@@ -1,0 +1,56 @@
+package noop
+
+import (
+	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/types"
+)
+
+// Adapter implements hal.Adapter for the noop backend.
+type Adapter struct{}
+
+// Open creates a noop device with the requested features and limits.
+// Always succeeds and returns a device/queue pair.
+func (a *Adapter) Open(_ types.Features, _ types.Limits) (hal.OpenDevice, error) {
+	return hal.OpenDevice{
+		Device: &Device{},
+		Queue:  &Queue{},
+	}, nil
+}
+
+// TextureFormatCapabilities returns default capabilities for all formats.
+func (a *Adapter) TextureFormatCapabilities(_ types.TextureFormat) hal.TextureFormatCapabilities {
+	return hal.TextureFormatCapabilities{
+		Flags: hal.TextureFormatCapabilitySampled |
+			hal.TextureFormatCapabilityStorage |
+			hal.TextureFormatCapabilityStorageReadWrite |
+			hal.TextureFormatCapabilityRenderAttachment |
+			hal.TextureFormatCapabilityBlendable |
+			hal.TextureFormatCapabilityMultisample |
+			hal.TextureFormatCapabilityMultisampleResolve,
+	}
+}
+
+// SurfaceCapabilities returns default surface capabilities.
+func (a *Adapter) SurfaceCapabilities(_ hal.Surface) *hal.SurfaceCapabilities {
+	return &hal.SurfaceCapabilities{
+		Formats: []types.TextureFormat{
+			types.TextureFormatBGRA8Unorm,
+			types.TextureFormatRGBA8Unorm,
+		},
+		PresentModes: []hal.PresentMode{
+			hal.PresentModeImmediate,
+			hal.PresentModeMailbox,
+			hal.PresentModeFifo,
+			hal.PresentModeFifoRelaxed,
+		},
+		AlphaModes: []hal.CompositeAlphaMode{
+			hal.CompositeAlphaModeOpaque,
+			hal.CompositeAlphaModePremultiplied,
+			hal.CompositeAlphaModePostmultiplied,
+			hal.CompositeAlphaModeInherit,
+		},
+	}
+}
+
+// Destroy is a no-op for the noop adapter.
+func (a *Adapter) Destroy() {}
