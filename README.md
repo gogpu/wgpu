@@ -1,15 +1,29 @@
-# wgpu
+<h1 align="center">wgpu</h1>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/gogpu/wgpu.svg)](https://pkg.go.dev/github.com/gogpu/wgpu)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <strong>Pure Go WebGPU Implementation</strong><br>
+  No Rust, No CGO, Just Go.
+</p>
 
-**Pure Go WebGPU Implementation** — No Rust, No CGO, Just Go.
+<p align="center">
+  <a href="https://github.com/gogpu/wgpu/actions/workflows/ci.yml"><img src="https://github.com/gogpu/wgpu/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/gogpu/wgpu"><img src="https://codecov.io/gh/gogpu/wgpu/branch/main/graph/badge.svg" alt="codecov"></a>
+  <a href="https://pkg.go.dev/github.com/gogpu/wgpu"><img src="https://pkg.go.dev/badge/github.com/gogpu/wgpu.svg" alt="Go Reference"></a>
+  <a href="https://goreportcard.com/report/github.com/gogpu/wgpu"><img src="https://goreportcard.com/badge/github.com/gogpu/wgpu" alt="Go Report Card"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+  <a href="https://github.com/gogpu/wgpu"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
+  <a href="https://github.com/gogpu/wgpu"><img src="https://img.shields.io/badge/CGO-none-success" alt="Zero CGO"></a>
+</p>
 
-> 🔮 **Future** — Long-term goal of the GoGPU ecosystem
+<p align="center">
+  <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
+</p>
+
+> **Status:** Types package complete, core validation in progress.
 
 ---
 
-## ✨ Vision
+## Vision
 
 A complete WebGPU implementation in pure Go:
 
@@ -18,20 +32,56 @@ A complete WebGPU implementation in pure Go:
 - **WebGPU compliant** — Following the W3C specification
 - **WASM compatible** — Run in browsers via WebAssembly
 
-## 🏗️ Architecture (Planned)
+## Installation
+
+```bash
+go get github.com/gogpu/wgpu
+```
+
+## Architecture
 
 ```
 wgpu/
-├── core/          # Validation, state tracking
+├── types/         # WebGPU type definitions (done)
+├── core/          # Validation, state tracking (planned)
 ├── hal/           # Hardware abstraction layer
 │   ├── vulkan/    # Vulkan backend
 │   ├── metal/     # Metal backend (macOS/iOS)
 │   ├── dx12/      # DirectX 12 backend (Windows)
 │   └── gl/        # OpenGL fallback
-└── types/         # WebGPU types
+└── internal/      # Platform-specific code
 ```
 
-## 🔗 Dependencies (Planned)
+## Roadmap
+
+**Phase 1: Types Package**
+- [x] Backend types (Vulkan, Metal, DX12, GL)
+- [x] Adapter and device types
+- [x] Feature flags
+- [x] GPU limits with presets
+- [x] Texture formats (100+)
+- [x] Buffer, sampler, shader types
+- [x] Bind group and render state types
+- [x] Vertex formats with size calculations
+
+**Phase 2: Core Validation**
+- [ ] Instance validation
+- [ ] Adapter/device state tracking
+- [ ] Resource validation
+- [ ] Error handling
+
+**Phase 3: HAL Interface**
+- [ ] Backend abstraction layer
+- [ ] Platform detection
+- [ ] Memory management
+
+**Phase 4: Backends**
+- [ ] OpenGL backend (easiest, uses go-gl)
+- [ ] Vulkan backend (uses vulkan-go)
+- [ ] Metal backend (macOS/iOS)
+- [ ] DX12 backend (Windows)
+
+## Dependencies (Planned)
 
 | Backend | Go Library |
 |---------|------------|
@@ -40,31 +90,27 @@ wgpu/
 | DX12 | TBD (syscall to COM APIs) |
 | OpenGL | [go-gl/gl](https://github.com/go-gl/gl) |
 
-## 🗺️ Roadmap
-
-1. **Phase 1:** Types package (port wgpu-types)
-2. **Phase 2:** Core validation (port wgpu-core)
-3. **Phase 3:** OpenGL backend (easiest, uses go-gl)
-4. **Phase 4:** Vulkan backend (uses vulkan-go)
-5. **Phase 5:** Metal/DX12 backends
-
-## 📚 References
+## References
 
 - [wgpu (Rust)](https://github.com/gfx-rs/wgpu) — Reference implementation
 - [WebGPU Specification](https://www.w3.org/TR/webgpu/)
 - [Dawn (C++)](https://dawn.googlesource.com/dawn) — Google's implementation
 
-## 🔗 Related Projects
+## Related Projects
 
 | Project | Description |
 |---------|-------------|
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings (current solution) |
-| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler |
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework |
+| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings (current solution) |
 
-## 📄 License
+## Contributing
 
-MIT License
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
