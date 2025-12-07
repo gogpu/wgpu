@@ -242,3 +242,25 @@ type Origin3D struct {
 	// Z is the Z coordinate.
 	Z uint32
 }
+
+// ImageCopyTexture describes a texture copy target.
+type ImageCopyTexture struct {
+	// Texture is the texture to copy to/from.
+	Texture uintptr // TextureID as uintptr for now
+	// MipLevel is the mip level to copy.
+	MipLevel uint32
+	// Origin is the origin of the copy in the texture.
+	Origin Origin3D
+	// Aspect is the aspect of the texture to copy.
+	Aspect TextureAspect
+}
+
+// TextureDataLayout describes the layout of texture data in memory.
+type TextureDataLayout struct {
+	// Offset is the offset in bytes from the start of the data.
+	Offset uint64
+	// BytesPerRow is the number of bytes per row of texture data.
+	BytesPerRow uint32
+	// RowsPerImage is the number of rows per image for 3D textures.
+	RowsPerImage uint32
+}

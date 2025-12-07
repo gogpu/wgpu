@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** Types package complete, core validation in progress.
+> **Status:** v0.1.0-alpha — Types and Core packages complete. HAL interface next.
 
 ---
 
@@ -38,12 +38,43 @@ A complete WebGPU implementation in pure Go:
 go get github.com/gogpu/wgpu
 ```
 
+## Usage (Preview)
+
+```go
+import (
+    "github.com/gogpu/wgpu/core"
+    "github.com/gogpu/wgpu/types"
+)
+
+// Create instance for GPU discovery
+instance := core.NewInstance(&types.InstanceDescriptor{
+    Backends: types.BackendsVulkan | types.BackendsMetal,
+})
+
+// Request high-performance GPU
+adapterID, _ := instance.RequestAdapter(&types.RequestAdapterOptions{
+    PowerPreference: types.PowerPreferenceHighPerformance,
+})
+
+// Get adapter info
+info, _ := core.GetAdapterInfo(adapterID)
+fmt.Printf("GPU: %s\n", info.Name)
+
+// Create device
+deviceID, _ := core.RequestDevice(adapterID, &types.DeviceDescriptor{
+    Label: "My Device",
+})
+
+// Get queue for command submission
+queueID, _ := core.GetDeviceQueue(deviceID)
+```
+
 ## Architecture
 
 ```
 wgpu/
-├── types/         # WebGPU type definitions (done)
-├── core/          # Validation, state tracking (planned)
+├── types/         # WebGPU type definitions ✓
+├── core/          # Validation, state tracking ✓
 ├── hal/           # Hardware abstraction layer
 │   ├── vulkan/    # Vulkan backend
 │   ├── metal/     # Metal backend (macOS/iOS)
@@ -54,7 +85,7 @@ wgpu/
 
 ## Roadmap
 
-**Phase 1: Types Package**
+**Phase 1: Types Package** ✓
 - [x] Backend types (Vulkan, Metal, DX12, GL)
 - [x] Adapter and device types
 - [x] Feature flags
@@ -64,13 +95,15 @@ wgpu/
 - [x] Bind group and render state types
 - [x] Vertex formats with size calculations
 
-**Phase 2: Core Validation**
-- [ ] Instance validation
-- [ ] Adapter/device state tracking
-- [ ] Resource validation
-- [ ] Error handling
+**Phase 2: Core Validation** ✓
+- [x] Type-safe ID system with generics
+- [x] Epoch-based use-after-free prevention
+- [x] Instance, Adapter, Device, Queue management
+- [x] Hub with 17 resource registries
+- [x] Comprehensive error handling
+- [x] 127 tests with 95% coverage
 
-**Phase 3: HAL Interface**
+**Phase 3: HAL Interface** (Next)
 - [ ] Backend abstraction layer
 - [ ] Platform detection
 - [ ] Memory management
