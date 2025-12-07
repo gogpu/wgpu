@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	// backendsMu protects the backends map.
+	// backendsMu protects the backends and registeredFactories maps.
 	backendsMu sync.RWMutex
 
 	// backends stores registered backend implementations.

@@ -4,6 +4,8 @@ import "errors"
 
 // Common HAL errors representing unrecoverable GPU states.
 var (
+	// ErrBackendNotFound indicates the requested backend is not registered.
+	ErrBackendNotFound = errors.New("hal: backend not found")
 	// ErrDeviceOutOfMemory indicates the GPU has exhausted its memory.
 	// This is unrecoverable - the application should reduce resource usage
 	// or gracefully terminate.

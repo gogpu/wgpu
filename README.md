@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.1.0-alpha — Types and Core packages complete. HAL interface next.
+> **Status:** v0.1.0-alpha — Types, Core, and HAL packages complete. Backends next.
 
 ---
 
@@ -75,11 +75,12 @@ queueID, _ := core.GetDeviceQueue(deviceID)
 wgpu/
 ├── types/         # WebGPU type definitions ✓
 ├── core/          # Validation, state tracking ✓
-├── hal/           # Hardware abstraction layer
-│   ├── vulkan/    # Vulkan backend
-│   ├── metal/     # Metal backend (macOS/iOS)
-│   ├── dx12/      # DirectX 12 backend (Windows)
-│   └── gl/        # OpenGL fallback
+├── hal/           # Hardware abstraction layer ✓
+│   ├── noop/      # No-op backend (testing) ✓
+│   ├── gles/      # OpenGL ES backend (planned)
+│   ├── vulkan/    # Vulkan backend (planned)
+│   ├── metal/     # Metal backend (planned)
+│   └── dx12/      # DirectX 12 backend (planned)
 └── internal/      # Platform-specific code
 ```
 
@@ -103,25 +104,30 @@ wgpu/
 - [x] Comprehensive error handling
 - [x] 127 tests with 95% coverage
 
-**Phase 3: HAL Interface** (Next)
-- [ ] Backend abstraction layer
-- [ ] Platform detection
-- [ ] Memory management
+**Phase 3: HAL Interface** ✓
+- [x] Backend abstraction layer (Backend, Instance, Adapter, Device, Queue)
+- [x] Resource interfaces (Buffer, Texture, Surface, Sampler, etc.)
+- [x] Command encoding (CommandEncoder, RenderPassEncoder, ComputePassEncoder)
+- [x] Backend registration system
+- [x] Noop backend for testing
+- [x] 54 tests with 94% coverage
 
-**Phase 4: Backends**
-- [ ] OpenGL backend (easiest, uses go-gl)
-- [ ] Vulkan backend (uses vulkan-go)
-- [ ] Metal backend (macOS/iOS)
-- [ ] DX12 backend (Windows)
+**Phase 4: Pure Go Backends** (Next)
+- [ ] OpenGL backend (`hal/gles/`) — Most portable, easiest
+- [ ] Vulkan backend (`hal/vulkan/`) — Primary for Linux/Windows
+- [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
+- [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
 
-## Dependencies (Planned)
+## Pure Go Approach
 
-| Backend | Go Library |
-|---------|------------|
-| Vulkan | [vulkan-go/vulkan](https://github.com/vulkan-go/vulkan) |
-| Metal | TBD (FFI to Objective-C) |
-| DX12 | TBD (syscall to COM APIs) |
-| OpenGL | [go-gl/gl](https://github.com/go-gl/gl) |
+All backends implemented without CGO:
+
+| Backend | Approach | Reference |
+|---------|----------|-----------|
+| OpenGL | purego / go-gl patterns | [Gio](https://gioui.org), [go-gl](https://github.com/go-gl/gl) |
+| Vulkan | purego / syscall | [vulkan-go](https://github.com/vulkan-go/vulkan) |
+| Metal | purego (Obj-C bridge) | [Ebitengine](https://ebitengine.org) |
+| DX12 | syscall + COM | [Gio DX11](https://gioui.org) |
 
 ## References
 
