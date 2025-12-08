@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.1.0-alpha — Types, Core, and HAL packages complete. Backends next.
+> **Status:** v0.1.0-alpha — Types, Core, HAL, and OpenGL ES backend complete!
 
 ---
 
@@ -77,7 +77,7 @@ wgpu/
 ├── core/          # Validation, state tracking ✓
 ├── hal/           # Hardware abstraction layer ✓
 │   ├── noop/      # No-op backend (testing) ✓
-│   ├── gles/      # OpenGL ES backend (planned)
+│   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~3500 LOC)
 │   ├── vulkan/    # Vulkan backend (planned)
 │   ├── metal/     # Metal backend (planned)
 │   └── dx12/      # DirectX 12 backend (planned)
@@ -112,8 +112,8 @@ wgpu/
 - [x] Noop backend for testing
 - [x] 54 tests with 94% coverage
 
-**Phase 4: Pure Go Backends** (Next)
-- [ ] OpenGL backend (`hal/gles/`) — Most portable, easiest
+**Phase 4: Pure Go Backends** (In Progress)
+- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via syscall.SyscallN, Windows (WGL)
 - [ ] Vulkan backend (`hal/vulkan/`) — Primary for Linux/Windows
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
 - [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
@@ -122,12 +122,12 @@ wgpu/
 
 All backends implemented without CGO:
 
-| Backend | Approach | Reference |
-|---------|----------|-----------|
-| OpenGL | purego / go-gl patterns | [Gio](https://gioui.org), [go-gl](https://github.com/go-gl/gl) |
-| Vulkan | purego / syscall | [vulkan-go](https://github.com/vulkan-go/vulkan) |
-| Metal | purego (Obj-C bridge) | [Ebitengine](https://ebitengine.org) |
-| DX12 | syscall + COM | [Gio DX11](https://gioui.org) |
+| Backend | Status | Approach |
+|---------|--------|----------|
+| OpenGL ES | **Done** | `syscall.SyscallN` + WGL (Windows) |
+| Vulkan | Planned | purego / syscall |
+| Metal | Planned | purego (Obj-C bridge) |
+| DX12 | Planned | syscall + COM |
 
 ## References
 

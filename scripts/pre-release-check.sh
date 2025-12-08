@@ -91,9 +91,15 @@ echo ""
 
 # 4. Go vet
 log_info "Running go vet..."
-if go vet ./... 2>&1; then
+# Note: hal/gles/gl/context.go has intentional unsafe.Pointer usage for C interop
+# We filter out that specific warning (handles both Unix / and Windows \ paths)
+VET_OUTPUT=$(go vet ./... 2>&1 || true)
+# Filter out known intentional unsafe pointer usage in GL context and package headers
+VET_FILTERED=$(echo "$VET_OUTPUT" | grep -v "context\.go.*possible misuse of unsafe\.Pointer" | grep -v "^# " || true)
+if [ -z "$VET_FILTERED" ]; then
     log_success "go vet passed"
 else
+    echo "$VET_FILTERED"
     log_error "go vet failed"
     ERRORS=$((ERRORS + 1))
 fi

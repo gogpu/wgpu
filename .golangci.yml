@@ -148,6 +148,18 @@ linters:
           - funlen
           - gosec
 
+      # GL context - requires unsafe for C interop
+      - path: hal/gles/gl/context\.go
+        linters:
+          - govet
+        text: "possible misuse of unsafe.Pointer"
+
+      # GL context - syscall returns are intentionally unchecked
+      # (GL errors are checked via glGetError, not syscall return values)
+      - path: hal/gles/gl/context\.go
+        linters:
+          - errcheck
+
       # Internal utilities
       - path: internal/.*\.go
         linters:

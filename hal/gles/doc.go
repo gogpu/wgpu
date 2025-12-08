@@ -1,47 +1,64 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-// Package gles provides an OpenGL ES backend for the HAL.
+// Package gles implements the HAL backend for OpenGL ES 3.0 / OpenGL 3.3+.
 //
-// # Status
+// This backend provides a Pure Go implementation using syscall directly,
+// without any CGO or external dependencies.
 //
-// This backend is PLANNED and not yet implemented.
-// See TASK-018 for implementation roadmap.
+// # Platform Support
 //
-// # Target Versions
+// Currently supported:
+//   - Windows (WGL) - via hal/gles/wgl package
 //
-//   - OpenGL 3.3+ (Desktop)
-//   - OpenGL ES 3.0+ (Mobile/WebGL)
+// Planned:
+//   - Linux (GLX/EGL)
+//   - macOS (CGL/EGL)
+//   - Android (EGL)
+//   - WebGL (via wasm)
 //
-// # Why OpenGL First?
+// # Architecture
 //
-//  1. Most portable (Windows, Linux, macOS, WebGL, Android, iOS)
-//  2. Simplest API among modern graphics APIs
-//  3. go-gl/gl provides excellent reference
-//  4. Good for learning HAL implementation patterns
+// The backend is organized into subpackages:
 //
-// # Reference Libraries
+//	hal/gles/
+//	├── gl/       - OpenGL function bindings
+//	├── wgl/      - Windows GL context management
+//	├── glx/      - Linux X11 GL context (planned)
+//	├── egl/      - EGL context for mobile/modern Linux (planned)
+//	└── cgl/      - macOS CGL context (planned)
 //
-//   - go-gl/gl      - OpenGL bindings (Pure Go via purego possible)
-//   - Gio           - Has GL backend in Pure Go
-//   - Ebitengine    - Uses OpenGL for some platforms
+// # Usage
 //
-// # Implementation Plan
+// Import this package to register the OpenGL backend:
 //
-//  1. Basic initialization (context creation)
-//  2. Buffer management (VBO, UBO)
-//  3. Texture management
-//  4. Shader compilation (GLSL from SPIR-V)
-//  5. Render pipeline
-//  6. Compute (if OpenGL 4.3+)
+//	import _ "github.com/gogpu/wgpu/hal/gles"
 //
-// # Usage (Future)
+// The backend is then available via hal.GetBackend(types.BackendGL).
 //
-//	import (
-//	    "github.com/gogpu/wgpu/hal"
-//	    _ "github.com/gogpu/wgpu/hal/gl" // Register OpenGL backend
-//	)
+// # OpenGL Version Requirements
 //
-//	backend := hal.GetBackend(types.BackendGL)
-//	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
+// Minimum requirements:
+//   - OpenGL 3.3 Core Profile (desktop)
+//   - OpenGL ES 3.0 (mobile/embedded)
+//
+// The backend queries actual capabilities at runtime and adjusts
+// feature availability accordingly.
+//
+// # Limitations
+//
+// Compared to Vulkan/Metal/DX12:
+//   - No async compute (compute runs on graphics queue)
+//   - Limited bindless resource support
+//   - Single command queue
+//   - Synchronous texture uploads
+//
+// # Command Recording
+//
+// This backend uses a command recording pattern similar to wgpu-hal.
+// Commands are recorded during render/compute pass encoding and
+// executed during Queue.Submit. This allows for:
+//   - State tracking and optimization
+//   - Better error handling
+//   - Potential future multithreading
 package gles
