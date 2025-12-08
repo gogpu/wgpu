@@ -281,18 +281,21 @@ func DefaultPixelFormat() PIXELFORMATDESCRIPTOR {
 // For GL 1.1 functions, it loads from opengl32.dll directly.
 // For GL 2.0+ functions, it uses wglGetProcAddress.
 func GetGLProcAddress(name string) uintptr {
-	// First try wglGetProcAddress (for GL 2.0+)
-	addr := GetProcAddress(name)
-	if addr != 0 {
-		return addr
+	// First try opengl32.dll (for GL 1.1 core functions)
+	// This must come first because wglGetProcAddress returns garbage
+	// for GL 1.1 functions on some drivers (returns 1, 2, 3 or -1).
+	proc, err := opengl32.FindProc(name)
+	if err == nil {
+		return proc.Addr()
 	}
 
-	// Fall back to opengl32.dll (for GL 1.1)
-	proc, err := opengl32.FindProc(name)
-	if err != nil {
+	// Fall back to wglGetProcAddress (for GL 2.0+ extensions)
+	addr := GetProcAddress(name)
+	// wglGetProcAddress returns 0, 1, 2, 3, or -1 for invalid addresses
+	if addr == 0 || addr <= 3 || addr == ^uintptr(0) {
 		return 0
 	}
-	return proc.Addr()
+	return addr
 }
 
 // Context wraps a WGL rendering context with its device context.
