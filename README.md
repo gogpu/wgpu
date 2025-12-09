@@ -84,7 +84,8 @@ wgpu/
 │   ├── metal/     # Metal backend (planned)
 │   └── dx12/      # DirectX 12 backend (planned)
 └── cmd/
-    └── vk-gen/    # Vulkan bindings generator from vk.xml
+    ├── vk-gen/           # Vulkan bindings generator from vk.xml
+    └── vulkan-triangle/  # Vulkan integration test (red triangle) ✓
 ```
 
 ## Roadmap
