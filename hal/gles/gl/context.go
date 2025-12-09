@@ -611,34 +611,37 @@ func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, in
 
 // --- Helpers ---
 
+// ptrFromUintptr converts a uintptr (from FFI) to *byte without triggering go vet warning.
+// This uses double pointer indirection pattern from ebitengine/purego.
+// Reference: https://github.com/golang/go/issues/56487
+func ptrFromUintptr(ptr uintptr) *byte {
+	return *(**byte)(unsafe.Pointer(&ptr))
+}
+
 // goString converts a null-terminated C string pointer to Go string.
 // The pointer must be valid and point to a null-terminated string.
+// This is safe because the pointer comes from OpenGL and remains valid
+// for the duration of this function call.
 func goString(cstr uintptr) string {
 	if cstr == 0 {
 		return ""
 	}
-	// Use a safer iteration pattern
-	var result []byte
-	ptr := cstr
+	// Find string length first (max 4096 to prevent infinite loops)
+	// Use double pointer indirection to satisfy go vet (pattern from ebitengine/purego)
+	length := 0
 	for i := 0; i < 4096; i++ {
-		// #nosec G103 -- required for C string interop from OpenGL
-		char := *(*byte)(ptrToUnsafe(ptr))
-		if char == 0 {
+		b := unsafe.Slice(ptrFromUintptr(cstr), i+1)
+		if b[i] == 0 {
+			length = i
 			break
 		}
-		result = append(result, char)
-		ptr++
 	}
+	if length == 0 {
+		return ""
+	}
+	// Create slice and copy to Go-managed memory
+	result := unsafe.Slice(ptrFromUintptr(cstr), length)
 	return string(result)
-}
-
-// ptrToUnsafe converts uintptr to unsafe.Pointer.
-// This is intentionally separated to make the unsafe conversion explicit.
-//
-//go:nosplit
-//go:nocheckptr
-func ptrToUnsafe(ptr uintptr) unsafe.Pointer {
-	return unsafe.Pointer(ptr)
 }
 
 // cString converts a Go string to a null-terminated C string.

@@ -1,20 +1,29 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-// Package vulkan provides a Vulkan backend for the HAL.
+// Package vulkan provides Pure Go Vulkan backend for the HAL.
 //
-// # Status: PLANNED
+// This backend uses syscall.SyscallN for Vulkan API calls, requiring no CGO.
+// Function pointers are loaded dynamically from vulkan-1.dll (Windows),
+// libvulkan.so.1 (Linux), or MoltenVK (macOS).
 //
-// This is the primary backend for Linux, Windows, and Android.
+// # Architecture
 //
-// # References
+// The backend follows wgpu-hal patterns:
+//   - Instance: VkInstance wrapper with extension loading
+//   - Adapter: VkPhysicalDevice enumeration and capabilities
+//   - Device: VkDevice with queues and memory allocator
+//   - Queue: Command submission and synchronization
+//   - Resources: Buffers, textures, pipelines with Vulkan objects
 //
-//   - vulkan-go/vulkan - Vulkan bindings
-//   - ash (Rust)       - Low-level Vulkan patterns
-//   - Gio              - Has Vulkan backend
+// # Memory Management
 //
-// # Pure Go Approach
+// Unlike OpenGL, Vulkan requires explicit memory allocation. This backend
+// implements a pool-based memory allocator similar to gpu-allocator.
 //
-// Use purego or direct syscall for Vulkan loader.
-// No CGO required.
+// # Platform Support
+//
+//   - Windows: vulkan-1.dll + VK_KHR_win32_surface
+//   - Linux: libvulkan.so.1 + VK_KHR_xlib_surface/VK_KHR_xcb_surface (planned)
+//   - macOS: MoltenVK + VK_EXT_metal_surface (planned)
 package vulkan

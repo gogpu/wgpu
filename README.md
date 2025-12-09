@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.1.0-alpha — Types, Core, HAL, and OpenGL ES backend complete!
+> **Status:** v0.1.0-alpha — Types, Core, HAL, OpenGL ES and Vulkan backends complete!
 
 ---
 
@@ -78,10 +78,13 @@ wgpu/
 ├── hal/           # Hardware abstraction layer ✓
 │   ├── noop/      # No-op backend (testing) ✓
 │   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~3500 LOC)
-│   ├── vulkan/    # Vulkan backend (planned)
+│   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~23K LOC)
+│   │   ├── vk/        # Generated Vulkan bindings (~19K LOC)
+│   │   └── memory/    # GPU memory allocator (~1.8K LOC)
 │   ├── metal/     # Metal backend (planned)
 │   └── dx12/      # DirectX 12 backend (planned)
-└── internal/      # Platform-specific code
+└── cmd/
+    └── vk-gen/    # Vulkan bindings generator from vk.xml
 ```
 
 ## Roadmap
@@ -114,7 +117,7 @@ wgpu/
 
 **Phase 4: Pure Go Backends** (In Progress)
 - [x] OpenGL ES backend (`hal/gles/`) — Pure Go via syscall.SyscallN, Windows (WGL)
-- [ ] Vulkan backend (`hal/vulkan/`) — Primary for Linux/Windows
+- [x] Vulkan backend (`hal/vulkan/`) — Pure Go, Windows (Win32 surface), ~23K LOC
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
 - [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
 
@@ -125,9 +128,17 @@ All backends implemented without CGO:
 | Backend | Status | Approach |
 |---------|--------|----------|
 | OpenGL ES | **Done** | `syscall.SyscallN` + WGL (Windows) |
-| Vulkan | Planned | purego / syscall |
+| Vulkan | **Done** | `syscall.SyscallN` + vk-gen from vk.xml |
 | Metal | Planned | purego (Obj-C bridge) |
 | DX12 | Planned | syscall + COM |
+
+### Vulkan Backend Features
+
+- **Auto-generated bindings** from official Vulkan XML specification
+- **Memory allocator** with buddy allocation (O(log n), minimal fragmentation)
+- **Vulkan 1.3 dynamic rendering** — No render pass objects needed
+- **Swapchain management** with automatic recreation
+- **Semaphore synchronization** for frame presentation
 
 ## References
 

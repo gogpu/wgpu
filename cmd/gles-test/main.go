@@ -2,6 +2,8 @@
 
 // Command gles-test is an integration test for the Pure Go GLES backend.
 // It creates a window, initializes OpenGL, and renders a simple triangle.
+//
+//nolint:errcheck,gosec,staticcheck,errorlint,funlen // test utility
 package main
 
 import (
@@ -23,7 +25,6 @@ var (
 	procRegisterClassExW = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW  = user32.NewProc("CreateWindowExW")
 	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
-	procGetMessageW      = user32.NewProc("GetMessageW")
 	procTranslateMessage = user32.NewProc("TranslateMessage")
 	procDispatchMessageW = user32.NewProc("DispatchMessageW")
 	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
@@ -316,8 +317,8 @@ func testGLESBackend() error {
 	fmt.Printf("OK (found %d)\n", len(adapters))
 
 	// Print adapter info
-	for i, exposed := range adapters {
-		fmt.Printf("    Adapter %d: %s (%s)\n", i, exposed.Info.Name, exposed.Info.Driver)
+	for i := range adapters {
+		fmt.Printf("    Adapter %d: %s (%s)\n", i, adapters[i].Info.Name, adapters[i].Info.Driver)
 	}
 
 	// Test 5: Create device
