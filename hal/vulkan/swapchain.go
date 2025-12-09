@@ -158,11 +158,11 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 			},
 		}
 
-		result = vkCreateImageView(device, &viewCreateInfo, nil, &imageViews[i])
+		result = vkCreateImageViewSwapchain(device, &viewCreateInfo, nil, &imageViews[i])
 		if result != vk.Success {
 			// Cleanup created views
 			for j := 0; j < i; j++ {
-				vkDestroyImageView(device, imageViews[j], nil)
+				vkDestroyImageViewSwapchain(device, imageViews[j], nil)
 			}
 			vkDestroySwapchainKHR(device, swapchainHandle, nil)
 			return fmt.Errorf("vulkan: vkCreateImageView failed: %d", result)
@@ -178,7 +178,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	result = vkCreateSemaphore(device, &semaphoreInfo, nil, &imageAvailable)
 	if result != vk.Success {
 		for _, view := range imageViews {
-			vkDestroyImageView(device, view, nil)
+			vkDestroyImageViewSwapchain(device, view, nil)
 		}
 		vkDestroySwapchainKHR(device, swapchainHandle, nil)
 		return fmt.Errorf("vulkan: vkCreateSemaphore (imageAvailable) failed: %d", result)
@@ -188,7 +188,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	if result != vk.Success {
 		vkDestroySemaphore(device, imageAvailable, nil)
 		for _, view := range imageViews {
-			vkDestroyImageView(device, view, nil)
+			vkDestroyImageViewSwapchain(device, view, nil)
 		}
 		vkDestroySwapchainKHR(device, swapchainHandle, nil)
 		return fmt.Errorf("vulkan: vkCreateSemaphore (renderFinished) failed: %d", result)
@@ -258,7 +258,7 @@ func (sc *Swapchain) destroyResources() {
 	// Destroy image views
 	for _, view := range sc.imageViews {
 		if view != 0 {
-			vkDestroyImageView(sc.device, view, nil)
+			vkDestroyImageViewSwapchain(sc.device, view, nil)
 		}
 	}
 	sc.imageViews = nil
@@ -430,7 +430,7 @@ func vkQueuePresentKHR(q *Queue, presentInfo *vk.PresentInfoKHR) vk.Result {
 	return vk.Result(r)
 }
 
-func vkCreateImageView(d *Device, createInfo *vk.ImageViewCreateInfo, allocator unsafe.Pointer, view *vk.ImageView) vk.Result {
+func vkCreateImageViewSwapchain(d *Device, createInfo *vk.ImageViewCreateInfo, allocator unsafe.Pointer, view *vk.ImageView) vk.Result {
 	proc := vk.GetDeviceProcAddr(d.handle, "vkCreateImageView")
 	if proc == 0 {
 		return vk.ErrorExtensionNotPresent
@@ -444,7 +444,7 @@ func vkCreateImageView(d *Device, createInfo *vk.ImageViewCreateInfo, allocator 
 }
 
 //nolint:unparam // allocator kept for Vulkan API consistency
-func vkDestroyImageView(d *Device, view vk.ImageView, allocator unsafe.Pointer) {
+func vkDestroyImageViewSwapchain(d *Device, view vk.ImageView, allocator unsafe.Pointer) {
 	proc := vk.GetDeviceProcAddr(d.handle, "vkDestroyImageView")
 	if proc == 0 {
 		return

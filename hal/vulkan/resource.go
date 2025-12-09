@@ -73,7 +73,7 @@ func (t *Texture) Handle() vk.Image {
 // TextureView implements hal.TextureView for Vulkan.
 type TextureView struct {
 	handle  vk.ImageView
-	texture *Texture //nolint:unused // Will be used for view operations
+	texture *Texture
 	device  *Device
 }
 
@@ -127,7 +127,8 @@ func (m *ShaderModule) Handle() vk.ShaderModule {
 
 // BindGroupLayout implements hal.BindGroupLayout for Vulkan.
 type BindGroupLayout struct {
-	handle vk.DescriptorSetLayout //nolint:unused // Will be used when implemented
+	handle vk.DescriptorSetLayout
+	counts DescriptorCounts // Descriptor counts for pool allocation
 	device *Device
 }
 
@@ -138,10 +139,20 @@ func (l *BindGroupLayout) Destroy() {
 	}
 }
 
+// Handle returns the VkDescriptorSetLayout handle.
+func (l *BindGroupLayout) Handle() vk.DescriptorSetLayout {
+	return l.handle
+}
+
+// Counts returns the descriptor counts for this layout.
+func (l *BindGroupLayout) Counts() DescriptorCounts {
+	return l.counts
+}
+
 // BindGroup implements hal.BindGroup for Vulkan.
 type BindGroup struct {
 	handle vk.DescriptorSet
-	pool   vk.DescriptorPool //nolint:unused // Will be used for descriptor pool management
+	pool   *DescriptorPool // Reference to the pool for freeing
 	device *Device
 }
 
@@ -152,9 +163,14 @@ func (g *BindGroup) Destroy() {
 	}
 }
 
+// Handle returns the VkDescriptorSet handle.
+func (g *BindGroup) Handle() vk.DescriptorSet {
+	return g.handle
+}
+
 // PipelineLayout implements hal.PipelineLayout for Vulkan.
 type PipelineLayout struct {
-	handle vk.PipelineLayout //nolint:unused // Will be used when implemented
+	handle vk.PipelineLayout
 	device *Device
 }
 
@@ -163,6 +179,11 @@ func (l *PipelineLayout) Destroy() {
 	if l.device != nil {
 		l.device.DestroyPipelineLayout(l)
 	}
+}
+
+// Handle returns the VkPipelineLayout handle.
+func (l *PipelineLayout) Handle() vk.PipelineLayout {
+	return l.handle
 }
 
 // RenderPipeline implements hal.RenderPipeline for Vulkan.

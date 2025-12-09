@@ -171,7 +171,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 			DstQueueFamilyIndex: vk.QueueFamilyIgnored,
 			Image:               tex.handle,
 			SubresourceRange: vk.ImageSubresourceRange{
-				AspectMask:     textureAspectToVk(b.Range.Aspect),
+				AspectMask:     textureAspectToVk(b.Range.Aspect, tex.format),
 				BaseMipLevel:   b.Range.BaseMipLevel,
 				LevelCount:     mipLevelCountOrRemaining(b.Range.MipLevelCount),
 				BaseArrayLayer: b.Range.BaseArrayLayer,
@@ -243,7 +243,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy) []vk.BufferI
 			BufferRowLength:   r.BufferLayout.BytesPerRow,
 			BufferImageHeight: r.BufferLayout.RowsPerImage,
 			ImageSubresource: vk.ImageSubresourceLayers{
-				AspectMask:     textureAspectToVk(r.TextureBase.Aspect),
+				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),
 				MipLevel:       r.TextureBase.MipLevel,
 				BaseArrayLayer: 0,
 				LayerCount:     1,
@@ -327,7 +327,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	for i, r := range regions {
 		vkRegions[i] = vk.ImageCopy{
 			SrcSubresource: vk.ImageSubresourceLayers{
-				AspectMask:     textureAspectToVk(r.SrcBase.Aspect),
+				AspectMask:     textureAspectToVk(r.SrcBase.Aspect, srcTex.format),
 				MipLevel:       r.SrcBase.MipLevel,
 				BaseArrayLayer: 0,
 				LayerCount:     1,
@@ -338,7 +338,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 				Z: int32(r.SrcBase.Origin.Z),
 			},
 			DstSubresource: vk.ImageSubresourceLayers{
-				AspectMask:     textureAspectToVk(r.DstBase.Aspect),
+				AspectMask:     textureAspectToVk(r.DstBase.Aspect, dstTex.format),
 				MipLevel:       r.DstBase.MipLevel,
 				BaseArrayLayer: 0,
 				LayerCount:     1,
@@ -787,17 +787,6 @@ func textureUsageToAccessStageLayout(usage types.TextureUsage) (vk.AccessFlags, 
 	}
 
 	return access, stage, layout
-}
-
-func textureAspectToVk(aspect types.TextureAspect) vk.ImageAspectFlags {
-	switch aspect {
-	case types.TextureAspectDepthOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
-	case types.TextureAspectStencilOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
-	default:
-		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
-	}
 }
 
 func mipLevelCountOrRemaining(count uint32) uint32 {

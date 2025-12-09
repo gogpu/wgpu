@@ -248,3 +248,91 @@ func (c *Commands) CmdWaitEvents() uintptr { return c.cmdWaitEvents }
 
 // CmdExecuteCommands returns the vkCmdExecuteCommands function pointer.
 func (c *Commands) CmdExecuteCommands() uintptr { return c.cmdExecuteCommands }
+
+// --- Sampler ---
+
+// CreateSampler returns the vkCreateSampler function pointer.
+func (c *Commands) CreateSampler() uintptr { return c.createSampler }
+
+// DestroySampler returns the vkDestroySampler function pointer.
+func (c *Commands) DestroySampler() uintptr { return c.destroySampler }
+
+// --- Shader Module ---
+
+// CreateShaderModule returns the vkCreateShaderModule function pointer.
+func (c *Commands) CreateShaderModule() uintptr { return c.createShaderModule }
+
+// DestroyShaderModule returns the vkDestroyShaderModule function pointer.
+func (c *Commands) DestroyShaderModule() uintptr { return c.destroyShaderModule }
+
+// --- Pipeline Layout ---
+
+// CreatePipelineLayout returns the vkCreatePipelineLayout function pointer.
+func (c *Commands) CreatePipelineLayout() uintptr { return c.createPipelineLayout }
+
+// DestroyPipelineLayout returns the vkDestroyPipelineLayout function pointer.
+func (c *Commands) DestroyPipelineLayout() uintptr { return c.destroyPipelineLayout }
+
+// --- Pipeline ---
+
+// CreateGraphicsPipelines returns the vkCreateGraphicsPipelines function pointer.
+func (c *Commands) CreateGraphicsPipelines() uintptr { return c.createGraphicsPipelines }
+
+// CreateComputePipelines returns the vkCreateComputePipelines function pointer.
+func (c *Commands) CreateComputePipelines() uintptr { return c.createComputePipelines }
+
+// DestroyPipeline returns the vkDestroyPipeline function pointer.
+func (c *Commands) DestroyPipeline() uintptr { return c.destroyPipeline }
+
+// --- Descriptor Set Layout ---
+
+// CreateDescriptorSetLayout returns the vkCreateDescriptorSetLayout function pointer.
+func (c *Commands) CreateDescriptorSetLayout() uintptr { return c.createDescriptorSetLayout }
+
+// DestroyDescriptorSetLayout returns the vkDestroyDescriptorSetLayout function pointer.
+func (c *Commands) DestroyDescriptorSetLayout() uintptr { return c.destroyDescriptorSetLayout }
+
+// --- Descriptor Pool ---
+
+// CreateDescriptorPool returns the vkCreateDescriptorPool function pointer.
+func (c *Commands) CreateDescriptorPool() uintptr { return c.createDescriptorPool }
+
+// DestroyDescriptorPool returns the vkDestroyDescriptorPool function pointer.
+func (c *Commands) DestroyDescriptorPool() uintptr { return c.destroyDescriptorPool }
+
+// ResetDescriptorPool returns the vkResetDescriptorPool function pointer.
+func (c *Commands) ResetDescriptorPool() uintptr { return c.resetDescriptorPool }
+
+// AllocateDescriptorSets returns the vkAllocateDescriptorSets function pointer.
+func (c *Commands) AllocateDescriptorSets() uintptr { return c.allocateDescriptorSets }
+
+// FreeDescriptorSets returns the vkFreeDescriptorSets function pointer.
+func (c *Commands) FreeDescriptorSets() uintptr { return c.freeDescriptorSets }
+
+// UpdateDescriptorSets returns the vkUpdateDescriptorSets function pointer.
+func (c *Commands) UpdateDescriptorSets() uintptr { return c.updateDescriptorSets }
+
+// --- Image View ---
+
+// CreateImageView returns the vkCreateImageView function pointer.
+func (c *Commands) CreateImageView() uintptr { return c.createImageView }
+
+// DestroyImageView returns the vkDestroyImageView function pointer.
+func (c *Commands) DestroyImageView() uintptr { return c.destroyImageView }
+
+// --- Fence ---
+
+// CreateFence returns the vkCreateFence function pointer.
+func (c *Commands) CreateFence() uintptr { return c.createFence }
+
+// DestroyFence returns the vkDestroyFence function pointer.
+func (c *Commands) DestroyFence() uintptr { return c.destroyFence }
+
+// WaitForFences returns the vkWaitForFences function pointer.
+func (c *Commands) WaitForFences() uintptr { return c.waitForFences }
+
+// ResetFences returns the vkResetFences function pointer.
+func (c *Commands) ResetFences() uintptr { return c.resetFences }
+
+// GetFenceStatus returns the vkGetFenceStatus function pointer.
+func (c *Commands) GetFenceStatus() uintptr { return c.getFenceStatus }
