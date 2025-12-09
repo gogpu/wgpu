@@ -146,6 +146,11 @@ All backends implemented without CGO:
   - PipelineLayout, RenderPipeline, ComputePipeline
   - CommandEncoder, RenderPassEncoder, ComputePassEncoder
   - Fence synchronization, WriteTexture immediate upload
+- **Comprehensive unit tests** (93 tests, 2200+ LOC):
+  - Conversion functions (formats, usage, blend modes)
+  - Descriptor allocator logic
+  - Resource structures
+  - Memory allocator (buddy allocation)
 
 ## References
 
