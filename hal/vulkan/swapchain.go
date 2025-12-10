@@ -1,14 +1,10 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -351,142 +347,48 @@ func presentModeToVk(mode hal.PresentMode) vk.PresentModeKHR {
 	}
 }
 
-// Vulkan function wrappers
+// Vulkan function wrappers using Commands methods
 
 func vkGetPhysicalDeviceSurfaceCapabilitiesKHR(i *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR, capabilities *vk.SurfaceCapabilitiesKHR) vk.Result {
-	proc := vk.GetInstanceProcAddr(i.handle, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(device),
-		uintptr(surface),
-		uintptr(unsafe.Pointer(capabilities)))
-	return vk.Result(r)
+	return i.cmds.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, capabilities)
 }
 
-func vkCreateSwapchainKHR(d *Device, createInfo *vk.SwapchainCreateInfoKHR, allocator unsafe.Pointer, swapchain *vk.SwapchainKHR) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkCreateSwapchainKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(swapchain)))
-	return vk.Result(r)
+func vkCreateSwapchainKHR(d *Device, createInfo *vk.SwapchainCreateInfoKHR, _ *vk.AllocationCallbacks, swapchain *vk.SwapchainKHR) vk.Result {
+	return d.cmds.CreateSwapchainKHR(d.handle, createInfo, nil, swapchain)
 }
 
-//nolint:unparam // allocator kept for Vulkan API consistency
-func vkDestroySwapchainKHR(d *Device, swapchain vk.SwapchainKHR, allocator unsafe.Pointer) {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkDestroySwapchainKHR")
-	if proc == 0 {
-		return
-	}
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(swapchain),
-		uintptr(allocator))
+func vkDestroySwapchainKHR(d *Device, swapchain vk.SwapchainKHR, _ *vk.AllocationCallbacks) {
+	d.cmds.DestroySwapchainKHR(d.handle, swapchain, nil)
 }
 
 func vkGetSwapchainImagesKHR(d *Device, swapchain vk.SwapchainKHR, count *uint32, images *vk.Image) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkGetSwapchainImagesKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(swapchain),
-		uintptr(unsafe.Pointer(count)),
-		uintptr(unsafe.Pointer(images)))
-	return vk.Result(r)
+	return d.cmds.GetSwapchainImagesKHR(d.handle, swapchain, count, images)
 }
 
 func vkAcquireNextImageKHR(d *Device, swapchain vk.SwapchainKHR, timeout uint64, semaphore vk.Semaphore, fence vk.Fence, imageIndex *uint32) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkAcquireNextImageKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(swapchain),
-		uintptr(timeout),
-		uintptr(semaphore),
-		uintptr(fence),
-		uintptr(unsafe.Pointer(imageIndex)))
-	return vk.Result(r)
+	return d.cmds.AcquireNextImageKHR(d.handle, swapchain, timeout, semaphore, fence, imageIndex)
 }
 
 func vkQueuePresentKHR(q *Queue, presentInfo *vk.PresentInfoKHR) vk.Result {
-	proc := vk.GetDeviceProcAddr(q.device.handle, "vkQueuePresentKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(q.handle),
-		uintptr(unsafe.Pointer(presentInfo)))
-	return vk.Result(r)
+	return q.device.cmds.QueuePresentKHR(q.handle, presentInfo)
 }
 
-func vkCreateImageViewSwapchain(d *Device, createInfo *vk.ImageViewCreateInfo, allocator unsafe.Pointer, view *vk.ImageView) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkCreateImageView")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(view)))
-	return vk.Result(r)
+func vkCreateImageViewSwapchain(d *Device, createInfo *vk.ImageViewCreateInfo, _ *vk.AllocationCallbacks, view *vk.ImageView) vk.Result {
+	return d.cmds.CreateImageView(d.handle, createInfo, nil, view)
 }
 
-//nolint:unparam // allocator kept for Vulkan API consistency
-func vkDestroyImageViewSwapchain(d *Device, view vk.ImageView, allocator unsafe.Pointer) {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkDestroyImageView")
-	if proc == 0 {
-		return
-	}
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(view),
-		uintptr(allocator))
+func vkDestroyImageViewSwapchain(d *Device, view vk.ImageView, _ *vk.AllocationCallbacks) {
+	d.cmds.DestroyImageView(d.handle, view, nil)
 }
 
-func vkCreateSemaphore(d *Device, createInfo *vk.SemaphoreCreateInfo, allocator unsafe.Pointer, semaphore *vk.Semaphore) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkCreateSemaphore")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(semaphore)))
-	return vk.Result(r)
+func vkCreateSemaphore(d *Device, createInfo *vk.SemaphoreCreateInfo, _ *vk.AllocationCallbacks, semaphore *vk.Semaphore) vk.Result {
+	return d.cmds.CreateSemaphore(d.handle, createInfo, nil, semaphore)
 }
 
-func vkDestroySemaphore(d *Device, semaphore vk.Semaphore, allocator unsafe.Pointer) {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkDestroySemaphore")
-	if proc == 0 {
-		return
-	}
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(proc,
-		uintptr(d.handle),
-		uintptr(semaphore),
-		uintptr(allocator))
+func vkDestroySemaphore(d *Device, semaphore vk.Semaphore, _ *vk.AllocationCallbacks) {
+	d.cmds.DestroySemaphore(d.handle, semaphore, nil)
 }
 
 func vkDeviceWaitIdle(d *Device) vk.Result {
-	proc := vk.GetDeviceProcAddr(d.handle, "vkDeviceWaitIdle")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(d.handle))
-	return vk.Result(r)
+	return d.cmds.DeviceWaitIdle(d.handle)
 }

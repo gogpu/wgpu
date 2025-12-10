@@ -1,14 +1,11 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
 	"sync"
-	"syscall"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -328,46 +325,22 @@ func (a *DescriptorAllocator) Stats() (pools int, allocated, freed uint32) {
 
 // Vulkan function wrappers
 
-func vkCreateDescriptorPool(cmds *vk.Commands, device vk.Device, createInfo *vk.DescriptorPoolCreateInfo, allocator unsafe.Pointer, pool *vk.DescriptorPool) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateDescriptorPool(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(pool)))
-	return vk.Result(ret)
+func vkCreateDescriptorPool(cmds *vk.Commands, device vk.Device, createInfo *vk.DescriptorPoolCreateInfo, _ unsafe.Pointer, pool *vk.DescriptorPool) vk.Result {
+	return cmds.CreateDescriptorPool(device, createInfo, nil, pool)
 }
 
-func vkDestroyDescriptorPool(cmds *vk.Commands, device vk.Device, pool vk.DescriptorPool, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.DestroyDescriptorPool(),
-		uintptr(device),
-		uintptr(pool),
-		uintptr(allocator))
+func vkDestroyDescriptorPool(cmds *vk.Commands, device vk.Device, pool vk.DescriptorPool, _ unsafe.Pointer) {
+	cmds.DestroyDescriptorPool(device, pool, nil)
 }
 
 func vkAllocateDescriptorSets(cmds *vk.Commands, device vk.Device, allocInfo *vk.DescriptorSetAllocateInfo, sets *vk.DescriptorSet) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.AllocateDescriptorSets(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(allocInfo)),
-		uintptr(unsafe.Pointer(sets)))
-	return vk.Result(ret)
+	return cmds.AllocateDescriptorSets(device, allocInfo, sets)
 }
 
 func vkFreeDescriptorSets(cmds *vk.Commands, device vk.Device, pool vk.DescriptorPool, count uint32, sets *vk.DescriptorSet) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.FreeDescriptorSets(),
-		uintptr(device),
-		uintptr(pool),
-		uintptr(count),
-		uintptr(unsafe.Pointer(sets)))
-	return vk.Result(ret)
+	return cmds.FreeDescriptorSets(device, pool, count, sets)
 }
 
 func vkUpdateDescriptorSets(cmds *vk.Commands, device vk.Device, writeCount uint32, writes *vk.WriteDescriptorSet, copyCount uint32, copies *vk.CopyDescriptorSet) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.UpdateDescriptorSets(),
-		uintptr(device),
-		uintptr(writeCount),
-		uintptr(unsafe.Pointer(writes)),
-		uintptr(copyCount),
-		uintptr(unsafe.Pointer(copies)))
+	cmds.UpdateDescriptorSets(device, writeCount, writes, copyCount, copies)
 }

@@ -3,7 +3,7 @@
 
 // Package vulkan provides Pure Go Vulkan backend for the HAL.
 //
-// This backend uses syscall.SyscallN for Vulkan API calls, requiring no CGO.
+// This backend uses goffi for cross-platform Vulkan API calls, requiring no CGO.
 // Function pointers are loaded dynamically from vulkan-1.dll (Windows),
 // libvulkan.so.1 (Linux), or MoltenVK (macOS).
 //

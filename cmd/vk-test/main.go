@@ -72,9 +72,8 @@ func main() {
 
 	// Step 3: Check vkEnumerateInstanceVersion (Vulkan 1.1+)
 	fmt.Print("3. Querying Vulkan version... ")
-	if proc := cmds.EnumerateInstanceVersion(); proc != 0 {
-		var version uint32
-		syscall.SyscallN(proc, uintptr(unsafe.Pointer(&version)))
+	var version uint32
+	if result := cmds.EnumerateInstanceVersion(&version); result == vk.Success {
 		major := version >> 22
 		minor := (version >> 12) & 0x3FF
 		patch := version & 0xFFF

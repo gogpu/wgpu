@@ -1,15 +1,11 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
@@ -33,7 +29,7 @@ type Device struct {
 func (d *Device) initAllocator() error {
 	// Get physical device memory properties
 	var vkProps vk.PhysicalDeviceMemoryProperties
-	vk.GetPhysicalDeviceMemoryProperties(&d.instance.cmds, d.physicalDevice, &vkProps)
+	d.instance.cmds.GetPhysicalDeviceMemoryProperties(d.physicalDevice, &vkProps)
 
 	// Convert to our format
 	props := memory.DeviceMemoryProperties{
@@ -56,15 +52,12 @@ func (d *Device) initAllocator() error {
 	}
 
 	// Create allocator with default config
-	allocator, err := memory.NewGpuAllocator(d.handle, props, memory.DefaultConfig())
+	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, memory.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("failed to create memory allocator: %w", err)
 	}
 
 	d.allocator = allocator
-
-	// Set device commands for memory operations
-	vk.SetDeviceCommands(d.cmds)
 
 	return nil
 }
@@ -90,14 +83,14 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	var buffer vk.Buffer
-	result := vk.CreateBuffer(d.handle, &createInfo, nil, &buffer)
+	result := d.cmds.CreateBuffer(d.handle, &createInfo, nil, &buffer)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateBuffer failed: %d", result)
 	}
 
 	// Get memory requirements
 	var memReqs vk.MemoryRequirements
-	vk.GetBufferMemoryRequirements(d.handle, buffer, &memReqs)
+	d.cmds.GetBufferMemoryRequirements(d.handle, buffer, &memReqs)
 
 	// Determine usage flags for memory allocation
 	memUsage := memory.UsageFastDeviceAccess
@@ -119,15 +112,15 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		MemoryTypeBits: memReqs.MemoryTypeBits,
 	})
 	if err != nil {
-		vk.DestroyBuffer(d.handle, buffer, nil)
+		d.cmds.DestroyBuffer(d.handle, buffer, nil)
 		return nil, fmt.Errorf("vulkan: failed to allocate buffer memory: %w", err)
 	}
 
 	// Bind memory to buffer
-	result = vk.BindBufferMemory(d.handle, buffer, memBlock.Memory, memBlock.Offset)
+	result = d.cmds.BindBufferMemory(d.handle, buffer, memBlock.Memory, vk.DeviceSize(memBlock.Offset))
 	if result != vk.Success {
 		_ = d.allocator.Free(memBlock)
-		vk.DestroyBuffer(d.handle, buffer, nil)
+		d.cmds.DestroyBuffer(d.handle, buffer, nil)
 		return nil, fmt.Errorf("vulkan: vkBindBufferMemory failed: %d", result)
 	}
 
@@ -148,7 +141,7 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 
 	if vkBuffer.handle != 0 {
-		vk.DestroyBuffer(d.handle, vkBuffer.handle, nil)
+		d.cmds.DestroyBuffer(d.handle, vkBuffer.handle, nil)
 		vkBuffer.handle = 0
 	}
 
@@ -208,14 +201,14 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	}
 
 	var image vk.Image
-	result := vk.CreateImage(d.handle, &createInfo, nil, &image)
+	result := d.cmds.CreateImage(d.handle, &createInfo, nil, &image)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateImage failed: %d", result)
 	}
 
 	// Get memory requirements
 	var memReqs vk.MemoryRequirements
-	vk.GetImageMemoryRequirements(d.handle, image, &memReqs)
+	d.cmds.GetImageMemoryRequirements(d.handle, image, &memReqs)
 
 	// Allocate memory (textures always use device-local)
 	memBlock, err := d.allocator.Alloc(memory.AllocationRequest{
@@ -225,15 +218,15 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		MemoryTypeBits: memReqs.MemoryTypeBits,
 	})
 	if err != nil {
-		vk.DestroyImage(d.handle, image, nil)
+		d.cmds.DestroyImage(d.handle, image, nil)
 		return nil, fmt.Errorf("vulkan: failed to allocate texture memory: %w", err)
 	}
 
 	// Bind memory to image
-	result = vk.BindImageMemory(d.handle, image, memBlock.Memory, memBlock.Offset)
+	result = d.cmds.BindImageMemory(d.handle, image, memBlock.Memory, vk.DeviceSize(memBlock.Offset))
 	if result != vk.Success {
 		_ = d.allocator.Free(memBlock)
-		vk.DestroyImage(d.handle, image, nil)
+		d.cmds.DestroyImage(d.handle, image, nil)
 		return nil, fmt.Errorf("vulkan: vkBindImageMemory failed: %d", result)
 	}
 
@@ -258,7 +251,7 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 	}
 
 	if vkTexture.handle != 0 && !vkTexture.isExternal {
-		vk.DestroyImage(d.handle, vkTexture.handle, nil)
+		d.cmds.DestroyImage(d.handle, vkTexture.handle, nil)
 		vkTexture.handle = 0
 	}
 
@@ -879,152 +872,68 @@ func (d *Device) Destroy() {
 	}
 }
 
-// Vulkan function wrapper
+// Vulkan function wrappers using Commands methods
 
-func vkDestroyDevice(device vk.Device, allocator unsafe.Pointer) {
-	proc := vk.GetInstanceProcAddr(0, "vkDestroyDevice")
-	if proc == 0 {
-		return
-	}
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(proc,
-		uintptr(device),
-		uintptr(allocator))
+func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.CommandPoolCreateInfo, allocator *vk.AllocationCallbacks, pool *vk.CommandPool) vk.Result {
+	return cmds.CreateCommandPool(device, createInfo, allocator, pool)
 }
 
-func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.CommandPoolCreateInfo, allocator unsafe.Pointer, pool *vk.CommandPool) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateCommandPool(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(pool)))
-	return vk.Result(ret)
-}
-
-func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyCommandPool(),
-		uintptr(device),
-		uintptr(pool),
-		uintptr(allocator))
+func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyCommandPool(device, pool, allocator)
 }
 
 func vkAllocateCommandBuffers(cmds *vk.Commands, device vk.Device, allocInfo *vk.CommandBufferAllocateInfo, cmdBuffers *vk.CommandBuffer) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.AllocateCommandBuffers(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(allocInfo)),
-		uintptr(unsafe.Pointer(cmdBuffers)))
-	return vk.Result(ret)
+	return cmds.AllocateCommandBuffers(device, allocInfo, cmdBuffers)
 }
 
-func vkCreateSampler(cmds *vk.Commands, device vk.Device, createInfo *vk.SamplerCreateInfo, allocator unsafe.Pointer, sampler *vk.Sampler) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateSampler(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(sampler)))
-	return vk.Result(ret)
+func vkCreateSampler(cmds *vk.Commands, device vk.Device, createInfo *vk.SamplerCreateInfo, allocator *vk.AllocationCallbacks, sampler *vk.Sampler) vk.Result {
+	return cmds.CreateSampler(device, createInfo, allocator, sampler)
 }
 
-func vkDestroySampler(cmds *vk.Commands, device vk.Device, sampler vk.Sampler, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroySampler(),
-		uintptr(device),
-		uintptr(sampler),
-		uintptr(allocator))
+func vkDestroySampler(cmds *vk.Commands, device vk.Device, sampler vk.Sampler, allocator *vk.AllocationCallbacks) {
+	cmds.DestroySampler(device, sampler, allocator)
 }
 
-func vkCreateShaderModule(cmds *vk.Commands, device vk.Device, createInfo *vk.ShaderModuleCreateInfo, allocator unsafe.Pointer, module *vk.ShaderModule) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateShaderModule(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(module)))
-	return vk.Result(ret)
+func vkCreateShaderModule(cmds *vk.Commands, device vk.Device, createInfo *vk.ShaderModuleCreateInfo, allocator *vk.AllocationCallbacks, module *vk.ShaderModule) vk.Result {
+	return cmds.CreateShaderModule(device, createInfo, allocator, module)
 }
 
-func vkDestroyShaderModule(cmds *vk.Commands, device vk.Device, module vk.ShaderModule, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyShaderModule(),
-		uintptr(device),
-		uintptr(module),
-		uintptr(allocator))
+func vkDestroyShaderModule(cmds *vk.Commands, device vk.Device, module vk.ShaderModule, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyShaderModule(device, module, allocator)
 }
 
-func vkCreatePipelineLayout(cmds *vk.Commands, device vk.Device, createInfo *vk.PipelineLayoutCreateInfo, allocator unsafe.Pointer, layout *vk.PipelineLayout) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreatePipelineLayout(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(layout)))
-	return vk.Result(ret)
+func vkCreatePipelineLayout(cmds *vk.Commands, device vk.Device, createInfo *vk.PipelineLayoutCreateInfo, allocator *vk.AllocationCallbacks, layout *vk.PipelineLayout) vk.Result {
+	return cmds.CreatePipelineLayout(device, createInfo, allocator, layout)
 }
 
-func vkDestroyPipelineLayout(cmds *vk.Commands, device vk.Device, layout vk.PipelineLayout, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyPipelineLayout(),
-		uintptr(device),
-		uintptr(layout),
-		uintptr(allocator))
+func vkDestroyPipelineLayout(cmds *vk.Commands, device vk.Device, layout vk.PipelineLayout, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyPipelineLayout(device, layout, allocator)
 }
 
-func vkCreateDescriptorSetLayout(cmds *vk.Commands, device vk.Device, createInfo *vk.DescriptorSetLayoutCreateInfo, allocator unsafe.Pointer, layout *vk.DescriptorSetLayout) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateDescriptorSetLayout(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(layout)))
-	return vk.Result(ret)
+func vkCreateDescriptorSetLayout(cmds *vk.Commands, device vk.Device, createInfo *vk.DescriptorSetLayoutCreateInfo, allocator *vk.AllocationCallbacks, layout *vk.DescriptorSetLayout) vk.Result {
+	return cmds.CreateDescriptorSetLayout(device, createInfo, allocator, layout)
 }
 
-func vkDestroyDescriptorSetLayout(cmds *vk.Commands, device vk.Device, layout vk.DescriptorSetLayout, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyDescriptorSetLayout(),
-		uintptr(device),
-		uintptr(layout),
-		uintptr(allocator))
+func vkDestroyDescriptorSetLayout(cmds *vk.Commands, device vk.Device, layout vk.DescriptorSetLayout, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyDescriptorSetLayout(device, layout, allocator)
 }
 
-func vkCreateImageView(cmds *vk.Commands, device vk.Device, createInfo *vk.ImageViewCreateInfo, allocator unsafe.Pointer, view *vk.ImageView) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateImageView(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(view)))
-	return vk.Result(ret)
+func vkCreateImageView(cmds *vk.Commands, device vk.Device, createInfo *vk.ImageViewCreateInfo, allocator *vk.AllocationCallbacks, view *vk.ImageView) vk.Result {
+	return cmds.CreateImageView(device, createInfo, allocator, view)
 }
 
-func vkDestroyImageView(cmds *vk.Commands, device vk.Device, view vk.ImageView, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyImageView(),
-		uintptr(device),
-		uintptr(view),
-		uintptr(allocator))
+func vkDestroyImageView(cmds *vk.Commands, device vk.Device, view vk.ImageView, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyImageView(device, view, allocator)
 }
 
-func vkCreateFence(cmds *vk.Commands, device vk.Device, createInfo *vk.FenceCreateInfo, allocator unsafe.Pointer, fence *vk.Fence) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateFence(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(fence)))
-	return vk.Result(ret)
+func vkCreateFence(cmds *vk.Commands, device vk.Device, createInfo *vk.FenceCreateInfo, allocator *vk.AllocationCallbacks, fence *vk.Fence) vk.Result {
+	return cmds.CreateFence(device, createInfo, allocator, fence)
 }
 
-func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(cmds.DestroyFence(),
-		uintptr(device),
-		uintptr(fence),
-		uintptr(allocator))
+func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator *vk.AllocationCallbacks) {
+	cmds.DestroyFence(device, fence, allocator)
 }
 
 func vkWaitForFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence, waitAll vk.Bool32, timeout uint64) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.WaitForFences(),
-		uintptr(device),
-		uintptr(fenceCount),
-		uintptr(unsafe.Pointer(fences)),
-		uintptr(waitAll),
-		uintptr(timeout))
-	return vk.Result(ret)
+	return cmds.WaitForFences(device, fenceCount, fences, waitAll, timeout)
 }

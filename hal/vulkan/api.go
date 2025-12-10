@@ -1,14 +1,11 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
 	"runtime"
-	"syscall"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -31,9 +28,11 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		return nil, fmt.Errorf("vulkan: failed to initialize: %w", err)
 	}
 
-	// Load global commands
-	var cmds vk.Commands
-	cmds.LoadGlobal()
+	// Create Commands and load global Vulkan functions
+	cmds := vk.NewCommands()
+	if err := cmds.LoadGlobal(); err != nil {
+		return nil, fmt.Errorf("vulkan: failed to load global commands: %w", err)
+	}
 
 	// Prepare application info
 	appName := []byte("gogpu\x00")
@@ -54,14 +53,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 
 	// Platform-specific surface extension
-	switch runtime.GOOS {
-	case "windows":
-		extensions = append(extensions, "VK_KHR_win32_surface\x00")
-	case "linux":
-		extensions = append(extensions, "VK_KHR_xlib_surface\x00")
-	case "darwin":
-		extensions = append(extensions, "VK_EXT_metal_surface\x00")
-	}
+	extensions = append(extensions, platformSurfaceExtension())
 
 	// Optional: validation layers for debug
 	var layers []string
@@ -97,13 +89,16 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 
 	var instance vk.Instance
-	result := vkCreateInstance(&cmds, &createInfo, nil, &instance)
+	result := cmds.CreateInstance(&createInfo, nil, &instance)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateInstance failed: %d", result)
 	}
 
 	// Load instance-level commands
-	cmds.LoadInstance(instance)
+	if err := cmds.LoadInstance(instance); err != nil {
+		cmds.DestroyInstance(instance, nil)
+		return nil, fmt.Errorf("vulkan: failed to load instance commands: %w", err)
+	}
 
 	// Keep references alive
 	runtime.KeepAlive(appName)
@@ -115,7 +110,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	return &Instance{
 		handle: instance,
-		cmds:   cmds,
+		cmds:   *cmds,
 	}, nil
 }
 
@@ -125,56 +120,34 @@ type Instance struct {
 	cmds   vk.Commands
 }
 
-// CreateSurface creates a Vulkan surface from window handles.
-func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
-	var surface vk.SurfaceKHR
-
-	// Windows: VK_KHR_win32_surface
-	createInfo := vk.Win32SurfaceCreateInfoKHR{
-		SType:     vk.StructureTypeWin32SurfaceCreateInfoKhr,
-		Hinstance: getModuleHandle(),
-		Hwnd:      windowHandle,
-	}
-
-	result := vkCreateWin32SurfaceKHR(i, &createInfo, nil, &surface)
-	if result != vk.Success {
-		return nil, fmt.Errorf("vulkan: vkCreateWin32SurfaceKHR failed: %d", result)
-	}
-
-	return &Surface{
-		handle:   surface,
-		instance: i,
-	}, nil
-}
-
 // EnumerateAdapters returns available Vulkan adapters (physical devices).
 func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
 	// Get physical device count
 	var count uint32
-	vkEnumeratePhysicalDevices(i, &count, nil)
+	i.cmds.EnumeratePhysicalDevices(i.handle, &count, nil)
 	if count == 0 {
 		return nil
 	}
 
 	// Get physical devices
 	devices := make([]vk.PhysicalDevice, count)
-	vkEnumeratePhysicalDevices(i, &count, &devices[0])
+	i.cmds.EnumeratePhysicalDevices(i.handle, &count, &devices[0])
 
 	adapters := make([]hal.ExposedAdapter, 0, count)
 	for _, device := range devices {
 		// Get device properties
 		var props vk.PhysicalDeviceProperties
-		vkGetPhysicalDeviceProperties(i, device, &props)
+		i.cmds.GetPhysicalDeviceProperties(device, &props)
 
 		// Get device features
 		var features vk.PhysicalDeviceFeatures
-		vkGetPhysicalDeviceFeatures(i, device, &features)
+		i.cmds.GetPhysicalDeviceFeatures(device, &features)
 
 		// Check surface support if surface hint provided
 		if surfaceHint != nil {
 			if s, ok := surfaceHint.(*Surface); ok {
 				var supported vk.Bool32
-				vkGetPhysicalDeviceSurfaceSupportKHR(i, device, 0, s.handle, &supported)
+				i.cmds.GetPhysicalDeviceSurfaceSupportKHR(device, 0, s.handle, &supported)
 				if supported == 0 {
 					continue // Skip devices that don't support this surface
 				}
@@ -240,7 +213,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 // Destroy releases the Vulkan instance.
 func (i *Instance) Destroy() {
 	if i.handle != 0 {
-		vkDestroyInstance(i, i.handle, nil)
+		i.cmds.DestroyInstance(i.handle, nil)
 		i.handle = 0
 	}
 }
@@ -302,7 +275,7 @@ func (s *Surface) Destroy() {
 		s.swapchain = nil
 	}
 	if s.handle != 0 && s.instance != nil {
-		vkDestroySurfaceKHR(s.instance, s.handle, nil)
+		s.instance.cmds.DestroySurfaceKHR(s.instance.handle, s.handle, nil)
 		s.handle = 0
 	}
 }
@@ -356,93 +329,4 @@ func vendorIDToName(id uint32) string {
 func limitsFromProps(props *vk.PhysicalDeviceProperties) types.Limits {
 	_ = props // TODO: Map Vulkan limits to WebGPU limits from props.Limits
 	return types.DefaultLimits()
-}
-
-// Vulkan function wrappers using syscall.SyscallN
-
-func vkCreateInstance(cmds *vk.Commands, createInfo *vk.InstanceCreateInfo, allocator unsafe.Pointer, instance *vk.Instance) vk.Result {
-	r, _, _ := syscall.SyscallN(cmds.CreateInstance(),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(instance)))
-	return vk.Result(r)
-}
-
-func vkDestroyInstance(i *Instance, instance vk.Instance, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(i.cmds.DestroyInstance(),
-		uintptr(instance),
-		uintptr(allocator))
-}
-
-//nolint:unparam // result is used in caller but linter doesn't see it
-func vkEnumeratePhysicalDevices(i *Instance, count *uint32, devices *vk.PhysicalDevice) vk.Result {
-	r, _, _ := syscall.SyscallN(i.cmds.EnumeratePhysicalDevices(),
-		uintptr(i.handle),
-		uintptr(unsafe.Pointer(count)),
-		uintptr(unsafe.Pointer(devices)))
-	return vk.Result(r)
-}
-
-func vkGetPhysicalDeviceProperties(i *Instance, device vk.PhysicalDevice, props *vk.PhysicalDeviceProperties) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(i.cmds.GetPhysicalDeviceProperties(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(props)))
-}
-
-func vkGetPhysicalDeviceFeatures(i *Instance, device vk.PhysicalDevice, features *vk.PhysicalDeviceFeatures) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(i.cmds.GetPhysicalDeviceFeatures(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(features)))
-}
-
-func vkCreateWin32SurfaceKHR(i *Instance, createInfo *vk.Win32SurfaceCreateInfoKHR, allocator unsafe.Pointer, surface *vk.SurfaceKHR) vk.Result {
-	proc := vk.GetInstanceProcAddr(i.handle, "vkCreateWin32SurfaceKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(i.handle),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(surface)))
-	return vk.Result(r)
-}
-
-func vkDestroySurfaceKHR(i *Instance, surface vk.SurfaceKHR, allocator unsafe.Pointer) {
-	proc := vk.GetInstanceProcAddr(i.handle, "vkDestroySurfaceKHR")
-	if proc == 0 {
-		return
-	}
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(proc,
-		uintptr(i.handle),
-		uintptr(surface),
-		uintptr(allocator))
-}
-
-func vkGetPhysicalDeviceSurfaceSupportKHR(i *Instance, device vk.PhysicalDevice, queueFamily uint32, surface vk.SurfaceKHR, supported *vk.Bool32) vk.Result {
-	proc := vk.GetInstanceProcAddr(i.handle, "vkGetPhysicalDeviceSurfaceSupportKHR")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(device),
-		uintptr(queueFamily),
-		uintptr(surface),
-		uintptr(unsafe.Pointer(supported)))
-	return vk.Result(r)
-}
-
-// Windows-specific
-var (
-	kernel32             = syscall.NewLazyDLL("kernel32.dll")
-	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
-)
-
-func getModuleHandle() uintptr {
-	h, _, _ := procGetModuleHandleW.Call(0)
-	return h
 }
