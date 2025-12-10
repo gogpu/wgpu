@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.1.0-alpha — Types, Core, HAL, OpenGL ES and Vulkan backends complete!
+> **Status:** v0.2.0 — Types, Core, HAL, Vulkan, OpenGL ES, and Software backends complete!
 
 ---
 
@@ -77,6 +77,7 @@ wgpu/
 ├── core/          # Validation, state tracking ✓
 ├── hal/           # Hardware abstraction layer ✓
 │   ├── noop/      # No-op backend (testing) ✓
+│   ├── software/  # Software backend ✓ (CPU rendering, headless, ~1K LOC)
 │   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~3500 LOC)
 │   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~27K LOC)
 │   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
@@ -119,6 +120,7 @@ wgpu/
 **Phase 4: Pure Go Backends** (In Progress)
 - [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL)
 - [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
+- [x] Software backend (`hal/software/`) — CPU-based headless rendering, ~1K LOC, 11 tests
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
 - [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
 
@@ -128,10 +130,40 @@ All backends implemented without CGO:
 
 | Backend | Status | Approach | Platforms |
 |---------|--------|----------|-----------|
+| Software | **Done** | Pure Go CPU rendering | All (headless) |
 | OpenGL ES | **Done** | goffi + WGL | Windows |
 | Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
 | Metal | Planned | goffi (Obj-C bridge) | macOS, iOS |
 | DX12 | Planned | goffi + COM | Windows |
+
+### Software Backend
+
+CPU-based rendering for headless scenarios:
+
+```bash
+# Build with software backend
+go build -tags software ./...
+```
+
+```go
+import _ "github.com/gogpu/wgpu/hal/software"
+
+// Use cases:
+// - CI/CD testing without GPU
+// - Server-side image generation
+// - Embedded systems without GPU
+// - Fallback when no GPU available
+
+// Key feature: read rendered pixels
+surface.GetFramebuffer() // Returns []byte (RGBA8)
+```
+
+Features:
+- Real data storage for buffers/textures
+- Clear operations (fill with color)
+- Buffer/texture copy operations
+- Thread-safe with `sync.RWMutex`
+- `Surface.GetFramebuffer()` for pixel readback
 
 ### Vulkan Backend Features
 
