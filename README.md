@@ -117,8 +117,8 @@ wgpu/
 - [x] 54 tests with 94% coverage
 
 **Phase 4: Pure Go Backends** (In Progress)
-- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via syscall.SyscallN, Windows (WGL)
-- [x] Vulkan backend (`hal/vulkan/`) — Pure Go, Windows (Win32 surface), ~27K LOC
+- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL)
+- [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
 - [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
 
@@ -126,12 +126,12 @@ wgpu/
 
 All backends implemented without CGO:
 
-| Backend | Status | Approach |
-|---------|--------|----------|
-| OpenGL ES | **Done** | `syscall.SyscallN` + WGL (Windows) |
-| Vulkan | **Done** | `syscall.SyscallN` + vk-gen from vk.xml |
-| Metal | Planned | purego (Obj-C bridge) |
-| DX12 | Planned | syscall + COM |
+| Backend | Status | Approach | Platforms |
+|---------|--------|----------|-----------|
+| OpenGL ES | **Done** | goffi + WGL | Windows |
+| Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
+| Metal | Planned | goffi (Obj-C bridge) | macOS, iOS |
+| DX12 | Planned | goffi + COM | Windows |
 
 ### Vulkan Backend Features
 

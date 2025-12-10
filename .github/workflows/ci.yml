@@ -21,6 +21,10 @@ on:
     branches:
       - main
 
+env:
+  # goffi requires CGO_ENABLED=0 for pure Go FFI on Unix
+  CGO_ENABLED: 0
+
 jobs:
   # Build verification - Cross-platform
   build:
@@ -74,11 +78,16 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      run: go vet ./...
+      # Skip hal/vulkan/vk due to generated code with intentional unsafe.Pointer usage
+      run: |
+        go vet $(go list ./... | grep -v '/hal/vulkan/vk$')
+
+    - name: Install pure-Go race detector
+      run: go install github.com/kolkov/racedetector/cmd/racedetector@v0.4.10
 
     - name: Run tests with race detector
       shell: bash
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'

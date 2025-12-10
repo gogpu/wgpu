@@ -1,13 +1,10 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -83,16 +80,23 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: vkCreateDevice failed: %d", result)
 	}
 
+	// Load device-level commands
+	var deviceCmds vk.Commands
+	if err := deviceCmds.LoadDevice(device); err != nil {
+		vkDestroyDevice(device, nil)
+		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to load device commands: %w", err)
+	}
+
 	// Get queue handle
 	var queue vk.Queue
-	vkGetDeviceQueue(device, uint32(graphicsFamily), 0, &queue)
+	vkGetDeviceQueue(&deviceCmds, device, uint32(graphicsFamily), 0, &queue)
 
 	dev := &Device{
 		handle:         device,
 		physicalDevice: a.physicalDevice,
 		instance:       a.instance,
 		graphicsFamily: uint32(graphicsFamily),
-		cmds:           &a.instance.cmds,
+		cmds:           &deviceCmds,
 	}
 
 	// Initialize memory allocator
@@ -171,34 +175,28 @@ func (a *Adapter) Destroy() {
 	// Adapter doesn't own resources
 }
 
-// Vulkan function wrappers
+// Vulkan function wrappers using Commands methods
 
 func vkGetPhysicalDeviceQueueFamilyProperties(i *Instance, device vk.PhysicalDevice, count *uint32, props *vk.QueueFamilyProperties) {
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(i.cmds.GetPhysicalDeviceQueueFamilyProperties(),
-		uintptr(device),
-		uintptr(unsafe.Pointer(count)),
-		uintptr(unsafe.Pointer(props)))
+	i.cmds.GetPhysicalDeviceQueueFamilyProperties(device, count, props)
 }
 
-func vkCreateDevice(i *Instance, physicalDevice vk.PhysicalDevice, createInfo *vk.DeviceCreateInfo, allocator unsafe.Pointer, device *vk.Device) vk.Result {
-	r, _, _ := syscall.SyscallN(i.cmds.CreateDevice(),
-		uintptr(physicalDevice),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(device)))
-	return vk.Result(r)
+func vkCreateDevice(i *Instance, physicalDevice vk.PhysicalDevice, createInfo *vk.DeviceCreateInfo, allocator *vk.AllocationCallbacks, device *vk.Device) vk.Result {
+	return i.cmds.CreateDevice(physicalDevice, createInfo, allocator, device)
 }
 
-func vkGetDeviceQueue(device vk.Device, queueFamilyIndex, queueIndex uint32, queue *vk.Queue) {
-	proc := vk.GetInstanceProcAddr(0, "vkGetDeviceQueue")
-	if proc == 0 {
+func vkGetDeviceQueue(cmds *vk.Commands, device vk.Device, queueFamilyIndex, queueIndex uint32, queue *vk.Queue) {
+	cmds.GetDeviceQueue(device, queueFamilyIndex, queueIndex, queue)
+}
+
+func vkDestroyDevice(device vk.Device, _ *vk.AllocationCallbacks) {
+	// Note: This requires device commands to be loaded, but we're destroying the device
+	// For now, use GetDeviceProcAddr directly
+	proc := vk.GetDeviceProcAddr(device, "vkDestroyDevice")
+	if proc == nil {
 		return
 	}
-	//nolint:errcheck // Vulkan void function, no return value to check
-	syscall.SyscallN(proc,
-		uintptr(device),
-		uintptr(queueFamilyIndex),
-		uintptr(queueIndex),
-		uintptr(unsafe.Pointer(queue)))
+	// TODO: Need proper signature for this call using ffi
+	// For now just skip - device will be destroyed when process exits
+	_ = proc
 }

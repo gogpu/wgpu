@@ -1,5 +1,3 @@
-//go:build windows
-
 package memory
 
 import (
@@ -76,6 +74,7 @@ type GpuAllocator struct {
 	mu sync.Mutex
 
 	device   vk.Device
+	cmds     *vk.Commands // goffi-based Vulkan commands
 	config   AllocatorConfig
 	selector *MemoryTypeSelector
 
@@ -114,9 +113,10 @@ var (
 //
 // Parameters:
 //   - device: Vulkan device handle
+//   - cmds: Vulkan commands for memory operations
 //   - props: Device memory properties from vkGetPhysicalDeviceMemoryProperties
 //   - config: Allocator configuration (use DefaultConfig() for defaults)
-func NewGpuAllocator(device vk.Device, props DeviceMemoryProperties, config AllocatorConfig) (*GpuAllocator, error) {
+func NewGpuAllocator(device vk.Device, cmds *vk.Commands, props DeviceMemoryProperties, config AllocatorConfig) (*GpuAllocator, error) {
 	// Validate config
 	if !isPowerOfTwo(config.BlockSize) {
 		return nil, fmt.Errorf("BlockSize must be power of 2: %d", config.BlockSize)
@@ -144,6 +144,7 @@ func NewGpuAllocator(device vk.Device, props DeviceMemoryProperties, config Allo
 
 	return &GpuAllocator{
 		device:    device,
+		cmds:      cmds,
 		config:    config,
 		selector:  selector,
 		pools:     pools,
@@ -406,7 +407,7 @@ func (a *GpuAllocator) vulkanAllocate(size uint64, memTypeIndex uint32) (vk.Devi
 	}
 
 	var memory vk.DeviceMemory
-	result := vk.AllocateMemory(a.device, &allocInfo, nil, &memory)
+	result := a.cmds.AllocateMemory(a.device, &allocInfo, nil, &memory)
 	if result != vk.Success {
 		return 0, fmt.Errorf("%w: vkAllocateMemory returned %d", ErrAllocationFailed, result)
 	}
@@ -416,7 +417,7 @@ func (a *GpuAllocator) vulkanAllocate(size uint64, memTypeIndex uint32) (vk.Devi
 
 // vulkanFree wraps vkFreeMemory.
 func (a *GpuAllocator) vulkanFree(memory vk.DeviceMemory) {
-	vk.FreeMemory(a.device, memory, nil)
+	a.cmds.FreeMemory(a.device, memory, nil)
 }
 
 // Selector returns the memory type selector.

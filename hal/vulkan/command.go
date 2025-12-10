@@ -1,14 +1,10 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -826,23 +822,15 @@ func storeOpToVk(op types.StoreOp) vk.AttachmentStoreOp {
 // --- Vulkan function wrappers ---
 
 func vkBeginCommandBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, beginInfo *vk.CommandBufferBeginInfo) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.BeginCommandBuffer(),
-		uintptr(cmdBuffer),
-		uintptr(unsafe.Pointer(beginInfo)))
-	return vk.Result(ret)
+	return cmds.BeginCommandBuffer(cmdBuffer, beginInfo)
 }
 
 func vkEndCommandBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.EndCommandBuffer(), uintptr(cmdBuffer))
-	return vk.Result(ret)
+	return cmds.EndCommandBuffer(cmdBuffer)
 }
 
 func vkResetCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, flags vk.CommandPoolResetFlags) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.ResetCommandPool(),
-		uintptr(device),
-		uintptr(pool),
-		uintptr(flags))
-	return vk.Result(ret)
+	return cmds.ResetCommandPool(device, pool, flags)
 }
 
 func vkCmdPipelineBarrier(cmds *vk.Commands, cmdBuffer vk.CommandBuffer,
@@ -851,213 +839,92 @@ func vkCmdPipelineBarrier(cmds *vk.Commands, cmdBuffer vk.CommandBuffer,
 	memoryBarrierCount uint32, pMemoryBarriers *vk.MemoryBarrier,
 	bufferMemoryBarrierCount uint32, pBufferMemoryBarriers *vk.BufferMemoryBarrier,
 	imageMemoryBarrierCount uint32, pImageMemoryBarriers *vk.ImageMemoryBarrier) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdPipelineBarrier(),
-		uintptr(cmdBuffer),
-		uintptr(srcStageMask),
-		uintptr(dstStageMask),
-		uintptr(dependencyFlags),
-		uintptr(memoryBarrierCount),
-		uintptr(unsafe.Pointer(pMemoryBarriers)),
-		uintptr(bufferMemoryBarrierCount),
-		uintptr(unsafe.Pointer(pBufferMemoryBarriers)),
-		uintptr(imageMemoryBarrierCount),
-		uintptr(unsafe.Pointer(pImageMemoryBarriers)))
+	cmds.CmdPipelineBarrier(cmdBuffer, srcStageMask, dstStageMask, dependencyFlags,
+		memoryBarrierCount, pMemoryBarriers,
+		bufferMemoryBarrierCount, pBufferMemoryBarriers,
+		imageMemoryBarrierCount, pImageMemoryBarriers)
 }
 
 func vkCmdFillBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset, size vk.DeviceSize, data uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdFillBuffer(),
-		uintptr(cmdBuffer),
-		uintptr(buffer),
-		uintptr(offset),
-		uintptr(size),
-		uintptr(data))
+	cmds.CmdFillBuffer(cmdBuffer, buffer, offset, size, data)
 }
 
 func vkCmdCopyBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, src, dst vk.Buffer, regionCount uint32, pRegions *vk.BufferCopy) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdCopyBuffer(),
-		uintptr(cmdBuffer),
-		uintptr(src),
-		uintptr(dst),
-		uintptr(regionCount),
-		uintptr(unsafe.Pointer(pRegions)))
+	cmds.CmdCopyBuffer(cmdBuffer, src, dst, regionCount, pRegions)
 }
 
 func vkCmdCopyBufferToImage(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, src vk.Buffer, dst vk.Image, layout vk.ImageLayout, regionCount uint32, pRegions *vk.BufferImageCopy) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdCopyBufferToImage(),
-		uintptr(cmdBuffer),
-		uintptr(src),
-		uintptr(dst),
-		uintptr(layout),
-		uintptr(regionCount),
-		uintptr(unsafe.Pointer(pRegions)))
+	cmds.CmdCopyBufferToImage(cmdBuffer, src, dst, layout, regionCount, pRegions)
 }
 
 func vkCmdCopyImageToBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, src vk.Image, layout vk.ImageLayout, dst vk.Buffer, regionCount uint32, pRegions *vk.BufferImageCopy) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdCopyImageToBuffer(),
-		uintptr(cmdBuffer),
-		uintptr(src),
-		uintptr(layout),
-		uintptr(dst),
-		uintptr(regionCount),
-		uintptr(unsafe.Pointer(pRegions)))
+	cmds.CmdCopyImageToBuffer(cmdBuffer, src, layout, dst, regionCount, pRegions)
 }
 
 func vkCmdCopyImage(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, src vk.Image, srcLayout vk.ImageLayout, dst vk.Image, dstLayout vk.ImageLayout, regionCount uint32, pRegions *vk.ImageCopy) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdCopyImage(),
-		uintptr(cmdBuffer),
-		uintptr(src),
-		uintptr(srcLayout),
-		uintptr(dst),
-		uintptr(dstLayout),
-		uintptr(regionCount),
-		uintptr(unsafe.Pointer(pRegions)))
+	cmds.CmdCopyImage(cmdBuffer, src, srcLayout, dst, dstLayout, regionCount, pRegions)
 }
 
 func vkCmdBeginRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, renderingInfo *vk.RenderingInfo) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdBeginRendering(),
-		uintptr(cmdBuffer),
-		uintptr(unsafe.Pointer(renderingInfo)))
+	cmds.CmdBeginRendering(cmdBuffer, renderingInfo)
 }
 
 func vkCmdEndRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdEndRendering(), uintptr(cmdBuffer))
+	cmds.CmdEndRendering(cmdBuffer)
 }
 
 func vkCmdBindPipeline(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, bindPoint vk.PipelineBindPoint, pipeline vk.Pipeline) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdBindPipeline(),
-		uintptr(cmdBuffer),
-		uintptr(bindPoint),
-		uintptr(pipeline))
+	cmds.CmdBindPipeline(cmdBuffer, bindPoint, pipeline)
 }
 
 func vkCmdBindDescriptorSets(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, bindPoint vk.PipelineBindPoint, layout vk.PipelineLayout, firstSet uint32, setCount uint32, pSets *vk.DescriptorSet, dynamicOffsetCount uint32, pDynamicOffsets *uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdBindDescriptorSets(),
-		uintptr(cmdBuffer),
-		uintptr(bindPoint),
-		uintptr(layout),
-		uintptr(firstSet),
-		uintptr(setCount),
-		uintptr(unsafe.Pointer(pSets)),
-		uintptr(dynamicOffsetCount),
-		uintptr(unsafe.Pointer(pDynamicOffsets)))
+	cmds.CmdBindDescriptorSets(cmdBuffer, bindPoint, layout, firstSet, setCount, pSets, dynamicOffsetCount, pDynamicOffsets)
 }
 
 func vkCmdBindVertexBuffers(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, firstBinding, bindingCount uint32, pBuffers *vk.Buffer, pOffsets *vk.DeviceSize) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdBindVertexBuffers(),
-		uintptr(cmdBuffer),
-		uintptr(firstBinding),
-		uintptr(bindingCount),
-		uintptr(unsafe.Pointer(pBuffers)),
-		uintptr(unsafe.Pointer(pOffsets)))
+	cmds.CmdBindVertexBuffers(cmdBuffer, firstBinding, bindingCount, pBuffers, pOffsets)
 }
 
 func vkCmdBindIndexBuffer(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize, indexType vk.IndexType) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdBindIndexBuffer(),
-		uintptr(cmdBuffer),
-		uintptr(buffer),
-		uintptr(offset),
-		uintptr(indexType))
+	cmds.CmdBindIndexBuffer(cmdBuffer, buffer, offset, indexType)
 }
 
 func vkCmdSetViewport(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, firstViewport, viewportCount uint32, pViewports *vk.Viewport) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdSetViewport(),
-		uintptr(cmdBuffer),
-		uintptr(firstViewport),
-		uintptr(viewportCount),
-		uintptr(unsafe.Pointer(pViewports)))
+	cmds.CmdSetViewport(cmdBuffer, firstViewport, viewportCount, pViewports)
 }
 
 func vkCmdSetScissor(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, firstScissor, scissorCount uint32, pScissors *vk.Rect2D) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdSetScissor(),
-		uintptr(cmdBuffer),
-		uintptr(firstScissor),
-		uintptr(scissorCount),
-		uintptr(unsafe.Pointer(pScissors)))
+	cmds.CmdSetScissor(cmdBuffer, firstScissor, scissorCount, pScissors)
 }
 
 func vkCmdSetBlendConstants(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, blendConstants *[4]float32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdSetBlendConstants(),
-		uintptr(cmdBuffer),
-		uintptr(unsafe.Pointer(blendConstants)))
+	cmds.CmdSetBlendConstants(cmdBuffer, *blendConstants)
 }
 
 func vkCmdSetStencilReference(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, faceMask vk.StencilFaceFlags, reference uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdSetStencilReference(),
-		uintptr(cmdBuffer),
-		uintptr(faceMask),
-		uintptr(reference))
+	cmds.CmdSetStencilReference(cmdBuffer, faceMask, reference)
 }
 
 func vkCmdDraw(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDraw(),
-		uintptr(cmdBuffer),
-		uintptr(vertexCount),
-		uintptr(instanceCount),
-		uintptr(firstVertex),
-		uintptr(firstInstance))
+	cmds.CmdDraw(cmdBuffer, vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
 func vkCmdDrawIndexed(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, indexCount, instanceCount, firstIndex uint32, vertexOffset int32, firstInstance uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDrawIndexed(),
-		uintptr(cmdBuffer),
-		uintptr(indexCount),
-		uintptr(instanceCount),
-		uintptr(firstIndex),
-		uintptr(vertexOffset),
-		uintptr(firstInstance))
+	cmds.CmdDrawIndexed(cmdBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance)
 }
 
 func vkCmdDrawIndirect(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize, drawCount, stride uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDrawIndirect(),
-		uintptr(cmdBuffer),
-		uintptr(buffer),
-		uintptr(offset),
-		uintptr(drawCount),
-		uintptr(stride))
+	cmds.CmdDrawIndirect(cmdBuffer, buffer, offset, drawCount, stride)
 }
 
 func vkCmdDrawIndexedIndirect(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize, drawCount, stride uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDrawIndexedIndirect(),
-		uintptr(cmdBuffer),
-		uintptr(buffer),
-		uintptr(offset),
-		uintptr(drawCount),
-		uintptr(stride))
+	cmds.CmdDrawIndexedIndirect(cmdBuffer, buffer, offset, drawCount, stride)
 }
 
 func vkCmdDispatch(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, x, y, z uint32) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDispatch(),
-		uintptr(cmdBuffer),
-		uintptr(x),
-		uintptr(y),
-		uintptr(z))
+	cmds.CmdDispatch(cmdBuffer, x, y, z)
 }
 
 func vkCmdDispatchIndirect(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.CmdDispatchIndirect(),
-		uintptr(cmdBuffer),
-		uintptr(buffer),
-		uintptr(offset))
+	cmds.CmdDispatchIndirect(cmdBuffer, buffer, offset)
 }

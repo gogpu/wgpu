@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package memory provides GPU memory allocation for Vulkan backend.
 //
 // # Architecture

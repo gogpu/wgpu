@@ -1,13 +1,10 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -417,32 +414,14 @@ func boolToVk(b bool) vk.Bool32 {
 
 // Vulkan function wrappers
 
-func vkCreateGraphicsPipelines(cmds *vk.Commands, device vk.Device, cache vk.PipelineCache, count uint32, createInfo *vk.GraphicsPipelineCreateInfo, allocator unsafe.Pointer, pipeline *vk.Pipeline) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateGraphicsPipelines(),
-		uintptr(device),
-		uintptr(cache),
-		uintptr(count),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(pipeline)))
-	return vk.Result(ret)
+func vkCreateGraphicsPipelines(cmds *vk.Commands, device vk.Device, cache vk.PipelineCache, count uint32, createInfo *vk.GraphicsPipelineCreateInfo, _ unsafe.Pointer, pipeline *vk.Pipeline) vk.Result {
+	return cmds.CreateGraphicsPipelines(device, cache, count, createInfo, nil, pipeline)
 }
 
-func vkCreateComputePipelines(cmds *vk.Commands, device vk.Device, cache vk.PipelineCache, count uint32, createInfo *vk.ComputePipelineCreateInfo, allocator unsafe.Pointer, pipeline *vk.Pipeline) vk.Result {
-	ret, _, _ := syscall.SyscallN(cmds.CreateComputePipelines(),
-		uintptr(device),
-		uintptr(cache),
-		uintptr(count),
-		uintptr(unsafe.Pointer(createInfo)),
-		uintptr(allocator),
-		uintptr(unsafe.Pointer(pipeline)))
-	return vk.Result(ret)
+func vkCreateComputePipelines(cmds *vk.Commands, device vk.Device, cache vk.PipelineCache, count uint32, createInfo *vk.ComputePipelineCreateInfo, _ unsafe.Pointer, pipeline *vk.Pipeline) vk.Result {
+	return cmds.CreateComputePipelines(device, cache, count, createInfo, nil, pipeline)
 }
 
-func vkDestroyPipeline(cmds *vk.Commands, device vk.Device, pipeline vk.Pipeline, allocator unsafe.Pointer) {
-	//nolint:errcheck // Vulkan void function
-	syscall.SyscallN(cmds.DestroyPipeline(),
-		uintptr(device),
-		uintptr(pipeline),
-		uintptr(allocator))
+func vkDestroyPipeline(cmds *vk.Commands, device vk.Device, pipeline vk.Pipeline, _ unsafe.Pointer) {
+	cmds.DestroyPipeline(device, pipeline, nil)
 }

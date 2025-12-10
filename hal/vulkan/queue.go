@@ -1,15 +1,11 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package vulkan
 
 import (
 	"fmt"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -285,14 +281,5 @@ func (q *Queue) GetTimestampPeriod() float32 {
 // Vulkan function wrapper
 
 func vkQueueSubmit(q *Queue, submitCount uint32, submits *vk.SubmitInfo, fence vk.Fence) vk.Result {
-	proc := vk.GetDeviceProcAddr(q.device.handle, "vkQueueSubmit")
-	if proc == 0 {
-		return vk.ErrorExtensionNotPresent
-	}
-	r, _, _ := syscall.SyscallN(proc,
-		uintptr(q.handle),
-		uintptr(submitCount),
-		uintptr(unsafe.Pointer(submits)),
-		uintptr(fence))
-	return vk.Result(r)
+	return q.device.cmds.QueueSubmit(q.handle, submitCount, submits, fence)
 }
