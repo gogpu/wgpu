@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.2.0 — Types, Core, HAL, Vulkan, OpenGL ES, and Software backends complete!
+> **Status:** v0.3.0 — Types, Core, HAL, Vulkan, OpenGL ES, and Software backends complete!
 
 ---
 
