@@ -83,7 +83,7 @@ jobs:
         go vet $(go list ./... | grep -v '/hal/vulkan/vk$')
 
     - name: Install pure-Go race detector
-      run: go install github.com/kolkov/racedetector/cmd/racedetector@v0.4.10
+      run: go install github.com/kolkov/racedetector/cmd/racedetector@v0.5.0
 
     - name: Run tests with race detector
       shell: bash
