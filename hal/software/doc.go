@@ -1,38 +1,42 @@
+//go:build software
+
 // Package software provides a CPU-based software rendering backend.
 //
-// Status: PLANNED - Not yet implemented.
+// Status: IMPLEMENTED (Phase 1 - Headless Rendering)
 //
-// The software backend will implement all HAL interfaces using pure Go CPU rendering.
-// Unlike the noop backend, it will actually perform rendering operations in memory.
+// The software backend implements all HAL interfaces using pure Go CPU rendering.
+// Unlike the noop backend, it actually performs rendering operations in memory.
 //
-// Planned use cases:
+// Use cases:
 //   - Headless rendering (servers, CI/CD)
 //   - Screenshot/image generation without GPU
 //   - Testing rendering logic without GPU hardware
 //   - Embedded systems without GPU
 //   - Fallback when no GPU backend is available
 //
-// Planned features:
-//   - Clear operations (fill framebuffer with color)
+// Implemented features (Phase 1):
+//   - Real data storage for buffers and textures
+//   - Clear operations (fill framebuffer/texture with color)
 //   - Buffer/texture copy operations
-//   - Basic triangle rasterization
-//   - Texture sampling (nearest/linear filtering)
-//   - Framebuffer readback via GetFramebuffer()
+//   - Framebuffer readback via Surface.GetFramebuffer()
+//   - Thread-safe resource access
 //
-// Limitations (planned):
+// Limitations:
 //   - Much slower than GPU backends (CPU-bound)
 //   - No hardware acceleration
-//   - No compute shaders (will return error)
-//   - Limited shader support (basic vertex/fragment only)
+//   - No compute shaders (returns error)
+//   - No rasterization yet (draw calls are no-op - Phase 2)
+//   - No shader execution (basic resources only)
 //
 // Build tag: -tags software
 //
-// Example (when implemented):
+// Example:
 //
 //	import _ "github.com/gogpu/wgpu/hal/software"
 //
-//	// Software backend will be registered automatically
-//	// Adapter name will contain "Software Renderer"
+//	// Software backend is registered automatically
+//	// Adapter name: "Software Renderer"
+//	// Device type: types.DeviceTypeCPU
 //
-// Implementation tracking: TASK-029 in gogpu/gogpu kanban
+// Backend identifier: types.BackendEmpty
 package software
