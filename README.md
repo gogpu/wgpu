@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.3.0 — Types, Core, HAL, Vulkan, OpenGL ES, and Software backends complete!
+> **Status:** v0.4.0 — OpenGL ES now supports Linux (EGL) + Windows (WGL)!
 
 ---
 
@@ -78,7 +78,7 @@ wgpu/
 ├── hal/           # Hardware abstraction layer ✓
 │   ├── noop/      # No-op backend (testing) ✓
 │   ├── software/  # Software backend ✓ (CPU rendering, headless, ~1K LOC)
-│   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~3500 LOC)
+│   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~7500 LOC, Windows + Linux)
 │   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~27K LOC)
 │   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
 │   │   └── memory/    # GPU memory allocator (~1.8K LOC)
@@ -118,7 +118,7 @@ wgpu/
 - [x] 54 tests with 94% coverage
 
 **Phase 4: Pure Go Backends** (In Progress)
-- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL)
+- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL) + Linux (EGL), ~7.5K LOC
 - [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
 - [x] Software backend (`hal/software/`) — CPU-based headless rendering, ~1K LOC, 11 tests
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
@@ -131,7 +131,7 @@ All backends implemented without CGO:
 | Backend | Status | Approach | Platforms |
 |---------|--------|----------|-----------|
 | Software | **Done** | Pure Go CPU rendering | All (headless) |
-| OpenGL ES | **Done** | goffi + WGL | Windows |
+| OpenGL ES | **Done** | goffi + WGL/EGL | Windows, Linux |
 | Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
 | Metal | Planned | goffi (Obj-C bridge) | macOS, iOS |
 | DX12 | Planned | goffi + COM | Windows |
