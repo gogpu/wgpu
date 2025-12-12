@@ -267,7 +267,9 @@ func (d *DisplayOwner) Close() {
 	case WindowKindX11:
 		if symXCloseDisplay != nil {
 			var result int32
-			args := [1]unsafe.Pointer{unsafe.Pointer(&d.display)}
+			//nolint:govet // Converting uintptr to unsafe.Pointer for FFI call to XCloseDisplay
+			ptr := unsafe.Pointer(d.display)
+			args := [1]unsafe.Pointer{ptr}
 			_ = ffi.CallFunction(&cifXCloseDisplay, symXCloseDisplay, unsafe.Pointer(&result), args[:])
 		}
 	case WindowKindWayland:
