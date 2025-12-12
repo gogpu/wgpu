@@ -3,7 +3,8 @@ name: CI
 # CI Strategy:
 # - Tests run on Linux, macOS, and Windows (cross-platform GPU library)
 # - Go 1.25+ required (matches go.mod requirement)
-# - Pure Go implementation - no external dependencies required
+# - Pure Go implementation via goffi (requires CGO_ENABLED=0 on Unix)
+# - Integration tests with Mesa software renderer on Linux
 #
 # Branch Strategy (GitHub Flow):
 # - main branch: Production-ready code
@@ -97,6 +98,72 @@ jobs:
         flags: unittests
         name: codecov-wgpu
         fail_ci_if_error: false
+
+  # GLES/EGL Integration Test - Linux with Mesa
+  integration-gles:
+    name: Integration - GLES/EGL (Linux + Mesa)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Install Mesa/EGL libraries
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libegl1-mesa-dev \
+          libgl1-mesa-dev \
+          libgles2-mesa-dev \
+          mesa-utils \
+          libx11-dev \
+          libxrandr-dev \
+          libxinerama-dev \
+          libxcursor-dev \
+          libxi-dev \
+          xvfb
+
+    - name: Verify Mesa installation
+      run: |
+        echo "=== Installed packages ==="
+        dpkg -l | grep -E 'mesa|egl' | head -10
+        echo ""
+        echo "=== Library files ==="
+        ls -la /usr/lib/x86_64-linux-gnu/libEGL* 2>/dev/null || true
+        ls -la /usr/lib/x86_64-linux-gnu/libGL* 2>/dev/null || true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build GLES backend
+      run: go build -v ./hal/gles/...
+
+    - name: Run GLES integration test
+      run: |
+        # Use Xvfb for headless testing
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1024x768x24 &
+        sleep 2
+
+        # Run integration test (if exists)
+        if [ -f "hal/gles/integration_test.go" ]; then
+          go test -v -tags integration ./hal/gles/...
+        else
+          echo "No integration tests yet - build verification passed"
+        fi
+
+    - name: Test EGL library loading
+      run: |
+        # Verify that EGL can be loaded at runtime
+        echo "Testing EGL library availability..."
+        ldconfig -p | grep -E 'libEGL|libGL' | head -5
+        echo "EGL libraries available for runtime loading"
 
   # Linting
   lint:

@@ -1,14 +1,11 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
-
 package gles
 
 import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/hal/gles/wgl"
 	"github.com/gogpu/wgpu/types"
 )
 
@@ -28,9 +25,9 @@ func (c *CommandBuffer) Destroy() {
 }
 
 // CommandEncoder implements hal.CommandEncoder for OpenGL.
+// Platform-specific fields are defined in command_<platform>.go files.
 type CommandEncoder struct {
 	glCtx    *gl.Context
-	wglCtx   *wgl.Context
 	commands []Command
 	label    string
 }

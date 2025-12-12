@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
+//go:build linux
 
 package gles
 
@@ -11,16 +11,17 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/hal/gles/wgl"
 	"github.com/gogpu/wgpu/types"
 )
 
-// Device implements hal.Device for OpenGL.
+// Device implements hal.Device for OpenGL on Linux.
 type Device struct {
-	glCtx  *gl.Context
-	wglCtx *wgl.Context
-	hwnd   wgl.HWND
+	glCtx         *gl.Context
+	eglCtx        *egl.Context
+	displayHandle uintptr
+	windowHandle  uintptr
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -47,7 +48,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	d.glCtx.BindBuffer(target, id)
-	d.glCtx.BufferData(target, int(desc.Size), nil, usage)
+	d.glCtx.BufferData(target, int(desc.Size), 0, usage)
 	d.glCtx.BindBuffer(target, 0)
 
 	buf := &Buffer{
@@ -116,7 +117,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
 			d.glCtx.TexImage2D(target, int32(level), int32(internalFormat),
-				width, height, 0, format, dataType, nil)
+				width, height, 0, format, dataType, 0)
 		}
 
 	case gl.TEXTURE_CUBE_MAP:
@@ -126,7 +127,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 				width := maxInt32(1, int32(desc.Size.Width>>level))
 				height := maxInt32(1, int32(desc.Size.Height>>level))
 				d.glCtx.TexImage2D(faceTarget, int32(level), int32(internalFormat),
-					width, height, 0, format, dataType, nil)
+					width, height, 0, format, dataType, 0)
 			}
 		}
 	}
