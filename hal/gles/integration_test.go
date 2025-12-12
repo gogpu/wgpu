@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
+	"github.com/gogpu/wgpu/types"
 )
 
 // TestEGLInit tests basic EGL initialization.
@@ -27,7 +28,7 @@ func TestEGLInit(t *testing.T) {
 	// Query EGL version
 	display, _, err := egl.GetEGLDisplay()
 	if err != nil {
-		t.Fatalf("egl.GetEGLDisplay() failed: %v", err)
+		t.Skipf("egl.GetEGLDisplay() failed (headless environment?): %v", err)
 	}
 	t.Logf("Got EGL display: %v", display)
 
@@ -65,7 +66,7 @@ func TestEGLContext(t *testing.T) {
 
 	ctx, err := egl.NewContext(config)
 	if err != nil {
-		t.Fatalf("egl.NewContext() failed: %v", err)
+		t.Skipf("egl.NewContext() failed (headless environment?): %v", err)
 	}
 	t.Logf("Created EGL context, window kind: %v", ctx.WindowKind())
 
@@ -86,7 +87,7 @@ func TestGLESBackend(t *testing.T) {
 
 	// Create backend
 	backend := Backend{}
-	if backend.Variant() != 3 { // types.BackendGL
+	if backend.Variant() != types.BackendGL {
 		t.Errorf("Expected BackendGL variant, got %v", backend.Variant())
 	}
 
@@ -122,7 +123,7 @@ func TestGLProcAddress(t *testing.T) {
 	config := egl.DefaultContextConfig()
 	ctx, err := egl.NewContext(config)
 	if err != nil {
-		t.Fatalf("egl.NewContext() failed: %v", err)
+		t.Skipf("egl.NewContext() failed (headless environment?): %v", err)
 	}
 	defer ctx.Destroy()
 
