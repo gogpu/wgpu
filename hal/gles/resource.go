@@ -1,6 +1,8 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
+//go:build windows || linux
+
 package gles
 
 import (

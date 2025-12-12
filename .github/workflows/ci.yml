@@ -79,9 +79,9 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      # Skip hal/vulkan/vk due to generated code with intentional unsafe.Pointer usage
+      # Skip hal/vulkan/vk and hal/gles due to intentional unsafe.Pointer FFI usage
       run: |
-        go vet $(go list ./... | grep -v '/hal/vulkan/vk$')
+        go vet $(go list ./... | grep -v '/hal/vulkan/vk$' | grep -v '/hal/gles')
 
     - name: Install pure-Go race detector
       run: go install github.com/kolkov/racedetector/cmd/racedetector@v0.7.0
