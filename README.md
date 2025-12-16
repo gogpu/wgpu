@@ -196,7 +196,7 @@ Features:
 |---------|-------------|--------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | v0.3.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | **v0.4.0** |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with text rendering | **v0.2.0** |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with images, clipping, compositing | **v0.3.0** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings (current solution) | Stable |
 
 ## Contributing
