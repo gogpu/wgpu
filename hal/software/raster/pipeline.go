@@ -21,6 +21,9 @@ type Pipeline struct {
 	cullMode  CullMode
 	frontFace FrontFace
 
+	// Blending configuration
+	blendState BlendState
+
 	// Buffers
 	colorBuffer []byte // RGBA8 format (4 bytes per pixel)
 	depthBuffer *DepthBuffer
@@ -50,6 +53,7 @@ func NewPipeline(width, height int) *Pipeline {
 		depthCompare: CompareLess,
 		cullMode:     CullNone,
 		frontFace:    FrontFaceCCW,
+		blendState:   BlendDisabled,
 		colorBuffer:  make([]byte, size),
 		depthBuffer:  NewDepthBuffer(width, height),
 		width:        width,
@@ -136,6 +140,20 @@ func (p *Pipeline) SetFrontFace(face FrontFace) {
 	p.frontFace = face
 }
 
+// SetBlendState sets the blending configuration.
+func (p *Pipeline) SetBlendState(state BlendState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.blendState = state
+}
+
+// GetBlendState returns the current blend state.
+func (p *Pipeline) GetBlendState() BlendState {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.blendState
+}
+
 // DrawTriangles rasterizes the given triangles with a solid color.
 // Color is in RGBA format with values in [0, 1].
 func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
@@ -146,13 +164,8 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 	depthCompare := p.depthCompare
 	cullMode := p.cullMode
 	frontFace := p.frontFace
+	blendState := p.blendState
 	p.mu.Unlock()
-
-	// Convert color to bytes
-	r := clampByte(color[0] * 255)
-	g := clampByte(color[1] * 255)
-	b := clampByte(color[2] * 255)
-	a := clampByte(color[3] * 255)
 
 	for i := range triangles {
 		tri := &triangles[i]
@@ -178,13 +191,24 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
-			// Write color
+			// Apply blending if enabled
 			idx := (frag.Y*p.width + frag.X) * 4
 			p.mu.Lock()
-			p.colorBuffer[idx+0] = r
-			p.colorBuffer[idx+1] = g
-			p.colorBuffer[idx+2] = b
-			p.colorBuffer[idx+3] = a
+			if blendState.Enabled {
+				r, g, b, a := BlendFloatToByte(color,
+					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+					blendState)
+				p.colorBuffer[idx+0] = r
+				p.colorBuffer[idx+1] = g
+				p.colorBuffer[idx+2] = b
+				p.colorBuffer[idx+3] = a
+			} else {
+				p.colorBuffer[idx+0] = clampByte(color[0] * 255)
+				p.colorBuffer[idx+1] = clampByte(color[1] * 255)
+				p.colorBuffer[idx+2] = clampByte(color[2] * 255)
+				p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+			}
 			p.mu.Unlock()
 		})
 	}
@@ -200,6 +224,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	depthCompare := p.depthCompare
 	cullMode := p.cullMode
 	frontFace := p.frontFace
+	blendState := p.blendState
 	p.mu.Unlock()
 
 	for i := range triangles {
@@ -227,21 +252,32 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 			}
 
 			// Get interpolated color from attributes
-			var r, g, b, a byte = 255, 255, 255, 255
+			srcColor := [4]float32{1, 1, 1, 1}
 			if len(frag.Attributes) >= 4 {
-				r = clampByte(frag.Attributes[0] * 255)
-				g = clampByte(frag.Attributes[1] * 255)
-				b = clampByte(frag.Attributes[2] * 255)
-				a = clampByte(frag.Attributes[3] * 255)
+				srcColor[0] = frag.Attributes[0]
+				srcColor[1] = frag.Attributes[1]
+				srcColor[2] = frag.Attributes[2]
+				srcColor[3] = frag.Attributes[3]
 			}
 
-			// Write color
+			// Apply blending if enabled
 			idx := (frag.Y*p.width + frag.X) * 4
 			p.mu.Lock()
-			p.colorBuffer[idx+0] = r
-			p.colorBuffer[idx+1] = g
-			p.colorBuffer[idx+2] = b
-			p.colorBuffer[idx+3] = a
+			if blendState.Enabled {
+				r, g, b, a := BlendFloatToByte(srcColor,
+					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+					blendState)
+				p.colorBuffer[idx+0] = r
+				p.colorBuffer[idx+1] = g
+				p.colorBuffer[idx+2] = b
+				p.colorBuffer[idx+3] = a
+			} else {
+				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
+				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
+				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
+				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+			}
 			p.mu.Unlock()
 		})
 	}
