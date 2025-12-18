@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.4.0 — OpenGL ES now supports Linux (EGL) + Windows (WGL)!
+> **Status:** v0.5.0 — Full software rasterization pipeline!
 
 ---
 
@@ -77,7 +77,7 @@ wgpu/
 ├── core/          # Validation, state tracking ✓
 ├── hal/           # Hardware abstraction layer ✓
 │   ├── noop/      # No-op backend (testing) ✓
-│   ├── software/  # Software backend ✓ (CPU rendering, headless, ~1K LOC)
+│   ├── software/  # Software backend ✓ (Full rasterizer, ~10K LOC)
 │   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~7500 LOC, Windows + Linux)
 │   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~27K LOC)
 │   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
@@ -120,7 +120,7 @@ wgpu/
 **Phase 4: Pure Go Backends** (In Progress)
 - [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL) + Linux (EGL), ~7.5K LOC
 - [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
-- [x] Software backend (`hal/software/`) — CPU-based headless rendering, ~1K LOC, 11 tests
+- [x] Software backend (`hal/software/`) — Full rasterization pipeline, ~10K LOC, 100+ tests
 - [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
 - [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
 
@@ -138,7 +138,7 @@ All backends implemented without CGO:
 
 ### Software Backend
 
-CPU-based rendering for headless scenarios:
+Full-featured CPU rasterizer for headless rendering:
 
 ```bash
 # Build with software backend
@@ -153,17 +153,30 @@ import _ "github.com/gogpu/wgpu/hal/software"
 // - Server-side image generation
 // - Embedded systems without GPU
 // - Fallback when no GPU available
+// - Reference implementation for testing
 
 // Key feature: read rendered pixels
 surface.GetFramebuffer() // Returns []byte (RGBA8)
 ```
 
-Features:
-- Real data storage for buffers/textures
-- Clear operations (fill with color)
-- Buffer/texture copy operations
-- Thread-safe with `sync.RWMutex`
-- `Surface.GetFramebuffer()` for pixel readback
+**Rasterization Pipeline** (`hal/software/raster/`):
+- Edge function (Pineda) triangle rasterization with top-left fill rule
+- Perspective-correct attribute interpolation
+- Depth buffer with 8 compare functions
+- Stencil buffer with 8 operations
+- 13 blend factors, 5 blend operations (WebGPU spec compliant)
+- 6-plane frustum clipping (Sutherland-Hodgman)
+- Backface culling (CW/CCW)
+- 8x8 tile-based rasterization for cache locality
+- Parallel rasterization with worker pool
+- Incremental edge evaluation (O(1) per pixel)
+
+**Shader System** (`hal/software/shader/`):
+- Callback-based vertex/fragment shaders
+- Built-in shaders: SolidColor, VertexColor, Textured
+- Custom shader support via `VertexShaderFunc` / `FragmentShaderFunc`
+
+**Metrics**: ~10K LOC, 100+ tests, 94% coverage
 
 ### Vulkan Backend Features
 

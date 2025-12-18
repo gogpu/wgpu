@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-12-19
+
+### Added
+- **Software rasterization pipeline** (`hal/software/raster/`) — Full CPU-based triangle rendering
+  - Edge function (Pineda) algorithm with top-left fill rule
+  - Perspective-correct attribute interpolation
+  - Depth buffer with 8 compare functions (Never, Less, Equal, LessEqual, etc.)
+  - Stencil buffer with 8 operations (Keep, Zero, Replace, IncrementClamp, etc.)
+  - 13 blend factors, 5 blend operations (WebGPU spec compliant)
+  - 6-plane frustum clipping (Sutherland-Hodgman algorithm)
+  - Backface culling (CW/CCW winding)
+  - 8x8 tile-based rasterization for cache locality
+  - Parallel rasterization with worker pool
+  - Incremental edge evaluation (O(1) per pixel stepping)
+  - ~6K new lines of code, 70+ tests
+- **Callback-based shader system** (`hal/software/shader/`)
+  - `VertexShaderFunc` and `FragmentShaderFunc` interfaces
+  - Built-in shaders: SolidColor, VertexColor, Textured
+  - Custom shader support for flexible rendering
+  - Matrix utilities (Mat4, transforms)
+  - ~1K new lines of code, 30+ tests
+
+### Changed
+- Pre-release check script now matches CI behavior for go vet exclusions
+- Improved WSL fallback for race detector tests
+
 ## [0.4.0] - 2025-12-13
 
 ### Added
@@ -68,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gogpu/wgpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/wgpu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/wgpu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/wgpu/compare/v0.1.0...v0.2.0
