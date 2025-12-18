@@ -6,6 +6,21 @@ import (
 	"sync"
 )
 
+// Rect defines a rectangular region in screen space.
+type Rect struct {
+	// X is the left edge of the rectangle in pixels.
+	X int
+
+	// Y is the top edge of the rectangle in pixels.
+	Y int
+
+	// Width of the rectangle in pixels.
+	Width int
+
+	// Height of the rectangle in pixels.
+	Height int
+}
+
 // Pipeline is a basic software rendering pipeline.
 // It manages the color buffer, depth buffer, and rendering state.
 type Pipeline struct {
@@ -23,6 +38,16 @@ type Pipeline struct {
 
 	// Blending configuration
 	blendState BlendState
+
+	// Stencil configuration
+	stencilBuffer *StencilBuffer
+	stencilState  StencilState
+
+	// Scissor test (nil = disabled)
+	scissorRect *Rect
+
+	// Clipping configuration
+	clippingEnabled bool
 
 	// Buffers
 	colorBuffer []byte // RGBA8 format (4 bytes per pixel)
@@ -48,16 +73,20 @@ func NewPipeline(width, height int) *Pipeline {
 			MinDepth: 0.0,
 			MaxDepth: 1.0,
 		},
-		depthTest:    false,
-		depthWrite:   true,
-		depthCompare: CompareLess,
-		cullMode:     CullNone,
-		frontFace:    FrontFaceCCW,
-		blendState:   BlendDisabled,
-		colorBuffer:  make([]byte, size),
-		depthBuffer:  NewDepthBuffer(width, height),
-		width:        width,
-		height:       height,
+		depthTest:       false,
+		depthWrite:      true,
+		depthCompare:    CompareLess,
+		cullMode:        CullNone,
+		frontFace:       FrontFaceCCW,
+		blendState:      BlendDisabled,
+		stencilBuffer:   nil,
+		stencilState:    DefaultStencilState(),
+		scissorRect:     nil,
+		clippingEnabled: false,
+		colorBuffer:     make([]byte, size),
+		depthBuffer:     NewDepthBuffer(width, height),
+		width:           width,
+		height:          height,
 	}
 }
 
@@ -154,6 +183,142 @@ func (p *Pipeline) GetBlendState() BlendState {
 	return p.blendState
 }
 
+// SetStencilBuffer sets the stencil buffer to use for stencil testing.
+// Pass nil to disable stencil testing.
+func (p *Pipeline) SetStencilBuffer(buf *StencilBuffer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stencilBuffer = buf
+}
+
+// GetStencilBuffer returns the current stencil buffer.
+func (p *Pipeline) GetStencilBuffer() *StencilBuffer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stencilBuffer
+}
+
+// SetStencilState sets the stencil testing configuration.
+func (p *Pipeline) SetStencilState(state StencilState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stencilState = state
+}
+
+// GetStencilState returns the current stencil state.
+func (p *Pipeline) GetStencilState() StencilState {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stencilState
+}
+
+// SetScissor sets the scissor rectangle for clipping fragments.
+// Pass nil to disable the scissor test.
+func (p *Pipeline) SetScissor(rect *Rect) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if rect == nil {
+		p.scissorRect = nil
+	} else {
+		// Copy the rect to avoid external mutation
+		p.scissorRect = &Rect{
+			X:      rect.X,
+			Y:      rect.Y,
+			Width:  rect.Width,
+			Height: rect.Height,
+		}
+	}
+}
+
+// GetScissor returns the current scissor rectangle.
+// Returns nil if scissor testing is disabled.
+func (p *Pipeline) GetScissor() *Rect {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.scissorRect == nil {
+		return nil
+	}
+	return &Rect{
+		X:      p.scissorRect.X,
+		Y:      p.scissorRect.Y,
+		Width:  p.scissorRect.Width,
+		Height: p.scissorRect.Height,
+	}
+}
+
+// SetClipping enables or disables frustum clipping.
+// When enabled, triangles are clipped against the view frustum before rasterization.
+func (p *Pipeline) SetClipping(enabled bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.clippingEnabled = enabled
+}
+
+// IsClippingEnabled returns whether frustum clipping is enabled.
+func (p *Pipeline) IsClippingEnabled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.clippingEnabled
+}
+
+// ClearStencil fills the stencil buffer with the specified value.
+func (p *Pipeline) ClearStencil(value uint8) {
+	if p.stencilBuffer != nil {
+		p.stencilBuffer.Clear(value)
+	}
+}
+
+// passesScissorTest returns true if the fragment passes the scissor test.
+func (p *Pipeline) passesScissorTest(x, y int, scissor *Rect) bool {
+	if scissor == nil {
+		return true
+	}
+	return x >= scissor.X && x < scissor.X+scissor.Width &&
+		y >= scissor.Y && y < scissor.Y+scissor.Height
+}
+
+// depthStencilTestResult holds the result of depth/stencil testing.
+type depthStencilTestResult struct {
+	passed     bool
+	writeDepth bool
+}
+
+// performDepthStencilTest runs depth and stencil tests for a fragment.
+// Returns whether the fragment passed all tests and whether to write depth.
+func (p *Pipeline) performDepthStencilTest(
+	x, y int, depth float32,
+	depthTest, depthWrite bool, depthCompare CompareFunc,
+	stencilBuffer *StencilBuffer, stencilState StencilState,
+) depthStencilTestResult {
+	// With stencil test
+	if stencilBuffer != nil && stencilState.Enabled {
+		// Perform depth test first to know if we need DepthFailOp
+		depthPassed := !depthTest || p.depthBuffer.Test(x, y, depth, depthCompare)
+
+		// Stencil test and apply operation
+		if !stencilBuffer.TestAndApply(x, y, depthPassed, stencilState) {
+			return depthStencilTestResult{passed: false}
+		}
+
+		// Stencil passed but depth failed
+		if !depthPassed {
+			return depthStencilTestResult{passed: false}
+		}
+
+		return depthStencilTestResult{passed: true, writeDepth: depthWrite}
+	}
+
+	// Without stencil test - original depth test path
+	if depthTest {
+		if !p.depthBuffer.TestAndSet(x, y, depth, depthCompare, depthWrite) {
+			return depthStencilTestResult{passed: false}
+		}
+		return depthStencilTestResult{passed: true, writeDepth: false} // Already written
+	}
+
+	return depthStencilTestResult{passed: true, writeDepth: depthWrite}
+}
+
 // DrawTriangles rasterizes the given triangles with a solid color.
 // Color is in RGBA format with values in [0, 1].
 func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
@@ -165,6 +330,17 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	stencilBuffer := p.stencilBuffer
+	stencilState := p.stencilState
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
 	p.mu.Unlock()
 
 	for i := range triangles {
@@ -182,12 +358,21 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				return
 			}
 
-			// Depth test
-			if depthTest {
-				if !p.depthBuffer.TestAndSet(frag.X, frag.Y, frag.Depth, depthCompare, depthWrite) {
-					return
-				}
-			} else if depthWrite {
+			// Scissor test
+			if !p.passesScissorTest(frag.X, frag.Y, scissor) {
+				return
+			}
+
+			// Depth and stencil tests
+			result := p.performDepthStencilTest(
+				frag.X, frag.Y, frag.Depth,
+				depthTest, depthWrite, depthCompare,
+				stencilBuffer, stencilState,
+			)
+			if !result.passed {
+				return
+			}
+			if result.writeDepth {
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
@@ -225,6 +410,17 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	stencilBuffer := p.stencilBuffer
+	stencilState := p.stencilState
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
 	p.mu.Unlock()
 
 	for i := range triangles {
@@ -242,12 +438,21 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 				return
 			}
 
-			// Depth test
-			if depthTest {
-				if !p.depthBuffer.TestAndSet(frag.X, frag.Y, frag.Depth, depthCompare, depthWrite) {
-					return
-				}
-			} else if depthWrite {
+			// Scissor test
+			if !p.passesScissorTest(frag.X, frag.Y, scissor) {
+				return
+			}
+
+			// Depth and stencil tests
+			result := p.performDepthStencilTest(
+				frag.X, frag.Y, frag.Depth,
+				depthTest, depthWrite, depthCompare,
+				stencilBuffer, stencilState,
+			)
+			if !result.passed {
+				return
+			}
+			if result.writeDepth {
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
