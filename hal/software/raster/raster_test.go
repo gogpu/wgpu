@@ -742,6 +742,278 @@ func BenchmarkDepthBufferTestAndSet(b *testing.B) {
 }
 
 // =============================================================================
+// Optimization Comparison Benchmarks
+// =============================================================================
+
+// BenchmarkRasterizationMethods compares different rasterization approaches.
+func BenchmarkRasterizationMethods(b *testing.B) {
+	// Small triangle (10x10)
+	smallTri := CreateScreenTriangle(
+		0, 0, 0.5,
+		10, 0, 0.5,
+		5, 10, 0.5,
+	)
+	smallViewport := Viewport{X: 0, Y: 0, Width: 20, Height: 20, MinDepth: 0, MaxDepth: 1}
+
+	// Medium triangle (50x50)
+	mediumTri := CreateScreenTriangle(
+		0, 0, 0.5,
+		50, 0, 0.5,
+		25, 50, 0.5,
+	)
+	mediumViewport := Viewport{X: 0, Y: 0, Width: 60, Height: 60, MinDepth: 0, MaxDepth: 1}
+
+	// Large triangle (100x100)
+	largeTri := CreateScreenTriangle(
+		0, 0, 0.5,
+		100, 0, 0.5,
+		50, 100, 0.5,
+	)
+	largeViewport := Viewport{X: 0, Y: 0, Width: 120, Height: 120, MinDepth: 0, MaxDepth: 1}
+
+	b.Run("Small_Standard", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Rasterize(smallTri, smallViewport, func(frag Fragment) {})
+		}
+	})
+
+	b.Run("Small_Incremental", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			RasterizeIncremental(smallTri, smallViewport, func(frag Fragment) {})
+		}
+	})
+
+	b.Run("Medium_Standard", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Rasterize(mediumTri, mediumViewport, func(frag Fragment) {})
+		}
+	})
+
+	b.Run("Medium_Incremental", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			RasterizeIncremental(mediumTri, mediumViewport, func(frag Fragment) {})
+		}
+	})
+
+	b.Run("Large_Standard", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Rasterize(largeTri, largeViewport, func(frag Fragment) {})
+		}
+	})
+
+	b.Run("Large_Incremental", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			RasterizeIncremental(largeTri, largeViewport, func(frag Fragment) {})
+		}
+	})
+}
+
+// BenchmarkPipelineSequentialVsParallel compares sequential and parallel rendering.
+func BenchmarkPipelineSequentialVsParallel(b *testing.B) {
+	// Create triangles of varying sizes
+	createTriangles := func(count int) []Triangle {
+		triangles := make([]Triangle, count)
+		for i := range triangles {
+			x := float32(i%10) * 80
+			y := float32(i/10) * 60
+			triangles[i] = CreateScreenTriangle(
+				x, y, 0.5,
+				x+70, y, 0.5,
+				x+35, y+50, 0.5,
+			)
+		}
+		return triangles
+	}
+
+	small := createTriangles(10)
+	medium := createTriangles(100)
+	large := createTriangles(1000)
+
+	b.Run("10Triangles_Sequential", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTriangles(small, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("10Triangles_Parallel", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.EnableParallel(true)
+		defer p.Close()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTrianglesParallel(small, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("100Triangles_Sequential", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTriangles(medium, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("100Triangles_Parallel", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.EnableParallel(true)
+		defer p.Close()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTrianglesParallel(medium, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("1000Triangles_Sequential", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTriangles(large, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("1000Triangles_Parallel", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.EnableParallel(true)
+		defer p.Close()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTrianglesParallel(large, [4]float32{1, 0, 0, 1})
+		}
+	})
+}
+
+// BenchmarkTileBasedRasterization benchmarks tile-based processing.
+func BenchmarkTileBasedRasterization(b *testing.B) {
+	grid := NewTileGrid(800, 600)
+	triangles := make([]Triangle, 500)
+	for i := range triangles {
+		x := float32(i%25) * 32
+		y := float32(i/25) * 30
+		triangles[i] = CreateScreenTriangle(
+			x, y, 0.5,
+			x+30, y, 0.5,
+			x+15, y+25, 0.5,
+		)
+	}
+
+	b.Run("BinTriangles", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = BinTrianglesToTiles(triangles, grid)
+		}
+	})
+
+	b.Run("BinTrianglesWithTest", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = BinTrianglesToTilesWithTest(triangles, grid)
+		}
+	})
+}
+
+// BenchmarkFullPipelineWithDepth tests the complete pipeline with depth testing.
+func BenchmarkFullPipelineWithDepth(b *testing.B) {
+	triangles := make([]Triangle, 200)
+	for i := range triangles {
+		x := float32(i%20) * 40
+		y := float32(i/20) * 60
+		z := float32(i%10) * 0.1 // Varying depths
+		triangles[i] = CreateScreenTriangle(
+			x, y, z,
+			x+35, y, z,
+			x+17, y+50, z,
+		)
+	}
+
+	b.Run("NoDepthTest", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.SetDepthTest(false, CompareLess)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.DrawTriangles(triangles, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("WithDepthTest", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.SetDepthTest(true, CompareLess)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.ClearDepth(1.0)
+			p.DrawTriangles(triangles, [4]float32{1, 0, 0, 1})
+		}
+	})
+
+	b.Run("WithDepthTest_Parallel", func(b *testing.B) {
+		p := NewPipeline(800, 600)
+		p.SetDepthTest(true, CompareLess)
+		p.EnableParallel(true)
+		defer p.Close()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Clear(0, 0, 0, 1)
+			p.ClearDepth(1.0)
+			p.DrawTrianglesParallel(triangles, [4]float32{1, 0, 0, 1})
+		}
+	})
+}
+
+// BenchmarkParallelScaling tests how performance scales with worker count.
+func BenchmarkParallelScaling(b *testing.B) {
+	triangles := make([]Triangle, 500)
+	for i := range triangles {
+		x := float32(i%25) * 32
+		y := float32(i/25) * 30
+		triangles[i] = CreateScreenTriangle(
+			x, y, 0.5,
+			x+30, y, 0.5,
+			x+15, y+25, 0.5,
+		)
+	}
+
+	b.Run("Workers_1", func(b *testing.B) {
+		runParallelBenchmark(b, triangles, 1)
+	})
+
+	b.Run("Workers_2", func(b *testing.B) {
+		runParallelBenchmark(b, triangles, 2)
+	})
+
+	b.Run("Workers_4", func(b *testing.B) {
+		runParallelBenchmark(b, triangles, 4)
+	})
+
+	b.Run("Workers_8", func(b *testing.B) {
+		runParallelBenchmark(b, triangles, 8)
+	})
+}
+
+func runParallelBenchmark(b *testing.B, triangles []Triangle, workers int) {
+	p := NewPipeline(800, 600)
+	p.SetParallelConfig(ParallelConfig{
+		Workers:      workers,
+		TileSize:     8,
+		MinTriangles: 10,
+	})
+	p.EnableParallel(true)
+	defer p.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p.Clear(0, 0, 0, 1)
+		p.DrawTrianglesParallel(triangles, [4]float32{1, 0, 0, 1})
+	}
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 

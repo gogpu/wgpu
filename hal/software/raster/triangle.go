@@ -257,3 +257,138 @@ func ShouldCull(tri Triangle, cullMode CullMode, frontFace FrontFace) bool {
 	}
 	return false
 }
+
+// RasterizeIncremental uses incremental edge evaluation for better performance.
+// This is faster than the standard Rasterize function for larger triangles
+// because it avoids per-pixel multiplication.
+func RasterizeIncremental(tri Triangle, viewport Viewport, callback RasterCallback) {
+	// Compute bounding box of the triangle
+	minX := min3(tri.V0.X, tri.V1.X, tri.V2.X)
+	maxX := max3(tri.V0.X, tri.V1.X, tri.V2.X)
+	minY := min3(tri.V0.Y, tri.V1.Y, tri.V2.Y)
+	maxY := max3(tri.V0.Y, tri.V1.Y, tri.V2.Y)
+
+	// Convert to integer pixel coordinates
+	startX := int(math.Floor(float64(minX)))
+	endX := int(math.Ceil(float64(maxX)))
+	startY := int(math.Floor(float64(minY)))
+	endY := int(math.Ceil(float64(maxY)))
+
+	// Clip to viewport
+	startX = maxInt(startX, viewport.X)
+	endX = minInt(endX, viewport.X+viewport.Width)
+	startY = maxInt(startY, viewport.Y)
+	endY = minInt(endY, viewport.Y+viewport.Height)
+
+	// Early exit if nothing to draw
+	if startX >= endX || startY >= endY {
+		return
+	}
+
+	rasterizeIncrementalCore(tri, startX, startY, endX, endY, callback)
+}
+
+// RasterizeTile rasterizes a triangle within a specific tile.
+// This is optimized for tile-based parallel rasterization where each tile
+// is processed independently.
+func RasterizeTile(tri Triangle, tile Tile, callback RasterCallback) {
+	// Compute triangle bounding box
+	minX := int(math.Floor(float64(min3(tri.V0.X, tri.V1.X, tri.V2.X))))
+	maxX := int(math.Ceil(float64(max3(tri.V0.X, tri.V1.X, tri.V2.X))))
+	minY := int(math.Floor(float64(min3(tri.V0.Y, tri.V1.Y, tri.V2.Y))))
+	maxY := int(math.Ceil(float64(max3(tri.V0.Y, tri.V1.Y, tri.V2.Y))))
+
+	// Intersect with tile bounds
+	startX := maxInt(minX, tile.MinX)
+	endX := minInt(maxX, tile.MaxX)
+	startY := maxInt(minY, tile.MinY)
+	endY := minInt(maxY, tile.MaxY)
+
+	// Early exit if no intersection
+	if startX >= endX || startY >= endY {
+		return
+	}
+
+	rasterizeIncrementalCore(tri, startX, startY, endX, endY, callback)
+}
+
+// rasterizeIncrementalCore is the shared implementation for incremental rasterization.
+// It rasterizes the triangle within the given pixel bounds [startX, endX) x [startY, endY).
+func rasterizeIncrementalCore(tri Triangle, startX, startY, endX, endY int, callback RasterCallback) {
+	// Create incremental triangle
+	incTri := NewIncrementalTriangle(tri)
+
+	// Degenerate triangle
+	if incTri.IsDegenerate() {
+		return
+	}
+
+	// Precompute attribute count
+	attrCount := len(tri.V0.Attributes)
+
+	// Initialize at first pixel center
+	px := float32(startX) + 0.5
+	py := float32(startY) + 0.5
+	incTri.SetRow(px, py)
+
+	// Rasterize pixels
+	for y := startY; y < endY; y++ {
+		for x := startX; x < endX; x++ {
+			if incTri.IsInside() {
+				frag := computeFragment(x, y, &tri, &incTri, attrCount)
+				callback(frag)
+			}
+			incTri.StepX()
+		}
+		// Reset X and advance Y
+		incTri.SetRow(px, float32(y+1)+0.5)
+	}
+}
+
+// computeFragment computes a fragment with interpolated attributes.
+func computeFragment(x, y int, tri *Triangle, incTri *IncrementalTriangle, attrCount int) Fragment {
+	b0, b1, b2 := incTri.Barycentric()
+
+	// Perspective-correct interpolation
+	oneOverW := b0*tri.V0.W + b1*tri.V1.W + b2*tri.V2.W
+
+	depth := interpolateDepth(b0, b1, b2, tri, oneOverW)
+	attrs := interpolateAttributes(b0, b1, b2, tri, oneOverW, attrCount)
+
+	return Fragment{
+		X:          x,
+		Y:          y,
+		Depth:      depth,
+		Bary:       [3]float32{b0, b1, b2},
+		Attributes: attrs,
+	}
+}
+
+// interpolateDepth performs perspective-correct depth interpolation.
+func interpolateDepth(b0, b1, b2 float32, tri *Triangle, oneOverW float32) float32 {
+	if oneOverW != 0 {
+		return (b0*tri.V0.Z*tri.V0.W + b1*tri.V1.Z*tri.V1.W + b2*tri.V2.Z*tri.V2.W) / oneOverW
+	}
+	return b0*tri.V0.Z + b1*tri.V1.Z + b2*tri.V2.Z
+}
+
+// interpolateAttributes performs perspective-correct attribute interpolation.
+func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, attrCount int) []float32 {
+	if attrCount == 0 {
+		return nil
+	}
+
+	attrs := make([]float32, attrCount)
+	if oneOverW != 0 {
+		for i := 0; i < attrCount; i++ {
+			attrs[i] = (b0*tri.V0.Attributes[i]*tri.V0.W +
+				b1*tri.V1.Attributes[i]*tri.V1.W +
+				b2*tri.V2.Attributes[i]*tri.V2.W) / oneOverW
+		}
+	} else {
+		for i := 0; i < attrCount; i++ {
+			attrs[i] = b0*tri.V0.Attributes[i] + b1*tri.V1.Attributes[i] + b2*tri.V2.Attributes[i]
+		}
+	}
+	return attrs
+}

@@ -49,6 +49,11 @@ type Pipeline struct {
 	// Clipping configuration
 	clippingEnabled bool
 
+	// Parallel rasterization
+	parallelRasterizer *ParallelRasterizer
+	useParallel        bool
+	parallelConfig     ParallelConfig
+
 	// Buffers
 	colorBuffer []byte // RGBA8 format (4 bytes per pixel)
 	depthBuffer *DepthBuffer
@@ -259,6 +264,50 @@ func (p *Pipeline) IsClippingEnabled() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.clippingEnabled
+}
+
+// SetParallelConfig sets the parallel rasterization configuration.
+// If enabled, the pipeline will use tile-based parallel rasterization.
+func (p *Pipeline) SetParallelConfig(config ParallelConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.parallelConfig = config
+
+	// Recreate parallel rasterizer if needed
+	if p.parallelRasterizer != nil {
+		p.parallelRasterizer.Close()
+	}
+	p.parallelRasterizer = NewParallelRasterizer(p.width, p.height, config)
+}
+
+// GetParallelConfig returns the current parallel configuration.
+func (p *Pipeline) GetParallelConfig() ParallelConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.parallelConfig
+}
+
+// EnableParallel enables or disables parallel rasterization.
+// When enabled, triangles are rasterized using tile-based parallelization.
+func (p *Pipeline) EnableParallel(enabled bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.useParallel = enabled
+
+	// Initialize parallel rasterizer if not already created
+	if enabled && p.parallelRasterizer == nil {
+		if p.parallelConfig.Workers <= 0 {
+			p.parallelConfig = DefaultParallelConfig()
+		}
+		p.parallelRasterizer = NewParallelRasterizer(p.width, p.height, p.parallelConfig)
+	}
+}
+
+// IsParallelEnabled returns whether parallel rasterization is enabled.
+func (p *Pipeline) IsParallelEnabled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.useParallel
 }
 
 // ClearStencil fills the stencil buffer with the specified value.
@@ -488,6 +537,110 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	}
 }
 
+// DrawTrianglesParallel uses tile-based parallel rasterization.
+// This can significantly speed up rendering for large numbers of triangles
+// by distributing work across multiple CPU cores.
+//
+// Note: Parallel rendering requires EnableParallel(true) to be called first.
+// If parallel is not enabled, this falls back to DrawTriangles.
+func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32) {
+	p.mu.Lock()
+	useParallel := p.useParallel
+	parallelRasterizer := p.parallelRasterizer
+	viewport := p.viewport
+	depthTest := p.depthTest
+	depthWrite := p.depthWrite
+	depthCompare := p.depthCompare
+	cullMode := p.cullMode
+	frontFace := p.frontFace
+	blendState := p.blendState
+	stencilBuffer := p.stencilBuffer
+	stencilState := p.stencilState
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
+	p.mu.Unlock()
+
+	// Fall back to sequential if parallel not enabled
+	if !useParallel || parallelRasterizer == nil {
+		p.DrawTriangles(triangles, color)
+		return
+	}
+
+	// Filter and cull triangles before binning
+	validTriangles := make([]Triangle, 0, len(triangles))
+	for i := range triangles {
+		tri := &triangles[i]
+		if !ShouldCull(*tri, cullMode, frontFace) {
+			validTriangles = append(validTriangles, *tri)
+		}
+	}
+
+	if len(validTriangles) == 0 {
+		return
+	}
+
+	// Use parallel rasterizer
+	parallelRasterizer.RasterizeParallel(validTriangles, func(tile Tile, tileTriangles []Triangle) {
+		// Process all triangles in this tile
+		for i := range tileTriangles {
+			tri := &tileTriangles[i]
+
+			RasterizeTile(*tri, tile, func(frag Fragment) {
+				// Bounds check (should always pass for properly clipped tiles)
+				if frag.X < viewport.X || frag.X >= viewport.X+viewport.Width ||
+					frag.Y < viewport.Y || frag.Y >= viewport.Y+viewport.Height {
+					return
+				}
+
+				// Scissor test
+				if !p.passesScissorTest(frag.X, frag.Y, scissor) {
+					return
+				}
+
+				// Depth and stencil tests
+				result := p.performDepthStencilTest(
+					frag.X, frag.Y, frag.Depth,
+					depthTest, depthWrite, depthCompare,
+					stencilBuffer, stencilState,
+				)
+				if !result.passed {
+					return
+				}
+				if result.writeDepth {
+					p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
+				}
+
+				// Apply blending if enabled
+				idx := (frag.Y*p.width + frag.X) * 4
+				p.mu.Lock()
+				if blendState.Enabled {
+					r, g, b, a := BlendFloatToByte(color,
+						p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+						p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+						blendState)
+					p.colorBuffer[idx+0] = r
+					p.colorBuffer[idx+1] = g
+					p.colorBuffer[idx+2] = b
+					p.colorBuffer[idx+3] = a
+				} else {
+					p.colorBuffer[idx+0] = clampByte(color[0] * 255)
+					p.colorBuffer[idx+1] = clampByte(color[1] * 255)
+					p.colorBuffer[idx+2] = clampByte(color[2] * 255)
+					p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+				}
+				p.mu.Unlock()
+			})
+		}
+	})
+}
+
 // GetColorBuffer returns a copy of the RGBA8 color buffer.
 // The data is in row-major order with 4 bytes per pixel (RGBA).
 func (p *Pipeline) GetColorBuffer() []byte {
@@ -550,6 +703,23 @@ func (p *Pipeline) Resize(width, height int) {
 	if p.viewport.X == 0 && p.viewport.Y == 0 {
 		p.viewport.Width = width
 		p.viewport.Height = height
+	}
+
+	// Update parallel rasterizer if enabled
+	if p.parallelRasterizer != nil {
+		p.parallelRasterizer.Resize(width, height)
+	}
+}
+
+// Close releases resources used by the pipeline.
+// This should be called when the pipeline is no longer needed.
+func (p *Pipeline) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.parallelRasterizer != nil {
+		p.parallelRasterizer.Close()
+		p.parallelRasterizer = nil
 	}
 }
 
