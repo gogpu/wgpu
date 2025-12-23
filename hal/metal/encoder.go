@@ -1,0 +1,505 @@
+// Copyright 2025 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+//go:build darwin
+
+package metal
+
+import (
+	"fmt"
+	"unsafe"
+
+	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/types"
+)
+
+// CommandEncoder implements hal.CommandEncoder for Metal.
+type CommandEncoder struct {
+	device      *Device
+	cmdBuffer   ID
+	pool        *AutoreleasePool
+	label       string
+	isRecording bool
+}
+
+// BeginEncoding begins command recording with an optional label.
+func (e *CommandEncoder) BeginEncoding(label string) error {
+	e.label = label
+	e.pool = NewAutoreleasePool()
+	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
+	if e.cmdBuffer == 0 {
+		e.pool.Drain()
+		e.pool = nil
+		return fmt.Errorf("metal: failed to create command buffer")
+	}
+	Retain(e.cmdBuffer)
+	if label != "" {
+		nsLabel := NSString(label)
+		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
+	}
+	e.isRecording = true
+	return nil
+}
+
+// EndEncoding finishes command recording and returns a command buffer.
+func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
+	if !e.isRecording {
+		return nil, fmt.Errorf("metal: command encoder is not recording")
+	}
+	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, pool: e.pool}
+	e.cmdBuffer = 0
+	e.pool = nil
+	e.isRecording = false
+	return cb, nil
+}
+
+// DiscardEncoding discards the encoder without creating a command buffer.
+func (e *CommandEncoder) DiscardEncoding() {
+	if e.cmdBuffer != 0 {
+		Release(e.cmdBuffer)
+		e.cmdBuffer = 0
+	}
+	if e.pool != nil {
+		e.pool.Drain()
+		e.pool = nil
+	}
+	e.isRecording = false
+}
+
+// ResetAll resets command buffers for reuse.
+func (e *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {}
+
+// TransitionBuffers transitions buffer states for synchronization.
+func (e *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
+
+// TransitionTextures transitions texture states for synchronization.
+func (e *CommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {}
+
+// ClearBuffer clears a buffer region to zero.
+func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
+	if !e.isRecording {
+		return
+	}
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
+	if blitEncoder == 0 {
+		return
+	}
+	_ = MsgSend(blitEncoder, Sel("fillBuffer:range:value:"), uintptr(buf.raw), uintptr(offset), uintptr(size), uintptr(0))
+	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// CopyBufferToBuffer copies data between buffers.
+func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
+	if !e.isRecording || len(regions) == 0 {
+		return
+	}
+	srcBuf, ok := src.(*Buffer)
+	if !ok || srcBuf == nil {
+		return
+	}
+	dstBuf, ok := dst.(*Buffer)
+	if !ok || dstBuf == nil {
+		return
+	}
+	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
+	if blitEncoder == 0 {
+		return
+	}
+	for _, region := range regions {
+		_ = MsgSend(blitEncoder, Sel("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:"),
+			uintptr(srcBuf.raw), uintptr(region.SrcOffset), uintptr(dstBuf.raw), uintptr(region.DstOffset), uintptr(region.Size))
+	}
+	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// CopyBufferToTexture copies data from a buffer to a texture.
+func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
+	if !e.isRecording || len(regions) == 0 {
+		return
+	}
+	srcBuf, ok := src.(*Buffer)
+	if !ok || srcBuf == nil {
+		return
+	}
+	dstTex, ok := dst.(*Texture)
+	if !ok || dstTex == nil {
+		return
+	}
+	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
+	if blitEncoder == 0 {
+		return
+	}
+	for _, region := range regions {
+		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
+		destOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
+		bytesPerRow := region.BufferLayout.BytesPerRow
+		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
+		_ = MsgSend(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+			uintptr(srcBuf.raw), uintptr(region.BufferLayout.Offset), uintptr(bytesPerRow), uintptr(bytesPerImage),
+			uintptr(unsafe.Pointer(&sourceSize)), uintptr(dstTex.raw), uintptr(region.TextureBase.Origin.Z),
+			uintptr(region.TextureBase.MipLevel), uintptr(unsafe.Pointer(&destOrigin)))
+	}
+	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// CopyTextureToBuffer copies data from a texture to a buffer.
+func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
+	if !e.isRecording || len(regions) == 0 {
+		return
+	}
+	srcTex, ok := src.(*Texture)
+	if !ok || srcTex == nil {
+		return
+	}
+	dstBuf, ok := dst.(*Buffer)
+	if !ok || dstBuf == nil {
+		return
+	}
+	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
+	if blitEncoder == 0 {
+		return
+	}
+	for _, region := range regions {
+		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
+		sourceOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
+		bytesPerRow := region.BufferLayout.BytesPerRow
+		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
+		_ = MsgSend(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
+			uintptr(srcTex.raw), uintptr(region.TextureBase.Origin.Z), uintptr(region.TextureBase.MipLevel),
+			uintptr(unsafe.Pointer(&sourceOrigin)), uintptr(unsafe.Pointer(&sourceSize)),
+			uintptr(dstBuf.raw), uintptr(region.BufferLayout.Offset), uintptr(bytesPerRow), uintptr(bytesPerImage))
+	}
+	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// CopyTextureToTexture copies data between textures.
+func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
+	if !e.isRecording || len(regions) == 0 {
+		return
+	}
+	srcTex, ok := src.(*Texture)
+	if !ok || srcTex == nil {
+		return
+	}
+	dstTex, ok := dst.(*Texture)
+	if !ok || dstTex == nil {
+		return
+	}
+	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
+	if blitEncoder == 0 {
+		return
+	}
+	for _, region := range regions {
+		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
+		sourceOrigin := MTLOrigin{X: NSUInteger(region.SrcBase.Origin.X), Y: NSUInteger(region.SrcBase.Origin.Y), Z: NSUInteger(region.SrcBase.Origin.Z)}
+		destOrigin := MTLOrigin{X: NSUInteger(region.DstBase.Origin.X), Y: NSUInteger(region.DstBase.Origin.Y), Z: NSUInteger(region.DstBase.Origin.Z)}
+		_ = MsgSend(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+			uintptr(srcTex.raw), uintptr(region.SrcBase.Origin.Z), uintptr(region.SrcBase.MipLevel),
+			uintptr(unsafe.Pointer(&sourceOrigin)), uintptr(unsafe.Pointer(&sourceSize)),
+			uintptr(dstTex.raw), uintptr(region.DstBase.Origin.Z), uintptr(region.DstBase.MipLevel), uintptr(unsafe.Pointer(&destOrigin)))
+	}
+	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// BeginRenderPass begins a render pass.
+func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	if !e.isRecording || e.cmdBuffer == 0 {
+		return nil
+	}
+	pool := NewAutoreleasePool()
+	rpDesc := MsgSend(ID(GetClass("MTLRenderPassDescriptor")), Sel("renderPassDescriptor"))
+	if rpDesc == 0 {
+		pool.Drain()
+		return nil
+	}
+	colorAttachments := MsgSend(rpDesc, Sel("colorAttachments"))
+	for i, ca := range desc.ColorAttachments {
+		attachment := MsgSend(colorAttachments, Sel("objectAtIndexedSubscript:"), uintptr(i))
+		if attachment == 0 {
+			continue
+		}
+		if tv, ok := ca.View.(*TextureView); ok && tv != nil {
+			_ = MsgSend(attachment, Sel("setTexture:"), uintptr(tv.raw))
+		}
+		_ = MsgSend(attachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(ca.LoadOp)))
+		if ca.LoadOp == types.LoadOpClear {
+			clearColor := MTLClearColor{Red: ca.ClearValue.R, Green: ca.ClearValue.G, Blue: ca.ClearValue.B, Alpha: ca.ClearValue.A}
+			msgSendClearColor(attachment, Sel("setClearColor:"), clearColor)
+		}
+		_ = MsgSend(attachment, Sel("setStoreAction:"), uintptr(storeOpToMTL(ca.StoreOp)))
+		if ca.ResolveTarget != nil {
+			if rtv, ok := ca.ResolveTarget.(*TextureView); ok && rtv != nil {
+				_ = MsgSend(attachment, Sel("setResolveTexture:"), uintptr(rtv.raw))
+			}
+		}
+	}
+	if desc.DepthStencilAttachment != nil {
+		dsa := desc.DepthStencilAttachment
+		depthAttachment := MsgSend(rpDesc, Sel("depthAttachment"))
+		if tv, ok := dsa.View.(*TextureView); ok && tv != nil {
+			_ = MsgSend(depthAttachment, Sel("setTexture:"), uintptr(tv.raw))
+		}
+		_ = MsgSend(depthAttachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(dsa.DepthLoadOp)))
+		_ = MsgSend(depthAttachment, Sel("setStoreAction:"), uintptr(storeOpToMTL(dsa.DepthStoreOp)))
+	}
+	encoder := MsgSend(e.cmdBuffer, Sel("renderCommandEncoderWithDescriptor:"), uintptr(rpDesc))
+	if encoder == 0 {
+		pool.Drain()
+		return nil
+	}
+	Retain(encoder)
+	return &RenderPassEncoder{raw: encoder, device: e.device, pool: pool}
+}
+
+// BeginComputePass begins a compute pass.
+func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	if !e.isRecording || e.cmdBuffer == 0 {
+		return nil
+	}
+	pool := NewAutoreleasePool()
+	encoder := MsgSend(e.cmdBuffer, Sel("computeCommandEncoder"))
+	if encoder == 0 {
+		pool.Drain()
+		return nil
+	}
+	Retain(encoder)
+	if desc != nil && desc.Label != "" {
+		_ = MsgSend(encoder, Sel("setLabel:"), uintptr(NSString(desc.Label)))
+	}
+	return &ComputePassEncoder{raw: encoder, device: e.device, pool: pool}
+}
+
+// CommandBuffer implements hal.CommandBuffer for Metal.
+type CommandBuffer struct {
+	raw    ID
+	device *Device
+	pool   *AutoreleasePool
+}
+
+// Destroy releases the command buffer.
+func (cb *CommandBuffer) Destroy() {
+	if cb.raw != 0 {
+		Release(cb.raw)
+		cb.raw = 0
+	}
+	if cb.pool != nil {
+		cb.pool.Drain()
+		cb.pool = nil
+	}
+}
+
+// RenderPassEncoder implements hal.RenderPassEncoder for Metal.
+type RenderPassEncoder struct {
+	raw         ID
+	device      *Device
+	pool        *AutoreleasePool
+	pipeline    *RenderPipeline
+	indexBuffer *Buffer
+	indexFormat types.IndexFormat
+	indexOffset uint64
+}
+
+// End finishes the render pass.
+func (e *RenderPassEncoder) End() {
+	if e.raw != 0 {
+		_ = MsgSend(e.raw, Sel("endEncoding"))
+		Release(e.raw)
+		e.raw = 0
+	}
+	if e.pool != nil {
+		e.pool.Drain()
+		e.pool = nil
+	}
+}
+
+// SetPipeline sets the render pipeline.
+func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
+	p, ok := pipeline.(*RenderPipeline)
+	if !ok || p == nil {
+		return
+	}
+	e.pipeline = p
+	_ = MsgSend(e.raw, Sel("setRenderPipelineState:"), uintptr(p.raw))
+}
+
+// SetBindGroup sets a bind group.
+func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	bg, ok := group.(*BindGroup)
+	if !ok || bg == nil {
+		return
+	}
+	// Metal argument buffers would be used here for real bind group support
+	// For now, this is a simplified implementation
+	_ = bg
+	_ = index
+	_ = offsets
+}
+
+// SetVertexBuffer sets a vertex buffer.
+func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+	_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), uintptr(buf.raw), uintptr(offset), uintptr(slot))
+}
+
+// SetIndexBuffer sets the index buffer.
+func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.IndexFormat, offset uint64) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+	e.indexBuffer = buf
+	e.indexFormat = format
+	e.indexOffset = offset
+}
+
+// SetViewport sets the viewport.
+func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+	viewport := MTLViewport{OriginX: float64(x), OriginY: float64(y), Width: float64(width), Height: float64(height), ZNear: float64(minDepth), ZFar: float64(maxDepth)}
+	_ = MsgSend(e.raw, Sel("setViewport:"), uintptr(unsafe.Pointer(&viewport)))
+}
+
+// SetScissorRect sets the scissor rectangle.
+func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+	scissor := MTLScissorRect{X: NSUInteger(x), Y: NSUInteger(y), Width: NSUInteger(width), Height: NSUInteger(height)}
+	_ = MsgSend(e.raw, Sel("setScissorRect:"), uintptr(unsafe.Pointer(&scissor)))
+}
+
+// SetBlendConstant sets the blend constant color.
+func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
+	if color == nil {
+		return
+	}
+	r := *(*uintptr)(unsafe.Pointer(&color.R))
+	g := *(*uintptr)(unsafe.Pointer(&color.G))
+	b := *(*uintptr)(unsafe.Pointer(&color.B))
+	a := *(*uintptr)(unsafe.Pointer(&color.A))
+	_ = MsgSend(e.raw, Sel("setBlendColorRed:green:blue:alpha:"), r, g, b, a)
+}
+
+// SetStencilReference sets the stencil reference value.
+func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
+	_ = MsgSend(e.raw, Sel("setStencilReferenceValue:"), uintptr(ref))
+}
+
+// Draw draws primitives.
+func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	_ = MsgSend(e.raw, Sel("drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"),
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(firstVertex), uintptr(vertexCount), uintptr(instanceCount), uintptr(firstInstance))
+}
+
+// DrawIndexed draws indexed primitives.
+func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	if e.indexBuffer == nil {
+		return
+	}
+	indexType := indexFormatToMTL(e.indexFormat)
+	indexSize := uint32(2)
+	if e.indexFormat == types.IndexFormatUint32 {
+		indexSize = 4
+	}
+	offset := e.indexOffset + uint64(firstIndex)*uint64(indexSize)
+	_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:"),
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(indexCount), uintptr(indexType),
+		uintptr(e.indexBuffer.raw), uintptr(offset), uintptr(instanceCount), uintptr(baseVertex), uintptr(firstInstance))
+}
+
+// DrawIndirect draws primitives with GPU-generated parameters.
+func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+	_ = MsgSend(e.raw, Sel("drawPrimitives:indirectBuffer:indirectBufferOffset:"),
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(buf.raw), uintptr(offset))
+}
+
+// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || e.indexBuffer == nil {
+		return
+	}
+	indexType := indexFormatToMTL(e.indexFormat)
+	_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"),
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(indexType), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), uintptr(buf.raw), uintptr(offset))
+}
+
+// ExecuteBundle executes a pre-recorded render bundle.
+func (e *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
+
+// ComputePassEncoder implements hal.ComputePassEncoder for Metal.
+type ComputePassEncoder struct {
+	raw      ID
+	device   *Device
+	pool     *AutoreleasePool
+	pipeline *ComputePipeline
+}
+
+// End finishes the compute pass.
+func (e *ComputePassEncoder) End() {
+	if e.raw != 0 {
+		_ = MsgSend(e.raw, Sel("endEncoding"))
+		Release(e.raw)
+		e.raw = 0
+	}
+	if e.pool != nil {
+		e.pool.Drain()
+		e.pool = nil
+	}
+}
+
+// SetPipeline sets the compute pipeline.
+func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
+	p, ok := pipeline.(*ComputePipeline)
+	if !ok || p == nil {
+		return
+	}
+	e.pipeline = p
+	_ = MsgSend(e.raw, Sel("setComputePipelineState:"), uintptr(p.raw))
+}
+
+// SetBindGroup sets a bind group.
+func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	bg, ok := group.(*BindGroup)
+	if !ok || bg == nil {
+		return
+	}
+	_ = bg
+	_ = index
+	_ = offsets
+}
+
+// Dispatch dispatches compute workgroups.
+func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
+	threadgroupsPerGrid := MTLSize{Width: NSUInteger(x), Height: NSUInteger(y), Depth: NSUInteger(z)}
+	threadsPerThreadgroup := MTLSize{Width: 64, Height: 1, Depth: 1}
+	_ = MsgSend(e.raw, Sel("dispatchThreadgroups:threadsPerThreadgroup:"),
+		uintptr(unsafe.Pointer(&threadgroupsPerGrid)), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
+}
+
+// DispatchIndirect dispatches compute work with GPU-generated parameters.
+func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+	threadsPerThreadgroup := MTLSize{Width: 64, Height: 1, Depth: 1}
+	_ = MsgSend(e.raw, Sel("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:"),
+		uintptr(buf.raw), uintptr(offset), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
+}
+
+// msgSendClearColor sends an Objective-C message with an MTLClearColor argument.
+func msgSendClearColor(obj ID, sel SEL, color MTLClearColor) {
+	if obj == 0 {
+		return
+	}
+	colorPtr := (*[4]uintptr)(unsafe.Pointer(&color))
+	_ = MsgSend(obj, sel, colorPtr[0], colorPtr[1], colorPtr[2], colorPtr[3])
+}

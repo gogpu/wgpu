@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.5.0
+## Current Status: v0.6.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -14,10 +14,10 @@
 | `hal/software/` | ✅ Complete | ~10K | 94% |
 | `hal/gles/` | ✅ Complete | ~7.5K | 80% |
 | `hal/vulkan/` | ✅ Complete | ~27K | 85% |
-| `hal/metal/` | 🔲 Planned | — | — |
+| `hal/metal/` | ✅ Complete | ~3K | — |
 | `hal/dx12/` | 🔲 Planned | — | — |
 
-**Total: ~52K LOC**
+**Total: ~55K LOC**
 
 ---
 
@@ -44,7 +44,7 @@
 - [x] Vulkan backend (Pure Go, vk-gen)
 - [x] Cross-platform: Windows, Linux, macOS
 
-### v0.5.0 — Software Rasterization (Current)
+### v0.5.0 — Software Rasterization
 - [x] Edge function triangle rasterization
 - [x] Perspective-correct interpolation
 - [x] Depth/stencil buffers
@@ -53,19 +53,17 @@
 - [x] Tile-based parallel rasterization
 - [x] Callback-based shader system
 
+### v0.6.0 — Metal Backend (Current)
+- [x] Metal API bindings via goffi (Objective-C bridge)
+- [x] Device enumeration and capabilities
+- [x] Command buffer and render encoder
+- [x] Shader compilation (MSL via naga v0.5.0)
+- [x] Texture and buffer management
+- [x] Surface presentation (CAMetalLayer)
+
 ---
 
 ## Upcoming Releases
-
-### v0.6.0 — Metal Backend
-**Target: Q1 2025**
-
-- [ ] Metal API bindings via goffi (Objective-C bridge)
-- [ ] Device enumeration and capabilities
-- [ ] Command buffer and render encoder
-- [ ] Shader compilation (MSL from SPIR-V via naga)
-- [ ] Texture and buffer management
-- [ ] Surface presentation (CAMetalLayer)
 
 ### v0.7.0 — DirectX 12 Backend
 **Target: Q2 2025**
@@ -147,11 +145,12 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| v0.5.0 | 2024-12 | Software rasterization pipeline |
-| v0.4.0 | 2024-12 | OpenGL ES (Linux EGL + Windows WGL) |
-| v0.3.0 | 2024-11 | Vulkan backend, HAL interface |
-| v0.2.0 | 2024-11 | Core validation layer |
-| v0.1.0 | 2024-10 | Initial types package |
+| v0.6.0 | 2025-12 | Metal backend for macOS |
+| v0.5.0 | 2025-12 | Software rasterization pipeline |
+| v0.4.0 | 2025-12 | OpenGL ES (Linux EGL + Windows WGL) |
+| v0.3.0 | 2025-11 | Vulkan backend, HAL interface |
+| v0.2.0 | 2025-11 | Core validation layer |
+| v0.1.0 | 2025-10 | Initial types package |
 
 ---
 
