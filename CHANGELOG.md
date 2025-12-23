@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-12-23
+
+### Added
+- **Metal backend** (`hal/metal/`) — Pure Go via goffi (~3K LOC)
+  - Objective-C runtime bindings via goffi (go-webgpu/goffi)
+  - Metal framework access: MTLDevice, MTLCommandQueue, MTLCommandBuffer
+  - Render encoder: MTLRenderCommandEncoder, MTLRenderPassDescriptor
+  - Resource management: MTLBuffer, MTLTexture, MTLSampler
+  - Pipeline state: MTLRenderPipelineState, MTLDepthStencilState
+  - Surface presentation via CAMetalLayer
+  - Format conversion: WebGPU → Metal texture formats
+  - Cross-compilable from Windows/Linux to macOS
+
+### Changed
+- Updated ecosystem: gogpu v0.5.0 (macOS Cocoa), naga v0.5.0 (MSL backend)
+- Pre-release check script now uses kolkov/racedetector (Pure Go, no CGO)
+
+### Notes
+- **Community Testing Requested**: Metal backend needs testing on real macOS systems (12+ Monterey)
+- Requires naga v0.5.0 for MSL shader compilation
+
 ## [0.5.0] - 2025-12-19
 
 ### Added
@@ -94,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gogpu/wgpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/wgpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/wgpu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/wgpu/compare/v0.2.0...v0.3.0

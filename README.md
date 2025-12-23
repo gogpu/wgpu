@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.5.0 — Full software rasterization pipeline!
+> **Status:** v0.6.0 — Metal backend for macOS!
 
 ---
 
@@ -82,7 +82,7 @@ wgpu/
 │   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~27K LOC)
 │   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
 │   │   └── memory/    # GPU memory allocator (~1.8K LOC)
-│   ├── metal/     # Metal backend (planned)
+│   ├── metal/     # Metal backend ✓ (Pure Go, ~3K LOC, macOS)
 │   └── dx12/      # DirectX 12 backend (planned)
 └── cmd/
     ├── vk-gen/           # Vulkan bindings generator from vk.xml
@@ -117,12 +117,12 @@ wgpu/
 - [x] Noop backend for testing
 - [x] 54 tests with 94% coverage
 
-**Phase 4: Pure Go Backends** (In Progress)
+**Phase 4: Pure Go Backends** ✓
 - [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL) + Linux (EGL), ~7.5K LOC
 - [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
 - [x] Software backend (`hal/software/`) — Full rasterization pipeline, ~10K LOC, 100+ tests
-- [ ] Metal backend (`hal/metal/`) — Required for macOS/iOS
-- [ ] DX12 backend (`hal/dx12/`) — Windows high-performance
+- [x] Metal backend (`hal/metal/`) — Pure Go via goffi, macOS, ~3K LOC
+- [ ] DX12 backend (`hal/dx12/`) — Windows high-performance (planned)
 
 ## Pure Go Approach
 
@@ -133,7 +133,7 @@ All backends implemented without CGO:
 | Software | **Done** | Pure Go CPU rendering | All (headless) |
 | OpenGL ES | **Done** | goffi + WGL/EGL | Windows, Linux |
 | Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
-| Metal | Planned | goffi (Obj-C bridge) | macOS, iOS |
+| Metal | **Done** | goffi (Obj-C bridge) | macOS, iOS |
 | DX12 | Planned | goffi + COM | Windows |
 
 ### Software Backend
@@ -197,6 +197,17 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
   - Resource structures
   - Memory allocator (buddy allocation)
 
+### Metal Backend Features (New in v0.6.0)
+
+- **Pure Go Objective-C bridge** via goffi
+- **Metal API access** via Objective-C runtime
+- **Device and adapter enumeration**
+- **Command buffer and render encoder**
+- **Shader compilation** (MSL via naga v0.5.0)
+- **Texture and buffer management**
+- **Surface presentation** (CAMetalLayer integration)
+- **~3K lines of code**
+
 ## References
 
 - [wgpu (Rust)](https://github.com/gfx-rs/wgpu) — Reference implementation
@@ -207,8 +218,8 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | **v0.4.0** |
-| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | **v0.4.0** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | **v0.5.0** |
+| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | **v0.5.0** |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with GPU backend, scene graph, SIMD | **v0.9.2** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings (current solution) | Stable |
 
