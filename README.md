@@ -19,7 +19,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.6.0 — Metal backend for macOS!
+> **Status:** v0.6.1 — ARM64 macOS fix + EGL surfaceless for CI
 
 ---
 

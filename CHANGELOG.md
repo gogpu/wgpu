@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-12-24
+
+### Fixed
+- **macOS ARM64 SIGBUS crash** — Corrected goffi API usage in Metal backend
+  - Fixed pointer argument passing pattern for Objective-C runtime calls
+  - Resolved SIGBUS errors on Apple Silicon (M1/M2/M3) systems
+- **GLES/EGL CI integration tests** — Implemented EGL surfaceless platform
+  - Added `EGL_MESA_platform_surfaceless` support for headless testing
+  - Added `QueryClientExtensions()` and `HasSurfacelessSupport()` functions
+  - Updated `DetectWindowKind()` to prioritize surfaceless in CI environments
+  - Removed Xvfb dependency, using Mesa llvmpipe software renderer
+- **staticcheck SA5011 warnings** — Added explicit returns after `t.Fatal()` calls
+
+### Changed
+- Updated goffi to v0.3.2 for ARM64 macOS compatibility
+- CI workflow now uses `LIBGL_ALWAYS_SOFTWARE=1` for reliable headless EGL
+
 ## [0.6.0] - 2025-12-23
 
 ### Added
@@ -115,7 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/gogpu/wgpu/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gogpu/wgpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/wgpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/wgpu/compare/v0.3.0...v0.4.0
