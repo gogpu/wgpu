@@ -22,6 +22,7 @@ func TestNewMemoryTypeSelector(t *testing.T) {
 	selector := NewMemoryTypeSelector(props)
 	if selector == nil {
 		t.Fatal("NewMemoryTypeSelector returned nil")
+		return
 	}
 
 	// All memory types should be valid (no exotic flags)

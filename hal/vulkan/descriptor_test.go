@@ -193,6 +193,7 @@ func TestNewDescriptorAllocator(t *testing.T) {
 
 	if allocator == nil {
 		t.Fatal("NewDescriptorAllocator returned nil")
+		return
 	}
 
 	if allocator.initialPoolSize != 128 {

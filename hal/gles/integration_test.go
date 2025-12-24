@@ -15,6 +15,7 @@ import (
 
 // TestEGLInit tests basic EGL initialization.
 // This requires Mesa/EGL libraries to be installed.
+// In CI, this uses the EGL_MESA_platform_surfaceless for headless testing.
 // Run with: go test -v -tags integration ./hal/gles/...
 func TestEGLInit(t *testing.T) {
 	t.Log("Testing EGL initialization...")
@@ -25,23 +26,40 @@ func TestEGLInit(t *testing.T) {
 	}
 	t.Log("EGL library loaded successfully")
 
-	// Query EGL version
-	display, _, err := egl.GetEGLDisplay()
-	if err != nil {
-		t.Skipf("egl.GetEGLDisplay() failed (headless environment?): %v", err)
+	// Log client extensions (available before display initialization)
+	clientExt := egl.QueryClientExtensions()
+	t.Logf("EGL client extensions: %s", clientExt)
+
+	// Check for surfaceless support
+	if egl.HasSurfacelessSupport() {
+		t.Log("EGL_MESA_platform_surfaceless is available")
+	} else {
+		t.Log("EGL_MESA_platform_surfaceless is NOT available")
 	}
-	t.Logf("Got EGL display: %v", display)
+
+	// Get EGL display (will use surfaceless if no DISPLAY/WAYLAND_DISPLAY set)
+	display, windowKind, err := egl.GetEGLDisplay()
+	if err != nil {
+		t.Fatalf("egl.GetEGLDisplay() failed: %v", err)
+	}
+	t.Logf("Got EGL display: %v (window kind: %v)", display, windowKind)
+
+	// Validate display before initialization
+	if display == egl.NoDisplay {
+		t.Fatalf("egl.GetEGLDisplay() returned NoDisplay")
+	}
 
 	// Initialize EGL display
 	var major, minor egl.EGLInt
 	if egl.Initialize(display, &major, &minor) == egl.False {
-		t.Fatalf("egl.Initialize() failed: error 0x%x", egl.GetError())
+		eglError := egl.GetError()
+		t.Fatalf("egl.Initialize() failed: error 0x%x", eglError)
 	}
 	t.Logf("EGL version: %d.%d", major, minor)
 
 	// Query EGL extensions
 	extensions := egl.QueryString(display, egl.Extensions)
-	t.Logf("EGL extensions: %s", extensions)
+	t.Logf("EGL display extensions: %s", extensions)
 
 	// Terminate
 	if egl.Terminate(display) == egl.False {

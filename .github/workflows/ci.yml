@@ -99,9 +99,9 @@ jobs:
         name: codecov-wgpu
         fail_ci_if_error: false
 
-  # GLES/EGL Integration Test - Linux with Mesa
+  # GLES/EGL Integration Test - Linux with Mesa Surfaceless
   integration-gles:
-    name: Integration - GLES/EGL (Linux + Mesa)
+    name: Integration - GLES/EGL (Linux + Mesa Surfaceless)
     runs-on: ubuntu-latest
 
     steps:
@@ -114,20 +114,14 @@ jobs:
         go-version: '1.25'
         cache: true
 
-    - name: Install Mesa/EGL libraries
+    - name: Install Mesa libraries for headless EGL
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           libegl1-mesa-dev \
-          libgl1-mesa-dev \
-          libgles2-mesa-dev \
-          mesa-utils \
-          libx11-dev \
-          libxrandr-dev \
-          libxinerama-dev \
-          libxcursor-dev \
-          libxi-dev \
-          xvfb
+          libgbm-dev \
+          libgl1-mesa-dri \
+          mesa-utils
 
     - name: Verify Mesa installation
       run: |
@@ -137,6 +131,9 @@ jobs:
         echo "=== Library files ==="
         ls -la /usr/lib/x86_64-linux-gnu/libEGL* 2>/dev/null || true
         ls -la /usr/lib/x86_64-linux-gnu/libGL* 2>/dev/null || true
+        echo ""
+        echo "=== Mesa DRI drivers ==="
+        ls -la /usr/lib/x86_64-linux-gnu/dri/ 2>/dev/null | head -10 || true
 
     - name: Download dependencies
       run: go mod download
@@ -144,19 +141,21 @@ jobs:
     - name: Build GLES backend
       run: go build -v ./hal/gles/...
 
-    - name: Run GLES integration test
+    - name: Run GLES integration test (surfaceless)
+      env:
+        # CRITICAL: Unset display variables to force surfaceless platform
+        DISPLAY: ""
+        WAYLAND_DISPLAY: ""
+        # Force software rendering with llvmpipe
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
       run: |
-        # Use Xvfb for headless testing
-        export DISPLAY=:99
-        Xvfb :99 -screen 0 1024x768x24 &
-        sleep 2
-
-        # Run integration test (if exists)
-        if [ -f "hal/gles/integration_test.go" ]; then
-          go test -v -tags integration ./hal/gles/...
-        else
-          echo "No integration tests yet - build verification passed"
-        fi
+        echo "=== Running with surfaceless EGL platform ==="
+        echo "DISPLAY='$DISPLAY'"
+        echo "WAYLAND_DISPLAY='$WAYLAND_DISPLAY'"
+        echo "LIBGL_ALWAYS_SOFTWARE='$LIBGL_ALWAYS_SOFTWARE'"
+        echo ""
+        go test -v -tags integration ./hal/gles/...
 
     - name: Test EGL library loading
       run: |

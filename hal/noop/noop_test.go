@@ -200,6 +200,7 @@ func TestNoopAdapterCapabilities(t *testing.T) {
 	surfaceCaps := adapter.SurfaceCapabilities(surface)
 	if surfaceCaps == nil {
 		t.Fatal("expected non-nil surface capabilities")
+		return
 	}
 	if len(surfaceCaps.Formats) == 0 {
 		t.Error("expected at least one supported format")
@@ -788,6 +789,7 @@ func TestNoopSurfaceAcquireTexture(t *testing.T) {
 	}
 	if acquired == nil {
 		t.Fatal("expected non-nil acquired texture")
+		return
 	}
 	if acquired.Texture == nil {
 		t.Fatal("expected non-nil texture")
