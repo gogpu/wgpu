@@ -193,7 +193,7 @@ func TestNewDescriptorAllocator(t *testing.T) {
 
 	if allocator == nil {
 		t.Fatal("NewDescriptorAllocator returned nil")
-		return //nolint:govet // unreachable but needed for staticcheck
+		return
 	}
 
 	if allocator.initialPoolSize != 128 {
