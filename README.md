@@ -218,9 +218,9 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | **v0.5.0** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | **v0.6.1** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | **v0.5.0** |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with GPU backend, scene graph, SIMD | **v0.9.2** |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with GPU backend, scene graph, SIMD | **v0.11.0** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings (current solution) | Stable |
 
 ## Contributing
