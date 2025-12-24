@@ -8,7 +8,10 @@ package metal
 import (
 	"fmt"
 	"time"
+	"unsafe"
 
+	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
 )
@@ -340,6 +343,53 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	// If WGSL source is provided, compile to MSL
+	if desc.Source.WGSL != "" {
+		// Parse WGSL to AST
+		ast, err := naga.Parse(desc.Source.WGSL)
+		if err != nil {
+			return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
+		}
+
+		// Lower AST to IR
+		irModule, err := naga.LowerWithSource(ast, desc.Source.WGSL)
+		if err != nil {
+			return nil, fmt.Errorf("metal: failed to lower WGSL to IR: %w", err)
+		}
+
+		// Compile IR to MSL
+		mslSource, _, err := msl.Compile(irModule, msl.DefaultOptions())
+		if err != nil {
+			return nil, fmt.Errorf("metal: failed to compile to MSL: %w", err)
+		}
+
+		// Create NSString from MSL source
+		mslString := NSString(mslSource)
+		defer Release(mslString)
+
+		// Create MTLLibrary from source
+		// MTLLibrary* newLibraryWithSource:options:error:
+		var errorPtr ID
+		library := MsgSend(d.raw, Sel("newLibraryWithSource:options:error:"),
+			uintptr(mslString), 0, uintptr(unsafe.Pointer(&errorPtr)))
+
+		if library == 0 {
+			errMsg := "unknown error"
+			if errorPtr != 0 {
+				// Get localized description from NSError
+				errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
+				if errDesc != 0 {
+					errMsg = GoString(errDesc)
+				}
+				Release(errorPtr)
+			}
+			return nil, fmt.Errorf("metal: failed to compile MSL: %s", errMsg)
+		}
+
+		return &ShaderModule{source: desc.Source, library: library, device: d}, nil
+	}
+
+	// No WGSL source - just store the descriptor for later
 	return &ShaderModule{source: desc.Source, device: d}, nil
 }
 
@@ -358,7 +408,114 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return nil, fmt.Errorf("metal: CreateRenderPipeline not yet implemented")
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	// Get shader modules
+	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
+	if !ok || vertexModule == nil || vertexModule.library == 0 {
+		return nil, fmt.Errorf("metal: invalid vertex shader module")
+	}
+
+	var fragmentModule *ShaderModule
+	if desc.Fragment != nil {
+		fragmentModule, ok = desc.Fragment.Module.(*ShaderModule)
+		if !ok || fragmentModule == nil || fragmentModule.library == 0 {
+			return nil, fmt.Errorf("metal: invalid fragment shader module")
+		}
+	}
+
+	// Create pipeline descriptor
+	pipelineDesc := MsgSend(ID(GetClass("MTLRenderPipelineDescriptor")), Sel("new"))
+	if pipelineDesc == 0 {
+		return nil, fmt.Errorf("metal: failed to create pipeline descriptor")
+	}
+	defer Release(pipelineDesc)
+
+	// Set label if provided
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(pipelineDesc, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	// Get vertex function from library
+	vertexFuncName := NSString(desc.Vertex.EntryPoint)
+	vertexFunc := MsgSend(vertexModule.library, Sel("newFunctionWithName:"), uintptr(vertexFuncName))
+	Release(vertexFuncName)
+	if vertexFunc == 0 {
+		return nil, fmt.Errorf("metal: vertex function '%s' not found", desc.Vertex.EntryPoint)
+	}
+	defer Release(vertexFunc)
+
+	// Set vertex function
+	_ = MsgSend(pipelineDesc, Sel("setVertexFunction:"), uintptr(vertexFunc))
+
+	// Get and set fragment function if present
+	if fragmentModule != nil && desc.Fragment != nil {
+		fragmentFuncName := NSString(desc.Fragment.EntryPoint)
+		fragmentFunc := MsgSend(fragmentModule.library, Sel("newFunctionWithName:"), uintptr(fragmentFuncName))
+		Release(fragmentFuncName)
+		if fragmentFunc == 0 {
+			return nil, fmt.Errorf("metal: fragment function '%s' not found", desc.Fragment.EntryPoint)
+		}
+		defer Release(fragmentFunc)
+
+		_ = MsgSend(pipelineDesc, Sel("setFragmentFunction:"), uintptr(fragmentFunc))
+
+		// Configure color attachments
+		colorAttachments := MsgSend(pipelineDesc, Sel("colorAttachments"))
+		for i, target := range desc.Fragment.Targets {
+			attachment := MsgSend(colorAttachments, Sel("objectAtIndexedSubscript:"), uintptr(i))
+			if attachment == 0 {
+				continue
+			}
+
+			// Set pixel format
+			pixelFormat := textureFormatToMTL(target.Format)
+			_ = MsgSend(attachment, Sel("setPixelFormat:"), uintptr(pixelFormat))
+
+			// Set write mask
+			_ = MsgSend(attachment, Sel("setWriteMask:"), uintptr(target.WriteMask))
+
+			// Configure blending if present
+			if target.Blend != nil {
+				_ = MsgSend(attachment, Sel("setBlendingEnabled:"), uintptr(1))
+				_ = MsgSend(attachment, Sel("setSourceRGBBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Color.SrcFactor)))
+				_ = MsgSend(attachment, Sel("setDestinationRGBBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Color.DstFactor)))
+				_ = MsgSend(attachment, Sel("setRgbBlendOperation:"), uintptr(blendOperationToMTL(target.Blend.Color.Operation)))
+				_ = MsgSend(attachment, Sel("setSourceAlphaBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Alpha.SrcFactor)))
+				_ = MsgSend(attachment, Sel("setDestinationAlphaBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Alpha.DstFactor)))
+				_ = MsgSend(attachment, Sel("setAlphaBlendOperation:"), uintptr(blendOperationToMTL(target.Blend.Alpha.Operation)))
+			}
+		}
+	}
+
+	// Set sample count
+	sampleCount := desc.Multisample.Count
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+	_ = MsgSend(pipelineDesc, Sel("setSampleCount:"), uintptr(sampleCount))
+
+	// Create pipeline state
+	var errorPtr ID
+	pipelineState := MsgSend(d.raw, Sel("newRenderPipelineStateWithDescriptor:error:"),
+		uintptr(pipelineDesc), uintptr(unsafe.Pointer(&errorPtr)))
+
+	if pipelineState == 0 {
+		errMsg := "unknown error"
+		if errorPtr != 0 {
+			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
+			if errDesc != 0 {
+				errMsg = GoString(errDesc)
+			}
+			Release(errorPtr)
+		}
+		return nil, fmt.Errorf("metal: failed to create pipeline state: %s", errMsg)
+	}
+
+	return &RenderPipeline{raw: pipelineState, device: d}, nil
 }
 
 // DestroyRenderPipeline destroys a render pipeline.
