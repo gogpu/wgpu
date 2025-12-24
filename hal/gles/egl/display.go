@@ -86,8 +86,8 @@ func OpenX11Display() *DisplayOwner {
 
 	// Open default display (NULL = use DISPLAY environment variable)
 	var display uintptr
-	var nullPtr unsafe.Pointer
-	args := [1]unsafe.Pointer{nullPtr}
+	var displayName uintptr // NULL pointer for default display
+	args := [1]unsafe.Pointer{unsafe.Pointer(&displayName)}
 	_ = ffi.CallFunction(&cifXOpenDisplay, symXOpenDisplay, unsafe.Pointer(&display), args[:])
 	if display == 0 {
 		return nil
@@ -144,8 +144,8 @@ func TestWaylandDisplay() *DisplayOwner {
 
 	// Test connection (NULL = use WAYLAND_DISPLAY environment variable)
 	var display uintptr
-	var nullPtr unsafe.Pointer
-	args := [1]unsafe.Pointer{nullPtr}
+	var displayName uintptr // NULL pointer for default display
+	args := [1]unsafe.Pointer{unsafe.Pointer(&displayName)}
 	_ = ffi.CallFunction(&cifWlDisplayConnect, symWlDisplayConnect, unsafe.Pointer(&display), args[:])
 	if display == 0 {
 		return nil
@@ -267,9 +267,9 @@ func (d *DisplayOwner) Close() {
 	case WindowKindX11:
 		if symXCloseDisplay != nil {
 			var result int32
-			//nolint:govet // Converting uintptr to unsafe.Pointer for FFI call to XCloseDisplay
-			ptr := unsafe.Pointer(d.display)
-			args := [1]unsafe.Pointer{ptr}
+			// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+			displayPtr := d.display
+			args := [1]unsafe.Pointer{unsafe.Pointer(&displayPtr)}
 			_ = ffi.CallFunction(&cifXCloseDisplay, symXCloseDisplay, unsafe.Pointer(&result), args[:])
 		}
 	case WindowKindWayland:

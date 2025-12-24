@@ -410,11 +410,20 @@ func GetPlatformDisplay(platform EGLEnum, nativeDisplay uintptr, attribList *EGL
 
 // Initialize initializes an EGL display connection.
 func Initialize(dpy EGLDisplay, major *EGLInt, minor *EGLInt) EGLBoolean {
+	// Defensive check: don't try to initialize an invalid display
+	if dpy == NoDisplay {
+		return False
+	}
+
 	var result EGLBoolean
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	// For pointer arguments, store as uintptr and pass address of that
+	majorPtr := uintptr(unsafe.Pointer(major))
+	minorPtr := uintptr(unsafe.Pointer(minor))
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
-		unsafe.Pointer(major),
-		unsafe.Pointer(minor),
+		unsafe.Pointer(&majorPtr),
+		unsafe.Pointer(&minorPtr),
 	}
 	_ = ffi.CallFunction(&cifEglInitialize, symEglInitialize, unsafe.Pointer(&result), args[:])
 	return result
@@ -447,12 +456,16 @@ func QueryString(dpy EGLDisplay, name EGLInt) string {
 // ChooseConfig returns EGL frame buffer configurations that match specified attributes.
 func ChooseConfig(dpy EGLDisplay, attribList *EGLInt, configs *EGLConfig, configSize EGLInt, numConfig *EGLInt) EGLBoolean {
 	var result EGLBoolean
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	configsPtr := uintptr(unsafe.Pointer(configs))
+	numConfigPtr := uintptr(unsafe.Pointer(numConfig))
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
-		unsafe.Pointer(attribList),
-		unsafe.Pointer(configs),
+		unsafe.Pointer(&attribListPtr),
+		unsafe.Pointer(&configsPtr),
 		unsafe.Pointer(&configSize),
-		unsafe.Pointer(numConfig),
+		unsafe.Pointer(&numConfigPtr),
 	}
 	_ = ffi.CallFunction(&cifEglChooseConfig, symEglChooseConfig, unsafe.Pointer(&result), args[:])
 	return result
@@ -461,11 +474,13 @@ func ChooseConfig(dpy EGLDisplay, attribList *EGLInt, configs *EGLConfig, config
 // GetConfigAttrib returns information about an EGL frame buffer configuration.
 func GetConfigAttrib(dpy EGLDisplay, config EGLConfig, attribute EGLInt, value *EGLInt) EGLBoolean {
 	var result EGLBoolean
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	valuePtr := uintptr(unsafe.Pointer(value))
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
 		unsafe.Pointer(&attribute),
-		unsafe.Pointer(value),
+		unsafe.Pointer(&valuePtr),
 	}
 	_ = ffi.CallFunction(&cifEglGetConfigAttrib, symEglGetConfigAttrib, unsafe.Pointer(&result), args[:])
 	return result
@@ -474,11 +489,13 @@ func GetConfigAttrib(dpy EGLDisplay, config EGLConfig, attribute EGLInt, value *
 // CreateWindowSurface creates a new EGL window surface.
 func CreateWindowSurface(dpy EGLDisplay, config EGLConfig, win EGLNativeWindowType, attribList *EGLInt) EGLSurface {
 	var result EGLSurface
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	attribListPtr := uintptr(unsafe.Pointer(attribList))
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
 		unsafe.Pointer(&win),
-		unsafe.Pointer(attribList),
+		unsafe.Pointer(&attribListPtr),
 	}
 	_ = ffi.CallFunction(&cifEglCreateWindowSurface, symEglCreateWindowSurface, unsafe.Pointer(&result), args[:])
 	return result
@@ -487,10 +504,12 @@ func CreateWindowSurface(dpy EGLDisplay, config EGLConfig, win EGLNativeWindowTy
 // CreatePbufferSurface creates a new EGL pixel buffer surface.
 func CreatePbufferSurface(dpy EGLDisplay, config EGLConfig, attribList *EGLInt) EGLSurface {
 	var result EGLSurface
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	attribListPtr := uintptr(unsafe.Pointer(attribList))
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
-		unsafe.Pointer(attribList),
+		unsafe.Pointer(&attribListPtr),
 	}
 	_ = ffi.CallFunction(&cifEglCreatePbufferSurface, symEglCreatePbufferSurface, unsafe.Pointer(&result), args[:])
 	return result
@@ -531,11 +550,13 @@ func SwapInterval(dpy EGLDisplay, interval EGLInt) EGLBoolean {
 // CreateContext creates a new EGL rendering context.
 func CreateContext(dpy EGLDisplay, config EGLConfig, shareContext EGLContext, attribList *EGLInt) EGLContext {
 	var result EGLContext
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	attribListPtr := uintptr(unsafe.Pointer(attribList))
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
 		unsafe.Pointer(&shareContext),
-		unsafe.Pointer(attribList),
+		unsafe.Pointer(&attribListPtr),
 	}
 	_ = ffi.CallFunction(&cifEglCreateContext, symEglCreateContext, unsafe.Pointer(&result), args[:])
 	return result
@@ -594,8 +615,10 @@ func SwapBuffers(dpy EGLDisplay, surface EGLSurface) EGLBoolean {
 func GetProcAddress(procname string) uintptr {
 	cname := append([]byte(procname), 0)
 	var result uintptr
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	ptr := uintptr(unsafe.Pointer(&cname[0]))
 	args := [1]unsafe.Pointer{
-		unsafe.Pointer(&cname[0]),
+		unsafe.Pointer(&ptr),
 	}
 	_ = ffi.CallFunction(&cifEglGetProcAddress, symEglGetProcAddress, unsafe.Pointer(&result), args[:])
 	return result

@@ -6,12 +6,18 @@
 package gles
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/types"
 )
+
+// isCI returns true if running in a CI environment.
+func isCI() bool {
+	return os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != ""
+}
 
 // TestEGLInit tests basic EGL initialization.
 // This requires Mesa/EGL libraries to be installed.
@@ -26,16 +32,32 @@ func TestEGLInit(t *testing.T) {
 	t.Log("EGL library loaded successfully")
 
 	// Query EGL version
-	display, _, err := egl.GetEGLDisplay()
+	display, windowKind, err := egl.GetEGLDisplay()
 	if err != nil {
 		t.Skipf("egl.GetEGLDisplay() failed (headless environment?): %v", err)
 	}
-	t.Logf("Got EGL display: %v", display)
+	t.Logf("Got EGL display: %v (window kind: %v)", display, windowKind)
+
+	// Validate display before initialization
+	if display == egl.NoDisplay {
+		t.Skipf("No valid EGL display available (headless CI without GPU?)")
+	}
+
+	// Skip surfaceless in CI - Mesa surfaceless can return seemingly valid
+	// display that crashes on initialization in headless environments
+	if isCI() && windowKind == egl.WindowKindSurfaceless {
+		t.Skipf("Skipping surfaceless EGL test in CI (Mesa surfaceless may not work in headless environment)")
+	}
 
 	// Initialize EGL display
 	var major, minor egl.EGLInt
 	if egl.Initialize(display, &major, &minor) == egl.False {
-		t.Fatalf("egl.Initialize() failed: error 0x%x", egl.GetError())
+		eglError := egl.GetError()
+		// In headless CI, initialization may fail - skip instead of fail
+		if eglError == egl.NotInitialized || eglError == egl.BadDisplay {
+			t.Skipf("egl.Initialize() failed in headless environment: error 0x%x", eglError)
+		}
+		t.Fatalf("egl.Initialize() failed: error 0x%x", eglError)
 	}
 	t.Logf("EGL version: %d.%d", major, minor)
 
