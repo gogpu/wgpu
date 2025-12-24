@@ -104,12 +104,15 @@ func preRegisterSelectors() {
 		"alloc", "init", "new", "retain", "release", "autorelease",
 		"name", "setLabel:", "label",
 		"contents", "length", "count",
+		"localizedDescription", // NSError
 		// MTLDevice
 		"newBufferWithLength:options:",
 		"newTextureWithDescriptor:",
 		"newSamplerStateWithDescriptor:",
 		"newCommandQueue",
 		"newRenderPipelineStateWithDescriptor:error:",
+		"newLibraryWithSource:options:error:",
+		"newFunctionWithName:",
 		"supportsFamily:",
 		// MTLCommandQueue
 		"commandBuffer",
@@ -146,6 +149,12 @@ func preRegisterSelectors() {
 		"setWidth:", "setHeight:", "setDepth:",
 		"setPixelFormat:", "setTextureType:", "setUsage:",
 		"setStorageMode:", "setMipmapLevelCount:", "setSampleCount:",
+		// MTLRenderPipelineDescriptor
+		"setVertexFunction:", "setFragmentFunction:",
+		"colorAttachments", "objectAtIndexedSubscript:",
+		"setWriteMask:", "setBlendingEnabled:",
+		"setSourceRGBBlendFactor:", "setDestinationRGBBlendFactor:", "setRgbBlendOperation:",
+		"setSourceAlphaBlendFactor:", "setDestinationAlphaBlendFactor:", "setAlphaBlendOperation:",
 	}
 	for _, sel := range commonSelectors {
 		RegisterSelector(sel)
