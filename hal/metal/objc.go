@@ -74,8 +74,10 @@ func prepareObjCCallInterfaces() error {
 // GetClass returns the Class for a given name.
 func GetClass(name string) Class {
 	cname := append([]byte(name), 0)
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	ptr := uintptr(unsafe.Pointer(&cname[0]))
 	var result Class
-	args := [1]unsafe.Pointer{unsafe.Pointer(&cname[0])}
+	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
 	_ = ffi.CallFunction(&cifGetClass, symObjcGetClass, unsafe.Pointer(&result), args[:])
 	return result
 }
@@ -87,8 +89,10 @@ func RegisterSelector(name string) SEL {
 	}
 
 	cname := append([]byte(name), 0)
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
+	ptr := uintptr(unsafe.Pointer(&cname[0]))
 	var result SEL
-	args := [1]unsafe.Pointer{unsafe.Pointer(&cname[0])}
+	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
 	_ = ffi.CallFunction(&cifSelRegister, symSelRegisterName, unsafe.Pointer(&result), args[:])
 
 	selectorCache.Store(name, result)
