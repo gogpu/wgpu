@@ -8,6 +8,7 @@ package egl
 import (
 	"fmt"
 	"os"
+	"strings"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
@@ -162,21 +163,46 @@ func TestWaylandDisplay() *DisplayOwner {
 	}
 }
 
+// QueryClientExtensions returns EGL client extensions available without a display.
+// This MUST be called with EGL_NO_DISPLAY to get client extensions.
+// EGL client extensions are extensions that can be queried before display initialization.
+func QueryClientExtensions() string {
+	return QueryString(NoDisplay, Extensions)
+}
+
+// HasSurfacelessSupport checks if Mesa surfaceless platform is available.
+func HasSurfacelessSupport() bool {
+	extensions := QueryClientExtensions()
+	return strings.Contains(extensions, "EGL_MESA_platform_surfaceless")
+}
+
 // DetectWindowKind detects the available window system.
-// It tries to detect in the following order:
-//  1. Wayland (if WAYLAND_DISPLAY is set)
-//  2. X11 (if DISPLAY is set or can be opened)
-//  3. Surfaceless (fallback for headless systems)
+// Priority order:
+//  1. If no DISPLAY/WAYLAND_DISPLAY set AND surfaceless available -> Surfaceless (for CI)
+//  2. Wayland (if WAYLAND_DISPLAY is set and works)
+//  3. X11 (if DISPLAY is set and works)
+//  4. Surfaceless (final fallback)
 func DetectWindowKind() WindowKind {
-	// Check environment variables first
-	if os.Getenv("WAYLAND_DISPLAY") != "" {
+	displayEnv := os.Getenv("DISPLAY")
+	waylandEnv := os.Getenv("WAYLAND_DISPLAY")
+
+	// In headless environments (no display env vars), prefer surfaceless
+	// This is critical for CI environments where Xvfb may be set but doesn't work properly
+	if displayEnv == "" && waylandEnv == "" {
+		if HasSurfacelessSupport() {
+			return WindowKindSurfaceless
+		}
+	}
+
+	// Check environment variables for real displays
+	if waylandEnv != "" {
 		if owner := TestWaylandDisplay(); owner != nil {
 			owner.Close()
 			return WindowKindWayland
 		}
 	}
 
-	if os.Getenv("DISPLAY") != "" {
+	if displayEnv != "" {
 		if owner := OpenX11Display(); owner != nil {
 			owner.Close()
 			return WindowKindX11
