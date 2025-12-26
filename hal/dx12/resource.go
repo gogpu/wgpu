@@ -242,12 +242,67 @@ func (s *Sampler) Handle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 }
 
 // -----------------------------------------------------------------------------
+// Pipeline and BindGroup Stubs (TODO: Implement in TASK-DX12-008)
+// -----------------------------------------------------------------------------
+
+// RenderPipeline implements hal.RenderPipeline for DirectX 12.
+type RenderPipeline struct {
+	pso           *d3d12.ID3D12PipelineState
+	rootSignature *d3d12.ID3D12RootSignature
+	topology      d3d12.D3D_PRIMITIVE_TOPOLOGY
+	vertexStrides []uint32
+}
+
+// Destroy releases the render pipeline resources.
+func (p *RenderPipeline) Destroy() {
+	if p.pso != nil {
+		p.pso.Release()
+		p.pso = nil
+	}
+	if p.rootSignature != nil {
+		p.rootSignature.Release()
+		p.rootSignature = nil
+	}
+}
+
+// ComputePipeline implements hal.ComputePipeline for DirectX 12.
+type ComputePipeline struct {
+	pso           *d3d12.ID3D12PipelineState
+	rootSignature *d3d12.ID3D12RootSignature
+}
+
+// Destroy releases the compute pipeline resources.
+func (p *ComputePipeline) Destroy() {
+	if p.pso != nil {
+		p.pso.Release()
+		p.pso = nil
+	}
+	if p.rootSignature != nil {
+		p.rootSignature.Release()
+		p.rootSignature = nil
+	}
+}
+
+// BindGroup implements hal.BindGroup for DirectX 12.
+type BindGroup struct {
+	// TODO: Implement descriptor table or root constants
+}
+
+// Destroy releases the bind group resources.
+func (g *BindGroup) Destroy() {
+	// TODO: Implement
+}
+
+// -----------------------------------------------------------------------------
 // Compile-time interface assertions
 // -----------------------------------------------------------------------------
 
 var (
-	_ hal.Buffer      = (*Buffer)(nil)
-	_ hal.Texture     = (*Texture)(nil)
-	_ hal.TextureView = (*TextureView)(nil)
-	_ hal.Sampler     = (*Sampler)(nil)
+	_ hal.Buffer          = (*Buffer)(nil)
+	_ hal.Texture         = (*Texture)(nil)
+	_ hal.TextureView     = (*TextureView)(nil)
+	_ hal.Sampler         = (*Sampler)(nil)
+	_ hal.RenderPipeline  = (*RenderPipeline)(nil)
+	_ hal.ComputePipeline = (*ComputePipeline)(nil)
+	_ hal.BindGroup       = (*BindGroup)(nil)
 )

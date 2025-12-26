@@ -43,7 +43,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			if !ok {
 				return fmt.Errorf("dx12: command buffer is not a DX12 command buffer")
 			}
-			cmdLists[i] = dx12CB.raw
+			cmdLists[i] = dx12CB.cmdList
 		}
 
 		// Execute command lists
@@ -162,34 +162,7 @@ func (q *Queue) GetTimestampPeriod() float32 {
 }
 
 // -----------------------------------------------------------------------------
-// CommandBuffer placeholder (will be fully implemented in TASK-DX12-008)
-// -----------------------------------------------------------------------------
-
-// CommandBuffer implements hal.CommandBuffer for DirectX 12.
-type CommandBuffer struct {
-	raw       *d3d12.ID3D12GraphicsCommandList
-	allocator *d3d12.ID3D12CommandAllocator
-	device    *Device
-}
-
-// Destroy releases the command buffer resources.
-func (cb *CommandBuffer) Destroy() {
-	if cb.raw != nil {
-		cb.raw.Release()
-		cb.raw = nil
-	}
-	if cb.allocator != nil {
-		cb.allocator.Release()
-		cb.allocator = nil
-	}
-	cb.device = nil
-}
-
-// -----------------------------------------------------------------------------
 // Compile-time interface assertions
 // -----------------------------------------------------------------------------
 
-var (
-	_ hal.Queue         = (*Queue)(nil)
-	_ hal.CommandBuffer = (*CommandBuffer)(nil)
-)
+var _ hal.Queue = (*Queue)(nil)

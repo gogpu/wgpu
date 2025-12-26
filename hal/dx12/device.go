@@ -952,9 +952,42 @@ func (d *Device) DestroyComputePipeline(_ hal.ComputePipeline) {
 }
 
 // CreateCommandEncoder creates a command encoder.
-func (d *Device) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	// TODO: Implement in TASK-DX12-008 (Command Encoding)
-	return nil, fmt.Errorf("dx12: CreateCommandEncoder not yet implemented")
+func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	// Create command allocator
+	allocator, err := d.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateCommandAllocator failed: %w", err)
+	}
+
+	// Create command list (starts in recording state)
+	cmdList, err := d.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nil)
+	if err != nil {
+		allocator.Release()
+		return nil, fmt.Errorf("dx12: CreateCommandList failed: %w", err)
+	}
+
+	// Command list is created in open state - close it immediately
+	// It will be reset when BeginEncoding is called
+	if err := cmdList.Close(); err != nil {
+		cmdList.Release()
+		allocator.Release()
+		return nil, fmt.Errorf("dx12: initial command list close failed: %w", err)
+	}
+
+	var label string
+	if desc != nil {
+		label = desc.Label
+	}
+
+	return &CommandEncoder{
+		device: d,
+		allocator: &CommandAllocator{
+			raw: allocator,
+		},
+		cmdList:     cmdList,
+		label:       label,
+		isRecording: false,
+	}, nil
 }
 
 // CreateFence creates a synchronization fence.

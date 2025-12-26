@@ -936,6 +936,22 @@ func (c *ID3D12GraphicsCommandList) ClearRenderTargetView(renderTargetView D3D12
 	)
 }
 
+// CopyTextureRegion copies a region of a texture.
+func (c *ID3D12GraphicsCommandList) CopyTextureRegion(dst *D3D12_TEXTURE_COPY_LOCATION, dstX, dstY, dstZ uint32, src *D3D12_TEXTURE_COPY_LOCATION, srcBox *D3D12_BOX) {
+	_, _, _ = syscall.Syscall9(
+		c.vtbl.CopyTextureRegion,
+		7,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(unsafe.Pointer(dst)),
+		uintptr(dstX),
+		uintptr(dstY),
+		uintptr(dstZ),
+		uintptr(unsafe.Pointer(src)),
+		uintptr(unsafe.Pointer(srcBox)),
+		0, 0,
+	)
+}
+
 // -----------------------------------------------------------------------------
 // ID3D12Fence methods
 // -----------------------------------------------------------------------------

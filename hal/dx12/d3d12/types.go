@@ -313,6 +313,18 @@ type D3D12_SUBRESOURCE_FOOTPRINT struct {
 	RowPitch uint32
 }
 
+// SetPlacedFootprint sets the placed footprint for this copy location.
+func (l *D3D12_TEXTURE_COPY_LOCATION) SetPlacedFootprint(footprint D3D12_PLACED_SUBRESOURCE_FOOTPRINT) {
+	l.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT
+	*(*D3D12_PLACED_SUBRESOURCE_FOOTPRINT)(unsafe.Pointer(&l.Union[0])) = footprint
+}
+
+// SetSubresourceIndex sets the subresource index for this copy location.
+func (l *D3D12_TEXTURE_COPY_LOCATION) SetSubresourceIndex(subresource uint32) {
+	l.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX
+	*(*uint32)(unsafe.Pointer(&l.Union[0])) = subresource
+}
+
 // D3D12_TILED_RESOURCE_COORDINATE describes a tiled resource coordinate.
 type D3D12_TILED_RESOURCE_COORDINATE struct {
 	X           uint32
