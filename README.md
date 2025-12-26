@@ -21,7 +21,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.8.0 — DirectX 12 backend complete! All 5 HAL backends ready.
+> **Status:** v0.9.0-dev — Compute shaders in development. All 5 HAL backends ready.
 
 ---
 
@@ -69,6 +69,30 @@ deviceID, _ := core.RequestDevice(adapterID, &types.DeviceDescriptor{
 
 // Get queue for command submission
 queueID, _ := core.GetDeviceQueue(deviceID)
+```
+
+### Compute Shaders (Preview)
+
+```go
+// Create compute pipeline
+pipelineID, _ := core.DeviceCreateComputePipeline(deviceID, &core.ComputePipelineDescriptor{
+    Label:  "My Compute Pipeline",
+    Layout: layoutID,
+    Compute: core.ProgrammableStage{
+        Module:     shaderModuleID,
+        EntryPoint: "main",
+    },
+})
+
+// Begin compute pass
+encoder, _ := core.DeviceCreateCommandEncoder(deviceID, nil)
+computePass := encoder.BeginComputePass(nil)
+
+// Dispatch workgroups
+computePass.SetPipeline(pipelineID)
+computePass.SetBindGroup(0, bindGroupID, nil)
+computePass.Dispatch(64, 1, 1) // 64 workgroups
+computePass.End()
 ```
 
 ## Architecture
@@ -125,6 +149,13 @@ wgpu/
 - [x] Software backend (`hal/software/`) — Full rasterization pipeline, ~10K LOC, 100+ tests
 - [x] Metal backend (`hal/metal/`) — Pure Go via goffi, macOS, ~3K LOC
 - [x] DX12 backend (`hal/dx12/`) — Pure Go via syscall, Windows, ~12K LOC
+
+**Phase 5: Compute Shaders** (In Progress)
+- [x] Core API: ComputePipelineDescriptor, ComputePassEncoder
+- [x] HAL infrastructure: glDispatchCompute, SetBindGroup, workgroup sizes
+- [ ] Backend tests: Vulkan, DX12, Metal, GLES
+- [ ] Examples: array sum, buffer copy, image filter
+- [ ] Documentation and tutorials
 
 ## Pure Go Approach
 

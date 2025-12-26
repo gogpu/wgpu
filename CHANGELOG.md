@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Compute Shader Support (Phase 2)** — Core API implementation
+  - `ComputePipelineDescriptor` and `ProgrammableStage` types
+  - `DeviceCreateComputePipeline()` and `DeviceDestroyComputePipeline()` functions
+  - `ComputePassEncoder` with SetPipeline, SetBindGroup, Dispatch, DispatchIndirect
+  - `CommandEncoderImpl.BeginComputePass()` for compute pass creation
+  - Bind group index validation (0-3 per WebGPU spec)
+  - Indirect dispatch offset alignment validation (4-byte)
+  - Comprehensive tests (~700 LOC) with concurrent access testing
+
+- **HAL Compute Infrastructure (Phase 1)**
+  - GLES: `glDispatchCompute`, `glMemoryBarrier`, compute shader constants
+  - DX12: `SetBindGroup` for ComputePassEncoder/RenderPassEncoder
+  - Metal: Pipeline workgroup size extraction from naga IR
+
 ## [0.8.0] - 2025-12-26
 
 ### Added
