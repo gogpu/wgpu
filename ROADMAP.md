@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.7.1
+## Current Status: v0.8.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -15,9 +15,9 @@
 | `hal/gles/` | ✅ Complete | ~7.5K | 80% |
 | `hal/vulkan/` | ✅ Complete | ~27K | 85% |
 | `hal/metal/` | ✅ Complete | ~3K | — |
-| `hal/dx12/` | 🔲 Planned | — | — |
+| `hal/dx12/` | ✅ Complete | ~12K | — |
 
-**Total: ~55K LOC**
+**Total: ~67K LOC** — All 5 HAL backends complete!
 
 ---
 

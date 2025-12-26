@@ -21,7 +21,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.7.1 — Metal shader pipeline + ErrZeroArea validation
+> **Status:** v0.8.0 — DirectX 12 backend complete! All 5 HAL backends ready.
 
 ---
 
@@ -85,7 +85,7 @@ wgpu/
 │   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
 │   │   └── memory/    # GPU memory allocator (~1.8K LOC)
 │   ├── metal/     # Metal backend ✓ (Pure Go, ~3K LOC, macOS)
-│   └── dx12/      # DirectX 12 backend (planned)
+│   └── dx12/      # DirectX 12 backend ✓ (Pure Go, ~12K LOC, Windows)
 └── cmd/
     ├── vk-gen/           # Vulkan bindings generator from vk.xml
     └── vulkan-triangle/  # Vulkan integration test (red triangle) ✓
@@ -124,7 +124,7 @@ wgpu/
 - [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
 - [x] Software backend (`hal/software/`) — Full rasterization pipeline, ~10K LOC, 100+ tests
 - [x] Metal backend (`hal/metal/`) — Pure Go via goffi, macOS, ~3K LOC
-- [ ] DX12 backend (`hal/dx12/`) — Windows high-performance (planned)
+- [x] DX12 backend (`hal/dx12/`) — Pure Go via syscall, Windows, ~12K LOC
 
 ## Pure Go Approach
 
@@ -136,7 +136,7 @@ All backends implemented without CGO:
 | OpenGL ES | **Done** | goffi + WGL/EGL | Windows, Linux |
 | Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
 | Metal | **Done** | goffi (Obj-C bridge) | macOS, iOS |
-| DX12 | Planned | goffi + COM | Windows |
+| DX12 | **Done** | syscall + COM | Windows |
 
 ### Software Backend
 
@@ -199,7 +199,7 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
   - Resource structures
   - Memory allocator (buddy allocation)
 
-### Metal Backend Features (New in v0.6.0)
+### Metal Backend Features (v0.6.0)
 
 - **Pure Go Objective-C bridge** via goffi
 - **Metal API access** via Objective-C runtime
@@ -209,6 +209,33 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
 - **Texture and buffer management**
 - **Surface presentation** (CAMetalLayer integration)
 - **~3K lines of code**
+
+### DirectX 12 Backend Features (New in v0.8.0)
+
+- **Pure Go COM bindings** via syscall (no CGO!)
+- **D3D12 API access** via COM interface vtables
+- **DXGI integration** for swapchain and adapter enumeration
+- **Descriptor heap management** (CBV/SRV/UAV, Sampler, RTV, DSV)
+- **Flip model swapchain** with tearing support (VRR)
+- **Command list recording** with resource barriers
+- **Root signature** and PSO creation
+- **~12K lines of code**
+
+**Structure:**
+```
+hal/dx12/
+├── d3d12/      # D3D12 COM bindings (~4K LOC)
+├── dxgi/       # DXGI bindings (~2K LOC)
+├── instance.go # Backend, Instance, Surface
+├── adapter.go  # Adapter enumeration
+├── device.go   # Device, descriptor heaps
+├── queue.go    # Command queue
+├── surface.go  # Swapchain management
+├── resource.go # Buffer, Texture, TextureView
+├── command.go  # CommandEncoder, RenderPassEncoder
+├── pipeline.go # RenderPipeline, ComputePipeline
+└── convert.go  # Format conversion helpers
+```
 
 ## References
 

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-12-26
+
+### Added
+- **DirectX 12 Backend** — Complete HAL implementation (~12K LOC)
+  - Pure Go COM bindings via syscall (no CGO!)
+  - D3D12 API access via COM interface vtables
+  - DXGI integration for swapchain and adapter enumeration
+  - Descriptor heap management (CBV/SRV/UAV, Sampler, RTV, DSV)
+  - Flip model swapchain with tearing support (VRR)
+  - Command list recording with resource barriers
+  - Root signature and PSO creation
+  - Buffer, Texture, TextureView, Sampler resources
+  - RenderPipeline, ComputePipeline creation
+  - Full format conversion (WebGPU → DXGI)
+
+- **Metal CommandEncoder Test** — Regression test for Issue #24
+
+### Changed
+- All 5 HAL backends now complete:
+  - Vulkan (~27K LOC) — Windows, Linux, macOS
+  - Metal (~3K LOC) — macOS, iOS
+  - DX12 (~12K LOC) — Windows
+  - GLES (~7.5K LOC) — Windows, Linux
+  - Software (~10K LOC) — All platforms
+
+### Fixed
+- Metal encoder test updated to use `IsRecording()` method instead of non-existent field
+
 ## [0.7.2] - 2025-12-26
 
 ### Fixed
