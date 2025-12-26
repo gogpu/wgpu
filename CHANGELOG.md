@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-12-24
+
+### Added
+- **Metal WGSL→MSL Compilation** — Full shader compilation pipeline via naga v0.5.0
+  - Parse WGSL source
+  - Lower to intermediate representation
+  - Compile to Metal Shading Language (MSL)
+  - Create MTLLibrary from MSL source
+- **CreateRenderPipeline** — Complete Metal implementation (~120 LOC)
+  - Get vertex/fragment functions from library
+  - Configure color attachments and blending
+  - Create MTLRenderPipelineState
+
+### Changed
+- Added `github.com/gogpu/naga v0.5.0` dependency
+
 ## [0.6.1] - 2025-12-24
 
 ### Fixed

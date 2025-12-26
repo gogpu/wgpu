@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.6.0
+## Current Status: v0.7.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -53,19 +53,26 @@
 - [x] Tile-based parallel rasterization
 - [x] Callback-based shader system
 
-### v0.6.0 — Metal Backend (Current)
+### v0.6.0 — Metal Backend
 - [x] Metal API bindings via goffi (Objective-C bridge)
 - [x] Device enumeration and capabilities
 - [x] Command buffer and render encoder
-- [x] Shader compilation (MSL via naga v0.5.0)
 - [x] Texture and buffer management
 - [x] Surface presentation (CAMetalLayer)
+
+### v0.7.0 — Metal Shader Pipeline (Current)
+- [x] WGSL→MSL compilation via naga v0.5.0
+- [x] Parse WGSL, lower to IR, generate MSL
+- [x] Create MTLLibrary from MSL source
+- [x] CreateRenderPipeline implementation (~120 LOC)
+- [x] Vertex/fragment function binding
+- [x] Color attachment and blending configuration
 
 ---
 
 ## Upcoming Releases
 
-### v0.7.0 — DirectX 12 Backend
+### v0.8.0 — DirectX 12 Backend
 **Target: Q2 2025**
 
 - [ ] DX12 bindings via goffi (COM interfaces)
@@ -75,8 +82,8 @@
 - [ ] Descriptor heaps
 - [ ] Shader compilation (DXIL from SPIR-V via naga)
 
-### v0.8.0 — Compute Shaders
-**Target: Q2 2025**
+### v0.10.0 — Compute Shaders
+**Target: Q3 2025**
 
 - [ ] Compute pipeline support in all backends
 - [ ] Dispatch and indirect dispatch
@@ -84,8 +91,8 @@
 - [ ] Atomic operations
 - [ ] Workgroup shared memory
 
-### v0.9.0 — WebAssembly Support
-**Target: Q3 2025**
+### v0.11.0 — WebAssembly Support
+**Target: Q4 2025**
 
 - [ ] WASM build target
 - [ ] Browser WebGPU API bindings
