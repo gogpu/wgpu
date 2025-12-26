@@ -21,7 +21,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.6.1 — ARM64 macOS fix + EGL surfaceless for CI
+> **Status:** v0.7.1 — Metal shader pipeline + ErrZeroArea validation
 
 ---
 
@@ -205,7 +205,7 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
 - **Metal API access** via Objective-C runtime
 - **Device and adapter enumeration**
 - **Command buffer and render encoder**
-- **Shader compilation** (MSL via naga v0.5.0)
+- **Shader compilation** (MSL via naga v0.6.0)
 - **Texture and buffer management**
 - **Surface presentation** (CAMetalLayer integration)
 - **~3K lines of code**
