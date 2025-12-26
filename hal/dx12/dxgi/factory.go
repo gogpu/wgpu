@@ -625,6 +625,24 @@ func (s *IDXGISwapChain1) Release() uint32 {
 	return uint32(ret)
 }
 
+// QueryInterface queries for IDXGISwapChain4 interface.
+func (s *IDXGISwapChain1) QueryInterface() (*IDXGISwapChain4, error) {
+	var swapchain4 *IDXGISwapChain4
+
+	ret, _, _ := syscall.Syscall(
+		s.vtbl.QueryInterface,
+		3,
+		uintptr(unsafe.Pointer(s)),
+		uintptr(unsafe.Pointer(&IID_IDXGISwapChain4)),
+		uintptr(unsafe.Pointer(&swapchain4)),
+	)
+
+	if ret != 0 {
+		return nil, d3d12.HRESULTError(ret)
+	}
+	return swapchain4, nil
+}
+
 // Present presents a rendered frame.
 func (s *IDXGISwapChain1) Present(syncInterval, flags uint32) error {
 	ret, _, _ := syscall.Syscall(

@@ -294,10 +294,20 @@ func (i *Instance) AllowsTearing() bool {
 
 // Surface implements hal.Surface for DirectX 12.
 type Surface struct {
-	instance  *Instance
-	hwnd      uintptr
-	swapchain *dxgi.IDXGISwapChain4
-	device    *Device
+	instance *Instance
+	hwnd     uintptr
+	device   *Device
+
+	// Swapchain state
+	swapchain      *dxgi.IDXGISwapChain4
+	backBuffers    []backBuffer
+	width          uint32
+	height         uint32
+	format         dxgi.DXGI_FORMAT
+	halFormat      types.TextureFormat
+	presentMode    hal.PresentMode
+	swapchainFlags uint32
+	allowTearing   bool
 }
 
 // Configure configures the surface for presentation.
@@ -306,49 +316,43 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 		return hal.ErrZeroArea
 	}
 
-	// TODO: Device type assertion will be implemented in TASK-DX12-004
-	// when Device struct implements hal.Device interface.
-	// For now, we just store a reference to check later.
-	_ = device
+	// Type assert to DX12 Device
+	dx12Device, ok := device.(*Device)
+	if !ok {
+		return fmt.Errorf("dx12: device is not a DX12 device")
+	}
 
-	// If we already have a swapchain, resize it
-	if s.swapchain != nil && s.device != nil {
+	// If we already have a swapchain with the same device, resize it
+	if s.swapchain != nil && s.device == dx12Device {
 		return s.resizeSwapchain(config)
 	}
 
 	// Destroy old swapchain if switching devices
 	s.Unconfigure(device)
 
-	// Create new swapchain
-	// TODO: Implement in TASK-DX12-005
-	return fmt.Errorf("dx12: surface configuration not yet implemented")
-}
-
-// createSwapchain creates a new swap chain for the surface.
-//
-//nolint:unused,unparam // Will be called once Configure is implemented in TASK-DX12-005
-func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfiguration) error {
-	// TODO: Implement swap chain creation
-	// This will be implemented in TASK-DX12-005
-	s.device = device
-	_ = config
-	return nil
-}
-
-// resizeSwapchain resizes an existing swap chain.
-func (s *Surface) resizeSwapchain(config *hal.SurfaceConfiguration) error {
-	// TODO: Implement swap chain resize
-	// This will be implemented in TASK-DX12-005
-	return nil
+	// Create new swapchain (implementation in surface.go)
+	return s.createSwapchain(dx12Device, config)
 }
 
 // Unconfigure removes surface configuration.
 func (s *Surface) Unconfigure(_ hal.Device) {
+	// Wait for GPU to finish using the swapchain
+	if s.device != nil {
+		_ = s.device.waitForGPU()
+	}
+
+	// Release back buffer resources
+	s.releaseBackBuffers()
+
+	// Release swapchain
 	if s.swapchain != nil {
 		s.swapchain.Release()
 		s.swapchain = nil
 	}
+
 	s.device = nil
+	s.width = 0
+	s.height = 0
 }
 
 // AcquireTexture acquires the next surface texture for rendering.
@@ -357,15 +361,39 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		return nil, fmt.Errorf("dx12: surface not configured")
 	}
 
-	// TODO: Implement texture acquisition
-	// This will be implemented in TASK-DX12-005
-	return nil, fmt.Errorf("dx12: AcquireTexture not yet implemented")
+	// Get current back buffer index
+	index := s.swapchain.GetCurrentBackBufferIndex()
+
+	if int(index) >= len(s.backBuffers) {
+		return nil, fmt.Errorf("dx12: back buffer index %d out of range", index)
+	}
+
+	bb := &s.backBuffers[index]
+
+	// Create surface texture wrapper
+	surfaceTexture := &SurfaceTexture{
+		surface:   s,
+		index:     index,
+		resource:  bb.resource,
+		rtvHandle: bb.rtvHandle,
+		format:    s.halFormat,
+		width:     s.width,
+		height:    s.height,
+		// TODO: Check for suboptimal state (window resized, etc.)
+		suboptimal: false,
+	}
+
+	return &hal.AcquiredSurfaceTexture{
+		Texture:    surfaceTexture,
+		Suboptimal: surfaceTexture.suboptimal,
+	}, nil
 }
 
 // DiscardTexture discards a surface texture without presenting it.
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {
-	// TODO: Implement texture discard
-	// This will be implemented in TASK-DX12-005
+	// For DX12 with flip model swapchains, discarding is a no-op.
+	// The texture is simply not presented, and the swapchain will
+	// continue to use the existing frame.
 }
 
 // Destroy releases the surface.

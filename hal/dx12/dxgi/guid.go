@@ -268,3 +268,13 @@ var IID_IDXGIResource = GUID{
 	Data3: 0x4E50,
 	Data4: [8]byte{0xB4, 0x1F, 0x8A, 0x7F, 0x8B, 0xD8, 0x96, 0x0B},
 }
+
+// IID_ID3D12Resource is the interface ID for ID3D12Resource.
+// This is a D3D12 GUID duplicated here for convenience when calling DXGI functions.
+// {696442BE-A72E-4059-BC79-5B5C98040FAD}
+var IID_ID3D12Resource = GUID{
+	Data1: 0x696442BE,
+	Data2: 0xA72E,
+	Data3: 0x4059,
+	Data4: [8]byte{0xBC, 0x79, 0x5B, 0x5C, 0x98, 0x04, 0x0F, 0xAD},
+}

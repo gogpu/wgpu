@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/hal/dx12/dxgi"
 )
 
 // Queue implements hal.Queue for DirectX 12.
@@ -108,14 +109,42 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("dx12: surface not configured")
 	}
 
-	// TODO: Implement in TASK-DX12-005 (Swap Chain)
-	// Full implementation requires:
-	// 1. Get current back buffer index
-	// 2. Insert resource barriers (render target -> present)
-	// 3. Present via swapchain
-	// 4. Handle tearing flags based on present mode
+	// Note: Resource barriers (render target -> present) should be
+	// handled in the command buffer encoding before this call.
+	// The present call here just flips the swapchain.
 
-	return fmt.Errorf("dx12: Present not yet implemented")
+	// Determine sync interval and flags based on present mode
+	var syncInterval uint32
+	var presentFlags uint32
+
+	switch dx12Surface.presentMode {
+	case hal.PresentModeImmediate:
+		// No vsync, immediate presentation
+		syncInterval = 0
+		if dx12Surface.allowTearing {
+			presentFlags |= uint32(dxgi.DXGI_PRESENT_ALLOW_TEARING)
+		}
+	case hal.PresentModeMailbox:
+		// VSync with triple buffering (latest frame wins)
+		// Mailbox is simulated with syncInterval=0 + triple buffer
+		syncInterval = 0
+		if dx12Surface.allowTearing {
+			presentFlags |= uint32(dxgi.DXGI_PRESENT_ALLOW_TEARING)
+		}
+	case hal.PresentModeFifo, hal.PresentModeFifoRelaxed:
+		// VSync enabled
+		syncInterval = 1
+	default:
+		// Default to vsync
+		syncInterval = 1
+	}
+
+	// Present the frame
+	if err := dx12Surface.swapchain.Present(syncInterval, presentFlags); err != nil {
+		return fmt.Errorf("dx12: Present failed: %w", err)
+	}
+
+	return nil
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.
