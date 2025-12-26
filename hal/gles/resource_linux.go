@@ -77,7 +77,17 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 }
 
 // Configure configures the surface for presentation.
+//
+// Returns hal.ErrZeroArea if width or height is zero.
+// This commonly happens when the window is minimized or not yet fully visible.
+// Wait until the window has valid dimensions before calling Configure again.
 func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) error {
+	// Validate dimensions first (before any side effects).
+	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
+	if config.Width == 0 || config.Height == 0 {
+		return hal.ErrZeroArea
+	}
+
 	s.configured = true
 	s.config = config
 	return nil
