@@ -290,6 +290,46 @@ else
 fi
 echo ""
 
+# 10. Ecosystem dependency validation
+log_info "Validating ecosystem dependencies..."
+
+check_ecosystem_dep() {
+    local DEP_NAME=$1
+    local REPO=$2
+
+    LOCAL_VERSION=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module" | awk '{print $2}')
+
+    if [ -z "$LOCAL_VERSION" ]; then
+        return 0  # Dependency not used, skip
+    fi
+
+    # Get latest release from GitHub
+    if command -v gh &> /dev/null; then
+        LATEST_VERSION=$(gh release view --repo "$REPO" --json tagName -q '.tagName' 2>/dev/null || echo "")
+    else
+        LATEST_VERSION=""
+    fi
+
+    if [ -z "$LATEST_VERSION" ]; then
+        log_warning "$DEP_NAME: $LOCAL_VERSION (cannot check latest)"
+        WARNINGS=$((WARNINGS + 1))
+        return 0
+    fi
+
+    if [ "$LOCAL_VERSION" = "$LATEST_VERSION" ]; then
+        log_success "$DEP_NAME: $LOCAL_VERSION (latest)"
+    else
+        log_error "$DEP_NAME: $LOCAL_VERSION (latest: $LATEST_VERSION)"
+        log_info "  Run: go get $DEP_NAME@$LATEST_VERSION"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+
+check_ecosystem_dep "github.com/gogpu/naga" "gogpu/naga"
+check_ecosystem_dep "github.com/go-webgpu/goffi" "go-webgpu/goffi"
+
+echo ""
+
 # 11. Check for TODO/FIXME comments
 log_info "Checking for TODO/FIXME comments..."
 TODO_COUNT=$(grep -r "TODO\|FIXME" --include="*.go" --exclude-dir=vendor . 2>/dev/null | wc -l)
