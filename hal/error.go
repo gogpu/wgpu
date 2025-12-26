@@ -35,4 +35,13 @@ var (
 	// ErrTimeout indicates an operation timed out.
 	// This is typically returned by Wait operations.
 	ErrTimeout = errors.New("hal: timeout")
+
+	// ErrZeroArea indicates that both surface width and height must be non-zero.
+	// This error is returned by Surface.Configure when the window has zero area.
+	// Wait to recreate the surface until the window has non-zero area.
+	// This commonly happens when:
+	//   - Window is minimized
+	//   - Window is not yet fully visible (timing issue on macOS)
+	//   - Invalid dimensions passed to Configure
+	ErrZeroArea = errors.New("hal: surface width and height must be non-zero")
 )

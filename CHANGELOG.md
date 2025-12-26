@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-12-26
+
+### Added
+- **ErrZeroArea error** — Sentinel error for zero-dimension surface configuration
+  - Matches wgpu-core `ConfigureSurfaceError::ZeroArea` pattern
+  - Comprehensive unit tests in `hal/error_test.go`
+
+### Fixed
+- **macOS Zero Dimension Crash** — Fixes Issue [#20](https://github.com/gogpu/gogpu/issues/20)
+  - Added zero-dimension validation to all `Surface.Configure()` implementations
+  - Returns `ErrZeroArea` when width or height is zero
+  - Affected backends: Metal, Vulkan, GLES (Linux/Windows), Software
+  - Follows wgpu-core pattern: "Wait to recreate the Surface until the window has non-zero area"
+
+### Notes
+- This fix allows proper handling of minimized windows and macOS timing issues
+- Window becomes visible asynchronously on macOS; initial dimensions may be 0,0
+
 ## [0.7.0] - 2025-12-24
 
 ### Added
