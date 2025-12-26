@@ -14,16 +14,29 @@ import (
 )
 
 // CommandEncoder implements hal.CommandEncoder for Metal.
+//
+// Recording state is determined by the presence of cmdBuffer (cmdBuffer != 0).
+// This follows the wgpu-rs pattern where Option<CommandBuffer> presence
+// indicates recording state, rather than a separate boolean flag.
 type CommandEncoder struct {
-	device      *Device
-	cmdBuffer   ID
-	pool        *AutoreleasePool
-	label       string
-	isRecording bool
+	device    *Device
+	cmdBuffer ID
+	pool      *AutoreleasePool
+	label     string
+}
+
+// IsRecording returns true if the encoder has an active command buffer.
+// This is the canonical way to check recording state.
+func (e *CommandEncoder) IsRecording() bool {
+	return e.cmdBuffer != 0
 }
 
 // BeginEncoding begins command recording with an optional label.
+// After successful call, IsRecording() returns true.
 func (e *CommandEncoder) BeginEncoding(label string) error {
+	if e.cmdBuffer != 0 {
+		return fmt.Errorf("metal: encoder is already recording")
+	}
 	e.label = label
 	e.pool = NewAutoreleasePool()
 	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
@@ -37,33 +50,33 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		nsLabel := NSString(label)
 		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
 	}
-	e.isRecording = true
+	// Recording state is now implicit: cmdBuffer != 0
 	return nil
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
+// After successful call, IsRecording() returns false.
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
-	if !e.isRecording {
+	if e.cmdBuffer == 0 {
 		return nil, fmt.Errorf("metal: command encoder is not recording")
 	}
 	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, pool: e.pool}
-	e.cmdBuffer = 0
+	e.cmdBuffer = 0 // Recording state becomes false
 	e.pool = nil
-	e.isRecording = false
 	return cb, nil
 }
 
 // DiscardEncoding discards the encoder without creating a command buffer.
+// After call, IsRecording() returns false.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.cmdBuffer != 0 {
 		Release(e.cmdBuffer)
-		e.cmdBuffer = 0
+		e.cmdBuffer = 0 // Recording state becomes false
 	}
 	if e.pool != nil {
 		e.pool.Drain()
 		e.pool = nil
 	}
-	e.isRecording = false
 }
 
 // ResetAll resets command buffers for reuse.
@@ -77,7 +90,7 @@ func (e *CommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {}
 
 // ClearBuffer clears a buffer region to zero.
 func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
-	if !e.isRecording {
+	if e.cmdBuffer == 0 {
 		return
 	}
 	buf, ok := buffer.(*Buffer)
@@ -94,7 +107,7 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
-	if !e.isRecording || len(regions) == 0 {
+	if e.cmdBuffer == 0 || len(regions) == 0 {
 		return
 	}
 	srcBuf, ok := src.(*Buffer)
@@ -118,7 +131,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
-	if !e.isRecording || len(regions) == 0 {
+	if e.cmdBuffer == 0 || len(regions) == 0 {
 		return
 	}
 	srcBuf, ok := src.(*Buffer)
@@ -148,7 +161,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	if !e.isRecording || len(regions) == 0 {
+	if e.cmdBuffer == 0 || len(regions) == 0 {
 		return
 	}
 	srcTex, ok := src.(*Texture)
@@ -178,7 +191,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 
 // CopyTextureToTexture copies data between textures.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	if !e.isRecording || len(regions) == 0 {
+	if e.cmdBuffer == 0 || len(regions) == 0 {
 		return
 	}
 	srcTex, ok := src.(*Texture)
@@ -206,8 +219,9 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 }
 
 // BeginRenderPass begins a render pass.
+// Returns nil if encoder is not recording (cmdBuffer == 0).
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.cmdBuffer == 0 {
 		return nil
 	}
 	pool := NewAutoreleasePool()
@@ -256,8 +270,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 }
 
 // BeginComputePass begins a compute pass.
+// Returns nil if encoder is not recording (cmdBuffer == 0).
 func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.cmdBuffer == 0 {
 		return nil
 	}
 	pool := NewAutoreleasePool()
