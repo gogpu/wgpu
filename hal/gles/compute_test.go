@@ -406,10 +406,8 @@ func TestGLESComputePassEncoder(t *testing.T) {
 func TestGLESComputeBarrier(t *testing.T) {
 	// Test that dispatch commands include memory barriers
 	t.Run("DispatchIncludesBarrier", func(t *testing.T) {
-		cmd := &DispatchCommand{x: 1, y: 1, z: 1}
-
 		// Execute should use SHADER_STORAGE_BARRIER_BIT | BUFFER_UPDATE_BARRIER_BIT
-		// We can't test actual GL calls without GPU, but we verify the command exists
+		// We can't test actual GL calls without GPU, but we verify the barrier constants
 		expectedBarriers := gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT
 		if expectedBarriers != 0x2200 {
 			t.Errorf("expected barriers = %#x, want 0x2200", expectedBarriers)
