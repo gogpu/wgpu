@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Vulkan goffi Argument Passing Bug** — Fixes Windows crash (Exception 0xc0000005)
+  - Root cause: vk-gen generated incorrect FFI calls after syscall→goffi migration
+  - Before: `unsafe.Pointer(ptr)` passed pointer value directly
+  - After: `unsafe.Pointer(&ptr)` passes pointer TO pointer (goffi requirement)
+  - Affected all Vulkan functions with pointer parameters
+
 ### Added
 - **Compute Shader Support (Phase 2)** — Core API implementation
   - `ComputePipelineDescriptor` and `ProgrammableStage` types
