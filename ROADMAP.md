@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.7.0
+## Current Status: v0.7.1
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -60,13 +60,19 @@
 - [x] Texture and buffer management
 - [x] Surface presentation (CAMetalLayer)
 
-### v0.7.0 — Metal Shader Pipeline (Current)
+### v0.7.0 — Metal Shader Pipeline
 - [x] WGSL→MSL compilation via naga v0.5.0
 - [x] Parse WGSL, lower to IR, generate MSL
 - [x] Create MTLLibrary from MSL source
 - [x] CreateRenderPipeline implementation (~120 LOC)
 - [x] Vertex/fragment function binding
 - [x] Color attachment and blending configuration
+
+### v0.7.1 — ErrZeroArea Validation (Current)
+- [x] Added `ErrZeroArea` sentinel error matching wgpu-core pattern
+- [x] All `Surface.Configure()` validate dimensions before configuring
+- [x] Affected backends: Metal, Vulkan, GLES, Software
+- [x] Unit tests for zero-dimension handling
 
 ---
 
