@@ -140,6 +140,11 @@ type Context struct {
 	glDrawArraysInstanced   uintptr
 	glDrawElementsInstanced uintptr
 	glVertexAttribDivisor   uintptr
+
+	// Compute shaders (GL 4.3+ / ES 3.1+)
+	glDispatchCompute         uintptr
+	glDispatchComputeIndirect uintptr
+	glMemoryBarrier           uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -273,6 +278,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDrawArraysInstanced = getProcAddr("glDrawArraysInstanced")
 	c.glDrawElementsInstanced = getProcAddr("glDrawElementsInstanced")
 	c.glVertexAttribDivisor = getProcAddr("glVertexAttribDivisor")
+
+	// Compute shaders (optional - may be nil on older GL versions)
+	c.glDispatchCompute = getProcAddr("glDispatchCompute")
+	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
+	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
 
 	return nil
 }
@@ -607,6 +617,45 @@ func (c *Context) DrawArraysInstanced(mode uint32, first, count, instanceCount i
 func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, indices uintptr, instanceCount int32) {
 	syscall.SyscallN(c.glDrawElementsInstanced, uintptr(mode), uintptr(count),
 		uintptr(typ), indices, uintptr(instanceCount))
+}
+
+// --- Compute Shaders ---
+
+// DispatchCompute launches compute shader workgroups.
+// Requires OpenGL 4.3+ or OpenGL ES 3.1+.
+// No-op if compute shaders are not supported.
+func (c *Context) DispatchCompute(numGroupsX, numGroupsY, numGroupsZ uint32) {
+	if c.glDispatchCompute == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDispatchCompute, uintptr(numGroupsX), uintptr(numGroupsY), uintptr(numGroupsZ))
+}
+
+// DispatchComputeIndirect launches compute workgroups with parameters from a buffer.
+// The indirect parameter is an offset into the currently bound GL_DISPATCH_INDIRECT_BUFFER.
+// Requires OpenGL 4.3+ or OpenGL ES 3.1+.
+// No-op if compute shaders are not supported.
+func (c *Context) DispatchComputeIndirect(indirect uintptr) {
+	if c.glDispatchComputeIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDispatchComputeIndirect, indirect)
+}
+
+// MemoryBarrier inserts a memory barrier for specified access types.
+// barriers is a bitwise OR of GL_*_BARRIER_BIT constants.
+// Requires OpenGL 4.2+ or OpenGL ES 3.1+.
+// No-op if memory barriers are not supported.
+func (c *Context) MemoryBarrier(barriers uint32) {
+	if c.glMemoryBarrier == 0 {
+		return
+	}
+	syscall.SyscallN(c.glMemoryBarrier, uintptr(barriers))
+}
+
+// SupportsCompute returns true if compute shaders are supported.
+func (c *Context) SupportsCompute() bool {
+	return c.glDispatchCompute != 0
 }
 
 // --- Helpers ---

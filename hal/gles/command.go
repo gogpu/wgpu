@@ -370,9 +370,14 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
-	// TODO: Implement
-	_ = buffer
-	_ = offset
+	buf, ok := buffer.(*Buffer)
+	if !ok {
+		return
+	}
+	e.encoder.commands = append(e.encoder.commands, &DispatchIndirectCommand{
+		buffer: buf,
+		offset: offset,
+	})
 }
 
 // --- GL Command implementations ---
@@ -599,8 +604,30 @@ type DispatchCommand struct {
 	x, y, z uint32
 }
 
-func (c *DispatchCommand) Execute(_ *gl.Context) {
-	// glDispatchCompute(c.x, c.y, c.z) would go here
+// Execute dispatches compute work and inserts a memory barrier.
+func (c *DispatchCommand) Execute(ctx *gl.Context) {
+	ctx.DispatchCompute(c.x, c.y, c.z)
+	// Insert barrier for storage buffer coherency after compute dispatch.
+	// This ensures subsequent reads/writes see the compute shader results.
+	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
+}
+
+// DispatchIndirectCommand dispatches compute work with GPU-generated parameters.
+type DispatchIndirectCommand struct {
+	buffer *Buffer
+	offset uint64
+}
+
+// Execute dispatches compute work from indirect buffer and inserts a memory barrier.
+func (c *DispatchIndirectCommand) Execute(ctx *gl.Context) {
+	// Bind the buffer containing dispatch parameters
+	ctx.BindBuffer(gl.DISPATCH_INDIRECT_BUFFER, c.buffer.id)
+	// Dispatch with parameters from the buffer at the given offset
+	ctx.DispatchComputeIndirect(uintptr(c.offset))
+	// Unbind the indirect buffer
+	ctx.BindBuffer(gl.DISPATCH_INDIRECT_BUFFER, 0)
+	// Insert barrier for storage buffer coherency after compute dispatch
+	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
 }
 
 // compareFunctionToGL converts compare function to GL constant.
