@@ -886,69 +886,260 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 }
 
 // CreateBindGroupLayout creates a bind group layout.
-func (d *Device) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreateBindGroupLayout not yet implemented")
+func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: bind group layout descriptor is nil")
+	}
+
+	entries := make([]BindGroupLayoutEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		entries[i] = BindGroupLayoutEntry{
+			Binding:    entry.Binding,
+			Visibility: entry.Visibility,
+			Count:      1,
+		}
+
+		// Determine binding type
+		switch {
+		case entry.Buffer != nil:
+			switch entry.Buffer.Type {
+			case types.BufferBindingTypeUniform:
+				entries[i].Type = BindingTypeUniformBuffer
+			case types.BufferBindingTypeStorage:
+				entries[i].Type = BindingTypeStorageBuffer
+			case types.BufferBindingTypeReadOnlyStorage:
+				entries[i].Type = BindingTypeReadOnlyStorageBuffer
+			}
+		case entry.Sampler != nil:
+			if entry.Sampler.Type == types.SamplerBindingTypeComparison {
+				entries[i].Type = BindingTypeComparisonSampler
+			} else {
+				entries[i].Type = BindingTypeSampler
+			}
+		case entry.Texture != nil:
+			entries[i].Type = BindingTypeSampledTexture
+		case entry.Storage != nil:
+			entries[i].Type = BindingTypeStorageTexture
+		}
+	}
+
+	return &BindGroupLayout{
+		entries: entries,
+		device:  d,
+	}, nil
 }
 
 // DestroyBindGroupLayout destroys a bind group layout.
-func (d *Device) DestroyBindGroupLayout(_ hal.BindGroupLayout) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
+	if l, ok := layout.(*BindGroupLayout); ok && l != nil {
+		l.Destroy()
+	}
 }
 
 // CreateBindGroup creates a bind group.
-func (d *Device) CreateBindGroup(_ *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreateBindGroup not yet implemented")
+func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: bind group descriptor is nil")
+	}
+
+	layout, ok := desc.Layout.(*BindGroupLayout)
+	if !ok {
+		return nil, fmt.Errorf("dx12: invalid bind group layout type")
+	}
+
+	// For now, create a minimal bind group that stores layout reference
+	// Full descriptor table allocation will be enhanced later
+	return &BindGroup{
+		layout: layout,
+		device: d,
+	}, nil
 }
 
 // DestroyBindGroup destroys a bind group.
-func (d *Device) DestroyBindGroup(_ hal.BindGroup) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyBindGroup(group hal.BindGroup) {
+	if g, ok := group.(*BindGroup); ok && g != nil {
+		g.Destroy()
+	}
 }
 
 // CreatePipelineLayout creates a pipeline layout.
-func (d *Device) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreatePipelineLayout not yet implemented")
+func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: pipeline layout descriptor is nil")
+	}
+
+	// Create root signature from bind group layouts
+	rootSig, err := d.createRootSignatureFromLayouts(desc.BindGroupLayouts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store references to bind group layouts
+	bgLayouts := make([]*BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, l := range desc.BindGroupLayouts {
+		bgLayout, ok := l.(*BindGroupLayout)
+		if !ok {
+			rootSig.Release()
+			return nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", i)
+		}
+		bgLayouts[i] = bgLayout
+	}
+
+	return &PipelineLayout{
+		rootSignature:    rootSig,
+		bindGroupLayouts: bgLayouts,
+		device:           d,
+	}, nil
 }
 
 // DestroyPipelineLayout destroys a pipeline layout.
-func (d *Device) DestroyPipelineLayout(_ hal.PipelineLayout) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
+	if l, ok := layout.(*PipelineLayout); ok && l != nil {
+		l.Destroy()
+	}
 }
 
 // CreateShaderModule creates a shader module.
-func (d *Device) CreateShaderModule(_ *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreateShaderModule not yet implemented")
+// For DX12, we expect pre-compiled DXBC/DXIL bytecode in the SPIRV field for now.
+// Full WGSL -> HLSL -> DXBC compilation will be implemented separately.
+func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: shader module descriptor is nil")
+	}
+
+	// For now, we expect bytecode in the SPIRV field (as uint32 slice)
+	// In the future, we'll add HLSL/DXBC compilation
+	var bytecode []byte
+	if len(desc.Source.SPIRV) > 0 {
+		// Convert uint32 slice to byte slice
+		bytecode = make([]byte, len(desc.Source.SPIRV)*4)
+		for i, word := range desc.Source.SPIRV {
+			bytecode[i*4+0] = byte(word)
+			bytecode[i*4+1] = byte(word >> 8)
+			bytecode[i*4+2] = byte(word >> 16)
+			bytecode[i*4+3] = byte(word >> 24)
+		}
+	}
+
+	return &ShaderModule{
+		bytecode: bytecode,
+		device:   d,
+	}, nil
 }
 
 // DestroyShaderModule destroys a shader module.
-func (d *Device) DestroyShaderModule(_ hal.ShaderModule) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
+	if m, ok := module.(*ShaderModule); ok && m != nil {
+		m.Destroy()
+	}
 }
 
 // CreateRenderPipeline creates a render pipeline.
-func (d *Device) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreateRenderPipeline not yet implemented")
+func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: render pipeline descriptor is nil")
+	}
+
+	// Build input layout from vertex buffers
+	inputElements, semanticNames := buildInputLayout(desc.Vertex.Buffers)
+
+	// Keep semantic names alive until pipeline creation
+	_ = semanticNames
+
+	// Build PSO description
+	psoDesc, err := d.buildGraphicsPipelineStateDesc(desc, inputElements, semanticNames)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the pipeline state object
+	pso, err := d.raw.CreateGraphicsPipelineState(psoDesc)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed: %w", err)
+	}
+
+	// Get root signature reference
+	var rootSig *d3d12.ID3D12RootSignature
+	if desc.Layout != nil {
+		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
+		if ok {
+			rootSig = pipelineLayout.rootSignature
+		}
+	}
+
+	// Calculate vertex strides for IASetVertexBuffers
+	vertexStrides := make([]uint32, len(desc.Vertex.Buffers))
+	for i, buf := range desc.Vertex.Buffers {
+		vertexStrides[i] = uint32(buf.ArrayStride)
+	}
+
+	return &RenderPipeline{
+		pso:           pso,
+		rootSignature: rootSig,
+		topology:      primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides: vertexStrides,
+	}, nil
 }
 
 // DestroyRenderPipeline destroys a render pipeline.
-func (d *Device) DestroyRenderPipeline(_ hal.RenderPipeline) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
+	if p, ok := pipeline.(*RenderPipeline); ok && p != nil {
+		p.Destroy()
+	}
 }
 
 // CreateComputePipeline creates a compute pipeline.
-func (d *Device) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
-	return nil, fmt.Errorf("dx12: CreateComputePipeline not yet implemented")
+func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: compute pipeline descriptor is nil")
+	}
+
+	// Get shader module
+	shaderModule, ok := desc.Compute.Module.(*ShaderModule)
+	if !ok {
+		return nil, fmt.Errorf("dx12: invalid compute shader module type")
+	}
+
+	// Get root signature from layout
+	var rootSig *d3d12.ID3D12RootSignature
+	if desc.Layout != nil {
+		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
+		if !ok {
+			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
+		}
+		rootSig = pipelineLayout.rootSignature
+	}
+
+	// Build compute pipeline state desc
+	psoDesc := d3d12.D3D12_COMPUTE_PIPELINE_STATE_DESC{
+		RootSignature: rootSig,
+		NodeMask:      0,
+	}
+
+	if len(shaderModule.bytecode) > 0 {
+		psoDesc.CS = d3d12.D3D12_SHADER_BYTECODE{
+			ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
+			BytecodeLength: uintptr(len(shaderModule.bytecode)),
+		}
+	}
+
+	// Create the pipeline state object
+	pso, err := d.raw.CreateComputePipelineState(&psoDesc)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateComputePipelineState failed: %w", err)
+	}
+
+	return &ComputePipeline{
+		pso:           pso,
+		rootSignature: rootSig,
+	}, nil
 }
 
 // DestroyComputePipeline destroys a compute pipeline.
-func (d *Device) DestroyComputePipeline(_ hal.ComputePipeline) {
-	// TODO: Implement in TASK-DX12-007 (Pipeline State)
+func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
+	if p, ok := pipeline.(*ComputePipeline); ok && p != nil {
+		p.Destroy()
+	}
 }
 
 // CreateCommandEncoder creates a command encoder.

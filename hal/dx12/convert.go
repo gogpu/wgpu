@@ -6,6 +6,7 @@
 package dx12
 
 import (
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/types"
 )
@@ -225,7 +226,6 @@ func isDepthFormat(format types.TextureFormat) bool {
 	}
 }
 
-
 // depthFormatToTypeless converts a depth format to its typeless equivalent for SRV.
 func depthFormatToTypeless(format types.TextureFormat) d3d12.DXGI_FORMAT {
 	switch format {
@@ -327,4 +327,264 @@ func compareFunctionToD3D12(fn types.CompareFunction) d3d12.D3D12_COMPARISON_FUN
 // alignTo256 aligns a size to 256 bytes (required for constant buffers).
 func alignTo256(size uint64) uint64 {
 	return (size + 255) &^ 255
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline Conversion Helpers
+// -----------------------------------------------------------------------------
+
+// blendFactorToD3D12 converts a WebGPU blend factor to D3D12.
+func blendFactorToD3D12(factor types.BlendFactor) d3d12.D3D12_BLEND {
+	switch factor {
+	case types.BlendFactorZero:
+		return d3d12.D3D12_BLEND_ZERO
+	case types.BlendFactorOne:
+		return d3d12.D3D12_BLEND_ONE
+	case types.BlendFactorSrc:
+		return d3d12.D3D12_BLEND_SRC_COLOR
+	case types.BlendFactorOneMinusSrc:
+		return d3d12.D3D12_BLEND_INV_SRC_COLOR
+	case types.BlendFactorSrcAlpha:
+		return d3d12.D3D12_BLEND_SRC_ALPHA
+	case types.BlendFactorOneMinusSrcAlpha:
+		return d3d12.D3D12_BLEND_INV_SRC_ALPHA
+	case types.BlendFactorDst:
+		return d3d12.D3D12_BLEND_DEST_COLOR
+	case types.BlendFactorOneMinusDst:
+		return d3d12.D3D12_BLEND_INV_DEST_COLOR
+	case types.BlendFactorDstAlpha:
+		return d3d12.D3D12_BLEND_DEST_ALPHA
+	case types.BlendFactorOneMinusDstAlpha:
+		return d3d12.D3D12_BLEND_INV_DEST_ALPHA
+	case types.BlendFactorSrcAlphaSaturated:
+		return d3d12.D3D12_BLEND_SRC_ALPHA_SAT
+	case types.BlendFactorConstant:
+		return d3d12.D3D12_BLEND_BLEND_FACTOR
+	case types.BlendFactorOneMinusConstant:
+		return d3d12.D3D12_BLEND_INV_BLEND_FACTOR
+	default:
+		return d3d12.D3D12_BLEND_ONE
+	}
+}
+
+// blendOperationToD3D12 converts a WebGPU blend operation to D3D12.
+func blendOperationToD3D12(op types.BlendOperation) d3d12.D3D12_BLEND_OP {
+	switch op {
+	case types.BlendOperationAdd:
+		return d3d12.D3D12_BLEND_OP_ADD
+	case types.BlendOperationSubtract:
+		return d3d12.D3D12_BLEND_OP_SUBTRACT
+	case types.BlendOperationReverseSubtract:
+		return d3d12.D3D12_BLEND_OP_REV_SUBTRACT
+	case types.BlendOperationMin:
+		return d3d12.D3D12_BLEND_OP_MIN
+	case types.BlendOperationMax:
+		return d3d12.D3D12_BLEND_OP_MAX
+	default:
+		return d3d12.D3D12_BLEND_OP_ADD
+	}
+}
+
+// cullModeToD3D12 converts a WebGPU cull mode to D3D12.
+func cullModeToD3D12(mode types.CullMode) d3d12.D3D12_CULL_MODE {
+	switch mode {
+	case types.CullModeNone:
+		return d3d12.D3D12_CULL_MODE_NONE
+	case types.CullModeFront:
+		return d3d12.D3D12_CULL_MODE_FRONT
+	case types.CullModeBack:
+		return d3d12.D3D12_CULL_MODE_BACK
+	default:
+		return d3d12.D3D12_CULL_MODE_NONE
+	}
+}
+
+// frontFaceToD3D12 converts a WebGPU front face to D3D12 winding order.
+// Returns 1 (TRUE) if counter-clockwise, 0 (FALSE) if clockwise.
+func frontFaceToD3D12(face types.FrontFace) int32 {
+	if face == types.FrontFaceCCW {
+		return 1 // TRUE - counter-clockwise is front
+	}
+	return 0 // FALSE - clockwise is front
+}
+
+// primitiveTopologyTypeToD3D12 converts a WebGPU primitive topology to D3D12 topology type.
+func primitiveTopologyTypeToD3D12(topology types.PrimitiveTopology) d3d12.D3D12_PRIMITIVE_TOPOLOGY_TYPE {
+	switch topology {
+	case types.PrimitiveTopologyPointList:
+		return d3d12.D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT
+	case types.PrimitiveTopologyLineList, types.PrimitiveTopologyLineStrip:
+		return d3d12.D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE
+	case types.PrimitiveTopologyTriangleList, types.PrimitiveTopologyTriangleStrip:
+		return d3d12.D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
+	default:
+		return d3d12.D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
+	}
+}
+
+// primitiveTopologyToD3D12 converts a WebGPU primitive topology to D3D12 primitive topology.
+func primitiveTopologyToD3D12(topology types.PrimitiveTopology) d3d12.D3D_PRIMITIVE_TOPOLOGY {
+	switch topology {
+	case types.PrimitiveTopologyPointList:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_POINTLIST
+	case types.PrimitiveTopologyLineList:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_LINELIST
+	case types.PrimitiveTopologyLineStrip:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_LINESTRIP
+	case types.PrimitiveTopologyTriangleList:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+	case types.PrimitiveTopologyTriangleStrip:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP
+	default:
+		return d3d12.D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+	}
+}
+
+// stencilOpToD3D12 converts a HAL stencil operation to D3D12.
+func stencilOpToD3D12(op hal.StencilOperation) d3d12.D3D12_STENCIL_OP {
+	switch op {
+	case hal.StencilOperationKeep:
+		return d3d12.D3D12_STENCIL_OP_KEEP
+	case hal.StencilOperationZero:
+		return d3d12.D3D12_STENCIL_OP_ZERO
+	case hal.StencilOperationReplace:
+		return d3d12.D3D12_STENCIL_OP_REPLACE
+	case hal.StencilOperationInvert:
+		return d3d12.D3D12_STENCIL_OP_INVERT
+	case hal.StencilOperationIncrementClamp:
+		return d3d12.D3D12_STENCIL_OP_INCR_SAT
+	case hal.StencilOperationDecrementClamp:
+		return d3d12.D3D12_STENCIL_OP_DECR_SAT
+	case hal.StencilOperationIncrementWrap:
+		return d3d12.D3D12_STENCIL_OP_INCR
+	case hal.StencilOperationDecrementWrap:
+		return d3d12.D3D12_STENCIL_OP_DECR
+	default:
+		return d3d12.D3D12_STENCIL_OP_KEEP
+	}
+}
+
+// inputStepModeToD3D12 converts a WebGPU vertex step mode to D3D12 input classification.
+func inputStepModeToD3D12(mode types.VertexStepMode) d3d12.D3D12_INPUT_CLASSIFICATION {
+	switch mode {
+	case types.VertexStepModeVertex:
+		return d3d12.D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+	case types.VertexStepModeInstance:
+		return d3d12.D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
+	default:
+		return d3d12.D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+	}
+}
+
+// vertexFormatToD3D12 converts a WebGPU vertex format to DXGI format.
+func vertexFormatToD3D12(format types.VertexFormat) d3d12.DXGI_FORMAT {
+	switch format {
+	case types.VertexFormatUint8x2:
+		return d3d12.DXGI_FORMAT_R8G8_UINT
+	case types.VertexFormatUint8x4:
+		return d3d12.DXGI_FORMAT_R8G8B8A8_UINT
+	case types.VertexFormatSint8x2:
+		return d3d12.DXGI_FORMAT_R8G8_SINT
+	case types.VertexFormatSint8x4:
+		return d3d12.DXGI_FORMAT_R8G8B8A8_SINT
+	case types.VertexFormatUnorm8x2:
+		return d3d12.DXGI_FORMAT_R8G8_UNORM
+	case types.VertexFormatUnorm8x4:
+		return d3d12.DXGI_FORMAT_R8G8B8A8_UNORM
+	case types.VertexFormatSnorm8x2:
+		return d3d12.DXGI_FORMAT_R8G8_SNORM
+	case types.VertexFormatSnorm8x4:
+		return d3d12.DXGI_FORMAT_R8G8B8A8_SNORM
+	case types.VertexFormatUint16x2:
+		return d3d12.DXGI_FORMAT_R16G16_UINT
+	case types.VertexFormatUint16x4:
+		return d3d12.DXGI_FORMAT_R16G16B16A16_UINT
+	case types.VertexFormatSint16x2:
+		return d3d12.DXGI_FORMAT_R16G16_SINT
+	case types.VertexFormatSint16x4:
+		return d3d12.DXGI_FORMAT_R16G16B16A16_SINT
+	case types.VertexFormatUnorm16x2:
+		return d3d12.DXGI_FORMAT_R16G16_UNORM
+	case types.VertexFormatUnorm16x4:
+		return d3d12.DXGI_FORMAT_R16G16B16A16_UNORM
+	case types.VertexFormatSnorm16x2:
+		return d3d12.DXGI_FORMAT_R16G16_SNORM
+	case types.VertexFormatSnorm16x4:
+		return d3d12.DXGI_FORMAT_R16G16B16A16_SNORM
+	case types.VertexFormatFloat16x2:
+		return d3d12.DXGI_FORMAT_R16G16_FLOAT
+	case types.VertexFormatFloat16x4:
+		return d3d12.DXGI_FORMAT_R16G16B16A16_FLOAT
+	case types.VertexFormatFloat32:
+		return d3d12.DXGI_FORMAT_R32_FLOAT
+	case types.VertexFormatFloat32x2:
+		return d3d12.DXGI_FORMAT_R32G32_FLOAT
+	case types.VertexFormatFloat32x3:
+		return d3d12.DXGI_FORMAT_R32G32B32_FLOAT
+	case types.VertexFormatFloat32x4:
+		return d3d12.DXGI_FORMAT_R32G32B32A32_FLOAT
+	case types.VertexFormatUint32:
+		return d3d12.DXGI_FORMAT_R32_UINT
+	case types.VertexFormatUint32x2:
+		return d3d12.DXGI_FORMAT_R32G32_UINT
+	case types.VertexFormatUint32x3:
+		return d3d12.DXGI_FORMAT_R32G32B32_UINT
+	case types.VertexFormatUint32x4:
+		return d3d12.DXGI_FORMAT_R32G32B32A32_UINT
+	case types.VertexFormatSint32:
+		return d3d12.DXGI_FORMAT_R32_SINT
+	case types.VertexFormatSint32x2:
+		return d3d12.DXGI_FORMAT_R32G32_SINT
+	case types.VertexFormatSint32x3:
+		return d3d12.DXGI_FORMAT_R32G32B32_SINT
+	case types.VertexFormatSint32x4:
+		return d3d12.DXGI_FORMAT_R32G32B32A32_SINT
+	case types.VertexFormatUnorm1010102:
+		return d3d12.DXGI_FORMAT_R10G10B10A2_UNORM
+	default:
+		return d3d12.DXGI_FORMAT_UNKNOWN
+	}
+}
+
+// colorWriteMaskToD3D12 converts a WebGPU color write mask to D3D12.
+func colorWriteMaskToD3D12(mask types.ColorWriteMask) uint8 {
+	var d3d12Mask uint8
+	if mask&types.ColorWriteMaskRed != 0 {
+		d3d12Mask |= uint8(d3d12.D3D12_COLOR_WRITE_ENABLE_RED)
+	}
+	if mask&types.ColorWriteMaskGreen != 0 {
+		d3d12Mask |= uint8(d3d12.D3D12_COLOR_WRITE_ENABLE_GREEN)
+	}
+	if mask&types.ColorWriteMaskBlue != 0 {
+		d3d12Mask |= uint8(d3d12.D3D12_COLOR_WRITE_ENABLE_BLUE)
+	}
+	if mask&types.ColorWriteMaskAlpha != 0 {
+		d3d12Mask |= uint8(d3d12.D3D12_COLOR_WRITE_ENABLE_ALPHA)
+	}
+	return d3d12Mask
+}
+
+// shaderStagesToD3D12Visibility converts WebGPU shader stages to D3D12 shader visibility.
+//
+//nolint:unused // Will be used when bind groups are fully implemented
+func shaderStagesToD3D12Visibility(stages types.ShaderStages) d3d12.D3D12_SHADER_VISIBILITY {
+	// If all stages, use ALL
+	if stages&(types.ShaderStageVertex|types.ShaderStageFragment|types.ShaderStageCompute) ==
+		(types.ShaderStageVertex | types.ShaderStageFragment | types.ShaderStageCompute) {
+		return d3d12.D3D12_SHADER_VISIBILITY_ALL
+	}
+
+	// If only vertex
+	if stages == types.ShaderStageVertex {
+		return d3d12.D3D12_SHADER_VISIBILITY_VERTEX
+	}
+
+	// If only fragment (pixel)
+	if stages == types.ShaderStageFragment {
+		return d3d12.D3D12_SHADER_VISIBILITY_PIXEL
+	}
+
+	// For compute, we don't use shader visibility (compute uses separate root signature)
+	// For combinations, use ALL
+	return d3d12.D3D12_SHADER_VISIBILITY_ALL
 }
