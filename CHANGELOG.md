@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-12-26
+
+### Fixed
+- **Metal CommandEncoder State Bug** — Fixes Issue [#24](https://github.com/gogpu/wgpu/issues/24)
+  - Root cause: `isRecording` flag was not set in `CreateCommandEncoder()`
+  - Caused `BeginRenderPass()` to return `nil` on macOS
+  - Fix: Removed boolean flag, use `cmdBuffer != 0` as state indicator
+  - Follows wgpu-rs pattern where `Option<CommandBuffer>` presence indicates state
+  - Added `IsRecording()` method for explicit state checking
+
+### Changed
+- Updated `github.com/gogpu/naga` dependency from v0.5.0 to v0.6.0
+
 ## [0.7.1] - 2025-12-26
 
 ### Added
@@ -166,7 +179,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/gogpu/wgpu/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/gogpu/wgpu/compare/v0.6.1...v0.7.1
 [0.6.1]: https://github.com/gogpu/wgpu/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gogpu/wgpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/wgpu/compare/v0.4.0...v0.5.0
