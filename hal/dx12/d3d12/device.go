@@ -51,6 +51,27 @@ func (d *ID3D12Device) GetNodeCount() uint32 {
 	return uint32(ret)
 }
 
+// CheckFeatureSupport queries feature support.
+// feature specifies which feature to query.
+// featureData is a pointer to the feature-specific data structure.
+// featureDataSize is the size of the data structure in bytes.
+func (d *ID3D12Device) CheckFeatureSupport(feature D3D12_FEATURE, featureData unsafe.Pointer, featureDataSize uint32) error {
+	ret, _, _ := syscall.Syscall6(
+		d.vtbl.CheckFeatureSupport,
+		4,
+		uintptr(unsafe.Pointer(d)),
+		uintptr(feature),
+		uintptr(featureData),
+		uintptr(featureDataSize),
+		0, 0,
+	)
+
+	if ret != 0 {
+		return HRESULTError(ret)
+	}
+	return nil
+}
+
 // CreateCommandQueue creates a command queue.
 func (d *ID3D12Device) CreateCommandQueue(desc *D3D12_COMMAND_QUEUE_DESC) (*ID3D12CommandQueue, error) {
 	var queue *ID3D12CommandQueue
