@@ -441,10 +441,11 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 
 // RenderPassEncoder implements hal.RenderPassEncoder for DirectX 12.
 type RenderPassEncoder struct {
-	encoder     *CommandEncoder
-	desc        *hal.RenderPassDescriptor
-	pipeline    *RenderPipeline
-	indexFormat types.IndexFormat
+	encoder            *CommandEncoder
+	desc               *hal.RenderPassDescriptor
+	pipeline           *RenderPipeline
+	indexFormat        types.IndexFormat
+	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
 }
 
 // End finishes the render pass.
@@ -468,18 +469,25 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	e.encoder.cmdList.IASetPrimitiveTopology(p.topology)
 }
 
-// SetBindGroup sets a bind group.
+// SetBindGroup sets a bind group for graphics operations.
+// index is the bind group slot (0-3 typically).
+// group contains the GPU descriptor handles for resources.
+// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
-	_ = index
-	_ = offsets
 
-	// TODO: Implement when bind groups are implemented
-	// This will involve SetGraphicsRootDescriptorTable or SetGraphicsRoot32BitConstants
-	_ = bg
+	// Ensure descriptor heaps are bound before setting descriptor tables.
+	if !e.descriptorHeapsSet {
+		e.encoder.ensureDescriptorHeapsBound()
+		e.descriptorHeapsSet = true
+	}
+
+	// Bind the group using graphics root descriptor tables.
+	e.encoder.bindGroupToRootTables(index, bg, false)
+	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -637,8 +645,9 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 
 // ComputePassEncoder implements hal.ComputePassEncoder for DirectX 12.
 type ComputePassEncoder struct {
-	encoder  *CommandEncoder
-	pipeline *ComputePipeline
+	encoder            *CommandEncoder
+	pipeline           *ComputePipeline
+	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
 }
 
 // End finishes the compute pass.
@@ -660,18 +669,25 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	}
 }
 
-// SetBindGroup sets a bind group.
+// SetBindGroup sets a bind group for compute operations.
+// index is the bind group slot (0-3 typically).
+// group contains the GPU descriptor handles for resources.
+// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
-	_ = index
-	_ = offsets
 
-	// TODO: Implement when bind groups are implemented
-	// This will involve SetComputeRootDescriptorTable or SetComputeRoot32BitConstants
-	_ = bg
+	// Ensure descriptor heaps are bound before setting descriptor tables.
+	if !e.descriptorHeapsSet {
+		e.encoder.ensureDescriptorHeapsBound()
+		e.descriptorHeapsSet = true
+	}
+
+	// Bind the group using compute root descriptor tables.
+	e.encoder.bindGroupToRootTables(index, bg, true)
+	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
 // Dispatch dispatches compute work.
@@ -697,6 +713,55 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 }
 
 // --- Helper functions ---
+
+// ensureDescriptorHeapsBound binds the shader-visible descriptor heaps to the command list.
+// D3D12 requires descriptor heaps to be bound before setting root descriptor tables.
+// This must be called before any SetBindGroup operations.
+func (e *CommandEncoder) ensureDescriptorHeapsBound() {
+	heaps := make([]*d3d12.ID3D12DescriptorHeap, 0, 2)
+
+	// Add shader-visible heaps (viewHeap for CBV/SRV/UAV, samplerHeap for samplers)
+	if e.device.viewHeap != nil && e.device.viewHeap.raw != nil {
+		heaps = append(heaps, e.device.viewHeap.raw)
+	}
+	if e.device.samplerHeap != nil && e.device.samplerHeap.raw != nil {
+		heaps = append(heaps, e.device.samplerHeap.raw)
+	}
+
+	if len(heaps) > 0 {
+		e.cmdList.SetDescriptorHeaps(uint32(len(heaps)), &heaps[0])
+	}
+}
+
+// bindGroupToRootTables binds a BindGroup's descriptor tables to root parameters.
+// isCompute determines whether to use compute or graphics root descriptor tables.
+// The root parameter index is calculated as: bindGroupIndex * 2 (for CBV/SRV/UAV and sampler tables).
+func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool) {
+	// Calculate root parameter index based on bind group index.
+	// In our root signature layout, each bind group may have up to 2 tables:
+	// - CBV/SRV/UAV table
+	// - Sampler table
+	// So bind group N starts at root parameter index N*2.
+	rootParamIndex := bindGroupIndex * 2
+
+	// Set CBV/SRV/UAV descriptor table if the bind group has one.
+	if bg.gpuDescHandle.Ptr != 0 {
+		if isCompute {
+			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+		} else {
+			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+		}
+	}
+
+	// Set sampler descriptor table if the bind group has one.
+	if bg.samplerGPUHandle.Ptr != 0 {
+		if isCompute {
+			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+		} else {
+			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+		}
+	}
+}
 
 // setupDepthStencilAttachment configures depth/stencil attachment for a render pass.
 // Returns the DSV handle if valid, nil otherwise.

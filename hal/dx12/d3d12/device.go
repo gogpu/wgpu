@@ -868,6 +868,38 @@ func (c *ID3D12GraphicsCommandList) SetGraphicsRootDescriptorTable(rootParameter
 	)
 }
 
+// SetComputeRoot32BitConstant sets a compute root 32-bit constant.
+// rootParameterIndex specifies the root parameter index.
+// srcData is the 32-bit constant value.
+// destOffsetIn32BitValues specifies the offset (in 32-bit values) to set the constant.
+func (c *ID3D12GraphicsCommandList) SetComputeRoot32BitConstant(rootParameterIndex, srcData, destOffsetIn32BitValues uint32) {
+	_, _, _ = syscall.Syscall6(
+		c.vtbl.SetComputeRoot32BitConstant,
+		4,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(rootParameterIndex),
+		uintptr(srcData),
+		uintptr(destOffsetIn32BitValues),
+		0, 0,
+	)
+}
+
+// SetGraphicsRoot32BitConstant sets a graphics root 32-bit constant.
+// rootParameterIndex specifies the root parameter index.
+// srcData is the 32-bit constant value.
+// destOffsetIn32BitValues specifies the offset (in 32-bit values) to set the constant.
+func (c *ID3D12GraphicsCommandList) SetGraphicsRoot32BitConstant(rootParameterIndex, srcData, destOffsetIn32BitValues uint32) {
+	_, _, _ = syscall.Syscall6(
+		c.vtbl.SetGraphicsRoot32BitConstant,
+		4,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(rootParameterIndex),
+		uintptr(srcData),
+		uintptr(destOffsetIn32BitValues),
+		0, 0,
+	)
+}
+
 // IASetIndexBuffer sets the index buffer.
 func (c *ID3D12GraphicsCommandList) IASetIndexBuffer(view *D3D12_INDEX_BUFFER_VIEW) {
 	_, _, _ = syscall.Syscall(
