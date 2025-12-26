@@ -68,25 +68,24 @@
 - [x] Vertex/fragment function binding
 - [x] Color attachment and blending configuration
 
-### v0.7.1 — ErrZeroArea Validation (Current)
+### v0.7.1 — ErrZeroArea Validation
 - [x] Added `ErrZeroArea` sentinel error matching wgpu-core pattern
 - [x] All `Surface.Configure()` validate dimensions before configuring
 - [x] Affected backends: Metal, Vulkan, GLES, Software
 - [x] Unit tests for zero-dimension handling
 
+### v0.8.0 — DirectX 12 Backend (Current)
+- [x] DX12 bindings via syscall (Pure Go COM, no CGO!)
+- [x] Device and adapter enumeration via DXGI
+- [x] Command list and allocator management
+- [x] Root signature and PSO creation
+- [x] Descriptor heaps (CBV/SRV/UAV, Sampler, RTV, DSV)
+- [x] Flip model swapchain with tearing support
+- [x] Full format conversion (WebGPU → DXGI)
+
 ---
 
 ## Upcoming Releases
-
-### v0.8.0 — DirectX 12 Backend
-**Target: Q2 2025**
-
-- [ ] DX12 bindings via goffi (COM interfaces)
-- [ ] Device and adapter enumeration
-- [ ] Command list and allocator
-- [ ] Root signature and PSO
-- [ ] Descriptor heaps
-- [ ] Shader compilation (DXIL from SPIR-V via naga)
 
 ### v0.10.0 — Compute Shaders
 **Target: Q3 2025**
@@ -146,11 +145,11 @@
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Priority areas:
-1. Metal backend implementation
-2. DX12 backend implementation
-3. Compute shader support
-4. WebAssembly support
-5. Documentation and examples
+1. Compute shader support
+2. WebAssembly support
+3. Documentation and examples
+4. Performance optimization
+5. WebGPU specification compliance
 
 ---
 
@@ -158,6 +157,8 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.8.0 | 2025-12 | DirectX 12 backend, all 5 HAL backends complete |
+| v0.7.0 | 2025-12 | Metal shader pipeline (WGSL→MSL) |
 | v0.6.0 | 2025-12 | Metal backend for macOS |
 | v0.5.0 | 2025-12 | Software rasterization pipeline |
 | v0.4.0 | 2025-12 | OpenGL ES (Linux EGL + Windows WGL) |
