@@ -20,10 +20,10 @@ var (
 
 // D3D12Lib provides access to D3D12 functions.
 type D3D12Lib struct {
-	dll                       *syscall.LazyDLL
-	d3d12CreateDevice         *syscall.LazyProc
-	d3d12GetDebugInterface    *syscall.LazyProc
-	d3d12SerializeRootSignature *syscall.LazyProc
+	dll                                  *syscall.LazyDLL
+	d3d12CreateDevice                    *syscall.LazyProc
+	d3d12GetDebugInterface               *syscall.LazyProc
+	d3d12SerializeRootSignature          *syscall.LazyProc
 	d3d12SerializeVersionedRootSignature *syscall.LazyProc
 }
 
@@ -42,10 +42,10 @@ func loadD3D12Internal() (*D3D12Lib, error) {
 	}
 
 	lib := &D3D12Lib{
-		dll:                       dll,
-		d3d12CreateDevice:         dll.NewProc("D3D12CreateDevice"),
-		d3d12GetDebugInterface:    dll.NewProc("D3D12GetDebugInterface"),
-		d3d12SerializeRootSignature: dll.NewProc("D3D12SerializeRootSignature"),
+		dll:                                  dll,
+		d3d12CreateDevice:                    dll.NewProc("D3D12CreateDevice"),
+		d3d12GetDebugInterface:               dll.NewProc("D3D12GetDebugInterface"),
+		d3d12SerializeRootSignature:          dll.NewProc("D3D12SerializeRootSignature"),
 		d3d12SerializeVersionedRootSignature: dll.NewProc("D3D12SerializeVersionedRootSignature"),
 	}
 

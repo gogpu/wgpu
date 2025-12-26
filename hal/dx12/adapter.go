@@ -256,7 +256,7 @@ func (a *Adapter) limits() types.Limits {
 
 	// Buffer limits
 	limits.MaxBufferSize = 128 * 1024 * 1024 * 1024 // 128 GB (virtual address space)
-	limits.MaxUniformBufferBindingSize = 65536       // 64 KB per CBV
+	limits.MaxUniformBufferBindingSize = 65536      // 64 KB per CBV
 
 	// Compute limits
 	limits.MaxComputeWorkgroupStorageSize = 32768 // 32 KB shared memory
@@ -299,9 +299,25 @@ func (a *Adapter) deviceType() types.DeviceType {
 
 // Open opens a logical device with the requested features and limits.
 func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDevice, error) {
-	// TODO: Implement device creation
-	// This will be implemented in TASK-DX12-004
-	return hal.OpenDevice{}, fmt.Errorf("dx12: device creation not yet implemented")
+	// Validate that the adapter supports the requested features
+	supported := a.Features()
+	if features&^supported != 0 {
+		return hal.OpenDevice{}, fmt.Errorf("dx12: adapter does not support requested features")
+	}
+
+	// Create device using the adapter
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), a.capabilities.FeatureLevel)
+	if err != nil {
+		return hal.OpenDevice{}, err
+	}
+
+	// Create queue wrapper
+	queue := newQueue(device)
+
+	return hal.OpenDevice{
+		Device: device,
+		Queue:  queue,
+	}, nil
 }
 
 // TextureFormatCapabilities returns capabilities for a specific texture format.
@@ -579,7 +595,25 @@ func (a *AdapterLegacy) deviceType() types.DeviceType {
 
 // Open opens a logical device with the requested features and limits.
 func (a *AdapterLegacy) Open(features types.Features, limits types.Limits) (hal.OpenDevice, error) {
-	return hal.OpenDevice{}, fmt.Errorf("dx12: device creation not yet implemented")
+	// Validate that the adapter supports the requested features
+	supported := a.Features()
+	if features&^supported != 0 {
+		return hal.OpenDevice{}, fmt.Errorf("dx12: adapter does not support requested features")
+	}
+
+	// Create device using the legacy adapter
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), a.capabilities.FeatureLevel)
+	if err != nil {
+		return hal.OpenDevice{}, err
+	}
+
+	// Create queue wrapper
+	queue := newQueue(device)
+
+	return hal.OpenDevice{
+		Device: device,
+		Queue:  queue,
+	}, nil
 }
 
 // TextureFormatCapabilities returns capabilities for a specific texture format.

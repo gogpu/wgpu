@@ -121,7 +121,7 @@ type D3D12_RESOURCE_BARRIER struct {
 
 // D3D12_RESOURCE_TRANSITION_BARRIER describes a resource transition barrier.
 type D3D12_RESOURCE_TRANSITION_BARRIER struct {
-	Resource   *ID3D12Resource
+	Resource    *ID3D12Resource
 	Subresource uint32
 	StateBefore D3D12_RESOURCE_STATES
 	StateAfter  D3D12_RESOURCE_STATES
@@ -194,8 +194,8 @@ type D3D12_INDEX_BUFFER_VIEW struct {
 
 // D3D12_STREAM_OUTPUT_BUFFER_VIEW describes a stream output buffer view.
 type D3D12_STREAM_OUTPUT_BUFFER_VIEW struct {
-	BufferLocation        uint64
-	SizeInBytes           uint64
+	BufferLocation           uint64
+	SizeInBytes              uint64
 	BufferFilledSizeLocation uint64
 }
 
@@ -283,10 +283,10 @@ type D3D12_BOX struct {
 
 // D3D12_TEXTURE_COPY_LOCATION describes a texture copy location.
 type D3D12_TEXTURE_COPY_LOCATION struct {
-	Resource        *ID3D12Resource
-	Type            D3D12_TEXTURE_COPY_TYPE
+	Resource *ID3D12Resource
+	Type     D3D12_TEXTURE_COPY_TYPE
 	// Union: PlacedFootprint or SubresourceIndex
-	Union           [48]byte
+	Union [48]byte
 }
 
 // D3D12_TEXTURE_COPY_TYPE specifies texture copy type.
@@ -294,8 +294,8 @@ type D3D12_TEXTURE_COPY_TYPE uint32
 
 // Texture copy type constants.
 const (
-	D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX  D3D12_TEXTURE_COPY_TYPE = 0
-	D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT   D3D12_TEXTURE_COPY_TYPE = 1
+	D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX D3D12_TEXTURE_COPY_TYPE = 0
+	D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT  D3D12_TEXTURE_COPY_TYPE = 1
 )
 
 // D3D12_PLACED_SUBRESOURCE_FOOTPRINT describes a placed subresource footprint.
@@ -323,11 +323,11 @@ type D3D12_TILED_RESOURCE_COORDINATE struct {
 
 // D3D12_TILE_REGION_SIZE describes a tile region size.
 type D3D12_TILE_REGION_SIZE struct {
-	NumTiles   uint32
-	UseBox     int32 // BOOL
-	Width      uint32
-	Height     uint16
-	Depth      uint16
+	NumTiles uint32
+	UseBox   int32 // BOOL
+	Width    uint32
+	Height   uint16
+	Depth    uint16
 }
 
 // D3D12_QUERY_HEAP_DESC describes a query heap.
@@ -383,11 +383,11 @@ type D3D12_SHADER_BYTECODE struct {
 
 // D3D12_STREAM_OUTPUT_DESC describes stream output.
 type D3D12_STREAM_OUTPUT_DESC struct {
-	SODeclaration      *D3D12_SO_DECLARATION_ENTRY
-	NumEntries         uint32
-	BufferStrides      *uint32
-	NumStrides         uint32
-	RasterizedStream   uint32
+	SODeclaration    *D3D12_SO_DECLARATION_ENTRY
+	NumEntries       uint32
+	BufferStrides    *uint32
+	NumStrides       uint32
+	RasterizedStream uint32
 }
 
 // D3D12_SO_DECLARATION_ENTRY describes a stream output declaration entry.
@@ -458,33 +458,33 @@ type D3D12_DEPTH_STENCILOP_DESC struct {
 
 // D3D12_CACHED_PIPELINE_STATE describes a cached pipeline state.
 type D3D12_CACHED_PIPELINE_STATE struct {
-	CachedBlob           unsafe.Pointer
+	CachedBlob            unsafe.Pointer
 	CachedBlobSizeInBytes uintptr
 }
 
 // D3D12_GRAPHICS_PIPELINE_STATE_DESC describes a graphics pipeline state.
 type D3D12_GRAPHICS_PIPELINE_STATE_DESC struct {
-	RootSignature        *ID3D12RootSignature
-	VS                   D3D12_SHADER_BYTECODE
-	PS                   D3D12_SHADER_BYTECODE
-	DS                   D3D12_SHADER_BYTECODE
-	HS                   D3D12_SHADER_BYTECODE
-	GS                   D3D12_SHADER_BYTECODE
-	StreamOutput         D3D12_STREAM_OUTPUT_DESC
-	BlendState           D3D12_BLEND_DESC
-	SampleMask           uint32
-	RasterizerState      D3D12_RASTERIZER_DESC
-	DepthStencilState    D3D12_DEPTH_STENCIL_DESC
-	InputLayout          D3D12_INPUT_LAYOUT_DESC
-	IBStripCutValue      D3D12_INDEX_BUFFER_STRIP_CUT_VALUE
+	RootSignature         *ID3D12RootSignature
+	VS                    D3D12_SHADER_BYTECODE
+	PS                    D3D12_SHADER_BYTECODE
+	DS                    D3D12_SHADER_BYTECODE
+	HS                    D3D12_SHADER_BYTECODE
+	GS                    D3D12_SHADER_BYTECODE
+	StreamOutput          D3D12_STREAM_OUTPUT_DESC
+	BlendState            D3D12_BLEND_DESC
+	SampleMask            uint32
+	RasterizerState       D3D12_RASTERIZER_DESC
+	DepthStencilState     D3D12_DEPTH_STENCIL_DESC
+	InputLayout           D3D12_INPUT_LAYOUT_DESC
+	IBStripCutValue       D3D12_INDEX_BUFFER_STRIP_CUT_VALUE
 	PrimitiveTopologyType D3D12_PRIMITIVE_TOPOLOGY_TYPE
-	NumRenderTargets     uint32
-	RTVFormats           [8]DXGI_FORMAT
-	DSVFormat            DXGI_FORMAT
-	SampleDesc           DXGI_SAMPLE_DESC
-	NodeMask             uint32
-	CachedPSO            D3D12_CACHED_PIPELINE_STATE
-	Flags                D3D12_PIPELINE_STATE_FLAGS
+	NumRenderTargets      uint32
+	RTVFormats            [8]DXGI_FORMAT
+	DSVFormat             DXGI_FORMAT
+	SampleDesc            DXGI_SAMPLE_DESC
+	NodeMask              uint32
+	CachedPSO             D3D12_CACHED_PIPELINE_STATE
+	Flags                 D3D12_PIPELINE_STATE_FLAGS
 }
 
 // D3D12_COMPUTE_PIPELINE_STATE_DESC describes a compute pipeline state.
@@ -507,7 +507,7 @@ type D3D12_ROOT_SIGNATURE_DESC struct {
 
 // D3D12_ROOT_PARAMETER describes a root parameter.
 type D3D12_ROOT_PARAMETER struct {
-	ParameterType    D3D12_ROOT_PARAMETER_TYPE
+	ParameterType D3D12_ROOT_PARAMETER_TYPE
 	// Union of DescriptorTable, Constants, or Descriptor
 	Union            [16]byte
 	ShaderVisibility D3D12_SHADER_VISIBILITY
@@ -568,7 +568,7 @@ type D3D12_COMMAND_SIGNATURE_DESC struct {
 
 // D3D12_INDIRECT_ARGUMENT_DESC describes an indirect argument.
 type D3D12_INDIRECT_ARGUMENT_DESC struct {
-	Type  D3D12_INDIRECT_ARGUMENT_TYPE
+	Type D3D12_INDIRECT_ARGUMENT_TYPE
 	// Union for different argument types
 	Union [8]byte
 }
@@ -588,28 +588,28 @@ type D3D12_FEATURE_DATA_SHADER_MODEL struct {
 
 // D3D12_FEATURE_DATA_D3D12_OPTIONS describes D3D12 options feature data.
 type D3D12_FEATURE_DATA_D3D12_OPTIONS struct {
-	DoublePrecisionFloatShaderOps                     int32 // BOOL
-	OutputMergerLogicOp                               int32 // BOOL
-	MinPrecisionSupport                               uint32 // D3D12_SHADER_MIN_PRECISION_SUPPORT
-	TiledResourcesTier                                uint32 // D3D12_TILED_RESOURCES_TIER
-	ResourceBindingTier                               uint32 // D3D12_RESOURCE_BINDING_TIER
-	PSSpecifiedStencilRefSupported                    int32 // BOOL
-	TypedUAVLoadAdditionalFormats                     int32 // BOOL
-	ROVsSupported                                     int32 // BOOL
-	ConservativeRasterizationTier                     uint32 // D3D12_CONSERVATIVE_RASTERIZATION_TIER
-	MaxGPUVirtualAddressBitsPerResource               uint32
-	StandardSwizzle64KBSupported                      int32 // BOOL
-	CrossNodeSharingTier                              uint32 // D3D12_CROSS_NODE_SHARING_TIER
-	CrossAdapterRowMajorTextureSupported              int32 // BOOL
-	VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation int32 // BOOL
-	ResourceHeapTier                                  uint32 // D3D12_RESOURCE_HEAP_TIER
+	DoublePrecisionFloatShaderOps                                              int32  // BOOL
+	OutputMergerLogicOp                                                        int32  // BOOL
+	MinPrecisionSupport                                                        uint32 // D3D12_SHADER_MIN_PRECISION_SUPPORT
+	TiledResourcesTier                                                         uint32 // D3D12_TILED_RESOURCES_TIER
+	ResourceBindingTier                                                        uint32 // D3D12_RESOURCE_BINDING_TIER
+	PSSpecifiedStencilRefSupported                                             int32  // BOOL
+	TypedUAVLoadAdditionalFormats                                              int32  // BOOL
+	ROVsSupported                                                              int32  // BOOL
+	ConservativeRasterizationTier                                              uint32 // D3D12_CONSERVATIVE_RASTERIZATION_TIER
+	MaxGPUVirtualAddressBitsPerResource                                        uint32
+	StandardSwizzle64KBSupported                                               int32  // BOOL
+	CrossNodeSharingTier                                                       uint32 // D3D12_CROSS_NODE_SHARING_TIER
+	CrossAdapterRowMajorTextureSupported                                       int32  // BOOL
+	VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation int32  // BOOL
+	ResourceHeapTier                                                           uint32 // D3D12_RESOURCE_HEAP_TIER
 }
 
 // D3D12_FEATURE_DATA_FEATURE_LEVELS describes feature levels.
 type D3D12_FEATURE_DATA_FEATURE_LEVELS struct {
-	NumFeatureLevels          uint32
-	FeatureLevelsRequested    *D3D_FEATURE_LEVEL
-	MaxSupportedFeatureLevel  D3D_FEATURE_LEVEL
+	NumFeatureLevels         uint32
+	FeatureLevelsRequested   *D3D_FEATURE_LEVEL
+	MaxSupportedFeatureLevel D3D_FEATURE_LEVEL
 }
 
 // D3D12_RENDER_PASS_RENDER_TARGET_DESC describes a render pass render target.
@@ -621,23 +621,23 @@ type D3D12_RENDER_PASS_RENDER_TARGET_DESC struct {
 
 // D3D12_RENDER_PASS_DEPTH_STENCIL_DESC describes a render pass depth stencil.
 type D3D12_RENDER_PASS_DEPTH_STENCIL_DESC struct {
-	CPUDescriptor              D3D12_CPU_DESCRIPTOR_HANDLE
-	DepthBeginningAccess       D3D12_RENDER_PASS_BEGINNING_ACCESS
-	StencilBeginningAccess     D3D12_RENDER_PASS_BEGINNING_ACCESS
-	DepthEndingAccess          D3D12_RENDER_PASS_ENDING_ACCESS
-	StencilEndingAccess        D3D12_RENDER_PASS_ENDING_ACCESS
+	CPUDescriptor          D3D12_CPU_DESCRIPTOR_HANDLE
+	DepthBeginningAccess   D3D12_RENDER_PASS_BEGINNING_ACCESS
+	StencilBeginningAccess D3D12_RENDER_PASS_BEGINNING_ACCESS
+	DepthEndingAccess      D3D12_RENDER_PASS_ENDING_ACCESS
+	StencilEndingAccess    D3D12_RENDER_PASS_ENDING_ACCESS
 }
 
 // D3D12_RENDER_PASS_BEGINNING_ACCESS describes render pass beginning access.
 type D3D12_RENDER_PASS_BEGINNING_ACCESS struct {
-	Type  D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE
+	Type D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE
 	// Union for Clear (D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS)
 	Union [20]byte
 }
 
 // D3D12_RENDER_PASS_ENDING_ACCESS describes render pass ending access.
 type D3D12_RENDER_PASS_ENDING_ACCESS struct {
-	Type  D3D12_RENDER_PASS_ENDING_ACCESS_TYPE
+	Type D3D12_RENDER_PASS_ENDING_ACCESS_TYPE
 	// Union for Resolve (D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_PARAMETERS)
 	Union [48]byte
 }
@@ -682,7 +682,7 @@ type D3D12_WRITEBUFFERIMMEDIATE_MODE uint32
 
 // Write buffer immediate mode constants.
 const (
-	D3D12_WRITEBUFFERIMMEDIATE_MODE_DEFAULT       D3D12_WRITEBUFFERIMMEDIATE_MODE = 0
-	D3D12_WRITEBUFFERIMMEDIATE_MODE_MARKER_IN     D3D12_WRITEBUFFERIMMEDIATE_MODE = 1
-	D3D12_WRITEBUFFERIMMEDIATE_MODE_MARKER_OUT    D3D12_WRITEBUFFERIMMEDIATE_MODE = 2
+	D3D12_WRITEBUFFERIMMEDIATE_MODE_DEFAULT    D3D12_WRITEBUFFERIMMEDIATE_MODE = 0
+	D3D12_WRITEBUFFERIMMEDIATE_MODE_MARKER_IN  D3D12_WRITEBUFFERIMMEDIATE_MODE = 1
+	D3D12_WRITEBUFFERIMMEDIATE_MODE_MARKER_OUT D3D12_WRITEBUFFERIMMEDIATE_MODE = 2
 )

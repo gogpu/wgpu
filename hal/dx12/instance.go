@@ -292,12 +292,6 @@ func (i *Instance) AllowsTearing() bool {
 	return i.allowTearing
 }
 
-// Device is a placeholder type for DX12 device (will be implemented in TASK-DX12-004).
-type Device struct {
-	// TODO: Implement in TASK-DX12-004
-	_ *d3d12.ID3D12Device // placeholder for raw device
-}
-
 // Surface implements hal.Surface for DirectX 12.
 type Surface struct {
 	instance  *Instance

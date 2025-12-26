@@ -85,43 +85,43 @@ type id3d12DeviceVtbl struct {
 	SetName                 uintptr
 
 	// ID3D12Device
-	GetNodeCount                                    uintptr
-	CreateCommandQueue                              uintptr
-	CreateCommandAllocator                          uintptr
-	CreateGraphicsPipelineState                     uintptr
-	CreateComputePipelineState                      uintptr
-	CreateCommandList                               uintptr
-	CheckFeatureSupport                             uintptr
-	CreateDescriptorHeap                            uintptr
-	GetDescriptorHandleIncrementSize                uintptr
-	CreateRootSignature                             uintptr
-	CreateConstantBufferView                        uintptr
-	CreateShaderResourceView                        uintptr
-	CreateUnorderedAccessView                       uintptr
-	CreateRenderTargetView                          uintptr
-	CreateDepthStencilView                          uintptr
-	CreateSampler                                   uintptr
-	CopyDescriptors                                 uintptr
-	CopyDescriptorsSimple                           uintptr
-	GetResourceAllocationInfo                       uintptr
-	GetCustomHeapProperties                         uintptr
-	CreateCommittedResource                         uintptr
-	CreateHeap                                      uintptr
-	CreatePlacedResource                            uintptr
-	CreateReservedResource                          uintptr
-	CreateSharedHandle                              uintptr
-	OpenSharedHandle                                uintptr
-	OpenSharedHandleByName                          uintptr
-	MakeResident                                    uintptr
-	Evict                                           uintptr
-	CreateFence                                     uintptr
-	GetDeviceRemovedReason                          uintptr
-	GetCopyableFootprints                           uintptr
-	CreateQueryHeap                                 uintptr
-	SetStablePowerState                             uintptr
-	CreateCommandSignature                          uintptr
-	GetResourceTiling                               uintptr
-	GetAdapterLuid                                  uintptr
+	GetNodeCount                     uintptr
+	CreateCommandQueue               uintptr
+	CreateCommandAllocator           uintptr
+	CreateGraphicsPipelineState      uintptr
+	CreateComputePipelineState       uintptr
+	CreateCommandList                uintptr
+	CheckFeatureSupport              uintptr
+	CreateDescriptorHeap             uintptr
+	GetDescriptorHandleIncrementSize uintptr
+	CreateRootSignature              uintptr
+	CreateConstantBufferView         uintptr
+	CreateShaderResourceView         uintptr
+	CreateUnorderedAccessView        uintptr
+	CreateRenderTargetView           uintptr
+	CreateDepthStencilView           uintptr
+	CreateSampler                    uintptr
+	CopyDescriptors                  uintptr
+	CopyDescriptorsSimple            uintptr
+	GetResourceAllocationInfo        uintptr
+	GetCustomHeapProperties          uintptr
+	CreateCommittedResource          uintptr
+	CreateHeap                       uintptr
+	CreatePlacedResource             uintptr
+	CreateReservedResource           uintptr
+	CreateSharedHandle               uintptr
+	OpenSharedHandle                 uintptr
+	OpenSharedHandleByName           uintptr
+	MakeResident                     uintptr
+	Evict                            uintptr
+	CreateFence                      uintptr
+	GetDeviceRemovedReason           uintptr
+	GetCopyableFootprints            uintptr
+	CreateQueryHeap                  uintptr
+	SetStablePowerState              uintptr
+	CreateCommandSignature           uintptr
+	GetResourceTiling                uintptr
+	GetAdapterLuid                   uintptr
 }
 
 // ID3D12CommandQueue represents a command queue.
@@ -147,17 +147,17 @@ type id3d12CommandQueueVtbl struct {
 	// ID3D12Pageable has no additional methods
 
 	// ID3D12CommandQueue
-	UpdateTileMappings        uintptr
-	CopyTileMappings          uintptr
-	ExecuteCommandLists       uintptr
-	SetMarker                 uintptr
-	BeginEvent                uintptr
-	EndEvent                  uintptr
-	Signal                    uintptr
-	Wait                      uintptr
-	GetTimestampFrequency     uintptr
-	GetClockCalibration       uintptr
-	GetDesc                   uintptr
+	UpdateTileMappings    uintptr
+	CopyTileMappings      uintptr
+	ExecuteCommandLists   uintptr
+	SetMarker             uintptr
+	BeginEvent            uintptr
+	EndEvent              uintptr
+	Signal                uintptr
+	Wait                  uintptr
+	GetTimestampFrequency uintptr
+	GetClockCalibration   uintptr
+	GetDesc               uintptr
 }
 
 // ID3D12CommandAllocator represents a command allocator.
@@ -234,57 +234,57 @@ type id3d12GraphicsCommandListVtbl struct {
 	GetType uintptr
 
 	// ID3D12GraphicsCommandList
-	Close                            uintptr
-	Reset                            uintptr
-	ClearState                       uintptr
-	DrawInstanced                    uintptr
-	DrawIndexedInstanced             uintptr
-	Dispatch                         uintptr
-	CopyBufferRegion                 uintptr
-	CopyTextureRegion                uintptr
-	CopyResource                     uintptr
-	CopyTiles                        uintptr
-	ResolveSubresource               uintptr
-	IASetPrimitiveTopology           uintptr
-	RSSetViewports                   uintptr
-	RSSetScissorRects                uintptr
-	OMSetBlendFactor                 uintptr
-	OMSetStencilRef                  uintptr
-	SetPipelineState                 uintptr
-	ResourceBarrier                  uintptr
-	ExecuteBundle                    uintptr
-	SetDescriptorHeaps               uintptr
-	SetComputeRootSignature          uintptr
-	SetGraphicsRootSignature         uintptr
-	SetComputeRootDescriptorTable    uintptr
-	SetGraphicsRootDescriptorTable   uintptr
-	SetComputeRoot32BitConstant      uintptr
-	SetGraphicsRoot32BitConstant     uintptr
-	SetComputeRoot32BitConstants     uintptr
-	SetGraphicsRoot32BitConstants    uintptr
-	SetComputeRootConstantBufferView uintptr
-	SetGraphicsRootConstantBufferView uintptr
-	SetComputeRootShaderResourceView uintptr
-	SetGraphicsRootShaderResourceView uintptr
-	SetComputeRootUnorderedAccessView uintptr
+	Close                              uintptr
+	Reset                              uintptr
+	ClearState                         uintptr
+	DrawInstanced                      uintptr
+	DrawIndexedInstanced               uintptr
+	Dispatch                           uintptr
+	CopyBufferRegion                   uintptr
+	CopyTextureRegion                  uintptr
+	CopyResource                       uintptr
+	CopyTiles                          uintptr
+	ResolveSubresource                 uintptr
+	IASetPrimitiveTopology             uintptr
+	RSSetViewports                     uintptr
+	RSSetScissorRects                  uintptr
+	OMSetBlendFactor                   uintptr
+	OMSetStencilRef                    uintptr
+	SetPipelineState                   uintptr
+	ResourceBarrier                    uintptr
+	ExecuteBundle                      uintptr
+	SetDescriptorHeaps                 uintptr
+	SetComputeRootSignature            uintptr
+	SetGraphicsRootSignature           uintptr
+	SetComputeRootDescriptorTable      uintptr
+	SetGraphicsRootDescriptorTable     uintptr
+	SetComputeRoot32BitConstant        uintptr
+	SetGraphicsRoot32BitConstant       uintptr
+	SetComputeRoot32BitConstants       uintptr
+	SetGraphicsRoot32BitConstants      uintptr
+	SetComputeRootConstantBufferView   uintptr
+	SetGraphicsRootConstantBufferView  uintptr
+	SetComputeRootShaderResourceView   uintptr
+	SetGraphicsRootShaderResourceView  uintptr
+	SetComputeRootUnorderedAccessView  uintptr
 	SetGraphicsRootUnorderedAccessView uintptr
-	IASetIndexBuffer                 uintptr
-	IASetVertexBuffers               uintptr
-	SOSetTargets                     uintptr
-	OMSetRenderTargets               uintptr
-	ClearDepthStencilView            uintptr
-	ClearRenderTargetView            uintptr
-	ClearUnorderedAccessViewUint     uintptr
-	ClearUnorderedAccessViewFloat    uintptr
-	DiscardResource                  uintptr
-	BeginQuery                       uintptr
-	EndQuery                         uintptr
-	ResolveQueryData                 uintptr
-	SetPredication                   uintptr
-	SetMarker                        uintptr
-	BeginEvent                       uintptr
-	EndEvent                         uintptr
-	ExecuteIndirect                  uintptr
+	IASetIndexBuffer                   uintptr
+	IASetVertexBuffers                 uintptr
+	SOSetTargets                       uintptr
+	OMSetRenderTargets                 uintptr
+	ClearDepthStencilView              uintptr
+	ClearRenderTargetView              uintptr
+	ClearUnorderedAccessViewUint       uintptr
+	ClearUnorderedAccessViewFloat      uintptr
+	DiscardResource                    uintptr
+	BeginQuery                         uintptr
+	EndQuery                           uintptr
+	ResolveQueryData                   uintptr
+	SetPredication                     uintptr
+	SetMarker                          uintptr
+	BeginEvent                         uintptr
+	EndEvent                           uintptr
+	ExecuteIndirect                    uintptr
 }
 
 // ID3D12GraphicsCommandList1 extends ID3D12GraphicsCommandList.
@@ -296,12 +296,12 @@ type id3d12GraphicsCommandList1Vtbl struct {
 	id3d12GraphicsCommandListVtbl
 
 	// ID3D12GraphicsCommandList1
-	AtomicCopyBufferUINT       uintptr
-	AtomicCopyBufferUINT64     uintptr
-	OMSetDepthBounds           uintptr
-	SetSamplePositions         uintptr
-	ResolveSubresourceRegion   uintptr
-	SetViewInstanceMask        uintptr
+	AtomicCopyBufferUINT     uintptr
+	AtomicCopyBufferUINT64   uintptr
+	OMSetDepthBounds         uintptr
+	SetSamplePositions       uintptr
+	ResolveSubresourceRegion uintptr
+	SetViewInstanceMask      uintptr
 }
 
 // ID3D12GraphicsCommandList2 extends ID3D12GraphicsCommandList1.
@@ -337,15 +337,15 @@ type id3d12GraphicsCommandList4Vtbl struct {
 	id3d12GraphicsCommandList3Vtbl
 
 	// ID3D12GraphicsCommandList4
-	BeginRenderPass                          uintptr
-	EndRenderPass                            uintptr
-	InitializeMetaCommand                    uintptr
-	ExecuteMetaCommand                       uintptr
-	BuildRaytracingAccelerationStructure     uintptr
+	BeginRenderPass                                  uintptr
+	EndRenderPass                                    uintptr
+	InitializeMetaCommand                            uintptr
+	ExecuteMetaCommand                               uintptr
+	BuildRaytracingAccelerationStructure             uintptr
 	EmitRaytracingAccelerationStructurePostbuildInfo uintptr
-	CopyRaytracingAccelerationStructure      uintptr
-	SetPipelineState1                        uintptr
-	DispatchRays                             uintptr
+	CopyRaytracingAccelerationStructure              uintptr
+	SetPipelineState1                                uintptr
+	DispatchRays                                     uintptr
 }
 
 // ID3D12Fence represents a fence for synchronization.
@@ -371,9 +371,9 @@ type id3d12FenceVtbl struct {
 	// ID3D12Pageable has no additional methods
 
 	// ID3D12Fence
-	GetCompletedValue uintptr
+	GetCompletedValue    uintptr
 	SetEventOnCompletion uintptr
-	Signal            uintptr
+	Signal               uintptr
 }
 
 // ID3D12Fence1 extends ID3D12Fence.
@@ -411,13 +411,13 @@ type id3d12ResourceVtbl struct {
 	// ID3D12Pageable has no additional methods
 
 	// ID3D12Resource
-	Map               uintptr
-	Unmap             uintptr
-	GetDesc           uintptr
+	Map                  uintptr
+	Unmap                uintptr
+	GetDesc              uintptr
 	GetGPUVirtualAddress uintptr
-	WriteToSubresource uintptr
-	ReadFromSubresource uintptr
-	GetHeapProperties uintptr
+	WriteToSubresource   uintptr
+	ReadFromSubresource  uintptr
+	GetHeapProperties    uintptr
 }
 
 // ID3D12Resource1 extends ID3D12Resource.
@@ -455,7 +455,7 @@ type id3d12DescriptorHeapVtbl struct {
 	// ID3D12Pageable has no additional methods
 
 	// ID3D12DescriptorHeap
-	GetDesc                  uintptr
+	GetDesc                            uintptr
 	GetCPUDescriptorHandleForHeapStart uintptr
 	GetGPUDescriptorHandleForHeapStart uintptr
 }
@@ -627,7 +627,7 @@ type id3d12Debug1Vtbl struct {
 	EnableDebugLayer uintptr
 
 	// ID3D12Debug1
-	SetEnableGPUBasedValidation uintptr
+	SetEnableGPUBasedValidation                 uintptr
 	SetEnableSynchronizedCommandQueueValidation uintptr
 }
 
@@ -661,7 +661,7 @@ type id3d12Debug3Vtbl struct {
 	EnableDebugLayer uintptr
 
 	// ID3D12Debug1
-	SetEnableGPUBasedValidation uintptr
+	SetEnableGPUBasedValidation                 uintptr
 	SetEnableSynchronizedCommandQueueValidation uintptr
 
 	// ID3D12Debug3
@@ -680,41 +680,41 @@ type id3d12InfoQueueVtbl struct {
 	Release        uintptr
 
 	// ID3D12InfoQueue
-	SetMessageCountLimit          uintptr
-	ClearStoredMessages           uintptr
-	GetMessage                    uintptr
-	GetNumMessagesAllowedByStorageFilter uintptr
-	GetNumMessagesDeniedByStorageFilter uintptr
-	GetNumStoredMessages          uintptr
+	SetMessageCountLimit                         uintptr
+	ClearStoredMessages                          uintptr
+	GetMessage                                   uintptr
+	GetNumMessagesAllowedByStorageFilter         uintptr
+	GetNumMessagesDeniedByStorageFilter          uintptr
+	GetNumStoredMessages                         uintptr
 	GetNumStoredMessagesAllowedByRetrievalFilter uintptr
-	GetNumMessagesDiscardedByMessageCountLimit uintptr
-	GetMessageCountLimit          uintptr
-	AddStorageFilterEntries       uintptr
-	GetStorageFilter              uintptr
-	ClearStorageFilter            uintptr
-	PushEmptyStorageFilter        uintptr
-	PushCopyOfStorageFilter       uintptr
-	PushStorageFilter             uintptr
-	PopStorageFilter              uintptr
-	GetStorageFilterStackSize     uintptr
-	AddRetrievalFilterEntries     uintptr
-	GetRetrievalFilter            uintptr
-	ClearRetrievalFilter          uintptr
-	PushEmptyRetrievalFilter      uintptr
-	PushCopyOfRetrievalFilter     uintptr
-	PushRetrievalFilter           uintptr
-	PopRetrievalFilter            uintptr
-	GetRetrievalFilterStackSize   uintptr
-	AddMessage                    uintptr
-	AddApplicationMessage         uintptr
-	SetBreakOnCategory            uintptr
-	SetBreakOnSeverity            uintptr
-	SetBreakOnID                  uintptr
-	GetBreakOnCategory            uintptr
-	GetBreakOnSeverity            uintptr
-	GetBreakOnID                  uintptr
-	SetMuteDebugOutput            uintptr
-	GetMuteDebugOutput            uintptr
+	GetNumMessagesDiscardedByMessageCountLimit   uintptr
+	GetMessageCountLimit                         uintptr
+	AddStorageFilterEntries                      uintptr
+	GetStorageFilter                             uintptr
+	ClearStorageFilter                           uintptr
+	PushEmptyStorageFilter                       uintptr
+	PushCopyOfStorageFilter                      uintptr
+	PushStorageFilter                            uintptr
+	PopStorageFilter                             uintptr
+	GetStorageFilterStackSize                    uintptr
+	AddRetrievalFilterEntries                    uintptr
+	GetRetrievalFilter                           uintptr
+	ClearRetrievalFilter                         uintptr
+	PushEmptyRetrievalFilter                     uintptr
+	PushCopyOfRetrievalFilter                    uintptr
+	PushRetrievalFilter                          uintptr
+	PopRetrievalFilter                           uintptr
+	GetRetrievalFilterStackSize                  uintptr
+	AddMessage                                   uintptr
+	AddApplicationMessage                        uintptr
+	SetBreakOnCategory                           uintptr
+	SetBreakOnSeverity                           uintptr
+	SetBreakOnID                                 uintptr
+	GetBreakOnCategory                           uintptr
+	GetBreakOnSeverity                           uintptr
+	GetBreakOnID                                 uintptr
+	SetMuteDebugOutput                           uintptr
+	GetMuteDebugOutput                           uintptr
 }
 
 // ID3DBlob represents a binary blob (typically shader bytecode).
