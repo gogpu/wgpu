@@ -87,8 +87,8 @@
 
 ## Upcoming Releases
 
-### v0.10.0 — Compute Shaders
-**Target: Q3 2025**
+### v0.9.0 — Compute Shaders
+**Target: Q1 2025**
 
 - [ ] Compute pipeline support in all backends
 - [ ] Dispatch and indirect dispatch
@@ -96,8 +96,8 @@
 - [ ] Atomic operations
 - [ ] Workgroup shared memory
 
-### v0.11.0 — WebAssembly Support
-**Target: Q4 2025**
+### v0.10.0 — WebAssembly Support
+**Target: Q2 2025**
 
 - [ ] WASM build target
 - [ ] Browser WebGPU API bindings
@@ -105,7 +105,7 @@
 - [ ] Examples running in browser
 
 ### v1.0.0 — Production Ready
-**Target: Q4 2025**
+**Target: Q3 2025**
 
 - [ ] Full WebGPU specification compliance
 - [ ] All backends stable
