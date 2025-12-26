@@ -85,9 +85,10 @@ func (s *Sampler) Destroy() {
 
 // ShaderModule implements hal.ShaderModule for Metal.
 type ShaderModule struct {
-	source  hal.ShaderSource
-	library ID // id<MTLLibrary>
-	device  *Device
+	source         hal.ShaderSource
+	library        ID // id<MTLLibrary>
+	device         *Device
+	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size
 }
 
 // Destroy releases the shader module.
@@ -152,8 +153,9 @@ func (p *RenderPipeline) Destroy() {
 
 // ComputePipeline implements hal.ComputePipeline for Metal.
 type ComputePipeline struct {
-	raw    ID // id<MTLComputePipelineState>
-	device *Device
+	raw           ID // id<MTLComputePipelineState>
+	device        *Device
+	workgroupSize MTLSize // workgroup size from shader
 }
 
 // Destroy releases the compute pipeline.

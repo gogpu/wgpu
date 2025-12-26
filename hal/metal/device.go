@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
@@ -357,6 +358,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			return nil, fmt.Errorf("metal: failed to lower WGSL to IR: %w", err)
 		}
 
+		// Extract workgroup sizes from entry points for compute shaders
+		workgroupSizes := extractWorkgroupSizes(irModule)
+
 		// Compile IR to MSL
 		mslSource, _, err := msl.Compile(irModule, msl.DefaultOptions())
 		if err != nil {
@@ -386,7 +390,12 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			return nil, fmt.Errorf("metal: failed to compile MSL: %s", errMsg)
 		}
 
-		return &ShaderModule{source: desc.Source, library: library, device: d}, nil
+		return &ShaderModule{
+			source:         desc.Source,
+			library:        library,
+			device:         d,
+			workgroupSizes: workgroupSizes,
+		}, nil
 	}
 
 	// No WGSL source - just store the descriptor for later
@@ -533,7 +542,65 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, fmt.Errorf("metal: CreateComputePipeline not yet implemented")
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	// Get shader module
+	computeModule, ok := desc.Compute.Module.(*ShaderModule)
+	if !ok || computeModule == nil || computeModule.library == 0 {
+		return nil, fmt.Errorf("metal: invalid compute shader module")
+	}
+
+	// Get compute function from library
+	funcName := NSString(desc.Compute.EntryPoint)
+	computeFunc := MsgSend(computeModule.library, Sel("newFunctionWithName:"), uintptr(funcName))
+	Release(funcName)
+	if computeFunc == 0 {
+		return nil, fmt.Errorf("metal: compute function '%s' not found", desc.Compute.EntryPoint)
+	}
+	defer Release(computeFunc)
+
+	// Create compute pipeline state
+	var errorPtr ID
+	pipelineState := MsgSend(d.raw, Sel("newComputePipelineStateWithFunction:error:"),
+		uintptr(computeFunc), uintptr(unsafe.Pointer(&errorPtr)))
+
+	if pipelineState == 0 {
+		errMsg := "unknown error"
+		if errorPtr != 0 {
+			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
+			if errDesc != 0 {
+				errMsg = GoString(errDesc)
+			}
+			Release(errorPtr)
+		}
+		return nil, fmt.Errorf("metal: failed to create compute pipeline state: %s", errMsg)
+	}
+
+	// Get workgroup size from shader module metadata
+	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
+
+	return &ComputePipeline{
+		raw:           pipelineState,
+		device:        d,
+		workgroupSize: workgroupSize,
+	}, nil
+}
+
+// getWorkgroupSize retrieves workgroup size for a compute entry point.
+// Falls back to default {64, 1, 1} if not found.
+func getWorkgroupSize(module *ShaderModule, entryPoint string) MTLSize {
+	if module.workgroupSizes != nil {
+		if size, ok := module.workgroupSizes[entryPoint]; ok {
+			return MTLSize{
+				Width:  NSUInteger(size[0]),
+				Height: NSUInteger(size[1]),
+				Depth:  NSUInteger(size[2]),
+			}
+		}
+	}
+	// Default fallback
+	return MTLSize{Width: 64, Height: 1, Depth: 1}
 }
 
 // DestroyComputePipeline destroys a compute pipeline.
@@ -605,4 +672,22 @@ func (d *Device) Destroy() {
 		Release(d.commandQueue)
 		d.commandQueue = 0
 	}
+}
+
+// extractWorkgroupSizes extracts workgroup sizes from IR module entry points.
+// Returns a map from entry point name to workgroup size [x, y, z].
+func extractWorkgroupSizes(module *ir.Module) map[string][3]uint32 {
+	if module == nil {
+		return nil
+	}
+	result := make(map[string][3]uint32)
+	for _, ep := range module.EntryPoints {
+		if ep.Stage == ir.StageCompute {
+			result[ep.Name] = ep.Workgroup
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

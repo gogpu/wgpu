@@ -493,19 +493,29 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 // Dispatch dispatches compute workgroups.
 func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
+	if e.pipeline == nil {
+		return // No pipeline set
+	}
+
 	threadgroupsPerGrid := MTLSize{Width: NSUInteger(x), Height: NSUInteger(y), Depth: NSUInteger(z)}
-	threadsPerThreadgroup := MTLSize{Width: 64, Height: 1, Depth: 1}
+	// Use pipeline's workgroup size instead of hardcoded value
+	threadsPerThreadgroup := e.pipeline.workgroupSize
+
 	_ = MsgSend(e.raw, Sel("dispatchThreadgroups:threadsPerThreadgroup:"),
 		uintptr(unsafe.Pointer(&threadgroupsPerGrid)), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
+	if e.pipeline == nil {
+		return // No pipeline set
+	}
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil {
 		return
 	}
-	threadsPerThreadgroup := MTLSize{Width: 64, Height: 1, Depth: 1}
+	// Use pipeline's workgroup size instead of hardcoded value
+	threadsPerThreadgroup := e.pipeline.workgroupSize
 	_ = MsgSend(e.raw, Sel("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:"),
 		uintptr(buf.raw), uintptr(offset), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
 }
