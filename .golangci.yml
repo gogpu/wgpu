@@ -166,6 +166,40 @@ linters:
           - gocyclo
           - cyclop
 
+      # DX12 COM bindings - Windows API naming conventions preserved
+      # D3D12_* types match the Windows SDK headers exactly for documentation cross-reference
+      - path: hal/dx12/d3d12/.*\.go
+        linters:
+          - revive
+          - errname
+          - dogsled
+          - staticcheck
+          - unused
+          - funlen
+          - dupl
+
+      # DXGI bindings - Windows API naming conventions
+      - path: hal/dx12/dxgi/.*\.go
+        linters:
+          - revive
+          - errname
+          - dogsled
+          - staticcheck
+          - unused
+          - funlen
+          - dupl
+
+      # DXC (shader compiler) bindings
+      - path: hal/dx12/dxc/.*\.go
+        linters:
+          - revive
+          - errname
+          - dogsled
+          - staticcheck
+          - unused
+          - funlen
+          - dupl
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
