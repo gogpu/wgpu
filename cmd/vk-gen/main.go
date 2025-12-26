@@ -1115,15 +1115,9 @@ func generateCommandMethod(f *os.File, cmd Command) error {
 	fmt.Fprintf(f, "\targs := [%d]unsafe.Pointer{\n", argCount)
 	for _, param := range params {
 		paramName := param.Name
-		isPointer := strings.Contains(param.RawXML, "*")
-
-		if isPointer {
-			// Already a pointer, use directly
-			fmt.Fprintf(f, "\t\tunsafe.Pointer(%s),\n", paramName)
-		} else {
-			// Primitive or handle, take address
-			fmt.Fprintf(f, "\t\tunsafe.Pointer(&%s),\n", paramName)
-		}
+		// goffi API requires pointer TO value for all arguments
+		// (the args slice contains pointers to where argument values are stored)
+		fmt.Fprintf(f, "\t\tunsafe.Pointer(&%s),\n", paramName)
 	}
 	fmt.Fprintln(f, "\t}")
 

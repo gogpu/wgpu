@@ -709,9 +709,9 @@ type Commands struct {
 func (c *Commands) CreateInstance(pCreateInfo *InstanceCreateInfo, pAllocator *AllocationCallbacks, pInstance *Instance) Result {
 	var result int32
 	args := [3]unsafe.Pointer{
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pInstance),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pInstance),
 	}
 	_ = ffi.CallFunction(&SigResultPtrPtrPtr, c.createInstance, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -721,7 +721,7 @@ func (c *Commands) CreateInstance(pCreateInfo *InstanceCreateInfo, pAllocator *A
 func (c *Commands) DestroyInstance(instance Instance, pAllocator *AllocationCallbacks) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.destroyInstance, nil, args[:])
 }
@@ -731,8 +731,8 @@ func (c *Commands) EnumeratePhysicalDevices(instance Instance, pPhysicalDeviceCo
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pPhysicalDeviceCount),
-		unsafe.Pointer(pPhysicalDevices),
+		unsafe.Pointer(&pPhysicalDeviceCount),
+		unsafe.Pointer(&pPhysicalDevices),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDevices, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -746,7 +746,7 @@ func (c *Commands) EnumeratePhysicalDevices(instance Instance, pPhysicalDeviceCo
 func (c *Commands) GetPhysicalDeviceProperties(physicalDevice PhysicalDevice, pProperties *PhysicalDeviceProperties) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceProperties, nil, args[:])
 }
@@ -755,8 +755,8 @@ func (c *Commands) GetPhysicalDeviceProperties(physicalDevice PhysicalDevice, pP
 func (c *Commands) GetPhysicalDeviceQueueFamilyProperties(physicalDevice PhysicalDevice, pQueueFamilyPropertyCount *uint32, pQueueFamilyProperties *QueueFamilyProperties) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pQueueFamilyPropertyCount),
-		unsafe.Pointer(pQueueFamilyProperties),
+		unsafe.Pointer(&pQueueFamilyPropertyCount),
+		unsafe.Pointer(&pQueueFamilyProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyProperties, nil, args[:])
 }
@@ -765,7 +765,7 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyProperties(physicalDevice Physica
 func (c *Commands) GetPhysicalDeviceMemoryProperties(physicalDevice PhysicalDevice, pMemoryProperties *PhysicalDeviceMemoryProperties) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pMemoryProperties),
+		unsafe.Pointer(&pMemoryProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceMemoryProperties, nil, args[:])
 }
@@ -774,7 +774,7 @@ func (c *Commands) GetPhysicalDeviceMemoryProperties(physicalDevice PhysicalDevi
 func (c *Commands) GetPhysicalDeviceFeatures(physicalDevice PhysicalDevice, pFeatures *PhysicalDeviceFeatures) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pFeatures),
+		unsafe.Pointer(&pFeatures),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceFeatures, nil, args[:])
 }
@@ -784,7 +784,7 @@ func (c *Commands) GetPhysicalDeviceFormatProperties(physicalDevice PhysicalDevi
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&format),
-		unsafe.Pointer(pFormatProperties),
+		unsafe.Pointer(&pFormatProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceFormatProperties, nil, args[:])
 }
@@ -796,9 +796,9 @@ func (c *Commands) CreateDevice(physicalDevice PhysicalDevice, pCreateInfo *Devi
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pDevice),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pDevice),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDevice, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -808,7 +808,7 @@ func (c *Commands) CreateDevice(physicalDevice PhysicalDevice, pCreateInfo *Devi
 func (c *Commands) DestroyDevice(device Device, pAllocator *AllocationCallbacks) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.destroyDevice, nil, args[:])
 }
@@ -817,7 +817,7 @@ func (c *Commands) DestroyDevice(device Device, pAllocator *AllocationCallbacks)
 func (c *Commands) EnumerateInstanceVersion(pApiVersion *uint32) Result {
 	var result int32
 	args := [1]unsafe.Pointer{
-		unsafe.Pointer(pApiVersion),
+		unsafe.Pointer(&pApiVersion),
 	}
 	_ = ffi.CallFunction(&SigResultPtr, c.enumerateInstanceVersion, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -827,8 +827,8 @@ func (c *Commands) EnumerateInstanceVersion(pApiVersion *uint32) Result {
 func (c *Commands) EnumerateInstanceLayerProperties(pPropertyCount *uint32, pProperties *LayerProperties) Result {
 	var result int32
 	args := [2]unsafe.Pointer{
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultPtrPtr, c.enumerateInstanceLayerProperties, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -838,9 +838,9 @@ func (c *Commands) EnumerateInstanceLayerProperties(pPropertyCount *uint32, pPro
 func (c *Commands) EnumerateInstanceExtensionProperties(pLayerName uintptr, pPropertyCount *uint32, pProperties *ExtensionProperties) Result {
 	var result int32
 	args := [3]unsafe.Pointer{
-		unsafe.Pointer(pLayerName),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pLayerName),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultPtrPtrPtr, c.enumerateInstanceExtensionProperties, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -851,8 +851,8 @@ func (c *Commands) EnumerateDeviceLayerProperties(physicalDevice PhysicalDevice,
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumerateDeviceLayerProperties, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -863,9 +863,9 @@ func (c *Commands) EnumerateDeviceExtensionProperties(physicalDevice PhysicalDev
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pLayerName),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pLayerName),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.enumerateDeviceExtensionProperties, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -877,7 +877,7 @@ func (c *Commands) GetDeviceQueue(device Device, queueFamilyIndex uint32, queueI
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&queueFamilyIndex),
 		unsafe.Pointer(&queueIndex),
-		unsafe.Pointer(pQueue),
+		unsafe.Pointer(&pQueue),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.getDeviceQueue, nil, args[:])
 }
@@ -888,7 +888,7 @@ func (c *Commands) QueueSubmit(queue Queue, submitCount uint32, pSubmits *Submit
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&submitCount),
-		unsafe.Pointer(pSubmits),
+		unsafe.Pointer(&pSubmits),
 		unsafe.Pointer(&fence),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit, unsafe.Pointer(&result), args[:])
@@ -920,9 +920,9 @@ func (c *Commands) AllocateMemory(device Device, pAllocateInfo *MemoryAllocateIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAllocateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pMemory),
+		unsafe.Pointer(&pAllocateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pMemory),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.allocateMemory, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -933,7 +933,7 @@ func (c *Commands) FreeMemory(device Device, memory DeviceMemory, pAllocator *Al
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memory),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.freeMemory, nil, args[:])
 }
@@ -947,7 +947,7 @@ func (c *Commands) MapMemory(device Device, memory DeviceMemory, offset DeviceSi
 		unsafe.Pointer(&offset),
 		unsafe.Pointer(&size),
 		unsafe.Pointer(&flags),
-		unsafe.Pointer(ppData),
+		unsafe.Pointer(&ppData),
 	}
 	_ = ffi.CallFunction(&SigResultMapMemory, c.mapMemory, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -968,7 +968,7 @@ func (c *Commands) FlushMappedMemoryRanges(device Device, memoryRangeCount uint3
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memoryRangeCount),
-		unsafe.Pointer(pMemoryRanges),
+		unsafe.Pointer(&pMemoryRanges),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.flushMappedMemoryRanges, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -980,7 +980,7 @@ func (c *Commands) InvalidateMappedMemoryRanges(device Device, memoryRangeCount 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memoryRangeCount),
-		unsafe.Pointer(pMemoryRanges),
+		unsafe.Pointer(&pMemoryRanges),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.invalidateMappedMemoryRanges, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -991,7 +991,7 @@ func (c *Commands) GetDeviceMemoryCommitment(device Device, memory DeviceMemory,
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memory),
-		unsafe.Pointer(pCommittedMemoryInBytes),
+		unsafe.Pointer(&pCommittedMemoryInBytes),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDeviceMemoryCommitment, nil, args[:])
 }
@@ -1001,7 +1001,7 @@ func (c *Commands) GetBufferMemoryRequirements(device Device, buffer Buffer, pMe
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&buffer),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getBufferMemoryRequirements, nil, args[:])
 }
@@ -1024,7 +1024,7 @@ func (c *Commands) GetImageMemoryRequirements(device Device, image Image, pMemor
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&image),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getImageMemoryRequirements, nil, args[:])
 }
@@ -1052,7 +1052,7 @@ func (c *Commands) QueueBindSparse(queue Queue, bindInfoCount uint32, pBindInfo 
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfo),
+		unsafe.Pointer(&pBindInfo),
 		unsafe.Pointer(&fence),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueBindSparse, unsafe.Pointer(&result), args[:])
@@ -1064,9 +1064,9 @@ func (c *Commands) CreateFence(device Device, pCreateInfo *FenceCreateInfo, pAll
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pFence),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pFence),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFence, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1077,7 +1077,7 @@ func (c *Commands) DestroyFence(device Device, fence Fence, pAllocator *Allocati
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&fence),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyFence, nil, args[:])
 }
@@ -1088,7 +1088,7 @@ func (c *Commands) ResetFences(device Device, fenceCount uint32, pFences *Fence)
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&fenceCount),
-		unsafe.Pointer(pFences),
+		unsafe.Pointer(&pFences),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.resetFences, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1111,7 +1111,7 @@ func (c *Commands) WaitForFences(device Device, fenceCount uint32, pFences *Fenc
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&fenceCount),
-		unsafe.Pointer(pFences),
+		unsafe.Pointer(&pFences),
 		unsafe.Pointer(&waitAll),
 		unsafe.Pointer(&timeout),
 	}
@@ -1124,9 +1124,9 @@ func (c *Commands) CreateSemaphore(device Device, pCreateInfo *SemaphoreCreateIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSemaphore),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSemaphore),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphore, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1137,7 +1137,7 @@ func (c *Commands) DestroySemaphore(device Device, semaphore Semaphore, pAllocat
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&semaphore),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySemaphore, nil, args[:])
 }
@@ -1147,9 +1147,9 @@ func (c *Commands) CreateEvent(device Device, pCreateInfo *EventCreateInfo, pAll
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pEvent),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pEvent),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createEvent, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1160,7 +1160,7 @@ func (c *Commands) DestroyEvent(device Device, event Event, pAllocator *Allocati
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&event),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyEvent, nil, args[:])
 }
@@ -1203,9 +1203,9 @@ func (c *Commands) CreateQueryPool(device Device, pCreateInfo *QueryPoolCreateIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pQueryPool),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pQueryPool),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createQueryPool, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1216,7 +1216,7 @@ func (c *Commands) DestroyQueryPool(device Device, queryPool QueryPool, pAllocat
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&queryPool),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyQueryPool, nil, args[:])
 }
@@ -1239,9 +1239,9 @@ func (c *Commands) CreateBuffer(device Device, pCreateInfo *BufferCreateInfo, pA
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pBuffer),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pBuffer),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBuffer, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1252,7 +1252,7 @@ func (c *Commands) DestroyBuffer(device Device, buffer Buffer, pAllocator *Alloc
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&buffer),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBuffer, nil, args[:])
 }
@@ -1262,9 +1262,9 @@ func (c *Commands) CreateBufferView(device Device, pCreateInfo *BufferViewCreate
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pView),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pView),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferView, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1275,7 +1275,7 @@ func (c *Commands) DestroyBufferView(device Device, bufferView BufferView, pAllo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bufferView),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBufferView, nil, args[:])
 }
@@ -1285,9 +1285,9 @@ func (c *Commands) CreateImage(device Device, pCreateInfo *ImageCreateInfo, pAll
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pImage),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pImage),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImage, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1298,7 +1298,7 @@ func (c *Commands) DestroyImage(device Device, image Image, pAllocator *Allocati
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&image),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyImage, nil, args[:])
 }
@@ -1310,9 +1310,9 @@ func (c *Commands) CreateImageView(device Device, pCreateInfo *ImageViewCreateIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pView),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pView),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImageView, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1323,7 +1323,7 @@ func (c *Commands) DestroyImageView(device Device, imageView ImageView, pAllocat
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&imageView),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyImageView, nil, args[:])
 }
@@ -1333,9 +1333,9 @@ func (c *Commands) CreateShaderModule(device Device, pCreateInfo *ShaderModuleCr
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pShaderModule),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pShaderModule),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createShaderModule, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1346,7 +1346,7 @@ func (c *Commands) DestroyShaderModule(device Device, shaderModule ShaderModule,
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shaderModule),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyShaderModule, nil, args[:])
 }
@@ -1356,9 +1356,9 @@ func (c *Commands) CreatePipelineCache(device Device, pCreateInfo *PipelineCache
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelineCache),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelineCache),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineCache, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1369,7 +1369,7 @@ func (c *Commands) DestroyPipelineCache(device Device, pipelineCache PipelineCac
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineCache, nil, args[:])
 }
@@ -1380,8 +1380,8 @@ func (c *Commands) GetPipelineCacheData(device Device, pipelineCache PipelineCac
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
-		unsafe.Pointer(pDataSize),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pDataSize),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPipelineCacheData, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1394,7 +1394,7 @@ func (c *Commands) MergePipelineCaches(device Device, dstCache PipelineCache, sr
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&dstCache),
 		unsafe.Pointer(&srcCacheCount),
-		unsafe.Pointer(pSrcCaches),
+		unsafe.Pointer(&pSrcCaches),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergePipelineCaches, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1405,9 +1405,9 @@ func (c *Commands) CreatePipelineBinariesKHR(device Device, pCreateInfo *Pipelin
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pBinaries),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pBinaries),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineBinariesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1418,7 +1418,7 @@ func (c *Commands) DestroyPipelineBinaryKHR(device Device, pipelineBinary Pipeli
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineBinary),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineBinaryKHR, nil, args[:])
 }
@@ -1428,8 +1428,8 @@ func (c *Commands) GetPipelineKeyKHR(device Device, pPipelineCreateInfo *Pipelin
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pPipelineCreateInfo),
-		unsafe.Pointer(pPipelineKey),
+		unsafe.Pointer(&pPipelineCreateInfo),
+		unsafe.Pointer(&pPipelineKey),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelineKeyKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1440,10 +1440,10 @@ func (c *Commands) GetPipelineBinaryDataKHR(device Device, pInfo *PipelineBinary
 	var result int32
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pPipelineBinaryKey),
-		unsafe.Pointer(pPipelineBinaryDataSize),
-		unsafe.Pointer(pPipelineBinaryData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pPipelineBinaryKey),
+		unsafe.Pointer(&pPipelineBinaryDataSize),
+		unsafe.Pointer(&pPipelineBinaryData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getPipelineBinaryDataKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1454,8 +1454,8 @@ func (c *Commands) ReleaseCapturedPipelineDataKHR(device Device, pInfo *ReleaseC
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.releaseCapturedPipelineDataKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1468,9 +1468,9 @@ func (c *Commands) CreateGraphicsPipelines(device Device, pipelineCache Pipeline
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
 		unsafe.Pointer(&createInfoCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelines),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelines),
 	}
 	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createGraphicsPipelines, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1483,9 +1483,9 @@ func (c *Commands) CreateComputePipelines(device Device, pipelineCache PipelineC
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
 		unsafe.Pointer(&createInfoCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelines),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelines),
 	}
 	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createComputePipelines, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1497,7 +1497,7 @@ func (c *Commands) GetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI(device Device, 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&renderpass),
-		unsafe.Pointer(pMaxWorkgroupSize),
+		unsafe.Pointer(&pMaxWorkgroupSize),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceSubpassShadingMaxWorkgroupSizeHUAWEI, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1508,7 +1508,7 @@ func (c *Commands) DestroyPipeline(device Device, pipeline Pipeline, pAllocator 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipeline),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipeline, nil, args[:])
 }
@@ -1518,9 +1518,9 @@ func (c *Commands) CreatePipelineLayout(device Device, pCreateInfo *PipelineLayo
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelineLayout),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelineLayout),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineLayout, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1531,7 +1531,7 @@ func (c *Commands) DestroyPipelineLayout(device Device, pipelineLayout PipelineL
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineLayout),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineLayout, nil, args[:])
 }
@@ -1541,9 +1541,9 @@ func (c *Commands) CreateSampler(device Device, pCreateInfo *SamplerCreateInfo, 
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSampler),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSampler),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSampler, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1554,7 +1554,7 @@ func (c *Commands) DestroySampler(device Device, sampler Sampler, pAllocator *Al
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&sampler),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySampler, nil, args[:])
 }
@@ -1564,9 +1564,9 @@ func (c *Commands) CreateDescriptorSetLayout(device Device, pCreateInfo *Descrip
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSetLayout),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSetLayout),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorSetLayout, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1577,7 +1577,7 @@ func (c *Commands) DestroyDescriptorSetLayout(device Device, descriptorSetLayout
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorSetLayout),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorSetLayout, nil, args[:])
 }
@@ -1587,9 +1587,9 @@ func (c *Commands) CreateDescriptorPool(device Device, pCreateInfo *DescriptorPo
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pDescriptorPool),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pDescriptorPool),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorPool, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1600,7 +1600,7 @@ func (c *Commands) DestroyDescriptorPool(device Device, descriptorPool Descripto
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorPool),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorPool, nil, args[:])
 }
@@ -1622,8 +1622,8 @@ func (c *Commands) AllocateDescriptorSets(device Device, pAllocateInfo *Descript
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAllocateInfo),
-		unsafe.Pointer(pDescriptorSets),
+		unsafe.Pointer(&pAllocateInfo),
+		unsafe.Pointer(&pDescriptorSets),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateDescriptorSets, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1636,7 +1636,7 @@ func (c *Commands) FreeDescriptorSets(device Device, descriptorPool DescriptorPo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorPool),
 		unsafe.Pointer(&descriptorSetCount),
-		unsafe.Pointer(pDescriptorSets),
+		unsafe.Pointer(&pDescriptorSets),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.freeDescriptorSets, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1647,9 +1647,9 @@ func (c *Commands) UpdateDescriptorSets(device Device, descriptorWriteCount uint
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorWriteCount),
-		unsafe.Pointer(pDescriptorWrites),
+		unsafe.Pointer(&pDescriptorWrites),
 		unsafe.Pointer(&descriptorCopyCount),
-		unsafe.Pointer(pDescriptorCopies),
+		unsafe.Pointer(&pDescriptorCopies),
 	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.updateDescriptorSets, nil, args[:])
 }
@@ -1659,9 +1659,9 @@ func (c *Commands) CreateFramebuffer(device Device, pCreateInfo *FramebufferCrea
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pFramebuffer),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pFramebuffer),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFramebuffer, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1672,7 +1672,7 @@ func (c *Commands) DestroyFramebuffer(device Device, framebuffer Framebuffer, pA
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&framebuffer),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyFramebuffer, nil, args[:])
 }
@@ -1682,9 +1682,9 @@ func (c *Commands) CreateRenderPass(device Device, pCreateInfo *RenderPassCreate
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pRenderPass),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pRenderPass),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1695,7 +1695,7 @@ func (c *Commands) DestroyRenderPass(device Device, renderPass RenderPass, pAllo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&renderPass),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyRenderPass, nil, args[:])
 }
@@ -1705,7 +1705,7 @@ func (c *Commands) GetRenderAreaGranularity(device Device, renderPass RenderPass
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&renderPass),
-		unsafe.Pointer(pGranularity),
+		unsafe.Pointer(&pGranularity),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getRenderAreaGranularity, nil, args[:])
 }
@@ -1714,8 +1714,8 @@ func (c *Commands) GetRenderAreaGranularity(device Device, renderPass RenderPass
 func (c *Commands) GetRenderingAreaGranularity(device Device, pRenderingAreaInfo *RenderingAreaInfo, pGranularity *Extent2D) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pRenderingAreaInfo),
-		unsafe.Pointer(pGranularity),
+		unsafe.Pointer(&pRenderingAreaInfo),
+		unsafe.Pointer(&pGranularity),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getRenderingAreaGranularity, nil, args[:])
 }
@@ -1725,9 +1725,9 @@ func (c *Commands) CreateCommandPool(device Device, pCreateInfo *CommandPoolCrea
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pCommandPool),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pCommandPool),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCommandPool, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1738,7 +1738,7 @@ func (c *Commands) DestroyCommandPool(device Device, commandPool CommandPool, pA
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&commandPool),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCommandPool, nil, args[:])
 }
@@ -1760,8 +1760,8 @@ func (c *Commands) AllocateCommandBuffers(device Device, pAllocateInfo *CommandB
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAllocateInfo),
-		unsafe.Pointer(pCommandBuffers),
+		unsafe.Pointer(&pAllocateInfo),
+		unsafe.Pointer(&pCommandBuffers),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateCommandBuffers, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1773,7 +1773,7 @@ func (c *Commands) FreeCommandBuffers(device Device, commandPool CommandPool, co
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&commandPool),
 		unsafe.Pointer(&commandBufferCount),
-		unsafe.Pointer(pCommandBuffers),
+		unsafe.Pointer(&pCommandBuffers),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.freeCommandBuffers, nil, args[:])
 }
@@ -1783,7 +1783,7 @@ func (c *Commands) BeginCommandBuffer(commandBuffer CommandBuffer, pBeginInfo *C
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBeginInfo),
+		unsafe.Pointer(&pBeginInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.beginCommandBuffer, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -1835,7 +1835,7 @@ func (c *Commands) CmdSetViewport(commandBuffer CommandBuffer, firstViewport uin
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstViewport),
 		unsafe.Pointer(&viewportCount),
-		unsafe.Pointer(pViewports),
+		unsafe.Pointer(&pViewports),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewport, nil, args[:])
 }
@@ -1846,7 +1846,7 @@ func (c *Commands) CmdSetScissor(commandBuffer CommandBuffer, firstScissor uint3
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstScissor),
 		unsafe.Pointer(&scissorCount),
-		unsafe.Pointer(pScissors),
+		unsafe.Pointer(&pScissors),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetScissor, nil, args[:])
 }
@@ -1911,9 +1911,9 @@ func (c *Commands) CmdBindDescriptorSets(commandBuffer CommandBuffer, pipelineBi
 		unsafe.Pointer(&layout),
 		unsafe.Pointer(&firstSet),
 		unsafe.Pointer(&descriptorSetCount),
-		unsafe.Pointer(pDescriptorSets),
+		unsafe.Pointer(&pDescriptorSets),
 		unsafe.Pointer(&dynamicOffsetCount),
-		unsafe.Pointer(pDynamicOffsets),
+		unsafe.Pointer(&pDynamicOffsets),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdBindDescriptorSets, c.cmdBindDescriptorSets, nil, args[:])
 }
@@ -1935,8 +1935,8 @@ func (c *Commands) CmdBindVertexBuffers(commandBuffer CommandBuffer, firstBindin
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstBinding),
 		unsafe.Pointer(&bindingCount),
-		unsafe.Pointer(pBuffers),
-		unsafe.Pointer(pOffsets),
+		unsafe.Pointer(&pBuffers),
+		unsafe.Pointer(&pOffsets),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdBindVertexBuffers, nil, args[:])
 }
@@ -2061,7 +2061,7 @@ func (c *Commands) CmdCopyBuffer(commandBuffer CommandBuffer, srcBuffer Buffer, 
 		unsafe.Pointer(&srcBuffer),
 		unsafe.Pointer(&dstBuffer),
 		unsafe.Pointer(&regionCount),
-		unsafe.Pointer(pRegions),
+		unsafe.Pointer(&pRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBuffer, c.cmdCopyBuffer, nil, args[:])
 }
@@ -2075,7 +2075,7 @@ func (c *Commands) CmdCopyImage(commandBuffer CommandBuffer, srcImage Image, src
 		unsafe.Pointer(&dstImage),
 		unsafe.Pointer(&dstImageLayout),
 		unsafe.Pointer(&regionCount),
-		unsafe.Pointer(pRegions),
+		unsafe.Pointer(&pRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImage, c.cmdCopyImage, nil, args[:])
 }
@@ -2090,7 +2090,7 @@ func (c *Commands) CmdCopyBufferToImage(commandBuffer CommandBuffer, srcBuffer B
 		unsafe.Pointer(&dstImage),
 		unsafe.Pointer(&dstImageLayout),
 		unsafe.Pointer(&regionCount),
-		unsafe.Pointer(pRegions),
+		unsafe.Pointer(&pRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBufferToImage, c.cmdCopyBufferToImage, nil, args[:])
 }
@@ -2103,7 +2103,7 @@ func (c *Commands) CmdCopyImageToBuffer(commandBuffer CommandBuffer, srcImage Im
 		unsafe.Pointer(&srcImageLayout),
 		unsafe.Pointer(&dstBuffer),
 		unsafe.Pointer(&regionCount),
-		unsafe.Pointer(pRegions),
+		unsafe.Pointer(&pRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImageToBuffer, c.cmdCopyImageToBuffer, nil, args[:])
 }
@@ -2114,7 +2114,7 @@ func (c *Commands) CmdCopyImageToBuffer(commandBuffer CommandBuffer, srcImage Im
 func (c *Commands) CmdCopyMemoryIndirectKHR(commandBuffer CommandBuffer, pCopyMemoryIndirectInfo *CopyMemoryIndirectInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyMemoryIndirectInfo),
+		unsafe.Pointer(&pCopyMemoryIndirectInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryIndirectKHR, nil, args[:])
 }
@@ -2125,7 +2125,7 @@ func (c *Commands) CmdCopyMemoryIndirectKHR(commandBuffer CommandBuffer, pCopyMe
 func (c *Commands) CmdCopyMemoryToImageIndirectKHR(commandBuffer CommandBuffer, pCopyMemoryToImageIndirectInfo *CopyMemoryToImageIndirectInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyMemoryToImageIndirectInfo),
+		unsafe.Pointer(&pCopyMemoryToImageIndirectInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToImageIndirectKHR, nil, args[:])
 }
@@ -2153,9 +2153,9 @@ func (c *Commands) CmdClearAttachments(commandBuffer CommandBuffer, attachmentCo
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pAttachments),
+		unsafe.Pointer(&pAttachments),
 		unsafe.Pointer(&rectCount),
-		unsafe.Pointer(pRects),
+		unsafe.Pointer(&pRects),
 	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.cmdClearAttachments, nil, args[:])
 }
@@ -2169,7 +2169,7 @@ func (c *Commands) CmdResolveImage(commandBuffer CommandBuffer, srcImage Image, 
 		unsafe.Pointer(&dstImage),
 		unsafe.Pointer(&dstImageLayout),
 		unsafe.Pointer(&regionCount),
-		unsafe.Pointer(pRegions),
+		unsafe.Pointer(&pRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImage, c.cmdResolveImage, nil, args[:])
 }
@@ -2204,11 +2204,11 @@ func (c *Commands) CmdPipelineBarrier(commandBuffer CommandBuffer, srcStageMask 
 		unsafe.Pointer(&dstStageMask),
 		unsafe.Pointer(&dependencyFlags),
 		unsafe.Pointer(&memoryBarrierCount),
-		unsafe.Pointer(pMemoryBarriers),
+		unsafe.Pointer(&pMemoryBarriers),
 		unsafe.Pointer(&bufferMemoryBarrierCount),
-		unsafe.Pointer(pBufferMemoryBarriers),
+		unsafe.Pointer(&pBufferMemoryBarriers),
 		unsafe.Pointer(&imageMemoryBarrierCount),
-		unsafe.Pointer(pImageMemoryBarriers),
+		unsafe.Pointer(&pImageMemoryBarriers),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdPipelineBarrier, c.cmdPipelineBarrier, nil, args[:])
 }
@@ -2238,7 +2238,7 @@ func (c *Commands) CmdEndQuery(commandBuffer CommandBuffer, queryPool QueryPool,
 func (c *Commands) CmdBeginConditionalRenderingEXT(commandBuffer CommandBuffer, pConditionalRenderingBegin *ConditionalRenderingBeginInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pConditionalRenderingBegin),
+		unsafe.Pointer(&pConditionalRenderingBegin),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginConditionalRenderingEXT, nil, args[:])
 }
@@ -2255,7 +2255,7 @@ func (c *Commands) CmdEndConditionalRenderingEXT(commandBuffer CommandBuffer) {
 func (c *Commands) CmdBeginCustomResolveEXT(commandBuffer CommandBuffer, pBeginCustomResolveInfo *BeginCustomResolveInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBeginCustomResolveInfo),
+		unsafe.Pointer(&pBeginCustomResolveInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginCustomResolveEXT, nil, args[:])
 }
@@ -2281,7 +2281,7 @@ func (c *Commands) CmdResetQueryPool(commandBuffer CommandBuffer, queryPool Quer
 func (c *Commands) CmdBeginRenderPass(commandBuffer CommandBuffer, pRenderPassBegin *RenderPassBeginInfo, contents SubpassContents) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pRenderPassBegin),
+		unsafe.Pointer(&pRenderPassBegin),
 		unsafe.Pointer(&contents),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrU32, c.cmdBeginRenderPass, nil, args[:])
@@ -2309,7 +2309,7 @@ func (c *Commands) CmdExecuteCommands(commandBuffer CommandBuffer, commandBuffer
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&commandBufferCount),
-		unsafe.Pointer(pCommandBuffers),
+		unsafe.Pointer(&pCommandBuffers),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteCommands, nil, args[:])
 }
@@ -2319,9 +2319,9 @@ func (c *Commands) CreateAndroidSurfaceKHR(instance Instance, pCreateInfo *Andro
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAndroidSurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2332,9 +2332,9 @@ func (c *Commands) CreateSurfaceOHOS(instance Instance, pCreateInfo *SurfaceCrea
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSurfaceOHOS, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2345,8 +2345,8 @@ func (c *Commands) GetPhysicalDeviceDisplayPropertiesKHR(physicalDevice Physical
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2357,8 +2357,8 @@ func (c *Commands) GetPhysicalDeviceDisplayPlanePropertiesKHR(physicalDevice Phy
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlanePropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2370,8 +2370,8 @@ func (c *Commands) GetDisplayPlaneSupportedDisplaysKHR(physicalDevice PhysicalDe
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&planeIndex),
-		unsafe.Pointer(pDisplayCount),
-		unsafe.Pointer(pDisplays),
+		unsafe.Pointer(&pDisplayCount),
+		unsafe.Pointer(&pDisplays),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getDisplayPlaneSupportedDisplaysKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2383,8 +2383,8 @@ func (c *Commands) GetDisplayModePropertiesKHR(physicalDevice PhysicalDevice, di
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&display),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModePropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2399,7 +2399,7 @@ func (c *Commands) GetDisplayPlaneCapabilitiesKHR(physicalDevice PhysicalDevice,
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&mode),
 		unsafe.Pointer(&planeIndex),
-		unsafe.Pointer(pCapabilities),
+		unsafe.Pointer(&pCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getDisplayPlaneCapabilitiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2410,9 +2410,9 @@ func (c *Commands) CreateDisplayPlaneSurfaceKHR(instance Instance, pCreateInfo *
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDisplayPlaneSurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2424,9 +2424,9 @@ func (c *Commands) CreateSharedSwapchainsKHR(device Device, swapchainCount uint3
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchainCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSwapchains),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSwapchains),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createSharedSwapchainsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2437,7 +2437,7 @@ func (c *Commands) DestroySurfaceKHR(instance Instance, surface SurfaceKHR, pAll
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySurfaceKHR, nil, args[:])
 }
@@ -2449,7 +2449,7 @@ func (c *Commands) GetPhysicalDeviceSurfaceSupportKHR(physicalDevice PhysicalDev
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&queueFamilyIndex),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pSupported),
+		unsafe.Pointer(&pSupported),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32HandlePtr, c.getPhysicalDeviceSurfaceSupportKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2461,7 +2461,7 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice Physic
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pSurfaceCapabilities),
+		unsafe.Pointer(&pSurfaceCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilitiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2473,8 +2473,8 @@ func (c *Commands) GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice PhysicalDev
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pSurfaceFormatCount),
-		unsafe.Pointer(pSurfaceFormats),
+		unsafe.Pointer(&pSurfaceFormatCount),
+		unsafe.Pointer(&pSurfaceFormats),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfaceFormatsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2486,8 +2486,8 @@ func (c *Commands) GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice Physic
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pPresentModeCount),
-		unsafe.Pointer(pPresentModes),
+		unsafe.Pointer(&pPresentModeCount),
+		unsafe.Pointer(&pPresentModes),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfacePresentModesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2498,9 +2498,9 @@ func (c *Commands) CreateSwapchainKHR(device Device, pCreateInfo *SwapchainCreat
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSwapchain),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSwapchain),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSwapchainKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2511,7 +2511,7 @@ func (c *Commands) DestroySwapchainKHR(device Device, swapchain SwapchainKHR, pA
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySwapchainKHR, nil, args[:])
 }
@@ -2522,8 +2522,8 @@ func (c *Commands) GetSwapchainImagesKHR(device Device, swapchain SwapchainKHR, 
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pSwapchainImageCount),
-		unsafe.Pointer(pSwapchainImages),
+		unsafe.Pointer(&pSwapchainImageCount),
+		unsafe.Pointer(&pSwapchainImages),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainImagesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2538,7 +2538,7 @@ func (c *Commands) AcquireNextImageKHR(device Device, swapchain SwapchainKHR, ti
 		unsafe.Pointer(&timeout),
 		unsafe.Pointer(&semaphore),
 		unsafe.Pointer(&fence),
-		unsafe.Pointer(pImageIndex),
+		unsafe.Pointer(&pImageIndex),
 	}
 	_ = ffi.CallFunction(&SigResultAcquireNextImage, c.acquireNextImageKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2549,7 +2549,7 @@ func (c *Commands) QueuePresentKHR(queue Queue, pPresentInfo *PresentInfoKHR) Re
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pPresentInfo),
+		unsafe.Pointer(&pPresentInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.queuePresentKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2560,9 +2560,9 @@ func (c *Commands) CreateViSurfaceNN(instance Instance, pCreateInfo *ViSurfaceCr
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createViSurfaceNN, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2573,9 +2573,9 @@ func (c *Commands) CreateWaylandSurfaceKHR(instance Instance, pCreateInfo *Wayla
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWaylandSurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2588,9 +2588,9 @@ func (c *Commands) CreateWin32SurfaceKHR(instance Instance, pCreateInfo *Win32Su
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWin32SurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2603,9 +2603,9 @@ func (c *Commands) CreateXlibSurfaceKHR(instance Instance, pCreateInfo *XlibSurf
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXlibSurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2618,9 +2618,9 @@ func (c *Commands) CreateXcbSurfaceKHR(instance Instance, pCreateInfo *XcbSurfac
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXcbSurfaceKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2633,9 +2633,9 @@ func (c *Commands) CreateDirectFBSurfaceEXT(instance Instance, pCreateInfo *Dire
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDirectFBSurfaceEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2648,9 +2648,9 @@ func (c *Commands) CreateImagePipeSurfaceFUCHSIA(instance Instance, pCreateInfo 
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImagePipeSurfaceFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2661,9 +2661,9 @@ func (c *Commands) CreateStreamDescriptorSurfaceGGP(instance Instance, pCreateIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createStreamDescriptorSurfaceGGP, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2674,9 +2674,9 @@ func (c *Commands) CreateScreenSurfaceQNX(instance Instance, pCreateInfo *Screen
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createScreenSurfaceQNX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2689,9 +2689,9 @@ func (c *Commands) CreateDebugReportCallbackEXT(instance Instance, pCreateInfo *
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pCallback),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pCallback),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugReportCallbackEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2702,7 +2702,7 @@ func (c *Commands) DestroyDebugReportCallbackEXT(instance Instance, callback Deb
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&callback),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDebugReportCallbackEXT, nil, args[:])
 }
@@ -2714,7 +2714,7 @@ func (c *Commands) DebugMarkerSetObjectNameEXT(device Device, pNameInfo *DebugMa
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pNameInfo),
+		unsafe.Pointer(&pNameInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectNameEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2725,7 +2725,7 @@ func (c *Commands) DebugMarkerSetObjectTagEXT(device Device, pTagInfo *DebugMark
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pTagInfo),
+		unsafe.Pointer(&pTagInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectTagEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2735,7 +2735,7 @@ func (c *Commands) DebugMarkerSetObjectTagEXT(device Device, pTagInfo *DebugMark
 func (c *Commands) CmdDebugMarkerBeginEXT(commandBuffer CommandBuffer, pMarkerInfo *DebugMarkerMarkerInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pMarkerInfo),
+		unsafe.Pointer(&pMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDebugMarkerBeginEXT, nil, args[:])
 }
@@ -2752,7 +2752,7 @@ func (c *Commands) CmdDebugMarkerEndEXT(commandBuffer CommandBuffer) {
 func (c *Commands) CmdDebugMarkerInsertEXT(commandBuffer CommandBuffer, pMarkerInfo *DebugMarkerMarkerInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pMarkerInfo),
+		unsafe.Pointer(&pMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDebugMarkerInsertEXT, nil, args[:])
 }
@@ -2766,7 +2766,7 @@ func (c *Commands) GetMemoryWin32HandleNV(device Device, memory DeviceMemory, ha
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memory),
 		unsafe.Pointer(&handleType),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getMemoryWin32HandleNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2777,7 +2777,7 @@ func (c *Commands) CmdExecuteGeneratedCommandsNV(commandBuffer CommandBuffer, is
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&isPreprocessed),
-		unsafe.Pointer(pGeneratedCommandsInfo),
+		unsafe.Pointer(&pGeneratedCommandsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteGeneratedCommandsNV, nil, args[:])
 }
@@ -2786,7 +2786,7 @@ func (c *Commands) CmdExecuteGeneratedCommandsNV(commandBuffer CommandBuffer, is
 func (c *Commands) CmdPreprocessGeneratedCommandsNV(commandBuffer CommandBuffer, pGeneratedCommandsInfo *GeneratedCommandsInfoNV) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pGeneratedCommandsInfo),
+		unsafe.Pointer(&pGeneratedCommandsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPreprocessGeneratedCommandsNV, nil, args[:])
 }
@@ -2797,8 +2797,8 @@ func (c *Commands) CmdPreprocessGeneratedCommandsNV(commandBuffer CommandBuffer,
 func (c *Commands) GetGeneratedCommandsMemoryRequirementsNV(device Device, pInfo *GeneratedCommandsMemoryRequirementsInfoNV, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getGeneratedCommandsMemoryRequirementsNV, nil, args[:])
 }
@@ -2808,9 +2808,9 @@ func (c *Commands) CreateIndirectCommandsLayoutNV(device Device, pCreateInfo *In
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pIndirectCommandsLayout),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pIndirectCommandsLayout),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2821,7 +2821,7 @@ func (c *Commands) DestroyIndirectCommandsLayoutNV(device Device, indirectComman
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectCommandsLayout),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectCommandsLayoutNV, nil, args[:])
 }
@@ -2831,7 +2831,7 @@ func (c *Commands) CmdExecuteGeneratedCommandsEXT(commandBuffer CommandBuffer, i
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&isPreprocessed),
-		unsafe.Pointer(pGeneratedCommandsInfo),
+		unsafe.Pointer(&pGeneratedCommandsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteGeneratedCommandsEXT, nil, args[:])
 }
@@ -2842,8 +2842,8 @@ func (c *Commands) CmdExecuteGeneratedCommandsEXT(commandBuffer CommandBuffer, i
 func (c *Commands) GetGeneratedCommandsMemoryRequirementsEXT(device Device, pInfo *GeneratedCommandsMemoryRequirementsInfoEXT, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getGeneratedCommandsMemoryRequirementsEXT, nil, args[:])
 }
@@ -2853,9 +2853,9 @@ func (c *Commands) CreateIndirectCommandsLayoutEXT(device Device, pCreateInfo *I
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pIndirectCommandsLayout),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pIndirectCommandsLayout),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2866,7 +2866,7 @@ func (c *Commands) DestroyIndirectCommandsLayoutEXT(device Device, indirectComma
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectCommandsLayout),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectCommandsLayoutEXT, nil, args[:])
 }
@@ -2876,9 +2876,9 @@ func (c *Commands) CreateIndirectExecutionSetEXT(device Device, pCreateInfo *Ind
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pIndirectExecutionSet),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pIndirectExecutionSet),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectExecutionSetEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2889,7 +2889,7 @@ func (c *Commands) DestroyIndirectExecutionSetEXT(device Device, indirectExecuti
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectExecutionSet),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectExecutionSetEXT, nil, args[:])
 }
@@ -2900,7 +2900,7 @@ func (c *Commands) UpdateIndirectExecutionSetPipelineEXT(device Device, indirect
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectExecutionSet),
 		unsafe.Pointer(&executionSetWriteCount),
-		unsafe.Pointer(pExecutionSetWrites),
+		unsafe.Pointer(&pExecutionSetWrites),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.updateIndirectExecutionSetPipelineEXT, nil, args[:])
 }
@@ -2911,7 +2911,7 @@ func (c *Commands) UpdateIndirectExecutionSetShaderEXT(device Device, indirectEx
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectExecutionSet),
 		unsafe.Pointer(&executionSetWriteCount),
-		unsafe.Pointer(pExecutionSetWrites),
+		unsafe.Pointer(&pExecutionSetWrites),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.updateIndirectExecutionSetShaderEXT, nil, args[:])
 }
@@ -2920,7 +2920,7 @@ func (c *Commands) UpdateIndirectExecutionSetShaderEXT(device Device, indirectEx
 func (c *Commands) GetPhysicalDeviceFeatures2(physicalDevice PhysicalDevice, pFeatures *PhysicalDeviceFeatures2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pFeatures),
+		unsafe.Pointer(&pFeatures),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceFeatures2, nil, args[:])
 }
@@ -2929,7 +2929,7 @@ func (c *Commands) GetPhysicalDeviceFeatures2(physicalDevice PhysicalDevice, pFe
 func (c *Commands) GetPhysicalDeviceProperties2(physicalDevice PhysicalDevice, pProperties *PhysicalDeviceProperties2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceProperties2, nil, args[:])
 }
@@ -2939,7 +2939,7 @@ func (c *Commands) GetPhysicalDeviceFormatProperties2(physicalDevice PhysicalDev
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&format),
-		unsafe.Pointer(pFormatProperties),
+		unsafe.Pointer(&pFormatProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceFormatProperties2, nil, args[:])
 }
@@ -2949,8 +2949,8 @@ func (c *Commands) GetPhysicalDeviceImageFormatProperties2(physicalDevice Physic
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pImageFormatInfo),
-		unsafe.Pointer(pImageFormatProperties),
+		unsafe.Pointer(&pImageFormatInfo),
+		unsafe.Pointer(&pImageFormatProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceImageFormatProperties2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -2960,8 +2960,8 @@ func (c *Commands) GetPhysicalDeviceImageFormatProperties2(physicalDevice Physic
 func (c *Commands) GetPhysicalDeviceQueueFamilyProperties2(physicalDevice PhysicalDevice, pQueueFamilyPropertyCount *uint32, pQueueFamilyProperties *QueueFamilyProperties2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pQueueFamilyPropertyCount),
-		unsafe.Pointer(pQueueFamilyProperties),
+		unsafe.Pointer(&pQueueFamilyPropertyCount),
+		unsafe.Pointer(&pQueueFamilyProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyProperties2, nil, args[:])
 }
@@ -2970,7 +2970,7 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyProperties2(physicalDevice Physic
 func (c *Commands) GetPhysicalDeviceMemoryProperties2(physicalDevice PhysicalDevice, pMemoryProperties *PhysicalDeviceMemoryProperties2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pMemoryProperties),
+		unsafe.Pointer(&pMemoryProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceMemoryProperties2, nil, args[:])
 }
@@ -2993,8 +2993,8 @@ func (c *Commands) TrimCommandPool(device Device, commandPool CommandPool, flags
 func (c *Commands) GetPhysicalDeviceExternalBufferProperties(physicalDevice PhysicalDevice, pExternalBufferInfo *PhysicalDeviceExternalBufferInfo, pExternalBufferProperties *ExternalBufferProperties) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pExternalBufferInfo),
-		unsafe.Pointer(pExternalBufferProperties),
+		unsafe.Pointer(&pExternalBufferInfo),
+		unsafe.Pointer(&pExternalBufferProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalBufferProperties, nil, args[:])
 }
@@ -3004,8 +3004,8 @@ func (c *Commands) GetMemoryWin32HandleKHR(device Device, pGetWin32HandleInfo *M
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetWin32HandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetWin32HandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryWin32HandleKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3018,8 +3018,8 @@ func (c *Commands) GetMemoryFdKHR(device Device, pGetFdInfo *MemoryGetFdInfoKHR,
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetFdInfo),
-		unsafe.Pointer(pFd),
+		unsafe.Pointer(&pGetFdInfo),
+		unsafe.Pointer(&pFd),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryFdKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3032,8 +3032,8 @@ func (c *Commands) GetMemoryZirconHandleFUCHSIA(device Device, pGetZirconHandleI
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetZirconHandleInfo),
-		unsafe.Pointer(pZirconHandle),
+		unsafe.Pointer(&pGetZirconHandleInfo),
+		unsafe.Pointer(&pZirconHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3046,8 +3046,8 @@ func (c *Commands) GetMemoryRemoteAddressNV(device Device, pMemoryGetRemoteAddre
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pMemoryGetRemoteAddressInfo),
-		unsafe.Pointer(pAddress),
+		unsafe.Pointer(&pMemoryGetRemoteAddressInfo),
+		unsafe.Pointer(&pAddress),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryRemoteAddressNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3058,8 +3058,8 @@ func (c *Commands) GetMemorySciBufNV(device Device, pGetSciBufInfo *MemoryGetSci
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetSciBufInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetSciBufInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemorySciBufNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3073,8 +3073,8 @@ func (c *Commands) GetMemorySciBufNV(device Device, pGetSciBufInfo *MemoryGetSci
 func (c *Commands) GetPhysicalDeviceExternalSemaphoreProperties(physicalDevice PhysicalDevice, pExternalSemaphoreInfo *PhysicalDeviceExternalSemaphoreInfo, pExternalSemaphoreProperties *ExternalSemaphoreProperties) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pExternalSemaphoreInfo),
-		unsafe.Pointer(pExternalSemaphoreProperties),
+		unsafe.Pointer(&pExternalSemaphoreInfo),
+		unsafe.Pointer(&pExternalSemaphoreProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalSemaphoreProperties, nil, args[:])
 }
@@ -3084,8 +3084,8 @@ func (c *Commands) GetSemaphoreWin32HandleKHR(device Device, pGetWin32HandleInfo
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetWin32HandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetWin32HandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3096,7 +3096,7 @@ func (c *Commands) ImportSemaphoreWin32HandleKHR(device Device, pImportSemaphore
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportSemaphoreWin32HandleInfo),
+		unsafe.Pointer(&pImportSemaphoreWin32HandleInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3107,8 +3107,8 @@ func (c *Commands) GetSemaphoreFdKHR(device Device, pGetFdInfo *SemaphoreGetFdIn
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetFdInfo),
-		unsafe.Pointer(pFd),
+		unsafe.Pointer(&pGetFdInfo),
+		unsafe.Pointer(&pFd),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreFdKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3119,7 +3119,7 @@ func (c *Commands) ImportSemaphoreFdKHR(device Device, pImportSemaphoreFdInfo *I
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportSemaphoreFdInfo),
+		unsafe.Pointer(&pImportSemaphoreFdInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreFdKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3130,8 +3130,8 @@ func (c *Commands) GetSemaphoreZirconHandleFUCHSIA(device Device, pGetZirconHand
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetZirconHandleInfo),
-		unsafe.Pointer(pZirconHandle),
+		unsafe.Pointer(&pGetZirconHandleInfo),
+		unsafe.Pointer(&pZirconHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3142,7 +3142,7 @@ func (c *Commands) ImportSemaphoreZirconHandleFUCHSIA(device Device, pImportSema
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportSemaphoreZirconHandleInfo),
+		unsafe.Pointer(&pImportSemaphoreZirconHandleInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3152,8 +3152,8 @@ func (c *Commands) ImportSemaphoreZirconHandleFUCHSIA(device Device, pImportSema
 func (c *Commands) GetPhysicalDeviceExternalFenceProperties(physicalDevice PhysicalDevice, pExternalFenceInfo *PhysicalDeviceExternalFenceInfo, pExternalFenceProperties *ExternalFenceProperties) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pExternalFenceInfo),
-		unsafe.Pointer(pExternalFenceProperties),
+		unsafe.Pointer(&pExternalFenceInfo),
+		unsafe.Pointer(&pExternalFenceProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalFenceProperties, nil, args[:])
 }
@@ -3163,8 +3163,8 @@ func (c *Commands) GetFenceWin32HandleKHR(device Device, pGetWin32HandleInfo *Fe
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetWin32HandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetWin32HandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceWin32HandleKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3175,7 +3175,7 @@ func (c *Commands) ImportFenceWin32HandleKHR(device Device, pImportFenceWin32Han
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportFenceWin32HandleInfo),
+		unsafe.Pointer(&pImportFenceWin32HandleInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceWin32HandleKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3186,8 +3186,8 @@ func (c *Commands) GetFenceFdKHR(device Device, pGetFdInfo *FenceGetFdInfoKHR, p
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetFdInfo),
-		unsafe.Pointer(pFd),
+		unsafe.Pointer(&pGetFdInfo),
+		unsafe.Pointer(&pFd),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceFdKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3198,7 +3198,7 @@ func (c *Commands) ImportFenceFdKHR(device Device, pImportFenceFdInfo *ImportFen
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportFenceFdInfo),
+		unsafe.Pointer(&pImportFenceFdInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceFdKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3209,8 +3209,8 @@ func (c *Commands) GetFenceSciSyncFenceNV(device Device, pGetSciSyncHandleInfo *
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetSciSyncHandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetSciSyncHandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3221,8 +3221,8 @@ func (c *Commands) GetFenceSciSyncObjNV(device Device, pGetSciSyncHandleInfo *Fe
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetSciSyncHandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetSciSyncHandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncObjNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3233,7 +3233,7 @@ func (c *Commands) ImportFenceSciSyncFenceNV(device Device, pImportFenceSciSyncI
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportFenceSciSyncInfo),
+		unsafe.Pointer(&pImportFenceSciSyncInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3244,7 +3244,7 @@ func (c *Commands) ImportFenceSciSyncObjNV(device Device, pImportFenceSciSyncInf
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportFenceSciSyncInfo),
+		unsafe.Pointer(&pImportFenceSciSyncInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncObjNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3255,8 +3255,8 @@ func (c *Commands) GetSemaphoreSciSyncObjNV(device Device, pGetSciSyncInfo *Sema
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetSciSyncInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetSciSyncInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3267,7 +3267,7 @@ func (c *Commands) ImportSemaphoreSciSyncObjNV(device Device, pImportSemaphoreSc
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pImportSemaphoreSciSyncInfo),
+		unsafe.Pointer(&pImportSemaphoreSciSyncInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3280,9 +3280,9 @@ func (c *Commands) CreateSemaphoreSciSyncPoolNV(device Device, pCreateInfo *Sema
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSemaphorePool),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSemaphorePool),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphoreSciSyncPoolNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3293,7 +3293,7 @@ func (c *Commands) DestroySemaphoreSciSyncPoolNV(device Device, semaphorePool Se
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&semaphorePool),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySemaphoreSciSyncPoolNV, nil, args[:])
 }
@@ -3330,7 +3330,7 @@ func (c *Commands) GetWinrtDisplayNV(physicalDevice PhysicalDevice, deviceRelati
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&deviceRelativeId),
-		unsafe.Pointer(pDisplay),
+		unsafe.Pointer(&pDisplay),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.getWinrtDisplayNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3342,7 +3342,7 @@ func (c *Commands) DisplayPowerControlEXT(device Device, display DisplayKHR, pDi
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&display),
-		unsafe.Pointer(pDisplayPowerInfo),
+		unsafe.Pointer(&pDisplayPowerInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.displayPowerControlEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3353,9 +3353,9 @@ func (c *Commands) RegisterDeviceEventEXT(device Device, pDeviceEventInfo *Devic
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pDeviceEventInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pFence),
+		unsafe.Pointer(&pDeviceEventInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pFence),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.registerDeviceEventEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3371,7 +3371,7 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice Physi
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pSurfaceCapabilities),
+		unsafe.Pointer(&pSurfaceCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilities2EXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3382,8 +3382,8 @@ func (c *Commands) EnumeratePhysicalDeviceGroups(instance Instance, pPhysicalDev
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pPhysicalDeviceGroupCount),
-		unsafe.Pointer(pPhysicalDeviceGroupProperties),
+		unsafe.Pointer(&pPhysicalDeviceGroupCount),
+		unsafe.Pointer(&pPhysicalDeviceGroupProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDeviceGroups, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3397,7 +3397,7 @@ func (c *Commands) BindBufferMemory2(device Device, bindInfoCount uint32, pBindI
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfos),
+		unsafe.Pointer(&pBindInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindBufferMemory2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3409,7 +3409,7 @@ func (c *Commands) BindImageMemory2(device Device, bindInfoCount uint32, pBindIn
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfos),
+		unsafe.Pointer(&pBindInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindImageMemory2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3429,7 +3429,7 @@ func (c *Commands) GetDeviceGroupPresentCapabilitiesKHR(device Device, pDeviceGr
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pDeviceGroupPresentCapabilities),
+		unsafe.Pointer(&pDeviceGroupPresentCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.getDeviceGroupPresentCapabilitiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3441,7 +3441,7 @@ func (c *Commands) GetDeviceGroupSurfacePresentModesKHR(device Device, surface S
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pModes),
+		unsafe.Pointer(&pModes),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceGroupSurfacePresentModesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3452,8 +3452,8 @@ func (c *Commands) AcquireNextImage2KHR(device Device, pAcquireInfo *AcquireNext
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAcquireInfo),
-		unsafe.Pointer(pImageIndex),
+		unsafe.Pointer(&pAcquireInfo),
+		unsafe.Pointer(&pImageIndex),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.acquireNextImage2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3467,8 +3467,8 @@ func (c *Commands) GetPhysicalDevicePresentRectanglesKHR(physicalDevice Physical
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&surface),
-		unsafe.Pointer(pRectCount),
-		unsafe.Pointer(pRects),
+		unsafe.Pointer(&pRectCount),
+		unsafe.Pointer(&pRects),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDevicePresentRectanglesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3479,9 +3479,9 @@ func (c *Commands) CreateDescriptorUpdateTemplate(device Device, pCreateInfo *De
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pDescriptorUpdateTemplate),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pDescriptorUpdateTemplate),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorUpdateTemplate, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3492,7 +3492,7 @@ func (c *Commands) DestroyDescriptorUpdateTemplate(device Device, descriptorUpda
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorUpdateTemplate),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorUpdateTemplate, nil, args[:])
 }
@@ -3506,7 +3506,7 @@ func (c *Commands) CmdPushDescriptorSetWithTemplate(commandBuffer CommandBuffer,
 		unsafe.Pointer(&descriptorUpdateTemplate),
 		unsafe.Pointer(&layout),
 		unsafe.Pointer(&set),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBuffer, c.cmdPushDescriptorSetWithTemplate, nil, args[:])
 }
@@ -3530,7 +3530,7 @@ func (c *Commands) GetRefreshCycleDurationGOOGLE(device Device, swapchain Swapch
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pDisplayTimingProperties),
+		unsafe.Pointer(&pDisplayTimingProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getRefreshCycleDurationGOOGLE, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3542,8 +3542,8 @@ func (c *Commands) GetPastPresentationTimingGOOGLE(device Device, swapchain Swap
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pPresentationTimingCount),
-		unsafe.Pointer(pPresentationTimings),
+		unsafe.Pointer(&pPresentationTimingCount),
+		unsafe.Pointer(&pPresentationTimings),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPastPresentationTimingGOOGLE, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3554,9 +3554,9 @@ func (c *Commands) CreateIOSSurfaceMVK(instance Instance, pCreateInfo *IOSSurfac
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIOSSurfaceMVK, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3567,9 +3567,9 @@ func (c *Commands) CreateMacOSSurfaceMVK(instance Instance, pCreateInfo *MacOSSu
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMacOSSurfaceMVK, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3580,9 +3580,9 @@ func (c *Commands) CreateMetalSurfaceEXT(instance Instance, pCreateInfo *MetalSu
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMetalSurfaceEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3594,7 +3594,7 @@ func (c *Commands) CmdSetViewportWScalingNV(commandBuffer CommandBuffer, firstVi
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstViewport),
 		unsafe.Pointer(&viewportCount),
-		unsafe.Pointer(pViewportWScalings),
+		unsafe.Pointer(&pViewportWScalings),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportWScalingNV, nil, args[:])
 }
@@ -3605,7 +3605,7 @@ func (c *Commands) CmdSetDiscardRectangleEXT(commandBuffer CommandBuffer, firstD
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstDiscardRectangle),
 		unsafe.Pointer(&discardRectangleCount),
-		unsafe.Pointer(pDiscardRectangles),
+		unsafe.Pointer(&pDiscardRectangles),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetDiscardRectangleEXT, nil, args[:])
 }
@@ -3632,7 +3632,7 @@ func (c *Commands) CmdSetDiscardRectangleModeEXT(commandBuffer CommandBuffer, di
 func (c *Commands) CmdSetSampleLocationsEXT(commandBuffer CommandBuffer, pSampleLocationsInfo *SampleLocationsInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pSampleLocationsInfo),
+		unsafe.Pointer(&pSampleLocationsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetSampleLocationsEXT, nil, args[:])
 }
@@ -3642,7 +3642,7 @@ func (c *Commands) GetPhysicalDeviceMultisamplePropertiesEXT(physicalDevice Phys
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&samples),
-		unsafe.Pointer(pMultisampleProperties),
+		unsafe.Pointer(&pMultisampleProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceMultisamplePropertiesEXT, nil, args[:])
 }
@@ -3652,8 +3652,8 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice Physi
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pSurfaceInfo),
-		unsafe.Pointer(pSurfaceCapabilities),
+		unsafe.Pointer(&pSurfaceInfo),
+		unsafe.Pointer(&pSurfaceCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSurfaceCapabilities2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3664,9 +3664,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice PhysicalDe
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pSurfaceInfo),
-		unsafe.Pointer(pSurfaceFormatCount),
-		unsafe.Pointer(pSurfaceFormats),
+		unsafe.Pointer(&pSurfaceInfo),
+		unsafe.Pointer(&pSurfaceFormatCount),
+		unsafe.Pointer(&pSurfaceFormats),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfaceFormats2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3677,8 +3677,8 @@ func (c *Commands) GetPhysicalDeviceDisplayProperties2KHR(physicalDevice Physica
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayProperties2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3689,8 +3689,8 @@ func (c *Commands) GetPhysicalDeviceDisplayPlaneProperties2KHR(physicalDevice Ph
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlaneProperties2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3702,8 +3702,8 @@ func (c *Commands) GetDisplayModeProperties2KHR(physicalDevice PhysicalDevice, d
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&display),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModeProperties2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3714,8 +3714,8 @@ func (c *Commands) GetDisplayPlaneCapabilities2KHR(physicalDevice PhysicalDevice
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pDisplayPlaneInfo),
-		unsafe.Pointer(pCapabilities),
+		unsafe.Pointer(&pDisplayPlaneInfo),
+		unsafe.Pointer(&pCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDisplayPlaneCapabilities2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3725,8 +3725,8 @@ func (c *Commands) GetDisplayPlaneCapabilities2KHR(physicalDevice PhysicalDevice
 func (c *Commands) GetBufferMemoryRequirements2(device Device, pInfo *BufferMemoryRequirementsInfo2, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getBufferMemoryRequirements2, nil, args[:])
 }
@@ -3735,8 +3735,8 @@ func (c *Commands) GetBufferMemoryRequirements2(device Device, pInfo *BufferMemo
 func (c *Commands) GetImageMemoryRequirements2(device Device, pInfo *ImageMemoryRequirementsInfo2, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getImageMemoryRequirements2, nil, args[:])
 }
@@ -3747,8 +3747,8 @@ func (c *Commands) GetImageMemoryRequirements2(device Device, pInfo *ImageMemory
 func (c *Commands) GetDeviceBufferMemoryRequirements(device Device, pInfo *DeviceBufferMemoryRequirements, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceBufferMemoryRequirements, nil, args[:])
 }
@@ -3757,8 +3757,8 @@ func (c *Commands) GetDeviceBufferMemoryRequirements(device Device, pInfo *Devic
 func (c *Commands) GetDeviceImageMemoryRequirements(device Device, pInfo *DeviceImageMemoryRequirements, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceImageMemoryRequirements, nil, args[:])
 }
@@ -3770,9 +3770,9 @@ func (c *Commands) CreateSamplerYcbcrConversion(device Device, pCreateInfo *Samp
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pYcbcrConversion),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pYcbcrConversion),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSamplerYcbcrConversion, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3783,7 +3783,7 @@ func (c *Commands) DestroySamplerYcbcrConversion(device Device, ycbcrConversion 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&ycbcrConversion),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySamplerYcbcrConversion, nil, args[:])
 }
@@ -3792,8 +3792,8 @@ func (c *Commands) DestroySamplerYcbcrConversion(device Device, ycbcrConversion 
 func (c *Commands) GetDeviceQueue2(device Device, pQueueInfo *DeviceQueueInfo2, pQueue *Queue) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pQueueInfo),
-		unsafe.Pointer(pQueue),
+		unsafe.Pointer(&pQueueInfo),
+		unsafe.Pointer(&pQueue),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceQueue2, nil, args[:])
 }
@@ -3803,9 +3803,9 @@ func (c *Commands) CreateValidationCacheEXT(device Device, pCreateInfo *Validati
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pValidationCache),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pValidationCache),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createValidationCacheEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3816,7 +3816,7 @@ func (c *Commands) DestroyValidationCacheEXT(device Device, validationCache Vali
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&validationCache),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyValidationCacheEXT, nil, args[:])
 }
@@ -3827,8 +3827,8 @@ func (c *Commands) GetValidationCacheDataEXT(device Device, validationCache Vali
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&validationCache),
-		unsafe.Pointer(pDataSize),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pDataSize),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getValidationCacheDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3841,7 +3841,7 @@ func (c *Commands) MergeValidationCachesEXT(device Device, dstCache ValidationCa
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&dstCache),
 		unsafe.Pointer(&srcCacheCount),
-		unsafe.Pointer(pSrcCaches),
+		unsafe.Pointer(&pSrcCaches),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergeValidationCachesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3851,8 +3851,8 @@ func (c *Commands) MergeValidationCachesEXT(device Device, dstCache ValidationCa
 func (c *Commands) GetDescriptorSetLayoutSupport(device Device, pCreateInfo *DescriptorSetLayoutCreateInfo, pSupport *DescriptorSetLayoutSupport) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pSupport),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pSupport),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDescriptorSetLayoutSupport, nil, args[:])
 }
@@ -3882,8 +3882,8 @@ func (c *Commands) GetPhysicalDeviceCalibrateableTimeDomainsKHR(physicalDevice P
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pTimeDomainCount),
-		unsafe.Pointer(pTimeDomains),
+		unsafe.Pointer(&pTimeDomainCount),
+		unsafe.Pointer(&pTimeDomains),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCalibrateableTimeDomainsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3895,9 +3895,9 @@ func (c *Commands) GetCalibratedTimestampsKHR(device Device, timestampCount uint
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&timestampCount),
-		unsafe.Pointer(pTimestampInfos),
-		unsafe.Pointer(pTimestamps),
-		unsafe.Pointer(pMaxDeviation),
+		unsafe.Pointer(&pTimestampInfos),
+		unsafe.Pointer(&pTimestamps),
+		unsafe.Pointer(&pMaxDeviation),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.getCalibratedTimestampsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3908,7 +3908,7 @@ func (c *Commands) SetDebugUtilsObjectNameEXT(device Device, pNameInfo *DebugUti
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pNameInfo),
+		unsafe.Pointer(&pNameInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectNameEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3919,7 +3919,7 @@ func (c *Commands) SetDebugUtilsObjectTagEXT(device Device, pTagInfo *DebugUtils
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pTagInfo),
+		unsafe.Pointer(&pTagInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectTagEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3929,7 +3929,7 @@ func (c *Commands) SetDebugUtilsObjectTagEXT(device Device, pTagInfo *DebugUtils
 func (c *Commands) QueueBeginDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugUtilsLabelEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pLabelInfo),
+		unsafe.Pointer(&pLabelInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueBeginDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3946,7 +3946,7 @@ func (c *Commands) QueueEndDebugUtilsLabelEXT(queue Queue) {
 func (c *Commands) QueueInsertDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugUtilsLabelEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pLabelInfo),
+		unsafe.Pointer(&pLabelInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueInsertDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3955,7 +3955,7 @@ func (c *Commands) QueueInsertDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugU
 func (c *Commands) CmdBeginDebugUtilsLabelEXT(commandBuffer CommandBuffer, pLabelInfo *DebugUtilsLabelEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pLabelInfo),
+		unsafe.Pointer(&pLabelInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3972,7 +3972,7 @@ func (c *Commands) CmdEndDebugUtilsLabelEXT(commandBuffer CommandBuffer) {
 func (c *Commands) CmdInsertDebugUtilsLabelEXT(commandBuffer CommandBuffer, pLabelInfo *DebugUtilsLabelEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pLabelInfo),
+		unsafe.Pointer(&pLabelInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdInsertDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3982,9 +3982,9 @@ func (c *Commands) CreateDebugUtilsMessengerEXT(instance Instance, pCreateInfo *
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pMessenger),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pMessenger),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugUtilsMessengerEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -3995,7 +3995,7 @@ func (c *Commands) DestroyDebugUtilsMessengerEXT(instance Instance, messenger De
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&messenger),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDebugUtilsMessengerEXT, nil, args[:])
 }
@@ -4006,7 +4006,7 @@ func (c *Commands) SubmitDebugUtilsMessageEXT(instance Instance, messageSeverity
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&messageSeverity),
 		unsafe.Pointer(&messageTypes),
-		unsafe.Pointer(pCallbackData),
+		unsafe.Pointer(&pCallbackData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.submitDebugUtilsMessageEXT, nil, args[:])
 }
@@ -4017,8 +4017,8 @@ func (c *Commands) GetMemoryHostPointerPropertiesEXT(device Device, handleType E
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&handleType),
-		unsafe.Pointer(pHostPointer),
-		unsafe.Pointer(pMemoryHostPointerProperties),
+		unsafe.Pointer(&pHostPointer),
+		unsafe.Pointer(&pMemoryHostPointerProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryHostPointerPropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4031,9 +4031,9 @@ func (c *Commands) CreateRenderPass2(device Device, pCreateInfo *RenderPassCreat
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pRenderPass),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pRenderPass),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4043,8 +4043,8 @@ func (c *Commands) CreateRenderPass2(device Device, pCreateInfo *RenderPassCreat
 func (c *Commands) CmdBeginRenderPass2(commandBuffer CommandBuffer, pRenderPassBegin *RenderPassBeginInfo, pSubpassBeginInfo *SubpassBeginInfo) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pRenderPassBegin),
-		unsafe.Pointer(pSubpassBeginInfo),
+		unsafe.Pointer(&pRenderPassBegin),
+		unsafe.Pointer(&pSubpassBeginInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.cmdBeginRenderPass2, nil, args[:])
 }
@@ -4053,8 +4053,8 @@ func (c *Commands) CmdBeginRenderPass2(commandBuffer CommandBuffer, pRenderPassB
 func (c *Commands) CmdNextSubpass2(commandBuffer CommandBuffer, pSubpassBeginInfo *SubpassBeginInfo, pSubpassEndInfo *SubpassEndInfo) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pSubpassBeginInfo),
-		unsafe.Pointer(pSubpassEndInfo),
+		unsafe.Pointer(&pSubpassBeginInfo),
+		unsafe.Pointer(&pSubpassEndInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.cmdNextSubpass2, nil, args[:])
 }
@@ -4063,7 +4063,7 @@ func (c *Commands) CmdNextSubpass2(commandBuffer CommandBuffer, pSubpassBeginInf
 func (c *Commands) CmdEndRenderPass2(commandBuffer CommandBuffer, pSubpassEndInfo *SubpassEndInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pSubpassEndInfo),
+		unsafe.Pointer(&pSubpassEndInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndRenderPass2, nil, args[:])
 }
@@ -4074,7 +4074,7 @@ func (c *Commands) GetSemaphoreCounterValue(device Device, semaphore Semaphore, 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&semaphore),
-		unsafe.Pointer(pValue),
+		unsafe.Pointer(&pValue),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getSemaphoreCounterValue, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4087,7 +4087,7 @@ func (c *Commands) SignalSemaphore(device Device, pSignalInfo *SemaphoreSignalIn
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pSignalInfo),
+		unsafe.Pointer(&pSignalInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.signalSemaphore, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4098,8 +4098,8 @@ func (c *Commands) GetAndroidHardwareBufferPropertiesANDROID(device Device, buff
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(buffer),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getAndroidHardwareBufferPropertiesANDROID, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4110,8 +4110,8 @@ func (c *Commands) GetMemoryAndroidHardwareBufferANDROID(device Device, pInfo *M
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pBuffer),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pBuffer),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryAndroidHardwareBufferANDROID, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4125,7 +4125,7 @@ func (c *Commands) GetMemoryAndroidHardwareBufferANDROID(device Device, pInfo *M
 func (c *Commands) CmdSetCheckpointNV(commandBuffer CommandBuffer, pCheckpointMarker *uintptr) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCheckpointMarker),
+		unsafe.Pointer(&pCheckpointMarker),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetCheckpointNV, nil, args[:])
 }
@@ -4134,8 +4134,8 @@ func (c *Commands) CmdSetCheckpointNV(commandBuffer CommandBuffer, pCheckpointMa
 func (c *Commands) GetQueueCheckpointDataNV(queue Queue, pCheckpointDataCount *uint32, pCheckpointData *CheckpointDataNV) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pCheckpointDataCount),
-		unsafe.Pointer(pCheckpointData),
+		unsafe.Pointer(&pCheckpointDataCount),
+		unsafe.Pointer(&pCheckpointData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getQueueCheckpointDataNV, nil, args[:])
 }
@@ -4148,8 +4148,8 @@ func (c *Commands) CmdBeginTransformFeedbackEXT(commandBuffer CommandBuffer, fir
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstCounterBuffer),
 		unsafe.Pointer(&counterBufferCount),
-		unsafe.Pointer(pCounterBuffers),
-		unsafe.Pointer(pCounterBufferOffsets),
+		unsafe.Pointer(&pCounterBuffers),
+		unsafe.Pointer(&pCounterBufferOffsets),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdBeginTransformFeedbackEXT, nil, args[:])
 }
@@ -4160,8 +4160,8 @@ func (c *Commands) CmdEndTransformFeedbackEXT(commandBuffer CommandBuffer, first
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstCounterBuffer),
 		unsafe.Pointer(&counterBufferCount),
-		unsafe.Pointer(pCounterBuffers),
-		unsafe.Pointer(pCounterBufferOffsets),
+		unsafe.Pointer(&pCounterBuffers),
+		unsafe.Pointer(&pCounterBufferOffsets),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdEndTransformFeedbackEXT, nil, args[:])
 }
@@ -4187,7 +4187,7 @@ func (c *Commands) CmdSetExclusiveScissorNV(commandBuffer CommandBuffer, firstEx
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstExclusiveScissor),
 		unsafe.Pointer(&exclusiveScissorCount),
-		unsafe.Pointer(pExclusiveScissors),
+		unsafe.Pointer(&pExclusiveScissors),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetExclusiveScissorNV, nil, args[:])
 }
@@ -4198,7 +4198,7 @@ func (c *Commands) CmdSetExclusiveScissorEnableNV(commandBuffer CommandBuffer, f
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstExclusiveScissor),
 		unsafe.Pointer(&exclusiveScissorCount),
-		unsafe.Pointer(pExclusiveScissorEnables),
+		unsafe.Pointer(&pExclusiveScissorEnables),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetExclusiveScissorEnableNV, nil, args[:])
 }
@@ -4219,7 +4219,7 @@ func (c *Commands) CmdSetViewportShadingRatePaletteNV(commandBuffer CommandBuffe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstViewport),
 		unsafe.Pointer(&viewportCount),
-		unsafe.Pointer(pShadingRatePalettes),
+		unsafe.Pointer(&pShadingRatePalettes),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportShadingRatePaletteNV, nil, args[:])
 }
@@ -4230,7 +4230,7 @@ func (c *Commands) CmdSetCoarseSampleOrderNV(commandBuffer CommandBuffer, sample
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&sampleOrderType),
 		unsafe.Pointer(&customSampleOrderCount),
-		unsafe.Pointer(pCustomSampleOrders),
+		unsafe.Pointer(&pCustomSampleOrders),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.cmdSetCoarseSampleOrderNV, nil, args[:])
 }
@@ -4301,9 +4301,9 @@ func (c *Commands) CreateAccelerationStructureNV(device Device, pCreateInfo *Acc
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pAccelerationStructure),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pAccelerationStructure),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4324,7 +4324,7 @@ func (c *Commands) DestroyAccelerationStructureKHR(device Device, accelerationSt
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&accelerationStructure),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyAccelerationStructureKHR, nil, args[:])
 }
@@ -4334,7 +4334,7 @@ func (c *Commands) DestroyAccelerationStructureNV(device Device, accelerationStr
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&accelerationStructure),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyAccelerationStructureNV, nil, args[:])
 }
@@ -4343,8 +4343,8 @@ func (c *Commands) DestroyAccelerationStructureNV(device Device, accelerationStr
 func (c *Commands) GetAccelerationStructureMemoryRequirementsNV(device Device, pInfo *AccelerationStructureMemoryRequirementsInfoNV, pMemoryRequirements *MemoryRequirements2KHR) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getAccelerationStructureMemoryRequirementsNV, nil, args[:])
 }
@@ -4355,7 +4355,7 @@ func (c *Commands) BindAccelerationStructureMemoryNV(device Device, bindInfoCoun
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfos),
+		unsafe.Pointer(&pBindInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindAccelerationStructureMemoryNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4367,7 +4367,7 @@ func (c *Commands) BindAccelerationStructureMemoryNV(device Device, bindInfoCoun
 func (c *Commands) CmdCopyAccelerationStructureKHR(commandBuffer CommandBuffer, pInfo *CopyAccelerationStructureInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyAccelerationStructureKHR, nil, args[:])
 }
@@ -4378,7 +4378,7 @@ func (c *Commands) CopyAccelerationStructureKHR(device Device, deferredOperation
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4388,7 +4388,7 @@ func (c *Commands) CopyAccelerationStructureKHR(device Device, deferredOperation
 func (c *Commands) CmdCopyAccelerationStructureToMemoryKHR(commandBuffer CommandBuffer, pInfo *CopyAccelerationStructureToMemoryInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyAccelerationStructureToMemoryKHR, nil, args[:])
 }
@@ -4399,7 +4399,7 @@ func (c *Commands) CopyAccelerationStructureToMemoryKHR(device Device, deferredO
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureToMemoryKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4409,7 +4409,7 @@ func (c *Commands) CopyAccelerationStructureToMemoryKHR(device Device, deferredO
 func (c *Commands) CmdCopyMemoryToAccelerationStructureKHR(commandBuffer CommandBuffer, pInfo *CopyMemoryToAccelerationStructureInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToAccelerationStructureKHR, nil, args[:])
 }
@@ -4420,7 +4420,7 @@ func (c *Commands) CopyMemoryToAccelerationStructureKHR(device Device, deferredO
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4451,9 +4451,9 @@ func (c *Commands) CreateRayTracingPipelinesNV(device Device, pipelineCache Pipe
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
 		unsafe.Pointer(&createInfoCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelines),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelines),
 	}
 	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createRayTracingPipelinesNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4466,8 +4466,8 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixPropertiesNV(physicalDevice
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4481,8 +4481,8 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixPropertiesNV(physicalDevice
 func (c *Commands) GetClusterAccelerationStructureBuildSizesNV(device Device, pInfo *ClusterAccelerationStructureInputInfoNV, pSizeInfo *AccelerationStructureBuildSizesInfoKHR) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pSizeInfo),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pSizeInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getClusterAccelerationStructureBuildSizesNV, nil, args[:])
 }
@@ -4491,7 +4491,7 @@ func (c *Commands) GetClusterAccelerationStructureBuildSizesNV(device Device, pI
 func (c *Commands) CmdBuildClusterAccelerationStructureIndirectNV(commandBuffer CommandBuffer, pCommandInfos *ClusterAccelerationStructureCommandsInfoNV) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCommandInfos),
+		unsafe.Pointer(&pCommandInfos),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBuildClusterAccelerationStructureIndirectNV, nil, args[:])
 }
@@ -4500,8 +4500,8 @@ func (c *Commands) CmdBuildClusterAccelerationStructureIndirectNV(commandBuffer 
 func (c *Commands) GetDeviceAccelerationStructureCompatibilityKHR(device Device, pVersionInfo *AccelerationStructureVersionInfoKHR, pCompatibility *AccelerationStructureCompatibilityKHR) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pVersionInfo),
-		unsafe.Pointer(pCompatibility),
+		unsafe.Pointer(&pVersionInfo),
+		unsafe.Pointer(&pCompatibility),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceAccelerationStructureCompatibilityKHR, nil, args[:])
 }
@@ -4527,7 +4527,7 @@ func (c *Commands) GetImageViewAddressNVX(device Device, imageView ImageView, pP
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&imageView),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageViewAddressNVX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4538,9 +4538,9 @@ func (c *Commands) GetPhysicalDeviceSurfacePresentModes2EXT(physicalDevice Physi
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pSurfaceInfo),
-		unsafe.Pointer(pPresentModeCount),
-		unsafe.Pointer(pPresentModes),
+		unsafe.Pointer(&pSurfaceInfo),
+		unsafe.Pointer(&pPresentModeCount),
+		unsafe.Pointer(&pPresentModes),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4551,8 +4551,8 @@ func (c *Commands) GetDeviceGroupSurfacePresentModes2EXT(device Device, pSurface
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pSurfaceInfo),
-		unsafe.Pointer(pModes),
+		unsafe.Pointer(&pSurfaceInfo),
+		unsafe.Pointer(&pModes),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceGroupSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4586,9 +4586,9 @@ func (c *Commands) EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&queueFamilyIndex),
-		unsafe.Pointer(pCounterCount),
-		unsafe.Pointer(pCounters),
-		unsafe.Pointer(pCounterDescriptions),
+		unsafe.Pointer(&pCounterCount),
+		unsafe.Pointer(&pCounters),
+		unsafe.Pointer(&pCounterDescriptions),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4598,8 +4598,8 @@ func (c *Commands) EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR
 func (c *Commands) GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR(physicalDevice PhysicalDevice, pPerformanceQueryCreateInfo *QueryPoolPerformanceCreateInfoKHR, pNumPasses *uint32) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPerformanceQueryCreateInfo),
-		unsafe.Pointer(pNumPasses),
+		unsafe.Pointer(&pPerformanceQueryCreateInfo),
+		unsafe.Pointer(&pNumPasses),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR, nil, args[:])
 }
@@ -4609,7 +4609,7 @@ func (c *Commands) AcquireProfilingLockKHR(device Device, pInfo *AcquireProfilin
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.acquireProfilingLockKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4629,7 +4629,7 @@ func (c *Commands) GetImageDrmFormatModifierPropertiesEXT(device Device, image I
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&image),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageDrmFormatModifierPropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4644,9 +4644,9 @@ func (c *Commands) CreateHeadlessSurfaceEXT(instance Instance, pCreateInfo *Head
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&instance),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSurface),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSurface),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createHeadlessSurfaceEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4657,8 +4657,8 @@ func (c *Commands) GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinations
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pCombinationCount),
-		unsafe.Pointer(pCombinations),
+		unsafe.Pointer(&pCombinationCount),
+		unsafe.Pointer(&pCombinations),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4669,7 +4669,7 @@ func (c *Commands) InitializePerformanceApiINTEL(device Device, pInitializeInfo 
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInitializeInfo),
+		unsafe.Pointer(&pInitializeInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.initializePerformanceApiINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4688,7 +4688,7 @@ func (c *Commands) CmdSetPerformanceMarkerINTEL(commandBuffer CommandBuffer, pMa
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pMarkerInfo),
+		unsafe.Pointer(&pMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceMarkerINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4699,7 +4699,7 @@ func (c *Commands) CmdSetPerformanceStreamMarkerINTEL(commandBuffer CommandBuffe
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pMarkerInfo),
+		unsafe.Pointer(&pMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceStreamMarkerINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4710,7 +4710,7 @@ func (c *Commands) CmdSetPerformanceOverrideINTEL(commandBuffer CommandBuffer, p
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pOverrideInfo),
+		unsafe.Pointer(&pOverrideInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceOverrideINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4721,8 +4721,8 @@ func (c *Commands) AcquirePerformanceConfigurationINTEL(device Device, pAcquireI
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAcquireInfo),
-		unsafe.Pointer(pConfiguration),
+		unsafe.Pointer(&pAcquireInfo),
+		unsafe.Pointer(&pConfiguration),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.acquirePerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4756,7 +4756,7 @@ func (c *Commands) GetPerformanceParameterINTEL(device Device, parameter Perform
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&parameter),
-		unsafe.Pointer(pValue),
+		unsafe.Pointer(&pValue),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPerformanceParameterINTEL, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4769,9 +4769,9 @@ func (c *Commands) GetPipelineExecutablePropertiesKHR(device Device, pPipelineIn
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pPipelineInfo),
-		unsafe.Pointer(pExecutableCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPipelineInfo),
+		unsafe.Pointer(&pExecutableCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutablePropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4782,9 +4782,9 @@ func (c *Commands) GetPipelineExecutableStatisticsKHR(device Device, pExecutable
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pExecutableInfo),
-		unsafe.Pointer(pStatisticCount),
-		unsafe.Pointer(pStatistics),
+		unsafe.Pointer(&pExecutableInfo),
+		unsafe.Pointer(&pStatisticCount),
+		unsafe.Pointer(&pStatistics),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableStatisticsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4795,9 +4795,9 @@ func (c *Commands) GetPipelineExecutableInternalRepresentationsKHR(device Device
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pExecutableInfo),
-		unsafe.Pointer(pInternalRepresentationCount),
-		unsafe.Pointer(pInternalRepresentations),
+		unsafe.Pointer(&pExecutableInfo),
+		unsafe.Pointer(&pInternalRepresentationCount),
+		unsafe.Pointer(&pInternalRepresentations),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableInternalRepresentationsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4812,8 +4812,8 @@ func (c *Commands) GetPhysicalDeviceToolProperties(physicalDevice PhysicalDevice
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pToolCount),
-		unsafe.Pointer(pToolProperties),
+		unsafe.Pointer(&pToolCount),
+		unsafe.Pointer(&pToolProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceToolProperties, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4824,9 +4824,9 @@ func (c *Commands) CreateAccelerationStructureKHR(device Device, pCreateInfo *Ac
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pAccelerationStructure),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pAccelerationStructure),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4845,8 +4845,8 @@ func (c *Commands) CreateDeferredOperationKHR(device Device, pAllocator *Allocat
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pDeferredOperation),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pDeferredOperation),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.createDeferredOperationKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -4857,7 +4857,7 @@ func (c *Commands) DestroyDeferredOperationKHR(device Device, operation Deferred
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&operation),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDeferredOperationKHR, nil, args[:])
 }
@@ -4890,8 +4890,8 @@ func (c *Commands) DeferredOperationJoinKHR(device Device, operation DeferredOpe
 func (c *Commands) GetPipelineIndirectMemoryRequirementsNV(device Device, pCreateInfo *ComputePipelineCreateInfo, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPipelineIndirectMemoryRequirementsNV, nil, args[:])
 }
@@ -4902,7 +4902,7 @@ func (c *Commands) GetPipelineIndirectMemoryRequirementsNV(device Device, pCreat
 func (c *Commands) AntiLagUpdateAMD(device Device, pData *AntiLagDataAMD) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.antiLagUpdateAMD, nil, args[:])
 }
@@ -4939,7 +4939,7 @@ func (c *Commands) CmdSetViewportWithCount(commandBuffer CommandBuffer, viewport
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&viewportCount),
-		unsafe.Pointer(pViewports),
+		unsafe.Pointer(&pViewports),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetViewportWithCount, nil, args[:])
 }
@@ -4949,7 +4949,7 @@ func (c *Commands) CmdSetScissorWithCount(commandBuffer CommandBuffer, scissorCo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&scissorCount),
-		unsafe.Pointer(pScissors),
+		unsafe.Pointer(&pScissors),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetScissorWithCount, nil, args[:])
 }
@@ -5101,7 +5101,7 @@ func (c *Commands) CmdSetSampleMaskEXT(commandBuffer CommandBuffer, samples Samp
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&samples),
-		unsafe.Pointer(pSampleMask),
+		unsafe.Pointer(&pSampleMask),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetSampleMaskEXT, nil, args[:])
 }
@@ -5139,7 +5139,7 @@ func (c *Commands) CmdSetColorBlendEnableEXT(commandBuffer CommandBuffer, firstA
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstAttachment),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pColorBlendEnables),
+		unsafe.Pointer(&pColorBlendEnables),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendEnableEXT, nil, args[:])
 }
@@ -5150,7 +5150,7 @@ func (c *Commands) CmdSetColorBlendEquationEXT(commandBuffer CommandBuffer, firs
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstAttachment),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pColorBlendEquations),
+		unsafe.Pointer(&pColorBlendEquations),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendEquationEXT, nil, args[:])
 }
@@ -5161,7 +5161,7 @@ func (c *Commands) CmdSetColorWriteMaskEXT(commandBuffer CommandBuffer, firstAtt
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstAttachment),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pColorWriteMasks),
+		unsafe.Pointer(&pColorWriteMasks),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorWriteMaskEXT, nil, args[:])
 }
@@ -5217,7 +5217,7 @@ func (c *Commands) CmdSetColorBlendAdvancedEXT(commandBuffer CommandBuffer, firs
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstAttachment),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pColorBlendAdvanced),
+		unsafe.Pointer(&pColorBlendAdvanced),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendAdvancedEXT, nil, args[:])
 }
@@ -5273,7 +5273,7 @@ func (c *Commands) CmdSetViewportSwizzleNV(commandBuffer CommandBuffer, firstVie
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&firstViewport),
 		unsafe.Pointer(&viewportCount),
-		unsafe.Pointer(pViewportSwizzles),
+		unsafe.Pointer(&pViewportSwizzles),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportSwizzleNV, nil, args[:])
 }
@@ -5319,7 +5319,7 @@ func (c *Commands) CmdSetCoverageModulationTableNV(commandBuffer CommandBuffer, 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageModulationTableCount),
-		unsafe.Pointer(pCoverageModulationTable),
+		unsafe.Pointer(&pCoverageModulationTable),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetCoverageModulationTableNV, nil, args[:])
 }
@@ -5356,9 +5356,9 @@ func (c *Commands) CreatePrivateDataSlot(device Device, pCreateInfo *PrivateData
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPrivateDataSlot),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPrivateDataSlot),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPrivateDataSlot, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5369,7 +5369,7 @@ func (c *Commands) DestroyPrivateDataSlot(device Device, privateDataSlot Private
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&privateDataSlot),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPrivateDataSlot, nil, args[:])
 }
@@ -5382,7 +5382,7 @@ func (c *Commands) DestroyPrivateDataSlot(device Device, privateDataSlot Private
 func (c *Commands) CmdCopyBuffer2(commandBuffer CommandBuffer, pCopyBufferInfo *CopyBufferInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyBufferInfo),
+		unsafe.Pointer(&pCopyBufferInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyBuffer2, nil, args[:])
 }
@@ -5391,7 +5391,7 @@ func (c *Commands) CmdCopyBuffer2(commandBuffer CommandBuffer, pCopyBufferInfo *
 func (c *Commands) CmdCopyImage2(commandBuffer CommandBuffer, pCopyImageInfo *CopyImageInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyImageInfo),
+		unsafe.Pointer(&pCopyImageInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyImage2, nil, args[:])
 }
@@ -5400,7 +5400,7 @@ func (c *Commands) CmdCopyImage2(commandBuffer CommandBuffer, pCopyImageInfo *Co
 func (c *Commands) CmdBlitImage2(commandBuffer CommandBuffer, pBlitImageInfo *BlitImageInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBlitImageInfo),
+		unsafe.Pointer(&pBlitImageInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBlitImage2, nil, args[:])
 }
@@ -5409,7 +5409,7 @@ func (c *Commands) CmdBlitImage2(commandBuffer CommandBuffer, pBlitImageInfo *Bl
 func (c *Commands) CmdCopyBufferToImage2(commandBuffer CommandBuffer, pCopyBufferToImageInfo *CopyBufferToImageInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyBufferToImageInfo),
+		unsafe.Pointer(&pCopyBufferToImageInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyBufferToImage2, nil, args[:])
 }
@@ -5418,7 +5418,7 @@ func (c *Commands) CmdCopyBufferToImage2(commandBuffer CommandBuffer, pCopyBuffe
 func (c *Commands) CmdCopyImageToBuffer2(commandBuffer CommandBuffer, pCopyImageToBufferInfo *CopyImageToBufferInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyImageToBufferInfo),
+		unsafe.Pointer(&pCopyImageToBufferInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyImageToBuffer2, nil, args[:])
 }
@@ -5427,7 +5427,7 @@ func (c *Commands) CmdCopyImageToBuffer2(commandBuffer CommandBuffer, pCopyImage
 func (c *Commands) CmdResolveImage2(commandBuffer CommandBuffer, pResolveImageInfo *ResolveImageInfo2) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pResolveImageInfo),
+		unsafe.Pointer(&pResolveImageInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdResolveImage2, nil, args[:])
 }
@@ -5436,7 +5436,7 @@ func (c *Commands) CmdResolveImage2(commandBuffer CommandBuffer, pResolveImageIn
 func (c *Commands) CmdRefreshObjectsKHR(commandBuffer CommandBuffer, pRefreshObjects *RefreshObjectListKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pRefreshObjects),
+		unsafe.Pointer(&pRefreshObjects),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdRefreshObjectsKHR, nil, args[:])
 }
@@ -5446,8 +5446,8 @@ func (c *Commands) GetPhysicalDeviceRefreshableObjectTypesKHR(physicalDevice Phy
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pRefreshableObjectTypeCount),
-		unsafe.Pointer(pRefreshableObjectTypes),
+		unsafe.Pointer(&pRefreshableObjectTypeCount),
+		unsafe.Pointer(&pRefreshableObjectTypes),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceRefreshableObjectTypesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5460,8 +5460,8 @@ func (c *Commands) GetPhysicalDeviceFragmentShadingRatesKHR(physicalDevice Physi
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pFragmentShadingRateCount),
-		unsafe.Pointer(pFragmentShadingRates),
+		unsafe.Pointer(&pFragmentShadingRateCount),
+		unsafe.Pointer(&pFragmentShadingRates),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceFragmentShadingRatesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5484,9 +5484,9 @@ func (c *Commands) CmdSetVertexInputEXT(commandBuffer CommandBuffer, vertexBindi
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&vertexBindingDescriptionCount),
-		unsafe.Pointer(pVertexBindingDescriptions),
+		unsafe.Pointer(&pVertexBindingDescriptions),
 		unsafe.Pointer(&vertexAttributeDescriptionCount),
-		unsafe.Pointer(pVertexAttributeDescriptions),
+		unsafe.Pointer(&pVertexAttributeDescriptions),
 	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.cmdSetVertexInputEXT, nil, args[:])
 }
@@ -5496,7 +5496,7 @@ func (c *Commands) CmdSetColorWriteEnableEXT(commandBuffer CommandBuffer, attach
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&attachmentCount),
-		unsafe.Pointer(pColorWriteEnables),
+		unsafe.Pointer(&pColorWriteEnables),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetColorWriteEnableEXT, nil, args[:])
 }
@@ -5506,7 +5506,7 @@ func (c *Commands) CmdSetEvent2(commandBuffer CommandBuffer, event Event, pDepen
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&event),
-		unsafe.Pointer(pDependencyInfo),
+		unsafe.Pointer(&pDependencyInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdSetEvent2, nil, args[:])
 }
@@ -5527,7 +5527,7 @@ func (c *Commands) CmdResetEvent2(commandBuffer CommandBuffer, event Event, stag
 func (c *Commands) CmdPipelineBarrier2(commandBuffer CommandBuffer, pDependencyInfo *DependencyInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pDependencyInfo),
+		unsafe.Pointer(&pDependencyInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPipelineBarrier2, nil, args[:])
 }
@@ -5538,7 +5538,7 @@ func (c *Commands) QueueSubmit2(queue Queue, submitCount uint32, pSubmits *Submi
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&submitCount),
-		unsafe.Pointer(pSubmits),
+		unsafe.Pointer(&pSubmits),
 		unsafe.Pointer(&fence),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit2, unsafe.Pointer(&result), args[:])
@@ -5553,8 +5553,8 @@ func (c *Commands) QueueSubmit2(queue Queue, submitCount uint32, pSubmits *Submi
 func (c *Commands) GetQueueCheckpointData2NV(queue Queue, pCheckpointDataCount *uint32, pCheckpointData *CheckpointData2NV) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pCheckpointDataCount),
-		unsafe.Pointer(pCheckpointData),
+		unsafe.Pointer(&pCheckpointDataCount),
+		unsafe.Pointer(&pCheckpointData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getQueueCheckpointData2NV, nil, args[:])
 }
@@ -5564,7 +5564,7 @@ func (c *Commands) CopyMemoryToImage(device Device, pCopyMemoryToImageInfo *Copy
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCopyMemoryToImageInfo),
+		unsafe.Pointer(&pCopyMemoryToImageInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyMemoryToImage, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5575,7 +5575,7 @@ func (c *Commands) CopyImageToMemory(device Device, pCopyImageToMemoryInfo *Copy
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCopyImageToMemoryInfo),
+		unsafe.Pointer(&pCopyImageToMemoryInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyImageToMemory, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5586,7 +5586,7 @@ func (c *Commands) CopyImageToImage(device Device, pCopyImageToImageInfo *CopyIm
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCopyImageToImageInfo),
+		unsafe.Pointer(&pCopyImageToImageInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyImageToImage, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5598,7 +5598,7 @@ func (c *Commands) TransitionImageLayout(device Device, transitionCount uint32, 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&transitionCount),
-		unsafe.Pointer(pTransitions),
+		unsafe.Pointer(&pTransitions),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.transitionImageLayout, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5611,8 +5611,8 @@ func (c *Commands) GetPhysicalDeviceVideoCapabilitiesKHR(physicalDevice Physical
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pVideoProfile),
-		unsafe.Pointer(pCapabilities),
+		unsafe.Pointer(&pVideoProfile),
+		unsafe.Pointer(&pCapabilities),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoCapabilitiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5623,9 +5623,9 @@ func (c *Commands) GetPhysicalDeviceVideoFormatPropertiesKHR(physicalDevice Phys
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pVideoFormatInfo),
-		unsafe.Pointer(pVideoFormatPropertyCount),
-		unsafe.Pointer(pVideoFormatProperties),
+		unsafe.Pointer(&pVideoFormatInfo),
+		unsafe.Pointer(&pVideoFormatPropertyCount),
+		unsafe.Pointer(&pVideoFormatProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceVideoFormatPropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5636,8 +5636,8 @@ func (c *Commands) GetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR(physica
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pQualityLevelInfo),
-		unsafe.Pointer(pQualityLevelProperties),
+		unsafe.Pointer(&pQualityLevelInfo),
+		unsafe.Pointer(&pQualityLevelProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5648,9 +5648,9 @@ func (c *Commands) CreateVideoSessionKHR(device Device, pCreateInfo *VideoSessio
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pVideoSession),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pVideoSession),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5661,7 +5661,7 @@ func (c *Commands) DestroyVideoSessionKHR(device Device, videoSession VideoSessi
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSession),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyVideoSessionKHR, nil, args[:])
 }
@@ -5671,9 +5671,9 @@ func (c *Commands) CreateVideoSessionParametersKHR(device Device, pCreateInfo *V
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pVideoSessionParameters),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pVideoSessionParameters),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5685,7 +5685,7 @@ func (c *Commands) UpdateVideoSessionParametersKHR(device Device, videoSessionPa
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSessionParameters),
-		unsafe.Pointer(pUpdateInfo),
+		unsafe.Pointer(&pUpdateInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.updateVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5696,10 +5696,10 @@ func (c *Commands) GetEncodedVideoSessionParametersKHR(device Device, pVideoSess
 	var result int32
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pVideoSessionParametersInfo),
-		unsafe.Pointer(pFeedbackInfo),
-		unsafe.Pointer(pDataSize),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pVideoSessionParametersInfo),
+		unsafe.Pointer(&pFeedbackInfo),
+		unsafe.Pointer(&pDataSize),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getEncodedVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5710,7 +5710,7 @@ func (c *Commands) DestroyVideoSessionParametersKHR(device Device, videoSessionP
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSessionParameters),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyVideoSessionParametersKHR, nil, args[:])
 }
@@ -5721,8 +5721,8 @@ func (c *Commands) GetVideoSessionMemoryRequirementsKHR(device Device, videoSess
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSession),
-		unsafe.Pointer(pMemoryRequirementsCount),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pMemoryRequirementsCount),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getVideoSessionMemoryRequirementsKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5735,7 +5735,7 @@ func (c *Commands) BindVideoSessionMemoryKHR(device Device, videoSession VideoSe
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSession),
 		unsafe.Pointer(&bindSessionMemoryInfoCount),
-		unsafe.Pointer(pBindSessionMemoryInfos),
+		unsafe.Pointer(&pBindSessionMemoryInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.bindVideoSessionMemoryKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5745,7 +5745,7 @@ func (c *Commands) BindVideoSessionMemoryKHR(device Device, videoSession VideoSe
 func (c *Commands) CmdDecodeVideoKHR(commandBuffer CommandBuffer, pDecodeInfo *VideoDecodeInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pDecodeInfo),
+		unsafe.Pointer(&pDecodeInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDecodeVideoKHR, nil, args[:])
 }
@@ -5754,7 +5754,7 @@ func (c *Commands) CmdDecodeVideoKHR(commandBuffer CommandBuffer, pDecodeInfo *V
 func (c *Commands) CmdBeginVideoCodingKHR(commandBuffer CommandBuffer, pBeginInfo *VideoBeginCodingInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBeginInfo),
+		unsafe.Pointer(&pBeginInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginVideoCodingKHR, nil, args[:])
 }
@@ -5763,7 +5763,7 @@ func (c *Commands) CmdBeginVideoCodingKHR(commandBuffer CommandBuffer, pBeginInf
 func (c *Commands) CmdControlVideoCodingKHR(commandBuffer CommandBuffer, pCodingControlInfo *VideoCodingControlInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCodingControlInfo),
+		unsafe.Pointer(&pCodingControlInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdControlVideoCodingKHR, nil, args[:])
 }
@@ -5772,7 +5772,7 @@ func (c *Commands) CmdControlVideoCodingKHR(commandBuffer CommandBuffer, pCoding
 func (c *Commands) CmdEndVideoCodingKHR(commandBuffer CommandBuffer, pEndCodingInfo *VideoEndCodingInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pEndCodingInfo),
+		unsafe.Pointer(&pEndCodingInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndVideoCodingKHR, nil, args[:])
 }
@@ -5781,7 +5781,7 @@ func (c *Commands) CmdEndVideoCodingKHR(commandBuffer CommandBuffer, pEndCodingI
 func (c *Commands) CmdEncodeVideoKHR(commandBuffer CommandBuffer, pEncodeInfo *VideoEncodeInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pEncodeInfo),
+		unsafe.Pointer(&pEncodeInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEncodeVideoKHR, nil, args[:])
 }
@@ -5791,7 +5791,7 @@ func (c *Commands) CmdDecompressMemoryNV(commandBuffer CommandBuffer, decompress
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&decompressRegionCount),
-		unsafe.Pointer(pDecompressMemoryRegions),
+		unsafe.Pointer(&pDecompressMemoryRegions),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdDecompressMemoryNV, nil, args[:])
 }
@@ -5802,8 +5802,8 @@ func (c *Commands) CmdDecompressMemoryNV(commandBuffer CommandBuffer, decompress
 func (c *Commands) GetPartitionedAccelerationStructuresBuildSizesNV(device Device, pInfo *PartitionedAccelerationStructureInstancesInputNV, pSizeInfo *AccelerationStructureBuildSizesInfoKHR) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pSizeInfo),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pSizeInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPartitionedAccelerationStructuresBuildSizesNV, nil, args[:])
 }
@@ -5812,7 +5812,7 @@ func (c *Commands) GetPartitionedAccelerationStructuresBuildSizesNV(device Devic
 func (c *Commands) CmdBuildPartitionedAccelerationStructuresNV(commandBuffer CommandBuffer, pBuildInfo *BuildPartitionedAccelerationStructureInfoNV) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBuildInfo),
+		unsafe.Pointer(&pBuildInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBuildPartitionedAccelerationStructuresNV, nil, args[:])
 }
@@ -5821,7 +5821,7 @@ func (c *Commands) CmdBuildPartitionedAccelerationStructuresNV(commandBuffer Com
 func (c *Commands) CmdDecompressMemoryEXT(commandBuffer CommandBuffer, pDecompressMemoryInfoEXT *DecompressMemoryInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pDecompressMemoryInfoEXT),
+		unsafe.Pointer(&pDecompressMemoryInfoEXT),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDecompressMemoryEXT, nil, args[:])
 }
@@ -5833,9 +5833,9 @@ func (c *Commands) CreateCuModuleNVX(device Device, pCreateInfo *CuModuleCreateI
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pModule),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pModule),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuModuleNVX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5846,9 +5846,9 @@ func (c *Commands) CreateCuFunctionNVX(device Device, pCreateInfo *CuFunctionCre
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pFunction),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pFunction),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuFunctionNVX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5859,7 +5859,7 @@ func (c *Commands) DestroyCuModuleNVX(device Device, module CuModuleNVX, pAlloca
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&module),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCuModuleNVX, nil, args[:])
 }
@@ -5869,7 +5869,7 @@ func (c *Commands) DestroyCuFunctionNVX(device Device, function CuFunctionNVX, p
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&function),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCuFunctionNVX, nil, args[:])
 }
@@ -5878,7 +5878,7 @@ func (c *Commands) DestroyCuFunctionNVX(device Device, function CuFunctionNVX, p
 func (c *Commands) CmdCuLaunchKernelNVX(commandBuffer CommandBuffer, pLaunchInfo *CuLaunchInfoNVX) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pLaunchInfo),
+		unsafe.Pointer(&pLaunchInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCuLaunchKernelNVX, nil, args[:])
 }
@@ -5888,7 +5888,7 @@ func (c *Commands) GetDescriptorSetLayoutSizeEXT(device Device, layout Descripto
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&layout),
-		unsafe.Pointer(pLayoutSizeInBytes),
+		unsafe.Pointer(&pLayoutSizeInBytes),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDescriptorSetLayoutSizeEXT, nil, args[:])
 }
@@ -5899,7 +5899,7 @@ func (c *Commands) GetDescriptorSetLayoutBindingOffsetEXT(device Device, layout 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&layout),
 		unsafe.Pointer(&binding),
-		unsafe.Pointer(pOffset),
+		unsafe.Pointer(&pOffset),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.getDescriptorSetLayoutBindingOffsetEXT, nil, args[:])
 }
@@ -5911,7 +5911,7 @@ func (c *Commands) CmdBindDescriptorBuffersEXT(commandBuffer CommandBuffer, buff
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&bufferCount),
-		unsafe.Pointer(pBindingInfos),
+		unsafe.Pointer(&pBindingInfos),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdBindDescriptorBuffersEXT, nil, args[:])
 }
@@ -5925,8 +5925,8 @@ func (c *Commands) GetBufferOpaqueCaptureDescriptorDataEXT(device Device, pInfo 
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getBufferOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5937,8 +5937,8 @@ func (c *Commands) GetImageOpaqueCaptureDescriptorDataEXT(device Device, pInfo *
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5949,8 +5949,8 @@ func (c *Commands) GetImageViewOpaqueCaptureDescriptorDataEXT(device Device, pIn
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageViewOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5961,8 +5961,8 @@ func (c *Commands) GetSamplerOpaqueCaptureDescriptorDataEXT(device Device, pInfo
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSamplerOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5973,8 +5973,8 @@ func (c *Commands) GetAccelerationStructureOpaqueCaptureDescriptorDataEXT(device
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getAccelerationStructureOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -5992,7 +5992,7 @@ func (c *Commands) WaitForPresent2KHR(device Device, swapchain SwapchainKHR, pPr
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pPresentWait2Info),
+		unsafe.Pointer(&pPresentWait2Info),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.waitForPresent2KHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6005,9 +6005,9 @@ func (c *Commands) CreateBufferCollectionFUCHSIA(device Device, pCreateInfo *Buf
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pCollection),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pCollection),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferCollectionFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6019,7 +6019,7 @@ func (c *Commands) SetBufferCollectionBufferConstraintsFUCHSIA(device Device, co
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&collection),
-		unsafe.Pointer(pBufferConstraintsInfo),
+		unsafe.Pointer(&pBufferConstraintsInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionBufferConstraintsFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6031,7 +6031,7 @@ func (c *Commands) SetBufferCollectionImageConstraintsFUCHSIA(device Device, col
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&collection),
-		unsafe.Pointer(pImageConstraintsInfo),
+		unsafe.Pointer(&pImageConstraintsInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionImageConstraintsFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6042,7 +6042,7 @@ func (c *Commands) DestroyBufferCollectionFUCHSIA(device Device, collection Buff
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&collection),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBufferCollectionFUCHSIA, nil, args[:])
 }
@@ -6053,7 +6053,7 @@ func (c *Commands) GetBufferCollectionPropertiesFUCHSIA(device Device, collectio
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&collection),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getBufferCollectionPropertiesFUCHSIA, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6064,9 +6064,9 @@ func (c *Commands) CreateCudaModuleNV(device Device, pCreateInfo *CudaModuleCrea
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pModule),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pModule),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaModuleNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6078,8 +6078,8 @@ func (c *Commands) GetCudaModuleCacheNV(device Device, module CudaModuleNV, pCac
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&module),
-		unsafe.Pointer(pCacheSize),
-		unsafe.Pointer(pCacheData),
+		unsafe.Pointer(&pCacheSize),
+		unsafe.Pointer(&pCacheData),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getCudaModuleCacheNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6090,9 +6090,9 @@ func (c *Commands) CreateCudaFunctionNV(device Device, pCreateInfo *CudaFunction
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pFunction),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pFunction),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaFunctionNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6103,7 +6103,7 @@ func (c *Commands) DestroyCudaModuleNV(device Device, module CudaModuleNV, pAllo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&module),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCudaModuleNV, nil, args[:])
 }
@@ -6113,7 +6113,7 @@ func (c *Commands) DestroyCudaFunctionNV(device Device, function CudaFunctionNV,
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&function),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCudaFunctionNV, nil, args[:])
 }
@@ -6122,7 +6122,7 @@ func (c *Commands) DestroyCudaFunctionNV(device Device, function CudaFunctionNV,
 func (c *Commands) CmdCudaLaunchKernelNV(commandBuffer CommandBuffer, pLaunchInfo *CudaLaunchInfoNV) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pLaunchInfo),
+		unsafe.Pointer(&pLaunchInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCudaLaunchKernelNV, nil, args[:])
 }
@@ -6131,7 +6131,7 @@ func (c *Commands) CmdCudaLaunchKernelNV(commandBuffer CommandBuffer, pLaunchInf
 func (c *Commands) CmdBeginRendering(commandBuffer CommandBuffer, pRenderingInfo *RenderingInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pRenderingInfo),
+		unsafe.Pointer(&pRenderingInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginRendering, nil, args[:])
 }
@@ -6148,7 +6148,7 @@ func (c *Commands) CmdEndRendering(commandBuffer CommandBuffer) {
 func (c *Commands) CmdEndRendering2KHR(commandBuffer CommandBuffer, pRenderingEndInfo *RenderingEndInfoKHR) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pRenderingEndInfo),
+		unsafe.Pointer(&pRenderingEndInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndRendering2KHR, nil, args[:])
 }
@@ -6157,8 +6157,8 @@ func (c *Commands) CmdEndRendering2KHR(commandBuffer CommandBuffer, pRenderingEn
 func (c *Commands) GetDescriptorSetLayoutHostMappingInfoVALVE(device Device, pBindingReference *DescriptorSetBindingReferenceVALVE, pHostMapping *DescriptorSetLayoutHostMappingInfoVALVE) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pBindingReference),
-		unsafe.Pointer(pHostMapping),
+		unsafe.Pointer(&pBindingReference),
+		unsafe.Pointer(&pHostMapping),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDescriptorSetLayoutHostMappingInfoVALVE, nil, args[:])
 }
@@ -6168,7 +6168,7 @@ func (c *Commands) GetDescriptorSetHostMappingVALVE(device Device, descriptorSet
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorSet),
-		unsafe.Pointer(ppData),
+		unsafe.Pointer(&ppData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDescriptorSetHostMappingVALVE, nil, args[:])
 }
@@ -6178,9 +6178,9 @@ func (c *Commands) CreateMicromapEXT(device Device, pCreateInfo *MicromapCreateI
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pMicromap),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pMicromap),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMicromapEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6191,7 +6191,7 @@ func (c *Commands) CmdBuildMicromapsEXT(commandBuffer CommandBuffer, infoCount u
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&infoCount),
-		unsafe.Pointer(pInfos),
+		unsafe.Pointer(&pInfos),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdBuildMicromapsEXT, nil, args[:])
 }
@@ -6203,7 +6203,7 @@ func (c *Commands) BuildMicromapsEXT(device Device, deferredOperation DeferredOp
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&infoCount),
-		unsafe.Pointer(pInfos),
+		unsafe.Pointer(&pInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.buildMicromapsEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6214,7 +6214,7 @@ func (c *Commands) DestroyMicromapEXT(device Device, micromap MicromapEXT, pAllo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&micromap),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyMicromapEXT, nil, args[:])
 }
@@ -6223,7 +6223,7 @@ func (c *Commands) DestroyMicromapEXT(device Device, micromap MicromapEXT, pAllo
 func (c *Commands) CmdCopyMicromapEXT(commandBuffer CommandBuffer, pInfo *CopyMicromapInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMicromapEXT, nil, args[:])
 }
@@ -6234,7 +6234,7 @@ func (c *Commands) CopyMicromapEXT(device Device, deferredOperation DeferredOper
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6244,7 +6244,7 @@ func (c *Commands) CopyMicromapEXT(device Device, deferredOperation DeferredOper
 func (c *Commands) CmdCopyMicromapToMemoryEXT(commandBuffer CommandBuffer, pInfo *CopyMicromapToMemoryInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMicromapToMemoryEXT, nil, args[:])
 }
@@ -6255,7 +6255,7 @@ func (c *Commands) CopyMicromapToMemoryEXT(device Device, deferredOperation Defe
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapToMemoryEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6265,7 +6265,7 @@ func (c *Commands) CopyMicromapToMemoryEXT(device Device, deferredOperation Defe
 func (c *Commands) CmdCopyMemoryToMicromapEXT(commandBuffer CommandBuffer, pInfo *CopyMemoryToMicromapInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToMicromapEXT, nil, args[:])
 }
@@ -6276,7 +6276,7 @@ func (c *Commands) CopyMemoryToMicromapEXT(device Device, deferredOperation Defe
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&deferredOperation),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToMicromapEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6290,8 +6290,8 @@ func (c *Commands) CopyMemoryToMicromapEXT(device Device, deferredOperation Defe
 func (c *Commands) GetDeviceMicromapCompatibilityEXT(device Device, pVersionInfo *MicromapVersionInfoEXT, pCompatibility *AccelerationStructureCompatibilityKHR) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pVersionInfo),
-		unsafe.Pointer(pCompatibility),
+		unsafe.Pointer(&pVersionInfo),
+		unsafe.Pointer(&pCompatibility),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceMicromapCompatibilityEXT, nil, args[:])
 }
@@ -6303,7 +6303,7 @@ func (c *Commands) GetShaderModuleIdentifierEXT(device Device, shaderModule Shad
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shaderModule),
-		unsafe.Pointer(pIdentifier),
+		unsafe.Pointer(&pIdentifier),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getShaderModuleIdentifierEXT, nil, args[:])
 }
@@ -6312,8 +6312,8 @@ func (c *Commands) GetShaderModuleIdentifierEXT(device Device, shaderModule Shad
 func (c *Commands) GetShaderModuleCreateInfoIdentifierEXT(device Device, pCreateInfo *ShaderModuleCreateInfo, pIdentifier *ShaderModuleIdentifierEXT) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pIdentifier),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pIdentifier),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getShaderModuleCreateInfoIdentifierEXT, nil, args[:])
 }
@@ -6325,8 +6325,8 @@ func (c *Commands) GetPipelinePropertiesEXT(device Device, pPipelineInfo *Pipeli
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pPipelineInfo),
-		unsafe.Pointer(pPipelineProperties),
+		unsafe.Pointer(&pPipelineInfo),
+		unsafe.Pointer(&pPipelineProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelinePropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6336,7 +6336,7 @@ func (c *Commands) GetPipelinePropertiesEXT(device Device, pPipelineInfo *Pipeli
 func (c *Commands) ExportMetalObjectsEXT(device Device, pMetalObjectsInfo *ExportMetalObjectsInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pMetalObjectsInfo),
+		unsafe.Pointer(&pMetalObjectsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.exportMetalObjectsEXT, nil, args[:])
 }
@@ -6345,7 +6345,7 @@ func (c *Commands) ExportMetalObjectsEXT(device Device, pMetalObjectsInfo *Expor
 func (c *Commands) CmdBindTileMemoryQCOM(commandBuffer CommandBuffer, pTileMemoryBindInfo *TileMemoryBindInfoQCOM) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pTileMemoryBindInfo),
+		unsafe.Pointer(&pTileMemoryBindInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindTileMemoryQCOM, nil, args[:])
 }
@@ -6356,8 +6356,8 @@ func (c *Commands) GetFramebufferTilePropertiesQCOM(device Device, framebuffer F
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&framebuffer),
-		unsafe.Pointer(pPropertiesCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertiesCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getFramebufferTilePropertiesQCOM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6368,8 +6368,8 @@ func (c *Commands) GetDynamicRenderingTilePropertiesQCOM(device Device, pRenderi
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pRenderingInfo),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pRenderingInfo),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDynamicRenderingTilePropertiesQCOM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6380,9 +6380,9 @@ func (c *Commands) GetPhysicalDeviceOpticalFlowImageFormatsNV(physicalDevice Phy
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pOpticalFlowImageFormatInfo),
-		unsafe.Pointer(pFormatCount),
-		unsafe.Pointer(pImageFormatProperties),
+		unsafe.Pointer(&pOpticalFlowImageFormatInfo),
+		unsafe.Pointer(&pFormatCount),
+		unsafe.Pointer(&pImageFormatProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceOpticalFlowImageFormatsNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6393,9 +6393,9 @@ func (c *Commands) CreateOpticalFlowSessionNV(device Device, pCreateInfo *Optica
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSession),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSession),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createOpticalFlowSessionNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6406,7 +6406,7 @@ func (c *Commands) DestroyOpticalFlowSessionNV(device Device, session OpticalFlo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&session),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyOpticalFlowSessionNV, nil, args[:])
 }
@@ -6418,7 +6418,7 @@ func (c *Commands) CmdOpticalFlowExecuteNV(commandBuffer CommandBuffer, session 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&session),
-		unsafe.Pointer(pExecuteInfo),
+		unsafe.Pointer(&pExecuteInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdOpticalFlowExecuteNV, nil, args[:])
 }
@@ -6428,8 +6428,8 @@ func (c *Commands) GetDeviceFaultInfoEXT(device Device, pFaultCounts *DeviceFaul
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pFaultCounts),
-		unsafe.Pointer(pFaultInfo),
+		unsafe.Pointer(&pFaultCounts),
+		unsafe.Pointer(&pFaultInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceFaultInfoEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6439,7 +6439,7 @@ func (c *Commands) GetDeviceFaultInfoEXT(device Device, pFaultCounts *DeviceFaul
 func (c *Commands) CmdSetDepthBias2EXT(commandBuffer CommandBuffer, pDepthBiasInfo *DepthBiasInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pDepthBiasInfo),
+		unsafe.Pointer(&pDepthBiasInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetDepthBias2EXT, nil, args[:])
 }
@@ -6449,7 +6449,7 @@ func (c *Commands) ReleaseSwapchainImagesKHR(device Device, pReleaseInfo *Releas
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pReleaseInfo),
+		unsafe.Pointer(&pReleaseInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.releaseSwapchainImagesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6459,8 +6459,8 @@ func (c *Commands) ReleaseSwapchainImagesKHR(device Device, pReleaseInfo *Releas
 func (c *Commands) GetDeviceImageSubresourceLayout(device Device, pInfo *DeviceImageSubresourceInfo, pLayout *SubresourceLayout2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pLayout),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pLayout),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceImageSubresourceLayout, nil, args[:])
 }
@@ -6470,8 +6470,8 @@ func (c *Commands) MapMemory2(device Device, pMemoryMapInfo *MemoryMapInfo, ppDa
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pMemoryMapInfo),
-		unsafe.Pointer(ppData),
+		unsafe.Pointer(&pMemoryMapInfo),
+		unsafe.Pointer(&ppData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.mapMemory2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6482,7 +6482,7 @@ func (c *Commands) UnmapMemory2(device Device, pMemoryUnmapInfo *MemoryUnmapInfo
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pMemoryUnmapInfo),
+		unsafe.Pointer(&pMemoryUnmapInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.unmapMemory2, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6494,9 +6494,9 @@ func (c *Commands) CreateShadersEXT(device Device, createInfoCount uint32, pCrea
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&createInfoCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pShaders),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pShaders),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createShadersEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6507,7 +6507,7 @@ func (c *Commands) DestroyShaderEXT(device Device, shader ShaderEXT, pAllocator 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shader),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyShaderEXT, nil, args[:])
 }
@@ -6518,8 +6518,8 @@ func (c *Commands) GetShaderBinaryDataEXT(device Device, shader ShaderEXT, pData
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shader),
-		unsafe.Pointer(pDataSize),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pDataSize),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getShaderBinaryDataEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6545,8 +6545,8 @@ func (c *Commands) GetSwapchainTimingPropertiesEXT(device Device, swapchain Swap
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pSwapchainTimingProperties),
-		unsafe.Pointer(pSwapchainTimingPropertiesCounter),
+		unsafe.Pointer(&pSwapchainTimingProperties),
+		unsafe.Pointer(&pSwapchainTimingPropertiesCounter),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimingPropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6558,8 +6558,8 @@ func (c *Commands) GetSwapchainTimeDomainPropertiesEXT(device Device, swapchain 
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pSwapchainTimeDomainProperties),
-		unsafe.Pointer(pTimeDomainsCounter),
+		unsafe.Pointer(&pSwapchainTimeDomainProperties),
+		unsafe.Pointer(&pTimeDomainsCounter),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimeDomainPropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6570,8 +6570,8 @@ func (c *Commands) GetPastPresentationTimingEXT(device Device, pPastPresentation
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pPastPresentationTimingInfo),
-		unsafe.Pointer(pPastPresentationTimingProperties),
+		unsafe.Pointer(&pPastPresentationTimingInfo),
+		unsafe.Pointer(&pPastPresentationTimingProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPastPresentationTimingEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6582,8 +6582,8 @@ func (c *Commands) GetScreenBufferPropertiesQNX(device Device, buffer *ScreenBuf
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(buffer),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getScreenBufferPropertiesQNX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6594,8 +6594,8 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixPropertiesKHR(physicalDevic
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesKHR, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6607,7 +6607,7 @@ func (c *Commands) GetExecutionGraphPipelineScratchSizeAMDX(device Device, execu
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&executionGraph),
-		unsafe.Pointer(pSizeInfo),
+		unsafe.Pointer(&pSizeInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getExecutionGraphPipelineScratchSizeAMDX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6619,8 +6619,8 @@ func (c *Commands) GetExecutionGraphPipelineNodeIndexAMDX(device Device, executi
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&executionGraph),
-		unsafe.Pointer(pNodeInfo),
-		unsafe.Pointer(pNodeIndex),
+		unsafe.Pointer(&pNodeInfo),
+		unsafe.Pointer(&pNodeIndex),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getExecutionGraphPipelineNodeIndexAMDX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6633,9 +6633,9 @@ func (c *Commands) CreateExecutionGraphPipelinesAMDX(device Device, pipelineCach
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
 		unsafe.Pointer(&createInfoCount),
-		unsafe.Pointer(pCreateInfos),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pPipelines),
+		unsafe.Pointer(&pCreateInfos),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pPipelines),
 	}
 	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createExecutionGraphPipelinesAMDX, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6653,7 +6653,7 @@ func (c *Commands) CreateExecutionGraphPipelinesAMDX(device Device, pipelineCach
 func (c *Commands) CmdBindDescriptorSets2(commandBuffer CommandBuffer, pBindDescriptorSetsInfo *BindDescriptorSetsInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBindDescriptorSetsInfo),
+		unsafe.Pointer(&pBindDescriptorSetsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindDescriptorSets2, nil, args[:])
 }
@@ -6662,7 +6662,7 @@ func (c *Commands) CmdBindDescriptorSets2(commandBuffer CommandBuffer, pBindDesc
 func (c *Commands) CmdPushConstants2(commandBuffer CommandBuffer, pPushConstantsInfo *PushConstantsInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pPushConstantsInfo),
+		unsafe.Pointer(&pPushConstantsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushConstants2, nil, args[:])
 }
@@ -6671,7 +6671,7 @@ func (c *Commands) CmdPushConstants2(commandBuffer CommandBuffer, pPushConstants
 func (c *Commands) CmdPushDescriptorSet2(commandBuffer CommandBuffer, pPushDescriptorSetInfo *PushDescriptorSetInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pPushDescriptorSetInfo),
+		unsafe.Pointer(&pPushDescriptorSetInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushDescriptorSet2, nil, args[:])
 }
@@ -6680,7 +6680,7 @@ func (c *Commands) CmdPushDescriptorSet2(commandBuffer CommandBuffer, pPushDescr
 func (c *Commands) CmdPushDescriptorSetWithTemplate2(commandBuffer CommandBuffer, pPushDescriptorSetWithTemplateInfo *PushDescriptorSetWithTemplateInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pPushDescriptorSetWithTemplateInfo),
+		unsafe.Pointer(&pPushDescriptorSetWithTemplateInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushDescriptorSetWithTemplate2, nil, args[:])
 }
@@ -6689,7 +6689,7 @@ func (c *Commands) CmdPushDescriptorSetWithTemplate2(commandBuffer CommandBuffer
 func (c *Commands) CmdSetDescriptorBufferOffsets2EXT(commandBuffer CommandBuffer, pSetDescriptorBufferOffsetsInfo *SetDescriptorBufferOffsetsInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pSetDescriptorBufferOffsetsInfo),
+		unsafe.Pointer(&pSetDescriptorBufferOffsetsInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetDescriptorBufferOffsets2EXT, nil, args[:])
 }
@@ -6698,7 +6698,7 @@ func (c *Commands) CmdSetDescriptorBufferOffsets2EXT(commandBuffer CommandBuffer
 func (c *Commands) CmdBindDescriptorBufferEmbeddedSamplers2EXT(commandBuffer CommandBuffer, pBindDescriptorBufferEmbeddedSamplersInfo *BindDescriptorBufferEmbeddedSamplersInfoEXT) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pBindDescriptorBufferEmbeddedSamplersInfo),
+		unsafe.Pointer(&pBindDescriptorBufferEmbeddedSamplersInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindDescriptorBufferEmbeddedSamplers2EXT, nil, args[:])
 }
@@ -6709,7 +6709,7 @@ func (c *Commands) SetLatencySleepModeNV(device Device, swapchain SwapchainKHR, 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pSleepModeInfo),
+		unsafe.Pointer(&pSleepModeInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setLatencySleepModeNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6721,7 +6721,7 @@ func (c *Commands) LatencySleepNV(device Device, swapchain SwapchainKHR, pSleepI
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pSleepInfo),
+		unsafe.Pointer(&pSleepInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.latencySleepNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6732,7 +6732,7 @@ func (c *Commands) SetLatencyMarkerNV(device Device, swapchain SwapchainKHR, pLa
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pLatencyMarkerInfo),
+		unsafe.Pointer(&pLatencyMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.setLatencyMarkerNV, nil, args[:])
 }
@@ -6742,7 +6742,7 @@ func (c *Commands) GetLatencyTimingsNV(device Device, swapchain SwapchainKHR, pL
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
-		unsafe.Pointer(pLatencyMarkerInfo),
+		unsafe.Pointer(&pLatencyMarkerInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getLatencyTimingsNV, nil, args[:])
 }
@@ -6751,7 +6751,7 @@ func (c *Commands) GetLatencyTimingsNV(device Device, swapchain SwapchainKHR, pL
 func (c *Commands) QueueNotifyOutOfBandNV(queue Queue, pQueueTypeInfo *OutOfBandQueueTypeInfoNV) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&queue),
-		unsafe.Pointer(pQueueTypeInfo),
+		unsafe.Pointer(&pQueueTypeInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueNotifyOutOfBandNV, nil, args[:])
 }
@@ -6760,7 +6760,7 @@ func (c *Commands) QueueNotifyOutOfBandNV(queue Queue, pQueueTypeInfo *OutOfBand
 func (c *Commands) CmdSetRenderingAttachmentLocations(commandBuffer CommandBuffer, pLocationInfo *RenderingAttachmentLocationInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pLocationInfo),
+		unsafe.Pointer(&pLocationInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetRenderingAttachmentLocations, nil, args[:])
 }
@@ -6769,7 +6769,7 @@ func (c *Commands) CmdSetRenderingAttachmentLocations(commandBuffer CommandBuffe
 func (c *Commands) CmdSetRenderingInputAttachmentIndices(commandBuffer CommandBuffer, pInputAttachmentIndexInfo *RenderingInputAttachmentIndexInfo) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pInputAttachmentIndexInfo),
+		unsafe.Pointer(&pInputAttachmentIndexInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetRenderingInputAttachmentIndices, nil, args[:])
 }
@@ -6779,7 +6779,7 @@ func (c *Commands) CmdSetDepthClampRangeEXT(commandBuffer CommandBuffer, depthCl
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthClampMode),
-		unsafe.Pointer(pDepthClampRange),
+		unsafe.Pointer(&pDepthClampRange),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdSetDepthClampRangeEXT, nil, args[:])
 }
@@ -6789,8 +6789,8 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertie
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6801,8 +6801,8 @@ func (c *Commands) GetMemoryMetalHandleEXT(device Device, pGetMetalHandleInfo *M
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pGetMetalHandleInfo),
-		unsafe.Pointer(pHandle),
+		unsafe.Pointer(&pGetMetalHandleInfo),
+		unsafe.Pointer(&pHandle),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryMetalHandleEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6814,8 +6814,8 @@ func (c *Commands) GetMemoryMetalHandlePropertiesEXT(device Device, handleType E
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&handleType),
-		unsafe.Pointer(pHandle),
-		unsafe.Pointer(pMemoryMetalHandleProperties),
+		unsafe.Pointer(&pHandle),
+		unsafe.Pointer(&pMemoryMetalHandleProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryMetalHandlePropertiesEXT, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6826,8 +6826,8 @@ func (c *Commands) GetPhysicalDeviceCooperativeVectorPropertiesNV(physicalDevice
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pPropertyCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPropertyCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeVectorPropertiesNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6838,7 +6838,7 @@ func (c *Commands) ConvertCooperativeVectorMatrixNV(device Device, pInfo *Conver
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtr, c.convertCooperativeVectorMatrixNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6849,7 +6849,7 @@ func (c *Commands) CmdConvertCooperativeVectorMatrixNV(commandBuffer CommandBuff
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&infoCount),
-		unsafe.Pointer(pInfos),
+		unsafe.Pointer(&pInfos),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdConvertCooperativeVectorMatrixNV, nil, args[:])
 }
@@ -6858,7 +6858,7 @@ func (c *Commands) CmdConvertCooperativeVectorMatrixNV(commandBuffer CommandBuff
 func (c *Commands) CmdDispatchTileQCOM(commandBuffer CommandBuffer, pDispatchTileInfo *DispatchTileInfoQCOM) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pDispatchTileInfo),
+		unsafe.Pointer(&pDispatchTileInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDispatchTileQCOM, nil, args[:])
 }
@@ -6867,7 +6867,7 @@ func (c *Commands) CmdDispatchTileQCOM(commandBuffer CommandBuffer, pDispatchTil
 func (c *Commands) CmdBeginPerTileExecutionQCOM(commandBuffer CommandBuffer, pPerTileBeginInfo *PerTileBeginInfoQCOM) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pPerTileBeginInfo),
+		unsafe.Pointer(&pPerTileBeginInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginPerTileExecutionQCOM, nil, args[:])
 }
@@ -6876,7 +6876,7 @@ func (c *Commands) CmdBeginPerTileExecutionQCOM(commandBuffer CommandBuffer, pPe
 func (c *Commands) CmdEndPerTileExecutionQCOM(commandBuffer CommandBuffer, pPerTileEndInfo *PerTileEndInfoQCOM) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pPerTileEndInfo),
+		unsafe.Pointer(&pPerTileEndInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndPerTileExecutionQCOM, nil, args[:])
 }
@@ -6886,9 +6886,9 @@ func (c *Commands) CreateExternalComputeQueueNV(device Device, pCreateInfo *Exte
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pExternalQueue),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pExternalQueue),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createExternalComputeQueueNV, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6899,7 +6899,7 @@ func (c *Commands) DestroyExternalComputeQueueNV(device Device, externalQueue Ex
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&externalQueue),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyExternalComputeQueueNV, nil, args[:])
 }
@@ -6908,8 +6908,8 @@ func (c *Commands) DestroyExternalComputeQueueNV(device Device, externalQueue Ex
 func (c *Commands) GetExternalComputeQueueDataNV(externalQueue ExternalComputeQueueNV, params *ExternalComputeQueueDataParamsNV, pData *uintptr) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&externalQueue),
-		unsafe.Pointer(params),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&params),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getExternalComputeQueueDataNV, nil, args[:])
 }
@@ -6919,9 +6919,9 @@ func (c *Commands) CreateTensorARM(device Device, pCreateInfo *TensorCreateInfoA
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pTensor),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pTensor),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6932,7 +6932,7 @@ func (c *Commands) DestroyTensorARM(device Device, tensor TensorARM, pAllocator 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&tensor),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyTensorARM, nil, args[:])
 }
@@ -6942,9 +6942,9 @@ func (c *Commands) CreateTensorViewARM(device Device, pCreateInfo *TensorViewCre
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pView),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pView),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorViewARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6955,7 +6955,7 @@ func (c *Commands) DestroyTensorViewARM(device Device, tensorView TensorViewARM,
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&tensorView),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyTensorViewARM, nil, args[:])
 }
@@ -6964,8 +6964,8 @@ func (c *Commands) DestroyTensorViewARM(device Device, tensorView TensorViewARM,
 func (c *Commands) GetTensorMemoryRequirementsARM(device Device, pInfo *TensorMemoryRequirementsInfoARM, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getTensorMemoryRequirementsARM, nil, args[:])
 }
@@ -6976,7 +6976,7 @@ func (c *Commands) BindTensorMemoryARM(device Device, bindInfoCount uint32, pBin
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfos),
+		unsafe.Pointer(&pBindInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindTensorMemoryARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -6986,8 +6986,8 @@ func (c *Commands) BindTensorMemoryARM(device Device, bindInfoCount uint32, pBin
 func (c *Commands) GetDeviceTensorMemoryRequirementsARM(device Device, pInfo *DeviceTensorMemoryRequirementsARM, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceTensorMemoryRequirementsARM, nil, args[:])
 }
@@ -6996,7 +6996,7 @@ func (c *Commands) GetDeviceTensorMemoryRequirementsARM(device Device, pInfo *De
 func (c *Commands) CmdCopyTensorARM(commandBuffer CommandBuffer, pCopyTensorInfo *CopyTensorInfoARM) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(pCopyTensorInfo),
+		unsafe.Pointer(&pCopyTensorInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyTensorARM, nil, args[:])
 }
@@ -7006,8 +7006,8 @@ func (c *Commands) GetTensorOpaqueCaptureDescriptorDataARM(device Device, pInfo 
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7018,8 +7018,8 @@ func (c *Commands) GetTensorViewOpaqueCaptureDescriptorDataARM(device Device, pI
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pData),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pData),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorViewOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7029,8 +7029,8 @@ func (c *Commands) GetTensorViewOpaqueCaptureDescriptorDataARM(device Device, pI
 func (c *Commands) GetPhysicalDeviceExternalTensorPropertiesARM(physicalDevice PhysicalDevice, pExternalTensorInfo *PhysicalDeviceExternalTensorInfoARM, pExternalTensorProperties *ExternalTensorPropertiesARM) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pExternalTensorInfo),
-		unsafe.Pointer(pExternalTensorProperties),
+		unsafe.Pointer(&pExternalTensorInfo),
+		unsafe.Pointer(&pExternalTensorProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalTensorPropertiesARM, nil, args[:])
 }
@@ -7042,9 +7042,9 @@ func (c *Commands) CreateDataGraphPipelineSessionARM(device Device, pCreateInfo 
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pCreateInfo),
-		unsafe.Pointer(pAllocator),
-		unsafe.Pointer(pSession),
+		unsafe.Pointer(&pCreateInfo),
+		unsafe.Pointer(&pAllocator),
+		unsafe.Pointer(&pSession),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDataGraphPipelineSessionARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7055,9 +7055,9 @@ func (c *Commands) GetDataGraphPipelineSessionBindPointRequirementsARM(device De
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pBindPointRequirementCount),
-		unsafe.Pointer(pBindPointRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pBindPointRequirementCount),
+		unsafe.Pointer(&pBindPointRequirements),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineSessionBindPointRequirementsARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7067,8 +7067,8 @@ func (c *Commands) GetDataGraphPipelineSessionBindPointRequirementsARM(device De
 func (c *Commands) GetDataGraphPipelineSessionMemoryRequirementsARM(device Device, pInfo *DataGraphPipelineSessionMemoryRequirementsInfoARM, pMemoryRequirements *MemoryRequirements2) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pMemoryRequirements),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pMemoryRequirements),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDataGraphPipelineSessionMemoryRequirementsARM, nil, args[:])
 }
@@ -7079,7 +7079,7 @@ func (c *Commands) BindDataGraphPipelineSessionMemoryARM(device Device, bindInfo
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bindInfoCount),
-		unsafe.Pointer(pBindInfos),
+		unsafe.Pointer(&pBindInfos),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindDataGraphPipelineSessionMemoryARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7090,7 +7090,7 @@ func (c *Commands) DestroyDataGraphPipelineSessionARM(device Device, session Dat
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&session),
-		unsafe.Pointer(pAllocator),
+		unsafe.Pointer(&pAllocator),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDataGraphPipelineSessionARM, nil, args[:])
 }
@@ -7100,7 +7100,7 @@ func (c *Commands) CmdDispatchDataGraphARM(commandBuffer CommandBuffer, session 
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&session),
-		unsafe.Pointer(pInfo),
+		unsafe.Pointer(&pInfo),
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdDispatchDataGraphARM, nil, args[:])
 }
@@ -7110,9 +7110,9 @@ func (c *Commands) GetDataGraphPipelineAvailablePropertiesARM(device Device, pPi
 	var result int32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pPipelineInfo),
-		unsafe.Pointer(pPropertiesCount),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&pPipelineInfo),
+		unsafe.Pointer(&pPropertiesCount),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineAvailablePropertiesARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7126,8 +7126,8 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(physicalDe
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&queueFamilyIndex),
-		unsafe.Pointer(pQueueFamilyDataGraphPropertyCount),
-		unsafe.Pointer(pQueueFamilyDataGraphProperties),
+		unsafe.Pointer(&pQueueFamilyDataGraphPropertyCount),
+		unsafe.Pointer(&pQueueFamilyDataGraphProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getPhysicalDeviceQueueFamilyDataGraphPropertiesARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7137,8 +7137,8 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(physicalDe
 func (c *Commands) GetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM(physicalDevice PhysicalDevice, pQueueFamilyDataGraphProcessingEngineInfo *PhysicalDeviceQueueFamilyDataGraphProcessingEngineInfoARM, pQueueFamilyDataGraphProcessingEngineProperties *QueueFamilyDataGraphProcessingEnginePropertiesARM) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
-		unsafe.Pointer(pQueueFamilyDataGraphProcessingEngineInfo),
-		unsafe.Pointer(pQueueFamilyDataGraphProcessingEngineProperties),
+		unsafe.Pointer(&pQueueFamilyDataGraphProcessingEngineInfo),
+		unsafe.Pointer(&pQueueFamilyDataGraphProcessingEngineProperties),
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM, nil, args[:])
 }
@@ -7148,8 +7148,8 @@ func (c *Commands) GetNativeBufferPropertiesOHOS(device Device, buffer *OH_Nativ
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(buffer),
-		unsafe.Pointer(pProperties),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&pProperties),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getNativeBufferPropertiesOHOS, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7160,8 +7160,8 @@ func (c *Commands) GetMemoryNativeBufferOHOS(device Device, pInfo *MemoryGetNati
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&device),
-		unsafe.Pointer(pInfo),
-		unsafe.Pointer(pBuffer),
+		unsafe.Pointer(&pInfo),
+		unsafe.Pointer(&pBuffer),
 	}
 	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryNativeBufferOHOS, unsafe.Pointer(&result), args[:])
 	return Result(result)
@@ -7179,9 +7179,9 @@ func (c *Commands) EnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegion
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&queueFamilyIndex),
-		unsafe.Pointer(pCounterCount),
-		unsafe.Pointer(pCounters),
-		unsafe.Pointer(pCounterDescriptions),
+		unsafe.Pointer(&pCounterCount),
+		unsafe.Pointer(&pCounters),
+		unsafe.Pointer(&pCounterDescriptions),
 	}
 	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM, unsafe.Pointer(&result), args[:])
 	return Result(result)
