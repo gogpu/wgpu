@@ -14,6 +14,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/types"
 	"golang.org/x/sys/windows"
 )
 
@@ -312,51 +313,576 @@ func (d *Device) cleanup() {
 }
 
 // -----------------------------------------------------------------------------
+// Descriptor Allocation Helpers
+// -----------------------------------------------------------------------------
+
+// allocateRTVDescriptor allocates a render target view descriptor.
+func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	if d.rtvHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap not initialized")
+	}
+
+	d.rtvHeap.mu.Lock()
+	defer d.rtvHeap.mu.Unlock()
+
+	if d.rtvHeap.nextFree >= d.rtvHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap exhausted")
+	}
+
+	index := d.rtvHeap.nextFree
+	handle := d.rtvHeap.cpuStart.Offset(int(index), d.rtvHeap.incrementSize)
+	d.rtvHeap.nextFree++
+	return handle, index, nil
+}
+
+// allocateDSVDescriptor allocates a depth stencil view descriptor.
+func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	if d.dsvHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap not initialized")
+	}
+
+	d.dsvHeap.mu.Lock()
+	defer d.dsvHeap.mu.Unlock()
+
+	if d.dsvHeap.nextFree >= d.dsvHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap exhausted")
+	}
+
+	index := d.dsvHeap.nextFree
+	handle := d.dsvHeap.cpuStart.Offset(int(index), d.dsvHeap.incrementSize)
+	d.dsvHeap.nextFree++
+	return handle, index, nil
+}
+
+// allocateSRVDescriptor allocates a shader resource view descriptor.
+func (d *Device) allocateSRVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	if d.viewHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: SRV heap not initialized")
+	}
+
+	d.viewHeap.mu.Lock()
+	defer d.viewHeap.mu.Unlock()
+
+	if d.viewHeap.nextFree >= d.viewHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: CBV/SRV/UAV heap exhausted")
+	}
+
+	index := d.viewHeap.nextFree
+	handle := d.viewHeap.cpuStart.Offset(int(index), d.viewHeap.incrementSize)
+	d.viewHeap.nextFree++
+	return handle, index, nil
+}
+
+// allocateSamplerDescriptor allocates a sampler descriptor.
+func (d *Device) allocateSamplerDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	if d.samplerHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: sampler heap not initialized")
+	}
+
+	d.samplerHeap.mu.Lock()
+	defer d.samplerHeap.mu.Unlock()
+
+	if d.samplerHeap.nextFree >= d.samplerHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: sampler heap exhausted")
+	}
+
+	index := d.samplerHeap.nextFree
+	handle := d.samplerHeap.cpuStart.Offset(int(index), d.samplerHeap.incrementSize)
+	d.samplerHeap.nextFree++
+	return handle, index, nil
+}
+
+// -----------------------------------------------------------------------------
 // hal.Device interface implementation
 // -----------------------------------------------------------------------------
 
 // CreateBuffer creates a GPU buffer.
-func (d *Device) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
-	return nil, fmt.Errorf("dx12: CreateBuffer not yet implemented")
+func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: buffer descriptor is nil")
+	}
+
+	if desc.Size == 0 {
+		return nil, fmt.Errorf("dx12: buffer size must be > 0")
+	}
+
+	// Determine heap type based on usage
+	var heapType d3d12.D3D12_HEAP_TYPE
+	var initialState d3d12.D3D12_RESOURCE_STATES
+
+	switch {
+	case desc.Usage&types.BufferUsageMapRead != 0:
+		// Readback buffer
+		heapType = d3d12.D3D12_HEAP_TYPE_READBACK
+		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
+	case desc.Usage&types.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
+		// Upload buffer
+		heapType = d3d12.D3D12_HEAP_TYPE_UPLOAD
+		initialState = d3d12.D3D12_RESOURCE_STATE_GENERIC_READ
+	default:
+		// Default (GPU-only) buffer
+		heapType = d3d12.D3D12_HEAP_TYPE_DEFAULT
+		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
+	}
+
+	// Align size for constant buffers (256-byte alignment required)
+	bufferSize := desc.Size
+	if desc.Usage&types.BufferUsageUniform != 0 {
+		bufferSize = alignTo256(bufferSize)
+	}
+
+	// Build resource flags
+	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
+	if desc.Usage&types.BufferUsageStorage != 0 {
+		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+	}
+
+	// Create heap properties
+	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
+		Type:                 heapType,
+		CPUPageProperty:      d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+		MemoryPoolPreference: d3d12.D3D12_MEMORY_POOL_UNKNOWN,
+		CreationNodeMask:     0,
+		VisibleNodeMask:      0,
+	}
+
+	// Create resource description for buffer
+	resourceDesc := d3d12.D3D12_RESOURCE_DESC{
+		Dimension:        d3d12.D3D12_RESOURCE_DIMENSION_BUFFER,
+		Alignment:        0,
+		Width:            bufferSize,
+		Height:           1,
+		DepthOrArraySize: 1,
+		MipLevels:        1,
+		Format:           d3d12.DXGI_FORMAT_UNKNOWN,
+		SampleDesc:       d3d12.DXGI_SAMPLE_DESC{Count: 1, Quality: 0},
+		Layout:           d3d12.D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+		Flags:            resourceFlags,
+	}
+
+	// Create the committed resource
+	resource, err := d.raw.CreateCommittedResource(
+		&heapProps,
+		d3d12.D3D12_HEAP_FLAG_NONE,
+		&resourceDesc,
+		initialState,
+		nil, // No optimized clear value for buffers
+	)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateCommittedResource failed: %w", err)
+	}
+
+	buffer := &Buffer{
+		raw:      resource,
+		size:     desc.Size, // Return original size, not aligned size
+		usage:    desc.Usage,
+		heapType: heapType,
+		gpuVA:    resource.GetGPUVirtualAddress(),
+		device:   d,
+	}
+
+	// Map at creation if requested
+	if desc.MappedAtCreation {
+		ptr, mapErr := buffer.Map(0, desc.Size)
+		if mapErr != nil {
+			resource.Release()
+			return nil, fmt.Errorf("dx12: failed to map buffer at creation: %w", mapErr)
+		}
+		buffer.mappedPointer = ptr
+	}
+
+	return buffer, nil
 }
 
 // DestroyBuffer destroys a GPU buffer.
-func (d *Device) DestroyBuffer(_ hal.Buffer) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+func (d *Device) DestroyBuffer(buffer hal.Buffer) {
+	if b, ok := buffer.(*Buffer); ok && b != nil {
+		b.Destroy()
+	}
 }
 
 // CreateTexture creates a GPU texture.
-func (d *Device) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
-	return nil, fmt.Errorf("dx12: CreateTexture not yet implemented")
+func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: texture descriptor is nil")
+	}
+
+	if desc.Size.Width == 0 || desc.Size.Height == 0 {
+		return nil, fmt.Errorf("dx12: texture size must be > 0")
+	}
+
+	// Convert format
+	dxgiFormat := textureFormatToD3D12(desc.Format)
+	if dxgiFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+		return nil, fmt.Errorf("dx12: unsupported texture format: %d", desc.Format)
+	}
+
+	// Build resource flags based on usage
+	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
+	if desc.Usage&types.TextureUsageRenderAttachment != 0 {
+		if isDepthFormat(desc.Format) {
+			resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
+		} else {
+			resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
+		}
+	}
+	if desc.Usage&types.TextureUsageStorageBinding != 0 {
+		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+	}
+
+	// Determine depth/array size
+	depthOrArraySize := desc.Size.DepthOrArrayLayers
+	if depthOrArraySize == 0 {
+		depthOrArraySize = 1
+	}
+
+	// Mip levels
+	mipLevels := desc.MipLevelCount
+	if mipLevels == 0 {
+		mipLevels = 1
+	}
+
+	// Sample count
+	sampleCount := desc.SampleCount
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+
+	// For depth formats, we may need to use typeless format for SRV compatibility
+	createFormat := dxgiFormat
+	if isDepthFormat(desc.Format) && (desc.Usage&types.TextureUsageTextureBinding != 0) {
+		// Use typeless format to allow both DSV and SRV
+		createFormat = depthFormatToTypeless(desc.Format)
+		if createFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+			createFormat = dxgiFormat
+		}
+	}
+
+	// Use optimal texture layout for all dimensions - let driver choose
+	layout := d3d12.D3D12_TEXTURE_LAYOUT_UNKNOWN
+
+	// Create resource description
+	resourceDesc := d3d12.D3D12_RESOURCE_DESC{
+		Dimension:        textureDimensionToD3D12(desc.Dimension),
+		Alignment:        0,
+		Width:            uint64(desc.Size.Width),
+		Height:           desc.Size.Height,
+		DepthOrArraySize: uint16(depthOrArraySize),
+		MipLevels:        uint16(mipLevels),
+		Format:           createFormat,
+		SampleDesc:       d3d12.DXGI_SAMPLE_DESC{Count: sampleCount, Quality: 0},
+		Layout:           layout,
+		Flags:            resourceFlags,
+	}
+
+	// Heap properties (default heap for GPU textures)
+	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
+		Type:                 d3d12.D3D12_HEAP_TYPE_DEFAULT,
+		CPUPageProperty:      d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+		MemoryPoolPreference: d3d12.D3D12_MEMORY_POOL_UNKNOWN,
+		CreationNodeMask:     0,
+		VisibleNodeMask:      0,
+	}
+
+	// Determine initial state based on primary usage
+	var initialState d3d12.D3D12_RESOURCE_STATES
+	switch {
+	case desc.Usage&types.TextureUsageRenderAttachment != 0 && isDepthFormat(desc.Format):
+		initialState = d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
+	case desc.Usage&types.TextureUsageRenderAttachment != 0:
+		initialState = d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
+	case desc.Usage&types.TextureUsageCopyDst != 0:
+		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
+	default:
+		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
+	}
+
+	// Optimized clear value for render targets/depth stencil
+	var clearValue *d3d12.D3D12_CLEAR_VALUE
+	if desc.Usage&types.TextureUsageRenderAttachment != 0 {
+		cv := d3d12.D3D12_CLEAR_VALUE{
+			Format: dxgiFormat,
+		}
+		if isDepthFormat(desc.Format) {
+			cv.SetDepthStencil(1.0, 0)
+		} else {
+			cv.SetColor([4]float32{0, 0, 0, 0})
+		}
+		clearValue = &cv
+	}
+
+	// Create the committed resource
+	resource, err := d.raw.CreateCommittedResource(
+		&heapProps,
+		d3d12.D3D12_HEAP_FLAG_NONE,
+		&resourceDesc,
+		initialState,
+		clearValue,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed: %w", err)
+	}
+
+	return &Texture{
+		raw:       resource,
+		format:    desc.Format,
+		dimension: desc.Dimension,
+		size: hal.Extent3D{
+			Width:              desc.Size.Width,
+			Height:             desc.Size.Height,
+			DepthOrArrayLayers: depthOrArraySize,
+		},
+		mipLevels: mipLevels,
+		samples:   sampleCount,
+		usage:     desc.Usage,
+		device:    d,
+	}, nil
 }
 
 // DestroyTexture destroys a GPU texture.
-func (d *Device) DestroyTexture(_ hal.Texture) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+func (d *Device) DestroyTexture(texture hal.Texture) {
+	if t, ok := texture.(*Texture); ok && t != nil {
+		t.Destroy()
+	}
 }
 
 // CreateTextureView creates a view into a texture.
-func (d *Device) CreateTextureView(_ hal.Texture, _ *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
-	return nil, fmt.Errorf("dx12: CreateTextureView not yet implemented")
+func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
+	if texture == nil {
+		return nil, fmt.Errorf("dx12: texture is nil")
+	}
+
+	tex, ok := texture.(*Texture)
+	if !ok {
+		return nil, fmt.Errorf("dx12: texture is not a DX12 texture")
+	}
+
+	// Determine view format
+	viewFormat := tex.format
+	if desc != nil && desc.Format != types.TextureFormatUndefined {
+		viewFormat = desc.Format
+	}
+
+	// Determine view dimension
+	viewDim := types.TextureViewDimension2D // Default
+	if desc != nil && desc.Dimension != types.TextureViewDimensionUndefined {
+		viewDim = desc.Dimension
+	} else {
+		// Infer from texture dimension
+		switch tex.dimension {
+		case types.TextureDimension1D:
+			viewDim = types.TextureViewDimension1D
+		case types.TextureDimension2D:
+			viewDim = types.TextureViewDimension2D
+		case types.TextureDimension3D:
+			viewDim = types.TextureViewDimension3D
+		}
+	}
+
+	// Determine mip range
+	baseMip := uint32(0)
+	mipCount := tex.mipLevels
+	if desc != nil {
+		baseMip = desc.BaseMipLevel
+		if desc.MipLevelCount > 0 {
+			mipCount = desc.MipLevelCount
+		} else {
+			mipCount = tex.mipLevels - baseMip
+		}
+	}
+
+	// Determine array layer range
+	baseLayer := uint32(0)
+	layerCount := tex.size.DepthOrArrayLayers
+	if desc != nil {
+		baseLayer = desc.BaseArrayLayer
+		if desc.ArrayLayerCount > 0 {
+			layerCount = desc.ArrayLayerCount
+		} else {
+			layerCount = tex.size.DepthOrArrayLayers - baseLayer
+		}
+	}
+
+	view := &TextureView{
+		texture:    tex,
+		format:     viewFormat,
+		dimension:  viewDim,
+		baseMip:    baseMip,
+		mipCount:   mipCount,
+		baseLayer:  baseLayer,
+		layerCount: layerCount,
+		device:     d,
+	}
+
+	dxgiFormat := textureFormatToD3D12(viewFormat)
+
+	// Create RTV if texture supports render attachment and is not depth
+	if tex.usage&types.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
+		// Allocate RTV descriptor
+		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err)
+		}
+
+		// Create RTV desc
+		rtvDesc := d3d12.D3D12_RENDER_TARGET_VIEW_DESC{
+			Format:        dxgiFormat,
+			ViewDimension: textureViewDimensionToRTV(viewDim),
+		}
+
+		// Set up dimension-specific fields
+		switch viewDim {
+		case types.TextureViewDimension1D:
+			rtvDesc.SetTexture1D(baseMip)
+		case types.TextureViewDimension2D:
+			rtvDesc.SetTexture2D(baseMip, 0)
+		case types.TextureViewDimension2DArray:
+			rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
+		case types.TextureViewDimension3D:
+			rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
+		}
+
+		d.raw.CreateRenderTargetView(tex.raw, &rtvDesc, rtvHandle)
+		view.rtvHandle = rtvHandle
+		view.rtvHeapIndex = rtvIndex
+		view.hasRTV = true
+	}
+
+	// Create DSV if texture supports render attachment and is depth
+	if tex.usage&types.TextureUsageRenderAttachment != 0 && isDepthFormat(viewFormat) {
+		// Allocate DSV descriptor
+		dsvHandle, dsvIndex, err := d.allocateDSVDescriptor()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to allocate DSV descriptor: %w", err)
+		}
+
+		// For depth views, use the actual depth format, not typeless
+		depthFormat := textureFormatToD3D12(viewFormat)
+
+		// Create DSV desc
+		dsvDesc := d3d12.D3D12_DEPTH_STENCIL_VIEW_DESC{
+			Format:        depthFormat,
+			ViewDimension: textureViewDimensionToDSV(viewDim),
+			Flags:         0,
+		}
+
+		// Set up dimension-specific fields
+		switch viewDim {
+		case types.TextureViewDimension1D:
+			dsvDesc.SetTexture1D(baseMip)
+		case types.TextureViewDimension2D:
+			dsvDesc.SetTexture2D(baseMip)
+		case types.TextureViewDimension2DArray:
+			dsvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount)
+		}
+
+		d.raw.CreateDepthStencilView(tex.raw, &dsvDesc, dsvHandle)
+		view.dsvHandle = dsvHandle
+		view.dsvHeapIndex = dsvIndex
+		view.hasDSV = true
+	}
+
+	// Create SRV if texture supports texture binding
+	if tex.usage&types.TextureUsageTextureBinding != 0 {
+		// Allocate SRV descriptor
+		srvHandle, srvIndex, err := d.allocateSRVDescriptor()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to allocate SRV descriptor: %w", err)
+		}
+
+		// For depth textures, use SRV-compatible format
+		srvFormat := dxgiFormat
+		if isDepthFormat(viewFormat) {
+			srvFormat = depthFormatToSRV(viewFormat)
+		}
+
+		// Create SRV desc
+		srvDesc := d3d12.D3D12_SHADER_RESOURCE_VIEW_DESC{
+			Format:                  srvFormat,
+			ViewDimension:           textureViewDimensionToSRV(viewDim),
+			Shader4ComponentMapping: d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+		}
+
+		// Set up dimension-specific fields
+		switch viewDim {
+		case types.TextureViewDimension1D:
+			srvDesc.SetTexture1D(baseMip, mipCount, 0)
+		case types.TextureViewDimension2D:
+			srvDesc.SetTexture2D(baseMip, mipCount, 0, 0)
+		case types.TextureViewDimension2DArray:
+			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, 0, 0)
+		case types.TextureViewDimensionCube:
+			srvDesc.SetTextureCube(baseMip, mipCount, 0)
+		case types.TextureViewDimensionCubeArray:
+			srvDesc.SetTextureCubeArray(baseMip, mipCount, baseLayer/6, layerCount/6, 0)
+		case types.TextureViewDimension3D:
+			srvDesc.SetTexture3D(baseMip, mipCount, 0)
+		}
+
+		d.raw.CreateShaderResourceView(tex.raw, &srvDesc, srvHandle)
+		view.srvHandle = srvHandle
+		view.srvHeapIndex = srvIndex
+		view.hasSRV = true
+	}
+
+	return view, nil
 }
 
 // DestroyTextureView destroys a texture view.
-func (d *Device) DestroyTextureView(_ hal.TextureView) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+func (d *Device) DestroyTextureView(view hal.TextureView) {
+	if v, ok := view.(*TextureView); ok && v != nil {
+		v.Destroy()
+	}
 }
 
 // CreateSampler creates a texture sampler.
-func (d *Device) CreateSampler(_ *hal.SamplerDescriptor) (hal.Sampler, error) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
-	return nil, fmt.Errorf("dx12: CreateSampler not yet implemented")
+func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("dx12: sampler descriptor is nil")
+	}
+
+	// Allocate sampler descriptor
+	handle, heapIndex, err := d.allocateSamplerDescriptor()
+	if err != nil {
+		return nil, fmt.Errorf("dx12: failed to allocate sampler descriptor: %w", err)
+	}
+
+	// Build D3D12 sampler desc
+	samplerDesc := d3d12.D3D12_SAMPLER_DESC{
+		Filter:         filterModeToD3D12(desc.MinFilter, desc.MagFilter, desc.MipmapFilter, desc.Compare),
+		AddressU:       addressModeToD3D12(desc.AddressModeU),
+		AddressV:       addressModeToD3D12(desc.AddressModeV),
+		AddressW:       addressModeToD3D12(desc.AddressModeW),
+		MipLODBias:     0,
+		MaxAnisotropy:  uint32(desc.Anisotropy),
+		ComparisonFunc: compareFunctionToD3D12(desc.Compare),
+		BorderColor:    [4]float32{0, 0, 0, 0},
+		MinLOD:         desc.LodMinClamp,
+		MaxLOD:         desc.LodMaxClamp,
+	}
+
+	// Clamp anisotropy
+	if samplerDesc.MaxAnisotropy == 0 {
+		samplerDesc.MaxAnisotropy = 1
+	}
+	if samplerDesc.MaxAnisotropy > 16 {
+		samplerDesc.MaxAnisotropy = 16
+	}
+
+	d.raw.CreateSampler(&samplerDesc, handle)
+
+	return &Sampler{
+		handle:    handle,
+		heapIndex: heapIndex,
+		device:    d,
+	}, nil
 }
 
 // DestroySampler destroys a sampler.
-func (d *Device) DestroySampler(_ hal.Sampler) {
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+func (d *Device) DestroySampler(sampler hal.Sampler) {
+	if s, ok := sampler.(*Sampler); ok && s != nil {
+		s.Destroy()
+	}
 }
 
 // CreateBindGroupLayout creates a bind group layout.
