@@ -473,16 +473,16 @@ func (d *ID3D12Device) CreateCommandSignature(
 }
 
 // GetResourceAllocationInfo returns resource allocation info.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
+// See: https://joshstaiger.org/notes/C-Language-Problems-in-Direct3D-12-GetCPUDescriptorHandleForHeapStart.html
 func (d *ID3D12Device) GetResourceAllocationInfo(visibleMask uint32, numResourceDescs uint32, resourceDescs *D3D12_RESOURCE_DESC) D3D12_RESOURCE_ALLOCATION_INFO {
 	var info D3D12_RESOURCE_ALLOCATION_INFO
 
-	// Note: GetResourceAllocationInfo returns the struct by value, which on Windows x64
-	// means the caller must provide a pointer to receive the result as the first hidden parameter.
 	_, _, _ = syscall.Syscall6(
 		d.vtbl.GetResourceAllocationInfo,
 		5,
-		uintptr(unsafe.Pointer(&info)),
-		uintptr(unsafe.Pointer(d)),
+		uintptr(unsafe.Pointer(d)),     // this pointer first
+		uintptr(unsafe.Pointer(&info)), // output pointer second
 		uintptr(visibleMask),
 		uintptr(numResourceDescs),
 		uintptr(unsafe.Pointer(resourceDescs)),
@@ -569,14 +569,15 @@ func (q *ID3D12CommandQueue) GetTimestampFrequency() (uint64, error) {
 }
 
 // GetDesc returns the command queue description.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
 func (q *ID3D12CommandQueue) GetDesc() D3D12_COMMAND_QUEUE_DESC {
 	var desc D3D12_COMMAND_QUEUE_DESC
 
 	_, _, _ = syscall.Syscall(
 		q.vtbl.GetDesc,
 		2,
-		uintptr(unsafe.Pointer(&desc)),
-		uintptr(unsafe.Pointer(q)),
+		uintptr(unsafe.Pointer(q)),     // this pointer first
+		uintptr(unsafe.Pointer(&desc)), // output pointer second
 		0,
 	)
 
@@ -1100,14 +1101,15 @@ func (r *ID3D12Resource) GetGPUVirtualAddress() uint64 {
 }
 
 // GetDesc returns the resource description.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
 func (r *ID3D12Resource) GetDesc() D3D12_RESOURCE_DESC {
 	var desc D3D12_RESOURCE_DESC
 
 	_, _, _ = syscall.Syscall(
 		r.vtbl.GetDesc,
 		2,
-		uintptr(unsafe.Pointer(&desc)),
-		uintptr(unsafe.Pointer(r)),
+		uintptr(unsafe.Pointer(r)),     // this pointer first
+		uintptr(unsafe.Pointer(&desc)), // output pointer second
 		0,
 	)
 
@@ -1130,14 +1132,17 @@ func (h *ID3D12DescriptorHeap) Release() uint32 {
 }
 
 // GetCPUDescriptorHandleForHeapStart returns the CPU handle for the start of the heap.
+// Note: D3D12 C headers incorrectly declare this as returning the struct directly.
+// The actual calling convention requires passing an output pointer.
+// See: https://joshstaiger.org/notes/C-Language-Problems-in-Direct3D-12-GetCPUDescriptorHandleForHeapStart.html
 func (h *ID3D12DescriptorHeap) GetCPUDescriptorHandleForHeapStart() D3D12_CPU_DESCRIPTOR_HANDLE {
 	var handle D3D12_CPU_DESCRIPTOR_HANDLE
 
 	_, _, _ = syscall.Syscall(
 		h.vtbl.GetCPUDescriptorHandleForHeapStart,
 		2,
-		uintptr(unsafe.Pointer(&handle)),
-		uintptr(unsafe.Pointer(h)),
+		uintptr(unsafe.Pointer(h)),       // this pointer first
+		uintptr(unsafe.Pointer(&handle)), // output pointer second
 		0,
 	)
 
@@ -1145,14 +1150,16 @@ func (h *ID3D12DescriptorHeap) GetCPUDescriptorHandleForHeapStart() D3D12_CPU_DE
 }
 
 // GetGPUDescriptorHandleForHeapStart returns the GPU handle for the start of the heap.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
+// See: https://joshstaiger.org/notes/C-Language-Problems-in-Direct3D-12-GetCPUDescriptorHandleForHeapStart.html
 func (h *ID3D12DescriptorHeap) GetGPUDescriptorHandleForHeapStart() D3D12_GPU_DESCRIPTOR_HANDLE {
 	var handle D3D12_GPU_DESCRIPTOR_HANDLE
 
 	_, _, _ = syscall.Syscall(
 		h.vtbl.GetGPUDescriptorHandleForHeapStart,
 		2,
-		uintptr(unsafe.Pointer(&handle)),
-		uintptr(unsafe.Pointer(h)),
+		uintptr(unsafe.Pointer(h)),       // this pointer first
+		uintptr(unsafe.Pointer(&handle)), // output pointer second
 		0,
 	)
 
@@ -1160,14 +1167,15 @@ func (h *ID3D12DescriptorHeap) GetGPUDescriptorHandleForHeapStart() D3D12_GPU_DE
 }
 
 // GetDesc returns the descriptor heap description.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
 func (h *ID3D12DescriptorHeap) GetDesc() D3D12_DESCRIPTOR_HEAP_DESC {
 	var desc D3D12_DESCRIPTOR_HEAP_DESC
 
 	_, _, _ = syscall.Syscall(
 		h.vtbl.GetDesc,
 		2,
-		uintptr(unsafe.Pointer(&desc)),
-		uintptr(unsafe.Pointer(h)),
+		uintptr(unsafe.Pointer(h)),     // this pointer first
+		uintptr(unsafe.Pointer(&desc)), // output pointer second
 		0,
 	)
 
