@@ -207,16 +207,19 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	baseMip := desc.BaseMipLevel
 	mipCount := desc.MipLevelCount
 	if mipCount == 0 {
+		// 0 means "all remaining mip levels" in WebGPU spec
 		mipCount = mtlTexture.mipLevels - baseMip
 	}
 
 	baseLayer := desc.BaseArrayLayer
 	layerCount := desc.ArrayLayerCount
 	if layerCount == 0 {
-		layerCount = 1
+		// 0 means "all remaining array layers" in WebGPU spec
+		layerCount = mtlTexture.depth - baseLayer
+		if layerCount == 0 {
+			layerCount = 1
+		}
 	}
-	_ = baseLayer
-	_ = layerCount
 
 	var viewType MTLTextureType
 	if desc.Dimension == types.TextureViewDimensionUndefined {
@@ -225,9 +228,20 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		viewType = textureViewDimensionToMTL(desc.Dimension)
 	}
 
+	// Metal's newTextureViewWithPixelFormat:textureType:levels:slices: expects NSRange structs
+	levelRange := NSRange{
+		Location: NSUInteger(baseMip),
+		Length:   NSUInteger(mipCount),
+	}
+	sliceRange := NSRange{
+		Location: NSUInteger(baseLayer),
+		Length:   NSUInteger(layerCount),
+	}
+
 	raw := MsgSend(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
 		uintptr(pixelFormat), uintptr(viewType),
-		uintptr(baseMip), uintptr(mipCount),
+		uintptr(unsafe.Pointer(&levelRange)),
+		uintptr(unsafe.Pointer(&sliceRange)),
 	)
 	if raw == 0 {
 		return nil, fmt.Errorf("metal: failed to create texture view")
