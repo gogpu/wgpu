@@ -290,9 +290,10 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 
 // CommandBuffer implements hal.CommandBuffer for Metal.
 type CommandBuffer struct {
-	raw    ID
-	device *Device
-	pool   *AutoreleasePool
+	raw      ID
+	device   *Device
+	pool     *AutoreleasePool
+	drawable ID // Attached drawable for presentation
 }
 
 // Destroy releases the command buffer.
@@ -305,6 +306,12 @@ func (cb *CommandBuffer) Destroy() {
 		cb.pool.Drain()
 		cb.pool = nil
 	}
+}
+
+// SetDrawable attaches a drawable for presentation.
+// The drawable will be presented when the command buffer is submitted.
+func (cb *CommandBuffer) SetDrawable(drawable ID) {
+	cb.drawable = drawable
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Metal.
