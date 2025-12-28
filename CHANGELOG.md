@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **DX12 COM Calling Convention Bug** — Fixes device operations on Intel GPUs
+  - Root cause: D3D12 methods returning structs require `this` pointer first, output pointer second
+  - Affected methods: `GetCPUDescriptorHandleForHeapStart`, `GetGPUDescriptorHandleForHeapStart`,
+    `GetDesc` (multiple types), `GetResourceAllocationInfo`
+  - Reference: [D3D12 Struct Return Convention](https://joshstaiger.org/notes/C-Language-Problems-in-Direct3D-12-GetCPUDescriptorHandleForHeapStart.html)
+
 - **Vulkan goffi Argument Passing Bug** — Fixes Windows crash (Exception 0xc0000005)
   - Root cause: vk-gen generated incorrect FFI calls after syscall→goffi migration
   - Before: `unsafe.Pointer(ptr)` passed pointer value directly
@@ -15,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Affected all Vulkan functions with pointer parameters
 
 ### Added
+- **DX12 Integration Test** (`cmd/dx12-test`) — Validates DX12 backend on Windows
+  - Tests: backend creation, instance, adapter enumeration, device, pipeline layout
+
 - **Compute Shader Support (Phase 2)** — Core API implementation
   - `ComputePipelineDescriptor` and `ProgrammableStage` types
   - `DeviceCreateComputePipeline()` and `DeviceDestroyComputePipeline()` functions
