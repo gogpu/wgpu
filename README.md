@@ -21,7 +21,7 @@
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** v0.9.0-dev — Compute shaders in development. All 5 HAL backends ready.
+> **Status:** Active development. All 5 HAL backends ready (Vulkan, Metal, DX12, GLES, Software).
 
 ---
 
@@ -117,45 +117,9 @@ wgpu/
 
 ## Roadmap
 
-**Phase 1: Types Package** ✓
-- [x] Backend types (Vulkan, Metal, DX12, GL)
-- [x] Adapter and device types
-- [x] Feature flags
-- [x] GPU limits with presets
-- [x] Texture formats (100+)
-- [x] Buffer, sampler, shader types
-- [x] Bind group and render state types
-- [x] Vertex formats with size calculations
+See [ROADMAP.md](ROADMAP.md) for detailed development milestones and version history.
 
-**Phase 2: Core Validation** ✓
-- [x] Type-safe ID system with generics
-- [x] Epoch-based use-after-free prevention
-- [x] Instance, Adapter, Device, Queue management
-- [x] Hub with 17 resource registries
-- [x] Comprehensive error handling
-- [x] 127 tests with 95% coverage
-
-**Phase 3: HAL Interface** ✓
-- [x] Backend abstraction layer (Backend, Instance, Adapter, Device, Queue)
-- [x] Resource interfaces (Buffer, Texture, Surface, Sampler, etc.)
-- [x] Command encoding (CommandEncoder, RenderPassEncoder, ComputePassEncoder)
-- [x] Backend registration system
-- [x] Noop backend for testing
-- [x] 54 tests with 94% coverage
-
-**Phase 4: Pure Go Backends** ✓
-- [x] OpenGL ES backend (`hal/gles/`) — Pure Go via goffi, Windows (WGL) + Linux (EGL), ~7.5K LOC
-- [x] Vulkan backend (`hal/vulkan/`) — Pure Go via goffi, cross-platform (Windows/Linux/macOS), ~27K LOC
-- [x] Software backend (`hal/software/`) — Full rasterization pipeline, ~10K LOC, 100+ tests
-- [x] Metal backend (`hal/metal/`) — Pure Go via goffi, macOS, ~3K LOC
-- [x] DX12 backend (`hal/dx12/`) — Pure Go via syscall, Windows, ~12K LOC
-
-**Phase 5: Compute Shaders** (In Progress)
-- [x] Core API: ComputePipelineDescriptor, ComputePassEncoder
-- [x] HAL infrastructure: glDispatchCompute, SetBindGroup, workgroup sizes
-- [ ] Backend tests: Vulkan, DX12, Metal, GLES
-- [ ] Examples: array sum, buffer copy, image filter
-- [ ] Documentation and tutorials
+**Current Focus:** Compute shader support across all backends.
 
 ## Pure Go Approach
 
@@ -230,22 +194,22 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
   - Resource structures
   - Memory allocator (buddy allocation)
 
-### Metal Backend Features (v0.6.0)
+### Metal Backend Features
 
 - **Pure Go Objective-C bridge** via goffi
 - **Metal API access** via Objective-C runtime
 - **Device and adapter enumeration**
 - **Command buffer and render encoder**
-- **Shader compilation** (MSL via naga v0.6.0)
+- **Shader compilation** (MSL via naga)
 - **Texture and buffer management**
 - **Surface presentation** (CAMetalLayer integration)
 - **~3K lines of code**
 
-### DirectX 12 Backend Features (v0.8.0+)
+### DirectX 12 Backend Features
 
 - **Pure Go COM bindings** via syscall (no CGO!)
 - **D3D12 API access** via COM interface vtables
-- **Intel GPU support** (v0.8.1 — fixed COM calling convention)
+- **Intel GPU support** (fixed COM calling convention)
 - **DXGI integration** for swapchain and adapter enumeration
 - **Descriptor heap management** (CBV/SRV/UAV, Sampler, RTV, DSV)
 - **Flip model swapchain** with tearing support (VRR)
