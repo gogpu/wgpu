@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.8.0
+## Current Status: v0.8.4
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -74,7 +74,7 @@
 - [x] Affected backends: Metal, Vulkan, GLES, Software
 - [x] Unit tests for zero-dimension handling
 
-### v0.8.0 — DirectX 12 Backend (Current)
+### v0.8.0 — DirectX 12 Backend
 - [x] DX12 bindings via syscall (Pure Go COM, no CGO!)
 - [x] Device and adapter enumeration via DXGI
 - [x] Command list and allocator management
@@ -82,6 +82,21 @@
 - [x] Descriptor heaps (CBV/SRV/UAV, Sampler, RTV, DSV)
 - [x] Flip model swapchain with tearing support
 - [x] Full format conversion (WebGPU → DXGI)
+
+### v0.8.1 — DX12 & Vulkan Fixes
+- [x] DX12 COM calling convention fix for Intel GPUs
+- [x] Vulkan goffi argument passing fix (Windows crash)
+- [x] Compute shader support (Phase 2 — Core API)
+
+### v0.8.2 — Naga Update
+- [x] Updated naga v0.6.0 → v0.8.0 (HLSL backend, SPIR-V fixes)
+
+### v0.8.3 — Metal macOS Fixes
+- [x] Metal present timing: schedule `presentDrawable:` before `commit`
+- [x] TextureView NSRange parameter fix
+
+### v0.8.4 — Naga Clamp Fix (Current)
+- [x] Updated naga v0.8.0 → v0.8.1 (clamp() built-in function fix)
 
 ---
 
@@ -157,6 +172,10 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.8.4 | 2025-12 | Naga v0.8.1 (clamp() fix) |
+| v0.8.3 | 2025-12 | Metal macOS blank window fix |
+| v0.8.2 | 2025-12 | Naga v0.8.0 (HLSL backend) |
+| v0.8.1 | 2025-12 | DX12/Vulkan fixes, compute API |
 | v0.8.0 | 2025-12 | DirectX 12 backend, all 5 HAL backends complete |
 | v0.7.0 | 2025-12 | Metal shader pipeline (WGSL→MSL) |
 | v0.6.0 | 2025-12 | Metal backend for macOS |
