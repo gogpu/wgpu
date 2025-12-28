@@ -241,10 +241,11 @@ surface.GetFramebuffer() // Returns []byte (RGBA8)
 - **Surface presentation** (CAMetalLayer integration)
 - **~3K lines of code**
 
-### DirectX 12 Backend Features (New in v0.8.0)
+### DirectX 12 Backend Features (v0.8.0+)
 
 - **Pure Go COM bindings** via syscall (no CGO!)
 - **D3D12 API access** via COM interface vtables
+- **Intel GPU support** (v0.8.1 — fixed COM calling convention)
 - **DXGI integration** for swapchain and adapter enumeration
 - **Descriptor heap management** (CBV/SRV/UAV, Sampler, RTV, DSV)
 - **Flip model swapchain** with tearing support (VRR)
