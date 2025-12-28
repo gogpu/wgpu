@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2025-12-29
+
+### Fixed
+- **Metal macOS Blank Window** (Issue [gogpu/gogpu#24](https://github.com/gogpu/gogpu/issues/24))
+  - Root cause: `[drawable present]` called separately after command buffer commit
+  - Fix: Schedule `presentDrawable:` on command buffer BEFORE `commit` (Metal requirement)
+  - Added `SetDrawable()` method to CommandBuffer for drawable attachment
+  - Added `Drawable()` accessor to SurfaceTexture
+
+- **Metal TextureView NSRange Parameters**
+  - Root cause: `newTextureViewWithPixelFormat:textureType:levels:slices:` expects `NSRange` structs
+  - Fix: Pass `NSRange` struct pointers instead of raw integers
+  - Fixed array layer count calculation (was previously ignored)
+
 ## [0.8.2] - 2025-12-29
 
 ### Changed
