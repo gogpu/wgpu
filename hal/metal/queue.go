@@ -36,6 +36,11 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			}
 		}
 
+		// Schedule presentation BEFORE commit (Metal requirement)
+		if cb.drawable != 0 {
+			_ = MsgSend(cb.raw, Sel("presentDrawable:"), uintptr(cb.drawable))
+		}
+
 		// Commit the command buffer
 		_ = MsgSend(cb.raw, Sel("commit"))
 	}

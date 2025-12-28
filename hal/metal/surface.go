@@ -162,6 +162,12 @@ func (st *SurfaceTexture) Destroy() {
 	}
 }
 
+// Drawable returns the drawable ID.
+// This is used by the native backend to attach the drawable to a command buffer.
+func (st *SurfaceTexture) Drawable() ID {
+	return st.drawable
+}
+
 // msgSendCGSize sends an Objective-C message with a CGSize argument.
 func msgSendCGSize(obj ID, sel SEL, size CGSize) {
 	if obj == 0 {
