@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2025-12-29
+
+### Changed
+- Updated dependency: `github.com/gogpu/naga` v0.6.0 → v0.8.0
+  - HLSL backend for DirectX 11/12
+  - Code quality and SPIR-V bug fixes
+  - All 4 shader backends now stable
+- Updated dependency: `github.com/go-webgpu/goffi` v0.3.3 → v0.3.5
+
 ## [0.8.1] - 2025-12-28
 
 ### Fixed
