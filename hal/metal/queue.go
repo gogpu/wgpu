@@ -71,15 +71,21 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 }
 
 // Present presents a surface texture to the screen.
+//
+// Note: On Metal, the actual presentation is scheduled via presentDrawable:
+// in Submit() BEFORE the command buffer is committed. This ensures proper
+// synchronization between GPU work and display.
+//
+// This method only releases the drawable reference. The present was already
+// scheduled during Submit() if a drawable was attached to the command buffer.
 func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	st, ok := texture.(*SurfaceTexture)
 	if !ok || st == nil {
 		return nil
 	}
 
+	// Release drawable reference (presentation was scheduled in Submit)
 	if st.drawable != 0 {
-		// Present the drawable
-		_ = MsgSend(st.drawable, Sel("present"))
 		Release(st.drawable)
 		st.drawable = 0
 	}
