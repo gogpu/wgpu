@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2025-12-29
+
+### Added
+- **DX12 Backend Registration** — DirectX 12 backend now auto-registers on Windows
+  - Added `hal/dx12/init.go` with `RegisterBackend()` call
+  - DX12 backend (~12.7K LOC) now available alongside Vulkan on Windows
+  - Backend selection priority: Vulkan → Metal → DX12 → GLES → Software
+
 ## [0.8.4] - 2025-12-29
 
 ### Changed

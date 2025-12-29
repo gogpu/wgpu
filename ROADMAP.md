@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.8.4
+## Current Status: v0.8.5
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -95,8 +95,13 @@
 - [x] Metal present timing: schedule `presentDrawable:` before `commit`
 - [x] TextureView NSRange parameter fix
 
-### v0.8.4 — Naga Clamp Fix (Current)
+### v0.8.4 — Naga Clamp Fix
 - [x] Updated naga v0.8.0 → v0.8.1 (clamp() built-in function fix)
+
+### v0.8.5 — DX12 Backend Registration (Current)
+- [x] DX12 backend auto-registers on Windows via `hal/dx12/init.go`
+- [x] Backend selection priority: Vulkan → Metal → DX12 → GLES → Software
+- [x] All 5 HAL backends now fully integrated
 
 ---
 
