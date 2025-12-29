@@ -100,7 +100,7 @@
 
 ### v0.8.5 — DX12 Backend Registration (Current)
 - [x] DX12 backend auto-registers on Windows via `hal/dx12/init.go`
-- [x] Backend selection priority: Vulkan → Metal → DX12 → GLES → Software
+- [x] Windows backend priority: Vulkan → DX12 → GLES → Software
 - [x] All 5 HAL backends now fully integrated
 
 ---
