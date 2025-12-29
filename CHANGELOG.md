@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2025-12-29
+
+### Fixed
+- **Metal Double Present Issue** — Removed duplicate `[drawable present]` call in `Queue.Present()`
+  - `presentDrawable:` is already scheduled in `Submit()` before command buffer commit
+  - Duplicate present was causing synchronization issues on some Metal drivers
+
+### Changed
+- Updated dependency: `github.com/go-webgpu/goffi` v0.3.5 → v0.3.6
+  - **ARM64 HFA Returns** — `NSRect` (4×float64) now correctly returns all values on Apple Silicon
+  - **Large Struct Returns** — Structs >16 bytes properly use X8 register for implicit pointer
+  - **Fixes macOS ARM64 blank window** — `GetSize()` no longer returns (0,0) on M1/M2/M3/M4 Macs
+  - Resolves [gogpu/gogpu#24](https://github.com/gogpu/gogpu/issues/24)
+
 ## [0.8.5] - 2025-12-29
 
 ### Added
@@ -278,7 +292,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/gogpu/wgpu/compare/v0.8.5...v0.8.6
+[0.8.5]: https://github.com/gogpu/wgpu/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/gogpu/wgpu/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/gogpu/wgpu/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/gogpu/wgpu/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/gogpu/wgpu/compare/v0.8.0...v0.8.1
