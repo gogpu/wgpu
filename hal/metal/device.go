@@ -190,9 +190,20 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	mtlTexture, ok := texture.(*Texture)
-	if !ok || mtlTexture == nil {
+	var mtlTexture *Texture
+	switch t := texture.(type) {
+	case *Texture:
+		mtlTexture = t
+	case *SurfaceTexture:
+		if t != nil {
+			mtlTexture = t.texture
+		}
+	}
+	if mtlTexture == nil {
 		return nil, fmt.Errorf("metal: invalid texture")
+	}
+	if desc == nil {
+		desc = &hal.TextureViewDescriptor{}
 	}
 
 	pool := NewAutoreleasePool()
@@ -238,10 +249,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		Length:   NSUInteger(layerCount),
 	}
 
-	raw := MsgSend(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
-		uintptr(pixelFormat), uintptr(viewType),
-		uintptr(unsafe.Pointer(&levelRange)),
-		uintptr(unsafe.Pointer(&sliceRange)),
+	raw := msgSendID(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
+		argUint64(uint64(pixelFormat)),
+		argUint64(uint64(viewType)),
+		argStruct(levelRange, nsRangeType),
+		argStruct(sliceRange, nsRangeType),
 	)
 	if raw == 0 {
 		return nil, fmt.Errorf("metal: failed to create texture view")
