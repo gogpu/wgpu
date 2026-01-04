@@ -50,7 +50,7 @@ func (a *Adapter) Open(_ types.Features, _ types.Limits) (hal.OpenDevice, error)
 // TextureFormatCapabilities returns capabilities for a texture format.
 func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
 	// OpenGL 3.3+ supports most common formats
-	// TODO: Query actual format support from GL
+	// Note: Full format support querying requires glGetInternalformativ (GL 4.2+).
 	flags := hal.TextureFormatCapabilitySampled
 
 	switch format {

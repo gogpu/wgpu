@@ -322,7 +322,7 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 
 // TextureFormatCapabilities returns capabilities for a specific texture format.
 func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
-	// TODO: Query actual format support via CheckFormatSupport
+	// Note: CheckFormatSupport can query exact format capabilities per resource type.
 	// For now, return common capabilities for well-supported formats
 	flags := hal.TextureFormatCapabilitySampled
 

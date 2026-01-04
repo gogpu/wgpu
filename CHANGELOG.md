@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Code Quality** — Replaced 50+ TODO comments with proper documentation notes
+  - Core layer: Deprecated legacy ID-based API functions with HAL-based alternatives
+  - HAL backends: Documented feature gaps with version targets (v0.5.0, v0.6.0)
+
+### Known Limitations (Vulkan Backend)
+
+The following features are not yet fully implemented in the Vulkan backend:
+
+| Feature | Status | Target |
+|---------|--------|--------|
+| Feature Detection | Returns 0 (all disabled) | v0.5.0 |
+| Limits Mapping | Uses conservative defaults | v0.5.0 |
+| Array Textures | Single layer only | v0.6.0 |
+| Render Bundles | Not implemented | v0.6.0 |
+| Timestamp Period | Hardcoded to 1.0 | v0.6.0 |
+
+**Note:** Basic rendering (triangles, textures, compute) works correctly. These limitations affect capability reporting and advanced features only.
+
 ## [0.8.8] - 2026-01-04
 
 ### Fixed

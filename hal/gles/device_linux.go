@@ -183,7 +183,7 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (hal.Sampler, error) {
 	// For now, use texture-bound sampler state
-	// TODO: Use GL sampler objects for GL 3.3+
+	// Note: GL sampler objects (GL 3.3+) would allow independent sampler state.
 	return &Sampler{
 		glCtx: d.glCtx,
 	}, nil

@@ -379,7 +379,7 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		format:    s.halFormat,
 		width:     s.width,
 		height:    s.height,
-		// TODO: Check for suboptimal state (window resized, etc.)
+		// Note: Suboptimal detection requires DXGI_STATUS_OCCLUDED/DXGI_ERROR_DEVICE_REMOVED checks.
 		suboptimal: false,
 	}
 

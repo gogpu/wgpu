@@ -33,6 +33,12 @@ type ProgrammableStage struct {
 
 // DeviceCreateComputePipeline creates a compute pipeline on this device.
 //
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API: Device.CreateComputePipeline() (when implemented).
+//
+// This function creates a placeholder pipeline without actual GPU resources.
+// It exists for backward compatibility with existing code.
+//
 // The pipeline combines a compute shader with a pipeline layout to define
 // how resources are bound and the shader is executed.
 //
@@ -74,9 +80,8 @@ func DeviceCreateComputePipeline(deviceID DeviceID, desc *ComputePipelineDescrip
 		}
 	}
 
-	// TODO: Create actual compute pipeline via HAL backend
-	// For now, create a placeholder pipeline
-
+	// Note: This creates a placeholder pipeline without HAL integration.
+	// For actual GPU pipelines, HAL-based Device.CreateComputePipeline() will be added.
 	pipeline := ComputePipeline{}
 	pipelineID := hub.RegisterComputePipeline(pipeline)
 

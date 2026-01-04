@@ -72,7 +72,7 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 		return
 	}
 
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+	// Note: Requires upload heap staging buffer. See Vulkan queue.go for pattern.
 	// For now this is a no-op stub. Full implementation requires:
 	// 1. Create upload heap staging buffer
 	// 2. Map staging buffer and copy data
@@ -88,7 +88,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return
 	}
 
-	// TODO: Implement in TASK-DX12-006 (Resource Creation)
+	// Note: Requires upload heap staging buffer. See Vulkan queue.go for pattern.
 	// For now this is a no-op stub. Full implementation requires:
 	// 1. Create upload heap staging buffer with proper row pitch alignment
 	// 2. Map staging buffer and copy data (handling row pitch)

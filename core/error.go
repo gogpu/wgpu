@@ -24,6 +24,15 @@ var (
 
 	// ErrAlreadyDestroyed is returned when operating on an already destroyed resource.
 	ErrAlreadyDestroyed = errors.New("resource already destroyed")
+
+	// ErrDeviceLost is returned when the GPU device is lost (e.g., driver crash, GPU reset).
+	ErrDeviceLost = errors.New("device lost")
+
+	// ErrDeviceDestroyed is returned when operating on a destroyed device.
+	ErrDeviceDestroyed = errors.New("device destroyed")
+
+	// ErrResourceDestroyed is returned when operating on a destroyed resource.
+	ErrResourceDestroyed = errors.New("resource destroyed")
 )
 
 // ValidationError represents a validation failure with context.
@@ -158,4 +167,130 @@ func IsLimitError(err error) bool {
 func IsFeatureError(err error) bool {
 	var fe *FeatureError
 	return errors.As(err, &fe)
+}
+
+// CreateBufferErrorKind represents the type of buffer creation error.
+type CreateBufferErrorKind int
+
+const (
+	// CreateBufferErrorZeroSize indicates buffer size was zero.
+	CreateBufferErrorZeroSize CreateBufferErrorKind = iota
+	// CreateBufferErrorMaxBufferSize indicates buffer size exceeded device limit.
+	CreateBufferErrorMaxBufferSize
+	// CreateBufferErrorEmptyUsage indicates no usage flags were specified.
+	CreateBufferErrorEmptyUsage
+	// CreateBufferErrorInvalidUsage indicates unknown usage flags were specified.
+	CreateBufferErrorInvalidUsage
+	// CreateBufferErrorMapReadWriteExclusive indicates both MAP_READ and MAP_WRITE were specified.
+	CreateBufferErrorMapReadWriteExclusive
+	// CreateBufferErrorHAL indicates the HAL backend failed to create the buffer.
+	CreateBufferErrorHAL
+)
+
+// CreateBufferError represents an error during buffer creation.
+type CreateBufferError struct {
+	Kind          CreateBufferErrorKind
+	Label         string
+	RequestedSize uint64
+	MaxSize       uint64
+	HALError      error
+}
+
+// Error implements the error interface.
+func (e *CreateBufferError) Error() string {
+	label := e.Label
+	if label == "" {
+		label = "<unnamed>"
+	}
+
+	switch e.Kind {
+	case CreateBufferErrorZeroSize:
+		return fmt.Sprintf("buffer %q: size must be greater than 0", label)
+	case CreateBufferErrorMaxBufferSize:
+		return fmt.Sprintf("buffer %q: size %d exceeds maximum %d",
+			label, e.RequestedSize, e.MaxSize)
+	case CreateBufferErrorEmptyUsage:
+		return fmt.Sprintf("buffer %q: usage must not be empty", label)
+	case CreateBufferErrorInvalidUsage:
+		return fmt.Sprintf("buffer %q: contains invalid usage flags", label)
+	case CreateBufferErrorMapReadWriteExclusive:
+		return fmt.Sprintf("buffer %q: MAP_READ and MAP_WRITE are mutually exclusive", label)
+	case CreateBufferErrorHAL:
+		return fmt.Sprintf("buffer %q: HAL error: %v", label, e.HALError)
+	default:
+		return fmt.Sprintf("buffer %q: unknown error", label)
+	}
+}
+
+// Unwrap returns the underlying HAL error, if any.
+func (e *CreateBufferError) Unwrap() error {
+	return e.HALError
+}
+
+// IsCreateBufferError returns true if the error is a CreateBufferError.
+func IsCreateBufferError(err error) bool {
+	var cbe *CreateBufferError
+	return errors.As(err, &cbe)
+}
+
+// =============================================================================
+// Command Encoder Errors
+// =============================================================================
+
+// CreateCommandEncoderErrorKind represents the type of command encoder creation error.
+type CreateCommandEncoderErrorKind int
+
+const (
+	// CreateCommandEncoderErrorHAL indicates the HAL backend failed to create the encoder.
+	CreateCommandEncoderErrorHAL CreateCommandEncoderErrorKind = iota
+)
+
+// CreateCommandEncoderError represents an error during command encoder creation.
+type CreateCommandEncoderError struct {
+	Kind     CreateCommandEncoderErrorKind
+	Label    string
+	HALError error
+}
+
+// Error implements the error interface.
+func (e *CreateCommandEncoderError) Error() string {
+	label := e.Label
+	if label == "" {
+		label = "<unnamed>"
+	}
+
+	switch e.Kind {
+	case CreateCommandEncoderErrorHAL:
+		return fmt.Sprintf("command encoder %q: HAL error: %v", label, e.HALError)
+	default:
+		return fmt.Sprintf("command encoder %q: unknown error", label)
+	}
+}
+
+// Unwrap returns the underlying HAL error, if any.
+func (e *CreateCommandEncoderError) Unwrap() error {
+	return e.HALError
+}
+
+// IsCreateCommandEncoderError returns true if the error is a CreateCommandEncoderError.
+func IsCreateCommandEncoderError(err error) bool {
+	var cee *CreateCommandEncoderError
+	return errors.As(err, &cee)
+}
+
+// EncoderStateError represents an invalid state transition error.
+type EncoderStateError struct {
+	Operation string
+	Status    CommandEncoderStatus
+}
+
+// Error implements the error interface.
+func (e *EncoderStateError) Error() string {
+	return fmt.Sprintf("cannot %s: encoder in %v state", e.Operation, e.Status)
+}
+
+// IsEncoderStateError returns true if the error is an EncoderStateError.
+func IsEncoderStateError(err error) bool {
+	var ese *EncoderStateError
+	return errors.As(err, &ese)
 }

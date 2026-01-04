@@ -633,7 +633,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 
 // ExecuteBundle executes a pre-recorded render bundle.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
-	// TODO: Implement using secondary command buffers
+	// Note(v0.6.0): Render bundles require VkCommandBuffer with SECONDARY level.
 	_ = bundle
 }
 

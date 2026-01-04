@@ -69,8 +69,8 @@ func RequestDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID,
 func AdapterDrop(id AdapterID) error {
 	hub := GetGlobal().Hub()
 
-	// TODO: Check if any devices are still using this adapter
-	// For now, just unregister it
+	// Note: Device reference counting is handled by the HAL-based API.
+	// The ID-based API does not track device references.
 
 	_, err := hub.UnregisterAdapter(id)
 	if err != nil {

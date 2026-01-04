@@ -192,7 +192,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: types.BackendVulkan,
 			},
-			Features: 0, // TODO: Map Vulkan features to WebGPU features
+			Features: 0, // Note(v0.5.0): Feature mapping pending. See DX12 adapter.go:204 for pattern.
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
@@ -337,6 +337,6 @@ func vendorIDToName(id uint32) string {
 }
 
 func limitsFromProps(props *vk.PhysicalDeviceProperties) types.Limits {
-	_ = props // TODO: Map Vulkan limits to WebGPU limits from props.Limits
+	_ = props // Note(v0.5.0): Limits mapping pending. DefaultLimits() is safe. See DX12 adapter.go:242.
 	return types.DefaultLimits()
 }

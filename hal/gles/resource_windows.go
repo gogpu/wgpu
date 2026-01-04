@@ -57,7 +57,7 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 			DriverInfo: "OpenGL 3.3+",
 			Backend:    types.BackendGL,
 		},
-		Features: 0, // TODO: Query features
+		Features: 0, // Note: Feature detection requires GL extension queries.
 		Capabilities: hal.Capabilities{
 			Limits: limits,
 			AlignmentsMask: hal.Alignments{

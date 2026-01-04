@@ -24,7 +24,24 @@ const (
 	BufferUsageIndirect
 	// BufferUsageQueryResolve allows use for query result resolution.
 	BufferUsageQueryResolve
+
+	// bufferUsageAll is a mask of all valid buffer usage flags.
+	bufferUsageAll = BufferUsageMapRead | BufferUsageMapWrite |
+		BufferUsageCopySrc | BufferUsageCopyDst |
+		BufferUsageIndex | BufferUsageVertex |
+		BufferUsageUniform | BufferUsageStorage |
+		BufferUsageIndirect | BufferUsageQueryResolve
 )
+
+// Contains returns true if the usage includes the given flag.
+func (u BufferUsage) Contains(flag BufferUsage) bool {
+	return u&flag == flag
+}
+
+// ContainsUnknownBits returns true if the usage contains any unknown flags.
+func (u BufferUsage) ContainsUnknownBits() bool {
+	return u&^bufferUsageAll != 0
+}
 
 // BufferDescriptor describes a buffer.
 type BufferDescriptor struct {

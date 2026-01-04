@@ -124,7 +124,7 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 		// Use copyToMappedMemory to avoid go vet false positive about unsafe.Pointer
 		copyToMappedMemory(vkBuffer.memory.MappedPtr, offset, data)
 	}
-	// TODO: Implement staging buffer for non-host-visible memory
+	// Note(v0.6.0): Staging buffer needed for device-local memory writes.
 }
 
 // WriteTexture writes data to a texture immediately.
@@ -274,7 +274,7 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.
 func (q *Queue) GetTimestampPeriod() float32 {
-	// TODO: Get from physical device properties
+	// Note: Should query VkPhysicalDeviceLimits.timestampPeriod.
 	return 1.0
 }
 

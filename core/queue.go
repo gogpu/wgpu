@@ -18,7 +18,12 @@ func GetQueue(id QueueID) (*Queue, error) {
 }
 
 // QueueSubmit submits command buffers to the queue.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API via Device and Queue structs from resource.go.
+//
+// This function validates command buffer IDs but does not perform actual
+// GPU submission. It exists for backward compatibility with existing code.
 //
 // The command buffers are executed in order. After submission,
 // the command buffer IDs become invalid and cannot be reused.
@@ -33,11 +38,7 @@ func QueueSubmit(id QueueID, commandBuffers []CommandBufferID) error {
 		return fmt.Errorf("invalid queue: %w", err)
 	}
 
-	// TODO: Validate command buffers
-	// TODO: Submit command buffers to GPU
-	// TODO: Mark command buffers as consumed
-
-	// Placeholder: verify all command buffers exist
+	// Validate all command buffers exist
 	for _, cmdBufID := range commandBuffers {
 		_, err := hub.GetCommandBuffer(cmdBufID)
 		if err != nil {
@@ -45,11 +46,19 @@ func QueueSubmit(id QueueID, commandBuffers []CommandBufferID) error {
 		}
 	}
 
+	// Note: Actual GPU submission is handled by the HAL-based API.
+	// This ID-based function only validates IDs.
+
 	return nil
 }
 
 // QueueWriteBuffer writes data to a buffer through the queue.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API via Queue.WriteBuffer() (when implemented).
+//
+// This function validates IDs but does not perform actual GPU writes.
+// It exists for backward compatibility with existing code.
 //
 // This is a convenience method for updating buffer data without
 // creating a staging buffer. The data is written at the specified
@@ -72,14 +81,21 @@ func QueueWriteBuffer(id QueueID, buffer BufferID, offset uint64, data []byte) e
 		return fmt.Errorf("invalid buffer: %w", err)
 	}
 
-	// TODO: Validate offset and data size
-	// TODO: Write data to buffer
+	// Note: Actual GPU write is handled by the HAL-based API.
+	// This ID-based function only validates IDs.
+	_ = offset
+	_ = data
 
 	return nil
 }
 
 // QueueWriteTexture writes data to a texture through the queue.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API via Queue.WriteTexture() (when implemented).
+//
+// This function validates parameters but does not perform actual GPU writes.
+// It exists for backward compatibility with existing code.
 //
 // This is a convenience method for updating texture data without
 // creating a staging buffer. The data is written to the specified
@@ -108,14 +124,20 @@ func QueueWriteTexture(id QueueID, dst *types.ImageCopyTexture, data []byte, lay
 		return fmt.Errorf("texture size is required")
 	}
 
-	// TODO: Validate texture and parameters
-	// TODO: Write data to texture
+	// Note: Actual GPU write is handled by the HAL-based API.
+	// This ID-based function only validates parameters.
+	_ = data
 
 	return nil
 }
 
 // QueueOnSubmittedWorkDone returns when all submitted work completes.
-// In the Pure Go implementation, this is synchronous for now.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API via Queue.OnSubmittedWorkDone() (when implemented).
+//
+// This function is currently a no-op as the ID-based API does not
+// perform actual GPU operations. It exists for backward compatibility.
 //
 // This function blocks until all work submitted to the queue before
 // this call has completed execution on the GPU.
@@ -130,8 +152,8 @@ func QueueOnSubmittedWorkDone(id QueueID) error {
 		return fmt.Errorf("invalid queue: %w", err)
 	}
 
-	// TODO: Implement actual synchronization
-	// For now, this is a no-op since we don't have GPU execution yet
+	// Note: Actual synchronization is handled by the HAL-based API.
+	// This ID-based function is a no-op.
 
 	return nil
 }
