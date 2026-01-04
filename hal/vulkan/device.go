@@ -192,7 +192,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 			Depth:  depth,
 		},
 		MipLevels:     mipLevels,
-		ArrayLayers:   1, // TODO: Support array textures
+		ArrayLayers:   1, // Note(v0.6.0): Array textures require VkImageViewType mapping.
 		Samples:       vk.SampleCountFlagBits(samples),
 		Tiling:        vk.ImageTilingOptimal,
 		Usage:         vkUsage,

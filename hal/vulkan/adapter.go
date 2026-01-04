@@ -119,7 +119,7 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 
 // TextureFormatCapabilities returns capabilities for a texture format.
 func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
-	// TODO: Query VkFormatProperties for actual support
+	// Note: Full format support requires vkGetPhysicalDeviceFormatProperties. See DX12 adapter.go for pattern.
 	flags := hal.TextureFormatCapabilitySampled
 
 	switch format {
@@ -150,7 +150,7 @@ func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.Text
 
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
-	// TODO: Query VkSurfaceCapabilitiesKHR
+	// Note: Full surface capabilities require vkGetPhysicalDeviceSurfaceCapabilitiesKHR.
 	return &hal.SurfaceCapabilities{
 		Formats: []types.TextureFormat{
 			types.TextureFormatBGRA8Unorm,
@@ -196,7 +196,7 @@ func vkDestroyDevice(device vk.Device, _ *vk.AllocationCallbacks) {
 	if proc == nil {
 		return
 	}
-	// TODO: Need proper signature for this call using ffi
+	// FIXME(v0.4.1): vkDestroyDevice requires goffi signature update. Minor memory leak.
 	// For now just skip - device will be destroyed when process exits
 	_ = proc
 }

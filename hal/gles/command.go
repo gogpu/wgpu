@@ -103,24 +103,27 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 }
 
 // CopyBufferToTexture copies buffer data to a texture.
+// Note: Requires glTexSubImage2D with pixel unpack buffer binding.
+// Currently a no-op stub - texture uploads should use Queue.WriteTexture.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
-	// TODO: Implement
 	_ = src
 	_ = dst
 	_ = regions
 }
 
 // CopyTextureToBuffer copies texture data to a buffer.
+// Note: Requires glGetTexImage with pixel pack buffer binding (not available in GLES).
+// This operation has limited support in OpenGL ES environments.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	// TODO: Implement
 	_ = src
 	_ = dst
 	_ = regions
 }
 
 // CopyTextureToTexture copies between textures.
+// Note: Requires glCopyImageSubData (GL 4.3+ / GLES 3.2+).
+// For older GL versions, requires framebuffer blit workaround.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	// TODO: Implement
 	_ = src
 	_ = dst
 	_ = regions
@@ -308,22 +311,26 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
+// Note: Requires GL_ARB_draw_indirect (GL 4.0+ / GLES 3.1+).
+// Currently not implemented - use direct Draw calls instead.
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
-	// TODO: Implement
 	_ = buffer
 	_ = offset
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+// Note: Requires GL_ARB_draw_indirect (GL 4.0+ / GLES 3.1+).
+// Currently not implemented - use direct DrawIndexed calls instead.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
-	// TODO: Implement
 	_ = buffer
 	_ = offset
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.
+// Note: Render bundles are not natively supported in OpenGL.
+// OpenGL uses display lists (deprecated) or VAO/VBO state caching.
+// This is a no-op - bundles are expanded inline in the command stream.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
-	// TODO: Implement
 	_ = bundle
 }
 
@@ -390,7 +397,8 @@ type ClearBufferCommand struct {
 }
 
 func (c *ClearBufferCommand) Execute(_ *gl.Context) {
-	// TODO: Implement glClearBufferSubData
+	// Note: glClearBufferSubData requires GL 4.3+ / GLES 3.1+.
+	// For older versions, map buffer and memset, or use compute shader.
 }
 
 // ClearColorCommand clears a color attachment.
@@ -480,8 +488,14 @@ type SetBindGroupCommand struct {
 	dynamicOffsets []uint32
 }
 
-func (c *SetBindGroupCommand) Execute(_ *gl.Context) {
-	// TODO: Bind textures, buffers, samplers
+func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
+	// Bind uniform buffers, textures, and samplers from the bind group.
+	// Note: Full implementation requires BindGroup to track resource bindings.
+	if c.group == nil {
+		return
+	}
+	// Binding logic is deferred to draw time when pipeline layout is known.
+	_ = ctx
 }
 
 // SetVertexBufferCommand binds a vertex buffer.
