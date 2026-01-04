@@ -108,14 +108,18 @@ func TestHubQueue(t *testing.T) {
 
 func TestHubBuffer(t *testing.T) {
 	hub := NewHub()
-	buffer := Buffer{}
+	buffer := Buffer{
+		label: "TestBuffer",
+		size:  1024,
+	}
 
 	id := hub.RegisterBuffer(buffer)
 	got, err := hub.GetBuffer(id)
 	if err != nil {
 		t.Fatalf("GetBuffer failed: %v", err)
 	}
-	if got != buffer {
+	// Can't compare structs with sync.Map, compare fields instead
+	if got.label != buffer.label || got.size != buffer.size {
 		t.Error("GetBuffer returned different buffer")
 	}
 
