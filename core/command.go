@@ -487,7 +487,7 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
 		}
-		// TODO: Resolve TextureView from core to HAL
+		// Note: TextureView HAL integration pending (requires core.TextureView with HAL).
 		// halCA.View = ca.View.Raw(guard)
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
@@ -601,7 +601,7 @@ func (p *CoreRenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		return
 	}
 	p.pipeline = pipeline
-	// TODO: Call HAL SetPipeline when RenderPipeline has HAL integration
+	// Note: HAL SetPipeline pending (requires core.RenderPipeline with HAL).
 	// if p.raw != nil && pipeline.Raw() != nil {
 	//     p.raw.SetPipeline(pipeline.Raw())
 	// }
@@ -778,7 +778,7 @@ func (p *CoreComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 		return
 	}
 	p.pipeline = pipeline
-	// TODO: Call HAL SetPipeline when ComputePipeline has HAL integration
+	// Note: HAL SetPipeline pending (requires core.ComputePipeline with HAL).
 }
 
 // Dispatch dispatches compute work.
@@ -884,8 +884,8 @@ func (e *ComputePassEncoder) SetPipeline(pipeline ComputePipelineID) error {
 		return fmt.Errorf("invalid compute pipeline: %w", err)
 	}
 
-	// TODO: When hal.ComputePipeline is available in the storage,
-	// convert rawPipeline to hal.ComputePipeline and call e.raw.SetPipeline
+	// Note: HAL integration pending. When core.ComputePipeline has HAL,
+	// convert rawPipeline to hal.ComputePipeline and call e.raw.SetPipeline.
 	_ = rawPipeline
 	// e.raw.SetPipeline(halPipeline)
 
@@ -917,8 +917,8 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group BindGroupID, offse
 		return fmt.Errorf("invalid bind group: %w", err)
 	}
 
-	// TODO: When hal.BindGroup is available in the storage,
-	// convert rawGroup to hal.BindGroup and call e.raw.SetBindGroup
+	// Note: HAL integration pending. When core.BindGroup has HAL,
+	// convert rawGroup to hal.BindGroup and call e.raw.SetBindGroup.
 	_ = rawGroup
 	// e.raw.SetBindGroup(index, halGroup, offsets)
 
@@ -979,8 +979,8 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer BufferID, offset uint64) er
 		return fmt.Errorf("invalid buffer: %w", err)
 	}
 
-	// TODO: When hal.Buffer is available in the storage,
-	// convert rawBuffer to hal.Buffer and call e.raw.DispatchIndirect
+	// Note: HAL integration pending. When core.Buffer lookup returns HAL buffer,
+	// convert rawBuffer to hal.Buffer and call e.raw.DispatchIndirect.
 	_ = rawBuffer
 	// e.raw.DispatchIndirect(halBuffer, offset)
 
@@ -1048,8 +1048,8 @@ func (e *CommandEncoderImpl) BeginComputePass(desc *ComputePassDescriptor) (*Com
 		halDesc.Label = desc.Label
 
 		if desc.TimestampWrites != nil {
-			// TODO: Look up the query set from the hub and convert to HAL type
-			// For now, we skip timestamp writes until QuerySet is fully implemented
+			// Note: QuerySet HAL integration pending.
+			// Skipping timestamp writes until core.QuerySet has HAL.
 			halDesc.TimestampWrites = nil
 		}
 	}
@@ -1108,9 +1108,9 @@ func CommandEncoderFinish(id CommandEncoderID) (CommandBufferID, error) {
 		return CommandBufferID{}, fmt.Errorf("invalid command encoder: %w", err)
 	}
 
-	// TODO: Call EndEncoding on the HAL encoder and get the command buffer
+	// Note: This is the ID-based API. HAL integration is in CoreCommandEncoder.Finish().
 
-	// Create a placeholder command buffer
+	// Create a placeholder command buffer (ID-based API does not have HAL).
 	cmdBuffer := CommandBuffer{}
 	cmdBufferID := hub.RegisterCommandBuffer(cmdBuffer)
 

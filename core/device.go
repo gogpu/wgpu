@@ -35,7 +35,8 @@ func CreateDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID, 
 		}
 	}
 
-	// TODO: Validate requested limits against adapter limits
+	// Note: Limits validation against adapter limits is deferred.
+	// The HAL-based API (NewDevice) handles this at the HAL layer.
 
 	// Determine which features to enable
 	// Start with required features
@@ -137,7 +138,8 @@ func DeviceDrop(id DeviceID) error {
 		return fmt.Errorf("failed to drop device: %w", err)
 	}
 
-	// TODO: Check if any resources are still using this device
+	// Note: Resource reference counting is handled by the HAL-based API.
+	// The ID-based API does not track resource references.
 
 	// Unregister the queue first
 	_, err = hub.UnregisterQueue(device.Queue)
@@ -155,7 +157,13 @@ func DeviceDrop(id DeviceID) error {
 }
 
 // DeviceCreateBuffer creates a buffer on this device.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API: Device.CreateBuffer() which provides full GPU integration.
+// See resource.go for the HAL-based implementation.
+//
+// This function creates a placeholder buffer without actual GPU resources.
+// It exists for backward compatibility with existing code.
 //
 // Returns a buffer ID that can be used to access the buffer, or an error if
 // buffer creation fails.
@@ -172,10 +180,8 @@ func DeviceCreateBuffer(id DeviceID, desc *types.BufferDescriptor) (BufferID, er
 		return BufferID{}, fmt.Errorf("buffer descriptor is required")
 	}
 
-	// TODO: Validate buffer descriptor
-	// TODO: Create actual buffer
-
-	// Create a placeholder buffer
+	// Note: This creates a placeholder buffer without HAL integration.
+	// For actual GPU buffers, use Device.CreateBuffer() instead.
 	buffer := Buffer{}
 	bufferID := hub.RegisterBuffer(buffer)
 
@@ -183,7 +189,12 @@ func DeviceCreateBuffer(id DeviceID, desc *types.BufferDescriptor) (BufferID, er
 }
 
 // DeviceCreateTexture creates a texture on this device.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API: Device.CreateTexture() (when implemented).
+//
+// This function creates a placeholder texture without actual GPU resources.
+// It exists for backward compatibility with existing code.
 //
 // Returns a texture ID that can be used to access the texture, or an error if
 // texture creation fails.
@@ -200,10 +211,8 @@ func DeviceCreateTexture(id DeviceID, desc *types.TextureDescriptor) (TextureID,
 		return TextureID{}, fmt.Errorf("texture descriptor is required")
 	}
 
-	// TODO: Validate texture descriptor
-	// TODO: Create actual texture
-
-	// Create a placeholder texture
+	// Note: This creates a placeholder texture without HAL integration.
+	// HAL-based Device.CreateTexture() will be added in a future release.
 	texture := Texture{}
 	textureID := hub.RegisterTexture(texture)
 
@@ -211,7 +220,12 @@ func DeviceCreateTexture(id DeviceID, desc *types.TextureDescriptor) (TextureID,
 }
 
 // DeviceCreateShaderModule creates a shader module.
-// This is a placeholder implementation that will be expanded later.
+//
+// Deprecated: This is the legacy ID-based API. For new code, use the
+// HAL-based API: Device.CreateShaderModule() (when implemented).
+//
+// This function creates a placeholder shader module without actual GPU resources.
+// It exists for backward compatibility with existing code.
 //
 // Returns a shader module ID that can be used to access the module, or an error if
 // module creation fails.
@@ -228,10 +242,8 @@ func DeviceCreateShaderModule(id DeviceID, desc *types.ShaderModuleDescriptor) (
 		return ShaderModuleID{}, fmt.Errorf("shader module descriptor is required")
 	}
 
-	// TODO: Validate shader module descriptor
-	// TODO: Create actual shader module
-
-	// Create a placeholder shader module
+	// Note: This creates a placeholder shader module without HAL integration.
+	// HAL-based Device.CreateShaderModule() will be added in a future release.
 	module := ShaderModule{}
 	moduleID := hub.RegisterShaderModule(module)
 

@@ -40,8 +40,10 @@ func NewInstance(desc *types.InstanceDescriptor) *Instance {
 		adapters: []AdapterID{}, // Will be populated by enumeration
 	}
 
-	// TODO: Implement real adapter enumeration
-	// For now, create a mock adapter for testing
+	// Note: Real adapter enumeration requires HAL backend integration.
+	// The HAL layer (hal/adapter.go) handles actual GPU discovery via Vulkan/DX12/Metal.
+	// This mock adapter allows the Core API to function for testing and validation.
+	// When HAL integration is complete, this will delegate to HAL.EnumerateAdapters().
 	i.createMockAdapter()
 
 	return i
