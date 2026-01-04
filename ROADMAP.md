@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.8.5
+## Current Status: v0.8.7
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -98,10 +98,20 @@
 ### v0.8.4 — Naga Clamp Fix
 - [x] Updated naga v0.8.0 → v0.8.1 (clamp() built-in function fix)
 
-### v0.8.5 — DX12 Backend Registration (Current)
+### v0.8.5 — DX12 Backend Registration
 - [x] DX12 backend auto-registers on Windows via `hal/dx12/init.go`
 - [x] Windows backend priority: Vulkan → DX12 → GLES → Software
 - [x] All 5 HAL backends now fully integrated
+
+### v0.8.6 — Metal ARM64 goffi Fix
+- [x] Updated goffi v0.3.5 → v0.3.6 (ARM64 HFA returns)
+- [x] Fixed Metal double present issue in Queue.Present()
+
+### v0.8.7 — Metal ARM64 ObjC Fixes (Current)
+- [x] Typed ObjC argument wrappers for ARM64 AAPCS64 ABI
+- [x] Metal ObjC tests and surface tests
+- [x] Updated goffi v0.3.6 → v0.3.7
+- [x] Updated naga v0.8.1 → v0.8.2
 
 ---
 

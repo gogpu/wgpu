@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-01-04
+
+### Fixed
+
+#### Metal Backend (ARM64)
+- **ObjC Typed Arguments** — Proper type-safe wrappers for ARM64 AAPCS64 ABI compliance
+- **Shader Creation** — Improved error handling in Metal shader module creation
+- **Pipeline Creation** — Better error messages for render pipeline failures
+
+### Added
+- **Metal ObjC Tests** — Comprehensive test coverage for ObjC interop (`objc_test.go`)
+- **Surface Tests** — Metal surface creation and configuration tests (`surface_test.go`)
+
+### Changed
+- Updated dependency: `github.com/go-webgpu/goffi` v0.3.6 → v0.3.7
+- Updated dependency: `github.com/gogpu/naga` v0.8.1 → v0.8.2
+
+### Contributors
+- @ppoage — ARM64 ObjC fixes and Metal backend testing
+
 ## [0.8.6] - 2025-12-29
 
 ### Fixed

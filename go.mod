@@ -4,6 +4,6 @@ go 1.25
 
 require (
 	github.com/go-webgpu/goffi v0.3.7
-	github.com/gogpu/naga v0.8.1
+	github.com/gogpu/naga v0.8.2
 	golang.org/x/sys v0.39.0
 )
