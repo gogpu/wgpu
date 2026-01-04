@@ -232,3 +232,65 @@ func IsCreateBufferError(err error) bool {
 	var cbe *CreateBufferError
 	return errors.As(err, &cbe)
 }
+
+// =============================================================================
+// Command Encoder Errors
+// =============================================================================
+
+// CreateCommandEncoderErrorKind represents the type of command encoder creation error.
+type CreateCommandEncoderErrorKind int
+
+const (
+	// CreateCommandEncoderErrorHAL indicates the HAL backend failed to create the encoder.
+	CreateCommandEncoderErrorHAL CreateCommandEncoderErrorKind = iota
+)
+
+// CreateCommandEncoderError represents an error during command encoder creation.
+type CreateCommandEncoderError struct {
+	Kind     CreateCommandEncoderErrorKind
+	Label    string
+	HALError error
+}
+
+// Error implements the error interface.
+func (e *CreateCommandEncoderError) Error() string {
+	label := e.Label
+	if label == "" {
+		label = "<unnamed>"
+	}
+
+	switch e.Kind {
+	case CreateCommandEncoderErrorHAL:
+		return fmt.Sprintf("command encoder %q: HAL error: %v", label, e.HALError)
+	default:
+		return fmt.Sprintf("command encoder %q: unknown error", label)
+	}
+}
+
+// Unwrap returns the underlying HAL error, if any.
+func (e *CreateCommandEncoderError) Unwrap() error {
+	return e.HALError
+}
+
+// IsCreateCommandEncoderError returns true if the error is a CreateCommandEncoderError.
+func IsCreateCommandEncoderError(err error) bool {
+	var cee *CreateCommandEncoderError
+	return errors.As(err, &cee)
+}
+
+// EncoderStateError represents an invalid state transition error.
+type EncoderStateError struct {
+	Operation string
+	Status    CommandEncoderStatus
+}
+
+// Error implements the error interface.
+func (e *EncoderStateError) Error() string {
+	return fmt.Sprintf("cannot %s: encoder in %v state", e.Operation, e.Status)
+}
+
+// IsEncoderStateError returns true if the error is an EncoderStateError.
+func IsEncoderStateError(err error) bool {
+	var ese *EncoderStateError
+	return errors.As(err, &ese)
+}
