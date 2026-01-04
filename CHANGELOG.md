@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-01-04
+
+### Fixed
+
+#### CI
+- **Metal Tests on CI** — Skip Metal tests on GitHub Actions (Metal unavailable in virtualized macOS)
+  - See: https://github.com/actions/runner-images/discussions/6138
+
+### Changed
+- Updated dependency: `github.com/gogpu/naga` v0.8.2 → v0.8.3
+  - Fixes MSL `[[position]]` attribute placement (now on struct member, not function)
+
 ## [0.8.7] - 2026-01-04
 
 ### Fixed
@@ -312,7 +324,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/gogpu/wgpu/compare/v0.8.7...v0.8.8
+[0.8.7]: https://github.com/gogpu/wgpu/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/gogpu/wgpu/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/gogpu/wgpu/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/gogpu/wgpu/compare/v0.8.3...v0.8.4
