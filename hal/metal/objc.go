@@ -19,11 +19,11 @@ import (
 var (
 	objcLib unsafe.Pointer
 
-	symObjcMsgSend     unsafe.Pointer
+	symObjcMsgSend      unsafe.Pointer
 	symObjcMsgSendFpret unsafe.Pointer
 	symObjcMsgSendStret unsafe.Pointer
-	symObjcGetClass    unsafe.Pointer
-	symSelRegisterName unsafe.Pointer
+	symObjcGetClass     unsafe.Pointer
+	symSelRegisterName  unsafe.Pointer
 
 	cifGetClass    types.CallInterface
 	cifSelRegister types.CallInterface
