@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -19,6 +20,8 @@ var (
 	objcLib unsafe.Pointer
 
 	symObjcMsgSend     unsafe.Pointer
+	symObjcMsgSendFpret unsafe.Pointer
+	symObjcMsgSendStret unsafe.Pointer
 	symObjcGetClass    unsafe.Pointer
 	symSelRegisterName unsafe.Pointer
 
@@ -28,6 +31,74 @@ var (
 
 // selectorCache caches registered selectors for performance.
 var selectorCache sync.Map
+
+type objcArg struct {
+	typ       *types.TypeDescriptor
+	ptr       unsafe.Pointer
+	keepAlive any
+}
+
+var (
+	cgSizeType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+	mtlClearColorType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+	mtlViewportType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+	mtlScissorRectType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	mtlOriginType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	mtlSizeType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	nsRangeType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+)
 
 // initObjCRuntime initializes the Objective-C runtime.
 func initObjCRuntime() error {
@@ -40,6 +111,12 @@ func initObjCRuntime() error {
 
 	if symObjcMsgSend, err = ffi.GetSymbol(objcLib, "objc_msgSend"); err != nil {
 		return fmt.Errorf("metal: objc_msgSend not found: %w", err)
+	}
+	if symObjcMsgSendFpret, err = ffi.GetSymbol(objcLib, "objc_msgSend_fpret"); err != nil {
+		symObjcMsgSendFpret = nil
+	}
+	if symObjcMsgSendStret, err = ffi.GetSymbol(objcLib, "objc_msgSend_stret"); err != nil {
+		symObjcMsgSendStret = nil
 	}
 	if symObjcGetClass, err = ffi.GetSymbol(objcLib, "objc_getClass"); err != nil {
 		return fmt.Errorf("metal: objc_getClass not found: %w", err)
@@ -104,46 +181,189 @@ func Sel(name string) SEL {
 	return RegisterSelector(name)
 }
 
-// MsgSend calls an Objective-C method on an object.
-func MsgSend(obj ID, sel SEL, args ...uintptr) ID {
-	if obj == 0 {
-		return 0
-	}
+func argPointer(val uintptr) objcArg {
+	v := val
+	return objcArg{typ: types.PointerTypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
 
-	allArgs := make([]unsafe.Pointer, 2+len(args))
-	allArgs[0] = unsafe.Pointer(&obj)
-	allArgs[1] = unsafe.Pointer(&sel)
+func argUint64(val uint64) objcArg {
+	v := val
+	return objcArg{typ: types.UInt64TypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func argInt64(val int64) objcArg {
+	v := val
+	return objcArg{typ: types.SInt64TypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func argBool(val bool) objcArg {
+	var v uint8
+	if val {
+		v = 1
+	}
+	return objcArg{typ: types.UInt8TypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func argFloat32(val float32) objcArg {
+	v := val
+	return objcArg{typ: types.FloatTypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func argFloat64(val float64) objcArg {
+	v := val
+	return objcArg{typ: types.DoubleTypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func argStruct[T any](val T, td *types.TypeDescriptor) objcArg {
+	v := val
+	return objcArg{typ: td, ptr: unsafe.Pointer(&v), keepAlive: &v}
+}
+
+func pointerArgs(args []uintptr) []objcArg {
+	out := make([]objcArg, len(args))
 	for i, arg := range args {
-		argCopy := arg
-		allArgs[2+i] = unsafe.Pointer(&argCopy)
+		out[i] = argPointer(arg)
+	}
+	return out
+}
+
+func msgSend(obj ID, sel SEL, retType *types.TypeDescriptor, retPtr unsafe.Pointer, args ...objcArg) error {
+	if obj == 0 || sel == 0 {
+		return nil
 	}
 
 	argTypes := make([]*types.TypeDescriptor, 2+len(args))
 	argTypes[0] = types.PointerTypeDescriptor
 	argTypes[1] = types.PointerTypeDescriptor
-	for i := range args {
-		argTypes[2+i] = types.PointerTypeDescriptor
+	for i, arg := range args {
+		argTypes[2+i] = arg.typ
 	}
 
-	var cif types.CallInterface
-	err := ffi.PrepareCallInterface(&cif, types.DefaultCall, types.PointerTypeDescriptor, argTypes)
-	if err != nil {
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall, retType, argTypes); err != nil {
+		return err
+	}
+
+	self := uintptr(obj)
+	cmd := uintptr(sel)
+	argPtrs := make([]unsafe.Pointer, 2+len(args))
+	argPtrs[0] = unsafe.Pointer(&self)
+	argPtrs[1] = unsafe.Pointer(&cmd)
+	for i, arg := range args {
+		argPtrs[2+i] = arg.ptr
+	}
+
+	fn := objcMsgSendSymbol(retType)
+	err := ffi.CallFunction(cif, fn, retPtr, argPtrs)
+	runtime.KeepAlive(args)
+	return err
+}
+
+func msgSendVoid(obj ID, sel SEL, args ...objcArg) {
+	_ = msgSend(obj, sel, types.VoidTypeDescriptor, nil, args...)
+}
+
+func msgSendID(obj ID, sel SEL, args ...objcArg) ID {
+	var result ID
+	_ = msgSend(obj, sel, types.PointerTypeDescriptor, unsafe.Pointer(&result), args...)
+	return result
+}
+
+func msgSendUint(obj ID, sel SEL, args ...objcArg) uint {
+	var result uint64
+	_ = msgSend(obj, sel, types.UInt64TypeDescriptor, unsafe.Pointer(&result), args...)
+	return uint(result)
+}
+
+func msgSendBool(obj ID, sel SEL, args ...objcArg) bool {
+	var result uint8
+	_ = msgSend(obj, sel, types.UInt8TypeDescriptor, unsafe.Pointer(&result), args...)
+	return result != 0
+}
+
+func objcMsgSendSymbol(retType *types.TypeDescriptor) unsafe.Pointer {
+	if retType != nil && retType.Kind == types.StructType && runtime.GOARCH == "amd64" {
+		if symObjcMsgSendStret != nil && typeSize(retType) > 16 {
+			return symObjcMsgSendStret
+		}
+	}
+	if retType != nil && (retType.Kind == types.FloatType || retType.Kind == types.DoubleType) && runtime.GOARCH == "amd64" {
+		if symObjcMsgSendFpret != nil {
+			return symObjcMsgSendFpret
+		}
+	}
+	return symObjcMsgSend
+}
+
+func typeSize(td *types.TypeDescriptor) uintptr {
+	if td == nil {
 		return 0
 	}
+	if td.Size != 0 {
+		return td.Size
+	}
+	if td.Kind != types.StructType {
+		return 0
+	}
+	var size uintptr
+	var maxAlign uintptr
+	for _, member := range td.Members {
+		align := typeAlign(member)
+		size = alignUp(size, align)
+		size += typeSize(member)
+		if align > maxAlign {
+			maxAlign = align
+		}
+	}
+	return alignUp(size, maxAlign)
+}
 
-	var result ID
-	_ = ffi.CallFunction(&cif, symObjcMsgSend, unsafe.Pointer(&result), allArgs)
-	return result
+func typeAlign(td *types.TypeDescriptor) uintptr {
+	if td == nil {
+		return 1
+	}
+	if td.Alignment != 0 {
+		return td.Alignment
+	}
+	if td.Kind != types.StructType {
+		return 1
+	}
+	var maxAlign uintptr
+	for _, member := range td.Members {
+		if align := typeAlign(member); align > maxAlign {
+			maxAlign = align
+		}
+	}
+	if maxAlign == 0 {
+		return 1
+	}
+	return maxAlign
+}
+
+func alignUp(val, align uintptr) uintptr {
+	if align == 0 {
+		return val
+	}
+	rem := val % align
+	if rem == 0 {
+		return val
+	}
+	return val + (align - rem)
+}
+
+// MsgSend calls an Objective-C method on an object.
+func MsgSend(obj ID, sel SEL, args ...uintptr) ID {
+	return msgSendID(obj, sel, pointerArgs(args)...)
 }
 
 // MsgSendUint calls a method and returns a uint result.
 func MsgSendUint(obj ID, sel SEL, args ...uintptr) uint {
-	return uint(MsgSend(obj, sel, args...))
+	return msgSendUint(obj, sel, pointerArgs(args)...)
 }
 
 // MsgSendBool calls a method and returns a bool result.
 func MsgSendBool(obj ID, sel SEL, args ...uintptr) bool {
-	return MsgSend(obj, sel, args...) != 0
+	return msgSendBool(obj, sel, pointerArgs(args)...)
 }
 
 // Retain increments the reference count of an object.

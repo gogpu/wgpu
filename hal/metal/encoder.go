@@ -7,7 +7,6 @@ package metal
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
@@ -151,10 +150,17 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		destOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
 		bytesPerRow := region.BufferLayout.BytesPerRow
 		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
-		_ = MsgSend(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
-			uintptr(srcBuf.raw), uintptr(region.BufferLayout.Offset), uintptr(bytesPerRow), uintptr(bytesPerImage),
-			uintptr(unsafe.Pointer(&sourceSize)), uintptr(dstTex.raw), uintptr(region.TextureBase.Origin.Z),
-			uintptr(region.TextureBase.MipLevel), uintptr(unsafe.Pointer(&destOrigin)))
+		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+			argPointer(uintptr(srcBuf.raw)),
+			argUint64(uint64(region.BufferLayout.Offset)),
+			argUint64(uint64(bytesPerRow)),
+			argUint64(uint64(bytesPerImage)),
+			argStruct(sourceSize, mtlSizeType),
+			argPointer(uintptr(dstTex.raw)),
+			argUint64(uint64(region.TextureBase.Origin.Z)),
+			argUint64(uint64(region.TextureBase.MipLevel)),
+			argStruct(destOrigin, mtlOriginType),
+		)
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
@@ -181,10 +187,17 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		sourceOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
 		bytesPerRow := region.BufferLayout.BytesPerRow
 		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
-		_ = MsgSend(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
-			uintptr(srcTex.raw), uintptr(region.TextureBase.Origin.Z), uintptr(region.TextureBase.MipLevel),
-			uintptr(unsafe.Pointer(&sourceOrigin)), uintptr(unsafe.Pointer(&sourceSize)),
-			uintptr(dstBuf.raw), uintptr(region.BufferLayout.Offset), uintptr(bytesPerRow), uintptr(bytesPerImage))
+		msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
+			argPointer(uintptr(srcTex.raw)),
+			argUint64(uint64(region.TextureBase.Origin.Z)),
+			argUint64(uint64(region.TextureBase.MipLevel)),
+			argStruct(sourceOrigin, mtlOriginType),
+			argStruct(sourceSize, mtlSizeType),
+			argPointer(uintptr(dstBuf.raw)),
+			argUint64(uint64(region.BufferLayout.Offset)),
+			argUint64(uint64(bytesPerRow)),
+			argUint64(uint64(bytesPerImage)),
+		)
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
@@ -210,10 +223,17 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
 		sourceOrigin := MTLOrigin{X: NSUInteger(region.SrcBase.Origin.X), Y: NSUInteger(region.SrcBase.Origin.Y), Z: NSUInteger(region.SrcBase.Origin.Z)}
 		destOrigin := MTLOrigin{X: NSUInteger(region.DstBase.Origin.X), Y: NSUInteger(region.DstBase.Origin.Y), Z: NSUInteger(region.DstBase.Origin.Z)}
-		_ = MsgSend(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
-			uintptr(srcTex.raw), uintptr(region.SrcBase.Origin.Z), uintptr(region.SrcBase.MipLevel),
-			uintptr(unsafe.Pointer(&sourceOrigin)), uintptr(unsafe.Pointer(&sourceSize)),
-			uintptr(dstTex.raw), uintptr(region.DstBase.Origin.Z), uintptr(region.DstBase.MipLevel), uintptr(unsafe.Pointer(&destOrigin)))
+		msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+			argPointer(uintptr(srcTex.raw)),
+			argUint64(uint64(region.SrcBase.Origin.Z)),
+			argUint64(uint64(region.SrcBase.MipLevel)),
+			argStruct(sourceOrigin, mtlOriginType),
+			argStruct(sourceSize, mtlSizeType),
+			argPointer(uintptr(dstTex.raw)),
+			argUint64(uint64(region.DstBase.Origin.Z)),
+			argUint64(uint64(region.DstBase.MipLevel)),
+			argStruct(destOrigin, mtlOriginType),
+		)
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
@@ -384,13 +404,13 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.Index
 // SetViewport sets the viewport.
 func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
 	viewport := MTLViewport{OriginX: float64(x), OriginY: float64(y), Width: float64(width), Height: float64(height), ZNear: float64(minDepth), ZFar: float64(maxDepth)}
-	_ = MsgSend(e.raw, Sel("setViewport:"), uintptr(unsafe.Pointer(&viewport)))
+	msgSendVoid(e.raw, Sel("setViewport:"), argStruct(viewport, mtlViewportType))
 }
 
 // SetScissorRect sets the scissor rectangle.
 func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 	scissor := MTLScissorRect{X: NSUInteger(x), Y: NSUInteger(y), Width: NSUInteger(width), Height: NSUInteger(height)}
-	_ = MsgSend(e.raw, Sel("setScissorRect:"), uintptr(unsafe.Pointer(&scissor)))
+	msgSendVoid(e.raw, Sel("setScissorRect:"), argStruct(scissor, mtlScissorRectType))
 }
 
 // SetBlendConstant sets the blend constant color.
@@ -398,11 +418,12 @@ func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
 	if color == nil {
 		return
 	}
-	r := *(*uintptr)(unsafe.Pointer(&color.R))
-	g := *(*uintptr)(unsafe.Pointer(&color.G))
-	b := *(*uintptr)(unsafe.Pointer(&color.B))
-	a := *(*uintptr)(unsafe.Pointer(&color.A))
-	_ = MsgSend(e.raw, Sel("setBlendColorRed:green:blue:alpha:"), r, g, b, a)
+	msgSendVoid(e.raw, Sel("setBlendColorRed:green:blue:alpha:"),
+		argFloat32(float32(color.R)),
+		argFloat32(float32(color.G)),
+		argFloat32(float32(color.B)),
+		argFloat32(float32(color.A)),
+	)
 }
 
 // SetStencilReference sets the stencil reference value.
@@ -508,8 +529,10 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	// Use pipeline's workgroup size instead of hardcoded value
 	threadsPerThreadgroup := e.pipeline.workgroupSize
 
-	_ = MsgSend(e.raw, Sel("dispatchThreadgroups:threadsPerThreadgroup:"),
-		uintptr(unsafe.Pointer(&threadgroupsPerGrid)), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
+	msgSendVoid(e.raw, Sel("dispatchThreadgroups:threadsPerThreadgroup:"),
+		argStruct(threadgroupsPerGrid, mtlSizeType),
+		argStruct(threadsPerThreadgroup, mtlSizeType),
+	)
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -523,8 +546,11 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	}
 	// Use pipeline's workgroup size instead of hardcoded value
 	threadsPerThreadgroup := e.pipeline.workgroupSize
-	_ = MsgSend(e.raw, Sel("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:"),
-		uintptr(buf.raw), uintptr(offset), uintptr(unsafe.Pointer(&threadsPerThreadgroup)))
+	msgSendVoid(e.raw, Sel("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:"),
+		argPointer(uintptr(buf.raw)),
+		argUint64(offset),
+		argStruct(threadsPerThreadgroup, mtlSizeType),
+	)
 }
 
 // msgSendClearColor sends an Objective-C message with an MTLClearColor argument.
@@ -532,6 +558,5 @@ func msgSendClearColor(obj ID, sel SEL, color MTLClearColor) {
 	if obj == 0 {
 		return
 	}
-	colorPtr := (*[4]uintptr)(unsafe.Pointer(&color))
-	_ = MsgSend(obj, sel, colorPtr[0], colorPtr[1], colorPtr[2], colorPtr[3])
+	msgSendVoid(obj, sel, argStruct(color, mtlClearColorType))
 }
