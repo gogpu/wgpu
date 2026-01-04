@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.8.7
+## Current Status: v0.8.8
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -107,11 +107,15 @@
 - [x] Updated goffi v0.3.5 → v0.3.6 (ARM64 HFA returns)
 - [x] Fixed Metal double present issue in Queue.Present()
 
-### v0.8.7 — Metal ARM64 ObjC Fixes (Current)
+### v0.8.7 — Metal ARM64 ObjC Fixes
 - [x] Typed ObjC argument wrappers for ARM64 AAPCS64 ABI
 - [x] Metal ObjC tests and surface tests
 - [x] Updated goffi v0.3.6 → v0.3.7
 - [x] Updated naga v0.8.1 → v0.8.2
+
+### v0.8.8 — CI Fixes & MSL Position Fix (Current)
+- [x] Skip Metal tests on CI (Metal unavailable in virtualized macOS)
+- [x] Updated naga v0.8.2 → v0.8.3 (MSL `[[position]]` attribute fix)
 
 ---
 
