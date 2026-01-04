@@ -12,20 +12,20 @@ import (
 
 // Mock HAL types to satisfy interfaces without returning nil, nil.
 type (
-	mockBuffer            struct{}
-	mockTexture           struct{}
-	mockTextureView       struct{}
-	mockSampler           struct{}
-	mockBindGroupLayout   struct{}
-	mockBindGroup         struct{}
-	mockPipelineLayout    struct{}
-	mockShaderModule      struct{}
-	mockRenderPipeline    struct{}
-	mockComputePipeline   struct{}
-	mockCommandEncoder    struct{}
-	mockCommandBuffer     struct{}
-	mockFence             struct{}
-	mockRenderPassEncoder struct{}
+	mockBuffer             struct{}
+	mockTexture            struct{}
+	mockTextureView        struct{}
+	mockSampler            struct{}
+	mockBindGroupLayout    struct{}
+	mockBindGroup          struct{}
+	mockPipelineLayout     struct{}
+	mockShaderModule       struct{}
+	mockRenderPipeline     struct{}
+	mockComputePipeline    struct{}
+	mockCommandEncoder     struct{}
+	mockCommandBuffer      struct{}
+	mockFence              struct{}
+	mockRenderPassEncoder  struct{}
 	mockComputePassEncoder struct{}
 )
 
@@ -44,16 +44,18 @@ func (mockCommandBuffer) Destroy()   {}
 func (mockFence) Destroy()           {}
 
 // mockCommandEncoder implements hal.CommandEncoder
-func (mockCommandEncoder) BeginEncoding(_ string) error            { return nil }
-func (mockCommandEncoder) EndEncoding() (hal.CommandBuffer, error) { return mockCommandBuffer{}, nil }
-func (mockCommandEncoder) DiscardEncoding()                        {}
-func (mockCommandEncoder) ResetAll(_ []hal.CommandBuffer)          {}
-func (mockCommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
-func (mockCommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {}
-func (mockCommandEncoder) ClearBuffer(_ hal.Buffer, _, _ uint64)   {}
+func (mockCommandEncoder) BeginEncoding(_ string) error                           { return nil }
+func (mockCommandEncoder) EndEncoding() (hal.CommandBuffer, error)                { return mockCommandBuffer{}, nil }
+func (mockCommandEncoder) DiscardEncoding()                                       {}
+func (mockCommandEncoder) ResetAll(_ []hal.CommandBuffer)                         {}
+func (mockCommandEncoder) TransitionBuffers(_ []hal.BufferBarrier)                {}
+func (mockCommandEncoder) TransitionTextures(_ []hal.TextureBarrier)              {}
+func (mockCommandEncoder) ClearBuffer(_ hal.Buffer, _, _ uint64)                  {}
 func (mockCommandEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {}
-func (mockCommandEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {}
-func (mockCommandEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []hal.BufferTextureCopy) {}
+func (mockCommandEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
+}
+func (mockCommandEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []hal.BufferTextureCopy) {
+}
 func (mockCommandEncoder) CopyTextureToTexture(_, _ hal.Texture, _ []hal.TextureCopy) {}
 func (mockCommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return mockRenderPassEncoder{}
@@ -79,14 +81,14 @@ func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64)        
 func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                           {}
 
 // mockComputePassEncoder implements hal.ComputePassEncoder (minimal)
-func (mockComputePassEncoder) End()                                                  {}
-func (mockComputePassEncoder) SetPipeline(_ hal.ComputePipeline)                     {}
-func (mockComputePassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32)    {}
-func (mockComputePassEncoder) Dispatch(_, _, _ uint32)                               {}
-func (mockComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64)               {}
-func (mockComputePassEncoder) PushDebugGroup(_ string)                               {}
-func (mockComputePassEncoder) PopDebugGroup()                                        {}
-func (mockComputePassEncoder) InsertDebugMarker(_ string)                            {}
+func (mockComputePassEncoder) End()                                               {}
+func (mockComputePassEncoder) SetPipeline(_ hal.ComputePipeline)                  {}
+func (mockComputePassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) {}
+func (mockComputePassEncoder) Dispatch(_, _, _ uint32)                            {}
+func (mockComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64)            {}
+func (mockComputePassEncoder) PushDebugGroup(_ string)                            {}
+func (mockComputePassEncoder) PopDebugGroup()                                     {}
+func (mockComputePassEncoder) InsertDebugMarker(_ string)                         {}
 
 type mockHALDevice struct {
 	destroyed bool
