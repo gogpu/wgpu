@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-05
+
+### Added
+
+#### Core-HAL Bridge
+- **Snatchable Pattern** — Safe deferred resource destruction with `Snatchable[T]` wrapper
+- **TrackerIndex Allocator** — Efficient dense index allocation for resource state tracking
+- **Buffer State Tracker** — Tracks buffer usage states for validation
+- **Core Device with HAL** — `NewDevice()` creates device with HAL backend integration
+- **Core Buffer with HAL** — `Device.CreateBuffer()` creates GPU-backed buffers
+- **Core CommandEncoder** — Command recording with HAL dispatch
+
 ### Changed
-- **Code Quality** — Replaced 50+ TODO comments with proper documentation notes
+- **Code Quality** — Replaced 58 TODO comments with proper documentation notes
   - Core layer: Deprecated legacy ID-based API functions with HAL-based alternatives
   - HAL backends: Documented feature gaps with version targets (v0.5.0, v0.6.0)
 

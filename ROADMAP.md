@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.8.8
+## Current Status: v0.9.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -113,9 +113,18 @@
 - [x] Updated goffi v0.3.6 → v0.3.7
 - [x] Updated naga v0.8.1 → v0.8.2
 
-### v0.8.8 — CI Fixes & MSL Position Fix (Current)
+### v0.8.8 — CI Fixes & MSL Position Fix
 - [x] Skip Metal tests on CI (Metal unavailable in virtualized macOS)
 - [x] Updated naga v0.8.2 → v0.8.3 (MSL `[[position]]` attribute fix)
+
+### v0.9.0 — Core-HAL Bridge (Current)
+- [x] **Snatchable Pattern** — Safe deferred resource destruction
+- [x] **TrackerIndex Allocator** — Dense index allocation for state tracking
+- [x] **Buffer State Tracker** — Buffer usage state validation
+- [x] **Core Device + HAL** — `NewDevice()` with HAL backend integration
+- [x] **Core Buffer + HAL** — `Device.CreateBuffer()` GPU-backed buffers
+- [x] **Core CommandEncoder** — Command recording with HAL dispatch
+- [x] **Code Quality** — 58 TODO comments replaced with proper documentation
 
 ---
 
