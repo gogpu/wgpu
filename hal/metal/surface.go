@@ -7,7 +7,6 @@ package metal
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
@@ -60,21 +59,13 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 
 	// Configure framebuffer only if not using storage binding
 	framebufferOnly := config.Usage&types.TextureUsageStorageBinding == 0
-	var fbOnlyVal uintptr
-	if framebufferOnly {
-		fbOnlyVal = 1
-	}
-	_ = MsgSend(s.layer, Sel("setFramebufferOnly:"), fbOnlyVal)
+	msgSendVoid(s.layer, Sel("setFramebufferOnly:"), argBool(framebufferOnly))
 
 	// Set present mode
 	s.presentMode = config.PresentMode
 	// VSync is controlled by displaySyncEnabled (available since macOS 10.13)
 	vsync := config.PresentMode == hal.PresentModeFifo
-	var vsyncVal uintptr
-	if vsync {
-		vsyncVal = 1
-	}
-	_ = MsgSend(s.layer, Sel("setDisplaySyncEnabled:"), vsyncVal)
+	msgSendVoid(s.layer, Sel("setDisplaySyncEnabled:"), argBool(vsync))
 
 	return nil
 }
@@ -173,6 +164,5 @@ func msgSendCGSize(obj ID, sel SEL, size CGSize) {
 	if obj == 0 {
 		return
 	}
-	sizePtr := (*[2]uintptr)(unsafe.Pointer(&size))
-	_ = MsgSend(obj, sel, sizePtr[0], sizePtr[1])
+	msgSendVoid(obj, sel, argStruct(size, cgSizeType))
 }

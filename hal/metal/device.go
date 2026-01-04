@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -190,9 +191,20 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	mtlTexture, ok := texture.(*Texture)
-	if !ok || mtlTexture == nil {
+	var mtlTexture *Texture
+	switch t := texture.(type) {
+	case *Texture:
+		mtlTexture = t
+	case *SurfaceTexture:
+		if t != nil {
+			mtlTexture = t.texture
+		}
+	}
+	if mtlTexture == nil {
 		return nil, fmt.Errorf("metal: invalid texture")
+	}
+	if desc == nil {
+		desc = &hal.TextureViewDescriptor{}
 	}
 
 	pool := NewAutoreleasePool()
@@ -238,10 +250,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		Length:   NSUInteger(layerCount),
 	}
 
-	raw := MsgSend(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
-		uintptr(pixelFormat), uintptr(viewType),
-		uintptr(unsafe.Pointer(&levelRange)),
-		uintptr(unsafe.Pointer(&sliceRange)),
+	raw := msgSendID(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
+		argUint64(uint64(pixelFormat)),
+		argUint64(uint64(viewType)),
+		argStruct(levelRange, nsRangeType),
+		argStruct(sliceRange, nsRangeType),
 	)
 	if raw == 0 {
 		return nil, fmt.Errorf("metal: failed to create texture view")
@@ -394,14 +407,12 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		if library == 0 {
 			errMsg := "unknown error"
 			if errorPtr != 0 {
-				// Get localized description from NSError
-				errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
-				if errDesc != 0 {
-					errMsg = GoString(errDesc)
+				if details := formatNSError(errorPtr); details != "" {
+					errMsg = details
 				}
-				Release(errorPtr)
+				// Object is autoreleased
 			}
-			return nil, fmt.Errorf("metal: failed to compile MSL: %s", errMsg)
+			return nil, fmt.Errorf("metal: failed to compile MSL: %s\nMSL:\n%s", errMsg, mslSource)
 		}
 
 		return &ShaderModule{
@@ -414,6 +425,28 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	// No WGSL source - just store the descriptor for later
 	return &ShaderModule{source: desc.Source, device: d}, nil
+}
+
+func formatNSError(errObj ID) string {
+	if errObj == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if desc := GoString(MsgSend(errObj, Sel("localizedDescription"))); desc != "" {
+		parts = append(parts, desc)
+	}
+	if reason := GoString(MsgSend(errObj, Sel("localizedFailureReason"))); reason != "" {
+		parts = append(parts, reason)
+	}
+	if debug := GoString(MsgSend(errObj, Sel("debugDescription"))); debug != "" {
+		parts = append(parts, debug)
+	}
+	if info := MsgSend(errObj, Sel("userInfo")); info != 0 {
+		if infoDesc := GoString(MsgSend(info, Sel("description"))); infoDesc != "" {
+			parts = append(parts, infoDesc)
+		}
+	}
+	return strings.Join(parts, " | ")
 }
 
 // DestroyShaderModule destroys a shader module.
@@ -533,7 +566,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			if errDesc != 0 {
 				errMsg = GoString(errDesc)
 			}
-			Release(errorPtr)
+			// Object is autoreleased
 		}
 		return nil, fmt.Errorf("metal: failed to create pipeline state: %s", errMsg)
 	}
@@ -586,7 +619,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 			if errDesc != 0 {
 				errMsg = GoString(errDesc)
 			}
-			Release(errorPtr)
+			// Object is autoreleased
 		}
 		return nil, fmt.Errorf("metal: failed to create compute pipeline state: %s", errMsg)
 	}
