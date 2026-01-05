@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-01-05
+
+### Fixed
+
+#### Metal Backend
+- **NSString Double-Free** — Fix crash on autorelease pool drain ([#39])
+  - `NSString()` used `stringWithUTF8String:` returning autoreleased object
+  - Callers called `Release()` causing double-free when pool drained
+  - Fix: Use `alloc/initWithUTF8String:` for +1 retained ownership
+
+[#39]: https://github.com/gogpu/wgpu/pull/39
+
 ## [0.9.1] - 2026-01-05
 
 ### Fixed
@@ -375,7 +387,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/gogpu/wgpu/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gogpu/wgpu/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/wgpu/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/gogpu/wgpu/compare/v0.8.7...v0.8.8
