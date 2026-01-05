@@ -404,14 +404,21 @@ func (p *AutoreleasePool) Drain() {
 }
 
 // NSString creates an NSString from a Go string.
+// Returns a +1 retained object that the caller must Release().
+// Uses alloc/initWithUTF8String: instead of stringWithUTF8String:
+// to return a retained object (not autoreleased) for explicit ownership.
 func NSString(s string) ID {
+	nsStringClass := ID(GetClass("NSString"))
 	if len(s) == 0 {
-		return MsgSend(ID(GetClass("NSString")), Sel("string"))
+		// Use alloc/init for empty string to get +1 retained object
+		obj := MsgSend(nsStringClass, Sel("alloc"))
+		return MsgSend(obj, Sel("init"))
 	}
 	cstr := append([]byte(s), 0)
+	obj := MsgSend(nsStringClass, Sel("alloc"))
 	return MsgSend(
-		ID(GetClass("NSString")),
-		Sel("stringWithUTF8String:"),
+		obj,
+		Sel("initWithUTF8String:"),
 		uintptr(unsafe.Pointer(&cstr[0])),
 	)
 }
