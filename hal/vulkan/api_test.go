@@ -182,118 +182,80 @@ func TestVendorIDToName(t *testing.T) {
 }
 
 // TestLimitsFromProps tests limits extraction from Vulkan properties.
-// NOTE: Currently returns DefaultLimits() - this test verifies current behavior.
 func TestLimitsFromProps(t *testing.T) {
 	props := &vk.PhysicalDeviceProperties{
 		Limits: vk.PhysicalDeviceLimits{
-			MaxImageDimension2D:                   4096,
-			MaxImageDimension3D:                   2048,
-			MaxImageDimensionCube:                 4096,
-			MaxImageArrayLayers:                   2048,
-			MaxTexelBufferElements:                128 * 1024 * 1024,
-			MaxUniformBufferRange:                 65536,
-			MaxStorageBufferRange:                 2 << 27,
-			MaxPushConstantsSize:                  256,
-			MaxMemoryAllocationCount:              4096,
-			MaxSamplerAllocationCount:             4000,
-			BufferImageGranularity:                0x20000,
-			SparseAddressSpaceSize:                0x80000000,
-			MaxBoundDescriptorSets:                4,
-			MaxPerStageDescriptorSamplers:         16,
-			MaxPerStageDescriptorUniformBuffers:   15,
-			MaxPerStageDescriptorStorageBuffers:   16,
-			MaxPerStageDescriptorSampledImages:    16,
-			MaxPerStageDescriptorStorageImages:    8,
-			MaxPerStageDescriptorInputAttachments: 8,
-			MaxPerStageResources:                  128,
-			MaxDescriptorSetSamplers:              80,
-			MaxDescriptorSetUniformBuffers:        90,
-			MaxDescriptorSetUniformBuffersDynamic: 8,
-			MaxDescriptorSetStorageBuffers:        96,
-			MaxDescriptorSetStorageBuffersDynamic: 8,
-			MaxDescriptorSetSampledImages:         96,
-			MaxDescriptorSetStorageImages:         48,
-			MaxDescriptorSetInputAttachments:      8,
-			MaxVertexInputAttributes:              32,
-			MaxVertexInputBindings:                32,
-			MaxVertexInputAttributeOffset:         2047,
-			MaxVertexInputBindingStride:           2048,
-			MaxVertexOutputComponents:             128,
-			MaxFragmentInputComponents:            128,
-			MaxFragmentOutputAttachments:          8,
-			MaxFragmentDualSrcAttachments:         1,
-			MaxFragmentCombinedOutputResources:    16,
-			MaxComputeSharedMemorySize:            32768,
-			MaxComputeWorkGroupCount:              [3]uint32{65535, 65535, 65535},
-			MaxComputeWorkGroupInvocations:        1024,
-			MaxComputeWorkGroupSize:               [3]uint32{1024, 1024, 64},
-			SubPixelPrecisionBits:                 8,
-			SubTexelPrecisionBits:                 8,
-			MipmapPrecisionBits:                   8,
-			MaxDrawIndexedIndexValue:              0xFFFFFFFF,
-			MaxDrawIndirectCount:                  0xFFFFFFFF,
-			MaxSamplerLodBias:                     15,
-			MaxSamplerAnisotropy:                  16,
-			MaxViewports:                          16,
-			MaxViewportDimensions:                 [2]uint32{16384, 16384},
-			ViewportBoundsRange:                   [2]float32{-32768.0, 32767.0},
-			ViewportSubPixelBits:                  8,
-			MinMemoryMapAlignment:                 64,
-			MinTexelBufferOffsetAlignment:         0x10,
-			MinUniformBufferOffsetAlignment:       0x100,
-			MinStorageBufferOffsetAlignment:       0x10,
-			MinTexelOffset:                        -8,
-			MaxTexelOffset:                        7,
-			MinTexelGatherOffset:                  -32,
-			MaxTexelGatherOffset:                  31,
-			MinInterpolationOffset:                -0.5,
-			MaxInterpolationOffset:                0.4375,
-			SubPixelInterpolationOffsetBits:       4,
-			MaxFramebufferWidth:                   16384,
-			MaxFramebufferHeight:                  16384,
-			MaxFramebufferLayers:                  2048,
-			FramebufferColorSampleCounts:          0x7F,
-			FramebufferDepthSampleCounts:          0x7F,
-			FramebufferStencilSampleCounts:        0x7F,
-			FramebufferNoAttachmentsSampleCounts:  0x7F,
-			MaxColorAttachments:                   8,
-			SampledImageColorSampleCounts:         0x7F,
-			SampledImageIntegerSampleCounts:       0x7F,
-			SampledImageDepthSampleCounts:         0x7F,
-			SampledImageStencilSampleCounts:       0x7F,
-			StorageImageSampleCounts:              0x7F,
-			MaxSampleMaskWords:                    1,
-			TimestampComputeAndGraphics:           1,
-			TimestampPeriod:                       1.0,
-			MaxClipDistances:                      8,
-			MaxCullDistances:                      8,
-			MaxCombinedClipAndCullDistances:       8,
-			DiscreteQueuePriorities:               2,
-			PointSizeRange:                        [2]float32{1.0, 64.0},
-			LineWidthRange:                        [2]float32{1.0, 8.0},
-			PointSizeGranularity:                  0.125,
-			LineWidthGranularity:                  0.125,
-			StrictLines:                           0,
-			StandardSampleLocations:               1,
-			OptimalBufferCopyOffsetAlignment:      0x10,
-			OptimalBufferCopyRowPitchAlignment:    0x10,
-			NonCoherentAtomSize:                   256,
+			MaxImageDimension1D:                 16384,
+			MaxImageDimension2D:                 16384,
+			MaxImageDimension3D:                 2048,
+			MaxImageArrayLayers:                 2048,
+			MaxUniformBufferRange:               65536,
+			MaxStorageBufferRange:               2 << 27,
+			MaxPushConstantsSize:                256,
+			MaxBoundDescriptorSets:              8,
+			MaxPerStageDescriptorSamplers:       16,
+			MaxPerStageDescriptorUniformBuffers: 15,
+			MaxPerStageDescriptorStorageBuffers: 16,
+			MaxPerStageDescriptorSampledImages:  128,
+			MaxPerStageDescriptorStorageImages:  8,
+			MaxVertexInputAttributes:            32,
+			MaxVertexInputBindingStride:         2048,
+			MaxFragmentOutputAttachments:        8,
+			MaxComputeSharedMemorySize:          32768,
+			MaxComputeWorkGroupCount:            [3]uint32{65535, 65535, 65535},
+			MaxComputeWorkGroupInvocations:      1024,
+			MaxComputeWorkGroupSize:             [3]uint32{1024, 1024, 64},
+			MinUniformBufferOffsetAlignment:     256,
+			MinStorageBufferOffsetAlignment:     16,
 		},
 	}
 
 	limits := limitsFromProps(props)
 
-	// Currently returns DefaultLimits() - test that it returns valid defaults
-	defaultLimits := types.DefaultLimits()
+	// Verify texture dimensions are mapped from Vulkan limits
+	if limits.MaxTextureDimension1D != 16384 {
+		t.Errorf("MaxTextureDimension1D = %d, want 16384", limits.MaxTextureDimension1D)
+	}
+	if limits.MaxTextureDimension2D != 16384 {
+		t.Errorf("MaxTextureDimension2D = %d, want 16384", limits.MaxTextureDimension2D)
+	}
+	if limits.MaxTextureDimension3D != 2048 {
+		t.Errorf("MaxTextureDimension3D = %d, want 2048", limits.MaxTextureDimension3D)
+	}
+	if limits.MaxTextureArrayLayers != 2048 {
+		t.Errorf("MaxTextureArrayLayers = %d, want 2048", limits.MaxTextureArrayLayers)
+	}
 
-	if limits.MaxTextureDimension2D != defaultLimits.MaxTextureDimension2D {
-		t.Errorf("MaxTextureDimension2D = %d, want %d", limits.MaxTextureDimension2D, defaultLimits.MaxTextureDimension2D)
+	// Verify buffer limits
+	if limits.MaxUniformBufferBindingSize != 65536 {
+		t.Errorf("MaxUniformBufferBindingSize = %d, want 65536", limits.MaxUniformBufferBindingSize)
 	}
-	if limits.MaxTextureDimension3D != defaultLimits.MaxTextureDimension3D {
-		t.Errorf("MaxTextureDimension3D = %d, want %d", limits.MaxTextureDimension3D, defaultLimits.MaxTextureDimension3D)
+	if limits.MaxStorageBufferBindingSize != uint64(2<<27) {
+		t.Errorf("MaxStorageBufferBindingSize = %d, want %d", limits.MaxStorageBufferBindingSize, 2<<27)
 	}
-	if limits.MaxUniformBufferBindingSize != defaultLimits.MaxUniformBufferBindingSize {
-		t.Errorf("MaxUniformBufferBindingSize = %d, want %d", limits.MaxUniformBufferBindingSize, defaultLimits.MaxUniformBufferBindingSize)
+
+	// Verify descriptor limits
+	if limits.MaxBindGroups != 8 {
+		t.Errorf("MaxBindGroups = %d, want 8", limits.MaxBindGroups)
+	}
+	if limits.MaxSampledTexturesPerShaderStage != 128 {
+		t.Errorf("MaxSampledTexturesPerShaderStage = %d, want 128", limits.MaxSampledTexturesPerShaderStage)
+	}
+
+	// Verify compute limits
+	if limits.MaxComputeWorkgroupStorageSize != 32768 {
+		t.Errorf("MaxComputeWorkgroupStorageSize = %d, want 32768", limits.MaxComputeWorkgroupStorageSize)
+	}
+	if limits.MaxComputeInvocationsPerWorkgroup != 1024 {
+		t.Errorf("MaxComputeInvocationsPerWorkgroup = %d, want 1024", limits.MaxComputeInvocationsPerWorkgroup)
+	}
+	if limits.MaxComputeWorkgroupSizeX != 1024 {
+		t.Errorf("MaxComputeWorkgroupSizeX = %d, want 1024", limits.MaxComputeWorkgroupSizeX)
+	}
+
+	// Verify push constants
+	if limits.MaxPushConstantSize != 256 {
+		t.Errorf("MaxPushConstantSize = %d, want 256", limits.MaxPushConstantSize)
 	}
 }
 
@@ -518,5 +480,107 @@ func TestLimitsAllFields(t *testing.T) {
 	}
 	if limits.MaxComputeInvocationsPerWorkgroup == 0 {
 		t.Error("MaxComputeInvocationsPerWorkgroup should not be 0")
+	}
+}
+
+// TestFeaturesFromPhysicalDevice tests feature mapping from Vulkan to WebGPU.
+func TestFeaturesFromPhysicalDevice(t *testing.T) {
+	tests := []struct {
+		name     string
+		features vk.PhysicalDeviceFeatures
+		want     types.Features
+	}{
+		{
+			name:     "no features",
+			features: vk.PhysicalDeviceFeatures{},
+			want:     types.Features(types.FeatureDepth32FloatStencil8), // Always enabled
+		},
+		{
+			name: "texture compression BC",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionBC: 1,
+			},
+			want: types.Features(types.FeatureTextureCompressionBC) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "texture compression ETC2",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionETC2: 1,
+			},
+			want: types.Features(types.FeatureTextureCompressionETC2) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "texture compression ASTC",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionASTC_LDR: 1,
+			},
+			want: types.Features(types.FeatureTextureCompressionASTC) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "draw indirect first instance",
+			features: vk.PhysicalDeviceFeatures{
+				DrawIndirectFirstInstance: 1,
+			},
+			want: types.Features(types.FeatureIndirectFirstInstance) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "multi draw indirect",
+			features: vk.PhysicalDeviceFeatures{
+				MultiDrawIndirect: 1,
+			},
+			want: types.Features(types.FeatureMultiDrawIndirect) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "depth clamp",
+			features: vk.PhysicalDeviceFeatures{
+				DepthClamp: 1,
+			},
+			want: types.Features(types.FeatureDepthClipControl) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "shader float64",
+			features: vk.PhysicalDeviceFeatures{
+				ShaderFloat64: 1,
+			},
+			want: types.Features(types.FeatureShaderFloat64) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "pipeline statistics query",
+			features: vk.PhysicalDeviceFeatures{
+				PipelineStatisticsQuery: 1,
+			},
+			want: types.Features(types.FeaturePipelineStatisticsQuery) | types.Features(types.FeatureDepth32FloatStencil8),
+		},
+		{
+			name: "all features",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionBC:       1,
+				TextureCompressionETC2:     1,
+				TextureCompressionASTC_LDR: 1,
+				DrawIndirectFirstInstance:  1,
+				MultiDrawIndirect:          1,
+				DepthClamp:                 1,
+				ShaderFloat64:              1,
+				PipelineStatisticsQuery:    1,
+			},
+			want: types.Features(types.FeatureTextureCompressionBC) |
+				types.Features(types.FeatureTextureCompressionETC2) |
+				types.Features(types.FeatureTextureCompressionASTC) |
+				types.Features(types.FeatureIndirectFirstInstance) |
+				types.Features(types.FeatureMultiDrawIndirect) |
+				types.Features(types.FeatureDepthClipControl) |
+				types.Features(types.FeatureShaderFloat64) |
+				types.Features(types.FeaturePipelineStatisticsQuery) |
+				types.Features(types.FeatureDepth32FloatStencil8),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := featuresFromPhysicalDevice(&tt.features)
+			if got != tt.want {
+				t.Errorf("featuresFromPhysicalDevice() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

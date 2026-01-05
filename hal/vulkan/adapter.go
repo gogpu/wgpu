@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/go-webgpu/goffi/ffi"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 	"github.com/gogpu/wgpu/types"
@@ -189,14 +190,17 @@ func vkGetDeviceQueue(cmds *vk.Commands, device vk.Device, queueFamilyIndex, que
 	cmds.GetDeviceQueue(device, queueFamilyIndex, queueIndex, queue)
 }
 
-func vkDestroyDevice(device vk.Device, _ *vk.AllocationCallbacks) {
-	// Note: This requires device commands to be loaded, but we're destroying the device
-	// For now, use GetDeviceProcAddr directly
+func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) {
+	// Get vkDestroyDevice function pointer directly since device commands
+	// may not be available when destroying the device
 	proc := vk.GetDeviceProcAddr(device, "vkDestroyDevice")
 	if proc == nil {
 		return
 	}
-	// FIXME(v0.4.1): vkDestroyDevice requires goffi signature update. Minor memory leak.
-	// For now just skip - device will be destroyed when process exits
-	_ = proc
+	// Call vkDestroyDevice(VkDevice, VkAllocationCallbacks*) via goffi
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&allocator),
+	}
+	_ = ffi.CallFunction(&vk.SigVoidHandlePtr, proc, nil, args[:])
 }

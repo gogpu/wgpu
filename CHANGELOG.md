@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-01-05
+
+### Fixed
+
+#### Vulkan Backend
+- **vkDestroyDevice Memory Leak** — Fixed memory leak when destroying Vulkan devices ([#32])
+  - Device was not properly destroyed due to missing goffi call
+  - Now correctly calls `vkDestroyDevice` via `ffi.CallFunction` with `SigVoidHandlePtr` signature
+- **Features Mapping** — Implemented `featuresFromPhysicalDevice()` ([#33])
+  - Maps 9 Vulkan features to WebGPU features (BC, ETC2, ASTC, IndirectFirstInstance, etc.)
+  - Reference: wgpu-hal/src/vulkan/adapter.rs:584-829
+- **Limits Mapping** — Implemented proper Vulkan→WebGPU limits mapping ([#34])
+  - Maps 25+ hardware limits from `VkPhysicalDeviceLimits`
+  - Includes: texture dimensions, descriptor limits, buffer limits, compute limits
+  - Reference: wgpu-hal/src/vulkan/adapter.rs:1254-1392
+
+[#32]: https://github.com/gogpu/wgpu/issues/32
+[#33]: https://github.com/gogpu/wgpu/issues/33
+[#34]: https://github.com/gogpu/wgpu/issues/34
+
 ## [0.9.0] - 2026-01-05
 
 ### Added
@@ -30,11 +50,11 @@ The following features are not yet fully implemented in the Vulkan backend:
 
 | Feature | Status | Target |
 |---------|--------|--------|
-| Feature Detection | Returns 0 (all disabled) | v0.5.0 |
-| Limits Mapping | Uses conservative defaults | v0.5.0 |
-| Array Textures | Single layer only | v0.6.0 |
-| Render Bundles | Not implemented | v0.6.0 |
-| Timestamp Period | Hardcoded to 1.0 | v0.6.0 |
+| Feature Detection | ~~Returns 0~~ **Fixed in v0.9.1** | ✅ |
+| Limits Mapping | ~~Uses defaults~~ **Fixed in v0.9.1** | ✅ |
+| Array Textures | Single layer only | v0.10.0 |
+| Render Bundles | Not implemented | v0.10.0 |
+| Timestamp Period | Hardcoded to 1.0 | v0.10.0 |
 
 **Note:** Basic rendering (triangles, textures, compute) works correctly. These limitations affect capability reporting and advanced features only.
 
@@ -355,7 +375,9 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/gogpu/wgpu/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/gogpu/wgpu/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/gogpu/wgpu/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/gogpu/wgpu/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/gogpu/wgpu/compare/v0.8.5...v0.8.6
