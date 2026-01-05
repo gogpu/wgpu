@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.9.0
+## Current Status: v0.9.1
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -117,7 +117,7 @@
 - [x] Skip Metal tests on CI (Metal unavailable in virtualized macOS)
 - [x] Updated naga v0.8.2 → v0.8.3 (MSL `[[position]]` attribute fix)
 
-### v0.9.0 — Core-HAL Bridge (Current)
+### v0.9.0 — Core-HAL Bridge
 - [x] **Snatchable Pattern** — Safe deferred resource destruction
 - [x] **TrackerIndex Allocator** — Dense index allocation for state tracking
 - [x] **Buffer State Tracker** — Buffer usage state validation
@@ -126,11 +126,26 @@
 - [x] **Core CommandEncoder** — Command recording with HAL dispatch
 - [x] **Code Quality** — 58 TODO comments replaced with proper documentation
 
+### v0.9.1 — Vulkan Backend Fixes (Current)
+- [x] **vkDestroyDevice Fix** — Fixed memory leak when destroying Vulkan devices ([#32])
+  - Device was not properly destroyed due to missing goffi call
+  - Now correctly invokes `vkDestroyDevice` via `ffi.CallFunction`
+- [x] **Features Mapping** — Implemented `featuresFromPhysicalDevice()` ([#33])
+  - Maps 9 Vulkan features to WebGPU features
+  - BC, ETC2, ASTC compression, IndirectFirstInstance, MultiDrawIndirect, etc.
+- [x] **Limits Mapping** — Implemented proper Vulkan→WebGPU limits ([#34])
+  - Maps 25+ hardware limits from `VkPhysicalDeviceLimits`
+  - Texture dimensions, descriptor limits, buffer limits, compute limits
+
+[#32]: https://github.com/gogpu/wgpu/issues/32
+[#33]: https://github.com/gogpu/wgpu/issues/33
+[#34]: https://github.com/gogpu/wgpu/issues/34
+
 ---
 
 ## Upcoming Releases
 
-### v0.9.0 — Compute Shaders
+### v0.10.0 — Compute Shaders
 **Target: Q1 2025**
 
 - [ ] Compute pipeline support in all backends

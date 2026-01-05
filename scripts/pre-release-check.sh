@@ -158,6 +158,8 @@ USE_WSL=0
 WSL_DISTRO=""
 
 # Helper function to find WSL distro with Go installed
+# Note: WSL on Windows outputs UTF-16 which contains null bytes.
+# We use printf (not echo) and filter nulls on the calling side.
 find_wsl_distro() {
     if ! command -v wsl &> /dev/null; then
         return 1
@@ -165,8 +167,9 @@ find_wsl_distro() {
 
     # Try common distros first
     for distro in "Gentoo" "Ubuntu" "Debian" "Alpine"; do
-        if wsl -d "$distro" bash -c "command -v go &> /dev/null" 2>/dev/null; then
-            echo "$distro"
+        # Redirect all WSL output to /dev/null to avoid UTF-16 null byte issues
+        if wsl -d "$distro" bash -c "command -v go" >/dev/null 2>&1; then
+            printf '%s' "$distro"
             return 0
         fi
     done
@@ -180,7 +183,8 @@ if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
     TEST_CMD="go test -race ./... 2>&1"
 else
     # Try to find WSL distro with Go
-    WSL_DISTRO=$(find_wsl_distro)
+    # Filter null bytes from output (WSL UTF-16 encoding issue on Windows)
+    WSL_DISTRO=$(find_wsl_distro 2>/dev/null | tr -d '\0')
     if [ -n "$WSL_DISTRO" ]; then
         log_info "GCC not found locally, but WSL2 ($WSL_DISTRO) detected!"
         log_info "Running tests with race detector via WSL2 $WSL_DISTRO..."

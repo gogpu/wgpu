@@ -192,7 +192,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: types.BackendVulkan,
 			},
-			Features: 0, // Note(v0.5.0): Feature mapping pending. See DX12 adapter.go:204 for pattern.
+			Features: featuresFromPhysicalDevice(&features),
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
@@ -336,7 +336,96 @@ func vendorIDToName(id uint32) string {
 	}
 }
 
+// featuresFromPhysicalDevice maps Vulkan physical device features to WebGPU features.
+// Reference: wgpu-hal/src/vulkan/adapter.rs:584-829
+func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) types.Features {
+	var result types.Features
+
+	// Texture compression features
+	if features.TextureCompressionBC != 0 {
+		result |= types.Features(types.FeatureTextureCompressionBC)
+	}
+	if features.TextureCompressionETC2 != 0 {
+		result |= types.Features(types.FeatureTextureCompressionETC2)
+	}
+	if features.TextureCompressionASTC_LDR != 0 {
+		result |= types.Features(types.FeatureTextureCompressionASTC)
+	}
+
+	// Draw features
+	if features.DrawIndirectFirstInstance != 0 {
+		result |= types.Features(types.FeatureIndirectFirstInstance)
+	}
+	if features.MultiDrawIndirect != 0 {
+		result |= types.Features(types.FeatureMultiDrawIndirect)
+	}
+
+	// Depth/clipping features
+	if features.DepthClamp != 0 {
+		result |= types.Features(types.FeatureDepthClipControl)
+	}
+
+	// Shader features
+	if features.ShaderFloat64 != 0 {
+		result |= types.Features(types.FeatureShaderFloat64)
+	}
+
+	// Query features
+	if features.PipelineStatisticsQuery != 0 {
+		result |= types.Features(types.FeaturePipelineStatisticsQuery)
+	}
+
+	// Depth32FloatStencil8 is always available in Vulkan 1.0+
+	result |= types.Features(types.FeatureDepth32FloatStencil8)
+
+	return result
+}
+
+// limitsFromProps maps Vulkan physical device limits to WebGPU limits.
+// Reference: wgpu-hal/src/vulkan/adapter.rs:1254-1392
 func limitsFromProps(props *vk.PhysicalDeviceProperties) types.Limits {
-	_ = props // Note(v0.5.0): Limits mapping pending. DefaultLimits() is safe. See DX12 adapter.go:242.
-	return types.DefaultLimits()
+	vkLimits := props.Limits
+
+	// Start with default limits and override with actual hardware values
+	limits := types.DefaultLimits()
+
+	// Texture dimensions
+	limits.MaxTextureDimension1D = vkLimits.MaxImageDimension1D
+	limits.MaxTextureDimension2D = vkLimits.MaxImageDimension2D
+	limits.MaxTextureDimension3D = vkLimits.MaxImageDimension3D
+	limits.MaxTextureArrayLayers = vkLimits.MaxImageArrayLayers
+
+	// Descriptor/binding limits
+	limits.MaxBindGroups = min(vkLimits.MaxBoundDescriptorSets, 8) // WebGPU max is 8
+	limits.MaxSampledTexturesPerShaderStage = vkLimits.MaxPerStageDescriptorSampledImages
+	limits.MaxSamplersPerShaderStage = vkLimits.MaxPerStageDescriptorSamplers
+	limits.MaxStorageBuffersPerShaderStage = vkLimits.MaxPerStageDescriptorStorageBuffers
+	limits.MaxStorageTexturesPerShaderStage = vkLimits.MaxPerStageDescriptorStorageImages
+	limits.MaxUniformBuffersPerShaderStage = vkLimits.MaxPerStageDescriptorUniformBuffers
+
+	// Buffer limits
+	limits.MaxUniformBufferBindingSize = uint64(vkLimits.MaxUniformBufferRange)
+	limits.MaxStorageBufferBindingSize = uint64(vkLimits.MaxStorageBufferRange)
+	limits.MinUniformBufferOffsetAlignment = uint32(vkLimits.MinUniformBufferOffsetAlignment)
+	limits.MinStorageBufferOffsetAlignment = uint32(vkLimits.MinStorageBufferOffsetAlignment)
+
+	// Vertex limits
+	limits.MaxVertexAttributes = min(vkLimits.MaxVertexInputAttributes, 32) // WebGPU max is 32
+	limits.MaxVertexBufferArrayStride = min(vkLimits.MaxVertexInputBindingStride, 2048)
+
+	// Color attachment limits
+	limits.MaxColorAttachments = min(vkLimits.MaxColorAttachments, 8) // WebGPU max is 8
+
+	// Compute limits
+	limits.MaxComputeWorkgroupStorageSize = vkLimits.MaxComputeSharedMemorySize
+	limits.MaxComputeInvocationsPerWorkgroup = vkLimits.MaxComputeWorkGroupInvocations
+	limits.MaxComputeWorkgroupSizeX = vkLimits.MaxComputeWorkGroupSize[0]
+	limits.MaxComputeWorkgroupSizeY = vkLimits.MaxComputeWorkGroupSize[1]
+	limits.MaxComputeWorkgroupSizeZ = vkLimits.MaxComputeWorkGroupSize[2]
+	limits.MaxComputeWorkgroupsPerDimension = vkLimits.MaxComputeWorkGroupCount[0]
+
+	// Push constants
+	limits.MaxPushConstantSize = vkLimits.MaxPushConstantsSize
+
+	return limits
 }
