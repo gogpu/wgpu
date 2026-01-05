@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.9.1
+## Current Status: v0.9.2
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
