@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### HAL
+- **ErrDriverBug Error** — New error type for driver specification violations ([#24])
+  - Returned when GPU driver violates API spec (e.g., returns success but invalid handle)
+  - Provides actionable guidance: update driver, try different backend, or use software rendering
+
+### Fixed
+
+#### Vulkan Backend
+- **Intel Null Pipeline Workaround** — Defensive check for Intel Vulkan driver bug ([#24])
+  - Intel Iris Xe drivers may return `VK_SUCCESS` but write `VK_NULL_HANDLE` to pipeline
+  - This is a Vulkan specification violation (Intel won't fix — "legacy support" mode)
+  - Added null checks after `vkCreateGraphicsPipelines` and `vkCreateComputePipelines`
+  - Returns `hal.ErrDriverBug` instead of crashing on affected hardware
+
+[#24]: https://github.com/gogpu/wgpu/issues/24
+
 ## [0.9.2] - 2026-01-05
 
 ### Fixed

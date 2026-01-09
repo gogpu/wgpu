@@ -293,6 +293,13 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, fmt.Errorf("vulkan: vkCreateGraphicsPipelines failed: %d", result)
 	}
 
+	// Defensive check: Intel Vulkan drivers may return VK_SUCCESS but write VK_NULL_HANDLE.
+	// This is a Vulkan spec violation, but we must handle it to prevent undefined behavior.
+	// See: https://github.com/gogpu/wgpu/issues/24
+	if pipeline == 0 {
+		return nil, hal.ErrDriverBug
+	}
+
 	// Keep shader entry point bytes alive for debug (optional, modules are kept)
 	_ = shaderModules
 	_ = vertexEntryBytes
@@ -368,6 +375,13 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	result := vkCreateComputePipelines(d.cmds, d.handle, 0, 1, &createInfo, nil, &pipeline)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateComputePipelines failed: %d", result)
+	}
+
+	// Defensive check: Intel Vulkan drivers may return VK_SUCCESS but write VK_NULL_HANDLE.
+	// This is a Vulkan spec violation, but we must handle it to prevent undefined behavior.
+	// See: https://github.com/gogpu/wgpu/issues/24
+	if pipeline == 0 {
+		return nil, hal.ErrDriverBug
 	}
 
 	return &ComputePipeline{
