@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Returned when GPU driver violates API spec (e.g., returns success but invalid handle)
   - Provides actionable guidance: update driver, try different backend, or use software rendering
 
+#### Vulkan Backend
+- **WSI Function Loading** — Added explicit loading of Window System Integration functions
+  - Surface functions: `vkDestroySurfaceKHR`, `vkGetPhysicalDeviceSurfaceSupportKHR`
+  - Surface capabilities: `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`, `vkGetPhysicalDeviceSurfaceFormatsKHR`, `vkGetPhysicalDeviceSurfacePresentModesKHR`
+  - Platform surfaces: `vkCreateWin32SurfaceKHR` (Windows)
+  - Swapchain functions: `vkCreateSwapchainKHR`, `vkDestroySwapchainKHR`, `vkGetSwapchainImagesKHR`, `vkAcquireNextImageKHR`, `vkQueuePresentKHR`
+- **SetDeviceProcAddr** — New function for Intel driver compatibility
+  - Some drivers (Intel Iris Xe) don't support `vkGetDeviceProcAddr` with `VK_NULL_HANDLE` instance
+  - Must be called after `vkCreateInstance` with valid instance handle
+
 ### Fixed
 
 #### Vulkan Backend
@@ -22,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - This is a Vulkan specification violation (Intel won't fix — "legacy support" mode)
   - Added null checks after `vkCreateGraphicsPipelines` and `vkCreateComputePipelines`
   - Returns `hal.ErrDriverBug` instead of crashing on affected hardware
+  - **Confirmed on hardware:** Intel Iris Xe Graphics (12th Gen i7-1265U), Vulkan 1.4.323
+- **goffi Pointer Argument Passing** — Fixed FFI calling convention in `loader.go`
+  - goffi expects `args[]` to contain pointers to WHERE values are stored
+  - For pointer arguments (e.g., `const char*`), must use pointer-to-pointer pattern
+  - Affected functions: `vkGetInstanceProcAddr`, `vkGetDeviceProcAddr`
+  - Symptom: `EXCEPTION_ACCESS_VIOLATION` (0xc0000005) on function call
+- **vkGetDeviceProcAddr Loading** — Fixed device function loading on Intel drivers
+  - Intel doesn't support `vkGetInstanceProcAddr(NULL, "vkGetDeviceProcAddr")`
+  - Now loads with valid instance handle via `SetDeviceProcAddr()`
+- **Validation Layer Availability** — Check layer availability before requesting
+  - Prevents `VK_ERROR_LAYER_NOT_PRESENT` when Vulkan SDK not installed
+  - `InstanceFlagsDebug` now gracefully skips validation if unavailable
 
 [#24]: https://github.com/gogpu/wgpu/issues/24
 

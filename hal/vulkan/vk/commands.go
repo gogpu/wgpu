@@ -3,6 +3,39 @@
 
 package vk
 
+// This file contains manual function pointer loading for Vulkan commands.
+// The Commands struct fields are defined in commands_gen.go (auto-generated).
+//
+// # Function Loading Hierarchy
+//
+// Vulkan functions are loaded in three stages:
+//
+//  1. LoadGlobal() — Functions callable without instance (pre-instance)
+//     - vkCreateInstance
+//     - vkEnumerateInstanceVersion
+//     - vkEnumerateInstanceLayerProperties
+//     - vkEnumerateInstanceExtensionProperties
+//
+//  2. LoadInstance(instance) — Instance-level functions
+//     - Core: vkDestroyInstance, vkEnumeratePhysicalDevices, vkCreateDevice
+//     - WSI:  vkCreateWin32SurfaceKHR, vkGetPhysicalDeviceSurfaceSupportKHR, etc.
+//     - Note: Also call SetDeviceProcAddr(instance) for Intel compatibility
+//
+//  3. LoadDevice(device) — Device-level functions
+//     - Memory: vkAllocateMemory, vkFreeMemory, vkMapMemory
+//     - Buffers: vkCreateBuffer, vkDestroyBuffer
+//     - Images: vkCreateImage, vkCreateImageView
+//     - Pipelines: vkCreateGraphicsPipelines, vkCreateComputePipelines
+//     - Commands: vkBeginCommandBuffer, vkCmdDraw, etc.
+//     - Swapchain: vkCreateSwapchainKHR, vkAcquireNextImageKHR, vkQueuePresentKHR
+//
+// # Intel Driver Notes
+//
+// Intel Iris Xe drivers require special handling:
+//   - vkGetInstanceProcAddr(NULL, "vkGetDeviceProcAddr") returns NULL
+//   - Must call SetDeviceProcAddr(instance) after creating instance
+//   - See loader.go for details
+
 import (
 	"fmt"
 )
@@ -55,6 +88,16 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	c.enumerateDeviceLayerProperties = GetInstanceProcAddr(instance, "vkEnumerateDeviceLayerProperties")
 	c.enumerateDeviceExtensionProperties = GetInstanceProcAddr(instance, "vkEnumerateDeviceExtensionProperties")
 	c.getPhysicalDeviceSparseImageFormatProperties = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSparseImageFormatProperties")
+
+	// Load WSI (Window System Integration) functions
+	c.destroySurfaceKHR = GetInstanceProcAddr(instance, "vkDestroySurfaceKHR")
+	c.getPhysicalDeviceSurfaceSupportKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceSupportKHR")
+	c.getPhysicalDeviceSurfaceCapabilitiesKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
+	c.getPhysicalDeviceSurfaceFormatsKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR")
+	c.getPhysicalDeviceSurfacePresentModesKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR")
+
+	// Platform-specific surface creation
+	c.createWin32SurfaceKHR = GetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR")
 
 	// Verify critical functions loaded
 	if c.destroyInstance == nil || c.enumeratePhysicalDevices == nil || c.createDevice == nil {
@@ -194,6 +237,13 @@ func (c *Commands) LoadDevice(device Device) error {
 	c.cmdNextSubpass = GetDeviceProcAddr(device, "vkCmdNextSubpass")
 	c.cmdEndRenderPass = GetDeviceProcAddr(device, "vkCmdEndRenderPass")
 	c.cmdExecuteCommands = GetDeviceProcAddr(device, "vkCmdExecuteCommands")
+
+	// Swapchain functions (WSI)
+	c.createSwapchainKHR = GetDeviceProcAddr(device, "vkCreateSwapchainKHR")
+	c.destroySwapchainKHR = GetDeviceProcAddr(device, "vkDestroySwapchainKHR")
+	c.getSwapchainImagesKHR = GetDeviceProcAddr(device, "vkGetSwapchainImagesKHR")
+	c.acquireNextImageKHR = GetDeviceProcAddr(device, "vkAcquireNextImageKHR")
+	c.queuePresentKHR = GetDeviceProcAddr(device, "vkQueuePresentKHR")
 
 	// Verify critical functions loaded
 	if c.destroyDevice == nil || c.getDeviceQueue == nil || c.queueSubmit == nil {
