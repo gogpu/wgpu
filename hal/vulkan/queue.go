@@ -42,11 +42,13 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have an active swapchain, use its semaphores for synchronization.
-	// This ensures proper GPU-side synchronization between acquire/render/present.
+	// If we have an active swapchain, use its semaphores and per-acquire fence.
+	// This ensures proper GPU-side synchronization between acquire/render/present:
 	// - Wait on currentAcquireSem (signaled by acquire)
 	// - Signal presentSemaphores[currentImage] (waited on by present)
+	// - Signal acquireFences[currentAcquireIdx] (waited on before reusing the semaphore)
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	var submitFence vk.Fence
 	if q.activeSwapchain != nil {
 		acquireSem := q.activeSwapchain.currentAcquireSem
 		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
@@ -55,17 +57,18 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
 		submitInfo.PSignalSemaphores = &presentSem
+		// Use the per-acquire fence so acquireNextImage can wait for this submission
+		submitFence = q.activeSwapchain.acquireFences[q.activeSwapchain.currentAcquireIdx]
 	}
 
-	// Get fence handle if provided
-	var vkFence vk.Fence
-	if fence != nil {
+	// If no swapchain, use user-provided fence if available
+	if submitFence == 0 && fence != nil {
 		if vkF, ok := fence.(*Fence); ok {
-			vkFence = vkF.handle
+			submitFence = vkF.handle
 		}
 	}
 
-	result := vkQueueSubmit(q, 1, &submitInfo, vkFence)
+	result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
@@ -106,7 +109,10 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		PSignalSemaphores:    &presentSem,
 	}
 
-	result := vkQueueSubmit(q, 1, &submitInfo, 0)
+	// Signal the per-acquire fence so acquireNextImage knows when this submission is done
+	submitFence := swapchain.acquireFences[swapchain.currentAcquireIdx]
+
+	result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
