@@ -364,85 +364,129 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	)
 }
 
-// BeginRenderPass begins a render pass using dynamic rendering (Vulkan 1.3+).
+// BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
+// This is compatible with Intel drivers that don't properly support dynamic rendering.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{
 		encoder: e,
 		desc:    desc,
 	}
 
-	if !e.isRecording {
+	if !e.isRecording || len(desc.ColorAttachments) == 0 {
 		return rpe
 	}
 
-	// Use dynamic rendering (VK_KHR_dynamic_rendering / Vulkan 1.3)
-	// This avoids the need for VkRenderPass and VkFramebuffer objects
-	colorAttachments := make([]vk.RenderingAttachmentInfo, len(desc.ColorAttachments))
-	for i, ca := range desc.ColorAttachments {
-		view, ok := ca.View.(*TextureView)
-		if !ok {
-			continue
-		}
-
-		colorAttachments[i] = vk.RenderingAttachmentInfo{
-			SType:       vk.StructureTypeRenderingAttachmentInfo,
-			ImageView:   view.handle,
-			ImageLayout: vk.ImageLayoutColorAttachmentOptimal,
-			LoadOp:      loadOpToVk(ca.LoadOp),
-			StoreOp:     storeOpToVk(ca.StoreOp),
-			ClearValue: vk.ClearValueColor(
-				float32(ca.ClearValue.R),
-				float32(ca.ClearValue.G),
-				float32(ca.ClearValue.B),
-				float32(ca.ClearValue.A),
-			),
-		}
-
-		// Handle resolve target for MSAA
-		if ca.ResolveTarget != nil {
-			resolveView, ok := ca.ResolveTarget.(*TextureView)
-			if ok {
-				colorAttachments[i].ResolveMode = vk.ResolveModeAverageBit
-				colorAttachments[i].ResolveImageView = resolveView.handle
-				colorAttachments[i].ResolveImageLayout = vk.ImageLayoutColorAttachmentOptimal
-			}
-		}
+	// Get first color attachment info
+	ca := desc.ColorAttachments[0]
+	view, ok := ca.View.(*TextureView)
+	if !ok {
+		return rpe
 	}
 
-	renderingInfo := vk.RenderingInfo{
-		SType: vk.StructureTypeRenderingInfo,
-		RenderArea: vk.Rect2D{
-			Offset: vk.Offset2D{X: 0, Y: 0},
-			Extent: vk.Extent2D{Width: 0, Height: 0}, // Will be set from first attachment
-		},
-		LayerCount:           1,
-		ColorAttachmentCount: uint32(len(colorAttachments)),
+	renderWidth := view.size.Width
+	renderHeight := view.size.Height
+
+	// Determine color format from the view
+	var colorFormat vk.Format
+	if view.texture != nil {
+		colorFormat = textureFormatToVk(view.texture.format)
+	} else if view.isSwapchain {
+		// Use the format stored in the view (set when creating swapchain view)
+		colorFormat = view.vkFormat
 	}
 
-	if len(colorAttachments) > 0 {
-		renderingInfo.PColorAttachments = &colorAttachments[0]
+	// Build render pass key
+	rpKey := RenderPassKey{
+		ColorFormat:      colorFormat,
+		ColorLoadOp:      loadOpToVk(ca.LoadOp),
+		ColorStoreOp:     storeOpToVk(ca.StoreOp),
+		SampleCount:      vk.SampleCountFlagBits(1),
+		ColorFinalLayout: vk.ImageLayoutPresentSrcKhr, // For swapchain presentation
 	}
 
 	// Handle depth/stencil attachment
-	var depthAttachment vk.RenderingAttachmentInfo
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
-		view, ok := dsa.View.(*TextureView)
-		if ok {
-			depthAttachment = vk.RenderingAttachmentInfo{
-				SType:       vk.StructureTypeRenderingAttachmentInfo,
-				ImageView:   view.handle,
-				ImageLayout: vk.ImageLayoutDepthStencilAttachmentOptimal,
-				LoadOp:      loadOpToVk(dsa.DepthLoadOp),
-				StoreOp:     storeOpToVk(dsa.DepthStoreOp),
-				ClearValue:  vk.ClearValueDepthStencil(dsa.DepthClearValue, dsa.StencilClearValue),
-			}
-			renderingInfo.PDepthAttachment = &depthAttachment
-			renderingInfo.PStencilAttachment = &depthAttachment // Same attachment for depth/stencil
+		if dsView, ok := dsa.View.(*TextureView); ok && dsView.texture != nil {
+			rpKey.DepthFormat = textureFormatToVk(dsView.texture.format)
+			rpKey.DepthLoadOp = loadOpToVk(dsa.DepthLoadOp)
+			rpKey.DepthStoreOp = storeOpToVk(dsa.DepthStoreOp)
+			rpKey.StencilLoadOp = loadOpToVk(dsa.StencilLoadOp)
+			rpKey.StencilStoreOp = storeOpToVk(dsa.StencilStoreOp)
 		}
 	}
 
-	vkCmdBeginRendering(e.device.cmds, e.cmdBuffer, &renderingInfo)
+	// Get or create render pass from cache
+	cache := e.device.GetRenderPassCache()
+	renderPass, err := cache.GetOrCreateRenderPass(rpKey)
+	if err != nil {
+		return rpe
+	}
+	rpe.renderPass = renderPass
+
+	// Build framebuffer key
+	fbKey := FramebufferKey{
+		RenderPass: renderPass,
+		ImageView:  view.handle,
+		Width:      renderWidth,
+		Height:     renderHeight,
+	}
+
+	// Get or create framebuffer from cache
+	framebuffer, err := cache.GetOrCreateFramebuffer(fbKey)
+	if err != nil {
+		return rpe
+	}
+	rpe.framebuffer = framebuffer
+
+	// Prepare clear values
+	clearValues := make([]vk.ClearValue, 0, 2)
+	clearValues = append(clearValues, vk.ClearValueColor(
+		float32(ca.ClearValue.R),
+		float32(ca.ClearValue.G),
+		float32(ca.ClearValue.B),
+		float32(ca.ClearValue.A),
+	))
+
+	if desc.DepthStencilAttachment != nil {
+		dsa := desc.DepthStencilAttachment
+		clearValues = append(clearValues, vk.ClearValueDepthStencil(dsa.DepthClearValue, dsa.StencilClearValue))
+	}
+
+	// Begin render pass
+	renderPassBegin := vk.RenderPassBeginInfo{
+		SType:       vk.StructureTypeRenderPassBeginInfo,
+		RenderPass:  renderPass,
+		Framebuffer: framebuffer,
+		RenderArea: vk.Rect2D{
+			Offset: vk.Offset2D{X: 0, Y: 0},
+			Extent: vk.Extent2D{Width: renderWidth, Height: renderHeight},
+		},
+		ClearValueCount: uint32(len(clearValues)),
+		PClearValues:    &clearValues[0],
+	}
+
+	vkCmdBeginRenderPass(e.device.cmds, e.cmdBuffer, &renderPassBegin, vk.SubpassContentsInline)
+
+	// Set default viewport and scissor for the render area.
+	// These are required since the pipeline uses dynamic viewport/scissor state.
+	if renderWidth > 0 && renderHeight > 0 {
+		viewport := vk.Viewport{
+			X:        0,
+			Y:        0,
+			Width:    float32(renderWidth),
+			Height:   float32(renderHeight),
+			MinDepth: 0.0,
+			MaxDepth: 1.0,
+		}
+		vkCmdSetViewport(e.device.cmds, e.cmdBuffer, 0, 1, &viewport)
+
+		scissor := vk.Rect2D{
+			Offset: vk.Offset2D{X: 0, Y: 0},
+			Extent: vk.Extent2D{Width: renderWidth, Height: renderHeight},
+		}
+		vkCmdSetScissor(e.device.cmds, e.cmdBuffer, 0, 1, &scissor)
+	}
 
 	return rpe
 }
@@ -461,13 +505,20 @@ type RenderPassEncoder struct {
 	desc        *hal.RenderPassDescriptor
 	pipeline    *RenderPipeline
 	indexFormat types.IndexFormat
+	// For VkRenderPass-based rendering (not dynamic rendering)
+	renderPass  vk.RenderPass
+	framebuffer vk.Framebuffer
 }
 
 // End finishes the render pass.
 func (e *RenderPassEncoder) End() {
-	if e.encoder.isRecording {
-		vkCmdEndRendering(e.encoder.device.cmds, e.encoder.cmdBuffer)
+	if !e.encoder.isRecording {
+		return
 	}
+
+	// Use vkCmdEndRenderPass (VkRenderPass handles layout transitions automatically
+	// via FinalLayout in AttachmentDescription)
+	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.cmdBuffer)
 }
 
 // SetPipeline sets the render pipeline.
@@ -871,6 +922,14 @@ func vkCmdBeginRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, renderin
 
 func vkCmdEndRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer) {
 	cmds.CmdEndRendering(cmdBuffer)
+}
+
+func vkCmdBeginRenderPass(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, renderPassBegin *vk.RenderPassBeginInfo, contents vk.SubpassContents) {
+	cmds.CmdBeginRenderPass(cmdBuffer, renderPassBegin, contents)
+}
+
+func vkCmdEndRenderPass(cmds *vk.Commands, cmdBuffer vk.CommandBuffer) {
+	cmds.CmdEndRenderPass(cmdBuffer)
 }
 
 func vkCmdBindPipeline(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, bindPoint vk.PipelineBindPoint, pipeline vk.Pipeline) {

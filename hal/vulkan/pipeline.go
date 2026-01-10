@@ -247,31 +247,44 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		PDynamicStates:    &dynamicStates[0],
 	}
 
-	// Build pipeline rendering info for dynamic rendering (Vulkan 1.3+)
+	// Create compatible render pass for pipeline (not dynamic rendering).
+	// This is required for Intel drivers that don't properly support VK_KHR_dynamic_rendering.
 	var depthFormat vk.Format
-	var stencilFormat vk.Format
 	if desc.DepthStencil != nil {
 		depthFormat = textureFormatToVk(desc.DepthStencil.Format)
-		// Check if format has stencil
-		if hasStencilComponent(desc.DepthStencil.Format) {
-			stencilFormat = depthFormat
-		}
 	}
 
-	renderingInfo := vk.PipelineRenderingCreateInfo{
-		SType:                   vk.StructureTypePipelineRenderingCreateInfo,
-		ColorAttachmentCount:    uint32(len(colorFormats)),
-		DepthAttachmentFormat:   depthFormat,
-		StencilAttachmentFormat: stencilFormat,
-	}
+	// Build render pass key for pipeline-compatible render pass
+	var colorFormat vk.Format
 	if len(colorFormats) > 0 {
-		renderingInfo.PColorAttachmentFormats = &colorFormats[0]
+		colorFormat = colorFormats[0]
 	}
 
-	// Create graphics pipeline
+	rpKey := RenderPassKey{
+		ColorFormat:      colorFormat,
+		ColorLoadOp:      vk.AttachmentLoadOpClear,
+		ColorStoreOp:     vk.AttachmentStoreOpStore,
+		SampleCount:      vk.SampleCountFlagBits(1),
+		ColorFinalLayout: vk.ImageLayoutPresentSrcKhr,
+	}
+	if depthFormat != vk.FormatUndefined {
+		rpKey.DepthFormat = depthFormat
+		rpKey.DepthLoadOp = vk.AttachmentLoadOpClear
+		rpKey.DepthStoreOp = vk.AttachmentStoreOpDontCare
+		rpKey.StencilLoadOp = vk.AttachmentLoadOpDontCare
+		rpKey.StencilStoreOp = vk.AttachmentStoreOpDontCare
+	}
+
+	// Get or create compatible render pass
+	cache := d.GetRenderPassCache()
+	compatibleRenderPass, err := cache.GetOrCreateRenderPass(rpKey)
+	if err != nil {
+		return nil, fmt.Errorf("vulkan: failed to create compatible render pass: %w", err)
+	}
+
+	// Create graphics pipeline with VkRenderPass (not dynamic rendering)
 	createInfo := vk.GraphicsPipelineCreateInfo{
 		SType:               vk.StructureTypeGraphicsPipelineCreateInfo,
-		PNext:               (*uintptr)(unsafe.Pointer(&renderingInfo)),
 		StageCount:          uint32(len(stages)),
 		PStages:             &stages[0],
 		PVertexInputState:   &vertexInputState,
@@ -283,7 +296,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		PColorBlendState:    &colorBlendState,
 		PDynamicState:       &dynamicState,
 		Layout:              pipelineLayout,
-		RenderPass:          0, // Dynamic rendering, no render pass
+		RenderPass:          compatibleRenderPass,
 		Subpass:             0,
 	}
 

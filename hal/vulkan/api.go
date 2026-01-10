@@ -272,6 +272,13 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		return nil, err
 	}
 
+	// Register swapchain with queue for proper synchronization in Submit.
+	// This ensures the queue waits for image acquisition before rendering
+	// and signals completion before present.
+	if s.device != nil && s.device.queue != nil {
+		s.device.queue.activeSwapchain = s.swapchain
+	}
+
 	return &hal.AcquiredSurfaceTexture{
 		Texture:    texture,
 		Suboptimal: suboptimal,

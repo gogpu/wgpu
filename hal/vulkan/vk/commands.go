@@ -38,6 +38,7 @@ package vk
 
 import (
 	"fmt"
+	"unsafe"
 )
 
 // NewCommands creates a new Commands instance.
@@ -251,4 +252,19 @@ func (c *Commands) LoadDevice(device Device) error {
 	}
 
 	return nil
+}
+
+// DebugFunctionPointer returns the address of the specified Vulkan function.
+// This is only for debugging purposes.
+func (c *Commands) DebugFunctionPointer(name string) unsafe.Pointer {
+	switch name {
+	case "vkCreateGraphicsPipelines":
+		return c.createGraphicsPipelines
+	case "vkCreateComputePipelines":
+		return c.createComputePipelines
+	case "vkCreateRenderPass":
+		return c.createRenderPass
+	default:
+		return nil
+	}
 }

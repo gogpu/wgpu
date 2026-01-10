@@ -112,6 +112,9 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 		familyIndex: uint32(graphicsFamily),
 	}
 
+	// Store queue reference in device for swapchain synchronization
+	dev.queue = q
+
 	return hal.OpenDevice{
 		Device: dev,
 		Queue:  q,

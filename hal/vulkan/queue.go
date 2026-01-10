@@ -14,9 +14,10 @@ import (
 
 // Queue implements hal.Queue for Vulkan.
 type Queue struct {
-	handle      vk.Queue
-	device      *Device
-	familyIndex uint32
+	handle          vk.Queue
+	device          *Device
+	familyIndex     uint32
+	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
 }
 
 // Submit submits command buffers to the GPU.
@@ -35,27 +36,21 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		vkCmdBuffers[i] = vkCB.handle
 	}
 
-	// Get wait/signal semaphores from surface if this is a present submit
-	var waitSemaphore, signalSemaphore vk.Semaphore
-	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-
-	// Check if any command buffer was used with a swapchain texture
-	// For now, we assume no synchronization needed without explicit fence
 	submitInfo := vk.SubmitInfo{
 		SType:              vk.StructureTypeSubmitInfo,
 		CommandBufferCount: uint32(len(vkCmdBuffers)),
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have semaphores from a swapchain, add them
-	if waitSemaphore != 0 {
+	// If we have an active swapchain, use its semaphores for synchronization.
+	// This ensures proper GPU-side synchronization between acquire/render/present.
+	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	if q.activeSwapchain != nil {
 		submitInfo.WaitSemaphoreCount = 1
-		submitInfo.PWaitSemaphores = &waitSemaphore
+		submitInfo.PWaitSemaphores = &q.activeSwapchain.imageAvailable
 		submitInfo.PWaitDstStageMask = &waitStage
-	}
-	if signalSemaphore != 0 {
 		submitInfo.SignalSemaphoreCount = 1
-		submitInfo.PSignalSemaphores = &signalSemaphore
+		submitInfo.PSignalSemaphores = &q.activeSwapchain.renderFinished
 	}
 
 	// Get fence handle if provided
@@ -269,7 +264,12 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("vulkan: surface not configured")
 	}
 
-	return vkSurface.swapchain.present(q)
+	err := vkSurface.swapchain.present(q)
+
+	// Clear active swapchain after present
+	q.activeSwapchain = nil
+
+	return err
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.

@@ -114,11 +114,14 @@ func run() error {
 	fmt.Println("OK")
 
 	// Step 8: Create shader modules
+	// Use WGSL shaders compiled to SPIR-V by naga at runtime.
+	// This works reliably across all drivers including Intel Iris Xe.
+	// The hardcoded SPIR-V fallback is kept for reference but not used.
 	fmt.Print("8. Creating shader modules... ")
 	vertexShader, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label: "Vertex Shader",
 		Source: hal.ShaderSource{
-			SPIRV: vertexShaderSPIRV,
+			WGSL: vertexShaderWGSL,
 		},
 	})
 	if err != nil {
@@ -129,7 +132,7 @@ func run() error {
 	fragmentShader, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label: "Fragment Shader",
 		Source: hal.ShaderSource{
-			SPIRV: fragmentShaderSPIRV,
+			WGSL: fragmentShaderWGSL,
 		},
 	})
 	if err != nil {

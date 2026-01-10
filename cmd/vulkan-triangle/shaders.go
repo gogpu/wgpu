@@ -5,8 +5,39 @@
 
 package main
 
-// Pre-compiled SPIR-V shaders for the triangle test.
-// These were compiled from GLSL using glslc.
+// WGSL shaders for the triangle test.
+// These are compiled to SPIR-V at runtime by naga.
+//
+// NOTE: Using naga-compiled WGSL is required for Intel Iris Xe compatibility.
+// The hardcoded SPIR-V shaders (compiled from GLSL using glslc) fail silently
+// on Intel drivers - vkCreateGraphicsPipelines returns VK_SUCCESS but
+// the pipeline handle is 0. Naga-generated SPIR-V works correctly.
+
+// Vertex shader WGSL
+const vertexShaderWGSL = `
+@vertex
+fn main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, -0.5),
+        vec2<f32>(0.5, 0.5),
+        vec2<f32>(-0.5, 0.5)
+    );
+    return vec4<f32>(positions[idx], 0.0, 1.0);
+}
+`
+
+// Fragment shader WGSL
+const fragmentShaderWGSL = `
+@fragment
+fn main() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+`
+
+// DEPRECATED: Pre-compiled SPIR-V shaders (compiled from GLSL using glslc).
+// These are kept for reference only. They fail on Intel Iris Xe drivers
+// (VK_SUCCESS returned but pipeline handle is 0).
+// Use WGSL shaders above which are compiled by naga at runtime.
 
 // Vertex shader:
 // #version 450
