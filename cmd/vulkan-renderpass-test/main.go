@@ -9,6 +9,8 @@
 // This test creates a pipeline using traditional VkRenderPass instead of
 // dynamic rendering to verify if the Intel driver works correctly with the
 // traditional approach.
+//
+//nolint:gosec,gocyclo,cyclop,funlen,maintidx,staticcheck // Low-level Vulkan diagnostic tool
 package main
 
 import (

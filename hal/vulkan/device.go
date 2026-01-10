@@ -275,7 +275,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		imageHandle   vk.Image
 		textureFormat types.TextureFormat
 		dimension     types.TextureDimension
-		mipLevels     uint32 = 1
+		mipLevels     uint32
 		textureSize   Extent3D
 	)
 
@@ -370,9 +370,10 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	// Store texture reference and track if this is a swapchain image.
 	var texRef *Texture
 	var isSwapchain bool
-	if t, ok := texture.(*Texture); ok {
+	switch t := texture.(type) {
+	case *Texture:
 		texRef = t
-	} else if _, ok := texture.(*SwapchainTexture); ok {
+	case *SwapchainTexture:
 		isSwapchain = true
 	}
 
@@ -753,10 +754,11 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	var spirv []uint32
 
-	// If WGSL is provided, compile it to SPIR-V using naga.
-	// This is required for Intel Iris Xe compatibility - hardcoded SPIR-V from
-	// external tools (like glslc) can fail silently on Intel drivers.
-	if desc.Source.WGSL != "" {
+	// Compile shader source to SPIR-V.
+	// WGSL compilation via naga is required for Intel Iris Xe compatibility -
+	// hardcoded SPIR-V from external tools can fail silently on Intel drivers.
+	switch {
+	case desc.Source.WGSL != "":
 		spirvBytes, err := naga.Compile(desc.Source.WGSL)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
@@ -769,9 +771,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		for i := range spirv {
 			spirv[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
 		}
-	} else if len(desc.Source.SPIRV) > 0 {
+	case len(desc.Source.SPIRV) > 0:
 		spirv = desc.Source.SPIRV
-	} else {
+	default:
 		return nil, fmt.Errorf("vulkan: shader module requires WGSL or SPIR-V source")
 	}
 

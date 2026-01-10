@@ -420,6 +420,7 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 
 // Helper functions
 
+//nolint:unused // Reserved for depth-stencil pipeline support
 func hasStencilComponent(format types.TextureFormat) bool {
 	switch format {
 	case types.TextureFormatDepth24PlusStencil8,

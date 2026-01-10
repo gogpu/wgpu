@@ -3,6 +3,7 @@
 
 //go:build windows
 
+//nolint:gosec // Low-level FFI diagnostic tool requires unsafe operations
 package main
 
 import (

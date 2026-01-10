@@ -13,15 +13,15 @@ import (
 // RenderPassKey uniquely identifies a render pass configuration.
 // Used for caching VkRenderPass objects.
 type RenderPassKey struct {
-	ColorFormat     vk.Format
-	ColorLoadOp     vk.AttachmentLoadOp
-	ColorStoreOp    vk.AttachmentStoreOp
-	DepthFormat     vk.Format
-	DepthLoadOp     vk.AttachmentLoadOp
-	DepthStoreOp    vk.AttachmentStoreOp
-	StencilLoadOp   vk.AttachmentLoadOp
-	StencilStoreOp  vk.AttachmentStoreOp
-	SampleCount     vk.SampleCountFlagBits
+	ColorFormat      vk.Format
+	ColorLoadOp      vk.AttachmentLoadOp
+	ColorStoreOp     vk.AttachmentStoreOp
+	DepthFormat      vk.Format
+	DepthLoadOp      vk.AttachmentLoadOp
+	DepthStoreOp     vk.AttachmentStoreOp
+	StencilLoadOp    vk.AttachmentLoadOp
+	StencilStoreOp   vk.AttachmentStoreOp
+	SampleCount      vk.SampleCountFlagBits
 	ColorFinalLayout vk.ImageLayout
 }
 
@@ -264,7 +264,7 @@ func vkResultToString(r vk.Result) string {
 	}
 }
 
-// Helper function to convert texture format to VkFormat for render pass key
+//nolint:unused // Helper for render pass format conversion
 func formatToVkForRenderPass(format types.TextureFormat) vk.Format {
 	return textureFormatToVk(format)
 }

@@ -53,6 +53,8 @@ fn main() -> @location(0) vec4<f32> {
 //	void main() {
 //	    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
 //	}
+//
+//nolint:unused // Fallback SPIR-V kept for reference; using WGSL compilation now
 var vertexShaderSPIRV = []uint32{
 	0x07230203, 0x00010000, 0x0008000a, 0x00000030, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
 	0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
@@ -95,6 +97,8 @@ var vertexShaderSPIRV = []uint32{
 //	void main() {
 //	    outColor = vec4(1.0, 0.0, 0.0, 1.0);
 //	}
+//
+//nolint:unused // Fallback SPIR-V kept for reference; using WGSL compilation now
 var fragmentShaderSPIRV = []uint32{
 	0x07230203, 0x00010000, 0x0008000a, 0x0000000d, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
 	0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,

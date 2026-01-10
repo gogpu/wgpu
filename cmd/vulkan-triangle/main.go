@@ -30,7 +30,7 @@ func main() {
 	}
 }
 
-//nolint:gocyclo,cyclop,funlen,maintidx // Integration test needs sequential setup steps
+//nolint:gocognit,gocyclo,cyclop,funlen,maintidx // Integration test needs sequential setup steps
 func run() error {
 	fmt.Println("=== Vulkan Triangle Integration Test ===")
 	fmt.Println()

@@ -13,14 +13,14 @@ import (
 
 // Swapchain manages Vulkan swapchain for a surface.
 type Swapchain struct {
-	handle          vk.SwapchainKHR
-	surface         *Surface
-	device          *Device
-	images          []vk.Image
-	imageViews      []vk.ImageView
-	format          vk.Format
-	extent          vk.Extent2D
-	presentMode     vk.PresentModeKHR
+	handle      vk.SwapchainKHR
+	surface     *Surface
+	device      *Device
+	images      []vk.Image
+	imageViews  []vk.ImageView
+	format      vk.Format
+	extent      vk.Extent2D
+	presentMode vk.PresentModeKHR
 	// Acquire semaphores - rotated through for each acquire (like wgpu).
 	// We don't know which image we'll get, so we can't index by image.
 	acquireSemaphores []vk.Semaphore
@@ -32,12 +32,12 @@ type Swapchain struct {
 	// Present semaphores - one per swapchain image (known after acquire).
 	presentSemaphores []vk.Semaphore
 
-	acquireFence       vk.Fence      // Fence for post-acquire sync (Windows/Intel fix)
-	currentImage       uint32        //nolint:unused // Used in Submit via activeSwapchain
-	currentAcquireIdx  int           // Index of acquire semaphore used for current frame
-	currentAcquireSem  vk.Semaphore  // The acquire semaphore used for current frame
-	imageAcquired      bool
-	surfaceTextures    []*SwapchainTexture
+	acquireFence      vk.Fence     // Fence for post-acquire sync (Windows/Intel fix)
+	currentImage      uint32       // Current swapchain image index
+	currentAcquireIdx int          // Index of acquire semaphore used for current frame
+	currentAcquireSem vk.Semaphore // The acquire semaphore used for current frame
+	imageAcquired     bool
+	surfaceTextures   []*SwapchainTexture
 }
 
 // SwapchainTexture wraps a swapchain image as a SurfaceTexture.
@@ -56,6 +56,8 @@ func (t *SwapchainTexture) Destroy() {
 }
 
 // createSwapchain creates a new swapchain for the surface.
+//
+//nolint:maintidx // Vulkan swapchain setup requires many sequential steps
 func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfiguration) error {
 	// Get surface capabilities
 	var capabilities vk.SurfaceCapabilitiesKHR

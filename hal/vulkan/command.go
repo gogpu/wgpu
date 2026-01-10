@@ -921,10 +921,12 @@ func vkCmdCopyImage(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, src vk.Image,
 	cmds.CmdCopyImage(cmdBuffer, src, srcLayout, dst, dstLayout, regionCount, pRegions)
 }
 
+//nolint:unused // Reserved for VK_KHR_dynamic_rendering support (disabled on Intel)
 func vkCmdBeginRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, renderingInfo *vk.RenderingInfo) {
 	cmds.CmdBeginRendering(cmdBuffer, renderingInfo)
 }
 
+//nolint:unused // Reserved for VK_KHR_dynamic_rendering support (disabled on Intel)
 func vkCmdEndRendering(cmds *vk.Commands, cmdBuffer vk.CommandBuffer) {
 	cmds.CmdEndRendering(cmdBuffer)
 }
