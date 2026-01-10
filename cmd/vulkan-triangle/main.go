@@ -104,7 +104,7 @@ func run() error {
 		Height:      safeUint32(height),
 		Format:      types.TextureFormatBGRA8Unorm,
 		Usage:       types.TextureUsageRenderAttachment,
-		PresentMode: hal.PresentModeFifo,
+		PresentMode: hal.PresentModeFifo, // Vsync for smooth rendering
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
 	if err := surface.Configure(device, surfaceConfig); err != nil {
@@ -307,8 +307,7 @@ func run() error {
 			fmt.Printf("Rendered %d frames (%.1f FPS)\n", frameCount, fps)
 		}
 
-		// Small sleep to avoid 100% CPU usage
-		time.Sleep(16 * time.Millisecond) // ~60 FPS
+		// Note: No sleep needed - Fifo present mode already provides vsync pacing
 	}
 
 	fmt.Println()

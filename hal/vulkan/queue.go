@@ -44,13 +44,17 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 
 	// If we have an active swapchain, use its semaphores for synchronization.
 	// This ensures proper GPU-side synchronization between acquire/render/present.
+	// - Wait on currentAcquireSem (signaled by acquire)
+	// - Signal presentSemaphores[currentImage] (waited on by present)
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	if q.activeSwapchain != nil {
+		acquireSem := q.activeSwapchain.currentAcquireSem
+		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
 		submitInfo.WaitSemaphoreCount = 1
-		submitInfo.PWaitSemaphores = &q.activeSwapchain.imageAvailable
+		submitInfo.PWaitSemaphores = &acquireSem
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
-		submitInfo.PSignalSemaphores = &q.activeSwapchain.renderFinished
+		submitInfo.PSignalSemaphores = &presentSem
 	}
 
 	// Get fence handle if provided
@@ -87,15 +91,19 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 
+	// Use the rotating acquire semaphore and per-image present semaphore (wgpu-style).
+	acquireSem := swapchain.currentAcquireSem
+	presentSem := swapchain.presentSemaphores[swapchain.currentImage]
+
 	submitInfo := vk.SubmitInfo{
 		SType:                vk.StructureTypeSubmitInfo,
 		WaitSemaphoreCount:   1,
-		PWaitSemaphores:      &swapchain.imageAvailable,
+		PWaitSemaphores:      &acquireSem,
 		PWaitDstStageMask:    &waitStage,
 		CommandBufferCount:   uint32(len(vkCmdBuffers)),
 		PCommandBuffers:      &vkCmdBuffers[0],
 		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    &swapchain.renderFinished,
+		PSignalSemaphores:    &presentSem,
 	}
 
 	result := vkQueueSubmit(q, 1, &submitInfo, 0)
