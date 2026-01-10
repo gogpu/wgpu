@@ -396,12 +396,21 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	// Wait for the previous submission that used this acquire semaphore to complete.
 	// This ensures it's safe to reuse the semaphore. The fence was signaled by the
 	// submission that waited on this semaphore (see Queue.Submit).
+	// wgpu-style optimization: check fence status first, skip wait if already signaled.
 	acquireIdx := sc.nextAcquireIdx
 	acquireFenceForSem := sc.acquireFences[acquireIdx]
-	waitResult := vkWaitForFencesSwapchain(sc.device, 1, &acquireFenceForSem, vk.True, timeout)
-	if waitResult != vk.Success {
-		return nil, false, fmt.Errorf("vulkan: vkWaitForFences (per-acquire) failed: %d", waitResult)
+	fenceStatus := vkGetFenceStatusSwapchain(sc.device, acquireFenceForSem)
+	if fenceStatus == vk.NotReady {
+		// Fence not yet signaled - need to wait
+		waitResult := vkWaitForFencesSwapchain(sc.device, 1, &acquireFenceForSem, vk.True, timeout)
+		if waitResult != vk.Success {
+			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (per-acquire) failed: %d", waitResult)
+		}
+	} else if fenceStatus != vk.Success {
+		// Error checking fence status
+		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (per-acquire) failed: %d", fenceStatus)
 	}
+	// Reset fence for reuse (regardless of whether we waited)
 	resetResult := vkResetFencesSwapchain(sc.device, 1, &acquireFenceForSem)
 	if resetResult != vk.Success {
 		return nil, false, fmt.Errorf("vulkan: vkResetFences (per-acquire) failed: %d", resetResult)
@@ -429,9 +438,15 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	// This is critical on Windows with Intel/DXGI swapchains to avoid
 	// rendering to an image that isn't fully ready.
 	// See wgpu-rs issues #8310 and #8354 for details.
-	postAcquireWait := vkWaitForFencesSwapchain(sc.device, 1, &sc.acquireFence, vk.True, timeout)
-	if postAcquireWait != vk.Success {
-		return nil, false, fmt.Errorf("vulkan: vkWaitForFences (post-acquire) failed: %d", postAcquireWait)
+	// wgpu-style optimization: check status first, skip wait if already signaled.
+	postAcquireStatus := vkGetFenceStatusSwapchain(sc.device, sc.acquireFence)
+	if postAcquireStatus == vk.NotReady {
+		postAcquireWait := vkWaitForFencesSwapchain(sc.device, 1, &sc.acquireFence, vk.True, timeout)
+		if postAcquireWait != vk.Success {
+			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (post-acquire) failed: %d", postAcquireWait)
+		}
+	} else if postAcquireStatus != vk.Success {
+		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (post-acquire) failed: %d", postAcquireStatus)
 	}
 
 	// Reset post-acquire fence for next acquire
@@ -560,6 +575,10 @@ func vkWaitForFencesSwapchain(d *Device, fenceCount uint32, pFences *vk.Fence, w
 
 func vkResetFencesSwapchain(d *Device, fenceCount uint32, pFences *vk.Fence) vk.Result {
 	return d.cmds.ResetFences(d.handle, fenceCount, pFences)
+}
+
+func vkGetFenceStatusSwapchain(d *Device, fence vk.Fence) vk.Result {
+	return d.cmds.GetFenceStatus(d.handle, fence)
 }
 
 func vkDeviceWaitIdle(d *Device) vk.Result {

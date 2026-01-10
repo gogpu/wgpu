@@ -862,6 +862,28 @@ func (d *Device) initCommandPool() error {
 	return nil
 }
 
+// WaitIdle waits for all GPU operations to complete.
+func (d *Device) WaitIdle() error {
+	result := d.cmds.DeviceWaitIdle(d.handle)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkDeviceWaitIdle failed: %d", result)
+	}
+	return nil
+}
+
+// ResetCommandPool resets all command buffers in the pool.
+// Call this after ensuring all submitted command buffers have completed (e.g., after WaitIdle).
+func (d *Device) ResetCommandPool() error {
+	if d.commandPool == 0 {
+		return nil
+	}
+	result := d.cmds.ResetCommandPool(d.handle, d.commandPool, 0)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
+	}
+	return nil
+}
+
 // CreateFence creates a synchronization fence.
 func (d *Device) CreateFence() (hal.Fence, error) {
 	createInfo := vk.FenceCreateInfo{

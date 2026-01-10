@@ -104,7 +104,7 @@ func run() error {
 		Height:      safeUint32(height),
 		Format:      types.TextureFormatBGRA8Unorm,
 		Usage:       types.TextureUsageRenderAttachment,
-		PresentMode: hal.PresentModeFifo, // Vsync for smooth rendering
+		PresentMode: hal.PresentModeFifo, // Vsync - correct for production
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
 	if err := surface.Configure(device, surfaceConfig); err != nil {
@@ -307,7 +307,16 @@ func run() error {
 			fmt.Printf("Rendered %d frames (%.1f FPS)\n", frameCount, fps)
 		}
 
-		// Note: No sleep needed - Fifo present mode already provides vsync pacing
+		// Reset command pool periodically to prevent memory exhaustion
+		if frameCount%180 == 0 { // Every 3 seconds at 60 FPS
+			if vkDev, ok := device.(*vulkan.Device); ok {
+				// Wait for all GPU work to complete before resetting
+				_ = vkDev.WaitIdle()
+				_ = vkDev.ResetCommandPool()
+			}
+		}
+
+		// Note: No sleep needed - present mode handles pacing
 	}
 
 	fmt.Println()
