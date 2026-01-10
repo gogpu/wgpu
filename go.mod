@@ -7,6 +7,3 @@ require (
 	github.com/gogpu/naga v0.8.4
 	golang.org/x/sys v0.39.0
 )
-
-// Use local naga for development
-replace github.com/gogpu/naga => ../naga
