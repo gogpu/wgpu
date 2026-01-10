@@ -5,8 +5,40 @@
 
 package main
 
-// Pre-compiled SPIR-V shaders for the triangle test.
-// These were compiled from GLSL using glslc.
+// WGSL shaders for the triangle test.
+// These are compiled to SPIR-V at runtime by naga.
+//
+// NOTE: Using naga-compiled WGSL is required for Intel Iris Xe compatibility.
+// The hardcoded SPIR-V shaders (compiled from GLSL using glslc) fail silently
+// on Intel drivers - vkCreateGraphicsPipelines returns VK_SUCCESS but
+// the pipeline handle is 0. Naga-generated SPIR-V works correctly.
+
+// Vertex shader WGSL - simple centered triangle
+// Uses array with dynamic indexing
+const vertexShaderWGSL = `
+@vertex
+fn main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 0.5),    // Top center
+        vec2<f32>(-0.5, -0.5),  // Bottom left
+        vec2<f32>(0.5, -0.5)    // Bottom right
+    );
+    return vec4<f32>(positions[idx], 0.0, 1.0);
+}
+`
+
+// Fragment shader WGSL
+const fragmentShaderWGSL = `
+@fragment
+fn main() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+`
+
+// DEPRECATED: Pre-compiled SPIR-V shaders (compiled from GLSL using glslc).
+// These are kept for reference only. They fail on Intel Iris Xe drivers
+// (VK_SUCCESS returned but pipeline handle is 0).
+// Use WGSL shaders above which are compiled by naga at runtime.
 
 // Vertex shader:
 // #version 450
@@ -21,6 +53,8 @@ package main
 //	void main() {
 //	    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
 //	}
+//
+//nolint:unused // Fallback SPIR-V kept for reference; using WGSL compilation now
 var vertexShaderSPIRV = []uint32{
 	0x07230203, 0x00010000, 0x0008000a, 0x00000030, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
 	0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
@@ -63,6 +97,8 @@ var vertexShaderSPIRV = []uint32{
 //	void main() {
 //	    outColor = vec4(1.0, 0.0, 0.0, 1.0);
 //	}
+//
+//nolint:unused // Fallback SPIR-V kept for reference; using WGSL compilation now
 var fragmentShaderSPIRV = []uint32{
 	0x07230203, 0x00010000, 0x0008000a, 0x0000000d, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
 	0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,

@@ -483,7 +483,9 @@ func buildRenderTargetBlendDesc(target *types.ColorTargetState) d3d12.D3D12_REND
 
 // buildInputLayout builds input element descriptors from vertex buffer layouts.
 func buildInputLayout(buffers []types.VertexBufferLayout) ([]d3d12.D3D12_INPUT_ELEMENT_DESC, [][]byte) {
+	//nolint:prealloc // Size depends on nested attributes
 	var elements []d3d12.D3D12_INPUT_ELEMENT_DESC
+	//nolint:prealloc // Size depends on nested attributes
 	var semanticNames [][]byte // Keep strings alive
 
 	// Create semantic names like "TEXCOORD0", "TEXCOORD1", etc.

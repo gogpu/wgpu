@@ -55,11 +55,14 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	// Platform-specific surface extension
 	extensions = append(extensions, platformSurfaceExtension())
 
-	// Optional: validation layers for debug
+	// Optional: validation layers for debug (only if available)
 	var layers []string
 	if desc != nil && desc.Flags&types.InstanceFlagsDebug != 0 {
-		layers = append(layers, "VK_LAYER_KHRONOS_validation\x00")
-		extensions = append(extensions, "VK_EXT_debug_utils\x00")
+		if isLayerAvailable(cmds, "VK_LAYER_KHRONOS_validation") {
+			layers = append(layers, "VK_LAYER_KHRONOS_validation\x00")
+			extensions = append(extensions, "VK_EXT_debug_utils\x00")
+		}
+		// Silently skip if validation layers not installed (Vulkan SDK not present)
 	}
 
 	// Convert to C strings
@@ -99,6 +102,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		cmds.DestroyInstance(instance, nil)
 		return nil, fmt.Errorf("vulkan: failed to load instance commands: %w", err)
 	}
+
+	// Set vkGetDeviceProcAddr for device function loading.
+	// Some drivers (e.g., Intel) don't support loading it with instance=0.
+	vk.SetDeviceProcAddr(instance)
 
 	// Keep references alive
 	runtime.KeepAlive(appName)
@@ -265,6 +272,13 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		return nil, err
 	}
 
+	// Register swapchain with queue for proper synchronization in Submit.
+	// This ensures the queue waits for image acquisition before rendering
+	// and signals completion before present.
+	if s.device != nil && s.device.queue != nil {
+		s.device.queue.activeSwapchain = s.swapchain
+	}
+
 	return &hal.AcquiredSurfaceTexture{
 		Texture:    texture,
 		Suboptimal: suboptimal,
@@ -428,4 +442,28 @@ func limitsFromProps(props *vk.PhysicalDeviceProperties) types.Limits {
 	limits.MaxPushConstantSize = vkLimits.MaxPushConstantsSize
 
 	return limits
+}
+
+// isLayerAvailable checks if a Vulkan instance layer is available.
+// Used to gracefully skip validation layers when Vulkan SDK is not installed.
+func isLayerAvailable(cmds *vk.Commands, layerName string) bool {
+	// Get layer count
+	var count uint32
+	cmds.EnumerateInstanceLayerProperties(&count, nil)
+	if count == 0 {
+		return false
+	}
+
+	// Get layer properties
+	layers := make([]vk.LayerProperties, count)
+	cmds.EnumerateInstanceLayerProperties(&count, &layers[0])
+
+	// Check if requested layer is available
+	for i := range layers {
+		name := cStringToGo(layers[i].LayerName[:])
+		if name == layerName {
+			return true
+		}
+	}
+	return false
 }

@@ -14,9 +14,10 @@ import (
 
 // Queue implements hal.Queue for Vulkan.
 type Queue struct {
-	handle      vk.Queue
-	device      *Device
-	familyIndex uint32
+	handle          vk.Queue
+	device          *Device
+	familyIndex     uint32
+	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
 }
 
 // Submit submits command buffers to the GPU.
@@ -35,38 +36,39 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		vkCmdBuffers[i] = vkCB.handle
 	}
 
-	// Get wait/signal semaphores from surface if this is a present submit
-	var waitSemaphore, signalSemaphore vk.Semaphore
-	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-
-	// Check if any command buffer was used with a swapchain texture
-	// For now, we assume no synchronization needed without explicit fence
 	submitInfo := vk.SubmitInfo{
 		SType:              vk.StructureTypeSubmitInfo,
 		CommandBufferCount: uint32(len(vkCmdBuffers)),
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have semaphores from a swapchain, add them
-	if waitSemaphore != 0 {
+	// If we have an active swapchain, use its semaphores and per-acquire fence.
+	// This ensures proper GPU-side synchronization between acquire/render/present:
+	// - Wait on currentAcquireSem (signaled by acquire)
+	// - Signal presentSemaphores[currentImage] (waited on by present)
+	// - Signal acquireFences[currentAcquireIdx] (waited on before reusing the semaphore)
+	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	var submitFence vk.Fence
+	if q.activeSwapchain != nil {
+		acquireSem := q.activeSwapchain.currentAcquireSem
+		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
 		submitInfo.WaitSemaphoreCount = 1
-		submitInfo.PWaitSemaphores = &waitSemaphore
+		submitInfo.PWaitSemaphores = &acquireSem
 		submitInfo.PWaitDstStageMask = &waitStage
-	}
-	if signalSemaphore != 0 {
 		submitInfo.SignalSemaphoreCount = 1
-		submitInfo.PSignalSemaphores = &signalSemaphore
+		submitInfo.PSignalSemaphores = &presentSem
+		// Use the per-acquire fence so acquireNextImage can wait for this submission
+		submitFence = q.activeSwapchain.acquireFences[q.activeSwapchain.currentAcquireIdx]
 	}
 
-	// Get fence handle if provided
-	var vkFence vk.Fence
-	if fence != nil {
+	// If no swapchain, use user-provided fence if available
+	if submitFence == 0 && fence != nil {
 		if vkF, ok := fence.(*Fence); ok {
-			vkFence = vkF.handle
+			submitFence = vkF.handle
 		}
 	}
 
-	result := vkQueueSubmit(q, 1, &submitInfo, vkFence)
+	result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
@@ -92,18 +94,25 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 
+	// Use the rotating acquire semaphore and per-image present semaphore (wgpu-style).
+	acquireSem := swapchain.currentAcquireSem
+	presentSem := swapchain.presentSemaphores[swapchain.currentImage]
+
 	submitInfo := vk.SubmitInfo{
 		SType:                vk.StructureTypeSubmitInfo,
 		WaitSemaphoreCount:   1,
-		PWaitSemaphores:      &swapchain.imageAvailable,
+		PWaitSemaphores:      &acquireSem,
 		PWaitDstStageMask:    &waitStage,
 		CommandBufferCount:   uint32(len(vkCmdBuffers)),
 		PCommandBuffers:      &vkCmdBuffers[0],
 		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    &swapchain.renderFinished,
+		PSignalSemaphores:    &presentSem,
 	}
 
-	result := vkQueueSubmit(q, 1, &submitInfo, 0)
+	// Signal the per-acquire fence so acquireNextImage knows when this submission is done
+	submitFence := swapchain.acquireFences[swapchain.currentAcquireIdx]
+
+	result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
@@ -269,7 +278,12 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("vulkan: surface not configured")
 	}
 
-	return vkSurface.swapchain.present(q)
+	err := vkSurface.swapchain.present(q)
+
+	// Clear active swapchain after present
+	q.activeSwapchain = nil
+
+	return err
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.

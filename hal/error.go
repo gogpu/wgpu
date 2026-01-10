@@ -44,4 +44,20 @@ var (
 	//   - Window is not yet fully visible (timing issue on macOS)
 	//   - Invalid dimensions passed to Configure
 	ErrZeroArea = errors.New("hal: surface width and height must be non-zero")
+
+	// ErrDriverBug indicates the GPU driver returned an invalid or unexpected result
+	// that violates the graphics API specification. This typically indicates a
+	// driver bug rather than an application error.
+	//
+	// Known cases:
+	//   - Intel Iris Xe: vkCreateGraphicsPipelines returns VK_SUCCESS but writes
+	//     VK_NULL_HANDLE to pipeline output (Vulkan spec violation)
+	//
+	// The operation cannot be completed. Possible workarounds:
+	//   - Update GPU driver to latest version
+	//   - Use a different backend (e.g., DX12 instead of Vulkan)
+	//   - Use software rendering backend
+	//
+	// See: https://github.com/gogpu/wgpu/issues/24
+	ErrDriverBug = errors.New("hal: driver bug detected (API spec violation)")
 )

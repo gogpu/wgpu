@@ -207,7 +207,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 func (i *Instance) enumerateAdaptersLegacy(surfaceHint hal.Surface) []hal.ExposedAdapter {
 	_ = surfaceHint // Surface hint not used in DX12; all adapters support all surfaces
 
-	var adapters []hal.ExposedAdapter
+	var adapters []hal.ExposedAdapter //nolint:prealloc // Size unknown until enumeration
 	var discreteAdapters []hal.ExposedAdapter
 	var integratedAdapters []hal.ExposedAdapter
 	var otherAdapters []hal.ExposedAdapter

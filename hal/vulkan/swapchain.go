@@ -13,19 +13,31 @@ import (
 
 // Swapchain manages Vulkan swapchain for a surface.
 type Swapchain struct {
-	handle          vk.SwapchainKHR
-	surface         *Surface
-	device          *Device
-	images          []vk.Image
-	imageViews      []vk.ImageView
-	format          vk.Format
-	extent          vk.Extent2D
-	presentMode     vk.PresentModeKHR
-	imageAvailable  vk.Semaphore // Signaled when image is acquired
-	renderFinished  vk.Semaphore // Signaled when rendering is complete
-	currentImage    uint32
-	imageAcquired   bool
-	surfaceTextures []*SwapchainTexture
+	handle      vk.SwapchainKHR
+	surface     *Surface
+	device      *Device
+	images      []vk.Image
+	imageViews  []vk.ImageView
+	format      vk.Format
+	extent      vk.Extent2D
+	presentMode vk.PresentModeKHR
+	// Acquire semaphores - rotated through for each acquire (like wgpu).
+	// We don't know which image we'll get, so we can't index by image.
+	acquireSemaphores []vk.Semaphore
+	// Fences to track when each acquire semaphore can be reused.
+	// Must wait on fence[i] before reusing acquireSemaphores[i].
+	acquireFences  []vk.Fence
+	nextAcquireIdx int
+
+	// Present semaphores - one per swapchain image (known after acquire).
+	presentSemaphores []vk.Semaphore
+
+	acquireFence      vk.Fence     // Fence for post-acquire sync (Windows/Intel fix)
+	currentImage      uint32       // Current swapchain image index
+	currentAcquireIdx int          // Index of acquire semaphore used for current frame
+	currentAcquireSem vk.Semaphore // The acquire semaphore used for current frame
+	imageAcquired     bool
+	surfaceTextures   []*SwapchainTexture
 }
 
 // SwapchainTexture wraps a swapchain image as a SurfaceTexture.
@@ -44,6 +56,8 @@ func (t *SwapchainTexture) Destroy() {
 }
 
 // createSwapchain creates a new swapchain for the surface.
+//
+//nolint:maintidx // Vulkan swapchain setup requires many sequential steps
 func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfiguration) error {
 	// Get surface capabilities
 	var capabilities vk.SurfaceCapabilitiesKHR
@@ -165,29 +179,103 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		}
 	}
 
-	// Create synchronization semaphores
+	// Create synchronization primitives (wgpu-style).
+	// Acquire semaphores: rotated through for each acquire (we don't know which image we'll get).
+	// Present semaphores: one per swapchain image (known after acquire).
 	semaphoreInfo := vk.SemaphoreCreateInfo{
 		SType: vk.StructureTypeSemaphoreCreateInfo,
 	}
 
-	var imageAvailable, renderFinished vk.Semaphore
-	result = vkCreateSemaphore(device, &semaphoreInfo, nil, &imageAvailable)
-	if result != vk.Success {
-		for _, view := range imageViews {
-			vkDestroyImageViewSwapchain(device, view, nil)
+	// Create arrays for rotating semaphores (same count as images).
+	acquireSemaphores := make([]vk.Semaphore, imageCount)
+	presentSemaphores := make([]vk.Semaphore, imageCount)
+
+	// Create acquire semaphores
+	for i := range acquireSemaphores {
+		result = vkCreateSemaphore(device, &semaphoreInfo, nil, &acquireSemaphores[i])
+		if result != vk.Success {
+			for j := 0; j < i; j++ {
+				vkDestroySemaphore(device, acquireSemaphores[j], nil)
+			}
+			for _, view := range imageViews {
+				vkDestroyImageViewSwapchain(device, view, nil)
+			}
+			vkDestroySwapchainKHR(device, swapchainHandle, nil)
+			return fmt.Errorf("vulkan: vkCreateSemaphore (acquireSemaphore[%d]) failed: %d", i, result)
 		}
-		vkDestroySwapchainKHR(device, swapchainHandle, nil)
-		return fmt.Errorf("vulkan: vkCreateSemaphore (imageAvailable) failed: %d", result)
 	}
 
-	result = vkCreateSemaphore(device, &semaphoreInfo, nil, &renderFinished)
+	// Create present semaphores
+	for i := range presentSemaphores {
+		result = vkCreateSemaphore(device, &semaphoreInfo, nil, &presentSemaphores[i])
+		if result != vk.Success {
+			for j := 0; j < i; j++ {
+				vkDestroySemaphore(device, presentSemaphores[j], nil)
+			}
+			for _, sem := range acquireSemaphores {
+				vkDestroySemaphore(device, sem, nil)
+			}
+			for _, view := range imageViews {
+				vkDestroyImageViewSwapchain(device, view, nil)
+			}
+			vkDestroySwapchainKHR(device, swapchainHandle, nil)
+			return fmt.Errorf("vulkan: vkCreateSemaphore (presentSemaphore[%d]) failed: %d", i, result)
+		}
+	}
+
+	// Create per-acquire fences to track when each acquire semaphore can be reused.
+	// Each fence is waited on before reusing its corresponding acquire semaphore,
+	// and signaled when the submission that waited on that semaphore completes.
+	// Start SIGNALED so first use doesn't block.
+	fenceInfoSignaled := vk.FenceCreateInfo{
+		SType: vk.StructureTypeFenceCreateInfo,
+		Flags: vk.FenceCreateFlags(vk.FenceCreateSignaledBit),
+	}
+	acquireFences := make([]vk.Fence, imageCount)
+	for i := range acquireFences {
+		result = vkCreateFenceSwapchain(device, &fenceInfoSignaled, nil, &acquireFences[i])
+		if result != vk.Success {
+			for j := 0; j < i; j++ {
+				vkDestroyFenceSwapchain(device, acquireFences[j], nil)
+			}
+			for _, sem := range presentSemaphores {
+				vkDestroySemaphore(device, sem, nil)
+			}
+			for _, sem := range acquireSemaphores {
+				vkDestroySemaphore(device, sem, nil)
+			}
+			for _, view := range imageViews {
+				vkDestroyImageViewSwapchain(device, view, nil)
+			}
+			vkDestroySwapchainKHR(device, swapchainHandle, nil)
+			return fmt.Errorf("vulkan: vkCreateFence (acquireFence[%d]) failed: %d", i, result)
+		}
+	}
+
+	// Create post-acquire fence for Windows/Intel synchronization.
+	// This ensures the acquired image is fully ready before rendering.
+	// See wgpu-rs issues #8310 and #8354 for details.
+	fenceInfoUnsignaled := vk.FenceCreateInfo{
+		SType: vk.StructureTypeFenceCreateInfo,
+		Flags: 0, // Start unsignaled - acquire will signal it
+	}
+	var acquireFence vk.Fence
+	result = vkCreateFenceSwapchain(device, &fenceInfoUnsignaled, nil, &acquireFence)
 	if result != vk.Success {
-		vkDestroySemaphore(device, imageAvailable, nil)
+		for _, fence := range acquireFences {
+			vkDestroyFenceSwapchain(device, fence, nil)
+		}
+		for _, sem := range presentSemaphores {
+			vkDestroySemaphore(device, sem, nil)
+		}
+		for _, sem := range acquireSemaphores {
+			vkDestroySemaphore(device, sem, nil)
+		}
 		for _, view := range imageViews {
 			vkDestroyImageViewSwapchain(device, view, nil)
 		}
 		vkDestroySwapchainKHR(device, swapchainHandle, nil)
-		return fmt.Errorf("vulkan: vkCreateSemaphore (renderFinished) failed: %d", result)
+		return fmt.Errorf("vulkan: vkCreateFence (acquireFence) failed: %d", result)
 	}
 
 	// Create surface textures
@@ -208,17 +296,20 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	// Store swapchain
 	swapchain := &Swapchain{
-		handle:          swapchainHandle,
-		surface:         s,
-		device:          device,
-		images:          images,
-		imageViews:      imageViews,
-		format:          vkFormat,
-		extent:          extent,
-		presentMode:     presentMode,
-		imageAvailable:  imageAvailable,
-		renderFinished:  renderFinished,
-		surfaceTextures: surfaceTextures,
+		handle:            swapchainHandle,
+		surface:           s,
+		device:            device,
+		images:            images,
+		imageViews:        imageViews,
+		format:            vkFormat,
+		extent:            extent,
+		presentMode:       presentMode,
+		acquireSemaphores: acquireSemaphores,
+		acquireFences:     acquireFences,
+		nextAcquireIdx:    0,
+		presentSemaphores: presentSemaphores,
+		acquireFence:      acquireFence,
+		surfaceTextures:   surfaceTextures,
 	}
 
 	// Link swapchain to surface textures
@@ -241,15 +332,38 @@ func (sc *Swapchain) destroyResources() {
 	// Wait for device idle before destroying
 	vkDeviceWaitIdle(sc.device)
 
-	// Destroy semaphores
-	if sc.imageAvailable != 0 {
-		vkDestroySemaphore(sc.device, sc.imageAvailable, nil)
-		sc.imageAvailable = 0
+	// Destroy post-acquire fence
+	if sc.acquireFence != 0 {
+		vkDestroyFenceSwapchain(sc.device, sc.acquireFence, nil)
+		sc.acquireFence = 0
 	}
-	if sc.renderFinished != 0 {
-		vkDestroySemaphore(sc.device, sc.renderFinished, nil)
-		sc.renderFinished = 0
+
+	// Destroy per-acquire fences
+	for i, fence := range sc.acquireFences {
+		if fence != 0 {
+			vkDestroyFenceSwapchain(sc.device, fence, nil)
+			sc.acquireFences[i] = 0
+		}
 	}
+	sc.acquireFences = nil
+
+	// Destroy acquire semaphores
+	for i, sem := range sc.acquireSemaphores {
+		if sem != 0 {
+			vkDestroySemaphore(sc.device, sem, nil)
+			sc.acquireSemaphores[i] = 0
+		}
+	}
+	sc.acquireSemaphores = nil
+
+	// Destroy present semaphores
+	for i, sem := range sc.presentSemaphores {
+		if sem != 0 {
+			vkDestroySemaphore(sc.device, sem, nil)
+			sc.presentSemaphores[i] = 0
+		}
+	}
+	sc.presentSemaphores = nil
 
 	// Destroy image views
 	for _, view := range sc.imageViews {
@@ -273,31 +387,87 @@ func (sc *Swapchain) Destroy() {
 }
 
 // acquireNextImage acquires the next available swapchain image.
+// Uses rotating acquire semaphores like wgpu to avoid reuse conflicts.
 func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	if sc.imageAcquired {
 		return nil, false, fmt.Errorf("vulkan: image already acquired")
 	}
 
+	const timeout = ^uint64(0) // UINT64_MAX = wait forever
+
+	// Wait for the previous submission that used this acquire semaphore to complete.
+	// This ensures it's safe to reuse the semaphore. The fence was signaled by the
+	// submission that waited on this semaphore (see Queue.Submit).
+	// wgpu-style optimization: check fence status first, skip wait if already signaled.
+	acquireIdx := sc.nextAcquireIdx
+	acquireFenceForSem := sc.acquireFences[acquireIdx]
+	fenceStatus := vkGetFenceStatusSwapchain(sc.device, acquireFenceForSem)
+	if fenceStatus == vk.NotReady {
+		// Fence not yet signaled - need to wait
+		waitResult := vkWaitForFencesSwapchain(sc.device, 1, &acquireFenceForSem, vk.True, timeout)
+		if waitResult != vk.Success {
+			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (per-acquire) failed: %d", waitResult)
+		}
+	} else if fenceStatus != vk.Success {
+		// Error checking fence status
+		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (per-acquire) failed: %d", fenceStatus)
+	}
+	// Reset fence for reuse (regardless of whether we waited)
+	resetResult := vkResetFencesSwapchain(sc.device, 1, &acquireFenceForSem)
+	if resetResult != vk.Success {
+		return nil, false, fmt.Errorf("vulkan: vkResetFences (per-acquire) failed: %d", resetResult)
+	}
+
+	// Get the acquire semaphore from the rotating pool.
+	acquireSem := sc.acquireSemaphores[acquireIdx]
+
+	// Acquire next image with BOTH semaphore AND post-acquire fence.
+	// Semaphore: for GPU-GPU synchronization (Submit waits on it)
+	// Post-acquire fence: for Windows/Intel synchronization
 	var imageIndex uint32
-	result := vkAcquireNextImageKHR(sc.device, sc.handle, ^uint64(0), sc.imageAvailable, 0, &imageIndex)
+	result := vkAcquireNextImageKHR(sc.device, sc.handle, timeout, acquireSem, sc.acquireFence, &imageIndex)
 
 	switch result {
-	case vk.Success:
-		// OK
-	case vk.SuboptimalKhr:
-		// Suboptimal but usable
-		sc.currentImage = imageIndex
-		sc.imageAcquired = true
-		return sc.surfaceTextures[imageIndex], true, nil
+	case vk.Success, vk.SuboptimalKhr:
+		// OK - continue to wait for fence
 	case vk.ErrorOutOfDateKhr:
 		return nil, false, hal.ErrSurfaceOutdated
 	default:
 		return nil, false, fmt.Errorf("vulkan: vkAcquireNextImageKHR failed: %d", result)
 	}
 
+	// Wait for the image to be fully ready to render (post-acquire fence).
+	// This is critical on Windows with Intel/DXGI swapchains to avoid
+	// rendering to an image that isn't fully ready.
+	// See wgpu-rs issues #8310 and #8354 for details.
+	// wgpu-style optimization: check status first, skip wait if already signaled.
+	postAcquireStatus := vkGetFenceStatusSwapchain(sc.device, sc.acquireFence)
+	if postAcquireStatus == vk.NotReady {
+		postAcquireWait := vkWaitForFencesSwapchain(sc.device, 1, &sc.acquireFence, vk.True, timeout)
+		if postAcquireWait != vk.Success {
+			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (post-acquire) failed: %d", postAcquireWait)
+		}
+	} else if postAcquireStatus != vk.Success {
+		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (post-acquire) failed: %d", postAcquireStatus)
+	}
+
+	// Reset post-acquire fence for next acquire
+	postAcquireReset := vkResetFencesSwapchain(sc.device, 1, &sc.acquireFence)
+	if postAcquireReset != vk.Success {
+		return nil, false, fmt.Errorf("vulkan: vkResetFences (post-acquire) failed: %d", postAcquireReset)
+	}
+
+	// Store the current acquire index and semaphore for use in Submit.
+	// Submit will signal acquireFences[currentAcquireIdx] when done.
+	sc.currentAcquireIdx = acquireIdx
+	sc.currentAcquireSem = acquireSem
+
+	// Advance the semaphore rotation index for next frame
+	sc.nextAcquireIdx = (sc.nextAcquireIdx + 1) % len(sc.acquireSemaphores)
+
 	sc.currentImage = imageIndex
 	sc.imageAcquired = true
-	return sc.surfaceTextures[imageIndex], false, nil
+	return sc.surfaceTextures[imageIndex], result == vk.SuboptimalKhr, nil
 }
 
 // present presents the current image to the screen.
@@ -306,10 +476,14 @@ func (sc *Swapchain) present(queue *Queue) error {
 		return fmt.Errorf("vulkan: no image acquired to present")
 	}
 
+	// Use the present semaphore for the current image.
+	// Submit signals this, and present waits on it.
+	presentSem := sc.presentSemaphores[sc.currentImage]
+
 	presentInfo := vk.PresentInfoKHR{
 		SType:              vk.StructureTypePresentInfoKhr,
 		WaitSemaphoreCount: 1,
-		PWaitSemaphores:    &sc.renderFinished,
+		PWaitSemaphores:    &presentSem,
 		SwapchainCount:     1,
 		PSwapchains:        &sc.handle,
 		PImageIndices:      &sc.currentImage,
@@ -387,6 +561,26 @@ func vkCreateSemaphore(d *Device, createInfo *vk.SemaphoreCreateInfo, _ *vk.Allo
 
 func vkDestroySemaphore(d *Device, semaphore vk.Semaphore, _ *vk.AllocationCallbacks) {
 	d.cmds.DestroySemaphore(d.handle, semaphore, nil)
+}
+
+func vkCreateFenceSwapchain(d *Device, createInfo *vk.FenceCreateInfo, _ *vk.AllocationCallbacks, fence *vk.Fence) vk.Result {
+	return d.cmds.CreateFence(d.handle, createInfo, nil, fence)
+}
+
+func vkDestroyFenceSwapchain(d *Device, fence vk.Fence, _ *vk.AllocationCallbacks) {
+	d.cmds.DestroyFence(d.handle, fence, nil)
+}
+
+func vkWaitForFencesSwapchain(d *Device, fenceCount uint32, pFences *vk.Fence, waitAll vk.Bool32, timeout uint64) vk.Result {
+	return d.cmds.WaitForFences(d.handle, fenceCount, pFences, waitAll, timeout)
+}
+
+func vkResetFencesSwapchain(d *Device, fenceCount uint32, pFences *vk.Fence) vk.Result {
+	return d.cmds.ResetFences(d.handle, fenceCount, pFences)
+}
+
+func vkGetFenceStatusSwapchain(d *Device, fence vk.Fence) vk.Result {
+	return d.cmds.GetFenceStatus(d.handle, fence)
 }
 
 func vkDeviceWaitIdle(d *Device) vk.Result {

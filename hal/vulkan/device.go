@@ -4,9 +4,11 @@
 package vulkan
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 
+	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -23,6 +25,8 @@ type Device struct {
 	cmds                *vk.Commands
 	commandPool         vk.CommandPool       // Primary command pool for encoder allocation
 	descriptorAllocator *DescriptorAllocator // Descriptor pool management for bind groups
+	queue               *Queue               // Primary queue (for swapchain synchronization)
+	renderPassCache     *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
 }
 
 // initAllocator initializes the memory allocator for this device.
@@ -265,21 +269,55 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	vkTexture, ok := texture.(*Texture)
-	if !ok || vkTexture == nil {
-		return nil, fmt.Errorf("vulkan: invalid texture")
+	// Extract image handle and metadata based on texture type.
+	// We support both regular Texture and SwapchainTexture.
+	var (
+		imageHandle   vk.Image
+		textureFormat types.TextureFormat
+		dimension     types.TextureDimension
+		mipLevels     uint32
+		textureSize   Extent3D
+	)
+
+	switch t := texture.(type) {
+	case *Texture:
+		if t == nil {
+			return nil, fmt.Errorf("vulkan: nil texture")
+		}
+		imageHandle = t.handle
+		textureFormat = t.format
+		dimension = t.dimension
+		mipLevels = t.mipLevels
+		textureSize = t.size
+	case *SwapchainTexture:
+		if t == nil {
+			return nil, fmt.Errorf("vulkan: nil swapchain texture")
+		}
+		// For swapchain textures, reuse the pre-created view from the swapchain.
+		// Creating new views for swapchain images can cause rendering issues.
+		return &TextureView{
+			handle:      t.view,
+			texture:     nil,
+			device:      d,
+			size:        t.size,
+			image:       t.handle,
+			isSwapchain: true,
+			vkFormat:    textureFormatToVk(t.format),
+		}, nil
+	default:
+		return nil, fmt.Errorf("vulkan: invalid texture type %T", texture)
 	}
 
 	// Determine format - use texture format if not specified
 	format := desc.Format
 	if format == types.TextureFormatUndefined {
-		format = vkTexture.format
+		format = textureFormat
 	}
 
 	// Determine view type - derive from texture dimension if not specified
 	var viewType vk.ImageViewType
 	if desc.Dimension == types.TextureViewDimensionUndefined {
-		viewType = textureDimensionToViewType(vkTexture.dimension)
+		viewType = textureDimensionToViewType(dimension)
 	} else {
 		viewType = textureViewDimensionToVk(desc.Dimension)
 	}
@@ -287,7 +325,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	// Determine mip level count
 	mipLevelCount := desc.MipLevelCount
 	if mipLevelCount == 0 {
-		mipLevelCount = vkTexture.mipLevels - desc.BaseMipLevel
+		mipLevelCount = mipLevels - desc.BaseMipLevel
 	}
 
 	// Determine array layer count
@@ -299,13 +337,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		case vk.ImageViewTypeCube:
 			arrayLayerCount = 6
 		case vk.ImageViewTypeCubeArray, vk.ImageViewType2dArray, vk.ImageViewType1dArray:
-			arrayLayerCount = vkTexture.size.Depth - desc.BaseArrayLayer
+			arrayLayerCount = textureSize.Depth - desc.BaseArrayLayer
 		}
 	}
 
 	createInfo := vk.ImageViewCreateInfo{
 		SType:    vk.StructureTypeImageViewCreateInfo,
-		Image:    vkTexture.handle,
+		Image:    imageHandle,
 		ViewType: viewType,
 		Format:   textureFormatToVk(format),
 		Components: vk.ComponentMapping{
@@ -329,10 +367,23 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		return nil, fmt.Errorf("vulkan: vkCreateImageView failed: %d", result)
 	}
 
+	// Store texture reference and track if this is a swapchain image.
+	var texRef *Texture
+	var isSwapchain bool
+	switch t := texture.(type) {
+	case *Texture:
+		texRef = t
+	case *SwapchainTexture:
+		isSwapchain = true
+	}
+
 	return &TextureView{
-		handle:  imageView,
-		texture: vkTexture,
-		device:  d,
+		handle:      imageView,
+		texture:     texRef,
+		device:      d,
+		size:        textureSize,
+		image:       imageHandle,
+		isSwapchain: isSwapchain,
 	}, nil
 }
 
@@ -340,6 +391,12 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 func (d *Device) DestroyTextureView(view hal.TextureView) {
 	vkView, ok := view.(*TextureView)
 	if !ok || vkView == nil {
+		return
+	}
+
+	// Don't destroy swapchain views - they're owned by the swapchain
+	if vkView.isSwapchain {
+		vkView.device = nil
 		return
 	}
 
@@ -695,15 +752,35 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		return nil, fmt.Errorf("vulkan: shader module descriptor is nil")
 	}
 
-	// Vulkan requires SPIR-V bytecode
-	if len(desc.Source.SPIRV) == 0 {
-		return nil, fmt.Errorf("vulkan: shader module requires SPIR-V bytecode")
+	var spirv []uint32
+
+	// Compile shader source to SPIR-V.
+	// WGSL compilation via naga is required for Intel Iris Xe compatibility -
+	// hardcoded SPIR-V from external tools can fail silently on Intel drivers.
+	switch {
+	case desc.Source.WGSL != "":
+		spirvBytes, err := naga.Compile(desc.Source.WGSL)
+		if err != nil {
+			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
+		}
+		// Convert bytes to uint32 slice
+		if len(spirvBytes)%4 != 0 {
+			return nil, fmt.Errorf("vulkan: naga output size not aligned to 4 bytes")
+		}
+		spirv = make([]uint32, len(spirvBytes)/4)
+		for i := range spirv {
+			spirv[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+		}
+	case len(desc.Source.SPIRV) > 0:
+		spirv = desc.Source.SPIRV
+	default:
+		return nil, fmt.Errorf("vulkan: shader module requires WGSL or SPIR-V source")
 	}
 
 	createInfo := vk.ShaderModuleCreateInfo{
 		SType:    vk.StructureTypeShaderModuleCreateInfo,
-		CodeSize: uintptr(len(desc.Source.SPIRV) * 4), // Size in bytes (uint32 = 4 bytes)
-		PCode:    &desc.Source.SPIRV[0],
+		CodeSize: uintptr(len(spirv) * 4), // Size in bytes (uint32 = 4 bytes)
+		PCode:    &spirv[0],
 	}
 
 	var module vk.ShaderModule
@@ -787,6 +864,28 @@ func (d *Device) initCommandPool() error {
 	return nil
 }
 
+// WaitIdle waits for all GPU operations to complete.
+func (d *Device) WaitIdle() error {
+	result := d.cmds.DeviceWaitIdle(d.handle)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkDeviceWaitIdle failed: %d", result)
+	}
+	return nil
+}
+
+// ResetCommandPool resets all command buffers in the pool.
+// Call this after ensuring all submitted command buffers have completed (e.g., after WaitIdle).
+func (d *Device) ResetCommandPool() error {
+	if d.commandPool == 0 {
+		return nil
+	}
+	result := d.cmds.ResetCommandPool(d.handle, d.commandPool, 0)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
+	}
+	return nil
+}
+
 // CreateFence creates a synchronization fence.
 func (d *Device) CreateFence() (hal.Fence, error) {
 	createInfo := vk.FenceCreateInfo{
@@ -861,6 +960,11 @@ func (d *Device) Destroy() {
 		d.descriptorAllocator = nil
 	}
 
+	if d.renderPassCache != nil {
+		d.renderPassCache.Destroy()
+		d.renderPassCache = nil
+	}
+
 	if d.allocator != nil {
 		d.allocator.Destroy()
 		d.allocator = nil
@@ -870,6 +974,14 @@ func (d *Device) Destroy() {
 		vkDestroyDevice(d.handle, nil)
 		d.handle = 0
 	}
+}
+
+// GetRenderPassCache returns the render pass cache, creating it if needed.
+func (d *Device) GetRenderPassCache() *RenderPassCache {
+	if d.renderPassCache == nil {
+		d.renderPassCache = NewRenderPassCache(d.handle, d.cmds)
+	}
+	return d.renderPassCache
 }
 
 // Vulkan function wrappers using Commands methods

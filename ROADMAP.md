@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.9.2
+## Current Status: v0.9.3
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -215,6 +215,10 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.9.3 | 2026-01 | Intel Vulkan fix: VkRenderPass, wgpu-style sync |
+| v0.9.2 | 2026-01 | Metal NSString double-free fix |
+| v0.9.1 | 2026-01 | Dependencies update |
+| v0.9.0 | 2026-01 | Major Vulkan improvements |
 | v0.8.4 | 2025-12 | Naga v0.8.1 (clamp() fix) |
 | v0.8.3 | 2025-12 | Metal macOS blank window fix |
 | v0.8.2 | 2025-12 | Naga v0.8.0 (HLSL backend) |

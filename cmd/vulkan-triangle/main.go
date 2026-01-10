@@ -30,7 +30,7 @@ func main() {
 	}
 }
 
-//nolint:gocyclo,cyclop,funlen,maintidx // Integration test needs sequential setup steps
+//nolint:gocognit,gocyclo,cyclop,funlen,maintidx // Integration test needs sequential setup steps
 func run() error {
 	fmt.Println("=== Vulkan Triangle Integration Test ===")
 	fmt.Println()
@@ -104,7 +104,7 @@ func run() error {
 		Height:      safeUint32(height),
 		Format:      types.TextureFormatBGRA8Unorm,
 		Usage:       types.TextureUsageRenderAttachment,
-		PresentMode: hal.PresentModeFifo,
+		PresentMode: hal.PresentModeFifo, // Vsync - correct for production
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
 	if err := surface.Configure(device, surfaceConfig); err != nil {
@@ -114,11 +114,14 @@ func run() error {
 	fmt.Println("OK")
 
 	// Step 8: Create shader modules
+	// Use WGSL shaders compiled to SPIR-V by naga at runtime.
+	// This works reliably across all drivers including Intel Iris Xe.
+	// The hardcoded SPIR-V fallback is kept for reference but not used.
 	fmt.Print("8. Creating shader modules... ")
 	vertexShader, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label: "Vertex Shader",
 		Source: hal.ShaderSource{
-			SPIRV: vertexShaderSPIRV,
+			WGSL: vertexShaderWGSL,
 		},
 	})
 	if err != nil {
@@ -129,7 +132,7 @@ func run() error {
 	fragmentShader, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label: "Fragment Shader",
 		Source: hal.ShaderSource{
-			SPIRV: fragmentShaderSPIRV,
+			WGSL: fragmentShaderWGSL,
 		},
 	})
 	if err != nil {
@@ -304,8 +307,16 @@ func run() error {
 			fmt.Printf("Rendered %d frames (%.1f FPS)\n", frameCount, fps)
 		}
 
-		// Small sleep to avoid 100% CPU usage
-		time.Sleep(16 * time.Millisecond) // ~60 FPS
+		// Reset command pool periodically to prevent memory exhaustion
+		if frameCount%180 == 0 { // Every 3 seconds at 60 FPS
+			if vkDev, ok := device.(*vulkan.Device); ok {
+				// Wait for all GPU work to complete before resetting
+				_ = vkDev.WaitIdle()
+				_ = vkDev.ResetCommandPool()
+			}
+		}
+
+		// Note: No sleep needed - present mode handles pacing
 	}
 
 	fmt.Println()
