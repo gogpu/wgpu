@@ -165,26 +165,15 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 		subpass.PColorAttachments = &colorRef
 	}
 
-	// Subpass dependencies for proper synchronization
-	dependencies := []vk.SubpassDependency{
-		{
-			SrcSubpass:      vk.SubpassExternal,
-			DstSubpass:      0,
-			SrcStageMask:    vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit | vk.PipelineStageEarlyFragmentTestsBit),
-			DstStageMask:    vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit | vk.PipelineStageEarlyFragmentTestsBit),
-			SrcAccessMask:   0,
-			DstAccessMask:   vk.AccessFlags(vk.AccessColorAttachmentWriteBit | vk.AccessDepthStencilAttachmentWriteBit),
-			DependencyFlags: 0,
-		},
-	}
-
+	// No explicit subpass dependencies - Vulkan handles implicit ones.
+	// This matches Rust wgpu which doesn't add explicit dependencies.
 	createInfo := vk.RenderPassCreateInfo{
 		SType:           vk.StructureTypeRenderPassCreateInfo,
 		AttachmentCount: uint32(len(attachments)),
 		SubpassCount:    1,
 		PSubpasses:      &subpass,
-		DependencyCount: uint32(len(dependencies)),
-		PDependencies:   &dependencies[0],
+		DependencyCount: 0, // No explicit dependencies (matches Rust wgpu)
+		PDependencies:   nil,
 	}
 	if len(attachments) > 0 {
 		createInfo.PAttachments = &attachments[0]

@@ -13,14 +13,15 @@ package main
 // on Intel drivers - vkCreateGraphicsPipelines returns VK_SUCCESS but
 // the pipeline handle is 0. Naga-generated SPIR-V works correctly.
 
-// Vertex shader WGSL
+// Vertex shader WGSL - simple centered triangle
+// Uses array with dynamic indexing
 const vertexShaderWGSL = `
 @vertex
 fn main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
     var positions = array<vec2<f32>, 3>(
-        vec2<f32>(0.0, -0.5),
-        vec2<f32>(0.5, 0.5),
-        vec2<f32>(-0.5, 0.5)
+        vec2<f32>(0.0, 0.5),    // Top center
+        vec2<f32>(-0.5, -0.5),  // Bottom left
+        vec2<f32>(0.5, -0.5)    // Bottom right
     );
     return vec4<f32>(positions[idx], 0.0, 1.0);
 }

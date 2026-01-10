@@ -470,12 +470,17 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 	// Set default viewport and scissor for the render area.
 	// These are required since the pipeline uses dynamic viewport/scissor state.
+	// NOTE: Viewport Y-flip is required for WebGPU/OpenGL coordinate system compatibility.
+	// Vulkan has Y pointing down, WebGPU has Y pointing up.
+	// Solution: Start Y at height and use negative height (matches Rust wgpu).
 	if renderWidth > 0 && renderHeight > 0 {
+		// Y-flip for WebGPU compatibility: Vulkan Y points down, WebGPU Y points up.
+		// Use negative height and start Y at bottom (matches Rust wgpu approach).
 		viewport := vk.Viewport{
 			X:        0,
-			Y:        0,
+			Y:        float32(renderHeight), // Start at bottom
 			Width:    float32(renderWidth),
-			Height:   float32(renderHeight),
+			Height:   -float32(renderHeight), // Negative height for Y-flip
 			MinDepth: 0.0,
 			MaxDepth: 1.0,
 		}
@@ -528,7 +533,6 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 		return
 	}
 	e.pipeline = p
-
 	vkCmdBindPipeline(e.encoder.device.cmds, e.encoder.cmdBuffer, vk.PipelineBindPointGraphics, p.handle)
 }
 
@@ -587,16 +591,18 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.Index
 }
 
 // SetViewport sets the viewport.
+// NOTE: Applies Y-flip for WebGPU/OpenGL coordinate system compatibility (matches Rust wgpu).
 func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
 	if !e.encoder.isRecording {
 		return
 	}
 
+	// Y-flip: Start Y at y+height, use negative height
 	viewport := vk.Viewport{
 		X:        x,
-		Y:        y,
+		Y:        y + height, // Y-flip: start at bottom
 		Width:    width,
-		Height:   height,
+		Height:   -height, // Y-flip: negative height
 		MinDepth: minDepth,
 		MaxDepth: maxDepth,
 	}
@@ -649,7 +655,6 @@ func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstI
 	if !e.encoder.isRecording {
 		return
 	}
-
 	vkCmdDraw(e.encoder.device.cmds, e.encoder.cmdBuffer, vertexCount, instanceCount, firstVertex, firstInstance)
 }
 

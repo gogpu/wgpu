@@ -281,7 +281,6 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if err != nil {
 		return nil, fmt.Errorf("vulkan: failed to create compatible render pass: %w", err)
 	}
-
 	// Create graphics pipeline with VkRenderPass (not dynamic rendering)
 	createInfo := vk.GraphicsPipelineCreateInfo{
 		SType:               vk.StructureTypeGraphicsPipelineCreateInfo,
