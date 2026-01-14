@@ -21,6 +21,33 @@ type Adapter struct {
 	Limits types.Limits
 	// Backend identifies which graphics backend this adapter uses.
 	Backend types.Backend
+
+	// === HAL integration fields ===
+
+	// halAdapter is the underlying HAL adapter handle.
+	// This is nil for mock adapters created without HAL integration.
+	halAdapter hal.Adapter
+
+	// halCapabilities contains the adapter's full capability information.
+	// This is nil for mock adapters.
+	halCapabilities *hal.Capabilities
+}
+
+// HALAdapter returns the underlying HAL adapter, if available.
+// Returns nil for mock adapters created without HAL integration.
+func (a *Adapter) HALAdapter() hal.Adapter {
+	return a.halAdapter
+}
+
+// HasHAL returns true if the adapter has HAL integration.
+func (a *Adapter) HasHAL() bool {
+	return a.halAdapter != nil
+}
+
+// Capabilities returns the adapter's full capability information.
+// Returns nil for mock adapters.
+func (a *Adapter) Capabilities() *hal.Capabilities {
+	return a.halCapabilities
 }
 
 // Device represents a logical GPU device.

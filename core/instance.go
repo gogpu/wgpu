@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
 )
 
@@ -19,15 +20,25 @@ type Instance struct {
 	mu       sync.RWMutex
 	backends types.Backends
 	flags    types.InstanceFlags
-	// Mock adapter list for testing - will be replaced with real enumeration
+
+	// adapters contains the registered adapter IDs.
 	adapters []AdapterID
+
+	// halInstances tracks HAL instances created for each backend.
+	// These are destroyed when the Instance is destroyed.
+	halInstances []hal.Instance
+
+	// useMock indicates whether to use mock adapters (for testing or when no HAL available).
+	useMock bool
 }
 
 // NewInstance creates a new WebGPU instance with the given descriptor.
 // If desc is nil, default settings are used.
 //
 // The instance will enumerate available GPU adapters based on the enabled
-// backends specified in the descriptor.
+// backends specified in the descriptor. If HAL backends are available,
+// real GPU adapters will be enumerated. Otherwise, a mock adapter is created
+// for testing purposes.
 func NewInstance(desc *types.InstanceDescriptor) *Instance {
 	if desc == nil {
 		defaultDesc := types.DefaultInstanceDescriptor()
@@ -35,22 +46,109 @@ func NewInstance(desc *types.InstanceDescriptor) *Instance {
 	}
 
 	i := &Instance{
-		backends: desc.Backends,
-		flags:    desc.Flags,
-		adapters: []AdapterID{}, // Will be populated by enumeration
+		backends:     desc.Backends,
+		flags:        desc.Flags,
+		adapters:     []AdapterID{},
+		halInstances: []hal.Instance{},
+		useMock:      false,
 	}
 
-	// Note: Real adapter enumeration requires HAL backend integration.
-	// The HAL layer (hal/adapter.go) handles actual GPU discovery via Vulkan/DX12/Metal.
-	// This mock adapter allows the Core API to function for testing and validation.
-	// When HAL integration is complete, this will delegate to HAL.EnumerateAdapters().
-	i.createMockAdapter()
+	// Try to enumerate real adapters via HAL backends
+	realAdaptersFound := i.enumerateRealAdapters(desc)
+
+	// Fall back to mock adapter if no real adapters were found
+	if !realAdaptersFound {
+		i.useMock = true
+		i.createMockAdapter()
+	}
 
 	return i
 }
 
+// NewInstanceWithMock creates a new WebGPU instance with mock adapters.
+// This is primarily for testing without requiring real GPU hardware.
+func NewInstanceWithMock(desc *types.InstanceDescriptor) *Instance {
+	if desc == nil {
+		defaultDesc := types.DefaultInstanceDescriptor()
+		desc = &defaultDesc
+	}
+
+	i := &Instance{
+		backends:     desc.Backends,
+		flags:        desc.Flags,
+		adapters:     []AdapterID{},
+		halInstances: []hal.Instance{},
+		useMock:      true,
+	}
+
+	i.createMockAdapter()
+	return i
+}
+
+// enumerateRealAdapters attempts to enumerate real GPU adapters via HAL backends.
+// Returns true if at least one real adapter was found.
+func (i *Instance) enumerateRealAdapters(desc *types.InstanceDescriptor) bool {
+	// First, ensure HAL backends are registered
+	RegisterHALBackends()
+
+	// Get backend providers filtered by the enabled backends mask
+	providers := FilterBackendsByMask(desc.Backends)
+	if len(providers) == 0 {
+		return false
+	}
+
+	foundAdapters := false
+	hub := GetGlobal().Hub()
+
+	// Create HAL descriptor
+	halDesc := &hal.InstanceDescriptor{
+		Backends: desc.Backends,
+		Flags:    desc.Flags,
+	}
+
+	// Try each backend provider
+	for _, provider := range providers {
+		// Skip noop/empty backend - we'll use that as mock fallback
+		if provider.Variant() == types.BackendEmpty {
+			continue
+		}
+
+		// Try to create HAL instance
+		halInstance, err := provider.CreateInstance(halDesc)
+		if err != nil {
+			// Backend not available, try next
+			continue
+		}
+
+		// Track HAL instance for cleanup
+		i.halInstances = append(i.halInstances, halInstance)
+
+		// Enumerate adapters from this backend
+		exposedAdapters := halInstance.EnumerateAdapters(nil)
+		for idx := range exposedAdapters {
+			exposed := &exposedAdapters[idx] // Use pointer to avoid copy
+			// Create core.Adapter wrapping the HAL adapter
+			adapter := &Adapter{
+				Info:            exposed.Info,
+				Features:        exposed.Features,
+				Limits:          exposed.Capabilities.Limits,
+				Backend:         exposed.Info.Backend,
+				halAdapter:      exposed.Adapter,
+				halCapabilities: &exposed.Capabilities,
+			}
+
+			// Register in the hub
+			adapterID := hub.RegisterAdapter(adapter)
+			i.adapters = append(i.adapters, adapterID)
+			foundAdapters = true
+		}
+	}
+
+	return foundAdapters
+}
+
 // createMockAdapter creates a mock adapter for testing purposes.
-// This will be replaced with real adapter enumeration.
+// Mock adapters provide a functional Core API without requiring real GPU hardware.
 func (i *Instance) createMockAdapter() {
 	// Create a mock adapter with reasonable default values
 	adapter := &Adapter{
@@ -61,12 +159,15 @@ func (i *Instance) createMockAdapter() {
 			DeviceID:   0x5678,
 			DeviceType: types.DeviceTypeDiscreteGPU,
 			Driver:     "1.0.0",
-			DriverInfo: "Mock Driver",
+			DriverInfo: "Mock Driver (no real GPU)",
 			Backend:    types.BackendVulkan,
 		},
-		Features: types.Features(0), // No special features for now
+		Features: types.Features(0), // No special features for mock
 		Limits:   types.DefaultLimits(),
 		Backend:  types.BackendVulkan,
+		// HAL fields are nil for mock adapters
+		halAdapter:      nil,
+		halCapabilities: nil,
 	}
 
 	// Register the adapter in the global hub
@@ -166,4 +267,53 @@ func (i *Instance) Flags() types.InstanceFlags {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.flags
+}
+
+// IsMock returns true if the instance is using mock adapters.
+// Mock adapters are used when no HAL backends are available or
+// when the instance was explicitly created with NewInstanceWithMock.
+func (i *Instance) IsMock() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.useMock
+}
+
+// HasHALAdapters returns true if any real HAL adapters are available.
+func (i *Instance) HasHALAdapters() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return len(i.halInstances) > 0 && !i.useMock
+}
+
+// Destroy releases all resources associated with this instance.
+// This includes unregistering all adapters and destroying HAL instances.
+// After calling Destroy, the instance should not be used.
+func (i *Instance) Destroy() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	hub := GetGlobal().Hub()
+
+	// Unregister all adapters from the hub
+	for _, adapterID := range i.adapters {
+		adapter, err := hub.GetAdapter(adapterID)
+		if err != nil {
+			continue
+		}
+
+		// Destroy the HAL adapter if present
+		if adapter.halAdapter != nil {
+			adapter.halAdapter.Destroy()
+		}
+
+		// Unregister from hub
+		_, _ = hub.UnregisterAdapter(adapterID)
+	}
+	i.adapters = nil
+
+	// Destroy all HAL instances
+	for _, halInstance := range i.halInstances {
+		halInstance.Destroy()
+	}
+	i.halInstances = nil
 }
