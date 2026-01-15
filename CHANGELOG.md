@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-01-15
+
+New HAL backend integration layer for unified multi-backend support.
+
+### Added
+
+#### Core
+- **Backend Interface** — New abstraction for HAL backend management
+  - `Backend` interface with `Name()`, `CreateInstance()`, `SupportsWindow()` methods
+  - `Resource` interface for GPU resource lifecycle management
+  - Platform-independent backend selection
+
+- **HAL Backend Integration** — Seamless backend auto-registration
+  - `hal/allbackends` package for platform-specific registration
+  - Vulkan backend auto-registered on Windows/Linux
+  - Metal backend auto-registered on macOS
+  - Import `_ "github.com/gogpu/wgpu/hal/allbackends"` to enable all available backends
+
+- **Enhanced Instance** — HAL backend support in core.Instance
+  - `Instance.Backend()` returns active backend
+  - `Instance.AvailableBackends()` lists registered backends
+  - Automatic backend selection based on platform
+
+#### HAL
+- **Backend Init Functions** — Auto-registration via `init()`
+  - `hal/vulkan/init.go` — Registers Vulkan backend
+  - `hal/metal/init.go` — Registers Metal backend
+
+### Changed
+- Instance creation now uses HAL backend abstraction internally
+
 ## [0.9.3] - 2026-01-10
 
 Critical Intel Vulkan fixes: VkRenderPass support, wgpu-style swapchain synchronization.
