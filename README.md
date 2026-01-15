@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Pure Go WebGPU Implementation</strong><br>
-  No Rust, No CGO, Just Go.
+  No Rust. No CGO. Just Go.
 </p>
 
 <p align="center">
@@ -11,28 +11,33 @@
   <a href="https://pkg.go.dev/github.com/gogpu/wgpu"><img src="https://pkg.go.dev/badge/github.com/gogpu/wgpu.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/gogpu/wgpu"><img src="https://goreportcard.com/badge/github.com/gogpu/wgpu" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+  <a href="https://github.com/gogpu/wgpu/releases"><img src="https://img.shields.io/github/v/release/gogpu/wgpu" alt="Latest Release"></a>
   <a href="https://github.com/gogpu/wgpu"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
   <a href="https://github.com/gogpu/wgpu"><img src="https://img.shields.io/badge/CGO-none-success" alt="Zero CGO"></a>
-  <a href="https://github.com/gogpu/gogpu/stargazers"><img src="https://img.shields.io/github/stars/gogpu/gogpu?style=flat&labelColor=555&color=yellow" alt="Stars"></a>
-  <a href="https://github.com/gogpu/gogpu/discussions"><img src="https://img.shields.io/github/discussions/gogpu/gogpu?style=flat&labelColor=555&color=blue" alt="Discussions"></a>
 </p>
 
 <p align="center">
   <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
-> **Status:** Active development. All 5 HAL backends ready (Vulkan, Metal, DX12, GLES, Software).
-
 ---
 
-## Vision
+## Overview
 
-A complete WebGPU implementation in pure Go:
+**wgpu** is a complete WebGPU implementation written entirely in Go. It provides direct GPU access through multiple hardware abstraction layer (HAL) backends without requiring Rust, CGO, or any external dependencies.
 
-- **No wgpu-native dependency** — Standalone Go library
-- **Direct GPU access** — Vulkan, Metal, DX12 backends
-- **WebGPU compliant** — Following the W3C specification
-- **WASM compatible** — Run in browsers via WebAssembly
+### Key Features
+
+| Category | Capabilities |
+|----------|--------------|
+| **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software |
+| **Platforms** | Windows, Linux, macOS, iOS |
+| **API** | WebGPU-compliant (W3C specification) |
+| **Shaders** | WGSL via gogpu/naga compiler |
+| **Compute** | Full compute shader support |
+| **Build** | Zero CGO, simple `go build` |
+
+---
 
 ## Installation
 
@@ -40,43 +45,55 @@ A complete WebGPU implementation in pure Go:
 go get github.com/gogpu/wgpu
 ```
 
-## Usage (Preview)
+**Requirements:** Go 1.25+
+
+---
+
+## Quick Start
 
 ```go
+package main
+
 import (
+    "fmt"
+
     "github.com/gogpu/wgpu/core"
     "github.com/gogpu/wgpu/types"
+    _ "github.com/gogpu/wgpu/hal/allbackends" // Auto-register platform backends
 )
 
-// Create instance for GPU discovery
-instance := core.NewInstance(&types.InstanceDescriptor{
-    Backends: types.BackendsVulkan | types.BackendsMetal,
-})
+func main() {
+    // Create instance with platform-appropriate backends
+    instance := core.NewInstance(&types.InstanceDescriptor{
+        Backends: types.BackendsAll,
+    })
 
-// Request high-performance GPU
-adapterID, _ := instance.RequestAdapter(&types.RequestAdapterOptions{
-    PowerPreference: types.PowerPreferenceHighPerformance,
-})
+    // Request high-performance GPU
+    adapterID, _ := instance.RequestAdapter(&types.RequestAdapterOptions{
+        PowerPreference: types.PowerPreferenceHighPerformance,
+    })
 
-// Get adapter info
-info, _ := core.GetAdapterInfo(adapterID)
-fmt.Printf("GPU: %s\n", info.Name)
+    // Get adapter info
+    info, _ := core.GetAdapterInfo(adapterID)
+    fmt.Printf("GPU: %s (%s)\n", info.Name, info.Backend)
 
-// Create device
-deviceID, _ := core.RequestDevice(adapterID, &types.DeviceDescriptor{
-    Label: "My Device",
-})
+    // Create device
+    deviceID, _ := core.RequestDevice(adapterID, &types.DeviceDescriptor{
+        Label: "My Device",
+    })
 
-// Get queue for command submission
-queueID, _ := core.GetDeviceQueue(deviceID)
+    // Get queue for command submission
+    queueID, _ := core.GetDeviceQueue(deviceID)
+    _ = queueID // Ready for rendering
+}
 ```
 
-### Compute Shaders (Preview)
+### Compute Shaders
 
 ```go
 // Create compute pipeline
 pipelineID, _ := core.DeviceCreateComputePipeline(deviceID, &core.ComputePipelineDescriptor{
-    Label:  "My Compute Pipeline",
+    Label:  "Compute Pipeline",
     Layout: layoutID,
     Compute: core.ProgrammableStage{
         Module:     shaderModuleID,
@@ -91,56 +108,94 @@ computePass := encoder.BeginComputePass(nil)
 // Dispatch workgroups
 computePass.SetPipeline(pipelineID)
 computePass.SetBindGroup(0, bindGroupID, nil)
-computePass.Dispatch(64, 1, 1) // 64 workgroups
+computePass.Dispatch(64, 1, 1)
 computePass.End()
+
+// Submit commands
+commands := encoder.Finish(nil)
+core.QueueSubmit(queueID, []types.CommandBuffer{commands})
 ```
+
+---
 
 ## Architecture
 
 ```
 wgpu/
-├── types/         # WebGPU type definitions ✓
-├── core/          # Validation, state tracking ✓
-├── hal/           # Hardware abstraction layer ✓
-│   ├── noop/      # No-op backend (testing) ✓
-│   ├── software/  # Software backend ✓ (Full rasterizer, ~10K LOC)
-│   ├── gles/      # OpenGL ES backend ✓ (Pure Go, ~7500 LOC, Windows + Linux)
-│   ├── vulkan/    # Vulkan backend ✓ (Pure Go, ~27K LOC)
-│   │   ├── vk/        # Generated Vulkan bindings (~20K LOC)
-│   │   └── memory/    # GPU memory allocator (~1.8K LOC)
-│   ├── metal/     # Metal backend ✓ (Pure Go, ~3K LOC, macOS)
-│   └── dx12/      # DirectX 12 backend ✓ (Pure Go, ~12K LOC, Windows)
+├── types/              # WebGPU type definitions
+├── core/               # Validation, state tracking, resource management
+├── hal/                # Hardware Abstraction Layer
+│   ├── allbackends/    # Platform-specific backend auto-registration
+│   ├── noop/           # No-op backend (testing)
+│   ├── software/       # CPU software rasterizer (~10K LOC)
+│   ├── gles/           # OpenGL ES 3.0+ (~7.5K LOC)
+│   ├── vulkan/         # Vulkan 1.3 (~27K LOC)
+│   ├── metal/          # Metal (~3K LOC)
+│   └── dx12/           # DirectX 12 (~12K LOC)
 └── cmd/
-    ├── vk-gen/           # Vulkan bindings generator from vk.xml
-    └── vulkan-triangle/  # Vulkan integration test (red triangle) ✓
+    ├── vk-gen/         # Vulkan bindings generator
+    └── vulkan-triangle/# Integration test
 ```
 
-## Roadmap
+### HAL Backend Integration
 
-See [ROADMAP.md](ROADMAP.md) for detailed development milestones and version history.
+The HAL Backend Integration layer provides unified multi-backend support:
 
-**Current Focus:** Compute shader support across all backends.
+```go
+import _ "github.com/gogpu/wgpu/hal/allbackends"
 
-## Pure Go Approach
+// Platform-specific backends auto-registered:
+// - Windows: Vulkan, DX12, GLES
+// - Linux:   Vulkan, GLES
+// - macOS:   Metal, Vulkan
+```
 
-All backends implemented without CGO:
+---
 
-| Backend | Status | Approach | Platforms |
-|---------|--------|----------|-----------|
-| Software | **Done** | Pure Go CPU rendering | All (headless) |
-| OpenGL ES | **Done** | goffi + WGL/EGL | Windows, Linux |
-| Vulkan | **Done** | goffi + vk-gen from vk.xml | Windows, Linux, macOS |
-| Metal | **Done** | goffi (Obj-C bridge) | macOS, iOS |
-| DX12 | **Done** | syscall + COM | Windows |
+## Backend Details
+
+### Platform Support
+
+| Backend | Windows | Linux | macOS | iOS | Notes |
+|---------|:-------:|:-----:|:-----:|:---:|-------|
+| **Vulkan** | Yes | Yes | Yes | - | MoltenVK on macOS |
+| **Metal** | - | - | Yes | Yes | Native Apple GPU |
+| **DX12** | Yes | - | - | - | Windows 10+ |
+| **GLES** | Yes | Yes | - | - | OpenGL ES 3.0+ |
+| **Software** | Yes | Yes | Yes | Yes | CPU fallback |
+
+### Vulkan Backend
+
+Full Vulkan 1.3 implementation with:
+
+- Auto-generated bindings from official `vk.xml`
+- Buddy allocator for GPU memory (O(log n), minimal fragmentation)
+- Dynamic rendering (VK_KHR_dynamic_rendering)
+- Classic render pass fallback for Intel compatibility
+- wgpu-style swapchain synchronization
+- Complete resource management (Buffer, Texture, Pipeline, BindGroup)
+
+### Metal Backend
+
+Native Apple GPU access via:
+
+- Pure Go Objective-C bridge (goffi)
+- Metal API via runtime message dispatch
+- CAMetalLayer integration for surface presentation
+- MSL shader compilation via naga
+
+### DirectX 12 Backend
+
+Windows GPU access via:
+
+- Pure Go COM bindings (syscall, no CGO)
+- DXGI integration for swapchain and adapters
+- Flip model with VRR support
+- Descriptor heap management
 
 ### Software Backend
 
 Full-featured CPU rasterizer for headless rendering:
-
-```bash
-# Build with software backend
-go build -tags software ./...
-```
 
 ```go
 import _ "github.com/gogpu/wgpu/hal/software"
@@ -148,112 +203,64 @@ import _ "github.com/gogpu/wgpu/hal/software"
 // Use cases:
 // - CI/CD testing without GPU
 // - Server-side image generation
-// - Embedded systems without GPU
-// - Fallback when no GPU available
-// - Reference implementation for testing
-
-// Key feature: read rendered pixels
-surface.GetFramebuffer() // Returns []byte (RGBA8)
+// - Reference implementation
+// - Fallback when GPU unavailable
 ```
 
-**Rasterization Pipeline** (`hal/software/raster/`):
-- Edge function (Pineda) triangle rasterization with top-left fill rule
-- Perspective-correct attribute interpolation
-- Depth buffer with 8 compare functions
-- Stencil buffer with 8 operations
-- 13 blend factors, 5 blend operations (WebGPU spec compliant)
+**Rasterization Features:**
+- Edge function triangle rasterization (Pineda algorithm)
+- Perspective-correct interpolation
+- Depth buffer (8 compare functions)
+- Stencil buffer (8 operations)
+- Blending (13 factors, 5 operations)
 - 6-plane frustum clipping (Sutherland-Hodgman)
-- Backface culling (CW/CCW)
-- 8x8 tile-based rasterization for cache locality
-- Parallel rasterization with worker pool
-- Incremental edge evaluation (O(1) per pixel)
+- 8x8 tile-based parallel rendering
 
-**Shader System** (`hal/software/shader/`):
-- Callback-based vertex/fragment shaders
-- Built-in shaders: SolidColor, VertexColor, Textured
-- Custom shader support via `VertexShaderFunc` / `FragmentShaderFunc`
+---
 
-**Metrics**: ~10K LOC, 100+ tests, 94% coverage
+## Ecosystem
 
-### Vulkan Backend Features
+**wgpu** is the foundation of the [GoGPU](https://github.com/gogpu) ecosystem.
 
-- **Auto-generated bindings** from official Vulkan XML specification
-- **Memory allocator** with buddy allocation (O(log n), minimal fragmentation)
-- **Vulkan 1.3 dynamic rendering** — No render pass objects needed
-- **Swapchain management** with automatic recreation
-- **Semaphore synchronization** for frame presentation
-- **Complete HAL implementation**:
-  - Buffer, Texture, TextureView, Sampler
-  - ShaderModule, BindGroupLayout, BindGroup
-  - PipelineLayout, RenderPipeline, ComputePipeline
-  - CommandEncoder, RenderPassEncoder, ComputePassEncoder
-  - Fence synchronization, WriteTexture immediate upload
-- **Comprehensive unit tests** (93 tests, 2200+ LOC):
-  - Conversion functions (formats, usage, blend modes)
-  - Descriptor allocator logic
-  - Resource structures
-  - Memory allocator (buddy allocation)
+| Project | Description |
+|---------|-------------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
+| **gogpu/wgpu** | **Pure Go WebGPU (this repo)** |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings |
+| [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |
 
-### Metal Backend Features
+---
 
-- **Pure Go Objective-C bridge** via goffi
-- **Metal API access** via Objective-C runtime
-- **Device and adapter enumeration**
-- **Command buffer and render encoder**
-- **Shader compilation** (MSL via naga)
-- **Texture and buffer management**
-- **Surface presentation** (CAMetalLayer integration)
-- **~3K lines of code**
+## Documentation
 
-### DirectX 12 Backend Features
+- **[ROADMAP.md](ROADMAP.md)** — Development milestones
+- **[CHANGELOG.md](CHANGELOG.md)** — Release notes
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/wgpu)** — API reference
 
-- **Pure Go COM bindings** via syscall (no CGO!)
-- **D3D12 API access** via COM interface vtables
-- **Intel GPU support** (fixed COM calling convention)
-- **DXGI integration** for swapchain and adapter enumeration
-- **Descriptor heap management** (CBV/SRV/UAV, Sampler, RTV, DSV)
-- **Flip model swapchain** with tearing support (VRR)
-- **Command list recording** with resource barriers
-- **Root signature** and PSO creation
-- **~12K lines of code**
-
-**Structure:**
-```
-hal/dx12/
-├── d3d12/      # D3D12 COM bindings (~4K LOC)
-├── dxgi/       # DXGI bindings (~2K LOC)
-├── instance.go # Backend, Instance, Surface
-├── adapter.go  # Adapter enumeration
-├── device.go   # Device, descriptor heaps
-├── queue.go    # Command queue
-├── surface.go  # Swapchain management
-├── resource.go # Buffer, Texture, TextureView
-├── command.go  # CommandEncoder, RenderPassEncoder
-├── pipeline.go # RenderPipeline, ComputePipeline
-└── convert.go  # Format conversion helpers
-```
+---
 
 ## References
 
+- [WebGPU Specification](https://www.w3.org/TR/webgpu/) — W3C standard
 - [wgpu (Rust)](https://github.com/gfx-rs/wgpu) — Reference implementation
-- [WebGPU Specification](https://www.w3.org/TR/webgpu/)
 - [Dawn (C++)](https://dawn.googlesource.com/dawn) — Google's implementation
 
-## Related Projects
-
-| Project | Description | Purpose |
-|---------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | GPU abstraction, windowing, input |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | WGSL → SPIR-V, MSL, GLSL |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | Canvas API, scene graph, GPU text |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | Widgets, layouts, themes (planned) |
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings | wgpu-native integration |
-
-> **Note:** Always use the latest versions. Check each repository for current releases.
+---
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Priority areas:**
+- Cross-platform testing
+- Performance benchmarks
+- Documentation improvements
+- Bug reports and fixes
+
+---
 
 ## License
 
@@ -262,5 +269,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <b>wgpu</b> — WebGPU in Pure Go
+  <strong>wgpu</strong> — WebGPU in Pure Go
 </p>

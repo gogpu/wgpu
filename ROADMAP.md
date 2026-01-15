@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.9.3
+## Current Status: v0.10.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -126,7 +126,7 @@
 - [x] **Core CommandEncoder** — Command recording with HAL dispatch
 - [x] **Code Quality** — 58 TODO comments replaced with proper documentation
 
-### v0.9.1 — Vulkan Backend Fixes (Current)
+### v0.9.1 — Vulkan Backend Fixes
 - [x] **vkDestroyDevice Fix** — Fixed memory leak when destroying Vulkan devices ([#32])
   - Device was not properly destroyed due to missing goffi call
   - Now correctly invokes `vkDestroyDevice` via `ffi.CallFunction`
@@ -141,12 +141,28 @@
 [#33]: https://github.com/gogpu/wgpu/issues/33
 [#34]: https://github.com/gogpu/wgpu/issues/34
 
+### v0.9.2 — Metal NSString Fix
+- [x] **NSString Double-Free Fix** — Fixed memory corruption in Metal backend
+  - Fixed NSString lifecycle management in ObjC calls
+
+### v0.9.3 — Intel Vulkan Fix
+- [x] **VkRenderPass Fix** — Fixed rendering on Intel GPUs
+  - Proper VkRenderPass creation with wgpu-style synchronization
+
+### v0.10.0 — HAL Backend Integration (Current)
+- [x] **Backend Interface** — New abstraction for HAL backend management
+- [x] **HAL Backend Integration** — Seamless backend auto-registration
+- [x] **Enhanced Instance** — HAL backend support in core.Instance
+- [x] **Device Extensions** — HAL device in core.Device
+- [x] **Buffer Extensions** — HAL buffer in core.Buffer
+- [x] **CommandEncoder Extensions** — HAL command encoding
+
 ---
 
 ## Upcoming Releases
 
-### v0.10.0 — Compute Shaders
-**Target: Q1 2025**
+### v0.11.0 — Compute Shaders
+**Target: Q1 2026**
 
 - [ ] Compute pipeline support in all backends
 - [ ] Dispatch and indirect dispatch
@@ -154,8 +170,8 @@
 - [ ] Atomic operations
 - [ ] Workgroup shared memory
 
-### v0.10.0 — WebAssembly Support
-**Target: Q2 2025**
+### v0.12.0 — WebAssembly Support
+**Target: Q2 2026**
 
 - [ ] WASM build target
 - [ ] Browser WebGPU API bindings
@@ -215,9 +231,10 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.10.0 | 2026-01 | HAL Backend Integration layer |
 | v0.9.3 | 2026-01 | Intel Vulkan fix: VkRenderPass, wgpu-style sync |
 | v0.9.2 | 2026-01 | Metal NSString double-free fix |
-| v0.9.1 | 2026-01 | Dependencies update |
+| v0.9.1 | 2026-01 | Vulkan backend fixes |
 | v0.9.0 | 2026-01 | Major Vulkan improvements |
 | v0.8.4 | 2025-12 | Naga v0.8.1 (clamp() fix) |
 | v0.8.3 | 2025-12 | Metal macOS blank window fix |
