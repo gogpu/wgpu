@@ -36,6 +36,12 @@ var (
 	// This is typically returned by Wait operations.
 	ErrTimeout = errors.New("hal: timeout")
 
+	// ErrNotReady indicates the resource is not ready yet.
+	// For AcquireTexture, this means no image is available right now.
+	// The caller should skip this frame and try again next frame.
+	// This is NOT an error - it's a normal condition for non-blocking acquire.
+	ErrNotReady = errors.New("hal: not ready")
+
 	// ErrZeroArea indicates that both surface width and height must be non-zero.
 	// This error is returned by Surface.Configure when the window has zero area.
 	// Wait to recreate the surface until the window has non-zero area.

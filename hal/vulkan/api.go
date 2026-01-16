@@ -262,6 +262,7 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 }
 
 // AcquireTexture acquires the next surface texture for rendering.
+// Returns hal.ErrNotReady if no image is available (non-blocking mode).
 func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
 	if s.swapchain == nil {
 		return nil, fmt.Errorf("vulkan: surface not configured")
@@ -270,6 +271,11 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	texture, suboptimal, err := s.swapchain.acquireNextImage()
 	if err != nil {
 		return nil, err
+	}
+
+	// No image available right now - skip this frame
+	if texture == nil {
+		return nil, hal.ErrNotReady
 	}
 
 	// Register swapchain with queue for proper synchronization in Submit.

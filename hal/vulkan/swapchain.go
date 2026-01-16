@@ -388,31 +388,43 @@ func (sc *Swapchain) Destroy() {
 
 // acquireNextImage acquires the next available swapchain image.
 // Uses rotating acquire semaphores like wgpu to avoid reuse conflicts.
+// Returns (nil, false, nil) if the frame should be skipped (timeout).
+//
+// Adapted from wgpu-hal vulkan/swapchain/native.rs acquire() function.
+// Key differences from original blocking implementation:
+// - Uses configurable timeout instead of infinite wait
+// - Returns nil on timeout instead of blocking forever
+// - Caller should skip frame rendering on nil return
 func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	if sc.imageAcquired {
 		return nil, false, fmt.Errorf("vulkan: image already acquired")
 	}
 
-	const timeout = ^uint64(0) // UINT64_MAX = wait forever
+	// Timeout for all wait operations (matches wgpu's approach).
+	// 16ms = one VSync period at 60Hz. This allows:
+	// - VSync to signal the next available frame
+	// - Reasonable responsiveness if GPU falls behind
+	const timeout = uint64(16_000_000) // 16ms in nanoseconds
 
 	// Wait for the previous submission that used this acquire semaphore to complete.
-	// This ensures it's safe to reuse the semaphore. The fence was signaled by the
-	// submission that waited on this semaphore (see Queue.Submit).
-	// wgpu-style optimization: check fence status first, skip wait if already signaled.
+	// This ensures it's safe to reuse the semaphore.
+	// (wgpu: wait_for_fence with previously_used_submission_index)
 	acquireIdx := sc.nextAcquireIdx
 	acquireFenceForSem := sc.acquireFences[acquireIdx]
 	fenceStatus := vkGetFenceStatusSwapchain(sc.device, acquireFenceForSem)
 	if fenceStatus == vk.NotReady {
-		// Fence not yet signaled - need to wait
 		waitResult := vkWaitForFencesSwapchain(sc.device, 1, &acquireFenceForSem, vk.True, timeout)
-		if waitResult != vk.Success {
+		if waitResult == vk.Timeout {
+			// Timeout - return nil to skip frame. DON'T advance semaphore rotation.
+			// (wgpu: returns Ok(None) without advancing)
+			return nil, false, nil
+		} else if waitResult != vk.Success {
 			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (per-acquire) failed: %d", waitResult)
 		}
 	} else if fenceStatus != vk.Success {
-		// Error checking fence status
 		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (per-acquire) failed: %d", fenceStatus)
 	}
-	// Reset fence for reuse (regardless of whether we waited)
+	// Reset fence for reuse
 	resetResult := vkResetFencesSwapchain(sc.device, 1, &acquireFenceForSem)
 	if resetResult != vk.Success {
 		return nil, false, fmt.Errorf("vulkan: vkResetFences (per-acquire) failed: %d", resetResult)
@@ -421,31 +433,38 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	// Get the acquire semaphore from the rotating pool.
 	acquireSem := sc.acquireSemaphores[acquireIdx]
 
-	// Acquire next image with BOTH semaphore AND post-acquire fence.
-	// Semaphore: for GPU-GPU synchronization (Submit waits on it)
-	// Post-acquire fence: for Windows/Intel synchronization
+	// Acquire next image with semaphore AND post-acquire fence.
+	// (wgpu: vkAcquireNextImageKHR with same timeout_ns)
 	var imageIndex uint32
 	result := vkAcquireNextImageKHR(sc.device, sc.handle, timeout, acquireSem, sc.acquireFence, &imageIndex)
 
 	switch result {
 	case vk.Success, vk.SuboptimalKhr:
-		// OK - continue to wait for fence
-	case vk.ErrorOutOfDateKhr:
+		// OK - continue
+	case vk.Timeout:
+		// Timeout - return nil to skip frame. DON'T advance.
+		// (wgpu: returns Ok(None))
+		return nil, false, nil
+	case vk.NotReady, vk.ErrorOutOfDateKhr:
+		// Surface needs reconfiguration
+		// (wgpu: returns Err(Outdated))
 		return nil, false, hal.ErrSurfaceOutdated
 	default:
 		return nil, false, fmt.Errorf("vulkan: vkAcquireNextImageKHR failed: %d", result)
 	}
 
-	// Wait for the image to be fully ready to render (post-acquire fence).
-	// This is critical on Windows with Intel/DXGI swapchains to avoid
-	// rendering to an image that isn't fully ready.
-	// See wgpu-rs issues #8310 and #8354 for details.
-	// wgpu-style optimization: check status first, skip wait if already signaled.
+	// Wait for post-acquire fence (Windows/Intel synchronization).
+	// This is critical for proper frame pacing with DXGI swapchains.
+	// See wgpu-rs issues #8310 and #8354.
+	// (wgpu: wait_for_fences(&[self.fence], false, timeout_ns))
 	postAcquireStatus := vkGetFenceStatusSwapchain(sc.device, sc.acquireFence)
 	if postAcquireStatus == vk.NotReady {
-		postAcquireWait := vkWaitForFencesSwapchain(sc.device, 1, &sc.acquireFence, vk.True, timeout)
-		if postAcquireWait != vk.Success {
-			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (post-acquire) failed: %d", postAcquireWait)
+		waitResult := vkWaitForFencesSwapchain(sc.device, 1, &sc.acquireFence, vk.True, timeout)
+		if waitResult == vk.Timeout {
+			// Timeout - skip frame
+			return nil, false, nil
+		} else if waitResult != vk.Success {
+			return nil, false, fmt.Errorf("vulkan: vkWaitForFences (post-acquire) failed: %d", waitResult)
 		}
 	} else if postAcquireStatus != vk.Success {
 		return nil, false, fmt.Errorf("vulkan: vkGetFenceStatus (post-acquire) failed: %d", postAcquireStatus)
