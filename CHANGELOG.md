@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-01-16
+
+Window responsiveness fix for Vulkan swapchain.
+
+### Added
+
+#### HAL
+- **ErrNotReady Error** — New error for non-blocking acquire signaling
+  - Returned when swapchain image is not ready yet
+  - Signals caller to skip frame without error
+
+### Changed
+
+#### HAL/Vulkan
+- **Non-blocking swapchain acquire** — Improved window responsiveness
+  - Use 16ms timeout instead of infinite wait in `acquireNextImage()`
+  - Return `ErrNotReady` on timeout instead of blocking forever
+  - Don't advance semaphore rotation on timeout (matches wgpu-hal pattern)
+  - Based on wgpu-hal `vulkan/swapchain/native.rs` implementation
+
+### Fixed
+- Window lag during resize/drag operations on Windows
+- "Not responding" window state during GPU-bound rendering
+
 ## [0.10.0] - 2026-01-15
 
 New HAL backend integration layer for unified multi-backend support.
