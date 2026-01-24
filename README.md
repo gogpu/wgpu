@@ -47,6 +47,13 @@ go get github.com/gogpu/wgpu
 
 **Requirements:** Go 1.25+
 
+**Build:**
+```bash
+CGO_ENABLED=0 go build
+```
+
+> **Note:** wgpu uses Pure Go FFI via `cgo_import_dynamic`, which requires `CGO_ENABLED=0`. This enables zero C compiler dependency and easy cross-compilation.
+
 ---
 
 ## Quick Start

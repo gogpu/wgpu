@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-01-24
+
+### Changed
+
+- **goffi v0.3.8** — Fixed CGO build tag consistency ([#43](https://github.com/gogpu/wgpu/issues/43))
+  - Clear error message when building with CGO enabled: `undefined: GOFFI_REQUIRES_CGO_ENABLED_0`
+  - Consistent `!cgo` build tags across all FFI files
+  - See [goffi v0.3.8 release notes](https://github.com/go-webgpu/goffi/releases/tag/v0.3.8)
+
 ## [0.10.1] - 2026-01-16
 
 Window responsiveness fix for Vulkan swapchain.

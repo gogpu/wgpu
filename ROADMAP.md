@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.10.0
+## Current Status: v0.10.2
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -149,13 +149,22 @@
 - [x] **VkRenderPass Fix** — Fixed rendering on Intel GPUs
   - Proper VkRenderPass creation with wgpu-style synchronization
 
-### v0.10.0 — HAL Backend Integration (Current)
+### v0.10.0 — HAL Backend Integration
 - [x] **Backend Interface** — New abstraction for HAL backend management
 - [x] **HAL Backend Integration** — Seamless backend auto-registration
 - [x] **Enhanced Instance** — HAL backend support in core.Instance
 - [x] **Device Extensions** — HAL device in core.Device
 - [x] **Buffer Extensions** — HAL buffer in core.Buffer
 - [x] **CommandEncoder Extensions** — HAL command encoding
+
+### v0.10.1 — Vulkan Swapchain Fix
+- [x] **Non-blocking swapchain acquire** — Window responsiveness fix
+- [x] **ErrNotReady Error** — New error for timeout signaling
+
+### v0.10.2 — FFI Build Tag Fix (Current)
+- [x] **goffi v0.3.8** — Fixed CGO build tag consistency
+- [x] **Clear error message** — `undefined: GOFFI_REQUIRES_CGO_ENABLED_0`
+- [x] **Documentation** — Added `CGO_ENABLED=0` requirement to README
 
 ---
 
@@ -231,6 +240,8 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.10.2 | 2026-01 | goffi v0.3.8, CGO build tag fix |
+| v0.10.1 | 2026-01 | Vulkan swapchain responsiveness fix |
 | v0.10.0 | 2026-01 | HAL Backend Integration layer |
 | v0.9.3 | 2026-01 | Intel Vulkan fix: VkRenderPass, wgpu-style sync |
 | v0.9.2 | 2026-01 | Metal NSString double-free fix |
