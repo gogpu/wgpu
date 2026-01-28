@@ -6,8 +6,8 @@
 package metal
 
 import (
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Adapter implements hal.Adapter for Metal.
@@ -88,7 +88,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 		},
 		AlphaModes: []hal.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
+			hal.CompositeAlphaModePreMultiplied,
 		},
 	}
 }

@@ -3,8 +3,8 @@
 package software
 
 import (
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // API implements hal.Backend for the software backend.

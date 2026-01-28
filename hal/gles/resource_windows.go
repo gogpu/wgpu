@@ -6,10 +6,10 @@
 package gles
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
-	"github.com/gogpu/gputypes"
 )
 
 // Surface implements hal.Surface for OpenGL on Windows.

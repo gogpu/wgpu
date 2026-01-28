@@ -1,8 +1,8 @@
 package noop
 
 import (
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Adapter implements hal.Adapter for the noop backend.
@@ -45,8 +45,8 @@ func (a *Adapter) SurfaceCapabilities(_ hal.Surface) *hal.SurfaceCapabilities {
 		},
 		AlphaModes: []hal.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
-			hal.CompositeAlphaModePostmultiplied,
+			hal.CompositeAlphaModePreMultiplied,
+			hal.CompositeAlphaModePostMultiplied,
 			hal.CompositeAlphaModeInherit,
 		},
 	}

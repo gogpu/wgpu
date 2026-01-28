@@ -6,9 +6,9 @@ package vulkan
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/gputypes"
 )
 
 // Swapchain manages Vulkan swapchain for a surface.

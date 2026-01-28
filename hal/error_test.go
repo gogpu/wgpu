@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	_ "github.com/gogpu/wgpu/hal/noop" // Import for side effect of registering noop backend
-	"github.com/gogpu/gputypes"
 )
 
 // TestErrZeroArea verifies that ErrZeroArea is defined correctly.

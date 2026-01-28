@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
-	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for DirectX 12.
@@ -366,7 +366,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 		PresentModes: a.presentModes(),
 		AlphaModes: []hal.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
+			hal.CompositeAlphaModePreMultiplied,
 		},
 	}
 }

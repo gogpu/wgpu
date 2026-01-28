@@ -8,9 +8,9 @@ import (
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for Vulkan.
@@ -169,7 +169,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 		},
 		AlphaModes: []hal.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
+			hal.CompositeAlphaModePreMultiplied,
 		},
 	}
 }

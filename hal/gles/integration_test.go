@@ -8,9 +8,9 @@ package gles
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
-	"github.com/gogpu/gputypes"
 )
 
 // TestEGLInit tests basic EGL initialization.

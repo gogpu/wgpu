@@ -8,10 +8,10 @@ package gles
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
-	"github.com/gogpu/gputypes"
 )
 
 // Backend implements hal.Backend for OpenGL ES / OpenGL 3.3+.

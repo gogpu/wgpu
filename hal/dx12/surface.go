@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
-	"github.com/gogpu/gputypes"
 )
 
 // defaultBufferCount is the default number of back buffers in the swapchain.
@@ -353,9 +353,9 @@ func textureFormatToDXGI(format gputypes.TextureFormat) dxgi.DXGI_FORMAT {
 // compositeAlphaModeToDXGI converts HAL CompositeAlphaMode to DXGI_ALPHA_MODE.
 func compositeAlphaModeToDXGI(mode hal.CompositeAlphaMode) dxgi.DXGI_ALPHA_MODE {
 	switch mode {
-	case hal.CompositeAlphaModePremultiplied:
+	case hal.CompositeAlphaModePreMultiplied:
 		return dxgi.DXGI_ALPHA_MODE_PREMULTIPLIED
-	case hal.CompositeAlphaModePostmultiplied:
+	case hal.CompositeAlphaModePostMultiplied:
 		return dxgi.DXGI_ALPHA_MODE_STRAIGHT
 	case hal.CompositeAlphaModeInherit:
 		return dxgi.DXGI_ALPHA_MODE_UNSPECIFIED

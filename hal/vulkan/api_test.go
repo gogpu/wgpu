@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gogpu/wgpu/hal/vulkan/vk"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
 // TestVkMakeVersion tests Vulkan version creation.

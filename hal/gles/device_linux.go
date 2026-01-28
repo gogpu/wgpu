@@ -10,10 +10,10 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for OpenGL on Linux.
