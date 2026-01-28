@@ -8,8 +8,8 @@ package gles
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 func TestTextureFormatToGL(t *testing.T) {

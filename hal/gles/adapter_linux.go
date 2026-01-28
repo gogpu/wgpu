@@ -6,10 +6,10 @@
 package gles
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for OpenGL on Linux.

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
-	"github.com/gogpu/gputypes"
 )
 
 // TestNoopBackendVariant tests the backend variant identification.

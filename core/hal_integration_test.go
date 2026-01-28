@@ -8,9 +8,9 @@ package core_test
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/gputypes"
 
 	// Import all backends for side-effect registration.
 	// This enables real GPU adapter enumeration.

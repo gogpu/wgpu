@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Mock HAL types to satisfy interfaces without returning nil, nil.
@@ -65,20 +65,20 @@ func (mockCommandEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.Com
 }
 
 // mockRenderPassEncoder implements hal.RenderPassEncoder
-func (mockRenderPassEncoder) End()                                                       {}
-func (mockRenderPassEncoder) SetPipeline(_ hal.RenderPipeline)                           {}
-func (mockRenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32)         {}
-func (mockRenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64)           {}
+func (mockRenderPassEncoder) End()                                                          {}
+func (mockRenderPassEncoder) SetPipeline(_ hal.RenderPipeline)                              {}
+func (mockRenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32)            {}
+func (mockRenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64)              {}
 func (mockRenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
-func (mockRenderPassEncoder) SetViewport(_, _, _, _, _, _ float32)                       {}
-func (mockRenderPassEncoder) SetScissorRect(_, _, _, _ uint32)                           {}
+func (mockRenderPassEncoder) SetViewport(_, _, _, _, _, _ float32)                          {}
+func (mockRenderPassEncoder) SetScissorRect(_, _, _, _ uint32)                              {}
 func (mockRenderPassEncoder) SetBlendConstant(_ *gputypes.Color)                            {}
-func (mockRenderPassEncoder) SetStencilReference(_ uint32)                               {}
-func (mockRenderPassEncoder) Draw(_, _, _, _ uint32)                                     {}
-func (mockRenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32)              {}
-func (mockRenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64)                        {}
-func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64)                 {}
-func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                           {}
+func (mockRenderPassEncoder) SetStencilReference(_ uint32)                                  {}
+func (mockRenderPassEncoder) Draw(_, _, _, _ uint32)                                        {}
+func (mockRenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32)                 {}
+func (mockRenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64)                           {}
+func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64)                    {}
+func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                              {}
 
 // mockComputePassEncoder implements hal.ComputePassEncoder (minimal)
 func (mockComputePassEncoder) End()                                               {}

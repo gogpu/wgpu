@@ -130,11 +130,11 @@ type CompositeAlphaMode = gputypes.CompositeAlphaMode
 
 // CompositeAlphaMode constants for backward compatibility.
 const (
-	CompositeAlphaModeAuto            = gputypes.CompositeAlphaModeAuto
-	CompositeAlphaModeOpaque          = gputypes.CompositeAlphaModeOpaque
-	CompositeAlphaModePreMultiplied   = gputypes.CompositeAlphaModePreMultiplied
-	CompositeAlphaModePostMultiplied  = gputypes.CompositeAlphaModePostMultiplied
-	CompositeAlphaModeInherit         = gputypes.CompositeAlphaModeInherit
+	CompositeAlphaModeAuto           = gputypes.CompositeAlphaModeAuto
+	CompositeAlphaModeOpaque         = gputypes.CompositeAlphaModeOpaque
+	CompositeAlphaModePreMultiplied  = gputypes.CompositeAlphaModePreMultiplied
+	CompositeAlphaModePostMultiplied = gputypes.CompositeAlphaModePostMultiplied
+	CompositeAlphaModeInherit        = gputypes.CompositeAlphaModeInherit
 )
 
 // SurfaceConfiguration describes surface settings.

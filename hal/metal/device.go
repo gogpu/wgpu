@@ -11,11 +11,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for Metal.

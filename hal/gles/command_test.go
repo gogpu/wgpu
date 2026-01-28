@@ -8,8 +8,8 @@ package gles
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 func TestCommandEncoder_BeginEndEncoding(t *testing.T) {

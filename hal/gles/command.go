@@ -6,9 +6,9 @@
 package gles
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/gputypes"
 )
 
 // Command represents a recorded GL command.

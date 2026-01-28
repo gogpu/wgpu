@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for Vulkan.
