@@ -2,6 +2,16 @@
 
 Full integration test for the Pure Go Vulkan backend. This test validates the entire rendering pipeline from window creation to triangle rendering.
 
+## Multi-Thread Architecture
+
+This demo uses **enterprise-level multi-thread architecture** based on Ebiten/Gio patterns:
+
+- **Main Thread**: Win32 message pump only (`runtime.LockOSThread()` in `init()`)
+- **Render Thread**: All GPU operations (via `internal/thread` package)
+- **Deferred Resize**: Size captured in WM_SIZE, applied on render thread
+
+This ensures the window stays responsive during heavy GPU operations like swapchain recreation (`vkDeviceWaitIdle`).
+
 ## What It Tests
 
 This integration test validates:
@@ -27,6 +37,18 @@ The test should:
 - Run until window is closed
 
 ## Architecture
+
+### Thread Model
+
+```
+Main Thread (OS Thread 0)     Render Thread (Dedicated)
+├─ runtime.LockOSThread()     ├─ runtime.LockOSThread()
+├─ Win32 Message Pump         ├─ GPU Initialization
+├─ WM_SIZE → RequestResize()  ├─ ConsumePendingResize()
+├─ WM_SETCURSOR handling      ├─ Surface.Configure()
+└─ window.PollEvents()        ├─ vkDeviceWaitIdle
+                              └─ Acquire → Render → Present
+```
 
 ### Shaders
 

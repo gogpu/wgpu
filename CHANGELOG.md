@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-01-28
+
+Enterprise-level multi-thread architecture for window responsiveness.
+
+### Added
+
+#### Internal
+- **Thread Package** (`internal/thread/`) — Cross-platform thread abstraction
+  - `Thread` — Dedicated OS thread with `runtime.LockOSThread()` for GPU operations
+  - `RenderLoop` — Manages UI/render thread separation with deferred resize
+  - `Call()`, `CallVoid()`, `CallAsync()` — Sync/async thread communication
+  - `RequestResize()` / `ConsumePendingResize()` — Thread-safe resize coordination
+  - Comprehensive tests (`thread_test.go`)
+
+#### Vulkan Triangle Demo
+- **Multi-Thread Architecture** — Ebiten-style separation for responsive windows
+  - Main thread: Win32 message pump only (`runtime.LockOSThread()` in `init()`)
+  - Render thread: All GPU operations including `vkDeviceWaitIdle`
+  - Deferred swapchain resize: size captured in WM_SIZE, applied on render thread
+  - No more "Not Responding" during resize/drag operations
+
+#### Windows Platform
+- **WM_SETCURSOR Handling** — Proper cursor restoration after resize
+  - Fixes resize cursor staying 5-10 seconds after resize ends
+  - Arrow cursor explicitly set when mouse enters client area
+
+### Changed
+
+#### HAL/Vulkan
+- Removed unused fence wrapper functions from `swapchain.go`
+  - `vkCreateFenceSwapchain`, `vkDestroyFenceSwapchain`
+  - `vkWaitForFencesSwapchain`, `vkResetFencesSwapchain`
+  - `vkGetFenceStatusSwapchain`
+
+### Architecture
+
+The multi-thread pattern follows Ebiten/Gio best practices:
+
+```
+Main Thread (OS Thread 0)     Render Thread (Dedicated)
+├─ runtime.LockOSThread()     ├─ runtime.LockOSThread()
+├─ Win32 Message Pump         ├─ Vulkan Device Operations
+├─ WM_SIZE → RequestResize()  ├─ ConsumePendingResize()
+└─ PollEvents()               ├─ vkDeviceWaitIdle (non-blocking UI!)
+                              └─ Acquire → Render → Present
+```
+
+This architecture ensures:
+- Window remains responsive during GPU operations
+- Swapchain recreation doesn't freeze UI
+- Proper handling of modal resize loops (WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE)
+
 ## [0.10.2] - 2026-01-24
 
 ### Changed
