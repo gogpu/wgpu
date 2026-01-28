@@ -5,8 +5,8 @@ package software
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 func TestBackendRegistration(t *testing.T) {
