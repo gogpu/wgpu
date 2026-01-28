@@ -578,7 +578,13 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/gogpu/wgpu/compare/v0.10.3...v0.11.0
+[0.10.3]: https://github.com/gogpu/wgpu/compare/v0.10.2...v0.10.3
+[0.10.2]: https://github.com/gogpu/wgpu/compare/v0.10.1...v0.10.2
+[0.10.1]: https://github.com/gogpu/wgpu/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/gogpu/wgpu/compare/v0.9.3...v0.10.0
+[0.9.3]: https://github.com/gogpu/wgpu/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gogpu/wgpu/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gogpu/wgpu/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/wgpu/compare/v0.8.8...v0.9.0
