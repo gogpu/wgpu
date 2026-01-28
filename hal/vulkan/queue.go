@@ -42,11 +42,9 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have an active swapchain, use its semaphores and per-acquire fence.
-	// This ensures proper GPU-side synchronization between acquire/render/present:
+	// If we have an active swapchain, use its semaphores for GPU-side synchronization:
 	// - Wait on currentAcquireSem (signaled by acquire)
 	// - Signal presentSemaphores[currentImage] (waited on by present)
-	// - Signal acquireFences[currentAcquireIdx] (waited on before reusing the semaphore)
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	var submitFence vk.Fence
 	if q.activeSwapchain != nil {
@@ -57,12 +55,10 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
 		submitInfo.PSignalSemaphores = &presentSem
-		// Use the per-acquire fence so acquireNextImage can wait for this submission
-		submitFence = q.activeSwapchain.acquireFences[q.activeSwapchain.currentAcquireIdx]
 	}
 
-	// If no swapchain, use user-provided fence if available
-	if submitFence == 0 && fence != nil {
+	// Use user-provided fence if available
+	if fence != nil {
 		if vkF, ok := fence.(*Fence); ok {
 			submitFence = vkF.handle
 		}
@@ -109,10 +105,8 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		PSignalSemaphores:    &presentSem,
 	}
 
-	// Signal the per-acquire fence so acquireNextImage knows when this submission is done
-	submitFence := swapchain.acquireFences[swapchain.currentAcquireIdx]
-
-	result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
+	// No fence needed - GPU synchronization is done via semaphores
+	result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
