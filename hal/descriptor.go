@@ -108,44 +108,33 @@ type SurfaceCapabilities struct {
 	Formats []gputypes.TextureFormat
 
 	// PresentModes are the supported presentation modes.
-	PresentModes []PresentMode
+	PresentModes []gputypes.PresentMode
 
 	// AlphaModes are the supported alpha modes.
-	AlphaModes []CompositeAlphaMode
+	AlphaModes []gputypes.CompositeAlphaMode
 }
 
-// PresentMode controls how frames are presented to the surface.
-type PresentMode uint8
+// PresentMode is an alias for gputypes.PresentMode for backward compatibility.
+type PresentMode = gputypes.PresentMode
 
+// PresentMode constants for backward compatibility.
 const (
-	// PresentModeImmediate presents frames immediately (may tear).
-	PresentModeImmediate PresentMode = iota
-
-	// PresentModeMailbox replaces pending frames (low latency, no tearing).
-	PresentModeMailbox
-
-	// PresentModeFifo waits for vsync (no tearing, higher latency).
-	PresentModeFifo
-
-	// PresentModeFifoRelaxed is like Fifo but tears on late frames.
-	PresentModeFifoRelaxed
+	PresentModeImmediate   = gputypes.PresentModeImmediate
+	PresentModeMailbox     = gputypes.PresentModeMailbox
+	PresentModeFifo        = gputypes.PresentModeFifo
+	PresentModeFifoRelaxed = gputypes.PresentModeFifoRelaxed
 )
 
-// CompositeAlphaMode controls how surface alpha is composited.
-type CompositeAlphaMode uint8
+// CompositeAlphaMode is an alias for gputypes.CompositeAlphaMode for backward compatibility.
+type CompositeAlphaMode = gputypes.CompositeAlphaMode
 
+// CompositeAlphaMode constants for backward compatibility.
 const (
-	// CompositeAlphaModeOpaque treats the surface as opaque.
-	CompositeAlphaModeOpaque CompositeAlphaMode = iota
-
-	// CompositeAlphaModePremultiplied uses premultiplied alpha.
-	CompositeAlphaModePremultiplied
-
-	// CompositeAlphaModePostmultiplied uses postmultiplied alpha.
-	CompositeAlphaModePostmultiplied
-
-	// CompositeAlphaModeInherit inherits alpha mode from the system.
-	CompositeAlphaModeInherit
+	CompositeAlphaModeAuto            = gputypes.CompositeAlphaModeAuto
+	CompositeAlphaModeOpaque          = gputypes.CompositeAlphaModeOpaque
+	CompositeAlphaModePreMultiplied   = gputypes.CompositeAlphaModePreMultiplied
+	CompositeAlphaModePostMultiplied  = gputypes.CompositeAlphaModePostMultiplied
+	CompositeAlphaModeInherit         = gputypes.CompositeAlphaModeInherit
 )
 
 // SurfaceConfiguration describes surface settings.
@@ -163,10 +152,10 @@ type SurfaceConfiguration struct {
 	Usage gputypes.TextureUsage
 
 	// PresentMode controls presentation timing.
-	PresentMode PresentMode
+	PresentMode gputypes.PresentMode
 
 	// AlphaMode controls alpha compositing.
-	AlphaMode CompositeAlphaMode
+	AlphaMode gputypes.CompositeAlphaMode
 }
 
 // BufferDescriptor describes how to create a buffer.

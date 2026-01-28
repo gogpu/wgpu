@@ -19,8 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - All packages now import `gputypes` for WebGPU type definitions
-- Converters updated to work with gputypes
-- 94 files updated for consistent type usage
+- **HAL types are now gputypes aliases** — No more type converters needed!
+  - `hal.PresentMode` = `gputypes.PresentMode`
+  - `hal.CompositeAlphaMode` = `gputypes.CompositeAlphaMode`
+- 97 files updated for consistent type usage
 
 ### Migration
 
