@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // -----------------------------------------------------------------------------
@@ -22,7 +22,7 @@ import (
 type Buffer struct {
 	raw           *d3d12.ID3D12Resource
 	size          uint64
-	usage         types.BufferUsage
+	usage         gputypes.BufferUsage
 	heapType      d3d12.D3D12_HEAP_TYPE
 	gpuVA         uint64 // GPU virtual address for binding
 	device        *Device
@@ -117,12 +117,12 @@ func (b *Buffer) Size() uint64 {
 // Texture implements hal.Texture for DirectX 12.
 type Texture struct {
 	raw        *d3d12.ID3D12Resource
-	format     types.TextureFormat
-	dimension  types.TextureDimension
+	format     gputypes.TextureFormat
+	dimension  gputypes.TextureDimension
 	size       hal.Extent3D
 	mipLevels  uint32
 	samples    uint32
-	usage      types.TextureUsage
+	usage      gputypes.TextureUsage
 	device     *Device
 	isExternal bool // True for swapchain images (not owned)
 }
@@ -141,12 +141,12 @@ func (t *Texture) Raw() *d3d12.ID3D12Resource {
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() types.TextureFormat {
+func (t *Texture) Format() gputypes.TextureFormat {
 	return t.format
 }
 
 // Dimension returns the texture dimension.
-func (t *Texture) Dimension() types.TextureDimension {
+func (t *Texture) Dimension() gputypes.TextureDimension {
 	return t.dimension
 }
 
@@ -157,8 +157,8 @@ func (t *Texture) Dimension() types.TextureDimension {
 // TextureView implements hal.TextureView for DirectX 12.
 type TextureView struct {
 	texture      *Texture
-	format       types.TextureFormat
-	dimension    types.TextureViewDimension
+	format       gputypes.TextureFormat
+	dimension    gputypes.TextureViewDimension
 	baseMip      uint32
 	mipCount     uint32
 	baseLayer    uint32

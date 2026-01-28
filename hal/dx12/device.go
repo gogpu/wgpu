@@ -14,7 +14,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 	"golang.org/x/sys/windows"
 )
 
@@ -143,7 +143,7 @@ func (d *Device) createCommandQueue() error {
 	return nil
 }
 
-// createDescriptorHeaps creates the descriptor heaps for various resource types.
+// createDescriptorHeaps creates the descriptor heaps for various resource gputypes.
 func (d *Device) createDescriptorHeaps() error {
 	var err error
 
@@ -411,11 +411,11 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var initialState d3d12.D3D12_RESOURCE_STATES
 
 	switch {
-	case desc.Usage&types.BufferUsageMapRead != 0:
+	case desc.Usage&gputypes.BufferUsageMapRead != 0:
 		// Readback buffer
 		heapType = d3d12.D3D12_HEAP_TYPE_READBACK
 		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
-	case desc.Usage&types.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
+	case desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
 		// Upload buffer
 		heapType = d3d12.D3D12_HEAP_TYPE_UPLOAD
 		initialState = d3d12.D3D12_RESOURCE_STATE_GENERIC_READ
@@ -427,13 +427,13 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 
 	// Align size for constant buffers (256-byte alignment required)
 	bufferSize := desc.Size
-	if desc.Usage&types.BufferUsageUniform != 0 {
+	if desc.Usage&gputypes.BufferUsageUniform != 0 {
 		bufferSize = alignTo256(bufferSize)
 	}
 
 	// Build resource flags
 	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
-	if desc.Usage&types.BufferUsageStorage != 0 {
+	if desc.Usage&gputypes.BufferUsageStorage != 0 {
 		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 	}
 
@@ -519,14 +519,14 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 
 	// Build resource flags based on usage
 	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
-	if desc.Usage&types.TextureUsageRenderAttachment != 0 {
+	if desc.Usage&gputypes.TextureUsageRenderAttachment != 0 {
 		if isDepthFormat(desc.Format) {
 			resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
 		} else {
 			resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
 		}
 	}
-	if desc.Usage&types.TextureUsageStorageBinding != 0 {
+	if desc.Usage&gputypes.TextureUsageStorageBinding != 0 {
 		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 	}
 
@@ -550,7 +550,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 
 	// For depth formats, we may need to use typeless format for SRV compatibility
 	createFormat := dxgiFormat
-	if isDepthFormat(desc.Format) && (desc.Usage&types.TextureUsageTextureBinding != 0) {
+	if isDepthFormat(desc.Format) && (desc.Usage&gputypes.TextureUsageTextureBinding != 0) {
 		// Use typeless format to allow both DSV and SRV
 		createFormat = depthFormatToTypeless(desc.Format)
 		if createFormat == d3d12.DXGI_FORMAT_UNKNOWN {
@@ -587,11 +587,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	// Determine initial state based on primary usage
 	var initialState d3d12.D3D12_RESOURCE_STATES
 	switch {
-	case desc.Usage&types.TextureUsageRenderAttachment != 0 && isDepthFormat(desc.Format):
+	case desc.Usage&gputypes.TextureUsageRenderAttachment != 0 && isDepthFormat(desc.Format):
 		initialState = d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
-	case desc.Usage&types.TextureUsageRenderAttachment != 0:
+	case desc.Usage&gputypes.TextureUsageRenderAttachment != 0:
 		initialState = d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
-	case desc.Usage&types.TextureUsageCopyDst != 0:
+	case desc.Usage&gputypes.TextureUsageCopyDst != 0:
 		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
 	default:
 		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
@@ -599,7 +599,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 
 	// Optimized clear value for render targets/depth stencil
 	var clearValue *d3d12.D3D12_CLEAR_VALUE
-	if desc.Usage&types.TextureUsageRenderAttachment != 0 {
+	if desc.Usage&gputypes.TextureUsageRenderAttachment != 0 {
 		cv := d3d12.D3D12_CLEAR_VALUE{
 			Format: dxgiFormat,
 		}
@@ -659,23 +659,23 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	// Determine view format
 	viewFormat := tex.format
-	if desc != nil && desc.Format != types.TextureFormatUndefined {
+	if desc != nil && desc.Format != gputypes.TextureFormatUndefined {
 		viewFormat = desc.Format
 	}
 
 	// Determine view dimension
-	viewDim := types.TextureViewDimension2D // Default
-	if desc != nil && desc.Dimension != types.TextureViewDimensionUndefined {
+	viewDim := gputypes.TextureViewDimension2D // Default
+	if desc != nil && desc.Dimension != gputypes.TextureViewDimensionUndefined {
 		viewDim = desc.Dimension
 	} else {
 		// Infer from texture dimension
 		switch tex.dimension {
-		case types.TextureDimension1D:
-			viewDim = types.TextureViewDimension1D
-		case types.TextureDimension2D:
-			viewDim = types.TextureViewDimension2D
-		case types.TextureDimension3D:
-			viewDim = types.TextureViewDimension3D
+		case gputypes.TextureDimension1D:
+			viewDim = gputypes.TextureViewDimension1D
+		case gputypes.TextureDimension2D:
+			viewDim = gputypes.TextureViewDimension2D
+		case gputypes.TextureDimension3D:
+			viewDim = gputypes.TextureViewDimension3D
 		}
 	}
 
@@ -717,7 +717,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	dxgiFormat := textureFormatToD3D12(viewFormat)
 
 	// Create RTV if texture supports render attachment and is not depth
-	if tex.usage&types.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
+	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
 		// Allocate RTV descriptor
 		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
 		if err != nil {
@@ -732,13 +732,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 		// Set up dimension-specific fields
 		switch viewDim {
-		case types.TextureViewDimension1D:
+		case gputypes.TextureViewDimension1D:
 			rtvDesc.SetTexture1D(baseMip)
-		case types.TextureViewDimension2D:
+		case gputypes.TextureViewDimension2D:
 			rtvDesc.SetTexture2D(baseMip, 0)
-		case types.TextureViewDimension2DArray:
+		case gputypes.TextureViewDimension2DArray:
 			rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
-		case types.TextureViewDimension3D:
+		case gputypes.TextureViewDimension3D:
 			rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
 		}
 
@@ -749,7 +749,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	// Create DSV if texture supports render attachment and is depth
-	if tex.usage&types.TextureUsageRenderAttachment != 0 && isDepthFormat(viewFormat) {
+	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && isDepthFormat(viewFormat) {
 		// Allocate DSV descriptor
 		dsvHandle, dsvIndex, err := d.allocateDSVDescriptor()
 		if err != nil {
@@ -768,11 +768,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 		// Set up dimension-specific fields
 		switch viewDim {
-		case types.TextureViewDimension1D:
+		case gputypes.TextureViewDimension1D:
 			dsvDesc.SetTexture1D(baseMip)
-		case types.TextureViewDimension2D:
+		case gputypes.TextureViewDimension2D:
 			dsvDesc.SetTexture2D(baseMip)
-		case types.TextureViewDimension2DArray:
+		case gputypes.TextureViewDimension2DArray:
 			dsvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount)
 		}
 
@@ -783,7 +783,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	// Create SRV if texture supports texture binding
-	if tex.usage&types.TextureUsageTextureBinding != 0 {
+	if tex.usage&gputypes.TextureUsageTextureBinding != 0 {
 		// Allocate SRV descriptor
 		srvHandle, srvIndex, err := d.allocateSRVDescriptor()
 		if err != nil {
@@ -805,17 +805,17 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 		// Set up dimension-specific fields
 		switch viewDim {
-		case types.TextureViewDimension1D:
+		case gputypes.TextureViewDimension1D:
 			srvDesc.SetTexture1D(baseMip, mipCount, 0)
-		case types.TextureViewDimension2D:
+		case gputypes.TextureViewDimension2D:
 			srvDesc.SetTexture2D(baseMip, mipCount, 0, 0)
-		case types.TextureViewDimension2DArray:
+		case gputypes.TextureViewDimension2DArray:
 			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, 0, 0)
-		case types.TextureViewDimensionCube:
+		case gputypes.TextureViewDimensionCube:
 			srvDesc.SetTextureCube(baseMip, mipCount, 0)
-		case types.TextureViewDimensionCubeArray:
+		case gputypes.TextureViewDimensionCubeArray:
 			srvDesc.SetTextureCubeArray(baseMip, mipCount, baseLayer/6, layerCount/6, 0)
-		case types.TextureViewDimension3D:
+		case gputypes.TextureViewDimension3D:
 			srvDesc.SetTexture3D(baseMip, mipCount, 0)
 		}
 
@@ -903,22 +903,22 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 		switch {
 		case entry.Buffer != nil:
 			switch entry.Buffer.Type {
-			case types.BufferBindingTypeUniform:
+			case gputypes.BufferBindingTypeUniform:
 				entries[i].Type = BindingTypeUniformBuffer
-			case types.BufferBindingTypeStorage:
+			case gputypes.BufferBindingTypeStorage:
 				entries[i].Type = BindingTypeStorageBuffer
-			case types.BufferBindingTypeReadOnlyStorage:
+			case gputypes.BufferBindingTypeReadOnlyStorage:
 				entries[i].Type = BindingTypeReadOnlyStorageBuffer
 			}
 		case entry.Sampler != nil:
-			if entry.Sampler.Type == types.SamplerBindingTypeComparison {
+			if entry.Sampler.Type == gputypes.SamplerBindingTypeComparison {
 				entries[i].Type = BindingTypeComparisonSampler
 			} else {
 				entries[i].Type = BindingTypeSampler
 			}
 		case entry.Texture != nil:
 			entries[i].Type = BindingTypeSampledTexture
-		case entry.Storage != nil:
+		case entry.StorageTexture != nil:
 			entries[i].Type = BindingTypeStorageTexture
 		}
 	}

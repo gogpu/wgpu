@@ -4,15 +4,15 @@ package software
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // API implements hal.Backend for the software backend.
 type API struct{}
 
 // Variant returns the backend type identifier.
-func (API) Variant() types.Backend {
-	return types.BackendEmpty
+func (API) Variant() gputypes.Backend {
+	return gputypes.BackendEmpty
 }
 
 // CreateInstance creates a new software rendering instance.
@@ -36,19 +36,19 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 	return []hal.ExposedAdapter{
 		{
 			Adapter: &Adapter{},
-			Info: types.AdapterInfo{
+			Info: gputypes.AdapterInfo{
 				Name:       "Software Renderer",
 				Vendor:     "GoGPU",
 				VendorID:   0,
 				DeviceID:   0,
-				DeviceType: types.DeviceTypeCPU,
+				DeviceType: gputypes.DeviceTypeCPU,
 				Driver:     "software-1.0",
 				DriverInfo: "CPU-based software rendering backend",
-				Backend:    types.BackendEmpty,
+				Backend:    gputypes.BackendEmpty,
 			},
 			Features: 0, // No optional features supported
 			Capabilities: hal.Capabilities{
-				Limits: types.DefaultLimits(),
+				Limits: gputypes.DefaultLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

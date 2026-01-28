@@ -4,11 +4,11 @@
 
 ---
 
-## Current Status: v0.10.2
+## Current Status: v0.11.0
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
-| `types/` | ✅ Complete | ~3K | 95% |
+| `gputypes` | ✅ External | — | — |
 | `core/` | ✅ Complete | ~4K | 95% |
 | `hal/noop/` | ✅ Complete | ~1K | 90% |
 | `hal/software/` | ✅ Complete | ~10K | 94% |
@@ -161,16 +161,26 @@
 - [x] **Non-blocking swapchain acquire** — Window responsiveness fix
 - [x] **ErrNotReady Error** — New error for timeout signaling
 
-### v0.10.2 — FFI Build Tag Fix (Current)
+### v0.10.2 — FFI Build Tag Fix
 - [x] **goffi v0.3.8** — Fixed CGO build tag consistency
 - [x] **Clear error message** — `undefined: GOFFI_REQUIRES_CGO_ENABLED_0`
 - [x] **Documentation** — Added `CGO_ENABLED=0` requirement to README
+
+### v0.10.3 — Multi-Thread Architecture
+- [x] **Thread Package** — Cross-platform thread abstraction for GPU operations
+- [x] **Ebiten-style Architecture** — Main thread for Win32, render thread for GPU
+- [x] **Responsive Windows** — No "Not Responding" during resize/drag
+
+### v0.11.0 — gputypes Migration (Current)
+- [x] **Unified WebGPU Types** — Import from `github.com/gogpu/gputypes`
+- [x] **Removed `types/` package** — 1,745 lines removed
+- [x] **Ecosystem Compatibility** — Single source of truth for types
 
 ---
 
 ## Upcoming Releases
 
-### v0.11.0 — Compute Shaders
+### v0.12.0 — Compute Shaders
 **Target: Q1 2026**
 
 - [ ] Compute pipeline support in all backends
@@ -240,6 +250,8 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.11.0 | 2026-01 | gputypes migration, types/ removed |
+| v0.10.3 | 2026-01 | Multi-thread architecture |
 | v0.10.2 | 2026-01 | goffi v0.3.8, CGO build tag fix |
 | v0.10.1 | 2026-01 | Vulkan swapchain responsiveness fix |
 | v0.10.0 | 2026-01 | HAL Backend Integration layer |

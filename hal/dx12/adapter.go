@@ -12,7 +12,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for DirectX 12.
@@ -187,8 +187,8 @@ func (a *Adapter) toExposedAdapter() hal.ExposedAdapter {
 }
 
 // Info returns adapter information.
-func (a *Adapter) Info() types.AdapterInfo {
-	return types.AdapterInfo{
+func (a *Adapter) Info() gputypes.AdapterInfo {
+	return gputypes.AdapterInfo{
 		Name:       utf16ToString(a.desc.Description[:]),
 		Vendor:     vendorIDToName(a.desc.VendorID),
 		VendorID:   a.desc.VendorID,
@@ -196,28 +196,28 @@ func (a *Adapter) Info() types.AdapterInfo {
 		DeviceType: a.deviceType(),
 		Driver:     "DirectX 12",
 		DriverInfo: featureLevelString(a.capabilities.FeatureLevel),
-		Backend:    types.BackendDX12,
+		Backend:    gputypes.BackendDX12,
 	}
 }
 
 // Features returns supported WebGPU features.
-func (a *Adapter) Features() types.Features {
-	var features types.Features
+func (a *Adapter) Features() gputypes.Features {
+	var features gputypes.Features
 
 	// Map D3D12 capabilities to WebGPU features
 	// Feature level 11.0+ guarantees basic compute and texture compression
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
-		features |= types.Features(types.FeatureTextureCompressionBC)
+		features |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}
 
 	// Feature level 12.0+ adds more advanced features
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_12_0 {
-		features |= types.Features(types.FeatureDepth32FloatStencil8)
+		features |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	}
 
 	// Shader model 6.0+ enables subgroups
 	if a.capabilities.ShaderModel >= d3d12.D3D_SHADER_MODEL_6_0 {
-		features |= types.Features(types.FeatureShaderF16)
+		features |= gputypes.Features(gputypes.FeatureShaderF16)
 	}
 
 	return features
@@ -239,8 +239,8 @@ func (a *Adapter) Capabilities() hal.Capabilities {
 }
 
 // limits returns WebGPU-style limits based on D3D12 capabilities.
-func (a *Adapter) limits() types.Limits {
-	limits := types.DefaultLimits()
+func (a *Adapter) limits() gputypes.Limits {
+	limits := gputypes.DefaultLimits()
 
 	// Override with D3D12-specific limits
 	limits.MaxTextureDimension2D = a.capabilities.MaxTexture2D
@@ -270,35 +270,35 @@ func (a *Adapter) limits() types.Limits {
 }
 
 // deviceType determines the device type from the adapter flags and dedicated memory.
-func (a *Adapter) deviceType() types.DeviceType {
+func (a *Adapter) deviceType() gputypes.DeviceType {
 	// Check for software adapter (WARP)
 	if a.desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
-		return types.DeviceTypeCPU
+		return gputypes.DeviceTypeCPU
 	}
 
 	// Check for dedicated video memory to distinguish discrete from integrated
 	if a.desc.DedicatedVideoMemory > 0 {
 		// Heuristic: >512MB dedicated VRAM is likely discrete
 		if a.desc.DedicatedVideoMemory > 512*1024*1024 {
-			return types.DeviceTypeDiscreteGPU
+			return gputypes.DeviceTypeDiscreteGPU
 		}
 	}
 
 	// If there's no dedicated video memory, it's likely integrated
 	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
-		return types.DeviceTypeIntegratedGPU
+		return gputypes.DeviceTypeIntegratedGPU
 	}
 
 	// Assume discrete if there's any dedicated memory
 	if a.desc.DedicatedVideoMemory > 0 {
-		return types.DeviceTypeDiscreteGPU
+		return gputypes.DeviceTypeDiscreteGPU
 	}
 
-	return types.DeviceTypeOther
+	return gputypes.DeviceTypeOther
 }
 
 // Open opens a logical device with the requested features and limits.
-func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDevice, error) {
+func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
 	// Validate that the adapter supports the requested features
 	supported := a.Features()
 	if features&^supported != 0 {
@@ -321,28 +321,28 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 }
 
 // TextureFormatCapabilities returns capabilities for a specific texture format.
-func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
+func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
 	// Note: CheckFormatSupport can query exact format capabilities per resource type.
 	// For now, return common capabilities for well-supported formats
 	flags := hal.TextureFormatCapabilitySampled
 
 	switch format {
-	case types.TextureFormatRGBA8Unorm,
-		types.TextureFormatRGBA8UnormSrgb,
-		types.TextureFormatBGRA8Unorm,
-		types.TextureFormatBGRA8UnormSrgb,
-		types.TextureFormatRGBA16Float,
-		types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatBGRA8UnormSrgb,
+		gputypes.TextureFormatRGBA16Float,
+		gputypes.TextureFormatRGBA32Float:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityBlendable |
 			hal.TextureFormatCapabilityMultisample |
 			hal.TextureFormatCapabilityMultisampleResolve
 
-	case types.TextureFormatDepth16Unorm,
-		types.TextureFormatDepth24Plus,
-		types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32Float,
-		types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityMultisample
 	}
@@ -356,12 +356,12 @@ func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.Text
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	// D3D12 supports these formats for swap chains
 	return &hal.SurfaceCapabilities{
-		Formats: []types.TextureFormat{
-			types.TextureFormatBGRA8Unorm,
-			types.TextureFormatRGBA8Unorm,
-			types.TextureFormatBGRA8UnormSrgb,
-			types.TextureFormatRGBA8UnormSrgb,
-			types.TextureFormatRGBA16Float,
+		Formats: []gputypes.TextureFormat{
+			gputypes.TextureFormatBGRA8Unorm,
+			gputypes.TextureFormatRGBA8Unorm,
+			gputypes.TextureFormatBGRA8UnormSrgb,
+			gputypes.TextureFormatRGBA8UnormSrgb,
+			gputypes.TextureFormatRGBA16Float,
 		},
 		PresentModes: a.presentModes(),
 		AlphaModes: []hal.CompositeAlphaMode{
@@ -526,7 +526,7 @@ func (a *AdapterLegacy) setTextureLimits() {
 
 // toExposedAdapter converts the legacy adapter to hal.ExposedAdapter.
 func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
-	info := types.AdapterInfo{
+	info := gputypes.AdapterInfo{
 		Name:       utf16ToString(a.desc.Description[:]),
 		Vendor:     vendorIDToName(a.desc.VendorID),
 		VendorID:   a.desc.VendorID,
@@ -534,7 +534,7 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 		DeviceType: a.deviceType(),
 		Driver:     "DirectX 12",
 		DriverInfo: featureLevelString(a.capabilities.FeatureLevel),
-		Backend:    types.BackendDX12,
+		Backend:    gputypes.BackendDX12,
 	}
 
 	return hal.ExposedAdapter{
@@ -546,20 +546,20 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 }
 
 // Features returns supported WebGPU features for legacy adapter.
-func (a *AdapterLegacy) Features() types.Features {
-	var features types.Features
+func (a *AdapterLegacy) Features() gputypes.Features {
+	var features gputypes.Features
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
-		features |= types.Features(types.FeatureTextureCompressionBC)
+		features |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_12_0 {
-		features |= types.Features(types.FeatureDepth32FloatStencil8)
+		features |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	}
 	return features
 }
 
 // Capabilities returns detailed adapter capabilities.
 func (a *AdapterLegacy) Capabilities() hal.Capabilities {
-	limits := types.DefaultLimits()
+	limits := gputypes.DefaultLimits()
 	limits.MaxTextureDimension2D = a.capabilities.MaxTexture2D
 	limits.MaxTextureDimension3D = a.capabilities.MaxTexture3D
 
@@ -577,24 +577,24 @@ func (a *AdapterLegacy) Capabilities() hal.Capabilities {
 }
 
 // deviceType determines the device type from the adapter flags and dedicated memory.
-func (a *AdapterLegacy) deviceType() types.DeviceType {
+func (a *AdapterLegacy) deviceType() gputypes.DeviceType {
 	if a.desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
-		return types.DeviceTypeCPU
+		return gputypes.DeviceTypeCPU
 	}
 	if a.desc.DedicatedVideoMemory > 512*1024*1024 {
-		return types.DeviceTypeDiscreteGPU
+		return gputypes.DeviceTypeDiscreteGPU
 	}
 	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
-		return types.DeviceTypeIntegratedGPU
+		return gputypes.DeviceTypeIntegratedGPU
 	}
 	if a.desc.DedicatedVideoMemory > 0 {
-		return types.DeviceTypeDiscreteGPU
+		return gputypes.DeviceTypeDiscreteGPU
 	}
-	return types.DeviceTypeOther
+	return gputypes.DeviceTypeOther
 }
 
 // Open opens a logical device with the requested features and limits.
-func (a *AdapterLegacy) Open(features types.Features, limits types.Limits) (hal.OpenDevice, error) {
+func (a *AdapterLegacy) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
 	// Validate that the adapter supports the requested features
 	supported := a.Features()
 	if features&^supported != 0 {
@@ -617,13 +617,13 @@ func (a *AdapterLegacy) Open(features types.Features, limits types.Limits) (hal.
 }
 
 // TextureFormatCapabilities returns capabilities for a specific texture format.
-func (a *AdapterLegacy) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
+func (a *AdapterLegacy) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
 	flags := hal.TextureFormatCapabilitySampled
 	switch format {
-	case types.TextureFormatRGBA8Unorm,
-		types.TextureFormatRGBA8UnormSrgb,
-		types.TextureFormatBGRA8Unorm,
-		types.TextureFormatBGRA8UnormSrgb:
+	case gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatBGRA8UnormSrgb:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityBlendable |
 			hal.TextureFormatCapabilityMultisample
@@ -634,9 +634,9 @@ func (a *AdapterLegacy) TextureFormatCapabilities(format types.TextureFormat) ha
 // SurfaceCapabilities returns surface capabilities.
 func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	return &hal.SurfaceCapabilities{
-		Formats: []types.TextureFormat{
-			types.TextureFormatBGRA8Unorm,
-			types.TextureFormatRGBA8Unorm,
+		Formats: []gputypes.TextureFormat{
+			gputypes.TextureFormatBGRA8Unorm,
+			gputypes.TextureFormatRGBA8Unorm,
 		},
 		PresentModes: []hal.PresentMode{hal.PresentModeFifo},
 		AlphaModes:   []hal.CompositeAlphaMode{hal.CompositeAlphaModeOpaque},

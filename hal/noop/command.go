@@ -2,7 +2,7 @@ package noop
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the noop backend.
@@ -73,7 +73,7 @@ func (r *RenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) 
 func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
 
 // SetIndexBuffer is a no-op.
-func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ types.IndexFormat, _ uint64) {}
+func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
 
 // SetViewport is a no-op.
 func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
@@ -82,7 +82,7 @@ func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
 func (r *RenderPassEncoder) SetScissorRect(_, _, _, _ uint32) {}
 
 // SetBlendConstant is a no-op.
-func (r *RenderPassEncoder) SetBlendConstant(_ *types.Color) {}
+func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 
 // SetStencilReference is a no-op.
 func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}

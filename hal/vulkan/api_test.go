@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestVkMakeVersion tests Vulkan version creation.
@@ -288,7 +288,7 @@ func TestBackendVariant(t *testing.T) {
 	backend := &Backend{}
 	variant := backend.Variant()
 
-	if variant != types.BackendVulkan {
+	if variant != gputypes.BackendVulkan {
 		t.Errorf("Variant() = %v, want BackendVulkan", variant)
 	}
 }
@@ -488,68 +488,68 @@ func TestFeaturesFromPhysicalDevice(t *testing.T) {
 	tests := []struct {
 		name     string
 		features vk.PhysicalDeviceFeatures
-		want     types.Features
+		want     gputypes.Features
 	}{
 		{
 			name:     "no features",
 			features: vk.PhysicalDeviceFeatures{},
-			want:     types.Features(types.FeatureDepth32FloatStencil8), // Always enabled
+			want:     gputypes.Features(gputypes.FeatureDepth32FloatStencil8), // Always enabled
 		},
 		{
 			name: "texture compression BC",
 			features: vk.PhysicalDeviceFeatures{
 				TextureCompressionBC: 1,
 			},
-			want: types.Features(types.FeatureTextureCompressionBC) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureTextureCompressionBC) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "texture compression ETC2",
 			features: vk.PhysicalDeviceFeatures{
 				TextureCompressionETC2: 1,
 			},
-			want: types.Features(types.FeatureTextureCompressionETC2) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureTextureCompressionETC2) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "texture compression ASTC",
 			features: vk.PhysicalDeviceFeatures{
 				TextureCompressionASTC_LDR: 1,
 			},
-			want: types.Features(types.FeatureTextureCompressionASTC) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureTextureCompressionASTC) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "draw indirect first instance",
 			features: vk.PhysicalDeviceFeatures{
 				DrawIndirectFirstInstance: 1,
 			},
-			want: types.Features(types.FeatureIndirectFirstInstance) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureIndirectFirstInstance) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "multi draw indirect",
 			features: vk.PhysicalDeviceFeatures{
 				MultiDrawIndirect: 1,
 			},
-			want: types.Features(types.FeatureMultiDrawIndirect) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureMultiDrawIndirect) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "depth clamp",
 			features: vk.PhysicalDeviceFeatures{
 				DepthClamp: 1,
 			},
-			want: types.Features(types.FeatureDepthClipControl) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureDepthClipControl) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "shader float64",
 			features: vk.PhysicalDeviceFeatures{
 				ShaderFloat64: 1,
 			},
-			want: types.Features(types.FeatureShaderFloat64) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureShaderFloat64) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "pipeline statistics query",
 			features: vk.PhysicalDeviceFeatures{
 				PipelineStatisticsQuery: 1,
 			},
-			want: types.Features(types.FeaturePipelineStatisticsQuery) | types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeaturePipelineStatisticsQuery) | gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 		{
 			name: "all features",
@@ -563,15 +563,15 @@ func TestFeaturesFromPhysicalDevice(t *testing.T) {
 				ShaderFloat64:              1,
 				PipelineStatisticsQuery:    1,
 			},
-			want: types.Features(types.FeatureTextureCompressionBC) |
-				types.Features(types.FeatureTextureCompressionETC2) |
-				types.Features(types.FeatureTextureCompressionASTC) |
-				types.Features(types.FeatureIndirectFirstInstance) |
-				types.Features(types.FeatureMultiDrawIndirect) |
-				types.Features(types.FeatureDepthClipControl) |
-				types.Features(types.FeatureShaderFloat64) |
-				types.Features(types.FeaturePipelineStatisticsQuery) |
-				types.Features(types.FeatureDepth32FloatStencil8),
+			want: gputypes.Features(gputypes.FeatureTextureCompressionBC) |
+				gputypes.Features(gputypes.FeatureTextureCompressionETC2) |
+				gputypes.Features(gputypes.FeatureTextureCompressionASTC) |
+				gputypes.Features(gputypes.FeatureIndirectFirstInstance) |
+				gputypes.Features(gputypes.FeatureMultiDrawIndirect) |
+				gputypes.Features(gputypes.FeatureDepthClipControl) |
+				gputypes.Features(gputypes.FeatureShaderFloat64) |
+				gputypes.Features(gputypes.FeaturePipelineStatisticsQuery) |
+				gputypes.Features(gputypes.FeatureDepth32FloatStencil8),
 		},
 	}
 

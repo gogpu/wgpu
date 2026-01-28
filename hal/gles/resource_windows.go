@@ -9,7 +9,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Surface implements hal.Surface for OpenGL on Windows.
@@ -34,7 +34,7 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 	var maxDrawBuffers int32
 	s.glCtx.GetIntegerv(gl.MAX_DRAW_BUFFERS, &maxDrawBuffers)
 
-	limits := types.DefaultLimits()
+	limits := gputypes.DefaultLimits()
 	limits.MaxTextureDimension1D = uint32(maxTextureSize)
 	limits.MaxTextureDimension2D = uint32(maxTextureSize)
 	limits.MaxColorAttachments = uint32(maxDrawBuffers)
@@ -47,15 +47,15 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 			version:  s.version,
 			renderer: s.renderer,
 		},
-		Info: types.AdapterInfo{
+		Info: gputypes.AdapterInfo{
 			Name:       s.renderer,
 			Vendor:     vendor,
 			VendorID:   0,
 			DeviceID:   0,
-			DeviceType: types.DeviceTypeDiscreteGPU,
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
 			Driver:     s.version,
 			DriverInfo: "OpenGL 3.3+",
-			Backend:    types.BackendGL,
+			Backend:    gputypes.BackendGL,
 		},
 		Features: 0, // Note: Feature detection requires GL extension queries.
 		Capabilities: hal.Capabilities{

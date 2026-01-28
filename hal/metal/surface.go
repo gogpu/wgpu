@@ -9,14 +9,14 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Surface implements hal.Surface for Metal using CAMetalLayer.
 type Surface struct {
 	layer       ID // CAMetalLayer
 	device      *Device
-	format      types.TextureFormat
+	format      gputypes.TextureFormat
 	width       uint32
 	height      uint32
 	presentMode hal.PresentMode
@@ -58,7 +58,7 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	msgSendCGSize(s.layer, Sel("setDrawableSize:"), size)
 
 	// Configure framebuffer only if not using storage binding
-	framebufferOnly := config.Usage&types.TextureUsageStorageBinding == 0
+	framebufferOnly := config.Usage&gputypes.TextureUsageStorageBinding == 0
 	msgSendVoid(s.layer, Sel("setFramebufferOnly:"), argBool(framebufferOnly))
 
 	// Set present mode
@@ -102,8 +102,8 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		depth:      1,
 		mipLevels:  1,
 		samples:    1,
-		dimension:  types.TextureDimension2D,
-		usage:      types.TextureUsageRenderAttachment,
+		dimension:  gputypes.TextureDimension2D,
+		usage:      gputypes.TextureUsageRenderAttachment,
 		device:     s.device,
 		isExternal: true,
 	}

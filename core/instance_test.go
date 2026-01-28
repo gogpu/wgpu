@@ -3,35 +3,35 @@ package core
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestNewInstance(t *testing.T) {
 	tests := []struct {
 		name string
-		desc *types.InstanceDescriptor
-		want types.Backends
+		desc *gputypes.InstanceDescriptor
+		want gputypes.Backends
 	}{
 		{
 			name: "nil descriptor uses defaults",
 			desc: nil,
-			want: types.BackendsPrimary,
+			want: gputypes.BackendsPrimary,
 		},
 		{
 			name: "custom backends",
-			desc: &types.InstanceDescriptor{
-				Backends: types.BackendsVulkan | types.BackendsMetal,
-				Flags:    types.InstanceFlagsDebug,
+			desc: &gputypes.InstanceDescriptor{
+				Backends: gputypes.BackendsVulkan | gputypes.BackendsMetal,
+				Flags:    gputypes.InstanceFlagsDebug,
 			},
-			want: types.BackendsVulkan | types.BackendsMetal,
+			want: gputypes.BackendsVulkan | gputypes.BackendsMetal,
 		},
 		{
 			name: "all backends",
-			desc: &types.InstanceDescriptor{
-				Backends: types.BackendsAll,
+			desc: &gputypes.InstanceDescriptor{
+				Backends: gputypes.BackendsAll,
 				Flags:    0,
 			},
-			want: types.BackendsAll,
+			want: gputypes.BackendsAll,
 		},
 	}
 
@@ -62,7 +62,7 @@ func TestNewInstance(t *testing.T) {
 func TestInstanceFlags(t *testing.T) {
 	tests := []struct {
 		name  string
-		flags types.InstanceFlags
+		flags gputypes.InstanceFlags
 	}{
 		{
 			name:  "no flags",
@@ -70,15 +70,15 @@ func TestInstanceFlags(t *testing.T) {
 		},
 		{
 			name:  "debug flag",
-			flags: types.InstanceFlagsDebug,
+			flags: gputypes.InstanceFlagsDebug,
 		},
 		{
 			name:  "validation flag",
-			flags: types.InstanceFlagsValidation,
+			flags: gputypes.InstanceFlagsValidation,
 		},
 		{
 			name:  "multiple flags",
-			flags: types.InstanceFlagsDebug | types.InstanceFlagsValidation,
+			flags: gputypes.InstanceFlagsDebug | gputypes.InstanceFlagsValidation,
 		},
 	}
 
@@ -86,8 +86,8 @@ func TestInstanceFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			GetGlobal().Clear()
 
-			desc := types.InstanceDescriptor{
-				Backends: types.BackendsPrimary,
+			desc := gputypes.InstanceDescriptor{
+				Backends: gputypes.BackendsPrimary,
 				Flags:    tt.flags,
 			}
 			instance := NewInstance(&desc)
@@ -129,7 +129,7 @@ func TestEnumerateAdapters(t *testing.T) {
 func TestRequestAdapter(t *testing.T) {
 	tests := []struct {
 		name    string
-		options *types.RequestAdapterOptions
+		options *gputypes.RequestAdapterOptions
 		wantErr bool
 	}{
 		{
@@ -139,28 +139,28 @@ func TestRequestAdapter(t *testing.T) {
 		},
 		{
 			name: "no power preference",
-			options: &types.RequestAdapterOptions{
-				PowerPreference: types.PowerPreferenceNone,
+			options: &gputypes.RequestAdapterOptions{
+				PowerPreference: gputypes.PowerPreferenceNone,
 			},
 			wantErr: false,
 		},
 		{
 			name: "high performance preference",
-			options: &types.RequestAdapterOptions{
-				PowerPreference: types.PowerPreferenceHighPerformance,
+			options: &gputypes.RequestAdapterOptions{
+				PowerPreference: gputypes.PowerPreferenceHighPerformance,
 			},
 			wantErr: false, // Mock adapter is discrete GPU
 		},
 		{
 			name: "low power preference",
-			options: &types.RequestAdapterOptions{
-				PowerPreference: types.PowerPreferenceLowPower,
+			options: &gputypes.RequestAdapterOptions{
+				PowerPreference: gputypes.PowerPreferenceLowPower,
 			},
 			wantErr: true, // Mock adapter is discrete GPU, not integrated
 		},
 		{
 			name: "force fallback adapter",
-			options: &types.RequestAdapterOptions{
+			options: &gputypes.RequestAdapterOptions{
 				ForceFallbackAdapter: true,
 			},
 			wantErr: true, // Mock adapter is not CPU
@@ -205,7 +205,7 @@ func TestRequestAdapterNoAdapters(t *testing.T) {
 
 	// Create instance but remove mock adapter
 	instance := &Instance{
-		backends: types.BackendsPrimary,
+		backends: gputypes.BackendsPrimary,
 		flags:    0,
 		adapters: []AdapterID{}, // Empty adapter list
 	}
@@ -219,44 +219,44 @@ func TestRequestAdapterNoAdapters(t *testing.T) {
 func TestMatchesPowerPreference(t *testing.T) {
 	tests := []struct {
 		name       string
-		deviceType types.DeviceType
-		preference types.PowerPreference
+		deviceType gputypes.DeviceType
+		preference gputypes.PowerPreference
 		want       bool
 	}{
 		{
 			name:       "integrated GPU with low power preference",
-			deviceType: types.DeviceTypeIntegratedGPU,
-			preference: types.PowerPreferenceLowPower,
+			deviceType: gputypes.DeviceTypeIntegratedGPU,
+			preference: gputypes.PowerPreferenceLowPower,
 			want:       true,
 		},
 		{
 			name:       "discrete GPU with low power preference",
-			deviceType: types.DeviceTypeDiscreteGPU,
-			preference: types.PowerPreferenceLowPower,
+			deviceType: gputypes.DeviceTypeDiscreteGPU,
+			preference: gputypes.PowerPreferenceLowPower,
 			want:       false,
 		},
 		{
 			name:       "discrete GPU with high performance preference",
-			deviceType: types.DeviceTypeDiscreteGPU,
-			preference: types.PowerPreferenceHighPerformance,
+			deviceType: gputypes.DeviceTypeDiscreteGPU,
+			preference: gputypes.PowerPreferenceHighPerformance,
 			want:       true,
 		},
 		{
 			name:       "integrated GPU with high performance preference",
-			deviceType: types.DeviceTypeIntegratedGPU,
-			preference: types.PowerPreferenceHighPerformance,
+			deviceType: gputypes.DeviceTypeIntegratedGPU,
+			preference: gputypes.PowerPreferenceHighPerformance,
 			want:       false,
 		},
 		{
 			name:       "any GPU with no preference",
-			deviceType: types.DeviceTypeDiscreteGPU,
-			preference: types.PowerPreferenceNone,
+			deviceType: gputypes.DeviceTypeDiscreteGPU,
+			preference: gputypes.PowerPreferenceNone,
 			want:       true,
 		},
 		{
 			name:       "CPU with low power preference",
-			deviceType: types.DeviceTypeCPU,
-			preference: types.PowerPreferenceLowPower,
+			deviceType: gputypes.DeviceTypeCPU,
+			preference: gputypes.PowerPreferenceLowPower,
 			want:       false,
 		},
 	}

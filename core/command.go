@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // ComputePassDescriptor describes how to create a compute pass.
@@ -535,13 +535,13 @@ type RenderPassColorAttachment struct {
 	ResolveTarget *TextureView
 
 	// LoadOp specifies what to do at pass start.
-	LoadOp types.LoadOp
+	LoadOp gputypes.LoadOp
 
 	// StoreOp specifies what to do at pass end.
-	StoreOp types.StoreOp
+	StoreOp gputypes.StoreOp
 
 	// ClearValue is the clear color (used if LoadOp is Clear).
-	ClearValue types.Color
+	ClearValue gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.
@@ -550,10 +550,10 @@ type RenderPassDepthStencilAttachment struct {
 	View *TextureView
 
 	// DepthLoadOp specifies what to do with depth at pass start.
-	DepthLoadOp types.LoadOp
+	DepthLoadOp gputypes.LoadOp
 
 	// DepthStoreOp specifies what to do with depth at pass end.
-	DepthStoreOp types.StoreOp
+	DepthStoreOp gputypes.StoreOp
 
 	// DepthClearValue is the depth clear value.
 	DepthClearValue float32
@@ -562,10 +562,10 @@ type RenderPassDepthStencilAttachment struct {
 	DepthReadOnly bool
 
 	// StencilLoadOp specifies what to do with stencil at pass start.
-	StencilLoadOp types.LoadOp
+	StencilLoadOp gputypes.LoadOp
 
 	// StencilStoreOp specifies what to do with stencil at pass end.
-	StencilStoreOp types.StoreOp
+	StencilStoreOp gputypes.StoreOp
 
 	// StencilClearValue is the stencil clear value.
 	StencilClearValue uint32
@@ -623,7 +623,7 @@ func (p *CoreRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, off
 }
 
 // SetIndexBuffer sets the index buffer.
-func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format types.IndexFormat, offset uint64) {
+func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
 	if p.ended {
 		return
 	}
@@ -658,7 +658,7 @@ func (p *CoreRenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 }
 
 // SetBlendConstant sets the blend constant color.
-func (p *CoreRenderPassEncoder) SetBlendConstant(color *types.Color) {
+func (p *CoreRenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if p.ended {
 		return
 	}

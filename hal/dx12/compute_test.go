@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestDX12ComputePipelineCreation tests pipeline creation with root signature.
@@ -104,15 +104,15 @@ func TestDX12ComputeUAV(t *testing.T) {
 	})
 
 	t.Run("Buffer storage usage", func(t *testing.T) {
-		buffer := &Buffer{usage: types.BufferUsageStorage}
-		if buffer.usage&types.BufferUsageStorage == 0 {
+		buffer := &Buffer{usage: gputypes.BufferUsageStorage}
+		if buffer.usage&gputypes.BufferUsageStorage == 0 {
 			t.Error("Buffer should have storage usage")
 		}
 	})
 
 	t.Run("Texture storage binding", func(t *testing.T) {
-		texture := &Texture{usage: types.TextureUsageStorageBinding, format: types.TextureFormatRGBA32Float}
-		if texture.usage&types.TextureUsageStorageBinding == 0 {
+		texture := &Texture{usage: gputypes.TextureUsageStorageBinding, format: gputypes.TextureFormatRGBA32Float}
+		if texture.usage&gputypes.TextureUsageStorageBinding == 0 {
 			t.Error("Texture should have storage binding")
 		}
 	})
@@ -138,14 +138,14 @@ func TestDX12ComputeBarriers(t *testing.T) {
 	})
 
 	t.Run("bufferUsageToD3D12State storage", func(t *testing.T) {
-		state := bufferUsageToD3D12State(types.BufferUsageStorage)
+		state := bufferUsageToD3D12State(gputypes.BufferUsageStorage)
 		if state != d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS {
 			t.Errorf("state = %d, want UNORDERED_ACCESS", state)
 		}
 	})
 
 	t.Run("textureUsageToD3D12State storage", func(t *testing.T) {
-		state := textureUsageToD3D12State(types.TextureUsageStorageBinding)
+		state := textureUsageToD3D12State(gputypes.TextureUsageStorageBinding)
 		if state != d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS {
 			t.Errorf("state = %d, want UNORDERED_ACCESS", state)
 		}

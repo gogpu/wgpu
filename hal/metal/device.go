@@ -15,7 +15,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for Metal.
@@ -53,8 +53,8 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	var options MTLResourceOptions
-	mapRead := desc.Usage&types.BufferUsageMapRead != 0
-	mapWrite := desc.Usage&types.BufferUsageMapWrite != 0
+	mapRead := desc.Usage&gputypes.BufferUsageMapRead != 0
+	mapWrite := desc.Usage&gputypes.BufferUsageMapWrite != 0
 
 	if mapRead || mapWrite {
 		options = MTLResourceStorageModeShared
@@ -211,7 +211,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	defer pool.Drain()
 
 	format := desc.Format
-	if format == types.TextureFormatUndefined {
+	if format == gputypes.TextureFormatUndefined {
 		format = mtlTexture.format
 	}
 	pixelFormat := textureFormatToMTL(format)
@@ -234,7 +234,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	var viewType MTLTextureType
-	if desc.Dimension == types.TextureViewDimensionUndefined {
+	if desc.Dimension == gputypes.TextureViewDimensionUndefined {
 		viewType = textureTypeFromDimension(mtlTexture.dimension, mtlTexture.samples, mtlTexture.depth)
 	} else {
 		viewType = textureViewDimensionToMTL(desc.Dimension)
@@ -302,7 +302,7 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		_ = MsgSend(sampDesc, Sel("setMaxAnisotropy:"), uintptr(desc.Anisotropy))
 	}
 
-	if desc.Compare != types.CompareFunctionUndefined {
+	if desc.Compare != gputypes.CompareFunctionUndefined {
 		_ = MsgSend(sampDesc, Sel("setCompareFunction:"), uintptr(compareFunctionToMTL(desc.Compare)))
 	}
 

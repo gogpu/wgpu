@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Mock HAL types to satisfy interfaces without returning nil, nil.
@@ -69,10 +69,10 @@ func (mockRenderPassEncoder) End()                                              
 func (mockRenderPassEncoder) SetPipeline(_ hal.RenderPipeline)                           {}
 func (mockRenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32)         {}
 func (mockRenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64)           {}
-func (mockRenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ types.IndexFormat, _ uint64) {}
+func (mockRenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
 func (mockRenderPassEncoder) SetViewport(_, _, _, _, _, _ float32)                       {}
 func (mockRenderPassEncoder) SetScissorRect(_, _, _, _ uint32)                           {}
-func (mockRenderPassEncoder) SetBlendConstant(_ *types.Color)                            {}
+func (mockRenderPassEncoder) SetBlendConstant(_ *gputypes.Color)                            {}
 func (mockRenderPassEncoder) SetStencilReference(_ uint32)                               {}
 func (mockRenderPassEncoder) Draw(_, _, _, _ uint32)                                     {}
 func (mockRenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32)              {}
@@ -145,9 +145,9 @@ func (m *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, erro
 func (m *mockHALDevice) Destroy() { m.destroyed = true }
 
 func TestDevice_NewDevice(t *testing.T) {
-	adapter := &Adapter{Info: types.AdapterInfo{Name: "Test"}}
+	adapter := &Adapter{Info: gputypes.AdapterInfo{Name: "Test"}}
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, adapter, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, adapter, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if device == nil {
 		t.Fatal("NewDevice returned nil")
 	}
@@ -164,7 +164,7 @@ func TestDevice_NewDevice(t *testing.T) {
 
 func TestDevice_RawAccess(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	lock := device.SnatchLock()
 	guard := lock.Read()
 	defer guard.Release()
@@ -176,7 +176,7 @@ func TestDevice_RawAccess(t *testing.T) {
 
 func TestDevice_Destroy(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if !device.IsValid() {
 		t.Error("Device should be valid before destroy")
 	}
@@ -191,7 +191,7 @@ func TestDevice_Destroy(t *testing.T) {
 
 func TestDevice_DestroyIdempotent(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	device.Destroy()
 	device.Destroy()
 	device.Destroy()
@@ -202,7 +202,7 @@ func TestDevice_DestroyIdempotent(t *testing.T) {
 
 func TestDevice_IsValid(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if !device.IsValid() {
 		t.Error("Should be valid")
 	}
@@ -214,7 +214,7 @@ func TestDevice_IsValid(t *testing.T) {
 
 func TestDevice_SnatchLock(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if device.SnatchLock() == nil {
 		t.Error("Should have lock")
 	}
@@ -226,7 +226,7 @@ func TestDevice_SnatchLock(t *testing.T) {
 
 func TestDevice_ConcurrentRawAccess(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -243,7 +243,7 @@ func TestDevice_ConcurrentRawAccess(t *testing.T) {
 
 func TestDevice_checkValid(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if err := device.checkValid(); err != nil {
 		t.Error("Should be valid")
 	}
@@ -255,7 +255,7 @@ func TestDevice_checkValid(t *testing.T) {
 
 func TestDevice_AssociatedQueue(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "Test")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "Test")
 	if device.AssociatedQueue() != nil {
 		t.Error("Should be nil initially")
 	}

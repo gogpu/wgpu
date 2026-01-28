@@ -10,15 +10,15 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Backend implements hal.Backend for Vulkan.
 type Backend struct{}
 
 // Variant returns the backend type identifier.
-func (Backend) Variant() types.Backend {
-	return types.BackendVulkan
+func (Backend) Variant() gputypes.Backend {
+	return gputypes.BackendVulkan
 }
 
 // CreateInstance creates a new Vulkan instance.
@@ -57,7 +57,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Optional: validation layers for debug (only if available)
 	var layers []string
-	if desc != nil && desc.Flags&types.InstanceFlagsDebug != 0 {
+	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
 		if isLayerAvailable(cmds, "VK_LAYER_KHRONOS_validation") {
 			layers = append(layers, "VK_LAYER_KHRONOS_validation\x00")
 			extensions = append(extensions, "VK_EXT_debug_utils\x00")
@@ -162,16 +162,16 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		}
 
 		// Convert device type
-		deviceType := types.DeviceTypeOther
+		deviceType := gputypes.DeviceTypeOther
 		switch props.DeviceType {
 		case vk.PhysicalDeviceTypeDiscreteGpu:
-			deviceType = types.DeviceTypeDiscreteGPU
+			deviceType = gputypes.DeviceTypeDiscreteGPU
 		case vk.PhysicalDeviceTypeIntegratedGpu:
-			deviceType = types.DeviceTypeIntegratedGPU
+			deviceType = gputypes.DeviceTypeIntegratedGPU
 		case vk.PhysicalDeviceTypeVirtualGpu:
-			deviceType = types.DeviceTypeVirtualGPU
+			deviceType = gputypes.DeviceTypeVirtualGPU
 		case vk.PhysicalDeviceTypeCpu:
-			deviceType = types.DeviceTypeCPU
+			deviceType = gputypes.DeviceTypeCPU
 		}
 
 		// Extract device name
@@ -186,7 +186,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 		adapters = append(adapters, hal.ExposedAdapter{
 			Adapter: adapter,
-			Info: types.AdapterInfo{
+			Info: gputypes.AdapterInfo{
 				Name:       deviceName,
 				Vendor:     vendorIDToName(props.VendorID),
 				VendorID:   props.VendorID,
@@ -197,7 +197,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionMajor(props.ApiVersion),
 					vkVersionMinor(props.ApiVersion),
 					vkVersionPatch(props.ApiVersion)),
-				Backend: types.BackendVulkan,
+				Backend: gputypes.BackendVulkan,
 			},
 			Features: featuresFromPhysicalDevice(&features),
 			Capabilities: hal.Capabilities{
@@ -358,56 +358,56 @@ func vendorIDToName(id uint32) string {
 
 // featuresFromPhysicalDevice maps Vulkan physical device features to WebGPU features.
 // Reference: wgpu-hal/src/vulkan/adapter.rs:584-829
-func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) types.Features {
-	var result types.Features
+func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) gputypes.Features {
+	var result gputypes.Features
 
 	// Texture compression features
 	if features.TextureCompressionBC != 0 {
-		result |= types.Features(types.FeatureTextureCompressionBC)
+		result |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}
 	if features.TextureCompressionETC2 != 0 {
-		result |= types.Features(types.FeatureTextureCompressionETC2)
+		result |= gputypes.Features(gputypes.FeatureTextureCompressionETC2)
 	}
 	if features.TextureCompressionASTC_LDR != 0 {
-		result |= types.Features(types.FeatureTextureCompressionASTC)
+		result |= gputypes.Features(gputypes.FeatureTextureCompressionASTC)
 	}
 
 	// Draw features
 	if features.DrawIndirectFirstInstance != 0 {
-		result |= types.Features(types.FeatureIndirectFirstInstance)
+		result |= gputypes.Features(gputypes.FeatureIndirectFirstInstance)
 	}
 	if features.MultiDrawIndirect != 0 {
-		result |= types.Features(types.FeatureMultiDrawIndirect)
+		result |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
 	}
 
 	// Depth/clipping features
 	if features.DepthClamp != 0 {
-		result |= types.Features(types.FeatureDepthClipControl)
+		result |= gputypes.Features(gputypes.FeatureDepthClipControl)
 	}
 
 	// Shader features
 	if features.ShaderFloat64 != 0 {
-		result |= types.Features(types.FeatureShaderFloat64)
+		result |= gputypes.Features(gputypes.FeatureShaderFloat64)
 	}
 
 	// Query features
 	if features.PipelineStatisticsQuery != 0 {
-		result |= types.Features(types.FeaturePipelineStatisticsQuery)
+		result |= gputypes.Features(gputypes.FeaturePipelineStatisticsQuery)
 	}
 
 	// Depth32FloatStencil8 is always available in Vulkan 1.0+
-	result |= types.Features(types.FeatureDepth32FloatStencil8)
+	result |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 
 	return result
 }
 
 // limitsFromProps maps Vulkan physical device limits to WebGPU limits.
 // Reference: wgpu-hal/src/vulkan/adapter.rs:1254-1392
-func limitsFromProps(props *vk.PhysicalDeviceProperties) types.Limits {
+func limitsFromProps(props *vk.PhysicalDeviceProperties) gputypes.Limits {
 	vkLimits := props.Limits
 
 	// Start with default limits and override with actual hardware values
-	limits := types.DefaultLimits()
+	limits := gputypes.DefaultLimits()
 
 	// Texture dimensions
 	limits.MaxTextureDimension1D = vkLimits.MaxImageDimension1D

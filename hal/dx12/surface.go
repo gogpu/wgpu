@@ -12,7 +12,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // defaultBufferCount is the default number of back buffers in the swapchain.
@@ -217,132 +217,132 @@ func querySwapChain4(swapchain1 *dxgi.IDXGISwapChain1) (*dxgi.IDXGISwapChain4, e
 }
 
 // textureFormatToDXGI converts WebGPU TextureFormat to DXGI_FORMAT.
-func textureFormatToDXGI(format types.TextureFormat) dxgi.DXGI_FORMAT {
+func textureFormatToDXGI(format gputypes.TextureFormat) dxgi.DXGI_FORMAT {
 	switch format {
 	// 8-bit formats
-	case types.TextureFormatR8Unorm:
+	case gputypes.TextureFormatR8Unorm:
 		return dxgi.DXGI_FORMAT_R8_UNORM
-	case types.TextureFormatR8Snorm:
+	case gputypes.TextureFormatR8Snorm:
 		return dxgi.DXGI_FORMAT_R8_SNORM
-	case types.TextureFormatR8Uint:
+	case gputypes.TextureFormatR8Uint:
 		return dxgi.DXGI_FORMAT_R8_UINT
-	case types.TextureFormatR8Sint:
+	case gputypes.TextureFormatR8Sint:
 		return dxgi.DXGI_FORMAT_R8_SINT
 
 	// 16-bit formats
-	case types.TextureFormatR16Uint:
+	case gputypes.TextureFormatR16Uint:
 		return dxgi.DXGI_FORMAT_R16_UINT
-	case types.TextureFormatR16Sint:
+	case gputypes.TextureFormatR16Sint:
 		return dxgi.DXGI_FORMAT_R16_SINT
-	case types.TextureFormatR16Float:
+	case gputypes.TextureFormatR16Float:
 		return dxgi.DXGI_FORMAT_R16_FLOAT
-	case types.TextureFormatRG8Unorm:
+	case gputypes.TextureFormatRG8Unorm:
 		return dxgi.DXGI_FORMAT_R8G8_UNORM
-	case types.TextureFormatRG8Snorm:
+	case gputypes.TextureFormatRG8Snorm:
 		return dxgi.DXGI_FORMAT_R8G8_SNORM
-	case types.TextureFormatRG8Uint:
+	case gputypes.TextureFormatRG8Uint:
 		return dxgi.DXGI_FORMAT_R8G8_UINT
-	case types.TextureFormatRG8Sint:
+	case gputypes.TextureFormatRG8Sint:
 		return dxgi.DXGI_FORMAT_R8G8_SINT
 
 	// 32-bit formats
-	case types.TextureFormatR32Uint:
+	case gputypes.TextureFormatR32Uint:
 		return dxgi.DXGI_FORMAT_R32_UINT
-	case types.TextureFormatR32Sint:
+	case gputypes.TextureFormatR32Sint:
 		return dxgi.DXGI_FORMAT_R32_SINT
-	case types.TextureFormatR32Float:
+	case gputypes.TextureFormatR32Float:
 		return dxgi.DXGI_FORMAT_R32_FLOAT
-	case types.TextureFormatRG16Uint:
+	case gputypes.TextureFormatRG16Uint:
 		return dxgi.DXGI_FORMAT_R16G16_UINT
-	case types.TextureFormatRG16Sint:
+	case gputypes.TextureFormatRG16Sint:
 		return dxgi.DXGI_FORMAT_R16G16_SINT
-	case types.TextureFormatRG16Float:
+	case gputypes.TextureFormatRG16Float:
 		return dxgi.DXGI_FORMAT_R16G16_FLOAT
-	case types.TextureFormatRGBA8Unorm:
+	case gputypes.TextureFormatRGBA8Unorm:
 		return dxgi.DXGI_FORMAT_R8G8B8A8_UNORM
-	case types.TextureFormatRGBA8UnormSrgb:
+	case gputypes.TextureFormatRGBA8UnormSrgb:
 		return dxgi.DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-	case types.TextureFormatRGBA8Snorm:
+	case gputypes.TextureFormatRGBA8Snorm:
 		return dxgi.DXGI_FORMAT_R8G8B8A8_SNORM
-	case types.TextureFormatRGBA8Uint:
+	case gputypes.TextureFormatRGBA8Uint:
 		return dxgi.DXGI_FORMAT_R8G8B8A8_UINT
-	case types.TextureFormatRGBA8Sint:
+	case gputypes.TextureFormatRGBA8Sint:
 		return dxgi.DXGI_FORMAT_R8G8B8A8_SINT
-	case types.TextureFormatBGRA8Unorm:
+	case gputypes.TextureFormatBGRA8Unorm:
 		return dxgi.DXGI_FORMAT_B8G8R8A8_UNORM
-	case types.TextureFormatBGRA8UnormSrgb:
+	case gputypes.TextureFormatBGRA8UnormSrgb:
 		return dxgi.DXGI_FORMAT_B8G8R8A8_UNORM_SRGB
 
 	// Packed 32-bit formats
-	case types.TextureFormatRGB10A2Uint:
+	case gputypes.TextureFormatRGB10A2Uint:
 		return dxgi.DXGI_FORMAT_R10G10B10A2_UINT
-	case types.TextureFormatRGB10A2Unorm:
+	case gputypes.TextureFormatRGB10A2Unorm:
 		return dxgi.DXGI_FORMAT_R10G10B10A2_UNORM
-	case types.TextureFormatRG11B10Ufloat:
+	case gputypes.TextureFormatRG11B10Ufloat:
 		return dxgi.DXGI_FORMAT_R11G11B10_FLOAT
 
 	// 64-bit formats
-	case types.TextureFormatRG32Uint:
+	case gputypes.TextureFormatRG32Uint:
 		return dxgi.DXGI_FORMAT_R32G32_UINT
-	case types.TextureFormatRG32Sint:
+	case gputypes.TextureFormatRG32Sint:
 		return dxgi.DXGI_FORMAT_R32G32_SINT
-	case types.TextureFormatRG32Float:
+	case gputypes.TextureFormatRG32Float:
 		return dxgi.DXGI_FORMAT_R32G32_FLOAT
-	case types.TextureFormatRGBA16Uint:
+	case gputypes.TextureFormatRGBA16Uint:
 		return dxgi.DXGI_FORMAT_R16G16B16A16_UINT
-	case types.TextureFormatRGBA16Sint:
+	case gputypes.TextureFormatRGBA16Sint:
 		return dxgi.DXGI_FORMAT_R16G16B16A16_SINT
-	case types.TextureFormatRGBA16Float:
+	case gputypes.TextureFormatRGBA16Float:
 		return dxgi.DXGI_FORMAT_R16G16B16A16_FLOAT
 
 	// 128-bit formats
-	case types.TextureFormatRGBA32Uint:
+	case gputypes.TextureFormatRGBA32Uint:
 		return dxgi.DXGI_FORMAT_R32G32B32A32_UINT
-	case types.TextureFormatRGBA32Sint:
+	case gputypes.TextureFormatRGBA32Sint:
 		return dxgi.DXGI_FORMAT_R32G32B32A32_SINT
-	case types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA32Float:
 		return dxgi.DXGI_FORMAT_R32G32B32A32_FLOAT
 
 	// Depth formats
-	case types.TextureFormatDepth16Unorm:
+	case gputypes.TextureFormatDepth16Unorm:
 		return dxgi.DXGI_FORMAT_D16_UNORM
-	case types.TextureFormatDepth24Plus:
+	case gputypes.TextureFormatDepth24Plus:
 		return dxgi.DXGI_FORMAT_D24_UNORM_S8_UINT
-	case types.TextureFormatDepth24PlusStencil8:
+	case gputypes.TextureFormatDepth24PlusStencil8:
 		return dxgi.DXGI_FORMAT_D24_UNORM_S8_UINT
-	case types.TextureFormatDepth32Float:
+	case gputypes.TextureFormatDepth32Float:
 		return dxgi.DXGI_FORMAT_D32_FLOAT
-	case types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth32FloatStencil8:
 		return dxgi.DXGI_FORMAT_D32_FLOAT_S8X24_UINT
 
 	// BC compressed formats
-	case types.TextureFormatBC1RGBAUnorm:
+	case gputypes.TextureFormatBC1RGBAUnorm:
 		return dxgi.DXGI_FORMAT_BC1_UNORM
-	case types.TextureFormatBC1RGBAUnormSrgb:
+	case gputypes.TextureFormatBC1RGBAUnormSrgb:
 		return dxgi.DXGI_FORMAT_BC1_UNORM_SRGB
-	case types.TextureFormatBC2RGBAUnorm:
+	case gputypes.TextureFormatBC2RGBAUnorm:
 		return dxgi.DXGI_FORMAT_BC2_UNORM
-	case types.TextureFormatBC2RGBAUnormSrgb:
+	case gputypes.TextureFormatBC2RGBAUnormSrgb:
 		return dxgi.DXGI_FORMAT_BC2_UNORM_SRGB
-	case types.TextureFormatBC3RGBAUnorm:
+	case gputypes.TextureFormatBC3RGBAUnorm:
 		return dxgi.DXGI_FORMAT_BC3_UNORM
-	case types.TextureFormatBC3RGBAUnormSrgb:
+	case gputypes.TextureFormatBC3RGBAUnormSrgb:
 		return dxgi.DXGI_FORMAT_BC3_UNORM_SRGB
-	case types.TextureFormatBC4RUnorm:
+	case gputypes.TextureFormatBC4RUnorm:
 		return dxgi.DXGI_FORMAT_BC4_UNORM
-	case types.TextureFormatBC4RSnorm:
+	case gputypes.TextureFormatBC4RSnorm:
 		return dxgi.DXGI_FORMAT_BC4_SNORM
-	case types.TextureFormatBC5RGUnorm:
+	case gputypes.TextureFormatBC5RGUnorm:
 		return dxgi.DXGI_FORMAT_BC5_UNORM
-	case types.TextureFormatBC5RGSnorm:
+	case gputypes.TextureFormatBC5RGSnorm:
 		return dxgi.DXGI_FORMAT_BC5_SNORM
-	case types.TextureFormatBC6HRGBUfloat:
+	case gputypes.TextureFormatBC6HRGBUfloat:
 		return dxgi.DXGI_FORMAT_BC6H_UF16
-	case types.TextureFormatBC6HRGBFloat:
+	case gputypes.TextureFormatBC6HRGBFloat:
 		return dxgi.DXGI_FORMAT_BC6H_SF16
-	case types.TextureFormatBC7RGBAUnorm:
+	case gputypes.TextureFormatBC7RGBAUnorm:
 		return dxgi.DXGI_FORMAT_BC7_UNORM
-	case types.TextureFormatBC7RGBAUnormSrgb:
+	case gputypes.TextureFormatBC7RGBAUnormSrgb:
 		return dxgi.DXGI_FORMAT_BC7_UNORM_SRGB
 
 	default:
@@ -376,7 +376,7 @@ type SurfaceTexture struct {
 	index      uint32
 	resource   *d3d12.ID3D12Resource
 	rtvHandle  d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
-	format     types.TextureFormat
+	format     gputypes.TextureFormat
 	width      uint32
 	height     uint32
 	suboptimal bool
@@ -399,7 +399,7 @@ func (t *SurfaceTexture) GetResource() *d3d12.ID3D12Resource {
 }
 
 // GetFormat returns the texture format.
-func (t *SurfaceTexture) GetFormat() types.TextureFormat {
+func (t *SurfaceTexture) GetFormat() gputypes.TextureFormat {
 	return t.format
 }
 

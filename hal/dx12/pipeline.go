@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // -----------------------------------------------------------------------------
@@ -45,7 +45,7 @@ func (m *ShaderModule) Bytecode() []byte {
 type BindGroupLayoutEntry struct {
 	Binding    uint32
 	Type       BindingType
-	Visibility types.ShaderStages
+	Visibility gputypes.ShaderStages
 	Count      uint32 // For arrays
 }
 
@@ -329,9 +329,9 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 	// Index buffer strip cut value for strip topologies
 	if desc.Primitive.StripIndexFormat != nil {
 		switch *desc.Primitive.StripIndexFormat {
-		case types.IndexFormatUint16:
+		case gputypes.IndexFormatUint16:
 			psoDesc.IBStripCutValue = d3d12.D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF
-		case types.IndexFormatUint32:
+		case gputypes.IndexFormatUint32:
 			psoDesc.IBStripCutValue = d3d12.D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFFFFFF
 		}
 	}
@@ -418,16 +418,16 @@ func buildDepthStencilDesc(ds *hal.DepthStencilState) d3d12.D3D12_DEPTH_STENCIL_
 	}
 
 	// Disable depth test if compare is Always and no write
-	if ds.DepthCompare == types.CompareFunctionAlways && !ds.DepthWriteEnabled {
+	if ds.DepthCompare == gputypes.CompareFunctionAlways && !ds.DepthWriteEnabled {
 		desc.DepthEnable = 0
 	}
 
 	// Stencil operations
-	hasStencil := ds.StencilFront.Compare != types.CompareFunctionAlways ||
+	hasStencil := ds.StencilFront.Compare != gputypes.CompareFunctionAlways ||
 		ds.StencilFront.FailOp != hal.StencilOperationKeep ||
 		ds.StencilFront.DepthFailOp != hal.StencilOperationKeep ||
 		ds.StencilFront.PassOp != hal.StencilOperationKeep ||
-		ds.StencilBack.Compare != types.CompareFunctionAlways ||
+		ds.StencilBack.Compare != gputypes.CompareFunctionAlways ||
 		ds.StencilBack.FailOp != hal.StencilOperationKeep ||
 		ds.StencilBack.DepthFailOp != hal.StencilOperationKeep ||
 		ds.StencilBack.PassOp != hal.StencilOperationKeep
@@ -454,7 +454,7 @@ func buildDepthStencilDesc(ds *hal.DepthStencilState) d3d12.D3D12_DEPTH_STENCIL_
 }
 
 // buildRenderTargetBlendDesc builds a D3D12_RENDER_TARGET_BLEND_DESC from a color target state.
-func buildRenderTargetBlendDesc(target *types.ColorTargetState) d3d12.D3D12_RENDER_TARGET_BLEND_DESC {
+func buildRenderTargetBlendDesc(target *gputypes.ColorTargetState) d3d12.D3D12_RENDER_TARGET_BLEND_DESC {
 	desc := d3d12.D3D12_RENDER_TARGET_BLEND_DESC{
 		BlendEnable:           0,
 		LogicOpEnable:         0,
@@ -482,7 +482,7 @@ func buildRenderTargetBlendDesc(target *types.ColorTargetState) d3d12.D3D12_REND
 }
 
 // buildInputLayout builds input element descriptors from vertex buffer layouts.
-func buildInputLayout(buffers []types.VertexBufferLayout) ([]d3d12.D3D12_INPUT_ELEMENT_DESC, [][]byte) {
+func buildInputLayout(buffers []gputypes.VertexBufferLayout) ([]d3d12.D3D12_INPUT_ELEMENT_DESC, [][]byte) {
 	//nolint:prealloc // Size depends on nested attributes
 	var elements []d3d12.D3D12_INPUT_ELEMENT_DESC
 	//nolint:prealloc // Size depends on nested attributes
@@ -507,7 +507,7 @@ func buildInputLayout(buffers []types.VertexBufferLayout) ([]d3d12.D3D12_INPUT_E
 				InstanceDataStepRate: 0,
 			}
 
-			if buffer.StepMode == types.VertexStepModeInstance {
+			if buffer.StepMode == gputypes.VertexStepModeInstance {
 				element.InstanceDataStepRate = 1
 			}
 

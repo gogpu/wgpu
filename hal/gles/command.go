@@ -8,7 +8,7 @@ package gles
 import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Command represents a recorded GL command.
@@ -138,7 +138,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 	// Record clear commands
 	for i, ca := range desc.ColorAttachments {
-		if ca.LoadOp == types.LoadOpClear {
+		if ca.LoadOp == gputypes.LoadOpClear {
 			clearColor := ca.ClearValue
 			e.commands = append(e.commands, &ClearColorCommand{
 				attachment: i,
@@ -152,12 +152,12 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
-		if dsa.DepthLoadOp == types.LoadOpClear {
+		if dsa.DepthLoadOp == gputypes.LoadOpClear {
 			e.commands = append(e.commands, &ClearDepthCommand{
 				depth: float64(dsa.DepthClearValue),
 			})
 		}
-		if dsa.StencilLoadOp == types.LoadOpClear {
+		if dsa.StencilLoadOp == gputypes.LoadOpClear {
 			e.commands = append(e.commands, &ClearStencilCommand{
 				stencil: int32(dsa.StencilClearValue),
 			})
@@ -181,7 +181,7 @@ type RenderPassEncoder struct {
 	pipeline      *RenderPipeline
 	vertexBuffers []*Buffer
 	indexBuffer   *Buffer
-	indexFormat   types.IndexFormat
+	indexFormat   gputypes.IndexFormat
 }
 
 // End finishes the render pass.
@@ -241,7 +241,7 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 }
 
 // SetIndexBuffer sets the index buffer.
-func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.IndexFormat, offset uint64) {
+func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok {
 		return
@@ -272,7 +272,7 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 }
 
 // SetBlendConstant sets the blend constant.
-func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
+func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	e.encoder.commands = append(e.encoder.commands, &SetBlendConstantCommand{
 		r: float32(color.R),
 		g: float32(color.G),
@@ -441,37 +441,37 @@ func (c *UseProgramCommand) Execute(ctx *gl.Context) {
 
 // SetPipelineStateCommand sets pipeline state (culling, depth, etc.).
 type SetPipelineStateCommand struct {
-	topology     types.PrimitiveTopology
-	cullMode     types.CullMode
-	frontFace    types.FrontFace
+	topology     gputypes.PrimitiveTopology
+	cullMode     gputypes.CullMode
+	frontFace    gputypes.FrontFace
 	depthStencil *hal.DepthStencilState
 }
 
 func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 	// Culling
-	if c.cullMode == types.CullModeNone {
+	if c.cullMode == gputypes.CullModeNone {
 		ctx.Disable(gl.CULL_FACE)
 	} else {
 		ctx.Enable(gl.CULL_FACE)
 		switch c.cullMode {
-		case types.CullModeFront:
+		case gputypes.CullModeFront:
 			ctx.CullFace(gl.FRONT)
-		case types.CullModeBack:
+		case gputypes.CullModeBack:
 			ctx.CullFace(gl.BACK)
 		}
 	}
 
 	// Front face
 	switch c.frontFace {
-	case types.FrontFaceCCW:
+	case gputypes.FrontFaceCCW:
 		ctx.FrontFace(gl.CCW)
-	case types.FrontFaceCW:
+	case gputypes.FrontFaceCW:
 		ctx.FrontFace(gl.CW)
 	}
 
 	// Depth/stencil
 	if c.depthStencil != nil {
-		if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != types.CompareFunctionAlways {
+		if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
 			ctx.Enable(gl.DEPTH_TEST)
 			ctx.DepthMask(c.depthStencil.DepthWriteEnabled)
 			ctx.DepthFunc(compareFunctionToGL(c.depthStencil.DepthCompare))
@@ -512,7 +512,7 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 // SetIndexBufferCommand binds an index buffer.
 type SetIndexBufferCommand struct {
 	buffer *Buffer
-	format types.IndexFormat
+	format gputypes.IndexFormat
 	offset uint64
 }
 
@@ -578,13 +578,13 @@ type DrawIndexedCommand struct {
 	firstIndex                uint32
 	baseVertex                int32
 	firstInstance             uint32
-	indexFormat               types.IndexFormat
+	indexFormat               gputypes.IndexFormat
 }
 
 func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
 	indexType := uint32(gl.UNSIGNED_SHORT)
 	indexSize := uintptr(2)
-	if c.indexFormat == types.IndexFormatUint32 {
+	if c.indexFormat == gputypes.IndexFormatUint32 {
 		indexType = gl.UNSIGNED_INT
 		indexSize = 4
 	}
@@ -645,23 +645,23 @@ func (c *DispatchIndirectCommand) Execute(ctx *gl.Context) {
 }
 
 // compareFunctionToGL converts compare function to GL constant.
-func compareFunctionToGL(fn types.CompareFunction) uint32 {
+func compareFunctionToGL(fn gputypes.CompareFunction) uint32 {
 	switch fn {
-	case types.CompareFunctionNever:
+	case gputypes.CompareFunctionNever:
 		return gl.NEVER
-	case types.CompareFunctionLess:
+	case gputypes.CompareFunctionLess:
 		return gl.LESS
-	case types.CompareFunctionEqual:
+	case gputypes.CompareFunctionEqual:
 		return gl.EQUAL
-	case types.CompareFunctionLessEqual:
+	case gputypes.CompareFunctionLessEqual:
 		return gl.LEQUAL
-	case types.CompareFunctionGreater:
+	case gputypes.CompareFunctionGreater:
 		return gl.GREATER
-	case types.CompareFunctionNotEqual:
+	case gputypes.CompareFunctionNotEqual:
 		return gl.NOTEQUAL
-	case types.CompareFunctionGreaterEqual:
+	case gputypes.CompareFunctionGreaterEqual:
 		return gl.GEQUAL
-	case types.CompareFunctionAlways:
+	case gputypes.CompareFunctionAlways:
 		return gl.ALWAYS
 	default:
 		return gl.ALWAYS

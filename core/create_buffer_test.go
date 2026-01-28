@@ -5,18 +5,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestDevice_CreateBuffer_Success(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	limits := types.DefaultLimits()
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), limits, "TestDevice")
+	limits := gputypes.DefaultLimits()
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), limits, "TestDevice")
 
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "TestBuffer",
 		Size:  1024,
-		Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 	})
 
 	if err != nil {
@@ -31,7 +31,7 @@ func TestDevice_CreateBuffer_Success(t *testing.T) {
 	if buffer.Size() != 1024 {
 		t.Errorf("Expected size 1024, got %d", buffer.Size())
 	}
-	if buffer.Usage() != types.BufferUsageVertex|types.BufferUsageCopyDst {
+	if buffer.Usage() != gputypes.BufferUsageVertex|gputypes.BufferUsageCopyDst {
 		t.Errorf("Unexpected usage flags")
 	}
 	if buffer.Device() != device {
@@ -41,12 +41,12 @@ func TestDevice_CreateBuffer_Success(t *testing.T) {
 
 func TestDevice_CreateBuffer_ZeroSize(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "ZeroBuffer",
 		Size:  0,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	})
 
 	if err == nil {
@@ -63,14 +63,14 @@ func TestDevice_CreateBuffer_ZeroSize(t *testing.T) {
 
 func TestDevice_CreateBuffer_MaxSize(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	limits := types.DefaultLimits()
+	limits := gputypes.DefaultLimits()
 	limits.MaxBufferSize = 1024 // Set small max for testing
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), limits, "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), limits, "TestDevice")
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "HugeBuffer",
 		Size:  2048, // Exceeds max
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	})
 
 	if err == nil {
@@ -93,9 +93,9 @@ func TestDevice_CreateBuffer_MaxSize(t *testing.T) {
 
 func TestDevice_CreateBuffer_EmptyUsage(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "NoUsageBuffer",
 		Size:  1024,
 		Usage: 0, // Empty usage
@@ -115,12 +115,12 @@ func TestDevice_CreateBuffer_EmptyUsage(t *testing.T) {
 
 func TestDevice_CreateBuffer_InvalidUsage(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	// Use a high bit that's not a valid usage flag
-	invalidUsage := types.BufferUsage(1 << 30)
+	invalidUsage := gputypes.BufferUsage(1 << 30)
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "InvalidBuffer",
 		Size:  1024,
 		Usage: invalidUsage,
@@ -140,12 +140,12 @@ func TestDevice_CreateBuffer_InvalidUsage(t *testing.T) {
 
 func TestDevice_CreateBuffer_MapReadWriteExclusive(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "MapBuffer",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead | types.BufferUsageMapWrite,
+		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
 	})
 
 	if err == nil {
@@ -162,14 +162,14 @@ func TestDevice_CreateBuffer_MapReadWriteExclusive(t *testing.T) {
 
 func TestDevice_CreateBuffer_DeviceDestroyed(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	device.Destroy()
 
-	_, err := device.CreateBuffer(&types.BufferDescriptor{
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "AfterDestroy",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	})
 
 	if err == nil {
@@ -182,7 +182,7 @@ func TestDevice_CreateBuffer_DeviceDestroyed(t *testing.T) {
 
 func TestDevice_CreateBuffer_NilDescriptor(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	_, err := device.CreateBuffer(nil)
 
@@ -193,12 +193,12 @@ func TestDevice_CreateBuffer_NilDescriptor(t *testing.T) {
 
 func TestDevice_CreateBuffer_MappedAtCreation(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label:            "MappedBuffer",
 		Size:             1024,
-		Usage:            types.BufferUsageMapWrite | types.BufferUsageCopySrc,
+		Usage:            gputypes.BufferUsageMapWrite | gputypes.BufferUsageCopySrc,
 		MappedAtCreation: true,
 	})
 
@@ -215,13 +215,13 @@ func TestDevice_CreateBuffer_MappedAtCreation(t *testing.T) {
 
 func TestDevice_CreateBuffer_SizeAlignment(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	// Request non-aligned size
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "UnalignedBuffer",
 		Size:  1023, // Not aligned to 4
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	})
 
 	if err != nil {
@@ -235,13 +235,13 @@ func TestDevice_CreateBuffer_SizeAlignment(t *testing.T) {
 
 func TestDevice_CreateBuffer_ValidMapReadOnly(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	// MAP_READ alone is valid
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "MapReadBuffer",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 	})
 
 	if err != nil {
@@ -254,13 +254,13 @@ func TestDevice_CreateBuffer_ValidMapReadOnly(t *testing.T) {
 
 func TestDevice_CreateBuffer_ValidMapWriteOnly(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	// MAP_WRITE alone is valid
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label: "MapWriteBuffer",
 		Size:  1024,
-		Usage: types.BufferUsageMapWrite | types.BufferUsageCopySrc,
+		Usage: gputypes.BufferUsageMapWrite | gputypes.BufferUsageCopySrc,
 	})
 
 	if err != nil {

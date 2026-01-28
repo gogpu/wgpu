@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestEGLInit tests basic EGL initialization.
@@ -105,7 +105,7 @@ func TestGLESBackend(t *testing.T) {
 
 	// Create backend
 	backend := Backend{}
-	if backend.Variant() != types.BackendGL {
+	if backend.Variant() != gputypes.BackendGL {
 		t.Errorf("Expected BackendGL variant, got %v", backend.Variant())
 	}
 

@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CreateDevice creates a device from an adapter.
@@ -13,7 +13,7 @@ import (
 // and a default queue is automatically created.
 //
 // Returns the device ID and an error if device creation fails.
-func CreateDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID, error) {
+func CreateDevice(adapterID AdapterID, desc *gputypes.DeviceDescriptor) (DeviceID, error) {
 	hub := GetGlobal().Hub()
 
 	// Verify the adapter exists
@@ -24,7 +24,7 @@ func CreateDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID, 
 
 	// Use default descriptor if none provided
 	if desc == nil {
-		defaultDesc := types.DefaultDeviceDescriptor()
+		defaultDesc := gputypes.DefaultDeviceDescriptor()
 		desc = &defaultDesc
 	}
 
@@ -40,7 +40,7 @@ func CreateDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID, 
 
 	// Determine which features to enable
 	// Start with required features
-	enabledFeatures := types.Features(0)
+	enabledFeatures := gputypes.Features(0)
 	for _, feature := range desc.RequiredFeatures {
 		enabledFeatures.Insert(feature)
 	}
@@ -93,7 +93,7 @@ func GetDevice(id DeviceID) (*Device, error) {
 
 // GetDeviceFeatures returns the device's enabled features.
 // Returns an error if the device ID is invalid.
-func GetDeviceFeatures(id DeviceID) (types.Features, error) {
+func GetDeviceFeatures(id DeviceID) (gputypes.Features, error) {
 	device, err := GetDevice(id)
 	if err != nil {
 		return 0, err
@@ -103,10 +103,10 @@ func GetDeviceFeatures(id DeviceID) (types.Features, error) {
 
 // GetDeviceLimits returns the device's limits.
 // Returns an error if the device ID is invalid.
-func GetDeviceLimits(id DeviceID) (types.Limits, error) {
+func GetDeviceLimits(id DeviceID) (gputypes.Limits, error) {
 	device, err := GetDevice(id)
 	if err != nil {
-		return types.Limits{}, err
+		return gputypes.Limits{}, err
 	}
 	return device.Limits, nil
 }
@@ -167,7 +167,7 @@ func DeviceDrop(id DeviceID) error {
 //
 // Returns a buffer ID that can be used to access the buffer, or an error if
 // buffer creation fails.
-func DeviceCreateBuffer(id DeviceID, desc *types.BufferDescriptor) (BufferID, error) {
+func DeviceCreateBuffer(id DeviceID, desc *gputypes.BufferDescriptor) (BufferID, error) {
 	hub := GetGlobal().Hub()
 
 	// Verify the device exists
@@ -198,7 +198,7 @@ func DeviceCreateBuffer(id DeviceID, desc *types.BufferDescriptor) (BufferID, er
 //
 // Returns a texture ID that can be used to access the texture, or an error if
 // texture creation fails.
-func DeviceCreateTexture(id DeviceID, desc *types.TextureDescriptor) (TextureID, error) {
+func DeviceCreateTexture(id DeviceID, desc *gputypes.TextureDescriptor) (TextureID, error) {
 	hub := GetGlobal().Hub()
 
 	// Verify the device exists
@@ -229,7 +229,7 @@ func DeviceCreateTexture(id DeviceID, desc *types.TextureDescriptor) (TextureID,
 //
 // Returns a shader module ID that can be used to access the module, or an error if
 // module creation fails.
-func DeviceCreateShaderModule(id DeviceID, desc *types.ShaderModuleDescriptor) (ShaderModuleID, error) {
+func DeviceCreateShaderModule(id DeviceID, desc *gputypes.ShaderModuleDescriptor) (ShaderModuleID, error) {
 	hub := GetGlobal().Hub()
 
 	// Verify the device exists

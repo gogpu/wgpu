@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Surface and SurfaceTexture are defined in platform-specific files (resource_windows.go, resource_linux.go)
@@ -20,7 +20,7 @@ import (
 type Buffer struct {
 	id     uint32 // GL buffer object ID
 	size   uint64
-	usage  types.BufferUsage
+	usage  gputypes.BufferUsage
 	glCtx  *gl.Context
 	mapped []byte // For mapped buffers
 }
@@ -37,8 +37,8 @@ func (b *Buffer) Destroy() {
 type Texture struct {
 	id        uint32 // GL texture object ID
 	target    uint32 // GL_TEXTURE_2D, etc.
-	format    types.TextureFormat
-	dimension types.TextureDimension
+	format    gputypes.TextureFormat
+	dimension gputypes.TextureDimension
 	size      hal.Extent3D
 	mipLevels uint32
 	glCtx     *gl.Context
@@ -55,7 +55,7 @@ func (t *Texture) Destroy() {
 // TextureView implements hal.TextureView for OpenGL.
 type TextureView struct {
 	texture    *Texture
-	aspect     types.TextureAspect
+	aspect     gputypes.TextureAspect
 	baseMip    uint32
 	mipCount   uint32
 	baseLayer  uint32
@@ -100,7 +100,7 @@ func (m *ShaderModule) Destroy() {
 
 // BindGroupLayout implements hal.BindGroupLayout for OpenGL.
 type BindGroupLayout struct {
-	entries []types.BindGroupLayoutEntry
+	entries []gputypes.BindGroupLayoutEntry
 }
 
 // Destroy is a no-op for bind group layouts.
@@ -109,7 +109,7 @@ func (l *BindGroupLayout) Destroy() {}
 // BindGroup implements hal.BindGroup for OpenGL.
 type BindGroup struct {
 	layout  *BindGroupLayout
-	entries []types.BindGroupEntry
+	entries []gputypes.BindGroupEntry
 }
 
 // Destroy is a no-op for bind groups.
@@ -130,11 +130,11 @@ type RenderPipeline struct {
 	glCtx     *gl.Context
 
 	// Pipeline state
-	primitiveTopology types.PrimitiveTopology
-	cullMode          types.CullMode
-	frontFace         types.FrontFace
+	primitiveTopology gputypes.PrimitiveTopology
+	cullMode          gputypes.CullMode
+	frontFace         gputypes.FrontFace
 	depthStencil      *hal.DepthStencilState
-	multisample       types.MultisampleState
+	multisample       gputypes.MultisampleState
 }
 
 // Destroy releases the render pipeline.

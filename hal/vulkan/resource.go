@@ -6,7 +6,7 @@ package vulkan
 import (
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Buffer implements hal.Buffer for Vulkan.
@@ -14,7 +14,7 @@ type Buffer struct {
 	handle vk.Buffer
 	memory *memory.MemoryBlock
 	size   uint64
-	usage  types.BufferUsage
+	usage  gputypes.BufferUsage
 	device *Device
 }
 
@@ -40,11 +40,11 @@ type Texture struct {
 	handle     vk.Image
 	memory     *memory.MemoryBlock
 	size       Extent3D
-	format     types.TextureFormat
-	usage      types.TextureUsage
+	format     gputypes.TextureFormat
+	usage      gputypes.TextureUsage
 	mipLevels  uint32
 	samples    uint32
-	dimension  types.TextureDimension
+	dimension  gputypes.TextureDimension
 	device     *Device
 	isExternal bool // True if memory is not owned by us (swapchain images)
 }

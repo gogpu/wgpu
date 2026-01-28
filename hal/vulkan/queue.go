@@ -9,7 +9,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Queue implements hal.Queue for Vulkan.
@@ -145,7 +145,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	stagingDesc := &hal.BufferDescriptor{
 		Label: "staging-buffer-for-texture",
 		Size:  uint64(len(data)),
-		Usage: types.BufferUsageCopySrc | types.BufferUsageMapWrite,
+		Usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
 	}
 
 	stagingBuffer, err := q.device.CreateBuffer(stagingDesc)
@@ -185,7 +185,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 			Texture: dst.Texture,
 			Usage: hal.TextureUsageTransition{
 				OldUsage: 0,
-				NewUsage: types.TextureUsageCopyDst,
+				NewUsage: gputypes.TextureUsageCopyDst,
 			},
 		},
 	})
@@ -234,8 +234,8 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		{
 			Texture: dst.Texture,
 			Usage: hal.TextureUsageTransition{
-				OldUsage: types.TextureUsageCopyDst,
-				NewUsage: types.TextureUsageTextureBinding,
+				OldUsage: gputypes.TextureUsageCopyDst,
+				NewUsage: gputypes.TextureUsageTextureBinding,
 			},
 		},
 	})

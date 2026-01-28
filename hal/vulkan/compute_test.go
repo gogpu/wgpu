@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestVulkanComputePipelineCreation tests pipeline creation and destruction.
@@ -102,7 +102,7 @@ func TestVulkanComputeDispatchIndirect(t *testing.T) {
 		buffer := &Buffer{
 			handle: vk.Buffer(12345),
 			size:   256,
-			usage:  types.BufferUsageIndirect | types.BufferUsageStorage,
+			usage:  gputypes.BufferUsageIndirect | gputypes.BufferUsageStorage,
 		}
 		cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
 		cpe.DispatchIndirect(buffer, 0) // Should not panic
@@ -113,13 +113,13 @@ func TestVulkanComputeDispatchIndirect(t *testing.T) {
 func TestVulkanComputeStorageBuffer(t *testing.T) {
 	t.Run("usage flags conversion", func(t *testing.T) {
 		tests := []struct {
-			usage  types.BufferUsage
+			usage  gputypes.BufferUsage
 			expect vk.BufferUsageFlags
 		}{
-			{types.BufferUsageStorage, vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit)},
-			{types.BufferUsageStorage | types.BufferUsageCopySrc,
+			{gputypes.BufferUsageStorage, vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit)},
+			{gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc,
 				vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit) | vk.BufferUsageFlags(vk.BufferUsageTransferSrcBit)},
-			{types.BufferUsageStorage | types.BufferUsageCopyDst,
+			{gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
 				vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit) | vk.BufferUsageFlags(vk.BufferUsageTransferDstBit)},
 		}
 		for _, tt := range tests {
@@ -133,7 +133,7 @@ func TestVulkanComputeStorageBuffer(t *testing.T) {
 		buffer := &Buffer{
 			handle: vk.Buffer(100),
 			size:   4096,
-			usage:  types.BufferUsageStorage,
+			usage:  gputypes.BufferUsageStorage,
 		}
 		if buffer.Size() != 4096 {
 			t.Errorf("Size() = %d, want 4096", buffer.Size())
@@ -145,12 +145,12 @@ func TestVulkanComputeStorageBuffer(t *testing.T) {
 
 	t.Run("binding type conversion", func(t *testing.T) {
 		tests := []struct {
-			bindingType types.BufferBindingType
+			bindingType gputypes.BufferBindingType
 			expect      vk.DescriptorType
 		}{
-			{types.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
-			{types.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
-			{types.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
+			{gputypes.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
+			{gputypes.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
+			{gputypes.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
 		}
 		for _, tt := range tests {
 			if got := bufferBindingTypeToVk(tt.bindingType); got != tt.expect {
@@ -227,7 +227,7 @@ func TestVulkanComputeMultipleBindGroups(t *testing.T) {
 
 // TestVulkanComputeShaderStages tests compute shader stage conversions.
 func TestVulkanComputeShaderStages(t *testing.T) {
-	got := shaderStagesToVk(types.ShaderStageCompute)
+	got := shaderStagesToVk(gputypes.ShaderStageCompute)
 	expect := vk.ShaderStageFlags(vk.ShaderStageComputeBit)
 	if got != expect {
 		t.Errorf("shaderStagesToVk(Compute) = %v, want %v", got, expect)

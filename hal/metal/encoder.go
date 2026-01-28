@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CommandEncoder implements hal.CommandEncoder for Metal.
@@ -260,7 +260,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			_ = MsgSend(attachment, Sel("setTexture:"), uintptr(tv.raw))
 		}
 		_ = MsgSend(attachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(ca.LoadOp)))
-		if ca.LoadOp == types.LoadOpClear {
+		if ca.LoadOp == gputypes.LoadOpClear {
 			clearColor := MTLClearColor{Red: ca.ClearValue.R, Green: ca.ClearValue.G, Blue: ca.ClearValue.B, Alpha: ca.ClearValue.A}
 			msgSendClearColor(attachment, Sel("setClearColor:"), clearColor)
 		}
@@ -341,7 +341,7 @@ type RenderPassEncoder struct {
 	pool        *AutoreleasePool
 	pipeline    *RenderPipeline
 	indexBuffer *Buffer
-	indexFormat types.IndexFormat
+	indexFormat gputypes.IndexFormat
 	indexOffset uint64
 }
 
@@ -391,7 +391,7 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 }
 
 // SetIndexBuffer sets the index buffer.
-func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.IndexFormat, offset uint64) {
+func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil {
 		return
@@ -414,7 +414,7 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 }
 
 // SetBlendConstant sets the blend constant color.
-func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
+func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if color == nil {
 		return
 	}
@@ -444,7 +444,7 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 	}
 	indexType := indexFormatToMTL(e.indexFormat)
 	indexSize := uint32(2)
-	if e.indexFormat == types.IndexFormatUint32 {
+	if e.indexFormat == gputypes.IndexFormatUint32 {
 		indexSize = 4
 	}
 	offset := e.indexOffset + uint64(firstIndex)*uint64(indexSize)

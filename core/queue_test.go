@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestGetQueue(t *testing.T) {
@@ -17,7 +17,7 @@ func TestGetQueue(t *testing.T) {
 			name: "get valid queue",
 			setup: func() QueueID {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				device, _ := GetDevice(deviceID)
 				return device.Queue
@@ -54,7 +54,7 @@ func TestGetQueue(t *testing.T) {
 func TestQueueSubmit(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -116,7 +116,7 @@ func TestQueueSubmit(t *testing.T) {
 func TestQueueWriteBuffer(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -128,10 +128,10 @@ func TestQueueWriteBuffer(t *testing.T) {
 	}
 
 	// Create a buffer (placeholder)
-	bufferDesc := &types.BufferDescriptor{
+	bufferDesc := &gputypes.BufferDescriptor{
 		Label: "Test Buffer",
 		Size:  256,
-		Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 	}
 	bufferID, err := DeviceCreateBuffer(deviceID, bufferDesc)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestQueueWriteBuffer(t *testing.T) {
 func TestQueueWriteTexture(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -206,38 +206,38 @@ func TestQueueWriteTexture(t *testing.T) {
 	}
 
 	// Create a texture (placeholder)
-	textureDesc := &types.TextureDescriptor{
+	textureDesc := &gputypes.TextureDescriptor{
 		Label: "Test Texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
 	}
 	textureID, err := DeviceCreateTexture(deviceID, textureDesc)
 	if err != nil {
 		t.Fatalf("DeviceCreateTexture() error = %v", err)
 	}
 
-	validDst := &types.ImageCopyTexture{
+	validDst := &gputypes.ImageCopyTexture{
 		Texture:  uintptr(textureID.Raw()),
 		MipLevel: 0,
-		Origin:   types.Origin3D{X: 0, Y: 0, Z: 0},
-		Aspect:   types.TextureAspectAll,
+		Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+		Aspect:   gputypes.TextureAspectAll,
 	}
 
-	validLayout := &types.TextureDataLayout{
+	validLayout := &gputypes.TextureDataLayout{
 		Offset:       0,
 		BytesPerRow:  256 * 4,
 		RowsPerImage: 256,
 	}
 
-	validSize := &types.Extent3D{
+	validSize := &gputypes.Extent3D{
 		Width:              256,
 		Height:             256,
 		DepthOrArrayLayers: 1,
@@ -248,10 +248,10 @@ func TestQueueWriteTexture(t *testing.T) {
 	tests := []struct {
 		name    string
 		queueID QueueID
-		dst     *types.ImageCopyTexture
+		dst     *gputypes.ImageCopyTexture
 		data    []byte
-		layout  *types.TextureDataLayout
-		size    *types.Extent3D
+		layout  *gputypes.TextureDataLayout
+		size    *gputypes.Extent3D
 		wantErr bool
 	}{
 		{
@@ -322,7 +322,7 @@ func TestQueueOnSubmittedWorkDone(t *testing.T) {
 			name: "wait for work on valid queue",
 			setup: func() QueueID {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				device, _ := GetDevice(deviceID)
 				return device.Queue
@@ -354,7 +354,7 @@ func TestQueueOnSubmittedWorkDone(t *testing.T) {
 func TestQueueConcurrentOperations(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -369,10 +369,10 @@ func TestQueueConcurrentOperations(t *testing.T) {
 	const numBuffers = 10
 	bufferIDs := make([]BufferID, numBuffers)
 	for i := 0; i < numBuffers; i++ {
-		desc := &types.BufferDescriptor{
+		desc := &gputypes.BufferDescriptor{
 			Label: "Concurrent Buffer",
 			Size:  256,
-			Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 		}
 		bufferIDs[i], err = DeviceCreateBuffer(deviceID, desc)
 		if err != nil {
@@ -406,7 +406,7 @@ func TestQueueConcurrentOperations(t *testing.T) {
 func TestQueueLifecycle(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)

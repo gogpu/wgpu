@@ -6,7 +6,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	_ "github.com/gogpu/wgpu/hal/noop" // Import for side effect of registering noop backend
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestErrZeroArea verifies that ErrZeroArea is defined correctly.
@@ -43,7 +43,7 @@ func TestErrZeroArea_IsComparable(t *testing.T) {
 // returns ErrZeroArea when dimensions are zero.
 func TestSurfaceConfigureZeroDimensions_Vulkan(t *testing.T) {
 	// Skip if Vulkan backend is not available
-	backend, ok := hal.GetBackend(types.BackendVulkan)
+	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
 	if !ok {
 		t.Skip("Vulkan backend not available")
 	}
@@ -65,7 +65,7 @@ func TestSurfaceConfigureZeroDimensions_Vulkan(t *testing.T) {
 		t.Skip("No Vulkan adapters available")
 	}
 
-	openDevice, err := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		t.Skipf("Device creation failed: %v", err)
 	}
@@ -75,8 +75,8 @@ func TestSurfaceConfigureZeroDimensions_Vulkan(t *testing.T) {
 	config := &hal.SurfaceConfiguration{
 		Width:       0,
 		Height:      600,
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeFifo,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
@@ -108,7 +108,7 @@ func TestSurfaceConfigureZeroDimensions_Vulkan(t *testing.T) {
 // TestSurfaceConfigureValidDimensions verifies that valid dimensions work.
 func TestSurfaceConfigureValidDimensions(t *testing.T) {
 	// Use noop backend which should accept any dimensions
-	backend, ok := hal.GetBackend(types.BackendEmpty)
+	backend, ok := hal.GetBackend(gputypes.BackendEmpty)
 	if !ok {
 		t.Fatal("noop backend should be available")
 	}
@@ -130,7 +130,7 @@ func TestSurfaceConfigureValidDimensions(t *testing.T) {
 		t.Fatal("expected at least one adapter")
 	}
 
-	openDevice, err := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -140,8 +140,8 @@ func TestSurfaceConfigureValidDimensions(t *testing.T) {
 	config := &hal.SurfaceConfiguration{
 		Width:       800,
 		Height:      600,
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeFifo,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}

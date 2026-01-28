@@ -4,15 +4,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestBuffer_NewBuffer(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex|types.BufferUsageCopySrc, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex|gputypes.BufferUsageCopySrc, 1024, "TestBuffer")
 
 	if buffer == nil {
 		t.Fatal("NewBuffer returned nil")
@@ -23,7 +23,7 @@ func TestBuffer_NewBuffer(t *testing.T) {
 	if buffer.Device() != device {
 		t.Error("Buffer.Device() should return parent device")
 	}
-	if buffer.Usage() != types.BufferUsageVertex|types.BufferUsageCopySrc {
+	if buffer.Usage() != gputypes.BufferUsageVertex|gputypes.BufferUsageCopySrc {
 		t.Error("Buffer.Usage() incorrect")
 	}
 	if buffer.Size() != 1024 {
@@ -36,10 +36,10 @@ func TestBuffer_NewBuffer(t *testing.T) {
 
 func TestBuffer_RawAccess(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	lock := device.SnatchLock()
 	guard := lock.Read()
@@ -53,10 +53,10 @@ func TestBuffer_RawAccess(t *testing.T) {
 
 func TestBuffer_Destroy(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	if buffer.IsDestroyed() {
 		t.Error("Buffer should not be destroyed initially")
@@ -71,10 +71,10 @@ func TestBuffer_Destroy(t *testing.T) {
 
 func TestBuffer_DestroyIdempotent(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	// Multiple destroy calls should be safe
 	buffer.Destroy()
@@ -88,10 +88,10 @@ func TestBuffer_DestroyIdempotent(t *testing.T) {
 
 func TestBuffer_RawAfterDestroy(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	buffer.Destroy()
 
@@ -107,10 +107,10 @@ func TestBuffer_RawAfterDestroy(t *testing.T) {
 
 func TestBuffer_MapState(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageMapRead, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageMapRead, 1024, "TestBuffer")
 
 	if buffer.MapState() != BufferMapStateIdle {
 		t.Error("Initial map state should be Idle")
@@ -134,11 +134,11 @@ func TestBuffer_MapState(t *testing.T) {
 
 func TestBuffer_InitTracker(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
 	// Create buffer with 16KB to have 4 chunks of 4KB each
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 16384, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 16384, "TestBuffer")
 
 	// Initially nothing is initialized
 	if buffer.IsInitialized(0, 4096) {
@@ -165,10 +165,10 @@ func TestBuffer_InitTracker(t *testing.T) {
 
 func TestBuffer_TrackingData(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	td := buffer.TrackingData()
 	if td == nil {
@@ -181,10 +181,10 @@ func TestBuffer_TrackingData(t *testing.T) {
 
 func TestBuffer_ConcurrentAccess(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	halBuffer := mockBuffer{}
-	buffer := NewBuffer(halBuffer, device, types.BufferUsageVertex, 1024, "TestBuffer")
+	buffer := NewBuffer(halBuffer, device, gputypes.BufferUsageVertex, 1024, "TestBuffer")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

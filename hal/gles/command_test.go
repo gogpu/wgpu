@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestCommandEncoder_BeginEndEncoding(t *testing.T) {
@@ -177,7 +177,7 @@ func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
 
 	// Set index format
 	idxBuf := &Buffer{id: 5}
-	rpe.SetIndexBuffer(idxBuf, types.IndexFormatUint32, 0)
+	rpe.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint32, 0)
 
 	rpe.DrawIndexed(36, 2, 0, 0, 0)
 
@@ -197,7 +197,7 @@ func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
 	if drawCmd.instanceCount != 2 {
 		t.Errorf("instanceCount = %d, want 2", drawCmd.instanceCount)
 	}
-	if drawCmd.indexFormat != types.IndexFormatUint32 {
+	if drawCmd.indexFormat != gputypes.IndexFormatUint32 {
 		t.Errorf("indexFormat = %v, want Uint32", drawCmd.indexFormat)
 	}
 }
@@ -301,8 +301,8 @@ func TestRenderPassEncoder_ClearColorOnLoad(t *testing.T) {
 	desc := &hal.RenderPassDescriptor{
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
-				LoadOp:     types.LoadOpClear,
-				ClearValue: types.Color{R: 1.0, G: 0.5, B: 0.25, A: 1.0},
+				LoadOp:     gputypes.LoadOpClear,
+				ClearValue: gputypes.Color{R: 1.0, G: 0.5, B: 0.25, A: 1.0},
 			},
 		},
 	}
@@ -353,7 +353,7 @@ func TestRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	color := &types.Color{R: 0.2, G: 0.4, B: 0.6, A: 0.8}
+	color := &gputypes.Color{R: 0.2, G: 0.4, B: 0.6, A: 0.8}
 	rpe.SetBlendConstant(color)
 
 	if len(enc.commands) != 1 {

@@ -3,23 +3,23 @@ package core
 import (
 	"fmt"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // GetAdapterInfo returns information about the specified adapter.
 // Returns an error if the adapter ID is invalid.
-func GetAdapterInfo(id AdapterID) (types.AdapterInfo, error) {
+func GetAdapterInfo(id AdapterID) (gputypes.AdapterInfo, error) {
 	hub := GetGlobal().Hub()
 	adapter, err := hub.GetAdapter(id)
 	if err != nil {
-		return types.AdapterInfo{}, fmt.Errorf("failed to get adapter info: %w", err)
+		return gputypes.AdapterInfo{}, fmt.Errorf("failed to get adapter info: %w", err)
 	}
 	return adapter.Info, nil
 }
 
 // GetAdapterFeatures returns the features supported by the specified adapter.
 // Returns an error if the adapter ID is invalid.
-func GetAdapterFeatures(id AdapterID) (types.Features, error) {
+func GetAdapterFeatures(id AdapterID) (gputypes.Features, error) {
 	hub := GetGlobal().Hub()
 	adapter, err := hub.GetAdapter(id)
 	if err != nil {
@@ -30,11 +30,11 @@ func GetAdapterFeatures(id AdapterID) (types.Features, error) {
 
 // GetAdapterLimits returns the resource limits of the specified adapter.
 // Returns an error if the adapter ID is invalid.
-func GetAdapterLimits(id AdapterID) (types.Limits, error) {
+func GetAdapterLimits(id AdapterID) (gputypes.Limits, error) {
 	hub := GetGlobal().Hub()
 	adapter, err := hub.GetAdapter(id)
 	if err != nil {
-		return types.Limits{}, fmt.Errorf("failed to get adapter limits: %w", err)
+		return gputypes.Limits{}, fmt.Errorf("failed to get adapter limits: %w", err)
 	}
 	return adapter.Limits, nil
 }
@@ -54,7 +54,7 @@ func GetAdapterLimits(id AdapterID) (types.Limits, error) {
 //   - Invalid adapter ID
 //   - Requested features not supported by adapter
 //   - Requested limits exceed adapter capabilities
-func RequestDevice(adapterID AdapterID, desc *types.DeviceDescriptor) (DeviceID, error) {
+func RequestDevice(adapterID AdapterID, desc *gputypes.DeviceDescriptor) (DeviceID, error) {
 	return CreateDevice(adapterID, desc)
 }
 

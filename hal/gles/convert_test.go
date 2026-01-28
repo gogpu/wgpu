@@ -9,111 +9,111 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestTextureFormatToGL(t *testing.T) {
 	tests := []struct {
 		name           string
-		format         types.TextureFormat
+		format         gputypes.TextureFormat
 		wantInternal   uint32
 		wantDataFormat uint32
 		wantDataType   uint32
 	}{
 		{
 			name:           "R8Unorm",
-			format:         types.TextureFormatR8Unorm,
+			format:         gputypes.TextureFormatR8Unorm,
 			wantInternal:   gl.R8,
 			wantDataFormat: gl.RED,
 			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "RG8Unorm",
-			format:         types.TextureFormatRG8Unorm,
+			format:         gputypes.TextureFormatRG8Unorm,
 			wantInternal:   gl.RG8,
 			wantDataFormat: gl.RG,
 			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "RGBA8Unorm",
-			format:         types.TextureFormatRGBA8Unorm,
+			format:         gputypes.TextureFormatRGBA8Unorm,
 			wantInternal:   gl.RGBA8,
 			wantDataFormat: gl.RGBA,
 			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "RGBA8UnormSrgb",
-			format:         types.TextureFormatRGBA8UnormSrgb,
+			format:         gputypes.TextureFormatRGBA8UnormSrgb,
 			wantInternal:   gl.SRGB8_ALPHA8,
 			wantDataFormat: gl.RGBA,
 			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "BGRA8Unorm",
-			format:         types.TextureFormatBGRA8Unorm,
+			format:         gputypes.TextureFormatBGRA8Unorm,
 			wantInternal:   gl.RGBA8,
 			wantDataFormat: gl.BGRA,
 			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "R16Float",
-			format:         types.TextureFormatR16Float,
+			format:         gputypes.TextureFormatR16Float,
 			wantInternal:   gl.R16F,
 			wantDataFormat: gl.RED,
 			wantDataType:   gl.HALF_FLOAT,
 		},
 		{
 			name:           "RGBA16Float",
-			format:         types.TextureFormatRGBA16Float,
+			format:         gputypes.TextureFormatRGBA16Float,
 			wantInternal:   gl.RGBA16F,
 			wantDataFormat: gl.RGBA,
 			wantDataType:   gl.HALF_FLOAT,
 		},
 		{
 			name:           "R32Float",
-			format:         types.TextureFormatR32Float,
+			format:         gputypes.TextureFormatR32Float,
 			wantInternal:   gl.R32F,
 			wantDataFormat: gl.RED,
 			wantDataType:   gl.FLOAT,
 		},
 		{
 			name:           "RGBA32Float",
-			format:         types.TextureFormatRGBA32Float,
+			format:         gputypes.TextureFormatRGBA32Float,
 			wantInternal:   gl.RGBA32F,
 			wantDataFormat: gl.RGBA,
 			wantDataType:   gl.FLOAT,
 		},
 		{
 			name:           "Depth16Unorm",
-			format:         types.TextureFormatDepth16Unorm,
+			format:         gputypes.TextureFormatDepth16Unorm,
 			wantInternal:   gl.DEPTH_COMPONENT16,
 			wantDataFormat: gl.DEPTH_COMPONENT,
 			wantDataType:   gl.UNSIGNED_SHORT,
 		},
 		{
 			name:           "Depth24Plus",
-			format:         types.TextureFormatDepth24Plus,
+			format:         gputypes.TextureFormatDepth24Plus,
 			wantInternal:   gl.DEPTH_COMPONENT24,
 			wantDataFormat: gl.DEPTH_COMPONENT,
 			wantDataType:   gl.UNSIGNED_INT,
 		},
 		{
 			name:           "Depth24PlusStencil8",
-			format:         types.TextureFormatDepth24PlusStencil8,
+			format:         gputypes.TextureFormatDepth24PlusStencil8,
 			wantInternal:   gl.DEPTH24_STENCIL8,
 			wantDataFormat: gl.DEPTH_STENCIL,
 			wantDataType:   gl.UNSIGNED_INT,
 		},
 		{
 			name:           "Depth32Float",
-			format:         types.TextureFormatDepth32Float,
+			format:         gputypes.TextureFormatDepth32Float,
 			wantInternal:   gl.DEPTH_COMPONENT32,
 			wantDataFormat: gl.DEPTH_COMPONENT,
 			wantDataType:   gl.FLOAT,
 		},
 		{
 			name:           "Unknown defaults to RGBA8",
-			format:         types.TextureFormat(9999),
+			format:         gputypes.TextureFormat(9999),
 			wantInternal:   gl.RGBA8,
 			wantDataFormat: gl.RGBA,
 			wantDataType:   gl.UNSIGNED_BYTE,
@@ -140,18 +140,18 @@ func TestTextureFormatToGL(t *testing.T) {
 func TestCompareFunctionToGL(t *testing.T) {
 	tests := []struct {
 		name string
-		fn   types.CompareFunction
+		fn   gputypes.CompareFunction
 		want uint32
 	}{
-		{"Never", types.CompareFunctionNever, gl.NEVER},
-		{"Less", types.CompareFunctionLess, gl.LESS},
-		{"Equal", types.CompareFunctionEqual, gl.EQUAL},
-		{"LessEqual", types.CompareFunctionLessEqual, gl.LEQUAL},
-		{"Greater", types.CompareFunctionGreater, gl.GREATER},
-		{"NotEqual", types.CompareFunctionNotEqual, gl.NOTEQUAL},
-		{"GreaterEqual", types.CompareFunctionGreaterEqual, gl.GEQUAL},
-		{"Always", types.CompareFunctionAlways, gl.ALWAYS},
-		{"Unknown", types.CompareFunction(99), gl.ALWAYS}, // Unknown defaults to ALWAYS
+		{"Never", gputypes.CompareFunctionNever, gl.NEVER},
+		{"Less", gputypes.CompareFunctionLess, gl.LESS},
+		{"Equal", gputypes.CompareFunctionEqual, gl.EQUAL},
+		{"LessEqual", gputypes.CompareFunctionLessEqual, gl.LEQUAL},
+		{"Greater", gputypes.CompareFunctionGreater, gl.GREATER},
+		{"NotEqual", gputypes.CompareFunctionNotEqual, gl.NOTEQUAL},
+		{"GreaterEqual", gputypes.CompareFunctionGreaterEqual, gl.GEQUAL},
+		{"Always", gputypes.CompareFunctionAlways, gl.ALWAYS},
+		{"Unknown", gputypes.CompareFunction(99), gl.ALWAYS}, // Unknown defaults to ALWAYS
 	}
 
 	for _, tt := range tests {

@@ -8,60 +8,60 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestBufferUsageToVk tests buffer usage flag conversions.
 func TestBufferUsageToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		usage  types.BufferUsage
+		usage  gputypes.BufferUsage
 		expect vk.BufferUsageFlags
 	}{
 		{
 			name:   "CopySrc",
-			usage:  types.BufferUsageCopySrc,
+			usage:  gputypes.BufferUsageCopySrc,
 			expect: vk.BufferUsageFlags(vk.BufferUsageTransferSrcBit),
 		},
 		{
 			name:   "CopyDst",
-			usage:  types.BufferUsageCopyDst,
+			usage:  gputypes.BufferUsageCopyDst,
 			expect: vk.BufferUsageFlags(vk.BufferUsageTransferDstBit),
 		},
 		{
 			name:   "Index",
-			usage:  types.BufferUsageIndex,
+			usage:  gputypes.BufferUsageIndex,
 			expect: vk.BufferUsageFlags(vk.BufferUsageIndexBufferBit),
 		},
 		{
 			name:   "Vertex",
-			usage:  types.BufferUsageVertex,
+			usage:  gputypes.BufferUsageVertex,
 			expect: vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit),
 		},
 		{
 			name:   "Uniform",
-			usage:  types.BufferUsageUniform,
+			usage:  gputypes.BufferUsageUniform,
 			expect: vk.BufferUsageFlags(vk.BufferUsageUniformBufferBit),
 		},
 		{
 			name:   "Storage",
-			usage:  types.BufferUsageStorage,
+			usage:  gputypes.BufferUsageStorage,
 			expect: vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit),
 		},
 		{
 			name:   "Indirect",
-			usage:  types.BufferUsageIndirect,
+			usage:  gputypes.BufferUsageIndirect,
 			expect: vk.BufferUsageFlags(vk.BufferUsageIndirectBufferBit),
 		},
 		{
 			name:  "Multiple flags",
-			usage: types.BufferUsageVertex | types.BufferUsageIndex,
+			usage: gputypes.BufferUsageVertex | gputypes.BufferUsageIndex,
 			expect: vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit) |
 				vk.BufferUsageFlags(vk.BufferUsageIndexBufferBit),
 		},
 		{
 			name:   "All flags",
-			usage:  types.BufferUsageCopySrc | types.BufferUsageCopyDst | types.BufferUsageIndex | types.BufferUsageVertex | types.BufferUsageUniform | types.BufferUsageStorage | types.BufferUsageIndirect,
+			usage:  gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst | gputypes.BufferUsageIndex | gputypes.BufferUsageVertex | gputypes.BufferUsageUniform | gputypes.BufferUsageStorage | gputypes.BufferUsageIndirect,
 			expect: vk.BufferUsageFlags(vk.BufferUsageTransferSrcBit) | vk.BufferUsageFlags(vk.BufferUsageTransferDstBit) | vk.BufferUsageFlags(vk.BufferUsageIndexBufferBit) | vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit) | vk.BufferUsageFlags(vk.BufferUsageUniformBufferBit) | vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit) | vk.BufferUsageFlags(vk.BufferUsageIndirectBufferBit),
 		},
 	}
@@ -80,37 +80,37 @@ func TestBufferUsageToVk(t *testing.T) {
 func TestTextureUsageToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		usage  types.TextureUsage
+		usage  gputypes.TextureUsage
 		expect vk.ImageUsageFlags
 	}{
 		{
 			name:   "CopySrc",
-			usage:  types.TextureUsageCopySrc,
+			usage:  gputypes.TextureUsageCopySrc,
 			expect: vk.ImageUsageFlags(vk.ImageUsageTransferSrcBit),
 		},
 		{
 			name:   "CopyDst",
-			usage:  types.TextureUsageCopyDst,
+			usage:  gputypes.TextureUsageCopyDst,
 			expect: vk.ImageUsageFlags(vk.ImageUsageTransferDstBit),
 		},
 		{
 			name:   "TextureBinding",
-			usage:  types.TextureUsageTextureBinding,
+			usage:  gputypes.TextureUsageTextureBinding,
 			expect: vk.ImageUsageFlags(vk.ImageUsageSampledBit),
 		},
 		{
 			name:   "StorageBinding",
-			usage:  types.TextureUsageStorageBinding,
+			usage:  gputypes.TextureUsageStorageBinding,
 			expect: vk.ImageUsageFlags(vk.ImageUsageStorageBit),
 		},
 		{
 			name:   "RenderAttachment",
-			usage:  types.TextureUsageRenderAttachment,
+			usage:  gputypes.TextureUsageRenderAttachment,
 			expect: vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit),
 		},
 		{
 			name:  "Multiple flags",
-			usage: types.TextureUsageCopySrc | types.TextureUsageTextureBinding,
+			usage: gputypes.TextureUsageCopySrc | gputypes.TextureUsageTextureBinding,
 			expect: vk.ImageUsageFlags(vk.ImageUsageTransferSrcBit) |
 				vk.ImageUsageFlags(vk.ImageUsageSampledBit),
 		},
@@ -130,13 +130,13 @@ func TestTextureUsageToVk(t *testing.T) {
 func TestTextureDimensionToVkImageType(t *testing.T) {
 	tests := []struct {
 		name   string
-		dim    types.TextureDimension
+		dim    gputypes.TextureDimension
 		expect vk.ImageType
 	}{
-		{"1D", types.TextureDimension1D, vk.ImageType1d},
-		{"2D", types.TextureDimension2D, vk.ImageType2d},
-		{"3D", types.TextureDimension3D, vk.ImageType3d},
-		{"Unknown defaults to 2D", types.TextureDimension(99), vk.ImageType2d},
+		{"1D", gputypes.TextureDimension1D, vk.ImageType1d},
+		{"2D", gputypes.TextureDimension2D, vk.ImageType2d},
+		{"3D", gputypes.TextureDimension3D, vk.ImageType3d},
+		{"Unknown defaults to 2D", gputypes.TextureDimension(99), vk.ImageType2d},
 	}
 
 	for _, tt := range tests {
@@ -153,67 +153,67 @@ func TestTextureDimensionToVkImageType(t *testing.T) {
 func TestTextureFormatToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		format types.TextureFormat
+		format gputypes.TextureFormat
 		expect vk.Format
 	}{
 		// 8-bit formats
-		{"R8Unorm", types.TextureFormatR8Unorm, vk.FormatR8Unorm},
-		{"R8Snorm", types.TextureFormatR8Snorm, vk.FormatR8Snorm},
-		{"R8Uint", types.TextureFormatR8Uint, vk.FormatR8Uint},
-		{"R8Sint", types.TextureFormatR8Sint, vk.FormatR8Sint},
+		{"R8Unorm", gputypes.TextureFormatR8Unorm, vk.FormatR8Unorm},
+		{"R8Snorm", gputypes.TextureFormatR8Snorm, vk.FormatR8Snorm},
+		{"R8Uint", gputypes.TextureFormatR8Uint, vk.FormatR8Uint},
+		{"R8Sint", gputypes.TextureFormatR8Sint, vk.FormatR8Sint},
 
 		// 16-bit formats
-		{"R16Uint", types.TextureFormatR16Uint, vk.FormatR16Uint},
-		{"R16Sint", types.TextureFormatR16Sint, vk.FormatR16Sint},
-		{"R16Float", types.TextureFormatR16Float, vk.FormatR16Sfloat},
-		{"RG8Unorm", types.TextureFormatRG8Unorm, vk.FormatR8g8Unorm},
+		{"R16Uint", gputypes.TextureFormatR16Uint, vk.FormatR16Uint},
+		{"R16Sint", gputypes.TextureFormatR16Sint, vk.FormatR16Sint},
+		{"R16Float", gputypes.TextureFormatR16Float, vk.FormatR16Sfloat},
+		{"RG8Unorm", gputypes.TextureFormatRG8Unorm, vk.FormatR8g8Unorm},
 
 		// 32-bit formats
-		{"R32Uint", types.TextureFormatR32Uint, vk.FormatR32Uint},
-		{"R32Sint", types.TextureFormatR32Sint, vk.FormatR32Sint},
-		{"R32Float", types.TextureFormatR32Float, vk.FormatR32Sfloat},
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, vk.FormatR8g8b8a8Unorm},
-		{"RGBA8UnormSrgb", types.TextureFormatRGBA8UnormSrgb, vk.FormatR8g8b8a8Srgb},
-		{"BGRA8Unorm", types.TextureFormatBGRA8Unorm, vk.FormatB8g8r8a8Unorm},
-		{"BGRA8UnormSrgb", types.TextureFormatBGRA8UnormSrgb, vk.FormatB8g8r8a8Srgb},
+		{"R32Uint", gputypes.TextureFormatR32Uint, vk.FormatR32Uint},
+		{"R32Sint", gputypes.TextureFormatR32Sint, vk.FormatR32Sint},
+		{"R32Float", gputypes.TextureFormatR32Float, vk.FormatR32Sfloat},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, vk.FormatR8g8b8a8Unorm},
+		{"RGBA8UnormSrgb", gputypes.TextureFormatRGBA8UnormSrgb, vk.FormatR8g8b8a8Srgb},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm, vk.FormatB8g8r8a8Unorm},
+		{"BGRA8UnormSrgb", gputypes.TextureFormatBGRA8UnormSrgb, vk.FormatB8g8r8a8Srgb},
 
 		// Packed formats
-		{"RGB9E5Ufloat", types.TextureFormatRGB9E5Ufloat, vk.FormatE5b9g9r9UfloatPack32},
-		{"RGB10A2Uint", types.TextureFormatRGB10A2Uint, vk.FormatA2b10g10r10UintPack32},
-		{"RGB10A2Unorm", types.TextureFormatRGB10A2Unorm, vk.FormatA2b10g10r10UnormPack32},
-		{"RG11B10Ufloat", types.TextureFormatRG11B10Ufloat, vk.FormatB10g11r11UfloatPack32},
+		{"RGB9E5Ufloat", gputypes.TextureFormatRGB9E5Ufloat, vk.FormatE5b9g9r9UfloatPack32},
+		{"RGB10A2Uint", gputypes.TextureFormatRGB10A2Uint, vk.FormatA2b10g10r10UintPack32},
+		{"RGB10A2Unorm", gputypes.TextureFormatRGB10A2Unorm, vk.FormatA2b10g10r10UnormPack32},
+		{"RG11B10Ufloat", gputypes.TextureFormatRG11B10Ufloat, vk.FormatB10g11r11UfloatPack32},
 
 		// 64-bit formats
-		{"RG32Uint", types.TextureFormatRG32Uint, vk.FormatR32g32Uint},
-		{"RG32Float", types.TextureFormatRG32Float, vk.FormatR32g32Sfloat},
-		{"RGBA16Float", types.TextureFormatRGBA16Float, vk.FormatR16g16b16a16Sfloat},
+		{"RG32Uint", gputypes.TextureFormatRG32Uint, vk.FormatR32g32Uint},
+		{"RG32Float", gputypes.TextureFormatRG32Float, vk.FormatR32g32Sfloat},
+		{"RGBA16Float", gputypes.TextureFormatRGBA16Float, vk.FormatR16g16b16a16Sfloat},
 
 		// 128-bit formats
-		{"RGBA32Float", types.TextureFormatRGBA32Float, vk.FormatR32g32b32a32Sfloat},
+		{"RGBA32Float", gputypes.TextureFormatRGBA32Float, vk.FormatR32g32b32a32Sfloat},
 
 		// Depth/stencil formats
-		{"Stencil8", types.TextureFormatStencil8, vk.FormatS8Uint},
-		{"Depth16Unorm", types.TextureFormatDepth16Unorm, vk.FormatD16Unorm},
-		{"Depth24Plus", types.TextureFormatDepth24Plus, vk.FormatX8D24UnormPack32},
-		{"Depth24PlusStencil8", types.TextureFormatDepth24PlusStencil8, vk.FormatD24UnormS8Uint},
-		{"Depth32Float", types.TextureFormatDepth32Float, vk.FormatD32Sfloat},
-		{"Depth32FloatStencil8", types.TextureFormatDepth32FloatStencil8, vk.FormatD32SfloatS8Uint},
+		{"Stencil8", gputypes.TextureFormatStencil8, vk.FormatS8Uint},
+		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, vk.FormatD16Unorm},
+		{"Depth24Plus", gputypes.TextureFormatDepth24Plus, vk.FormatX8D24UnormPack32},
+		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, vk.FormatD24UnormS8Uint},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float, vk.FormatD32Sfloat},
+		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, vk.FormatD32SfloatS8Uint},
 
 		// BC compressed formats
-		{"BC1RGBAUnorm", types.TextureFormatBC1RGBAUnorm, vk.FormatBc1RgbaUnormBlock},
-		{"BC1RGBAUnormSrgb", types.TextureFormatBC1RGBAUnormSrgb, vk.FormatBc1RgbaSrgbBlock},
-		{"BC7RGBAUnorm", types.TextureFormatBC7RGBAUnorm, vk.FormatBc7UnormBlock},
+		{"BC1RGBAUnorm", gputypes.TextureFormatBC1RGBAUnorm, vk.FormatBc1RgbaUnormBlock},
+		{"BC1RGBAUnormSrgb", gputypes.TextureFormatBC1RGBAUnormSrgb, vk.FormatBc1RgbaSrgbBlock},
+		{"BC7RGBAUnorm", gputypes.TextureFormatBC7RGBAUnorm, vk.FormatBc7UnormBlock},
 
 		// ETC2 compressed formats
-		{"ETC2RGB8Unorm", types.TextureFormatETC2RGB8Unorm, vk.FormatEtc2R8g8b8UnormBlock},
-		{"ETC2RGBA8Unorm", types.TextureFormatETC2RGBA8Unorm, vk.FormatEtc2R8g8b8a8UnormBlock},
+		{"ETC2RGB8Unorm", gputypes.TextureFormatETC2RGB8Unorm, vk.FormatEtc2R8g8b8UnormBlock},
+		{"ETC2RGBA8Unorm", gputypes.TextureFormatETC2RGBA8Unorm, vk.FormatEtc2R8g8b8a8UnormBlock},
 
 		// ASTC compressed formats
-		{"ASTC4x4Unorm", types.TextureFormatASTC4x4Unorm, vk.FormatAstc4x4UnormBlock},
-		{"ASTC12x12UnormSrgb", types.TextureFormatASTC12x12UnormSrgb, vk.FormatAstc12x12SrgbBlock},
+		{"ASTC4x4Unorm", gputypes.TextureFormatASTC4x4Unorm, vk.FormatAstc4x4UnormBlock},
+		{"ASTC12x12UnormSrgb", gputypes.TextureFormatASTC12x12UnormSrgb, vk.FormatAstc12x12SrgbBlock},
 
 		// Unknown format
-		{"Unknown", types.TextureFormat(65535), vk.FormatUndefined},
+		{"Unknown", gputypes.TextureFormat(65535), vk.FormatUndefined},
 	}
 
 	for _, tt := range tests {
@@ -230,13 +230,13 @@ func TestTextureFormatToVk(t *testing.T) {
 func TestAddressModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   types.AddressMode
+		mode   gputypes.AddressMode
 		expect vk.SamplerAddressMode
 	}{
-		{"ClampToEdge", types.AddressModeClampToEdge, vk.SamplerAddressModeClampToEdge},
-		{"Repeat", types.AddressModeRepeat, vk.SamplerAddressModeRepeat},
-		{"MirrorRepeat", types.AddressModeMirrorRepeat, vk.SamplerAddressModeMirroredRepeat},
-		{"Unknown defaults to ClampToEdge", types.AddressMode(99), vk.SamplerAddressModeClampToEdge},
+		{"ClampToEdge", gputypes.AddressModeClampToEdge, vk.SamplerAddressModeClampToEdge},
+		{"Repeat", gputypes.AddressModeRepeat, vk.SamplerAddressModeRepeat},
+		{"MirrorRepeat", gputypes.AddressModeMirrorRepeat, vk.SamplerAddressModeMirroredRepeat},
+		{"Unknown defaults to ClampToEdge", gputypes.AddressMode(99), vk.SamplerAddressModeClampToEdge},
 	}
 
 	for _, tt := range tests {
@@ -253,12 +253,12 @@ func TestAddressModeToVk(t *testing.T) {
 func TestFilterModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   types.FilterMode
+		mode   gputypes.FilterMode
 		expect vk.Filter
 	}{
-		{"Nearest", types.FilterModeNearest, vk.FilterNearest},
-		{"Linear", types.FilterModeLinear, vk.FilterLinear},
-		{"Unknown defaults to Nearest", types.FilterMode(99), vk.FilterNearest},
+		{"Nearest", gputypes.FilterModeNearest, vk.FilterNearest},
+		{"Linear", gputypes.FilterModeLinear, vk.FilterLinear},
+		{"Unknown defaults to Nearest", gputypes.FilterMode(99), vk.FilterNearest},
 	}
 
 	for _, tt := range tests {
@@ -275,12 +275,12 @@ func TestFilterModeToVk(t *testing.T) {
 func TestMipmapFilterModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   types.FilterMode
+		mode   gputypes.FilterMode
 		expect vk.SamplerMipmapMode
 	}{
-		{"Nearest", types.FilterModeNearest, vk.SamplerMipmapModeNearest},
-		{"Linear", types.FilterModeLinear, vk.SamplerMipmapModeLinear},
-		{"Unknown defaults to Nearest", types.FilterMode(99), vk.SamplerMipmapModeNearest},
+		{"Nearest", gputypes.FilterModeNearest, vk.SamplerMipmapModeNearest},
+		{"Linear", gputypes.FilterModeLinear, vk.SamplerMipmapModeLinear},
+		{"Unknown defaults to Nearest", gputypes.FilterMode(99), vk.SamplerMipmapModeNearest},
 	}
 
 	for _, tt := range tests {
@@ -297,18 +297,18 @@ func TestMipmapFilterModeToVk(t *testing.T) {
 func TestCompareFunctionToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		fn     types.CompareFunction
+		fn     gputypes.CompareFunction
 		expect vk.CompareOp
 	}{
-		{"Never", types.CompareFunctionNever, vk.CompareOpNever},
-		{"Less", types.CompareFunctionLess, vk.CompareOpLess},
-		{"Equal", types.CompareFunctionEqual, vk.CompareOpEqual},
-		{"LessEqual", types.CompareFunctionLessEqual, vk.CompareOpLessOrEqual},
-		{"Greater", types.CompareFunctionGreater, vk.CompareOpGreater},
-		{"NotEqual", types.CompareFunctionNotEqual, vk.CompareOpNotEqual},
-		{"GreaterEqual", types.CompareFunctionGreaterEqual, vk.CompareOpGreaterOrEqual},
-		{"Always", types.CompareFunctionAlways, vk.CompareOpAlways},
-		{"Unknown defaults to Never", types.CompareFunction(99), vk.CompareOpNever},
+		{"Never", gputypes.CompareFunctionNever, vk.CompareOpNever},
+		{"Less", gputypes.CompareFunctionLess, vk.CompareOpLess},
+		{"Equal", gputypes.CompareFunctionEqual, vk.CompareOpEqual},
+		{"LessEqual", gputypes.CompareFunctionLessEqual, vk.CompareOpLessOrEqual},
+		{"Greater", gputypes.CompareFunctionGreater, vk.CompareOpGreater},
+		{"NotEqual", gputypes.CompareFunctionNotEqual, vk.CompareOpNotEqual},
+		{"GreaterEqual", gputypes.CompareFunctionGreaterEqual, vk.CompareOpGreaterOrEqual},
+		{"Always", gputypes.CompareFunctionAlways, vk.CompareOpAlways},
+		{"Unknown defaults to Never", gputypes.CompareFunction(99), vk.CompareOpNever},
 	}
 
 	for _, tt := range tests {
@@ -325,20 +325,20 @@ func TestCompareFunctionToVk(t *testing.T) {
 func TestShaderStagesToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		stages types.ShaderStages
+		stages gputypes.ShaderStages
 		expect vk.ShaderStageFlags
 	}{
-		{"Vertex", types.ShaderStageVertex, vk.ShaderStageFlags(vk.ShaderStageVertexBit)},
-		{"Fragment", types.ShaderStageFragment, vk.ShaderStageFlags(vk.ShaderStageFragmentBit)},
-		{"Compute", types.ShaderStageCompute, vk.ShaderStageFlags(vk.ShaderStageComputeBit)},
+		{"Vertex", gputypes.ShaderStageVertex, vk.ShaderStageFlags(vk.ShaderStageVertexBit)},
+		{"Fragment", gputypes.ShaderStageFragment, vk.ShaderStageFlags(vk.ShaderStageFragmentBit)},
+		{"Compute", gputypes.ShaderStageCompute, vk.ShaderStageFlags(vk.ShaderStageComputeBit)},
 		{
 			"Vertex and Fragment",
-			types.ShaderStageVertex | types.ShaderStageFragment,
+			gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
 			vk.ShaderStageFlags(vk.ShaderStageVertexBit) | vk.ShaderStageFlags(vk.ShaderStageFragmentBit),
 		},
 		{
 			"All stages",
-			types.ShaderStageVertex | types.ShaderStageFragment | types.ShaderStageCompute,
+			gputypes.ShaderStageVertex | gputypes.ShaderStageFragment | gputypes.ShaderStageCompute,
 			vk.ShaderStageFlags(vk.ShaderStageVertexBit) | vk.ShaderStageFlags(vk.ShaderStageFragmentBit) | vk.ShaderStageFlags(vk.ShaderStageComputeBit),
 		},
 	}
@@ -357,13 +357,13 @@ func TestShaderStagesToVk(t *testing.T) {
 func TestBufferBindingTypeToVk(t *testing.T) {
 	tests := []struct {
 		name        string
-		bindingType types.BufferBindingType
+		bindingType gputypes.BufferBindingType
 		expect      vk.DescriptorType
 	}{
-		{"Uniform", types.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
-		{"Storage", types.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
-		{"ReadOnlyStorage", types.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
-		{"Unknown defaults to Uniform", types.BufferBindingType(99), vk.DescriptorTypeUniformBuffer},
+		{"Uniform", gputypes.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
+		{"Storage", gputypes.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
+		{"ReadOnlyStorage", gputypes.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
+		{"Unknown defaults to Uniform", gputypes.BufferBindingType(99), vk.DescriptorTypeUniformBuffer},
 	}
 
 	for _, tt := range tests {
@@ -380,12 +380,12 @@ func TestBufferBindingTypeToVk(t *testing.T) {
 func TestVertexStepModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   types.VertexStepMode
+		mode   gputypes.VertexStepMode
 		expect vk.VertexInputRate
 	}{
-		{"Vertex", types.VertexStepModeVertex, vk.VertexInputRateVertex},
-		{"Instance", types.VertexStepModeInstance, vk.VertexInputRateInstance},
-		{"Unknown defaults to Vertex", types.VertexStepMode(99), vk.VertexInputRateVertex},
+		{"Vertex", gputypes.VertexStepModeVertex, vk.VertexInputRateVertex},
+		{"Instance", gputypes.VertexStepModeInstance, vk.VertexInputRateInstance},
+		{"Unknown defaults to Vertex", gputypes.VertexStepMode(99), vk.VertexInputRateVertex},
 	}
 
 	for _, tt := range tests {
@@ -402,32 +402,32 @@ func TestVertexStepModeToVk(t *testing.T) {
 func TestVertexFormatToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		format types.VertexFormat
+		format gputypes.VertexFormat
 		expect vk.Format
 	}{
 		// 8-bit formats
-		{"Uint8x2", types.VertexFormatUint8x2, vk.FormatR8g8Uint},
-		{"Uint8x4", types.VertexFormatUint8x4, vk.FormatR8g8b8a8Uint},
-		{"Sint8x2", types.VertexFormatSint8x2, vk.FormatR8g8Sint},
-		{"Unorm8x4", types.VertexFormatUnorm8x4, vk.FormatR8g8b8a8Unorm},
+		{"Uint8x2", gputypes.VertexFormatUint8x2, vk.FormatR8g8Uint},
+		{"Uint8x4", gputypes.VertexFormatUint8x4, vk.FormatR8g8b8a8Uint},
+		{"Sint8x2", gputypes.VertexFormatSint8x2, vk.FormatR8g8Sint},
+		{"Unorm8x4", gputypes.VertexFormatUnorm8x4, vk.FormatR8g8b8a8Unorm},
 
 		// 16-bit formats
-		{"Uint16x2", types.VertexFormatUint16x2, vk.FormatR16g16Uint},
-		{"Float16x4", types.VertexFormatFloat16x4, vk.FormatR16g16b16a16Sfloat},
+		{"Uint16x2", gputypes.VertexFormatUint16x2, vk.FormatR16g16Uint},
+		{"Float16x4", gputypes.VertexFormatFloat16x4, vk.FormatR16g16b16a16Sfloat},
 
 		// 32-bit formats
-		{"Float32", types.VertexFormatFloat32, vk.FormatR32Sfloat},
-		{"Float32x2", types.VertexFormatFloat32x2, vk.FormatR32g32Sfloat},
-		{"Float32x3", types.VertexFormatFloat32x3, vk.FormatR32g32b32Sfloat},
-		{"Float32x4", types.VertexFormatFloat32x4, vk.FormatR32g32b32a32Sfloat},
-		{"Uint32", types.VertexFormatUint32, vk.FormatR32Uint},
-		{"Sint32x4", types.VertexFormatSint32x4, vk.FormatR32g32b32a32Sint},
+		{"Float32", gputypes.VertexFormatFloat32, vk.FormatR32Sfloat},
+		{"Float32x2", gputypes.VertexFormatFloat32x2, vk.FormatR32g32Sfloat},
+		{"Float32x3", gputypes.VertexFormatFloat32x3, vk.FormatR32g32b32Sfloat},
+		{"Float32x4", gputypes.VertexFormatFloat32x4, vk.FormatR32g32b32a32Sfloat},
+		{"Uint32", gputypes.VertexFormatUint32, vk.FormatR32Uint},
+		{"Sint32x4", gputypes.VertexFormatSint32x4, vk.FormatR32g32b32a32Sint},
 
 		// Packed formats
-		{"Unorm1010102", types.VertexFormatUnorm1010102, vk.FormatA2b10g10r10UnormPack32},
+		{"Unorm1010102", gputypes.VertexFormatUnorm1010102, vk.FormatA2b10g10r10UnormPack32},
 
 		// Unknown format defaults to Float32x4
-		{"Unknown", types.VertexFormat(255), vk.FormatR32g32b32a32Sfloat},
+		{"Unknown", gputypes.VertexFormat(255), vk.FormatR32g32b32a32Sfloat},
 	}
 
 	for _, tt := range tests {
@@ -444,15 +444,15 @@ func TestVertexFormatToVk(t *testing.T) {
 func TestPrimitiveTopologyToVk(t *testing.T) {
 	tests := []struct {
 		name     string
-		topology types.PrimitiveTopology
+		topology gputypes.PrimitiveTopology
 		expect   vk.PrimitiveTopology
 	}{
-		{"PointList", types.PrimitiveTopologyPointList, vk.PrimitiveTopologyPointList},
-		{"LineList", types.PrimitiveTopologyLineList, vk.PrimitiveTopologyLineList},
-		{"LineStrip", types.PrimitiveTopologyLineStrip, vk.PrimitiveTopologyLineStrip},
-		{"TriangleList", types.PrimitiveTopologyTriangleList, vk.PrimitiveTopologyTriangleList},
-		{"TriangleStrip", types.PrimitiveTopologyTriangleStrip, vk.PrimitiveTopologyTriangleStrip},
-		{"Unknown defaults to TriangleList", types.PrimitiveTopology(99), vk.PrimitiveTopologyTriangleList},
+		{"PointList", gputypes.PrimitiveTopologyPointList, vk.PrimitiveTopologyPointList},
+		{"LineList", gputypes.PrimitiveTopologyLineList, vk.PrimitiveTopologyLineList},
+		{"LineStrip", gputypes.PrimitiveTopologyLineStrip, vk.PrimitiveTopologyLineStrip},
+		{"TriangleList", gputypes.PrimitiveTopologyTriangleList, vk.PrimitiveTopologyTriangleList},
+		{"TriangleStrip", gputypes.PrimitiveTopologyTriangleStrip, vk.PrimitiveTopologyTriangleStrip},
+		{"Unknown defaults to TriangleList", gputypes.PrimitiveTopology(99), vk.PrimitiveTopologyTriangleList},
 	}
 
 	for _, tt := range tests {
@@ -469,13 +469,13 @@ func TestPrimitiveTopologyToVk(t *testing.T) {
 func TestCullModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   types.CullMode
+		mode   gputypes.CullMode
 		expect vk.CullModeFlags
 	}{
-		{"None", types.CullModeNone, vk.CullModeFlags(vk.CullModeNone)},
-		{"Front", types.CullModeFront, vk.CullModeFlags(vk.CullModeFrontBit)},
-		{"Back", types.CullModeBack, vk.CullModeFlags(vk.CullModeBackBit)},
-		{"Unknown defaults to None", types.CullMode(99), vk.CullModeFlags(vk.CullModeNone)},
+		{"None", gputypes.CullModeNone, vk.CullModeFlags(vk.CullModeNone)},
+		{"Front", gputypes.CullModeFront, vk.CullModeFlags(vk.CullModeFrontBit)},
+		{"Back", gputypes.CullModeBack, vk.CullModeFlags(vk.CullModeBackBit)},
+		{"Unknown defaults to None", gputypes.CullMode(99), vk.CullModeFlags(vk.CullModeNone)},
 	}
 
 	for _, tt := range tests {
@@ -492,12 +492,12 @@ func TestCullModeToVk(t *testing.T) {
 func TestFrontFaceToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		face   types.FrontFace
+		face   gputypes.FrontFace
 		expect vk.FrontFace
 	}{
-		{"CCW", types.FrontFaceCCW, vk.FrontFaceCounterClockwise},
-		{"CW", types.FrontFaceCW, vk.FrontFaceClockwise},
-		{"Unknown defaults to CCW", types.FrontFace(99), vk.FrontFaceCounterClockwise},
+		{"CCW", gputypes.FrontFaceCCW, vk.FrontFaceCounterClockwise},
+		{"CW", gputypes.FrontFaceCW, vk.FrontFaceClockwise},
+		{"Unknown defaults to CCW", gputypes.FrontFace(99), vk.FrontFaceCounterClockwise},
 	}
 
 	for _, tt := range tests {
@@ -514,16 +514,16 @@ func TestFrontFaceToVk(t *testing.T) {
 func TestColorWriteMaskToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mask   types.ColorWriteMask
+		mask   gputypes.ColorWriteMask
 		expect vk.ColorComponentFlags
 	}{
-		{"Red", types.ColorWriteMaskRed, vk.ColorComponentFlags(vk.ColorComponentRBit)},
-		{"Green", types.ColorWriteMaskGreen, vk.ColorComponentFlags(vk.ColorComponentGBit)},
-		{"Blue", types.ColorWriteMaskBlue, vk.ColorComponentFlags(vk.ColorComponentBBit)},
-		{"Alpha", types.ColorWriteMaskAlpha, vk.ColorComponentFlags(vk.ColorComponentABit)},
+		{"Red", gputypes.ColorWriteMaskRed, vk.ColorComponentFlags(vk.ColorComponentRBit)},
+		{"Green", gputypes.ColorWriteMaskGreen, vk.ColorComponentFlags(vk.ColorComponentGBit)},
+		{"Blue", gputypes.ColorWriteMaskBlue, vk.ColorComponentFlags(vk.ColorComponentBBit)},
+		{"Alpha", gputypes.ColorWriteMaskAlpha, vk.ColorComponentFlags(vk.ColorComponentABit)},
 		{
 			"All",
-			types.ColorWriteMaskRed | types.ColorWriteMaskGreen | types.ColorWriteMaskBlue | types.ColorWriteMaskAlpha,
+			gputypes.ColorWriteMaskRed | gputypes.ColorWriteMaskGreen | gputypes.ColorWriteMaskBlue | gputypes.ColorWriteMaskAlpha,
 			vk.ColorComponentFlags(vk.ColorComponentRBit) | vk.ColorComponentFlags(vk.ColorComponentGBit) | vk.ColorComponentFlags(vk.ColorComponentBBit) | vk.ColorComponentFlags(vk.ColorComponentABit),
 		},
 	}
@@ -542,23 +542,23 @@ func TestColorWriteMaskToVk(t *testing.T) {
 func TestBlendFactorToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		factor types.BlendFactor
+		factor gputypes.BlendFactor
 		expect vk.BlendFactor
 	}{
-		{"Zero", types.BlendFactorZero, vk.BlendFactorZero},
-		{"One", types.BlendFactorOne, vk.BlendFactorOne},
-		{"Src", types.BlendFactorSrc, vk.BlendFactorSrcColor},
-		{"OneMinusSrc", types.BlendFactorOneMinusSrc, vk.BlendFactorOneMinusSrcColor},
-		{"SrcAlpha", types.BlendFactorSrcAlpha, vk.BlendFactorSrcAlpha},
-		{"OneMinusSrcAlpha", types.BlendFactorOneMinusSrcAlpha, vk.BlendFactorOneMinusSrcAlpha},
-		{"Dst", types.BlendFactorDst, vk.BlendFactorDstColor},
-		{"OneMinusDst", types.BlendFactorOneMinusDst, vk.BlendFactorOneMinusDstColor},
-		{"DstAlpha", types.BlendFactorDstAlpha, vk.BlendFactorDstAlpha},
-		{"OneMinusDstAlpha", types.BlendFactorOneMinusDstAlpha, vk.BlendFactorOneMinusDstAlpha},
-		{"SrcAlphaSaturated", types.BlendFactorSrcAlphaSaturated, vk.BlendFactorSrcAlphaSaturate},
-		{"Constant", types.BlendFactorConstant, vk.BlendFactorConstantColor},
-		{"OneMinusConstant", types.BlendFactorOneMinusConstant, vk.BlendFactorOneMinusConstantColor},
-		{"Unknown defaults to One", types.BlendFactor(99), vk.BlendFactorOne},
+		{"Zero", gputypes.BlendFactorZero, vk.BlendFactorZero},
+		{"One", gputypes.BlendFactorOne, vk.BlendFactorOne},
+		{"Src", gputypes.BlendFactorSrc, vk.BlendFactorSrcColor},
+		{"OneMinusSrc", gputypes.BlendFactorOneMinusSrc, vk.BlendFactorOneMinusSrcColor},
+		{"SrcAlpha", gputypes.BlendFactorSrcAlpha, vk.BlendFactorSrcAlpha},
+		{"OneMinusSrcAlpha", gputypes.BlendFactorOneMinusSrcAlpha, vk.BlendFactorOneMinusSrcAlpha},
+		{"Dst", gputypes.BlendFactorDst, vk.BlendFactorDstColor},
+		{"OneMinusDst", gputypes.BlendFactorOneMinusDst, vk.BlendFactorOneMinusDstColor},
+		{"DstAlpha", gputypes.BlendFactorDstAlpha, vk.BlendFactorDstAlpha},
+		{"OneMinusDstAlpha", gputypes.BlendFactorOneMinusDstAlpha, vk.BlendFactorOneMinusDstAlpha},
+		{"SrcAlphaSaturated", gputypes.BlendFactorSrcAlphaSaturated, vk.BlendFactorSrcAlphaSaturate},
+		{"Constant", gputypes.BlendFactorConstant, vk.BlendFactorConstantColor},
+		{"OneMinusConstant", gputypes.BlendFactorOneMinusConstant, vk.BlendFactorOneMinusConstantColor},
+		{"Unknown defaults to One", gputypes.BlendFactor(99), vk.BlendFactorOne},
 	}
 
 	for _, tt := range tests {
@@ -575,15 +575,15 @@ func TestBlendFactorToVk(t *testing.T) {
 func TestBlendOperationToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		op     types.BlendOperation
+		op     gputypes.BlendOperation
 		expect vk.BlendOp
 	}{
-		{"Add", types.BlendOperationAdd, vk.BlendOpAdd},
-		{"Subtract", types.BlendOperationSubtract, vk.BlendOpSubtract},
-		{"ReverseSubtract", types.BlendOperationReverseSubtract, vk.BlendOpReverseSubtract},
-		{"Min", types.BlendOperationMin, vk.BlendOpMin},
-		{"Max", types.BlendOperationMax, vk.BlendOpMax},
-		{"Unknown defaults to Add", types.BlendOperation(99), vk.BlendOpAdd},
+		{"Add", gputypes.BlendOperationAdd, vk.BlendOpAdd},
+		{"Subtract", gputypes.BlendOperationSubtract, vk.BlendOpSubtract},
+		{"ReverseSubtract", gputypes.BlendOperationReverseSubtract, vk.BlendOpReverseSubtract},
+		{"Min", gputypes.BlendOperationMin, vk.BlendOpMin},
+		{"Max", gputypes.BlendOperationMax, vk.BlendOpMax},
+		{"Unknown defaults to Add", gputypes.BlendOperation(99), vk.BlendOpAdd},
 	}
 
 	for _, tt := range tests {
@@ -630,7 +630,7 @@ func TestStencilFaceStateToVk(t *testing.T) {
 		FailOp:      hal.StencilOperationKeep,
 		PassOp:      hal.StencilOperationReplace,
 		DepthFailOp: hal.StencilOperationIncrementClamp,
-		Compare:     types.CompareFunctionLess,
+		Compare:     gputypes.CompareFunctionLess,
 	}
 
 	got := stencilFaceStateToVk(state)
@@ -653,16 +653,16 @@ func TestStencilFaceStateToVk(t *testing.T) {
 func TestTextureViewDimensionToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		dim    types.TextureViewDimension
+		dim    gputypes.TextureViewDimension
 		expect vk.ImageViewType
 	}{
-		{"1D", types.TextureViewDimension1D, vk.ImageViewType1d},
-		{"2D", types.TextureViewDimension2D, vk.ImageViewType2d},
-		{"2DArray", types.TextureViewDimension2DArray, vk.ImageViewType2dArray},
-		{"Cube", types.TextureViewDimensionCube, vk.ImageViewTypeCube},
-		{"CubeArray", types.TextureViewDimensionCubeArray, vk.ImageViewTypeCubeArray},
-		{"3D", types.TextureViewDimension3D, vk.ImageViewType3d},
-		{"Unknown defaults to 2D", types.TextureViewDimension(99), vk.ImageViewType2d},
+		{"1D", gputypes.TextureViewDimension1D, vk.ImageViewType1d},
+		{"2D", gputypes.TextureViewDimension2D, vk.ImageViewType2d},
+		{"2DArray", gputypes.TextureViewDimension2DArray, vk.ImageViewType2dArray},
+		{"Cube", gputypes.TextureViewDimensionCube, vk.ImageViewTypeCube},
+		{"CubeArray", gputypes.TextureViewDimensionCubeArray, vk.ImageViewTypeCubeArray},
+		{"3D", gputypes.TextureViewDimension3D, vk.ImageViewType3d},
+		{"Unknown defaults to 2D", gputypes.TextureViewDimension(99), vk.ImageViewType2d},
 	}
 
 	for _, tt := range tests {
@@ -679,21 +679,21 @@ func TestTextureViewDimensionToVk(t *testing.T) {
 func TestTextureAspectToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		aspect types.TextureAspect
-		format types.TextureFormat
+		aspect gputypes.TextureAspect
+		format gputypes.TextureFormat
 		expect vk.ImageAspectFlags
 	}{
-		{"DepthOnly", types.TextureAspectDepthOnly, types.TextureFormatDepth32Float, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
-		{"StencilOnly", types.TextureAspectStencilOnly, types.TextureFormatStencil8, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
-		{"All color", types.TextureAspectAll, types.TextureFormatRGBA8Unorm, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
+		{"DepthOnly", gputypes.TextureAspectDepthOnly, gputypes.TextureFormatDepth32Float, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"StencilOnly", gputypes.TextureAspectStencilOnly, gputypes.TextureFormatStencil8, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
+		{"All color", gputypes.TextureAspectAll, gputypes.TextureFormatRGBA8Unorm, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
 		{
 			"All depth-stencil",
-			types.TextureAspectAll,
-			types.TextureFormatDepth24PlusStencil8,
+			gputypes.TextureAspectAll,
+			gputypes.TextureFormatDepth24PlusStencil8,
 			vk.ImageAspectFlags(vk.ImageAspectDepthBit) | vk.ImageAspectFlags(vk.ImageAspectStencilBit),
 		},
-		{"All depth only", types.TextureAspectAll, types.TextureFormatDepth32Float, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
-		{"Unknown defaults to Color", types.TextureAspect(99), types.TextureFormatRGBA8Unorm, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
+		{"All depth only", gputypes.TextureAspectAll, gputypes.TextureFormatDepth32Float, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"Unknown defaults to Color", gputypes.TextureAspect(99), gputypes.TextureFormatRGBA8Unorm, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
 	}
 
 	for _, tt := range tests {
@@ -710,12 +710,12 @@ func TestTextureAspectToVk(t *testing.T) {
 func TestTextureAspectToVkSimple(t *testing.T) {
 	tests := []struct {
 		name   string
-		aspect types.TextureAspect
+		aspect gputypes.TextureAspect
 		expect vk.ImageAspectFlags
 	}{
-		{"DepthOnly", types.TextureAspectDepthOnly, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
-		{"StencilOnly", types.TextureAspectStencilOnly, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
-		{"All defaults to Color", types.TextureAspectAll, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
+		{"DepthOnly", gputypes.TextureAspectDepthOnly, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"StencilOnly", gputypes.TextureAspectStencilOnly, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
+		{"All defaults to Color", gputypes.TextureAspectAll, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
 	}
 
 	for _, tt := range tests {
@@ -732,17 +732,17 @@ func TestTextureAspectToVkSimple(t *testing.T) {
 func TestIsDepthStencilFormat(t *testing.T) {
 	tests := []struct {
 		name   string
-		format types.TextureFormat
+		format gputypes.TextureFormat
 		expect bool
 	}{
-		{"Depth16Unorm", types.TextureFormatDepth16Unorm, true},
-		{"Depth24Plus", types.TextureFormatDepth24Plus, true},
-		{"Depth24PlusStencil8", types.TextureFormatDepth24PlusStencil8, true},
-		{"Depth32Float", types.TextureFormatDepth32Float, true},
-		{"Depth32FloatStencil8", types.TextureFormatDepth32FloatStencil8, true},
-		{"Stencil8", types.TextureFormatStencil8, true},
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, false},
-		{"R32Float", types.TextureFormatR32Float, false},
+		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, true},
+		{"Depth24Plus", gputypes.TextureFormatDepth24Plus, true},
+		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, true},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float, true},
+		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, true},
+		{"Stencil8", gputypes.TextureFormatStencil8, true},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, false},
+		{"R32Float", gputypes.TextureFormatR32Float, false},
 	}
 
 	for _, tt := range tests {
@@ -759,15 +759,15 @@ func TestIsDepthStencilFormat(t *testing.T) {
 func TestHasStencilAspect(t *testing.T) {
 	tests := []struct {
 		name   string
-		format types.TextureFormat
+		format gputypes.TextureFormat
 		expect bool
 	}{
-		{"Depth24PlusStencil8", types.TextureFormatDepth24PlusStencil8, true},
-		{"Depth32FloatStencil8", types.TextureFormatDepth32FloatStencil8, true},
-		{"Stencil8", types.TextureFormatStencil8, true},
-		{"Depth16Unorm", types.TextureFormatDepth16Unorm, false},
-		{"Depth32Float", types.TextureFormatDepth32Float, false},
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, false},
+		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, true},
+		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, true},
+		{"Stencil8", gputypes.TextureFormatStencil8, true},
+		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, false},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float, false},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, false},
 	}
 
 	for _, tt := range tests {
@@ -784,13 +784,13 @@ func TestHasStencilAspect(t *testing.T) {
 func TestTextureDimensionToViewType(t *testing.T) {
 	tests := []struct {
 		name   string
-		dim    types.TextureDimension
+		dim    gputypes.TextureDimension
 		expect vk.ImageViewType
 	}{
-		{"1D", types.TextureDimension1D, vk.ImageViewType1d},
-		{"2D", types.TextureDimension2D, vk.ImageViewType2d},
-		{"3D", types.TextureDimension3D, vk.ImageViewType3d},
-		{"Unknown defaults to 2D", types.TextureDimension(99), vk.ImageViewType2d},
+		{"1D", gputypes.TextureDimension1D, vk.ImageViewType1d},
+		{"2D", gputypes.TextureDimension2D, vk.ImageViewType2d},
+		{"3D", gputypes.TextureDimension3D, vk.ImageViewType3d},
+		{"Unknown defaults to 2D", gputypes.TextureDimension(99), vk.ImageViewType2d},
 	}
 
 	for _, tt := range tests {

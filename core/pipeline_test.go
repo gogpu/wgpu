@@ -4,15 +4,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // createTestShaderModule creates a shader module for testing
 func createTestShaderModule(t *testing.T, deviceID DeviceID) ShaderModuleID {
 	t.Helper()
-	moduleID, err := DeviceCreateShaderModule(deviceID, &types.ShaderModuleDescriptor{
+	moduleID, err := DeviceCreateShaderModule(deviceID, &gputypes.ShaderModuleDescriptor{
 		Label: "Test Compute Shader",
-		Source: types.ShaderSourceWGSL{
+		Source: gputypes.ShaderSourceWGSL{
 			Code: "@compute @workgroup_size(64) fn main() {}",
 		},
 	})
@@ -32,7 +32,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "create pipeline with valid descriptor",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				return deviceID, &ComputePipelineDescriptor{
@@ -49,7 +49,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "create pipeline with constants",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				return deviceID, &ComputePipelineDescriptor{
@@ -70,7 +70,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "fail with nil descriptor",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				return deviceID, nil
 			},
@@ -93,7 +93,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "fail with missing shader module",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				return deviceID, &ComputePipelineDescriptor{
 					Label: "Missing Module",
@@ -109,7 +109,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "fail with invalid shader module",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				// Create a fake module ID that doesn't exist
 				invalidModuleID := NewID[shaderModuleMarker](999, 1)
@@ -127,7 +127,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "fail with missing entry point",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				return deviceID, &ComputePipelineDescriptor{
@@ -144,7 +144,7 @@ func TestDeviceCreateComputePipeline(t *testing.T) {
 			name: "fail with invalid pipeline layout",
 			setup: func(t *testing.T) (DeviceID, *ComputePipelineDescriptor) {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				// Create a fake layout ID that doesn't exist
@@ -194,7 +194,7 @@ func TestDeviceDestroyComputePipeline(t *testing.T) {
 			name: "destroy valid pipeline",
 			setup: func(t *testing.T) ComputePipelineID {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				pipelineID, _ := DeviceCreateComputePipeline(deviceID, &ComputePipelineDescriptor{
@@ -258,7 +258,7 @@ func TestGetComputePipeline(t *testing.T) {
 			name: "get valid pipeline",
 			setup: func(t *testing.T) ComputePipelineID {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				moduleID := createTestShaderModule(t, deviceID)
 				pipelineID, _ := DeviceCreateComputePipeline(deviceID, &ComputePipelineDescriptor{
@@ -297,7 +297,7 @@ func TestGetComputePipeline(t *testing.T) {
 func TestComputePipelineConcurrentAccess(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)

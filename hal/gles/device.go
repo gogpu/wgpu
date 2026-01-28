@@ -13,7 +13,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for OpenGL.
@@ -30,19 +30,19 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	// Determine GL buffer target from usage
 	target := uint32(gl.ARRAY_BUFFER)
 	switch {
-	case desc.Usage&types.BufferUsageIndex != 0:
+	case desc.Usage&gputypes.BufferUsageIndex != 0:
 		target = gl.ELEMENT_ARRAY_BUFFER
-	case desc.Usage&types.BufferUsageUniform != 0:
+	case desc.Usage&gputypes.BufferUsageUniform != 0:
 		target = gl.UNIFORM_BUFFER
-	case desc.Usage&types.BufferUsageCopySrc != 0, desc.Usage&types.BufferUsageCopyDst != 0:
+	case desc.Usage&gputypes.BufferUsageCopySrc != 0, desc.Usage&gputypes.BufferUsageCopyDst != 0:
 		target = gl.COPY_READ_BUFFER
 	}
 
 	// Determine usage hint
 	usage := uint32(gl.STATIC_DRAW)
-	if desc.Usage&types.BufferUsageMapWrite != 0 {
+	if desc.Usage&gputypes.BufferUsageMapWrite != 0 {
 		usage = gl.DYNAMIC_DRAW
-	} else if desc.Usage&types.BufferUsageMapRead != 0 {
+	} else if desc.Usage&gputypes.BufferUsageMapRead != 0 {
 		usage = gl.DYNAMIC_READ
 	}
 
@@ -79,16 +79,16 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	// Map dimension to GL target
 	target := uint32(gl.TEXTURE_2D)
 	switch desc.Dimension {
-	case types.TextureDimension1D:
+	case gputypes.TextureDimension1D:
 		// GL doesn't have 1D textures in ES, use 2D with height=1
 		target = gl.TEXTURE_2D
-	case types.TextureDimension2D:
+	case gputypes.TextureDimension2D:
 		if desc.Size.DepthOrArrayLayers > 1 {
 			target = gl.TEXTURE_2D_ARRAY
 		} else {
 			target = gl.TEXTURE_2D
 		}
-	case types.TextureDimension3D:
+	case gputypes.TextureDimension3D:
 		target = gl.TEXTURE_3D
 	}
 
@@ -450,41 +450,41 @@ type (
 )
 
 // textureFormatToGL converts a WebGPU texture format to GL format info.
-func textureFormatToGL(format types.TextureFormat) (internalFormat, dataFormat, dataType uint32) {
+func textureFormatToGL(format gputypes.TextureFormat) (internalFormat, dataFormat, dataType uint32) {
 	switch format {
-	case types.TextureFormatR8Unorm:
+	case gputypes.TextureFormatR8Unorm:
 		return gl.R8, gl.RED, gl.UNSIGNED_BYTE
-	case types.TextureFormatRG8Unorm:
+	case gputypes.TextureFormatRG8Unorm:
 		return gl.RG8, gl.RG, gl.UNSIGNED_BYTE
-	case types.TextureFormatRGBA8Unorm:
+	case gputypes.TextureFormatRGBA8Unorm:
 		return gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case types.TextureFormatRGBA8UnormSrgb:
+	case gputypes.TextureFormatRGBA8UnormSrgb:
 		return gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case types.TextureFormatBGRA8Unorm:
+	case gputypes.TextureFormatBGRA8Unorm:
 		return gl.RGBA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case types.TextureFormatBGRA8UnormSrgb:
+	case gputypes.TextureFormatBGRA8UnormSrgb:
 		return gl.SRGB8_ALPHA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case types.TextureFormatR16Float:
+	case gputypes.TextureFormatR16Float:
 		return gl.R16F, gl.RED, gl.HALF_FLOAT
-	case types.TextureFormatRG16Float:
+	case gputypes.TextureFormatRG16Float:
 		return gl.RG16F, gl.RG, gl.HALF_FLOAT
-	case types.TextureFormatRGBA16Float:
+	case gputypes.TextureFormatRGBA16Float:
 		return gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT
-	case types.TextureFormatR32Float:
+	case gputypes.TextureFormatR32Float:
 		return gl.R32F, gl.RED, gl.FLOAT
-	case types.TextureFormatRG32Float:
+	case gputypes.TextureFormatRG32Float:
 		return gl.RG32F, gl.RG, gl.FLOAT
-	case types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA32Float:
 		return gl.RGBA32F, gl.RGBA, gl.FLOAT
-	case types.TextureFormatDepth16Unorm:
+	case gputypes.TextureFormatDepth16Unorm:
 		return gl.DEPTH_COMPONENT16, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT
-	case types.TextureFormatDepth24Plus:
+	case gputypes.TextureFormatDepth24Plus:
 		return gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT
-	case types.TextureFormatDepth24PlusStencil8:
+	case gputypes.TextureFormatDepth24PlusStencil8:
 		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT
-	case types.TextureFormatDepth32Float:
+	case gputypes.TextureFormatDepth32Float:
 		return gl.DEPTH_COMPONENT32, gl.DEPTH_COMPONENT, gl.FLOAT
-	case types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth32FloatStencil8:
 		return gl.DEPTH32F_STENCIL8, gl.DEPTH_STENCIL, gl.FLOAT
 	default:
 		// Default to RGBA8

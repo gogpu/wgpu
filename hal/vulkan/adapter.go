@@ -10,7 +10,7 @@ import (
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for Vulkan.
@@ -22,7 +22,7 @@ type Adapter struct {
 }
 
 // Open creates a logical device with the requested features and limits.
-func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDevice, error) {
+func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
 	// Find queue families
 	var queueFamilyCount uint32
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, nil)
@@ -122,27 +122,27 @@ func (a *Adapter) Open(features types.Features, limits types.Limits) (hal.OpenDe
 }
 
 // TextureFormatCapabilities returns capabilities for a texture format.
-func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
+func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
 	// Note: Full format support requires vkGetPhysicalDeviceFormatProperties. See DX12 adapter.go for pattern.
 	flags := hal.TextureFormatCapabilitySampled
 
 	switch format {
-	case types.TextureFormatRGBA8Unorm,
-		types.TextureFormatRGBA8UnormSrgb,
-		types.TextureFormatBGRA8Unorm,
-		types.TextureFormatBGRA8UnormSrgb,
-		types.TextureFormatRGBA16Float,
-		types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatBGRA8UnormSrgb,
+		gputypes.TextureFormatRGBA16Float,
+		gputypes.TextureFormatRGBA32Float:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityBlendable |
 			hal.TextureFormatCapabilityMultisample |
 			hal.TextureFormatCapabilityMultisampleResolve
 
-	case types.TextureFormatDepth16Unorm,
-		types.TextureFormatDepth24Plus,
-		types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32Float,
-		types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityMultisample
 	}
@@ -156,11 +156,11 @@ func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.Text
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	// Note: Full surface capabilities require vkGetPhysicalDeviceSurfaceCapabilitiesKHR.
 	return &hal.SurfaceCapabilities{
-		Formats: []types.TextureFormat{
-			types.TextureFormatBGRA8Unorm,
-			types.TextureFormatRGBA8Unorm,
-			types.TextureFormatBGRA8UnormSrgb,
-			types.TextureFormatRGBA8UnormSrgb,
+		Formats: []gputypes.TextureFormat{
+			gputypes.TextureFormatBGRA8Unorm,
+			gputypes.TextureFormatRGBA8Unorm,
+			gputypes.TextureFormatBGRA8UnormSrgb,
+			gputypes.TextureFormatRGBA8UnormSrgb,
 		},
 		PresentModes: []hal.PresentMode{
 			hal.PresentModeFifo,

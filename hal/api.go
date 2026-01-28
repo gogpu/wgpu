@@ -3,14 +3,14 @@ package hal
 import (
 	"time"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Backend identifies a graphics backend implementation.
 // Backends are registered globally and provide factory methods for instances.
 type Backend interface {
 	// Variant returns the backend type identifier.
-	Variant() types.Backend
+	Variant() gputypes.Backend
 
 	// CreateInstance creates a new GPU instance with the given configuration.
 	// Returns an error if instance creation fails (e.g., drivers not available).
@@ -42,10 +42,10 @@ type ExposedAdapter struct {
 	Adapter Adapter
 
 	// Info contains adapter metadata (name, vendor, device type).
-	Info types.AdapterInfo
+	Info gputypes.AdapterInfo
 
 	// Features are the supported optional features.
-	Features types.Features
+	Features gputypes.Features
 
 	// Capabilities contains detailed capability information.
 	Capabilities Capabilities
@@ -56,10 +56,10 @@ type ExposedAdapter struct {
 type Adapter interface {
 	// Open opens a logical device with the requested features and limits.
 	// Returns an error if the adapter cannot support the requested configuration.
-	Open(features types.Features, limits types.Limits) (OpenDevice, error)
+	Open(features gputypes.Features, limits gputypes.Limits) (OpenDevice, error)
 
 	// TextureFormatCapabilities returns capabilities for a specific texture format.
-	TextureFormatCapabilities(format types.TextureFormat) TextureFormatCapabilities
+	TextureFormatCapabilities(format gputypes.TextureFormat) TextureFormatCapabilities
 
 	// SurfaceCapabilities returns capabilities for a specific surface.
 	// Returns nil if the adapter is not compatible with the surface.

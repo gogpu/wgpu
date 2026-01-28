@@ -11,15 +11,15 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Backend implements hal.Backend for OpenGL ES / OpenGL 3.3+ on Linux.
 type Backend struct{}
 
 // Variant returns the backend type identifier.
-func (Backend) Variant() types.Backend {
-	return types.BackendGL
+func (Backend) Variant() gputypes.Backend {
+	return gputypes.BackendGL
 }
 
 // CreateInstance creates a new OpenGL instance.
@@ -89,19 +89,19 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	return []hal.ExposedAdapter{
 		{
 			Adapter: &Adapter{},
-			Info: types.AdapterInfo{
+			Info: gputypes.AdapterInfo{
 				Name:       "OpenGL Adapter",
 				Vendor:     "Unknown",
 				VendorID:   0,
 				DeviceID:   0,
-				DeviceType: types.DeviceTypeOther,
+				DeviceType: gputypes.DeviceTypeOther,
 				Driver:     "OpenGL",
 				DriverInfo: "OpenGL 3.3+ / ES 3.0+",
-				Backend:    types.BackendGL,
+				Backend:    gputypes.BackendGL,
 			},
 			Features: 0,
 			Capabilities: hal.Capabilities{
-				Limits: types.DefaultLimits(),
+				Limits: gputypes.DefaultLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

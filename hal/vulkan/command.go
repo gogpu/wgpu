@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CommandPool manages command buffer allocation.
@@ -509,7 +509,7 @@ type RenderPassEncoder struct {
 	encoder     *CommandEncoder
 	desc        *hal.RenderPassDescriptor
 	pipeline    *RenderPipeline
-	indexFormat types.IndexFormat
+	indexFormat gputypes.IndexFormat
 	// For VkRenderPass-based rendering (not dynamic rendering)
 	renderPass  vk.RenderPass
 	framebuffer vk.Framebuffer
@@ -575,7 +575,7 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 }
 
 // SetIndexBuffer sets the index buffer.
-func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.IndexFormat, offset uint64) {
+func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
@@ -583,7 +583,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.Index
 
 	e.indexFormat = format
 	indexType := vk.IndexTypeUint16
-	if format == types.IndexFormatUint32 {
+	if format == gputypes.IndexFormatUint32 {
 		indexType = vk.IndexTypeUint32
 	}
 
@@ -625,7 +625,7 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 }
 
 // SetBlendConstant sets the blend constant.
-func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
+func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if !e.encoder.isRecording || color == nil {
 		return
 	}
@@ -762,35 +762,35 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 // --- Helper functions ---
 
 //nolint:unparam // stage will be used when barrier optimization is implemented
-func bufferUsageToAccessAndStage(usage types.BufferUsage) (vk.AccessFlags, vk.PipelineStageFlags) {
+func bufferUsageToAccessAndStage(usage gputypes.BufferUsage) (vk.AccessFlags, vk.PipelineStageFlags) {
 	var access vk.AccessFlags
 	var stage vk.PipelineStageFlags
 
-	if usage&types.BufferUsageCopySrc != 0 {
+	if usage&gputypes.BufferUsageCopySrc != 0 {
 		access |= vk.AccessFlags(vk.AccessTransferReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageTransferBit)
 	}
-	if usage&types.BufferUsageCopyDst != 0 {
+	if usage&gputypes.BufferUsageCopyDst != 0 {
 		access |= vk.AccessFlags(vk.AccessTransferWriteBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageTransferBit)
 	}
-	if usage&types.BufferUsageVertex != 0 {
+	if usage&gputypes.BufferUsageVertex != 0 {
 		access |= vk.AccessFlags(vk.AccessVertexAttributeReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageVertexInputBit)
 	}
-	if usage&types.BufferUsageIndex != 0 {
+	if usage&gputypes.BufferUsageIndex != 0 {
 		access |= vk.AccessFlags(vk.AccessIndexReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageVertexInputBit)
 	}
-	if usage&types.BufferUsageUniform != 0 {
+	if usage&gputypes.BufferUsageUniform != 0 {
 		access |= vk.AccessFlags(vk.AccessUniformReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageVertexShaderBit | vk.PipelineStageFragmentShaderBit)
 	}
-	if usage&types.BufferUsageStorage != 0 {
+	if usage&gputypes.BufferUsageStorage != 0 {
 		access |= vk.AccessFlags(vk.AccessShaderReadBit | vk.AccessShaderWriteBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageVertexShaderBit | vk.PipelineStageFragmentShaderBit | vk.PipelineStageComputeShaderBit)
 	}
-	if usage&types.BufferUsageIndirect != 0 {
+	if usage&gputypes.BufferUsageIndirect != 0 {
 		access |= vk.AccessFlags(vk.AccessIndirectCommandReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageDrawIndirectBit)
 	}
@@ -803,32 +803,32 @@ func bufferUsageToAccessAndStage(usage types.BufferUsage) (vk.AccessFlags, vk.Pi
 }
 
 //nolint:unparam // stage will be used when barrier optimization is implemented
-func textureUsageToAccessStageLayout(usage types.TextureUsage) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
+func textureUsageToAccessStageLayout(usage gputypes.TextureUsage) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
 	var access vk.AccessFlags
 	var stage vk.PipelineStageFlags
 	layout := vk.ImageLayoutGeneral
 
-	if usage&types.TextureUsageCopySrc != 0 {
+	if usage&gputypes.TextureUsageCopySrc != 0 {
 		access |= vk.AccessFlags(vk.AccessTransferReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageTransferBit)
 		layout = vk.ImageLayoutTransferSrcOptimal
 	}
-	if usage&types.TextureUsageCopyDst != 0 {
+	if usage&gputypes.TextureUsageCopyDst != 0 {
 		access |= vk.AccessFlags(vk.AccessTransferWriteBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageTransferBit)
 		layout = vk.ImageLayoutTransferDstOptimal
 	}
-	if usage&types.TextureUsageTextureBinding != 0 {
+	if usage&gputypes.TextureUsageTextureBinding != 0 {
 		access |= vk.AccessFlags(vk.AccessShaderReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageFragmentShaderBit)
 		layout = vk.ImageLayoutShaderReadOnlyOptimal
 	}
-	if usage&types.TextureUsageStorageBinding != 0 {
+	if usage&gputypes.TextureUsageStorageBinding != 0 {
 		access |= vk.AccessFlags(vk.AccessShaderReadBit | vk.AccessShaderWriteBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit)
 		layout = vk.ImageLayoutGeneral
 	}
-	if usage&types.TextureUsageRenderAttachment != 0 {
+	if usage&gputypes.TextureUsageRenderAttachment != 0 {
 		access |= vk.AccessFlags(vk.AccessColorAttachmentWriteBit | vk.AccessColorAttachmentReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 		layout = vk.ImageLayoutColorAttachmentOptimal
@@ -855,20 +855,20 @@ func arrayLayerCountOrRemaining(count uint32) uint32 {
 	return count
 }
 
-func loadOpToVk(op types.LoadOp) vk.AttachmentLoadOp {
+func loadOpToVk(op gputypes.LoadOp) vk.AttachmentLoadOp {
 	switch op {
-	case types.LoadOpClear:
+	case gputypes.LoadOpClear:
 		return vk.AttachmentLoadOpClear
-	case types.LoadOpLoad:
+	case gputypes.LoadOpLoad:
 		return vk.AttachmentLoadOpLoad
 	default:
 		return vk.AttachmentLoadOpDontCare
 	}
 }
 
-func storeOpToVk(op types.StoreOp) vk.AttachmentStoreOp {
+func storeOpToVk(op gputypes.StoreOp) vk.AttachmentStoreOp {
 	switch op {
-	case types.StoreOpStore:
+	case gputypes.StoreOpStore:
 		return vk.AttachmentStoreOpStore
 	default:
 		return vk.AttachmentStoreOpDontCare

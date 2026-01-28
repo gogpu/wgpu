@@ -7,14 +7,14 @@ package metal
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Buffer implements hal.Buffer for Metal.
 type Buffer struct {
 	raw     ID // id<MTLBuffer>
 	size    uint64
-	usage   types.BufferUsage
+	usage   gputypes.BufferUsage
 	options MTLResourceOptions
 	device  *Device
 }
@@ -37,14 +37,14 @@ func (b *Buffer) Contents() uintptr {
 // Texture implements hal.Texture for Metal.
 type Texture struct {
 	raw        ID // id<MTLTexture>
-	format     types.TextureFormat
+	format     gputypes.TextureFormat
 	width      uint32
 	height     uint32
 	depth      uint32
 	mipLevels  uint32
 	samples    uint32
-	dimension  types.TextureDimension
-	usage      types.TextureUsage
+	dimension  gputypes.TextureDimension
+	usage      gputypes.TextureUsage
 	device     *Device
 	isExternal bool
 }
@@ -100,7 +100,7 @@ func (m *ShaderModule) Destroy() {
 
 // BindGroupLayout implements hal.BindGroupLayout for Metal.
 type BindGroupLayout struct {
-	entries []types.BindGroupLayoutEntry
+	entries []gputypes.BindGroupLayoutEntry
 	device  *Device
 }
 
@@ -114,7 +114,7 @@ func (l *BindGroupLayout) Destroy() {
 // BindGroup implements hal.BindGroup for Metal.
 type BindGroup struct {
 	layout  *BindGroupLayout
-	entries []types.BindGroupEntry
+	entries []gputypes.BindGroupEntry
 	device  *Device
 }
 

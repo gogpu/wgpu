@@ -1,26 +1,26 @@
 package hal
 
-import "github.com/gogpu/wgpu/types"
+import "github.com/gogpu/gputypes"
 
 // InstanceDescriptor describes how to create a GPU instance.
 type InstanceDescriptor struct {
 	// Backends specifies which backends to enable.
-	Backends types.Backends
+	Backends gputypes.Backends
 
 	// Flags controls instance behavior (debug, validation, etc.).
-	Flags types.InstanceFlags
+	Flags gputypes.InstanceFlags
 
 	// Dx12ShaderCompiler specifies the DX12 shader compiler (FXC or DXC).
-	Dx12ShaderCompiler types.Dx12ShaderCompiler
+	Dx12ShaderCompiler gputypes.Dx12ShaderCompiler
 
-	// GlBackend specifies the OpenGL backend flavor (GL or GLES).
-	GlBackend types.GlBackend
+	// GLBackend specifies the OpenGL backend flavor (GL or GLES).
+	GLBackend gputypes.GLBackend
 }
 
 // Capabilities contains detailed adapter capabilities.
 type Capabilities struct {
 	// Limits are the maximum supported limits.
-	Limits types.Limits
+	Limits gputypes.Limits
 
 	// AlignmentsMask specifies required buffer alignment (bitmask).
 	AlignmentsMask Alignments
@@ -105,7 +105,7 @@ const (
 // SurfaceCapabilities describes surface capabilities.
 type SurfaceCapabilities struct {
 	// Formats are the supported surface texture formats.
-	Formats []types.TextureFormat
+	Formats []gputypes.TextureFormat
 
 	// PresentModes are the supported presentation modes.
 	PresentModes []PresentMode
@@ -157,10 +157,10 @@ type SurfaceConfiguration struct {
 	Height uint32
 
 	// Format is the texture format for surface textures.
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Usage specifies how surface textures will be used.
-	Usage types.TextureUsage
+	Usage gputypes.TextureUsage
 
 	// PresentMode controls presentation timing.
 	PresentMode PresentMode
@@ -178,7 +178,7 @@ type BufferDescriptor struct {
 	Size uint64
 
 	// Usage specifies how the buffer will be used.
-	Usage types.BufferUsage
+	Usage gputypes.BufferUsage
 
 	// MappedAtCreation creates the buffer pre-mapped for writing.
 	MappedAtCreation bool
@@ -199,17 +199,17 @@ type TextureDescriptor struct {
 	SampleCount uint32
 
 	// Dimension is the texture dimension (1D, 2D, 3D).
-	Dimension types.TextureDimension
+	Dimension gputypes.TextureDimension
 
 	// Format is the texture pixel format.
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Usage specifies how the texture will be used.
-	Usage types.TextureUsage
+	Usage gputypes.TextureUsage
 
 	// ViewFormats are additional formats for texture views.
 	// Required for creating views with different (but compatible) formats.
-	ViewFormats []types.TextureFormat
+	ViewFormats []gputypes.TextureFormat
 }
 
 // TextureViewDescriptor describes how to create a texture view.
@@ -219,14 +219,14 @@ type TextureViewDescriptor struct {
 
 	// Format is the view format (can differ from texture format if compatible).
 	// Use TextureFormatUndefined to inherit from the texture.
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Dimension is the view dimension (can differ from texture dimension).
 	// Use TextureViewDimensionUndefined to inherit from the texture.
-	Dimension types.TextureViewDimension
+	Dimension gputypes.TextureViewDimension
 
 	// Aspect specifies which aspect to view (color, depth, stencil).
-	Aspect types.TextureAspect
+	Aspect gputypes.TextureAspect
 
 	// BaseMipLevel is the first mip level in the view.
 	BaseMipLevel uint32
@@ -247,22 +247,22 @@ type SamplerDescriptor struct {
 	Label string
 
 	// AddressModeU is the addressing mode for U coordinates.
-	AddressModeU types.AddressMode
+	AddressModeU gputypes.AddressMode
 
 	// AddressModeV is the addressing mode for V coordinates.
-	AddressModeV types.AddressMode
+	AddressModeV gputypes.AddressMode
 
 	// AddressModeW is the addressing mode for W coordinates.
-	AddressModeW types.AddressMode
+	AddressModeW gputypes.AddressMode
 
 	// MagFilter is the magnification filter.
-	MagFilter types.FilterMode
+	MagFilter gputypes.FilterMode
 
 	// MinFilter is the minification filter.
-	MinFilter types.FilterMode
+	MinFilter gputypes.FilterMode
 
 	// MipmapFilter is the mipmap filter.
-	MipmapFilter types.FilterMode
+	MipmapFilter gputypes.FilterMode
 
 	// LodMinClamp is the minimum LOD clamp.
 	LodMinClamp float32
@@ -271,7 +271,7 @@ type SamplerDescriptor struct {
 	LodMaxClamp float32
 
 	// Compare is the comparison function for depth textures.
-	Compare types.CompareFunction
+	Compare gputypes.CompareFunction
 
 	// Anisotropy is the anisotropic filtering level (1-16, 1 is off).
 	Anisotropy uint16
@@ -283,7 +283,7 @@ type BindGroupLayoutDescriptor struct {
 	Label string
 
 	// Entries define the bindings in this layout.
-	Entries []types.BindGroupLayoutEntry
+	Entries []gputypes.BindGroupLayoutEntry
 }
 
 // BindGroupDescriptor describes a bind group.
@@ -295,7 +295,7 @@ type BindGroupDescriptor struct {
 	Layout BindGroupLayout
 
 	// Entries are the resource bindings.
-	Entries []types.BindGroupEntry
+	Entries []gputypes.BindGroupEntry
 }
 
 // PipelineLayoutDescriptor describes a pipeline layout.
@@ -313,7 +313,7 @@ type PipelineLayoutDescriptor struct {
 // PushConstantRange defines a push constant range.
 type PushConstantRange struct {
 	// Stages are the shader stages that can access this range.
-	Stages types.ShaderStages
+	Stages gputypes.ShaderStages
 
 	// Range is the byte range of the push constants.
 	Range Range
@@ -356,13 +356,13 @@ type RenderPipelineDescriptor struct {
 	Vertex VertexState
 
 	// Primitive is the primitive assembly state.
-	Primitive types.PrimitiveState
+	Primitive gputypes.PrimitiveState
 
 	// DepthStencil is the depth/stencil state (optional).
 	DepthStencil *DepthStencilState
 
 	// Multisample is the multisample state.
-	Multisample types.MultisampleState
+	Multisample gputypes.MultisampleState
 
 	// Fragment is the fragment stage (optional for depth-only passes).
 	Fragment *FragmentState
@@ -377,7 +377,7 @@ type VertexState struct {
 	EntryPoint string
 
 	// Buffers describe the vertex buffer layouts.
-	Buffers []types.VertexBufferLayout
+	Buffers []gputypes.VertexBufferLayout
 }
 
 // FragmentState describes the fragment shader stage.
@@ -389,7 +389,7 @@ type FragmentState struct {
 	EntryPoint string
 
 	// Targets describe the render target formats and blend state.
-	Targets []types.ColorTargetState
+	Targets []gputypes.ColorTargetState
 }
 
 // ComputePipelineDescriptor describes a compute pipeline.
@@ -443,13 +443,13 @@ type RenderPassColorAttachment struct {
 	ResolveTarget TextureView
 
 	// LoadOp specifies what to do at pass start.
-	LoadOp types.LoadOp
+	LoadOp gputypes.LoadOp
 
 	// StoreOp specifies what to do at pass end.
-	StoreOp types.StoreOp
+	StoreOp gputypes.StoreOp
 
 	// ClearValue is the clear color (used if LoadOp is Clear).
-	ClearValue types.Color
+	ClearValue gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.
@@ -458,10 +458,10 @@ type RenderPassDepthStencilAttachment struct {
 	View TextureView
 
 	// DepthLoadOp specifies what to do with depth at pass start.
-	DepthLoadOp types.LoadOp
+	DepthLoadOp gputypes.LoadOp
 
 	// DepthStoreOp specifies what to do with depth at pass end.
-	DepthStoreOp types.StoreOp
+	DepthStoreOp gputypes.StoreOp
 
 	// DepthClearValue is the depth clear value (used if DepthLoadOp is Clear).
 	DepthClearValue float32
@@ -470,10 +470,10 @@ type RenderPassDepthStencilAttachment struct {
 	DepthReadOnly bool
 
 	// StencilLoadOp specifies what to do with stencil at pass start.
-	StencilLoadOp types.LoadOp
+	StencilLoadOp gputypes.LoadOp
 
 	// StencilStoreOp specifies what to do with stencil at pass end.
-	StencilStoreOp types.StoreOp
+	StencilStoreOp gputypes.StoreOp
 
 	// StencilClearValue is the stencil clear value (used if StencilLoadOp is Clear).
 	StencilClearValue uint32
@@ -527,13 +527,13 @@ type ComputePassTimestampWrites struct {
 // DepthStencilState describes depth and stencil testing.
 type DepthStencilState struct {
 	// Format is the depth/stencil texture format.
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// DepthWriteEnabled enables depth writes.
 	DepthWriteEnabled bool
 
 	// DepthCompare is the depth comparison function.
-	DepthCompare types.CompareFunction
+	DepthCompare gputypes.CompareFunction
 
 	// StencilFront is the stencil state for front faces.
 	StencilFront StencilFaceState
@@ -560,7 +560,7 @@ type DepthStencilState struct {
 // StencilFaceState describes stencil operations for a face.
 type StencilFaceState struct {
 	// Compare is the stencil comparison function.
-	Compare types.CompareFunction
+	Compare gputypes.CompareFunction
 
 	// FailOp is the operation when stencil test fails.
 	FailOp StencilOperation

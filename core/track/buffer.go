@@ -2,11 +2,11 @@ package track
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // BufferUses represents internal buffer usage states for tracking.
-// These are more granular than types.BufferUsage for precise barrier insertion.
+// These are more granular than gputypes.BufferUsage for precise barrier insertion.
 type BufferUses uint32
 
 // Buffer usage flags for state tracking.
@@ -57,39 +57,39 @@ func (u BufferUses) IsCompatible(other BufferUses) bool {
 	return u == other
 }
 
-// ToBufferUsage converts internal uses to types.BufferUsage for HAL.
-func (u BufferUses) ToBufferUsage() types.BufferUsage {
-	var result types.BufferUsage
+// ToBufferUsage converts internal uses to gputypes.BufferUsage for HAL.
+func (u BufferUses) ToBufferUsage() gputypes.BufferUsage {
+	var result gputypes.BufferUsage
 
 	if u&BufferUsesCopySrc != 0 {
-		result |= types.BufferUsageCopySrc
+		result |= gputypes.BufferUsageCopySrc
 	}
 	if u&BufferUsesCopyDst != 0 {
-		result |= types.BufferUsageCopyDst
+		result |= gputypes.BufferUsageCopyDst
 	}
 	if u&BufferUsesIndex != 0 {
-		result |= types.BufferUsageIndex
+		result |= gputypes.BufferUsageIndex
 	}
 	if u&BufferUsesVertex != 0 {
-		result |= types.BufferUsageVertex
+		result |= gputypes.BufferUsageVertex
 	}
 	if u&BufferUsesUniform != 0 {
-		result |= types.BufferUsageUniform
+		result |= gputypes.BufferUsageUniform
 	}
 	if u&(BufferUsesStorageRead|BufferUsesStorageWrite) != 0 {
-		result |= types.BufferUsageStorage
+		result |= gputypes.BufferUsageStorage
 	}
 	if u&BufferUsesIndirect != 0 {
-		result |= types.BufferUsageIndirect
+		result |= gputypes.BufferUsageIndirect
 	}
 	if u&BufferUsesMapRead != 0 {
-		result |= types.BufferUsageMapRead
+		result |= gputypes.BufferUsageMapRead
 	}
 	if u&BufferUsesMapWrite != 0 {
-		result |= types.BufferUsageMapWrite
+		result |= gputypes.BufferUsageMapWrite
 	}
 	if u&BufferUsesQueryResolve != 0 {
-		result |= types.BufferUsageQueryResolve
+		result |= gputypes.BufferUsageQueryResolve
 	}
 
 	return result

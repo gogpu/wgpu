@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-01-29
+
+### Breaking Changes
+
+- **Removed `types/` package** — Use `github.com/gogpu/gputypes` instead
+  - All WebGPU types now come from shared `gputypes` package
+  - Import `github.com/gogpu/gputypes` for TextureFormat, BufferUsage, etc.
+  - 1,745 lines removed, unified ecosystem types
+
+### Changed
+
+- All packages now import `gputypes` for WebGPU type definitions
+- Converters updated to work with gputypes
+- 94 files updated for consistent type usage
+
+### Migration
+
+```go
+// Before (wgpu v0.10.x)
+import "github.com/gogpu/wgpu/types"
+types.TextureFormatRGBA8Unorm
+
+// After (wgpu v0.11.0)
+import "github.com/gogpu/gputypes"
+gputypes.TextureFormatRGBA8Unorm
+```
+
 ## [0.10.3] - 2026-01-28
 
 Enterprise-level multi-thread architecture for window responsiveness.

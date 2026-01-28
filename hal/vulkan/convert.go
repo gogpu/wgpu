@@ -6,32 +6,32 @@ package vulkan
 import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // bufferUsageToVk converts WebGPU buffer usage flags to Vulkan buffer usage flags.
-func bufferUsageToVk(usage types.BufferUsage) vk.BufferUsageFlags {
+func bufferUsageToVk(usage gputypes.BufferUsage) vk.BufferUsageFlags {
 	var flags vk.BufferUsageFlags
 
-	if usage&types.BufferUsageCopySrc != 0 {
+	if usage&gputypes.BufferUsageCopySrc != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageTransferSrcBit)
 	}
-	if usage&types.BufferUsageCopyDst != 0 {
+	if usage&gputypes.BufferUsageCopyDst != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageTransferDstBit)
 	}
-	if usage&types.BufferUsageIndex != 0 {
+	if usage&gputypes.BufferUsageIndex != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageIndexBufferBit)
 	}
-	if usage&types.BufferUsageVertex != 0 {
+	if usage&gputypes.BufferUsageVertex != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit)
 	}
-	if usage&types.BufferUsageUniform != 0 {
+	if usage&gputypes.BufferUsageUniform != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageUniformBufferBit)
 	}
-	if usage&types.BufferUsageStorage != 0 {
+	if usage&gputypes.BufferUsageStorage != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit)
 	}
-	if usage&types.BufferUsageIndirect != 0 {
+	if usage&gputypes.BufferUsageIndirect != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageIndirectBufferBit)
 	}
 
@@ -39,22 +39,22 @@ func bufferUsageToVk(usage types.BufferUsage) vk.BufferUsageFlags {
 }
 
 // textureUsageToVk converts WebGPU texture usage flags to Vulkan image usage flags.
-func textureUsageToVk(usage types.TextureUsage) vk.ImageUsageFlags {
+func textureUsageToVk(usage gputypes.TextureUsage) vk.ImageUsageFlags {
 	var flags vk.ImageUsageFlags
 
-	if usage&types.TextureUsageCopySrc != 0 {
+	if usage&gputypes.TextureUsageCopySrc != 0 {
 		flags |= vk.ImageUsageFlags(vk.ImageUsageTransferSrcBit)
 	}
-	if usage&types.TextureUsageCopyDst != 0 {
+	if usage&gputypes.TextureUsageCopyDst != 0 {
 		flags |= vk.ImageUsageFlags(vk.ImageUsageTransferDstBit)
 	}
-	if usage&types.TextureUsageTextureBinding != 0 {
+	if usage&gputypes.TextureUsageTextureBinding != 0 {
 		flags |= vk.ImageUsageFlags(vk.ImageUsageSampledBit)
 	}
-	if usage&types.TextureUsageStorageBinding != 0 {
+	if usage&gputypes.TextureUsageStorageBinding != 0 {
 		flags |= vk.ImageUsageFlags(vk.ImageUsageStorageBit)
 	}
-	if usage&types.TextureUsageRenderAttachment != 0 {
+	if usage&gputypes.TextureUsageRenderAttachment != 0 {
 		flags |= vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit)
 	}
 
@@ -62,13 +62,13 @@ func textureUsageToVk(usage types.TextureUsage) vk.ImageUsageFlags {
 }
 
 // textureDimensionToVkImageType converts WebGPU texture dimension to Vulkan image type.
-func textureDimensionToVkImageType(dim types.TextureDimension) vk.ImageType {
+func textureDimensionToVkImageType(dim gputypes.TextureDimension) vk.ImageType {
 	switch dim {
-	case types.TextureDimension1D:
+	case gputypes.TextureDimension1D:
 		return vk.ImageType1d
-	case types.TextureDimension2D:
+	case gputypes.TextureDimension2D:
 		return vk.ImageType2d
-	case types.TextureDimension3D:
+	case gputypes.TextureDimension3D:
 		return vk.ImageType3d
 	default:
 		return vk.ImageType2d
@@ -77,7 +77,7 @@ func textureDimensionToVkImageType(dim types.TextureDimension) vk.ImageType {
 
 // textureFormatToVk converts WebGPU texture format to Vulkan format.
 // Uses a lookup table for efficient O(1) conversion.
-func textureFormatToVk(format types.TextureFormat) vk.Format {
+func textureFormatToVk(format gputypes.TextureFormat) vk.Format {
 	if f, ok := textureFormatMap[format]; ok {
 		return f
 	}
@@ -85,131 +85,131 @@ func textureFormatToVk(format types.TextureFormat) vk.Format {
 }
 
 // textureFormatMap maps WebGPU texture formats to Vulkan formats.
-var textureFormatMap = map[types.TextureFormat]vk.Format{
+var textureFormatMap = map[gputypes.TextureFormat]vk.Format{
 	// 8-bit formats
-	types.TextureFormatR8Unorm: vk.FormatR8Unorm,
-	types.TextureFormatR8Snorm: vk.FormatR8Snorm,
-	types.TextureFormatR8Uint:  vk.FormatR8Uint,
-	types.TextureFormatR8Sint:  vk.FormatR8Sint,
+	gputypes.TextureFormatR8Unorm: vk.FormatR8Unorm,
+	gputypes.TextureFormatR8Snorm: vk.FormatR8Snorm,
+	gputypes.TextureFormatR8Uint:  vk.FormatR8Uint,
+	gputypes.TextureFormatR8Sint:  vk.FormatR8Sint,
 
 	// 16-bit formats
-	types.TextureFormatR16Uint:  vk.FormatR16Uint,
-	types.TextureFormatR16Sint:  vk.FormatR16Sint,
-	types.TextureFormatR16Float: vk.FormatR16Sfloat,
-	types.TextureFormatRG8Unorm: vk.FormatR8g8Unorm,
-	types.TextureFormatRG8Snorm: vk.FormatR8g8Snorm,
-	types.TextureFormatRG8Uint:  vk.FormatR8g8Uint,
-	types.TextureFormatRG8Sint:  vk.FormatR8g8Sint,
+	gputypes.TextureFormatR16Uint:  vk.FormatR16Uint,
+	gputypes.TextureFormatR16Sint:  vk.FormatR16Sint,
+	gputypes.TextureFormatR16Float: vk.FormatR16Sfloat,
+	gputypes.TextureFormatRG8Unorm: vk.FormatR8g8Unorm,
+	gputypes.TextureFormatRG8Snorm: vk.FormatR8g8Snorm,
+	gputypes.TextureFormatRG8Uint:  vk.FormatR8g8Uint,
+	gputypes.TextureFormatRG8Sint:  vk.FormatR8g8Sint,
 
 	// 32-bit formats
-	types.TextureFormatR32Uint:        vk.FormatR32Uint,
-	types.TextureFormatR32Sint:        vk.FormatR32Sint,
-	types.TextureFormatR32Float:       vk.FormatR32Sfloat,
-	types.TextureFormatRG16Uint:       vk.FormatR16g16Uint,
-	types.TextureFormatRG16Sint:       vk.FormatR16g16Sint,
-	types.TextureFormatRG16Float:      vk.FormatR16g16Sfloat,
-	types.TextureFormatRGBA8Unorm:     vk.FormatR8g8b8a8Unorm,
-	types.TextureFormatRGBA8UnormSrgb: vk.FormatR8g8b8a8Srgb,
-	types.TextureFormatRGBA8Snorm:     vk.FormatR8g8b8a8Snorm,
-	types.TextureFormatRGBA8Uint:      vk.FormatR8g8b8a8Uint,
-	types.TextureFormatRGBA8Sint:      vk.FormatR8g8b8a8Sint,
-	types.TextureFormatBGRA8Unorm:     vk.FormatB8g8r8a8Unorm,
-	types.TextureFormatBGRA8UnormSrgb: vk.FormatB8g8r8a8Srgb,
+	gputypes.TextureFormatR32Uint:        vk.FormatR32Uint,
+	gputypes.TextureFormatR32Sint:        vk.FormatR32Sint,
+	gputypes.TextureFormatR32Float:       vk.FormatR32Sfloat,
+	gputypes.TextureFormatRG16Uint:       vk.FormatR16g16Uint,
+	gputypes.TextureFormatRG16Sint:       vk.FormatR16g16Sint,
+	gputypes.TextureFormatRG16Float:      vk.FormatR16g16Sfloat,
+	gputypes.TextureFormatRGBA8Unorm:     vk.FormatR8g8b8a8Unorm,
+	gputypes.TextureFormatRGBA8UnormSrgb: vk.FormatR8g8b8a8Srgb,
+	gputypes.TextureFormatRGBA8Snorm:     vk.FormatR8g8b8a8Snorm,
+	gputypes.TextureFormatRGBA8Uint:      vk.FormatR8g8b8a8Uint,
+	gputypes.TextureFormatRGBA8Sint:      vk.FormatR8g8b8a8Sint,
+	gputypes.TextureFormatBGRA8Unorm:     vk.FormatB8g8r8a8Unorm,
+	gputypes.TextureFormatBGRA8UnormSrgb: vk.FormatB8g8r8a8Srgb,
 
 	// Packed formats
-	types.TextureFormatRGB9E5Ufloat:  vk.FormatE5b9g9r9UfloatPack32,
-	types.TextureFormatRGB10A2Uint:   vk.FormatA2b10g10r10UintPack32,
-	types.TextureFormatRGB10A2Unorm:  vk.FormatA2b10g10r10UnormPack32,
-	types.TextureFormatRG11B10Ufloat: vk.FormatB10g11r11UfloatPack32,
+	gputypes.TextureFormatRGB9E5Ufloat:  vk.FormatE5b9g9r9UfloatPack32,
+	gputypes.TextureFormatRGB10A2Uint:   vk.FormatA2b10g10r10UintPack32,
+	gputypes.TextureFormatRGB10A2Unorm:  vk.FormatA2b10g10r10UnormPack32,
+	gputypes.TextureFormatRG11B10Ufloat: vk.FormatB10g11r11UfloatPack32,
 
 	// 64-bit formats
-	types.TextureFormatRG32Uint:    vk.FormatR32g32Uint,
-	types.TextureFormatRG32Sint:    vk.FormatR32g32Sint,
-	types.TextureFormatRG32Float:   vk.FormatR32g32Sfloat,
-	types.TextureFormatRGBA16Uint:  vk.FormatR16g16b16a16Uint,
-	types.TextureFormatRGBA16Sint:  vk.FormatR16g16b16a16Sint,
-	types.TextureFormatRGBA16Float: vk.FormatR16g16b16a16Sfloat,
+	gputypes.TextureFormatRG32Uint:    vk.FormatR32g32Uint,
+	gputypes.TextureFormatRG32Sint:    vk.FormatR32g32Sint,
+	gputypes.TextureFormatRG32Float:   vk.FormatR32g32Sfloat,
+	gputypes.TextureFormatRGBA16Uint:  vk.FormatR16g16b16a16Uint,
+	gputypes.TextureFormatRGBA16Sint:  vk.FormatR16g16b16a16Sint,
+	gputypes.TextureFormatRGBA16Float: vk.FormatR16g16b16a16Sfloat,
 
 	// 128-bit formats
-	types.TextureFormatRGBA32Uint:  vk.FormatR32g32b32a32Uint,
-	types.TextureFormatRGBA32Sint:  vk.FormatR32g32b32a32Sint,
-	types.TextureFormatRGBA32Float: vk.FormatR32g32b32a32Sfloat,
+	gputypes.TextureFormatRGBA32Uint:  vk.FormatR32g32b32a32Uint,
+	gputypes.TextureFormatRGBA32Sint:  vk.FormatR32g32b32a32Sint,
+	gputypes.TextureFormatRGBA32Float: vk.FormatR32g32b32a32Sfloat,
 
 	// Depth/stencil formats
-	types.TextureFormatStencil8:             vk.FormatS8Uint,
-	types.TextureFormatDepth16Unorm:         vk.FormatD16Unorm,
-	types.TextureFormatDepth24Plus:          vk.FormatX8D24UnormPack32,
-	types.TextureFormatDepth24PlusStencil8:  vk.FormatD24UnormS8Uint,
-	types.TextureFormatDepth32Float:         vk.FormatD32Sfloat,
-	types.TextureFormatDepth32FloatStencil8: vk.FormatD32SfloatS8Uint,
+	gputypes.TextureFormatStencil8:             vk.FormatS8Uint,
+	gputypes.TextureFormatDepth16Unorm:         vk.FormatD16Unorm,
+	gputypes.TextureFormatDepth24Plus:          vk.FormatX8D24UnormPack32,
+	gputypes.TextureFormatDepth24PlusStencil8:  vk.FormatD24UnormS8Uint,
+	gputypes.TextureFormatDepth32Float:         vk.FormatD32Sfloat,
+	gputypes.TextureFormatDepth32FloatStencil8: vk.FormatD32SfloatS8Uint,
 
 	// BC compressed formats
-	types.TextureFormatBC1RGBAUnorm:     vk.FormatBc1RgbaUnormBlock,
-	types.TextureFormatBC1RGBAUnormSrgb: vk.FormatBc1RgbaSrgbBlock,
-	types.TextureFormatBC2RGBAUnorm:     vk.FormatBc2UnormBlock,
-	types.TextureFormatBC2RGBAUnormSrgb: vk.FormatBc2SrgbBlock,
-	types.TextureFormatBC3RGBAUnorm:     vk.FormatBc3UnormBlock,
-	types.TextureFormatBC3RGBAUnormSrgb: vk.FormatBc3SrgbBlock,
-	types.TextureFormatBC4RUnorm:        vk.FormatBc4UnormBlock,
-	types.TextureFormatBC4RSnorm:        vk.FormatBc4SnormBlock,
-	types.TextureFormatBC5RGUnorm:       vk.FormatBc5UnormBlock,
-	types.TextureFormatBC5RGSnorm:       vk.FormatBc5SnormBlock,
-	types.TextureFormatBC6HRGBUfloat:    vk.FormatBc6hUfloatBlock,
-	types.TextureFormatBC6HRGBFloat:     vk.FormatBc6hSfloatBlock,
-	types.TextureFormatBC7RGBAUnorm:     vk.FormatBc7UnormBlock,
-	types.TextureFormatBC7RGBAUnormSrgb: vk.FormatBc7SrgbBlock,
+	gputypes.TextureFormatBC1RGBAUnorm:     vk.FormatBc1RgbaUnormBlock,
+	gputypes.TextureFormatBC1RGBAUnormSrgb: vk.FormatBc1RgbaSrgbBlock,
+	gputypes.TextureFormatBC2RGBAUnorm:     vk.FormatBc2UnormBlock,
+	gputypes.TextureFormatBC2RGBAUnormSrgb: vk.FormatBc2SrgbBlock,
+	gputypes.TextureFormatBC3RGBAUnorm:     vk.FormatBc3UnormBlock,
+	gputypes.TextureFormatBC3RGBAUnormSrgb: vk.FormatBc3SrgbBlock,
+	gputypes.TextureFormatBC4RUnorm:        vk.FormatBc4UnormBlock,
+	gputypes.TextureFormatBC4RSnorm:        vk.FormatBc4SnormBlock,
+	gputypes.TextureFormatBC5RGUnorm:       vk.FormatBc5UnormBlock,
+	gputypes.TextureFormatBC5RGSnorm:       vk.FormatBc5SnormBlock,
+	gputypes.TextureFormatBC6HRGBUfloat:    vk.FormatBc6hUfloatBlock,
+	gputypes.TextureFormatBC6HRGBFloat:     vk.FormatBc6hSfloatBlock,
+	gputypes.TextureFormatBC7RGBAUnorm:     vk.FormatBc7UnormBlock,
+	gputypes.TextureFormatBC7RGBAUnormSrgb: vk.FormatBc7SrgbBlock,
 
 	// ETC2 compressed formats
-	types.TextureFormatETC2RGB8Unorm:       vk.FormatEtc2R8g8b8UnormBlock,
-	types.TextureFormatETC2RGB8UnormSrgb:   vk.FormatEtc2R8g8b8SrgbBlock,
-	types.TextureFormatETC2RGB8A1Unorm:     vk.FormatEtc2R8g8b8a1UnormBlock,
-	types.TextureFormatETC2RGB8A1UnormSrgb: vk.FormatEtc2R8g8b8a1SrgbBlock,
-	types.TextureFormatETC2RGBA8Unorm:      vk.FormatEtc2R8g8b8a8UnormBlock,
-	types.TextureFormatETC2RGBA8UnormSrgb:  vk.FormatEtc2R8g8b8a8SrgbBlock,
-	types.TextureFormatEACR11Unorm:         vk.FormatEacR11UnormBlock,
-	types.TextureFormatEACR11Snorm:         vk.FormatEacR11SnormBlock,
-	types.TextureFormatEACRG11Unorm:        vk.FormatEacR11g11UnormBlock,
-	types.TextureFormatEACRG11Snorm:        vk.FormatEacR11g11SnormBlock,
+	gputypes.TextureFormatETC2RGB8Unorm:       vk.FormatEtc2R8g8b8UnormBlock,
+	gputypes.TextureFormatETC2RGB8UnormSrgb:   vk.FormatEtc2R8g8b8SrgbBlock,
+	gputypes.TextureFormatETC2RGB8A1Unorm:     vk.FormatEtc2R8g8b8a1UnormBlock,
+	gputypes.TextureFormatETC2RGB8A1UnormSrgb: vk.FormatEtc2R8g8b8a1SrgbBlock,
+	gputypes.TextureFormatETC2RGBA8Unorm:      vk.FormatEtc2R8g8b8a8UnormBlock,
+	gputypes.TextureFormatETC2RGBA8UnormSrgb:  vk.FormatEtc2R8g8b8a8SrgbBlock,
+	gputypes.TextureFormatEACR11Unorm:         vk.FormatEacR11UnormBlock,
+	gputypes.TextureFormatEACR11Snorm:         vk.FormatEacR11SnormBlock,
+	gputypes.TextureFormatEACRG11Unorm:        vk.FormatEacR11g11UnormBlock,
+	gputypes.TextureFormatEACRG11Snorm:        vk.FormatEacR11g11SnormBlock,
 
 	// ASTC compressed formats
-	types.TextureFormatASTC4x4Unorm:       vk.FormatAstc4x4UnormBlock,
-	types.TextureFormatASTC4x4UnormSrgb:   vk.FormatAstc4x4SrgbBlock,
-	types.TextureFormatASTC5x4Unorm:       vk.FormatAstc5x4UnormBlock,
-	types.TextureFormatASTC5x4UnormSrgb:   vk.FormatAstc5x4SrgbBlock,
-	types.TextureFormatASTC5x5Unorm:       vk.FormatAstc5x5UnormBlock,
-	types.TextureFormatASTC5x5UnormSrgb:   vk.FormatAstc5x5SrgbBlock,
-	types.TextureFormatASTC6x5Unorm:       vk.FormatAstc6x5UnormBlock,
-	types.TextureFormatASTC6x5UnormSrgb:   vk.FormatAstc6x5SrgbBlock,
-	types.TextureFormatASTC6x6Unorm:       vk.FormatAstc6x6UnormBlock,
-	types.TextureFormatASTC6x6UnormSrgb:   vk.FormatAstc6x6SrgbBlock,
-	types.TextureFormatASTC8x5Unorm:       vk.FormatAstc8x5UnormBlock,
-	types.TextureFormatASTC8x5UnormSrgb:   vk.FormatAstc8x5SrgbBlock,
-	types.TextureFormatASTC8x6Unorm:       vk.FormatAstc8x6UnormBlock,
-	types.TextureFormatASTC8x6UnormSrgb:   vk.FormatAstc8x6SrgbBlock,
-	types.TextureFormatASTC8x8Unorm:       vk.FormatAstc8x8UnormBlock,
-	types.TextureFormatASTC8x8UnormSrgb:   vk.FormatAstc8x8SrgbBlock,
-	types.TextureFormatASTC10x5Unorm:      vk.FormatAstc10x5UnormBlock,
-	types.TextureFormatASTC10x5UnormSrgb:  vk.FormatAstc10x5SrgbBlock,
-	types.TextureFormatASTC10x6Unorm:      vk.FormatAstc10x6UnormBlock,
-	types.TextureFormatASTC10x6UnormSrgb:  vk.FormatAstc10x6SrgbBlock,
-	types.TextureFormatASTC10x8Unorm:      vk.FormatAstc10x8UnormBlock,
-	types.TextureFormatASTC10x8UnormSrgb:  vk.FormatAstc10x8SrgbBlock,
-	types.TextureFormatASTC10x10Unorm:     vk.FormatAstc10x10UnormBlock,
-	types.TextureFormatASTC10x10UnormSrgb: vk.FormatAstc10x10SrgbBlock,
-	types.TextureFormatASTC12x10Unorm:     vk.FormatAstc12x10UnormBlock,
-	types.TextureFormatASTC12x10UnormSrgb: vk.FormatAstc12x10SrgbBlock,
-	types.TextureFormatASTC12x12Unorm:     vk.FormatAstc12x12UnormBlock,
-	types.TextureFormatASTC12x12UnormSrgb: vk.FormatAstc12x12SrgbBlock,
+	gputypes.TextureFormatASTC4x4Unorm:       vk.FormatAstc4x4UnormBlock,
+	gputypes.TextureFormatASTC4x4UnormSrgb:   vk.FormatAstc4x4SrgbBlock,
+	gputypes.TextureFormatASTC5x4Unorm:       vk.FormatAstc5x4UnormBlock,
+	gputypes.TextureFormatASTC5x4UnormSrgb:   vk.FormatAstc5x4SrgbBlock,
+	gputypes.TextureFormatASTC5x5Unorm:       vk.FormatAstc5x5UnormBlock,
+	gputypes.TextureFormatASTC5x5UnormSrgb:   vk.FormatAstc5x5SrgbBlock,
+	gputypes.TextureFormatASTC6x5Unorm:       vk.FormatAstc6x5UnormBlock,
+	gputypes.TextureFormatASTC6x5UnormSrgb:   vk.FormatAstc6x5SrgbBlock,
+	gputypes.TextureFormatASTC6x6Unorm:       vk.FormatAstc6x6UnormBlock,
+	gputypes.TextureFormatASTC6x6UnormSrgb:   vk.FormatAstc6x6SrgbBlock,
+	gputypes.TextureFormatASTC8x5Unorm:       vk.FormatAstc8x5UnormBlock,
+	gputypes.TextureFormatASTC8x5UnormSrgb:   vk.FormatAstc8x5SrgbBlock,
+	gputypes.TextureFormatASTC8x6Unorm:       vk.FormatAstc8x6UnormBlock,
+	gputypes.TextureFormatASTC8x6UnormSrgb:   vk.FormatAstc8x6SrgbBlock,
+	gputypes.TextureFormatASTC8x8Unorm:       vk.FormatAstc8x8UnormBlock,
+	gputypes.TextureFormatASTC8x8UnormSrgb:   vk.FormatAstc8x8SrgbBlock,
+	gputypes.TextureFormatASTC10x5Unorm:      vk.FormatAstc10x5UnormBlock,
+	gputypes.TextureFormatASTC10x5UnormSrgb:  vk.FormatAstc10x5SrgbBlock,
+	gputypes.TextureFormatASTC10x6Unorm:      vk.FormatAstc10x6UnormBlock,
+	gputypes.TextureFormatASTC10x6UnormSrgb:  vk.FormatAstc10x6SrgbBlock,
+	gputypes.TextureFormatASTC10x8Unorm:      vk.FormatAstc10x8UnormBlock,
+	gputypes.TextureFormatASTC10x8UnormSrgb:  vk.FormatAstc10x8SrgbBlock,
+	gputypes.TextureFormatASTC10x10Unorm:     vk.FormatAstc10x10UnormBlock,
+	gputypes.TextureFormatASTC10x10UnormSrgb: vk.FormatAstc10x10SrgbBlock,
+	gputypes.TextureFormatASTC12x10Unorm:     vk.FormatAstc12x10UnormBlock,
+	gputypes.TextureFormatASTC12x10UnormSrgb: vk.FormatAstc12x10SrgbBlock,
+	gputypes.TextureFormatASTC12x12Unorm:     vk.FormatAstc12x12UnormBlock,
+	gputypes.TextureFormatASTC12x12UnormSrgb: vk.FormatAstc12x12SrgbBlock,
 }
 
 // addressModeToVk converts WebGPU address mode to Vulkan sampler address mode.
-func addressModeToVk(mode types.AddressMode) vk.SamplerAddressMode {
+func addressModeToVk(mode gputypes.AddressMode) vk.SamplerAddressMode {
 	switch mode {
-	case types.AddressModeClampToEdge:
+	case gputypes.AddressModeClampToEdge:
 		return vk.SamplerAddressModeClampToEdge
-	case types.AddressModeRepeat:
+	case gputypes.AddressModeRepeat:
 		return vk.SamplerAddressModeRepeat
-	case types.AddressModeMirrorRepeat:
+	case gputypes.AddressModeMirrorRepeat:
 		return vk.SamplerAddressModeMirroredRepeat
 	default:
 		return vk.SamplerAddressModeClampToEdge
@@ -217,11 +217,11 @@ func addressModeToVk(mode types.AddressMode) vk.SamplerAddressMode {
 }
 
 // filterModeToVk converts WebGPU filter mode to Vulkan filter.
-func filterModeToVk(mode types.FilterMode) vk.Filter {
+func filterModeToVk(mode gputypes.FilterMode) vk.Filter {
 	switch mode {
-	case types.FilterModeNearest:
+	case gputypes.FilterModeNearest:
 		return vk.FilterNearest
-	case types.FilterModeLinear:
+	case gputypes.FilterModeLinear:
 		return vk.FilterLinear
 	default:
 		return vk.FilterNearest
@@ -229,11 +229,11 @@ func filterModeToVk(mode types.FilterMode) vk.Filter {
 }
 
 // mipmapFilterModeToVk converts WebGPU mipmap filter mode to Vulkan sampler mipmap mode.
-func mipmapFilterModeToVk(mode types.FilterMode) vk.SamplerMipmapMode {
+func mipmapFilterModeToVk(mode gputypes.FilterMode) vk.SamplerMipmapMode {
 	switch mode {
-	case types.FilterModeNearest:
+	case gputypes.FilterModeNearest:
 		return vk.SamplerMipmapModeNearest
-	case types.FilterModeLinear:
+	case gputypes.FilterModeLinear:
 		return vk.SamplerMipmapModeLinear
 	default:
 		return vk.SamplerMipmapModeNearest
@@ -241,23 +241,23 @@ func mipmapFilterModeToVk(mode types.FilterMode) vk.SamplerMipmapMode {
 }
 
 // compareFunctionToVk converts WebGPU compare function to Vulkan compare op.
-func compareFunctionToVk(fn types.CompareFunction) vk.CompareOp {
+func compareFunctionToVk(fn gputypes.CompareFunction) vk.CompareOp {
 	switch fn {
-	case types.CompareFunctionNever:
+	case gputypes.CompareFunctionNever:
 		return vk.CompareOpNever
-	case types.CompareFunctionLess:
+	case gputypes.CompareFunctionLess:
 		return vk.CompareOpLess
-	case types.CompareFunctionEqual:
+	case gputypes.CompareFunctionEqual:
 		return vk.CompareOpEqual
-	case types.CompareFunctionLessEqual:
+	case gputypes.CompareFunctionLessEqual:
 		return vk.CompareOpLessOrEqual
-	case types.CompareFunctionGreater:
+	case gputypes.CompareFunctionGreater:
 		return vk.CompareOpGreater
-	case types.CompareFunctionNotEqual:
+	case gputypes.CompareFunctionNotEqual:
 		return vk.CompareOpNotEqual
-	case types.CompareFunctionGreaterEqual:
+	case gputypes.CompareFunctionGreaterEqual:
 		return vk.CompareOpGreaterOrEqual
-	case types.CompareFunctionAlways:
+	case gputypes.CompareFunctionAlways:
 		return vk.CompareOpAlways
 	default:
 		return vk.CompareOpNever
@@ -265,16 +265,16 @@ func compareFunctionToVk(fn types.CompareFunction) vk.CompareOp {
 }
 
 // shaderStagesToVk converts WebGPU shader stages to Vulkan shader stage flags.
-func shaderStagesToVk(stages types.ShaderStages) vk.ShaderStageFlags {
+func shaderStagesToVk(stages gputypes.ShaderStages) vk.ShaderStageFlags {
 	var flags vk.ShaderStageFlags
 
-	if stages&types.ShaderStageVertex != 0 {
+	if stages&gputypes.ShaderStageVertex != 0 {
 		flags |= vk.ShaderStageFlags(vk.ShaderStageVertexBit)
 	}
-	if stages&types.ShaderStageFragment != 0 {
+	if stages&gputypes.ShaderStageFragment != 0 {
 		flags |= vk.ShaderStageFlags(vk.ShaderStageFragmentBit)
 	}
-	if stages&types.ShaderStageCompute != 0 {
+	if stages&gputypes.ShaderStageCompute != 0 {
 		flags |= vk.ShaderStageFlags(vk.ShaderStageComputeBit)
 	}
 
@@ -282,13 +282,13 @@ func shaderStagesToVk(stages types.ShaderStages) vk.ShaderStageFlags {
 }
 
 // bufferBindingTypeToVk converts WebGPU buffer binding type to Vulkan descriptor type.
-func bufferBindingTypeToVk(bindingType types.BufferBindingType) vk.DescriptorType {
+func bufferBindingTypeToVk(bindingType gputypes.BufferBindingType) vk.DescriptorType {
 	switch bindingType {
-	case types.BufferBindingTypeUniform:
+	case gputypes.BufferBindingTypeUniform:
 		return vk.DescriptorTypeUniformBuffer
-	case types.BufferBindingTypeStorage:
+	case gputypes.BufferBindingTypeStorage:
 		return vk.DescriptorTypeStorageBuffer
-	case types.BufferBindingTypeReadOnlyStorage:
+	case gputypes.BufferBindingTypeReadOnlyStorage:
 		return vk.DescriptorTypeStorageBuffer
 	default:
 		return vk.DescriptorTypeUniformBuffer
@@ -296,11 +296,11 @@ func bufferBindingTypeToVk(bindingType types.BufferBindingType) vk.DescriptorTyp
 }
 
 // vertexStepModeToVk converts WebGPU vertex step mode to Vulkan input rate.
-func vertexStepModeToVk(mode types.VertexStepMode) vk.VertexInputRate {
+func vertexStepModeToVk(mode gputypes.VertexStepMode) vk.VertexInputRate {
 	switch mode {
-	case types.VertexStepModeVertex:
+	case gputypes.VertexStepModeVertex:
 		return vk.VertexInputRateVertex
-	case types.VertexStepModeInstance:
+	case gputypes.VertexStepModeInstance:
 		return vk.VertexInputRateInstance
 	default:
 		return vk.VertexInputRateVertex
@@ -308,76 +308,76 @@ func vertexStepModeToVk(mode types.VertexStepMode) vk.VertexInputRate {
 }
 
 // vertexFormatToVk converts WebGPU vertex format to Vulkan format.
-func vertexFormatToVk(format types.VertexFormat) vk.Format {
+func vertexFormatToVk(format gputypes.VertexFormat) vk.Format {
 	switch format {
 	// 8-bit formats
-	case types.VertexFormatUint8x2:
+	case gputypes.VertexFormatUint8x2:
 		return vk.FormatR8g8Uint
-	case types.VertexFormatUint8x4:
+	case gputypes.VertexFormatUint8x4:
 		return vk.FormatR8g8b8a8Uint
-	case types.VertexFormatSint8x2:
+	case gputypes.VertexFormatSint8x2:
 		return vk.FormatR8g8Sint
-	case types.VertexFormatSint8x4:
+	case gputypes.VertexFormatSint8x4:
 		return vk.FormatR8g8b8a8Sint
-	case types.VertexFormatUnorm8x2:
+	case gputypes.VertexFormatUnorm8x2:
 		return vk.FormatR8g8Unorm
-	case types.VertexFormatUnorm8x4:
+	case gputypes.VertexFormatUnorm8x4:
 		return vk.FormatR8g8b8a8Unorm
-	case types.VertexFormatSnorm8x2:
+	case gputypes.VertexFormatSnorm8x2:
 		return vk.FormatR8g8Snorm
-	case types.VertexFormatSnorm8x4:
+	case gputypes.VertexFormatSnorm8x4:
 		return vk.FormatR8g8b8a8Snorm
 
 	// 16-bit formats
-	case types.VertexFormatUint16x2:
+	case gputypes.VertexFormatUint16x2:
 		return vk.FormatR16g16Uint
-	case types.VertexFormatUint16x4:
+	case gputypes.VertexFormatUint16x4:
 		return vk.FormatR16g16b16a16Uint
-	case types.VertexFormatSint16x2:
+	case gputypes.VertexFormatSint16x2:
 		return vk.FormatR16g16Sint
-	case types.VertexFormatSint16x4:
+	case gputypes.VertexFormatSint16x4:
 		return vk.FormatR16g16b16a16Sint
-	case types.VertexFormatUnorm16x2:
+	case gputypes.VertexFormatUnorm16x2:
 		return vk.FormatR16g16Unorm
-	case types.VertexFormatUnorm16x4:
+	case gputypes.VertexFormatUnorm16x4:
 		return vk.FormatR16g16b16a16Unorm
-	case types.VertexFormatSnorm16x2:
+	case gputypes.VertexFormatSnorm16x2:
 		return vk.FormatR16g16Snorm
-	case types.VertexFormatSnorm16x4:
+	case gputypes.VertexFormatSnorm16x4:
 		return vk.FormatR16g16b16a16Snorm
-	case types.VertexFormatFloat16x2:
+	case gputypes.VertexFormatFloat16x2:
 		return vk.FormatR16g16Sfloat
-	case types.VertexFormatFloat16x4:
+	case gputypes.VertexFormatFloat16x4:
 		return vk.FormatR16g16b16a16Sfloat
 
 	// 32-bit formats
-	case types.VertexFormatFloat32:
+	case gputypes.VertexFormatFloat32:
 		return vk.FormatR32Sfloat
-	case types.VertexFormatFloat32x2:
+	case gputypes.VertexFormatFloat32x2:
 		return vk.FormatR32g32Sfloat
-	case types.VertexFormatFloat32x3:
+	case gputypes.VertexFormatFloat32x3:
 		return vk.FormatR32g32b32Sfloat
-	case types.VertexFormatFloat32x4:
+	case gputypes.VertexFormatFloat32x4:
 		return vk.FormatR32g32b32a32Sfloat
-	case types.VertexFormatUint32:
+	case gputypes.VertexFormatUint32:
 		return vk.FormatR32Uint
-	case types.VertexFormatUint32x2:
+	case gputypes.VertexFormatUint32x2:
 		return vk.FormatR32g32Uint
-	case types.VertexFormatUint32x3:
+	case gputypes.VertexFormatUint32x3:
 		return vk.FormatR32g32b32Uint
-	case types.VertexFormatUint32x4:
+	case gputypes.VertexFormatUint32x4:
 		return vk.FormatR32g32b32a32Uint
-	case types.VertexFormatSint32:
+	case gputypes.VertexFormatSint32:
 		return vk.FormatR32Sint
-	case types.VertexFormatSint32x2:
+	case gputypes.VertexFormatSint32x2:
 		return vk.FormatR32g32Sint
-	case types.VertexFormatSint32x3:
+	case gputypes.VertexFormatSint32x3:
 		return vk.FormatR32g32b32Sint
-	case types.VertexFormatSint32x4:
+	case gputypes.VertexFormatSint32x4:
 		return vk.FormatR32g32b32a32Sint
 
 	// Packed formats
-	case types.VertexFormatUnorm1010102:
+	case gputypes.VertexFormatUnorm1010102:
 		return vk.FormatA2b10g10r10UnormPack32
 
 	default:
@@ -386,17 +386,17 @@ func vertexFormatToVk(format types.VertexFormat) vk.Format {
 }
 
 // primitiveTopologyToVk converts WebGPU primitive topology to Vulkan topology.
-func primitiveTopologyToVk(topology types.PrimitiveTopology) vk.PrimitiveTopology {
+func primitiveTopologyToVk(topology gputypes.PrimitiveTopology) vk.PrimitiveTopology {
 	switch topology {
-	case types.PrimitiveTopologyPointList:
+	case gputypes.PrimitiveTopologyPointList:
 		return vk.PrimitiveTopologyPointList
-	case types.PrimitiveTopologyLineList:
+	case gputypes.PrimitiveTopologyLineList:
 		return vk.PrimitiveTopologyLineList
-	case types.PrimitiveTopologyLineStrip:
+	case gputypes.PrimitiveTopologyLineStrip:
 		return vk.PrimitiveTopologyLineStrip
-	case types.PrimitiveTopologyTriangleList:
+	case gputypes.PrimitiveTopologyTriangleList:
 		return vk.PrimitiveTopologyTriangleList
-	case types.PrimitiveTopologyTriangleStrip:
+	case gputypes.PrimitiveTopologyTriangleStrip:
 		return vk.PrimitiveTopologyTriangleStrip
 	default:
 		return vk.PrimitiveTopologyTriangleList
@@ -404,13 +404,13 @@ func primitiveTopologyToVk(topology types.PrimitiveTopology) vk.PrimitiveTopolog
 }
 
 // cullModeToVk converts WebGPU cull mode to Vulkan cull mode flags.
-func cullModeToVk(mode types.CullMode) vk.CullModeFlags {
+func cullModeToVk(mode gputypes.CullMode) vk.CullModeFlags {
 	switch mode {
-	case types.CullModeNone:
+	case gputypes.CullModeNone:
 		return vk.CullModeFlags(vk.CullModeNone)
-	case types.CullModeFront:
+	case gputypes.CullModeFront:
 		return vk.CullModeFlags(vk.CullModeFrontBit)
-	case types.CullModeBack:
+	case gputypes.CullModeBack:
 		return vk.CullModeFlags(vk.CullModeBackBit)
 	default:
 		return vk.CullModeFlags(vk.CullModeNone)
@@ -418,11 +418,11 @@ func cullModeToVk(mode types.CullMode) vk.CullModeFlags {
 }
 
 // frontFaceToVk converts WebGPU front face to Vulkan front face.
-func frontFaceToVk(face types.FrontFace) vk.FrontFace {
+func frontFaceToVk(face gputypes.FrontFace) vk.FrontFace {
 	switch face {
-	case types.FrontFaceCCW:
+	case gputypes.FrontFaceCCW:
 		return vk.FrontFaceCounterClockwise
-	case types.FrontFaceCW:
+	case gputypes.FrontFaceCW:
 		return vk.FrontFaceClockwise
 	default:
 		return vk.FrontFaceCounterClockwise
@@ -430,51 +430,51 @@ func frontFaceToVk(face types.FrontFace) vk.FrontFace {
 }
 
 // colorWriteMaskToVk converts WebGPU color write mask to Vulkan color component flags.
-func colorWriteMaskToVk(mask types.ColorWriteMask) vk.ColorComponentFlags {
+func colorWriteMaskToVk(mask gputypes.ColorWriteMask) vk.ColorComponentFlags {
 	var flags vk.ColorComponentFlags
-	if mask&types.ColorWriteMaskRed != 0 {
+	if mask&gputypes.ColorWriteMaskRed != 0 {
 		flags |= vk.ColorComponentFlags(vk.ColorComponentRBit)
 	}
-	if mask&types.ColorWriteMaskGreen != 0 {
+	if mask&gputypes.ColorWriteMaskGreen != 0 {
 		flags |= vk.ColorComponentFlags(vk.ColorComponentGBit)
 	}
-	if mask&types.ColorWriteMaskBlue != 0 {
+	if mask&gputypes.ColorWriteMaskBlue != 0 {
 		flags |= vk.ColorComponentFlags(vk.ColorComponentBBit)
 	}
-	if mask&types.ColorWriteMaskAlpha != 0 {
+	if mask&gputypes.ColorWriteMaskAlpha != 0 {
 		flags |= vk.ColorComponentFlags(vk.ColorComponentABit)
 	}
 	return flags
 }
 
 // blendFactorToVk converts WebGPU blend factor to Vulkan blend factor.
-func blendFactorToVk(factor types.BlendFactor) vk.BlendFactor {
+func blendFactorToVk(factor gputypes.BlendFactor) vk.BlendFactor {
 	switch factor {
-	case types.BlendFactorZero:
+	case gputypes.BlendFactorZero:
 		return vk.BlendFactorZero
-	case types.BlendFactorOne:
+	case gputypes.BlendFactorOne:
 		return vk.BlendFactorOne
-	case types.BlendFactorSrc:
+	case gputypes.BlendFactorSrc:
 		return vk.BlendFactorSrcColor
-	case types.BlendFactorOneMinusSrc:
+	case gputypes.BlendFactorOneMinusSrc:
 		return vk.BlendFactorOneMinusSrcColor
-	case types.BlendFactorSrcAlpha:
+	case gputypes.BlendFactorSrcAlpha:
 		return vk.BlendFactorSrcAlpha
-	case types.BlendFactorOneMinusSrcAlpha:
+	case gputypes.BlendFactorOneMinusSrcAlpha:
 		return vk.BlendFactorOneMinusSrcAlpha
-	case types.BlendFactorDst:
+	case gputypes.BlendFactorDst:
 		return vk.BlendFactorDstColor
-	case types.BlendFactorOneMinusDst:
+	case gputypes.BlendFactorOneMinusDst:
 		return vk.BlendFactorOneMinusDstColor
-	case types.BlendFactorDstAlpha:
+	case gputypes.BlendFactorDstAlpha:
 		return vk.BlendFactorDstAlpha
-	case types.BlendFactorOneMinusDstAlpha:
+	case gputypes.BlendFactorOneMinusDstAlpha:
 		return vk.BlendFactorOneMinusDstAlpha
-	case types.BlendFactorSrcAlphaSaturated:
+	case gputypes.BlendFactorSrcAlphaSaturated:
 		return vk.BlendFactorSrcAlphaSaturate
-	case types.BlendFactorConstant:
+	case gputypes.BlendFactorConstant:
 		return vk.BlendFactorConstantColor
-	case types.BlendFactorOneMinusConstant:
+	case gputypes.BlendFactorOneMinusConstant:
 		return vk.BlendFactorOneMinusConstantColor
 	default:
 		return vk.BlendFactorOne
@@ -482,17 +482,17 @@ func blendFactorToVk(factor types.BlendFactor) vk.BlendFactor {
 }
 
 // blendOperationToVk converts WebGPU blend operation to Vulkan blend op.
-func blendOperationToVk(op types.BlendOperation) vk.BlendOp {
+func blendOperationToVk(op gputypes.BlendOperation) vk.BlendOp {
 	switch op {
-	case types.BlendOperationAdd:
+	case gputypes.BlendOperationAdd:
 		return vk.BlendOpAdd
-	case types.BlendOperationSubtract:
+	case gputypes.BlendOperationSubtract:
 		return vk.BlendOpSubtract
-	case types.BlendOperationReverseSubtract:
+	case gputypes.BlendOperationReverseSubtract:
 		return vk.BlendOpReverseSubtract
-	case types.BlendOperationMin:
+	case gputypes.BlendOperationMin:
 		return vk.BlendOpMin
-	case types.BlendOperationMax:
+	case gputypes.BlendOperationMax:
 		return vk.BlendOpMax
 	default:
 		return vk.BlendOpAdd
@@ -534,19 +534,19 @@ func stencilFaceStateToVk(state hal.StencilFaceState) vk.StencilOpState {
 }
 
 // textureViewDimensionToVk converts WebGPU texture view dimension to Vulkan image view type.
-func textureViewDimensionToVk(dim types.TextureViewDimension) vk.ImageViewType {
+func textureViewDimensionToVk(dim gputypes.TextureViewDimension) vk.ImageViewType {
 	switch dim {
-	case types.TextureViewDimension1D:
+	case gputypes.TextureViewDimension1D:
 		return vk.ImageViewType1d
-	case types.TextureViewDimension2D:
+	case gputypes.TextureViewDimension2D:
 		return vk.ImageViewType2d
-	case types.TextureViewDimension2DArray:
+	case gputypes.TextureViewDimension2DArray:
 		return vk.ImageViewType2dArray
-	case types.TextureViewDimensionCube:
+	case gputypes.TextureViewDimensionCube:
 		return vk.ImageViewTypeCube
-	case types.TextureViewDimensionCubeArray:
+	case gputypes.TextureViewDimensionCubeArray:
 		return vk.ImageViewTypeCubeArray
-	case types.TextureViewDimension3D:
+	case gputypes.TextureViewDimension3D:
 		return vk.ImageViewType3d
 	default:
 		return vk.ImageViewType2d
@@ -554,13 +554,13 @@ func textureViewDimensionToVk(dim types.TextureViewDimension) vk.ImageViewType {
 }
 
 // textureAspectToVk converts WebGPU texture aspect to Vulkan image aspect flags.
-func textureAspectToVk(aspect types.TextureAspect, format types.TextureFormat) vk.ImageAspectFlags {
+func textureAspectToVk(aspect gputypes.TextureAspect, format gputypes.TextureFormat) vk.ImageAspectFlags {
 	switch aspect {
-	case types.TextureAspectDepthOnly:
+	case gputypes.TextureAspectDepthOnly:
 		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
-	case types.TextureAspectStencilOnly:
+	case gputypes.TextureAspectStencilOnly:
 		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
-	case types.TextureAspectAll:
+	case gputypes.TextureAspectAll:
 		// For depth-stencil formats, include both aspects
 		if isDepthStencilFormat(format) {
 			flags := vk.ImageAspectFlags(vk.ImageAspectDepthBit)
@@ -577,11 +577,11 @@ func textureAspectToVk(aspect types.TextureAspect, format types.TextureFormat) v
 
 // textureAspectToVkSimple converts texture aspect without format context.
 // Used when texture format is not available (e.g., in buffer-texture copy regions).
-func textureAspectToVkSimple(aspect types.TextureAspect) vk.ImageAspectFlags {
+func textureAspectToVkSimple(aspect gputypes.TextureAspect) vk.ImageAspectFlags {
 	switch aspect {
-	case types.TextureAspectDepthOnly:
+	case gputypes.TextureAspectDepthOnly:
 		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
-	case types.TextureAspectStencilOnly:
+	case gputypes.TextureAspectStencilOnly:
 		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
 	default:
 		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
@@ -589,14 +589,14 @@ func textureAspectToVkSimple(aspect types.TextureAspect) vk.ImageAspectFlags {
 }
 
 // isDepthStencilFormat returns true if the format is a depth or depth-stencil format.
-func isDepthStencilFormat(format types.TextureFormat) bool {
+func isDepthStencilFormat(format gputypes.TextureFormat) bool {
 	switch format {
-	case types.TextureFormatDepth16Unorm,
-		types.TextureFormatDepth24Plus,
-		types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32Float,
-		types.TextureFormatDepth32FloatStencil8,
-		types.TextureFormatStencil8:
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
 		return true
 	default:
 		return false
@@ -604,11 +604,11 @@ func isDepthStencilFormat(format types.TextureFormat) bool {
 }
 
 // hasStencilAspect returns true if the format has a stencil aspect.
-func hasStencilAspect(format types.TextureFormat) bool {
+func hasStencilAspect(format gputypes.TextureFormat) bool {
 	switch format {
-	case types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32FloatStencil8,
-		types.TextureFormatStencil8:
+	case gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
 		return true
 	default:
 		return false
@@ -616,13 +616,13 @@ func hasStencilAspect(format types.TextureFormat) bool {
 }
 
 // textureDimensionToViewType converts WebGPU texture dimension to default Vulkan image view type.
-func textureDimensionToViewType(dim types.TextureDimension) vk.ImageViewType {
+func textureDimensionToViewType(dim gputypes.TextureDimension) vk.ImageViewType {
 	switch dim {
-	case types.TextureDimension1D:
+	case gputypes.TextureDimension1D:
 		return vk.ImageViewType1d
-	case types.TextureDimension2D:
+	case gputypes.TextureDimension2D:
 		return vk.ImageViewType2d
-	case types.TextureDimension3D:
+	case gputypes.TextureDimension3D:
 		return vk.ImageViewType3d
 	default:
 		return vk.ImageViewType2d

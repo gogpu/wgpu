@@ -9,7 +9,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Adapter implements hal.Adapter for OpenGL.
@@ -22,7 +22,7 @@ type Adapter struct {
 }
 
 // Open creates a logical device with the requested features and limits.
-func (a *Adapter) Open(_ types.Features, _ types.Limits) (hal.OpenDevice, error) {
+func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
 	// Make context current if we have one
 	if a.wglCtx != nil {
 		if err := a.wglCtx.MakeCurrent(); err != nil {
@@ -48,37 +48,37 @@ func (a *Adapter) Open(_ types.Features, _ types.Limits) (hal.OpenDevice, error)
 }
 
 // TextureFormatCapabilities returns capabilities for a texture format.
-func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.TextureFormatCapabilities {
+func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
 	// OpenGL 3.3+ supports most common formats
 	// Note: Full format support querying requires glGetInternalformativ (GL 4.2+).
 	flags := hal.TextureFormatCapabilitySampled
 
 	switch format {
-	case types.TextureFormatRGBA8Unorm,
-		types.TextureFormatRGBA8UnormSrgb,
-		types.TextureFormatBGRA8Unorm,
-		types.TextureFormatBGRA8UnormSrgb,
-		types.TextureFormatRGBA16Float,
-		types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatBGRA8UnormSrgb,
+		gputypes.TextureFormatRGBA16Float,
+		gputypes.TextureFormatRGBA32Float:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityBlendable |
 			hal.TextureFormatCapabilityMultisample |
 			hal.TextureFormatCapabilityMultisampleResolve
 
-	case types.TextureFormatR8Unorm,
-		types.TextureFormatRG8Unorm,
-		types.TextureFormatR16Float,
-		types.TextureFormatRG16Float,
-		types.TextureFormatR32Float,
-		types.TextureFormatRG32Float:
+	case gputypes.TextureFormatR8Unorm,
+		gputypes.TextureFormatRG8Unorm,
+		gputypes.TextureFormatR16Float,
+		gputypes.TextureFormatRG16Float,
+		gputypes.TextureFormatR32Float,
+		gputypes.TextureFormatRG32Float:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityBlendable
 
-	case types.TextureFormatDepth16Unorm,
-		types.TextureFormatDepth24Plus,
-		types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32Float,
-		types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
 		flags |= hal.TextureFormatCapabilityRenderAttachment |
 			hal.TextureFormatCapabilityMultisample
 	}
@@ -91,11 +91,11 @@ func (a *Adapter) TextureFormatCapabilities(format types.TextureFormat) hal.Text
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(_ hal.Surface) *hal.SurfaceCapabilities {
 	return &hal.SurfaceCapabilities{
-		Formats: []types.TextureFormat{
-			types.TextureFormatBGRA8Unorm,
-			types.TextureFormatRGBA8Unorm,
-			types.TextureFormatBGRA8UnormSrgb,
-			types.TextureFormatRGBA8UnormSrgb,
+		Formats: []gputypes.TextureFormat{
+			gputypes.TextureFormatBGRA8Unorm,
+			gputypes.TextureFormatRGBA8Unorm,
+			gputypes.TextureFormatBGRA8UnormSrgb,
+			gputypes.TextureFormatRGBA8UnormSrgb,
 		},
 		PresentModes: []hal.PresentMode{
 			hal.PresentModeFifo,      // VSync on

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Swapchain manages Vulkan swapchain for a surface.
@@ -41,7 +41,7 @@ type SwapchainTexture struct {
 	view      vk.ImageView
 	index     uint32
 	swapchain *Swapchain
-	format    types.TextureFormat
+	format    gputypes.TextureFormat
 	size      Extent3D
 }
 
@@ -82,10 +82,10 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	// Convert usage
 	imageUsage := vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit)
-	if config.Usage&types.TextureUsageCopySrc != 0 {
+	if config.Usage&gputypes.TextureUsageCopySrc != 0 {
 		imageUsage |= vk.ImageUsageFlags(vk.ImageUsageTransferSrcBit)
 	}
-	if config.Usage&types.TextureUsageCopyDst != 0 {
+	if config.Usage&gputypes.TextureUsageCopyDst != 0 {
 		imageUsage |= vk.ImageUsageFlags(vk.ImageUsageTransferDstBit)
 	}
 

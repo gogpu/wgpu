@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CommandAllocator wraps a D3D12 command allocator.
@@ -180,7 +180,7 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 	// 3. Use CopyBufferRegion from a zero-filled buffer
 	// For now, we'll use UAV clear if the buffer supports it
 
-	if buf.usage&types.BufferUsageStorage != 0 {
+	if buf.usage&gputypes.BufferUsageStorage != 0 {
 		// Note: UAV clear requires ClearUnorderedAccessViewUint/Float.
 		// This requires setting up a UAV descriptor and calling ClearUnorderedAccessViewUint
 		_ = offset
@@ -373,7 +373,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		rtvHandles = append(rtvHandles, view.rtvHandle)
 
 		// Clear if needed
-		if ca.LoadOp == types.LoadOpClear {
+		if ca.LoadOp == gputypes.LoadOpClear {
 			clearColor := [4]float32{
 				float32(ca.ClearValue.R),
 				float32(ca.ClearValue.G),
@@ -444,7 +444,7 @@ type RenderPassEncoder struct {
 	encoder            *CommandEncoder
 	desc               *hal.RenderPassDescriptor
 	pipeline           *RenderPipeline
-	indexFormat        types.IndexFormat
+	indexFormat        gputypes.IndexFormat
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
 }
 
@@ -513,7 +513,7 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 }
 
 // SetIndexBuffer sets the index buffer.
-func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.IndexFormat, offset uint64) {
+func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
@@ -521,7 +521,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format types.Index
 
 	e.indexFormat = format
 	dxgiFormat := d3d12.DXGI_FORMAT_R16_UINT
-	if format == types.IndexFormatUint32 {
+	if format == gputypes.IndexFormatUint32 {
 		dxgiFormat = d3d12.DXGI_FORMAT_R32_UINT
 	}
 
@@ -569,7 +569,7 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 }
 
 // SetBlendConstant sets the blend constant.
-func (e *RenderPassEncoder) SetBlendConstant(color *types.Color) {
+func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if !e.encoder.isRecording || color == nil {
 		return
 	}
@@ -777,10 +777,10 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 
 	// Determine clear flags
 	var clearFlags d3d12.D3D12_CLEAR_FLAGS
-	if dsa.DepthLoadOp == types.LoadOpClear {
+	if dsa.DepthLoadOp == gputypes.LoadOpClear {
 		clearFlags |= d3d12.D3D12_CLEAR_FLAG_DEPTH
 	}
-	if dsa.StencilLoadOp == types.LoadOpClear {
+	if dsa.StencilLoadOp == gputypes.LoadOpClear {
 		clearFlags |= d3d12.D3D12_CLEAR_FLAG_STENCIL
 	}
 
@@ -799,28 +799,28 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 }
 
 // bufferUsageToD3D12State converts buffer usage to D3D12 resource state.
-func bufferUsageToD3D12State(usage types.BufferUsage) d3d12.D3D12_RESOURCE_STATES {
+func bufferUsageToD3D12State(usage gputypes.BufferUsage) d3d12.D3D12_RESOURCE_STATES {
 	var state d3d12.D3D12_RESOURCE_STATES
 
-	if usage&types.BufferUsageCopySrc != 0 {
+	if usage&gputypes.BufferUsageCopySrc != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE
 	}
-	if usage&types.BufferUsageCopyDst != 0 {
+	if usage&gputypes.BufferUsageCopyDst != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_COPY_DEST
 	}
-	if usage&types.BufferUsageVertex != 0 {
+	if usage&gputypes.BufferUsageVertex != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
 	}
-	if usage&types.BufferUsageIndex != 0 {
+	if usage&gputypes.BufferUsageIndex != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_INDEX_BUFFER
 	}
-	if usage&types.BufferUsageUniform != 0 {
+	if usage&gputypes.BufferUsageUniform != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
 	}
-	if usage&types.BufferUsageStorage != 0 {
+	if usage&gputypes.BufferUsageStorage != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
 	}
-	if usage&types.BufferUsageIndirect != 0 {
+	if usage&gputypes.BufferUsageIndirect != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
 	}
 
@@ -832,22 +832,22 @@ func bufferUsageToD3D12State(usage types.BufferUsage) d3d12.D3D12_RESOURCE_STATE
 }
 
 // textureUsageToD3D12State converts texture usage to D3D12 resource state.
-func textureUsageToD3D12State(usage types.TextureUsage) d3d12.D3D12_RESOURCE_STATES {
+func textureUsageToD3D12State(usage gputypes.TextureUsage) d3d12.D3D12_RESOURCE_STATES {
 	var state d3d12.D3D12_RESOURCE_STATES
 
-	if usage&types.TextureUsageCopySrc != 0 {
+	if usage&gputypes.TextureUsageCopySrc != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE
 	}
-	if usage&types.TextureUsageCopyDst != 0 {
+	if usage&gputypes.TextureUsageCopyDst != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_COPY_DEST
 	}
-	if usage&types.TextureUsageTextureBinding != 0 {
+	if usage&gputypes.TextureUsageTextureBinding != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
 	}
-	if usage&types.TextureUsageStorageBinding != 0 {
+	if usage&gputypes.TextureUsageStorageBinding != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
 	}
-	if usage&types.TextureUsageRenderAttachment != 0 {
+	if usage&gputypes.TextureUsageRenderAttachment != 0 {
 		state |= d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
 	}
 

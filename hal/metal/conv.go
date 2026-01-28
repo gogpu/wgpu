@@ -5,92 +5,92 @@
 
 package metal
 
-import "github.com/gogpu/wgpu/types"
+import "github.com/gogpu/gputypes"
 
 // textureFormatToMTL converts WebGPU texture format to Metal pixel format.
-func textureFormatToMTL(format types.TextureFormat) MTLPixelFormat {
+func textureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
 	switch format {
-	case types.TextureFormatR8Unorm:
+	case gputypes.TextureFormatR8Unorm:
 		return MTLPixelFormatR8Unorm
-	case types.TextureFormatR8Snorm:
+	case gputypes.TextureFormatR8Snorm:
 		return MTLPixelFormatR8Snorm
-	case types.TextureFormatR8Uint:
+	case gputypes.TextureFormatR8Uint:
 		return MTLPixelFormatR8Uint
-	case types.TextureFormatR8Sint:
+	case gputypes.TextureFormatR8Sint:
 		return MTLPixelFormatR8Sint
-	case types.TextureFormatR16Uint:
+	case gputypes.TextureFormatR16Uint:
 		return MTLPixelFormatR16Uint
-	case types.TextureFormatR16Sint:
+	case gputypes.TextureFormatR16Sint:
 		return MTLPixelFormatR16Sint
-	case types.TextureFormatR16Float:
+	case gputypes.TextureFormatR16Float:
 		return MTLPixelFormatR16Float
-	case types.TextureFormatRG8Unorm:
+	case gputypes.TextureFormatRG8Unorm:
 		return MTLPixelFormatRG8Unorm
-	case types.TextureFormatRG8Snorm:
+	case gputypes.TextureFormatRG8Snorm:
 		return MTLPixelFormatRG8Snorm
-	case types.TextureFormatRG8Uint:
+	case gputypes.TextureFormatRG8Uint:
 		return MTLPixelFormatRG8Uint
-	case types.TextureFormatRG8Sint:
+	case gputypes.TextureFormatRG8Sint:
 		return MTLPixelFormatRG8Sint
-	case types.TextureFormatR32Uint:
+	case gputypes.TextureFormatR32Uint:
 		return MTLPixelFormatR32Uint
-	case types.TextureFormatR32Sint:
+	case gputypes.TextureFormatR32Sint:
 		return MTLPixelFormatR32Sint
-	case types.TextureFormatR32Float:
+	case gputypes.TextureFormatR32Float:
 		return MTLPixelFormatR32Float
-	case types.TextureFormatRG16Uint:
+	case gputypes.TextureFormatRG16Uint:
 		return MTLPixelFormatRG16Uint
-	case types.TextureFormatRG16Sint:
+	case gputypes.TextureFormatRG16Sint:
 		return MTLPixelFormatRG16Sint
-	case types.TextureFormatRG16Float:
+	case gputypes.TextureFormatRG16Float:
 		return MTLPixelFormatRG16Float
-	case types.TextureFormatRGBA8Unorm:
+	case gputypes.TextureFormatRGBA8Unorm:
 		return MTLPixelFormatRGBA8Unorm
-	case types.TextureFormatRGBA8UnormSrgb:
+	case gputypes.TextureFormatRGBA8UnormSrgb:
 		return MTLPixelFormatRGBA8UnormSRGB
-	case types.TextureFormatRGBA8Snorm:
+	case gputypes.TextureFormatRGBA8Snorm:
 		return MTLPixelFormatRGBA8Snorm
-	case types.TextureFormatRGBA8Uint:
+	case gputypes.TextureFormatRGBA8Uint:
 		return MTLPixelFormatRGBA8Uint
-	case types.TextureFormatRGBA8Sint:
+	case gputypes.TextureFormatRGBA8Sint:
 		return MTLPixelFormatRGBA8Sint
-	case types.TextureFormatBGRA8Unorm:
+	case gputypes.TextureFormatBGRA8Unorm:
 		return MTLPixelFormatBGRA8Unorm
-	case types.TextureFormatBGRA8UnormSrgb:
+	case gputypes.TextureFormatBGRA8UnormSrgb:
 		return MTLPixelFormatBGRA8UnormSRGB
-	case types.TextureFormatRGB10A2Unorm:
+	case gputypes.TextureFormatRGB10A2Unorm:
 		return MTLPixelFormatRGB10A2Unorm
-	case types.TextureFormatRG11B10Ufloat:
+	case gputypes.TextureFormatRG11B10Ufloat:
 		return MTLPixelFormatRG11B10Float
-	case types.TextureFormatRGB9E5Ufloat:
+	case gputypes.TextureFormatRGB9E5Ufloat:
 		return MTLPixelFormatRGB9E5Float
-	case types.TextureFormatRG32Uint:
+	case gputypes.TextureFormatRG32Uint:
 		return MTLPixelFormatRG32Uint
-	case types.TextureFormatRG32Sint:
+	case gputypes.TextureFormatRG32Sint:
 		return MTLPixelFormatRG32Sint
-	case types.TextureFormatRG32Float:
+	case gputypes.TextureFormatRG32Float:
 		return MTLPixelFormatRG32Float
-	case types.TextureFormatRGBA16Uint:
+	case gputypes.TextureFormatRGBA16Uint:
 		return MTLPixelFormatRGBA16Uint
-	case types.TextureFormatRGBA16Sint:
+	case gputypes.TextureFormatRGBA16Sint:
 		return MTLPixelFormatRGBA16Sint
-	case types.TextureFormatRGBA16Float:
+	case gputypes.TextureFormatRGBA16Float:
 		return MTLPixelFormatRGBA16Float
-	case types.TextureFormatRGBA32Uint:
+	case gputypes.TextureFormatRGBA32Uint:
 		return MTLPixelFormatRGBA32Uint
-	case types.TextureFormatRGBA32Sint:
+	case gputypes.TextureFormatRGBA32Sint:
 		return MTLPixelFormatRGBA32Sint
-	case types.TextureFormatRGBA32Float:
+	case gputypes.TextureFormatRGBA32Float:
 		return MTLPixelFormatRGBA32Float
-	case types.TextureFormatDepth16Unorm:
+	case gputypes.TextureFormatDepth16Unorm:
 		return MTLPixelFormatDepth16Unorm
-	case types.TextureFormatDepth32Float:
+	case gputypes.TextureFormatDepth32Float:
 		return MTLPixelFormatDepth32Float
-	case types.TextureFormatDepth24PlusStencil8:
+	case gputypes.TextureFormatDepth24PlusStencil8:
 		return MTLPixelFormatDepth24UnormStencil8
-	case types.TextureFormatDepth32FloatStencil8:
+	case gputypes.TextureFormatDepth32FloatStencil8:
 		return MTLPixelFormatDepth32FloatStencil8
-	case types.TextureFormatStencil8:
+	case gputypes.TextureFormatStencil8:
 		return MTLPixelFormatStencil8
 	default:
 		return MTLPixelFormatInvalid
@@ -98,18 +98,18 @@ func textureFormatToMTL(format types.TextureFormat) MTLPixelFormat {
 }
 
 // textureUsageToMTL converts WebGPU texture usage to Metal texture usage.
-func textureUsageToMTL(usage types.TextureUsage) MTLTextureUsage {
+func textureUsageToMTL(usage gputypes.TextureUsage) MTLTextureUsage {
 	var mtlUsage MTLTextureUsage
-	if usage&types.TextureUsageCopySrc != 0 || usage&types.TextureUsageCopyDst != 0 {
+	if usage&gputypes.TextureUsageCopySrc != 0 || usage&gputypes.TextureUsageCopyDst != 0 {
 		mtlUsage |= MTLTextureUsageShaderRead
 	}
-	if usage&types.TextureUsageTextureBinding != 0 {
+	if usage&gputypes.TextureUsageTextureBinding != 0 {
 		mtlUsage |= MTLTextureUsageShaderRead
 	}
-	if usage&types.TextureUsageStorageBinding != 0 {
+	if usage&gputypes.TextureUsageStorageBinding != 0 {
 		mtlUsage |= MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite
 	}
-	if usage&types.TextureUsageRenderAttachment != 0 {
+	if usage&gputypes.TextureUsageRenderAttachment != 0 {
 		mtlUsage |= MTLTextureUsageRenderTarget
 	}
 	if mtlUsage == 0 {
@@ -119,14 +119,14 @@ func textureUsageToMTL(usage types.TextureUsage) MTLTextureUsage {
 }
 
 // textureTypeFromDimension converts WebGPU texture dimension to Metal texture type.
-func textureTypeFromDimension(dimension types.TextureDimension, sampleCount, depth uint32) MTLTextureType {
+func textureTypeFromDimension(dimension gputypes.TextureDimension, sampleCount, depth uint32) MTLTextureType {
 	switch dimension {
-	case types.TextureDimension1D:
+	case gputypes.TextureDimension1D:
 		if depth > 1 {
 			return MTLTextureType1DArray
 		}
 		return MTLTextureType1D
-	case types.TextureDimension2D:
+	case gputypes.TextureDimension2D:
 		if sampleCount > 1 {
 			return MTLTextureType2DMultisample
 		}
@@ -134,7 +134,7 @@ func textureTypeFromDimension(dimension types.TextureDimension, sampleCount, dep
 			return MTLTextureType2DArray
 		}
 		return MTLTextureType2D
-	case types.TextureDimension3D:
+	case gputypes.TextureDimension3D:
 		return MTLTextureType3D
 	default:
 		return MTLTextureType2D
@@ -142,19 +142,19 @@ func textureTypeFromDimension(dimension types.TextureDimension, sampleCount, dep
 }
 
 // textureViewDimensionToMTL converts WebGPU texture view dimension to Metal texture type.
-func textureViewDimensionToMTL(dimension types.TextureViewDimension) MTLTextureType {
+func textureViewDimensionToMTL(dimension gputypes.TextureViewDimension) MTLTextureType {
 	switch dimension {
-	case types.TextureViewDimension1D:
+	case gputypes.TextureViewDimension1D:
 		return MTLTextureType1D
-	case types.TextureViewDimension2D:
+	case gputypes.TextureViewDimension2D:
 		return MTLTextureType2D
-	case types.TextureViewDimension2DArray:
+	case gputypes.TextureViewDimension2DArray:
 		return MTLTextureType2DArray
-	case types.TextureViewDimensionCube:
+	case gputypes.TextureViewDimensionCube:
 		return MTLTextureTypeCube
-	case types.TextureViewDimensionCubeArray:
+	case gputypes.TextureViewDimensionCubeArray:
 		return MTLTextureTypeCubeArray
-	case types.TextureViewDimension3D:
+	case gputypes.TextureViewDimension3D:
 		return MTLTextureType3D
 	default:
 		return MTLTextureType2D
@@ -162,11 +162,11 @@ func textureViewDimensionToMTL(dimension types.TextureViewDimension) MTLTextureT
 }
 
 // filterModeToMTL converts WebGPU filter mode to Metal sampler filter.
-func filterModeToMTL(mode types.FilterMode) MTLSamplerMinMagFilter {
+func filterModeToMTL(mode gputypes.FilterMode) MTLSamplerMinMagFilter {
 	switch mode {
-	case types.FilterModeNearest:
+	case gputypes.FilterModeNearest:
 		return MTLSamplerMinMagFilterNearest
-	case types.FilterModeLinear:
+	case gputypes.FilterModeLinear:
 		return MTLSamplerMinMagFilterLinear
 	default:
 		return MTLSamplerMinMagFilterNearest
@@ -174,11 +174,11 @@ func filterModeToMTL(mode types.FilterMode) MTLSamplerMinMagFilter {
 }
 
 // mipmapFilterModeToMTL converts WebGPU mipmap filter mode to Metal sampler mip filter.
-func mipmapFilterModeToMTL(mode types.FilterMode) MTLSamplerMipFilter {
+func mipmapFilterModeToMTL(mode gputypes.FilterMode) MTLSamplerMipFilter {
 	switch mode {
-	case types.FilterModeNearest:
+	case gputypes.FilterModeNearest:
 		return MTLSamplerMipFilterNearest
-	case types.FilterModeLinear:
+	case gputypes.FilterModeLinear:
 		return MTLSamplerMipFilterLinear
 	default:
 		return MTLSamplerMipFilterNotMipmapped
@@ -186,13 +186,13 @@ func mipmapFilterModeToMTL(mode types.FilterMode) MTLSamplerMipFilter {
 }
 
 // addressModeToMTL converts WebGPU address mode to Metal sampler address mode.
-func addressModeToMTL(mode types.AddressMode) MTLSamplerAddressMode {
+func addressModeToMTL(mode gputypes.AddressMode) MTLSamplerAddressMode {
 	switch mode {
-	case types.AddressModeClampToEdge:
+	case gputypes.AddressModeClampToEdge:
 		return MTLSamplerAddressModeClampToEdge
-	case types.AddressModeRepeat:
+	case gputypes.AddressModeRepeat:
 		return MTLSamplerAddressModeRepeat
-	case types.AddressModeMirrorRepeat:
+	case gputypes.AddressModeMirrorRepeat:
 		return MTLSamplerAddressModeMirrorRepeat
 	default:
 		return MTLSamplerAddressModeClampToEdge
@@ -200,23 +200,23 @@ func addressModeToMTL(mode types.AddressMode) MTLSamplerAddressMode {
 }
 
 // compareFunctionToMTL converts WebGPU compare function to Metal compare function.
-func compareFunctionToMTL(fn types.CompareFunction) MTLCompareFunction {
+func compareFunctionToMTL(fn gputypes.CompareFunction) MTLCompareFunction {
 	switch fn {
-	case types.CompareFunctionNever:
+	case gputypes.CompareFunctionNever:
 		return MTLCompareFunctionNever
-	case types.CompareFunctionLess:
+	case gputypes.CompareFunctionLess:
 		return MTLCompareFunctionLess
-	case types.CompareFunctionEqual:
+	case gputypes.CompareFunctionEqual:
 		return MTLCompareFunctionEqual
-	case types.CompareFunctionLessEqual:
+	case gputypes.CompareFunctionLessEqual:
 		return MTLCompareFunctionLessEqual
-	case types.CompareFunctionGreater:
+	case gputypes.CompareFunctionGreater:
 		return MTLCompareFunctionGreater
-	case types.CompareFunctionNotEqual:
+	case gputypes.CompareFunctionNotEqual:
 		return MTLCompareFunctionNotEqual
-	case types.CompareFunctionGreaterEqual:
+	case gputypes.CompareFunctionGreaterEqual:
 		return MTLCompareFunctionGreaterEqual
-	case types.CompareFunctionAlways:
+	case gputypes.CompareFunctionAlways:
 		return MTLCompareFunctionAlways
 	default:
 		return MTLCompareFunctionAlways
@@ -224,17 +224,17 @@ func compareFunctionToMTL(fn types.CompareFunction) MTLCompareFunction {
 }
 
 // primitiveTopologyToMTL converts WebGPU primitive topology to Metal primitive type.
-func primitiveTopologyToMTL(topology types.PrimitiveTopology) MTLPrimitiveType {
+func primitiveTopologyToMTL(topology gputypes.PrimitiveTopology) MTLPrimitiveType {
 	switch topology {
-	case types.PrimitiveTopologyPointList:
+	case gputypes.PrimitiveTopologyPointList:
 		return MTLPrimitiveTypePoint
-	case types.PrimitiveTopologyLineList:
+	case gputypes.PrimitiveTopologyLineList:
 		return MTLPrimitiveTypeLine
-	case types.PrimitiveTopologyLineStrip:
+	case gputypes.PrimitiveTopologyLineStrip:
 		return MTLPrimitiveTypeLineStrip
-	case types.PrimitiveTopologyTriangleList:
+	case gputypes.PrimitiveTopologyTriangleList:
 		return MTLPrimitiveTypeTriangle
-	case types.PrimitiveTopologyTriangleStrip:
+	case gputypes.PrimitiveTopologyTriangleStrip:
 		return MTLPrimitiveTypeTriangleStrip
 	default:
 		return MTLPrimitiveTypeTriangle
@@ -242,33 +242,33 @@ func primitiveTopologyToMTL(topology types.PrimitiveTopology) MTLPrimitiveType {
 }
 
 // blendFactorToMTL converts WebGPU blend factor to Metal blend factor.
-func blendFactorToMTL(factor types.BlendFactor) MTLBlendFactor {
+func blendFactorToMTL(factor gputypes.BlendFactor) MTLBlendFactor {
 	switch factor {
-	case types.BlendFactorZero:
+	case gputypes.BlendFactorZero:
 		return MTLBlendFactorZero
-	case types.BlendFactorOne:
+	case gputypes.BlendFactorOne:
 		return MTLBlendFactorOne
-	case types.BlendFactorSrc:
+	case gputypes.BlendFactorSrc:
 		return MTLBlendFactorSourceColor
-	case types.BlendFactorOneMinusSrc:
+	case gputypes.BlendFactorOneMinusSrc:
 		return MTLBlendFactorOneMinusSourceColor
-	case types.BlendFactorSrcAlpha:
+	case gputypes.BlendFactorSrcAlpha:
 		return MTLBlendFactorSourceAlpha
-	case types.BlendFactorOneMinusSrcAlpha:
+	case gputypes.BlendFactorOneMinusSrcAlpha:
 		return MTLBlendFactorOneMinusSourceAlpha
-	case types.BlendFactorDst:
+	case gputypes.BlendFactorDst:
 		return MTLBlendFactorDestinationColor
-	case types.BlendFactorOneMinusDst:
+	case gputypes.BlendFactorOneMinusDst:
 		return MTLBlendFactorOneMinusDestinationColor
-	case types.BlendFactorDstAlpha:
+	case gputypes.BlendFactorDstAlpha:
 		return MTLBlendFactorDestinationAlpha
-	case types.BlendFactorOneMinusDstAlpha:
+	case gputypes.BlendFactorOneMinusDstAlpha:
 		return MTLBlendFactorOneMinusDestinationAlpha
-	case types.BlendFactorSrcAlphaSaturated:
+	case gputypes.BlendFactorSrcAlphaSaturated:
 		return MTLBlendFactorSourceAlphaSaturated
-	case types.BlendFactorConstant:
+	case gputypes.BlendFactorConstant:
 		return MTLBlendFactorBlendColor
-	case types.BlendFactorOneMinusConstant:
+	case gputypes.BlendFactorOneMinusConstant:
 		return MTLBlendFactorOneMinusBlendColor
 	default:
 		return MTLBlendFactorOne
@@ -276,17 +276,17 @@ func blendFactorToMTL(factor types.BlendFactor) MTLBlendFactor {
 }
 
 // blendOperationToMTL converts WebGPU blend operation to Metal blend operation.
-func blendOperationToMTL(op types.BlendOperation) MTLBlendOperation {
+func blendOperationToMTL(op gputypes.BlendOperation) MTLBlendOperation {
 	switch op {
-	case types.BlendOperationAdd:
+	case gputypes.BlendOperationAdd:
 		return MTLBlendOperationAdd
-	case types.BlendOperationSubtract:
+	case gputypes.BlendOperationSubtract:
 		return MTLBlendOperationSubtract
-	case types.BlendOperationReverseSubtract:
+	case gputypes.BlendOperationReverseSubtract:
 		return MTLBlendOperationReverseSubtract
-	case types.BlendOperationMin:
+	case gputypes.BlendOperationMin:
 		return MTLBlendOperationMin
-	case types.BlendOperationMax:
+	case gputypes.BlendOperationMax:
 		return MTLBlendOperationMax
 	default:
 		return MTLBlendOperationAdd
@@ -294,11 +294,11 @@ func blendOperationToMTL(op types.BlendOperation) MTLBlendOperation {
 }
 
 // loadOpToMTL converts WebGPU load operation to Metal load action.
-func loadOpToMTL(op types.LoadOp) MTLLoadAction {
+func loadOpToMTL(op gputypes.LoadOp) MTLLoadAction {
 	switch op {
-	case types.LoadOpClear:
+	case gputypes.LoadOpClear:
 		return MTLLoadActionClear
-	case types.LoadOpLoad:
+	case gputypes.LoadOpLoad:
 		return MTLLoadActionLoad
 	default:
 		return MTLLoadActionDontCare
@@ -306,11 +306,11 @@ func loadOpToMTL(op types.LoadOp) MTLLoadAction {
 }
 
 // storeOpToMTL converts WebGPU store operation to Metal store action.
-func storeOpToMTL(op types.StoreOp) MTLStoreAction {
+func storeOpToMTL(op gputypes.StoreOp) MTLStoreAction {
 	switch op {
-	case types.StoreOpStore:
+	case gputypes.StoreOpStore:
 		return MTLStoreActionStore
-	case types.StoreOpDiscard:
+	case gputypes.StoreOpDiscard:
 		return MTLStoreActionDontCare
 	default:
 		return MTLStoreActionStore
@@ -318,13 +318,13 @@ func storeOpToMTL(op types.StoreOp) MTLStoreAction {
 }
 
 // cullModeToMTL converts WebGPU cull mode to Metal cull mode.
-func cullModeToMTL(mode types.CullMode) MTLCullMode {
+func cullModeToMTL(mode gputypes.CullMode) MTLCullMode {
 	switch mode {
-	case types.CullModeNone:
+	case gputypes.CullModeNone:
 		return MTLCullModeNone
-	case types.CullModeFront:
+	case gputypes.CullModeFront:
 		return MTLCullModeFront
-	case types.CullModeBack:
+	case gputypes.CullModeBack:
 		return MTLCullModeBack
 	default:
 		return MTLCullModeNone
@@ -332,11 +332,11 @@ func cullModeToMTL(mode types.CullMode) MTLCullMode {
 }
 
 // frontFaceToMTL converts WebGPU front face to Metal winding order.
-func frontFaceToMTL(face types.FrontFace) MTLWinding {
+func frontFaceToMTL(face gputypes.FrontFace) MTLWinding {
 	switch face {
-	case types.FrontFaceCCW:
+	case gputypes.FrontFaceCCW:
 		return MTLWindingCounterClockwise
-	case types.FrontFaceCW:
+	case gputypes.FrontFaceCW:
 		return MTLWindingClockwise
 	default:
 		return MTLWindingCounterClockwise
@@ -344,11 +344,11 @@ func frontFaceToMTL(face types.FrontFace) MTLWinding {
 }
 
 // indexFormatToMTL converts WebGPU index format to Metal index type.
-func indexFormatToMTL(format types.IndexFormat) MTLIndexType {
+func indexFormatToMTL(format gputypes.IndexFormat) MTLIndexType {
 	switch format {
-	case types.IndexFormatUint16:
+	case gputypes.IndexFormatUint16:
 		return MTLIndexTypeUInt16
-	case types.IndexFormatUint32:
+	case gputypes.IndexFormatUint32:
 		return MTLIndexTypeUInt32
 	default:
 		return MTLIndexTypeUInt32

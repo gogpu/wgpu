@@ -7,13 +7,13 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestNoopBackendVariant tests the backend variant identification.
 func TestNoopBackendVariant(t *testing.T) {
 	api := noop.API{}
-	if api.Variant() != types.BackendEmpty {
+	if api.Variant() != gputypes.BackendEmpty {
 		t.Errorf("expected BackendEmpty, got %v", api.Variant())
 	}
 }
@@ -22,7 +22,7 @@ func TestNoopBackendVariant(t *testing.T) {
 func TestNoopCreateInstance(t *testing.T) {
 	api := noop.API{}
 	desc := &hal.InstanceDescriptor{
-		Backends: types.BackendsPrimary,
+		Backends: gputypes.BackendsPrimary,
 		Flags:    0,
 	}
 
@@ -73,10 +73,10 @@ func TestNoopEnumerateAdapters(t *testing.T) {
 	if adapter.Info.Name != "Noop Adapter" {
 		t.Errorf("expected adapter name 'Noop Adapter', got %q", adapter.Info.Name)
 	}
-	if adapter.Info.Backend != types.BackendEmpty {
+	if adapter.Info.Backend != gputypes.BackendEmpty {
 		t.Errorf("expected backend BackendEmpty, got %v", adapter.Info.Backend)
 	}
-	if adapter.Info.DeviceType != types.DeviceTypeOther {
+	if adapter.Info.DeviceType != gputypes.DeviceTypeOther {
 		t.Errorf("expected device type Other, got %v", adapter.Info.DeviceType)
 	}
 }
@@ -150,12 +150,12 @@ func TestNoopAdapterOpen(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		features types.Features
-		limits   types.Limits
+		features gputypes.Features
+		limits   gputypes.Limits
 	}{
-		{"default limits", 0, types.DefaultLimits()},
-		{"zero limits", 0, types.Limits{}},
-		{"with features", types.Features(types.FeatureDepthClipControl), types.DefaultLimits()},
+		{"default limits", 0, gputypes.DefaultLimits()},
+		{"zero limits", 0, gputypes.Limits{}},
+		{"with features", gputypes.Features(gputypes.FeatureDepthClipControl), gputypes.DefaultLimits()},
 	}
 
 	for _, tt := range tests {
@@ -188,7 +188,7 @@ func TestNoopAdapterCapabilities(t *testing.T) {
 	adapter := adapters[0].Adapter
 
 	// Test texture format capabilities
-	caps := adapter.TextureFormatCapabilities(types.TextureFormatRGBA8Unorm)
+	caps := adapter.TextureFormatCapabilities(gputypes.TextureFormatRGBA8Unorm)
 	if caps.Flags == 0 {
 		t.Error("expected non-zero texture format capabilities")
 	}
@@ -227,7 +227,7 @@ func TestNoopCreateBuffer(t *testing.T) {
 			&hal.BufferDescriptor{
 				Label: "test buffer",
 				Size:  256,
-				Usage: types.BufferUsageVertex,
+				Usage: gputypes.BufferUsageVertex,
 			},
 		},
 		{
@@ -235,7 +235,7 @@ func TestNoopCreateBuffer(t *testing.T) {
 			&hal.BufferDescriptor{
 				Label:            "mapped buffer",
 				Size:             1024,
-				Usage:            types.BufferUsageCopyDst,
+				Usage:            gputypes.BufferUsageCopyDst,
 				MappedAtCreation: true,
 			},
 		},
@@ -243,14 +243,14 @@ func TestNoopCreateBuffer(t *testing.T) {
 			"zero size buffer",
 			&hal.BufferDescriptor{
 				Size:  0,
-				Usage: types.BufferUsageUniform,
+				Usage: gputypes.BufferUsageUniform,
 			},
 		},
 		{
 			"large buffer",
 			&hal.BufferDescriptor{
 				Size:  1024 * 1024 * 10, // 10 MB
-				Usage: types.BufferUsageStorage,
+				Usage: gputypes.BufferUsageStorage,
 			},
 		},
 	}
@@ -285,9 +285,9 @@ func TestNoopCreateTexture(t *testing.T) {
 				Size:          hal.Extent3D{Width: 512, Height: 512, DepthOrArrayLayers: 1},
 				MipLevelCount: 1,
 				SampleCount:   1,
-				Dimension:     types.TextureDimension2D,
-				Format:        types.TextureFormatRGBA8Unorm,
-				Usage:         types.TextureUsageTextureBinding | types.TextureUsageRenderAttachment,
+				Dimension:     gputypes.TextureDimension2D,
+				Format:        gputypes.TextureFormatRGBA8Unorm,
+				Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageRenderAttachment,
 			},
 		},
 		{
@@ -296,9 +296,9 @@ func TestNoopCreateTexture(t *testing.T) {
 				Size:          hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 32},
 				MipLevelCount: 1,
 				SampleCount:   1,
-				Dimension:     types.TextureDimension3D,
-				Format:        types.TextureFormatRGBA8Unorm,
-				Usage:         types.TextureUsageTextureBinding,
+				Dimension:     gputypes.TextureDimension3D,
+				Format:        gputypes.TextureFormatRGBA8Unorm,
+				Usage:         gputypes.TextureUsageTextureBinding,
 			},
 		},
 		{
@@ -307,9 +307,9 @@ func TestNoopCreateTexture(t *testing.T) {
 				Size:          hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1},
 				MipLevelCount: 1,
 				SampleCount:   4,
-				Dimension:     types.TextureDimension2D,
-				Format:        types.TextureFormatRGBA8Unorm,
-				Usage:         types.TextureUsageRenderAttachment,
+				Dimension:     gputypes.TextureDimension2D,
+				Format:        gputypes.TextureFormatRGBA8Unorm,
+				Usage:         gputypes.TextureUsageRenderAttachment,
 			},
 		},
 	}
@@ -341,20 +341,20 @@ func TestNoopCreateSampler(t *testing.T) {
 			"default sampler",
 			&hal.SamplerDescriptor{
 				Label:        "default",
-				AddressModeU: types.AddressModeClampToEdge,
-				AddressModeV: types.AddressModeClampToEdge,
-				AddressModeW: types.AddressModeClampToEdge,
-				MagFilter:    types.FilterModeLinear,
-				MinFilter:    types.FilterModeLinear,
-				MipmapFilter: types.FilterModeLinear,
+				AddressModeU: gputypes.AddressModeClampToEdge,
+				AddressModeV: gputypes.AddressModeClampToEdge,
+				AddressModeW: gputypes.AddressModeClampToEdge,
+				MagFilter:    gputypes.FilterModeLinear,
+				MinFilter:    gputypes.FilterModeLinear,
+				MipmapFilter: gputypes.FilterModeLinear,
 			},
 		},
 		{
 			"comparison sampler",
 			&hal.SamplerDescriptor{
-				Compare:   types.CompareFunctionLess,
-				MagFilter: types.FilterModeNearest,
-				MinFilter: types.FilterModeNearest,
+				Compare:   gputypes.CompareFunctionLess,
+				MagFilter: gputypes.FilterModeNearest,
+				MinFilter: gputypes.FilterModeNearest,
 			},
 		},
 	}
@@ -380,12 +380,12 @@ func TestNoopCreateBindGroupLayout(t *testing.T) {
 
 	desc := &hal.BindGroupLayoutDescriptor{
 		Label: "test layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageVertex,
-				Buffer: &types.BufferBindingLayout{
-					Type:             types.BufferBindingTypeUniform,
+				Visibility: gputypes.ShaderStageVertex,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:             gputypes.BufferBindingTypeUniform,
 					HasDynamicOffset: false,
 					MinBindingSize:   64,
 				},
@@ -467,10 +467,10 @@ func TestNoopCreateRenderPipeline(t *testing.T) {
 			Module:     module,
 			EntryPoint: "vs",
 		},
-		Primitive: types.PrimitiveState{
-			Topology: types.PrimitiveTopologyTriangleList,
+		Primitive: gputypes.PrimitiveState{
+			Topology: gputypes.PrimitiveTopologyTriangleList,
 		},
-		Multisample: types.MultisampleState{
+		Multisample: gputypes.MultisampleState{
 			Count: 1,
 			Mask:  0xFFFFFFFF,
 		},
@@ -583,7 +583,7 @@ func TestNoopQueueWriteBuffer(t *testing.T) {
 	// Create a mapped buffer
 	buffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
 		Size:             256,
-		Usage:            types.BufferUsageCopyDst,
+		Usage:            gputypes.BufferUsageCopyDst,
 		MappedAtCreation: true,
 	})
 	defer device.DestroyBuffer(buffer)
@@ -605,9 +605,9 @@ func TestNoopQueueWriteTexture(t *testing.T) {
 		Size:          hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageCopyDst,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageCopyDst,
 	})
 	defer device.DestroyTexture(texture)
 
@@ -615,7 +615,7 @@ func TestNoopQueueWriteTexture(t *testing.T) {
 	dst := &hal.ImageCopyTexture{
 		Texture:  texture,
 		MipLevel: 0,
-		Aspect:   types.TextureAspectAll,
+		Aspect:   gputypes.TextureAspectAll,
 	}
 	layout := &hal.ImageDataLayout{
 		BytesPerRow: 16,
@@ -672,9 +672,9 @@ func TestNoopRenderPass(t *testing.T) {
 		Size:          hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageRenderAttachment,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	defer device.DestroyTexture(texture)
 
@@ -689,9 +689,9 @@ func TestNoopRenderPass(t *testing.T) {
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:       view,
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0.0, G: 0.0, B: 0.0, A: 1.0},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0.0, G: 0.0, B: 0.0, A: 1.0},
 			},
 		},
 	})
@@ -735,14 +735,14 @@ func TestNoopSurfaceConfigure(t *testing.T) {
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
-	openDevice, _ := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	defer openDevice.Device.Destroy()
 
 	config := &hal.SurfaceConfiguration{
 		Width:       800,
 		Height:      600,
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeFifo,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
@@ -766,15 +766,15 @@ func TestNoopSurfaceAcquireTexture(t *testing.T) {
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
-	openDevice, _ := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	defer openDevice.Device.Destroy()
 
 	// Configure surface
 	config := &hal.SurfaceConfiguration{
 		Width:  800,
 		Height: 600,
-		Format: types.TextureFormatBGRA8Unorm,
-		Usage:  types.TextureUsageRenderAttachment,
+		Format: gputypes.TextureFormatBGRA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
 	}
 	_ = surface.Configure(openDevice.Device, config)
 	defer surface.Unconfigure(openDevice.Device)
@@ -892,7 +892,7 @@ func TestNoopFullLifecycle(t *testing.T) {
 	}
 
 	// Open device
-	openDevice, err := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -905,8 +905,8 @@ func TestNoopFullLifecycle(t *testing.T) {
 	config := &hal.SurfaceConfiguration{
 		Width:  800,
 		Height: 600,
-		Format: types.TextureFormatBGRA8Unorm,
-		Usage:  types.TextureUsageRenderAttachment,
+		Format: gputypes.TextureFormatBGRA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
 	}
 	if err := surface.Configure(device, config); err != nil {
 		t.Fatalf("Configure failed: %v", err)
@@ -916,7 +916,7 @@ func TestNoopFullLifecycle(t *testing.T) {
 	// Create resources
 	buffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
 		Size:  256,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	})
 	defer device.DestroyBuffer(buffer)
 
@@ -924,9 +924,9 @@ func TestNoopFullLifecycle(t *testing.T) {
 		Size:          hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageRenderAttachment,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	defer device.DestroyTexture(texture)
 
@@ -948,8 +948,8 @@ func TestNoopFullLifecycle(t *testing.T) {
 			Module:     module,
 			EntryPoint: "vs",
 		},
-		Primitive:   types.PrimitiveState{Topology: types.PrimitiveTopologyTriangleList},
-		Multisample: types.MultisampleState{Count: 1, Mask: 0xFFFFFFFF},
+		Primitive:   gputypes.PrimitiveState{Topology: gputypes.PrimitiveTopologyTriangleList},
+		Multisample: gputypes.MultisampleState{Count: 1, Mask: 0xFFFFFFFF},
 	})
 	defer device.DestroyRenderPipeline(pipeline)
 
@@ -961,9 +961,9 @@ func TestNoopFullLifecycle(t *testing.T) {
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:       view,
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0.0, G: 0.0, B: 0.0, A: 1.0},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0.0, G: 0.0, B: 0.0, A: 1.0},
 			},
 		},
 	})
@@ -1043,7 +1043,7 @@ func createTestDevice(t *testing.T) (hal.Device, func()) {
 	}
 
 	adapters := instance.EnumerateAdapters(nil)
-	openDevice, err := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		instance.Destroy()
 		t.Fatalf("Open failed: %v", err)
@@ -1067,7 +1067,7 @@ func createTestDeviceAndQueue(t *testing.T) (hal.Device, hal.Queue, func()) {
 	}
 
 	adapters := instance.EnumerateAdapters(nil)
-	openDevice, err := adapters[0].Adapter.Open(0, types.DefaultLimits())
+	openDevice, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		instance.Destroy()
 		t.Fatalf("Open failed: %v", err)

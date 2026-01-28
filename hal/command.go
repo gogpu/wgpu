@@ -1,6 +1,6 @@
 package hal
 
-import "github.com/gogpu/wgpu/types"
+import "github.com/gogpu/gputypes"
 
 // CommandEncoder records GPU commands.
 // Command encoders are single-use - after EndEncoding, they cannot be reused.
@@ -71,7 +71,7 @@ type RenderPassEncoder interface {
 	SetVertexBuffer(slot uint32, buffer Buffer, offset uint64)
 
 	// SetIndexBuffer sets the index buffer.
-	SetIndexBuffer(buffer Buffer, format types.IndexFormat, offset uint64)
+	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
 
 	// SetViewport sets the viewport transformation.
 	SetViewport(x, y, width, height, minDepth, maxDepth float32)
@@ -80,7 +80,7 @@ type RenderPassEncoder interface {
 	SetScissorRect(x, y, width, height uint32)
 
 	// SetBlendConstant sets the blend constant color.
-	SetBlendConstant(color *types.Color)
+	SetBlendConstant(color *gputypes.Color)
 
 	// SetStencilReference sets the stencil reference value.
 	SetStencilReference(reference uint32)
@@ -156,20 +156,20 @@ type TextureBarrier struct {
 
 // BufferUsageTransition defines a buffer usage state transition.
 type BufferUsageTransition struct {
-	OldUsage types.BufferUsage
-	NewUsage types.BufferUsage
+	OldUsage gputypes.BufferUsage
+	NewUsage gputypes.BufferUsage
 }
 
 // TextureUsageTransition defines a texture usage state transition.
 type TextureUsageTransition struct {
-	OldUsage types.TextureUsage
-	NewUsage types.TextureUsage
+	OldUsage gputypes.TextureUsage
+	NewUsage gputypes.TextureUsage
 }
 
 // TextureRange specifies a range of texture subresources.
 type TextureRange struct {
 	// Aspect specifies which aspect of the texture (color, depth, stencil).
-	Aspect types.TextureAspect
+	Aspect gputypes.TextureAspect
 
 	// BaseMipLevel is the first mip level in the range.
 	BaseMipLevel uint32
@@ -233,7 +233,7 @@ type ImageCopyTexture struct {
 	Origin Origin3D
 
 	// Aspect specifies which aspect to copy (color, depth, stencil).
-	Aspect types.TextureAspect
+	Aspect gputypes.TextureAspect
 }
 
 // Origin3D is a 3D origin point.

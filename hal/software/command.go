@@ -4,7 +4,7 @@ package software
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the software backend.
@@ -172,7 +172,7 @@ func (r *RenderPassEncoder) End() {
 	// Process color attachments
 	for _, attachment := range r.desc.ColorAttachments {
 		// Handle clear operation
-		if attachment.LoadOp == types.LoadOpClear {
+		if attachment.LoadOp == gputypes.LoadOpClear {
 			// Get the underlying texture from the view
 			if view, ok := attachment.View.(*TextureView); ok {
 				if view.texture != nil {
@@ -185,12 +185,12 @@ func (r *RenderPassEncoder) End() {
 
 	// Depth/stencil attachment handling (simplified - just clear if needed)
 	if r.desc.DepthStencilAttachment != nil {
-		if r.desc.DepthStencilAttachment.DepthLoadOp == types.LoadOpClear {
+		if r.desc.DepthStencilAttachment.DepthLoadOp == gputypes.LoadOpClear {
 			if view, ok := r.desc.DepthStencilAttachment.View.(*TextureView); ok {
 				if view.texture != nil {
 					// Clear depth to clearValue (as grayscale for simplicity)
 					val := r.desc.DepthStencilAttachment.DepthClearValue
-					color := types.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0}
+					color := gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0}
 					view.texture.Clear(color)
 				}
 			}
@@ -208,7 +208,7 @@ func (r *RenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) 
 func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
 
 // SetIndexBuffer is a no-op.
-func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ types.IndexFormat, _ uint64) {}
+func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
 
 // SetViewport is a no-op.
 func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
@@ -217,7 +217,7 @@ func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
 func (r *RenderPassEncoder) SetScissorRect(_, _, _, _ uint32) {}
 
 // SetBlendConstant is a no-op.
-func (r *RenderPassEncoder) SetBlendConstant(_ *types.Color) {}
+func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 
 // SetStencilReference is a no-op.
 func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}

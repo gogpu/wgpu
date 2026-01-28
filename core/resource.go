@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Resource placeholder types - will be properly defined later.
@@ -14,13 +14,13 @@ import (
 // Adapter represents a physical GPU adapter.
 type Adapter struct {
 	// Info contains information about the adapter.
-	Info types.AdapterInfo
+	Info gputypes.AdapterInfo
 	// Features contains the features supported by the adapter.
-	Features types.Features
+	Features gputypes.Features
 	// Limits contains the resource limits of the adapter.
-	Limits types.Limits
+	Limits gputypes.Limits
 	// Backend identifies which graphics backend this adapter uses.
-	Backend types.Backend
+	Backend gputypes.Backend
 
 	// === HAL integration fields ===
 
@@ -92,9 +92,9 @@ type Device struct {
 	// Label is a debug label for the device.
 	Label string
 	// Features contains the features enabled on this device.
-	Features types.Features
+	Features gputypes.Features
 	// Limits contains the resource limits of this device.
-	Limits types.Limits
+	Limits gputypes.Limits
 
 	// valid indicates whether the device is still valid for use.
 	// Once a device is destroyed, this becomes false.
@@ -118,8 +118,8 @@ type Device struct {
 func NewDevice(
 	halDevice hal.Device,
 	adapter *Adapter,
-	features types.Features,
-	limits types.Limits,
+	features gputypes.Features,
+	limits gputypes.Limits,
 	label string,
 ) *Device {
 	d := &Device{
@@ -266,7 +266,7 @@ func (d *Device) SetAssociatedQueue(queue *Queue) {
 //
 // Returns the buffer and nil on success.
 // Returns nil and an error if validation fails or HAL creation fails.
-func (d *Device) CreateBuffer(desc *types.BufferDescriptor) (*Buffer, error) {
+func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) {
 	// 1. Check device validity
 	if err := d.checkValid(); err != nil {
 		return nil, err
@@ -311,8 +311,8 @@ func (d *Device) CreateBuffer(desc *types.BufferDescriptor) (*Buffer, error) {
 	}
 
 	// 5. Validate MAP_READ/MAP_WRITE exclusivity
-	hasMapRead := desc.Usage.Contains(types.BufferUsageMapRead)
-	hasMapWrite := desc.Usage.Contains(types.BufferUsageMapWrite)
+	hasMapRead := desc.Usage.Contains(gputypes.BufferUsageMapRead)
+	hasMapWrite := desc.Usage.Contains(gputypes.BufferUsageMapWrite)
 	if hasMapRead && hasMapWrite {
 		return nil, &CreateBufferError{
 			Kind:  CreateBufferErrorMapReadWriteExclusive,
@@ -393,7 +393,7 @@ type Buffer struct {
 	// === WebGPU properties ===
 
 	// usage is the buffer's usage flags.
-	usage types.BufferUsage
+	usage gputypes.BufferUsage
 
 	// size is the buffer size in bytes.
 	size uint64
@@ -473,7 +473,7 @@ const InvalidTrackerIndex TrackerIndex = ^TrackerIndex(0)
 func NewBuffer(
 	halBuffer hal.Buffer,
 	device *Device,
-	usage types.BufferUsage,
+	usage gputypes.BufferUsage,
 	size uint64,
 	label string,
 ) *Buffer {
@@ -551,7 +551,7 @@ func (b *Buffer) Device() *Device {
 }
 
 // Usage returns the buffer's usage flags.
-func (b *Buffer) Usage() types.BufferUsage {
+func (b *Buffer) Usage() gputypes.BufferUsage {
 	return b.usage
 }
 

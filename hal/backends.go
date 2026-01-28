@@ -3,7 +3,7 @@
 
 package hal
 
-import "github.com/gogpu/wgpu/types"
+import "github.com/gogpu/gputypes"
 
 // Backend Implementation Guide
 //
@@ -50,7 +50,7 @@ import "github.com/gogpu/wgpu/types"
 // BackendInfo provides metadata about a backend implementation.
 type BackendInfo struct {
 	// Variant identifies the backend type.
-	Variant types.Backend
+	Variant gputypes.Backend
 
 	// Name is a human-readable backend name.
 	Name string
@@ -100,12 +100,12 @@ type BackendLimitations struct {
 type BackendFactory func() (Backend, error)
 
 // registeredFactories holds lazy backend factories.
-var registeredFactories = make(map[types.Backend]BackendFactory)
+var registeredFactories = make(map[gputypes.Backend]BackendFactory)
 
 // RegisterBackendFactory registers a factory for lazy backend creation.
 // This is preferred over RegisterBackend for backends that may fail
 // initialization (e.g., missing GPU drivers).
-func RegisterBackendFactory(variant types.Backend, factory BackendFactory) {
+func RegisterBackendFactory(variant gputypes.Backend, factory BackendFactory) {
 	backendsMu.Lock()
 	defer backendsMu.Unlock()
 	registeredFactories[variant] = factory
@@ -113,7 +113,7 @@ func RegisterBackendFactory(variant types.Backend, factory BackendFactory) {
 
 // CreateBackend creates a backend instance using registered factory.
 // Returns error if no factory is registered for the variant.
-func CreateBackend(variant types.Backend) (Backend, error) {
+func CreateBackend(variant gputypes.Backend) (Backend, error) {
 	backendsMu.RLock()
 	factory, ok := registeredFactories[variant]
 	backendsMu.RUnlock()
@@ -126,7 +126,7 @@ func CreateBackend(variant types.Backend) (Backend, error) {
 
 // ProbeBackend tests if a backend is available without fully initializing it.
 // Returns BackendInfo if available, error otherwise.
-func ProbeBackend(variant types.Backend) (*BackendInfo, error) {
+func ProbeBackend(variant gputypes.Backend) (*BackendInfo, error) {
 	// First check if already registered
 	_, ok := GetBackend(variant)
 	if ok {
@@ -165,12 +165,12 @@ func ProbeBackend(variant types.Backend) (*BackendInfo, error) {
 // SelectBestBackend chooses the most capable available backend.
 // Priority: Vulkan > Metal > DX12 > OpenGL > Noop
 func SelectBestBackend() (Backend, error) {
-	priority := []types.Backend{
-		types.BackendVulkan,
-		types.BackendMetal,
-		types.BackendDX12,
-		types.BackendGL,
-		types.BackendEmpty, // noop
+	priority := []gputypes.Backend{
+		gputypes.BackendVulkan,
+		gputypes.BackendMetal,
+		gputypes.BackendDX12,
+		gputypes.BackendGL,
+		gputypes.BackendEmpty, // noop
 	}
 
 	for _, variant := range priority {

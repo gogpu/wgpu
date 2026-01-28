@@ -5,15 +5,15 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	_ "github.com/gogpu/wgpu/hal/noop" // Import for side effect of registering noop backend
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // mockBackend is a simple test backend implementation.
 type mockBackend struct {
-	variant types.Backend
+	variant gputypes.Backend
 }
 
-func (m *mockBackend) Variant() types.Backend {
+func (m *mockBackend) Variant() gputypes.Backend {
 	return m.variant
 }
 
@@ -53,55 +53,55 @@ func (m *mockSurfaceTexture) Destroy() {}
 
 func TestRegisterBackend(t *testing.T) {
 	// Register a custom backend
-	mock := &mockBackend{variant: types.BackendVulkan}
+	mock := &mockBackend{variant: gputypes.BackendVulkan}
 	hal.RegisterBackend(mock)
 
 	// Verify it was registered
-	backend, ok := hal.GetBackend(types.BackendVulkan)
+	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
 	if !ok {
 		t.Fatal("expected backend to be registered")
 	}
-	if backend.Variant() != types.BackendVulkan {
-		t.Errorf("expected variant %v, got %v", types.BackendVulkan, backend.Variant())
+	if backend.Variant() != gputypes.BackendVulkan {
+		t.Errorf("expected variant %v, got %v", gputypes.BackendVulkan, backend.Variant())
 	}
 }
 
 func TestRegisterBackend_Replacement(t *testing.T) {
 	// Register initial backend
-	mock1 := &mockBackend{variant: types.BackendMetal}
+	mock1 := &mockBackend{variant: gputypes.BackendMetal}
 	hal.RegisterBackend(mock1)
 
 	// Replace with another backend of same type
-	mock2 := &mockBackend{variant: types.BackendMetal}
+	mock2 := &mockBackend{variant: gputypes.BackendMetal}
 	hal.RegisterBackend(mock2)
 
 	// Verify the replacement
-	backend, ok := hal.GetBackend(types.BackendMetal)
+	backend, ok := hal.GetBackend(gputypes.BackendMetal)
 	if !ok {
 		t.Fatal("expected backend to be registered")
 	}
 
 	// Both backends have same variant, but should be the second instance
 	// In real scenario, you might have different internal state
-	if backend.Variant() != types.BackendMetal {
-		t.Errorf("expected variant %v, got %v", types.BackendMetal, backend.Variant())
+	if backend.Variant() != gputypes.BackendMetal {
+		t.Errorf("expected variant %v, got %v", gputypes.BackendMetal, backend.Variant())
 	}
 }
 
 func TestGetBackend(t *testing.T) {
 	tests := []struct {
 		name    string
-		variant types.Backend
+		variant gputypes.Backend
 		wantOk  bool
 	}{
 		{
 			name:    "noop backend (registered by init)",
-			variant: types.BackendEmpty,
+			variant: gputypes.BackendEmpty,
 			wantOk:  true,
 		},
 		{
 			name:    "unregistered backend",
-			variant: types.BackendDX12,
+			variant: gputypes.BackendDX12,
 			wantOk:  false,
 		},
 	}
@@ -124,7 +124,7 @@ func TestGetBackend(t *testing.T) {
 
 func TestGetBackend_NotRegistered(t *testing.T) {
 	// Try to get a backend that definitely doesn't exist
-	backend, ok := hal.GetBackend(types.BackendGL)
+	backend, ok := hal.GetBackend(gputypes.BackendGL)
 	if ok {
 		t.Error("expected GetBackend to return false for unregistered backend")
 	}
@@ -145,7 +145,7 @@ func TestAvailableBackends(t *testing.T) {
 	// Check that noop backend is present
 	found := false
 	for _, b := range backends {
-		if b == types.BackendEmpty {
+		if b == gputypes.BackendEmpty {
 			found = true
 			break
 		}
@@ -161,7 +161,7 @@ func TestAvailableBackends_AfterRegistration(t *testing.T) {
 	initialCount := len(initialBackends)
 
 	// Register a new backend (using Vulkan as test backend)
-	mock := &mockBackend{variant: types.BackendVulkan}
+	mock := &mockBackend{variant: gputypes.BackendVulkan}
 	hal.RegisterBackend(mock)
 
 	// Get updated list
@@ -176,7 +176,7 @@ func TestAvailableBackends_AfterRegistration(t *testing.T) {
 	// Verify the new backend is in the list
 	found := false
 	for _, b := range updatedBackends {
-		if b == types.BackendVulkan {
+		if b == gputypes.BackendVulkan {
 			found = true
 			break
 		}
@@ -193,7 +193,7 @@ func TestConcurrentAccess(t *testing.T) {
 	// Goroutine 1: Register backends
 	go func() {
 		for i := 0; i < 100; i++ {
-			mock := &mockBackend{variant: types.Backend(i % 8)}
+			mock := &mockBackend{variant: gputypes.Backend(i % 8)}
 			hal.RegisterBackend(mock)
 		}
 		done <- true
@@ -203,7 +203,7 @@ func TestConcurrentAccess(t *testing.T) {
 	go func() {
 		for i := 0; i < 100; i++ {
 			_ = hal.AvailableBackends()
-			_, _ = hal.GetBackend(types.Backend(i % 8))
+			_, _ = hal.GetBackend(gputypes.Backend(i % 8))
 		}
 		done <- true
 	}()
@@ -215,12 +215,12 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestNoopBackendRegistered(t *testing.T) {
 	// Verify that the noop backend is automatically registered via init()
-	backend, ok := hal.GetBackend(types.BackendEmpty)
+	backend, ok := hal.GetBackend(gputypes.BackendEmpty)
 	if !ok {
 		t.Fatal("noop backend should be registered automatically")
 	}
 
-	if backend.Variant() != types.BackendEmpty {
+	if backend.Variant() != gputypes.BackendEmpty {
 		t.Errorf("expected variant BackendEmpty, got %v", backend.Variant())
 	}
 

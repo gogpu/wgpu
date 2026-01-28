@@ -12,7 +12,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Device implements hal.Device for Vulkan.
@@ -98,12 +98,12 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 
 	// Determine usage flags for memory allocation
 	memUsage := memory.UsageFastDeviceAccess
-	if desc.Usage&(types.BufferUsageMapRead|types.BufferUsageMapWrite) != 0 {
+	if desc.Usage&(gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite) != 0 {
 		memUsage = memory.UsageHostAccess
-		if desc.Usage&types.BufferUsageMapRead != 0 {
+		if desc.Usage&gputypes.BufferUsageMapRead != 0 {
 			memUsage |= memory.UsageDownload
 		}
-		if desc.Usage&types.BufferUsageMapWrite != 0 {
+		if desc.Usage&gputypes.BufferUsageMapWrite != 0 {
 			memUsage |= memory.UsageUpload
 		}
 	}
@@ -273,8 +273,8 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	// We support both regular Texture and SwapchainTexture.
 	var (
 		imageHandle   vk.Image
-		textureFormat types.TextureFormat
-		dimension     types.TextureDimension
+		textureFormat gputypes.TextureFormat
+		dimension     gputypes.TextureDimension
 		mipLevels     uint32
 		textureSize   Extent3D
 	)
@@ -310,13 +310,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	// Determine format - use texture format if not specified
 	format := desc.Format
-	if format == types.TextureFormatUndefined {
+	if format == gputypes.TextureFormatUndefined {
 		format = textureFormat
 	}
 
 	// Determine view type - derive from texture dimension if not specified
 	var viewType vk.ImageViewType
-	if desc.Dimension == types.TextureViewDimensionUndefined {
+	if desc.Dimension == gputypes.TextureViewDimensionUndefined {
 		viewType = textureDimensionToViewType(dimension)
 	} else {
 		viewType = textureViewDimensionToVk(desc.Dimension)
@@ -417,7 +417,7 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 	// Determine if comparison is enabled
 	compareEnable := vk.Bool32(vk.False)
 	compareOp := vk.CompareOpNever
-	if desc.Compare != types.CompareFunctionUndefined {
+	if desc.Compare != gputypes.CompareFunctionUndefined {
 		compareEnable = vk.Bool32(vk.True)
 		compareOp = compareFunctionToVk(desc.Compare)
 	}
@@ -504,7 +504,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 		switch {
 		case entry.Buffer != nil:
 			binding.DescriptorType = bufferBindingTypeToVk(entry.Buffer.Type)
-			if entry.Buffer.Type == types.BufferBindingTypeUniform {
+			if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
 				counts.UniformBuffers++
 			} else {
 				counts.StorageBuffers++
@@ -515,7 +515,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 		case entry.Texture != nil:
 			binding.DescriptorType = vk.DescriptorTypeSampledImage
 			counts.SampledImages++
-		case entry.Storage != nil:
+		case entry.StorageTexture != nil:
 			binding.DescriptorType = vk.DescriptorTypeStorageImage
 			counts.StorageImages++
 		}
@@ -598,7 +598,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 }
 
 // updateDescriptorSet writes resource bindings to a descriptor set.
-func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []types.BindGroupEntry) error {
+func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.BindGroupEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -619,7 +619,7 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []types.BindG
 		}
 
 		switch res := entry.Resource.(type) {
-		case types.BufferBinding:
+		case gputypes.BufferBinding:
 			bufferInfo := vk.DescriptorBufferInfo{
 				Buffer: vk.Buffer(res.Buffer),
 				Offset: vk.DeviceSize(res.Offset),
@@ -632,7 +632,7 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []types.BindG
 			write.DescriptorType = vk.DescriptorTypeUniformBuffer // Default, will be overridden by layout
 			write.PBufferInfo = &bufferInfos[len(bufferInfos)-1]
 
-		case types.SamplerBinding:
+		case gputypes.SamplerBinding:
 			imageInfo := vk.DescriptorImageInfo{
 				Sampler: vk.Sampler(res.Sampler),
 			}
@@ -640,7 +640,7 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []types.BindG
 			write.DescriptorType = vk.DescriptorTypeSampler
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
-		case types.TextureViewBinding:
+		case gputypes.TextureViewBinding:
 			imageInfo := vk.DescriptorImageInfo{
 				ImageView:   vk.ImageView(res.TextureView),
 				ImageLayout: vk.ImageLayoutShaderReadOnlyOptimal,

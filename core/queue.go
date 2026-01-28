@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // GetQueue retrieves queue data.
@@ -103,7 +103,7 @@ func QueueWriteBuffer(id QueueID, buffer BufferID, offset uint64, data []byte) e
 //
 // Returns an error if the queue ID or texture ID is invalid,
 // or if the write operation fails.
-func QueueWriteTexture(id QueueID, dst *types.ImageCopyTexture, data []byte, layout *types.TextureDataLayout, size *types.Extent3D) error {
+func QueueWriteTexture(id QueueID, dst *gputypes.ImageCopyTexture, data []byte, layout *gputypes.TextureDataLayout, size *gputypes.Extent3D) error {
 	hub := GetGlobal().Hub()
 
 	// Verify the queue exists

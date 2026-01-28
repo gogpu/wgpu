@@ -2,15 +2,15 @@ package noop
 
 import (
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // API implements hal.Backend for the noop backend.
 type API struct{}
 
 // Variant returns the backend type identifier.
-func (API) Variant() types.Backend {
-	return types.BackendEmpty
+func (API) Variant() gputypes.Backend {
+	return gputypes.BackendEmpty
 }
 
 // CreateInstance creates a new noop instance.
@@ -34,19 +34,19 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 	return []hal.ExposedAdapter{
 		{
 			Adapter: &Adapter{},
-			Info: types.AdapterInfo{
+			Info: gputypes.AdapterInfo{
 				Name:       "Noop Adapter",
 				Vendor:     "GoGPU",
 				VendorID:   0,
 				DeviceID:   0,
-				DeviceType: types.DeviceTypeOther,
+				DeviceType: gputypes.DeviceTypeOther,
 				Driver:     "noop-1.0",
 				DriverInfo: "No-operation backend for testing",
-				Backend:    types.BackendEmpty,
+				Backend:    gputypes.BackendEmpty,
 			},
 			Features: 0, // No features supported
 			Capabilities: hal.Capabilities{
-				Limits: types.DefaultLimits(),
+				Limits: gputypes.DefaultLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

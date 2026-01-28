@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // RenderPassKey uniquely identifies a render pass configuration.
@@ -265,6 +265,6 @@ func vkResultToString(r vk.Result) string {
 }
 
 //nolint:unused // Helper for render pass format conversion
-func formatToVkForRenderPass(format types.TextureFormat) vk.Format {
+func formatToVkForRenderPass(format gputypes.TextureFormat) vk.Format {
 	return textureFormatToVk(format)
 }

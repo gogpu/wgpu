@@ -4,11 +4,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // verifyDeviceCreation verifies that a device was created correctly
-func verifyDeviceCreation(t *testing.T, deviceID DeviceID, adapterID AdapterID, desc *types.DeviceDescriptor) {
+func verifyDeviceCreation(t *testing.T, deviceID DeviceID, adapterID AdapterID, desc *gputypes.DeviceDescriptor) {
 	t.Helper()
 
 	// Verify device was created
@@ -46,13 +46,13 @@ func TestCreateDevice(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupAdapter func() AdapterID
-		desc         *types.DeviceDescriptor
+		desc         *gputypes.DeviceDescriptor
 		wantErr      bool
 	}{
 		{
 			name: "create device with default descriptor",
 			setupAdapter: func() AdapterID {
-				return createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				return createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 			},
 			desc:    nil,
 			wantErr: false,
@@ -60,30 +60,30 @@ func TestCreateDevice(t *testing.T) {
 		{
 			name: "create device with custom label",
 			setupAdapter: func() AdapterID {
-				return createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				return createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 			},
-			desc: &types.DeviceDescriptor{
+			desc: &gputypes.DeviceDescriptor{
 				Label:            "Test Device",
 				RequiredFeatures: nil,
-				RequiredLimits:   types.DefaultLimits(),
+				RequiredLimits:   gputypes.DefaultLimits(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "create device with supported features",
 			setupAdapter: func() AdapterID {
-				features := types.Features(0)
-				features.Insert(types.FeatureDepthClipControl)
-				features.Insert(types.FeatureTimestampQuery)
-				return createTestAdapter(t, features, types.DefaultLimits())
+				features := gputypes.Features(0)
+				features.Insert(gputypes.FeatureDepthClipControl)
+				features.Insert(gputypes.FeatureTimestampQuery)
+				return createTestAdapter(t, features, gputypes.DefaultLimits())
 			},
-			desc: &types.DeviceDescriptor{
+			desc: &gputypes.DeviceDescriptor{
 				Label: "Device with features",
-				RequiredFeatures: []types.Feature{
-					types.FeatureDepthClipControl,
-					types.FeatureTimestampQuery,
+				RequiredFeatures: []gputypes.Feature{
+					gputypes.FeatureDepthClipControl,
+					gputypes.FeatureTimestampQuery,
 				},
-				RequiredLimits: types.DefaultLimits(),
+				RequiredLimits: gputypes.DefaultLimits(),
 			},
 			wantErr: false,
 		},
@@ -91,14 +91,14 @@ func TestCreateDevice(t *testing.T) {
 			name: "fail with unsupported features",
 			setupAdapter: func() AdapterID {
 				// Adapter with no features
-				return createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				return createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 			},
-			desc: &types.DeviceDescriptor{
+			desc: &gputypes.DeviceDescriptor{
 				Label: "Device with unsupported features",
-				RequiredFeatures: []types.Feature{
-					types.FeatureDepthClipControl,
+				RequiredFeatures: []gputypes.Feature{
+					gputypes.FeatureDepthClipControl,
 				},
-				RequiredLimits: types.DefaultLimits(),
+				RequiredLimits: gputypes.DefaultLimits(),
 			},
 			wantErr: true,
 		},
@@ -138,17 +138,17 @@ func TestCreateDevice(t *testing.T) {
 func TestGetDeviceFeatures(t *testing.T) {
 	ResetGlobal()
 
-	features := types.Features(0)
-	features.Insert(types.FeatureDepthClipControl)
-	features.Insert(types.FeatureTimestampQuery)
+	features := gputypes.Features(0)
+	features.Insert(gputypes.FeatureDepthClipControl)
+	features.Insert(gputypes.FeatureTimestampQuery)
 
-	adapterID := createTestAdapter(t, features, types.DefaultLimits())
-	desc := &types.DeviceDescriptor{
+	adapterID := createTestAdapter(t, features, gputypes.DefaultLimits())
+	desc := &gputypes.DeviceDescriptor{
 		Label: "Test Device",
-		RequiredFeatures: []types.Feature{
-			types.FeatureDepthClipControl,
+		RequiredFeatures: []gputypes.Feature{
+			gputypes.FeatureDepthClipControl,
 		},
-		RequiredLimits: types.DefaultLimits(),
+		RequiredLimits: gputypes.DefaultLimits(),
 	}
 
 	deviceID, err := CreateDevice(adapterID, desc)
@@ -161,7 +161,7 @@ func TestGetDeviceFeatures(t *testing.T) {
 		t.Fatalf("GetDeviceFeatures() error = %v", err)
 	}
 
-	if !gotFeatures.Contains(types.FeatureDepthClipControl) {
+	if !gotFeatures.Contains(gputypes.FeatureDepthClipControl) {
 		t.Errorf("Device features should contain FeatureDepthClipControl")
 	}
 }
@@ -169,7 +169,7 @@ func TestGetDeviceFeatures(t *testing.T) {
 func TestGetDeviceLimits(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -189,7 +189,7 @@ func TestGetDeviceLimits(t *testing.T) {
 func TestGetDeviceQueue(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -222,7 +222,7 @@ func TestDeviceDrop(t *testing.T) {
 			name: "drop valid device",
 			setup: func() DeviceID {
 				ResetGlobal()
-				adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+				adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 				deviceID, _ := CreateDevice(adapterID, nil)
 				return deviceID
 			},
@@ -262,7 +262,7 @@ func TestDeviceDrop(t *testing.T) {
 func TestDeviceCreateBuffer(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -270,15 +270,15 @@ func TestDeviceCreateBuffer(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		desc    *types.BufferDescriptor
+		desc    *gputypes.BufferDescriptor
 		wantErr bool
 	}{
 		{
 			name: "create buffer with valid descriptor",
-			desc: &types.BufferDescriptor{
+			desc: &gputypes.BufferDescriptor{
 				Label: "Test Buffer",
 				Size:  256,
-				Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+				Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 			},
 			wantErr: false,
 		},
@@ -313,7 +313,7 @@ func TestDeviceCreateBuffer(t *testing.T) {
 func TestDeviceCreateTexture(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -321,23 +321,23 @@ func TestDeviceCreateTexture(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		desc    *types.TextureDescriptor
+		desc    *gputypes.TextureDescriptor
 		wantErr bool
 	}{
 		{
 			name: "create texture with valid descriptor",
-			desc: &types.TextureDescriptor{
+			desc: &gputypes.TextureDescriptor{
 				Label: "Test Texture",
-				Size: types.Extent3D{
+				Size: gputypes.Extent3D{
 					Width:              256,
 					Height:             256,
 					DepthOrArrayLayers: 1,
 				},
 				MipLevelCount: 1,
 				SampleCount:   1,
-				Dimension:     types.TextureDimension2D,
-				Format:        types.TextureFormatRGBA8Unorm,
-				Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
+				Dimension:     gputypes.TextureDimension2D,
+				Format:        gputypes.TextureFormatRGBA8Unorm,
+				Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
 			},
 			wantErr: false,
 		},
@@ -372,7 +372,7 @@ func TestDeviceCreateTexture(t *testing.T) {
 func TestDeviceCreateShaderModule(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 	deviceID, err := CreateDevice(adapterID, nil)
 	if err != nil {
 		t.Fatalf("CreateDevice() error = %v", err)
@@ -380,14 +380,14 @@ func TestDeviceCreateShaderModule(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		desc    *types.ShaderModuleDescriptor
+		desc    *gputypes.ShaderModuleDescriptor
 		wantErr bool
 	}{
 		{
 			name: "create shader module with WGSL",
-			desc: &types.ShaderModuleDescriptor{
+			desc: &gputypes.ShaderModuleDescriptor{
 				Label: "Test Shader",
-				Source: types.ShaderSourceWGSL{
+				Source: gputypes.ShaderSourceWGSL{
 					Code: "@vertex fn main() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }",
 				},
 			},
@@ -424,7 +424,7 @@ func TestDeviceCreateShaderModule(t *testing.T) {
 func TestDeviceConcurrentAccess(t *testing.T) {
 	ResetGlobal()
 
-	adapterID := createTestAdapter(t, types.Features(0), types.DefaultLimits())
+	adapterID := createTestAdapter(t, gputypes.Features(0), gputypes.DefaultLimits())
 
 	// Create multiple devices concurrently
 	const numDevices = 10
@@ -436,9 +436,9 @@ func TestDeviceConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			desc := &types.DeviceDescriptor{
+			desc := &gputypes.DeviceDescriptor{
 				Label:          "Concurrent Device",
-				RequiredLimits: types.DefaultLimits(),
+				RequiredLimits: gputypes.DefaultLimits(),
 			}
 			deviceIDs[idx], errors[idx] = CreateDevice(adapterID, desc)
 		}(i)
@@ -463,19 +463,19 @@ func TestDeviceConcurrentAccess(t *testing.T) {
 }
 
 // Helper function to create a test adapter
-func createTestAdapter(t *testing.T, features types.Features, limits types.Limits) AdapterID {
+func createTestAdapter(t *testing.T, features gputypes.Features, limits gputypes.Limits) AdapterID {
 	t.Helper()
 	hub := GetGlobal().Hub()
 	adapter := &Adapter{
-		Info: types.AdapterInfo{
+		Info: gputypes.AdapterInfo{
 			Name:       "Test Adapter",
 			Vendor:     "Test",
-			DeviceType: types.DeviceTypeDiscreteGPU,
-			Backend:    types.BackendVulkan,
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
+			Backend:    gputypes.BackendVulkan,
 		},
 		Features: features,
 		Limits:   limits,
-		Backend:  types.BackendVulkan,
+		Backend:  gputypes.BackendVulkan,
 	}
 	return hub.RegisterAdapter(adapter)
 }

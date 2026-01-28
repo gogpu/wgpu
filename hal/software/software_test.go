@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestBackendRegistration(t *testing.T) {
 	backend := API{}
-	if backend.Variant() != types.BackendEmpty {
+	if backend.Variant() != gputypes.BackendEmpty {
 		t.Errorf("Expected BackendEmpty, got %v", backend.Variant())
 	}
 }
@@ -42,7 +42,7 @@ func TestAdapterEnumeration(t *testing.T) {
 	if adapter.Info.Name != "Software Renderer" {
 		t.Errorf("Expected 'Software Renderer', got %s", adapter.Info.Name)
 	}
-	if adapter.Info.DeviceType != types.DeviceTypeCPU {
+	if adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
 		t.Errorf("Expected DeviceTypeCPU, got %v", adapter.Info.DeviceType)
 	}
 }
@@ -55,7 +55,7 @@ func TestDeviceCreation(t *testing.T) {
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
 
-	openDev, err := adapter.Open(0, types.DefaultLimits())
+	openDev, err := adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
 		t.Fatalf("Failed to open device: %v", err)
 	}
@@ -76,14 +76,14 @@ func TestBufferCreation(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	// Create buffer
 	buffer, err := openDev.Device.CreateBuffer(&hal.BufferDescriptor{
 		Label: "Test Buffer",
 		Size:  1024,
-		Usage: types.BufferUsageCopyDst | types.BufferUsageCopySrc,
+		Usage: gputypes.BufferUsageCopyDst | gputypes.BufferUsageCopySrc,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create buffer: %v", err)
@@ -111,12 +111,12 @@ func TestBufferWriteRead(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	buffer, _ := openDev.Device.CreateBuffer(&hal.BufferDescriptor{
 		Size:  256,
-		Usage: types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageCopyDst,
 	})
 	defer openDev.Device.DestroyBuffer(buffer)
 
@@ -143,7 +143,7 @@ func TestTextureCreation(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	texture, err := openDev.Device.CreateTexture(&hal.TextureDescriptor{
@@ -155,9 +155,9 @@ func TestTextureCreation(t *testing.T) {
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageRenderAttachment,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create texture: %v", err)
@@ -186,7 +186,7 @@ func TestTextureClear(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	texture, _ := openDev.Device.CreateTexture(&hal.TextureDescriptor{
@@ -197,16 +197,16 @@ func TestTextureClear(t *testing.T) {
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageRenderAttachment,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	defer openDev.Device.DestroyTexture(texture)
 
 	tex := texture.(*Texture)
 
 	// Clear to red
-	tex.Clear(types.Color{R: 1.0, G: 0.0, B: 0.0, A: 1.0})
+	tex.Clear(gputypes.Color{R: 1.0, G: 0.0, B: 0.0, A: 1.0})
 
 	data := tex.GetData()
 
@@ -229,15 +229,15 @@ func TestSurfaceConfiguration(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	// Configure surface
 	err = surface.Configure(openDev.Device, &hal.SurfaceConfiguration{
 		Width:       800,
 		Height:      600,
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeImmediate,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	})
@@ -267,14 +267,14 @@ func TestSurfaceFramebufferReadback(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	surface.Configure(openDev.Device, &hal.SurfaceConfiguration{
 		Width:       100,
 		Height:      100,
-		Format:      types.TextureFormatRGBA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatRGBA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeImmediate,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	})
@@ -296,7 +296,7 @@ func TestComputePipelineNotSupported(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(nil)
 	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, types.DefaultLimits())
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
 	_, err := openDev.Device.CreateComputePipeline(&hal.ComputePipelineDescriptor{

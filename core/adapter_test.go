@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestGetAdapterInfo(t *testing.T) {
@@ -28,7 +28,7 @@ func TestGetAdapterInfo(t *testing.T) {
 	if info.Vendor == "" {
 		t.Error("adapter vendor is empty")
 	}
-	if info.Backend == types.BackendEmpty {
+	if info.Backend == gputypes.BackendEmpty {
 		t.Error("adapter backend is empty")
 	}
 }
@@ -99,7 +99,7 @@ func TestGetAdapterLimits(t *testing.T) {
 	}
 
 	// Verify limits match defaults
-	defaultLimits := types.DefaultLimits()
+	defaultLimits := gputypes.DefaultLimits()
 	if limits.MaxTextureDimension2D != defaultLimits.MaxTextureDimension2D {
 		t.Errorf("MaxTextureDimension2D = %d, want %d",
 			limits.MaxTextureDimension2D, defaultLimits.MaxTextureDimension2D)
@@ -119,7 +119,7 @@ func TestGetAdapterLimitsInvalid(t *testing.T) {
 func TestRequestDevice(t *testing.T) {
 	tests := []struct {
 		name    string
-		desc    *types.DeviceDescriptor
+		desc    *gputypes.DeviceDescriptor
 		wantErr bool
 	}{
 		{
@@ -129,20 +129,20 @@ func TestRequestDevice(t *testing.T) {
 		},
 		{
 			name: "custom descriptor",
-			desc: &types.DeviceDescriptor{
+			desc: &gputypes.DeviceDescriptor{
 				Label:            "Test Device",
-				RequiredFeatures: []types.Feature{},
-				RequiredLimits:   types.DefaultLimits(),
+				RequiredFeatures: []gputypes.Feature{},
+				RequiredLimits:   gputypes.DefaultLimits(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "with required features",
-			desc: &types.DeviceDescriptor{
+			desc: &gputypes.DeviceDescriptor{
 				Label: "Feature Test Device",
 				// Mock adapter has no features, so this should fail
-				RequiredFeatures: []types.Feature{types.FeatureDepthClipControl},
-				RequiredLimits:   types.DefaultLimits(),
+				RequiredFeatures: []gputypes.Feature{gputypes.FeatureDepthClipControl},
+				RequiredLimits:   gputypes.DefaultLimits(),
 			},
 			wantErr: true, // Mock adapter doesn't support this feature
 		},
@@ -335,13 +335,13 @@ func TestRequestDeviceFeatureValidation(t *testing.T) {
 	}
 
 	// Request a feature the adapter doesn't support
-	unsupportedFeature := types.FeatureDepthClipControl
+	unsupportedFeature := gputypes.FeatureDepthClipControl
 	if adapterFeatures.Contains(unsupportedFeature) {
 		t.Skip("Mock adapter unexpectedly supports this feature")
 	}
 
-	desc := types.DeviceDescriptor{
-		RequiredFeatures: []types.Feature{unsupportedFeature},
+	desc := gputypes.DeviceDescriptor{
+		RequiredFeatures: []gputypes.Feature{unsupportedFeature},
 	}
 
 	_, err = RequestDevice(adapterID, &desc)

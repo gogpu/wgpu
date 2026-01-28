@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
-// Resource is a placeholder implementation for most HAL resource types.
+// Resource is a placeholder implementation for most HAL resource gputypes.
 // It implements the hal.Resource interface with a no-op Destroy method.
 type Resource struct{}
 
@@ -23,7 +23,7 @@ type Buffer struct {
 	Resource
 	data  []byte
 	size  uint64
-	usage types.BufferUsage
+	usage gputypes.BufferUsage
 	mu    sync.RWMutex // Protects data access
 }
 
@@ -50,8 +50,8 @@ type Texture struct {
 	width         uint32
 	height        uint32
 	depth         uint32
-	format        types.TextureFormat
-	usage         types.TextureUsage
+	format        gputypes.TextureFormat
+	usage         gputypes.TextureUsage
 	mipLevelCount uint32
 	sampleCount   uint32
 	mu            sync.RWMutex // Protects data access
@@ -74,7 +74,7 @@ func (t *Texture) WriteData(offset uint64, data []byte) {
 }
 
 // Clear fills the texture with a color value.
-func (t *Texture) Clear(color types.Color) {
+func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -105,7 +105,7 @@ type Surface struct {
 	configured  bool
 	width       uint32
 	height      uint32
-	format      types.TextureFormat
+	format      gputypes.TextureFormat
 	framebuffer []byte
 	mu          sync.RWMutex // Protects framebuffer access
 	presentMode hal.PresentMode
@@ -164,7 +164,7 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 				height: s.height,
 				depth:  1,
 				format: s.format,
-				usage:  types.TextureUsageRenderAttachment,
+				usage:  gputypes.TextureUsageRenderAttachment,
 			},
 		},
 		Suboptimal: false,

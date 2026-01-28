@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestBufferHandle tests Buffer Handle method.
@@ -39,7 +39,7 @@ func TestBufferFields(t *testing.T) {
 	buffer := &Buffer{
 		handle: vk.Buffer(100),
 		size:   2048,
-		usage:  types.BufferUsageVertex | types.BufferUsageIndex,
+		usage:  gputypes.BufferUsageVertex | gputypes.BufferUsageIndex,
 	}
 
 	if buffer.handle != vk.Buffer(100) {
@@ -48,7 +48,7 @@ func TestBufferFields(t *testing.T) {
 	if buffer.size != 2048 {
 		t.Errorf("size = %d, want 2048", buffer.size)
 	}
-	if buffer.usage != (types.BufferUsageVertex | types.BufferUsageIndex) {
+	if buffer.usage != (gputypes.BufferUsageVertex | gputypes.BufferUsageIndex) {
 		t.Errorf("usage = %v, want Vertex|Index", buffer.usage)
 	}
 }
@@ -74,11 +74,11 @@ func TestTextureFields(t *testing.T) {
 			Height: 768,
 			Depth:  1,
 		},
-		format:     types.TextureFormatRGBA8Unorm,
-		usage:      types.TextureUsageTextureBinding,
+		format:     gputypes.TextureFormatRGBA8Unorm,
+		usage:      gputypes.TextureUsageTextureBinding,
 		mipLevels:  1,
 		samples:    1,
-		dimension:  types.TextureDimension2D,
+		dimension:  gputypes.TextureDimension2D,
 		isExternal: false,
 	}
 
@@ -94,7 +94,7 @@ func TestTextureFields(t *testing.T) {
 	if texture.size.Depth != 1 {
 		t.Errorf("size.Depth = %d, want 1", texture.size.Depth)
 	}
-	if texture.format != types.TextureFormatRGBA8Unorm {
+	if texture.format != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("format = %v, want RGBA8Unorm", texture.format)
 	}
 	if texture.mipLevels != 1 {
@@ -103,7 +103,7 @@ func TestTextureFields(t *testing.T) {
 	if texture.samples != 1 {
 		t.Errorf("samples = %d, want 1", texture.samples)
 	}
-	if texture.dimension != types.TextureDimension2D {
+	if texture.dimension != gputypes.TextureDimension2D {
 		t.Errorf("dimension = %v, want 2D", texture.dimension)
 	}
 	if texture.isExternal != false {
@@ -298,15 +298,15 @@ func TestTextureIsExternal(t *testing.T) {
 func TestBufferUsageFlags(t *testing.T) {
 	tests := []struct {
 		name  string
-		usage types.BufferUsage
+		usage gputypes.BufferUsage
 	}{
-		{"Vertex buffer", types.BufferUsageVertex},
-		{"Index buffer", types.BufferUsageIndex},
-		{"Uniform buffer", types.BufferUsageUniform},
-		{"Storage buffer", types.BufferUsageStorage},
-		{"Vertex + Index", types.BufferUsageVertex | types.BufferUsageIndex},
-		{"Transfer src + dst", types.BufferUsageCopySrc | types.BufferUsageCopyDst},
-		{"All flags", types.BufferUsageVertex | types.BufferUsageIndex | types.BufferUsageUniform | types.BufferUsageStorage | types.BufferUsageCopySrc | types.BufferUsageCopyDst},
+		{"Vertex buffer", gputypes.BufferUsageVertex},
+		{"Index buffer", gputypes.BufferUsageIndex},
+		{"Uniform buffer", gputypes.BufferUsageUniform},
+		{"Storage buffer", gputypes.BufferUsageStorage},
+		{"Vertex + Index", gputypes.BufferUsageVertex | gputypes.BufferUsageIndex},
+		{"Transfer src + dst", gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst},
+		{"All flags", gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform | gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst},
 	}
 
 	for _, tt := range tests {
@@ -326,15 +326,15 @@ func TestBufferUsageFlags(t *testing.T) {
 func TestTextureUsageFlags(t *testing.T) {
 	tests := []struct {
 		name  string
-		usage types.TextureUsage
+		usage gputypes.TextureUsage
 	}{
-		{"Texture binding", types.TextureUsageTextureBinding},
-		{"Storage binding", types.TextureUsageStorageBinding},
-		{"Render attachment", types.TextureUsageRenderAttachment},
-		{"Copy src", types.TextureUsageCopySrc},
-		{"Copy dst", types.TextureUsageCopyDst},
-		{"Texture + Render", types.TextureUsageTextureBinding | types.TextureUsageRenderAttachment},
-		{"All flags", types.TextureUsageTextureBinding | types.TextureUsageStorageBinding | types.TextureUsageRenderAttachment | types.TextureUsageCopySrc | types.TextureUsageCopyDst},
+		{"Texture binding", gputypes.TextureUsageTextureBinding},
+		{"Storage binding", gputypes.TextureUsageStorageBinding},
+		{"Render attachment", gputypes.TextureUsageRenderAttachment},
+		{"Copy src", gputypes.TextureUsageCopySrc},
+		{"Copy dst", gputypes.TextureUsageCopyDst},
+		{"Texture + Render", gputypes.TextureUsageTextureBinding | gputypes.TextureUsageRenderAttachment},
+		{"All flags", gputypes.TextureUsageTextureBinding | gputypes.TextureUsageStorageBinding | gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageCopyDst},
 	}
 
 	for _, tt := range tests {
@@ -407,11 +407,11 @@ func TestTextureSamples(t *testing.T) {
 func TestTextureDimensions(t *testing.T) {
 	tests := []struct {
 		name      string
-		dimension types.TextureDimension
+		dimension gputypes.TextureDimension
 	}{
-		{"1D", types.TextureDimension1D},
-		{"2D", types.TextureDimension2D},
-		{"3D", types.TextureDimension3D},
+		{"1D", gputypes.TextureDimension1D},
+		{"2D", gputypes.TextureDimension2D},
+		{"3D", gputypes.TextureDimension3D},
 	}
 
 	for _, tt := range tests {
@@ -431,16 +431,16 @@ func TestTextureDimensions(t *testing.T) {
 func TestTextureFormats(t *testing.T) {
 	tests := []struct {
 		name   string
-		format types.TextureFormat
+		format gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm},
-		{"RGBA8UnormSrgb", types.TextureFormatRGBA8UnormSrgb},
-		{"BGRA8Unorm", types.TextureFormatBGRA8Unorm},
-		{"R32Float", types.TextureFormatR32Float},
-		{"RGBA32Float", types.TextureFormatRGBA32Float},
-		{"Depth32Float", types.TextureFormatDepth32Float},
-		{"Depth24PlusStencil8", types.TextureFormatDepth24PlusStencil8},
-		{"BC1RGBAUnorm", types.TextureFormatBC1RGBAUnorm},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm},
+		{"RGBA8UnormSrgb", gputypes.TextureFormatRGBA8UnormSrgb},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm},
+		{"R32Float", gputypes.TextureFormatR32Float},
+		{"RGBA32Float", gputypes.TextureFormatRGBA32Float},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float},
+		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8},
+		{"BC1RGBAUnorm", gputypes.TextureFormatBC1RGBAUnorm},
 	}
 
 	for _, tt := range tests {

@@ -9,15 +9,15 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Backend implements hal.Backend for Metal.
 type Backend struct{}
 
 // Variant returns the backend type identifier.
-func (Backend) Variant() types.Backend {
-	return types.BackendMetal
+func (Backend) Variant() gputypes.Backend {
+	return gputypes.BackendMetal
 }
 
 // CreateInstance creates a new Metal instance.
@@ -55,22 +55,22 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		deviceName := DeviceName(device)
 
 		// Determine device type
-		deviceType := types.DeviceTypeIntegratedGPU
+		deviceType := gputypes.DeviceTypeIntegratedGPU
 		if DeviceIsHeadless(device) {
-			deviceType = types.DeviceTypeOther
+			deviceType = gputypes.DeviceTypeOther
 		} else if DeviceIsRemovable(device) {
-			deviceType = types.DeviceTypeDiscreteGPU
+			deviceType = gputypes.DeviceTypeDiscreteGPU
 		} else if !DeviceIsLowPower(device) {
-			deviceType = types.DeviceTypeDiscreteGPU
+			deviceType = gputypes.DeviceTypeDiscreteGPU
 		}
 
 		// Build features
-		var features types.Features
+		var features gputypes.Features
 		if DeviceSupportsFamily(device, MTLGPUFamilyMetal3) {
-			features.Insert(types.FeatureTimestampQuery)
+			features.Insert(gputypes.FeatureTimestampQuery)
 		}
-		features.Insert(types.FeatureDepthClipControl)
-		features.Insert(types.FeatureTextureCompressionBC)
+		features.Insert(gputypes.FeatureDepthClipControl)
+		features.Insert(gputypes.FeatureTextureCompressionBC)
 
 		adapter := &Adapter{
 			instance: i,
@@ -81,7 +81,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 		adapters = append(adapters, hal.ExposedAdapter{
 			Adapter: adapter,
-			Info: types.AdapterInfo{
+			Info: gputypes.AdapterInfo{
 				Name:       deviceName,
 				Vendor:     "Apple",
 				VendorID:   0x106b, // Apple Inc.
@@ -89,11 +89,11 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 				DeviceType: deviceType,
 				Driver:     "Metal",
 				DriverInfo: "Metal API",
-				Backend:    types.BackendMetal,
+				Backend:    gputypes.BackendMetal,
 			},
 			Features: features,
 			Capabilities: hal.Capabilities{
-				Limits: types.Limits{
+				Limits: gputypes.Limits{
 					MaxTextureDimension1D:                     16384,
 					MaxTextureDimension2D:                     16384,
 					MaxTextureDimension3D:                     2048,

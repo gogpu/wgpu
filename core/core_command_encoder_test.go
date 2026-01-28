@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // =============================================================================
@@ -59,7 +59,7 @@ func TestCommandEncoderStatus_Constants(t *testing.T) {
 
 func TestDevice_CreateCommandEncoder_Success(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, err := device.CreateCommandEncoder("TestEncoder")
 	if err != nil {
@@ -81,7 +81,7 @@ func TestDevice_CreateCommandEncoder_Success(t *testing.T) {
 
 func TestDevice_CreateCommandEncoder_DeviceDestroyed(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	device.Destroy()
 
@@ -96,7 +96,7 @@ func TestDevice_CreateCommandEncoder_DeviceDestroyed(t *testing.T) {
 
 func TestCoreCommandEncoder_BeginRenderPass(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, err := device.CreateCommandEncoder("TestEncoder")
 	if err != nil {
@@ -107,9 +107,9 @@ func TestCoreCommandEncoder_BeginRenderPass(t *testing.T) {
 		Label: "TestPass",
 		ColorAttachments: []RenderPassColorAttachment{
 			{
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0, G: 0, B: 0, A: 1},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
 			},
 		},
 	}
@@ -128,7 +128,7 @@ func TestCoreCommandEncoder_BeginRenderPass(t *testing.T) {
 
 func TestCoreCommandEncoder_BeginRenderPass_NilDescriptor(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -143,7 +143,7 @@ func TestCoreCommandEncoder_BeginRenderPass_NilDescriptor(t *testing.T) {
 
 func TestCoreCommandEncoder_BeginRenderPass_WhileLocked(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -166,7 +166,7 @@ func TestCoreCommandEncoder_BeginRenderPass_WhileLocked(t *testing.T) {
 
 func TestCoreRenderPassEncoder_End(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -182,7 +182,7 @@ func TestCoreRenderPassEncoder_End(t *testing.T) {
 
 func TestCoreRenderPassEncoder_End_Idempotent(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -202,7 +202,7 @@ func TestCoreRenderPassEncoder_End_Idempotent(t *testing.T) {
 
 func TestCoreCommandEncoder_BeginComputePass(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -220,7 +220,7 @@ func TestCoreCommandEncoder_BeginComputePass(t *testing.T) {
 
 func TestCoreCommandEncoder_BeginComputePass_NilDescriptor(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -236,7 +236,7 @@ func TestCoreCommandEncoder_BeginComputePass_NilDescriptor(t *testing.T) {
 
 func TestCoreComputePassEncoder_End(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginComputePass(&CoreComputePassDescriptor{Label: "TestCompute"})
@@ -252,7 +252,7 @@ func TestCoreComputePassEncoder_End(t *testing.T) {
 
 func TestCoreComputePassEncoder_Dispatch(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginComputePass(&CoreComputePassDescriptor{Label: "TestCompute"})
@@ -265,7 +265,7 @@ func TestCoreComputePassEncoder_Dispatch(t *testing.T) {
 
 func TestCoreComputePassEncoder_Dispatch_AfterEnd(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginComputePass(&CoreComputePassDescriptor{Label: "TestCompute"})
@@ -277,7 +277,7 @@ func TestCoreComputePassEncoder_Dispatch_AfterEnd(t *testing.T) {
 
 func TestCoreCommandEncoder_Finish(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -301,7 +301,7 @@ func TestCoreCommandEncoder_Finish(t *testing.T) {
 
 func TestCoreCommandEncoder_Finish_WhileLocked(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	_, _ = encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -319,7 +319,7 @@ func TestCoreCommandEncoder_Finish_WhileLocked(t *testing.T) {
 
 func TestCoreCommandEncoder_Finish_AfterFinish(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	_, _ = encoder.Finish()
@@ -340,7 +340,7 @@ func TestCoreCommandEncoder_Finish_AfterFinish(t *testing.T) {
 
 func TestCoreCommandEncoder_MarkConsumed(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	_, _ = encoder.Finish()
@@ -353,7 +353,7 @@ func TestCoreCommandEncoder_MarkConsumed(t *testing.T) {
 
 func TestCoreCommandEncoder_Error(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 
@@ -377,7 +377,7 @@ func TestCoreCommandEncoder_Error(t *testing.T) {
 
 func TestCoreRenderPassEncoder_SetViewport(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -388,7 +388,7 @@ func TestCoreRenderPassEncoder_SetViewport(t *testing.T) {
 
 func TestCoreRenderPassEncoder_SetScissorRect(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -399,18 +399,18 @@ func TestCoreRenderPassEncoder_SetScissorRect(t *testing.T) {
 
 func TestCoreRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
 
 	// Should not panic
-	pass.SetBlendConstant(&types.Color{R: 1, G: 1, B: 1, A: 1})
+	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 1, B: 1, A: 1})
 }
 
 func TestCoreRenderPassEncoder_SetStencilReference(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -421,7 +421,7 @@ func TestCoreRenderPassEncoder_SetStencilReference(t *testing.T) {
 
 func TestCoreRenderPassEncoder_Draw(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -432,7 +432,7 @@ func TestCoreRenderPassEncoder_Draw(t *testing.T) {
 
 func TestCoreRenderPassEncoder_DrawIndexed(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -443,7 +443,7 @@ func TestCoreRenderPassEncoder_DrawIndexed(t *testing.T) {
 
 func TestCoreRenderPassEncoder_AfterEnd(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
@@ -452,7 +452,7 @@ func TestCoreRenderPassEncoder_AfterEnd(t *testing.T) {
 	// All methods should silently return after End
 	pass.SetViewport(0, 0, 800, 600, 0.0, 1.0)
 	pass.SetScissorRect(0, 0, 800, 600)
-	pass.SetBlendConstant(&types.Color{R: 1, G: 1, B: 1, A: 1})
+	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 1, B: 1, A: 1})
 	pass.SetStencilReference(1)
 	pass.Draw(3, 1, 0, 0)
 	pass.DrawIndexed(6, 1, 0, 0, 0)
@@ -581,7 +581,7 @@ func TestTextureUses_Constants(t *testing.T) {
 
 func TestCoreCommandBuffer_Raw(t *testing.T) {
 	halDevice := &mockHALDevice{}
-	device := NewDevice(halDevice, &Adapter{}, types.Features(0), types.DefaultLimits(), "TestDevice")
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
 	encoder, _ := device.CreateCommandEncoder("TestEncoder")
 	cmdBuffer, _ := encoder.Finish()

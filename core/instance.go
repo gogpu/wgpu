@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Instance represents a WebGPU instance for GPU discovery and initialization.
@@ -18,8 +18,8 @@ import (
 // Thread-safe for concurrent use.
 type Instance struct {
 	mu       sync.RWMutex
-	backends types.Backends
-	flags    types.InstanceFlags
+	backends gputypes.Backends
+	flags    gputypes.InstanceFlags
 
 	// adapters contains the registered adapter IDs.
 	adapters []AdapterID
@@ -39,9 +39,9 @@ type Instance struct {
 // backends specified in the descriptor. If HAL backends are available,
 // real GPU adapters will be enumerated. Otherwise, a mock adapter is created
 // for testing purposes.
-func NewInstance(desc *types.InstanceDescriptor) *Instance {
+func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 	if desc == nil {
-		defaultDesc := types.DefaultInstanceDescriptor()
+		defaultDesc := gputypes.DefaultInstanceDescriptor()
 		desc = &defaultDesc
 	}
 
@@ -67,9 +67,9 @@ func NewInstance(desc *types.InstanceDescriptor) *Instance {
 
 // NewInstanceWithMock creates a new WebGPU instance with mock adapters.
 // This is primarily for testing without requiring real GPU hardware.
-func NewInstanceWithMock(desc *types.InstanceDescriptor) *Instance {
+func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 	if desc == nil {
-		defaultDesc := types.DefaultInstanceDescriptor()
+		defaultDesc := gputypes.DefaultInstanceDescriptor()
 		desc = &defaultDesc
 	}
 
@@ -87,7 +87,7 @@ func NewInstanceWithMock(desc *types.InstanceDescriptor) *Instance {
 
 // enumerateRealAdapters attempts to enumerate real GPU adapters via HAL backends.
 // Returns true if at least one real adapter was found.
-func (i *Instance) enumerateRealAdapters(desc *types.InstanceDescriptor) bool {
+func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool {
 	// First, ensure HAL backends are registered
 	RegisterHALBackends()
 
@@ -109,7 +109,7 @@ func (i *Instance) enumerateRealAdapters(desc *types.InstanceDescriptor) bool {
 	// Try each backend provider
 	for _, provider := range providers {
 		// Skip noop/empty backend - we'll use that as mock fallback
-		if provider.Variant() == types.BackendEmpty {
+		if provider.Variant() == gputypes.BackendEmpty {
 			continue
 		}
 
@@ -152,19 +152,19 @@ func (i *Instance) enumerateRealAdapters(desc *types.InstanceDescriptor) bool {
 func (i *Instance) createMockAdapter() {
 	// Create a mock adapter with reasonable default values
 	adapter := &Adapter{
-		Info: types.AdapterInfo{
+		Info: gputypes.AdapterInfo{
 			Name:       "Mock Adapter",
 			Vendor:     "MockVendor",
 			VendorID:   0x1234,
 			DeviceID:   0x5678,
-			DeviceType: types.DeviceTypeDiscreteGPU,
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
 			Driver:     "1.0.0",
 			DriverInfo: "Mock Driver (no real GPU)",
-			Backend:    types.BackendVulkan,
+			Backend:    gputypes.BackendVulkan,
 		},
-		Features: types.Features(0), // No special features for mock
-		Limits:   types.DefaultLimits(),
-		Backend:  types.BackendVulkan,
+		Features: gputypes.Features(0), // No special features for mock
+		Limits:   gputypes.DefaultLimits(),
+		Backend:  gputypes.BackendVulkan,
 		// HAL fields are nil for mock adapters
 		halAdapter:      nil,
 		halCapabilities: nil,
@@ -200,7 +200,7 @@ func (i *Instance) EnumerateAdapters() []AdapterID {
 //   - CompatibleSurface: adapter must support the given surface
 //
 // If options is nil, the first available adapter is returned.
-func (i *Instance) RequestAdapter(options *types.RequestAdapterOptions) (AdapterID, error) {
+func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
@@ -223,14 +223,14 @@ func (i *Instance) RequestAdapter(options *types.RequestAdapterOptions) (Adapter
 		}
 
 		// Check power preference
-		if options.PowerPreference != types.PowerPreferenceNone {
+		if options.PowerPreference != gputypes.PowerPreferenceNone {
 			if !matchesPowerPreference(adapter.Info.DeviceType, options.PowerPreference) {
 				continue
 			}
 		}
 
 		// Check fallback adapter requirement
-		if options.ForceFallbackAdapter && adapter.Info.DeviceType != types.DeviceTypeCPU {
+		if options.ForceFallbackAdapter && adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
 			continue
 		}
 
@@ -242,28 +242,28 @@ func (i *Instance) RequestAdapter(options *types.RequestAdapterOptions) (Adapter
 }
 
 // matchesPowerPreference checks if a device type matches the power preference.
-func matchesPowerPreference(deviceType types.DeviceType, preference types.PowerPreference) bool {
+func matchesPowerPreference(deviceType gputypes.DeviceType, preference gputypes.PowerPreference) bool {
 	switch preference {
-	case types.PowerPreferenceLowPower:
+	case gputypes.PowerPreferenceLowPower:
 		// Prefer integrated GPUs for low power
-		return deviceType == types.DeviceTypeIntegratedGPU
-	case types.PowerPreferenceHighPerformance:
+		return deviceType == gputypes.DeviceTypeIntegratedGPU
+	case gputypes.PowerPreferenceHighPerformance:
 		// Prefer discrete GPUs for high performance
-		return deviceType == types.DeviceTypeDiscreteGPU
+		return deviceType == gputypes.DeviceTypeDiscreteGPU
 	default:
 		return true
 	}
 }
 
 // Backends returns the enabled backends for this instance.
-func (i *Instance) Backends() types.Backends {
+func (i *Instance) Backends() gputypes.Backends {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.backends
 }
 
 // Flags returns the instance flags.
-func (i *Instance) Flags() types.InstanceFlags {
+func (i *Instance) Flags() gputypes.InstanceFlags {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.flags

@@ -24,7 +24,7 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan"
 	"github.com/gogpu/wgpu/internal/thread"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 const (
@@ -213,8 +213,8 @@ func initGPU(window *Window) (*gpuResources, error) {
 	// Create instance
 	fmt.Print("4. Creating Vulkan instance... ")
 	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{
-		Backends: types.BackendsVulkan,
-		Flags:    types.InstanceFlagsDebug,
+		Backends: gputypes.BackendsVulkan,
+		Flags:    gputypes.InstanceFlagsDebug,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating instance: %w", err)
@@ -263,8 +263,8 @@ func initGPU(window *Window) (*gpuResources, error) {
 	gpu.surfaceConfig = &hal.SurfaceConfiguration{
 		Width:       gpu.currentWidth,
 		Height:      gpu.currentHeight,
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: hal.PresentModeFifo,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
@@ -316,14 +316,14 @@ func initGPU(window *Window) (*gpuResources, error) {
 			EntryPoint: "main",
 			Buffers:    nil,
 		},
-		Primitive: types.PrimitiveState{
-			Topology:         types.PrimitiveTopologyTriangleList,
+		Primitive: gputypes.PrimitiveState{
+			Topology:         gputypes.PrimitiveTopologyTriangleList,
 			StripIndexFormat: nil,
-			FrontFace:        types.FrontFaceCCW,
-			CullMode:         types.CullModeNone,
+			FrontFace:        gputypes.FrontFaceCCW,
+			CullMode:         gputypes.CullModeNone,
 		},
 		DepthStencil: nil,
-		Multisample: types.MultisampleState{
+		Multisample: gputypes.MultisampleState{
 			Count:                  1,
 			Mask:                   0xFFFFFFFF,
 			AlphaToCoverageEnabled: false,
@@ -331,11 +331,11 @@ func initGPU(window *Window) (*gpuResources, error) {
 		Fragment: &hal.FragmentState{
 			Module:     fragmentShader,
 			EntryPoint: "main",
-			Targets: []types.ColorTargetState{
+			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    types.TextureFormatBGRA8Unorm,
+					Format:    gputypes.TextureFormatBGRA8Unorm,
 					Blend:     nil,
-					WriteMask: types.ColorWriteMaskAll,
+					WriteMask: gputypes.ColorWriteMaskAll,
 				},
 			},
 		},
@@ -404,9 +404,9 @@ func renderFrame(gpu *gpuResources) error {
 	// Create texture view
 	textureView, err := gpu.device.CreateTextureView(acquired.Texture, &hal.TextureViewDescriptor{
 		Label:           "Swapchain View",
-		Format:          types.TextureFormatBGRA8Unorm,
-		Dimension:       types.TextureViewDimension2D,
-		Aspect:          types.TextureAspectAll,
+		Format:          gputypes.TextureFormatBGRA8Unorm,
+		Dimension:       gputypes.TextureViewDimension2D,
+		Aspect:          gputypes.TextureAspectAll,
 		BaseMipLevel:    0,
 		MipLevelCount:   1,
 		BaseArrayLayer:  0,
@@ -439,9 +439,9 @@ func renderFrame(gpu *gpuResources) error {
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:    textureView,
-				LoadOp:  types.LoadOpClear,
-				StoreOp: types.StoreOpStore,
-				ClearValue: types.Color{
+				LoadOp:  gputypes.LoadOpClear,
+				StoreOp: gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{
 					R: 0.0,
 					G: 0.0,
 					B: 0.5,

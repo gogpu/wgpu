@@ -29,15 +29,15 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Backend implements hal.Backend for DirectX 12.
 type Backend struct{}
 
 // Variant returns the backend type identifier.
-func (Backend) Variant() types.Backend {
-	return types.BackendDX12
+func (Backend) Variant() gputypes.Backend {
+	return gputypes.BackendDX12
 }
 
 // CreateInstance creates a new DirectX 12 instance.
@@ -53,7 +53,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Determine factory creation flags
 	var factoryFlags uint32
-	if desc != nil && desc.Flags&types.InstanceFlagsDebug != 0 {
+	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
 		factoryFlags |= dxgi.DXGI_CREATE_FACTORY_DEBUG
 		instance.flags = desc.Flags
 	}
@@ -74,7 +74,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	instance.d3d12Lib = d3d12Lib
 
 	// Enable debug layer if requested
-	if desc != nil && desc.Flags&types.InstanceFlagsDebug != 0 {
+	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
 		if err := instance.enableDebugLayer(); err != nil {
 			// Debug layer is optional; log but don't fail
 			// In production, we might want to use a logger here
@@ -98,7 +98,7 @@ type Instance struct {
 	dxgiLib      *dxgi.DXGILib
 	debugLayer   *d3d12.ID3D12Debug
 	allowTearing bool
-	flags        types.InstanceFlags
+	flags        gputypes.InstanceFlags
 }
 
 // enableDebugLayer enables the D3D12 debug layer for validation.
@@ -245,9 +245,9 @@ func (i *Instance) enumerateAdaptersLegacy(surfaceHint hal.Surface) []hal.Expose
 
 		// Sort by device type for proper preference ordering
 		switch exposed.Info.DeviceType {
-		case types.DeviceTypeDiscreteGPU:
+		case gputypes.DeviceTypeDiscreteGPU:
 			discreteAdapters = append(discreteAdapters, exposed)
-		case types.DeviceTypeIntegratedGPU:
+		case gputypes.DeviceTypeIntegratedGPU:
 			integratedAdapters = append(integratedAdapters, exposed)
 		default:
 			otherAdapters = append(otherAdapters, exposed)
@@ -304,7 +304,7 @@ type Surface struct {
 	width          uint32
 	height         uint32
 	format         dxgi.DXGI_FORMAT
-	halFormat      types.TextureFormat
+	halFormat      gputypes.TextureFormat
 	presentMode    hal.PresentMode
 	swapchainFlags uint32
 	allowTearing   bool

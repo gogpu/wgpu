@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestBufferUses_IsReadOnly(t *testing.T) {
@@ -96,24 +96,24 @@ func TestBufferUses_ToBufferUsage(t *testing.T) {
 	tests := []struct {
 		name string
 		uses BufferUses
-		want types.BufferUsage
+		want gputypes.BufferUsage
 	}{
 		{"none", BufferUsesNone, 0},
-		{"copy src", BufferUsesCopySrc, types.BufferUsageCopySrc},
-		{"copy dst", BufferUsesCopyDst, types.BufferUsageCopyDst},
-		{"index", BufferUsesIndex, types.BufferUsageIndex},
-		{"vertex", BufferUsesVertex, types.BufferUsageVertex},
-		{"uniform", BufferUsesUniform, types.BufferUsageUniform},
-		{"storage read", BufferUsesStorageRead, types.BufferUsageStorage},
-		{"storage write", BufferUsesStorageWrite, types.BufferUsageStorage},
-		{"indirect", BufferUsesIndirect, types.BufferUsageIndirect},
-		{"map read", BufferUsesMapRead, types.BufferUsageMapRead},
-		{"map write", BufferUsesMapWrite, types.BufferUsageMapWrite},
-		{"query resolve", BufferUsesQueryResolve, types.BufferUsageQueryResolve},
+		{"copy src", BufferUsesCopySrc, gputypes.BufferUsageCopySrc},
+		{"copy dst", BufferUsesCopyDst, gputypes.BufferUsageCopyDst},
+		{"index", BufferUsesIndex, gputypes.BufferUsageIndex},
+		{"vertex", BufferUsesVertex, gputypes.BufferUsageVertex},
+		{"uniform", BufferUsesUniform, gputypes.BufferUsageUniform},
+		{"storage read", BufferUsesStorageRead, gputypes.BufferUsageStorage},
+		{"storage write", BufferUsesStorageWrite, gputypes.BufferUsageStorage},
+		{"indirect", BufferUsesIndirect, gputypes.BufferUsageIndirect},
+		{"map read", BufferUsesMapRead, gputypes.BufferUsageMapRead},
+		{"map write", BufferUsesMapWrite, gputypes.BufferUsageMapWrite},
+		{"query resolve", BufferUsesQueryResolve, gputypes.BufferUsageQueryResolve},
 		{
 			"combined",
 			BufferUsesCopySrc | BufferUsesVertex | BufferUsesUniform,
-			types.BufferUsageCopySrc | types.BufferUsageVertex | types.BufferUsageUniform,
+			gputypes.BufferUsageCopySrc | gputypes.BufferUsageVertex | gputypes.BufferUsageUniform,
 		},
 	}
 
@@ -354,11 +354,11 @@ func TestPendingTransition_IntoHAL(t *testing.T) {
 	// Create a nil buffer (HAL conversion doesn't need actual buffer for this test)
 	barrier := trans.IntoHAL(nil)
 
-	if barrier.Usage.OldUsage != types.BufferUsageVertex {
-		t.Errorf("OldUsage = %d, want %d", barrier.Usage.OldUsage, types.BufferUsageVertex)
+	if barrier.Usage.OldUsage != gputypes.BufferUsageVertex {
+		t.Errorf("OldUsage = %d, want %d", barrier.Usage.OldUsage, gputypes.BufferUsageVertex)
 	}
-	if barrier.Usage.NewUsage != types.BufferUsageCopyDst {
-		t.Errorf("NewUsage = %d, want %d", barrier.Usage.NewUsage, types.BufferUsageCopyDst)
+	if barrier.Usage.NewUsage != gputypes.BufferUsageCopyDst {
+		t.Errorf("NewUsage = %d, want %d", barrier.Usage.NewUsage, gputypes.BufferUsageCopyDst)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestSurfaceTextureCreateView(t *testing.T) {
@@ -28,7 +28,7 @@ func TestSurfaceTextureCreateView(t *testing.T) {
 
 	backend := Backend{}
 	inst, err := backend.CreateInstance(&hal.InstanceDescriptor{
-		Backends: types.Backends(1 << types.BackendMetal),
+		Backends: gputypes.Backends(1 << gputypes.BackendMetal),
 	})
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -48,18 +48,18 @@ func TestSurfaceTextureCreateView(t *testing.T) {
 	adapter := adapters[0].Adapter
 	defer adapter.Destroy()
 
-	open, err := adapter.Open(types.Features(0), types.DefaultLimits())
+	open, err := adapter.Open(gputypes.Features(0), gputypes.DefaultLimits())
 	if err != nil {
 		t.Fatalf("Adapter.Open failed: %v", err)
 	}
 	defer open.Device.Destroy()
 
 	config := &hal.SurfaceConfiguration{
-		Format:      types.TextureFormatBGRA8Unorm,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
 		Width:       64,
 		Height:      64,
 		PresentMode: hal.PresentModeFifo,
-		Usage:       types.TextureUsageRenderAttachment,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		AlphaMode:   hal.CompositeAlphaModeOpaque,
 	}
 	if err := surface.Configure(open.Device, config); err != nil {

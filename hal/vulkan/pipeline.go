@@ -9,7 +9,7 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 const defaultEntryPoint = "main"
@@ -421,11 +421,11 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 // Helper functions
 
 //nolint:unused // Reserved for depth-stencil pipeline support
-func hasStencilComponent(format types.TextureFormat) bool {
+func hasStencilComponent(format gputypes.TextureFormat) bool {
 	switch format {
-	case types.TextureFormatDepth24PlusStencil8,
-		types.TextureFormatDepth32FloatStencil8,
-		types.TextureFormatStencil8:
+	case gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
 		return true
 	default:
 		return false

@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 
 	// Import all backends for side-effect registration.
 	// This enables real GPU adapter enumeration.
@@ -34,8 +34,8 @@ func TestCoreHALIntegration(t *testing.T) {
 	core.GetGlobal().Clear()
 
 	// Create instance - should enumerate real adapters
-	instance := core.NewInstance(&types.InstanceDescriptor{
-		Backends: types.BackendsPrimary,
+	instance := core.NewInstance(&gputypes.InstanceDescriptor{
+		Backends: gputypes.BackendsPrimary,
 		Flags:    0,
 	})
 
@@ -106,8 +106,8 @@ func TestCoreDeviceCreation(t *testing.T) {
 	defer instance.Destroy()
 
 	// Request adapter
-	adapterID, err := instance.RequestAdapter(&types.RequestAdapterOptions{
-		PowerPreference: types.PowerPreferenceHighPerformance,
+	adapterID, err := instance.RequestAdapter(&gputypes.RequestAdapterOptions{
+		PowerPreference: gputypes.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
 		t.Fatalf("RequestAdapter failed: %v", err)
@@ -143,7 +143,7 @@ func TestCoreDeviceCreation(t *testing.T) {
 	halBuffer, err := openDev.Device.CreateBuffer(&hal.BufferDescriptor{
 		Label: "Test Buffer",
 		Size:  1024,
-		Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
 		t.Fatalf("CreateBuffer failed: %v", err)
@@ -207,10 +207,10 @@ func TestCoreBufferCreationViaDevice(t *testing.T) {
 	}
 
 	// Create buffer via core.Device
-	buffer, err := device.CreateBuffer(&types.BufferDescriptor{
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{
 		Label:            "Core API Buffer",
 		Size:             2048,
-		Usage:            types.BufferUsageStorage | types.BufferUsageCopyDst,
+		Usage:            gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
 		MappedAtCreation: false,
 	})
 	if err != nil {
