@@ -49,7 +49,8 @@ func (m *mockSurface) Destroy()                            {}
 // mockSurfaceTexture is a minimal surface texture implementation for testing.
 type mockSurfaceTexture struct{}
 
-func (m *mockSurfaceTexture) Destroy() {}
+func (m *mockSurfaceTexture) Destroy()              {}
+func (m *mockSurfaceTexture) NativeHandle() uintptr { return 0 }
 
 func TestRegisterBackend(t *testing.T) {
 	// Register a custom backend

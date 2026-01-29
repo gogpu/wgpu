@@ -308,6 +308,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		return nil, fmt.Errorf("vulkan: invalid texture type %T", texture)
 	}
 
+	// Handle nil descriptor - use defaults from texture
+	if desc == nil {
+		desc = &hal.TextureViewDescriptor{}
+	}
+
 	// Determine format - use texture format if not specified
 	format := desc.Format
 	if format == gputypes.TextureFormatUndefined {

@@ -9,28 +9,41 @@ type Resource interface {
 	Destroy()
 }
 
+// NativeHandle provides access to the underlying API handle.
+// Used for advanced interop scenarios like bind group creation.
+type NativeHandle interface {
+	// NativeHandle returns the raw API handle as uintptr.
+	// For Vulkan: VkBuffer, VkImage, VkSampler, etc.
+	// For Metal: MTLBuffer, MTLTexture, etc.
+	NativeHandle() uintptr
+}
+
 // Buffer represents a GPU buffer.
 // Buffers are contiguous memory regions accessible by the GPU.
 type Buffer interface {
 	Resource
+	NativeHandle
 }
 
 // Texture represents a GPU texture.
 // Textures are multi-dimensional images with specific formats.
 type Texture interface {
 	Resource
+	NativeHandle
 }
 
 // TextureView represents a view into a texture.
 // Views specify how a texture is interpreted (format, dimensions, layers).
 type TextureView interface {
 	Resource
+	NativeHandle
 }
 
 // Sampler represents a texture sampler.
 // Samplers define how textures are filtered and addressed.
 type Sampler interface {
 	Resource
+	NativeHandle
 }
 
 // ShaderModule represents a compiled shader module.

@@ -50,6 +50,11 @@ func (t *SwapchainTexture) Destroy() {
 	// Swapchain textures are owned by the swapchain, not destroyed individually
 }
 
+// NativeHandle returns the raw VkImage handle as uintptr.
+func (t *SwapchainTexture) NativeHandle() uintptr {
+	return uintptr(t.handle)
+}
+
 // createSwapchain creates a new swapchain for the surface.
 //
 //nolint:maintidx // Vulkan swapchain setup requires many sequential steps

@@ -124,3 +124,6 @@ type SurfaceTexture struct {
 
 // Destroy is a no-op for surface textures.
 func (t *SurfaceTexture) Destroy() {}
+
+// NativeHandle returns 0 (OpenGL default framebuffer has no handle).
+func (t *SurfaceTexture) NativeHandle() uintptr { return 0 }

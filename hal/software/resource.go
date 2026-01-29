@@ -17,6 +17,9 @@ type Resource struct{}
 // Destroy is a no-op.
 func (r *Resource) Destroy() {}
 
+// NativeHandle returns 0 for software resources (no real GPU handle).
+func (r *Resource) NativeHandle() uintptr { return 0 }
+
 // Buffer implements hal.Buffer with real data storage.
 // All software buffers store their data in memory.
 type Buffer struct {
@@ -42,6 +45,9 @@ func (b *Buffer) WriteData(offset uint64, data []byte) {
 	defer b.mu.Unlock()
 	copy(b.data[offset:], data)
 }
+
+// NativeHandle returns 0 for software buffers.
+func (b *Buffer) NativeHandle() uintptr { return 0 }
 
 // Texture implements hal.Texture with real pixel storage.
 type Texture struct {
@@ -73,6 +79,9 @@ func (t *Texture) WriteData(offset uint64, data []byte) {
 	copy(t.data[offset:], data)
 }
 
+// NativeHandle returns 0 for software textures.
+func (t *Texture) NativeHandle() uintptr { return 0 }
+
 // Clear fills the texture with a color value.
 func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
@@ -98,6 +107,9 @@ type TextureView struct {
 	Resource
 	texture *Texture
 }
+
+// NativeHandle returns 0 for software texture views.
+func (v *TextureView) NativeHandle() uintptr { return 0 }
 
 // Surface implements hal.Surface for the software backend.
 type Surface struct {
