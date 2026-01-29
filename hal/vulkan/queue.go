@@ -115,11 +115,17 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 }
 
 // WriteBuffer writes data to a buffer immediately.
+// Note: This waits for GPU to finish to avoid race conditions.
+// A more optimal solution would use a staging belt (like wgpu-rs).
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	vkBuffer, ok := buffer.(*Buffer)
 	if !ok || vkBuffer.memory == nil {
 		return
 	}
+
+	// Wait for GPU to finish using the buffer before writing
+	// This prevents race conditions where GPU reads stale/partial data
+	_ = q.device.cmds.QueueWaitIdle(q.handle)
 
 	// Map, copy, unmap
 	if vkBuffer.memory.MappedPtr != 0 {
