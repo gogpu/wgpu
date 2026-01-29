@@ -353,9 +353,9 @@ func textureFormatToDXGI(format gputypes.TextureFormat) dxgi.DXGI_FORMAT {
 // compositeAlphaModeToDXGI converts HAL CompositeAlphaMode to DXGI_ALPHA_MODE.
 func compositeAlphaModeToDXGI(mode hal.CompositeAlphaMode) dxgi.DXGI_ALPHA_MODE {
 	switch mode {
-	case hal.CompositeAlphaModePreMultiplied:
+	case hal.CompositeAlphaModePremultiplied:
 		return dxgi.DXGI_ALPHA_MODE_PREMULTIPLIED
-	case hal.CompositeAlphaModePostMultiplied:
+	case hal.CompositeAlphaModeUnpremultiplied:
 		return dxgi.DXGI_ALPHA_MODE_STRAIGHT
 	case hal.CompositeAlphaModeInherit:
 		return dxgi.DXGI_ALPHA_MODE_UNSPECIFIED
