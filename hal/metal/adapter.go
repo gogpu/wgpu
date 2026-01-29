@@ -88,7 +88,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 		},
 		AlphaModes: []hal.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePreMultiplied,
+			hal.CompositeAlphaModePremultiplied,
 		},
 	}
 }

@@ -4,7 +4,7 @@
 
 ---
 
-## Current Status: v0.11.0
+## Current Status: v0.11.2
 
 | Component | Status | LOC | Coverage |
 |-----------|--------|-----|----------|
@@ -171,10 +171,14 @@
 - [x] **Ebiten-style Architecture** — Main thread for Win32, render thread for GPU
 - [x] **Responsive Windows** — No "Not Responding" during resize/drag
 
-### v0.11.0 — gputypes Migration (Current)
+### v0.11.0 — gputypes Migration
 - [x] **Unified WebGPU Types** — Import from `github.com/gogpu/gputypes`
 - [x] **Removed `types/` package** — 1,745 lines removed
 - [x] **Ecosystem Compatibility** — Single source of truth for types
+
+### v0.11.2 — gputypes v0.2.0 (Current)
+- [x] **webgpu.h Compliance** — Update gputypes to v0.2.0 with spec-compliant enum values
+- [x] **CompositeAlphaMode Fix** — `PreMultiplied` → `Premultiplied` in all HAL adapters
 
 ---
 
@@ -250,6 +254,7 @@ Priority areas:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.11.2 | 2026-01 | gputypes v0.2.0, webgpu.h spec compliance |
 | v0.11.0 | 2026-01 | gputypes migration, types/ removed |
 | v0.10.3 | 2026-01 | Multi-thread architecture |
 | v0.10.2 | 2026-01 | goffi v0.3.8, CGO build tag fix |

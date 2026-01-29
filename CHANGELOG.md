@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-01-29
+
+### Changed
+
+- **Update gputypes to v0.2.0** for webgpu.h spec-compliant enum values
+  - All enum values now match official WebGPU C header specification
+  - Binary compatibility with wgpu-native and other WebGPU implementations
+
+### Fixed
+
+- **CompositeAlphaMode naming** — Fixed `PreMultiplied` → `Premultiplied` in all HAL adapters
+  - Matches webgpu.h spec naming convention
+  - Affected: Vulkan, DX12, GLES, Metal, Noop, Software adapters
+
 ## [0.11.1] - 2026-01-29
 
 ### Breaking Changes
@@ -578,7 +592,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/gogpu/wgpu/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/gogpu/wgpu/compare/v0.10.3...v0.11.1
 [0.10.3]: https://github.com/gogpu/wgpu/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/gogpu/wgpu/compare/v0.10.1...v0.10.2
