@@ -5,6 +5,7 @@ package vulkan
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -281,6 +282,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if err != nil {
 		return nil, fmt.Errorf("vulkan: failed to create compatible render pass: %w", err)
 	}
+
 	// Create graphics pipeline with VkRenderPass (not dynamic rendering)
 	createInfo := vk.GraphicsPipelineCreateInfo{
 		SType:               vk.StructureTypeGraphicsPipelineCreateInfo,
@@ -301,6 +303,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	var pipeline vk.Pipeline
 	result := vkCreateGraphicsPipelines(d.cmds, d.handle, 0, 1, &createInfo, nil, &pipeline)
+
+	// Keep all data structures alive until after the Vulkan call completes.
+	// This is critical because unsafe.Pointer→uintptr conversions break GC tracking.
+	runtime.KeepAlive(stages)
+	runtime.KeepAlive(shaderModules)
+	runtime.KeepAlive(vertexEntryBytes)
+	runtime.KeepAlive(fragmentEntryBytes)
+	runtime.KeepAlive(vertexBindings)
+	runtime.KeepAlive(vertexAttribs)
+	runtime.KeepAlive(colorBlendAttachments)
+	runtime.KeepAlive(dynamicStates)
+
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateGraphicsPipelines failed: %d", result)
 	}
@@ -311,11 +325,6 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if pipeline == 0 {
 		return nil, hal.ErrDriverBug
 	}
-
-	// Keep shader entry point bytes alive for debug (optional, modules are kept)
-	_ = shaderModules
-	_ = vertexEntryBytes
-	_ = fragmentEntryBytes
 
 	return &RenderPipeline{
 		handle: pipeline,
