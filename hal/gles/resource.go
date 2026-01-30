@@ -33,6 +33,9 @@ func (b *Buffer) Destroy() {
 	}
 }
 
+// NativeHandle returns the GL buffer object ID.
+func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
+
 // Texture implements hal.Texture for OpenGL.
 type Texture struct {
 	id        uint32 // GL texture object ID
@@ -52,6 +55,9 @@ func (t *Texture) Destroy() {
 	}
 }
 
+// NativeHandle returns the GL texture object ID.
+func (t *Texture) NativeHandle() uintptr { return uintptr(t.id) }
+
 // TextureView implements hal.TextureView for OpenGL.
 type TextureView struct {
 	texture    *Texture
@@ -65,6 +71,14 @@ type TextureView struct {
 // Destroy is a no-op for texture views in OpenGL.
 func (v *TextureView) Destroy() {}
 
+// NativeHandle returns the underlying texture's GL object ID.
+func (v *TextureView) NativeHandle() uintptr {
+	if v.texture != nil {
+		return uintptr(v.texture.id)
+	}
+	return 0
+}
+
 // Sampler implements hal.Sampler for OpenGL.
 type Sampler struct {
 	glCtx *gl.Context
@@ -75,6 +89,9 @@ func (s *Sampler) Destroy() {
 	// Note: GL 3.3 core requires sampler objects
 	// For now, we use texture-bound state (no GL sampler object)
 }
+
+// NativeHandle returns 0 (no GL sampler object).
+func (s *Sampler) NativeHandle() uintptr { return 0 }
 
 // ShaderModule implements hal.ShaderModule for OpenGL.
 type ShaderModule struct {

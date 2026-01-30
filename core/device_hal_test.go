@@ -43,6 +43,12 @@ func (mockComputePipeline) Destroy() {}
 func (mockCommandBuffer) Destroy()   {}
 func (mockFence) Destroy()           {}
 
+// NativeHandle interface implementations
+func (mockBuffer) NativeHandle() uintptr      { return 0 }
+func (mockTexture) NativeHandle() uintptr     { return 0 }
+func (mockTextureView) NativeHandle() uintptr { return 0 }
+func (mockSampler) NativeHandle() uintptr     { return 0 }
+
 // mockCommandEncoder implements hal.CommandEncoder
 func (mockCommandEncoder) BeginEncoding(_ string) error                           { return nil }
 func (mockCommandEncoder) EndEncoding() (hal.CommandBuffer, error)                { return mockCommandBuffer{}, nil }

@@ -100,6 +100,14 @@ func (b *Buffer) Raw() *d3d12.ID3D12Resource {
 	return b.raw
 }
 
+// NativeHandle returns the raw ID3D12Resource pointer.
+func (b *Buffer) NativeHandle() uintptr {
+	if b.raw != nil {
+		return uintptr(unsafe.Pointer(b.raw))
+	}
+	return 0
+}
+
 // GPUVirtualAddress returns the GPU virtual address for this buffer.
 func (b *Buffer) GPUVirtualAddress() uint64 {
 	return b.gpuVA
@@ -138,6 +146,14 @@ func (t *Texture) Destroy() {
 // Raw returns the underlying D3D12 resource.
 func (t *Texture) Raw() *d3d12.ID3D12Resource {
 	return t.raw
+}
+
+// NativeHandle returns the raw ID3D12Resource pointer.
+func (t *Texture) NativeHandle() uintptr {
+	if t.raw != nil {
+		return uintptr(unsafe.Pointer(t.raw))
+	}
+	return 0
 }
 
 // Format returns the texture format.
@@ -190,6 +206,14 @@ func (v *TextureView) Texture() *Texture {
 	return v.texture
 }
 
+// NativeHandle returns the underlying texture's ID3D12Resource pointer.
+func (v *TextureView) NativeHandle() uintptr {
+	if v.texture != nil && v.texture.raw != nil {
+		return uintptr(unsafe.Pointer(v.texture.raw))
+	}
+	return 0
+}
+
 // RTVHandle returns the render target view descriptor handle.
 func (v *TextureView) RTVHandle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return v.rtvHandle
@@ -240,6 +264,9 @@ func (s *Sampler) Destroy() {
 func (s *Sampler) Handle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return s.handle
 }
+
+// NativeHandle returns the sampler descriptor heap index (no raw pointer for descriptors).
+func (s *Sampler) NativeHandle() uintptr { return uintptr(s.heapIndex) }
 
 // -----------------------------------------------------------------------------
 // Compile-time interface assertions

@@ -153,6 +153,14 @@ func (st *SurfaceTexture) Destroy() {
 	}
 }
 
+// NativeHandle returns the raw MTLTexture handle.
+func (st *SurfaceTexture) NativeHandle() uintptr {
+	if st.texture != nil {
+		return uintptr(st.texture.raw)
+	}
+	return 0
+}
+
 // Drawable returns the drawable ID.
 // This is used by the native backend to attach the drawable to a command buffer.
 func (st *SurfaceTexture) Drawable() ID {

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-01-30
+
+### Added
+
+- **NativeHandle interface** (`hal/`) — Access raw GPU handles for interop
+  - `NativeTextureHandle()` returns platform-specific texture handle
+  - Enables integration with external graphics libraries
+
+### Fixed
+
+- **Vulkan texture rendering** — Critical BufferRowLength fix
+  - `BufferRowLength` now correctly specified in **texels**, not bytes
+  - Fixes aspect ratio distortion (squashed circles → proper circles)
+  - Root cause: Vulkan `VkBufferImageCopy` expects texel count, not byte count
+
+- **WriteBuffer support** — Buffer memory mapping implementation
+  - Proper staging buffer creation and memory mapping
+  - Fixes texture upload pipeline
+
+### Changed
+
+- **Vulkan pipeline creation** — Code cleanup and refactoring
+- **Update naga v0.8.4 → v0.9.0** — Sampler types, swizzle, SPIR-V fixes
+
 ## [0.11.2] - 2026-01-29
 
 ### Changed

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
@@ -97,14 +98,14 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	d.cmds.GetBufferMemoryRequirements(d.handle, buffer, &memReqs)
 
 	// Determine usage flags for memory allocation
+	// For CopyDst buffers or MappedAtCreation, we need host-visible memory
+	// so that WriteBuffer can write directly without staging
 	memUsage := memory.UsageFastDeviceAccess
-	if desc.Usage&(gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite) != 0 {
-		memUsage = memory.UsageHostAccess
+	if desc.Usage&(gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite) != 0 ||
+		desc.Usage&gputypes.BufferUsageCopyDst != 0 || desc.MappedAtCreation {
+		memUsage = memory.UsageHostAccess | memory.UsageUpload
 		if desc.Usage&gputypes.BufferUsageMapRead != 0 {
 			memUsage |= memory.UsageDownload
-		}
-		if desc.Usage&gputypes.BufferUsageMapWrite != 0 {
-			memUsage |= memory.UsageUpload
 		}
 	}
 
@@ -126,6 +127,19 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		_ = d.allocator.Free(memBlock)
 		d.cmds.DestroyBuffer(d.handle, buffer, nil)
 		return nil, fmt.Errorf("vulkan: vkBindBufferMemory failed: %d", result)
+	}
+
+	// Map memory for host-visible buffers so WriteBuffer can write directly
+	if memUsage&memory.UsageHostAccess != 0 {
+		var mappedPtr uintptr
+		result = d.cmds.MapMemory(d.handle, memBlock.Memory, vk.DeviceSize(memBlock.Offset),
+			vk.DeviceSize(desc.Size), 0, uintptr(unsafe.Pointer(&mappedPtr)))
+		if result != vk.Success {
+			_ = d.allocator.Free(memBlock)
+			d.cmds.DestroyBuffer(d.handle, buffer, nil)
+			return nil, fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
+		}
+		memBlock.MappedPtr = mappedPtr
 	}
 
 	return &Buffer{
@@ -150,6 +164,11 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 
 	if vkBuffer.memory != nil {
+		// Unmap memory if it was mapped
+		if vkBuffer.memory.MappedPtr != 0 {
+			d.cmds.UnmapMemory(d.handle, vkBuffer.memory.Memory)
+			vkBuffer.memory.MappedPtr = 0
+		}
 		_ = d.allocator.Free(vkBuffer.memory)
 		vkBuffer.memory = nil
 	}
@@ -306,6 +325,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		}, nil
 	default:
 		return nil, fmt.Errorf("vulkan: invalid texture type %T", texture)
+	}
+
+	// Handle nil descriptor - use defaults from texture
+	if desc == nil {
+		desc = &hal.TextureViewDescriptor{}
 	}
 
 	// Determine format - use texture format if not specified

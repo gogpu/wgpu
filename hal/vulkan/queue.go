@@ -18,6 +18,7 @@ type Queue struct {
 	device          *Device
 	familyIndex     uint32
 	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
+	acquireUsed     bool       // True if acquire semaphore was consumed by a submit
 }
 
 // Submit submits command buffers to the GPU.
@@ -42,12 +43,14 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have an active swapchain, use its semaphores for GPU-side synchronization:
-	// - Wait on currentAcquireSem (signaled by acquire)
-	// - Signal presentSemaphores[currentImage] (waited on by present)
+	// If we have an active swapchain, use its semaphores for GPU-side synchronization.
+	// CRITICAL: Semaphores can only be used ONCE per frame.
+	// - Wait on currentAcquireSem: ONLY on first submit (signaled by acquire)
+	// - Signal presentSemaphores: ONLY on first submit (waited on by present)
+	// Subsequent submits in the same frame run without semaphore synchronization.
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	var submitFence vk.Fence
-	if q.activeSwapchain != nil {
+	if q.activeSwapchain != nil && !q.acquireUsed {
 		acquireSem := q.activeSwapchain.currentAcquireSem
 		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
 		submitInfo.WaitSemaphoreCount = 1
@@ -55,6 +58,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
 		submitInfo.PSignalSemaphores = &presentSem
+		q.acquireUsed = true // Mark as used for this frame
 	}
 
 	// Use user-provided fence if available
@@ -115,11 +119,17 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 }
 
 // WriteBuffer writes data to a buffer immediately.
+// Note: This waits for GPU to finish to avoid race conditions.
+// A more optimal solution would use a staging belt (like wgpu-rs).
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	vkBuffer, ok := buffer.(*Buffer)
 	if !ok || vkBuffer.memory == nil {
 		return
 	}
+
+	// Wait for GPU to finish using the buffer before writing
+	// This prevents race conditions where GPU reads stale/partial data
+	_ = q.device.cmds.QueueWaitIdle(q.handle)
 
 	// Map, copy, unmap
 	if vkBuffer.memory.MappedPtr != 0 {

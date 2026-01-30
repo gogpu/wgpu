@@ -26,6 +26,9 @@ func (b *Buffer) Destroy() {
 	}
 }
 
+// NativeHandle returns the raw MTLBuffer handle.
+func (b *Buffer) NativeHandle() uintptr { return uintptr(b.raw) }
+
 // Contents returns the buffer contents pointer (for mapped buffers).
 func (b *Buffer) Contents() uintptr {
 	if b.raw == 0 {
@@ -56,6 +59,9 @@ func (t *Texture) Destroy() {
 	}
 }
 
+// NativeHandle returns the raw MTLTexture handle.
+func (t *Texture) NativeHandle() uintptr { return uintptr(t.raw) }
+
 // TextureView implements hal.TextureView for Metal.
 type TextureView struct {
 	raw     ID // id<MTLTexture>
@@ -70,6 +76,9 @@ func (v *TextureView) Destroy() {
 	}
 }
 
+// NativeHandle returns the raw MTLTexture handle (view is also a texture).
+func (v *TextureView) NativeHandle() uintptr { return uintptr(v.raw) }
+
 // Sampler implements hal.Sampler for Metal.
 type Sampler struct {
 	raw    ID // id<MTLSamplerState>
@@ -82,6 +91,9 @@ func (s *Sampler) Destroy() {
 		s.device.DestroySampler(s)
 	}
 }
+
+// NativeHandle returns the raw MTLSamplerState handle.
+func (s *Sampler) NativeHandle() uintptr { return uintptr(s.raw) }
 
 // ShaderModule implements hal.ShaderModule for Metal.
 type ShaderModule struct {

@@ -30,6 +30,11 @@ func (b *Buffer) Handle() vk.Buffer {
 	return b.handle
 }
 
+// NativeHandle returns the raw VkBuffer handle as uintptr.
+func (b *Buffer) NativeHandle() uintptr {
+	return uintptr(b.handle)
+}
+
 // Size returns the buffer size in bytes.
 func (b *Buffer) Size() uint64 {
 	return b.size
@@ -68,6 +73,11 @@ func (t *Texture) Handle() vk.Image {
 	return t.handle
 }
 
+// NativeHandle returns the raw VkImage handle as uintptr.
+func (t *Texture) NativeHandle() uintptr {
+	return uintptr(t.handle)
+}
+
 // TextureView implements hal.TextureView for Vulkan.
 type TextureView struct {
 	handle      vk.ImageView
@@ -91,6 +101,11 @@ func (v *TextureView) Handle() vk.ImageView {
 	return v.handle
 }
 
+// NativeHandle returns the raw VkImageView handle as uintptr.
+func (v *TextureView) NativeHandle() uintptr {
+	return uintptr(v.handle)
+}
+
 // Sampler implements hal.Sampler for Vulkan.
 type Sampler struct {
 	handle vk.Sampler
@@ -107,6 +122,11 @@ func (s *Sampler) Destroy() {
 // Handle returns the VkSampler handle.
 func (s *Sampler) Handle() vk.Sampler {
 	return s.handle
+}
+
+// NativeHandle returns the raw VkSampler handle as uintptr.
+func (s *Sampler) NativeHandle() uintptr {
+	return uintptr(s.handle)
 }
 
 // ShaderModule implements hal.ShaderModule for Vulkan.

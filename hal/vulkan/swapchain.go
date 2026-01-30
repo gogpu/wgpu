@@ -50,6 +50,11 @@ func (t *SwapchainTexture) Destroy() {
 	// Swapchain textures are owned by the swapchain, not destroyed individually
 }
 
+// NativeHandle returns the raw VkImage handle as uintptr.
+func (t *SwapchainTexture) NativeHandle() uintptr {
+	return uintptr(t.handle)
+}
+
 // createSwapchain creates a new swapchain for the surface.
 //
 //nolint:maintidx // Vulkan swapchain setup requires many sequential steps
@@ -67,7 +72,8 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		imageCount = capabilities.MaxImageCount
 	}
 
-	// Determine extent
+	// Determine extent - use CurrentExtent if valid, otherwise use config dimensions.
+	// CurrentExtent of 0xFFFFFFFF means the surface size is determined by the swapchain extent.
 	extent := capabilities.CurrentExtent
 	if extent.Width == 0xFFFFFFFF {
 		extent.Width = config.Width
