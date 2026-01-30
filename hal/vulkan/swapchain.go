@@ -72,7 +72,8 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		imageCount = capabilities.MaxImageCount
 	}
 
-	// Determine extent
+	// Determine extent - use CurrentExtent if valid, otherwise use config dimensions.
+	// CurrentExtent of 0xFFFFFFFF means the surface size is determined by the swapchain extent.
 	extent := capabilities.CurrentExtent
 	if extent.Width == 0xFFFFFFFF {
 		extent.Width = config.Width

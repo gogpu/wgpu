@@ -25,7 +25,10 @@ type CommandBuffer struct {
 
 // Destroy releases the command buffer resources.
 func (c *CommandBuffer) Destroy() {
-	// Command buffers are freed when the pool is destroyed or reset
+	// Command buffers are freed when the pool is destroyed or reset.
+	// We cannot call vkFreeCommandBuffers here because:
+	// 1. GPU may still be using this command buffer (async submission)
+	// 2. Proper solution requires fence-based tracking or pool reset after WaitIdle
 	c.handle = 0
 }
 
@@ -234,9 +237,20 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy) []vk.BufferImageCopy {
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
 	for i, r := range regions {
+		// Vulkan bufferRowLength is in TEXELS, not bytes!
+		// For RGBA8 format (4 bytes per texel), convert bytes to texels.
+		// A value of 0 means tightly packed (row length = image width).
+		bufferRowLength := uint32(0)
+		if r.BufferLayout.BytesPerRow > 0 && r.Size.Width > 0 {
+			bytesPerTexel := r.BufferLayout.BytesPerRow / r.Size.Width
+			if bytesPerTexel > 0 {
+				bufferRowLength = r.BufferLayout.BytesPerRow / bytesPerTexel
+			}
+		}
+
 		vkRegions[i] = vk.BufferImageCopy{
 			BufferOffset:      vk.DeviceSize(r.BufferLayout.Offset),
-			BufferRowLength:   r.BufferLayout.BytesPerRow,
+			BufferRowLength:   bufferRowLength,
 			BufferImageHeight: r.BufferLayout.RowsPerImage,
 			ImageSubresource: vk.ImageSubresourceLayers{
 				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),

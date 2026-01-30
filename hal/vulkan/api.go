@@ -283,6 +283,7 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	// and signals completion before present.
 	if s.device != nil && s.device.queue != nil {
 		s.device.queue.activeSwapchain = s.swapchain
+		s.device.queue.acquireUsed = false // Reset for new frame
 	}
 
 	return &hal.AcquiredSurfaceTexture{

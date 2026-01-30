@@ -18,6 +18,7 @@ type Queue struct {
 	device          *Device
 	familyIndex     uint32
 	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
+	acquireUsed     bool       // True if acquire semaphore was consumed by a submit
 }
 
 // Submit submits command buffers to the GPU.
@@ -42,12 +43,14 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
 
-	// If we have an active swapchain, use its semaphores for GPU-side synchronization:
-	// - Wait on currentAcquireSem (signaled by acquire)
-	// - Signal presentSemaphores[currentImage] (waited on by present)
+	// If we have an active swapchain, use its semaphores for GPU-side synchronization.
+	// CRITICAL: Semaphores can only be used ONCE per frame.
+	// - Wait on currentAcquireSem: ONLY on first submit (signaled by acquire)
+	// - Signal presentSemaphores: ONLY on first submit (waited on by present)
+	// Subsequent submits in the same frame run without semaphore synchronization.
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	var submitFence vk.Fence
-	if q.activeSwapchain != nil {
+	if q.activeSwapchain != nil && !q.acquireUsed {
 		acquireSem := q.activeSwapchain.currentAcquireSem
 		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
 		submitInfo.WaitSemaphoreCount = 1
@@ -55,6 +58,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
 		submitInfo.PSignalSemaphores = &presentSem
+		q.acquireUsed = true // Mark as used for this frame
 	}
 
 	// Use user-provided fence if available
