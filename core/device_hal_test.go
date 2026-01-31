@@ -149,11 +149,9 @@ func (m *mockHALDevice) DestroyFence(_ hal.Fence)        {}
 func (m *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
 	return true, nil
 }
-func (m *mockHALDevice) ResetFence(_ hal.Fence) error { return nil }
-func (m *mockHALDevice) GetFenceStatus(_ hal.Fence) (bool, error) {
-	return true, nil
-}
-func (m *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer) {}
+func (m *mockHALDevice) ResetFence(_ hal.Fence) error             { return nil }
+func (m *mockHALDevice) GetFenceStatus(_ hal.Fence) (bool, error) { return true, nil }
+func (m *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer)    {}
 func (m *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
 	return nil, fmt.Errorf("mock: render bundles not supported")
 }

@@ -430,6 +430,25 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	return f.Wait(value, timeout), nil
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return fmt.Errorf("gles: invalid fence type")
+	}
+	f.Reset()
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return false, fmt.Errorf("gles: invalid fence type")
+	}
+	return f.GetValue() > 0, nil
+}
+
 // FreeCommandBuffer is a no-op for GLES.
 // GLES doesn't have Vulkan-style command pools - commands are recorded directly.
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
