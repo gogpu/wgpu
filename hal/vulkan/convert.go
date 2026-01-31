@@ -628,3 +628,100 @@ func textureDimensionToViewType(dim gputypes.TextureDimension) vk.ImageViewType 
 		return vk.ImageViewType2d
 	}
 }
+
+// vkFormatFeaturesToHAL converts Vulkan format feature flags to HAL texture format capability flags.
+func vkFormatFeaturesToHAL(features vk.FormatFeatureFlags) hal.TextureFormatCapabilityFlags {
+	var flags hal.TextureFormatCapabilityFlags
+
+	if features&vk.FormatFeatureFlags(vk.FormatFeatureSampledImageBit) != 0 {
+		flags |= hal.TextureFormatCapabilitySampled
+	}
+	if features&vk.FormatFeatureFlags(vk.FormatFeatureStorageImageBit) != 0 {
+		flags |= hal.TextureFormatCapabilityStorage
+	}
+	if features&vk.FormatFeatureFlags(vk.FormatFeatureColorAttachmentBit) != 0 {
+		flags |= hal.TextureFormatCapabilityRenderAttachment
+	}
+	if features&vk.FormatFeatureFlags(vk.FormatFeatureColorAttachmentBlendBit) != 0 {
+		flags |= hal.TextureFormatCapabilityBlendable
+	}
+	if features&vk.FormatFeatureFlags(vk.FormatFeatureDepthStencilAttachmentBit) != 0 {
+		flags |= hal.TextureFormatCapabilityRenderAttachment
+	}
+
+	return flags
+}
+
+// vkFormatToTextureFormat converts Vulkan format to WebGPU texture format.
+// Returns TextureFormatUndefined for unsupported formats.
+func vkFormatToTextureFormat(format vk.Format) gputypes.TextureFormat {
+	if f, ok := vkFormatToTextureMap[format]; ok {
+		return f
+	}
+	return gputypes.TextureFormatUndefined
+}
+
+// vkFormatToTextureMap is the reverse mapping from Vulkan formats to WebGPU formats.
+var vkFormatToTextureMap = map[vk.Format]gputypes.TextureFormat{
+	// BGRA formats (common surface formats)
+	vk.FormatB8g8r8a8Unorm: gputypes.TextureFormatBGRA8Unorm,
+	vk.FormatB8g8r8a8Srgb:  gputypes.TextureFormatBGRA8UnormSrgb,
+
+	// RGBA formats
+	vk.FormatR8g8b8a8Unorm: gputypes.TextureFormatRGBA8Unorm,
+	vk.FormatR8g8b8a8Srgb:  gputypes.TextureFormatRGBA8UnormSrgb,
+	vk.FormatR8g8b8a8Snorm: gputypes.TextureFormatRGBA8Snorm,
+	vk.FormatR8g8b8a8Uint:  gputypes.TextureFormatRGBA8Uint,
+	vk.FormatR8g8b8a8Sint:  gputypes.TextureFormatRGBA8Sint,
+
+	// 16-bit float formats
+	vk.FormatR16g16b16a16Sfloat: gputypes.TextureFormatRGBA16Float,
+
+	// 32-bit float formats
+	vk.FormatR32g32b32a32Sfloat: gputypes.TextureFormatRGBA32Float,
+
+	// Single channel formats
+	vk.FormatR8Unorm:   gputypes.TextureFormatR8Unorm,
+	vk.FormatR16Sfloat: gputypes.TextureFormatR16Float,
+}
+
+// vkPresentModeToHAL converts Vulkan present mode to HAL present mode.
+func vkPresentModeToHAL(mode vk.PresentModeKHR) hal.PresentMode {
+	switch mode {
+	case vk.PresentModeImmediateKhr:
+		return hal.PresentModeImmediate
+	case vk.PresentModeMailboxKhr:
+		return hal.PresentModeMailbox
+	case vk.PresentModeFifoKhr:
+		return hal.PresentModeFifo
+	case vk.PresentModeFifoRelaxedKhr:
+		return hal.PresentModeFifoRelaxed
+	default:
+		return hal.PresentModeFifo
+	}
+}
+
+// vkCompositeAlphaToHAL converts Vulkan composite alpha flags to HAL composite alpha modes.
+func vkCompositeAlphaToHAL(flags vk.CompositeAlphaFlagsKHR) []hal.CompositeAlphaMode {
+	var modes []hal.CompositeAlphaMode
+
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaOpaqueBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeOpaque)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaPreMultipliedBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModePremultiplied)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaPostMultipliedBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeUnpremultiplied)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaInheritBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeInherit)
+	}
+
+	// Always provide at least opaque mode
+	if len(modes) == 0 {
+		modes = append(modes, hal.CompositeAlphaModeOpaque)
+	}
+
+	return modes
+}

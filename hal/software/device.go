@@ -141,5 +141,24 @@ func (d *Device) Wait(fence hal.Fence, value uint64, _ time.Duration) (bool, err
 	return f.value.Load() >= value, nil
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return nil
+	}
+	f.value.Store(0)
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return false, nil
+	}
+	return f.value.Load() > 0, nil
+}
+
 // Destroy is a no-op for the software device.
 func (d *Device) Destroy() {}

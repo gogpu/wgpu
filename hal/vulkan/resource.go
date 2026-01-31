@@ -42,16 +42,17 @@ func (b *Buffer) Size() uint64 {
 
 // Texture implements hal.Texture for Vulkan.
 type Texture struct {
-	handle     vk.Image
-	memory     *memory.MemoryBlock
-	size       Extent3D
-	format     gputypes.TextureFormat
-	usage      gputypes.TextureUsage
-	mipLevels  uint32
-	samples    uint32
-	dimension  gputypes.TextureDimension
-	device     *Device
-	isExternal bool // True if memory is not owned by us (swapchain images)
+	handle      vk.Image
+	memory      *memory.MemoryBlock
+	size        Extent3D
+	format      gputypes.TextureFormat
+	usage       gputypes.TextureUsage
+	mipLevels   uint32
+	arrayLayers uint32 // Number of array layers (1 for non-array textures)
+	samples     uint32
+	dimension   gputypes.TextureDimension
+	device      *Device
+	isExternal  bool // True if memory is not owned by us (swapchain images)
 }
 
 // Extent3D represents 3D dimensions.

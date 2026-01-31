@@ -1263,6 +1263,45 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	}
 }
 
+// ResetFence resets a fence to the unsignaled state.
+// Note: D3D12 fences are timeline-based and don't have a direct reset.
+// The fence value monotonically increases, so "reset" is a no-op.
+// Users should track fence values properly for D3D12.
+func (d *Device) ResetFence(_ hal.Fence) error {
+	// D3D12 fences are timeline semaphores - they cannot be reset.
+	// The fence value only increases monotonically.
+	// This is a no-op to satisfy the interface.
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+// D3D12 fences are timeline-based, so we check if completed value > 0.
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok || f == nil {
+		return false, nil
+	}
+	// D3D12 fence: check if GPU has signaled the fence at all
+	return f.GetCompletedValue() > 0, nil
+}
+
+// FreeCommandBuffer returns a command buffer to its command allocator.
+// In DX12, command allocators are reset at frame boundaries rather than
+// freeing individual command lists.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	// DX12 command lists are automatically managed through command allocator reset
+	// Individual list freeing is not needed - allocator reset handles this
+}
+
+// CreateRenderBundleEncoder creates a render bundle encoder.
+// Note: DX12 supports bundles natively, but not yet implemented.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("dx12: render bundles not yet implemented")
+}
+
+// DestroyRenderBundle destroys a render bundle.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

@@ -146,6 +146,19 @@ type Device interface {
 	// CreateCommandEncoder creates a command encoder.
 	CreateCommandEncoder(desc *CommandEncoderDescriptor) (CommandEncoder, error)
 
+	// CreateRenderBundleEncoder creates a render bundle encoder.
+	// Render bundles are pre-recorded command sequences that can be replayed
+	// multiple times for better performance.
+	CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (RenderBundleEncoder, error)
+
+	// DestroyRenderBundle destroys a render bundle.
+	DestroyRenderBundle(bundle RenderBundle)
+
+	// FreeCommandBuffer returns a command buffer to the command pool.
+	// This must be called after the GPU has finished using the command buffer.
+	// The command buffer handle becomes invalid after this call.
+	FreeCommandBuffer(cmdBuffer CommandBuffer)
+
 	// CreateFence creates a synchronization fence.
 	CreateFence() (Fence, error)
 
@@ -156,6 +169,14 @@ type Device interface {
 	// Returns true if the fence reached the value, false if timeout.
 	// Returns ErrDeviceLost if the device is lost.
 	Wait(fence Fence, value uint64, timeout time.Duration) (bool, error)
+
+	// ResetFence resets a fence to the unsignaled state.
+	// The fence must not be in use by the GPU.
+	ResetFence(fence Fence) error
+
+	// GetFenceStatus returns true if the fence is signaled (non-blocking).
+	// This is used for polling completion without blocking.
+	GetFenceStatus(fence Fence) (bool, error)
 
 	// Destroy releases the device.
 	// All resources created from this device must be destroyed first.

@@ -703,8 +703,17 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 
 // ExecuteBundle executes a pre-recorded render bundle.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
-	// Note(v0.6.0): Render bundles require VkCommandBuffer with SECONDARY level.
-	_ = bundle
+	vkBundle, ok := bundle.(*RenderBundle)
+	if !ok || vkBundle == nil || !e.encoder.isRecording {
+		return
+	}
+
+	// Execute the secondary command buffer
+	e.encoder.device.cmds.CmdExecuteCommands(
+		e.encoder.cmdBuffer,
+		1,
+		&vkBundle.commandBuffer,
+	)
 }
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Vulkan.

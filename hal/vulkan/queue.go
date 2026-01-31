@@ -269,6 +269,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	// Wait for completion (60 second timeout)
 	_, _ = q.device.Wait(fence, 0, 60*time.Second)
+
+	// Free command buffer back to pool after GPU finishes
+	q.device.FreeCommandBuffer(cmdBuffer)
 }
 
 // Present presents a surface texture to the screen.

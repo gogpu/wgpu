@@ -1,6 +1,7 @@
 package noop
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gogpu/wgpu/hal"
@@ -116,6 +117,36 @@ func (d *Device) Wait(fence hal.Fence, value uint64, _ time.Duration) (bool, err
 	// Check if fence has reached the value
 	return f.value.Load() >= value, nil
 }
+
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return nil
+	}
+	f.value.Store(0)
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return false, nil
+	}
+	return f.value.Load() > 0, nil
+}
+
+// FreeCommandBuffer is a no-op for the noop device.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+
+// CreateRenderBundleEncoder is a no-op for the noop device.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("noop: render bundles not supported")
+}
+
+// DestroyRenderBundle is a no-op for the noop device.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // Destroy is a no-op for the noop device.
 func (d *Device) Destroy() {}

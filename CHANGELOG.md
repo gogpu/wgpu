@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-02-01
+
+Major HAL interface additions: format capabilities, array textures, and render bundles.
+
+### Added
+
+#### Format & Surface Capabilities
+- **GetTextureFormatCapabilities** — Query actual Vulkan format capabilities
+  - Returns TextureFormatCapabilityFlags based on `vkGetPhysicalDeviceFormatProperties`
+  - No more hardcoded flags — real hardware support detection
+- **GetSurfaceCapabilities** — Query surface capabilities from Vulkan
+  - Uses `vkGetPhysicalDeviceSurfaceFormatsKHR` and `vkGetPhysicalDeviceSurfacePresentModesKHR`
+  - Returns real supported formats, present modes, and alpha modes
+
+#### Array Textures & Cubemaps
+- **Array texture support** — Proper VkImageViewType selection
+  - `VK_IMAGE_VIEW_TYPE_2D_ARRAY` for 2D array textures
+  - `VK_IMAGE_VIEW_TYPE_CUBE` for cubemaps (6 layers)
+  - `VK_IMAGE_VIEW_TYPE_CUBE_ARRAY` for cubemap arrays
+- **ArrayLayers tracking** — Separate from depth dimension in Texture struct
+
+#### Render Bundles
+- **RenderBundleEncoder interface** — Pre-record render commands for reuse
+  - SetPipeline, SetBindGroup, SetVertexBuffer, SetIndexBuffer
+  - Draw, DrawIndexed, Finish
+- **RenderBundle interface** — Execute pre-recorded commands
+- **Vulkan implementation** — Secondary command buffers with `VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT`
+- **ExecuteBundle** — Execute render bundles via `vkCmdExecuteCommands`
+
+#### HAL Interface Extensions
+- **ResetFence** — Reset fence to unsignaled state
+- **GetFenceStatus** — Non-blocking fence status check
+- **FreeCommandBuffer** — Explicit command buffer cleanup
+- **CreateRenderBundleEncoder** / **DestroyRenderBundle** — Bundle lifecycle
+
+### Changed
+- All HAL backends updated with stub implementations for new interface methods
+
 ## [0.12.0] - 2026-01-30
 
 ### Added

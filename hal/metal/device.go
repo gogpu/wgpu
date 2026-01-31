@@ -713,6 +713,37 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	return false, nil
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return fmt.Errorf("metal: invalid fence")
+	}
+	mtlFence.value = 0
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return false, fmt.Errorf("metal: invalid fence")
+	}
+	return mtlFence.value > 0, nil
+}
+
+// FreeCommandBuffer is a no-op for Metal.
+// Metal command buffers are managed by the command queue.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+
+// CreateRenderBundleEncoder is not supported in Metal backend.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("metal: render bundles not supported")
+}
+
+// DestroyRenderBundle is not supported in Metal backend.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandQueue != 0 {
