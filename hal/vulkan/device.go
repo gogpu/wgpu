@@ -972,6 +972,20 @@ func (d *Device) Wait(fence hal.Fence, _ uint64, timeout time.Duration) (bool, e
 	}
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	vkFence, ok := fence.(*Fence)
+	if !ok || vkFence == nil {
+		return fmt.Errorf("vulkan: invalid fence")
+	}
+
+	result := vkResetFences(d.cmds, d.handle, 1, &vkFence.handle)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkResetFences failed: %d", result)
+	}
+	return nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandPool != 0 {
@@ -1072,4 +1086,8 @@ func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocat
 
 func vkWaitForFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence, waitAll vk.Bool32, timeout uint64) vk.Result {
 	return cmds.WaitForFences(device, fenceCount, fences, waitAll, timeout)
+}
+
+func vkResetFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence) vk.Result {
+	return cmds.ResetFences(device, fenceCount, fences)
 }

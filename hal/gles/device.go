@@ -429,6 +429,16 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	return f.Wait(value, timeout), nil
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return fmt.Errorf("gles: invalid fence type")
+	}
+	f.Reset()
+	return nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	// Device doesn't own the GL context

@@ -157,6 +157,10 @@ type Device interface {
 	// Returns ErrDeviceLost if the device is lost.
 	Wait(fence Fence, value uint64, timeout time.Duration) (bool, error)
 
+	// ResetFence resets a fence to the unsignaled state.
+	// The fence must not be in use by the GPU.
+	ResetFence(fence Fence) error
+
 	// Destroy releases the device.
 	// All resources created from this device must be destroyed first.
 	Destroy()

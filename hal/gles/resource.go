@@ -207,6 +207,11 @@ func (f *Fence) GetValue() uint64 {
 	return f.value.Load()
 }
 
+// Reset resets the fence to the unsignaled state.
+func (f *Fence) Reset() {
+	f.value.Store(0)
+}
+
 // Destroy releases fence resources.
 func (f *Fence) Destroy() {
 	// Clean up sync objects if any

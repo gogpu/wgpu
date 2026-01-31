@@ -1263,6 +1263,17 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	}
 }
 
+// ResetFence resets a fence to the unsignaled state.
+// Note: D3D12 fences are timeline-based and don't have a direct reset.
+// The fence value monotonically increases, so "reset" is a no-op.
+// Users should track fence values properly for D3D12.
+func (d *Device) ResetFence(_ hal.Fence) error {
+	// D3D12 fences are timeline semaphores - they cannot be reset.
+	// The fence value only increases monotonically.
+	// This is a no-op to satisfy the interface.
+	return nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

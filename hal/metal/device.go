@@ -713,6 +713,16 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	return false, nil
 }
 
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return fmt.Errorf("metal: invalid fence")
+	}
+	mtlFence.value = 0
+	return nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandQueue != 0 {

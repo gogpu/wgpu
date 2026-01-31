@@ -148,7 +148,8 @@ func (m *mockHALDevice) DestroyFence(_ hal.Fence)        {}
 func (m *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
 	return true, nil
 }
-func (m *mockHALDevice) Destroy() { m.destroyed = true }
+func (m *mockHALDevice) ResetFence(_ hal.Fence) error { return nil }
+func (m *mockHALDevice) Destroy()                     { m.destroyed = true }
 
 func TestDevice_NewDevice(t *testing.T) {
 	adapter := &Adapter{Info: gputypes.AdapterInfo{Name: "Test"}}
