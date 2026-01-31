@@ -146,6 +146,11 @@ type Device interface {
 	// CreateCommandEncoder creates a command encoder.
 	CreateCommandEncoder(desc *CommandEncoderDescriptor) (CommandEncoder, error)
 
+	// FreeCommandBuffer returns a command buffer to the command pool.
+	// This must be called after the GPU has finished using the command buffer.
+	// The command buffer handle becomes invalid after this call.
+	FreeCommandBuffer(cmdBuffer CommandBuffer)
+
 	// CreateFence creates a synchronization fence.
 	CreateFence() (Fence, error)
 

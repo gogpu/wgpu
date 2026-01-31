@@ -910,6 +910,20 @@ func (d *Device) ResetCommandPool() error {
 	return nil
 }
 
+// FreeCommandBuffer frees a specific command buffer back to the pool.
+// Only call this AFTER the GPU has finished using the command buffer (after fence wait).
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	if d.commandPool == 0 {
+		return
+	}
+	vkCmdBuf, ok := cmdBuffer.(*CommandBuffer)
+	if !ok || vkCmdBuf.handle == 0 {
+		return
+	}
+	d.cmds.FreeCommandBuffers(d.handle, d.commandPool, 1, &vkCmdBuf.handle)
+	vkCmdBuf.handle = 0
+}
+
 // CreateFence creates a synchronization fence.
 func (d *Device) CreateFence() (hal.Fence, error) {
 	createInfo := vk.FenceCreateInfo{

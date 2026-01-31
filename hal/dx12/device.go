@@ -1285,6 +1285,14 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return f.GetCompletedValue() > 0, nil
 }
 
+// FreeCommandBuffer returns a command buffer to its command allocator.
+// In DX12, command allocators are reset at frame boundaries rather than
+// freeing individual command lists.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	// DX12 command lists are automatically managed through command allocator reset
+	// Individual list freeing is not needed - allocator reset handles this
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

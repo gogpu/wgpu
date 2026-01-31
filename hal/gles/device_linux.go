@@ -430,6 +430,12 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	return f.Wait(value, timeout), nil
 }
 
+// FreeCommandBuffer is a no-op for GLES.
+// GLES doesn't have Vulkan-style command pools - commands are recorded directly.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	// GLES command buffers don't need explicit freeing
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	// Device doesn't own the GL context

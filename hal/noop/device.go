@@ -136,5 +136,8 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return f.value.Load() > 0, nil
 }
 
+// FreeCommandBuffer is a no-op for the noop device.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+
 // Destroy is a no-op for the noop device.
 func (d *Device) Destroy() {}
