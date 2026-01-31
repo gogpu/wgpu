@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **HAL ResetFence** — Reset fence to unsignaled state
+  - `Device.ResetFence(fence Fence) error` added to HAL interface
+  - Vulkan implementation using `vkResetFences`
+  - Enables fence reuse in submission tracking pattern
+
 ## [0.12.0] - 2026-01-30
 
 ### Added
