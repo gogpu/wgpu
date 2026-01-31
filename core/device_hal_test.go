@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -149,7 +150,15 @@ func (m *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, erro
 	return true, nil
 }
 func (m *mockHALDevice) ResetFence(_ hal.Fence) error { return nil }
-func (m *mockHALDevice) Destroy()                     { m.destroyed = true }
+func (m *mockHALDevice) GetFenceStatus(_ hal.Fence) (bool, error) {
+	return true, nil
+}
+func (m *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer) {}
+func (m *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("mock: render bundles not supported")
+}
+func (m *mockHALDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
+func (m *mockHALDevice) Destroy()                               { m.destroyed = true }
 
 func TestDevice_NewDevice(t *testing.T) {
 	adapter := &Adapter{Info: gputypes.AdapterInfo{Name: "Test"}}

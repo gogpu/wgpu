@@ -1293,6 +1293,15 @@ func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	// Individual list freeing is not needed - allocator reset handles this
 }
 
+// CreateRenderBundleEncoder creates a render bundle encoder.
+// Note: DX12 supports bundles natively, but not yet implemented.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("dx12: render bundles not yet implemented")
+}
+
+// DestroyRenderBundle destroys a render bundle.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

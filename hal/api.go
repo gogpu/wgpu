@@ -146,6 +146,14 @@ type Device interface {
 	// CreateCommandEncoder creates a command encoder.
 	CreateCommandEncoder(desc *CommandEncoderDescriptor) (CommandEncoder, error)
 
+	// CreateRenderBundleEncoder creates a render bundle encoder.
+	// Render bundles are pre-recorded command sequences that can be replayed
+	// multiple times for better performance.
+	CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (RenderBundleEncoder, error)
+
+	// DestroyRenderBundle destroys a render bundle.
+	DestroyRenderBundle(bundle RenderBundle)
+
 	// FreeCommandBuffer returns a command buffer to the command pool.
 	// This must be called after the GPU has finished using the command buffer.
 	// The command buffer handle becomes invalid after this call.

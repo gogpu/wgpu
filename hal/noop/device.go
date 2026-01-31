@@ -1,6 +1,7 @@
 package noop
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gogpu/wgpu/hal"
@@ -138,6 +139,14 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 
 // FreeCommandBuffer is a no-op for the noop device.
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+
+// CreateRenderBundleEncoder is a no-op for the noop device.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("noop: render bundles not supported")
+}
+
+// DestroyRenderBundle is a no-op for the noop device.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // Destroy is a no-op for the noop device.
 func (d *Device) Destroy() {}

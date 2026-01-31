@@ -408,6 +408,29 @@ type CommandEncoderDescriptor struct {
 	Label string
 }
 
+// RenderBundleEncoderDescriptor describes a render bundle encoder.
+type RenderBundleEncoderDescriptor struct {
+	// Label is an optional debug name.
+	Label string
+
+	// ColorFormats are the formats of the color attachments the bundle will render to.
+	ColorFormats []gputypes.TextureFormat
+
+	// DepthStencilFormat is the format of the depth/stencil attachment.
+	// Use TextureFormatUndefined if no depth/stencil attachment is used.
+	DepthStencilFormat gputypes.TextureFormat
+
+	// SampleCount is the number of samples for multisampling.
+	// Use 1 for no multisampling.
+	SampleCount uint32
+
+	// DepthReadOnly indicates the depth attachment is read-only during the render pass.
+	DepthReadOnly bool
+
+	// StencilReadOnly indicates the stencil attachment is read-only during the render pass.
+	StencilReadOnly bool
+}
+
 // RenderPassDescriptor describes a render pass.
 type RenderPassDescriptor struct {
 	// Label is an optional debug name.

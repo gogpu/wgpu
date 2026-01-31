@@ -141,6 +141,32 @@ type RenderBundle interface {
 	Resource
 }
 
+// RenderBundleEncoder records commands into a render bundle.
+// The recorded commands can be replayed multiple times via ExecuteBundle.
+type RenderBundleEncoder interface {
+	// SetPipeline sets the active render pipeline.
+	SetPipeline(pipeline RenderPipeline)
+
+	// SetBindGroup sets a bind group for the given index.
+	SetBindGroup(index uint32, group BindGroup, offsets []uint32)
+
+	// SetVertexBuffer sets a vertex buffer for the given slot.
+	SetVertexBuffer(slot uint32, buffer Buffer, offset uint64)
+
+	// SetIndexBuffer sets the index buffer.
+	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
+
+	// Draw draws primitives.
+	Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32)
+
+	// DrawIndexed draws indexed primitives.
+	DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
+
+	// Finish finalizes the bundle and returns it.
+	// The encoder cannot be used after this call.
+	Finish() RenderBundle
+}
+
 // BufferBarrier defines a buffer state transition.
 type BufferBarrier struct {
 	Buffer Buffer

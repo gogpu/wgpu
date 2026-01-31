@@ -436,6 +436,14 @@ func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	// GLES command buffers don't need explicit freeing
 }
 
+// CreateRenderBundleEncoder is not supported in GLES backend.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("gles: render bundles not supported")
+}
+
+// DestroyRenderBundle is not supported in GLES backend.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	// Device doesn't own the GL context
