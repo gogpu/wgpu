@@ -123,28 +123,22 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 
 // TextureFormatCapabilities returns capabilities for a texture format.
 func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
-	// Note: Full format support requires vkGetPhysicalDeviceFormatProperties. See DX12 adapter.go for pattern.
-	flags := hal.TextureFormatCapabilitySampled
+	vkFormat := textureFormatToVk(format)
+	if vkFormat == vk.FormatUndefined {
+		return hal.TextureFormatCapabilities{}
+	}
 
-	switch format {
-	case gputypes.TextureFormatRGBA8Unorm,
-		gputypes.TextureFormatRGBA8UnormSrgb,
-		gputypes.TextureFormatBGRA8Unorm,
-		gputypes.TextureFormatBGRA8UnormSrgb,
-		gputypes.TextureFormatRGBA16Float,
-		gputypes.TextureFormatRGBA32Float:
-		flags |= hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityBlendable |
-			hal.TextureFormatCapabilityMultisample |
-			hal.TextureFormatCapabilityMultisampleResolve
+	var props vk.FormatProperties
+	a.instance.cmds.GetPhysicalDeviceFormatProperties(a.physicalDevice, vkFormat, &props)
 
-	case gputypes.TextureFormatDepth16Unorm,
-		gputypes.TextureFormatDepth24Plus,
-		gputypes.TextureFormatDepth24PlusStencil8,
-		gputypes.TextureFormatDepth32Float,
-		gputypes.TextureFormatDepth32FloatStencil8:
-		flags |= hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityMultisample
+	// Use OptimalTilingFeatures for texture capabilities (most common use case)
+	flags := vkFormatFeaturesToHAL(props.OptimalTilingFeatures)
+
+	// Check multisampling support via image format properties
+	// TODO: Query vkGetPhysicalDeviceImageFormatProperties for accurate multisample support
+	// For now, assume common formats support multisampling if they support rendering
+	if flags&hal.TextureFormatCapabilityRenderAttachment != 0 {
+		flags |= hal.TextureFormatCapabilityMultisample | hal.TextureFormatCapabilityMultisampleResolve
 	}
 
 	return hal.TextureFormatCapabilities{
@@ -154,23 +148,70 @@ func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.T
 
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
-	// Note: Full surface capabilities require vkGetPhysicalDeviceSurfaceCapabilitiesKHR.
-	return &hal.SurfaceCapabilities{
-		Formats: []gputypes.TextureFormat{
+	vkSurface, ok := surface.(*Surface)
+	if !ok || vkSurface == nil {
+		return nil
+	}
+
+	// Query surface capabilities for alpha modes
+	var surfaceCaps vk.SurfaceCapabilitiesKHR
+	a.instance.cmds.GetPhysicalDeviceSurfaceCapabilitiesKHR(
+		a.physicalDevice, vkSurface.handle, &surfaceCaps)
+
+	// Query supported surface formats
+	var formatCount uint32
+	a.instance.cmds.GetPhysicalDeviceSurfaceFormatsKHR(
+		a.physicalDevice, vkSurface.handle, &formatCount, nil)
+
+	formats := make([]gputypes.TextureFormat, 0, formatCount)
+	if formatCount > 0 {
+		vkFormats := make([]vk.SurfaceFormatKHR, formatCount)
+		a.instance.cmds.GetPhysicalDeviceSurfaceFormatsKHR(
+			a.physicalDevice, vkSurface.handle, &formatCount, &vkFormats[0])
+
+		for _, f := range vkFormats {
+			if tf := vkFormatToTextureFormat(f.Format); tf != gputypes.TextureFormatUndefined {
+				formats = append(formats, tf)
+			}
+		}
+	}
+
+	// Fallback if no formats found
+	if len(formats) == 0 {
+		formats = []gputypes.TextureFormat{
 			gputypes.TextureFormatBGRA8Unorm,
 			gputypes.TextureFormatRGBA8Unorm,
-			gputypes.TextureFormatBGRA8UnormSrgb,
-			gputypes.TextureFormatRGBA8UnormSrgb,
-		},
-		PresentModes: []hal.PresentMode{
-			hal.PresentModeFifo,
-			hal.PresentModeMailbox,
-			hal.PresentModeImmediate,
-		},
-		AlphaModes: []hal.CompositeAlphaMode{
-			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
-		},
+		}
+	}
+
+	// Query supported present modes
+	var modeCount uint32
+	a.instance.cmds.GetPhysicalDeviceSurfacePresentModesKHR(
+		a.physicalDevice, vkSurface.handle, &modeCount, nil)
+
+	presentModes := make([]hal.PresentMode, 0, modeCount)
+	if modeCount > 0 {
+		vkModes := make([]vk.PresentModeKHR, modeCount)
+		a.instance.cmds.GetPhysicalDeviceSurfacePresentModesKHR(
+			a.physicalDevice, vkSurface.handle, &modeCount, &vkModes[0])
+
+		for _, m := range vkModes {
+			presentModes = append(presentModes, vkPresentModeToHAL(m))
+		}
+	}
+
+	// Fallback if no present modes found
+	if len(presentModes) == 0 {
+		presentModes = []hal.PresentMode{hal.PresentModeFifo}
+	}
+
+	// Convert composite alpha modes
+	alphaModes := vkCompositeAlphaToHAL(surfaceCaps.SupportedCompositeAlpha)
+
+	return &hal.SurfaceCapabilities{
+		Formats:      formats,
+		PresentModes: presentModes,
+		AlphaModes:   alphaModes,
 	}
 }
 
