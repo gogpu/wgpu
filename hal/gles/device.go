@@ -439,6 +439,15 @@ func (d *Device) ResetFence(fence hal.Fence) error {
 	return nil
 }
 
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return false, fmt.Errorf("gles: invalid fence type")
+	}
+	return f.GetValue() > 0, nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	// Device doesn't own the GL context

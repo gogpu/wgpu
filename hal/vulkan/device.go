@@ -986,6 +986,27 @@ func (d *Device) ResetFence(fence hal.Fence) error {
 	return nil
 }
 
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+// Uses vkGetFenceStatus for efficient polling without blocking.
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	vkFence, ok := fence.(*Fence)
+	if !ok || vkFence == nil {
+		return false, fmt.Errorf("vulkan: invalid fence")
+	}
+
+	result := d.cmds.GetFenceStatus(d.handle, vkFence.handle)
+	switch result {
+	case vk.Success:
+		return true, nil // Fence is signaled
+	case vk.NotReady:
+		return false, nil // Fence is not signaled yet
+	case vk.ErrorDeviceLost:
+		return false, hal.ErrDeviceLost
+	default:
+		return false, fmt.Errorf("vulkan: vkGetFenceStatus failed: %d", result)
+	}
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandPool != 0 {

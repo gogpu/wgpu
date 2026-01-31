@@ -127,5 +127,14 @@ func (d *Device) ResetFence(fence hal.Fence) error {
 	return nil
 }
 
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok {
+		return false, nil
+	}
+	return f.value.Load() > 0, nil
+}
+
 // Destroy is a no-op for the noop device.
 func (d *Device) Destroy() {}

@@ -1274,6 +1274,17 @@ func (d *Device) ResetFence(_ hal.Fence) error {
 	return nil
 }
 
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+// D3D12 fences are timeline-based, so we check if completed value > 0.
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	f, ok := fence.(*Fence)
+	if !ok || f == nil {
+		return false, nil
+	}
+	// D3D12 fence: check if GPU has signaled the fence at all
+	return f.GetCompletedValue() > 0, nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

@@ -723,6 +723,15 @@ func (d *Device) ResetFence(fence hal.Fence) error {
 	return nil
 }
 
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return false, fmt.Errorf("metal: invalid fence")
+	}
+	return mtlFence.value > 0, nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandQueue != 0 {

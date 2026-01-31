@@ -161,6 +161,10 @@ type Device interface {
 	// The fence must not be in use by the GPU.
 	ResetFence(fence Fence) error
 
+	// GetFenceStatus returns true if the fence is signaled (non-blocking).
+	// This is used for polling completion without blocking.
+	GetFenceStatus(fence Fence) (bool, error)
+
 	// Destroy releases the device.
 	// All resources created from this device must be destroyed first.
 	Destroy()
