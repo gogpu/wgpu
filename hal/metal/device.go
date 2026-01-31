@@ -732,6 +732,18 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return mtlFence.value > 0, nil
 }
 
+// FreeCommandBuffer is a no-op for Metal.
+// Metal command buffers are managed by the command queue.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+
+// CreateRenderBundleEncoder is not supported in Metal backend.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("metal: render bundles not supported")
+}
+
+// DestroyRenderBundle is not supported in Metal backend.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.commandQueue != 0 {
