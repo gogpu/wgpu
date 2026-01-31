@@ -204,9 +204,31 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		samples = 1
 	}
 
+	// Determine array layer count
+	// For 3D textures, DepthOrArrayLayers is the depth; for 1D/2D, it's the array layer count
+	arrayLayers := uint32(1)
+	if desc.Dimension != gputypes.TextureDimension3D {
+		arrayLayers = desc.Size.DepthOrArrayLayers
+		if arrayLayers == 0 {
+			arrayLayers = 1
+		}
+	}
+
+	// Determine image creation flags
+	var imageFlags vk.ImageCreateFlags
+	// Enable cube compatibility for 2D textures with 6+ layers (potential cubemaps)
+	if desc.Dimension == gputypes.TextureDimension2D && arrayLayers >= 6 {
+		imageFlags |= vk.ImageCreateFlags(vk.ImageCreateCubeCompatibleBit)
+	}
+	// Enable mutable format if view formats are specified
+	if len(desc.ViewFormats) > 0 {
+		imageFlags |= vk.ImageCreateFlags(vk.ImageCreateMutableFormatBit)
+	}
+
 	// Create VkImage (without memory)
 	createInfo := vk.ImageCreateInfo{
 		SType:     vk.StructureTypeImageCreateInfo,
+		Flags:     imageFlags,
 		ImageType: imageType,
 		Format:    vkFormat,
 		Extent: vk.Extent3D{
@@ -215,7 +237,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 			Depth:  depth,
 		},
 		MipLevels:     mipLevels,
-		ArrayLayers:   1, // Note(v0.6.0): Array textures require VkImageViewType mapping.
+		ArrayLayers:   arrayLayers,
 		Samples:       vk.SampleCountFlagBits(samples),
 		Tiling:        vk.ImageTilingOptimal,
 		Usage:         vkUsage,
@@ -254,15 +276,16 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	}
 
 	return &Texture{
-		handle:    image,
-		memory:    memBlock,
-		size:      Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, Depth: depth},
-		format:    desc.Format,
-		usage:     desc.Usage,
-		mipLevels: mipLevels,
-		samples:   samples,
-		dimension: desc.Dimension,
-		device:    d,
+		handle:      image,
+		memory:      memBlock,
+		size:        Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, Depth: depth},
+		format:      desc.Format,
+		usage:       desc.Usage,
+		mipLevels:   mipLevels,
+		arrayLayers: arrayLayers,
+		samples:     samples,
+		dimension:   desc.Dimension,
+		device:      d,
 	}, nil
 }
 
@@ -295,6 +318,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		textureFormat gputypes.TextureFormat
 		dimension     gputypes.TextureDimension
 		mipLevels     uint32
+		arrayLayers   uint32
 		textureSize   Extent3D
 	)
 
@@ -307,6 +331,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		textureFormat = t.format
 		dimension = t.dimension
 		mipLevels = t.mipLevels
+		arrayLayers = t.arrayLayers
 		textureSize = t.size
 	case *SwapchainTexture:
 		if t == nil {
@@ -355,13 +380,15 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	// Determine array layer count
 	arrayLayerCount := desc.ArrayLayerCount
 	if arrayLayerCount == 0 {
-		arrayLayerCount = 1
-		// For cube maps and arrays, calculate appropriate layer count
-		switch viewType {
-		case vk.ImageViewTypeCube:
+		// Use all remaining layers from base layer
+		if arrayLayers > desc.BaseArrayLayer {
+			arrayLayerCount = arrayLayers - desc.BaseArrayLayer
+		} else {
+			arrayLayerCount = 1
+		}
+		// For cube views, ensure we use exactly 6 layers
+		if viewType == vk.ImageViewTypeCube && arrayLayerCount > 6 {
 			arrayLayerCount = 6
-		case vk.ImageViewTypeCubeArray, vk.ImageViewType2dArray, vk.ImageViewType1dArray:
-			arrayLayerCount = textureSize.Depth - desc.BaseArrayLayer
 		}
 	}
 
