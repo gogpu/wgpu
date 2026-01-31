@@ -19,9 +19,14 @@
 
 ---
 
-## Current State: v0.12.0
+## Current State: v0.13.0
 
-✅ **All 5 HAL backends complete** (~67K LOC):
+✅ **All 5 HAL backends complete** (~70K LOC):
+
+**New in v0.13.0:**
+- Format and surface capability queries (real hardware detection)
+- Array textures and cubemaps
+- Render bundles (pre-recorded command reuse)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
