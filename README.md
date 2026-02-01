@@ -65,7 +65,7 @@ import (
     "fmt"
 
     "github.com/gogpu/wgpu/core"
-    "github.com/gogpu/wgpu/types"
+    types "github.com/gogpu/gputypes"
     _ "github.com/gogpu/wgpu/hal/allbackends" // Auto-register platform backends
 )
 
