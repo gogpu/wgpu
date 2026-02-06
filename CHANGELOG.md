@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-02-06
+
+### Fixed
+
+- **Render pass InitialLayout for LoadOpLoad** — Set correct `InitialLayout` when `LoadOp` is `Load` instead of unconditional `ImageLayoutUndefined`. Previously, Vulkan was allowed to discard image contents between render passes, causing ClearColor output to be lost (black background instead of the expected color). Affects both color and depth/stencil attachments.
+
 ## [0.13.0] - 2026-02-01
 
 Major HAL interface additions: format capabilities, array textures, and render bundles.
