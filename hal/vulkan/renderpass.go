@@ -123,6 +123,13 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 
 	// Color attachment
 	if key.ColorFormat != vk.FormatUndefined {
+		// When LoadOp is Load, InitialLayout must match the actual image layout
+		// so Vulkan preserves existing contents. With Undefined, the driver may
+		// discard the image data even when LoadOpLoad is specified.
+		colorInitialLayout := vk.ImageLayoutUndefined
+		if key.ColorLoadOp == vk.AttachmentLoadOpLoad {
+			colorInitialLayout = key.ColorFinalLayout
+		}
 		attachments = append(attachments, vk.AttachmentDescription{
 			Format:         key.ColorFormat,
 			Samples:        key.SampleCount,
@@ -130,7 +137,7 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 			StoreOp:        key.ColorStoreOp,
 			StencilLoadOp:  vk.AttachmentLoadOpDontCare,
 			StencilStoreOp: vk.AttachmentStoreOpDontCare,
-			InitialLayout:  vk.ImageLayoutUndefined,
+			InitialLayout:  colorInitialLayout,
 			FinalLayout:    key.ColorFinalLayout,
 		})
 		colorRef.Attachment = 0
@@ -138,6 +145,10 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 
 	// Depth/stencil attachment
 	if key.DepthFormat != vk.FormatUndefined {
+		depthInitialLayout := vk.ImageLayoutUndefined
+		if key.DepthLoadOp == vk.AttachmentLoadOpLoad {
+			depthInitialLayout = vk.ImageLayoutDepthStencilAttachmentOptimal
+		}
 		attachments = append(attachments, vk.AttachmentDescription{
 			Format:         key.DepthFormat,
 			Samples:        key.SampleCount,
@@ -145,7 +156,7 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 			StoreOp:        key.DepthStoreOp,
 			StencilLoadOp:  key.StencilLoadOp,
 			StencilStoreOp: key.StencilStoreOp,
-			InitialLayout:  vk.ImageLayoutUndefined,
+			InitialLayout:  depthInitialLayout,
 			FinalLayout:    vk.ImageLayoutDepthStencilAttachmentOptimal,
 		})
 		depthRef = &vk.AttachmentReference{
