@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-02-07
+
+### Changed
+
+- **naga** dependency updated v0.10.0 → v0.11.0 — fixes SPIR-V `if/else` GPU hang, adds 55 new WGSL built-in functions
+
 ## [0.13.1] - 2026-02-06
 
 ### Fixed
@@ -660,7 +666,11 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/gogpu/wgpu/compare/v0.13.1...v0.13.2
+[0.13.1]: https://github.com/gogpu/wgpu/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/gogpu/wgpu/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/gogpu/wgpu/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/gogpu/wgpu/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/gogpu/wgpu/compare/v0.10.3...v0.11.1
 [0.10.3]: https://github.com/gogpu/wgpu/compare/v0.10.2...v0.10.3
