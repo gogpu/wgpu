@@ -470,6 +470,29 @@ func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Poi
 		uintptr(size), uintptr(data))
 }
 
+// MapBuffer maps a buffer object's data store into the client's address space.
+// target: GL_ARRAY_BUFFER, GL_COPY_READ_BUFFER, etc.
+// access: GL_READ_ONLY, GL_WRITE_ONLY, GL_READ_WRITE.
+// Returns the mapped pointer, or 0 if glMapBuffer is not available or the call fails.
+func (c *Context) MapBuffer(target, access uint32) uintptr {
+	if c.glMapBuffer == 0 {
+		return 0
+	}
+	r, _, _ := syscall.SyscallN(c.glMapBuffer, uintptr(target), uintptr(access))
+	return r
+}
+
+// UnmapBuffer releases the mapping of a buffer object's data store.
+// Returns true if the buffer was successfully unmapped, false if the buffer contents
+// became corrupt during the mapping (GL_FALSE from driver) or glUnmapBuffer is unavailable.
+func (c *Context) UnmapBuffer(target uint32) bool {
+	if c.glUnmapBuffer == 0 {
+		return false
+	}
+	r, _, _ := syscall.SyscallN(c.glUnmapBuffer, uintptr(target))
+	return r != 0
+}
+
 // --- VAO ---
 
 func (c *Context) GenVertexArrays(n int32) uint32 {

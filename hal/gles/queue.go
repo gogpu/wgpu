@@ -47,6 +47,41 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	return nil
 }
 
+// ReadBuffer reads data from a GPU buffer into the provided byte slice.
+// It uses glMapBuffer with GL_READ_ONLY to map the buffer, copies the requested
+// range starting at offset, then unmaps the buffer.
+func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf.id == 0 {
+		return fmt.Errorf("gles: invalid buffer for ReadBuffer")
+	}
+
+	// Bind buffer to COPY_READ_BUFFER target (avoids disturbing other bindings)
+	q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
+
+	// Map the buffer for reading
+	ptr := q.glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
+	if ptr == 0 {
+		q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+		return fmt.Errorf("gles: glMapBuffer returned null (function may not be available)")
+	}
+
+	// Copy from the mapped pointer at the given offset into data.
+	// Use the same ptrFromUintptr pattern as the gl package (double pointer indirection).
+	src := unsafe.Slice(*(**byte)(unsafe.Pointer(&ptr)), uint64(len(data))+offset)
+	copy(data, src[offset:])
+
+	// Unmap and unbind
+	q.glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
+	q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+
+	return nil
+}
+
 // WriteBuffer writes data to a buffer immediately.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	buf, ok := buffer.(*Buffer)

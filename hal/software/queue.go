@@ -20,6 +20,16 @@ func (q *Queue) Submit(_ []hal.CommandBuffer, fence hal.Fence, fenceValue uint64
 	return nil
 }
 
+// ReadBuffer reads data from a buffer.
+func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if b, ok := buffer.(*Buffer); ok && b.data != nil {
+		b.mu.RLock()
+		copy(data, b.data[offset:])
+		b.mu.RUnlock()
+	}
+	return nil
+}
+
 // WriteBuffer performs immediate buffer writes with real data storage.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	if b, ok := buffer.(*Buffer); ok {

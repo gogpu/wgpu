@@ -723,8 +723,31 @@ type ComputePassEncoder struct {
 }
 
 // End finishes the compute pass.
+// Inserts a global memory barrier so compute shader writes are visible to
+// subsequent commands (transfers, other dispatches, etc.). Without this
+// barrier the GPU may reorder a CopyBufferToBuffer before the compute
+// shader has finished writing, causing stale/zero reads.
 func (e *ComputePassEncoder) End() {
-	// No Vulkan-level end needed for compute passes
+	if e.encoder == nil || !e.encoder.isRecording {
+		return
+	}
+
+	// Global memory barrier: compute writes → everything after.
+	memBarrier := vk.MemoryBarrier{
+		SType:         vk.StructureTypeMemoryBarrier,
+		SrcAccessMask: vk.AccessFlags(vk.AccessShaderWriteBit),
+		DstAccessMask: vk.AccessFlags(vk.AccessShaderReadBit | vk.AccessTransferReadBit | vk.AccessTransferWriteBit | vk.AccessHostReadBit),
+	}
+	vkCmdPipelineBarrier(
+		e.encoder.device.cmds,
+		e.encoder.cmdBuffer,
+		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit),
+		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit|vk.PipelineStageTransferBit|vk.PipelineStageHostBit),
+		0,
+		1, &memBarrier,
+		0, nil,
+		0, nil,
+	)
 }
 
 // SetPipeline sets the compute pipeline.

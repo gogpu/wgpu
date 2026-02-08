@@ -35,6 +35,7 @@ var (
 	cifVoid4Draw     types.CallInterface // void fn(uint32, int32, int32, int32)
 	cifVoid5DrawElem types.CallInterface // void fn(uint32, int32, uint32, void*, int32)
 	cifPtr1          types.CallInterface // void* fn(uint32)
+	cifPtr2UU        types.CallInterface // void* fn(uint32, uint32)
 	cifInitialized   bool
 )
 
@@ -108,6 +109,17 @@ func initCommonCallInterfaces() error {
 	err = ffi.PrepareCallInterface(&cifPtr1, types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{types.UInt32TypeDescriptor})
+	if err != nil {
+		return err
+	}
+
+	// void* fn(uint32, uint32) - MapBuffer
+	err = ffi.PrepareCallInterface(&cifPtr2UU, types.DefaultCall,
+		types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+		})
 	if err != nil {
 		return err
 	}
@@ -884,6 +896,36 @@ func (c *Context) BufferSubData(target uint32, offset, size int, data uintptr) {
 		unsafe.Pointer(data), //nolint:govet // FFI requires uintptr-to-pointer conversion
 	}
 	_ = ffi.CallFunction(&cifVoid4SubBuf, c.glBufferSubData, nil, args[:])
+}
+
+// MapBuffer maps a buffer object's data store into the client's address space.
+// target: GL_ARRAY_BUFFER, GL_COPY_READ_BUFFER, etc.
+// access: GL_READ_ONLY, GL_WRITE_ONLY, GL_READ_WRITE.
+// Returns the mapped pointer, or 0 if glMapBuffer is not available or the call fails.
+func (c *Context) MapBuffer(target, access uint32) uintptr {
+	if c.glMapBuffer == nil {
+		return 0
+	}
+	var ptr uintptr
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&access),
+	}
+	_ = ffi.CallFunction(&cifPtr2UU, c.glMapBuffer, unsafe.Pointer(&ptr), args[:])
+	return ptr
+}
+
+// UnmapBuffer releases the mapping of a buffer object's data store.
+// Returns true if the buffer was successfully unmapped, false if the buffer contents
+// became corrupt during the mapping (GL_FALSE from driver) or glUnmapBuffer is unavailable.
+func (c *Context) UnmapBuffer(target uint32) bool {
+	if c.glUnmapBuffer == nil {
+		return false
+	}
+	var result uint32
+	args := [1]unsafe.Pointer{unsafe.Pointer(&target)}
+	_ = ffi.CallFunction(&cifUInt321, c.glUnmapBuffer, unsafe.Pointer(&result), args[:])
+	return result != 0
 }
 
 // --- VAO ---

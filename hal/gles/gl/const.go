@@ -50,6 +50,11 @@ const (
 	PIXEL_UNPACK_BUFFER       = 0x88EC
 	TRANSFORM_FEEDBACK_BUFFER = 0x8C8E
 
+	// Buffer access modes
+	READ_ONLY  = 0x88B8
+	WRITE_ONLY = 0x88B9
+	READ_WRITE = 0x88BA
+
 	// Buffer usage
 	STREAM_DRAW  = 0x88E0
 	STREAM_READ  = 0x88E1
