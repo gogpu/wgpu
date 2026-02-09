@@ -28,6 +28,12 @@ type Device struct {
 	descriptorAllocator *DescriptorAllocator // Descriptor pool management for bind groups
 	queue               *Queue               // Primary queue (for swapchain synchronization)
 	renderPassCache     *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
+
+	// mappedMemory tracks persistently mapped VkDeviceMemory objects.
+	// Vulkan only allows one active vkMapMemory per VkDeviceMemory;
+	// with suballocation multiple buffers share the same VkDeviceMemory,
+	// so we map each VkDeviceMemory once from offset 0 and reuse it.
+	mappedMemory map[vk.DeviceMemory]uintptr
 }
 
 // initAllocator initializes the memory allocator for this device.
@@ -129,17 +135,13 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		return nil, fmt.Errorf("vulkan: vkBindBufferMemory failed: %d", result)
 	}
 
-	// Map memory for host-visible buffers so WriteBuffer can write directly
+	// Map memory for host-visible buffers so WriteBuffer can write directly.
 	if memUsage&memory.UsageHostAccess != 0 {
-		var mappedPtr uintptr
-		result = d.cmds.MapMemory(d.handle, memBlock.Memory, vk.DeviceSize(memBlock.Offset),
-			vk.DeviceSize(desc.Size), 0, uintptr(unsafe.Pointer(&mappedPtr)))
-		if result != vk.Success {
+		if err := d.ensureMemoryMapped(memBlock); err != nil {
 			_ = d.allocator.Free(memBlock)
 			d.cmds.DestroyBuffer(d.handle, buffer, nil)
-			return nil, fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
+			return nil, err
 		}
-		memBlock.MappedPtr = mappedPtr
 	}
 
 	return &Buffer{
@@ -149,6 +151,29 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		usage:  desc.Usage,
 		device: d,
 	}, nil
+}
+
+// ensureMemoryMapped maps the VkDeviceMemory backing block if not already mapped.
+// Vulkan only allows one active vkMapMemory per VkDeviceMemory.
+// With suballocation, multiple buffers share the same VkDeviceMemory,
+// so we map from offset 0 once and compute per-buffer pointers.
+func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
+	if d.mappedMemory == nil {
+		d.mappedMemory = make(map[vk.DeviceMemory]uintptr)
+	}
+	basePtr, alreadyMapped := d.mappedMemory[block.Memory]
+	if !alreadyMapped {
+		var mappedPtr uintptr
+		result := d.cmds.MapMemory(d.handle, block.Memory, 0,
+			vk.DeviceSize(vk.WholeSize), 0, uintptr(unsafe.Pointer(&mappedPtr)))
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
+		}
+		d.mappedMemory[block.Memory] = mappedPtr
+		basePtr = mappedPtr
+	}
+	block.MappedPtr = basePtr + uintptr(block.Offset)
+	return nil
 }
 
 // DestroyBuffer destroys a GPU buffer.
@@ -164,11 +189,10 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 
 	if vkBuffer.memory != nil {
-		// Unmap memory if it was mapped
-		if vkBuffer.memory.MappedPtr != 0 {
-			d.cmds.UnmapMemory(d.handle, vkBuffer.memory.Memory)
-			vkBuffer.memory.MappedPtr = 0
-		}
+		// Don't unmap individually — the VkDeviceMemory mapping is shared
+		// by all buffers suballocated from the same block. The mapping is
+		// cleaned up when the allocator destroys the block or the device is destroyed.
+		vkBuffer.memory.MappedPtr = 0
 		_ = d.allocator.Free(vkBuffer.memory)
 		vkBuffer.memory = nil
 	}
@@ -542,6 +566,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 
 	// Convert entries to Vulkan descriptor set layout bindings and track counts
 	bindings := make([]vk.DescriptorSetLayoutBinding, 0, len(desc.Entries))
+	bindingTypes := make(map[uint32]vk.DescriptorType, len(desc.Entries))
 	var counts DescriptorCounts
 
 	for _, entry := range desc.Entries {
@@ -571,6 +596,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			counts.StorageImages++
 		}
 
+		bindingTypes[entry.Binding] = binding.DescriptorType
 		bindings = append(bindings, binding)
 	}
 
@@ -590,9 +616,10 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 	}
 
 	return &BindGroupLayout{
-		handle: layout,
-		counts: counts,
-		device: d,
+		handle:       layout,
+		counts:       counts,
+		bindingTypes: bindingTypes,
+		device:       d,
 	}, nil
 }
 
@@ -635,7 +662,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 	}
 
 	// Update descriptor set with bindings
-	if err := d.updateDescriptorSet(set, desc.Entries); err != nil {
+	if err := d.updateDescriptorSet(set, desc.Entries, vkLayout.bindingTypes); err != nil {
 		// Free the set on error
 		_ = d.descriptorAllocator.Free(pool, set)
 		return nil, fmt.Errorf("vulkan: failed to update descriptor set: %w", err)
@@ -649,7 +676,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 }
 
 // updateDescriptorSet writes resource bindings to a descriptor set.
-func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.BindGroupEntry) error {
+func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, bindingTypes map[uint32]vk.DescriptorType) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -680,7 +707,12 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 				bufferInfo.Range = vk.DeviceSize(vk.WholeSize)
 			}
 			bufferInfos = append(bufferInfos, bufferInfo)
-			write.DescriptorType = vk.DescriptorTypeUniformBuffer // Default, will be overridden by layout
+			// Use the actual descriptor type from the layout
+			if dt, ok := bindingTypes[entry.Binding]; ok {
+				write.DescriptorType = dt
+			} else {
+				write.DescriptorType = vk.DescriptorTypeUniformBuffer
+			}
 			write.PBufferInfo = &bufferInfos[len(bufferInfos)-1]
 
 		case gputypes.SamplerBinding:

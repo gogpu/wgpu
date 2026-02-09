@@ -34,7 +34,7 @@
 | **Platforms** | Windows, Linux, macOS, iOS |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler |
-| **Compute** | Full compute shader support |
+| **Compute** | Full compute shader support, GPU→CPU readback |
 | **Debug** | Leak detection, error scopes (W3C WebGPU spec) |
 | **Build** | Zero CGO, simple `go build` |
 

@@ -194,6 +194,11 @@ type Queue interface {
 	// This is a convenience method that creates a staging buffer internally.
 	WriteBuffer(buffer Buffer, offset uint64, data []byte)
 
+	// ReadBuffer reads data from a GPU buffer into the provided byte slice.
+	// The buffer must have been created with BufferUsageMapRead.
+	// The caller must ensure the GPU has finished writing before calling this.
+	ReadBuffer(buffer Buffer, offset uint64, data []byte) error
+
 	// WriteTexture writes data to a texture immediately.
 	// This is a convenience method that creates a staging buffer internally.
 	WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D)

@@ -27,3 +27,14 @@ func copyToMappedMemory(ptr uintptr, offset uint64, data []byte) {
 	dst := unsafe.Slice(base, len(data))
 	copy(dst, data)
 }
+
+// copyFromMappedMemory copies data from Vulkan mapped memory into a byte slice.
+// The ptr must be a valid pointer from vkMapMemory.
+func copyFromMappedMemory(dst []byte, ptr uintptr, offset uint64) {
+	if len(dst) == 0 {
+		return
+	}
+	base := ptrFromUintptr(ptr + uintptr(offset))
+	src := unsafe.Slice(base, len(dst))
+	copy(dst, src)
+}

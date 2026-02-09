@@ -136,8 +136,46 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 		// Already mapped - direct copy using Vulkan mapped memory from vkMapMemory
 		// Use copyToMappedMemory to avoid go vet false positive about unsafe.Pointer
 		copyToMappedMemory(vkBuffer.memory.MappedPtr, offset, data)
+
+		// Flush mapped memory to ensure GPU sees CPU writes.
+		// Required for non-HOST_COHERENT memory; harmless on coherent memory.
+		memRange := vk.MappedMemoryRange{
+			SType:  vk.StructureTypeMappedMemoryRange,
+			Memory: vkBuffer.memory.Memory,
+			Offset: vk.DeviceSize(vkBuffer.memory.Offset),
+			Size:   vk.DeviceSize(vk.WholeSize),
+		}
+		_ = q.device.cmds.FlushMappedMemoryRanges(q.device.handle, 1, &memRange)
 	}
 	// Note(v0.6.0): Staging buffer needed for device-local memory writes.
+}
+
+// ReadBuffer reads data from a GPU buffer.
+// The buffer must have host-visible memory (created with MapRead usage).
+func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	vkBuffer, ok := buffer.(*Buffer)
+	if !ok || vkBuffer.memory == nil {
+		return fmt.Errorf("vulkan: invalid buffer for ReadBuffer")
+	}
+
+	// Wait for GPU to finish using the buffer
+	_ = q.device.cmds.QueueWaitIdle(q.handle)
+
+	if vkBuffer.memory.MappedPtr != 0 {
+		// Invalidate CPU cache so we see the latest GPU writes.
+		// Required for non-HOST_COHERENT memory; harmless on coherent memory.
+		memRange := vk.MappedMemoryRange{
+			SType:  vk.StructureTypeMappedMemoryRange,
+			Memory: vkBuffer.memory.Memory,
+			Offset: vk.DeviceSize(vkBuffer.memory.Offset),
+			Size:   vk.DeviceSize(vk.WholeSize),
+		}
+		_ = q.device.cmds.InvalidateMappedMemoryRanges(q.device.handle, 1, &memRange)
+
+		copyFromMappedMemory(data, vkBuffer.memory.MappedPtr, offset)
+		return nil
+	}
+	return fmt.Errorf("vulkan: buffer is not mapped, cannot read")
 }
 
 // WriteTexture writes data to a texture immediately.

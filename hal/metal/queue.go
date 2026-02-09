@@ -6,6 +6,7 @@
 package metal
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -44,6 +45,21 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		// Commit the command buffer
 		_ = MsgSend(cb.raw, Sel("commit"))
 	}
+	return nil
+}
+
+// ReadBuffer reads data from a buffer.
+func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return fmt.Errorf("metal: invalid buffer")
+	}
+	ptr := buf.Contents()
+	if ptr == 0 {
+		return fmt.Errorf("metal: buffer not mappable")
+	}
+	src := unsafe.Slice((*byte)(unsafe.Pointer(ptr+uintptr(offset))), len(data))
+	copy(data, src)
 	return nil
 }
 

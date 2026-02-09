@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
@@ -61,6 +62,50 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			return fmt.Errorf("dx12: queue Signal failed: %w", err)
 		}
 	}
+
+	return nil
+}
+
+// ReadBuffer reads data from a GPU buffer into the provided byte slice.
+// The buffer must have been created with MapRead usage (readback heap).
+// If the buffer is already mapped, data is copied directly.
+// Otherwise, the buffer is temporarily mapped for the read.
+func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf.raw == nil {
+		return fmt.Errorf("dx12: invalid buffer for ReadBuffer")
+	}
+
+	if buf.mappedPointer != nil {
+		// Buffer is already mapped — copy directly
+		src := unsafe.Slice((*byte)(unsafe.Add(buf.mappedPointer, int(offset))), len(data))
+		copy(data, src)
+		return nil
+	}
+
+	// Buffer is not mapped — temporarily map, copy, unmap
+	if buf.heapType != d3d12.D3D12_HEAP_TYPE_READBACK {
+		return fmt.Errorf("dx12: buffer is not in readback heap, cannot read")
+	}
+
+	readRange := &d3d12.D3D12_RANGE{
+		Begin: uintptr(offset),
+		End:   uintptr(offset + uint64(len(data))),
+	}
+	ptr, err := buf.raw.Map(0, readRange)
+	if err != nil {
+		return fmt.Errorf("dx12: buffer Map failed for ReadBuffer: %w", err)
+	}
+
+	src := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
+	copy(data, src)
+
+	// Unmap with nil written range (we only read, not write)
+	buf.raw.Unmap(0, nil)
 
 	return nil
 }

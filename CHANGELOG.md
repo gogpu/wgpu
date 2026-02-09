@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-02-10
+
+HAL Queue ReadBuffer for GPU→CPU data transfer, enabling compute shader result readback.
+
+### Added
+
+#### HAL Interface
+- **`ReadBuffer`** on `Queue` interface — GPU→CPU buffer readback for storage/staging buffers
+  - Maps buffer memory, copies data to Go byte slice, unmaps
+  - Enables compute shader pipelines (e.g., SDF rendering) to read results back to CPU
+  - Implemented in Vulkan backend via `vkMapMemory`/`vkUnmapMemory`
+
+### Changed
+
+- **naga** dependency updated v0.11.1 → v0.12.0 — adds `OpFunctionCall`, compute shader codegen fixes
+- **golang.org/x/sys** updated v0.39.0 → v0.41.0
+
 ## [0.14.0] - 2026-02-09
 
 Debug toolkit for GPU resource management and error handling.
@@ -693,7 +710,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/gogpu/wgpu/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/gogpu/wgpu/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/gogpu/wgpu/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/gogpu/wgpu/compare/v0.13.0...v0.13.1

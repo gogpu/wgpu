@@ -150,9 +150,10 @@ func (m *ShaderModule) Handle() vk.ShaderModule {
 
 // BindGroupLayout implements hal.BindGroupLayout for Vulkan.
 type BindGroupLayout struct {
-	handle vk.DescriptorSetLayout
-	counts DescriptorCounts // Descriptor counts for pool allocation
-	device *Device
+	handle       vk.DescriptorSetLayout
+	counts       DescriptorCounts             // Descriptor counts for pool allocation
+	bindingTypes map[uint32]vk.DescriptorType // Descriptor type per binding index
+	device       *Device
 }
 
 // Destroy releases the bind group layout.
