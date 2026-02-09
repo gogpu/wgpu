@@ -3,6 +3,7 @@ package core
 import (
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -99,6 +100,13 @@ type Device struct {
 	// valid indicates whether the device is still valid for use.
 	// Once a device is destroyed, this becomes false.
 	valid *atomic.Bool
+
+	// errorScopeManager manages the error scope stack for this device.
+	// Initialized lazily on first use. This is a plain pointer because
+	// Device is passed by value in the legacy ID-based API, which
+	// prohibits noCopy types (sync.Once, atomic.Pointer, etc.).
+	// Thread-safety is provided by ErrorScopeManager's internal mutex.
+	errorScopeManager *ErrorScopeManager
 }
 
 // NewDevice creates a new Device wrapping a HAL device.
@@ -134,6 +142,7 @@ func NewDevice(
 	valid := &atomic.Bool{}
 	valid.Store(true)
 	d.valid = valid
+	trackResource(uintptr(unsafe.Pointer(d)), "Device") //nolint:gosec // debug tracking uses pointer as unique ID
 	return d
 }
 
@@ -188,6 +197,8 @@ func (d *Device) Destroy() {
 	if d.valid != nil {
 		d.valid.Store(false)
 	}
+
+	untrackResource(uintptr(unsafe.Pointer(d))) //nolint:gosec // debug tracking uses pointer as unique ID
 
 	if d.snatchLock == nil || d.raw == nil {
 		return
@@ -477,7 +488,7 @@ func NewBuffer(
 	size uint64,
 	label string,
 ) *Buffer {
-	return &Buffer{
+	b := &Buffer{
 		raw:         NewSnatchable(halBuffer),
 		device:      device,
 		usage:       usage,
@@ -489,6 +500,8 @@ func NewBuffer(
 		),
 		mapState: BufferMapStateIdle,
 	}
+	trackResource(uintptr(unsafe.Pointer(b)), "Buffer") //nolint:gosec // debug tracking uses pointer as unique ID
+	return b
 }
 
 // NewBufferInitTracker creates a new initialization tracker for a buffer.
@@ -586,6 +599,8 @@ func (b *Buffer) TrackingData() *TrackingData {
 // This method is idempotent - calling it multiple times is safe.
 // After calling Destroy(), Raw() returns nil.
 func (b *Buffer) Destroy() {
+	untrackResource(uintptr(unsafe.Pointer(b))) //nolint:gosec // debug tracking uses pointer as unique ID
+
 	if b.device == nil || b.device.SnatchLock() == nil || b.raw == nil {
 		return
 	}

@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -62,6 +63,7 @@ func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 		i.createMockAdapter()
 	}
 
+	trackResource(uintptr(unsafe.Pointer(i)), "Instance") //nolint:gosec // debug tracking uses pointer as unique ID
 	return i
 }
 
@@ -82,6 +84,7 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 	}
 
 	i.createMockAdapter()
+	trackResource(uintptr(unsafe.Pointer(i)), "Instance") //nolint:gosec // debug tracking uses pointer as unique ID
 	return i
 }
 
@@ -291,6 +294,8 @@ func (i *Instance) HasHALAdapters() bool {
 func (i *Instance) Destroy() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+
+	untrackResource(uintptr(unsafe.Pointer(i))) //nolint:gosec // debug tracking uses pointer as unique ID
 
 	hub := GetGlobal().Hub()
 
