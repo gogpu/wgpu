@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-02-09
+
+Debug toolkit for GPU resource management and error handling.
+
+### Added
+
+#### Debug & Diagnostics (`core/`)
+- **GPU Resource Leak Detection** — Track unreleased GPU resources at runtime
+  - `SetDebugMode(true)` enables tracking with zero overhead when disabled (~1ns atomic load)
+  - `ReportLeaks()` returns `LeakReport` with per-type counts (Buffer, Texture, Device, etc.)
+  - `ResetLeakTracker()` for test cleanup
+  - Integrated into Device, Buffer, Instance, CommandEncoder lifecycle
+- **W3C WebGPU Error Scopes** — Programmatic GPU error capture per the WebGPU spec
+  - `ErrorScopeManager` with LIFO stack-based scopes
+  - `ErrorFilter`: Validation, OutOfMemory, Internal
+  - `GPUError` type implementing Go `error` interface
+  - Device integration: `device.PushErrorScope()`, `device.PopErrorScope()`
+  - Lazy initialization, thread-safe via internal mutex
+- **Thread Safety Tests** — Concurrent access validation
+  - Concurrent leak tracking (track/untrack from 50+ goroutines)
+  - Concurrent error scope operations (push/pop/report)
+  - Concurrent instance creation and adapter requests
+
+### Changed
+
+- **naga** dependency updated v0.11.0 → v0.11.1 — fixes SPIR-V OpLogicalAnd, comparison/shift opcodes, variable initializers, runtime-sized arrays
+
 ## [0.13.2] - 2026-02-07
 
 ### Changed
@@ -666,7 +693,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/gogpu/wgpu/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/gogpu/wgpu/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/gogpu/wgpu/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/gogpu/wgpu/compare/v0.12.0...v0.13.0

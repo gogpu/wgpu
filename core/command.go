@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -233,6 +234,7 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 	}
 	enc.status.Store(int32(CommandEncoderStatusRecording))
 
+	trackResource(uintptr(unsafe.Pointer(enc)), "CommandEncoder") //nolint:gosec // debug tracking uses pointer as unique ID
 	return enc, nil
 }
 
@@ -444,6 +446,8 @@ func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 
 	// Transition to finished
 	e.status.Store(int32(CommandEncoderStatusFinished))
+
+	untrackResource(uintptr(unsafe.Pointer(e))) //nolint:gosec // debug tracking uses pointer as unique ID
 
 	return &CoreCommandBuffer{
 		raw:     halCmdBuffer,
