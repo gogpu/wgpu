@@ -136,27 +136,12 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	// Map memory for host-visible buffers so WriteBuffer can write directly.
-	// Vulkan only allows one active vkMapMemory per VkDeviceMemory.
-	// With suballocation, multiple buffers share the same VkDeviceMemory,
-	// so we map from offset 0 once and compute per-buffer pointers.
 	if memUsage&memory.UsageHostAccess != 0 {
-		if d.mappedMemory == nil {
-			d.mappedMemory = make(map[vk.DeviceMemory]uintptr)
+		if err := d.ensureMemoryMapped(memBlock); err != nil {
+			_ = d.allocator.Free(memBlock)
+			d.cmds.DestroyBuffer(d.handle, buffer, nil)
+			return nil, err
 		}
-		basePtr, alreadyMapped := d.mappedMemory[memBlock.Memory]
-		if !alreadyMapped {
-			var mappedPtr uintptr
-			result = d.cmds.MapMemory(d.handle, memBlock.Memory, 0,
-				vk.DeviceSize(vk.WholeSize), 0, uintptr(unsafe.Pointer(&mappedPtr)))
-			if result != vk.Success {
-				_ = d.allocator.Free(memBlock)
-				d.cmds.DestroyBuffer(d.handle, buffer, nil)
-				return nil, fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
-			}
-			d.mappedMemory[memBlock.Memory] = mappedPtr
-			basePtr = mappedPtr
-		}
-		memBlock.MappedPtr = basePtr + uintptr(memBlock.Offset)
 	}
 
 	return &Buffer{
@@ -166,6 +151,29 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		usage:  desc.Usage,
 		device: d,
 	}, nil
+}
+
+// ensureMemoryMapped maps the VkDeviceMemory backing block if not already mapped.
+// Vulkan only allows one active vkMapMemory per VkDeviceMemory.
+// With suballocation, multiple buffers share the same VkDeviceMemory,
+// so we map from offset 0 once and compute per-buffer pointers.
+func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
+	if d.mappedMemory == nil {
+		d.mappedMemory = make(map[vk.DeviceMemory]uintptr)
+	}
+	basePtr, alreadyMapped := d.mappedMemory[block.Memory]
+	if !alreadyMapped {
+		var mappedPtr uintptr
+		result := d.cmds.MapMemory(d.handle, block.Memory, 0,
+			vk.DeviceSize(vk.WholeSize), 0, uintptr(unsafe.Pointer(&mappedPtr)))
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
+		}
+		d.mappedMemory[block.Memory] = mappedPtr
+		basePtr = mappedPtr
+	}
+	block.MappedPtr = basePtr + uintptr(block.Offset)
+	return nil
 }
 
 // DestroyBuffer destroys a GPU buffer.
