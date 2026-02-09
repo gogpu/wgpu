@@ -19,14 +19,14 @@
 
 ---
 
-## Current State: v0.13.0
+## Current State: v0.14.0
 
 ✅ **All 5 HAL backends complete** (~70K LOC):
 
-**New in v0.13.0:**
-- Format and surface capability queries (real hardware detection)
-- Array textures and cubemaps
-- Render bundles (pre-recorded command reuse)
+**New in v0.14.0:**
+- GPU resource leak detection (zero overhead in production)
+- W3C WebGPU error scopes (programmatic error capture)
+- Thread safety tests for concurrent operations
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -79,7 +79,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.12.0** | 2026-01 | BufferRowLength fix, NativeHandle, WriteBuffer |
+| **v0.14.0** | 2026-02 | Leak detection, error scopes, thread safety |
+| v0.13.x | 2026-02 | Format capabilities, render bundles, naga v0.11.1 |
+| v0.12.0 | 2026-01 | BufferRowLength fix, NativeHandle, WriteBuffer |
 | v0.11.x | 2026-01 | gputypes migration, webgpu.h compliance |
 | v0.10.x | 2026-01 | HAL integration, multi-thread architecture |
 | v0.9.x | 2026-01 | Vulkan fixes (Intel, features, limits) |
