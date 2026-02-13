@@ -48,6 +48,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	if label != "" {
 		nsLabel := NSString(label)
 		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
+		Release(nsLabel)
 	}
 	// Recording state is now implicit: cmdBuffer != 0
 	return nil
@@ -303,7 +304,9 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	}
 	Retain(encoder)
 	if desc != nil && desc.Label != "" {
-		_ = MsgSend(encoder, Sel("setLabel:"), uintptr(NSString(desc.Label)))
+		nsLabel := NSString(desc.Label)
+		_ = MsgSend(encoder, Sel("setLabel:"), uintptr(nsLabel))
+		Release(nsLabel)
 	}
 	return &ComputePassEncoder{raw: encoder, device: e.device, pool: pool}
 }

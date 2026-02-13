@@ -35,7 +35,7 @@
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler |
 | **Compute** | Full compute shader support, GPU→CPU readback |
-| **Debug** | Leak detection, error scopes (W3C WebGPU spec) |
+| **Debug** | Leak detection, error scopes, Vulkan validation layers |
 | **Build** | Zero CGO, simple `go build` |
 
 ---
@@ -182,6 +182,7 @@ Full Vulkan 1.3 implementation with:
 - Classic render pass fallback for Intel compatibility
 - wgpu-style swapchain synchronization
 - Complete resource management (Buffer, Texture, Pipeline, BindGroup)
+- Debug messenger for validation layer error capture (`VK_EXT_debug_utils`)
 
 ### Metal Backend
 

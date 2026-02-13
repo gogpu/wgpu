@@ -78,6 +78,7 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc.Label != "" {
 		label := NSString(desc.Label)
 		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
 	}
 
 	return &Buffer{
@@ -159,6 +160,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc.Label != "" {
 		label := NSString(desc.Label)
 		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
 	}
 
 	return &Texture{
@@ -732,9 +734,21 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return mtlFence.value > 0, nil
 }
 
-// FreeCommandBuffer is a no-op for Metal.
-// Metal command buffers are managed by the command queue.
-func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+// FreeCommandBuffer releases a submitted command buffer and its autorelease pool.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	cb, ok := cmdBuffer.(*CommandBuffer)
+	if !ok || cb == nil {
+		return
+	}
+	if cb.raw != 0 {
+		Release(cb.raw)
+		cb.raw = 0
+	}
+	if cb.pool != nil {
+		cb.pool.Drain()
+		cb.pool = nil
+	}
+}
 
 // CreateRenderBundleEncoder is not supported in Metal backend.
 func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {

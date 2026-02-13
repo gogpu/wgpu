@@ -27,6 +27,8 @@
 - DX12 WriteBuffer/WriteTexture fix — were no-op stubs
 - DX12 shader compilation fix (WGSL → HLSL → DXBC)
 - D3DCompile shader compiler bindings
+- Metal memory leak fix — FreeCommandBuffer was no-op (Issue #55)
+- Vulkan debug messenger — validation errors logged (Issue #53)
 
 | Backend | Platform | Status |
 |---------|----------|--------|

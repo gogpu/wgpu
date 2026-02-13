@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.15.1] - 2026-02-13
 
-DX12 backend critical fixes: WriteBuffer/WriteTexture were no-op stubs, shader compilation produced empty bytecode.
+Critical fixes across DX12, Metal, and Vulkan backends.
 
 ### Fixed
 
@@ -23,6 +23,17 @@ DX12 backend critical fixes: WriteBuffer/WriteTexture were no-op stubs, shader c
 - **DX12 shader compilation** produced empty DXBC bytecode
   - Added `d3dcompile` package — Pure Go bindings to d3dcompiler_47.dll
   - Wired `compileWGSLModule`: WGSL → naga HLSL → D3DCompile → DXBC
+- **Metal memory leak** — 30GB+ memory usage on macOS (Issue #55)
+  - `FreeCommandBuffer` was a no-op — command buffers never released after submit
+  - NSString labels leaked in `BeginEncoding`, `BeginComputePass`, `CreateBuffer`, `CreateTexture`
+
+### Added
+
+- **Vulkan debug messenger** — validation errors now logged via `log.Printf` (Issue #53)
+  - `VK_EXT_debug_utils` messenger created when `InstanceFlagsDebug` is set
+  - Captures ERROR and WARNING severity from validation layers
+  - Cross-platform callback via `goffi/ffi.NewCallback`
+  - Zero overhead when debug mode is off
 
 ## [0.15.0] - 2026-02-10
 
