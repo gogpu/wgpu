@@ -23,6 +23,7 @@ package dx12
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"unsafe"
 
@@ -53,13 +54,22 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Determine factory creation flags
 	var factoryFlags uint32
-	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
+	debugRequested := desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0
+	if debugRequested {
 		factoryFlags |= dxgi.DXGI_CREATE_FACTORY_DEBUG
 		instance.flags = desc.Flags
 	}
 
-	// Create DXGI factory
+	// Create DXGI factory (with graceful debug fallback)
 	factory, err := dxgiLib.CreateFactory2(factoryFlags)
+	if err != nil && debugRequested {
+		// Debug layer not installed (requires Windows "Graphics Tools" optional feature).
+		// Fall back to non-debug factory.
+		log.Printf("[DX12] debug layer not available, falling back to non-debug mode: %v", err)
+		factoryFlags = 0
+		instance.flags = 0
+		factory, err = dxgiLib.CreateFactory2(factoryFlags)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("dx12: failed to create DXGI factory: %w", err)
 	}
@@ -73,12 +83,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 	instance.d3d12Lib = d3d12Lib
 
-	// Enable debug layer if requested
-	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
+	// Enable debug layer if requested (and factory was created with debug flags)
+	if instance.flags&gputypes.InstanceFlagsDebug != 0 {
 		if err := instance.enableDebugLayer(); err != nil {
-			// Debug layer is optional; log but don't fail
-			// In production, we might want to use a logger here
-			_ = err
+			log.Printf("[DX12] debug layer enable failed (non-fatal): %v", err)
 		}
 	}
 

@@ -280,13 +280,23 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 ) (*d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC, error) {
 	psoDesc := &d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC{}
 
-	// Set root signature from pipeline layout
+	// Set root signature from pipeline layout.
+	// DX12 requires a valid root signature for every PSO. If no layout is
+	// provided (shader has no resource bindings), use the device's shared
+	// empty root signature. This prevents GPU hangs on drivers that don't
+	// gracefully handle nil root signatures (observed as DPC_WATCHDOG_VIOLATION).
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
 		}
 		psoDesc.RootSignature = pipelineLayout.rootSignature
+	} else {
+		emptyRS, err := d.getOrCreateEmptyRootSignature()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to get empty root signature: %w", err)
+		}
+		psoDesc.RootSignature = emptyRS
 	}
 
 	// Set vertex shader

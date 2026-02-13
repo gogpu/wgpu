@@ -436,6 +436,13 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("dx12: Present failed: %w", err)
 	}
 
+	// CRITICAL: Wait for GPU to finish presenting before allowing the next frame.
+	// Without this, the next frame may start rendering to a swapchain buffer that
+	// the GPU is still presenting, causing corruption or a hang.
+	if err := q.device.waitForGPU(); err != nil {
+		return fmt.Errorf("dx12: post-present GPU sync failed: %w", err)
+	}
+
 	return nil
 }
 

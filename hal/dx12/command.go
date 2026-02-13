@@ -45,7 +45,16 @@ type CommandEncoder struct {
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 
-	// Reset the command allocator (can only be done when GPU is done with it)
+	// CRITICAL: Wait for GPU to finish all pending work before resetting allocator.
+	// DX12 requires that the command allocator is not in use by the GPU when Reset()
+	// is called. Without this wait, the GPU may still be executing commands from the
+	// previous frame, and resetting the allocator frees the memory the GPU is reading
+	// from — causing a GPU hang and DPC_WATCHDOG_VIOLATION BSOD.
+	if err := e.device.waitForGPU(); err != nil {
+		return fmt.Errorf("dx12: wait for GPU before allocator reset: %w", err)
+	}
+
+	// Reset the command allocator (safe now — GPU is idle)
 	if err := e.allocator.raw.Reset(); err != nil {
 		return fmt.Errorf("dx12: command allocator reset failed: %w", err)
 	}

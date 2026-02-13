@@ -45,6 +45,12 @@ type Device struct {
 
 	// Feature level and capabilities.
 	featureLevel d3d12.D3D_FEATURE_LEVEL
+
+	// Shared empty root signature for pipelines without bind groups.
+	// DX12 requires a valid root signature for every PSO, even if the shader
+	// has no resource bindings. This is lazily created on first use and shared
+	// across all pipelines that don't provide an explicit PipelineLayout.
+	emptyRootSignature *d3d12.ID3D12RootSignature
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -276,8 +282,45 @@ func (d *Device) waitForGPU() error {
 	return nil
 }
 
+// getOrCreateEmptyRootSignature returns a shared empty root signature for
+// pipelines that have no resource bindings (no PipelineLayout).
+// DX12 requires a valid root signature for every PSO — even with zero parameters.
+// Created lazily on first use, reused for all such pipelines on this device.
+func (d *Device) getOrCreateEmptyRootSignature() (*d3d12.ID3D12RootSignature, error) {
+	if d.emptyRootSignature != nil {
+		return d.emptyRootSignature, nil
+	}
+
+	// Create root signature with zero parameters (only the IA input layout flag).
+	desc := d3d12.D3D12_ROOT_SIGNATURE_DESC{
+		Flags: d3d12.D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+	}
+
+	blob, errorBlob, err := d.instance.d3d12Lib.SerializeRootSignature(&desc, d3d12.D3D_ROOT_SIGNATURE_VERSION_1_0)
+	if err != nil {
+		if errorBlob != nil {
+			errorBlob.Release()
+		}
+		return nil, fmt.Errorf("dx12: failed to serialize empty root signature: %w", err)
+	}
+	defer blob.Release()
+
+	rootSig, err := d.raw.CreateRootSignature(0, blob.GetBufferPointer(), blob.GetBufferSize())
+	if err != nil {
+		return nil, fmt.Errorf("dx12: failed to create empty root signature: %w", err)
+	}
+
+	d.emptyRootSignature = rootSig
+	return rootSig, nil
+}
+
 // cleanup releases all device resources without clearing the finalizer.
 func (d *Device) cleanup() {
+	if d.emptyRootSignature != nil {
+		d.emptyRootSignature.Release()
+		d.emptyRootSignature = nil
+	}
+
 	if d.fenceEvent != 0 {
 		_ = windows.CloseHandle(d.fenceEvent)
 		d.fenceEvent = 0
@@ -1159,13 +1202,17 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed: %w", err)
 	}
 
-	// Get root signature reference
+	// Get root signature reference for command list binding.
+	// Must match the root signature used in the PSO.
 	var rootSig *d3d12.ID3D12RootSignature
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
 		if ok {
 			rootSig = pipelineLayout.rootSignature
 		}
+	} else {
+		// No layout → use the same empty root signature that was used in the PSO.
+		rootSig, _ = d.getOrCreateEmptyRootSignature()
 	}
 
 	// Calculate vertex strides for IASetVertexBuffers
@@ -1201,7 +1248,8 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, fmt.Errorf("dx12: invalid compute shader module type")
 	}
 
-	// Get root signature from layout
+	// Get root signature from layout.
+	// DX12 requires a valid root signature for every PSO.
 	var rootSig *d3d12.ID3D12RootSignature
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
@@ -1209,6 +1257,12 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
 		}
 		rootSig = pipelineLayout.rootSignature
+	} else {
+		emptyRS, err := d.getOrCreateEmptyRootSignature()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to get empty root signature for compute: %w", err)
+		}
+		rootSig = emptyRS
 	}
 
 	// Build compute pipeline state desc
