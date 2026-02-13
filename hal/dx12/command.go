@@ -363,6 +363,24 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return rpe
 	}
 
+	// Transition surface textures from PRESENT to RENDER_TARGET state.
+	// DX12 requires explicit barriers (unlike Vulkan which uses render pass layout transitions).
+	for _, ca := range desc.ColorAttachments {
+		view, ok := ca.View.(*TextureView)
+		if !ok || view.texture == nil || view.texture.raw == nil {
+			continue
+		}
+		if view.texture.isExternal {
+			barrier := d3d12.NewTransitionBarrier(
+				view.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			e.cmdList.ResourceBarrier(1, &barrier)
+		}
+	}
+
 	// Set render targets
 	rtvHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, 0, len(desc.ColorAttachments))
 	for _, ca := range desc.ColorAttachments {
@@ -449,9 +467,28 @@ type RenderPassEncoder struct {
 }
 
 // End finishes the render pass.
+// Automatically transitions surface textures back from RENDER_TARGET to PRESENT state.
 func (e *RenderPassEncoder) End() {
-	// D3D12 doesn't have explicit render pass end like Vulkan
-	// Resource transitions should be done by the user via TransitionTextures
+	if e.desc == nil || e.encoder == nil || !e.encoder.isRecording {
+		return
+	}
+
+	// Transition surface textures from RENDER_TARGET back to PRESENT state.
+	for _, ca := range e.desc.ColorAttachments {
+		view, ok := ca.View.(*TextureView)
+		if !ok || view.texture == nil || view.texture.raw == nil {
+			continue
+		}
+		if view.texture.isExternal {
+			barrier := d3d12.NewTransitionBarrier(
+				view.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			e.encoder.cmdList.ResourceBarrier(1, &barrier)
+		}
+	}
 }
 
 // SetPipeline sets the render pipeline.

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-02-13
+
+DX12 backend critical fixes: WriteBuffer/WriteTexture were no-op stubs, shader compilation produced empty bytecode.
+
+### Fixed
+
+- **DX12 WriteBuffer** was a no-op stub, causing blank renders with uniform data
+  - Staging buffer + `CopyBufferRegion` for DEFAULT heap (GPU-only) buffers
+  - Direct CPU mapping for UPLOAD heap buffers (zero-copy path)
+  - D3D12 auto-promotion from COMMON state for buffer copies
+- **DX12 WriteTexture** was a no-op stub, textures never uploaded to GPU
+  - Staging buffer + `CopyTextureRegion` with 256-byte row pitch alignment
+  - Resource barriers: COMMON → COPY_DEST → SHADER_RESOURCE
+- **DX12 shader compilation** produced empty DXBC bytecode
+  - Added `d3dcompile` package — Pure Go bindings to d3dcompiler_47.dll
+  - Wired `compileWGSLModule`: WGSL → naga HLSL → D3DCompile → DXBC
+
 ## [0.15.0] - 2026-02-10
 
 HAL Queue ReadBuffer for GPU→CPU data transfer, enabling compute shader result readback.

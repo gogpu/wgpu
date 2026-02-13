@@ -13,8 +13,12 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/hlsl"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/hal/dx12/d3dcompile"
 	"golang.org/x/sys/windows"
 )
 
@@ -647,9 +651,35 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 }
 
 // CreateTextureView creates a view into a texture.
+//
+//nolint:maintidx // inherent D3D12 complexity: one WebGPU view → RTV + DSV + SRV descriptors
 func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
 	if texture == nil {
 		return nil, fmt.Errorf("dx12: texture is nil")
+	}
+
+	// Handle SurfaceTexture (swapchain back buffer) — return a lightweight view
+	// with the pre-existing RTV handle, similar to Vulkan's SwapchainTexture path.
+	if st, ok := texture.(*SurfaceTexture); ok {
+		return &TextureView{
+			texture: &Texture{
+				raw:        st.resource,
+				format:     st.format,
+				dimension:  gputypes.TextureDimension2D,
+				size:       hal.Extent3D{Width: st.width, Height: st.height, DepthOrArrayLayers: 1},
+				mipLevels:  1,
+				isExternal: true,
+			},
+			format:     st.format,
+			dimension:  gputypes.TextureViewDimension2D,
+			baseMip:    0,
+			mipCount:   1,
+			baseLayer:  0,
+			layerCount: 1,
+			device:     d,
+			rtvHandle:  st.rtvHandle,
+			hasRTV:     true,
+		}, nil
 	}
 
 	tex, ok := texture.(*Texture)
@@ -1000,31 +1030,102 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 }
 
 // CreateShaderModule creates a shader module.
-// For DX12, we expect pre-compiled DXBC/DXIL bytecode in the SPIRV field for now.
-// Full WGSL -> HLSL -> DXBC compilation will be implemented separately.
+// Supports WGSL source (compiled via naga HLSL backend + D3DCompile) and pre-compiled SPIR-V.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("dx12: shader module descriptor is nil")
 	}
 
-	// For now, we expect bytecode in the SPIRV field (as uint32 slice)
-	// In the future, we'll add HLSL/DXBC compilation
-	var bytecode []byte
-	if len(desc.Source.SPIRV) > 0 {
-		// Convert uint32 slice to byte slice
-		bytecode = make([]byte, len(desc.Source.SPIRV)*4)
+	module := &ShaderModule{
+		entryPoints: make(map[string][]byte),
+		device:      d,
+	}
+
+	switch {
+	case desc.Source.WGSL != "":
+		if err := d.compileWGSLModule(desc.Source.WGSL, module); err != nil {
+			return nil, fmt.Errorf("dx12: WGSL compilation failed: %w", err)
+		}
+	case len(desc.Source.SPIRV) > 0:
+		// Legacy: pre-compiled SPIR-V stored as single entry "main"
+		bytecode := make([]byte, len(desc.Source.SPIRV)*4)
 		for i, word := range desc.Source.SPIRV {
 			bytecode[i*4+0] = byte(word)
 			bytecode[i*4+1] = byte(word >> 8)
 			bytecode[i*4+2] = byte(word >> 16)
 			bytecode[i*4+3] = byte(word >> 24)
 		}
+		module.entryPoints["main"] = bytecode
+	default:
+		return nil, fmt.Errorf("dx12: no shader source provided (need WGSL or SPIRV)")
 	}
 
-	return &ShaderModule{
-		bytecode: bytecode,
-		device:   d,
-	}, nil
+	return module, nil
+}
+
+// compileWGSLModule compiles WGSL source to per-entry-point DXBC bytecode.
+// Pipeline: WGSL → naga parse → IR → HLSL → D3DCompile → DXBC
+func (d *Device) compileWGSLModule(wgslSource string, module *ShaderModule) error {
+	// Step 1: Parse WGSL to AST
+	ast, err := naga.Parse(wgslSource)
+	if err != nil {
+		return fmt.Errorf("WGSL parse: %w", err)
+	}
+
+	// Step 2: Lower to IR
+	irModule, err := naga.LowerWithSource(ast, wgslSource)
+	if err != nil {
+		return fmt.Errorf("WGSL lower: %w", err)
+	}
+
+	// Step 3: Generate HLSL (all entry points)
+	hlslSource, info, err := hlsl.Compile(irModule, hlsl.DefaultOptions())
+	if err != nil {
+		return fmt.Errorf("HLSL generation: %w", err)
+	}
+
+	// Step 4: Load d3dcompiler_47.dll
+	compiler, err := d3dcompile.Load()
+	if err != nil {
+		return fmt.Errorf("load d3dcompiler: %w", err)
+	}
+
+	// Step 5: Compile each entry point separately
+	for _, ep := range irModule.EntryPoints {
+		target := shaderStageToTarget(ep.Stage)
+
+		// Use the HLSL entry point name (naga may rename it)
+		hlslName := ep.Name
+		if info != nil && info.EntryPointNames != nil {
+			if mapped, ok := info.EntryPointNames[ep.Name]; ok {
+				hlslName = mapped
+			}
+		}
+
+		bytecode, err := compiler.Compile(hlslSource, hlslName, target)
+		if err != nil {
+			return fmt.Errorf("D3DCompile entry point %q (hlsl: %q, target: %s): %w",
+				ep.Name, hlslName, target, err)
+		}
+
+		module.entryPoints[ep.Name] = bytecode
+	}
+
+	return nil
+}
+
+// shaderStageToTarget maps naga IR shader stage to D3DCompile target profile.
+func shaderStageToTarget(stage ir.ShaderStage) string {
+	switch stage {
+	case ir.StageVertex:
+		return d3dcompile.TargetVS51
+	case ir.StageFragment:
+		return d3dcompile.TargetPS51
+	case ir.StageCompute:
+		return d3dcompile.TargetCS51
+	default:
+		return d3dcompile.TargetVS51
+	}
 }
 
 // DestroyShaderModule destroys a shader module.
@@ -1116,11 +1217,14 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		NodeMask:      0,
 	}
 
-	if len(shaderModule.bytecode) > 0 {
+	bytecode := shaderModule.EntryPointBytecode(desc.Compute.EntryPoint)
+	if len(bytecode) > 0 {
 		psoDesc.CS = d3d12.D3D12_SHADER_BYTECODE{
-			ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
-			BytecodeLength: uintptr(len(shaderModule.bytecode)),
+			ShaderBytecode: unsafe.Pointer(&bytecode[0]),
+			BytecodeLength: uintptr(len(bytecode)),
 		}
+	} else {
+		return nil, fmt.Errorf("dx12: compute shader entry point %q not found in module", desc.Compute.EntryPoint)
 	}
 
 	// Create the pipeline state object

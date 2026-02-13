@@ -7,8 +7,10 @@ package dx12
 
 import (
 	"fmt"
+	"time"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
@@ -111,35 +113,280 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 }
 
 // WriteBuffer writes data to a buffer immediately.
-// This is a convenience method that creates a staging buffer internally.
+// For upload heap buffers, data is copied directly via CPU mapping.
+// For default heap buffers, a staging buffer + GPU copy command is used.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	if buffer == nil || len(data) == 0 {
 		return
 	}
 
-	// Note: Requires upload heap staging buffer. See Vulkan queue.go for pattern.
-	// For now this is a no-op stub. Full implementation requires:
-	// 1. Create upload heap staging buffer
-	// 2. Map staging buffer and copy data
-	// 3. Create command list with CopyBufferRegion
-	// 4. Execute and wait for completion
-	// 5. Release staging buffer
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf.raw == nil {
+		return
+	}
+
+	// Upload heap buffers can be written directly via CPU mapping
+	if buf.heapType == d3d12.D3D12_HEAP_TYPE_UPLOAD {
+		q.writeBufferDirect(buf, offset, data)
+		return
+	}
+
+	// Default heap buffers require staging buffer + GPU copy
+	q.writeBufferStaged(buf, offset, data)
 }
 
+// writeBufferDirect copies data to a mappable (upload heap) buffer.
+func (q *Queue) writeBufferDirect(buf *Buffer, offset uint64, data []byte) {
+	if buf.mappedPointer != nil {
+		// Already mapped — copy directly
+		dst := unsafe.Slice((*byte)(unsafe.Add(buf.mappedPointer, int(offset))), len(data))
+		copy(dst, data)
+		return
+	}
+
+	// Temporarily map, copy, unmap
+	readRange := &d3d12.D3D12_RANGE{Begin: 0, End: 0} // No reads
+	ptr, err := buf.raw.Map(0, readRange)
+	if err != nil {
+		return
+	}
+	dst := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
+	copy(dst, data)
+
+	writtenRange := &d3d12.D3D12_RANGE{
+		Begin: uintptr(offset),
+		End:   uintptr(offset + uint64(len(data))),
+	}
+	buf.raw.Unmap(0, writtenRange)
+}
+
+// writeBufferStaged copies data to a GPU-only (default heap) buffer
+// via an upload heap staging buffer and CopyBufferRegion command.
+func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
+	// Create upload heap staging buffer (mapped at creation for immediate write)
+	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{
+		Label:            "write-buffer-staging",
+		Size:             uint64(len(data)),
+		Usage:            gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		return
+	}
+	defer q.device.DestroyBuffer(staging)
+
+	stagingBuf := staging.(*Buffer)
+
+	// Copy data to mapped staging buffer
+	dst := unsafe.Slice((*byte)(stagingBuf.mappedPointer), len(data))
+	copy(dst, data)
+
+	// Unmap staging buffer
+	writtenRange := &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(len(data))}
+	stagingBuf.raw.Unmap(0, writtenRange)
+	stagingBuf.mappedPointer = nil
+
+	// Create one-shot command encoder for the copy
+	cmdEncoder, err := q.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "write-buffer-copy",
+	})
+	if err != nil {
+		return
+	}
+
+	encoder := cmdEncoder.(*CommandEncoder)
+	if err := encoder.BeginEncoding("write-buffer-copy"); err != nil {
+		return
+	}
+
+	// D3D12 auto-promotes buffers from COMMON to COPY_DEST.
+	// After command list execution, buffers auto-decay back to COMMON.
+	encoder.cmdList.CopyBufferRegion(buf.raw, offset, stagingBuf.raw, 0, uint64(len(data)))
+
+	cmdBuffer, err := encoder.EndEncoding()
+	if err != nil {
+		return
+	}
+
+	// Submit and wait for GPU completion
+	fence, err := q.device.CreateFence()
+	if err != nil {
+		return
+	}
+	defer q.device.DestroyFence(fence)
+
+	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+		return
+	}
+	_, _ = q.device.Wait(fence, 1, 60*time.Second)
+	q.device.FreeCommandBuffer(cmdBuffer)
+}
+
+// d3d12TexturePitchAlignment is the required row pitch alignment for texture data.
+const d3d12TexturePitchAlignment = 256
+
 // WriteTexture writes data to a texture immediately.
-// This is a convenience method that creates a staging buffer internally.
+// Creates an upload heap staging buffer, copies data with proper row pitch
+// alignment, and uses CopyTextureRegion to transfer to the GPU texture.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
 	if dst == nil || dst.Texture == nil || len(data) == 0 || size == nil {
 		return
 	}
 
-	// Note: Requires upload heap staging buffer. See Vulkan queue.go for pattern.
-	// For now this is a no-op stub. Full implementation requires:
-	// 1. Create upload heap staging buffer with proper row pitch alignment
-	// 2. Map staging buffer and copy data (handling row pitch)
-	// 3. Create command list with CopyTextureRegion
-	// 4. Execute and wait for completion
-	// 5. Release staging buffer
+	dstTex, ok := dst.Texture.(*Texture)
+	if !ok || dstTex.raw == nil {
+		return
+	}
+
+	// Calculate layout parameters
+	bytesPerRow := layout.BytesPerRow
+	if bytesPerRow == 0 {
+		bytesPerRow = size.Width * 4 // Assume RGBA8 (4 bytes per pixel)
+	}
+
+	rowsPerImage := layout.RowsPerImage
+	if rowsPerImage == 0 {
+		rowsPerImage = size.Height
+	}
+
+	depthOrLayers := size.DepthOrArrayLayers
+	if depthOrLayers == 0 {
+		depthOrLayers = 1
+	}
+
+	// D3D12 requires RowPitch to be aligned to 256 bytes
+	alignedRowPitch := (bytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
+
+	// Calculate staging buffer size with aligned pitch
+	stagingSize := uint64(alignedRowPitch) * uint64(rowsPerImage) * uint64(depthOrLayers)
+
+	// Create upload heap staging buffer
+	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{
+		Label:            "write-texture-staging",
+		Size:             stagingSize,
+		Usage:            gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		return
+	}
+	defer q.device.DestroyBuffer(staging)
+
+	stagingBuf := staging.(*Buffer)
+
+	// Copy data to staging buffer with proper row pitch alignment
+	srcOffset := layout.Offset
+	if bytesPerRow == alignedRowPitch {
+		// No alignment padding needed — single copy
+		srcData := data[srcOffset:]
+		if uint64(len(srcData)) > stagingSize {
+			srcData = srcData[:stagingSize]
+		}
+		d := unsafe.Slice((*byte)(stagingBuf.mappedPointer), len(srcData))
+		copy(d, srcData)
+	} else {
+		// Row-by-row copy to handle alignment padding
+		for z := uint32(0); z < depthOrLayers; z++ {
+			for row := uint32(0); row < rowsPerImage; row++ {
+				srcStart := srcOffset + uint64(z)*uint64(bytesPerRow)*uint64(rowsPerImage) + uint64(row)*uint64(bytesPerRow)
+				dstStart := uint64(z)*uint64(alignedRowPitch)*uint64(rowsPerImage) + uint64(row)*uint64(alignedRowPitch)
+
+				if srcStart+uint64(bytesPerRow) > uint64(len(data)) {
+					break
+				}
+
+				src := data[srcStart : srcStart+uint64(bytesPerRow)]
+				d := unsafe.Slice((*byte)(unsafe.Add(stagingBuf.mappedPointer, int(dstStart))), bytesPerRow)
+				copy(d, src)
+			}
+		}
+	}
+
+	// Unmap staging buffer
+	writtenRange := &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(stagingSize)}
+	stagingBuf.raw.Unmap(0, writtenRange)
+	stagingBuf.mappedPointer = nil
+
+	// Create one-shot command encoder
+	cmdEncoder, err := q.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "write-texture-copy",
+	})
+	if err != nil {
+		return
+	}
+
+	encoder := cmdEncoder.(*CommandEncoder)
+	if err := encoder.BeginEncoding("write-texture-copy"); err != nil {
+		return
+	}
+
+	// Transition texture to COPY_DEST (textures don't auto-promote for writes)
+	barrierToCopy := d3d12.NewTransitionBarrier(
+		dstTex.raw,
+		d3d12.D3D12_RESOURCE_STATE_COMMON,
+		d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
+		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+	)
+	encoder.cmdList.ResourceBarrier(1, &barrierToCopy)
+
+	// Source location (staging buffer with placed footprint)
+	srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+		Resource: stagingBuf.raw,
+		Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+	}
+	srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
+		Offset: 0,
+		Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
+			Format:   textureFormatToD3D12(dstTex.format),
+			Width:    size.Width,
+			Height:   size.Height,
+			Depth:    depthOrLayers,
+			RowPitch: alignedRowPitch,
+		},
+	})
+
+	// Destination location (texture subresource)
+	subresource := dst.MipLevel + dst.Origin.Z*dstTex.mipLevels
+	dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+		Resource: dstTex.raw,
+		Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+	}
+	dstLoc.SetSubresourceIndex(subresource)
+
+	encoder.cmdList.CopyTextureRegion(
+		&dstLoc,
+		dst.Origin.X, dst.Origin.Y, dst.Origin.Z,
+		&srcLoc,
+		nil, // Copy entire source
+	)
+
+	// Transition texture to shader resource state (ready for rendering)
+	barrierToShader := d3d12.NewTransitionBarrier(
+		dstTex.raw,
+		d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
+		d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+	)
+	encoder.cmdList.ResourceBarrier(1, &barrierToShader)
+
+	// End encoding
+	cmdBuffer, err := encoder.EndEncoding()
+	if err != nil {
+		return
+	}
+
+	// Submit and wait for GPU completion
+	fence, err := q.device.CreateFence()
+	if err != nil {
+		return
+	}
+	defer q.device.DestroyFence(fence)
+
+	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+		return
+	}
+	_, _ = q.device.Wait(fence, 1, 60*time.Second)
+	q.device.FreeCommandBuffer(cmdBuffer)
 }
 
 // Present presents a surface texture to the screen.

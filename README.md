@@ -200,6 +200,8 @@ Windows GPU access via:
 - DXGI integration for swapchain and adapters
 - Flip model with VRR support
 - Descriptor heap management
+- WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
+- Staging buffer GPU data transfer (WriteBuffer, WriteTexture)
 
 ### Software Backend
 

@@ -19,22 +19,24 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShaderModule implements hal.ShaderModule for DirectX 12.
-// For now, it stores raw bytecode (DXBC/DXIL) that is passed in.
-// Full WGSL -> HLSL -> DXBC compilation will be a separate task.
+// Stores per-entry-point DXBC bytecode compiled from WGSL via HLSL.
 type ShaderModule struct {
-	bytecode []byte // Compiled shader bytecode (DXBC or DXIL)
-	device   *Device
+	entryPoints map[string][]byte // entryName → DXBC bytecode
+	device      *Device
 }
 
 // Destroy releases the shader module resources.
 func (m *ShaderModule) Destroy() {
-	m.bytecode = nil
+	m.entryPoints = nil
 	m.device = nil
 }
 
-// Bytecode returns the shader bytecode.
-func (m *ShaderModule) Bytecode() []byte {
-	return m.bytecode
+// EntryPointBytecode returns the compiled DXBC bytecode for the given entry point.
+func (m *ShaderModule) EntryPointBytecode(name string) []byte {
+	if m.entryPoints == nil {
+		return nil
+	}
+	return m.entryPoints[name]
 }
 
 // -----------------------------------------------------------------------------
@@ -293,11 +295,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid vertex shader module type")
 		}
-		if len(shaderModule.bytecode) > 0 {
+		bytecode := shaderModule.EntryPointBytecode(desc.Vertex.EntryPoint)
+		if len(bytecode) > 0 {
 			psoDesc.VS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
-				BytecodeLength: uintptr(len(shaderModule.bytecode)),
+				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
+				BytecodeLength: uintptr(len(bytecode)),
 			}
+		} else {
+			return nil, fmt.Errorf("dx12: vertex shader entry point %q not found in module", desc.Vertex.EntryPoint)
 		}
 	}
 
@@ -307,11 +312,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid fragment shader module type")
 		}
-		if len(shaderModule.bytecode) > 0 {
+		bytecode := shaderModule.EntryPointBytecode(desc.Fragment.EntryPoint)
+		if len(bytecode) > 0 {
 			psoDesc.PS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
-				BytecodeLength: uintptr(len(shaderModule.bytecode)),
+				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
+				BytecodeLength: uintptr(len(bytecode)),
 			}
+		} else {
+			return nil, fmt.Errorf("dx12: fragment shader entry point %q not found in module", desc.Fragment.EntryPoint)
 		}
 	}
 
