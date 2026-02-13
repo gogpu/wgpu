@@ -122,15 +122,16 @@ func (b *Buffer) Size() uint64 {
 
 // Texture implements hal.Texture for DirectX 12.
 type Texture struct {
-	raw        *d3d12.ID3D12Resource
-	format     gputypes.TextureFormat
-	dimension  gputypes.TextureDimension
-	size       hal.Extent3D
-	mipLevels  uint32
-	samples    uint32
-	usage      gputypes.TextureUsage
-	device     *Device
-	isExternal bool // True for swapchain images (not owned)
+	raw          *d3d12.ID3D12Resource
+	format       gputypes.TextureFormat
+	dimension    gputypes.TextureDimension
+	size         hal.Extent3D
+	mipLevels    uint32
+	samples      uint32
+	usage        gputypes.TextureUsage
+	device       *Device
+	isExternal   bool                        // True for swapchain images (not owned)
+	currentState d3d12.D3D12_RESOURCE_STATES // Tracked resource state for barrier correctness
 }
 
 // Destroy releases the texture resources.

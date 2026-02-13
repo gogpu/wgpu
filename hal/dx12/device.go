@@ -679,10 +679,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 			Height:             desc.Size.Height,
 			DepthOrArrayLayers: depthOrArraySize,
 		},
-		mipLevels: mipLevels,
-		samples:   sampleCount,
-		usage:     desc.Usage,
-		device:    d,
+		mipLevels:    mipLevels,
+		samples:      sampleCount,
+		usage:        desc.Usage,
+		device:       d,
+		currentState: initialState, // Track initial resource state for barrier correctness
 	}, nil
 }
 
@@ -1026,7 +1027,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 	}
 
 	// Classify entries into CBV/SRV/UAV vs Sampler
-	var viewEntries []gputypes.BindGroupEntry  // CBV, SRV, UAV
+	var viewEntries []gputypes.BindGroupEntry // CBV, SRV, UAV
 	var samplerEntries []gputypes.BindGroupEntry
 
 	for _, entry := range desc.Entries {
@@ -1299,11 +1300,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 
 	return &RenderPipeline{
-		pso:            pso,
-		rootSignature:  rootSig,
-		groupMappings:  groupMappings,
-		topology:       primitiveTopologyToD3D12(desc.Primitive.Topology),
-		vertexStrides:  vertexStrides,
+		pso:           pso,
+		rootSignature: rootSig,
+		groupMappings: groupMappings,
+		topology:      primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides: vertexStrides,
 	}, nil
 }
 
@@ -1368,9 +1369,9 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	return &ComputePipeline{
-		pso:            pso,
-		rootSignature:  rootSig,
-		groupMappings:  groupMappings,
+		pso:           pso,
+		rootSignature: rootSig,
+		groupMappings: groupMappings,
 	}, nil
 }
 
@@ -1528,8 +1529,9 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 // In DX12, command allocators are reset at frame boundaries rather than
 // freeing individual command lists.
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
-	// DX12 command lists are automatically managed through command allocator reset
-	// Individual list freeing is not needed - allocator reset handles this
+	if cb, ok := cmdBuffer.(*CommandBuffer); ok && cb != nil {
+		cb.Destroy()
+	}
 }
 
 // CreateRenderBundleEncoder creates a render bundle encoder.

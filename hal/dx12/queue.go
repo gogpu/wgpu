@@ -326,14 +326,19 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return
 	}
 
-	// Transition texture to COPY_DEST (textures don't auto-promote for writes)
-	barrierToCopy := d3d12.NewTransitionBarrier(
-		dstTex.raw,
-		d3d12.D3D12_RESOURCE_STATE_COMMON,
-		d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
-		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-	)
-	encoder.cmdList.ResourceBarrier(1, &barrierToCopy)
+	// Transition texture to COPY_DEST using tracked current state.
+	// After first WriteTexture, the texture is in PIXEL_SHADER_RESOURCE state,
+	// not COMMON — using wrong "before" state causes undefined behavior on DX12.
+	beforeState := dstTex.currentState
+	if beforeState != d3d12.D3D12_RESOURCE_STATE_COPY_DEST {
+		barrierToCopy := d3d12.NewTransitionBarrier(
+			dstTex.raw,
+			beforeState,
+			d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
+			d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+		)
+		encoder.cmdList.ResourceBarrier(1, &barrierToCopy)
+	}
 
 	// Source location (staging buffer with placed footprint)
 	srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
@@ -367,13 +372,17 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	)
 
 	// Transition texture to shader resource state (ready for rendering)
+	afterState := d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
 	barrierToShader := d3d12.NewTransitionBarrier(
 		dstTex.raw,
 		d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
-		d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+		afterState,
 		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 	)
 	encoder.cmdList.ResourceBarrier(1, &barrierToShader)
+
+	// Update tracked state so subsequent WriteTexture calls use correct before-state
+	dstTex.currentState = afterState
 
 	// End encoding
 	cmdBuffer, err := encoder.EndEncoding()

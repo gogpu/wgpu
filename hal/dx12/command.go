@@ -24,11 +24,16 @@ type CommandBuffer struct {
 	allocator *CommandAllocator
 }
 
-// Destroy releases the command buffer resources.
+// Destroy releases the command buffer's COM resources.
 func (c *CommandBuffer) Destroy() {
-	// Command lists are reusable - don't release them individually
-	// The allocator will be reset when the encoder is reused
-	c.cmdList = nil
+	if c.cmdList != nil {
+		c.cmdList.Release()
+		c.cmdList = nil
+	}
+	if c.allocator != nil && c.allocator.raw != nil {
+		c.allocator.raw.Release()
+		c.allocator.raw = nil
+	}
 	c.allocator = nil
 }
 
