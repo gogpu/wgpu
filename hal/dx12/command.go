@@ -531,8 +531,14 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		e.descriptorHeapsSet = true
 	}
 
+	// Get group mappings from the current pipeline.
+	var mappings []rootParamMapping
+	if e.pipeline != nil {
+		mappings = e.pipeline.groupMappings
+	}
+
 	// Bind the group using graphics root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, false)
+	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -731,8 +737,14 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		e.descriptorHeapsSet = true
 	}
 
+	// Get group mappings from the current pipeline.
+	var mappings []rootParamMapping
+	if e.pipeline != nil {
+		mappings = e.pipeline.groupMappings
+	}
+
 	// Bind the group using compute root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, true)
+	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -781,30 +793,31 @@ func (e *CommandEncoder) ensureDescriptorHeapsBound() {
 
 // bindGroupToRootTables binds a BindGroup's descriptor tables to root parameters.
 // isCompute determines whether to use compute or graphics root descriptor tables.
-// The root parameter index is calculated as: bindGroupIndex * 2 (for CBV/SRV/UAV and sampler tables).
-func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool) {
-	// Calculate root parameter index based on bind group index.
-	// In our root signature layout, each bind group may have up to 2 tables:
-	// - CBV/SRV/UAV table
-	// - Sampler table
-	// So bind group N starts at root parameter index N*2.
-	rootParamIndex := bindGroupIndex * 2
+// groupMappings provides the actual root parameter indices (not all groups have both table types).
+func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool, groupMappings []rootParamMapping) {
+	// Use mapping if available; fall back to bindGroupIndex*2 for backwards compatibility.
+	cbvIdx := int(bindGroupIndex) * 2
+	samplerIdx := cbvIdx + 1
+	if int(bindGroupIndex) < len(groupMappings) {
+		cbvIdx = groupMappings[bindGroupIndex].cbvSrvUavIndex
+		samplerIdx = groupMappings[bindGroupIndex].samplerIndex
+	}
 
 	// Set CBV/SRV/UAV descriptor table if the bind group has one.
-	if bg.gpuDescHandle.Ptr != 0 {
+	if bg.gpuDescHandle.Ptr != 0 && cbvIdx >= 0 {
 		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+			e.cmdList.SetComputeRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
 		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+			e.cmdList.SetGraphicsRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
 		}
 	}
 
 	// Set sampler descriptor table if the bind group has one.
-	if bg.samplerGPUHandle.Ptr != 0 {
+	if bg.samplerGPUHandle.Ptr != 0 && samplerIdx >= 0 {
 		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+			e.cmdList.SetComputeRootDescriptorTable(uint32(samplerIdx), bg.samplerGPUHandle)
 		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+			e.cmdList.SetGraphicsRootDescriptorTable(uint32(samplerIdx), bg.samplerGPUHandle)
 		}
 	}
 }

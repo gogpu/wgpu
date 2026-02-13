@@ -1020,12 +1020,86 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		return nil, fmt.Errorf("dx12: invalid bind group layout type")
 	}
 
-	// For now, create a minimal bind group that stores layout reference
-	// Full descriptor table allocation will be enhanced later
-	return &BindGroup{
+	bg := &BindGroup{
 		layout: layout,
 		device: d,
-	}, nil
+	}
+
+	// Classify entries into CBV/SRV/UAV vs Sampler
+	var viewEntries []gputypes.BindGroupEntry  // CBV, SRV, UAV
+	var samplerEntries []gputypes.BindGroupEntry
+
+	for _, entry := range desc.Entries {
+		switch entry.Resource.(type) {
+		case gputypes.SamplerBinding:
+			samplerEntries = append(samplerEntries, entry)
+		default: // BufferBinding, TextureViewBinding
+			viewEntries = append(viewEntries, entry)
+		}
+	}
+
+	// Allocate and populate CBV/SRV/UAV descriptors
+	if len(viewEntries) > 0 && d.viewHeap != nil {
+		cpuStart, gpuStart, err := d.viewHeap.AllocateGPU(uint32(len(viewEntries)))
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to allocate view descriptors: %w", err)
+		}
+		bg.gpuDescHandle = gpuStart
+
+		for i, entry := range viewEntries {
+			destCPU := cpuStart.Offset(i, d.viewHeap.incrementSize)
+			if err := d.writeViewDescriptor(destCPU, entry); err != nil {
+				return nil, fmt.Errorf("dx12: failed to write descriptor for binding %d: %w", entry.Binding, err)
+			}
+		}
+	}
+
+	// Allocate and populate sampler descriptors
+	if len(samplerEntries) > 0 && d.samplerHeap != nil {
+		cpuStart, gpuStart, err := d.samplerHeap.AllocateGPU(uint32(len(samplerEntries)))
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to allocate sampler descriptors: %w", err)
+		}
+		bg.samplerGPUHandle = gpuStart
+
+		for i, entry := range samplerEntries {
+			destCPU := cpuStart.Offset(i, d.samplerHeap.incrementSize)
+			sb := entry.Resource.(gputypes.SamplerBinding)
+			sampler := (*Sampler)(unsafe.Pointer(sb.Sampler))
+			d.raw.CopyDescriptorsSimple(1, destCPU, sampler.handle, d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+		}
+	}
+
+	return bg, nil
+}
+
+// writeViewDescriptor writes a single CBV/SRV/UAV descriptor to the specified CPU handle.
+func (d *Device) writeViewDescriptor(dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entry gputypes.BindGroupEntry) error {
+	switch res := entry.Resource.(type) {
+	case gputypes.BufferBinding:
+		buf := (*Buffer)(unsafe.Pointer(res.Buffer))
+		size := res.Size
+		if size == 0 {
+			size = buf.size - res.Offset
+		}
+		// Align CBV size to 256 bytes (D3D12 requirement)
+		alignedSize := (size + 255) &^ 255
+		d.raw.CreateConstantBufferView(&d3d12.D3D12_CONSTANT_BUFFER_VIEW_DESC{
+			BufferLocation: buf.gpuVA + res.Offset,
+			SizeInBytes:    uint32(alignedSize),
+		}, dest)
+
+	case gputypes.TextureViewBinding:
+		view := (*TextureView)(unsafe.Pointer(res.TextureView))
+		if !view.hasSRV {
+			return fmt.Errorf("texture view has no SRV")
+		}
+		d.raw.CopyDescriptorsSimple(1, dest, view.srvHandle, d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+
+	default:
+		return fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
+	}
+	return nil
 }
 
 // DestroyBindGroup destroys a bind group.
@@ -1042,7 +1116,7 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	}
 
 	// Create root signature from bind group layouts
-	rootSig, err := d.createRootSignatureFromLayouts(desc.BindGroupLayouts)
+	rootSig, groupMappings, err := d.createRootSignatureFromLayouts(desc.BindGroupLayouts)
 	if err != nil {
 		return nil, err
 	}
@@ -1061,6 +1135,7 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	return &PipelineLayout{
 		rootSignature:    rootSig,
 		bindGroupLayouts: bgLayouts,
+		groupMappings:    groupMappings,
 		device:           d,
 	}, nil
 }
@@ -1202,13 +1277,15 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed: %w", err)
 	}
 
-	// Get root signature reference for command list binding.
+	// Get root signature reference and group mappings for command list binding.
 	// Must match the root signature used in the PSO.
 	var rootSig *d3d12.ID3D12RootSignature
+	var groupMappings []rootParamMapping
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
 		if ok {
 			rootSig = pipelineLayout.rootSignature
+			groupMappings = pipelineLayout.groupMappings
 		}
 	} else {
 		// No layout → use the same empty root signature that was used in the PSO.
@@ -1222,10 +1299,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 
 	return &RenderPipeline{
-		pso:           pso,
-		rootSignature: rootSig,
-		topology:      primitiveTopologyToD3D12(desc.Primitive.Topology),
-		vertexStrides: vertexStrides,
+		pso:            pso,
+		rootSignature:  rootSig,
+		groupMappings:  groupMappings,
+		topology:       primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides:  vertexStrides,
 	}, nil
 }
 
@@ -1248,15 +1326,17 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, fmt.Errorf("dx12: invalid compute shader module type")
 	}
 
-	// Get root signature from layout.
+	// Get root signature and group mappings from layout.
 	// DX12 requires a valid root signature for every PSO.
 	var rootSig *d3d12.ID3D12RootSignature
+	var groupMappings []rootParamMapping
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
 		}
 		rootSig = pipelineLayout.rootSignature
+		groupMappings = pipelineLayout.groupMappings
 	} else {
 		emptyRS, err := d.getOrCreateEmptyRootSignature()
 		if err != nil {
@@ -1288,8 +1368,9 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	return &ComputePipeline{
-		pso:           pso,
-		rootSignature: rootSig,
+		pso:            pso,
+		rootSignature:  rootSig,
+		groupMappings:  groupMappings,
 	}, nil
 }
 

@@ -275,6 +275,24 @@ func (d *ID3D12Device) CreateUnorderedAccessView(resource *ID3D12Resource, count
 	)
 }
 
+// CopyDescriptorsSimple copies descriptors from one location to another.
+// numDescriptors is the number of descriptors to copy.
+// destDescriptorRangeStart is the destination CPU descriptor handle.
+// srcDescriptorRangeStart is the source CPU descriptor handle.
+// descriptorHeapsType specifies the type of descriptor heap.
+func (d *ID3D12Device) CopyDescriptorsSimple(numDescriptors uint32, destDescriptorRangeStart, srcDescriptorRangeStart D3D12_CPU_DESCRIPTOR_HANDLE, descriptorHeapsType D3D12_DESCRIPTOR_HEAP_TYPE) {
+	_, _, _ = syscall.Syscall6(
+		d.vtbl.CopyDescriptorsSimple,
+		5,
+		uintptr(unsafe.Pointer(d)),
+		uintptr(numDescriptors),
+		destDescriptorRangeStart.Ptr,
+		srcDescriptorRangeStart.Ptr,
+		uintptr(descriptorHeapsType),
+		0,
+	)
+}
+
 // CreateRenderTargetView creates a render target view.
 func (d *ID3D12Device) CreateRenderTargetView(resource *ID3D12Resource, desc *D3D12_RENDER_TARGET_VIEW_DESC, destDescriptor D3D12_CPU_DESCRIPTOR_HANDLE) {
 	_, _, _ = syscall.Syscall6(

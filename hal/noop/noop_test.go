@@ -725,6 +725,227 @@ func TestNoopComputePass(t *testing.T) {
 	_, _ = encoder.EndEncoding()
 }
 
+// TestNoopComputeE2E tests the full compute pipeline end-to-end:
+// shader → bind group → pipeline → dispatch → submit → readback.
+func TestNoopComputeE2E(t *testing.T) {
+	device, queue, cleanup := createTestDeviceAndQueue(t)
+	defer cleanup()
+
+	// 1. Create compute shader module
+	module, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label: "compute-shader",
+		Source: hal.ShaderSource{
+			WGSL: `@group(0) @binding(0) var<storage, read_write> data: array<u32>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+  data[id.x] = id.x * 2u;
+}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule failed: %v", err)
+	}
+	defer device.DestroyShaderModule(module)
+
+	// 2. Create storage buffer with initial data
+	const bufferSize = 256 * 4 // 256 uint32 values
+	buffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+		Label:            "storage-buffer",
+		Size:             bufferSize,
+		Usage:            gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer failed: %v", err)
+	}
+	defer device.DestroyBuffer(buffer)
+
+	// Write initial data (zeros)
+	initialData := make([]byte, bufferSize)
+	queue.WriteBuffer(buffer, 0, initialData)
+
+	// 3. Create bind group layout
+	bgLayout, err := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+		Label: "compute-bgl",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout failed: %v", err)
+	}
+	defer device.DestroyBindGroupLayout(bgLayout)
+
+	// 4. Create bind group
+	bg, err := device.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label:  "compute-bg",
+		Layout: bgLayout,
+		Entries: []gputypes.BindGroupEntry{
+			{
+				Binding:  0,
+				Resource: gputypes.BufferBinding{Buffer: 0, Offset: 0, Size: bufferSize},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup failed: %v", err)
+	}
+	defer device.DestroyBindGroup(bg)
+
+	// 5. Create pipeline layout
+	pipelineLayout, err := device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+		Label:            "compute-pl",
+		BindGroupLayouts: []hal.BindGroupLayout{bgLayout},
+	})
+	if err != nil {
+		t.Fatalf("CreatePipelineLayout failed: %v", err)
+	}
+	defer device.DestroyPipelineLayout(pipelineLayout)
+
+	// 6. Create compute pipeline
+	pipeline, err := device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
+		Label:  "compute-pipeline",
+		Layout: pipelineLayout,
+		Compute: hal.ComputeState{
+			Module:     module,
+			EntryPoint: "main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateComputePipeline failed: %v", err)
+	}
+	defer device.DestroyComputePipeline(pipeline)
+
+	// 7. Record and submit compute commands
+	encoder, err := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "compute-encoder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder failed: %v", err)
+	}
+
+	if err := encoder.BeginEncoding("compute-pass"); err != nil {
+		t.Fatalf("BeginEncoding failed: %v", err)
+	}
+
+	computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{
+		Label: "compute",
+	})
+	computePass.SetPipeline(pipeline)
+	computePass.SetBindGroup(0, bg, nil)
+	computePass.Dispatch(4, 1, 1) // 4 workgroups × 64 threads = 256 invocations
+	computePass.End()
+
+	cmdBuffer, err := encoder.EndEncoding()
+	if err != nil {
+		t.Fatalf("EndEncoding failed: %v", err)
+	}
+
+	// 8. Submit with fence
+	fence, err := device.CreateFence()
+	if err != nil {
+		t.Fatalf("CreateFence failed: %v", err)
+	}
+	defer device.DestroyFence(fence)
+
+	if err := queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+		t.Fatalf("Submit failed: %v", err)
+	}
+
+	// 9. Wait for completion
+	ok, err := device.Wait(fence, 1, time.Second)
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("fence not signaled after submit")
+	}
+
+	// 10. Read back results
+	result := make([]byte, bufferSize)
+	if err := queue.ReadBuffer(buffer, 0, result); err != nil {
+		t.Fatalf("ReadBuffer failed: %v", err)
+	}
+
+	// Note: noop backend doesn't execute the shader, so results won't be
+	// modified. This test verifies the full API flow completes without errors.
+}
+
+// TestNoopWriteReadBufferRoundTrip tests WriteBuffer followed by ReadBuffer.
+func TestNoopWriteReadBufferRoundTrip(t *testing.T) {
+	device, queue, cleanup := createTestDeviceAndQueue(t)
+	defer cleanup()
+
+	buffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+		Label:            "roundtrip-buffer",
+		Size:             64,
+		Usage:            gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer failed: %v", err)
+	}
+	defer device.DestroyBuffer(buffer)
+
+	// Write test pattern
+	writeData := make([]byte, 64)
+	for i := range writeData {
+		writeData[i] = byte(i * 3)
+	}
+	queue.WriteBuffer(buffer, 0, writeData)
+
+	// Read back
+	readData := make([]byte, 64)
+	if err := queue.ReadBuffer(buffer, 0, readData); err != nil {
+		t.Fatalf("ReadBuffer failed: %v", err)
+	}
+
+	// Verify round-trip
+	for i := range writeData {
+		if readData[i] != writeData[i] {
+			t.Errorf("byte %d: got %d, want %d", i, readData[i], writeData[i])
+		}
+	}
+}
+
+// TestNoopWriteReadBufferWithOffset tests WriteBuffer/ReadBuffer with non-zero offset.
+func TestNoopWriteReadBufferWithOffset(t *testing.T) {
+	device, queue, cleanup := createTestDeviceAndQueue(t)
+	defer cleanup()
+
+	buffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+		Label:            "offset-buffer",
+		Size:             256,
+		Usage:            gputypes.BufferUsageStorage,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer failed: %v", err)
+	}
+	defer device.DestroyBuffer(buffer)
+
+	// Write at offset 128
+	writeData := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	queue.WriteBuffer(buffer, 128, writeData)
+
+	// Read back at same offset
+	readData := make([]byte, 4)
+	if err := queue.ReadBuffer(buffer, 128, readData); err != nil {
+		t.Fatalf("ReadBuffer failed: %v", err)
+	}
+
+	for i := range writeData {
+		if readData[i] != writeData[i] {
+			t.Errorf("byte %d: got 0x%02X, want 0x%02X", i, readData[i], writeData[i])
+		}
+	}
+}
+
 // TestNoopSurfaceConfigure tests surface configuration.
 func TestNoopSurfaceConfigure(t *testing.T) {
 	api := noop.API{}

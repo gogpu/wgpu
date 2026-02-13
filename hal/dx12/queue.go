@@ -51,6 +51,12 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 
 		// Execute command lists
 		q.raw.ExecuteCommandLists(uint32(len(cmdLists)), &cmdLists[0])
+
+		// Check for immediate device removal after execution.
+		// ExecuteCommandLists is async (void), but some drivers detect errors immediately.
+		if reason := q.device.raw.GetDeviceRemovedReason(); reason != nil {
+			return fmt.Errorf("dx12: device removed after ExecuteCommandLists: %w", reason)
+		}
 	}
 
 	// Signal the fence if provided
