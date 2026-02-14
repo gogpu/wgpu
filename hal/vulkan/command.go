@@ -561,6 +561,13 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		vkCmdSetScissor(e.device.cmds, e.cmdBuffer, 0, 1, &scissor)
 	}
 
+	// Set default blend constants and stencil reference.
+	// All pipelines declare these as dynamic state (matching Rust wgpu),
+	// so they must be initialized before any draw call (VK-PIPE-001).
+	vkCmdSetBlendConstants(e.device.cmds, e.cmdBuffer, &[4]float32{0, 0, 0, 0})
+	vkCmdSetStencilReference(e.device.cmds, e.cmdBuffer,
+		vk.StencilFaceFlags(vk.StencilFaceFrontAndBack), 0)
+
 	return rpe
 }
 

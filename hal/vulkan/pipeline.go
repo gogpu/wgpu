@@ -237,10 +237,14 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		colorBlendState.PAttachments = &colorBlendAttachments[0]
 	}
 
-	// Dynamic state (viewport and scissor are always dynamic)
+	// Dynamic state — all pipelines declare the same 4 dynamic states.
+	// This matches Rust wgpu behavior and avoids Vulkan validation warnings
+	// when switching between pipelines in a unified render pass (VK-PIPE-001).
 	dynamicStates := []vk.DynamicState{
 		vk.DynamicStateViewport,
 		vk.DynamicStateScissor,
+		vk.DynamicStateBlendConstants,
+		vk.DynamicStateStencilReference,
 	}
 	dynamicState := vk.PipelineDynamicStateCreateInfo{
 		SType:             vk.StructureTypePipelineDynamicStateCreateInfo,
