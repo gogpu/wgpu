@@ -265,8 +265,9 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		ColorFormat:      colorFormat,
 		ColorLoadOp:      vk.AttachmentLoadOpClear,
 		ColorStoreOp:     vk.AttachmentStoreOpStore,
-		SampleCount:      vk.SampleCountFlagBits(1),
+		SampleCount:      vk.SampleCountFlagBits(sampleCount),
 		ColorFinalLayout: vk.ImageLayoutPresentSrcKhr,
+		HasResolve:       sampleCount > 1, // MSAA pipelines need resolve attachment
 	}
 	if depthFormat != vk.FormatUndefined {
 		rpKey.DepthFormat = depthFormat

@@ -4,6 +4,7 @@
 package vulkan
 
 import (
+	"runtime"
 	"sync"
 
 	"github.com/gogpu/gputypes"
@@ -23,14 +24,18 @@ type RenderPassKey struct {
 	StencilStoreOp   vk.AttachmentStoreOp
 	SampleCount      vk.SampleCountFlagBits
 	ColorFinalLayout vk.ImageLayout
+	HasResolve       bool // true when MSAA resolve target is present
 }
 
 // FramebufferKey uniquely identifies a framebuffer configuration.
+// Supports multiple attachments for MSAA (color + resolve + depth/stencil).
 type FramebufferKey struct {
-	RenderPass vk.RenderPass
-	ImageView  vk.ImageView
-	Width      uint32
-	Height     uint32
+	RenderPass  vk.RenderPass
+	ColorView   vk.ImageView // MSAA color view or single-sample color view
+	ResolveView vk.ImageView // Resolve target (0 if no MSAA)
+	DepthView   vk.ImageView // Depth/stencil view (0 if none)
+	Width       uint32
+	Height      uint32
 }
 
 // RenderPassCache caches VkRenderPass and VkFramebuffer objects.
@@ -113,37 +118,74 @@ func (c *RenderPassCache) GetOrCreateFramebuffer(key FramebufferKey) (vk.Framebu
 }
 
 // createRenderPass creates a new VkRenderPass.
+// Attachment order (indices must match framebuffer view order):
+//   - 0: color (always, MSAA or single-sample)
+//   - 1: resolve (only if HasResolve && SampleCount > 1)
+//   - next: depth/stencil (if DepthFormat != Undefined)
 func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, error) {
-	attachments := make([]vk.AttachmentDescription, 0, 2)
+	attachments := make([]vk.AttachmentDescription, 0, 3)
 	colorRef := vk.AttachmentReference{
 		Attachment: vk.AttachmentUnused,
 		Layout:     vk.ImageLayoutColorAttachmentOptimal,
 	}
+	var resolveRef *vk.AttachmentReference
 	var depthRef *vk.AttachmentReference
 
-	// Color attachment
+	hasMSAAResolve := key.HasResolve && key.SampleCount > vk.SampleCountFlagBits(1)
+
+	// Color attachment (attachment 0)
 	if key.ColorFormat != vk.FormatUndefined {
+		colorFinalLayout := key.ColorFinalLayout
+		colorStoreOp := key.ColorStoreOp
+
+		if hasMSAAResolve {
+			// With MSAA resolve, the MSAA color attachment is intermediate:
+			// - FinalLayout = ColorAttachmentOptimal (not presented directly)
+			// - StoreOp = DontCare (resolved content goes to resolve target)
+			colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
+			colorStoreOp = vk.AttachmentStoreOpDontCare
+		}
+
 		// When LoadOp is Load, InitialLayout must match the actual image layout
 		// so Vulkan preserves existing contents. With Undefined, the driver may
 		// discard the image data even when LoadOpLoad is specified.
 		colorInitialLayout := vk.ImageLayoutUndefined
 		if key.ColorLoadOp == vk.AttachmentLoadOpLoad {
-			colorInitialLayout = key.ColorFinalLayout
+			colorInitialLayout = colorFinalLayout
 		}
+
 		attachments = append(attachments, vk.AttachmentDescription{
 			Format:         key.ColorFormat,
 			Samples:        key.SampleCount,
 			LoadOp:         key.ColorLoadOp,
-			StoreOp:        key.ColorStoreOp,
+			StoreOp:        colorStoreOp,
 			StencilLoadOp:  vk.AttachmentLoadOpDontCare,
 			StencilStoreOp: vk.AttachmentStoreOpDontCare,
 			InitialLayout:  colorInitialLayout,
-			FinalLayout:    key.ColorFinalLayout,
+			FinalLayout:    colorFinalLayout,
 		})
 		colorRef.Attachment = 0
 	}
 
-	// Depth/stencil attachment
+	// Resolve attachment (attachment 1, only for MSAA)
+	if hasMSAAResolve && key.ColorFormat != vk.FormatUndefined {
+		attachments = append(attachments, vk.AttachmentDescription{
+			Format:         key.ColorFormat,
+			Samples:        vk.SampleCountFlagBits(1), // Resolve target is always single-sample
+			LoadOp:         vk.AttachmentLoadOpDontCare,
+			StoreOp:        vk.AttachmentStoreOpStore,
+			StencilLoadOp:  vk.AttachmentLoadOpDontCare,
+			StencilStoreOp: vk.AttachmentStoreOpDontCare,
+			InitialLayout:  vk.ImageLayoutUndefined,
+			FinalLayout:    key.ColorFinalLayout, // The resolve target gets the "real" final layout
+		})
+		resolveRef = &vk.AttachmentReference{
+			Attachment: uint32(len(attachments) - 1),
+			Layout:     vk.ImageLayoutColorAttachmentOptimal,
+		}
+	}
+
+	// Depth/stencil attachment (last attachment)
 	if key.DepthFormat != vk.FormatUndefined {
 		depthInitialLayout := vk.ImageLayoutUndefined
 		if key.DepthLoadOp == vk.AttachmentLoadOpLoad {
@@ -170,6 +212,7 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 		PipelineBindPoint:       vk.PipelineBindPointGraphics,
 		ColorAttachmentCount:    0,
 		PDepthStencilAttachment: depthRef,
+		PResolveAttachments:     resolveRef,
 	}
 	if colorRef.Attachment != vk.AttachmentUnused {
 		subpass.ColorAttachmentCount = 1
@@ -192,42 +235,74 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 
 	var renderPass vk.RenderPass
 	result := c.cmds.CreateRenderPass(c.device, &createInfo, nil, &renderPass)
+	runtime.KeepAlive(attachments)
+	runtime.KeepAlive(colorRef)
+	runtime.KeepAlive(resolveRef)
+	runtime.KeepAlive(depthRef)
+	runtime.KeepAlive(createInfo)
+
 	if result != vk.Success {
 		return 0, &vkError{code: result, op: "vkCreateRenderPass"}
+	}
+	if renderPass == 0 {
+		return 0, &vkError{code: -1, op: "vkCreateRenderPass returned NULL handle"}
 	}
 
 	return renderPass, nil
 }
 
 // createFramebuffer creates a new VkFramebuffer.
+// The view order MUST match the attachment order in the render pass:
+//   - ColorView (always)
+//   - ResolveView (only if non-zero, for MSAA resolve)
+//   - DepthView (only if non-zero, for depth/stencil)
 func (c *RenderPassCache) createFramebuffer(key FramebufferKey) (vk.Framebuffer, error) {
+	views := make([]vk.ImageView, 0, 3)
+	if key.ColorView != 0 {
+		views = append(views, key.ColorView)
+	}
+	if key.ResolveView != 0 {
+		views = append(views, key.ResolveView)
+	}
+	if key.DepthView != 0 {
+		views = append(views, key.DepthView)
+	}
+
 	createInfo := vk.FramebufferCreateInfo{
 		SType:           vk.StructureTypeFramebufferCreateInfo,
 		RenderPass:      key.RenderPass,
-		AttachmentCount: 1,
-		PAttachments:    &key.ImageView,
+		AttachmentCount: uint32(len(views)),
 		Width:           key.Width,
 		Height:          key.Height,
 		Layers:          1,
 	}
+	if len(views) > 0 {
+		createInfo.PAttachments = &views[0]
+	}
 
 	var framebuffer vk.Framebuffer
 	result := c.cmds.CreateFramebuffer(c.device, &createInfo, nil, &framebuffer)
+	runtime.KeepAlive(views)
+	runtime.KeepAlive(createInfo)
+
 	if result != vk.Success {
 		return 0, &vkError{code: result, op: "vkCreateFramebuffer"}
+	}
+	if framebuffer == 0 {
+		return 0, &vkError{code: -1, op: "vkCreateFramebuffer returned NULL handle"}
 	}
 
 	return framebuffer, nil
 }
 
-// InvalidateFramebuffer removes a framebuffer from cache.
+// InvalidateFramebuffer removes framebuffers from cache that reference the given image view.
 // Called when swapchain is recreated.
 func (c *RenderPassCache) InvalidateFramebuffer(imageView vk.ImageView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for key, fb := range c.framebuffers {
-		if key.ImageView == imageView {
+		if key.ColorView == imageView || key.ResolveView == imageView || key.DepthView == imageView {
 			c.cmds.DestroyFramebuffer(c.device, fb, nil)
 			delete(c.framebuffers, key)
 		}

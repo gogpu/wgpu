@@ -5,6 +5,7 @@ package vulkan
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -380,6 +381,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
+// Supports MSAA render passes with resolve targets and depth/stencil attachments.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{
 		encoder: e,
@@ -409,13 +411,48 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		colorFormat = view.vkFormat
 	}
 
+	// Get sample count from the view's texture (defaults to 1)
+	sampleCount := vk.SampleCountFlagBits(1)
+	if view.texture != nil && view.texture.samples > 1 {
+		sampleCount = vk.SampleCountFlagBits(view.texture.samples)
+	}
+
+	// Check for MSAA resolve target.
+	// Resolve is only meaningful when the color attachment has multiple samples.
+	// The resolve attachment count must match between render pass and framebuffer,
+	// so we use hasMSAAResolve consistently for both.
+	var resolveView *TextureView
+	if ca.ResolveTarget != nil {
+		resolveView, _ = ca.ResolveTarget.(*TextureView)
+	}
+	hasMSAAResolve := resolveView != nil && sampleCount > vk.SampleCountFlagBits(1)
+
+	// Determine the final layout for the "output" attachment:
+	// - Without MSAA: the color attachment itself
+	// - With MSAA: the resolve target (the MSAA color stays ColorAttachmentOptimal)
+	colorFinalLayout := vk.ImageLayoutPresentSrcKhr // Default for swapchain
+	if !view.isSwapchain {
+		// Offscreen rendering
+		colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
+	}
+	if hasMSAAResolve {
+		// With resolve, the final layout applies to the resolve target.
+		// Check if the resolve target is a swapchain image.
+		if resolveView.isSwapchain {
+			colorFinalLayout = vk.ImageLayoutPresentSrcKhr
+		} else {
+			colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
+		}
+	}
+
 	// Build render pass key
 	rpKey := RenderPassKey{
 		ColorFormat:      colorFormat,
 		ColorLoadOp:      loadOpToVk(ca.LoadOp),
 		ColorStoreOp:     storeOpToVk(ca.StoreOp),
-		SampleCount:      vk.SampleCountFlagBits(1),
-		ColorFinalLayout: vk.ImageLayoutPresentSrcKhr, // For swapchain presentation
+		SampleCount:      sampleCount,
+		ColorFinalLayout: colorFinalLayout,
+		HasResolve:       hasMSAAResolve,
 	}
 
 	// Handle depth/stencil attachment
@@ -438,12 +475,20 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	rpe.renderPass = renderPass
 
-	// Build framebuffer key
+	// Build framebuffer key with all attachment views
 	fbKey := FramebufferKey{
 		RenderPass: renderPass,
-		ImageView:  view.handle,
+		ColorView:  view.handle,
 		Width:      renderWidth,
 		Height:     renderHeight,
+	}
+	if hasMSAAResolve {
+		fbKey.ResolveView = resolveView.handle
+	}
+	if desc.DepthStencilAttachment != nil {
+		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok {
+			fbKey.DepthView = dsView.handle
+		}
 	}
 
 	// Get or create framebuffer from cache
@@ -453,14 +498,22 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	rpe.framebuffer = framebuffer
 
-	// Prepare clear values
-	clearValues := make([]vk.ClearValue, 0, 2)
+	// Prepare clear values.
+	// Order MUST match attachment order in the render pass:
+	// [0] color, [1] resolve (if present), [2] depth/stencil (if present).
+	clearValues := make([]vk.ClearValue, 0, 3)
 	clearValues = append(clearValues, vk.ClearValueColor(
 		float32(ca.ClearValue.R),
 		float32(ca.ClearValue.G),
 		float32(ca.ClearValue.B),
 		float32(ca.ClearValue.A),
 	))
+
+	if hasMSAAResolve {
+		// Resolve attachment clear value (not used since LoadOp is DontCare,
+		// but Vulkan requires one clear value per attachment)
+		clearValues = append(clearValues, vk.ClearValueColor(0, 0, 0, 0))
+	}
 
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
@@ -481,6 +534,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 
 	vkCmdBeginRenderPass(e.device.cmds, e.cmdBuffer, &renderPassBegin, vk.SubpassContentsInline)
+	runtime.KeepAlive(clearValues)
 
 	// Set default viewport and scissor for the render area.
 	// These are required since the pipeline uses dynamic viewport/scissor state.
