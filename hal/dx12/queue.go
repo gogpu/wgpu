@@ -60,6 +60,9 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		}
 	}
 
+	// Drain debug messages after submission.
+	q.device.DrainDebugMessages()
+
 	// Signal the fence if provided
 	if fence != nil {
 		dx12Fence, ok := fence.(*Fence)
@@ -471,6 +474,9 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	if err := q.device.waitForGPU(); err != nil {
 		return fmt.Errorf("dx12: post-present GPU sync failed: %w", err)
 	}
+
+	// Drain debug messages after present.
+	q.device.DrainDebugMessages()
 
 	return nil
 }

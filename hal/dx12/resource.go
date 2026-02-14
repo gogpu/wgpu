@@ -196,7 +196,7 @@ type TextureView struct {
 func (v *TextureView) Destroy() {
 	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
 		if v.hasSRV {
-			v.device.viewHeap.Free(v.srvHeapIndex, 1)
+			v.device.stagingViewHeap.Free(v.srvHeapIndex, 1)
 		}
 		if v.hasRTV {
 			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
@@ -265,7 +265,7 @@ type Sampler struct {
 // Destroy releases the sampler resources and recycles the descriptor heap slot.
 func (s *Sampler) Destroy() {
 	if s.device != nil {
-		s.device.samplerHeap.Free(s.heapIndex, 1)
+		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
 	}
 }
 

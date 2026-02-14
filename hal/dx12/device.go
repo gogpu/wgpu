@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"sync"
 	"time"
@@ -32,10 +33,17 @@ type Device struct {
 	directQueue *d3d12.ID3D12CommandQueue
 
 	// Descriptor heaps (shared for all resources).
-	viewHeap    *DescriptorHeap // CBV/SRV/UAV
-	samplerHeap *DescriptorHeap // Samplers
-	rtvHeap     *DescriptorHeap // Render Target Views
-	dsvHeap     *DescriptorHeap // Depth Stencil Views
+	viewHeap    *DescriptorHeap // CBV/SRV/UAV (shader-visible, for bind groups)
+	samplerHeap *DescriptorHeap // Samplers (shader-visible, for bind groups)
+	rtvHeap     *DescriptorHeap // Render Target Views (non-shader-visible)
+	dsvHeap     *DescriptorHeap // Depth Stencil Views (non-shader-visible)
+
+	// Staging heaps (non-shader-visible, CPU-only) for creating SRVs and samplers.
+	// DX12 requires CopyDescriptorsSimple source to be in a non-shader-visible heap
+	// because shader-visible heaps use WRITE_COMBINE or GPU-local memory which is
+	// prohibitively slow to read from (Microsoft docs: ID3D12Device::CopyDescriptorsSimple).
+	stagingViewHeap    *DescriptorHeap // CBV/SRV/UAV staging
+	stagingSamplerHeap *DescriptorHeap // Sampler staging
 
 	// GPU synchronization.
 	fence      *d3d12.ID3D12Fence
@@ -51,6 +59,9 @@ type Device struct {
 	// has no resource bindings. This is lazily created on first use and shared
 	// across all pipelines that don't provide an explicit PipelineLayout.
 	emptyRootSignature *d3d12.ID3D12RootSignature
+
+	// Debug info queue for validation messages (nil when debug layer is off).
+	infoQueue *d3d12.ID3D12InfoQueue
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -170,6 +181,16 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 		return nil, err
 	}
 
+	// Query InfoQueue for debug messages (only available when debug layer is on).
+	if instance.flags&gputypes.InstanceFlagsDebug != 0 {
+		if iq := rawDevice.QueryInfoQueue(); iq != nil {
+			dev.infoQueue = iq
+			log.Printf("[DX12] InfoQueue attached — debug messages enabled")
+		} else {
+			log.Printf("[DX12] InfoQueue not available (debug layer may not be active)")
+		}
+	}
+
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(dev, (*Device).Destroy)
 
@@ -198,7 +219,7 @@ func (d *Device) createCommandQueue() error {
 func (d *Device) createDescriptorHeaps() error {
 	var err error
 
-	// CBV/SRV/UAV heap (shader visible)
+	// CBV/SRV/UAV heap (shader visible — for bind groups, referenced by GPU)
 	d.viewHeap, err = d.createHeap(
 		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 		1024*1024, // 1M descriptors for bindless
@@ -208,7 +229,19 @@ func (d *Device) createDescriptorHeaps() error {
 		return fmt.Errorf("dx12: failed to create CBV/SRV/UAV heap: %w", err)
 	}
 
-	// Sampler heap (shader visible)
+	// CBV/SRV/UAV staging heap (non-shader-visible — for creating SRVs)
+	// CopyDescriptorsSimple requires source in non-shader-visible heap because
+	// shader-visible heaps use WRITE_COMBINE memory that is slow/unreliable to read.
+	d.stagingViewHeap, err = d.createHeap(
+		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+		65536, // 64K staging descriptors
+		false, // non-shader-visible
+	)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to create staging CBV/SRV/UAV heap: %w", err)
+	}
+
+	// Sampler heap (shader visible — for bind groups, referenced by GPU)
 	d.samplerHeap, err = d.createHeap(
 		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
 		2048,
@@ -216,6 +249,16 @@ func (d *Device) createDescriptorHeaps() error {
 	)
 	if err != nil {
 		return fmt.Errorf("dx12: failed to create sampler heap: %w", err)
+	}
+
+	// Sampler staging heap (non-shader-visible — for creating samplers)
+	d.stagingSamplerHeap, err = d.createHeap(
+		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+		2048,
+		false,
+	)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to create staging sampler heap: %w", err)
 	}
 
 	// RTV heap (not shader visible)
@@ -355,8 +398,40 @@ func (d *Device) getOrCreateEmptyRootSignature() (*d3d12.ID3D12RootSignature, er
 	return rootSig, nil
 }
 
+// DrainDebugMessages reads and logs all pending messages from the D3D12 InfoQueue.
+// Returns the number of messages drained. No-op if debug layer is off.
+func (d *Device) DrainDebugMessages() int {
+	if d.infoQueue == nil {
+		return 0
+	}
+
+	count := d.infoQueue.GetNumStoredMessages()
+	if count == 0 {
+		return 0
+	}
+
+	for i := uint64(0); i < count; i++ {
+		msg := d.infoQueue.GetMessage(i)
+		if msg == nil {
+			continue
+		}
+		log.Printf("[DX12 %s] (ID:%d) %s", msg.Severity, msg.ID, msg.Description())
+	}
+	d.infoQueue.ClearStoredMessages()
+
+	return int(count)
+}
+
 // cleanup releases all device resources without clearing the finalizer.
 func (d *Device) cleanup() {
+	// Drain any remaining debug messages before releasing resources.
+	d.DrainDebugMessages()
+
+	if d.infoQueue != nil {
+		d.infoQueue.Release()
+		d.infoQueue = nil
+	}
+
 	if d.emptyRootSignature != nil {
 		d.emptyRootSignature.Release()
 		d.emptyRootSignature = nil
@@ -376,9 +451,17 @@ func (d *Device) cleanup() {
 		d.viewHeap.raw.Release()
 		d.viewHeap = nil
 	}
+	if d.stagingViewHeap != nil && d.stagingViewHeap.raw != nil {
+		d.stagingViewHeap.raw.Release()
+		d.stagingViewHeap = nil
+	}
 	if d.samplerHeap != nil && d.samplerHeap.raw != nil {
 		d.samplerHeap.raw.Release()
 		d.samplerHeap = nil
+	}
+	if d.stagingSamplerHeap != nil && d.stagingSamplerHeap.raw != nil {
+		d.stagingSamplerHeap.raw.Release()
+		d.stagingSamplerHeap = nil
 	}
 	if d.rtvHeap != nil && d.rtvHeap.raw != nil {
 		d.rtvHeap.raw.Release()
@@ -442,41 +525,46 @@ func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 	return handle, index, nil
 }
 
-// allocateSRVDescriptor allocates a shader resource view descriptor.
+// allocateSRVDescriptor allocates a shader resource view descriptor in the
+// non-shader-visible staging heap. SRVs are created here and later copied to
+// the shader-visible heap via CopyDescriptorsSimple in CreateBindGroup.
+// DX12 requires CopyDescriptorsSimple source to be non-shader-visible.
 func (d *Device) allocateSRVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.viewHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: SRV heap not initialized")
+	if d.stagingViewHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging SRV heap not initialized")
 	}
 
-	d.viewHeap.mu.Lock()
-	defer d.viewHeap.mu.Unlock()
+	d.stagingViewHeap.mu.Lock()
+	defer d.stagingViewHeap.mu.Unlock()
 
-	if d.viewHeap.nextFree >= d.viewHeap.capacity {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: CBV/SRV/UAV heap exhausted")
+	if d.stagingViewHeap.nextFree >= d.stagingViewHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging CBV/SRV/UAV heap exhausted")
 	}
 
-	index := d.viewHeap.nextFree
-	handle := d.viewHeap.cpuStart.Offset(int(index), d.viewHeap.incrementSize)
-	d.viewHeap.nextFree++
+	index := d.stagingViewHeap.nextFree
+	handle := d.stagingViewHeap.cpuStart.Offset(int(index), d.stagingViewHeap.incrementSize)
+	d.stagingViewHeap.nextFree++
 	return handle, index, nil
 }
 
-// allocateSamplerDescriptor allocates a sampler descriptor.
+// allocateSamplerDescriptor allocates a sampler descriptor in the
+// non-shader-visible staging heap. Samplers are created here and later copied
+// to the shader-visible heap via CopyDescriptorsSimple in CreateBindGroup.
 func (d *Device) allocateSamplerDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.samplerHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: sampler heap not initialized")
+	if d.stagingSamplerHeap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging sampler heap not initialized")
 	}
 
-	d.samplerHeap.mu.Lock()
-	defer d.samplerHeap.mu.Unlock()
+	d.stagingSamplerHeap.mu.Lock()
+	defer d.stagingSamplerHeap.mu.Unlock()
 
-	if d.samplerHeap.nextFree >= d.samplerHeap.capacity {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: sampler heap exhausted")
+	if d.stagingSamplerHeap.nextFree >= d.stagingSamplerHeap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging sampler heap exhausted")
 	}
 
-	index := d.samplerHeap.nextFree
-	handle := d.samplerHeap.cpuStart.Offset(int(index), d.samplerHeap.incrementSize)
-	d.samplerHeap.nextFree++
+	index := d.stagingSamplerHeap.nextFree
+	handle := d.stagingSamplerHeap.cpuStart.Offset(int(index), d.stagingSamplerHeap.incrementSize)
+	d.stagingSamplerHeap.nextFree++
 	return handle, index, nil
 }
 

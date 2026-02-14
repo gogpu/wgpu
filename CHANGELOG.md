@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DX12 staging descriptor heaps** — SRV and sampler descriptors are now created in
+  non-shader-visible staging heaps, then copied to shader-visible heaps via
+  `CopyDescriptorsSimple`. This follows the DX12 specification requirement that
+  `CopyDescriptorsSimple` source must be non-shader-visible (WRITE_COMBINE memory
+  is unreliable for reads). Prevents subtle rendering corruption on some hardware.
+- **DX12 descriptor recycling** — `TextureView.Destroy()` and `Sampler.Destroy()` now
+  free descriptors from the correct staging heaps, enabling proper slot reuse
+
+### Added
+
+- **DX12 InfoQueue** — debug message capture via `ID3D12InfoQueue` when debug layer
+  is enabled. Validation errors/warnings are logged after Submit and Present.
+  `DrainDebugMessages()` reads and logs all pending messages.
+
 ## [0.15.1] - 2026-02-13
 
 Critical fixes across DX12, Metal, and Vulkan backends.

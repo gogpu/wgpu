@@ -1435,3 +1435,165 @@ func (b *ID3DBlob) GetBufferSize() uintptr {
 	)
 	return ret
 }
+
+// -----------------------------------------------------------------------------
+// ID3D12Device QueryInterface for InfoQueue
+// -----------------------------------------------------------------------------
+
+// QueryInfoQueue queries the device for the ID3D12InfoQueue interface.
+// Returns nil if the debug layer is not enabled or InfoQueue is unavailable.
+func (d *ID3D12Device) QueryInfoQueue() *ID3D12InfoQueue {
+	var infoQueue *ID3D12InfoQueue
+	ret, _, _ := syscall.Syscall(
+		d.vtbl.QueryInterface,
+		3,
+		uintptr(unsafe.Pointer(d)),
+		uintptr(unsafe.Pointer(&IID_ID3D12InfoQueue)),
+		uintptr(unsafe.Pointer(&infoQueue)),
+	)
+	if ret != 0 {
+		return nil
+	}
+	return infoQueue
+}
+
+// -----------------------------------------------------------------------------
+// ID3D12InfoQueue methods
+// -----------------------------------------------------------------------------
+
+// Release decrements the reference count.
+func (q *ID3D12InfoQueue) Release() uint32 {
+	ret, _, _ := syscall.Syscall(
+		q.vtbl.Release,
+		1,
+		uintptr(unsafe.Pointer(q)),
+		0, 0,
+	)
+	return uint32(ret)
+}
+
+// GetNumStoredMessages returns the number of messages stored in the queue.
+func (q *ID3D12InfoQueue) GetNumStoredMessages() uint64 {
+	ret, _, _ := syscall.Syscall(
+		q.vtbl.GetNumStoredMessages,
+		1,
+		uintptr(unsafe.Pointer(q)),
+		0, 0,
+	)
+	return uint64(ret)
+}
+
+// D3D12MessageSeverity represents the severity of a debug message.
+type D3D12MessageSeverity int32
+
+const (
+	D3D12MessageSeverityCorruption D3D12MessageSeverity = 0
+	D3D12MessageSeverityError      D3D12MessageSeverity = 1
+	D3D12MessageSeverityWarning    D3D12MessageSeverity = 2
+	D3D12MessageSeverityInfo       D3D12MessageSeverity = 3
+	D3D12MessageSeverityMessage    D3D12MessageSeverity = 4
+)
+
+// String returns a human-readable severity name.
+func (s D3D12MessageSeverity) String() string {
+	switch s {
+	case D3D12MessageSeverityCorruption:
+		return "CORRUPTION"
+	case D3D12MessageSeverityError:
+		return "ERROR"
+	case D3D12MessageSeverityWarning:
+		return "WARNING"
+	case D3D12MessageSeverityInfo:
+		return "INFO"
+	case D3D12MessageSeverityMessage:
+		return "MESSAGE"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// D3D12Message represents a debug message from the D3D12 runtime.
+// Layout must match the native D3D12_MESSAGE struct.
+type D3D12Message struct {
+	Category              int32
+	Severity              D3D12MessageSeverity
+	ID                    int32
+	PDescription          *byte
+	DescriptionByteLength uintptr
+}
+
+// Description returns the message text as a Go string.
+func (m *D3D12Message) Description() string {
+	if m.PDescription == nil || m.DescriptionByteLength == 0 {
+		return ""
+	}
+	// Exclude null terminator if present.
+	n := m.DescriptionByteLength
+	if n > 0 {
+		n--
+	}
+	return string(unsafe.Slice(m.PDescription, n))
+}
+
+// GetMessage retrieves a message by index. The caller must free the returned
+// buffer with CoTaskMemFree (or just let Go GC it since we copy the data).
+// Returns nil if the index is out of range or the call fails.
+func (q *ID3D12InfoQueue) GetMessage(index uint64) *D3D12Message {
+	// First call: get required buffer size.
+	var msgSize uintptr
+	ret, _, _ := syscall.Syscall6(
+		q.vtbl.GetMessage,
+		4,
+		uintptr(unsafe.Pointer(q)),
+		uintptr(index),
+		0, // pMessage = nil → query size
+		uintptr(unsafe.Pointer(&msgSize)),
+		0, 0,
+	)
+	if ret != 0 || msgSize == 0 {
+		return nil
+	}
+
+	// Allocate buffer and retrieve the message.
+	buf := make([]byte, msgSize)
+	ret, _, _ = syscall.Syscall6(
+		q.vtbl.GetMessage,
+		4,
+		uintptr(unsafe.Pointer(q)),
+		uintptr(index),
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&msgSize)),
+		0, 0,
+	)
+	if ret != 0 {
+		return nil
+	}
+
+	// The buffer starts with D3D12_MESSAGE header.
+	msg := (*D3D12Message)(unsafe.Pointer(&buf[0]))
+
+	// Copy the message to a standalone struct so buf can be GC'd independently.
+	result := &D3D12Message{
+		Category:              msg.Category,
+		Severity:              msg.Severity,
+		ID:                    msg.ID,
+		DescriptionByteLength: msg.DescriptionByteLength,
+	}
+	if msg.PDescription != nil && msg.DescriptionByteLength > 0 {
+		descCopy := make([]byte, msg.DescriptionByteLength)
+		copy(descCopy, unsafe.Slice(msg.PDescription, msg.DescriptionByteLength))
+		result.PDescription = &descCopy[0]
+	}
+
+	return result
+}
+
+// ClearStoredMessages clears all stored messages from the queue.
+func (q *ID3D12InfoQueue) ClearStoredMessages() {
+	_, _, _ = syscall.Syscall(
+		q.vtbl.ClearStoredMessages,
+		1,
+		uintptr(unsafe.Pointer(q)),
+		0, 0,
+	)
+}
