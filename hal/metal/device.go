@@ -666,19 +666,19 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 }
 
 // CreateCommandEncoder creates a command encoder.
+//
+// The Metal command buffer is NOT created here — it is deferred to BeginEncoding.
+// This matches the two-step pattern used by Vulkan (allocate → vkBeginCommandBuffer)
+// and DX12 (create list → Reset). Creating the command buffer eagerly here would
+// conflict with BeginEncoding's guard (cmdBuffer != 0 → "already recording"),
+// causing every subsequent BeginEncoding call to fail and leak the pre-allocated
+// command buffer and its autorelease pool.
 func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	pool := NewAutoreleasePool()
-	cmdBuffer := MsgSend(d.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
-		pool.Drain()
-		return nil, fmt.Errorf("metal: failed to create command buffer")
-	}
-	Retain(cmdBuffer)
 	label := ""
 	if desc != nil {
 		label = desc.Label
 	}
-	return &CommandEncoder{device: d, cmdBuffer: cmdBuffer, pool: pool, label: label}, nil
+	return &CommandEncoder{device: d, label: label}, nil
 }
 
 // CreateFence creates a synchronization fence.

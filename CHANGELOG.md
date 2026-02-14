@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Metal command buffer leak** — `CreateCommandEncoder` eagerly created a Metal
+  command buffer, conflicting with `BeginEncoding`'s guard (`cmdBuffer != 0`).
+  Every `BeginEncoding` call returned "already recording" error, and the pre-allocated
+  command buffer + autorelease pool were never released. At 60fps this leaked ~30GB
+  in minutes. Fix: defer command buffer creation to `BeginEncoding`, matching the
+  two-step pattern used by Vulkan and DX12 backends. (Fixes [#55])
 - **DX12 staging descriptor heaps** — SRV and sampler descriptors are now created in
   non-shader-visible staging heaps, then copied to shader-visible heaps via
   `CopyDescriptorsSimple`. This follows the DX12 specification requirement that
@@ -754,7 +760,9 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.15.0...HEAD
+[#55]: https://github.com/gogpu/wgpu/issues/55
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/gogpu/wgpu/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/gogpu/wgpu/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/gogpu/wgpu/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/gogpu/wgpu/compare/v0.13.1...v0.13.2
