@@ -481,21 +481,69 @@ type RenderPassEncoder struct {
 }
 
 // End finishes the render pass.
-// Automatically transitions surface textures back from RENDER_TARGET to PRESENT state.
+// Handles MSAA resolve (if ResolveTarget is set) and transitions surface
+// textures back to PRESENT state for presentation.
 func (e *RenderPassEncoder) End() {
 	if e.desc == nil || e.encoder == nil || !e.encoder.isRecording {
 		return
 	}
 
-	// Transition surface textures from RENDER_TARGET back to PRESENT state.
 	for _, ca := range e.desc.ColorAttachments {
-		view, ok := ca.View.(*TextureView)
-		if !ok || view.texture == nil || view.texture.raw == nil {
+		msaaView, ok := ca.View.(*TextureView)
+		if !ok || msaaView.texture == nil || msaaView.texture.raw == nil {
 			continue
 		}
-		if view.texture.isExternal {
+
+		// Check for MSAA resolve target.
+		resolveView, _ := ca.ResolveTarget.(*TextureView)
+		if resolveView != nil && resolveView.texture != nil && resolveView.texture.raw != nil && msaaView.texture.samples > 1 {
+			// MSAA resolve: render target → resolve source, surface → resolve dest.
+			b1 := d3d12.NewTransitionBarrier(
+				msaaView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			b2 := d3d12.NewTransitionBarrier(
+				resolveView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			barriers := [2]d3d12.D3D12_RESOURCE_BARRIER{b1, b2}
+			e.encoder.cmdList.ResourceBarrier(2, &barriers[0])
+
+			// Resolve MSAA → single-sample.
+			format := textureFormatToD3D12(msaaView.texture.format)
+			e.encoder.cmdList.ResolveSubresource(
+				resolveView.texture.raw, 0,
+				msaaView.texture.raw, 0,
+				format,
+			)
+
+			// Transition back: MSAA → render target (for next frame),
+			// surface → present (for Present call).
+			b3 := d3d12.NewTransitionBarrier(
+				msaaView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			b4 := d3d12.NewTransitionBarrier(
+				resolveView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			barriers2 := [2]d3d12.D3D12_RESOURCE_BARRIER{b3, b4}
+			e.encoder.cmdList.ResourceBarrier(2, &barriers2[0])
+			continue
+		}
+
+		// No resolve — just transition external surface back to PRESENT.
+		if msaaView.texture.isExternal {
 			barrier := d3d12.NewTransitionBarrier(
-				view.texture.raw,
+				msaaView.texture.raw,
 				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
 				d3d12.D3D12_RESOURCE_STATE_PRESENT,
 				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,

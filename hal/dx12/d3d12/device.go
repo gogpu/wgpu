@@ -755,6 +755,20 @@ func (c *ID3D12GraphicsCommandList) CopyResource(dstResource, srcResource *ID3D1
 	)
 }
 
+// ResolveSubresource resolves a multisampled resource into a non-multisampled resource.
+func (c *ID3D12GraphicsCommandList) ResolveSubresource(dstResource *ID3D12Resource, dstSubresource uint32, srcResource *ID3D12Resource, srcSubresource uint32, format DXGI_FORMAT) {
+	_, _, _ = syscall.Syscall6(
+		c.vtbl.ResolveSubresource,
+		6,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(unsafe.Pointer(dstResource)),
+		uintptr(dstSubresource),
+		uintptr(unsafe.Pointer(srcResource)),
+		uintptr(srcSubresource),
+		uintptr(format),
+	)
+}
+
 // IASetPrimitiveTopology sets the primitive topology.
 func (c *ID3D12GraphicsCommandList) IASetPrimitiveTopology(topology D3D_PRIMITIVE_TOPOLOGY) {
 	_, _, _ = syscall.Syscall(

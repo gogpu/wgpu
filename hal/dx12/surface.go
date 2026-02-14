@@ -113,6 +113,11 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		return err
 	}
 
+	// Verify device is still healthy after swapchain creation.
+	if err := device.checkHealth("createSwapchain"); err != nil {
+		return err
+	}
+
 	return nil
 }
 

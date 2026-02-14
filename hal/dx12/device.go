@@ -62,6 +62,9 @@ type Device struct {
 
 	// Debug info queue for validation messages (nil when debug layer is off).
 	infoQueue *d3d12.ID3D12InfoQueue
+
+	// Debug: operation step counter for tracking which call kills the device.
+	debugStep int
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -398,6 +401,24 @@ func (d *Device) getOrCreateEmptyRootSignature() (*d3d12.ID3D12RootSignature, er
 	return rootSig, nil
 }
 
+// checkHealth verifies the device is still alive and logs the current step.
+// Returns an error if the device has been removed.
+func (d *Device) checkHealth(operation string) error {
+	d.debugStep++
+	d.DrainDebugMessages()
+	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+		log.Printf("[DX12] DEVICE KILLED at step %d: %s — %v", d.debugStep, operation, reason)
+		return fmt.Errorf("dx12: device removed at step %d (%s): %w", d.debugStep, operation, reason)
+	}
+	return nil
+}
+
+// CheckHealth is a public diagnostic method that checks if the DX12 device
+// is still operational. Returns nil if healthy, or an error with the removal reason.
+func (d *Device) CheckHealth(label string) error {
+	return d.checkHealth(label)
+}
+
 // DrainDebugMessages reads and logs all pending messages from the D3D12 InfoQueue.
 // Returns the number of messages drained. No-op if debug layer is off.
 func (d *Device) DrainDebugMessages() int {
@@ -488,6 +509,7 @@ func (d *Device) cleanup() {
 // -----------------------------------------------------------------------------
 
 // allocateRTVDescriptor allocates a render target view descriptor.
+// Recycles freed slots before bumping the watermark.
 func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
 	if d.rtvHeap == nil {
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap not initialized")
@@ -495,6 +517,14 @@ func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 
 	d.rtvHeap.mu.Lock()
 	defer d.rtvHeap.mu.Unlock()
+
+	// Prefer recycled slots.
+	if len(d.rtvHeap.freeList) > 0 {
+		idx := d.rtvHeap.freeList[len(d.rtvHeap.freeList)-1]
+		d.rtvHeap.freeList = d.rtvHeap.freeList[:len(d.rtvHeap.freeList)-1]
+		handle := d.rtvHeap.cpuStart.Offset(int(idx), d.rtvHeap.incrementSize)
+		return handle, idx, nil
+	}
 
 	if d.rtvHeap.nextFree >= d.rtvHeap.capacity {
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap exhausted")
@@ -507,6 +537,7 @@ func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 }
 
 // allocateDSVDescriptor allocates a depth stencil view descriptor.
+// Recycles freed slots before bumping the watermark.
 func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
 	if d.dsvHeap == nil {
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap not initialized")
@@ -514,6 +545,14 @@ func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 
 	d.dsvHeap.mu.Lock()
 	defer d.dsvHeap.mu.Unlock()
+
+	// Prefer recycled slots.
+	if len(d.dsvHeap.freeList) > 0 {
+		idx := d.dsvHeap.freeList[len(d.dsvHeap.freeList)-1]
+		d.dsvHeap.freeList = d.dsvHeap.freeList[:len(d.dsvHeap.freeList)-1]
+		handle := d.dsvHeap.cpuStart.Offset(int(idx), d.dsvHeap.incrementSize)
+		return handle, idx, nil
+	}
 
 	if d.dsvHeap.nextFree >= d.dsvHeap.capacity {
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap exhausted")
@@ -687,6 +726,13 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		return nil, fmt.Errorf("dx12: texture size must be > 0")
 	}
 
+	// Check device health before allocating resources.
+	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+		d.DrainDebugMessages() // Print validation errors that killed the device
+		return nil, fmt.Errorf("dx12: device already removed before CreateTexture (format=%d, samples=%d): %w",
+			desc.Format, desc.SampleCount, reason)
+	}
+
 	// Convert format
 	dxgiFormat := textureFormatToD3D12(desc.Format)
 	if dxgiFormat == d3d12.DXGI_FORMAT_UNKNOWN {
@@ -796,10 +842,15 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		clearValue,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed: %w", err)
+		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+			return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed (device removed: %v, format=%d, samples=%d, %dx%d, flags=0x%x): %w",
+				reason, createFormat, sampleCount, desc.Size.Width, desc.Size.Height, resourceFlags, err)
+		}
+		return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed (format=%d, samples=%d, %dx%d, flags=0x%x): %w",
+			createFormat, sampleCount, desc.Size.Width, desc.Size.Height, resourceFlags, err)
 	}
 
-	return &Texture{
+	tex := &Texture{
 		raw:       resource,
 		format:    desc.Format,
 		dimension: desc.Dimension,
@@ -812,8 +863,17 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		samples:      sampleCount,
 		usage:        desc.Usage,
 		device:       d,
-		currentState: initialState, // Track initial resource state for barrier correctness
-	}, nil
+		currentState: initialState,
+	}
+
+	// Post-creation health check: detect if CreateCommittedResource silently poisoned the device.
+	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+		d.DrainDebugMessages()
+		log.Printf("[DX12] device died DURING CreateTexture (format=%d, samples=%d, %dx%d, flags=0x%x): %v",
+			createFormat, sampleCount, desc.Size.Width, desc.Size.Height, resourceFlags, reason)
+	}
+
+	return tex, nil
 }
 
 // DestroyTexture destroys a GPU texture.
@@ -921,6 +981,8 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	dxgiFormat := textureFormatToD3D12(viewFormat)
 
+	isMultisampled := tex.samples > 1
+
 	// Create RTV if texture supports render attachment and is not depth
 	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
 		// Allocate RTV descriptor
@@ -929,22 +991,31 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			return nil, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err)
 		}
 
-		// Create RTV desc
-		rtvDesc := d3d12.D3D12_RENDER_TARGET_VIEW_DESC{
-			Format:        dxgiFormat,
-			ViewDimension: textureViewDimensionToRTV(viewDim),
-		}
-
-		// Set up dimension-specific fields
-		switch viewDim {
-		case gputypes.TextureViewDimension1D:
-			rtvDesc.SetTexture1D(baseMip)
-		case gputypes.TextureViewDimension2D:
-			rtvDesc.SetTexture2D(baseMip, 0)
-		case gputypes.TextureViewDimension2DArray:
-			rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
-		case gputypes.TextureViewDimension3D:
-			rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
+		var rtvDesc d3d12.D3D12_RENDER_TARGET_VIEW_DESC
+		if isMultisampled && viewDim == gputypes.TextureViewDimension2D {
+			// MSAA textures require TEXTURE2DMS view dimension.
+			// Using TEXTURE2D for multi-sampled resources is invalid and
+			// causes DX12 DEVICE_REMOVED on some drivers (Intel Iris Xe).
+			rtvDesc = d3d12.D3D12_RENDER_TARGET_VIEW_DESC{
+				Format:        dxgiFormat,
+				ViewDimension: d3d12.D3D12_RTV_DIMENSION_TEXTURE2DMS,
+			}
+			// TEXTURE2DMS has no additional fields (no MipSlice, etc.)
+		} else {
+			rtvDesc = d3d12.D3D12_RENDER_TARGET_VIEW_DESC{
+				Format:        dxgiFormat,
+				ViewDimension: textureViewDimensionToRTV(viewDim),
+			}
+			switch viewDim {
+			case gputypes.TextureViewDimension1D:
+				rtvDesc.SetTexture1D(baseMip)
+			case gputypes.TextureViewDimension2D:
+				rtvDesc.SetTexture2D(baseMip, 0)
+			case gputypes.TextureViewDimension2DArray:
+				rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
+			case gputypes.TextureViewDimension3D:
+				rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
+			}
 		}
 
 		d.raw.CreateRenderTargetView(tex.raw, &rtvDesc, rtvHandle)
@@ -964,21 +1035,29 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// For depth views, use the actual depth format, not typeless
 		depthFormat := textureFormatToD3D12(viewFormat)
 
-		// Create DSV desc
-		dsvDesc := d3d12.D3D12_DEPTH_STENCIL_VIEW_DESC{
-			Format:        depthFormat,
-			ViewDimension: textureViewDimensionToDSV(viewDim),
-			Flags:         0,
-		}
-
-		// Set up dimension-specific fields
-		switch viewDim {
-		case gputypes.TextureViewDimension1D:
-			dsvDesc.SetTexture1D(baseMip)
-		case gputypes.TextureViewDimension2D:
-			dsvDesc.SetTexture2D(baseMip)
-		case gputypes.TextureViewDimension2DArray:
-			dsvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount)
+		var dsvDesc d3d12.D3D12_DEPTH_STENCIL_VIEW_DESC
+		if isMultisampled && viewDim == gputypes.TextureViewDimension2D {
+			// MSAA depth/stencil textures require TEXTURE2DMS view dimension.
+			dsvDesc = d3d12.D3D12_DEPTH_STENCIL_VIEW_DESC{
+				Format:        depthFormat,
+				ViewDimension: d3d12.D3D12_DSV_DIMENSION_TEXTURE2DMS,
+				Flags:         0,
+			}
+			// TEXTURE2DMS has no additional fields.
+		} else {
+			dsvDesc = d3d12.D3D12_DEPTH_STENCIL_VIEW_DESC{
+				Format:        depthFormat,
+				ViewDimension: textureViewDimensionToDSV(viewDim),
+				Flags:         0,
+			}
+			switch viewDim {
+			case gputypes.TextureViewDimension1D:
+				dsvDesc.SetTexture1D(baseMip)
+			case gputypes.TextureViewDimension2D:
+				dsvDesc.SetTexture2D(baseMip)
+			case gputypes.TextureViewDimension2DArray:
+				dsvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount)
+			}
 		}
 
 		d.raw.CreateDepthStencilView(tex.raw, &dsvDesc, dsvHandle)
@@ -1268,6 +1347,10 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 		bgLayouts[i] = bgLayout
 	}
 
+	if err := d.checkHealth("CreatePipelineLayout(" + desc.Label + ")"); err != nil {
+		rootSig.Release()
+		return nil, err
+	}
 	return &PipelineLayout{
 		rootSignature:    rootSig,
 		bindGroupLayouts: bgLayouts,
@@ -1314,6 +1397,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		return nil, fmt.Errorf("dx12: no shader source provided (need WGSL or SPIRV)")
 	}
 
+	if err := d.checkHealth("CreateShaderModule(" + desc.Label + ")"); err != nil {
+		return nil, err
+	}
 	return module, nil
 }
 
@@ -1409,7 +1495,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Create the pipeline state object
 	pso, err := d.raw.CreateGraphicsPipelineState(psoDesc)
+	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
+		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+			return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed (device removed: %v): %w", reason, err)
+		}
 		return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed: %w", err)
 	}
 
@@ -1434,6 +1524,10 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		vertexStrides[i] = uint32(buf.ArrayStride)
 	}
 
+	if err := d.checkHealth("CreateRenderPipeline(" + desc.Label + ")"); err != nil {
+		pso.Release()
+		return nil, err
+	}
 	return &RenderPipeline{
 		pso:           pso,
 		rootSignature: rootSig,
@@ -1499,10 +1593,18 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 
 	// Create the pipeline state object
 	pso, err := d.raw.CreateComputePipelineState(&psoDesc)
+	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
+		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+			return nil, fmt.Errorf("dx12: CreateComputePipelineState failed (device removed: %v): %w", reason, err)
+		}
 		return nil, fmt.Errorf("dx12: CreateComputePipelineState failed: %w", err)
 	}
 
+	if err := d.checkHealth("CreateComputePipeline"); err != nil {
+		pso.Release()
+		return nil, err
+	}
 	return &ComputePipeline{
 		pso:           pso,
 		rootSignature: rootSig,
