@@ -181,10 +181,13 @@ func (p *ComputePipeline) Destroy() {
 	}
 }
 
-// Fence implements hal.Fence for Metal.
+// Fence implements hal.Fence for Metal using MTLSharedEvent.
+//
+// MTLSharedEvent (unlike MTLEvent) exposes signaledValue to the CPU,
+// enabling proper blocking waits and non-blocking status queries.
+// The GPU updates signaledValue when encodeSignalEvent:value: completes.
 type Fence struct {
-	event  ID // id<MTLEvent>
-	value  uint64
+	event  ID // id<MTLSharedEvent>
 	device *Device
 }
 

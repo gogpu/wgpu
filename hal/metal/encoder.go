@@ -371,17 +371,50 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	_ = MsgSend(e.raw, Sel("setRenderPipelineState:"), uintptr(p.raw))
 }
 
-// SetBindGroup sets a bind group.
+// SetBindGroup sets a bind group by binding each resource directly on the encoder.
+//
+// Metal does not use argument buffers for basic resource binding. Instead, resources
+// are set individually via setVertexBuffer/setFragmentBuffer, setVertexTexture/
+// setFragmentTexture, and setVertexSamplerState/setFragmentSamplerState.
+//
+// The Metal binding index matches the WGSL @binding(N) value because naga MSL
+// auto-generates [[buffer(N)]], [[texture(N)]], [[sampler(N)]] attributes directly
+// from the binding number when PerEntryPointMap is nil.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || bg == nil {
 		return
 	}
-	// Metal argument buffers would be used here for real bind group support
-	// For now, this is a simplified implementation
-	_ = bg
-	_ = index
-	_ = offsets
+
+	var dynamicIdx int
+	for _, entry := range bg.entries {
+		slot := uintptr(entry.Binding)
+
+		switch res := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			offset := uintptr(res.Offset)
+			// Apply dynamic offset if the layout entry has HasDynamicOffset.
+			if dynamicIdx < len(offsets) && bg.layout != nil {
+				for _, le := range bg.layout.entries {
+					if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
+						offset += uintptr(offsets[dynamicIdx])
+						dynamicIdx++
+						break
+					}
+				}
+			}
+			_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), res.Buffer, offset, slot)
+			_ = MsgSend(e.raw, Sel("setFragmentBuffer:offset:atIndex:"), res.Buffer, offset, slot)
+
+		case gputypes.TextureViewBinding:
+			_ = MsgSend(e.raw, Sel("setVertexTexture:atIndex:"), res.TextureView, slot)
+			_ = MsgSend(e.raw, Sel("setFragmentTexture:atIndex:"), res.TextureView, slot)
+
+		case gputypes.SamplerBinding:
+			_ = MsgSend(e.raw, Sel("setVertexSamplerState:atIndex:"), res.Sampler, slot)
+			_ = MsgSend(e.raw, Sel("setFragmentSamplerState:atIndex:"), res.Sampler, slot)
+		}
+	}
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -511,15 +544,40 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	_ = MsgSend(e.raw, Sel("setComputePipelineState:"), uintptr(p.raw))
 }
 
-// SetBindGroup sets a bind group.
+// SetBindGroup sets a bind group by binding each resource directly on the compute encoder.
+//
+// See RenderPassEncoder.SetBindGroup for the binding index convention.
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || bg == nil {
 		return
 	}
-	_ = bg
-	_ = index
-	_ = offsets
+
+	var dynamicIdx int
+	for _, entry := range bg.entries {
+		slot := uintptr(entry.Binding)
+
+		switch res := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			offset := uintptr(res.Offset)
+			if dynamicIdx < len(offsets) && bg.layout != nil {
+				for _, le := range bg.layout.entries {
+					if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
+						offset += uintptr(offsets[dynamicIdx])
+						dynamicIdx++
+						break
+					}
+				}
+			}
+			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.Buffer, offset, slot)
+
+		case gputypes.TextureViewBinding:
+			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.TextureView, slot)
+
+		case gputypes.SamplerBinding:
+			_ = MsgSend(e.raw, Sel("setSamplerState:atIndex:"), res.Sampler, slot)
+		}
+	}
 }
 
 // Dispatch dispatches compute workgroups.

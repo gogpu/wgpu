@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -681,13 +682,16 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 	return &CommandEncoder{device: d, label: label}, nil
 }
 
-// CreateFence creates a synchronization fence.
+// CreateFence creates a synchronization fence backed by MTLSharedEvent.
+//
+// MTLSharedEvent (unlike MTLEvent) exposes a signaledValue property readable
+// from the CPU, enabling proper blocking waits and non-blocking status queries.
 func (d *Device) CreateFence() (hal.Fence, error) {
-	event := MsgSend(d.raw, Sel("newEvent"))
+	event := MsgSend(d.raw, Sel("newSharedEvent"))
 	if event == 0 {
-		return nil, fmt.Errorf("metal: failed to create event")
+		return nil, fmt.Errorf("metal: failed to create shared event")
 	}
-	return &Fence{event: event, value: 0, device: d}, nil
+	return &Fence{event: event, device: d}, nil
 }
 
 // DestroyFence destroys a fence.
@@ -703,35 +707,68 @@ func (d *Device) DestroyFence(fence hal.Fence) {
 	mtlFence.device = nil
 }
 
-// Wait waits for a fence to reach the specified value.
+// Wait waits for a fence to reach the specified value by polling MTLSharedEvent.signaledValue.
+//
+// MTLSharedEvent.signaledValue is updated by the GPU when the event is signaled.
+// This method polls with progressive backoff (spin → yield → 1ms sleep) to
+// balance latency against CPU usage.
 func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (bool, error) {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return false, fmt.Errorf("metal: invalid fence")
 	}
-	if mtlFence.value >= value {
+
+	// Fast path: already signaled.
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	if uint64(signaled) >= value {
 		return true, nil
 	}
-	return false, nil
+
+	// Poll with progressive backoff until timeout.
+	deadline := time.Now().Add(timeout)
+	spins := 0
+	for {
+		signaled = MsgSendUint(mtlFence.event, Sel("signaledValue"))
+		if uint64(signaled) >= value {
+			return true, nil
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+
+		// Progressive backoff: first 100 iterations spin, then yield, then sleep.
+		spins++
+		switch {
+		case spins < 100:
+			// Busy spin for low-latency scenarios.
+		case spins < 200:
+			runtime.Gosched()
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 // ResetFence resets a fence to the unsignaled state.
+// Sets the MTLSharedEvent.signaledValue to 0 via Objective-C message send.
 func (d *Device) ResetFence(fence hal.Fence) error {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return fmt.Errorf("metal: invalid fence")
 	}
-	mtlFence.value = 0
+	_ = MsgSend(mtlFence.event, Sel("setSignaledValue:"), uintptr(0))
 	return nil
 }
 
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
+// Reads the GPU-updated signaledValue from MTLSharedEvent.
 func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return false, fmt.Errorf("metal: invalid fence")
 	}
-	return mtlFence.value > 0, nil
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	return signaled > 0, nil
 }
 
 // FreeCommandBuffer releases a submitted command buffer and its autorelease pool.
