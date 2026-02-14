@@ -850,6 +850,14 @@ func bufferUsageToAccessAndStage(usage gputypes.BufferUsage) (vk.AccessFlags, vk
 
 //nolint:unparam // stage will be used when barrier optimization is implemented
 func textureUsageToAccessStageLayout(usage gputypes.TextureUsage) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
+	// Usage 0 means "initial/undefined" — the image has no prior usage.
+	// Newly created Vulkan images start in VK_IMAGE_LAYOUT_UNDEFINED.
+	// Using ImageLayoutGeneral here would lie about the old layout,
+	// causing validation errors and undefined behavior on the barrier.
+	if usage == 0 {
+		return 0, vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit), vk.ImageLayoutUndefined
+	}
+
 	var access vk.AccessFlags
 	var stage vk.PipelineStageFlags
 	layout := vk.ImageLayoutGeneral

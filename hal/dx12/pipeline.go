@@ -126,11 +126,24 @@ type BindGroup struct {
 	gpuDescHandle    d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for CBV/SRV/UAV table
 	samplerGPUHandle d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for sampler table
 	device           *Device
+
+	// Tracked allocation indices for descriptor recycling
+	viewHeapIndex    uint32
+	viewCount        uint32
+	samplerHeapIndex uint32
+	samplerCount     uint32
 }
 
-// Destroy releases the bind group resources.
-// Note: Descriptors are managed by heaps; we just clear references.
+// Destroy releases the bind group resources and recycles descriptor heap slots.
 func (g *BindGroup) Destroy() {
+	if g.device != nil {
+		if g.viewCount > 0 {
+			g.device.viewHeap.Free(g.viewHeapIndex, g.viewCount)
+		}
+		if g.samplerCount > 0 {
+			g.device.samplerHeap.Free(g.samplerHeapIndex, g.samplerCount)
+		}
+	}
 	g.layout = nil
 	g.device = nil
 }
@@ -579,11 +592,11 @@ func boolToInt32(b bool) int32 {
 
 // RenderPipeline implements hal.RenderPipeline for DirectX 12.
 type RenderPipeline struct {
-	pso            *d3d12.ID3D12PipelineState
-	rootSignature  *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings  []rootParamMapping         // bind group → root param index mapping
-	topology       d3d12.D3D_PRIMITIVE_TOPOLOGY
-	vertexStrides  []uint32 // Strides per vertex buffer slot
+	pso           *d3d12.ID3D12PipelineState
+	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings []rootParamMapping         // bind group → root param index mapping
+	topology      d3d12.D3D_PRIMITIVE_TOPOLOGY
+	vertexStrides []uint32 // Strides per vertex buffer slot
 }
 
 // Destroy releases the render pipeline resources.
@@ -623,9 +636,9 @@ func (p *RenderPipeline) VertexStrides() []uint32 {
 
 // ComputePipeline implements hal.ComputePipeline for DirectX 12.
 type ComputePipeline struct {
-	pso            *d3d12.ID3D12PipelineState
-	rootSignature  *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings  []rootParamMapping         // bind group → root param index mapping
+	pso           *d3d12.ID3D12PipelineState
+	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings []rootParamMapping         // bind group → root param index mapping
 }
 
 // Destroy releases the compute pipeline resources.

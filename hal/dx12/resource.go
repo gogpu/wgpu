@@ -190,11 +190,21 @@ type TextureView struct {
 	dsvHeapIndex uint32
 }
 
-// Destroy releases the texture view resources.
-// Note: Descriptors are not freed back to the heap in this simple implementation.
-// A proper implementation would use a free list.
+// Destroy releases the texture view resources and recycles descriptor heap slots.
+// For external (surface) texture views, descriptor slots are NOT freed because
+// the Surface owns them and manages their lifecycle via releaseBackBuffers().
 func (v *TextureView) Destroy() {
-	// Descriptors are managed by heaps; we just clear references
+	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
+		if v.hasSRV {
+			v.device.viewHeap.Free(v.srvHeapIndex, 1)
+		}
+		if v.hasRTV {
+			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
+		}
+		if v.hasDSV {
+			v.device.dsvHeap.Free(v.dsvHeapIndex, 1)
+		}
+	}
 	v.hasSRV = false
 	v.hasRTV = false
 	v.hasDSV = false
@@ -252,9 +262,11 @@ type Sampler struct {
 	device    *Device
 }
 
-// Destroy releases the sampler resources.
+// Destroy releases the sampler resources and recycles the descriptor heap slot.
 func (s *Sampler) Destroy() {
-	// Sampler descriptors are managed by the heap
+	if s.device != nil {
+		s.device.samplerHeap.Free(s.heapIndex, 1)
+	}
 }
 
 // Handle returns the sampler descriptor handle.

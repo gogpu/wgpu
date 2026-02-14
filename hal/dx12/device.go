@@ -54,6 +54,9 @@ type Device struct {
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
+// Supports descriptor recycling via a free list — freed indices are reused
+// before bumping the linear allocator. This prevents heap exhaustion during
+// operations like swapchain resize that repeatedly allocate/free RTVs.
 type DescriptorHeap struct {
 	raw           *d3d12.ID3D12DescriptorHeap
 	heapType      d3d12.D3D12_DESCRIPTOR_HEAP_TYPE
@@ -62,17 +65,28 @@ type DescriptorHeap struct {
 	incrementSize uint32
 	capacity      uint32
 	nextFree      uint32
+	freeList      []uint32 // Recycled descriptor indices (LIFO stack)
 	mu            sync.Mutex
 }
 
 // Allocate allocates descriptors from the heap.
 // Returns the CPU handle for the first allocated descriptor.
+// For single-descriptor allocations, recycled slots are preferred.
 func (h *DescriptorHeap) Allocate(count uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// Recycle from free list for single-descriptor allocations
+	if count == 1 && len(h.freeList) > 0 {
+		idx := h.freeList[len(h.freeList)-1]
+		h.freeList = h.freeList[:len(h.freeList)-1]
+		handle := h.cpuStart.Offset(int(idx), h.incrementSize)
+		return handle, nil
+	}
+
 	if h.nextFree+count > h.capacity {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: descriptor heap exhausted")
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: descriptor heap exhausted (capacity=%d, used=%d, requested=%d)",
+			h.capacity, h.nextFree, count)
 	}
 
 	handle := h.cpuStart.Offset(int(h.nextFree), h.incrementSize)
@@ -81,19 +95,46 @@ func (h *DescriptorHeap) Allocate(count uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HAND
 }
 
 // AllocateGPU allocates descriptors and returns both CPU and GPU handles.
+// For single-descriptor allocations, recycled slots are preferred.
 func (h *DescriptorHeap) AllocateGPU(count uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, d3d12.D3D12_GPU_DESCRIPTOR_HANDLE, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// Recycle from free list for single-descriptor allocations
+	if count == 1 && len(h.freeList) > 0 {
+		idx := h.freeList[len(h.freeList)-1]
+		h.freeList = h.freeList[:len(h.freeList)-1]
+		cpuHandle := h.cpuStart.Offset(int(idx), h.incrementSize)
+		gpuHandle := h.gpuStart.Offset(int(idx), h.incrementSize)
+		return cpuHandle, gpuHandle, nil
+	}
+
 	if h.nextFree+count > h.capacity {
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, d3d12.D3D12_GPU_DESCRIPTOR_HANDLE{},
-			fmt.Errorf("dx12: descriptor heap exhausted")
+			fmt.Errorf("dx12: descriptor heap exhausted (capacity=%d, used=%d, requested=%d)",
+				h.capacity, h.nextFree, count)
 	}
 
 	cpuHandle := h.cpuStart.Offset(int(h.nextFree), h.incrementSize)
 	gpuHandle := h.gpuStart.Offset(int(h.nextFree), h.incrementSize)
 	h.nextFree += count
 	return cpuHandle, gpuHandle, nil
+}
+
+// Free returns descriptor indices to the free list for reuse.
+// The descriptors must no longer be referenced by any in-flight GPU work.
+func (h *DescriptorHeap) Free(baseIndex, count uint32) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for i := uint32(0); i < count; i++ {
+		h.freeList = append(h.freeList, baseIndex+i)
+	}
+}
+
+// HandleToIndex computes the descriptor index from a CPU handle.
+func (h *DescriptorHeap) HandleToIndex(handle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE) uint32 {
+	return uint32((handle.Ptr - h.cpuStart.Ptr) / uintptr(h.incrementSize))
 }
 
 // newDevice creates a new DX12 device from a DXGI adapter.
@@ -704,6 +745,8 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	// Handle SurfaceTexture (swapchain back buffer) — return a lightweight view
 	// with the pre-existing RTV handle, similar to Vulkan's SwapchainTexture path.
+	// hasRTV=true so BeginRenderPass uses this RTV, but isExternal=true tells
+	// Destroy() to skip freeing the RTV heap slot (the Surface owns it).
 	if st, ok := texture.(*SurfaceTexture); ok {
 		return &TextureView{
 			texture: &Texture{
@@ -1046,6 +1089,8 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			return nil, fmt.Errorf("dx12: failed to allocate view descriptors: %w", err)
 		}
 		bg.gpuDescHandle = gpuStart
+		bg.viewHeapIndex = d.viewHeap.HandleToIndex(cpuStart)
+		bg.viewCount = uint32(len(viewEntries))
 
 		for i, entry := range viewEntries {
 			destCPU := cpuStart.Offset(i, d.viewHeap.incrementSize)
@@ -1062,6 +1107,8 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			return nil, fmt.Errorf("dx12: failed to allocate sampler descriptors: %w", err)
 		}
 		bg.samplerGPUHandle = gpuStart
+		bg.samplerHeapIndex = d.samplerHeap.HandleToIndex(cpuStart)
+		bg.samplerCount = uint32(len(samplerEntries))
 
 		for i, entry := range samplerEntries {
 			destCPU := cpuStart.Offset(i, d.samplerHeap.incrementSize)

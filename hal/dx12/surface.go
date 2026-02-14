@@ -25,6 +25,7 @@ const maxFrameLatency = 2
 type backBuffer struct {
 	resource  *d3d12.ID3D12Resource
 	rtvHandle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
+	rtvIndex  uint32 // Heap index for recycling on release
 }
 
 // createSwapchain creates a new DXGI swapchain for the surface.
@@ -137,7 +138,7 @@ func (s *Surface) createBackBufferRTVs() error {
 
 		resource := (*d3d12.ID3D12Resource)(resourcePtr)
 
-		// Allocate RTV from device heap
+		// Allocate RTV from device heap (supports recycling via free list)
 		rtvHandle, err := s.device.rtvHeap.Allocate(1)
 		if err != nil {
 			resource.Release()
@@ -145,24 +146,32 @@ func (s *Surface) createBackBufferRTVs() error {
 			return fmt.Errorf("dx12: failed to allocate RTV for buffer %d: %w", i, err)
 		}
 
+		// Track heap index for recycling on release
+		rtvIndex := s.device.rtvHeap.HandleToIndex(rtvHandle)
+
 		// Create RTV (nil desc = use resource format)
 		s.device.raw.CreateRenderTargetView(resource, nil, rtvHandle)
 
 		s.backBuffers[i] = backBuffer{
 			resource:  resource,
 			rtvHandle: rtvHandle,
+			rtvIndex:  rtvIndex,
 		}
 	}
 
 	return nil
 }
 
-// releaseBackBuffers releases all back buffer resources.
+// releaseBackBuffers releases all back buffer resources and recycles RTV descriptors.
 func (s *Surface) releaseBackBuffers() {
 	for i := range s.backBuffers {
 		if s.backBuffers[i].resource != nil {
 			s.backBuffers[i].resource.Release()
 			s.backBuffers[i].resource = nil
+		}
+		// Recycle RTV descriptor slot for reuse (prevents heap exhaustion on resize)
+		if s.device != nil {
+			s.device.rtvHeap.Free(s.backBuffers[i].rtvIndex, 1)
 		}
 	}
 	s.backBuffers = nil
