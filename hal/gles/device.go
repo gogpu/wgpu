@@ -21,6 +21,7 @@ type Device struct {
 	glCtx  *gl.Context
 	wglCtx *wgl.Context
 	hwnd   wgl.HWND
+	vao    uint32 // persistent VAO (Core Profile requires one bound)
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -158,20 +159,32 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 }
 
 // CreateTextureView creates a view into a texture.
+// Accepts both *Texture and *SurfaceTexture (default framebuffer).
 func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescriptor) (hal.TextureView, error) {
+	// Surface texture (default framebuffer) — return a view with no GL texture.
+	if st, ok := texture.(*SurfaceTexture); ok {
+		return &TextureView{
+			isSurface:  true,
+			surfaceTex: st,
+		}, nil
+	}
+
 	t, ok := texture.(*Texture)
 	if !ok {
 		return nil, fmt.Errorf("gles: invalid texture type")
 	}
 
-	return &TextureView{
-		texture:    t,
-		aspect:     desc.Aspect,
-		baseMip:    desc.BaseMipLevel,
-		mipCount:   desc.MipLevelCount,
-		baseLayer:  desc.BaseArrayLayer,
-		layerCount: desc.ArrayLayerCount,
-	}, nil
+	view := &TextureView{
+		texture: t,
+	}
+	if desc != nil {
+		view.aspect = desc.Aspect
+		view.baseMip = desc.BaseMipLevel
+		view.mipCount = desc.MipLevelCount
+		view.baseLayer = desc.BaseArrayLayer
+		view.layerCount = desc.ArrayLayerCount
+	}
+	return view, nil
 }
 
 // DestroyTextureView destroys a texture view.
@@ -258,9 +271,16 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	layout, ok := desc.Layout.(*PipelineLayout)
-	if !ok {
-		return nil, fmt.Errorf("gles: invalid pipeline layout type")
+	// Handle nil layout (auto-layout for shaders without bindings).
+	var layout *PipelineLayout
+	if desc.Layout != nil {
+		var ok bool
+		layout, ok = desc.Layout.(*PipelineLayout)
+		if !ok {
+			return nil, fmt.Errorf("gles: invalid pipeline layout type")
+		}
+	} else {
+		layout = &PipelineLayout{}
 	}
 
 	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
@@ -268,9 +288,14 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		return nil, fmt.Errorf("gles: invalid vertex shader module type")
 	}
 
-	// Compile vertex shader
+	// Compile WGSL → GLSL for vertex stage.
+	vertexGLSL, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint)
+	if err != nil {
+		return nil, fmt.Errorf("gles: vertex shader: %w", err)
+	}
+
 	vertexID := d.glCtx.CreateShader(gl.VERTEX_SHADER)
-	d.glCtx.ShaderSource(vertexID, vertexModule.source.WGSL)
+	d.glCtx.ShaderSource(vertexID, vertexGLSL)
 	d.glCtx.CompileShader(vertexID)
 
 	var status int32
@@ -290,8 +315,15 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 			return nil, fmt.Errorf("gles: invalid fragment shader module type")
 		}
 
+		// Compile WGSL → GLSL for fragment stage.
+		fragmentGLSL, err := compileWGSLToGLSL(fragmentModule.source, desc.Fragment.EntryPoint)
+		if err != nil {
+			d.glCtx.DeleteShader(vertexID)
+			return nil, fmt.Errorf("gles: fragment shader: %w", err)
+		}
+
 		fragmentID = d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
-		d.glCtx.ShaderSource(fragmentID, fragmentModule.source.WGSL)
+		d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
 		d.glCtx.CompileShader(fragmentID)
 
 		d.glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
@@ -359,9 +391,14 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 		return nil, fmt.Errorf("gles: invalid compute shader module type")
 	}
 
-	// Compile compute shader
+	// Compile WGSL → GLSL for compute stage.
+	computeGLSL, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint)
+	if err != nil {
+		return nil, fmt.Errorf("gles: compute shader: %w", err)
+	}
+
 	computeID := d.glCtx.CreateShader(gl.COMPUTE_SHADER)
-	d.glCtx.ShaderSource(computeID, computeModule.source.WGSL)
+	d.glCtx.ShaderSource(computeID, computeGLSL)
 	d.glCtx.CompileShader(computeID)
 
 	var status int32
@@ -464,7 +501,10 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // Destroy releases the device.
 func (d *Device) Destroy() {
-	// Device doesn't own the GL context
+	if d.vao != 0 && d.glCtx != nil {
+		d.glCtx.DeleteVertexArrays(d.vao)
+		d.vao = 0
+	}
 }
 
 // Type aliases for hal descriptors

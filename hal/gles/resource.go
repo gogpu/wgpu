@@ -66,6 +66,8 @@ type TextureView struct {
 	mipCount   uint32
 	baseLayer  uint32
 	layerCount uint32
+	isSurface  bool         // true for default framebuffer (surface texture)
+	surfaceTex *SurfaceTexture // non-nil only when isSurface is true
 }
 
 // Destroy is a no-op for texture views in OpenGL.

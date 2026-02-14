@@ -136,6 +136,14 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		desc:    desc,
 	}
 
+	// Bind the correct framebuffer: FBO 0 for surface (default), or an offscreen FBO.
+	if len(desc.ColorAttachments) > 0 {
+		if tv, ok := desc.ColorAttachments[0].View.(*TextureView); ok && tv.isSurface {
+			// Render to the default framebuffer (window surface)
+			e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
+		}
+	}
+
 	// Record clear commands
 	for i, ca := range desc.ColorAttachments {
 		if ca.LoadOp == gputypes.LoadOpClear {
@@ -399,6 +407,15 @@ type ClearBufferCommand struct {
 func (c *ClearBufferCommand) Execute(_ *gl.Context) {
 	// Note: glClearBufferSubData requires GL 4.3+ / GLES 3.1+.
 	// For older versions, map buffer and memset, or use compute shader.
+}
+
+// BindFramebufferCommand binds a framebuffer object.
+type BindFramebufferCommand struct {
+	fbo uint32
+}
+
+func (c *BindFramebufferCommand) Execute(ctx *gl.Context) {
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, c.fbo)
 }
 
 // ClearColorCommand clears a color attachment.

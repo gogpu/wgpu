@@ -104,12 +104,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return
 	}
 
-	_, format, dataType := textureFormatToGL(tex.format)
+	internalFormat, format, dataType := textureFormatToGL(tex.format)
 
 	q.glCtx.BindTexture(tex.target, tex.id)
 
 	if tex.target == gl.TEXTURE_2D {
-		q.glCtx.TexImage2D(tex.target, int32(dst.MipLevel), int32(tex.target),
+		q.glCtx.TexImage2D(tex.target, int32(dst.MipLevel), int32(internalFormat),
 			int32(size.Width), int32(size.Height), 0, format, dataType,
 			unsafe.Pointer(&data[0]))
 	}
