@@ -6,6 +6,8 @@
 package metal
 
 import (
+	"unsafe"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -30,11 +32,13 @@ func (b *Buffer) Destroy() {
 func (b *Buffer) NativeHandle() uintptr { return uintptr(b.raw) }
 
 // Contents returns the buffer contents pointer (for mapped buffers).
-func (b *Buffer) Contents() uintptr {
+// Returns unsafe.Pointer to allow safe pointer arithmetic via unsafe.Add
+// without triggering go vet "possible misuse of unsafe.Pointer" warnings.
+func (b *Buffer) Contents() unsafe.Pointer {
 	if b.raw == 0 {
-		return 0
+		return nil
 	}
-	return uintptr(MsgSend(b.raw, Sel("contents")))
+	return unsafe.Pointer(MsgSend(b.raw, Sel("contents"))) //nolint:govet // ObjC FFI: pointer from Metal runtime, not Go heap
 }
 
 // Texture implements hal.Texture for Metal.

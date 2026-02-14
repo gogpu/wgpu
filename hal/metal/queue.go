@@ -55,10 +55,10 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 		return fmt.Errorf("metal: invalid buffer")
 	}
 	ptr := buf.Contents()
-	if ptr == 0 {
+	if ptr == nil {
 		return fmt.Errorf("metal: buffer not mappable")
 	}
-	src := unsafe.Slice((*byte)(unsafe.Pointer(ptr+uintptr(offset))), len(data))
+	src := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
 	copy(data, src)
 	return nil
 }
@@ -71,12 +71,11 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	}
 
 	ptr := buf.Contents()
-	if ptr == 0 {
+	if ptr == nil {
 		return // Buffer is not mappable
 	}
 
-	// Copy data using unsafe
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(ptr+uintptr(offset))), len(data))
+	dst := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
 	copy(dst, data)
 }
 
