@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-02-15
+
+### Fixed
+
+- **Vulkan framebuffer cache invalidation** — `DestroyTextureView` now invalidates
+  cached framebuffers before calling `vkDestroyImageView`, ensuring framebuffers that
+  reference the view are destroyed first. Fixes Vulkan validation error:
+  `vkDestroyImageView`/`vkDestroyFramebuffer` in use by `VkCommandBuffer`.
+
 ## [0.16.0] - 2026-02-15
 
 Major release: full GLES rendering pipeline, structured logging across all backends,
@@ -834,7 +843,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/gogpu/wgpu/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/gogpu/wgpu/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/gogpu/wgpu/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/gogpu/wgpu/compare/v0.14.0...v0.15.0
