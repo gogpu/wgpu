@@ -377,10 +377,12 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteShader(fragmentID)
 	}
 
-	// Extract blend state from the first color target.
+	// Extract blend state and color write mask from the first color target.
 	var blend *gputypes.BlendState
+	colorWriteMask := gputypes.ColorWriteMaskAll
 	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
 		blend = desc.Fragment.Targets[0].Blend
+		colorWriteMask = desc.Fragment.Targets[0].WriteMask
 	}
 
 	return &RenderPipeline{
@@ -393,6 +395,8 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		depthStencil:      desc.DepthStencil,
 		multisample:       desc.Multisample,
 		blend:             blend,
+		colorWriteMask:    colorWriteMask,
+		vertexBuffers:     desc.Vertex.Buffers,
 	}, nil
 }
 

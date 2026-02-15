@@ -117,12 +117,16 @@ type Context struct {
 	glBlendColor            uintptr
 
 	// Depth/Stencil
-	glDepthFunc   uintptr
-	glDepthMask   uintptr
-	glDepthRange  uintptr
-	glStencilFunc uintptr
-	glStencilOp   uintptr
-	glStencilMask uintptr
+	glDepthFunc           uintptr
+	glDepthMask           uintptr
+	glDepthRange          uintptr
+	glStencilFunc         uintptr
+	glStencilOp           uintptr
+	glStencilMask         uintptr
+	glStencilFuncSeparate uintptr
+	glStencilOpSeparate   uintptr
+	glStencilMaskSeparate uintptr
+	glColorMask           uintptr
 
 	// Face culling
 	glCullFace  uintptr
@@ -269,6 +273,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
 	c.glStencilMask = getProcAddr("glStencilMask")
+	c.glStencilFuncSeparate = getProcAddr("glStencilFuncSeparate")
+	c.glStencilOpSeparate = getProcAddr("glStencilOpSeparate")
+	c.glStencilMaskSeparate = getProcAddr("glStencilMaskSeparate")
+	c.glColorMask = getProcAddr("glColorMask")
 
 	// Face culling
 	c.glCullFace = getProcAddr("glCullFace")
@@ -722,6 +730,39 @@ func (c *Context) DepthMask(flag bool) {
 		f = TRUE
 	}
 	syscall.SyscallN(c.glDepthMask, f)
+}
+
+// StencilFuncSeparate sets stencil test function per face.
+func (c *Context) StencilFuncSeparate(face, fn uint32, ref int32, mask uint32) {
+	syscall.SyscallN(c.glStencilFuncSeparate, uintptr(face), uintptr(fn), uintptr(ref), uintptr(mask))
+}
+
+// StencilOpSeparate sets stencil operations per face.
+func (c *Context) StencilOpSeparate(face, sfail, dpfail, dppass uint32) {
+	syscall.SyscallN(c.glStencilOpSeparate, uintptr(face), uintptr(sfail), uintptr(dpfail), uintptr(dppass))
+}
+
+// StencilMaskSeparate sets stencil write mask per face.
+func (c *Context) StencilMaskSeparate(face, mask uint32) {
+	syscall.SyscallN(c.glStencilMaskSeparate, uintptr(face), uintptr(mask))
+}
+
+// ColorMask enables or disables writing of color components.
+func (c *Context) ColorMask(r, g, b, a bool) {
+	var rv, gv, bv, av uintptr
+	if r {
+		rv = TRUE
+	}
+	if g {
+		gv = TRUE
+	}
+	if b {
+		bv = TRUE
+	}
+	if a {
+		av = TRUE
+	}
+	syscall.SyscallN(c.glColorMask, rv, gv, bv, av)
 }
 
 // --- Face Culling ---

@@ -470,12 +470,16 @@ type Context struct {
 	glBlendColor            unsafe.Pointer
 
 	// Depth/Stencil
-	glDepthFunc   unsafe.Pointer
-	glDepthMask   unsafe.Pointer
-	glDepthRange  unsafe.Pointer
-	glStencilFunc unsafe.Pointer
-	glStencilOp   unsafe.Pointer
-	glStencilMask unsafe.Pointer
+	glDepthFunc           unsafe.Pointer
+	glDepthMask           unsafe.Pointer
+	glDepthRange          unsafe.Pointer
+	glStencilFunc         unsafe.Pointer
+	glStencilOp           unsafe.Pointer
+	glStencilMask         unsafe.Pointer
+	glStencilFuncSeparate unsafe.Pointer
+	glStencilOpSeparate   unsafe.Pointer
+	glStencilMaskSeparate unsafe.Pointer
+	glColorMask           unsafe.Pointer
 
 	// Face culling
 	glCullFace  unsafe.Pointer
@@ -627,6 +631,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
 	c.glStencilMask = getProcAddr("glStencilMask")
+	c.glStencilFuncSeparate = getProcAddr("glStencilFuncSeparate")
+	c.glStencilOpSeparate = getProcAddr("glStencilOpSeparate")
+	c.glStencilMaskSeparate = getProcAddr("glStencilMaskSeparate")
+	c.glColorMask = getProcAddr("glColorMask")
 
 	// Face culling
 	c.glCullFace = getProcAddr("glCullFace")
@@ -1349,6 +1357,61 @@ func (c *Context) DepthMask(flag bool) {
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&f)}
 	_ = ffi.CallFunction(&cifVoid1, c.glDepthMask, nil, args[:])
+}
+
+// StencilFuncSeparate sets stencil test function per face.
+func (c *Context) StencilFuncSeparate(face, fn uint32, ref int32, mask uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&fn),
+		unsafe.Pointer(&ref),
+		unsafe.Pointer(&mask),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glStencilFuncSeparate, nil, args[:])
+}
+
+// StencilOpSeparate sets stencil operations per face.
+func (c *Context) StencilOpSeparate(face, sfail, dpfail, dppass uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&sfail),
+		unsafe.Pointer(&dpfail),
+		unsafe.Pointer(&dppass),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glStencilOpSeparate, nil, args[:])
+}
+
+// StencilMaskSeparate sets stencil write mask per face.
+func (c *Context) StencilMaskSeparate(face, mask uint32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&mask),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glStencilMaskSeparate, nil, args[:])
+}
+
+// ColorMask enables or disables writing of color components.
+func (c *Context) ColorMask(r, g, b, a bool) {
+	var rv, gv, bv, av uint32
+	if r {
+		rv = 1
+	}
+	if g {
+		gv = 1
+	}
+	if b {
+		bv = 1
+	}
+	if a {
+		av = 1
+	}
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&rv),
+		unsafe.Pointer(&gv),
+		unsafe.Pointer(&bv),
+		unsafe.Pointer(&av),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glColorMask, nil, args[:])
 }
 
 // --- Face Culling ---

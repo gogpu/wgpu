@@ -252,6 +252,7 @@ type RenderPassEncoder struct {
 	vertexBuffers []*Buffer
 	indexBuffer   *Buffer
 	indexFormat   gputypes.IndexFormat
+	stencilRef    uint32
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture    *Texture // The MSAA color texture (source for resolve)
@@ -293,11 +294,13 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	e.encoder.commands = append(e.encoder.commands,
 		&UseProgramCommand{programID: p.programID},
 		&SetPipelineStateCommand{
-			topology:     p.primitiveTopology,
-			cullMode:     p.cullMode,
-			frontFace:    p.frontFace,
-			depthStencil: p.depthStencil,
-			blend:        p.blend,
+			topology:       p.primitiveTopology,
+			cullMode:       p.cullMode,
+			frontFace:      p.frontFace,
+			depthStencil:   p.depthStencil,
+			blend:          p.blend,
+			colorWriteMask: p.colorWriteMask,
+			stencilRef:     e.stencilRef,
 		},
 	)
 }
@@ -315,7 +318,10 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	})
 }
 
-// SetVertexBuffer sets a vertex buffer.
+// SetVertexBuffer sets a vertex buffer and configures vertex attributes.
+// In OpenGL, vertex attribute configuration (glVertexAttribPointer +
+// glEnableVertexAttribArray) must be done explicitly. The layout is taken
+// from the currently bound render pipeline's vertex buffer descriptors.
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok {
@@ -328,10 +334,17 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 	}
 	e.vertexBuffers[slot] = buf
 
+	// Get vertex layout from the current pipeline for this slot.
+	var layout *gputypes.VertexBufferLayout
+	if e.pipeline != nil && int(slot) < len(e.pipeline.vertexBuffers) {
+		layout = &e.pipeline.vertexBuffers[slot]
+	}
+
 	e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
 		slot:   slot,
 		buffer: buf,
 		offset: offset,
+		layout: layout,
 	})
 }
 
@@ -378,8 +391,14 @@ func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 
 // SetStencilReference sets the stencil reference value.
 func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
+	e.stencilRef = ref
+	var ds *hal.DepthStencilState
+	if e.pipeline != nil {
+		ds = e.pipeline.depthStencil
+	}
 	e.encoder.commands = append(e.encoder.commands, &SetStencilRefCommand{
-		ref: ref,
+		ref:          ref,
+		depthStencil: ds,
 	})
 }
 
@@ -628,6 +647,8 @@ type ClearStencilCommand struct {
 }
 
 func (c *ClearStencilCommand) Execute(ctx *gl.Context) {
+	// Ensure stencil write mask allows the clear to take effect.
+	ctx.StencilMaskSeparate(gl.FRONT_AND_BACK, 0xFF)
 	ctx.Clear(gl.STENCIL_BUFFER_BIT)
 }
 
@@ -640,13 +661,15 @@ func (c *UseProgramCommand) Execute(ctx *gl.Context) {
 	ctx.UseProgram(c.programID)
 }
 
-// SetPipelineStateCommand sets pipeline state (culling, depth, blending, etc.).
+// SetPipelineStateCommand sets pipeline state (culling, depth, stencil, blending, color mask).
 type SetPipelineStateCommand struct {
-	topology     gputypes.PrimitiveTopology
-	cullMode     gputypes.CullMode
-	frontFace    gputypes.FrontFace
-	depthStencil *hal.DepthStencilState
-	blend        *gputypes.BlendState
+	topology       gputypes.PrimitiveTopology
+	cullMode       gputypes.CullMode
+	frontFace      gputypes.FrontFace
+	depthStencil   *hal.DepthStencilState
+	blend          *gputypes.BlendState
+	colorWriteMask gputypes.ColorWriteMask
+	stencilRef     uint32
 }
 
 func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
@@ -671,7 +694,7 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 		ctx.FrontFace(gl.CW)
 	}
 
-	// Depth/stencil
+	// Depth
 	if c.depthStencil != nil {
 		if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
 			ctx.Enable(gl.DEPTH_TEST)
@@ -680,7 +703,52 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 		} else {
 			ctx.Disable(gl.DEPTH_TEST)
 		}
+
+		// Stencil
+		hasStencilOps := c.depthStencil.StencilFront.PassOp != hal.StencilOperationKeep ||
+			c.depthStencil.StencilFront.FailOp != hal.StencilOperationKeep ||
+			c.depthStencil.StencilBack.PassOp != hal.StencilOperationKeep ||
+			c.depthStencil.StencilBack.FailOp != hal.StencilOperationKeep ||
+			c.depthStencil.StencilFront.Compare != gputypes.CompareFunctionAlways ||
+			c.depthStencil.StencilBack.Compare != gputypes.CompareFunctionAlways
+
+		if hasStencilOps || c.depthStencil.StencilWriteMask != 0 {
+			ctx.Enable(gl.STENCIL_TEST)
+			ref := int32(c.stencilRef) //nolint:gosec // stencil ref fits int32
+
+			ctx.StencilFuncSeparate(gl.FRONT,
+				compareFunctionToGL(c.depthStencil.StencilFront.Compare),
+				ref, c.depthStencil.StencilReadMask)
+			ctx.StencilFuncSeparate(gl.BACK,
+				compareFunctionToGL(c.depthStencil.StencilBack.Compare),
+				ref, c.depthStencil.StencilReadMask)
+
+			ctx.StencilOpSeparate(gl.FRONT,
+				stencilOpToGL(c.depthStencil.StencilFront.FailOp),
+				stencilOpToGL(c.depthStencil.StencilFront.DepthFailOp),
+				stencilOpToGL(c.depthStencil.StencilFront.PassOp))
+			ctx.StencilOpSeparate(gl.BACK,
+				stencilOpToGL(c.depthStencil.StencilBack.FailOp),
+				stencilOpToGL(c.depthStencil.StencilBack.DepthFailOp),
+				stencilOpToGL(c.depthStencil.StencilBack.PassOp))
+
+			ctx.StencilMaskSeparate(gl.FRONT, c.depthStencil.StencilWriteMask)
+			ctx.StencilMaskSeparate(gl.BACK, c.depthStencil.StencilWriteMask)
+		} else {
+			ctx.Disable(gl.STENCIL_TEST)
+		}
+	} else {
+		ctx.Disable(gl.DEPTH_TEST)
+		ctx.Disable(gl.STENCIL_TEST)
 	}
+
+	// Color write mask
+	ctx.ColorMask(
+		c.colorWriteMask&gputypes.ColorWriteMaskRed != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskGreen != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskBlue != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskAlpha != 0,
+	)
 
 	// Blending
 	if c.blend != nil {
@@ -758,15 +826,32 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 	}
 }
 
-// SetVertexBufferCommand binds a vertex buffer.
+// SetVertexBufferCommand binds a vertex buffer and configures vertex attributes.
+// In OpenGL, vertex attributes must be configured explicitly via
+// glVertexAttribPointer + glEnableVertexAttribArray. The layout describes
+// how vertex data is interpreted (attribute locations, formats, strides).
 type SetVertexBufferCommand struct {
 	slot   uint32
 	buffer *Buffer
 	offset uint64
+	layout *gputypes.VertexBufferLayout // from the render pipeline descriptor
 }
 
 func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 	ctx.BindBuffer(gl.ARRAY_BUFFER, c.buffer.id)
+
+	// Configure vertex attributes from the pipeline's vertex layout.
+	if c.layout == nil {
+		return
+	}
+	stride := int32(c.layout.ArrayStride)
+	for _, attr := range c.layout.Attributes {
+		loc := attr.ShaderLocation
+		size, typ := vertexFormatToGL(attr.Format)
+		attrOffset := uintptr(c.offset) + uintptr(attr.Offset)
+		ctx.EnableVertexAttribArray(loc)
+		ctx.VertexAttribPointer(loc, size, typ, false, stride, attrOffset)
+	}
 }
 
 // SetIndexBufferCommand binds an index buffer.
@@ -809,13 +894,25 @@ func (c *SetBlendConstantCommand) Execute(ctx *gl.Context) {
 	ctx.BlendColor(c.r, c.g, c.b, c.a)
 }
 
-// SetStencilRefCommand sets stencil reference.
+// SetStencilRefCommand updates the stencil reference value.
+// This re-applies glStencilFuncSeparate with the new reference while
+// keeping the compare function and read mask from the current pipeline.
 type SetStencilRefCommand struct {
-	ref uint32
+	ref          uint32
+	depthStencil *hal.DepthStencilState
 }
 
-func (c *SetStencilRefCommand) Execute(_ *gl.Context) {
-	// ctx.StencilFunc uses ref
+func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
+	if c.depthStencil == nil {
+		return
+	}
+	ref := int32(c.ref) //nolint:gosec // stencil ref fits int32
+	ctx.StencilFuncSeparate(gl.FRONT,
+		compareFunctionToGL(c.depthStencil.StencilFront.Compare),
+		ref, c.depthStencil.StencilReadMask)
+	ctx.StencilFuncSeparate(gl.BACK,
+		compareFunctionToGL(c.depthStencil.StencilBack.Compare),
+		ref, c.depthStencil.StencilReadMask)
 }
 
 // DrawCommand executes a non-indexed draw.
@@ -966,7 +1063,7 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	ctx.ReadPixels(
 		int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
 		width, height,
-		gl.RGBA, gl.UNSIGNED_BYTE,
+		gl.BGRA, gl.UNSIGNED_BYTE,
 		unsafe.Pointer(&tmpBuf[0]),
 	)
 
@@ -983,6 +1080,78 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 
 	// Restore the previous FBO binding.
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+}
+
+// vertexFormatToGL converts a WebGPU vertex format to GL component count and type.
+func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32) {
+	switch format {
+	case gputypes.VertexFormatFloat32:
+		return 1, gl.FLOAT
+	case gputypes.VertexFormatFloat32x2:
+		return 2, gl.FLOAT
+	case gputypes.VertexFormatFloat32x3:
+		return 3, gl.FLOAT
+	case gputypes.VertexFormatFloat32x4:
+		return 4, gl.FLOAT
+	case gputypes.VertexFormatUint8x2:
+		return 2, gl.UNSIGNED_BYTE
+	case gputypes.VertexFormatUint8x4:
+		return 4, gl.UNSIGNED_BYTE
+	case gputypes.VertexFormatSint8x2:
+		return 2, gl.BYTE
+	case gputypes.VertexFormatSint8x4:
+		return 4, gl.BYTE
+	case gputypes.VertexFormatUint16x2:
+		return 2, gl.UNSIGNED_SHORT
+	case gputypes.VertexFormatUint16x4:
+		return 4, gl.UNSIGNED_SHORT
+	case gputypes.VertexFormatSint16x2:
+		return 2, gl.SHORT
+	case gputypes.VertexFormatSint16x4:
+		return 4, gl.SHORT
+	case gputypes.VertexFormatUint32:
+		return 1, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x2:
+		return 2, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x3:
+		return 3, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x4:
+		return 4, gl.UNSIGNED_INT
+	case gputypes.VertexFormatSint32:
+		return 1, gl.INT
+	case gputypes.VertexFormatSint32x2:
+		return 2, gl.INT
+	case gputypes.VertexFormatSint32x3:
+		return 3, gl.INT
+	case gputypes.VertexFormatSint32x4:
+		return 4, gl.INT
+	default:
+		return 4, gl.FLOAT
+	}
+}
+
+// stencilOpToGL converts a HAL stencil operation to the corresponding GL constant.
+func stencilOpToGL(op hal.StencilOperation) uint32 {
+	switch op {
+	case hal.StencilOperationKeep:
+		return gl.KEEP
+	case hal.StencilOperationZero:
+		return gl.ZERO
+	case hal.StencilOperationReplace:
+		return gl.REPLACE
+	case hal.StencilOperationInvert:
+		return gl.INVERT
+	case hal.StencilOperationIncrementClamp:
+		return gl.INCR
+	case hal.StencilOperationDecrementClamp:
+		return gl.DECR
+	case hal.StencilOperationIncrementWrap:
+		return gl.INCR_WRAP
+	case hal.StencilOperationDecrementWrap:
+		return gl.DECR_WRAP
+	default:
+		return gl.KEEP
+	}
 }
 
 // compareFunctionToGL converts compare function to GL constant.

@@ -167,6 +167,15 @@ type RenderPipeline struct {
 
 	// Blend state from the first color target (nil = no blending).
 	blend *gputypes.BlendState
+
+	// Color write mask from the first color target.
+	colorWriteMask gputypes.ColorWriteMask
+
+	// Vertex buffer layouts from the pipeline descriptor.
+	// OpenGL requires explicit glVertexAttribPointer calls to configure
+	// how vertex data is interpreted. This is stored here so that
+	// SetVertexBuffer can configure attributes using the pipeline's layout.
+	vertexBuffers []gputypes.VertexBufferLayout
 }
 
 // Destroy releases the render pipeline.
