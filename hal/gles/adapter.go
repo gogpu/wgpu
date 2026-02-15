@@ -30,10 +30,16 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 		}
 	}
 
+	// Create and bind a persistent VAO. OpenGL Core Profile requires a VAO
+	// to be bound for any draw call. We keep one bound for the device lifetime.
+	vao := a.glCtx.GenVertexArrays(1)
+	a.glCtx.BindVertexArray(vao)
+
 	device := &Device{
 		glCtx:  a.glCtx,
 		wglCtx: a.wglCtx,
 		hwnd:   a.hwnd,
+		vao:    vao,
 	}
 
 	queue := &Queue{

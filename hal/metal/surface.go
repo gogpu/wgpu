@@ -67,6 +67,14 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	vsync := config.PresentMode == hal.PresentModeFifo
 	msgSendVoid(s.layer, Sel("setDisplaySyncEnabled:"), argBool(vsync))
 
+	hal.Logger().Info("metal: surface configured",
+		"width", config.Width,
+		"height", config.Height,
+		"format", config.Format,
+		"presentMode", config.PresentMode,
+		"vsync", vsync,
+	)
+
 	return nil
 }
 

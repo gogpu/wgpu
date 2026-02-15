@@ -21,6 +21,7 @@ type Device struct {
 	glCtx  *gl.Context
 	wglCtx *wgl.Context
 	hwnd   wgl.HWND
+	vao    uint32 // persistent VAO (Core Profile requires one bound)
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -51,10 +52,11 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	d.glCtx.BindBuffer(target, 0)
 
 	buf := &Buffer{
-		id:    id,
-		size:  desc.Size,
-		usage: desc.Usage,
-		glCtx: d.glCtx,
+		id:     id,
+		target: target,
+		size:   desc.Size,
+		usage:  desc.Usage,
+		glCtx:  d.glCtx,
 	}
 
 	// Handle MappedAtCreation
@@ -76,6 +78,11 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	id := d.glCtx.GenTextures(1)
 
+	sampleCount := desc.SampleCount
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+
 	// Map dimension to GL target
 	target := uint32(gl.TEXTURE_2D)
 	switch desc.Dimension {
@@ -83,17 +90,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		// GL doesn't have 1D textures in ES, use 2D with height=1
 		target = gl.TEXTURE_2D
 	case gputypes.TextureDimension2D:
-		if desc.Size.DepthOrArrayLayers > 1 {
+		switch {
+		case sampleCount > 1:
+			target = gl.TEXTURE_2D_MULTISAMPLE
+		case desc.Size.DepthOrArrayLayers > 1:
 			target = gl.TEXTURE_2D_ARRAY
-		} else {
+		default:
 			target = gl.TEXTURE_2D
 		}
 	case gputypes.TextureDimension3D:
 		target = gl.TEXTURE_3D
 	}
 
-	// Handle cube maps
-	if desc.ViewFormats != nil {
+	// Handle cube maps (only for single-sample textures)
+	if sampleCount <= 1 && desc.ViewFormats != nil {
 		for _, vf := range desc.ViewFormats {
 			if vf == desc.Format {
 				// Check if this should be a cube map
@@ -111,6 +121,11 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	// Allocate texture storage
 	switch target {
+	case gl.TEXTURE_2D_MULTISAMPLE:
+		// Multisample textures use TexImage2DMultisample (no mip levels).
+		d.glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
+			int32(desc.Size.Width), int32(desc.Size.Height), true)
+
 	case gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
@@ -131,22 +146,25 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		}
 	}
 
-	// Set default texture parameters
-	d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	// Set default texture parameters (multisample textures don't support these).
+	if target != gl.TEXTURE_2D_MULTISAMPLE {
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	}
 
 	d.glCtx.BindTexture(target, 0)
 
 	return &Texture{
-		id:        id,
-		target:    target,
-		format:    desc.Format,
-		dimension: desc.Dimension,
-		size:      desc.Size,
-		mipLevels: desc.MipLevelCount,
-		glCtx:     d.glCtx,
+		id:          id,
+		target:      target,
+		format:      desc.Format,
+		dimension:   desc.Dimension,
+		size:        desc.Size,
+		mipLevels:   desc.MipLevelCount,
+		sampleCount: sampleCount,
+		glCtx:       d.glCtx,
 	}, nil
 }
 
@@ -158,20 +176,32 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 }
 
 // CreateTextureView creates a view into a texture.
+// Accepts both *Texture and *SurfaceTexture (default framebuffer).
 func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescriptor) (hal.TextureView, error) {
+	// Surface texture (default framebuffer) — return a view with no GL texture.
+	if st, ok := texture.(*SurfaceTexture); ok {
+		return &TextureView{
+			isSurface:  true,
+			surfaceTex: st,
+		}, nil
+	}
+
 	t, ok := texture.(*Texture)
 	if !ok {
 		return nil, fmt.Errorf("gles: invalid texture type")
 	}
 
-	return &TextureView{
-		texture:    t,
-		aspect:     desc.Aspect,
-		baseMip:    desc.BaseMipLevel,
-		mipCount:   desc.MipLevelCount,
-		baseLayer:  desc.BaseArrayLayer,
-		layerCount: desc.ArrayLayerCount,
-	}, nil
+	view := &TextureView{
+		texture: t,
+	}
+	if desc != nil {
+		view.aspect = desc.Aspect
+		view.baseMip = desc.BaseMipLevel
+		view.mipCount = desc.MipLevelCount
+		view.baseLayer = desc.BaseArrayLayer
+		view.layerCount = desc.ArrayLayerCount
+	}
+	return view, nil
 }
 
 // DestroyTextureView destroys a texture view.
@@ -258,9 +288,16 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	layout, ok := desc.Layout.(*PipelineLayout)
-	if !ok {
-		return nil, fmt.Errorf("gles: invalid pipeline layout type")
+	// Handle nil layout (auto-layout for shaders without bindings).
+	var layout *PipelineLayout
+	if desc.Layout != nil {
+		var ok bool
+		layout, ok = desc.Layout.(*PipelineLayout)
+		if !ok {
+			return nil, fmt.Errorf("gles: invalid pipeline layout type")
+		}
+	} else {
+		layout = &PipelineLayout{}
 	}
 
 	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
@@ -268,9 +305,14 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		return nil, fmt.Errorf("gles: invalid vertex shader module type")
 	}
 
-	// Compile vertex shader
+	// Compile WGSL → GLSL for vertex stage.
+	vertexGLSL, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint)
+	if err != nil {
+		return nil, fmt.Errorf("gles: vertex shader: %w", err)
+	}
+
 	vertexID := d.glCtx.CreateShader(gl.VERTEX_SHADER)
-	d.glCtx.ShaderSource(vertexID, vertexModule.source.WGSL)
+	d.glCtx.ShaderSource(vertexID, vertexGLSL)
 	d.glCtx.CompileShader(vertexID)
 
 	var status int32
@@ -290,8 +332,15 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 			return nil, fmt.Errorf("gles: invalid fragment shader module type")
 		}
 
+		// Compile WGSL → GLSL for fragment stage.
+		fragmentGLSL, err := compileWGSLToGLSL(fragmentModule.source, desc.Fragment.EntryPoint)
+		if err != nil {
+			d.glCtx.DeleteShader(vertexID)
+			return nil, fmt.Errorf("gles: fragment shader: %w", err)
+		}
+
 		fragmentID = d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
-		d.glCtx.ShaderSource(fragmentID, fragmentModule.source.WGSL)
+		d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
 		d.glCtx.CompileShader(fragmentID)
 
 		d.glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
@@ -328,6 +377,19 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteShader(fragmentID)
 	}
 
+	hal.Logger().Debug("gles: render pipeline created",
+		"programID", programID,
+		"vertexEntry", desc.Vertex.EntryPoint,
+	)
+
+	// Extract blend state and color write mask from the first color target.
+	var blend *gputypes.BlendState
+	colorWriteMask := gputypes.ColorWriteMaskAll
+	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
+		blend = desc.Fragment.Targets[0].Blend
+		colorWriteMask = desc.Fragment.Targets[0].WriteMask
+	}
+
 	return &RenderPipeline{
 		programID:         programID,
 		layout:            layout,
@@ -337,6 +399,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		frontFace:         desc.Primitive.FrontFace,
 		depthStencil:      desc.DepthStencil,
 		multisample:       desc.Multisample,
+		blend:             blend,
+		colorWriteMask:    colorWriteMask,
+		vertexBuffers:     desc.Vertex.Buffers,
 	}, nil
 }
 
@@ -359,9 +424,14 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 		return nil, fmt.Errorf("gles: invalid compute shader module type")
 	}
 
-	// Compile compute shader
+	// Compile WGSL → GLSL for compute stage.
+	computeGLSL, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint)
+	if err != nil {
+		return nil, fmt.Errorf("gles: compute shader: %w", err)
+	}
+
 	computeID := d.glCtx.CreateShader(gl.COMPUTE_SHADER)
-	d.glCtx.ShaderSource(computeID, computeModule.source.WGSL)
+	d.glCtx.ShaderSource(computeID, computeGLSL)
 	d.glCtx.CompileShader(computeID)
 
 	var status int32
@@ -387,6 +457,11 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 
 	d.glCtx.DeleteShader(computeID)
 
+	hal.Logger().Debug("gles: compute pipeline created",
+		"programID", programID,
+		"entryPoint", desc.Compute.EntryPoint,
+	)
+
 	return &ComputePipeline{
 		programID: programID,
 		layout:    layout,
@@ -405,6 +480,7 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{
 		glCtx: d.glCtx,
+		vao:   d.vao,
 	}, nil
 }
 
@@ -464,7 +540,10 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // Destroy releases the device.
 func (d *Device) Destroy() {
-	// Device doesn't own the GL context
+	if d.vao != 0 && d.glCtx != nil {
+		d.glCtx.DeleteVertexArrays(d.vao)
+		d.vao = 0
+	}
 }
 
 // Type aliases for hal descriptors
@@ -514,7 +593,7 @@ func textureFormatToGL(format gputypes.TextureFormat) (internalFormat, dataForma
 	case gputypes.TextureFormatDepth24Plus:
 		return gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT
 	case gputypes.TextureFormatDepth24PlusStencil8:
-		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT
+		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8
 	case gputypes.TextureFormatDepth32Float:
 		return gl.DEPTH_COMPONENT32, gl.DEPTH_COMPONENT, gl.FLOAT
 	case gputypes.TextureFormatDepth32FloatStencil8:

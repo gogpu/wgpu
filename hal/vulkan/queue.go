@@ -310,6 +310,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	// Free command buffer back to pool after GPU finishes
 	q.device.FreeCommandBuffer(cmdBuffer)
+
+	hal.Logger().Debug("vulkan: WriteTexture completed",
+		"width", size.Width,
+		"height", size.Height,
+		"dataSize", len(data),
+	)
 }
 
 // Present presents a surface texture to the screen.

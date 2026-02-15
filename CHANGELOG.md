@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-02-15
+
+Major release: full GLES rendering pipeline, structured logging across all backends,
+MSAA support, and cross-backend stability fixes.
+
+### Added
+
+#### Structured Logging
+- **`log/slog` integration** — All HAL backends now emit structured diagnostic logs
+  via Go's standard `log/slog` package. Silent by default; enable with
+  `slog.SetLogLoggerLevel(slog.LevelDebug)` or a custom handler. Zero overhead
+  when logging is disabled.
+
+#### OpenGL ES Backend (Full Rendering Pipeline)
+- **WGSL-to-GLSL shader compilation** — End-to-end shader pipeline via naga:
+  WGSL source is compiled to GLSL, then loaded via `glShaderSource`/`glCompileShader`.
+  Includes VAO creation, FBO setup, and triangle rendering.
+- **Offscreen FBO and MSAA textures** — Framebuffer objects for off-screen rendering,
+  multi-sample texture support, and `CopyTextureToBuffer` readback path.
+- **Vertex attributes, stencil state, color mask** — Full vertex attribute layout
+  configuration, stencil test state, per-channel color write masks, and BGRA readback
+  format conversion.
+- **VAO, viewport, blend state, bind group commands** — Vertex Array Objects,
+  viewport/scissor state, blend equation/factor configuration, and bind group
+  resource binding.
+
+#### Metal Backend
+- **SetBindGroup** — Bind group resource binding for render and compute encoders.
+- **WriteTexture** — GPU texture upload via staging buffer and blit encoder.
+- **Fence synchronization** — CPU-GPU synchronization for command completion.
+
+#### DX12 Backend
+- **CreateBindGroup** — Bind group creation with SRV/CBV/sampler descriptor
+  mapping to root parameter slots.
+- **InfoQueue debug messages** — `ID3D12InfoQueue` captures validation
+  errors/warnings when debug layer is enabled. `DrainDebugMessages()` reads
+  and logs all pending messages after Submit and Present.
+
+#### Vulkan Backend
+- **MSAA render pass support** — Multi-sample render pass with automatic resolve
+  attachment configuration. Includes depth/stencil usage flag fixes for MSAA targets.
+
+### Fixed
+
+#### DX12 Backend
+- **GPU hang causing DPC_WATCHDOG_VIOLATION BSOD** — Resolved a device hang that
+  triggered a Windows kernel watchdog timeout on some hardware configurations.
+- **Texture resource state tracking** — Correct resource barriers via per-texture
+  state tracking. Fixes rendering corruption from missing or incorrect
+  COMMON/COPY_DEST/SHADER_RESOURCE transitions. Also fixes a COM reference leak.
+- **MSAA resolve, view dimensions, descriptor recycling** — MSAA resolve copies
+  now target the correct subresource. Texture view dimensions match the underlying
+  resource. Descriptor recycling frees slots from the correct staging heaps.
+- **Readback pitch alignment and barrier states** — Buffer readback row pitch is
+  now aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). Resource barriers
+  use correct before/after states for copy operations.
+- **Staging descriptor heaps** — SRV and sampler descriptors are now created in
+  non-shader-visible staging heaps, then copied to shader-visible heaps via
+  `CopyDescriptorsSimple`. Follows the DX12 specification requirement that
+  `CopyDescriptorsSimple` source must be non-shader-visible. Prevents subtle
+  rendering corruption on some hardware.
+- **Descriptor recycling** — `TextureView.Destroy()` and `Sampler.Destroy()` now
+  free descriptors from the correct staging heaps, enabling proper slot reuse.
+
+#### Vulkan Backend
+- **Descriptor pool allocation** — Always include all descriptor types (uniform buffer,
+  storage buffer, sampled image, sampler, storage image) in pool creation. Fixes
+  `VK_ERROR_OUT_OF_POOL_MEMORY` when bind groups reference previously unused types.
+- **vkCmdSetBlendConstants FFI signature** — Corrected goffi calling convention to
+  pass blend constants by pointer, matching the Vulkan specification.
+- **Dynamic pipeline states** — All 4 dynamic states (viewport, scissor, stencil
+  reference, blend constants) are now declared on every render pipeline. Prevents
+  validation errors on drivers that require complete dynamic state declarations.
+
+#### Metal Backend
+- **Command buffer creation deferred to BeginEncoding** — `CreateCommandEncoder`
+  eagerly created a Metal command buffer, conflicting with `BeginEncoding`'s guard
+  (`cmdBuffer != 0`). Every `BeginEncoding` call returned "already recording" error,
+  and the pre-allocated command buffer + autorelease pool were never released.
+  At 60fps this leaked ~30GB in minutes. Fix: defer command buffer creation to
+  `BeginEncoding`, matching the two-step pattern used by Vulkan and DX12 backends.
+  (Fixes [#55])
+
+#### GLES Backend
+- **Surface resolve** — Correct resolve blit from MSAA renderbuffer to single-sample
+  surface texture for presentation.
+
+### Changed
+
+- **Metal queue** — Eliminated `go vet` unsafe.Pointer warnings by using typed
+  wrapper functions for Objective-C message sends.
+- **DX12 descriptor heap management** — Free list recycling for descriptor slots,
+  reducing allocation overhead for long-running applications.
+- **naga v0.12.0 → v0.13.0** — GLSL backend improvements, HLSL/SPIR-V fixes
+
+## [0.15.1] - 2026-02-13
+
+Critical fixes across DX12, Metal, and Vulkan backends.
+
+### Fixed
+
+- **DX12 WriteBuffer** was a no-op stub, causing blank renders with uniform data
+  - Staging buffer + `CopyBufferRegion` for DEFAULT heap (GPU-only) buffers
+  - Direct CPU mapping for UPLOAD heap buffers (zero-copy path)
+  - D3D12 auto-promotion from COMMON state for buffer copies
+- **DX12 WriteTexture** was a no-op stub, textures never uploaded to GPU
+  - Staging buffer + `CopyTextureRegion` with 256-byte row pitch alignment
+  - Resource barriers: COMMON → COPY_DEST → SHADER_RESOURCE
+- **DX12 shader compilation** produced empty DXBC bytecode
+  - Added `d3dcompile` package — Pure Go bindings to d3dcompiler_47.dll
+  - Wired `compileWGSLModule`: WGSL → naga HLSL → D3DCompile → DXBC
+- **Metal memory leak** — 30GB+ memory usage on macOS (Issue #55)
+  - `FreeCommandBuffer` was a no-op — command buffers never released after submit
+  - NSString labels leaked in `BeginEncoding`, `BeginComputePass`, `CreateBuffer`, `CreateTexture`
+
+### Added
+
+- **Vulkan debug messenger** — validation errors now logged via `log.Printf` (Issue #53)
+  - `VK_EXT_debug_utils` messenger created when `InstanceFlagsDebug` is set
+  - Captures ERROR and WARNING severity from validation layers
+  - Cross-platform callback via `goffi/ffi.NewCallback`
+  - Zero overhead when debug mode is off
+
 ## [0.15.0] - 2026-02-10
 
 HAL Queue ReadBuffer for GPU→CPU data transfer, enabling compute shader result readback.
@@ -710,7 +833,10 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **Noop backend** (`hal/noop/`) - Reference implementation for testing
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.15.0...HEAD
+[#55]: https://github.com/gogpu/wgpu/issues/55
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/gogpu/wgpu/compare/v0.15.1...v0.16.0
+[0.15.1]: https://github.com/gogpu/wgpu/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/gogpu/wgpu/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/gogpu/wgpu/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/gogpu/wgpu/compare/v0.13.1...v0.13.2

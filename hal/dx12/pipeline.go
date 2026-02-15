@@ -19,22 +19,24 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShaderModule implements hal.ShaderModule for DirectX 12.
-// For now, it stores raw bytecode (DXBC/DXIL) that is passed in.
-// Full WGSL -> HLSL -> DXBC compilation will be a separate task.
+// Stores per-entry-point DXBC bytecode compiled from WGSL via HLSL.
 type ShaderModule struct {
-	bytecode []byte // Compiled shader bytecode (DXBC or DXIL)
-	device   *Device
+	entryPoints map[string][]byte // entryName → DXBC bytecode
+	device      *Device
 }
 
 // Destroy releases the shader module resources.
 func (m *ShaderModule) Destroy() {
-	m.bytecode = nil
+	m.entryPoints = nil
 	m.device = nil
 }
 
-// Bytecode returns the shader bytecode.
-func (m *ShaderModule) Bytecode() []byte {
-	return m.bytecode
+// EntryPointBytecode returns the compiled DXBC bytecode for the given entry point.
+func (m *ShaderModule) EntryPointBytecode(name string) []byte {
+	if m.entryPoints == nil {
+		return nil
+	}
+	return m.entryPoints[name]
 }
 
 // -----------------------------------------------------------------------------
@@ -83,11 +85,19 @@ func (l *BindGroupLayout) Entries() []BindGroupLayoutEntry {
 // PipelineLayout Implementation
 // -----------------------------------------------------------------------------
 
+// rootParamMapping stores actual root parameter indices for a single bind group.
+// Values are -1 when the group has no descriptors of that type.
+type rootParamMapping struct {
+	cbvSrvUavIndex int // root param index for CBV/SRV/UAV table, or -1
+	samplerIndex   int // root param index for sampler table, or -1
+}
+
 // PipelineLayout implements hal.PipelineLayout for DirectX 12.
 // It wraps an ID3D12RootSignature.
 type PipelineLayout struct {
 	rootSignature    *d3d12.ID3D12RootSignature
 	bindGroupLayouts []*BindGroupLayout
+	groupMappings    []rootParamMapping // actual root param indices per bind group
 	device           *Device
 }
 
@@ -116,11 +126,24 @@ type BindGroup struct {
 	gpuDescHandle    d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for CBV/SRV/UAV table
 	samplerGPUHandle d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for sampler table
 	device           *Device
+
+	// Tracked allocation indices for descriptor recycling
+	viewHeapIndex    uint32
+	viewCount        uint32
+	samplerHeapIndex uint32
+	samplerCount     uint32
 }
 
-// Destroy releases the bind group resources.
-// Note: Descriptors are managed by heaps; we just clear references.
+// Destroy releases the bind group resources and recycles descriptor heap slots.
 func (g *BindGroup) Destroy() {
+	if g.device != nil {
+		if g.viewCount > 0 {
+			g.device.viewHeap.Free(g.viewHeapIndex, g.viewCount)
+		}
+		if g.samplerCount > 0 {
+			g.device.samplerHeap.Free(g.samplerHeapIndex, g.samplerCount)
+		}
+	}
 	g.layout = nil
 	g.device = nil
 }
@@ -140,19 +163,24 @@ func (g *BindGroup) SamplerGPUHandle() d3d12.D3D12_GPU_DESCRIPTOR_HANDLE {
 // -----------------------------------------------------------------------------
 
 // createRootSignatureFromLayouts creates a D3D12 root signature from bind group layouts.
-func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (*d3d12.ID3D12RootSignature, error) {
+// Returns the root signature and the mapping of bind group indices to root parameter indices.
+func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (*d3d12.ID3D12RootSignature, []rootParamMapping, error) {
 	// Count total descriptor ranges needed
 	var rootParams []d3d12.D3D12_ROOT_PARAMETER
 	var descriptorRanges [][]d3d12.D3D12_DESCRIPTOR_RANGE // Keep ranges alive
+	var groupMappings []rootParamMapping
 
 	for groupIdx, layout := range layouts {
 		bgLayout, ok := layout.(*BindGroupLayout)
 		if !ok {
-			return nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", groupIdx)
+			return nil, nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", groupIdx)
 		}
+
+		mapping := rootParamMapping{cbvSrvUavIndex: -1, samplerIndex: -1}
 
 		// Skip empty layouts
 		if len(bgLayout.entries) == 0 {
+			groupMappings = append(groupMappings, mapping)
 			continue
 		}
 
@@ -183,6 +211,8 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			descriptorRanges = append(descriptorRanges, cbvSrvUavRanges)
 			rangeIdx := len(descriptorRanges) - 1
 
+			mapping.cbvSrvUavIndex = len(rootParams)
+
 			param := d3d12.D3D12_ROOT_PARAMETER{
 				ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
 				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
@@ -201,6 +231,8 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			descriptorRanges = append(descriptorRanges, samplerRanges)
 			rangeIdx := len(descriptorRanges) - 1
 
+			mapping.samplerIndex = len(rootParams)
+
 			param := d3d12.D3D12_ROOT_PARAMETER{
 				ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
 				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
@@ -213,6 +245,8 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 
 			rootParams = append(rootParams, param)
 		}
+
+		groupMappings = append(groupMappings, mapping)
 	}
 
 	// Build root signature description
@@ -231,17 +265,27 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 		if errorBlob != nil {
 			errorBlob.Release()
 		}
-		return nil, fmt.Errorf("dx12: failed to serialize root signature: %w", err)
+		return nil, nil, fmt.Errorf("dx12: failed to serialize root signature: %w", err)
 	}
 	defer blob.Release()
+
+	// Check if device is already lost before attempting to create root signature.
+	// Device removal can happen asynchronously (e.g. TDR from a prior GPU hang).
+	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+		return nil, nil, fmt.Errorf("dx12: device already removed before CreateRootSignature: %w", reason)
+	}
 
 	// Create root signature
 	rootSig, err := d.raw.CreateRootSignature(0, blob.GetBufferPointer(), blob.GetBufferSize())
 	if err != nil {
-		return nil, fmt.Errorf("dx12: failed to create root signature: %w", err)
+		// Include device removed reason for better diagnostics
+		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+			return nil, nil, fmt.Errorf("dx12: failed to create root signature (device removed: %s): %w", reason.Error(), err)
+		}
+		return nil, nil, fmt.Errorf("dx12: failed to create root signature: %w", err)
 	}
 
-	return rootSig, nil
+	return rootSig, groupMappings, nil
 }
 
 // bindingTypeToD3D12DescriptorRangeType converts binding type to D3D12 descriptor range type.
@@ -278,13 +322,23 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 ) (*d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC, error) {
 	psoDesc := &d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC{}
 
-	// Set root signature from pipeline layout
+	// Set root signature from pipeline layout.
+	// DX12 requires a valid root signature for every PSO. If no layout is
+	// provided (shader has no resource bindings), use the device's shared
+	// empty root signature. This prevents GPU hangs on drivers that don't
+	// gracefully handle nil root signatures (observed as DPC_WATCHDOG_VIOLATION).
 	if desc.Layout != nil {
 		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
 		}
 		psoDesc.RootSignature = pipelineLayout.rootSignature
+	} else {
+		emptyRS, err := d.getOrCreateEmptyRootSignature()
+		if err != nil {
+			return nil, fmt.Errorf("dx12: failed to get empty root signature: %w", err)
+		}
+		psoDesc.RootSignature = emptyRS
 	}
 
 	// Set vertex shader
@@ -293,11 +347,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid vertex shader module type")
 		}
-		if len(shaderModule.bytecode) > 0 {
+		bytecode := shaderModule.EntryPointBytecode(desc.Vertex.EntryPoint)
+		if len(bytecode) > 0 {
 			psoDesc.VS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
-				BytecodeLength: uintptr(len(shaderModule.bytecode)),
+				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
+				BytecodeLength: uintptr(len(bytecode)),
 			}
+		} else {
+			return nil, fmt.Errorf("dx12: vertex shader entry point %q not found in module", desc.Vertex.EntryPoint)
 		}
 	}
 
@@ -307,11 +364,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid fragment shader module type")
 		}
-		if len(shaderModule.bytecode) > 0 {
+		bytecode := shaderModule.EntryPointBytecode(desc.Fragment.EntryPoint)
+		if len(bytecode) > 0 {
 			psoDesc.PS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&shaderModule.bytecode[0]),
-				BytecodeLength: uintptr(len(shaderModule.bytecode)),
+				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
+				BytecodeLength: uintptr(len(bytecode)),
 			}
+		} else {
+			return nil, fmt.Errorf("dx12: fragment shader entry point %q not found in module", desc.Fragment.EntryPoint)
 		}
 	}
 
@@ -534,6 +594,7 @@ func boolToInt32(b bool) int32 {
 type RenderPipeline struct {
 	pso           *d3d12.ID3D12PipelineState
 	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings []rootParamMapping         // bind group → root param index mapping
 	topology      d3d12.D3D_PRIMITIVE_TOPOLOGY
 	vertexStrides []uint32 // Strides per vertex buffer slot
 }
@@ -577,6 +638,7 @@ func (p *RenderPipeline) VertexStrides() []uint32 {
 type ComputePipeline struct {
 	pso           *d3d12.ID3D12PipelineState
 	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings []rootParamMapping         // bind group → root param index mapping
 }
 
 // Destroy releases the compute pipeline resources.

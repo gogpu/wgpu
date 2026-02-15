@@ -1864,11 +1864,12 @@ func (c *Commands) CmdSetLineWidth(commandBuffer CommandBuffer, lineWidth float3
 
 // CmdSetBlendConstants wraps vkCmdSetBlendConstants.
 func (c *Commands) CmdSetBlendConstants(commandBuffer CommandBuffer, blendConstants [4]float32) {
+	p := unsafe.Pointer(&blendConstants)
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(&blendConstants),
+		unsafe.Pointer(&p),
 	}
-	_ = ffi.CallFunction(&SigVoidHandleF32, c.cmdSetBlendConstants, nil, args[:])
+	_ = ffi.CallFunction(&SigVoidHandleFloatPtr, c.cmdSetBlendConstants, nil, args[:])
 }
 
 // TODO: CmdSetDepthBounds - signature not yet supported: void(handle, f32, f32)

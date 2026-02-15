@@ -19,10 +19,12 @@ import (
 // Buffer implements hal.Buffer for OpenGL.
 type Buffer struct {
 	id     uint32 // GL buffer object ID
+	target uint32 // GL_ARRAY_BUFFER, GL_UNIFORM_BUFFER, etc.
 	size   uint64
 	usage  gputypes.BufferUsage
 	glCtx  *gl.Context
 	mapped []byte // For mapped buffers
+	data   []byte // CPU-side storage for readback (populated by CopyTextureToBuffer)
 }
 
 // Destroy releases the buffer.
@@ -38,20 +40,28 @@ func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
 // Texture implements hal.Texture for OpenGL.
 type Texture struct {
-	id        uint32 // GL texture object ID
-	target    uint32 // GL_TEXTURE_2D, etc.
-	format    gputypes.TextureFormat
-	dimension gputypes.TextureDimension
-	size      hal.Extent3D
-	mipLevels uint32
-	glCtx     *gl.Context
+	id          uint32 // GL texture object ID
+	target      uint32 // GL_TEXTURE_2D, GL_TEXTURE_2D_MULTISAMPLE, etc.
+	format      gputypes.TextureFormat
+	dimension   gputypes.TextureDimension
+	size        hal.Extent3D
+	mipLevels   uint32
+	sampleCount uint32 // 1 for regular textures, >1 for MSAA
+	fbo         uint32 // GL framebuffer object ID (0 = no FBO created)
+	glCtx       *gl.Context
 }
 
-// Destroy releases the texture.
+// Destroy releases the texture and any associated framebuffer object.
 func (t *Texture) Destroy() {
-	if t.id != 0 && t.glCtx != nil {
-		t.glCtx.DeleteTextures(t.id)
-		t.id = 0
+	if t.glCtx != nil {
+		if t.fbo != 0 {
+			t.glCtx.DeleteFramebuffers(t.fbo)
+			t.fbo = 0
+		}
+		if t.id != 0 {
+			t.glCtx.DeleteTextures(t.id)
+			t.id = 0
+		}
 	}
 }
 
@@ -66,6 +76,8 @@ type TextureView struct {
 	mipCount   uint32
 	baseLayer  uint32
 	layerCount uint32
+	isSurface  bool            // true for default framebuffer (surface texture)
+	surfaceTex *SurfaceTexture // non-nil only when isSurface is true
 }
 
 // Destroy is a no-op for texture views in OpenGL.
@@ -152,6 +164,18 @@ type RenderPipeline struct {
 	frontFace         gputypes.FrontFace
 	depthStencil      *hal.DepthStencilState
 	multisample       gputypes.MultisampleState
+
+	// Blend state from the first color target (nil = no blending).
+	blend *gputypes.BlendState
+
+	// Color write mask from the first color target.
+	colorWriteMask gputypes.ColorWriteMask
+
+	// Vertex buffer layouts from the pipeline descriptor.
+	// OpenGL requires explicit glVertexAttribPointer calls to configure
+	// how vertex data is interpreted. This is stored here so that
+	// SetVertexBuffer can configure attributes using the pipeline's layout.
+	vertexBuffers []gputypes.VertexBufferLayout
 }
 
 // Destroy releases the render pipeline.

@@ -100,12 +100,10 @@ func (b *Buffer) Raw() *d3d12.ID3D12Resource {
 	return b.raw
 }
 
-// NativeHandle returns the raw ID3D12Resource pointer.
+// NativeHandle returns an opaque handle to this Buffer struct.
+// DX12 bind groups need the full Go struct to access GPU virtual address and size.
 func (b *Buffer) NativeHandle() uintptr {
-	if b.raw != nil {
-		return uintptr(unsafe.Pointer(b.raw))
-	}
-	return 0
+	return uintptr(unsafe.Pointer(b))
 }
 
 // GPUVirtualAddress returns the GPU virtual address for this buffer.
@@ -124,15 +122,16 @@ func (b *Buffer) Size() uint64 {
 
 // Texture implements hal.Texture for DirectX 12.
 type Texture struct {
-	raw        *d3d12.ID3D12Resource
-	format     gputypes.TextureFormat
-	dimension  gputypes.TextureDimension
-	size       hal.Extent3D
-	mipLevels  uint32
-	samples    uint32
-	usage      gputypes.TextureUsage
-	device     *Device
-	isExternal bool // True for swapchain images (not owned)
+	raw          *d3d12.ID3D12Resource
+	format       gputypes.TextureFormat
+	dimension    gputypes.TextureDimension
+	size         hal.Extent3D
+	mipLevels    uint32
+	samples      uint32
+	usage        gputypes.TextureUsage
+	device       *Device
+	isExternal   bool                        // True for swapchain images (not owned)
+	currentState d3d12.D3D12_RESOURCE_STATES // Tracked resource state for barrier correctness
 }
 
 // Destroy releases the texture resources.
@@ -191,11 +190,21 @@ type TextureView struct {
 	dsvHeapIndex uint32
 }
 
-// Destroy releases the texture view resources.
-// Note: Descriptors are not freed back to the heap in this simple implementation.
-// A proper implementation would use a free list.
+// Destroy releases the texture view resources and recycles descriptor heap slots.
+// For external (surface) texture views, descriptor slots are NOT freed because
+// the Surface owns them and manages their lifecycle via releaseBackBuffers().
 func (v *TextureView) Destroy() {
-	// Descriptors are managed by heaps; we just clear references
+	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
+		if v.hasSRV && v.device.stagingViewHeap != nil {
+			v.device.stagingViewHeap.Free(v.srvHeapIndex, 1)
+		}
+		if v.hasRTV && v.device.rtvHeap != nil {
+			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
+		}
+		if v.hasDSV && v.device.dsvHeap != nil {
+			v.device.dsvHeap.Free(v.dsvHeapIndex, 1)
+		}
+	}
 	v.hasSRV = false
 	v.hasRTV = false
 	v.hasDSV = false
@@ -206,12 +215,10 @@ func (v *TextureView) Texture() *Texture {
 	return v.texture
 }
 
-// NativeHandle returns the underlying texture's ID3D12Resource pointer.
+// NativeHandle returns an opaque handle to this TextureView struct.
+// DX12 bind groups need the full Go struct to access SRV descriptor handles.
 func (v *TextureView) NativeHandle() uintptr {
-	if v.texture != nil && v.texture.raw != nil {
-		return uintptr(unsafe.Pointer(v.texture.raw))
-	}
-	return 0
+	return uintptr(unsafe.Pointer(v))
 }
 
 // RTVHandle returns the render target view descriptor handle.
@@ -255,9 +262,11 @@ type Sampler struct {
 	device    *Device
 }
 
-// Destroy releases the sampler resources.
+// Destroy releases the sampler resources and recycles the descriptor heap slot.
 func (s *Sampler) Destroy() {
-	// Sampler descriptors are managed by the heap
+	if s.device != nil {
+		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
+	}
 }
 
 // Handle returns the sampler descriptor handle.
@@ -265,8 +274,9 @@ func (s *Sampler) Handle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return s.handle
 }
 
-// NativeHandle returns the sampler descriptor heap index (no raw pointer for descriptors).
-func (s *Sampler) NativeHandle() uintptr { return uintptr(s.heapIndex) }
+// NativeHandle returns an opaque handle to this Sampler struct.
+// DX12 bind groups need the full Go struct to access the sampler descriptor handle.
+func (s *Sampler) NativeHandle() uintptr { return uintptr(unsafe.Pointer(s)) }
 
 // -----------------------------------------------------------------------------
 // Compile-time interface assertions

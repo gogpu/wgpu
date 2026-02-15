@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -35,6 +36,10 @@ func newDevice(adapter *Adapter) (*Device, error) {
 	if queue == 0 {
 		return nil, fmt.Errorf("metal: failed to create command queue")
 	}
+
+	hal.Logger().Info("metal: device created",
+		"name", DeviceName(adapter.raw),
+	)
 
 	return &Device{
 		raw:          adapter.raw,
@@ -78,6 +83,7 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc.Label != "" {
 		label := NSString(desc.Label)
 		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
 	}
 
 	return &Buffer{
@@ -159,6 +165,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc.Label != "" {
 		label := NSString(desc.Label)
 		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
 	}
 
 	return &Texture{
@@ -373,6 +380,8 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	// If WGSL source is provided, compile to MSL
 	if desc.Source.WGSL != "" {
+		start := time.Now()
+
 		// Parse WGSL to AST
 		ast, err := naga.Parse(desc.Source.WGSL)
 		if err != nil {
@@ -394,6 +403,11 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			return nil, fmt.Errorf("metal: failed to compile to MSL: %w", err)
 		}
 
+		hal.Logger().Debug("metal: WGSL→MSL compilation",
+			"elapsed", time.Since(start),
+			"mslBytes", len(mslSource),
+		)
+
 		// Create NSString from MSL source
 		mslString := NSString(mslSource)
 		defer Release(mslString)
@@ -414,6 +428,10 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			}
 			return nil, fmt.Errorf("metal: failed to compile MSL: %s\nMSL:\n%s", errMsg, mslSource)
 		}
+
+		hal.Logger().Info("metal: shader module compiled",
+			"entryPoints", len(workgroupSizes),
+		)
 
 		return &ShaderModule{
 			source:         desc.Source,
@@ -571,6 +589,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, fmt.Errorf("metal: failed to create pipeline state: %s", errMsg)
 	}
 
+	hal.Logger().Debug("metal: render pipeline created",
+		"label", desc.Label,
+		"vertexEntry", desc.Vertex.EntryPoint,
+		"sampleCount", sampleCount,
+	)
+
 	return &RenderPipeline{raw: pipelineState, device: d}, nil
 }
 
@@ -627,6 +651,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	// Get workgroup size from shader module metadata
 	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
 
+	hal.Logger().Debug("metal: compute pipeline created",
+		"entryPoint", desc.Compute.EntryPoint,
+		"workgroupSize", fmt.Sprintf("%dx%dx%d", workgroupSize.Width, workgroupSize.Height, workgroupSize.Depth),
+	)
+
 	return &ComputePipeline{
 		raw:           pipelineState,
 		device:        d,
@@ -664,28 +693,31 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 }
 
 // CreateCommandEncoder creates a command encoder.
+//
+// The Metal command buffer is NOT created here — it is deferred to BeginEncoding.
+// This matches the two-step pattern used by Vulkan (allocate → vkBeginCommandBuffer)
+// and DX12 (create list → Reset). Creating the command buffer eagerly here would
+// conflict with BeginEncoding's guard (cmdBuffer != 0 → "already recording"),
+// causing every subsequent BeginEncoding call to fail and leak the pre-allocated
+// command buffer and its autorelease pool.
 func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	pool := NewAutoreleasePool()
-	cmdBuffer := MsgSend(d.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
-		pool.Drain()
-		return nil, fmt.Errorf("metal: failed to create command buffer")
-	}
-	Retain(cmdBuffer)
 	label := ""
 	if desc != nil {
 		label = desc.Label
 	}
-	return &CommandEncoder{device: d, cmdBuffer: cmdBuffer, pool: pool, label: label}, nil
+	return &CommandEncoder{device: d, label: label}, nil
 }
 
-// CreateFence creates a synchronization fence.
+// CreateFence creates a synchronization fence backed by MTLSharedEvent.
+//
+// MTLSharedEvent (unlike MTLEvent) exposes a signaledValue property readable
+// from the CPU, enabling proper blocking waits and non-blocking status queries.
 func (d *Device) CreateFence() (hal.Fence, error) {
-	event := MsgSend(d.raw, Sel("newEvent"))
+	event := MsgSend(d.raw, Sel("newSharedEvent"))
 	if event == 0 {
-		return nil, fmt.Errorf("metal: failed to create event")
+		return nil, fmt.Errorf("metal: failed to create shared event")
 	}
-	return &Fence{event: event, value: 0, device: d}, nil
+	return &Fence{event: event, device: d}, nil
 }
 
 // DestroyFence destroys a fence.
@@ -701,40 +733,85 @@ func (d *Device) DestroyFence(fence hal.Fence) {
 	mtlFence.device = nil
 }
 
-// Wait waits for a fence to reach the specified value.
+// Wait waits for a fence to reach the specified value by polling MTLSharedEvent.signaledValue.
+//
+// MTLSharedEvent.signaledValue is updated by the GPU when the event is signaled.
+// This method polls with progressive backoff (spin → yield → 1ms sleep) to
+// balance latency against CPU usage.
 func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (bool, error) {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return false, fmt.Errorf("metal: invalid fence")
 	}
-	if mtlFence.value >= value {
+
+	// Fast path: already signaled.
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	if uint64(signaled) >= value {
 		return true, nil
 	}
-	return false, nil
+
+	// Poll with progressive backoff until timeout.
+	deadline := time.Now().Add(timeout)
+	spins := 0
+	for {
+		signaled = MsgSendUint(mtlFence.event, Sel("signaledValue"))
+		if uint64(signaled) >= value {
+			return true, nil
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+
+		// Progressive backoff: first 100 iterations spin, then yield, then sleep.
+		spins++
+		switch {
+		case spins < 100:
+			// Busy spin for low-latency scenarios.
+		case spins < 200:
+			runtime.Gosched()
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 // ResetFence resets a fence to the unsignaled state.
+// Sets the MTLSharedEvent.signaledValue to 0 via Objective-C message send.
 func (d *Device) ResetFence(fence hal.Fence) error {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return fmt.Errorf("metal: invalid fence")
 	}
-	mtlFence.value = 0
+	_ = MsgSend(mtlFence.event, Sel("setSignaledValue:"), uintptr(0))
 	return nil
 }
 
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
+// Reads the GPU-updated signaledValue from MTLSharedEvent.
 func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
 		return false, fmt.Errorf("metal: invalid fence")
 	}
-	return mtlFence.value > 0, nil
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	return signaled > 0, nil
 }
 
-// FreeCommandBuffer is a no-op for Metal.
-// Metal command buffers are managed by the command queue.
-func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {}
+// FreeCommandBuffer releases a submitted command buffer and its autorelease pool.
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	cb, ok := cmdBuffer.(*CommandBuffer)
+	if !ok || cb == nil {
+		return
+	}
+	if cb.raw != 0 {
+		Release(cb.raw)
+		cb.raw = 0
+	}
+	if cb.pool != nil {
+		cb.pool.Drain()
+		cb.pool = nil
+	}
+}
 
 // CreateRenderBundleEncoder is not supported in Metal backend.
 func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {

@@ -102,7 +102,7 @@ func TestTextureFormatToGL(t *testing.T) {
 			format:         gputypes.TextureFormatDepth24PlusStencil8,
 			wantInternal:   gl.DEPTH24_STENCIL8,
 			wantDataFormat: gl.DEPTH_STENCIL,
-			wantDataType:   gl.UNSIGNED_INT,
+			wantDataType:   gl.UNSIGNED_INT_24_8,
 		},
 		{
 			name:           "Depth32Float",

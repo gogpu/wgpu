@@ -209,78 +209,18 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		}
 	}
 
-	// Build pool sizes for each descriptor type
-	var poolSizes []vk.DescriptorPoolSize
-
-	// Use reasonable defaults if counts are empty (common case for simple pipelines)
-	//nolint:nestif // Pool sizing requires checking each descriptor type.
-	if counts.IsEmpty() {
-		// Default pool sizes for general use
-		poolSizes = []vk.DescriptorPoolSize{
-			{Type: vk.DescriptorTypeSampler, DescriptorCount: poolSize},
-			{Type: vk.DescriptorTypeSampledImage, DescriptorCount: poolSize},
-			{Type: vk.DescriptorTypeStorageImage, DescriptorCount: poolSize / 4},
-			{Type: vk.DescriptorTypeUniformBuffer, DescriptorCount: poolSize},
-			{Type: vk.DescriptorTypeStorageBuffer, DescriptorCount: poolSize / 2},
-			{Type: vk.DescriptorTypeCombinedImageSampler, DescriptorCount: poolSize},
-		}
-	} else {
-		// Use exact counts multiplied by pool size
-		if counts.Samplers > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeSampler,
-				DescriptorCount: counts.Samplers * poolSize,
-			})
-		}
-		if counts.SampledImages > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeSampledImage,
-				DescriptorCount: counts.SampledImages * poolSize,
-			})
-		}
-		if counts.StorageImages > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeStorageImage,
-				DescriptorCount: counts.StorageImages * poolSize,
-			})
-		}
-		if counts.UniformBuffers > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeUniformBuffer,
-				DescriptorCount: counts.UniformBuffers * poolSize,
-			})
-		}
-		if counts.StorageBuffers > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeStorageBuffer,
-				DescriptorCount: counts.StorageBuffers * poolSize,
-			})
-		}
-		if counts.UniformTexelBuffer > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeUniformTexelBuffer,
-				DescriptorCount: counts.UniformTexelBuffer * poolSize,
-			})
-		}
-		if counts.StorageTexelBuffer > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeStorageTexelBuffer,
-				DescriptorCount: counts.StorageTexelBuffer * poolSize,
-			})
-		}
-		if counts.InputAttachments > 0 {
-			poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-				Type:            vk.DescriptorTypeInputAttachment,
-				DescriptorCount: counts.InputAttachments * poolSize,
-			})
-		}
-	}
-
-	// Ensure we have at least one pool size
-	if len(poolSizes) == 0 {
-		poolSizes = []vk.DescriptorPoolSize{
-			{Type: vk.DescriptorTypeUniformBuffer, DescriptorCount: poolSize},
-		}
+	// Build pool sizes with ALL descriptor types.
+	// Every pool includes all types to avoid allocation failures when
+	// different bind group layouts (e.g., uniform-only vs sampler+texture)
+	// share the same pool. Requested counts scale the primary types;
+	// all other types get a reasonable baseline allocation.
+	poolSizes := []vk.DescriptorPoolSize{
+		{Type: vk.DescriptorTypeSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
+		{Type: vk.DescriptorTypeSampledImage, DescriptorCount: max(counts.SampledImages, 1) * poolSize},
+		{Type: vk.DescriptorTypeStorageImage, DescriptorCount: max(counts.StorageImages*poolSize, poolSize/4)},
+		{Type: vk.DescriptorTypeUniformBuffer, DescriptorCount: max(counts.UniformBuffers, 1) * poolSize},
+		{Type: vk.DescriptorTypeStorageBuffer, DescriptorCount: max(counts.StorageBuffers*poolSize, poolSize/2)},
+		{Type: vk.DescriptorTypeCombinedImageSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
 	}
 
 	createInfo := vk.DescriptorPoolCreateInfo{

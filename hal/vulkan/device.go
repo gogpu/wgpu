@@ -214,6 +214,15 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	vkUsage := textureUsageToVk(desc.Usage)
 	imageType := textureDimensionToVkImageType(desc.Dimension)
 
+	// For depth/stencil formats, replace COLOR_ATTACHMENT with DEPTH_STENCIL_ATTACHMENT.
+	// textureUsageToVk maps RenderAttachment → COLOR_ATTACHMENT generically,
+	// but depth/stencil textures must use DEPTH_STENCIL_ATTACHMENT instead.
+	if isDepthStencilFormat(desc.Format) &&
+		vkUsage&vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit) != 0 {
+		vkUsage &^= vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit)
+		vkUsage |= vk.ImageUsageFlags(vk.ImageUsageDepthStencilAttachmentBit)
+	}
+
 	// Determine depth/array layers
 	depth := desc.Size.DepthOrArrayLayers
 	if depth == 0 {
@@ -871,6 +880,15 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
 	}
+
+	sourceType := "SPIR-V"
+	if desc.Source.WGSL != "" {
+		sourceType = "WGSL"
+	}
+	hal.Logger().Debug("vulkan: shader module compiled",
+		"source", sourceType,
+		"spirvWords", len(spirv),
+	)
 
 	return &ShaderModule{
 		handle: module,

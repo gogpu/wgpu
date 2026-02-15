@@ -28,9 +28,12 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			return fmt.Errorf("gles: invalid command buffer type")
 		}
 
-		// Execute recorded commands
-		for _, cmd := range cmdBuf.commands {
+		// Execute recorded commands with GL error checking.
+		for i, cmd := range cmdBuf.commands {
 			cmd.Execute(q.glCtx)
+			if glErr := q.glCtx.GetError(); glErr != 0 {
+				hal.Logger().Warn("gles: GL error after command", "error", fmt.Sprintf("0x%x", glErr), "index", i, "command", fmt.Sprintf("%T", cmd))
+			}
 		}
 	}
 
@@ -48,16 +51,31 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 }
 
 // ReadBuffer reads data from a GPU buffer into the provided byte slice.
-// It uses glMapBuffer with GL_READ_ONLY to map the buffer, copies the requested
-// range starting at offset, then unmaps the buffer.
+// If the buffer has CPU-side data (populated by CopyTextureToBuffer), it reads
+// from there directly. Otherwise it falls back to glMapBuffer with GL_READ_ONLY.
 func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
 
 	buf, ok := buffer.(*Buffer)
-	if !ok || buf.id == 0 {
+	if !ok {
 		return fmt.Errorf("gles: invalid buffer for ReadBuffer")
+	}
+
+	// If the buffer has CPU-side data (from CopyTextureToBuffer), read from it.
+	if len(buf.data) > 0 {
+		end := offset + uint64(len(data))
+		if end > uint64(len(buf.data)) {
+			return fmt.Errorf("gles: ReadBuffer offset+size (%d) exceeds buffer data length (%d)", end, len(buf.data))
+		}
+		copy(data, buf.data[offset:end])
+		return nil
+	}
+
+	// Fall back to GL buffer mapping for GPU-resident buffers.
+	if buf.id == 0 {
+		return fmt.Errorf("gles: invalid buffer for ReadBuffer (no GL ID and no CPU data)")
 	}
 
 	// Bind buffer to COPY_READ_BUFFER target (avoids disturbing other bindings)
@@ -85,16 +103,13 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 // WriteBuffer writes data to a buffer immediately.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	buf, ok := buffer.(*Buffer)
-	if !ok {
+	if !ok || len(data) == 0 {
 		return
 	}
 
-	// Determine target from usage
-	target := uint32(gl.ARRAY_BUFFER)
-
-	q.glCtx.BindBuffer(target, buf.id)
-	q.glCtx.BufferSubData(target, int(offset), len(data), uintptr(unsafe.Pointer(&data[0])))
-	q.glCtx.BindBuffer(target, 0)
+	q.glCtx.BindBuffer(buf.target, buf.id)
+	q.glCtx.BufferSubData(buf.target, int(offset), len(data), uintptr(unsafe.Pointer(&data[0])))
+	q.glCtx.BindBuffer(buf.target, 0)
 }
 
 // WriteTexture writes data to a texture immediately.

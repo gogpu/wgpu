@@ -24,11 +24,16 @@ type CommandBuffer struct {
 	allocator *CommandAllocator
 }
 
-// Destroy releases the command buffer resources.
+// Destroy releases the command buffer's COM resources.
 func (c *CommandBuffer) Destroy() {
-	// Command lists are reusable - don't release them individually
-	// The allocator will be reset when the encoder is reused
-	c.cmdList = nil
+	if c.cmdList != nil {
+		c.cmdList.Release()
+		c.cmdList = nil
+	}
+	if c.allocator != nil && c.allocator.raw != nil {
+		c.allocator.raw.Release()
+		c.allocator.raw = nil
+	}
 	c.allocator = nil
 }
 
@@ -45,7 +50,16 @@ type CommandEncoder struct {
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 
-	// Reset the command allocator (can only be done when GPU is done with it)
+	// CRITICAL: Wait for GPU to finish all pending work before resetting allocator.
+	// DX12 requires that the command allocator is not in use by the GPU when Reset()
+	// is called. Without this wait, the GPU may still be executing commands from the
+	// previous frame, and resetting the allocator frees the memory the GPU is reading
+	// from — causing a GPU hang and DPC_WATCHDOG_VIOLATION BSOD.
+	if err := e.device.waitForGPU(); err != nil {
+		return fmt.Errorf("dx12: wait for GPU before allocator reset: %w", err)
+	}
+
+	// Reset the command allocator (safe now — GPU is idle)
 	if err := e.allocator.raw.Reset(); err != nil {
 		return fmt.Errorf("dx12: command allocator reset failed: %w", err)
 	}
@@ -274,6 +288,10 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		}
 		srcLoc.SetSubresourceIndex(subresource)
 
+		// D3D12 requires RowPitch aligned to 256 bytes.
+		// The caller should pass aligned BytesPerRow, but align defensively.
+		rowPitch := (r.BufferLayout.BytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
+
 		// Destination location (buffer)
 		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
 			Resource: dstBuf.raw,
@@ -286,7 +304,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 				Width:    r.Size.Width,
 				Height:   r.Size.Height,
 				Depth:    r.Size.DepthOrArrayLayers,
-				RowPitch: r.BufferLayout.BytesPerRow,
+				RowPitch: rowPitch,
 			},
 		})
 
@@ -361,6 +379,24 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 	if !e.isRecording {
 		return rpe
+	}
+
+	// Transition surface textures from PRESENT to RENDER_TARGET state.
+	// DX12 requires explicit barriers (unlike Vulkan which uses render pass layout transitions).
+	for _, ca := range desc.ColorAttachments {
+		view, ok := ca.View.(*TextureView)
+		if !ok || view.texture == nil || view.texture.raw == nil {
+			continue
+		}
+		if view.texture.isExternal {
+			barrier := d3d12.NewTransitionBarrier(
+				view.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			e.cmdList.ResourceBarrier(1, &barrier)
+		}
 	}
 
 	// Set render targets
@@ -449,9 +485,85 @@ type RenderPassEncoder struct {
 }
 
 // End finishes the render pass.
+// Handles MSAA resolve (if ResolveTarget is set) and transitions surface
+// textures back to PRESENT state for presentation.
 func (e *RenderPassEncoder) End() {
-	// D3D12 doesn't have explicit render pass end like Vulkan
-	// Resource transitions should be done by the user via TransitionTextures
+	if e.desc == nil || e.encoder == nil || !e.encoder.isRecording {
+		return
+	}
+
+	for _, ca := range e.desc.ColorAttachments {
+		msaaView, ok := ca.View.(*TextureView)
+		if !ok || msaaView.texture == nil || msaaView.texture.raw == nil {
+			continue
+		}
+
+		// Check for MSAA resolve target.
+		resolveView, _ := ca.ResolveTarget.(*TextureView)
+		if resolveView != nil && resolveView.texture != nil && resolveView.texture.raw != nil && msaaView.texture.samples > 1 {
+			// Determine resolve target's resting state based on ownership.
+			// Surface (swapchain) textures live in PRESENT between frames.
+			// Internal (offscreen) textures live in RENDER_TARGET, matching
+			// the initial state set by CreateTexture for RenderAttachment usage.
+			resolveRestState := d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
+			if resolveView.texture.isExternal {
+				resolveRestState = d3d12.D3D12_RESOURCE_STATE_PRESENT
+			}
+
+			// MSAA resolve: render target → resolve source, resolve target → resolve dest.
+			b1 := d3d12.NewTransitionBarrier(
+				msaaView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			b2 := d3d12.NewTransitionBarrier(
+				resolveView.texture.raw,
+				resolveRestState,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			barriers := [2]d3d12.D3D12_RESOURCE_BARRIER{b1, b2}
+			e.encoder.cmdList.ResourceBarrier(2, &barriers[0])
+
+			// Resolve MSAA → single-sample.
+			format := textureFormatToD3D12(msaaView.texture.format)
+			e.encoder.cmdList.ResolveSubresource(
+				resolveView.texture.raw, 0,
+				msaaView.texture.raw, 0,
+				format,
+			)
+
+			// Transition back: MSAA → render target (for next frame),
+			// resolve target → resting state.
+			b3 := d3d12.NewTransitionBarrier(
+				msaaView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			b4 := d3d12.NewTransitionBarrier(
+				resolveView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
+				resolveRestState,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			barriers2 := [2]d3d12.D3D12_RESOURCE_BARRIER{b3, b4}
+			e.encoder.cmdList.ResourceBarrier(2, &barriers2[0])
+			continue
+		}
+
+		// No resolve — just transition external surface back to PRESENT.
+		if msaaView.texture.isExternal {
+			barrier := d3d12.NewTransitionBarrier(
+				msaaView.texture.raw,
+				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
+				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			)
+			e.encoder.cmdList.ResourceBarrier(1, &barrier)
+		}
+	}
 }
 
 // SetPipeline sets the render pipeline.
@@ -485,8 +597,14 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		e.descriptorHeapsSet = true
 	}
 
+	// Get group mappings from the current pipeline.
+	var mappings []rootParamMapping
+	if e.pipeline != nil {
+		mappings = e.pipeline.groupMappings
+	}
+
 	// Bind the group using graphics root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, false)
+	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -685,8 +803,14 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		e.descriptorHeapsSet = true
 	}
 
+	// Get group mappings from the current pipeline.
+	var mappings []rootParamMapping
+	if e.pipeline != nil {
+		mappings = e.pipeline.groupMappings
+	}
+
 	// Bind the group using compute root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, true)
+	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -735,30 +859,31 @@ func (e *CommandEncoder) ensureDescriptorHeapsBound() {
 
 // bindGroupToRootTables binds a BindGroup's descriptor tables to root parameters.
 // isCompute determines whether to use compute or graphics root descriptor tables.
-// The root parameter index is calculated as: bindGroupIndex * 2 (for CBV/SRV/UAV and sampler tables).
-func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool) {
-	// Calculate root parameter index based on bind group index.
-	// In our root signature layout, each bind group may have up to 2 tables:
-	// - CBV/SRV/UAV table
-	// - Sampler table
-	// So bind group N starts at root parameter index N*2.
-	rootParamIndex := bindGroupIndex * 2
+// groupMappings provides the actual root parameter indices (not all groups have both table types).
+func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool, groupMappings []rootParamMapping) {
+	// Use mapping if available; fall back to bindGroupIndex*2 for backwards compatibility.
+	cbvIdx := int(bindGroupIndex) * 2
+	samplerIdx := cbvIdx + 1
+	if int(bindGroupIndex) < len(groupMappings) {
+		cbvIdx = groupMappings[bindGroupIndex].cbvSrvUavIndex
+		samplerIdx = groupMappings[bindGroupIndex].samplerIndex
+	}
 
 	// Set CBV/SRV/UAV descriptor table if the bind group has one.
-	if bg.gpuDescHandle.Ptr != 0 {
+	if bg.gpuDescHandle.Ptr != 0 && cbvIdx >= 0 {
 		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+			e.cmdList.SetComputeRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
 		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex, bg.gpuDescHandle)
+			e.cmdList.SetGraphicsRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
 		}
 	}
 
 	// Set sampler descriptor table if the bind group has one.
-	if bg.samplerGPUHandle.Ptr != 0 {
+	if bg.samplerGPUHandle.Ptr != 0 && samplerIdx >= 0 {
 		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+			e.cmdList.SetComputeRootDescriptorTable(uint32(samplerIdx), bg.samplerGPUHandle)
 		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(rootParamIndex+1, bg.samplerGPUHandle)
+			e.cmdList.SetGraphicsRootDescriptorTable(uint32(samplerIdx), bg.samplerGPUHandle)
 		}
 	}
 }

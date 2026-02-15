@@ -25,6 +25,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	if err := Init(); err != nil {
 		return nil, fmt.Errorf("metal: failed to initialize: %w", err)
 	}
+	hal.Logger().Info("metal: instance created")
 	return &Instance{}, nil
 }
 
@@ -49,6 +50,8 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	if len(devices) == 0 {
 		return nil
 	}
+
+	hal.Logger().Debug("metal: enumerating adapters", "count", len(devices))
 
 	adapters := make([]hal.ExposedAdapter, 0, len(devices))
 	for _, device := range devices {
@@ -78,6 +81,15 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		}
 
 		maxBuf := DeviceMaxBufferLength(device)
+
+		hal.Logger().Info("metal: adapter found",
+			"name", deviceName,
+			"type", deviceType,
+			"lowPower", DeviceIsLowPower(device),
+			"removable", DeviceIsRemovable(device),
+			"headless", DeviceIsHeadless(device),
+			"maxBuffer", maxBuf,
+		)
 
 		adapters = append(adapters, hal.ExposedAdapter{
 			Adapter: adapter,

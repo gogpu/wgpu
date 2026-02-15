@@ -53,13 +53,22 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Determine factory creation flags
 	var factoryFlags uint32
-	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
+	debugRequested := desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0
+	if debugRequested {
 		factoryFlags |= dxgi.DXGI_CREATE_FACTORY_DEBUG
 		instance.flags = desc.Flags
 	}
 
-	// Create DXGI factory
+	// Create DXGI factory (with graceful debug fallback)
 	factory, err := dxgiLib.CreateFactory2(factoryFlags)
+	if err != nil && debugRequested {
+		// Debug layer not installed (requires Windows "Graphics Tools" optional feature).
+		// Fall back to non-debug factory.
+		hal.Logger().Warn("dx12: debug layer not available, falling back to non-debug mode", "err", err)
+		factoryFlags = 0
+		instance.flags = 0
+		factory, err = dxgiLib.CreateFactory2(factoryFlags)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("dx12: failed to create DXGI factory: %w", err)
 	}
@@ -73,12 +82,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 	instance.d3d12Lib = d3d12Lib
 
-	// Enable debug layer if requested
-	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
+	// Enable debug layer if requested (and factory was created with debug flags)
+	if instance.flags&gputypes.InstanceFlagsDebug != 0 {
 		if err := instance.enableDebugLayer(); err != nil {
-			// Debug layer is optional; log but don't fail
-			// In production, we might want to use a logger here
-			_ = err
+			hal.Logger().Warn("dx12: debug layer enable failed (non-fatal)", "err", err)
 		}
 	}
 
@@ -87,6 +94,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(instance, (*Instance).Destroy)
+
+	hal.Logger().Info("dx12: instance created",
+		"tearing", instance.allowTearing,
+	)
 
 	return instance, nil
 }
@@ -196,6 +207,13 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		}
 
 		exposed := adapter.toExposedAdapter()
+
+		hal.Logger().Info("dx12: adapter found",
+			"name", exposed.Info.Name,
+			"type", exposed.Info.DeviceType,
+			"vendorID", fmt.Sprintf("0x%04X", exposed.Info.VendorID),
+		)
+
 		adapters = append(adapters, exposed)
 	}
 
@@ -242,6 +260,12 @@ func (i *Instance) enumerateAdaptersLegacy(surfaceHint hal.Surface) []hal.Expose
 		}
 
 		exposed := adapter.toExposedAdapter()
+
+		hal.Logger().Info("dx12: adapter found (legacy)",
+			"name", exposed.Info.Name,
+			"type", exposed.Info.DeviceType,
+			"vendorID", fmt.Sprintf("0x%04X", exposed.Info.VendorID),
+		)
 
 		// Sort by device type for proper preference ordering
 		switch exposed.Info.DeviceType {

@@ -35,7 +35,7 @@
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler |
 | **Compute** | Full compute shader support, GPU→CPU readback |
-| **Debug** | Leak detection, error scopes (W3C WebGPU spec) |
+| **Debug** | Leak detection, error scopes, validation layers, structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
 
 ---
@@ -110,7 +110,7 @@ pipelineID, _ := core.DeviceCreateComputePipeline(deviceID, &core.ComputePipelin
 })
 
 // Begin compute pass
-encoder, _ := core.DeviceCreateCommandEncoder(deviceID, nil)
+encoderID, _ := core.DeviceCreateCommandEncoder(deviceID, "Compute Encoder")
 computePass := encoder.BeginComputePass(nil)
 
 // Dispatch workgroups
@@ -120,8 +120,8 @@ computePass.Dispatch(64, 1, 1)
 computePass.End()
 
 // Submit commands
-commands := encoder.Finish(nil)
-core.QueueSubmit(queueID, []types.CommandBuffer{commands})
+cmdBufID, _ := core.CommandEncoderFinish(encoderID)
+core.QueueSubmit(queueID, []core.CommandBufferID{cmdBufID})
 ```
 
 ---
@@ -130,16 +130,15 @@ core.QueueSubmit(queueID, []types.CommandBuffer{commands})
 
 ```
 wgpu/
-├── types/              # WebGPU type definitions
 ├── core/               # Validation, state tracking, resource management
 ├── hal/                # Hardware Abstraction Layer
 │   ├── allbackends/    # Platform-specific backend auto-registration
 │   ├── noop/           # No-op backend (testing)
-│   ├── software/       # CPU software rasterizer (~10K LOC)
-│   ├── gles/           # OpenGL ES 3.0+ (~7.5K LOC)
-│   ├── vulkan/         # Vulkan 1.3 (~27K LOC)
-│   ├── metal/          # Metal (~3K LOC)
-│   └── dx12/           # DirectX 12 (~12K LOC)
+│   ├── software/       # CPU software rasterizer (~11K LOC)
+│   ├── gles/           # OpenGL ES 3.0+ (~10K LOC)
+│   ├── vulkan/         # Vulkan 1.3 (~38K LOC)
+│   ├── metal/          # Metal (~5K LOC)
+│   └── dx12/           # DirectX 12 (~14K LOC)
 └── cmd/
     ├── vk-gen/         # Vulkan bindings generator
     └── vulkan-triangle/# Integration test
@@ -181,7 +180,10 @@ Full Vulkan 1.3 implementation with:
 - Dynamic rendering (VK_KHR_dynamic_rendering)
 - Classic render pass fallback for Intel compatibility
 - wgpu-style swapchain synchronization
+- MSAA render pass with automatic resolve
 - Complete resource management (Buffer, Texture, Pipeline, BindGroup)
+- Debug messenger for validation layer error capture (`VK_EXT_debug_utils`)
+- Structured diagnostic logging via `log/slog`
 
 ### Metal Backend
 
@@ -200,6 +202,19 @@ Windows GPU access via:
 - DXGI integration for swapchain and adapters
 - Flip model with VRR support
 - Descriptor heap management
+- WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
+- Staging buffer GPU data transfer (WriteBuffer, WriteTexture)
+
+### OpenGL ES Backend
+
+Cross-platform GPU access via OpenGL ES 3.0+:
+
+- Pure Go EGL/GL bindings (goffi)
+- Full rendering pipeline: VAO, FBO, MSAA, blend, stencil, depth
+- WGSL shader compilation (WGSL → GLSL via naga)
+- CopyTextureToBuffer readback for GPU → CPU data transfer
+- Platform detection: X11, Wayland, Surfaceless (headless CI)
+- Works with Mesa llvmpipe for software-only environments
 
 ### Software Backend
 
@@ -234,7 +249,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 |---------|-------------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
 | **gogpu/wgpu** | **Pure Go WebGPU (this repo)** |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings |
 | [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |

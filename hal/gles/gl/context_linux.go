@@ -36,6 +36,9 @@ var (
 	cifVoid5DrawElem types.CallInterface // void fn(uint32, int32, uint32, void*, int32)
 	cifPtr1          types.CallInterface // void* fn(uint32)
 	cifPtr2UU        types.CallInterface // void* fn(uint32, uint32)
+	cifVoid7ReadPx   types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
+	cifVoid6TexMS    types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
+	cifVoid10Blit    types.CallInterface // void fn(int32*8, uint32, uint32) - BlitFramebuffer
 	cifInitialized   bool
 )
 
@@ -307,6 +310,56 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	// void fn(int32, int32, int32, int32, uint32, uint32, void*) - ReadPixels
+	err = ffi.PrepareCallInterface(&cifVoid7ReadPx, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
+	err = ffi.PrepareCallInterface(&cifVoid6TexMS, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // target
+			types.SInt32TypeDescriptor, // samples
+			types.UInt32TypeDescriptor, // internalformat
+			types.SInt32TypeDescriptor, // width
+			types.SInt32TypeDescriptor, // height
+			types.UInt8TypeDescriptor,  // fixedsamplelocations
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(int32, int32, int32, int32, int32, int32, int32, int32, uint32, uint32) - BlitFramebuffer
+	err = ffi.PrepareCallInterface(&cifVoid10Blit, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.SInt32TypeDescriptor, // srcX0
+			types.SInt32TypeDescriptor, // srcY0
+			types.SInt32TypeDescriptor, // srcX1
+			types.SInt32TypeDescriptor, // srcY1
+			types.SInt32TypeDescriptor, // dstX0
+			types.SInt32TypeDescriptor, // dstY0
+			types.SInt32TypeDescriptor, // dstX1
+			types.SInt32TypeDescriptor, // dstY1
+			types.UInt32TypeDescriptor, // mask
+			types.UInt32TypeDescriptor, // filter
+		})
+	if err != nil {
+		return err
+	}
+
 	cifInitialized = true
 	return nil
 }
@@ -398,6 +451,10 @@ type Context struct {
 	glCheckFramebufferStatus unsafe.Pointer
 	glDrawBuffers            unsafe.Pointer
 
+	// Pixel read/store (GL 1.0+)
+	glReadPixels  unsafe.Pointer
+	glPixelStorei unsafe.Pointer
+
 	// Renderbuffers (GL 3.0+)
 	glGenRenderbuffers        unsafe.Pointer
 	glDeleteRenderbuffers     unsafe.Pointer
@@ -413,12 +470,16 @@ type Context struct {
 	glBlendColor            unsafe.Pointer
 
 	// Depth/Stencil
-	glDepthFunc   unsafe.Pointer
-	glDepthMask   unsafe.Pointer
-	glDepthRange  unsafe.Pointer
-	glStencilFunc unsafe.Pointer
-	glStencilOp   unsafe.Pointer
-	glStencilMask unsafe.Pointer
+	glDepthFunc           unsafe.Pointer
+	glDepthMask           unsafe.Pointer
+	glDepthRange          unsafe.Pointer
+	glStencilFunc         unsafe.Pointer
+	glStencilOp           unsafe.Pointer
+	glStencilMask         unsafe.Pointer
+	glStencilFuncSeparate unsafe.Pointer
+	glStencilOpSeparate   unsafe.Pointer
+	glStencilMaskSeparate unsafe.Pointer
+	glColorMask           unsafe.Pointer
 
 	// Face culling
 	glCullFace  unsafe.Pointer
@@ -445,6 +506,10 @@ type Context struct {
 	glDispatchCompute         unsafe.Pointer
 	glDispatchComputeIndirect unsafe.Pointer
 	glMemoryBarrier           unsafe.Pointer
+
+	// MSAA (GL 3.2+ / ES 3.1+)
+	glTexImage2DMultisample unsafe.Pointer
+	glBlitFramebuffer       unsafe.Pointer
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -541,6 +606,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
 
+	// Pixel read/store
+	c.glReadPixels = getProcAddr("glReadPixels")
+	c.glPixelStorei = getProcAddr("glPixelStorei")
+
 	// Renderbuffers
 	c.glGenRenderbuffers = getProcAddr("glGenRenderbuffers")
 	c.glDeleteRenderbuffers = getProcAddr("glDeleteRenderbuffers")
@@ -562,6 +631,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
 	c.glStencilMask = getProcAddr("glStencilMask")
+	c.glStencilFuncSeparate = getProcAddr("glStencilFuncSeparate")
+	c.glStencilOpSeparate = getProcAddr("glStencilOpSeparate")
+	c.glStencilMaskSeparate = getProcAddr("glStencilMaskSeparate")
+	c.glColorMask = getProcAddr("glColorMask")
 
 	// Face culling
 	c.glCullFace = getProcAddr("glCullFace")
@@ -588,6 +661,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+
+	// MSAA (optional - may be nil on older GL versions)
+	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
+	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
 
 	return nil
 }
@@ -1045,6 +1122,50 @@ func (c *Context) GenerateMipmap(target uint32) {
 	_ = ffi.CallFunction(&cifVoid1, c.glGenerateMipmap, nil, args[:])
 }
 
+// TexImage2DMultisample creates a multisample 2D texture image.
+// Requires OpenGL 3.2+ or OpenGL ES 3.1+.
+// No-op if not supported.
+func (c *Context) TexImage2DMultisample(target uint32, samples int32, internalformat uint32, width, height int32, fixedsamplelocations bool) {
+	if c.glTexImage2DMultisample == nil {
+		return
+	}
+	var fixed uint8
+	if fixedsamplelocations {
+		fixed = 1
+	}
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&samples),
+		unsafe.Pointer(&internalformat),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&fixed),
+	}
+	_ = ffi.CallFunction(&cifVoid6TexMS, c.glTexImage2DMultisample, nil, args[:])
+}
+
+// BlitFramebuffer copies a block of pixels between framebuffers.
+// Requires OpenGL 3.0+ or OpenGL ES 3.0+.
+// No-op if not supported.
+func (c *Context) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1 int32, mask, filter uint32) {
+	if c.glBlitFramebuffer == nil {
+		return
+	}
+	args := [10]unsafe.Pointer{
+		unsafe.Pointer(&srcX0),
+		unsafe.Pointer(&srcY0),
+		unsafe.Pointer(&srcX1),
+		unsafe.Pointer(&srcY1),
+		unsafe.Pointer(&dstX0),
+		unsafe.Pointer(&dstY0),
+		unsafe.Pointer(&dstX1),
+		unsafe.Pointer(&dstY1),
+		unsafe.Pointer(&mask),
+		unsafe.Pointer(&filter),
+	}
+	_ = ffi.CallFunction(&cifVoid10Blit, c.glBlitFramebuffer, nil, args[:])
+}
+
 // --- Framebuffers ---
 
 func (c *Context) GenFramebuffers(n int32) uint32 {
@@ -1092,6 +1213,31 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	return result
 }
 
+// --- Pixel Read/Store ---
+
+// ReadPixels reads a block of pixels from the framebuffer.
+func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32, pixels unsafe.Pointer) {
+	args := [7]unsafe.Pointer{
+		unsafe.Pointer(&x),
+		unsafe.Pointer(&y),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&dataType),
+		pixels,
+	}
+	_ = ffi.CallFunction(&cifVoid7ReadPx, c.glReadPixels, nil, args[:])
+}
+
+// PixelStorei sets pixel storage modes that affect ReadPixels and TexImage operations.
+func (c *Context) PixelStorei(pname uint32, param int32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&pname),
+		unsafe.Pointer(&param),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glPixelStorei, nil, args[:])
+}
+
 // --- Blending ---
 
 func (c *Context) BlendFunc(sfactor, dfactor uint32) {
@@ -1117,6 +1263,86 @@ func (c *Context) BlendEquation(mode uint32) {
 	_ = ffi.CallFunction(&cifVoid1, c.glBlendEquation, nil, args[:])
 }
 
+// BlendEquationSeparate sets separate blend equations for RGB and alpha.
+func (c *Context) BlendEquationSeparate(modeRGB, modeAlpha uint32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&modeRGB),
+		unsafe.Pointer(&modeAlpha),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glBlendEquationSeparate, nil, args[:])
+}
+
+// BlendColor sets the constant blend color.
+func (c *Context) BlendColor(r, g, b, a float32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&r),
+		unsafe.Pointer(&g),
+		unsafe.Pointer(&b),
+		unsafe.Pointer(&a),
+	}
+	_ = ffi.CallFunction(&cifVoid4Float, c.glBlendColor, nil, args[:])
+}
+
+// --- UBO ---
+
+// BindBufferBase binds a buffer to an indexed binding point.
+func (c *Context) BindBufferBase(target, index, buffer uint32) {
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&buffer),
+	}
+	_ = ffi.CallFunction(&cifVoid3, c.glBindBufferBase, nil, args[:])
+}
+
+// BindBufferRange binds a range of a buffer to an indexed binding point.
+func (c *Context) BindBufferRange(target, index, buffer uint32, offset, size int) {
+	o := int32(offset)
+	s := int32(size)
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&o),
+		unsafe.Pointer(&s),
+	}
+	_ = ffi.CallFunction(&cifVoid5FBO, c.glBindBufferRange, nil, args[:])
+}
+
+// GetUniformBlockIndex returns the index of a named uniform block.
+func (c *Context) GetUniformBlockIndex(program uint32, name string) uint32 {
+	cname, free := cString(name)
+	defer free()
+	var result int32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&program),
+		unsafe.Pointer(cname),
+	}
+	_ = ffi.CallFunction(&cifInt322, c.glGetUniformBlockIndex, unsafe.Pointer(&result), args[:])
+	return uint32(result)
+}
+
+// UniformBlockBinding assigns a uniform block to a binding point.
+func (c *Context) UniformBlockBinding(program, blockIndex, blockBinding uint32) {
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&program),
+		unsafe.Pointer(&blockIndex),
+		unsafe.Pointer(&blockBinding),
+	}
+	_ = ffi.CallFunction(&cifVoid3, c.glUniformBlockBinding, nil, args[:])
+}
+
+// --- Uniforms ---
+
+// Uniform1i sets an integer uniform value.
+func (c *Context) Uniform1i(location, value int32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&location),
+		unsafe.Pointer(&value),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glUniform1i, nil, args[:])
+}
+
 // --- Depth/Stencil ---
 
 func (c *Context) DepthFunc(fn uint32) {
@@ -1131,6 +1357,61 @@ func (c *Context) DepthMask(flag bool) {
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&f)}
 	_ = ffi.CallFunction(&cifVoid1, c.glDepthMask, nil, args[:])
+}
+
+// StencilFuncSeparate sets stencil test function per face.
+func (c *Context) StencilFuncSeparate(face, fn uint32, ref int32, mask uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&fn),
+		unsafe.Pointer(&ref),
+		unsafe.Pointer(&mask),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glStencilFuncSeparate, nil, args[:])
+}
+
+// StencilOpSeparate sets stencil operations per face.
+func (c *Context) StencilOpSeparate(face, sfail, dpfail, dppass uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&sfail),
+		unsafe.Pointer(&dpfail),
+		unsafe.Pointer(&dppass),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glStencilOpSeparate, nil, args[:])
+}
+
+// StencilMaskSeparate sets stencil write mask per face.
+func (c *Context) StencilMaskSeparate(face, mask uint32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&face),
+		unsafe.Pointer(&mask),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glStencilMaskSeparate, nil, args[:])
+}
+
+// ColorMask enables or disables writing of color components.
+func (c *Context) ColorMask(r, g, b, a bool) {
+	var rv, gv, bv, av uint32
+	if r {
+		rv = 1
+	}
+	if g {
+		gv = 1
+	}
+	if b {
+		bv = 1
+	}
+	if a {
+		av = 1
+	}
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&rv),
+		unsafe.Pointer(&gv),
+		unsafe.Pointer(&bv),
+		unsafe.Pointer(&av),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glColorMask, nil, args[:])
 }
 
 // --- Face Culling ---

@@ -560,8 +560,9 @@ func textureAspectToVk(aspect gputypes.TextureAspect, format gputypes.TextureFor
 		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
 	case gputypes.TextureAspectStencilOnly:
 		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
-	case gputypes.TextureAspectAll:
-		// For depth-stencil formats, include both aspects
+	default:
+		// TextureAspectAll and TextureAspectUndefined both derive
+		// the correct aspect mask from the texture format.
 		if isDepthStencilFormat(format) {
 			flags := vk.ImageAspectFlags(vk.ImageAspectDepthBit)
 			if hasStencilAspect(format) {
@@ -569,8 +570,6 @@ func textureAspectToVk(aspect gputypes.TextureAspect, format gputypes.TextureFor
 			}
 			return flags
 		}
-		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
-	default:
 		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
 	}
 }

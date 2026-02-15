@@ -115,6 +115,11 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	// Store queue reference in device for swapchain synchronization
 	dev.queue = q
 
+	hal.Logger().Info("vulkan: device created",
+		"name", cStringToGo(a.properties.DeviceName[:]),
+		"queueFamily", graphicsFamily,
+	)
+
 	return hal.OpenDevice{
 		Device: dev,
 		Queue:  q,

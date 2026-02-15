@@ -206,12 +206,17 @@ type D3D12_CONSTANT_BUFFER_VIEW_DESC struct {
 }
 
 // D3D12_SHADER_RESOURCE_VIEW_DESC describes a shader resource view.
+// The Union field must start at offset 16 to match C ABI alignment.
+// In C, the union contains D3D12_BUFFER_SRV which starts with UINT64 FirstElement,
+// requiring 8-byte alignment. Without explicit padding, Go places [24]byte
+// (alignment 1) at offset 12 → wrong layout. With _ uint32, Go adds 4 bytes
+// at offset 12, pushing Union to offset 16 → correct 40-byte struct.
 type D3D12_SHADER_RESOURCE_VIEW_DESC struct {
 	Format                  DXGI_FORMAT
 	ViewDimension           D3D12_SRV_DIMENSION
 	Shader4ComponentMapping uint32
-	// Union of different view types - use the largest
-	Union [16]byte
+	_                       uint32   // C ABI padding: aligns Union to offset 16
+	Union                   [24]byte // various texture/buffer SRV view params
 }
 
 // D3D12_UNORDERED_ACCESS_VIEW_DESC describes an unordered access view.
@@ -282,11 +287,16 @@ type D3D12_BOX struct {
 }
 
 // D3D12_TEXTURE_COPY_LOCATION describes a texture copy location.
+// The Union field must start at offset 16 to match C ABI alignment.
+// In C, the union contains D3D12_PLACED_SUBRESOURCE_FOOTPRINT which starts with
+// UINT64 Offset, requiring 8-byte alignment. Without explicit padding, Go places
+// [32]byte (alignment 1) at offset 12 → wrong layout. With _ uint32, Go adds
+// 4 bytes at offset 12, pushing Union to offset 16 → correct 48-byte struct.
 type D3D12_TEXTURE_COPY_LOCATION struct {
 	Resource *ID3D12Resource
 	Type     D3D12_TEXTURE_COPY_TYPE
-	// Union: PlacedFootprint or SubresourceIndex
-	Union [48]byte
+	_        uint32   // C ABI padding: aligns Union to offset 16
+	Union    [32]byte // PlacedFootprint (32 bytes) or SubresourceIndex (4 bytes)
 }
 
 // D3D12_TEXTURE_COPY_TYPE specifies texture copy type.
@@ -518,10 +528,15 @@ type D3D12_ROOT_SIGNATURE_DESC struct {
 }
 
 // D3D12_ROOT_PARAMETER describes a root parameter.
+// The Union field uses [2]uint64 (not [16]byte) to enforce 8-byte alignment,
+// matching the C ABI where the union contains a pointer (D3D12_ROOT_DESCRIPTOR_TABLE).
+// With [16]byte (alignment 1), Go places Union at offset 4 → 24-byte struct.
+// With [2]uint64 (alignment 8), Go pads to offset 8 → 32-byte struct (correct).
 type D3D12_ROOT_PARAMETER struct {
 	ParameterType D3D12_ROOT_PARAMETER_TYPE
-	// Union of DescriptorTable, Constants, or Descriptor
-	Union            [16]byte
+	// Union of DescriptorTable, Constants, or Descriptor.
+	// Access via unsafe.Pointer(&Union[0]) cast to the appropriate type.
+	Union            [2]uint64
 	ShaderVisibility D3D12_SHADER_VISIBILITY
 }
 

@@ -6,6 +6,8 @@
 package gles
 
 import (
+	"unsafe"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
@@ -32,6 +34,7 @@ type CommandEncoder struct {
 	glCtx    *gl.Context
 	commands []Command
 	label    string
+	vao      uint32 // persistent VAO from Device for Core Profile
 }
 
 // BeginEncoding begins command recording.
@@ -111,13 +114,27 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	_ = regions
 }
 
-// CopyTextureToBuffer copies texture data to a buffer.
-// Note: Requires glGetTexImage with pixel pack buffer binding (not available in GLES).
-// This operation has limited support in OpenGL ES environments.
+// CopyTextureToBuffer copies texture data to a buffer via FBO + glReadPixels.
+// For each region, it binds the source texture's FBO and reads pixels into the
+// destination buffer's CPU-side data slice.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	_ = src
-	_ = dst
-	_ = regions
+	srcTex, srcOK := src.(*Texture)
+	dstBuf, dstOK := dst.(*Buffer)
+	if !srcOK || !dstOK {
+		return
+	}
+
+	for _, region := range regions {
+		e.commands = append(e.commands, &CopyTextureToBufferCommand{
+			glCtx:       e.glCtx,
+			srcTexture:  srcTex,
+			dstBuffer:   dstBuf,
+			srcOrigin:   [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
+			copySize:    [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
+			dstOffset:   region.BufferLayout.Offset,
+			bytesPerRow: region.BufferLayout.BytesPerRow,
+		})
+	}
 }
 
 // CopyTextureToTexture copies between textures.
@@ -134,6 +151,19 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe := &RenderPassEncoder{
 		encoder: e,
 		desc:    desc,
+	}
+
+	// Bind the persistent VAO. Core Profile requires a VAO to be bound for any
+	// vertex attribute or draw call. Re-binding at pass start ensures it is
+	// active even if external code (or a previous pass) unbound it.
+	if e.vao != 0 {
+		e.commands = append(e.commands, &BindVAOCommand{vao: e.vao})
+	}
+
+	// Bind the correct framebuffer and set viewport.
+	// Reference wgpu sets viewport at render pass start — required for correct rendering.
+	if len(desc.ColorAttachments) > 0 {
+		e.setupColorAttachment(desc, rpe)
 	}
 
 	// Record clear commands
@@ -167,6 +197,75 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	return rpe
 }
 
+// setupColorAttachment configures framebuffer, viewport, and MSAA resolve for the
+// primary color attachment of a render pass.
+func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rpe *RenderPassEncoder) {
+	ca := desc.ColorAttachments[0]
+	tv, ok := ca.View.(*TextureView)
+	if !ok {
+		return
+	}
+
+	if tv.isSurface {
+		e.setupSurfaceTarget(tv)
+		return
+	}
+
+	if tv.texture == nil {
+		return
+	}
+
+	e.setupOffscreenTarget(desc, ca, tv, rpe)
+}
+
+// setupSurfaceTarget binds the default framebuffer and sets viewport to surface dimensions.
+func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView) {
+	e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
+	if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
+		cfg := tv.surfaceTex.surface.config
+		e.commands = append(e.commands, &SetViewportCommand{
+			width:  float32(cfg.Width),
+			height: float32(cfg.Height),
+		})
+	}
+}
+
+// setupOffscreenTarget configures an offscreen FBO, depth/stencil attachment, and MSAA resolve.
+func (e *CommandEncoder) setupOffscreenTarget(
+	desc *hal.RenderPassDescriptor,
+	ca hal.RenderPassColorAttachment,
+	tv *TextureView,
+	rpe *RenderPassEncoder,
+) {
+	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{texture: tv.texture})
+
+	// Attach depth/stencil texture to the FBO if provided.
+	if desc.DepthStencilAttachment != nil {
+		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
+			e.commands = append(e.commands, &AttachDepthStencilCommand{
+				colorTexture: tv.texture,
+				depthTexture: dsView.texture,
+			})
+		}
+	}
+
+	e.commands = append(e.commands, &SetViewportCommand{
+		width:  float32(tv.texture.size.Width),
+		height: float32(tv.texture.size.Height),
+	})
+
+	// Record MSAA resolve target if present.
+	if resolveView, ok := ca.ResolveTarget.(*TextureView); ok && ca.ResolveTarget != nil {
+		if resolveView.texture != nil {
+			rpe.msaaTexture = tv.texture
+			rpe.resolveTexture = resolveView.texture
+		} else if resolveView.isSurface {
+			rpe.msaaTexture = tv.texture
+			rpe.resolveToSurface = true
+		}
+	}
+}
+
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
 	return &ComputePassEncoder{
@@ -182,11 +281,48 @@ type RenderPassEncoder struct {
 	vertexBuffers []*Buffer
 	indexBuffer   *Buffer
 	indexFormat   gputypes.IndexFormat
+	stencilRef    uint32
+
+	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
+	msaaTexture      *Texture // The MSAA color texture (source for resolve)
+	resolveTexture   *Texture // The single-sample resolve target (nil when resolveToSurface)
+	resolveToSurface bool     // True when resolve target is the default framebuffer (FBO 0)
 }
 
 // End finishes the render pass.
+// If MSAA resolve is needed, blits the MSAA FBO to the resolve target FBO.
+// If the pass was rendering to an offscreen FBO, rebinds the default framebuffer
+// so subsequent operations do not accidentally target the offscreen texture.
 func (e *RenderPassEncoder) End() {
-	// Nothing special needed - commands are already recorded
+	// Perform MSAA resolve if a resolve target was recorded.
+	if e.msaaTexture != nil {
+		if e.resolveToSurface {
+			// Resolve to the default framebuffer (FBO 0).
+			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+				msaaTexture:      e.msaaTexture,
+				resolveToSurface: true,
+				width:            int32(e.msaaTexture.size.Width),
+				height:           int32(e.msaaTexture.size.Height),
+			})
+		} else if e.resolveTexture != nil {
+			// Resolve to an offscreen texture FBO.
+			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+				msaaTexture:    e.msaaTexture,
+				resolveTexture: e.resolveTexture,
+				width:          int32(e.msaaTexture.size.Width),
+				height:         int32(e.msaaTexture.size.Height),
+			})
+		}
+	}
+
+	// Check if we were rendering to an offscreen target.
+	if len(e.desc.ColorAttachments) > 0 {
+		if tv, ok := e.desc.ColorAttachments[0].View.(*TextureView); ok {
+			if !tv.isSurface && tv.texture != nil {
+				e.encoder.commands = append(e.encoder.commands, &BindFramebufferCommand{fbo: 0})
+			}
+		}
+	}
 }
 
 // SetPipeline sets the render pipeline.
@@ -199,10 +335,13 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	e.encoder.commands = append(e.encoder.commands,
 		&UseProgramCommand{programID: p.programID},
 		&SetPipelineStateCommand{
-			topology:     p.primitiveTopology,
-			cullMode:     p.cullMode,
-			frontFace:    p.frontFace,
-			depthStencil: p.depthStencil,
+			topology:       p.primitiveTopology,
+			cullMode:       p.cullMode,
+			frontFace:      p.frontFace,
+			depthStencil:   p.depthStencil,
+			blend:          p.blend,
+			colorWriteMask: p.colorWriteMask,
+			stencilRef:     e.stencilRef,
 		},
 	)
 }
@@ -220,7 +359,10 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	})
 }
 
-// SetVertexBuffer sets a vertex buffer.
+// SetVertexBuffer sets a vertex buffer and configures vertex attributes.
+// In OpenGL, vertex attribute configuration (glVertexAttribPointer +
+// glEnableVertexAttribArray) must be done explicitly. The layout is taken
+// from the currently bound render pipeline's vertex buffer descriptors.
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok {
@@ -233,10 +375,17 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 	}
 	e.vertexBuffers[slot] = buf
 
+	// Get vertex layout from the current pipeline for this slot.
+	var layout *gputypes.VertexBufferLayout
+	if e.pipeline != nil && int(slot) < len(e.pipeline.vertexBuffers) {
+		layout = &e.pipeline.vertexBuffers[slot]
+	}
+
 	e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
 		slot:   slot,
 		buffer: buf,
 		offset: offset,
+		layout: layout,
 	})
 }
 
@@ -283,8 +432,14 @@ func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 
 // SetStencilReference sets the stencil reference value.
 func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
+	e.stencilRef = ref
+	var ds *hal.DepthStencilState
+	if e.pipeline != nil {
+		ds = e.pipeline.depthStencil
+	}
 	e.encoder.commands = append(e.encoder.commands, &SetStencilRefCommand{
-		ref: ref,
+		ref:          ref,
+		depthStencil: ds,
 	})
 }
 
@@ -401,6 +556,122 @@ func (c *ClearBufferCommand) Execute(_ *gl.Context) {
 	// For older versions, map buffer and memset, or use compute shader.
 }
 
+// BindVAOCommand binds a vertex array object.
+type BindVAOCommand struct {
+	vao uint32
+}
+
+func (c *BindVAOCommand) Execute(ctx *gl.Context) {
+	ctx.BindVertexArray(c.vao)
+}
+
+// BindFramebufferCommand binds a framebuffer object.
+type BindFramebufferCommand struct {
+	fbo uint32
+}
+
+func (c *BindFramebufferCommand) Execute(ctx *gl.Context) {
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, c.fbo)
+}
+
+// EnsureOffscreenFBOCommand lazily creates a framebuffer object for an offscreen
+// texture and binds it. If the texture already has an FBO, it simply binds it.
+type EnsureOffscreenFBOCommand struct {
+	texture *Texture
+}
+
+func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
+	if c.texture.fbo == 0 {
+		// Create FBO.
+		fbo := ctx.GenFramebuffers(1)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+		// Attach the color texture as COLOR_ATTACHMENT0.
+		// Use the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture.target, c.texture.id, 0)
+		// Verify completeness.
+		status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
+		if status != gl.FRAMEBUFFER_COMPLETE {
+			// FBO incomplete — delete and fall back to default framebuffer.
+			ctx.DeleteFramebuffers(fbo)
+			ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+			return
+		}
+		c.texture.fbo = fbo
+	} else {
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.texture.fbo)
+	}
+}
+
+// AttachDepthStencilCommand attaches a depth/stencil texture to the currently
+// bound FBO (the one associated with the color texture). This must be recorded
+// after EnsureOffscreenFBOCommand so the FBO is already bound.
+type AttachDepthStencilCommand struct {
+	colorTexture *Texture // used to verify the FBO exists
+	depthTexture *Texture
+}
+
+func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
+	if c.colorTexture.fbo == 0 {
+		return // No FBO was created; nothing to attach to.
+	}
+	// Attach the depth/stencil texture. Using DEPTH_STENCIL_ATTACHMENT covers
+	// combined depth+stencil formats (e.g., Depth24PlusStencil8). For
+	// depth-only formats the driver silently ignores the stencil part.
+	// Use the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, c.depthTexture.target, c.depthTexture.id, 0)
+}
+
+// MSAAResolveCommand resolves an MSAA framebuffer to a single-sample framebuffer
+// using glBlitFramebuffer. This is recorded at render pass End() when a
+// ResolveTarget is specified in the color attachment.
+type MSAAResolveCommand struct {
+	msaaTexture      *Texture // MSAA source texture (SampleCount > 1)
+	resolveTexture   *Texture // Single-sample resolve target (nil when resolveToSurface)
+	resolveToSurface bool     // True to resolve to default framebuffer (FBO 0)
+	width, height    int32
+}
+
+func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
+	// Bind MSAA FBO as read source.
+	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, c.msaaTexture.fbo)
+
+	// Bind the draw target.
+	if c.resolveToSurface {
+		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+	} else if !c.ensureResolveFBO(ctx) {
+		return
+	}
+
+	// Blit (resolve) the MSAA framebuffer to the single-sample framebuffer.
+	ctx.BlitFramebuffer(
+		0, 0, c.width, c.height,
+		0, 0, c.width, c.height,
+		gl.COLOR_BUFFER_BIT, gl.NEAREST,
+	)
+
+	// Restore default framebuffer binding.
+	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, 0)
+	ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+}
+
+// ensureResolveFBO lazily creates the resolve FBO and binds it as draw target.
+// Returns false if the FBO creation fails.
+func (c *MSAAResolveCommand) ensureResolveFBO(ctx *gl.Context) bool {
+	if c.resolveTexture.fbo == 0 {
+		fbo := ctx.GenFramebuffers(1)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+			c.resolveTexture.target, c.resolveTexture.id, 0)
+		if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+			ctx.DeleteFramebuffers(fbo)
+			return false
+		}
+		c.resolveTexture.fbo = fbo
+	}
+	ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, c.resolveTexture.fbo)
+	return true
+}
+
 // ClearColorCommand clears a color attachment.
 type ClearColorCommand struct {
 	attachment int
@@ -427,6 +698,8 @@ type ClearStencilCommand struct {
 }
 
 func (c *ClearStencilCommand) Execute(ctx *gl.Context) {
+	// Ensure stencil write mask allows the clear to take effect.
+	ctx.StencilMaskSeparate(gl.FRONT_AND_BACK, 0xFF)
 	ctx.Clear(gl.STENCIL_BUFFER_BIT)
 }
 
@@ -439,12 +712,15 @@ func (c *UseProgramCommand) Execute(ctx *gl.Context) {
 	ctx.UseProgram(c.programID)
 }
 
-// SetPipelineStateCommand sets pipeline state (culling, depth, etc.).
+// SetPipelineStateCommand sets pipeline state (culling, depth, stencil, blending, color mask).
 type SetPipelineStateCommand struct {
-	topology     gputypes.PrimitiveTopology
-	cullMode     gputypes.CullMode
-	frontFace    gputypes.FrontFace
-	depthStencil *hal.DepthStencilState
+	topology       gputypes.PrimitiveTopology
+	cullMode       gputypes.CullMode
+	frontFace      gputypes.FrontFace
+	depthStencil   *hal.DepthStencilState
+	blend          *gputypes.BlendState
+	colorWriteMask gputypes.ColorWriteMask
+	stencilRef     uint32
 }
 
 func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
@@ -469,16 +745,86 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 		ctx.FrontFace(gl.CW)
 	}
 
-	// Depth/stencil
-	if c.depthStencil != nil {
-		if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
-			ctx.Enable(gl.DEPTH_TEST)
-			ctx.DepthMask(c.depthStencil.DepthWriteEnabled)
-			ctx.DepthFunc(compareFunctionToGL(c.depthStencil.DepthCompare))
-		} else {
-			ctx.Disable(gl.DEPTH_TEST)
-		}
+	// Depth and stencil
+	c.applyDepthStencilState(ctx)
+
+	// Color write mask
+	ctx.ColorMask(
+		c.colorWriteMask&gputypes.ColorWriteMaskRed != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskGreen != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskBlue != 0,
+		c.colorWriteMask&gputypes.ColorWriteMaskAlpha != 0,
+	)
+
+	// Blending
+	if c.blend != nil {
+		ctx.Enable(gl.BLEND)
+		ctx.BlendFuncSeparate(
+			blendFactorToGL(c.blend.Color.SrcFactor),
+			blendFactorToGL(c.blend.Color.DstFactor),
+			blendFactorToGL(c.blend.Alpha.SrcFactor),
+			blendFactorToGL(c.blend.Alpha.DstFactor),
+		)
+		ctx.BlendEquationSeparate(
+			blendOperationToGL(c.blend.Color.Operation),
+			blendOperationToGL(c.blend.Alpha.Operation),
+		)
+	} else {
+		ctx.Disable(gl.BLEND)
 	}
+}
+
+// applyDepthStencilState configures GL depth test and stencil test from pipeline state.
+func (c *SetPipelineStateCommand) applyDepthStencilState(ctx *gl.Context) {
+	if c.depthStencil == nil {
+		ctx.Disable(gl.DEPTH_TEST)
+		ctx.Disable(gl.STENCIL_TEST)
+		return
+	}
+
+	// Depth test
+	if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
+		ctx.Enable(gl.DEPTH_TEST)
+		ctx.DepthMask(c.depthStencil.DepthWriteEnabled)
+		ctx.DepthFunc(compareFunctionToGL(c.depthStencil.DepthCompare))
+	} else {
+		ctx.Disable(gl.DEPTH_TEST)
+	}
+
+	// Stencil test
+	hasStencilOps := c.depthStencil.StencilFront.PassOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilFront.FailOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilBack.PassOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilBack.FailOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilFront.Compare != gputypes.CompareFunctionAlways ||
+		c.depthStencil.StencilBack.Compare != gputypes.CompareFunctionAlways
+
+	if !hasStencilOps && c.depthStencil.StencilWriteMask == 0 {
+		ctx.Disable(gl.STENCIL_TEST)
+		return
+	}
+
+	ctx.Enable(gl.STENCIL_TEST)
+	ref := int32(c.stencilRef)
+
+	ctx.StencilFuncSeparate(gl.FRONT,
+		compareFunctionToGL(c.depthStencil.StencilFront.Compare),
+		ref, c.depthStencil.StencilReadMask)
+	ctx.StencilFuncSeparate(gl.BACK,
+		compareFunctionToGL(c.depthStencil.StencilBack.Compare),
+		ref, c.depthStencil.StencilReadMask)
+
+	ctx.StencilOpSeparate(gl.FRONT,
+		stencilOpToGL(c.depthStencil.StencilFront.FailOp),
+		stencilOpToGL(c.depthStencil.StencilFront.DepthFailOp),
+		stencilOpToGL(c.depthStencil.StencilFront.PassOp))
+	ctx.StencilOpSeparate(gl.BACK,
+		stencilOpToGL(c.depthStencil.StencilBack.FailOp),
+		stencilOpToGL(c.depthStencil.StencilBack.DepthFailOp),
+		stencilOpToGL(c.depthStencil.StencilBack.PassOp))
+
+	ctx.StencilMaskSeparate(gl.FRONT, c.depthStencil.StencilWriteMask)
+	ctx.StencilMaskSeparate(gl.BACK, c.depthStencil.StencilWriteMask)
 }
 
 // SetBindGroupCommand binds resources.
@@ -489,24 +835,82 @@ type SetBindGroupCommand struct {
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
-	// Bind uniform buffers, textures, and samplers from the bind group.
-	// Note: Full implementation requires BindGroup to track resource bindings.
 	if c.group == nil {
 		return
 	}
-	// Binding logic is deferred to draw time when pipeline layout is known.
-	_ = ctx
+
+	dynamicIdx := 0
+	for _, entry := range c.group.entries {
+		switch res := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			// Buffer handle is the GL buffer object ID (from NativeHandle()).
+			bufID := uint32(res.Buffer)
+			if bufID == 0 {
+				continue
+			}
+			offset := int(res.Offset)
+			size := int(res.Size)
+
+			// Apply dynamic offset if available.
+			if c.dynamicOffsets != nil && dynamicIdx < len(c.dynamicOffsets) {
+				if c.group.layout != nil {
+					for _, le := range c.group.layout.entries {
+						if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
+							offset += int(c.dynamicOffsets[dynamicIdx])
+							dynamicIdx++
+							break
+						}
+					}
+				}
+			}
+
+			if size > 0 {
+				ctx.BindBufferRange(gl.UNIFORM_BUFFER, entry.Binding, bufID, offset, size)
+			} else {
+				ctx.BindBufferBase(gl.UNIFORM_BUFFER, entry.Binding, bufID)
+			}
+
+		case gputypes.TextureViewBinding:
+			// TextureView handle is the GL texture object ID (from NativeHandle()).
+			texID := uint32(res.TextureView)
+			if texID == 0 {
+				continue
+			}
+			ctx.ActiveTexture(gl.TEXTURE0 + entry.Binding)
+			ctx.BindTexture(gl.TEXTURE_2D, texID)
+
+		case gputypes.SamplerBinding:
+			// GLES uses texture-bound sampler state, no GL sampler objects.
+		}
+	}
 }
 
-// SetVertexBufferCommand binds a vertex buffer.
+// SetVertexBufferCommand binds a vertex buffer and configures vertex attributes.
+// In OpenGL, vertex attributes must be configured explicitly via
+// glVertexAttribPointer + glEnableVertexAttribArray. The layout describes
+// how vertex data is interpreted (attribute locations, formats, strides).
 type SetVertexBufferCommand struct {
 	slot   uint32
 	buffer *Buffer
 	offset uint64
+	layout *gputypes.VertexBufferLayout // from the render pipeline descriptor
 }
 
 func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 	ctx.BindBuffer(gl.ARRAY_BUFFER, c.buffer.id)
+
+	// Configure vertex attributes from the pipeline's vertex layout.
+	if c.layout == nil {
+		return
+	}
+	stride := int32(c.layout.ArrayStride)
+	for _, attr := range c.layout.Attributes {
+		loc := attr.ShaderLocation
+		size, typ := vertexFormatToGL(attr.Format)
+		attrOffset := uintptr(c.offset) + uintptr(attr.Offset)
+		ctx.EnableVertexAttribArray(loc)
+		ctx.VertexAttribPointer(loc, size, typ, false, stride, attrOffset)
+	}
 }
 
 // SetIndexBufferCommand binds an index buffer.
@@ -545,17 +949,29 @@ type SetBlendConstantCommand struct {
 	r, g, b, a float32
 }
 
-func (c *SetBlendConstantCommand) Execute(_ *gl.Context) {
-	// ctx.BlendColor(c.r, c.g, c.b, c.a)
+func (c *SetBlendConstantCommand) Execute(ctx *gl.Context) {
+	ctx.BlendColor(c.r, c.g, c.b, c.a)
 }
 
-// SetStencilRefCommand sets stencil reference.
+// SetStencilRefCommand updates the stencil reference value.
+// This re-applies glStencilFuncSeparate with the new reference while
+// keeping the compare function and read mask from the current pipeline.
 type SetStencilRefCommand struct {
-	ref uint32
+	ref          uint32
+	depthStencil *hal.DepthStencilState
 }
 
-func (c *SetStencilRefCommand) Execute(_ *gl.Context) {
-	// ctx.StencilFunc uses ref
+func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
+	if c.depthStencil == nil {
+		return
+	}
+	ref := int32(c.ref)
+	ctx.StencilFuncSeparate(gl.FRONT,
+		compareFunctionToGL(c.depthStencil.StencilFront.Compare),
+		ref, c.depthStencil.StencilReadMask)
+	ctx.StencilFuncSeparate(gl.BACK,
+		compareFunctionToGL(c.depthStencil.StencilBack.Compare),
+		ref, c.depthStencil.StencilReadMask)
 }
 
 // DrawCommand executes a non-indexed draw.
@@ -644,6 +1060,159 @@ func (c *DispatchIndirectCommand) Execute(ctx *gl.Context) {
 	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
 }
 
+// CopyTextureToBufferCommand reads pixels from a texture's FBO into a buffer's
+// CPU-side data slice. This is the standard GLES readback path since GLES lacks
+// glGetTexImage. The approach: bind texture FBO -> glReadPixels -> copy to buffer.
+type CopyTextureToBufferCommand struct {
+	glCtx       *gl.Context
+	srcTexture  *Texture
+	dstBuffer   *Buffer
+	srcOrigin   [3]uint32 // x, y, z
+	copySize    [3]uint32 // width, height, depthOrArrayLayers
+	dstOffset   uint64
+	bytesPerRow uint32
+}
+
+// Execute reads pixels from the source texture's FBO into the destination buffer.
+func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
+	width := int32(c.copySize[0])
+	height := int32(c.copySize[1])
+	if width == 0 || height == 0 {
+		return
+	}
+
+	// Calculate byte sizes. Assume RGBA8 (4 bytes per pixel) for readback.
+	bpp := uint32(4)
+	rowBytes := uint32(width) * bpp
+	totalBytes := uint64(rowBytes) * uint64(height)
+
+	// Ensure destination buffer has enough CPU-side storage.
+	requiredSize := c.dstOffset + totalBytes
+	if uint64(len(c.dstBuffer.data)) < requiredSize {
+		newData := make([]byte, requiredSize)
+		copy(newData, c.dstBuffer.data)
+		c.dstBuffer.data = newData
+	}
+
+	// Save the current FBO binding so we can restore it after the read.
+	var prevFBO int32
+	ctx.GetIntegerv(gl.FRAMEBUFFER_BINDING, &prevFBO)
+
+	// Ensure the source texture has an FBO. Create one lazily if needed.
+	if c.srcTexture.fbo == 0 {
+		fbo := ctx.GenFramebuffers(1)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture.target, c.srcTexture.id, 0)
+		status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
+		if status != gl.FRAMEBUFFER_COMPLETE {
+			ctx.DeleteFramebuffers(fbo)
+			ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+			return
+		}
+		c.srcTexture.fbo = fbo
+	} else {
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.srcTexture.fbo)
+	}
+
+	// Set tight pixel packing (no row alignment padding).
+	ctx.PixelStorei(gl.PACK_ALIGNMENT, 1)
+
+	// Read pixels from the bound FBO into a temporary CPU buffer.
+	tmpBuf := make([]byte, totalBytes)
+	ctx.ReadPixels(
+		int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
+		width, height,
+		gl.BGRA, gl.UNSIGNED_BYTE,
+		unsafe.Pointer(&tmpBuf[0]),
+	)
+
+	// Copy the pixel data into the destination buffer's CPU-side storage.
+	// OpenGL reads bottom-to-top, but callers expect top-to-bottom order.
+	// Flip the rows during copy.
+	for row := int32(0); row < height; row++ {
+		// OpenGL row 0 = bottom. We want row 0 = top.
+		srcRow := (height - 1 - row)
+		srcStart := uint64(srcRow) * uint64(rowBytes)
+		dstStart := c.dstOffset + uint64(row)*uint64(rowBytes)
+		copy(c.dstBuffer.data[dstStart:dstStart+uint64(rowBytes)], tmpBuf[srcStart:srcStart+uint64(rowBytes)])
+	}
+
+	// Restore the previous FBO binding.
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+}
+
+// vertexFormatToGL converts a WebGPU vertex format to GL component count and type.
+func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32) {
+	switch format {
+	case gputypes.VertexFormatFloat32:
+		return 1, gl.FLOAT
+	case gputypes.VertexFormatFloat32x2:
+		return 2, gl.FLOAT
+	case gputypes.VertexFormatFloat32x3:
+		return 3, gl.FLOAT
+	case gputypes.VertexFormatFloat32x4:
+		return 4, gl.FLOAT
+	case gputypes.VertexFormatUint8x2:
+		return 2, gl.UNSIGNED_BYTE
+	case gputypes.VertexFormatUint8x4:
+		return 4, gl.UNSIGNED_BYTE
+	case gputypes.VertexFormatSint8x2:
+		return 2, gl.BYTE
+	case gputypes.VertexFormatSint8x4:
+		return 4, gl.BYTE
+	case gputypes.VertexFormatUint16x2:
+		return 2, gl.UNSIGNED_SHORT
+	case gputypes.VertexFormatUint16x4:
+		return 4, gl.UNSIGNED_SHORT
+	case gputypes.VertexFormatSint16x2:
+		return 2, gl.SHORT
+	case gputypes.VertexFormatSint16x4:
+		return 4, gl.SHORT
+	case gputypes.VertexFormatUint32:
+		return 1, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x2:
+		return 2, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x3:
+		return 3, gl.UNSIGNED_INT
+	case gputypes.VertexFormatUint32x4:
+		return 4, gl.UNSIGNED_INT
+	case gputypes.VertexFormatSint32:
+		return 1, gl.INT
+	case gputypes.VertexFormatSint32x2:
+		return 2, gl.INT
+	case gputypes.VertexFormatSint32x3:
+		return 3, gl.INT
+	case gputypes.VertexFormatSint32x4:
+		return 4, gl.INT
+	default:
+		return 4, gl.FLOAT
+	}
+}
+
+// stencilOpToGL converts a HAL stencil operation to the corresponding GL constant.
+func stencilOpToGL(op hal.StencilOperation) uint32 {
+	switch op {
+	case hal.StencilOperationKeep:
+		return gl.KEEP
+	case hal.StencilOperationZero:
+		return gl.ZERO
+	case hal.StencilOperationReplace:
+		return gl.REPLACE
+	case hal.StencilOperationInvert:
+		return gl.INVERT
+	case hal.StencilOperationIncrementClamp:
+		return gl.INCR
+	case hal.StencilOperationDecrementClamp:
+		return gl.DECR
+	case hal.StencilOperationIncrementWrap:
+		return gl.INCR_WRAP
+	case hal.StencilOperationDecrementWrap:
+		return gl.DECR_WRAP
+	default:
+		return gl.KEEP
+	}
+}
+
 // compareFunctionToGL converts compare function to GL constant.
 func compareFunctionToGL(fn gputypes.CompareFunction) uint32 {
 	switch fn {
@@ -665,5 +1234,57 @@ func compareFunctionToGL(fn gputypes.CompareFunction) uint32 {
 		return gl.ALWAYS
 	default:
 		return gl.ALWAYS
+	}
+}
+
+// blendFactorToGL converts a WebGPU blend factor to the corresponding GL constant.
+func blendFactorToGL(f gputypes.BlendFactor) uint32 {
+	switch f {
+	case gputypes.BlendFactorZero:
+		return gl.ZERO
+	case gputypes.BlendFactorOne:
+		return gl.ONE
+	case gputypes.BlendFactorSrc:
+		return gl.SRC_COLOR
+	case gputypes.BlendFactorOneMinusSrc:
+		return gl.ONE_MINUS_SRC_COLOR
+	case gputypes.BlendFactorSrcAlpha:
+		return gl.SRC_ALPHA
+	case gputypes.BlendFactorOneMinusSrcAlpha:
+		return gl.ONE_MINUS_SRC_ALPHA
+	case gputypes.BlendFactorDst:
+		return gl.DST_COLOR
+	case gputypes.BlendFactorOneMinusDst:
+		return gl.ONE_MINUS_DST_COLOR
+	case gputypes.BlendFactorDstAlpha:
+		return gl.DST_ALPHA
+	case gputypes.BlendFactorOneMinusDstAlpha:
+		return gl.ONE_MINUS_DST_ALPHA
+	case gputypes.BlendFactorSrcAlphaSaturated:
+		return gl.SRC_ALPHA_SATURATE
+	case gputypes.BlendFactorConstant:
+		return gl.CONSTANT_COLOR
+	case gputypes.BlendFactorOneMinusConstant:
+		return gl.ONE_MINUS_CONSTANT_COLOR
+	default:
+		return gl.ONE
+	}
+}
+
+// blendOperationToGL converts a WebGPU blend operation to the corresponding GL constant.
+func blendOperationToGL(op gputypes.BlendOperation) uint32 {
+	switch op {
+	case gputypes.BlendOperationAdd:
+		return gl.FUNC_ADD
+	case gputypes.BlendOperationSubtract:
+		return gl.FUNC_SUBTRACT
+	case gputypes.BlendOperationReverseSubtract:
+		return gl.FUNC_REVERSE_SUBTRACT
+	case gputypes.BlendOperationMin:
+		return gl.MIN
+	case gputypes.BlendOperationMax:
+		return gl.MAX
+	default:
+		return gl.FUNC_ADD
 	}
 }

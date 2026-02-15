@@ -57,10 +57,12 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 
 	// Optional: validation layers for debug (only if available)
 	var layers []string
+	var validationEnabled bool
 	if desc != nil && desc.Flags&gputypes.InstanceFlagsDebug != 0 {
 		if isLayerAvailable(cmds, "VK_LAYER_KHRONOS_validation") {
 			layers = append(layers, "VK_LAYER_KHRONOS_validation\x00")
 			extensions = append(extensions, "VK_EXT_debug_utils\x00")
+			validationEnabled = true
 		}
 		// Silently skip if validation layers not installed (Vulkan SDK not present)
 	}
@@ -115,16 +117,32 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	runtime.KeepAlive(extensionPtrs)
 	runtime.KeepAlive(layerPtrs)
 
-	return &Instance{
-		handle: instance,
-		cmds:   *cmds,
-	}, nil
+	inst := &Instance{
+		handle:       instance,
+		cmds:         *cmds,
+		debugEnabled: validationEnabled,
+	}
+
+	// Create debug messenger when validation layers are active.
+	// This captures validation errors and logs them via Go's log package.
+	if validationEnabled {
+		inst.debugMessenger = createDebugMessenger(inst)
+	}
+
+	hal.Logger().Info("vulkan: instance created",
+		"apiVersion", fmt.Sprintf("%d.%d.%d", vkVersionMajor(appInfo.ApiVersion), vkVersionMinor(appInfo.ApiVersion), vkVersionPatch(appInfo.ApiVersion)),
+		"validation", validationEnabled,
+	)
+
+	return inst, nil
 }
 
 // Instance implements hal.Instance for Vulkan.
 type Instance struct {
-	handle vk.Instance
-	cmds   vk.Commands
+	handle         vk.Instance
+	cmds           vk.Commands
+	debugMessenger vk.DebugUtilsMessengerEXT
+	debugEnabled   bool
 }
 
 // EnumerateAdapters returns available Vulkan adapters (physical devices).
@@ -141,6 +159,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	i.cmds.EnumeratePhysicalDevices(i.handle, &count, &devices[0])
 
 	adapters := make([]hal.ExposedAdapter, 0, count)
+	hal.Logger().Debug("vulkan: enumerating adapters", "count", count)
 	for _, device := range devices {
 		// Get device properties
 		var props vk.PhysicalDeviceProperties
@@ -184,6 +203,13 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			features:       features,
 		}
 
+		hal.Logger().Info("vulkan: adapter found",
+			"name", deviceName,
+			"type", deviceType,
+			"vendor", vendorIDToName(props.VendorID),
+			"apiVersion", fmt.Sprintf("%d.%d.%d", vkVersionMajor(props.ApiVersion), vkVersionMinor(props.ApiVersion), vkVersionPatch(props.ApiVersion)),
+		)
+
 		adapters = append(adapters, hal.ExposedAdapter{
 			Adapter: adapter,
 			Info: gputypes.AdapterInfo{
@@ -220,6 +246,11 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 // Destroy releases the Vulkan instance.
 func (i *Instance) Destroy() {
 	if i.handle != 0 {
+		// Destroy debug messenger before the instance (required by Vulkan spec).
+		if i.debugMessenger != 0 {
+			destroyDebugMessenger(i, i.debugMessenger)
+			i.debugMessenger = 0
+		}
 		i.cmds.DestroyInstance(i.handle, nil)
 		i.handle = 0
 	}
@@ -249,6 +280,12 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	if !ok {
 		return fmt.Errorf("vulkan: device is not a Vulkan device")
 	}
+	hal.Logger().Info("vulkan: surface configuring",
+		"width", config.Width,
+		"height", config.Height,
+		"format", config.Format,
+		"presentMode", config.PresentMode,
+	)
 	return s.createSwapchain(vkDevice, config)
 }
 

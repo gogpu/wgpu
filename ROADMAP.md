@@ -19,14 +19,17 @@
 
 ---
 
-## Current State: v0.14.0
+## Current State: v0.16.0
 
 ✅ **All 5 HAL backends complete** (~70K LOC):
 
-**New in v0.14.0:**
-- GPU resource leak detection (zero overhead in production)
-- W3C WebGPU error scopes (programmatic error capture)
-- Thread safety tests for concurrent operations
+**New in v0.16.0:**
+- Full GLES rendering pipeline — WGSL→GLSL shaders, VAO, FBO, MSAA, blend, stencil
+- Structured logging via `log/slog` across all backends (silent by default)
+- Vulkan MSAA render pass with automatic resolve
+- Metal SetBindGroup, WriteTexture, Fence synchronization
+- DX12 CreateBindGroup, staging descriptor heaps, BSOD fix
+- Cross-backend stability fixes (DX12, Vulkan, Metal, GLES)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -79,7 +82,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.14.0** | 2026-02 | Leak detection, error scopes, thread safety |
+| **v0.16.0** | 2026-02 | Full GLES pipeline, structured logging, MSAA, Metal/DX12 features |
+| v0.15.1 | 2026-02 | DX12 WriteBuffer/WriteTexture fix, shader pipeline fix |
+| v0.15.0 | 2026-02 | ReadBuffer for compute shader readback |
+| v0.14.0 | 2026-02 | Leak detection, error scopes, thread safety |
 | v0.13.x | 2026-02 | Format capabilities, render bundles, naga v0.11.1 |
 | v0.12.0 | 2026-01 | BufferRowLength fix, NativeHandle, WriteBuffer |
 | v0.11.x | 2026-01 | gputypes migration, webgpu.h compliance |

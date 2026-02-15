@@ -98,6 +98,10 @@ type Context struct {
 	glCheckFramebufferStatus uintptr
 	glDrawBuffers            uintptr
 
+	// Pixel read/store (GL 1.0+)
+	glReadPixels  uintptr
+	glPixelStorei uintptr
+
 	// Renderbuffers (GL 3.0+)
 	glGenRenderbuffers        uintptr
 	glDeleteRenderbuffers     uintptr
@@ -113,12 +117,16 @@ type Context struct {
 	glBlendColor            uintptr
 
 	// Depth/Stencil
-	glDepthFunc   uintptr
-	glDepthMask   uintptr
-	glDepthRange  uintptr
-	glStencilFunc uintptr
-	glStencilOp   uintptr
-	glStencilMask uintptr
+	glDepthFunc           uintptr
+	glDepthMask           uintptr
+	glDepthRange          uintptr
+	glStencilFunc         uintptr
+	glStencilOp           uintptr
+	glStencilMask         uintptr
+	glStencilFuncSeparate uintptr
+	glStencilOpSeparate   uintptr
+	glStencilMaskSeparate uintptr
+	glColorMask           uintptr
 
 	// Face culling
 	glCullFace  uintptr
@@ -145,6 +153,10 @@ type Context struct {
 	glDispatchCompute         uintptr
 	glDispatchComputeIndirect uintptr
 	glMemoryBarrier           uintptr
+
+	// MSAA (GL 3.2+ / ES 3.1+)
+	glTexImage2DMultisample uintptr
+	glBlitFramebuffer       uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -236,6 +248,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
 
+	// Pixel read/store
+	c.glReadPixels = getProcAddr("glReadPixels")
+	c.glPixelStorei = getProcAddr("glPixelStorei")
+
 	// Renderbuffers
 	c.glGenRenderbuffers = getProcAddr("glGenRenderbuffers")
 	c.glDeleteRenderbuffers = getProcAddr("glDeleteRenderbuffers")
@@ -257,6 +273,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
 	c.glStencilMask = getProcAddr("glStencilMask")
+	c.glStencilFuncSeparate = getProcAddr("glStencilFuncSeparate")
+	c.glStencilOpSeparate = getProcAddr("glStencilOpSeparate")
+	c.glStencilMaskSeparate = getProcAddr("glStencilMaskSeparate")
+	c.glColorMask = getProcAddr("glColorMask")
 
 	// Face culling
 	c.glCullFace = getProcAddr("glCullFace")
@@ -283,6 +303,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+
+	// MSAA (optional - may be nil on older GL versions)
+	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
+	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
 
 	return nil
 }
@@ -564,6 +588,34 @@ func (c *Context) GenerateMipmap(target uint32) {
 	syscall.SyscallN(c.glGenerateMipmap, uintptr(target))
 }
 
+// TexImage2DMultisample creates a multisample 2D texture image.
+// Requires OpenGL 3.2+ or OpenGL ES 3.1+.
+// No-op if not supported.
+func (c *Context) TexImage2DMultisample(target uint32, samples int32, internalformat uint32, width, height int32, fixedsamplelocations bool) {
+	if c.glTexImage2DMultisample == 0 {
+		return
+	}
+	var fixed uintptr
+	if fixedsamplelocations {
+		fixed = TRUE
+	}
+	syscall.SyscallN(c.glTexImage2DMultisample, uintptr(target), uintptr(samples),
+		uintptr(internalformat), uintptr(width), uintptr(height), fixed)
+}
+
+// BlitFramebuffer copies a block of pixels between framebuffers.
+// Requires OpenGL 3.0+ or OpenGL ES 3.0+.
+// No-op if not supported.
+func (c *Context) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1 int32, mask, filter uint32) {
+	if c.glBlitFramebuffer == 0 {
+		return
+	}
+	syscall.SyscallN(c.glBlitFramebuffer,
+		uintptr(srcX0), uintptr(srcY0), uintptr(srcX1), uintptr(srcY1),
+		uintptr(dstX0), uintptr(dstY0), uintptr(dstX1), uintptr(dstY1),
+		uintptr(mask), uintptr(filter))
+}
+
 // --- Framebuffers ---
 
 func (c *Context) GenFramebuffers(n int32) uint32 {
@@ -591,6 +643,52 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	return uint32(r)
 }
 
+// --- Pixel Read/Store ---
+
+// ReadPixels reads a block of pixels from the framebuffer.
+func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32, pixels unsafe.Pointer) {
+	syscall.SyscallN(c.glReadPixels, uintptr(x), uintptr(y), uintptr(width), uintptr(height),
+		uintptr(format), uintptr(dataType), uintptr(pixels))
+}
+
+// PixelStorei sets pixel storage modes that affect ReadPixels and TexImage operations.
+func (c *Context) PixelStorei(pname uint32, param int32) {
+	syscall.SyscallN(c.glPixelStorei, uintptr(pname), uintptr(param))
+}
+
+// --- UBO ---
+
+// BindBufferBase binds a buffer to an indexed binding point.
+func (c *Context) BindBufferBase(target, index, buffer uint32) {
+	syscall.SyscallN(c.glBindBufferBase, uintptr(target), uintptr(index), uintptr(buffer))
+}
+
+// BindBufferRange binds a range of a buffer to an indexed binding point.
+func (c *Context) BindBufferRange(target, index, buffer uint32, offset, size int) {
+	syscall.SyscallN(c.glBindBufferRange, uintptr(target), uintptr(index), uintptr(buffer),
+		uintptr(offset), uintptr(size))
+}
+
+// GetUniformBlockIndex returns the index of a named uniform block.
+func (c *Context) GetUniformBlockIndex(program uint32, name string) uint32 {
+	cname, free := cString(name)
+	defer free()
+	r, _, _ := syscall.SyscallN(c.glGetUniformBlockIndex, uintptr(program), uintptr(unsafe.Pointer(cname)))
+	return uint32(r)
+}
+
+// UniformBlockBinding assigns a uniform block to a binding point.
+func (c *Context) UniformBlockBinding(program, blockIndex, blockBinding uint32) {
+	syscall.SyscallN(c.glUniformBlockBinding, uintptr(program), uintptr(blockIndex), uintptr(blockBinding))
+}
+
+// --- Uniforms ---
+
+// Uniform1i sets an integer uniform value.
+func (c *Context) Uniform1i(location, value int32) {
+	syscall.SyscallN(c.glUniform1i, uintptr(location), uintptr(value))
+}
+
 // --- Blending ---
 
 func (c *Context) BlendFunc(sfactor, dfactor uint32) {
@@ -606,6 +704,20 @@ func (c *Context) BlendEquation(mode uint32) {
 	syscall.SyscallN(c.glBlendEquation, uintptr(mode))
 }
 
+// BlendEquationSeparate sets separate blend equations for RGB and alpha.
+func (c *Context) BlendEquationSeparate(modeRGB, modeAlpha uint32) {
+	syscall.SyscallN(c.glBlendEquationSeparate, uintptr(modeRGB), uintptr(modeAlpha))
+}
+
+// BlendColor sets the constant blend color.
+func (c *Context) BlendColor(r, g, b, a float32) {
+	syscall.SyscallN(c.glBlendColor,
+		uintptr(*(*uint32)(unsafe.Pointer(&r))),
+		uintptr(*(*uint32)(unsafe.Pointer(&g))),
+		uintptr(*(*uint32)(unsafe.Pointer(&b))),
+		uintptr(*(*uint32)(unsafe.Pointer(&a))))
+}
+
 // --- Depth/Stencil ---
 
 func (c *Context) DepthFunc(fn uint32) {
@@ -618,6 +730,39 @@ func (c *Context) DepthMask(flag bool) {
 		f = TRUE
 	}
 	syscall.SyscallN(c.glDepthMask, f)
+}
+
+// StencilFuncSeparate sets stencil test function per face.
+func (c *Context) StencilFuncSeparate(face, fn uint32, ref int32, mask uint32) {
+	syscall.SyscallN(c.glStencilFuncSeparate, uintptr(face), uintptr(fn), uintptr(ref), uintptr(mask))
+}
+
+// StencilOpSeparate sets stencil operations per face.
+func (c *Context) StencilOpSeparate(face, sfail, dpfail, dppass uint32) {
+	syscall.SyscallN(c.glStencilOpSeparate, uintptr(face), uintptr(sfail), uintptr(dpfail), uintptr(dppass))
+}
+
+// StencilMaskSeparate sets stencil write mask per face.
+func (c *Context) StencilMaskSeparate(face, mask uint32) {
+	syscall.SyscallN(c.glStencilMaskSeparate, uintptr(face), uintptr(mask))
+}
+
+// ColorMask enables or disables writing of color components.
+func (c *Context) ColorMask(r, g, b, a bool) {
+	var rv, gv, bv, av uintptr
+	if r {
+		rv = TRUE
+	}
+	if g {
+		gv = TRUE
+	}
+	if b {
+		bv = TRUE
+	}
+	if a {
+		av = TRUE
+	}
+	syscall.SyscallN(c.glColorMask, rv, gv, bv, av)
 }
 
 // --- Face Culling ---
