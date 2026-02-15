@@ -37,6 +37,10 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		return nil, fmt.Errorf("metal: failed to create command queue")
 	}
 
+	hal.Logger().Info("metal: device created",
+		"name", DeviceName(adapter.raw),
+	)
+
 	return &Device{
 		raw:          adapter.raw,
 		commandQueue: queue,
@@ -376,6 +380,8 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	// If WGSL source is provided, compile to MSL
 	if desc.Source.WGSL != "" {
+		start := time.Now()
+
 		// Parse WGSL to AST
 		ast, err := naga.Parse(desc.Source.WGSL)
 		if err != nil {
@@ -397,6 +403,11 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			return nil, fmt.Errorf("metal: failed to compile to MSL: %w", err)
 		}
 
+		hal.Logger().Debug("metal: WGSL→MSL compilation",
+			"elapsed", time.Since(start),
+			"mslBytes", len(mslSource),
+		)
+
 		// Create NSString from MSL source
 		mslString := NSString(mslSource)
 		defer Release(mslString)
@@ -417,6 +428,10 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			}
 			return nil, fmt.Errorf("metal: failed to compile MSL: %s\nMSL:\n%s", errMsg, mslSource)
 		}
+
+		hal.Logger().Info("metal: shader module compiled",
+			"entryPoints", len(workgroupSizes),
+		)
 
 		return &ShaderModule{
 			source:         desc.Source,
@@ -574,6 +589,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, fmt.Errorf("metal: failed to create pipeline state: %s", errMsg)
 	}
 
+	hal.Logger().Debug("metal: render pipeline created",
+		"label", desc.Label,
+		"vertexEntry", desc.Vertex.EntryPoint,
+		"sampleCount", sampleCount,
+	)
+
 	return &RenderPipeline{raw: pipelineState, device: d}, nil
 }
 
@@ -629,6 +650,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 
 	// Get workgroup size from shader module metadata
 	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
+
+	hal.Logger().Debug("metal: compute pipeline created",
+		"entryPoint", desc.Compute.EntryPoint,
+		"workgroupSize", fmt.Sprintf("%dx%dx%d", workgroupSize.Width, workgroupSize.Height, workgroupSize.Depth),
+	)
 
 	return &ComputePipeline{
 		raw:           pipelineState,

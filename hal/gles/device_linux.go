@@ -378,6 +378,11 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteShader(fragmentID)
 	}
 
+	hal.Logger().Debug("gles: render pipeline created",
+		"programID", programID,
+		"vertexEntry", desc.Vertex.EntryPoint,
+	)
+
 	// Extract blend state from the first color target.
 	var blend *gputypes.BlendState
 	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
@@ -448,6 +453,11 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	d.glCtx.DeleteShader(computeID)
+
+	hal.Logger().Debug("gles: compute pipeline created",
+		"programID", programID,
+		"entryPoint", desc.Compute.EntryPoint,
+	)
 
 	return &ComputePipeline{
 		programID: programID,

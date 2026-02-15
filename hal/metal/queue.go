@@ -96,6 +96,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	stagingBuffer := MsgSend(q.device.raw, Sel("newBufferWithBytes:length:options:"),
 		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(MTLStorageModeShared))
 	if stagingBuffer == 0 {
+		hal.Logger().Warn("metal: WriteTexture staging buffer creation failed",
+			"dataSize", len(data),
+		)
 		return
 	}
 	defer Release(stagingBuffer)
@@ -103,6 +106,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Create a one-shot command buffer for the blit operation.
 	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
 	if cmdBuffer == 0 {
+		hal.Logger().Warn("metal: WriteTexture command buffer creation failed")
 		return
 	}
 	Retain(cmdBuffer)
@@ -110,6 +114,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	blitEncoder := MsgSend(cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
+		hal.Logger().Warn("metal: WriteTexture blit encoder creation failed")
 		return
 	}
 
@@ -156,6 +161,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Commit and wait synchronously — WriteTexture is a blocking API.
 	_ = MsgSend(cmdBuffer, Sel("commit"))
 	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
+
+	hal.Logger().Debug("metal: WriteTexture completed",
+		"width", size.Width,
+		"height", size.Height,
+		"dataSize", len(data),
+		"format", tex.format,
+	)
 }
 
 // Present presents a surface texture to the screen.

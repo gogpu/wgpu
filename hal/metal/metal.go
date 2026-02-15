@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"github.com/gogpu/wgpu/hal"
 )
 
 var (
@@ -72,6 +73,7 @@ func doInit() error {
 	// Pre-register common selectors for performance
 	preRegisterSelectors()
 
+	hal.Logger().Info("metal: framework initialized")
 	return nil
 }
 

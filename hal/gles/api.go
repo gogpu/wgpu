@@ -28,6 +28,7 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 	if err := wgl.Init(); err != nil {
 		return nil, fmt.Errorf("gles: failed to initialize WGL: %w", err)
 	}
+	hal.Logger().Info("gles: instance created", "platform", "windows")
 	return &Instance{}, nil
 }
 
@@ -59,6 +60,11 @@ func (i *Instance) CreateSurface(_, windowHandle uintptr) (hal.Surface, error) {
 	// Query OpenGL version
 	version := glCtx.GetString(gl.VERSION)
 	renderer := glCtx.GetString(gl.RENDERER)
+
+	hal.Logger().Info("gles: surface created",
+		"version", version,
+		"renderer", renderer,
+	)
 
 	return &Surface{
 		hwnd:     wgl.HWND(windowHandle),

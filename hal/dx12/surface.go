@@ -118,6 +118,13 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		return err
 	}
 
+	hal.Logger().Info("dx12: surface configured",
+		"width", config.Width,
+		"height", config.Height,
+		"format", config.Format,
+		"presentMode", config.PresentMode,
+	)
+
 	return nil
 }
 

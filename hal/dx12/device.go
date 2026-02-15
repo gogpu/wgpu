@@ -196,6 +196,10 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(dev, (*Device).Destroy)
 
+	hal.Logger().Info("dx12: device created",
+		"featureLevel", fmt.Sprintf("0x%x", featureLevel),
+	)
+
 	return dev, nil
 }
 
@@ -1384,6 +1388,10 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		if err := d.compileWGSLModule(desc.Source.WGSL, module); err != nil {
 			return nil, fmt.Errorf("dx12: WGSL compilation failed: %w", err)
 		}
+		hal.Logger().Debug("dx12: shader module compiled",
+			"entryPoints", len(module.entryPoints),
+			"source", "WGSL",
+		)
 	case len(desc.Source.SPIRV) > 0:
 		// Legacy: pre-compiled SPIR-V stored as single entry "main"
 		bytecode := make([]byte, len(desc.Source.SPIRV)*4)
@@ -1529,6 +1537,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		pso.Release()
 		return nil, err
 	}
+
+	hal.Logger().Debug("dx12: render pipeline created",
+		"label", desc.Label,
+		"vertexEntry", desc.Vertex.EntryPoint,
+	)
+
 	return &RenderPipeline{
 		pso:           pso,
 		rootSignature: rootSig,
@@ -1606,6 +1620,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		pso.Release()
 		return nil, err
 	}
+
+	hal.Logger().Debug("dx12: compute pipeline created",
+		"entryPoint", desc.Compute.EntryPoint,
+	)
+
 	return &ComputePipeline{
 		pso:           pso,
 		rootSignature: rootSig,

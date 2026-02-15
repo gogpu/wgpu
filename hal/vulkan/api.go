@@ -129,6 +129,11 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		inst.debugMessenger = createDebugMessenger(inst)
 	}
 
+	hal.Logger().Info("vulkan: instance created",
+		"apiVersion", fmt.Sprintf("%d.%d.%d", vkVersionMajor(appInfo.ApiVersion), vkVersionMinor(appInfo.ApiVersion), vkVersionPatch(appInfo.ApiVersion)),
+		"validation", validationEnabled,
+	)
+
 	return inst, nil
 }
 
@@ -154,6 +159,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	i.cmds.EnumeratePhysicalDevices(i.handle, &count, &devices[0])
 
 	adapters := make([]hal.ExposedAdapter, 0, count)
+	hal.Logger().Debug("vulkan: enumerating adapters", "count", count)
 	for _, device := range devices {
 		// Get device properties
 		var props vk.PhysicalDeviceProperties
@@ -196,6 +202,13 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			properties:     props,
 			features:       features,
 		}
+
+		hal.Logger().Info("vulkan: adapter found",
+			"name", deviceName,
+			"type", deviceType,
+			"vendor", vendorIDToName(props.VendorID),
+			"apiVersion", fmt.Sprintf("%d.%d.%d", vkVersionMajor(props.ApiVersion), vkVersionMinor(props.ApiVersion), vkVersionPatch(props.ApiVersion)),
+		)
 
 		adapters = append(adapters, hal.ExposedAdapter{
 			Adapter: adapter,
@@ -267,6 +280,12 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	if !ok {
 		return fmt.Errorf("vulkan: device is not a Vulkan device")
 	}
+	hal.Logger().Info("vulkan: surface configuring",
+		"width", config.Width,
+		"height", config.Height,
+		"format", config.Format,
+		"presentMode", config.PresentMode,
+	)
 	return s.createSwapchain(vkDevice, config)
 }
 

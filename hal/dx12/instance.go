@@ -95,6 +95,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(instance, (*Instance).Destroy)
 
+	hal.Logger().Info("dx12: instance created",
+		"tearing", instance.allowTearing,
+	)
+
 	return instance, nil
 }
 
@@ -203,6 +207,13 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		}
 
 		exposed := adapter.toExposedAdapter()
+
+		hal.Logger().Info("dx12: adapter found",
+			"name", exposed.Info.Name,
+			"type", exposed.Info.DeviceType,
+			"vendorID", fmt.Sprintf("0x%04X", exposed.Info.VendorID),
+		)
+
 		adapters = append(adapters, exposed)
 	}
 
@@ -249,6 +260,12 @@ func (i *Instance) enumerateAdaptersLegacy(surfaceHint hal.Surface) []hal.Expose
 		}
 
 		exposed := adapter.toExposedAdapter()
+
+		hal.Logger().Info("dx12: adapter found (legacy)",
+			"name", exposed.Info.Name,
+			"type", exposed.Info.DeviceType,
+			"vendorID", fmt.Sprintf("0x%04X", exposed.Info.VendorID),
+		)
 
 		// Sort by device type for proper preference ordering
 		switch exposed.Info.DeviceType {

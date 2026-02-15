@@ -881,6 +881,15 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		return nil, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
 	}
 
+	sourceType := "SPIR-V"
+	if desc.Source.WGSL != "" {
+		sourceType = "WGSL"
+	}
+	hal.Logger().Debug("vulkan: shader module compiled",
+		"source", sourceType,
+		"spirvWords", len(spirv),
+	)
+
 	return &ShaderModule{
 		handle: module,
 		device: d,
