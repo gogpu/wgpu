@@ -197,9 +197,16 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 				// Record MSAA resolve target if present.
 				if ca.ResolveTarget != nil {
-					if resolveView, ok := ca.ResolveTarget.(*TextureView); ok && resolveView.texture != nil {
-						rpe.msaaTexture = tv.texture
-						rpe.resolveTexture = resolveView.texture
+					if resolveView, ok := ca.ResolveTarget.(*TextureView); ok {
+						if resolveView.texture != nil {
+							// Offscreen resolve target (has a GL texture).
+							rpe.msaaTexture = tv.texture
+							rpe.resolveTexture = resolveView.texture
+						} else if resolveView.isSurface {
+							// Surface resolve target (default framebuffer, FBO 0).
+							rpe.msaaTexture = tv.texture
+							rpe.resolveToSurface = true
+						}
 					}
 				}
 			}
@@ -255,8 +262,9 @@ type RenderPassEncoder struct {
 	stencilRef    uint32
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
-	msaaTexture    *Texture // The MSAA color texture (source for resolve)
-	resolveTexture *Texture // The single-sample resolve target
+	msaaTexture      *Texture // The MSAA color texture (source for resolve)
+	resolveTexture   *Texture // The single-sample resolve target (nil when resolveToSurface)
+	resolveToSurface bool     // True when resolve target is the default framebuffer (FBO 0)
 }
 
 // End finishes the render pass.
@@ -265,13 +273,24 @@ type RenderPassEncoder struct {
 // so subsequent operations do not accidentally target the offscreen texture.
 func (e *RenderPassEncoder) End() {
 	// Perform MSAA resolve if a resolve target was recorded.
-	if e.msaaTexture != nil && e.resolveTexture != nil {
-		e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
-			msaaTexture:    e.msaaTexture,
-			resolveTexture: e.resolveTexture,
-			width:          int32(e.msaaTexture.size.Width),
-			height:         int32(e.msaaTexture.size.Height),
-		})
+	if e.msaaTexture != nil {
+		if e.resolveToSurface {
+			// Resolve to the default framebuffer (FBO 0).
+			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+				msaaTexture:      e.msaaTexture,
+				resolveToSurface: true,
+				width:            int32(e.msaaTexture.size.Width),
+				height:           int32(e.msaaTexture.size.Height),
+			})
+		} else if e.resolveTexture != nil {
+			// Resolve to an offscreen texture FBO.
+			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+				msaaTexture:    e.msaaTexture,
+				resolveTexture: e.resolveTexture,
+				width:          int32(e.msaaTexture.size.Width),
+				height:         int32(e.msaaTexture.size.Height),
+			})
+		}
 	}
 
 	// Check if we were rendering to an offscreen target.
@@ -584,30 +603,35 @@ func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 // using glBlitFramebuffer. This is recorded at render pass End() when a
 // ResolveTarget is specified in the color attachment.
 type MSAAResolveCommand struct {
-	msaaTexture    *Texture // MSAA source texture (SampleCount > 1)
-	resolveTexture *Texture // Single-sample resolve target
-	width, height  int32
+	msaaTexture      *Texture // MSAA source texture (SampleCount > 1)
+	resolveTexture   *Texture // Single-sample resolve target (nil when resolveToSurface)
+	resolveToSurface bool     // True to resolve to default framebuffer (FBO 0)
+	width, height    int32
 }
 
 func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
-	// Ensure the resolve target has an FBO.
-	if c.resolveTexture.fbo == 0 {
-		fbo := ctx.GenFramebuffers(1)
-		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-			c.resolveTexture.target, c.resolveTexture.id, 0)
-		status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
-		if status != gl.FRAMEBUFFER_COMPLETE {
-			ctx.DeleteFramebuffers(fbo)
-			return
-		}
-		c.resolveTexture.fbo = fbo
-	}
-
 	// Bind MSAA FBO as read source.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, c.msaaTexture.fbo)
-	// Bind resolve target FBO as draw destination.
-	ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, c.resolveTexture.fbo)
+
+	if c.resolveToSurface {
+		// Resolve to default framebuffer (FBO 0 = window surface).
+		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+	} else {
+		// Resolve to an offscreen texture FBO.
+		if c.resolveTexture.fbo == 0 {
+			fbo := ctx.GenFramebuffers(1)
+			ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+			ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+				c.resolveTexture.target, c.resolveTexture.id, 0)
+			status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
+			if status != gl.FRAMEBUFFER_COMPLETE {
+				ctx.DeleteFramebuffers(fbo)
+				return
+			}
+			c.resolveTexture.fbo = fbo
+		}
+		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, c.resolveTexture.fbo)
+	}
 
 	// Blit (resolve) the MSAA framebuffer to the single-sample framebuffer.
 	ctx.BlitFramebuffer(

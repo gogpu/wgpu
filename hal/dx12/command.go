@@ -288,6 +288,10 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		}
 		srcLoc.SetSubresourceIndex(subresource)
 
+		// D3D12 requires RowPitch aligned to 256 bytes.
+		// The caller should pass aligned BytesPerRow, but align defensively.
+		rowPitch := (r.BufferLayout.BytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
+
 		// Destination location (buffer)
 		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
 			Resource: dstBuf.raw,
@@ -300,7 +304,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 				Width:    r.Size.Width,
 				Height:   r.Size.Height,
 				Depth:    r.Size.DepthOrArrayLayers,
-				RowPitch: r.BufferLayout.BytesPerRow,
+				RowPitch: rowPitch,
 			},
 		})
 
@@ -497,7 +501,16 @@ func (e *RenderPassEncoder) End() {
 		// Check for MSAA resolve target.
 		resolveView, _ := ca.ResolveTarget.(*TextureView)
 		if resolveView != nil && resolveView.texture != nil && resolveView.texture.raw != nil && msaaView.texture.samples > 1 {
-			// MSAA resolve: render target → resolve source, surface → resolve dest.
+			// Determine resolve target's resting state based on ownership.
+			// Surface (swapchain) textures live in PRESENT between frames.
+			// Internal (offscreen) textures live in RENDER_TARGET, matching
+			// the initial state set by CreateTexture for RenderAttachment usage.
+			resolveRestState := d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
+			if resolveView.texture.isExternal {
+				resolveRestState = d3d12.D3D12_RESOURCE_STATE_PRESENT
+			}
+
+			// MSAA resolve: render target → resolve source, resolve target → resolve dest.
 			b1 := d3d12.NewTransitionBarrier(
 				msaaView.texture.raw,
 				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -506,7 +519,7 @@ func (e *RenderPassEncoder) End() {
 			)
 			b2 := d3d12.NewTransitionBarrier(
 				resolveView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				resolveRestState,
 				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
 				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 			)
@@ -522,7 +535,7 @@ func (e *RenderPassEncoder) End() {
 			)
 
 			// Transition back: MSAA → render target (for next frame),
-			// surface → present (for Present call).
+			// resolve target → resting state.
 			b3 := d3d12.NewTransitionBarrier(
 				msaaView.texture.raw,
 				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
@@ -532,7 +545,7 @@ func (e *RenderPassEncoder) End() {
 			b4 := d3d12.NewTransitionBarrier(
 				resolveView.texture.raw,
 				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
+				resolveRestState,
 				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 			)
 			barriers2 := [2]d3d12.D3D12_RESOURCE_BARRIER{b3, b4}

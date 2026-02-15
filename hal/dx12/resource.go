@@ -195,13 +195,13 @@ type TextureView struct {
 // the Surface owns them and manages their lifecycle via releaseBackBuffers().
 func (v *TextureView) Destroy() {
 	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
-		if v.hasSRV {
+		if v.hasSRV && v.device.stagingViewHeap != nil {
 			v.device.stagingViewHeap.Free(v.srvHeapIndex, 1)
 		}
-		if v.hasRTV {
+		if v.hasRTV && v.device.rtvHeap != nil {
 			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
 		}
-		if v.hasDSV {
+		if v.hasDSV && v.device.dsvHeap != nil {
 			v.device.dsvHeap.Free(v.dsvHeapIndex, 1)
 		}
 	}
