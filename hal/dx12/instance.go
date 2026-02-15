@@ -23,7 +23,6 @@ package dx12
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"unsafe"
 
@@ -65,7 +64,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	if err != nil && debugRequested {
 		// Debug layer not installed (requires Windows "Graphics Tools" optional feature).
 		// Fall back to non-debug factory.
-		log.Printf("[DX12] debug layer not available, falling back to non-debug mode: %v", err)
+		hal.Logger().Warn("dx12: debug layer not available, falling back to non-debug mode", "err", err)
 		factoryFlags = 0
 		instance.flags = 0
 		factory, err = dxgiLib.CreateFactory2(factoryFlags)
@@ -86,7 +85,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	// Enable debug layer if requested (and factory was created with debug flags)
 	if instance.flags&gputypes.InstanceFlagsDebug != 0 {
 		if err := instance.enableDebugLayer(); err != nil {
-			log.Printf("[DX12] debug layer enable failed (non-fatal): %v", err)
+			hal.Logger().Warn("dx12: debug layer enable failed (non-fatal)", "err", err)
 		}
 	}
 

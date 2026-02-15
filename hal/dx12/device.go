@@ -7,7 +7,6 @@ package dx12
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"sync"
 	"time"
@@ -188,9 +187,9 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 	if instance.flags&gputypes.InstanceFlagsDebug != 0 {
 		if iq := rawDevice.QueryInfoQueue(); iq != nil {
 			dev.infoQueue = iq
-			log.Printf("[DX12] InfoQueue attached — debug messages enabled")
+			hal.Logger().Info("dx12: InfoQueue attached, debug messages enabled")
 		} else {
-			log.Printf("[DX12] InfoQueue not available (debug layer may not be active)")
+			hal.Logger().Debug("dx12: InfoQueue not available, debug layer may not be active")
 		}
 	}
 
@@ -407,7 +406,7 @@ func (d *Device) checkHealth(operation string) error {
 	d.debugStep++
 	d.DrainDebugMessages()
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-		log.Printf("[DX12] DEVICE KILLED at step %d: %s — %v", d.debugStep, operation, reason)
+		hal.Logger().Error("dx12: device removed", "step", d.debugStep, "operation", operation, "reason", reason)
 		return fmt.Errorf("dx12: device removed at step %d (%s): %w", d.debugStep, operation, reason)
 	}
 	return nil
@@ -436,7 +435,7 @@ func (d *Device) DrainDebugMessages() int {
 		if msg == nil {
 			continue
 		}
-		log.Printf("[DX12 %s] (ID:%d) %s", msg.Severity, msg.ID, msg.Description())
+		hal.Logger().Warn("dx12: debug message", "severity", msg.Severity, "id", msg.ID, "msg", msg.Description())
 	}
 	d.infoQueue.ClearStoredMessages()
 
@@ -869,8 +868,10 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	// Post-creation health check: detect if CreateCommittedResource silently poisoned the device.
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 		d.DrainDebugMessages()
-		log.Printf("[DX12] device died DURING CreateTexture (format=%d, samples=%d, %dx%d, flags=0x%x): %v",
-			createFormat, sampleCount, desc.Size.Width, desc.Size.Height, resourceFlags, reason)
+		hal.Logger().Error("dx12: device removed during CreateTexture",
+			"format", createFormat, "samples", sampleCount,
+			"width", desc.Size.Width, "height", desc.Size.Height,
+			"flags", fmt.Sprintf("0x%x", resourceFlags), "reason", reason)
 	}
 
 	return tex, nil

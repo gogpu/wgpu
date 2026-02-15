@@ -4,11 +4,13 @@
 package vulkan
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"runtime"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
@@ -48,18 +50,18 @@ func vulkanDebugCallback(severity, types, callbackData, userData uintptr) uintpt
 		msgID = cStringFromPtr(data.PMessageIdName)
 	}
 
-	// Determine severity prefix.
+	// Map Vulkan severity to slog level.
 	severityBits := vk.DebugUtilsMessageSeverityFlagBitsEXT(severity)
-	var prefix string
+	var level slog.Level
 	switch {
 	case severityBits&vk.DebugUtilsMessageSeverityErrorBitExt != 0:
-		prefix = "[VULKAN ERROR]"
+		level = slog.LevelError
 	case severityBits&vk.DebugUtilsMessageSeverityWarningBitExt != 0:
-		prefix = "[VULKAN WARNING]"
+		level = slog.LevelWarn
 	case severityBits&vk.DebugUtilsMessageSeverityInfoBitExt != 0:
-		prefix = "[VULKAN INFO]"
+		level = slog.LevelInfo
 	default:
-		prefix = "[VULKAN VERBOSE]"
+		level = slog.LevelDebug
 	}
 
 	// Determine message type.
@@ -74,11 +76,13 @@ func vulkanDebugCallback(severity, types, callbackData, userData uintptr) uintpt
 		typeStr = "General"
 	}
 
-	if msgID != "" {
-		log.Printf("%s %s: %s: %s", prefix, typeStr, msgID, msg)
-	} else {
-		log.Printf("%s %s: %s", prefix, typeStr, msg)
+	attrs := []slog.Attr{
+		slog.String("type", typeStr),
 	}
+	if msgID != "" {
+		attrs = append(attrs, slog.String("id", msgID))
+	}
+	hal.Logger().LogAttrs(context.Background(), level, "vulkan: "+msg, attrs...)
 
 	// Returning VK_FALSE (0) means the Vulkan call that triggered the callback
 	// should NOT be aborted. Returning VK_TRUE would abort the call.
@@ -135,7 +139,7 @@ func createDebugMessenger(instance *Instance) vk.DebugUtilsMessengerEXT {
 		instance.handle, &createInfo, nil, &messenger,
 	)
 	if result != vk.Success {
-		log.Printf("[VULKAN WARNING] Failed to create debug messenger: %d", result)
+		hal.Logger().Warn("vulkan: failed to create debug messenger", "result", result)
 		return 0
 	}
 

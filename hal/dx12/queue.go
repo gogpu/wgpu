@@ -7,7 +7,6 @@ package dx12
 
 import (
 	"fmt"
-	"log"
 	"time"
 	"unsafe"
 
@@ -181,7 +180,7 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 		MappedAtCreation: true,
 	})
 	if err != nil {
-		log.Printf("dx12: writeBufferStaged: CreateBuffer failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: CreateBuffer failed", "err", err)
 		return
 	}
 	defer q.device.DestroyBuffer(staging)
@@ -202,13 +201,13 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 		Label: "write-buffer-copy",
 	})
 	if err != nil {
-		log.Printf("dx12: writeBufferStaged: CreateCommandEncoder failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: CreateCommandEncoder failed", "err", err)
 		return
 	}
 
 	encoder := cmdEncoder.(*CommandEncoder)
 	if err := encoder.BeginEncoding("write-buffer-copy"); err != nil {
-		log.Printf("dx12: writeBufferStaged: BeginEncoding failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: BeginEncoding failed", "err", err)
 		return
 	}
 
@@ -218,20 +217,20 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
-		log.Printf("dx12: writeBufferStaged: EndEncoding failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: EndEncoding failed", "err", err)
 		return
 	}
 
 	// Submit and wait for GPU completion
 	fence, err := q.device.CreateFence()
 	if err != nil {
-		log.Printf("dx12: writeBufferStaged: CreateFence failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: CreateFence failed", "err", err)
 		return
 	}
 	defer q.device.DestroyFence(fence)
 
 	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
-		log.Printf("dx12: writeBufferStaged: Submit failed: %v", err)
+		hal.Logger().Warn("dx12: writeBufferStaged: Submit failed", "err", err)
 		return
 	}
 	_, _ = q.device.Wait(fence, 1, 60*time.Second)
@@ -328,13 +327,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		Label: "write-texture-copy",
 	})
 	if err != nil {
-		log.Printf("dx12: WriteTexture: CreateCommandEncoder failed: %v", err)
+		hal.Logger().Warn("dx12: WriteTexture: CreateCommandEncoder failed", "err", err)
 		return
 	}
 
 	encoder := cmdEncoder.(*CommandEncoder)
 	if err := encoder.BeginEncoding("write-texture-copy"); err != nil {
-		log.Printf("dx12: WriteTexture: BeginEncoding failed: %v", err)
+		hal.Logger().Warn("dx12: WriteTexture: BeginEncoding failed", "err", err)
 		return
 	}
 
@@ -396,20 +395,20 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// End encoding
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
-		log.Printf("dx12: WriteTexture: EndEncoding failed: %v", err)
+		hal.Logger().Warn("dx12: WriteTexture: EndEncoding failed", "err", err)
 		return
 	}
 
 	// Submit and wait for GPU completion
 	fence, err := q.device.CreateFence()
 	if err != nil {
-		log.Printf("dx12: WriteTexture: CreateFence failed: %v", err)
+		hal.Logger().Warn("dx12: WriteTexture: CreateFence failed", "err", err)
 		return
 	}
 	defer q.device.DestroyFence(fence)
 
 	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
-		log.Printf("dx12: WriteTexture: Submit failed: %v", err)
+		hal.Logger().Warn("dx12: WriteTexture: Submit failed", "err", err)
 		return
 	}
 	_, _ = q.device.Wait(fence, 1, 60*time.Second)

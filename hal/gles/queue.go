@@ -7,7 +7,6 @@ package gles
 
 import (
 	"fmt"
-	"log"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -33,7 +32,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		for i, cmd := range cmdBuf.commands {
 			cmd.Execute(q.glCtx)
 			if glErr := q.glCtx.GetError(); glErr != 0 {
-				log.Printf("gles: GL error 0x%x after command %d (%T)", glErr, i, cmd)
+				hal.Logger().Warn("gles: GL error after command", "error", fmt.Sprintf("0x%x", glErr), "index", i, "command", fmt.Sprintf("%T", cmd))
 			}
 		}
 	}
