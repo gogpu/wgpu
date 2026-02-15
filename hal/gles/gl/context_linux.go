@@ -1216,14 +1216,14 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 // --- Pixel Read/Store ---
 
 // ReadPixels reads a block of pixels from the framebuffer.
-func (c *Context) ReadPixels(x, y, width, height int32, format, type_ uint32, pixels unsafe.Pointer) {
+func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32, pixels unsafe.Pointer) {
 	args := [7]unsafe.Pointer{
 		unsafe.Pointer(&x),
 		unsafe.Pointer(&y),
 		unsafe.Pointer(&width),
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&format),
-		unsafe.Pointer(&type_),
+		unsafe.Pointer(&dataType),
 		pixels,
 	}
 	_ = ffi.CallFunction(&cifVoid7ReadPx, c.glReadPixels, nil, args[:])

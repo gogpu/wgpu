@@ -100,6 +100,7 @@ MSAA support, and cross-backend stability fixes.
   wrapper functions for Objective-C message sends.
 - **DX12 descriptor heap management** — Free list recycling for descriptor slots,
   reducing allocation overhead for long-running applications.
+- **naga v0.12.0 → v0.13.0** — GLSL backend improvements, HLSL/SPIR-V fixes
 
 ## [0.15.1] - 2026-02-13
 

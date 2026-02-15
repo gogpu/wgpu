@@ -511,60 +511,42 @@ func (d *Device) cleanup() {
 // Descriptor Allocation Helpers
 // -----------------------------------------------------------------------------
 
-// allocateRTVDescriptor allocates a render target view descriptor.
+// allocateDescriptor allocates a descriptor from the given staging heap.
 // Recycles freed slots before bumping the watermark.
-func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.rtvHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap not initialized")
+func allocateDescriptor(heap *DescriptorHeap, heapName string) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	if heap == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: %s heap not initialized", heapName)
 	}
 
-	d.rtvHeap.mu.Lock()
-	defer d.rtvHeap.mu.Unlock()
+	heap.mu.Lock()
+	defer heap.mu.Unlock()
 
 	// Prefer recycled slots.
-	if len(d.rtvHeap.freeList) > 0 {
-		idx := d.rtvHeap.freeList[len(d.rtvHeap.freeList)-1]
-		d.rtvHeap.freeList = d.rtvHeap.freeList[:len(d.rtvHeap.freeList)-1]
-		handle := d.rtvHeap.cpuStart.Offset(int(idx), d.rtvHeap.incrementSize)
+	if len(heap.freeList) > 0 {
+		idx := heap.freeList[len(heap.freeList)-1]
+		heap.freeList = heap.freeList[:len(heap.freeList)-1]
+		handle := heap.cpuStart.Offset(int(idx), heap.incrementSize)
 		return handle, idx, nil
 	}
 
-	if d.rtvHeap.nextFree >= d.rtvHeap.capacity {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: RTV heap exhausted")
+	if heap.nextFree >= heap.capacity {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: %s heap exhausted", heapName)
 	}
 
-	index := d.rtvHeap.nextFree
-	handle := d.rtvHeap.cpuStart.Offset(int(index), d.rtvHeap.incrementSize)
-	d.rtvHeap.nextFree++
+	index := heap.nextFree
+	handle := heap.cpuStart.Offset(int(index), heap.incrementSize)
+	heap.nextFree++
 	return handle, index, nil
 }
 
+// allocateRTVDescriptor allocates a render target view descriptor.
+func (d *Device) allocateRTVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
+	return allocateDescriptor(d.rtvHeap, "RTV")
+}
+
 // allocateDSVDescriptor allocates a depth stencil view descriptor.
-// Recycles freed slots before bumping the watermark.
 func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.dsvHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap not initialized")
-	}
-
-	d.dsvHeap.mu.Lock()
-	defer d.dsvHeap.mu.Unlock()
-
-	// Prefer recycled slots.
-	if len(d.dsvHeap.freeList) > 0 {
-		idx := d.dsvHeap.freeList[len(d.dsvHeap.freeList)-1]
-		d.dsvHeap.freeList = d.dsvHeap.freeList[:len(d.dsvHeap.freeList)-1]
-		handle := d.dsvHeap.cpuStart.Offset(int(idx), d.dsvHeap.incrementSize)
-		return handle, idx, nil
-	}
-
-	if d.dsvHeap.nextFree >= d.dsvHeap.capacity {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: DSV heap exhausted")
-	}
-
-	index := d.dsvHeap.nextFree
-	handle := d.dsvHeap.cpuStart.Offset(int(index), d.dsvHeap.incrementSize)
-	d.dsvHeap.nextFree++
-	return handle, index, nil
+	return allocateDescriptor(d.dsvHeap, "DSV")
 }
 
 // allocateSRVDescriptor allocates a shader resource view descriptor in the
@@ -846,7 +828,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	)
 	if err != nil {
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-			return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed (device removed: %v, format=%d, samples=%d, %dx%d, flags=0x%x): %w",
+			return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed (device removed: %w, format=%d, samples=%d, %dx%d, flags=0x%x): %w",
 				reason, createFormat, sampleCount, desc.Size.Width, desc.Size.Height, resourceFlags, err)
 		}
 		return nil, fmt.Errorf("dx12: CreateCommittedResource for texture failed (format=%d, samples=%d, %dx%d, flags=0x%x): %w",
@@ -1285,7 +1267,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		for i, entry := range samplerEntries {
 			destCPU := cpuStart.Offset(i, d.samplerHeap.incrementSize)
 			sb := entry.Resource.(gputypes.SamplerBinding)
-			sampler := (*Sampler)(unsafe.Pointer(sb.Sampler))
+			sampler := (*Sampler)(unsafe.Pointer(sb.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
 			d.raw.CopyDescriptorsSimple(1, destCPU, sampler.handle, d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
 		}
 	}
@@ -1297,7 +1279,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 func (d *Device) writeViewDescriptor(dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entry gputypes.BindGroupEntry) error {
 	switch res := entry.Resource.(type) {
 	case gputypes.BufferBinding:
-		buf := (*Buffer)(unsafe.Pointer(res.Buffer))
+		buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
 		size := res.Size
 		if size == 0 {
 			size = buf.size - res.Offset
@@ -1310,7 +1292,7 @@ func (d *Device) writeViewDescriptor(dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, ent
 		}, dest)
 
 	case gputypes.TextureViewBinding:
-		view := (*TextureView)(unsafe.Pointer(res.TextureView))
+		view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle → concrete type
 		if !view.hasSRV {
 			return fmt.Errorf("texture view has no SRV")
 		}
@@ -1507,7 +1489,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-			return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed (device removed: %v): %w", reason, err)
+			return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed (device removed: %w): %w", reason, err)
 		}
 		return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed: %w", err)
 	}
@@ -1611,7 +1593,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-			return nil, fmt.Errorf("dx12: CreateComputePipelineState failed (device removed: %v): %w", reason, err)
+			return nil, fmt.Errorf("dx12: CreateComputePipelineState failed (device removed: %w): %w", reason, err)
 		}
 		return nil, fmt.Errorf("dx12: CreateComputePipelineState failed: %w", err)
 	}

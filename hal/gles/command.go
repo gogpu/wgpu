@@ -163,54 +163,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Bind the correct framebuffer and set viewport.
 	// Reference wgpu sets viewport at render pass start — required for correct rendering.
 	if len(desc.ColorAttachments) > 0 {
-		ca := desc.ColorAttachments[0]
-		if tv, ok := ca.View.(*TextureView); ok {
-			if tv.isSurface {
-				// Render to the default framebuffer (window surface)
-				e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
-				// Set viewport to surface dimensions
-				if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
-					cfg := tv.surfaceTex.surface.config
-					e.commands = append(e.commands, &SetViewportCommand{
-						width:  float32(cfg.Width),
-						height: float32(cfg.Height),
-					})
-				}
-			} else if tv.texture != nil {
-				// Offscreen render target — lazily create and bind FBO.
-				e.commands = append(e.commands, &EnsureOffscreenFBOCommand{
-					texture: tv.texture,
-				})
-				// Attach depth/stencil texture to the FBO if provided.
-				if desc.DepthStencilAttachment != nil {
-					if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
-						e.commands = append(e.commands, &AttachDepthStencilCommand{
-							colorTexture: tv.texture,
-							depthTexture: dsView.texture,
-						})
-					}
-				}
-				e.commands = append(e.commands, &SetViewportCommand{
-					width:  float32(tv.texture.size.Width),
-					height: float32(tv.texture.size.Height),
-				})
-
-				// Record MSAA resolve target if present.
-				if ca.ResolveTarget != nil {
-					if resolveView, ok := ca.ResolveTarget.(*TextureView); ok {
-						if resolveView.texture != nil {
-							// Offscreen resolve target (has a GL texture).
-							rpe.msaaTexture = tv.texture
-							rpe.resolveTexture = resolveView.texture
-						} else if resolveView.isSurface {
-							// Surface resolve target (default framebuffer, FBO 0).
-							rpe.msaaTexture = tv.texture
-							rpe.resolveToSurface = true
-						}
-					}
-				}
-			}
-		}
+		e.setupColorAttachment(desc, rpe)
 	}
 
 	// Record clear commands
@@ -242,6 +195,75 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 
 	return rpe
+}
+
+// setupColorAttachment configures framebuffer, viewport, and MSAA resolve for the
+// primary color attachment of a render pass.
+func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rpe *RenderPassEncoder) {
+	ca := desc.ColorAttachments[0]
+	tv, ok := ca.View.(*TextureView)
+	if !ok {
+		return
+	}
+
+	if tv.isSurface {
+		e.setupSurfaceTarget(tv)
+		return
+	}
+
+	if tv.texture == nil {
+		return
+	}
+
+	e.setupOffscreenTarget(desc, ca, tv, rpe)
+}
+
+// setupSurfaceTarget binds the default framebuffer and sets viewport to surface dimensions.
+func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView) {
+	e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
+	if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
+		cfg := tv.surfaceTex.surface.config
+		e.commands = append(e.commands, &SetViewportCommand{
+			width:  float32(cfg.Width),
+			height: float32(cfg.Height),
+		})
+	}
+}
+
+// setupOffscreenTarget configures an offscreen FBO, depth/stencil attachment, and MSAA resolve.
+func (e *CommandEncoder) setupOffscreenTarget(
+	desc *hal.RenderPassDescriptor,
+	ca hal.RenderPassColorAttachment,
+	tv *TextureView,
+	rpe *RenderPassEncoder,
+) {
+	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{texture: tv.texture})
+
+	// Attach depth/stencil texture to the FBO if provided.
+	if desc.DepthStencilAttachment != nil {
+		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
+			e.commands = append(e.commands, &AttachDepthStencilCommand{
+				colorTexture: tv.texture,
+				depthTexture: dsView.texture,
+			})
+		}
+	}
+
+	e.commands = append(e.commands, &SetViewportCommand{
+		width:  float32(tv.texture.size.Width),
+		height: float32(tv.texture.size.Height),
+	})
+
+	// Record MSAA resolve target if present.
+	if resolveView, ok := ca.ResolveTarget.(*TextureView); ok && ca.ResolveTarget != nil {
+		if resolveView.texture != nil {
+			rpe.msaaTexture = tv.texture
+			rpe.resolveTexture = resolveView.texture
+		} else if resolveView.isSurface {
+			rpe.msaaTexture = tv.texture
+			rpe.resolveToSurface = true
+		}
+	}
 }
 
 // BeginComputePass begins a compute pass.
@@ -613,24 +635,11 @@ func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
 	// Bind MSAA FBO as read source.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, c.msaaTexture.fbo)
 
+	// Bind the draw target.
 	if c.resolveToSurface {
-		// Resolve to default framebuffer (FBO 0 = window surface).
 		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
-	} else {
-		// Resolve to an offscreen texture FBO.
-		if c.resolveTexture.fbo == 0 {
-			fbo := ctx.GenFramebuffers(1)
-			ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-			ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-				c.resolveTexture.target, c.resolveTexture.id, 0)
-			status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
-			if status != gl.FRAMEBUFFER_COMPLETE {
-				ctx.DeleteFramebuffers(fbo)
-				return
-			}
-			c.resolveTexture.fbo = fbo
-		}
-		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, c.resolveTexture.fbo)
+	} else if !c.ensureResolveFBO(ctx) {
+		return
 	}
 
 	// Blit (resolve) the MSAA framebuffer to the single-sample framebuffer.
@@ -643,6 +652,24 @@ func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
 	// Restore default framebuffer binding.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, 0)
 	ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+}
+
+// ensureResolveFBO lazily creates the resolve FBO and binds it as draw target.
+// Returns false if the FBO creation fails.
+func (c *MSAAResolveCommand) ensureResolveFBO(ctx *gl.Context) bool {
+	if c.resolveTexture.fbo == 0 {
+		fbo := ctx.GenFramebuffers(1)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+			c.resolveTexture.target, c.resolveTexture.id, 0)
+		if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+			ctx.DeleteFramebuffers(fbo)
+			return false
+		}
+		c.resolveTexture.fbo = fbo
+	}
+	ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, c.resolveTexture.fbo)
+	return true
 }
 
 // ClearColorCommand clears a color attachment.
@@ -718,53 +745,8 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 		ctx.FrontFace(gl.CW)
 	}
 
-	// Depth
-	if c.depthStencil != nil {
-		if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
-			ctx.Enable(gl.DEPTH_TEST)
-			ctx.DepthMask(c.depthStencil.DepthWriteEnabled)
-			ctx.DepthFunc(compareFunctionToGL(c.depthStencil.DepthCompare))
-		} else {
-			ctx.Disable(gl.DEPTH_TEST)
-		}
-
-		// Stencil
-		hasStencilOps := c.depthStencil.StencilFront.PassOp != hal.StencilOperationKeep ||
-			c.depthStencil.StencilFront.FailOp != hal.StencilOperationKeep ||
-			c.depthStencil.StencilBack.PassOp != hal.StencilOperationKeep ||
-			c.depthStencil.StencilBack.FailOp != hal.StencilOperationKeep ||
-			c.depthStencil.StencilFront.Compare != gputypes.CompareFunctionAlways ||
-			c.depthStencil.StencilBack.Compare != gputypes.CompareFunctionAlways
-
-		if hasStencilOps || c.depthStencil.StencilWriteMask != 0 {
-			ctx.Enable(gl.STENCIL_TEST)
-			ref := int32(c.stencilRef) //nolint:gosec // stencil ref fits int32
-
-			ctx.StencilFuncSeparate(gl.FRONT,
-				compareFunctionToGL(c.depthStencil.StencilFront.Compare),
-				ref, c.depthStencil.StencilReadMask)
-			ctx.StencilFuncSeparate(gl.BACK,
-				compareFunctionToGL(c.depthStencil.StencilBack.Compare),
-				ref, c.depthStencil.StencilReadMask)
-
-			ctx.StencilOpSeparate(gl.FRONT,
-				stencilOpToGL(c.depthStencil.StencilFront.FailOp),
-				stencilOpToGL(c.depthStencil.StencilFront.DepthFailOp),
-				stencilOpToGL(c.depthStencil.StencilFront.PassOp))
-			ctx.StencilOpSeparate(gl.BACK,
-				stencilOpToGL(c.depthStencil.StencilBack.FailOp),
-				stencilOpToGL(c.depthStencil.StencilBack.DepthFailOp),
-				stencilOpToGL(c.depthStencil.StencilBack.PassOp))
-
-			ctx.StencilMaskSeparate(gl.FRONT, c.depthStencil.StencilWriteMask)
-			ctx.StencilMaskSeparate(gl.BACK, c.depthStencil.StencilWriteMask)
-		} else {
-			ctx.Disable(gl.STENCIL_TEST)
-		}
-	} else {
-		ctx.Disable(gl.DEPTH_TEST)
-		ctx.Disable(gl.STENCIL_TEST)
-	}
+	// Depth and stencil
+	c.applyDepthStencilState(ctx)
 
 	// Color write mask
 	ctx.ColorMask(
@@ -790,6 +772,59 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 	} else {
 		ctx.Disable(gl.BLEND)
 	}
+}
+
+// applyDepthStencilState configures GL depth test and stencil test from pipeline state.
+func (c *SetPipelineStateCommand) applyDepthStencilState(ctx *gl.Context) {
+	if c.depthStencil == nil {
+		ctx.Disable(gl.DEPTH_TEST)
+		ctx.Disable(gl.STENCIL_TEST)
+		return
+	}
+
+	// Depth test
+	if c.depthStencil.DepthWriteEnabled || c.depthStencil.DepthCompare != gputypes.CompareFunctionAlways {
+		ctx.Enable(gl.DEPTH_TEST)
+		ctx.DepthMask(c.depthStencil.DepthWriteEnabled)
+		ctx.DepthFunc(compareFunctionToGL(c.depthStencil.DepthCompare))
+	} else {
+		ctx.Disable(gl.DEPTH_TEST)
+	}
+
+	// Stencil test
+	hasStencilOps := c.depthStencil.StencilFront.PassOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilFront.FailOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilBack.PassOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilBack.FailOp != hal.StencilOperationKeep ||
+		c.depthStencil.StencilFront.Compare != gputypes.CompareFunctionAlways ||
+		c.depthStencil.StencilBack.Compare != gputypes.CompareFunctionAlways
+
+	if !hasStencilOps && c.depthStencil.StencilWriteMask == 0 {
+		ctx.Disable(gl.STENCIL_TEST)
+		return
+	}
+
+	ctx.Enable(gl.STENCIL_TEST)
+	ref := int32(c.stencilRef)
+
+	ctx.StencilFuncSeparate(gl.FRONT,
+		compareFunctionToGL(c.depthStencil.StencilFront.Compare),
+		ref, c.depthStencil.StencilReadMask)
+	ctx.StencilFuncSeparate(gl.BACK,
+		compareFunctionToGL(c.depthStencil.StencilBack.Compare),
+		ref, c.depthStencil.StencilReadMask)
+
+	ctx.StencilOpSeparate(gl.FRONT,
+		stencilOpToGL(c.depthStencil.StencilFront.FailOp),
+		stencilOpToGL(c.depthStencil.StencilFront.DepthFailOp),
+		stencilOpToGL(c.depthStencil.StencilFront.PassOp))
+	ctx.StencilOpSeparate(gl.BACK,
+		stencilOpToGL(c.depthStencil.StencilBack.FailOp),
+		stencilOpToGL(c.depthStencil.StencilBack.DepthFailOp),
+		stencilOpToGL(c.depthStencil.StencilBack.PassOp))
+
+	ctx.StencilMaskSeparate(gl.FRONT, c.depthStencil.StencilWriteMask)
+	ctx.StencilMaskSeparate(gl.BACK, c.depthStencil.StencilWriteMask)
 }
 
 // SetBindGroupCommand binds resources.
@@ -930,7 +965,7 @@ func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
 	if c.depthStencil == nil {
 		return
 	}
-	ref := int32(c.ref) //nolint:gosec // stencil ref fits int32
+	ref := int32(c.ref)
 	ctx.StencilFuncSeparate(gl.FRONT,
 		compareFunctionToGL(c.depthStencil.StencilFront.Compare),
 		ref, c.depthStencil.StencilReadMask)

@@ -646,9 +646,9 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 // --- Pixel Read/Store ---
 
 // ReadPixels reads a block of pixels from the framebuffer.
-func (c *Context) ReadPixels(x, y, width, height int32, format, type_ uint32, pixels unsafe.Pointer) {
+func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32, pixels unsafe.Pointer) {
 	syscall.SyscallN(c.glReadPixels, uintptr(x), uintptr(y), uintptr(width), uintptr(height),
-		uintptr(format), uintptr(type_), uintptr(pixels))
+		uintptr(format), uintptr(dataType), uintptr(pixels))
 }
 
 // PixelStorei sets pixel storage modes that affect ReadPixels and TexImage operations.
