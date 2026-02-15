@@ -32,6 +32,7 @@ type CommandEncoder struct {
 	glCtx    *gl.Context
 	commands []Command
 	label    string
+	vao      uint32 // persistent VAO from Device for Core Profile
 }
 
 // BeginEncoding begins command recording.
@@ -136,11 +137,36 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		desc:    desc,
 	}
 
-	// Bind the correct framebuffer: FBO 0 for surface (default), or an offscreen FBO.
+	// Bind the persistent VAO. Core Profile requires a VAO to be bound for any
+	// vertex attribute or draw call. Re-binding at pass start ensures it is
+	// active even if external code (or a previous pass) unbound it.
+	if e.vao != 0 {
+		e.commands = append(e.commands, &BindVAOCommand{vao: e.vao})
+	}
+
+	// Bind the correct framebuffer and set viewport.
+	// Reference wgpu sets viewport at render pass start — required for correct rendering.
 	if len(desc.ColorAttachments) > 0 {
-		if tv, ok := desc.ColorAttachments[0].View.(*TextureView); ok && tv.isSurface {
-			// Render to the default framebuffer (window surface)
-			e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
+		if tv, ok := desc.ColorAttachments[0].View.(*TextureView); ok {
+			if tv.isSurface {
+				// Render to the default framebuffer (window surface)
+				e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
+				// Set viewport to surface dimensions
+				if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
+					cfg := tv.surfaceTex.surface.config
+					e.commands = append(e.commands, &SetViewportCommand{
+						width:  float32(cfg.Width),
+						height: float32(cfg.Height),
+					})
+				}
+			} else if tv.texture != nil {
+				// Offscreen render target — set viewport to texture dimensions.
+				// FBO creation for offscreen targets is not yet implemented.
+				e.commands = append(e.commands, &SetViewportCommand{
+					width:  float32(tv.texture.size.Width),
+					height: float32(tv.texture.size.Height),
+				})
+			}
 		}
 	}
 
@@ -211,6 +237,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 			cullMode:     p.cullMode,
 			frontFace:    p.frontFace,
 			depthStencil: p.depthStencil,
+			blend:        p.blend,
 		},
 	)
 }
@@ -409,6 +436,15 @@ func (c *ClearBufferCommand) Execute(_ *gl.Context) {
 	// For older versions, map buffer and memset, or use compute shader.
 }
 
+// BindVAOCommand binds a vertex array object.
+type BindVAOCommand struct {
+	vao uint32
+}
+
+func (c *BindVAOCommand) Execute(ctx *gl.Context) {
+	ctx.BindVertexArray(c.vao)
+}
+
 // BindFramebufferCommand binds a framebuffer object.
 type BindFramebufferCommand struct {
 	fbo uint32
@@ -456,12 +492,13 @@ func (c *UseProgramCommand) Execute(ctx *gl.Context) {
 	ctx.UseProgram(c.programID)
 }
 
-// SetPipelineStateCommand sets pipeline state (culling, depth, etc.).
+// SetPipelineStateCommand sets pipeline state (culling, depth, blending, etc.).
 type SetPipelineStateCommand struct {
 	topology     gputypes.PrimitiveTopology
 	cullMode     gputypes.CullMode
 	frontFace    gputypes.FrontFace
 	depthStencil *hal.DepthStencilState
+	blend        *gputypes.BlendState
 }
 
 func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
@@ -496,6 +533,23 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 			ctx.Disable(gl.DEPTH_TEST)
 		}
 	}
+
+	// Blending
+	if c.blend != nil {
+		ctx.Enable(gl.BLEND)
+		ctx.BlendFuncSeparate(
+			blendFactorToGL(c.blend.Color.SrcFactor),
+			blendFactorToGL(c.blend.Color.DstFactor),
+			blendFactorToGL(c.blend.Alpha.SrcFactor),
+			blendFactorToGL(c.blend.Alpha.DstFactor),
+		)
+		ctx.BlendEquationSeparate(
+			blendOperationToGL(c.blend.Color.Operation),
+			blendOperationToGL(c.blend.Alpha.Operation),
+		)
+	} else {
+		ctx.Disable(gl.BLEND)
+	}
 }
 
 // SetBindGroupCommand binds resources.
@@ -506,13 +560,54 @@ type SetBindGroupCommand struct {
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
-	// Bind uniform buffers, textures, and samplers from the bind group.
-	// Note: Full implementation requires BindGroup to track resource bindings.
 	if c.group == nil {
 		return
 	}
-	// Binding logic is deferred to draw time when pipeline layout is known.
-	_ = ctx
+
+	dynamicIdx := 0
+	for _, entry := range c.group.entries {
+		switch res := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			// Buffer handle is the GL buffer object ID (from NativeHandle()).
+			bufID := uint32(res.Buffer)
+			if bufID == 0 {
+				continue
+			}
+			offset := int(res.Offset)
+			size := int(res.Size)
+
+			// Apply dynamic offset if available.
+			if c.dynamicOffsets != nil && dynamicIdx < len(c.dynamicOffsets) {
+				if c.group.layout != nil {
+					for _, le := range c.group.layout.entries {
+						if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
+							offset += int(c.dynamicOffsets[dynamicIdx])
+							dynamicIdx++
+							break
+						}
+					}
+				}
+			}
+
+			if size > 0 {
+				ctx.BindBufferRange(gl.UNIFORM_BUFFER, entry.Binding, bufID, offset, size)
+			} else {
+				ctx.BindBufferBase(gl.UNIFORM_BUFFER, entry.Binding, bufID)
+			}
+
+		case gputypes.TextureViewBinding:
+			// TextureView handle is the GL texture object ID (from NativeHandle()).
+			texID := uint32(res.TextureView)
+			if texID == 0 {
+				continue
+			}
+			ctx.ActiveTexture(gl.TEXTURE0 + entry.Binding)
+			ctx.BindTexture(gl.TEXTURE_2D, texID)
+
+		case gputypes.SamplerBinding:
+			// GLES uses texture-bound sampler state, no GL sampler objects.
+		}
+	}
 }
 
 // SetVertexBufferCommand binds a vertex buffer.
@@ -562,8 +657,8 @@ type SetBlendConstantCommand struct {
 	r, g, b, a float32
 }
 
-func (c *SetBlendConstantCommand) Execute(_ *gl.Context) {
-	// ctx.BlendColor(c.r, c.g, c.b, c.a)
+func (c *SetBlendConstantCommand) Execute(ctx *gl.Context) {
+	ctx.BlendColor(c.r, c.g, c.b, c.a)
 }
 
 // SetStencilRefCommand sets stencil reference.
@@ -682,5 +777,57 @@ func compareFunctionToGL(fn gputypes.CompareFunction) uint32 {
 		return gl.ALWAYS
 	default:
 		return gl.ALWAYS
+	}
+}
+
+// blendFactorToGL converts a WebGPU blend factor to the corresponding GL constant.
+func blendFactorToGL(f gputypes.BlendFactor) uint32 {
+	switch f {
+	case gputypes.BlendFactorZero:
+		return gl.ZERO
+	case gputypes.BlendFactorOne:
+		return gl.ONE
+	case gputypes.BlendFactorSrc:
+		return gl.SRC_COLOR
+	case gputypes.BlendFactorOneMinusSrc:
+		return gl.ONE_MINUS_SRC_COLOR
+	case gputypes.BlendFactorSrcAlpha:
+		return gl.SRC_ALPHA
+	case gputypes.BlendFactorOneMinusSrcAlpha:
+		return gl.ONE_MINUS_SRC_ALPHA
+	case gputypes.BlendFactorDst:
+		return gl.DST_COLOR
+	case gputypes.BlendFactorOneMinusDst:
+		return gl.ONE_MINUS_DST_COLOR
+	case gputypes.BlendFactorDstAlpha:
+		return gl.DST_ALPHA
+	case gputypes.BlendFactorOneMinusDstAlpha:
+		return gl.ONE_MINUS_DST_ALPHA
+	case gputypes.BlendFactorSrcAlphaSaturated:
+		return gl.SRC_ALPHA_SATURATE
+	case gputypes.BlendFactorConstant:
+		return gl.CONSTANT_COLOR
+	case gputypes.BlendFactorOneMinusConstant:
+		return gl.ONE_MINUS_CONSTANT_COLOR
+	default:
+		return gl.ONE
+	}
+}
+
+// blendOperationToGL converts a WebGPU blend operation to the corresponding GL constant.
+func blendOperationToGL(op gputypes.BlendOperation) uint32 {
+	switch op {
+	case gputypes.BlendOperationAdd:
+		return gl.FUNC_ADD
+	case gputypes.BlendOperationSubtract:
+		return gl.FUNC_SUBTRACT
+	case gputypes.BlendOperationReverseSubtract:
+		return gl.FUNC_REVERSE_SUBTRACT
+	case gputypes.BlendOperationMin:
+		return gl.MIN
+	case gputypes.BlendOperationMax:
+		return gl.MAX
+	default:
+		return gl.FUNC_ADD
 	}
 }

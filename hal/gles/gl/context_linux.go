@@ -1117,6 +1117,86 @@ func (c *Context) BlendEquation(mode uint32) {
 	_ = ffi.CallFunction(&cifVoid1, c.glBlendEquation, nil, args[:])
 }
 
+// BlendEquationSeparate sets separate blend equations for RGB and alpha.
+func (c *Context) BlendEquationSeparate(modeRGB, modeAlpha uint32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&modeRGB),
+		unsafe.Pointer(&modeAlpha),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glBlendEquationSeparate, nil, args[:])
+}
+
+// BlendColor sets the constant blend color.
+func (c *Context) BlendColor(r, g, b, a float32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&r),
+		unsafe.Pointer(&g),
+		unsafe.Pointer(&b),
+		unsafe.Pointer(&a),
+	}
+	_ = ffi.CallFunction(&cifVoid4Float, c.glBlendColor, nil, args[:])
+}
+
+// --- UBO ---
+
+// BindBufferBase binds a buffer to an indexed binding point.
+func (c *Context) BindBufferBase(target, index, buffer uint32) {
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&buffer),
+	}
+	_ = ffi.CallFunction(&cifVoid3, c.glBindBufferBase, nil, args[:])
+}
+
+// BindBufferRange binds a range of a buffer to an indexed binding point.
+func (c *Context) BindBufferRange(target, index, buffer uint32, offset, size int) {
+	o := int32(offset)
+	s := int32(size)
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&o),
+		unsafe.Pointer(&s),
+	}
+	_ = ffi.CallFunction(&cifVoid5FBO, c.glBindBufferRange, nil, args[:])
+}
+
+// GetUniformBlockIndex returns the index of a named uniform block.
+func (c *Context) GetUniformBlockIndex(program uint32, name string) uint32 {
+	cname, free := cString(name)
+	defer free()
+	var result int32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&program),
+		unsafe.Pointer(cname),
+	}
+	_ = ffi.CallFunction(&cifInt322, c.glGetUniformBlockIndex, unsafe.Pointer(&result), args[:])
+	return uint32(result)
+}
+
+// UniformBlockBinding assigns a uniform block to a binding point.
+func (c *Context) UniformBlockBinding(program, blockIndex, blockBinding uint32) {
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&program),
+		unsafe.Pointer(&blockIndex),
+		unsafe.Pointer(&blockBinding),
+	}
+	_ = ffi.CallFunction(&cifVoid3, c.glUniformBlockBinding, nil, args[:])
+}
+
+// --- Uniforms ---
+
+// Uniform1i sets an integer uniform value.
+func (c *Context) Uniform1i(location, value int32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&location),
+		unsafe.Pointer(&value),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glUniform1i, nil, args[:])
+}
+
 // --- Depth/Stencil ---
 
 func (c *Context) DepthFunc(fn uint32) {

@@ -53,10 +53,11 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	d.glCtx.BindBuffer(target, 0)
 
 	buf := &Buffer{
-		id:    id,
-		size:  desc.Size,
-		usage: desc.Usage,
-		glCtx: d.glCtx,
+		id:     id,
+		target: target,
+		size:   desc.Size,
+		usage:  desc.Usage,
+		glCtx:  d.glCtx,
 	}
 
 	// Handle MappedAtCreation
@@ -361,6 +362,12 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteShader(fragmentID)
 	}
 
+	// Extract blend state from the first color target.
+	var blend *gputypes.BlendState
+	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
+		blend = desc.Fragment.Targets[0].Blend
+	}
+
 	return &RenderPipeline{
 		programID:         programID,
 		layout:            layout,
@@ -370,6 +377,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		frontFace:         desc.Primitive.FrontFace,
 		depthStencil:      desc.DepthStencil,
 		multisample:       desc.Multisample,
+		blend:             blend,
 	}, nil
 }
 
@@ -443,6 +451,7 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{
 		glCtx: d.glCtx,
+		vao:   d.vao,
 	}, nil
 }
 

@@ -66,6 +66,9 @@ const (
 	DYNAMIC_READ = 0x88E9
 	DYNAMIC_COPY = 0x88EA
 
+	// Texture units
+	TEXTURE0 = 0x84C0
+
 	// Texture targets
 	TEXTURE_2D                  = 0x0DE1
 	TEXTURE_3D                  = 0x806F

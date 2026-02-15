@@ -19,6 +19,7 @@ import (
 // Buffer implements hal.Buffer for OpenGL.
 type Buffer struct {
 	id     uint32 // GL buffer object ID
+	target uint32 // GL_ARRAY_BUFFER, GL_UNIFORM_BUFFER, etc.
 	size   uint64
 	usage  gputypes.BufferUsage
 	glCtx  *gl.Context
@@ -66,7 +67,7 @@ type TextureView struct {
 	mipCount   uint32
 	baseLayer  uint32
 	layerCount uint32
-	isSurface  bool         // true for default framebuffer (surface texture)
+	isSurface  bool            // true for default framebuffer (surface texture)
 	surfaceTex *SurfaceTexture // non-nil only when isSurface is true
 }
 
@@ -154,6 +155,9 @@ type RenderPipeline struct {
 	frontFace         gputypes.FrontFace
 	depthStencil      *hal.DepthStencilState
 	multisample       gputypes.MultisampleState
+
+	// Blend state from the first color target (nil = no blending).
+	blend *gputypes.BlendState
 }
 
 // Destroy releases the render pipeline.

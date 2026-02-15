@@ -591,6 +591,39 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	return uint32(r)
 }
 
+// --- UBO ---
+
+// BindBufferBase binds a buffer to an indexed binding point.
+func (c *Context) BindBufferBase(target, index, buffer uint32) {
+	syscall.SyscallN(c.glBindBufferBase, uintptr(target), uintptr(index), uintptr(buffer))
+}
+
+// BindBufferRange binds a range of a buffer to an indexed binding point.
+func (c *Context) BindBufferRange(target, index, buffer uint32, offset, size int) {
+	syscall.SyscallN(c.glBindBufferRange, uintptr(target), uintptr(index), uintptr(buffer),
+		uintptr(offset), uintptr(size))
+}
+
+// GetUniformBlockIndex returns the index of a named uniform block.
+func (c *Context) GetUniformBlockIndex(program uint32, name string) uint32 {
+	cname, free := cString(name)
+	defer free()
+	r, _, _ := syscall.SyscallN(c.glGetUniformBlockIndex, uintptr(program), uintptr(unsafe.Pointer(cname)))
+	return uint32(r)
+}
+
+// UniformBlockBinding assigns a uniform block to a binding point.
+func (c *Context) UniformBlockBinding(program, blockIndex, blockBinding uint32) {
+	syscall.SyscallN(c.glUniformBlockBinding, uintptr(program), uintptr(blockIndex), uintptr(blockBinding))
+}
+
+// --- Uniforms ---
+
+// Uniform1i sets an integer uniform value.
+func (c *Context) Uniform1i(location, value int32) {
+	syscall.SyscallN(c.glUniform1i, uintptr(location), uintptr(value))
+}
+
 // --- Blending ---
 
 func (c *Context) BlendFunc(sfactor, dfactor uint32) {
@@ -604,6 +637,20 @@ func (c *Context) BlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha uint32) {
 
 func (c *Context) BlendEquation(mode uint32) {
 	syscall.SyscallN(c.glBlendEquation, uintptr(mode))
+}
+
+// BlendEquationSeparate sets separate blend equations for RGB and alpha.
+func (c *Context) BlendEquationSeparate(modeRGB, modeAlpha uint32) {
+	syscall.SyscallN(c.glBlendEquationSeparate, uintptr(modeRGB), uintptr(modeAlpha))
+}
+
+// BlendColor sets the constant blend color.
+func (c *Context) BlendColor(r, g, b, a float32) {
+	syscall.SyscallN(c.glBlendColor,
+		uintptr(*(*uint32)(unsafe.Pointer(&r))),
+		uintptr(*(*uint32)(unsafe.Pointer(&g))),
+		uintptr(*(*uint32)(unsafe.Pointer(&b))),
+		uintptr(*(*uint32)(unsafe.Pointer(&a))))
 }
 
 // --- Depth/Stencil ---
