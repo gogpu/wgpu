@@ -19,16 +19,17 @@
 
 ---
 
-## Current State: v0.15.1
+## Current State: v0.16.0
 
 ✅ **All 5 HAL backends complete** (~70K LOC):
 
-**New in v0.15.1:**
-- DX12 WriteBuffer/WriteTexture fix — were no-op stubs
-- DX12 shader compilation fix (WGSL → HLSL → DXBC)
-- D3DCompile shader compiler bindings
-- Metal memory leak fix — FreeCommandBuffer was no-op (Issue #55)
-- Vulkan debug messenger — validation errors logged (Issue #53)
+**New in v0.16.0:**
+- Full GLES rendering pipeline — WGSL→GLSL shaders, VAO, FBO, MSAA, blend, stencil
+- Structured logging via `log/slog` across all backends (silent by default)
+- Vulkan MSAA render pass with automatic resolve
+- Metal SetBindGroup, WriteTexture, Fence synchronization
+- DX12 CreateBindGroup, staging descriptor heaps, BSOD fix
+- Cross-backend stability fixes (DX12, Vulkan, Metal, GLES)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -81,7 +82,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.15.1** | 2026-02 | DX12 WriteBuffer/WriteTexture fix, shader pipeline fix |
+| **v0.16.0** | 2026-02 | Full GLES pipeline, structured logging, MSAA, Metal/DX12 features |
+| v0.15.1 | 2026-02 | DX12 WriteBuffer/WriteTexture fix, shader pipeline fix |
 | v0.15.0 | 2026-02 | ReadBuffer for compute shader readback |
 | v0.14.0 | 2026-02 | Leak detection, error scopes, thread safety |
 | v0.13.x | 2026-02 | Format capabilities, render bundles, naga v0.11.1 |
