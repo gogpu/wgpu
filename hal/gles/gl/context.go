@@ -98,6 +98,10 @@ type Context struct {
 	glCheckFramebufferStatus uintptr
 	glDrawBuffers            uintptr
 
+	// Pixel read/store (GL 1.0+)
+	glReadPixels  uintptr
+	glPixelStorei uintptr
+
 	// Renderbuffers (GL 3.0+)
 	glGenRenderbuffers        uintptr
 	glDeleteRenderbuffers     uintptr
@@ -145,6 +149,10 @@ type Context struct {
 	glDispatchCompute         uintptr
 	glDispatchComputeIndirect uintptr
 	glMemoryBarrier           uintptr
+
+	// MSAA (GL 3.2+ / ES 3.1+)
+	glTexImage2DMultisample uintptr
+	glBlitFramebuffer       uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -236,6 +244,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
 
+	// Pixel read/store
+	c.glReadPixels = getProcAddr("glReadPixels")
+	c.glPixelStorei = getProcAddr("glPixelStorei")
+
 	// Renderbuffers
 	c.glGenRenderbuffers = getProcAddr("glGenRenderbuffers")
 	c.glDeleteRenderbuffers = getProcAddr("glDeleteRenderbuffers")
@@ -283,6 +295,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+
+	// MSAA (optional - may be nil on older GL versions)
+	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
+	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
 
 	return nil
 }
@@ -564,6 +580,34 @@ func (c *Context) GenerateMipmap(target uint32) {
 	syscall.SyscallN(c.glGenerateMipmap, uintptr(target))
 }
 
+// TexImage2DMultisample creates a multisample 2D texture image.
+// Requires OpenGL 3.2+ or OpenGL ES 3.1+.
+// No-op if not supported.
+func (c *Context) TexImage2DMultisample(target uint32, samples int32, internalformat uint32, width, height int32, fixedsamplelocations bool) {
+	if c.glTexImage2DMultisample == 0 {
+		return
+	}
+	var fixed uintptr
+	if fixedsamplelocations {
+		fixed = TRUE
+	}
+	syscall.SyscallN(c.glTexImage2DMultisample, uintptr(target), uintptr(samples),
+		uintptr(internalformat), uintptr(width), uintptr(height), fixed)
+}
+
+// BlitFramebuffer copies a block of pixels between framebuffers.
+// Requires OpenGL 3.0+ or OpenGL ES 3.0+.
+// No-op if not supported.
+func (c *Context) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1 int32, mask, filter uint32) {
+	if c.glBlitFramebuffer == 0 {
+		return
+	}
+	syscall.SyscallN(c.glBlitFramebuffer,
+		uintptr(srcX0), uintptr(srcY0), uintptr(srcX1), uintptr(srcY1),
+		uintptr(dstX0), uintptr(dstY0), uintptr(dstX1), uintptr(dstY1),
+		uintptr(mask), uintptr(filter))
+}
+
 // --- Framebuffers ---
 
 func (c *Context) GenFramebuffers(n int32) uint32 {
@@ -589,6 +633,19 @@ func (c *Context) FramebufferTexture2D(target, attachment, textarget, texture ui
 func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	r, _, _ := syscall.SyscallN(c.glCheckFramebufferStatus, uintptr(target))
 	return uint32(r)
+}
+
+// --- Pixel Read/Store ---
+
+// ReadPixels reads a block of pixels from the framebuffer.
+func (c *Context) ReadPixels(x, y, width, height int32, format, type_ uint32, pixels unsafe.Pointer) {
+	syscall.SyscallN(c.glReadPixels, uintptr(x), uintptr(y), uintptr(width), uintptr(height),
+		uintptr(format), uintptr(type_), uintptr(pixels))
+}
+
+// PixelStorei sets pixel storage modes that affect ReadPixels and TexImage operations.
+func (c *Context) PixelStorei(pname uint32, param int32) {
+	syscall.SyscallN(c.glPixelStorei, uintptr(pname), uintptr(param))
 }
 
 // --- UBO ---

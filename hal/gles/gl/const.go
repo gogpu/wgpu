@@ -15,14 +15,15 @@ const (
 	TRUE  = 1
 
 	// Data types
-	BYTE           = 0x1400
-	UNSIGNED_BYTE  = 0x1401
-	SHORT          = 0x1402
-	UNSIGNED_SHORT = 0x1403
-	INT            = 0x1404
-	UNSIGNED_INT   = 0x1405
-	FLOAT          = 0x1406
-	HALF_FLOAT     = 0x140B
+	BYTE              = 0x1400
+	UNSIGNED_BYTE     = 0x1401
+	SHORT             = 0x1402
+	UNSIGNED_SHORT    = 0x1403
+	INT               = 0x1404
+	UNSIGNED_INT      = 0x1405
+	FLOAT             = 0x1406
+	HALF_FLOAT        = 0x140B
+	UNSIGNED_INT_24_8 = 0x84FA
 
 	// Errors
 	NO_ERROR                      = 0
@@ -73,6 +74,7 @@ const (
 	TEXTURE_2D                  = 0x0DE1
 	TEXTURE_3D                  = 0x806F
 	TEXTURE_2D_ARRAY            = 0x8C1A
+	TEXTURE_2D_MULTISAMPLE      = 0x9100
 	TEXTURE_CUBE_MAP            = 0x8513
 	TEXTURE_CUBE_MAP_POSITIVE_X = 0x8515
 	TEXTURE_CUBE_MAP_NEGATIVE_X = 0x8516
@@ -227,6 +229,7 @@ const (
 
 	// Framebuffer
 	FRAMEBUFFER              = 0x8D40
+	FRAMEBUFFER_BINDING      = 0x8CA6
 	READ_FRAMEBUFFER         = 0x8CA8
 	DRAW_FRAMEBUFFER         = 0x8CA9
 	RENDERBUFFER             = 0x8D41
@@ -235,6 +238,10 @@ const (
 	STENCIL_ATTACHMENT       = 0x8D20
 	DEPTH_STENCIL_ATTACHMENT = 0x821A
 	FRAMEBUFFER_COMPLETE     = 0x8CD5
+
+	// Pixel storage
+	PACK_ALIGNMENT   = 0x0D05
+	UNPACK_ALIGNMENT = 0x0CF5
 
 	// Clear bits
 	COLOR_BUFFER_BIT   = 0x00004000

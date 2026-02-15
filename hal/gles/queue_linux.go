@@ -52,16 +52,31 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 }
 
 // ReadBuffer reads data from a GPU buffer into the provided byte slice.
-// It uses glMapBuffer with GL_READ_ONLY to map the buffer, copies the requested
-// range starting at offset, then unmaps the buffer.
+// If the buffer has CPU-side data (populated by CopyTextureToBuffer), it reads
+// from there directly. Otherwise it falls back to glMapBuffer with GL_READ_ONLY.
 func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
 
 	buf, ok := buffer.(*Buffer)
-	if !ok || buf.id == 0 {
+	if !ok {
 		return fmt.Errorf("gles: invalid buffer for ReadBuffer")
+	}
+
+	// If the buffer has CPU-side data (from CopyTextureToBuffer), read from it.
+	if len(buf.data) > 0 {
+		end := offset + uint64(len(data))
+		if end > uint64(len(buf.data)) {
+			return fmt.Errorf("gles: ReadBuffer offset+size (%d) exceeds buffer data length (%d)", end, len(buf.data))
+		}
+		copy(data, buf.data[offset:end])
+		return nil
+	}
+
+	// Fall back to GL buffer mapping for GPU-resident buffers.
+	if buf.id == 0 {
+		return fmt.Errorf("gles: invalid buffer for ReadBuffer (no GL ID and no CPU data)")
 	}
 
 	// Bind buffer to COPY_READ_BUFFER target (avoids disturbing other bindings)

@@ -79,6 +79,11 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	id := d.glCtx.GenTextures(1)
 
+	sampleCount := desc.SampleCount
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+
 	// Map dimension to GL target
 	target := uint32(gl.TEXTURE_2D)
 	switch desc.Dimension {
@@ -86,17 +91,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		// GL doesn't have 1D textures in ES, use 2D with height=1
 		target = gl.TEXTURE_2D
 	case gputypes.TextureDimension2D:
-		if desc.Size.DepthOrArrayLayers > 1 {
+		switch {
+		case sampleCount > 1:
+			target = gl.TEXTURE_2D_MULTISAMPLE
+		case desc.Size.DepthOrArrayLayers > 1:
 			target = gl.TEXTURE_2D_ARRAY
-		} else {
+		default:
 			target = gl.TEXTURE_2D
 		}
 	case gputypes.TextureDimension3D:
 		target = gl.TEXTURE_3D
 	}
 
-	// Handle cube maps
-	if desc.ViewFormats != nil {
+	// Handle cube maps (only for single-sample textures)
+	if sampleCount <= 1 && desc.ViewFormats != nil {
 		for _, vf := range desc.ViewFormats {
 			if vf == desc.Format {
 				// Check if this should be a cube map
@@ -114,6 +122,11 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	// Allocate texture storage
 	switch target {
+	case gl.TEXTURE_2D_MULTISAMPLE:
+		// Multisample textures use TexImage2DMultisample (no mip levels).
+		d.glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
+			int32(desc.Size.Width), int32(desc.Size.Height), true)
+
 	case gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
@@ -134,22 +147,25 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		}
 	}
 
-	// Set default texture parameters
-	d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	// Set default texture parameters (multisample textures don't support these).
+	if target != gl.TEXTURE_2D_MULTISAMPLE {
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	}
 
 	d.glCtx.BindTexture(target, 0)
 
 	return &Texture{
-		id:        id,
-		target:    target,
-		format:    desc.Format,
-		dimension: desc.Dimension,
-		size:      desc.Size,
-		mipLevels: desc.MipLevelCount,
-		glCtx:     d.glCtx,
+		id:          id,
+		target:      target,
+		format:      desc.Format,
+		dimension:   desc.Dimension,
+		size:        desc.Size,
+		mipLevels:   desc.MipLevelCount,
+		sampleCount: sampleCount,
+		glCtx:       d.glCtx,
 	}, nil
 }
 
@@ -564,7 +580,7 @@ func textureFormatToGL(format gputypes.TextureFormat) (internalFormat, dataForma
 	case gputypes.TextureFormatDepth24Plus:
 		return gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT
 	case gputypes.TextureFormatDepth24PlusStencil8:
-		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT
+		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8
 	case gputypes.TextureFormatDepth32Float:
 		return gl.DEPTH_COMPONENT32, gl.DEPTH_COMPONENT, gl.FLOAT
 	case gputypes.TextureFormatDepth32FloatStencil8:

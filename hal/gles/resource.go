@@ -24,6 +24,7 @@ type Buffer struct {
 	usage  gputypes.BufferUsage
 	glCtx  *gl.Context
 	mapped []byte // For mapped buffers
+	data   []byte // CPU-side storage for readback (populated by CopyTextureToBuffer)
 }
 
 // Destroy releases the buffer.
@@ -39,20 +40,28 @@ func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
 // Texture implements hal.Texture for OpenGL.
 type Texture struct {
-	id        uint32 // GL texture object ID
-	target    uint32 // GL_TEXTURE_2D, etc.
-	format    gputypes.TextureFormat
-	dimension gputypes.TextureDimension
-	size      hal.Extent3D
-	mipLevels uint32
-	glCtx     *gl.Context
+	id          uint32 // GL texture object ID
+	target      uint32 // GL_TEXTURE_2D, GL_TEXTURE_2D_MULTISAMPLE, etc.
+	format      gputypes.TextureFormat
+	dimension   gputypes.TextureDimension
+	size        hal.Extent3D
+	mipLevels   uint32
+	sampleCount uint32 // 1 for regular textures, >1 for MSAA
+	fbo         uint32 // GL framebuffer object ID (0 = no FBO created)
+	glCtx       *gl.Context
 }
 
-// Destroy releases the texture.
+// Destroy releases the texture and any associated framebuffer object.
 func (t *Texture) Destroy() {
-	if t.id != 0 && t.glCtx != nil {
-		t.glCtx.DeleteTextures(t.id)
-		t.id = 0
+	if t.glCtx != nil {
+		if t.fbo != 0 {
+			t.glCtx.DeleteFramebuffers(t.fbo)
+			t.fbo = 0
+		}
+		if t.id != 0 {
+			t.glCtx.DeleteTextures(t.id)
+			t.id = 0
+		}
 	}
 }
 
