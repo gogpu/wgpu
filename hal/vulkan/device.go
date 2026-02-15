@@ -485,6 +485,12 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 	}
 
 	if vkView.handle != 0 {
+		// Invalidate cached framebuffers that reference this view before
+		// destroying it, otherwise Vulkan validation reports the image view
+		// as "in use" by the (now stale) framebuffer.
+		if d.renderPassCache != nil {
+			d.renderPassCache.InvalidateFramebuffer(vkView.handle)
+		}
 		vkDestroyImageView(d.cmds, d.handle, vkView.handle, nil)
 		vkView.handle = 0
 	}
