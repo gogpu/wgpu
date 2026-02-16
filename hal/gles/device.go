@@ -538,6 +538,14 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is not supported in GLES backend.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// WaitIdle waits for all GPU work to complete.
+func (d *Device) WaitIdle() error {
+	if d.glCtx != nil {
+		d.glCtx.Finish()
+	}
+	return nil
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d.vao != 0 && d.glCtx != nil {

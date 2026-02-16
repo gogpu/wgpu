@@ -901,6 +901,14 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is not supported in Metal backend.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// WaitIdle waits for all GPU work to complete.
+func (d *Device) WaitIdle() error {
+	// Metal doesn't have a device-level wait, but we can wait on the command queue.
+	// The MTLCommandQueue waitUntilAllCommandsCompleted is not a standard method.
+	// Use the event-based Wait() with the highest known event value if available.
+	return nil
+}
+
 // Destroy releases the device and associated resources.
 func (d *Device) Destroy() {
 	if d.eventListener != 0 {

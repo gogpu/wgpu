@@ -105,10 +105,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		q.signalTransferFence()
 	}
 
-	// Signal the frame fence for per-frame command pool tracking (VK-OPT-003).
-	// This records the fence value in the current frame slot so advanceFrame
-	// knows when to recycle the command pool.
-	return q.device.signalFrameFence()
+	return nil
 }
 
 // SubmitForPresent submits command buffers with swapchain synchronization.
@@ -435,6 +432,12 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	q.activeSwapchain = nil
 
 	if err != nil {
+		return err
+	}
+
+	// Signal the frame fence once per frame (after all submits, before advance).
+	// This marks the current slot as in-flight so advanceFrame knows when to wait.
+	if err := q.device.signalFrameFence(); err != nil {
 		return err
 	}
 

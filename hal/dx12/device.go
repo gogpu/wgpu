@@ -1893,6 +1893,11 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle destroys a render bundle.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// WaitIdle waits for all GPU work to complete.
+func (d *Device) WaitIdle() error {
+	return d.waitForGPU()
+}
+
 // Destroy releases the device.
 func (d *Device) Destroy() {
 	if d == nil {

@@ -156,6 +156,7 @@ func (m *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDesc
 	return nil, fmt.Errorf("mock: render bundles not supported")
 }
 func (m *mockHALDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
+func (m *mockHALDevice) WaitIdle() error                        { return nil }
 func (m *mockHALDevice) Destroy()                               { m.destroyed = true }
 
 func TestDevice_NewDevice(t *testing.T) {

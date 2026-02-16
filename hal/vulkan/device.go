@@ -21,12 +21,13 @@ import (
 // Matches the swapchain double-buffering pattern and the DX12 backend constant.
 const maxFramesInFlight = 2
 
-// frameState tracks a per-frame command pool and fence value for one in-flight frame slot.
-// Each slot owns its own VkCommandPool so that when the GPU finishes a frame,
+// frameState tracks a per-frame command pool and fence for one in-flight frame slot.
+// Each slot owns its own VkCommandPool and VkFence. When the GPU finishes a frame,
 // all command buffers can be bulk-reset via vkResetCommandPool (VK-OPT-002).
 type frameState struct {
 	commandPool vk.CommandPool // Per-frame command pool (created with TRANSIENT_BIT)
-	fenceValue  uint64         // Fence value when this frame was submitted
+	fence       vk.Fence       // Per-slot fence (signaled when GPU finishes this frame)
+	submitted   bool           // Whether this slot has been submitted and fence is pending
 }
 
 // Device implements hal.Device for Vulkan.
@@ -48,13 +49,8 @@ type Device struct {
 	frames     [maxFramesInFlight]frameState
 	frameIndex uint64
 
-	// Frame fence for CPU/GPU overlap (VK-OPT-003).
-	// A single VkFence is used with a monotonically increasing fenceValue.
-	// Each submitted frame records its fenceValue in the frame slot.
-	// advanceFrame waits only for the specific slot's fence value.
-	frameFence vk.Fence
-	fenceValue uint64
-	fenceMu    sync.Mutex
+	// Frame fence mutex protects frameIndex and frame slot state (VK-OPT-003).
+	fenceMu sync.Mutex
 
 	// mappedMemory tracks persistently mapped VkDeviceMemory objects.
 	// Vulkan only allows one active vkMapMemory per VkDeviceMemory;
@@ -990,7 +986,7 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 // Each pool is created with TRANSIENT_BIT (short-lived buffers) and WITHOUT
 // RESET_COMMAND_BUFFER_BIT, enabling efficient bulk reset via vkResetCommandPool.
 func (d *Device) initFramePools() error {
-	// Create per-frame command pools
+	// Create per-frame command pools and fences.
 	for i := 0; i < maxFramesInFlight; i++ {
 		createInfo := vk.CommandPoolCreateInfo{
 			SType:            vk.StructureTypeCommandPoolCreateInfo,
@@ -1001,54 +997,68 @@ func (d *Device) initFramePools() error {
 		var pool vk.CommandPool
 		result := vkCreateCommandPool(d.cmds, d.handle, &createInfo, nil, &pool)
 		if result != vk.Success {
-			// Cleanup already-created pools on failure
+			// Cleanup already-created pools and fences on failure.
 			for j := 0; j < i; j++ {
 				vkDestroyCommandPool(d.cmds, d.handle, d.frames[j].commandPool, nil)
 				d.frames[j].commandPool = 0
+				if d.frames[j].fence != 0 {
+					vkDestroyFence(d.cmds, d.handle, d.frames[j].fence, nil)
+					d.frames[j].fence = 0
+				}
 			}
 			return fmt.Errorf("vulkan: vkCreateCommandPool (frame %d) failed: %d", i, result)
 		}
 		d.frames[i].commandPool = pool
-	}
 
-	// Create the frame tracking fence (unsignaled initially).
-	fenceCreateInfo := vk.FenceCreateInfo{
-		SType: vk.StructureTypeFenceCreateInfo,
-		Flags: 0,
-	}
-	var fence vk.Fence
-	result := vkCreateFence(d.cmds, d.handle, &fenceCreateInfo, nil, &fence)
-	if result != vk.Success {
-		for i := 0; i < maxFramesInFlight; i++ {
-			vkDestroyCommandPool(d.cmds, d.handle, d.frames[i].commandPool, nil)
-			d.frames[i].commandPool = 0
+		// Per-slot fence (unsignaled initially).
+		fenceCreateInfo := vk.FenceCreateInfo{
+			SType: vk.StructureTypeFenceCreateInfo,
+			Flags: 0,
 		}
-		return fmt.Errorf("vulkan: vkCreateFence (frameFence) failed: %d", result)
+		var fence vk.Fence
+		result = vkCreateFence(d.cmds, d.handle, &fenceCreateInfo, nil, &fence)
+		if result != vk.Success {
+			vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
+			d.frames[i].commandPool = 0
+			for j := 0; j < i; j++ {
+				vkDestroyCommandPool(d.cmds, d.handle, d.frames[j].commandPool, nil)
+				d.frames[j].commandPool = 0
+				if d.frames[j].fence != 0 {
+					vkDestroyFence(d.cmds, d.handle, d.frames[j].fence, nil)
+					d.frames[j].fence = 0
+				}
+			}
+			return fmt.Errorf("vulkan: vkCreateFence (frame %d) failed: %d", i, result)
+		}
+		d.frames[i].fence = fence
 	}
-	d.frameFence = fence
 
 	return nil
 }
 
 // waitForFrameSlot waits until the GPU finishes the frame occupying the given slot.
-// Returns immediately if no work was submitted for that slot (fenceValue == 0).
+// Returns immediately if no work was submitted for that slot.
 func (d *Device) waitForFrameSlot(slot uint64) error {
 	d.fenceMu.Lock()
-	target := d.frames[slot].fenceValue
+	submitted := d.frames[slot].submitted
 	d.fenceMu.Unlock()
 
-	if target == 0 {
+	if !submitted {
 		return nil // No work submitted for this slot
 	}
 
-	// The frame fence is reused: we wait, then reset it for the next submission.
-	// Wait with a generous timeout (5 seconds) — longer than any reasonable frame.
-	result := vkWaitForFences(d.cmds, d.handle, 1, &d.frameFence, vk.Bool32(vk.True), 5_000_000_000)
+	fence := d.frames[slot].fence
+	result := vkWaitForFences(d.cmds, d.handle, 1, &fence, vk.Bool32(vk.True), 5_000_000_000)
 	switch result {
 	case vk.Success:
+		// Reset the fence now that it's signaled — ready for next use.
+		vkResetFences(d.cmds, d.handle, 1, &fence)
+		d.fenceMu.Lock()
+		d.frames[slot].submitted = false
+		d.fenceMu.Unlock()
 		return nil
 	case vk.Timeout:
-		return fmt.Errorf("vulkan: frame fence wait timed out (slot=%d, value=%d)", slot, target)
+		return fmt.Errorf("vulkan: frame fence wait timed out (slot=%d)", slot)
 	case vk.ErrorDeviceLost:
 		return hal.ErrDeviceLost
 	default:
@@ -1064,14 +1074,10 @@ func (d *Device) advanceFrame() error {
 	slot := d.frameIndex % maxFramesInFlight
 
 	// Wait for the old frame that occupied this slot to finish on GPU.
+	// waitForFrameSlot also resets the fence after it's signaled.
 	if err := d.waitForFrameSlot(slot); err != nil {
 		return err
 	}
-
-	// Clear fence value for this slot.
-	d.fenceMu.Lock()
-	d.frames[slot].fenceValue = 0
-	d.fenceMu.Unlock()
 
 	// Bulk-reset the command pool for this slot.
 	// This frees all command buffers allocated from this pool at once --
@@ -1086,30 +1092,20 @@ func (d *Device) advanceFrame() error {
 	return nil
 }
 
-// signalFrameFence signals the frame fence after queue submit and records the
-// fence value in the current frame slot. This enables per-frame fence tracking --
-// advanceFrame only needs to wait for the specific slot's fence value.
+// signalFrameFence signals the current frame slot's fence via an empty queue submit.
+// The fence must be unsignaled (guaranteed by waitForFrameSlot which resets after wait).
+// advanceFrame will wait for this specific slot's fence before recycling the command pool.
 func (d *Device) signalFrameFence() error {
 	d.fenceMu.Lock()
-	d.fenceValue++
-	value := d.fenceValue
 	slot := d.frameIndex % maxFramesInFlight
-	d.frames[slot].fenceValue = value
+	d.frames[slot].submitted = true
 	d.fenceMu.Unlock()
 
-	// Reset the fence before re-signaling (Vulkan requires unsignaled fences for submit).
-	result := vkResetFences(d.cmds, d.handle, 1, &d.frameFence)
-	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkResetFences (frameFence) failed: %d", result)
-	}
-
-	// Submit the fence signal to the queue.
-	// We use an empty submit with just the fence -- this is the standard Vulkan
-	// pattern for signaling a fence from the queue (unlike DX12 which has Signal).
+	fence := d.frames[slot].fence
 	emptySubmit := vk.SubmitInfo{
 		SType: vk.StructureTypeSubmitInfo,
 	}
-	result = d.cmds.QueueSubmit(d.queue.handle, 1, &emptySubmit, d.frameFence)
+	result := d.cmds.QueueSubmit(d.queue.handle, 1, &emptySubmit, fence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: frame fence QueueSubmit failed: %d", result)
 	}
@@ -1266,10 +1262,12 @@ func (d *Device) Destroy() {
 		}
 	}
 
-	// Destroy frame tracking fence
-	if d.frameFence != 0 {
-		vkDestroyFence(d.cmds, d.handle, d.frameFence, nil)
-		d.frameFence = 0
+	// Destroy per-slot frame fences
+	for i := 0; i < maxFramesInFlight; i++ {
+		if d.frames[i].fence != 0 {
+			vkDestroyFence(d.cmds, d.handle, d.frames[i].fence, nil)
+			d.frames[i].fence = 0
+		}
 	}
 
 	if d.descriptorAllocator != nil {
@@ -1307,7 +1305,7 @@ func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.Com
 	return cmds.CreateCommandPool(device, createInfo, allocator, pool)
 }
 
-func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) {
+func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature
 	cmds.DestroyCommandPool(device, pool, allocator)
 }
 
@@ -1359,7 +1357,7 @@ func vkCreateFence(cmds *vk.Commands, device vk.Device, createInfo *vk.FenceCrea
 	return cmds.CreateFence(device, createInfo, allocator, fence)
 }
 
-func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator *vk.AllocationCallbacks) {
+func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature
 	cmds.DestroyFence(device, fence, allocator)
 }
 
