@@ -112,6 +112,20 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		familyIndex: uint32(graphicsFamily),
 	}
 
+	// Create transfer fence for WriteBuffer/ReadBuffer synchronization.
+	// This replaces vkQueueWaitIdle with targeted fence-based sync.
+	transferFenceInfo := vk.FenceCreateInfo{
+		SType: vk.StructureTypeFenceCreateInfo,
+		Flags: 0, // Not signaled initially
+	}
+	var transferFence vk.Fence
+	fenceResult := dev.cmds.CreateFence(dev.handle, &transferFenceInfo, nil, &transferFence)
+	if fenceResult != vk.Success {
+		vkDestroyDevice(device, nil)
+		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to create transfer fence: %d", fenceResult)
+	}
+	q.transferFence = transferFence
+
 	// Store queue reference in device for swapchain synchronization
 	dev.queue = q
 

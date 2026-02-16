@@ -7,23 +7,50 @@ package metal
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 )
 
+// maxFramesInFlight is the maximum number of frames the CPU can get ahead of
+// the GPU. Apple recommends 3 for smooth rendering without excessive memory use.
+// When the CPU tries to submit a frame beyond this limit, it blocks until the
+// GPU finishes an earlier frame, preventing unbounded resource growth and
+// drawable pool exhaustion.
+const maxFramesInFlight = 3
+
 // Queue implements hal.Queue for Metal.
 type Queue struct {
 	device       *Device
 	commandQueue ID // id<MTLCommandQueue>
+
+	// frameSemaphore limits CPU-ahead-of-GPU frames. Each Submit consumes a
+	// slot from the buffered channel; the GPU's addCompletedHandler callback
+	// returns the slot when the command buffer finishes execution.
+	// nil if block support is unavailable (graceful degradation).
+	frameSemaphore chan struct{}
 }
 
 // Submit submits command buffers to the GPU.
+//
+// Frame throttling: when frameSemaphore is initialized, Submit blocks until a
+// frame slot is available (at most maxFramesInFlight frames in-flight). A
+// completion handler on the last command buffer signals the semaphore when the
+// GPU finishes, releasing the slot for the next frame. This prevents unbounded
+// memory growth from queued command buffers and avoids drawable pool exhaustion.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+	// Acquire a frame slot — blocks if maxFramesInFlight frames are in-flight.
+	// This is the CPU-side throttle point.
+	if q.frameSemaphore != nil {
+		<-q.frameSemaphore
+	}
+
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
-	for _, buf := range commandBuffers {
+	lastIdx := len(commandBuffers) - 1
+	for i, buf := range commandBuffers {
 		cb, ok := buf.(*CommandBuffer)
 		if !ok || cb == nil {
 			continue
@@ -44,10 +71,41 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			_ = MsgSend(cb.raw, Sel("presentDrawable:"), uintptr(cb.drawable))
 		}
 
+		// On the last command buffer, register a completion handler to release
+		// the frame semaphore slot when the GPU finishes this batch.
+		if i == lastIdx && q.frameSemaphore != nil {
+			q.registerFrameCompletionHandler(cb.raw)
+		}
+
 		// Commit the command buffer
 		_ = MsgSend(cb.raw, Sel("commit"))
 	}
+
+	// If there were no valid command buffers but we acquired a semaphore slot,
+	// release it immediately to avoid deadlock.
+	if lastIdx < 0 && q.frameSemaphore != nil {
+		q.frameSemaphore <- struct{}{}
+	}
+
 	return nil
+}
+
+// registerFrameCompletionHandler attaches an addCompletedHandler: block to the
+// command buffer that signals frameSemaphore when the GPU finishes execution.
+func (q *Queue) registerFrameCompletionHandler(cmdBuffer ID) {
+	blockPtr := newFrameCompletionBlock(q.frameSemaphore)
+	if blockPtr == 0 {
+		// Block creation failed — release the semaphore slot immediately
+		// so the pipeline does not deadlock. This degrades gracefully to
+		// no throttling for this frame.
+		q.frameSemaphore <- struct{}{}
+		return
+	}
+
+	// addCompletedHandler: copies the block internally, so the Go-side
+	// blockLiteral can be collected after this call returns.
+	_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
+	runtime.KeepAlive(blockPtr)
 }
 
 // ReadBuffer reads data from a buffer.
@@ -86,6 +144,14 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 // Metal textures with StorageModePrivate cannot be written from the CPU directly.
 // This method creates a temporary Shared buffer, copies the pixel data into it,
 // then uses a blit command encoder to copy from the buffer into the texture.
+//
+// The staging buffer is released asynchronously via addCompletedHandler when
+// the GPU finishes the blit, avoiding a full pipeline stall. If block creation
+// fails, falls back to synchronous waitUntilCompleted + immediate Release.
+//
+// The caller's data slice is consumed synchronously — newBufferWithBytes copies
+// the bytes into the staging buffer before this method returns, so the caller
+// may reuse or free the data slice immediately.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
 	tex, ok := dst.Texture.(*Texture)
 	if !ok || tex == nil || len(data) == 0 || size == nil {
@@ -96,6 +162,8 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	defer pool.Drain()
 
 	// Create a temporary staging buffer with Shared storage mode.
+	// newBufferWithBytes copies data[] into GPU-visible memory synchronously,
+	// so the caller's slice is consumed before this method returns.
 	stagingBuffer := MsgSend(q.device.raw, Sel("newBufferWithBytes:length:options:"),
 		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(MTLStorageModeShared))
 	if stagingBuffer == 0 {
@@ -104,19 +172,22 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		)
 		return
 	}
-	defer Release(stagingBuffer)
+	// Do NOT defer Release(stagingBuffer) — it will be released either by
+	// the completion handler (async path) or explicitly (sync fallback).
 
 	// Create a one-shot command buffer for the blit operation.
 	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
 	if cmdBuffer == 0 {
+		Release(stagingBuffer)
 		hal.Logger().Warn("metal: WriteTexture command buffer creation failed")
 		return
 	}
 	Retain(cmdBuffer)
-	defer Release(cmdBuffer)
 
 	blitEncoder := MsgSend(cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
+		Release(stagingBuffer)
+		Release(cmdBuffer)
 		hal.Logger().Warn("metal: WriteTexture blit encoder creation failed")
 		return
 	}
@@ -161,11 +232,47 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 
-	// Commit and wait synchronously — WriteTexture is a blocking API.
+	// Try async path: register a completion handler to release the staging
+	// buffer when the GPU finishes the blit. This avoids a full pipeline stall
+	// that waitUntilCompleted causes (multi-ms per 4K texture).
+	blockPtr, blockID := newCompletedHandlerBlock(stagingBuffer)
+	if blockPtr != 0 {
+		// Register completion handler BEFORE commit.
+		// addCompletedHandler: retains the command buffer internally.
+		_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
+
+		// Commit — GPU will execute the blit asynchronously.
+		_ = MsgSend(cmdBuffer, Sel("commit"))
+
+		// Release our reference to the command buffer. The Metal runtime
+		// retains it until the completion handler fires.
+		Release(cmdBuffer)
+
+		// Keep the block literal alive until after commit + addCompletedHandler
+		// have consumed it. The Metal runtime copies block data during
+		// addCompletedHandler, so after this point the Go-side literal
+		// can be collected.
+		runtime.KeepAlive(blockPtr)
+		// Suppress "unused" warning — blockID is used only in the cancellation
+		// path below and runtime.KeepAlive above prevents premature GC.
+		_ = blockID
+
+		hal.Logger().Debug("metal: WriteTexture committed (async)",
+			"width", size.Width,
+			"height", size.Height,
+			"dataSize", len(data),
+			"format", tex.format,
+		)
+		return
+	}
+
+	// Fallback: block creation failed — use synchronous path.
 	_ = MsgSend(cmdBuffer, Sel("commit"))
 	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
+	Release(stagingBuffer)
+	Release(cmdBuffer)
 
-	hal.Logger().Debug("metal: WriteTexture completed",
+	hal.Logger().Debug("metal: WriteTexture completed (sync fallback)",
 		"width", size.Width,
 		"height", size.Height,
 		"dataSize", len(data),

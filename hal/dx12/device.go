@@ -22,6 +22,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// maxFramesInFlight is the number of frames that can be in-flight simultaneously.
+// Matches defaultBufferCount for swapchain double-buffering.
+const maxFramesInFlight = 2
+
+// frameState tracks allocators and fence value for one in-flight frame slot.
+type frameState struct {
+	allocators []*CommandAllocator
+	fenceValue uint64
+}
+
 // Device implements hal.Device for DirectX 12.
 // It manages the D3D12 device, command queue, descriptor heaps, and synchronization.
 type Device struct {
@@ -64,6 +74,12 @@ type Device struct {
 
 	// Debug: operation step counter for tracking which call kills the device.
 	debugStep int
+
+	// Per-frame tracking for CPU/GPU overlap (DX12-OPT-002).
+	frames         [maxFramesInFlight]frameState
+	frameIndex     uint64
+	freeAllocators []*d3d12.ID3D12CommandAllocator
+	allocatorMu    sync.Mutex
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -372,6 +388,107 @@ func (d *Device) waitForGPU() error {
 	return nil
 }
 
+// acquireAllocator gets a command allocator from the pool or creates a new one.
+// The allocator is registered with the current frame slot for lifecycle tracking.
+func (d *Device) acquireAllocator() (*CommandAllocator, error) {
+	d.allocatorMu.Lock()
+	defer d.allocatorMu.Unlock()
+
+	var raw *d3d12.ID3D12CommandAllocator
+	if len(d.freeAllocators) > 0 {
+		raw = d.freeAllocators[len(d.freeAllocators)-1]
+		d.freeAllocators = d.freeAllocators[:len(d.freeAllocators)-1]
+	} else {
+		var err error
+		raw, err = d.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
+		if err != nil {
+			return nil, fmt.Errorf("dx12: CreateCommandAllocator failed: %w", err)
+		}
+	}
+
+	alloc := &CommandAllocator{raw: raw}
+	slot := d.frameIndex % maxFramesInFlight
+	d.frames[slot].allocators = append(d.frames[slot].allocators, alloc)
+	return alloc, nil
+}
+
+// waitForFrameSlot waits until the GPU finishes the frame occupying the given slot.
+// Returns immediately if no work was submitted for that slot.
+func (d *Device) waitForFrameSlot(slot uint64) error {
+	d.fenceMu.Lock()
+	defer d.fenceMu.Unlock()
+
+	target := d.frames[slot].fenceValue
+	if target == 0 {
+		return nil
+	}
+
+	if d.fence.GetCompletedValue() >= target {
+		return nil
+	}
+
+	if err := d.fence.SetEventOnCompletion(target, uintptr(d.fenceEvent)); err != nil {
+		return fmt.Errorf("dx12: SetEventOnCompletion failed: %w", err)
+	}
+	_, err := windows.WaitForSingleObject(d.fenceEvent, windows.INFINITE)
+	if err != nil {
+		return fmt.Errorf("dx12: WaitForSingleObject failed: %w", err)
+	}
+	return nil
+}
+
+// advanceFrame increments the frame index and recycles allocators from the old frame
+// that occupied the new slot. Only waits for that specific frame — not all GPU work —
+// enabling CPU/GPU overlap.
+func (d *Device) advanceFrame() error {
+	d.frameIndex++
+	slot := d.frameIndex % maxFramesInFlight
+
+	// Wait for the old frame that occupied this slot to finish on GPU.
+	if err := d.waitForFrameSlot(slot); err != nil {
+		return err
+	}
+
+	// Clear fence value for this slot (protected by fenceMu).
+	d.fenceMu.Lock()
+	d.frames[slot].fenceValue = 0
+	d.fenceMu.Unlock()
+
+	// Reset and recycle allocators from the completed frame.
+	d.allocatorMu.Lock()
+	for _, alloc := range d.frames[slot].allocators {
+		if alloc == nil || alloc.raw == nil {
+			continue
+		}
+		if err := alloc.raw.Reset(); err != nil {
+			alloc.raw.Release()
+			continue
+		}
+		d.freeAllocators = append(d.freeAllocators, alloc.raw)
+	}
+	d.frames[slot].allocators = d.frames[slot].allocators[:0]
+	d.allocatorMu.Unlock()
+
+	return nil
+}
+
+// signalFrameFence signals the device fence from the queue and records the value
+// in the current frame slot. This enables per-frame fence tracking — advanceFrame
+// only needs to wait for the specific slot's fence value, not all GPU work.
+func (d *Device) signalFrameFence() error {
+	d.fenceMu.Lock()
+	d.fenceValue++
+	value := d.fenceValue
+	err := d.directQueue.Signal(d.fence, value)
+	d.frames[d.frameIndex%maxFramesInFlight].fenceValue = value
+	d.fenceMu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("dx12: frame fence Signal failed: %w", err)
+	}
+	return nil
+}
+
 // getOrCreateEmptyRootSignature returns a shared empty root signature for
 // pipelines that have no resource bindings (no PipelineLayout).
 // DX12 requires a valid root signature for every PSO — even with zero parameters.
@@ -450,6 +567,24 @@ func (d *Device) DrainDebugMessages() int {
 func (d *Device) cleanup() {
 	// Drain any remaining debug messages before releasing resources.
 	d.DrainDebugMessages()
+
+	// Release pooled and in-flight allocators.
+	d.allocatorMu.Lock()
+	for _, raw := range d.freeAllocators {
+		if raw != nil {
+			raw.Release()
+		}
+	}
+	d.freeAllocators = nil
+	for i := range d.frames {
+		for _, alloc := range d.frames[i].allocators {
+			if alloc != nil && alloc.raw != nil {
+				alloc.raw.Release()
+			}
+		}
+		d.frames[i].allocators = nil
+	}
+	d.allocatorMu.Unlock()
 
 	if d.infoQueue != nil {
 		d.infoQueue.Release()
@@ -1622,28 +1757,9 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 }
 
 // CreateCommandEncoder creates a command encoder.
+// The encoder is a lightweight shell — command allocator and list are created
+// lazily in BeginEncoding, enabling per-frame allocator pooling.
 func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	// Create command allocator
-	allocator, err := d.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
-	if err != nil {
-		return nil, fmt.Errorf("dx12: CreateCommandAllocator failed: %w", err)
-	}
-
-	// Create command list (starts in recording state)
-	cmdList, err := d.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nil)
-	if err != nil {
-		allocator.Release()
-		return nil, fmt.Errorf("dx12: CreateCommandList failed: %w", err)
-	}
-
-	// Command list is created in open state - close it immediately
-	// It will be reset when BeginEncoding is called
-	if err := cmdList.Close(); err != nil {
-		cmdList.Release()
-		allocator.Release()
-		return nil, fmt.Errorf("dx12: initial command list close failed: %w", err)
-	}
-
 	var label string
 	if desc != nil {
 		label = desc.Label
@@ -1651,12 +1767,7 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 
 	return &CommandEncoder{
 		device: d,
-		allocator: &CommandAllocator{
-			raw: allocator,
-		},
-		cmdList:     cmdList,
-		label:       label,
-		isRecording: false,
+		label:  label,
 	}, nil
 }
 

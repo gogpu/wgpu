@@ -21,9 +21,10 @@ import (
 
 // Device implements hal.Device for Metal.
 type Device struct {
-	raw          ID // id<MTLDevice>
-	commandQueue ID // id<MTLCommandQueue>
-	adapter      *Adapter
+	raw           ID // id<MTLDevice>
+	commandQueue  ID // id<MTLCommandQueue>
+	adapter       *Adapter
+	eventListener ID // id<MTLSharedEventListener> — created lazily, reused
 }
 
 // newDevice creates a new Device from a Metal device.
@@ -733,11 +734,37 @@ func (d *Device) DestroyFence(fence hal.Fence) {
 	mtlFence.device = nil
 }
 
-// Wait waits for a fence to reach the specified value by polling MTLSharedEvent.signaledValue.
+// getOrCreateEventListener returns a lazily-created MTLSharedEventListener.
+// The listener is allocated once per device and reused for all event notifications.
+// It is released in Destroy().
+func (d *Device) getOrCreateEventListener() ID {
+	if d.eventListener != 0 {
+		return d.eventListener
+	}
+	cls := GetClass("MTLSharedEventListener")
+	if cls == 0 {
+		return 0
+	}
+	obj := MsgSend(ID(cls), Sel("alloc"))
+	if obj == 0 {
+		return 0
+	}
+	obj = MsgSend(obj, Sel("init"))
+	if obj == 0 {
+		return 0
+	}
+	d.eventListener = obj
+	return d.eventListener
+}
+
+// Wait waits for a fence to reach the specified value.
 //
-// MTLSharedEvent.signaledValue is updated by the GPU when the event is signaled.
-// This method polls with progressive backoff (spin → yield → 1ms sleep) to
-// balance latency against CPU usage.
+// Uses Metal's MTLSharedEvent.notifyListener:atValue:block: for event-driven
+// notification when available. This avoids CPU polling and reduces latency
+// compared to the spin-yield-sleep fallback.
+//
+// Falls back to polling with progressive backoff if block infrastructure
+// is unavailable (e.g., _NSConcreteStackBlock symbol not loaded).
 func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (bool, error) {
 	mtlFence, ok := fence.(*Fence)
 	if !ok || mtlFence == nil {
@@ -750,11 +777,66 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 		return true, nil
 	}
 
-	// Poll with progressive backoff until timeout.
+	// Try event-driven path using MTLSharedEvent notification.
+	if result, err, attempted := d.waitEventDriven(mtlFence, value, timeout); attempted {
+		return result, err
+	}
+
+	// Fallback: poll with progressive backoff.
+	return d.waitPolling(mtlFence, value, timeout)
+}
+
+// waitEventDriven attempts to wait using MTLSharedEvent.notifyListener:atValue:block:.
+// Returns (result, error, true) if the event-driven path was used.
+// Returns (false, nil, false) if the path is unavailable and caller should fall back.
+func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error, bool) {
+	listener := d.getOrCreateEventListener()
+	if listener == 0 {
+		return false, nil, false
+	}
+
+	blockPtr, blockID, done := newSharedEventNotificationBlock()
+	if blockPtr == 0 {
+		return false, nil, false
+	}
+	defer releaseBlock(blockID)
+
+	// Register the notification: notifyListener:atValue:block:
+	// This tells Metal to invoke our block when signaledValue >= value.
+	msgSendVoid(mtlFence.event, Sel("notifyListener:atValue:block:"),
+		argPointer(uintptr(listener)),
+		argUint64(value),
+		argPointer(blockPtr),
+	)
+
+	// Keep block alive until notification fires or times out.
+	// The block struct is on the Go heap; runtime.KeepAlive prevents GC
+	// from collecting the underlying memory while Metal holds a reference.
+	defer runtime.KeepAlive(blockPtr)
+
+	// Wait for the callback or timeout.
+	select {
+	case <-done:
+		return true, nil, true
+	case <-time.After(timeout):
+		// Timeout — check once more in case the event fired between
+		// the select evaluation and now.
+		select {
+		case <-done:
+			return true, nil, true
+		default:
+			return false, nil, true
+		}
+	}
+}
+
+// waitPolling waits for a fence using progressive backoff polling.
+// This is the fallback path when event-driven notification is unavailable.
+func (d *Device) waitPolling(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error) {
 	deadline := time.Now().Add(timeout)
 	spins := 0
 	for {
-		signaled = MsgSendUint(mtlFence.event, Sel("signaledValue"))
+		signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
 		if uint64(signaled) >= value {
 			return true, nil
 		}
@@ -819,8 +901,12 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is not supported in Metal backend.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
-// Destroy releases the device.
+// Destroy releases the device and associated resources.
 func (d *Device) Destroy() {
+	if d.eventListener != 0 {
+		Release(d.eventListener)
+		d.eventListener = 0
+	}
 	if d.commandQueue != 0 {
 		Release(d.commandQueue)
 		d.commandQueue = 0

@@ -74,7 +74,8 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		}
 	}
 
-	return nil
+	// Signal the frame fence for per-frame allocator tracking.
+	return q.device.signalFrameFence()
 }
 
 // ReadBuffer reads data from a GPU buffer into the provided byte slice.
@@ -467,11 +468,10 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("dx12: Present failed: %w", err)
 	}
 
-	// CRITICAL: Wait for GPU to finish presenting before allowing the next frame.
-	// Without this, the next frame may start rendering to a swapchain buffer that
-	// the GPU is still presenting, causing corruption or a hang.
-	if err := q.device.waitForGPU(); err != nil {
-		return fmt.Errorf("dx12: post-present GPU sync failed: %w", err)
+	// Advance to the next frame slot. This waits only for the specific old frame
+	// occupying the next slot — not all GPU work — enabling CPU/GPU overlap.
+	if err := q.device.advanceFrame(); err != nil {
+		return fmt.Errorf("dx12: advance frame failed: %w", err)
 	}
 
 	// Drain debug messages after present.

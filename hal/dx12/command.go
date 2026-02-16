@@ -19,22 +19,17 @@ type CommandAllocator struct {
 }
 
 // CommandBuffer holds a recorded D3D12 command list.
+// Allocators are managed by Device frame tracking, not by CommandBuffer.
 type CommandBuffer struct {
-	cmdList   *d3d12.ID3D12GraphicsCommandList
-	allocator *CommandAllocator
+	cmdList *d3d12.ID3D12GraphicsCommandList
 }
 
-// Destroy releases the command buffer's COM resources.
+// Destroy releases the command buffer's command list.
 func (c *CommandBuffer) Destroy() {
 	if c.cmdList != nil {
 		c.cmdList.Release()
 		c.cmdList = nil
 	}
-	if c.allocator != nil && c.allocator.raw != nil {
-		c.allocator.raw.Release()
-		c.allocator.raw = nil
-	}
-	c.allocator = nil
 }
 
 // CommandEncoder implements hal.CommandEncoder for DirectX 12.
@@ -47,27 +42,31 @@ type CommandEncoder struct {
 }
 
 // BeginEncoding begins command recording.
+// Acquires a command allocator from the pool (already reset by advanceFrame)
+// and creates or resets the command list for recording.
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 
-	// CRITICAL: Wait for GPU to finish all pending work before resetting allocator.
-	// DX12 requires that the command allocator is not in use by the GPU when Reset()
-	// is called. Without this wait, the GPU may still be executing commands from the
-	// previous frame, and resetting the allocator frees the memory the GPU is reading
-	// from — causing a GPU hang and DPC_WATCHDOG_VIOLATION BSOD.
-	if err := e.device.waitForGPU(); err != nil {
-		return fmt.Errorf("dx12: wait for GPU before allocator reset: %w", err)
+	// Acquire a safe allocator from the pool. Allocators are reset by advanceFrame
+	// after their frame slot's fence is reached — no full GPU stall needed here.
+	alloc, err := e.device.acquireAllocator()
+	if err != nil {
+		return fmt.Errorf("dx12: acquire allocator: %w", err)
 	}
+	e.allocator = alloc
 
-	// Reset the command allocator (safe now — GPU is idle)
-	if err := e.allocator.raw.Reset(); err != nil {
-		return fmt.Errorf("dx12: command allocator reset failed: %w", err)
-	}
-
-	// Reset command list using the allocator
-	// nil for initial pipeline state - we'll set it later
-	if err := e.cmdList.Reset(e.allocator.raw, nil); err != nil {
-		return fmt.Errorf("dx12: command list reset failed: %w", err)
+	if e.cmdList == nil {
+		// First use — create command list (starts in recording state).
+		cmdList, err := e.device.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.raw, nil)
+		if err != nil {
+			return fmt.Errorf("dx12: CreateCommandList failed: %w", err)
+		}
+		e.cmdList = cmdList
+	} else {
+		// Subsequent use — reset command list with the new allocator.
+		if err := e.cmdList.Reset(alloc.raw, nil); err != nil {
+			return fmt.Errorf("dx12: command list reset failed: %w", err)
+		}
 	}
 
 	e.isRecording = true
@@ -88,8 +87,7 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	e.isRecording = false
 
 	return &CommandBuffer{
-		cmdList:   e.cmdList,
-		allocator: e.allocator,
+		cmdList: e.cmdList,
 	}, nil
 }
 

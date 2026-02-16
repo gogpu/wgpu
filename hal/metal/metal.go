@@ -73,6 +73,9 @@ func doInit() error {
 	// Pre-register common selectors for performance
 	preRegisterSelectors()
 
+	// Initialize ObjC block support for event-driven GPU synchronization
+	initBlockSupport()
+
 	hal.Logger().Info("metal: framework initialized")
 	return nil
 }
@@ -125,6 +128,7 @@ func preRegisterSelectors() {
 		"computeCommandEncoder",
 		"commit",
 		"waitUntilCompleted",
+		"addCompletedHandler:",
 		"presentDrawable:",
 		// MTLRenderCommandEncoder
 		"setRenderPipelineState:",
@@ -143,6 +147,12 @@ func preRegisterSelectors() {
 		"setFramebufferOnly:",
 		"setDrawableSize:",
 		"nextDrawable",
+		// MTLSharedEvent / MTLSharedEventListener
+		"newSharedEvent",
+		"signaledValue",
+		"setSignaledValue:",
+		"encodeSignalEvent:value:",
+		"notifyListener:atValue:block:",
 		// MTLTexture
 		"width", "height", "depth",
 		"pixelFormat", "textureType",

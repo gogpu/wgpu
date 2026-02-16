@@ -28,6 +28,17 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		commandQueue: device.commandQueue,
 	}
 
+	// Initialize frame semaphore for CPU-ahead-of-GPU throttling.
+	// Uses a buffered channel of size maxFramesInFlight pre-filled with tokens.
+	// Each Submit() consumes a token; the GPU's addCompletedHandler: returns it.
+	// If block support is unavailable, frameSemaphore stays nil (no throttling).
+	if symNSConcreteStackBlock != 0 {
+		queue.frameSemaphore = make(chan struct{}, maxFramesInFlight)
+		for i := 0; i < maxFramesInFlight; i++ {
+			queue.frameSemaphore <- struct{}{}
+		}
+	}
+
 	return hal.OpenDevice{
 		Device: device,
 		Queue:  queue,
