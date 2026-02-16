@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-02-16
+
+### Added
+
+- **`hal.Device.WaitIdle()` interface method** — Waits for all GPU work to complete before
+  resource destruction. Implemented across all backends: Vulkan (`vkDeviceWaitIdle`),
+  DX12 (`waitForGPU`), Metal (`waitUntilCompleted`), GLES (`glFinish`), noop/software (no-op).
+
+### Fixed
+
+- **Vulkan per-frame fence tracking** — Replaced single shared `frameFence` with per-slot
+  `VkFence` objects (one per frame-in-flight). Each fence is only reset after `vkWaitForFences`
+  confirms it is signaled. Fixes `vkResetFences(): pFences[0] is in use` validation error.
+  Frame fence signaling moved from `Submit()` to `Present()` to avoid fence reuse across
+  multiple submits per frame. Pattern based on Rust wgpu-hal FencePool design.
+
+- **DX12 per-frame fence tracking** — Per-frame command allocator pool with timeline fence.
+  `advanceFrame()` waits only for the specific old frame slot instead of all GPU work.
+  Eliminates two `waitForGPU()` stalls per frame (in `BeginEncoding` and `Present`).
+
+- **Metal per-frame fence tracking** — `maxFramesInFlight` semaphore (capacity 2) limits
+  CPU-ahead-of-GPU buffering. `frameCompletionHandler` signals semaphore on GPU completion.
+  Event-based `Wait()` replaces polling loop. Async `WriteTexture` via staging buffer and
+  blit encoder.
+
+- **GLES VSync on Windows** — Load `wglSwapIntervalEXT` via `wglGetProcAddress` during
+  `Surface.Configure()`. Maps `PresentMode` to swap interval: Fifo=1 (VSync on),
+  Immediate=0 (VSync off). Fixes 100% GPU usage on the GLES Windows backend.
+
 ## [0.16.2] - 2026-02-16
 
 ### Fixed
