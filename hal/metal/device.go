@@ -797,7 +797,9 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return signaled > 0, nil
 }
 
-// FreeCommandBuffer releases a submitted command buffer and its autorelease pool.
+// FreeCommandBuffer releases a submitted command buffer.
+// Autorelease pools are no longer stored in command buffers — they use scoped
+// pools that drain immediately in BeginEncoding (macOS Tahoe LIFO fix).
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	cb, ok := cmdBuffer.(*CommandBuffer)
 	if !ok || cb == nil {
@@ -806,10 +808,6 @@ func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	if cb.raw != 0 {
 		Release(cb.raw)
 		cb.raw = 0
-	}
-	if cb.pool != nil {
-		cb.pool.Drain()
-		cb.pool = nil
 	}
 }
 
