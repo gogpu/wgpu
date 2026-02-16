@@ -1367,6 +1367,6 @@ func vkWaitForFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fen
 	return cmds.WaitForFences(device, fenceCount, fences, waitAll, timeout)
 }
 
-func vkResetFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence) vk.Result {
+func vkResetFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence) vk.Result { //nolint:unparam // Vulkan API signature requires fenceCount parameter
 	return cmds.ResetFences(device, fenceCount, fences)
 }

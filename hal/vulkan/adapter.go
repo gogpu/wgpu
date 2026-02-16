@@ -253,7 +253,7 @@ func vkGetDeviceQueue(cmds *vk.Commands, device vk.Device, queueFamilyIndex, que
 	cmds.GetDeviceQueue(device, queueFamilyIndex, queueIndex, queue)
 }
 
-func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) {
+func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature requires allocator parameter
 	// Get vkDestroyDevice function pointer directly since device commands
 	// may not be available when destroying the device
 	proc := vk.GetDeviceProcAddr(device, "vkDestroyDevice")
