@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.16.1
+## Current State: v0.16.2
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.2:**
+- Metal autorelease pool LIFO fix — scoped pools instead of stored pools (fixes macOS Tahoe crash, gogpu/gogpu#83)
 
 **New in v0.16.0:**
 - Full GLES rendering pipeline — WGSL→GLSL shaders, VAO, FBO, MSAA, blend, stencil
@@ -82,7 +85,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.1** | 2026-02 | Vulkan framebuffer cache invalidation fix |
+| **v0.16.2** | 2026-02 | Metal autorelease pool LIFO fix (macOS Tahoe crash) |
+| v0.16.1 | 2026-02 | Vulkan framebuffer cache invalidation fix |
 | v0.16.0 | 2026-02 | Full GLES pipeline, structured logging, MSAA, Metal/DX12 features |
 | v0.15.1 | 2026-02 | DX12 WriteBuffer/WriteTexture fix, shader pipeline fix |
 | v0.15.0 | 2026-02 | ReadBuffer for compute shader readback |

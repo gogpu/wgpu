@@ -20,6 +20,9 @@ type Queue struct {
 
 // Submit submits command buffers to the GPU.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
 	for _, buf := range commandBuffers {
 		cb, ok := buf.(*CommandBuffer)
 		if !ok || cb == nil {

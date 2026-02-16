@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-02-16
+
+### Fixed
+
+- **Metal autorelease pool LIFO violation** — Replaced stored autorelease pools with
+  scoped pools that drain immediately within the same function. Previously, pools were
+  stored in `CommandBuffer` structs and drained asynchronously via `FencePool`, causing
+  LIFO violations when frame N+1 overlapped with frame N on the ObjC pool stack.
+  macOS Tahoe (26.2) upgraded this from a warning to fatal SIGABRT. Fix matches the
+  Rust wgpu-hal Metal backend pattern. Fixes gogpu/gogpu#83.
+
 ## [0.16.1] - 2026-02-15
 
 ### Fixed

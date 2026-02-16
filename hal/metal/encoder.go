@@ -20,7 +20,6 @@ import (
 type CommandEncoder struct {
 	device    *Device
 	cmdBuffer ID
-	pool      *AutoreleasePool
 	label     string
 }
 
@@ -37,11 +36,15 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		return fmt.Errorf("metal: encoder is already recording")
 	}
 	e.label = label
-	e.pool = NewAutoreleasePool()
+
+	// Scoped autorelease pool — drain immediately after creating the command buffer.
+	// The command buffer is Retained so it survives the pool drain.
+	// This prevents LIFO violations when pools from different frames overlap
+	// on the ObjC autorelease pool stack (macOS Tahoe SIGABRT fix).
+	pool := NewAutoreleasePool()
 	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
 	if e.cmdBuffer == 0 {
-		e.pool.Drain()
-		e.pool = nil
+		pool.Drain()
 		return fmt.Errorf("metal: failed to create command buffer")
 	}
 	Retain(e.cmdBuffer)
@@ -50,7 +53,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
 		Release(nsLabel)
 	}
-	// Recording state is now implicit: cmdBuffer != 0
+	pool.Drain()
 	return nil
 }
 
@@ -60,9 +63,8 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if e.cmdBuffer == 0 {
 		return nil, fmt.Errorf("metal: command encoder is not recording")
 	}
-	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, pool: e.pool}
+	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device}
 	e.cmdBuffer = 0 // Recording state becomes false
-	e.pool = nil
 	return cb, nil
 }
 
@@ -72,10 +74,6 @@ func (e *CommandEncoder) DiscardEncoding() {
 	if e.cmdBuffer != 0 {
 		Release(e.cmdBuffer)
 		e.cmdBuffer = 0 // Recording state becomes false
-	}
-	if e.pool != nil {
-		e.pool.Drain()
-		e.pool = nil
 	}
 }
 
@@ -97,6 +95,8 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 	if !ok || buf == nil {
 		return
 	}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
 		return
@@ -118,6 +118,8 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	if !ok || dstBuf == nil {
 		return
 	}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
 		return
@@ -142,6 +144,8 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if !ok || dstTex == nil {
 		return
 	}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
 		return
@@ -179,6 +183,8 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !ok || dstBuf == nil {
 		return
 	}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
 		return
@@ -216,6 +222,8 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	if !ok || dstTex == nil {
 		return
 	}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
 		return
@@ -245,6 +253,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	if e.cmdBuffer == 0 {
 		return nil
 	}
+	// Scoped pool: rpDesc and other autoreleased objects are only needed during
+	// encoder creation. The encoder itself is Retained to survive pool drain.
 	pool := NewAutoreleasePool()
 	rpDesc := MsgSend(ID(GetClass("MTLRenderPassDescriptor")), Sel("renderPassDescriptor"))
 	if rpDesc == 0 {
@@ -287,7 +297,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return nil
 	}
 	Retain(encoder)
-	return &RenderPassEncoder{raw: encoder, device: e.device, pool: pool}
+	pool.Drain() // drain now — encoder is Retained, rpDesc no longer needed
+	return &RenderPassEncoder{raw: encoder, device: e.device}
 }
 
 // BeginComputePass begins a compute pass.
@@ -296,6 +307,7 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	if e.cmdBuffer == 0 {
 		return nil
 	}
+	// Scoped pool: encoder is Retained to survive pool drain.
 	pool := NewAutoreleasePool()
 	encoder := MsgSend(e.cmdBuffer, Sel("computeCommandEncoder"))
 	if encoder == 0 {
@@ -308,14 +320,14 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 		_ = MsgSend(encoder, Sel("setLabel:"), uintptr(nsLabel))
 		Release(nsLabel)
 	}
-	return &ComputePassEncoder{raw: encoder, device: e.device, pool: pool}
+	pool.Drain()
+	return &ComputePassEncoder{raw: encoder, device: e.device}
 }
 
 // CommandBuffer implements hal.CommandBuffer for Metal.
 type CommandBuffer struct {
 	raw      ID
 	device   *Device
-	pool     *AutoreleasePool
 	drawable ID // Attached drawable for presentation
 }
 
@@ -324,10 +336,6 @@ func (cb *CommandBuffer) Destroy() {
 	if cb.raw != 0 {
 		Release(cb.raw)
 		cb.raw = 0
-	}
-	if cb.pool != nil {
-		cb.pool.Drain()
-		cb.pool = nil
 	}
 }
 
@@ -341,7 +349,6 @@ func (cb *CommandBuffer) SetDrawable(drawable ID) {
 type RenderPassEncoder struct {
 	raw         ID
 	device      *Device
-	pool        *AutoreleasePool
 	pipeline    *RenderPipeline
 	indexBuffer *Buffer
 	indexFormat gputypes.IndexFormat
@@ -354,10 +361,6 @@ func (e *RenderPassEncoder) End() {
 		_ = MsgSend(e.raw, Sel("endEncoding"))
 		Release(e.raw)
 		e.raw = 0
-	}
-	if e.pool != nil {
-		e.pool.Drain()
-		e.pool = nil
 	}
 }
 
@@ -517,7 +520,6 @@ func (e *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 type ComputePassEncoder struct {
 	raw      ID
 	device   *Device
-	pool     *AutoreleasePool
 	pipeline *ComputePipeline
 }
 
@@ -527,10 +529,6 @@ func (e *ComputePassEncoder) End() {
 		_ = MsgSend(e.raw, Sel("endEncoding"))
 		Release(e.raw)
 		e.raw = 0
-	}
-	if e.pool != nil {
-		e.pool.Drain()
-		e.pool = nil
 	}
 }
 
