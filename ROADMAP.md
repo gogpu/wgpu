@@ -90,7 +90,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.2** | 2026-02 | Metal autorelease pool LIFO fix (macOS Tahoe crash) |
+| **v0.16.3** | 2026-02 | Per-frame fence tracking, GLES VSync, WaitIdle interface |
+| v0.16.2 | 2026-02 | Metal autorelease pool LIFO fix (macOS Tahoe crash) |
 | v0.16.1 | 2026-02 | Vulkan framebuffer cache invalidation fix |
 | v0.16.0 | 2026-02 | Full GLES pipeline, structured logging, MSAA, Metal/DX12 features |
 | v0.15.1 | 2026-02 | DX12 WriteBuffer/WriteTexture fix, shader pipeline fix |
