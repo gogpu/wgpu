@@ -6,6 +6,8 @@
 package gles
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
@@ -82,6 +84,27 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
 	if config.Width == 0 || config.Height == 0 {
 		return hal.ErrZeroArea
+	}
+
+	// Load WGL extensions and set swap interval for VSync control.
+	// wglGetProcAddress requires a current GL context.
+	if s.wglCtx != nil {
+		wgl.LoadExtensions(s.wglCtx.HDC())
+
+		if wgl.HasSwapControl() {
+			var interval int
+			switch config.PresentMode {
+			case hal.PresentModeFifo, hal.PresentModeFifoRelaxed:
+				interval = 1 // VSync on
+			case hal.PresentModeImmediate, hal.PresentModeMailbox:
+				interval = 0 // VSync off
+			default:
+				interval = 1 // Default to VSync
+			}
+			if err := wgl.SetSwapInterval(interval); err != nil {
+				return fmt.Errorf("gles: failed to set swap interval: %w", err)
+			}
+		}
 	}
 
 	s.configured = true
