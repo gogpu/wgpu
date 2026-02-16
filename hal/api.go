@@ -178,6 +178,10 @@ type Device interface {
 	// This is used for polling completion without blocking.
 	GetFenceStatus(fence Fence) (bool, error)
 
+	// WaitIdle waits for all GPU work to complete.
+	// Call this before destroying resources to ensure the GPU is not using them.
+	WaitIdle() error
+
 	// Destroy releases the device.
 	// All resources created from this device must be destroyed first.
 	Destroy()

@@ -160,5 +160,8 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	return f.value.Load() > 0, nil
 }
 
+// WaitIdle is a no-op for the software device.
+func (d *Device) WaitIdle() error { return nil }
+
 // Destroy is a no-op for the software device.
 func (d *Device) Destroy() {}

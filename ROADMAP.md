@@ -19,9 +19,14 @@
 
 ---
 
-## Current State: v0.16.2
+## Current State: v0.16.3
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.3:**
+- Per-frame fence tracking — eliminates GPU stalls in Vulkan, DX12, Metal hot paths
+- `hal.Device.WaitIdle()` — safe GPU drain before resource destruction
+- GLES VSync via `wglSwapIntervalEXT` on Windows (fixes 100% GPU usage)
 
 **New in v0.16.2:**
 - Metal autorelease pool LIFO fix — scoped pools instead of stored pools (fixes macOS Tahoe crash, gogpu/gogpu#83)

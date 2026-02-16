@@ -8,6 +8,7 @@ package wgl
 
 import (
 	"fmt"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -34,6 +35,12 @@ var (
 	// User32.dll functions
 	procGetDC     *syscall.Proc
 	procReleaseDC *syscall.Proc
+
+	// WGL extension function pointers (loaded at runtime via wglGetProcAddress)
+	procSwapIntervalEXT  uintptr
+	procGetExtensionsARB uintptr
+	extensionsLoaded     bool
+	swapControlAvailable bool
 )
 
 // Windows types
@@ -296,6 +303,68 @@ func GetGLProcAddress(name string) uintptr {
 		return 0
 	}
 	return addr
+}
+
+// LoadExtensions loads WGL extension functions via wglGetProcAddress.
+// Must be called with a current GL context.
+func LoadExtensions(hdc HDC) {
+	if extensionsLoaded {
+		return
+	}
+	extensionsLoaded = true
+
+	procSwapIntervalEXT = GetProcAddress("wglSwapIntervalEXT")
+	procGetExtensionsARB = GetProcAddress("wglGetExtensionsStringARB")
+
+	// Check extension availability via extension string
+	ext := getExtensionsString(hdc)
+	swapControlAvailable = strings.Contains(ext, "WGL_EXT_swap_control") &&
+		procSwapIntervalEXT != 0
+}
+
+// getExtensionsString queries WGL extension string via wglGetExtensionsStringARB.
+func getExtensionsString(hdc HDC) string {
+	if procGetExtensionsARB == 0 {
+		return ""
+	}
+	r, _, _ := syscall.SyscallN(procGetExtensionsARB, uintptr(hdc))
+	if r == 0 {
+		return ""
+	}
+	// r is a pointer to a null-terminated C string
+	return goString(r)
+}
+
+// goString converts a C null-terminated string pointer to a Go string.
+func goString(p uintptr) string {
+	if p == 0 {
+		return ""
+	}
+	//nolint:govet // safe: p is a valid C string pointer from WGL syscall return
+	base := unsafe.Slice((*byte)(unsafe.Pointer(p)), 8192)
+	for i, b := range base {
+		if b == 0 {
+			return string(base[:i])
+		}
+	}
+	return string(base)
+}
+
+// SetSwapInterval sets the WGL swap interval (0=immediate, 1=vsync).
+func SetSwapInterval(interval int) error {
+	if !swapControlAvailable {
+		return fmt.Errorf("WGL_EXT_swap_control is not supported")
+	}
+	r, _, _ := syscall.SyscallN(procSwapIntervalEXT, uintptr(interval))
+	if r == 0 {
+		return fmt.Errorf("wglSwapIntervalEXT(%d) failed", interval)
+	}
+	return nil
+}
+
+// HasSwapControl returns whether WGL_EXT_swap_control is available.
+func HasSwapControl() bool {
+	return swapControlAvailable
 }
 
 // Context wraps a WGL rendering context with its device context.

@@ -112,6 +112,20 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		familyIndex: uint32(graphicsFamily),
 	}
 
+	// Create transfer fence for WriteBuffer/ReadBuffer synchronization.
+	// This replaces vkQueueWaitIdle with targeted fence-based sync.
+	transferFenceInfo := vk.FenceCreateInfo{
+		SType: vk.StructureTypeFenceCreateInfo,
+		Flags: 0, // Not signaled initially
+	}
+	var transferFence vk.Fence
+	fenceResult := dev.cmds.CreateFence(dev.handle, &transferFenceInfo, nil, &transferFence)
+	if fenceResult != vk.Success {
+		vkDestroyDevice(device, nil)
+		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to create transfer fence: %d", fenceResult)
+	}
+	q.transferFence = transferFence
+
 	// Store queue reference in device for swapchain synchronization
 	dev.queue = q
 
@@ -239,7 +253,7 @@ func vkGetDeviceQueue(cmds *vk.Commands, device vk.Device, queueFamilyIndex, que
 	cmds.GetDeviceQueue(device, queueFamilyIndex, queueIndex, queue)
 }
 
-func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) {
+func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature requires allocator parameter
 	// Get vkDestroyDevice function pointer directly since device commands
 	// may not be available when destroying the device
 	proc := vk.GetDeviceProcAddr(device, "vkDestroyDevice")

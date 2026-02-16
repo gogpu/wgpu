@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
@@ -453,4 +454,362 @@ func goStringFromCStr(cstr uintptr) string {
 	}
 	result := unsafe.Slice(ptr, length)
 	return string(result)
+}
+
+// --------------------------------------------------------------------------
+// ObjC Block ABI — Pure Go implementation
+// --------------------------------------------------------------------------
+//
+// Objective-C blocks (closures) follow a documented ABI layout:
+//
+//	struct Block_literal {
+//	    void *isa;           // &_NSConcreteStackBlock or &_NSConcreteGlobalBlock
+//	    int  flags;          // Block flags (see blockHasCopyDispose, etc.)
+//	    int  reserved;       // Always 0
+//	    void *invoke;        // Function pointer: (block_ptr, args...) -> ret
+//	    struct Block_descriptor *descriptor;
+//	    // Captured variables follow (we embed a block ID here)
+//	    uint64 blockID;      // Index into blockRegistry for Go-side state
+//	};
+//
+// The invoke function receives the block pointer as its first argument,
+// allowing us to read blockID and look up the associated Go channel.
+//
+// Reference: https://clang.llvm.org/docs/Block-ABI-Apple.html
+
+// blockLiteral is the Go representation of an ObjC Block_literal struct.
+// It matches the C ABI layout expected by the Objective-C runtime.
+//
+//nolint:unused // Fields are accessed via unsafe pointer arithmetic from C callbacks
+type blockLiteral struct {
+	isa        uintptr // Class pointer: _NSConcreteStackBlock
+	flags      int32   // Block flags
+	reserved   int32   // Reserved, always 0
+	invoke     uintptr // C function pointer for the block body
+	descriptor uintptr // Pointer to blockDescriptor
+	blockID    uint64  // Index into blockRegistry
+}
+
+// blockDescriptor is the descriptor referenced by blockLiteral.
+//
+//nolint:unused // Fields are read by the ObjC runtime
+type blockDescriptor struct {
+	reserved uint64 // Always 0
+	size     uint64 // sizeof(blockLiteral)
+}
+
+// blockRegistryEntry holds Go-side state for an active ObjC block.
+type blockRegistryEntry struct {
+	done chan struct{} // Signaled when the block is invoked
+}
+
+// blockRegistry maps block IDs to their Go-side state.
+// Entries are added when a block is created and removed after it fires or times out.
+var blockRegistry sync.Map // map[uint64]*blockRegistryEntry
+
+// blockIDCounter is the next block ID to assign. Atomically incremented.
+var blockIDCounter uint64
+
+// symNSConcreteStackBlock is the address of _NSConcreteStackBlock from libobjc.
+// Loaded during initObjCRuntime.
+var symNSConcreteStackBlock uintptr
+
+// sharedEventBlockInvoke is the ffi.NewCallback trampoline for
+// the MTLSharedEvent notification block.
+// Signature: void(^)(id<MTLSharedEvent> event, uint64_t value)
+// Block invoke: void(block_ptr, event, value)
+//
+// Initialized lazily via sync.Once to avoid calling ffi.NewCallback at init time.
+var (
+	sharedEventBlockInvokeOnce sync.Once
+	sharedEventBlockInvokePtr  uintptr
+)
+
+// sharedEventBlockDescriptor is allocated once and shared by all notification blocks.
+var sharedEventBlockDescriptor *blockDescriptor
+
+func initBlockSupport() {
+	// Load _NSConcreteStackBlock symbol from libobjc
+	if objcLib != nil {
+		sym, err := ffi.GetSymbol(objcLib, "_NSConcreteStackBlock")
+		if err == nil && sym != nil {
+			// The symbol is a pointer to the class — we need the address of the global,
+			// which is what the pointer value itself represents.
+			symNSConcreteStackBlock = *(*uintptr)(sym)
+		}
+	}
+
+	// Create shared descriptor
+	sharedEventBlockDescriptor = &blockDescriptor{
+		reserved: 0,
+		size:     uint64(unsafe.Sizeof(blockLiteral{})),
+	}
+}
+
+// getSharedEventBlockInvoke returns the C function pointer for notification block invocations.
+// The function is created once via ffi.NewCallback and reused for all blocks.
+func getSharedEventBlockInvoke() uintptr {
+	sharedEventBlockInvokeOnce.Do(func() {
+		// Block invoke signature: void (block_ptr uintptr, event uintptr, value uint64)
+		// On arm64 macOS, the block pointer is the first argument (x0),
+		// event is x1, value is x2.
+		sharedEventBlockInvokePtr = ffi.NewCallback(func(blockPtr, event uintptr, value uint64) {
+			if blockPtr == 0 {
+				return
+			}
+			// Read blockID from the block literal at the fixed offset.
+			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
+			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			if entry, ok := blockRegistry.Load(blockID); ok {
+				e := entry.(*blockRegistryEntry)
+				select {
+				case e.done <- struct{}{}:
+				default:
+					// Channel already has a value or is closed
+				}
+			}
+		})
+	})
+	return sharedEventBlockInvokePtr
+}
+
+// newSharedEventNotificationBlock creates an ObjC block for MTLSharedEvent notifications.
+// The block signals the returned channel when invoked by the GPU event system.
+//
+// The caller must call releaseBlock(id) when the block is no longer needed
+// (either after the channel is signaled or after a timeout).
+//
+// Returns (block pointer, block ID, done channel) or (0, 0, nil) on failure.
+func newSharedEventNotificationBlock() (uintptr, uint64, chan struct{}) {
+	if symNSConcreteStackBlock == 0 {
+		return 0, 0, nil
+	}
+
+	invokePtr := getSharedEventBlockInvoke()
+	if invokePtr == 0 {
+		return 0, 0, nil
+	}
+
+	// Allocate block ID and registry entry
+	id := nextBlockID()
+	done := make(chan struct{}, 1)
+	blockRegistry.Store(id, &blockRegistryEntry{done: done})
+
+	// Allocate block on Go heap — must remain alive until the callback fires.
+	block := &blockLiteral{
+		isa:        symNSConcreteStackBlock,
+		flags:      0,
+		reserved:   0,
+		invoke:     invokePtr,
+		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
+		blockID:    id,
+	}
+
+	return uintptr(unsafe.Pointer(block)), id, done
+}
+
+// releaseBlock removes the block entry from the registry.
+// Must be called after the block fires or times out to prevent memory leaks.
+func releaseBlock(id uint64) {
+	blockRegistry.Delete(id)
+}
+
+// nextBlockID atomically increments the block ID counter and returns the new value.
+func nextBlockID() uint64 {
+	return atomic.AddUint64(&blockIDCounter, 1)
+}
+
+// --------------------------------------------------------------------------
+// Completed Handler Block — async staging buffer release for WriteTexture
+// --------------------------------------------------------------------------
+//
+// addCompletedHandler: expects a block with signature:
+//   void (^)(id<MTLCommandBuffer> commandBuffer)
+// Block invoke: void(block_ptr, cmdBuffer) — 2 pointer-sized args.
+//
+// When the GPU finishes executing the command buffer, Metal invokes the
+// block. We look up the block ID and release the associated staging buffer.
+
+// completedHandlerRegistry maps block IDs to staging buffer IDs that
+// should be released when the completion handler fires.
+var completedHandlerRegistry sync.Map // map[uint64]ID
+
+// completedHandlerBlockInvoke is the ffi.NewCallback trampoline for
+// MTLCommandBuffer completion handler blocks.
+// Initialized lazily via sync.Once.
+var (
+	completedHandlerBlockInvokeOnce sync.Once
+	completedHandlerBlockInvokePtr  uintptr
+)
+
+// getCompletedHandlerBlockInvoke returns the C function pointer for completion
+// handler block invocations. Created once via ffi.NewCallback and reused.
+func getCompletedHandlerBlockInvoke() uintptr {
+	completedHandlerBlockInvokeOnce.Do(func() {
+		// Block invoke signature: void (block_ptr uintptr, cmdBuffer uintptr)
+		// On arm64: block_ptr in x0, cmdBuffer in x1.
+		// ffi.NewCallback requires uintptr return.
+		completedHandlerBlockInvokePtr = ffi.NewCallback(func(blockPtr, _ uintptr) uintptr {
+			if blockPtr == 0 {
+				return 0
+			}
+			// Read blockID from the block literal at the fixed offset.
+			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
+			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			if val, ok := completedHandlerRegistry.LoadAndDelete(blockID); ok {
+				stagingBuf := val.(ID)
+				if stagingBuf != 0 {
+					Release(stagingBuf)
+				}
+			}
+			return 0
+		})
+	})
+	return completedHandlerBlockInvokePtr
+}
+
+// newCompletedHandlerBlock creates an ObjC block for MTLCommandBuffer
+// completion handler that releases the given staging buffer when invoked.
+//
+// The block is suitable for passing to [MTLCommandBuffer addCompletedHandler:].
+// It uses the same blockLiteral layout and blockID mechanism as the shared
+// event notification blocks.
+//
+// Returns (block pointer, block ID) or (0, 0) on failure.
+// The caller must keep the returned block pointer alive (via runtime.KeepAlive)
+// until after addCompletedHandler: and commit have been called.
+//
+// If the block will not be used (e.g., fallback to sync), call
+// cancelCompletedHandlerBlock(blockID) to remove the registry entry and
+// avoid leaking the staging buffer reference.
+func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
+	if symNSConcreteStackBlock == 0 {
+		return 0, 0
+	}
+
+	invokePtr := getCompletedHandlerBlockInvoke()
+	if invokePtr == 0 {
+		return 0, 0
+	}
+
+	// Allocate block ID and register the staging buffer
+	id := nextBlockID()
+	completedHandlerRegistry.Store(id, stagingBuffer)
+
+	// Allocate block on Go heap — must remain alive until addCompletedHandler
+	// has consumed it (Metal copies the block internally).
+	block := &blockLiteral{
+		isa:        symNSConcreteStackBlock,
+		flags:      0,
+		reserved:   0,
+		invoke:     invokePtr,
+		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
+		blockID:    id,
+	}
+
+	return uintptr(unsafe.Pointer(block)), id
+}
+
+// cancelCompletedHandlerBlock removes a completed handler block entry from
+// the registry without releasing the staging buffer. Returns the staging
+// buffer ID so the caller can release it in the synchronous fallback path.
+func cancelCompletedHandlerBlock(id uint64) ID {
+	if val, ok := completedHandlerRegistry.LoadAndDelete(id); ok {
+		return val.(ID)
+	}
+	return 0
+}
+
+// --------------------------------------------------------------------------
+// Frame Completion Block — frame semaphore signaling for Submit throttling
+// --------------------------------------------------------------------------
+//
+// addCompletedHandler: expects a block with signature:
+//
+//	void (^)(id<MTLCommandBuffer> commandBuffer)
+//
+// Block invoke: void(block_ptr, cmdBuffer) — 2 pointer-sized args.
+//
+// When the GPU finishes executing the last command buffer of a Submit batch,
+// Metal invokes the block. We look up the block ID and signal the frame
+// semaphore channel, releasing a slot for the next frame.
+
+// frameCompletionRegistry maps block IDs to frame semaphore channels.
+// Entries are added in newFrameCompletionBlock and removed when the GPU
+// invokes the completion handler.
+var frameCompletionRegistry sync.Map // map[uint64]chan<- struct{}
+
+// frameCompletionBlockInvoke is the ffi.NewCallback trampoline for
+// frame completion handler blocks.
+// Initialized lazily via sync.Once.
+var (
+	frameCompletionBlockInvokeOnce sync.Once
+	frameCompletionBlockInvokePtr  uintptr
+)
+
+// getFrameCompletionBlockInvoke returns the C function pointer for frame
+// completion handler block invocations. Created once and reused.
+func getFrameCompletionBlockInvoke() uintptr {
+	frameCompletionBlockInvokeOnce.Do(func() {
+		// Block invoke signature: void (block_ptr uintptr, cmdBuffer uintptr)
+		frameCompletionBlockInvokePtr = ffi.NewCallback(func(blockPtr, _ uintptr) uintptr {
+			if blockPtr == 0 {
+				return 0
+			}
+			// Read blockID from the block literal at the fixed offset.
+			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
+			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			if val, ok := frameCompletionRegistry.LoadAndDelete(blockID); ok {
+				ch := val.(chan<- struct{})
+				if ch != nil {
+					// Signal that the GPU finished this frame — release a semaphore slot.
+					ch <- struct{}{}
+				}
+			}
+			return 0
+		})
+	})
+	return frameCompletionBlockInvokePtr
+}
+
+// newFrameCompletionBlock creates an ObjC block for MTLCommandBuffer
+// addCompletedHandler: that signals the given frame semaphore channel
+// when the GPU finishes executing the command buffer.
+//
+// Returns a block pointer suitable for passing to addCompletedHandler:,
+// or 0 if block support is unavailable.
+//
+// The caller must keep the returned pointer alive (via runtime.KeepAlive)
+// until after addCompletedHandler: has been called. Metal copies the block
+// internally, so the Go-side literal can be collected after that point.
+func newFrameCompletionBlock(frameSemaphore chan struct{}) uintptr {
+	if symNSConcreteStackBlock == 0 || frameSemaphore == nil {
+		return 0
+	}
+
+	invokePtr := getFrameCompletionBlockInvoke()
+	if invokePtr == 0 {
+		return 0
+	}
+
+	// Allocate block ID and register the semaphore channel.
+	id := nextBlockID()
+	// Store as chan<- struct{} (send-only) to match the registry type.
+	frameCompletionRegistry.Store(id, (chan<- struct{})(frameSemaphore))
+
+	// Allocate block on Go heap — must remain alive until addCompletedHandler
+	// has consumed it (Metal copies the block internally).
+	block := &blockLiteral{
+		isa:        symNSConcreteStackBlock,
+		flags:      0,
+		reserved:   0,
+		invoke:     invokePtr,
+		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
+		blockID:    id,
+	}
+
+	return uintptr(unsafe.Pointer(block))
 }

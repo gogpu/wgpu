@@ -148,5 +148,8 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is a no-op for the noop device.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// WaitIdle is a no-op for the noop device.
+func (d *Device) WaitIdle() error { return nil }
+
 // Destroy is a no-op for the noop device.
 func (d *Device) Destroy() {}
