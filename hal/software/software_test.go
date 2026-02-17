@@ -3,6 +3,7 @@
 package software
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -303,6 +304,44 @@ func TestComputePipelineNotSupported(t *testing.T) {
 		Label: "Test Compute",
 	})
 	if err == nil {
-		t.Error("Expected error for compute pipeline creation, got nil")
+		t.Fatal("expected error for compute pipeline creation, got nil")
+	}
+	if !errors.Is(err, ErrComputeNotSupported) {
+		t.Errorf("expected ErrComputeNotSupported, got: %v", err)
+	}
+}
+
+func TestComputePipelineNotSupportedNilDescriptor(t *testing.T) {
+	backend := API{}
+	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
+	defer instance.Destroy()
+
+	adapters := instance.EnumerateAdapters(nil)
+	adapter := adapters[0].Adapter
+	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
+	defer openDev.Device.Destroy()
+
+	_, err := openDev.Device.CreateComputePipeline(nil)
+	if err == nil {
+		t.Fatal("expected error for nil compute pipeline descriptor, got nil")
+	}
+	if !errors.Is(err, ErrComputeNotSupported) {
+		t.Errorf("expected ErrComputeNotSupported, got: %v", err)
+	}
+}
+
+func TestAdapterDownlevelNoCompute(t *testing.T) {
+	backend := API{}
+	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
+	defer instance.Destroy()
+
+	adapters := instance.EnumerateAdapters(nil)
+	if len(adapters) == 0 {
+		t.Fatal("no adapters found")
+	}
+
+	caps := adapters[0].Capabilities
+	if caps.DownlevelCapabilities.Flags&hal.DownlevelFlagsComputeShaders != 0 {
+		t.Error("software backend should not report compute shader support")
 	}
 }

@@ -148,6 +148,9 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	}
 }
 
+// ResolveQuerySet is a no-op (query sets not supported in software backend).
+func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
+
 // BeginRenderPass begins a render pass and returns an encoder.
 func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return &RenderPassEncoder{
