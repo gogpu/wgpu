@@ -21,6 +21,30 @@ import (
 // Matches the swapchain double-buffering pattern and the DX12 backend constant.
 const maxFramesInFlight = 2
 
+// encoderPool reuses CommandEncoder structs across CreateCommandEncoder calls.
+// Without pooling, every frame allocates a new CommandEncoder on the heap (VK-PERF-003).
+var encoderPool = sync.Pool{
+	New: func() any { return &CommandEncoder{} },
+}
+
+// cmdBufferResultPool reuses CommandBuffer structs returned by EndEncoding.
+// Without pooling, every EndEncoding allocates a new CommandBuffer on the heap (VK-PERF-004).
+var cmdBufferResultPool = sync.Pool{
+	New: func() any { return &CommandBuffer{} },
+}
+
+// computePassPool reuses ComputePassEncoder structs across BeginComputePass calls.
+// Without pooling, every compute pass allocates a new encoder on the heap (VK-PERF-005).
+var computePassPool = sync.Pool{
+	New: func() any { return &ComputePassEncoder{} },
+}
+
+// renderPassPool reuses RenderPassEncoder structs across BeginRenderPass calls.
+// Without pooling, every render pass allocates a new encoder on the heap (VK-PERF-006).
+var renderPassPool = sync.Pool{
+	New: func() any { return &RenderPassEncoder{} },
+}
+
 // frameState tracks a per-frame command pool and fence for one in-flight frame slot.
 // Each slot owns its own VkCommandPool and VkFence. When the GPU finishes a frame,
 // all command buffers can be bulk-reset via vkResetCommandPool (VK-OPT-002).
@@ -943,6 +967,7 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 // CreateCommandEncoder creates a command encoder.
 // Command buffers are allocated from the current frame slot's command pool.
 // This enables bulk reset via vkResetCommandPool when the frame is recycled.
+// Uses sync.Pool for CommandEncoder and CommandPool reuse (VK-PERF-003).
 func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	// Ensure per-frame command pools exist
 	if d.frames[0].commandPool == 0 {
@@ -969,17 +994,14 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 		return nil, fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
 	}
 
-	cmdPool := &CommandPool{
-		handle: pool,
-		device: d,
-	}
-
-	return &CommandEncoder{
-		device:    d,
-		pool:      cmdPool,
-		cmdBuffer: cmdBuffer,
-		label:     desc.Label,
-	}, nil
+	// Reuse CommandEncoder from pool (VK-PERF-003).
+	e := encoderPool.Get().(*CommandEncoder)
+	e.device = d
+	e.pool = pool
+	e.cmdBuffer = cmdBuffer
+	e.label = desc.Label
+	e.isRecording = false
+	return e, nil
 }
 
 // initFramePools creates per-frame command pools and the frame tracking fence.
@@ -1143,11 +1165,13 @@ func (d *Device) ResetCommandPool() error {
 // in advanceFrame. This method is provided for one-shot commands (e.g., WriteTexture).
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	vkCmdBuf, ok := cmdBuffer.(*CommandBuffer)
-	if !ok || vkCmdBuf.handle == 0 || vkCmdBuf.pool == nil {
+	if !ok || vkCmdBuf.handle == 0 || vkCmdBuf.pool == 0 {
 		return
 	}
-	d.cmds.FreeCommandBuffers(d.handle, vkCmdBuf.pool.handle, 1, &vkCmdBuf.handle)
+	d.cmds.FreeCommandBuffers(d.handle, vkCmdBuf.pool, 1, &vkCmdBuf.handle)
 	vkCmdBuf.handle = 0
+	vkCmdBuf.pool = 0
+	cmdBufferResultPool.Put(vkCmdBuf)
 }
 
 // CreateFence creates a synchronization fence.

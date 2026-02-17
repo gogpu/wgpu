@@ -12,31 +12,30 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// CommandPool manages command buffer allocation.
-type CommandPool struct {
-	handle vk.CommandPool
-	device *Device
-}
-
 // CommandBuffer holds a recorded Vulkan command buffer.
+// Pooled via cmdBufferResultPool to avoid per-frame heap allocation (VK-PERF-004).
 type CommandBuffer struct {
 	handle vk.CommandBuffer
-	pool   *CommandPool
+	pool   vk.CommandPool
 }
 
 // Destroy releases the command buffer resources.
+// Returns the struct to the pool for reuse (VK-PERF-004).
 func (c *CommandBuffer) Destroy() {
 	// Command buffers are freed when the pool is destroyed or reset.
 	// We cannot call vkFreeCommandBuffers here because:
 	// 1. GPU may still be using this command buffer (async submission)
 	// 2. Proper solution requires fence-based tracking or pool reset after WaitIdle
 	c.handle = 0
+	c.pool = 0
+	cmdBufferResultPool.Put(c)
 }
 
 // CommandEncoder implements hal.CommandEncoder for Vulkan.
+// Pooled via encoderPool to avoid per-frame heap allocation (VK-PERF-003).
 type CommandEncoder struct {
 	device      *Device
-	pool        *CommandPool
+	pool        vk.CommandPool
 	cmdBuffer   vk.CommandBuffer
 	label       string
 	isRecording bool
@@ -62,6 +61,8 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
+// Uses sync.Pool for CommandBuffer reuse (VK-PERF-004).
+// Returns the CommandEncoder to the pool after use.
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if !e.isRecording {
 		return nil, fmt.Errorf("vulkan: command encoder is not recording")
@@ -74,26 +75,41 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 
 	e.isRecording = false
 
-	return &CommandBuffer{
-		handle: e.cmdBuffer,
-		pool:   e.pool,
-	}, nil
+	// Reuse CommandBuffer from pool (VK-PERF-004).
+	cb := cmdBufferResultPool.Get().(*CommandBuffer)
+	cb.handle = e.cmdBuffer
+	cb.pool = e.pool
+
+	// Return encoder to pool for reuse.
+	e.device = nil
+	e.pool = 0
+	e.cmdBuffer = 0
+	e.label = ""
+	encoderPool.Put(e)
+
+	return cb, nil
 }
 
-// DiscardEncoding discards the encoder.
+// DiscardEncoding discards the encoder and returns it to the pool.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.isRecording {
 		// End the command buffer even though we're discarding it
 		_ = vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
 		e.isRecording = false
 	}
+	// Return encoder to pool for reuse.
+	e.device = nil
+	e.pool = 0
+	e.cmdBuffer = 0
+	e.label = ""
+	encoderPool.Put(e)
 }
 
 // ResetAll resets command buffers for reuse.
 func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
 	// Reset the pool instead of individual buffers for better performance
-	if e.pool != nil {
-		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool.handle, 0)
+	if e.pool != 0 {
+		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool, 0)
 	}
 	_ = commandBuffers // Individual buffers are reset with the pool
 }
@@ -428,11 +444,15 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
 // Supports MSAA render passes with resolve targets and depth/stencil attachments.
+// Uses sync.Pool for RenderPassEncoder reuse (VK-PERF-006).
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
-	rpe := &RenderPassEncoder{
-		encoder: e,
-		desc:    desc,
-	}
+	rpe := renderPassPool.Get().(*RenderPassEncoder)
+	rpe.encoder = e
+	rpe.desc = desc
+	rpe.pipeline = nil
+	rpe.indexFormat = 0
+	rpe.renderPass = 0
+	rpe.framebuffer = 0
 
 	if !e.isRecording || len(desc.ColorAttachments) == 0 {
 		return rpe
@@ -618,10 +638,12 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 }
 
 // BeginComputePass begins a compute pass.
+// Uses sync.Pool for ComputePassEncoder reuse (VK-PERF-005).
 func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	cpe := &ComputePassEncoder{
-		encoder: e,
-	}
+	cpe := computePassPool.Get().(*ComputePassEncoder)
+	cpe.encoder = e
+	cpe.pipeline = nil
+	cpe.timestampWrites = nil
 
 	// Write beginning-of-pass timestamp if requested.
 	if desc != nil && desc.TimestampWrites != nil {
@@ -655,6 +677,7 @@ type RenderPassEncoder struct {
 }
 
 // End finishes the render pass.
+// Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
 	if !e.encoder.isRecording {
 		return
@@ -663,6 +686,14 @@ func (e *RenderPassEncoder) End() {
 	// Use vkCmdEndRenderPass (VkRenderPass handles layout transitions automatically
 	// via FinalLayout in AttachmentDescription)
 	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.cmdBuffer)
+
+	// Return to pool for reuse.
+	e.encoder = nil
+	e.desc = nil
+	e.pipeline = nil
+	e.renderPass = 0
+	e.framebuffer = 0
+	renderPassPool.Put(e)
 }
 
 // SetPipeline sets the render pipeline.
@@ -701,16 +732,18 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 }
 
 // SetVertexBuffer sets a vertex buffer.
+// Uses stack variables instead of slice allocations (VK-PERF-007).
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
 
-	offsets := []vk.DeviceSize{vk.DeviceSize(offset)}
-	buffers := []vk.Buffer{buf.handle}
+	// Stack-allocated single values avoid heap allocation (VK-PERF-007).
+	vkOffset := vk.DeviceSize(offset)
+	vkBuffer := buf.handle
 
-	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.cmdBuffer, slot, 1, &buffers[0], &offsets[0])
+	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.cmdBuffer, slot, 1, &vkBuffer, &vkOffset)
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -854,6 +887,7 @@ type ComputePassEncoder struct {
 // (transfers, other dispatches, etc.). Without this barrier the GPU may
 // reorder a CopyBufferToBuffer before the compute shader has finished
 // writing, causing stale/zero reads.
+// Returns the encoder to the pool for reuse (VK-PERF-005).
 func (e *ComputePassEncoder) End() {
 	if e.encoder == nil || !e.encoder.isRecording {
 		return
@@ -891,6 +925,12 @@ func (e *ComputePassEncoder) End() {
 		0, nil,
 		0, nil,
 	)
+
+	// Return to pool for reuse.
+	e.encoder = nil
+	e.pipeline = nil
+	e.timestampWrites = nil
+	computePassPool.Put(e)
 }
 
 // SetPipeline sets the compute pipeline.
