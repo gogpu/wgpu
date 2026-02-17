@@ -1126,6 +1126,7 @@ func vkResetCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool
 	return cmds.ResetCommandPool(device, pool, flags)
 }
 
+//nolint:unparam // Vulkan API wrapper — signature mirrors vkCmdPipelineBarrier spec
 func vkCmdPipelineBarrier(cmds *vk.Commands, cmdBuffer vk.CommandBuffer,
 	srcStageMask, dstStageMask vk.PipelineStageFlags,
 	dependencyFlags vk.DependencyFlags,

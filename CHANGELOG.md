@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.4] - 2026-02-18
+
+Vulkan timeline semaphore fences, binary fence pool, hot-path allocation optimization,
+and enterprise benchmarks. Internal performance improvements — no API changes.
 
 ### Added
 
@@ -928,7 +931,10 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.4...HEAD
+[0.16.4]: https://github.com/gogpu/wgpu/compare/v0.16.3...v0.16.4
+[0.16.3]: https://github.com/gogpu/wgpu/compare/v0.16.2...v0.16.3
+[0.16.2]: https://github.com/gogpu/wgpu/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/gogpu/wgpu/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/gogpu/wgpu/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/gogpu/wgpu/compare/v0.15.0...v0.15.1

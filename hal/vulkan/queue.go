@@ -511,6 +511,7 @@ func (q *Queue) GetTimestampPeriod() float32 {
 
 // Vulkan function wrapper
 
+//nolint:unparam // Vulkan API wrapper — signature mirrors vkQueueSubmit spec
 func vkQueueSubmit(q *Queue, submitCount uint32, submits *vk.SubmitInfo, fence vk.Fence) vk.Result {
 	return q.device.cmds.QueueSubmit(q.handle, submitCount, submits, fence)
 }

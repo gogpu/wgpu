@@ -19,9 +19,18 @@
 
 ---
 
-## Current State: v0.16.3
+## Current State: v0.16.4
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.4:**
+- Vulkan timeline semaphore fence — single VkSemaphore replaces binary fence ring buffer (Vulkan 1.2+)
+- Vulkan binary fence pool — FencePool with per-submission tracking (Vulkan <1.2 fallback)
+- Vulkan command buffer batch allocation — 16 per call, free/used list recycling
+- Hot-path allocation reduction — sync.Pool for encoders, stack-allocated ClearValues
+- 44+ enterprise hot-path benchmarks with ReportAllocs()
+- Compute shader examples, docs, SDF integration test
+- naga v0.13.1 (OpArrayLength fix, −32% compiler allocations)
 
 **New in v0.16.3:**
 - Per-frame fence tracking — eliminates GPU stalls in Vulkan, DX12, Metal hot paths
@@ -93,7 +102,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.3** | 2026-02 | Per-frame fence tracking, GLES VSync, WaitIdle interface |
+| **v0.16.4** | 2026-02 | Timeline semaphore, FencePool, batch alloc, hot-path benchmarks |
+| v0.16.3 | 2026-02 | Per-frame fence tracking, GLES VSync, WaitIdle interface |
 | v0.16.2 | 2026-02 | Metal autorelease pool LIFO fix (macOS Tahoe crash) |
 | v0.16.1 | 2026-02 | Vulkan framebuffer cache invalidation fix |
 | v0.16.0 | 2026-02 | Full GLES pipeline, structured logging, MSAA, Metal/DX12 features |
