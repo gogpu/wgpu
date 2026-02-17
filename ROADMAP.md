@@ -55,7 +55,7 @@
 - [ ] Full WebGPU specification compliance
 - [ ] Compute shader support in all backends
 - [ ] API stability guarantee
-- [ ] Performance benchmarks
+- [x] Performance benchmarks — 115+ benchmarks, hot-path allocation optimization
 - [ ] Comprehensive documentation
 
 ### Future

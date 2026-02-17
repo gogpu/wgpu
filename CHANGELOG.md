@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Enterprise hot-path benchmarks** — 44+ benchmarks with `ReportAllocs()` covering Vulkan
+  Submit/Present/Encoding cycle, descriptor operations, memory allocator, noop backend overhead,
+  and cross-backend HAL interface. Table-driven sub-benchmarks for different sizes and workloads.
+- **Compute shader SDF integration test** — End-to-end GPU test: WGSL SDF shader → naga compile →
+  Vulkan compute pipeline → dispatch → ReadBuffer → CPU reference verification (256 pixels, ±0.01).
+- **Compute shader examples** — `cmd/compute-sum/` (parallel pairwise reduction) and
+  `cmd/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
+- **Timestamp queries for compute passes** — `ComputePassTimestampWrites`, `CreateQuerySet`,
+  `ResolveQuerySet` with full Vulkan implementation (`vkCmdWriteTimestamp`, `vkCmdCopyQueryPoolResults`).
+  Other backends return `ErrTimestampsNotSupported`.
+- **Software backend compute error** — `ErrComputeNotSupported` sentinel error with `errors.Is` support.
+- **Compute shader documentation** — `docs/compute-shaders.md` (getting started guide) and
+  `docs/compute-backends.md` (backend support matrix).
+
+### Changed
+
+- **Vulkan hot-path allocation reduction** — `sync.Pool` for CommandEncoder, CommandBuffer,
+  ComputePassEncoder, RenderPassEncoder. Stack-allocated `[3]vk.ClearValue` in BeginRenderPass.
+  Removed CommandPool wrapper struct. Per-frame Submit uses pooled `[]vk.CommandBuffer` slices.
+  Result: BeginEndEncoding 15→13 allocs, ComputePassBeginEnd 25→22 allocs, EncodeSubmitCycle 28→26 allocs.
+
 ## [0.16.3] - 2026-02-16
 
 ### Added
