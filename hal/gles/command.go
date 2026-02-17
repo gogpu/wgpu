@@ -146,6 +146,12 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	_ = regions
 }
 
+// ResolveQuerySet copies query results from a query set into a destination buffer.
+// TODO: implement using GL_EXT_disjoint_timer_query when query sets are supported.
+func (e *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {
+	// Stub: GLES timestamp query implementation pending.
+}
+
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{

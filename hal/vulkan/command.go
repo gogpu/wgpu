@@ -379,6 +379,52 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	)
 }
 
+// ResolveQuerySet copies query results from a query set into a destination buffer.
+// For timestamp queries, each result is a uint64 (8 bytes).
+// This uses vkCmdCopyQueryPoolResults under the hood.
+func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
+	qs, ok := querySet.(*QuerySet)
+	if !ok || qs.pool == 0 || !e.isRecording {
+		return
+	}
+	buf, ok := destination.(*Buffer)
+	if !ok || buf.handle == 0 {
+		return
+	}
+
+	// Pipeline barrier: ensure timestamps are written before copy.
+	memBarrier := vk.MemoryBarrier{
+		SType:         vk.StructureTypeMemoryBarrier,
+		SrcAccessMask: vk.AccessFlags(vk.AccessTransferWriteBit),
+		DstAccessMask: vk.AccessFlags(vk.AccessTransferReadBit),
+	}
+	vkCmdPipelineBarrier(
+		e.device.cmds,
+		e.cmdBuffer,
+		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
+		vk.PipelineStageFlags(vk.PipelineStageTransferBit),
+		0,
+		1, &memBarrier,
+		0, nil,
+		0, nil,
+	)
+
+	// Use vkCmdCopyQueryPoolResults to copy timestamp values to the buffer.
+	// Stride is 8 bytes per timestamp (uint64).
+	// Flags: VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT.
+	vkCmdCopyQueryPoolResults(
+		e.device.cmds,
+		e.cmdBuffer,
+		qs.pool,
+		firstQuery,
+		queryCount,
+		buf.handle,
+		destinationOffset,
+		8, // stride: sizeof(uint64)
+		vk.QueryResultFlags(vk.QueryResult64Bit|vk.QueryResultWaitBit),
+	)
+}
+
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
 // Supports MSAA render passes with resolve targets and depth/stencil attachments.
@@ -573,10 +619,28 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	_ = desc // Compute passes don't need Vulkan-level begin/end
-	return &ComputePassEncoder{
+	cpe := &ComputePassEncoder{
 		encoder: e,
 	}
+
+	// Write beginning-of-pass timestamp if requested.
+	if desc != nil && desc.TimestampWrites != nil {
+		cpe.timestampWrites = desc.TimestampWrites
+		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
+			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.isRecording {
+				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
+				e.device.cmds.CmdResetQueryPool(e.cmdBuffer, qs.pool, idx, 1)
+				e.device.cmds.CmdWriteTimestamp(
+					e.cmdBuffer,
+					vk.PipelineStageTopOfPipeBit,
+					qs.pool,
+					idx,
+				)
+			}
+		}
+	}
+
+	return cpe
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Vulkan.
@@ -779,18 +843,36 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Vulkan.
 type ComputePassEncoder struct {
-	encoder  *CommandEncoder
-	pipeline *ComputePipeline
+	encoder         *CommandEncoder
+	pipeline        *ComputePipeline
+	timestampWrites *hal.ComputePassTimestampWrites
 }
 
 // End finishes the compute pass.
-// Inserts a global memory barrier so compute shader writes are visible to
-// subsequent commands (transfers, other dispatches, etc.). Without this
-// barrier the GPU may reorder a CopyBufferToBuffer before the compute
-// shader has finished writing, causing stale/zero reads.
+// Writes end-of-pass timestamp if requested, then inserts a global memory
+// barrier so compute shader writes are visible to subsequent commands
+// (transfers, other dispatches, etc.). Without this barrier the GPU may
+// reorder a CopyBufferToBuffer before the compute shader has finished
+// writing, causing stale/zero reads.
 func (e *ComputePassEncoder) End() {
 	if e.encoder == nil || !e.encoder.isRecording {
 		return
+	}
+
+	// Write end-of-pass timestamp if requested.
+	if e.timestampWrites != nil {
+		if qs, ok := e.timestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
+			if e.timestampWrites.EndOfPassWriteIndex != nil {
+				idx := *e.timestampWrites.EndOfPassWriteIndex
+				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.cmdBuffer, qs.pool, idx, 1)
+				e.encoder.device.cmds.CmdWriteTimestamp(
+					e.encoder.cmdBuffer,
+					vk.PipelineStageBottomOfPipeBit,
+					qs.pool,
+					idx,
+				)
+			}
+		}
 	}
 
 	// Global memory barrier: compute writes → everything after.
@@ -1108,4 +1190,8 @@ func vkCmdDispatch(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, x, y, z uint32
 
 func vkCmdDispatchIndirect(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize) {
 	cmds.CmdDispatchIndirect(cmdBuffer, buffer, offset)
+}
+
+func vkCmdCopyQueryPoolResults(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, queryPool vk.QueryPool, firstQuery, queryCount uint32, dstBuffer vk.Buffer, dstOffset, stride uint64, flags vk.QueryResultFlags) {
+	cmds.CmdCopyQueryPoolResults(cmdBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset, stride, flags)
 }

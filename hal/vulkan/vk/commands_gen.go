@@ -2272,9 +2272,31 @@ func (c *Commands) CmdResetQueryPool(commandBuffer CommandBuffer, queryPool Quer
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32U32, c.cmdResetQueryPool, nil, args[:])
 }
 
-// TODO: CmdWriteTimestamp - signature not yet supported: void(handle, u32, handle, u32)
+// CmdWriteTimestamp wraps vkCmdWriteTimestamp.
+func (c *Commands) CmdWriteTimestamp(commandBuffer CommandBuffer, pipelineStage PipelineStageFlagBits, queryPool QueryPool, query uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&pipelineStage),
+		unsafe.Pointer(&queryPool),
+		unsafe.Pointer(&query),
+	}
+	_ = ffi.CallFunction(&SigVoidHandleU32HandleU32, c.cmdWriteTimestamp, nil, args[:])
+}
 
-// TODO: CmdCopyQueryPoolResults - signature not yet supported: void(handle, handle, u32, u32, handle, u64, u64, u32)
+// CmdCopyQueryPoolResults wraps vkCmdCopyQueryPoolResults.
+func (c *Commands) CmdCopyQueryPoolResults(commandBuffer CommandBuffer, queryPool QueryPool, firstQuery, queryCount uint32, dstBuffer Buffer, dstOffset, stride uint64, flags QueryResultFlags) {
+	args := [8]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&queryPool),
+		unsafe.Pointer(&firstQuery),
+		unsafe.Pointer(&queryCount),
+		unsafe.Pointer(&dstBuffer),
+		unsafe.Pointer(&dstOffset),
+		unsafe.Pointer(&stride),
+		unsafe.Pointer(&flags),
+	}
+	_ = ffi.CallFunction(&SigVoidCmdCopyQueryPoolResults, c.cmdCopyQueryPoolResults, nil, args[:])
+}
 
 // TODO: CmdPushConstants - signature not yet supported: void(handle, handle, u32, u32, u32, ptr)
 

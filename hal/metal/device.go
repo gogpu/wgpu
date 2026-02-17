@@ -697,6 +697,19 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 //
 // The Metal command buffer is NOT created here — it is deferred to BeginEncoding.
 // This matches the two-step pattern used by Vulkan (allocate → vkBeginCommandBuffer)
+// CreateQuerySet creates a query set.
+// TODO: implement using Metal counter sample buffers for timestamp support.
+func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, hal.ErrTimestampsNotSupported
+}
+
+// DestroyQuerySet destroys a query set.
+func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
+	// Stub: Metal query set implementation pending.
+}
+
+// CreateCommandEncoder creates a command encoder for recording GPU commands.
+//
 // and DX12 (create list → Reset). Creating the command buffer eagerly here would
 // conflict with BeginEncoding's guard (cmdBuffer != 0 → "already recording"),
 // causing every subsequent BeginEncoding call to fail and leak the pre-allocated

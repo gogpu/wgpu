@@ -92,6 +92,9 @@ var (
 	// void(handle, u32, u32, u32) - vkCmdSetStencilReference
 	SigVoidHandleU32x3 types.CallInterface
 
+	// void(handle, u32, handle, u32) - vkCmdWriteTimestamp
+	SigVoidHandleU32HandleU32 types.CallInterface
+
 	// void(handle, handle, u64, u32) - vkCmdDrawIndirect
 	SigVoidHandleHandleU64U32Count types.CallInterface
 
@@ -215,6 +218,9 @@ var (
 
 	// VkResult(handle, handle, u32, ptr, ptr, ptr) - vkCreateGraphicsPipelines, vkCreateComputePipelines
 	SigResultCreatePipelines types.CallInterface
+
+	// void(handle, handle, u32, u32, handle, u64, u64, u32) - vkCmdCopyQueryPoolResults
+	SigVoidCmdCopyQueryPoolResults types.CallInterface
 )
 
 // InitSignatures prepares all CallInterface templates.
@@ -414,6 +420,13 @@ func InitSignatures() error {
 	// void(handle, u32, u32, u32)
 	err = ffi.PrepareCallInterface(&SigVoidHandleU32x3, types.DefaultCall, voidRet,
 		[]*types.TypeDescriptor{u64, u32, u32, u32})
+	if err != nil {
+		return err
+	}
+
+	// void(handle, u32, handle, u32) for CmdWriteTimestamp
+	err = ffi.PrepareCallInterface(&SigVoidHandleU32HandleU32, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u32, u64, u32})
 	if err != nil {
 		return err
 	}
@@ -685,6 +698,13 @@ func InitSignatures() error {
 	// VkResult(handle, handle, u32, ptr, ptr, ptr) - vkCreateGraphicsPipelines
 	err = ffi.PrepareCallInterface(&SigResultCreatePipelines, types.DefaultCall, resultRet,
 		[]*types.TypeDescriptor{u64, u64, u32, ptr, ptr, ptr})
+	if err != nil {
+		return err
+	}
+
+	// void(handle, handle, u32, u32, handle, u64, u64, u32) - vkCmdCopyQueryPoolResults
+	err = ffi.PrepareCallInterface(&SigVoidCmdCopyQueryPoolResults, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u64, u32, u32, u64, u64, u64, u32})
 	if err != nil {
 		return err
 	}

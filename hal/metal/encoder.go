@@ -247,6 +247,12 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
 
+// ResolveQuerySet copies query results from a query set into a destination buffer.
+// TODO: implement using Metal counter sample buffer readback.
+func (e *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {
+	// Stub: Metal timestamp query implementation pending.
+}
+
 // BeginRenderPass begins a render pass.
 // Returns nil if encoder is not recording (cmdBuffer == 0).
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {

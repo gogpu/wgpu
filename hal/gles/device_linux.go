@@ -473,6 +473,17 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 	}
 }
 
+// CreateQuerySet creates a query set.
+// TODO: implement using GL_EXT_disjoint_timer_query for timestamp support.
+func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, hal.ErrTimestampsNotSupported
+}
+
+// DestroyQuerySet destroys a query set.
+func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
+	// Stub: GLES query set implementation pending.
+}
+
 // CreateCommandEncoder creates a command encoder.
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{

@@ -47,6 +47,9 @@ func (c *CommandEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []ha
 // CopyTextureToTexture is a no-op.
 func (c *CommandEncoder) CopyTextureToTexture(_, _ hal.Texture, _ []hal.TextureCopy) {}
 
+// ResolveQuerySet is a no-op.
+func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
+
 // BeginRenderPass returns a noop render pass encoder.
 func (c *CommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return &RenderPassEncoder{}

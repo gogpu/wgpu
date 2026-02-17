@@ -508,6 +508,29 @@ type RenderPassTimestampWrites struct {
 	EndOfPassWriteIndex *uint32
 }
 
+// QueryType specifies the type of queries in a query set.
+type QueryType uint32
+
+const (
+	// QueryTypeOcclusion counts the number of samples that pass depth/stencil tests.
+	QueryTypeOcclusion QueryType = iota
+
+	// QueryTypeTimestamp writes GPU timestamps for profiling.
+	QueryTypeTimestamp
+)
+
+// QuerySetDescriptor describes how to create a query set.
+type QuerySetDescriptor struct {
+	// Label is an optional debug name.
+	Label string
+
+	// Type is the type of queries in this set.
+	Type QueryType
+
+	// Count is the number of queries in the set.
+	Count uint32
+}
+
 // QuerySet represents a set of queries.
 type QuerySet interface {
 	Resource
