@@ -544,10 +544,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	rpe.framebuffer = framebuffer
 
-	// Prepare clear values.
-	// Order MUST match attachment order in the render pass:
-	// [0] color, [1] resolve (if present), [2] depth/stencil (if present).
-	clearValues := make([]vk.ClearValue, 0, 3)
+	// Prepare clear values on the stack (max 3: color + resolve + depth/stencil).
+	// Using a fixed-size array avoids heap allocation on this per-frame path (VK-PERF-002).
+	var clearValuesArr [3]vk.ClearValue
+	clearValues := clearValuesArr[:0]
 	clearValues = append(clearValues, vk.ClearValueColor(
 		float32(ca.ClearValue.R),
 		float32(ca.ClearValue.G),

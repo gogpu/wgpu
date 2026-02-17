@@ -108,7 +108,6 @@ func tryCreateVulkanDevice(t *testing.T) (hal.Device, hal.Queue, func()) {
 // CPU verification with tolerance.
 //
 // The test is skipped if no Vulkan GPU is available (headless CI).
-//
 func TestComputeSDFIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping GPU integration test in short mode")

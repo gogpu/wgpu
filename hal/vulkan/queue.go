@@ -13,6 +13,16 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
+// cmdBufferPool reuses slices of vk.CommandBuffer handles across Submit calls.
+// Without pooling, every Submit allocates a new []vk.CommandBuffer on the heap
+// (1-8 elements per frame at 60+ FPS = 60-480 allocations/second).
+var cmdBufferPool = sync.Pool{
+	New: func() any {
+		s := make([]vk.CommandBuffer, 0, 8)
+		return &s
+	},
+}
+
 // Queue implements hal.Queue for Vulkan.
 type Queue struct {
 	handle          vk.Queue
@@ -39,15 +49,23 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		return nil
 	}
 
-	// Convert command buffers to Vulkan handles
-	vkCmdBuffers := make([]vk.CommandBuffer, len(commandBuffers))
-	for i, cb := range commandBuffers {
+	// Convert command buffers to Vulkan handles.
+	// Use sync.Pool to avoid per-frame heap allocation (VK-PERF-001).
+	pooledSlice := cmdBufferPool.Get().(*[]vk.CommandBuffer)
+	vkCmdBuffers := (*pooledSlice)[:0]
+	for _, cb := range commandBuffers {
 		vkCB, ok := cb.(*CommandBuffer)
 		if !ok {
+			*pooledSlice = vkCmdBuffers
+			cmdBufferPool.Put(pooledSlice)
 			return fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
 		}
-		vkCmdBuffers[i] = vkCB.handle
+		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
 	}
+	defer func() {
+		*pooledSlice = vkCmdBuffers[:0]
+		cmdBufferPool.Put(pooledSlice)
+	}()
 
 	submitInfo := vk.SubmitInfo{
 		SType:              vk.StructureTypeSubmitInfo,
@@ -117,15 +135,23 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		return nil
 	}
 
-	// Convert command buffers to Vulkan handles
-	vkCmdBuffers := make([]vk.CommandBuffer, len(commandBuffers))
-	for i, cb := range commandBuffers {
+	// Convert command buffers to Vulkan handles.
+	// Use sync.Pool to avoid per-frame heap allocation (VK-PERF-001).
+	pooledSlice := cmdBufferPool.Get().(*[]vk.CommandBuffer)
+	vkCmdBuffers := (*pooledSlice)[:0]
+	for _, cb := range commandBuffers {
 		vkCB, ok := cb.(*CommandBuffer)
 		if !ok {
+			*pooledSlice = vkCmdBuffers
+			cmdBufferPool.Put(pooledSlice)
 			return fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
 		}
-		vkCmdBuffers[i] = vkCB.handle
+		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
 	}
+	defer func() {
+		*pooledSlice = vkCmdBuffers[:0]
+		cmdBufferPool.Put(pooledSlice)
+	}()
 
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 

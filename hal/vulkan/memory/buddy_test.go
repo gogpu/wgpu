@@ -461,6 +461,128 @@ func BenchmarkBuddyAllocFree(b *testing.B) {
 	}
 }
 
+// BenchmarkBuddyAllocParallel measures concurrent allocation throughput.
+// GPU memory allocation can be called from multiple goroutines in real workloads
+// (e.g., texture loading, buffer creation during scene setup).
+func BenchmarkBuddyAllocParallel(b *testing.B) {
+	b.ReportAllocs()
+	allocator, err := NewBuddyAllocator(256<<20, 256) // 256MB
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			block, err := allocator.Alloc(4096)
+			if err != nil {
+				// Allocator is full, reset and retry.
+				// In parallel benchmarks, contention may cause OOM.
+				continue
+			}
+			_ = allocator.Free(block)
+		}
+	})
+}
+
+// BenchmarkBuddyAllocVariedSizes measures allocation with varied sizes,
+// simulating real GPU workloads that mix uniform buffers (256B),
+// vertex buffers (4KB-64KB), and textures (1MB+).
+func BenchmarkBuddyAllocVariedSizes(b *testing.B) {
+	b.ReportAllocs()
+	allocator, err := NewBuddyAllocator(256<<20, 256) // 256MB
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	sizes := []uint64{256, 1024, 4096, 16384, 65536, 262144}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		size := sizes[i%len(sizes)]
+		block, err := allocator.Alloc(size)
+		if err != nil {
+			allocator.Reset()
+			block, _ = allocator.Alloc(size)
+		}
+		_ = allocator.Free(block)
+	}
+}
+
+// BenchmarkBuddyFragmentation measures allocation under fragmentation pressure.
+// Allocates many blocks, frees every other one (creating fragmentation),
+// then tries to allocate into the gaps. This simulates real GPU resource churn
+// where buffers/textures are created and destroyed in non-sequential order.
+func BenchmarkBuddyFragmentation(b *testing.B) {
+	b.ReportAllocs()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		allocator, _ := NewBuddyAllocator(1<<20, 256) // 1MB
+
+		// Phase 1: Fill with small blocks
+		blocks := make([]BuddyBlock, 0, 256)
+		for {
+			block, err := allocator.Alloc(4096)
+			if err != nil {
+				break
+			}
+			blocks = append(blocks, block)
+		}
+
+		// Phase 2: Free every other block (create fragmentation)
+		for j := 0; j < len(blocks); j += 2 {
+			_ = allocator.Free(blocks[j])
+		}
+
+		b.StartTimer()
+
+		// Phase 3: Re-allocate into gaps (measure fragmented allocation cost)
+		for j := 0; j < len(blocks)/2; j++ {
+			block, err := allocator.Alloc(4096)
+			if err != nil {
+				break
+			}
+			_ = allocator.Free(block)
+		}
+	}
+}
+
+// BenchmarkBuddyAllocSizes measures allocation speed across different block sizes.
+func BenchmarkBuddyAllocSizes(b *testing.B) {
+	sizes := []struct {
+		name string
+		size uint64
+	}{
+		{"256B", 256},
+		{"1KB", 1024},
+		{"4KB", 4096},
+		{"64KB", 65536},
+		{"1MB", 1 << 20},
+	}
+
+	for _, s := range sizes {
+		b.Run(s.name, func(b *testing.B) {
+			b.ReportAllocs()
+			allocator, err := NewBuddyAllocator(256<<20, 256)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				block, err := allocator.Alloc(s.size)
+				if err != nil {
+					allocator.Reset()
+					block, _ = allocator.Alloc(s.size)
+				}
+				_ = allocator.Free(block)
+			}
+		})
+	}
+}
+
 // Helper tests
 
 func TestIsPowerOfTwo(t *testing.T) {
