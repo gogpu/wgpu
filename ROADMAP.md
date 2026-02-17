@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.16.4
+## Current State: v0.16.5
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.5:**
+- Vulkan per-encoder command pools — dedicated VkCommandPool per encoder, eliminates VkCommandBuffer crash
 
 **New in v0.16.4:**
 - Vulkan timeline semaphore fence — single VkSemaphore replaces binary fence ring buffer (Vulkan 1.2+)

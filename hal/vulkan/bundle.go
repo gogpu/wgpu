@@ -14,6 +14,7 @@ import (
 // RenderBundle is a pre-recorded set of render commands.
 type RenderBundle struct {
 	device        *Device
+	pool          vk.CommandPool // Dedicated pool for the secondary command buffer.
 	commandBuffer vk.CommandBuffer
 }
 
@@ -27,6 +28,7 @@ func (b *RenderBundle) Destroy() {
 // RenderBundleEncoder records commands into a render bundle.
 type RenderBundleEncoder struct {
 	device        *Device
+	pool          vk.CommandPool
 	commandBuffer vk.CommandBuffer
 	pipeline      *RenderPipeline
 	finished      bool
@@ -137,25 +139,29 @@ func (e *RenderBundleEncoder) Finish() hal.RenderBundle {
 
 	return &RenderBundle{
 		device:        e.device,
+		pool:          e.pool,
 		commandBuffer: e.commandBuffer,
 	}
 }
 
 // CreateRenderBundleEncoder creates a render bundle encoder.
-// Uses the current frame slot's command pool for secondary command buffer allocation.
+// Each bundle gets its own dedicated VkCommandPool for secondary command buffer
+// allocation, matching the per-encoder pool pattern (VK-POOL-001).
 func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
-	// Ensure per-frame command pools exist
-	if d.frames[0].commandPool == 0 {
-		if err := d.initFramePools(); err != nil {
-			return nil, err
-		}
+	// Create a dedicated pool for this bundle's secondary command buffer.
+	createInfo := vk.CommandPoolCreateInfo{
+		SType:            vk.StructureTypeCommandPoolCreateInfo,
+		Flags:            vk.CommandPoolCreateFlags(vk.CommandPoolCreateTransientBit),
+		QueueFamilyIndex: d.graphicsFamily,
 	}
 
-	// Use the current frame slot's command pool
-	slot := d.frameIndex % maxFramesInFlight
-	pool := d.frames[slot].commandPool
+	var pool vk.CommandPool
+	result := vkCreateCommandPool(d.cmds, d.handle, &createInfo, nil, &pool)
+	if result != vk.Success {
+		return nil, fmt.Errorf("vulkan: vkCreateCommandPool (bundle) failed: %d", result)
+	}
 
-	// Allocate a secondary command buffer
+	// Allocate a secondary command buffer from the dedicated pool.
 	allocInfo := vk.CommandBufferAllocateInfo{
 		SType:              vk.StructureTypeCommandBufferAllocateInfo,
 		CommandPool:        pool,
@@ -164,18 +170,17 @@ func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor)
 	}
 
 	var cmdBuffer vk.CommandBuffer
-	result := d.cmds.AllocateCommandBuffers(d.handle, &allocInfo, &cmdBuffer)
+	result = d.cmds.AllocateCommandBuffers(d.handle, &allocInfo, &cmdBuffer)
 	if result != vk.Success {
+		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
 		return nil, fmt.Errorf("vulkan: failed to allocate secondary command buffer: %d", result)
 	}
 
-	// Begin the secondary command buffer with inheritance info
-	// Note: We use VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT to indicate
-	// this command buffer will be executed inside a render pass.
+	// Begin the secondary command buffer with inheritance info.
+	// VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT indicates this buffer
+	// will be executed inside a render pass.
 	inheritanceInfo := vk.CommandBufferInheritanceInfo{
 		SType: vk.StructureTypeCommandBufferInheritanceInfo,
-		// RenderPass and Framebuffer can be VK_NULL_HANDLE when using dynamic rendering
-		// or when the secondary command buffer doesn't depend on specific pass/framebuffer
 	}
 
 	beginInfo := vk.CommandBufferBeginInfo{
@@ -190,29 +195,32 @@ func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor)
 	result = d.cmds.BeginCommandBuffer(cmdBuffer, &beginInfo)
 	if result != vk.Success {
 		d.cmds.FreeCommandBuffers(d.handle, pool, 1, &cmdBuffer)
+		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
 		return nil, fmt.Errorf("vulkan: failed to begin secondary command buffer: %d", result)
 	}
 
 	return &RenderBundleEncoder{
 		device:        d,
+		pool:          pool,
 		commandBuffer: cmdBuffer,
 	}, nil
 }
 
 // DestroyRenderBundle destroys a render bundle.
+// Frees the secondary command buffer from its dedicated pool, then destroys the pool.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {
 	vkBundle, ok := bundle.(*RenderBundle)
 	if !ok || vkBundle == nil {
 		return
 	}
 
-	if vkBundle.commandBuffer != 0 {
-		// Use frame slot 0's pool for freeing -- bundles are allocated from per-frame pools.
-		// In practice, pool reset in advanceFrame handles cleanup; explicit free is a safety measure.
-		if d.frames[0].commandPool != 0 {
-			d.cmds.FreeCommandBuffers(d.handle, d.frames[0].commandPool, 1, &vkBundle.commandBuffer)
-		}
+	if vkBundle.commandBuffer != 0 && vkBundle.pool != 0 {
+		d.cmds.FreeCommandBuffers(d.handle, vkBundle.pool, 1, &vkBundle.commandBuffer)
 		vkBundle.commandBuffer = 0
+	}
+	if vkBundle.pool != 0 {
+		vkDestroyCommandPool(d.cmds, d.handle, vkBundle.pool, nil)
+		vkBundle.pool = 0
 	}
 	vkBundle.device = nil
 }

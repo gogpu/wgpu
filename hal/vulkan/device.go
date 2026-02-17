@@ -17,16 +17,21 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// maxFramesInFlight is the number of frames that can be in-flight simultaneously.
-// Matches the swapchain double-buffering pattern and the DX12 backend constant.
-const maxFramesInFlight = 2
-
-// cmdBufferAllocationGranularity is the number of command buffers allocated in
-// a single vkAllocateCommandBuffers call. Matches Rust wgpu-hal's
-// ALLOCATION_GRANULARITY. Batch allocation amortizes the per-call overhead of
-// vkAllocateCommandBuffers across multiple CreateCommandEncoder invocations
-// within the same frame (VK-IMPL-002).
-const cmdBufferAllocationGranularity = 16
+// commandAllocator pairs a VkCommandPool with a pre-allocated VkCommandBuffer.
+// Each CreateCommandEncoder gets its own dedicated pool+buffer pair. After GPU
+// completion, FreeCommandBuffer recycles the pair back to the free list for reuse.
+//
+// This design eliminates the race between per-frame bulk pool reset and individual
+// command buffer freeing that caused "Couldn't find VkCommandBuffer Object" crashes.
+// Pool reset (vkResetCommandPool flag 0) restores the command buffer to initial
+// state without destroying the handle, enabling fast recycle (VK-POOL-001).
+//
+// Reference: Rust wgpu-hal uses the same per-encoder pool pattern — each
+// CommandEncoder owns its own VkCommandPool.
+type commandAllocator struct {
+	pool      vk.CommandPool
+	cmdBuffer vk.CommandBuffer
+}
 
 // encoderPool reuses CommandEncoder structs across CreateCommandEncoder calls.
 // Without pooling, every frame allocates a new CommandEncoder on the heap (VK-PERF-003).
@@ -52,26 +57,6 @@ var renderPassPool = sync.Pool{
 	New: func() any { return &RenderPassEncoder{} },
 }
 
-// frameState tracks a per-frame command pool for one in-flight frame slot.
-// Each slot owns its own VkCommandPool. When the GPU finishes a frame,
-// all command buffers can be bulk-reset via vkResetCommandPool (VK-OPT-002).
-//
-// Command buffers are batch-allocated in groups of cmdBufferAllocationGranularity
-// to reduce vkAllocateCommandBuffers overhead (VK-IMPL-002). After pool reset
-// (flag 0), all allocated handles remain valid in initial state, so we recycle
-// them back into the free list for the next frame.
-//
-// Frame synchronization is handled by the unified deviceFence (timeline semaphore
-// or fencePool). The timelineValue records which submission value corresponds to
-// this frame slot, used by waitForFrameSlot to wait for the correct value.
-type frameState struct {
-	commandPool    vk.CommandPool     // Per-frame command pool (created with TRANSIENT_BIT)
-	submitted      bool               // Whether this slot has been submitted and is pending GPU completion
-	timelineValue  uint64             // Submission value for this frame slot (both timeline and binary paths)
-	freeCmdBuffers []vk.CommandBuffer // Available command buffers (not yet handed out)
-	usedCmdBuffers []vk.CommandBuffer // Command buffers handed out this frame (via acquireCommandBuffer)
-}
-
 // Device implements hal.Device for Vulkan.
 type Device struct {
 	handle              vk.Device
@@ -89,15 +74,13 @@ type Device struct {
 	// with a single timeline semaphore. Falls back to binary fences on older drivers.
 	timelineFence *deviceFence
 
-	// Per-frame command pool ring buffer (VK-OPT-002).
-	// Each slot has its own VkCommandPool created with TRANSIENT_BIT (no per-buffer reset).
-	// When a frame slot is recycled in advanceFrame, we bulk-reset the pool via
-	// vkResetCommandPool — much faster than individual vkResetCommandBuffer calls.
-	frames     [maxFramesInFlight]frameState
-	frameIndex uint64
-
-	// Frame fence mutex protects frameIndex and frame slot state (VK-OPT-003).
-	fenceMu sync.Mutex
+	// Per-encoder command pool recycling (VK-POOL-001).
+	// Each CreateCommandEncoder gets a dedicated VkCommandPool + VkCommandBuffer pair.
+	// After GPU completion, FreeCommandBuffer recycles the pair for reuse.
+	// This eliminates the race between per-frame pool reset and individual buffer freeing
+	// that caused "Couldn't find VkCommandBuffer Object" crashes.
+	freeAllocators []commandAllocator
+	allocatorMu    sync.Mutex // protects freeAllocators
 
 	// mappedMemory tracks persistently mapped VkDeviceMemory objects.
 	// Vulkan only allows one active vkMapMemory per VkDeviceMemory;
@@ -987,67 +970,74 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 	vkModule.device = nil
 }
 
-// acquireCommandBuffer returns a command buffer from the current frame slot.
-// If the free list is empty, a batch of cmdBufferAllocationGranularity buffers
-// is allocated from the slot's command pool. The first buffer from the batch is
-// returned and the rest are added to the free list (VK-IMPL-002).
-func (d *Device) acquireCommandBuffer(slot uint64) (vk.CommandBuffer, error) {
-	frame := &d.frames[slot]
+// acquireAllocator returns a command allocator (pool+buffer pair) for a new encoder.
+// If the free list has a recycled pair, it pops one and resets its pool.
+// Otherwise, it creates a new VkCommandPool with TRANSIENT_BIT and allocates
+// a single primary command buffer from it (VK-POOL-001).
+func (d *Device) acquireAllocator() (commandAllocator, error) {
+	d.allocatorMu.Lock()
+	if n := len(d.freeAllocators); n > 0 {
+		alloc := d.freeAllocators[n-1]
+		d.freeAllocators = d.freeAllocators[:n-1]
+		d.allocatorMu.Unlock()
 
-	// Pop from free list if available.
-	if n := len(frame.freeCmdBuffers); n > 0 {
-		cb := frame.freeCmdBuffers[n-1]
-		frame.freeCmdBuffers = frame.freeCmdBuffers[:n-1]
-		frame.usedCmdBuffers = append(frame.usedCmdBuffers, cb)
-		return cb, nil
+		// Reset the pool: restores the command buffer to initial state
+		// without destroying its handle (flag 0). This is faster than
+		// vkFreeCommandBuffers + vkAllocateCommandBuffers.
+		result := d.cmds.ResetCommandPool(d.handle, alloc.pool, 0)
+		if result != vk.Success {
+			return commandAllocator{}, fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
+		}
+		return alloc, nil
+	}
+	d.allocatorMu.Unlock()
+
+	// Create a new dedicated pool with TRANSIENT_BIT (short-lived buffers).
+	createInfo := vk.CommandPoolCreateInfo{
+		SType:            vk.StructureTypeCommandPoolCreateInfo,
+		Flags:            vk.CommandPoolCreateFlags(vk.CommandPoolCreateTransientBit),
+		QueueFamilyIndex: d.graphicsFamily,
 	}
 
-	// Batch allocate a new group of command buffers.
-	var batch [cmdBufferAllocationGranularity]vk.CommandBuffer
+	var pool vk.CommandPool
+	result := vkCreateCommandPool(d.cmds, d.handle, &createInfo, nil, &pool)
+	if result != vk.Success {
+		return commandAllocator{}, fmt.Errorf("vulkan: vkCreateCommandPool failed: %d", result)
+	}
+
+	// Allocate a single primary command buffer from the new pool.
 	allocInfo := vk.CommandBufferAllocateInfo{
 		SType:              vk.StructureTypeCommandBufferAllocateInfo,
-		CommandPool:        frame.commandPool,
+		CommandPool:        pool,
 		Level:              vk.CommandBufferLevelPrimary,
-		CommandBufferCount: cmdBufferAllocationGranularity,
+		CommandBufferCount: 1,
 	}
 
-	result := vkAllocateCommandBuffers(d.cmds, d.handle, &allocInfo, &batch[0])
+	var cmdBuffer vk.CommandBuffer
+	result = vkAllocateCommandBuffers(d.cmds, d.handle, &allocInfo, &cmdBuffer)
 	if result != vk.Success {
-		return 0, fmt.Errorf("vulkan: batch vkAllocateCommandBuffers failed: %d", result)
+		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
+		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
 	}
 
-	// Store batch[1:] in the free list; return batch[0] immediately.
-	frame.freeCmdBuffers = append(frame.freeCmdBuffers, batch[1:]...)
-	frame.usedCmdBuffers = append(frame.usedCmdBuffers, batch[0])
-	return batch[0], nil
+	return commandAllocator{pool: pool, cmdBuffer: cmdBuffer}, nil
 }
 
-// recycleCommandBuffers moves all used command buffers back to the free list.
-// Called after vkResetCommandPool (flag 0), which puts all allocated buffers
-// back into the initial state without invalidating their handles (VK-IMPL-002).
-func (d *Device) recycleCommandBuffers(slot uint64) {
-	frame := &d.frames[slot]
-	frame.freeCmdBuffers = append(frame.freeCmdBuffers, frame.usedCmdBuffers...)
-	frame.usedCmdBuffers = frame.usedCmdBuffers[:0]
+// recycleAllocator returns a command allocator back to the free list for reuse.
+// The pool is NOT reset here — it will be reset lazily in the next acquireAllocator call.
+func (d *Device) recycleAllocator(alloc commandAllocator) {
+	d.allocatorMu.Lock()
+	d.freeAllocators = append(d.freeAllocators, alloc)
+	d.allocatorMu.Unlock()
 }
 
-// CreateCommandEncoder creates a command encoder.
-// Command buffers are acquired from the current frame slot's batch-allocated
-// free list, reducing vkAllocateCommandBuffers overhead (VK-IMPL-002).
+// CreateCommandEncoder creates a command encoder with its own dedicated
+// VkCommandPool + VkCommandBuffer pair. This per-encoder pool design matches
+// Rust wgpu-hal and eliminates races between pool reset and buffer freeing
+// that caused "Couldn't find VkCommandBuffer Object" crashes (VK-POOL-001).
 // Uses sync.Pool for CommandEncoder struct reuse (VK-PERF-003).
 func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	// Ensure per-frame command pools exist
-	if d.frames[0].commandPool == 0 {
-		if err := d.initFramePools(); err != nil {
-			return nil, err
-		}
-	}
-
-	// Use the current frame slot's command pool
-	slot := d.frameIndex % maxFramesInFlight
-
-	// Acquire a command buffer from the batch-allocated free list.
-	cmdBuffer, err := d.acquireCommandBuffer(slot)
+	alloc, err := d.acquireAllocator()
 	if err != nil {
 		return nil, err
 	}
@@ -1055,141 +1045,11 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 	// Reuse CommandEncoder from pool (VK-PERF-003).
 	e := encoderPool.Get().(*CommandEncoder)
 	e.device = d
-	e.pool = d.frames[slot].commandPool
-	e.cmdBuffer = cmdBuffer
+	e.pool = alloc.pool
+	e.cmdBuffer = alloc.cmdBuffer
 	e.label = desc.Label
 	e.isRecording = false
 	return e, nil
-}
-
-// initFramePools creates per-frame command pools.
-// Each pool is created with TRANSIENT_BIT (short-lived buffers) and WITHOUT
-// RESET_COMMAND_BUFFER_BIT, enabling efficient bulk reset via vkResetCommandPool.
-//
-// Per-slot binary fences are no longer created here. Frame synchronization is
-// handled by the unified deviceFence: timeline semaphore (VK-IMPL-001) or
-// fencePool of binary fences (VK-IMPL-003).
-func (d *Device) initFramePools() error {
-	for i := 0; i < maxFramesInFlight; i++ {
-		createInfo := vk.CommandPoolCreateInfo{
-			SType:            vk.StructureTypeCommandPoolCreateInfo,
-			Flags:            vk.CommandPoolCreateFlags(vk.CommandPoolCreateTransientBit),
-			QueueFamilyIndex: d.graphicsFamily,
-		}
-
-		var pool vk.CommandPool
-		result := vkCreateCommandPool(d.cmds, d.handle, &createInfo, nil, &pool)
-		if result != vk.Success {
-			// Cleanup already-created pools on failure.
-			for j := 0; j < i; j++ {
-				vkDestroyCommandPool(d.cmds, d.handle, d.frames[j].commandPool, nil)
-				d.frames[j].commandPool = 0
-			}
-			return fmt.Errorf("vulkan: vkCreateCommandPool (frame %d) failed: %d", i, result)
-		}
-		d.frames[i].commandPool = pool
-	}
-
-	return nil
-}
-
-// waitForFrameSlot waits until the GPU finishes the frame occupying the given slot.
-// Returns immediately if no work was submitted for that slot.
-//
-// Both paths (timeline semaphore and binary fence pool) are handled by the
-// unified deviceFence, which dispatches to the appropriate implementation.
-func (d *Device) waitForFrameSlot(slot uint64) error {
-	d.fenceMu.Lock()
-	submitted := d.frames[slot].submitted
-	value := d.frames[slot].timelineValue
-	d.fenceMu.Unlock()
-
-	if !submitted {
-		return nil // No work submitted for this slot
-	}
-
-	if err := d.timelineFence.waitForValue(d.cmds, d.handle, value, 5_000_000_000); err != nil {
-		return err
-	}
-
-	d.fenceMu.Lock()
-	d.frames[slot].submitted = false
-	d.fenceMu.Unlock()
-	return nil
-}
-
-// advanceFrame increments the frame index and recycles the command pool from the
-// old frame that occupied the new slot. Only waits for that specific frame --
-// not all GPU work -- enabling CPU/GPU overlap (VK-OPT-003).
-func (d *Device) advanceFrame() error {
-	d.frameIndex++
-	slot := d.frameIndex % maxFramesInFlight
-
-	// Wait for the old frame that occupied this slot to finish on GPU.
-	// waitForFrameSlot also resets the fence after it's signaled.
-	if err := d.waitForFrameSlot(slot); err != nil {
-		return err
-	}
-
-	// Bulk-reset the command pool for this slot.
-	// This frees all command buffers allocated from this pool at once --
-	// much faster than individual vkFreeCommandBuffers or vkResetCommandBuffer.
-	// Flag 0 means handles remain valid in the initial state (VK-IMPL-002).
-	if d.frames[slot].commandPool != 0 {
-		result := d.cmds.ResetCommandPool(d.handle, d.frames[slot].commandPool, 0)
-		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkResetCommandPool (frame slot %d) failed: %d", slot, result)
-		}
-		// Recycle all command buffer handles back to the free list.
-		// After pool reset with flag 0, all handles are valid and in initial state.
-		d.recycleCommandBuffers(slot)
-	}
-
-	return nil
-}
-
-// signalFrameFence signals the current frame slot's fence.
-//
-// Timeline path (VK-IMPL-001): The timeline semaphore signal was already attached
-// to the real vkQueueSubmit in Submit(), so this only records the signal value for
-// this frame slot. No empty submit needed.
-//
-// Binary path (VK-IMPL-003): Gets a fence from the fencePool, submits an empty
-// queue command to signal it, and records the value so waitForFrameSlot can wait.
-func (d *Device) signalFrameFence() error {
-	d.fenceMu.Lock()
-	slot := d.frameIndex % maxFramesInFlight
-	d.frames[slot].submitted = true
-	d.fenceMu.Unlock()
-
-	// Timeline path: signal value was already attached to the real submit.
-	// Just record the current value so waitForFrameSlot knows what to wait for.
-	if d.timelineFence.isTimeline {
-		d.fenceMu.Lock()
-		d.frames[slot].timelineValue = d.timelineFence.currentSignalValue()
-		d.fenceMu.Unlock()
-		return nil
-	}
-
-	// Binary path (VK-IMPL-003): get a fence from the pool, signal via empty submit.
-	signalValue := d.timelineFence.nextSignalValue()
-	fence, err := d.timelineFence.pool.signal(d.cmds, d.handle, signalValue)
-	if err != nil {
-		return fmt.Errorf("vulkan: signalFrameFence: %w", err)
-	}
-
-	emptySubmit := vk.SubmitInfo{
-		SType: vk.StructureTypeSubmitInfo,
-	}
-	result := d.cmds.QueueSubmit(d.queue.handle, 1, &emptySubmit, fence)
-	if result != vk.Success {
-		return fmt.Errorf("vulkan: frame fence QueueSubmit failed: %d", result)
-	}
-
-	d.fenceMu.Lock()
-	d.frames[slot].timelineValue = signalValue
-	d.fenceMu.Unlock()
-	return nil
 }
 
 // WaitIdle waits for all GPU operations to complete.
@@ -1201,58 +1061,50 @@ func (d *Device) WaitIdle() error {
 	return nil
 }
 
-// ResetCommandPool resets all per-frame command pools.
+// ResetCommandPool resets all recycled command pools.
 // Call this after ensuring all submitted command buffers have completed (e.g., after WaitIdle).
 func (d *Device) ResetCommandPool() error {
-	for i := 0; i < maxFramesInFlight; i++ {
-		if d.frames[i].commandPool == 0 {
-			continue
-		}
-		result := d.cmds.ResetCommandPool(d.handle, d.frames[i].commandPool, 0)
+	d.allocatorMu.Lock()
+	defer d.allocatorMu.Unlock()
+
+	for _, alloc := range d.freeAllocators {
+		result := d.cmds.ResetCommandPool(d.handle, alloc.pool, 0)
 		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkResetCommandPool (frame %d) failed: %d", i, result)
+			return fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
 		}
-		// Recycle command buffer handles after pool reset (VK-IMPL-002).
-		d.recycleCommandBuffers(uint64(i))
 	}
 	return nil
 }
 
-// FreeCommandBuffer frees a specific command buffer back to its pool.
+// FreeCommandBuffer recycles a command buffer's pool+buffer pair for reuse.
 // Only call this AFTER the GPU has finished using the command buffer (after fence wait).
-// With per-frame pools, individual freeing is rarely needed -- pools are bulk-reset
-// in advanceFrame. This method is provided for one-shot commands (e.g., WriteTexture).
-//
-// The buffer handle is removed from the frame slot's used list to prevent
-// recycleCommandBuffers from adding a freed handle to the free list (VK-IMPL-002).
+// The pool is returned to the free list; it will be reset lazily on next acquire.
+// No vkFreeCommandBuffers call is needed because pool reset restores the buffer.
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	vkCmdBuf, ok := cmdBuffer.(*CommandBuffer)
 	if !ok || vkCmdBuf.handle == 0 || vkCmdBuf.pool == 0 {
 		return
 	}
 
-	// Remove from the used list of the frame slot that owns this pool.
-	// This prevents the freed handle from being recycled into freeCmdBuffers
-	// during the next pool reset cycle (VK-IMPL-002).
-	for i := 0; i < maxFramesInFlight; i++ {
-		if d.frames[i].commandPool == vkCmdBuf.pool {
-			used := d.frames[i].usedCmdBuffers
-			for j, h := range used {
-				if h == vkCmdBuf.handle {
-					// Swap-remove: O(1) removal from unordered slice.
-					used[j] = used[len(used)-1]
-					d.frames[i].usedCmdBuffers = used[:len(used)-1]
-					break
-				}
-			}
-			break
-		}
-	}
+	// Recycle the pool+buffer pair back to the free list.
+	d.recycleAllocator(commandAllocator{pool: vkCmdBuf.pool, cmdBuffer: vkCmdBuf.handle})
 
-	d.cmds.FreeCommandBuffers(d.handle, vkCmdBuf.pool, 1, &vkCmdBuf.handle)
 	vkCmdBuf.handle = 0
 	vkCmdBuf.pool = 0
 	cmdBufferResultPool.Put(vkCmdBuf)
+}
+
+// destroyAllocators destroys all recycled command pools in the free list.
+// Called during device shutdown after all GPU work is complete.
+func (d *Device) destroyAllocators() {
+	d.allocatorMu.Lock()
+	defer d.allocatorMu.Unlock()
+
+	for _, alloc := range d.freeAllocators {
+		// Destroying a pool implicitly frees all command buffers allocated from it.
+		vkDestroyCommandPool(d.cmds, d.handle, alloc.pool, nil)
+	}
+	d.freeAllocators = d.freeAllocators[:0]
 }
 
 // CreateFence creates a synchronization fence.
@@ -1368,17 +1220,8 @@ func (d *Device) Destroy() {
 		d.timelineFence = nil
 	}
 
-	// Destroy per-frame command pools and clear batch-allocated buffer lists.
-	// All command buffers allocated from a pool are implicitly freed when the
-	// pool is destroyed, so we only need to clear our tracking slices (VK-IMPL-002).
-	for i := 0; i < maxFramesInFlight; i++ {
-		if d.frames[i].commandPool != 0 {
-			vkDestroyCommandPool(d.cmds, d.handle, d.frames[i].commandPool, nil)
-			d.frames[i].commandPool = 0
-			d.frames[i].freeCmdBuffers = d.frames[i].freeCmdBuffers[:0]
-			d.frames[i].usedCmdBuffers = d.frames[i].usedCmdBuffers[:0]
-		}
-	}
+	// Destroy all recycled command pools (VK-POOL-001).
+	d.destroyAllocators()
 
 	if d.descriptorAllocator != nil {
 		d.descriptorAllocator.Destroy()
@@ -1415,6 +1258,7 @@ func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.Com
 	return cmds.CreateCommandPool(device, createInfo, allocator, pool)
 }
 
+//nolint:unparam // Vulkan API wrapper — signature mirrors vkDestroyCommandPool spec
 func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) {
 	cmds.DestroyCommandPool(device, pool, allocator)
 }
