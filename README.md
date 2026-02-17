@@ -124,6 +124,10 @@ cmdBufID, _ := core.CommandEncoderFinish(encoderID)
 core.QueueSubmit(queueID, []core.CommandBufferID{cmdBufID})
 ```
 
+**Guides:** [Getting Started](docs/compute-shaders.md) | [Backend Differences](docs/compute-backends.md)
+
+Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan), GPU-to-CPU readback.
+
 ---
 
 ## Architecture
@@ -258,6 +262,9 @@ import _ "github.com/gogpu/wgpu/hal/software"
 
 ## Documentation
 
+- **[Compute Shaders Guide](docs/compute-shaders.md)** — Getting started with compute
+- **[Compute Backend Differences](docs/compute-backends.md)** — Per-backend capabilities
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
