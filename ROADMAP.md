@@ -56,6 +56,8 @@
 - [ ] Compute shader support in all backends
 - [ ] API stability guarantee
 - [x] Performance benchmarks — 115+ benchmarks, hot-path allocation optimization
+- [x] Vulkan timeline semaphore fence (VK_KHR_timeline_semaphore, Vulkan 1.2 core)
+- [x] Vulkan command buffer batch allocation (16 per call, wgpu-hal pattern)
 - [ ] Comprehensive documentation
 
 ### Future

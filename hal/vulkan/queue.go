@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -98,13 +99,65 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		}
 	}
 
-	// If no user fence is provided, use our transfer fence directly on this submit.
+	// Timeline path (VK-IMPL-001): Attach timeline semaphore signal to the real submit.
+	// This replaces the empty signalFrameFence submit AND the transfer fence with
+	// a single inline signal on the actual command buffer submit.
+	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
+	if q.device.timelineFence != nil && q.device.timelineFence.isTimeline {
+		signalValue := q.device.timelineFence.nextSignalValue()
+		timelineSubmitInfo = vk.TimelineSemaphoreSubmitInfo{
+			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
+			SignalSemaphoreValueCount: 1,
+			PSignalSemaphoreValues:    &signalValue,
+		}
+
+		// Chain timeline submit info into the submit info.
+		// If there are already signal semaphores (e.g., present semaphore),
+		// we need to add our timeline semaphore to the signal list.
+		if submitInfo.SignalSemaphoreCount > 0 {
+			// Already have a signal semaphore (present path).
+			// We need to signal BOTH the present semaphore AND the timeline semaphore.
+			signalSems := [2]vk.Semaphore{
+				*submitInfo.PSignalSemaphores,            // original (e.g., present semaphore)
+				q.device.timelineFence.timelineSemaphore, // timeline
+			}
+			signalValues := [2]uint64{
+				0,           // binary semaphore: value ignored
+				signalValue, // timeline semaphore: value to signal
+			}
+			submitInfo.SignalSemaphoreCount = 2
+			submitInfo.PSignalSemaphores = &signalSems[0]
+			timelineSubmitInfo.SignalSemaphoreValueCount = 2
+			timelineSubmitInfo.PSignalSemaphoreValues = &signalValues[0]
+		} else {
+			// No existing signal semaphores — just signal the timeline.
+			submitInfo.SignalSemaphoreCount = 1
+			submitInfo.PSignalSemaphores = &q.device.timelineFence.timelineSemaphore
+		}
+		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
+
+		// Also chain timeline wait values if we have wait semaphores.
+		if submitInfo.WaitSemaphoreCount > 0 {
+			waitValue := uint64(0) // Binary semaphore wait: value ignored.
+			timelineSubmitInfo.WaitSemaphoreValueCount = 1
+			timelineSubmitInfo.PWaitSemaphoreValues = &waitValue
+		}
+
+		result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		}
+		return nil
+	}
+
+	// Binary path: If no user fence is provided, use our transfer fence directly on this submit.
 	// This avoids an extra vkQueueSubmit call for the common rendering path.
 	if submitFence == 0 && q.transferFence != 0 {
-		// Reset transfer fence before reuse (must be unsignaled for vkQueueSubmit)
+		// Wait for previous GPU work before resetting the fence.
+		// Without this, vkResetFences fails with "fence is in use" validation error
+		// because the GPU may still be processing the previous frame's commands.
 		if q.transferFenceActive {
-			_ = vkResetFences(q.device.cmds, q.device.handle, 1, &q.transferFence)
-			q.transferFenceActive = false
+			q.waitForTransferFence()
 		}
 		submitFence = q.transferFence
 	}
@@ -170,7 +223,27 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		PSignalSemaphores:    &presentSem,
 	}
 
-	// No fence needed - GPU synchronization is done via semaphores
+	// Timeline path (VK-IMPL-001): Also signal the timeline semaphore on this submit.
+	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
+	if q.device.timelineFence != nil && q.device.timelineFence.isTimeline {
+		signalValue := q.device.timelineFence.nextSignalValue()
+		signalSems := [2]vk.Semaphore{presentSem, q.device.timelineFence.timelineSemaphore}
+		signalValues := [2]uint64{0, signalValue} // 0 for binary, value for timeline
+		waitValue := uint64(0)                    // Binary acquire semaphore: value ignored
+
+		submitInfo.SignalSemaphoreCount = 2
+		submitInfo.PSignalSemaphores = &signalSems[0]
+
+		timelineSubmitInfo = vk.TimelineSemaphoreSubmitInfo{
+			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
+			WaitSemaphoreValueCount:   1,
+			PWaitSemaphoreValues:      &waitValue,
+			SignalSemaphoreValueCount: 2,
+			PSignalSemaphoreValues:    &signalValues[0],
+		}
+		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
+	}
+
 	result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
@@ -183,6 +256,9 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 // Uses fence-based synchronization instead of vkQueueWaitIdle to avoid
 // stalling the entire GPU pipeline. Only waits for the last queue submission
 // to complete, which per Khronos benchmarks improves frame times by ~22%.
+//
+// Timeline path (VK-IMPL-001): Uses vkWaitSemaphores on the latest signal value.
+// Binary path: Uses the transfer fence.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 	vkBuffer, ok := buffer.(*Buffer)
 	if !ok || vkBuffer.memory == nil {
@@ -191,7 +267,7 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 
 	// Wait for the last queue submission to complete before CPU writes.
 	// This prevents race conditions where GPU reads stale/partial data.
-	q.waitForTransferFence()
+	q.waitForGPU()
 
 	// Map, copy, unmap
 	if vkBuffer.memory.MappedPtr != 0 {
@@ -215,6 +291,9 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 // ReadBuffer reads data from a GPU buffer.
 // The buffer must have host-visible memory (created with MapRead usage).
 // Uses fence-based synchronization instead of vkQueueWaitIdle.
+//
+// Timeline path (VK-IMPL-001): Uses vkWaitSemaphores on the latest signal value.
+// Binary path: Uses the transfer fence.
 func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	vkBuffer, ok := buffer.(*Buffer)
 	if !ok || vkBuffer.memory == nil {
@@ -222,7 +301,7 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 	}
 
 	// Wait for the last queue submission to complete before CPU reads.
-	q.waitForTransferFence()
+	q.waitForGPU()
 
 	if vkBuffer.memory.MappedPtr != 0 {
 		// Invalidate CPU cache so we see the latest GPU writes.
@@ -381,6 +460,18 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	)
 }
 
+// waitForGPU waits for the latest GPU submission to complete.
+// Timeline path (VK-IMPL-001): Uses vkWaitSemaphores on the latest signal value.
+// Binary path: Uses the transfer fence.
+func (q *Queue) waitForGPU() {
+	if q.device.timelineFence != nil && q.device.timelineFence.isTimeline {
+		timeoutNs := uint64(60 * time.Second)
+		_ = q.device.timelineFence.waitForLatest(q.device.cmds, q.device.handle, timeoutNs)
+		return
+	}
+	q.waitForTransferFence()
+}
+
 // signalTransferFence signals the transfer fence with an empty queue submit.
 // Called when the user provides their own fence to Submit() -- the user's fence
 // is used for the main submit, so we need a separate empty submit to signal
@@ -388,7 +479,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // spec and just inserts a fence signal after all previously submitted work.
 func (q *Queue) signalTransferFence() {
 	if q.transferFenceActive {
-		_ = vkResetFences(q.device.cmds, q.device.handle, 1, &q.transferFence)
+		q.waitForTransferFence()
 	}
 	emptySubmit := vk.SubmitInfo{
 		SType: vk.StructureTypeSubmitInfo,

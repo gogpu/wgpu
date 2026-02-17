@@ -65,6 +65,21 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
 	}
 
+	// Detect timeline semaphore support (VK-IMPL-001).
+	// Query via PhysicalDeviceVulkan12Features with PNext chain on GetPhysicalDeviceFeatures2.
+	hasTimelineSemaphore := false
+	if a.instance.cmds.HasPhysicalDeviceFeatures2() {
+		var vulkan12Features vk.PhysicalDeviceVulkan12Features
+		vulkan12Features.SType = vk.StructureTypePhysicalDeviceVulkan12Features
+
+		features2 := vk.PhysicalDeviceFeatures2{
+			SType: vk.StructureTypePhysicalDeviceFeatures2,
+			PNext: (*uintptr)(unsafe.Pointer(&vulkan12Features)),
+		}
+		a.instance.cmds.GetPhysicalDeviceFeatures2(a.physicalDevice, &features2)
+		hasTimelineSemaphore = vulkan12Features.TimelineSemaphore != 0
+	}
+
 	// Device create info
 	deviceCreateInfo := vk.DeviceCreateInfo{
 		SType:                   vk.StructureTypeDeviceCreateInfo,
@@ -73,6 +88,15 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		EnabledExtensionCount:   uint32(len(extensions)),
 		PpEnabledExtensionNames: uintptr(unsafe.Pointer(&extensionPtrs[0])),
 		PEnabledFeatures:        &a.features,
+	}
+
+	// Enable timeline semaphore feature if supported.
+	// Vulkan 1.2 requires explicitly enabling features via PNext chain.
+	var vulkan12Enable vk.PhysicalDeviceVulkan12Features
+	if hasTimelineSemaphore {
+		vulkan12Enable.SType = vk.StructureTypePhysicalDeviceVulkan12Features
+		vulkan12Enable.TimelineSemaphore = vk.Bool32(vk.True)
+		deviceCreateInfo.PNext = (*uintptr)(unsafe.Pointer(&vulkan12Enable))
 	}
 
 	var device vk.Device
@@ -100,8 +124,26 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		cmds:           &deviceCmds,
 	}
 
+	// Initialize timeline fence if supported (VK-IMPL-001).
+	// This must happen before initAllocator or queue creation since they may
+	// use the fence for synchronization.
+	if hasTimelineSemaphore {
+		tlFence, err := initTimelineFence(dev.cmds, dev.handle)
+		if err != nil {
+			hal.Logger().Warn("vulkan: timeline semaphore feature reported but init failed, using binary fences",
+				"error", err,
+			)
+		} else {
+			dev.timelineFence = tlFence
+			hal.Logger().Info("vulkan: using timeline semaphore fence (VK-IMPL-001)")
+		}
+	}
+
 	// Initialize memory allocator
 	if err := dev.initAllocator(); err != nil {
+		if dev.timelineFence != nil {
+			dev.timelineFence.destroy(dev.cmds, dev.handle)
+		}
 		vkDestroyDevice(device, nil)
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to initialize allocator: %w", err)
 	}
@@ -113,25 +155,36 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	}
 
 	// Create transfer fence for WriteBuffer/ReadBuffer synchronization.
-	// This replaces vkQueueWaitIdle with targeted fence-based sync.
-	transferFenceInfo := vk.FenceCreateInfo{
-		SType: vk.StructureTypeFenceCreateInfo,
-		Flags: 0, // Not signaled initially
+	// On timeline path, the transfer fence is not needed — the timeline semaphore
+	// handles all synchronization. On binary path, this replaces vkQueueWaitIdle.
+	if dev.timelineFence == nil {
+		transferFenceInfo := vk.FenceCreateInfo{
+			SType: vk.StructureTypeFenceCreateInfo,
+			Flags: 0, // Not signaled initially
+		}
+		var transferFence vk.Fence
+		fenceResult := dev.cmds.CreateFence(dev.handle, &transferFenceInfo, nil, &transferFence)
+		if fenceResult != vk.Success {
+			if dev.timelineFence != nil {
+				dev.timelineFence.destroy(dev.cmds, dev.handle)
+			}
+			vkDestroyDevice(device, nil)
+			return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to create transfer fence: %d", fenceResult)
+		}
+		q.transferFence = transferFence
 	}
-	var transferFence vk.Fence
-	fenceResult := dev.cmds.CreateFence(dev.handle, &transferFenceInfo, nil, &transferFence)
-	if fenceResult != vk.Success {
-		vkDestroyDevice(device, nil)
-		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to create transfer fence: %d", fenceResult)
-	}
-	q.transferFence = transferFence
 
 	// Store queue reference in device for swapchain synchronization
 	dev.queue = q
 
+	syncMode := "binary fences"
+	if dev.timelineFence != nil {
+		syncMode = "timeline semaphore"
+	}
 	hal.Logger().Info("vulkan: device created",
 		"name", cStringToGo(a.properties.DeviceName[:]),
 		"queueFamily", graphicsFamily,
+		"syncMode", syncMode,
 	)
 
 	return hal.OpenDevice{

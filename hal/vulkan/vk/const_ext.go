@@ -8,10 +8,39 @@ import (
 	"unsafe"
 )
 
-// Additional constants not generated from vk.xml but needed for Vulkan 1.3 dynamic rendering.
-// Values from VK_KHR_dynamic_rendering extension (promoted to core in Vulkan 1.3).
+// Additional constants not generated from vk.xml but needed for Vulkan 1.2/1.3 features.
 
 const (
+	// === Vulkan 1.1 Core (promoted from KHR extensions) ===
+
+	// StructureTypePhysicalDeviceFeatures2 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+	StructureTypePhysicalDeviceFeatures2 StructureType = 1000059000
+
+	// StructureTypePhysicalDeviceProperties2 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
+	StructureTypePhysicalDeviceProperties2 StructureType = 1000059001
+
+	// === Vulkan 1.2 Core (promoted from VK_KHR_timeline_semaphore) ===
+
+	// StructureTypePhysicalDeviceTimelineSemaphoreFeatures = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
+	StructureTypePhysicalDeviceTimelineSemaphoreFeatures StructureType = 1000207000
+
+	// StructureTypeSemaphoreTypeCreateInfo = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
+	StructureTypeSemaphoreTypeCreateInfo StructureType = 1000207002
+
+	// StructureTypeTimelineSemaphoreSubmitInfo = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
+	StructureTypeTimelineSemaphoreSubmitInfo StructureType = 1000207003
+
+	// StructureTypeSemaphoreWaitInfo = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO
+	StructureTypeSemaphoreWaitInfo StructureType = 1000207004
+
+	// StructureTypeSemaphoreSignalInfo = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO
+	StructureTypeSemaphoreSignalInfo StructureType = 1000207005
+
+	// StructureTypePhysicalDeviceVulkan12Features = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+	StructureTypePhysicalDeviceVulkan12Features StructureType = 51
+
+	// === Vulkan 1.3 Core (promoted from VK_KHR_dynamic_rendering) ===
+
 	// StructureTypeRenderingInfo = VK_STRUCTURE_TYPE_RENDERING_INFO
 	StructureTypeRenderingInfo StructureType = 1000044000
 

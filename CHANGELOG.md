@@ -25,10 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Vulkan timeline semaphore fence** (VK-IMPL-001) — Single `VkSemaphore` with monotonic `uint64`
+  counter replaces binary `VkFence` ring buffer on Vulkan 1.2+. Signal attached to real
+  `vkQueueSubmit` (eliminates empty submit per frame). Replaces transfer fence state machine.
+  Graceful fallback to binary fences on pre-1.2 drivers. Based on Rust wgpu-hal `Fence::TimelineSemaphore`.
+- **Vulkan command buffer batch allocation** (VK-IMPL-002) — Batch-allocate 16 command buffers
+  per `vkAllocateCommandBuffers` call (matches wgpu-hal `ALLOCATION_GRANULARITY`). Free/used list
+  recycling per frame slot. Handles are valid after `vkResetCommandPool` (flag 0).
 - **Vulkan hot-path allocation reduction** — `sync.Pool` for CommandEncoder, CommandBuffer,
   ComputePassEncoder, RenderPassEncoder. Stack-allocated `[3]vk.ClearValue` in BeginRenderPass.
   Removed CommandPool wrapper struct. Per-frame Submit uses pooled `[]vk.CommandBuffer` slices.
   Result: BeginEndEncoding 15→13 allocs, ComputePassBeginEnd 25→22 allocs, EncodeSubmitCycle 28→26 allocs.
+
+### Fixed
+
+- **Vulkan transfer fence race condition** — `Submit()` now waits for previous GPU work before
+  resetting transfer fence, preventing "vkResetFences: pFences[0] is in use" validation error.
+- **Vulkan swapchain image view leak** — `createSwapchain()` now calls `destroyResources()`
+  (semaphores + image views) instead of `releaseSyncResources()` (semaphores only) when
+  reconfiguring, preventing "VkImageView has not been destroyed" validation errors on shutdown.
+- **Vulkan device destroy fence wait** — `Destroy()` waits for all in-flight frame slots
+  before destroying fences, preventing fence-in-use errors during cleanup.
 
 ## [0.16.3] - 2026-02-16
 

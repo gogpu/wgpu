@@ -4103,7 +4103,17 @@ func (c *Commands) GetSemaphoreCounterValue(device Device, semaphore Semaphore, 
 	return Result(result)
 }
 
-// TODO: WaitSemaphores - signature not yet supported: Result(handle, ptr, u64)
+// WaitSemaphores wraps vkWaitSemaphores (Vulkan 1.2 core).
+func (c *Commands) WaitSemaphores(device Device, pWaitInfo *SemaphoreWaitInfo, timeout uint64) Result {
+	var result int32
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&pWaitInfo),
+		unsafe.Pointer(&timeout),
+	}
+	_ = ffi.CallFunction(&SigResultHandlePtrU64, c.waitSemaphores, unsafe.Pointer(&result), args[:])
+	return Result(result)
+}
 
 // SignalSemaphore wraps vkSignalSemaphore.
 func (c *Commands) SignalSemaphore(device Device, pSignalInfo *SemaphoreSignalInfo) Result {
