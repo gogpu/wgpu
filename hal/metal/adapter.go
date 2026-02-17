@@ -39,6 +39,9 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		}
 	}
 
+	// Back-reference so Device.WaitIdle can drain the frame semaphore.
+	device.queue = queue
+
 	return hal.OpenDevice{
 		Device: device,
 		Queue:  queue,

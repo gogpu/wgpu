@@ -25,6 +25,7 @@ type Device struct {
 	commandQueue  ID // id<MTLCommandQueue>
 	adapter       *Adapter
 	eventListener ID // id<MTLSharedEventListener> — created lazily, reused
+	queue         *Queue // back-reference for WaitIdle semaphore draining
 }
 
 // newDevice creates a new Device from a Metal device.
@@ -915,10 +916,50 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // WaitIdle waits for all GPU work to complete.
+//
+// Metal has no device-level wait API like Vulkan's vkDeviceWaitIdle. Instead,
+// we submit an empty command buffer and call waitUntilCompleted on it. Since
+// command buffers execute in order on the same queue, this guarantees all
+// previously submitted work has finished.
+//
+// After the GPU is idle, we drain and refill the frame semaphore to ensure
+// all in-flight slots are reclaimed. This prevents deadlocks when the caller
+// wants to submit new work after WaitIdle returns.
 func (d *Device) WaitIdle() error {
-	// Metal doesn't have a device-level wait, but we can wait on the command queue.
-	// The MTLCommandQueue waitUntilAllCommandsCompleted is not a standard method.
-	// Use the event-based Wait() with the highest known event value if available.
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	// Submit an empty command buffer and wait for it synchronously.
+	// All previously committed command buffers on this queue will complete
+	// before this one starts, so waitUntilCompleted acts as a full barrier.
+	cmdBuffer := MsgSend(d.commandQueue, Sel("commandBuffer"))
+	if cmdBuffer != 0 {
+		Retain(cmdBuffer)
+		_ = MsgSend(cmdBuffer, Sel("commit"))
+		_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
+		Release(cmdBuffer)
+	}
+
+	// Drain and refill the frame semaphore. After waitUntilCompleted, all
+	// in-flight completion handlers have fired and returned their tokens.
+	// We drain any remaining tokens and refill to maxFramesInFlight so the
+	// semaphore is in a clean state for subsequent submissions.
+	if d.queue != nil && d.queue.frameSemaphore != nil {
+		// Drain all available tokens (non-blocking).
+		for {
+			select {
+			case <-d.queue.frameSemaphore:
+			default:
+				goto refill
+			}
+		}
+	refill:
+		// Refill to capacity.
+		for i := 0; i < maxFramesInFlight; i++ {
+			d.queue.frameSemaphore <- struct{}{}
+		}
+	}
+
 	return nil
 }
 
