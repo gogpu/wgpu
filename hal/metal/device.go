@@ -24,7 +24,7 @@ type Device struct {
 	raw           ID // id<MTLDevice>
 	commandQueue  ID // id<MTLCommandQueue>
 	adapter       *Adapter
-	eventListener ID // id<MTLSharedEventListener> — created lazily, reused
+	eventListener ID     // id<MTLSharedEventListener> — created lazily, reused
 	queue         *Queue // back-reference for WaitIdle semaphore draining
 }
 

@@ -52,19 +52,22 @@ var renderPassPool = sync.Pool{
 	New: func() any { return &RenderPassEncoder{} },
 }
 
-// frameState tracks a per-frame command pool and fence for one in-flight frame slot.
-// Each slot owns its own VkCommandPool and VkFence. When the GPU finishes a frame,
+// frameState tracks a per-frame command pool for one in-flight frame slot.
+// Each slot owns its own VkCommandPool. When the GPU finishes a frame,
 // all command buffers can be bulk-reset via vkResetCommandPool (VK-OPT-002).
 //
 // Command buffers are batch-allocated in groups of cmdBufferAllocationGranularity
 // to reduce vkAllocateCommandBuffers overhead (VK-IMPL-002). After pool reset
 // (flag 0), all allocated handles remain valid in initial state, so we recycle
 // them back into the free list for the next frame.
+//
+// Frame synchronization is handled by the unified deviceFence (timeline semaphore
+// or fencePool). The timelineValue records which submission value corresponds to
+// this frame slot, used by waitForFrameSlot to wait for the correct value.
 type frameState struct {
 	commandPool    vk.CommandPool     // Per-frame command pool (created with TRANSIENT_BIT)
-	fence          vk.Fence           // Per-slot fence (signaled when GPU finishes this frame) — binary path only
-	submitted      bool               // Whether this slot has been submitted and fence is pending
-	timelineValue  uint64             // Timeline semaphore value for this frame slot (VK-IMPL-001)
+	submitted      bool               // Whether this slot has been submitted and is pending GPU completion
+	timelineValue  uint64             // Submission value for this frame slot (both timeline and binary paths)
 	freeCmdBuffers []vk.CommandBuffer // Available command buffers (not yet handed out)
 	usedCmdBuffers []vk.CommandBuffer // Command buffers handed out this frame (via acquireCommandBuffer)
 }
@@ -1059,16 +1062,14 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 	return e, nil
 }
 
-// initFramePools creates per-frame command pools and (on binary path) per-slot fences.
+// initFramePools creates per-frame command pools.
 // Each pool is created with TRANSIENT_BIT (short-lived buffers) and WITHOUT
 // RESET_COMMAND_BUFFER_BIT, enabling efficient bulk reset via vkResetCommandPool.
 //
-// When timeline semaphore is active (VK-IMPL-001), per-slot binary fences are not
-// created — frame synchronization uses the shared timeline semaphore instead.
+// Per-slot binary fences are no longer created here. Frame synchronization is
+// handled by the unified deviceFence: timeline semaphore (VK-IMPL-001) or
+// fencePool of binary fences (VK-IMPL-003).
 func (d *Device) initFramePools() error {
-	useTimeline := d.timelineFence != nil && d.timelineFence.isTimeline
-
-	// Create per-frame command pools and (optionally) fences.
 	for i := 0; i < maxFramesInFlight; i++ {
 		createInfo := vk.CommandPoolCreateInfo{
 			SType:            vk.StructureTypeCommandPoolCreateInfo,
@@ -1079,46 +1080,14 @@ func (d *Device) initFramePools() error {
 		var pool vk.CommandPool
 		result := vkCreateCommandPool(d.cmds, d.handle, &createInfo, nil, &pool)
 		if result != vk.Success {
-			// Cleanup already-created pools and fences on failure.
+			// Cleanup already-created pools on failure.
 			for j := 0; j < i; j++ {
 				vkDestroyCommandPool(d.cmds, d.handle, d.frames[j].commandPool, nil)
 				d.frames[j].commandPool = 0
-				if d.frames[j].fence != 0 {
-					vkDestroyFence(d.cmds, d.handle, d.frames[j].fence, nil)
-					d.frames[j].fence = 0
-				}
 			}
 			return fmt.Errorf("vulkan: vkCreateCommandPool (frame %d) failed: %d", i, result)
 		}
 		d.frames[i].commandPool = pool
-
-		// Skip per-slot binary fences on timeline path — the shared timeline
-		// semaphore handles all frame synchronization (VK-IMPL-001).
-		if useTimeline {
-			continue
-		}
-
-		// Per-slot fence (unsignaled initially) — binary path only.
-		fenceCreateInfo := vk.FenceCreateInfo{
-			SType: vk.StructureTypeFenceCreateInfo,
-			Flags: 0,
-		}
-		var fence vk.Fence
-		result = vkCreateFence(d.cmds, d.handle, &fenceCreateInfo, nil, &fence)
-		if result != vk.Success {
-			vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
-			d.frames[i].commandPool = 0
-			for j := 0; j < i; j++ {
-				vkDestroyCommandPool(d.cmds, d.handle, d.frames[j].commandPool, nil)
-				d.frames[j].commandPool = 0
-				if d.frames[j].fence != 0 {
-					vkDestroyFence(d.cmds, d.handle, d.frames[j].fence, nil)
-					d.frames[j].fence = 0
-				}
-			}
-			return fmt.Errorf("vulkan: vkCreateFence (frame %d) failed: %d", i, result)
-		}
-		d.frames[i].fence = fence
 	}
 
 	return nil
@@ -1127,52 +1096,26 @@ func (d *Device) initFramePools() error {
 // waitForFrameSlot waits until the GPU finishes the frame occupying the given slot.
 // Returns immediately if no work was submitted for that slot.
 //
-// Timeline path (VK-IMPL-001): Uses vkWaitSemaphores on the timeline value recorded
-// for this slot. No fence reset needed — timeline semaphores are monotonic.
-//
-// Binary path (fallback): Uses vkWaitForFences + vkResetFences on the per-slot fence.
+// Both paths (timeline semaphore and binary fence pool) are handled by the
+// unified deviceFence, which dispatches to the appropriate implementation.
 func (d *Device) waitForFrameSlot(slot uint64) error {
 	d.fenceMu.Lock()
 	submitted := d.frames[slot].submitted
+	value := d.frames[slot].timelineValue
 	d.fenceMu.Unlock()
 
 	if !submitted {
 		return nil // No work submitted for this slot
 	}
 
-	// Timeline path: wait on the timeline semaphore value for this slot.
-	if d.timelineFence != nil && d.timelineFence.isTimeline {
-		d.fenceMu.Lock()
-		value := d.frames[slot].timelineValue
-		d.fenceMu.Unlock()
-
-		if err := d.timelineFence.waitForValue(d.cmds, d.handle, value, 5_000_000_000); err != nil {
-			return err
-		}
-		d.fenceMu.Lock()
-		d.frames[slot].submitted = false
-		d.fenceMu.Unlock()
-		return nil
+	if err := d.timelineFence.waitForValue(d.cmds, d.handle, value, 5_000_000_000); err != nil {
+		return err
 	}
 
-	// Binary path: wait on the per-slot fence.
-	fence := d.frames[slot].fence
-	result := vkWaitForFences(d.cmds, d.handle, 1, &fence, vk.Bool32(vk.True), 5_000_000_000)
-	switch result {
-	case vk.Success:
-		// Reset the fence now that it's signaled — ready for next use.
-		vkResetFences(d.cmds, d.handle, 1, &fence)
-		d.fenceMu.Lock()
-		d.frames[slot].submitted = false
-		d.fenceMu.Unlock()
-		return nil
-	case vk.Timeout:
-		return fmt.Errorf("vulkan: frame fence wait timed out (slot=%d)", slot)
-	case vk.ErrorDeviceLost:
-		return hal.ErrDeviceLost
-	default:
-		return fmt.Errorf("vulkan: vkWaitForFences (frame slot %d) failed: %d", slot, result)
-	}
+	d.fenceMu.Lock()
+	d.frames[slot].submitted = false
+	d.fenceMu.Unlock()
+	return nil
 }
 
 // advanceFrame increments the frame index and recycles the command pool from the
@@ -1211,8 +1154,8 @@ func (d *Device) advanceFrame() error {
 // to the real vkQueueSubmit in Submit(), so this only records the signal value for
 // this frame slot. No empty submit needed.
 //
-// Binary path (fallback): Signals via an empty vkQueueSubmit with the slot's fence.
-// The fence must be unsignaled (guaranteed by waitForFrameSlot which resets after wait).
+// Binary path (VK-IMPL-003): Gets a fence from the fencePool, submits an empty
+// queue command to signal it, and records the value so waitForFrameSlot can wait.
 func (d *Device) signalFrameFence() error {
 	d.fenceMu.Lock()
 	slot := d.frameIndex % maxFramesInFlight
@@ -1221,15 +1164,20 @@ func (d *Device) signalFrameFence() error {
 
 	// Timeline path: signal value was already attached to the real submit.
 	// Just record the current value so waitForFrameSlot knows what to wait for.
-	if d.timelineFence != nil && d.timelineFence.isTimeline {
+	if d.timelineFence.isTimeline {
 		d.fenceMu.Lock()
 		d.frames[slot].timelineValue = d.timelineFence.currentSignalValue()
 		d.fenceMu.Unlock()
 		return nil
 	}
 
-	// Binary path: empty submit to signal the per-slot fence.
-	fence := d.frames[slot].fence
+	// Binary path (VK-IMPL-003): get a fence from the pool, signal via empty submit.
+	signalValue := d.timelineFence.nextSignalValue()
+	fence, err := d.timelineFence.pool.signal(d.cmds, d.handle, signalValue)
+	if err != nil {
+		return fmt.Errorf("vulkan: signalFrameFence: %w", err)
+	}
+
 	emptySubmit := vk.SubmitInfo{
 		SType: vk.StructureTypeSubmitInfo,
 	}
@@ -1238,6 +1186,9 @@ func (d *Device) signalFrameFence() error {
 		return fmt.Errorf("vulkan: frame fence QueueSubmit failed: %d", result)
 	}
 
+	d.fenceMu.Lock()
+	d.frames[slot].timelineValue = signalValue
+	d.fenceMu.Unlock()
 	return nil
 }
 
@@ -1406,28 +1357,15 @@ func (d *Device) Destroy() {
 	// Wait for all in-flight frames to complete before destroying resources.
 	// Without this, fences may still be in use by the GPU, causing
 	// "vkResetFences: pFences[0] is in use" validation errors.
-	if d.timelineFence != nil && d.timelineFence.isTimeline {
-		// Timeline path: wait for the latest signaled value to complete.
-		// This covers all in-flight frames at once (VK-IMPL-001).
+	// Both paths (timeline and binary pool) are handled by waitForLatest.
+	if d.timelineFence != nil {
 		_ = d.timelineFence.waitForLatest(d.cmds, d.handle, 5_000_000_000)
-	} else {
-		// Binary path: wait for each in-flight frame slot individually.
-		for i := 0; i < maxFramesInFlight; i++ {
-			if d.frames[i].fence != 0 {
-				_ = d.waitForFrameSlot(uint64(i))
-			}
-		}
 	}
 
-	// Destroy timeline fence (VK-IMPL-001).
+	// Destroy unified fence (timeline semaphore or fencePool).
 	if d.timelineFence != nil {
 		d.timelineFence.destroy(d.cmds, d.handle)
 		d.timelineFence = nil
-	}
-
-	// Destroy queue's transfer fence before other resources (binary path only).
-	if d.queue != nil {
-		d.queue.destroyTransferFence()
 	}
 
 	// Destroy per-frame command pools and clear batch-allocated buffer lists.
@@ -1439,14 +1377,6 @@ func (d *Device) Destroy() {
 			d.frames[i].commandPool = 0
 			d.frames[i].freeCmdBuffers = d.frames[i].freeCmdBuffers[:0]
 			d.frames[i].usedCmdBuffers = d.frames[i].usedCmdBuffers[:0]
-		}
-	}
-
-	// Destroy per-slot frame fences
-	for i := 0; i < maxFramesInFlight; i++ {
-		if d.frames[i].fence != 0 {
-			vkDestroyFence(d.cmds, d.handle, d.frames[i].fence, nil)
-			d.frames[i].fence = 0
 		}
 	}
 
@@ -1485,7 +1415,7 @@ func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.Com
 	return cmds.CreateCommandPool(device, createInfo, allocator, pool)
 }
 
-func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature
+func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) {
 	cmds.DestroyCommandPool(device, pool, allocator)
 }
 
@@ -1537,7 +1467,7 @@ func vkCreateFence(cmds *vk.Commands, device vk.Device, createInfo *vk.FenceCrea
 	return cmds.CreateFence(device, createInfo, allocator, fence)
 }
 
-func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature
+func vkDestroyFence(cmds *vk.Commands, device vk.Device, fence vk.Fence, allocator *vk.AllocationCallbacks) {
 	cmds.DestroyFence(device, fence, allocator)
 }
 
@@ -1545,6 +1475,6 @@ func vkWaitForFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fen
 	return cmds.WaitForFences(device, fenceCount, fences, waitAll, timeout)
 }
 
-func vkResetFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence) vk.Result { //nolint:unparam // Vulkan API signature requires fenceCount parameter
+func vkResetFences(cmds *vk.Commands, device vk.Device, fenceCount uint32, fences *vk.Fence) vk.Result {
 	return cmds.ResetFences(device, fenceCount, fences)
 }

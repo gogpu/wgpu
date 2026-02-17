@@ -58,6 +58,7 @@
 - [x] Performance benchmarks — 115+ benchmarks, hot-path allocation optimization
 - [x] Vulkan timeline semaphore fence (VK_KHR_timeline_semaphore, Vulkan 1.2 core)
 - [x] Vulkan command buffer batch allocation (16 per call, wgpu-hal pattern)
+- [x] Vulkan binary fence pool (FencePool with per-submission tracking, Vulkan <1.2 fallback)
 - [ ] Comprehensive documentation
 
 ### Future

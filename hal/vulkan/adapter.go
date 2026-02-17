@@ -124,26 +124,28 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		cmds:           &deviceCmds,
 	}
 
-	// Initialize timeline fence if supported (VK-IMPL-001).
-	// This must happen before initAllocator or queue creation since they may
-	// use the fence for synchronization.
+	// Initialize synchronization fence (VK-IMPL-001 / VK-IMPL-003).
+	// Prefer timeline semaphore (Vulkan 1.2+); fall back to fencePool of binary
+	// VkFences on older drivers. Either way, dev.timelineFence is always set so
+	// the rest of the codebase can use a single path without nil checks.
 	if hasTimelineSemaphore {
 		tlFence, err := initTimelineFence(dev.cmds, dev.handle)
 		if err != nil {
-			hal.Logger().Warn("vulkan: timeline semaphore feature reported but init failed, using binary fences",
+			hal.Logger().Warn("vulkan: timeline semaphore feature reported but init failed, using binary fence pool",
 				"error", err,
 			)
+			dev.timelineFence = initBinaryFence()
 		} else {
 			dev.timelineFence = tlFence
 			hal.Logger().Info("vulkan: using timeline semaphore fence (VK-IMPL-001)")
 		}
+	} else {
+		dev.timelineFence = initBinaryFence()
 	}
 
 	// Initialize memory allocator
 	if err := dev.initAllocator(); err != nil {
-		if dev.timelineFence != nil {
-			dev.timelineFence.destroy(dev.cmds, dev.handle)
-		}
+		dev.timelineFence.destroy(dev.cmds, dev.handle)
 		vkDestroyDevice(device, nil)
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to initialize allocator: %w", err)
 	}
@@ -154,32 +156,12 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		familyIndex: uint32(graphicsFamily),
 	}
 
-	// Create transfer fence for WriteBuffer/ReadBuffer synchronization.
-	// On timeline path, the transfer fence is not needed — the timeline semaphore
-	// handles all synchronization. On binary path, this replaces vkQueueWaitIdle.
-	if dev.timelineFence == nil {
-		transferFenceInfo := vk.FenceCreateInfo{
-			SType: vk.StructureTypeFenceCreateInfo,
-			Flags: 0, // Not signaled initially
-		}
-		var transferFence vk.Fence
-		fenceResult := dev.cmds.CreateFence(dev.handle, &transferFenceInfo, nil, &transferFence)
-		if fenceResult != vk.Success {
-			if dev.timelineFence != nil {
-				dev.timelineFence.destroy(dev.cmds, dev.handle)
-			}
-			vkDestroyDevice(device, nil)
-			return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to create transfer fence: %d", fenceResult)
-		}
-		q.transferFence = transferFence
-	}
-
 	// Store queue reference in device for swapchain synchronization
 	dev.queue = q
 
-	syncMode := "binary fences"
-	if dev.timelineFence != nil {
-		syncMode = "timeline semaphore"
+	syncMode := "binary fence pool (VK-IMPL-003)"
+	if dev.timelineFence.isTimeline {
+		syncMode = "timeline semaphore (VK-IMPL-001)"
 	}
 	hal.Logger().Info("vulkan: device created",
 		"name", cStringToGo(a.properties.DeviceName[:]),
@@ -306,7 +288,7 @@ func vkGetDeviceQueue(cmds *vk.Commands, device vk.Device, queueFamilyIndex, que
 	cmds.GetDeviceQueue(device, queueFamilyIndex, queueIndex, queue)
 }
 
-func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) { //nolint:unparam // Vulkan API signature requires allocator parameter
+func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) {
 	// Get vkDestroyDevice function pointer directly since device commands
 	// may not be available when destroying the device
 	proc := vk.GetDeviceProcAddr(device, "vkDestroyDevice")

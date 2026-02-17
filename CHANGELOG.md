@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Vulkan command buffer batch allocation** (VK-IMPL-002) — Batch-allocate 16 command buffers
   per `vkAllocateCommandBuffers` call (matches wgpu-hal `ALLOCATION_GRANULARITY`). Free/used list
   recycling per frame slot. Handles are valid after `vkResetCommandPool` (flag 0).
+- **Vulkan binary fence pool** (VK-IMPL-003) — `fencePool` with per-submission tracking for
+  Vulkan <1.2 where timeline semaphores are unavailable. Active/free lists with non-blocking
+  `maintain()` polling, `signal()` fence acquisition, `wait()` with watermark fast-path.
+  Replaces 2-slot binary fence ring buffer and separate transfer fence. Mirrors Rust wgpu-hal
+  `FencePool` pattern. `deviceFence` now always created (never nil) — unified dual-path dispatch.
 - **Vulkan hot-path allocation reduction** — `sync.Pool` for CommandEncoder, CommandBuffer,
   ComputePassEncoder, RenderPassEncoder. Stack-allocated `[3]vk.ClearValue` in BeginRenderPass.
   Removed CommandPool wrapper struct. Per-frame Submit uses pooled `[]vk.CommandBuffer` slices.
