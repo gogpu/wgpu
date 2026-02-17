@@ -51,6 +51,12 @@ var (
 	//   - Invalid dimensions passed to Configure
 	ErrZeroArea = errors.New("hal: surface width and height must be non-zero")
 
+	// ErrTimestampsNotSupported indicates the backend does not support timestamp queries.
+	// This is returned by CreateQuerySet when QueryTypeTimestamp is requested
+	// on backends that lack GPU timestamp support (e.g., Software, Noop, GLES without
+	// GL_EXT_disjoint_timer_query).
+	ErrTimestampsNotSupported = errors.New("hal: timestamp queries not supported by this backend")
+
 	// ErrDriverBug indicates the GPU driver returned an invalid or unexpected result
 	// that violates the graphics API specification. This typically indicates a
 	// driver bug rather than an application error.

@@ -5,7 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.4] - 2026-02-18
+
+Vulkan timeline semaphore fences, binary fence pool, hot-path allocation optimization,
+and enterprise benchmarks. Internal performance improvements — no API changes.
+
+### Added
+
+- **Enterprise hot-path benchmarks** — 44+ benchmarks with `ReportAllocs()` covering Vulkan
+  Submit/Present/Encoding cycle, descriptor operations, memory allocator, noop backend overhead,
+  and cross-backend HAL interface. Table-driven sub-benchmarks for different sizes and workloads.
+- **Compute shader SDF integration test** — End-to-end GPU test: WGSL SDF shader → naga compile →
+  Vulkan compute pipeline → dispatch → ReadBuffer → CPU reference verification (256 pixels, ±0.01).
+- **Compute shader examples** — `cmd/compute-sum/` (parallel pairwise reduction) and
+  `cmd/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
+- **Timestamp queries for compute passes** — `ComputePassTimestampWrites`, `CreateQuerySet`,
+  `ResolveQuerySet` with full Vulkan implementation (`vkCmdWriteTimestamp`, `vkCmdCopyQueryPoolResults`).
+  Other backends return `ErrTimestampsNotSupported`.
+- **Software backend compute error** — `ErrComputeNotSupported` sentinel error with `errors.Is` support.
+- **Compute shader documentation** — `docs/compute-shaders.md` (getting started guide) and
+  `docs/compute-backends.md` (backend support matrix).
+
+### Changed
+
+- **Vulkan timeline semaphore fence** (VK-IMPL-001) — Single `VkSemaphore` with monotonic `uint64`
+  counter replaces binary `VkFence` ring buffer on Vulkan 1.2+. Signal attached to real
+  `vkQueueSubmit` (eliminates empty submit per frame). Replaces transfer fence state machine.
+  Graceful fallback to binary fences on pre-1.2 drivers. Based on Rust wgpu-hal `Fence::TimelineSemaphore`.
+- **Vulkan command buffer batch allocation** (VK-IMPL-002) — Batch-allocate 16 command buffers
+  per `vkAllocateCommandBuffers` call (matches wgpu-hal `ALLOCATION_GRANULARITY`). Free/used list
+  recycling per frame slot. Handles are valid after `vkResetCommandPool` (flag 0).
+- **Vulkan binary fence pool** (VK-IMPL-003) — `fencePool` with per-submission tracking for
+  Vulkan <1.2 where timeline semaphores are unavailable. Active/free lists with non-blocking
+  `maintain()` polling, `signal()` fence acquisition, `wait()` with watermark fast-path.
+  Replaces 2-slot binary fence ring buffer and separate transfer fence. Mirrors Rust wgpu-hal
+  `FencePool` pattern. `deviceFence` now always created (never nil) — unified dual-path dispatch.
+- **Vulkan hot-path allocation reduction** — `sync.Pool` for CommandEncoder, CommandBuffer,
+  ComputePassEncoder, RenderPassEncoder. Stack-allocated `[3]vk.ClearValue` in BeginRenderPass.
+  Removed CommandPool wrapper struct. Per-frame Submit uses pooled `[]vk.CommandBuffer` slices.
+  Result: BeginEndEncoding 15→13 allocs, ComputePassBeginEnd 25→22 allocs, EncodeSubmitCycle 28→26 allocs.
+
+### Fixed
+
+- **Vulkan transfer fence race condition** — `Submit()` now waits for previous GPU work before
+  resetting transfer fence, preventing "vkResetFences: pFences[0] is in use" validation error.
+- **Vulkan swapchain image view leak** — `createSwapchain()` now calls `destroyResources()`
+  (semaphores + image views) instead of `releaseSyncResources()` (semaphores only) when
+  reconfiguring, preventing "VkImageView has not been destroyed" validation errors on shutdown.
+- **Vulkan device destroy fence wait** — `Destroy()` waits for all in-flight frame slots
+  before destroying fences, preventing fence-in-use errors during cleanup.
 
 ## [0.16.3] - 2026-02-16
 
@@ -883,7 +931,10 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.4...HEAD
+[0.16.4]: https://github.com/gogpu/wgpu/compare/v0.16.3...v0.16.4
+[0.16.3]: https://github.com/gogpu/wgpu/compare/v0.16.2...v0.16.3
+[0.16.2]: https://github.com/gogpu/wgpu/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/gogpu/wgpu/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/gogpu/wgpu/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/gogpu/wgpu/compare/v0.15.0...v0.15.1

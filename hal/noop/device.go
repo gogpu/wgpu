@@ -94,6 +94,14 @@ func (d *Device) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.Co
 // DestroyComputePipeline is a no-op.
 func (d *Device) DestroyComputePipeline(_ hal.ComputePipeline) {}
 
+// CreateQuerySet returns ErrTimestampsNotSupported (noop backend has no GPU).
+func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, hal.ErrTimestampsNotSupported
+}
+
+// DestroyQuerySet is a no-op.
+func (d *Device) DestroyQuerySet(_ hal.QuerySet) {}
+
 // CreateCommandEncoder creates a noop command encoder.
 func (d *Device) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{}, nil

@@ -64,6 +64,8 @@ func (mockCommandEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []h
 func (mockCommandEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []hal.BufferTextureCopy) {
 }
 func (mockCommandEncoder) CopyTextureToTexture(_, _ hal.Texture, _ []hal.TextureCopy) {}
+func (mockCommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {
+}
 func (mockCommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return mockRenderPassEncoder{}
 }
@@ -141,6 +143,10 @@ func (m *mockHALDevice) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) 
 	return mockComputePipeline{}, nil
 }
 func (m *mockHALDevice) DestroyComputePipeline(_ hal.ComputePipeline) {}
+func (m *mockHALDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, hal.ErrTimestampsNotSupported
+}
+func (m *mockHALDevice) DestroyQuerySet(_ hal.QuerySet) {}
 func (m *mockHALDevice) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return mockCommandEncoder{}, nil
 }

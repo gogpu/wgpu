@@ -143,6 +143,13 @@ type Device interface {
 	// DestroyComputePipeline destroys a compute pipeline.
 	DestroyComputePipeline(pipeline ComputePipeline)
 
+	// CreateQuerySet creates a query set for timestamp or occlusion queries.
+	// Returns ErrTimestampsNotSupported if the backend does not support the query type.
+	CreateQuerySet(desc *QuerySetDescriptor) (QuerySet, error)
+
+	// DestroyQuerySet destroys a query set.
+	DestroyQuerySet(querySet QuerySet)
+
 	// CreateCommandEncoder creates a command encoder.
 	CreateCommandEncoder(desc *CommandEncoderDescriptor) (CommandEncoder, error)
 

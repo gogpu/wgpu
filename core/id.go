@@ -23,19 +23,16 @@ func Zip(index Index, epoch Epoch) RawID {
 
 // Unzip extracts the index and epoch from a RawID.
 func (id RawID) Unzip() (Index, Epoch) {
-	//nolint:gosec // G115: Safe conversion - masked to 32 bits
 	return Index(id & 0xFFFFFFFF), Epoch(id >> 32)
 }
 
 // Index returns the index component of the RawID.
 func (id RawID) Index() Index {
-	//nolint:gosec // G115: Safe conversion - masked to 32 bits
 	return Index(id & 0xFFFFFFFF)
 }
 
 // Epoch returns the epoch component of the RawID.
 func (id RawID) Epoch() Epoch {
-	//nolint:gosec // G115: Safe conversion - shifted down from upper 32 bits
 	return Epoch(id >> 32)
 }
 

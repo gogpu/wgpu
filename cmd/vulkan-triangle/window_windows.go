@@ -171,8 +171,8 @@ func NewWindow(title string, width, height int32) (*Window, error) {
 		uintptr(unsafe.Pointer(windowTitle)), //nolint:gosec // G103: Win32 API
 		uintptr(style),
 		100, 100, // x, y
-		uintptr(rc.Right-rc.Left),
-		uintptr(rc.Bottom-rc.Top),
+		uintptr(rc.Right-rc.Left), //nolint:gosec // G115: window dimensions always positive
+		uintptr(rc.Bottom-rc.Top), //nolint:gosec // G115: window dimensions always positive
 		0, 0, hInstance, 0,
 	)
 	if hwnd == 0 {

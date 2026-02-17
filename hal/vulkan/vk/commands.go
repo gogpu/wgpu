@@ -100,6 +100,10 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	// Platform-specific surface creation
 	c.createWin32SurfaceKHR = GetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR")
 
+	// Vulkan 1.1+ instance functions
+	c.getPhysicalDeviceFeatures2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2")
+	c.getPhysicalDeviceProperties2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2")
+
 	// Verify critical functions loaded
 	if c.destroyInstance == nil || c.enumeratePhysicalDevices == nil || c.createDevice == nil {
 		return fmt.Errorf("failed to load critical instance functions")
@@ -239,6 +243,11 @@ func (c *Commands) LoadDevice(device Device) error {
 	c.cmdEndRenderPass = GetDeviceProcAddr(device, "vkCmdEndRenderPass")
 	c.cmdExecuteCommands = GetDeviceProcAddr(device, "vkCmdExecuteCommands")
 
+	// Vulkan 1.2+ timeline semaphore functions
+	c.getSemaphoreCounterValue = GetDeviceProcAddr(device, "vkGetSemaphoreCounterValue")
+	c.waitSemaphores = GetDeviceProcAddr(device, "vkWaitSemaphores")
+	c.signalSemaphore = GetDeviceProcAddr(device, "vkSignalSemaphore")
+
 	// Swapchain functions (WSI)
 	c.createSwapchainKHR = GetDeviceProcAddr(device, "vkCreateSwapchainKHR")
 	c.destroySwapchainKHR = GetDeviceProcAddr(device, "vkDestroySwapchainKHR")
@@ -252,6 +261,20 @@ func (c *Commands) LoadDevice(device Device) error {
 	}
 
 	return nil
+}
+
+// HasTimelineSemaphore returns true if timeline semaphore functions were loaded.
+// These are Vulkan 1.2 core functions and should be available on all conformant drivers.
+func (c *Commands) HasTimelineSemaphore() bool {
+	return c.getSemaphoreCounterValue != nil &&
+		c.waitSemaphores != nil &&
+		c.signalSemaphore != nil
+}
+
+// HasPhysicalDeviceFeatures2 returns true if vkGetPhysicalDeviceFeatures2 is available.
+// This is a Vulkan 1.1 core function used to query extended feature support via PNext chains.
+func (c *Commands) HasPhysicalDeviceFeatures2() bool {
+	return c.getPhysicalDeviceFeatures2 != nil
 }
 
 // DebugFunctionPointer returns the address of the specified Vulkan function.

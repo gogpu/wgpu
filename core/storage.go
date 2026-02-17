@@ -168,7 +168,6 @@ func (s *Storage[T, M]) ForEach(fn func(ID[M], T) bool) {
 	for i := range s.slots {
 		slot := &s.slots[i]
 		if slot.valid {
-			//nolint:gosec // G115: Safe conversion - i is storage index, always < 2^32
 			id := NewID[M](Index(i), slot.epoch)
 			if !fn(id, slot.item) {
 				break

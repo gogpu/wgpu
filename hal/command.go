@@ -44,6 +44,14 @@ type CommandEncoder interface {
 	// CopyTextureToTexture copies data between textures.
 	CopyTextureToTexture(src, dst Texture, regions []TextureCopy)
 
+	// ResolveQuerySet copies query results from a query set into a buffer.
+	// firstQuery is the index of the first query to resolve.
+	// queryCount is the number of queries to resolve.
+	// destination is the buffer to write results to.
+	// destinationOffset is the byte offset into the destination buffer.
+	// Each timestamp result is a uint64 (8 bytes).
+	ResolveQuerySet(querySet QuerySet, firstQuery, queryCount uint32, destination Buffer, destinationOffset uint64)
+
 	// BeginRenderPass begins a render pass.
 	// Returns a render pass encoder for recording draw commands.
 	BeginRenderPass(desc *RenderPassDescriptor) RenderPassEncoder

@@ -12,31 +12,30 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// CommandPool manages command buffer allocation.
-type CommandPool struct {
-	handle vk.CommandPool
-	device *Device
-}
-
 // CommandBuffer holds a recorded Vulkan command buffer.
+// Pooled via cmdBufferResultPool to avoid per-frame heap allocation (VK-PERF-004).
 type CommandBuffer struct {
 	handle vk.CommandBuffer
-	pool   *CommandPool
+	pool   vk.CommandPool
 }
 
 // Destroy releases the command buffer resources.
+// Returns the struct to the pool for reuse (VK-PERF-004).
 func (c *CommandBuffer) Destroy() {
 	// Command buffers are freed when the pool is destroyed or reset.
 	// We cannot call vkFreeCommandBuffers here because:
 	// 1. GPU may still be using this command buffer (async submission)
 	// 2. Proper solution requires fence-based tracking or pool reset after WaitIdle
 	c.handle = 0
+	c.pool = 0
+	cmdBufferResultPool.Put(c)
 }
 
 // CommandEncoder implements hal.CommandEncoder for Vulkan.
+// Pooled via encoderPool to avoid per-frame heap allocation (VK-PERF-003).
 type CommandEncoder struct {
 	device      *Device
-	pool        *CommandPool
+	pool        vk.CommandPool
 	cmdBuffer   vk.CommandBuffer
 	label       string
 	isRecording bool
@@ -62,6 +61,8 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
+// Uses sync.Pool for CommandBuffer reuse (VK-PERF-004).
+// Returns the CommandEncoder to the pool after use.
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if !e.isRecording {
 		return nil, fmt.Errorf("vulkan: command encoder is not recording")
@@ -74,26 +75,41 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 
 	e.isRecording = false
 
-	return &CommandBuffer{
-		handle: e.cmdBuffer,
-		pool:   e.pool,
-	}, nil
+	// Reuse CommandBuffer from pool (VK-PERF-004).
+	cb := cmdBufferResultPool.Get().(*CommandBuffer)
+	cb.handle = e.cmdBuffer
+	cb.pool = e.pool
+
+	// Return encoder to pool for reuse.
+	e.device = nil
+	e.pool = 0
+	e.cmdBuffer = 0
+	e.label = ""
+	encoderPool.Put(e)
+
+	return cb, nil
 }
 
-// DiscardEncoding discards the encoder.
+// DiscardEncoding discards the encoder and returns it to the pool.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.isRecording {
 		// End the command buffer even though we're discarding it
 		_ = vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
 		e.isRecording = false
 	}
+	// Return encoder to pool for reuse.
+	e.device = nil
+	e.pool = 0
+	e.cmdBuffer = 0
+	e.label = ""
+	encoderPool.Put(e)
 }
 
 // ResetAll resets command buffers for reuse.
 func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
 	// Reset the pool instead of individual buffers for better performance
-	if e.pool != nil {
-		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool.handle, 0)
+	if e.pool != 0 {
+		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool, 0)
 	}
 	_ = commandBuffers // Individual buffers are reset with the pool
 }
@@ -379,14 +395,64 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	)
 }
 
+// ResolveQuerySet copies query results from a query set into a destination buffer.
+// For timestamp queries, each result is a uint64 (8 bytes).
+// This uses vkCmdCopyQueryPoolResults under the hood.
+func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
+	qs, ok := querySet.(*QuerySet)
+	if !ok || qs.pool == 0 || !e.isRecording {
+		return
+	}
+	buf, ok := destination.(*Buffer)
+	if !ok || buf.handle == 0 {
+		return
+	}
+
+	// Pipeline barrier: ensure timestamps are written before copy.
+	memBarrier := vk.MemoryBarrier{
+		SType:         vk.StructureTypeMemoryBarrier,
+		SrcAccessMask: vk.AccessFlags(vk.AccessTransferWriteBit),
+		DstAccessMask: vk.AccessFlags(vk.AccessTransferReadBit),
+	}
+	vkCmdPipelineBarrier(
+		e.device.cmds,
+		e.cmdBuffer,
+		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
+		vk.PipelineStageFlags(vk.PipelineStageTransferBit),
+		0,
+		1, &memBarrier,
+		0, nil,
+		0, nil,
+	)
+
+	// Use vkCmdCopyQueryPoolResults to copy timestamp values to the buffer.
+	// Stride is 8 bytes per timestamp (uint64).
+	// Flags: VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT.
+	vkCmdCopyQueryPoolResults(
+		e.device.cmds,
+		e.cmdBuffer,
+		qs.pool,
+		firstQuery,
+		queryCount,
+		buf.handle,
+		destinationOffset,
+		8, // stride: sizeof(uint64)
+		vk.QueryResultFlags(vk.QueryResult64Bit|vk.QueryResultWaitBit),
+	)
+}
+
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
 // Supports MSAA render passes with resolve targets and depth/stencil attachments.
+// Uses sync.Pool for RenderPassEncoder reuse (VK-PERF-006).
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
-	rpe := &RenderPassEncoder{
-		encoder: e,
-		desc:    desc,
-	}
+	rpe := renderPassPool.Get().(*RenderPassEncoder)
+	rpe.encoder = e
+	rpe.desc = desc
+	rpe.pipeline = nil
+	rpe.indexFormat = 0
+	rpe.renderPass = 0
+	rpe.framebuffer = 0
 
 	if !e.isRecording || len(desc.ColorAttachments) == 0 {
 		return rpe
@@ -498,10 +564,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	rpe.framebuffer = framebuffer
 
-	// Prepare clear values.
-	// Order MUST match attachment order in the render pass:
-	// [0] color, [1] resolve (if present), [2] depth/stencil (if present).
-	clearValues := make([]vk.ClearValue, 0, 3)
+	// Prepare clear values on the stack (max 3: color + resolve + depth/stencil).
+	// Using a fixed-size array avoids heap allocation on this per-frame path (VK-PERF-002).
+	var clearValuesArr [3]vk.ClearValue
+	clearValues := clearValuesArr[:0]
 	clearValues = append(clearValues, vk.ClearValueColor(
 		float32(ca.ClearValue.R),
 		float32(ca.ClearValue.G),
@@ -572,11 +638,31 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 }
 
 // BeginComputePass begins a compute pass.
+// Uses sync.Pool for ComputePassEncoder reuse (VK-PERF-005).
 func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	_ = desc // Compute passes don't need Vulkan-level begin/end
-	return &ComputePassEncoder{
-		encoder: e,
+	cpe := computePassPool.Get().(*ComputePassEncoder)
+	cpe.encoder = e
+	cpe.pipeline = nil
+	cpe.timestampWrites = nil
+
+	// Write beginning-of-pass timestamp if requested.
+	if desc != nil && desc.TimestampWrites != nil {
+		cpe.timestampWrites = desc.TimestampWrites
+		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
+			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.isRecording {
+				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
+				e.device.cmds.CmdResetQueryPool(e.cmdBuffer, qs.pool, idx, 1)
+				e.device.cmds.CmdWriteTimestamp(
+					e.cmdBuffer,
+					vk.PipelineStageTopOfPipeBit,
+					qs.pool,
+					idx,
+				)
+			}
+		}
 	}
+
+	return cpe
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Vulkan.
@@ -591,6 +677,7 @@ type RenderPassEncoder struct {
 }
 
 // End finishes the render pass.
+// Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
 	if !e.encoder.isRecording {
 		return
@@ -599,6 +686,14 @@ func (e *RenderPassEncoder) End() {
 	// Use vkCmdEndRenderPass (VkRenderPass handles layout transitions automatically
 	// via FinalLayout in AttachmentDescription)
 	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.cmdBuffer)
+
+	// Return to pool for reuse.
+	e.encoder = nil
+	e.desc = nil
+	e.pipeline = nil
+	e.renderPass = 0
+	e.framebuffer = 0
+	renderPassPool.Put(e)
 }
 
 // SetPipeline sets the render pipeline.
@@ -637,16 +732,18 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 }
 
 // SetVertexBuffer sets a vertex buffer.
+// Uses stack variables instead of slice allocations (VK-PERF-007).
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
 
-	offsets := []vk.DeviceSize{vk.DeviceSize(offset)}
-	buffers := []vk.Buffer{buf.handle}
+	// Stack-allocated single values avoid heap allocation (VK-PERF-007).
+	vkOffset := vk.DeviceSize(offset)
+	vkBuffer := buf.handle
 
-	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.cmdBuffer, slot, 1, &buffers[0], &offsets[0])
+	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.cmdBuffer, slot, 1, &vkBuffer, &vkOffset)
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -779,18 +876,37 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Vulkan.
 type ComputePassEncoder struct {
-	encoder  *CommandEncoder
-	pipeline *ComputePipeline
+	encoder         *CommandEncoder
+	pipeline        *ComputePipeline
+	timestampWrites *hal.ComputePassTimestampWrites
 }
 
 // End finishes the compute pass.
-// Inserts a global memory barrier so compute shader writes are visible to
-// subsequent commands (transfers, other dispatches, etc.). Without this
-// barrier the GPU may reorder a CopyBufferToBuffer before the compute
-// shader has finished writing, causing stale/zero reads.
+// Writes end-of-pass timestamp if requested, then inserts a global memory
+// barrier so compute shader writes are visible to subsequent commands
+// (transfers, other dispatches, etc.). Without this barrier the GPU may
+// reorder a CopyBufferToBuffer before the compute shader has finished
+// writing, causing stale/zero reads.
+// Returns the encoder to the pool for reuse (VK-PERF-005).
 func (e *ComputePassEncoder) End() {
 	if e.encoder == nil || !e.encoder.isRecording {
 		return
+	}
+
+	// Write end-of-pass timestamp if requested.
+	if e.timestampWrites != nil {
+		if qs, ok := e.timestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
+			if e.timestampWrites.EndOfPassWriteIndex != nil {
+				idx := *e.timestampWrites.EndOfPassWriteIndex
+				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.cmdBuffer, qs.pool, idx, 1)
+				e.encoder.device.cmds.CmdWriteTimestamp(
+					e.encoder.cmdBuffer,
+					vk.PipelineStageBottomOfPipeBit,
+					qs.pool,
+					idx,
+				)
+			}
+		}
 	}
 
 	// Global memory barrier: compute writes → everything after.
@@ -809,6 +925,12 @@ func (e *ComputePassEncoder) End() {
 		0, nil,
 		0, nil,
 	)
+
+	// Return to pool for reuse.
+	e.encoder = nil
+	e.pipeline = nil
+	e.timestampWrites = nil
+	computePassPool.Put(e)
 }
 
 // SetPipeline sets the compute pipeline.
@@ -1004,6 +1126,7 @@ func vkResetCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool
 	return cmds.ResetCommandPool(device, pool, flags)
 }
 
+//nolint:unparam // Vulkan API wrapper — signature mirrors vkCmdPipelineBarrier spec
 func vkCmdPipelineBarrier(cmds *vk.Commands, cmdBuffer vk.CommandBuffer,
 	srcStageMask, dstStageMask vk.PipelineStageFlags,
 	dependencyFlags vk.DependencyFlags,
@@ -1108,4 +1231,8 @@ func vkCmdDispatch(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, x, y, z uint32
 
 func vkCmdDispatchIndirect(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, buffer vk.Buffer, offset vk.DeviceSize) {
 	cmds.CmdDispatchIndirect(cmdBuffer, buffer, offset)
+}
+
+func vkCmdCopyQueryPoolResults(cmds *vk.Commands, cmdBuffer vk.CommandBuffer, queryPool vk.QueryPool, firstQuery, queryCount uint32, dstBuffer vk.Buffer, dstOffset, stride uint64, flags vk.QueryResultFlags) {
+	cmds.CmdCopyQueryPoolResults(cmdBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset, stride, flags)
 }

@@ -95,13 +95,17 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		imageUsage |= vk.ImageUsageFlags(vk.ImageUsageTransferDstBit)
 	}
 
-	// Handle old swapchain - release sync resources BEFORE creating new (wgpu pattern)
+	// Handle old swapchain - destroy resources (semaphores + image views) BEFORE creating new.
+	// Using destroyResources() instead of releaseSyncResources() ensures image views from
+	// the old swapchain are properly cleaned up, preventing "VkImageView has not been
+	// destroyed" validation errors on device destruction.
 	var oldSwapchain vk.SwapchainKHR
 	if s.swapchain != nil {
 		oldSwapchain = s.swapchain.handle
-		// Release semaphores BEFORE creating new swapchain (critical for sync safety)
-		// This does vkDeviceWaitIdle + destroy semaphores, but NOT the swapchain handle
-		s.swapchain.releaseSyncResources()
+		// Destroy semaphores AND image views BEFORE creating new swapchain.
+		// This does vkDeviceWaitIdle + destroy semaphores + destroy image views,
+		// but NOT the swapchain handle (destroyed after new one is created).
+		s.swapchain.destroyResources()
 	}
 
 	// Create swapchain (passing old handle for seamless transition)

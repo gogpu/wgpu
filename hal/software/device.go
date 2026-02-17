@@ -3,11 +3,16 @@
 package software
 
 import (
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/gogpu/wgpu/hal"
 )
+
+// ErrComputeNotSupported indicates that compute shaders are not available
+// in the software backend. The software backend only supports rasterization;
+// use a GPU-accelerated backend (Vulkan, Metal, DX12) for compute workloads.
+var ErrComputeNotSupported = errors.New("software: compute shaders not supported")
 
 // Device implements hal.Device for the software backend.
 type Device struct{}
@@ -109,13 +114,22 @@ func (d *Device) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.Rend
 // DestroyRenderPipeline is a no-op.
 func (d *Device) DestroyRenderPipeline(_ hal.RenderPipeline) {}
 
-// CreateComputePipeline returns an error as compute is not supported.
+// CreateComputePipeline returns ErrComputeNotSupported.
+// The software backend does not support compute shaders.
 func (d *Device) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, fmt.Errorf("compute pipelines not supported in software backend")
+	return nil, ErrComputeNotSupported
 }
 
 // DestroyComputePipeline is a no-op.
 func (d *Device) DestroyComputePipeline(_ hal.ComputePipeline) {}
+
+// CreateQuerySet is not supported in the software backend.
+func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, errors.New("software: query sets not supported")
+}
+
+// DestroyQuerySet is a no-op for the software device.
+func (d *Device) DestroyQuerySet(_ hal.QuerySet) {}
 
 // CreateCommandEncoder creates a software command encoder.
 func (d *Device) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
@@ -159,6 +173,17 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	}
 	return f.value.Load() > 0, nil
 }
+
+// FreeCommandBuffer is a no-op for the software device.
+func (d *Device) FreeCommandBuffer(_ hal.CommandBuffer) {}
+
+// CreateRenderBundleEncoder is not supported in the software backend.
+func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, errors.New("software: render bundles not supported")
+}
+
+// DestroyRenderBundle is a no-op for the software device.
+func (d *Device) DestroyRenderBundle(_ hal.RenderBundle) {}
 
 // WaitIdle is a no-op for the software device.
 func (d *Device) WaitIdle() error { return nil }

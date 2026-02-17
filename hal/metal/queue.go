@@ -14,11 +14,11 @@ import (
 )
 
 // maxFramesInFlight is the maximum number of frames the CPU can get ahead of
-// the GPU. Apple recommends 3 for smooth rendering without excessive memory use.
-// When the CPU tries to submit a frame beyond this limit, it blocks until the
-// GPU finishes an earlier frame, preventing unbounded resource growth and
-// drawable pool exhaustion.
-const maxFramesInFlight = 3
+// the GPU. A value of 2 matches the Vulkan and DX12 backends and provides good
+// latency/throughput balance. When the CPU tries to submit a frame beyond this
+// limit, it blocks until the GPU finishes an earlier frame, preventing unbounded
+// resource growth and drawable pool exhaustion.
+const maxFramesInFlight = 2
 
 // Queue implements hal.Queue for Metal.
 type Queue struct {
