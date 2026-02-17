@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-02-18
+
+### Fixed
+
+- **Vulkan per-encoder command pools** (VK-POOL-001) — Each `CreateCommandEncoder` now gets
+  its own dedicated `VkCommandPool` + `VkCommandBuffer` pair, matching Rust wgpu-hal architecture.
+  Eliminates race condition between per-frame bulk pool reset (`vkResetCommandPool`) and individual
+  command buffer freeing (`vkFreeCommandBuffers`) that caused `vkBeginCommandBuffer(): Couldn't find
+  VkCommandBuffer Object` access violation crashes. Pools are recycled via a thread-safe free list
+  with lazy reset on next acquire. No API changes — `hal.Device` interface unchanged.
+
 ## [0.16.4] - 2026-02-18
 
 Vulkan timeline semaphore fences, binary fence pool, hot-path allocation optimization,

@@ -93,8 +93,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	}
 
 	// Timeline path (VK-IMPL-001): Attach timeline semaphore signal to the real submit.
-	// This replaces the empty signalFrameFence submit with a single inline signal
-	// on the actual command buffer submit.
+	// This enables waitForGPU to track the latest submission.
 	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
 	if q.device.timelineFence.isTimeline { //nolint:nestif // timeline PNext chaining requires conditional semaphore setup
 		signalValue := q.device.timelineFence.nextSignalValue()
@@ -467,8 +466,6 @@ func (q *Queue) waitForGPU() {
 }
 
 // Present presents a surface texture to the screen.
-// After presenting, advances the frame index and recycles the old command pool
-// from the reused slot (VK-OPT-002/003).
 func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -483,24 +480,8 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	}
 
 	err := vkSurface.swapchain.present(q)
-
-	// Clear active swapchain after present
 	q.activeSwapchain = nil
-
-	if err != nil {
-		return err
-	}
-
-	// Signal the frame fence once per frame (after all submits, before advance).
-	// This marks the current slot as in-flight so advanceFrame knows when to wait.
-	if err := q.device.signalFrameFence(); err != nil {
-		return err
-	}
-
-	// Advance the frame index and recycle the old command pool.
-	// This waits only for the specific old frame in the reused slot --
-	// not all GPU work -- enabling CPU/GPU overlap (VK-OPT-003).
-	return q.device.advanceFrame()
+	return err
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.

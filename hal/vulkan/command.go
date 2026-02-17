@@ -90,12 +90,16 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	return cb, nil
 }
 
-// DiscardEncoding discards the encoder and returns it to the pool.
+// DiscardEncoding discards the encoder and recycles its pool+buffer pair.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.isRecording {
-		// End the command buffer even though we're discarding it
+		// End the command buffer even though we're discarding it.
 		_ = vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
 		e.isRecording = false
+	}
+	// Recycle the per-encoder pool+buffer pair for reuse (VK-POOL-001).
+	if e.device != nil && e.pool != 0 && e.cmdBuffer != 0 {
+		e.device.recycleAllocator(commandAllocator{pool: e.pool, cmdBuffer: e.cmdBuffer})
 	}
 	// Return encoder to pool for reuse.
 	e.device = nil
