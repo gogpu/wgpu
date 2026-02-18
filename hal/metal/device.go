@@ -720,6 +720,7 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 	if desc != nil {
 		label = desc.Label
 	}
+	hal.Logger().Debug("metal: command encoder created", "label", label)
 	return &CommandEncoder{device: d, label: label}, nil
 }
 
@@ -804,6 +805,7 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 // Returns (result, error, true) if the event-driven path was used.
 // Returns (false, nil, false) if the path is unavailable and caller should fall back.
 func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error, bool) {
+	hal.Logger().Debug("metal: Wait", "value", value, "timeout", timeout, "path", "event-driven")
 	listener := d.getOrCreateEventListener()
 	if listener == 0 {
 		return false, nil, false
@@ -847,6 +849,7 @@ func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Dur
 // waitPolling waits for a fence using progressive backoff polling.
 // This is the fallback path when event-driven notification is unavailable.
 func (d *Device) waitPolling(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error) {
+	hal.Logger().Debug("metal: Wait (polling)", "value", value, "timeout", timeout)
 	deadline := time.Now().Add(timeout)
 	spins := 0
 	for {
@@ -926,6 +929,7 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 // all in-flight slots are reclaimed. This prevents deadlocks when the caller
 // wants to submit new work after WaitIdle returns.
 func (d *Device) WaitIdle() error {
+	hal.Logger().Debug("metal: WaitIdle starting")
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
@@ -960,11 +964,13 @@ func (d *Device) WaitIdle() error {
 		}
 	}
 
+	hal.Logger().Debug("metal: WaitIdle complete")
 	return nil
 }
 
 // Destroy releases the device and associated resources.
 func (d *Device) Destroy() {
+	hal.Logger().Debug("metal: device destroyed")
 	if d.eventListener != 0 {
 		Release(d.eventListener)
 		d.eventListener = 0

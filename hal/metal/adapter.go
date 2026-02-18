@@ -42,6 +42,11 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	// Back-reference so Device.WaitIdle can drain the frame semaphore.
 	device.queue = queue
 
+	hal.Logger().Debug("metal: adapter opened",
+		"maxFramesInFlight", maxFramesInFlight,
+		"blockSupport", symNSConcreteStackBlock != 0,
+	)
+
 	return hal.OpenDevice{
 		Device: device,
 		Queue:  queue,

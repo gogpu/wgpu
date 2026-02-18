@@ -54,6 +54,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		Release(nsLabel)
 	}
 	pool.Drain()
+	hal.Logger().Debug("metal: encoding started", "label", label)
 	return nil
 }
 
@@ -65,6 +66,7 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	}
 	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device}
 	e.cmdBuffer = 0 // Recording state becomes false
+	hal.Logger().Debug("metal: encoding ended")
 	return cb, nil
 }
 
@@ -72,6 +74,7 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 // After call, IsRecording() returns false.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.cmdBuffer != 0 {
+		hal.Logger().Debug("metal: encoding discarded")
 		Release(e.cmdBuffer)
 		e.cmdBuffer = 0 // Recording state becomes false
 	}

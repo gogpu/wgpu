@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.6] - 2026-02-18
+
+### Added
+
+- **Metal backend debug logging** — 23 new `hal.Logger()` calls across the critical
+  rendering path: `AcquireTexture`, `Submit`, `Present`, `BeginEncoding`/`EndEncoding`,
+  `CreateCommandEncoder`, `Wait`/`WaitIdle`, `Destroy`, and all three ObjC block callback
+  invocations (shared event, completion handler, frame completion). Enables diagnosis of
+  blank window issues on macOS (gogpu/gogpu#89) and validates goffi callback delivery
+  (go-webgpu/goffi#16). Metal backend now has ~38 log points, matching Vulkan/DX12 coverage.
+
+### Changed
+
+- **goffi** v0.3.8 → v0.3.9
+
 ## [0.16.5] - 2026-02-18
 
 ### Fixed
@@ -942,7 +957,9 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.4...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.6...HEAD
+[0.16.6]: https://github.com/gogpu/wgpu/compare/v0.16.5...v0.16.6
+[0.16.5]: https://github.com/gogpu/wgpu/compare/v0.16.4...v0.16.5
 [0.16.4]: https://github.com/gogpu/wgpu/compare/v0.16.3...v0.16.4
 [0.16.3]: https://github.com/gogpu/wgpu/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/gogpu/wgpu/compare/v0.16.1...v0.16.2

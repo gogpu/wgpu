@@ -80,6 +80,7 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 
 // Unconfigure removes surface configuration.
 func (s *Surface) Unconfigure(_ hal.Device) {
+	hal.Logger().Debug("metal: surface unconfigured")
 	// Nothing to release for Metal layer
 	s.device = nil
 }
@@ -91,12 +92,14 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 
 	drawable := MsgSend(s.layer, Sel("nextDrawable"))
 	if drawable == 0 {
+		hal.Logger().Error("metal: nextDrawable failed", "layer", s.layer)
 		return nil, fmt.Errorf("metal: failed to get next drawable")
 	}
 	Retain(drawable)
 
 	texture := MsgSend(drawable, Sel("texture"))
 	if texture == 0 {
+		hal.Logger().Error("metal: drawable has no texture", "drawable", drawable)
 		Release(drawable)
 		return nil, fmt.Errorf("metal: drawable has no texture")
 	}
@@ -115,6 +118,13 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		device:     s.device,
 		isExternal: true,
 	}
+
+	hal.Logger().Debug("metal: surface texture acquired",
+		"drawable", drawable,
+		"texture", texture,
+		"width", s.width,
+		"height", s.height,
+	)
 
 	return &hal.AcquiredSurfaceTexture{
 		Texture: &SurfaceTexture{
@@ -137,6 +147,7 @@ func (s *Surface) DiscardTexture(tex hal.SurfaceTexture) {
 
 // Destroy releases the surface.
 func (s *Surface) Destroy() {
+	hal.Logger().Debug("metal: surface destroyed")
 	if s.layer != 0 {
 		Release(s.layer)
 		s.layer = 0
