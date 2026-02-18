@@ -19,9 +19,13 @@
 
 ---
 
-## Current State: v0.16.5
+## Current State: v0.16.6
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.6:**
+- Metal backend debug logging — 23 new log points across rendering path, callbacks, and lifecycle (gogpu/gogpu#89, go-webgpu/goffi#16)
+- goffi v0.3.9
 
 **New in v0.16.5:**
 - Vulkan per-encoder command pools — dedicated VkCommandPool per encoder, eliminates VkCommandBuffer crash
@@ -105,7 +109,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.4** | 2026-02 | Timeline semaphore, FencePool, batch alloc, hot-path benchmarks |
+| **v0.16.6** | 2026-02 | Metal debug logging (23 log points), goffi v0.3.9 |
+| v0.16.5 | 2026-02 | Vulkan per-encoder command pools |
+| v0.16.4 | 2026-02 | Timeline semaphore, FencePool, batch alloc, hot-path benchmarks |
 | v0.16.3 | 2026-02 | Per-frame fence tracking, GLES VSync, WaitIdle interface |
 | v0.16.2 | 2026-02 | Metal autorelease pool LIFO fix (macOS Tahoe crash) |
 | v0.16.1 | 2026-02 | Vulkan framebuffer cache invalidation fix |

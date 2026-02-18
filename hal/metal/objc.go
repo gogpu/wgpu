@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Objective-C runtime library handle and function symbols.
@@ -561,6 +562,8 @@ func getSharedEventBlockInvoke() uintptr {
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
 			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
 
+			hal.Logger().Debug("metal: shared event notification fired", "blockID", blockID)
+
 			if entry, ok := blockRegistry.Load(blockID); ok {
 				e := entry.(*blockRegistryEntry)
 				select {
@@ -657,6 +660,8 @@ func getCompletedHandlerBlockInvoke() uintptr {
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
 			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			hal.Logger().Debug("metal: completion handler fired", "blockID", blockID)
 
 			if val, ok := completedHandlerRegistry.LoadAndDelete(blockID); ok {
 				stagingBuf := val.(ID)
@@ -761,6 +766,8 @@ func getFrameCompletionBlockInvoke() uintptr {
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
 			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			hal.Logger().Debug("metal: frame completion fired", "blockID", blockID)
 
 			if val, ok := frameCompletionRegistry.LoadAndDelete(blockID); ok {
 				ch := val.(chan<- struct{})

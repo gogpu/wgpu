@@ -46,6 +46,11 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		<-q.frameSemaphore
 	}
 
+	hal.Logger().Debug("metal: Submit",
+		"buffers", len(commandBuffers),
+		"hasFence", fence != nil,
+	)
+
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
@@ -69,12 +74,14 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		// Schedule presentation BEFORE commit (Metal requirement)
 		if cb.drawable != 0 {
 			_ = MsgSend(cb.raw, Sel("presentDrawable:"), uintptr(cb.drawable))
+			hal.Logger().Debug("metal: presentDrawable scheduled")
 		}
 
 		// On the last command buffer, register a completion handler to release
 		// the frame semaphore slot when the GPU finishes this batch.
 		if i == lastIdx && q.frameSemaphore != nil {
 			q.registerFrameCompletionHandler(cb.raw)
+			hal.Logger().Debug("metal: frame completion handler registered")
 		}
 
 		// Commit the command buffer
@@ -98,6 +105,7 @@ func (q *Queue) registerFrameCompletionHandler(cmdBuffer ID) {
 		// Block creation failed — release the semaphore slot immediately
 		// so the pipeline does not deadlock. This degrades gracefully to
 		// no throttling for this frame.
+		hal.Logger().Warn("metal: frame completion block creation failed")
 		q.frameSemaphore <- struct{}{}
 		return
 	}
@@ -289,6 +297,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // This method only releases the drawable reference. The present was already
 // scheduled during Submit() if a drawable was attached to the command buffer.
 func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+	hal.Logger().Debug("metal: Present")
 	st, ok := texture.(*SurfaceTexture)
 	if !ok || st == nil {
 		return nil
