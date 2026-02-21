@@ -290,12 +290,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 // Present presents a surface texture to the screen.
 //
-// Note: On Metal, the actual presentation is scheduled via presentDrawable:
-// in Submit() BEFORE the command buffer is committed. This ensures proper
-// synchronization between GPU work and display.
-//
-// This method only releases the drawable reference. The present was already
-// scheduled during Submit() if a drawable was attached to the command buffer.
+// Creates a dedicated command buffer, calls presentDrawable:, and commits.
+// This matches the Rust wgpu Metal backend pattern where presentation is
+// handled in a separate command buffer from rendering work.
 func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	hal.Logger().Debug("metal: Present")
 	st, ok := texture.(*SurfaceTexture)
@@ -303,10 +300,21 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return nil
 	}
 
-	// Release drawable reference (presentation was scheduled in Submit)
 	if st.drawable != 0 {
+		pool := NewAutoreleasePool()
+
+		// Create a dedicated command buffer for presentation
+		cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
+		if cmdBuffer != 0 {
+			_ = MsgSend(cmdBuffer, Sel("presentDrawable:"), uintptr(st.drawable))
+			_ = MsgSend(cmdBuffer, Sel("commit"))
+			hal.Logger().Debug("metal: presentDrawable committed")
+		}
+
 		Release(st.drawable)
 		st.drawable = 0
+
+		pool.Drain()
 	}
 
 	return nil
