@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.8] - 2026-02-21
+
+### Fixed
+
+- **Metal: blank window on macOS** ([gogpu#89](https://github.com/gogpu/gogpu/issues/89)) —
+  `Queue.Present()` only released the drawable reference without calling `presentDrawable:`.
+  Now creates a dedicated command buffer for presentation matching the Rust wgpu pattern:
+  `commandBuffer` → `presentDrawable:` → `commit`. Fixes blank rendering on macOS Tahoe M2 Max.
+
 ## [0.16.7] - 2026-02-21
 
 ### Dependencies
