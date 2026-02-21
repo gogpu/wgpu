@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.9] - 2026-02-21
+
+### Dependencies
+
+- naga v0.14.0 → v0.14.1 (HLSL row_major matrices for DX12, GLSL namedExpressions leak fix for GLES)
+
 ## [0.16.8] - 2026-02-21
 
 ### Fixed
