@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.10] - 2026-02-22
+
+### Fixed
+
+- **Vulkan: pre-acquire semaphore wait** (VK-IMPL-004) — Acquire semaphores are rotated across
+  frames, but nothing guaranteed the GPU had consumed the previous wait before reuse, violating
+  `VUID-vkAcquireNextImageKHR-semaphore-01779` on some drivers. Now tracks the submission fence
+  value per acquire semaphore and waits before reuse, matching Rust wgpu's
+  `previously_used_submission_index` pattern. Also adds binary fence pool tracking to
+  `SubmitForPresent` which previously submitted with no fence at all.
+  ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
+### Dependencies
+
+- naga v0.14.1 → v0.14.2 (GLSL GL_ARB_separate_shader_objects fix, golden snapshot tests)
+
 ## [0.16.9] - 2026-02-21
 
 ### Dependencies

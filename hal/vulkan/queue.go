@@ -74,6 +74,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	// Subsequent submits in the same frame run without semaphore synchronization.
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	var submitFence vk.Fence
+	consumedAcquire := false // tracks whether THIS submit consumes the acquire semaphore
 	if q.activeSwapchain != nil && !q.acquireUsed {
 		acquireSem := q.activeSwapchain.currentAcquireSem
 		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
@@ -82,7 +83,8 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		submitInfo.PWaitDstStageMask = &waitStage
 		submitInfo.SignalSemaphoreCount = 1
 		submitInfo.PSignalSemaphores = &presentSem
-		q.acquireUsed = true // Mark as used for this frame
+		q.acquireUsed = true
+		consumedAcquire = true
 	}
 
 	// Use user-provided fence if available
@@ -97,6 +99,13 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
 	if q.device.timelineFence.isTimeline { //nolint:nestif // timeline PNext chaining requires conditional semaphore setup
 		signalValue := q.device.timelineFence.nextSignalValue()
+
+		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
+		// Pre-acquire wait in acquireNextImage() uses this to ensure the GPU
+		// has finished before reusing the semaphore.
+		if consumedAcquire {
+			q.activeSwapchain.acquireFenceValues[q.activeSwapchain.currentAcquireIdx] = signalValue
+		}
 		timelineSubmitInfo = vk.TimelineSemaphoreSubmitInfo{
 			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
 			SignalSemaphoreValueCount: 1,
@@ -147,6 +156,11 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	// enabling waitForGPU to wait for specific or latest submissions.
 	pool := q.device.timelineFence.pool
 	signalValue := q.device.timelineFence.nextSignalValue()
+
+	// VK-IMPL-004: Record fence value for pre-acquire wait (binary path).
+	if consumedAcquire {
+		q.activeSwapchain.acquireFenceValues[q.activeSwapchain.currentAcquireIdx] = signalValue
+	}
 	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
 	if err != nil {
 		return fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
@@ -221,9 +235,12 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 	}
 
 	// Timeline path (VK-IMPL-001): Also signal the timeline semaphore on this submit.
-	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
 	if q.device.timelineFence.isTimeline {
 		signalValue := q.device.timelineFence.nextSignalValue()
+
+		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
+		swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
+
 		signalSems := [2]vk.Semaphore{presentSem, q.device.timelineFence.timelineSemaphore}
 		signalValues := [2]uint64{0, signalValue} // 0 for binary, value for timeline
 		waitValue := uint64(0)                    // Binary acquire semaphore: value ignored
@@ -231,7 +248,7 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		submitInfo.SignalSemaphoreCount = 2
 		submitInfo.PSignalSemaphores = &signalSems[0]
 
-		timelineSubmitInfo = vk.TimelineSemaphoreSubmitInfo{
+		timelineSubmitInfo := vk.TimelineSemaphoreSubmitInfo{
 			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
 			WaitSemaphoreValueCount:   1,
 			PWaitSemaphoreValues:      &waitValue,
@@ -239,9 +256,28 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 			PSignalSemaphoreValues:    &signalValues[0],
 		}
 		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
+
+		result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		}
+		return nil
 	}
 
-	result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
+	// Binary path (VK-IMPL-003): Track submission with fence pool for waitForGPU
+	// and VK-IMPL-004 pre-acquire semaphore wait.
+	pool := q.device.timelineFence.pool
+	signalValue := q.device.timelineFence.nextSignalValue()
+
+	// VK-IMPL-004: Record which submission consumed this acquire semaphore.
+	swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
+
+	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
+	if err != nil {
+		return fmt.Errorf("vulkan: SubmitForPresent fencePool signal: %w", err)
+	}
+
+	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
