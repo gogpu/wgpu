@@ -19,9 +19,13 @@
 
 ---
 
-## Current State: v0.16.6
+## Current State: v0.16.10
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.10:**
+- Vulkan pre-acquire semaphore wait (VK-IMPL-004) — fixes `VUID-vkAcquireNextImageKHR-semaphore-01779` (gogpu#98)
+- naga v0.14.2 (GLSL GL_ARB_separate_shader_objects fix, golden snapshot tests)
 
 **New in v0.16.6:**
 - Metal backend debug logging — 23 new log points across rendering path, callbacks, and lifecycle (gogpu/gogpu#89, go-webgpu/goffi#16)

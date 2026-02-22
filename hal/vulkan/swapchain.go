@@ -23,8 +23,9 @@ type Swapchain struct {
 	presentMode vk.PresentModeKHR
 	// Acquire semaphores - rotated through for each acquire (like wgpu).
 	// We don't know which image we'll get, so we can't index by image.
-	acquireSemaphores []vk.Semaphore
-	nextAcquireIdx    int
+	acquireSemaphores  []vk.Semaphore
+	acquireFenceValues []uint64 // fence value when each acquire semaphore was last consumed by Submit
+	nextAcquireIdx     int
 
 	// Present semaphores - one per swapchain image (known after acquire).
 	presentSemaphores []vk.Semaphore
@@ -231,9 +232,10 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		}
 	}
 
-	// NOTE: Per-acquire fences removed. wgpu uses timeline semaphores to track
-	// when each acquire semaphore was last used. We rely on vkAcquireNextImageKHR
-	// to block when no images are available (FIFO mode guarantees this).
+	// VK-IMPL-004: acquireFenceValues tracks the submission fence value when each
+	// acquire semaphore was last consumed by Submit/SubmitForPresent. The pre-acquire
+	// wait in acquireNextImage() uses this to ensure the GPU has finished before
+	// reusing the semaphore (required by VUID-vkAcquireNextImageKHR-semaphore-01779).
 
 	// Create surface textures
 	surfaceTextures := make([]*SwapchainTexture, len(images))
@@ -253,18 +255,19 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	// Store swapchain
 	swapchain := &Swapchain{
-		handle:            swapchainHandle,
-		surface:           s,
-		device:            device,
-		images:            images,
-		imageViews:        imageViews,
-		format:            vkFormat,
-		extent:            extent,
-		presentMode:       presentMode,
-		acquireSemaphores: acquireSemaphores,
-		nextAcquireIdx:    0,
-		presentSemaphores: presentSemaphores,
-		surfaceTextures:   surfaceTextures,
+		handle:             swapchainHandle,
+		surface:            s,
+		device:             device,
+		images:             images,
+		imageViews:         imageViews,
+		format:             vkFormat,
+		extent:             extent,
+		presentMode:        presentMode,
+		acquireSemaphores:  acquireSemaphores,
+		acquireFenceValues: make([]uint64, len(acquireSemaphores)),
+		nextAcquireIdx:     0,
+		presentSemaphores:  presentSemaphores,
+		surfaceTextures:    surfaceTextures,
 	}
 
 	// Link swapchain to surface textures
@@ -366,17 +369,22 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 	const timeout = uint64(1_000_000_000) // 1000ms = 1 second
 
 	// Get the acquire semaphore from the rotating pool.
-	// NOTE: Pre-acquire fence wait is removed. wgpu uses timeline semaphores
-	// to track when each semaphore was last used, which we don't have yet.
-	// Instead, we rely on vkAcquireNextImageKHR to block when no images
-	// are available (FIFO mode guarantees this).
 	acquireIdx := sc.nextAcquireIdx
 	acquireSem := sc.acquireSemaphores[acquireIdx]
 
-	// Acquire next image with semaphore only (no fence).
-	// Post-acquire fence wait is disabled for now - it's a Windows/Intel optimization
+	// Pre-acquire wait: ensure the GPU has consumed this semaphore from
+	// a previous frame's Submit before we pass it to vkAcquireNextImageKHR again.
+	// Without this, the semaphore may still have pending operations,
+	// violating VUID-vkAcquireNextImageKHR-semaphore-01779.
+	// See: wgpu-hal/src/vulkan/swapchain/native.rs — previously_used_submission_index
+	if prevValue := sc.acquireFenceValues[acquireIdx]; prevValue > 0 {
+		_ = sc.device.timelineFence.waitForValue(
+			sc.device.cmds, sc.device.handle, prevValue, timeout,
+		)
+	}
+
+	// Post-acquire fence wait is not implemented — it's a Windows/Intel optimization
 	// for DXGI frame pacing (see wgpu issues #8310, #8354), not required for correctness.
-	// The semaphore-based GPU synchronization is sufficient.
 	var imageIndex uint32
 	result := vkAcquireNextImageKHR(sc.device, sc.handle, timeout, acquireSem, vk.Fence(0), &imageIndex)
 
