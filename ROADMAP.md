@@ -23,6 +23,9 @@
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
 
+**Next (unreleased):**
+- Vulkan zero-extent swapchain fix (VK-VAL-001) — config-primary extent, unconditional viewport/scissor (gogpu#98)
+
 **New in v0.16.10:**
 - Vulkan pre-acquire semaphore wait (VK-IMPL-004) — fixes `VUID-vkAcquireNextImageKHR-semaphore-01779` (gogpu#98)
 - naga v0.14.2 (GLSL GL_ARB_separate_shader_objects fix, golden snapshot tests)

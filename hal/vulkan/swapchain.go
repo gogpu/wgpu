@@ -73,12 +73,24 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		imageCount = capabilities.MaxImageCount
 	}
 
-	// Determine extent - use CurrentExtent if valid, otherwise use config dimensions.
-	// CurrentExtent of 0xFFFFFFFF means the surface size is determined by the swapchain extent.
-	extent := capabilities.CurrentExtent
-	if extent.Width == 0xFFFFFFFF {
-		extent.Width = config.Width
-		extent.Height = config.Height
+	// Use config dimensions as primary source (matching Rust wgpu-hal behavior).
+	// CurrentExtent from the driver is used only for clamping to the valid range.
+	// Ref: wgpu-hal/src/vulkan/swapchain/native.rs:189-197
+	extent := vk.Extent2D{
+		Width:  config.Width,
+		Height: config.Height,
+	}
+
+	// Clamp to driver-reported range when CurrentExtent is defined.
+	// CurrentExtent of 0xFFFFFFFF means the surface size is determined by the swapchain.
+	if capabilities.CurrentExtent.Width != 0xFFFFFFFF {
+		extent.Width = clampUint32(extent.Width, capabilities.MinImageExtent.Width, capabilities.MaxImageExtent.Width)
+		extent.Height = clampUint32(extent.Height, capabilities.MinImageExtent.Height, capabilities.MaxImageExtent.Height)
+	}
+
+	// Zero extent means the window is minimized -- skip swapchain creation.
+	if extent.Width == 0 || extent.Height == 0 {
+		return hal.ErrZeroArea
 	}
 
 	// Convert format
@@ -469,6 +481,11 @@ func presentModeToVk(mode hal.PresentMode) vk.PresentModeKHR {
 	default:
 		return vk.PresentModeFifoKhr
 	}
+}
+
+// clampUint32 returns v clamped to [lo, hi].
+func clampUint32(v, lo, hi uint32) uint32 {
+	return max(lo, min(v, hi))
 }
 
 // Vulkan function wrappers using Commands methods

@@ -611,25 +611,29 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// NOTE: Viewport Y-flip is required for WebGPU/OpenGL coordinate system compatibility.
 	// Vulkan has Y pointing down, WebGPU has Y pointing up.
 	// Solution: Start Y at height and use negative height (matches Rust wgpu).
-	if renderWidth > 0 && renderHeight > 0 {
-		// Y-flip for WebGPU compatibility: Vulkan Y points down, WebGPU Y points up.
-		// Use negative height and start Y at bottom (matches Rust wgpu approach).
-		viewport := vk.Viewport{
-			X:        0,
-			Y:        float32(renderHeight), // Start at bottom
-			Width:    float32(renderWidth),
-			Height:   -float32(renderHeight), // Negative height for Y-flip
-			MinDepth: 0.0,
-			MaxDepth: 1.0,
-		}
-		vkCmdSetViewport(e.device.cmds, e.cmdBuffer, 0, 1, &viewport)
+	// Always set viewport/scissor -- the pipeline declares them as dynamic state,
+	// so they must be initialized before any draw call regardless of dimensions.
+	// Use max(1, dim) as safety net to satisfy Vulkan spec minimum extent.
+	viewW := max(float32(renderWidth), 1.0)
+	viewH := max(float32(renderHeight), 1.0)
 
-		scissor := vk.Rect2D{
-			Offset: vk.Offset2D{X: 0, Y: 0},
-			Extent: vk.Extent2D{Width: renderWidth, Height: renderHeight},
-		}
-		vkCmdSetScissor(e.device.cmds, e.cmdBuffer, 0, 1, &scissor)
+	// Y-flip for WebGPU compatibility: Vulkan Y points down, WebGPU Y points up.
+	// Use negative height and start Y at bottom (matches Rust wgpu approach).
+	viewport := vk.Viewport{
+		X:        0,
+		Y:        viewH, // Start at bottom
+		Width:    viewW,
+		Height:   -viewH, // Negative height for Y-flip
+		MinDepth: 0.0,
+		MaxDepth: 1.0,
 	}
+	vkCmdSetViewport(e.device.cmds, e.cmdBuffer, 0, 1, &viewport)
+
+	scissor := vk.Rect2D{
+		Offset: vk.Offset2D{X: 0, Y: 0},
+		Extent: vk.Extent2D{Width: max(renderWidth, 1), Height: max(renderHeight, 1)},
+	}
+	vkCmdSetScissor(e.device.cmds, e.cmdBuffer, 0, 1, &scissor)
 
 	// Set default blend constants and stencil reference.
 	// All pipelines declare these as dynamic state (matching Rust wgpu),
