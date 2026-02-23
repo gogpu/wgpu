@@ -143,9 +143,12 @@ wgpu/
 │   ├── vulkan/         # Vulkan 1.3 (~38K LOC)
 │   ├── metal/          # Metal (~5K LOC)
 │   └── dx12/           # DirectX 12 (~14K LOC)
+├── examples/
+│   ├── compute-copy/   # GPU buffer copy with compute shader
+│   └── compute-sum/    # Parallel reduction on GPU
 └── cmd/
     ├── vk-gen/         # Vulkan bindings generator
-    └── vulkan-triangle/# Integration test
+    └── ...             # Backend integration tests
 ```
 
 ### HAL Backend Integration

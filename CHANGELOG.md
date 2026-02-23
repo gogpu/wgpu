@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.11] - 2026-02-23
+
+### Fixed
+
+- **Vulkan: zero-extent swapchain on window minimize** (VK-VAL-001) — `createSwapchain()` used
+  `capabilities.CurrentExtent` as primary extent source. NVIDIA drivers report `CurrentExtent = {0, 0}`
+  when minimized, passing zero directly to `vkCreateSwapchainKHR` and violating
+  `VUID-VkSwapchainCreateInfoKHR-imageExtent-01274`. Now uses `config` dimensions as primary source
+  (matching Rust wgpu-hal `native.rs:189-197` pattern), with `CurrentExtent` only for clamping to
+  the valid range. Returns `hal.ErrZeroArea` when clamped extent is zero.
+  ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
+- **Vulkan: unconditional viewport/scissor in BeginRenderPass** — viewport and scissor dynamic state
+  was conditionally set only when render dimensions > 0. When zero-extent frames slipped through,
+  the pipeline's dynamic state was never initialized, causing `VUID-vkCmdDraw-None-07831` and
+  `VUID-vkCmdDraw-None-07832` validation errors. Now always sets viewport/scissor using
+  `max(dim, 1)` as safety net.
+  ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
+### Changed
+
+- **Public examples moved to `examples/`** — `compute-copy` and `compute-sum` moved from `cmd/` to
+  `examples/` following Go project layout conventions. `cmd/` retains internal tools (vk-gen, backend tests).
+
 ## [0.16.10] - 2026-02-22
 
 ### Fixed
@@ -80,8 +104,8 @@ and enterprise benchmarks. Internal performance improvements — no API changes.
   and cross-backend HAL interface. Table-driven sub-benchmarks for different sizes and workloads.
 - **Compute shader SDF integration test** — End-to-end GPU test: WGSL SDF shader → naga compile →
   Vulkan compute pipeline → dispatch → ReadBuffer → CPU reference verification (256 pixels, ±0.01).
-- **Compute shader examples** — `cmd/compute-sum/` (parallel pairwise reduction) and
-  `cmd/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
+- **Compute shader examples** — `examples/compute-sum/` (parallel pairwise reduction) and
+  `examples/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
 - **Timestamp queries for compute passes** — `ComputePassTimestampWrites`, `CreateQuerySet`,
   `ResolveQuerySet` with full Vulkan implementation (`vkCmdWriteTimestamp`, `vkCmdCopyQueryPoolResults`).
   Other backends return `ErrTimestampsNotSupported`.

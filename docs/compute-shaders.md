@@ -422,7 +422,7 @@ if errors.Is(err, hal.ErrTimestampsNotSupported) {
 
 ## Complete Example
 
-See `cmd/compute-sum/` for a working example of a compute shader that sums array elements.
+See `examples/compute-sum/` for a working example of a compute shader that sums array elements.
 
 ## Further Reading
 
