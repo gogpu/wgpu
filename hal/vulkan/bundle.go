@@ -161,6 +161,8 @@ func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor)
 		return nil, fmt.Errorf("vulkan: vkCreateCommandPool (bundle) failed: %d", result)
 	}
 
+	d.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "BundleCommandPool")
+
 	// Allocate a secondary command buffer from the dedicated pool.
 	allocInfo := vk.CommandBufferAllocateInfo{
 		SType:              vk.StructureTypeCommandBufferAllocateInfo,

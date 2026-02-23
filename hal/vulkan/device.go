@@ -197,13 +197,19 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		}
 	}
 
-	return &Buffer{
+	b := &Buffer{
 		handle: buffer,
 		memory: memBlock,
 		size:   desc.Size,
 		usage:  desc.Usage,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeBuffer, uint64(buffer), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeBuffer, uint64(buffer), "Buffer")
+	}
+	return b, nil
 }
 
 // ensureMemoryMapped maps the VkDeviceMemory backing block if not already mapped.
@@ -361,7 +367,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		return nil, fmt.Errorf("vulkan: vkBindImageMemory failed: %d", result)
 	}
 
-	return &Texture{
+	t := &Texture{
 		handle:      image,
 		memory:      memBlock,
 		size:        Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, Depth: depth},
@@ -372,7 +378,13 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		samples:     samples,
 		dimension:   desc.Dimension,
 		device:      d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeImage, uint64(image), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeImage, uint64(image), "Texture")
+	}
+	return t, nil
 }
 
 // DestroyTexture destroys a GPU texture.
@@ -425,7 +437,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		}
 		// For swapchain textures, reuse the pre-created view from the swapchain.
 		// Creating new views for swapchain images can cause rendering issues.
-		return &TextureView{
+		tv := &TextureView{
 			handle:      t.view,
 			texture:     nil,
 			device:      d,
@@ -433,7 +445,10 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			image:       t.handle,
 			isSwapchain: true,
 			vkFormat:    textureFormatToVk(t.format),
-		}, nil
+		}
+		d.setObjectName(vk.ObjectTypeImageView, uint64(t.view),
+			fmt.Sprintf("SwapchainView(%d)", t.index))
+		return tv, nil
 	default:
 		return nil, fmt.Errorf("vulkan: invalid texture type %T", texture)
 	}
@@ -514,14 +529,20 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		isSwapchain = true
 	}
 
-	return &TextureView{
+	tv := &TextureView{
 		handle:      imageView,
 		texture:     texRef,
 		device:      d,
 		size:        textureSize,
 		image:       imageHandle,
 		isSwapchain: isSwapchain,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeImageView, uint64(imageView), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeImageView, uint64(imageView), "TextureView")
+	}
+	return tv, nil
 }
 
 // DestroyTextureView destroys a texture view.
@@ -605,10 +626,16 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		return nil, fmt.Errorf("vulkan: vkCreateSampler failed: %d", result)
 	}
 
-	return &Sampler{
+	s := &Sampler{
 		handle: sampler,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeSampler, uint64(sampler), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeSampler, uint64(sampler), "Sampler")
+	}
+	return s, nil
 }
 
 // DestroySampler destroys a sampler.
@@ -683,12 +710,18 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 		return nil, fmt.Errorf("vulkan: vkCreateDescriptorSetLayout failed: %d", result)
 	}
 
-	return &BindGroupLayout{
+	bgl := &BindGroupLayout{
 		handle:       layout,
 		counts:       counts,
 		bindingTypes: bindingTypes,
 		device:       d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeDescriptorSetLayout, uint64(layout), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeDescriptorSetLayout, uint64(layout), "BindGroupLayout")
+	}
+	return bgl, nil
 }
 
 // DestroyBindGroupLayout destroys a bind group layout.
@@ -876,10 +909,16 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 		return nil, fmt.Errorf("vulkan: vkCreatePipelineLayout failed: %d", result)
 	}
 
-	return &PipelineLayout{
+	pl := &PipelineLayout{
 		handle: layout,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypePipelineLayout, uint64(layout), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypePipelineLayout, uint64(layout), "PipelineLayout")
+	}
+	return pl, nil
 }
 
 // DestroyPipelineLayout destroys a pipeline layout.
@@ -949,10 +988,16 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		"spirvWords", len(spirv),
 	)
 
-	return &ShaderModule{
+	sm := &ShaderModule{
 		handle: module,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeShaderModule, uint64(module), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeShaderModule, uint64(module), "ShaderModule("+sourceType+")")
+	}
+	return sm, nil
 }
 
 // DestroyShaderModule destroys a shader module.
@@ -1019,6 +1064,8 @@ func (d *Device) acquireAllocator() (commandAllocator, error) {
 		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
 		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
 	}
+
+	d.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "CommandPool")
 
 	return commandAllocator{pool: pool, cmdBuffer: cmdBuffer}, nil
 }
@@ -1120,10 +1167,12 @@ func (d *Device) CreateFence() (hal.Fence, error) {
 		return nil, fmt.Errorf("vulkan: vkCreateFence failed: %d", result)
 	}
 
-	return &Fence{
+	f := &Fence{
 		handle: fence,
 		device: d,
-	}, nil
+	}
+	d.setObjectName(vk.ObjectTypeFence, uint64(fence), "Fence")
+	return f, nil
 }
 
 // DestroyFence destroys a fence.

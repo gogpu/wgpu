@@ -5,6 +5,7 @@ package vulkan
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -238,11 +239,31 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		return nil, fmt.Errorf("vkCreateDescriptorPool failed: %d", result)
 	}
 
-	return &DescriptorPool{
+	dp := &DescriptorPool{
 		handle:        pool,
 		maxSets:       poolSize,
 		allocatedSets: 0,
-	}, nil
+	}
+	a.setObjectName(vk.ObjectTypeDescriptorPool, uint64(pool),
+		fmt.Sprintf("DescriptorPool(%d)", len(a.pools)))
+	return dp, nil
+}
+
+// setObjectName labels a Vulkan object for debug/validation.
+// No-op when VK_EXT_debug_utils is not available.
+func (a *DescriptorAllocator) setObjectName(objectType vk.ObjectType, handle uint64, name string) {
+	if !a.cmds.HasDebugUtils() || handle == 0 {
+		return
+	}
+	nameBytes := append([]byte(name), 0)
+	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
+		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
+		ObjectType:   objectType,
+		ObjectHandle: handle,
+		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
+	}
+	_ = a.cmds.SetDebugUtilsObjectNameEXT(a.device, &nameInfo)
+	runtime.KeepAlive(nameBytes)
 }
 
 // Destroy releases all descriptor pools.

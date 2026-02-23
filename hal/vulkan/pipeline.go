@@ -331,11 +331,17 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, hal.ErrDriverBug
 	}
 
-	return &RenderPipeline{
+	rp := &RenderPipeline{
 		handle: pipeline,
 		layout: pipelineLayout,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypePipeline, uint64(pipeline), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypePipeline, uint64(pipeline), "RenderPipeline")
+	}
+	return rp, nil
 }
 
 // DestroyRenderPipeline destroys a render pipeline.
@@ -410,11 +416,17 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, hal.ErrDriverBug
 	}
 
-	return &ComputePipeline{
+	cp := &ComputePipeline{
 		handle: pipeline,
 		layout: pipelineLayout,
 		device: d,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypePipeline, uint64(pipeline), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypePipeline, uint64(pipeline), "ComputePipeline")
+	}
+	return cp, nil
 }
 
 // DestroyComputePipeline destroys a compute pipeline.

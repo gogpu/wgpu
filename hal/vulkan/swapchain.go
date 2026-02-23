@@ -200,6 +200,15 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		}
 	}
 
+	// Label swapchain images and views for debug/validation (VK-VAL-002).
+	for i, img := range images {
+		device.setObjectName(vk.ObjectTypeImage, uint64(img),
+			fmt.Sprintf("SwapchainImage(%d)", i))
+		device.setObjectName(vk.ObjectTypeImageView, uint64(imageViews[i]),
+			fmt.Sprintf("SwapchainView(%d)", i))
+	}
+	device.setObjectName(vk.ObjectTypeSwapchainKhr, uint64(swapchainHandle), "Swapchain")
+
 	// Create synchronization primitives (wgpu-style).
 	// Acquire semaphores: rotated through for each acquire (we don't know which image we'll get).
 	// Present semaphores: one per swapchain image (known after acquire).
@@ -226,6 +235,12 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		}
 	}
 
+	// Label acquire semaphores for debug/validation.
+	for i, sem := range acquireSemaphores {
+		device.setObjectName(vk.ObjectTypeSemaphore, uint64(sem),
+			fmt.Sprintf("AcquireSemaphore(%d)", i))
+	}
+
 	// Create present semaphores
 	for i := range presentSemaphores {
 		result = vkCreateSemaphore(device, &semaphoreInfo, nil, &presentSemaphores[i])
@@ -242,6 +257,12 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 			vkDestroySwapchainKHR(device, swapchainHandle, nil)
 			return fmt.Errorf("vulkan: vkCreateSemaphore (presentSemaphore[%d]) failed: %d", i, result)
 		}
+	}
+
+	// Label present semaphores for debug/validation.
+	for i, sem := range presentSemaphores {
+		device.setObjectName(vk.ObjectTypeSemaphore, uint64(sem),
+			fmt.Sprintf("PresentSemaphore(%d)", i))
 	}
 
 	// VK-IMPL-004: acquireFenceValues tracks the submission fence value when each
