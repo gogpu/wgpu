@@ -19,12 +19,13 @@
 
 ---
 
-## Current State: v0.16.10
+## Current State: v0.16.11
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
 
-**Next (unreleased):**
+**New in v0.16.11:**
 - Vulkan zero-extent swapchain fix (VK-VAL-001) — config-primary extent, unconditional viewport/scissor (gogpu#98)
+- Public examples moved from `cmd/` to `examples/`
 
 **New in v0.16.10:**
 - Vulkan pre-acquire semaphore wait (VK-IMPL-004) — fixes `VUID-vkAcquireNextImageKHR-semaphore-01779` (gogpu#98)

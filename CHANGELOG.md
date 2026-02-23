@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.11] - 2026-02-23
 
 ### Fixed
 
@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VUID-vkCmdDraw-None-07832` validation errors. Now always sets viewport/scissor using
   `max(dim, 1)` as safety net.
   ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
+### Changed
+
+- **Public examples moved to `examples/`** — `compute-copy` and `compute-sum` moved from `cmd/` to
+  `examples/` following Go project layout conventions. `cmd/` retains internal tools (vk-gen, backend tests).
 
 ## [0.16.10] - 2026-02-22
 
