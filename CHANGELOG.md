@@ -99,8 +99,8 @@ and enterprise benchmarks. Internal performance improvements — no API changes.
   and cross-backend HAL interface. Table-driven sub-benchmarks for different sizes and workloads.
 - **Compute shader SDF integration test** — End-to-end GPU test: WGSL SDF shader → naga compile →
   Vulkan compute pipeline → dispatch → ReadBuffer → CPU reference verification (256 pixels, ±0.01).
-- **Compute shader examples** — `cmd/compute-sum/` (parallel pairwise reduction) and
-  `cmd/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
+- **Compute shader examples** — `examples/compute-sum/` (parallel pairwise reduction) and
+  `examples/compute-copy/` (scaled buffer copy) demonstrating the compute pipeline API.
 - **Timestamp queries for compute passes** — `ComputePassTimestampWrites`, `CreateQuerySet`,
   `ResolveQuerySet` with full Vulkan implementation (`vkCmdWriteTimestamp`, `vkCmdCopyQueryPoolResults`).
   Other backends return `ErrTimestampsNotSupported`.
