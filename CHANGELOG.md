@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.12] - 2026-02-23
+
+### Fixed
+
+- **Vulkan: debug object naming** (VK-VAL-002) — added `setObjectName` helper that calls
+  `vkSetDebugUtilsObjectNameEXT` after every Vulkan object creation. Labels buffers, textures,
+  pipelines, render passes, framebuffers, descriptor pools, swapchain images, semaphores, and
+  more with human-readable names. Eliminates false-positive `VUID-VkDebugUtilsObjectNameInfoEXT-objectType-02590`
+  validation errors on NVIDIA where the validation layer's handle tracking lost sync with packed
+  non-dispatchable handles. No-op when `VK_EXT_debug_utils` is unavailable. Resources display
+  named labels in RenderDoc/Nsight captures.
+  ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
 ## [0.16.11] - 2026-02-23
 
 ### Fixed

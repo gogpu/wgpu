@@ -4,8 +4,10 @@
 package vulkan
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -248,6 +250,8 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 		return 0, &vkError{code: -1, op: "vkCreateRenderPass returned NULL handle"}
 	}
 
+	c.setObjectName(vk.ObjectTypeRenderPass, uint64(renderPass),
+		fmt.Sprintf("RenderPass(%d)", len(c.renderPasses)))
 	return renderPass, nil
 }
 
@@ -292,7 +296,26 @@ func (c *RenderPassCache) createFramebuffer(key FramebufferKey) (vk.Framebuffer,
 		return 0, &vkError{code: -1, op: "vkCreateFramebuffer returned NULL handle"}
 	}
 
+	c.setObjectName(vk.ObjectTypeFramebuffer, uint64(framebuffer),
+		fmt.Sprintf("Framebuffer(%d)", len(c.framebuffers)))
 	return framebuffer, nil
+}
+
+// setObjectName labels a Vulkan object for debug/validation.
+// No-op when VK_EXT_debug_utils is not available.
+func (c *RenderPassCache) setObjectName(objectType vk.ObjectType, handle uint64, name string) {
+	if !c.cmds.HasDebugUtils() || handle == 0 {
+		return
+	}
+	nameBytes := append([]byte(name), 0)
+	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
+		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
+		ObjectType:   objectType,
+		ObjectHandle: handle,
+		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
+	}
+	_ = c.cmds.SetDebugUtilsObjectNameEXT(c.device, &nameInfo)
+	runtime.KeepAlive(nameBytes)
 }
 
 // InvalidateFramebuffer removes framebuffers from cache that reference the given image view.

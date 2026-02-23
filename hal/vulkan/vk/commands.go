@@ -255,6 +255,9 @@ func (c *Commands) LoadDevice(device Device) error {
 	c.acquireNextImageKHR = GetDeviceProcAddr(device, "vkAcquireNextImageKHR")
 	c.queuePresentKHR = GetDeviceProcAddr(device, "vkQueuePresentKHR")
 
+	// VK_EXT_debug_utils (optional — loaded from device for object naming)
+	c.setDebugUtilsObjectNameEXT = GetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT")
+
 	// Verify critical functions loaded
 	if c.destroyDevice == nil || c.getDeviceQueue == nil || c.queueSubmit == nil {
 		return fmt.Errorf("failed to load critical device functions")
@@ -275,6 +278,13 @@ func (c *Commands) HasTimelineSemaphore() bool {
 // This is a Vulkan 1.1 core function used to query extended feature support via PNext chains.
 func (c *Commands) HasPhysicalDeviceFeatures2() bool {
 	return c.getPhysicalDeviceFeatures2 != nil
+}
+
+// HasDebugUtils returns true if vkSetDebugUtilsObjectNameEXT is available.
+// When true, Vulkan objects can be labeled with human-readable names for
+// validation layer messages and GPU debugging tools (RenderDoc, NSight).
+func (c *Commands) HasDebugUtils() bool {
+	return c.setDebugUtilsObjectNameEXT != nil
 }
 
 // DebugFunctionPointer returns the address of the specified Vulkan function.

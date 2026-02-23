@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.16.11
+## Current State: v0.16.12
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.12:**
+- Vulkan debug object naming (VK-VAL-002) — labels every Vulkan object via `vkSetDebugUtilsObjectNameEXT`, eliminates false-positive validation errors on NVIDIA (gogpu#98)
 
 **New in v0.16.11:**
 - Vulkan zero-extent swapchain fix (VK-VAL-001) — config-primary extent, unconditional viewport/scissor (gogpu#98)
@@ -117,7 +120,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.6** | 2026-02 | Metal debug logging (23 log points), goffi v0.3.9 |
+| **v0.16.12** | 2026-02 | Vulkan debug object naming (VK-VAL-002, gogpu#98) |
+| v0.16.11 | 2026-02 | Vulkan zero-extent swapchain fix (VK-VAL-001, gogpu#98) |
+| v0.16.10 | 2026-02 | Vulkan pre-acquire semaphore wait (VK-IMPL-004) |
+| v0.16.6 | 2026-02 | Metal debug logging (23 log points), goffi v0.3.9 |
 | v0.16.5 | 2026-02 | Vulkan per-encoder command pools |
 | v0.16.4 | 2026-02 | Timeline semaphore, FencePool, batch alloc, hot-path benchmarks |
 | v0.16.3 | 2026-02 | Per-frame fence tracking, GLES VSync, WaitIdle interface |

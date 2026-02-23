@@ -155,3 +155,29 @@ func destroyDebugMessenger(instance *Instance, messenger vk.DebugUtilsMessengerE
 		instance.cmds.DestroyDebugUtilsMessengerEXT(instance.handle, messenger, nil)
 	}
 }
+
+// setObjectName labels a Vulkan object with a human-readable name via
+// vkSetDebugUtilsObjectNameEXT. This eliminates false-positive validation
+// errors where the validation layer's internal handle tracking loses sync
+// with the driver's packed non-dispatchable handles (VK-VAL-002).
+//
+// No-op when VK_EXT_debug_utils is not available (graceful degradation).
+// Reference: Rust wgpu-hal set_object_name() — labels every created object.
+func (d *Device) setObjectName(objectType vk.ObjectType, handle uint64, name string) {
+	if !d.cmds.HasDebugUtils() || handle == 0 {
+		return
+	}
+
+	// Null-terminate the name for the Vulkan C API.
+	nameBytes := append([]byte(name), 0)
+
+	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
+		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
+		ObjectType:   objectType,
+		ObjectHandle: handle,
+		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
+	}
+
+	_ = d.cmds.SetDebugUtilsObjectNameEXT(d.handle, &nameInfo)
+	runtime.KeepAlive(nameBytes)
+}

@@ -58,12 +58,18 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 	// Reset the query pool so it can be used immediately.
 	d.cmds.ResetQueryPool(d.handle, pool, 0, desc.Count)
 
-	return &QuerySet{
+	qs := &QuerySet{
 		pool:      pool,
 		device:    d,
 		queryType: desc.Type,
 		count:     desc.Count,
-	}, nil
+	}
+	if desc.Label != "" {
+		d.setObjectName(vk.ObjectTypeQueryPool, uint64(pool), desc.Label)
+	} else {
+		d.setObjectName(vk.ObjectTypeQueryPool, uint64(pool), "QueryPool")
+	}
+	return qs, nil
 }
 
 // DestroyQuerySet destroys a Vulkan query set.
