@@ -19,9 +19,13 @@
 
 ---
 
-## Current State: v0.16.12
+## Current State: v0.16.13
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.13:**
+- Vulkan: load VK_EXT_debug_utils via `GetInstanceProcAddr` — fixes "Invalid VkDescriptorPool" validation errors on NVIDIA (gogpu#98)
+- Debug messenger callback now works (was missing function pointer loading)
 
 **New in v0.16.12:**
 - Vulkan debug object naming (VK-VAL-002) — labels every Vulkan object via `vkSetDebugUtilsObjectNameEXT`, eliminates false-positive validation errors on NVIDIA (gogpu#98)
@@ -120,7 +124,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.12** | 2026-02 | Vulkan debug object naming (VK-VAL-002, gogpu#98) |
+| **v0.16.13** | 2026-02 | Vulkan: debug_utils via GetInstanceProcAddr (gogpu#98) |
+| v0.16.12 | 2026-02 | Vulkan debug object naming (VK-VAL-002, gogpu#98) |
 | v0.16.11 | 2026-02 | Vulkan zero-extent swapchain fix (VK-VAL-001, gogpu#98) |
 | v0.16.10 | 2026-02 | Vulkan pre-acquire semaphore wait (VK-IMPL-004) |
 | v0.16.6 | 2026-02 | Metal debug logging (23 log points), goffi v0.3.9 |

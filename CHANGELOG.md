@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.13] - 2026-02-24
+
+### Fixed
+
+- **Vulkan: load VK_EXT_debug_utils via GetInstanceProcAddr** — `vkSetDebugUtilsObjectNameEXT`
+  was loaded via `GetDeviceProcAddr`, which bypasses the validation layer's handle wrapping on
+  NVIDIA drivers, causing `VUID-VkDebugUtilsObjectNameInfoEXT-objectType-02590` ("Invalid
+  VkDescriptorPool Object") errors. Now loaded via `GetInstanceProcAddr` as required for instance
+  extensions. Also loads `vkCreateDebugUtilsMessengerEXT` and `vkDestroyDebugUtilsMessengerEXT`
+  which were previously missing — debug messenger callback now works correctly.
+  ([gogpu#98](https://github.com/gogpu/gogpu/issues/98))
+
 ## [0.16.12] - 2026-02-23
 
 ### Fixed

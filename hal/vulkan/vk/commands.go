@@ -104,6 +104,14 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	c.getPhysicalDeviceFeatures2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2")
 	c.getPhysicalDeviceProperties2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2")
 
+	// VK_EXT_debug_utils (instance extension — MUST use GetInstanceProcAddr).
+	// Loading via GetDeviceProcAddr bypasses the validation layer's handle
+	// wrapping on NVIDIA drivers, causing "Invalid VkDescriptorPool" errors.
+	// See: https://github.com/gogpu/gogpu/issues/98
+	c.setDebugUtilsObjectNameEXT = GetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT")
+	c.createDebugUtilsMessengerEXT = GetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT")
+	c.destroyDebugUtilsMessengerEXT = GetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT")
+
 	// Verify critical functions loaded
 	if c.destroyInstance == nil || c.enumeratePhysicalDevices == nil || c.createDevice == nil {
 		return fmt.Errorf("failed to load critical instance functions")
@@ -254,9 +262,6 @@ func (c *Commands) LoadDevice(device Device) error {
 	c.getSwapchainImagesKHR = GetDeviceProcAddr(device, "vkGetSwapchainImagesKHR")
 	c.acquireNextImageKHR = GetDeviceProcAddr(device, "vkAcquireNextImageKHR")
 	c.queuePresentKHR = GetDeviceProcAddr(device, "vkQueuePresentKHR")
-
-	// VK_EXT_debug_utils (optional — loaded from device for object naming)
-	c.setDebugUtilsObjectNameEXT = GetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT")
 
 	// Verify critical functions loaded
 	if c.destroyDevice == nil || c.getDeviceQueue == nil || c.queueSubmit == nil {
