@@ -23,8 +23,10 @@ func platformSurfaceExtension() string {
 //   - _: unused first parameter for API consistency with other platforms
 //   - metalLayer: Pointer to CAMetalLayer
 func (i *Instance) CreateSurface(_, metalLayer uintptr) (hal.Surface, error) {
-	// Convert layer pointer: CAMetalLayer* -> *CAMetalLayer (which is *uintptr internally)
-	layer := (*vk.CAMetalLayer)(unsafe.Pointer(&metalLayer))
+	// Convert CAMetalLayer* value to *CAMetalLayer for the Vulkan struct.
+	// Using unsafe.Pointer(metalLayer) stores the actual pointer value;
+	// &metalLayer would store the Go stack address (wrong).
+	layer := (*vk.CAMetalLayer)(unsafe.Pointer(metalLayer)) //nolint:gosec // C interop: CAMetalLayer* from ObjC
 
 	createInfo := vk.MetalSurfaceCreateInfoEXT{
 		SType:  vk.StructureTypeMetalSurfaceCreateInfoExt,

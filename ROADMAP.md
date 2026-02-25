@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.16.15
+## Current State: v0.16.16
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.16:**
+- Vulkan X11/macOS surface creation pointer fix — `unsafe.Pointer(&display)` → `unsafe.Pointer(display)`. Old code passed Go stack address instead of Display*/CAMetalLayer* value (gogpu#106)
 
 **New in v0.16.15:**
 - Software backend always compiled — removed `//go:build software` from all 34 files. No build tags required, always available as fallback (gogpu#106)
@@ -131,7 +134,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.15** | 2026-02 | Software backend always compiled, no build tags (gogpu#106) |
+| **v0.16.16** | 2026-02 | Vulkan X11/macOS surface pointer fix (gogpu#106) |
+| v0.16.15 | 2026-02 | Software backend always compiled, no build tags (gogpu#106) |
 | v0.16.14 | 2026-02 | Vulkan null surface handle guard (gogpu#106), naga v0.14.3 |
 | v0.16.13 | 2026-02 | Vulkan: debug_utils via GetInstanceProcAddr (gogpu#98) |
 | v0.16.12 | 2026-02 | Vulkan debug object naming (VK-VAL-002, gogpu#98) |
