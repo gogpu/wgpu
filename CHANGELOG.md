@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.17] - 2026-02-26
+
+### Fixed
+
+- **Vulkan: load platform surface creation functions** — `vkCreateXlibSurfaceKHR`,
+  `vkCreateXcbSurfaceKHR`, `vkCreateWaylandSurfaceKHR`, and `vkCreateMetalSurfaceEXT` were never
+  loaded via `GetInstanceProcAddr` — only `vkCreateWin32SurfaceKHR` was. On Linux/macOS the
+  function pointer stayed nil, and goffi FFI returned zeros (result=0, surface=0x0) instead of
+  crashing, causing "null surface" errors downstream.
+  ([gogpu#106](https://github.com/gogpu/gogpu/issues/106))
+
 ## [0.16.16] - 2026-02-25
 
 ### Fixed
