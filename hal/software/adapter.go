@@ -1,5 +1,3 @@
-//go:build software
-
 package software
 
 import (

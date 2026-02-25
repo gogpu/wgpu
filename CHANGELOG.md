@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.15] - 2026-02-25
+
+### Changed
+
+- **Software backend: always compiled** — removed `//go:build software` build tags from all 34 files
+  in `hal/software/`, `hal/software/raster/`, and `hal/software/shader/`. The software backend is now
+  always available without `-tags software`. Pure Go, zero system dependencies — ideal for CI/CD,
+  headless rendering, and fallback when no GPU is available.
+  ([gogpu#106](https://github.com/gogpu/gogpu/issues/106))
+
+### Fixed
+
+- **Software backend: nestif complexity** — extracted `clearDepthStencilAttachment()` helper in
+  `RenderPassEncoder.End()` to reduce nesting depth (pre-existing issue exposed by build tag removal).
+
 ## [0.16.14] - 2026-02-25
 
 ### Fixed

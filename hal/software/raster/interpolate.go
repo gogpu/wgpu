@@ -1,5 +1,3 @@
-//go:build software
-
 package raster
 
 // InterpolateFloat32 interpolates a single float32 attribute with perspective correction.

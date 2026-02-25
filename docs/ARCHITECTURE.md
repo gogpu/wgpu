@@ -97,10 +97,12 @@ Pure Go OpenGL ES 3.0+ implementation.
 
 ### `hal/software/` — Software Backend
 
-CPU-based rasterizer for testing and fallback.
+CPU-based rasterizer. Always compiled (no build tags required). Pure Go, zero system dependencies.
 
 - `raster/` — Triangle rasterization, blending, depth/stencil, tiling
 - `shader/` — Software shader execution (callback-based)
+
+Use cases: headless rendering (servers, CI/CD), testing without GPU, embedded systems, fallback when no GPU available.
 
 ### `hal/noop/` — No-op Backend
 

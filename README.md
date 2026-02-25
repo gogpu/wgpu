@@ -225,9 +225,12 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 
 ### Software Backend
 
-Full-featured CPU rasterizer for headless rendering:
+Full-featured CPU rasterizer for headless rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
+// Software backend auto-registers via init().
+// No explicit import needed when using hal/allbackends.
+// For standalone usage:
 import _ "github.com/gogpu/wgpu/hal/software"
 
 // Use cases:
@@ -235,6 +238,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 // - Server-side image generation
 // - Reference implementation
 // - Fallback when GPU unavailable
+// - Embedded systems without GPU
 ```
 
 **Rasterization Features:**

@@ -1,5 +1,3 @@
-//go:build software
-
 // Package software provides a CPU-based software rendering backend.
 //
 // Status: IMPLEMENTED (Phase 1 - Headless Rendering)
@@ -28,7 +26,7 @@
 //   - No rasterization yet (draw calls are no-op - Phase 2)
 //   - No shader execution (basic resources only)
 //
-// Build tag: -tags software
+// Always compiled (no build tags required).
 //
 // Example:
 //

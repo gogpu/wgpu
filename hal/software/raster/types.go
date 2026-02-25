@@ -1,5 +1,3 @@
-//go:build software
-
 package raster
 
 // ClipSpaceVertex is the output of vertex shader processing.

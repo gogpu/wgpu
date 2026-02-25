@@ -1,5 +1,3 @@
-//go:build software
-
 package raster
 
 // BlendFactor specifies the blend factor for source or destination color.

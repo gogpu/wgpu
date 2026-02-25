@@ -1,5 +1,3 @@
-//go:build software
-
 package raster
 
 // ClipPlane represents a clipping plane in homogeneous clip space.
