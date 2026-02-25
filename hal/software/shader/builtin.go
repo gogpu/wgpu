@@ -1,5 +1,3 @@
-//go:build software
-
 package shader
 
 import "github.com/gogpu/wgpu/hal/software/raster"

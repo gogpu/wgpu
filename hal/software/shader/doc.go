@@ -1,5 +1,3 @@
-//go:build software
-
 // Package shader provides callback-based shader execution for the software backend.
 //
 // Since there is no SPIR-V interpreter in Go, we use callback functions to define

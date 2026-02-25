@@ -1,5 +1,3 @@
-//go:build software
-
 package raster
 
 // IncrementalEdge optimizes edge function evaluation by using incremental

@@ -19,9 +19,16 @@
 
 ---
 
-## Current State: v0.16.13
+## Current State: v0.16.15
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.15:**
+- Software backend always compiled — removed `//go:build software` from all 34 files. No build tags required, always available as fallback (gogpu#106)
+
+**New in v0.16.14:**
+- Vulkan null surface handle guard — prevents SIGSEGV on Linux when surface creation fails (gogpu#106)
+- naga v0.14.3 (5 SPIR-V compute shader bug fixes)
 
 **New in v0.16.13:**
 - Vulkan: load VK_EXT_debug_utils via `GetInstanceProcAddr` — fixes "Invalid VkDescriptorPool" validation errors on NVIDIA (gogpu#98)
@@ -124,7 +131,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.16.13** | 2026-02 | Vulkan: debug_utils via GetInstanceProcAddr (gogpu#98) |
+| **v0.16.15** | 2026-02 | Software backend always compiled, no build tags (gogpu#106) |
+| v0.16.14 | 2026-02 | Vulkan null surface handle guard (gogpu#106), naga v0.14.3 |
+| v0.16.13 | 2026-02 | Vulkan: debug_utils via GetInstanceProcAddr (gogpu#98) |
 | v0.16.12 | 2026-02 | Vulkan debug object naming (VK-VAL-002, gogpu#98) |
 | v0.16.11 | 2026-02 | Vulkan zero-extent swapchain fix (VK-VAL-001, gogpu#98) |
 | v0.16.10 | 2026-02 | Vulkan pre-acquire semaphore wait (VK-IMPL-004) |

@@ -1,5 +1,3 @@
-//go:build software
-
 package software
 
 import (
@@ -187,18 +185,21 @@ func (r *RenderPassEncoder) End() {
 	}
 
 	// Depth/stencil attachment handling (simplified - just clear if needed)
-	if r.desc.DepthStencilAttachment != nil {
-		if r.desc.DepthStencilAttachment.DepthLoadOp == gputypes.LoadOpClear {
-			if view, ok := r.desc.DepthStencilAttachment.View.(*TextureView); ok {
-				if view.texture != nil {
-					// Clear depth to clearValue (as grayscale for simplicity)
-					val := r.desc.DepthStencilAttachment.DepthClearValue
-					color := gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0}
-					view.texture.Clear(color)
-				}
-			}
-		}
+	r.clearDepthStencilAttachment()
+}
+
+// clearDepthStencilAttachment clears the depth/stencil attachment if present and LoadOp is Clear.
+func (r *RenderPassEncoder) clearDepthStencilAttachment() {
+	ds := r.desc.DepthStencilAttachment
+	if ds == nil || ds.DepthLoadOp != gputypes.LoadOpClear {
+		return
 	}
+	view, ok := ds.View.(*TextureView)
+	if !ok || view.texture == nil {
+		return
+	}
+	val := ds.DepthClearValue
+	view.texture.Clear(gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0})
 }
 
 // SetPipeline is a no-op.
