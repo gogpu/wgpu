@@ -171,7 +171,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 		// Check surface support if surface hint provided
 		if surfaceHint != nil {
-			if s, ok := surfaceHint.(*Surface); ok {
+			if s, ok := surfaceHint.(*Surface); ok && s.handle != 0 {
 				var supported vk.Bool32
 				i.cmds.GetPhysicalDeviceSurfaceSupportKHR(device, 0, s.handle, &supported)
 				if supported == 0 {

@@ -60,6 +60,10 @@ func (t *SwapchainTexture) NativeHandle() uintptr {
 //
 //nolint:maintidx // Vulkan swapchain setup requires many sequential steps
 func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfiguration) error {
+	if s.handle == 0 {
+		return fmt.Errorf("vulkan: cannot create swapchain for null surface")
+	}
+
 	// Get surface capabilities
 	var capabilities vk.SurfaceCapabilitiesKHR
 	result := vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s.instance, device.physicalDevice, s.handle, &capabilities)
