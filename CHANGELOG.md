@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.14] - 2026-02-25
+
+### Fixed
+
+- **Vulkan: null surface handle guard** — `EnumerateAdapters`, `SurfaceCapabilities`, and
+  `createSwapchain` now check for null `VkSurfaceKHR` handle before calling Vulkan surface
+  functions. Prevents SIGSEGV on Linux when surface creation fails (e.g., X11 connection issues).
+  ([gogpu#106](https://github.com/gogpu/gogpu/issues/106))
+
+### Changed
+
+- **Dependencies:** naga v0.14.2 → v0.14.3 (5 SPIR-V compute shader bug fixes)
+
 ## [0.16.13] - 2026-02-24
 
 ### Fixed
@@ -1043,7 +1056,15 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.6...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.14...HEAD
+[0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
+[0.16.13]: https://github.com/gogpu/wgpu/compare/v0.16.12...v0.16.13
+[0.16.12]: https://github.com/gogpu/wgpu/compare/v0.16.11...v0.16.12
+[0.16.11]: https://github.com/gogpu/wgpu/compare/v0.16.10...v0.16.11
+[0.16.10]: https://github.com/gogpu/wgpu/compare/v0.16.9...v0.16.10
+[0.16.9]: https://github.com/gogpu/wgpu/compare/v0.16.8...v0.16.9
+[0.16.8]: https://github.com/gogpu/wgpu/compare/v0.16.7...v0.16.8
+[0.16.7]: https://github.com/gogpu/wgpu/compare/v0.16.6...v0.16.7
 [0.16.6]: https://github.com/gogpu/wgpu/compare/v0.16.5...v0.16.6
 [0.16.5]: https://github.com/gogpu/wgpu/compare/v0.16.4...v0.16.5
 [0.16.4]: https://github.com/gogpu/wgpu/compare/v0.16.3...v0.16.4
