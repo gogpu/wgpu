@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.16.16
+## Current State: v0.16.17
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+
+**New in v0.16.17:**
+- Vulkan: load platform surface creation functions — `vkCreateXlibSurfaceKHR`, `vkCreateXcbSurfaceKHR`, `vkCreateWaylandSurfaceKHR`, `vkCreateMetalSurfaceEXT` were never loaded via `GetInstanceProcAddr` (only Win32 was). Fixed — Linux/macOS Vulkan surfaces now work (gogpu#106)
 
 **New in v0.16.16:**
 - Vulkan X11/macOS surface creation pointer fix — `unsafe.Pointer(&display)` → `unsafe.Pointer(display)`. Old code passed Go stack address instead of Display*/CAMetalLayer* value (gogpu#106)

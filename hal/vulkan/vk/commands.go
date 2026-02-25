@@ -97,8 +97,12 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	c.getPhysicalDeviceSurfaceFormatsKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR")
 	c.getPhysicalDeviceSurfacePresentModesKHR = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR")
 
-	// Platform-specific surface creation
+	// Platform-specific surface creation (nil on unsupported platforms)
 	c.createWin32SurfaceKHR = GetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR")
+	c.createXlibSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateXlibSurfaceKHR")
+	c.createXcbSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateXcbSurfaceKHR")
+	c.createWaylandSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR")
+	c.createMetalSurfaceEXT = GetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT")
 
 	// Vulkan 1.1+ instance functions
 	c.getPhysicalDeviceFeatures2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2")
@@ -283,6 +287,21 @@ func (c *Commands) HasTimelineSemaphore() bool {
 // This is a Vulkan 1.1 core function used to query extended feature support via PNext chains.
 func (c *Commands) HasPhysicalDeviceFeatures2() bool {
 	return c.getPhysicalDeviceFeatures2 != nil
+}
+
+// HasCreateWin32SurfaceKHR returns true if vkCreateWin32SurfaceKHR is available.
+func (c *Commands) HasCreateWin32SurfaceKHR() bool {
+	return c.createWin32SurfaceKHR != nil
+}
+
+// HasCreateXlibSurfaceKHR returns true if vkCreateXlibSurfaceKHR is available.
+func (c *Commands) HasCreateXlibSurfaceKHR() bool {
+	return c.createXlibSurfaceKHR != nil
+}
+
+// HasCreateMetalSurfaceEXT returns true if vkCreateMetalSurfaceEXT is available.
+func (c *Commands) HasCreateMetalSurfaceEXT() bool {
+	return c.createMetalSurfaceEXT != nil
 }
 
 // HasDebugUtils returns true if vkSetDebugUtilsObjectNameEXT is available.

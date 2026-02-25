@@ -33,10 +33,17 @@ func (i *Instance) CreateSurface(_, metalLayer uintptr) (hal.Surface, error) {
 	// Previous bug: &metalLayer stored Go stack address instead of CAMetalLayer* value.
 	*(*uintptr)(unsafe.Pointer(&createInfo.PLayer)) = metalLayer
 
+	if !i.cmds.HasCreateMetalSurfaceEXT() {
+		return nil, fmt.Errorf("vulkan: vkCreateMetalSurfaceEXT not available (VK_EXT_metal_surface extension not loaded)")
+	}
+
 	var surface vk.SurfaceKHR
 	result := i.cmds.CreateMetalSurfaceEXT(i.handle, &createInfo, nil, &surface)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateMetalSurfaceEXT failed: %d", result)
+	}
+	if surface == 0 {
+		return nil, fmt.Errorf("vulkan: vkCreateMetalSurfaceEXT returned success but surface is null")
 	}
 
 	return &Surface{

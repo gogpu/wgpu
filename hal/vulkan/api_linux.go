@@ -34,10 +34,17 @@ func (i *Instance) CreateSurface(display, window uintptr) (hal.Surface, error) {
 	// Previous bug: &display stored Go stack address instead of Display* value.
 	*(*uintptr)(unsafe.Pointer(&createInfo.Dpy)) = display
 
+	if !i.cmds.HasCreateXlibSurfaceKHR() {
+		return nil, fmt.Errorf("vulkan: vkCreateXlibSurfaceKHR not available (VK_KHR_xlib_surface extension not loaded)")
+	}
+
 	var surface vk.SurfaceKHR
 	result := i.cmds.CreateXlibSurfaceKHR(i.handle, &createInfo, nil, &surface)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateXlibSurfaceKHR failed: %d", result)
+	}
+	if surface == 0 {
+		return nil, fmt.Errorf("vulkan: vkCreateXlibSurfaceKHR returned success but surface is null")
 	}
 
 	return &Surface{
