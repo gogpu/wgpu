@@ -23,14 +23,16 @@ func platformSurfaceExtension() string {
 //   - display: X11 Display pointer (Display*)
 //   - window: X11 Window handle (Window)
 func (i *Instance) CreateSurface(display, window uintptr) (hal.Surface, error) {
-	// Convert display pointer: Display* -> *XlibDisplay (which is *uintptr internally)
-	dpy := (*vk.XlibDisplay)(unsafe.Pointer(&display))
-
 	createInfo := vk.XlibSurfaceCreateInfoKHR{
 		SType:  vk.StructureTypeXlibSurfaceCreateInfoKhr,
-		Dpy:    dpy,
 		Window: vk.XlibWindow(window),
 	}
+	// Write Display* value directly into the Dpy field memory.
+	// Dpy is *XlibDisplay (a Go pointer type) but must hold the raw C Display*
+	// address. We cannot use unsafe.Pointer(uintptr) — go vet rejects it.
+	// Instead, write the uintptr value into the field's memory location.
+	// Previous bug: &display stored Go stack address instead of Display* value.
+	*(*uintptr)(unsafe.Pointer(&createInfo.Dpy)) = display
 
 	var surface vk.SurfaceKHR
 	result := i.cmds.CreateXlibSurfaceKHR(i.handle, &createInfo, nil, &surface)

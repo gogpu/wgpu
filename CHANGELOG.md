@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.16] - 2026-02-25
+
+### Fixed
+
+- **Vulkan: X11/macOS surface creation pointer bug** — `CreateSurface` passed the Go stack address
+  of the `display` parameter (`unsafe.Pointer(&display)`) instead of the actual `Display*` value
+  (`unsafe.Pointer(display)`). This caused `vkCreateXlibSurfaceKHR` to receive a Go stack pointer
+  instead of the real Xlib `Display*`, resulting in null surfaces or SIGSEGV. Same fix applied to
+  macOS `CAMetalLayer*` in the Vulkan-on-MoltenVK path.
+  ([gogpu#106](https://github.com/gogpu/gogpu/issues/106))
+
 ## [0.16.15] - 2026-02-25
 
 ### Changed

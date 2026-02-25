@@ -23,13 +23,15 @@ func platformSurfaceExtension() string {
 //   - _: unused first parameter for API consistency with other platforms
 //   - metalLayer: Pointer to CAMetalLayer
 func (i *Instance) CreateSurface(_, metalLayer uintptr) (hal.Surface, error) {
-	// Convert layer pointer: CAMetalLayer* -> *CAMetalLayer (which is *uintptr internally)
-	layer := (*vk.CAMetalLayer)(unsafe.Pointer(&metalLayer))
-
 	createInfo := vk.MetalSurfaceCreateInfoEXT{
-		SType:  vk.StructureTypeMetalSurfaceCreateInfoExt,
-		PLayer: layer,
+		SType: vk.StructureTypeMetalSurfaceCreateInfoExt,
 	}
+	// Write CAMetalLayer* value directly into the PLayer field memory.
+	// PLayer is *CAMetalLayer (a Go pointer type) but must hold the raw C pointer
+	// address. We cannot use unsafe.Pointer(uintptr) — go vet rejects it.
+	// Instead, write the uintptr value into the field's memory location.
+	// Previous bug: &metalLayer stored Go stack address instead of CAMetalLayer* value.
+	*(*uintptr)(unsafe.Pointer(&createInfo.PLayer)) = metalLayer
 
 	var surface vk.SurfaceKHR
 	result := i.cmds.CreateMetalSurfaceEXT(i.handle, &createInfo, nil, &surface)
