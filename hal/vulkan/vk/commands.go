@@ -299,6 +299,11 @@ func (c *Commands) HasCreateXlibSurfaceKHR() bool {
 	return c.createXlibSurfaceKHR != nil
 }
 
+// HasCreateWaylandSurfaceKHR returns true if vkCreateWaylandSurfaceKHR is available.
+func (c *Commands) HasCreateWaylandSurfaceKHR() bool {
+	return c.createWaylandSurfaceKHR != nil
+}
+
 // HasCreateMetalSurfaceEXT returns true if vkCreateMetalSurfaceEXT is available.
 func (c *Commands) HasCreateMetalSurfaceEXT() bool {
 	return c.createMetalSurfaceEXT != nil
