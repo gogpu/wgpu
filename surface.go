@@ -25,14 +25,9 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 		return nil, ErrReleased
 	}
 
-	halBackend, err := hal.SelectBestBackend()
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: no backend available for surface creation: %w", err)
-	}
-
-	halInstance, err := halBackend.CreateInstance(&hal.InstanceDescriptor{})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create HAL instance for surface: %w", err)
+	halInstance := i.core.HALInstance()
+	if halInstance == nil {
+		return nil, fmt.Errorf("wgpu: no HAL instance available for surface creation")
 	}
 
 	halSurface, err := halInstance.CreateSurface(displayHandle, windowHandle)

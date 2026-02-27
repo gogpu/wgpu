@@ -301,6 +301,17 @@ func (i *Instance) HasHALAdapters() bool {
 	return len(i.halInstances) > 0 && !i.useMock
 }
 
+// HALInstance returns the first available HAL instance, or nil if none.
+// Used by the public API for surface creation without creating duplicate HAL instances.
+func (i *Instance) HALInstance() hal.Instance {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	if len(i.halInstances) > 0 {
+		return i.halInstances[0]
+	}
+	return nil
+}
+
 // Destroy releases all resources associated with this instance.
 // This includes unregistering all adapters and destroying HAL instances.
 // After calling Destroy, the instance should not be used.

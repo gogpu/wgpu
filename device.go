@@ -11,7 +11,8 @@ import (
 // Device represents a logical GPU device.
 // It is the main interface for creating GPU resources.
 //
-// Thread-safe for concurrent use.
+// Device methods are safe for concurrent use, except Release() which
+// must not be called concurrently with other methods.
 type Device struct {
 	core     *core.Device
 	queue    *Queue

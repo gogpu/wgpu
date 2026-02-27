@@ -504,8 +504,12 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
 		}
-		// Note: TextureView HAL integration pending (requires core.TextureView with HAL).
-		// halCA.View = ca.View.Raw(guard)
+		if ca.View != nil {
+			halCA.View = ca.View.HAL
+		}
+		if ca.ResolveTarget != nil {
+			halCA.ResolveTarget = ca.ResolveTarget.HAL
+		}
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
 
@@ -520,6 +524,9 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StencilStoreOp:    desc.DepthStencilAttachment.StencilStoreOp,
 			StencilClearValue: desc.DepthStencilAttachment.StencilClearValue,
 			StencilReadOnly:   desc.DepthStencilAttachment.StencilReadOnly,
+		}
+		if desc.DepthStencilAttachment.View != nil {
+			halDS.View = desc.DepthStencilAttachment.View.HAL
 		}
 		halDesc.DepthStencilAttachment = halDS
 	}

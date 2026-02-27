@@ -107,14 +107,18 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
 		}
-		// TextureView conversion requires core.TextureView with HAL integration.
-		// The core encoder handles nil views gracefully for now.
+		if ca.View != nil {
+			coreCA.View = &core.TextureView{HAL: ca.View.hal}
+		}
+		if ca.ResolveTarget != nil {
+			coreCA.ResolveTarget = &core.TextureView{HAL: ca.ResolveTarget.hal}
+		}
 		coreDesc.ColorAttachments = append(coreDesc.ColorAttachments, coreCA)
 	}
 
 	if desc.DepthStencilAttachment != nil {
 		ds := desc.DepthStencilAttachment
-		coreDesc.DepthStencilAttachment = &core.RenderPassDepthStencilAttachment{
+		coreDSA := &core.RenderPassDepthStencilAttachment{
 			DepthLoadOp:       ds.DepthLoadOp,
 			DepthStoreOp:      ds.DepthStoreOp,
 			DepthClearValue:   ds.DepthClearValue,
@@ -124,6 +128,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			StencilClearValue: ds.StencilClearValue,
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
+		if ds.View != nil {
+			coreDSA.View = &core.TextureView{HAL: ds.View.hal}
+		}
+		coreDesc.DepthStencilAttachment = coreDSA
 	}
 
 	return coreDesc

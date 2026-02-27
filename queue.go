@@ -8,6 +8,10 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// defaultSubmitTimeout is the maximum time to wait for GPU work to complete
+// after submitting command buffers. 30 seconds accommodates heavy compute workloads.
+const defaultSubmitTimeout = 30 * time.Second
+
 // Queue handles command submission and data transfers.
 type Queue struct {
 	hal        hal.Queue
@@ -35,7 +39,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) error {
 		return fmt.Errorf("wgpu: submit failed: %w", err)
 	}
 
-	_, err = q.halDevice.Wait(q.fence, nextValue, 5*time.Second)
+	_, err = q.halDevice.Wait(q.fence, nextValue, defaultSubmitTimeout)
 	if err != nil {
 		return fmt.Errorf("wgpu: wait failed: %w", err)
 	}

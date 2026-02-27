@@ -1,6 +1,8 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 )
@@ -11,6 +13,9 @@ type InstanceDescriptor struct {
 }
 
 // Instance is the entry point for GPU operations.
+//
+// Instance methods are safe for concurrent use, except Release() which
+// must not be called concurrently with other methods.
 type Instance struct {
 	core     *core.Instance
 	released bool
@@ -43,12 +48,24 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 		return nil, err
 	}
 
-	info, _ := core.GetAdapterInfo(adapterID)
-	features, _ := core.GetAdapterFeatures(adapterID)
-	limits, _ := core.GetAdapterLimits(adapterID)
+	info, err := core.GetAdapterInfo(adapterID)
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to get adapter info: %w", err)
+	}
+	features, err := core.GetAdapterFeatures(adapterID)
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to get adapter features: %w", err)
+	}
+	limits, err := core.GetAdapterLimits(adapterID)
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to get adapter limits: %w", err)
+	}
 
 	hub := core.GetGlobal().Hub()
-	coreAdapter, _ := hub.GetAdapter(adapterID)
+	coreAdapter, err := hub.GetAdapter(adapterID)
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to get adapter: %w", err)
+	}
 
 	return &Adapter{
 		id:       adapterID,
