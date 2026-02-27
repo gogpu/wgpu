@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Metal: MSAA texture view crash** — `CreateTextureView` crashed on Apple Silicon (M3) when
+  creating a `TextureViewDimension2D` view from a multisampled (4x MSAA) source texture. Metal
+  requires the view type to match the source texture's multisample state
+  (`MTLTextureType2DMultisample`), unlike Vulkan which handles this implicitly.
+  ([ui#23](https://github.com/gogpu/ui/issues/23), [#80](https://github.com/gogpu/wgpu/issues/80))
+
 ## [0.17.0] - 2026-02-27
 
 ### Added
