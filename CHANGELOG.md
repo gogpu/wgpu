@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Type aliases re-exported from `gputypes` (no need to import `gputypes` directly)
   - Deterministic cleanup via `Release()` on all resource types
   - Backend registration via blank import (`_ "github.com/gogpu/wgpu/hal/allbackends"`)
+  - Full command recording: `RenderPassEncoder.SetPipeline/SetBindGroup`,
+    `ComputePassEncoder.SetPipeline/SetBindGroup`, `CommandEncoder.CopyBufferToBuffer`
+    delegate to HAL via new `RawPass()` / `RawEncoder()` core accessors
+  - Examples rewritten to use public API (`examples/compute-copy/`, `examples/compute-sum/`)
+  - Integration tests with software backend (15 tests covering full Instance→Submit flow)
+  - `core/instance.go`: software backend now enumerated as real adapter (noop still skipped)
 
 ## [0.17.1] - 2026-02-27
 

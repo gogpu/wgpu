@@ -61,10 +61,18 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	if e.released || src == nil || dst == nil {
 		return
 	}
-	// The core encoder wraps a HAL command encoder internally.
-	// Buffer-to-buffer copy is recorded via the HAL encoder.
-	// Full integration pending: requires access to the raw HAL encoder
-	// through the core command encoder, which will be exposed in a future release.
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+	halSrc := src.halBuffer()
+	halDst := dst.halBuffer()
+	if halSrc == nil || halDst == nil {
+		return
+	}
+	raw.CopyBufferToBuffer(halSrc, halDst, []hal.BufferCopy{
+		{SrcOffset: srcOffset, DstOffset: dstOffset, Size: size},
+	})
 }
 
 // Finish completes command recording and returns a CommandBuffer.

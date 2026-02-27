@@ -20,9 +20,10 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	if pipeline == nil {
 		return
 	}
-	// Core's SetPipeline tracks pipeline state internally.
-	// Full HAL integration pending: requires core.ComputePipeline with HAL handle.
-	p.core.SetPipeline(nil)
+	raw := p.core.RawPass()
+	if raw != nil && pipeline.hal != nil {
+		raw.SetPipeline(pipeline.hal)
+	}
 }
 
 // SetBindGroup sets a bind group for the given index.
@@ -30,7 +31,10 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	if group == nil {
 		return
 	}
-	// Direct HAL delegate pending: core doesn't have HAL bind group integration yet.
+	raw := p.core.RawPass()
+	if raw != nil && group.hal != nil {
+		raw.SetBindGroup(index, group.hal, offsets)
+	}
 }
 
 // Dispatch dispatches compute work.

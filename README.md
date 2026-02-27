@@ -124,7 +124,7 @@ defer pipeline.Release()
 encoder, _ := device.CreateCommandEncoder(nil)
 pass, _ := encoder.BeginComputePass(nil)
 pass.SetPipeline(pipeline)
-pass.SetBindGroup(0, bindGroup)
+pass.SetBindGroup(0, bindGroup, nil)
 pass.Dispatch(64, 1, 1)
 pass.End()
 

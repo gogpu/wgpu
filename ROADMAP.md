@@ -25,7 +25,7 @@
 ✅ **Public API root package** — `import "github.com/gogpu/wgpu"`
 
 **New in v0.18.0:**
-- Public API root package with 18 user-facing types wrapping core/ and hal/
+- Public API root package with 20 user-facing types wrapping core/ and hal/
 - WebGPU-spec-aligned flow: `CreateInstance()` → `RequestAdapter()` → `RequestDevice()`
 - Synchronous `Queue.Submit()` with internal fence management
 - Type aliases from `gputypes` — no extra imports needed
@@ -146,7 +146,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.18.0** | 2026-02 | Public API root package (18 types, WebGPU-aligned) |
+| **v0.18.0** | 2026-02 | Public API root package (20 types, WebGPU-aligned) |
 | v0.17.1 | 2026-02 | Metal MSAA texture view crash fix |
 | v0.17.0 | 2026-02 | Wayland Vulkan surface creation |
 | **v0.16.16** | 2026-02 | Vulkan X11/macOS surface pointer fix (gogpu#106) |

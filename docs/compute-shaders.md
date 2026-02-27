@@ -233,7 +233,7 @@ if err != nil {
 
 // Bind pipeline and resources
 computePass.SetPipeline(pipeline)
-computePass.SetBindGroup(0, bindGroup)
+computePass.SetBindGroup(0, bindGroup, nil)
 
 // Dispatch workgroups
 // If data has 1024 elements and workgroup_size is 64:

@@ -238,6 +238,19 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 	return enc, nil
 }
 
+// RawEncoder returns the underlying HAL command encoder for direct HAL access.
+// Requires the device's snatch lock to be held. Returns nil if the encoder
+// has been snatched or the device is destroyed.
+func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return nil
+	}
+	return *halEncoder
+}
+
 // Status returns the current encoder status.
 func (e *CoreCommandEncoder) Status() CommandEncoderStatus {
 	return CommandEncoderStatus(e.status.Load())
@@ -599,6 +612,11 @@ type CoreRenderPassEncoder struct {
 	ended bool
 }
 
+// RawPass returns the underlying HAL render pass encoder for direct HAL access.
+func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
+	return p.raw
+}
+
 // SetPipeline sets the render pipeline.
 func (p *CoreRenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	if p.ended {
@@ -774,6 +792,11 @@ type CoreComputePassEncoder struct {
 
 	// ended indicates whether End() has been called.
 	ended bool
+}
+
+// RawPass returns the underlying HAL compute pass encoder for direct HAL access.
+func (p *CoreComputePassEncoder) RawPass() hal.ComputePassEncoder {
+	return p.raw
 }
 
 // SetPipeline sets the compute pipeline.
