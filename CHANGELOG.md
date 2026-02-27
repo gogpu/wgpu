@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-02-27
+
+### Fixed
+
+- **Vulkan: buffer-to-image copy row stride corruption** — `convertBufferImageCopyRegions` incorrectly
+  inferred `bytesPerTexel` via integer division `BytesPerRow / Width` instead of using the texture
+  format's known block size. When `BytesPerRow` was padded to 256-byte alignment, the division
+  produced wrong results for most image widths (126 out of 204 possible widths for RGBA8).
+  For example, width=204: `1024 / 204 = 5` (should be 4) → Vulkan received wrong `bufferRowLength`
+  → pixel corruption on rounded rectangles and other non-power-of-2 width textures.
+  Fixed by adding `blockCopySize()` static lookup matching the Rust wgpu reference implementation's
+  `TextureFormat::block_copy_size()`. Covers all non-compressed WebGPU texture formats.
+  ([gogpu#96](https://github.com/gogpu/gogpu/discussions/96))
+
 ## [0.18.0] - 2026-02-27
 
 ### Added
