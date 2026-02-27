@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-02-27
+
+### Added
+
+- **Public API root package** — `import "github.com/gogpu/wgpu"` provides a safe, ergonomic,
+  WebGPU-spec-aligned API for third-party applications. Wraps `core/` and `hal/` into 18 public
+  types: Instance, Adapter, Device, Queue, Buffer, Texture, TextureView, Sampler, ShaderModule,
+  BindGroupLayout, PipelineLayout, BindGroup, RenderPipeline, ComputePipeline, CommandEncoder,
+  CommandBuffer, RenderPassEncoder, ComputePassEncoder, Surface, SurfaceTexture.
+  - `wgpu.CreateInstance()` → `instance.RequestAdapter()` → `adapter.RequestDevice()` flow
+  - All `Create*` methods on Device with `(T, error)` returns
+  - Synchronous `Queue.Submit()` with internal fence management
+  - `Queue.WriteBuffer()` / `Queue.ReadBuffer()` for CPU↔GPU data transfer
+  - Type aliases re-exported from `gputypes` (no need to import `gputypes` directly)
+  - Deterministic cleanup via `Release()` on all resource types
+  - Backend registration via blank import (`_ "github.com/gogpu/wgpu/hal/allbackends"`)
+
 ## [0.17.1] - 2026-02-27
 
 ### Fixed

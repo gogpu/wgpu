@@ -7,12 +7,20 @@ This document describes the architecture of `wgpu` — a Pure Go WebGPU implemen
 ```
 ┌─────────────────────────────────────────────────┐
 │                   User Code                     │
-│        (gogpu, gg, or direct HAL usage)         │
+│   import "github.com/gogpu/wgpu"                │
+│   _ "github.com/gogpu/wgpu/hal/allbackends"     │
 └──────────────────────┬──────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────┐
+│              Root Package (wgpu/)                │
+│  Safe, ergonomic public API (WebGPU-aligned)    │
+│  Instance · Adapter · Device · Queue · Buffer   │
+│  Texture · Pipeline · CommandEncoder · Surface   │
+└──────────────────────┬──────────────────────────┘
+                       │ wraps
+┌──────────────────────▼──────────────────────────┐
 │                  core/                          │
-│      WebGPU-compliant API with validation       │
+│      Validation, state tracking, error scopes   │
 │   (Instance, Adapter, Device, Queue, Pipeline)  │
 └──────────────────────┬──────────────────────────┘
                        │
@@ -32,9 +40,21 @@ This document describes the architecture of `wgpu` — a Pure Go WebGPU implemen
 
 ## Layers
 
-### `core/` — WebGPU API
+### Root Package (`wgpu/`) — Public API
 
-The public API layer that users interact with. Follows the W3C WebGPU specification.
+The user-facing API layer. Wraps `core/` and `hal/` into safe, ergonomic types aligned with the W3C WebGPU specification.
+
+- **Type safety** — Public types hide internal HAL handles; users never touch `unsafe.Pointer`
+- **Go-idiomatic errors** — All fallible methods return `(T, error)`
+- **Deterministic cleanup** — `Release()` on all resource types
+- **Type aliases** — Re-exports from `gputypes` so users don't need a separate import
+- **Descriptor conversion** — Public descriptors auto-convert to HAL descriptors via `toHAL()` methods
+
+Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `TextureView`, `Sampler`, `ShaderModule`, `BindGroupLayout`, `PipelineLayout`, `BindGroup`, `RenderPipeline`, `ComputePipeline`, `CommandEncoder`, `RenderPassEncoder`, `ComputePassEncoder`, `Surface`.
+
+### `core/` — Validation & State Tracking
+
+Internal validation layer between the public API and HAL.
 
 - **Validation** — Validates descriptors, usage flags, and state before forwarding to HAL
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)
@@ -128,6 +148,31 @@ Backend priority for auto-selection: Vulkan > Metal > DX12 > GLES > Software > N
 
 ## Resource Lifecycle
 
+### Public API (recommended)
+
+```go
+instance, _ := wgpu.CreateInstance(nil)
+defer instance.Release()
+
+adapter, _ := instance.RequestAdapter(nil)
+defer adapter.Release()
+
+device, _ := adapter.RequestDevice(nil)
+defer device.Release()
+
+buffer, _ := device.CreateBuffer(&wgpu.BufferDescriptor{...})
+defer buffer.Release()
+
+encoder, _ := device.CreateCommandEncoder(nil)
+pass, _ := encoder.BeginComputePass(nil)
+// ... record commands ...
+pass.End()
+cmdBuf, _ := encoder.Finish()
+device.Queue().Submit(cmdBuf)
+```
+
+### Internal HAL flow
+
 ```
 Backend.CreateInstance()
   → Instance.EnumerateAdapters()
@@ -139,7 +184,7 @@ Backend.CreateInstance()
         → Device.Destroy*(res)     // release
 ```
 
-All resources must be explicitly destroyed. The `core/` layer provides leak detection.
+All resources must be explicitly released. The `core/` layer provides leak detection.
 
 ## Pure Go Approach
 

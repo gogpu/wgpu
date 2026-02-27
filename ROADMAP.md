@@ -19,9 +19,17 @@
 
 ---
 
-## Current State: v0.16.17
+## Current State: v0.18.0
 
-✅ **All 5 HAL backends complete** (~80K LOC, ~100K total):
+✅ **All 5 HAL backends complete** (~80K LOC, ~100K total)
+✅ **Public API root package** — `import "github.com/gogpu/wgpu"`
+
+**New in v0.18.0:**
+- Public API root package with 18 user-facing types wrapping core/ and hal/
+- WebGPU-spec-aligned flow: `CreateInstance()` → `RequestAdapter()` → `RequestDevice()`
+- Synchronous `Queue.Submit()` with internal fence management
+- Type aliases from `gputypes` — no extra imports needed
+- Deterministic `Release()` cleanup on all resource types
 
 **New in v0.16.17:**
 - Vulkan: load platform surface creation functions — `vkCreateXlibSurfaceKHR`, `vkCreateXcbSurfaceKHR`, `vkCreateWaylandSurfaceKHR`, `vkCreateMetalSurfaceEXT` were never loaded via `GetInstanceProcAddr` (only Win32 was). Fixed — Linux/macOS Vulkan surfaces now work (gogpu#106)
@@ -103,6 +111,7 @@
 - [x] Vulkan timeline semaphore fence (VK_KHR_timeline_semaphore, Vulkan 1.2 core)
 - [x] Vulkan command buffer batch allocation (16 per call, wgpu-hal pattern)
 - [x] Vulkan binary fence pool (FencePool with per-submission tracking, Vulkan <1.2 fallback)
+- [x] Public API root package — safe, ergonomic user-facing API
 - [ ] Comprehensive documentation
 
 ### Future
@@ -137,6 +146,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.18.0** | 2026-02 | Public API root package (18 types, WebGPU-aligned) |
+| v0.17.1 | 2026-02 | Metal MSAA texture view crash fix |
+| v0.17.0 | 2026-02 | Wayland Vulkan surface creation |
 | **v0.16.16** | 2026-02 | Vulkan X11/macOS surface pointer fix (gogpu#106) |
 | v0.16.15 | 2026-02 | Software backend always compiled, no build tags (gogpu#106) |
 | v0.16.14 | 2026-02 | Vulkan null surface handle guard (gogpu#106), naga v0.14.3 |
