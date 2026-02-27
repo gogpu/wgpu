@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Wayland Vulkan surface creation** — `CreateWaylandSurface()` method on Vulkan API for creating
+  surfaces from `wl_display*` and `wl_surface*` C pointers via `VK_KHR_wayland_surface` extension.
+  Function pointer `vkCreateWaylandSurfaceKHR` loaded via `vkGetInstanceProcAddr`, following the
+  same pattern as X11, XCB, and Metal surface creation.
+
 ## [0.16.17] - 2026-02-26
 
 ### Fixed
@@ -1093,7 +1102,7 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.14...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.16.17...HEAD
 [0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
 [0.16.13]: https://github.com/gogpu/wgpu/compare/v0.16.12...v0.16.13
 [0.16.12]: https://github.com/gogpu/wgpu/compare/v0.16.11...v0.16.12
