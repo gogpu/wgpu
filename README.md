@@ -295,7 +295,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 
 - **[Compute Shaders Guide](docs/compute-shaders.md)** — Getting started with compute
 - **[Compute Backend Differences](docs/compute-backends.md)** — Per-backend capabilities
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
+- **[ARCHITECTURE.md](docs/architecture.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
