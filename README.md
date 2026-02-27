@@ -189,6 +189,7 @@ Full Vulkan 1.3 implementation with:
 - wgpu-style swapchain synchronization
 - MSAA render pass with automatic resolve
 - Complete resource management (Buffer, Texture, Pipeline, BindGroup)
+- Surface creation: Win32, X11, Wayland, Metal (MoltenVK)
 - Debug messenger for validation layer error capture (`VK_EXT_debug_utils`)
 - Structured diagnostic logging via `log/slog`
 
