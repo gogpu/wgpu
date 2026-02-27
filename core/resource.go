@@ -701,7 +701,11 @@ func (t *BufferInitTracker) IsInitialized(offset, size uint64) bool {
 type Texture struct{}
 
 // TextureView represents a view into a texture.
-type TextureView struct{}
+type TextureView struct {
+	// HAL is the underlying HAL texture view handle.
+	// Set by the public API layer when creating texture views with real HAL backends.
+	HAL hal.TextureView
+}
 
 // Sampler represents a texture sampler.
 type Sampler struct{}

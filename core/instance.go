@@ -111,9 +111,22 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool
 
 	// Try each backend provider
 	for _, provider := range providers {
-		// Skip noop/empty backend - we'll use that as mock fallback
+		// Skip noop backend — it's for testing only, not real rendering.
+		// Software backend (also BackendEmpty variant) is allowed through
+		// because it provides real CPU-based rendering.
 		if provider.Variant() == gputypes.BackendEmpty {
-			continue
+			halInst, err := provider.CreateInstance(halDesc)
+			if err != nil {
+				continue
+			}
+			adapters := halInst.EnumerateAdapters(nil)
+			isNoop := len(adapters) > 0 && adapters[0].Info.DeviceType == gputypes.DeviceTypeOther
+			if isNoop {
+				halInst.Destroy()
+				continue
+			}
+			// Not noop (software backend) — destroy temp instance and fall through
+			halInst.Destroy()
 		}
 
 		// Try to create HAL instance
@@ -286,6 +299,17 @@ func (i *Instance) HasHALAdapters() bool {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return len(i.halInstances) > 0 && !i.useMock
+}
+
+// HALInstance returns the first available HAL instance, or nil if none.
+// Used by the public API for surface creation without creating duplicate HAL instances.
+func (i *Instance) HALInstance() hal.Instance {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	if len(i.halInstances) > 0 {
+		return i.halInstances[0]
+	}
+	return nil
 }
 
 // Destroy releases all resources associated with this instance.

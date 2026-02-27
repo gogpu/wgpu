@@ -238,6 +238,19 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 	return enc, nil
 }
 
+// RawEncoder returns the underlying HAL command encoder for direct HAL access.
+// Requires the device's snatch lock to be held. Returns nil if the encoder
+// has been snatched or the device is destroyed.
+func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return nil
+	}
+	return *halEncoder
+}
+
 // Status returns the current encoder status.
 func (e *CoreCommandEncoder) Status() CommandEncoderStatus {
 	return CommandEncoderStatus(e.status.Load())
@@ -491,8 +504,12 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
 		}
-		// Note: TextureView HAL integration pending (requires core.TextureView with HAL).
-		// halCA.View = ca.View.Raw(guard)
+		if ca.View != nil {
+			halCA.View = ca.View.HAL
+		}
+		if ca.ResolveTarget != nil {
+			halCA.ResolveTarget = ca.ResolveTarget.HAL
+		}
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
 
@@ -507,6 +524,9 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StencilStoreOp:    desc.DepthStencilAttachment.StencilStoreOp,
 			StencilClearValue: desc.DepthStencilAttachment.StencilClearValue,
 			StencilReadOnly:   desc.DepthStencilAttachment.StencilReadOnly,
+		}
+		if desc.DepthStencilAttachment.View != nil {
+			halDS.View = desc.DepthStencilAttachment.View.HAL
 		}
 		halDesc.DepthStencilAttachment = halDS
 	}
@@ -597,6 +617,11 @@ type CoreRenderPassEncoder struct {
 
 	// ended indicates whether End() has been called.
 	ended bool
+}
+
+// RawPass returns the underlying HAL render pass encoder for direct HAL access.
+func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
+	return p.raw
 }
 
 // SetPipeline sets the render pipeline.
@@ -774,6 +799,11 @@ type CoreComputePassEncoder struct {
 
 	// ended indicates whether End() has been called.
 	ended bool
+}
+
+// RawPass returns the underlying HAL compute pass encoder for direct HAL access.
+func (p *CoreComputePassEncoder) RawPass() hal.ComputePassEncoder {
+	return p.raw
 }
 
 // SetPipeline sets the compute pipeline.

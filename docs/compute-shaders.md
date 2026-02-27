@@ -52,16 +52,14 @@ The compute pipeline binds a shader module to a pipeline layout.
 Compile WGSL source code (or SPIR-V bytecode) into a shader module:
 
 ```go
-shaderModule, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
+shaderModule, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
     Label: "Compute Shader",
-    Source: hal.ShaderSource{
-        WGSL: wgslSource,
-    },
+    WGSL:  wgslSource,
 })
 if err != nil {
     log.Fatal("failed to create shader module:", err)
 }
-defer device.DestroyShaderModule(shaderModule)
+defer shaderModule.Release()
 ```
 
 The `naga` shader compiler translates WGSL to the backend's native format:
@@ -75,19 +73,19 @@ The `naga` shader compiler translates WGSL to the backend's native format:
 Define the resource binding structure:
 
 ```go
-bindGroupLayout, err := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+bindGroupLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
     Label: "Compute Bind Group Layout",
-    Entries: []gputypes.BindGroupLayoutEntry{
+    Entries: []wgpu.BindGroupLayoutEntry{
         {
             Binding:    0,
-            Visibility: gputypes.ShaderStageCompute,
+            Visibility: wgpu.ShaderStageCompute,
             Buffer: &gputypes.BufferBindingLayout{
                 Type: gputypes.BufferBindingTypeReadOnlyStorage,
             },
         },
         {
             Binding:    1,
-            Visibility: gputypes.ShaderStageCompute,
+            Visibility: wgpu.ShaderStageCompute,
             Buffer: &gputypes.BufferBindingLayout{
                 Type: gputypes.BufferBindingTypeStorage,
             },
@@ -97,37 +95,35 @@ bindGroupLayout, err := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescrip
 if err != nil {
     log.Fatal("failed to create bind group layout:", err)
 }
-defer device.DestroyBindGroupLayout(bindGroupLayout)
+defer bindGroupLayout.Release()
 ```
 
 ### Step 3: Create a Pipeline Layout
 
 ```go
-pipelineLayout, err := device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+pipelineLayout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
     Label:            "Compute Pipeline Layout",
-    BindGroupLayouts: []hal.BindGroupLayout{bindGroupLayout},
+    BindGroupLayouts: []*wgpu.BindGroupLayout{bindGroupLayout},
 })
 if err != nil {
     log.Fatal("failed to create pipeline layout:", err)
 }
-defer device.DestroyPipelineLayout(pipelineLayout)
+defer pipelineLayout.Release()
 ```
 
 ### Step 4: Create the Compute Pipeline
 
 ```go
-pipeline, err := device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-    Label:  "Compute Pipeline",
-    Layout: pipelineLayout,
-    Compute: hal.ComputeState{
-        Module:     shaderModule,
-        EntryPoint: "main",
-    },
+pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+    Label:      "Compute Pipeline",
+    Layout:     pipelineLayout,
+    Module:     shaderModule,
+    EntryPoint: "main",
 })
 if err != nil {
     log.Fatal("failed to create compute pipeline:", err)
 }
-defer device.DestroyComputePipeline(pipeline)
+defer pipeline.Release()
 ```
 
 ## Creating Buffers
@@ -140,25 +136,28 @@ Storage buffers are the primary way to pass data to and from compute shaders:
 
 ```go
 // Input buffer: written by CPU, read by shader
-inputBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+inputBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
     Label: "Input Buffer",
     Size:  uint64(len(inputData)) * 4, // f32 = 4 bytes
-    Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
+    Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 })
+defer inputBuffer.Release()
 
 // Output buffer: written by shader, read back by CPU
-outputBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+outputBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
     Label: "Output Buffer",
     Size:  uint64(len(inputData)) * 4,
-    Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc,
+    Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopySrc,
 })
+defer outputBuffer.Release()
 
 // Readback buffer: CPU-readable staging buffer
-readbackBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+readbackBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
     Label: "Readback Buffer",
     Size:  uint64(len(inputData)) * 4,
-    Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
+    Usage: wgpu.BufferUsageMapRead | wgpu.BufferUsageCopyDst,
 })
+defer readbackBuffer.Release()
 ```
 
 ### Uniform Buffers
@@ -166,22 +165,23 @@ readbackBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
 For small, frequently updated data (e.g., parameters, dimensions):
 
 ```go
-uniformBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
+uniformBuffer, err := device.CreateBuffer(&wgpu.BufferDescriptor{
     Label: "Uniform Buffer",
     Size:  16, // e.g., vec4<f32>
-    Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+    Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
 })
+defer uniformBuffer.Release()
 ```
 
 ### Writing Data to Buffers
 
-Use `Queue.WriteBuffer` to upload data from CPU to GPU:
+Use `Queue().WriteBuffer` to upload data from CPU to GPU:
 
 ```go
 // Convert float32 slice to bytes
 data := []float32{1.0, 2.0, 3.0, 4.0}
 byteData := unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), len(data)*4)
-queue.WriteBuffer(inputBuffer, 0, byteData)
+device.Queue().WriteBuffer(inputBuffer, 0, byteData)
 ```
 
 ## Creating Bind Groups
@@ -189,32 +189,26 @@ queue.WriteBuffer(inputBuffer, 0, byteData)
 Bind groups connect actual GPU resources to the layout:
 
 ```go
-bindGroup, err := device.CreateBindGroup(&hal.BindGroupDescriptor{
+bindGroup, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
     Label:  "Compute Bind Group",
     Layout: bindGroupLayout,
-    Entries: []gputypes.BindGroupEntry{
+    Entries: []wgpu.BindGroupEntry{
         {
             Binding: 0,
-            Resource: gputypes.BufferBinding{
-                Buffer: inputBuffer.NativeHandle(),
-                Offset: 0,
-                Size:   inputBufferSize,
-            },
+            Buffer:  inputBuffer,
+            Size:    inputBufferSize,
         },
         {
             Binding: 1,
-            Resource: gputypes.BufferBinding{
-                Buffer: outputBuffer.NativeHandle(),
-                Offset: 0,
-                Size:   outputBufferSize,
-            },
+            Buffer:  outputBuffer,
+            Size:    outputBufferSize,
         },
     },
 })
 if err != nil {
     log.Fatal("failed to create bind group:", err)
 }
-defer device.DestroyBindGroup(bindGroup)
+defer bindGroup.Release()
 ```
 
 ## Dispatching Workgroups
@@ -222,22 +216,20 @@ defer device.DestroyBindGroup(bindGroup)
 ### Recording Commands
 
 ```go
-encoder, err := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+encoder, err := device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
     Label: "Compute Encoder",
 })
 if err != nil {
     log.Fatal("failed to create encoder:", err)
 }
 
-err = encoder.BeginEncoding("Compute Commands")
-if err != nil {
-    log.Fatal("failed to begin encoding:", err)
-}
-
 // Begin compute pass
-computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{
+computePass, err := encoder.BeginComputePass(&wgpu.ComputePassDescriptor{
     Label: "Compute Pass",
 })
+if err != nil {
+    log.Fatal("failed to begin compute pass:", err)
+}
 
 // Bind pipeline and resources
 computePass.SetPipeline(pipeline)
@@ -269,18 +261,11 @@ After the compute shader writes to the output buffer, copy the results to a CPU-
 ### Step 1: Copy Output to Readback Buffer
 
 ```go
-// Transition and copy
-encoder.CopyBufferToBuffer(
-    outputBuffer, readbackBuffer,
-    []hal.BufferCopy{{
-        SrcOffset: 0,
-        DstOffset: 0,
-        Size:      outputBufferSize,
-    }},
-)
+// Copy output buffer to readback buffer
+encoder.CopyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, outputBufferSize)
 
 // Finish encoding
-cmdBuffer, err := encoder.EndEncoding()
+cmdBuffer, err := encoder.Finish()
 if err != nil {
     log.Fatal("failed to finish encoding:", err)
 }
@@ -289,21 +274,10 @@ if err != nil {
 ### Step 2: Submit and Wait
 
 ```go
-fence, err := device.CreateFence()
-if err != nil {
-    log.Fatal("failed to create fence:", err)
-}
-defer device.DestroyFence(fence)
-
-err = queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1)
+// Queue.Submit() handles fencing internally — blocks until GPU is done
+err = device.Queue().Submit(cmdBuffer)
 if err != nil {
     log.Fatal("failed to submit:", err)
-}
-
-// Wait for GPU to finish
-ok, err := device.Wait(fence, 1, 5*time.Second)
-if err != nil || !ok {
-    log.Fatal("GPU wait failed:", err)
 }
 ```
 
@@ -311,7 +285,7 @@ if err != nil || !ok {
 
 ```go
 resultBytes := make([]byte, outputBufferSize)
-err = queue.ReadBuffer(readbackBuffer, 0, resultBytes)
+err = device.Queue().ReadBuffer(readbackBuffer, 0, resultBytes)
 if err != nil {
     log.Fatal("failed to read buffer:", err)
 }
@@ -322,12 +296,17 @@ results := unsafe.Slice((*float32)(unsafe.Pointer(&resultBytes[0])), numElements
 
 ## Timestamp Queries for Profiling
 
+> **Note:** Timestamp queries use the `hal/` package directly — they are not yet exposed
+> in the high-level `wgpu` root package. Import `"github.com/gogpu/wgpu/hal"` for this functionality.
+
 You can measure GPU execution time of compute passes using timestamp queries.
 
 ### Creating a Query Set
 
 ```go
-querySet, err := device.CreateQuerySet(&hal.QuerySetDescriptor{
+import "github.com/gogpu/wgpu/hal"
+
+querySet, err := halDevice.CreateQuerySet(&hal.QuerySetDescriptor{
     Label: "Timestamp Queries",
     Type:  hal.QueryTypeTimestamp,
     Count: 2, // begin + end
@@ -336,7 +315,7 @@ if err != nil {
     // Backend may not support timestamps
     log.Println("timestamps not supported:", err)
 }
-defer device.DestroyQuerySet(querySet)
+defer halDevice.DestroyQuerySet(querySet)
 ```
 
 ### Using Timestamps in a Compute Pass
@@ -345,7 +324,7 @@ defer device.DestroyQuerySet(querySet)
 beginIdx := uint32(0)
 endIdx := uint32(1)
 
-computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{
+computePass := halEncoder.BeginComputePass(&hal.ComputePassDescriptor{
     Label: "Timed Compute Pass",
     TimestampWrites: &hal.ComputePassTimestampWrites{
         QuerySet:                  querySet,
@@ -362,61 +341,42 @@ computePass.End()
 
 ```go
 // Create a buffer for timestamp results (2 * uint64 = 16 bytes)
-timestampBuffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
+timestampBuffer, _ := halDevice.CreateBuffer(&hal.BufferDescriptor{
     Label: "Timestamp Buffer",
     Size:  16,
     Usage: gputypes.BufferUsageCopyDst | gputypes.BufferUsageMapRead,
 })
 
 // Resolve timestamps into the buffer
-encoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
+halEncoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
 
 // After submit + wait, read back and compute elapsed time
 timestampBytes := make([]byte, 16)
-queue.ReadBuffer(timestampBuffer, 0, timestampBytes)
+halQueue.ReadBuffer(timestampBuffer, 0, timestampBytes)
 
 timestamps := unsafe.Slice((*uint64)(unsafe.Pointer(&timestampBytes[0])), 2)
 begin := timestamps[0]
 end := timestamps[1]
 
 // Convert to nanoseconds using the timestamp period
-period := queue.GetTimestampPeriod()
+period := halQueue.GetTimestampPeriod()
 elapsedNs := float64(end-begin) * float64(period)
 fmt.Printf("Compute pass took %.3f ms\n", elapsedNs/1e6)
 ```
 
 ## Error Handling
 
-### Backend-Specific Errors
+### Checking Errors
 
 ```go
-import "github.com/gogpu/wgpu/hal"
+import "github.com/gogpu/wgpu"
 
 pipeline, err := device.CreateComputePipeline(desc)
 if err != nil {
-    // Check for specific error types
-    if errors.Is(err, hal.ErrDeviceOutOfMemory) {
+    if errors.Is(err, wgpu.ErrOutOfMemory) {
         // Reduce buffer sizes or batch work
     }
-    if errors.Is(err, hal.ErrDriverBug) {
-        // Try a different backend
-    }
     log.Fatal("pipeline creation failed:", err)
-}
-```
-
-### Timestamp Support
-
-Not all backends support timestamp queries:
-
-```go
-querySet, err := device.CreateQuerySet(&hal.QuerySetDescriptor{
-    Type:  hal.QueryTypeTimestamp,
-    Count: 2,
-})
-if errors.Is(err, hal.ErrTimestampsNotSupported) {
-    // Fall back to CPU timing
-    log.Println("GPU timestamps not available, using CPU timing")
 }
 ```
 

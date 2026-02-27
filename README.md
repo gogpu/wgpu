@@ -65,63 +65,71 @@ package main
 import (
     "fmt"
 
-    "github.com/gogpu/wgpu/core"
-    types "github.com/gogpu/gputypes"
+    "github.com/gogpu/wgpu"
     _ "github.com/gogpu/wgpu/hal/allbackends" // Auto-register platform backends
 )
 
 func main() {
-    // Create instance with platform-appropriate backends
-    instance := core.NewInstance(&types.InstanceDescriptor{
-        Backends: types.BackendsAll,
-    })
+    // Create instance
+    instance, _ := wgpu.CreateInstance(nil)
+    defer instance.Release()
 
     // Request high-performance GPU
-    adapterID, _ := instance.RequestAdapter(&types.RequestAdapterOptions{
-        PowerPreference: types.PowerPreferenceHighPerformance,
+    adapter, _ := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+        PowerPreference: wgpu.PowerPreferenceHighPerformance,
     })
+    defer adapter.Release()
 
     // Get adapter info
-    info, _ := core.GetAdapterInfo(adapterID)
+    info := adapter.Info()
     fmt.Printf("GPU: %s (%s)\n", info.Name, info.Backend)
 
     // Create device
-    deviceID, _ := core.RequestDevice(adapterID, &types.DeviceDescriptor{
-        Label: "My Device",
-    })
+    device, _ := adapter.RequestDevice(nil)
+    defer device.Release()
 
-    // Get queue for command submission
-    queueID, _ := core.GetDeviceQueue(deviceID)
-    _ = queueID // Ready for rendering
+    // Create a GPU buffer
+    buffer, _ := device.CreateBuffer(&wgpu.BufferDescriptor{
+        Label: "My Buffer",
+        Size:  1024,
+        Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
+    })
+    defer buffer.Release()
+
+    // Write data to buffer
+    device.Queue().WriteBuffer(buffer, 0, []byte{1, 2, 3, 4})
 }
 ```
 
 ### Compute Shaders
 
 ```go
-// Create compute pipeline
-pipelineID, _ := core.DeviceCreateComputePipeline(deviceID, &core.ComputePipelineDescriptor{
-    Label:  "Compute Pipeline",
-    Layout: layoutID,
-    Compute: core.ProgrammableStage{
-        Module:     shaderModuleID,
-        EntryPoint: "main",
-    },
+// Create shader module from WGSL
+shader, _ := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+    Label: "Compute Shader",
+    WGSL:  wgslSource,
 })
+defer shader.Release()
 
-// Begin compute pass
-encoderID, _ := core.DeviceCreateCommandEncoder(deviceID, "Compute Encoder")
-computePass := encoder.BeginComputePass(nil)
+// Create compute pipeline
+pipeline, _ := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+    Label:      "Compute Pipeline",
+    Layout:     pipelineLayout,
+    Module:     shader,
+    EntryPoint: "main",
+})
+defer pipeline.Release()
 
-// Dispatch workgroups
-computePass.SetPipeline(pipelineID)
-computePass.SetBindGroup(0, bindGroupID, nil)
-computePass.Dispatch(64, 1, 1)
-computePass.End()
+// Record and submit commands
+encoder, _ := device.CreateCommandEncoder(nil)
+pass, _ := encoder.BeginComputePass(nil)
+pass.SetPipeline(pipeline)
+pass.SetBindGroup(0, bindGroup, nil)
+pass.Dispatch(64, 1, 1)
+pass.End()
 
-// Submit commands
-cmdBufID, _ := core.CommandEncoderFinish(encoderID)
-core.QueueSubmit(queueID, []core.CommandBufferID{cmdBufID})
+cmdBuffer, _ := encoder.Finish()
+device.Queue().Submit(cmdBuffer)
 ```
 
 **Guides:** [Getting Started](docs/compute-shaders.md) | [Backend Differences](docs/compute-backends.md)
@@ -134,6 +142,7 @@ Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU 
 
 ```
 wgpu/
+├── *.go                # Public API (import "github.com/gogpu/wgpu")
 ├── core/               # Validation, state tracking, resource management
 ├── hal/                # Hardware Abstraction Layer
 │   ├── allbackends/    # Platform-specific backend auto-registration
@@ -151,17 +160,31 @@ wgpu/
     └── ...             # Backend integration tests
 ```
 
+### Public API
+
+The root package (`import "github.com/gogpu/wgpu"`) provides a safe, ergonomic API aligned with the W3C WebGPU specification. It wraps `core/` and `hal/` into user-friendly types:
+
+```
+User Application
+  ↓ import "github.com/gogpu/wgpu"
+Root Package (public API)
+  ↓ wraps
+core/ (validation) + hal/ (backend interfaces)
+  ↓
+vulkan/ | metal/ | dx12/ | gles/ | software/
+```
+
 ### HAL Backend Integration
 
-The HAL Backend Integration layer provides unified multi-backend support:
+Backends auto-register via blank imports:
 
 ```go
 import _ "github.com/gogpu/wgpu/hal/allbackends"
 
 // Platform-specific backends auto-registered:
-// - Windows: Vulkan, DX12, GLES
-// - Linux:   Vulkan, GLES
-// - macOS:   Metal, Vulkan
+// - Windows: Vulkan, DX12, GLES, Software
+// - Linux:   Vulkan, GLES, Software
+// - macOS:   Metal, Software
 ```
 
 ---
@@ -272,7 +295,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 
 - **[Compute Shaders Guide](docs/compute-shaders.md)** — Getting started with compute
 - **[Compute Backend Differences](docs/compute-backends.md)** — Per-backend capabilities
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
+- **[ARCHITECTURE.md](docs/architecture.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
