@@ -19,10 +19,13 @@
 
 ---
 
-## Current State: v0.18.0
+## Current State: v0.18.1
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total)
 ✅ **Public API root package** — `import "github.com/gogpu/wgpu"`
+
+**New in v0.18.1:**
+- Vulkan: fix buffer-to-image copy row stride corruption — use format's block copy size instead of inferring from padded `BytesPerRow / Width` (gogpu#96)
 
 **New in v0.18.0:**
 - Public API root package with 20 user-facing types wrapping core/ and hal/

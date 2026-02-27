@@ -254,19 +254,65 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	vkCmdCopyBuffer(e.device.cmds, e.cmdBuffer, srcBuf.handle, dstBuf.handle, uint32(len(vkRegions)), &vkRegions[0])
 }
 
+// blockCopySize returns the number of bytes per block for a given texture format.
+// For non-compressed formats the block is a single texel.
+// Matches wgpu-types TextureFormat::block_copy_size in the Rust reference.
+func blockCopySize(format gputypes.TextureFormat) uint32 {
+	switch format {
+	// 1 byte per texel
+	case gputypes.TextureFormatR8Unorm, gputypes.TextureFormatR8Snorm,
+		gputypes.TextureFormatR8Uint, gputypes.TextureFormatR8Sint,
+		gputypes.TextureFormatStencil8:
+		return 1
+	// 2 bytes per texel
+	case gputypes.TextureFormatR16Unorm, gputypes.TextureFormatR16Snorm,
+		gputypes.TextureFormatR16Uint, gputypes.TextureFormatR16Sint,
+		gputypes.TextureFormatR16Float,
+		gputypes.TextureFormatRG8Unorm, gputypes.TextureFormatRG8Snorm,
+		gputypes.TextureFormatRG8Uint, gputypes.TextureFormatRG8Sint,
+		gputypes.TextureFormatDepth16Unorm:
+		return 2
+	// 4 bytes per texel
+	case gputypes.TextureFormatR32Float, gputypes.TextureFormatR32Uint, gputypes.TextureFormatR32Sint,
+		gputypes.TextureFormatRG16Unorm, gputypes.TextureFormatRG16Snorm,
+		gputypes.TextureFormatRG16Uint, gputypes.TextureFormatRG16Sint,
+		gputypes.TextureFormatRG16Float,
+		gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatRGBA8Snorm, gputypes.TextureFormatRGBA8Uint, gputypes.TextureFormatRGBA8Sint,
+		gputypes.TextureFormatBGRA8Unorm, gputypes.TextureFormatBGRA8UnormSrgb,
+		gputypes.TextureFormatRGB10A2Uint, gputypes.TextureFormatRGB10A2Unorm,
+		gputypes.TextureFormatRG11B10Ufloat, gputypes.TextureFormatRGB9E5Ufloat,
+		gputypes.TextureFormatDepth32Float:
+		return 4
+	// 8 bytes per texel
+	case gputypes.TextureFormatRG32Uint, gputypes.TextureFormatRG32Sint, gputypes.TextureFormatRG32Float,
+		gputypes.TextureFormatRGBA16Unorm, gputypes.TextureFormatRGBA16Snorm,
+		gputypes.TextureFormatRGBA16Uint, gputypes.TextureFormatRGBA16Sint,
+		gputypes.TextureFormatRGBA16Float:
+		return 8
+	// 16 bytes per texel
+	case gputypes.TextureFormatRGBA32Uint, gputypes.TextureFormatRGBA32Sint, gputypes.TextureFormatRGBA32Float:
+		return 16
+	default:
+		// Fallback for unknown formats — assume 4 (RGBA8 is the most common).
+		return 4
+	}
+}
+
 // convertBufferImageCopyRegions converts HAL BufferTextureCopy regions to Vulkan BufferImageCopy.
-func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy) []vk.BufferImageCopy {
+// The format parameter is the texture format, used to determine block copy size
+// for correct bytes-to-texels conversion of bufferRowLength.
+func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat) []vk.BufferImageCopy {
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
+	blockSize := blockCopySize(format)
 	for i, r := range regions {
-		// Vulkan bufferRowLength is in TEXELS, not bytes!
-		// For RGBA8 format (4 bytes per texel), convert bytes to texels.
-		// A value of 0 means tightly packed (row length = image width).
+		// Vulkan bufferRowLength is in TEXELS, not bytes.
+		// Convert from WebGPU's BytesPerRow (bytes) to Vulkan's bufferRowLength (texels)
+		// using the format's known block size — NOT inference from BytesPerRow/Width,
+		// which gives wrong results when BytesPerRow is padded to alignment.
 		bufferRowLength := uint32(0)
-		if r.BufferLayout.BytesPerRow > 0 && r.Size.Width > 0 {
-			bytesPerTexel := r.BufferLayout.BytesPerRow / r.Size.Width
-			if bytesPerTexel > 0 {
-				bufferRowLength = r.BufferLayout.BytesPerRow / bytesPerTexel
-			}
+		if r.BufferLayout.BytesPerRow > 0 {
+			bufferRowLength = r.BufferLayout.BytesPerRow / blockSize
 		}
 
 		vkRegions[i] = vk.BufferImageCopy{
@@ -306,7 +352,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		return
 	}
 
-	vkRegions := convertBufferImageCopyRegions(regions)
+	vkRegions := convertBufferImageCopyRegions(regions, dstTex.format)
 	vkCmdCopyBufferToImage(
 		e.device.cmds,
 		e.cmdBuffer,
@@ -330,7 +376,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		return
 	}
 
-	vkRegions := convertBufferImageCopyRegions(regions)
+	vkRegions := convertBufferImageCopyRegions(regions, srcTex.format)
 	vkCmdCopyImageToBuffer(
 		e.device.cmds,
 		e.cmdBuffer,
