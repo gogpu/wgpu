@@ -261,18 +261,11 @@ After the compute shader writes to the output buffer, copy the results to a CPU-
 ### Step 1: Copy Output to Readback Buffer
 
 ```go
-// Transition and copy
-encoder.CopyBufferToBuffer(
-    outputBuffer, readbackBuffer,
-    []hal.BufferCopy{{
-        SrcOffset: 0,
-        DstOffset: 0,
-        Size:      outputBufferSize,
-    }},
-)
+// Copy output buffer to readback buffer
+encoder.CopyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, outputBufferSize)
 
 // Finish encoding
-cmdBuffer, err := encoder.EndEncoding()
+cmdBuffer, err := encoder.Finish()
 if err != nil {
     log.Fatal("failed to finish encoding:", err)
 }
@@ -303,12 +296,17 @@ results := unsafe.Slice((*float32)(unsafe.Pointer(&resultBytes[0])), numElements
 
 ## Timestamp Queries for Profiling
 
+> **Note:** Timestamp queries use the `hal/` package directly — they are not yet exposed
+> in the high-level `wgpu` root package. Import `"github.com/gogpu/wgpu/hal"` for this functionality.
+
 You can measure GPU execution time of compute passes using timestamp queries.
 
 ### Creating a Query Set
 
 ```go
-querySet, err := device.CreateQuerySet(&hal.QuerySetDescriptor{
+import "github.com/gogpu/wgpu/hal"
+
+querySet, err := halDevice.CreateQuerySet(&hal.QuerySetDescriptor{
     Label: "Timestamp Queries",
     Type:  hal.QueryTypeTimestamp,
     Count: 2, // begin + end
@@ -317,7 +315,7 @@ if err != nil {
     // Backend may not support timestamps
     log.Println("timestamps not supported:", err)
 }
-defer device.DestroyQuerySet(querySet)
+defer halDevice.DestroyQuerySet(querySet)
 ```
 
 ### Using Timestamps in a Compute Pass
@@ -326,7 +324,7 @@ defer device.DestroyQuerySet(querySet)
 beginIdx := uint32(0)
 endIdx := uint32(1)
 
-computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{
+computePass := halEncoder.BeginComputePass(&hal.ComputePassDescriptor{
     Label: "Timed Compute Pass",
     TimestampWrites: &hal.ComputePassTimestampWrites{
         QuerySet:                  querySet,
@@ -343,58 +341,42 @@ computePass.End()
 
 ```go
 // Create a buffer for timestamp results (2 * uint64 = 16 bytes)
-timestampBuffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
+timestampBuffer, _ := halDevice.CreateBuffer(&hal.BufferDescriptor{
     Label: "Timestamp Buffer",
     Size:  16,
     Usage: gputypes.BufferUsageCopyDst | gputypes.BufferUsageMapRead,
 })
 
 // Resolve timestamps into the buffer
-encoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
+halEncoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
 
 // After submit + wait, read back and compute elapsed time
 timestampBytes := make([]byte, 16)
-queue.ReadBuffer(timestampBuffer, 0, timestampBytes)
+halQueue.ReadBuffer(timestampBuffer, 0, timestampBytes)
 
 timestamps := unsafe.Slice((*uint64)(unsafe.Pointer(&timestampBytes[0])), 2)
 begin := timestamps[0]
 end := timestamps[1]
 
 // Convert to nanoseconds using the timestamp period
-period := queue.GetTimestampPeriod()
+period := halQueue.GetTimestampPeriod()
 elapsedNs := float64(end-begin) * float64(period)
 fmt.Printf("Compute pass took %.3f ms\n", elapsedNs/1e6)
 ```
 
 ## Error Handling
 
-### Backend-Specific Errors
+### Checking Errors
 
 ```go
 import "github.com/gogpu/wgpu"
 
 pipeline, err := device.CreateComputePipeline(desc)
 if err != nil {
-    // Check for specific error types
     if errors.Is(err, wgpu.ErrOutOfMemory) {
         // Reduce buffer sizes or batch work
     }
     log.Fatal("pipeline creation failed:", err)
-}
-```
-
-### Timestamp Support
-
-Not all backends support timestamp queries:
-
-```go
-querySet, err := device.CreateQuerySet(&hal.QuerySetDescriptor{
-    Type:  hal.QueryTypeTimestamp,
-    Count: 2,
-})
-if errors.Is(err, hal.ErrTimestampsNotSupported) {
-    // Fall back to CPU timing
-    log.Println("GPU timestamps not available, using CPU timing")
 }
 ```
 

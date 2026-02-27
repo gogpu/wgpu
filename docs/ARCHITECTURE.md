@@ -50,7 +50,7 @@ The user-facing API layer. Wraps `core/` and `hal/` into safe, ergonomic types a
 - **Type aliases** — Re-exports from `gputypes` so users don't need a separate import
 - **Descriptor conversion** — Public descriptors auto-convert to HAL descriptors via `toHAL()` methods
 
-Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `TextureView`, `Sampler`, `ShaderModule`, `BindGroupLayout`, `PipelineLayout`, `BindGroup`, `RenderPipeline`, `ComputePipeline`, `CommandEncoder`, `RenderPassEncoder`, `ComputePassEncoder`, `Surface`.
+Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `TextureView`, `Sampler`, `ShaderModule`, `BindGroupLayout`, `PipelineLayout`, `BindGroup`, `RenderPipeline`, `ComputePipeline`, `CommandEncoder`, `CommandBuffer`, `RenderPassEncoder`, `ComputePassEncoder`, `Surface`, `SurfaceTexture`.
 
 ### `core/` — Validation & State Tracking
 

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Public API root package** — `import "github.com/gogpu/wgpu"` provides a safe, ergonomic,
-  WebGPU-spec-aligned API for third-party applications. Wraps `core/` and `hal/` into 18 public
+  WebGPU-spec-aligned API for third-party applications. Wraps `core/` and `hal/` into 20 public
   types: Instance, Adapter, Device, Queue, Buffer, Texture, TextureView, Sampler, ShaderModule,
   BindGroupLayout, PipelineLayout, BindGroup, RenderPipeline, ComputePipeline, CommandEncoder,
   CommandBuffer, RenderPassEncoder, ComputePassEncoder, Surface, SurfaceTexture.
