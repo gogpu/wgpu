@@ -249,6 +249,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		viewType = textureViewDimensionToMTL(desc.Dimension)
 	}
 
+	// Metal requires the texture view type to match the source texture's
+	// multisample state. A 2DMultisample source cannot have a 2D view.
+	// Vulkan handles this implicitly, but Metal is stricter.
+	if mtlTexture.samples > 1 && viewType == MTLTextureType2D {
+		viewType = MTLTextureType2DMultisample
+	}
+
 	// Metal's newTextureViewWithPixelFormat:textureType:levels:slices: expects NSRange structs
 	levelRange := NSRange{
 		Location: NSUInteger(baseMip),
