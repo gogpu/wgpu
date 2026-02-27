@@ -62,101 +62,152 @@ func run() error {
 	fmt.Println("=== Compute Shader: Parallel Sum ===")
 	fmt.Println()
 
-	// Step 1: Create instance
+	device, cleanup, err := initDevice()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	inputData, cpuSum := prepareInput()
+	fmt.Printf("4. Input: %d elements, CPU sum = %d\n", numElements, cpuSum)
+
+	bufs, err := createBuffers(device, inputData)
+	if err != nil {
+		return err
+	}
+	defer bufs.release()
+
+	ps, err := createPipeline(device, bufs)
+	if err != nil {
+		return err
+	}
+	defer ps.release()
+
+	gpuSum, err := dispatchAndReadBack(device, ps, bufs)
+	if err != nil {
+		return err
+	}
+
+	return verify(cpuSum, gpuSum)
+}
+
+func initDevice() (*wgpu.Device, func(), error) {
 	fmt.Print("1. Creating instance... ")
 	instance, err := wgpu.CreateInstance(nil)
 	if err != nil {
-		return fmt.Errorf("CreateInstance: %w", err)
+		return nil, nil, fmt.Errorf("CreateInstance: %w", err)
 	}
-	defer instance.Release()
 	fmt.Println("OK")
 
-	// Step 2: Request adapter
 	fmt.Print("2. Requesting adapter... ")
 	adapter, err := instance.RequestAdapter(nil)
 	if err != nil {
-		return fmt.Errorf("RequestAdapter: %w", err)
+		instance.Release()
+		return nil, nil, fmt.Errorf("RequestAdapter: %w", err)
 	}
-	defer adapter.Release()
 	fmt.Printf("OK (%s)\n", adapter.Info().Name)
 
-	// Step 3: Request device
 	fmt.Print("3. Creating device... ")
 	device, err := adapter.RequestDevice(nil)
 	if err != nil {
-		return fmt.Errorf("RequestDevice: %w", err)
+		adapter.Release()
+		instance.Release()
+		return nil, nil, fmt.Errorf("RequestDevice: %w", err)
 	}
-	defer device.Release()
 	fmt.Println("OK")
 
-	// Step 4: Prepare input data [1, 2, 3, ..., numElements]
+	cleanup := func() {
+		device.Release()
+		adapter.Release()
+		instance.Release()
+	}
+	return device, cleanup, nil
+}
+
+func prepareInput() ([]byte, uint32) {
 	inputData := make([]byte, inputBufSize)
 	var cpuSum uint32
 	for i := uint32(0); i < numElements; i++ {
 		binary.LittleEndian.PutUint32(inputData[i*4:], i+1)
 		cpuSum += i + 1
 	}
-	fmt.Printf("4. Input: %d elements, CPU sum = %d\n", numElements, cpuSum)
+	return inputData, cpuSum
+}
 
-	// Step 5: Create GPU buffers and upload data
+type bufferSet struct {
+	input, output, staging, uniform *wgpu.Buffer
+}
+
+func (b *bufferSet) release() {
+	b.uniform.Release()
+	b.staging.Release()
+	b.output.Release()
+	b.input.Release()
+}
+
+func createBuffers(device *wgpu.Device, inputData []byte) (*bufferSet, error) {
 	fmt.Print("5. Creating buffers... ")
 	inputBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "input",
-		Size:  inputBufSize,
+		Label: "input", Size: inputBufSize,
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
-		return fmt.Errorf("create input buffer: %w", err)
+		return nil, fmt.Errorf("create input buffer: %w", err)
 	}
-	defer inputBuf.Release()
-
 	outputBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "output",
-		Size:  outputBufSize,
+		Label: "output", Size: outputBufSize,
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopySrc,
 	})
 	if err != nil {
-		return fmt.Errorf("create output buffer: %w", err)
+		return nil, fmt.Errorf("create output buffer: %w", err)
 	}
-	defer outputBuf.Release()
-
 	stagingBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "staging",
-		Size:  stagingBufSize,
+		Label: "staging", Size: stagingBufSize,
 		Usage: wgpu.BufferUsageCopyDst | wgpu.BufferUsageMapRead,
 	})
 	if err != nil {
-		return fmt.Errorf("create staging buffer: %w", err)
+		return nil, fmt.Errorf("create staging buffer: %w", err)
 	}
-	defer stagingBuf.Release()
 
 	uniformData := make([]byte, 4)
 	binary.LittleEndian.PutUint32(uniformData, outCount)
 	uniformBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "params",
-		Size:  4,
+		Label: "params", Size: 4,
 		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
-		return fmt.Errorf("create uniform buffer: %w", err)
+		return nil, fmt.Errorf("create uniform buffer: %w", err)
 	}
-	defer uniformBuf.Release()
 
 	device.Queue().WriteBuffer(inputBuf, 0, inputData)
 	device.Queue().WriteBuffer(uniformBuf, 0, uniformData)
 	fmt.Println("OK")
 
-	// Step 6: Create shader and pipeline
+	return &bufferSet{input: inputBuf, output: outputBuf, staging: stagingBuf, uniform: uniformBuf}, nil
+}
+
+type pipelineSet struct {
+	shader, bgLayout, plLayout interface{ Release() }
+	bindGroup                  *wgpu.BindGroup
+	pipeline                   *wgpu.ComputePipeline
+}
+
+func (p *pipelineSet) release() {
+	p.pipeline.Release()
+	p.plLayout.Release()
+	p.bindGroup.Release()
+	p.bgLayout.Release()
+	p.shader.Release()
+}
+
+func createPipeline(device *wgpu.Device, bufs *bufferSet) (*pipelineSet, error) {
 	fmt.Print("6. Creating compute pipeline... ")
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
-		Label: "sum-shader",
-		WGSL:  sumShaderWGSL,
+		Label: "sum-shader", WGSL: sumShaderWGSL,
 	})
 	if err != nil {
-		return fmt.Errorf("create shader: %w", err)
+		return nil, fmt.Errorf("create shader: %w", err)
 	}
-	defer shader.Release()
-
 	bgLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "sum-bgl",
 		Entries: []wgpu.BindGroupLayoutEntry{
@@ -166,90 +217,76 @@ func run() error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("create bind group layout: %w", err)
+		return nil, fmt.Errorf("create bind group layout: %w", err)
 	}
-	defer bgLayout.Release()
-
 	bindGroup, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "sum-bg",
-		Layout: bgLayout,
+		Label: "sum-bg", Layout: bgLayout,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: inputBuf, Size: inputBufSize},
-			{Binding: 1, Buffer: outputBuf, Size: outputBufSize},
-			{Binding: 2, Buffer: uniformBuf, Size: 4},
+			{Binding: 0, Buffer: bufs.input, Size: inputBufSize},
+			{Binding: 1, Buffer: bufs.output, Size: outputBufSize},
+			{Binding: 2, Buffer: bufs.uniform, Size: 4},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("create bind group: %w", err)
+		return nil, fmt.Errorf("create bind group: %w", err)
 	}
-	defer bindGroup.Release()
-
-	pipelineLayout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
-		Label:            "sum-pl",
-		BindGroupLayouts: []*wgpu.BindGroupLayout{bgLayout},
+	plLayout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+		Label: "sum-pl", BindGroupLayouts: []*wgpu.BindGroupLayout{bgLayout},
 	})
 	if err != nil {
-		return fmt.Errorf("create pipeline layout: %w", err)
+		return nil, fmt.Errorf("create pipeline layout: %w", err)
 	}
-	defer pipelineLayout.Release()
-
 	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
-		Label:      "sum-pipeline",
-		Layout:     pipelineLayout,
-		Module:     shader,
-		EntryPoint: "main",
+		Label: "sum-pipeline", Layout: plLayout, Module: shader, EntryPoint: "main",
 	})
 	if err != nil {
-		return fmt.Errorf("create compute pipeline: %w", err)
+		return nil, fmt.Errorf("create compute pipeline: %w", err)
 	}
-	defer pipeline.Release()
 	fmt.Println("OK")
 
-	// Step 7: Dispatch and read back
+	return &pipelineSet{
+		shader: shader, bgLayout: bgLayout, plLayout: plLayout,
+		bindGroup: bindGroup, pipeline: pipeline,
+	}, nil
+}
+
+func dispatchAndReadBack(device *wgpu.Device, ps *pipelineSet, bufs *bufferSet) (uint32, error) {
 	fmt.Print("7. Dispatching compute... ")
 	encoder, err := device.CreateCommandEncoder(nil)
 	if err != nil {
-		return fmt.Errorf("create encoder: %w", err)
+		return 0, fmt.Errorf("create encoder: %w", err)
 	}
-
 	pass, err := encoder.BeginComputePass(nil)
 	if err != nil {
-		return fmt.Errorf("begin compute pass: %w", err)
+		return 0, fmt.Errorf("begin compute pass: %w", err)
 	}
-	pass.SetPipeline(pipeline)
-	pass.SetBindGroup(0, bindGroup, nil)
+	pass.SetPipeline(ps.pipeline)
+	pass.SetBindGroup(0, ps.bindGroup, nil)
 	pass.Dispatch((outCount+63)/64, 1, 1)
 	if err := pass.End(); err != nil {
-		return fmt.Errorf("end compute pass: %w", err)
+		return 0, fmt.Errorf("end compute pass: %w", err)
 	}
-
-	encoder.CopyBufferToBuffer(outputBuf, 0, stagingBuf, 0, outputBufSize)
-
+	encoder.CopyBufferToBuffer(bufs.output, 0, bufs.staging, 0, outputBufSize)
 	cmdBuf, err := encoder.Finish()
 	if err != nil {
-		return fmt.Errorf("finish encoder: %w", err)
+		return 0, fmt.Errorf("finish encoder: %w", err)
 	}
-
 	if err := device.Queue().Submit(cmdBuf); err != nil {
-		return fmt.Errorf("submit: %w", err)
+		return 0, fmt.Errorf("submit: %w", err)
 	}
 	fmt.Println("OK")
 
-	// Step 8: Read results
 	fmt.Print("8. Reading results... ")
 	resultBytes := make([]byte, outputBufSize)
-	if err := device.Queue().ReadBuffer(stagingBuf, 0, resultBytes); err != nil {
-		return fmt.Errorf("read buffer: %w", err)
+	if err := device.Queue().ReadBuffer(bufs.staging, 0, resultBytes); err != nil {
+		return 0, fmt.Errorf("read buffer: %w", err)
 	}
-
 	var gpuSum uint32
 	for i := 0; i < outCount; i++ {
 		gpuSum += binary.LittleEndian.Uint32(resultBytes[i*4:])
 	}
 	fmt.Println("OK")
-
-	// Step 9: Verify
-	return verify(cpuSum, gpuSum)
+	return gpuSum, nil
 }
 
 func verify(cpuSum, gpuSum uint32) error {

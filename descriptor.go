@@ -181,7 +181,8 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 		Binding: e.Binding,
 	}
 
-	if e.Buffer != nil {
+	switch {
+	case e.Buffer != nil:
 		halBuf := e.Buffer.halBuffer()
 		if halBuf != nil {
 			entry.Resource = gputypes.BufferBinding{
@@ -190,11 +191,11 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 				Size:   e.Size,
 			}
 		}
-	} else if e.Sampler != nil && e.Sampler.hal != nil {
+	case e.Sampler != nil && e.Sampler.hal != nil:
 		entry.Resource = gputypes.SamplerBinding{
 			Sampler: e.Sampler.hal.NativeHandle(),
 		}
-	} else if e.TextureView != nil && e.TextureView.hal != nil {
+	case e.TextureView != nil && e.TextureView.hal != nil:
 		entry.Resource = gputypes.TextureViewBinding{
 			TextureView: e.TextureView.hal.NativeHandle(),
 		}

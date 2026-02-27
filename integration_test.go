@@ -215,7 +215,7 @@ func TestIntegrationCreateTextureView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTextureView: %v", err)
 	}
-	defer view.Release()
+	view.Release()
 }
 
 // --- Sampler tests ---
@@ -243,7 +243,7 @@ func TestIntegrationCreateSampler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSampler(nil): %v", err)
 	}
-	defer samplerDefault.Release()
+	samplerDefault.Release()
 }
 
 // --- Shader module tests ---
@@ -270,7 +270,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 	if err != nil {
 		t.Fatalf("CreateShaderModule: %v", err)
 	}
-	defer mod.Release()
+	mod.Release()
 }
 
 // --- Bind group layout tests ---
@@ -298,7 +298,7 @@ func TestIntegrationCreateBindGroupLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
 	}
-	defer layout.Release()
+	layout.Release()
 }
 
 // --- Pipeline layout tests ---
@@ -335,7 +335,7 @@ func TestIntegrationCreatePipelineLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePipelineLayout: %v", err)
 	}
-	defer pipelineLayout.Release()
+	pipelineLayout.Release()
 }
 
 // --- Command encoder tests ---

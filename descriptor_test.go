@@ -114,10 +114,10 @@ func TestTextureDescriptorToHAL(t *testing.T) {
 
 func TestSamplerDescriptorToHAL(t *testing.T) {
 	desc := SamplerDescriptor{
-		Label:        "test-sampler",
-		LodMinClamp:  0.0,
-		LodMaxClamp:  32.0,
-		Anisotropy:   16,
+		Label:       "test-sampler",
+		LodMinClamp: 0.0,
+		LodMaxClamp: 32.0,
+		Anisotropy:  16,
 	}
 
 	halDesc := desc.toHAL()

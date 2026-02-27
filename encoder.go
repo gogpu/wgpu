@@ -132,9 +132,8 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 // CommandBuffer holds recorded GPU commands ready for submission.
 // Created by CommandEncoder.Finish().
 type CommandBuffer struct {
-	core     *core.CoreCommandBuffer
-	device   *Device
-	released bool
+	core   *core.CoreCommandBuffer
+	device *Device
 }
 
 // halBuffer returns the underlying HAL command buffer.

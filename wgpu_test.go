@@ -1125,7 +1125,7 @@ func TestDeviceCreateBufferTableDriven(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf, err := device.CreateBuffer(tt.desc)
-			if tt.wantErr {
+			if tt.wantErr { //nolint:nestif // table-driven test validation
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
