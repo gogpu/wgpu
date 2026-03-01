@@ -1,6 +1,7 @@
 package noop_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -1257,6 +1258,394 @@ func TestNoopConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestNoopCreateQuerySet tests that QuerySet creation returns ErrTimestampsNotSupported.
+func TestNoopCreateQuerySet(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	qs, err := device.CreateQuerySet(&hal.QuerySetDescriptor{
+		Label: "test-queryset",
+		Count: 4,
+	})
+	if err == nil {
+		t.Fatal("CreateQuerySet should return error for noop backend")
+	}
+	if qs != nil {
+		t.Fatal("CreateQuerySet should return nil query set")
+	}
+	if !errors.Is(err, hal.ErrTimestampsNotSupported) {
+		t.Errorf("expected ErrTimestampsNotSupported, got %v", err)
+	}
+}
+
+// TestNoopCreateRenderBundleEncoder tests that render bundle encoder is not supported.
+func TestNoopCreateRenderBundleEncoder(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	enc, err := device.CreateRenderBundleEncoder(&hal.RenderBundleEncoderDescriptor{
+		Label: "test-bundle",
+	})
+	if err == nil {
+		t.Fatal("CreateRenderBundleEncoder should return error for noop backend")
+	}
+	if enc != nil {
+		t.Fatal("CreateRenderBundleEncoder should return nil encoder")
+	}
+}
+
+// TestNoopWaitIdle tests that WaitIdle completes without error.
+func TestNoopWaitIdle(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	err := device.WaitIdle()
+	if err != nil {
+		t.Fatalf("WaitIdle returned error: %v", err)
+	}
+}
+
+// TestNoopGetFenceStatus tests fence status queries.
+func TestNoopGetFenceStatus(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	fence, err := device.CreateFence()
+	if err != nil {
+		t.Fatalf("CreateFence failed: %v", err)
+	}
+	defer device.DestroyFence(fence)
+
+	// Initial status should be unsignaled (value 0, so > 0 is false)
+	signaled, err := device.GetFenceStatus(fence)
+	if err != nil {
+		t.Fatalf("GetFenceStatus failed: %v", err)
+	}
+	if signaled {
+		t.Error("fence should not be signaled initially")
+	}
+
+	// Signal the fence
+	noopFence, ok := fence.(*noop.Fence)
+	if !ok {
+		t.Fatal("expected *noop.Fence")
+	}
+	noopFence.Signal(1)
+
+	// Now it should be signaled
+	signaled, err = device.GetFenceStatus(fence)
+	if err != nil {
+		t.Fatalf("GetFenceStatus failed: %v", err)
+	}
+	if !signaled {
+		t.Error("fence should be signaled after Signal(1)")
+	}
+}
+
+// TestNoopResetFence tests fence reset operations.
+func TestNoopResetFence(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	fence, err := device.CreateFence()
+	if err != nil {
+		t.Fatalf("CreateFence failed: %v", err)
+	}
+	defer device.DestroyFence(fence)
+
+	// Signal and then reset
+	noopFence := fence.(*noop.Fence)
+	noopFence.Signal(42)
+	if val := noopFence.GetValue(); val != 42 {
+		t.Fatalf("expected value 42, got %d", val)
+	}
+
+	err = device.ResetFence(fence)
+	if err != nil {
+		t.Fatalf("ResetFence failed: %v", err)
+	}
+	if val := noopFence.GetValue(); val != 0 {
+		t.Errorf("expected value 0 after reset, got %d", val)
+	}
+}
+
+// TestNoopDeviceWaitWithNonNoopFence tests Wait/GetFenceStatus/ResetFence with non-noop fence.
+func TestNoopDeviceWaitWithNonNoopFence(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	// Use a non-noop fence (nil) to test the type assertion paths
+	var fake hal.Fence
+
+	// Wait with nil fence should not panic
+	ok, err := device.Wait(fake, 0, time.Millisecond)
+	if err != nil {
+		t.Errorf("Wait with nil fence should not error: %v", err)
+	}
+	// ok is true since type assertion fails and returns true
+	_ = ok
+
+	// GetFenceStatus with nil fence
+	_, err = device.GetFenceStatus(fake)
+	if err != nil {
+		t.Errorf("GetFenceStatus with nil fence should not error: %v", err)
+	}
+
+	// ResetFence with nil fence
+	err = device.ResetFence(fake)
+	if err != nil {
+		t.Errorf("ResetFence with nil fence should not error: %v", err)
+	}
+}
+
+// TestNoopFreeCommandBuffer tests that FreeCommandBuffer does not panic.
+func TestNoopFreeCommandBuffer(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	_ = encoder.BeginEncoding("test")
+	cmdBuf, _ := encoder.EndEncoding()
+
+	// FreeCommandBuffer is a no-op, should not panic
+	device.FreeCommandBuffer(cmdBuf)
+}
+
+// TestNoopDestroyQuerySet tests that DestroyQuerySet does not panic with nil.
+func TestNoopDestroyQuerySet(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	// DestroyQuerySet is a no-op, should not panic even with nil
+	device.DestroyQuerySet(nil)
+}
+
+// TestNoopDestroyRenderBundle tests that DestroyRenderBundle does not panic with nil.
+func TestNoopDestroyRenderBundle(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	// DestroyRenderBundle is a no-op, should not panic even with nil
+	device.DestroyRenderBundle(nil)
+}
+
+// TestNoopDeviceDestroy tests that Destroy does not panic.
+func TestNoopDeviceDestroy(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	// Destroy is a no-op for noop device
+	device.Destroy()
+}
+
+// =============================================================================
+// Command Encoder Tests
+// =============================================================================
+
+// TestNoopCommandEncoderBeginEnd tests the basic encoding lifecycle.
+func TestNoopCommandEncoderBeginEnd(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, err := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "test"})
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder failed: %v", err)
+	}
+
+	if err := encoder.BeginEncoding("test-pass"); err != nil {
+		t.Fatalf("BeginEncoding failed: %v", err)
+	}
+
+	cmdBuf, err := encoder.EndEncoding()
+	if err != nil {
+		t.Fatalf("EndEncoding failed: %v", err)
+	}
+	if cmdBuf == nil {
+		t.Fatal("EndEncoding returned nil command buffer")
+	}
+}
+
+// TestNoopCommandEncoderDiscardEncoding tests that DiscardEncoding does not panic.
+func TestNoopCommandEncoderDiscardEncoding(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	_ = encoder.BeginEncoding("test")
+	encoder.DiscardEncoding() // should not panic
+}
+
+// TestNoopCommandEncoderResetAll tests that ResetAll does not panic.
+func TestNoopCommandEncoderResetAll(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	encoder.ResetAll(nil)
+	encoder.ResetAll([]hal.CommandBuffer{})
+}
+
+// TestNoopCommandEncoderTransitions tests buffer/texture transition no-ops.
+func TestNoopCommandEncoderTransitions(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+
+	// Buffer barriers
+	encoder.TransitionBuffers(nil)
+	encoder.TransitionBuffers([]hal.BufferBarrier{{}})
+
+	// Texture barriers
+	encoder.TransitionTextures(nil)
+	encoder.TransitionTextures([]hal.TextureBarrier{{}})
+}
+
+// TestNoopCommandEncoderClearBuffer tests ClearBuffer no-op.
+func TestNoopCommandEncoderClearBuffer(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	buf, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 256})
+	defer device.DestroyBuffer(buf)
+
+	encoder.ClearBuffer(buf, 0, 256)
+}
+
+// TestNoopCommandEncoderCopyOps tests all copy operations.
+func TestNoopCommandEncoderCopyOps(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+
+	buf1, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 256})
+	buf2, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 256})
+	tex1, _ := device.CreateTexture(&hal.TextureDescriptor{
+		Size: hal.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 1},
+	})
+	tex2, _ := device.CreateTexture(&hal.TextureDescriptor{
+		Size: hal.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 1},
+	})
+	defer device.DestroyBuffer(buf1)
+	defer device.DestroyBuffer(buf2)
+	defer device.DestroyTexture(tex1)
+	defer device.DestroyTexture(tex2)
+
+	encoder.CopyBufferToBuffer(buf1, buf2, []hal.BufferCopy{{Size: 64}})
+	encoder.CopyBufferToTexture(buf1, tex1, []hal.BufferTextureCopy{})
+	encoder.CopyTextureToBuffer(tex1, buf1, []hal.BufferTextureCopy{})
+	encoder.CopyTextureToTexture(tex1, tex2, []hal.TextureCopy{})
+}
+
+// TestNoopCommandEncoderResolveQuerySet tests the ResolveQuerySet no-op.
+func TestNoopCommandEncoderResolveQuerySet(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	buf, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 256})
+	defer device.DestroyBuffer(buf)
+
+	encoder.ResolveQuerySet(nil, 0, 1, buf, 0) // should not panic
+}
+
+// TestNoopRenderPassEncoder tests all render pass encoder methods.
+func TestNoopRenderPassEncoder(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	pass := encoder.BeginRenderPass(&hal.RenderPassDescriptor{Label: "test-rp"})
+	if pass == nil {
+		t.Fatal("BeginRenderPass returned nil")
+	}
+
+	buf, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 256})
+	defer device.DestroyBuffer(buf)
+
+	// All these should be no-ops and not panic
+	pass.SetPipeline(nil)
+	pass.SetBindGroup(0, nil, nil)
+	pass.SetBindGroup(1, nil, []uint32{0, 256})
+	pass.SetVertexBuffer(0, buf, 0)
+	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 0)
+	pass.SetViewport(0, 0, 800, 600, 0, 1)
+	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 0, B: 0, A: 1})
+	pass.SetStencilReference(0xFF)
+	pass.Draw(6, 1, 0, 0)
+	pass.DrawIndexed(6, 1, 0, 0, 0)
+	pass.DrawIndirect(buf, 0)
+	pass.DrawIndexedIndirect(buf, 0)
+	pass.ExecuteBundle(nil)
+	pass.End()
+}
+
+// TestNoopComputePassEncoder tests all compute pass encoder methods.
+func TestNoopComputePassEncoder(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	pass := encoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "test-cp"})
+	if pass == nil {
+		t.Fatal("BeginComputePass returned nil")
+	}
+
+	// All these should be no-ops and not panic
+	pass.SetPipeline(nil)
+	pass.SetBindGroup(0, nil, nil)
+	pass.SetBindGroup(1, nil, []uint32{0})
+	pass.Dispatch(1, 1, 1)
+	pass.Dispatch(64, 32, 16)
+	pass.DispatchIndirect(nil, 0)
+	pass.End()
+}
+
+// =============================================================================
+// Additional Device Resource Tests
+// =============================================================================
+
+// TestNoopDestroyMethods tests all Destroy methods do not panic.
+func TestNoopDestroyMethods(t *testing.T) {
+	device, cleanup := createTestDevice(t)
+	defer cleanup()
+
+	// Create and destroy each resource type
+	buf, _ := device.CreateBuffer(&hal.BufferDescriptor{Size: 64})
+	device.DestroyBuffer(buf)
+
+	tex, _ := device.CreateTexture(&hal.TextureDescriptor{
+		Size: hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1},
+	})
+	view, _ := device.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+	device.DestroyTextureView(view)
+	device.DestroyTexture(tex)
+
+	sampler, _ := device.CreateSampler(&hal.SamplerDescriptor{})
+	device.DestroySampler(sampler)
+
+	bgl, _ := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{})
+	device.DestroyBindGroupLayout(bgl)
+
+	bg, _ := device.CreateBindGroup(&hal.BindGroupDescriptor{})
+	device.DestroyBindGroup(bg)
+
+	pl, _ := device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{})
+	device.DestroyPipelineLayout(pl)
+
+	sm, _ := device.CreateShaderModule(&hal.ShaderModuleDescriptor{})
+	device.DestroyShaderModule(sm)
+
+	rp, _ := device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{})
+	device.DestroyRenderPipeline(rp)
+
+	device.DestroyComputePipeline(nil) // no-op
+	device.DestroyFence(nil)           // no-op
 }
 
 // Helper functions

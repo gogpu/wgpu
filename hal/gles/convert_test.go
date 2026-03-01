@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
@@ -180,5 +181,146 @@ func TestMaxInt32(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("maxInt32(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
+	}
+}
+
+func TestVertexFormatToGL(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   gputypes.VertexFormat
+		wantSize int32
+		wantType uint32
+	}{
+		// Float32 formats
+		{"Float32", gputypes.VertexFormatFloat32, 1, gl.FLOAT},
+		{"Float32x2", gputypes.VertexFormatFloat32x2, 2, gl.FLOAT},
+		{"Float32x3", gputypes.VertexFormatFloat32x3, 3, gl.FLOAT},
+		{"Float32x4", gputypes.VertexFormatFloat32x4, 4, gl.FLOAT},
+
+		// 8-bit unsigned
+		{"Uint8x2", gputypes.VertexFormatUint8x2, 2, gl.UNSIGNED_BYTE},
+		{"Uint8x4", gputypes.VertexFormatUint8x4, 4, gl.UNSIGNED_BYTE},
+
+		// 8-bit signed
+		{"Sint8x2", gputypes.VertexFormatSint8x2, 2, gl.BYTE},
+		{"Sint8x4", gputypes.VertexFormatSint8x4, 4, gl.BYTE},
+
+		// 16-bit unsigned
+		{"Uint16x2", gputypes.VertexFormatUint16x2, 2, gl.UNSIGNED_SHORT},
+		{"Uint16x4", gputypes.VertexFormatUint16x4, 4, gl.UNSIGNED_SHORT},
+
+		// 16-bit signed
+		{"Sint16x2", gputypes.VertexFormatSint16x2, 2, gl.SHORT},
+		{"Sint16x4", gputypes.VertexFormatSint16x4, 4, gl.SHORT},
+
+		// 32-bit unsigned int
+		{"Uint32", gputypes.VertexFormatUint32, 1, gl.UNSIGNED_INT},
+		{"Uint32x2", gputypes.VertexFormatUint32x2, 2, gl.UNSIGNED_INT},
+		{"Uint32x3", gputypes.VertexFormatUint32x3, 3, gl.UNSIGNED_INT},
+		{"Uint32x4", gputypes.VertexFormatUint32x4, 4, gl.UNSIGNED_INT},
+
+		// 32-bit signed int
+		{"Sint32", gputypes.VertexFormatSint32, 1, gl.INT},
+		{"Sint32x2", gputypes.VertexFormatSint32x2, 2, gl.INT},
+		{"Sint32x3", gputypes.VertexFormatSint32x3, 3, gl.INT},
+		{"Sint32x4", gputypes.VertexFormatSint32x4, 4, gl.INT},
+
+		// Unknown defaults to Float32x4
+		{"Unknown", gputypes.VertexFormat(255), 4, gl.FLOAT},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSize, gotType := vertexFormatToGL(tt.format)
+			if gotSize != tt.wantSize {
+				t.Errorf("size = %d, want %d", gotSize, tt.wantSize)
+			}
+			if gotType != tt.wantType {
+				t.Errorf("type = %#x, want %#x", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestStencilOpToGL(t *testing.T) {
+	tests := []struct {
+		name string
+		op   hal.StencilOperation
+		want uint32
+	}{
+		{"Keep", hal.StencilOperationKeep, gl.KEEP},
+		{"Zero", hal.StencilOperationZero, gl.ZERO},
+		{"Replace", hal.StencilOperationReplace, gl.REPLACE},
+		{"Invert", hal.StencilOperationInvert, gl.INVERT},
+		{"IncrementClamp", hal.StencilOperationIncrementClamp, gl.INCR},
+		{"DecrementClamp", hal.StencilOperationDecrementClamp, gl.DECR},
+		{"IncrementWrap", hal.StencilOperationIncrementWrap, gl.INCR_WRAP},
+		{"DecrementWrap", hal.StencilOperationDecrementWrap, gl.DECR_WRAP},
+		{"Unknown defaults to Keep", hal.StencilOperation(99), gl.KEEP},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stencilOpToGL(tt.op)
+			if got != tt.want {
+				t.Errorf("stencilOpToGL(%v) = %#x, want %#x", tt.op, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBlendFactorToGL(t *testing.T) {
+	tests := []struct {
+		name   string
+		factor gputypes.BlendFactor
+		want   uint32
+	}{
+		{"Zero", gputypes.BlendFactorZero, gl.ZERO},
+		{"One", gputypes.BlendFactorOne, gl.ONE},
+		{"Src", gputypes.BlendFactorSrc, gl.SRC_COLOR},
+		{"OneMinusSrc", gputypes.BlendFactorOneMinusSrc, gl.ONE_MINUS_SRC_COLOR},
+		{"SrcAlpha", gputypes.BlendFactorSrcAlpha, gl.SRC_ALPHA},
+		{"OneMinusSrcAlpha", gputypes.BlendFactorOneMinusSrcAlpha, gl.ONE_MINUS_SRC_ALPHA},
+		{"Dst", gputypes.BlendFactorDst, gl.DST_COLOR},
+		{"OneMinusDst", gputypes.BlendFactorOneMinusDst, gl.ONE_MINUS_DST_COLOR},
+		{"DstAlpha", gputypes.BlendFactorDstAlpha, gl.DST_ALPHA},
+		{"OneMinusDstAlpha", gputypes.BlendFactorOneMinusDstAlpha, gl.ONE_MINUS_DST_ALPHA},
+		{"SrcAlphaSaturated", gputypes.BlendFactorSrcAlphaSaturated, gl.SRC_ALPHA_SATURATE},
+		{"Constant", gputypes.BlendFactorConstant, gl.CONSTANT_COLOR},
+		{"OneMinusConstant", gputypes.BlendFactorOneMinusConstant, gl.ONE_MINUS_CONSTANT_COLOR},
+		{"Unknown defaults to One", gputypes.BlendFactor(99), gl.ONE},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := blendFactorToGL(tt.factor)
+			if got != tt.want {
+				t.Errorf("blendFactorToGL(%v) = %#x, want %#x", tt.factor, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBlendOperationToGL(t *testing.T) {
+	tests := []struct {
+		name string
+		op   gputypes.BlendOperation
+		want uint32
+	}{
+		{"Add", gputypes.BlendOperationAdd, gl.FUNC_ADD},
+		{"Subtract", gputypes.BlendOperationSubtract, gl.FUNC_SUBTRACT},
+		{"ReverseSubtract", gputypes.BlendOperationReverseSubtract, gl.FUNC_REVERSE_SUBTRACT},
+		{"Min", gputypes.BlendOperationMin, gl.MIN},
+		{"Max", gputypes.BlendOperationMax, gl.MAX},
+		{"Unknown defaults to Add", gputypes.BlendOperation(99), gl.FUNC_ADD},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := blendOperationToGL(tt.op)
+			if got != tt.want {
+				t.Errorf("blendOperationToGL(%v) = %#x, want %#x", tt.op, got, tt.want)
+			}
+		})
 	}
 }
