@@ -13,7 +13,7 @@ import (
 // Adapter implements hal.Adapter for Metal.
 type Adapter struct {
 	instance              *Instance
-	raw                   ID // id<MTLDevice>
+	raw                   ID   // id<MTLDevice>
 	formatDepth24Stencil8 bool // true if Depth24UnormStencil8 supported (Intel-era AMD only)
 }
 
