@@ -590,10 +590,9 @@ func TestNoopQueueWriteBuffer(t *testing.T) {
 
 	// Write data
 	data := []byte{1, 2, 3, 4}
-	queue.WriteBuffer(buffer, 0, data)
-
-	// Note: In noop backend, we can't verify the data was written
-	// but we verify the operation doesn't crash
+	if err := queue.WriteBuffer(buffer, 0, data); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 }
 
 // TestNoopQueueWriteTexture tests immediate texture writes.
@@ -622,7 +621,9 @@ func TestNoopQueueWriteTexture(t *testing.T) {
 	}
 	size := &hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}
 
-	queue.WriteTexture(dst, data, layout, size)
+	if err := queue.WriteTexture(dst, data, layout, size); err != nil {
+		t.Fatalf("WriteTexture failed: %v", err)
+	}
 }
 
 // TestNoopCommandEncoder tests command encoder operations.
@@ -761,7 +762,9 @@ func TestNoopComputeE2E(t *testing.T) {
 
 	// Write initial data (zeros)
 	initialData := make([]byte, bufferSize)
-	queue.WriteBuffer(buffer, 0, initialData)
+	if err := queue.WriteBuffer(buffer, 0, initialData); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 
 	// 3. Create bind group layout
 	bgLayout, err := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
@@ -897,7 +900,9 @@ func TestNoopWriteReadBufferRoundTrip(t *testing.T) {
 	for i := range writeData {
 		writeData[i] = byte(i * 3)
 	}
-	queue.WriteBuffer(buffer, 0, writeData)
+	if err := queue.WriteBuffer(buffer, 0, writeData); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 
 	// Read back
 	readData := make([]byte, 64)
@@ -931,7 +936,9 @@ func TestNoopWriteReadBufferWithOffset(t *testing.T) {
 
 	// Write at offset 128
 	writeData := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	queue.WriteBuffer(buffer, 128, writeData)
+	if err := queue.WriteBuffer(buffer, 128, writeData); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 
 	// Read back at same offset
 	readData := make([]byte, 4)

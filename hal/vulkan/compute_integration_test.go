@@ -181,7 +181,9 @@ func TestComputeSDFIntegration(t *testing.T) {
 	defer device.DestroyBuffer(uniformBuffer)
 
 	// Write uniform data
-	queue.WriteBuffer(uniformBuffer, 0, uniformData)
+	if err := queue.WriteBuffer(uniformBuffer, 0, uniformData); err != nil {
+		t.Fatalf("WriteBuffer (uniform) failed: %v", err)
+	}
 
 	// Step 5: Create bind group layout
 	bgLayout, err := device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{

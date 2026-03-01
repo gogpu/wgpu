@@ -42,8 +42,20 @@ type CommandEncoder struct {
 }
 
 // BeginEncoding begins command recording.
+// Returns an error if the command buffer handle is null (VK-001: prevents SIGSEGV
+// from null VkCommandBuffer dispatch table dereference).
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
+
+	// VK-001: Validate command buffer handle before use.
+	// A null handle causes SIGSEGV at addr=0x10 when the ICD dereferences
+	// the dispatch table pointer (gogpu#119).
+	if e.cmdBuffer == 0 {
+		return fmt.Errorf("vulkan: BeginEncoding called with null command buffer handle")
+	}
+	if e.device == nil {
+		return fmt.Errorf("vulkan: BeginEncoding called with nil device")
+	}
 
 	// Begin command buffer
 	beginInfo := vk.CommandBufferBeginInfo{
@@ -66,6 +78,9 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if !e.isRecording {
 		return nil, fmt.Errorf("vulkan: command encoder is not recording")
+	}
+	if e.cmdBuffer == 0 {
+		return nil, fmt.Errorf("vulkan: EndEncoding called with null command buffer handle")
 	}
 
 	result := vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
@@ -123,6 +138,9 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 	if !e.isRecording || len(barriers) == 0 {
 		return
 	}
+	if e.cmdBuffer == 0 {
+		return
+	}
 
 	// Convert to Vulkan buffer memory barriers
 	bufferBarriers := make([]vk.BufferMemoryBarrier, len(barriers))
@@ -167,6 +185,11 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 // TransitionTextures transitions texture states for synchronization.
 func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	if !e.isRecording || len(barriers) == 0 {
+		return
+	}
+	// VK-001: Defense-in-depth null guard. Prevents SIGSEGV at addr=0x10
+	// if cmdBuffer is somehow null while isRecording is true (gogpu#119).
+	if e.cmdBuffer == 0 {
 		return
 	}
 
@@ -217,7 +240,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 
 // ClearBuffer clears a buffer region to zero.
 func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
-	if !e.isRecording {
+	if !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 
@@ -232,7 +255,7 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
-	if !e.isRecording {
+	if !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 
@@ -342,7 +365,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
-	if !e.isRecording {
+	if !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 
@@ -366,7 +389,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	if !e.isRecording {
+	if !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 
@@ -390,7 +413,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 
 // CopyTextureToTexture copies data between textures.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	if !e.isRecording {
+	if !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 
@@ -450,7 +473,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 // This uses vkCmdCopyQueryPoolResults under the hood.
 func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
 	qs, ok := querySet.(*QuerySet)
-	if !ok || qs.pool == 0 || !e.isRecording {
+	if !ok || qs.pool == 0 || !e.isRecording || e.cmdBuffer == 0 {
 		return
 	}
 	buf, ok := destination.(*Buffer)
@@ -504,7 +527,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe.renderPass = 0
 	rpe.framebuffer = 0
 
-	if !e.isRecording || len(desc.ColorAttachments) == 0 {
+	if !e.isRecording || e.cmdBuffer == 0 || len(desc.ColorAttachments) == 0 {
 		return rpe
 	}
 
@@ -733,7 +756,7 @@ type RenderPassEncoder struct {
 // End finishes the render pass.
 // Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 

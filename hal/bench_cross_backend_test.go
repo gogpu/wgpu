@@ -280,7 +280,9 @@ func BenchmarkHALWriteBuffer(b *testing.B) {
 			b.ResetTimer()
 			b.SetBytes(int64(s.size))
 			for i := 0; i < b.N; i++ {
-				queue.WriteBuffer(buffer, 0, data)
+				if err := queue.WriteBuffer(buffer, 0, data); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

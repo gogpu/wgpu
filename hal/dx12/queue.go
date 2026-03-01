@@ -125,40 +125,42 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 // WriteBuffer writes data to a buffer immediately.
 // For upload heap buffers, data is copied directly via CPU mapping.
 // For default heap buffers, a staging buffer + GPU copy command is used.
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
-	if buffer == nil || len(data) == 0 {
-		return
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if buffer == nil {
+		return fmt.Errorf("dx12: WriteBuffer: nil buffer")
+	}
+	if len(data) == 0 {
+		return nil
 	}
 
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf.raw == nil {
-		return
+		return fmt.Errorf("dx12: WriteBuffer: invalid buffer type")
 	}
 
 	// Upload heap buffers can be written directly via CPU mapping
 	if buf.heapType == d3d12.D3D12_HEAP_TYPE_UPLOAD {
-		q.writeBufferDirect(buf, offset, data)
-		return
+		return q.writeBufferDirect(buf, offset, data)
 	}
 
 	// Default heap buffers require staging buffer + GPU copy
-	q.writeBufferStaged(buf, offset, data)
+	return q.writeBufferStaged(buf, offset, data)
 }
 
 // writeBufferDirect copies data to a mappable (upload heap) buffer.
-func (q *Queue) writeBufferDirect(buf *Buffer, offset uint64, data []byte) {
+func (q *Queue) writeBufferDirect(buf *Buffer, offset uint64, data []byte) error {
 	if buf.mappedPointer != nil {
 		// Already mapped — copy directly
 		dst := unsafe.Slice((*byte)(unsafe.Add(buf.mappedPointer, int(offset))), len(data))
 		copy(dst, data)
-		return
+		return nil
 	}
 
 	// Temporarily map, copy, unmap
 	readRange := &d3d12.D3D12_RANGE{Begin: 0, End: 0} // No reads
 	ptr, err := buf.raw.Map(0, readRange)
 	if err != nil {
-		return
+		return fmt.Errorf("dx12: WriteBuffer: Map failed: %w", err)
 	}
 	dst := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
 	copy(dst, data)
@@ -168,11 +170,12 @@ func (q *Queue) writeBufferDirect(buf *Buffer, offset uint64, data []byte) {
 		End:   uintptr(offset + uint64(len(data))),
 	}
 	buf.raw.Unmap(0, writtenRange)
+	return nil
 }
 
 // writeBufferStaged copies data to a GPU-only (default heap) buffer
 // via an upload heap staging buffer and CopyBufferRegion command.
-func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
+func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error {
 	// Create upload heap staging buffer (mapped at creation for immediate write)
 	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{
 		Label:            "write-buffer-staging",
@@ -181,8 +184,7 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 		MappedAtCreation: true,
 	})
 	if err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: CreateBuffer failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: staging buffer creation failed: %w", err)
 	}
 	defer q.device.DestroyBuffer(staging)
 
@@ -202,14 +204,12 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 		Label: "write-buffer-copy",
 	})
 	if err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: CreateCommandEncoder failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: CreateCommandEncoder failed: %w", err)
 	}
 
 	encoder := cmdEncoder.(*CommandEncoder)
 	if err := encoder.BeginEncoding("write-buffer-copy"); err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: BeginEncoding failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: BeginEncoding failed: %w", err)
 	}
 
 	// D3D12 auto-promotes buffers from COMMON to COPY_DEST.
@@ -218,24 +218,22 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) {
 
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: EndEncoding failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: EndEncoding failed: %w", err)
 	}
 
 	// Submit and wait for GPU completion
 	fence, err := q.device.CreateFence()
 	if err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: CreateFence failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: CreateFence failed: %w", err)
 	}
 	defer q.device.DestroyFence(fence)
 
 	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
-		hal.Logger().Warn("dx12: writeBufferStaged: Submit failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteBuffer: Submit failed: %w", err)
 	}
 	_, _ = q.device.Wait(fence, 1, 60*time.Second)
 	q.device.FreeCommandBuffer(cmdBuffer)
+	return nil
 }
 
 // d3d12TexturePitchAlignment is the required row pitch alignment for texture data.
@@ -244,14 +242,14 @@ const d3d12TexturePitchAlignment = 256
 // WriteTexture writes data to a texture immediately.
 // Creates an upload heap staging buffer, copies data with proper row pitch
 // alignment, and uses CopyTextureRegion to transfer to the GPU texture.
-func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	if dst == nil || dst.Texture == nil || len(data) == 0 || size == nil {
-		return
+		return fmt.Errorf("dx12: WriteTexture: invalid arguments")
 	}
 
 	dstTex, ok := dst.Texture.(*Texture)
 	if !ok || dstTex.raw == nil {
-		return
+		return fmt.Errorf("dx12: WriteTexture: invalid texture type")
 	}
 
 	// Calculate layout parameters
@@ -284,7 +282,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		MappedAtCreation: true,
 	})
 	if err != nil {
-		return
+		return fmt.Errorf("dx12: WriteTexture: CreateBuffer failed: %w", err)
 	}
 	defer q.device.DestroyBuffer(staging)
 
@@ -328,14 +326,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		Label: "write-texture-copy",
 	})
 	if err != nil {
-		hal.Logger().Warn("dx12: WriteTexture: CreateCommandEncoder failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteTexture: CreateCommandEncoder failed: %w", err)
 	}
 
 	encoder := cmdEncoder.(*CommandEncoder)
 	if err := encoder.BeginEncoding("write-texture-copy"); err != nil {
-		hal.Logger().Warn("dx12: WriteTexture: BeginEncoding failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteTexture: BeginEncoding failed: %w", err)
 	}
 
 	// Transition texture to COPY_DEST using tracked current state.
@@ -396,29 +392,25 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// End encoding
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
-		hal.Logger().Warn("dx12: WriteTexture: EndEncoding failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteTexture: EndEncoding failed: %w", err)
 	}
 
 	// Submit and wait for GPU completion
 	fence, err := q.device.CreateFence()
 	if err != nil {
-		hal.Logger().Warn("dx12: WriteTexture: CreateFence failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteTexture: CreateFence failed: %w", err)
 	}
 	defer q.device.DestroyFence(fence)
 
 	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
-		hal.Logger().Warn("dx12: WriteTexture: Submit failed", "err", err)
-		return
+		return fmt.Errorf("dx12: WriteTexture: Submit failed: %w", err)
 	}
 	_, _ = q.device.Wait(fence, 1, 60*time.Second)
 	q.device.FreeCommandBuffer(cmdBuffer)
 
 	// Update tracked state AFTER successful execution.
-	// If any step above failed and returned early, the texture remains
-	// in its original state, keeping tracked state consistent with reality.
 	dstTex.currentState = afterState
+	return nil
 }
 
 // Present presents a surface texture to the screen.

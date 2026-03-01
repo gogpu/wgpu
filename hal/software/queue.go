@@ -1,6 +1,8 @@
 package software
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -29,19 +31,23 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 }
 
 // WriteBuffer performs immediate buffer writes with real data storage.
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
-	if b, ok := buffer.(*Buffer); ok {
-		b.WriteData(offset, data)
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	b, ok := buffer.(*Buffer)
+	if !ok {
+		return fmt.Errorf("software: WriteBuffer: invalid buffer type")
 	}
+	b.WriteData(offset, data)
+	return nil
 }
 
 // WriteTexture performs immediate texture writes with real data storage.
-func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	if tex, ok := dst.Texture.(*Texture); ok {
 		// Simple implementation: just write data at offset
 		// In a real implementation, this would respect layout parameters
 		tex.WriteData(layout.Offset, data)
 	}
+	return nil
 }
 
 // Present simulates surface presentation.

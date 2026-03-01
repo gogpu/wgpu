@@ -55,17 +55,17 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) error {
 }
 
 // WriteBuffer writes data to a buffer.
-func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) {
+func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	if q.hal == nil || buffer == nil {
-		return
+		return fmt.Errorf("wgpu: WriteBuffer: queue or buffer is nil")
 	}
 
 	halBuffer := buffer.halBuffer()
 	if halBuffer == nil {
-		return
+		return fmt.Errorf("wgpu: WriteBuffer: no HAL buffer")
 	}
 
-	q.hal.WriteBuffer(halBuffer, offset, data)
+	return q.hal.WriteBuffer(halBuffer, offset, data)
 }
 
 // ReadBuffer reads data from a GPU buffer.

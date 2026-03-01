@@ -292,10 +292,10 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 //
 // Both paths use the unified deviceFence: timeline semaphore (VK-IMPL-001)
 // or binary fence pool (VK-IMPL-003).
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	vkBuffer, ok := buffer.(*Buffer)
 	if !ok || vkBuffer.memory == nil {
-		return
+		return fmt.Errorf("vulkan: WriteBuffer: invalid buffer")
 	}
 
 	// Wait for the last queue submission to complete before CPU writes.
@@ -316,9 +316,14 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 			Offset: vk.DeviceSize(vkBuffer.memory.Offset),
 			Size:   vk.DeviceSize(vk.WholeSize),
 		}
-		_ = q.device.cmds.FlushMappedMemoryRanges(q.device.handle, 1, &memRange)
+		result := q.device.cmds.FlushMappedMemoryRanges(q.device.handle, 1, &memRange)
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: WriteBuffer: FlushMappedMemoryRanges failed: %d", result)
+		}
+		return nil
 	}
 	// Note(v0.6.0): Staging buffer needed for device-local memory writes.
+	return fmt.Errorf("vulkan: WriteBuffer: buffer is not mapped")
 }
 
 // ReadBuffer reads data from a GPU buffer.
@@ -354,14 +359,15 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 }
 
 // WriteTexture writes data to a texture immediately.
-func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+// Returns an error if any step fails (VK-003: no more silent error swallowing).
+func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	if dst == nil || dst.Texture == nil || len(data) == 0 || size == nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: invalid arguments")
 	}
 
 	vkTexture, ok := dst.Texture.(*Texture)
 	if !ok || vkTexture == nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: invalid texture type")
 	}
 
 	// Create staging buffer
@@ -373,14 +379,14 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	stagingBuffer, err := q.device.CreateBuffer(stagingDesc)
 	if err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: CreateBuffer failed: %w", err)
 	}
 	defer q.device.DestroyBuffer(stagingBuffer)
 
 	// Copy data to staging buffer
 	vkStaging, ok := stagingBuffer.(*Buffer)
 	if !ok || vkStaging.memory == nil || vkStaging.memory.MappedPtr == 0 {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: staging buffer not mapped")
 	}
 	copyToMappedMemory(vkStaging.memory.MappedPtr, 0, data)
 
@@ -389,17 +395,17 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		Label: "texture-upload-encoder",
 	})
 	if err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: CreateCommandEncoder failed: %w", err)
 	}
 
 	encoder, ok := cmdEncoder.(*CommandEncoder)
 	if !ok {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: unexpected encoder type")
 	}
 
 	// Begin recording
 	if err := encoder.BeginEncoding("texture-upload"); err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: BeginEncoding failed: %w", err)
 	}
 
 	// Transition texture to transfer destination layout
@@ -466,18 +472,35 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// End recording and submit
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: EndEncoding failed: %w", err)
 	}
 
 	// Submit and wait
 	fence, err := q.device.CreateFence()
 	if err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: CreateFence failed: %w", err)
 	}
 	defer q.device.DestroyFence(fence)
 
+	// VK-004: Staging uploads must NOT consume swapchain semaphores.
+	// When WriteTexture is called between BeginFrame/EndFrame (e.g., in onDraw),
+	// the activeSwapchain acquire semaphore must be preserved for the render pass
+	// Submit, not consumed by this staging upload. Temporarily clear activeSwapchain
+	// so the internal Submit runs without render-pass synchronization.
+	q.mu.Lock()
+	savedSwapchain := q.activeSwapchain
+	savedAcquireUsed := q.acquireUsed
+	q.activeSwapchain = nil
+	q.mu.Unlock()
+	defer func() {
+		q.mu.Lock()
+		q.activeSwapchain = savedSwapchain
+		q.acquireUsed = savedAcquireUsed
+		q.mu.Unlock()
+	}()
+
 	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 0); err != nil {
-		return
+		return fmt.Errorf("vulkan: WriteTexture: Submit failed: %w", err)
 	}
 
 	// Wait for completion (60 second timeout)
@@ -491,6 +514,8 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		"height", size.Height,
 		"dataSize", len(data),
 	)
+
+	return nil
 }
 
 // waitForGPU waits for the latest GPU submission to complete.

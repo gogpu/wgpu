@@ -101,22 +101,26 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 }
 
 // WriteBuffer writes data to a buffer immediately.
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	buf, ok := buffer.(*Buffer)
-	if !ok || len(data) == 0 {
-		return
+	if !ok {
+		return fmt.Errorf("gles: WriteBuffer: invalid buffer type")
+	}
+	if len(data) == 0 {
+		return nil
 	}
 
 	q.glCtx.BindBuffer(buf.target, buf.id)
 	q.glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
 	q.glCtx.BindBuffer(buf.target, 0)
+	return nil
 }
 
 // WriteTexture writes data to a texture immediately.
-func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	tex, ok := dst.Texture.(*Texture)
 	if !ok {
-		return
+		return fmt.Errorf("gles: invalid texture type for WriteTexture")
 	}
 
 	internalFormat, format, dataType := textureFormatToGL(tex.format)
@@ -130,6 +134,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	}
 
 	q.glCtx.BindTexture(tex.target, 0)
+	return nil
 }
 
 // Present presents a surface texture to the screen.

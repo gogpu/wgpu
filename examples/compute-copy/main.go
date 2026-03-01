@@ -178,8 +178,12 @@ func createBuffers(device *wgpu.Device, inputData []byte) (*bufferSet, error) {
 		return nil, fmt.Errorf("create uniform buffer: %w", err)
 	}
 
-	device.Queue().WriteBuffer(inputBuf, 0, inputData)
-	device.Queue().WriteBuffer(uniformBuf, 0, uniformData)
+	if err := device.Queue().WriteBuffer(inputBuf, 0, inputData); err != nil {
+		return nil, fmt.Errorf("write input buffer: %w", err)
+	}
+	if err := device.Queue().WriteBuffer(uniformBuf, 0, uniformData); err != nil {
+		return nil, fmt.Errorf("write uniform buffer: %w", err)
+	}
 	fmt.Println("OK")
 
 	return &bufferSet{input: inputBuf, output: outputBuf, staging: stagingBuf, uniform: uniformBuf}, nil

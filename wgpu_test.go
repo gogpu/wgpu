@@ -696,7 +696,9 @@ func TestQueueWriteBuffer(t *testing.T) {
 
 	// WriteBuffer should not panic.
 	data := []byte{1, 2, 3, 4}
-	q.WriteBuffer(buf, 0, data)
+	if err := q.WriteBuffer(buf, 0, data); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 }
 
 // --- WaitIdle tests (require HAL) ---

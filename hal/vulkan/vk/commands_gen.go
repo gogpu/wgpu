@@ -713,7 +713,9 @@ func (c *Commands) CreateInstance(pCreateInfo *InstanceCreateInfo, pAllocator *A
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pInstance),
 	}
-	_ = ffi.CallFunction(&SigResultPtrPtrPtr, c.createInstance, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultPtrPtrPtr, c.createInstance, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -722,6 +724,9 @@ func (c *Commands) DestroyInstance(instance Instance, pAllocator *AllocationCall
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyInstance == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.destroyInstance, nil, args[:])
 }
@@ -734,7 +739,9 @@ func (c *Commands) EnumeratePhysicalDevices(instance Instance, pPhysicalDeviceCo
 		unsafe.Pointer(&pPhysicalDeviceCount),
 		unsafe.Pointer(&pPhysicalDevices),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDevices, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDevices, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -748,6 +755,9 @@ func (c *Commands) GetPhysicalDeviceProperties(physicalDevice PhysicalDevice, pP
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pProperties),
 	}
+	if c.getPhysicalDeviceProperties == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceProperties, nil, args[:])
 }
 
@@ -758,6 +768,9 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyProperties(physicalDevice Physica
 		unsafe.Pointer(&pQueueFamilyPropertyCount),
 		unsafe.Pointer(&pQueueFamilyProperties),
 	}
+	if c.getPhysicalDeviceQueueFamilyProperties == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyProperties, nil, args[:])
 }
 
@@ -766,6 +779,9 @@ func (c *Commands) GetPhysicalDeviceMemoryProperties(physicalDevice PhysicalDevi
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pMemoryProperties),
+	}
+	if c.getPhysicalDeviceMemoryProperties == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceMemoryProperties, nil, args[:])
 }
@@ -776,6 +792,9 @@ func (c *Commands) GetPhysicalDeviceFeatures(physicalDevice PhysicalDevice, pFea
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pFeatures),
 	}
+	if c.getPhysicalDeviceFeatures == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceFeatures, nil, args[:])
 }
 
@@ -785,6 +804,9 @@ func (c *Commands) GetPhysicalDeviceFormatProperties(physicalDevice PhysicalDevi
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&pFormatProperties),
+	}
+	if c.getPhysicalDeviceFormatProperties == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceFormatProperties, nil, args[:])
 }
@@ -800,7 +822,9 @@ func (c *Commands) CreateDevice(physicalDevice PhysicalDevice, pCreateInfo *Devi
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pDevice),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDevice, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDevice, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -809,6 +833,9 @@ func (c *Commands) DestroyDevice(device Device, pAllocator *AllocationCallbacks)
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDevice == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.destroyDevice, nil, args[:])
 }
@@ -819,7 +846,9 @@ func (c *Commands) EnumerateInstanceVersion(pApiVersion *uint32) Result {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&pApiVersion),
 	}
-	_ = ffi.CallFunction(&SigResultPtr, c.enumerateInstanceVersion, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultPtr, c.enumerateInstanceVersion, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -830,7 +859,9 @@ func (c *Commands) EnumerateInstanceLayerProperties(pPropertyCount *uint32, pPro
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultPtrPtr, c.enumerateInstanceLayerProperties, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultPtrPtr, c.enumerateInstanceLayerProperties, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -842,7 +873,9 @@ func (c *Commands) EnumerateInstanceExtensionProperties(pLayerName uintptr, pPro
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultPtrPtrPtr, c.enumerateInstanceExtensionProperties, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultPtrPtrPtr, c.enumerateInstanceExtensionProperties, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -854,7 +887,9 @@ func (c *Commands) EnumerateDeviceLayerProperties(physicalDevice PhysicalDevice,
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumerateDeviceLayerProperties, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.enumerateDeviceLayerProperties, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -867,7 +902,9 @@ func (c *Commands) EnumerateDeviceExtensionProperties(physicalDevice PhysicalDev
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.enumerateDeviceExtensionProperties, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.enumerateDeviceExtensionProperties, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -878,6 +915,9 @@ func (c *Commands) GetDeviceQueue(device Device, queueFamilyIndex uint32, queueI
 		unsafe.Pointer(&queueFamilyIndex),
 		unsafe.Pointer(&queueIndex),
 		unsafe.Pointer(&pQueue),
+	}
+	if c.getDeviceQueue == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.getDeviceQueue, nil, args[:])
 }
@@ -891,7 +931,9 @@ func (c *Commands) QueueSubmit(queue Queue, submitCount uint32, pSubmits *Submit
 		unsafe.Pointer(&pSubmits),
 		unsafe.Pointer(&fence),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -901,7 +943,9 @@ func (c *Commands) QueueWaitIdle(queue Queue) Result {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&queue),
 	}
-	_ = ffi.CallFunction(&SigResultHandle, c.queueWaitIdle, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandle, c.queueWaitIdle, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -911,7 +955,9 @@ func (c *Commands) DeviceWaitIdle(device Device) Result {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&device),
 	}
-	_ = ffi.CallFunction(&SigResultHandle, c.deviceWaitIdle, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandle, c.deviceWaitIdle, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -924,7 +970,9 @@ func (c *Commands) AllocateMemory(device Device, pAllocateInfo *MemoryAllocateIn
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pMemory),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.allocateMemory, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.allocateMemory, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -934,6 +982,9 @@ func (c *Commands) FreeMemory(device Device, memory DeviceMemory, pAllocator *Al
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memory),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.freeMemory == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.freeMemory, nil, args[:])
 }
@@ -949,7 +1000,9 @@ func (c *Commands) MapMemory(device Device, memory DeviceMemory, offset DeviceSi
 		unsafe.Pointer(&flags),
 		unsafe.Pointer(&ppData),
 	}
-	_ = ffi.CallFunction(&SigResultMapMemory, c.mapMemory, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultMapMemory, c.mapMemory, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -958,6 +1011,9 @@ func (c *Commands) UnmapMemory(device Device, memory DeviceMemory) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&memory),
+	}
+	if c.unmapMemory == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.unmapMemory, nil, args[:])
 }
@@ -970,7 +1026,9 @@ func (c *Commands) FlushMappedMemoryRanges(device Device, memoryRangeCount uint3
 		unsafe.Pointer(&memoryRangeCount),
 		unsafe.Pointer(&pMemoryRanges),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.flushMappedMemoryRanges, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.flushMappedMemoryRanges, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -982,7 +1040,9 @@ func (c *Commands) InvalidateMappedMemoryRanges(device Device, memoryRangeCount 
 		unsafe.Pointer(&memoryRangeCount),
 		unsafe.Pointer(&pMemoryRanges),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.invalidateMappedMemoryRanges, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.invalidateMappedMemoryRanges, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -993,6 +1053,9 @@ func (c *Commands) GetDeviceMemoryCommitment(device Device, memory DeviceMemory,
 		unsafe.Pointer(&memory),
 		unsafe.Pointer(&pCommittedMemoryInBytes),
 	}
+	if c.getDeviceMemoryCommitment == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDeviceMemoryCommitment, nil, args[:])
 }
 
@@ -1002,6 +1065,9 @@ func (c *Commands) GetBufferMemoryRequirements(device Device, buffer Buffer, pMe
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getBufferMemoryRequirements == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getBufferMemoryRequirements, nil, args[:])
 }
@@ -1015,7 +1081,9 @@ func (c *Commands) BindBufferMemory(device Device, buffer Buffer, memory DeviceM
 		unsafe.Pointer(&memory),
 		unsafe.Pointer(&memoryOffset),
 	}
-	_ = ffi.CallFunction(&SigResultHandle4, c.bindBufferMemory, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandle4, c.bindBufferMemory, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1025,6 +1093,9 @@ func (c *Commands) GetImageMemoryRequirements(device Device, image Image, pMemor
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&image),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getImageMemoryRequirements == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getImageMemoryRequirements, nil, args[:])
 }
@@ -1038,7 +1109,9 @@ func (c *Commands) BindImageMemory(device Device, image Image, memory DeviceMemo
 		unsafe.Pointer(&memory),
 		unsafe.Pointer(&memoryOffset),
 	}
-	_ = ffi.CallFunction(&SigResultHandle4, c.bindImageMemory, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandle4, c.bindImageMemory, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1055,7 +1128,9 @@ func (c *Commands) QueueBindSparse(queue Queue, bindInfoCount uint32, pBindInfo 
 		unsafe.Pointer(&pBindInfo),
 		unsafe.Pointer(&fence),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueBindSparse, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueBindSparse, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1068,7 +1143,9 @@ func (c *Commands) CreateFence(device Device, pCreateInfo *FenceCreateInfo, pAll
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pFence),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFence, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFence, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1078,6 +1155,9 @@ func (c *Commands) DestroyFence(device Device, fence Fence, pAllocator *Allocati
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&fence),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyFence == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyFence, nil, args[:])
 }
@@ -1090,7 +1170,9 @@ func (c *Commands) ResetFences(device Device, fenceCount uint32, pFences *Fence)
 		unsafe.Pointer(&fenceCount),
 		unsafe.Pointer(&pFences),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.resetFences, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.resetFences, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1101,7 +1183,9 @@ func (c *Commands) GetFenceStatus(device Device, fence Fence) Result {
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&fence),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.getFenceStatus, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.getFenceStatus, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1115,7 +1199,9 @@ func (c *Commands) WaitForFences(device Device, fenceCount uint32, pFences *Fenc
 		unsafe.Pointer(&waitAll),
 		unsafe.Pointer(&timeout),
 	}
-	_ = ffi.CallFunction(&SigResultWaitForFences, c.waitForFences, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultWaitForFences, c.waitForFences, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1128,7 +1214,9 @@ func (c *Commands) CreateSemaphore(device Device, pCreateInfo *SemaphoreCreateIn
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSemaphore),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphore, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphore, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1138,6 +1226,9 @@ func (c *Commands) DestroySemaphore(device Device, semaphore Semaphore, pAllocat
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&semaphore),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroySemaphore == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySemaphore, nil, args[:])
 }
@@ -1151,7 +1242,9 @@ func (c *Commands) CreateEvent(device Device, pCreateInfo *EventCreateInfo, pAll
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pEvent),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createEvent, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createEvent, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1161,6 +1254,9 @@ func (c *Commands) DestroyEvent(device Device, event Event, pAllocator *Allocati
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&event),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyEvent == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyEvent, nil, args[:])
 }
@@ -1172,7 +1268,9 @@ func (c *Commands) GetEventStatus(device Device, event Event) Result {
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&event),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.getEventStatus, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.getEventStatus, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1183,7 +1281,9 @@ func (c *Commands) SetEvent(device Device, event Event) Result {
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&event),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.setEvent, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.setEvent, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1194,7 +1294,9 @@ func (c *Commands) ResetEvent(device Device, event Event) Result {
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&event),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.resetEvent, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.resetEvent, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1207,7 +1309,9 @@ func (c *Commands) CreateQueryPool(device Device, pCreateInfo *QueryPoolCreateIn
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pQueryPool),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createQueryPool, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createQueryPool, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1217,6 +1321,9 @@ func (c *Commands) DestroyQueryPool(device Device, queryPool QueryPool, pAllocat
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&queryPool),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyQueryPool == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyQueryPool, nil, args[:])
 }
@@ -1231,6 +1338,9 @@ func (c *Commands) ResetQueryPool(device Device, queryPool QueryPool, firstQuery
 		unsafe.Pointer(&firstQuery),
 		unsafe.Pointer(&queryCount),
 	}
+	if c.resetQueryPool == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32U32, c.resetQueryPool, nil, args[:])
 }
 
@@ -1243,7 +1353,9 @@ func (c *Commands) CreateBuffer(device Device, pCreateInfo *BufferCreateInfo, pA
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pBuffer),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBuffer, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBuffer, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1253,6 +1365,9 @@ func (c *Commands) DestroyBuffer(device Device, buffer Buffer, pAllocator *Alloc
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyBuffer == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBuffer, nil, args[:])
 }
@@ -1266,7 +1381,9 @@ func (c *Commands) CreateBufferView(device Device, pCreateInfo *BufferViewCreate
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pView),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferView, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferView, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1276,6 +1393,9 @@ func (c *Commands) DestroyBufferView(device Device, bufferView BufferView, pAllo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&bufferView),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyBufferView == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBufferView, nil, args[:])
 }
@@ -1289,7 +1409,9 @@ func (c *Commands) CreateImage(device Device, pCreateInfo *ImageCreateInfo, pAll
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pImage),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImage, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImage, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1299,6 +1421,9 @@ func (c *Commands) DestroyImage(device Device, image Image, pAllocator *Allocati
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&image),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyImage == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyImage, nil, args[:])
 }
@@ -1314,7 +1439,9 @@ func (c *Commands) CreateImageView(device Device, pCreateInfo *ImageViewCreateIn
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pView),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImageView, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImageView, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1324,6 +1451,9 @@ func (c *Commands) DestroyImageView(device Device, imageView ImageView, pAllocat
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&imageView),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyImageView == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyImageView, nil, args[:])
 }
@@ -1337,7 +1467,9 @@ func (c *Commands) CreateShaderModule(device Device, pCreateInfo *ShaderModuleCr
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pShaderModule),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createShaderModule, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createShaderModule, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1347,6 +1479,9 @@ func (c *Commands) DestroyShaderModule(device Device, shaderModule ShaderModule,
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shaderModule),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyShaderModule == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyShaderModule, nil, args[:])
 }
@@ -1360,7 +1495,9 @@ func (c *Commands) CreatePipelineCache(device Device, pCreateInfo *PipelineCache
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelineCache),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineCache, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineCache, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1370,6 +1507,9 @@ func (c *Commands) DestroyPipelineCache(device Device, pipelineCache PipelineCac
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineCache),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyPipelineCache == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineCache, nil, args[:])
 }
@@ -1383,7 +1523,9 @@ func (c *Commands) GetPipelineCacheData(device Device, pipelineCache PipelineCac
 		unsafe.Pointer(&pDataSize),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPipelineCacheData, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPipelineCacheData, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1396,7 +1538,9 @@ func (c *Commands) MergePipelineCaches(device Device, dstCache PipelineCache, sr
 		unsafe.Pointer(&srcCacheCount),
 		unsafe.Pointer(&pSrcCaches),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergePipelineCaches, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergePipelineCaches, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1409,7 +1553,9 @@ func (c *Commands) CreatePipelineBinariesKHR(device Device, pCreateInfo *Pipelin
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pBinaries),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineBinariesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineBinariesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1419,6 +1565,9 @@ func (c *Commands) DestroyPipelineBinaryKHR(device Device, pipelineBinary Pipeli
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineBinary),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyPipelineBinaryKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineBinaryKHR, nil, args[:])
 }
@@ -1431,7 +1580,9 @@ func (c *Commands) GetPipelineKeyKHR(device Device, pPipelineCreateInfo *Pipelin
 		unsafe.Pointer(&pPipelineCreateInfo),
 		unsafe.Pointer(&pPipelineKey),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelineKeyKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelineKeyKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1445,7 +1596,9 @@ func (c *Commands) GetPipelineBinaryDataKHR(device Device, pInfo *PipelineBinary
 		unsafe.Pointer(&pPipelineBinaryDataSize),
 		unsafe.Pointer(&pPipelineBinaryData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getPipelineBinaryDataKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getPipelineBinaryDataKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1457,7 +1610,9 @@ func (c *Commands) ReleaseCapturedPipelineDataKHR(device Device, pInfo *ReleaseC
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pAllocator),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.releaseCapturedPipelineDataKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.releaseCapturedPipelineDataKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1472,7 +1627,9 @@ func (c *Commands) CreateGraphicsPipelines(device Device, pipelineCache Pipeline
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelines),
 	}
-	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createGraphicsPipelines, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultCreatePipelines, c.createGraphicsPipelines, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1487,7 +1644,9 @@ func (c *Commands) CreateComputePipelines(device Device, pipelineCache PipelineC
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelines),
 	}
-	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createComputePipelines, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultCreatePipelines, c.createComputePipelines, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1499,7 +1658,9 @@ func (c *Commands) GetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI(device Device, 
 		unsafe.Pointer(&renderpass),
 		unsafe.Pointer(&pMaxWorkgroupSize),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceSubpassShadingMaxWorkgroupSizeHUAWEI, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceSubpassShadingMaxWorkgroupSizeHUAWEI, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1509,6 +1670,9 @@ func (c *Commands) DestroyPipeline(device Device, pipeline Pipeline, pAllocator 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipeline),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyPipeline == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipeline, nil, args[:])
 }
@@ -1522,7 +1686,9 @@ func (c *Commands) CreatePipelineLayout(device Device, pCreateInfo *PipelineLayo
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelineLayout),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineLayout, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPipelineLayout, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1532,6 +1698,9 @@ func (c *Commands) DestroyPipelineLayout(device Device, pipelineLayout PipelineL
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pipelineLayout),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyPipelineLayout == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPipelineLayout, nil, args[:])
 }
@@ -1545,7 +1714,9 @@ func (c *Commands) CreateSampler(device Device, pCreateInfo *SamplerCreateInfo, 
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSampler),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSampler, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSampler, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1555,6 +1726,9 @@ func (c *Commands) DestroySampler(device Device, sampler Sampler, pAllocator *Al
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&sampler),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroySampler == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySampler, nil, args[:])
 }
@@ -1568,7 +1742,9 @@ func (c *Commands) CreateDescriptorSetLayout(device Device, pCreateInfo *Descrip
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSetLayout),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorSetLayout, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorSetLayout, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1578,6 +1754,9 @@ func (c *Commands) DestroyDescriptorSetLayout(device Device, descriptorSetLayout
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorSetLayout),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDescriptorSetLayout == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorSetLayout, nil, args[:])
 }
@@ -1591,7 +1770,9 @@ func (c *Commands) CreateDescriptorPool(device Device, pCreateInfo *DescriptorPo
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pDescriptorPool),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorPool, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorPool, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1601,6 +1782,9 @@ func (c *Commands) DestroyDescriptorPool(device Device, descriptorPool Descripto
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorPool),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDescriptorPool == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorPool, nil, args[:])
 }
@@ -1613,7 +1797,9 @@ func (c *Commands) ResetDescriptorPool(device Device, descriptorPool DescriptorP
 		unsafe.Pointer(&descriptorPool),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32, c.resetDescriptorPool, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32, c.resetDescriptorPool, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1625,7 +1811,9 @@ func (c *Commands) AllocateDescriptorSets(device Device, pAllocateInfo *Descript
 		unsafe.Pointer(&pAllocateInfo),
 		unsafe.Pointer(&pDescriptorSets),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateDescriptorSets, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateDescriptorSets, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1638,7 +1826,9 @@ func (c *Commands) FreeDescriptorSets(device Device, descriptorPool DescriptorPo
 		unsafe.Pointer(&descriptorSetCount),
 		unsafe.Pointer(&pDescriptorSets),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.freeDescriptorSets, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.freeDescriptorSets, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1650,6 +1840,9 @@ func (c *Commands) UpdateDescriptorSets(device Device, descriptorWriteCount uint
 		unsafe.Pointer(&pDescriptorWrites),
 		unsafe.Pointer(&descriptorCopyCount),
 		unsafe.Pointer(&pDescriptorCopies),
+	}
+	if c.updateDescriptorSets == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.updateDescriptorSets, nil, args[:])
 }
@@ -1663,7 +1856,9 @@ func (c *Commands) CreateFramebuffer(device Device, pCreateInfo *FramebufferCrea
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pFramebuffer),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFramebuffer, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createFramebuffer, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1673,6 +1868,9 @@ func (c *Commands) DestroyFramebuffer(device Device, framebuffer Framebuffer, pA
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&framebuffer),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyFramebuffer == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyFramebuffer, nil, args[:])
 }
@@ -1686,7 +1884,9 @@ func (c *Commands) CreateRenderPass(device Device, pCreateInfo *RenderPassCreate
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pRenderPass),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1696,6 +1896,9 @@ func (c *Commands) DestroyRenderPass(device Device, renderPass RenderPass, pAllo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&renderPass),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyRenderPass == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyRenderPass, nil, args[:])
 }
@@ -1707,6 +1910,9 @@ func (c *Commands) GetRenderAreaGranularity(device Device, renderPass RenderPass
 		unsafe.Pointer(&renderPass),
 		unsafe.Pointer(&pGranularity),
 	}
+	if c.getRenderAreaGranularity == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getRenderAreaGranularity, nil, args[:])
 }
 
@@ -1716,6 +1922,9 @@ func (c *Commands) GetRenderingAreaGranularity(device Device, pRenderingAreaInfo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pRenderingAreaInfo),
 		unsafe.Pointer(&pGranularity),
+	}
+	if c.getRenderingAreaGranularity == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getRenderingAreaGranularity, nil, args[:])
 }
@@ -1729,7 +1938,9 @@ func (c *Commands) CreateCommandPool(device Device, pCreateInfo *CommandPoolCrea
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pCommandPool),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCommandPool, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCommandPool, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1739,6 +1950,9 @@ func (c *Commands) DestroyCommandPool(device Device, commandPool CommandPool, pA
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&commandPool),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyCommandPool == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCommandPool, nil, args[:])
 }
@@ -1751,7 +1965,9 @@ func (c *Commands) ResetCommandPool(device Device, commandPool CommandPool, flag
 		unsafe.Pointer(&commandPool),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32, c.resetCommandPool, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32, c.resetCommandPool, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1763,7 +1979,9 @@ func (c *Commands) AllocateCommandBuffers(device Device, pAllocateInfo *CommandB
 		unsafe.Pointer(&pAllocateInfo),
 		unsafe.Pointer(&pCommandBuffers),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateCommandBuffers, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.allocateCommandBuffers, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1775,6 +1993,9 @@ func (c *Commands) FreeCommandBuffers(device Device, commandPool CommandPool, co
 		unsafe.Pointer(&commandBufferCount),
 		unsafe.Pointer(&pCommandBuffers),
 	}
+	if c.freeCommandBuffers == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.freeCommandBuffers, nil, args[:])
 }
 
@@ -1785,7 +2006,9 @@ func (c *Commands) BeginCommandBuffer(commandBuffer CommandBuffer, pBeginInfo *C
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBeginInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.beginCommandBuffer, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.beginCommandBuffer, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1795,7 +2018,9 @@ func (c *Commands) EndCommandBuffer(commandBuffer CommandBuffer) Result {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 	}
-	_ = ffi.CallFunction(&SigResultHandle, c.endCommandBuffer, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandle, c.endCommandBuffer, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1806,7 +2031,9 @@ func (c *Commands) ResetCommandBuffer(commandBuffer CommandBuffer, flags Command
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32, c.resetCommandBuffer, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32, c.resetCommandBuffer, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -1817,6 +2044,9 @@ func (c *Commands) CmdBindPipeline(commandBuffer CommandBuffer, pipelineBindPoin
 		unsafe.Pointer(&pipelineBindPoint),
 		unsafe.Pointer(&pipeline),
 	}
+	if c.cmdBindPipeline == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Handle, c.cmdBindPipeline, nil, args[:])
 }
 
@@ -1825,6 +2055,9 @@ func (c *Commands) CmdSetAttachmentFeedbackLoopEnableEXT(commandBuffer CommandBu
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&aspectMask),
+	}
+	if c.cmdSetAttachmentFeedbackLoopEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetAttachmentFeedbackLoopEnableEXT, nil, args[:])
 }
@@ -1837,6 +2070,9 @@ func (c *Commands) CmdSetViewport(commandBuffer CommandBuffer, firstViewport uin
 		unsafe.Pointer(&viewportCount),
 		unsafe.Pointer(&pViewports),
 	}
+	if c.cmdSetViewport == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewport, nil, args[:])
 }
 
@@ -1848,6 +2084,9 @@ func (c *Commands) CmdSetScissor(commandBuffer CommandBuffer, firstScissor uint3
 		unsafe.Pointer(&scissorCount),
 		unsafe.Pointer(&pScissors),
 	}
+	if c.cmdSetScissor == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetScissor, nil, args[:])
 }
 
@@ -1857,13 +2096,20 @@ func (c *Commands) CmdSetLineWidth(commandBuffer CommandBuffer, lineWidth float3
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&lineWidth),
 	}
+	if c.cmdSetLineWidth == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleF32, c.cmdSetLineWidth, nil, args[:])
 }
 
 // TODO: CmdSetDepthBias - signature not yet supported: void(handle, f32, f32, f32)
 
 // CmdSetBlendConstants wraps vkCmdSetBlendConstants.
+// blendConstants is passed as a pointer (const float[4] in Vulkan ABI).
 func (c *Commands) CmdSetBlendConstants(commandBuffer CommandBuffer, blendConstants [4]float32) {
+	if c.cmdSetBlendConstants == nil {
+		return
+	}
 	p := unsafe.Pointer(&blendConstants)
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
@@ -1881,6 +2127,9 @@ func (c *Commands) CmdSetStencilCompareMask(commandBuffer CommandBuffer, faceMas
 		unsafe.Pointer(&faceMask),
 		unsafe.Pointer(&compareMask),
 	}
+	if c.cmdSetStencilCompareMask == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32, c.cmdSetStencilCompareMask, nil, args[:])
 }
 
@@ -1891,6 +2140,9 @@ func (c *Commands) CmdSetStencilWriteMask(commandBuffer CommandBuffer, faceMask 
 		unsafe.Pointer(&faceMask),
 		unsafe.Pointer(&writeMask),
 	}
+	if c.cmdSetStencilWriteMask == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32, c.cmdSetStencilWriteMask, nil, args[:])
 }
 
@@ -1900,6 +2152,9 @@ func (c *Commands) CmdSetStencilReference(commandBuffer CommandBuffer, faceMask 
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&faceMask),
 		unsafe.Pointer(&reference),
+	}
+	if c.cmdSetStencilReference == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32, c.cmdSetStencilReference, nil, args[:])
 }
@@ -1916,6 +2171,9 @@ func (c *Commands) CmdBindDescriptorSets(commandBuffer CommandBuffer, pipelineBi
 		unsafe.Pointer(&dynamicOffsetCount),
 		unsafe.Pointer(&pDynamicOffsets),
 	}
+	if c.cmdBindDescriptorSets == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdBindDescriptorSets, c.cmdBindDescriptorSets, nil, args[:])
 }
 
@@ -1926,6 +2184,9 @@ func (c *Commands) CmdBindIndexBuffer(commandBuffer CommandBuffer, buffer Buffer
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&offset),
 		unsafe.Pointer(&indexType),
+	}
+	if c.cmdBindIndexBuffer == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64U32, c.cmdBindIndexBuffer, nil, args[:])
 }
@@ -1939,6 +2200,9 @@ func (c *Commands) CmdBindVertexBuffers(commandBuffer CommandBuffer, firstBindin
 		unsafe.Pointer(&pBuffers),
 		unsafe.Pointer(&pOffsets),
 	}
+	if c.cmdBindVertexBuffers == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdBindVertexBuffers, nil, args[:])
 }
 
@@ -1950,6 +2214,9 @@ func (c *Commands) CmdDraw(commandBuffer CommandBuffer, vertexCount uint32, inst
 		unsafe.Pointer(&instanceCount),
 		unsafe.Pointer(&firstVertex),
 		unsafe.Pointer(&firstInstance),
+	}
+	if c.cmdDraw == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32x4, c.cmdDraw, nil, args[:])
 }
@@ -1963,6 +2230,9 @@ func (c *Commands) CmdDrawIndexed(commandBuffer CommandBuffer, indexCount uint32
 		unsafe.Pointer(&firstIndex),
 		unsafe.Pointer(&vertexOffset),
 		unsafe.Pointer(&firstInstance),
+	}
+	if c.cmdDrawIndexed == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32x3I32U32, c.cmdDrawIndexed, nil, args[:])
 }
@@ -1980,6 +2250,9 @@ func (c *Commands) CmdDrawIndirect(commandBuffer CommandBuffer, buffer Buffer, o
 		unsafe.Pointer(&drawCount),
 		unsafe.Pointer(&stride),
 	}
+	if c.cmdDrawIndirect == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64U32U32, c.cmdDrawIndirect, nil, args[:])
 }
 
@@ -1992,6 +2265,9 @@ func (c *Commands) CmdDrawIndexedIndirect(commandBuffer CommandBuffer, buffer Bu
 		unsafe.Pointer(&drawCount),
 		unsafe.Pointer(&stride),
 	}
+	if c.cmdDrawIndexedIndirect == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64U32U32, c.cmdDrawIndexedIndirect, nil, args[:])
 }
 
@@ -2003,6 +2279,9 @@ func (c *Commands) CmdDispatch(commandBuffer CommandBuffer, groupCountX uint32, 
 		unsafe.Pointer(&groupCountY),
 		unsafe.Pointer(&groupCountZ),
 	}
+	if c.cmdDispatch == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32x3, c.cmdDispatch, nil, args[:])
 }
 
@@ -2013,6 +2292,9 @@ func (c *Commands) CmdDispatchIndirect(commandBuffer CommandBuffer, buffer Buffe
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&offset),
 	}
+	if c.cmdDispatchIndirect == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64, c.cmdDispatchIndirect, nil, args[:])
 }
 
@@ -2020,6 +2302,9 @@ func (c *Commands) CmdDispatchIndirect(commandBuffer CommandBuffer, buffer Buffe
 func (c *Commands) CmdSubpassShadingHUAWEI(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdSubpassShadingHUAWEI == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdSubpassShadingHUAWEI, nil, args[:])
 }
@@ -2032,6 +2317,9 @@ func (c *Commands) CmdDrawClusterHUAWEI(commandBuffer CommandBuffer, groupCountX
 		unsafe.Pointer(&groupCountY),
 		unsafe.Pointer(&groupCountZ),
 	}
+	if c.cmdDrawClusterHUAWEI == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32x3, c.cmdDrawClusterHUAWEI, nil, args[:])
 }
 
@@ -2042,6 +2330,9 @@ func (c *Commands) CmdDrawClusterIndirectHUAWEI(commandBuffer CommandBuffer, buf
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&offset),
 	}
+	if c.cmdDrawClusterIndirectHUAWEI == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64, c.cmdDrawClusterIndirectHUAWEI, nil, args[:])
 }
 
@@ -2051,6 +2342,9 @@ func (c *Commands) CmdUpdatePipelineIndirectBufferNV(commandBuffer CommandBuffer
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pipelineBindPoint),
 		unsafe.Pointer(&pipeline),
+	}
+	if c.cmdUpdatePipelineIndirectBufferNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Handle, c.cmdUpdatePipelineIndirectBufferNV, nil, args[:])
 }
@@ -2063,6 +2357,9 @@ func (c *Commands) CmdCopyBuffer(commandBuffer CommandBuffer, srcBuffer Buffer, 
 		unsafe.Pointer(&dstBuffer),
 		unsafe.Pointer(&regionCount),
 		unsafe.Pointer(&pRegions),
+	}
+	if c.cmdCopyBuffer == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBuffer, c.cmdCopyBuffer, nil, args[:])
 }
@@ -2077,6 +2374,9 @@ func (c *Commands) CmdCopyImage(commandBuffer CommandBuffer, srcImage Image, src
 		unsafe.Pointer(&dstImageLayout),
 		unsafe.Pointer(&regionCount),
 		unsafe.Pointer(&pRegions),
+	}
+	if c.cmdCopyImage == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImage, c.cmdCopyImage, nil, args[:])
 }
@@ -2093,6 +2393,9 @@ func (c *Commands) CmdCopyBufferToImage(commandBuffer CommandBuffer, srcBuffer B
 		unsafe.Pointer(&regionCount),
 		unsafe.Pointer(&pRegions),
 	}
+	if c.cmdCopyBufferToImage == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBufferToImage, c.cmdCopyBufferToImage, nil, args[:])
 }
 
@@ -2106,6 +2409,9 @@ func (c *Commands) CmdCopyImageToBuffer(commandBuffer CommandBuffer, srcImage Im
 		unsafe.Pointer(&regionCount),
 		unsafe.Pointer(&pRegions),
 	}
+	if c.cmdCopyImageToBuffer == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImageToBuffer, c.cmdCopyImageToBuffer, nil, args[:])
 }
 
@@ -2117,6 +2423,9 @@ func (c *Commands) CmdCopyMemoryIndirectKHR(commandBuffer CommandBuffer, pCopyMe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyMemoryIndirectInfo),
 	}
+	if c.cmdCopyMemoryIndirectKHR == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryIndirectKHR, nil, args[:])
 }
 
@@ -2127,6 +2436,9 @@ func (c *Commands) CmdCopyMemoryToImageIndirectKHR(commandBuffer CommandBuffer, 
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyMemoryToImageIndirectInfo),
+	}
+	if c.cmdCopyMemoryToImageIndirectKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToImageIndirectKHR, nil, args[:])
 }
@@ -2141,6 +2453,9 @@ func (c *Commands) CmdFillBuffer(commandBuffer CommandBuffer, dstBuffer Buffer, 
 		unsafe.Pointer(&dstOffset),
 		unsafe.Pointer(&size),
 		unsafe.Pointer(&data),
+	}
+	if c.cmdFillBuffer == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidCmdFillBuffer, c.cmdFillBuffer, nil, args[:])
 }
@@ -2158,6 +2473,9 @@ func (c *Commands) CmdClearAttachments(commandBuffer CommandBuffer, attachmentCo
 		unsafe.Pointer(&rectCount),
 		unsafe.Pointer(&pRects),
 	}
+	if c.cmdClearAttachments == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.cmdClearAttachments, nil, args[:])
 }
 
@@ -2172,6 +2490,9 @@ func (c *Commands) CmdResolveImage(commandBuffer CommandBuffer, srcImage Image, 
 		unsafe.Pointer(&regionCount),
 		unsafe.Pointer(&pRegions),
 	}
+	if c.cmdResolveImage == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyImage, c.cmdResolveImage, nil, args[:])
 }
 
@@ -2182,6 +2503,9 @@ func (c *Commands) CmdSetEvent(commandBuffer CommandBuffer, event Event, stageMa
 		unsafe.Pointer(&event),
 		unsafe.Pointer(&stageMask),
 	}
+	if c.cmdSetEvent == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdSetEvent, nil, args[:])
 }
 
@@ -2191,6 +2515,9 @@ func (c *Commands) CmdResetEvent(commandBuffer CommandBuffer, event Event, stage
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&event),
 		unsafe.Pointer(&stageMask),
+	}
+	if c.cmdResetEvent == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdResetEvent, nil, args[:])
 }
@@ -2211,6 +2538,9 @@ func (c *Commands) CmdPipelineBarrier(commandBuffer CommandBuffer, srcStageMask 
 		unsafe.Pointer(&imageMemoryBarrierCount),
 		unsafe.Pointer(&pImageMemoryBarriers),
 	}
+	if c.cmdPipelineBarrier == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdPipelineBarrier, c.cmdPipelineBarrier, nil, args[:])
 }
 
@@ -2222,6 +2552,9 @@ func (c *Commands) CmdBeginQuery(commandBuffer CommandBuffer, queryPool QueryPoo
 		unsafe.Pointer(&query),
 		unsafe.Pointer(&flags),
 	}
+	if c.cmdBeginQuery == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32U32, c.cmdBeginQuery, nil, args[:])
 }
 
@@ -2232,6 +2565,9 @@ func (c *Commands) CmdEndQuery(commandBuffer CommandBuffer, queryPool QueryPool,
 		unsafe.Pointer(&queryPool),
 		unsafe.Pointer(&query),
 	}
+	if c.cmdEndQuery == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdEndQuery, nil, args[:])
 }
 
@@ -2241,6 +2577,9 @@ func (c *Commands) CmdBeginConditionalRenderingEXT(commandBuffer CommandBuffer, 
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pConditionalRenderingBegin),
 	}
+	if c.cmdBeginConditionalRenderingEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginConditionalRenderingEXT, nil, args[:])
 }
 
@@ -2248,6 +2587,9 @@ func (c *Commands) CmdBeginConditionalRenderingEXT(commandBuffer CommandBuffer, 
 func (c *Commands) CmdEndConditionalRenderingEXT(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdEndConditionalRenderingEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdEndConditionalRenderingEXT, nil, args[:])
 }
@@ -2257,6 +2599,9 @@ func (c *Commands) CmdBeginCustomResolveEXT(commandBuffer CommandBuffer, pBeginC
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBeginCustomResolveInfo),
+	}
+	if c.cmdBeginCustomResolveEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginCustomResolveEXT, nil, args[:])
 }
@@ -2269,34 +2614,15 @@ func (c *Commands) CmdResetQueryPool(commandBuffer CommandBuffer, queryPool Quer
 		unsafe.Pointer(&firstQuery),
 		unsafe.Pointer(&queryCount),
 	}
+	if c.cmdResetQueryPool == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32U32, c.cmdResetQueryPool, nil, args[:])
 }
 
-// CmdWriteTimestamp wraps vkCmdWriteTimestamp.
-func (c *Commands) CmdWriteTimestamp(commandBuffer CommandBuffer, pipelineStage PipelineStageFlagBits, queryPool QueryPool, query uint32) {
-	args := [4]unsafe.Pointer{
-		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(&pipelineStage),
-		unsafe.Pointer(&queryPool),
-		unsafe.Pointer(&query),
-	}
-	_ = ffi.CallFunction(&SigVoidHandleU32HandleU32, c.cmdWriteTimestamp, nil, args[:])
-}
+// TODO: CmdWriteTimestamp - signature not yet supported: void(handle, u32, handle, u32)
 
-// CmdCopyQueryPoolResults wraps vkCmdCopyQueryPoolResults.
-func (c *Commands) CmdCopyQueryPoolResults(commandBuffer CommandBuffer, queryPool QueryPool, firstQuery, queryCount uint32, dstBuffer Buffer, dstOffset, stride uint64, flags QueryResultFlags) {
-	args := [8]unsafe.Pointer{
-		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(&queryPool),
-		unsafe.Pointer(&firstQuery),
-		unsafe.Pointer(&queryCount),
-		unsafe.Pointer(&dstBuffer),
-		unsafe.Pointer(&dstOffset),
-		unsafe.Pointer(&stride),
-		unsafe.Pointer(&flags),
-	}
-	_ = ffi.CallFunction(&SigVoidCmdCopyQueryPoolResults, c.cmdCopyQueryPoolResults, nil, args[:])
-}
+// TODO: CmdCopyQueryPoolResults - signature not yet supported: void(handle, handle, u32, u32, handle, u64, u64, u32)
 
 // TODO: CmdPushConstants - signature not yet supported: void(handle, handle, u32, u32, u32, ptr)
 
@@ -2307,6 +2633,9 @@ func (c *Commands) CmdBeginRenderPass(commandBuffer CommandBuffer, pRenderPassBe
 		unsafe.Pointer(&pRenderPassBegin),
 		unsafe.Pointer(&contents),
 	}
+	if c.cmdBeginRenderPass == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrU32, c.cmdBeginRenderPass, nil, args[:])
 }
 
@@ -2316,6 +2645,9 @@ func (c *Commands) CmdNextSubpass(commandBuffer CommandBuffer, contents SubpassC
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&contents),
 	}
+	if c.cmdNextSubpass == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdNextSubpass, nil, args[:])
 }
 
@@ -2323,6 +2655,9 @@ func (c *Commands) CmdNextSubpass(commandBuffer CommandBuffer, contents SubpassC
 func (c *Commands) CmdEndRenderPass(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdEndRenderPass == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdEndRenderPass, nil, args[:])
 }
@@ -2333,6 +2668,9 @@ func (c *Commands) CmdExecuteCommands(commandBuffer CommandBuffer, commandBuffer
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&commandBufferCount),
 		unsafe.Pointer(&pCommandBuffers),
+	}
+	if c.cmdExecuteCommands == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteCommands, nil, args[:])
 }
@@ -2346,7 +2684,9 @@ func (c *Commands) CreateAndroidSurfaceKHR(instance Instance, pCreateInfo *Andro
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAndroidSurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAndroidSurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2359,7 +2699,9 @@ func (c *Commands) CreateSurfaceOHOS(instance Instance, pCreateInfo *SurfaceCrea
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSurfaceOHOS, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSurfaceOHOS, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2371,7 +2713,9 @@ func (c *Commands) GetPhysicalDeviceDisplayPropertiesKHR(physicalDevice Physical
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2383,7 +2727,9 @@ func (c *Commands) GetPhysicalDeviceDisplayPlanePropertiesKHR(physicalDevice Phy
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlanePropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlanePropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2396,7 +2742,9 @@ func (c *Commands) GetDisplayPlaneSupportedDisplaysKHR(physicalDevice PhysicalDe
 		unsafe.Pointer(&pDisplayCount),
 		unsafe.Pointer(&pDisplays),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getDisplayPlaneSupportedDisplaysKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getDisplayPlaneSupportedDisplaysKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2409,7 +2757,9 @@ func (c *Commands) GetDisplayModePropertiesKHR(physicalDevice PhysicalDevice, di
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModePropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModePropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2424,7 +2774,9 @@ func (c *Commands) GetDisplayPlaneCapabilitiesKHR(physicalDevice PhysicalDevice,
 		unsafe.Pointer(&planeIndex),
 		unsafe.Pointer(&pCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getDisplayPlaneCapabilitiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getDisplayPlaneCapabilitiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2437,7 +2789,9 @@ func (c *Commands) CreateDisplayPlaneSurfaceKHR(instance Instance, pCreateInfo *
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDisplayPlaneSurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDisplayPlaneSurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2451,7 +2805,9 @@ func (c *Commands) CreateSharedSwapchainsKHR(device Device, swapchainCount uint3
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSwapchains),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createSharedSwapchainsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createSharedSwapchainsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2461,6 +2817,9 @@ func (c *Commands) DestroySurfaceKHR(instance Instance, surface SurfaceKHR, pAll
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroySurfaceKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySurfaceKHR, nil, args[:])
 }
@@ -2474,7 +2833,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceSupportKHR(physicalDevice PhysicalDev
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&pSupported),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32HandlePtr, c.getPhysicalDeviceSurfaceSupportKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32HandlePtr, c.getPhysicalDeviceSurfaceSupportKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2486,7 +2847,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice Physic
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&pSurfaceCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilitiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilitiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2499,7 +2862,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice PhysicalDev
 		unsafe.Pointer(&pSurfaceFormatCount),
 		unsafe.Pointer(&pSurfaceFormats),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfaceFormatsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfaceFormatsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2512,7 +2877,9 @@ func (c *Commands) GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice Physic
 		unsafe.Pointer(&pPresentModeCount),
 		unsafe.Pointer(&pPresentModes),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfacePresentModesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDeviceSurfacePresentModesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2525,7 +2892,9 @@ func (c *Commands) CreateSwapchainKHR(device Device, pCreateInfo *SwapchainCreat
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSwapchain),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSwapchainKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSwapchainKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2535,6 +2904,9 @@ func (c *Commands) DestroySwapchainKHR(device Device, swapchain SwapchainKHR, pA
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroySwapchainKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySwapchainKHR, nil, args[:])
 }
@@ -2548,7 +2920,9 @@ func (c *Commands) GetSwapchainImagesKHR(device Device, swapchain SwapchainKHR, 
 		unsafe.Pointer(&pSwapchainImageCount),
 		unsafe.Pointer(&pSwapchainImages),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainImagesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainImagesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2563,7 +2937,9 @@ func (c *Commands) AcquireNextImageKHR(device Device, swapchain SwapchainKHR, ti
 		unsafe.Pointer(&fence),
 		unsafe.Pointer(&pImageIndex),
 	}
-	_ = ffi.CallFunction(&SigResultAcquireNextImage, c.acquireNextImageKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultAcquireNextImage, c.acquireNextImageKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2574,7 +2950,9 @@ func (c *Commands) QueuePresentKHR(queue Queue, pPresentInfo *PresentInfoKHR) Re
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&pPresentInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.queuePresentKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.queuePresentKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2587,7 +2965,9 @@ func (c *Commands) CreateViSurfaceNN(instance Instance, pCreateInfo *ViSurfaceCr
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createViSurfaceNN, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createViSurfaceNN, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2600,7 +2980,9 @@ func (c *Commands) CreateWaylandSurfaceKHR(instance Instance, pCreateInfo *Wayla
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWaylandSurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWaylandSurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2615,7 +2997,9 @@ func (c *Commands) CreateWin32SurfaceKHR(instance Instance, pCreateInfo *Win32Su
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWin32SurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createWin32SurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2630,7 +3014,9 @@ func (c *Commands) CreateXlibSurfaceKHR(instance Instance, pCreateInfo *XlibSurf
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXlibSurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXlibSurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2645,7 +3031,9 @@ func (c *Commands) CreateXcbSurfaceKHR(instance Instance, pCreateInfo *XcbSurfac
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXcbSurfaceKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createXcbSurfaceKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2660,7 +3048,9 @@ func (c *Commands) CreateDirectFBSurfaceEXT(instance Instance, pCreateInfo *Dire
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDirectFBSurfaceEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDirectFBSurfaceEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2675,7 +3065,9 @@ func (c *Commands) CreateImagePipeSurfaceFUCHSIA(instance Instance, pCreateInfo 
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImagePipeSurfaceFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createImagePipeSurfaceFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2688,7 +3080,9 @@ func (c *Commands) CreateStreamDescriptorSurfaceGGP(instance Instance, pCreateIn
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createStreamDescriptorSurfaceGGP, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createStreamDescriptorSurfaceGGP, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2701,7 +3095,9 @@ func (c *Commands) CreateScreenSurfaceQNX(instance Instance, pCreateInfo *Screen
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createScreenSurfaceQNX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createScreenSurfaceQNX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2716,7 +3112,9 @@ func (c *Commands) CreateDebugReportCallbackEXT(instance Instance, pCreateInfo *
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pCallback),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugReportCallbackEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugReportCallbackEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2726,6 +3124,9 @@ func (c *Commands) DestroyDebugReportCallbackEXT(instance Instance, callback Deb
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&callback),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDebugReportCallbackEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDebugReportCallbackEXT, nil, args[:])
 }
@@ -2739,7 +3140,9 @@ func (c *Commands) DebugMarkerSetObjectNameEXT(device Device, pNameInfo *DebugMa
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pNameInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectNameEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectNameEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2750,7 +3153,9 @@ func (c *Commands) DebugMarkerSetObjectTagEXT(device Device, pTagInfo *DebugMark
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pTagInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectTagEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.debugMarkerSetObjectTagEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2760,6 +3165,9 @@ func (c *Commands) CmdDebugMarkerBeginEXT(commandBuffer CommandBuffer, pMarkerIn
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pMarkerInfo),
 	}
+	if c.cmdDebugMarkerBeginEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDebugMarkerBeginEXT, nil, args[:])
 }
 
@@ -2767,6 +3175,9 @@ func (c *Commands) CmdDebugMarkerBeginEXT(commandBuffer CommandBuffer, pMarkerIn
 func (c *Commands) CmdDebugMarkerEndEXT(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdDebugMarkerEndEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdDebugMarkerEndEXT, nil, args[:])
 }
@@ -2776,6 +3187,9 @@ func (c *Commands) CmdDebugMarkerInsertEXT(commandBuffer CommandBuffer, pMarkerI
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pMarkerInfo),
+	}
+	if c.cmdDebugMarkerInsertEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDebugMarkerInsertEXT, nil, args[:])
 }
@@ -2791,7 +3205,9 @@ func (c *Commands) GetMemoryWin32HandleNV(device Device, memory DeviceMemory, ha
 		unsafe.Pointer(&handleType),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getMemoryWin32HandleNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getMemoryWin32HandleNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2802,6 +3218,9 @@ func (c *Commands) CmdExecuteGeneratedCommandsNV(commandBuffer CommandBuffer, is
 		unsafe.Pointer(&isPreprocessed),
 		unsafe.Pointer(&pGeneratedCommandsInfo),
 	}
+	if c.cmdExecuteGeneratedCommandsNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteGeneratedCommandsNV, nil, args[:])
 }
 
@@ -2810,6 +3229,9 @@ func (c *Commands) CmdPreprocessGeneratedCommandsNV(commandBuffer CommandBuffer,
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pGeneratedCommandsInfo),
+	}
+	if c.cmdPreprocessGeneratedCommandsNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPreprocessGeneratedCommandsNV, nil, args[:])
 }
@@ -2823,6 +3245,9 @@ func (c *Commands) GetGeneratedCommandsMemoryRequirementsNV(device Device, pInfo
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
+	if c.getGeneratedCommandsMemoryRequirementsNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getGeneratedCommandsMemoryRequirementsNV, nil, args[:])
 }
 
@@ -2835,7 +3260,9 @@ func (c *Commands) CreateIndirectCommandsLayoutNV(device Device, pCreateInfo *In
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pIndirectCommandsLayout),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2846,6 +3273,9 @@ func (c *Commands) DestroyIndirectCommandsLayoutNV(device Device, indirectComman
 		unsafe.Pointer(&indirectCommandsLayout),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyIndirectCommandsLayoutNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectCommandsLayoutNV, nil, args[:])
 }
 
@@ -2855,6 +3285,9 @@ func (c *Commands) CmdExecuteGeneratedCommandsEXT(commandBuffer CommandBuffer, i
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&isPreprocessed),
 		unsafe.Pointer(&pGeneratedCommandsInfo),
+	}
+	if c.cmdExecuteGeneratedCommandsEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdExecuteGeneratedCommandsEXT, nil, args[:])
 }
@@ -2868,6 +3301,9 @@ func (c *Commands) GetGeneratedCommandsMemoryRequirementsEXT(device Device, pInf
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
+	if c.getGeneratedCommandsMemoryRequirementsEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getGeneratedCommandsMemoryRequirementsEXT, nil, args[:])
 }
 
@@ -2880,7 +3316,9 @@ func (c *Commands) CreateIndirectCommandsLayoutEXT(device Device, pCreateInfo *I
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pIndirectCommandsLayout),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectCommandsLayoutEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2890,6 +3328,9 @@ func (c *Commands) DestroyIndirectCommandsLayoutEXT(device Device, indirectComma
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectCommandsLayout),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyIndirectCommandsLayoutEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectCommandsLayoutEXT, nil, args[:])
 }
@@ -2903,7 +3344,9 @@ func (c *Commands) CreateIndirectExecutionSetEXT(device Device, pCreateInfo *Ind
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pIndirectExecutionSet),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectExecutionSetEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIndirectExecutionSetEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2913,6 +3356,9 @@ func (c *Commands) DestroyIndirectExecutionSetEXT(device Device, indirectExecuti
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&indirectExecutionSet),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyIndirectExecutionSetEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyIndirectExecutionSetEXT, nil, args[:])
 }
@@ -2925,6 +3371,9 @@ func (c *Commands) UpdateIndirectExecutionSetPipelineEXT(device Device, indirect
 		unsafe.Pointer(&executionSetWriteCount),
 		unsafe.Pointer(&pExecutionSetWrites),
 	}
+	if c.updateIndirectExecutionSetPipelineEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.updateIndirectExecutionSetPipelineEXT, nil, args[:])
 }
 
@@ -2936,6 +3385,9 @@ func (c *Commands) UpdateIndirectExecutionSetShaderEXT(device Device, indirectEx
 		unsafe.Pointer(&executionSetWriteCount),
 		unsafe.Pointer(&pExecutionSetWrites),
 	}
+	if c.updateIndirectExecutionSetShaderEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.updateIndirectExecutionSetShaderEXT, nil, args[:])
 }
 
@@ -2944,6 +3396,9 @@ func (c *Commands) GetPhysicalDeviceFeatures2(physicalDevice PhysicalDevice, pFe
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pFeatures),
+	}
+	if c.getPhysicalDeviceFeatures2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceFeatures2, nil, args[:])
 }
@@ -2954,6 +3409,9 @@ func (c *Commands) GetPhysicalDeviceProperties2(physicalDevice PhysicalDevice, p
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pProperties),
 	}
+	if c.getPhysicalDeviceProperties2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceProperties2, nil, args[:])
 }
 
@@ -2963,6 +3421,9 @@ func (c *Commands) GetPhysicalDeviceFormatProperties2(physicalDevice PhysicalDev
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&pFormatProperties),
+	}
+	if c.getPhysicalDeviceFormatProperties2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceFormatProperties2, nil, args[:])
 }
@@ -2975,7 +3436,9 @@ func (c *Commands) GetPhysicalDeviceImageFormatProperties2(physicalDevice Physic
 		unsafe.Pointer(&pImageFormatInfo),
 		unsafe.Pointer(&pImageFormatProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceImageFormatProperties2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceImageFormatProperties2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -2986,6 +3449,9 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyProperties2(physicalDevice Physic
 		unsafe.Pointer(&pQueueFamilyPropertyCount),
 		unsafe.Pointer(&pQueueFamilyProperties),
 	}
+	if c.getPhysicalDeviceQueueFamilyProperties2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyProperties2, nil, args[:])
 }
 
@@ -2994,6 +3460,9 @@ func (c *Commands) GetPhysicalDeviceMemoryProperties2(physicalDevice PhysicalDev
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pMemoryProperties),
+	}
+	if c.getPhysicalDeviceMemoryProperties2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.getPhysicalDeviceMemoryProperties2, nil, args[:])
 }
@@ -3009,6 +3478,9 @@ func (c *Commands) TrimCommandPool(device Device, commandPool CommandPool, flags
 		unsafe.Pointer(&commandPool),
 		unsafe.Pointer(&flags),
 	}
+	if c.trimCommandPool == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.trimCommandPool, nil, args[:])
 }
 
@@ -3018,6 +3490,9 @@ func (c *Commands) GetPhysicalDeviceExternalBufferProperties(physicalDevice Phys
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pExternalBufferInfo),
 		unsafe.Pointer(&pExternalBufferProperties),
+	}
+	if c.getPhysicalDeviceExternalBufferProperties == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalBufferProperties, nil, args[:])
 }
@@ -3030,7 +3505,9 @@ func (c *Commands) GetMemoryWin32HandleKHR(device Device, pGetWin32HandleInfo *M
 		unsafe.Pointer(&pGetWin32HandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryWin32HandleKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryWin32HandleKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3044,7 +3521,9 @@ func (c *Commands) GetMemoryFdKHR(device Device, pGetFdInfo *MemoryGetFdInfoKHR,
 		unsafe.Pointer(&pGetFdInfo),
 		unsafe.Pointer(&pFd),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryFdKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryFdKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3058,7 +3537,9 @@ func (c *Commands) GetMemoryZirconHandleFUCHSIA(device Device, pGetZirconHandleI
 		unsafe.Pointer(&pGetZirconHandleInfo),
 		unsafe.Pointer(&pZirconHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3072,7 +3553,9 @@ func (c *Commands) GetMemoryRemoteAddressNV(device Device, pMemoryGetRemoteAddre
 		unsafe.Pointer(&pMemoryGetRemoteAddressInfo),
 		unsafe.Pointer(&pAddress),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryRemoteAddressNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryRemoteAddressNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3084,7 +3567,9 @@ func (c *Commands) GetMemorySciBufNV(device Device, pGetSciBufInfo *MemoryGetSci
 		unsafe.Pointer(&pGetSciBufInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemorySciBufNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemorySciBufNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3099,6 +3584,9 @@ func (c *Commands) GetPhysicalDeviceExternalSemaphoreProperties(physicalDevice P
 		unsafe.Pointer(&pExternalSemaphoreInfo),
 		unsafe.Pointer(&pExternalSemaphoreProperties),
 	}
+	if c.getPhysicalDeviceExternalSemaphoreProperties == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalSemaphoreProperties, nil, args[:])
 }
 
@@ -3110,7 +3598,9 @@ func (c *Commands) GetSemaphoreWin32HandleKHR(device Device, pGetWin32HandleInfo
 		unsafe.Pointer(&pGetWin32HandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3121,7 +3611,9 @@ func (c *Commands) ImportSemaphoreWin32HandleKHR(device Device, pImportSemaphore
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportSemaphoreWin32HandleInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreWin32HandleKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3133,7 +3625,9 @@ func (c *Commands) GetSemaphoreFdKHR(device Device, pGetFdInfo *SemaphoreGetFdIn
 		unsafe.Pointer(&pGetFdInfo),
 		unsafe.Pointer(&pFd),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreFdKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreFdKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3144,7 +3638,9 @@ func (c *Commands) ImportSemaphoreFdKHR(device Device, pImportSemaphoreFdInfo *I
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportSemaphoreFdInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreFdKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreFdKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3156,7 +3652,9 @@ func (c *Commands) GetSemaphoreZirconHandleFUCHSIA(device Device, pGetZirconHand
 		unsafe.Pointer(&pGetZirconHandleInfo),
 		unsafe.Pointer(&pZirconHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3167,7 +3665,9 @@ func (c *Commands) ImportSemaphoreZirconHandleFUCHSIA(device Device, pImportSema
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportSemaphoreZirconHandleInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreZirconHandleFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3177,6 +3677,9 @@ func (c *Commands) GetPhysicalDeviceExternalFenceProperties(physicalDevice Physi
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pExternalFenceInfo),
 		unsafe.Pointer(&pExternalFenceProperties),
+	}
+	if c.getPhysicalDeviceExternalFenceProperties == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalFenceProperties, nil, args[:])
 }
@@ -3189,7 +3692,9 @@ func (c *Commands) GetFenceWin32HandleKHR(device Device, pGetWin32HandleInfo *Fe
 		unsafe.Pointer(&pGetWin32HandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceWin32HandleKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceWin32HandleKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3200,7 +3705,9 @@ func (c *Commands) ImportFenceWin32HandleKHR(device Device, pImportFenceWin32Han
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportFenceWin32HandleInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceWin32HandleKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importFenceWin32HandleKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3212,7 +3719,9 @@ func (c *Commands) GetFenceFdKHR(device Device, pGetFdInfo *FenceGetFdInfoKHR, p
 		unsafe.Pointer(&pGetFdInfo),
 		unsafe.Pointer(&pFd),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceFdKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceFdKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3223,7 +3732,9 @@ func (c *Commands) ImportFenceFdKHR(device Device, pImportFenceFdInfo *ImportFen
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportFenceFdInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceFdKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importFenceFdKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3235,7 +3746,9 @@ func (c *Commands) GetFenceSciSyncFenceNV(device Device, pGetSciSyncHandleInfo *
 		unsafe.Pointer(&pGetSciSyncHandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3247,7 +3760,9 @@ func (c *Commands) GetFenceSciSyncObjNV(device Device, pGetSciSyncHandleInfo *Fe
 		unsafe.Pointer(&pGetSciSyncHandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncObjNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getFenceSciSyncObjNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3258,7 +3773,9 @@ func (c *Commands) ImportFenceSciSyncFenceNV(device Device, pImportFenceSciSyncI
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportFenceSciSyncInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncFenceNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3269,7 +3786,9 @@ func (c *Commands) ImportFenceSciSyncObjNV(device Device, pImportFenceSciSyncInf
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportFenceSciSyncInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncObjNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importFenceSciSyncObjNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3281,7 +3800,9 @@ func (c *Commands) GetSemaphoreSciSyncObjNV(device Device, pGetSciSyncInfo *Sema
 		unsafe.Pointer(&pGetSciSyncInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3292,7 +3813,9 @@ func (c *Commands) ImportSemaphoreSciSyncObjNV(device Device, pImportSemaphoreSc
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pImportSemaphoreSciSyncInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.importSemaphoreSciSyncObjNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3307,7 +3830,9 @@ func (c *Commands) CreateSemaphoreSciSyncPoolNV(device Device, pCreateInfo *Sema
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSemaphorePool),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphoreSciSyncPoolNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSemaphoreSciSyncPoolNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3317,6 +3842,9 @@ func (c *Commands) DestroySemaphoreSciSyncPoolNV(device Device, semaphorePool Se
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&semaphorePool),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroySemaphoreSciSyncPoolNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySemaphoreSciSyncPoolNV, nil, args[:])
 }
@@ -3328,7 +3856,9 @@ func (c *Commands) ReleaseDisplayEXT(physicalDevice PhysicalDevice, display Disp
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&display),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.releaseDisplayEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.releaseDisplayEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3343,7 +3873,9 @@ func (c *Commands) AcquireWinrtDisplayNV(physicalDevice PhysicalDevice, display 
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&display),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.acquireWinrtDisplayNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.acquireWinrtDisplayNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3355,7 +3887,9 @@ func (c *Commands) GetWinrtDisplayNV(physicalDevice PhysicalDevice, deviceRelati
 		unsafe.Pointer(&deviceRelativeId),
 		unsafe.Pointer(&pDisplay),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.getWinrtDisplayNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.getWinrtDisplayNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3367,7 +3901,9 @@ func (c *Commands) DisplayPowerControlEXT(device Device, display DisplayKHR, pDi
 		unsafe.Pointer(&display),
 		unsafe.Pointer(&pDisplayPowerInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.displayPowerControlEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.displayPowerControlEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3380,7 +3916,9 @@ func (c *Commands) RegisterDeviceEventEXT(device Device, pDeviceEventInfo *Devic
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pFence),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.registerDeviceEventEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.registerDeviceEventEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3396,7 +3934,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice Physi
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&pSurfaceCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilities2EXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getPhysicalDeviceSurfaceCapabilities2EXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3408,7 +3948,9 @@ func (c *Commands) EnumeratePhysicalDeviceGroups(instance Instance, pPhysicalDev
 		unsafe.Pointer(&pPhysicalDeviceGroupCount),
 		unsafe.Pointer(&pPhysicalDeviceGroupProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDeviceGroups, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.enumeratePhysicalDeviceGroups, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3422,7 +3964,9 @@ func (c *Commands) BindBufferMemory2(device Device, bindInfoCount uint32, pBindI
 		unsafe.Pointer(&bindInfoCount),
 		unsafe.Pointer(&pBindInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindBufferMemory2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.bindBufferMemory2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3434,7 +3978,9 @@ func (c *Commands) BindImageMemory2(device Device, bindInfoCount uint32, pBindIn
 		unsafe.Pointer(&bindInfoCount),
 		unsafe.Pointer(&pBindInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindImageMemory2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.bindImageMemory2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3443,6 +3989,9 @@ func (c *Commands) CmdSetDeviceMask(commandBuffer CommandBuffer, deviceMask uint
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&deviceMask),
+	}
+	if c.cmdSetDeviceMask == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDeviceMask, nil, args[:])
 }
@@ -3454,7 +4003,9 @@ func (c *Commands) GetDeviceGroupPresentCapabilitiesKHR(device Device, pDeviceGr
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pDeviceGroupPresentCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.getDeviceGroupPresentCapabilitiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.getDeviceGroupPresentCapabilitiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3466,7 +4017,9 @@ func (c *Commands) GetDeviceGroupSurfacePresentModesKHR(device Device, surface S
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&pModes),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceGroupSurfacePresentModesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getDeviceGroupSurfacePresentModesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3478,7 +4031,9 @@ func (c *Commands) AcquireNextImage2KHR(device Device, pAcquireInfo *AcquireNext
 		unsafe.Pointer(&pAcquireInfo),
 		unsafe.Pointer(&pImageIndex),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.acquireNextImage2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.acquireNextImage2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3493,7 +4048,9 @@ func (c *Commands) GetPhysicalDevicePresentRectanglesKHR(physicalDevice Physical
 		unsafe.Pointer(&pRectCount),
 		unsafe.Pointer(&pRects),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDevicePresentRectanglesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPhysicalDevicePresentRectanglesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3506,7 +4063,9 @@ func (c *Commands) CreateDescriptorUpdateTemplate(device Device, pCreateInfo *De
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pDescriptorUpdateTemplate),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorUpdateTemplate, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDescriptorUpdateTemplate, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3516,6 +4075,9 @@ func (c *Commands) DestroyDescriptorUpdateTemplate(device Device, descriptorUpda
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorUpdateTemplate),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDescriptorUpdateTemplate == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDescriptorUpdateTemplate, nil, args[:])
 }
@@ -3531,6 +4093,9 @@ func (c *Commands) CmdPushDescriptorSetWithTemplate(commandBuffer CommandBuffer,
 		unsafe.Pointer(&set),
 		unsafe.Pointer(&pData),
 	}
+	if c.cmdPushDescriptorSetWithTemplate == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdCopyBuffer, c.cmdPushDescriptorSetWithTemplate, nil, args[:])
 }
 
@@ -3543,7 +4108,9 @@ func (c *Commands) GetSwapchainStatusKHR(device Device, swapchain SwapchainKHR) 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.getSwapchainStatusKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.getSwapchainStatusKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3555,7 +4122,9 @@ func (c *Commands) GetRefreshCycleDurationGOOGLE(device Device, swapchain Swapch
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pDisplayTimingProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getRefreshCycleDurationGOOGLE, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getRefreshCycleDurationGOOGLE, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3568,7 +4137,9 @@ func (c *Commands) GetPastPresentationTimingGOOGLE(device Device, swapchain Swap
 		unsafe.Pointer(&pPresentationTimingCount),
 		unsafe.Pointer(&pPresentationTimings),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPastPresentationTimingGOOGLE, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getPastPresentationTimingGOOGLE, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3581,7 +4152,9 @@ func (c *Commands) CreateIOSSurfaceMVK(instance Instance, pCreateInfo *IOSSurfac
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIOSSurfaceMVK, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createIOSSurfaceMVK, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3594,7 +4167,9 @@ func (c *Commands) CreateMacOSSurfaceMVK(instance Instance, pCreateInfo *MacOSSu
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMacOSSurfaceMVK, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMacOSSurfaceMVK, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3607,7 +4182,9 @@ func (c *Commands) CreateMetalSurfaceEXT(instance Instance, pCreateInfo *MetalSu
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMetalSurfaceEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMetalSurfaceEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3618,6 +4195,9 @@ func (c *Commands) CmdSetViewportWScalingNV(commandBuffer CommandBuffer, firstVi
 		unsafe.Pointer(&firstViewport),
 		unsafe.Pointer(&viewportCount),
 		unsafe.Pointer(&pViewportWScalings),
+	}
+	if c.cmdSetViewportWScalingNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportWScalingNV, nil, args[:])
 }
@@ -3630,6 +4210,9 @@ func (c *Commands) CmdSetDiscardRectangleEXT(commandBuffer CommandBuffer, firstD
 		unsafe.Pointer(&discardRectangleCount),
 		unsafe.Pointer(&pDiscardRectangles),
 	}
+	if c.cmdSetDiscardRectangleEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetDiscardRectangleEXT, nil, args[:])
 }
 
@@ -3638,6 +4221,9 @@ func (c *Commands) CmdSetDiscardRectangleEnableEXT(commandBuffer CommandBuffer, 
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&discardRectangleEnable),
+	}
+	if c.cmdSetDiscardRectangleEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDiscardRectangleEnableEXT, nil, args[:])
 }
@@ -3648,6 +4234,9 @@ func (c *Commands) CmdSetDiscardRectangleModeEXT(commandBuffer CommandBuffer, di
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&discardRectangleMode),
 	}
+	if c.cmdSetDiscardRectangleModeEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetDiscardRectangleModeEXT, nil, args[:])
 }
 
@@ -3656,6 +4245,9 @@ func (c *Commands) CmdSetSampleLocationsEXT(commandBuffer CommandBuffer, pSample
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pSampleLocationsInfo),
+	}
+	if c.cmdSetSampleLocationsEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetSampleLocationsEXT, nil, args[:])
 }
@@ -3666,6 +4258,9 @@ func (c *Commands) GetPhysicalDeviceMultisamplePropertiesEXT(physicalDevice Phys
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&samples),
 		unsafe.Pointer(&pMultisampleProperties),
+	}
+	if c.getPhysicalDeviceMultisamplePropertiesEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.getPhysicalDeviceMultisamplePropertiesEXT, nil, args[:])
 }
@@ -3678,7 +4273,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice Physi
 		unsafe.Pointer(&pSurfaceInfo),
 		unsafe.Pointer(&pSurfaceCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSurfaceCapabilities2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSurfaceCapabilities2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3691,7 +4288,9 @@ func (c *Commands) GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice PhysicalDe
 		unsafe.Pointer(&pSurfaceFormatCount),
 		unsafe.Pointer(&pSurfaceFormats),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfaceFormats2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfaceFormats2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3703,7 +4302,9 @@ func (c *Commands) GetPhysicalDeviceDisplayProperties2KHR(physicalDevice Physica
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayProperties2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayProperties2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3715,7 +4316,9 @@ func (c *Commands) GetPhysicalDeviceDisplayPlaneProperties2KHR(physicalDevice Ph
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlaneProperties2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceDisplayPlaneProperties2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3728,7 +4331,9 @@ func (c *Commands) GetDisplayModeProperties2KHR(physicalDevice PhysicalDevice, d
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModeProperties2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getDisplayModeProperties2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3740,7 +4345,9 @@ func (c *Commands) GetDisplayPlaneCapabilities2KHR(physicalDevice PhysicalDevice
 		unsafe.Pointer(&pDisplayPlaneInfo),
 		unsafe.Pointer(&pCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDisplayPlaneCapabilities2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getDisplayPlaneCapabilities2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3751,6 +4358,9 @@ func (c *Commands) GetBufferMemoryRequirements2(device Device, pInfo *BufferMemo
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
+	if c.getBufferMemoryRequirements2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getBufferMemoryRequirements2, nil, args[:])
 }
 
@@ -3760,6 +4370,9 @@ func (c *Commands) GetImageMemoryRequirements2(device Device, pInfo *ImageMemory
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getImageMemoryRequirements2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getImageMemoryRequirements2, nil, args[:])
 }
@@ -3773,6 +4386,9 @@ func (c *Commands) GetDeviceBufferMemoryRequirements(device Device, pInfo *Devic
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
+	if c.getDeviceBufferMemoryRequirements == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceBufferMemoryRequirements, nil, args[:])
 }
 
@@ -3782,6 +4398,9 @@ func (c *Commands) GetDeviceImageMemoryRequirements(device Device, pInfo *Device
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getDeviceImageMemoryRequirements == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceImageMemoryRequirements, nil, args[:])
 }
@@ -3797,7 +4416,9 @@ func (c *Commands) CreateSamplerYcbcrConversion(device Device, pCreateInfo *Samp
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pYcbcrConversion),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSamplerYcbcrConversion, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createSamplerYcbcrConversion, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3808,6 +4429,9 @@ func (c *Commands) DestroySamplerYcbcrConversion(device Device, ycbcrConversion 
 		unsafe.Pointer(&ycbcrConversion),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroySamplerYcbcrConversion == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroySamplerYcbcrConversion, nil, args[:])
 }
 
@@ -3817,6 +4441,9 @@ func (c *Commands) GetDeviceQueue2(device Device, pQueueInfo *DeviceQueueInfo2, 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pQueueInfo),
 		unsafe.Pointer(&pQueue),
+	}
+	if c.getDeviceQueue2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceQueue2, nil, args[:])
 }
@@ -3830,7 +4457,9 @@ func (c *Commands) CreateValidationCacheEXT(device Device, pCreateInfo *Validati
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pValidationCache),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createValidationCacheEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createValidationCacheEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3840,6 +4469,9 @@ func (c *Commands) DestroyValidationCacheEXT(device Device, validationCache Vali
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&validationCache),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyValidationCacheEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyValidationCacheEXT, nil, args[:])
 }
@@ -3853,7 +4485,9 @@ func (c *Commands) GetValidationCacheDataEXT(device Device, validationCache Vali
 		unsafe.Pointer(&pDataSize),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getValidationCacheDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getValidationCacheDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3866,7 +4500,9 @@ func (c *Commands) MergeValidationCachesEXT(device Device, dstCache ValidationCa
 		unsafe.Pointer(&srcCacheCount),
 		unsafe.Pointer(&pSrcCaches),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergeValidationCachesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.mergeValidationCachesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3876,6 +4512,9 @@ func (c *Commands) GetDescriptorSetLayoutSupport(device Device, pCreateInfo *Des
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCreateInfo),
 		unsafe.Pointer(&pSupport),
+	}
+	if c.getDescriptorSetLayoutSupport == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDescriptorSetLayoutSupport, nil, args[:])
 }
@@ -3897,6 +4536,9 @@ func (c *Commands) SetLocalDimmingAMD(device Device, swapChain SwapchainKHR, loc
 		unsafe.Pointer(&swapChain),
 		unsafe.Pointer(&localDimmingEnable),
 	}
+	if c.setLocalDimmingAMD == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.setLocalDimmingAMD, nil, args[:])
 }
 
@@ -3908,7 +4550,9 @@ func (c *Commands) GetPhysicalDeviceCalibrateableTimeDomainsKHR(physicalDevice P
 		unsafe.Pointer(&pTimeDomainCount),
 		unsafe.Pointer(&pTimeDomains),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCalibrateableTimeDomainsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCalibrateableTimeDomainsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3922,7 +4566,9 @@ func (c *Commands) GetCalibratedTimestampsKHR(device Device, timestampCount uint
 		unsafe.Pointer(&pTimestamps),
 		unsafe.Pointer(&pMaxDeviation),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.getCalibratedTimestampsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.getCalibratedTimestampsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3933,7 +4579,9 @@ func (c *Commands) SetDebugUtilsObjectNameEXT(device Device, pNameInfo *DebugUti
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pNameInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectNameEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectNameEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3944,7 +4592,9 @@ func (c *Commands) SetDebugUtilsObjectTagEXT(device Device, pTagInfo *DebugUtils
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pTagInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectTagEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.setDebugUtilsObjectTagEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -3954,6 +4604,9 @@ func (c *Commands) QueueBeginDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugUt
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&pLabelInfo),
 	}
+	if c.queueBeginDebugUtilsLabelEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueBeginDebugUtilsLabelEXT, nil, args[:])
 }
 
@@ -3961,6 +4614,9 @@ func (c *Commands) QueueBeginDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugUt
 func (c *Commands) QueueEndDebugUtilsLabelEXT(queue Queue) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&queue),
+	}
+	if c.queueEndDebugUtilsLabelEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.queueEndDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3971,6 +4627,9 @@ func (c *Commands) QueueInsertDebugUtilsLabelEXT(queue Queue, pLabelInfo *DebugU
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&pLabelInfo),
 	}
+	if c.queueInsertDebugUtilsLabelEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueInsertDebugUtilsLabelEXT, nil, args[:])
 }
 
@@ -3980,6 +4639,9 @@ func (c *Commands) CmdBeginDebugUtilsLabelEXT(commandBuffer CommandBuffer, pLabe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pLabelInfo),
 	}
+	if c.cmdBeginDebugUtilsLabelEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginDebugUtilsLabelEXT, nil, args[:])
 }
 
@@ -3987,6 +4649,9 @@ func (c *Commands) CmdBeginDebugUtilsLabelEXT(commandBuffer CommandBuffer, pLabe
 func (c *Commands) CmdEndDebugUtilsLabelEXT(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdEndDebugUtilsLabelEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdEndDebugUtilsLabelEXT, nil, args[:])
 }
@@ -3996,6 +4661,9 @@ func (c *Commands) CmdInsertDebugUtilsLabelEXT(commandBuffer CommandBuffer, pLab
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pLabelInfo),
+	}
+	if c.cmdInsertDebugUtilsLabelEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdInsertDebugUtilsLabelEXT, nil, args[:])
 }
@@ -4009,7 +4677,9 @@ func (c *Commands) CreateDebugUtilsMessengerEXT(instance Instance, pCreateInfo *
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pMessenger),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugUtilsMessengerEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDebugUtilsMessengerEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4019,6 +4689,9 @@ func (c *Commands) DestroyDebugUtilsMessengerEXT(instance Instance, messenger De
 		unsafe.Pointer(&instance),
 		unsafe.Pointer(&messenger),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDebugUtilsMessengerEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDebugUtilsMessengerEXT, nil, args[:])
 }
@@ -4030,6 +4703,9 @@ func (c *Commands) SubmitDebugUtilsMessageEXT(instance Instance, messageSeverity
 		unsafe.Pointer(&messageSeverity),
 		unsafe.Pointer(&messageTypes),
 		unsafe.Pointer(&pCallbackData),
+	}
+	if c.submitDebugUtilsMessageEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.submitDebugUtilsMessageEXT, nil, args[:])
 }
@@ -4043,7 +4719,9 @@ func (c *Commands) GetMemoryHostPointerPropertiesEXT(device Device, handleType E
 		unsafe.Pointer(&pHostPointer),
 		unsafe.Pointer(&pMemoryHostPointerProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryHostPointerPropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryHostPointerPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4058,7 +4736,9 @@ func (c *Commands) CreateRenderPass2(device Device, pCreateInfo *RenderPassCreat
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pRenderPass),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createRenderPass2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4068,6 +4748,9 @@ func (c *Commands) CmdBeginRenderPass2(commandBuffer CommandBuffer, pRenderPassB
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pRenderPassBegin),
 		unsafe.Pointer(&pSubpassBeginInfo),
+	}
+	if c.cmdBeginRenderPass2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.cmdBeginRenderPass2, nil, args[:])
 }
@@ -4079,6 +4762,9 @@ func (c *Commands) CmdNextSubpass2(commandBuffer CommandBuffer, pSubpassBeginInf
 		unsafe.Pointer(&pSubpassBeginInfo),
 		unsafe.Pointer(&pSubpassEndInfo),
 	}
+	if c.cmdNextSubpass2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.cmdNextSubpass2, nil, args[:])
 }
 
@@ -4087,6 +4773,9 @@ func (c *Commands) CmdEndRenderPass2(commandBuffer CommandBuffer, pSubpassEndInf
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pSubpassEndInfo),
+	}
+	if c.cmdEndRenderPass2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndRenderPass2, nil, args[:])
 }
@@ -4099,21 +4788,13 @@ func (c *Commands) GetSemaphoreCounterValue(device Device, semaphore Semaphore, 
 		unsafe.Pointer(&semaphore),
 		unsafe.Pointer(&pValue),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getSemaphoreCounterValue, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getSemaphoreCounterValue, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
-// WaitSemaphores wraps vkWaitSemaphores (Vulkan 1.2 core).
-func (c *Commands) WaitSemaphores(device Device, pWaitInfo *SemaphoreWaitInfo, timeout uint64) Result {
-	var result int32
-	args := [3]unsafe.Pointer{
-		unsafe.Pointer(&device),
-		unsafe.Pointer(&pWaitInfo),
-		unsafe.Pointer(&timeout),
-	}
-	_ = ffi.CallFunction(&SigResultHandlePtrU64, c.waitSemaphores, unsafe.Pointer(&result), args[:])
-	return Result(result)
-}
+// TODO: WaitSemaphores - signature not yet supported: Result(handle, ptr, u64)
 
 // SignalSemaphore wraps vkSignalSemaphore.
 func (c *Commands) SignalSemaphore(device Device, pSignalInfo *SemaphoreSignalInfo) Result {
@@ -4122,7 +4803,9 @@ func (c *Commands) SignalSemaphore(device Device, pSignalInfo *SemaphoreSignalIn
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pSignalInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.signalSemaphore, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.signalSemaphore, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4134,7 +4817,9 @@ func (c *Commands) GetAndroidHardwareBufferPropertiesANDROID(device Device, buff
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getAndroidHardwareBufferPropertiesANDROID, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getAndroidHardwareBufferPropertiesANDROID, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4146,7 +4831,9 @@ func (c *Commands) GetMemoryAndroidHardwareBufferANDROID(device Device, pInfo *M
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pBuffer),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryAndroidHardwareBufferANDROID, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryAndroidHardwareBufferANDROID, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4160,6 +4847,9 @@ func (c *Commands) CmdSetCheckpointNV(commandBuffer CommandBuffer, pCheckpointMa
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCheckpointMarker),
 	}
+	if c.cmdSetCheckpointNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetCheckpointNV, nil, args[:])
 }
 
@@ -4169,6 +4859,9 @@ func (c *Commands) GetQueueCheckpointDataNV(queue Queue, pCheckpointDataCount *u
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&pCheckpointDataCount),
 		unsafe.Pointer(&pCheckpointData),
+	}
+	if c.getQueueCheckpointDataNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getQueueCheckpointDataNV, nil, args[:])
 }
@@ -4184,6 +4877,9 @@ func (c *Commands) CmdBeginTransformFeedbackEXT(commandBuffer CommandBuffer, fir
 		unsafe.Pointer(&pCounterBuffers),
 		unsafe.Pointer(&pCounterBufferOffsets),
 	}
+	if c.cmdBeginTransformFeedbackEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdBeginTransformFeedbackEXT, nil, args[:])
 }
 
@@ -4195,6 +4891,9 @@ func (c *Commands) CmdEndTransformFeedbackEXT(commandBuffer CommandBuffer, first
 		unsafe.Pointer(&counterBufferCount),
 		unsafe.Pointer(&pCounterBuffers),
 		unsafe.Pointer(&pCounterBufferOffsets),
+	}
+	if c.cmdEndTransformFeedbackEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32PtrPtr, c.cmdEndTransformFeedbackEXT, nil, args[:])
 }
@@ -4209,6 +4908,9 @@ func (c *Commands) CmdEndQueryIndexedEXT(commandBuffer CommandBuffer, queryPool 
 		unsafe.Pointer(&query),
 		unsafe.Pointer(&index),
 	}
+	if c.cmdEndQueryIndexedEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32U32, c.cmdEndQueryIndexedEXT, nil, args[:])
 }
 
@@ -4222,6 +4924,9 @@ func (c *Commands) CmdSetExclusiveScissorNV(commandBuffer CommandBuffer, firstEx
 		unsafe.Pointer(&exclusiveScissorCount),
 		unsafe.Pointer(&pExclusiveScissors),
 	}
+	if c.cmdSetExclusiveScissorNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetExclusiveScissorNV, nil, args[:])
 }
 
@@ -4233,6 +4938,9 @@ func (c *Commands) CmdSetExclusiveScissorEnableNV(commandBuffer CommandBuffer, f
 		unsafe.Pointer(&exclusiveScissorCount),
 		unsafe.Pointer(&pExclusiveScissorEnables),
 	}
+	if c.cmdSetExclusiveScissorEnableNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetExclusiveScissorEnableNV, nil, args[:])
 }
 
@@ -4242,6 +4950,9 @@ func (c *Commands) CmdBindShadingRateImageNV(commandBuffer CommandBuffer, imageV
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&imageView),
 		unsafe.Pointer(&imageLayout),
+	}
+	if c.cmdBindShadingRateImageNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdBindShadingRateImageNV, nil, args[:])
 }
@@ -4254,6 +4965,9 @@ func (c *Commands) CmdSetViewportShadingRatePaletteNV(commandBuffer CommandBuffe
 		unsafe.Pointer(&viewportCount),
 		unsafe.Pointer(&pShadingRatePalettes),
 	}
+	if c.cmdSetViewportShadingRatePaletteNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportShadingRatePaletteNV, nil, args[:])
 }
 
@@ -4265,6 +4979,9 @@ func (c *Commands) CmdSetCoarseSampleOrderNV(commandBuffer CommandBuffer, sample
 		unsafe.Pointer(&customSampleOrderCount),
 		unsafe.Pointer(&pCustomSampleOrders),
 	}
+	if c.cmdSetCoarseSampleOrderNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.cmdSetCoarseSampleOrderNV, nil, args[:])
 }
 
@@ -4274,6 +4991,9 @@ func (c *Commands) CmdDrawMeshTasksNV(commandBuffer CommandBuffer, taskCount uin
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&taskCount),
 		unsafe.Pointer(&firstTask),
+	}
+	if c.cmdDrawMeshTasksNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32, c.cmdDrawMeshTasksNV, nil, args[:])
 }
@@ -4286,6 +5006,9 @@ func (c *Commands) CmdDrawMeshTasksIndirectNV(commandBuffer CommandBuffer, buffe
 		unsafe.Pointer(&offset),
 		unsafe.Pointer(&drawCount),
 		unsafe.Pointer(&stride),
+	}
+	if c.cmdDrawMeshTasksIndirectNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64U32U32, c.cmdDrawMeshTasksIndirectNV, nil, args[:])
 }
@@ -4300,6 +5023,9 @@ func (c *Commands) CmdDrawMeshTasksEXT(commandBuffer CommandBuffer, groupCountX 
 		unsafe.Pointer(&groupCountY),
 		unsafe.Pointer(&groupCountZ),
 	}
+	if c.cmdDrawMeshTasksEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32x3, c.cmdDrawMeshTasksEXT, nil, args[:])
 }
 
@@ -4311,6 +5037,9 @@ func (c *Commands) CmdDrawMeshTasksIndirectEXT(commandBuffer CommandBuffer, buff
 		unsafe.Pointer(&offset),
 		unsafe.Pointer(&drawCount),
 		unsafe.Pointer(&stride),
+	}
+	if c.cmdDrawMeshTasksIndirectEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU64U32U32, c.cmdDrawMeshTasksIndirectEXT, nil, args[:])
 }
@@ -4325,7 +5054,9 @@ func (c *Commands) CompileDeferredNV(device Device, pipeline Pipeline, shader ui
 		unsafe.Pointer(&pipeline),
 		unsafe.Pointer(&shader),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32, c.compileDeferredNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32, c.compileDeferredNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4338,7 +5069,9 @@ func (c *Commands) CreateAccelerationStructureNV(device Device, pCreateInfo *Acc
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pAccelerationStructure),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4348,6 +5081,9 @@ func (c *Commands) CmdBindInvocationMaskHUAWEI(commandBuffer CommandBuffer, imag
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&imageView),
 		unsafe.Pointer(&imageLayout),
+	}
+	if c.cmdBindInvocationMaskHUAWEI == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdBindInvocationMaskHUAWEI, nil, args[:])
 }
@@ -4359,6 +5095,9 @@ func (c *Commands) DestroyAccelerationStructureKHR(device Device, accelerationSt
 		unsafe.Pointer(&accelerationStructure),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyAccelerationStructureKHR == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyAccelerationStructureKHR, nil, args[:])
 }
 
@@ -4369,6 +5108,9 @@ func (c *Commands) DestroyAccelerationStructureNV(device Device, accelerationStr
 		unsafe.Pointer(&accelerationStructure),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyAccelerationStructureNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyAccelerationStructureNV, nil, args[:])
 }
 
@@ -4378,6 +5120,9 @@ func (c *Commands) GetAccelerationStructureMemoryRequirementsNV(device Device, p
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getAccelerationStructureMemoryRequirementsNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getAccelerationStructureMemoryRequirementsNV, nil, args[:])
 }
@@ -4390,7 +5135,9 @@ func (c *Commands) BindAccelerationStructureMemoryNV(device Device, bindInfoCoun
 		unsafe.Pointer(&bindInfoCount),
 		unsafe.Pointer(&pBindInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindAccelerationStructureMemoryNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.bindAccelerationStructureMemoryNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4401,6 +5148,9 @@ func (c *Commands) CmdCopyAccelerationStructureKHR(commandBuffer CommandBuffer, 
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyAccelerationStructureKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyAccelerationStructureKHR, nil, args[:])
 }
@@ -4413,7 +5163,9 @@ func (c *Commands) CopyAccelerationStructureKHR(device Device, deferredOperation
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4422,6 +5174,9 @@ func (c *Commands) CmdCopyAccelerationStructureToMemoryKHR(commandBuffer Command
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyAccelerationStructureToMemoryKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyAccelerationStructureToMemoryKHR, nil, args[:])
 }
@@ -4434,7 +5189,9 @@ func (c *Commands) CopyAccelerationStructureToMemoryKHR(device Device, deferredO
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureToMemoryKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyAccelerationStructureToMemoryKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4443,6 +5200,9 @@ func (c *Commands) CmdCopyMemoryToAccelerationStructureKHR(commandBuffer Command
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyMemoryToAccelerationStructureKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToAccelerationStructureKHR, nil, args[:])
 }
@@ -4455,7 +5215,9 @@ func (c *Commands) CopyMemoryToAccelerationStructureKHR(device Device, deferredO
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToAccelerationStructureKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4488,7 +5250,9 @@ func (c *Commands) CreateRayTracingPipelinesNV(device Device, pipelineCache Pipe
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelines),
 	}
-	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createRayTracingPipelinesNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultCreatePipelines, c.createRayTracingPipelinesNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4502,7 +5266,9 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixPropertiesNV(physicalDevice
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4517,6 +5283,9 @@ func (c *Commands) GetClusterAccelerationStructureBuildSizesNV(device Device, pI
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pSizeInfo),
 	}
+	if c.getClusterAccelerationStructureBuildSizesNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getClusterAccelerationStructureBuildSizesNV, nil, args[:])
 }
 
@@ -4525,6 +5294,9 @@ func (c *Commands) CmdBuildClusterAccelerationStructureIndirectNV(commandBuffer 
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCommandInfos),
+	}
+	if c.cmdBuildClusterAccelerationStructureIndirectNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBuildClusterAccelerationStructureIndirectNV, nil, args[:])
 }
@@ -4536,6 +5308,9 @@ func (c *Commands) GetDeviceAccelerationStructureCompatibilityKHR(device Device,
 		unsafe.Pointer(&pVersionInfo),
 		unsafe.Pointer(&pCompatibility),
 	}
+	if c.getDeviceAccelerationStructureCompatibilityKHR == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceAccelerationStructureCompatibilityKHR, nil, args[:])
 }
 
@@ -4546,6 +5321,9 @@ func (c *Commands) CmdSetRayTracingPipelineStackSizeKHR(commandBuffer CommandBuf
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pipelineStackSize),
+	}
+	if c.cmdSetRayTracingPipelineStackSizeKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetRayTracingPipelineStackSizeKHR, nil, args[:])
 }
@@ -4562,7 +5340,9 @@ func (c *Commands) GetImageViewAddressNVX(device Device, imageView ImageView, pP
 		unsafe.Pointer(&imageView),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageViewAddressNVX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageViewAddressNVX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4575,7 +5355,9 @@ func (c *Commands) GetPhysicalDeviceSurfacePresentModes2EXT(physicalDevice Physi
 		unsafe.Pointer(&pPresentModeCount),
 		unsafe.Pointer(&pPresentModes),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4587,7 +5369,9 @@ func (c *Commands) GetDeviceGroupSurfacePresentModes2EXT(device Device, pSurface
 		unsafe.Pointer(&pSurfaceInfo),
 		unsafe.Pointer(&pModes),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceGroupSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceGroupSurfacePresentModes2EXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4598,7 +5382,9 @@ func (c *Commands) AcquireFullScreenExclusiveModeEXT(device Device, swapchain Sw
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.acquireFullScreenExclusiveModeEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.acquireFullScreenExclusiveModeEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4609,7 +5395,9 @@ func (c *Commands) ReleaseFullScreenExclusiveModeEXT(device Device, swapchain Sw
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.releaseFullScreenExclusiveModeEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.releaseFullScreenExclusiveModeEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4623,7 +5411,9 @@ func (c *Commands) EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR
 		unsafe.Pointer(&pCounters),
 		unsafe.Pointer(&pCounterDescriptions),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4633,6 +5423,9 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR(physica
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pPerformanceQueryCreateInfo),
 		unsafe.Pointer(&pNumPasses),
+	}
+	if c.getPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR, nil, args[:])
 }
@@ -4644,7 +5437,9 @@ func (c *Commands) AcquireProfilingLockKHR(device Device, pInfo *AcquireProfilin
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.acquireProfilingLockKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.acquireProfilingLockKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4652,6 +5447,9 @@ func (c *Commands) AcquireProfilingLockKHR(device Device, pInfo *AcquireProfilin
 func (c *Commands) ReleaseProfilingLockKHR(device Device) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&device),
+	}
+	if c.releaseProfilingLockKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.releaseProfilingLockKHR, nil, args[:])
 }
@@ -4664,7 +5462,9 @@ func (c *Commands) GetImageDrmFormatModifierPropertiesEXT(device Device, image I
 		unsafe.Pointer(&image),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageDrmFormatModifierPropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getImageDrmFormatModifierPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4681,7 +5481,9 @@ func (c *Commands) CreateHeadlessSurfaceEXT(instance Instance, pCreateInfo *Head
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSurface),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createHeadlessSurfaceEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createHeadlessSurfaceEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4693,7 +5495,9 @@ func (c *Commands) GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinations
 		unsafe.Pointer(&pCombinationCount),
 		unsafe.Pointer(&pCombinations),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4704,7 +5508,9 @@ func (c *Commands) InitializePerformanceApiINTEL(device Device, pInitializeInfo 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInitializeInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.initializePerformanceApiINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.initializePerformanceApiINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4712,6 +5518,9 @@ func (c *Commands) InitializePerformanceApiINTEL(device Device, pInitializeInfo 
 func (c *Commands) UninitializePerformanceApiINTEL(device Device) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&device),
+	}
+	if c.uninitializePerformanceApiINTEL == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.uninitializePerformanceApiINTEL, nil, args[:])
 }
@@ -4723,7 +5532,9 @@ func (c *Commands) CmdSetPerformanceMarkerINTEL(commandBuffer CommandBuffer, pMa
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pMarkerInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceMarkerINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceMarkerINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4734,7 +5545,9 @@ func (c *Commands) CmdSetPerformanceStreamMarkerINTEL(commandBuffer CommandBuffe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pMarkerInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceStreamMarkerINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceStreamMarkerINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4745,7 +5558,9 @@ func (c *Commands) CmdSetPerformanceOverrideINTEL(commandBuffer CommandBuffer, p
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pOverrideInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceOverrideINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.cmdSetPerformanceOverrideINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4757,7 +5572,9 @@ func (c *Commands) AcquirePerformanceConfigurationINTEL(device Device, pAcquireI
 		unsafe.Pointer(&pAcquireInfo),
 		unsafe.Pointer(&pConfiguration),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.acquirePerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.acquirePerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4768,7 +5585,9 @@ func (c *Commands) ReleasePerformanceConfigurationINTEL(device Device, configura
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&configuration),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.releasePerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.releasePerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4779,7 +5598,9 @@ func (c *Commands) QueueSetPerformanceConfigurationINTEL(queue Queue, configurat
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&configuration),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.queueSetPerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.queueSetPerformanceConfigurationINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4791,7 +5612,9 @@ func (c *Commands) GetPerformanceParameterINTEL(device Device, parameter Perform
 		unsafe.Pointer(&parameter),
 		unsafe.Pointer(&pValue),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getPerformanceParameterINTEL, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getPerformanceParameterINTEL, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4806,7 +5629,9 @@ func (c *Commands) GetPipelineExecutablePropertiesKHR(device Device, pPipelineIn
 		unsafe.Pointer(&pExecutableCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutablePropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutablePropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4819,7 +5644,9 @@ func (c *Commands) GetPipelineExecutableStatisticsKHR(device Device, pExecutable
 		unsafe.Pointer(&pStatisticCount),
 		unsafe.Pointer(&pStatistics),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableStatisticsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableStatisticsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4832,7 +5659,9 @@ func (c *Commands) GetPipelineExecutableInternalRepresentationsKHR(device Device
 		unsafe.Pointer(&pInternalRepresentationCount),
 		unsafe.Pointer(&pInternalRepresentations),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableInternalRepresentationsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPipelineExecutableInternalRepresentationsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4848,7 +5677,9 @@ func (c *Commands) GetPhysicalDeviceToolProperties(physicalDevice PhysicalDevice
 		unsafe.Pointer(&pToolCount),
 		unsafe.Pointer(&pToolProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceToolProperties, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceToolProperties, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4861,7 +5692,9 @@ func (c *Commands) CreateAccelerationStructureKHR(device Device, pCreateInfo *Ac
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pAccelerationStructure),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createAccelerationStructureKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4881,7 +5714,9 @@ func (c *Commands) CreateDeferredOperationKHR(device Device, pAllocator *Allocat
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pDeferredOperation),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.createDeferredOperationKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.createDeferredOperationKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4891,6 +5726,9 @@ func (c *Commands) DestroyDeferredOperationKHR(device Device, operation Deferred
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&operation),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyDeferredOperationKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDeferredOperationKHR, nil, args[:])
 }
@@ -4904,7 +5742,9 @@ func (c *Commands) GetDeferredOperationResultKHR(device Device, operation Deferr
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&operation),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.getDeferredOperationResultKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.getDeferredOperationResultKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4915,7 +5755,9 @@ func (c *Commands) DeferredOperationJoinKHR(device Device, operation DeferredOpe
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&operation),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandle, c.deferredOperationJoinKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandle, c.deferredOperationJoinKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -4925,6 +5767,9 @@ func (c *Commands) GetPipelineIndirectMemoryRequirementsNV(device Device, pCreat
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCreateInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getPipelineIndirectMemoryRequirementsNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPipelineIndirectMemoryRequirementsNV, nil, args[:])
 }
@@ -4937,6 +5782,9 @@ func (c *Commands) AntiLagUpdateAMD(device Device, pData *AntiLagDataAMD) {
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pData),
 	}
+	if c.antiLagUpdateAMD == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.antiLagUpdateAMD, nil, args[:])
 }
 
@@ -4945,6 +5793,9 @@ func (c *Commands) CmdSetCullMode(commandBuffer CommandBuffer, cullMode CullMode
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&cullMode),
+	}
+	if c.cmdSetCullMode == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetCullMode, nil, args[:])
 }
@@ -4955,6 +5806,9 @@ func (c *Commands) CmdSetFrontFace(commandBuffer CommandBuffer, frontFace FrontF
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&frontFace),
 	}
+	if c.cmdSetFrontFace == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetFrontFace, nil, args[:])
 }
 
@@ -4963,6 +5817,9 @@ func (c *Commands) CmdSetPrimitiveTopology(commandBuffer CommandBuffer, primitiv
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&primitiveTopology),
+	}
+	if c.cmdSetPrimitiveTopology == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetPrimitiveTopology, nil, args[:])
 }
@@ -4974,6 +5831,9 @@ func (c *Commands) CmdSetViewportWithCount(commandBuffer CommandBuffer, viewport
 		unsafe.Pointer(&viewportCount),
 		unsafe.Pointer(&pViewports),
 	}
+	if c.cmdSetViewportWithCount == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetViewportWithCount, nil, args[:])
 }
 
@@ -4983,6 +5843,9 @@ func (c *Commands) CmdSetScissorWithCount(commandBuffer CommandBuffer, scissorCo
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&scissorCount),
 		unsafe.Pointer(&pScissors),
+	}
+	if c.cmdSetScissorWithCount == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetScissorWithCount, nil, args[:])
 }
@@ -4996,6 +5859,9 @@ func (c *Commands) CmdBindIndexBuffer2(commandBuffer CommandBuffer, buffer Buffe
 		unsafe.Pointer(&size),
 		unsafe.Pointer(&indexType),
 	}
+	if c.cmdBindIndexBuffer2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidCmdFillBuffer, c.cmdBindIndexBuffer2, nil, args[:])
 }
 
@@ -5007,6 +5873,9 @@ func (c *Commands) CmdSetDepthTestEnable(commandBuffer CommandBuffer, depthTestE
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthTestEnable),
 	}
+	if c.cmdSetDepthTestEnable == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthTestEnable, nil, args[:])
 }
 
@@ -5015,6 +5884,9 @@ func (c *Commands) CmdSetDepthWriteEnable(commandBuffer CommandBuffer, depthWrit
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthWriteEnable),
+	}
+	if c.cmdSetDepthWriteEnable == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthWriteEnable, nil, args[:])
 }
@@ -5025,6 +5897,9 @@ func (c *Commands) CmdSetDepthCompareOp(commandBuffer CommandBuffer, depthCompar
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthCompareOp),
 	}
+	if c.cmdSetDepthCompareOp == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthCompareOp, nil, args[:])
 }
 
@@ -5034,6 +5909,9 @@ func (c *Commands) CmdSetDepthBoundsTestEnable(commandBuffer CommandBuffer, dept
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthBoundsTestEnable),
 	}
+	if c.cmdSetDepthBoundsTestEnable == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthBoundsTestEnable, nil, args[:])
 }
 
@@ -5042,6 +5920,9 @@ func (c *Commands) CmdSetStencilTestEnable(commandBuffer CommandBuffer, stencilT
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&stencilTestEnable),
+	}
+	if c.cmdSetStencilTestEnable == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetStencilTestEnable, nil, args[:])
 }
@@ -5054,6 +5935,9 @@ func (c *Commands) CmdSetPatchControlPointsEXT(commandBuffer CommandBuffer, patc
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&patchControlPoints),
 	}
+	if c.cmdSetPatchControlPointsEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetPatchControlPointsEXT, nil, args[:])
 }
 
@@ -5062,6 +5946,9 @@ func (c *Commands) CmdSetRasterizerDiscardEnable(commandBuffer CommandBuffer, ra
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&rasterizerDiscardEnable),
+	}
+	if c.cmdSetRasterizerDiscardEnable == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetRasterizerDiscardEnable, nil, args[:])
 }
@@ -5072,6 +5959,9 @@ func (c *Commands) CmdSetDepthBiasEnable(commandBuffer CommandBuffer, depthBiasE
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthBiasEnable),
 	}
+	if c.cmdSetDepthBiasEnable == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthBiasEnable, nil, args[:])
 }
 
@@ -5080,6 +5970,9 @@ func (c *Commands) CmdSetLogicOpEXT(commandBuffer CommandBuffer, logicOp LogicOp
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&logicOp),
+	}
+	if c.cmdSetLogicOpEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetLogicOpEXT, nil, args[:])
 }
@@ -5090,6 +5983,9 @@ func (c *Commands) CmdSetPrimitiveRestartEnable(commandBuffer CommandBuffer, pri
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&primitiveRestartEnable),
 	}
+	if c.cmdSetPrimitiveRestartEnable == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetPrimitiveRestartEnable, nil, args[:])
 }
 
@@ -5098,6 +5994,9 @@ func (c *Commands) CmdSetTessellationDomainOriginEXT(commandBuffer CommandBuffer
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&domainOrigin),
+	}
+	if c.cmdSetTessellationDomainOriginEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetTessellationDomainOriginEXT, nil, args[:])
 }
@@ -5108,6 +6007,9 @@ func (c *Commands) CmdSetDepthClampEnableEXT(commandBuffer CommandBuffer, depthC
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthClampEnable),
 	}
+	if c.cmdSetDepthClampEnableEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthClampEnableEXT, nil, args[:])
 }
 
@@ -5117,6 +6019,9 @@ func (c *Commands) CmdSetPolygonModeEXT(commandBuffer CommandBuffer, polygonMode
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&polygonMode),
 	}
+	if c.cmdSetPolygonModeEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetPolygonModeEXT, nil, args[:])
 }
 
@@ -5125,6 +6030,9 @@ func (c *Commands) CmdSetRasterizationSamplesEXT(commandBuffer CommandBuffer, ra
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&rasterizationSamples),
+	}
+	if c.cmdSetRasterizationSamplesEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetRasterizationSamplesEXT, nil, args[:])
 }
@@ -5136,6 +6044,9 @@ func (c *Commands) CmdSetSampleMaskEXT(commandBuffer CommandBuffer, samples Samp
 		unsafe.Pointer(&samples),
 		unsafe.Pointer(&pSampleMask),
 	}
+	if c.cmdSetSampleMaskEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetSampleMaskEXT, nil, args[:])
 }
 
@@ -5144,6 +6055,9 @@ func (c *Commands) CmdSetAlphaToCoverageEnableEXT(commandBuffer CommandBuffer, a
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&alphaToCoverageEnable),
+	}
+	if c.cmdSetAlphaToCoverageEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetAlphaToCoverageEnableEXT, nil, args[:])
 }
@@ -5154,6 +6068,9 @@ func (c *Commands) CmdSetAlphaToOneEnableEXT(commandBuffer CommandBuffer, alphaT
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&alphaToOneEnable),
 	}
+	if c.cmdSetAlphaToOneEnableEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetAlphaToOneEnableEXT, nil, args[:])
 }
 
@@ -5162,6 +6079,9 @@ func (c *Commands) CmdSetLogicOpEnableEXT(commandBuffer CommandBuffer, logicOpEn
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&logicOpEnable),
+	}
+	if c.cmdSetLogicOpEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetLogicOpEnableEXT, nil, args[:])
 }
@@ -5174,6 +6094,9 @@ func (c *Commands) CmdSetColorBlendEnableEXT(commandBuffer CommandBuffer, firstA
 		unsafe.Pointer(&attachmentCount),
 		unsafe.Pointer(&pColorBlendEnables),
 	}
+	if c.cmdSetColorBlendEnableEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendEnableEXT, nil, args[:])
 }
 
@@ -5184,6 +6107,9 @@ func (c *Commands) CmdSetColorBlendEquationEXT(commandBuffer CommandBuffer, firs
 		unsafe.Pointer(&firstAttachment),
 		unsafe.Pointer(&attachmentCount),
 		unsafe.Pointer(&pColorBlendEquations),
+	}
+	if c.cmdSetColorBlendEquationEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendEquationEXT, nil, args[:])
 }
@@ -5196,6 +6122,9 @@ func (c *Commands) CmdSetColorWriteMaskEXT(commandBuffer CommandBuffer, firstAtt
 		unsafe.Pointer(&attachmentCount),
 		unsafe.Pointer(&pColorWriteMasks),
 	}
+	if c.cmdSetColorWriteMaskEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorWriteMaskEXT, nil, args[:])
 }
 
@@ -5204,6 +6133,9 @@ func (c *Commands) CmdSetRasterizationStreamEXT(commandBuffer CommandBuffer, ras
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&rasterizationStream),
+	}
+	if c.cmdSetRasterizationStreamEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetRasterizationStreamEXT, nil, args[:])
 }
@@ -5214,6 +6146,9 @@ func (c *Commands) CmdSetConservativeRasterizationModeEXT(commandBuffer CommandB
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&conservativeRasterizationMode),
 	}
+	if c.cmdSetConservativeRasterizationModeEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetConservativeRasterizationModeEXT, nil, args[:])
 }
 
@@ -5222,6 +6157,9 @@ func (c *Commands) CmdSetExtraPrimitiveOverestimationSizeEXT(commandBuffer Comma
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&extraPrimitiveOverestimationSize),
+	}
+	if c.cmdSetExtraPrimitiveOverestimationSizeEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleF32, c.cmdSetExtraPrimitiveOverestimationSizeEXT, nil, args[:])
 }
@@ -5232,6 +6170,9 @@ func (c *Commands) CmdSetDepthClipEnableEXT(commandBuffer CommandBuffer, depthCl
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthClipEnable),
 	}
+	if c.cmdSetDepthClipEnableEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthClipEnableEXT, nil, args[:])
 }
 
@@ -5240,6 +6181,9 @@ func (c *Commands) CmdSetSampleLocationsEnableEXT(commandBuffer CommandBuffer, s
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&sampleLocationsEnable),
+	}
+	if c.cmdSetSampleLocationsEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetSampleLocationsEnableEXT, nil, args[:])
 }
@@ -5252,6 +6196,9 @@ func (c *Commands) CmdSetColorBlendAdvancedEXT(commandBuffer CommandBuffer, firs
 		unsafe.Pointer(&attachmentCount),
 		unsafe.Pointer(&pColorBlendAdvanced),
 	}
+	if c.cmdSetColorBlendAdvancedEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetColorBlendAdvancedEXT, nil, args[:])
 }
 
@@ -5260,6 +6207,9 @@ func (c *Commands) CmdSetProvokingVertexModeEXT(commandBuffer CommandBuffer, pro
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&provokingVertexMode),
+	}
+	if c.cmdSetProvokingVertexModeEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetProvokingVertexModeEXT, nil, args[:])
 }
@@ -5270,6 +6220,9 @@ func (c *Commands) CmdSetLineRasterizationModeEXT(commandBuffer CommandBuffer, l
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&lineRasterizationMode),
 	}
+	if c.cmdSetLineRasterizationModeEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetLineRasterizationModeEXT, nil, args[:])
 }
 
@@ -5278,6 +6231,9 @@ func (c *Commands) CmdSetLineStippleEnableEXT(commandBuffer CommandBuffer, stipp
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&stippledLineEnable),
+	}
+	if c.cmdSetLineStippleEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetLineStippleEnableEXT, nil, args[:])
 }
@@ -5288,6 +6244,9 @@ func (c *Commands) CmdSetDepthClipNegativeOneToOneEXT(commandBuffer CommandBuffe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&negativeOneToOne),
 	}
+	if c.cmdSetDepthClipNegativeOneToOneEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetDepthClipNegativeOneToOneEXT, nil, args[:])
 }
 
@@ -5296,6 +6255,9 @@ func (c *Commands) CmdSetViewportWScalingEnableNV(commandBuffer CommandBuffer, v
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&viewportWScalingEnable),
+	}
+	if c.cmdSetViewportWScalingEnableNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetViewportWScalingEnableNV, nil, args[:])
 }
@@ -5308,6 +6270,9 @@ func (c *Commands) CmdSetViewportSwizzleNV(commandBuffer CommandBuffer, firstVie
 		unsafe.Pointer(&viewportCount),
 		unsafe.Pointer(&pViewportSwizzles),
 	}
+	if c.cmdSetViewportSwizzleNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.cmdSetViewportSwizzleNV, nil, args[:])
 }
 
@@ -5316,6 +6281,9 @@ func (c *Commands) CmdSetCoverageToColorEnableNV(commandBuffer CommandBuffer, co
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageToColorEnable),
+	}
+	if c.cmdSetCoverageToColorEnableNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetCoverageToColorEnableNV, nil, args[:])
 }
@@ -5326,6 +6294,9 @@ func (c *Commands) CmdSetCoverageToColorLocationNV(commandBuffer CommandBuffer, 
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageToColorLocation),
 	}
+	if c.cmdSetCoverageToColorLocationNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetCoverageToColorLocationNV, nil, args[:])
 }
 
@@ -5335,6 +6306,9 @@ func (c *Commands) CmdSetCoverageModulationModeNV(commandBuffer CommandBuffer, c
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageModulationMode),
 	}
+	if c.cmdSetCoverageModulationModeNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetCoverageModulationModeNV, nil, args[:])
 }
 
@@ -5343,6 +6317,9 @@ func (c *Commands) CmdSetCoverageModulationTableEnableNV(commandBuffer CommandBu
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageModulationTableEnable),
+	}
+	if c.cmdSetCoverageModulationTableEnableNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetCoverageModulationTableEnableNV, nil, args[:])
 }
@@ -5354,6 +6331,9 @@ func (c *Commands) CmdSetCoverageModulationTableNV(commandBuffer CommandBuffer, 
 		unsafe.Pointer(&coverageModulationTableCount),
 		unsafe.Pointer(&pCoverageModulationTable),
 	}
+	if c.cmdSetCoverageModulationTableNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetCoverageModulationTableNV, nil, args[:])
 }
 
@@ -5362,6 +6342,9 @@ func (c *Commands) CmdSetShadingRateImageEnableNV(commandBuffer CommandBuffer, s
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&shadingRateImageEnable),
+	}
+	if c.cmdSetShadingRateImageEnableNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetShadingRateImageEnableNV, nil, args[:])
 }
@@ -5372,6 +6355,9 @@ func (c *Commands) CmdSetCoverageReductionModeNV(commandBuffer CommandBuffer, co
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&coverageReductionMode),
 	}
+	if c.cmdSetCoverageReductionModeNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandle, c.cmdSetCoverageReductionModeNV, nil, args[:])
 }
 
@@ -5380,6 +6366,9 @@ func (c *Commands) CmdSetRepresentativeFragmentTestEnableNV(commandBuffer Comman
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&representativeFragmentTestEnable),
+	}
+	if c.cmdSetRepresentativeFragmentTestEnableNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32, c.cmdSetRepresentativeFragmentTestEnableNV, nil, args[:])
 }
@@ -5393,7 +6382,9 @@ func (c *Commands) CreatePrivateDataSlot(device Device, pCreateInfo *PrivateData
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPrivateDataSlot),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPrivateDataSlot, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createPrivateDataSlot, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5403,6 +6394,9 @@ func (c *Commands) DestroyPrivateDataSlot(device Device, privateDataSlot Private
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&privateDataSlot),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyPrivateDataSlot == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyPrivateDataSlot, nil, args[:])
 }
@@ -5417,6 +6411,9 @@ func (c *Commands) CmdCopyBuffer2(commandBuffer CommandBuffer, pCopyBufferInfo *
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyBufferInfo),
 	}
+	if c.cmdCopyBuffer2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyBuffer2, nil, args[:])
 }
 
@@ -5425,6 +6422,9 @@ func (c *Commands) CmdCopyImage2(commandBuffer CommandBuffer, pCopyImageInfo *Co
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyImageInfo),
+	}
+	if c.cmdCopyImage2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyImage2, nil, args[:])
 }
@@ -5435,6 +6435,9 @@ func (c *Commands) CmdBlitImage2(commandBuffer CommandBuffer, pBlitImageInfo *Bl
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBlitImageInfo),
 	}
+	if c.cmdBlitImage2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBlitImage2, nil, args[:])
 }
 
@@ -5443,6 +6446,9 @@ func (c *Commands) CmdCopyBufferToImage2(commandBuffer CommandBuffer, pCopyBuffe
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyBufferToImageInfo),
+	}
+	if c.cmdCopyBufferToImage2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyBufferToImage2, nil, args[:])
 }
@@ -5453,6 +6459,9 @@ func (c *Commands) CmdCopyImageToBuffer2(commandBuffer CommandBuffer, pCopyImage
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyImageToBufferInfo),
 	}
+	if c.cmdCopyImageToBuffer2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyImageToBuffer2, nil, args[:])
 }
 
@@ -5462,6 +6471,9 @@ func (c *Commands) CmdResolveImage2(commandBuffer CommandBuffer, pResolveImageIn
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pResolveImageInfo),
 	}
+	if c.cmdResolveImage2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdResolveImage2, nil, args[:])
 }
 
@@ -5470,6 +6482,9 @@ func (c *Commands) CmdRefreshObjectsKHR(commandBuffer CommandBuffer, pRefreshObj
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pRefreshObjects),
+	}
+	if c.cmdRefreshObjectsKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdRefreshObjectsKHR, nil, args[:])
 }
@@ -5482,7 +6497,9 @@ func (c *Commands) GetPhysicalDeviceRefreshableObjectTypesKHR(physicalDevice Phy
 		unsafe.Pointer(&pRefreshableObjectTypeCount),
 		unsafe.Pointer(&pRefreshableObjectTypes),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceRefreshableObjectTypesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceRefreshableObjectTypesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5496,7 +6513,9 @@ func (c *Commands) GetPhysicalDeviceFragmentShadingRatesKHR(physicalDevice Physi
 		unsafe.Pointer(&pFragmentShadingRateCount),
 		unsafe.Pointer(&pFragmentShadingRates),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceFragmentShadingRatesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceFragmentShadingRatesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5506,6 +6525,9 @@ func (c *Commands) CmdSetFragmentShadingRateEnumNV(commandBuffer CommandBuffer, 
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&shadingRate),
 		unsafe.Pointer(&combinerOps),
+	}
+	if c.cmdSetFragmentShadingRateEnumNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleHandle, c.cmdSetFragmentShadingRateEnumNV, nil, args[:])
 }
@@ -5521,6 +6543,9 @@ func (c *Commands) CmdSetVertexInputEXT(commandBuffer CommandBuffer, vertexBindi
 		unsafe.Pointer(&vertexAttributeDescriptionCount),
 		unsafe.Pointer(&pVertexAttributeDescriptions),
 	}
+	if c.cmdSetVertexInputEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidDeviceUpdateDescriptorSets, c.cmdSetVertexInputEXT, nil, args[:])
 }
 
@@ -5530,6 +6555,9 @@ func (c *Commands) CmdSetColorWriteEnableEXT(commandBuffer CommandBuffer, attach
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&attachmentCount),
 		unsafe.Pointer(&pColorWriteEnables),
+	}
+	if c.cmdSetColorWriteEnableEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdSetColorWriteEnableEXT, nil, args[:])
 }
@@ -5541,6 +6569,9 @@ func (c *Commands) CmdSetEvent2(commandBuffer CommandBuffer, event Event, pDepen
 		unsafe.Pointer(&event),
 		unsafe.Pointer(&pDependencyInfo),
 	}
+	if c.cmdSetEvent2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdSetEvent2, nil, args[:])
 }
 
@@ -5550,6 +6581,9 @@ func (c *Commands) CmdResetEvent2(commandBuffer CommandBuffer, event Event, stag
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&event),
 		unsafe.Pointer(&stageMask),
+	}
+	if c.cmdResetEvent2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32, c.cmdResetEvent2, nil, args[:])
 }
@@ -5561,6 +6595,9 @@ func (c *Commands) CmdPipelineBarrier2(commandBuffer CommandBuffer, pDependencyI
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pDependencyInfo),
+	}
+	if c.cmdPipelineBarrier2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPipelineBarrier2, nil, args[:])
 }
@@ -5574,7 +6611,9 @@ func (c *Commands) QueueSubmit2(queue Queue, submitCount uint32, pSubmits *Submi
 		unsafe.Pointer(&pSubmits),
 		unsafe.Pointer(&fence),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrHandle, c.queueSubmit2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5589,6 +6628,9 @@ func (c *Commands) GetQueueCheckpointData2NV(queue Queue, pCheckpointDataCount *
 		unsafe.Pointer(&pCheckpointDataCount),
 		unsafe.Pointer(&pCheckpointData),
 	}
+	if c.getQueueCheckpointData2NV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getQueueCheckpointData2NV, nil, args[:])
 }
 
@@ -5599,7 +6641,9 @@ func (c *Commands) CopyMemoryToImage(device Device, pCopyMemoryToImageInfo *Copy
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCopyMemoryToImageInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyMemoryToImage, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.copyMemoryToImage, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5610,7 +6654,9 @@ func (c *Commands) CopyImageToMemory(device Device, pCopyImageToMemoryInfo *Copy
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCopyImageToMemoryInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyImageToMemory, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.copyImageToMemory, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5621,7 +6667,9 @@ func (c *Commands) CopyImageToImage(device Device, pCopyImageToImageInfo *CopyIm
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCopyImageToImageInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.copyImageToImage, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.copyImageToImage, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5633,7 +6681,9 @@ func (c *Commands) TransitionImageLayout(device Device, transitionCount uint32, 
 		unsafe.Pointer(&transitionCount),
 		unsafe.Pointer(&pTransitions),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.transitionImageLayout, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.transitionImageLayout, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5647,7 +6697,9 @@ func (c *Commands) GetPhysicalDeviceVideoCapabilitiesKHR(physicalDevice Physical
 		unsafe.Pointer(&pVideoProfile),
 		unsafe.Pointer(&pCapabilities),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoCapabilitiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoCapabilitiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5660,7 +6712,9 @@ func (c *Commands) GetPhysicalDeviceVideoFormatPropertiesKHR(physicalDevice Phys
 		unsafe.Pointer(&pVideoFormatPropertyCount),
 		unsafe.Pointer(&pVideoFormatProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceVideoFormatPropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceVideoFormatPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5672,7 +6726,9 @@ func (c *Commands) GetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR(physica
 		unsafe.Pointer(&pQualityLevelInfo),
 		unsafe.Pointer(&pQualityLevelProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5685,7 +6741,9 @@ func (c *Commands) CreateVideoSessionKHR(device Device, pCreateInfo *VideoSessio
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pVideoSession),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5695,6 +6753,9 @@ func (c *Commands) DestroyVideoSessionKHR(device Device, videoSession VideoSessi
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSession),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyVideoSessionKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyVideoSessionKHR, nil, args[:])
 }
@@ -5708,7 +6769,9 @@ func (c *Commands) CreateVideoSessionParametersKHR(device Device, pCreateInfo *V
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pVideoSessionParameters),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createVideoSessionParametersKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5720,7 +6783,9 @@ func (c *Commands) UpdateVideoSessionParametersKHR(device Device, videoSessionPa
 		unsafe.Pointer(&videoSessionParameters),
 		unsafe.Pointer(&pUpdateInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.updateVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.updateVideoSessionParametersKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5734,7 +6799,9 @@ func (c *Commands) GetEncodedVideoSessionParametersKHR(device Device, pVideoSess
 		unsafe.Pointer(&pDataSize),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getEncodedVideoSessionParametersKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtrPtr, c.getEncodedVideoSessionParametersKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5744,6 +6811,9 @@ func (c *Commands) DestroyVideoSessionParametersKHR(device Device, videoSessionP
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&videoSessionParameters),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyVideoSessionParametersKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyVideoSessionParametersKHR, nil, args[:])
 }
@@ -5757,7 +6827,9 @@ func (c *Commands) GetVideoSessionMemoryRequirementsKHR(device Device, videoSess
 		unsafe.Pointer(&pMemoryRequirementsCount),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getVideoSessionMemoryRequirementsKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getVideoSessionMemoryRequirementsKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5770,7 +6842,9 @@ func (c *Commands) BindVideoSessionMemoryKHR(device Device, videoSession VideoSe
 		unsafe.Pointer(&bindSessionMemoryInfoCount),
 		unsafe.Pointer(&pBindSessionMemoryInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.bindVideoSessionMemoryKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.bindVideoSessionMemoryKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5779,6 +6853,9 @@ func (c *Commands) CmdDecodeVideoKHR(commandBuffer CommandBuffer, pDecodeInfo *V
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pDecodeInfo),
+	}
+	if c.cmdDecodeVideoKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDecodeVideoKHR, nil, args[:])
 }
@@ -5789,6 +6866,9 @@ func (c *Commands) CmdBeginVideoCodingKHR(commandBuffer CommandBuffer, pBeginInf
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBeginInfo),
 	}
+	if c.cmdBeginVideoCodingKHR == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginVideoCodingKHR, nil, args[:])
 }
 
@@ -5797,6 +6877,9 @@ func (c *Commands) CmdControlVideoCodingKHR(commandBuffer CommandBuffer, pCoding
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCodingControlInfo),
+	}
+	if c.cmdControlVideoCodingKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdControlVideoCodingKHR, nil, args[:])
 }
@@ -5807,6 +6890,9 @@ func (c *Commands) CmdEndVideoCodingKHR(commandBuffer CommandBuffer, pEndCodingI
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pEndCodingInfo),
 	}
+	if c.cmdEndVideoCodingKHR == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndVideoCodingKHR, nil, args[:])
 }
 
@@ -5815,6 +6901,9 @@ func (c *Commands) CmdEncodeVideoKHR(commandBuffer CommandBuffer, pEncodeInfo *V
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pEncodeInfo),
+	}
+	if c.cmdEncodeVideoKHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEncodeVideoKHR, nil, args[:])
 }
@@ -5825,6 +6914,9 @@ func (c *Commands) CmdDecompressMemoryNV(commandBuffer CommandBuffer, decompress
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&decompressRegionCount),
 		unsafe.Pointer(&pDecompressMemoryRegions),
+	}
+	if c.cmdDecompressMemoryNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdDecompressMemoryNV, nil, args[:])
 }
@@ -5838,6 +6930,9 @@ func (c *Commands) GetPartitionedAccelerationStructuresBuildSizesNV(device Devic
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pSizeInfo),
 	}
+	if c.getPartitionedAccelerationStructuresBuildSizesNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPartitionedAccelerationStructuresBuildSizesNV, nil, args[:])
 }
 
@@ -5847,6 +6942,9 @@ func (c *Commands) CmdBuildPartitionedAccelerationStructuresNV(commandBuffer Com
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBuildInfo),
 	}
+	if c.cmdBuildPartitionedAccelerationStructuresNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBuildPartitionedAccelerationStructuresNV, nil, args[:])
 }
 
@@ -5855,6 +6953,9 @@ func (c *Commands) CmdDecompressMemoryEXT(commandBuffer CommandBuffer, pDecompre
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pDecompressMemoryInfoEXT),
+	}
+	if c.cmdDecompressMemoryEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDecompressMemoryEXT, nil, args[:])
 }
@@ -5870,7 +6971,9 @@ func (c *Commands) CreateCuModuleNVX(device Device, pCreateInfo *CuModuleCreateI
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pModule),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuModuleNVX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuModuleNVX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5883,7 +6986,9 @@ func (c *Commands) CreateCuFunctionNVX(device Device, pCreateInfo *CuFunctionCre
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pFunction),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuFunctionNVX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCuFunctionNVX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5893,6 +6998,9 @@ func (c *Commands) DestroyCuModuleNVX(device Device, module CuModuleNVX, pAlloca
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&module),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyCuModuleNVX == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCuModuleNVX, nil, args[:])
 }
@@ -5904,6 +7012,9 @@ func (c *Commands) DestroyCuFunctionNVX(device Device, function CuFunctionNVX, p
 		unsafe.Pointer(&function),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyCuFunctionNVX == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCuFunctionNVX, nil, args[:])
 }
 
@@ -5912,6 +7023,9 @@ func (c *Commands) CmdCuLaunchKernelNVX(commandBuffer CommandBuffer, pLaunchInfo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pLaunchInfo),
+	}
+	if c.cmdCuLaunchKernelNVX == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCuLaunchKernelNVX, nil, args[:])
 }
@@ -5922,6 +7036,9 @@ func (c *Commands) GetDescriptorSetLayoutSizeEXT(device Device, layout Descripto
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&layout),
 		unsafe.Pointer(&pLayoutSizeInBytes),
+	}
+	if c.getDescriptorSetLayoutSizeEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDescriptorSetLayoutSizeEXT, nil, args[:])
 }
@@ -5934,6 +7051,9 @@ func (c *Commands) GetDescriptorSetLayoutBindingOffsetEXT(device Device, layout 
 		unsafe.Pointer(&binding),
 		unsafe.Pointer(&pOffset),
 	}
+	if c.getDescriptorSetLayoutBindingOffsetEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.getDescriptorSetLayoutBindingOffsetEXT, nil, args[:])
 }
 
@@ -5945,6 +7065,9 @@ func (c *Commands) CmdBindDescriptorBuffersEXT(commandBuffer CommandBuffer, buff
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&bufferCount),
 		unsafe.Pointer(&pBindingInfos),
+	}
+	if c.cmdBindDescriptorBuffersEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdBindDescriptorBuffersEXT, nil, args[:])
 }
@@ -5961,7 +7084,9 @@ func (c *Commands) GetBufferOpaqueCaptureDescriptorDataEXT(device Device, pInfo 
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getBufferOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getBufferOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5973,7 +7098,9 @@ func (c *Commands) GetImageOpaqueCaptureDescriptorDataEXT(device Device, pInfo *
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5985,7 +7112,9 @@ func (c *Commands) GetImageViewOpaqueCaptureDescriptorDataEXT(device Device, pIn
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageViewOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getImageViewOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -5997,7 +7126,9 @@ func (c *Commands) GetSamplerOpaqueCaptureDescriptorDataEXT(device Device, pInfo
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getSamplerOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getSamplerOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6009,7 +7140,9 @@ func (c *Commands) GetAccelerationStructureOpaqueCaptureDescriptorDataEXT(device
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getAccelerationStructureOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getAccelerationStructureOpaqueCaptureDescriptorDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6027,7 +7160,9 @@ func (c *Commands) WaitForPresent2KHR(device Device, swapchain SwapchainKHR, pPr
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pPresentWait2Info),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.waitForPresent2KHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.waitForPresent2KHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6042,7 +7177,9 @@ func (c *Commands) CreateBufferCollectionFUCHSIA(device Device, pCreateInfo *Buf
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pCollection),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferCollectionFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createBufferCollectionFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6054,7 +7191,9 @@ func (c *Commands) SetBufferCollectionBufferConstraintsFUCHSIA(device Device, co
 		unsafe.Pointer(&collection),
 		unsafe.Pointer(&pBufferConstraintsInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionBufferConstraintsFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionBufferConstraintsFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6066,7 +7205,9 @@ func (c *Commands) SetBufferCollectionImageConstraintsFUCHSIA(device Device, col
 		unsafe.Pointer(&collection),
 		unsafe.Pointer(&pImageConstraintsInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionImageConstraintsFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.setBufferCollectionImageConstraintsFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6076,6 +7217,9 @@ func (c *Commands) DestroyBufferCollectionFUCHSIA(device Device, collection Buff
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&collection),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyBufferCollectionFUCHSIA == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyBufferCollectionFUCHSIA, nil, args[:])
 }
@@ -6088,7 +7232,9 @@ func (c *Commands) GetBufferCollectionPropertiesFUCHSIA(device Device, collectio
 		unsafe.Pointer(&collection),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getBufferCollectionPropertiesFUCHSIA, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getBufferCollectionPropertiesFUCHSIA, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6101,7 +7247,9 @@ func (c *Commands) CreateCudaModuleNV(device Device, pCreateInfo *CudaModuleCrea
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pModule),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaModuleNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaModuleNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6114,7 +7262,9 @@ func (c *Commands) GetCudaModuleCacheNV(device Device, module CudaModuleNV, pCac
 		unsafe.Pointer(&pCacheSize),
 		unsafe.Pointer(&pCacheData),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getCudaModuleCacheNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getCudaModuleCacheNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6127,7 +7277,9 @@ func (c *Commands) CreateCudaFunctionNV(device Device, pCreateInfo *CudaFunction
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pFunction),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaFunctionNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createCudaFunctionNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6137,6 +7289,9 @@ func (c *Commands) DestroyCudaModuleNV(device Device, module CudaModuleNV, pAllo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&module),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyCudaModuleNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCudaModuleNV, nil, args[:])
 }
@@ -6148,6 +7303,9 @@ func (c *Commands) DestroyCudaFunctionNV(device Device, function CudaFunctionNV,
 		unsafe.Pointer(&function),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyCudaFunctionNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyCudaFunctionNV, nil, args[:])
 }
 
@@ -6156,6 +7314,9 @@ func (c *Commands) CmdCudaLaunchKernelNV(commandBuffer CommandBuffer, pLaunchInf
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pLaunchInfo),
+	}
+	if c.cmdCudaLaunchKernelNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCudaLaunchKernelNV, nil, args[:])
 }
@@ -6166,6 +7327,9 @@ func (c *Commands) CmdBeginRendering(commandBuffer CommandBuffer, pRenderingInfo
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pRenderingInfo),
 	}
+	if c.cmdBeginRendering == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginRendering, nil, args[:])
 }
 
@@ -6173,6 +7337,9 @@ func (c *Commands) CmdBeginRendering(commandBuffer CommandBuffer, pRenderingInfo
 func (c *Commands) CmdEndRendering(commandBuffer CommandBuffer) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
+	}
+	if c.cmdEndRendering == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandle, c.cmdEndRendering, nil, args[:])
 }
@@ -6182,6 +7349,9 @@ func (c *Commands) CmdEndRendering2KHR(commandBuffer CommandBuffer, pRenderingEn
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pRenderingEndInfo),
+	}
+	if c.cmdEndRendering2KHR == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndRendering2KHR, nil, args[:])
 }
@@ -6193,6 +7363,9 @@ func (c *Commands) GetDescriptorSetLayoutHostMappingInfoVALVE(device Device, pBi
 		unsafe.Pointer(&pBindingReference),
 		unsafe.Pointer(&pHostMapping),
 	}
+	if c.getDescriptorSetLayoutHostMappingInfoVALVE == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDescriptorSetLayoutHostMappingInfoVALVE, nil, args[:])
 }
 
@@ -6202,6 +7375,9 @@ func (c *Commands) GetDescriptorSetHostMappingVALVE(device Device, descriptorSet
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&descriptorSet),
 		unsafe.Pointer(&ppData),
+	}
+	if c.getDescriptorSetHostMappingVALVE == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getDescriptorSetHostMappingVALVE, nil, args[:])
 }
@@ -6215,7 +7391,9 @@ func (c *Commands) CreateMicromapEXT(device Device, pCreateInfo *MicromapCreateI
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pMicromap),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMicromapEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createMicromapEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6225,6 +7403,9 @@ func (c *Commands) CmdBuildMicromapsEXT(commandBuffer CommandBuffer, infoCount u
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&infoCount),
 		unsafe.Pointer(&pInfos),
+	}
+	if c.cmdBuildMicromapsEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdBuildMicromapsEXT, nil, args[:])
 }
@@ -6238,7 +7419,9 @@ func (c *Commands) BuildMicromapsEXT(device Device, deferredOperation DeferredOp
 		unsafe.Pointer(&infoCount),
 		unsafe.Pointer(&pInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.buildMicromapsEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.buildMicromapsEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6249,6 +7432,9 @@ func (c *Commands) DestroyMicromapEXT(device Device, micromap MicromapEXT, pAllo
 		unsafe.Pointer(&micromap),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyMicromapEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyMicromapEXT, nil, args[:])
 }
 
@@ -6257,6 +7443,9 @@ func (c *Commands) CmdCopyMicromapEXT(commandBuffer CommandBuffer, pInfo *CopyMi
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyMicromapEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMicromapEXT, nil, args[:])
 }
@@ -6269,7 +7458,9 @@ func (c *Commands) CopyMicromapEXT(device Device, deferredOperation DeferredOper
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6278,6 +7469,9 @@ func (c *Commands) CmdCopyMicromapToMemoryEXT(commandBuffer CommandBuffer, pInfo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyMicromapToMemoryEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMicromapToMemoryEXT, nil, args[:])
 }
@@ -6290,7 +7484,9 @@ func (c *Commands) CopyMicromapToMemoryEXT(device Device, deferredOperation Defe
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapToMemoryEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMicromapToMemoryEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6299,6 +7495,9 @@ func (c *Commands) CmdCopyMemoryToMicromapEXT(commandBuffer CommandBuffer, pInfo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdCopyMemoryToMicromapEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyMemoryToMicromapEXT, nil, args[:])
 }
@@ -6311,7 +7510,9 @@ func (c *Commands) CopyMemoryToMicromapEXT(device Device, deferredOperation Defe
 		unsafe.Pointer(&deferredOperation),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToMicromapEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.copyMemoryToMicromapEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6326,6 +7527,9 @@ func (c *Commands) GetDeviceMicromapCompatibilityEXT(device Device, pVersionInfo
 		unsafe.Pointer(&pVersionInfo),
 		unsafe.Pointer(&pCompatibility),
 	}
+	if c.getDeviceMicromapCompatibilityEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceMicromapCompatibilityEXT, nil, args[:])
 }
 
@@ -6338,6 +7542,9 @@ func (c *Commands) GetShaderModuleIdentifierEXT(device Device, shaderModule Shad
 		unsafe.Pointer(&shaderModule),
 		unsafe.Pointer(&pIdentifier),
 	}
+	if c.getShaderModuleIdentifierEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getShaderModuleIdentifierEXT, nil, args[:])
 }
 
@@ -6347,6 +7554,9 @@ func (c *Commands) GetShaderModuleCreateInfoIdentifierEXT(device Device, pCreate
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pCreateInfo),
 		unsafe.Pointer(&pIdentifier),
+	}
+	if c.getShaderModuleCreateInfoIdentifierEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getShaderModuleCreateInfoIdentifierEXT, nil, args[:])
 }
@@ -6361,7 +7571,9 @@ func (c *Commands) GetPipelinePropertiesEXT(device Device, pPipelineInfo *Pipeli
 		unsafe.Pointer(&pPipelineInfo),
 		unsafe.Pointer(&pPipelineProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelinePropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPipelinePropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6371,6 +7583,9 @@ func (c *Commands) ExportMetalObjectsEXT(device Device, pMetalObjectsInfo *Expor
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pMetalObjectsInfo),
 	}
+	if c.exportMetalObjectsEXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.exportMetalObjectsEXT, nil, args[:])
 }
 
@@ -6379,6 +7594,9 @@ func (c *Commands) CmdBindTileMemoryQCOM(commandBuffer CommandBuffer, pTileMemor
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pTileMemoryBindInfo),
+	}
+	if c.cmdBindTileMemoryQCOM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindTileMemoryQCOM, nil, args[:])
 }
@@ -6392,7 +7610,9 @@ func (c *Commands) GetFramebufferTilePropertiesQCOM(device Device, framebuffer F
 		unsafe.Pointer(&pPropertiesCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getFramebufferTilePropertiesQCOM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getFramebufferTilePropertiesQCOM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6404,7 +7624,9 @@ func (c *Commands) GetDynamicRenderingTilePropertiesQCOM(device Device, pRenderi
 		unsafe.Pointer(&pRenderingInfo),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDynamicRenderingTilePropertiesQCOM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getDynamicRenderingTilePropertiesQCOM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6417,7 +7639,9 @@ func (c *Commands) GetPhysicalDeviceOpticalFlowImageFormatsNV(physicalDevice Phy
 		unsafe.Pointer(&pFormatCount),
 		unsafe.Pointer(&pImageFormatProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceOpticalFlowImageFormatsNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getPhysicalDeviceOpticalFlowImageFormatsNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6430,7 +7654,9 @@ func (c *Commands) CreateOpticalFlowSessionNV(device Device, pCreateInfo *Optica
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSession),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createOpticalFlowSessionNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createOpticalFlowSessionNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6440,6 +7666,9 @@ func (c *Commands) DestroyOpticalFlowSessionNV(device Device, session OpticalFlo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&session),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyOpticalFlowSessionNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyOpticalFlowSessionNV, nil, args[:])
 }
@@ -6453,6 +7682,9 @@ func (c *Commands) CmdOpticalFlowExecuteNV(commandBuffer CommandBuffer, session 
 		unsafe.Pointer(&session),
 		unsafe.Pointer(&pExecuteInfo),
 	}
+	if c.cmdOpticalFlowExecuteNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdOpticalFlowExecuteNV, nil, args[:])
 }
 
@@ -6464,7 +7696,9 @@ func (c *Commands) GetDeviceFaultInfoEXT(device Device, pFaultCounts *DeviceFaul
 		unsafe.Pointer(&pFaultCounts),
 		unsafe.Pointer(&pFaultInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceFaultInfoEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getDeviceFaultInfoEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6473,6 +7707,9 @@ func (c *Commands) CmdSetDepthBias2EXT(commandBuffer CommandBuffer, pDepthBiasIn
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pDepthBiasInfo),
+	}
+	if c.cmdSetDepthBias2EXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetDepthBias2EXT, nil, args[:])
 }
@@ -6484,7 +7721,9 @@ func (c *Commands) ReleaseSwapchainImagesKHR(device Device, pReleaseInfo *Releas
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pReleaseInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.releaseSwapchainImagesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.releaseSwapchainImagesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6494,6 +7733,9 @@ func (c *Commands) GetDeviceImageSubresourceLayout(device Device, pInfo *DeviceI
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pLayout),
+	}
+	if c.getDeviceImageSubresourceLayout == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceImageSubresourceLayout, nil, args[:])
 }
@@ -6506,7 +7748,9 @@ func (c *Commands) MapMemory2(device Device, pMemoryMapInfo *MemoryMapInfo, ppDa
 		unsafe.Pointer(&pMemoryMapInfo),
 		unsafe.Pointer(&ppData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.mapMemory2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.mapMemory2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6517,7 +7761,9 @@ func (c *Commands) UnmapMemory2(device Device, pMemoryUnmapInfo *MemoryUnmapInfo
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pMemoryUnmapInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.unmapMemory2, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.unmapMemory2, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6531,7 +7777,9 @@ func (c *Commands) CreateShadersEXT(device Device, createInfoCount uint32, pCrea
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pShaders),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createShadersEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.createShadersEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6541,6 +7789,9 @@ func (c *Commands) DestroyShaderEXT(device Device, shader ShaderEXT, pAllocator 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&shader),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyShaderEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyShaderEXT, nil, args[:])
 }
@@ -6554,7 +7805,9 @@ func (c *Commands) GetShaderBinaryDataEXT(device Device, shader ShaderEXT, pData
 		unsafe.Pointer(&pDataSize),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getShaderBinaryDataEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getShaderBinaryDataEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6568,7 +7821,9 @@ func (c *Commands) SetSwapchainPresentTimingQueueSizeEXT(device Device, swapchai
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&size),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandleU32, c.setSwapchainPresentTimingQueueSizeEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandleU32, c.setSwapchainPresentTimingQueueSizeEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6581,7 +7836,9 @@ func (c *Commands) GetSwapchainTimingPropertiesEXT(device Device, swapchain Swap
 		unsafe.Pointer(&pSwapchainTimingProperties),
 		unsafe.Pointer(&pSwapchainTimingPropertiesCounter),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimingPropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimingPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6594,7 +7851,9 @@ func (c *Commands) GetSwapchainTimeDomainPropertiesEXT(device Device, swapchain 
 		unsafe.Pointer(&pSwapchainTimeDomainProperties),
 		unsafe.Pointer(&pTimeDomainsCounter),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimeDomainPropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getSwapchainTimeDomainPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6606,7 +7865,9 @@ func (c *Commands) GetPastPresentationTimingEXT(device Device, pPastPresentation
 		unsafe.Pointer(&pPastPresentationTimingInfo),
 		unsafe.Pointer(&pPastPresentationTimingProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPastPresentationTimingEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPastPresentationTimingEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6618,7 +7879,9 @@ func (c *Commands) GetScreenBufferPropertiesQNX(device Device, buffer *ScreenBuf
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getScreenBufferPropertiesQNX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getScreenBufferPropertiesQNX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6630,7 +7893,9 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixPropertiesKHR(physicalDevic
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesKHR, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6642,7 +7907,9 @@ func (c *Commands) GetExecutionGraphPipelineScratchSizeAMDX(device Device, execu
 		unsafe.Pointer(&executionGraph),
 		unsafe.Pointer(&pSizeInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.getExecutionGraphPipelineScratchSizeAMDX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.getExecutionGraphPipelineScratchSizeAMDX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6655,7 +7922,9 @@ func (c *Commands) GetExecutionGraphPipelineNodeIndexAMDX(device Device, executi
 		unsafe.Pointer(&pNodeInfo),
 		unsafe.Pointer(&pNodeIndex),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getExecutionGraphPipelineNodeIndexAMDX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getExecutionGraphPipelineNodeIndexAMDX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6670,7 +7939,9 @@ func (c *Commands) CreateExecutionGraphPipelinesAMDX(device Device, pipelineCach
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pPipelines),
 	}
-	_ = ffi.CallFunction(&SigResultCreatePipelines, c.createExecutionGraphPipelinesAMDX, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultCreatePipelines, c.createExecutionGraphPipelinesAMDX, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6688,6 +7959,9 @@ func (c *Commands) CmdBindDescriptorSets2(commandBuffer CommandBuffer, pBindDesc
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBindDescriptorSetsInfo),
 	}
+	if c.cmdBindDescriptorSets2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindDescriptorSets2, nil, args[:])
 }
 
@@ -6696,6 +7970,9 @@ func (c *Commands) CmdPushConstants2(commandBuffer CommandBuffer, pPushConstants
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pPushConstantsInfo),
+	}
+	if c.cmdPushConstants2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushConstants2, nil, args[:])
 }
@@ -6706,6 +7983,9 @@ func (c *Commands) CmdPushDescriptorSet2(commandBuffer CommandBuffer, pPushDescr
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pPushDescriptorSetInfo),
 	}
+	if c.cmdPushDescriptorSet2 == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushDescriptorSet2, nil, args[:])
 }
 
@@ -6714,6 +7994,9 @@ func (c *Commands) CmdPushDescriptorSetWithTemplate2(commandBuffer CommandBuffer
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pPushDescriptorSetWithTemplateInfo),
+	}
+	if c.cmdPushDescriptorSetWithTemplate2 == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdPushDescriptorSetWithTemplate2, nil, args[:])
 }
@@ -6724,6 +8007,9 @@ func (c *Commands) CmdSetDescriptorBufferOffsets2EXT(commandBuffer CommandBuffer
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pSetDescriptorBufferOffsetsInfo),
 	}
+	if c.cmdSetDescriptorBufferOffsets2EXT == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetDescriptorBufferOffsets2EXT, nil, args[:])
 }
 
@@ -6732,6 +8018,9 @@ func (c *Commands) CmdBindDescriptorBufferEmbeddedSamplers2EXT(commandBuffer Com
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pBindDescriptorBufferEmbeddedSamplersInfo),
+	}
+	if c.cmdBindDescriptorBufferEmbeddedSamplers2EXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBindDescriptorBufferEmbeddedSamplers2EXT, nil, args[:])
 }
@@ -6744,7 +8033,9 @@ func (c *Commands) SetLatencySleepModeNV(device Device, swapchain SwapchainKHR, 
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pSleepModeInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.setLatencySleepModeNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.setLatencySleepModeNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6756,7 +8047,9 @@ func (c *Commands) LatencySleepNV(device Device, swapchain SwapchainKHR, pSleepI
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pSleepInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtr, c.latencySleepNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtr, c.latencySleepNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6766,6 +8059,9 @@ func (c *Commands) SetLatencyMarkerNV(device Device, swapchain SwapchainKHR, pLa
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pLatencyMarkerInfo),
+	}
+	if c.setLatencyMarkerNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.setLatencyMarkerNV, nil, args[:])
 }
@@ -6777,6 +8073,9 @@ func (c *Commands) GetLatencyTimingsNV(device Device, swapchain SwapchainKHR, pL
 		unsafe.Pointer(&swapchain),
 		unsafe.Pointer(&pLatencyMarkerInfo),
 	}
+	if c.getLatencyTimingsNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.getLatencyTimingsNV, nil, args[:])
 }
 
@@ -6785,6 +8084,9 @@ func (c *Commands) QueueNotifyOutOfBandNV(queue Queue, pQueueTypeInfo *OutOfBand
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&queue),
 		unsafe.Pointer(&pQueueTypeInfo),
+	}
+	if c.queueNotifyOutOfBandNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.queueNotifyOutOfBandNV, nil, args[:])
 }
@@ -6795,6 +8097,9 @@ func (c *Commands) CmdSetRenderingAttachmentLocations(commandBuffer CommandBuffe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pLocationInfo),
 	}
+	if c.cmdSetRenderingAttachmentLocations == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetRenderingAttachmentLocations, nil, args[:])
 }
 
@@ -6803,6 +8108,9 @@ func (c *Commands) CmdSetRenderingInputAttachmentIndices(commandBuffer CommandBu
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pInputAttachmentIndexInfo),
+	}
+	if c.cmdSetRenderingInputAttachmentIndices == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetRenderingInputAttachmentIndices, nil, args[:])
 }
@@ -6813,6 +8121,9 @@ func (c *Commands) CmdSetDepthClampRangeEXT(commandBuffer CommandBuffer, depthCl
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&depthClampMode),
 		unsafe.Pointer(&pDepthClampRange),
+	}
+	if c.cmdSetDepthClampRangeEXT == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdSetDepthClampRangeEXT, nil, args[:])
 }
@@ -6825,7 +8136,9 @@ func (c *Commands) GetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertie
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6837,7 +8150,9 @@ func (c *Commands) GetMemoryMetalHandleEXT(device Device, pGetMetalHandleInfo *M
 		unsafe.Pointer(&pGetMetalHandleInfo),
 		unsafe.Pointer(&pHandle),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryMetalHandleEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryMetalHandleEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6850,7 +8165,9 @@ func (c *Commands) GetMemoryMetalHandlePropertiesEXT(device Device, handleType E
 		unsafe.Pointer(&pHandle),
 		unsafe.Pointer(&pMemoryMetalHandleProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryMetalHandlePropertiesEXT, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryMetalHandlePropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6862,7 +8179,9 @@ func (c *Commands) GetPhysicalDeviceCooperativeVectorPropertiesNV(physicalDevice
 		unsafe.Pointer(&pPropertyCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeVectorPropertiesNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getPhysicalDeviceCooperativeVectorPropertiesNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6873,7 +8192,9 @@ func (c *Commands) ConvertCooperativeVectorMatrixNV(device Device, pInfo *Conver
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtr, c.convertCooperativeVectorMatrixNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtr, c.convertCooperativeVectorMatrixNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6884,6 +8205,9 @@ func (c *Commands) CmdConvertCooperativeVectorMatrixNV(commandBuffer CommandBuff
 		unsafe.Pointer(&infoCount),
 		unsafe.Pointer(&pInfos),
 	}
+	if c.cmdConvertCooperativeVectorMatrixNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleU32Ptr, c.cmdConvertCooperativeVectorMatrixNV, nil, args[:])
 }
 
@@ -6892,6 +8216,9 @@ func (c *Commands) CmdDispatchTileQCOM(commandBuffer CommandBuffer, pDispatchTil
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pDispatchTileInfo),
+	}
+	if c.cmdDispatchTileQCOM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdDispatchTileQCOM, nil, args[:])
 }
@@ -6902,6 +8229,9 @@ func (c *Commands) CmdBeginPerTileExecutionQCOM(commandBuffer CommandBuffer, pPe
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pPerTileBeginInfo),
 	}
+	if c.cmdBeginPerTileExecutionQCOM == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdBeginPerTileExecutionQCOM, nil, args[:])
 }
 
@@ -6910,6 +8240,9 @@ func (c *Commands) CmdEndPerTileExecutionQCOM(commandBuffer CommandBuffer, pPerT
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pPerTileEndInfo),
+	}
+	if c.cmdEndPerTileExecutionQCOM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdEndPerTileExecutionQCOM, nil, args[:])
 }
@@ -6923,7 +8256,9 @@ func (c *Commands) CreateExternalComputeQueueNV(device Device, pCreateInfo *Exte
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pExternalQueue),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createExternalComputeQueueNV, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createExternalComputeQueueNV, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6934,6 +8269,9 @@ func (c *Commands) DestroyExternalComputeQueueNV(device Device, externalQueue Ex
 		unsafe.Pointer(&externalQueue),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyExternalComputeQueueNV == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyExternalComputeQueueNV, nil, args[:])
 }
 
@@ -6943,6 +8281,9 @@ func (c *Commands) GetExternalComputeQueueDataNV(externalQueue ExternalComputeQu
 		unsafe.Pointer(&externalQueue),
 		unsafe.Pointer(&params),
 		unsafe.Pointer(&pData),
+	}
+	if c.getExternalComputeQueueDataNV == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getExternalComputeQueueDataNV, nil, args[:])
 }
@@ -6956,7 +8297,9 @@ func (c *Commands) CreateTensorARM(device Device, pCreateInfo *TensorCreateInfoA
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pTensor),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6966,6 +8309,9 @@ func (c *Commands) DestroyTensorARM(device Device, tensor TensorARM, pAllocator 
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&tensor),
 		unsafe.Pointer(&pAllocator),
+	}
+	if c.destroyTensorARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyTensorARM, nil, args[:])
 }
@@ -6979,7 +8325,9 @@ func (c *Commands) CreateTensorViewARM(device Device, pCreateInfo *TensorViewCre
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pView),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorViewARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createTensorViewARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -6990,6 +8338,9 @@ func (c *Commands) DestroyTensorViewARM(device Device, tensorView TensorViewARM,
 		unsafe.Pointer(&tensorView),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyTensorViewARM == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyTensorViewARM, nil, args[:])
 }
 
@@ -6999,6 +8350,9 @@ func (c *Commands) GetTensorMemoryRequirementsARM(device Device, pInfo *TensorMe
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getTensorMemoryRequirementsARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getTensorMemoryRequirementsARM, nil, args[:])
 }
@@ -7011,7 +8365,9 @@ func (c *Commands) BindTensorMemoryARM(device Device, bindInfoCount uint32, pBin
 		unsafe.Pointer(&bindInfoCount),
 		unsafe.Pointer(&pBindInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindTensorMemoryARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.bindTensorMemoryARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7022,6 +8378,9 @@ func (c *Commands) GetDeviceTensorMemoryRequirementsARM(device Device, pInfo *De
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
 	}
+	if c.getDeviceTensorMemoryRequirementsARM == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceTensorMemoryRequirementsARM, nil, args[:])
 }
 
@@ -7030,6 +8389,9 @@ func (c *Commands) CmdCopyTensorARM(commandBuffer CommandBuffer, pCopyTensorInfo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&pCopyTensorInfo),
+	}
+	if c.cmdCopyTensorARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdCopyTensorARM, nil, args[:])
 }
@@ -7042,7 +8404,9 @@ func (c *Commands) GetTensorOpaqueCaptureDescriptorDataARM(device Device, pInfo 
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7054,7 +8418,9 @@ func (c *Commands) GetTensorViewOpaqueCaptureDescriptorDataARM(device Device, pI
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pData),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorViewOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getTensorViewOpaqueCaptureDescriptorDataARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7064,6 +8430,9 @@ func (c *Commands) GetPhysicalDeviceExternalTensorPropertiesARM(physicalDevice P
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pExternalTensorInfo),
 		unsafe.Pointer(&pExternalTensorProperties),
+	}
+	if c.getPhysicalDeviceExternalTensorPropertiesARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceExternalTensorPropertiesARM, nil, args[:])
 }
@@ -7079,7 +8448,9 @@ func (c *Commands) CreateDataGraphPipelineSessionARM(device Device, pCreateInfo 
 		unsafe.Pointer(&pAllocator),
 		unsafe.Pointer(&pSession),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDataGraphPipelineSessionARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.createDataGraphPipelineSessionARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7092,7 +8463,9 @@ func (c *Commands) GetDataGraphPipelineSessionBindPointRequirementsARM(device De
 		unsafe.Pointer(&pBindPointRequirementCount),
 		unsafe.Pointer(&pBindPointRequirements),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineSessionBindPointRequirementsARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineSessionBindPointRequirementsARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7102,6 +8475,9 @@ func (c *Commands) GetDataGraphPipelineSessionMemoryRequirementsARM(device Devic
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pMemoryRequirements),
+	}
+	if c.getDataGraphPipelineSessionMemoryRequirementsARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDataGraphPipelineSessionMemoryRequirementsARM, nil, args[:])
 }
@@ -7114,7 +8490,9 @@ func (c *Commands) BindDataGraphPipelineSessionMemoryARM(device Device, bindInfo
 		unsafe.Pointer(&bindInfoCount),
 		unsafe.Pointer(&pBindInfos),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32Ptr, c.bindDataGraphPipelineSessionMemoryARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32Ptr, c.bindDataGraphPipelineSessionMemoryARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7125,6 +8503,9 @@ func (c *Commands) DestroyDataGraphPipelineSessionARM(device Device, session Dat
 		unsafe.Pointer(&session),
 		unsafe.Pointer(&pAllocator),
 	}
+	if c.destroyDataGraphPipelineSessionARM == nil {
+		return
+	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyDataGraphPipelineSessionARM, nil, args[:])
 }
 
@@ -7134,6 +8515,9 @@ func (c *Commands) CmdDispatchDataGraphARM(commandBuffer CommandBuffer, session 
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&session),
 		unsafe.Pointer(&pInfo),
+	}
+	if c.cmdDispatchDataGraphARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdDispatchDataGraphARM, nil, args[:])
 }
@@ -7147,7 +8531,9 @@ func (c *Commands) GetDataGraphPipelineAvailablePropertiesARM(device Device, pPi
 		unsafe.Pointer(&pPropertiesCount),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineAvailablePropertiesARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtrPtr, c.getDataGraphPipelineAvailablePropertiesARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7162,7 +8548,9 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(physicalDe
 		unsafe.Pointer(&pQueueFamilyDataGraphPropertyCount),
 		unsafe.Pointer(&pQueueFamilyDataGraphProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getPhysicalDeviceQueueFamilyDataGraphPropertiesARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getPhysicalDeviceQueueFamilyDataGraphPropertiesARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7172,6 +8560,9 @@ func (c *Commands) GetPhysicalDeviceQueueFamilyDataGraphProcessingEngineProperti
 		unsafe.Pointer(&physicalDevice),
 		unsafe.Pointer(&pQueueFamilyDataGraphProcessingEngineInfo),
 		unsafe.Pointer(&pQueueFamilyDataGraphProcessingEngineProperties),
+	}
+	if c.getPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM == nil {
+		return
 	}
 	_ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM, nil, args[:])
 }
@@ -7184,7 +8575,9 @@ func (c *Commands) GetNativeBufferPropertiesOHOS(device Device, buffer *OH_Nativ
 		unsafe.Pointer(&buffer),
 		unsafe.Pointer(&pProperties),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getNativeBufferPropertiesOHOS, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getNativeBufferPropertiesOHOS, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7196,7 +8589,9 @@ func (c *Commands) GetMemoryNativeBufferOHOS(device Device, pInfo *MemoryGetNati
 		unsafe.Pointer(&pInfo),
 		unsafe.Pointer(&pBuffer),
 	}
-	_ = ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryNativeBufferOHOS, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandlePtrPtr, c.getMemoryNativeBufferOHOS, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }
 
@@ -7216,6 +8611,8 @@ func (c *Commands) EnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegion
 		unsafe.Pointer(&pCounters),
 		unsafe.Pointer(&pCounterDescriptions),
 	}
-	_ = ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM, unsafe.Pointer(&result), args[:])
+	if err := ffi.CallFunction(&SigResultHandleU32PtrPtrPtr, c.enumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
 	return Result(result)
 }

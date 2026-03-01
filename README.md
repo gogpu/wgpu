@@ -97,7 +97,9 @@ func main() {
     defer buffer.Release()
 
     // Write data to buffer
-    device.Queue().WriteBuffer(buffer, 0, []byte{1, 2, 3, 4})
+    if err := device.Queue().WriteBuffer(buffer, 0, []byte{1, 2, 3, 4}); err != nil {
+        panic(err)
+    }
 }
 ```
 

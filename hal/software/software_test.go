@@ -121,7 +121,9 @@ func TestBufferWriteRead(t *testing.T) {
 
 	// Write data via queue
 	testData := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	openDev.Queue.WriteBuffer(buffer, 0, testData)
+	if err := openDev.Queue.WriteBuffer(buffer, 0, testData); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 
 	// Read data back
 	buf := buffer.(*Buffer)

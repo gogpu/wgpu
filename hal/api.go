@@ -203,7 +203,8 @@ type Queue interface {
 
 	// WriteBuffer writes data to a buffer immediately.
 	// This is a convenience method that creates a staging buffer internally.
-	WriteBuffer(buffer Buffer, offset uint64, data []byte)
+	// Returns an error if the buffer is invalid or the write fails.
+	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
 
 	// ReadBuffer reads data from a GPU buffer into the provided byte slice.
 	// The buffer must have been created with BufferUsageMapRead.
@@ -212,7 +213,8 @@ type Queue interface {
 
 	// WriteTexture writes data to a texture immediately.
 	// This is a convenience method that creates a staging buffer internally.
-	WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D)
+	// Returns an error if any step in the upload pipeline fails (VK-003).
+	WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error
 
 	// Present presents a surface texture to the screen.
 	// The texture must have been acquired via Surface.AcquireTexture.
