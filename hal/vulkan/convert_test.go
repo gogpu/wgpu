@@ -802,3 +802,139 @@ func TestTextureDimensionToViewType(t *testing.T) {
 		})
 	}
 }
+
+// TestVkFormatFeaturesToHAL tests Vulkan format feature flag conversion to HAL.
+func TestVkFormatFeaturesToHAL(t *testing.T) {
+	tests := []struct {
+		name     string
+		features vk.FormatFeatureFlags
+		expect   hal.TextureFormatCapabilityFlags
+	}{
+		{"None", 0, 0},
+		{"Sampled", vk.FormatFeatureFlags(vk.FormatFeatureSampledImageBit), hal.TextureFormatCapabilitySampled},
+		{"Storage", vk.FormatFeatureFlags(vk.FormatFeatureStorageImageBit), hal.TextureFormatCapabilityStorage},
+		{"ColorAttachment", vk.FormatFeatureFlags(vk.FormatFeatureColorAttachmentBit), hal.TextureFormatCapabilityRenderAttachment},
+		{"Blendable", vk.FormatFeatureFlags(vk.FormatFeatureColorAttachmentBlendBit), hal.TextureFormatCapabilityBlendable},
+		{"DepthStencilAttachment", vk.FormatFeatureFlags(vk.FormatFeatureDepthStencilAttachmentBit), hal.TextureFormatCapabilityRenderAttachment},
+		{
+			"Multiple flags",
+			vk.FormatFeatureFlags(vk.FormatFeatureSampledImageBit) | vk.FormatFeatureFlags(vk.FormatFeatureStorageImageBit) | vk.FormatFeatureFlags(vk.FormatFeatureColorAttachmentBit),
+			hal.TextureFormatCapabilitySampled | hal.TextureFormatCapabilityStorage | hal.TextureFormatCapabilityRenderAttachment,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vkFormatFeaturesToHAL(tt.features)
+			if got != tt.expect {
+				t.Errorf("vkFormatFeaturesToHAL() = %v, want %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestVkFormatToTextureFormat tests Vulkan format to WebGPU texture format conversion.
+func TestVkFormatToTextureFormat(t *testing.T) {
+	tests := []struct {
+		name   string
+		format vk.Format
+		expect gputypes.TextureFormat
+	}{
+		{"BGRA8Unorm", vk.FormatB8g8r8a8Unorm, gputypes.TextureFormatBGRA8Unorm},
+		{"BGRA8Srgb", vk.FormatB8g8r8a8Srgb, gputypes.TextureFormatBGRA8UnormSrgb},
+		{"RGBA8Unorm", vk.FormatR8g8b8a8Unorm, gputypes.TextureFormatRGBA8Unorm},
+		{"RGBA8Srgb", vk.FormatR8g8b8a8Srgb, gputypes.TextureFormatRGBA8UnormSrgb},
+		{"RGBA8Snorm", vk.FormatR8g8b8a8Snorm, gputypes.TextureFormatRGBA8Snorm},
+		{"RGBA8Uint", vk.FormatR8g8b8a8Uint, gputypes.TextureFormatRGBA8Uint},
+		{"RGBA8Sint", vk.FormatR8g8b8a8Sint, gputypes.TextureFormatRGBA8Sint},
+		{"RGBA16Float", vk.FormatR16g16b16a16Sfloat, gputypes.TextureFormatRGBA16Float},
+		{"RGBA32Float", vk.FormatR32g32b32a32Sfloat, gputypes.TextureFormatRGBA32Float},
+		{"R8Unorm", vk.FormatR8Unorm, gputypes.TextureFormatR8Unorm},
+		{"R16Float", vk.FormatR16Sfloat, gputypes.TextureFormatR16Float},
+		{"Unknown returns Undefined", vk.Format(9999), gputypes.TextureFormatUndefined},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vkFormatToTextureFormat(tt.format)
+			if got != tt.expect {
+				t.Errorf("vkFormatToTextureFormat(%v) = %v, want %v", tt.format, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestVkPresentModeToHAL tests Vulkan present mode conversion to HAL.
+func TestVkPresentModeToHAL(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   vk.PresentModeKHR
+		expect hal.PresentMode
+	}{
+		{"Immediate", vk.PresentModeImmediateKhr, hal.PresentModeImmediate},
+		{"Mailbox", vk.PresentModeMailboxKhr, hal.PresentModeMailbox},
+		{"FIFO", vk.PresentModeFifoKhr, hal.PresentModeFifo},
+		{"FIFORelaxed", vk.PresentModeFifoRelaxedKhr, hal.PresentModeFifoRelaxed},
+		{"Unknown defaults to FIFO", vk.PresentModeKHR(99), hal.PresentModeFifo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vkPresentModeToHAL(tt.mode)
+			if got != tt.expect {
+				t.Errorf("vkPresentModeToHAL(%v) = %v, want %v", tt.mode, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestVkCompositeAlphaToHAL tests Vulkan composite alpha flag conversion.
+func TestVkCompositeAlphaToHAL(t *testing.T) {
+	tests := []struct {
+		name      string
+		flags     vk.CompositeAlphaFlagsKHR
+		expectLen int
+	}{
+		{"Opaque", vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaOpaqueBitKhr), 1},
+		{"Premultiplied", vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaPreMultipliedBitKhr), 1},
+		{"PostMultiplied", vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaPostMultipliedBitKhr), 1},
+		{"Inherit", vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaInheritBitKhr), 1},
+		{
+			"OpaqueAndPremultiplied",
+			vk.CompositeAlphaFlagsKHR(vk.Flags(vk.CompositeAlphaOpaqueBitKhr) | vk.Flags(vk.CompositeAlphaPreMultipliedBitKhr)),
+			2,
+		},
+		{"None defaults to Opaque", 0, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vkCompositeAlphaToHAL(tt.flags)
+			if len(got) != tt.expectLen {
+				t.Errorf("vkCompositeAlphaToHAL() returned %d modes, want %d", len(got), tt.expectLen)
+			}
+		})
+	}
+
+	// Verify specific mode values for single-flag inputs
+	t.Run("OpaqueValue", func(t *testing.T) {
+		modes := vkCompositeAlphaToHAL(vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaOpaqueBitKhr))
+		if len(modes) != 1 || modes[0] != hal.CompositeAlphaModeOpaque {
+			t.Errorf("expected [Opaque], got %v", modes)
+		}
+	})
+
+	t.Run("PremultipliedValue", func(t *testing.T) {
+		modes := vkCompositeAlphaToHAL(vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaPreMultipliedBitKhr))
+		if len(modes) != 1 || modes[0] != hal.CompositeAlphaModePremultiplied {
+			t.Errorf("expected [Premultiplied], got %v", modes)
+		}
+	})
+
+	t.Run("InheritValue", func(t *testing.T) {
+		modes := vkCompositeAlphaToHAL(vk.CompositeAlphaFlagsKHR(vk.CompositeAlphaInheritBitKhr))
+		if len(modes) != 1 || modes[0] != hal.CompositeAlphaModeInherit {
+			t.Errorf("expected [Inherit], got %v", modes)
+		}
+	})
+}

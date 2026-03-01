@@ -7,7 +7,6 @@ package metal
 
 import (
 	"fmt"
-	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -110,10 +109,10 @@ func (q *Queue) registerFrameCompletionHandler(cmdBuffer ID) {
 		return
 	}
 
-	// addCompletedHandler: copies the block internally, so the Go-side
-	// blockLiteral can be collected after this call returns.
+	// With _NSConcreteGlobalBlock, Block_copy() is a no-op — Metal holds
+	// the same pointer. The block is pinned via blockPinRegistry until
+	// the completion callback fires and unpins it.
 	_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
-	runtime.KeepAlive(blockPtr)
 }
 
 // ReadBuffer reads data from a buffer.
@@ -252,13 +251,8 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		// retains it until the completion handler fires.
 		Release(cmdBuffer)
 
-		// Keep the block literal alive until after commit + addCompletedHandler
-		// have consumed it. The Metal runtime copies block data during
-		// addCompletedHandler, so after this point the Go-side literal
-		// can be collected.
-		runtime.KeepAlive(blockPtr)
-		// Suppress "unused" warning — blockID is used only in the cancellation
-		// path below and runtime.KeepAlive above prevents premature GC.
+		// Block is pinned via blockPinRegistry until the completion callback
+		// fires and unpins it. No runtime.KeepAlive needed.
 		_ = blockID
 
 		hal.Logger().Debug("metal: WriteTexture committed (async)",
