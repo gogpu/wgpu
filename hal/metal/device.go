@@ -131,7 +131,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	texType := textureTypeFromDimension(desc.Dimension, desc.SampleCount, desc.Size.DepthOrArrayLayers)
 	_ = MsgSend(texDesc, Sel("setTextureType:"), uintptr(texType))
 
-	pixelFormat := textureFormatToMTL(desc.Format)
+	pixelFormat := d.adapter.mapTextureFormat(desc.Format)
 	_ = MsgSend(texDesc, Sel("setPixelFormat:"), uintptr(pixelFormat))
 
 	_ = MsgSend(texDesc, Sel("setWidth:"), uintptr(desc.Size.Width))
@@ -223,7 +223,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	if format == gputypes.TextureFormatUndefined {
 		format = mtlTexture.format
 	}
-	pixelFormat := textureFormatToMTL(format)
+	pixelFormat := d.adapter.mapTextureFormat(format)
 
 	baseMip := desc.BaseMipLevel
 	mipCount := desc.MipLevelCount
@@ -555,7 +555,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			}
 
 			// Set pixel format
-			pixelFormat := textureFormatToMTL(target.Format)
+			pixelFormat := d.adapter.mapTextureFormat(target.Format)
 			_ = MsgSend(attachment, Sel("setPixelFormat:"), uintptr(pixelFormat))
 
 			// Set write mask

@@ -12,8 +12,28 @@ import (
 
 // Adapter implements hal.Adapter for Metal.
 type Adapter struct {
-	instance *Instance
-	raw      ID // id<MTLDevice>
+	instance              *Instance
+	raw                   ID   // id<MTLDevice>
+	formatDepth24Stencil8 bool // true if Depth24UnormStencil8 supported (Intel-era AMD only)
+}
+
+// mapTextureFormat converts a WebGPU texture format to Metal pixel format,
+// accounting for device capabilities (e.g. Depth24 support on Apple Silicon).
+func (a *Adapter) mapTextureFormat(format gputypes.TextureFormat) MTLPixelFormat {
+	switch format {
+	case gputypes.TextureFormatDepth24Plus:
+		if a.formatDepth24Stencil8 {
+			return MTLPixelFormatDepth24UnormStencil8
+		}
+		return MTLPixelFormatDepth32Float
+	case gputypes.TextureFormatDepth24PlusStencil8:
+		if a.formatDepth24Stencil8 {
+			return MTLPixelFormatDepth24UnormStencil8
+		}
+		return MTLPixelFormatDepth32FloatStencil8
+	default:
+		return textureFormatToMTL(format)
+	}
 }
 
 // Open opens a logical device with the requested features and limits.
