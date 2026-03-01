@@ -87,14 +87,26 @@ jobs:
       shell: bash
       run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
 
+    - name: Verify coverage file
+      if: matrix.os == 'ubuntu-latest'
+      shell: bash
+      run: |
+        if [ -f coverage.txt ]; then
+          echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
+        else
+          echo "coverage.txt not found, generating separately..."
+          go test -coverprofile=coverage.txt -covermode=atomic ./... || true
+        fi
+
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
-        file: ./coverage.txt
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.txt
         flags: unittests
         name: codecov-wgpu
-        fail_ci_if_error: false
+        fail_ci_if_error: true
 
   # GLES/EGL Integration Test - Linux with Mesa Surfaceless
   integration-gles:
