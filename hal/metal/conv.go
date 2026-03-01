@@ -86,8 +86,10 @@ func textureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
 		return MTLPixelFormatDepth16Unorm
 	case gputypes.TextureFormatDepth32Float:
 		return MTLPixelFormatDepth32Float
+	case gputypes.TextureFormatDepth24Plus:
+		return MTLPixelFormatDepth32Float
 	case gputypes.TextureFormatDepth24PlusStencil8:
-		return MTLPixelFormatDepth24UnormStencil8
+		return MTLPixelFormatDepth32FloatStencil8
 	case gputypes.TextureFormatDepth32FloatStencil8:
 		return MTLPixelFormatDepth32FloatStencil8
 	case gputypes.TextureFormatStencil8:

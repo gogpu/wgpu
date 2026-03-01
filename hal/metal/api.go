@@ -76,8 +76,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		features.Insert(gputypes.FeatureTextureCompressionBC)
 
 		adapter := &Adapter{
-			instance: i,
-			raw:      device,
+			instance:              i,
+			raw:                   device,
+			formatDepth24Stencil8: MsgSendBool(device, Sel("isDepth24Stencil8PixelFormatSupported")),
 		}
 
 		maxBuf := DeviceMaxBufferLength(device)
@@ -89,6 +90,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			"removable", DeviceIsRemovable(device),
 			"headless", DeviceIsHeadless(device),
 			"maxBuffer", maxBuf,
+			"depth24Stencil8", adapter.formatDepth24Stencil8,
 		)
 
 		adapters = append(adapters, hal.ExposedAdapter{

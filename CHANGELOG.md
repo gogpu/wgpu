@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-03-01
+
+### Fixed
+
+- **Metal: crash on Apple Silicon (M1/M2/M3/M4) with depth/stencil textures** —
+  `Depth24PlusStencil8` was hardcoded to `MTLPixelFormatDepth24UnormStencil8` (255),
+  which is unsupported on Apple Silicon GPUs (only available on legacy AMD GPUs in
+  Intel-era Macs). Metal rejected the invalid pixel format with SIGABRT. Additionally,
+  `Depth24Plus` was completely missing from the format mapping, returning
+  `MTLPixelFormatInvalid` (0). Fixed by detecting device capability via
+  `isDepth24Stencil8PixelFormatSupported` at adapter enumeration and choosing
+  `Depth32Float`/`Depth32FloatStencil8` (universally supported) when Depth24 is
+  unavailable. Follows the same pattern as wgpu-rs (`wgpu-hal/src/metal/adapter.rs`).
+  ([ui#23](https://github.com/gogpu/ui/issues/23))
+
 ## [0.19.0] - 2026-03-01
 
 ### Changed
