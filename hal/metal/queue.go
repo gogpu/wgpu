@@ -132,19 +132,20 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 }
 
 // WriteBuffer writes data to a buffer immediately.
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil {
-		return
+		return fmt.Errorf("metal: WriteBuffer: invalid buffer")
 	}
 
 	ptr := buf.Contents()
 	if ptr == nil {
-		return // Buffer is not mappable
+		return fmt.Errorf("metal: WriteBuffer: buffer not mappable")
 	}
 
 	dst := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
 	copy(dst, data)
+	return nil
 }
 
 // WriteTexture writes data to a texture using a staging buffer and blit encoder.
@@ -160,10 +161,10 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
 // The caller's data slice is consumed synchronously — newBufferWithBytes copies
 // the bytes into the staging buffer before this method returns, so the caller
 // may reuse or free the data slice immediately.
-func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	tex, ok := dst.Texture.(*Texture)
 	if !ok || tex == nil || len(data) == 0 || size == nil {
-		return
+		return fmt.Errorf("metal: WriteTexture: invalid arguments")
 	}
 
 	pool := NewAutoreleasePool()
@@ -175,10 +176,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	stagingBuffer := MsgSend(q.device.raw, Sel("newBufferWithBytes:length:options:"),
 		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(MTLStorageModeShared))
 	if stagingBuffer == 0 {
-		hal.Logger().Warn("metal: WriteTexture staging buffer creation failed",
-			"dataSize", len(data),
-		)
-		return
+		return fmt.Errorf("metal: WriteTexture: staging buffer creation failed (dataSize=%d)", len(data))
 	}
 	// Do NOT defer Release(stagingBuffer) — it will be released either by
 	// the completion handler (async path) or explicitly (sync fallback).
@@ -187,8 +185,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
 	if cmdBuffer == 0 {
 		Release(stagingBuffer)
-		hal.Logger().Warn("metal: WriteTexture command buffer creation failed")
-		return
+		return fmt.Errorf("metal: WriteTexture: command buffer creation failed")
 	}
 	Retain(cmdBuffer)
 
@@ -196,8 +193,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if blitEncoder == 0 {
 		Release(stagingBuffer)
 		Release(cmdBuffer)
-		hal.Logger().Warn("metal: WriteTexture blit encoder creation failed")
-		return
+		return fmt.Errorf("metal: WriteTexture: blit encoder creation failed")
 	}
 
 	// Calculate layout parameters.
@@ -271,7 +267,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 			"dataSize", len(data),
 			"format", tex.format,
 		)
-		return
+		return nil
 	}
 
 	// Fallback: block creation failed — use synchronous path.
@@ -286,6 +282,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		"dataSize", len(data),
 		"format", tex.format,
 	)
+	return nil
 }
 
 // Present presents a surface texture to the screen.

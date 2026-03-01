@@ -1033,6 +1033,12 @@ func (d *Device) acquireAllocator() (commandAllocator, error) {
 		if result != vk.Success {
 			return commandAllocator{}, fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
 		}
+
+		// Post-condition: validate recycled handle is still valid (VK-001).
+		if alloc.cmdBuffer == 0 {
+			return commandAllocator{}, fmt.Errorf("vulkan: recycled allocator has null command buffer handle")
+		}
+
 		return alloc, nil
 	}
 	d.allocatorMu.Unlock()
@@ -1063,6 +1069,14 @@ func (d *Device) acquireAllocator() (commandAllocator, error) {
 	if result != vk.Success {
 		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
 		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
+	}
+
+	// Post-condition: validate handle is non-null (VK-001).
+	// goffi returns zeros on nil function pointer (no crash, no error),
+	// so vkAllocateCommandBuffers could "succeed" with cmdBuffer=0.
+	if cmdBuffer == 0 {
+		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
+		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers returned null command buffer handle")
 	}
 
 	d.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "CommandPool")

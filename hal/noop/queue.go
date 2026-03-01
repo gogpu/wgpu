@@ -1,6 +1,8 @@
 package noop
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -29,15 +31,26 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 
 // WriteBuffer simulates immediate buffer writes.
 // If the buffer has storage, copies data to it.
-func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
-	if b, ok := buffer.(*Buffer); ok && b.data != nil {
-		copy(b.data[offset:], data)
+func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	switch b := buffer.(type) {
+	case *Buffer:
+		if b.data != nil {
+			copy(b.data[offset:], data)
+		}
+		return nil
+	case *Resource:
+		// Non-mapped buffer — no data to write, just a no-op.
+		_ = b
+		return nil
+	default:
+		return fmt.Errorf("noop: WriteBuffer: invalid buffer type %T", buffer)
 	}
 }
 
 // WriteTexture simulates immediate texture writes.
 // This is a no-op since textures don't store data.
-func (q *Queue) WriteTexture(_ *hal.ImageCopyTexture, _ []byte, _ *hal.ImageDataLayout, _ *hal.Extent3D) {
+func (q *Queue) WriteTexture(_ *hal.ImageCopyTexture, _ []byte, _ *hal.ImageDataLayout, _ *hal.Extent3D) error {
+	return nil
 }
 
 // Present simulates surface presentation.

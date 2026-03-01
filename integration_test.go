@@ -394,7 +394,9 @@ func TestIntegrationQueueWriteBuffer(t *testing.T) {
 	}
 
 	// WriteBuffer should not panic and should store the data.
-	q.WriteBuffer(buf, 0, data)
+	if err := q.WriteBuffer(buf, 0, data); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 }
 
 // --- WaitIdle tests ---
@@ -589,7 +591,9 @@ func TestIntegrationQueueReadBuffer(t *testing.T) {
 		binary.LittleEndian.PutUint32(writeData[i*4:], uint32(i*10+1))
 	}
 
-	q.WriteBuffer(buf, 0, writeData)
+	if err := q.WriteBuffer(buf, 0, writeData); err != nil {
+		t.Fatalf("WriteBuffer failed: %v", err)
+	}
 
 	// Read it back.
 	readData := make([]byte, bufSize)

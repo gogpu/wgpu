@@ -3476,47 +3476,366 @@ const (
 	SwapchainImageUsageSharedBitOhos SwapchainImageUsageFlagBitsOHOS = 1 << 0
 )
 
-// VkQueueFlagBits extension values
+// VkFormatFeatureFlagBits extension values
 const (
-	QueueVideoDecodeBitKhr QueueFlagBits = 32
-	QueueVideoEncodeBitKhr QueueFlagBits = 64
-	QueueOpticalFlowBitNv  QueueFlagBits = 256
-	QueueDataGraphBitArm   QueueFlagBits = 1024
+	FormatFeatureVideoDecodeOutputBitKhr                 FormatFeatureFlagBits = 33554432
+	FormatFeatureVideoDecodeDpbBitKhr                    FormatFeatureFlagBits = 67108864
+	FormatFeatureAccelerationStructureVertexBufferBitKhr FormatFeatureFlagBits = 536870912
+	FormatFeatureSampledImageFilterCubicBitExt           FormatFeatureFlagBits = 8192
+	FormatFeatureFragmentDensityMapBitExt                FormatFeatureFlagBits = 16777216
+	FormatFeatureFragmentShadingRateAttachmentBitKhr     FormatFeatureFlagBits = 1073741824
+	FormatFeatureVideoEncodeInputBitKhr                  FormatFeatureFlagBits = 134217728
+	FormatFeatureVideoEncodeDpbBitKhr                    FormatFeatureFlagBits = 268435456
 )
 
-// VkFormatFeatureFlagBits2 extension values
+// VkExternalMemoryHandleTypeFlagBits extension values
 const (
-	FormatFeature2VideoDecodeOutputBitKhr                 FormatFeatureFlagBits2 = 33554432
-	FormatFeature2VideoDecodeDpbBitKhr                    FormatFeatureFlagBits2 = 67108864
-	FormatFeature2AccelerationStructureVertexBufferBitKhr FormatFeatureFlagBits2 = 536870912
-	FormatFeature2FragmentDensityMapBitExt                FormatFeatureFlagBits2 = 16777216
-	FormatFeature2FragmentShadingRateAttachmentBitKhr     FormatFeatureFlagBits2 = 1073741824
-	FormatFeature2VideoEncodeInputBitKhr                  FormatFeatureFlagBits2 = 134217728
-	FormatFeature2VideoEncodeDpbBitKhr                    FormatFeatureFlagBits2 = 268435456
-	FormatFeature2AccelerationStructureRadiusBufferBitNv  FormatFeatureFlagBits2 = 2251799813685248
-	FormatFeature2LinearColorAttachmentBitNv              FormatFeatureFlagBits2 = 274877906944
-	FormatFeature2WeightImageBitQcom                      FormatFeatureFlagBits2 = 17179869184
-	FormatFeature2WeightSampledImageBitQcom               FormatFeatureFlagBits2 = 34359738368
-	FormatFeature2BlockMatchingBitQcom                    FormatFeatureFlagBits2 = 68719476736
-	FormatFeature2BoxFilterSampledBitQcom                 FormatFeatureFlagBits2 = 137438953472
-	FormatFeature2TensorShaderBitArm                      FormatFeatureFlagBits2 = 549755813888
-	FormatFeature2TensorImageAliasingBitArm               FormatFeatureFlagBits2 = 8796093022208
-	FormatFeature2OpticalFlowImageBitNv                   FormatFeatureFlagBits2 = 1099511627776
-	FormatFeature2OpticalFlowVectorBitNv                  FormatFeatureFlagBits2 = 2199023255552
-	FormatFeature2OpticalFlowCostBitNv                    FormatFeatureFlagBits2 = 4398046511104
-	FormatFeature2TensorDataGraphBitArm                   FormatFeatureFlagBits2 = 281474976710656
-	FormatFeature2CopyImageIndirectDstBitKhr              FormatFeatureFlagBits2 = 576460752303423488
-	FormatFeature2VideoEncodeQuantizationDeltaMapBitKhr   FormatFeatureFlagBits2 = 562949953421312
-	FormatFeature2VideoEncodeEmphasisMapBitKhr            FormatFeatureFlagBits2 = 1125899906842624
-	FormatFeature2DepthCopyOnComputeQueueBitKhr           FormatFeatureFlagBits2 = 4503599627370496
-	FormatFeature2DepthCopyOnTransferQueueBitKhr          FormatFeatureFlagBits2 = 9007199254740992
-	FormatFeature2StencilCopyOnComputeQueueBitKhr         FormatFeatureFlagBits2 = 18014398509481984
-	FormatFeature2StencilCopyOnTransferQueueBitKhr        FormatFeatureFlagBits2 = 36028797018963968
+	ExternalMemoryHandleTypeDmaBufBitExt                    ExternalMemoryHandleTypeFlagBits = 512
+	ExternalMemoryHandleTypeAndroidHardwareBufferBitAndroid ExternalMemoryHandleTypeFlagBits = 1024
+	ExternalMemoryHandleTypeHostAllocationBitExt            ExternalMemoryHandleTypeFlagBits = 128
+	ExternalMemoryHandleTypeHostMappedForeignMemoryBitExt   ExternalMemoryHandleTypeFlagBits = 256
+	ExternalMemoryHandleTypeZirconVmoBitFuchsia             ExternalMemoryHandleTypeFlagBits = 2048
+	ExternalMemoryHandleTypeRdmaAddressBitNv                ExternalMemoryHandleTypeFlagBits = 4096
+	ExternalMemoryHandleTypeSciBufBitNv                     ExternalMemoryHandleTypeFlagBits = 8192
+	ExternalMemoryHandleTypeOhNativeBufferBitOhos           ExternalMemoryHandleTypeFlagBits = 32768
+	ExternalMemoryHandleTypeScreenBufferBitQnx              ExternalMemoryHandleTypeFlagBits = 16384
+	ExternalMemoryHandleTypeMtlbufferBitExt                 ExternalMemoryHandleTypeFlagBits = 65536
+	ExternalMemoryHandleTypeMtltextureBitExt                ExternalMemoryHandleTypeFlagBits = 131072
+	ExternalMemoryHandleTypeMtlheapBitExt                   ExternalMemoryHandleTypeFlagBits = 262144
 )
 
-// VkImageTiling extension values
+// VkBufferUsageFlagBits2 extension values
 const (
-	ImageTilingDrmFormatModifierExt ImageTiling = 1000158000
+	BufferUsage2ExecutionGraphScratchBitAmdx                  BufferUsageFlagBits2 = 33554432
+	BufferUsage2ConditionalRenderingBitExt                    BufferUsageFlagBits2 = 512
+	BufferUsage2ShaderBindingTableBitKhr                      BufferUsageFlagBits2 = 1024
+	BufferUsage2TransformFeedbackBufferBitExt                 BufferUsageFlagBits2 = 2048
+	BufferUsage2TransformFeedbackCounterBufferBitExt          BufferUsageFlagBits2 = 4096
+	BufferUsage2VideoDecodeSrcBitKhr                          BufferUsageFlagBits2 = 8192
+	BufferUsage2VideoDecodeDstBitKhr                          BufferUsageFlagBits2 = 16384
+	BufferUsage2VideoEncodeDstBitKhr                          BufferUsageFlagBits2 = 32768
+	BufferUsage2VideoEncodeSrcBitKhr                          BufferUsageFlagBits2 = 65536
+	BufferUsage2AccelerationStructureBuildInputReadOnlyBitKhr BufferUsageFlagBits2 = 524288
+	BufferUsage2AccelerationStructureStorageBitKhr            BufferUsageFlagBits2 = 1048576
+	BufferUsage2SamplerDescriptorBufferBitExt                 BufferUsageFlagBits2 = 2097152
+	BufferUsage2ResourceDescriptorBufferBitExt                BufferUsageFlagBits2 = 4194304
+	BufferUsage2PushDescriptorsDescriptorBufferBitExt         BufferUsageFlagBits2 = 67108864
+	BufferUsage2MicromapBuildInputReadOnlyBitExt              BufferUsageFlagBits2 = 8388608
+	BufferUsage2MicromapStorageBitExt                         BufferUsageFlagBits2 = 16777216
+	BufferUsage2CompressedDataDgf1BitAmdx                     BufferUsageFlagBits2 = 8589934592
+	BufferUsage2DataGraphForeignDescriptorBitArm              BufferUsageFlagBits2 = 536870912
+	BufferUsage2TileMemoryBitQcom                             BufferUsageFlagBits2 = 134217728
+	BufferUsage2MemoryDecompressionBitExt                     BufferUsageFlagBits2 = 4294967296
+	BufferUsage2PreprocessBufferBitExt                        BufferUsageFlagBits2 = 2147483648
+)
+
+// VkShaderStageFlagBits extension values
+const (
+	ShaderStageRaygenBitKhr            ShaderStageFlagBits = 256
+	ShaderStageAnyHitBitKhr            ShaderStageFlagBits = 512
+	ShaderStageClosestHitBitKhr        ShaderStageFlagBits = 1024
+	ShaderStageMissBitKhr              ShaderStageFlagBits = 2048
+	ShaderStageIntersectionBitKhr      ShaderStageFlagBits = 4096
+	ShaderStageCallableBitKhr          ShaderStageFlagBits = 8192
+	ShaderStageTaskBitExt              ShaderStageFlagBits = 64
+	ShaderStageMeshBitExt              ShaderStageFlagBits = 128
+	ShaderStageSubpassShadingBitHuawei ShaderStageFlagBits = 16384
+	ShaderStageClusterCullingBitHuawei ShaderStageFlagBits = 524288
+)
+
+// VkPolygonMode extension values
+const (
+	PolygonModeFillRectangleNv PolygonMode = 1000153000
+)
+
+// VkImageViewCreateFlagBits extension values
+const (
+	ImageViewCreateFragmentDensityMapDynamicBitExt     ImageViewCreateFlagBits = 1
+	ImageViewCreateDescriptorBufferCaptureReplayBitExt ImageViewCreateFlagBits = 4
+	ImageViewCreateFragmentDensityMapDeferredBitExt    ImageViewCreateFlagBits = 2
+)
+
+// VkDebugUtilsMessageTypeFlagBitsEXT extension values
+const (
+	DebugUtilsMessageTypeDeviceAddressBindingBitExt DebugUtilsMessageTypeFlagBitsEXT = 8
+)
+
+// VkResolveModeFlagBits extension values
+const (
+	ResolveModeExternalFormatDownsampleBitAndroid ResolveModeFlagBits = 16
+	ResolveModeCustomBitExt                       ResolveModeFlagBits = 32
+)
+
+// VkImageCreateFlagBits extension values
+const (
+	ImageCreateCornerSampledBitNv                      ImageCreateFlagBits = 8192
+	ImageCreateSampleLocationsCompatibleDepthBitExt    ImageCreateFlagBits = 4096
+	ImageCreateSubsampledBitExt                        ImageCreateFlagBits = 16384
+	ImageCreateDescriptorBufferCaptureReplayBitExt     ImageCreateFlagBits = 65536
+	ImageCreateMultisampledRenderToSingleSampledBitExt ImageCreateFlagBits = 262144
+	ImageCreate2dViewCompatibleBitExt                  ImageCreateFlagBits = 131072
+	ImageCreateVideoProfileIndependentBitKhr           ImageCreateFlagBits = 1048576
+	ImageCreateFragmentDensityMapOffsetBitExt          ImageCreateFlagBits = 32768
+)
+
+// VkColorSpaceKHR extension values
+const (
+	ColorSpaceDisplayP3NonlinearExt    ColorSpaceKHR = 1000104001
+	ColorSpaceExtendedSrgbLinearExt    ColorSpaceKHR = 1000104002
+	ColorSpaceDisplayP3LinearExt       ColorSpaceKHR = 1000104003
+	ColorSpaceDciP3NonlinearExt        ColorSpaceKHR = 1000104004
+	ColorSpaceBt709LinearExt           ColorSpaceKHR = 1000104005
+	ColorSpaceBt709NonlinearExt        ColorSpaceKHR = 1000104006
+	ColorSpaceBt2020LinearExt          ColorSpaceKHR = 1000104007
+	ColorSpaceHdr10St2084Ext           ColorSpaceKHR = 1000104008
+	ColorSpaceDolbyvisionExt           ColorSpaceKHR = 1000104009
+	ColorSpaceHdr10HlgExt              ColorSpaceKHR = 1000104010
+	ColorSpaceAdobergbLinearExt        ColorSpaceKHR = 1000104011
+	ColorSpaceAdobergbNonlinearExt     ColorSpaceKHR = 1000104012
+	ColorSpacePassThroughExt           ColorSpaceKHR = 1000104013
+	ColorSpaceExtendedSrgbNonlinearExt ColorSpaceKHR = 1000104014
+	ColorSpaceDisplayNativeAmd         ColorSpaceKHR = 1000213000
+)
+
+// VkComponentTypeKHR extension values
+const (
+	ComponentTypeBfloat16Khr   ComponentTypeKHR = 1000141000
+	ComponentTypeSint8PackedNv ComponentTypeKHR = 1000491000
+	ComponentTypeUint8PackedNv ComponentTypeKHR = 1000491001
+	ComponentTypeFloat8E4m3Ext ComponentTypeKHR = 1000567002
+	ComponentTypeFloat8E5m2Ext ComponentTypeKHR = 1000567003
+)
+
+// VkCopyAccelerationStructureModeKHR extension values
+const (
+	CopyAccelerationStructureModeSerializeKhr   CopyAccelerationStructureModeKHR = 2
+	CopyAccelerationStructureModeDeserializeKhr CopyAccelerationStructureModeKHR = 3
+)
+
+// VkMemoryUnmapFlagBits extension values
+const (
+	MemoryUnmapReserveBitExt MemoryUnmapFlagBits = 1
+)
+
+// VkVideoSessionCreateFlagBitsKHR extension values
+const (
+	VideoSessionCreateAllowEncodeParameterOptimizationsBitKhr VideoSessionCreateFlagBitsKHR = 2
+	VideoSessionCreateInlineQueriesBitKhr                     VideoSessionCreateFlagBitsKHR = 4
+	VideoSessionCreateAllowEncodeQuantizationDeltaMapBitKhr   VideoSessionCreateFlagBitsKHR = 8
+	VideoSessionCreateAllowEncodeEmphasisMapBitKhr            VideoSessionCreateFlagBitsKHR = 16
+	VideoSessionCreateInlineSessionParametersBitKhr           VideoSessionCreateFlagBitsKHR = 32
+)
+
+// VkGeometryTypeKHR extension values
+const (
+	GeometryTypeSpheresNv                        GeometryTypeKHR = 1000429004
+	GeometryTypeLinearSweptSpheresNv             GeometryTypeKHR = 1000429005
+	GeometryTypeDenseGeometryFormatTrianglesAmdx GeometryTypeKHR = 1000478000
+)
+
+// VkTensorViewCreateFlagBitsARM extension values
+const (
+	TensorViewCreateDescriptorBufferCaptureReplayBitArm TensorViewCreateFlagBitsARM = 1
+)
+
+// VkObjectType extension values
+const (
+	ObjectTypeSurfaceKhr                    ObjectType = 1000000000
+	ObjectTypeSwapchainKhr                  ObjectType = 1000001000
+	ObjectTypeDisplayKhr                    ObjectType = 1000002000
+	ObjectTypeDisplayModeKhr                ObjectType = 1000002001
+	ObjectTypeDebugReportCallbackExt        ObjectType = 1000011000
+	ObjectTypeVideoSessionKhr               ObjectType = 1000023000
+	ObjectTypeVideoSessionParametersKhr     ObjectType = 1000023001
+	ObjectTypeCuModuleNvx                   ObjectType = 1000029000
+	ObjectTypeCuFunctionNvx                 ObjectType = 1000029001
+	ObjectTypeDebugUtilsMessengerExt        ObjectType = 1000128000
+	ObjectTypeAccelerationStructureKhr      ObjectType = 1000150000
+	ObjectTypeValidationCacheExt            ObjectType = 1000160000
+	ObjectTypeAccelerationStructureNv       ObjectType = 1000165000
+	ObjectTypePerformanceConfigurationIntel ObjectType = 1000210000
+	ObjectTypeDeferredOperationKhr          ObjectType = 1000268000
+	ObjectTypeIndirectCommandsLayoutNv      ObjectType = 1000277000
+	ObjectTypeCudaModuleNv                  ObjectType = 1000307000
+	ObjectTypeCudaFunctionNv                ObjectType = 1000307001
+	ObjectTypeBufferCollectionFuchsia       ObjectType = 1000366000
+	ObjectTypeMicromapExt                   ObjectType = 1000396000
+	ObjectTypeTensorArm                     ObjectType = 1000460000
+	ObjectTypeTensorViewArm                 ObjectType = 1000460001
+	ObjectTypeOpticalFlowSessionNv          ObjectType = 1000464000
+	ObjectTypeShaderExt                     ObjectType = 1000482000
+	ObjectTypePipelineBinaryKhr             ObjectType = 1000483000
+	ObjectTypeSemaphoreSciSyncPoolNv        ObjectType = 1000489000
+	ObjectTypeDataGraphPipelineSessionArm   ObjectType = 1000507000
+	ObjectTypeExternalComputeQueueNv        ObjectType = 1000556000
+	ObjectTypeIndirectCommandsLayoutExt     ObjectType = 1000572000
+	ObjectTypeIndirectExecutionSetExt       ObjectType = 1000572001
+)
+
+// VkDebugReportObjectTypeEXT extension values
+const (
+	DebugReportObjectTypeSamplerYcbcrConversionExt   DebugReportObjectTypeEXT = 1000011000
+	DebugReportObjectTypeDescriptorUpdateTemplateExt DebugReportObjectTypeEXT = 1000011000
+	DebugReportObjectTypeCuModuleNvxExt              DebugReportObjectTypeEXT = 1000029000
+	DebugReportObjectTypeCuFunctionNvxExt            DebugReportObjectTypeEXT = 1000029001
+	DebugReportObjectTypeAccelerationStructureKhrExt DebugReportObjectTypeEXT = 1000150000
+	DebugReportObjectTypeAccelerationStructureNvExt  DebugReportObjectTypeEXT = 1000165000
+	DebugReportObjectTypeCudaModuleNvExt             DebugReportObjectTypeEXT = 1000307000
+	DebugReportObjectTypeCudaFunctionNvExt           DebugReportObjectTypeEXT = 1000307001
+	DebugReportObjectTypeBufferCollectionFuchsiaExt  DebugReportObjectTypeEXT = 1000366000
+)
+
+// VkVideoCodecOperationFlagBitsKHR extension values
+const (
+	VideoCodecOperationEncodeH264BitKhr VideoCodecOperationFlagBitsKHR = 65536
+	VideoCodecOperationEncodeH265BitKhr VideoCodecOperationFlagBitsKHR = 131072
+	VideoCodecOperationDecodeH264BitKhr VideoCodecOperationFlagBitsKHR = 1
+	VideoCodecOperationDecodeH265BitKhr VideoCodecOperationFlagBitsKHR = 2
+	VideoCodecOperationDecodeAv1BitKhr  VideoCodecOperationFlagBitsKHR = 4
+	VideoCodecOperationEncodeAv1BitKhr  VideoCodecOperationFlagBitsKHR = 262144
+	VideoCodecOperationDecodeVp9BitKhr  VideoCodecOperationFlagBitsKHR = 8
+)
+
+// VkIndexType extension values
+const (
+	IndexTypeNoneKhr IndexType = 1000150000
+)
+
+// VkSamplerCreateFlagBits extension values
+const (
+	SamplerCreateSubsampledBitExt                     SamplerCreateFlagBits = 1
+	SamplerCreateSubsampledCoarseReconstructionBitExt SamplerCreateFlagBits = 2
+	SamplerCreateDescriptorBufferCaptureReplayBitExt  SamplerCreateFlagBits = 8
+	SamplerCreateNonSeamlessCubeMapBitExt             SamplerCreateFlagBits = 4
+	SamplerCreateImageProcessingBitQcom               SamplerCreateFlagBits = 16
+)
+
+// VkVideoCodingControlFlagBitsKHR extension values
+const (
+	VideoCodingControlEncodeRateControlBitKhr  VideoCodingControlFlagBitsKHR = 2
+	VideoCodingControlEncodeQualityLevelBitKhr VideoCodingControlFlagBitsKHR = 4
+)
+
+// VkInstanceCreateFlagBits extension values
+const (
+	InstanceCreateEnumeratePortabilityBitKhr InstanceCreateFlagBits = 1
+)
+
+// VkVideoEncodeAV1CapabilityFlagBitsKHR extension values
+const (
+	VideoEncodeAv1CapabilityCompoundPredictionIntraRefreshBitKhr VideoEncodeAV1CapabilityFlagBitsKHR = 32
+)
+
+// VkPipelineStageFlagBits2 extension values
+const (
+	PipelineStage2VideoDecodeBitKhr                   PipelineStageFlagBits2 = 67108864
+	PipelineStage2VideoEncodeBitKhr                   PipelineStageFlagBits2 = 134217728
+	PipelineStage2TransformFeedbackBitExt             PipelineStageFlagBits2 = 16777216
+	PipelineStage2ConditionalRenderingBitExt          PipelineStageFlagBits2 = 262144
+	PipelineStage2CommandPreprocessBitExt             PipelineStageFlagBits2 = 131072
+	PipelineStage2FragmentShadingRateAttachmentBitKhr PipelineStageFlagBits2 = 4194304
+	PipelineStage2AccelerationStructureBuildBitKhr    PipelineStageFlagBits2 = 33554432
+	PipelineStage2RayTracingShaderBitKhr              PipelineStageFlagBits2 = 2097152
+	PipelineStage2FragmentDensityProcessBitExt        PipelineStageFlagBits2 = 8388608
+	PipelineStage2TaskShaderBitExt                    PipelineStageFlagBits2 = 524288
+	PipelineStage2MeshShaderBitExt                    PipelineStageFlagBits2 = 1048576
+	PipelineStage2SubpassShaderBitHuawei              PipelineStageFlagBits2 = 549755813888
+	PipelineStage2InvocationMaskBitHuawei             PipelineStageFlagBits2 = 1099511627776
+	PipelineStage2AccelerationStructureCopyBitKhr     PipelineStageFlagBits2 = 268435456
+	PipelineStage2MicromapBuildBitExt                 PipelineStageFlagBits2 = 1073741824
+	PipelineStage2ClusterCullingShaderBitHuawei       PipelineStageFlagBits2 = 2199023255552
+	PipelineStage2OpticalFlowBitNv                    PipelineStageFlagBits2 = 536870912
+	PipelineStage2ConvertCooperativeVectorMatrixBitNv PipelineStageFlagBits2 = 17592186044416
+	PipelineStage2DataGraphBitArm                     PipelineStageFlagBits2 = 4398046511104
+	PipelineStage2CopyIndirectBitKhr                  PipelineStageFlagBits2 = 70368744177664
+	PipelineStage2MemoryDecompressionBitExt           PipelineStageFlagBits2 = 35184372088832
+)
+
+// VkFormat extension values
+const (
+	FormatPvrtc12bppUnormBlockImg                 Format = 1000054000
+	FormatPvrtc14bppUnormBlockImg                 Format = 1000054001
+	FormatPvrtc22bppUnormBlockImg                 Format = 1000054002
+	FormatPvrtc24bppUnormBlockImg                 Format = 1000054003
+	FormatPvrtc12bppSrgbBlockImg                  Format = 1000054004
+	FormatPvrtc14bppSrgbBlockImg                  Format = 1000054005
+	FormatPvrtc22bppSrgbBlockImg                  Format = 1000054006
+	FormatPvrtc24bppSrgbBlockImg                  Format = 1000054007
+	FormatR8BoolArm                               Format = 1000460000
+	FormatR16g16Sfixed5Nv                         Format = 1000464000
+	FormatR10x6UintPack16Arm                      Format = 1000609000
+	FormatR10x6g10x6Uint2pack16Arm                Format = 1000609001
+	FormatR10x6g10x6b10x6a10x6Uint4pack16Arm      Format = 1000609002
+	FormatR12x4UintPack16Arm                      Format = 1000609003
+	FormatR12x4g12x4Uint2pack16Arm                Format = 1000609004
+	FormatR12x4g12x4b12x4a12x4Uint4pack16Arm      Format = 1000609005
+	FormatR14x2UintPack16Arm                      Format = 1000609006
+	FormatR14x2g14x2Uint2pack16Arm                Format = 1000609007
+	FormatR14x2g14x2b14x2a14x2Uint4pack16Arm      Format = 1000609008
+	FormatR14x2UnormPack16Arm                     Format = 1000609009
+	FormatR14x2g14x2Unorm2pack16Arm               Format = 1000609010
+	FormatR14x2g14x2b14x2a14x2Unorm4pack16Arm     Format = 1000609011
+	FormatG14x2B14x2r14x22plane420Unorm3pack16Arm Format = 1000609012
+	FormatG14x2B14x2r14x22plane422Unorm3pack16Arm Format = 1000609013
+)
+
+// VkDynamicState extension values
+const (
+	DynamicStateViewportWScalingNv                  DynamicState = 1000087000
+	DynamicStateDiscardRectangleExt                 DynamicState = 1000099000
+	DynamicStateDiscardRectangleEnableExt           DynamicState = 1000099001
+	DynamicStateDiscardRectangleModeExt             DynamicState = 1000099002
+	DynamicStateSampleLocationsExt                  DynamicState = 1000143000
+	DynamicStateRayTracingPipelineStackSizeKhr      DynamicState = 1000347000
+	DynamicStateViewportShadingRatePaletteNv        DynamicState = 1000164004
+	DynamicStateViewportCoarseSampleOrderNv         DynamicState = 1000164006
+	DynamicStateExclusiveScissorEnableNv            DynamicState = 1000205000
+	DynamicStateExclusiveScissorNv                  DynamicState = 1000205001
+	DynamicStateFragmentShadingRateKhr              DynamicState = 1000226000
+	DynamicStateVertexInputExt                      DynamicState = 1000352000
+	DynamicStatePatchControlPointsExt               DynamicState = 1000377000
+	DynamicStateLogicOpExt                          DynamicState = 1000377003
+	DynamicStateColorWriteEnableExt                 DynamicState = 1000381000
+	DynamicStateDepthClampEnableExt                 DynamicState = 1000455003
+	DynamicStatePolygonModeExt                      DynamicState = 1000455004
+	DynamicStateRasterizationSamplesExt             DynamicState = 1000455005
+	DynamicStateSampleMaskExt                       DynamicState = 1000455006
+	DynamicStateAlphaToCoverageEnableExt            DynamicState = 1000455007
+	DynamicStateAlphaToOneEnableExt                 DynamicState = 1000455008
+	DynamicStateLogicOpEnableExt                    DynamicState = 1000455009
+	DynamicStateColorBlendEnableExt                 DynamicState = 1000455010
+	DynamicStateColorBlendEquationExt               DynamicState = 1000455011
+	DynamicStateColorWriteMaskExt                   DynamicState = 1000455012
+	DynamicStateTessellationDomainOriginExt         DynamicState = 1000455002
+	DynamicStateRasterizationStreamExt              DynamicState = 1000455013
+	DynamicStateConservativeRasterizationModeExt    DynamicState = 1000455014
+	DynamicStateExtraPrimitiveOverestimationSizeExt DynamicState = 1000455015
+	DynamicStateDepthClipEnableExt                  DynamicState = 1000455016
+	DynamicStateSampleLocationsEnableExt            DynamicState = 1000455017
+	DynamicStateColorBlendAdvancedExt               DynamicState = 1000455018
+	DynamicStateProvokingVertexModeExt              DynamicState = 1000455019
+	DynamicStateLineRasterizationModeExt            DynamicState = 1000455020
+	DynamicStateLineStippleEnableExt                DynamicState = 1000455021
+	DynamicStateDepthClipNegativeOneToOneExt        DynamicState = 1000455022
+	DynamicStateViewportWScalingEnableNv            DynamicState = 1000455023
+	DynamicStateViewportSwizzleNv                   DynamicState = 1000455024
+	DynamicStateCoverageToColorEnableNv             DynamicState = 1000455025
+	DynamicStateCoverageToColorLocationNv           DynamicState = 1000455026
+	DynamicStateCoverageModulationModeNv            DynamicState = 1000455027
+	DynamicStateCoverageModulationTableEnableNv     DynamicState = 1000455028
+	DynamicStateCoverageModulationTableNv           DynamicState = 1000455029
+	DynamicStateShadingRateImageEnableNv            DynamicState = 1000455030
+	DynamicStateRepresentativeFragmentTestEnableNv  DynamicState = 1000455031
+	DynamicStateCoverageReductionModeNv             DynamicState = 1000455032
+	DynamicStateAttachmentFeedbackLoopEnableExt     DynamicState = 1000524000
+	DynamicStateDepthClampRangeExt                  DynamicState = 1000582000
+)
+
+// VkPresentModeKHR extension values
+const (
+	PresentModeSharedDemandRefreshKhr     PresentModeKHR = 1000111000
+	PresentModeSharedContinuousRefreshKhr PresentModeKHR = 1000111001
+	PresentModeFifoLatestReadyKhr         PresentModeKHR = 1000621000
 )
 
 // VkToolPurposeFlagBits extension values
@@ -3525,23 +3844,170 @@ const (
 	ToolPurposeDebugMarkersBitExt   ToolPurposeFlagBits = 64
 )
 
-// VkDependencyFlagBits extension values
+// VkShaderCreateFlagBitsEXT extension values
 const (
-	DependencyFeedbackLoopBitExt                             DependencyFlagBits = 8
-	DependencyQueueFamilyOwnershipTransferUseAllStagesBitKhr DependencyFlagBits = 32
-	DependencyAsymmetricEventBitKhr                          DependencyFlagBits = 64
+	ShaderCreateAllowVaryingSubgroupSizeBitExt      ShaderCreateFlagBitsEXT = 2
+	ShaderCreateRequireFullSubgroupsBitExt          ShaderCreateFlagBitsEXT = 4
+	ShaderCreateNoTaskShaderBitExt                  ShaderCreateFlagBitsEXT = 8
+	ShaderCreateDispatchBaseBitExt                  ShaderCreateFlagBitsEXT = 16
+	ShaderCreateFragmentShadingRateAttachmentBitExt ShaderCreateFlagBitsEXT = 32
+	ShaderCreateFragmentDensityMapAttachmentBitExt  ShaderCreateFlagBitsEXT = 64
+	ShaderCreateIndirectBindableBitExt              ShaderCreateFlagBitsEXT = 128
+	ShaderCreate64BitIndexingBitExt                 ShaderCreateFlagBitsEXT = 32768
 )
 
-// VkDescriptorPoolCreateFlagBits extension values
+// VkPipelineCacheHeaderVersion extension values
 const (
-	DescriptorPoolCreateHostOnlyBitExt                DescriptorPoolCreateFlagBits = 4
-	DescriptorPoolCreateAllowOverallocationSetsBitNv  DescriptorPoolCreateFlagBits = 8
-	DescriptorPoolCreateAllowOverallocationPoolsBitNv DescriptorPoolCreateFlagBits = 16
+	PipelineCacheHeaderVersionDataGraphQcom PipelineCacheHeaderVersion = 1000629000
 )
 
-// VkMemoryAllocateFlagBits extension values
+// VkResult extension values
 const (
-	MemoryAllocateZeroInitializeBitExt MemoryAllocateFlagBits = 8
+	ErrorSurfaceLostKhr                         Result = -1000000000
+	ErrorNativeWindowInUseKhr                   Result = -1000000001
+	SuboptimalKhr                               Result = 1000001003
+	ErrorOutOfDateKhr                           Result = -1000001004
+	ErrorIncompatibleDisplayKhr                 Result = -1000003001
+	ErrorInvalidShaderNv                        Result = -1000012000
+	ErrorImageUsageNotSupportedKhr              Result = -1000023000
+	ErrorVideoPictureLayoutNotSupportedKhr      Result = -1000023001
+	ErrorVideoProfileOperationNotSupportedKhr   Result = -1000023002
+	ErrorVideoProfileFormatNotSupportedKhr      Result = -1000023003
+	ErrorVideoProfileCodecNotSupportedKhr       Result = -1000023004
+	ErrorVideoStdVersionNotSupportedKhr         Result = -1000023005
+	ErrorInvalidDrmFormatModifierPlaneLayoutExt Result = -1000158000
+	ErrorPresentTimingQueueFullExt              Result = -1000208000
+	ErrorFullScreenExclusiveModeLostExt         Result = -1000255000
+	ThreadIdleKhr                               Result = 1000268000
+	ThreadDoneKhr                               Result = 1000268001
+	OperationDeferredKhr                        Result = 1000268002
+	OperationNotDeferredKhr                     Result = 1000268003
+	ErrorInvalidVideoStdParametersKhr           Result = -1000299000
+	ErrorCompressionExhaustedExt                Result = -1000338000
+	IncompatibleShaderBinaryExt                 Result = 1000482000
+	PipelineBinaryMissingKhr                    Result = 1000483000
+	ErrorNotEnoughSpaceKhr                      Result = -1000483000
+)
+
+// VkQueueFlagBits extension values
+const (
+	QueueVideoDecodeBitKhr QueueFlagBits = 32
+	QueueVideoEncodeBitKhr QueueFlagBits = 64
+	QueueOpticalFlowBitNv  QueueFlagBits = 256
+	QueueDataGraphBitArm   QueueFlagBits = 1024
+)
+
+// VkMemoryPropertyFlagBits extension values
+const (
+	MemoryPropertyDeviceCoherentBitAmd MemoryPropertyFlagBits = 64
+	MemoryPropertyDeviceUncachedBitAmd MemoryPropertyFlagBits = 128
+	MemoryPropertyRdmaCapableBitNv     MemoryPropertyFlagBits = 256
+)
+
+// VkTensorUsageFlagBitsARM extension values
+const (
+	TensorUsageDataGraphBitArm TensorUsageFlagBitsARM = 32
+)
+
+// VkVideoSessionParametersCreateFlagBitsKHR extension values
+const (
+	VideoSessionParametersCreateQuantizationMapCompatibleBitKhr VideoSessionParametersCreateFlagBitsKHR = 1
+)
+
+// VkOpacityMicromapSpecialIndexEXT extension values
+const (
+	OpacityMicromapSpecialIndexClusterGeometryDisableOpacityMicromapNv OpacityMicromapSpecialIndexEXT = -5
+)
+
+// VkPipelineCacheCreateFlagBits extension values
+const (
+	PipelineCacheCreateInternallySynchronizedMergeBitKhr PipelineCacheCreateFlagBits = 8
+)
+
+// VkPhysicalDeviceDataGraphOperationTypeARM extension values
+const (
+	PhysicalDeviceDataGraphOperationTypeNeuralModelQcom  PhysicalDeviceDataGraphOperationTypeARM = 1000629000
+	PhysicalDeviceDataGraphOperationTypeBuiltinModelQcom PhysicalDeviceDataGraphOperationTypeARM = 1000629001
+)
+
+// VkImageLayout extension values
+const (
+	ImageLayoutPresentSrcKhr                           ImageLayout = 1000001002
+	ImageLayoutVideoDecodeDstKhr                       ImageLayout = 1000024000
+	ImageLayoutVideoDecodeSrcKhr                       ImageLayout = 1000024001
+	ImageLayoutVideoDecodeDpbKhr                       ImageLayout = 1000024002
+	ImageLayoutSharedPresentKhr                        ImageLayout = 1000111000
+	ImageLayoutFragmentDensityMapOptimalExt            ImageLayout = 1000218000
+	ImageLayoutFragmentShadingRateAttachmentOptimalKhr ImageLayout = 1000226003
+	ImageLayoutVideoEncodeDstKhr                       ImageLayout = 1000299000
+	ImageLayoutVideoEncodeSrcKhr                       ImageLayout = 1000299001
+	ImageLayoutVideoEncodeDpbKhr                       ImageLayout = 1000299002
+	ImageLayoutAttachmentFeedbackLoopOptimalExt        ImageLayout = 1000339000
+	ImageLayoutTensorAliasingArm                       ImageLayout = 1000460000
+	ImageLayoutVideoEncodeQuantizationMapKhr           ImageLayout = 1000553000
+	ImageLayoutZeroInitializedExt                      ImageLayout = 1000620000
+)
+
+// VkAccessFlagBits extension values
+const (
+	AccessTransformFeedbackWriteBitExt            AccessFlagBits = 33554432
+	AccessTransformFeedbackCounterReadBitExt      AccessFlagBits = 67108864
+	AccessTransformFeedbackCounterWriteBitExt     AccessFlagBits = 134217728
+	AccessConditionalRenderingReadBitExt          AccessFlagBits = 1048576
+	AccessColorAttachmentReadNoncoherentBitExt    AccessFlagBits = 524288
+	AccessAccelerationStructureReadBitKhr         AccessFlagBits = 2097152
+	AccessAccelerationStructureWriteBitKhr        AccessFlagBits = 4194304
+	AccessFragmentDensityMapReadBitExt            AccessFlagBits = 16777216
+	AccessFragmentShadingRateAttachmentReadBitKhr AccessFlagBits = 8388608
+	AccessCommandPreprocessReadBitExt             AccessFlagBits = 131072
+	AccessCommandPreprocessWriteBitExt            AccessFlagBits = 262144
+)
+
+// VkPipelineCreateFlagBits extension values
+const (
+	PipelineCreateRayTracingNoNullAnyHitShadersBitKhr            PipelineCreateFlagBits = 16384
+	PipelineCreateRayTracingNoNullClosestHitShadersBitKhr        PipelineCreateFlagBits = 32768
+	PipelineCreateRayTracingNoNullMissShadersBitKhr              PipelineCreateFlagBits = 65536
+	PipelineCreateRayTracingNoNullIntersectionShadersBitKhr      PipelineCreateFlagBits = 131072
+	PipelineCreateRayTracingSkipTrianglesBitKhr                  PipelineCreateFlagBits = 4096
+	PipelineCreateRayTracingSkipAabbsBitKhr                      PipelineCreateFlagBits = 8192
+	PipelineCreateRayTracingShaderGroupHandleCaptureReplayBitKhr PipelineCreateFlagBits = 524288
+	PipelineCreateDeferCompileBitNv                              PipelineCreateFlagBits = 32
+	PipelineCreateRenderingFragmentDensityMapAttachmentBitExt    PipelineCreateFlagBits = 4194304
+	PipelineCreateRenderingFragmentShadingRateAttachmentBitKhr   PipelineCreateFlagBits = 2097152
+	PipelineCreateCaptureStatisticsBitKhr                        PipelineCreateFlagBits = 64
+	PipelineCreateCaptureInternalRepresentationsBitKhr           PipelineCreateFlagBits = 128
+	PipelineCreateIndirectBindableBitNv                          PipelineCreateFlagBits = 262144
+	PipelineCreateLibraryBitKhr                                  PipelineCreateFlagBits = 2048
+	PipelineCreateDescriptorBufferBitExt                         PipelineCreateFlagBits = 536870912
+	PipelineCreateRetainLinkTimeOptimizationInfoBitExt           PipelineCreateFlagBits = 8388608
+	PipelineCreateLinkTimeOptimizationBitExt                     PipelineCreateFlagBits = 1024
+	PipelineCreateRayTracingAllowMotionBitNv                     PipelineCreateFlagBits = 1048576
+	PipelineCreateColorAttachmentFeedbackLoopBitExt              PipelineCreateFlagBits = 33554432
+	PipelineCreateDepthStencilAttachmentFeedbackLoopBitExt       PipelineCreateFlagBits = 67108864
+	PipelineCreateRayTracingOpacityMicromapBitExt                PipelineCreateFlagBits = 16777216
+	PipelineCreateRayTracingDisplacementMicromapBitNv            PipelineCreateFlagBits = 268435456
+)
+
+// VkSubgroupFeatureFlagBits extension values
+const (
+	SubgroupFeaturePartitionedBitNv SubgroupFeatureFlagBits = 256
+)
+
+// VkQueryResultStatusKHR extension values
+const (
+	QueryResultStatusInsufficientBitstreamBufferRangeKhr QueryResultStatusKHR = -1000299000
+)
+
+// VkSubpassContents extension values
+const (
+	SubpassContentsInlineAndSecondaryCommandBuffersKhr SubpassContents = 1000562000
+)
+
+// VkPhysicalDeviceDataGraphProcessingEngineTypeARM extension values
+const (
+	PhysicalDeviceDataGraphProcessingEngineTypeNeuralQcom  PhysicalDeviceDataGraphProcessingEngineTypeARM = 1000629000
+	PhysicalDeviceDataGraphProcessingEngineTypeComputeQcom PhysicalDeviceDataGraphProcessingEngineTypeARM = 1000629001
 )
 
 // VkStructureType extension values
@@ -4444,86 +4910,38 @@ const (
 	StructureTypePhysicalDeviceShaderUniformBufferUnsizedArrayFeaturesExt     StructureType = 1000642000
 )
 
-// VkDebugReportObjectTypeEXT extension values
+// VkBufferUsageFlagBits extension values
 const (
-	DebugReportObjectTypeSamplerYcbcrConversionExt   DebugReportObjectTypeEXT = 1000011000
-	DebugReportObjectTypeDescriptorUpdateTemplateExt DebugReportObjectTypeEXT = 1000011000
-	DebugReportObjectTypeCuModuleNvxExt              DebugReportObjectTypeEXT = 1000029000
-	DebugReportObjectTypeCuFunctionNvxExt            DebugReportObjectTypeEXT = 1000029001
-	DebugReportObjectTypeAccelerationStructureKhrExt DebugReportObjectTypeEXT = 1000150000
-	DebugReportObjectTypeAccelerationStructureNvExt  DebugReportObjectTypeEXT = 1000165000
-	DebugReportObjectTypeCudaModuleNvExt             DebugReportObjectTypeEXT = 1000307000
-	DebugReportObjectTypeCudaFunctionNvExt           DebugReportObjectTypeEXT = 1000307001
-	DebugReportObjectTypeBufferCollectionFuchsiaExt  DebugReportObjectTypeEXT = 1000366000
+	BufferUsageVideoDecodeSrcBitKhr                          BufferUsageFlagBits = 8192
+	BufferUsageVideoDecodeDstBitKhr                          BufferUsageFlagBits = 16384
+	BufferUsageTransformFeedbackBufferBitExt                 BufferUsageFlagBits = 2048
+	BufferUsageTransformFeedbackCounterBufferBitExt          BufferUsageFlagBits = 4096
+	BufferUsageConditionalRenderingBitExt                    BufferUsageFlagBits = 512
+	BufferUsageExecutionGraphScratchBitAmdx                  BufferUsageFlagBits = 33554432
+	BufferUsageAccelerationStructureBuildInputReadOnlyBitKhr BufferUsageFlagBits = 524288
+	BufferUsageAccelerationStructureStorageBitKhr            BufferUsageFlagBits = 1048576
+	BufferUsageShaderBindingTableBitKhr                      BufferUsageFlagBits = 1024
+	BufferUsageVideoEncodeDstBitKhr                          BufferUsageFlagBits = 32768
+	BufferUsageVideoEncodeSrcBitKhr                          BufferUsageFlagBits = 65536
+	BufferUsageSamplerDescriptorBufferBitExt                 BufferUsageFlagBits = 2097152
+	BufferUsageResourceDescriptorBufferBitExt                BufferUsageFlagBits = 4194304
+	BufferUsagePushDescriptorsDescriptorBufferBitExt         BufferUsageFlagBits = 67108864
+	BufferUsageMicromapBuildInputReadOnlyBitExt              BufferUsageFlagBits = 8388608
+	BufferUsageMicromapStorageBitExt                         BufferUsageFlagBits = 16777216
+	BufferUsageTileMemoryBitQcom                             BufferUsageFlagBits = 134217728
 )
 
-// VkDynamicState extension values
+// VkPipelineBindPoint extension values
 const (
-	DynamicStateViewportWScalingNv                  DynamicState = 1000087000
-	DynamicStateDiscardRectangleExt                 DynamicState = 1000099000
-	DynamicStateDiscardRectangleEnableExt           DynamicState = 1000099001
-	DynamicStateDiscardRectangleModeExt             DynamicState = 1000099002
-	DynamicStateSampleLocationsExt                  DynamicState = 1000143000
-	DynamicStateRayTracingPipelineStackSizeKhr      DynamicState = 1000347000
-	DynamicStateViewportShadingRatePaletteNv        DynamicState = 1000164004
-	DynamicStateViewportCoarseSampleOrderNv         DynamicState = 1000164006
-	DynamicStateExclusiveScissorEnableNv            DynamicState = 1000205000
-	DynamicStateExclusiveScissorNv                  DynamicState = 1000205001
-	DynamicStateFragmentShadingRateKhr              DynamicState = 1000226000
-	DynamicStateVertexInputExt                      DynamicState = 1000352000
-	DynamicStatePatchControlPointsExt               DynamicState = 1000377000
-	DynamicStateLogicOpExt                          DynamicState = 1000377003
-	DynamicStateColorWriteEnableExt                 DynamicState = 1000381000
-	DynamicStateDepthClampEnableExt                 DynamicState = 1000455003
-	DynamicStatePolygonModeExt                      DynamicState = 1000455004
-	DynamicStateRasterizationSamplesExt             DynamicState = 1000455005
-	DynamicStateSampleMaskExt                       DynamicState = 1000455006
-	DynamicStateAlphaToCoverageEnableExt            DynamicState = 1000455007
-	DynamicStateAlphaToOneEnableExt                 DynamicState = 1000455008
-	DynamicStateLogicOpEnableExt                    DynamicState = 1000455009
-	DynamicStateColorBlendEnableExt                 DynamicState = 1000455010
-	DynamicStateColorBlendEquationExt               DynamicState = 1000455011
-	DynamicStateColorWriteMaskExt                   DynamicState = 1000455012
-	DynamicStateTessellationDomainOriginExt         DynamicState = 1000455002
-	DynamicStateRasterizationStreamExt              DynamicState = 1000455013
-	DynamicStateConservativeRasterizationModeExt    DynamicState = 1000455014
-	DynamicStateExtraPrimitiveOverestimationSizeExt DynamicState = 1000455015
-	DynamicStateDepthClipEnableExt                  DynamicState = 1000455016
-	DynamicStateSampleLocationsEnableExt            DynamicState = 1000455017
-	DynamicStateColorBlendAdvancedExt               DynamicState = 1000455018
-	DynamicStateProvokingVertexModeExt              DynamicState = 1000455019
-	DynamicStateLineRasterizationModeExt            DynamicState = 1000455020
-	DynamicStateLineStippleEnableExt                DynamicState = 1000455021
-	DynamicStateDepthClipNegativeOneToOneExt        DynamicState = 1000455022
-	DynamicStateViewportWScalingEnableNv            DynamicState = 1000455023
-	DynamicStateViewportSwizzleNv                   DynamicState = 1000455024
-	DynamicStateCoverageToColorEnableNv             DynamicState = 1000455025
-	DynamicStateCoverageToColorLocationNv           DynamicState = 1000455026
-	DynamicStateCoverageModulationModeNv            DynamicState = 1000455027
-	DynamicStateCoverageModulationTableEnableNv     DynamicState = 1000455028
-	DynamicStateCoverageModulationTableNv           DynamicState = 1000455029
-	DynamicStateShadingRateImageEnableNv            DynamicState = 1000455030
-	DynamicStateRepresentativeFragmentTestEnableNv  DynamicState = 1000455031
-	DynamicStateCoverageReductionModeNv             DynamicState = 1000455032
-	DynamicStateAttachmentFeedbackLoopEnableExt     DynamicState = 1000524000
-	DynamicStateDepthClampRangeExt                  DynamicState = 1000582000
+	PipelineBindPointExecutionGraphAmdx   PipelineBindPoint = 1000134000
+	PipelineBindPointRayTracingKhr        PipelineBindPoint = 1000347000
+	PipelineBindPointSubpassShadingHuawei PipelineBindPoint = 1000369003
+	PipelineBindPointDataGraphArm         PipelineBindPoint = 1000507000
 )
 
-// VkDebugUtilsMessageTypeFlagBitsEXT extension values
+// VkImageTiling extension values
 const (
-	DebugUtilsMessageTypeDeviceAddressBindingBitExt DebugUtilsMessageTypeFlagBitsEXT = 8
-)
-
-// VkGeometryTypeKHR extension values
-const (
-	GeometryTypeSpheresNv                        GeometryTypeKHR = 1000429004
-	GeometryTypeLinearSweptSpheresNv             GeometryTypeKHR = 1000429005
-	GeometryTypeDenseGeometryFormatTrianglesAmdx GeometryTypeKHR = 1000478000
-)
-
-// VkMemoryHeapFlagBits extension values
-const (
-	MemoryHeapTileMemoryBitQcom MemoryHeapFlagBits = 8
+	ImageTilingDrmFormatModifierExt ImageTiling = 1000158000
 )
 
 // VkAttachmentDescriptionFlagBits extension values
@@ -4532,42 +4950,122 @@ const (
 	AttachmentDescriptionResolveEnableTransferFunctionBitKhr AttachmentDescriptionFlagBits = 4
 )
 
-// VkSubpassDescriptionFlagBits extension values
+// VkAccessFlagBits2 extension values
 const (
-	SubpassDescriptionPerViewAttributesBitNvx                         SubpassDescriptionFlagBits = 1
-	SubpassDescriptionPerViewPositionXOnlyBitNvx                      SubpassDescriptionFlagBits = 2
-	SubpassDescriptionTileShadingApronBitQcom                         SubpassDescriptionFlagBits = 256
-	SubpassDescriptionRasterizationOrderAttachmentColorAccessBitExt   SubpassDescriptionFlagBits = 16
-	SubpassDescriptionRasterizationOrderAttachmentDepthAccessBitExt   SubpassDescriptionFlagBits = 32
-	SubpassDescriptionRasterizationOrderAttachmentStencilAccessBitExt SubpassDescriptionFlagBits = 64
-	SubpassDescriptionEnableLegacyDitheringBitExt                     SubpassDescriptionFlagBits = 128
-	SubpassDescriptionFragmentRegionBitExt                            SubpassDescriptionFlagBits = 4
-	SubpassDescriptionCustomResolveBitExt                             SubpassDescriptionFlagBits = 8
+	Access2VideoDecodeReadBitKhr                   AccessFlagBits2 = 34359738368
+	Access2VideoDecodeWriteBitKhr                  AccessFlagBits2 = 68719476736
+	Access2VideoEncodeReadBitKhr                   AccessFlagBits2 = 137438953472
+	Access2VideoEncodeWriteBitKhr                  AccessFlagBits2 = 274877906944
+	Access2ShaderTileAttachmentReadBitQcom         AccessFlagBits2 = 2251799813685248
+	Access2ShaderTileAttachmentWriteBitQcom        AccessFlagBits2 = 4503599627370496
+	Access2TransformFeedbackWriteBitExt            AccessFlagBits2 = 33554432
+	Access2TransformFeedbackCounterReadBitExt      AccessFlagBits2 = 67108864
+	Access2TransformFeedbackCounterWriteBitExt     AccessFlagBits2 = 134217728
+	Access2ConditionalRenderingReadBitExt          AccessFlagBits2 = 1048576
+	Access2CommandPreprocessReadBitExt             AccessFlagBits2 = 131072
+	Access2CommandPreprocessWriteBitExt            AccessFlagBits2 = 262144
+	Access2FragmentShadingRateAttachmentReadBitKhr AccessFlagBits2 = 8388608
+	Access2AccelerationStructureReadBitKhr         AccessFlagBits2 = 2097152
+	Access2AccelerationStructureWriteBitKhr        AccessFlagBits2 = 4194304
+	Access2FragmentDensityMapReadBitExt            AccessFlagBits2 = 16777216
+	Access2ColorAttachmentReadNoncoherentBitExt    AccessFlagBits2 = 524288
+	Access2DescriptorBufferReadBitExt              AccessFlagBits2 = 2199023255552
+	Access2InvocationMaskReadBitHuawei             AccessFlagBits2 = 549755813888
+	Access2ShaderBindingTableReadBitKhr            AccessFlagBits2 = 1099511627776
+	Access2MicromapReadBitExt                      AccessFlagBits2 = 17592186044416
+	Access2MicromapWriteBitExt                     AccessFlagBits2 = 35184372088832
+	Access2OpticalFlowReadBitNv                    AccessFlagBits2 = 4398046511104
+	Access2OpticalFlowWriteBitNv                   AccessFlagBits2 = 8796093022208
+	Access2DataGraphReadBitArm                     AccessFlagBits2 = 140737488355328
+	Access2DataGraphWriteBitArm                    AccessFlagBits2 = 281474976710656
+	Access2MemoryDecompressionReadBitExt           AccessFlagBits2 = 36028797018963968
+	Access2MemoryDecompressionWriteBitExt          AccessFlagBits2 = 72057594037927936
 )
 
-// VkBufferUsageFlagBits2 extension values
+// VkBorderColor extension values
 const (
-	BufferUsage2ExecutionGraphScratchBitAmdx                  BufferUsageFlagBits2 = 33554432
-	BufferUsage2ConditionalRenderingBitExt                    BufferUsageFlagBits2 = 512
-	BufferUsage2ShaderBindingTableBitKhr                      BufferUsageFlagBits2 = 1024
-	BufferUsage2TransformFeedbackBufferBitExt                 BufferUsageFlagBits2 = 2048
-	BufferUsage2TransformFeedbackCounterBufferBitExt          BufferUsageFlagBits2 = 4096
-	BufferUsage2VideoDecodeSrcBitKhr                          BufferUsageFlagBits2 = 8192
-	BufferUsage2VideoDecodeDstBitKhr                          BufferUsageFlagBits2 = 16384
-	BufferUsage2VideoEncodeDstBitKhr                          BufferUsageFlagBits2 = 32768
-	BufferUsage2VideoEncodeSrcBitKhr                          BufferUsageFlagBits2 = 65536
-	BufferUsage2AccelerationStructureBuildInputReadOnlyBitKhr BufferUsageFlagBits2 = 524288
-	BufferUsage2AccelerationStructureStorageBitKhr            BufferUsageFlagBits2 = 1048576
-	BufferUsage2SamplerDescriptorBufferBitExt                 BufferUsageFlagBits2 = 2097152
-	BufferUsage2ResourceDescriptorBufferBitExt                BufferUsageFlagBits2 = 4194304
-	BufferUsage2PushDescriptorsDescriptorBufferBitExt         BufferUsageFlagBits2 = 67108864
-	BufferUsage2MicromapBuildInputReadOnlyBitExt              BufferUsageFlagBits2 = 8388608
-	BufferUsage2MicromapStorageBitExt                         BufferUsageFlagBits2 = 16777216
-	BufferUsage2CompressedDataDgf1BitAmdx                     BufferUsageFlagBits2 = 8589934592
-	BufferUsage2DataGraphForeignDescriptorBitArm              BufferUsageFlagBits2 = 536870912
-	BufferUsage2TileMemoryBitQcom                             BufferUsageFlagBits2 = 134217728
-	BufferUsage2MemoryDecompressionBitExt                     BufferUsageFlagBits2 = 4294967296
-	BufferUsage2PreprocessBufferBitExt                        BufferUsageFlagBits2 = 2147483648
+	BorderColorFloatCustomExt BorderColor = 1000287003
+	BorderColorIntCustomExt   BorderColor = 1000287004
+)
+
+// VkExternalFenceHandleTypeFlagBits extension values
+const (
+	ExternalFenceHandleTypeSciSyncObjBitNv   ExternalFenceHandleTypeFlagBits = 16
+	ExternalFenceHandleTypeSciSyncFenceBitNv ExternalFenceHandleTypeFlagBits = 32
+)
+
+// VkPipelineDepthStencilStateCreateFlagBits extension values
+const (
+	PipelineDepthStencilStateCreateRasterizationOrderAttachmentDepthAccessBitExt   PipelineDepthStencilStateCreateFlagBits = 1
+	PipelineDepthStencilStateCreateRasterizationOrderAttachmentStencilAccessBitExt PipelineDepthStencilStateCreateFlagBits = 2
+)
+
+// VkAccelerationStructureCreateFlagBitsKHR extension values
+const (
+	AccelerationStructureCreateDescriptorBufferCaptureReplayBitExt AccelerationStructureCreateFlagBitsKHR = 8
+	AccelerationStructureCreateMotionBitNv                         AccelerationStructureCreateFlagBitsKHR = 4
+)
+
+// VkExternalSemaphoreHandleTypeFlagBits extension values
+const (
+	ExternalSemaphoreHandleTypeZirconEventBitFuchsia ExternalSemaphoreHandleTypeFlagBits = 128
+	ExternalSemaphoreHandleTypeSciSyncObjBitNv       ExternalSemaphoreHandleTypeFlagBits = 32
+)
+
+// VkDescriptorPoolCreateFlagBits extension values
+const (
+	DescriptorPoolCreateHostOnlyBitExt                DescriptorPoolCreateFlagBits = 4
+	DescriptorPoolCreateAllowOverallocationSetsBitNv  DescriptorPoolCreateFlagBits = 8
+	DescriptorPoolCreateAllowOverallocationPoolsBitNv DescriptorPoolCreateFlagBits = 16
+)
+
+// VkRenderingAttachmentFlagBitsKHR extension values
+const (
+	RenderingAttachmentInputAttachmentFeedbackBitKhr       RenderingAttachmentFlagBitsKHR = 1
+	RenderingAttachmentResolveSkipTransferFunctionBitKhr   RenderingAttachmentFlagBitsKHR = 2
+	RenderingAttachmentResolveEnableTransferFunctionBitKhr RenderingAttachmentFlagBitsKHR = 4
+)
+
+// VkQueryResultFlagBits extension values
+const (
+	QueryResultWithStatusBitKhr QueryResultFlagBits = 16
+)
+
+// VkDescriptorType extension values
+const (
+	DescriptorTypeAccelerationStructureKhr           DescriptorType = 1000150000
+	DescriptorTypeAccelerationStructureNv            DescriptorType = 1000165000
+	DescriptorTypeSampleWeightImageQcom              DescriptorType = 1000440000
+	DescriptorTypeBlockMatchImageQcom                DescriptorType = 1000440001
+	DescriptorTypeTensorArm                          DescriptorType = 1000460000
+	DescriptorTypeMutableExt                         DescriptorType = 1000494000
+	DescriptorTypePartitionedAccelerationStructureNv DescriptorType = 1000570000
+)
+
+// VkDependencyFlagBits extension values
+const (
+	DependencyFeedbackLoopBitExt                             DependencyFlagBits = 8
+	DependencyQueueFamilyOwnershipTransferUseAllStagesBitKhr DependencyFlagBits = 32
+	DependencyAsymmetricEventBitKhr                          DependencyFlagBits = 64
+)
+
+// VkVideoEncodeH264CapabilityFlagBitsKHR extension values
+const (
+	VideoEncodeH264CapabilityBPictureIntraRefreshBitKhr VideoEncodeH264CapabilityFlagBitsKHR = 1024
+	VideoEncodeH264CapabilityMbQpDiffWraparoundBitKhr   VideoEncodeH264CapabilityFlagBitsKHR = 512
+)
+
+// VkPipelineStageFlagBits extension values
+const (
+	PipelineStageTransformFeedbackBitExt             PipelineStageFlagBits = 16777216
+	PipelineStageConditionalRenderingBitExt          PipelineStageFlagBits = 262144
+	PipelineStageAccelerationStructureBuildBitKhr    PipelineStageFlagBits = 33554432
+	PipelineStageRayTracingShaderBitKhr              PipelineStageFlagBits = 2097152
+	PipelineStageFragmentDensityProcessBitExt        PipelineStageFlagBits = 8388608
+	PipelineStageFragmentShadingRateAttachmentBitKhr PipelineStageFlagBits = 4194304
+	PipelineStageTaskShaderBitExt                    PipelineStageFlagBits = 524288
+	PipelineStageMeshShaderBitExt                    PipelineStageFlagBits = 1048576
+	PipelineStageCommandPreprocessBitExt             PipelineStageFlagBits = 131072
 )
 
 // VkBlendOp extension values
@@ -4620,310 +5118,15 @@ const (
 	BlendOpBlueExt             BlendOp = 1000148045
 )
 
-// VkPipelineCreateFlagBits extension values
+// VkTimeDomainKHR extension values
 const (
-	PipelineCreateRayTracingNoNullAnyHitShadersBitKhr            PipelineCreateFlagBits = 16384
-	PipelineCreateRayTracingNoNullClosestHitShadersBitKhr        PipelineCreateFlagBits = 32768
-	PipelineCreateRayTracingNoNullMissShadersBitKhr              PipelineCreateFlagBits = 65536
-	PipelineCreateRayTracingNoNullIntersectionShadersBitKhr      PipelineCreateFlagBits = 131072
-	PipelineCreateRayTracingSkipTrianglesBitKhr                  PipelineCreateFlagBits = 4096
-	PipelineCreateRayTracingSkipAabbsBitKhr                      PipelineCreateFlagBits = 8192
-	PipelineCreateRayTracingShaderGroupHandleCaptureReplayBitKhr PipelineCreateFlagBits = 524288
-	PipelineCreateDeferCompileBitNv                              PipelineCreateFlagBits = 32
-	PipelineCreateRenderingFragmentDensityMapAttachmentBitExt    PipelineCreateFlagBits = 4194304
-	PipelineCreateRenderingFragmentShadingRateAttachmentBitKhr   PipelineCreateFlagBits = 2097152
-	PipelineCreateCaptureStatisticsBitKhr                        PipelineCreateFlagBits = 64
-	PipelineCreateCaptureInternalRepresentationsBitKhr           PipelineCreateFlagBits = 128
-	PipelineCreateIndirectBindableBitNv                          PipelineCreateFlagBits = 262144
-	PipelineCreateLibraryBitKhr                                  PipelineCreateFlagBits = 2048
-	PipelineCreateDescriptorBufferBitExt                         PipelineCreateFlagBits = 536870912
-	PipelineCreateRetainLinkTimeOptimizationInfoBitExt           PipelineCreateFlagBits = 8388608
-	PipelineCreateLinkTimeOptimizationBitExt                     PipelineCreateFlagBits = 1024
-	PipelineCreateRayTracingAllowMotionBitNv                     PipelineCreateFlagBits = 1048576
-	PipelineCreateColorAttachmentFeedbackLoopBitExt              PipelineCreateFlagBits = 33554432
-	PipelineCreateDepthStencilAttachmentFeedbackLoopBitExt       PipelineCreateFlagBits = 67108864
-	PipelineCreateRayTracingOpacityMicromapBitExt                PipelineCreateFlagBits = 16777216
-	PipelineCreateRayTracingDisplacementMicromapBitNv            PipelineCreateFlagBits = 268435456
+	TimeDomainPresentStageLocalExt TimeDomainKHR = 1000208000
+	TimeDomainSwapchainLocalExt    TimeDomainKHR = 1000208001
 )
 
-// VkMemoryPropertyFlagBits extension values
+// VkSamplerReductionMode extension values
 const (
-	MemoryPropertyDeviceCoherentBitAmd MemoryPropertyFlagBits = 64
-	MemoryPropertyDeviceUncachedBitAmd MemoryPropertyFlagBits = 128
-	MemoryPropertyRdmaCapableBitNv     MemoryPropertyFlagBits = 256
-)
-
-// VkVideoEncodeAV1CapabilityFlagBitsKHR extension values
-const (
-	VideoEncodeAv1CapabilityCompoundPredictionIntraRefreshBitKhr VideoEncodeAV1CapabilityFlagBitsKHR = 32
-)
-
-// VkDescriptorSetLayoutCreateFlagBits extension values
-const (
-	DescriptorSetLayoutCreateDescriptorBufferBitExt          DescriptorSetLayoutCreateFlagBits = 16
-	DescriptorSetLayoutCreateEmbeddedImmutableSamplersBitExt DescriptorSetLayoutCreateFlagBits = 32
-	DescriptorSetLayoutCreateIndirectBindableBitNv           DescriptorSetLayoutCreateFlagBits = 128
-	DescriptorSetLayoutCreateHostOnlyPoolBitExt              DescriptorSetLayoutCreateFlagBits = 4
-	DescriptorSetLayoutCreatePerStageBitNv                   DescriptorSetLayoutCreateFlagBits = 64
-)
-
-// VkFormat extension values
-const (
-	FormatPvrtc12bppUnormBlockImg                 Format = 1000054000
-	FormatPvrtc14bppUnormBlockImg                 Format = 1000054001
-	FormatPvrtc22bppUnormBlockImg                 Format = 1000054002
-	FormatPvrtc24bppUnormBlockImg                 Format = 1000054003
-	FormatPvrtc12bppSrgbBlockImg                  Format = 1000054004
-	FormatPvrtc14bppSrgbBlockImg                  Format = 1000054005
-	FormatPvrtc22bppSrgbBlockImg                  Format = 1000054006
-	FormatPvrtc24bppSrgbBlockImg                  Format = 1000054007
-	FormatR8BoolArm                               Format = 1000460000
-	FormatR16g16Sfixed5Nv                         Format = 1000464000
-	FormatR10x6UintPack16Arm                      Format = 1000609000
-	FormatR10x6g10x6Uint2pack16Arm                Format = 1000609001
-	FormatR10x6g10x6b10x6a10x6Uint4pack16Arm      Format = 1000609002
-	FormatR12x4UintPack16Arm                      Format = 1000609003
-	FormatR12x4g12x4Uint2pack16Arm                Format = 1000609004
-	FormatR12x4g12x4b12x4a12x4Uint4pack16Arm      Format = 1000609005
-	FormatR14x2UintPack16Arm                      Format = 1000609006
-	FormatR14x2g14x2Uint2pack16Arm                Format = 1000609007
-	FormatR14x2g14x2b14x2a14x2Uint4pack16Arm      Format = 1000609008
-	FormatR14x2UnormPack16Arm                     Format = 1000609009
-	FormatR14x2g14x2Unorm2pack16Arm               Format = 1000609010
-	FormatR14x2g14x2b14x2a14x2Unorm4pack16Arm     Format = 1000609011
-	FormatG14x2B14x2r14x22plane420Unorm3pack16Arm Format = 1000609012
-	FormatG14x2B14x2r14x22plane422Unorm3pack16Arm Format = 1000609013
-)
-
-// VkMemoryMapFlagBits extension values
-const (
-	MemoryMapPlacedBitExt MemoryMapFlagBits = 1
-)
-
-// VkMicromapTypeEXT extension values
-const (
-	MicromapTypeDisplacementMicromapNv MicromapTypeEXT = 1000397000
-)
-
-// VkVideoSessionParametersCreateFlagBitsKHR extension values
-const (
-	VideoSessionParametersCreateQuantizationMapCompatibleBitKhr VideoSessionParametersCreateFlagBitsKHR = 1
-)
-
-// VkQueryPoolCreateFlagBits extension values
-const (
-	QueryPoolCreateResetBitKhr QueryPoolCreateFlagBits = 1
-)
-
-// VkBufferCreateFlagBits extension values
-const (
-	BufferCreateDescriptorBufferCaptureReplayBitExt BufferCreateFlagBits = 32
-	BufferCreateVideoProfileIndependentBitKhr       BufferCreateFlagBits = 64
-)
-
-// VkExternalMemoryHandleTypeFlagBits extension values
-const (
-	ExternalMemoryHandleTypeDmaBufBitExt                    ExternalMemoryHandleTypeFlagBits = 512
-	ExternalMemoryHandleTypeAndroidHardwareBufferBitAndroid ExternalMemoryHandleTypeFlagBits = 1024
-	ExternalMemoryHandleTypeHostAllocationBitExt            ExternalMemoryHandleTypeFlagBits = 128
-	ExternalMemoryHandleTypeHostMappedForeignMemoryBitExt   ExternalMemoryHandleTypeFlagBits = 256
-	ExternalMemoryHandleTypeZirconVmoBitFuchsia             ExternalMemoryHandleTypeFlagBits = 2048
-	ExternalMemoryHandleTypeRdmaAddressBitNv                ExternalMemoryHandleTypeFlagBits = 4096
-	ExternalMemoryHandleTypeSciBufBitNv                     ExternalMemoryHandleTypeFlagBits = 8192
-	ExternalMemoryHandleTypeOhNativeBufferBitOhos           ExternalMemoryHandleTypeFlagBits = 32768
-	ExternalMemoryHandleTypeScreenBufferBitQnx              ExternalMemoryHandleTypeFlagBits = 16384
-	ExternalMemoryHandleTypeMtlbufferBitExt                 ExternalMemoryHandleTypeFlagBits = 65536
-	ExternalMemoryHandleTypeMtltextureBitExt                ExternalMemoryHandleTypeFlagBits = 131072
-	ExternalMemoryHandleTypeMtlheapBitExt                   ExternalMemoryHandleTypeFlagBits = 262144
-)
-
-// VkIndexType extension values
-const (
-	IndexTypeNoneKhr IndexType = 1000150000
-)
-
-// VkGeometryInstanceFlagBitsKHR extension values
-const (
-	GeometryInstanceForceOpacityMicromap2StateBitExt GeometryInstanceFlagBitsKHR = 16
-	GeometryInstanceDisableOpacityMicromapsBitExt    GeometryInstanceFlagBitsKHR = 32
-)
-
-// VkPipelineColorBlendStateCreateFlagBits extension values
-const (
-	PipelineColorBlendStateCreateRasterizationOrderAttachmentAccessBitExt PipelineColorBlendStateCreateFlagBits = 1
-)
-
-// VkRenderingFlagBits extension values
-const (
-	RenderingEnableLegacyDitheringBitExt            RenderingFlagBits = 8
-	RenderingContentsInlineBitKhr                   RenderingFlagBits = 16
-	RenderingPerLayerFragmentDensityBitValve        RenderingFlagBits = 32
-	RenderingFragmentRegionBitExt                   RenderingFlagBits = 64
-	RenderingCustomResolveBitExt                    RenderingFlagBits = 128
-	RenderingLocalReadConcurrentAccessControlBitKhr RenderingFlagBits = 256
-)
-
-// VkResolveModeFlagBits extension values
-const (
-	ResolveModeExternalFormatDownsampleBitAndroid ResolveModeFlagBits = 16
-	ResolveModeCustomBitExt                       ResolveModeFlagBits = 32
-)
-
-// VkTensorUsageFlagBitsARM extension values
-const (
-	TensorUsageDataGraphBitArm TensorUsageFlagBitsARM = 32
-)
-
-// VkPipelineStageFlagBits extension values
-const (
-	PipelineStageTransformFeedbackBitExt             PipelineStageFlagBits = 16777216
-	PipelineStageConditionalRenderingBitExt          PipelineStageFlagBits = 262144
-	PipelineStageAccelerationStructureBuildBitKhr    PipelineStageFlagBits = 33554432
-	PipelineStageRayTracingShaderBitKhr              PipelineStageFlagBits = 2097152
-	PipelineStageFragmentDensityProcessBitExt        PipelineStageFlagBits = 8388608
-	PipelineStageFragmentShadingRateAttachmentBitKhr PipelineStageFlagBits = 4194304
-	PipelineStageTaskShaderBitExt                    PipelineStageFlagBits = 524288
-	PipelineStageMeshShaderBitExt                    PipelineStageFlagBits = 1048576
-	PipelineStageCommandPreprocessBitExt             PipelineStageFlagBits = 131072
-)
-
-// VkImageViewCreateFlagBits extension values
-const (
-	ImageViewCreateFragmentDensityMapDynamicBitExt     ImageViewCreateFlagBits = 1
-	ImageViewCreateDescriptorBufferCaptureReplayBitExt ImageViewCreateFlagBits = 4
-	ImageViewCreateFragmentDensityMapDeferredBitExt    ImageViewCreateFlagBits = 2
-)
-
-// VkQueryPipelineStatisticFlagBits extension values
-const (
-	QueryPipelineStatisticTaskShaderInvocationsBitExt              QueryPipelineStatisticFlagBits = 2048
-	QueryPipelineStatisticMeshShaderInvocationsBitExt              QueryPipelineStatisticFlagBits = 4096
-	QueryPipelineStatisticClusterCullingShaderInvocationsBitHuawei QueryPipelineStatisticFlagBits = 8192
-)
-
-// VkTensorCreateFlagBitsARM extension values
-const (
-	TensorCreateDescriptorBufferCaptureReplayBitArm TensorCreateFlagBitsARM = 4
-)
-
-// VkVideoEncodeH265CapabilityFlagBitsKHR extension values
-const (
-	VideoEncodeH265CapabilityBPictureIntraRefreshBitKhr VideoEncodeH265CapabilityFlagBitsKHR = 2048
-	VideoEncodeH265CapabilityCuQpDiffWraparoundBitKhr   VideoEncodeH265CapabilityFlagBitsKHR = 1024
-)
-
-// VkResolveImageFlagBitsKHR extension values
-const (
-	ResolveImageSkipTransferFunctionBitKhr   ResolveImageFlagBitsKHR = 1
-	ResolveImageEnableTransferFunctionBitKhr ResolveImageFlagBitsKHR = 2
-)
-
-// VkAccessFlagBits2 extension values
-const (
-	Access2VideoDecodeReadBitKhr                   AccessFlagBits2 = 34359738368
-	Access2VideoDecodeWriteBitKhr                  AccessFlagBits2 = 68719476736
-	Access2VideoEncodeReadBitKhr                   AccessFlagBits2 = 137438953472
-	Access2VideoEncodeWriteBitKhr                  AccessFlagBits2 = 274877906944
-	Access2ShaderTileAttachmentReadBitQcom         AccessFlagBits2 = 2251799813685248
-	Access2ShaderTileAttachmentWriteBitQcom        AccessFlagBits2 = 4503599627370496
-	Access2TransformFeedbackWriteBitExt            AccessFlagBits2 = 33554432
-	Access2TransformFeedbackCounterReadBitExt      AccessFlagBits2 = 67108864
-	Access2TransformFeedbackCounterWriteBitExt     AccessFlagBits2 = 134217728
-	Access2ConditionalRenderingReadBitExt          AccessFlagBits2 = 1048576
-	Access2CommandPreprocessReadBitExt             AccessFlagBits2 = 131072
-	Access2CommandPreprocessWriteBitExt            AccessFlagBits2 = 262144
-	Access2FragmentShadingRateAttachmentReadBitKhr AccessFlagBits2 = 8388608
-	Access2AccelerationStructureReadBitKhr         AccessFlagBits2 = 2097152
-	Access2AccelerationStructureWriteBitKhr        AccessFlagBits2 = 4194304
-	Access2FragmentDensityMapReadBitExt            AccessFlagBits2 = 16777216
-	Access2ColorAttachmentReadNoncoherentBitExt    AccessFlagBits2 = 524288
-	Access2DescriptorBufferReadBitExt              AccessFlagBits2 = 2199023255552
-	Access2InvocationMaskReadBitHuawei             AccessFlagBits2 = 549755813888
-	Access2ShaderBindingTableReadBitKhr            AccessFlagBits2 = 1099511627776
-	Access2MicromapReadBitExt                      AccessFlagBits2 = 17592186044416
-	Access2MicromapWriteBitExt                     AccessFlagBits2 = 35184372088832
-	Access2OpticalFlowReadBitNv                    AccessFlagBits2 = 4398046511104
-	Access2OpticalFlowWriteBitNv                   AccessFlagBits2 = 8796093022208
-	Access2DataGraphReadBitArm                     AccessFlagBits2 = 140737488355328
-	Access2DataGraphWriteBitArm                    AccessFlagBits2 = 281474976710656
-	Access2MemoryDecompressionReadBitExt           AccessFlagBits2 = 36028797018963968
-	Access2MemoryDecompressionWriteBitExt          AccessFlagBits2 = 72057594037927936
-)
-
-// VkImageAspectFlagBits extension values
-const (
-	ImageAspectMemoryPlane0BitExt ImageAspectFlagBits = 128
-	ImageAspectMemoryPlane1BitExt ImageAspectFlagBits = 256
-	ImageAspectMemoryPlane2BitExt ImageAspectFlagBits = 512
-	ImageAspectMemoryPlane3BitExt ImageAspectFlagBits = 1024
-)
-
-// VkSwapchainCreateFlagBitsKHR extension values
-const (
-	SwapchainCreateSplitInstanceBindRegionsBitKhr SwapchainCreateFlagBitsKHR = 1
-	SwapchainCreateProtectedBitKhr                SwapchainCreateFlagBitsKHR = 2
-	SwapchainCreateMutableFormatBitKhr            SwapchainCreateFlagBitsKHR = 4
-	SwapchainCreatePresentTimingBitExt            SwapchainCreateFlagBitsKHR = 512
-	SwapchainCreatePresentId2BitKhr               SwapchainCreateFlagBitsKHR = 64
-	SwapchainCreatePresentWait2BitKhr             SwapchainCreateFlagBitsKHR = 128
-	SwapchainCreateDeferredMemoryAllocationBitKhr SwapchainCreateFlagBitsKHR = 8
-)
-
-// VkFilter extension values
-const (
-	FilterCubicExt Filter = 1000170000
-)
-
-// VkInstanceCreateFlagBits extension values
-const (
-	InstanceCreateEnumeratePortabilityBitKhr InstanceCreateFlagBits = 1
-)
-
-// VkPipelineCacheCreateFlagBits extension values
-const (
-	PipelineCacheCreateInternallySynchronizedMergeBitKhr PipelineCacheCreateFlagBits = 8
-)
-
-// VkQueryResultStatusKHR extension values
-const (
-	QueryResultStatusInsufficientBitstreamBufferRangeKhr QueryResultStatusKHR = -1000299000
-)
-
-// VkAccelerationStructureCreateFlagBitsKHR extension values
-const (
-	AccelerationStructureCreateDescriptorBufferCaptureReplayBitExt AccelerationStructureCreateFlagBitsKHR = 8
-	AccelerationStructureCreateMotionBitNv                         AccelerationStructureCreateFlagBitsKHR = 4
-)
-
-// VkPipelineDepthStencilStateCreateFlagBits extension values
-const (
-	PipelineDepthStencilStateCreateRasterizationOrderAttachmentDepthAccessBitExt   PipelineDepthStencilStateCreateFlagBits = 1
-	PipelineDepthStencilStateCreateRasterizationOrderAttachmentStencilAccessBitExt PipelineDepthStencilStateCreateFlagBits = 2
-)
-
-// VkPipelineStageFlagBits2 extension values
-const (
-	PipelineStage2VideoDecodeBitKhr                   PipelineStageFlagBits2 = 67108864
-	PipelineStage2VideoEncodeBitKhr                   PipelineStageFlagBits2 = 134217728
-	PipelineStage2TransformFeedbackBitExt             PipelineStageFlagBits2 = 16777216
-	PipelineStage2ConditionalRenderingBitExt          PipelineStageFlagBits2 = 262144
-	PipelineStage2CommandPreprocessBitExt             PipelineStageFlagBits2 = 131072
-	PipelineStage2FragmentShadingRateAttachmentBitKhr PipelineStageFlagBits2 = 4194304
-	PipelineStage2AccelerationStructureBuildBitKhr    PipelineStageFlagBits2 = 33554432
-	PipelineStage2RayTracingShaderBitKhr              PipelineStageFlagBits2 = 2097152
-	PipelineStage2FragmentDensityProcessBitExt        PipelineStageFlagBits2 = 8388608
-	PipelineStage2TaskShaderBitExt                    PipelineStageFlagBits2 = 524288
-	PipelineStage2MeshShaderBitExt                    PipelineStageFlagBits2 = 1048576
-	PipelineStage2SubpassShaderBitHuawei              PipelineStageFlagBits2 = 549755813888
-	PipelineStage2InvocationMaskBitHuawei             PipelineStageFlagBits2 = 1099511627776
-	PipelineStage2AccelerationStructureCopyBitKhr     PipelineStageFlagBits2 = 268435456
-	PipelineStage2MicromapBuildBitExt                 PipelineStageFlagBits2 = 1073741824
-	PipelineStage2ClusterCullingShaderBitHuawei       PipelineStageFlagBits2 = 2199023255552
-	PipelineStage2OpticalFlowBitNv                    PipelineStageFlagBits2 = 536870912
-	PipelineStage2ConvertCooperativeVectorMatrixBitNv PipelineStageFlagBits2 = 17592186044416
-	PipelineStage2DataGraphBitArm                     PipelineStageFlagBits2 = 4398046511104
-	PipelineStage2CopyIndirectBitKhr                  PipelineStageFlagBits2 = 70368744177664
-	PipelineStage2MemoryDecompressionBitExt           PipelineStageFlagBits2 = 35184372088832
+	SamplerReductionModeWeightedAverageRangeclampQcom SamplerReductionMode = 1000521000
 )
 
 // VkImageUsageFlagBits extension values
@@ -4944,132 +5147,6 @@ const (
 	ImageUsageTileMemoryBitQcom                     ImageUsageFlagBits = 134217728
 	ImageUsageVideoEncodeQuantizationDeltaMapBitKhr ImageUsageFlagBits = 33554432
 	ImageUsageVideoEncodeEmphasisMapBitKhr          ImageUsageFlagBits = 67108864
-)
-
-// VkImageCreateFlagBits extension values
-const (
-	ImageCreateCornerSampledBitNv                      ImageCreateFlagBits = 8192
-	ImageCreateSampleLocationsCompatibleDepthBitExt    ImageCreateFlagBits = 4096
-	ImageCreateSubsampledBitExt                        ImageCreateFlagBits = 16384
-	ImageCreateDescriptorBufferCaptureReplayBitExt     ImageCreateFlagBits = 65536
-	ImageCreateMultisampledRenderToSingleSampledBitExt ImageCreateFlagBits = 262144
-	ImageCreate2dViewCompatibleBitExt                  ImageCreateFlagBits = 131072
-	ImageCreateVideoProfileIndependentBitKhr           ImageCreateFlagBits = 1048576
-	ImageCreateFragmentDensityMapOffsetBitExt          ImageCreateFlagBits = 32768
-)
-
-// VkPipelineBindPoint extension values
-const (
-	PipelineBindPointExecutionGraphAmdx   PipelineBindPoint = 1000134000
-	PipelineBindPointRayTracingKhr        PipelineBindPoint = 1000347000
-	PipelineBindPointSubpassShadingHuawei PipelineBindPoint = 1000369003
-	PipelineBindPointDataGraphArm         PipelineBindPoint = 1000507000
-)
-
-// VkExternalSemaphoreHandleTypeFlagBits extension values
-const (
-	ExternalSemaphoreHandleTypeZirconEventBitFuchsia ExternalSemaphoreHandleTypeFlagBits = 128
-	ExternalSemaphoreHandleTypeSciSyncObjBitNv       ExternalSemaphoreHandleTypeFlagBits = 32
-)
-
-// VkExternalFenceHandleTypeFlagBits extension values
-const (
-	ExternalFenceHandleTypeSciSyncObjBitNv   ExternalFenceHandleTypeFlagBits = 16
-	ExternalFenceHandleTypeSciSyncFenceBitNv ExternalFenceHandleTypeFlagBits = 32
-)
-
-// VkShaderCreateFlagBitsEXT extension values
-const (
-	ShaderCreateAllowVaryingSubgroupSizeBitExt      ShaderCreateFlagBitsEXT = 2
-	ShaderCreateRequireFullSubgroupsBitExt          ShaderCreateFlagBitsEXT = 4
-	ShaderCreateNoTaskShaderBitExt                  ShaderCreateFlagBitsEXT = 8
-	ShaderCreateDispatchBaseBitExt                  ShaderCreateFlagBitsEXT = 16
-	ShaderCreateFragmentShadingRateAttachmentBitExt ShaderCreateFlagBitsEXT = 32
-	ShaderCreateFragmentDensityMapAttachmentBitExt  ShaderCreateFlagBitsEXT = 64
-	ShaderCreateIndirectBindableBitExt              ShaderCreateFlagBitsEXT = 128
-	ShaderCreate64BitIndexingBitExt                 ShaderCreateFlagBitsEXT = 32768
-)
-
-// VkSubpassContents extension values
-const (
-	SubpassContentsInlineAndSecondaryCommandBuffersKhr SubpassContents = 1000562000
-)
-
-// VkBufferUsageFlagBits extension values
-const (
-	BufferUsageVideoDecodeSrcBitKhr                          BufferUsageFlagBits = 8192
-	BufferUsageVideoDecodeDstBitKhr                          BufferUsageFlagBits = 16384
-	BufferUsageTransformFeedbackBufferBitExt                 BufferUsageFlagBits = 2048
-	BufferUsageTransformFeedbackCounterBufferBitExt          BufferUsageFlagBits = 4096
-	BufferUsageConditionalRenderingBitExt                    BufferUsageFlagBits = 512
-	BufferUsageExecutionGraphScratchBitAmdx                  BufferUsageFlagBits = 33554432
-	BufferUsageAccelerationStructureBuildInputReadOnlyBitKhr BufferUsageFlagBits = 524288
-	BufferUsageAccelerationStructureStorageBitKhr            BufferUsageFlagBits = 1048576
-	BufferUsageShaderBindingTableBitKhr                      BufferUsageFlagBits = 1024
-	BufferUsageVideoEncodeDstBitKhr                          BufferUsageFlagBits = 32768
-	BufferUsageVideoEncodeSrcBitKhr                          BufferUsageFlagBits = 65536
-	BufferUsageSamplerDescriptorBufferBitExt                 BufferUsageFlagBits = 2097152
-	BufferUsageResourceDescriptorBufferBitExt                BufferUsageFlagBits = 4194304
-	BufferUsagePushDescriptorsDescriptorBufferBitExt         BufferUsageFlagBits = 67108864
-	BufferUsageMicromapBuildInputReadOnlyBitExt              BufferUsageFlagBits = 8388608
-	BufferUsageMicromapStorageBitExt                         BufferUsageFlagBits = 16777216
-	BufferUsageTileMemoryBitQcom                             BufferUsageFlagBits = 134217728
-)
-
-// VkVideoCodecOperationFlagBitsKHR extension values
-const (
-	VideoCodecOperationEncodeH264BitKhr VideoCodecOperationFlagBitsKHR = 65536
-	VideoCodecOperationEncodeH265BitKhr VideoCodecOperationFlagBitsKHR = 131072
-	VideoCodecOperationDecodeH264BitKhr VideoCodecOperationFlagBitsKHR = 1
-	VideoCodecOperationDecodeH265BitKhr VideoCodecOperationFlagBitsKHR = 2
-	VideoCodecOperationDecodeAv1BitKhr  VideoCodecOperationFlagBitsKHR = 4
-	VideoCodecOperationEncodeAv1BitKhr  VideoCodecOperationFlagBitsKHR = 262144
-	VideoCodecOperationDecodeVp9BitKhr  VideoCodecOperationFlagBitsKHR = 8
-)
-
-// VkMemoryUnmapFlagBits extension values
-const (
-	MemoryUnmapReserveBitExt MemoryUnmapFlagBits = 1
-)
-
-// VkBuildAccelerationStructureFlagBitsKHR extension values
-const (
-	BuildAccelerationStructureMotionBitNv                          BuildAccelerationStructureFlagBitsKHR = 32
-	BuildAccelerationStructureAllowOpacityMicromapUpdateBitExt     BuildAccelerationStructureFlagBitsKHR = 64
-	BuildAccelerationStructureAllowDisableOpacityMicromapsBitExt   BuildAccelerationStructureFlagBitsKHR = 128
-	BuildAccelerationStructureAllowOpacityMicromapDataUpdateBitExt BuildAccelerationStructureFlagBitsKHR = 256
-	BuildAccelerationStructureAllowDisplacementMicromapUpdateBitNv BuildAccelerationStructureFlagBitsKHR = 512
-	BuildAccelerationStructureAllowDataAccessBitKhr                BuildAccelerationStructureFlagBitsKHR = 2048
-	BuildAccelerationStructureAllowClusterOpacityMicromapsBitNv    BuildAccelerationStructureFlagBitsKHR = 4096
-)
-
-// VkOpacityMicromapSpecialIndexEXT extension values
-const (
-	OpacityMicromapSpecialIndexClusterGeometryDisableOpacityMicromapNv OpacityMicromapSpecialIndexEXT = -5
-)
-
-// VkPhysicalDeviceDataGraphProcessingEngineTypeARM extension values
-const (
-	PhysicalDeviceDataGraphProcessingEngineTypeNeuralQcom  PhysicalDeviceDataGraphProcessingEngineTypeARM = 1000629000
-	PhysicalDeviceDataGraphProcessingEngineTypeComputeQcom PhysicalDeviceDataGraphProcessingEngineTypeARM = 1000629001
-)
-
-// VkQueryType extension values
-const (
-	QueryTypeResultStatusOnlyKhr                                      QueryType = 1000023000
-	QueryTypeTransformFeedbackStreamExt                               QueryType = 1000028004
-	QueryTypePerformanceQueryKhr                                      QueryType = 1000116000
-	QueryTypeAccelerationStructureCompactedSizeKhr                    QueryType = 1000150000
-	QueryTypeAccelerationStructureSerializationSizeKhr                QueryType = 1000150001
-	QueryTypeAccelerationStructureCompactedSizeNv                     QueryType = 1000165000
-	QueryTypePerformanceQueryIntel                                    QueryType = 1000210000
-	QueryTypeVideoEncodeFeedbackKhr                                   QueryType = 1000299000
-	QueryTypeMeshPrimitivesGeneratedExt                               QueryType = 1000328000
-	QueryTypePrimitivesGeneratedExt                                   QueryType = 1000382000
-	QueryTypeAccelerationStructureSerializationBottomLevelPointersKhr QueryType = 1000386000
-	QueryTypeAccelerationStructureSizeKhr                             QueryType = 1000386001
-	QueryTypeMicromapSerializationSizeExt                             QueryType = 1000396000
-	QueryTypeMicromapCompactedSizeExt                                 QueryType = 1000396001
 )
 
 // VkPipelineCreateFlagBits2 extension values
@@ -5106,15 +5183,142 @@ const (
 	PipelineCreate264BitIndexingBitExt                              PipelineCreateFlagBits2 = 8796093022208
 )
 
-// VkDescriptorType extension values
+// VkFilter extension values
 const (
-	DescriptorTypeAccelerationStructureKhr           DescriptorType = 1000150000
-	DescriptorTypeAccelerationStructureNv            DescriptorType = 1000165000
-	DescriptorTypeSampleWeightImageQcom              DescriptorType = 1000440000
-	DescriptorTypeBlockMatchImageQcom                DescriptorType = 1000440001
-	DescriptorTypeTensorArm                          DescriptorType = 1000460000
-	DescriptorTypeMutableExt                         DescriptorType = 1000494000
-	DescriptorTypePartitionedAccelerationStructureNv DescriptorType = 1000570000
+	FilterCubicExt Filter = 1000170000
+)
+
+// VkBufferCreateFlagBits extension values
+const (
+	BufferCreateDescriptorBufferCaptureReplayBitExt BufferCreateFlagBits = 32
+	BufferCreateVideoProfileIndependentBitKhr       BufferCreateFlagBits = 64
+)
+
+// VkIndirectCommandsTokenTypeNV extension values
+const (
+	IndirectCommandsTokenTypeDrawMeshTasksNv IndirectCommandsTokenTypeNV = 1000328000
+	IndirectCommandsTokenTypePipelineNv      IndirectCommandsTokenTypeNV = 1000428003
+	IndirectCommandsTokenTypeDispatchNv      IndirectCommandsTokenTypeNV = 1000428004
+)
+
+// VkMemoryHeapFlagBits extension values
+const (
+	MemoryHeapTileMemoryBitQcom MemoryHeapFlagBits = 8
+)
+
+// VkVideoEncodeH265CapabilityFlagBitsKHR extension values
+const (
+	VideoEncodeH265CapabilityBPictureIntraRefreshBitKhr VideoEncodeH265CapabilityFlagBitsKHR = 2048
+	VideoEncodeH265CapabilityCuQpDiffWraparoundBitKhr   VideoEncodeH265CapabilityFlagBitsKHR = 1024
+)
+
+// VkQueryPoolCreateFlagBits extension values
+const (
+	QueryPoolCreateResetBitKhr QueryPoolCreateFlagBits = 1
+)
+
+// VkSwapchainCreateFlagBitsKHR extension values
+const (
+	SwapchainCreateSplitInstanceBindRegionsBitKhr SwapchainCreateFlagBitsKHR = 1
+	SwapchainCreateProtectedBitKhr                SwapchainCreateFlagBitsKHR = 2
+	SwapchainCreateMutableFormatBitKhr            SwapchainCreateFlagBitsKHR = 4
+	SwapchainCreatePresentTimingBitExt            SwapchainCreateFlagBitsKHR = 512
+	SwapchainCreatePresentId2BitKhr               SwapchainCreateFlagBitsKHR = 64
+	SwapchainCreatePresentWait2BitKhr             SwapchainCreateFlagBitsKHR = 128
+	SwapchainCreateDeferredMemoryAllocationBitKhr SwapchainCreateFlagBitsKHR = 8
+)
+
+// VkQueryType extension values
+const (
+	QueryTypeResultStatusOnlyKhr                                      QueryType = 1000023000
+	QueryTypeTransformFeedbackStreamExt                               QueryType = 1000028004
+	QueryTypePerformanceQueryKhr                                      QueryType = 1000116000
+	QueryTypeAccelerationStructureCompactedSizeKhr                    QueryType = 1000150000
+	QueryTypeAccelerationStructureSerializationSizeKhr                QueryType = 1000150001
+	QueryTypeAccelerationStructureCompactedSizeNv                     QueryType = 1000165000
+	QueryTypePerformanceQueryIntel                                    QueryType = 1000210000
+	QueryTypeVideoEncodeFeedbackKhr                                   QueryType = 1000299000
+	QueryTypeMeshPrimitivesGeneratedExt                               QueryType = 1000328000
+	QueryTypePrimitivesGeneratedExt                                   QueryType = 1000382000
+	QueryTypeAccelerationStructureSerializationBottomLevelPointersKhr QueryType = 1000386000
+	QueryTypeAccelerationStructureSizeKhr                             QueryType = 1000386001
+	QueryTypeMicromapSerializationSizeExt                             QueryType = 1000396000
+	QueryTypeMicromapCompactedSizeExt                                 QueryType = 1000396001
+)
+
+// VkFormatFeatureFlagBits2 extension values
+const (
+	FormatFeature2VideoDecodeOutputBitKhr                 FormatFeatureFlagBits2 = 33554432
+	FormatFeature2VideoDecodeDpbBitKhr                    FormatFeatureFlagBits2 = 67108864
+	FormatFeature2AccelerationStructureVertexBufferBitKhr FormatFeatureFlagBits2 = 536870912
+	FormatFeature2FragmentDensityMapBitExt                FormatFeatureFlagBits2 = 16777216
+	FormatFeature2FragmentShadingRateAttachmentBitKhr     FormatFeatureFlagBits2 = 1073741824
+	FormatFeature2VideoEncodeInputBitKhr                  FormatFeatureFlagBits2 = 134217728
+	FormatFeature2VideoEncodeDpbBitKhr                    FormatFeatureFlagBits2 = 268435456
+	FormatFeature2AccelerationStructureRadiusBufferBitNv  FormatFeatureFlagBits2 = 2251799813685248
+	FormatFeature2LinearColorAttachmentBitNv              FormatFeatureFlagBits2 = 274877906944
+	FormatFeature2WeightImageBitQcom                      FormatFeatureFlagBits2 = 17179869184
+	FormatFeature2WeightSampledImageBitQcom               FormatFeatureFlagBits2 = 34359738368
+	FormatFeature2BlockMatchingBitQcom                    FormatFeatureFlagBits2 = 68719476736
+	FormatFeature2BoxFilterSampledBitQcom                 FormatFeatureFlagBits2 = 137438953472
+	FormatFeature2TensorShaderBitArm                      FormatFeatureFlagBits2 = 549755813888
+	FormatFeature2TensorImageAliasingBitArm               FormatFeatureFlagBits2 = 8796093022208
+	FormatFeature2OpticalFlowImageBitNv                   FormatFeatureFlagBits2 = 1099511627776
+	FormatFeature2OpticalFlowVectorBitNv                  FormatFeatureFlagBits2 = 2199023255552
+	FormatFeature2OpticalFlowCostBitNv                    FormatFeatureFlagBits2 = 4398046511104
+	FormatFeature2TensorDataGraphBitArm                   FormatFeatureFlagBits2 = 281474976710656
+	FormatFeature2CopyImageIndirectDstBitKhr              FormatFeatureFlagBits2 = 576460752303423488
+	FormatFeature2VideoEncodeQuantizationDeltaMapBitKhr   FormatFeatureFlagBits2 = 562949953421312
+	FormatFeature2VideoEncodeEmphasisMapBitKhr            FormatFeatureFlagBits2 = 1125899906842624
+	FormatFeature2DepthCopyOnComputeQueueBitKhr           FormatFeatureFlagBits2 = 4503599627370496
+	FormatFeature2DepthCopyOnTransferQueueBitKhr          FormatFeatureFlagBits2 = 9007199254740992
+	FormatFeature2StencilCopyOnComputeQueueBitKhr         FormatFeatureFlagBits2 = 18014398509481984
+	FormatFeature2StencilCopyOnTransferQueueBitKhr        FormatFeatureFlagBits2 = 36028797018963968
+)
+
+// VkSubpassDescriptionFlagBits extension values
+const (
+	SubpassDescriptionPerViewAttributesBitNvx                         SubpassDescriptionFlagBits = 1
+	SubpassDescriptionPerViewPositionXOnlyBitNvx                      SubpassDescriptionFlagBits = 2
+	SubpassDescriptionTileShadingApronBitQcom                         SubpassDescriptionFlagBits = 256
+	SubpassDescriptionRasterizationOrderAttachmentColorAccessBitExt   SubpassDescriptionFlagBits = 16
+	SubpassDescriptionRasterizationOrderAttachmentDepthAccessBitExt   SubpassDescriptionFlagBits = 32
+	SubpassDescriptionRasterizationOrderAttachmentStencilAccessBitExt SubpassDescriptionFlagBits = 64
+	SubpassDescriptionEnableLegacyDitheringBitExt                     SubpassDescriptionFlagBits = 128
+	SubpassDescriptionFragmentRegionBitExt                            SubpassDescriptionFlagBits = 4
+	SubpassDescriptionCustomResolveBitExt                             SubpassDescriptionFlagBits = 8
+)
+
+// VkDescriptorSetLayoutCreateFlagBits extension values
+const (
+	DescriptorSetLayoutCreateDescriptorBufferBitExt          DescriptorSetLayoutCreateFlagBits = 16
+	DescriptorSetLayoutCreateEmbeddedImmutableSamplersBitExt DescriptorSetLayoutCreateFlagBits = 32
+	DescriptorSetLayoutCreateIndirectBindableBitNv           DescriptorSetLayoutCreateFlagBits = 128
+	DescriptorSetLayoutCreateHostOnlyPoolBitExt              DescriptorSetLayoutCreateFlagBits = 4
+	DescriptorSetLayoutCreatePerStageBitNv                   DescriptorSetLayoutCreateFlagBits = 64
+)
+
+// VkQueryPipelineStatisticFlagBits extension values
+const (
+	QueryPipelineStatisticTaskShaderInvocationsBitExt              QueryPipelineStatisticFlagBits = 2048
+	QueryPipelineStatisticMeshShaderInvocationsBitExt              QueryPipelineStatisticFlagBits = 4096
+	QueryPipelineStatisticClusterCullingShaderInvocationsBitHuawei QueryPipelineStatisticFlagBits = 8192
+)
+
+// VkRenderingFlagBits extension values
+const (
+	RenderingEnableLegacyDitheringBitExt            RenderingFlagBits = 8
+	RenderingContentsInlineBitKhr                   RenderingFlagBits = 16
+	RenderingPerLayerFragmentDensityBitValve        RenderingFlagBits = 32
+	RenderingFragmentRegionBitExt                   RenderingFlagBits = 64
+	RenderingCustomResolveBitExt                    RenderingFlagBits = 128
+	RenderingLocalReadConcurrentAccessControlBitKhr RenderingFlagBits = 256
+)
+
+// VkVideoEncodeCapabilityFlagBitsKHR extension values
+const (
+	VideoEncodeCapabilityQuantizationDeltaMapBitKhr VideoEncodeCapabilityFlagBitsKHR = 4
+	VideoEncodeCapabilityEmphasisMapBitKhr          VideoEncodeCapabilityFlagBitsKHR = 8
 )
 
 // VkIndirectCommandsTokenTypeEXT extension values
@@ -5126,246 +5330,19 @@ const (
 	IndirectCommandsTokenTypeTraceRays2Ext           IndirectCommandsTokenTypeEXT = 1000386004
 )
 
-// VkSamplerCreateFlagBits extension values
+// VkMemoryMapFlagBits extension values
 const (
-	SamplerCreateSubsampledBitExt                     SamplerCreateFlagBits = 1
-	SamplerCreateSubsampledCoarseReconstructionBitExt SamplerCreateFlagBits = 2
-	SamplerCreateDescriptorBufferCaptureReplayBitExt  SamplerCreateFlagBits = 8
-	SamplerCreateNonSeamlessCubeMapBitExt             SamplerCreateFlagBits = 4
-	SamplerCreateImageProcessingBitQcom               SamplerCreateFlagBits = 16
+	MemoryMapPlacedBitExt MemoryMapFlagBits = 1
 )
 
-// VkBorderColor extension values
+// VkTensorCreateFlagBitsARM extension values
 const (
-	BorderColorFloatCustomExt BorderColor = 1000287003
-	BorderColorIntCustomExt   BorderColor = 1000287004
+	TensorCreateDescriptorBufferCaptureReplayBitArm TensorCreateFlagBitsARM = 4
 )
 
-// VkVideoEncodeH264CapabilityFlagBitsKHR extension values
+// VkPipelineColorBlendStateCreateFlagBits extension values
 const (
-	VideoEncodeH264CapabilityBPictureIntraRefreshBitKhr VideoEncodeH264CapabilityFlagBitsKHR = 1024
-	VideoEncodeH264CapabilityMbQpDiffWraparoundBitKhr   VideoEncodeH264CapabilityFlagBitsKHR = 512
-)
-
-// VkPipelineCacheHeaderVersion extension values
-const (
-	PipelineCacheHeaderVersionDataGraphQcom PipelineCacheHeaderVersion = 1000629000
-)
-
-// VkResult extension values
-const (
-	ErrorSurfaceLostKhr                         Result = -1000000000
-	ErrorNativeWindowInUseKhr                   Result = -1000000001
-	SuboptimalKhr                               Result = 1000001003
-	ErrorOutOfDateKhr                           Result = -1000001004
-	ErrorIncompatibleDisplayKhr                 Result = -1000003001
-	ErrorInvalidShaderNv                        Result = -1000012000
-	ErrorImageUsageNotSupportedKhr              Result = -1000023000
-	ErrorVideoPictureLayoutNotSupportedKhr      Result = -1000023001
-	ErrorVideoProfileOperationNotSupportedKhr   Result = -1000023002
-	ErrorVideoProfileFormatNotSupportedKhr      Result = -1000023003
-	ErrorVideoProfileCodecNotSupportedKhr       Result = -1000023004
-	ErrorVideoStdVersionNotSupportedKhr         Result = -1000023005
-	ErrorInvalidDrmFormatModifierPlaneLayoutExt Result = -1000158000
-	ErrorPresentTimingQueueFullExt              Result = -1000208000
-	ErrorFullScreenExclusiveModeLostExt         Result = -1000255000
-	ThreadIdleKhr                               Result = 1000268000
-	ThreadDoneKhr                               Result = 1000268001
-	OperationDeferredKhr                        Result = 1000268002
-	OperationNotDeferredKhr                     Result = 1000268003
-	ErrorInvalidVideoStdParametersKhr           Result = -1000299000
-	ErrorCompressionExhaustedExt                Result = -1000338000
-	IncompatibleShaderBinaryExt                 Result = 1000482000
-	PipelineBinaryMissingKhr                    Result = 1000483000
-	ErrorNotEnoughSpaceKhr                      Result = -1000483000
-)
-
-// VkComponentTypeKHR extension values
-const (
-	ComponentTypeBfloat16Khr   ComponentTypeKHR = 1000141000
-	ComponentTypeSint8PackedNv ComponentTypeKHR = 1000491000
-	ComponentTypeUint8PackedNv ComponentTypeKHR = 1000491001
-	ComponentTypeFloat8E4m3Ext ComponentTypeKHR = 1000567002
-	ComponentTypeFloat8E5m2Ext ComponentTypeKHR = 1000567003
-)
-
-// VkPolygonMode extension values
-const (
-	PolygonModeFillRectangleNv PolygonMode = 1000153000
-)
-
-// VkSubgroupFeatureFlagBits extension values
-const (
-	SubgroupFeaturePartitionedBitNv SubgroupFeatureFlagBits = 256
-)
-
-// VkVideoCodingControlFlagBitsKHR extension values
-const (
-	VideoCodingControlEncodeRateControlBitKhr  VideoCodingControlFlagBitsKHR = 2
-	VideoCodingControlEncodeQualityLevelBitKhr VideoCodingControlFlagBitsKHR = 4
-)
-
-// VkVideoSessionCreateFlagBitsKHR extension values
-const (
-	VideoSessionCreateAllowEncodeParameterOptimizationsBitKhr VideoSessionCreateFlagBitsKHR = 2
-	VideoSessionCreateInlineQueriesBitKhr                     VideoSessionCreateFlagBitsKHR = 4
-	VideoSessionCreateAllowEncodeQuantizationDeltaMapBitKhr   VideoSessionCreateFlagBitsKHR = 8
-	VideoSessionCreateAllowEncodeEmphasisMapBitKhr            VideoSessionCreateFlagBitsKHR = 16
-	VideoSessionCreateInlineSessionParametersBitKhr           VideoSessionCreateFlagBitsKHR = 32
-)
-
-// VkPipelineLayoutCreateFlagBits extension values
-const (
-	PipelineLayoutCreateIndependentSetsBitExt PipelineLayoutCreateFlagBits = 2
-)
-
-// VkRenderingAttachmentFlagBitsKHR extension values
-const (
-	RenderingAttachmentInputAttachmentFeedbackBitKhr       RenderingAttachmentFlagBitsKHR = 1
-	RenderingAttachmentResolveSkipTransferFunctionBitKhr   RenderingAttachmentFlagBitsKHR = 2
-	RenderingAttachmentResolveEnableTransferFunctionBitKhr RenderingAttachmentFlagBitsKHR = 4
-)
-
-// VkColorSpaceKHR extension values
-const (
-	ColorSpaceDisplayP3NonlinearExt    ColorSpaceKHR = 1000104001
-	ColorSpaceExtendedSrgbLinearExt    ColorSpaceKHR = 1000104002
-	ColorSpaceDisplayP3LinearExt       ColorSpaceKHR = 1000104003
-	ColorSpaceDciP3NonlinearExt        ColorSpaceKHR = 1000104004
-	ColorSpaceBt709LinearExt           ColorSpaceKHR = 1000104005
-	ColorSpaceBt709NonlinearExt        ColorSpaceKHR = 1000104006
-	ColorSpaceBt2020LinearExt          ColorSpaceKHR = 1000104007
-	ColorSpaceHdr10St2084Ext           ColorSpaceKHR = 1000104008
-	ColorSpaceDolbyvisionExt           ColorSpaceKHR = 1000104009
-	ColorSpaceHdr10HlgExt              ColorSpaceKHR = 1000104010
-	ColorSpaceAdobergbLinearExt        ColorSpaceKHR = 1000104011
-	ColorSpaceAdobergbNonlinearExt     ColorSpaceKHR = 1000104012
-	ColorSpacePassThroughExt           ColorSpaceKHR = 1000104013
-	ColorSpaceExtendedSrgbNonlinearExt ColorSpaceKHR = 1000104014
-	ColorSpaceDisplayNativeAmd         ColorSpaceKHR = 1000213000
-)
-
-// VkCopyAccelerationStructureModeKHR extension values
-const (
-	CopyAccelerationStructureModeSerializeKhr   CopyAccelerationStructureModeKHR = 2
-	CopyAccelerationStructureModeDeserializeKhr CopyAccelerationStructureModeKHR = 3
-)
-
-// VkIndirectCommandsTokenTypeNV extension values
-const (
-	IndirectCommandsTokenTypeDrawMeshTasksNv IndirectCommandsTokenTypeNV = 1000328000
-	IndirectCommandsTokenTypePipelineNv      IndirectCommandsTokenTypeNV = 1000428003
-	IndirectCommandsTokenTypeDispatchNv      IndirectCommandsTokenTypeNV = 1000428004
-)
-
-// VkQueryResultFlagBits extension values
-const (
-	QueryResultWithStatusBitKhr QueryResultFlagBits = 16
-)
-
-// VkAccessFlagBits extension values
-const (
-	AccessTransformFeedbackWriteBitExt            AccessFlagBits = 33554432
-	AccessTransformFeedbackCounterReadBitExt      AccessFlagBits = 67108864
-	AccessTransformFeedbackCounterWriteBitExt     AccessFlagBits = 134217728
-	AccessConditionalRenderingReadBitExt          AccessFlagBits = 1048576
-	AccessColorAttachmentReadNoncoherentBitExt    AccessFlagBits = 524288
-	AccessAccelerationStructureReadBitKhr         AccessFlagBits = 2097152
-	AccessAccelerationStructureWriteBitKhr        AccessFlagBits = 4194304
-	AccessFragmentDensityMapReadBitExt            AccessFlagBits = 16777216
-	AccessFragmentShadingRateAttachmentReadBitKhr AccessFlagBits = 8388608
-	AccessCommandPreprocessReadBitExt             AccessFlagBits = 131072
-	AccessCommandPreprocessWriteBitExt            AccessFlagBits = 262144
-)
-
-// VkShaderStageFlagBits extension values
-const (
-	ShaderStageRaygenBitKhr            ShaderStageFlagBits = 256
-	ShaderStageAnyHitBitKhr            ShaderStageFlagBits = 512
-	ShaderStageClosestHitBitKhr        ShaderStageFlagBits = 1024
-	ShaderStageMissBitKhr              ShaderStageFlagBits = 2048
-	ShaderStageIntersectionBitKhr      ShaderStageFlagBits = 4096
-	ShaderStageCallableBitKhr          ShaderStageFlagBits = 8192
-	ShaderStageTaskBitExt              ShaderStageFlagBits = 64
-	ShaderStageMeshBitExt              ShaderStageFlagBits = 128
-	ShaderStageSubpassShadingBitHuawei ShaderStageFlagBits = 16384
-	ShaderStageClusterCullingBitHuawei ShaderStageFlagBits = 524288
-)
-
-// VkTensorViewCreateFlagBitsARM extension values
-const (
-	TensorViewCreateDescriptorBufferCaptureReplayBitArm TensorViewCreateFlagBitsARM = 1
-)
-
-// VkSamplerReductionMode extension values
-const (
-	SamplerReductionModeWeightedAverageRangeclampQcom SamplerReductionMode = 1000521000
-)
-
-// VkVideoEncodeCapabilityFlagBitsKHR extension values
-const (
-	VideoEncodeCapabilityQuantizationDeltaMapBitKhr VideoEncodeCapabilityFlagBitsKHR = 4
-	VideoEncodeCapabilityEmphasisMapBitKhr          VideoEncodeCapabilityFlagBitsKHR = 8
-)
-
-// VkPhysicalDeviceDataGraphOperationTypeARM extension values
-const (
-	PhysicalDeviceDataGraphOperationTypeNeuralModelQcom  PhysicalDeviceDataGraphOperationTypeARM = 1000629000
-	PhysicalDeviceDataGraphOperationTypeBuiltinModelQcom PhysicalDeviceDataGraphOperationTypeARM = 1000629001
-)
-
-// VkImageLayout extension values
-const (
-	ImageLayoutPresentSrcKhr                           ImageLayout = 1000001002
-	ImageLayoutVideoDecodeDstKhr                       ImageLayout = 1000024000
-	ImageLayoutVideoDecodeSrcKhr                       ImageLayout = 1000024001
-	ImageLayoutVideoDecodeDpbKhr                       ImageLayout = 1000024002
-	ImageLayoutSharedPresentKhr                        ImageLayout = 1000111000
-	ImageLayoutFragmentDensityMapOptimalExt            ImageLayout = 1000218000
-	ImageLayoutFragmentShadingRateAttachmentOptimalKhr ImageLayout = 1000226003
-	ImageLayoutVideoEncodeDstKhr                       ImageLayout = 1000299000
-	ImageLayoutVideoEncodeSrcKhr                       ImageLayout = 1000299001
-	ImageLayoutVideoEncodeDpbKhr                       ImageLayout = 1000299002
-	ImageLayoutAttachmentFeedbackLoopOptimalExt        ImageLayout = 1000339000
-	ImageLayoutTensorAliasingArm                       ImageLayout = 1000460000
-	ImageLayoutVideoEncodeQuantizationMapKhr           ImageLayout = 1000553000
-	ImageLayoutZeroInitializedExt                      ImageLayout = 1000620000
-)
-
-// VkSamplerAddressMode extension values
-const (
-	SamplerAddressModeMirrorClampToEdge SamplerAddressMode = 4
-)
-
-// VkFormatFeatureFlagBits extension values
-const (
-	FormatFeatureVideoDecodeOutputBitKhr                 FormatFeatureFlagBits = 33554432
-	FormatFeatureVideoDecodeDpbBitKhr                    FormatFeatureFlagBits = 67108864
-	FormatFeatureAccelerationStructureVertexBufferBitKhr FormatFeatureFlagBits = 536870912
-	FormatFeatureSampledImageFilterCubicBitExt           FormatFeatureFlagBits = 8192
-	FormatFeatureFragmentDensityMapBitExt                FormatFeatureFlagBits = 16777216
-	FormatFeatureFragmentShadingRateAttachmentBitKhr     FormatFeatureFlagBits = 1073741824
-	FormatFeatureVideoEncodeInputBitKhr                  FormatFeatureFlagBits = 134217728
-	FormatFeatureVideoEncodeDpbBitKhr                    FormatFeatureFlagBits = 268435456
-)
-
-// VkPresentModeKHR extension values
-const (
-	PresentModeSharedDemandRefreshKhr     PresentModeKHR = 1000111000
-	PresentModeSharedContinuousRefreshKhr PresentModeKHR = 1000111001
-	PresentModeFifoLatestReadyKhr         PresentModeKHR = 1000621000
-)
-
-// VkTimeDomainKHR extension values
-const (
-	TimeDomainPresentStageLocalExt TimeDomainKHR = 1000208000
-	TimeDomainSwapchainLocalExt    TimeDomainKHR = 1000208001
-)
-
-// VkRenderPassCreateFlagBits extension values
-const (
-	RenderPassCreateTransformBitQcom                RenderPassCreateFlagBits = 2
-	RenderPassCreatePerLayerFragmentDensityBitValve RenderPassCreateFlagBits = 4
+	PipelineColorBlendStateCreateRasterizationOrderAttachmentAccessBitExt PipelineColorBlendStateCreateFlagBits = 1
 )
 
 // VkVideoEncodeFlagBitsKHR extension values
@@ -5375,36 +5352,59 @@ const (
 	VideoEncodeWithEmphasisMapBitKhr          VideoEncodeFlagBitsKHR = 2
 )
 
-// VkObjectType extension values
+// VkMemoryAllocateFlagBits extension values
 const (
-	ObjectTypeSurfaceKhr                    ObjectType = 1000000000
-	ObjectTypeSwapchainKhr                  ObjectType = 1000001000
-	ObjectTypeDisplayKhr                    ObjectType = 1000002000
-	ObjectTypeDisplayModeKhr                ObjectType = 1000002001
-	ObjectTypeDebugReportCallbackExt        ObjectType = 1000011000
-	ObjectTypeVideoSessionKhr               ObjectType = 1000023000
-	ObjectTypeVideoSessionParametersKhr     ObjectType = 1000023001
-	ObjectTypeCuModuleNvx                   ObjectType = 1000029000
-	ObjectTypeCuFunctionNvx                 ObjectType = 1000029001
-	ObjectTypeDebugUtilsMessengerExt        ObjectType = 1000128000
-	ObjectTypeAccelerationStructureKhr      ObjectType = 1000150000
-	ObjectTypeValidationCacheExt            ObjectType = 1000160000
-	ObjectTypeAccelerationStructureNv       ObjectType = 1000165000
-	ObjectTypePerformanceConfigurationIntel ObjectType = 1000210000
-	ObjectTypeDeferredOperationKhr          ObjectType = 1000268000
-	ObjectTypeIndirectCommandsLayoutNv      ObjectType = 1000277000
-	ObjectTypeCudaModuleNv                  ObjectType = 1000307000
-	ObjectTypeCudaFunctionNv                ObjectType = 1000307001
-	ObjectTypeBufferCollectionFuchsia       ObjectType = 1000366000
-	ObjectTypeMicromapExt                   ObjectType = 1000396000
-	ObjectTypeTensorArm                     ObjectType = 1000460000
-	ObjectTypeTensorViewArm                 ObjectType = 1000460001
-	ObjectTypeOpticalFlowSessionNv          ObjectType = 1000464000
-	ObjectTypeShaderExt                     ObjectType = 1000482000
-	ObjectTypePipelineBinaryKhr             ObjectType = 1000483000
-	ObjectTypeSemaphoreSciSyncPoolNv        ObjectType = 1000489000
-	ObjectTypeDataGraphPipelineSessionArm   ObjectType = 1000507000
-	ObjectTypeExternalComputeQueueNv        ObjectType = 1000556000
-	ObjectTypeIndirectCommandsLayoutExt     ObjectType = 1000572000
-	ObjectTypeIndirectExecutionSetExt       ObjectType = 1000572001
+	MemoryAllocateZeroInitializeBitExt MemoryAllocateFlagBits = 8
+)
+
+// VkImageAspectFlagBits extension values
+const (
+	ImageAspectMemoryPlane0BitExt ImageAspectFlagBits = 128
+	ImageAspectMemoryPlane1BitExt ImageAspectFlagBits = 256
+	ImageAspectMemoryPlane2BitExt ImageAspectFlagBits = 512
+	ImageAspectMemoryPlane3BitExt ImageAspectFlagBits = 1024
+)
+
+// VkRenderPassCreateFlagBits extension values
+const (
+	RenderPassCreateTransformBitQcom                RenderPassCreateFlagBits = 2
+	RenderPassCreatePerLayerFragmentDensityBitValve RenderPassCreateFlagBits = 4
+)
+
+// VkResolveImageFlagBitsKHR extension values
+const (
+	ResolveImageSkipTransferFunctionBitKhr   ResolveImageFlagBitsKHR = 1
+	ResolveImageEnableTransferFunctionBitKhr ResolveImageFlagBitsKHR = 2
+)
+
+// VkSamplerAddressMode extension values
+const (
+	SamplerAddressModeMirrorClampToEdge SamplerAddressMode = 4
+)
+
+// VkPipelineLayoutCreateFlagBits extension values
+const (
+	PipelineLayoutCreateIndependentSetsBitExt PipelineLayoutCreateFlagBits = 2
+)
+
+// VkBuildAccelerationStructureFlagBitsKHR extension values
+const (
+	BuildAccelerationStructureMotionBitNv                          BuildAccelerationStructureFlagBitsKHR = 32
+	BuildAccelerationStructureAllowOpacityMicromapUpdateBitExt     BuildAccelerationStructureFlagBitsKHR = 64
+	BuildAccelerationStructureAllowDisableOpacityMicromapsBitExt   BuildAccelerationStructureFlagBitsKHR = 128
+	BuildAccelerationStructureAllowOpacityMicromapDataUpdateBitExt BuildAccelerationStructureFlagBitsKHR = 256
+	BuildAccelerationStructureAllowDisplacementMicromapUpdateBitNv BuildAccelerationStructureFlagBitsKHR = 512
+	BuildAccelerationStructureAllowDataAccessBitKhr                BuildAccelerationStructureFlagBitsKHR = 2048
+	BuildAccelerationStructureAllowClusterOpacityMicromapsBitNv    BuildAccelerationStructureFlagBitsKHR = 4096
+)
+
+// VkGeometryInstanceFlagBitsKHR extension values
+const (
+	GeometryInstanceForceOpacityMicromap2StateBitExt GeometryInstanceFlagBitsKHR = 16
+	GeometryInstanceDisableOpacityMicromapsBitExt    GeometryInstanceFlagBitsKHR = 32
+)
+
+// VkMicromapTypeEXT extension values
+const (
+	MicromapTypeDisplacementMicromapNv MicromapTypeEXT = 1000397000
 )

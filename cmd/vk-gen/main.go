@@ -1121,12 +1121,28 @@ func generateCommandMethod(f *os.File, cmd Command) error {
 	}
 	fmt.Fprintln(f, "\t}")
 
-	// Call ffi.CallFunction
+	// Call ffi.CallFunction with goffi error checking (VK-002).
+	// goffi returns zeros on nil function pointer — no crash, no error —
+	// which produces false VK_SUCCESS with null output handles (gogpu#119).
 	resultPtr := "nil"
 	if hasReturn {
 		resultPtr = "unsafe.Pointer(&result)"
 	}
-	fmt.Fprintf(f, "\t_ = ffi.CallFunction(&%s, c.%s, %s, args[:])\n", callInterface, goFieldName, resultPtr)
+	if returnType == "VkResult" {
+		// VkResult functions: check goffi transport error and return
+		// ErrorInitializationFailed if the function pointer is nil or call failed.
+		fmt.Fprintf(f, "\tif err := ffi.CallFunction(&%s, c.%s, %s, args[:]); err != nil {\n", callInterface, goFieldName, resultPtr)
+		fmt.Fprintln(f, "\t\treturn ErrorInitializationFailed")
+		fmt.Fprintln(f, "\t}")
+	} else {
+		// Void/other functions: guard against nil function pointer.
+		fmt.Fprintf(f, "\tif c.%s == nil {\n\t\treturn", goFieldName)
+		if hasReturn && returnType != "VkResult" {
+			fmt.Fprint(f, " 0")
+		}
+		fmt.Fprintln(f, "\n\t}")
+		fmt.Fprintf(f, "\t_ = ffi.CallFunction(&%s, c.%s, %s, args[:])\n", callInterface, goFieldName, resultPtr)
+	}
 
 	// Return result
 	if hasReturn {

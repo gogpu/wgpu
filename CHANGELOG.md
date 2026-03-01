@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.19.0] - 2026-03-01
+
+### Changed
+
+- **BREAKING: `hal.Queue.WriteBuffer` now returns `error`** — previously a silent void method
+  that could swallow errors from all backends (Vulkan `FlushMappedMemoryRanges`, Metal/DX12
+  buffer mapping, etc.). All 7 backend implementations (vulkan, metal, dx12, gles, gles_linux,
+  software, noop) updated. All callers in tests and examples now check errors.
+- **BREAKING: `hal.Queue.WriteTexture` now returns `error`** — previously a void method.
+  All 7 backend implementations updated with proper error propagation from staging buffer
+  allocation, data copy, and submission. Callers updated across the ecosystem.
+- **BREAKING: `wgpu.Queue.WriteBuffer` now returns `error`** — public API wrapper updated
+  to propagate errors from HAL layer.
+- **BREAKING: `wgpu.Queue.WriteTexture` now returns `error`** — public API wrapper updated
+  to propagate errors from HAL layer.
+
+### Fixed
+
+- **Vulkan: `WriteTexture` consumes swapchain acquire semaphore** — `WriteTexture` performs
+  an internal staging `Submit()` that consumed the swapchain acquire semaphore meant for the
+  render pass. This caused `vkQueueSubmit` to fail or produce undefined behavior when the
+  render pass subsequently tried to use the already-consumed semaphore. Fixed by saving and
+  restoring `activeSwapchain`/`acquireUsed` state around the staging submit, protected by mutex.
+  ([gogpu#119](https://github.com/gogpu/gogpu/issues/119))
+- **Vulkan: `VK_ERROR_DEVICE_LOST` masked by void `WriteTexture`** — Vulkan staging submit
+  errors were silently discarded because `WriteTexture` returned void. Now all Vulkan errors
+  (buffer mapping, memory flush, queue submit) propagate to the caller.
+- **Vulkan: `CmdSetBlendConstants` codegen regression** — auto-generated binding used scalar
+  float signature instead of pointer-to-float-array. Vulkan ABI expects `const float[4]` as
+  pointer, not scalar. Caused SIGSEGV in `BeginRenderPass` for any application using blend.
+- **Noop: `WriteBuffer` rejects non-mapped buffers** — noop `CreateBuffer` returns `*Resource`
+  (not `*Buffer`) for non-mapped buffers. `WriteBuffer` type assertion now handles both types.
+
 ## [0.18.1] - 2026-02-27
 
 ### Fixed
