@@ -52,7 +52,7 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	// Uses a buffered channel of size maxFramesInFlight pre-filled with tokens.
 	// Each Submit() consumes a token; the GPU's addCompletedHandler: returns it.
 	// If block support is unavailable, frameSemaphore stays nil (no throttling).
-	if symNSConcreteStackBlock != 0 {
+	if symNSConcreteGlobalBlock != 0 {
 		queue.frameSemaphore = make(chan struct{}, maxFramesInFlight)
 		for i := 0; i < maxFramesInFlight; i++ {
 			queue.frameSemaphore <- struct{}{}
@@ -64,7 +64,7 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 
 	hal.Logger().Debug("metal: adapter opened",
 		"maxFramesInFlight", maxFramesInFlight,
-		"blockSupport", symNSConcreteStackBlock != 0,
+		"blockSupport", symNSConcreteGlobalBlock != 0,
 	)
 
 	return hal.OpenDevice{

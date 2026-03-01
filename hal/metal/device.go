@@ -832,10 +832,9 @@ func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Dur
 		argPointer(blockPtr),
 	)
 
-	// Keep block alive until notification fires or times out.
-	// The block struct is on the Go heap; runtime.KeepAlive prevents GC
-	// from collecting the underlying memory while Metal holds a reference.
-	defer runtime.KeepAlive(blockPtr)
+	// Block is pinned via blockPinRegistry until releaseBlock(blockID).
+	// No runtime.KeepAlive needed — the deferred releaseBlock above
+	// keeps the pin alive for the entire function scope.
 
 	// Wait for the callback or timeout.
 	select {

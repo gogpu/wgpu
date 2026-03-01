@@ -508,12 +508,25 @@ type blockRegistryEntry struct {
 // Entries are added when a block is created and removed after it fires or times out.
 var blockRegistry sync.Map // map[uint64]*blockRegistryEntry
 
+// blockPinRegistry keeps *blockLiteral alive until the callback fires.
+// With _NSConcreteGlobalBlock, Block_copy() is a no-op — Metal holds the
+// exact same pointer to our Go-heap block. Without this registry, GC could
+// collect the block before Metal invokes the callback.
+var blockPinRegistry sync.Map // map[uint64]*blockLiteral
+
 // blockIDCounter is the next block ID to assign. Atomically incremented.
 var blockIDCounter uint64
 
-// symNSConcreteStackBlock is the address of _NSConcreteStackBlock from libobjc.
-// Loaded during initObjCRuntime.
-var symNSConcreteStackBlock uintptr
+// blockIsGlobal is the BLOCK_IS_GLOBAL flag (1 << 28).
+// When set, Block_copy() is a no-op (returns same pointer) and Block_release()
+// is also a no-op. This avoids PAC re-signing issues on ARM64e (Apple Silicon).
+const blockIsGlobal = 1 << 28
+
+// symNSConcreteGlobalBlock is the address of _NSConcreteGlobalBlock from libobjc.
+// Global blocks make Block_copy() a no-op, avoiding PAC pointer re-signing
+// that causes SIGBUS on Apple Silicon when using _NSConcreteStackBlock.
+// See: gogpu/wgpu#89
+var symNSConcreteGlobalBlock uintptr
 
 // sharedEventBlockInvoke is the ffi.NewCallback trampoline for
 // the MTLSharedEvent notification block.
@@ -530,13 +543,15 @@ var (
 var sharedEventBlockDescriptor *blockDescriptor
 
 func initBlockSupport() {
-	// Load _NSConcreteStackBlock symbol from libobjc
+	// Load _NSConcreteGlobalBlock symbol from libobjc.
+	// Global blocks make Block_copy() a no-op — no memmove, no PAC re-signing.
+	// This is critical for Apple Silicon where Block_copy() on stack blocks
+	// re-signs the invoke pointer via PAC, causing SIGBUS with unsigned
+	// function pointers from ffi.NewCallback. See: gogpu/wgpu#89
 	if objcLib != nil {
-		sym, err := ffi.GetSymbol(objcLib, "_NSConcreteStackBlock")
+		sym, err := ffi.GetSymbol(objcLib, "_NSConcreteGlobalBlock")
 		if err == nil && sym != nil {
-			// The symbol is a pointer to the class — we need the address of the global,
-			// which is what the pointer value itself represents.
-			symNSConcreteStackBlock = *(*uintptr)(sym)
+			symNSConcreteGlobalBlock = *(*uintptr)(sym)
 		}
 	}
 
@@ -585,7 +600,7 @@ func getSharedEventBlockInvoke() uintptr {
 //
 // Returns (block pointer, block ID, done channel) or (0, 0, nil) on failure.
 func newSharedEventNotificationBlock() (uintptr, uint64, chan struct{}) {
-	if symNSConcreteStackBlock == 0 {
+	if symNSConcreteGlobalBlock == 0 {
 		return 0, 0, nil
 	}
 
@@ -599,23 +614,27 @@ func newSharedEventNotificationBlock() (uintptr, uint64, chan struct{}) {
 	done := make(chan struct{}, 1)
 	blockRegistry.Store(id, &blockRegistryEntry{done: done})
 
-	// Allocate block on Go heap — must remain alive until the callback fires.
+	// Allocate block as global — Block_copy() is a no-op (no PAC re-signing).
 	block := &blockLiteral{
-		isa:        symNSConcreteStackBlock,
-		flags:      0,
+		isa:        symNSConcreteGlobalBlock,
+		flags:      blockIsGlobal,
 		reserved:   0,
 		invoke:     invokePtr,
 		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
 		blockID:    id,
 	}
 
+	// Pin the block so GC doesn't collect it before the callback fires.
+	blockPinRegistry.Store(id, block)
+
 	return uintptr(unsafe.Pointer(block)), id, done
 }
 
-// releaseBlock removes the block entry from the registry.
+// releaseBlock removes the block entry from the registry and unpins the block.
 // Must be called after the block fires or times out to prevent memory leaks.
 func releaseBlock(id uint64) {
 	blockRegistry.Delete(id)
+	blockPinRegistry.Delete(id)
 }
 
 // nextBlockID atomically increments the block ID counter and returns the new value.
@@ -663,6 +682,7 @@ func getCompletedHandlerBlockInvoke() uintptr {
 
 			hal.Logger().Debug("metal: completion handler fired", "blockID", blockID)
 
+			blockPinRegistry.Delete(blockID)
 			if val, ok := completedHandlerRegistry.LoadAndDelete(blockID); ok {
 				stagingBuf := val.(ID)
 				if stagingBuf != 0 {
@@ -690,7 +710,7 @@ func getCompletedHandlerBlockInvoke() uintptr {
 // cancelCompletedHandlerBlock(blockID) to remove the registry entry and
 // avoid leaking the staging buffer reference.
 func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
-	if symNSConcreteStackBlock == 0 {
+	if symNSConcreteGlobalBlock == 0 {
 		return 0, 0
 	}
 
@@ -703,16 +723,18 @@ func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
 	id := nextBlockID()
 	completedHandlerRegistry.Store(id, stagingBuffer)
 
-	// Allocate block on Go heap — must remain alive until addCompletedHandler
-	// has consumed it (Metal copies the block internally).
+	// Allocate block as global — Block_copy() is a no-op (no PAC re-signing).
 	block := &blockLiteral{
-		isa:        symNSConcreteStackBlock,
-		flags:      0,
+		isa:        symNSConcreteGlobalBlock,
+		flags:      blockIsGlobal,
 		reserved:   0,
 		invoke:     invokePtr,
 		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
 		blockID:    id,
 	}
+
+	// Pin the block so GC doesn't collect it before the callback fires.
+	blockPinRegistry.Store(id, block)
 
 	return uintptr(unsafe.Pointer(block)), id
 }
@@ -721,6 +743,7 @@ func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
 // the registry without releasing the staging buffer. Returns the staging
 // buffer ID so the caller can release it in the synchronous fallback path.
 func cancelCompletedHandlerBlock(id uint64) ID {
+	blockPinRegistry.Delete(id)
 	if val, ok := completedHandlerRegistry.LoadAndDelete(id); ok {
 		return val.(ID)
 	}
@@ -769,6 +792,7 @@ func getFrameCompletionBlockInvoke() uintptr {
 
 			hal.Logger().Debug("metal: frame completion fired", "blockID", blockID)
 
+			blockPinRegistry.Delete(blockID)
 			if val, ok := frameCompletionRegistry.LoadAndDelete(blockID); ok {
 				ch := val.(chan<- struct{})
 				if ch != nil {
@@ -793,7 +817,7 @@ func getFrameCompletionBlockInvoke() uintptr {
 // until after addCompletedHandler: has been called. Metal copies the block
 // internally, so the Go-side literal can be collected after that point.
 func newFrameCompletionBlock(frameSemaphore chan struct{}) uintptr {
-	if symNSConcreteStackBlock == 0 || frameSemaphore == nil {
+	if symNSConcreteGlobalBlock == 0 || frameSemaphore == nil {
 		return 0
 	}
 
@@ -807,16 +831,18 @@ func newFrameCompletionBlock(frameSemaphore chan struct{}) uintptr {
 	// Store as chan<- struct{} (send-only) to match the registry type.
 	frameCompletionRegistry.Store(id, (chan<- struct{})(frameSemaphore))
 
-	// Allocate block on Go heap — must remain alive until addCompletedHandler
-	// has consumed it (Metal copies the block internally).
+	// Allocate block as global — Block_copy() is a no-op (no PAC re-signing).
 	block := &blockLiteral{
-		isa:        symNSConcreteStackBlock,
-		flags:      0,
+		isa:        symNSConcreteGlobalBlock,
+		flags:      blockIsGlobal,
 		reserved:   0,
 		invoke:     invokePtr,
 		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
 		blockID:    id,
 	}
+
+	// Pin the block so GC doesn't collect it before the callback fires.
+	blockPinRegistry.Store(id, block)
 
 	return uintptr(unsafe.Pointer(block))
 }
