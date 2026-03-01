@@ -565,8 +565,6 @@ func colorWriteMaskToD3D12(mask gputypes.ColorWriteMask) uint8 {
 }
 
 // shaderStagesToD3D12Visibility converts WebGPU shader stages to D3D12 shader visibility.
-//
-//nolint:unused // Will be used when bind groups are fully implemented
 func shaderStagesToD3D12Visibility(stages gputypes.ShaderStages) d3d12.D3D12_SHADER_VISIBILITY {
 	// If all stages, use ALL
 	if stages&(gputypes.ShaderStageVertex|gputypes.ShaderStageFragment|gputypes.ShaderStageCompute) ==
