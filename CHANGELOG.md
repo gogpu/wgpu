@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-03-01
+
+### Fixed
+
+- **Metal: SIGBUS crash on Apple Silicon from ObjC block PAC re-signing** —
+  ObjC blocks were constructed with `_NSConcreteStackBlock` but allocated on the
+  Go heap. When Metal calls `Block_copy()` during `addCompletedHandler:`, ARM64e
+  Pointer Authentication (PAC) re-signs the invoke function pointer. Since
+  `ffi.NewCallback` pointers are unsigned, authentication fails and produces a
+  corrupted pointer that causes SIGBUS ~0.7s after launch when Metal's completion
+  queue invokes the callback. Fixed by switching to `_NSConcreteGlobalBlock` with
+  `BLOCK_IS_GLOBAL` flag, which makes `Block_copy()` a complete no-op (no memmove,
+  no PAC re-signing). Added `blockPinRegistry` to prevent GC collection of block
+  literals while Metal holds references. Removed stale `runtime.KeepAlive(uintptr)`
+  calls that were no-ops (GC doesn't track `uintptr` as roots).
+  ([wgpu#89](https://github.com/gogpu/wgpu/issues/89),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+
+### Changed
+
+- **CI: upgraded codecov-action v4 → v5**, added `codecov.yml` configuration
+- **Tests: added coverage tests** for core, HAL backends, and format conversion
+
 ## [0.19.1] - 2026-03-01
 
 ### Fixed
