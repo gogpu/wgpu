@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-03-01
+
+### Changed
+
+- **Update naga v0.14.3 → v0.14.4** — MSL backend fixes: vertex `[[stage_in]]`
+  for struct-typed arguments, `metal::discard_fragment()` namespace prefix
+  ([naga#38](https://github.com/gogpu/naga/pull/38),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+
 ## [0.19.2] - 2026-03-01
 
 ### Fixed
