@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-03-02
+
+### Changed
+
+- **Update goffi v0.3.9 → v0.4.1** — fix SIGSEGV on Linux/macOS for Vulkan
+  functions with >6 arguments (`vkCmdPipelineBarrier`, etc.)
+  ([goffi#19](https://github.com/go-webgpu/goffi/issues/19),
+  [gogpu#119](https://github.com/gogpu/gogpu/issues/119))
+
 ## [0.19.3] - 2026-03-01
 
 ### Changed
