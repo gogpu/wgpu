@@ -356,3 +356,83 @@ func indexFormatToMTL(format gputypes.IndexFormat) MTLIndexType {
 		return MTLIndexTypeUInt32
 	}
 }
+
+func vertexFormatToMTL(format gputypes.VertexFormat) MTLVertexFormat {
+	switch format {
+	case gputypes.VertexFormatUint8x2:
+		return MTLVertexFormatUChar2
+	case gputypes.VertexFormatUint8x4:
+		return MTLVertexFormatUChar4
+	case gputypes.VertexFormatSint8x2:
+		return MTLVertexFormatChar2
+	case gputypes.VertexFormatSint8x4:
+		return MTLVertexFormatChar4
+	case gputypes.VertexFormatUnorm8x2:
+		return MTLVertexFormatUChar2Normalized
+	case gputypes.VertexFormatUnorm8x4:
+		return MTLVertexFormatUChar4Normalized
+	case gputypes.VertexFormatSnorm8x2:
+		return MTLVertexFormatChar2Normalized
+	case gputypes.VertexFormatSnorm8x4:
+		return MTLVertexFormatChar4Normalized
+	case gputypes.VertexFormatUint16x2:
+		return MTLVertexFormatUShort2
+	case gputypes.VertexFormatUint16x4:
+		return MTLVertexFormatUShort4
+	case gputypes.VertexFormatSint16x2:
+		return MTLVertexFormatShort2
+	case gputypes.VertexFormatSint16x4:
+		return MTLVertexFormatShort4
+	case gputypes.VertexFormatUnorm16x2:
+		return MTLVertexFormatUShort2Normalized
+	case gputypes.VertexFormatUnorm16x4:
+		return MTLVertexFormatUShort4Normalized
+	case gputypes.VertexFormatSnorm16x2:
+		return MTLVertexFormatShort2Normalized
+	case gputypes.VertexFormatSnorm16x4:
+		return MTLVertexFormatShort4Normalized
+	case gputypes.VertexFormatFloat16x2:
+		return MTLVertexFormatHalf2
+	case gputypes.VertexFormatFloat16x4:
+		return MTLVertexFormatHalf4
+	case gputypes.VertexFormatFloat32:
+		return MTLVertexFormatFloat
+	case gputypes.VertexFormatFloat32x2:
+		return MTLVertexFormatFloat2
+	case gputypes.VertexFormatFloat32x3:
+		return MTLVertexFormatFloat3
+	case gputypes.VertexFormatFloat32x4:
+		return MTLVertexFormatFloat4
+	case gputypes.VertexFormatUint32:
+		return MTLVertexFormatUInt
+	case gputypes.VertexFormatUint32x2:
+		return MTLVertexFormatUInt2
+	case gputypes.VertexFormatUint32x3:
+		return MTLVertexFormatUInt3
+	case gputypes.VertexFormatUint32x4:
+		return MTLVertexFormatUInt4
+	case gputypes.VertexFormatSint32:
+		return MTLVertexFormatInt
+	case gputypes.VertexFormatSint32x2:
+		return MTLVertexFormatInt2
+	case gputypes.VertexFormatSint32x3:
+		return MTLVertexFormatInt3
+	case gputypes.VertexFormatSint32x4:
+		return MTLVertexFormatInt4
+	case gputypes.VertexFormatUnorm1010102:
+		return MTLVertexFormatUInt1010102Normalized
+	default:
+		return MTLVertexFormatInvalid
+	}
+}
+
+func vertexStepModeToMTL(mode gputypes.VertexStepMode) MTLVertexStepFunction {
+	switch mode {
+	case gputypes.VertexStepModeVertex:
+		return MTLVertexStepFunctionPerVertex
+	case gputypes.VertexStepModeInstance:
+		return MTLVertexStepFunctionPerInstance
+	default:
+		return MTLVertexStepFunctionPerVertex
+	}
+}

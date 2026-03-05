@@ -438,26 +438,39 @@ const (
 type MTLVertexFormat NSUInteger
 
 const (
-	MTLVertexFormatInvalid MTLVertexFormat = 0
-	MTLVertexFormatFloat   MTLVertexFormat = 28
-	MTLVertexFormatFloat2  MTLVertexFormat = 29
-	MTLVertexFormatFloat3  MTLVertexFormat = 30
-	MTLVertexFormatFloat4  MTLVertexFormat = 31
-	MTLVertexFormatInt     MTLVertexFormat = 32
-	MTLVertexFormatInt2    MTLVertexFormat = 33
-	MTLVertexFormatInt3    MTLVertexFormat = 34
-	MTLVertexFormatInt4    MTLVertexFormat = 35
-	MTLVertexFormatUInt    MTLVertexFormat = 36
-	MTLVertexFormatUInt2   MTLVertexFormat = 37
-	MTLVertexFormatUInt3   MTLVertexFormat = 38
-	MTLVertexFormatUInt4   MTLVertexFormat = 39
-	MTLVertexFormatHalf2   MTLVertexFormat = 25
-	MTLVertexFormatHalf3   MTLVertexFormat = 26
-	MTLVertexFormatHalf4   MTLVertexFormat = 27
-	MTLVertexFormatUChar4  MTLVertexFormat = 3
-	MTLVertexFormatChar4   MTLVertexFormat = 6
-	MTLVertexFormatUShort2 MTLVertexFormat = 13
-	MTLVertexFormatShort2  MTLVertexFormat = 16
+	MTLVertexFormatInvalid               MTLVertexFormat = 0
+	MTLVertexFormatUChar2                MTLVertexFormat = 1
+	MTLVertexFormatUChar4                MTLVertexFormat = 3
+	MTLVertexFormatChar2                 MTLVertexFormat = 4
+	MTLVertexFormatChar4                 MTLVertexFormat = 6
+	MTLVertexFormatUChar2Normalized      MTLVertexFormat = 7
+	MTLVertexFormatUChar4Normalized      MTLVertexFormat = 9
+	MTLVertexFormatChar2Normalized       MTLVertexFormat = 10
+	MTLVertexFormatChar4Normalized       MTLVertexFormat = 12
+	MTLVertexFormatUShort2               MTLVertexFormat = 13
+	MTLVertexFormatUShort4               MTLVertexFormat = 15
+	MTLVertexFormatShort2                MTLVertexFormat = 16
+	MTLVertexFormatShort4                MTLVertexFormat = 18
+	MTLVertexFormatUShort2Normalized     MTLVertexFormat = 19
+	MTLVertexFormatUShort4Normalized     MTLVertexFormat = 21
+	MTLVertexFormatShort2Normalized      MTLVertexFormat = 22
+	MTLVertexFormatShort4Normalized      MTLVertexFormat = 24
+	MTLVertexFormatHalf2                 MTLVertexFormat = 25
+	MTLVertexFormatHalf3                 MTLVertexFormat = 26
+	MTLVertexFormatHalf4                 MTLVertexFormat = 27
+	MTLVertexFormatFloat                 MTLVertexFormat = 28
+	MTLVertexFormatFloat2                MTLVertexFormat = 29
+	MTLVertexFormatFloat3                MTLVertexFormat = 30
+	MTLVertexFormatFloat4                MTLVertexFormat = 31
+	MTLVertexFormatInt                   MTLVertexFormat = 32
+	MTLVertexFormatInt2                  MTLVertexFormat = 33
+	MTLVertexFormatInt3                  MTLVertexFormat = 34
+	MTLVertexFormatInt4                  MTLVertexFormat = 35
+	MTLVertexFormatUInt                  MTLVertexFormat = 36
+	MTLVertexFormatUInt2                 MTLVertexFormat = 37
+	MTLVertexFormatUInt3                 MTLVertexFormat = 38
+	MTLVertexFormatUInt4                 MTLVertexFormat = 39
+	MTLVertexFormatUInt1010102Normalized MTLVertexFormat = 40
 )
 
 // MTLVertexStepFunction represents vertex step functions.

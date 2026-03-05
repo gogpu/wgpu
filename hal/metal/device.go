@@ -534,6 +534,15 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	// Set vertex function
 	_ = MsgSend(pipelineDesc, Sel("setVertexFunction:"), uintptr(vertexFunc))
 
+	// Configure vertex descriptor from vertex buffer layouts
+	if len(desc.Vertex.Buffers) > 0 {
+		if vd, err := d.buildVertexDescriptor(desc.Vertex.Buffers); err != nil {
+			return nil, err
+		} else if vd != 0 {
+			_ = MsgSend(pipelineDesc, Sel("setVertexDescriptor:"), uintptr(vd))
+		}
+	}
+
 	// Get and set fragment function if present
 	if fragmentModule != nil && desc.Fragment != nil {
 		fragmentFuncName := NSString(desc.Fragment.EntryPoint)
@@ -605,6 +614,38 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	)
 
 	return &RenderPipeline{raw: pipelineState, device: d}, nil
+}
+
+// buildVertexDescriptor creates an MTLVertexDescriptor from WebGPU vertex buffer layouts.
+func (d *Device) buildVertexDescriptor(buffers []gputypes.VertexBufferLayout) (ID, error) {
+	vertexDesc := MsgSend(ID(GetClass("MTLVertexDescriptor")), Sel("vertexDescriptor"))
+	if vertexDesc == 0 {
+		return 0, fmt.Errorf("metal: failed to create vertex descriptor")
+	}
+
+	attributes := MsgSend(vertexDesc, Sel("attributes"))
+	layouts := MsgSend(vertexDesc, Sel("layouts"))
+
+	for bufIdx, buf := range buffers {
+		for _, attr := range buf.Attributes {
+			attrDesc := MsgSend(attributes, Sel("objectAtIndexedSubscript:"), uintptr(attr.ShaderLocation))
+			if attrDesc == 0 {
+				continue
+			}
+			_ = MsgSend(attrDesc, Sel("setFormat:"), uintptr(vertexFormatToMTL(attr.Format)))
+			_ = MsgSend(attrDesc, Sel("setOffset:"), uintptr(attr.Offset))
+			_ = MsgSend(attrDesc, Sel("setBufferIndex:"), uintptr(bufIdx))
+		}
+
+		layoutDesc := MsgSend(layouts, Sel("objectAtIndexedSubscript:"), uintptr(bufIdx))
+		if layoutDesc != 0 {
+			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(buf.ArrayStride))
+			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(vertexStepModeToMTL(buf.StepMode)))
+			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(1))
+		}
+	}
+
+	return vertexDesc, nil
 }
 
 // DestroyRenderPipeline destroys a render pipeline.
