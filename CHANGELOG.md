@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.6] - 2026-03-05
+
+### Fixed
+
+- **Metal: MSAA resolve store action** — when a render pass has a resolve target
+  (MSAA → single-sample), Metal requires `MTLStoreActionMultisampleResolve` or
+  `MTLStoreActionStoreAndMultisampleResolve`. We were setting `MTLStoreActionStore`,
+  causing Metal to silently skip the resolve. The surface texture stayed
+  uninitialized (purple/magenta screen).
+  ([ui#23](https://github.com/gogpu/ui/issues/23))
+
 ## [0.19.5] - 2026-03-05
 
 ### Fixed

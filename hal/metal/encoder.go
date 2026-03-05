@@ -284,12 +284,21 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			clearColor := MTLClearColor{Red: ca.ClearValue.R, Green: ca.ClearValue.G, Blue: ca.ClearValue.B, Alpha: ca.ClearValue.A}
 			msgSendClearColor(attachment, Sel("setClearColor:"), clearColor)
 		}
-		_ = MsgSend(attachment, Sel("setStoreAction:"), uintptr(storeOpToMTL(ca.StoreOp)))
+		storeAction := storeOpToMTL(ca.StoreOp)
 		if ca.ResolveTarget != nil {
 			if rtv, ok := ca.ResolveTarget.(*TextureView); ok && rtv != nil {
 				_ = MsgSend(attachment, Sel("setResolveTexture:"), uintptr(rtv.raw))
+				// Metal requires MultisampleResolve store action when a resolve
+				// texture is set. Without this, Metal silently skips the MSAA
+				// resolve and the surface stays uninitialized (purple screen).
+				if storeAction == MTLStoreActionStore {
+					storeAction = MTLStoreActionStoreAndMultisampleResolve
+				} else {
+					storeAction = MTLStoreActionMultisampleResolve
+				}
 			}
 		}
+		_ = MsgSend(attachment, Sel("setStoreAction:"), uintptr(storeAction))
 	}
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
