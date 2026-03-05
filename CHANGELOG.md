@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-03-05
+
 ### Fixed
 
 - **Metal: add vertex descriptor to render pipeline creation** — Metal requires
@@ -21,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Complete Metal vertex format mapping** — all WebGPU vertex formats (8/16/32-bit
   int/uint/float, normalized, packed 10-10-10-2) now map to corresponding
   `MTLVertexFormat` constants.
+
+### Changed
+
+- **Update goffi v0.4.1 → v0.4.2**
+- **Update naga v0.14.4 → v0.14.5**
 
 ## [0.19.4] - 2026-03-02
 
