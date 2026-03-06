@@ -85,6 +85,30 @@ func (q *Queue) ReadBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	return q.hal.ReadBuffer(halBuffer, offset, data)
 }
 
+// WriteTexture writes data to a texture.
+func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *TextureDataLayout, size *Extent3D) error {
+	if q.hal == nil {
+		return fmt.Errorf("wgpu: WriteTexture: queue is nil")
+	}
+	if dst == nil {
+		return fmt.Errorf("wgpu: WriteTexture: destination texture is nil")
+	}
+	if dst.Texture == nil || dst.Texture.hal == nil {
+		return fmt.Errorf("wgpu: WriteTexture: destination texture is invalid")
+	}
+	if layout == nil {
+		return fmt.Errorf("wgpu: WriteTexture: layout is nil")
+	}
+	if size == nil {
+		return fmt.Errorf("wgpu: WriteTexture: size is nil")
+	}
+
+	halDst := dst.toHAL()
+	halLayout := textureDataLayoutToHAL(layout)
+
+	return q.hal.WriteTexture(halDst, data, halLayout, size)
+}
+
 // release cleans up queue resources.
 func (q *Queue) release() {
 	if q.fence != nil && q.halDevice != nil {

@@ -1,6 +1,8 @@
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import (
+	"github.com/gogpu/wgpu/hal"
+)
 
 // Texture represents a GPU texture.
 type Texture struct {
@@ -42,5 +44,42 @@ func (v *TextureView) Release() {
 	halDevice := v.device.halDevice()
 	if halDevice != nil {
 		halDevice.DestroyTextureView(v.hal)
+	}
+}
+
+// ImageCopyTexture describes a texture subresource and origin for write operations.
+type ImageCopyTexture struct {
+	Texture  *Texture
+	MipLevel uint32
+	Origin   Origin3D
+	Aspect   TextureAspect
+}
+
+func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
+	if i == nil || i.Texture == nil {
+		return nil
+	}
+
+	return &hal.ImageCopyTexture{
+		Texture:  i.Texture.hal,
+		MipLevel: i.MipLevel,
+		Origin: hal.Origin3D{
+			X: i.Origin.X,
+			Y: i.Origin.Y,
+			Z: i.Origin.Z,
+		},
+		Aspect: i.Aspect,
+	}
+}
+
+func textureDataLayoutToHAL(t *TextureDataLayout) *hal.ImageDataLayout {
+	if t == nil {
+		return nil
+	}
+
+	return &hal.ImageDataLayout{
+		Offset:       t.Offset,
+		BytesPerRow:  t.BytesPerRow,
+		RowsPerImage: t.RowsPerImage,
 	}
 }
