@@ -86,12 +86,9 @@ func (q *Queue) ReadBuffer(buffer *Buffer, offset uint64, data []byte) error {
 }
 
 // WriteTexture writes data to a texture.
-func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *TextureDataLayout, size *Extent3D) error {
-	if q.hal == nil {
-		return fmt.Errorf("wgpu: WriteTexture: queue is nil")
-	}
-	if dst == nil {
-		return fmt.Errorf("wgpu: WriteTexture: destination texture is nil")
+func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	if q.hal == nil || dst == nil {
+		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
 	if dst.Texture == nil || dst.Texture.hal == nil {
 		return fmt.Errorf("wgpu: WriteTexture: destination texture is invalid")
@@ -104,9 +101,7 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *Texture
 	}
 
 	halDst := dst.toHAL()
-	halLayout := textureDataLayoutToHAL(layout)
-
-	return q.hal.WriteTexture(halDst, data, halLayout, size)
+	return q.hal.WriteTexture(halDst, data, layout, size)
 }
 
 // release cleans up queue resources.

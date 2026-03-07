@@ -11,6 +11,9 @@ type Extent3D = hal.Extent3D
 // Origin3D is a 3D origin point.
 type Origin3D = hal.Origin3D
 
+// ImageDataLayout describes the layout of image data in a buffer.
+type ImageDataLayout = hal.ImageDataLayout
+
 // BufferDescriptor describes buffer creation parameters.
 type BufferDescriptor struct {
 	Label            string
@@ -400,5 +403,26 @@ func (c *SurfaceConfiguration) toHAL() *hal.SurfaceConfiguration {
 		Usage:       c.Usage,
 		PresentMode: c.PresentMode,
 		AlphaMode:   c.AlphaMode,
+	}
+}
+
+// ImageCopyTexture describes a texture subresource and origin for write operations.
+type ImageCopyTexture struct {
+	Texture  *Texture
+	MipLevel uint32
+	Origin   Origin3D
+	Aspect   TextureAspect
+}
+
+func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
+	if i == nil || i.Texture == nil {
+		return nil
+	}
+
+	return &hal.ImageCopyTexture{
+		Texture:  i.Texture.hal,
+		MipLevel: i.MipLevel,
+		Origin: i.Origin,
+		Aspect: i.Aspect,
 	}
 }
