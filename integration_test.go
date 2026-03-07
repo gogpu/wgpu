@@ -611,3 +611,58 @@ func TestIntegrationQueueReadBuffer(t *testing.T) {
 		}
 	}
 }
+
+// --- Write texture tests ---
+
+// TestIntegrationQueueWriteTexture creates a texture, writes data to it via Queue.WriteTexture, and verifies the call succeeds. The test does not read
+// back the texture data, but it verifies the full integration path for writing texture data.
+func TestIntegrationQueueWriteTexture(t *testing.T) {
+	instance, adapter, device := createTestDevice(t)
+	defer instance.Release()
+	defer adapter.Release()
+	defer device.Release()
+
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "write-texture",
+		Size:          wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
+		ViewFormats:   []wgpu.TextureFormat{wgpu.TextureFormatRGBA8Unorm},
+	})
+	if err != nil {
+		t.Fatalf("CreateTexture: %v", err)
+	}
+	defer tex.Release()
+
+	q := device.Queue()
+	if q == nil {
+		t.Fatal("Queue is nil")
+	}
+
+	writeData := []byte{
+		255, 0, 0, 255, // red
+		0, 255, 0, 255, // green
+		0, 0, 255, 255, // blue
+		255, 255, 0, 255, // yellow
+	}
+	layout := &wgpu.ImageDataLayout{
+		Offset:       0,
+		BytesPerRow:  8,
+		RowsPerImage: 0,
+	}
+	copyTexture := &wgpu.ImageCopyTexture{
+		Texture:  tex,
+		MipLevel: 0,
+		Origin:   wgpu.Origin3D{X: 0, Y: 0, Z: 0},
+		Aspect:   gputypes.TextureAspectAll,
+	}
+	size := &wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1}
+
+	err = q.WriteTexture(copyTexture, writeData, layout, size)
+	if err != nil {
+		t.Fatalf("WriteTexture: %v", err)
+	}
+}

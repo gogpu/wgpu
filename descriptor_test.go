@@ -2,6 +2,8 @@ package wgpu
 
 import (
 	"testing"
+
+	"github.com/gogpu/gputypes"
 )
 
 func TestBufferDescriptorToHAL(t *testing.T) {
@@ -294,5 +296,32 @@ func TestRenderPassDescriptorToHAL(t *testing.T) {
 		t.Error("DepthStencilAttachment should not be nil")
 	} else if halDesc.DepthStencilAttachment.DepthClearValue != 1.0 {
 		t.Errorf("DepthClearValue = %f, want 1.0", halDesc.DepthStencilAttachment.DepthClearValue)
+	}
+}
+
+func TestImageCopyTextureToHAL(t *testing.T) {
+	tex := ImageCopyTexture{
+		Texture: &Texture{
+			hal:      nil,
+			device:   &Device{},
+			format:   TextureFormatBGRA8Unorm,
+			released: false,
+		},
+		MipLevel: 1,
+		Origin:   Origin3D{X: 10, Y: 20, Z: 0},
+		Aspect:   gputypes.TextureAspectAll,
+	}
+	halTex := tex.toHAL()
+	if halTex.Texture != tex.Texture.hal {
+		t.Errorf("Texture HAL = %v, want %v", halTex.Texture, tex.Texture.hal)
+	}
+	if halTex.MipLevel != tex.MipLevel {
+		t.Errorf("MipLevel = %d, want %d", halTex.MipLevel, tex.MipLevel)
+	}
+	if halTex.Origin.X != tex.Origin.X || halTex.Origin.Y != tex.Origin.Y || halTex.Origin.Z != tex.Origin.Z {
+		t.Errorf("Origin = (%d, %d, %d), want (%d, %d, %d)", halTex.Origin.X, halTex.Origin.Y, halTex.Origin.Z, tex.Origin.X, tex.Origin.Y, tex.Origin.Z)
+	}
+	if halTex.Aspect != tex.Aspect {
+		t.Errorf("Aspect = %v, want %v", halTex.Aspect, tex.Aspect)
 	}
 }

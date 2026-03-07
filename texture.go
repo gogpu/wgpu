@@ -1,6 +1,8 @@
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import (
+	"github.com/gogpu/wgpu/hal"
+)
 
 // Texture represents a GPU texture.
 type Texture struct {
