@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.7] - 2026-03-07
+
+### Added
+
+- **Queue.WriteTexture** — public API for writing data to textures. Includes
+  `ImageCopyTexture` descriptor, `ImageDataLayout` alias, and full nil validation
+  with specific error messages.
+  ([#95](https://github.com/gogpu/wgpu/pull/95) by [@Carmen-Shannon](https://github.com/Carmen-Shannon))
+
+### Changed
+
+- **Update naga v0.14.5 → v0.14.6** — MSL pass-through globals fix: helper
+  functions now receive texture/sampler as extra parameters instead of using
+  `[[binding]]` attributes. Fixes black screen on M3 Mac.
+  ([naga#40](https://github.com/gogpu/naga/pull/40))
+
 ## [0.19.6] - 2026-03-05
 
 ### Fixed
