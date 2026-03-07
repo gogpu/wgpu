@@ -59,7 +59,6 @@ type TextureFormat = gputypes.TextureFormat
 type TextureDimension = gputypes.TextureDimension
 type TextureViewDimension = gputypes.TextureViewDimension
 type TextureAspect = gputypes.TextureAspect
-type TextureDataLayout = gputypes.TextureDataLayout
 
 // Commonly used texture format constants
 const (

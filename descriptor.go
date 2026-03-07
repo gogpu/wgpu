@@ -422,7 +422,7 @@ func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
 	return &hal.ImageCopyTexture{
 		Texture:  i.Texture.hal,
 		MipLevel: i.MipLevel,
-		Origin: i.Origin,
-		Aspect: i.Aspect,
+		Origin:   i.Origin,
+		Aspect:   i.Aspect,
 	}
 }
