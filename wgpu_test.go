@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 
 	// Import noop backend. Note: the noop backend (BackendEmpty) is skipped by
@@ -1426,5 +1427,228 @@ func TestTextureFormatConstants(t *testing.T) {
 				t.Errorf("TextureFormat%s should be non-zero", f.name)
 			}
 		})
+	}
+}
+
+// --- VAL-003: Deferred nil error tests ---
+
+// newEncoderWithRenderPass creates a device, command encoder, and begins a render pass.
+// Returns the device, encoder, and render pass. Requires HAL.
+func newEncoderWithRenderPass(t *testing.T) (*wgpu.Device, *wgpu.CommandEncoder, *wgpu.RenderPassEncoder) {
+	t.Helper()
+	_, _, device := newDevice(t)
+	requireHAL(t, device)
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	pass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "test-pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{
+			{
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: wgpu.Color{R: 0, G: 0, B: 0, A: 1},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BeginRenderPass: %v", err)
+	}
+
+	return device, encoder, pass
+}
+
+// newEncoderWithComputePass creates a device, command encoder, and begins a compute pass.
+func newEncoderWithComputePass(t *testing.T) (*wgpu.Device, *wgpu.CommandEncoder, *wgpu.ComputePassEncoder) {
+	t.Helper()
+	_, _, device := newDevice(t)
+	requireHAL(t, device)
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	pass, err := encoder.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+
+	return device, encoder, pass
+}
+
+func TestRenderPassSetPipelineNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.SetPipeline(nil) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetPipeline(nil)")
+	}
+}
+
+func TestRenderPassSetBindGroupNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.SetBindGroup(0, nil, nil) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetBindGroup(nil)")
+	}
+}
+
+func TestRenderPassSetVertexBufferNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.SetVertexBuffer(0, nil, 0) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetVertexBuffer(nil)")
+	}
+}
+
+func TestRenderPassSetIndexBufferNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.SetIndexBuffer(nil, 0, 0) // should record deferred error (format doesn't matter for nil buffer)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetIndexBuffer(nil)")
+	}
+}
+
+func TestRenderPassDrawIndirectNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.DrawIndirect(nil, 0) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after DrawIndirect(nil)")
+	}
+}
+
+func TestRenderPassDrawIndexedIndirectNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.DrawIndexedIndirect(nil, 0) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after DrawIndexedIndirect(nil)")
+	}
+}
+
+func TestComputePassSetPipelineNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pass.SetPipeline(nil) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetPipeline(nil)")
+	}
+}
+
+func TestComputePassSetBindGroupNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pass.SetBindGroup(0, nil, nil) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after SetBindGroup(nil)")
+	}
+}
+
+func TestComputePassDispatchIndirectNilDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pass.DispatchIndirect(nil, 0) // should record deferred error
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after DispatchIndirect(nil)")
+	}
+}
+
+func TestCopyBufferToBufferNilSrcDeferredError(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	dstBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "dst-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer dstBuf.Release()
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	encoder.CopyBufferToBuffer(nil, 0, dstBuf, 0, 64)
+
+	_, err = encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after CopyBufferToBuffer(nil src)")
+	}
+}
+
+func TestCopyBufferToBufferNilDstDeferredError(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "src-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageCopySrc,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer buf.Release()
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	encoder.CopyBufferToBuffer(buf, 0, nil, 0, 64)
+
+	_, err = encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error after CopyBufferToBuffer(nil dst)")
 	}
 }

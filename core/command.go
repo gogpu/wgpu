@@ -477,7 +477,18 @@ func (e *CoreCommandEncoder) MarkConsumed() {
 	e.status.Store(int32(CommandEncoderStatusConsumed))
 }
 
-// setError transitions to error state.
+// SetError records a deferred error on this encoder.
+//
+// The error transitions the encoder to the Error state and will be returned
+// by Finish(). This implements the WebGPU deferred error pattern where
+// encoding-phase errors are collected and surfaced at Finish() time.
+func (e *CoreCommandEncoder) SetError(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.setError(err)
+}
+
+// setError transitions to error state. Caller must hold e.mu.
 func (e *CoreCommandEncoder) setError(err error) {
 	e.error = err
 	e.status.Store(int32(CommandEncoderStatusError))
