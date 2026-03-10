@@ -335,6 +335,7 @@ func TestDeviceCreateTexture(t *testing.T) {
 		Size:          wgpu.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
+		Dimension:     wgpu.TextureDimension2D,
 		Format:        wgpu.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
 	})

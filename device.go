@@ -83,6 +83,10 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		ViewFormats:   desc.ViewFormats,
 	}
 
+	if err := core.ValidateTextureDescriptor(halDesc, d.core.Limits); err != nil {
+		return nil, err
+	}
+
 	halTexture, err := halDevice.CreateTexture(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
@@ -151,6 +155,10 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		halDesc.Anisotropy = desc.Anisotropy
 	}
 
+	if err := core.ValidateSamplerDescriptor(halDesc); err != nil {
+		return nil, err
+	}
+
 	halSampler, err := halDevice.CreateSampler(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
@@ -181,6 +189,10 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		},
 	}
 
+	if err := core.ValidateShaderModuleDescriptor(halDesc); err != nil {
+		return nil, err
+	}
+
 	halModule, err := halDevice.CreateShaderModule(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
@@ -206,6 +218,10 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 	halDesc := &hal.BindGroupLayoutDescriptor{
 		Label:   desc.Label,
 		Entries: desc.Entries,
+	}
+
+	if err := core.ValidateBindGroupLayoutDescriptor(halDesc, d.core.Limits); err != nil {
+		return nil, err
 	}
 
 	halLayout, err := halDevice.CreateBindGroupLayout(halDesc)
@@ -266,7 +282,10 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	}
 
 	if desc.Layout == nil {
-		return nil, fmt.Errorf("wgpu: bind group layout is nil")
+		return nil, &core.CreateBindGroupError{
+			Kind:  core.CreateBindGroupErrorMissingLayout,
+			Label: desc.Label,
+		}
 	}
 
 	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))
@@ -304,6 +323,10 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 
 	halDesc := desc.toHAL()
 
+	if err := core.ValidateRenderPipelineDescriptor(halDesc, d.core.Limits); err != nil {
+		return nil, err
+	}
+
 	halPipeline, err := halDevice.CreateRenderPipeline(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
@@ -327,6 +350,10 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}
 
 	halDesc := desc.toHAL()
+
+	if err := core.ValidateComputePipelineDescriptor(halDesc); err != nil {
+		return nil, err
+	}
 
 	halPipeline, err := halDevice.CreateComputePipeline(halDesc)
 	if err != nil {

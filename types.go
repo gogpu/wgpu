@@ -60,6 +60,13 @@ type TextureDimension = gputypes.TextureDimension
 type TextureViewDimension = gputypes.TextureViewDimension
 type TextureAspect = gputypes.TextureAspect
 
+// Texture dimension constants
+const (
+	TextureDimension1D = gputypes.TextureDimension1D
+	TextureDimension2D = gputypes.TextureDimension2D
+	TextureDimension3D = gputypes.TextureDimension3D
+)
+
 // Commonly used texture format constants
 const (
 	TextureFormatRGBA8Unorm     = gputypes.TextureFormatRGBA8Unorm
