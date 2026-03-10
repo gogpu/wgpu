@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   texture dimensions) from Vulkan, Metal, DX12 — core validates these. Added 9
   missing nil checks to GLES, Software, and Noop backends.
 
+### Dependencies
+
+- **gputypes v0.2.0 → v0.3.0** — `TextureUsage.ContainsUnknownBits()` method,
+  used by core validation for texture descriptor validation (VAL-002).
+
 ## [0.19.7] - 2026-03-07
 
 ### Added

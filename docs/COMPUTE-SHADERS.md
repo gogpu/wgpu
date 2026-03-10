@@ -40,7 +40,7 @@ Key concepts:
 
 - `@workgroup_size(64)` is a safe default for most GPUs.
 - `@workgroup_size(256)` may be faster for large data sets on discrete GPUs.
-- Maximum workgroup size varies by backend (see [Backend Differences](compute-backends.md)).
+- Maximum workgroup size varies by backend (see [Backend Differences](COMPUTE-BACKENDS.md)).
 - The total invocations per workgroup (x * y * z) must not exceed the device limit.
 
 ## Creating a Compute Pipeline
@@ -386,6 +386,6 @@ See `examples/compute-sum/` for a working example of a compute shader that sums 
 
 ## Further Reading
 
-- [Backend Differences](compute-backends.md) -- per-backend capabilities and limits
+- [Backend Differences](COMPUTE-BACKENDS.md) -- per-backend capabilities and limits
 - [WebGPU Compute Specification](https://www.w3.org/TR/webgpu/#compute-passes)
 - [WGSL Specification](https://www.w3.org/TR/WGSL/)
