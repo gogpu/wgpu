@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.8] - 2026-03-10
+
+### Fixed
+
+- **Metal: CopyDst buffer storage mode** — buffers with `CopyDst` usage were
+  allocated with `StorageModePrivate` (GPU-only), causing "buffer not mappable"
+  errors on Apple Silicon when `Queue.WriteBuffer()` tried to write. Now uses
+  `StorageModeShared` for `CopyDst` and `MappedAtCreation` buffers, matching
+  the Vulkan backend behavior. On UMA (all Apple Silicon) this is zero-cost.
+  ([gg#170](https://github.com/gogpu/gg/issues/170))
+
+- **Metal: staging buffer fallback for ReadBuffer/WriteBuffer** — defense-in-depth:
+  if a buffer is `StorageModePrivate`, `WriteBuffer` and `ReadBuffer` now fall
+  back to a temporary staging buffer + blit instead of failing. Mirrors the
+  pattern already used by `WriteTexture` and matches Rust wgpu behavior.
+
+- **Metal: zero-length data guard** — `WriteBuffer` and `ReadBuffer` now return
+  early for empty data slices, preventing a potential panic in the staging path.
+
 ## [0.19.7] - 2026-03-07
 
 ### Added

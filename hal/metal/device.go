@@ -62,8 +62,13 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var options MTLResourceOptions
 	mapRead := desc.Usage&gputypes.BufferUsageMapRead != 0
 	mapWrite := desc.Usage&gputypes.BufferUsageMapWrite != 0
+	copyDst := desc.Usage&gputypes.BufferUsageCopyDst != 0
 
-	if mapRead || mapWrite {
+	if mapRead || mapWrite || copyDst || desc.MappedAtCreation {
+		// CopyDst buffers need CPU-visible storage for Queue.WriteBuffer().
+		// MappedAtCreation needs CPU-visible storage for the initial mapping.
+		// On Apple Silicon UMA, StorageModeShared is zero-cost (same physical memory).
+		// This matches the Vulkan backend which maps CopyDst/MappedAtCreation to host-visible memory.
 		options = MTLResourceStorageModeShared
 	} else {
 		options = MTLResourceStorageModePrivate
