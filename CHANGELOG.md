@@ -7,9 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.19.8] - 2026-03-10
+## [0.20.0] - 2026-03-10
+
+### Added
+
+- **Core validation layer** (VAL-002) — exhaustive spec-level validation before
+  HAL calls. 7 validation functions in `core/validate.go` covering 30+ WebGPU
+  rules for textures, samplers, shaders, pipelines, bind groups, and bind group
+  layouts. Validates dimensions, limits, multisampling, formats, and usage flags.
+
+- **Typed error types** (VAL-002) — 7 new typed errors with specific error kinds
+  and context fields: `CreateTextureError` (13 kinds), `CreateSamplerError` (5),
+  `CreateShaderModuleError` (3), `CreateRenderPipelineError` (8),
+  `CreateComputePipelineError` (3), `CreateBindGroupLayoutError` (3),
+  `CreateBindGroupError` (2). All support `errors.As()` for programmatic handling.
+
+- **Deferred nil error detection** (VAL-003) — 10 pass encoder and command encoder
+  methods that previously silently ignored nil inputs now record deferred errors
+  following the WebGPU spec pattern. Errors surface at `End()` / `Finish()`:
+  `RenderPass.SetPipeline`, `SetBindGroup`, `SetVertexBuffer`, `SetIndexBuffer`,
+  `DrawIndirect`, `DrawIndexedIndirect`, `ComputePass.SetPipeline`, `SetBindGroup`,
+  `DispatchIndirect`, `CommandEncoder.CopyBufferToBuffer`.
+
+- **Format conversion tests** (COV-001) — 26 new test functions across Metal (20),
+  Vulkan (4), DX12 (2), and GLES (5 format cases) backends.
 
 ### Fixed
+
+- **5 nil panic paths** (VAL-001) — added nil checks in `CreateBindGroup` (nil layout),
+  `CreatePipelineLayout` (nil bind group layout element), `Queue.Submit` (nil command
+  buffer), `Surface.Configure` (nil device), `Surface.Present` (nil texture).
 
 - **Metal: CopyDst buffer storage mode** — buffers with `CopyDst` usage were
   allocated with `StorageModePrivate` (GPU-only), causing "buffer not mappable"
@@ -25,6 +52,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Metal: zero-length data guard** — `WriteBuffer` and `ReadBuffer` now return
   early for empty data slices, preventing a potential panic in the staging path.
+
+### Changed
+
+- **HAL defense-in-depth** (VAL-004) — HAL nil checks now use `"BUG: ..."` prefix
+  to signal core validation gaps. Removed 6 redundant spec checks (buffer size,
+  texture dimensions) from Vulkan, Metal, DX12 — core validates these. Added 9
+  missing nil checks to GLES, Software, and Noop backends.
+
+### Dependencies
+
+- **gputypes v0.2.0 → v0.3.0** — `TextureUsage.ContainsUnknownBits()` method,
+  used by core validation for texture descriptor validation (VAL-002).
 
 ## [0.19.7] - 2026-03-07
 

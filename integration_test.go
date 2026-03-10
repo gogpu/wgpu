@@ -171,6 +171,7 @@ func TestIntegrationCreateTexture(t *testing.T) {
 		Size:          wgpu.Extent3D{Width: 128, Height: 128, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
 		Format:        wgpu.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
 	})
@@ -196,6 +197,7 @@ func TestIntegrationCreateTextureView(t *testing.T) {
 		Size:          wgpu.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
 		Format:        wgpu.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})

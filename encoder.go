@@ -1,6 +1,8 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -15,6 +17,15 @@ type CommandEncoder struct {
 	core     *core.CoreCommandEncoder
 	device   *Device
 	released bool
+}
+
+// setError records a deferred error on the underlying command encoder.
+// This implements the WebGPU deferred error pattern: encoding-phase errors
+// are collected and surfaced when Finish() is called.
+func (e *CommandEncoder) setError(err error) {
+	if e.core != nil {
+		e.core.SetError(err)
+	}
 }
 
 // BeginRenderPass begins a render pass.
@@ -58,7 +69,15 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *Buffer, dstOffset uint64, size uint64) {
-	if e.released || src == nil || dst == nil {
+	if e.released {
+		return
+	}
+	if src == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source buffer is nil"))
+		return
+	}
+	if dst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: destination buffer is nil"))
 		return
 	}
 	raw := e.core.RawEncoder()

@@ -1,6 +1,8 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/core"
 )
 
@@ -18,6 +20,7 @@ type ComputePassEncoder struct {
 // SetPipeline sets the active compute pipeline.
 func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	if pipeline == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetPipeline: pipeline is nil"))
 		return
 	}
 	raw := p.core.RawPass()
@@ -29,6 +32,7 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 // SetBindGroup sets a bind group for the given index.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
 	if group == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetBindGroup: bind group is nil"))
 		return
 	}
 	raw := p.core.RawPass()
@@ -45,6 +49,7 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	if buffer == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: buffer is nil"))
 		return
 	}
 	p.core.DispatchIndirect(buffer.coreBuffer(), offset)

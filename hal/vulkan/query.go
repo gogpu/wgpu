@@ -26,11 +26,11 @@ func (q *QuerySet) Destroy() {
 // CreateQuerySet creates a Vulkan query pool.
 func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: query set descriptor is nil")
+		return nil, fmt.Errorf("BUG: query set descriptor is nil in Vulkan.CreateQuerySet — core validation gap")
 	}
 
 	if desc.Count == 0 {
-		return nil, fmt.Errorf("vulkan: query set count must be > 0")
+		return nil, fmt.Errorf("BUG: query set count is 0 in Vulkan.CreateQuerySet — core validation gap")
 	}
 
 	var vkQueryType vk.QueryType

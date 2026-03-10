@@ -13,6 +13,9 @@ type Device struct{}
 // CreateBuffer creates a noop buffer.
 // Optionally stores data if MappedAtCreation is true.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Noop.CreateBuffer — core validation gap")
+	}
 	if desc.MappedAtCreation {
 		return &Buffer{data: make([]byte, desc.Size)}, nil
 	}
@@ -23,7 +26,10 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 func (d *Device) DestroyBuffer(_ hal.Buffer) {}
 
 // CreateTexture creates a noop texture.
-func (d *Device) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
+func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in Noop.CreateTexture — core validation gap")
+	}
 	return &Texture{}, nil
 }
 

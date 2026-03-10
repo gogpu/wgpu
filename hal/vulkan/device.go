@@ -129,10 +129,7 @@ func (d *Device) initAllocator() error {
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: buffer descriptor is nil")
-	}
-	if desc.Size == 0 {
-		return nil, fmt.Errorf("vulkan: buffer size must be > 0")
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Vulkan.CreateBuffer — core validation gap")
 	}
 
 	// Convert usage flags
@@ -262,10 +259,7 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: texture descriptor is nil")
-	}
-	if desc.Size.Width == 0 || desc.Size.Height == 0 {
-		return nil, fmt.Errorf("vulkan: texture size must be > 0")
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in Vulkan.CreateTexture — core validation gap")
 	}
 
 	// Convert parameters
@@ -575,7 +569,7 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: sampler descriptor is nil")
+		return nil, fmt.Errorf("BUG: sampler descriptor is nil in Vulkan.CreateSampler — core validation gap")
 	}
 
 	// Determine if comparison is enabled
@@ -656,7 +650,7 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 // CreateBindGroupLayout creates a bind group layout.
 func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: bind group layout descriptor is nil")
+		return nil, fmt.Errorf("BUG: bind group layout descriptor is nil in Vulkan.CreateBindGroupLayout — core validation gap")
 	}
 
 	// Convert entries to Vulkan descriptor set layout bindings and track counts
@@ -742,7 +736,7 @@ func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
 // CreateBindGroup creates a bind group.
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: bind group descriptor is nil")
+		return nil, fmt.Errorf("BUG: bind group descriptor is nil in Vulkan.CreateBindGroup — core validation gap")
 	}
 
 	// Get the layout
@@ -866,7 +860,7 @@ func (d *Device) DestroyBindGroup(group hal.BindGroup) {
 // CreatePipelineLayout creates a pipeline layout.
 func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: pipeline layout descriptor is nil")
+		return nil, fmt.Errorf("BUG: pipeline layout descriptor is nil in Vulkan.CreatePipelineLayout — core validation gap")
 	}
 
 	// Convert bind group layouts to descriptor set layouts
@@ -939,7 +933,7 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: shader module descriptor is nil")
+		return nil, fmt.Errorf("BUG: shader module descriptor is nil in Vulkan.CreateShaderModule — core validation gap")
 	}
 
 	var spirv []uint32

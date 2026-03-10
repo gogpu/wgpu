@@ -20,7 +20,7 @@ const defaultEntryPoint = "main"
 //nolint:maintidx // Pipeline creation is inherently complex due to all the state it configures.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: render pipeline descriptor is nil")
+		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in Vulkan.CreateRenderPipeline — core validation gap")
 	}
 
 	// Get pipeline layout
@@ -362,7 +362,7 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("vulkan: compute pipeline descriptor is nil")
+		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in Vulkan.CreateComputePipeline — core validation gap")
 	}
 
 	// Get pipeline layout

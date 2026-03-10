@@ -1,6 +1,8 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/core"
 )
 
@@ -18,6 +20,7 @@ type RenderPassEncoder struct {
 // SetPipeline sets the active render pipeline.
 func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	if pipeline == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetPipeline: pipeline is nil"))
 		return
 	}
 	raw := p.core.RawPass()
@@ -29,6 +32,7 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 // SetBindGroup sets a bind group for the given index.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
 	if group == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: bind group is nil"))
 		return
 	}
 	raw := p.core.RawPass()
@@ -40,6 +44,7 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 // SetVertexBuffer sets a vertex buffer for the given slot.
 func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset uint64) {
 	if buffer == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetVertexBuffer: buffer is nil"))
 		return
 	}
 	p.core.SetVertexBuffer(slot, buffer.coreBuffer(), offset)
@@ -48,6 +53,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 // SetIndexBuffer sets the index buffer.
 func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, offset uint64) {
 	if buffer == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetIndexBuffer: buffer is nil"))
 		return
 	}
 	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
@@ -86,6 +92,7 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 	if buffer == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndirect: buffer is nil"))
 		return
 	}
 	p.core.DrawIndirect(buffer.coreBuffer(), offset)
@@ -94,6 +101,7 @@ func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 	if buffer == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: buffer is nil"))
 		return
 	}
 	p.core.DrawIndexedIndirect(buffer.coreBuffer(), offset)

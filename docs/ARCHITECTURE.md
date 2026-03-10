@@ -54,9 +54,11 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Textu
 
 ### `core/` — Validation & State Tracking
 
-Internal validation layer between the public API and HAL.
+Validation layer between the public API and HAL. Core validates exhaustively — HAL assumes validated input.
 
-- **Validation** — Validates descriptors, usage flags, and state before forwarding to HAL
+- **Spec validation** — `core/validate.go` implements 30+ WebGPU spec rules for textures (dimensions, limits, multisampling, formats), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets), bind groups and layouts
+- **Typed errors** — `core/error.go` defines 7 typed error types (`CreateTextureError`, `CreateSamplerError`, `CreateShaderModuleError`, `CreateRenderPipelineError`, `CreateComputePipelineError`, `CreateBindGroupLayoutError`, `CreateBindGroupError`) with specific error kinds and context fields, supporting `errors.As()` for programmatic handling
+- **Deferred errors** — WebGPU pattern: encoding-phase errors are recorded via `SetError()` and surface at `End()` / `Finish()`
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)
 - **Resource tracking** — Leak detection in debug builds
 - **Structured logging** — `log/slog` integration, silent by default
@@ -65,7 +67,7 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Rende
 
 ### `hal/` — Hardware Abstraction Layer
 
-Backend-agnostic interfaces that each graphics API implements. The HAL prioritizes portability over safety — validation is handled by the `core/` layer above.
+Backend-agnostic interfaces that each graphics API implements. HAL methods assume input is validated by `core/` — they retain only nil pointer guards as defense-in-depth (prefixed with `"BUG: ..."` to signal core validation gaps if triggered).
 
 Key interfaces (defined in `hal/api.go`):
 
