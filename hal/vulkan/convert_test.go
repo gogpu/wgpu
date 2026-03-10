@@ -938,3 +938,92 @@ func TestVkCompositeAlphaToHAL(t *testing.T) {
 		}
 	})
 }
+
+// TestLoadOpToVk tests load operation conversions.
+func TestLoadOpToVk(t *testing.T) {
+	tests := []struct {
+		name   string
+		op     gputypes.LoadOp
+		expect vk.AttachmentLoadOp
+	}{
+		{"Clear", gputypes.LoadOpClear, vk.AttachmentLoadOpClear},
+		{"Load", gputypes.LoadOpLoad, vk.AttachmentLoadOpLoad},
+		{"Unknown defaults to DontCare", gputypes.LoadOp(99), vk.AttachmentLoadOpDontCare},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := loadOpToVk(tt.op)
+			if got != tt.expect {
+				t.Errorf("loadOpToVk(%v) = %v, want %v", tt.op, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStoreOpToVk tests store operation conversions.
+func TestStoreOpToVk(t *testing.T) {
+	tests := []struct {
+		name   string
+		op     gputypes.StoreOp
+		expect vk.AttachmentStoreOp
+	}{
+		{"Store", gputypes.StoreOpStore, vk.AttachmentStoreOpStore},
+		{"Discard defaults to DontCare", gputypes.StoreOpDiscard, vk.AttachmentStoreOpDontCare},
+		{"Unknown defaults to DontCare", gputypes.StoreOp(99), vk.AttachmentStoreOpDontCare},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := storeOpToVk(tt.op)
+			if got != tt.expect {
+				t.Errorf("storeOpToVk(%v) = %v, want %v", tt.op, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestPresentModeToVk tests present mode conversions.
+func TestPresentModeToVk(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   hal.PresentMode
+		expect vk.PresentModeKHR
+	}{
+		{"Immediate", hal.PresentModeImmediate, vk.PresentModeImmediateKhr},
+		{"Mailbox", hal.PresentModeMailbox, vk.PresentModeMailboxKhr},
+		{"Fifo", hal.PresentModeFifo, vk.PresentModeFifoKhr},
+		{"FifoRelaxed", hal.PresentModeFifoRelaxed, vk.PresentModeFifoRelaxedKhr},
+		{"Unknown defaults to Fifo", hal.PresentMode(99), vk.PresentModeFifoKhr},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := presentModeToVk(tt.mode)
+			if got != tt.expect {
+				t.Errorf("presentModeToVk(%v) = %v, want %v", tt.mode, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestBoolToVk tests boolean to Vulkan Bool32 conversion.
+func TestBoolToVk(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  bool
+		expect vk.Bool32
+	}{
+		{"true", true, vk.Bool32(vk.True)},
+		{"false", false, vk.Bool32(vk.False)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := boolToVk(tt.input)
+			if got != tt.expect {
+				t.Errorf("boolToVk(%v) = %v, want %v", tt.input, got, tt.expect)
+			}
+		})
+	}
+}

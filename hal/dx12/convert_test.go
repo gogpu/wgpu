@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/hal/dx12/dxgi"
 )
 
 func TestTextureFormatToD3D12(t *testing.T) {
@@ -673,6 +674,70 @@ func TestShaderStagesToD3D12Visibility(t *testing.T) {
 			got := shaderStagesToD3D12Visibility(tt.stages)
 			if got != tt.expect {
 				t.Errorf("shaderStagesToD3D12Visibility(%v) = %v, want %v", tt.stages, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestTextureFormatToDXGI tests the DXGI surface format conversion.
+func TestTextureFormatToDXGI(t *testing.T) {
+	tests := []struct {
+		name   string
+		format gputypes.TextureFormat
+		expect dxgi.DXGI_FORMAT
+	}{
+		// Common surface formats
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, dxgi.DXGI_FORMAT_R8G8B8A8_UNORM},
+		{"RGBA8UnormSrgb", gputypes.TextureFormatRGBA8UnormSrgb, dxgi.DXGI_FORMAT_R8G8B8A8_UNORM_SRGB},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm, dxgi.DXGI_FORMAT_B8G8R8A8_UNORM},
+		{"BGRA8UnormSrgb", gputypes.TextureFormatBGRA8UnormSrgb, dxgi.DXGI_FORMAT_B8G8R8A8_UNORM_SRGB},
+		{"RGBA16Float", gputypes.TextureFormatRGBA16Float, dxgi.DXGI_FORMAT_R16G16B16A16_FLOAT},
+		{"RGB10A2Unorm", gputypes.TextureFormatRGB10A2Unorm, dxgi.DXGI_FORMAT_R10G10B10A2_UNORM},
+
+		// Depth formats
+		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, dxgi.DXGI_FORMAT_D16_UNORM},
+		{"Depth24Plus", gputypes.TextureFormatDepth24Plus, dxgi.DXGI_FORMAT_D24_UNORM_S8_UINT},
+		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, dxgi.DXGI_FORMAT_D24_UNORM_S8_UINT},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float, dxgi.DXGI_FORMAT_D32_FLOAT},
+		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, dxgi.DXGI_FORMAT_D32_FLOAT_S8X24_UINT},
+
+		// BC compressed formats
+		{"BC1RGBAUnorm", gputypes.TextureFormatBC1RGBAUnorm, dxgi.DXGI_FORMAT_BC1_UNORM},
+		{"BC7RGBAUnorm", gputypes.TextureFormatBC7RGBAUnorm, dxgi.DXGI_FORMAT_BC7_UNORM},
+
+		// Unknown format
+		{"Unknown", gputypes.TextureFormat(65535), dxgi.DXGI_FORMAT_UNKNOWN},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := textureFormatToDXGI(tt.format)
+			if got != tt.expect {
+				t.Errorf("textureFormatToDXGI(%v) = %v, want %v", tt.format, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestCompositeAlphaModeToDXGI tests composite alpha mode conversions.
+func TestCompositeAlphaModeToDXGI(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   hal.CompositeAlphaMode
+		expect dxgi.DXGI_ALPHA_MODE
+	}{
+		{"Premultiplied", hal.CompositeAlphaModePremultiplied, dxgi.DXGI_ALPHA_MODE_PREMULTIPLIED},
+		{"Unpremultiplied", hal.CompositeAlphaModeUnpremultiplied, dxgi.DXGI_ALPHA_MODE_STRAIGHT},
+		{"Inherit", hal.CompositeAlphaModeInherit, dxgi.DXGI_ALPHA_MODE_UNSPECIFIED},
+		{"Opaque", hal.CompositeAlphaModeOpaque, dxgi.DXGI_ALPHA_MODE_IGNORE},
+		{"Unknown defaults to Ignore", hal.CompositeAlphaMode(99), dxgi.DXGI_ALPHA_MODE_IGNORE},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compositeAlphaModeToDXGI(tt.mode)
+			if got != tt.expect {
+				t.Errorf("compositeAlphaModeToDXGI(%v) = %v, want %v", tt.mode, got, tt.expect)
 			}
 		})
 	}
