@@ -30,6 +30,9 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) error {
 
 	halBuffers := make([]hal.CommandBuffer, len(commandBuffers))
 	for i, cb := range commandBuffers {
+		if cb == nil {
+			return fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+		}
 		halBuffers[i] = cb.halBuffer()
 	}
 

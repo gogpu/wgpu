@@ -232,6 +232,9 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 
 	halLayouts := make([]hal.BindGroupLayout, len(desc.BindGroupLayouts))
 	for i, layout := range desc.BindGroupLayouts {
+		if layout == nil {
+			return nil, fmt.Errorf("wgpu: bind group layout at index %d is nil", i)
+		}
 		halLayouts[i] = layout.hal
 	}
 
@@ -260,6 +263,10 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return nil, ErrReleased
+	}
+
+	if desc.Layout == nil {
+		return nil, fmt.Errorf("wgpu: bind group layout is nil")
 	}
 
 	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))

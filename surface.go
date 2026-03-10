@@ -50,6 +50,9 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	if config == nil {
 		return fmt.Errorf("wgpu: surface configuration is nil")
 	}
+	if device == nil {
+		return fmt.Errorf("wgpu: device is nil")
+	}
 
 	halDevice := device.halDevice()
 	if halDevice == nil {
@@ -124,6 +127,10 @@ func (s *Surface) Present(texture *SurfaceTexture) error {
 	}
 	if s.device.queue == nil || s.device.queue.hal == nil {
 		return fmt.Errorf("wgpu: queue not available")
+	}
+
+	if texture == nil {
+		return fmt.Errorf("wgpu: surface texture is nil")
 	}
 
 	return s.device.queue.hal.Present(s.hal, texture.hal)
