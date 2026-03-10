@@ -734,11 +734,7 @@ func (d *Device) allocateSamplerDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE,
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: buffer descriptor is nil")
-	}
-
-	if desc.Size == 0 {
-		return nil, fmt.Errorf("dx12: buffer size must be > 0")
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in DX12.CreateBuffer — core validation gap")
 	}
 
 	// Determine heap type based on usage
@@ -839,11 +835,7 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: texture descriptor is nil")
-	}
-
-	if desc.Size.Width == 0 || desc.Size.Height == 0 {
-		return nil, fmt.Errorf("dx12: texture size must be > 0")
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in DX12.CreateTexture — core validation gap")
 	}
 
 	// Check device health before allocating resources.
@@ -1244,7 +1236,7 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: sampler descriptor is nil")
+		return nil, fmt.Errorf("BUG: sampler descriptor is nil in DX12.CreateSampler — core validation gap")
 	}
 
 	// Allocate sampler descriptor
@@ -1294,7 +1286,7 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 // CreateBindGroupLayout creates a bind group layout.
 func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: bind group layout descriptor is nil")
+		return nil, fmt.Errorf("BUG: bind group layout descriptor is nil in DX12.CreateBindGroupLayout — core validation gap")
 	}
 
 	entries := make([]BindGroupLayoutEntry, len(desc.Entries))
@@ -1345,7 +1337,7 @@ func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
 // CreateBindGroup creates a bind group.
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: bind group descriptor is nil")
+		return nil, fmt.Errorf("BUG: bind group descriptor is nil in DX12.CreateBindGroup — core validation gap")
 	}
 
 	layout, ok := desc.Layout.(*BindGroupLayout)
@@ -1449,7 +1441,7 @@ func (d *Device) DestroyBindGroup(group hal.BindGroup) {
 // CreatePipelineLayout creates a pipeline layout.
 func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: pipeline layout descriptor is nil")
+		return nil, fmt.Errorf("BUG: pipeline layout descriptor is nil in DX12.CreatePipelineLayout — core validation gap")
 	}
 
 	// Create root signature from bind group layouts
@@ -1492,7 +1484,7 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 // Supports WGSL source (compiled via naga HLSL backend + D3DCompile) and pre-compiled SPIR-V.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: shader module descriptor is nil")
+		return nil, fmt.Errorf("BUG: shader module descriptor is nil in DX12.CreateShaderModule — core validation gap")
 	}
 
 	module := &ShaderModule{
@@ -1604,7 +1596,7 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: render pipeline descriptor is nil")
+		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in DX12.CreateRenderPipeline — core validation gap")
 	}
 
 	// Build input layout from vertex buffers
@@ -1679,7 +1671,7 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("dx12: compute pipeline descriptor is nil")
+		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in DX12.CreateComputePipeline — core validation gap")
 	}
 
 	// Get shader module

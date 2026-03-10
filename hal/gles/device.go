@@ -26,6 +26,9 @@ type Device struct {
 
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in GLES.CreateBuffer — core validation gap")
+	}
 	id := d.glCtx.GenBuffers(1)
 
 	// Determine GL buffer target from usage
@@ -76,6 +79,9 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in GLES.CreateTexture — core validation gap")
+	}
 	id := d.glCtx.GenTextures(1)
 
 	sampleCount := desc.SampleCount
@@ -272,6 +278,9 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {}
 
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: shader module descriptor is nil in GLES.CreateShaderModule — core validation gap")
+	}
 	// For now, store the source - compilation happens at pipeline creation
 	return &ShaderModule{
 		source: desc.Source,
@@ -288,6 +297,9 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in GLES.CreateRenderPipeline — core validation gap")
+	}
 	// Handle nil layout (auto-layout for shaders without bindings).
 	var layout *PipelineLayout
 	if desc.Layout != nil {
@@ -414,6 +426,9 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in GLES.CreateComputePipeline — core validation gap")
+	}
 	layout, ok := desc.Layout.(*PipelineLayout)
 	if !ok {
 		return nil, fmt.Errorf("gles: invalid pipeline layout type")

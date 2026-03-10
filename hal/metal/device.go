@@ -53,10 +53,7 @@ func newDevice(adapter *Adapter) (*Device, error) {
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("metal: buffer descriptor is nil")
-	}
-	if desc.Size == 0 {
-		return nil, fmt.Errorf("metal: buffer size must be > 0")
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Metal.CreateBuffer — core validation gap")
 	}
 
 	var options MTLResourceOptions
@@ -118,10 +115,7 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("metal: texture descriptor is nil")
-	}
-	if desc.Size.Width == 0 || desc.Size.Height == 0 {
-		return nil, fmt.Errorf("metal: texture size must be > 0")
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in Metal.CreateTexture — core validation gap")
 	}
 
 	pool := NewAutoreleasePool()
@@ -300,7 +294,7 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
 	if desc == nil {
-		return nil, fmt.Errorf("metal: sampler descriptor is nil")
+		return nil, fmt.Errorf("BUG: sampler descriptor is nil in Metal.CreateSampler — core validation gap")
 	}
 
 	pool := NewAutoreleasePool()

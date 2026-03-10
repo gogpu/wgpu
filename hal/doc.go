@@ -14,15 +14,28 @@
 //  5. Queue - Command buffer submission and presentation
 //  6. CommandEncoder - Command recording
 //
-// # Design Principles
+// # Validation Contract
 //
-// The HAL prioritizes portability over safety, delegating validation to the
-// higher core layer. This means:
+// The HAL follows a defense-in-depth validation pattern:
 //
-//   - Most methods are unsafe in terms of GPU state validation
-//   - Validation is the caller's responsibility
-//   - Only unrecoverable errors are returned (out of memory, device lost)
-//   - Invalid usage results in undefined behavior at the GPU level
+//   - The core layer (wgpu/core) performs exhaustive spec-level validation BEFORE
+//     calling HAL methods. This includes dimension checks, format validation, usage
+//     flags, mip levels, sample counts, and all WebGPU spec rules.
+//
+//   - HAL methods assume their input has been validated by core. They do NOT
+//     re-validate spec rules (size > 0, valid format, usage checks, etc.).
+//
+//   - HAL methods DO retain nil/null pointer checks as defense-in-depth guards.
+//     These checks use a "BUG:" prefix in their error messages to indicate that
+//     they should never fire in normal operation. If a "BUG:" error is returned,
+//     it means the core validation layer has a gap that must be fixed.
+//
+//   - Example BUG error: "BUG: buffer descriptor is nil in Vulkan.CreateBuffer — core validation gap"
+//
+// This contract ensures:
+//   - No redundant validation between core and HAL (single source of truth)
+//   - No panics from nil pointer dereferences (safety-critical)
+//   - Clear diagnostics when core validation is incomplete
 //
 // # Resource Types
 //
@@ -58,8 +71,9 @@
 //   - ErrSurfaceLost - Window destroyed or surface invalidated
 //   - ErrSurfaceOutdated - Window resized, need reconfiguration
 //
-// Validation errors (invalid descriptors, incorrect usage) are the caller's
-// responsibility and are not checked by the HAL.
+// Validation errors (invalid descriptors, incorrect usage) are the core layer's
+// responsibility and are not checked by the HAL. HAL nil checks are defense-in-depth
+// only, prefixed with "BUG:" to signal a core validation gap.
 //
 // # Reference
 //

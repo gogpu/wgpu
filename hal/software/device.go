@@ -2,6 +2,7 @@ package software
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gogpu/wgpu/hal"
@@ -17,6 +18,9 @@ type Device struct{}
 
 // CreateBuffer creates a software buffer with real data storage.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Software.CreateBuffer — core validation gap")
+	}
 	// Always allocate real storage for software backend
 	data := make([]byte, desc.Size)
 	return &Buffer{
@@ -31,6 +35,9 @@ func (d *Device) DestroyBuffer(_ hal.Buffer) {}
 
 // CreateTexture creates a software texture with real pixel storage.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in Software.CreateTexture — core validation gap")
+	}
 	// Calculate total size needed for texture data
 	// Simple calculation: width * height * depth * bytesPerPixel
 	// Assuming 4 bytes per pixel (RGBA8) for now
