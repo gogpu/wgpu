@@ -1059,9 +1059,11 @@ func TestSurfaceAcquireTexture(t *testing.T) {
 	}
 	if acquired == nil {
 		t.Fatal("acquired is nil")
+		return
 	}
 	if acquired.Texture == nil {
 		t.Fatal("acquired.Texture is nil")
+		return
 	}
 	if acquired.Suboptimal {
 		t.Error("expected Suboptimal=false")

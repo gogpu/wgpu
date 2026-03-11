@@ -100,6 +100,7 @@ func TestProbeBackendRegistered(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("ProbeBackend returned nil info")
+		return
 	}
 	if info.Variant != gputypes.BackendEmpty {
 		t.Errorf("variant = %v, want BackendEmpty", info.Variant)
@@ -118,6 +119,7 @@ func TestProbeBackendViaFactory(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("ProbeBackend returned nil info")
+		return
 	}
 	if info.Variant != testFactoryVariant3 {
 		t.Errorf("variant = %v, want %v", info.Variant, testFactoryVariant3)
