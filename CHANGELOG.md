@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-03-11
+
+### Fixed
+
+- **Metal: missing stencil attachment in render pass** — `BeginRenderPass` configured
+  only the depth attachment, completely skipping the stencil attachment. On Apple Silicon
+  TBDR GPUs, this left the stencil load action as `MTLLoadActionDontCare`, causing
+  undefined stencil values and progressive rendering artifacts on Retina displays.
+  Now configures `rpDesc.stencilAttachment` with texture, load/store actions, and clear
+  value — matching the Vulkan and DX12 backends.
+  ([#171](https://github.com/gogpu/gg/issues/171))
+
+- **Metal: missing `setClearDepth:` call** — depth clear value was never explicitly set,
+  relying on Metal's default of 1.0. Now calls `setClearDepth:` when `DepthLoadOp` is
+  `LoadOpClear` for correctness.
+
 ## [0.20.0] - 2026-03-10
 
 ### Added

@@ -302,12 +302,35 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
+
+		// Depth attachment
 		depthAttachment := MsgSend(rpDesc, Sel("depthAttachment"))
 		if tv, ok := dsa.View.(*TextureView); ok && tv != nil {
 			_ = MsgSend(depthAttachment, Sel("setTexture:"), uintptr(tv.raw))
 		}
 		_ = MsgSend(depthAttachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(dsa.DepthLoadOp)))
+		if dsa.DepthLoadOp == gputypes.LoadOpClear {
+			msgSendVoid(depthAttachment, Sel("setClearDepth:"), argFloat64(float64(dsa.DepthClearValue)))
+		}
 		_ = MsgSend(depthAttachment, Sel("setStoreAction:"), uintptr(storeOpToMTL(dsa.DepthStoreOp)))
+
+		// Stencil attachment — same texture, separate load/store/clear.
+		// Metal requires both depth and stencil attachments to be configured
+		// independently when using combined depth-stencil formats (e.g.
+		// Depth32FloatStencil8). Without this, the stencil load action
+		// defaults to MTLLoadActionDontCare, leaving stencil values
+		// undefined and causing progressive rendering artifacts on Apple
+		// Silicon TBDR GPUs.
+		// Reference: Rust wgpu-hal metal/command.rs:705-727.
+		stencilAttachment := MsgSend(rpDesc, Sel("stencilAttachment"))
+		if tv, ok := dsa.View.(*TextureView); ok && tv != nil {
+			_ = MsgSend(stencilAttachment, Sel("setTexture:"), uintptr(tv.raw))
+		}
+		_ = MsgSend(stencilAttachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(dsa.StencilLoadOp)))
+		if dsa.StencilLoadOp == gputypes.LoadOpClear {
+			_ = MsgSend(stencilAttachment, Sel("setClearStencil:"), uintptr(dsa.StencilClearValue))
+		}
+		_ = MsgSend(stencilAttachment, Sel("setStoreAction:"), uintptr(storeOpToMTL(dsa.StencilStoreOp)))
 	}
 	encoder := MsgSend(e.cmdBuffer, Sel("renderCommandEncoderWithDescriptor:"), uintptr(rpDesc))
 	if encoder == 0 {
