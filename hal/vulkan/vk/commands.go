@@ -121,6 +121,17 @@ func (c *Commands) LoadInstance(instance Instance) error {
 		return fmt.Errorf("failed to load critical instance functions")
 	}
 
+	// Verify WSI (Window System Integration) query functions.
+	// These are required for any surface-based rendering. Platform-specific
+	// surface creation functions (vkCreate*SurfaceKHR) are optional and
+	// checked at call sites via Has* methods, but the query functions are
+	// part of VK_KHR_surface which is always enabled for windowed rendering.
+	if c.getPhysicalDeviceSurfaceCapabilitiesKHR == nil ||
+		c.getPhysicalDeviceSurfaceFormatsKHR == nil ||
+		c.getPhysicalDeviceSurfacePresentModesKHR == nil {
+		return fmt.Errorf("failed to load WSI query functions (VK_KHR_surface)")
+	}
+
 	return nil
 }
 

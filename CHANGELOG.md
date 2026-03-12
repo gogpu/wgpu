@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-03-12
+
+### Fixed
+
+- **Vulkan: validate WSI query functions in LoadInstance** — `vkGetPhysicalDevice-
+  SurfaceCapabilitiesKHR`, `vkGetPhysicalDeviceSurfaceFormatsKHR`, and
+  `vkGetPhysicalDeviceSurfacePresentModesKHR` are now verified during instance
+  initialization. Previously, if any WSI function failed to load (returned nil),
+  the error was silent until a later SIGSEGV via goffi nil function pointer call.
+  Now fails fast with a clear error message.
+
 ## [0.20.1] - 2026-03-11
 
 ### Fixed
