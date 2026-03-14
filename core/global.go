@@ -13,7 +13,7 @@ import (
 // Thread-safe for concurrent use via singleton pattern.
 type Global struct {
 	mu       sync.RWMutex
-	surfaces *Registry[Surface, surfaceMarker]
+	surfaces *Registry[*Surface, surfaceMarker]
 	hub      *Hub
 }
 
@@ -27,7 +27,7 @@ var (
 func GetGlobal() *Global {
 	globalOnce.Do(func() {
 		globalInstance = &Global{
-			surfaces: NewRegistry[Surface, surfaceMarker](),
+			surfaces: NewRegistry[*Surface, surfaceMarker](),
 			hub:      NewHub(),
 		}
 	})
@@ -47,21 +47,21 @@ func (g *Global) Hub() *Hub {
 // RegisterSurface allocates a new ID and stores the surface.
 // Surfaces are managed separately from other GPU resources because
 // they're tied to windowing systems and created before adapters.
-func (g *Global) RegisterSurface(surface Surface) SurfaceID {
+func (g *Global) RegisterSurface(surface *Surface) SurfaceID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.surfaces.Register(surface)
 }
 
 // GetSurface retrieves a surface by ID.
-func (g *Global) GetSurface(id SurfaceID) (Surface, error) {
+func (g *Global) GetSurface(id SurfaceID) (*Surface, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.surfaces.Get(id)
 }
 
 // UnregisterSurface removes a surface by ID.
-func (g *Global) UnregisterSurface(id SurfaceID) (Surface, error) {
+func (g *Global) UnregisterSurface(id SurfaceID) (*Surface, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.surfaces.Unregister(id)
@@ -100,7 +100,7 @@ func (g *Global) Clear() {
 // Should only be used in tests.
 func ResetGlobal() {
 	globalInstance = &Global{
-		surfaces: NewRegistry[Surface, surfaceMarker](),
+		surfaces: NewRegistry[*Surface, surfaceMarker](),
 		hub:      NewHub(),
 	}
 }

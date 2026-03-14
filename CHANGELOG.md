@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and constructor functions. Previously these were empty `struct{}` stubs. This completes
   the foundation for wgpu/core resource lifecycle management (CORE-001).
 
+- **core: Surface lifecycle state machine** — `core.Surface` now manages the full
+  Unconfigured → Configured → Acquired → Configured state machine with mutex-protected
+  transitions. Methods: Configure, Unconfigure, AcquireTexture, Present, DiscardTexture.
+  Validates state transitions (e.g., can't acquire twice, can't present without acquire).
+  Includes `PrepareFrameFunc` hook for platform DPI/scale integration — called before
+  each AcquireTexture, auto-reconfigures surface on dimension changes (CORE-002).
+
 ## [0.20.2] - 2026-03-12
 
 ### Fixed

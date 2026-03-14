@@ -37,7 +37,7 @@ func TestGlobalHub(t *testing.T) {
 
 func TestGlobalSurface(t *testing.T) {
 	global := GetGlobal()
-	surface := Surface{}
+	surface := &Surface{label: "test"}
 
 	// Register
 	id := global.RegisterSurface(surface)
@@ -89,7 +89,7 @@ func TestGlobalStats(t *testing.T) {
 	initialStats := global.Stats()
 
 	// Register resources
-	surfaceID := global.RegisterSurface(Surface{})
+	surfaceID := global.RegisterSurface(&Surface{})
 	adapterID := global.Hub().RegisterAdapter(&Adapter{})
 	deviceID := global.Hub().RegisterDevice(Device{})
 	bufferID := global.Hub().RegisterBuffer(Buffer{})
@@ -137,7 +137,7 @@ func TestGlobalClear(t *testing.T) {
 	global.Clear() // Start clean
 
 	// Register resources
-	surfaceID := global.RegisterSurface(Surface{})
+	surfaceID := global.RegisterSurface(&Surface{})
 	adapterID := global.Hub().RegisterAdapter(&Adapter{})
 	deviceID := global.Hub().RegisterDevice(Device{})
 	bufferID := global.Hub().RegisterBuffer(Buffer{})
@@ -187,7 +187,7 @@ func TestGlobalConcurrentSurfaceAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < opsPerGoroutine; j++ {
 				// Register
-				id := global.RegisterSurface(Surface{})
+				id := global.RegisterSurface(&Surface{})
 
 				// Get
 				_, err := global.GetSurface(id)
@@ -265,9 +265,9 @@ func TestGlobalMixedOperations(t *testing.T) {
 	initialStats := global.Stats()
 
 	// Register surfaces and hub resources in mixed order
-	surfaceID1 := global.RegisterSurface(Surface{})
+	surfaceID1 := global.RegisterSurface(&Surface{})
 	adapterID := global.Hub().RegisterAdapter(&Adapter{})
-	surfaceID2 := global.RegisterSurface(Surface{})
+	surfaceID2 := global.RegisterSurface(&Surface{})
 	deviceID := global.Hub().RegisterDevice(Device{})
 	bufferID := global.Hub().RegisterBuffer(Buffer{})
 
@@ -333,7 +333,7 @@ func TestGlobalSurfaceEpochMismatch(t *testing.T) {
 	global.Clear() // Start clean
 
 	// Register and unregister to increment epoch
-	id1 := global.RegisterSurface(Surface{})
+	id1 := global.RegisterSurface(&Surface{})
 	_, err := global.UnregisterSurface(id1)
 	if err != nil {
 		t.Fatalf("UnregisterSurface failed: %v", err)

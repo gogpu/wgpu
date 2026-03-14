@@ -1312,12 +1312,33 @@ func (qs *QuerySet) Raw(guard *SnatchGuard) hal.QuerySet {
 	return *p
 }
 
+// SurfaceState represents the lifecycle state of a surface.
+type SurfaceState int
+
+const (
+	// SurfaceStateUnconfigured indicates the surface has not been configured.
+	SurfaceStateUnconfigured SurfaceState = iota
+
+	// SurfaceStateConfigured indicates the surface is configured and ready to acquire textures.
+	SurfaceStateConfigured
+
+	// SurfaceStateAcquired indicates a texture has been acquired and not yet presented or discarded.
+	SurfaceStateAcquired
+)
+
+// PrepareFrameFunc is a platform hook called before acquiring a surface texture.
+// It returns the current surface dimensions and whether they changed since the last call.
+// If changed is true, the surface will be reconfigured with the new dimensions before acquiring.
+type PrepareFrameFunc func() (width, height uint32, changed bool)
+
 // Surface represents a rendering surface with HAL integration.
 //
 // Surface wraps a HAL surface handle. Unlike other resources, surfaces are
 // owned by the Instance (not Device) and outlive devices, so the HAL handle
-// is stored directly rather than in a Snatchable. Full lifecycle management
-// is implemented in CORE-002.
+// is stored directly rather than in a Snatchable.
+//
+// Surface manages a state machine: Unconfigured -> Configured -> Acquired -> Configured.
+// All state transitions are protected by a mutex.
 type Surface struct {
 	// raw is the HAL surface handle.
 	// Not wrapped in Snatchable — surfaces are owned by Instance, not Device.
@@ -1325,9 +1346,30 @@ type Surface struct {
 
 	// label is a debug label for the surface.
 	label string
+
+	// device is the configured device (nil when unconfigured).
+	device *Device
+
+	// config is the current surface configuration (nil when unconfigured).
+	config *hal.SurfaceConfiguration
+
+	// state is the current lifecycle state.
+	state SurfaceState
+
+	// acquiredTex is the currently acquired surface texture (nil when not acquired).
+	acquiredTex hal.SurfaceTexture
+
+	// prepareFrame is an optional platform hook called before acquiring a texture.
+	prepareFrame PrepareFrameFunc
+
+	// mu protects state transitions.
+	mu sync.Mutex
 }
 
 // NewSurface creates a core Surface wrapping a HAL surface.
+//
+// The surface starts in the Unconfigured state. Call Configure() before
+// acquiring textures.
 //
 // Parameters:
 //   - halSurface: The HAL surface to wrap (ownership transferred)
@@ -1339,6 +1381,7 @@ func NewSurface(
 	s := &Surface{
 		raw:   halSurface,
 		label: label,
+		state: SurfaceStateUnconfigured,
 	}
 	trackResource(uintptr(unsafe.Pointer(s)), "Surface") //nolint:gosec // debug tracking uses pointer as unique ID
 	return s
