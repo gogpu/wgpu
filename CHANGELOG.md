@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **public API: Fence type and Device fence methods** — New `Fence` wrapper type with
+  `Release()` method. Device now exposes `CreateFence()`, `DestroyFence()`, `ResetFence()`,
+  `GetFenceStatus()`, `WaitForFence()`, and `FreeCommandBuffer()` for non-blocking GPU
+  submission tracking. This enables the FencePool pattern used by gogpu renderer for
+  async submit with per-frame fence tracking.
+
+- **public API: Queue.SubmitWithFence** — Non-blocking submit variant that signals a
+  fence on GPU completion instead of blocking. Unlike `Submit()` which waits synchronously,
+  `SubmitWithFence()` returns immediately and the caller polls/waits on the fence.
+  Command buffers must be freed manually after the fence signals.
+
+- **public API: Surface.DiscardTexture** — Discards an acquired surface texture without
+  presenting it. Delegates to `core.Surface.DiscardTexture()`. Use when rendering fails
+  or is canceled after acquiring a texture via `GetCurrentTexture()`.
+
 - **core: resource accessor methods and Destroy** — All pipeline and binding resource
   types (Texture, Sampler, BindGroupLayout, PipelineLayout, BindGroup, ShaderModule,
   RenderPipeline, ComputePipeline, QuerySet) now have read-only accessor methods for

@@ -57,6 +57,40 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) error {
 	return nil
 }
 
+// SubmitWithFence submits command buffers for execution with fence-based tracking.
+// Unlike Submit, this method does NOT block until GPU completion. Instead, it
+// signals the provided fence with submissionIndex when the work completes.
+// The caller is responsible for polling or waiting on the fence.
+//
+// If fence is nil, the submission proceeds without fence signaling.
+// Command buffers must be freed by the caller after the fence signals
+// (use Device.FreeCommandBuffer).
+func (q *Queue) SubmitWithFence(commandBuffers []*CommandBuffer, fence *Fence, submissionIndex uint64) error {
+	if q.hal == nil {
+		return fmt.Errorf("wgpu: queue not available")
+	}
+
+	halBuffers := make([]hal.CommandBuffer, len(commandBuffers))
+	for i, cb := range commandBuffers {
+		if cb == nil {
+			return fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+		}
+		halBuffers[i] = cb.halBuffer()
+	}
+
+	var halFence hal.Fence
+	if fence != nil {
+		halFence = fence.hal
+	}
+
+	err := q.hal.Submit(halBuffers, halFence, submissionIndex)
+	if err != nil {
+		return fmt.Errorf("wgpu: submit failed: %w", err)
+	}
+
+	return nil
+}
+
 // WriteBuffer writes data to a buffer.
 func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	if q.hal == nil || buffer == nil {

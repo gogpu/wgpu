@@ -2,6 +2,7 @@ package wgpu
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
@@ -380,6 +381,101 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 	}
 
 	return &CommandEncoder{core: coreEncoder, device: d}, nil
+}
+
+// CreateFence creates a GPU synchronization fence.
+// The returned fence can be used with Queue.SubmitWithFence to track
+// GPU work completion without blocking.
+func (d *Device) CreateFence() (*Fence, error) {
+	if d.released {
+		return nil, ErrReleased
+	}
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return nil, ErrReleased
+	}
+
+	halFence, err := halDevice.CreateFence()
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create fence: %w", err)
+	}
+
+	return &Fence{hal: halFence, device: d}, nil
+}
+
+// DestroyFence destroys a fence.
+// The fence must not be in use by the GPU when destroyed.
+//
+// Deprecated: Use Fence.Release() instead.
+func (d *Device) DestroyFence(f *Fence) {
+	if f != nil {
+		f.Release()
+	}
+}
+
+// ResetFence resets a fence to the unsignaled state.
+// The fence must not be in use by the GPU.
+func (d *Device) ResetFence(f *Fence) error {
+	if d.released {
+		return ErrReleased
+	}
+	if f == nil || f.released {
+		return ErrReleased
+	}
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return ErrReleased
+	}
+	return halDevice.ResetFence(f.hal)
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+// This is used for polling completion without blocking.
+func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
+	if d.released {
+		return false, ErrReleased
+	}
+	if f == nil || f.released {
+		return false, ErrReleased
+	}
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return false, ErrReleased
+	}
+	return halDevice.GetFenceStatus(f.hal)
+}
+
+// WaitForFence waits for a fence to reach the specified value.
+// Returns true if the fence reached the value, false if timeout expired.
+func (d *Device) WaitForFence(f *Fence, value uint64, timeout time.Duration) (bool, error) {
+	if d.released {
+		return false, ErrReleased
+	}
+	if f == nil || f.released {
+		return false, ErrReleased
+	}
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return false, ErrReleased
+	}
+	return halDevice.Wait(f.hal, value, timeout)
+}
+
+// FreeCommandBuffer returns a command buffer to the command pool.
+// This must be called after the GPU has finished using the command buffer.
+// The command buffer handle becomes invalid after this call.
+func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
+	if d.released || cb == nil {
+		return
+	}
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return
+	}
+	raw := cb.halBuffer()
+	if raw != nil {
+		halDevice.FreeCommandBuffer(raw)
+	}
 }
 
 // PushErrorScope pushes a new error scope onto the device's error scope stack.

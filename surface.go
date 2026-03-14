@@ -147,6 +147,16 @@ func (s *Surface) SetPrepareFrame(fn core.PrepareFrameFunc) {
 	s.core.SetPrepareFrame(fn)
 }
 
+// DiscardTexture discards the acquired surface texture without presenting it.
+// Use this if rendering failed or was canceled. If no texture is currently
+// acquired, this is a no-op.
+func (s *Surface) DiscardTexture() {
+	if s.released {
+		return
+	}
+	s.core.DiscardTexture()
+}
+
 // HAL returns the underlying HAL surface for backward compatibility.
 // Prefer using Surface methods instead of direct HAL access.
 func (s *Surface) HAL() hal.Surface {
