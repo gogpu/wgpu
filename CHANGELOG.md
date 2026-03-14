@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core: resource accessor methods and Destroy** — All pipeline and binding resource
+  types (Texture, Sampler, BindGroupLayout, PipelineLayout, BindGroup, ShaderModule,
+  RenderPipeline, ComputePipeline, QuerySet) now have read-only accessor methods for
+  their properties (Label, Format, Size, Entries, Count, etc.), an idempotent Destroy()
+  method following the Buffer snatch-and-release pattern, and an IsDestroyed() check.
+  Methods are in a separate `resource_accessors.go` file with full test coverage (CORE-004).
+
 - **core: complete all 12 stub resource types** — Texture, Sampler, BindGroupLayout,
   PipelineLayout, BindGroup, ShaderModule, RenderPipeline, ComputePipeline,
   CommandEncoder, CommandBuffer, QuerySet, and Surface now have full struct definitions
