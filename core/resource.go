@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -1157,11 +1158,61 @@ func (cp *ComputePipeline) Raw(guard *SnatchGuard) hal.ComputePipeline {
 	return *p
 }
 
+// CommandEncoderPassState represents the current state of a command encoder
+// with respect to pass lifecycle.
+type CommandEncoderPassState int
+
+const (
+	// CommandEncoderPassStateRecording means the encoder is recording commands
+	// outside of any pass.
+	CommandEncoderPassStateRecording CommandEncoderPassState = iota
+
+	// CommandEncoderPassStateInRenderPass means the encoder is inside a render pass.
+	CommandEncoderPassStateInRenderPass
+
+	// CommandEncoderPassStateInComputePass means the encoder is inside a compute pass.
+	CommandEncoderPassStateInComputePass
+
+	// CommandEncoderPassStateFinished means encoding is complete.
+	CommandEncoderPassStateFinished
+
+	// CommandEncoderPassStateError means the encoder encountered an error.
+	CommandEncoderPassStateError
+)
+
+// String returns a human-readable representation of the pass state.
+func (s CommandEncoderPassState) String() string {
+	switch s {
+	case CommandEncoderPassStateRecording:
+		return "Recording"
+	case CommandEncoderPassStateInRenderPass:
+		return "InRenderPass"
+	case CommandEncoderPassStateInComputePass:
+		return "InComputePass"
+	case CommandEncoderPassStateFinished:
+		return "Finished"
+	case CommandEncoderPassStateError:
+		return "Error"
+	default:
+		return fmt.Sprintf("Unknown(%d)", s)
+	}
+}
+
 // CommandEncoder represents a command encoder with HAL integration.
 //
-// CommandEncoder wraps a HAL command encoder handle. The full state machine
-// for encoding commands is implemented in CORE-003; this struct provides
-// the basic storage structure.
+// CommandEncoder wraps a HAL command encoder handle and tracks the encoder's
+// lifecycle state. The state machine ensures commands are recorded in the
+// correct order: passes must be opened and closed properly, and encoding
+// must be finished before the resulting command buffer can be submitted.
+//
+// State transitions:
+//
+//	Recording     -> BeginRenderPass()  -> InRenderPass
+//	Recording     -> BeginComputePass() -> InComputePass
+//	InRenderPass  -> EndRenderPass()    -> Recording
+//	InComputePass -> EndComputePass()   -> Recording
+//	Recording     -> Finish()           -> Finished
+//	Any           -> RecordError()      -> Error
 type CommandEncoder struct {
 	// raw is the HAL command encoder handle.
 	// Not wrapped in Snatchable — state machine lifecycle is managed by CORE-003.
@@ -1170,11 +1221,22 @@ type CommandEncoder struct {
 	// device is a pointer to the parent Device.
 	device *Device
 
+	// passState is the current pass lifecycle state.
+	passState CommandEncoderPassState
+
 	// label is a debug label for the command encoder.
 	label string
+
+	// passDepth tracks nesting depth (should never exceed 1).
+	passDepth int
+
+	// errorMessage holds the first error encountered.
+	errorMessage string
 }
 
 // NewCommandEncoder creates a core CommandEncoder wrapping a HAL command encoder.
+//
+// The encoder starts in the Recording state, ready to record commands.
 //
 // Parameters:
 //   - halEncoder: The HAL command encoder to wrap (ownership transferred)
@@ -1186,9 +1248,10 @@ func NewCommandEncoder(
 	label string,
 ) *CommandEncoder {
 	ce := &CommandEncoder{
-		raw:    halEncoder,
-		device: device,
-		label:  label,
+		raw:       halEncoder,
+		device:    device,
+		passState: CommandEncoderPassStateRecording,
+		label:     label,
 	}
 	trackResource(uintptr(unsafe.Pointer(ce)), "CommandEncoder") //nolint:gosec // debug tracking uses pointer as unique ID
 	return ce
@@ -1199,10 +1262,21 @@ func (ce *CommandEncoder) RawEncoder() hal.CommandEncoder {
 	return ce.raw
 }
 
+// CommandBufferSubmitState represents the submission state of a command buffer.
+type CommandBufferSubmitState int
+
+const (
+	// CommandBufferSubmitStateAvailable means the buffer is ready for submission.
+	CommandBufferSubmitStateAvailable CommandBufferSubmitState = iota
+
+	// CommandBufferSubmitStateSubmitted means the buffer has been submitted to a queue.
+	CommandBufferSubmitStateSubmitted
+)
+
 // CommandBuffer represents a recorded command buffer with HAL integration.
 //
 // CommandBuffer wraps a HAL command buffer handle. Command buffers are
-// immutable after encoding and can be submitted to a queue.
+// immutable after encoding and can be submitted to a queue exactly once.
 type CommandBuffer struct {
 	// raw is the HAL command buffer handle wrapped for safe destruction.
 	raw *Snatchable[hal.CommandBuffer]
@@ -1212,6 +1286,9 @@ type CommandBuffer struct {
 
 	// label is a debug label for the command buffer.
 	label string
+
+	// submitState tracks whether the buffer has been submitted.
+	submitState CommandBufferSubmitState
 
 	// trackingData holds per-resource tracking information.
 	trackingData *TrackingData

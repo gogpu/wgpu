@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state tracking. New public methods: `SetPrepareFrame()` for platform HiDPI hooks,
   `HAL()` escape hatch for backward compatibility (CORE-005).
 
+- **core: CommandEncoder/CommandBuffer state machine** — `core.CommandEncoder` now tracks
+  pass state (Recording, InRenderPass, InComputePass, Finished, Error) with validated
+  transitions. BeginRenderPass/EndRenderPass, BeginComputePass/EndComputePass enforce
+  proper nesting. Finish validates no open passes. RecordError captures first error.
+  `core.CommandBuffer` tracks submission state (Available, Submitted) to prevent
+  double-submission (CORE-003).
+
 ## [0.20.2] - 2026-03-12
 
 ### Fixed
