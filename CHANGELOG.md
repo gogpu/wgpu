@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Includes `PrepareFrameFunc` hook for platform DPI/scale integration — called before
   each AcquireTexture, auto-reconfigures surface on dimension changes (CORE-002).
 
+- **public API: Surface delegates to core.Surface** — `wgpu.Surface` now uses
+  `core.Surface` internally instead of `hal.Surface` directly. All lifecycle methods
+  (Configure, Unconfigure, GetCurrentTexture, Present) go through core validation and
+  state tracking. New public methods: `SetPrepareFrame()` for platform HiDPI hooks,
+  `HAL()` escape hatch for backward compatibility (CORE-005).
+
 ## [0.20.2] - 2026-03-12
 
 ### Fixed

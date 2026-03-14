@@ -3,12 +3,16 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
 // Surface represents a platform rendering surface (e.g., a window).
+//
+// Surface delegates lifecycle management to core.Surface, which enforces
+// the state machine: Unconfigured -> Configured -> Acquired -> Configured.
 type Surface struct {
-	hal      hal.Surface
+	core     *core.Surface
 	instance *Instance
 	device   *Device
 	released bool
@@ -35,8 +39,9 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
 	}
 
+	coreSurface := core.NewSurface(halSurface, "")
 	return &Surface{
-		hal:      halSurface,
+		core:     coreSurface,
 		instance: i,
 	}, nil
 }
@@ -54,11 +59,6 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		return fmt.Errorf("wgpu: device is nil")
 	}
 
-	halDevice := device.halDevice()
-	if halDevice == nil {
-		return ErrReleased
-	}
-
 	halConfig := &hal.SurfaceConfiguration{
 		Width:       config.Width,
 		Height:      config.Height,
@@ -69,23 +69,22 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	}
 
 	s.device = device
-	return s.hal.Configure(halDevice, halConfig)
+	return s.core.Configure(device.core, halConfig)
 }
 
 // Unconfigure removes the surface configuration.
 func (s *Surface) Unconfigure() {
-	if s.released || s.device == nil {
+	if s.released {
 		return
 	}
-	halDevice := s.device.halDevice()
-	if halDevice == nil {
-		return
-	}
-	s.hal.Unconfigure(halDevice)
+	s.core.Unconfigure()
 }
 
 // GetCurrentTexture acquires the next texture for rendering.
 // Returns the surface texture and whether the surface is suboptimal.
+//
+// If a PrepareFrame hook is registered and reports changed dimensions,
+// the surface is automatically reconfigured before acquiring.
 func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 	if s.released {
 		return nil, false, ErrReleased
@@ -105,7 +104,7 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 	}
 	defer halDevice.DestroyFence(fence)
 
-	acquired, err := s.hal.AcquireTexture(fence)
+	acquired, err := s.core.AcquireTexture(fence)
 	if err != nil {
 		return nil, false, err
 	}
@@ -133,7 +132,25 @@ func (s *Surface) Present(texture *SurfaceTexture) error {
 		return fmt.Errorf("wgpu: surface texture is nil")
 	}
 
-	return s.device.queue.hal.Present(s.hal, texture.hal)
+	return s.core.Present(s.device.queue.hal)
+}
+
+// SetPrepareFrame registers a platform hook called before each GetCurrentTexture.
+// If the hook returns changed=true with new dimensions, the surface is automatically
+// reconfigured. This is the integration point for HiDPI/DPI change handling:
+//   - macOS Metal: read CAMetalLayer.contentsScale
+//   - Windows: handle WM_DPICHANGED
+//   - Wayland: read wl_output.scale
+//
+// Pass nil to remove the hook.
+func (s *Surface) SetPrepareFrame(fn core.PrepareFrameFunc) {
+	s.core.SetPrepareFrame(fn)
+}
+
+// HAL returns the underlying HAL surface for backward compatibility.
+// Prefer using Surface methods instead of direct HAL access.
+func (s *Surface) HAL() hal.Surface {
+	return s.core.RawSurface()
 }
 
 // Release releases the surface.
@@ -142,7 +159,8 @@ func (s *Surface) Release() {
 		return
 	}
 	s.released = true
-	s.hal.Destroy()
+	s.core.RawSurface().Destroy()
+	s.core = nil
 }
 
 // SurfaceTexture is a texture acquired from a surface for rendering.
