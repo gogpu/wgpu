@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **core: complete all 12 stub resource types** — Texture, Sampler, BindGroupLayout,
+  PipelineLayout, BindGroup, ShaderModule, RenderPipeline, ComputePipeline,
+  CommandEncoder, CommandBuffer, QuerySet, and Surface now have full struct definitions
+  with HAL handle wrapping (Snatchable pattern), device references, WebGPU properties,
+  and constructor functions. Previously these were empty `struct{}` stubs. This completes
+  the foundation for wgpu/core resource lifecycle management (CORE-001).
+
 ## [0.20.2] - 2026-03-12
 
 ### Fixed
