@@ -96,7 +96,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 // This is used for GPU-to-CPU readback of rendered content.
-func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions []hal.BufferTextureCopy) {
+func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions []BufferTextureCopy) {
 	if e.released {
 		return
 	}
@@ -116,14 +116,18 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	if src.hal == nil || halDst == nil {
 		return
 	}
-	raw.CopyTextureToBuffer(src.hal, halDst, regions)
+	halRegions := make([]hal.BufferTextureCopy, len(regions))
+	for i, r := range regions {
+		halRegions[i] = r.toHAL()
+	}
+	raw.CopyTextureToBuffer(src.hal, halDst, halRegions)
 }
 
 // TransitionTextures transitions texture states for synchronization.
 // This is needed on Vulkan for layout transitions between render pass
 // and copy operations (e.g., after MSAA resolve before CopyTextureToBuffer).
 // On Metal, GLES, and software backends this is a no-op.
-func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	if e.released {
 		return
 	}
@@ -131,7 +135,11 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	if raw == nil {
 		return
 	}
-	raw.TransitionTextures(barriers)
+	halBarriers := make([]hal.TextureBarrier, len(barriers))
+	for i, b := range barriers {
+		halBarriers[i] = b.toHAL()
+	}
+	raw.TransitionTextures(halBarriers)
 }
 
 // DiscardEncoding discards the encoder without producing a command buffer.

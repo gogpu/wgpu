@@ -138,7 +138,9 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	}
 
 	halDst := dst.toHAL()
-	return q.hal.WriteTexture(halDst, data, layout, size)
+	halLayout := layout.toHAL()
+	halSize := size.toHAL()
+	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
 }
 
 // release cleans up queue resources.

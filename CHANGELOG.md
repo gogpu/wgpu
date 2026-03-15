@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **public API: SetLogger / Logger** — New `wgpu.SetLogger()` and `wgpu.Logger()`
+  functions that propagate the logger to the entire wgpu stack (public API, core
+  validation, HAL backends). Consumers no longer need to import `wgpu/hal` for logging.
+
+- **public API: proper type definitions for GPU descriptors** — Replaced type aliases
+  to `hal` package with proper struct definitions and unexported `toHAL()` converters.
+  This removes `hal` leakage from godoc and follows the Google Go Style Guide (aliases
+  are for migration only, not permanent public API). Promoted types:
+  `Extent3D`, `Origin3D`, `ImageDataLayout`, `DepthStencilState`, `StencilFaceState`,
+  `StencilOperation` (enum alias kept), plus new barrier/copy types:
+  `TextureBarrier`, `TextureRange`, `TextureUsageTransition`, `BufferTextureCopy`.
+
+### Changed
+
+- **public API: CommandEncoder signatures use wgpu types** — `CopyTextureToBuffer`
+  now takes `[]BufferTextureCopy` (was `[]hal.BufferTextureCopy`), `TransitionTextures`
+  now takes `[]TextureBarrier` (was `[]hal.TextureBarrier`). No HAL types in public
+  method signatures.
+
 - **public API: Fence type and Device fence methods** — New `Fence` wrapper type with
   `Release()` method. Device now exposes `CreateFence()`, `DestroyFence()`, `ResetFence()`,
   `GetFenceStatus()`, `WaitForFence()`, and `FreeCommandBuffer()` for non-blocking GPU

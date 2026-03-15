@@ -73,16 +73,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, ErrReleased
 	}
 
-	halDesc := &hal.TextureDescriptor{
-		Label:         desc.Label,
-		Size:          hal.Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, DepthOrArrayLayers: desc.Size.DepthOrArrayLayers},
-		MipLevelCount: desc.MipLevelCount,
-		SampleCount:   desc.SampleCount,
-		Dimension:     desc.Dimension,
-		Format:        desc.Format,
-		Usage:         desc.Usage,
-		ViewFormats:   desc.ViewFormats,
-	}
+	halDesc := desc.toHAL()
 
 	if err := core.ValidateTextureDescriptor(halDesc, d.core.Limits); err != nil {
 		return nil, err

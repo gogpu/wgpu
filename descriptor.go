@@ -6,13 +6,37 @@ import (
 )
 
 // Extent3D is a 3D size.
-type Extent3D = hal.Extent3D
+type Extent3D struct {
+	Width              uint32
+	Height             uint32
+	DepthOrArrayLayers uint32
+}
+
+func (e Extent3D) toHAL() hal.Extent3D {
+	return hal.Extent3D{Width: e.Width, Height: e.Height, DepthOrArrayLayers: e.DepthOrArrayLayers}
+}
 
 // Origin3D is a 3D origin point.
-type Origin3D = hal.Origin3D
+type Origin3D struct {
+	X uint32
+	Y uint32
+	Z uint32
+}
+
+func (o Origin3D) toHAL() hal.Origin3D {
+	return hal.Origin3D{X: o.X, Y: o.Y, Z: o.Z}
+}
 
 // ImageDataLayout describes the layout of image data in a buffer.
-type ImageDataLayout = hal.ImageDataLayout
+type ImageDataLayout struct {
+	Offset       uint64
+	BytesPerRow  uint32
+	RowsPerImage uint32
+}
+
+func (l ImageDataLayout) toHAL() hal.ImageDataLayout {
+	return hal.ImageDataLayout{Offset: l.Offset, BytesPerRow: l.BytesPerRow, RowsPerImage: l.RowsPerImage}
+}
 
 // BufferDescriptor describes buffer creation parameters.
 type BufferDescriptor struct {
@@ -48,7 +72,7 @@ type TextureDescriptor struct {
 func (d *TextureDescriptor) toHAL() *hal.TextureDescriptor {
 	return &hal.TextureDescriptor{
 		Label:         d.Label,
-		Size:          d.Size,
+		Size:          d.Size.toHAL(),
 		MipLevelCount: d.MipLevelCount,
 		SampleCount:   d.SampleCount,
 		Dimension:     d.Dimension,
@@ -213,8 +237,64 @@ type PipelineLayoutDescriptor struct {
 	BindGroupLayouts []*BindGroupLayout
 }
 
-// DepthStencilState describes depth/stencil testing configuration.
-type DepthStencilState = hal.DepthStencilState
+// StencilOperation describes a stencil operation.
+type StencilOperation = hal.StencilOperation
+
+// Stencil operation constants.
+const (
+	StencilOperationKeep           = hal.StencilOperationKeep
+	StencilOperationZero           = hal.StencilOperationZero
+	StencilOperationReplace        = hal.StencilOperationReplace
+	StencilOperationInvert         = hal.StencilOperationInvert
+	StencilOperationIncrementClamp = hal.StencilOperationIncrementClamp
+	StencilOperationDecrementClamp = hal.StencilOperationDecrementClamp
+	StencilOperationIncrementWrap  = hal.StencilOperationIncrementWrap
+	StencilOperationDecrementWrap  = hal.StencilOperationDecrementWrap
+)
+
+// StencilFaceState describes stencil operations for a face.
+type StencilFaceState struct {
+	Compare     CompareFunction
+	FailOp      StencilOperation
+	DepthFailOp StencilOperation
+	PassOp      StencilOperation
+}
+
+func (s StencilFaceState) toHAL() hal.StencilFaceState {
+	return hal.StencilFaceState{Compare: s.Compare, FailOp: s.FailOp, DepthFailOp: s.DepthFailOp, PassOp: s.PassOp}
+}
+
+// DepthStencilState describes depth and stencil testing configuration.
+type DepthStencilState struct {
+	Format              TextureFormat
+	DepthWriteEnabled   bool
+	DepthCompare        CompareFunction
+	StencilFront        StencilFaceState
+	StencilBack         StencilFaceState
+	StencilReadMask     uint32
+	StencilWriteMask    uint32
+	DepthBias           int32
+	DepthBiasSlopeScale float32
+	DepthBiasClamp      float32
+}
+
+func (d *DepthStencilState) toHAL() *hal.DepthStencilState {
+	if d == nil {
+		return nil
+	}
+	return &hal.DepthStencilState{
+		Format:              d.Format,
+		DepthWriteEnabled:   d.DepthWriteEnabled,
+		DepthCompare:        d.DepthCompare,
+		StencilFront:        d.StencilFront.toHAL(),
+		StencilBack:         d.StencilBack.toHAL(),
+		StencilReadMask:     d.StencilReadMask,
+		StencilWriteMask:    d.StencilWriteMask,
+		DepthBias:           d.DepthBias,
+		DepthBiasSlopeScale: d.DepthBiasSlopeScale,
+		DepthBiasClamp:      d.DepthBiasClamp,
+	}
+}
 
 // RenderPipelineDescriptor describes a render pipeline.
 type RenderPipelineDescriptor struct {
@@ -247,7 +327,7 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		Label:        d.Label,
 		Primitive:    d.Primitive,
 		Multisample:  d.Multisample,
-		DepthStencil: d.DepthStencil,
+		DepthStencil: d.DepthStencil.toHAL(),
 	}
 
 	if d.Layout != nil {
@@ -422,7 +502,71 @@ func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
 	return &hal.ImageCopyTexture{
 		Texture:  i.Texture.hal,
 		MipLevel: i.MipLevel,
-		Origin:   i.Origin,
+		Origin:   i.Origin.toHAL(),
 		Aspect:   i.Aspect,
 	}
+}
+
+// TextureUsageTransition defines a texture usage state transition.
+type TextureUsageTransition struct {
+	OldUsage TextureUsage
+	NewUsage TextureUsage
+}
+
+// TextureRange specifies a range of texture subresources.
+type TextureRange struct {
+	Aspect          TextureAspect
+	BaseMipLevel    uint32
+	MipLevelCount   uint32
+	BaseArrayLayer  uint32
+	ArrayLayerCount uint32
+}
+
+// TextureBarrier defines a texture state transition for synchronization.
+// Required on Vulkan for layout transitions between render pass and copy
+// operations. On Metal, GLES, and software backends this is a no-op.
+type TextureBarrier struct {
+	Texture *Texture
+	Range   TextureRange
+	Usage   TextureUsageTransition
+}
+
+func (b TextureBarrier) toHAL() hal.TextureBarrier {
+	var t hal.Texture
+	if b.Texture != nil {
+		t = b.Texture.hal
+	}
+	return hal.TextureBarrier{
+		Texture: t,
+		Range: hal.TextureRange{
+			Aspect:          b.Range.Aspect,
+			BaseMipLevel:    b.Range.BaseMipLevel,
+			MipLevelCount:   b.Range.MipLevelCount,
+			BaseArrayLayer:  b.Range.BaseArrayLayer,
+			ArrayLayerCount: b.Range.ArrayLayerCount,
+		},
+		Usage: hal.TextureUsageTransition{
+			OldUsage: b.Usage.OldUsage,
+			NewUsage: b.Usage.NewUsage,
+		},
+	}
+}
+
+// BufferTextureCopy defines a buffer-texture copy region.
+type BufferTextureCopy struct {
+	BufferLayout ImageDataLayout
+	TextureBase  ImageCopyTexture
+	Size         Extent3D
+}
+
+func (c BufferTextureCopy) toHAL() hal.BufferTextureCopy {
+	btc := hal.BufferTextureCopy{
+		BufferLayout: c.BufferLayout.toHAL(),
+		Size:         c.Size.toHAL(),
+	}
+	halTex := c.TextureBase.toHAL()
+	if halTex != nil {
+		btc.TextureBase = *halTex
+	}
+	return btc
 }
