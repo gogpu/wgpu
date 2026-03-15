@@ -19,19 +19,31 @@
 
 ---
 
-## Current State: v0.18.1
+## Current State: v0.21.0
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total)
-✅ **Public API root package** — `import "github.com/gogpu/wgpu"`
+✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
+✅ **Complete public API** — consumers never import `wgpu/hal`
 
-**New in v0.18.1:**
-- Vulkan: fix buffer-to-image copy row stride corruption — use format's block copy size instead of inferring from padded `BytesPerRow / Width` (gogpu#96)
+**New in v0.21.0:**
+- Complete three-layer architecture: public API → core validation → HAL backends
+- core: Surface lifecycle state machine, CommandEncoder state machine, 12 resource types
+- Proper type definitions (no hal aliases in godoc): Extent3D, DepthStencilState, TextureBarrier, etc.
+- Fence + async submission (SubmitWithFence), Surface PrepareFrame hook
+- SetLogger/Logger for stack-wide logging propagation
+- naga v0.14.7 (MSL binding index fix)
 
-**New in v0.18.0:**
-- Public API root package with 20 user-facing types wrapping core/ and hal/
+**New in v0.20.2:**
+- Vulkan: validate WSI query functions in LoadInstance (prevents nil pointer SIGSEGV)
+
+**New in v0.20.1:**
+- Metal: missing stencil attachment in render pass (macOS rendering fix)
+- Metal: missing setClearDepth: call
+
+**New in v0.20.0:**
+- Public API root package with typed wrappers for core/ and hal/
 - WebGPU-spec-aligned flow: `CreateInstance()` → `RequestAdapter()` → `RequestDevice()`
 - Synchronous `Queue.Submit()` with internal fence management
-- Type aliases from `gputypes` — no extra imports needed
 - Deterministic `Release()` cleanup on all resource types
 
 **New in v0.16.17:**

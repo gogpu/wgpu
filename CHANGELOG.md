@@ -7,79 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-03-15
+
 ### Added
 
-- **public API: SetLogger / Logger** — New `wgpu.SetLogger()` and `wgpu.Logger()`
-  functions that propagate the logger to the entire wgpu stack (public API, core
-  validation, HAL backends). Consumers no longer need to import `wgpu/hal` for logging.
+- **public API: complete three-layer WebGPU stack** — The root `wgpu` package now
+  provides a full typed API for GPU programming. All operations go through
+  wgpu (public) → wgpu/core (validation) → wgpu/hal (backend). Consumers never
+  need to import `wgpu/hal` for standard use.
 
-- **public API: proper type definitions for GPU descriptors** — Replaced type aliases
-  to `hal` package with proper struct definitions and unexported `toHAL()` converters.
-  This removes `hal` leakage from godoc and follows the Google Go Style Guide (aliases
-  are for migration only, not permanent public API). Promoted types:
-  `Extent3D`, `Origin3D`, `ImageDataLayout`, `DepthStencilState`, `StencilFaceState`,
-  `StencilOperation` (enum alias kept), plus new barrier/copy types:
-  `TextureBarrier`, `TextureRange`, `TextureUsageTransition`, `BufferTextureCopy`.
+- **public API: SetLogger / Logger** — `wgpu.SetLogger()` and `wgpu.Logger()`
+  propagate the logger to the entire stack (API, core, HAL backends).
+
+- **public API: Fence and async submission** — `Fence` type, `Device.CreateFence()`,
+  `WaitForFence()`, `ResetFence()`, `GetFenceStatus()`, `FreeCommandBuffer()`.
+  `Queue.SubmitWithFence()` for non-blocking GPU submission with fence signaling.
+
+- **public API: Surface lifecycle** — `Surface.SetPrepareFrame()` for platform
+  HiDPI/DPI hooks. `Surface.DiscardTexture()` for canceled frames. `Surface.HAL()`
+  escape hatch. Delegates to `core.Surface` state machine.
+
+- **public API: CommandEncoder extensions** — `CopyTextureToBuffer()`,
+  `TransitionTextures()`, `DiscardEncoding()`. All use wgpu types (no hal in signatures).
+
+- **public API: HAL accessors** — `Device.HalDevice()`, `Device.HalQueue()`,
+  `Texture.HalTexture()`, `TextureView.HalTextureView()` for advanced interop.
+
+- **public API: proper type definitions** — Replaced hal type aliases with proper
+  structs: `Extent3D`, `Origin3D`, `ImageDataLayout`, `DepthStencilState`,
+  `StencilFaceState`, `TextureBarrier`, `TextureRange`, `TextureUsageTransition`,
+  `BufferTextureCopy`. Unexported `toHAL()` converters. No hal leakage in godoc.
+
+- **core: complete resource types (CORE-001)** — All 12 stub resource types
+  (Texture, Sampler, BindGroupLayout, PipelineLayout, BindGroup, ShaderModule,
+  RenderPipeline, ComputePipeline, CommandEncoder, CommandBuffer, QuerySet, Surface)
+  now have full struct definitions with HAL handle wrapping.
+
+- **core: Surface state machine (CORE-002)** — Unconfigured → Configured → Acquired
+  lifecycle with PrepareFrameFunc hook and auto-reconfigure on dimension changes.
+
+- **core: CommandEncoder state machine (CORE-003)** — Recording/InRenderPass/
+  InComputePass/Finished/Error states with validated transitions.
+
+- **core: resource accessors (CORE-004)** — Read-only accessors and idempotent
+  Destroy() for all resource types.
+
+- **cmd/wgpu-triangle** — Single-threaded wgpu API triangle example.
+
+- **cmd/wgpu-triangle-mt** — Multi-threaded wgpu API triangle example.
 
 ### Changed
 
-- **Updated naga v0.14.6 → v0.14.7** — Fixes MSL sequential per-type binding indices
-  across bind groups (`buffer(N)`, `texture(N)`, `sampler(N)` counters now reset per type
-  not per group).
-
-- **public API: CommandEncoder signatures use wgpu types** — `CopyTextureToBuffer`
-  now takes `[]BufferTextureCopy` (was `[]hal.BufferTextureCopy`), `TransitionTextures`
-  now takes `[]TextureBarrier` (was `[]hal.TextureBarrier`). No HAL types in public
-  method signatures.
-
-- **public API: Fence type and Device fence methods** — New `Fence` wrapper type with
-  `Release()` method. Device now exposes `CreateFence()`, `DestroyFence()`, `ResetFence()`,
-  `GetFenceStatus()`, `WaitForFence()`, and `FreeCommandBuffer()` for non-blocking GPU
-  submission tracking. This enables the FencePool pattern used by gogpu renderer for
-  async submit with per-frame fence tracking.
-
-- **public API: Queue.SubmitWithFence** — Non-blocking submit variant that signals a
-  fence on GPU completion instead of blocking. Unlike `Submit()` which waits synchronously,
-  `SubmitWithFence()` returns immediately and the caller polls/waits on the fence.
-  Command buffers must be freed manually after the fence signals.
-
-- **public API: Surface.DiscardTexture** — Discards an acquired surface texture without
-  presenting it. Delegates to `core.Surface.DiscardTexture()`. Use when rendering fails
-  or is canceled after acquiring a texture via `GetCurrentTexture()`.
-
-- **core: resource accessor methods and Destroy** — All pipeline and binding resource
-  types (Texture, Sampler, BindGroupLayout, PipelineLayout, BindGroup, ShaderModule,
-  RenderPipeline, ComputePipeline, QuerySet) now have read-only accessor methods for
-  their properties (Label, Format, Size, Entries, Count, etc.), an idempotent Destroy()
-  method following the Buffer snatch-and-release pattern, and an IsDestroyed() check.
-  Methods are in a separate `resource_accessors.go` file with full test coverage (CORE-004).
-
-- **core: complete all 12 stub resource types** — Texture, Sampler, BindGroupLayout,
-  PipelineLayout, BindGroup, ShaderModule, RenderPipeline, ComputePipeline,
-  CommandEncoder, CommandBuffer, QuerySet, and Surface now have full struct definitions
-  with HAL handle wrapping (Snatchable pattern), device references, WebGPU properties,
-  and constructor functions. Previously these were empty `struct{}` stubs. This completes
-  the foundation for wgpu/core resource lifecycle management (CORE-001).
-
-- **core: Surface lifecycle state machine** — `core.Surface` now manages the full
-  Unconfigured → Configured → Acquired → Configured state machine with mutex-protected
-  transitions. Methods: Configure, Unconfigure, AcquireTexture, Present, DiscardTexture.
-  Validates state transitions (e.g., can't acquire twice, can't present without acquire).
-  Includes `PrepareFrameFunc` hook for platform DPI/scale integration — called before
-  each AcquireTexture, auto-reconfigures surface on dimension changes (CORE-002).
-
-- **public API: Surface delegates to core.Surface** — `wgpu.Surface` now uses
-  `core.Surface` internally instead of `hal.Surface` directly. All lifecycle methods
-  (Configure, Unconfigure, GetCurrentTexture, Present) go through core validation and
-  state tracking. New public methods: `SetPrepareFrame()` for platform HiDPI hooks,
-  `HAL()` escape hatch for backward compatibility (CORE-005).
-
-- **core: CommandEncoder/CommandBuffer state machine** — `core.CommandEncoder` now tracks
-  pass state (Recording, InRenderPass, InComputePass, Finished, Error) with validated
-  transitions. BeginRenderPass/EndRenderPass, BeginComputePass/EndComputePass enforce
-  proper nesting. Finish validates no open passes. RecordError captures first error.
-  `core.CommandBuffer` tracks submission state (Available, Submitted) to prevent
-  double-submission (CORE-003).
+- **Updated naga v0.14.6 → v0.14.7** — Fixes MSL sequential per-type binding
+  indices across bind groups.
 
 ## [0.20.2] - 2026-03-12
 
