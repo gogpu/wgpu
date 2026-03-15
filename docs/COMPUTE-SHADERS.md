@@ -298,6 +298,7 @@ results := unsafe.Slice((*float32)(unsafe.Pointer(&resultBytes[0])), numElements
 
 > **Note:** Timestamp queries use the `hal/` package directly — they are not yet exposed
 > in the high-level `wgpu` root package. Import `"github.com/gogpu/wgpu/hal"` for this functionality.
+> Access HAL device/queue from wgpu types via `device.HalDevice()` and `device.HalQueue()`.
 
 You can measure GPU execution time of compute passes using timestamp queries.
 
