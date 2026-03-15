@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Updated naga v0.14.6 → v0.14.7** — Fixes MSL sequential per-type binding indices
+  across bind groups (`buffer(N)`, `texture(N)`, `sampler(N)` counters now reset per type
+  not per group).
+
 - **public API: CommandEncoder signatures use wgpu types** — `CopyTextureToBuffer`
   now takes `[]BufferTextureCopy` (was `[]hal.BufferTextureCopy`), `TransitionTextures`
   now takes `[]TextureBarrier` (was `[]hal.TextureBarrier`). No HAL types in public
