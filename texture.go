@@ -35,6 +35,18 @@ type TextureView struct {
 	released bool
 }
 
+// HalTextureView returns the underlying HAL texture view for advanced use cases.
+// This enables interop with code that needs direct HAL access (e.g., gg
+// GPU accelerator surface rendering).
+//
+// Returns nil if the view has been released.
+func (v *TextureView) HalTextureView() hal.TextureView {
+	if v.released {
+		return nil
+	}
+	return v.hal
+}
+
 // Release destroys the texture view.
 func (v *TextureView) Release() {
 	if v.released {

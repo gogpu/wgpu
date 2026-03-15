@@ -93,18 +93,7 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, fmt.Errorf("wgpu: surface not configured")
 	}
 
-	halDevice := s.device.halDevice()
-	if halDevice == nil {
-		return nil, false, ErrReleased
-	}
-
-	fence, err := halDevice.CreateFence()
-	if err != nil {
-		return nil, false, fmt.Errorf("wgpu: failed to create acquire fence: %w", err)
-	}
-	defer halDevice.DestroyFence(fence)
-
-	acquired, err := s.core.AcquireTexture(fence)
+	acquired, err := s.core.AcquireTexture(nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -187,16 +176,18 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, ErrReleased
 	}
 
-	halDesc := &hal.TextureViewDescriptor{}
+	var halDesc *hal.TextureViewDescriptor
 	if desc != nil {
-		halDesc.Label = desc.Label
-		halDesc.Format = desc.Format
-		halDesc.Dimension = desc.Dimension
-		halDesc.Aspect = desc.Aspect
-		halDesc.BaseMipLevel = desc.BaseMipLevel
-		halDesc.MipLevelCount = desc.MipLevelCount
-		halDesc.BaseArrayLayer = desc.BaseArrayLayer
-		halDesc.ArrayLayerCount = desc.ArrayLayerCount
+		halDesc = &hal.TextureViewDescriptor{
+			Label:           desc.Label,
+			Format:          desc.Format,
+			Dimension:       desc.Dimension,
+			Aspect:          desc.Aspect,
+			BaseMipLevel:    desc.BaseMipLevel,
+			MipLevelCount:   desc.MipLevelCount,
+			BaseArrayLayer:  desc.BaseArrayLayer,
+			ArrayLayerCount: desc.ArrayLayerCount,
+		}
 	}
 
 	halView, err := halDevice.CreateTextureView(st.hal, halDesc)
