@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"math/bits"
 
 	"github.com/gogpu/gputypes"
@@ -384,7 +385,9 @@ func ValidateBindGroupLayoutDescriptor(desc *hal.BindGroupLayoutDescriptor, limi
 	}
 
 	// BGL1: Entry binding numbers must be unique.
+	// Also count per-stage resource usage for limit validation.
 	seen := make(map[uint32]struct{}, len(desc.Entries))
+	var storageBuffers, uniformBuffers, samplers, sampledTextures, storageTextures uint32
 	for _, entry := range desc.Entries {
 		if _, ok := seen[entry.Binding]; ok {
 			return &CreateBindGroupLayoutError{
@@ -394,6 +397,47 @@ func ValidateBindGroupLayoutDescriptor(desc *hal.BindGroupLayoutDescriptor, limi
 			}
 		}
 		seen[entry.Binding] = struct{}{}
+
+		// Count resources by type for per-stage limit checks.
+		if entry.Buffer != nil {
+			switch entry.Buffer.Type {
+			case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+				storageBuffers++
+			case gputypes.BufferBindingTypeUniform:
+				uniformBuffers++
+			}
+		}
+		if entry.Sampler != nil {
+			samplers++
+		}
+		if entry.Texture != nil {
+			sampledTextures++
+		}
+		if entry.StorageTexture != nil {
+			storageTextures++
+		}
+	}
+
+	// BGL3: Per-stage resource limits.
+	if limits.MaxStorageBuffersPerShaderStage > 0 && storageBuffers > limits.MaxStorageBuffersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d storage buffers exceeds limit %d",
+			label, storageBuffers, limits.MaxStorageBuffersPerShaderStage)
+	}
+	if limits.MaxUniformBuffersPerShaderStage > 0 && uniformBuffers > limits.MaxUniformBuffersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d uniform buffers exceeds limit %d",
+			label, uniformBuffers, limits.MaxUniformBuffersPerShaderStage)
+	}
+	if limits.MaxSamplersPerShaderStage > 0 && samplers > limits.MaxSamplersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d samplers exceeds limit %d",
+			label, samplers, limits.MaxSamplersPerShaderStage)
+	}
+	if limits.MaxSampledTexturesPerShaderStage > 0 && sampledTextures > limits.MaxSampledTexturesPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d sampled textures exceeds limit %d",
+			label, sampledTextures, limits.MaxSampledTexturesPerShaderStage)
+	}
+	if limits.MaxStorageTexturesPerShaderStage > 0 && storageTextures > limits.MaxStorageTexturesPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d storage textures exceeds limit %d",
+			label, storageTextures, limits.MaxStorageTexturesPerShaderStage)
 	}
 
 	return nil
