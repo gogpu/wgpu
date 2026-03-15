@@ -35,6 +35,7 @@ func main() {
 	}
 }
 
+//nolint:gocognit,gocyclo,cyclop,funlen // example code — intentionally sequential
 func run() error {
 	log.Println("=== wgpu Multi-Thread Triangle Test ===")
 
@@ -69,7 +70,7 @@ func run() error {
 			return
 		}
 
-		surface, err = instance.CreateSurface(0, uintptr(window.Handle()))
+		surface, err = instance.CreateSurface(0, window.Handle())
 		if err != nil {
 			initErr = fmt.Errorf("surface: %w", err)
 			return
@@ -195,24 +196,24 @@ func run() error {
 			renderPass.SetPipeline(pipeline)
 			renderPass.Draw(3, 1, 0, 0)
 			if err := renderPass.End(); err != nil {
-				frameErr = fmt.Errorf("End: %w", err)
+				frameErr = fmt.Errorf("end: %w", err)
 				view.Release()
 				return
 			}
 
 			commands, err := encoder.Finish()
 			if err != nil {
-				frameErr = fmt.Errorf("Finish: %w", err)
+				frameErr = fmt.Errorf("finish: %w", err)
 				view.Release()
 				return
 			}
 
 			if err := device.Queue().Submit(commands); err != nil {
-				frameErr = fmt.Errorf("Submit: %w", err)
+				frameErr = fmt.Errorf("submit: %w", err)
 			}
 
 			if err := surface.Present(surfaceTex); err != nil {
-				frameErr = fmt.Errorf("Present: %w", err)
+				frameErr = fmt.Errorf("present: %w", err)
 			}
 
 			view.Release()

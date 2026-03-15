@@ -27,6 +27,7 @@ func main() {
 	}
 }
 
+//nolint:funlen // example code — intentionally sequential
 func run() error {
 	log.Println("=== wgpu Public API Triangle Test ===")
 
@@ -41,7 +42,7 @@ func run() error {
 		return fmt.Errorf("instance: %w", err)
 	}
 
-	surface, err := instance.CreateSurface(0, uintptr(window.Handle()))
+	surface, err := instance.CreateSurface(0, window.Handle())
 	if err != nil {
 		return fmt.Errorf("surface: %w", err)
 	}
