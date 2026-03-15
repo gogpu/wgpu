@@ -195,7 +195,8 @@ func TestHubBindGroupLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBindGroupLayout failed: %v", err)
 	}
-	if got != layout {
+	// Can't compare structs with slice fields, compare label instead
+	if got.label != layout.label {
 		t.Error("GetBindGroupLayout returned different layout")
 	}
 

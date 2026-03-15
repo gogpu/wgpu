@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-03-15
+
+### Added
+
+- **public API: complete three-layer WebGPU stack** — The root `wgpu` package now
+  provides a full typed API for GPU programming. All operations go through
+  wgpu (public) → wgpu/core (validation) → wgpu/hal (backend). Consumers never
+  need to import `wgpu/hal` for standard use.
+
+- **public API: SetLogger / Logger** — `wgpu.SetLogger()` and `wgpu.Logger()`
+  propagate the logger to the entire stack (API, core, HAL backends).
+
+- **public API: Fence and async submission** — `Fence` type, `Device.CreateFence()`,
+  `WaitForFence()`, `ResetFence()`, `GetFenceStatus()`, `FreeCommandBuffer()`.
+  `Queue.SubmitWithFence()` for non-blocking GPU submission with fence signaling.
+
+- **public API: Surface lifecycle** — `Surface.SetPrepareFrame()` for platform
+  HiDPI/DPI hooks. `Surface.DiscardTexture()` for canceled frames. `Surface.HAL()`
+  escape hatch. Delegates to `core.Surface` state machine.
+
+- **public API: CommandEncoder extensions** — `CopyTextureToBuffer()`,
+  `TransitionTextures()`, `DiscardEncoding()`. All use wgpu types (no hal in signatures).
+
+- **public API: HAL accessors** — `Device.HalDevice()`, `Device.HalQueue()`,
+  `Texture.HalTexture()`, `TextureView.HalTextureView()` for advanced interop.
+
+- **public API: proper type definitions** — Replaced hal type aliases with proper
+  structs: `Extent3D`, `Origin3D`, `ImageDataLayout`, `DepthStencilState`,
+  `StencilFaceState`, `TextureBarrier`, `TextureRange`, `TextureUsageTransition`,
+  `BufferTextureCopy`. Unexported `toHAL()` converters. No hal leakage in godoc.
+
+- **core: complete resource types (CORE-001)** — All 12 stub resource types
+  (Texture, Sampler, BindGroupLayout, PipelineLayout, BindGroup, ShaderModule,
+  RenderPipeline, ComputePipeline, CommandEncoder, CommandBuffer, QuerySet, Surface)
+  now have full struct definitions with HAL handle wrapping.
+
+- **core: Surface state machine (CORE-002)** — Unconfigured → Configured → Acquired
+  lifecycle with PrepareFrameFunc hook and auto-reconfigure on dimension changes.
+
+- **core: CommandEncoder state machine (CORE-003)** — Recording/InRenderPass/
+  InComputePass/Finished/Error states with validated transitions.
+
+- **core: resource accessors (CORE-004)** — Read-only accessors and idempotent
+  Destroy() for all resource types.
+
+- **cmd/wgpu-triangle** — Single-threaded wgpu API triangle example.
+
+- **cmd/wgpu-triangle-mt** — Multi-threaded wgpu API triangle example.
+
+### Changed
+
+- **Updated naga v0.14.6 → v0.14.7** — Fixes MSL sequential per-type binding
+  indices across bind groups.
+
 ## [0.20.2] - 2026-03-12
 
 ### Fixed

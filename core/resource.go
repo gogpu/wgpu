@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -697,8 +698,92 @@ func (t *BufferInitTracker) IsInitialized(offset, size uint64) bool {
 	return true
 }
 
-// Texture represents a GPU texture.
-type Texture struct{}
+// Texture represents a GPU texture with HAL integration.
+//
+// Texture wraps a HAL texture handle and stores WebGPU texture properties.
+// The HAL texture is wrapped in a Snatchable to enable safe deferred destruction.
+type Texture struct {
+	// raw is the HAL texture handle wrapped for safe destruction.
+	raw *Snatchable[hal.Texture]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// format is the texture pixel format.
+	format gputypes.TextureFormat
+
+	// dimension is the texture dimension (1D, 2D, 3D).
+	dimension gputypes.TextureDimension
+
+	// usage is the texture usage flags.
+	usage gputypes.TextureUsage
+
+	// size is the texture dimensions.
+	size gputypes.Extent3D
+
+	// mipLevelCount is the number of mip levels.
+	mipLevelCount uint32
+
+	// sampleCount is the number of samples per pixel.
+	sampleCount uint32
+
+	// label is a debug label for the texture.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewTexture creates a core Texture wrapping a HAL texture.
+//
+// Parameters:
+//   - halTexture: The HAL texture to wrap (ownership transferred)
+//   - device: The parent device
+//   - format: Texture pixel format
+//   - dimension: Texture dimension (1D, 2D, 3D)
+//   - usage: Texture usage flags
+//   - size: Texture dimensions
+//   - mipLevelCount: Number of mip levels
+//   - sampleCount: Number of samples per pixel
+//   - label: Debug label for the texture
+func NewTexture(
+	halTexture hal.Texture,
+	device *Device,
+	format gputypes.TextureFormat,
+	dimension gputypes.TextureDimension,
+	usage gputypes.TextureUsage,
+	size gputypes.Extent3D,
+	mipLevelCount uint32,
+	sampleCount uint32,
+	label string,
+) *Texture {
+	t := &Texture{
+		raw:           NewSnatchable(halTexture),
+		device:        device,
+		format:        format,
+		dimension:     dimension,
+		usage:         usage,
+		size:          size,
+		mipLevelCount: mipLevelCount,
+		sampleCount:   sampleCount,
+		label:         label,
+		trackingData:  NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(t)), "Texture") //nolint:gosec // debug tracking uses pointer as unique ID
+	return t
+}
+
+// Raw returns the underlying HAL texture if it hasn't been snatched.
+func (t *Texture) Raw(guard *SnatchGuard) hal.Texture {
+	if t.raw == nil {
+		return nil
+	}
+	p := t.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
 
 // TextureView represents a view into a texture.
 type TextureView struct {
@@ -707,35 +792,679 @@ type TextureView struct {
 	HAL hal.TextureView
 }
 
-// Sampler represents a texture sampler.
-type Sampler struct{}
+// Sampler represents a texture sampler with HAL integration.
+//
+// Sampler wraps a HAL sampler handle. Samplers are immutable after creation
+// and have no mutable state beyond their HAL handle.
+type Sampler struct {
+	// raw is the HAL sampler handle wrapped for safe destruction.
+	raw *Snatchable[hal.Sampler]
 
-// BindGroupLayout represents the layout of a bind group.
-type BindGroupLayout struct{}
+	// device is a pointer to the parent Device.
+	device *Device
 
-// PipelineLayout represents the layout of a pipeline.
-type PipelineLayout struct{}
+	// label is a debug label for the sampler.
+	label string
 
-// BindGroup represents a collection of resources bound together.
-type BindGroup struct{}
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
 
-// ShaderModule represents a compiled shader module.
-type ShaderModule struct{}
+// NewSampler creates a core Sampler wrapping a HAL sampler.
+//
+// Parameters:
+//   - halSampler: The HAL sampler to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the sampler
+func NewSampler(
+	halSampler hal.Sampler,
+	device *Device,
+	label string,
+) *Sampler {
+	s := &Sampler{
+		raw:          NewSnatchable(halSampler),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(s)), "Sampler") //nolint:gosec // debug tracking uses pointer as unique ID
+	return s
+}
 
-// RenderPipeline represents a render pipeline.
-type RenderPipeline struct{}
+// Raw returns the underlying HAL sampler if it hasn't been snatched.
+func (s *Sampler) Raw(guard *SnatchGuard) hal.Sampler {
+	if s.raw == nil {
+		return nil
+	}
+	p := s.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
 
-// ComputePipeline represents a compute pipeline.
-type ComputePipeline struct{}
+// BindGroupLayout represents the layout of a bind group with HAL integration.
+//
+// BindGroupLayout wraps a HAL bind group layout handle and stores the layout entries.
+type BindGroupLayout struct {
+	// raw is the HAL bind group layout handle wrapped for safe destruction.
+	raw *Snatchable[hal.BindGroupLayout]
 
-// CommandEncoder represents a command encoder.
-type CommandEncoder struct{}
+	// device is a pointer to the parent Device.
+	device *Device
 
-// CommandBuffer represents a recorded command buffer.
-type CommandBuffer struct{}
+	// entries are the binding entries in this layout.
+	entries []gputypes.BindGroupLayoutEntry
 
-// QuerySet represents a set of queries.
-type QuerySet struct{}
+	// label is a debug label for the bind group layout.
+	label string
 
-// Surface represents a rendering surface.
-type Surface struct{}
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewBindGroupLayout creates a core BindGroupLayout wrapping a HAL bind group layout.
+//
+// Parameters:
+//   - halLayout: The HAL bind group layout to wrap (ownership transferred)
+//   - device: The parent device
+//   - entries: The binding entries in this layout
+//   - label: Debug label for the bind group layout
+func NewBindGroupLayout(
+	halLayout hal.BindGroupLayout,
+	device *Device,
+	entries []gputypes.BindGroupLayoutEntry,
+	label string,
+) *BindGroupLayout {
+	bgl := &BindGroupLayout{
+		raw:          NewSnatchable(halLayout),
+		device:       device,
+		entries:      entries,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(bgl)), "BindGroupLayout") //nolint:gosec // debug tracking uses pointer as unique ID
+	return bgl
+}
+
+// Raw returns the underlying HAL bind group layout if it hasn't been snatched.
+func (bgl *BindGroupLayout) Raw(guard *SnatchGuard) hal.BindGroupLayout {
+	if bgl.raw == nil {
+		return nil
+	}
+	p := bgl.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// PipelineLayout represents the layout of a pipeline with HAL integration.
+//
+// PipelineLayout wraps a HAL pipeline layout handle and stores the bind group
+// layout count. It does not store pointers to BindGroupLayout to avoid
+// circular references.
+type PipelineLayout struct {
+	// raw is the HAL pipeline layout handle wrapped for safe destruction.
+	raw *Snatchable[hal.PipelineLayout]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// bindGroupLayoutCount is the number of bind group layouts in this pipeline layout.
+	bindGroupLayoutCount int
+
+	// label is a debug label for the pipeline layout.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewPipelineLayout creates a core PipelineLayout wrapping a HAL pipeline layout.
+//
+// Parameters:
+//   - halLayout: The HAL pipeline layout to wrap (ownership transferred)
+//   - device: The parent device
+//   - bindGroupLayoutCount: Number of bind group layouts
+//   - label: Debug label for the pipeline layout
+func NewPipelineLayout(
+	halLayout hal.PipelineLayout,
+	device *Device,
+	bindGroupLayoutCount int,
+	label string,
+) *PipelineLayout {
+	pl := &PipelineLayout{
+		raw:                  NewSnatchable(halLayout),
+		device:               device,
+		bindGroupLayoutCount: bindGroupLayoutCount,
+		label:                label,
+		trackingData:         NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(pl)), "PipelineLayout") //nolint:gosec // debug tracking uses pointer as unique ID
+	return pl
+}
+
+// Raw returns the underlying HAL pipeline layout if it hasn't been snatched.
+func (pl *PipelineLayout) Raw(guard *SnatchGuard) hal.PipelineLayout {
+	if pl.raw == nil {
+		return nil
+	}
+	p := pl.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// BindGroup represents a collection of resources bound together with HAL integration.
+//
+// BindGroup wraps a HAL bind group handle. Resource references are not stored
+// yet to keep the implementation simple — that is future work.
+type BindGroup struct {
+	// raw is the HAL bind group handle wrapped for safe destruction.
+	raw *Snatchable[hal.BindGroup]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// label is a debug label for the bind group.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewBindGroup creates a core BindGroup wrapping a HAL bind group.
+//
+// Parameters:
+//   - halGroup: The HAL bind group to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the bind group
+func NewBindGroup(
+	halGroup hal.BindGroup,
+	device *Device,
+	label string,
+) *BindGroup {
+	bg := &BindGroup{
+		raw:          NewSnatchable(halGroup),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(bg)), "BindGroup") //nolint:gosec // debug tracking uses pointer as unique ID
+	return bg
+}
+
+// Raw returns the underlying HAL bind group if it hasn't been snatched.
+func (bg *BindGroup) Raw(guard *SnatchGuard) hal.BindGroup {
+	if bg.raw == nil {
+		return nil
+	}
+	p := bg.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// ShaderModule represents a compiled shader module with HAL integration.
+//
+// ShaderModule wraps a HAL shader module handle.
+type ShaderModule struct {
+	// raw is the HAL shader module handle wrapped for safe destruction.
+	raw *Snatchable[hal.ShaderModule]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// label is a debug label for the shader module.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewShaderModule creates a core ShaderModule wrapping a HAL shader module.
+//
+// Parameters:
+//   - halModule: The HAL shader module to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the shader module
+func NewShaderModule(
+	halModule hal.ShaderModule,
+	device *Device,
+	label string,
+) *ShaderModule {
+	sm := &ShaderModule{
+		raw:          NewSnatchable(halModule),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(sm)), "ShaderModule") //nolint:gosec // debug tracking uses pointer as unique ID
+	return sm
+}
+
+// Raw returns the underlying HAL shader module if it hasn't been snatched.
+func (sm *ShaderModule) Raw(guard *SnatchGuard) hal.ShaderModule {
+	if sm.raw == nil {
+		return nil
+	}
+	p := sm.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// RenderPipeline represents a render pipeline with HAL integration.
+//
+// RenderPipeline wraps a HAL render pipeline handle.
+type RenderPipeline struct {
+	// raw is the HAL render pipeline handle wrapped for safe destruction.
+	raw *Snatchable[hal.RenderPipeline]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// label is a debug label for the render pipeline.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewRenderPipeline creates a core RenderPipeline wrapping a HAL render pipeline.
+//
+// Parameters:
+//   - halPipeline: The HAL render pipeline to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the render pipeline
+func NewRenderPipeline(
+	halPipeline hal.RenderPipeline,
+	device *Device,
+	label string,
+) *RenderPipeline {
+	rp := &RenderPipeline{
+		raw:          NewSnatchable(halPipeline),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(rp)), "RenderPipeline") //nolint:gosec // debug tracking uses pointer as unique ID
+	return rp
+}
+
+// Raw returns the underlying HAL render pipeline if it hasn't been snatched.
+func (rp *RenderPipeline) Raw(guard *SnatchGuard) hal.RenderPipeline {
+	if rp.raw == nil {
+		return nil
+	}
+	p := rp.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// ComputePipeline represents a compute pipeline with HAL integration.
+//
+// ComputePipeline wraps a HAL compute pipeline handle.
+type ComputePipeline struct {
+	// raw is the HAL compute pipeline handle wrapped for safe destruction.
+	raw *Snatchable[hal.ComputePipeline]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// label is a debug label for the compute pipeline.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewComputePipeline creates a core ComputePipeline wrapping a HAL compute pipeline.
+//
+// Parameters:
+//   - halPipeline: The HAL compute pipeline to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the compute pipeline
+func NewComputePipeline(
+	halPipeline hal.ComputePipeline,
+	device *Device,
+	label string,
+) *ComputePipeline {
+	cp := &ComputePipeline{
+		raw:          NewSnatchable(halPipeline),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(cp)), "ComputePipeline") //nolint:gosec // debug tracking uses pointer as unique ID
+	return cp
+}
+
+// Raw returns the underlying HAL compute pipeline if it hasn't been snatched.
+func (cp *ComputePipeline) Raw(guard *SnatchGuard) hal.ComputePipeline {
+	if cp.raw == nil {
+		return nil
+	}
+	p := cp.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// CommandEncoderPassState represents the current state of a command encoder
+// with respect to pass lifecycle.
+type CommandEncoderPassState int
+
+const (
+	// CommandEncoderPassStateRecording means the encoder is recording commands
+	// outside of any pass.
+	CommandEncoderPassStateRecording CommandEncoderPassState = iota
+
+	// CommandEncoderPassStateInRenderPass means the encoder is inside a render pass.
+	CommandEncoderPassStateInRenderPass
+
+	// CommandEncoderPassStateInComputePass means the encoder is inside a compute pass.
+	CommandEncoderPassStateInComputePass
+
+	// CommandEncoderPassStateFinished means encoding is complete.
+	CommandEncoderPassStateFinished
+
+	// CommandEncoderPassStateError means the encoder encountered an error.
+	CommandEncoderPassStateError
+)
+
+// String returns a human-readable representation of the pass state.
+func (s CommandEncoderPassState) String() string {
+	switch s {
+	case CommandEncoderPassStateRecording:
+		return "Recording"
+	case CommandEncoderPassStateInRenderPass:
+		return "InRenderPass"
+	case CommandEncoderPassStateInComputePass:
+		return "InComputePass"
+	case CommandEncoderPassStateFinished:
+		return "Finished"
+	case CommandEncoderPassStateError:
+		return "Error"
+	default:
+		return fmt.Sprintf("Unknown(%d)", s)
+	}
+}
+
+// CommandEncoder represents a command encoder with HAL integration.
+//
+// CommandEncoder wraps a HAL command encoder handle and tracks the encoder's
+// lifecycle state. The state machine ensures commands are recorded in the
+// correct order: passes must be opened and closed properly, and encoding
+// must be finished before the resulting command buffer can be submitted.
+//
+// State transitions:
+//
+//	Recording     -> BeginRenderPass()  -> InRenderPass
+//	Recording     -> BeginComputePass() -> InComputePass
+//	InRenderPass  -> EndRenderPass()    -> Recording
+//	InComputePass -> EndComputePass()   -> Recording
+//	Recording     -> Finish()           -> Finished
+//	Any           -> RecordError()      -> Error
+type CommandEncoder struct {
+	// raw is the HAL command encoder handle.
+	// Not wrapped in Snatchable — state machine lifecycle is managed by CORE-003.
+	raw hal.CommandEncoder
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// passState is the current pass lifecycle state.
+	passState CommandEncoderPassState
+
+	// label is a debug label for the command encoder.
+	label string
+
+	// passDepth tracks nesting depth (should never exceed 1).
+	passDepth int
+
+	// errorMessage holds the first error encountered.
+	errorMessage string
+}
+
+// NewCommandEncoder creates a core CommandEncoder wrapping a HAL command encoder.
+//
+// The encoder starts in the Recording state, ready to record commands.
+//
+// Parameters:
+//   - halEncoder: The HAL command encoder to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the command encoder
+func NewCommandEncoder(
+	halEncoder hal.CommandEncoder,
+	device *Device,
+	label string,
+) *CommandEncoder {
+	ce := &CommandEncoder{
+		raw:       halEncoder,
+		device:    device,
+		passState: CommandEncoderPassStateRecording,
+		label:     label,
+	}
+	trackResource(uintptr(unsafe.Pointer(ce)), "CommandEncoder") //nolint:gosec // debug tracking uses pointer as unique ID
+	return ce
+}
+
+// RawEncoder returns the underlying HAL command encoder.
+func (ce *CommandEncoder) RawEncoder() hal.CommandEncoder {
+	return ce.raw
+}
+
+// CommandBufferSubmitState represents the submission state of a command buffer.
+type CommandBufferSubmitState int
+
+const (
+	// CommandBufferSubmitStateAvailable means the buffer is ready for submission.
+	CommandBufferSubmitStateAvailable CommandBufferSubmitState = iota
+
+	// CommandBufferSubmitStateSubmitted means the buffer has been submitted to a queue.
+	CommandBufferSubmitStateSubmitted
+)
+
+// CommandBuffer represents a recorded command buffer with HAL integration.
+//
+// CommandBuffer wraps a HAL command buffer handle. Command buffers are
+// immutable after encoding and can be submitted to a queue exactly once.
+type CommandBuffer struct {
+	// raw is the HAL command buffer handle wrapped for safe destruction.
+	raw *Snatchable[hal.CommandBuffer]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// label is a debug label for the command buffer.
+	label string
+
+	// submitState tracks whether the buffer has been submitted.
+	submitState CommandBufferSubmitState
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewCommandBuffer creates a core CommandBuffer wrapping a HAL command buffer.
+//
+// Parameters:
+//   - halBuffer: The HAL command buffer to wrap (ownership transferred)
+//   - device: The parent device
+//   - label: Debug label for the command buffer
+func NewCommandBuffer(
+	halBuffer hal.CommandBuffer,
+	device *Device,
+	label string,
+) *CommandBuffer {
+	cb := &CommandBuffer{
+		raw:          NewSnatchable(halBuffer),
+		device:       device,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(cb)), "CommandBuffer") //nolint:gosec // debug tracking uses pointer as unique ID
+	return cb
+}
+
+// Raw returns the underlying HAL command buffer if it hasn't been snatched.
+func (cb *CommandBuffer) Raw(guard *SnatchGuard) hal.CommandBuffer {
+	if cb.raw == nil {
+		return nil
+	}
+	p := cb.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// QuerySet represents a set of queries with HAL integration.
+//
+// QuerySet wraps a HAL query set handle and stores query set properties.
+type QuerySet struct {
+	// raw is the HAL query set handle wrapped for safe destruction.
+	raw *Snatchable[hal.QuerySet]
+
+	// device is a pointer to the parent Device.
+	device *Device
+
+	// queryType is the type of queries in this set.
+	queryType hal.QueryType
+
+	// count is the number of queries in the set.
+	count uint32
+
+	// label is a debug label for the query set.
+	label string
+
+	// trackingData holds per-resource tracking information.
+	trackingData *TrackingData
+}
+
+// NewQuerySet creates a core QuerySet wrapping a HAL query set.
+//
+// Parameters:
+//   - halQuerySet: The HAL query set to wrap (ownership transferred)
+//   - device: The parent device
+//   - queryType: The type of queries in this set
+//   - count: Number of queries in the set
+//   - label: Debug label for the query set
+func NewQuerySet(
+	halQuerySet hal.QuerySet,
+	device *Device,
+	queryType hal.QueryType,
+	count uint32,
+	label string,
+) *QuerySet {
+	qs := &QuerySet{
+		raw:          NewSnatchable(halQuerySet),
+		device:       device,
+		queryType:    queryType,
+		count:        count,
+		label:        label,
+		trackingData: NewTrackingData(device.TrackerIndices()),
+	}
+	trackResource(uintptr(unsafe.Pointer(qs)), "QuerySet") //nolint:gosec // debug tracking uses pointer as unique ID
+	return qs
+}
+
+// Raw returns the underlying HAL query set if it hasn't been snatched.
+func (qs *QuerySet) Raw(guard *SnatchGuard) hal.QuerySet {
+	if qs.raw == nil {
+		return nil
+	}
+	p := qs.raw.Get(guard)
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// SurfaceState represents the lifecycle state of a surface.
+type SurfaceState int
+
+const (
+	// SurfaceStateUnconfigured indicates the surface has not been configured.
+	SurfaceStateUnconfigured SurfaceState = iota
+
+	// SurfaceStateConfigured indicates the surface is configured and ready to acquire textures.
+	SurfaceStateConfigured
+
+	// SurfaceStateAcquired indicates a texture has been acquired and not yet presented or discarded.
+	SurfaceStateAcquired
+)
+
+// PrepareFrameFunc is a platform hook called before acquiring a surface texture.
+// It returns the current surface dimensions and whether they changed since the last call.
+// If changed is true, the surface will be reconfigured with the new dimensions before acquiring.
+type PrepareFrameFunc func() (width, height uint32, changed bool)
+
+// Surface represents a rendering surface with HAL integration.
+//
+// Surface wraps a HAL surface handle. Unlike other resources, surfaces are
+// owned by the Instance (not Device) and outlive devices, so the HAL handle
+// is stored directly rather than in a Snatchable.
+//
+// Surface manages a state machine: Unconfigured -> Configured -> Acquired -> Configured.
+// All state transitions are protected by a mutex.
+type Surface struct {
+	// raw is the HAL surface handle.
+	// Not wrapped in Snatchable — surfaces are owned by Instance, not Device.
+	raw hal.Surface
+
+	// label is a debug label for the surface.
+	label string
+
+	// device is the configured device (nil when unconfigured).
+	device *Device
+
+	// config is the current surface configuration (nil when unconfigured).
+	config *hal.SurfaceConfiguration
+
+	// state is the current lifecycle state.
+	state SurfaceState
+
+	// acquiredTex is the currently acquired surface texture (nil when not acquired).
+	acquiredTex hal.SurfaceTexture
+
+	// prepareFrame is an optional platform hook called before acquiring a texture.
+	prepareFrame PrepareFrameFunc
+
+	// mu protects state transitions.
+	mu sync.Mutex
+}
+
+// NewSurface creates a core Surface wrapping a HAL surface.
+//
+// The surface starts in the Unconfigured state. Call Configure() before
+// acquiring textures.
+//
+// Parameters:
+//   - halSurface: The HAL surface to wrap (ownership transferred)
+//   - label: Debug label for the surface
+func NewSurface(
+	halSurface hal.Surface,
+	label string,
+) *Surface {
+	s := &Surface{
+		raw:   halSurface,
+		label: label,
+		state: SurfaceStateUnconfigured,
+	}
+	trackResource(uintptr(unsafe.Pointer(s)), "Surface") //nolint:gosec // debug tracking uses pointer as unique ID
+	return s
+}
+
+// RawSurface returns the underlying HAL surface.
+func (s *Surface) RawSurface() hal.Surface {
+	return s.raw
+}
