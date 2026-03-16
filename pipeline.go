@@ -14,6 +14,10 @@ type RenderPipeline struct {
 	// bindGroupLayouts stores the layouts from the pipeline layout.
 	// Used by the binder for draw-time compatibility validation.
 	bindGroupLayouts []*BindGroupLayout
+	// requiredVertexBuffers is the number of vertex buffer layouts declared
+	// in the pipeline's vertex state. Draw calls validate that at least this
+	// many vertex buffers have been set via SetVertexBuffer.
+	requiredVertexBuffers uint32
 }
 
 // Release destroys the render pipeline.

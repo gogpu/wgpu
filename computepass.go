@@ -45,24 +45,8 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 
 // SetBindGroup sets a bind group for the given index.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil {
-		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetBindGroup: bind group is nil"))
-		return
-	}
-	// Hard cap: WebGPU allows at most MaxBindGroups (8) bind group slots.
-	if index >= MaxBindGroups {
-		p.encoder.setError(fmt.Errorf(
-			"wgpu: ComputePass.SetBindGroup: index %d >= MaxBindGroups (%d)",
-			index, MaxBindGroups,
-		))
-		return
-	}
-	// Validate that the group index is within the current pipeline's layout.
-	if p.currentPipelineBindGroupCount > 0 && index >= p.currentPipelineBindGroupCount {
-		p.encoder.setError(fmt.Errorf(
-			"wgpu: ComputePass.SetBindGroup: group index %d exceeds pipeline layout bind group count %d",
-			index, p.currentPipelineBindGroupCount,
-		))
+	if err := validateSetBindGroup("ComputePass", index, group, offsets, p.currentPipelineBindGroupCount); err != nil {
+		p.encoder.setError(err)
 		return
 	}
 	p.binder.assign(index, group.layout)

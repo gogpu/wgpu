@@ -340,10 +340,11 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
 	return &RenderPipeline{
-		hal:              halPipeline,
-		device:           d,
-		bindGroupCount:   bgCount,
-		bindGroupLayouts: bgLayouts,
+		hal:                   halPipeline,
+		device:                d,
+		bindGroupCount:        bgCount,
+		bindGroupLayouts:      bgLayouts,
+		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
 	}, nil
 }
 

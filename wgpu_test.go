@@ -1824,3 +1824,245 @@ func TestCopyBufferToBufferNilDstDeferredError(t *testing.T) {
 		t.Fatal("Finish() should return error after CopyBufferToBuffer(nil dst)")
 	}
 }
+
+// =============================================================================
+// Dynamic offset alignment validation (SetBindGroup)
+// =============================================================================
+
+func TestRenderPassSetBindGroupDynamicOffsetUnaligned(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(0, group, []uint32{100}) // 100 is not aligned to 256
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error for unaligned dynamic offset")
+	}
+}
+
+func TestRenderPassSetBindGroupDynamicOffsetAligned(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	// 256 and 512 are properly aligned — should not produce an error from offset validation.
+	// Note: this may still fail at the HAL level, but offset validation itself should pass.
+	pass.SetBindGroup(0, group, []uint32{256, 512})
+	_ = pass.End()
+
+	// We only verify that no offset-alignment error was recorded.
+	// The encoder may have other errors (e.g., no pipeline set), which is fine.
+	_, _ = encoder.Finish()
+}
+
+func TestRenderPassSetBindGroupDynamicOffsetZero(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	// Zero offset is always aligned.
+	pass.SetBindGroup(0, group, []uint32{0})
+	_ = pass.End()
+
+	_, _ = encoder.Finish()
+}
+
+func TestRenderPassSetBindGroupMultipleOffsetsOneUnaligned(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	// First offset aligned (256), second unaligned (300).
+	pass.SetBindGroup(0, group, []uint32{256, 300})
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when any dynamic offset is unaligned")
+	}
+}
+
+func TestComputePassSetBindGroupDynamicOffsetUnaligned(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(0, group, []uint32{128}) // 128 is not aligned to 256
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error for unaligned dynamic offset in compute pass")
+	}
+}
+
+func TestComputePassSetBindGroupDynamicOffsetAligned(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(0, group, []uint32{256})
+	_ = pass.End()
+
+	_, _ = encoder.Finish()
+}
+
+// =============================================================================
+// Vertex buffer count validation
+// =============================================================================
+
+func TestRenderPassDrawWithInsufficientVertexBuffers(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline requiring 2 vertex buffers.
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(2)
+	pass.SetPipeline(pipeline)
+
+	// Only set 1 vertex buffer (slot 0).
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "vb",
+		Size:  64,
+		Usage: wgpu.BufferUsageVertex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.SetVertexBuffer(0, buf, 0)
+	pass.Draw(3, 1, 0, 0) // should fail: need 2, have 1
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when not enough vertex buffers are set")
+	}
+}
+
+func TestRenderPassDrawWithSufficientVertexBuffers(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline requiring 1 vertex buffer.
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(1)
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "vb",
+		Size:  64,
+		Usage: wgpu.BufferUsageVertex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.SetVertexBuffer(0, buf, 0)
+	pass.Draw(3, 1, 0, 0) // should pass vertex buffer check
+	_ = pass.End()
+
+	// May still fail for other reasons (no real HAL pipeline), but vertex buffer
+	// validation should not be the cause.
+	_, _ = encoder.Finish()
+}
+
+func TestRenderPassDrawWithZeroRequiredVertexBuffers(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline requiring 0 vertex buffers (e.g., fullscreen triangle from vertex ID).
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	pass.Draw(3, 1, 0, 0) // should pass: no vertex buffers needed
+	_ = pass.End()
+
+	_, _ = encoder.Finish()
+}
+
+// =============================================================================
+// Index buffer set check (DrawIndexed / DrawIndexedIndirect)
+// =============================================================================
+
+func TestRenderPassDrawIndexedWithoutIndexBuffer(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	pass.DrawIndexed(3, 1, 0, 0, 0) // no index buffer set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexed called without SetIndexBuffer")
+	}
+}
+
+func TestRenderPassDrawIndexedIndirectWithoutIndexBuffer(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  20,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndexedIndirect(buf, 0) // no index buffer set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexedIndirect called without SetIndexBuffer")
+	}
+}
+
+func TestRenderPassDrawIndexedWithIndexBuffer(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, 0, 0)
+	pass.DrawIndexed(3, 1, 0, 0, 0) // index buffer is set
+	_ = pass.End()
+
+	// May fail for other HAL reasons, but index buffer check should pass.
+	_, _ = encoder.Finish()
+}

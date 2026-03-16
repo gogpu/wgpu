@@ -56,6 +56,27 @@ func (b *binder) assign(index uint32, layout *BindGroupLayout) {
 	}
 }
 
+// validateSetBindGroup performs common validation for SetBindGroup on both
+// render and compute passes. Returns a non-nil error message if validation fails.
+func validateSetBindGroup(passName string, index uint32, group *BindGroup, offsets []uint32, pipelineBGCount uint32) error {
+	if group == nil {
+		return fmt.Errorf("wgpu: %s.SetBindGroup: bind group is nil", passName)
+	}
+	if index >= MaxBindGroups {
+		return fmt.Errorf("wgpu: %s.SetBindGroup: index %d >= MaxBindGroups (%d)", passName, index, MaxBindGroups)
+	}
+	if pipelineBGCount > 0 && index >= pipelineBGCount {
+		return fmt.Errorf("wgpu: %s.SetBindGroup: group index %d exceeds pipeline layout bind group count %d",
+			passName, index, pipelineBGCount)
+	}
+	for i, offset := range offsets {
+		if offset%256 != 0 {
+			return fmt.Errorf("wgpu: %s.SetBindGroup: dynamic offset[%d]=%d not aligned to 256", passName, i, offset)
+		}
+	}
+	return nil
+}
+
 // checkCompatibility validates that all slots expected by the current pipeline
 // have compatible bind groups assigned. Returns an error describing the first
 // incompatible or missing slot, or nil if all slots are satisfied.
