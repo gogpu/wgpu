@@ -19,19 +19,17 @@
 
 ---
 
-## Current State: v0.21.0
+## Current State: v0.21.2
 
 ✅ **All 5 HAL backends complete** (~80K LOC, ~100K total)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
+✅ **Core validation layer** — 14/17 Rust wgpu-core checks (Binder, SetBindGroup bounds, draw-time compatibility, dynamic offsets, vertex/index buffer)
 
-**New in v0.21.0:**
-- Complete three-layer architecture: public API → core validation → HAL backends
-- core: Surface lifecycle state machine, CommandEncoder state machine, 12 resource types
-- Proper type definitions (no hal aliases in godoc): Extent3D, DepthStencilState, TextureBarrier, etc.
-- Fence + async submission (SubmitWithFence), Surface PrepareFrame hook
-- SetLogger/Logger for stack-wide logging propagation
-- naga v0.14.7 (MSL binding index fix)
+### Remaining validation (planned)
+- Blend constant tracking (pipeline blend state → draw-time check)
+- Late buffer binding size (SPIR-V reflection → min binding size)
+- Resource usage conflict detection (read/write tracking across bind groups)
 
 **New in v0.20.2:**
 - Vulkan: validate WSI query functions in LoadInstance (prevents nil pointer SIGSEGV)
