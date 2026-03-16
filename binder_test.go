@@ -3,6 +3,8 @@ package wgpu
 import (
 	"strings"
 	"testing"
+
+	"github.com/gogpu/gputypes"
 )
 
 func TestBinderReset(t *testing.T) {
@@ -131,8 +133,16 @@ func TestBinderCheckCompatibilityMissingBindGroup(t *testing.T) {
 func TestBinderCheckCompatibilityIncompatibleLayout(t *testing.T) {
 	var b binder
 
-	expected := &BindGroupLayout{}
-	wrong := &BindGroupLayout{}
+	expected := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+		},
+	}
+	wrong := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: gputypes.ShaderStageFragment},
+		},
+	}
 	b.updateExpectations([]*BindGroupLayout{expected})
 	b.assign(0, wrong)
 
@@ -202,6 +212,211 @@ func TestBinderCrashScenario(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "index 0") {
 		t.Errorf("error should reference index 0 (missing): %v", err)
+	}
+}
+
+func TestBindGroupLayoutIsCompatibleWithSamePointer(t *testing.T) {
+	layout := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+		},
+	}
+	if !layout.isCompatibleWith(layout) {
+		t.Error("same pointer should be compatible (fast path)")
+	}
+}
+
+func TestBindGroupLayoutIsCompatibleWithSameEntries(t *testing.T) {
+	bufLayout := gputypes.BufferBindingLayout{
+		Type:             gputypes.BufferBindingTypeUniform,
+		HasDynamicOffset: false,
+		MinBindingSize:   64,
+	}
+	entries := []gputypes.BindGroupLayoutEntry{
+		{
+			Binding:    0,
+			Visibility: gputypes.ShaderStageVertex,
+			Buffer:     &bufLayout,
+		},
+		{
+			Binding:    1,
+			Visibility: gputypes.ShaderStageFragment,
+			Sampler:    &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering},
+		},
+	}
+
+	layout1 := &BindGroupLayout{entries: make([]gputypes.BindGroupLayoutEntry, len(entries))}
+	copy(layout1.entries, entries)
+
+	// Create a second layout with identical entries but separate pointer allocations.
+	layout2 := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageVertex,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:             gputypes.BufferBindingTypeUniform,
+					HasDynamicOffset: false,
+					MinBindingSize:   64,
+				},
+			},
+			{
+				Binding:    1,
+				Visibility: gputypes.ShaderStageFragment,
+				Sampler:    &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering},
+			},
+		},
+	}
+
+	if !layout1.isCompatibleWith(layout2) {
+		t.Error("layouts with identical entries (different pointers) should be compatible")
+	}
+}
+
+func TestBindGroupLayoutIsCompatibleWithDifferentEntries(t *testing.T) {
+	tests := []struct {
+		name     string
+		entries1 []gputypes.BindGroupLayoutEntry
+		entries2 []gputypes.BindGroupLayoutEntry
+	}{
+		{
+			name: "different binding number",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 1, Visibility: gputypes.ShaderStageVertex},
+			},
+		},
+		{
+			name: "different visibility",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageFragment},
+			},
+		},
+		{
+			name: "different entry count",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+				{Binding: 1, Visibility: gputypes.ShaderStageFragment},
+			},
+		},
+		{
+			name: "buffer vs nil",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+			},
+		},
+		{
+			name: "different buffer type",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+			},
+		},
+		{
+			name: "different texture sample type",
+			entries1: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageFragment, Texture: &gputypes.TextureBindingLayout{SampleType: gputypes.TextureSampleTypeFloat}},
+			},
+			entries2: []gputypes.BindGroupLayoutEntry{
+				{Binding: 0, Visibility: gputypes.ShaderStageFragment, Texture: &gputypes.TextureBindingLayout{SampleType: gputypes.TextureSampleTypeDepth}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l1 := &BindGroupLayout{entries: tt.entries1}
+			l2 := &BindGroupLayout{entries: tt.entries2}
+			if l1.isCompatibleWith(l2) {
+				t.Error("layouts with different entries should NOT be compatible")
+			}
+		})
+	}
+}
+
+func TestBindGroupLayoutIsCompatibleWithEmptyEntries(t *testing.T) {
+	l1 := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{}}
+	l2 := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{}}
+	if !l1.isCompatibleWith(l2) {
+		t.Error("two empty layouts should be compatible")
+	}
+}
+
+func TestBinderCheckCompatibilityEntryByEntry(t *testing.T) {
+	// The key scenario: two separate BindGroupLayout pointers with
+	// identical entries should be considered compatible by the binder.
+	var b binder
+
+	entries := []gputypes.BindGroupLayoutEntry{
+		{
+			Binding:    0,
+			Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: 64},
+		},
+	}
+
+	pipelineLayout := &BindGroupLayout{entries: make([]gputypes.BindGroupLayoutEntry, len(entries))}
+	copy(pipelineLayout.entries, entries)
+
+	bindGroupLayout := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: 64},
+			},
+		},
+	}
+
+	// Different pointers but same entries.
+	if pipelineLayout == bindGroupLayout {
+		t.Fatal("test setup error: layouts should be different pointers")
+	}
+
+	b.updateExpectations([]*BindGroupLayout{pipelineLayout})
+	b.assign(0, bindGroupLayout)
+
+	if err := b.checkCompatibility(); err != nil {
+		t.Errorf("checkCompatibility() = %v, want nil (equivalent entries from separate CreateBindGroupLayout calls)", err)
+	}
+}
+
+func TestBinderCheckCompatibilityEntryByEntryMismatch(t *testing.T) {
+	var b binder
+
+	pipelineLayout := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+		},
+	}
+	bindGroupLayout := &BindGroupLayout{
+		entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+		},
+	}
+
+	b.updateExpectations([]*BindGroupLayout{pipelineLayout})
+	b.assign(0, bindGroupLayout)
+
+	err := b.checkCompatibility()
+	if err == nil {
+		t.Fatal("checkCompatibility() = nil, want error for mismatched buffer type")
+	}
+	if !strings.Contains(err.Error(), "incompatible") {
+		t.Errorf("error should mention 'incompatible': %v", err)
 	}
 }
 

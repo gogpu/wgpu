@@ -81,10 +81,11 @@ func validateSetBindGroup(passName string, index uint32, group *BindGroup, offse
 // have compatible bind groups assigned. Returns an error describing the first
 // incompatible or missing slot, or nil if all slots are satisfied.
 //
-// Compatibility is checked via pointer equality: two layouts are compatible if
-// they are the same *BindGroupLayout object. This is correct because our API
-// does not support creating equivalent-but-distinct layouts that should be
-// considered compatible.
+// Compatibility is checked entry-by-entry, matching Rust wgpu-core's
+// binder.check_compatibility() behavior. Two layouts are compatible if they
+// have the same bindings with matching types, visibility, and counts.
+// This allows equivalent layouts created via separate CreateBindGroupLayout
+// calls to be considered compatible.
 func (b *binder) checkCompatibility() error {
 	for i := uint32(0); i < b.maxSlots; i++ {
 		exp := b.expected[i]
@@ -99,7 +100,7 @@ func (b *binder) checkCompatibility() error {
 				i,
 			)
 		}
-		if asg != exp {
+		if !asg.isCompatibleWith(exp) {
 			return fmt.Errorf(
 				"wgpu: bind group at index %d has incompatible layout (assigned layout %p != expected layout %p)",
 				i, asg, exp,
