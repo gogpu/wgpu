@@ -22,10 +22,14 @@ func (l *BindGroupLayout) Release() {
 }
 
 // PipelineLayout defines the resource layout for a pipeline.
+// PipelineLayout defines the bind group layout arrangement for a pipeline.
 type PipelineLayout struct {
 	hal      hal.PipelineLayout
 	device   *Device
 	released bool
+	// bindGroupCount is the number of bind group layouts in this layout.
+	// Used for validation in SetBindGroup.
+	bindGroupCount uint32
 }
 
 // Release destroys the pipeline layout.

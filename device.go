@@ -256,7 +256,11 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
 	}
 
-	return &PipelineLayout{hal: halLayout, device: d}, nil
+	return &PipelineLayout{
+		hal:            halLayout,
+		device:         d,
+		bindGroupCount: uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
+	}, nil
 }
 
 // CreateBindGroup creates a bind group.
@@ -324,7 +328,11 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
 	}
 
-	return &RenderPipeline{hal: halPipeline, device: d}, nil
+	var bgCount uint32
+	if desc.Layout != nil {
+		bgCount = desc.Layout.bindGroupCount
+	}
+	return &RenderPipeline{hal: halPipeline, device: d, bindGroupCount: bgCount}, nil
 }
 
 // CreateComputePipeline creates a compute pipeline.

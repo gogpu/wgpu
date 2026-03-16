@@ -15,6 +15,11 @@ import (
 type RenderPassEncoder struct {
 	core    *core.CoreRenderPassEncoder
 	encoder *CommandEncoder
+	// currentPipelineBindGroupCount tracks the bind group count of the
+	// currently set pipeline. Used by SetBindGroup to validate that the
+	// group index is within the pipeline layout bounds. Zero means no
+	// pipeline has been set yet.
+	currentPipelineBindGroupCount uint32
 }
 
 // SetPipeline sets the active render pipeline.
@@ -23,6 +28,7 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetPipeline: pipeline is nil"))
 		return
 	}
+	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
 		raw.SetPipeline(pipeline.hal)
@@ -33,6 +39,16 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
 	if group == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: bind group is nil"))
+		return
+	}
+	// Validate that the group index is within the current pipeline's layout.
+	// Without this check, binding a group beyond the pipeline layout causes
+	// a Vulkan validation error or crash on AMD/NVIDIA GPUs (Intel tolerates it).
+	if p.currentPipelineBindGroupCount > 0 && index >= p.currentPipelineBindGroupCount {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.SetBindGroup: group index %d exceeds pipeline layout bind group count %d",
+			index, p.currentPipelineBindGroupCount,
+		))
 		return
 	}
 	raw := p.core.RawPass()

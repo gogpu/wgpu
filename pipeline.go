@@ -7,6 +7,10 @@ type RenderPipeline struct {
 	hal      hal.RenderPipeline
 	device   *Device
 	released bool
+	// bindGroupCount is the number of bind group layouts in this pipeline's
+	// layout. Used by RenderPassEncoder.SetBindGroup to validate that
+	// the group index is within bounds before issuing the HAL call.
+	bindGroupCount uint32
 }
 
 // Release destroys the render pipeline.
