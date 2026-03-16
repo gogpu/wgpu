@@ -6,6 +6,8 @@
 package gles
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
@@ -23,6 +25,13 @@ type Adapter struct {
 
 // Open creates a logical device with the requested features and limits.
 func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	// OpenGL requires a current context to do anything. If the adapter was
+	// created without a surface (placeholder from EnumerateAdapters(nil)),
+	// glCtx is nil and we cannot proceed.
+	if a.glCtx == nil {
+		return hal.OpenDevice{}, fmt.Errorf("gles: GL context not initialized — create a surface first")
+	}
+
 	// Make context current if we have one
 	if a.wglCtx != nil {
 		if err := a.wglCtx.MakeCurrent(); err != nil {

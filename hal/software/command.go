@@ -163,29 +163,89 @@ func (c *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	}
 }
 
-// RenderPassEncoder implements hal.RenderPassEncoder for the software backend.
-type RenderPassEncoder struct {
-	desc *hal.RenderPassDescriptor
+// vertexBufferBinding holds a vertex buffer and its byte offset.
+type vertexBufferBinding struct {
+	buffer *Buffer
+	offset uint64
 }
 
-// End finishes the render pass and performs load/store operations.
+// RenderPassEncoder implements hal.RenderPassEncoder for the software backend.
+// It tracks pipeline state set during encoding and executes draw calls
+// using the raster/ package for triangle rasterization.
+type RenderPassEncoder struct {
+	desc *hal.RenderPassDescriptor
+
+	// Pipeline and resource state set during encoding.
+	pipeline    *RenderPipeline
+	bindGroups  [4]*BindGroup          // max 4 per WebGPU spec
+	vertexBufs  [8]vertexBufferBinding // max 8 vertex buffers
+	indexBuffer *Buffer
+	indexFormat gputypes.IndexFormat
+	indexOffset uint64
+
+	// Viewport and scissor state.
+	viewport    [6]float32 // x, y, w, h, minDepth, maxDepth
+	scissorRect [4]uint32  // x, y, w, h
+	hasViewport bool
+	hasScissor  bool
+
+	// Whether the framebuffer has been cleared this pass.
+	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
+	cleared bool
+}
+
+// End finishes the render pass.
+// If no draw calls were issued and LoadOp is Clear, the clear is applied now.
+// MSAA resolve: copies color attachment pixels to resolve target (WebGPU spec).
 func (r *RenderPassEncoder) End() {
-	// Process color attachments
+	// If no draw happened, apply pending clears.
+	if !r.cleared {
+		r.applyClear()
+	}
+
+	// MSAA resolve: copy color attachment to resolve target.
+	// In WebGPU, if a color attachment has a ResolveTarget, the GPU resolves
+	// MSAA samples to the single-sample target at end of render pass.
+	// Software backend has no real MSAA — this is a direct pixel copy.
 	for _, attachment := range r.desc.ColorAttachments {
-		// Handle clear operation
+		if attachment.ResolveTarget == nil {
+			continue
+		}
+		srcView, ok := attachment.View.(*TextureView)
+		if !ok || srcView.texture == nil {
+			continue
+		}
+		dstView, ok := attachment.ResolveTarget.(*TextureView)
+		if !ok || dstView.texture == nil {
+			continue
+		}
+		src := srcView.texture
+		dst := dstView.texture
+		src.mu.RLock()
+		dst.mu.Lock()
+		if len(src.data) == len(dst.data) {
+			copy(dst.data, src.data)
+		}
+		dst.mu.Unlock()
+		src.mu.RUnlock()
+	}
+
+	// Depth/stencil attachment handling (simplified - just clear if needed)
+	r.clearDepthStencilAttachment()
+}
+
+// applyClear clears color attachments that have LoadOp=Clear.
+func (r *RenderPassEncoder) applyClear() {
+	r.cleared = true
+	for _, attachment := range r.desc.ColorAttachments {
 		if attachment.LoadOp == gputypes.LoadOpClear {
-			// Get the underlying texture from the view
 			if view, ok := attachment.View.(*TextureView); ok {
 				if view.texture != nil {
 					view.texture.Clear(attachment.ClearValue)
 				}
 			}
 		}
-		// Store operation is implicit (data stays in texture)
 	}
-
-	// Depth/stencil attachment handling (simplified - just clear if needed)
-	r.clearDepthStencilAttachment()
 }
 
 // clearDepthStencilAttachment clears the depth/stencil attachment if present and LoadOp is Clear.
@@ -202,34 +262,67 @@ func (r *RenderPassEncoder) clearDepthStencilAttachment() {
 	view.texture.Clear(gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0})
 }
 
-// SetPipeline is a no-op.
-func (r *RenderPassEncoder) SetPipeline(_ hal.RenderPipeline) {}
+// SetPipeline stores the render pipeline for subsequent draw calls.
+func (r *RenderPassEncoder) SetPipeline(p hal.RenderPipeline) {
+	if rp, ok := p.(*RenderPipeline); ok {
+		r.pipeline = rp
+	}
+}
 
-// SetBindGroup is a no-op.
-func (r *RenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) {}
+// SetBindGroup stores a bind group at the given index.
+func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+	if index < 4 {
+		if b, ok := bg.(*BindGroup); ok {
+			r.bindGroups[index] = b
+		}
+	}
+}
 
-// SetVertexBuffer is a no-op.
-func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
+// SetVertexBuffer stores a vertex buffer binding at the given slot.
+func (r *RenderPassEncoder) SetVertexBuffer(slot uint32, buf hal.Buffer, offset uint64) {
+	if slot < 8 {
+		if b, ok := buf.(*Buffer); ok {
+			r.vertexBufs[slot] = vertexBufferBinding{buffer: b, offset: offset}
+		}
+	}
+}
 
-// SetIndexBuffer is a no-op.
-func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
+// SetIndexBuffer stores the index buffer for indexed draw calls.
+func (r *RenderPassEncoder) SetIndexBuffer(buf hal.Buffer, format gputypes.IndexFormat, offset uint64) {
+	if b, ok := buf.(*Buffer); ok {
+		r.indexBuffer = b
+		r.indexFormat = format
+		r.indexOffset = offset
+	}
+}
 
-// SetViewport is a no-op.
-func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
+// SetViewport stores the viewport transformation.
+func (r *RenderPassEncoder) SetViewport(x, y, w, h, minDepth, maxDepth float32) {
+	r.viewport = [6]float32{x, y, w, h, minDepth, maxDepth}
+	r.hasViewport = true
+}
 
-// SetScissorRect is a no-op.
-func (r *RenderPassEncoder) SetScissorRect(_, _, _, _ uint32) {}
+// SetScissorRect stores the scissor rectangle.
+func (r *RenderPassEncoder) SetScissorRect(x, y, w, h uint32) {
+	r.scissorRect = [4]uint32{x, y, w, h}
+	r.hasScissor = true
+}
 
-// SetBlendConstant is a no-op.
+// SetBlendConstant is a no-op (blend constants not yet wired to raster pipeline).
 func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 
-// SetStencilReference is a no-op.
+// SetStencilReference is a no-op (stencil not yet wired).
 func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
 
-// Draw is a no-op (rasterization not implemented in Phase 1).
-func (r *RenderPassEncoder) Draw(_, _, _, _ uint32) {}
+// Draw executes a non-indexed draw call.
+// It performs vertex fetch, viewport transform, and triangle rasterization
+// using the raster/ package. If no vertex buffer is bound and a texture is
+// available in a bind group, it performs a fullscreen texture blit.
+func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	r.executeDraw(vertexCount, firstVertex)
+}
 
-// DrawIndexed is a no-op (rasterization not implemented in Phase 1).
+// DrawIndexed is a no-op (indexed drawing not yet implemented).
 func (r *RenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32) {}
 
 // DrawIndirect is a no-op.

@@ -1,12 +1,77 @@
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
+)
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
 	hal      hal.BindGroupLayout
 	device   *Device
 	released bool
+	// entries stores the layout entries for entry-by-entry compatibility checks.
+	// This matches Rust wgpu-core's pattern where binder.check_compatibility()
+	// compares layouts by their entries, not by pointer identity.
+	entries []gputypes.BindGroupLayoutEntry
+}
+
+// isCompatibleWith returns true if two layouts have identical entries.
+// This matches Rust wgpu-core's entry-by-entry compatibility check in
+// binder.check_compatibility(), allowing equivalent layouts created via
+// separate CreateBindGroupLayout calls to be considered compatible.
+func (l *BindGroupLayout) isCompatibleWith(other *BindGroupLayout) bool {
+	if l == other {
+		return true // pointer equality fast path
+	}
+	if len(l.entries) != len(other.entries) {
+		return false
+	}
+	for i := range l.entries {
+		if !bindGroupLayoutEntriesEqual(&l.entries[i], &other.entries[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// bindGroupLayoutEntriesEqual compares two BindGroupLayoutEntry values,
+// dereferencing pointer fields (Buffer, Sampler, Texture, StorageTexture)
+// to compare by value rather than by pointer identity.
+func bindGroupLayoutEntriesEqual(a, b *gputypes.BindGroupLayoutEntry) bool {
+	if a.Binding != b.Binding || a.Visibility != b.Visibility {
+		return false
+	}
+
+	// Compare Buffer pointer fields by value.
+	if !optionalEqual(a.Buffer, b.Buffer) {
+		return false
+	}
+	// Compare Sampler pointer fields by value.
+	if !optionalEqual(a.Sampler, b.Sampler) {
+		return false
+	}
+	// Compare Texture pointer fields by value.
+	if !optionalEqual(a.Texture, b.Texture) {
+		return false
+	}
+	// Compare StorageTexture pointer fields by value.
+	if !optionalEqual(a.StorageTexture, b.StorageTexture) {
+		return false
+	}
+	return true
+}
+
+// optionalEqual compares two optional (pointer) values by dereferenced content.
+// Both nil → equal; one nil → not equal; both non-nil → compare dereferenced values.
+func optionalEqual[T comparable](a, b *T) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // Release destroys the bind group layout.

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] - 2026-03-16
+
+### Added
+
+- **software: Draw() with vertex rasterization + textured blit** — Software backend
+  now renders textured quads (fullscreen blit) and vertex-buffer-based triangles via
+  `raster.Pipeline`. Resource registry for handle→resource lookup. MSAA resolve in End().
+  21 tests.
+
+- **core: entry-by-entry BindGroupLayout compatibility** — Layouts compared by entries,
+  not pointer equality, matching WebGPU spec and Rust wgpu-core. 7 tests.
+
+- **core: lazy GLES adapter enumeration with surface hint** — GLES backends defer
+  adapter enumeration until `RequestAdapter` with `CompatibleSurface`. OpenGL requires
+  GL context which only exists after surface creation.
+
+- **RequestAdapterOptions** — Proper struct with `CompatibleSurface *Surface` field
+  (was alias to gputypes). Follows WebGPU spec `requestAdapter({compatibleSurface})`.
+
+### Fixed
+
+- **DX12: reduce CBV/SRV/UAV heap to 1M** — D3D12 Tier 1/2 spec maximum. Was 1,048,576.
+  Fixes `E_INVALIDARG` on NVIDIA. ([wgpu#106](https://github.com/gogpu/wgpu/issues/106))
+
+- **GLES: nil context guard in Adapter.Open** — Returns error instead of panic when
+  adapter created without surface. ([wgpu#107](https://github.com/gogpu/wgpu/issues/107))
+
+- **GLES: match naga flattened binding indices** — GL binding = `group * 16 + binding`,
+  matching naga GLSL output. Fixes SDF shapes invisible on GLES.
+
+- **core: prefer GPU adapters over Software in RequestAdapter** — GPU adapters selected
+  before CPU/Software. ForceFallbackAdapter correctly returns CPU. 3 tests.
+
+### Dependencies
+
+- naga v0.14.7 → v0.14.8 (GLSL bind group collision fix)
+
 ## [0.21.2] - 2026-03-16
 
 ### Added

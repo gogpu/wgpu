@@ -847,6 +847,12 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 
 	dynamicIdx := 0
 	for _, entry := range c.group.entries {
+		// Flatten (group, binding) to a single GL binding index.
+		// Must match the formula used by naga GLSL backend:
+		// glBinding = group * maxBindingsPerGroup + binding.
+		const maxBindingsPerGroup = 16
+		glBinding := c.index*maxBindingsPerGroup + entry.Binding
+
 		switch res := entry.Resource.(type) {
 		case gputypes.BufferBinding:
 			// Buffer handle is the GL buffer object ID (from NativeHandle()).
@@ -871,9 +877,9 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			}
 
 			if size > 0 {
-				ctx.BindBufferRange(gl.UNIFORM_BUFFER, entry.Binding, bufID, offset, size)
+				ctx.BindBufferRange(gl.UNIFORM_BUFFER, glBinding, bufID, offset, size)
 			} else {
-				ctx.BindBufferBase(gl.UNIFORM_BUFFER, entry.Binding, bufID)
+				ctx.BindBufferBase(gl.UNIFORM_BUFFER, glBinding, bufID)
 			}
 
 		case gputypes.TextureViewBinding:
@@ -882,7 +888,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			if texID == 0 {
 				continue
 			}
-			ctx.ActiveTexture(gl.TEXTURE0 + entry.Binding)
+			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)
 			ctx.BindTexture(gl.TEXTURE_2D, texID)
 
 		case gputypes.SamplerBinding:

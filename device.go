@@ -221,7 +221,12 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 		return nil, fmt.Errorf("wgpu: failed to create bind group layout: %w", err)
 	}
 
-	return &BindGroupLayout{hal: halLayout, device: d}, nil
+	// Store a defensive copy of entries for entry-by-entry compatibility checks.
+	// This matches Rust wgpu-core's pattern where binder compares layouts by entries.
+	entriesCopy := make([]gputypes.BindGroupLayoutEntry, len(desc.Entries))
+	copy(entriesCopy, desc.Entries)
+
+	return &BindGroupLayout{hal: halLayout, device: d, entries: entriesCopy}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout.

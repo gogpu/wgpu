@@ -244,7 +244,7 @@ func (d *Device) createDescriptorHeaps() error {
 	// CBV/SRV/UAV heap (shader visible — for bind groups, referenced by GPU)
 	d.viewHeap, err = d.createHeap(
 		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-		1024*1024, // 1M descriptors for bindless
+		1_000_000, // D3D12 Tier 1/2 maximum for shader-visible CBV/SRV/UAV
 		true,      // shader visible
 	)
 	if err != nil {

@@ -293,3 +293,131 @@ func TestInstanceConcurrentAccess(t *testing.T) {
 		<-done
 	}
 }
+
+func TestRequestAdapterPrefersGPUOverCPU(t *testing.T) {
+	GetGlobal().Clear()
+
+	instance := &Instance{
+		backends: gputypes.BackendsAll,
+	}
+
+	hub := GetGlobal().Hub()
+
+	// Register CPU adapter first (like Software backend)
+	cpuAdapter := &Adapter{
+		Info: gputypes.AdapterInfo{
+			Name:       "Software Renderer",
+			DeviceType: gputypes.DeviceTypeCPU,
+			Backend:    gputypes.BackendVulkan,
+		},
+		Limits: gputypes.DefaultLimits(),
+	}
+	cpuID := hub.RegisterAdapter(cpuAdapter)
+	instance.adapters = append(instance.adapters, cpuID)
+
+	// Register GPU adapter second (like GLES deferred)
+	gpuAdapter := &Adapter{
+		Info: gputypes.AdapterInfo{
+			Name:       "GLES GPU",
+			DeviceType: gputypes.DeviceTypeIntegratedGPU,
+			Backend:    gputypes.BackendGL,
+		},
+		Limits: gputypes.DefaultLimits(),
+	}
+	gpuID := hub.RegisterAdapter(gpuAdapter)
+	instance.adapters = append(instance.adapters, gpuID)
+
+	// nil options should prefer GPU over CPU
+	adapterID, err := instance.RequestAdapter(nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter(nil) error: %v", err)
+	}
+	adapter, _ := hub.GetAdapter(adapterID)
+	if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
+		t.Errorf("RequestAdapter(nil) returned CPU adapter, want GPU")
+	}
+	if adapter.Info.Name != "GLES GPU" {
+		t.Errorf("RequestAdapter(nil) returned %q, want %q", adapter.Info.Name, "GLES GPU")
+	}
+
+	// options with no preference should also prefer GPU
+	adapterID2, err := instance.RequestAdapter(&gputypes.RequestAdapterOptions{})
+	if err != nil {
+		t.Fatalf("RequestAdapter({}) error: %v", err)
+	}
+	adapter2, _ := hub.GetAdapter(adapterID2)
+	if adapter2.Info.DeviceType == gputypes.DeviceTypeCPU {
+		t.Errorf("RequestAdapter({}) returned CPU adapter, want GPU")
+	}
+}
+
+func TestRequestAdapterForceFallbackReturnsCPU(t *testing.T) {
+	GetGlobal().Clear()
+
+	instance := &Instance{
+		backends: gputypes.BackendsAll,
+	}
+
+	hub := GetGlobal().Hub()
+
+	gpuAdapter := &Adapter{
+		Info: gputypes.AdapterInfo{
+			Name:       "Vulkan GPU",
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
+		},
+		Limits: gputypes.DefaultLimits(),
+	}
+	gpuID := hub.RegisterAdapter(gpuAdapter)
+	instance.adapters = append(instance.adapters, gpuID)
+
+	cpuAdapter := &Adapter{
+		Info: gputypes.AdapterInfo{
+			Name:       "Software Renderer",
+			DeviceType: gputypes.DeviceTypeCPU,
+		},
+		Limits: gputypes.DefaultLimits(),
+	}
+	cpuID := hub.RegisterAdapter(cpuAdapter)
+	instance.adapters = append(instance.adapters, cpuID)
+
+	adapterID, err := instance.RequestAdapter(&gputypes.RequestAdapterOptions{
+		ForceFallbackAdapter: true,
+	})
+	if err != nil {
+		t.Fatalf("ForceFallbackAdapter error: %v", err)
+	}
+	adapter, _ := hub.GetAdapter(adapterID)
+	if adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
+		t.Errorf("ForceFallbackAdapter returned %v, want CPU", adapter.Info.DeviceType)
+	}
+}
+
+func TestRequestAdapterOnlyCPUAvailable(t *testing.T) {
+	GetGlobal().Clear()
+
+	instance := &Instance{
+		backends: gputypes.BackendsAll,
+	}
+
+	hub := GetGlobal().Hub()
+
+	cpuAdapter := &Adapter{
+		Info: gputypes.AdapterInfo{
+			Name:       "Software Renderer",
+			DeviceType: gputypes.DeviceTypeCPU,
+		},
+		Limits: gputypes.DefaultLimits(),
+	}
+	cpuID := hub.RegisterAdapter(cpuAdapter)
+	instance.adapters = append(instance.adapters, cpuID)
+
+	// Should fallback to CPU when no GPU available
+	adapterID, err := instance.RequestAdapter(nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter(nil) with only CPU: %v", err)
+	}
+	adapter, _ := hub.GetAdapter(adapterID)
+	if adapter.Info.Name != "Software Renderer" {
+		t.Errorf("got %q, want %q", adapter.Info.Name, "Software Renderer")
+	}
+}

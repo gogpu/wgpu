@@ -29,6 +29,15 @@ type Instance struct {
 	// These are destroyed when the Instance is destroyed.
 	halInstances []hal.Instance
 
+	// deferredGLES holds GLES HAL instances whose adapter enumeration is deferred
+	// until a surface is available. OpenGL requires a GL context (obtained from a
+	// surface) to query adapter capabilities. These are enumerated lazily on the
+	// first RequestAdapterWithSurface call that provides a non-nil surface hint.
+	deferredGLES []hal.Instance
+
+	// glesEnumerated tracks whether deferred GLES adapters have been enumerated.
+	glesEnumerated bool
+
 	// useMock indicates whether to use mock adapters (for testing or when no HAL available).
 	useMock bool
 }
@@ -136,6 +145,16 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool
 			continue
 		}
 
+		// GLES/GL backends require a surface (GL context) to enumerate adapters
+		// properly. Defer their enumeration until RequestAdapterWithSurface is
+		// called with a surface hint. Without a surface, EnumerateAdapters returns
+		// a placeholder adapter with nil glCtx that crashes on use.
+		if provider.Variant() == gputypes.BackendGL {
+			i.halInstances = append(i.halInstances, halInstance)
+			i.deferredGLES = append(i.deferredGLES, halInstance)
+			continue
+		}
+
 		// Track HAL instance for cleanup
 		i.halInstances = append(i.halInstances, halInstance)
 
@@ -216,7 +235,7 @@ func (i *Instance) EnumerateAdapters() []AdapterID {
 //   - CompatibleSurface: adapter must support the given surface
 //
 // If options is nil, the first available adapter is returned.
-func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) {
+func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) { //nolint:gocognit // adapter selection with GPU preference logic
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
@@ -224,18 +243,53 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 		return AdapterID{}, fmt.Errorf("no adapters available")
 	}
 
-	// If no options specified, return the first adapter
+	// If no options specified, prefer non-CPU adapters (GPU > Software fallback).
 	if options == nil {
-		return i.adapters[0], nil
+		hub := GetGlobal().Hub()
+		for _, adapterID := range i.adapters {
+			adapter, err := hub.GetAdapter(adapterID)
+			if err != nil {
+				continue
+			}
+			if adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
+				return adapterID, nil
+			}
+		}
+		return i.adapters[0], nil // fallback to first (Software)
 	}
 
 	hub := GetGlobal().Hub()
 
-	// Filter adapters based on power preference
+	// ForceFallbackAdapter: return first CPU adapter directly
+	if options.ForceFallbackAdapter {
+		for _, adapterID := range i.adapters {
+			adapter, err := hub.GetAdapter(adapterID)
+			if err != nil {
+				continue
+			}
+			if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
+				return adapterID, nil
+			}
+		}
+		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
+	}
+
+	// Prefer GPU adapters over Software. Track CPU as fallback.
+	var cpuFallback AdapterID
+	hasCPUFallback := false
+
 	for _, adapterID := range i.adapters {
 		adapter, err := hub.GetAdapter(adapterID)
 		if err != nil {
-			continue // Skip invalid adapters
+			continue
+		}
+
+		if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
+			if !hasCPUFallback {
+				cpuFallback = adapterID
+				hasCPUFallback = true
+			}
+			continue
 		}
 
 		// Check power preference
@@ -245,16 +299,109 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 			}
 		}
 
-		// Check fallback adapter requirement
-		if options.ForceFallbackAdapter && adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
-			continue
-		}
-
-		// If we get here, the adapter matches requirements
 		return adapterID, nil
 	}
 
+	if hasCPUFallback {
+		return cpuFallback, nil
+	}
+
 	return AdapterID{}, fmt.Errorf("no adapter matches the requested options")
+}
+
+// RequestAdapterWithSurface requests an adapter matching the given options,
+// using the provided HAL surface as a hint for backends that require it (GLES).
+//
+// For GLES/GL backends, adapter enumeration is deferred until a surface is
+// available because OpenGL requires a GL context to query capabilities.
+// This method triggers that deferred enumeration when surfaceHint is non-nil.
+//
+// If surfaceHint is nil, this behaves identically to RequestAdapter.
+func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOptions, surfaceHint hal.Surface) (AdapterID, error) {
+	// Enumerate deferred GLES adapters if we have a surface and haven't done so yet.
+	if surfaceHint != nil {
+		i.enumerateDeferredGLES(surfaceHint)
+	}
+
+	return i.RequestAdapter(options)
+}
+
+// enumerateDeferredGLES enumerates adapters for deferred GLES HAL instances
+// using the provided surface hint. This is called at most once per instance.
+//
+// Must NOT be called with i.mu held (it acquires mu internally).
+func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.glesEnumerated || len(i.deferredGLES) == 0 {
+		return
+	}
+	i.glesEnumerated = true
+
+	hub := GetGlobal().Hub()
+
+	for _, halInstance := range i.deferredGLES {
+		exposedAdapters := halInstance.EnumerateAdapters(surfaceHint)
+		for idx := range exposedAdapters {
+			exposed := &exposedAdapters[idx]
+			adapter := &Adapter{
+				Info:            exposed.Info,
+				Features:        exposed.Features,
+				Limits:          exposed.Capabilities.Limits,
+				Backend:         exposed.Info.Backend,
+				halAdapter:      exposed.Adapter,
+				halCapabilities: &exposed.Capabilities,
+			}
+
+			adapterID := hub.RegisterAdapter(adapter)
+			i.adapters = append(i.adapters, adapterID)
+		}
+	}
+
+	// Clear deferred list -- enumeration is done.
+	i.deferredGLES = nil
+
+	// If we were in mock mode and now have real adapters from GLES,
+	// remove mock adapters so real ones are selected first.
+	if i.useMock && i.hasRealAdaptersLocked(hub) {
+		i.useMock = false
+		i.removeMockAdaptersLocked(hub)
+	}
+}
+
+// hasRealAdaptersLocked checks if any adapter has a non-nil HAL adapter.
+// Caller must hold i.mu.
+func (i *Instance) hasRealAdaptersLocked(hub *Hub) bool {
+	for _, adapterID := range i.adapters {
+		adapter, err := hub.GetAdapter(adapterID)
+		if err != nil {
+			continue
+		}
+		if adapter.halAdapter != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// removeMockAdaptersLocked filters out mock adapters (halAdapter == nil) from
+// the adapter list and unregisters them from the hub.
+// Caller must hold i.mu.
+func (i *Instance) removeMockAdaptersLocked(hub *Hub) {
+	filtered := make([]AdapterID, 0, len(i.adapters))
+	for _, adapterID := range i.adapters {
+		adapter, err := hub.GetAdapter(adapterID)
+		if err != nil {
+			continue
+		}
+		if adapter.halAdapter != nil {
+			filtered = append(filtered, adapterID)
+		} else {
+			_, _ = hub.UnregisterAdapter(adapterID)
+		}
+	}
+	i.adapters = filtered
 }
 
 // matchesPowerPreference checks if a device type matches the power preference.
@@ -340,9 +487,10 @@ func (i *Instance) Destroy() {
 	}
 	i.adapters = nil
 
-	// Destroy all HAL instances
+	// Destroy all HAL instances (includes deferred GLES instances).
 	for _, halInstance := range i.halInstances {
 		halInstance.Destroy()
 	}
 	i.halInstances = nil
+	i.deferredGLES = nil
 }

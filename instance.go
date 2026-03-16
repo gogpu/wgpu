@@ -38,12 +38,35 @@ func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 
 // RequestAdapter requests a GPU adapter matching the options.
 // If opts is nil, the best available adapter is returned.
+//
+// When opts.CompatibleSurface is set, backends that require a surface for
+// adapter enumeration (GLES/OpenGL) will perform deferred enumeration using
+// the surface's GL context. This follows the WebGPU spec pattern where
+// requestAdapter accepts a compatible surface hint.
 func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error) {
 	if i.released {
 		return nil, ErrReleased
 	}
 
-	adapterID, err := i.core.RequestAdapter(opts)
+	// Convert wgpu-level options to gputypes for core.
+	var coreOpts *gputypes.RequestAdapterOptions
+	if opts != nil {
+		coreOpts = &gputypes.RequestAdapterOptions{
+			PowerPreference:      opts.PowerPreference,
+			ForceFallbackAdapter: opts.ForceFallbackAdapter,
+		}
+	}
+
+	// If a compatible surface is provided, use the surface-aware path
+	// that triggers deferred GLES adapter enumeration.
+	var adapterID core.AdapterID
+	var err error
+	if opts != nil && opts.CompatibleSurface != nil {
+		halSurface := opts.CompatibleSurface.HAL()
+		adapterID, err = i.core.RequestAdapterWithSurface(coreOpts, halSurface)
+	} else {
+		adapterID, err = i.core.RequestAdapter(coreOpts)
+	}
 	if err != nil {
 		return nil, err
 	}
