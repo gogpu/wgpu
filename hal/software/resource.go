@@ -8,6 +8,10 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// nextResourceID is a monotonic counter for assigning unique IDs to software resources.
+// This enables handle-to-resource resolution in bind groups.
+var nextResourceID atomic.Uint64
+
 // Resource is a placeholder implementation for most HAL resource gputypes.
 // It implements the hal.Resource interface with a no-op Destroy method.
 type Resource struct{}
@@ -22,6 +26,7 @@ func (r *Resource) NativeHandle() uintptr { return 0 }
 // All software buffers store their data in memory.
 type Buffer struct {
 	Resource
+	id    uint64 // unique ID for handle resolution
 	data  []byte
 	size  uint64
 	usage gputypes.BufferUsage
@@ -44,12 +49,13 @@ func (b *Buffer) WriteData(offset uint64, data []byte) {
 	copy(b.data[offset:], data)
 }
 
-// NativeHandle returns 0 for software buffers.
-func (b *Buffer) NativeHandle() uintptr { return 0 }
+// NativeHandle returns the buffer's unique ID for handle resolution.
+func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
 // Texture implements hal.Texture with real pixel storage.
 type Texture struct {
 	Resource
+	id            uint64 // unique ID for handle resolution
 	data          []byte
 	width         uint32
 	height        uint32
@@ -77,8 +83,8 @@ func (t *Texture) WriteData(offset uint64, data []byte) {
 	copy(t.data[offset:], data)
 }
 
-// NativeHandle returns 0 for software textures.
-func (t *Texture) NativeHandle() uintptr { return 0 }
+// NativeHandle returns the texture's unique ID for handle resolution.
+func (t *Texture) NativeHandle() uintptr { return uintptr(t.id) }
 
 // Clear fills the texture with a color value.
 func (t *Texture) Clear(color gputypes.Color) {
@@ -103,11 +109,12 @@ func (t *Texture) Clear(color gputypes.Color) {
 // In software backend, views just reference the original texture.
 type TextureView struct {
 	Resource
+	id      uint64 // unique ID for handle resolution
 	texture *Texture
 }
 
-// NativeHandle returns 0 for software texture views.
-func (v *TextureView) NativeHandle() uintptr { return 0 }
+// NativeHandle returns the view's unique ID for handle resolution.
+func (v *TextureView) NativeHandle() uintptr { return uintptr(v.id) }
 
 // Surface implements hal.Surface for the software backend.
 type Surface struct {
@@ -210,4 +217,25 @@ type SurfaceTexture struct {
 type Fence struct {
 	Resource
 	value atomic.Uint64
+}
+
+// RenderPipeline stores render pipeline configuration for the software backend.
+type RenderPipeline struct {
+	Resource
+	desc *hal.RenderPipelineDescriptor
+}
+
+// BindGroup stores bound resources for the software backend.
+// It resolves handle-based entries to concrete software resource pointers.
+type BindGroup struct {
+	Resource
+	desc         *hal.BindGroupDescriptor
+	textureViews map[uint32]*TextureView // binding index -> resolved texture view
+	buffers      map[uint32]*Buffer      // binding index -> resolved buffer
+}
+
+// ShaderModule stores shader source for the software backend.
+type ShaderModule struct {
+	Resource
+	desc *hal.ShaderModuleDescriptor
 }

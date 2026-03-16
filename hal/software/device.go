@@ -3,8 +3,10 @@ package software
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -14,20 +16,28 @@ import (
 var ErrComputeNotSupported = errors.New("software: compute shaders not supported")
 
 // Device implements hal.Device for the software backend.
-type Device struct{}
+// It maintains a resource registry for resolving handle-based bind group entries
+// back to typed software resources.
+type Device struct {
+	mu           sync.RWMutex
+	textureViews map[uintptr]*TextureView // handle -> TextureView
+	buffers      map[uintptr]*Buffer      // handle -> Buffer
+}
 
 // CreateBuffer creates a software buffer with real data storage.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Software.CreateBuffer — core validation gap")
 	}
-	// Always allocate real storage for software backend
-	data := make([]byte, desc.Size)
-	return &Buffer{
-		data:  data,
+	id := nextResourceID.Add(1)
+	buf := &Buffer{
+		id:    id,
+		data:  make([]byte, desc.Size),
 		size:  desc.Size,
 		usage: desc.Usage,
-	}, nil
+	}
+	d.registerBuffer(buf)
+	return buf, nil
 }
 
 // DestroyBuffer is a no-op (Go GC handles cleanup).
@@ -45,6 +55,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	totalSize := uint64(desc.Size.Width) * uint64(desc.Size.Height) * uint64(desc.Size.DepthOrArrayLayers) * bytesPerPixel
 
 	return &Texture{
+		id:            nextResourceID.Add(1),
 		data:          make([]byte, totalSize),
 		width:         desc.Size.Width,
 		height:        desc.Size.Height,
@@ -63,7 +74,21 @@ func (d *Device) DestroyTexture(_ hal.Texture) {}
 func (d *Device) CreateTextureView(texture hal.Texture, _ *hal.TextureViewDescriptor) (hal.TextureView, error) {
 	// Views in software backend just reference the original texture
 	if tex, ok := texture.(*Texture); ok {
-		return &TextureView{texture: tex}, nil
+		view := &TextureView{
+			id:      nextResourceID.Add(1),
+			texture: tex,
+		}
+		d.registerTextureView(view)
+		return view, nil
+	}
+	// Also handle SurfaceTexture (embeds Texture)
+	if st, ok := texture.(*SurfaceTexture); ok {
+		view := &TextureView{
+			id:      nextResourceID.Add(1),
+			texture: &st.Texture,
+		}
+		d.registerTextureView(view)
+		return view, nil
 	}
 	return &Resource{}, nil
 }
@@ -88,8 +113,28 @@ func (d *Device) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.Bi
 func (d *Device) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
 
 // CreateBindGroup creates a software bind group.
-func (d *Device) CreateBindGroup(_ *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	return &Resource{}, nil
+// It resolves handle-based entries to typed software resources using the device registry.
+func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
+	bg := &BindGroup{
+		desc:         desc,
+		textureViews: make(map[uint32]*TextureView),
+		buffers:      make(map[uint32]*Buffer),
+	}
+	if desc != nil {
+		for _, entry := range desc.Entries {
+			switch res := entry.Resource.(type) {
+			case gputypes.TextureViewBinding:
+				if view := d.lookupTextureView(res.TextureView); view != nil {
+					bg.textureViews[entry.Binding] = view
+				}
+			case gputypes.BufferBinding:
+				if buf := d.lookupBuffer(res.Buffer); buf != nil {
+					bg.buffers[entry.Binding] = buf
+				}
+			}
+		}
+	}
+	return bg, nil
 }
 
 // DestroyBindGroup is a no-op.
@@ -104,16 +149,16 @@ func (d *Device) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.Pipe
 func (d *Device) DestroyPipelineLayout(_ hal.PipelineLayout) {}
 
 // CreateShaderModule creates a software shader module.
-func (d *Device) CreateShaderModule(_ *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	return &Resource{}, nil
+func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	return &ShaderModule{desc: desc}, nil
 }
 
 // DestroyShaderModule is a no-op.
 func (d *Device) DestroyShaderModule(_ hal.ShaderModule) {}
 
 // CreateRenderPipeline creates a software render pipeline.
-func (d *Device) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return &Resource{}, nil
+func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	return &RenderPipeline{desc: desc}, nil
 }
 
 // DestroyRenderPipeline is a no-op.
@@ -195,3 +240,55 @@ func (d *Device) WaitIdle() error { return nil }
 
 // Destroy is a no-op for the software device.
 func (d *Device) Destroy() {}
+
+// initRegistry initializes the resource maps if needed.
+func (d *Device) initRegistry() {
+	if d.textureViews == nil {
+		d.textureViews = make(map[uintptr]*TextureView)
+	}
+	if d.buffers == nil {
+		d.buffers = make(map[uintptr]*Buffer)
+	}
+}
+
+// registerTextureView adds a texture view to the device registry.
+func (d *Device) registerTextureView(view *TextureView) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initRegistry()
+	d.textureViews[uintptr(view.id)] = view
+}
+
+// registerBuffer adds a buffer to the device registry.
+func (d *Device) registerBuffer(buf *Buffer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initRegistry()
+	d.buffers[uintptr(buf.id)] = buf
+}
+
+// lookupTextureView finds a texture view by its handle.
+func (d *Device) lookupTextureView(handle uintptr) *TextureView {
+	if handle == 0 {
+		return nil
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.textureViews == nil {
+		return nil
+	}
+	return d.textureViews[handle]
+}
+
+// lookupBuffer finds a buffer by its handle.
+func (d *Device) lookupBuffer(handle uintptr) *Buffer {
+	if handle == 0 {
+		return nil
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.buffers == nil {
+		return nil
+	}
+	return d.buffers[handle]
+}
