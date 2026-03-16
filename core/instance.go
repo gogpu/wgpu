@@ -235,7 +235,7 @@ func (i *Instance) EnumerateAdapters() []AdapterID {
 //   - CompatibleSurface: adapter must support the given surface
 //
 // If options is nil, the first available adapter is returned.
-func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) {
+func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) { //nolint:gocognit // adapter selection with GPU preference logic
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
