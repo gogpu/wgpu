@@ -130,7 +130,23 @@ const (
 type AdapterInfo = gputypes.AdapterInfo
 type DeviceType = gputypes.DeviceType
 type PowerPreference = gputypes.PowerPreference
-type RequestAdapterOptions = gputypes.RequestAdapterOptions
+
+// RequestAdapterOptions controls adapter selection.
+//
+// Following the WebGPU spec, CompatibleSurface is a typed *Surface pointer
+// (not a raw handle). Backends that require a surface for adapter enumeration
+// (e.g., GLES/OpenGL which needs a GL context) use this to perform deferred
+// enumeration when RequestAdapter is called.
+type RequestAdapterOptions struct {
+	// PowerPreference indicates power consumption preference.
+	PowerPreference PowerPreference
+	// ForceFallbackAdapter forces the use of a fallback (software) adapter.
+	ForceFallbackAdapter bool
+	// CompatibleSurface, if non-nil, indicates that the adapter must support
+	// rendering to this surface. For GLES backends, this triggers deferred
+	// adapter enumeration using the surface's GL context.
+	CompatibleSurface *Surface
+}
 
 const (
 	PowerPreferenceNone            = gputypes.PowerPreferenceNone
