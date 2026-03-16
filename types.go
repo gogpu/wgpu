@@ -2,6 +2,11 @@ package wgpu
 
 import "github.com/gogpu/gputypes"
 
+// MaxBindGroups is the maximum number of bind groups allowed by the WebGPU spec.
+// This is the hard cap (wgpu-hal MAX_BIND_GROUPS = 8). Actual device limits
+// may be lower (typically 4 in the WebGPU spec).
+const MaxBindGroups = 8
+
 // Backend types
 type Backend = gputypes.Backend
 type Backends = gputypes.Backends

@@ -20,6 +20,12 @@ type RenderPassEncoder struct {
 	// group index is within the pipeline layout bounds. Zero means no
 	// pipeline has been set yet.
 	currentPipelineBindGroupCount uint32
+	// pipelineSet tracks whether SetPipeline has been called.
+	// Draw commands require a pipeline to be set first.
+	pipelineSet bool
+	// binder tracks bind group assignments and validates compatibility
+	// at draw time, matching Rust wgpu-core's Binder pattern.
+	binder binder
 }
 
 // SetPipeline sets the active render pipeline.
@@ -29,6 +35,8 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		return
 	}
 	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
+	p.pipelineSet = true
+	p.binder.updateExpectations(pipeline.bindGroupLayouts)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
 		raw.SetPipeline(pipeline.hal)
@@ -41,6 +49,15 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: bind group is nil"))
 		return
 	}
+	// Hard cap: WebGPU allows at most MaxBindGroups (8) bind group slots,
+	// regardless of what the pipeline layout declares.
+	if index >= MaxBindGroups {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.SetBindGroup: index %d >= MaxBindGroups (%d)",
+			index, MaxBindGroups,
+		))
+		return
+	}
 	// Validate that the group index is within the current pipeline's layout.
 	// Without this check, binding a group beyond the pipeline layout causes
 	// a Vulkan validation error or crash on AMD/NVIDIA GPUs (Intel tolerates it).
@@ -51,6 +68,7 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 		))
 		return
 	}
+	p.binder.assign(index, group.layout)
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
@@ -95,18 +113,42 @@ func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
 	p.core.SetStencilReference(reference)
 }
 
+// validateDrawState checks that a pipeline has been set and all bind groups
+// are compatible before a draw call.
+// Returns true if validation passes, false if an error was recorded.
+func (p *RenderPassEncoder) validateDrawState(method string) bool {
+	if !p.pipelineSet {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: no pipeline set (call SetPipeline first)", method))
+		return false
+	}
+	if err := p.binder.checkCompatibility(); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w", method, err))
+		return false
+	}
+	return true
+}
+
 // Draw draws primitives.
 func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	if !p.validateDrawState("Draw") {
+		return
+	}
 	p.core.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
 func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	if !p.validateDrawState("DrawIndexed") {
+		return
+	}
 	p.core.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
+	if !p.validateDrawState("DrawIndirect") {
+		return
+	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndirect: buffer is nil"))
 		return
@@ -116,6 +158,9 @@ func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
+	if !p.validateDrawState("DrawIndexedIndirect") {
+		return
+	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: buffer is nil"))
 		return

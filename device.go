@@ -256,10 +256,15 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
 	}
 
+	// Store a copy of the bind group layouts slice for binder validation.
+	bgLayouts := make([]*BindGroupLayout, len(desc.BindGroupLayouts))
+	copy(bgLayouts, desc.BindGroupLayouts)
+
 	return &PipelineLayout{
-		hal:            halLayout,
-		device:         d,
-		bindGroupCount: uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
+		hal:              halLayout,
+		device:           d,
+		bindGroupCount:   uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
+		bindGroupLayouts: bgLayouts,
 	}, nil
 }
 
@@ -300,7 +305,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
 
-	return &BindGroup{hal: halGroup, device: d}, nil
+	return &BindGroup{hal: halGroup, device: d, layout: desc.Layout}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -329,10 +334,17 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}
 
 	var bgCount uint32
+	var bgLayouts []*BindGroupLayout
 	if desc.Layout != nil {
 		bgCount = desc.Layout.bindGroupCount
+		bgLayouts = desc.Layout.bindGroupLayouts
 	}
-	return &RenderPipeline{hal: halPipeline, device: d, bindGroupCount: bgCount}, nil
+	return &RenderPipeline{
+		hal:              halPipeline,
+		device:           d,
+		bindGroupCount:   bgCount,
+		bindGroupLayouts: bgLayouts,
+	}, nil
 }
 
 // CreateComputePipeline creates a compute pipeline.
@@ -360,7 +372,18 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
 	}
 
-	return &ComputePipeline{hal: halPipeline, device: d}, nil
+	var bgCount uint32
+	var bgLayouts []*BindGroupLayout
+	if desc.Layout != nil {
+		bgCount = desc.Layout.bindGroupCount
+		bgLayouts = desc.Layout.bindGroupLayouts
+	}
+	return &ComputePipeline{
+		hal:              halPipeline,
+		device:           d,
+		bindGroupCount:   bgCount,
+		bindGroupLayouts: bgLayouts,
+	}, nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.

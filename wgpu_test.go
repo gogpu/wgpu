@@ -1597,6 +1597,178 @@ func TestComputePassDispatchIndirectNilDeferredError(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// SetBindGroup: index >= MaxBindGroups (8) hard cap
+// =============================================================================
+
+func TestRenderPassSetBindGroupIndexExceedsMaxBindGroups(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Create a dummy bind group to avoid the nil check path.
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(8, group, nil) // index 8 >= MaxBindGroups (8)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when SetBindGroup index >= MaxBindGroups")
+	}
+}
+
+func TestComputePassSetBindGroupIndexExceedsMaxBindGroups(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(8, group, nil) // index 8 >= MaxBindGroups (8)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when SetBindGroup index >= MaxBindGroups")
+	}
+}
+
+func TestRenderPassSetBindGroupLargeIndexExceedsMaxBindGroups(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	group := &wgpu.BindGroup{}
+
+	pass.SetBindGroup(100, group, nil) // well above MaxBindGroups
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when SetBindGroup index far exceeds MaxBindGroups")
+	}
+}
+
+// =============================================================================
+// Draw/Dispatch: pipeline must be set
+// =============================================================================
+
+func TestRenderPassDrawWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.Draw(3, 1, 0, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Draw called without SetPipeline")
+	}
+}
+
+func TestRenderPassDrawIndexedWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.DrawIndexed(3, 1, 0, 0, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexed called without SetPipeline")
+	}
+}
+
+func TestRenderPassDrawIndirectWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  16,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndirect(buf, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndirect called without SetPipeline")
+	}
+}
+
+func TestRenderPassDrawIndexedIndirectWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  20,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndexedIndirect(buf, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexedIndirect called without SetPipeline")
+	}
+}
+
+func TestComputePassDispatchWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pass.Dispatch(1, 1, 1) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Dispatch called without SetPipeline")
+	}
+}
+
+func TestComputePassDispatchIndirectWithoutPipelineDeferredError(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  12,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DispatchIndirect(buf, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DispatchIndirect called without SetPipeline")
+	}
+}
+
+// =============================================================================
+// MaxBindGroups constant value
+// =============================================================================
+
+func TestMaxBindGroupsConstant(t *testing.T) {
+	if wgpu.MaxBindGroups != 8 {
+		t.Errorf("MaxBindGroups = %d, want 8", wgpu.MaxBindGroups)
+	}
+}
+
 func TestCopyBufferToBufferNilSrcDeferredError(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
