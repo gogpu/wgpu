@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2026-03-16
+
+### Added
+
+- **core: Binder struct for render/compute pass validation** — Tracks assigned vs expected
+  bind group layouts per slot (matching Rust wgpu-core pattern). At draw/dispatch time,
+  `checkCompatibility()` verifies all expected slots have compatible bind groups assigned.
+  13 binder tests.
+
+- **core: comprehensive render/compute pass state validation** — SetBindGroup validates
+  MAX_BIND_GROUPS hard cap (8), pipeline bind group count, and dynamic offset alignment
+  (256 bytes). Draw/DrawIndexed validate pipeline is set, vertex buffer count, and index
+  buffer presence. Dispatch validates pipeline set + bind group compatibility.
+  25+ new tests.
+
+### Fixed
+
+- **core: SetBindGroup index bounds validation** — Prevents `vkCmdBindDescriptorSets`
+  crash on AMD/NVIDIA GPUs when bind group index exceeds pipeline layout set count.
+  Intel silently tolerates this spec violation; AMD/NVIDIA crash with access violation.
+  Fixes [ui#52](https://github.com/gogpu/ui/issues/52).
+
 ## [0.21.1] - 2026-03-15
 
 ### Fixed
