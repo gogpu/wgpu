@@ -243,18 +243,53 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 		return AdapterID{}, fmt.Errorf("no adapters available")
 	}
 
-	// If no options specified, return the first adapter
+	// If no options specified, prefer non-CPU adapters (GPU > Software fallback).
 	if options == nil {
-		return i.adapters[0], nil
+		hub := GetGlobal().Hub()
+		for _, adapterID := range i.adapters {
+			adapter, err := hub.GetAdapter(adapterID)
+			if err != nil {
+				continue
+			}
+			if adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
+				return adapterID, nil
+			}
+		}
+		return i.adapters[0], nil // fallback to first (Software)
 	}
 
 	hub := GetGlobal().Hub()
 
-	// Filter adapters based on power preference
+	// ForceFallbackAdapter: return first CPU adapter directly
+	if options.ForceFallbackAdapter {
+		for _, adapterID := range i.adapters {
+			adapter, err := hub.GetAdapter(adapterID)
+			if err != nil {
+				continue
+			}
+			if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
+				return adapterID, nil
+			}
+		}
+		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
+	}
+
+	// Prefer GPU adapters over Software. Track CPU as fallback.
+	var cpuFallback AdapterID
+	hasCPUFallback := false
+
 	for _, adapterID := range i.adapters {
 		adapter, err := hub.GetAdapter(adapterID)
 		if err != nil {
-			continue // Skip invalid adapters
+			continue
+		}
+
+		if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
+			if !hasCPUFallback {
+				cpuFallback = adapterID
+				hasCPUFallback = true
+			}
+			continue
 		}
 
 		// Check power preference
@@ -264,13 +299,11 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 			}
 		}
 
-		// Check fallback adapter requirement
-		if options.ForceFallbackAdapter && adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
-			continue
-		}
-
-		// If we get here, the adapter matches requirements
 		return adapterID, nil
+	}
+
+	if hasCPUFallback {
+		return cpuFallback, nil
 	}
 
 	return AdapterID{}, fmt.Errorf("no adapter matches the requested options")
