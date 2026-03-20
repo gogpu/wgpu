@@ -39,6 +39,12 @@ type CommandEncoder struct {
 	cmdList     *d3d12.ID3D12GraphicsCommandList
 	label       string
 	isRecording bool
+
+	// descriptorHeaps is a pre-allocated array for SetDescriptorHeaps calls,
+	// avoiding a slice allocation per render/compute pass. At most 2 heaps
+	// are needed: one for CBV/SRV/UAV views and one for samplers.
+	descriptorHeaps     [2]*d3d12.ID3D12DescriptorHeap
+	descriptorHeapCount int
 }
 
 // BeginEncoding begins command recording.
@@ -846,18 +852,20 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 // D3D12 requires descriptor heaps to be bound before setting root descriptor tables.
 // This must be called before any SetBindGroup operations.
 func (e *CommandEncoder) ensureDescriptorHeapsBound() {
-	heaps := make([]*d3d12.ID3D12DescriptorHeap, 0, 2)
+	e.descriptorHeapCount = 0
 
 	// Add shader-visible heaps (viewHeap for CBV/SRV/UAV, samplerHeap for samplers)
 	if e.device.viewHeap != nil && e.device.viewHeap.raw != nil {
-		heaps = append(heaps, e.device.viewHeap.raw)
+		e.descriptorHeaps[e.descriptorHeapCount] = e.device.viewHeap.raw
+		e.descriptorHeapCount++
 	}
 	if e.device.samplerHeap != nil && e.device.samplerHeap.raw != nil {
-		heaps = append(heaps, e.device.samplerHeap.raw)
+		e.descriptorHeaps[e.descriptorHeapCount] = e.device.samplerHeap.raw
+		e.descriptorHeapCount++
 	}
 
-	if len(heaps) > 0 {
-		e.cmdList.SetDescriptorHeaps(uint32(len(heaps)), &heaps[0])
+	if e.descriptorHeapCount > 0 {
+		e.cmdList.SetDescriptorHeaps(uint32(e.descriptorHeapCount), &e.descriptorHeaps[0])
 	}
 }
 
