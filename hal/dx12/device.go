@@ -437,11 +437,20 @@ func (d *Device) waitForFrameSlot(slot uint64) error {
 	return nil
 }
 
-// advanceFrame increments the frame index and recycles allocators from the old frame
-// that occupied the new slot. Only waits for that specific frame — not all GPU work —
-// enabling CPU/GPU overlap.
-func (d *Device) advanceFrame() error {
+// advanceFrame increments the frame index.
+// The actual wait for the old frame occupying the new slot is deferred to
+// recycleFrameSlot, which is called at the start of the next frame
+// (in AcquireTexture). This allows the CPU to begin preparing the next
+// frame immediately after Present, overlapping with GPU execution.
+func (d *Device) advanceFrame() {
 	d.frameIndex++
+}
+
+// recycleFrameSlot waits for the GPU to finish the old frame occupying the
+// current slot, then recycles its command allocators. Called at the start
+// of each frame (from AcquireTexture) to ensure the slot is free before
+// the CPU begins recording new commands into it.
+func (d *Device) recycleFrameSlot() error {
 	slot := d.frameIndex % maxFramesInFlight
 
 	// Wait for the old frame that occupied this slot to finish on GPU.

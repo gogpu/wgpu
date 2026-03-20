@@ -460,11 +460,9 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return fmt.Errorf("dx12: Present failed: %w", err)
 	}
 
-	// Advance to the next frame slot. This waits only for the specific old frame
-	// occupying the next slot — not all GPU work — enabling CPU/GPU overlap.
-	if err := q.device.advanceFrame(); err != nil {
-		return fmt.Errorf("dx12: advance frame failed: %w", err)
-	}
+	// Advance frame index. The wait for the old frame occupying the next slot
+	// is deferred to AcquireTexture, allowing the CPU to overlap with GPU work.
+	q.device.advanceFrame()
 
 	// Drain debug messages after present.
 	q.device.DrainDebugMessages()

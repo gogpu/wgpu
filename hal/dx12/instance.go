@@ -380,9 +380,21 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 }
 
 // AcquireTexture acquires the next surface texture for rendering.
+// It first waits for the GPU to finish the old frame that occupied the
+// current slot and recycles its allocators. This deferred wait (moved
+// from Present) allows the CPU to overlap work with GPU execution.
 func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
 	if s.swapchain == nil {
 		return nil, fmt.Errorf("dx12: surface not configured")
+	}
+
+	// Wait for the old frame occupying the current slot and recycle
+	// its allocators. On the very first frame this is a no-op because
+	// frameState.fenceValue is zero (no prior GPU work to wait for).
+	if s.device != nil {
+		if err := s.device.recycleFrameSlot(); err != nil {
+			return nil, fmt.Errorf("dx12: recycle frame slot failed: %w", err)
+		}
 	}
 
 	// Get current back buffer index
