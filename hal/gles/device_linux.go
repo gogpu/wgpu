@@ -28,6 +28,9 @@ type Device struct {
 
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in GLES.CreateBuffer — core validation gap")
+	}
 	id := d.glCtx.GenBuffers(1)
 
 	// Determine GL buffer target from usage
@@ -389,10 +392,12 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		"vertexEntry", desc.Vertex.EntryPoint,
 	)
 
-	// Extract blend state from the first color target.
+	// Extract blend state and color write mask from the first color target.
 	var blend *gputypes.BlendState
+	colorWriteMask := gputypes.ColorWriteMaskAll
 	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
 		blend = desc.Fragment.Targets[0].Blend
+		colorWriteMask = desc.Fragment.Targets[0].WriteMask
 	}
 
 	return &RenderPipeline{
@@ -405,6 +410,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		depthStencil:      desc.DepthStencil,
 		multisample:       desc.Multisample,
 		blend:             blend,
+		colorWriteMask:    colorWriteMask,
 	}, nil
 }
 

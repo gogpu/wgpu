@@ -990,7 +990,11 @@ func (c *SetScissorCommand) Execute(ctx *gl.Context) {
 	ctx.Enable(gl.SCISSOR_TEST)
 	// OpenGL scissor uses bottom-left origin, WebGPU uses top-left origin.
 	// Convert: glY = fbHeight - y - height
+	// Clamp to 0 to avoid GL_INVALID_VALUE when fbHeight is 0 (uninitialized).
 	glY := int32(c.fbHeight) - int32(c.y) - int32(c.height)
+	if glY < 0 {
+		glY = 0
+	}
 	ctx.Scissor(int32(c.x), glY, int32(c.width), int32(c.height))
 }
 
