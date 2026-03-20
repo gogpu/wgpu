@@ -1363,7 +1363,9 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		}
 	}
 
-	// Allocate and populate CBV/SRV/UAV descriptors
+	// Allocate and populate CBV/SRV/UAV descriptors.
+	// CBVs are created inline (CreateConstantBufferView), SRVs are batched
+	// via CopyDescriptors to reduce per-descriptor syscall overhead.
 	if len(viewEntries) > 0 && d.viewHeap != nil {
 		cpuStart, gpuStart, err := d.viewHeap.AllocateGPU(uint32(len(viewEntries)))
 		if err != nil {
@@ -1373,15 +1375,14 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		bg.viewHeapIndex = d.viewHeap.HandleToIndex(cpuStart)
 		bg.viewCount = uint32(len(viewEntries))
 
-		for i, entry := range viewEntries {
-			destCPU := cpuStart.Offset(i, d.viewHeap.incrementSize)
-			if err := d.writeViewDescriptor(destCPU, entry); err != nil {
-				return nil, fmt.Errorf("dx12: failed to write descriptor for binding %d: %w", entry.Binding, err)
-			}
+		if err := d.writeViewDescriptorsBatched(cpuStart, viewEntries); err != nil {
+			return nil, err
 		}
 	}
 
-	// Allocate and populate sampler descriptors
+	// Allocate and populate sampler descriptors.
+	// Uses batched CopyDescriptors: N scattered source handles copied to 1
+	// contiguous destination range in a single D3D12 API call.
 	if len(samplerEntries) > 0 && d.samplerHeap != nil {
 		cpuStart, gpuStart, err := d.samplerHeap.AllocateGPU(uint32(len(samplerEntries)))
 		if err != nil {
@@ -1391,43 +1392,75 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		bg.samplerHeapIndex = d.samplerHeap.HandleToIndex(cpuStart)
 		bg.samplerCount = uint32(len(samplerEntries))
 
+		srcHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, len(samplerEntries))
 		for i, entry := range samplerEntries {
-			destCPU := cpuStart.Offset(i, d.samplerHeap.incrementSize)
 			sb := entry.Resource.(gputypes.SamplerBinding)
 			sampler := (*Sampler)(unsafe.Pointer(sb.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
-			d.raw.CopyDescriptorsSimple(1, destCPU, sampler.handle, d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+			srcHandles[i] = sampler.handle
 		}
+		count := uint32(len(samplerEntries))
+		d.raw.CopyDescriptors(
+			1, &cpuStart, &count,
+			count, &srcHandles[0], nil,
+			d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+		)
 	}
 
 	return bg, nil
 }
 
-// writeViewDescriptor writes a single CBV/SRV/UAV descriptor to the specified CPU handle.
-func (d *Device) writeViewDescriptor(dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entry gputypes.BindGroupEntry) error {
-	switch res := entry.Resource.(type) {
-	case gputypes.BufferBinding:
-		buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
-		size := res.Size
-		if size == 0 {
-			size = buf.size - res.Offset
-		}
-		// Align CBV size to 256 bytes (D3D12 requirement)
-		alignedSize := (size + 255) &^ 255
-		d.raw.CreateConstantBufferView(&d3d12.D3D12_CONSTANT_BUFFER_VIEW_DESC{
-			BufferLocation: buf.gpuVA + res.Offset,
-			SizeInBytes:    uint32(alignedSize),
-		}, dest)
+// writeViewDescriptorsBatched writes CBV/SRV/UAV descriptors for all view entries.
+// CBVs are created inline (cannot be batched), while SRV copies from scattered
+// source handles are batched into a single CopyDescriptors call.
+func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entries []gputypes.BindGroupEntry) error {
+	// Collect SRV copy sources for batching.
+	// destHandles[i] = destination in GPU-visible heap, srcHandles[i] = source from staging heap.
+	var srvDestHandles []d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
+	var srvSrcHandles []d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
 
-	case gputypes.TextureViewBinding:
-		view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle → concrete type
-		if !view.hasSRV {
-			return fmt.Errorf("texture view has no SRV")
-		}
-		d.raw.CopyDescriptorsSimple(1, dest, view.srvHandle, d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+	for i, entry := range entries {
+		dest := cpuStart.Offset(i, d.viewHeap.incrementSize)
 
-	default:
-		return fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
+		switch res := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
+			size := res.Size
+			if size == 0 {
+				size = buf.size - res.Offset
+			}
+			// Align CBV size to 256 bytes (D3D12 requirement).
+			alignedSize := (size + 255) &^ 255
+			d.raw.CreateConstantBufferView(&d3d12.D3D12_CONSTANT_BUFFER_VIEW_DESC{
+				BufferLocation: buf.gpuVA + res.Offset,
+				SizeInBytes:    uint32(alignedSize),
+			}, dest)
+
+		case gputypes.TextureViewBinding:
+			view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle → concrete type
+			if !view.hasSRV {
+				return fmt.Errorf("dx12: texture view has no SRV for binding %d", entry.Binding)
+			}
+			srvDestHandles = append(srvDestHandles, dest)
+			srvSrcHandles = append(srvSrcHandles, view.srvHandle)
+
+		default:
+			return fmt.Errorf("dx12: unsupported binding resource type: %T", entry.Resource)
+		}
 	}
+
+	// Batch all SRV copies in a single CopyDescriptors call.
+	// Each source is a separate range of size 1 (non-contiguous),
+	// each destination is also a separate range of size 1 (may be non-contiguous
+	// if interleaved with CBVs).
+	if len(srvSrcHandles) > 0 {
+		n := uint32(len(srvSrcHandles))
+		d.raw.CopyDescriptors(
+			n, &srvDestHandles[0], nil,
+			n, &srvSrcHandles[0], nil,
+			d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+		)
+	}
+
 	return nil
 }
 

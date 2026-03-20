@@ -275,6 +275,41 @@ func (d *ID3D12Device) CreateUnorderedAccessView(resource *ID3D12Resource, count
 	)
 }
 
+// CopyDescriptors copies descriptors from multiple non-contiguous source ranges
+// to multiple destination ranges. This is the full D3D12 API that supports
+// scattered source descriptors mapped to contiguous destination ranges.
+//
+// numDestRanges is the number of destination descriptor ranges.
+// destRangeStarts points to an array of destination CPU descriptor handles.
+// destRangeSizes points to an array of destination range sizes (nil = all 1).
+// numSrcRanges is the number of source descriptor ranges.
+// srcRangeStarts points to an array of source CPU descriptor handles.
+// srcRangeSizes points to an array of source range sizes (nil = all 1).
+// heapType specifies the type of descriptor heap (must match for all ranges).
+func (d *ID3D12Device) CopyDescriptors(
+	numDestRanges uint32,
+	destRangeStarts *D3D12_CPU_DESCRIPTOR_HANDLE,
+	destRangeSizes *uint32,
+	numSrcRanges uint32,
+	srcRangeStarts *D3D12_CPU_DESCRIPTOR_HANDLE,
+	srcRangeSizes *uint32,
+	heapType D3D12_DESCRIPTOR_HEAP_TYPE,
+) {
+	_, _, _ = syscall.Syscall9(
+		d.vtbl.CopyDescriptors,
+		8,
+		uintptr(unsafe.Pointer(d)),
+		uintptr(numDestRanges),
+		uintptr(unsafe.Pointer(destRangeStarts)),
+		uintptr(unsafe.Pointer(destRangeSizes)),
+		uintptr(numSrcRanges),
+		uintptr(unsafe.Pointer(srcRangeStarts)),
+		uintptr(unsafe.Pointer(srcRangeSizes)),
+		uintptr(heapType),
+		0,
+	)
+}
+
 // CopyDescriptorsSimple copies descriptors from one location to another.
 // numDescriptors is the number of descriptors to copy.
 // destDescriptorRangeStart is the destination CPU descriptor handle.
