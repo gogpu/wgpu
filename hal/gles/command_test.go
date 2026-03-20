@@ -258,6 +258,138 @@ func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
 	}
 }
 
+func TestSetScissorCommand_YFlip(t *testing.T) {
+	// WebGPU uses top-left origin, OpenGL uses bottom-left origin.
+	// glY = fbHeight - y - height
+	tests := []struct {
+		name             string
+		x, y, w, h      uint32
+		fbHeight         uint32
+		wantX, wantY     int32
+		wantW, wantH     int32
+	}{
+		{
+			name:     "top-left corner",
+			x:        0,
+			y:        0,
+			w:        100,
+			h:        100,
+			fbHeight: 600,
+			wantX:    0,
+			wantY:    500, // 600 - 0 - 100
+			wantW:    100,
+			wantH:    100,
+		},
+		{
+			name:     "bottom-right corner",
+			x:        700,
+			y:        500,
+			w:        100,
+			h:        100,
+			fbHeight: 600,
+			wantX:    700,
+			wantY:    0, // 600 - 500 - 100
+			wantW:    100,
+			wantH:    100,
+		},
+		{
+			name:     "center region",
+			x:        200,
+			y:        150,
+			w:        400,
+			h:        300,
+			fbHeight: 600,
+			wantX:    200,
+			wantY:    150, // 600 - 150 - 300
+			wantW:    400,
+			wantH:    300,
+		},
+		{
+			name:     "full framebuffer",
+			x:        0,
+			y:        0,
+			w:        800,
+			h:        600,
+			fbHeight: 600,
+			wantX:    0,
+			wantY:    0, // 600 - 0 - 600
+			wantW:    800,
+			wantH:    600,
+		},
+		{
+			name:     "small rect near top",
+			x:        50,
+			y:        10,
+			w:        200,
+			h:        50,
+			fbHeight: 768,
+			wantX:    50,
+			wantY:    708, // 768 - 10 - 50
+			wantW:    200,
+			wantH:    50,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &SetScissorCommand{
+				x: tt.x, y: tt.y, width: tt.w, height: tt.h,
+				fbHeight: tt.fbHeight,
+			}
+			// Verify the Y-flip formula: glY = fbHeight - y - height
+			glY := int32(cmd.fbHeight) - int32(cmd.y) - int32(cmd.height)
+			if glY != tt.wantY {
+				t.Errorf("glY = %d, want %d (fbHeight=%d, y=%d, h=%d)",
+					glY, tt.wantY, tt.fbHeight, tt.y, tt.h)
+			}
+			if int32(cmd.x) != tt.wantX {
+				t.Errorf("x = %d, want %d", cmd.x, tt.wantX)
+			}
+			if int32(cmd.width) != tt.wantW {
+				t.Errorf("width = %d, want %d", cmd.width, tt.wantW)
+			}
+			if int32(cmd.height) != tt.wantH {
+				t.Errorf("height = %d, want %d", cmd.height, tt.wantH)
+			}
+		})
+	}
+}
+
+func TestRenderPassEncoder_SetScissorRect_CapturesFbHeight(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc).(*RenderPassEncoder)
+
+	// Simulate framebuffer height being set (normally done in setupColorAttachment)
+	rpe.fbHeight = 600
+
+	rpe.SetScissorRect(50, 100, 400, 200)
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetScissorCommand)
+	if !ok {
+		t.Fatalf("expected SetScissorCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.fbHeight != 600 {
+		t.Errorf("fbHeight = %d, want 600", cmd.fbHeight)
+	}
+
+	// Verify the command stores the original WebGPU coordinates
+	if cmd.x != 50 || cmd.y != 100 {
+		t.Errorf("position = (%d, %d), want (50, 100)", cmd.x, cmd.y)
+	}
+	if cmd.width != 400 || cmd.height != 200 {
+		t.Errorf("size = (%d, %d), want (400, 200)", cmd.width, cmd.height)
+	}
+}
+
 func TestRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	enc := &CommandEncoder{}
 	_ = enc.BeginEncoding("test")

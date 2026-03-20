@@ -215,7 +215,7 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 	}
 
 	if tv.isSurface {
-		e.setupSurfaceTarget(tv)
+		e.setupSurfaceTarget(tv, rpe)
 		return
 	}
 
@@ -227,10 +227,11 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 }
 
 // setupSurfaceTarget binds the default framebuffer and sets viewport to surface dimensions.
-func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView) {
+func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView, rpe *RenderPassEncoder) {
 	e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
 	if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
 		cfg := tv.surfaceTex.surface.config
+		rpe.fbHeight = cfg.Height
 		e.commands = append(e.commands, &SetViewportCommand{
 			width:  float32(cfg.Width),
 			height: float32(cfg.Height),
@@ -257,6 +258,7 @@ func (e *CommandEncoder) setupOffscreenTarget(
 		}
 	}
 
+	rpe.fbHeight = tv.texture.size.Height
 	e.commands = append(e.commands, &SetViewportCommand{
 		width:  float32(tv.texture.size.Width),
 		height: float32(tv.texture.size.Height),
@@ -290,6 +292,7 @@ type RenderPassEncoder struct {
 	indexBuffer   *Buffer
 	indexFormat   gputypes.IndexFormat
 	stencilRef    uint32
+	fbHeight      uint32 // Framebuffer height for glScissor Y-coordinate flip
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
@@ -423,9 +426,12 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 }
 
 // SetScissorRect sets the scissor rectangle.
+// WebGPU uses top-left origin; OpenGL uses bottom-left origin.
+// The Y coordinate is flipped using the framebuffer height captured at BeginRenderPass.
 func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 	e.encoder.commands = append(e.encoder.commands, &SetScissorCommand{
 		x: x, y: y, width: width, height: height,
+		fbHeight: e.fbHeight,
 	})
 }
 
@@ -966,13 +972,19 @@ func (c *SetViewportCommand) Execute(ctx *gl.Context) {
 }
 
 // SetScissorCommand sets the scissor rectangle.
+// It converts from WebGPU top-left origin to OpenGL bottom-left origin
+// using the framebuffer height: glY = fbHeight - y - height.
 type SetScissorCommand struct {
 	x, y, width, height uint32
+	fbHeight            uint32 // Framebuffer height for Y-coordinate flip
 }
 
 func (c *SetScissorCommand) Execute(ctx *gl.Context) {
 	ctx.Enable(gl.SCISSOR_TEST)
-	ctx.Scissor(int32(c.x), int32(c.y), int32(c.width), int32(c.height))
+	// OpenGL scissor uses bottom-left origin, WebGPU uses top-left origin.
+	// Convert: glY = fbHeight - y - height
+	glY := int32(c.fbHeight) - int32(c.y) - int32(c.height)
+	ctx.Scissor(int32(c.x), glY, int32(c.width), int32(c.height))
 }
 
 // SetBlendConstantCommand sets blend constant.
