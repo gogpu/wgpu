@@ -37,10 +37,16 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 	var maxDrawBuffers int32
 	s.glCtx.GetIntegerv(gl.MAX_DRAW_BUFFERS, &maxDrawBuffers)
 
+	var maxTextureUnits int32
+	s.glCtx.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &maxTextureUnits)
+
 	limits := gputypes.DefaultLimits()
 	limits.MaxTextureDimension1D = uint32(maxTextureSize)
 	limits.MaxTextureDimension2D = uint32(maxTextureSize)
 	limits.MaxColorAttachments = uint32(maxDrawBuffers)
+	if maxTextureUnits > 0 {
+		limits.MaxSampledTexturesPerShaderStage = uint32(maxTextureUnits)
+	}
 
 	return hal.ExposedAdapter{
 		Adapter: &Adapter{

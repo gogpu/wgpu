@@ -6,6 +6,7 @@
 package gles
 
 import (
+	"log/slog"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -31,10 +32,11 @@ func (c *CommandBuffer) Destroy() {
 // CommandEncoder implements hal.CommandEncoder for OpenGL.
 // Platform-specific fields are defined in command_<platform>.go files.
 type CommandEncoder struct {
-	glCtx    *gl.Context
-	commands []Command
-	label    string
-	vao      uint32 // persistent VAO from Device for Core Profile
+	glCtx           *gl.Context
+	commands        []Command
+	label           string
+	vao             uint32 // persistent VAO from Device for Core Profile
+	maxTextureUnits int32  // Hardware limit passed from Device
 }
 
 // BeginEncoding begins command recording.
@@ -359,9 +361,10 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		return
 	}
 	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
-		index:          index,
-		group:          bg,
-		dynamicOffsets: offsets,
+		index:           index,
+		group:           bg,
+		dynamicOffsets:  offsets,
+		maxTextureUnits: e.encoder.maxTextureUnits,
 	})
 }
 
@@ -523,9 +526,10 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		return
 	}
 	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
-		index:          index,
-		group:          bg,
-		dynamicOffsets: offsets,
+		index:           index,
+		group:           bg,
+		dynamicOffsets:  offsets,
+		maxTextureUnits: e.encoder.maxTextureUnits,
 	})
 }
 
@@ -835,9 +839,10 @@ func (c *SetPipelineStateCommand) applyDepthStencilState(ctx *gl.Context) {
 
 // SetBindGroupCommand binds resources.
 type SetBindGroupCommand struct {
-	index          uint32
-	group          *BindGroup
-	dynamicOffsets []uint32
+	index           uint32
+	group           *BindGroup
+	dynamicOffsets  []uint32
+	maxTextureUnits int32 // Hardware limit for validation
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
@@ -886,6 +891,20 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			// TextureView handle is the GL texture object ID (from NativeHandle()).
 			texID := uint32(res.TextureView)
 			if texID == 0 {
+				continue
+			}
+			// Validate texture unit index against hardware limit.
+			// Without this check, textures silently fail to bind when
+			// glBinding >= GL_MAX_TEXTURE_IMAGE_UNITS (typically 8 on Intel).
+			if c.maxTextureUnits > 0 && int32(glBinding) >= c.maxTextureUnits {
+				if l := hal.Logger(); l != nil {
+					l.Warn("GLES texture unit overflow: binding exceeds hardware limit",
+						slog.Uint64("glBinding", uint64(glBinding)),
+						slog.Int64("maxTextureUnits", int64(c.maxTextureUnits)),
+						slog.Uint64("group", uint64(c.index)),
+						slog.Uint64("binding", uint64(entry.Binding)),
+					)
+				}
 				continue
 			}
 			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)

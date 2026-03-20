@@ -18,11 +18,12 @@ import (
 
 // Device implements hal.Device for OpenGL on Linux.
 type Device struct {
-	glCtx         *gl.Context
-	eglCtx        *egl.Context
-	displayHandle uintptr
-	windowHandle  uintptr
-	vao           uint32 // persistent VAO (Core Profile requires one bound)
+	glCtx           *gl.Context
+	eglCtx          *egl.Context
+	displayHandle   uintptr
+	windowHandle    uintptr
+	vao             uint32 // persistent VAO (Core Profile requires one bound)
+	maxTextureUnits int32  // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -487,8 +488,9 @@ func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
 // CreateCommandEncoder creates a command encoder.
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{
-		glCtx: d.glCtx,
-		vao:   d.vao,
+		glCtx:           d.glCtx,
+		vao:             d.vao,
+		maxTextureUnits: d.maxTextureUnits,
 	}, nil
 }
 

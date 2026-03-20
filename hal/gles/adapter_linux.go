@@ -36,12 +36,20 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	vao := a.glCtx.GenVertexArrays(1)
 	a.glCtx.BindVertexArray(vao)
 
+	// Query hardware texture unit limit for binding validation.
+	var maxTexUnits int32
+	a.glCtx.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &maxTexUnits)
+	if maxTexUnits <= 0 {
+		maxTexUnits = 8 // Conservative default
+	}
+
 	device := &Device{
-		glCtx:         a.glCtx,
-		eglCtx:        a.eglCtx,
-		displayHandle: a.displayHandle,
-		windowHandle:  a.windowHandle,
-		vao:           vao,
+		glCtx:           a.glCtx,
+		eglCtx:          a.eglCtx,
+		displayHandle:   a.displayHandle,
+		windowHandle:    a.windowHandle,
+		vao:             vao,
+		maxTextureUnits: maxTexUnits,
 	}
 
 	queue := &Queue{
