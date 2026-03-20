@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-03-20
+
+### Added
+
+- **GLES: GL sampler objects** — Proper sampler state via `glGenSamplers`/`glBindSampler`
+  (GL 3.3+). Samplers now honor `FilterModeLinear`/`FilterModeNearest`, address modes,
+  LOD clamp, anisotropy, and compare functions. Previously all textures were hardcoded
+  to `GL_NEAREST` and sampler bindings were no-ops. Matches Rust wgpu GLES approach.
+
+- **GLES: texture unit overflow validation** — Warns via `slog` when flattened binding
+  index exceeds `GL_MAX_TEXTURE_IMAGE_UNITS` (typically 8 on Intel). Reports actual
+  hardware limit in adapter `Limits.MaxSampledTexturesPerShaderStage`.
+
+### Fixed
+
+- **GLES: scissor Y-coordinate flip** — `glScissor` now correctly converts WebGPU
+  top-left origin to OpenGL bottom-left origin (`glY = fbHeight - y - height`).
+  Previously the scissor was vertically mirrored, clipping out content in complex
+  UI layouts with nested clip rects. Includes clamp to 0 for safety.
+
+- **GLES: Linux colorWriteMask** — `CreateRenderPipeline` on Linux was missing
+  `colorWriteMask` extraction from fragment targets, causing all color writes to
+  be masked (black screen). Now matches Windows implementation.
+
+- **GLES: Linux CreateBuffer nil check** — Added nil descriptor guard matching
+  the Windows version to prevent nil pointer panic.
+
+- **GLES: texture defaults changed to LINEAR** — Default texture filter changed
+  from `GL_NEAREST` to `GL_LINEAR`. GL sampler objects override this when bound.
+
+### Performance
+
+- **DX12: batch CopyDescriptors** — `CreateBindGroup` now batches descriptor copies
+  via the full `CopyDescriptors` D3D12 API instead of calling `CopyDescriptorsSimple`
+  per descriptor (~800 syscalls/frame → ~200). Estimated +20-30% FPS for complex UI.
+
+- **DX12: frame pacing** — GPU wait moved from `Present` to `AcquireTexture`,
+  allowing CPU/GPU overlap. Matches Rust wgpu approach. Estimated +15-25% FPS
+  when GPU is the bottleneck.
+
+- **DX12: pool descriptor heap slice** — Replaced heap-allocated slice in
+  `ensureDescriptorHeapsBound` with fixed `[2]` array field on `CommandEncoder`.
+
 ## [0.21.3] - 2026-03-16
 
 ### Added
