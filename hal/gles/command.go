@@ -917,7 +917,14 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			ctx.BindTexture(gl.TEXTURE_2D, texID)
 
 		case gputypes.SamplerBinding:
-			// GLES uses texture-bound sampler state, no GL sampler objects.
+			// Sampler handle is the GL sampler object ID (from NativeHandle()).
+			samplerID := uint32(res.Sampler)
+			if samplerID != 0 {
+				// Bind the GL sampler object to the texture unit corresponding
+				// to this binding index. The sampler overrides any texture-bound
+				// filtering/wrapping state on this unit.
+				ctx.BindSampler(glBinding, samplerID)
+			}
 		}
 	}
 }

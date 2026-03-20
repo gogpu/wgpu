@@ -149,9 +149,11 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	}
 
 	// Set default texture parameters (multisample textures don't support these).
+	// GL sampler objects override these when bound, but they provide reasonable
+	// defaults when no sampler is explicitly used.
 	if target != gl.TEXTURE_2D_MULTISAMPLE {
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	}
@@ -211,11 +213,14 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 	// TextureViews don't hold GL resources in OpenGL
 }
 
-// CreateSampler creates a texture sampler.
+// CreateSampler creates a texture sampler using GL sampler objects (GL 3.3+).
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (hal.Sampler, error) {
-	// For now, use texture-bound sampler state
-	// Note: GL sampler objects (GL 3.3+) would allow independent sampler state.
+	if desc == nil {
+		return &Sampler{glCtx: d.glCtx}, nil
+	}
+	id := configureSampler(d.glCtx, desc)
 	return &Sampler{
+		id:    id,
 		glCtx: d.glCtx,
 	}, nil
 }

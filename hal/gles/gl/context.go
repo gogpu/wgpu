@@ -157,6 +157,13 @@ type Context struct {
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample uintptr
 	glBlitFramebuffer       uintptr
+
+	// Sampler objects (GL 3.3+ / ES 3.0+)
+	glGenSamplers       uintptr
+	glDeleteSamplers    uintptr
+	glBindSampler       uintptr
+	glSamplerParameteri uintptr
+	glSamplerParameterf uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -307,6 +314,13 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
 	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
+
+	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
+	c.glGenSamplers = getProcAddr("glGenSamplers")
+	c.glDeleteSamplers = getProcAddr("glDeleteSamplers")
+	c.glBindSampler = getProcAddr("glBindSampler")
+	c.glSamplerParameteri = getProcAddr("glSamplerParameteri")
+	c.glSamplerParameterf = getProcAddr("glSamplerParameterf")
 
 	return nil
 }
@@ -614,6 +628,63 @@ func (c *Context) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX
 		uintptr(srcX0), uintptr(srcY0), uintptr(srcX1), uintptr(srcY1),
 		uintptr(dstX0), uintptr(dstY0), uintptr(dstX1), uintptr(dstY1),
 		uintptr(mask), uintptr(filter))
+}
+
+// --- Sampler Objects ---
+
+// GenSamplers generates sampler object names.
+// Requires OpenGL 3.3+ or OpenGL ES 3.0+.
+// Returns 0 if sampler objects are not supported.
+func (c *Context) GenSamplers(n int32) uint32 {
+	if c.glGenSamplers == 0 {
+		return 0
+	}
+	var sampler uint32
+	syscall.SyscallN(c.glGenSamplers, uintptr(n), uintptr(unsafe.Pointer(&sampler)))
+	return sampler
+}
+
+// DeleteSamplers deletes sampler objects.
+// No-op if sampler objects are not supported.
+func (c *Context) DeleteSamplers(samplers ...uint32) {
+	if c.glDeleteSamplers == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDeleteSamplers, uintptr(len(samplers)),
+		uintptr(unsafe.Pointer(&samplers[0])))
+}
+
+// BindSampler binds a sampler object to a texture unit.
+// No-op if sampler objects are not supported.
+func (c *Context) BindSampler(unit, sampler uint32) {
+	if c.glBindSampler == 0 {
+		return
+	}
+	syscall.SyscallN(c.glBindSampler, uintptr(unit), uintptr(sampler))
+}
+
+// SamplerParameteri sets an integer parameter on a sampler object.
+// No-op if sampler objects are not supported.
+func (c *Context) SamplerParameteri(sampler, pname uint32, param int32) {
+	if c.glSamplerParameteri == 0 {
+		return
+	}
+	syscall.SyscallN(c.glSamplerParameteri, uintptr(sampler), uintptr(pname), uintptr(param))
+}
+
+// SamplerParameterf sets a float parameter on a sampler object.
+// No-op if sampler objects are not supported.
+func (c *Context) SamplerParameterf(sampler, pname uint32, param float32) {
+	if c.glSamplerParameterf == 0 {
+		return
+	}
+	syscall.SyscallN(c.glSamplerParameterf, uintptr(sampler), uintptr(pname),
+		uintptr(*(*uint32)(unsafe.Pointer(&param))))
+}
+
+// SupportsSamplerObjects returns true if GL sampler objects are supported.
+func (c *Context) SupportsSamplerObjects() bool {
+	return c.glGenSamplers != 0
 }
 
 // --- Framebuffers ---

@@ -39,6 +39,7 @@ var (
 	cifVoid7ReadPx   types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
 	cifVoid6TexMS    types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
 	cifVoid10Blit    types.CallInterface // void fn(int32*8, uint32, uint32) - BlitFramebuffer
+	cifVoid3UUF      types.CallInterface // void fn(uint32, uint32, float32) - SamplerParameterf
 	cifInitialized   bool
 )
 
@@ -360,6 +361,18 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	// void fn(uint32, uint32, float32) - SamplerParameterf
+	err = ffi.PrepareCallInterface(&cifVoid3UUF, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.FloatTypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
 	cifInitialized = true
 	return nil
 }
@@ -510,6 +523,13 @@ type Context struct {
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample unsafe.Pointer
 	glBlitFramebuffer       unsafe.Pointer
+
+	// Sampler objects (GL 3.3+ / ES 3.0+)
+	glGenSamplers       unsafe.Pointer
+	glDeleteSamplers    unsafe.Pointer
+	glBindSampler       unsafe.Pointer
+	glSamplerParameteri unsafe.Pointer
+	glSamplerParameterf unsafe.Pointer
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -665,6 +685,13 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
 	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
+
+	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
+	c.glGenSamplers = getProcAddr("glGenSamplers")
+	c.glDeleteSamplers = getProcAddr("glDeleteSamplers")
+	c.glBindSampler = getProcAddr("glBindSampler")
+	c.glSamplerParameteri = getProcAddr("glSamplerParameteri")
+	c.glSamplerParameterf = getProcAddr("glSamplerParameterf")
 
 	return nil
 }
@@ -1164,6 +1191,84 @@ func (c *Context) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX
 		unsafe.Pointer(&filter),
 	}
 	_ = ffi.CallFunction(&cifVoid10Blit, c.glBlitFramebuffer, nil, args[:])
+}
+
+// --- Sampler Objects ---
+
+// GenSamplers generates sampler object names.
+// Requires OpenGL 3.3+ or OpenGL ES 3.0+.
+// Returns 0 if sampler objects are not supported.
+func (c *Context) GenSamplers(n int32) uint32 {
+	if c.glGenSamplers == nil {
+		return 0
+	}
+	var sampler uint32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&sampler),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glGenSamplers, nil, args[:])
+	return sampler
+}
+
+// DeleteSamplers deletes sampler objects.
+// No-op if sampler objects are not supported.
+func (c *Context) DeleteSamplers(samplers ...uint32) {
+	if c.glDeleteSamplers == nil {
+		return
+	}
+	n := int32(len(samplers))
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&samplers[0]),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glDeleteSamplers, nil, args[:])
+}
+
+// BindSampler binds a sampler object to a texture unit.
+// No-op if sampler objects are not supported.
+func (c *Context) BindSampler(unit, sampler uint32) {
+	if c.glBindSampler == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&unit),
+		unsafe.Pointer(&sampler),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glBindSampler, nil, args[:])
+}
+
+// SamplerParameteri sets an integer parameter on a sampler object.
+// No-op if sampler objects are not supported.
+func (c *Context) SamplerParameteri(sampler, pname uint32, param int32) {
+	if c.glSamplerParameteri == nil {
+		return
+	}
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&sampler),
+		unsafe.Pointer(&pname),
+		unsafe.Pointer(&param),
+	}
+	_ = ffi.CallFunction(&cifVoid3, c.glSamplerParameteri, nil, args[:])
+}
+
+// SamplerParameterf sets a float parameter on a sampler object.
+// No-op if sampler objects are not supported.
+func (c *Context) SamplerParameterf(sampler, pname uint32, param float32) {
+	if c.glSamplerParameterf == nil {
+		return
+	}
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&sampler),
+		unsafe.Pointer(&pname),
+		unsafe.Pointer(&param),
+	}
+	_ = ffi.CallFunction(&cifVoid3UUF, c.glSamplerParameterf, nil, args[:])
+}
+
+// SupportsSamplerObjects returns true if GL sampler objects are supported.
+func (c *Context) SupportsSamplerObjects() bool {
+	return c.glGenSamplers != nil
 }
 
 // --- Framebuffers ---

@@ -262,11 +262,11 @@ func TestSetScissorCommand_YFlip(t *testing.T) {
 	// WebGPU uses top-left origin, OpenGL uses bottom-left origin.
 	// glY = fbHeight - y - height
 	tests := []struct {
-		name             string
-		x, y, w, h      uint32
-		fbHeight         uint32
-		wantX, wantY     int32
-		wantW, wantH     int32
+		name         string
+		x, y, w, h   uint32
+		fbHeight     uint32
+		wantX, wantY int32
+		wantW, wantH int32
 	}{
 		{
 			name:     "top-left corner",

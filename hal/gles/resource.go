@@ -91,19 +91,22 @@ func (v *TextureView) NativeHandle() uintptr {
 	return 0
 }
 
-// Sampler implements hal.Sampler for OpenGL.
+// Sampler implements hal.Sampler for OpenGL using GL sampler objects (GL 3.3+).
 type Sampler struct {
+	id    uint32 // GL sampler object ID (0 if sampler objects not supported)
 	glCtx *gl.Context
 }
 
-// Destroy releases the sampler.
+// Destroy releases the GL sampler object.
 func (s *Sampler) Destroy() {
-	// Note: GL 3.3 core requires sampler objects
-	// For now, we use texture-bound state (no GL sampler object)
+	if s.id != 0 && s.glCtx != nil {
+		s.glCtx.DeleteSamplers(s.id)
+		s.id = 0
+	}
 }
 
-// NativeHandle returns 0 (no GL sampler object).
-func (s *Sampler) NativeHandle() uintptr { return 0 }
+// NativeHandle returns the GL sampler object ID.
+func (s *Sampler) NativeHandle() uintptr { return uintptr(s.id) }
 
 // ShaderModule implements hal.ShaderModule for OpenGL.
 type ShaderModule struct {
