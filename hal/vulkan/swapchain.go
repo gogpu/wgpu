@@ -34,6 +34,7 @@ type Swapchain struct {
 	currentAcquireSem vk.Semaphore // The acquire semaphore used for current frame
 	imageAcquired     bool
 	surfaceTextures   []*SwapchainTexture
+	acquireFence      vk.Fence // Post-acquire fence for frame pacing (Rust wgpu pattern)
 }
 
 // SwapchainTexture wraps a swapchain image as a SurfaceTexture.
@@ -307,6 +308,19 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		surfaceTextures:    surfaceTextures,
 	}
 
+	// Create post-acquire fence for frame pacing (Rust wgpu pattern).
+	// vkAcquireNextImageKHR signals this fence when the image is ready.
+	// We wait on it before rendering to sync with the presentation engine.
+	// Critical for Windows where Vulkan uses DXGI swapchain internally.
+	var acquireFence vk.Fence
+	fenceInfo := vk.FenceCreateInfo{
+		SType: vk.StructureTypeFenceCreateInfo,
+	}
+	fenceResult := device.cmds.CreateFence(device.handle, &fenceInfo, nil, &acquireFence)
+	if fenceResult == vk.Success {
+		swapchain.acquireFence = acquireFence
+	}
+
 	// Link swapchain to surface textures
 	for _, tex := range surfaceTextures {
 		tex.swapchain = swapchain
@@ -374,6 +388,12 @@ func (sc *Swapchain) destroyResources() {
 	sc.imageViews = nil
 	sc.images = nil
 	sc.surfaceTextures = nil
+
+	// Destroy post-acquire fence
+	if sc.acquireFence != 0 {
+		sc.device.cmds.DestroyFence(sc.device.handle, sc.acquireFence, nil)
+		sc.acquireFence = 0
+	}
 }
 
 // Destroy destroys the swapchain completely.
@@ -420,10 +440,12 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		)
 	}
 
-	// Post-acquire fence wait is not implemented — it's a Windows/Intel optimization
-	// for DXGI frame pacing (see wgpu issues #8310, #8354), not required for correctness.
+	// Pass acquireFence to vkAcquireNextImageKHR for post-acquire frame pacing.
+	// Rust wgpu: "This wait is very important on Windows to avoid bad frame pacing
+	// where the Vulkan driver is using a DXGI swapchain" (issues #8310, #8354).
+	fence := sc.acquireFence
 	var imageIndex uint32
-	result := vkAcquireNextImageKHR(sc.device, sc.handle, timeout, acquireSem, vk.Fence(0), &imageIndex)
+	result := vkAcquireNextImageKHR(sc.device, sc.handle, timeout, acquireSem, fence, &imageIndex)
 
 	switch result {
 	case vk.Success, vk.SuboptimalKhr:
@@ -440,10 +462,20 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		return nil, false, fmt.Errorf("vulkan: vkAcquireNextImageKHR failed: %d", result)
 	}
 
-	// NOTE: Post-acquire fence wait removed.
-	// wgpu uses this for Windows/Intel DXGI swapchain frame pacing,
-	// but it causes timeouts on other drivers. We rely on semaphore
-	// synchronization which is sufficient for GPU-side correctness.
+	// Post-acquire fence wait: sync with presentation engine for proper frame pacing.
+	// Rust wgpu: "very important on Windows to avoid bad frame pacing where the
+	// Vulkan driver is using a DXGI swapchain" (issues #8310, #8354).
+	// Previously removed due to Intel driver timeouts — re-enabled for testing
+	// with updated drivers (2026-03).
+	if fence != 0 {
+		waitResult := sc.device.cmds.WaitForFences(sc.device.handle, 1, &fence, vk.True, timeout)
+		if waitResult != vk.Success {
+			// Non-fatal: if wait fails, continue without frame pacing.
+			// This handles drivers that don't support post-acquire fence properly.
+			_ = waitResult
+		}
+		_ = sc.device.cmds.ResetFences(sc.device.handle, 1, &fence)
+	}
 
 	// Store the current acquire index and semaphore for use in Submit.
 	sc.currentAcquireIdx = acquireIdx

@@ -695,6 +695,7 @@ type ClearColorCommand struct {
 }
 
 func (c *ClearColorCommand) Execute(ctx *gl.Context) {
+	ctx.Disable(gl.SCISSOR_TEST) // Ensure clear covers full framebuffer (not clipped by stale scissor)
 	ctx.ClearColor(c.r, c.g, c.b, c.a)
 	ctx.Clear(gl.COLOR_BUFFER_BIT)
 }
@@ -705,6 +706,7 @@ type ClearDepthCommand struct {
 }
 
 func (c *ClearDepthCommand) Execute(ctx *gl.Context) {
+	ctx.Disable(gl.SCISSOR_TEST)
 	ctx.Clear(gl.DEPTH_BUFFER_BIT)
 }
 
@@ -714,6 +716,7 @@ type ClearStencilCommand struct {
 }
 
 func (c *ClearStencilCommand) Execute(ctx *gl.Context) {
+	ctx.Disable(gl.SCISSOR_TEST)
 	// Ensure stencil write mask allows the clear to take effect.
 	ctx.StencilMaskSeparate(gl.FRONT_AND_BACK, 0xFF)
 	ctx.Clear(gl.STENCIL_BUFFER_BIT)

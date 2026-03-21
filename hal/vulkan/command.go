@@ -723,10 +723,12 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	cpe.timestampWrites = nil
 
 	// Write beginning-of-pass timestamp if requested.
+	// VK-001: Defense-in-depth — check both isRecording and cmdBuffer != 0
+	// to prevent SIGSEGV from null dispatch table dereference (gogpu#119).
 	if desc != nil && desc.TimestampWrites != nil {
 		cpe.timestampWrites = desc.TimestampWrites
 		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.isRecording {
+			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.isRecording && e.cmdBuffer != 0 {
 				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
 				e.device.cmds.CmdResetQueryPool(e.cmdBuffer, qs.pool, idx, 1)
 				e.device.cmds.CmdWriteTimestamp(
@@ -776,7 +778,7 @@ func (e *RenderPassEncoder) End() {
 // SetPipeline sets the render pipeline.
 func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	p, ok := pipeline.(*RenderPipeline)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 	e.pipeline = p
@@ -786,7 +788,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 // SetBindGroup sets a bind group.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -812,7 +814,7 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 // Uses stack variables instead of slice allocations (VK-PERF-007).
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -826,7 +828,7 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 // SetIndexBuffer sets the index buffer.
 func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -842,7 +844,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 // SetViewport sets the viewport.
 // NOTE: Applies Y-flip for WebGPU/OpenGL coordinate system compatibility (matches Rust wgpu).
 func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -861,7 +863,7 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 
 // SetScissorRect sets the scissor rectangle.
 func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -875,7 +877,7 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 
 // SetBlendConstant sets the blend constant.
 func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
-	if !e.encoder.isRecording || color == nil {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 || color == nil {
 		return
 	}
 
@@ -891,7 +893,7 @@ func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 
 // SetStencilReference sets the stencil reference value.
 func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -901,7 +903,7 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 	vkCmdDraw(e.encoder.device.cmds, e.encoder.cmdBuffer, vertexCount, instanceCount, firstVertex, firstInstance)
@@ -909,7 +911,7 @@ func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstI
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -919,7 +921,7 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -929,7 +931,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -939,7 +941,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 // ExecuteBundle executes a pre-recorded render bundle.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 	vkBundle, ok := bundle.(*RenderBundle)
-	if !ok || vkBundle == nil || !e.encoder.isRecording {
+	if !ok || vkBundle == nil || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -966,7 +968,9 @@ type ComputePassEncoder struct {
 // writing, causing stale/zero reads.
 // Returns the encoder to the pool for reuse (VK-PERF-005).
 func (e *ComputePassEncoder) End() {
-	if e.encoder == nil || !e.encoder.isRecording {
+	// VK-001: Defense-in-depth — check both isRecording and cmdBuffer != 0
+	// to prevent SIGSEGV from null dispatch table dereference (gogpu#119).
+	if e.encoder == nil || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -1013,7 +1017,7 @@ func (e *ComputePassEncoder) End() {
 // SetPipeline sets the compute pipeline.
 func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	p, ok := pipeline.(*ComputePipeline)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 	e.pipeline = p
@@ -1024,7 +1028,7 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 // SetBindGroup sets a bind group.
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || !e.encoder.isRecording || e.pipeline == nil {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 || e.pipeline == nil {
 		return
 	}
 
@@ -1048,7 +1052,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 // Dispatch dispatches compute work.
 func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
-	if !e.encoder.isRecording {
+	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 
@@ -1058,7 +1062,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
 		return
 	}
 

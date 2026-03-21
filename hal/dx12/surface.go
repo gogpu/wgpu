@@ -100,6 +100,10 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		_ = err
 	}
 
+	// Get waitable object for frame pacing (must be called after SetMaximumFrameLatency).
+	// Without this wait, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT is a no-op.
+	s.frameLatencyWaitableObject = swapchain4.GetFrameLatencyWaitableObject()
+
 	// Disable Alt+Enter fullscreen toggle
 	if err := s.instance.factory.MakeWindowAssociation(s.hwnd, dxgi.DXGI_MWA_NO_ALT_ENTER); err != nil {
 		// Non-fatal, just continue

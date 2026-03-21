@@ -26,6 +26,8 @@ import (
 	"runtime"
 	"unsafe"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
@@ -323,15 +325,16 @@ type Surface struct {
 	device   *Device
 
 	// Swapchain state
-	swapchain      *dxgi.IDXGISwapChain4
-	backBuffers    []backBuffer
-	width          uint32
-	height         uint32
-	format         dxgi.DXGI_FORMAT
-	halFormat      gputypes.TextureFormat
-	presentMode    hal.PresentMode
-	swapchainFlags uint32
-	allowTearing   bool
+	swapchain                  *dxgi.IDXGISwapChain4
+	backBuffers                []backBuffer
+	width                      uint32
+	height                     uint32
+	format                     dxgi.DXGI_FORMAT
+	halFormat                  gputypes.TextureFormat
+	presentMode                hal.PresentMode
+	swapchainFlags             uint32
+	allowTearing               bool
+	frameLatencyWaitableObject uintptr // HANDLE from GetFrameLatencyWaitableObject
 }
 
 // Configure configures the surface for presentation.
@@ -368,6 +371,12 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 	// Release back buffer resources
 	s.releaseBackBuffers()
 
+	// Close frame latency waitable object handle
+	if s.frameLatencyWaitableObject != 0 {
+		_ = windows.CloseHandle(windows.Handle(s.frameLatencyWaitableObject))
+		s.frameLatencyWaitableObject = 0
+	}
+
 	// Release swapchain
 	if s.swapchain != nil {
 		s.swapchain.Release()
@@ -394,6 +403,19 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	if s.device != nil {
 		if err := s.device.recycleFrameSlot(); err != nil {
 			return nil, fmt.Errorf("dx12: recycle frame slot failed: %w", err)
+		}
+	}
+
+	// Wait on the frame latency waitable object for proper frame pacing.
+	// This blocks until the swapchain is ready to accept a new frame,
+	// preventing the CPU from queuing too many frames ahead of the GPU.
+	if s.frameLatencyWaitableObject != 0 {
+		_, err := windows.WaitForSingleObject(
+			windows.Handle(s.frameLatencyWaitableObject),
+			1000, // 1 second timeout (same as Rust wgpu)
+		)
+		if err != nil {
+			return nil, fmt.Errorf("dx12: WaitForSingleObject on frame latency waitable failed: %w", err)
 		}
 	}
 

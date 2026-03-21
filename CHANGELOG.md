@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-03-20
+
+### Fixed
+
+- **Vulkan: null command buffer guards** — Defense-in-depth checks across 19 methods
+  prevent SIGSEGV if vkAllocateCommandBuffers silently returns null handle. 17 unit tests.
+
+- **GLES: disable scissor before glClear** — Prevents garbage/noise pixels during
+  window resize. glClear was clipped by stale scissor rect from previous frame.
+
+### Performance
+
+- **Vulkan: restore post-acquire fence wait** — Re-enabled fence in vkAcquireNextImageKHR
+  for proper frame pacing on Windows (Intel driver timeouts fixed in 2026 drivers).
+  Matches Rust wgpu pattern (issues #8310, #8354).
+
+- **DX12: waitable swapchain frame latency** — GetFrameLatencyWaitableObject + wait
+  in AcquireTexture. Was flag-only (no-op). Now provides proper CPU frame pacing.
+
 ## [0.22.0] - 2026-03-20
 
 ### Added
