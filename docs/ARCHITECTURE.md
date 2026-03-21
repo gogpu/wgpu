@@ -114,12 +114,15 @@ Pure Go DX12 implementation via COM interfaces.
 
 ### `hal/gles/` — OpenGL ES Backend
 
-Pure Go OpenGL ES 3.0+ implementation.
+Pure Go OpenGL ES 3.0+ / OpenGL 3.3+ implementation.
 
-- `gl/` — OpenGL function bindings
-- `egl/` — EGL context and display management
+- `gl/` — OpenGL function bindings (Windows syscall + Linux goffi)
+- `egl/` — EGL context and display management (Linux)
 - `wgl/` — WGL context for Windows
+- `sampler.go` — GL sampler objects (glGenSamplers/glBindSampler, GL 3.3+)
 - Shader compilation: WGSL → GLSL via naga
+- Scissor Y-flip: WebGPU top-left → OpenGL bottom-left origin conversion
+- Texture unit validation: warns when binding exceeds GL_MAX_TEXTURE_IMAGE_UNITS
 
 ### `hal/software/` — Software Backend
 
