@@ -648,6 +648,11 @@ type MSAAResolveCommand struct {
 }
 
 func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
+	// Disable scissor test before blit — glBlitFramebuffer respects GL_SCISSOR_TEST
+	// on the draw framebuffer. Without this, only the last scissor rect's pixels
+	// are copied, leaving the rest of the surface black (gg#226).
+	ctx.Disable(gl.SCISSOR_TEST)
+
 	// Bind MSAA FBO as read source.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, c.msaaTexture.fbo)
 
@@ -993,11 +998,12 @@ func (c *SetScissorCommand) Execute(ctx *gl.Context) {
 	ctx.Enable(gl.SCISSOR_TEST)
 	// OpenGL scissor uses bottom-left origin, WebGPU uses top-left origin.
 	// Convert: glY = fbHeight - y - height
-	// Clamp to 0 to avoid GL_INVALID_VALUE when fbHeight is 0 (uninitialized).
+	//
+	// Negative glY is valid — OpenGL glScissor accepts GLint (signed).
+	// The driver handles partial visibility via per-fragment scissor test.
+	// Previous code clamped glY to 0 without reducing height, which shifted
+	// the scissor rect and broke ScrollView overflow clipping (gg#226).
 	glY := int32(c.fbHeight) - int32(c.y) - int32(c.height)
-	if glY < 0 {
-		glY = 0
-	}
 	ctx.Scissor(int32(c.x), glY, int32(c.width), int32(c.height))
 }
 

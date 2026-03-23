@@ -41,6 +41,9 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 		LangVersion:        glsl.Version430,
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
+		// NOTE: Do NOT use WriterFlagAdjustCoordinateSpace here.
+		// Our gg shaders already flip Y in the vertex shader (Vulkan convention).
+		// Adding naga's flip would double-flip, producing upside-down output.
 	})
 	if err != nil {
 		return "", fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)

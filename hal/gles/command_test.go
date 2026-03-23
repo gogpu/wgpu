@@ -328,6 +328,42 @@ func TestSetScissorCommand_YFlip(t *testing.T) {
 			wantW:    200,
 			wantH:    50,
 		},
+		{
+			name:     "overflow bottom — ScrollView case (gg#226)",
+			x:        0,
+			y:        500,
+			w:        584,
+			h:        361,
+			fbHeight: 700,
+			wantX:    0,
+			wantY:    -161, // 700 - 500 - 361 = -161 (negative is valid for glScissor)
+			wantW:    584,
+			wantH:    361,
+		},
+		{
+			name:     "overflow — rect larger than framebuffer",
+			x:        0,
+			y:        0,
+			w:        800,
+			h:        900,
+			fbHeight: 700,
+			wantX:    0,
+			wantY:    -200, // 700 - 0 - 900 = -200
+			wantW:    800,
+			wantH:    900,
+		},
+		{
+			name:     "overflow — rect at framebuffer edge",
+			x:        0,
+			y:        600,
+			w:        100,
+			h:        200,
+			fbHeight: 700,
+			wantX:    0,
+			wantY:    -100, // 700 - 600 - 200 = -100
+			wantW:    100,
+			wantH:    200,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
