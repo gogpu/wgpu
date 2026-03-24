@@ -415,25 +415,58 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	_ = MsgSend(e.raw, Sel("setRenderPipelineState:"), uintptr(p.raw))
 }
 
+// bindSlotAssignment holds the computed per-type Metal slot index for a bind group entry.
+type bindSlotAssignment struct {
+	entryIndex int
+	slot       uintptr
+}
+
+// computeBindSlots calculates per-type sequential Metal slot indices for bind group entries.
+//
+// Metal uses separate index spaces: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
+// The naga MSL compiler auto-generates these indices sequentially per type,
+// so we must count each resource type independently instead of using the
+// WGSL @binding(N) number (which is unique across all types in a group).
+func computeBindSlots(entries []gputypes.BindGroupEntry) (bufferSlots, textureSlots, samplerSlots []bindSlotAssignment) {
+	var bufferIdx, textureIdx, samplerIdx uintptr
+	for i, entry := range entries {
+		switch entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			bufferSlots = append(bufferSlots, bindSlotAssignment{entryIndex: i, slot: bufferIdx})
+			bufferIdx++
+		case gputypes.TextureViewBinding:
+			textureSlots = append(textureSlots, bindSlotAssignment{entryIndex: i, slot: textureIdx})
+			textureIdx++
+		case gputypes.SamplerBinding:
+			samplerSlots = append(samplerSlots, bindSlotAssignment{entryIndex: i, slot: samplerIdx})
+			samplerIdx++
+		}
+	}
+	return
+}
+
 // SetBindGroup sets a bind group by binding each resource directly on the encoder.
 //
 // Metal does not use argument buffers for basic resource binding. Instead, resources
 // are set individually via setVertexBuffer/setFragmentBuffer, setVertexTexture/
 // setFragmentTexture, and setVertexSamplerState/setFragmentSamplerState.
 //
-// The Metal binding index matches the WGSL @binding(N) value because naga MSL
-// auto-generates [[buffer(N)]], [[texture(N)]], [[sampler(N)]] attributes directly
-// from the binding number when PerEntryPointMap is nil.
+// The Metal binding index uses per-type sequential indices because naga MSL
+// auto-generates [[buffer(N)]], [[texture(M)]], [[sampler(K)]] attributes
+// sequentially per type.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || bg == nil {
 		return
 	}
 
+	// Metal uses per-type sequential indices: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
+	// The naga MSL compiler auto-generates these indices sequentially per type,
+	// so we must count each resource type independently instead of using the
+	// WGSL @binding(N) number (which is unique across all types in a group).
+	var bufferSlot, textureSlot, samplerSlot uintptr
 	var dynamicIdx int
 	for _, entry := range bg.entries {
-		slot := uintptr(entry.Binding)
-
 		switch res := entry.Resource.(type) {
 		case gputypes.BufferBinding:
 			offset := uintptr(res.Offset)
@@ -447,16 +480,19 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 					}
 				}
 			}
-			_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), res.Buffer, offset, slot)
-			_ = MsgSend(e.raw, Sel("setFragmentBuffer:offset:atIndex:"), res.Buffer, offset, slot)
+			_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
+			_ = MsgSend(e.raw, Sel("setFragmentBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
+			bufferSlot++
 
 		case gputypes.TextureViewBinding:
-			_ = MsgSend(e.raw, Sel("setVertexTexture:atIndex:"), res.TextureView, slot)
-			_ = MsgSend(e.raw, Sel("setFragmentTexture:atIndex:"), res.TextureView, slot)
+			_ = MsgSend(e.raw, Sel("setVertexTexture:atIndex:"), res.TextureView, textureSlot)
+			_ = MsgSend(e.raw, Sel("setFragmentTexture:atIndex:"), res.TextureView, textureSlot)
+			textureSlot++
 
 		case gputypes.SamplerBinding:
-			_ = MsgSend(e.raw, Sel("setVertexSamplerState:atIndex:"), res.Sampler, slot)
-			_ = MsgSend(e.raw, Sel("setFragmentSamplerState:atIndex:"), res.Sampler, slot)
+			_ = MsgSend(e.raw, Sel("setVertexSamplerState:atIndex:"), res.Sampler, samplerSlot)
+			_ = MsgSend(e.raw, Sel("setFragmentSamplerState:atIndex:"), res.Sampler, samplerSlot)
+			samplerSlot++
 		}
 	}
 }
@@ -592,10 +628,10 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		return
 	}
 
+	// Metal uses per-type sequential indices (see RenderPassEncoder.SetBindGroup).
+	var bufferSlot, textureSlot, samplerSlot uintptr
 	var dynamicIdx int
 	for _, entry := range bg.entries {
-		slot := uintptr(entry.Binding)
-
 		switch res := entry.Resource.(type) {
 		case gputypes.BufferBinding:
 			offset := uintptr(res.Offset)
@@ -608,13 +644,16 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 					}
 				}
 			}
-			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.Buffer, offset, slot)
+			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
+			bufferSlot++
 
 		case gputypes.TextureViewBinding:
-			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.TextureView, slot)
+			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.TextureView, textureSlot)
+			textureSlot++
 
 		case gputypes.SamplerBinding:
-			_ = MsgSend(e.raw, Sel("setSamplerState:atIndex:"), res.Sampler, slot)
+			_ = MsgSend(e.raw, Sel("setSamplerState:atIndex:"), res.Sampler, samplerSlot)
+			samplerSlot++
 		}
 	}
 }
