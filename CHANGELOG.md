@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2] - 2026-03-29
+
+### Fixed
+
+- **Metal: per-type sequential slot indices in SetBindGroup** — Fixed descriptor set
+  binding for Metal backend when multiple bind groups use different resource types
+  (samplers, textures, buffers). Previously all resources shared a single index counter,
+  causing incorrect slot assignments. (PR #112 by @timzifer)
+
+- **GLES: disable scissor test before MSAA resolve blit** — Prevents clipped resolve
+  when scissor rect from previous draw call was still active during MSAA resolve.
+  Fixes rendering artifacts on NVIDIA GPUs. (gg#226)
+
+### Changed
+
+- **deps: goffi v0.4.2 → v0.5.0** — Adds Windows ARM64 (Snapdragon X) support.
+  First Go GPU framework with Windows ARM64 support. (go-webgpu/goffi#31, tested by @SideFx)
+
 ## [0.22.1] - 2026-03-20
 
 ### Fixed

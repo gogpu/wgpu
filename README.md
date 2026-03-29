@@ -203,6 +203,8 @@ import _ "github.com/gogpu/wgpu/hal/allbackends"
 | **GLES** | Yes | Yes | - | - | OpenGL ES 3.0+ |
 | **Software** | Yes | Yes | Yes | Yes | CPU fallback |
 
+**Architectures:** amd64, arm64 (including Windows ARM64 / Snapdragon X)
+
 ### Vulkan Backend
 
 Full Vulkan 1.3 implementation with:
