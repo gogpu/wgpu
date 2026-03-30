@@ -904,7 +904,7 @@ func TestQueueSubmitNilCommandBuffer(t *testing.T) {
 		t.Skip("no queue available")
 	}
 
-	err := q.Submit(nil)
+	_, err := q.Submit(nil)
 	if err == nil {
 		t.Fatal("Submit with nil command buffer should return error")
 	}

@@ -24,6 +24,9 @@ type Queue struct {
 	device       *Device
 	commandQueue ID // id<MTLCommandQueue>
 
+	// submissionIndex is a monotonically increasing counter for tracking submissions.
+	submissionIndex uint64
+
 	// frameSemaphore limits CPU-ahead-of-GPU frames. Each Submit consumes a
 	// slot from the buffered channel; the GPU's addCompletedHandler callback
 	// returns the slot when the command buffer finishes execution.
@@ -32,13 +35,14 @@ type Queue struct {
 }
 
 // Submit submits command buffers to the GPU.
+// Returns a monotonically increasing submission index for tracking completion.
 //
 // Frame throttling: when frameSemaphore is initialized, Submit blocks until a
 // frame slot is available (at most maxFramesInFlight frames in-flight). A
 // completion handler on the last command buffer signals the semaphore when the
 // GPU finishes, releasing the slot for the next frame. This prevents unbounded
 // memory growth from queued command buffers and avoids drawable pool exhaustion.
-func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	// Acquire a frame slot — blocks if maxFramesInFlight frames are in-flight.
 	// This is the CPU-side throttle point.
 	if q.frameSemaphore != nil {
@@ -47,8 +51,10 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 
 	hal.Logger().Debug("metal: Submit",
 		"buffers", len(commandBuffers),
-		"hasFence", fence != nil,
 	)
+
+	q.submissionIndex++
+	subIdx := q.submissionIndex
 
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
@@ -58,16 +64,6 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		cb, ok := buf.(*CommandBuffer)
 		if !ok || cb == nil {
 			continue
-		}
-
-		// If fence provided, encode a signal on the shared event.
-		// MTLSharedEvent.signaledValue is updated by the GPU when the command
-		// buffer completes — we do NOT set the Go-side value here.
-		if fence != nil {
-			if mtlFence, ok := fence.(*Fence); ok && mtlFence != nil {
-				_ = MsgSend(cb.raw, Sel("encodeSignalEvent:value:"),
-					uintptr(mtlFence.event), uintptr(fenceValue))
-			}
 		}
 
 		// Schedule presentation BEFORE commit (Metal requirement)
@@ -93,7 +89,20 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		q.frameSemaphore <- struct{}{}
 	}
 
-	return nil
+	return subIdx, nil
+}
+
+// PollCompleted returns the highest submission index known to be completed by the GPU.
+// Metal tracks completion via completion handlers; this returns the last known completed index.
+func (q *Queue) PollCompleted() uint64 {
+	// Metal uses completion handlers for tracking. Since we don't have a shared
+	// event counter exposed here, we conservatively return the last submission
+	// minus frames-in-flight (or 0 if too early). The frame semaphore provides
+	// the actual throttling.
+	if q.submissionIndex <= maxFramesInFlight {
+		return 0
+	}
+	return q.submissionIndex - maxFramesInFlight
 }
 
 // registerFrameCompletionHandler attaches an addCompletedHandler: block to the

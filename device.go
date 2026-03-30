@@ -412,8 +412,8 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 }
 
 // CreateFence creates a GPU synchronization fence.
-// The returned fence can be used with Queue.SubmitWithFence to track
-// GPU work completion without blocking.
+// Fences are primarily used by the HAL internally for synchronization.
+// Most callers should use Queue.Submit + Queue.Poll instead.
 func (d *Device) CreateFence() (*Fence, error) {
 	if d.released {
 		return nil, ErrReleased

@@ -197,9 +197,15 @@ type Device interface {
 // Queue handles command submission and presentation.
 // Queues are typically thread-safe (backend-specific).
 type Queue interface {
-	// Submit submits command buffers to the GPU.
-	// If fence is not nil, it will be signaled with fenceValue when commands complete.
-	Submit(commandBuffers []CommandBuffer, fence Fence, fenceValue uint64) error
+	// Submit submits command buffers to the GPU for execution.
+	// Returns a monotonically increasing submission index that can be used
+	// with PollCompleted to determine when the GPU has finished the work.
+	// The HAL manages its own internal fences/synchronization.
+	Submit(commandBuffers []CommandBuffer) (submissionIndex uint64, err error)
+
+	// PollCompleted returns the highest submission index known to be completed
+	// by the GPU. Non-blocking. Returns 0 if no submissions have completed.
+	PollCompleted() uint64
 
 	// WriteBuffer writes data to a buffer immediately.
 	// This is a convenience method that creates a staging buffer internally.

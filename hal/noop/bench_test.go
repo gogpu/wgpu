@@ -50,7 +50,7 @@ func BenchmarkNoopSubmitEmpty(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Submit(nil, nil, 0)
+		_, err := queue.Submit(nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -71,30 +71,7 @@ func BenchmarkNoopSubmitSingle(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Submit(cmdBuffers, nil, 0)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-	runtime.KeepAlive(cmdBuffers)
-}
-
-// BenchmarkNoopSubmitWithFence measures submit + fence signaling overhead.
-func BenchmarkNoopSubmitWithFence(b *testing.B) {
-	b.ReportAllocs()
-	device, queue, cleanup := setupNoopDevice(b)
-	defer cleanup()
-
-	encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "bench"})
-	_ = encoder.BeginEncoding("bench")
-	cmdBuffer, _ := encoder.EndEncoding()
-	cmdBuffers := []hal.CommandBuffer{cmdBuffer}
-	fence, _ := device.CreateFence()
-	defer device.DestroyFence(fence)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err := queue.Submit(cmdBuffers, fence, uint64(i+1))
+		_, err := queue.Submit(cmdBuffers)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -337,9 +314,6 @@ func BenchmarkNoopFullFrame(b *testing.B) {
 	})
 	defer device.DestroyRenderPipeline(pipeline)
 
-	fence, _ := device.CreateFence()
-	defer device.DestroyFence(fence)
-
 	rpDesc := &hal.RenderPassDescriptor{
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
@@ -366,7 +340,7 @@ func BenchmarkNoopFullFrame(b *testing.B) {
 		cmdBuffer, _ := encoder.EndEncoding()
 
 		// Submit
-		_ = queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, uint64(i+1))
+		_, _ = queue.Submit([]hal.CommandBuffer{cmdBuffer})
 	}
 }
 

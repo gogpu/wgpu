@@ -554,25 +554,19 @@ func TestNoopQueueSubmit(t *testing.T) {
 	_ = encoder.BeginEncoding("test")
 	cmdBuffer, _ := encoder.EndEncoding()
 
-	// Submit without fence
-	err := queue.Submit([]hal.CommandBuffer{cmdBuffer}, nil, 0)
+	// Submit
+	subIdx, err := queue.Submit([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
 		t.Fatalf("Submit failed: %v", err)
 	}
-
-	// Submit with fence
-	fence, _ := device.CreateFence()
-	defer device.DestroyFence(fence)
-
-	err = queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1)
-	if err != nil {
-		t.Fatalf("Submit with fence failed: %v", err)
+	if subIdx == 0 {
+		t.Error("expected non-zero submission index")
 	}
 
-	// Verify fence was signaled
-	ok, _ := device.Wait(fence, 1, 100*time.Millisecond)
-	if !ok {
-		t.Error("expected fence to be signaled after submit")
+	// Poll completed — noop is synchronous, should be immediately complete
+	completed := queue.PollCompleted()
+	if completed < subIdx {
+		t.Errorf("expected completed >= %d, got %d", subIdx, completed)
 	}
 }
 
@@ -850,25 +844,12 @@ func TestNoopComputeE2E(t *testing.T) {
 		t.Fatalf("EndEncoding failed: %v", err)
 	}
 
-	// 8. Submit with fence
-	fence, err := device.CreateFence()
-	if err != nil {
-		t.Fatalf("CreateFence failed: %v", err)
-	}
-	defer device.DestroyFence(fence)
-
-	if err := queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+	// 8. Submit
+	if _, err := queue.Submit([]hal.CommandBuffer{cmdBuffer}); err != nil {
 		t.Fatalf("Submit failed: %v", err)
 	}
 
-	// 9. Wait for completion
-	ok, err := device.Wait(fence, 1, time.Second)
-	if err != nil {
-		t.Fatalf("Wait failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("fence not signaled after submit")
-	}
+	// 9. Noop is synchronous — submission is immediately complete.
 
 	// 10. Read back results
 	result := make([]byte, bufferSize)
@@ -1204,21 +1185,9 @@ func TestNoopFullLifecycle(t *testing.T) {
 	cmdBuffer, _ := encoder.EndEncoding()
 
 	// Submit
-	fence, _ := device.CreateFence()
-	defer device.DestroyFence(fence)
-
-	err = queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1)
+	_, err = queue.Submit([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
 		t.Fatalf("Submit failed: %v", err)
-	}
-
-	// Wait
-	ok, err := device.Wait(fence, 1, time.Second)
-	if err != nil {
-		t.Fatalf("Wait failed: %v", err)
-	}
-	if !ok {
-		t.Error("expected fence to be signaled")
 	}
 }
 
@@ -1253,7 +1222,7 @@ func TestNoopConcurrentAccess(t *testing.T) {
 				encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
 				_ = encoder.BeginEncoding("test")
 				cmdBuffer, _ := encoder.EndEncoding()
-				_ = queue.Submit([]hal.CommandBuffer{cmdBuffer}, nil, 0)
+				_, _ = queue.Submit([]hal.CommandBuffer{cmdBuffer})
 			}
 		}()
 	}

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-03-30
+
+### Added
+
+- **`Adapter.GetSurfaceCapabilities(surface)`** — New public API. Returns supported
+  texture formats, present modes, and composite alpha modes for a surface. Queries
+  HAL capabilities (`vkGetPhysicalDeviceSurfacePresentModesKHR` on Vulkan). Follows
+  Rust wgpu `surface.get_capabilities(&adapter)` pattern.
+
+- **`Queue.Poll()`** — Non-blocking completion query. Returns the highest submission
+  index known to be completed by the GPU.
+
+### Changed
+
+- **Enterprise fence architecture** — HAL `Queue.Submit()` no longer accepts user
+  fence parameter. Returns `(submissionIndex uint64, err error)` instead. HAL owns
+  all fence management internally (binary fence pool or timeline semaphore). Matches
+  Rust wgpu, Dawn, Godot, DXVK, vkd3d-proton architecture. All 6 backends updated
+  (Vulkan, DX12, Metal, GLES, Software, Noop). Eliminates double `vkQueueSubmit`
+  on binary fence path that caused first-frame loss on llvmpipe Vulkan 1.0.2.
+  (BUG-GOGPU-004, fixes ui#66)
+
+- **`Queue.Submit()` is now non-blocking** — Returns `(uint64, error)` with
+  submission index for deferred resource tracking. Use `Queue.Poll()` to check
+  completion.
+
+- **deps: naga v0.14.8 → v0.15.0** — Full Rust parity: IR 144/144, SPIR-V 87/87,
+  MSL 91/91, HLSL 58/58, GLSL 68/68.
+
+### Removed
+
+- **`Queue.SubmitWithFence()`** — Replaced by `Queue.Submit()` + `Queue.Poll()`.
+  HAL manages fences internally, application layer uses submission indices.
+
 ## [0.22.2] - 2026-03-29
 
 ### Fixed

@@ -555,7 +555,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 		t.Fatalf("Finish: %v", err)
 	}
 
-	err = device.Queue().Submit(cmdBuf)
+	_, err = device.Queue().Submit(cmdBuf)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

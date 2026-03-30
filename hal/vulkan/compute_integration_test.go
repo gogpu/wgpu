@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -285,21 +284,16 @@ func TestComputeSDFIntegration(t *testing.T) {
 		t.Fatalf("EndEncoding failed: %v", err)
 	}
 
-	// Step 10: Submit with fence and wait
-	fence, err := device.CreateFence()
+	// Step 10: Submit and wait for completion
+	subIdx, err := queue.Submit([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
-		t.Fatalf("CreateFence failed: %v", err)
-	}
-	defer device.DestroyFence(fence)
-
-	if err := queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
 		t.Fatalf("Submit failed: %v", err)
 	}
 
-	ok, err := device.Wait(fence, 1, 5*time.Second)
-	if err != nil {
-		t.Fatalf("Wait failed: %v", err)
-	}
+	// Wait for GPU to complete by polling (or use WaitIdle for tests).
+	_ = device.WaitIdle()
+	completed := queue.PollCompleted()
+	ok := completed >= subIdx
 	if !ok {
 		t.Fatal("fence not signaled after 5s timeout")
 	}

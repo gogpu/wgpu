@@ -177,7 +177,7 @@ pass, _ := encoder.BeginComputePass(nil)
 // ... record commands ...
 pass.End()
 cmdBuf, _ := encoder.Finish()
-device.Queue().Submit(cmdBuf)
+_, _ = device.Queue().Submit(cmdBuf)  // non-blocking, returns submissionIndex
 ```
 
 ### Internal HAL flow

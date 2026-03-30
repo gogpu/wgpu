@@ -275,7 +275,7 @@ func simulate(device *wgpu.Device, pipeline *wgpu.ComputePipeline, bg *wgpu.Bind
 		if err != nil {
 			return fmt.Errorf("finish encoder: %w", err)
 		}
-		if err := device.Queue().Submit(cmds); err != nil {
+		if _, err := device.Queue().Submit(cmds); err != nil {
 			return fmt.Errorf("submit: %w", err)
 		}
 

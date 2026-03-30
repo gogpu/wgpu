@@ -274,11 +274,13 @@ if err != nil {
 ### Step 2: Submit and Wait
 
 ```go
-// Queue.Submit() handles fencing internally — blocks until GPU is done
-err = device.Queue().Submit(cmdBuffer)
+// Queue.Submit() is non-blocking — returns submission index for tracking
+_, err = device.Queue().Submit(cmdBuffer)
 if err != nil {
     log.Fatal("failed to submit:", err)
 }
+// Wait for GPU to finish before reading back results
+device.WaitIdle()
 ```
 
 ### Step 3: Read Back Data

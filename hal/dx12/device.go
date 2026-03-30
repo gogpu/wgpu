@@ -498,6 +498,21 @@ func (d *Device) signalFrameFence() error {
 	return nil
 }
 
+// currentFrameFenceValue returns the most recently signaled fence value.
+// This is used as the submission index.
+func (d *Device) currentFrameFenceValue() uint64 {
+	d.fenceMu.Lock()
+	v := d.fenceValue
+	d.fenceMu.Unlock()
+	return v
+}
+
+// completedFrameFenceValue returns the highest fence value completed by the GPU.
+// Non-blocking — queries the D3D12 fence directly.
+func (d *Device) completedFrameFenceValue() uint64 {
+	return d.fence.GetCompletedValue()
+}
+
 // getOrCreateEmptyRootSignature returns a shared empty root signature for
 // pipelines that have no resource bindings (no PipelineLayout).
 // DX12 requires a valid root signature for every PSO — even with zero parameters.
@@ -1591,7 +1606,8 @@ func (d *Device) compileWGSLModule(wgslSource string, module *ShaderModule) erro
 	}
 
 	// Step 5: Compile each entry point separately
-	for _, ep := range irModule.EntryPoints {
+	for i := range irModule.EntryPoints {
+		ep := &irModule.EntryPoints[i]
 		target := shaderStageToTarget(ep.Stage)
 
 		// Use the HLSL entry point name (naga may rename it)

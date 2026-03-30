@@ -208,7 +208,7 @@ func run() error {
 				return
 			}
 
-			if err := device.Queue().Submit(commands); err != nil {
+			if _, err := device.Queue().Submit(commands); err != nil {
 				frameErr = fmt.Errorf("submit: %w", err)
 			}
 

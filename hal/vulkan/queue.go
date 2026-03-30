@@ -35,12 +35,14 @@ type Queue struct {
 }
 
 // Submit submits command buffers to the GPU.
-func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+// Returns a monotonically increasing submission index for tracking completion.
+// The HAL internally manages fence/timeline semaphore synchronization.
+func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if len(commandBuffers) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// Convert command buffers to Vulkan handles.
@@ -52,7 +54,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		if !ok {
 			*pooledSlice = vkCmdBuffers
 			cmdBufferPool.Put(pooledSlice)
-			return fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
+			return 0, fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
 		}
 		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
 	}
@@ -73,7 +75,6 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	// - Signal presentSemaphores: ONLY on first submit (waited on by present)
 	// Subsequent submits in the same frame run without semaphore synchronization.
 	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-	var submitFence vk.Fence
 	consumedAcquire := false // tracks whether THIS submit consumes the acquire semaphore
 	if q.activeSwapchain != nil && !q.acquireUsed {
 		acquireSem := q.activeSwapchain.currentAcquireSem
@@ -87,19 +88,12 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		consumedAcquire = true
 	}
 
-	// Use user-provided fence if available
-	if fence != nil {
-		if vkF, ok := fence.(*Fence); ok {
-			submitFence = vkF.handle
-		}
-	}
+	signalValue := q.device.timelineFence.nextSignalValue()
 
 	// Timeline path (VK-IMPL-001): Attach timeline semaphore signal to the real submit.
 	// This enables waitForGPU to track the latest submission.
 	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
 	if q.device.timelineFence.isTimeline { //nolint:nestif // timeline PNext chaining requires conditional semaphore setup
-		signalValue := q.device.timelineFence.nextSignalValue()
-
 		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
 		// Pre-acquire wait in acquireNextImage() uses this to ensure the GPU
 		// has finished before reusing the semaphore.
@@ -144,18 +138,18 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 			timelineSubmitInfo.PWaitSemaphoreValues = &waitValue
 		}
 
-		result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
+		result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
 		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+			return 0, fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 		}
-		return nil
+		return signalValue, nil
 	}
 
 	// Binary path (VK-IMPL-003): Get a fence from the pool to track this submission.
-	// The fencePool replaces the old transferFence with per-submission tracking,
-	// enabling waitForGPU to wait for specific or latest submissions.
+	// BUG-GOGPU-004 FIX: Always use pool fence directly — single vkQueueSubmit per frame.
+	// Previously, user-provided fences caused a double submit (real + empty for pool tracking).
+	// Now the HAL manages fences internally, eliminating the double submit entirely.
 	pool := q.device.timelineFence.pool
-	signalValue := q.device.timelineFence.nextSignalValue()
 
 	// VK-IMPL-004: Record fence value for pre-acquire wait (binary path).
 	if consumedAcquire {
@@ -163,31 +157,41 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 	}
 	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
 	if err != nil {
-		return fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
+		return 0, fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
 	}
 
-	// If user provided their own fence, we submit with the user fence and
-	// signal the pool fence via a separate empty submit for tracking.
-	if submitFence != 0 {
-		result := vkQueueSubmit(q, 1, &submitInfo, submitFence)
-		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
-		}
-		// Empty submit to signal the pool fence for waitForGPU tracking.
-		emptySubmit := vk.SubmitInfo{SType: vk.StructureTypeSubmitInfo}
-		result = vkQueueSubmit(q, 1, &emptySubmit, poolFence)
-		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkQueueSubmit (pool fence) failed: %d", result)
-		}
-		return nil
-	}
-
-	// Common case: no user fence, submit with pool fence directly.
+	// Single vkQueueSubmit with pool fence — no more double submit.
 	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		return 0, fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
 	}
-	return nil
+	return signalValue, nil
+}
+
+// PollCompleted returns the highest submission index known to be completed by the GPU.
+// Non-blocking.
+func (q *Queue) PollCompleted() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.device.timelineFence.isTimeline {
+		// Timeline path: query the semaphore counter value.
+		var value uint64
+		result := q.device.cmds.GetSemaphoreCounterValue(q.device.handle, q.device.timelineFence.timelineSemaphore, &value)
+		if result == vk.Success {
+			if value > q.device.timelineFence.lastCompleted {
+				q.device.timelineFence.lastCompleted = value
+			}
+			return value
+		}
+		return q.device.timelineFence.lastCompleted
+	}
+
+	// Binary path: poll fences in the pool.
+	pool := q.device.timelineFence.pool
+	pool.maintain(q.device.cmds, q.device.handle)
+	q.device.timelineFence.lastCompleted = pool.lastCompleted
+	return pool.lastCompleted
 }
 
 // SubmitForPresent submits command buffers with swapchain synchronization.
@@ -475,13 +479,6 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("vulkan: WriteTexture: EndEncoding failed: %w", err)
 	}
 
-	// Submit and wait
-	fence, err := q.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("vulkan: WriteTexture: CreateFence failed: %w", err)
-	}
-	defer q.device.DestroyFence(fence)
-
 	// VK-004: Staging uploads must NOT consume swapchain semaphores.
 	// When WriteTexture is called between BeginFrame/EndFrame (e.g., in onDraw),
 	// the activeSwapchain acquire semaphore must be preserved for the render pass
@@ -499,12 +496,18 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		q.mu.Unlock()
 	}()
 
-	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 0); err != nil {
+	// Submit and wait for completion — WriteTexture must block because
+	// the staging buffer data must be fully uploaded before return.
+	subIdx, err := q.Submit([]hal.CommandBuffer{cmdBuffer})
+	if err != nil {
 		return fmt.Errorf("vulkan: WriteTexture: Submit failed: %w", err)
 	}
 
-	// Wait for completion (60 second timeout)
-	_, _ = q.device.Wait(fence, 0, 60*time.Second)
+	// Wait for the submission to complete (60 second timeout).
+	timeoutNs := uint64(60 * time.Second)
+	if waitErr := q.device.timelineFence.waitForValue(q.device.cmds, q.device.handle, subIdx, timeoutNs); waitErr != nil {
+		hal.Logger().Warn("vulkan: WriteTexture: wait failed", "err", waitErr)
+	}
 
 	// Free command buffer back to pool after GPU finishes
 	q.device.FreeCommandBuffer(cmdBuffer)

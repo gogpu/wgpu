@@ -7,7 +7,6 @@ package dx12
 
 import (
 	"fmt"
-	"time"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -32,50 +31,46 @@ func newQueue(device *Device) *Queue {
 }
 
 // Submit submits command buffers to the GPU.
-// If fence is not nil, it will be signaled with fenceValue when commands complete.
-func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
-	if len(commandBuffers) == 0 && fence == nil {
-		return nil
+// Returns a monotonically increasing submission index for tracking completion.
+func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	if len(commandBuffers) == 0 {
+		return 0, nil
 	}
 
 	// Convert command buffers to D3D12 command lists
-	if len(commandBuffers) > 0 {
-		cmdLists := make([]*d3d12.ID3D12GraphicsCommandList, len(commandBuffers))
-		for i, cb := range commandBuffers {
-			dx12CB, ok := cb.(*CommandBuffer)
-			if !ok {
-				return fmt.Errorf("dx12: command buffer is not a DX12 command buffer")
-			}
-			cmdLists[i] = dx12CB.cmdList
+	cmdLists := make([]*d3d12.ID3D12GraphicsCommandList, len(commandBuffers))
+	for i, cb := range commandBuffers {
+		dx12CB, ok := cb.(*CommandBuffer)
+		if !ok {
+			return 0, fmt.Errorf("dx12: command buffer is not a DX12 command buffer")
 		}
+		cmdLists[i] = dx12CB.cmdList
+	}
 
-		// Execute command lists
-		q.raw.ExecuteCommandLists(uint32(len(cmdLists)), &cmdLists[0])
+	// Execute command lists
+	q.raw.ExecuteCommandLists(uint32(len(cmdLists)), &cmdLists[0])
 
-		// Check for immediate device removal after execution.
-		// ExecuteCommandLists is async (void), but some drivers detect errors immediately.
-		if reason := q.device.raw.GetDeviceRemovedReason(); reason != nil {
-			return fmt.Errorf("dx12: device removed after ExecuteCommandLists: %w", reason)
-		}
+	// Check for immediate device removal after execution.
+	// ExecuteCommandLists is async (void), but some drivers detect errors immediately.
+	if reason := q.device.raw.GetDeviceRemovedReason(); reason != nil {
+		return 0, fmt.Errorf("dx12: device removed after ExecuteCommandLists: %w", reason)
 	}
 
 	// Drain debug messages after submission.
 	q.device.DrainDebugMessages()
 
-	// Signal the fence if provided
-	if fence != nil {
-		dx12Fence, ok := fence.(*Fence)
-		if !ok {
-			return fmt.Errorf("dx12: fence is not a DX12 fence")
-		}
-
-		if err := q.raw.Signal(dx12Fence.raw, fenceValue); err != nil {
-			return fmt.Errorf("dx12: queue Signal failed: %w", err)
-		}
+	// Signal the frame fence for per-frame allocator tracking and return its value
+	// as the submission index.
+	if err := q.device.signalFrameFence(); err != nil {
+		return 0, err
 	}
+	return q.device.currentFrameFenceValue(), nil
+}
 
-	// Signal the frame fence for per-frame allocator tracking.
-	return q.device.signalFrameFence()
+// PollCompleted returns the highest submission index known to be completed by the GPU.
+// Non-blocking.
+func (q *Queue) PollCompleted() uint64 {
+	return q.device.completedFrameFenceValue()
 }
 
 // ReadBuffer reads data from a GPU buffer into the provided byte slice.
@@ -221,17 +216,13 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 		return fmt.Errorf("dx12: WriteBuffer: EndEncoding failed: %w", err)
 	}
 
-	// Submit and wait for GPU completion
-	fence, err := q.device.CreateFence()
+	// Submit and wait for GPU completion.
+	_, err = q.Submit([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
-		return fmt.Errorf("dx12: WriteBuffer: CreateFence failed: %w", err)
-	}
-	defer q.device.DestroyFence(fence)
-
-	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
 		return fmt.Errorf("dx12: WriteBuffer: Submit failed: %w", err)
 	}
-	_, _ = q.device.Wait(fence, 1, 60*time.Second)
+	// Block until GPU finishes the copy — staging buffer must remain valid.
+	_ = q.device.WaitIdle()
 	q.device.FreeCommandBuffer(cmdBuffer)
 	return nil
 }
@@ -395,17 +386,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("dx12: WriteTexture: EndEncoding failed: %w", err)
 	}
 
-	// Submit and wait for GPU completion
-	fence, err := q.device.CreateFence()
+	// Submit and wait for GPU completion.
+	_, err = q.Submit([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
-		return fmt.Errorf("dx12: WriteTexture: CreateFence failed: %w", err)
-	}
-	defer q.device.DestroyFence(fence)
-
-	if err := q.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
 		return fmt.Errorf("dx12: WriteTexture: Submit failed: %w", err)
 	}
-	_, _ = q.device.Wait(fence, 1, 60*time.Second)
+	// Block until GPU finishes the copy — staging buffer must remain valid.
+	_ = q.device.WaitIdle()
 	q.device.FreeCommandBuffer(cmdBuffer)
 
 	// Update tracked state AFTER successful execution.

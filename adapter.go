@@ -68,16 +68,9 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 
 	coreDevice := core.NewDevice(openDevice.Device, a.core, features, limits, label)
 
-	fence, err := openDevice.Device.CreateFence()
-	if err != nil {
-		coreDevice.Destroy()
-		return nil, fmt.Errorf("wgpu: failed to create fence: %w", err)
-	}
-
 	queue := &Queue{
 		hal:       openDevice.Queue,
 		halDevice: openDevice.Device,
-		fence:     fence,
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
@@ -115,6 +108,44 @@ func (a *Adapter) requestDeviceCore(desc *DeviceDescriptor) (*Device, error) {
 	}
 
 	return &Device{core: coreDevice}, nil
+}
+
+// SurfaceCapabilities describes what a surface supports on this adapter.
+type SurfaceCapabilities struct {
+	// Formats lists the supported surface texture formats.
+	Formats []gputypes.TextureFormat
+
+	// PresentModes lists the supported presentation modes.
+	PresentModes []gputypes.PresentMode
+
+	// AlphaModes lists the supported composite alpha modes.
+	AlphaModes []gputypes.CompositeAlphaMode
+}
+
+// GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
+// Returns nil if the adapter has no HAL (core-only path) or the surface is nil.
+func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
+	if a.released || surface == nil {
+		return nil
+	}
+
+	if !a.core.HasHAL() {
+		// Core-only path: return safe defaults (Fifo is guaranteed by Vulkan spec).
+		return &SurfaceCapabilities{
+			PresentModes: []gputypes.PresentMode{gputypes.PresentModeFifo},
+		}
+	}
+
+	halCaps := a.core.HALAdapter().SurfaceCapabilities(surface.HAL())
+	if halCaps == nil {
+		return nil
+	}
+
+	return &SurfaceCapabilities{
+		Formats:      halCaps.Formats,
+		PresentModes: halCaps.PresentModes,
+		AlphaModes:   halCaps.AlphaModes,
+	}
 }
 
 // Release releases the adapter.

@@ -275,7 +275,7 @@ func dispatchAndReadBack(device *wgpu.Device, ps *pipelineSet, bufs *bufferSet) 
 	if err != nil {
 		return 0, fmt.Errorf("finish encoder: %w", err)
 	}
-	if err := device.Queue().Submit(cmdBuf); err != nil {
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
 		return 0, fmt.Errorf("submit: %w", err)
 	}
 	fmt.Println("OK")

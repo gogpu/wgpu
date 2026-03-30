@@ -16,16 +16,18 @@ import (
 
 // Queue implements hal.Queue for OpenGL.
 type Queue struct {
-	glCtx  *gl.Context
-	wglCtx *wgl.Context
+	glCtx           *gl.Context
+	wglCtx          *wgl.Context
+	submissionIndex uint64
 }
 
 // Submit submits command buffers to the GPU.
-func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+// GLES is synchronous, so the submission is effectively complete immediately after Flush.
+func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	for _, cb := range commandBuffers {
 		cmdBuf, ok := cb.(*CommandBuffer)
 		if !ok {
-			return fmt.Errorf("gles: invalid command buffer type")
+			return 0, fmt.Errorf("gles: invalid command buffer type")
 		}
 
 		// Execute recorded commands with GL error checking.
@@ -37,17 +39,17 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenc
 		}
 	}
 
-	// Signal fence if provided
-	if fence != nil {
-		if f, ok := fence.(*Fence); ok {
-			f.Signal(fenceValue)
-		}
-	}
-
 	// Flush GL commands
 	q.glCtx.Flush()
 
-	return nil
+	q.submissionIndex++
+	return q.submissionIndex, nil
+}
+
+// PollCompleted returns the highest submission index known to be completed.
+// GLES is synchronous — after Flush, all submitted work is complete.
+func (q *Queue) PollCompleted() uint64 {
+	return q.submissionIndex
 }
 
 // ReadBuffer reads data from a GPU buffer into the provided byte slice.

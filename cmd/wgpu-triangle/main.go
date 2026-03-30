@@ -132,7 +132,7 @@ func run() error {
 		renderPass.Draw(3, 1, 0, 0)
 		_ = renderPass.End()
 		commands, _ := encoder.Finish()
-		_ = device.Queue().Submit(commands)
+		_, _ = device.Queue().Submit(commands)
 		_ = surface.Present(surfaceTex)
 		view.Release()
 

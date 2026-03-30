@@ -463,7 +463,7 @@ func renderFrame(gpu *gpuResources) error {
 	}
 
 	// Submit
-	if err := gpu.queue.Submit([]hal.CommandBuffer{cmdBuffer}, nil, 0); err != nil {
+	if _, err := gpu.queue.Submit([]hal.CommandBuffer{cmdBuffer}); err != nil {
 		gpu.surface.DiscardTexture(acquired.Texture)
 		return fmt.Errorf("submit: %w", err)
 	}

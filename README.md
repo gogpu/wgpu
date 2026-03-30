@@ -131,7 +131,7 @@ pass.Dispatch(64, 1, 1)
 pass.End()
 
 cmdBuffer, _ := encoder.Finish()
-device.Queue().Submit(cmdBuffer)
+_, _ = device.Queue().Submit(cmdBuffer)  // returns (submissionIndex, error)
 ```
 
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)

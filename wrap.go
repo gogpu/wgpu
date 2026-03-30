@@ -2,7 +2,6 @@ package wgpu
 
 import (
 	"fmt"
-	"sync/atomic"
 
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
@@ -39,18 +38,10 @@ func NewDeviceFromHAL(
 
 	coreDevice := core.NewDevice(halDevice, coreAdapter, features, limits, label)
 
-	fence, err := halDevice.CreateFence()
-	if err != nil {
-		coreDevice.Destroy()
-		return nil, fmt.Errorf("wgpu: failed to create queue fence: %w", err)
-	}
-
 	queue := &Queue{
 		hal:       halQueue,
 		halDevice: halDevice,
-		fence:     fence,
 	}
-	queue.fenceValue = atomic.Uint64{}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 

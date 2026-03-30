@@ -78,7 +78,7 @@ func BenchmarkVulkanSubmitEmpty(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Submit(nil, nil, 0)
+		_, err := queue.Submit(nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func BenchmarkVulkanSubmitSingle(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Submit(cmdBuffers, nil, 0)
+		_, err := queue.Submit(cmdBuffers)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -186,7 +186,7 @@ func BenchmarkVulkanEncodeSubmitCycle(b *testing.B) {
 		_ = encoder.BeginEncoding("frame")
 		cb, _ := encoder.EndEncoding()
 
-		_ = queue.Submit([]hal.CommandBuffer{cb}, nil, 0)
+		_, _ = queue.Submit([]hal.CommandBuffer{cb})
 		_ = device.WaitIdle()
 	}
 }
@@ -224,7 +224,7 @@ func BenchmarkVulkanSubmitMultiple(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = queue.Submit(cmdBuffers, nil, 0)
+				_, _ = queue.Submit(cmdBuffers)
 				_ = device.WaitIdle()
 			}
 		})

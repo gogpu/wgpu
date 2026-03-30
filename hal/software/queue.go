@@ -7,17 +7,21 @@ import (
 )
 
 // Queue implements hal.Queue for the software backend.
-type Queue struct{}
+type Queue struct {
+	submissionIndex uint64
+}
 
 // Submit simulates command buffer submission.
-// If a fence is provided, it is signaled with the given value.
-func (q *Queue) Submit(_ []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
-	if fence != nil {
-		if f, ok := fence.(*Fence); ok {
-			f.value.Store(fenceValue)
-		}
-	}
-	return nil
+// Software backend is synchronous — work is complete immediately.
+func (q *Queue) Submit(_ []hal.CommandBuffer) (uint64, error) {
+	q.submissionIndex++
+	return q.submissionIndex, nil
+}
+
+// PollCompleted returns the highest submission index known to be completed.
+// Software backend is synchronous — all submissions are immediately complete.
+func (q *Queue) PollCompleted() uint64 {
+	return q.submissionIndex
 }
 
 // ReadBuffer reads data from a buffer.

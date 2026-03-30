@@ -56,7 +56,7 @@ func BenchmarkHALSubmitOverhead(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Submit(cmdBuffers, nil, 0)
+		_, err := queue.Submit(cmdBuffers)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -221,9 +221,6 @@ func BenchmarkHALFullFrameSimulation(b *testing.B) {
 	view, _ := device.CreateTextureView(texture, &hal.TextureViewDescriptor{})
 	defer device.DestroyTextureView(view)
 
-	fence, _ := device.CreateFence()
-	defer device.DestroyFence(fence)
-
 	rpDesc := &hal.RenderPassDescriptor{
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
@@ -247,7 +244,7 @@ func BenchmarkHALFullFrameSimulation(b *testing.B) {
 		rp.End()
 
 		cb, _ := encoder.EndEncoding()
-		_ = queue.Submit([]hal.CommandBuffer{cb}, fence, uint64(i+1))
+		_, _ = queue.Submit([]hal.CommandBuffer{cb})
 	}
 }
 
