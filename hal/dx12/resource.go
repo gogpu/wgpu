@@ -256,16 +256,21 @@ func (v *TextureView) HasSRV() bool {
 // -----------------------------------------------------------------------------
 
 // Sampler implements hal.Sampler for DirectX 12.
+// Each sampler occupies a slot in both the staging heap (for CopyDescriptors source)
+// and the shader-visible sampler heap (global sampler pool, referenced by index
+// from sampler index buffers in bind groups).
 type Sampler struct {
-	handle    d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
-	heapIndex uint32
-	device    *Device
+	handle          d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // staging heap handle
+	heapIndex       uint32                            // staging heap index
+	samplerPoolSlot uint32                            // index in shader-visible sampler heap (global pool)
+	device          *Device
 }
 
-// Destroy releases the sampler resources and recycles the descriptor heap slot.
+// Destroy releases the sampler resources and recycles descriptor heap slots.
 func (s *Sampler) Destroy() {
 	if s.device != nil {
 		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
+		s.device.samplerHeap.Free(s.samplerPoolSlot, 1)
 	}
 }
 

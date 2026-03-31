@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/hlsl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 )
@@ -19,14 +20,18 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShaderModule implements hal.ShaderModule for DirectX 12.
-// Stores per-entry-point DXBC bytecode compiled from WGSL via HLSL.
+// Stores raw WGSL source for deferred compilation. Compilation happens during
+// pipeline creation when the PipelineLayout (with naga options) is available.
+// For pre-compiled SPIR-V, entryPoints is populated directly.
 type ShaderModule struct {
-	entryPoints map[string][]byte // entryName → DXBC bytecode
+	wgslSource  string            // Raw WGSL source (for deferred compilation)
+	entryPoints map[string][]byte // entryName → DXBC bytecode (populated on pipeline creation or from SPIR-V)
 	device      *Device
 }
 
 // Destroy releases the shader module resources.
 func (m *ShaderModule) Destroy() {
+	m.wgslSource = ""
 	m.entryPoints = nil
 	m.device = nil
 }
@@ -37,6 +42,12 @@ func (m *ShaderModule) EntryPointBytecode(name string) []byte {
 		return nil
 	}
 	return m.entryPoints[name]
+}
+
+// IsDeferred returns true if this module contains raw WGSL that needs
+// compilation with pipeline-specific naga options.
+func (m *ShaderModule) IsDeferred() bool {
+	return m.wgslSource != "" && len(m.entryPoints) == 0
 }
 
 // -----------------------------------------------------------------------------
@@ -89,15 +100,17 @@ func (l *BindGroupLayout) Entries() []BindGroupLayoutEntry {
 // Values are -1 when the group has no descriptors of that type.
 type rootParamMapping struct {
 	cbvSrvUavIndex int // root param index for CBV/SRV/UAV table, or -1
-	samplerIndex   int // root param index for sampler table, or -1
 }
 
 // PipelineLayout implements hal.PipelineLayout for DirectX 12.
-// It wraps an ID3D12RootSignature.
+// It wraps an ID3D12RootSignature and stores naga HLSL options for deferred
+// shader compilation, matching Rust wgpu-hal architecture.
 type PipelineLayout struct {
 	rootSignature    *d3d12.ID3D12RootSignature
 	bindGroupLayouts []*BindGroupLayout
 	groupMappings    []rootParamMapping // actual root param indices per bind group
+	samplerRootIndex int                // root param index for global sampler heap table, or -1
+	nagaOptions      *hlsl.Options      // HLSL compile options with proper BindingMap
 	device           *Device
 }
 
@@ -121,17 +134,22 @@ func (l *PipelineLayout) RootSignature() *d3d12.ID3D12RootSignature {
 // -----------------------------------------------------------------------------
 
 // BindGroup implements hal.BindGroup for DirectX 12.
+// Uses the Rust wgpu-hal sampler heap pattern: samplers are not copied into
+// a per-group sampler table. Instead, a sampler index buffer (StructuredBuffer<uint>)
+// is created containing the global sampler pool indices. The shader reads
+// nagaSamplerHeap[indexBuffer[binding]] to access the sampler.
 type BindGroup struct {
-	layout           *BindGroupLayout
-	gpuDescHandle    d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for CBV/SRV/UAV table
-	samplerGPUHandle d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for sampler table
-	device           *Device
+	layout        *BindGroupLayout
+	gpuDescHandle d3d12.D3D12_GPU_DESCRIPTOR_HANDLE // GPU handle for CBV/SRV/UAV table
+	device        *Device
 
 	// Tracked allocation indices for descriptor recycling
-	viewHeapIndex    uint32
-	viewCount        uint32
-	samplerHeapIndex uint32
-	samplerCount     uint32
+	viewHeapIndex uint32
+	viewCount     uint32
+
+	// Sampler index buffer (StructuredBuffer<uint> containing sampler pool indices).
+	// This GPU buffer is allocated per bind group if the group has any samplers.
+	samplerIndexBuffer *d3d12.ID3D12Resource
 }
 
 // Destroy releases the bind group resources and recycles descriptor heap slots.
@@ -140,9 +158,10 @@ func (g *BindGroup) Destroy() {
 		if g.viewCount > 0 {
 			g.device.viewHeap.Free(g.viewHeapIndex, g.viewCount)
 		}
-		if g.samplerCount > 0 {
-			g.device.samplerHeap.Free(g.samplerHeapIndex, g.samplerCount)
-		}
+	}
+	if g.samplerIndexBuffer != nil {
+		g.samplerIndexBuffer.Release()
+		g.samplerIndexBuffer = nil
 	}
 	g.layout = nil
 	g.device = nil
@@ -153,30 +172,75 @@ func (g *BindGroup) GPUDescriptorHandle() d3d12.D3D12_GPU_DESCRIPTOR_HANDLE {
 	return g.gpuDescHandle
 }
 
-// SamplerGPUHandle returns the GPU descriptor handle for samplers.
-func (g *BindGroup) SamplerGPUHandle() d3d12.D3D12_GPU_DESCRIPTOR_HANDLE {
-	return g.samplerGPUHandle
-}
-
 // -----------------------------------------------------------------------------
 // Pipeline Creation Helpers
 // -----------------------------------------------------------------------------
 
+// pipelineLayoutResult holds the output of root signature creation.
+type pipelineLayoutResult struct {
+	rootSignature    *d3d12.ID3D12RootSignature
+	groupMappings    []rootParamMapping
+	samplerRootIndex int
+	nagaOptions      *hlsl.Options
+}
+
 // createRootSignatureFromLayouts creates a D3D12 root signature from bind group layouts.
-// Returns the root signature and the mapping of bind group indices to root parameter indices.
-func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (*d3d12.ID3D12RootSignature, []rootParamMapping, error) {
-	// Count total descriptor ranges needed
+// Implements the Rust wgpu-hal architecture:
+//   - Monotonic per-type register counters (bind_cbv, bind_srv, bind_uav)
+//   - Sampler bindings mapped to space=255 with index_within_group as register
+//   - Per-group sampler index buffer SRV in the CBV/SRV/UAV table
+//   - Global sampler heap root parameter (2x2048 sampler ranges)
+//   - Full naga HLSL options with BindingMap and SamplerBufferBindingMap
+//
+//nolint:maintidx // inherent complexity: Rust wgpu-hal root signature construction with monotonic register counters
+func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (*pipelineLayoutResult, error) {
 	var rootParams []d3d12.D3D12_ROOT_PARAMETER
-	var descriptorRanges [][]d3d12.D3D12_DESCRIPTOR_RANGE // Keep ranges alive
+	var allRanges []d3d12.D3D12_DESCRIPTOR_RANGE // flat slice to prevent reallocation
 	var groupMappings []rootParamMapping
+
+	// Monotonic per-type register counters (matches Rust wgpu-hal).
+	var bindCBV, bindSRV, bindUAV uint32
+
+	// naga HLSL binding maps.
+	bindingMap := make(map[hlsl.ResourceBinding]hlsl.BindTarget)
+	samplerBufferBindingMap := make(map[uint32]hlsl.BindTarget)
+
+	// Track whether any bind group has samplers.
+	samplerInAnyGroup := false
+
+	// Pre-count total descriptor ranges to avoid reallocation.
+	totalRanges := 0
+	for _, layout := range layouts {
+		bgLayout, ok := layout.(*BindGroupLayout)
+		if !ok {
+			continue
+		}
+		samplerInGroup := false
+		for _, entry := range bgLayout.entries {
+			switch entry.Type {
+			case BindingTypeSampler, BindingTypeComparisonSampler:
+				samplerInGroup = true
+			default:
+				totalRanges++
+			}
+		}
+		if samplerInGroup {
+			totalRanges++ // sampler index buffer SRV
+			samplerInAnyGroup = true
+		}
+	}
+	if samplerInAnyGroup {
+		totalRanges += 2 // global sampler heap ranges (standard + comparison)
+	}
+	allRanges = make([]d3d12.D3D12_DESCRIPTOR_RANGE, 0, totalRanges)
 
 	for groupIdx, layout := range layouts {
 		bgLayout, ok := layout.(*BindGroupLayout)
 		if !ok {
-			return nil, nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", groupIdx)
+			return nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", groupIdx)
 		}
 
-		mapping := rootParamMapping{cbvSrvUavIndex: -1, samplerIndex: -1}
+		mapping := rootParamMapping{cbvSrvUavIndex: -1}
 
 		// Skip empty layouts
 		if len(bgLayout.entries) == 0 {
@@ -184,33 +248,83 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			continue
 		}
 
-		// Separate entries by descriptor type
-		var cbvSrvUavRanges []d3d12.D3D12_DESCRIPTOR_RANGE
-		var samplerRanges []d3d12.D3D12_DESCRIPTOR_RANGE
+		// Build CBV/SRV/UAV descriptor ranges for this group.
+		rangeBase := len(allRanges)
 
 		for _, entry := range bgLayout.entries {
 			rangeType, isSampler := bindingTypeToD3D12DescriptorRangeType(entry.Type)
+			if isSampler {
+				continue // Samplers handled separately below
+			}
 
-			descRange := d3d12.D3D12_DESCRIPTOR_RANGE{
+			// Assign register using per-type monotonic counter.
+			var reg *uint32
+			switch rangeType {
+			case d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_CBV:
+				reg = &bindCBV
+			case d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
+				reg = &bindSRV
+			case d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_UAV:
+				reg = &bindUAV
+			default:
+				reg = &bindSRV
+			}
+
+			bindingMap[hlsl.ResourceBinding{
+				Group:   uint32(groupIdx),
+				Binding: entry.Binding,
+			}] = hlsl.BindTarget{
+				Space:    0,
+				Register: *reg,
+			}
+
+			allRanges = append(allRanges, d3d12.D3D12_DESCRIPTOR_RANGE{
 				RangeType:                         rangeType,
 				NumDescriptors:                    1,
-				BaseShaderRegister:                entry.Binding,
-				RegisterSpace:                     uint32(groupIdx), // Use group index as register space
-				OffsetInDescriptorsFromTableStart: 0xFFFFFFFF,       // D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
-			}
-
-			if isSampler {
-				samplerRanges = append(samplerRanges, descRange)
-			} else {
-				cbvSrvUavRanges = append(cbvSrvUavRanges, descRange)
-			}
+				BaseShaderRegister:                *reg,
+				RegisterSpace:                     0,
+				OffsetInDescriptorsFromTableStart: 0xFFFFFFFF, // D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
+			})
+			*reg++
 		}
 
-		// Create root parameter for CBV/SRV/UAV table
-		if len(cbvSrvUavRanges) > 0 {
-			descriptorRanges = append(descriptorRanges, cbvSrvUavRanges)
-			rangeIdx := len(descriptorRanges) - 1
+		// Handle samplers: assign to BindingMap with space=255 and
+		// index_within_group as register. Add sampler index buffer SRV.
+		var samplerIdxInGroup uint32
+		for _, entry := range bgLayout.entries {
+			if entry.Type != BindingTypeSampler && entry.Type != BindingTypeComparisonSampler {
+				continue
+			}
+			bindingMap[hlsl.ResourceBinding{
+				Group:   uint32(groupIdx),
+				Binding: entry.Binding,
+			}] = hlsl.BindTarget{
+				Space:    255,
+				Register: samplerIdxInGroup,
+			}
+			samplerIdxInGroup++
+		}
 
+		if samplerIdxInGroup > 0 {
+			// Add sampler index buffer SRV to the CBV/SRV/UAV table.
+			// This is the StructuredBuffer<uint> that maps sampler binding index
+			// to the global sampler heap slot.
+			samplerBufferBindingMap[uint32(groupIdx)] = hlsl.BindTarget{
+				Space:    0,
+				Register: bindSRV,
+			}
+			allRanges = append(allRanges, d3d12.D3D12_DESCRIPTOR_RANGE{
+				RangeType:                         d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+				NumDescriptors:                    1,
+				BaseShaderRegister:                bindSRV,
+				RegisterSpace:                     0,
+				OffsetInDescriptorsFromTableStart: 0xFFFFFFFF,
+			})
+			bindSRV++
+		}
+
+		// Create root parameter for CBV/SRV/UAV table (includes sampler index buffer SRV).
+		if len(allRanges) > rangeBase {
 			mapping.cbvSrvUavIndex = len(rootParams)
 
 			param := d3d12.D3D12_ROOT_PARAMETER{
@@ -218,35 +332,53 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
 			}
 
-			// Set descriptor table in union
+			rangeSlice := allRanges[rangeBase:]
 			table := (*d3d12.D3D12_ROOT_DESCRIPTOR_TABLE)(unsafe.Pointer(&param.Union[0]))
-			table.NumDescriptorRanges = uint32(len(descriptorRanges[rangeIdx]))
-			table.DescriptorRanges = &descriptorRanges[rangeIdx][0]
-
-			rootParams = append(rootParams, param)
-		}
-
-		// Create root parameter for sampler table
-		if len(samplerRanges) > 0 {
-			descriptorRanges = append(descriptorRanges, samplerRanges)
-			rangeIdx := len(descriptorRanges) - 1
-
-			mapping.samplerIndex = len(rootParams)
-
-			param := d3d12.D3D12_ROOT_PARAMETER{
-				ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
-			}
-
-			// Set descriptor table in union
-			table := (*d3d12.D3D12_ROOT_DESCRIPTOR_TABLE)(unsafe.Pointer(&param.Union[0]))
-			table.NumDescriptorRanges = uint32(len(descriptorRanges[rangeIdx]))
-			table.DescriptorRanges = &descriptorRanges[rangeIdx][0]
+			table.NumDescriptorRanges = uint32(len(rangeSlice))
+			table.DescriptorRanges = &rangeSlice[0]
 
 			rootParams = append(rootParams, param)
 		}
 
 		groupMappings = append(groupMappings, mapping)
+	}
+
+	// Global sampler heap root parameter (matches Rust wgpu-hal).
+	// Two ranges in the same descriptor table: standard samplers at s0-s2047
+	// and comparison samplers at s2048-s4095, both in space 0.
+	samplerRootIndex := -1
+	if samplerInAnyGroup {
+		samplerRootIndex = len(rootParams)
+
+		rangeBase := len(allRanges)
+		// Standard samplers (registers 0-2047) and comparison samplers (registers 2048-4095).
+		allRanges = append(allRanges,
+			d3d12.D3D12_DESCRIPTOR_RANGE{
+				RangeType:                         d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
+				NumDescriptors:                    2048,
+				BaseShaderRegister:                0,
+				RegisterSpace:                     0,
+				OffsetInDescriptorsFromTableStart: 0,
+			},
+			d3d12.D3D12_DESCRIPTOR_RANGE{
+				RangeType:                         d3d12.D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
+				NumDescriptors:                    2048,
+				BaseShaderRegister:                2048,
+				RegisterSpace:                     0,
+				OffsetInDescriptorsFromTableStart: 0,
+			},
+		)
+
+		samplerRanges := allRanges[rangeBase:]
+		param := d3d12.D3D12_ROOT_PARAMETER{
+			ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+			ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
+		}
+		table := (*d3d12.D3D12_ROOT_DESCRIPTOR_TABLE)(unsafe.Pointer(&param.Union[0]))
+		table.NumDescriptorRanges = uint32(len(samplerRanges))
+		table.DescriptorRanges = &samplerRanges[0]
+
+		rootParams = append(rootParams, param)
 	}
 
 	// Build root signature description
@@ -265,27 +397,40 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 		if errorBlob != nil {
 			errorBlob.Release()
 		}
-		return nil, nil, fmt.Errorf("dx12: failed to serialize root signature: %w", err)
+		return nil, fmt.Errorf("dx12: failed to serialize root signature: %w", err)
 	}
 	defer blob.Release()
 
 	// Check if device is already lost before attempting to create root signature.
-	// Device removal can happen asynchronously (e.g. TDR from a prior GPU hang).
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-		return nil, nil, fmt.Errorf("dx12: device already removed before CreateRootSignature: %w", reason)
+		return nil, fmt.Errorf("dx12: device already removed before CreateRootSignature: %w", reason)
 	}
 
 	// Create root signature
 	rootSig, err := d.raw.CreateRootSignature(0, blob.GetBufferPointer(), blob.GetBufferSize())
 	if err != nil {
-		// Include device removed reason for better diagnostics
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-			return nil, nil, fmt.Errorf("dx12: failed to create root signature (device removed: %s): %w", reason.Error(), err)
+			return nil, fmt.Errorf("dx12: failed to create root signature (device removed: %s): %w", reason.Error(), err)
 		}
-		return nil, nil, fmt.Errorf("dx12: failed to create root signature: %w", err)
+		return nil, fmt.Errorf("dx12: failed to create root signature: %w", err)
 	}
 
-	return rootSig, groupMappings, nil
+	// Build naga HLSL options for deferred shader compilation.
+	nagaOpts := hlsl.DefaultOptions()
+	nagaOpts.BindingMap = bindingMap
+	nagaOpts.FakeMissingBindings = false
+	nagaOpts.SamplerBufferBindingMap = samplerBufferBindingMap
+	nagaOpts.SamplerHeapTargets = hlsl.SamplerHeapBindTargets{
+		StandardSamplers:   hlsl.BindTarget{Space: 0, Register: 0},
+		ComparisonSamplers: hlsl.BindTarget{Space: 0, Register: 2048},
+	}
+
+	return &pipelineLayoutResult{
+		rootSignature:    rootSig,
+		groupMappings:    groupMappings,
+		samplerRootIndex: samplerRootIndex,
+		nagaOptions:      nagaOpts,
+	}, nil
 }
 
 // bindingTypeToD3D12DescriptorRangeType converts binding type to D3D12 descriptor range type.
@@ -591,11 +736,12 @@ func boolToInt32(b bool) int32 {
 
 // RenderPipeline implements hal.RenderPipeline for DirectX 12.
 type RenderPipeline struct {
-	pso           *d3d12.ID3D12PipelineState
-	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings []rootParamMapping         // bind group → root param index mapping
-	topology      d3d12.D3D_PRIMITIVE_TOPOLOGY
-	vertexStrides []uint32 // Strides per vertex buffer slot
+	pso              *d3d12.ID3D12PipelineState
+	rootSignature    *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings    []rootParamMapping         // bind group → root param index mapping
+	samplerRootIndex int                        // root param index for global sampler heap, or -1
+	topology         d3d12.D3D_PRIMITIVE_TOPOLOGY
+	vertexStrides    []uint32 // Strides per vertex buffer slot
 }
 
 // Destroy releases the render pipeline resources.
@@ -635,9 +781,10 @@ func (p *RenderPipeline) VertexStrides() []uint32 {
 
 // ComputePipeline implements hal.ComputePipeline for DirectX 12.
 type ComputePipeline struct {
-	pso           *d3d12.ID3D12PipelineState
-	rootSignature *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings []rootParamMapping         // bind group → root param index mapping
+	pso              *d3d12.ID3D12PipelineState
+	rootSignature    *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings    []rootParamMapping         // bind group → root param index mapping
+	samplerRootIndex int                        // root param index for global sampler heap, or -1
 }
 
 // Destroy releases the compute pipeline resources.

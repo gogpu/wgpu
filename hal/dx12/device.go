@@ -1293,10 +1293,29 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 
 	d.raw.CreateSampler(&samplerDesc, handle)
 
+	// Allocate a slot in the shader-visible sampler heap (global sampler pool).
+	// This is the index that gets written into sampler index buffers in bind groups,
+	// matching Rust wgpu-hal's SamplerIndex architecture.
+	poolCPU, poolGPU, err := d.samplerHeap.AllocateGPU(1)
+	if err != nil {
+		d.stagingSamplerHeap.Free(heapIndex, 1)
+		return nil, fmt.Errorf("dx12: failed to allocate sampler pool slot: %w", err)
+	}
+	_ = poolGPU // GPU handle not needed directly; the shader uses the heap index
+	poolSlot := d.samplerHeap.HandleToIndex(poolCPU)
+
+	// Copy the sampler from staging to shader-visible heap.
+	d.raw.CopyDescriptors(
+		1, &poolCPU, nil,
+		1, &handle, nil,
+		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+	)
+
 	return &Sampler{
-		handle:    handle,
-		heapIndex: heapIndex,
-		device:    d,
+		handle:          handle,
+		heapIndex:       heapIndex,
+		samplerPoolSlot: poolSlot,
+		device:          d,
 	}, nil
 }
 
@@ -1359,6 +1378,10 @@ func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
 }
 
 // CreateBindGroup creates a bind group.
+// Uses the Rust wgpu-hal sampler heap pattern: sampler entries are collected
+// as pool indices and written to a StructuredBuffer<uint> (sampler index buffer).
+// The SRV for this buffer is placed in the CBV/SRV/UAV table so the shader can
+// read nagaSamplerHeap[indexBuffer[binding_index]].
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: bind group descriptor is nil in DX12.CreateBindGroup — core validation gap")
@@ -1376,61 +1399,136 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 
 	// Classify entries into CBV/SRV/UAV vs Sampler
 	var viewEntries []gputypes.BindGroupEntry // CBV, SRV, UAV
-	var samplerEntries []gputypes.BindGroupEntry
+	var samplerPoolIndices []uint32           // global sampler pool indices
 
 	for _, entry := range desc.Entries {
-		switch entry.Resource.(type) {
+		switch res := entry.Resource.(type) {
 		case gputypes.SamplerBinding:
-			samplerEntries = append(samplerEntries, entry)
+			sampler := (*Sampler)(unsafe.Pointer(res.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
+			samplerPoolIndices = append(samplerPoolIndices, sampler.samplerPoolSlot)
 		default: // BufferBinding, TextureViewBinding
 			viewEntries = append(viewEntries, entry)
 		}
 	}
 
-	// Allocate and populate CBV/SRV/UAV descriptors.
-	// CBVs are created inline (CreateConstantBufferView), SRVs are batched
-	// via CopyDescriptors to reduce per-descriptor syscall overhead.
-	if len(viewEntries) > 0 && d.viewHeap != nil {
-		cpuStart, gpuStart, err := d.viewHeap.AllocateGPU(uint32(len(viewEntries)))
-		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate view descriptors: %w", err)
-		}
-		bg.gpuDescHandle = gpuStart
-		bg.viewHeapIndex = d.viewHeap.HandleToIndex(cpuStart)
-		bg.viewCount = uint32(len(viewEntries))
-
-		if err := d.writeViewDescriptorsBatched(cpuStart, viewEntries); err != nil {
-			return nil, err
-		}
+	// Total view descriptors: regular entries + sampler index buffer SRV (if samplers present).
+	totalViewDescs := uint32(len(viewEntries))
+	if len(samplerPoolIndices) > 0 {
+		totalViewDescs++ // +1 for sampler index buffer SRV
 	}
 
-	// Allocate and populate sampler descriptors.
-	// Uses batched CopyDescriptors: N scattered source handles copied to 1
-	// contiguous destination range in a single D3D12 API call.
-	if len(samplerEntries) > 0 && d.samplerHeap != nil {
-		cpuStart, gpuStart, err := d.samplerHeap.AllocateGPU(uint32(len(samplerEntries)))
-		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate sampler descriptors: %w", err)
-		}
-		bg.samplerGPUHandle = gpuStart
-		bg.samplerHeapIndex = d.samplerHeap.HandleToIndex(cpuStart)
-		bg.samplerCount = uint32(len(samplerEntries))
-
-		srcHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, len(samplerEntries))
-		for i, entry := range samplerEntries {
-			sb := entry.Resource.(gputypes.SamplerBinding)
-			sampler := (*Sampler)(unsafe.Pointer(sb.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
-			srcHandles[i] = sampler.handle
-		}
-		count := uint32(len(samplerEntries))
-		d.raw.CopyDescriptors(
-			1, &cpuStart, &count,
-			count, &srcHandles[0], nil,
-			d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
-		)
+	// Allocate and populate CBV/SRV/UAV descriptors (including sampler index buffer SRV).
+	if err := d.populateBindGroupDescriptors(bg, totalViewDescs, viewEntries, samplerPoolIndices); err != nil {
+		return nil, err
 	}
 
 	return bg, nil
+}
+
+// populateBindGroupDescriptors allocates view heap descriptors and writes CBV/SRV/UAV
+// entries plus the sampler index buffer SRV into the contiguous GPU descriptor range.
+func (d *Device) populateBindGroupDescriptors(bg *BindGroup, totalViewDescs uint32, viewEntries []gputypes.BindGroupEntry, samplerPoolIndices []uint32) error {
+	if totalViewDescs == 0 || d.viewHeap == nil {
+		return nil
+	}
+
+	cpuStart, gpuStart, err := d.viewHeap.AllocateGPU(totalViewDescs)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to allocate view descriptors: %w", err)
+	}
+	bg.gpuDescHandle = gpuStart
+	bg.viewHeapIndex = d.viewHeap.HandleToIndex(cpuStart)
+	bg.viewCount = totalViewDescs
+
+	if len(viewEntries) > 0 {
+		if err := d.writeViewDescriptorsBatched(cpuStart, viewEntries); err != nil {
+			return err
+		}
+	}
+
+	// Create sampler index buffer and its SRV.
+	if len(samplerPoolIndices) > 0 {
+		indexBuf, err := d.createSamplerIndexBuffer(samplerPoolIndices)
+		if err != nil {
+			return fmt.Errorf("dx12: failed to create sampler index buffer: %w", err)
+		}
+		bg.samplerIndexBuffer = indexBuf
+
+		// Create SRV for the sampler index buffer at the end of the view descriptors.
+		srvDest := cpuStart.Offset(len(viewEntries), d.viewHeap.incrementSize)
+		d.createBufferSRV(indexBuf, uint32(len(samplerPoolIndices)), 4, srvDest)
+	}
+
+	return nil
+}
+
+// createSamplerIndexBuffer creates a GPU buffer containing sampler pool indices.
+// This is the StructuredBuffer<uint> that the shader reads to resolve sampler heap slots.
+// Matches Rust wgpu-hal's sampler_index_buffer creation in create_bind_group.
+func (d *Device) createSamplerIndexBuffer(indices []uint32) (*d3d12.ID3D12Resource, error) {
+	bufferSize := uint64(len(indices) * 4) // uint32 = 4 bytes
+
+	// Create an upload heap buffer (CPU-writable, GPU-readable).
+	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
+		Type: d3d12.D3D12_HEAP_TYPE_UPLOAD,
+	}
+	resourceDesc := d3d12.D3D12_RESOURCE_DESC{
+		Dimension:        d3d12.D3D12_RESOURCE_DIMENSION_BUFFER,
+		Width:            bufferSize,
+		Height:           1,
+		DepthOrArraySize: 1,
+		MipLevels:        1,
+		SampleDesc:       d3d12.DXGI_SAMPLE_DESC{Count: 1},
+		Layout:           d3d12.D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+		Flags:            d3d12.D3D12_RESOURCE_FLAG_NONE,
+	}
+
+	resource, err := d.raw.CreateCommittedResource(
+		&heapProps,
+		d3d12.D3D12_HEAP_FLAG_NONE,
+		&resourceDesc,
+		d3d12.D3D12_RESOURCE_STATE_GENERIC_READ,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create committed resource: %w", err)
+	}
+
+	// Map, write indices, unmap.
+	ptr, err := resource.Map(0, nil)
+	if err != nil {
+		resource.Release()
+		return nil, fmt.Errorf("map sampler index buffer: %w", err)
+	}
+
+	dst := unsafe.Slice((*uint32)(ptr), len(indices))
+	copy(dst, indices)
+	resource.Unmap(0, nil)
+
+	return resource, nil
+}
+
+// createBufferSRV creates a structured buffer SRV at the given CPU descriptor handle.
+func (d *Device) createBufferSRV(resource *d3d12.ID3D12Resource, numElements, structureByteStride uint32, dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE) {
+	srvDesc := d3d12.D3D12_SHADER_RESOURCE_VIEW_DESC{
+		Format:                  d3d12.DXGI_FORMAT_UNKNOWN,
+		ViewDimension:           d3d12.D3D12_SRV_DIMENSION_BUFFER,
+		Shader4ComponentMapping: d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+	}
+	// Set buffer SRV union: FirstElement=0, NumElements, StructureByteStride, Flags=0
+	type bufferSRV struct {
+		FirstElement        uint64
+		NumElements         uint32
+		StructureByteStride uint32
+		Flags               uint32
+	}
+	buf := (*bufferSRV)(unsafe.Pointer(&srvDesc.Union[0]))
+	buf.FirstElement = 0
+	buf.NumElements = numElements
+	buf.StructureByteStride = structureByteStride
+	buf.Flags = 0
+
+	d.raw.CreateShaderResourceView(resource, &srvDesc, dest)
 }
 
 // writeViewDescriptorsBatched writes CBV/SRV/UAV descriptors for all view entries.
@@ -1502,7 +1600,7 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	}
 
 	// Create root signature from bind group layouts
-	rootSig, groupMappings, err := d.createRootSignatureFromLayouts(desc.BindGroupLayouts)
+	result, err := d.createRootSignatureFromLayouts(desc.BindGroupLayouts)
 	if err != nil {
 		return nil, err
 	}
@@ -1512,20 +1610,22 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	for i, l := range desc.BindGroupLayouts {
 		bgLayout, ok := l.(*BindGroupLayout)
 		if !ok {
-			rootSig.Release()
+			result.rootSignature.Release()
 			return nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", i)
 		}
 		bgLayouts[i] = bgLayout
 	}
 
 	if err := d.checkHealth("CreatePipelineLayout(" + desc.Label + ")"); err != nil {
-		rootSig.Release()
+		result.rootSignature.Release()
 		return nil, err
 	}
 	return &PipelineLayout{
-		rootSignature:    rootSig,
+		rootSignature:    result.rootSignature,
 		bindGroupLayouts: bgLayouts,
-		groupMappings:    groupMappings,
+		groupMappings:    result.groupMappings,
+		samplerRootIndex: result.samplerRootIndex,
+		nagaOptions:      result.nagaOptions,
 		device:           d,
 	}, nil
 }
@@ -1538,7 +1638,10 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 }
 
 // CreateShaderModule creates a shader module.
-// Supports WGSL source (compiled via naga HLSL backend + D3DCompile) and pre-compiled SPIR-V.
+// For WGSL source, compilation is deferred to pipeline creation time when the
+// PipelineLayout (with proper naga HLSL options) is available. This matches
+// Rust wgpu-hal which compiles shaders in create_render_pipeline.
+// For pre-compiled SPIR-V, bytecode is stored directly.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: shader module descriptor is nil in DX12.CreateShaderModule — core validation gap")
@@ -1551,11 +1654,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	switch {
 	case desc.Source.WGSL != "":
-		if err := d.compileWGSLModule(desc.Source.WGSL, module); err != nil {
-			return nil, fmt.Errorf("dx12: WGSL compilation failed: %w", err)
-		}
-		hal.Logger().Debug("dx12: shader module compiled",
-			"entryPoints", len(module.entryPoints),
+		// Store raw WGSL for deferred compilation during pipeline creation.
+		module.wgslSource = desc.Source.WGSL
+		hal.Logger().Debug("dx12: shader module created (deferred compilation)",
 			"source", "WGSL",
 		)
 	case len(desc.Source.SPIRV) > 0:
@@ -1580,7 +1681,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 // compileWGSLModule compiles WGSL source to per-entry-point DXBC bytecode.
 // Pipeline: WGSL → naga parse → IR → HLSL → D3DCompile → DXBC
-func (d *Device) compileWGSLModule(wgslSource string, module *ShaderModule) error {
+// The naga options must come from the PipelineLayout, which contains the proper
+// BindingMap and SamplerBufferBindingMap matching the root signature layout.
+func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, module *ShaderModule) error {
 	// Step 1: Parse WGSL to AST
 	ast, err := naga.Parse(wgslSource)
 	if err != nil {
@@ -1593,39 +1696,11 @@ func (d *Device) compileWGSLModule(wgslSource string, module *ShaderModule) erro
 		return fmt.Errorf("WGSL lower: %w", err)
 	}
 
-	// Step 3: Build BindingMap from IR global variables.
-	// This maps each (group, binding) pair to an explicit HLSL register target,
-	// matching the root signature layout where register=binding and space=group.
-	// Without this, naga generates sampler heap indirection (nagaSamplerHeap[...])
-	// which requires a global sampler pool and index buffers that our HAL doesn't
-	// implement. With explicit BindingMap entries and no SamplerBufferBindingMap,
-	// naga emits direct register bindings for samplers (register(sN, spaceG)),
-	// matching our per-group sampler descriptor tables.
-	bindingMap := make(map[hlsl.ResourceBinding]hlsl.BindTarget, len(irModule.GlobalVariables))
-	for i := range irModule.GlobalVariables {
-		gv := &irModule.GlobalVariables[i]
-		if gv.Binding == nil {
-			continue
-		}
-		bindingMap[hlsl.ResourceBinding{
-			Group:   gv.Binding.Group,
-			Binding: gv.Binding.Binding,
-		}] = hlsl.BindTarget{
-			Space:    uint8(gv.Binding.Group),
-			Register: gv.Binding.Binding,
-		}
-	}
-
-	opts := hlsl.DefaultOptions()
-	opts.BindingMap = bindingMap
-	opts.FakeMissingBindings = false
-	// NOTE: SamplerBufferBindingMap is intentionally left nil.
-	// This tells naga to emit direct sampler register bindings instead of
-	// sampler heap indirection, which matches our root signature layout.
-	opts.SamplerBufferBindingMap = nil
-
-	// Step 4: Generate HLSL (all entry points)
-	hlslSource, info, err := hlsl.Compile(irModule, opts)
+	// Step 3: Generate HLSL using pipeline-specific naga options.
+	// The options contain BindingMap (register assignments matching root signature)
+	// and SamplerBufferBindingMap (sampler index buffer locations), ensuring the
+	// shader's register usage matches the root signature exactly.
+	hlslSource, info, err := hlsl.Compile(irModule, nagaOpts)
 	if err != nil {
 		return fmt.Errorf("HLSL generation: %w", err)
 	}
@@ -1682,10 +1757,44 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 	}
 }
 
+// ensureShaderCompiled performs deferred WGSL compilation if needed.
+// Must be called during pipeline creation when the PipelineLayout is available.
+func (d *Device) ensureShaderCompiled(module *ShaderModule, layout *PipelineLayout) error {
+	if !module.IsDeferred() {
+		return nil // Already compiled (SPIR-V or previously compiled WGSL)
+	}
+	if layout == nil || layout.nagaOptions == nil {
+		return fmt.Errorf("dx12: deferred WGSL compilation requires PipelineLayout with naga options")
+	}
+	return d.compileWGSLModule(module.wgslSource, layout.nagaOptions, module)
+}
+
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in DX12.CreateRenderPipeline — core validation gap")
+	}
+
+	// Deferred shader compilation: compile WGSL with pipeline-specific naga options.
+	var pipelineLayout *PipelineLayout
+	if desc.Layout != nil {
+		if pl, ok := desc.Layout.(*PipelineLayout); ok {
+			pipelineLayout = pl
+		}
+	}
+	if desc.Vertex.Module != nil {
+		if sm, ok := desc.Vertex.Module.(*ShaderModule); ok {
+			if err := d.ensureShaderCompiled(sm, pipelineLayout); err != nil {
+				return nil, fmt.Errorf("dx12: vertex shader compilation failed: %w", err)
+			}
+		}
+	}
+	if desc.Fragment != nil && desc.Fragment.Module != nil {
+		if sm, ok := desc.Fragment.Module.(*ShaderModule); ok {
+			if err := d.ensureShaderCompiled(sm, pipelineLayout); err != nil {
+				return nil, fmt.Errorf("dx12: fragment shader compilation failed: %w", err)
+			}
+		}
 	}
 
 	// Build input layout from vertex buffers
@@ -1714,12 +1823,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	// Must match the root signature used in the PSO.
 	var rootSig *d3d12.ID3D12RootSignature
 	var groupMappings []rootParamMapping
-	if desc.Layout != nil {
-		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
-		if ok {
-			rootSig = pipelineLayout.rootSignature
-			groupMappings = pipelineLayout.groupMappings
-		}
+	samplerRootIdx := -1
+	if pipelineLayout != nil {
+		rootSig = pipelineLayout.rootSignature
+		groupMappings = pipelineLayout.groupMappings
+		samplerRootIdx = pipelineLayout.samplerRootIndex
 	} else {
 		// No layout → use the same empty root signature that was used in the PSO.
 		rootSig, _ = d.getOrCreateEmptyRootSignature()
@@ -1742,11 +1850,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	)
 
 	return &RenderPipeline{
-		pso:           pso,
-		rootSignature: rootSig,
-		groupMappings: groupMappings,
-		topology:      primitiveTopologyToD3D12(desc.Primitive.Topology),
-		vertexStrides: vertexStrides,
+		pso:              pso,
+		rootSignature:    rootSig,
+		groupMappings:    groupMappings,
+		samplerRootIndex: samplerRootIdx,
+		topology:         primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides:    vertexStrides,
 	}, nil
 }
 
@@ -1773,19 +1882,28 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	// DX12 requires a valid root signature for every PSO.
 	var rootSig *d3d12.ID3D12RootSignature
 	var groupMappings []rootParamMapping
+	var pipelineLayout *PipelineLayout
+	samplerRootIdx := -1
 	if desc.Layout != nil {
-		pipelineLayout, ok := desc.Layout.(*PipelineLayout)
+		pl, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
 			return nil, fmt.Errorf("dx12: invalid pipeline layout type")
 		}
-		rootSig = pipelineLayout.rootSignature
-		groupMappings = pipelineLayout.groupMappings
+		pipelineLayout = pl
+		rootSig = pl.rootSignature
+		groupMappings = pl.groupMappings
+		samplerRootIdx = pl.samplerRootIndex
 	} else {
 		emptyRS, err := d.getOrCreateEmptyRootSignature()
 		if err != nil {
 			return nil, fmt.Errorf("dx12: failed to get empty root signature for compute: %w", err)
 		}
 		rootSig = emptyRS
+	}
+
+	// Deferred shader compilation: compile WGSL with pipeline-specific naga options.
+	if err := d.ensureShaderCompiled(shaderModule, pipelineLayout); err != nil {
+		return nil, fmt.Errorf("dx12: compute shader compilation failed: %w", err)
 	}
 
 	// Build compute pipeline state desc
@@ -1824,9 +1942,10 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	)
 
 	return &ComputePipeline{
-		pso:           pso,
-		rootSignature: rootSig,
-		groupMappings: groupMappings,
+		pso:              pso,
+		rootSignature:    rootSig,
+		groupMappings:    groupMappings,
+		samplerRootIndex: samplerRootIdx,
 	}, nil
 }
 

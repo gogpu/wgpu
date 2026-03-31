@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.23.1] - 2026-03-31
+## [0.23.2] - 2026-03-31
 
 ### Fixed
 
@@ -27,10 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` before R8 uploads to prevent corrupted
   font glyphs on non-power-of-2 widths.
 
-- **DX12: direct sampler binding** — naga HLSL now generates direct `register(sN, spaceG)`
-  for samplers when BindingMap is provided (instead of sampler heap indirection).
-  DX12 HAL builds BindingMap from IR module, matching root signature layout.
-  Fixes invisible text/textures on DX12.
+- **DX12: proper sampler heap** — Implemented global sampler pool + per-group
+  sampler index buffers (matching Rust wgpu-hal architecture). Deferred HLSL
+  compilation with SamplerBufferBindingMap. Fixes invisible text/textures on DX12.
 
 ### Known Issues
 
