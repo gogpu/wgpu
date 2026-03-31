@@ -551,8 +551,9 @@ func buildInputLayout(buffers []gputypes.VertexBufferLayout) ([]d3d12.D3D12_INPU
 
 	for slotIdx, buffer := range buffers {
 		for _, attr := range buffer.Attributes {
-			// Create semantic name "TEXCOORD" with semantic index = shader location
-			semanticName := []byte("TEXCOORD\x00")
+			// Create semantic name "LOC" with semantic index = shader location.
+			// Must match naga HLSL output which uses LOC{N} for @location(N).
+			semanticName := []byte("LOC\x00")
 			semanticNames = append(semanticNames, semanticName)
 
 			element := d3d12.D3D12_INPUT_ELEMENT_DESC{

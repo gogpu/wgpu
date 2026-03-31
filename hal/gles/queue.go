@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
@@ -130,9 +131,18 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	q.glCtx.BindTexture(tex.target, tex.id)
 
 	if tex.target == gl.TEXTURE_2D {
+		// Set alignment to 1 for single-channel formats (R8) whose row stride
+		// may not be a multiple of the default 4-byte GL_UNPACK_ALIGNMENT.
+		if tex.format == gputypes.TextureFormatR8Unorm {
+			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+		}
 		q.glCtx.TexImage2D(tex.target, int32(dst.MipLevel), int32(internalFormat),
 			int32(size.Width), int32(size.Height), 0, format, dataType,
 			unsafe.Pointer(&data[0]))
+		// Restore default alignment after upload.
+		if tex.format == gputypes.TextureFormatR8Unorm {
+			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+		}
 	}
 
 	q.glCtx.BindTexture(tex.target, 0)
