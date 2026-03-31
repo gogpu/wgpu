@@ -34,6 +34,24 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 		return "", fmt.Errorf("gles: WGSL lower error: %w", err)
 	}
 
+	// Build a BindingMap that maps (group, binding) to flat GL texture unit indices.
+	// The formula group*16 + binding must match SetBindGroupCommand.Execute in command.go,
+	// which uses the same maxBindingsPerGroup=16 constant to compute glBinding.
+	// Without this map, naga emits layout(binding=N) using the raw WGSL binding number,
+	// which does not match the texture units that SetBindGroupCommand activates.
+	const maxBindingsPerGroup = 16
+	bindingMap := make(map[glsl.BindingMapKey]uint8, len(module.GlobalVariables))
+	for _, gv := range module.GlobalVariables {
+		if gv.Binding == nil {
+			continue
+		}
+		flatBinding := gv.Binding.Group*maxBindingsPerGroup + gv.Binding.Binding
+		bindingMap[glsl.BindingMapKey{
+			Group:   gv.Binding.Group,
+			Binding: gv.Binding.Binding,
+		}] = uint8(flatBinding)
+	}
+
 	// Compile IR to GLSL 4.30 core.
 	// Version 4.30 is needed for layout(binding=N) resource binding qualifiers
 	// and compute shader support (local_size_x/y/z).
@@ -41,6 +59,7 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 		LangVersion:        glsl.Version430,
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
+		BindingMap:         bindingMap,
 		// NOTE: Do NOT use WriterFlagAdjustCoordinateSpace here.
 		// Our gg shaders already flip Y in the vertex shader (Vulkan convention).
 		// Adding naga's flip would double-flip, producing upside-down output.

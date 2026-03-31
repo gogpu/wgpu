@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-03-31
+
+### Fixed
+
+- **DX12: vertex input semantic mismatch** — Changed input layout semantic from
+  `TEXCOORD{N}` to `LOC{N}` to match naga HLSL output. DX12 validates exact
+  semantic name match between shader and input layout. Previous mismatch caused
+  `CreateGraphicsPipelineState` to fail with `E_INVALIDARG` on all render pipelines.
+
+- **GLES: texture sampling broken — BindingMap not passed to GLSL compiler** —
+  Without BindingMap, naga GLSL emitted default `layout(binding=0)` for all
+  samplers. Runtime bound textures at `group*16+binding` (unit 1+). Shader
+  sampled unit 0 (empty) → invisible text and textures on all GLES backends.
+
+- **GLES (Linux): WriteTexture used wrong internalFormat** — Linux path discarded
+  `internalFormat` from `textureFormatToGL()` and passed `GL_TEXTURE_2D` (0x0DE1)
+  as internal format to `glTexImage2D`. Texture upload silently failed.
+
+- **GLES: missing GL_UNPACK_ALIGNMENT for R8 textures** — Added
+  `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` before R8 uploads to prevent corrupted
+  font glyphs on non-power-of-2 widths.
+
+- **DX12: direct sampler binding** — naga HLSL now generates direct `register(sN, spaceG)`
+  for samplers when BindingMap is provided (instead of sampler heap indirection).
+  DX12 HAL builds BindingMap from IR module, matching root signature layout.
+  Fixes invisible text/textures on DX12.
+
+### Known Issues
+
+- **DX12: rendering noticeably slower than Vulkan/GLES** — Needs profiling.
+  Possible causes: HLSL compilation overhead, descriptor heap allocation, sync.
+  Tracked in PERF-DX12-001.
+
 ## [0.23.0] - 2026-03-30
 
 ### Added

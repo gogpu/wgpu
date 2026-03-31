@@ -1593,19 +1593,50 @@ func (d *Device) compileWGSLModule(wgslSource string, module *ShaderModule) erro
 		return fmt.Errorf("WGSL lower: %w", err)
 	}
 
-	// Step 3: Generate HLSL (all entry points)
-	hlslSource, info, err := hlsl.Compile(irModule, hlsl.DefaultOptions())
+	// Step 3: Build BindingMap from IR global variables.
+	// This maps each (group, binding) pair to an explicit HLSL register target,
+	// matching the root signature layout where register=binding and space=group.
+	// Without this, naga generates sampler heap indirection (nagaSamplerHeap[...])
+	// which requires a global sampler pool and index buffers that our HAL doesn't
+	// implement. With explicit BindingMap entries and no SamplerBufferBindingMap,
+	// naga emits direct register bindings for samplers (register(sN, spaceG)),
+	// matching our per-group sampler descriptor tables.
+	bindingMap := make(map[hlsl.ResourceBinding]hlsl.BindTarget, len(irModule.GlobalVariables))
+	for i := range irModule.GlobalVariables {
+		gv := &irModule.GlobalVariables[i]
+		if gv.Binding == nil {
+			continue
+		}
+		bindingMap[hlsl.ResourceBinding{
+			Group:   gv.Binding.Group,
+			Binding: gv.Binding.Binding,
+		}] = hlsl.BindTarget{
+			Space:    uint8(gv.Binding.Group),
+			Register: gv.Binding.Binding,
+		}
+	}
+
+	opts := hlsl.DefaultOptions()
+	opts.BindingMap = bindingMap
+	opts.FakeMissingBindings = false
+	// NOTE: SamplerBufferBindingMap is intentionally left nil.
+	// This tells naga to emit direct sampler register bindings instead of
+	// sampler heap indirection, which matches our root signature layout.
+	opts.SamplerBufferBindingMap = nil
+
+	// Step 4: Generate HLSL (all entry points)
+	hlslSource, info, err := hlsl.Compile(irModule, opts)
 	if err != nil {
 		return fmt.Errorf("HLSL generation: %w", err)
 	}
 
-	// Step 4: Load d3dcompiler_47.dll
+	// Step 5: Load d3dcompiler_47.dll
 	compiler, err := d3dcompile.Load()
 	if err != nil {
 		return fmt.Errorf("load d3dcompiler: %w", err)
 	}
 
-	// Step 5: Compile each entry point separately
+	// Step 6: Compile each entry point separately
 	for i := range irModule.EntryPoints {
 		ep := &irModule.EntryPoints[i]
 		target := shaderStageToTarget(ep.Stage)
