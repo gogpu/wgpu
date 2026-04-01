@@ -6,6 +6,7 @@
 package gles
 
 import (
+	"context"
 	"log/slog"
 	"unsafe"
 
@@ -928,6 +929,12 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			// Sampler handle is the GL sampler object ID (from NativeHandle()).
 			samplerID := uint32(res.Sampler)
 			if samplerID != 0 {
+				if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
+					hal.Logger().Debug("gles: binding sampler",
+						"unit", glBinding,
+						"samplerID", samplerID,
+					)
+				}
 				// Bind the GL sampler object to the texture unit corresponding
 				// to this binding index. The sampler overrides any texture-bound
 				// filtering/wrapping state on this unit.

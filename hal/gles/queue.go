@@ -146,6 +146,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	}
 
 	q.glCtx.BindTexture(tex.target, 0)
+
+	hal.Logger().Debug("gles: texture written",
+		"format", tex.format,
+		"width", size.Width,
+		"height", size.Height,
+	)
+
 	return nil
 }
 

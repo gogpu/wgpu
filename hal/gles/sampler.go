@@ -59,6 +59,12 @@ func configureSampler(glCtx *gl.Context, desc *hal.SamplerDescriptor) uint32 {
 		glCtx.SamplerParameteri(id, gl.TEXTURE_COMPARE_FUNC, mapCompareFunction(desc.Compare))
 	}
 
+	hal.Logger().Debug("gles: sampler created",
+		"id", id,
+		"magFilter", desc.MagFilter,
+		"minFilter", desc.MinFilter,
+	)
+
 	return id
 }
 
@@ -129,5 +135,53 @@ func mapCompareFunction(fn gputypes.CompareFunction) int32 {
 		return gl.ALWAYS
 	default:
 		return gl.ALWAYS
+	}
+}
+
+// isNonFilterableFormat reports whether the given texture format is non-filterable
+// per the WebGPU spec. Non-filterable formats include all integer formats and
+// 32-bit float formats (which require the float32-filterable feature to filter).
+// Rust wgpu sets GL_NEAREST for these at texture creation; filterable formats
+// are left to sampler objects.
+func isNonFilterableFormat(format gputypes.TextureFormat) bool {
+	switch format {
+	// Unsigned integer formats.
+	case gputypes.TextureFormatR8Uint,
+		gputypes.TextureFormatR16Uint,
+		gputypes.TextureFormatR32Uint,
+		gputypes.TextureFormatRG8Uint,
+		gputypes.TextureFormatRG16Uint,
+		gputypes.TextureFormatRG32Uint,
+		gputypes.TextureFormatRGBA8Uint,
+		gputypes.TextureFormatRGBA16Uint,
+		gputypes.TextureFormatRGBA32Uint,
+		gputypes.TextureFormatRGB10A2Uint:
+		return true
+
+	// Signed integer formats.
+	case gputypes.TextureFormatR8Sint,
+		gputypes.TextureFormatR16Sint,
+		gputypes.TextureFormatR32Sint,
+		gputypes.TextureFormatRG8Sint,
+		gputypes.TextureFormatRG16Sint,
+		gputypes.TextureFormatRG32Sint,
+		gputypes.TextureFormatRGBA8Sint,
+		gputypes.TextureFormatRGBA16Sint,
+		gputypes.TextureFormatRGBA32Sint:
+		return true
+
+	// 32-bit float formats (non-filterable without float32-filterable feature).
+	case gputypes.TextureFormatR32Float,
+		gputypes.TextureFormatRG32Float,
+		gputypes.TextureFormatRGBA32Float:
+		return true
+
+	// Depth/stencil non-filterable formats.
+	case gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatStencil8:
+		return true
+
+	default:
+		return false
 	}
 }

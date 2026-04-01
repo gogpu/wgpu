@@ -43,6 +43,15 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 		maxTexUnits = 8 // Conservative default
 	}
 
+	vendor := a.glCtx.GetString(gl.VENDOR)
+
+	hal.Logger().Info("gles: device opened",
+		"vendor", vendor,
+		"version", a.version,
+		"renderer", a.renderer,
+		"maxTextureUnits", maxTexUnits,
+	)
+
 	device := &Device{
 		glCtx:           a.glCtx,
 		eglCtx:          a.eglCtx,

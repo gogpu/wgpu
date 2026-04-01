@@ -114,6 +114,13 @@ func (h *DescriptorHeap) Allocate(count uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HAND
 	}
 
 	if h.nextFree+count > h.capacity {
+		hal.Logger().Error("dx12: descriptor heap exhausted",
+			"heapType", h.heapType,
+			"capacity", h.capacity,
+			"used", h.nextFree,
+			"freeList", len(h.freeList),
+			"requested", count,
+		)
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: descriptor heap exhausted (capacity=%d, used=%d, requested=%d)",
 			h.capacity, h.nextFree, count)
 	}
@@ -139,6 +146,13 @@ func (h *DescriptorHeap) AllocateGPU(count uint32) (d3d12.D3D12_CPU_DESCRIPTOR_H
 	}
 
 	if h.nextFree+count > h.capacity {
+		hal.Logger().Error("dx12: descriptor heap exhausted",
+			"heapType", h.heapType,
+			"capacity", h.capacity,
+			"used", h.nextFree,
+			"freeList", len(h.freeList),
+			"requested", count,
+		)
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, d3d12.D3D12_GPU_DESCRIPTOR_HANDLE{},
 			fmt.Errorf("dx12: descriptor heap exhausted (capacity=%d, used=%d, requested=%d)",
 				h.capacity, h.nextFree, count)
@@ -214,6 +228,7 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 
 	hal.Logger().Info("dx12: device created",
 		"featureLevel", fmt.Sprintf("0x%x", featureLevel),
+		"debugLayer", instance.flags&gputypes.InstanceFlagsDebug != 0,
 	)
 
 	return dev, nil
@@ -302,6 +317,11 @@ func (d *Device) createDescriptorHeaps() error {
 	if err != nil {
 		return fmt.Errorf("dx12: failed to create DSV heap: %w", err)
 	}
+
+	hal.Logger().Info("dx12: descriptor heaps created",
+		"viewHeapSize", d.viewHeap.capacity,
+		"samplerHeapSize", d.samplerHeap.capacity,
+	)
 
 	return nil
 }
@@ -488,6 +508,7 @@ func (d *Device) signalFrameFence() error {
 	d.fenceMu.Lock()
 	d.fenceValue++
 	value := d.fenceValue
+	start := time.Now()
 	err := d.directQueue.Signal(d.fence, value)
 	d.frames[d.frameIndex%maxFramesInFlight].fenceValue = value
 	d.fenceMu.Unlock()
@@ -495,6 +516,12 @@ func (d *Device) signalFrameFence() error {
 	if err != nil {
 		return fmt.Errorf("dx12: frame fence Signal failed: %w", err)
 	}
+
+	hal.Logger().Debug("dx12: fence signaled",
+		"value", value,
+		"elapsed", time.Since(start),
+	)
+
 	return nil
 }
 
@@ -689,6 +716,12 @@ func allocateDescriptor(heap *DescriptorHeap, heapName string) (d3d12.D3D12_CPU_
 	}
 
 	if heap.nextFree >= heap.capacity {
+		hal.Logger().Error("dx12: descriptor heap exhausted",
+			"heapType", heapName,
+			"capacity", heap.capacity,
+			"used", heap.nextFree,
+			"freeList", len(heap.freeList),
+		)
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: %s heap exhausted", heapName)
 	}
 
@@ -721,6 +754,11 @@ func (d *Device) allocateSRVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 	defer d.stagingViewHeap.mu.Unlock()
 
 	if d.stagingViewHeap.nextFree >= d.stagingViewHeap.capacity {
+		hal.Logger().Error("dx12: descriptor heap exhausted",
+			"heapType", "staging CBV/SRV/UAV",
+			"capacity", d.stagingViewHeap.capacity,
+			"used", d.stagingViewHeap.nextFree,
+		)
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging CBV/SRV/UAV heap exhausted")
 	}
 
@@ -742,6 +780,11 @@ func (d *Device) allocateSamplerDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE,
 	defer d.stagingSamplerHeap.mu.Unlock()
 
 	if d.stagingSamplerHeap.nextFree >= d.stagingSamplerHeap.capacity {
+		hal.Logger().Error("dx12: descriptor heap exhausted",
+			"heapType", "staging sampler",
+			"capacity", d.stagingSamplerHeap.capacity,
+			"used", d.stagingSamplerHeap.nextFree,
+		)
 		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging sampler heap exhausted")
 	}
 
@@ -1006,6 +1049,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 		d.DrainDebugMessages()
 		hal.Logger().Error("dx12: device removed during CreateTexture",
+			"label", desc.Label,
 			"format", createFormat, "samples", sampleCount,
 			"width", desc.Size.Width, "height", desc.Size.Height,
 			"flags", fmt.Sprintf("0x%x", resourceFlags), "reason", reason)
@@ -1620,6 +1664,13 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 		result.rootSignature.Release()
 		return nil, err
 	}
+
+	hal.Logger().Debug("dx12: pipeline layout created",
+		"label", desc.Label,
+		"bindGroups", len(desc.BindGroupLayouts),
+		"samplerRootIndex", result.samplerRootIndex,
+	)
+
 	return &PipelineLayout{
 		rootSignature:    result.rootSignature,
 		bindGroupLayouts: bgLayouts,
@@ -1705,6 +1756,11 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 		return fmt.Errorf("HLSL generation: %w", err)
 	}
 
+	hal.Logger().Debug("dx12: compiling HLSL",
+		"sourceLen", len(hlslSource),
+		"entryPoints", len(irModule.EntryPoints),
+	)
+
 	// Step 5: Load d3dcompiler_47.dll
 	compiler, err := d3dcompile.Load()
 	if err != nil {
@@ -1771,6 +1827,7 @@ func (d *Device) ensureShaderCompiled(module *ShaderModule, layout *PipelineLayo
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	start := time.Now()
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in DX12.CreateRenderPipeline — core validation gap")
 	}
@@ -1847,6 +1904,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	hal.Logger().Debug("dx12: render pipeline created",
 		"label", desc.Label,
 		"vertexEntry", desc.Vertex.EntryPoint,
+		"elapsed", time.Since(start),
 	)
 
 	return &RenderPipeline{
@@ -1868,6 +1926,7 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	start := time.Now()
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in DX12.CreateComputePipeline — core validation gap")
 	}
@@ -1939,6 +1998,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 
 	hal.Logger().Debug("dx12: compute pipeline created",
 		"entryPoint", desc.Compute.EntryPoint,
+		"elapsed", time.Since(start),
 	)
 
 	return &ComputePipeline{

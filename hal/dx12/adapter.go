@@ -151,6 +151,11 @@ func (a *Adapter) queryD3D12Options(device *d3d12.ID3D12Device) {
 	a.capabilities.TiledResourcesTier = options.TiledResourcesTier
 	a.capabilities.SupportsTypedUAVLoadAdditionalFormats = options.TypedUAVLoadAdditionalFormats != 0
 	a.capabilities.SupportsROVs = options.ROVsSupported != 0
+
+	hal.Logger().Info("dx12: adapter capabilities",
+		"resourceBindingTier", a.capabilities.ResourceBindingTier,
+		"tiledResourcesTier", a.capabilities.TiledResourcesTier,
+	)
 }
 
 // setTextureLimits sets texture dimension limits based on feature level.

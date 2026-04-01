@@ -152,16 +152,28 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	}
 
 	// Set default texture parameters (multisample textures don't support these).
-	// GL sampler objects override these when bound, but they provide reasonable
-	// defaults when no sampler is explicitly used.
 	if target != gl.TEXTURE_2D_MULTISAMPLE {
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		// Non-filterable formats (integer, 32-bit float, depth32float, stencil8)
+		// must use NEAREST — GL_LINEAR is invalid and causes blurred text on
+		// Qualcomm Adreno. Filterable formats: sampler objects (bound via
+		// glBindSampler) override texture-level state, so we skip setting
+		// min/mag filter here to let the sampler control filtering.
+		if isNonFilterableFormat(desc.Format) {
+			d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+			d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		}
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	}
 
 	d.glCtx.BindTexture(target, 0)
+
+	hal.Logger().Debug("gles: texture created",
+		"label", desc.Label,
+		"format", desc.Format,
+		"width", desc.Size.Width,
+		"height", desc.Size.Height,
+	)
 
 	return &Texture{
 		id:          id,
@@ -298,6 +310,7 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	start := time.Now()
 	// Handle nil layout (auto-layout for shaders without bindings).
 	var layout *PipelineLayout
 	if desc.Layout != nil {
@@ -332,33 +345,18 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteShader(vertexID)
 		return nil, fmt.Errorf("gles: vertex shader compilation failed: %s", log)
 	}
+	if infoLog := d.glCtx.GetShaderInfoLog(vertexID); infoLog != "" {
+		hal.Logger().Debug("gles: vertex shader compile info", "info", infoLog)
+	}
 
 	// Compile fragment shader
 	var fragmentID uint32
 	if desc.Fragment != nil {
-		fragmentModule, ok := desc.Fragment.Module.(*ShaderModule)
-		if !ok {
-			d.glCtx.DeleteShader(vertexID)
-			return nil, fmt.Errorf("gles: invalid fragment shader module type")
-		}
-
-		// Compile WGSL → GLSL for fragment stage.
-		fragmentGLSL, err := compileWGSLToGLSL(fragmentModule.source, desc.Fragment.EntryPoint)
+		var err error
+		fragmentID, err = d.compileFragmentShader(desc.Fragment)
 		if err != nil {
 			d.glCtx.DeleteShader(vertexID)
-			return nil, fmt.Errorf("gles: fragment shader: %w", err)
-		}
-
-		fragmentID = d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
-		d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
-		d.glCtx.CompileShader(fragmentID)
-
-		d.glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
-		if status == gl.FALSE {
-			log := d.glCtx.GetShaderInfoLog(fragmentID)
-			d.glCtx.DeleteShader(vertexID)
-			d.glCtx.DeleteShader(fragmentID)
-			return nil, fmt.Errorf("gles: fragment shader compilation failed: %s", log)
+			return nil, err
 		}
 	}
 
@@ -380,6 +378,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		d.glCtx.DeleteProgram(programID)
 		return nil, fmt.Errorf("gles: program linking failed: %s", log)
 	}
+	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
+		hal.Logger().Debug("gles: program link info", "info", infoLog)
+	}
 
 	// Shaders can be deleted after linking
 	d.glCtx.DeleteShader(vertexID)
@@ -390,6 +391,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	hal.Logger().Debug("gles: render pipeline created",
 		"programID", programID,
 		"vertexEntry", desc.Vertex.EntryPoint,
+		"elapsed", time.Since(start),
 	)
 
 	// Extract blend state and color write mask from the first color target.
@@ -423,6 +425,7 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	start := time.Now()
 	layout, ok := desc.Layout.(*PipelineLayout)
 	if !ok {
 		return nil, fmt.Errorf("gles: invalid pipeline layout type")
@@ -450,6 +453,9 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 		d.glCtx.DeleteShader(computeID)
 		return nil, fmt.Errorf("gles: compute shader compilation failed: %s", log)
 	}
+	if infoLog := d.glCtx.GetShaderInfoLog(computeID); infoLog != "" {
+		hal.Logger().Debug("gles: compute shader compile info", "info", infoLog)
+	}
 
 	// Link program
 	programID := d.glCtx.CreateProgram()
@@ -463,12 +469,16 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 		d.glCtx.DeleteProgram(programID)
 		return nil, fmt.Errorf("gles: compute program linking failed: %s", log)
 	}
+	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
+		hal.Logger().Debug("gles: compute program link info", "info", infoLog)
+	}
 
 	d.glCtx.DeleteShader(computeID)
 
 	hal.Logger().Debug("gles: compute pipeline created",
 		"programID", programID,
 		"entryPoint", desc.Compute.EntryPoint,
+		"elapsed", time.Since(start),
 	)
 
 	return &ComputePipeline{
@@ -639,6 +649,36 @@ func maxInt32(a, b int32) int32 {
 		return a
 	}
 	return b
+}
+
+// compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
+func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, error) {
+	fragmentModule, ok := frag.Module.(*ShaderModule)
+	if !ok {
+		return 0, fmt.Errorf("gles: invalid fragment shader module type")
+	}
+
+	fragmentGLSL, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint)
+	if err != nil {
+		return 0, fmt.Errorf("gles: fragment shader: %w", err)
+	}
+
+	fragmentID := d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
+	d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
+	d.glCtx.CompileShader(fragmentID)
+
+	var status int32
+	d.glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		log := d.glCtx.GetShaderInfoLog(fragmentID)
+		d.glCtx.DeleteShader(fragmentID)
+		return 0, fmt.Errorf("gles: fragment shader compilation failed: %s", log)
+	}
+	if infoLog := d.glCtx.GetShaderInfoLog(fragmentID); infoLog != "" {
+		hal.Logger().Debug("gles: fragment shader compile info", "info", infoLog)
+	}
+
+	return fragmentID, nil
 }
 
 // Ensure we use unsafe for later

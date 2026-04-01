@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.3] - 2026-04-01
+
+### Fixed
+
+- **GLES: blurred text on Qualcomm Adreno** — Unconditional `GL_LINEAR` texture
+  defaults caused blurry font rendering when sampler override was incomplete.
+  Now aligned with Rust wgpu: only set `GL_NEAREST` for non-filterable formats
+  (integer, depth, 32-bit float), let sampler objects control filterable textures.
+
+### Added
+
+- **Enterprise logging system (Rust wgpu parity)** — Comprehensive diagnostic
+  logging across DX12 and GLES backends, matching Rust wgpu's tracing patterns:
+  - **DX12**: adapter capabilities (ResourceBindingTier, TiledResourcesTier),
+    descriptor heap creation, pipeline layout, HLSL compilation preview,
+    pipeline creation timing, submit/present timing, fence signal timing,
+    descriptor heap exhaustion errors, texture label in error logs
+  - **GLES**: GL_VENDOR/GL_RENDERER/GL_VERSION at device init, generated GLSL
+    source preview, shader compile/link info log on success (driver warnings),
+    texture creation, sampler creation/binding, WriteTexture, pipeline timing
+  - Enable with `GOGPU_LOG=debug` or `GOGPU_WGPU_LOG=debug`
+
 ## [0.23.2] - 2026-03-31
 
 ### Fixed

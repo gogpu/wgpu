@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -48,6 +49,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	}
 
 	// Execute command lists
+	submitStart := time.Now()
 	q.raw.ExecuteCommandLists(uint32(len(cmdLists)), &cmdLists[0])
 
 	// Check for immediate device removal after execution.
@@ -64,6 +66,12 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	if err := q.device.signalFrameFence(); err != nil {
 		return 0, err
 	}
+
+	hal.Logger().Debug("dx12: command list submitted",
+		"cmdLists", len(cmdLists),
+		"elapsed", time.Since(submitStart),
+	)
+
 	return q.device.currentFrameFenceValue(), nil
 }
 
@@ -222,7 +230,9 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 		return fmt.Errorf("dx12: WriteBuffer: Submit failed: %w", err)
 	}
 	// Block until GPU finishes the copy — staging buffer must remain valid.
-	_ = q.device.WaitIdle()
+	if err := q.device.WaitIdle(); err != nil {
+		hal.Logger().Error("dx12: WaitIdle failed after staged write", "err", err)
+	}
 	q.device.FreeCommandBuffer(cmdBuffer)
 	return nil
 }
@@ -392,7 +402,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("dx12: WriteTexture: Submit failed: %w", err)
 	}
 	// Block until GPU finishes the copy — staging buffer must remain valid.
-	_ = q.device.WaitIdle()
+	if err := q.device.WaitIdle(); err != nil {
+		hal.Logger().Error("dx12: WaitIdle failed after texture write", "err", err)
+	}
 	q.device.FreeCommandBuffer(cmdBuffer)
 
 	// Update tracked state AFTER successful execution.
@@ -443,9 +455,15 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	}
 
 	// Present the frame
+	presentStart := time.Now()
 	if err := dx12Surface.swapchain.Present(syncInterval, presentFlags); err != nil {
 		return fmt.Errorf("dx12: Present failed: %w", err)
 	}
+
+	hal.Logger().Debug("dx12: present",
+		"syncInterval", syncInterval,
+		"elapsed", time.Since(presentStart),
+	)
 
 	// Advance frame index. The wait for the old frame occupying the next slot
 	// is deferred to AcquireTexture, allowing the CPU to overlap with GPU work.

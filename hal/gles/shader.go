@@ -6,7 +6,9 @@
 package gles
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/glsl"
@@ -66,6 +68,18 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 	})
 	if err != nil {
 		return "", fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)
+	}
+
+	hal.Logger().Debug("gles: GLSL generated",
+		"entryPoint", entryPoint,
+		"sourceLen", len(glslCode),
+	)
+	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
+		preview := glslCode
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		hal.Logger().Debug("gles: GLSL source", "glsl", preview)
 	}
 
 	return glslCode, nil
