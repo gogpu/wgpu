@@ -51,7 +51,8 @@
 
 ### Next: v0.24.0
 
-- [ ] Remove DX12 debug prints → slog (done locally, pending release)
+- [x] StagingBelt ring-buffer allocator (0 allocs steady-state, 15× faster)
+- [x] Remove DX12 debug prints → slog
 - [ ] DX12 maxFramesInFlight=2 stability (currently =1 as workaround)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)

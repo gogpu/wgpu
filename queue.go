@@ -85,6 +85,11 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 				deferredTextureViews: deferredTV,
 			})
 		}
+		// Update the staging belt with the actual submission index
+		// (belt.finish() was called during flush() before Submit).
+		if q.pending.belt != nil {
+			q.pending.belt.setLastSubmissionIndex(subIdx)
+		}
 		q.pending.maintain(q.hal.PollCompleted())
 		q.pending.mu.Unlock()
 	}

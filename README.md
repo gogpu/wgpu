@@ -239,7 +239,7 @@ Windows GPU access via:
 - Descriptor heap management with fence-based deferred destruction
 - Encoder pool with allocator recycling (Rust wgpu-core pattern)
 - WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
-- Staging buffer GPU data transfer (WriteBuffer, WriteTexture)
+- StagingBelt ring-buffer allocator for zero-allocation GPU data transfer
 
 ### OpenGL ES Backend
 

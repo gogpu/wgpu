@@ -129,6 +129,9 @@ func TestPendingWrites_NewBatching(t *testing.T) {
 	if pw.pool == nil {
 		t.Error("expected pool to be created for batching queue")
 	}
+	if pw.belt == nil {
+		t.Error("expected belt to be created for batching queue")
+	}
 }
 
 func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
@@ -183,14 +186,15 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// Queue.WriteBuffer is called to copy data into the staging buffer.
+	// Queue.WriteBuffer is called to copy data into the staging belt chunk.
 	if q.writeBufferCalls != 1 {
 		t.Errorf("expected 1 WriteBuffer call (staging copy), got %d", q.writeBufferCalls)
 	}
 
-	// Staging buffer should be tracked.
-	if len(pw.staging) != 1 {
-		t.Errorf("expected 1 staging buffer, got %d", len(pw.staging))
+	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
+	activeChunks, _, _, _ := pw.belt.stats()
+	if activeChunks != 1 {
+		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
 	}
 
 	// Encoder should be active.
@@ -210,9 +214,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// dstBuffers should track the buffer. Note: usage=0 because we passed it
-	// through the unexported param which is the second arg.
-	// Actually, let's test with proper usage value via a second write.
+	// dstBuffers should track the buffer with proper usage.
 	pw2.mu.Lock()
 	pw2.dstBuffers[dstBuf] = usage
 	pw2.mu.Unlock()
@@ -285,14 +287,15 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 		t.Fatalf("writeTexture: %v", err)
 	}
 
-	// WriteBuffer should be called for staging copy.
+	// WriteBuffer should be called for staging copy into belt chunk.
 	if q.writeBufferCalls != 1 {
 		t.Errorf("expected 1 WriteBuffer call (staging), got %d", q.writeBufferCalls)
 	}
 
-	// Staging buffer tracked.
-	if len(pw.staging) != 1 {
-		t.Errorf("expected 1 staging buffer, got %d", len(pw.staging))
+	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
+	activeChunks, _, _, _ := pw.belt.stats()
+	if activeChunks != 1 {
+		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
 	}
 
 	// Encoder active.
@@ -382,11 +385,19 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	if enc == nil {
 		t.Error("expected non-nil encoder after flush")
 	}
-	if len(staging) != 1 {
-		t.Errorf("expected 1 staging buffer, got %d", len(staging))
+	// staging from flush contains only oversized one-off buffers;
+	// normal belt-managed writes produce no oversized buffers.
+	if len(staging) != 0 {
+		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
 	}
 	if len(flushedDstBufs) == 0 {
 		t.Error("expected non-empty flushedDstBuffers")
+	}
+
+	// Belt chunks should have moved to closedSubmissions.
+	_, _, closedSubs, _ := pw.belt.stats()
+	if closedSubs != 1 {
+		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
 	}
 
 	// After flush, state should be reset.
@@ -395,9 +406,6 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 	if pw.encoder != nil {
 		t.Error("expected encoder=nil after flush")
-	}
-	if len(pw.staging) != 0 {
-		t.Errorf("expected staging cleared, got %d", len(pw.staging))
 	}
 	if len(pw.dstBuffers) != 0 {
 		t.Errorf("expected dstBuffers cleared, got %d", len(pw.dstBuffers))
@@ -431,11 +439,19 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	if enc == nil {
 		t.Error("expected non-nil encoder")
 	}
-	if len(staging) != 1 {
-		t.Errorf("expected 1 staging buffer, got %d", len(staging))
+	// staging from flush contains only oversized one-off buffers;
+	// texture data fits in a belt chunk, so no oversized buffers.
+	if len(staging) != 0 {
+		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
 	}
 	if len(flushedTex) != 1 {
 		t.Errorf("expected 1 flushed texture, got %d", len(flushedTex))
+	}
+
+	// Belt chunks should have moved to closedSubmissions.
+	_, _, closedSubs, _ := pw.belt.stats()
+	if closedSubs != 1 {
+		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
 	}
 }
 
@@ -882,8 +898,10 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 		t.Fatalf("writeBuffer 2: %v", err)
 	}
 
-	if len(pw.staging) != 2 {
-		t.Errorf("expected 2 staging buffers, got %d", len(pw.staging))
+	// Both writes fit in the same belt chunk (4 bytes each, chunk=256KB).
+	activeChunks, _, _, _ := pw.belt.stats()
+	if activeChunks != 1 {
+		t.Errorf("expected 1 active belt chunk (both writes fit), got %d", activeChunks)
 	}
 
 	pw.mu.Lock()
@@ -899,16 +917,20 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	if enc == nil {
 		t.Error("expected non-nil encoder")
 	}
-	if len(staging) != 2 {
-		t.Errorf("expected 2 flushed staging buffers, got %d", len(staging))
+	// No oversized buffers — both writes fit in belt chunks.
+	if len(staging) != 0 {
+		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
+	}
+
+	// Belt chunks moved to closed.
+	_, _, closedSubs, _ := pw.belt.stats()
+	if closedSubs != 1 {
+		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
 	}
 
 	// State reset after flush.
 	if pw.isRecording {
 		t.Error("expected isRecording=false after flush")
-	}
-	if len(pw.staging) != 0 {
-		t.Errorf("expected staging cleared, got %d", len(pw.staging))
 	}
 }
 

@@ -61,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DX12: minimal repro test** — Standalone DX12 test (3 WriteBuffer + render)
   for TDR investigation and regression testing.
 
+- **StagingBelt ring-buffer allocator (Rust wgpu util::StagingBelt pattern)** —
+  Replaces per-WriteBuffer staging buffer creation with bump-pointer sub-allocation
+  from reusable 256KB chunks. Zero heap allocations in steady state (0 allocs/op,
+  22ns — 15× faster than per-write staging). Oversized writes (> chunkSize) fall
+  back to one-off buffers. Chunks recycled after GPU completion via recall().
+
 - **Instance flags propagation** — `InstanceFlags` (debug layer, validation)
   now propagated from `wgpu.CreateInstance` through to HAL backends.
 

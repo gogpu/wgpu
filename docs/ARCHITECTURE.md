@@ -182,9 +182,16 @@ Queue.Submit(userCmds)    │
   └─ track inflight resources (staging, encoders, deferred descriptors)
 ```
 
-**Batching backends** (DX12, Vulkan, Metal): create staging buffers, record `CopyBufferToBuffer`/`CopyBufferToTexture` via command encoder. Encoder pool recycles allocators after GPU completion.
+**Batching backends** (DX12, Vulkan, Metal): sub-allocate from StagingBelt chunks, record `CopyBufferToBuffer`/`CopyBufferToTexture` via command encoder. Encoder pool recycles allocators after GPU completion.
 
-**Direct-write backends** (GLES, Software): `usesBatching=false`, delegate directly to `hal.Queue.WriteBuffer()`/`WriteTexture()`. No staging, no command encoder.
+**StagingBelt** (`staging_belt.go`): ring-buffer of reusable 256KB staging chunks with bump-pointer sub-allocation. Matches Rust wgpu `util::StagingBelt` (belt.rs). Zero heap allocations in steady state — chunks are pre-allocated and recycled after GPU completion. Oversized writes (> chunkSize) fall back to one-off buffers.
+
+```
+Chunk lifecycle:  free → active (sub-allocating) → closed (GPU in-flight) → free (recycled)
+Steady-state:     0 allocs/op, 22ns — 15× faster than per-write staging
+```
+
+**Direct-write backends** (GLES, Software): `usesBatching=false`, delegate directly to `hal.Queue.WriteBuffer()`/`WriteTexture()`. No staging, no command encoder, no belt.
 
 **Deferred destruction** (BUG-DX12-007): BindGroup/TextureView descriptor heap slots are accumulated via `deferBindGroupDestroy()`/`deferTextureViewDestroy()` and freed only after GPU completes the submission. Prevents descriptor use-after-free with `maxFramesInFlight=2`.
 
