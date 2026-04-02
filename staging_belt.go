@@ -128,6 +128,7 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 		alloc, ok := b.activeChunks[i].tryAllocate(alignedSize)
 		if ok {
 			if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+				b.activeChunks[i].rollback(alignedSize)
 				return stagingAllocation{}, fmt.Errorf("staging belt: write to active chunk: %w", err)
 			}
 			return alloc, nil
@@ -138,9 +139,10 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 	if len(b.freeChunks) > 0 {
 		chunk := b.freeChunks[len(b.freeChunks)-1]
 		b.freeChunks = b.freeChunks[:len(b.freeChunks)-1]
-		alloc, _ := chunk.tryAllocate(alignedSize) // guaranteed to fit (offset=0, size >= chunkSize)
+		alloc, _ := chunk.tryAllocate(alignedSize)
 		b.activeChunks = append(b.activeChunks, chunk)
 		if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+			b.activeChunks[len(b.activeChunks)-1].rollback(alignedSize)
 			return stagingAllocation{}, fmt.Errorf("staging belt: write to recycled chunk: %w", err)
 		}
 		return alloc, nil
@@ -154,6 +156,7 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 	alloc, _ := chunk.tryAllocate(alignedSize)
 	b.activeChunks = append(b.activeChunks, chunk)
 	if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+		chunk.rollback(alignedSize)
 		return stagingAllocation{}, fmt.Errorf("staging belt: write to new chunk: %w", err)
 	}
 	return alloc, nil
@@ -258,8 +261,9 @@ func (b *stagingBelt) createChunk(size uint64) (stagingChunk, error) {
 	return stagingChunk{buffer: buf, size: size, offset: 0}, nil
 }
 
-// tryAllocate attempts to sub-allocate `size` bytes from the chunk.
-// Returns the allocation and true if it fits, or zero and false if not.
+// tryAllocate checks if `size` bytes fit in the chunk and reserves the space.
+// Returns the allocation start offset and true if it fits. On success, the
+// caller MUST write data; on WriteBuffer failure, call rollback(alignedSize).
 func (c *stagingChunk) tryAllocate(alignedSize uint64) (stagingAllocation, bool) {
 	start := c.offset
 	end := start + alignedSize
@@ -268,6 +272,14 @@ func (c *stagingChunk) tryAllocate(alignedSize uint64) (stagingAllocation, bool)
 	}
 	c.offset = end
 	return stagingAllocation{buffer: c.buffer, offset: start}, true
+}
+
+// rollback reverts a tryAllocate when the subsequent WriteBuffer fails.
+// This prevents leaving a gap in the chunk (DeepSeek review finding).
+func (c *stagingChunk) rollback(alignedSize uint64) {
+	if c.offset >= alignedSize {
+		c.offset -= alignedSize
+	}
 }
 
 // destroy releases all chunk buffers (active, free, and closed).
