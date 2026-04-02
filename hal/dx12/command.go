@@ -33,10 +33,17 @@ func (c *CommandBuffer) Destroy() {
 }
 
 // CommandEncoder implements hal.CommandEncoder for DirectX 12.
+//
+// Matches Rust wgpu-hal architecture: each encoder OWNS its ID3D12CommandAllocator
+// permanently. Command lists are pooled in freeLists and reused via Reset.
+// The allocator is only Reset when the encoder is returned to the pool after
+// GPU completion (via ResetAll). This avoids per-frame allocator churn that
+// causes TDR on Intel Iris Xe.
 type CommandEncoder struct {
 	device      *Device
-	allocator   *CommandAllocator
+	allocator   *d3d12.ID3D12CommandAllocator // Owned permanently by this encoder
 	cmdList     *d3d12.ID3D12GraphicsCommandList
+	freeLists   []*d3d12.ID3D12GraphicsCommandList // Pool of reusable command lists
 	label       string
 	isRecording bool
 
@@ -48,53 +55,51 @@ type CommandEncoder struct {
 }
 
 // BeginEncoding begins command recording.
-// Acquires a command allocator from the pool (already reset by advanceFrame)
-// and creates or resets the command list for recording.
+// Reuses a command list from freeLists (Reset with owned allocator) or creates new.
+// The allocator is permanently owned by this encoder — not acquired per-call.
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 
-	// Acquire a safe allocator from the pool. Allocators are reset by advanceFrame
-	// after their frame slot's fence is reached — no full GPU stall needed here.
-	alloc, err := e.device.acquireAllocator()
+	// Try reusing a command list from the free pool.
+	if len(e.freeLists) > 0 {
+		list := e.freeLists[len(e.freeLists)-1]
+		e.freeLists = e.freeLists[:len(e.freeLists)-1]
+		if err := list.Reset(e.allocator, nil); err == nil {
+			e.cmdList = list
+			e.isRecording = true
+			return nil
+		}
+		// Reset failed — discard this list, try next or create new.
+		list.Release()
+	}
+
+	// No reusable lists — create a new one with our owned allocator.
+	cmdList, err := e.device.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, e.allocator, nil)
 	if err != nil {
-		return fmt.Errorf("dx12: acquire allocator: %w", err)
+		return fmt.Errorf("dx12: CreateCommandList failed: %w", err)
 	}
-	e.allocator = alloc
-
-	if e.cmdList == nil {
-		// First use — create command list (starts in recording state).
-		cmdList, err := e.device.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.raw, nil)
-		if err != nil {
-			return fmt.Errorf("dx12: CreateCommandList failed: %w", err)
-		}
-		e.cmdList = cmdList
-	} else {
-		// Subsequent use — reset command list with the new allocator.
-		if err := e.cmdList.Reset(alloc.raw, nil); err != nil {
-			return fmt.Errorf("dx12: command list reset failed: %w", err)
-		}
-	}
-
+	e.cmdList = cmdList
 	e.isRecording = true
 	return nil
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
+// The command list is detached from the encoder — it will be returned
+// to freeLists when ResetAll is called after GPU completion.
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if !e.isRecording {
 		return nil, fmt.Errorf("dx12: command encoder is not recording")
 	}
 
-	// Close the command list
+	hal.Logger().Debug("dx12: command list close", "label", e.label)
 	if err := e.cmdList.Close(); err != nil {
 		return nil, fmt.Errorf("dx12: command list close failed: %w", err)
 	}
 
 	e.isRecording = false
-
-	return &CommandBuffer{
-		cmdList: e.cmdList,
-	}, nil
+	cb := &CommandBuffer{cmdList: e.cmdList}
+	e.cmdList = nil // Detach — owned by CommandBuffer until ResetAll returns it.
+	return cb, nil
 }
 
 // DiscardEncoding discards the encoder without creating a command buffer.
@@ -106,11 +111,41 @@ func (e *CommandEncoder) DiscardEncoding() {
 	}
 }
 
-// ResetAll resets command buffers for reuse.
+// ResetAll resets the encoder's allocator and returns command lists to the free pool.
+// Called after GPU confirms completion of all commands recorded by this encoder.
+// Matches Rust wgpu-hal CommandEncoder::reset_all (command.rs:442-450).
 func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
-	// In DX12, command allocators are reset when BeginEncoding is called
-	// Command lists can be reset and reused
-	_ = commandBuffers
+	// Return command lists to the free pool for reuse.
+	for _, cb := range commandBuffers {
+		if dx12CB, ok := cb.(*CommandBuffer); ok && dx12CB.cmdList != nil {
+			e.freeLists = append(e.freeLists, dx12CB.cmdList)
+			dx12CB.cmdList = nil // Prevent double-free via CommandBuffer.Destroy.
+		}
+	}
+	// Reset the owned allocator. This frees the internal memory used by
+	// previously recorded commands. Safe because GPU is done with them.
+	if e.allocator != nil {
+		if err := e.allocator.Reset(); err != nil {
+			hal.Logger().Error("dx12: ID3D12CommandAllocator::Reset failed", "err", err)
+		}
+	}
+}
+
+// Destroy releases the allocator and all pooled command lists.
+// Must be called when the encoder is permanently retired (e.g., device shutdown).
+func (e *CommandEncoder) Destroy() {
+	for _, list := range e.freeLists {
+		list.Release()
+	}
+	e.freeLists = nil
+	if e.cmdList != nil {
+		e.cmdList.Release()
+		e.cmdList = nil
+	}
+	if e.allocator != nil {
+		e.allocator.Release()
+		e.allocator = nil
+	}
 }
 
 // TransitionBuffers transitions buffer states for synchronization.
@@ -176,6 +211,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	}
 
 	if len(d3dBarriers) > 0 {
+		hal.Logger().Debug("dx12: resource barrier", "label", e.label, "count", len(d3dBarriers))
 		e.cmdList.ResourceBarrier(uint32(len(d3dBarriers)), &d3dBarriers[0])
 	}
 }
@@ -220,6 +256,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	}
 
 	for _, r := range regions {
+		hal.Logger().Debug("dx12: copy buffer region", "label", e.label, "offset", r.DstOffset, "size", r.Size)
 		e.cmdList.CopyBufferRegion(dstBuf.raw, r.DstOffset, srcBuf.raw, r.SrcOffset, r.Size)
 	}
 }
@@ -386,6 +423,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		encoder: e,
 		desc:    desc,
 	}
+
+	hal.Logger().Debug("dx12: begin render pass", "label", e.label, "attachments", len(desc.ColorAttachments))
 
 	if !e.isRecording {
 		return rpe
@@ -980,6 +1019,31 @@ func bufferUsageToD3D12State(usage gputypes.BufferUsage) d3d12.D3D12_RESOURCE_ST
 }
 
 // textureUsageToD3D12State converts texture usage to D3D12 resource state.
+// d3d12StateToTextureUsage maps a D3D12 resource state back to gputypes.TextureUsage.
+// Used by Texture.CurrentUsage() for PendingWrites barrier computation.
+func d3d12StateToTextureUsage(state d3d12.D3D12_RESOURCE_STATES) gputypes.TextureUsage {
+	var usage gputypes.TextureUsage
+
+	if state&d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE != 0 {
+		usage |= gputypes.TextureUsageCopySrc
+	}
+	if state&d3d12.D3D12_RESOURCE_STATE_COPY_DEST != 0 {
+		usage |= gputypes.TextureUsageCopyDst
+	}
+	if state&(d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) != 0 {
+		usage |= gputypes.TextureUsageTextureBinding
+	}
+	if state&d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS != 0 {
+		usage |= gputypes.TextureUsageStorageBinding
+	}
+	if state&d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET != 0 {
+		usage |= gputypes.TextureUsageRenderAttachment
+	}
+
+	// COMMON (0) maps to 0 (no specific usage)
+	return usage
+}
+
 func textureUsageToD3D12State(usage gputypes.TextureUsage) d3d12.D3D12_RESOURCE_STATES {
 	var state d3d12.D3D12_RESOURCE_STATES
 

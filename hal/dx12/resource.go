@@ -132,10 +132,47 @@ type Texture struct {
 	device       *Device
 	isExternal   bool                        // True for swapchain images (not owned)
 	currentState d3d12.D3D12_RESOURCE_STATES // Tracked resource state for barrier correctness
+	pendingRefs  int32                       // >0 = PendingWrites in-flight, defer Destroy (BUG-DX12-006)
+	pendingDeath bool                        // true = Destroy was called while pendingRefs > 0
+}
+
+// CurrentUsage returns the texture's tracked D3D12 resource state mapped to gputypes.TextureUsage.
+// Used by PendingWrites to determine the correct "before" state for copy barriers.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage {
+	return d3d12StateToTextureUsage(t.currentState)
+}
+
+// AddPendingRef increments the pending reference count.
+// Called by PendingWrites when recording CopyBufferToTexture.
+func (t *Texture) AddPendingRef() {
+	t.pendingRefs++
+	hal.Logger().Debug("dx12: texture AddPendingRef", "refs", t.pendingRefs)
+}
+
+// DecPendingRef decrements the pending reference count.
+// If Destroy was deferred (pendingDeath=true) and refcount reaches 0, releases now.
+func (t *Texture) DecPendingRef() {
+	t.pendingRefs--
+	if t.pendingRefs <= 0 && t.pendingDeath {
+		t.doDestroy()
+	}
 }
 
 // Destroy releases the texture resources.
+// If PendingWrites has in-flight references (pendingRefs > 0), destruction is
+// deferred until all references are released. This prevents use-after-free when
+// the GPU is still executing CopyBufferToTexture (BUG-DX12-006).
 func (t *Texture) Destroy() {
+	hal.Logger().Debug("dx12: texture Destroy", "refs", t.pendingRefs, "deferred", t.pendingDeath)
+	if t.pendingRefs > 0 {
+		t.pendingDeath = true
+		hal.Logger().Debug("dx12: texture destroy deferred (pending refs)")
+		return
+	}
+	t.doDestroy()
+}
+
+func (t *Texture) doDestroy() {
 	if t.raw != nil && !t.isExternal {
 		t.raw.Release()
 		t.raw = nil
