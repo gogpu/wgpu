@@ -19,118 +19,71 @@
 
 ---
 
-## Current State: v0.21.2
+## Current State: v0.23.3+ (unreleased fixes pending)
 
-✅ **All 5 HAL backends complete** (~80K LOC, ~100K total)
+✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
-✅ **Core validation layer** — 14/17 Rust wgpu-core checks (Binder, SetBindGroup bounds, draw-time compatibility, dynamic offsets, vertex/index buffer)
+✅ **Core validation layer** — 14/17 Rust wgpu-core checks
+✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES
+✅ **DX12 TDR fixed** — 11410+ frames stable with maxFramesInFlight=1
+✅ **PendingWrites batching** — Rust wgpu-core pattern for WriteBuffer/WriteTexture
+✅ **Enterprise fence architecture** — HAL owns fences, SubmissionIndex tracking
 
 ### Remaining validation (planned)
 - Blend constant tracking (pipeline blend state → draw-time check)
 - Late buffer binding size (SPIR-V reflection → min binding size)
 - Resource usage conflict detection (read/write tracking across bind groups)
 
-**New in v0.20.2:**
-- Vulkan: validate WSI query functions in LoadInstance (prevents nil pointer SIGSEGV)
-
-**New in v0.20.1:**
-- Metal: missing stencil attachment in render pass (macOS rendering fix)
-- Metal: missing setClearDepth: call
-
-**New in v0.20.0:**
-- Public API root package with typed wrappers for core/ and hal/
-- WebGPU-spec-aligned flow: `CreateInstance()` → `RequestAdapter()` → `RequestDevice()`
-- Synchronous `Queue.Submit()` with internal fence management
-- Deterministic `Release()` cleanup on all resource types
-
-**New in v0.16.17:**
-- Vulkan: load platform surface creation functions — `vkCreateXlibSurfaceKHR`, `vkCreateXcbSurfaceKHR`, `vkCreateWaylandSurfaceKHR`, `vkCreateMetalSurfaceEXT` were never loaded via `GetInstanceProcAddr` (only Win32 was). Fixed — Linux/macOS Vulkan surfaces now work (gogpu#106)
-
-**New in v0.16.16:**
-- Vulkan X11/macOS surface creation pointer fix — `unsafe.Pointer(&display)` → `unsafe.Pointer(display)`. Old code passed Go stack address instead of Display*/CAMetalLayer* value (gogpu#106)
-
-**New in v0.16.15:**
-- Software backend always compiled — removed `//go:build software` from all 34 files. No build tags required, always available as fallback (gogpu#106)
-
-**New in v0.16.14:**
-- Vulkan null surface handle guard — prevents SIGSEGV on Linux when surface creation fails (gogpu#106)
-- naga v0.14.3 (5 SPIR-V compute shader bug fixes)
-
-**New in v0.16.13:**
-- Vulkan: load VK_EXT_debug_utils via `GetInstanceProcAddr` — fixes "Invalid VkDescriptorPool" validation errors on NVIDIA (gogpu#98)
-- Debug messenger callback now works (was missing function pointer loading)
-
-**New in v0.16.12:**
-- Vulkan debug object naming (VK-VAL-002) — labels every Vulkan object via `vkSetDebugUtilsObjectNameEXT`, eliminates false-positive validation errors on NVIDIA (gogpu#98)
-
-**New in v0.16.11:**
-- Vulkan zero-extent swapchain fix (VK-VAL-001) — config-primary extent, unconditional viewport/scissor (gogpu#98)
-- Public examples moved from `cmd/` to `examples/`
-
-**New in v0.16.10:**
-- Vulkan pre-acquire semaphore wait (VK-IMPL-004) — fixes `VUID-vkAcquireNextImageKHR-semaphore-01779` (gogpu#98)
-- naga v0.14.2 (GLSL GL_ARB_separate_shader_objects fix, golden snapshot tests)
-
-**New in v0.16.6:**
-- Metal backend debug logging — 23 new log points across rendering path, callbacks, and lifecycle (gogpu/gogpu#89, go-webgpu/goffi#16)
-- goffi v0.3.9
-
-**New in v0.16.5:**
-- Vulkan per-encoder command pools — dedicated VkCommandPool per encoder, eliminates VkCommandBuffer crash
-
-**New in v0.16.4:**
-- Vulkan timeline semaphore fence — single VkSemaphore replaces binary fence ring buffer (Vulkan 1.2+)
-- Vulkan binary fence pool — FencePool with per-submission tracking (Vulkan <1.2 fallback)
-- Vulkan command buffer batch allocation — 16 per call, free/used list recycling
-- Hot-path allocation reduction — sync.Pool for encoders, stack-allocated ClearValues
-- 44+ enterprise hot-path benchmarks with ReportAllocs()
-- Compute shader examples, docs, SDF integration test
-- naga v0.13.1 (OpArrayLength fix, −32% compiler allocations)
-
-**New in v0.16.3:**
-- Per-frame fence tracking — eliminates GPU stalls in Vulkan, DX12, Metal hot paths
-- `hal.Device.WaitIdle()` — safe GPU drain before resource destruction
-- GLES VSync via `wglSwapIntervalEXT` on Windows (fixes 100% GPU usage)
-
-**New in v0.16.2:**
-- Metal autorelease pool LIFO fix — scoped pools instead of stored pools (fixes macOS Tahoe crash, gogpu/gogpu#83)
-
-**New in v0.16.0:**
-- Full GLES rendering pipeline — WGSL→GLSL shaders, VAO, FBO, MSAA, blend, stencil
-- Structured logging via `log/slog` across all backends (silent by default)
-- Vulkan MSAA render pass with automatic resolve
-- Metal SetBindGroup, WriteTexture, Fence synchronization
-- DX12 CreateBindGroup, staging descriptor heaps, BSOD fix
-- Cross-backend stability fixes (DX12, Vulkan, Metal, GLES)
-
 | Backend | Platform | Status |
 |---------|----------|--------|
-| Vulkan | Windows, Linux, macOS | ✅ Stable |
-| Metal | macOS, iOS | ✅ Stable |
-| DX12 | Windows | ✅ Stable |
-| GLES | Windows, Linux | ✅ Stable |
-| Software | All | ✅ Stable |
+| Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
+| Metal | macOS | ✅ Stable — naga MSL 91/91 |
+| DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
+| GLES | Windows, Linux | ✅ Stable — text rendering, SamplerBindMap, texture completeness |
+| Software | All | ✅ Partial (SW-002) |
+
+→ **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
 ---
 
 ## Upcoming
 
+### Next: v0.24.0
+
+- [ ] Remove DX12 debug prints → slog (done locally, pending release)
+- [ ] DX12 maxFramesInFlight=2 stability (currently =1 as workaround)
+- [ ] DX12 DeviceTextureTracker for proper barrier state tracking
+- [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
+- [ ] Vulkan relay semaphores for multi-submission ordering (VK-SYNC-001)
+
+### v0.25.0 — WebGPU Compliance
+
+- [ ] Full render/compute pass validation (usage conflicts, resource transitions)
+- [ ] Blend constant tracking (pipeline blend state → draw-time check)
+- [ ] Late buffer binding size validation (SPIR-V reflection → min binding size)
+- [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
+
 ### v1.0.0 — Production Release
+
 - [ ] Full WebGPU specification compliance
-- [ ] Compute shader support in all backends
+- [ ] Compute shader support in all backends (Metal compute pending)
 - [ ] API stability guarantee
 - [x] Performance benchmarks — 115+ benchmarks, hot-path allocation optimization
-- [x] Vulkan timeline semaphore fence (VK_KHR_timeline_semaphore, Vulkan 1.2 core)
-- [x] Vulkan command buffer batch allocation (16 per call, wgpu-hal pattern)
-- [x] Vulkan binary fence pool (FencePool with per-submission tracking, Vulkan <1.2 fallback)
+- [x] Enterprise fence architecture — HAL owns fences, SubmissionIndex tracking
+- [x] PendingWrites batching — Rust wgpu-core pattern
 - [x] Public API root package — safe, ergonomic user-facing API
+- [x] Text rendering on all GPU backends
 - [ ] Comprehensive documentation
+- [ ] Conformance test suite
 
 ### Future
-- [ ] WebAssembly support (browser WebGPU)
+
+- [ ] WebAssembly support (browser WebGPU) — ADR and research complete
 - [ ] Android (Vulkan/GLES)
 - [ ] iOS (Metal)
+- [ ] Ray tracing extensions
+- [ ] Bindless resources
 
 ---
 
@@ -159,6 +112,14 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.23.3** | 2026-04 | GLES blur fix, enterprise logging system |
+| **v0.23.2** | 2026-04 | DX12 sampler heap (Rust pattern), GLES BindingMap |
+| **v0.23.1** | 2026-04 | Text/texture rendering on all non-Vulkan backends |
+| **v0.23.0** | 2026-03 | Enterprise fence architecture, naga v0.15.0 |
+| **v0.22.2** | 2026-03 | Metal per-type slots, GLES scissor, goffi v0.5.0 |
+| **v0.22.1** | 2026-03 | Vulkan/GLES/DX12 patches |
+| **v0.21.3** | 2026-03 | Validation layer + GLES/DX12/Software fixes |
+| **v0.21.0** | 2026-03 | wgpu public API migration |
 | **v0.18.0** | 2026-02 | Public API root package (20 types, WebGPU-aligned) |
 | v0.17.1 | 2026-02 | Metal MSAA texture view crash fix |
 | v0.17.0 | 2026-02 | Wayland Vulkan surface creation |

@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+#### GLES
+
+- **Texture completeness for non-mipmapped textures** — `GL_TEXTURE_MAX_LEVEL`
+  defaulted to 1000, making single-mip textures incomplete (invisible text, missing
+  UI elements). Now set to `MipLevelCount-1`. Texture uploads use `glTexSubImage2D`
+  after pre-allocated `glTexImage2D` storage, matching Rust wgpu-hal pattern.
+  (BUG-GLES-TEXT-001)
+
+- **DYNAMIC_DRAW for all writable buffers** — `GL_STATIC_DRAW` was used for
+  non-MAP_READ buffers. Some vendors (Intel) take the hint literally, causing
+  stale data on frequently rewritten uniform/storage buffers. Now uses
+  `GL_DYNAMIC_DRAW` for all non-read-only buffers, matching Rust wgpu-hal.
+
+#### DX12
+
+- **Deferred BindGroup/TextureView descriptor destruction** — Root cause of DX12
+  TDR (GPU timeout) with `maxFramesInFlight=2`: descriptors in SRV/sampler heaps
+  were freed immediately on `Release()` while the GPU was still referencing them.
+  Descriptors now tracked via `AddPendingRef`/`DecPendingRef` and freed only after
+  GPU fence confirms completion. (BUG-DX12-007)
+
+- **Staging SRV/sampler heap descriptor recycling** — Heap descriptor slots were
+  not returned to the free list after GPU completion, causing gradual exhaustion.
+  (BUG-DX12-008)
+
+- **Texture initial state COMMON instead of COPY_DEST** — DX12 textures were
+  created in `D3D12_RESOURCE_STATE_COPY_DEST`. Correct initial state is
+  `D3D12_RESOURCE_STATE_COMMON`, which is implicitly promotable to any read state.
+  (BUG-DX12-009)
+
+- **Buffer barriers after PendingWrites copies** — Buffers stayed in
+  `COPY_DEST` state after staging copies, causing undefined behavior on
+  subsequent shader reads. Added `COPY_DEST -> VERTEX/INDEX/CONSTANT/SRV`
+  transition barriers after copy commands. (BUG-DX12-010)
+
+### Added
+
+- **GLES: SamplerBindMap for combined texture-sampler binding** — GLES lacks
+  separate texture and sampler objects. WGSL `texture_sample(t, s, uv)` now
+  correctly maps to combined GLSL `sampler2D` via `SamplerBindMap` derived from
+  naga `TextureMappings`. Matches Rust wgpu-hal GLES architecture.
+
+- **DX12: GPU-based validation** — `InstanceFlagsValidation` enables D3D12
+  GPU-based validation (GBV) for catching shader-level resource access errors.
+
+- **DX12: encoder pool (Rust wgpu-core CommandAllocator pattern)** — Command
+  allocators are pooled and recycled after GPU fence completion instead of
+  allocated per-encoder. Reduces DX12 memory churn.
+
+- **DX12: minimal repro test** — Standalone DX12 test (3 WriteBuffer + render)
+  for TDR investigation and regression testing.
+
+- **Instance flags propagation** — `InstanceFlags` (debug layer, validation)
+  now propagated from `wgpu.CreateInstance` through to HAL backends.
+
 ## [0.23.3] - 2026-04-01
 
 ### Fixed
@@ -13,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defaults caused blurry font rendering when sampler override was incomplete.
   Now aligned with Rust wgpu: only set `GL_NEAREST` for non-filterable formats
   (integer, depth, 32-bit float), let sampler objects control filterable textures.
+
+- **DX12/Vulkan/Metal: PendingWrites batching (Rust wgpu-core pattern)** —
+  `WriteBuffer`/`WriteTexture` previously did per-call staging→submit→WaitIdle
+  (20+ GPU round-trips per frame). Now batched into a single shared command
+  encoder, flushed once at `Queue.Submit`. Staging buffers freed asynchronously
+  via fence tracking. Reduces DX12 submits from 120 to ~10 per frame.
 
 ### Added
 
