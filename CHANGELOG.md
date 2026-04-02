@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.23.4] - 2026-04-02
 
 ### Fixed
 
@@ -58,9 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allocators are pooled and recycled after GPU fence completion instead of
   allocated per-encoder. Reduces DX12 memory churn.
 
-- **DX12: minimal repro test** — Standalone DX12 test (3 WriteBuffer + render)
-  for TDR investigation and regression testing.
-
 - **StagingBelt ring-buffer allocator (Rust wgpu util::StagingBelt pattern)** —
   Replaces per-WriteBuffer staging buffer creation with bump-pointer sub-allocation
   from reusable 256KB chunks. Zero heap allocations in steady state (0 allocs/op,
@@ -69,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Instance flags propagation** — `InstanceFlags` (debug layer, validation)
   now propagated from `wgpu.CreateInstance` through to HAL backends.
+
+### Changed
+
+- **naga v0.15.2 → v0.16.0** — GLSL TextureMappings for SamplerBindMap, 34 SPIR-V
+  validation fixes (spirv-val 52% → 73%), depth texture combined sampler fix.
 
 ## [0.23.3] - 2026-04-01
 

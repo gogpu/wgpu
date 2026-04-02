@@ -698,7 +698,6 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, glsl.Tr
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}
 
-
 	fragmentID := d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
 	d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
 	d.glCtx.CompileShader(fragmentID)

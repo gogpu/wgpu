@@ -298,23 +298,33 @@ func (b *stagingBelt) destroy() {
 	b.oversized = nil
 }
 
+// beltStats holds belt statistics for diagnostics/logging.
+type beltStats struct {
+	ActiveChunks   int
+	FreeChunks     int
+	ClosedSubs     int
+	TotalAllocated uint64
+}
+
 // stats returns belt statistics for diagnostics/logging.
-func (b *stagingBelt) stats() (activeChunks, freeChunks, closedSubs int, totalAllocated uint64) {
-	activeChunks = len(b.activeChunks)
-	freeChunks = len(b.freeChunks)
-	closedSubs = len(b.closedSubmissions)
+func (b *stagingBelt) stats() beltStats {
+	s := beltStats{
+		ActiveChunks: len(b.activeChunks),
+		FreeChunks:   len(b.freeChunks),
+		ClosedSubs:   len(b.closedSubmissions),
+	}
 	for _, c := range b.activeChunks {
-		totalAllocated += c.size
+		s.TotalAllocated += c.size
 	}
 	for _, c := range b.freeChunks {
-		totalAllocated += c.size
+		s.TotalAllocated += c.size
 	}
 	for _, sub := range b.closedSubmissions {
 		for _, c := range sub.chunks {
-			totalAllocated += c.size
+			s.TotalAllocated += c.size
 		}
 	}
-	return
+	return s
 }
 
 // alignUp64 rounds n up to the nearest multiple of alignment.

@@ -70,8 +70,8 @@ func (b *mockBindGroup) Destroy() { b.destroyed = true }
 // mockTextureView implements hal.TextureView for deferred destroy tests.
 type mockTextureView struct{ destroyed bool }
 
-func (v *mockTextureView) Destroy()               { v.destroyed = true }
-func (v *mockTextureView) NativeHandle() uintptr   { return 0 }
+func (v *mockTextureView) Destroy()              { v.destroyed = true }
+func (v *mockTextureView) NativeHandle() uintptr { return 0 }
 
 // --- Helpers ---
 
@@ -192,7 +192,8 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	}
 
 	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
-	activeChunks, _, _, _ := pw.belt.stats()
+	s := pw.belt.stats()
+	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
 	}
@@ -293,7 +294,8 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	}
 
 	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
-	activeChunks, _, _, _ := pw.belt.stats()
+	s := pw.belt.stats()
+	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
 	}
@@ -395,7 +397,8 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 
 	// Belt chunks should have moved to closedSubmissions.
-	_, _, closedSubs, _ := pw.belt.stats()
+	s := pw.belt.stats()
+	closedSubs := s.ClosedSubs
 	if closedSubs != 1 {
 		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
 	}
@@ -449,7 +452,8 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	}
 
 	// Belt chunks should have moved to closedSubmissions.
-	_, _, closedSubs, _ := pw.belt.stats()
+	s := pw.belt.stats()
+	closedSubs := s.ClosedSubs
 	if closedSubs != 1 {
 		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
 	}
@@ -760,7 +764,7 @@ func TestPendingWrites_BufferReadUsage(t *testing.T) {
 			want:  0,
 		},
 		{
-			name:  "all flags combined",
+			name: "all flags combined",
 			usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst | gputypes.BufferUsageMapWrite |
 				gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform |
 				gputypes.BufferUsageStorage | gputypes.BufferUsageIndirect,
@@ -899,7 +903,8 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	}
 
 	// Both writes fit in the same belt chunk (4 bytes each, chunk=256KB).
-	activeChunks, _, _, _ := pw.belt.stats()
+	s := pw.belt.stats()
+	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk (both writes fit), got %d", activeChunks)
 	}
@@ -923,9 +928,9 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	}
 
 	// Belt chunks moved to closed.
-	_, _, closedSubs, _ := pw.belt.stats()
-	if closedSubs != 1 {
-		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
+	s = pw.belt.stats()
+	if s.ClosedSubs != 1 {
+		t.Errorf("expected 1 closed belt submission, got %d", s.ClosedSubs)
 	}
 
 	// State reset after flush.

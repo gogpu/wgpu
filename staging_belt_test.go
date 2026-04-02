@@ -42,7 +42,8 @@ func TestStagingBelt_AllocateSubAllocates(t *testing.T) {
 	}
 
 	// Only 1 active chunk.
-	active, free, closed, _ := belt.stats()
+	s := belt.stats()
+	active, free, closed := s.ActiveChunks, s.FreeChunks, s.ClosedSubs
 	if active != 1 {
 		t.Errorf("expected 1 active chunk, got %d", active)
 	}
@@ -67,7 +68,8 @@ func TestStagingBelt_AllocateRecyclesChunk(t *testing.T) {
 	// Finish moves active chunks to closed.
 	belt.finish(1)
 
-	active, free, closed, _ := belt.stats()
+	s := belt.stats()
+	active, free, closed := s.ActiveChunks, s.FreeChunks, s.ClosedSubs
 	if active != 0 {
 		t.Errorf("after finish: expected 0 active, got %d", active)
 	}
@@ -78,7 +80,8 @@ func TestStagingBelt_AllocateRecyclesChunk(t *testing.T) {
 	// Recall recycles closed chunks to free.
 	belt.recall(1)
 
-	active, free, closed, _ = belt.stats()
+	s = belt.stats()
+	active, free, closed = s.ActiveChunks, s.FreeChunks, s.ClosedSubs
 	if free != 1 {
 		t.Errorf("after recall: expected 1 free, got %d", free)
 	}
@@ -95,7 +98,8 @@ func TestStagingBelt_AllocateRecyclesChunk(t *testing.T) {
 		t.Error("expected non-nil buffer from recycled chunk")
 	}
 
-	active, free, _, _ = belt.stats()
+	s = belt.stats()
+	active, free = s.ActiveChunks, s.FreeChunks
 	if active != 1 {
 		t.Errorf("after reuse: expected 1 active, got %d", active)
 	}
@@ -124,7 +128,8 @@ func TestStagingBelt_AllocateOversized(t *testing.T) {
 	}
 
 	// Oversized goes to belt.oversized, not activeChunks.
-	active, _, _, _ := belt.stats()
+	s := belt.stats()
+	active := s.ActiveChunks
 	if active != 0 {
 		t.Errorf("expected 0 active chunks for oversized alloc, got %d", active)
 	}
@@ -134,9 +139,9 @@ func TestStagingBelt_AllocateOversized(t *testing.T) {
 
 	// finish() moves oversized to closedSubmissions (belt owns them).
 	belt.finish(1)
-	_, _, closedSubs, _ := belt.stats()
-	if closedSubs != 1 {
-		t.Errorf("expected 1 closed submission after finish, got %d", closedSubs)
+	s = belt.stats()
+	if s.ClosedSubs != 1 {
+		t.Errorf("expected 1 closed submission after finish, got %d", s.ClosedSubs)
 	}
 }
 
@@ -160,7 +165,8 @@ func TestStagingBelt_FinishAndRecall(t *testing.T) {
 	belt.finish(0)
 	belt.setLastSubmissionIndex(20)
 
-	active, free, closed, _ := belt.stats()
+	s := belt.stats()
+	active, free, closed := s.ActiveChunks, s.FreeChunks, s.ClosedSubs
 	if active != 0 {
 		t.Errorf("expected 0 active, got %d", active)
 	}
@@ -174,7 +180,8 @@ func TestStagingBelt_FinishAndRecall(t *testing.T) {
 	// Recall submission 1 only (completedIndex=10).
 	belt.recall(10)
 
-	_, free, closed, _ = belt.stats()
+	s = belt.stats()
+	free, closed = s.FreeChunks, s.ClosedSubs
 	if free != 1 {
 		t.Errorf("after recall(10): expected 1 free, got %d", free)
 	}
@@ -185,7 +192,8 @@ func TestStagingBelt_FinishAndRecall(t *testing.T) {
 	// Recall submission 2 (completedIndex=20).
 	belt.recall(20)
 
-	_, free, closed, _ = belt.stats()
+	s = belt.stats()
+	free, closed = s.FreeChunks, s.ClosedSubs
 	if free != 2 {
 		t.Errorf("after recall(20): expected 2 free, got %d", free)
 	}
@@ -209,7 +217,8 @@ func TestStagingBelt_ZeroAllocSteadyState(t *testing.T) {
 	belt.recall(1)
 
 	// After warmup, we should have 1 free chunk.
-	_, free, _, _ := belt.stats()
+	s := belt.stats()
+	free := s.FreeChunks
 	if free != 1 {
 		t.Fatalf("expected 1 free chunk after warmup, got %d", free)
 	}
@@ -226,7 +235,8 @@ func TestStagingBelt_ZeroAllocSteadyState(t *testing.T) {
 		belt.recall(100 + i)
 	}
 
-	active, free, closed, totalAllocated := belt.stats()
+	s = belt.stats()
+	active, free, closed, totalAllocated := s.ActiveChunks, s.FreeChunks, s.ClosedSubs, s.TotalAllocated
 	if active != 0 {
 		t.Errorf("steady state: expected 0 active, got %d", active)
 	}
@@ -290,7 +300,8 @@ func TestStagingBelt_EmptyAllocate(t *testing.T) {
 		t.Error("expected nil buffer for 0-byte allocation")
 	}
 
-	active, _, _, _ := belt.stats()
+	s := belt.stats()
+	active := s.ActiveChunks
 	if active != 0 {
 		t.Errorf("expected 0 active chunks after 0-byte alloc, got %d", active)
 	}
@@ -301,13 +312,8 @@ func TestStagingBelt_FinishNoWork(t *testing.T) {
 	defer belt.destroy()
 
 	belt.finish(1)
-	_, _, closedSubs, _ := belt.stats()
-	if closedSubs != 0 {
-		t.Errorf("expected 0 closed submissions from empty finish, got %d", closedSubs)
-	}
-
-	_, _, closed, _ := belt.stats()
-	if closed != 0 {
-		t.Errorf("expected 0 closed submissions from empty finish, got %d", closed)
+	s := belt.stats()
+	if s.ClosedSubs != 0 {
+		t.Errorf("expected 0 closed submissions from empty finish, got %d", s.ClosedSubs)
 	}
 }
