@@ -132,6 +132,11 @@ type SurfaceTexture struct {
 	surface *Surface
 }
 
+// CurrentUsage returns 0 — GLES surface textures have no state tracking.
+func (t *SurfaceTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *SurfaceTexture) AddPendingRef()                      {}
+func (t *SurfaceTexture) DecPendingRef()                      {}
+
 // Destroy is a no-op for surface textures.
 func (t *SurfaceTexture) Destroy() {}
 

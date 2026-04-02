@@ -66,6 +66,9 @@ func (e *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {
 	// No-op for OpenGL
 }
 
+// Destroy is a no-op for OpenGL (no persistent GPU resources owned by encoder).
+func (e *CommandEncoder) Destroy() {}
+
 // TransitionBuffers transitions buffer states.
 func (e *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {
 	// No-op for OpenGL - no explicit barriers needed
@@ -364,11 +367,16 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	if !ok {
 		return
 	}
+	var samplerMap *[maxTextureSlots]int8
+	if e.pipeline != nil {
+		samplerMap = &e.pipeline.samplerBindMap
+	}
 	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
 		index:           index,
 		group:           bg,
 		dynamicOffsets:  offsets,
 		maxTextureUnits: e.encoder.maxTextureUnits,
+		samplerBindMap:  samplerMap,
 	})
 }
 
@@ -858,6 +866,10 @@ type SetBindGroupCommand struct {
 	group           *BindGroup
 	dynamicOffsets  []uint32
 	maxTextureUnits int32 // Hardware limit for validation
+	// samplerBindMap maps texture unit → sampler unit for combined sampler2D.
+	// Built from naga GLSL TextureMappings at pipeline creation (Rust SamplerBindMap pattern).
+	// When non-nil, sampler is bound to the texture's unit instead of its own WGSL binding.
+	samplerBindMap *[maxTextureSlots]int8
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
@@ -929,16 +941,29 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			// Sampler handle is the GL sampler object ID (from NativeHandle()).
 			samplerID := uint32(res.Sampler)
 			if samplerID != 0 {
+				// Determine the correct texture unit for this sampler.
+				// Naga GLSL generates combined sampler2D on the texture's binding,
+				// so the sampler must be bound to the texture's unit — NOT the
+				// sampler's own WGSL binding. SamplerBindMap provides this mapping.
+				// Matches Rust wgpu-hal GLES SamplerBindMap (command.rs:247).
+				bindUnit := glBinding
+				if c.samplerBindMap != nil {
+					// Search: which texture unit expects this sampler?
+					for texUnit := range c.samplerBindMap {
+						if c.samplerBindMap[texUnit] == int8(glBinding) {
+							bindUnit = uint32(texUnit)
+							break
+						}
+					}
+				}
 				if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
 					hal.Logger().Debug("gles: binding sampler",
-						"unit", glBinding,
+						"samplerBinding", glBinding,
+						"textureUnit", bindUnit,
 						"samplerID", samplerID,
 					)
 				}
-				// Bind the GL sampler object to the texture unit corresponding
-				// to this binding index. The sampler overrides any texture-bound
-				// filtering/wrapping state on this unit.
-				ctx.BindSampler(glBinding, samplerID)
+				ctx.BindSampler(bindUnit, samplerID)
 			}
 		}
 	}

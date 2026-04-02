@@ -126,7 +126,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("gles: invalid texture type for WriteTexture")
 	}
 
-	internalFormat, format, dataType := textureFormatToGL(tex.format)
+	_, format, dataType := textureFormatToGL(tex.format)
 
 	q.glCtx.BindTexture(tex.target, tex.id)
 
@@ -136,8 +136,10 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		if tex.format == gputypes.TextureFormatR8Unorm {
 			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
 		}
-		q.glCtx.TexImage2D(tex.target, int32(dst.MipLevel), int32(internalFormat),
-			int32(size.Width), int32(size.Height), 0, format, dataType,
+		// Use TexSubImage2D to update existing texture data (Rust wgpu-hal pattern).
+		// TexImage2D reallocates storage on every call; TexSubImage2D updates in-place.
+		q.glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
+			0, 0, int32(size.Width), int32(size.Height), format, dataType,
 			unsafe.Pointer(&data[0]))
 		// Restore default alignment after upload.
 		if tex.format == gputypes.TextureFormatR8Unorm {
@@ -171,4 +173,11 @@ func (q *Queue) GetTimestampPeriod() float32 {
 	// OpenGL doesn't have a standard way to query this
 	// Return 1.0 to indicate nanoseconds
 	return 1.0
+}
+
+// SupportsCommandBufferCopies returns false for GLES.
+// GLES uses direct GL calls (glBufferSubData, glTexSubImage2D) for writes,
+// not command buffer copy operations.
+func (q *Queue) SupportsCommandBufferCopies() bool {
+	return false
 }

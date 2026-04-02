@@ -598,6 +598,12 @@ func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, w
 		uintptr(format), uintptr(typ), uintptr(pixels))
 }
 
+func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, width, height int32, format, typ uint32, pixels unsafe.Pointer) {
+	syscall.SyscallN(c.glTexSubImage2D, uintptr(target), uintptr(level),
+		uintptr(xoffset), uintptr(yoffset), uintptr(width), uintptr(height),
+		uintptr(format), uintptr(typ), uintptr(pixels))
+}
+
 func (c *Context) GenerateMipmap(target uint32) {
 	syscall.SyscallN(c.glGenerateMipmap, uintptr(target))
 }

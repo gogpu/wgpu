@@ -51,6 +51,11 @@ type Texture struct {
 	glCtx       *gl.Context
 }
 
+// CurrentUsage returns 0 — GLES has no explicit resource state tracking.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *Texture) AddPendingRef()                      {}
+func (t *Texture) DecPendingRef()                      {}
+
 // Destroy releases the texture and any associated framebuffer object.
 func (t *Texture) Destroy() {
 	if t.glCtx != nil {
@@ -179,7 +184,17 @@ type RenderPipeline struct {
 	// how vertex data is interpreted. This is stored here so that
 	// SetVertexBuffer can configure attributes using the pipeline's layout.
 	vertexBuffers []gputypes.VertexBufferLayout
+
+	// samplerBindMap maps texture unit indices to sampler unit indices.
+	// Built from naga GLSL TranslationInfo.TextureMappings at pipeline creation.
+	// When binding textures, the associated sampler must be bound to the SAME
+	// texture unit (not the sampler's own WGSL binding). This is because naga
+	// GLSL generates combined sampler2D on the texture's binding.
+	// Matches Rust wgpu-hal GLES SamplerBindMap pattern.
+	samplerBindMap [maxTextureSlots]int8 // -1 = no sampler, otherwise = sampler glBinding
 }
+
+const maxTextureSlots = 32
 
 // Destroy releases the render pipeline.
 func (p *RenderPipeline) Destroy() {
