@@ -429,7 +429,7 @@ if err != nil {
 
 ## Complete Example
 
-See `examples/compute-sum/` for a working example of a compute shader that sums array elements.
+See `examples/` for a few working examples of various compute shaders.
 
 ## Further Reading
 
