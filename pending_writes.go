@@ -136,12 +136,14 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, usage gputypes.BufferUsa
 	}
 
 	// Create staging buffer (upload heap, mapped at creation).
-	stagingBuf, err := pw.halDevice.CreateBuffer(&hal.BufferDescriptor{
+	// Stack-allocate descriptor to avoid heap escape (hot path optimization).
+	stagingDesc := hal.BufferDescriptor{
 		Label:            "(wgpu internal) staging",
 		Size:             dataLen,
 		Usage:            gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
 		MappedAtCreation: true,
-	})
+	}
+	stagingBuf, err := pw.halDevice.CreateBuffer(&stagingDesc)
 	if err != nil {
 		return fmt.Errorf("wgpu: pending writes: create staging buffer: %w", err)
 	}
@@ -167,13 +169,13 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, usage gputypes.BufferUsa
 	// the wrong "from" state (e.g., COMMON when the buffer is actually in
 	// VERTEX_AND_CONSTANT_BUFFER from the previous frame) causes immediate TDR.
 	// maxFramesInFlight=1 prevents inter-frame data races instead.
-	enc.CopyBufferToBuffer(stagingBuf, buffer, []hal.BufferCopy{
-		{
-			SrcOffset: 0,
-			DstOffset: offset,
-			Size:      dataLen,
-		},
-	})
+	// Stack-allocate copy region to avoid slice heap escape.
+	copyRegion := [1]hal.BufferCopy{{
+		SrcOffset: 0,
+		DstOffset: offset,
+		Size:      dataLen,
+	}}
+	enc.CopyBufferToBuffer(stagingBuf, buffer, copyRegion[:])
 
 	// Track resources.
 	pw.staging = append(pw.staging, stagingBuf)
@@ -238,13 +240,14 @@ func (pw *pendingWrites) writeTexture(
 
 	stagingSize := uint64(alignedBytesPerRow) * uint64(rowsPerImage) * uint64(depthOrLayers)
 
-	// Create staging buffer.
-	stagingBuf, err := pw.halDevice.CreateBuffer(&hal.BufferDescriptor{
+	// Create staging buffer (stack-allocate descriptor).
+	texStagingDesc := hal.BufferDescriptor{
 		Label:            "(wgpu internal) staging texture",
 		Size:             stagingSize,
 		Usage:            gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
 		MappedAtCreation: true,
-	})
+	}
+	stagingBuf, err := pw.halDevice.CreateBuffer(&texStagingDesc)
 	if err != nil {
 		return fmt.Errorf("wgpu: pending writes: create texture staging buffer: %w", err)
 	}
@@ -267,43 +270,7 @@ func (pw *pendingWrites) writeTexture(
 	// Transition texture to COPY_DST using its actual tracked state.
 	currentUsage := dst.Texture.CurrentUsage()
 	if currentUsage != gputypes.TextureUsageCopyDst {
-		enc.TransitionTextures([]hal.TextureBarrier{
-			{
-				Texture: dst.Texture,
-				Range: hal.TextureRange{
-					Aspect:          gputypes.TextureAspectAll,
-					BaseMipLevel:    dst.MipLevel,
-					MipLevelCount:   1,
-					BaseArrayLayer:  0,
-					ArrayLayerCount: 1,
-				},
-				Usage: hal.TextureUsageTransition{
-					OldUsage: currentUsage,
-					NewUsage: gputypes.TextureUsageCopyDst,
-				},
-			},
-		})
-	}
-
-	// Record copy command.
-	enc.CopyBufferToTexture(stagingBuf, dst.Texture, []hal.BufferTextureCopy{
-		{
-			BufferLayout: hal.ImageDataLayout{
-				Offset:       0,
-				BytesPerRow:  alignedBytesPerRow,
-				RowsPerImage: rowsPerImage,
-			},
-			TextureBase: *dst,
-			Size:        *size,
-		},
-	})
-
-	// Transition texture to SHADER_RESOURCE for rendering.
-	// Unlike Rust wgpu-core (which defers this to submit-time via DeviceTextureTracker),
-	// we do it eagerly because we lack a centralized tracker. This is correct but slightly
-	// suboptimal — an extra barrier if the next usage is also COPY_DST.
-	enc.TransitionTextures([]hal.TextureBarrier{
-		{
+		barrier := [1]hal.TextureBarrier{{
 			Texture: dst.Texture,
 			Range: hal.TextureRange{
 				Aspect:          gputypes.TextureAspectAll,
@@ -313,11 +280,44 @@ func (pw *pendingWrites) writeTexture(
 				ArrayLayerCount: 1,
 			},
 			Usage: hal.TextureUsageTransition{
-				OldUsage: gputypes.TextureUsageCopyDst,
-				NewUsage: gputypes.TextureUsageTextureBinding,
+				OldUsage: currentUsage,
+				NewUsage: gputypes.TextureUsageCopyDst,
 			},
+		}}
+		enc.TransitionTextures(barrier[:])
+	}
+
+	// Record copy command (stack-allocate to avoid slice heap escape).
+	texCopy := [1]hal.BufferTextureCopy{{
+		BufferLayout: hal.ImageDataLayout{
+			Offset:       0,
+			BytesPerRow:  alignedBytesPerRow,
+			RowsPerImage: rowsPerImage,
 		},
-	})
+		TextureBase: *dst,
+		Size:        *size,
+	}}
+	enc.CopyBufferToTexture(stagingBuf, dst.Texture, texCopy[:])
+
+	// Transition texture to SHADER_RESOURCE for rendering.
+	// Unlike Rust wgpu-core (which defers this to submit-time via DeviceTextureTracker),
+	// we do it eagerly because we lack a centralized tracker. This is correct but slightly
+	// suboptimal — an extra barrier if the next usage is also COPY_DST.
+	postBarrier := [1]hal.TextureBarrier{{
+		Texture: dst.Texture,
+		Range: hal.TextureRange{
+			Aspect:          gputypes.TextureAspectAll,
+			BaseMipLevel:    dst.MipLevel,
+			MipLevelCount:   1,
+			BaseArrayLayer:  0,
+			ArrayLayerCount: 1,
+		},
+		Usage: hal.TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageCopyDst,
+			NewUsage: gputypes.TextureUsageTextureBinding,
+		},
+	}}
+	enc.TransitionTextures(postBarrier[:])
 
 	// Track resources. AddPendingRef prevents premature Destroy (BUG-DX12-006).
 	pw.staging = append(pw.staging, stagingBuf)
