@@ -83,6 +83,9 @@ func (e *CommandEncoder) DiscardEncoding() {
 // ResetAll resets command buffers for reuse.
 func (e *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {}
 
+// Destroy is a no-op for Metal (command buffers are managed by MTLCommandQueue).
+func (e *CommandEncoder) Destroy() {}
+
 // TransitionBuffers transitions buffer states for synchronization.
 func (e *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
 

@@ -50,11 +50,17 @@ func (mockTexture) NativeHandle() uintptr     { return 0 }
 func (mockTextureView) NativeHandle() uintptr { return 0 }
 func (mockSampler) NativeHandle() uintptr     { return 0 }
 
+// CurrentUsage for mock texture (no state tracking)
+func (mockTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (mockTexture) AddPendingRef()                      {}
+func (mockTexture) DecPendingRef()                      {}
+
 // mockCommandEncoder implements hal.CommandEncoder
 func (mockCommandEncoder) BeginEncoding(_ string) error                           { return nil }
 func (mockCommandEncoder) EndEncoding() (hal.CommandBuffer, error)                { return mockCommandBuffer{}, nil }
 func (mockCommandEncoder) DiscardEncoding()                                       {}
 func (mockCommandEncoder) ResetAll(_ []hal.CommandBuffer)                         {}
+func (mockCommandEncoder) Destroy()                                               {}
 func (mockCommandEncoder) TransitionBuffers(_ []hal.BufferBarrier)                {}
 func (mockCommandEncoder) TransitionTextures(_ []hal.TextureBarrier)              {}
 func (mockCommandEncoder) ClearBuffer(_ hal.Buffer, _, _ uint64)                  {}

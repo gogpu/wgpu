@@ -32,6 +32,17 @@ func (c *CommandBuffer) Destroy() {
 }
 
 // CommandEncoder implements hal.CommandEncoder for Vulkan.
+//
+// Two ownership modes:
+//   - Standalone (poolManaged=false): After EndEncoding, the encoder detaches its
+//     pool+cmdBuffer to the CommandBuffer result and returns itself to encoderPool
+//     (sync.Pool for struct reuse). FreeCommandBuffer recycles the Vulkan resources.
+//     This is the default mode for user-created command encoders.
+//   - Pool-managed (poolManaged=true): After EndEncoding, the encoder retains
+//     ownership of its VkCommandPool. After GPU completion, ResetAll resets the
+//     pool (restoring the cmdBuffer to initial state) so the encoder can be
+//     reused via the wgpu-level encoder pool. Used by pendingWrites.
+//
 // Pooled via encoderPool to avoid per-frame heap allocation (VK-PERF-003).
 type CommandEncoder struct {
 	device      *Device
@@ -39,6 +50,7 @@ type CommandEncoder struct {
 	cmdBuffer   vk.CommandBuffer
 	label       string
 	isRecording bool
+	poolManaged bool // true when managed by wgpu-level encoder pool
 }
 
 // BeginEncoding begins command recording.
@@ -73,8 +85,12 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
-// Uses sync.Pool for CommandBuffer reuse (VK-PERF-004).
-// Returns the CommandEncoder to the pool after use.
+// Uses sync.Pool for CommandBuffer struct reuse (VK-PERF-004).
+//
+// In standalone mode (default): detaches pool+cmdBuffer to the result and
+// returns the encoder struct to encoderPool for reuse.
+// In pool-managed mode: the encoder retains ownership of its VkCommandPool.
+// After GPU completion, call ResetAll to prepare for the next BeginEncoding cycle.
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	if !e.isRecording {
 		return nil, fmt.Errorf("vulkan: command encoder is not recording")
@@ -90,47 +106,75 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 
 	e.isRecording = false
 
-	// Reuse CommandBuffer from pool (VK-PERF-004).
+	// Reuse CommandBuffer struct from pool (VK-PERF-004).
 	cb := cmdBufferResultPool.Get().(*CommandBuffer)
 	cb.handle = e.cmdBuffer
 	cb.pool = e.pool
 
-	// Return encoder to pool for reuse.
-	e.device = nil
-	e.pool = 0
-	e.cmdBuffer = 0
-	e.label = ""
-	encoderPool.Put(e)
+	if !e.poolManaged {
+		// Standalone mode: detach resources to CommandBuffer, return encoder struct.
+		e.device = nil
+		e.pool = 0
+		e.cmdBuffer = 0
+		e.label = ""
+		encoderPool.Put(e)
+	}
+	// Pool-managed mode: encoder retains pool+cmdBuffer for ResetAll+reuse.
 
 	return cb, nil
 }
 
-// DiscardEncoding discards the encoder and recycles its pool+buffer pair.
+// DiscardEncoding discards the encoder without creating a command buffer.
+// In standalone mode, recycles pool+cmdBuffer pair for reuse.
+// In pool-managed mode, retains resources for the encoder pool.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.isRecording {
 		// End the command buffer even though we're discarding it.
 		_ = vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
 		e.isRecording = false
 	}
-	// Recycle the per-encoder pool+buffer pair for reuse (VK-POOL-001).
-	if e.device != nil && e.pool != 0 && e.cmdBuffer != 0 {
-		e.device.recycleAllocator(commandAllocator{pool: e.pool, cmdBuffer: e.cmdBuffer})
+
+	if !e.poolManaged {
+		// Standalone mode: recycle pool+buffer pair and encoder struct (VK-POOL-001).
+		if e.device != nil && e.pool != 0 && e.cmdBuffer != 0 {
+			e.device.recycleAllocator(commandAllocator{pool: e.pool, cmdBuffer: e.cmdBuffer})
+		}
+		e.device = nil
+		e.pool = 0
+		e.cmdBuffer = 0
+		e.label = ""
+		encoderPool.Put(e)
 	}
-	// Return encoder to pool for reuse.
-	e.device = nil
-	e.pool = 0
-	e.cmdBuffer = 0
-	e.label = ""
-	encoderPool.Put(e)
+	// Pool-managed mode: encoder retains resources for ResetAll+reuse.
 }
 
-// ResetAll resets command buffers for reuse.
+// ResetAll resets the encoder's command pool, restoring the cmdBuffer to initial
+// state. After this call, the encoder is ready for a new BeginEncoding cycle.
+// The commandBuffers parameter is unused — Vulkan resets all buffers in the pool.
 func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
-	// Reset the pool instead of individual buffers for better performance
-	if e.pool != 0 {
+	if e.device != nil && e.pool != 0 {
 		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool, 0)
 	}
 	_ = commandBuffers // Individual buffers are reset with the pool
+}
+
+// SetPoolManaged marks this encoder as managed by the wgpu-level encoder pool.
+// When true, EndEncoding retains ownership of the VkCommandPool instead of
+// detaching it to the CommandBuffer result. This enables encoder reuse after
+// ResetAll without creating new Vulkan resources.
+func (e *CommandEncoder) SetPoolManaged(managed bool) {
+	e.poolManaged = managed
+}
+
+// Destroy releases the VkCommandPool owned by this encoder.
+// Must be called when the encoder is permanently retired (e.g., device shutdown).
+func (e *CommandEncoder) Destroy() {
+	if e.device != nil && e.pool != 0 {
+		vkDestroyCommandPool(e.device.cmds, e.device.handle, e.pool, nil)
+	}
+	e.pool = 0
+	e.cmdBuffer = 0
+	e.device = nil
 }
 
 // TransitionBuffers transitions buffer states for synchronization.

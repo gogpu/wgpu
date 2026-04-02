@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -31,6 +32,11 @@ func (b *Buffer) NativeHandle() uintptr { return 0 }
 type Texture struct {
 	Resource
 }
+
+// CurrentUsage returns 0 — noop backend has no resource state tracking.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *Texture) AddPendingRef()                      {}
+func (t *Texture) DecPendingRef()                      {}
 
 // NativeHandle returns 0 for noop textures.
 func (t *Texture) NativeHandle() uintptr { return 0 }

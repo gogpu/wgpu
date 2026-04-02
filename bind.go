@@ -121,14 +121,25 @@ type BindGroup struct {
 	layout *BindGroupLayout
 }
 
-// Release destroys the bind group.
+// Release marks the bind group for destruction. The underlying HAL BindGroup
+// (and its descriptor heap slots) is not freed immediately — it is deferred
+// until the GPU completes any submission that may reference it. This prevents
+// descriptor use-after-free on DX12 with maxFramesInFlight=2 (BUG-DX12-007).
+//
+// Matches Rust wgpu pattern: BindGroup::drop() only fires after
+// triage_submissions confirms fence completion.
 func (g *BindGroup) Release() {
 	if g.released {
 		return
 	}
 	g.released = true
-	halDevice := g.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyBindGroup(g.hal)
+	if g.device != nil && g.device.queue != nil && g.device.queue.pending != nil {
+		g.device.queue.pending.deferBindGroupDestroy(g.hal)
+	} else if g.device != nil {
+		// Fallback: queue not available (device shutting down) — destroy immediately.
+		halDevice := g.device.halDevice()
+		if halDevice != nil {
+			halDevice.DestroyBindGroup(g.hal)
+		}
 	}
 }

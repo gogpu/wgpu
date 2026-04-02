@@ -1,5 +1,7 @@
 package hal
 
+import "github.com/gogpu/gputypes"
+
 // Resource is the base interface for all GPU resources.
 // Resources must be explicitly destroyed to free GPU memory.
 type Resource interface {
@@ -30,6 +32,20 @@ type Buffer interface {
 type Texture interface {
 	Resource
 	NativeHandle
+
+	// CurrentUsage returns the texture's tracked usage state for barrier computation.
+	// On DX12, this maps the tracked D3D12 resource state back to gputypes.TextureUsage.
+	// On backends without state tracking (GLES, Software, Metal, Noop), returns 0.
+	// Used by PendingWrites to determine the correct "before" state for copy barriers.
+	CurrentUsage() gputypes.TextureUsage
+
+	// AddPendingRef/DecPendingRef manage reference counting for in-flight GPU work.
+	// PendingWrites calls AddPendingRef when recording CopyBufferToTexture, and
+	// DecPendingRef when GPU confirms completion. Destroy() is deferred if refs > 0.
+	// This prevents use-after-free on DX12 (BUG-DX12-006).
+	// No-op on backends that don't need deferred destruction.
+	AddPendingRef()
+	DecPendingRef()
 }
 
 // TextureView represents a view into a texture.

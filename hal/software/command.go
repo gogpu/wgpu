@@ -24,6 +24,9 @@ func (c *CommandEncoder) DiscardEncoding() {}
 // ResetAll is a no-op.
 func (c *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {}
 
+// Destroy is a no-op for the software backend.
+func (c *CommandEncoder) Destroy() {}
+
 // TransitionBuffers is a no-op (software backend doesn't need explicit transitions).
 func (c *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
 

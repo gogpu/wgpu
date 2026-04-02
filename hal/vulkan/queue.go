@@ -554,6 +554,12 @@ func (q *Queue) GetTimestampPeriod() float32 {
 	return 1.0
 }
 
+// SupportsCommandBufferCopies returns true for Vulkan.
+// Vulkan uses command buffers for copy operations — PendingWrites batches them.
+func (q *Queue) SupportsCommandBufferCopies() bool {
+	return true
+}
+
 // Vulkan function wrapper
 
 //nolint:unparam // Vulkan API wrapper — signature mirrors vkQueueSubmit spec

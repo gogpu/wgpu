@@ -47,6 +47,11 @@ type SwapchainTexture struct {
 	size      Extent3D
 }
 
+// CurrentUsage returns 0 — Vulkan swapchain images are managed by the swapchain.
+func (t *SwapchainTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *SwapchainTexture) AddPendingRef()                      {}
+func (t *SwapchainTexture) DecPendingRef()                      {}
+
 // Destroy implements hal.Texture.
 func (t *SwapchainTexture) Destroy() {
 	// Swapchain textures are owned by the swapchain, not destroyed individually
