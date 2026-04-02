@@ -29,14 +29,13 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	// Flush pending writes under lock, then release lock before HAL submit.
 	var pendingCmdBuf hal.CommandBuffer
 	var flushedEncoder hal.CommandEncoder
-	var flushedStaging []hal.Buffer
 	var flushedDstTextures []hal.Texture
 	var flushedDstBuffers []hal.Buffer
 
 	if q.pending != nil {
 		q.pending.mu.Lock()
 		var err error
-		pendingCmdBuf, flushedEncoder, flushedStaging, flushedDstTextures, flushedDstBuffers, err = q.pending.flush()
+		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, err = q.pending.flush()
 		q.pending.mu.Unlock()
 		if err != nil {
 			return 0, fmt.Errorf("wgpu: flush pending writes: %w", err)
@@ -71,12 +70,12 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	if q.pending != nil {
 		q.pending.mu.Lock()
 		deferredBG, deferredTV := q.pending.drainDeferred()
-		hasInflightWork := flushedStaging != nil || pendingCmdBuf != nil ||
+		hasInflightWork := pendingCmdBuf != nil ||
 			flushedDstTextures != nil || deferredBG != nil || deferredTV != nil
 		if hasInflightWork {
 			q.pending.inflight = append(q.pending.inflight, inflightSubmission{
 				submissionIndex:      subIdx,
-				staging:              flushedStaging,
+				staging:              nil, // staging managed by belt
 				cmdBuf:               pendingCmdBuf,
 				encoder:              flushedEncoder,
 				dstTextures:          flushedDstTextures,

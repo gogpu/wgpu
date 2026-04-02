@@ -69,24 +69,22 @@ func TestStagingBelt_AllocateRecyclesChunk(t *testing.T) {
 	belt.finish(1)
 
 	s := belt.stats()
-	active, free, closed := s.ActiveChunks, s.FreeChunks, s.ClosedSubs
-	if active != 0 {
-		t.Errorf("after finish: expected 0 active, got %d", active)
+	if s.ActiveChunks != 0 {
+		t.Errorf("after finish: expected 0 active, got %d", s.ActiveChunks)
 	}
-	if closed != 1 {
-		t.Errorf("after finish: expected 1 closed, got %d", closed)
+	if s.ClosedSubs != 1 {
+		t.Errorf("after finish: expected 1 closed, got %d", s.ClosedSubs)
 	}
 
 	// Recall recycles closed chunks to free.
 	belt.recall(1)
 
 	s = belt.stats()
-	active, free, closed = s.ActiveChunks, s.FreeChunks, s.ClosedSubs
-	if free != 1 {
-		t.Errorf("after recall: expected 1 free, got %d", free)
+	if s.FreeChunks != 1 {
+		t.Errorf("after recall: expected 1 free, got %d", s.FreeChunks)
 	}
-	if closed != 0 {
-		t.Errorf("after recall: expected 0 closed, got %d", closed)
+	if s.ClosedSubs != 0 {
+		t.Errorf("after recall: expected 0 closed, got %d", s.ClosedSubs)
 	}
 
 	// Next allocation should reuse the free chunk (no new chunk created).
@@ -99,12 +97,11 @@ func TestStagingBelt_AllocateRecyclesChunk(t *testing.T) {
 	}
 
 	s = belt.stats()
-	active, free = s.ActiveChunks, s.FreeChunks
-	if active != 1 {
-		t.Errorf("after reuse: expected 1 active, got %d", active)
+	if s.ActiveChunks != 1 {
+		t.Errorf("after reuse: expected 1 active, got %d", s.ActiveChunks)
 	}
-	if free != 0 {
-		t.Errorf("after reuse: expected 0 free (chunk was recycled), got %d", free)
+	if s.FreeChunks != 0 {
+		t.Errorf("after reuse: expected 0 free (chunk was recycled), got %d", s.FreeChunks)
 	}
 }
 

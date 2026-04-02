@@ -374,9 +374,9 @@ func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
 // The encoder is detached for inflight tracking — after GPU completion,
 // maintain() calls ResetAll and returns it to the pool.
 // Must be called with pw.mu held.
-func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Buffer, []hal.Texture, []hal.Buffer, error) {
+func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []hal.Buffer, error) {
 	if !pw.isRecording {
-		return nil, nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 
 	// Transition destination buffers from COPY_DEST to their primary read usage
@@ -417,7 +417,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.B
 		pw.encoder = nil
 		pw.dstBuffers = make(map[hal.Buffer]gputypes.BufferUsage)
 		pw.dstTextures = make(map[hal.Texture]struct{})
-		return nil, nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: end encoding: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: end encoding: %w", err)
 	}
 
 	// Move resources out for inflight tracking.
@@ -444,7 +444,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.B
 	pw.dstBuffers = make(map[hal.Buffer]gputypes.BufferUsage)
 	pw.dstTextures = make(map[hal.Texture]struct{})
 
-	return cmdBuf, flushedEncoder, nil, flushedDstTextures, flushedDstBuffers, nil
+	return cmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, nil
 }
 
 // maintain frees staging buffers and returns encoders to the pool from
@@ -457,7 +457,8 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 
 	// Find the cutoff point — all submissions with index <= completedIndex are done.
 	cutoff := 0
-	for i, sub := range pw.inflight {
+	for i := range pw.inflight {
+		sub := &pw.inflight[i]
 		if sub.submissionIndex > completedIndex {
 			break
 		}
@@ -553,7 +554,8 @@ func (pw *pendingWrites) destroy() {
 	pw.staging = nil
 
 	// Destroy inflight staging buffers, command buffers, encoders, and deferred resources.
-	for _, sub := range pw.inflight {
+	for i := range pw.inflight {
+		sub := &pw.inflight[i]
 		for _, buf := range sub.staging {
 			pw.halDevice.DestroyBuffer(buf)
 		}

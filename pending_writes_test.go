@@ -95,7 +95,7 @@ func createNonBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockNonBa
 
 // flushAndDiscard calls flush and discards all return values except error.
 func flushAndDiscard(pw *pendingWrites) error {
-	_, _, _, _, _, err := pw.flush() //nolint:dogsled // flush has 6 returns by design
+	_, _, _, _, err := pw.flush() //nolint:dogsled // test helper discards all but error
 	return err
 }
 
@@ -340,7 +340,7 @@ func TestPendingWrites_FlushNoWork(t *testing.T) {
 	defer pw.destroy()
 
 	pw.mu.Lock()
-	cmdBuf, enc, staging, dstTex, dstBuf, err := pw.flush()
+	cmdBuf, enc, dstTex, dstBuf, err := pw.flush()
 	pw.mu.Unlock()
 
 	if err != nil {
@@ -351,9 +351,6 @@ func TestPendingWrites_FlushNoWork(t *testing.T) {
 	}
 	if enc != nil {
 		t.Error("expected nil encoder when no work pending")
-	}
-	if staging != nil {
-		t.Error("expected nil staging when no work pending")
 	}
 	if dstTex != nil {
 		t.Error("expected nil dstTextures when no work pending")
@@ -375,7 +372,7 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 
 	pw.mu.Lock()
-	cmdBuf, enc, staging, _, flushedDstBufs, err := pw.flush()
+	cmdBuf, enc, _, flushedDstBufs, err := pw.flush()
 	pw.mu.Unlock()
 
 	if err != nil {
@@ -389,9 +386,6 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 	// staging from flush contains only oversized one-off buffers;
 	// normal belt-managed writes produce no oversized buffers.
-	if len(staging) != 0 {
-		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
-	}
 	if len(flushedDstBufs) == 0 {
 		t.Error("expected non-empty flushedDstBuffers")
 	}
@@ -430,7 +424,7 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	}
 
 	pw.mu.Lock()
-	cmdBuf, enc, staging, flushedTex, _, err := pw.flush()
+	cmdBuf, enc, flushedTex, _, err := pw.flush()
 	pw.mu.Unlock()
 
 	if err != nil {
@@ -444,9 +438,6 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	}
 	// staging from flush contains only oversized one-off buffers;
 	// texture data fits in a belt chunk, so no oversized buffers.
-	if len(staging) != 0 {
-		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
-	}
 	if len(flushedTex) != 1 {
 		t.Errorf("expected 1 flushed texture, got %d", len(flushedTex))
 	}
@@ -910,7 +901,7 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	}
 
 	pw.mu.Lock()
-	cmdBuf, enc, staging, _, _, err := pw.flush()
+	cmdBuf, enc, _, _, err := pw.flush()
 	pw.mu.Unlock()
 
 	if err != nil {
@@ -923,9 +914,6 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 		t.Error("expected non-nil encoder")
 	}
 	// No oversized buffers — both writes fit in belt chunks.
-	if len(staging) != 0 {
-		t.Errorf("expected 0 oversized staging buffers, got %d", len(staging))
-	}
 
 	// Belt chunks moved to closed.
 	s = pw.belt.stats()
@@ -969,14 +957,13 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	}
 
 	pw.mu.Lock()
-	flushedCmdBuf, flushedEnc, flushedStaging, flushedTex, flushedBufs, err := pw.flush()
+	flushedCmdBuf, flushedEnc, flushedTex, flushedBufs, err := pw.flush()
 	pw.mu.Unlock()
 	if err != nil {
 		t.Fatalf("flush: %v", err)
 	}
 	// Consume return values to avoid dogsled lint.
 	_ = flushedCmdBuf
-	_ = flushedStaging
 	_ = flushedTex
 	_ = flushedBufs
 
