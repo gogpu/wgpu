@@ -1144,6 +1144,21 @@ func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, w
 	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexImage2D, nil, args[:])
 }
 
+func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, width, height int32, format, typ uint32, pixels uintptr) {
+	args := [9]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&xoffset),
+		unsafe.Pointer(&yoffset),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(pixels), //nolint:govet // FFI requires uintptr-to-pointer conversion
+	}
+	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexSubImage2D, nil, args[:])
+}
+
 func (c *Context) GenerateMipmap(target uint32) {
 	args := [1]unsafe.Pointer{unsafe.Pointer(&target)}
 	_ = ffi.CallFunction(&cifVoid1, c.glGenerateMipmap, nil, args[:])

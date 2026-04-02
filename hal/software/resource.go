@@ -19,6 +19,11 @@ type Resource struct{}
 // Destroy is a no-op.
 func (r *Resource) Destroy() {}
 
+// CurrentUsage returns 0 — Software backend has no resource state tracking.
+func (r *Resource) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (r *Resource) AddPendingRef()                      {}
+func (r *Resource) DecPendingRef()                      {}
+
 // NativeHandle returns 0 for software resources (no real GPU handle).
 func (r *Resource) NativeHandle() uintptr { return 0 }
 
@@ -82,6 +87,9 @@ func (t *Texture) WriteData(offset uint64, data []byte) {
 	defer t.mu.Unlock()
 	copy(t.data[offset:], data)
 }
+
+// CurrentUsage returns 0 — Software backend has no resource state tracking.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
 
 // NativeHandle returns the texture's unique ID for handle resolution.
 func (t *Texture) NativeHandle() uintptr { return uintptr(t.id) }

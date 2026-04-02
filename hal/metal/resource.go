@@ -56,6 +56,11 @@ type Texture struct {
 	isExternal bool
 }
 
+// CurrentUsage returns 0 — Metal has no explicit resource state tracking.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *Texture) AddPendingRef()                      {}
+func (t *Texture) DecPendingRef()                      {}
+
 // Destroy releases the texture.
 func (t *Texture) Destroy() {
 	if t.device != nil {

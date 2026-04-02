@@ -236,9 +236,10 @@ Windows GPU access via:
 - Pure Go COM bindings (syscall, no CGO)
 - DXGI integration for swapchain and adapters
 - Flip model with VRR support
-- Descriptor heap management
+- Descriptor heap management with fence-based deferred destruction
+- Encoder pool with allocator recycling (Rust wgpu-core pattern)
 - WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
-- Staging buffer GPU data transfer (WriteBuffer, WriteTexture)
+- StagingBelt ring-buffer allocator for zero-allocation GPU data transfer
 
 ### OpenGL ES Backend
 
@@ -247,6 +248,8 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 - Pure Go EGL/GL bindings (goffi)
 - Full rendering pipeline: VAO, FBO, MSAA, blend, stencil, depth
 - WGSL shader compilation (WGSL → GLSL via naga)
+- Combined texture-sampler binding via SamplerBindMap (Rust wgpu pattern)
+- Text rendering with proper texture completeness handling
 - CopyTextureToBuffer readback for GPU → CPU data transfer
 - Platform detection: X11, Wayland, Surfaceless (headless CI)
 - Works with Mesa llvmpipe for software-only environments

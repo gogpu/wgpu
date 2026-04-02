@@ -127,9 +127,13 @@ func (i *Instance) enableDebugLayer() error {
 	// Try to get ID3D12Debug1 for GPU-based validation
 	debug1, err := i.d3d12Lib.GetDebugInterface1()
 	if err == nil {
-		// GPU-based validation is very slow but catches more errors
-		// Only enable if explicitly requested (future: add separate flag)
-		debug1.SetEnableGPUBasedValidation(false)
+		// GPU-based validation catches resource state, descriptor, and shader errors
+		// at the cost of significant performance. Enable with InstanceFlagsValidation.
+		enableGBV := i.flags&gputypes.InstanceFlagsValidation != 0
+		debug1.SetEnableGPUBasedValidation(enableGBV)
+		if enableGBV {
+			hal.Logger().Info("dx12: GPU-based validation enabled (slow)")
+		}
 		debug1.Release()
 	}
 
@@ -397,9 +401,6 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 		return nil, fmt.Errorf("dx12: surface not configured")
 	}
 
-	// Wait for the old frame occupying the current slot and recycle
-	// its allocators. On the very first frame this is a no-op because
-	// frameState.fenceValue is zero (no prior GPU work to wait for).
 	if s.device != nil {
 		if err := s.device.recycleFrameSlot(); err != nil {
 			return nil, fmt.Errorf("dx12: recycle frame slot failed: %w", err)
@@ -407,8 +408,6 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	}
 
 	// Wait on the frame latency waitable object for proper frame pacing.
-	// This blocks until the swapchain is ready to accept a new frame,
-	// preventing the CPU from queuing too many frames ahead of the GPU.
 	if s.frameLatencyWaitableObject != 0 {
 		_, err := windows.WaitForSingleObject(
 			windows.Handle(s.frameLatencyWaitableObject),

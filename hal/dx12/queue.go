@@ -53,7 +53,6 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	q.raw.ExecuteCommandLists(uint32(len(cmdLists)), &cmdLists[0])
 
 	// Check for immediate device removal after execution.
-	// ExecuteCommandLists is async (void), but some drivers detect errors immediately.
 	if reason := q.device.raw.GetDeviceRemovedReason(); reason != nil {
 		return 0, fmt.Errorf("dx12: device removed after ExecuteCommandLists: %w", reason)
 	}
@@ -459,14 +458,12 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 	if err := dx12Surface.swapchain.Present(syncInterval, presentFlags); err != nil {
 		return fmt.Errorf("dx12: Present failed: %w", err)
 	}
-
 	hal.Logger().Debug("dx12: present",
 		"syncInterval", syncInterval,
 		"elapsed", time.Since(presentStart),
 	)
 
-	// Advance frame index. The wait for the old frame occupying the next slot
-	// is deferred to AcquireTexture, allowing the CPU to overlap with GPU work.
+	// Advance frame index.
 	q.device.advanceFrame()
 
 	// Drain debug messages after present.
@@ -487,6 +484,12 @@ func (q *Queue) GetTimestampPeriod() float32 {
 	// Convert frequency (Hz) to period (nanoseconds)
 	// period = 1 / frequency (in seconds) = 1e9 / frequency (in nanoseconds)
 	return float32(1e9) / float32(freq)
+}
+
+// SupportsCommandBufferCopies returns true for DX12.
+// DX12 uses command lists for copy operations — PendingWrites batches them.
+func (q *Queue) SupportsCommandBufferCopies() bool {
+	return true
 }
 
 // -----------------------------------------------------------------------------

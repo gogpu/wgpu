@@ -19,21 +19,24 @@ import (
 // OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL 4.30 core.
 // GLSL 4.30 is required because naga emits layout(binding=N) qualifiers which are
 // not available in GLSL 3.30. OpenGL 4.3+ is supported on all modern GPUs (2012+).
-func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, error) {
+//
+// Returns the GLSL source and TranslationInfo containing TextureMappings for
+// SamplerBindMap construction (which sampler goes with which texture unit).
+func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, glsl.TranslationInfo, error) {
 	if source.WGSL == "" {
-		return "", fmt.Errorf("gles: shader source has no WGSL code")
+		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
 
 	// Parse WGSL to AST.
 	ast, err := naga.Parse(source.WGSL)
 	if err != nil {
-		return "", fmt.Errorf("gles: WGSL parse error: %w", err)
+		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL parse error: %w", err)
 	}
 
 	// Lower AST to IR.
 	module, err := naga.Lower(ast)
 	if err != nil {
-		return "", fmt.Errorf("gles: WGSL lower error: %w", err)
+		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL lower error: %w", err)
 	}
 
 	// Build a BindingMap that maps (group, binding) to flat GL texture unit indices.
@@ -57,7 +60,7 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 	// Compile IR to GLSL 4.30 core.
 	// Version 4.30 is needed for layout(binding=N) resource binding qualifiers
 	// and compute shader support (local_size_x/y/z).
-	glslCode, _, err := glsl.Compile(module, glsl.Options{
+	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
 		LangVersion:        glsl.Version430,
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
@@ -67,7 +70,7 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 		// Adding naga's flip would double-flip, producing upside-down output.
 	})
 	if err != nil {
-		return "", fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)
+		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)
 	}
 
 	hal.Logger().Debug("gles: GLSL generated",
@@ -76,11 +79,11 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, erro
 	)
 	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
 		preview := glslCode
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
+		if len(preview) > 2000 {
+			preview = preview[:2000] + "..."
 		}
 		hal.Logger().Debug("gles: GLSL source", "glsl", preview)
 	}
 
-	return glslCode, nil
+	return glslCode, translationInfo, nil
 }

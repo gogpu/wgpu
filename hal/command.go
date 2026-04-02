@@ -3,23 +3,36 @@ package hal
 import "github.com/gogpu/gputypes"
 
 // CommandEncoder records GPU commands.
-// Command encoders are single-use - after EndEncoding, they cannot be reused.
+//
+// Lifecycle: After EndEncoding, the encoder is in "closed" state. After
+// ResetAll (with completed command buffers), the encoder is ready for a
+// new BeginEncoding cycle. This enables encoder pooling at the wgpu core
+// level, matching Rust wgpu-core's CommandAllocator pattern.
 type CommandEncoder interface {
 	// BeginEncoding begins command recording with an optional label.
 	BeginEncoding(label string) error
 
 	// EndEncoding finishes command recording and returns a command buffer.
-	// After this call, the encoder cannot be used again.
+	// The encoder enters "closed" state but retains its internal resources
+	// (e.g., DX12 allocator, Vulkan command pool). Call ResetAll after GPU
+	// completion to prepare for the next BeginEncoding cycle.
 	EndEncoding() (CommandBuffer, error)
 
 	// DiscardEncoding discards the encoder without creating a command buffer.
 	// Use this to cancel encoding that encountered errors.
 	DiscardEncoding()
 
-	// ResetAll resets command buffers for reuse.
-	// This is an optimization to avoid allocating new command buffers.
-	// Not all backends support this.
+	// ResetAll resets the encoder and associated command buffers for reuse.
+	// Must be called after the GPU has completed all commands from previous
+	// EndEncoding calls. After ResetAll, the encoder is ready for BeginEncoding.
+	// Not all backends need this (GLES/Software/Metal/Noop are no-ops).
 	ResetAll(commandBuffers []CommandBuffer)
+
+	// Destroy releases all GPU resources owned by this encoder.
+	// Must be called when the encoder is no longer needed (e.g., during
+	// device shutdown or encoder pool cleanup). The encoder must not be
+	// in recording state when Destroy is called.
+	Destroy()
 
 	// TransitionBuffers transitions buffer states for synchronization.
 	// This is required on some backends (Vulkan, DX12) but no-op on others (Metal).

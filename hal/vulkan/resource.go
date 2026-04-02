@@ -62,6 +62,11 @@ type Extent3D struct {
 	Depth  uint32
 }
 
+// CurrentUsage returns 0 — Vulkan uses pipeline barriers managed by the caller.
+func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *Texture) AddPendingRef()                      {}
+func (t *Texture) DecPendingRef()                      {}
+
 // Destroy releases the texture.
 func (t *Texture) Destroy() {
 	if t.device != nil {

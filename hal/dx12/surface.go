@@ -407,6 +407,11 @@ type SurfaceTexture struct {
 	suboptimal bool
 }
 
+// CurrentUsage returns 0 — DX12 surface textures are managed by swapchain, state tracked externally.
+func (t *SurfaceTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *SurfaceTexture) AddPendingRef()                      {}
+func (t *SurfaceTexture) DecPendingRef()                      {}
+
 // Destroy implements hal.SurfaceTexture.
 // Surface textures are owned by the swapchain and should not be destroyed individually.
 func (t *SurfaceTexture) Destroy() {

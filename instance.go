@@ -10,6 +10,9 @@ import (
 // InstanceDescriptor configures instance creation.
 type InstanceDescriptor struct {
 	Backends Backends
+	// Flags controls instance features like debug layers and validation.
+	// Use gputypes.InstanceFlagsDebug to enable GPU debug layer.
+	Flags gputypes.InstanceFlags
 }
 
 // Instance is the entry point for GPU operations.
@@ -28,6 +31,7 @@ func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 	if desc != nil {
 		d := gputypes.DefaultInstanceDescriptor()
 		d.Backends = desc.Backends
+		d.Flags = desc.Flags
 		gpuDesc = &d
 	}
 

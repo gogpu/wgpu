@@ -66,3 +66,9 @@ func (q *Queue) Present(_ hal.Surface, _ hal.SurfaceTexture) error {
 func (q *Queue) GetTimestampPeriod() float32 {
 	return 1.0
 }
+
+// SupportsCommandBufferCopies returns false for the software backend.
+// Writes are handled directly via memcpy without command buffer batching.
+func (q *Queue) SupportsCommandBufferCopies() bool {
+	return false
+}

@@ -23,7 +23,15 @@ import (
 )
 
 // maxFramesInFlight is the number of frames that can be in-flight simultaneously.
-// Matches defaultBufferCount for swapchain double-buffering.
+// Set to 1 pending buffer barrier implementation in PendingWrites.
+// With maxFramesInFlight=2, frame N+1's CopyBufferToBuffer overwrites buffers
+// that frame N's render is still reading — GPU pipeline overlap causes data race.
+// Rust wgpu handles this via per-buffer transition barriers (current→COPY_DST)
+// that force GPU to complete reads before writes. See BUG-DX12-006.
+// maxFramesInFlight is the number of frames that can be in-flight simultaneously.
+// Set to 2 for CPU/GPU parallelism. GPU serialization is handled by
+// ID3D12CommandQueue::Wait in Submit (GPU waits for previous frame's fence
+// before executing, while CPU continues recording the next frame).
 const maxFramesInFlight = 2
 
 // frameState tracks allocators and fence value for one in-flight frame slot.
@@ -408,29 +416,8 @@ func (d *Device) waitForGPU() error {
 	return nil
 }
 
-// acquireAllocator gets a command allocator from the pool or creates a new one.
-// The allocator is registered with the current frame slot for lifecycle tracking.
-func (d *Device) acquireAllocator() (*CommandAllocator, error) {
-	d.allocatorMu.Lock()
-	defer d.allocatorMu.Unlock()
-
-	var raw *d3d12.ID3D12CommandAllocator
-	if len(d.freeAllocators) > 0 {
-		raw = d.freeAllocators[len(d.freeAllocators)-1]
-		d.freeAllocators = d.freeAllocators[:len(d.freeAllocators)-1]
-	} else {
-		var err error
-		raw, err = d.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
-		if err != nil {
-			return nil, fmt.Errorf("dx12: CreateCommandAllocator failed: %w", err)
-		}
-	}
-
-	alloc := &CommandAllocator{raw: raw}
-	slot := d.frameIndex % maxFramesInFlight
-	d.frames[slot].allocators = append(d.frames[slot].allocators, alloc)
-	return alloc, nil
-}
+// Note: acquireAllocator removed — encoders now own their allocators permanently
+// (Rust wgpu-hal pattern). See CommandEncoder.allocator and ResetAll().
 
 // waitForFrameSlot waits until the GPU finishes the frame occupying the given slot.
 // Returns immediately if no work was submitted for that slot.
@@ -483,20 +470,9 @@ func (d *Device) recycleFrameSlot() error {
 	d.frames[slot].fenceValue = 0
 	d.fenceMu.Unlock()
 
-	// Reset and recycle allocators from the completed frame.
-	d.allocatorMu.Lock()
-	for _, alloc := range d.frames[slot].allocators {
-		if alloc == nil || alloc.raw == nil {
-			continue
-		}
-		if err := alloc.raw.Reset(); err != nil {
-			alloc.raw.Release()
-			continue
-		}
-		d.freeAllocators = append(d.freeAllocators, alloc.raw)
-	}
-	d.frames[slot].allocators = d.frames[slot].allocators[:0]
-	d.allocatorMu.Unlock()
+	// Note: Allocator recycling removed — encoders now own their allocators
+	// permanently (Rust wgpu-hal pattern). Allocator Reset happens in
+	// CommandEncoder.ResetAll() after GPU completion via PendingWrites.maintain().
 
 	return nil
 }
@@ -746,52 +722,14 @@ func (d *Device) allocateDSVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uin
 // the shader-visible heap via CopyDescriptorsSimple in CreateBindGroup.
 // DX12 requires CopyDescriptorsSimple source to be non-shader-visible.
 func (d *Device) allocateSRVDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.stagingViewHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging SRV heap not initialized")
-	}
-
-	d.stagingViewHeap.mu.Lock()
-	defer d.stagingViewHeap.mu.Unlock()
-
-	if d.stagingViewHeap.nextFree >= d.stagingViewHeap.capacity {
-		hal.Logger().Error("dx12: descriptor heap exhausted",
-			"heapType", "staging CBV/SRV/UAV",
-			"capacity", d.stagingViewHeap.capacity,
-			"used", d.stagingViewHeap.nextFree,
-		)
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging CBV/SRV/UAV heap exhausted")
-	}
-
-	index := d.stagingViewHeap.nextFree
-	handle := d.stagingViewHeap.cpuStart.Offset(int(index), d.stagingViewHeap.incrementSize)
-	d.stagingViewHeap.nextFree++
-	return handle, index, nil
+	return allocateDescriptor(d.stagingViewHeap, "staging CBV/SRV/UAV")
 }
 
 // allocateSamplerDescriptor allocates a sampler descriptor in the
 // non-shader-visible staging heap. Samplers are created here and later copied
 // to the shader-visible heap via CopyDescriptorsSimple in CreateBindGroup.
 func (d *Device) allocateSamplerDescriptor() (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, uint32, error) {
-	if d.stagingSamplerHeap == nil {
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging sampler heap not initialized")
-	}
-
-	d.stagingSamplerHeap.mu.Lock()
-	defer d.stagingSamplerHeap.mu.Unlock()
-
-	if d.stagingSamplerHeap.nextFree >= d.stagingSamplerHeap.capacity {
-		hal.Logger().Error("dx12: descriptor heap exhausted",
-			"heapType", "staging sampler",
-			"capacity", d.stagingSamplerHeap.capacity,
-			"used", d.stagingSamplerHeap.nextFree,
-		)
-		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, 0, fmt.Errorf("dx12: staging sampler heap exhausted")
-	}
-
-	index := d.stagingSamplerHeap.nextFree
-	handle := d.stagingSamplerHeap.cpuStart.Offset(int(index), d.stagingSamplerHeap.incrementSize)
-	d.stagingSamplerHeap.nextFree++
-	return handle, index, nil
+	return allocateDescriptor(d.stagingSamplerHeap, "staging sampler")
 }
 
 // -----------------------------------------------------------------------------
@@ -985,18 +923,12 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		VisibleNodeMask:      0,
 	}
 
-	// Determine initial state based on primary usage
-	var initialState d3d12.D3D12_RESOURCE_STATES
-	switch {
-	case desc.Usage&gputypes.TextureUsageRenderAttachment != 0 && isDepthFormat(desc.Format):
-		initialState = d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
-	case desc.Usage&gputypes.TextureUsageRenderAttachment != 0:
-		initialState = d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET
-	case desc.Usage&gputypes.TextureUsageCopyDst != 0:
-		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
-	default:
-		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
-	}
+	// All DEFAULT heap textures start in COMMON state (DX12 spec requirement).
+	// Matches Rust wgpu (suballocation.rs:369). Auto-promotion handles the first
+	// use transition (COMMON → COPY_DEST, COMMON → RENDER_TARGET, etc.).
+	// Previous code used non-COMMON initial states which violates the spec and
+	// causes incorrect barrier "from" states in PendingWrites (BUG-DX12-009).
+	initialState := d3d12.D3D12_RESOURCE_STATE_COMMON
 
 	// Optimized clear value for render targets/depth stencil
 	var clearValue *d3d12.D3D12_CLEAR_VALUE
@@ -2036,9 +1968,17 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 		label = desc.Label
 	}
 
+	// Each encoder permanently owns its own allocator (Rust wgpu-hal pattern).
+	// The allocator is Reset only via ResetAll after GPU completion.
+	alloc, err := d.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: CreateCommandAllocator failed: %w", err)
+	}
+
 	return &CommandEncoder{
-		device: d,
-		label:  label,
+		device:    d,
+		allocator: alloc,
+		label:     label,
 	}, nil
 }
 

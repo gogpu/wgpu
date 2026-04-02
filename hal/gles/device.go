@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
@@ -43,11 +44,13 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 		target = gl.COPY_READ_BUFFER
 	}
 
-	// Determine usage hint
-	usage := uint32(gl.STATIC_DRAW)
-	if desc.Usage&gputypes.BufferUsageMapWrite != 0 {
-		usage = gl.DYNAMIC_DRAW
-	} else if desc.Usage&gputypes.BufferUsageMapRead != 0 {
+	// Determine usage hint.
+	// Rust wgpu-hal GLES uses DYNAMIC_DRAW for all writable buffers (device.rs:600):
+	// "Some vendors take usage very literally and STATIC_DRAW will freeze us with
+	// an empty buffer." On Intel, STATIC_DRAW causes glBufferSubData to be silently
+	// ignored for per-frame uniform updates, resulting in invisible text (BUG-GLES-TEXT-001).
+	usage := uint32(gl.DYNAMIC_DRAW)
+	if desc.Usage&gputypes.BufferUsageMapRead != 0 {
 		usage = gl.DYNAMIC_READ
 	}
 
@@ -155,15 +158,16 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	// Set default texture parameters (multisample textures don't support these).
 	if target != gl.TEXTURE_2D_MULTISAMPLE {
-		// Non-filterable formats (integer, 32-bit float, depth32float, stencil8)
-		// must use NEAREST — GL_LINEAR is invalid and causes blurred text on
-		// Qualcomm Adreno. Filterable formats: sampler objects (bound via
-		// glBindSampler) override texture-level state, so we skip setting
-		// min/mag filter here to let the sampler control filtering.
-		if isNonFilterableFormat(desc.Format) {
-			d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-			d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-		}
+		// Set NEAREST filter and MAX_LEVEL on all textures for completeness.
+		// Default GL_TEXTURE_MIN_FILTER is GL_NEAREST_MIPMAP_LINEAR and default
+		// GL_TEXTURE_MAX_LEVEL is 1000. For non-mipmapped textures (MipLevelCount=1),
+		// this combination makes the texture INCOMPLETE — sampling returns (0,0,0,0)
+		// because GL expects mip levels 0..1000 but only level 0 exists.
+		// Setting MAX_LEVEL = MipLevelCount-1 tells GL the actual mip chain length.
+		// Sampler objects override MIN/MAG_FILTER but NOT MAX_LEVEL.
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		d.glCtx.TexParameteri(target, gl.TEXTURE_MAX_LEVEL, int32(desc.MipLevelCount-1))
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	}
@@ -337,7 +341,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint)
+	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -359,9 +363,10 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 
 	// Compile fragment shader
 	var fragmentID uint32
+	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, err = d.compileFragmentShader(desc.Fragment)
+		fragmentID, fragmentTranslationInfo, err = d.compileFragmentShader(desc.Fragment)
 		if err != nil {
 			d.glCtx.DeleteShader(vertexID)
 			return nil, err
@@ -410,7 +415,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		colorWriteMask = desc.Fragment.Targets[0].WriteMask
 	}
 
-	return &RenderPipeline{
+	pipeline := &RenderPipeline{
 		programID:         programID,
 		layout:            layout,
 		glCtx:             d.glCtx,
@@ -422,7 +427,25 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		blend:             blend,
 		colorWriteMask:    colorWriteMask,
 		vertexBuffers:     desc.Vertex.Buffers,
-	}, nil
+	}
+
+	// Build SamplerBindMap from TextureMappings.
+	// For each combined sampler2D, map texture's glBinding to sampler's glBinding.
+	const maxBindingsPerGroup = 16
+	for i := range pipeline.samplerBindMap {
+		pipeline.samplerBindMap[i] = -1 // no sampler
+	}
+	for _, tm := range fragmentTranslationInfo.TextureMappings {
+		if tm.SamplerBinding != nil {
+			texUnit := tm.TextureBinding.Group*maxBindingsPerGroup + tm.TextureBinding.Binding
+			samplerUnit := tm.SamplerBinding.Group*maxBindingsPerGroup + tm.SamplerBinding.Binding
+			if texUnit < maxTextureSlots {
+				pipeline.samplerBindMap[texUnit] = int8(samplerUnit)
+			}
+		}
+	}
+
+	return pipeline, nil
 }
 
 // DestroyRenderPipeline destroys a render pipeline.
@@ -449,7 +472,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint)
+	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -664,15 +687,15 @@ func maxInt32(a, b int32) int32 {
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
-func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, error) {
+func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
-		return 0, fmt.Errorf("gles: invalid fragment shader module type")
+		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint)
 	if err != nil {
-		return 0, fmt.Errorf("gles: fragment shader: %w", err)
+		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}
 
 	fragmentID := d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
@@ -684,13 +707,13 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, error) 
 	if status == gl.FALSE {
 		log := d.glCtx.GetShaderInfoLog(fragmentID)
 		d.glCtx.DeleteShader(fragmentID)
-		return 0, fmt.Errorf("gles: fragment shader compilation failed: %s", log)
+		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader compilation failed: %s", log)
 	}
 	if infoLog := d.glCtx.GetShaderInfoLog(fragmentID); infoLog != "" {
 		hal.Logger().Debug("gles: fragment shader compile info", "info", infoLog)
 	}
 
-	return fragmentID, nil
+	return fragmentID, translationInfo, nil
 }
 
 // Ensure we use unsafe for later

@@ -462,3 +462,9 @@ func (q *Queue) GetTimestampPeriod() float32 {
 	// Metal timestamps are in nanoseconds
 	return 1.0
 }
+
+// SupportsCommandBufferCopies returns true for Metal.
+// Metal uses command buffers for copy operations — PendingWrites batches them.
+func (q *Queue) SupportsCommandBufferCopies() bool {
+	return true
+}

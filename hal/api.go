@@ -230,4 +230,10 @@ type Queue interface {
 	// GetTimestampPeriod returns the timestamp period in nanoseconds.
 	// Used to convert timestamp query results to real time.
 	GetTimestampPeriod() float32
+
+	// SupportsCommandBufferCopies reports whether this queue uses command-buffer-based
+	// copy operations (true for DX12, Vulkan, Metal) or direct API calls (false for
+	// GLES, Software). When false, PendingWrites passes WriteBuffer/WriteTexture
+	// directly to the HAL without batching.
+	SupportsCommandBufferCopies() bool
 }
