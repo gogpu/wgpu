@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.5] - 2026-04-03
+
+### Fixed
+
+#### GLES
+
+- **ADJUST_COORDINATE_SPACE for correct gl_FragCoord Y convention** — GLES backend
+  was missing naga's `ADJUST_COORDINATE_SPACE` flag, causing `gl_FragCoord.y` to use
+  OpenGL convention (Y=0 at bottom) instead of WebGPU (Y=0 at top). This broke
+  `rrect_clip_coverage()` in fragment shaders and required a fragile manual scissor
+  Y-flip. Now matches Rust wgpu-hal GLES with 4 coordinated changes: naga Y-flip
+  in vertex shader, scissor pass-through, front face CW↔CCW swap, and MSAA resolve
+  blit Y-flip for presentation. Fixes invisible scrollbar and dividers in UI on GLES.
+  (BUG-GLES-SCROLLBAR-001)
+
+- **Normalized vertex format support (unorm/snorm)** — `vertexFormatToGL()` was
+  missing `Unorm8x4`, `Snorm8x4`, `Unorm16x2`, `Snorm16x2` etc. These fell back
+  to float formats (16 bytes instead of 4), causing incorrect per-vertex color
+  rendering. Added all normalized variants and `normalized=true` parameter in
+  `glVertexAttribPointer`. Required for text batching per-vertex color (unorm8x4).
+
 ## [0.23.4] - 2026-04-02
 
 ### Fixed
