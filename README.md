@@ -292,8 +292,9 @@ import _ "github.com/gogpu/wgpu/hal/software"
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
 | **gogpu/wgpu** | **Pure Go WebGPU (this repo)** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL) |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library with GPU SDF acceleration |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit: 22+ widgets, 4 themes |
+| [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU type definitions |
 | [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |
 
 ---

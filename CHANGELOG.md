@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.23.5] - 2026-04-03
+## [0.23.5] - 2026-04-04
 
 ### Fixed
 
@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values, causing silent rendering errors. Pipeline creation scans color targets to
   detect constant blend factor usage. Matches Rust wgpu-core `OptionalState` pattern
   and `DrawError::MissingBlendConstant`. (VAL-005)
+
+### Changed
+
+- **gputypes v0.3.0 → v0.4.0** — adds `BlendComponent.UsesConstant()` used by
+  blend constant validation (VAL-005).
+- **naga v0.16.0 → v0.16.1** — SPIR-V backend 164/164 validation pass (100%).
+  Fixes atomics, barriers, images, pointer spill, binding-arrays, depth sampling,
+  integer ops, matrix decomposition.
 
 ## [0.23.4] - 2026-04-02
 

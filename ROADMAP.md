@@ -19,21 +19,22 @@
 
 ---
 
-## Current State: v0.23.3+ (unreleased fixes pending)
+## Current State: v0.23.5
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
-✅ **Core validation layer** — 14/17 Rust wgpu-core checks
+✅ **Core validation layer** — 15/17 Rust wgpu-core checks
 ✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES
-✅ **DX12 TDR fixed** — 11410+ frames stable with maxFramesInFlight=1
+✅ **DX12 TDR fixed** — 11410+ frames stable with maxFramesInFlight=2
 ✅ **PendingWrites batching** — Rust wgpu-core pattern for WriteBuffer/WriteTexture
 ✅ **Enterprise fence architecture** — HAL owns fences, SubmissionIndex tracking
+✅ **Blend constant draw-time validation** — Rust wgpu-core OptionalState pattern
+✅ **Vulkan fence pool recycling** — matches Rust wgpu-hal maintain() before submit
 
 ### Remaining validation (planned)
-- Blend constant tracking (pipeline blend state → draw-time check)
 - Late buffer binding size (SPIR-V reflection → min binding size)
-- Resource usage conflict detection (read/write tracking across bind groups)
+- Resource usage conflict detection — ~~read/write tracking across bind groups~~ DONE (BufferTracker)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -53,15 +54,18 @@
 
 - [x] StagingBelt ring-buffer allocator (0 allocs steady-state, 15× faster)
 - [x] Remove DX12 debug prints → slog
-- [ ] DX12 maxFramesInFlight=2 stability (currently =1 as workaround)
+- [x] DX12 maxFramesInFlight=2 stability (encoder pool architecture)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
+- [ ] DX12 HLSL compilation caching (ShaderCache with LRU eviction)
+- [ ] GLES BindingMap refactor → per-type sequential counters (Rust parity)
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
 - [ ] Vulkan relay semaphores for multi-submission ordering (VK-SYNC-001)
 
 ### v0.25.0 — WebGPU Compliance
 
-- [ ] Full render/compute pass validation (usage conflicts, resource transitions)
-- [ ] Blend constant tracking (pipeline blend state → draw-time check)
+- [x] Blend constant tracking (pipeline blend state → draw-time check)
+- [x] Resource usage conflict detection (BufferTracker with UsageConflictError)
+- [ ] Full render/compute pass validation (resource transitions)
 - [ ] Late buffer binding size validation (SPIR-V reflection → min binding size)
 - [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
 
@@ -78,11 +82,18 @@
 - [ ] Comprehensive documentation
 - [ ] Conformance test suite
 
-### Future
+### Future — Platform Expansion
 
-- [ ] WebAssembly support (browser WebGPU) — ADR and research complete
-- [ ] Android (Vulkan/GLES)
-- [ ] iOS (Metal)
+- [ ] **WebAssembly (browser WebGPU)** — ADR approved, research complete. Top-level
+  `backend/browser/` via `syscall/js` → `navigator.gpu` (bypasses core/hal, like Rust
+  wgpu `ContextWebGpu`). WebGL2 fallback via GLES backend + `_js.go`.
+  See `docs/dev/research/ADR-WASM-WEBGPU-ARCHITECTURE.md`
+- [ ] **Android** — Vulkan surface via `vkCreateAndroidSurfaceKHR` (S estimate).
+  Depends on gogpu platform layer
+- [ ] **iOS** — Metal backend ready (naga MSL 91/91), needs platform integration
+
+### Future — Advanced Features
+
 - [ ] Ray tracing extensions
 - [ ] Bindless resources
 
@@ -113,6 +124,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.23.5** | 2026-04 | GLES coordinate space, Vulkan fence recycling, blend constant validation |
+| **v0.23.4** | 2026-04 | GLES text fix, DX12 TDR (descriptor UAF), StagingBelt |
 | **v0.23.3** | 2026-04 | GLES blur fix, enterprise logging system |
 | **v0.23.2** | 2026-04 | DX12 sampler heap (Rust pattern), GLES BindingMap |
 | **v0.23.1** | 2026-04 | Text/texture rendering on all non-Vulkan backends |
