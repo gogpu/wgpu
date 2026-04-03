@@ -995,10 +995,10 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 	stride := int32(c.layout.ArrayStride)
 	for _, attr := range c.layout.Attributes {
 		loc := attr.ShaderLocation
-		size, typ := vertexFormatToGL(attr.Format)
+		size, typ, normalized := vertexFormatToGL(attr.Format)
 		attrOffset := uintptr(c.offset) + uintptr(attr.Offset)
 		ctx.EnableVertexAttribArray(loc)
-		ctx.VertexAttribPointer(loc, size, typ, false, stride, attrOffset)
+		ctx.VertexAttribPointer(loc, size, typ, normalized, stride, attrOffset)
 	}
 }
 
@@ -1242,50 +1242,66 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 }
 
 // vertexFormatToGL converts a WebGPU vertex format to GL component count and type.
-func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32) {
+func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32, normalized bool) {
 	switch format {
 	case gputypes.VertexFormatFloat32:
-		return 1, gl.FLOAT
+		return 1, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x2:
-		return 2, gl.FLOAT
+		return 2, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x3:
-		return 3, gl.FLOAT
+		return 3, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x4:
-		return 4, gl.FLOAT
+		return 4, gl.FLOAT, false
 	case gputypes.VertexFormatUint8x2:
-		return 2, gl.UNSIGNED_BYTE
+		return 2, gl.UNSIGNED_BYTE, false
 	case gputypes.VertexFormatUint8x4:
-		return 4, gl.UNSIGNED_BYTE
+		return 4, gl.UNSIGNED_BYTE, false
+	case gputypes.VertexFormatUnorm8x2:
+		return 2, gl.UNSIGNED_BYTE, true
+	case gputypes.VertexFormatUnorm8x4:
+		return 4, gl.UNSIGNED_BYTE, true
 	case gputypes.VertexFormatSint8x2:
-		return 2, gl.BYTE
+		return 2, gl.BYTE, false
 	case gputypes.VertexFormatSint8x4:
-		return 4, gl.BYTE
+		return 4, gl.BYTE, false
+	case gputypes.VertexFormatSnorm8x2:
+		return 2, gl.BYTE, true
+	case gputypes.VertexFormatSnorm8x4:
+		return 4, gl.BYTE, true
 	case gputypes.VertexFormatUint16x2:
-		return 2, gl.UNSIGNED_SHORT
+		return 2, gl.UNSIGNED_SHORT, false
 	case gputypes.VertexFormatUint16x4:
-		return 4, gl.UNSIGNED_SHORT
+		return 4, gl.UNSIGNED_SHORT, false
+	case gputypes.VertexFormatUnorm16x2:
+		return 2, gl.UNSIGNED_SHORT, true
+	case gputypes.VertexFormatUnorm16x4:
+		return 4, gl.UNSIGNED_SHORT, true
 	case gputypes.VertexFormatSint16x2:
-		return 2, gl.SHORT
+		return 2, gl.SHORT, false
 	case gputypes.VertexFormatSint16x4:
-		return 4, gl.SHORT
+		return 4, gl.SHORT, false
+	case gputypes.VertexFormatSnorm16x2:
+		return 2, gl.SHORT, true
+	case gputypes.VertexFormatSnorm16x4:
+		return 4, gl.SHORT, true
 	case gputypes.VertexFormatUint32:
-		return 1, gl.UNSIGNED_INT
+		return 1, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x2:
-		return 2, gl.UNSIGNED_INT
+		return 2, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x3:
-		return 3, gl.UNSIGNED_INT
+		return 3, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x4:
-		return 4, gl.UNSIGNED_INT
+		return 4, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatSint32:
-		return 1, gl.INT
+		return 1, gl.INT, false
 	case gputypes.VertexFormatSint32x2:
-		return 2, gl.INT
+		return 2, gl.INT, false
 	case gputypes.VertexFormatSint32x3:
-		return 3, gl.INT
+		return 3, gl.INT, false
 	case gputypes.VertexFormatSint32x4:
-		return 4, gl.INT
+		return 4, gl.INT, false
 	default:
-		return 4, gl.FLOAT
+		return 4, gl.FLOAT, false
 	}
 }
 
