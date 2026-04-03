@@ -344,12 +344,27 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		bgCount = desc.Layout.bindGroupCount
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
+	// Check if any color target uses blend constant factors.
+	// Matches Rust wgpu-core PipelineFlags::BLEND_CONSTANT (resource.rs:4562-4569).
+	var needsBlendConstant bool
+	if desc.Fragment != nil {
+		for i := range desc.Fragment.Targets {
+			if b := desc.Fragment.Targets[i].Blend; b != nil {
+				if b.Color.UsesConstant() || b.Alpha.UsesConstant() {
+					needsBlendConstant = true
+					break
+				}
+			}
+		}
+	}
+
 	return &RenderPipeline{
 		hal:                   halPipeline,
 		device:                d,
 		bindGroupCount:        bgCount,
 		bindGroupLayouts:      bgLayouts,
 		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
+		blendConstantRequired: needsBlendConstant,
 	}, nil
 }
 

@@ -35,6 +35,13 @@ type RenderPassEncoder struct {
 	// indexBufferSet tracks whether SetIndexBuffer has been called.
 	// DrawIndexed and DrawIndexedIndirect require an index buffer.
 	indexBufferSet bool
+	// blendConstantRequired is true if the current pipeline uses
+	// BlendFactorConstant or BlendFactorOneMinusConstant.
+	// Set by SetPipeline from RenderPipeline.blendConstantRequired.
+	blendConstantRequired bool
+	// blendConstantSet tracks whether SetBlendConstant has been called.
+	// Matches Rust wgpu-core OptionalState for blend_constant.
+	blendConstantSet bool
 }
 
 // SetPipeline sets the active render pipeline.
@@ -46,6 +53,9 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.requiredVertexBuffers = pipeline.requiredVertexBuffers
+	if pipeline.blendConstantRequired {
+		p.blendConstantRequired = true
+	}
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
@@ -100,6 +110,7 @@ func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 
 // SetBlendConstant sets the blend constant color.
 func (p *RenderPassEncoder) SetBlendConstant(color *Color) {
+	p.blendConstantSet = true
 	p.core.SetBlendConstant(color)
 }
 
@@ -124,6 +135,13 @@ func (p *RenderPassEncoder) validateDrawState(method string) bool {
 		p.encoder.setError(fmt.Errorf(
 			"wgpu: RenderPass.%s: pipeline requires %d vertex buffer(s) but only %d set",
 			method, p.requiredVertexBuffers, p.vertexBufferCount,
+		))
+		return false
+	}
+	if p.blendConstantRequired && !p.blendConstantSet {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.%s: blend constant needs to be set (pipeline uses BlendFactorConstant)",
+			method,
 		))
 		return false
 	}

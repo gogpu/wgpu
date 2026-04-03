@@ -26,6 +26,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendering. Added all normalized variants and `normalized=true` parameter in
   `glVertexAttribPointer`. Required for text batching per-vertex color (unorm8x4).
 
+#### Vulkan
+
+- **Fence pool recycling before allocation** — `fencePool.signal()` was not calling
+  `maintain()` before allocating a fence, causing signaled fences to accumulate in
+  the active list instead of being recycled to the free list. On the binary fence
+  path (Vulkan 1.0/1.1 without timeline semaphores), every `vkQueueSubmit` created
+  a new `VkFence` via `vkCreateFence`. On NVIDIA Linux drivers, each `VkFence`
+  consumes a file descriptor — ~1000 unrecycled fences exhaust the default FD limit
+  and crash with `VK_ERROR_OUT_OF_HOST_MEMORY`. Now calls `maintain()` before
+  allocation, matching Rust wgpu-hal `Queue::submit`. No impact on timeline
+  semaphore path (Vulkan 1.2+). (VK-SYNC-002)
+
+### Added
+
+- **Blend constant draw-time validation** — `Draw`, `DrawIndexed`, `DrawIndirect`,
+  and `DrawIndexedIndirect` now validate that `SetBlendConstant()` has been called
+  when the current pipeline uses `BlendFactorConstant` or
+  `BlendFactorOneMinusConstant`. Without this, the GPU uses undefined blend constant
+  values, causing silent rendering errors. Pipeline creation scans color targets to
+  detect constant blend factor usage. Matches Rust wgpu-core `OptionalState` pattern
+  and `DrawError::MissingBlendConstant`. (VAL-005)
+
 ## [0.23.4] - 2026-04-02
 
 ### Fixed
