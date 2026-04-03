@@ -65,9 +65,13 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string) (string, glsl
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
 		BindingMap:         bindingMap,
-		// NOTE: Do NOT use WriterFlagAdjustCoordinateSpace here.
-		// Our gg shaders already flip Y in the vertex shader (Vulkan convention).
-		// Adding naga's flip would double-flip, producing upside-down output.
+		// ADJUST_COORDINATE_SPACE: naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
+		// at the end of vertex shaders. This flips Y and remaps Z from [0,1] to [-1,1].
+		// The scene renders upside-down in GL; the present blit (MSAAResolveCommand) flips it back.
+		// This matches Rust wgpu-hal GLES (device.rs:1160) and fixes gl_FragCoord.y convention:
+		// with the flip, gl_FragCoord.y=0 is at the top (WebGPU convention), not bottom (GL convention).
+		// Without this, rrect_clip_coverage() in fragment shaders gets wrong Y values (BUG-GLES-SCROLLBAR-001).
+		WriterFlags: glsl.WriterFlagAdjustCoordinateSpace | glsl.WriterFlagForcePointSize,
 	})
 	if err != nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)

@@ -56,7 +56,7 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Textu
 
 Validation layer between the public API and HAL. Core validates exhaustively — HAL assumes validated input.
 
-- **Spec validation** — `core/validate.go` implements 30+ WebGPU spec rules for textures (dimensions, limits, multisampling, formats), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets), bind groups and layouts
+- **Spec validation** — `core/validate.go` implements 30+ WebGPU spec rules for textures (dimensions, limits, multisampling, formats), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets), bind groups and layouts. Draw-time validation includes blend constant tracking (VAL-005) and resource usage conflict detection (BufferTracker)
 - **Typed errors** — `core/error.go` defines 7 typed error types (`CreateTextureError`, `CreateSamplerError`, `CreateShaderModuleError`, `CreateRenderPipelineError`, `CreateComputePipelineError`, `CreateBindGroupLayoutError`, `CreateBindGroupError`) with specific error kinds and context fields, supporting `errors.As()` for programmatic handling
 - **Deferred errors** — WebGPU pattern: encoding-phase errors are recorded via `SetError()` and surface at `End()` / `Finish()`
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)
@@ -254,4 +254,7 @@ wgpu (this library)
 gogpu (app framework) / gg (2D graphics)
 ```
 
-External dependency: `github.com/gogpu/naga` (shader compiler, also Pure Go).
+External dependencies:
+- `github.com/gogpu/naga` v0.16.1 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL), Pure Go
+- `github.com/gogpu/gputypes` v0.4.0 — shared WebGPU type definitions
+- `github.com/nicholasgasior/goffi` v0.3.9 — FFI for Vulkan/Metal symbol loading

@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.5] - 2026-04-04
+
+### Fixed
+
+#### GLES
+
+- **ADJUST_COORDINATE_SPACE for correct gl_FragCoord Y convention** — GLES backend
+  was missing naga's `ADJUST_COORDINATE_SPACE` flag, causing `gl_FragCoord.y` to use
+  OpenGL convention (Y=0 at bottom) instead of WebGPU (Y=0 at top). This broke
+  `rrect_clip_coverage()` in fragment shaders and required a fragile manual scissor
+  Y-flip. Now matches Rust wgpu-hal GLES with 4 coordinated changes: naga Y-flip
+  in vertex shader, scissor pass-through, front face CW↔CCW swap, and MSAA resolve
+  blit Y-flip for presentation. Fixes invisible scrollbar and dividers in UI on GLES.
+  (BUG-GLES-SCROLLBAR-001)
+
+- **Normalized vertex format support (unorm/snorm)** — `vertexFormatToGL()` was
+  missing `Unorm8x4`, `Snorm8x4`, `Unorm16x2`, `Snorm16x2` etc. These fell back
+  to float formats (16 bytes instead of 4), causing incorrect per-vertex color
+  rendering. Added all normalized variants and `normalized=true` parameter in
+  `glVertexAttribPointer`. Required for text batching per-vertex color (unorm8x4).
+
+#### Vulkan
+
+- **Fence pool recycling before allocation** — `fencePool.signal()` was not calling
+  `maintain()` before allocating a fence, causing signaled fences to accumulate in
+  the active list instead of being recycled to the free list. On the binary fence
+  path (Vulkan 1.0/1.1 without timeline semaphores), every `vkQueueSubmit` created
+  a new `VkFence` via `vkCreateFence`. On NVIDIA Linux drivers, each `VkFence`
+  consumes a file descriptor — ~1000 unrecycled fences exhaust the default FD limit
+  and crash with `VK_ERROR_OUT_OF_HOST_MEMORY`. Now calls `maintain()` before
+  allocation, matching Rust wgpu-hal `Queue::submit`. No impact on timeline
+  semaphore path (Vulkan 1.2+). (VK-SYNC-002)
+
+### Added
+
+- **Blend constant draw-time validation** — `Draw`, `DrawIndexed`, `DrawIndirect`,
+  and `DrawIndexedIndirect` now validate that `SetBlendConstant()` has been called
+  when the current pipeline uses `BlendFactorConstant` or
+  `BlendFactorOneMinusConstant`. Without this, the GPU uses undefined blend constant
+  values, causing silent rendering errors. Pipeline creation scans color targets to
+  detect constant blend factor usage. Matches Rust wgpu-core `OptionalState` pattern
+  and `DrawError::MissingBlendConstant`. (VAL-005)
+
+### Changed
+
+- **gputypes v0.3.0 → v0.4.0** — adds `BlendComponent.UsesConstant()` used by
+  blend constant validation (VAL-005).
+- **naga v0.16.0 → v0.16.1** — SPIR-V backend 164/164 validation pass (100%).
+  Fixes atomics, barriers, images, pointer spill, binding-arrays, depth sampling,
+  integer ops, matrix decomposition.
+
 ## [0.23.4] - 2026-04-02
 
 ### Fixed

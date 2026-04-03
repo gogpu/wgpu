@@ -18,6 +18,11 @@ type RenderPipeline struct {
 	// in the pipeline's vertex state. Draw calls validate that at least this
 	// many vertex buffers have been set via SetVertexBuffer.
 	requiredVertexBuffers uint32
+	// blendConstantRequired is true if any color target uses BlendFactorConstant
+	// or BlendFactorOneMinusConstant. Draw calls validate that SetBlendConstant
+	// has been called when this is true.
+	// Matches Rust wgpu-core PipelineFlags::BLEND_CONSTANT.
+	blendConstantRequired bool
 }
 
 // Release destroys the render pipeline.

@@ -221,57 +221,77 @@ func TestMaxInt32(t *testing.T) {
 
 func TestVertexFormatToGL(t *testing.T) {
 	tests := []struct {
-		name     string
-		format   gputypes.VertexFormat
-		wantSize int32
-		wantType uint32
+		name           string
+		format         gputypes.VertexFormat
+		wantSize       int32
+		wantType       uint32
+		wantNormalized bool
 	}{
 		// Float32 formats
-		{"Float32", gputypes.VertexFormatFloat32, 1, gl.FLOAT},
-		{"Float32x2", gputypes.VertexFormatFloat32x2, 2, gl.FLOAT},
-		{"Float32x3", gputypes.VertexFormatFloat32x3, 3, gl.FLOAT},
-		{"Float32x4", gputypes.VertexFormatFloat32x4, 4, gl.FLOAT},
+		{"Float32", gputypes.VertexFormatFloat32, 1, gl.FLOAT, false},
+		{"Float32x2", gputypes.VertexFormatFloat32x2, 2, gl.FLOAT, false},
+		{"Float32x3", gputypes.VertexFormatFloat32x3, 3, gl.FLOAT, false},
+		{"Float32x4", gputypes.VertexFormatFloat32x4, 4, gl.FLOAT, false},
 
 		// 8-bit unsigned
-		{"Uint8x2", gputypes.VertexFormatUint8x2, 2, gl.UNSIGNED_BYTE},
-		{"Uint8x4", gputypes.VertexFormatUint8x4, 4, gl.UNSIGNED_BYTE},
+		{"Uint8x2", gputypes.VertexFormatUint8x2, 2, gl.UNSIGNED_BYTE, false},
+		{"Uint8x4", gputypes.VertexFormatUint8x4, 4, gl.UNSIGNED_BYTE, false},
+
+		// 8-bit unsigned normalized
+		{"Unorm8x2", gputypes.VertexFormatUnorm8x2, 2, gl.UNSIGNED_BYTE, true},
+		{"Unorm8x4", gputypes.VertexFormatUnorm8x4, 4, gl.UNSIGNED_BYTE, true},
 
 		// 8-bit signed
-		{"Sint8x2", gputypes.VertexFormatSint8x2, 2, gl.BYTE},
-		{"Sint8x4", gputypes.VertexFormatSint8x4, 4, gl.BYTE},
+		{"Sint8x2", gputypes.VertexFormatSint8x2, 2, gl.BYTE, false},
+		{"Sint8x4", gputypes.VertexFormatSint8x4, 4, gl.BYTE, false},
+
+		// 8-bit signed normalized
+		{"Snorm8x2", gputypes.VertexFormatSnorm8x2, 2, gl.BYTE, true},
+		{"Snorm8x4", gputypes.VertexFormatSnorm8x4, 4, gl.BYTE, true},
 
 		// 16-bit unsigned
-		{"Uint16x2", gputypes.VertexFormatUint16x2, 2, gl.UNSIGNED_SHORT},
-		{"Uint16x4", gputypes.VertexFormatUint16x4, 4, gl.UNSIGNED_SHORT},
+		{"Uint16x2", gputypes.VertexFormatUint16x2, 2, gl.UNSIGNED_SHORT, false},
+		{"Uint16x4", gputypes.VertexFormatUint16x4, 4, gl.UNSIGNED_SHORT, false},
+
+		// 16-bit unsigned normalized
+		{"Unorm16x2", gputypes.VertexFormatUnorm16x2, 2, gl.UNSIGNED_SHORT, true},
+		{"Unorm16x4", gputypes.VertexFormatUnorm16x4, 4, gl.UNSIGNED_SHORT, true},
 
 		// 16-bit signed
-		{"Sint16x2", gputypes.VertexFormatSint16x2, 2, gl.SHORT},
-		{"Sint16x4", gputypes.VertexFormatSint16x4, 4, gl.SHORT},
+		{"Sint16x2", gputypes.VertexFormatSint16x2, 2, gl.SHORT, false},
+		{"Sint16x4", gputypes.VertexFormatSint16x4, 4, gl.SHORT, false},
+
+		// 16-bit signed normalized
+		{"Snorm16x2", gputypes.VertexFormatSnorm16x2, 2, gl.SHORT, true},
+		{"Snorm16x4", gputypes.VertexFormatSnorm16x4, 4, gl.SHORT, true},
 
 		// 32-bit unsigned int
-		{"Uint32", gputypes.VertexFormatUint32, 1, gl.UNSIGNED_INT},
-		{"Uint32x2", gputypes.VertexFormatUint32x2, 2, gl.UNSIGNED_INT},
-		{"Uint32x3", gputypes.VertexFormatUint32x3, 3, gl.UNSIGNED_INT},
-		{"Uint32x4", gputypes.VertexFormatUint32x4, 4, gl.UNSIGNED_INT},
+		{"Uint32", gputypes.VertexFormatUint32, 1, gl.UNSIGNED_INT, false},
+		{"Uint32x2", gputypes.VertexFormatUint32x2, 2, gl.UNSIGNED_INT, false},
+		{"Uint32x3", gputypes.VertexFormatUint32x3, 3, gl.UNSIGNED_INT, false},
+		{"Uint32x4", gputypes.VertexFormatUint32x4, 4, gl.UNSIGNED_INT, false},
 
 		// 32-bit signed int
-		{"Sint32", gputypes.VertexFormatSint32, 1, gl.INT},
-		{"Sint32x2", gputypes.VertexFormatSint32x2, 2, gl.INT},
-		{"Sint32x3", gputypes.VertexFormatSint32x3, 3, gl.INT},
-		{"Sint32x4", gputypes.VertexFormatSint32x4, 4, gl.INT},
+		{"Sint32", gputypes.VertexFormatSint32, 1, gl.INT, false},
+		{"Sint32x2", gputypes.VertexFormatSint32x2, 2, gl.INT, false},
+		{"Sint32x3", gputypes.VertexFormatSint32x3, 3, gl.INT, false},
+		{"Sint32x4", gputypes.VertexFormatSint32x4, 4, gl.INT, false},
 
 		// Unknown defaults to Float32x4
-		{"Unknown", gputypes.VertexFormat(255), 4, gl.FLOAT},
+		{"Unknown", gputypes.VertexFormat(255), 4, gl.FLOAT, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSize, gotType := vertexFormatToGL(tt.format)
+			gotSize, gotType, gotNorm := vertexFormatToGL(tt.format)
 			if gotSize != tt.wantSize {
 				t.Errorf("size = %d, want %d", gotSize, tt.wantSize)
 			}
 			if gotType != tt.wantType {
 				t.Errorf("type = %#x, want %#x", gotType, tt.wantType)
+			}
+			if gotNorm != tt.wantNormalized {
+				t.Errorf("normalized = %v, want %v", gotNorm, tt.wantNormalized)
 			}
 		})
 	}

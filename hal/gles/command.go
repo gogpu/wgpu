@@ -296,7 +296,7 @@ type RenderPassEncoder struct {
 	indexBuffer   *Buffer
 	indexFormat   gputypes.IndexFormat
 	stencilRef    uint32
-	fbHeight      uint32 // Framebuffer height for glScissor Y-coordinate flip
+	fbHeight      uint32 // Framebuffer height for MSAA resolve blit Y-flip
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
@@ -435,12 +435,10 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 }
 
 // SetScissorRect sets the scissor rectangle.
-// WebGPU uses top-left origin; OpenGL uses bottom-left origin.
-// The Y coordinate is flipped using the framebuffer height captured at BeginRenderPass.
+// With ADJUST_COORDINATE_SPACE, no Y-flip is needed — coordinates pass through directly.
 func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 	e.encoder.commands = append(e.encoder.commands, &SetScissorCommand{
 		x: x, y: y, width: width, height: height,
-		fbHeight: e.fbHeight,
 	})
 }
 
@@ -673,11 +671,25 @@ func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
 	}
 
 	// Blit (resolve) the MSAA framebuffer to the single-sample framebuffer.
-	ctx.BlitFramebuffer(
-		0, 0, c.width, c.height,
-		0, 0, c.width, c.height,
-		gl.COLOR_BUFFER_BIT, gl.NEAREST,
-	)
+	// With ADJUST_COORDINATE_SPACE, the scene is rendered upside-down in the MSAA FBO.
+	// When resolving to the surface (FBO 0) for presentation, we Y-flip the source rect
+	// to produce the correct orientation on screen. This matches Rust wgpu-hal GLES
+	// present blit (egl.rs:1292-1305): srcY0=height, srcY1=0 flips the image.
+	// For offscreen resolve (texture target), no flip — the texture stays in GL orientation
+	// and subsequent render passes (also flipped) will read it correctly.
+	if c.resolveToSurface {
+		ctx.BlitFramebuffer(
+			0, c.height, c.width, 0, // source Y-flipped: top→bottom
+			0, 0, c.width, c.height, // dest: normal
+			gl.COLOR_BUFFER_BIT, gl.NEAREST,
+		)
+	} else {
+		ctx.BlitFramebuffer(
+			0, 0, c.width, c.height,
+			0, 0, c.width, c.height,
+			gl.COLOR_BUFFER_BIT, gl.NEAREST,
+		)
+	}
 
 	// Restore default framebuffer binding.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, 0)
@@ -770,12 +782,15 @@ func (c *SetPipelineStateCommand) Execute(ctx *gl.Context) {
 		}
 	}
 
-	// Front face
+	// Front face — swapped CW↔CCW to compensate for the Y-flip from
+	// ADJUST_COORDINATE_SPACE. The negation of gl_Position.y reverses triangle
+	// winding order, so we swap the front face to keep the same visibility.
+	// Matches Rust wgpu-hal GLES (conv.rs:298-303).
 	switch c.frontFace {
 	case gputypes.FrontFaceCCW:
-		ctx.FrontFace(gl.CCW)
-	case gputypes.FrontFaceCW:
 		ctx.FrontFace(gl.CW)
+	case gputypes.FrontFaceCW:
+		ctx.FrontFace(gl.CCW)
 	}
 
 	// Depth and stencil
@@ -995,10 +1010,10 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 	stride := int32(c.layout.ArrayStride)
 	for _, attr := range c.layout.Attributes {
 		loc := attr.ShaderLocation
-		size, typ := vertexFormatToGL(attr.Format)
+		size, typ, normalized := vertexFormatToGL(attr.Format)
 		attrOffset := uintptr(c.offset) + uintptr(attr.Offset)
 		ctx.EnableVertexAttribArray(loc)
-		ctx.VertexAttribPointer(loc, size, typ, false, stride, attrOffset)
+		ctx.VertexAttribPointer(loc, size, typ, normalized, stride, attrOffset)
 	}
 }
 
@@ -1024,24 +1039,20 @@ func (c *SetViewportCommand) Execute(ctx *gl.Context) {
 }
 
 // SetScissorCommand sets the scissor rectangle.
-// It converts from WebGPU top-left origin to OpenGL bottom-left origin
-// using the framebuffer height: glY = fbHeight - y - height.
+// With ADJUST_COORDINATE_SPACE enabled, the scene is rendered upside-down in GL.
+// The scissor coordinates are passed through directly (no Y-flip needed) because
+// the scissor operates in the same flipped coordinate space as the rendered content.
+// This matches Rust wgpu-hal GLES which also passes scissor through without Y-flip.
 type SetScissorCommand struct {
 	x, y, width, height uint32
-	fbHeight            uint32 // Framebuffer height for Y-coordinate flip
 }
 
 func (c *SetScissorCommand) Execute(ctx *gl.Context) {
 	ctx.Enable(gl.SCISSOR_TEST)
-	// OpenGL scissor uses bottom-left origin, WebGPU uses top-left origin.
-	// Convert: glY = fbHeight - y - height
-	//
-	// Negative glY is valid — OpenGL glScissor accepts GLint (signed).
-	// The driver handles partial visibility via per-fragment scissor test.
-	// Previous code clamped glY to 0 without reducing height, which shifted
-	// the scissor rect and broke ScrollView overflow clipping (gg#226).
-	glY := int32(c.fbHeight) - int32(c.y) - int32(c.height)
-	ctx.Scissor(int32(c.x), glY, int32(c.width), int32(c.height))
+	// No Y-flip: ADJUST_COORDINATE_SPACE flips the scene in the vertex shader,
+	// so GL pixel Y=0 corresponds to the top of the scene (WebGPU Y=0).
+	// The scissor rect in WebGPU coords maps directly to GL coords.
+	ctx.Scissor(int32(c.x), int32(c.y), int32(c.width), int32(c.height))
 }
 
 // SetBlendConstantCommand sets blend constant.
@@ -1242,50 +1253,66 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 }
 
 // vertexFormatToGL converts a WebGPU vertex format to GL component count and type.
-func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32) {
+func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32, normalized bool) {
 	switch format {
 	case gputypes.VertexFormatFloat32:
-		return 1, gl.FLOAT
+		return 1, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x2:
-		return 2, gl.FLOAT
+		return 2, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x3:
-		return 3, gl.FLOAT
+		return 3, gl.FLOAT, false
 	case gputypes.VertexFormatFloat32x4:
-		return 4, gl.FLOAT
+		return 4, gl.FLOAT, false
 	case gputypes.VertexFormatUint8x2:
-		return 2, gl.UNSIGNED_BYTE
+		return 2, gl.UNSIGNED_BYTE, false
 	case gputypes.VertexFormatUint8x4:
-		return 4, gl.UNSIGNED_BYTE
+		return 4, gl.UNSIGNED_BYTE, false
+	case gputypes.VertexFormatUnorm8x2:
+		return 2, gl.UNSIGNED_BYTE, true
+	case gputypes.VertexFormatUnorm8x4:
+		return 4, gl.UNSIGNED_BYTE, true
 	case gputypes.VertexFormatSint8x2:
-		return 2, gl.BYTE
+		return 2, gl.BYTE, false
 	case gputypes.VertexFormatSint8x4:
-		return 4, gl.BYTE
+		return 4, gl.BYTE, false
+	case gputypes.VertexFormatSnorm8x2:
+		return 2, gl.BYTE, true
+	case gputypes.VertexFormatSnorm8x4:
+		return 4, gl.BYTE, true
 	case gputypes.VertexFormatUint16x2:
-		return 2, gl.UNSIGNED_SHORT
+		return 2, gl.UNSIGNED_SHORT, false
 	case gputypes.VertexFormatUint16x4:
-		return 4, gl.UNSIGNED_SHORT
+		return 4, gl.UNSIGNED_SHORT, false
+	case gputypes.VertexFormatUnorm16x2:
+		return 2, gl.UNSIGNED_SHORT, true
+	case gputypes.VertexFormatUnorm16x4:
+		return 4, gl.UNSIGNED_SHORT, true
 	case gputypes.VertexFormatSint16x2:
-		return 2, gl.SHORT
+		return 2, gl.SHORT, false
 	case gputypes.VertexFormatSint16x4:
-		return 4, gl.SHORT
+		return 4, gl.SHORT, false
+	case gputypes.VertexFormatSnorm16x2:
+		return 2, gl.SHORT, true
+	case gputypes.VertexFormatSnorm16x4:
+		return 4, gl.SHORT, true
 	case gputypes.VertexFormatUint32:
-		return 1, gl.UNSIGNED_INT
+		return 1, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x2:
-		return 2, gl.UNSIGNED_INT
+		return 2, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x3:
-		return 3, gl.UNSIGNED_INT
+		return 3, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatUint32x4:
-		return 4, gl.UNSIGNED_INT
+		return 4, gl.UNSIGNED_INT, false
 	case gputypes.VertexFormatSint32:
-		return 1, gl.INT
+		return 1, gl.INT, false
 	case gputypes.VertexFormatSint32x2:
-		return 2, gl.INT
+		return 2, gl.INT, false
 	case gputypes.VertexFormatSint32x3:
-		return 3, gl.INT
+		return 3, gl.INT, false
 	case gputypes.VertexFormatSint32x4:
-		return 4, gl.INT
+		return 4, gl.INT, false
 	default:
-		return 4, gl.FLOAT
+		return 4, gl.FLOAT, false
 	}
 }
 

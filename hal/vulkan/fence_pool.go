@@ -68,9 +68,23 @@ func (p *fencePool) maintain(cmds *vk.Commands, device vk.Device) {
 // submission value. The fence is taken from the free list if available,
 // otherwise a new one is created.
 //
+// Calls maintain() first to recycle signaled fences back to the free list.
+// Without this, every submit allocates a new VkFence via vkCreateFence,
+// causing unbounded growth of the active list. On NVIDIA Linux drivers,
+// each VkFence consumes a file descriptor — ~1000 unrecycled fences
+// exhaust the default FD limit and crash with VK_ERROR_OUT_OF_HOST_MEMORY.
+//
+// Matches Rust wgpu-hal Queue::submit (mod.rs:1293):
+//
+//	signal_fence.maintain(&self.device.raw)?;
+//
 // The caller must pass the returned fence to vkQueueSubmit. After the GPU
 // signals it, maintain() or wait() will recycle it.
 func (p *fencePool) signal(cmds *vk.Commands, device vk.Device, value uint64) (vk.Fence, error) {
+	// Recycle signaled fences before allocating. This keeps the free list
+	// populated and prevents unbounded vkCreateFence calls.
+	p.maintain(cmds, device)
+
 	var fence vk.Fence
 
 	// Pop from free list if available.
