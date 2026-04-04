@@ -27,16 +27,31 @@ func (t *Texture) HalTexture() hal.Texture {
 	return t.hal
 }
 
-// Release destroys the texture.
+// Release destroys the texture. The underlying HAL texture is not freed
+// immediately — destruction is deferred until the GPU completes any submission
+// that may reference it. This prevents use-after-free on DX12/Vulkan.
 func (t *Texture) Release() {
 	if t.released {
 		return
 	}
 	t.released = true
+
 	halDevice := t.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyTexture(t.hal)
+	if halDevice == nil {
+		return
 	}
+
+	dq := t.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyTexture(t.hal)
+		return
+	}
+
+	subIdx := t.device.lastSubmissionIndex()
+	halTex := t.hal
+	dq.Defer(subIdx, "Texture", func() {
+		halDevice.DestroyTexture(halTex)
+	})
 }
 
 // TextureView represents a view into a texture.

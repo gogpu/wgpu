@@ -25,16 +25,30 @@ type RenderPipeline struct {
 	blendConstantRequired bool
 }
 
-// Release destroys the render pipeline.
+// Release destroys the render pipeline. Destruction is deferred until the GPU
+// completes any submission that may reference this pipeline.
 func (p *RenderPipeline) Release() {
 	if p.released {
 		return
 	}
 	p.released = true
+
 	halDevice := p.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyRenderPipeline(p.hal)
+	if halDevice == nil {
+		return
 	}
+
+	dq := p.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyRenderPipeline(p.hal)
+		return
+	}
+
+	subIdx := p.device.lastSubmissionIndex()
+	halPipeline := p.hal
+	dq.Defer(subIdx, "RenderPipeline", func() {
+		halDevice.DestroyRenderPipeline(halPipeline)
+	})
 }
 
 // ComputePipeline represents a configured compute pipeline.
@@ -51,14 +65,28 @@ type ComputePipeline struct {
 	bindGroupLayouts []*BindGroupLayout
 }
 
-// Release destroys the compute pipeline.
+// Release destroys the compute pipeline. Destruction is deferred until the GPU
+// completes any submission that may reference this pipeline.
 func (p *ComputePipeline) Release() {
 	if p.released {
 		return
 	}
 	p.released = true
+
 	halDevice := p.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyComputePipeline(p.hal)
+	if halDevice == nil {
+		return
 	}
+
+	dq := p.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyComputePipeline(p.hal)
+		return
+	}
+
+	subIdx := p.device.lastSubmissionIndex()
+	halPipeline := p.hal
+	dq.Defer(subIdx, "ComputePipeline", func() {
+		halDevice.DestroyComputePipeline(halPipeline)
+	})
 }

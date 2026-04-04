@@ -74,16 +74,30 @@ func optionalEqual[T comparable](a, b *T) bool {
 	return *a == *b
 }
 
-// Release destroys the bind group layout.
+// Release destroys the bind group layout. Destruction is deferred until the
+// GPU completes any submission that may reference this layout.
 func (l *BindGroupLayout) Release() {
 	if l.released {
 		return
 	}
 	l.released = true
+
 	halDevice := l.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyBindGroupLayout(l.hal)
+	if halDevice == nil {
+		return
 	}
+
+	dq := l.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyBindGroupLayout(l.hal)
+		return
+	}
+
+	subIdx := l.device.lastSubmissionIndex()
+	halLayout := l.hal
+	dq.Defer(subIdx, "BindGroupLayout", func() {
+		halDevice.DestroyBindGroupLayout(halLayout)
+	})
 }
 
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
@@ -99,16 +113,30 @@ type PipelineLayout struct {
 	bindGroupLayouts []*BindGroupLayout
 }
 
-// Release destroys the pipeline layout.
+// Release destroys the pipeline layout. Destruction is deferred until the
+// GPU completes any submission that may reference this layout.
 func (l *PipelineLayout) Release() {
 	if l.released {
 		return
 	}
 	l.released = true
+
 	halDevice := l.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyPipelineLayout(l.hal)
+	if halDevice == nil {
+		return
 	}
+
+	dq := l.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyPipelineLayout(l.hal)
+		return
+	}
+
+	subIdx := l.device.lastSubmissionIndex()
+	halLayout := l.hal
+	dq.Defer(subIdx, "PipelineLayout", func() {
+		halDevice.DestroyPipelineLayout(halLayout)
+	})
 }
 
 // BindGroup represents bound GPU resources for shader access.

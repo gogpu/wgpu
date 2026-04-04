@@ -545,6 +545,7 @@ func (d *Device) WaitIdle() error {
 }
 
 // Release releases the device and all associated resources.
+// Deferred resource destructions are flushed before the device is destroyed.
 func (d *Device) Release() {
 	if d.released {
 		return
@@ -555,7 +556,26 @@ func (d *Device) Release() {
 		d.queue.release()
 	}
 
+	// core.Device.Destroy() calls DestroyQueue.FlushAll() internally.
 	d.core.Destroy()
+}
+
+// destroyQueue returns the device's DestroyQueue for deferred resource destruction.
+// Returns nil if the device has no HAL integration or no DestroyQueue.
+func (d *Device) destroyQueue() *core.DestroyQueue {
+	if d.core == nil {
+		return nil
+	}
+	return d.core.DestroyQueueRef()
+}
+
+// lastSubmissionIndex returns the latest submission index from the queue.
+// Used by Release() methods to schedule deferred destruction.
+func (d *Device) lastSubmissionIndex() uint64 {
+	if d.queue == nil {
+		return 0
+	}
+	return d.queue.LastSubmissionIndex()
 }
 
 // halDevice returns the underlying HAL device for direct resource creation.
