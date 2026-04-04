@@ -126,7 +126,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					MaxStorageBufferBindingSize:               maxBuf,
 					MinUniformBufferOffsetAlignment:           256,
 					MinStorageBufferOffsetAlignment:           256,
-					MaxVertexBuffers:                          30,
+					MaxVertexBuffers:                          maxVertexBuffers,
 					MaxBufferSize:                             maxBuf,
 					MaxVertexAttributes:                       31,
 					MaxVertexBufferArrayStride:                2048,

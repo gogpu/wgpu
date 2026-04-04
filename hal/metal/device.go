@@ -19,6 +19,10 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// Vertex buffer indices are assigned from the end of the range and count down.
+// This maximizes the gap between uniform/storage buffers and vertex buffers.
+const maxVertexBuffers = 31
+
 // Device implements hal.Device for Metal.
 type Device struct {
 	raw           ID // id<MTLDevice>
@@ -625,7 +629,8 @@ func (d *Device) buildVertexDescriptor(buffers []gputypes.VertexBufferLayout) (I
 	attributes := MsgSend(vertexDesc, Sel("attributes"))
 	layouts := MsgSend(vertexDesc, Sel("layouts"))
 
-	for bufIdx, buf := range buffers {
+	for slot, buf := range buffers {
+		bufIdx := maxVertexBuffers - 1 - slot
 		for _, attr := range buf.Attributes {
 			attrDesc := MsgSend(attributes, Sel("objectAtIndexedSubscript:"), uintptr(attr.ShaderLocation))
 			if attrDesc == 0 {

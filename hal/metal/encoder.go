@@ -506,7 +506,8 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 	if !ok || buf == nil {
 		return
 	}
-	_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), uintptr(buf.raw), uintptr(offset), uintptr(slot))
+	bufIdx := maxVertexBuffers - 1 - slot
+	_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), uintptr(buf.raw), uintptr(offset), uintptr(bufIdx))
 }
 
 // SetIndexBuffer sets the index buffer.
