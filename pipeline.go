@@ -1,6 +1,9 @@
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import (
+	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/hal"
+)
 
 // RenderPipeline represents a configured render pipeline.
 type RenderPipeline struct {
@@ -23,6 +26,9 @@ type RenderPipeline struct {
 	// has been called when this is true.
 	// Matches Rust wgpu-core PipelineFlags::BLEND_CONSTANT.
 	blendConstantRequired bool
+	// ref is the GPU-aware reference counter for this pipeline (Phase 2).
+	// Clone'd when used in a render pass, Drop'd when GPU completes submission.
+	ref *core.ResourceRef
 }
 
 // Release destroys the render pipeline. Destruction is deferred until the GPU
@@ -63,6 +69,9 @@ type ComputePipeline struct {
 	// bindGroupLayouts stores the layouts from the pipeline layout.
 	// Used by the binder for draw-time compatibility validation.
 	bindGroupLayouts []*BindGroupLayout
+	// ref is the GPU-aware reference counter for this pipeline (Phase 2).
+	// Clone'd when used in a compute pass, Drop'd when GPU completes submission.
+	ref *core.ResourceRef
 }
 
 // Release destroys the compute pipeline. Destruction is deferred until the GPU

@@ -56,6 +56,11 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		return nil, err
 	}
 
+	// Phase 2: initialize ResourceRef for per-command-buffer tracking.
+	// onZero is nil — destruction is handled by Phase 1's DestroyQueue.Defer().
+	// The Ref tracks in-flight usage: Clone'd on encoding, Drop'd on GPU completion.
+	coreBuffer.Ref = core.NewResourceRef("Buffer:"+desc.Label, nil)
+
 	return &Buffer{core: coreBuffer, device: d}, nil
 }
 
@@ -310,7 +315,12 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
 
-	return &BindGroup{hal: halGroup, device: d, layout: desc.Layout}, nil
+	return &BindGroup{
+		hal:    halGroup,
+		device: d,
+		layout: desc.Layout,
+		ref:    core.NewResourceRef("BindGroup:"+desc.Label, nil),
+	}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -365,6 +375,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		bindGroupLayouts:      bgLayouts,
 		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
 		blendConstantRequired: needsBlendConstant,
+		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, nil),
 	}, nil
 }
 
@@ -404,6 +415,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		device:           d,
 		bindGroupCount:   bgCount,
 		bindGroupLayouts: bgLayouts,
+		ref:              core.NewResourceRef("ComputePipeline:"+desc.Label, nil),
 	}, nil
 }
 

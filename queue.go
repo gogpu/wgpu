@@ -102,6 +102,21 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		q.pending.mu.Unlock()
 	}
 
+	// Collect tracked refs from command buffers and associate with this submission.
+	// Phase 2: per-command-buffer resource tracking — refs are Drop'd when GPU completes.
+	if dq := q.destroyQueue(); dq != nil {
+		var allRefs []*core.ResourceRef
+		for _, cb := range commandBuffers {
+			if cb != nil && len(cb.trackedRefs) > 0 {
+				allRefs = append(allRefs, cb.trackedRefs...)
+				cb.trackedRefs = nil
+			}
+		}
+		if len(allRefs) > 0 {
+			dq.TrackSubmission(subIdx, allRefs)
+		}
+	}
+
 	// Triage deferred resource destructions from the DestroyQueue.
 	// Resources whose GPU submissions have completed are now safe to destroy.
 	if dq := q.destroyQueue(); dq != nil {

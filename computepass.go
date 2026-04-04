@@ -26,6 +26,20 @@ type ComputePassEncoder struct {
 	// binder tracks bind group assignments and validates compatibility
 	// at dispatch time, matching Rust wgpu-core's Binder pattern.
 	binder binder
+	// trackedRefs accumulates Clone'd ResourceRefs for resources used in
+	// this compute pass. Transferred to the parent CommandEncoder on End().
+	// Phase 2: per-command-buffer resource tracking.
+	trackedRefs []*core.ResourceRef
+}
+
+// trackRef Clone()'s a ResourceRef and accumulates it for later transfer
+// to the parent CommandEncoder. This keeps the resource alive until the
+// GPU completes the submission containing this compute pass.
+func (p *ComputePassEncoder) trackRef(ref *core.ResourceRef) {
+	if ref != nil {
+		ref.Clone()
+		p.trackedRefs = append(p.trackedRefs, ref)
+	}
 }
 
 // SetPipeline sets the active compute pipeline.
@@ -37,6 +51,7 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
+	p.trackRef(pipeline.ref)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
 		raw.SetPipeline(pipeline.hal)
@@ -50,6 +65,7 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 		return
 	}
 	p.binder.assign(index, group.layout)
+	p.trackRef(group.ref)
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
@@ -88,10 +104,16 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: buffer is nil"))
 		return
 	}
+	p.trackRef(buffer.core.Ref)
 	p.core.DispatchIndirect(buffer.coreBuffer(), offset)
 }
 
 // End ends the compute pass.
 func (p *ComputePassEncoder) End() error {
+	// Transfer tracked refs to parent CommandEncoder before ending.
+	if len(p.trackedRefs) > 0 {
+		p.encoder.trackedRefs = append(p.encoder.trackedRefs, p.trackedRefs...)
+		p.trackedRefs = nil
+	}
 	return p.core.End()
 }

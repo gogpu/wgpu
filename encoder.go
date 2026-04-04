@@ -17,6 +17,10 @@ type CommandEncoder struct {
 	core     *core.CoreCommandEncoder
 	device   *Device
 	released bool
+	// trackedRefs accumulates Clone'd ResourceRefs from render/compute passes.
+	// Transferred to the CommandBuffer on Finish(), then to the DestroyQueue
+	// on Submit(). Phase 2: per-command-buffer resource tracking.
+	trackedRefs []*core.ResourceRef
 }
 
 // setError records a deferred error on the underlying command encoder.
@@ -25,6 +29,16 @@ type CommandEncoder struct {
 func (e *CommandEncoder) setError(err error) {
 	if e.core != nil {
 		e.core.SetError(err)
+	}
+}
+
+// trackRef Clone()'s a ResourceRef and accumulates it for transfer to the
+// CommandBuffer on Finish(). This keeps the resource alive until the GPU
+// completes the submission. Used for encoder-level operations (copy commands).
+func (e *CommandEncoder) trackRef(ref *core.ResourceRef) {
+	if ref != nil {
+		ref.Clone()
+		e.trackedRefs = append(e.trackedRefs, ref)
 	}
 }
 
@@ -80,6 +94,8 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: destination buffer is nil"))
 		return
 	}
+	e.trackRef(src.core.Ref)
+	e.trackRef(dst.core.Ref)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -149,6 +165,11 @@ func (e *CommandEncoder) DiscardEncoding() {
 		return
 	}
 	e.released = true
+	// Drop all tracked refs since no submission will happen.
+	for _, ref := range e.trackedRefs {
+		ref.Drop()
+	}
+	e.trackedRefs = nil
 	raw := e.core.RawEncoder()
 	if raw != nil {
 		raw.DiscardEncoding()
@@ -165,10 +186,21 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 
 	coreCmdBuffer, err := e.core.Finish()
 	if err != nil {
+		// On error, drop all tracked refs since no submission will happen.
+		for _, ref := range e.trackedRefs {
+			ref.Drop()
+		}
+		e.trackedRefs = nil
 		return nil, err
 	}
 
-	return &CommandBuffer{core: coreCmdBuffer, device: e.device}, nil
+	cb := &CommandBuffer{
+		core:        coreCmdBuffer,
+		device:      e.device,
+		trackedRefs: e.trackedRefs,
+	}
+	e.trackedRefs = nil
+	return cb, nil
 }
 
 // convertRenderPassDesc converts a public descriptor to core descriptor.
@@ -222,6 +254,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 type CommandBuffer struct {
 	core   *core.CoreCommandBuffer
 	device *Device
+	// trackedRefs holds Clone'd ResourceRefs from encoding. Transferred to
+	// the DestroyQueue on Submit() so refs are Drop'd when GPU completes.
+	// Phase 2: per-command-buffer resource tracking.
+	trackedRefs []*core.ResourceRef
 }
 
 // halBuffer returns the underlying HAL command buffer.

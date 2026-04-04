@@ -2,6 +2,7 @@ package wgpu
 
 import (
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -147,6 +148,9 @@ type BindGroup struct {
 	// layout is the bind group layout used to create this bind group.
 	// Stored for draw-time compatibility validation via the binder.
 	layout *BindGroupLayout
+	// ref is the GPU-aware reference counter for this bind group (Phase 2).
+	// Clone'd when used in a render/compute pass, Drop'd when GPU completes submission.
+	ref *core.ResourceRef
 }
 
 // Release marks the bind group for destruction. The underlying HAL BindGroup

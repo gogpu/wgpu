@@ -42,6 +42,20 @@ type RenderPassEncoder struct {
 	// blendConstantSet tracks whether SetBlendConstant has been called.
 	// Matches Rust wgpu-core OptionalState for blend_constant.
 	blendConstantSet bool
+	// trackedRefs accumulates Clone'd ResourceRefs for resources used in
+	// this render pass. Transferred to the parent CommandEncoder on End().
+	// Phase 2: per-command-buffer resource tracking.
+	trackedRefs []*core.ResourceRef
+}
+
+// trackRef Clone()'s a ResourceRef and accumulates it for later transfer
+// to the parent CommandEncoder. This keeps the resource alive until the
+// GPU completes the submission containing this render pass.
+func (p *RenderPassEncoder) trackRef(ref *core.ResourceRef) {
+	if ref != nil {
+		ref.Clone()
+		p.trackedRefs = append(p.trackedRefs, ref)
+	}
 }
 
 // SetPipeline sets the active render pipeline.
@@ -57,6 +71,7 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		p.blendConstantRequired = true
 	}
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
+	p.trackRef(pipeline.ref)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
 		raw.SetPipeline(pipeline.hal)
@@ -70,6 +85,7 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 		return
 	}
 	p.binder.assign(index, group.layout)
+	p.trackRef(group.ref)
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
@@ -85,6 +101,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 	if slot+1 > p.vertexBufferCount {
 		p.vertexBufferCount = slot + 1
 	}
+	p.trackRef(buffer.core.Ref)
 	p.core.SetVertexBuffer(slot, buffer.coreBuffer(), offset)
 }
 
@@ -95,6 +112,7 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 		return
 	}
 	p.indexBufferSet = true
+	p.trackRef(buffer.core.Ref)
 	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
 }
 
@@ -177,6 +195,7 @@ func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndirect: buffer is nil"))
 		return
 	}
+	p.trackRef(buffer.core.Ref)
 	p.core.DrawIndirect(buffer.coreBuffer(), offset)
 }
 
@@ -193,11 +212,17 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: buffer is nil"))
 		return
 	}
+	p.trackRef(buffer.core.Ref)
 	p.core.DrawIndexedIndirect(buffer.coreBuffer(), offset)
 }
 
 // End ends the render pass.
 // After this call, the encoder cannot be used again.
 func (p *RenderPassEncoder) End() error {
+	// Transfer tracked refs to parent CommandEncoder before ending.
+	if len(p.trackedRefs) > 0 {
+		p.encoder.trackedRefs = append(p.encoder.trackedRefs, p.trackedRefs...)
+		p.trackedRefs = nil
+	}
 	return p.core.End()
 }
