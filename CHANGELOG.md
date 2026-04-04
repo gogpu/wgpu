@@ -5,9 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.23.5] - 2026-04-04
+## [0.23.6] - 2026-04-04
 
 ### Added
+
+#### Core
+
+- **Deferred resource destruction (ResourceRef + DestroyQueue)** — All GPU
+  resources (Buffer, Texture, TextureView, BindGroup, Pipeline, Sampler, etc.)
+  now defer HAL destruction until the GPU completes the submission that was active
+  when `Release()` was called. Prevents use-after-free crashes on DX12 (TDR) and
+  validation errors on Vulkan when resources are released while the GPU is still
+  rendering with them. Implements Go equivalent of Rust wgpu-core's
+  `LifetimeTracker` pattern with `ResourceRef` (atomic refcount, Go analog of
+  Rust `Arc`) and `DestroyQueue` (submission-scoped triage).
+  (TASK-WGPU-CORE-LIFETIME-001)
+
+- **Per-command-buffer resource tracking** — Command encoders now Clone()
+  ResourceRef for every resource bound during render/compute pass encoding
+  (SetVertexBuffer, SetBindGroup, SetPipeline, etc.). Refs transfer through
+  `End()` → `Finish()` → `Submit()` → `DestroyQueue.TrackSubmission()` and are
+  Drop()'d when GPU completes the submission. Matches Rust wgpu-core
+  `EncoderInFlight` pattern where `Arc` refs in trackers keep resources alive.
+  (TASK-WGPU-CORE-LIFETIME-002)
+
+- **Unified destruction mechanism** — Migrated TextureView and BindGroup from
+  duplicate `pendingWrites` deferred mechanism to `core.DestroyQueue`. All 9
+  resource types now use a single destruction path. Removed 234 lines of
+  duplicate code. (TASK-WGPU-CORE-LIFETIME-003)
 
 #### DX12
 
@@ -25,6 +50,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (use-after-free detection via recently freed allocations list). Provides
   enterprise-level GPU crash diagnostics not available in Rust wgpu.
   (TASK-DX12-DRED-001)
+
+### Fixed
+
+#### Core
+
+- **Deferred resource destruction — use-after-free fix** — `Buffer.Release()`,
+  `Texture.Release()`, and all other resource `Release()` methods were calling HAL
+  destroy immediately while the GPU was still using the resource. On DX12 this caused
+  TDR (DEVICE_HUNG) after ~300-700 frames in gallery app. Root cause: missing
+  LifetimeTracker after wgpu core API migration (v0.21.0). Now all 9 resource types
+  defer destruction via `core.DestroyQueue` until GPU completes the associated
+  submission. (TASK-WGPU-CORE-LIFETIME-001)
+
+## [0.23.5] - 2026-04-04
 
 ### Fixed
 
@@ -56,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and crash with `VK_ERROR_OUT_OF_HOST_MEMORY`. Now calls `maintain()` before
   allocation, matching Rust wgpu-hal `Queue::submit`. No impact on timeline
   semaphore path (Vulkan 1.2+). (VK-SYNC-002)
+
+### Added
 
 - **Blend constant draw-time validation** — `Draw`, `DrawIndexed`, `DrawIndirect`,
   and `DrawIndexedIndirect` now validate that `SetBlendConstant()` has been called

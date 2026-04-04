@@ -19,22 +19,25 @@
 
 ---
 
-## Current State: v0.23.5
+## Current State: v0.23.6
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
 ✅ **Core validation layer** — 15/17 Rust wgpu-core checks
 ✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES
-✅ **DX12 TDR fixed** — 11410+ frames stable with maxFramesInFlight=2
+✅ **DX12 TDR fixed** — deferred resource destruction + DRED diagnostics
 ✅ **PendingWrites batching** — Rust wgpu-core pattern for WriteBuffer/WriteTexture
 ✅ **Enterprise fence architecture** — HAL owns fences, SubmissionIndex tracking
+✅ **Deferred resource destruction** — ResourceRef (Go Arc) + DestroyQueue (Rust LifetimeTracker)
+✅ **Per-command-buffer resource tracking** — Clone/Drop in encoders (Rust EncoderInFlight)
+✅ **DX12 HLSL shader cache** — in-memory SHA-256 keyed, LRU eviction
+✅ **DX12 DRED diagnostics** — auto-breadcrumbs + page fault tracking on TDR
 ✅ **Blend constant draw-time validation** — Rust wgpu-core OptionalState pattern
 ✅ **Vulkan fence pool recycling** — matches Rust wgpu-hal maintain() before submit
 
 ### Remaining validation (planned)
 - Late buffer binding size (SPIR-V reflection → min binding size)
-- Resource usage conflict detection — ~~read/write tracking across bind groups~~ DONE (BufferTracker)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -50,13 +53,9 @@
 
 ## Upcoming
 
-### Next: v0.24.0
+### Next: v0.25.0
 
-- [x] StagingBelt ring-buffer allocator (0 allocs steady-state, 15× faster)
-- [x] Remove DX12 debug prints → slog
-- [x] DX12 maxFramesInFlight=2 stability (encoder pool architecture)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
-- [ ] DX12 HLSL compilation caching (ShaderCache with LRU eviction)
 - [ ] GLES BindingMap refactor → per-type sequential counters (Rust parity)
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
 - [ ] Vulkan relay semaphores for multi-submission ordering (VK-SYNC-001)
@@ -124,6 +123,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.23.6** | 2026-04 | Deferred resource destruction, DX12 shader cache, DRED diagnostics |
 | **v0.23.5** | 2026-04 | GLES coordinate space, Vulkan fence recycling, blend constant validation |
 | **v0.23.4** | 2026-04 | GLES text fix, DX12 TDR (descriptor UAF), StagingBelt |
 | **v0.23.3** | 2026-04 | GLES blur fix, enterprise logging system |

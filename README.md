@@ -35,7 +35,7 @@
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler |
 | **Compute** | Full compute shader support, GPU→CPU readback |
-| **Debug** | Leak detection, error scopes, validation layers, structured logging (`log/slog`) |
+| **Debug** | Leak detection, error scopes, validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
 
 ---
@@ -145,7 +145,7 @@ Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU 
 ```
 wgpu/
 ├── *.go                # Public API (import "github.com/gogpu/wgpu")
-├── core/               # Validation, state tracking, resource management
+├── core/               # Validation, state tracking, deferred resource destruction
 ├── hal/                # Hardware Abstraction Layer
 │   ├── allbackends/    # Platform-specific backend auto-registration
 │   ├── noop/           # No-op backend (testing)
@@ -238,6 +238,8 @@ Windows GPU access via:
 - Flip model with VRR support
 - Descriptor heap management with fence-based deferred destruction
 - Encoder pool with allocator recycling (Rust wgpu-core pattern)
+- In-memory HLSL→DXBC shader cache (SHA-256 keyed, LRU eviction)
+- DRED diagnostics (auto-breadcrumbs + page fault tracking on TDR)
 - WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
 - StagingBelt ring-buffer allocator for zero-allocation GPU data transfer
 
