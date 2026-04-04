@@ -74,23 +74,17 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 
 	// Record inflight resources and clean up completed ones.
 	// dstTextures/dstBuffers prevent premature Release (BUG-DX12-006: use-after-free).
-	// deferredBindGroups/deferredTextureViews prevent descriptor heap use-after-free
-	// by deferring HAL destroy until GPU completes this submission (BUG-DX12-007).
 	if q.pending != nil {
 		q.pending.mu.Lock()
-		deferredBG, deferredTV := q.pending.drainDeferred()
-		hasInflightWork := pendingCmdBuf != nil ||
-			flushedDstTextures != nil || deferredBG != nil || deferredTV != nil
+		hasInflightWork := pendingCmdBuf != nil || flushedDstTextures != nil
 		if hasInflightWork {
 			q.pending.inflight = append(q.pending.inflight, inflightSubmission{
-				submissionIndex:      subIdx,
-				staging:              nil, // staging managed by belt
-				cmdBuf:               pendingCmdBuf,
-				encoder:              flushedEncoder,
-				dstTextures:          flushedDstTextures,
-				dstBuffers:           flushedDstBuffers,
-				deferredBindGroups:   deferredBG,
-				deferredTextureViews: deferredTV,
+				submissionIndex: subIdx,
+				staging:         nil, // staging managed by belt
+				cmdBuf:          pendingCmdBuf,
+				encoder:         flushedEncoder,
+				dstTextures:     flushedDstTextures,
+				dstBuffers:      flushedDstBuffers,
 			})
 		}
 		// Update the staging belt with the actual submission index

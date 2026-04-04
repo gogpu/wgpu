@@ -75,21 +75,34 @@ func (v *TextureView) HalTextureView() hal.TextureView {
 }
 
 // Release marks the texture view for destruction. The underlying HAL TextureView
-// (and its descriptor heap slots) is not freed immediately — it is deferred
-// until the GPU completes any submission that may reference it. This prevents
-// descriptor use-after-free on DX12 with maxFramesInFlight=2 (BUG-DX12-007).
+// (and its descriptor heap slots) is not freed immediately — it is deferred via
+// DestroyQueue until the GPU completes any submission that may reference it.
+// This prevents descriptor use-after-free on DX12 with maxFramesInFlight=2
+// (BUG-DX12-007).
 func (v *TextureView) Release() {
 	if v.released {
 		return
 	}
 	v.released = true
-	if v.device != nil && v.device.queue != nil && v.device.queue.pending != nil {
-		v.device.queue.pending.deferTextureViewDestroy(v.hal)
-	} else if v.device != nil {
-		// Fallback: queue not available (device shutting down) — destroy immediately.
-		halDevice := v.device.halDevice()
-		if halDevice != nil {
-			halDevice.DestroyTextureView(v.hal)
-		}
+
+	if v.device == nil {
+		return
 	}
+
+	halDevice := v.device.halDevice()
+	if halDevice == nil {
+		return
+	}
+
+	dq := v.device.destroyQueue()
+	if dq == nil {
+		halDevice.DestroyTextureView(v.hal)
+		return
+	}
+
+	subIdx := v.device.lastSubmissionIndex()
+	halTV := v.hal
+	dq.Defer(subIdx, "TextureView", func() {
+		halDevice.DestroyTextureView(halTV)
+	})
 }

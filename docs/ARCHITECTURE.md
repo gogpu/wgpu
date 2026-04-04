@@ -193,7 +193,7 @@ Steady-state:     0 allocs/op, 22ns — 15× faster than per-write staging
 
 **Direct-write backends** (GLES, Software): `usesBatching=false`, delegate directly to `hal.Queue.WriteBuffer()`/`WriteTexture()`. No staging, no command encoder, no belt.
 
-**Deferred destruction** (BUG-DX12-007): BindGroup/TextureView descriptor heap slots are accumulated via `deferBindGroupDestroy()`/`deferTextureViewDestroy()` and freed only after GPU completes the submission. Prevents descriptor use-after-free with `maxFramesInFlight=2`.
+**Deferred destruction** (BUG-DX12-007): BindGroup/TextureView descriptor heap slots are deferred via `core.DestroyQueue.Defer()` (same mechanism as all other resources) and freed only after GPU completes the submission. Prevents descriptor use-after-free with `maxFramesInFlight=2`.
 
 ## Resource Lifecycle
 

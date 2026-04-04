@@ -62,17 +62,6 @@ func (q *mockNonBatchingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []by
 	return q.Queue.WriteTexture(dst, data, layout, size)
 }
 
-// mockBindGroup implements hal.BindGroup for deferred destroy tests.
-type mockBindGroup struct{ destroyed bool }
-
-func (b *mockBindGroup) Destroy() { b.destroyed = true }
-
-// mockTextureView implements hal.TextureView for deferred destroy tests.
-type mockTextureView struct{ destroyed bool }
-
-func (v *mockTextureView) Destroy()              { v.destroyed = true }
-func (v *mockTextureView) NativeHandle() uintptr { return 0 }
-
 // --- Helpers ---
 
 // createBatchingPW creates a pendingWrites with a batching mock queue.
@@ -491,30 +480,6 @@ func TestPendingWrites_Maintain(t *testing.T) {
 	}
 }
 
-func TestPendingWrites_MaintainWithDeferredResources(t *testing.T) {
-	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
-
-	bg := &mockBindGroup{}
-	tv := &mockTextureView{}
-
-	pw.inflight = []inflightSubmission{
-		{
-			submissionIndex:      1,
-			deferredBindGroups:   []hal.BindGroup{bg},
-			deferredTextureViews: []hal.TextureView{tv},
-		},
-	}
-
-	pw.maintain(1)
-
-	if len(pw.inflight) != 0 {
-		t.Errorf("expected 0 inflight after maintain, got %d", len(pw.inflight))
-	}
-	// Deferred resources should have been cleaned up by DestroyBindGroup/DestroyTextureView
-	// (noop device is a no-op, but the path is exercised).
-}
-
 func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.destroy()
@@ -534,81 +499,6 @@ func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 
 	if len(pw.inflight) != 0 {
 		t.Errorf("expected 0 inflight, got %d", len(pw.inflight))
-	}
-}
-
-func TestPendingWrites_DeferBindGroupDestroy(t *testing.T) {
-	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
-
-	bg1 := &mockBindGroup{}
-	bg2 := &mockBindGroup{}
-
-	pw.deferBindGroupDestroy(bg1)
-	pw.deferBindGroupDestroy(bg2)
-
-	pw.mu.Lock()
-	count := len(pw.deferredBindGroups)
-	pw.mu.Unlock()
-
-	if count != 2 {
-		t.Errorf("expected 2 deferred bind groups, got %d", count)
-	}
-}
-
-func TestPendingWrites_DeferTextureViewDestroy(t *testing.T) {
-	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
-
-	tv1 := &mockTextureView{}
-	tv2 := &mockTextureView{}
-	tv3 := &mockTextureView{}
-
-	pw.deferTextureViewDestroy(tv1)
-	pw.deferTextureViewDestroy(tv2)
-	pw.deferTextureViewDestroy(tv3)
-
-	pw.mu.Lock()
-	count := len(pw.deferredTextureViews)
-	pw.mu.Unlock()
-
-	if count != 3 {
-		t.Errorf("expected 3 deferred texture views, got %d", count)
-	}
-}
-
-func TestPendingWrites_DrainDeferred(t *testing.T) {
-	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
-
-	bg := &mockBindGroup{}
-	tv := &mockTextureView{}
-
-	pw.deferBindGroupDestroy(bg)
-	pw.deferTextureViewDestroy(tv)
-
-	pw.mu.Lock()
-	drainedBG, drainedTV := pw.drainDeferred()
-	pw.mu.Unlock()
-
-	if len(drainedBG) != 1 {
-		t.Errorf("expected 1 drained bind group, got %d", len(drainedBG))
-	}
-	if len(drainedTV) != 1 {
-		t.Errorf("expected 1 drained texture view, got %d", len(drainedTV))
-	}
-
-	// After drain, internal lists should be empty.
-	pw.mu.Lock()
-	bgCount := len(pw.deferredBindGroups)
-	tvCount := len(pw.deferredTextureViews)
-	pw.mu.Unlock()
-
-	if bgCount != 0 {
-		t.Errorf("expected 0 deferred bind groups after drain, got %d", bgCount)
-	}
-	if tvCount != 0 {
-		t.Errorf("expected 0 deferred texture views after drain, got %d", tvCount)
 	}
 }
 
@@ -652,17 +542,11 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// Add deferred resources.
-	pw.deferBindGroupDestroy(&mockBindGroup{})
-	pw.deferTextureViewDestroy(&mockTextureView{})
-
 	// Add inflight submissions.
 	pw.mu.Lock()
 	pw.inflight = append(pw.inflight, inflightSubmission{
-		submissionIndex:      1,
-		staging:              []hal.Buffer{&noop.Resource{}},
-		deferredBindGroups:   []hal.BindGroup{&mockBindGroup{}},
-		deferredTextureViews: []hal.TextureView{&mockTextureView{}},
+		submissionIndex: 1,
+		staging:         []hal.Buffer{&noop.Resource{}},
 	})
 	pw.mu.Unlock()
 
@@ -677,12 +561,6 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 	}
 	if pw.inflight != nil {
 		t.Error("expected inflight=nil after destroy")
-	}
-	if pw.deferredBindGroups != nil {
-		t.Error("expected deferredBindGroups=nil after destroy")
-	}
-	if pw.deferredTextureViews != nil {
-		t.Error("expected deferredTextureViews=nil after destroy")
 	}
 	if pw.dstBuffers != nil {
 		t.Error("expected dstBuffers=nil after destroy")

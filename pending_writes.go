@@ -67,17 +67,6 @@ type pendingWrites struct {
 	// copy backends). false for GLES/Software (direct API writes).
 	// Set once at creation, never changes.
 	usesBatching bool
-
-	// deferredBindGroups accumulates HAL BindGroups whose public Release()
-	// was called but whose descriptor heap slots must not be freed until
-	// the GPU completes any submission that may reference them.
-	// Moved to inflightSubmission on the next Submit (BUG-DX12-007).
-	deferredBindGroups []hal.BindGroup
-
-	// deferredTextureViews accumulates HAL TextureViews whose public Release()
-	// was called but whose descriptor heap slots must not be freed until
-	// the GPU completes any submission that may reference them (BUG-DX12-007).
-	deferredTextureViews []hal.TextureView
 }
 
 // inflightSubmission tracks resources from a single submission that must
@@ -93,14 +82,6 @@ type inflightSubmission struct {
 	// executing commands that reference them. Root cause of DX12 TDR (BUG-DX12-006).
 	dstTextures []hal.Texture
 	dstBuffers  []hal.Buffer
-	// deferredBindGroups and deferredTextureViews hold HAL resources whose public
-	// Release() was called during this submission's lifetime, but whose descriptor
-	// heap slots must not be freed until the GPU completes the submission.
-	// This prevents descriptor use-after-free — the ROOT CAUSE of DX12 TDR with
-	// maxFramesInFlight=2 (BUG-DX12-007). Matches Rust wgpu's LifetimeTracker
-	// pattern where BindGroup/TextureView Drop only fires after triage_submissions.
-	deferredBindGroups   []hal.BindGroup
-	deferredTextureViews []hal.TextureView
 }
 
 // newPendingWrites creates a pendingWrites for the given HAL device and queue.
@@ -472,15 +453,6 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 		for _, tex := range sub.dstTextures {
 			tex.DecPendingRef()
 		}
-		// Destroy deferred BindGroups whose descriptor heap slots are now safe
-		// to free — GPU has completed this submission (BUG-DX12-007).
-		for _, bg := range sub.deferredBindGroups {
-			pw.halDevice.DestroyBindGroup(bg)
-		}
-		// Destroy deferred TextureViews (BUG-DX12-007).
-		for _, tv := range sub.deferredTextureViews {
-			pw.halDevice.DestroyTextureView(tv)
-		}
 		// Reset the encoder and return it to the pool.
 		if sub.encoder != nil && sub.cmdBuf != nil {
 			sub.encoder.ResetAll([]hal.CommandBuffer{sub.cmdBuf})
@@ -493,35 +465,6 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 	if cutoff > 0 {
 		pw.inflight = pw.inflight[cutoff:]
 	}
-}
-
-// deferBindGroupDestroy adds a HAL BindGroup to the deferred destruction list.
-// The BindGroup's descriptor heap slots will be freed only after the GPU completes
-// the submission that is active at the time of the next Queue.Submit call.
-// Must be called instead of halDevice.DestroyBindGroup for any BindGroup that
-// may have been referenced by GPU commands (BUG-DX12-007).
-func (pw *pendingWrites) deferBindGroupDestroy(bg hal.BindGroup) {
-	pw.mu.Lock()
-	pw.deferredBindGroups = append(pw.deferredBindGroups, bg)
-	pw.mu.Unlock()
-}
-
-// deferTextureViewDestroy adds a HAL TextureView to the deferred destruction list.
-// Same pattern as deferBindGroupDestroy (BUG-DX12-007).
-func (pw *pendingWrites) deferTextureViewDestroy(tv hal.TextureView) {
-	pw.mu.Lock()
-	pw.deferredTextureViews = append(pw.deferredTextureViews, tv)
-	pw.mu.Unlock()
-}
-
-// drainDeferred moves accumulated deferred resources out for inflight tracking.
-// Must be called with pw.mu held.
-func (pw *pendingWrites) drainDeferred() ([]hal.BindGroup, []hal.TextureView) {
-	bg := pw.deferredBindGroups
-	tv := pw.deferredTextureViews
-	pw.deferredBindGroups = nil
-	pw.deferredTextureViews = nil
-	return bg, tv
 }
 
 // HasPendingWork returns true if there are buffered writes waiting to be flushed.
@@ -553,17 +496,11 @@ func (pw *pendingWrites) destroy() {
 	}
 	pw.staging = nil
 
-	// Destroy inflight staging buffers, command buffers, encoders, and deferred resources.
+	// Destroy inflight staging buffers, command buffers, and encoders.
 	for i := range pw.inflight {
 		sub := &pw.inflight[i]
 		for _, buf := range sub.staging {
 			pw.halDevice.DestroyBuffer(buf)
-		}
-		for _, bg := range sub.deferredBindGroups {
-			pw.halDevice.DestroyBindGroup(bg)
-		}
-		for _, tv := range sub.deferredTextureViews {
-			pw.halDevice.DestroyTextureView(tv)
 		}
 		if sub.encoder != nil {
 			// Encoder owns the command buffer's resources. Destroy releases both.
@@ -573,16 +510,6 @@ func (pw *pendingWrites) destroy() {
 		}
 	}
 	pw.inflight = nil
-
-	// Destroy any deferred resources that were never submitted.
-	for _, bg := range pw.deferredBindGroups {
-		pw.halDevice.DestroyBindGroup(bg)
-	}
-	pw.deferredBindGroups = nil
-	for _, tv := range pw.deferredTextureViews {
-		pw.halDevice.DestroyTextureView(tv)
-	}
-	pw.deferredTextureViews = nil
 
 	// Destroy the staging belt (releases all chunk buffers).
 	if pw.belt != nil {
