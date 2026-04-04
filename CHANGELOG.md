@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.23.5] - 2026-04-04
 
+### Added
+
+#### DX12
+
+- **In-memory HLSL→DXBC shader cache** — Caches FXC compilation results keyed
+  by SHA-256(HLSL source) + entry point + stage + target profile. 30 pipelines
+  sharing 8 unique shaders → 8 FXC calls instead of 30. LRU eviction at 200
+  entries retaining last 100. Matches Rust wgpu ShaderCache pattern
+  (wgpu-hal/src/dx12/mod.rs:1136). Fixes DEVICE_HUNG on first frame for complex
+  UI (Gallery with 15-30 PSOs). (TASK-DX12-PSO-CACHE-001)
+
 ### Fixed
 
 #### GLES

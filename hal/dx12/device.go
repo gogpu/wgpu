@@ -88,6 +88,11 @@ type Device struct {
 	frameIndex     uint64
 	freeAllocators []*d3d12.ID3D12CommandAllocator
 	allocatorMu    sync.Mutex
+
+	// In-memory HLSL->DXBC shader cache (TASK-DX12-PSO-CACHE-001).
+	// Caches FXC compilation results keyed by HLSL source hash + entry point + stage + target.
+	// Matches Rust wgpu ShaderCache pattern (wgpu-hal/src/dx12/mod.rs:1136).
+	shaderCache ShaderCache
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -1693,13 +1698,12 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 		"entryPoints", len(irModule.EntryPoints),
 	)
 
-	// Step 5: Load d3dcompiler_47.dll
-	compiler, err := d3dcompile.Load()
-	if err != nil {
-		return fmt.Errorf("load d3dcompiler: %w", err)
-	}
+	// Step 5: Load d3dcompiler_47.dll (deferred until cache miss)
+	var compiler *d3dcompile.Lib
 
-	// Step 6: Compile each entry point separately
+	// Step 6: Compile each entry point separately, using shader cache.
+	// Cache key = SHA-256(HLSL source) + entry point + stage + target.
+	// This matches Rust wgpu's ShaderCache pattern (device.rs:390-428).
 	for i := range irModule.EntryPoints {
 		ep := &irModule.EntryPoints[i]
 		target := shaderStageToTarget(ep.Stage)
@@ -1712,12 +1716,29 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 			}
 		}
 
+		// Check shader cache before calling FXC.
+		cacheKey := NewShaderCacheKey(hlslSource, hlslName, ep.Stage, target)
+		if cached, ok := d.shaderCache.Get(cacheKey); ok {
+			module.entryPoints[ep.Name] = cached
+			continue
+		}
+
+		// Cache miss — load compiler if not yet loaded and compile via FXC.
+		if compiler == nil {
+			compiler, err = d3dcompile.Load()
+			if err != nil {
+				return fmt.Errorf("load d3dcompiler: %w", err)
+			}
+		}
+
 		bytecode, err := compiler.Compile(hlslSource, hlslName, target)
 		if err != nil {
 			return fmt.Errorf("D3DCompile entry point %q (hlsl: %q, target: %s): %w",
 				ep.Name, hlslName, target, err)
 		}
 
+		// Store in cache for future pipelines using the same shader.
+		d.shaderCache.Put(cacheKey, bytecode)
 		module.entryPoints[ep.Name] = bytecode
 	}
 
