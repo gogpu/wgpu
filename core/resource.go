@@ -89,6 +89,13 @@ type Device struct {
 	// This is nil for devices created via the ID-based API without HAL.
 	trackerIndices *TrackerIndexAllocators
 
+	// destroyQueue defers HAL resource destruction until the GPU completes
+	// the submission that was active when the resource was released.
+	// This prevents use-after-free on DX12/Vulkan when a resource is
+	// released while the GPU is still referencing it (BUG-DX12-TDR).
+	// Matches Rust wgpu-core's LifetimeTracker pattern.
+	destroyQueue *DestroyQueue
+
 	// === Common fields ===
 
 	// Label is a debug label for the device.
@@ -136,6 +143,7 @@ func NewDevice(
 		adapter:        adapter,
 		snatchLock:     NewSnatchLock(),
 		trackerIndices: NewTrackerIndexAllocators(),
+		destroyQueue:   NewDestroyQueue(),
 		Label:          label,
 		Features:       features,
 		Limits:         limits,
@@ -201,6 +209,13 @@ func (d *Device) Destroy() {
 
 	untrackResource(uintptr(unsafe.Pointer(d))) //nolint:gosec // debug tracking uses pointer as unique ID
 
+	// Flush all deferred resource destructions before destroying the device.
+	// At this point the GPU should be idle (caller should have called WaitIdle
+	// or equivalent), so all deferred destroys are safe to execute.
+	if d.destroyQueue != nil {
+		d.destroyQueue.FlushAll()
+	}
+
 	if d.snatchLock == nil || d.raw == nil {
 		return
 	}
@@ -241,6 +256,15 @@ func (d *Device) HasHAL() bool {
 // Returns nil if the device has no HAL integration.
 func (d *Device) TrackerIndices() *TrackerIndexAllocators {
 	return d.trackerIndices
+}
+
+// DestroyQueueRef returns the device's deferred destruction queue.
+// Resources scheduled via Defer() will be destroyed when Triage() confirms
+// their associated GPU submission has completed.
+//
+// Returns nil if the device has no HAL integration.
+func (d *Device) DestroyQueueRef() *DestroyQueue {
+	return d.destroyQueue
 }
 
 // ParentAdapter returns the parent adapter for this device.

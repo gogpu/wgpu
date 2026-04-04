@@ -80,7 +80,7 @@ func (h *Hub) UnregisterAdapter(id AdapterID) (Adapter, error) {
 // Device methods
 
 // RegisterDevice allocates a new ID and stores the device.
-func (h *Hub) RegisterDevice(device Device) DeviceID {
+func (h *Hub) RegisterDevice(device Device) DeviceID { //nolint:gocritic // legacy ID-based API uses value semantics
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.devices.Register(device)
