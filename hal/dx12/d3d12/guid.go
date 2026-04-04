@@ -316,6 +316,28 @@ var IID_ID3D12InfoQueue = GUID{
 	Data4: [8]byte{0xB9, 0x46, 0x30, 0xA7, 0xE4, 0xE6, 0x14, 0x58},
 }
 
+// DRED Interface GUIDs
+
+// IID_ID3D12DeviceRemovedExtendedDataSettings is the interface ID for
+// ID3D12DeviceRemovedExtendedDataSettings (DRED settings, before device creation).
+// {82BC481C-6B9B-4030-AEDB-7EE3D1DF1E63}
+var IID_ID3D12DeviceRemovedExtendedDataSettings = GUID{
+	Data1: 0x82BC481C,
+	Data2: 0x6B9B,
+	Data3: 0x4030,
+	Data4: [8]byte{0xAE, 0xDB, 0x7E, 0xE3, 0xD1, 0xDF, 0x1E, 0x63},
+}
+
+// IID_ID3D12DeviceRemovedExtendedData1 is the interface ID for
+// ID3D12DeviceRemovedExtendedData1 (query DRED data after device removal).
+// {8727A009-F2F4-424F-8B91-B9C9C472D8E6}
+var IID_ID3D12DeviceRemovedExtendedData1 = GUID{
+	Data1: 0x8727A009,
+	Data2: 0xF2F4,
+	Data3: 0x424F,
+	Data4: [8]byte{0x8B, 0x91, 0xB9, 0xC9, 0xC4, 0x72, 0xD8, 0xE6},
+}
+
 // ID3DBlob GUID
 
 // IID_ID3DBlob is the interface ID for ID3DBlob (ID3D10Blob).

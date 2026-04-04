@@ -117,6 +117,23 @@ func (lib *D3D12Lib) GetDebugInterface3() (*ID3D12Debug3, error) {
 	return debug, nil
 }
 
+// GetDREDSettings retrieves the DRED settings interface via D3D12GetDebugInterface.
+// DRED must be configured BEFORE device creation. Returns an error if DRED
+// is not available (older Windows versions or missing debug layer).
+func (lib *D3D12Lib) GetDREDSettings() (*ID3D12DeviceRemovedExtendedDataSettings, error) {
+	var settings *ID3D12DeviceRemovedExtendedDataSettings
+
+	ret, _, _ := lib.d3d12GetDebugInterface.Call(
+		uintptr(unsafe.Pointer(&IID_ID3D12DeviceRemovedExtendedDataSettings)),
+		uintptr(unsafe.Pointer(&settings)),
+	)
+
+	if ret != 0 {
+		return nil, HRESULTError(ret)
+	}
+	return settings, nil
+}
+
 // SerializeRootSignature serializes a root signature.
 func (lib *D3D12Lib) SerializeRootSignature(
 	desc *D3D12_ROOT_SIGNATURE_DESC,

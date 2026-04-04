@@ -54,6 +54,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 
 	// Check for immediate device removal after execution.
 	if reason := q.device.raw.GetDeviceRemovedReason(); reason != nil {
+		q.device.logDREDBreadcrumbs()
 		return 0, fmt.Errorf("dx12: device removed after ExecuteCommandLists: %w", reason)
 	}
 

@@ -403,6 +403,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 
 	// Check if device is already lost before attempting to create root signature.
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+		d.logDREDBreadcrumbs()
 		return nil, fmt.Errorf("dx12: device already removed before CreateRootSignature: %w", reason)
 	}
 
@@ -410,6 +411,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	rootSig, err := d.raw.CreateRootSignature(0, blob.GetBufferPointer(), blob.GetBufferSize())
 	if err != nil {
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
+			d.logDREDBreadcrumbs()
 			return nil, fmt.Errorf("dx12: failed to create root signature (device removed: %s): %w", reason.Error(), err)
 		}
 		return nil, fmt.Errorf("dx12: failed to create root signature: %w", err)

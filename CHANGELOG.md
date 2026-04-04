@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (wgpu-hal/src/dx12/mod.rs:1136). Fixes DEVICE_HUNG on first frame for complex
   UI (Gallery with 15-30 PSOs). (TASK-DX12-PSO-CACHE-001)
 
+- **DRED diagnostics (Device Removed Extended Data)** — When DX12 debug mode is
+  enabled (`InstanceFlagsDebug`), auto-breadcrumbs and page fault tracking are
+  activated. On TDR/device removal, logs which GPU command was executing
+  (breadcrumb context window around hang point) and which allocation was accessed
+  (use-after-free detection via recently freed allocations list). Provides
+  enterprise-level GPU crash diagnostics not available in Rust wgpu.
+  (TASK-DX12-DRED-001)
+
 ### Fixed
 
 #### GLES
@@ -48,8 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and crash with `VK_ERROR_OUT_OF_HOST_MEMORY`. Now calls `maintain()` before
   allocation, matching Rust wgpu-hal `Queue::submit`. No impact on timeline
   semaphore path (Vulkan 1.2+). (VK-SYNC-002)
-
-### Added
 
 - **Blend constant draw-time validation** — `Draw`, `DrawIndexed`, `DrawIndirect`,
   and `DrawIndexedIndirect` now validate that `SetBlendConstant()` has been called

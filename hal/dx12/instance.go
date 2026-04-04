@@ -137,6 +137,20 @@ func (i *Instance) enableDebugLayer() error {
 		debug1.Release()
 	}
 
+	// Enable DRED (Device Removed Extended Data) for TDR diagnostics.
+	// DRED must be configured BEFORE device creation. When a TDR occurs,
+	// DRED provides auto-breadcrumbs showing which GPU command was executing
+	// and page fault information showing which allocation was accessed.
+	dredSettings, err := i.d3d12Lib.GetDREDSettings()
+	if err == nil {
+		dredSettings.SetAutoBreadcrumbsEnablement(d3d12.D3D12DREDEnablementForcedOn)
+		dredSettings.SetPageFaultEnablement(d3d12.D3D12DREDEnablementForcedOn)
+		dredSettings.Release()
+		hal.Logger().Info("dx12: DRED enabled (auto breadcrumbs + page fault tracking)")
+	} else {
+		hal.Logger().Debug("dx12: DRED not available (requires Windows 10 1903+)", "err", err)
+	}
+
 	return nil
 }
 
