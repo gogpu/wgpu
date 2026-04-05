@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-04-06
+
+### Added
+
+#### DX12
+
+- **DXIL direct compilation path** — DX12 HAL can now compile shaders via naga
+  DXIL backend (`GOGPU_DX12_DXIL=1`), bypassing HLSL→FXC entirely. Generates
+  LLVM 3.7 bitcode with dx.op intrinsics wrapped in DXBC container with BYPASS
+  hash. SM 6.0+, zero external dependencies (no d3dcompiler_47.dll). First Pure
+  Go DXIL generator. Integrated with existing shader cache. HLSL→FXC remains
+  default. (TASK-WGPU-DXIL-001)
+
+### Changed
+
+- **naga v0.16.6 → v0.17.0** — DXIL backend (12,475 LOC, 190 tests). Direct LLVM
+  3.7 bitcode generation from naga IR. Vertex + fragment shaders, SM 6.0, BYPASS
+  hash. Dead code cleanup (flattenBinding removed).
+
 ## [0.23.9] - 2026-04-05
 
 ### Performance

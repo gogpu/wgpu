@@ -64,7 +64,7 @@ defer shaderModule.Release()
 
 The `naga` shader compiler translates WGSL to the backend's native format:
 - Vulkan: WGSL -> SPIR-V
-- DX12: WGSL -> HLSL -> DXBC
+- DX12: WGSL -> HLSL -> DXBC (default) or WGSL -> DXIL direct (`GOGPU_DX12_DXIL=1`)
 - Metal: WGSL -> MSL
 - GLES: WGSL -> GLSL
 

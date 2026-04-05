@@ -108,13 +108,16 @@ Pure Go Metal implementation via Objective-C runtime message sending.
 
 Pure Go DX12 implementation via COM interfaces.
 
-- `d3d12/` — D3D12 COM interfaces, GUID definitions, loader
+- `d3d12/` — D3D12 COM interfaces, GUID definitions, DRED diagnostics, loader
 - `dxgi/` — DXGI factory, adapter enumeration
-- `device.go` — Device, resource creation, descriptor heaps (SRV/sampler)
+- `device.go` — Device, resource creation, descriptor heaps (SRV/sampler), dual shader compilation (HLSL→FXC or DXIL direct)
 - `command.go` — Command encoder with resource barriers (buffer/texture state transitions)
 - `queue.go` — Command submission with fence-based GPU completion tracking
 - `resource.go` — Buffers (upload/default heaps), textures with deferred destruction
-- Deferred descriptor destruction: BindGroup/TextureView heap slots freed only after GPU completion (BUG-DX12-007)
+- `shader_cache.go` — In-memory SHA-256 keyed LRU cache (works for both HLSL and DXIL paths)
+- **Shader compilation:** dual path — HLSL→FXC (default, SM 5.1) or DXIL direct via naga (opt-in `GOGPU_DX12_DXIL=1`, SM 6.0+, zero external dependencies)
+- **DRED diagnostics:** auto-breadcrumbs + page fault tracking on TDR (debug mode)
+- Deferred descriptor destruction: heap slots freed after GPU completion (BUG-DX12-007)
 - Texture pending refs: prevents premature Release while GPU copies in-flight (BUG-DX12-006)
 - Buffer barriers: COPY_DEST → read-state transitions after PendingWrites (BUG-DX12-010)
 - Windows-only (`//go:build windows`)
@@ -247,7 +250,7 @@ All backends are implemented without CGO:
 ## Dependencies
 
 ```
-naga (shader compiler) — WGSL → SPIR-V / MSL / GLSL
+naga (shader compiler) — WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL
   ↑
 wgpu (this library)
   ↑
@@ -255,6 +258,6 @@ gogpu (app framework) / gg (2D graphics)
 ```
 
 External dependencies:
-- `github.com/gogpu/naga` v0.16.4 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL), Pure Go
+- `github.com/gogpu/naga` — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
 - `github.com/gogpu/gputypes` v0.4.0 — shared WebGPU type definitions
 - `github.com/go-webgpu/goffi` v0.5.0 — Pure Go FFI for Vulkan/Metal symbol loading

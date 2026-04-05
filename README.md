@@ -33,7 +33,7 @@
 | **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software |
 | **Platforms** | Windows, Linux, macOS, iOS |
 | **API** | WebGPU-compliant (W3C specification) |
-| **Shaders** | WGSL via gogpu/naga compiler |
+| **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |
 | **Debug** | Leak detection, error scopes, validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
@@ -238,9 +238,9 @@ Windows GPU access via:
 - Flip model with VRR support
 - Descriptor heap management with fence-based deferred destruction
 - Encoder pool with allocator recycling (Rust wgpu-core pattern)
-- In-memory HLSL→DXBC shader cache (SHA-256 keyed, LRU eviction)
+- In-memory shader cache (SHA-256 keyed, LRU eviction, works for both paths)
 - DRED diagnostics (auto-breadcrumbs + page fault tracking on TDR)
-- WGSL shader compilation (WGSL → HLSL via naga → DXBC via d3dcompiler_47.dll)
+- **Dual shader compilation:** HLSL→FXC (default, SM 5.1) or **DXIL direct** via naga (`GOGPU_DX12_DXIL=1`, SM 6.0+, zero external dependencies — first Pure Go DXIL generator)
 - StagingBelt ring-buffer allocator for zero-allocation GPU data transfer
 
 ### OpenGL ES Backend

@@ -6,7 +6,9 @@
 package dx12
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/dxil"
 	"github.com/gogpu/naga/hlsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -93,6 +96,11 @@ type Device struct {
 	// Caches FXC compilation results keyed by HLSL source hash + entry point + stage + target.
 	// Matches Rust wgpu ShaderCache pattern (wgpu-hal/src/dx12/mod.rs:1136).
 	shaderCache ShaderCache
+
+	// useDXIL enables direct DXIL compilation via naga dxil backend,
+	// bypassing the HLSL->FXC path. Opt-in via GOGPU_DX12_DXIL=1 env var.
+	// Requires SM 6.0+ and AgilitySDK 1.615+ for BYPASS hash support.
+	useDXIL bool
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -236,13 +244,24 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 		}
 	}
 
+	// Enable DXIL direct compilation if requested via environment variable.
+	// DXIL path uses naga dxil backend (SM 6.0, BYPASS hash) instead of HLSL->FXC.
+	dev.useDXIL = os.Getenv("GOGPU_DX12_DXIL") == "1"
+
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(dev, (*Device).Destroy)
 
-	hal.Logger().Info("dx12: device created",
-		"featureLevel", fmt.Sprintf("0x%x", featureLevel),
-		"debugLayer", instance.flags&gputypes.InstanceFlagsDebug != 0,
-	)
+	if dev.useDXIL {
+		hal.Logger().Info("dx12: device created (DXIL direct compilation via naga dxil backend)",
+			"featureLevel", fmt.Sprintf("0x%x", featureLevel),
+			"debugLayer", instance.flags&gputypes.InstanceFlagsDebug != 0,
+		)
+	} else {
+		hal.Logger().Info("dx12: device created (HLSL→FXC compilation)",
+			"featureLevel", fmt.Sprintf("0x%x", featureLevel),
+			"debugLayer", instance.flags&gputypes.InstanceFlagsDebug != 0,
+		)
+	}
 
 	return dev, nil
 }
@@ -1826,8 +1845,8 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	return module, nil
 }
 
-// compileWGSLModule compiles WGSL source to per-entry-point DXBC bytecode.
-// Pipeline: WGSL → naga parse → IR → HLSL → D3DCompile → DXBC
+// compileWGSLModule compiles WGSL source to per-entry-point bytecode.
+// Routes to either DXIL direct compilation or HLSL→FXC based on Device.useDXIL.
 // The naga options must come from the PipelineLayout, which contains the proper
 // BindingMap and SamplerBufferBindingMap matching the root signature layout.
 func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, module *ShaderModule) error {
@@ -1843,7 +1862,16 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 		return fmt.Errorf("WGSL lower: %w", err)
 	}
 
-	// Step 3: Generate HLSL using pipeline-specific naga options.
+	if d.useDXIL {
+		return d.compileWGSLModuleDXIL(wgslSource, irModule, module)
+	}
+	return d.compileWGSLModuleHLSL(irModule, nagaOpts, module)
+}
+
+// compileWGSLModuleHLSL compiles IR to per-entry-point DXBC via HLSL→FXC.
+// Pipeline: IR → HLSL → D3DCompile (d3dcompiler_47.dll) → DXBC
+func (d *Device) compileWGSLModuleHLSL(irModule *ir.Module, nagaOpts *hlsl.Options, module *ShaderModule) error {
+	// Generate HLSL using pipeline-specific naga options.
 	// The options contain BindingMap (register assignments matching root signature)
 	// and SamplerBufferBindingMap (sampler index buffer locations), ensuring the
 	// shader's register usage matches the root signature exactly.
@@ -1857,10 +1885,10 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 		"entryPoints", len(irModule.EntryPoints),
 	)
 
-	// Step 5: Load d3dcompiler_47.dll (deferred until cache miss)
+	// Load d3dcompiler_47.dll (deferred until cache miss)
 	var compiler *d3dcompile.Lib
 
-	// Step 6: Compile each entry point separately, using shader cache.
+	// Compile each entry point separately, using shader cache.
 	// Cache key = SHA-256(HLSL source) + entry point + stage + target.
 	// This matches Rust wgpu's ShaderCache pattern (device.rs:390-428).
 	for i := range irModule.EntryPoints {
@@ -1902,6 +1930,74 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 	}
 
 	return nil
+}
+
+// compileWGSLModuleDXIL compiles IR to per-entry-point DXIL bytecode directly.
+// Pipeline: IR → naga dxil.Compile → DXBC container (with DXIL bitcode + BYPASS hash)
+// Eliminates the HLSL→FXC dependency — no d3dcompiler_47.dll needed.
+func (d *Device) compileWGSLModuleDXIL(wgslSource string, irModule *ir.Module, module *ShaderModule) error {
+	hal.Logger().Debug("dx12: compiling DXIL direct",
+		"entryPoints", len(irModule.EntryPoints),
+	)
+
+	opts := dxil.DefaultOptions()
+
+	// Compile each entry point separately by creating a single-entry-point IR module.
+	// dxil.Compile always compiles EntryPoints[0], so we isolate each entry point
+	// into its own module copy. This matches the per-entry-point granularity of the
+	// HLSL→FXC path and the shader cache.
+	for i := range irModule.EntryPoints {
+		ep := &irModule.EntryPoints[i]
+
+		// Check shader cache before compiling.
+		// DXIL cache key: SHA-256(WGSL source + entry point name) + "dxil" target.
+		// Using WGSL source (not HLSL) because the DXIL path bypasses HLSL generation.
+		cacheKey := NewShaderCacheKey(
+			dxilCacheSource(wgslSource, ep.Name),
+			ep.Name, ep.Stage, "dxil",
+		)
+		if cached, ok := d.shaderCache.Get(cacheKey); ok {
+			module.entryPoints[ep.Name] = cached
+			continue
+		}
+
+		// Create a single-entry-point module for dxil.Compile.
+		// dxil.Compile always processes EntryPoints[0], so we need to isolate
+		// the target entry point. Shared module data (types, constants, globals)
+		// is referenced, not copied — only the EntryPoints slice differs.
+		singleEPModule := &ir.Module{
+			Types:             irModule.Types,
+			Constants:         irModule.Constants,
+			GlobalVariables:   irModule.GlobalVariables,
+			GlobalExpressions: irModule.GlobalExpressions,
+			Functions:         irModule.Functions,
+			EntryPoints:       []ir.EntryPoint{irModule.EntryPoints[i]},
+			Overrides:         irModule.Overrides,
+			SpecialTypes:      irModule.SpecialTypes,
+		}
+
+		dxilBytes, err := dxil.Compile(singleEPModule, opts)
+		if err != nil {
+			return fmt.Errorf("dx12: DXIL compile entry point %q: %w", ep.Name, err)
+		}
+
+		// Store in cache for future pipelines using the same shader.
+		d.shaderCache.Put(cacheKey, dxilBytes)
+		module.entryPoints[ep.Name] = dxilBytes
+	}
+
+	return nil
+}
+
+// dxilCacheSource creates a unique cache source string for DXIL compilation.
+// Combines WGSL source with entry point name to ensure different entry points
+// from the same WGSL source get distinct cache keys.
+func dxilCacheSource(wgslSource, entryPoint string) string {
+	// Use SHA-256 of combined source to keep the key compact while unique.
+	// NewShaderCacheKey will hash this again, but the intermediate string
+	// needs to be deterministic and unique per (source, entry) pair.
+	h := sha256.Sum256([]byte(wgslSource + "\x00" + entryPoint))
+	return string(h[:])
 }
 
 // shaderStageToTarget maps naga IR shader stage to D3DCompile target profile.

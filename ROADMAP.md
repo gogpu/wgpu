@@ -33,6 +33,7 @@
 ✅ **Per-command-buffer resource tracking** — Clone/Drop in encoders (Rust EncoderInFlight)
 ✅ **DX12 HLSL shader cache** — in-memory SHA-256 keyed, LRU eviction
 ✅ **DX12 DRED diagnostics** — auto-breadcrumbs + page fault tracking on TDR
+✅ **DX12 DXIL direct compilation** — naga DXIL backend, SM 6.0+, zero external dependencies, first Pure Go DXIL
 ✅ **Blend constant draw-time validation** — Rust wgpu-core OptionalState pattern
 ✅ **Vulkan fence pool recycling** — matches Rust wgpu-hal maintain() before submit
 
