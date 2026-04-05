@@ -396,8 +396,8 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 		pw.encoder.DiscardEncoding()
 		pw.isRecording = false
 		pw.encoder = nil
-		pw.dstBuffers = make(map[hal.Buffer]gputypes.BufferUsage)
-		pw.dstTextures = make(map[hal.Texture]struct{})
+		clear(pw.dstBuffers)
+		clear(pw.dstTextures)
 		return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: end encoding: %w", err)
 	}
 
@@ -422,8 +422,12 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	}
 	pw.isRecording = false
 	pw.encoder = nil
-	pw.dstBuffers = make(map[hal.Buffer]gputypes.BufferUsage)
-	pw.dstTextures = make(map[hal.Texture]struct{})
+
+	// PERF-PW-001: reuse map buckets instead of allocating new maps each flush.
+	// clear() zeros values and deletes all keys but keeps allocated hash table
+	// buckets, so subsequent inserts in the next batch don't trigger growth allocations.
+	clear(pw.dstBuffers)
+	clear(pw.dstTextures)
 
 	return cmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, nil
 }

@@ -8,6 +8,15 @@ import (
 	"github.com/gogpu/wgpu/hal/noop"
 )
 
+// benchBatchingQueue is a zero-allocation mock for benchmarks.
+// Unlike mockBatchingQueue (which copies data for test assertions),
+// this just delegates to noop.Queue without tracking — pure overhead measurement.
+type benchBatchingQueue struct {
+	noop.Queue
+}
+
+func (q *benchBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+
 // BenchmarkPendingWrites_WriteBufferNonBatching measures the hot path for
 // GLES/Software backends where WriteBuffer delegates directly to HAL.
 func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
@@ -30,9 +39,12 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 // DX12/Vulkan/Metal backends with StagingBelt (ring-buffer chunks).
 // Simulates the real frame loop: write → flush → submit → maintain(recall).
 // After warmup, steady-state should show 0 allocs (chunks recycled).
+//
+// Uses benchBatchingQueue (not mockBatchingQueue) to avoid mock overhead
+// from data copying that would pollute alloc measurements.
 func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	dev := &noop.Device{}
-	q := &mockBatchingQueue{Queue: noop.Queue{}}
+	q := &benchBatchingQueue{Queue: noop.Queue{}}
 	pw := newPendingWrites(dev, q)
 	defer pw.destroy()
 
