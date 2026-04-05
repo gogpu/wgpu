@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Now uses two-pass selection: prefer matching, fall back to any GPU. Matches Rust
   wgpu sort-not-filter approach. (BUG-WGPU-ADAPTER-002)
 
+- **Device inherits adapter limits instead of WebGPU defaults** — `RequestDevice()`
+  with empty `RequiredLimits` returned WebGPU spec minimums (e.g., 8 storage buffers)
+  instead of the adapter's actual capabilities (e.g., 200 on Intel Iris Xe). Blocked
+  gg Vello coarse shader (9 storage buffer bindings). Device now inherits adapter
+  limits when no explicit limits requested. (BUG-WGPU-LIMITS-002)
+
 ## [0.23.7] - 2026-04-04
 
 ### Changed

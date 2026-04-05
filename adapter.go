@@ -60,12 +60,14 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	}
 
 	// If no limits specified (nil descriptor or zero-value RequiredLimits),
-	// use WebGPU spec defaults. This matches Rust wgpu behavior where
-	// DeviceDescriptor::default() uses Limits::defaults() with non-zero values.
-	// Without this, a zero Limits struct causes validation to reject all
-	// bind group layouts (e.g., "binding count 3 exceeds maximum 0").
+	// use the adapter's actual hardware limits. This matches the WebGPU spec:
+	// "Each limit in the returned device will be no worse than the corresponding
+	// limit in adapter.limits." When user doesn't specify limits, device gets
+	// full hardware capabilities (e.g., Intel Iris Xe reports 200 storage buffers,
+	// not the WebGPU minimum of 8).
+	// Matches Rust wgpu which returns adapter limits by default.
 	if limits == (gputypes.Limits{}) {
-		limits = gputypes.DefaultLimits()
+		limits = a.limits
 	}
 
 	openDevice, err := a.core.HALAdapter().Open(features, limits)
