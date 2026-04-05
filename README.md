@@ -149,11 +149,11 @@ wgpu/
 ├── hal/                # Hardware Abstraction Layer
 │   ├── allbackends/    # Platform-specific backend auto-registration
 │   ├── noop/           # No-op backend (testing)
-│   ├── software/       # CPU software rasterizer (~11K LOC)
-│   ├── gles/           # OpenGL ES 3.0+ (~10K LOC)
-│   ├── vulkan/         # Vulkan 1.3 (~38K LOC)
-│   ├── metal/          # Metal (~5K LOC)
-│   └── dx12/           # DirectX 12 (~14K LOC)
+│   ├── software/       # CPU software rasterizer (~14K LOC)
+│   ├── gles/           # OpenGL ES 3.0+ (~12K LOC)
+│   ├── vulkan/         # Vulkan 1.3 (~42K LOC)
+│   ├── metal/          # Metal (~7K LOC)
+│   └── dx12/           # DirectX 12 (~17K LOC)
 ├── examples/
 │   ├── compute-copy/   # GPU buffer copy with compute shader
 │   └── compute-sum/    # Parallel reduction on GPU

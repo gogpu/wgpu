@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bytes (Rust wgpu `MAP_ALIGNMENT` parity). Alignment now configurable per-belt.
   WebGPU `COPY_BUFFER_ALIGNMENT` is 4. (TASK-WGPU-BELT-002)
 
+#### Core
+
+- **Default limits when RequiredLimits is zero struct** — `RequestDevice()` with a
+  descriptor containing zero-value `RequiredLimits` caused all device limits to be 0,
+  rejecting all bind group layouts ("binding count N exceeds maximum 0"). Now detects
+  zero struct and falls back to WebGPU spec defaults. Matches Rust wgpu
+  `DeviceDescriptor::default()` behavior. (BUG-WGPU-LIMITS-001)
+
+- **PowerPreference fallback per WebGPU spec** — `RequestAdapter()` with
+  `PowerPreference: HighPerformance` on systems with only integrated GPU returned
+  error instead of falling back. WebGPU spec: powerPreference is a hint, "must not
+  cause requestAdapter() to fail if there is at least one available adapter."
+  Now uses two-pass selection: prefer matching, fall back to any GPU. Matches Rust
+  wgpu sort-not-filter approach. (BUG-WGPU-ADAPTER-002)
+
 ## [0.23.7] - 2026-04-04
 
 ### Changed

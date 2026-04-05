@@ -56,7 +56,7 @@
 ### Next: v0.25.0
 
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
-- [ ] GLES BindingMap refactor → per-type sequential counters (Rust parity)
+- [x] GLES BindingMap refactor → per-type sequential counters (v0.23.8)
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
 - [ ] Vulkan relay semaphores for multi-submission ordering (VK-SYNC-001)
 

@@ -255,6 +255,6 @@ gogpu (app framework) / gg (2D graphics)
 ```
 
 External dependencies:
-- `github.com/gogpu/naga` v0.16.1 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL), Pure Go
+- `github.com/gogpu/naga` v0.16.4 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL), Pure Go
 - `github.com/gogpu/gputypes` v0.4.0 — shared WebGPU type definitions
-- `github.com/nicholasgasior/goffi` v0.3.9 — FFI for Vulkan/Metal symbol loading
+- `github.com/go-webgpu/goffi` v0.5.0 — Pure Go FFI for Vulkan/Metal symbol loading
