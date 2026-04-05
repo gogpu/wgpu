@@ -3,6 +3,7 @@ package memory
 import (
 	"errors"
 	"math/bits"
+	"sync"
 )
 
 // BuddyAllocator implements the buddy memory allocation algorithm.
@@ -14,7 +15,13 @@ import (
 //
 // Time complexity: O(log n) for both allocation and deallocation.
 // Space overhead: O(n) bits for tracking block states.
+//
+// Thread-safe: all public methods are protected by a mutex.
+// PERF-BUDDY-001: replaced maps with slices for O(1) push/pop free list
+// operations and added mutex for concurrent safety.
 type BuddyAllocator struct {
+	mu sync.Mutex
+
 	// totalSize is the total managed memory size (must be power of 2).
 	totalSize uint64
 
@@ -26,16 +33,19 @@ type BuddyAllocator struct {
 	// Order 0 = minBlockSize, order maxOrder = totalSize.
 	maxOrder int
 
-	// freeLists contains free blocks for each order.
-	// freeLists[i] contains blocks of size minBlockSize << i.
-	freeLists []map[uint64]struct{}
+	// freeLists contains free blocks for each order as sorted slices.
+	// freeLists[i] contains offsets of free blocks of size minBlockSize << i.
+	// Push/pop from end = O(1) amortized vs map iteration O(n) + hash overhead.
+	freeLists [][]uint64
 
-	// splitBlocks tracks which blocks have been split.
-	// Key: (order << 48) | offset
-	splitBlocks map[uint64]struct{}
+	// splitBlocks is a bitset tracking which blocks have been split.
+	// Indexed by (order * maxBlocksPerOrder + blockIndex).
+	// Replaces map[uint64]struct{} — O(1) lookup with zero allocation.
+	splitBlocks []uint64 // bitset, 64 bits per element
 
 	// allocatedBlocks tracks allocated blocks for validation.
-	// Key: offset, Value: order
+	// Key: offset, Value: order. Kept as a map because alloc/free
+	// validation needs arbitrary offset lookup (not ordered iteration).
 	allocatedBlocks map[uint64]int
 
 	// stats tracks allocation statistics.
@@ -96,25 +106,28 @@ func NewBuddyAllocator(totalSize, minBlockSize uint64) (*BuddyAllocator, error) 
 
 	maxOrder := log2(totalSize / minBlockSize)
 
+	// Calculate total bits needed for the splitBlocks bitset.
+	// Each order i has totalSize / (minBlockSize << i) possible blocks.
+	// We index as order * maxBlocksAtOrder0 + blockIndex.
+	// maxBlocksAtOrder0 = totalSize / minBlockSize.
+	maxBlocksAtOrder0 := totalSize / minBlockSize
+	totalBits := uint64(maxOrder+1) * maxBlocksAtOrder0
+	bitsetSize := (totalBits + 63) / 64
+
 	b := &BuddyAllocator{
 		totalSize:       totalSize,
 		minBlockSize:    minBlockSize,
 		maxOrder:        maxOrder,
-		freeLists:       make([]map[uint64]struct{}, maxOrder+1),
-		splitBlocks:     make(map[uint64]struct{}),
-		allocatedBlocks: make(map[uint64]int),
+		freeLists:       make([][]uint64, maxOrder+1),
+		splitBlocks:     make([]uint64, bitsetSize),
+		allocatedBlocks: make(map[uint64]int, 64),
 		stats: BuddyStats{
 			TotalSize: totalSize,
 		},
 	}
 
-	// Initialize free lists
-	for i := range b.freeLists {
-		b.freeLists[i] = make(map[uint64]struct{})
-	}
-
 	// Initially, the entire region is one free block at max order
-	b.freeLists[maxOrder][0] = struct{}{}
+	b.freeLists[maxOrder] = append(b.freeLists[maxOrder], 0)
 
 	return b, nil
 }
@@ -124,7 +137,12 @@ func NewBuddyAllocator(totalSize, minBlockSize uint64) (*BuddyAllocator, error) 
 // The returned block size will be rounded up to the next power of 2,
 // and at least minBlockSize. Returns ErrOutOfMemory if no suitable
 // block is available, ErrInvalidSize if size is 0 or exceeds totalSize.
+//
+// Thread-safe.
 func (b *BuddyAllocator) Alloc(size uint64) (BuddyBlock, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	if size == 0 || size > b.totalSize {
 		return BuddyBlock{}, ErrInvalidSize
 	}
@@ -165,7 +183,12 @@ func (b *BuddyAllocator) Alloc(size uint64) (BuddyBlock, error) {
 // Free releases a previously allocated block.
 //
 // Returns ErrDoubleFree if the block was not allocated or already freed.
+//
+// Thread-safe.
 func (b *BuddyAllocator) Free(block BuddyBlock) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	// Validate the block was allocated
 	order, ok := b.allocatedBlocks[block.Offset]
 	if !ok {
@@ -189,38 +212,67 @@ func (b *BuddyAllocator) Free(block BuddyBlock) error {
 }
 
 // Stats returns current allocator statistics.
+// Thread-safe.
 func (b *BuddyAllocator) Stats() BuddyStats {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.stats
 }
 
 // Reset releases all allocations and resets the allocator to initial state.
+// Thread-safe.
 func (b *BuddyAllocator) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	// Clear all free lists
 	for i := range b.freeLists {
-		b.freeLists[i] = make(map[uint64]struct{})
+		b.freeLists[i] = b.freeLists[i][:0]
 	}
 
-	// Clear tracking maps
-	b.splitBlocks = make(map[uint64]struct{})
-	b.allocatedBlocks = make(map[uint64]int)
+	// Clear splitBlocks bitset
+	for i := range b.splitBlocks {
+		b.splitBlocks[i] = 0
+	}
+
+	// Clear allocated blocks map
+	b.allocatedBlocks = make(map[uint64]int, 64)
 
 	// Reset to single max-order block
-	b.freeLists[b.maxOrder][0] = struct{}{}
+	b.freeLists[b.maxOrder] = append(b.freeLists[b.maxOrder], 0)
 
 	// Reset stats (keep totals for historical tracking)
 	b.stats.AllocatedSize = 0
 	b.stats.AllocationCount = 0
 }
 
+// splitBitIndex returns the bitset index for a split block at the given order and offset.
+// The index is: order * maxBlocksAtOrder0 + (offset / minBlockSize).
+func (b *BuddyAllocator) splitBitIndex(order int, offset uint64) uint64 {
+	maxBlocksAtOrder0 := b.totalSize / b.minBlockSize
+	blockIndex := offset / b.minBlockSize
+	return uint64(order)*maxBlocksAtOrder0 + blockIndex
+}
+
+// setSplit marks a block as split in the bitset.
+func (b *BuddyAllocator) setSplit(order int, offset uint64) {
+	idx := b.splitBitIndex(order, offset)
+	b.splitBlocks[idx/64] |= 1 << (idx % 64)
+}
+
+// clearSplit unmarks a block as split in the bitset.
+func (b *BuddyAllocator) clearSplit(order int, offset uint64) {
+	idx := b.splitBitIndex(order, offset)
+	b.splitBlocks[idx/64] &^= 1 << (idx % 64)
+}
+
 // findAndSplit finds a free block of the target order, splitting larger blocks if needed.
 func (b *BuddyAllocator) findAndSplit(targetOrder int) (uint64, bool) {
-	// First, try to find a free block at the exact order
-	if len(b.freeLists[targetOrder]) > 0 {
-		// Get any free block (map iteration is random, that's fine)
-		for offset := range b.freeLists[targetOrder] {
-			delete(b.freeLists[targetOrder], offset)
-			return offset, true
-		}
+	// First, try to find a free block at the exact order (pop from end = O(1))
+	if n := len(b.freeLists[targetOrder]); n > 0 {
+		offset := b.freeLists[targetOrder][n-1]
+		b.freeLists[targetOrder] = b.freeLists[targetOrder][:n-1]
+		return offset, true
 	}
 
 	// No free block at target order, find a larger block to split
@@ -236,13 +288,10 @@ func (b *BuddyAllocator) findAndSplit(targetOrder int) (uint64, bool) {
 		return 0, false // No suitable block found
 	}
 
-	// Get the block to split
-	var offset uint64
-	for o := range b.freeLists[splitOrder] {
-		offset = o
-		delete(b.freeLists[splitOrder], o)
-		break
-	}
+	// Pop the block to split (from end = O(1))
+	n := len(b.freeLists[splitOrder])
+	offset := b.freeLists[splitOrder][n-1]
+	b.freeLists[splitOrder] = b.freeLists[splitOrder][:n-1]
 
 	// Split down to target order
 	for order := splitOrder; order > targetOrder; order-- {
@@ -250,13 +299,12 @@ func (b *BuddyAllocator) findAndSplit(targetOrder int) (uint64, bool) {
 		halfSize := blockSize >> 1
 
 		// Mark this block as split
-		splitKey := (uint64(order) << 48) | offset
-		b.splitBlocks[splitKey] = struct{}{}
+		b.setSplit(order, offset)
 		b.stats.SplitCount++
 
 		// The right buddy goes to free list
 		buddyOffset := offset + halfSize
-		b.freeLists[order-1][buddyOffset] = struct{}{}
+		b.freeLists[order-1] = append(b.freeLists[order-1], buddyOffset)
 
 		// Continue with the left half
 	}
@@ -270,8 +318,6 @@ func (b *BuddyAllocator) freeAndMerge(offset uint64, order int) {
 		blockSize := b.minBlockSize << order
 
 		// Calculate buddy offset
-		// If offset is aligned to 2*blockSize, buddy is to the right
-		// Otherwise, buddy is to the left
 		var buddyOffset uint64
 		if (offset & blockSize) == 0 {
 			buddyOffset = offset + blockSize
@@ -279,28 +325,41 @@ func (b *BuddyAllocator) freeAndMerge(offset uint64, order int) {
 			buddyOffset = offset - blockSize
 		}
 
-		// Check if buddy is free (and not at max order where there's no buddy)
+		// At max order there's no buddy to merge with
 		if order == b.maxOrder {
-			b.freeLists[order][offset] = struct{}{}
+			b.freeLists[order] = append(b.freeLists[order], offset)
 			return
 		}
 
-		_, buddyFree := b.freeLists[order][buddyOffset]
-		if !buddyFree {
+		// Check if buddy is free by scanning the free list.
+		// Free lists are typically small (< 100 entries), so linear scan
+		// is faster than map lookup due to cache locality and no hash overhead.
+		buddyIdx := -1
+		freeList := b.freeLists[order]
+		for i, off := range freeList {
+			if off == buddyOffset {
+				buddyIdx = i
+				break
+			}
+		}
+
+		if buddyIdx == -1 {
 			// Buddy is not free, just add this block to free list
-			b.freeLists[order][offset] = struct{}{}
+			b.freeLists[order] = append(b.freeLists[order], offset)
 			return
 		}
 
-		// Buddy is free! Merge them.
-		delete(b.freeLists[order], buddyOffset)
+		// Buddy is free! Remove it and merge.
+		// Swap-remove: O(1) removal from unordered slice.
+		lastIdx := len(freeList) - 1
+		freeList[buddyIdx] = freeList[lastIdx]
+		b.freeLists[order] = freeList[:lastIdx]
 		b.stats.MergeCount++
 
 		// Remove split marker from parent
 		parentOffset := offset & ^blockSize // Align to 2*blockSize
 		parentOrder := order + 1
-		splitKey := (uint64(parentOrder) << 48) | parentOffset
-		delete(b.splitBlocks, splitKey)
+		b.clearSplit(parentOrder, parentOffset)
 
 		// Continue merging at the next level
 		offset = parentOffset

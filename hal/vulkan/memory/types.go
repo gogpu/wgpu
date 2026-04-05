@@ -65,7 +65,9 @@ type MemoryBlock struct {
 	dedicated bool
 
 	// buddyBlock holds buddy allocator metadata for pooled allocations.
-	buddyBlock *BuddyBlock
+	// Embedded by value (PERF-VK-001) to avoid a separate heap allocation
+	// per pooled memory block. Valid only when dedicated == false.
+	buddyBlock BuddyBlock
 
 	// MappedPtr holds the mapped pointer if memory is mapped.
 	// Set by Map(), cleared by Unmap().

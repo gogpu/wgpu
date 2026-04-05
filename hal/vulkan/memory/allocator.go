@@ -225,7 +225,7 @@ func (a *GpuAllocator) allocPooled(size uint64, memTypeIndex uint32) (*MemoryBlo
 				Size:            buddyBlock.Size,
 				memoryTypeIndex: memTypeIndex,
 				dedicated:       false,
-				buddyBlock:      &buddyBlock,
+				buddyBlock:      buddyBlock,
 			}
 
 			pool.stats.UsedSize += buddyBlock.Size
@@ -279,7 +279,7 @@ func (a *GpuAllocator) allocPooled(size uint64, memTypeIndex uint32) (*MemoryBlo
 		Size:            buddyBlock.Size,
 		memoryTypeIndex: memTypeIndex,
 		dedicated:       false,
-		buddyBlock:      &buddyBlock,
+		buddyBlock:      buddyBlock,
 	}
 
 	pool.stats.UsedSize += buddyBlock.Size
@@ -326,10 +326,6 @@ func (a *GpuAllocator) freeDedicated(block *MemoryBlock) error {
 
 // freePooled releases a pooled allocation.
 func (a *GpuAllocator) freePooled(block *MemoryBlock) error {
-	if block.buddyBlock == nil {
-		return ErrInvalidBlock
-	}
-
 	pool := a.pools[block.memoryTypeIndex]
 
 	// Find the pool block containing this allocation
@@ -338,7 +334,7 @@ func (a *GpuAllocator) freePooled(block *MemoryBlock) error {
 			continue
 		}
 
-		if err := poolBlock.buddy.Free(*block.buddyBlock); err != nil {
+		if err := poolBlock.buddy.Free(block.buddyBlock); err != nil {
 			return err
 		}
 
