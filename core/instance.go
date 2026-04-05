@@ -274,10 +274,16 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
 	}
 
-	// Prefer GPU adapters over Software. Track CPU as fallback.
+	// Two-pass adapter selection matching WebGPU spec:
+	// powerPreference is a HINT, not a filter. "must not cause requestAdapter()
+	// to fail if there is at least one available adapter." (W3C WebGPU spec)
+	// Matches Rust wgpu which sorts by preference, never filters.
 	var cpuFallback AdapterID
 	hasCPUFallback := false
+	var gpuFallback AdapterID
+	hasGPUFallback := false
 
+	// Pass 1: find preferred adapter + track fallbacks.
 	for _, adapterID := range i.adapters {
 		adapter, err := hub.GetAdapter(adapterID)
 		if err != nil {
@@ -292,16 +298,29 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 			continue
 		}
 
-		// Check power preference
-		if options.PowerPreference != gputypes.PowerPreferenceNone {
-			if !matchesPowerPreference(adapter.Info.DeviceType, options.PowerPreference) {
-				continue
-			}
+		// Track first non-CPU adapter as GPU fallback
+		if !hasGPUFallback {
+			gpuFallback = adapterID
+			hasGPUFallback = true
 		}
 
-		return adapterID, nil
+		// Check power preference — return immediately on exact match
+		if options.PowerPreference != gputypes.PowerPreferenceNone {
+			if matchesPowerPreference(adapter.Info.DeviceType, options.PowerPreference) {
+				return adapterID, nil
+			}
+		} else {
+			return adapterID, nil
+		}
 	}
 
+	// Pass 2: no exact preference match — return any GPU (fallback).
+	// E.g., HighPerformance requested but only IntegratedGPU available.
+	if hasGPUFallback {
+		return gpuFallback, nil
+	}
+
+	// Pass 3: CPU fallback (software rasterizer).
 	if hasCPUFallback {
 		return cpuFallback, nil
 	}

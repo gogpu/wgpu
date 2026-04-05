@@ -156,7 +156,7 @@ func TestRequestAdapter(t *testing.T) {
 			options: &gputypes.RequestAdapterOptions{
 				PowerPreference: gputypes.PowerPreferenceLowPower,
 			},
-			wantErr: true, // Mock adapter is discrete GPU, not integrated
+			wantErr: false, // WebGPU spec: powerPreference is a hint, falls back to discrete GPU
 		},
 		{
 			name: "force fallback adapter",
