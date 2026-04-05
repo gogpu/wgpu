@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.8] - 2026-04-05
+
+### Fixed
+
+#### Metal
+
+- **Descending vertex buffer indices** — Metal vertex, uniform and storage buffers
+  share the same index range. Vertex buffers now use descending indices from the
+  end of the range (`maxVertexBuffers - 1 - slot`) to avoid collisions with
+  uniform/storage buffers assigned from the start. Matches Rust wgpu-hal pattern.
+  Contributed by @jdbann. (gogpu/gogpu#165)
+
+#### GLES
+
+- **Per-type sequential binding counters** — Replaced hardcoded `group*16+binding`
+  formula with per-type sequential counters (samplers, textures, images, uniform
+  buffers, storage buffers) computed at PipelineLayout creation. Fixes binding
+  collision when >16 bindings per group. Removed all `maxBindingsPerGroup=16`
+  constants. Matches Rust wgpu-hal `device.rs:1154-1221`. (GLES-001)
+
+- **StagingBelt configurable alignment** — Default alignment changed from 16 to 8
+  bytes (Rust wgpu `MAP_ALIGNMENT` parity). Alignment now configurable per-belt.
+  WebGPU `COPY_BUFFER_ALIGNMENT` is 4. (TASK-WGPU-BELT-002)
+
 ## [0.23.7] - 2026-04-04
 
 ### Changed
