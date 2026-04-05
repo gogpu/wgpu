@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Registry capped growth** — Changed from unbounded 2× doubling to capped 1.5×
   with max 1024 extra slots. Peak allocation: 324KB→193KB. (PERF-REG-001)
 
+### Changed
+
+- **naga v0.16.4 → v0.16.6** — 4.9× fewer allocs for SPIR-V backend, TypeRegistry
+  zero-alloc lookups, lexer/parser pre-sizing. Overall: 594→562 allocs/op.
+
 ## [0.23.8] - 2026-04-05
 
 ### Fixed
