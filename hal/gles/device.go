@@ -280,6 +280,10 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (hal.BindGroup, erro
 func (d *Device) DestroyBindGroup(group hal.BindGroup) {}
 
 // CreatePipelineLayout creates a pipeline layout.
+// Computes per-type sequential binding indices following the Rust wgpu-hal pattern
+// (wgpu-hal/src/gles/device.rs:1154-1221). Five resource type counters (samplers,
+// textures, images, uniform buffers, storage buffers) are incremented sequentially
+// across all bind group layouts, producing a flat GL slot index per binding.
 func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
 	layouts := make([]*BindGroupLayout, len(desc.BindGroupLayouts))
 	for i, l := range desc.BindGroupLayouts {
@@ -290,8 +294,12 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (hal.Pipel
 		layouts[i] = layout
 	}
 
+	bindingMap, groupInfos := computeBindingMap(layouts)
+
 	return &PipelineLayout{
 		bindGroupLayouts: layouts,
+		groupInfos:       groupInfos,
+		bindingMap:       bindingMap,
 	}, nil
 }
 
@@ -341,7 +349,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint)
+	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -366,7 +374,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, fragmentTranslationInfo, err = d.compileFragmentShader(desc.Fragment)
+		fragmentID, fragmentTranslationInfo, err = d.compileFragmentShader(desc.Fragment, layout.bindingMap)
 		if err != nil {
 			d.glCtx.DeleteShader(vertexID)
 			return nil, err
@@ -429,19 +437,21 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		vertexBuffers:     desc.Vertex.Buffers,
 	}
 
-	// Build SamplerBindMap from TextureMappings.
-	// For each combined sampler2D, map texture's glBinding to sampler's glBinding.
-	const maxBindingsPerGroup = 16
+	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.
+	// For each combined sampler2D, map texture's GL slot to sampler's GL slot.
 	for i := range pipeline.samplerBindMap {
 		pipeline.samplerBindMap[i] = -1 // no sampler
 	}
 	for _, tm := range fragmentTranslationInfo.TextureMappings {
-		if tm.SamplerBinding != nil {
-			texUnit := tm.TextureBinding.Group*maxBindingsPerGroup + tm.TextureBinding.Binding
-			samplerUnit := tm.SamplerBinding.Group*maxBindingsPerGroup + tm.SamplerBinding.Binding
-			if texUnit < maxTextureSlots {
-				pipeline.samplerBindMap[texUnit] = int8(samplerUnit)
-			}
+		if tm.SamplerBinding == nil {
+			continue
+		}
+		texKey := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+		samplerKey := glsl.BindingMapKey{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
+		texUnit, texOk := layout.bindingMap[texKey]
+		samplerUnit, samplerOk := layout.bindingMap[samplerKey]
+		if texOk && samplerOk && texUnit < maxTextureSlots {
+			pipeline.samplerBindMap[texUnit] = int8(samplerUnit)
 		}
 	}
 
@@ -472,7 +482,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint)
+	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -687,13 +697,13 @@ func maxInt32(a, b int32) int32 {
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
-func (d *Device) compileFragmentShader(frag *hal.FragmentState) (uint32, glsl.TranslationInfo, error) {
+func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

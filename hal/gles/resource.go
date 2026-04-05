@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
@@ -152,9 +153,26 @@ type BindGroup struct {
 // Destroy is a no-op for bind groups.
 func (g *BindGroup) Destroy() {}
 
+// BindGroupLayoutInfo stores per-group binding-to-slot mapping computed at
+// PipelineLayout creation time. Matches Rust wgpu-hal BindGroupLayoutInfo.
+// Each entry in BindingToSlot is indexed by the WGSL binding number and maps
+// to the sequential GL slot index for that resource type. 0xFF means unused.
+type BindGroupLayoutInfo struct {
+	BindingToSlot []uint8 // indexed by binding number, 0xFF = unused
+}
+
 // PipelineLayout implements hal.PipelineLayout for OpenGL.
+// Stores pre-computed per-type sequential binding indices (Rust wgpu pattern).
+// The BindingMap is used by naga GLSL writer, GroupInfos by SetBindGroup at runtime.
 type PipelineLayout struct {
 	bindGroupLayouts []*BindGroupLayout
+	// groupInfos stores per-group binding-to-slot tables computed from per-type
+	// sequential counters (samplers, textures, images, uniform buffers, storage buffers).
+	// Matches Rust wgpu-hal/src/gles/mod.rs BindGroupLayoutInfo.
+	groupInfos []BindGroupLayoutInfo
+	// bindingMap maps (group, binding) to flat GL slot index for naga GLSL writer.
+	// Computed simultaneously with groupInfos in CreatePipelineLayout.
+	bindingMap map[glsl.BindingMapKey]uint8
 }
 
 // Destroy is a no-op for pipeline layouts.

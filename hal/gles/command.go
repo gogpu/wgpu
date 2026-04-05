@@ -368,14 +368,19 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		return
 	}
 	var samplerMap *[maxTextureSlots]int8
+	var groupInfos []BindGroupLayoutInfo
 	if e.pipeline != nil {
 		samplerMap = &e.pipeline.samplerBindMap
+		if e.pipeline.layout != nil {
+			groupInfos = e.pipeline.layout.groupInfos
+		}
 	}
 	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
 		index:           index,
 		group:           bg,
 		dynamicOffsets:  offsets,
 		maxTextureUnits: e.encoder.maxTextureUnits,
+		groupInfos:      groupInfos,
 		samplerBindMap:  samplerMap,
 	})
 }
@@ -538,11 +543,16 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	if !ok {
 		return
 	}
+	var groupInfos []BindGroupLayoutInfo
+	if e.pipeline != nil && e.pipeline.layout != nil {
+		groupInfos = e.pipeline.layout.groupInfos
+	}
 	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
 		index:           index,
 		group:           bg,
 		dynamicOffsets:  offsets,
 		maxTextureUnits: e.encoder.maxTextureUnits,
+		groupInfos:      groupInfos,
 	})
 }
 
@@ -881,6 +891,9 @@ type SetBindGroupCommand struct {
 	group           *BindGroup
 	dynamicOffsets  []uint32
 	maxTextureUnits int32 // Hardware limit for validation
+	// groupInfos stores per-group binding-to-slot tables from PipelineLayout.
+	// Used to look up the GL slot for each binding instead of the old group*16+binding formula.
+	groupInfos []BindGroupLayoutInfo
 	// samplerBindMap maps texture unit → sampler unit for combined sampler2D.
 	// Built from naga GLSL TextureMappings at pipeline creation (Rust SamplerBindMap pattern).
 	// When non-nil, sampler is bound to the texture's unit instead of its own WGSL binding.
@@ -894,11 +907,13 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 
 	dynamicIdx := 0
 	for _, entry := range c.group.entries {
-		// Flatten (group, binding) to a single GL binding index.
-		// Must match the formula used by naga GLSL backend:
-		// glBinding = group * maxBindingsPerGroup + binding.
-		const maxBindingsPerGroup = 16
-		glBinding := c.index*maxBindingsPerGroup + entry.Binding
+		// Look up the GL slot index from the pre-computed per-type sequential
+		// binding table (computed in CreatePipelineLayout). This replaces the old
+		// group*16+binding formula and matches Rust wgpu-hal command.rs:720-783.
+		glBinding := c.lookupSlot(entry.Binding)
+		if glBinding == 0xFF {
+			continue // binding not mapped in pipeline layout
+		}
 
 		switch res := entry.Resource.(type) {
 		case gputypes.BufferBinding:
@@ -974,6 +989,18 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			ctx.BindSampler(bindUnit, samplerID)
 		}
 	}
+}
+
+// lookupSlot returns the GL slot index for a binding number using the
+// pre-computed GroupInfos from PipelineLayout. Returns 0xFF if not mapped.
+func (c *SetBindGroupCommand) lookupSlot(binding uint32) uint32 {
+	if int(c.index) < len(c.groupInfos) {
+		info := c.groupInfos[c.index]
+		if int(binding) < len(info.BindingToSlot) {
+			return uint32(info.BindingToSlot[binding])
+		}
+	}
+	return 0xFF
 }
 
 // resolveSamplerUnit finds the texture unit for a sampler via SamplerBindMap.
