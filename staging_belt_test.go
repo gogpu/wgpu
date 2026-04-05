@@ -10,7 +10,7 @@ func createTestBelt(t *testing.T, chunkSize uint64) *stagingBelt {
 	t.Helper()
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
-	return newStagingBelt(dev, q, chunkSize)
+	return newStagingBelt(dev, q, chunkSize, 0)
 }
 
 func TestStagingBelt_AllocateSubAllocates(t *testing.T) {
@@ -36,7 +36,7 @@ func TestStagingBelt_AllocateSubAllocates(t *testing.T) {
 	}
 
 	// Second allocation offset should be after first (aligned to 16).
-	expectedOffset := alignUp64(32, stagingBeltCopyAlignment)
+	expectedOffset := alignUp64(32, stagingBeltDefaultAlignment)
 	if alloc2.offset != expectedOffset {
 		t.Errorf("expected alloc2.offset=%d, got %d", expectedOffset, alloc2.offset)
 	}
@@ -277,7 +277,7 @@ func TestStagingBelt_AlignUp64(t *testing.T) {
 func TestStagingBelt_DefaultChunkSize(t *testing.T) {
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
-	belt := newStagingBelt(dev, q, 0) // 0 = default
+	belt := newStagingBelt(dev, q, 0, 0) // 0 = defaults
 	defer belt.destroy()
 
 	if belt.chunkSize != stagingBeltDefaultChunkSize {

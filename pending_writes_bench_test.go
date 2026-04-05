@@ -131,7 +131,7 @@ func BenchmarkBufferReadUsage(b *testing.B) {
 func BenchmarkStagingBelt_AllocateSteadyState(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	belt := newStagingBelt(dev, q, 0)
+	belt := newStagingBelt(dev, q, 0, 0)
 	defer belt.destroy()
 
 	data := make([]byte, 256)

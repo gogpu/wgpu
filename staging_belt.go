@@ -32,6 +32,7 @@ type stagingBelt struct {
 	halDevice hal.Device
 	halQueue  hal.Queue
 	chunkSize uint64 // size of each pre-allocated chunk
+	alignment uint64 // minimum sub-allocation alignment (power of two)
 
 	// activeChunks are being sub-allocated via bump pointer.
 	// Typically 1 chunk is active; more are activated when the current
@@ -71,23 +72,30 @@ type closedSubmission struct {
 // but small enough to not waste memory when idle.
 const stagingBeltDefaultChunkSize = 256 * 1024
 
-// stagingBeltCopyAlignment is the minimum alignment for sub-allocations
-// within a chunk. 16 bytes ensures correct alignment for all GPU buffer
-// types (DX12 constant buffers require 256-byte alignment for the BUFFER
-// itself, but data WITHIN a staging buffer only needs copy alignment).
-// WebGPU COPY_BUFFER_ALIGNMENT = 4, but 16 gives better cache behavior.
-const stagingBeltCopyAlignment = 16
+// stagingBeltDefaultAlignment is the default minimum alignment for sub-allocations.
+// WebGPU COPY_BUFFER_ALIGNMENT = 4. Rust wgpu uses MAP_ALIGNMENT = 8.
+// We default to 8 (Rust parity) — good balance between spec compliance and
+// cache performance. Configurable via newStagingBelt alignment parameter.
+const stagingBeltDefaultAlignment uint64 = 8
 
-// newStagingBelt creates a staging belt with the given chunk size.
+// newStagingBelt creates a staging belt with the given chunk size and alignment.
 // If chunkSize is 0, uses the default (256KB).
-func newStagingBelt(halDevice hal.Device, halQueue hal.Queue, chunkSize uint64) *stagingBelt {
+// If alignment is 0, uses the default (8 bytes, Rust wgpu parity).
+// Alignment must be a power of two.
+// Matches Rust wgpu StagingBelt::allocate() where alignment is per-allocation;
+// we simplify to per-belt since the belt is internal to pendingWrites.
+func newStagingBelt(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment uint64) *stagingBelt { //nolint:unparam // alignment is configurable for future callers and testing
 	if chunkSize == 0 {
 		chunkSize = stagingBeltDefaultChunkSize
+	}
+	if alignment == 0 {
+		alignment = stagingBeltDefaultAlignment
 	}
 	return &stagingBelt{
 		halDevice: halDevice,
 		halQueue:  halQueue,
 		chunkSize: chunkSize,
+		alignment: alignment,
 	}
 }
 
@@ -115,7 +123,7 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 		return stagingAllocation{}, nil
 	}
 
-	alignedSize := alignUp64(size, stagingBeltCopyAlignment)
+	alignedSize := alignUp64(size, b.alignment)
 
 	// Oversized write: create a one-off staging buffer (not recycled).
 	// This avoids wasting chunk pool memory on rare large transfers.

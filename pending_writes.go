@@ -95,7 +95,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue) *pendingWrites {
 	}
 	if pw.usesBatching {
 		pw.pool = newEncoderPool(halDevice)
-		pw.belt = newStagingBelt(halDevice, halQueue, 0) // 0 = default 256KB chunks
+		pw.belt = newStagingBelt(halDevice, halQueue, 0, 0) // 0 = defaults (256KB chunks, 8-byte alignment)
 	}
 	return pw
 }
