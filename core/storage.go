@@ -188,7 +188,15 @@ func (s *Storage[T, M]) Clear() {
 	}
 }
 
+// storageGrowthCap is the maximum number of new slots to add in a single growth.
+// Limits peak allocation size to avoid >64KB single allocations for typical
+// resource types (GPU buffers, textures, pipelines are 40-200 bytes each).
+// PERF-REG-001: prevents 323KB allocation spikes during registry growth.
+const storageGrowthCap Index = 1024
+
 // ensureCapacity grows the slots slice if needed.
+// Uses capped growth (1.5x up to storageGrowthCap extra slots) instead of
+// unbounded 2x doubling to prevent large single allocations.
 // Must be called with write lock held.
 func (s *Storage[T, M]) ensureCapacity(needed Index) {
 	//nolint:gosec // G115: Safe conversion - len(s.slots) is always < 2^32 in practice
@@ -197,8 +205,16 @@ func (s *Storage[T, M]) ensureCapacity(needed Index) {
 		return
 	}
 
-	// Grow by at least doubling, but at least to needed
-	newCap := current * 2
+	// Growth strategy: 1.5x (like C++ std::vector) with a cap on extra slots.
+	// This avoids single allocations >64KB for typical GPU resource sizes.
+	// - Small registry (<64 slots): jump to 64 (common case, fast warmup)
+	// - Medium (64-2048): grow by 1.5x (amortized O(1) inserts)
+	// - Large (>2048): grow by at most storageGrowthCap slots per resize
+	extra := current / 2 // 1.5x growth factor
+	if extra > storageGrowthCap {
+		extra = storageGrowthCap
+	}
+	newCap := current + extra
 	if newCap < needed {
 		newCap = needed
 	}
