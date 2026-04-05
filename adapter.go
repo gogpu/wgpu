@@ -57,7 +57,14 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 		features = desc.RequiredFeatures
 		limits = desc.RequiredLimits
 		label = desc.Label
-	} else {
+	}
+
+	// If no limits specified (nil descriptor or zero-value RequiredLimits),
+	// use WebGPU spec defaults. This matches Rust wgpu behavior where
+	// DeviceDescriptor::default() uses Limits::defaults() with non-zero values.
+	// Without this, a zero Limits struct causes validation to reject all
+	// bind group layouts (e.g., "binding count 3 exceeds maximum 0").
+	if limits == (gputypes.Limits{}) {
 		limits = gputypes.DefaultLimits()
 	}
 
