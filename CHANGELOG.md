@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.9] - 2026-04-05
+
+### Performance
+
+- **BuddyAllocator thread-safe + slice-based free lists** — Added mutex for
+  concurrent safety (fixed crash in parallel benchmark). Replaced map-based free
+  lists with slices and bitset. 3.3× faster Alloc, 2× faster Free. (PERF-BUDDY-001)
+
+- **SnatchGuard zero heap allocation** — Return guards as value types instead of
+  pointers. Eliminates 1 heap alloc per HAL call on hottest path (~3000 allocs/sec
+  eliminated at 60 FPS). Snatchable.Get: 82→42 ns/op. (PERF-SNATCH-001)
+
+- **Vulkan debug name reuse** — Reuse byte buffer for null-terminated label strings.
+  Embed BuddyBlock as value. Saves 2-3 allocs per object creation. (PERF-VK-001)
+
+- **PendingWrites map bucket reuse** — Use `clear()` instead of `make()` after flush
+  to keep allocated hash table buckets. WriteBufferBatching: 354→155 ns/op,
+  2→1 allocs. (PERF-PW-001)
+
+- **Registry capped growth** — Changed from unbounded 2× doubling to capped 1.5×
+  with max 1024 extra slots. Peak allocation: 324KB→193KB. (PERF-REG-001)
+
 ## [0.23.8] - 2026-04-05
 
 ### Fixed
