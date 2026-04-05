@@ -163,7 +163,7 @@ func NewDevice(
 // Returns nil if:
 //   - The device has no HAL integration (ID-based API only)
 //   - The HAL device has been snatched (device destroyed)
-func (d *Device) Raw(guard *SnatchGuard) hal.Device {
+func (d *Device) Raw(guard SnatchGuard) hal.Device {
 	if d.raw == nil {
 		return nil
 	}
@@ -576,7 +576,7 @@ func (t *TrackingData) Index() TrackerIndex {
 // Returns nil if:
 //   - The buffer has no HAL integration (ID-based API only)
 //   - The HAL buffer has been snatched (buffer destroyed)
-func (b *Buffer) Raw(guard *SnatchGuard) hal.Buffer {
+func (b *Buffer) Raw(guard SnatchGuard) hal.Buffer {
 	if b.raw == nil {
 		return nil
 	}
@@ -807,7 +807,7 @@ func NewTexture(
 }
 
 // Raw returns the underlying HAL texture if it hasn't been snatched.
-func (t *Texture) Raw(guard *SnatchGuard) hal.Texture {
+func (t *Texture) Raw(guard SnatchGuard) hal.Texture {
 	if t.raw == nil {
 		return nil
 	}
@@ -868,7 +868,7 @@ func NewSampler(
 }
 
 // Raw returns the underlying HAL sampler if it hasn't been snatched.
-func (s *Sampler) Raw(guard *SnatchGuard) hal.Sampler {
+func (s *Sampler) Raw(guard SnatchGuard) hal.Sampler {
 	if s.raw == nil {
 		return nil
 	}
@@ -927,7 +927,7 @@ func NewBindGroupLayout(
 }
 
 // Raw returns the underlying HAL bind group layout if it hasn't been snatched.
-func (bgl *BindGroupLayout) Raw(guard *SnatchGuard) hal.BindGroupLayout {
+func (bgl *BindGroupLayout) Raw(guard SnatchGuard) hal.BindGroupLayout {
 	if bgl.raw == nil {
 		return nil
 	}
@@ -988,7 +988,7 @@ func NewPipelineLayout(
 }
 
 // Raw returns the underlying HAL pipeline layout if it hasn't been snatched.
-func (pl *PipelineLayout) Raw(guard *SnatchGuard) hal.PipelineLayout {
+func (pl *PipelineLayout) Raw(guard SnatchGuard) hal.PipelineLayout {
 	if pl.raw == nil {
 		return nil
 	}
@@ -1042,7 +1042,7 @@ func NewBindGroup(
 }
 
 // Raw returns the underlying HAL bind group if it hasn't been snatched.
-func (bg *BindGroup) Raw(guard *SnatchGuard) hal.BindGroup {
+func (bg *BindGroup) Raw(guard SnatchGuard) hal.BindGroup {
 	if bg.raw == nil {
 		return nil
 	}
@@ -1095,7 +1095,7 @@ func NewShaderModule(
 }
 
 // Raw returns the underlying HAL shader module if it hasn't been snatched.
-func (sm *ShaderModule) Raw(guard *SnatchGuard) hal.ShaderModule {
+func (sm *ShaderModule) Raw(guard SnatchGuard) hal.ShaderModule {
 	if sm.raw == nil {
 		return nil
 	}
@@ -1148,7 +1148,7 @@ func NewRenderPipeline(
 }
 
 // Raw returns the underlying HAL render pipeline if it hasn't been snatched.
-func (rp *RenderPipeline) Raw(guard *SnatchGuard) hal.RenderPipeline {
+func (rp *RenderPipeline) Raw(guard SnatchGuard) hal.RenderPipeline {
 	if rp.raw == nil {
 		return nil
 	}
@@ -1201,7 +1201,7 @@ func NewComputePipeline(
 }
 
 // Raw returns the underlying HAL compute pipeline if it hasn't been snatched.
-func (cp *ComputePipeline) Raw(guard *SnatchGuard) hal.ComputePipeline {
+func (cp *ComputePipeline) Raw(guard SnatchGuard) hal.ComputePipeline {
 	if cp.raw == nil {
 		return nil
 	}
@@ -1370,7 +1370,7 @@ func NewCommandBuffer(
 }
 
 // Raw returns the underlying HAL command buffer if it hasn't been snatched.
-func (cb *CommandBuffer) Raw(guard *SnatchGuard) hal.CommandBuffer {
+func (cb *CommandBuffer) Raw(guard SnatchGuard) hal.CommandBuffer {
 	if cb.raw == nil {
 		return nil
 	}
@@ -1435,7 +1435,7 @@ func NewQuerySet(
 }
 
 // Raw returns the underlying HAL query set if it hasn't been snatched.
-func (qs *QuerySet) Raw(guard *SnatchGuard) hal.QuerySet {
+func (qs *QuerySet) Raw(guard SnatchGuard) hal.QuerySet {
 	if qs.raw == nil {
 		return nil
 	}

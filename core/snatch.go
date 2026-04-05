@@ -43,7 +43,7 @@ func NewSnatchable[T any](value T) *Snatchable[T] {
 //
 // Note: The guard parameter is used for API clarity and to enforce
 // the pattern of acquiring a lock before accessing snatchable resources.
-func (s *Snatchable[T]) Get(_ *SnatchGuard) *T {
+func (s *Snatchable[T]) Get(_ SnatchGuard) *T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -63,7 +63,7 @@ func (s *Snatchable[T]) Get(_ *SnatchGuard) *T {
 //
 // Note: The guard parameter is used for API clarity and to enforce
 // the pattern of acquiring exclusive lock before snatching.
-func (s *Snatchable[T]) Snatch(_ *ExclusiveSnatchGuard) *T {
+func (s *Snatchable[T]) Snatch(_ ExclusiveSnatchGuard) *T {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -108,9 +108,13 @@ func NewSnatchLock() *SnatchLock {
 //
 //	guard := lock.Read()
 //	defer guard.Release()
-func (l *SnatchLock) Read() *SnatchGuard {
+//
+// PERF-SNATCH-001: SnatchGuard is a value type (not pointer) to avoid
+// heap allocation on every HAL call. The guard holds a pointer to the
+// lock internally for Release().
+func (l *SnatchLock) Read() SnatchGuard {
 	l.mu.RLock()
-	return &SnatchGuard{lock: l, released: false}
+	return SnatchGuard{lock: l, released: false}
 }
 
 // Write acquires an exclusive write lock and returns an ExclusiveSnatchGuard.
@@ -121,15 +125,18 @@ func (l *SnatchLock) Read() *SnatchGuard {
 //
 //	guard := lock.Write()
 //	defer guard.Release()
-func (l *SnatchLock) Write() *ExclusiveSnatchGuard {
+func (l *SnatchLock) Write() ExclusiveSnatchGuard {
 	l.mu.Lock()
-	return &ExclusiveSnatchGuard{lock: l, released: false}
+	return ExclusiveSnatchGuard{lock: l, released: false}
 }
 
 // SnatchGuard represents a held read lock on a SnatchLock.
 //
 // It must be released by calling Release() when done.
 // Not releasing the guard will cause a deadlock.
+//
+// PERF-SNATCH-001: Value type (not pointer) — stays on stack, zero heap allocs.
+// Methods use pointer receiver so Release() can mutate the released flag.
 type SnatchGuard struct {
 	lock     *SnatchLock
 	released bool

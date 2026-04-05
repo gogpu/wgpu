@@ -155,9 +155,6 @@ func TestSnatchLock_Read(t *testing.T) {
 	lock := NewSnatchLock()
 
 	guard := lock.Read()
-	if guard == nil {
-		t.Fatal("Read() returned nil guard")
-	}
 	if guard.released {
 		t.Error("New guard already released")
 	}
@@ -172,9 +169,6 @@ func TestSnatchLock_Write(t *testing.T) {
 	lock := NewSnatchLock()
 
 	guard := lock.Write()
-	if guard == nil {
-		t.Fatal("Write() returned nil guard")
-	}
 	if guard.released {
 		t.Error("New guard already released")
 	}
@@ -190,21 +184,14 @@ func TestSnatchLock_MultipleReaders(t *testing.T) {
 	const readers = 10
 
 	// Acquire multiple read guards
-	guards := make([]*SnatchGuard, readers)
+	guards := make([]SnatchGuard, readers)
 	for i := 0; i < readers; i++ {
 		guards[i] = lock.Read()
 	}
 
-	// All should be acquired (not blocked)
-	for i, g := range guards {
-		if g == nil {
-			t.Errorf("Reader %d: guard is nil", i)
-		}
-	}
-
 	// Release all
-	for _, g := range guards {
-		g.Release()
+	for i := range guards {
+		guards[i].Release()
 	}
 }
 
