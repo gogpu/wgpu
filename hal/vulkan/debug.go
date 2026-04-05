@@ -168,16 +168,26 @@ func (d *Device) setObjectName(objectType vk.ObjectType, handle uint64, name str
 		return
 	}
 
-	// Null-terminate the name for the Vulkan C API.
-	nameBytes := append([]byte(name), 0)
+	// PERF-VK-001: reuse Device.debugNameBuf to avoid heap allocation per
+	// Vulkan object creation. The buffer is grown once and reused for all
+	// subsequent setObjectName calls. Vulkan consumes the name synchronously
+	// in vkSetDebugUtilsObjectNameEXT, so the buffer is safe to reuse after
+	// the call returns. Not thread-safe — resource creation is single-threaded.
+	needed := len(name) + 1 // +1 for null terminator
+	if cap(d.debugNameBuf) < needed {
+		d.debugNameBuf = make([]byte, needed)
+	}
+	d.debugNameBuf = d.debugNameBuf[:needed]
+	copy(d.debugNameBuf, name)
+	d.debugNameBuf[len(name)] = 0
 
 	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
 		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
 		ObjectType:   objectType,
 		ObjectHandle: handle,
-		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
+		PObjectName:  uintptr(unsafe.Pointer(&d.debugNameBuf[0])),
 	}
 
 	_ = d.cmds.SetDebugUtilsObjectNameEXT(d.handle, &nameInfo)
-	runtime.KeepAlive(nameBytes)
+	runtime.KeepAlive(d.debugNameBuf)
 }

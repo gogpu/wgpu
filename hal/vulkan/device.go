@@ -87,6 +87,12 @@ type Device struct {
 	// with suballocation multiple buffers share the same VkDeviceMemory,
 	// so we map each VkDeviceMemory once from offset 0 and reuse it.
 	mappedMemory map[vk.DeviceMemory]uintptr
+
+	// debugNameBuf is a reusable buffer for null-terminating debug label strings
+	// passed to vkSetDebugUtilsObjectNameEXT. Avoids heap allocation per
+	// Vulkan object creation (PERF-VK-001). Not thread-safe — setObjectName
+	// is only called during resource creation which is single-threaded per device.
+	debugNameBuf []byte
 }
 
 // initAllocator initializes the memory allocator for this device.
