@@ -123,6 +123,15 @@ func (m *ShaderModule) Destroy() {
 type BindGroupLayout struct {
 	entries []gputypes.BindGroupLayoutEntry
 	device  *Device
+
+	// Per-type resource counts for this layout.
+	// Used by PipelineLayout to compute cumulative slot offsets across groups.
+	// naga MSL generates sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
+	// indices across all bind groups, so each group must know how many resources
+	// of each type it contributes.
+	bufferCount  int
+	textureCount int
+	samplerCount int
 }
 
 // Destroy releases the bind group layout.
@@ -146,10 +155,28 @@ func (g *BindGroup) Destroy() {
 	}
 }
 
+// GroupSlotOffsets holds the cumulative Metal slot offsets for a single bind group.
+// These offsets are the starting [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
+// indices for each group, computed from the resource counts of all preceding groups.
+//
+// Reference: Rust wgpu-hal metal/mod.rs BindGroupLayoutInfo.base_resource_indices.
+type GroupSlotOffsets struct {
+	Buffers  int
+	Textures int
+	Samplers int
+}
+
 // PipelineLayout implements hal.PipelineLayout for Metal.
 type PipelineLayout struct {
 	layouts []hal.BindGroupLayout
 	device  *Device
+
+	// groupOffsets holds the cumulative per-type slot offsets for each bind group.
+	// groupOffsets[i] contains the starting Metal indices for group i,
+	// computed by summing resource counts of groups 0..i-1.
+	//
+	// Reference: Rust wgpu-hal metal/mod.rs PipelineLayout.bind_group_infos.
+	groupOffsets []GroupSlotOffsets
 }
 
 // Destroy releases the pipeline layout.
@@ -163,6 +190,7 @@ func (l *PipelineLayout) Destroy() {
 type RenderPipeline struct {
 	raw    ID // id<MTLRenderPipelineState>
 	device *Device
+	layout *PipelineLayout // for SetBindGroup slot offset lookup
 }
 
 // Destroy releases the render pipeline.
@@ -176,7 +204,8 @@ func (p *RenderPipeline) Destroy() {
 type ComputePipeline struct {
 	raw           ID // id<MTLComputePipelineState>
 	device        *Device
-	workgroupSize MTLSize // workgroup size from shader
+	layout        *PipelineLayout // for SetBindGroup slot offset lookup
+	workgroupSize MTLSize         // workgroup size from shader
 }
 
 // Destroy releases the compute pipeline.

@@ -348,7 +348,25 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 
 // CreateBindGroupLayout creates a bind group layout.
 func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	return &BindGroupLayout{entries: desc.Entries, device: d}, nil
+	layout := &BindGroupLayout{entries: desc.Entries, device: d}
+
+	// Count resources by type so PipelineLayout can compute cumulative slot offsets.
+	// naga MSL generates sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
+	// indices across all bind groups in a pipeline layout.
+	for _, entry := range desc.Entries {
+		switch {
+		case entry.Buffer != nil:
+			layout.bufferCount++
+		case entry.Texture != nil:
+			layout.textureCount++
+		case entry.Sampler != nil:
+			layout.samplerCount++
+		case entry.StorageTexture != nil:
+			layout.textureCount++
+		}
+	}
+
+	return layout, nil
 }
 
 // DestroyBindGroupLayout destroys a bind group layout.
@@ -375,8 +393,28 @@ func (d *Device) DestroyBindGroup(group hal.BindGroup) {
 }
 
 // CreatePipelineLayout creates a pipeline layout.
+//
+// Computes cumulative per-type slot offsets for each bind group. naga MSL generates
+// sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]] indices across all groups,
+// so group i's starting slot = sum of resource counts from groups 0..i-1.
+//
+// Reference: Rust wgpu-hal metal/device.rs:718-801 (base_resource_indices).
 func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	return &PipelineLayout{layouts: desc.BindGroupLayouts, device: d}, nil
+	offsets := make([]GroupSlotOffsets, len(desc.BindGroupLayouts))
+	var bufAccum, texAccum, samAccum int
+	for i, bglIface := range desc.BindGroupLayouts {
+		offsets[i] = GroupSlotOffsets{
+			Buffers:  bufAccum,
+			Textures: texAccum,
+			Samplers: samAccum,
+		}
+		if bgl, ok := bglIface.(*BindGroupLayout); ok && bgl != nil {
+			bufAccum += bgl.bufferCount
+			texAccum += bgl.textureCount
+			samAccum += bgl.samplerCount
+		}
+	}
+	return &PipelineLayout{layouts: desc.BindGroupLayouts, device: d, groupOffsets: offsets}, nil
 }
 
 // DestroyPipelineLayout destroys a pipeline layout.
@@ -616,7 +654,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		"sampleCount", sampleCount,
 	)
 
-	return &RenderPipeline{raw: pipelineState, device: d}, nil
+	var pipeLayout *PipelineLayout
+	if pl, ok := desc.Layout.(*PipelineLayout); ok {
+		pipeLayout = pl
+	}
+	return &RenderPipeline{raw: pipelineState, device: d, layout: pipeLayout}, nil
 }
 
 // buildVertexDescriptor creates an MTLVertexDescriptor from WebGPU vertex buffer layouts.
@@ -710,9 +752,14 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		"workgroupSize", fmt.Sprintf("%dx%dx%d", workgroupSize.Width, workgroupSize.Height, workgroupSize.Depth),
 	)
 
+	var pipeLayout *PipelineLayout
+	if pl, ok := desc.Layout.(*PipelineLayout); ok {
+		pipeLayout = pl
+	}
 	return &ComputePipeline{
 		raw:           pipelineState,
 		device:        d,
+		layout:        pipeLayout,
 		workgroupSize: workgroupSize,
 	}, nil
 }

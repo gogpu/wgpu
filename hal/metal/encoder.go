@@ -391,12 +391,13 @@ func (cb *CommandBuffer) SetDrawable(drawable ID) {
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Metal.
 type RenderPassEncoder struct {
-	raw         ID
-	device      *Device
-	pipeline    *RenderPipeline
-	indexBuffer *Buffer
-	indexFormat gputypes.IndexFormat
-	indexOffset uint64
+	raw           ID
+	device        *Device
+	pipeline      *RenderPipeline
+	currentLayout *PipelineLayout // set by SetPipeline for SetBindGroup slot offsets
+	indexBuffer   *Buffer
+	indexFormat   gputypes.IndexFormat
+	indexOffset   uint64
 }
 
 // End finishes the render pass.
@@ -415,6 +416,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 		return
 	}
 	e.pipeline = p
+	e.currentLayout = p.layout // store for SetBindGroup slot offset lookup
 	_ = MsgSend(e.raw, Sel("setRenderPipelineState:"), uintptr(p.raw))
 }
 
@@ -464,10 +466,20 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	}
 
 	// Metal uses per-type sequential indices: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
-	// The naga MSL compiler auto-generates these indices sequentially per type,
-	// so we must count each resource type independently instead of using the
-	// WGSL @binding(N) number (which is unique across all types in a group).
+	// naga MSL generates these indices sequentially across ALL bind groups in the
+	// pipeline layout. Group 0 starts at 0; group 1 starts where group 0 ended, etc.
+	// We use the cumulative offsets from the pipeline layout to compute the correct
+	// starting slot for this group.
+	//
+	// Reference: Rust wgpu-hal metal/command.rs:182 (resource_indices.buffers + index).
 	var bufferSlot, textureSlot, samplerSlot uintptr
+	if e.currentLayout != nil && int(index) < len(e.currentLayout.groupOffsets) {
+		off := e.currentLayout.groupOffsets[index]
+		bufferSlot = uintptr(off.Buffers)
+		textureSlot = uintptr(off.Textures)
+		samplerSlot = uintptr(off.Samplers)
+	}
+
 	var dynamicIdx int
 	for _, entry := range bg.entries {
 		switch res := entry.Resource.(type) {
@@ -599,9 +611,10 @@ func (e *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Metal.
 type ComputePassEncoder struct {
-	raw      ID
-	device   *Device
-	pipeline *ComputePipeline
+	raw           ID
+	device        *Device
+	pipeline      *ComputePipeline
+	currentLayout *PipelineLayout // set by SetPipeline for SetBindGroup slot offsets
 }
 
 // End finishes the compute pass.
@@ -620,6 +633,7 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 		return
 	}
 	e.pipeline = p
+	e.currentLayout = p.layout // store for SetBindGroup slot offset lookup
 	_ = MsgSend(e.raw, Sel("setComputePipelineState:"), uintptr(p.raw))
 }
 
@@ -632,8 +646,16 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		return
 	}
 
-	// Metal uses per-type sequential indices (see RenderPassEncoder.SetBindGroup).
+	// Metal uses per-type sequential indices across all bind groups.
+	// See RenderPassEncoder.SetBindGroup for detailed explanation.
 	var bufferSlot, textureSlot, samplerSlot uintptr
+	if e.currentLayout != nil && int(index) < len(e.currentLayout.groupOffsets) {
+		off := e.currentLayout.groupOffsets[index]
+		bufferSlot = uintptr(off.Buffers)
+		textureSlot = uintptr(off.Textures)
+		samplerSlot = uintptr(off.Samplers)
+	}
+
 	var dynamicIdx int
 	for _, entry := range bg.entries {
 		switch res := entry.Resource.(type) {
