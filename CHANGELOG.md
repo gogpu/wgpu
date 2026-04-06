@@ -19,13 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Core
 
-- **Remove MapWrite buffer bypass — route all WriteBuffer through staging** —
-  MapWrite buffers bypassed PendingWrites staging belt with direct memcpy. When
-  CPU overwrites a Shared buffer while GPU is still reading from previous submit
-  → data race → texture flickering on Metal. Rust wgpu-core `write_buffer()`
-  (queue.rs:549) ALWAYS creates StagingBuffer, even for MapWrite. Data is
-  immutable in staging until GPU completion. Race impossible. Our bypass was an
-  incorrect optimization not present in Rust reference. (BUG-METAL-001 Fix #1)
+- **Metal MapWrite buffers routed through staging belt** — MapWrite buffers on
+  Metal bypassed PendingWrites with direct memcpy. When CPU overwrites a Shared
+  buffer while GPU reads from previous submit → data race → texture flickering.
+  Now Metal routes MapWrite through staging (immutable data, no race). DX12 keeps
+  direct bypass (upload heap is read-only to GPU, CopyBufferRegion = E_INVALIDARG).
+  HAL interface `SupportsMapWriteStaging()`: Metal=true, others=false.
+  Rust wgpu avoids this entirely by using D3D12_HEAP_TYPE_CUSTOM (COMMON state)
+  instead of HEAP_TYPE_UPLOAD — future refactoring opportunity. (BUG-METAL-001 Fix #1)
 
 ## [0.24.0] - 2026-04-06
 

@@ -3,6 +3,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -147,15 +148,25 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 		return fmt.Errorf("wgpu: WriteBuffer: no HAL buffer")
 	}
 
-	// Always route through PendingWrites staging belt when available.
-	// Rust wgpu-core write_buffer() (queue.rs:549) ALWAYS creates a StagingBuffer,
-	// even for MapWrite buffers. Data is immutable in staging until GPU completion.
-	// This prevents data races when CPU overwrites a MapWrite buffer while GPU
-	// is still reading from a previous submission.
+	// MapWrite buffers need special handling per backend.
+	// Rust wgpu uses D3D12_HEAP_TYPE_CUSTOM (COMMON state) which allows GPU copy.
+	// Our DX12 HAL uses D3D12_HEAP_TYPE_UPLOAD (GENERIC_READ) — read-only to GPU,
+	// so CopyBufferRegion into upload heap returns E_INVALIDARG.
 	//
-	// Previous code bypassed PendingWrites for MapWrite buffers (direct memcpy),
-	// which caused texture flickering on Metal (BUG-METAL-001) when multiple
-	// WriteBuffer+Submit cycles target the same uniform buffer per frame.
+	// Metal Shared buffers CAN be GPU copy destinations — routing through staging
+	// prevents data races when CPU overwrites while GPU reads (BUG-METAL-001).
+	//
+	// SupportsMapWriteStaging(): Metal=true, DX12/Vulkan/GLES/Software=false.
+	if buffer.Usage()&gputypes.BufferUsageMapWrite != 0 {
+		if q.pending != nil && q.hal.SupportsMapWriteStaging() {
+			// Metal: route through staging belt (immutable data, no race)
+			return q.pending.writeBuffer(halBuffer, buffer.Usage(), offset, data)
+		}
+		// DX12/others: direct memcpy (upload heap can't be copy destination)
+		return q.hal.WriteBuffer(halBuffer, offset, data)
+	}
+
+	// Non-MapWrite buffers always go through staging when available.
 	if q.pending != nil {
 		return q.pending.writeBuffer(halBuffer, buffer.Usage(), offset, data)
 	}

@@ -498,3 +498,8 @@ func (q *Queue) SupportsCommandBufferCopies() bool {
 // -----------------------------------------------------------------------------
 
 var _ hal.Queue = (*Queue)(nil)
+
+// SupportsMapWriteStaging returns false for dx12.
+func (q *Queue) SupportsMapWriteStaging() bool {
+	return false
+}
