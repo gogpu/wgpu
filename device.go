@@ -603,14 +603,20 @@ func (d *Device) WaitIdle() error {
 
 // Release releases the device and all associated resources.
 // Deferred resource destructions are flushed before the device is destroyed.
-// Shutdown order (matches Rust wgpu-core Device drop):
-//  1. Flush deferred destructions (encoders return to pool, HAL device alive)
-//  2. Destroy encoder pool (HAL device still alive — VkCommandPool/DX12 allocator freed cleanly)
-//  3. Destroy HAL device (VkDevice/ID3D12Device released)
+// Shutdown order:
+//  0. WaitIdle — block until ALL GPU submissions complete
+//  1. Triage + FlushAll — deferred callbacks fire (encoders return to pool)
+//  2. Destroy encoder pool (HAL device still alive)
+//  3. Destroy core + HAL device
 //
-// The encoder pool MUST be destroyed AFTER FlushAll (so deferred encoder
-// recycling callbacks can run) but BEFORE halDevice.Destroy() (so
-// vkDestroyCommandPool/ID3D12CommandAllocator::Release runs on a live device).
+// WaitIdle is required because FlushAll calls Triage(PollCompleted()),
+// but PollCompleted may return a stale index if GPU hasn't finished.
+// Without WaitIdle, deferred encoder recycling callbacks don't fire,
+// and pool.destroy() destroys encoders whose VkCommandPool is then
+// double-freed by hal.Device.Destroy() → vkDestroyCommandPool crash.
+//
+// Rust avoids this via Arc ownership + maintain loop. In Go we must
+// be explicit: WaitIdle ensures PollCompleted returns final index.
 func (d *Device) Release() {
 	if d.released {
 		return
@@ -621,10 +627,21 @@ func (d *Device) Release() {
 		d.queue.release()
 	}
 
-	// Step 1: Flush deferred destructions. Encoder recycling callbacks fire,
-	// returning encoders to cmdEncoderPool. HAL device is still alive.
+	// Step 0: Wait for ALL GPU work to finish. This ensures PollCompleted()
+	// returns the final submission index, so Triage processes all submissions
+	// and deferred encoder recycling callbacks fire correctly.
+	_ = d.WaitIdle()
+
+	// Step 1: Flush deferred destructions. With GPU idle, Triage processes
+	// all submissions. Encoder recycling callbacks fire, returning encoders
+	// to cmdEncoderPool. HAL device is still alive.
 	if d.core != nil && d.core.DestroyQueueRef() != nil {
-		d.core.DestroyQueueRef().FlushAll()
+		dq := d.core.DestroyQueueRef()
+		// Triage with latest completion index (GPU is idle, all done).
+		if d.queue != nil && d.queue.hal != nil {
+			dq.Triage(d.queue.hal.PollCompleted())
+		}
+		dq.FlushAll()
 	}
 
 	// Step 2: Destroy encoder pool. Each encoder.Destroy() calls
