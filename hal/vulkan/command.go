@@ -109,7 +109,17 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	// Reuse CommandBuffer struct from pool (VK-PERF-004).
 	cb := cmdBufferResultPool.Get().(*CommandBuffer)
 	cb.handle = e.cmdBuffer
-	cb.pool = e.pool
+
+	if e.poolManaged {
+		// Pool-managed mode: encoder retains VkCommandPool ownership.
+		// CommandBuffer must NOT carry pool — otherwise FreeCommandBuffer
+		// would return it to freeAllocators, causing double-free when
+		// encoder.Destroy() also destroys the same pool at shutdown.
+		cb.pool = 0
+	} else {
+		// Standalone mode: CommandBuffer takes ownership of pool.
+		cb.pool = e.pool
+	}
 
 	if !e.poolManaged {
 		// Standalone mode: detach resources to CommandBuffer, return encoder struct.
