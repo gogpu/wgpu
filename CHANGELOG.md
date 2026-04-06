@@ -14,9 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Actual GPU completion tracking via addCompletedHandler** — `PollCompleted()`
   returned a conservative heuristic (`submissionIndex - maxFramesInFlight`)
   causing `maintain()` to recycle staging belt chunks before GPU finished using
-  them. Result: texture flickering on macOS. Now uses `atomic.Uint64` updated by
-  Metal completion handler — same pattern as Rust wgpu-hal `Fence.completed_value`.
-  CAS loop ensures monotonic-only updates. (BUG-METAL-001)
+  them. Now uses `atomic.Uint64` updated by Metal completion handler — same
+  pattern as Rust wgpu-hal `Fence.completed_value`. (BUG-METAL-001 Fix #2)
+
+#### Core
+
+- **Remove MapWrite buffer bypass — route all WriteBuffer through staging** —
+  MapWrite buffers bypassed PendingWrites staging belt with direct memcpy. When
+  CPU overwrites a Shared buffer while GPU is still reading from previous submit
+  → data race → texture flickering on Metal. Rust wgpu-core `write_buffer()`
+  (queue.rs:549) ALWAYS creates StagingBuffer, even for MapWrite. Data is
+  immutable in staging until GPU completion. Race impossible. Our bypass was an
+  incorrect optimization not present in Rust reference. (BUG-METAL-001 Fix #1)
 
 ## [0.24.0] - 2026-04-06
 
