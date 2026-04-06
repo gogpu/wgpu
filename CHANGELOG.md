@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Core
 
+- **Command encoder pool — recycle HAL encoders after GPU completion** — Each
+  `CreateCommandEncoder()` created a new DX12 `ID3D12CommandAllocator` (~64KB)
+  that leaked after `Finish()`. Device-level pool acquires/releases encoders,
+  matching Rust wgpu-core `CommandAllocator` pattern. Encoder travels:
+  Pool → CommandEncoder → CommandBuffer → Submit → GPU done → ResetAll → Pool.
+  Fixes ~7.5 MB/min memory leak on DX12. (BUG-DX12-004)
+
 - **All WriteBuffer through staging + DX12 HEAP_TYPE_CUSTOM** — MapWrite buffers
   bypassed PendingWrites with direct memcpy, causing data races when CPU overwrites
   while GPU reads (texture flickering on Metal). Now ALL WriteBuffer goes through

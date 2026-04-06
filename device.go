@@ -18,6 +18,17 @@ type Device struct {
 	core     *core.Device
 	queue    *Queue
 	released bool
+
+	// cmdEncoderPool pools HAL command encoders for CreateCommandEncoder.
+	// Matches Rust wgpu-core's CommandAllocator pattern (allocator.rs):
+	// encoders are acquired from the pool instead of creating expensive
+	// GPU resources (DX12 ID3D12CommandAllocator ~64KB, Vulkan VkCommandPool)
+	// every frame. After GPU completion, encoders are reset via ResetAll
+	// and returned to the pool for reuse.
+	//
+	// nil when PendingWrites is not active (e.g., no HAL device).
+	// Separate from pendingWrites.pool which manages internal staging encoders.
+	cmdEncoderPool *encoderPool
 }
 
 // Queue returns the device's command queue.
@@ -420,6 +431,12 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.
+//
+// When a device-level encoder pool is available (BUG-DX12-004), the HAL encoder
+// is acquired from the pool instead of creating a new one. This avoids allocating
+// expensive GPU resources (DX12 ID3D12CommandAllocator ~64KB, Vulkan VkCommandPool)
+// on every frame. After GPU completion, the encoder is reset and returned to the
+// pool for reuse. Matches Rust wgpu-core's CommandAllocator pattern (allocator.rs).
 func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
 	if d.released {
 		return nil, ErrReleased
@@ -430,6 +447,34 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		label = desc.Label
 	}
 
+	// When pool is available, acquire a recycled HAL encoder and pass it to core.
+	// This bypasses core's internal CreateCommandEncoder which would create a new
+	// HAL encoder, and instead uses CreateCommandEncoderWithHAL that accepts
+	// a pre-existing encoder already in recording state.
+	if d.cmdEncoderPool != nil {
+		halEnc, err := d.cmdEncoderPool.acquire()
+		if err != nil {
+			return nil, fmt.Errorf("wgpu: encoder pool acquire: %w", err)
+		}
+
+		if err := halEnc.BeginEncoding(label); err != nil {
+			// Failed to begin encoding — return encoder to pool for future use.
+			d.cmdEncoderPool.release(halEnc)
+			return nil, fmt.Errorf("wgpu: begin encoding: %w", err)
+		}
+
+		coreEncoder, err := d.core.CreateCommandEncoderWithHAL(halEnc, label)
+		if err != nil {
+			halEnc.DiscardEncoding()
+			d.cmdEncoderPool.release(halEnc)
+			return nil, err
+		}
+
+		return &CommandEncoder{core: coreEncoder, device: d, halEncoder: halEnc}, nil
+	}
+
+	// Fallback: no pool available (e.g., non-HAL device). Use core's built-in
+	// encoder creation which creates a fresh HAL encoder each time.
 	coreEncoder, err := d.core.CreateCommandEncoder(label)
 	if err != nil {
 		return nil, err
@@ -558,6 +603,8 @@ func (d *Device) WaitIdle() error {
 
 // Release releases the device and all associated resources.
 // Deferred resource destructions are flushed before the device is destroyed.
+// The command encoder pool is destroyed after flushing deferred destructions
+// since FlushAll may recycle encoders back to the pool.
 func (d *Device) Release() {
 	if d.released {
 		return
@@ -569,7 +616,15 @@ func (d *Device) Release() {
 	}
 
 	// core.Device.Destroy() calls DestroyQueue.FlushAll() internally.
+	// FlushAll triggers deferred encoder recycling callbacks, which return
+	// encoders to cmdEncoderPool. We destroy the pool after FlushAll so
+	// those callbacks don't write to a destroyed pool.
 	d.core.Destroy()
+
+	if d.cmdEncoderPool != nil {
+		d.cmdEncoderPool.destroy()
+		d.cmdEncoderPool = nil
+	}
 }
 
 // destroyQueue returns the device's DestroyQueue for deferred resource destruction.

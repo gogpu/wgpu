@@ -46,8 +46,9 @@ func NewDeviceFromHAL(
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 
 	device := &Device{
-		core:  coreDevice,
-		queue: queue,
+		core:           coreDevice,
+		queue:          queue,
+		cmdEncoderPool: newEncoderPool(halDevice),
 	}
 	queue.device = device
 

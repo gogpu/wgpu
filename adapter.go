@@ -86,8 +86,9 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 
 	device := &Device{
-		core:  coreDevice,
-		queue: queue,
+		core:           coreDevice,
+		queue:          queue,
+		cmdEncoderPool: newEncoderPool(openDevice.Device),
 	}
 	queue.device = device
 

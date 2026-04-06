@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // =============================================================================
@@ -76,6 +77,66 @@ func TestDevice_CreateCommandEncoder_Success(t *testing.T) {
 	}
 	if encoder.Device() != device {
 		t.Error("Encoder should reference parent device")
+	}
+}
+
+func TestDevice_CreateCommandEncoderWithHAL(t *testing.T) {
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	// Create a HAL encoder externally (simulating pool acquire).
+	halEnc, err := halDevice.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "pool-test"})
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder failed: %v", err)
+	}
+	if err := halEnc.BeginEncoding("pool-test"); err != nil {
+		t.Fatalf("BeginEncoding failed: %v", err)
+	}
+
+	// Use CreateCommandEncoderWithHAL.
+	encoder, err := device.CreateCommandEncoderWithHAL(halEnc, "pool-test")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoderWithHAL failed: %v", err)
+	}
+	if encoder.Status() != CommandEncoderStatusRecording {
+		t.Errorf("Expected Recording status, got %v", encoder.Status())
+	}
+
+	// Finish should succeed.
+	cmdBuf, err := encoder.Finish()
+	if err != nil {
+		t.Fatalf("Finish failed: %v", err)
+	}
+	if cmdBuf == nil {
+		t.Fatal("Finish returned nil")
+	}
+}
+
+func TestCoreCommandEncoder_TakeHALEncoder(t *testing.T) {
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	encoder, err := device.CreateCommandEncoder("TestEncoder")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder failed: %v", err)
+	}
+
+	// Finish the encoder (transitions to Finished state).
+	_, err = encoder.Finish()
+	if err != nil {
+		t.Fatalf("Finish failed: %v", err)
+	}
+
+	// TakeHALEncoder should extract the HAL encoder.
+	halEnc := encoder.TakeHALEncoder()
+	if halEnc == nil {
+		t.Fatal("TakeHALEncoder returned nil")
+	}
+
+	// Second call should return nil (already snatched).
+	halEnc2 := encoder.TakeHALEncoder()
+	if halEnc2 != nil {
+		t.Fatal("Second TakeHALEncoder should return nil")
 	}
 }
 

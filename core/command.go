@@ -238,6 +238,51 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 	return enc, nil
 }
 
+// CreateCommandEncoderWithHAL creates a core command encoder using a pre-existing
+// HAL encoder that is already in recording state (BeginEncoding already called).
+// This is used by the public API encoder pool to reuse HAL encoders across frames,
+// matching Rust wgpu-core's CommandAllocator pattern where encoders are acquired
+// from a pool rather than created fresh each time.
+//
+// The caller is responsible for ensuring the HAL encoder is valid and recording.
+func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, label string) (*CoreCommandEncoder, error) {
+	if err := d.checkValid(); err != nil {
+		return nil, err
+	}
+
+	enc := &CoreCommandEncoder{
+		raw:    NewSnatchable(halEncoder),
+		device: d,
+		mutable: &CommandBufferMutable{
+			usedBuffers:  make(map[*Buffer]BufferUses),
+			usedTextures: make(map[*Texture]TextureUses),
+		},
+		label: label,
+	}
+	enc.status.Store(int32(CommandEncoderStatusRecording))
+
+	trackResource(uintptr(unsafe.Pointer(enc)), "CommandEncoder") //nolint:gosec // debug tracking uses pointer as unique ID
+	return enc, nil
+}
+
+// TakeHALEncoder extracts the HAL command encoder from this core encoder,
+// removing it from snatchable ownership. This is used by the encoder pool
+// to reclaim the HAL encoder after Finish() for recycling. The HAL encoder
+// is returned to the pool after GPU completion and ResetAll.
+//
+// Must be called after Finish() (encoder in Finished state). Returns nil if
+// the encoder has already been snatched or was never set.
+func (e *CoreCommandEncoder) TakeHALEncoder() hal.CommandEncoder {
+	guard := e.device.snatchLock.Write()
+	defer guard.Release()
+
+	ptr := e.raw.Snatch(guard)
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
 // RawEncoder returns the underlying HAL command encoder for direct HAL access.
 // Requires the device's snatch lock to be held. Returns nil if the encoder
 // has been snatched or the device is destroyed.

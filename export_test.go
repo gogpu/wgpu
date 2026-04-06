@@ -22,3 +22,17 @@ func (cb *CommandBuffer) TestTrackedRefs() []*core.ResourceRef { return cb.track
 
 // TestTrackedRefs returns the tracked refs of a CommandEncoder (testing only).
 func (e *CommandEncoder) TestTrackedRefs() []*core.ResourceRef { return e.trackedRefs }
+
+// TestHALEncoder returns the HAL encoder reference on a CommandBuffer (testing only).
+func (cb *CommandBuffer) TestHALEncoder() interface{} { return cb.halEncoder }
+
+// TestCmdEncoderPoolSize returns the number of free encoders in the device's pool (testing only).
+// Returns -1 if no pool is configured.
+func (d *Device) TestCmdEncoderPoolSize() int {
+	if d.cmdEncoderPool == nil {
+		return -1
+	}
+	d.cmdEncoderPool.mu.Lock()
+	defer d.cmdEncoderPool.mu.Unlock()
+	return len(d.cmdEncoderPool.free)
+}

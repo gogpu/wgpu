@@ -539,6 +539,109 @@ func TestCommandEncoderFinishTwiceFails(t *testing.T) {
 	}
 }
 
+// --- Encoder pool tests (BUG-DX12-004) ---
+
+func TestEncoderPoolFinishTransfersEncoder(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	cmdBuf, err := encoder.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// After Finish, the CommandBuffer should carry the HAL encoder.
+	if cmdBuf.TestHALEncoder() == nil {
+		t.Fatal("CommandBuffer.halEncoder is nil after Finish — encoder was not transferred from pool")
+	}
+}
+
+func TestEncoderPoolDiscardReturnsToPool(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	poolBefore := device.TestCmdEncoderPoolSize()
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	// Pool should have one fewer encoder (or still 0 if the pool was empty
+	// and a new encoder was created).
+	encoder.DiscardEncoding()
+
+	// After discard, the encoder should be returned to the pool.
+	poolAfter := device.TestCmdEncoderPoolSize()
+	if poolAfter <= poolBefore {
+		t.Errorf("pool size after discard (%d) should be > pool size before (%d)", poolAfter, poolBefore)
+	}
+}
+
+func TestEncoderPoolRecyclesAfterSubmit(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	// Create encoder, finish, submit.
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	cmdBuf, err := encoder.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	_, err = device.Queue().Submit(cmdBuf)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// After submit, the CommandBuffer's halEncoder should be nil
+	// (ownership moved to deferred callback).
+	if cmdBuf.TestHALEncoder() != nil {
+		t.Fatal("CommandBuffer.halEncoder should be nil after Submit — ownership not transferred to deferred callback")
+	}
+}
+
+func TestEncoderPoolMultipleFrames(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	// Simulate 3 frames of encoder creation, finish, submit.
+	// The pool should accumulate and reuse encoders.
+	for i := 0; i < 3; i++ {
+		enc, err := device.CreateCommandEncoder(nil)
+		if err != nil {
+			t.Fatalf("frame %d: CreateCommandEncoder: %v", i, err)
+		}
+
+		cb, err := enc.Finish()
+		if err != nil {
+			t.Fatalf("frame %d: Finish: %v", i, err)
+		}
+
+		_, err = device.Queue().Submit(cb)
+		if err != nil {
+			t.Fatalf("frame %d: Submit: %v", i, err)
+		}
+	}
+
+	// Pool should have been used (encoders recycled via DestroyQueue on Triage).
+	// With noop backend, PollCompleted returns 0, so deferred callbacks may not
+	// fire immediately. Verify that no panic occurred during the loop.
+}
+
 // --- ComputePass tests (require HAL) ---
 
 func TestCommandEncoderBeginComputePass(t *testing.T) {

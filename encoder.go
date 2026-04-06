@@ -21,6 +21,11 @@ type CommandEncoder struct {
 	// Transferred to the CommandBuffer on Finish(), then to the DestroyQueue
 	// on Submit(). Phase 2: per-command-buffer resource tracking.
 	trackedRefs []*core.ResourceRef
+
+	// halEncoder is the HAL command encoder acquired from the Device's pool.
+	// On Finish(), ownership transfers to the CommandBuffer for post-GPU recycling.
+	// On DiscardEncoding(), the encoder is reset and returned to the pool immediately.
+	halEncoder hal.CommandEncoder
 }
 
 // setError records a deferred error on the underlying command encoder.
@@ -160,6 +165,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 
 // DiscardEncoding discards the encoder without producing a command buffer.
 // Use this to abandon an in-progress encoding when an error occurs.
+// If the encoder was acquired from the pool, it is returned for reuse.
 func (e *CommandEncoder) DiscardEncoding() {
 	if e.released {
 		return
@@ -174,10 +180,28 @@ func (e *CommandEncoder) DiscardEncoding() {
 	if raw != nil {
 		raw.DiscardEncoding()
 	}
+	// Return pooled encoder immediately — no GPU work was submitted.
+	e.returnEncoderToPool()
+}
+
+// returnEncoderToPool returns the HAL encoder to the device's pool.
+// Called when the encoder will not be submitted (error or discard).
+// The encoder must not be in recording state (DiscardEncoding or error
+// path must have been called first).
+func (e *CommandEncoder) returnEncoderToPool() {
+	if e.halEncoder == nil || e.device == nil || e.device.cmdEncoderPool == nil {
+		return
+	}
+	e.device.cmdEncoderPool.release(e.halEncoder)
+	e.halEncoder = nil
 }
 
 // Finish completes command recording and returns a CommandBuffer.
 // After calling Finish(), the encoder cannot be used again.
+//
+// The HAL encoder ownership transfers from the CommandEncoder to the
+// CommandBuffer. After GPU completion, Submit() schedules the encoder
+// to be reset via ResetAll and returned to the Device's encoder pool.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	if e.released {
 		return nil, ErrReleased
@@ -191,15 +215,27 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 			ref.Drop()
 		}
 		e.trackedRefs = nil
+		// Return the pooled encoder on error — it won't be submitted.
+		e.returnEncoderToPool()
 		return nil, err
+	}
+
+	// Transfer HAL encoder ownership to the CommandBuffer for post-GPU recycling.
+	// Extract the HAL encoder from the core encoder's Snatchable so the pool
+	// will own the only reference after recycling. Without this, the Snatchable
+	// would hold a dangling reference after ResetAll.
+	if e.halEncoder != nil {
+		e.core.TakeHALEncoder()
 	}
 
 	cb := &CommandBuffer{
 		core:        coreCmdBuffer,
 		device:      e.device,
 		trackedRefs: e.trackedRefs,
+		halEncoder:  e.halEncoder,
 	}
 	e.trackedRefs = nil
+	e.halEncoder = nil // ownership transferred
 	return cb, nil
 }
 
@@ -258,6 +294,17 @@ type CommandBuffer struct {
 	// the DestroyQueue on Submit() so refs are Drop'd when GPU completes.
 	// Phase 2: per-command-buffer resource tracking.
 	trackedRefs []*core.ResourceRef
+
+	// halEncoder is the HAL command encoder that produced this command buffer.
+	// Ownership transfers from CommandEncoder to CommandBuffer on Finish(),
+	// then to the DestroyQueue on Submit() for recycling after GPU completion.
+	// After GPU completion, the encoder is reset via ResetAll and returned to
+	// the Device's encoder pool. This avoids creating new DX12 command allocators
+	// (~64KB each) or Vulkan command pools every frame.
+	//
+	// Matches Rust wgpu-core where the encoder travels:
+	// CommandEncoder -> CommandBuffer -> EncoderInFlight -> GPU done -> pool
+	halEncoder hal.CommandEncoder
 }
 
 // halBuffer returns the underlying HAL command buffer.
