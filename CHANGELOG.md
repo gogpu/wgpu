@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.2] - 2026-04-07
+
+### Fixed
+
+#### Metal
+
+- **Cross-group sequential slot offsets in SetBindGroup** — `SetBindGroup` reset
+  buffer/texture/sampler slot counters to 0 on each call, but naga MSL generates
+  `[[buffer(N)]]` with cross-group sequential numbering (group(0)→`[[buffer(0)]]`,
+  group(1)→`[[buffer(1)]]`). PipelineLayout now stores cumulative `GroupSlotOffsets`
+  per bind group. Fixes SDF shapes invisible on Metal (gg#171). Matches Rust wgpu-hal
+  `base_resource_indices` pattern. (BUG-METAL-002)
+
 ## [0.24.1] - 2026-04-07
 
 ### Fixed
