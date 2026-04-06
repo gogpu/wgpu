@@ -19,15 +19,21 @@ type Device struct {
 	queue    *Queue
 	released bool
 
-	// cmdEncoderPool pools HAL command encoders for CreateCommandEncoder.
-	// Matches Rust wgpu-core's CommandAllocator pattern (allocator.rs):
-	// encoders are acquired from the pool instead of creating expensive
+	// cmdEncoderPool is the single shared encoder pool for the device.
+	// Used by both CreateCommandEncoder (user command encoders) and
+	// PendingWrites (internal staging encoders). Matches Rust wgpu-core's
+	// single device.command_allocator for both paths (queue.rs:1373).
+	//
+	// Encoders are acquired from the pool instead of creating expensive
 	// GPU resources (DX12 ID3D12CommandAllocator ~64KB, Vulkan VkCommandPool)
 	// every frame. After GPU completion, encoders are reset via ResetAll
 	// and returned to the pool for reuse.
 	//
-	// nil when PendingWrites is not active (e.g., no HAL device).
-	// Separate from pendingWrites.pool which manages internal staging encoders.
+	// Lifecycle: created before PendingWrites, destroyed after PendingWrites.
+	// PendingWrites.destroy() clears its pool reference but does NOT destroy
+	// the pool. Device.Release() destroys the pool after all users are done.
+	//
+	// nil when no HAL device (e.g., core-only path).
 	cmdEncoderPool *encoderPool
 }
 

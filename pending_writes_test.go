@@ -64,12 +64,14 @@ func (q *mockNonBatchingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []by
 
 // --- Helpers ---
 
-// createBatchingPW creates a pendingWrites with a batching mock queue.
+// createBatchingPW creates a pendingWrites with a batching mock queue and shared pool.
 func createBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockBatchingQueue) {
 	t.Helper()
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
-	pw := newPendingWrites(dev, q)
+	pool := newEncoderPool(dev)
+	pw := newPendingWrites(dev, q, pool)
+	t.Cleanup(func() { pool.destroy() })
 	return pw, dev, q
 }
 
@@ -78,7 +80,7 @@ func createNonBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockNonBa
 	t.Helper()
 	dev := &noop.Device{}
 	q := &mockNonBatchingQueue{}
-	pw := newPendingWrites(dev, q)
+	pw := newPendingWrites(dev, q, nil)
 	return pw, dev, q
 }
 
@@ -865,7 +867,7 @@ func TestPendingWrites_NewWithNoopBackend(t *testing.T) {
 	dev, q, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pw := newPendingWrites(dev, q)
+	pw := newPendingWrites(dev, q, nil)
 	defer pw.destroy()
 
 	if pw.usesBatching {
@@ -881,7 +883,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	dev, q, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pw := newPendingWrites(dev, q)
+	pw := newPendingWrites(dev, q, nil)
 	defer pw.destroy()
 
 	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{

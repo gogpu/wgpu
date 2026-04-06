@@ -32,7 +32,9 @@ type pendingWrites struct {
 	// halQueue is the underlying HAL queue for direct-write backends.
 	halQueue hal.Queue
 
-	// pool manages reusable command encoders. nil for non-batching backends.
+	// pool is a reference to the shared device-level encoder pool.
+	// Not owned by pendingWrites — owned by Device. destroy() clears the
+	// reference without destroying the pool. nil for non-batching backends.
 	pool *encoderPool
 
 	// belt manages reusable staging buffer chunks for zero-allocation
@@ -85,7 +87,12 @@ type inflightSubmission struct {
 }
 
 // newPendingWrites creates a pendingWrites for the given HAL device and queue.
-func newPendingWrites(halDevice hal.Device, halQueue hal.Queue) *pendingWrites {
+// For batching backends (DX12/Vulkan/Metal), pool is the shared device-level
+// encoder pool (same pool used by CreateCommandEncoder). This matches Rust
+// wgpu-core which uses a single device.command_allocator for both user command
+// encoders and internal PendingWrites (queue.rs:1373). pool may be nil for
+// non-batching backends (GLES/Software).
+func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPool) *pendingWrites {
 	pw := &pendingWrites{
 		halDevice:    halDevice,
 		halQueue:     halQueue,
@@ -94,7 +101,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue) *pendingWrites {
 		usesBatching: halQueue.SupportsCommandBufferCopies(),
 	}
 	if pw.usesBatching {
-		pw.pool = newEncoderPool(halDevice)
+		pw.pool = pool
 		pw.belt = newStagingBelt(halDevice, halQueue, 0, 0) // 0 = defaults (256KB chunks, 8-byte alignment)
 	}
 	return pw
@@ -520,10 +527,9 @@ func (pw *pendingWrites) destroy() {
 		pw.belt.destroy()
 	}
 
-	// Destroy the encoder pool (releases all pooled encoders).
-	if pw.pool != nil {
-		pw.pool.destroy()
-	}
+	// Clear pool reference — pool is owned by Device, not PendingWrites.
+	// Device.Release() destroys the shared pool after PendingWrites.destroy().
+	pw.pool = nil
 
 	pw.dstBuffers = nil
 	pw.dstTextures = nil

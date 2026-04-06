@@ -22,7 +22,7 @@ func (q *benchBatchingQueue) SupportsCommandBufferCopies() bool { return true }
 func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q)
+	pw := newPendingWrites(dev, q, nil)
 	defer pw.destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
@@ -45,7 +45,9 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	dev := &noop.Device{}
 	q := &benchBatchingQueue{Queue: noop.Queue{}}
-	pw := newPendingWrites(dev, q)
+	pool := newEncoderPool(dev)
+	defer pool.destroy()
+	pw := newPendingWrites(dev, q, pool)
 	defer pw.destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
@@ -85,7 +87,9 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{Queue: noop.Queue{}}
-	pw := newPendingWrites(dev, q)
+	pool := newEncoderPool(dev)
+	defer pool.destroy()
+	pw := newPendingWrites(dev, q, pool)
 	defer pw.destroy()
 
 	b.ResetTimer()
@@ -101,7 +105,7 @@ func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
 func BenchmarkPendingWrites_Maintain(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q)
+	pw := newPendingWrites(dev, q, nil)
 	defer pw.destroy()
 
 	// Pre-populate inflight list
