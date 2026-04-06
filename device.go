@@ -603,8 +603,14 @@ func (d *Device) WaitIdle() error {
 
 // Release releases the device and all associated resources.
 // Deferred resource destructions are flushed before the device is destroyed.
-// The command encoder pool is destroyed after flushing deferred destructions
-// since FlushAll may recycle encoders back to the pool.
+// Shutdown order (matches Rust wgpu-core Device drop):
+//  1. Flush deferred destructions (encoders return to pool, HAL device alive)
+//  2. Destroy encoder pool (HAL device still alive — VkCommandPool/DX12 allocator freed cleanly)
+//  3. Destroy HAL device (VkDevice/ID3D12Device released)
+//
+// The encoder pool MUST be destroyed AFTER FlushAll (so deferred encoder
+// recycling callbacks can run) but BEFORE halDevice.Destroy() (so
+// vkDestroyCommandPool/ID3D12CommandAllocator::Release runs on a live device).
 func (d *Device) Release() {
 	if d.released {
 		return
@@ -615,16 +621,23 @@ func (d *Device) Release() {
 		d.queue.release()
 	}
 
-	// core.Device.Destroy() calls DestroyQueue.FlushAll() internally.
-	// FlushAll triggers deferred encoder recycling callbacks, which return
-	// encoders to cmdEncoderPool. We destroy the pool after FlushAll so
-	// those callbacks don't write to a destroyed pool.
-	d.core.Destroy()
+	// Step 1: Flush deferred destructions. Encoder recycling callbacks fire,
+	// returning encoders to cmdEncoderPool. HAL device is still alive.
+	if d.core != nil && d.core.DestroyQueueRef() != nil {
+		d.core.DestroyQueueRef().FlushAll()
+	}
 
+	// Step 2: Destroy encoder pool. Each encoder.Destroy() calls
+	// vkDestroyCommandPool / ID3D12CommandAllocator.Release on the still-alive
+	// HAL device. After this, no native encoder resources remain.
 	if d.cmdEncoderPool != nil {
 		d.cmdEncoderPool.destroy()
 		d.cmdEncoderPool = nil
 	}
+
+	// Step 3: Destroy core + HAL device. core.Destroy() calls FlushAll again
+	// (idempotent — already flushed) then halDevice.Destroy().
+	d.core.Destroy()
 }
 
 // destroyQueue returns the device's DestroyQueue for deferred resource destruction.
