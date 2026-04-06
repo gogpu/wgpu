@@ -236,16 +236,4 @@ type Queue interface {
 	// GLES, Software). When false, PendingWrites passes WriteBuffer/WriteTexture
 	// directly to the HAL without batching.
 	SupportsCommandBufferCopies() bool
-
-	// SupportsMapWriteStaging reports whether MapWrite buffers can be used as
-	// GPU copy destinations via staging belt. Metal returns true (Shared memory
-	// supports blits). DX12 returns false (D3D12_HEAP_TYPE_UPLOAD is read-only
-	// to GPU — CopyBufferRegion into upload heap returns E_INVALIDARG).
-	// When false, WriteBuffer for MapWrite buffers bypasses PendingWrites and
-	// writes directly to the mapped memory.
-	//
-	// Rust wgpu uses D3D12_HEAP_TYPE_CUSTOM with WRITE_COMBINE + COMMON state
-	// which allows copy destinations. Our DX12 HAL uses HEAP_TYPE_UPLOAD —
-	// a future refactoring to custom heaps would allow removing this method.
-	SupportsMapWriteStaging() bool
 }

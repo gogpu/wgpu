@@ -566,8 +566,3 @@ func (q *Queue) SupportsCommandBufferCopies() bool {
 func vkQueueSubmit(q *Queue, submitCount uint32, submits *vk.SubmitInfo, fence vk.Fence) vk.Result {
 	return q.device.cmds.QueueSubmit(q.handle, submitCount, submits, fence)
 }
-
-// SupportsMapWriteStaging returns false for vulkan.
-func (q *Queue) SupportsMapWriteStaging() bool {
-	return false
-}

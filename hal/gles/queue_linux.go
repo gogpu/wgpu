@@ -186,8 +186,3 @@ func (q *Queue) GetTimestampPeriod() float32 {
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return false
 }
-
-// SupportsMapWriteStaging returns false for GLES on Linux.
-func (q *Queue) SupportsMapWriteStaging() bool {
-	return false
-}

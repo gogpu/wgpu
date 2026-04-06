@@ -20,13 +20,34 @@ import (
 
 // Buffer implements hal.Buffer for DirectX 12.
 type Buffer struct {
-	raw           *d3d12.ID3D12Resource
-	size          uint64
-	usage         gputypes.BufferUsage
-	heapType      d3d12.D3D12_HEAP_TYPE
-	gpuVA         uint64 // GPU virtual address for binding
-	device        *Device
-	mappedPointer unsafe.Pointer // Non-nil if buffer is currently mapped
+	raw             *d3d12.ID3D12Resource
+	size            uint64
+	usage           gputypes.BufferUsage
+	heapType        d3d12.D3D12_HEAP_TYPE
+	cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY // for CUSTOM heap type
+	gpuVA           uint64                        // GPU virtual address for binding
+	device          *Device
+	mappedPointer   unsafe.Pointer // Non-nil if buffer is currently mapped
+}
+
+// isMappable returns true if the buffer can be mapped for CPU access.
+// UPLOAD, READBACK, and CUSTOM heaps with CPU page properties are mappable.
+func (b *Buffer) isMappable() bool {
+	switch b.heapType {
+	case d3d12.D3D12_HEAP_TYPE_UPLOAD, d3d12.D3D12_HEAP_TYPE_READBACK:
+		return true
+	case d3d12.D3D12_HEAP_TYPE_CUSTOM:
+		return b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE ||
+			b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
+	default:
+		return false
+	}
+}
+
+// isReadback returns true if the buffer is for GPU→CPU reads.
+func (b *Buffer) isReadback() bool {
+	return b.heapType == d3d12.D3D12_HEAP_TYPE_READBACK ||
+		(b.heapType == d3d12.D3D12_HEAP_TYPE_CUSTOM && b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK)
 }
 
 // Destroy releases the buffer resources.
@@ -49,13 +70,13 @@ func (b *Buffer) Map(offset, size uint64) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("dx12: buffer is already mapped")
 	}
 
-	if b.heapType != d3d12.D3D12_HEAP_TYPE_UPLOAD && b.heapType != d3d12.D3D12_HEAP_TYPE_READBACK {
-		return nil, fmt.Errorf("dx12: buffer is not mappable (heap type: %d)", b.heapType)
+	if !b.isMappable() {
+		return nil, fmt.Errorf("dx12: buffer is not mappable (heap type: %d, cpuPage: %d)", b.heapType, b.cpuPageProperty)
 	}
 
 	// For read-back buffers, specify the range to read
 	var readRange *d3d12.D3D12_RANGE
-	if b.heapType == d3d12.D3D12_HEAP_TYPE_READBACK {
+	if b.isReadback() {
 		readRange = &d3d12.D3D12_RANGE{
 			Begin: uintptr(offset),
 			End:   uintptr(offset + size),
@@ -81,9 +102,9 @@ func (b *Buffer) Unmap(offset, size uint64) {
 		return
 	}
 
-	// For upload buffers, specify the written range
+	// For CPU-writable buffers, specify the written range
 	var writtenRange *d3d12.D3D12_RANGE
-	if b.heapType == d3d12.D3D12_HEAP_TYPE_UPLOAD {
+	if !b.isReadback() {
 		writtenRange = &d3d12.D3D12_RANGE{
 			Begin: uintptr(offset),
 			End:   uintptr(offset + size),

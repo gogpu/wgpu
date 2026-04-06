@@ -492,11 +492,3 @@ func (q *Queue) GetTimestampPeriod() float32 {
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return true
 }
-
-// SupportsMapWriteStaging returns true for Metal.
-// Metal Shared memory buffers can be GPU copy destinations (blit encoder).
-// This allows WriteBuffer for MapWrite buffers to go through staging belt,
-// preventing data races when CPU overwrites while GPU reads.
-func (q *Queue) SupportsMapWriteStaging() bool {
-	return true
-}

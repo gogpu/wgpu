@@ -103,8 +103,8 @@ func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error 
 	}
 
 	// Buffer is not mapped — temporarily map, copy, unmap
-	if buf.heapType != d3d12.D3D12_HEAP_TYPE_READBACK {
-		return fmt.Errorf("dx12: buffer is not in readback heap, cannot read")
+	if !buf.isReadback() {
+		return fmt.Errorf("dx12: buffer is not a readback buffer, cannot read")
 	}
 
 	readRange := &d3d12.D3D12_RANGE{
@@ -141,8 +141,8 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 		return fmt.Errorf("dx12: WriteBuffer: invalid buffer type")
 	}
 
-	// Upload heap buffers can be written directly via CPU mapping
-	if buf.heapType == d3d12.D3D12_HEAP_TYPE_UPLOAD {
+	// Mappable buffers (CUSTOM/UPLOAD heaps) can be written directly via CPU mapping
+	if buf.isMappable() {
 		return q.writeBufferDirect(buf, offset, data)
 	}
 
@@ -498,8 +498,3 @@ func (q *Queue) SupportsCommandBufferCopies() bool {
 // -----------------------------------------------------------------------------
 
 var _ hal.Queue = (*Queue)(nil)
-
-// SupportsMapWriteStaging returns false for dx12.
-func (q *Queue) SupportsMapWriteStaging() bool {
-	return false
-}

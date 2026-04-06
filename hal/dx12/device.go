@@ -923,22 +923,36 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in DX12.CreateBuffer — core validation gap")
 	}
 
-	// Determine heap type based on usage
+	// Determine heap type based on usage.
+	// Matches Rust wgpu-hal suballocation.rs:437-464 which uses HEAP_TYPE_CUSTOM
+	// with WRITE_COMBINE + L0 for CpuToGpu (MapWrite) buffers, and COMMON state
+	// that allows implicit promotion to COPY_DST. This enables staging belt
+	// CopyBufferRegion into MapWrite buffers (prevents data race on Metal/DX12).
 	var heapType d3d12.D3D12_HEAP_TYPE
+	var cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY
+	var memoryPool d3d12.D3D12_MEMORY_POOL
 	var initialState d3d12.D3D12_RESOURCE_STATES
 
 	switch {
 	case desc.Usage&gputypes.BufferUsageMapRead != 0:
-		// Readback buffer
-		heapType = d3d12.D3D12_HEAP_TYPE_READBACK
+		// Readback buffer — GPU writes, CPU reads
+		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
+		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
+		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
 		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
 	case desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
-		// Upload buffer
-		heapType = d3d12.D3D12_HEAP_TYPE_UPLOAD
-		initialState = d3d12.D3D12_RESOURCE_STATE_GENERIC_READ
+		// CPU-to-GPU buffer — CPU writes, GPU reads. CUSTOM heap with WRITE_COMBINE
+		// allows COMMON state which permits implicit promotion to COPY_DST.
+		// This is required for staging belt CopyBufferRegion to work.
+		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
+		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE
+		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
+		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 	default:
 		// Default (GPU-only) buffer
 		heapType = d3d12.D3D12_HEAP_TYPE_DEFAULT
+		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN
+		memoryPool = d3d12.D3D12_MEMORY_POOL_UNKNOWN
 		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 	}
 
@@ -957,8 +971,8 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	// Create heap properties
 	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
 		Type:                 heapType,
-		CPUPageProperty:      d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-		MemoryPoolPreference: d3d12.D3D12_MEMORY_POOL_UNKNOWN,
+		CPUPageProperty:      cpuPageProperty,
+		MemoryPoolPreference: memoryPool,
 		CreationNodeMask:     0,
 		VisibleNodeMask:      0,
 	}
@@ -990,12 +1004,13 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	buffer := &Buffer{
-		raw:      resource,
-		size:     desc.Size, // Return original size, not aligned size
-		usage:    desc.Usage,
-		heapType: heapType,
-		gpuVA:    resource.GetGPUVirtualAddress(),
-		device:   d,
+		raw:             resource,
+		size:            desc.Size, // Return original size, not aligned size
+		usage:           desc.Usage,
+		heapType:        heapType,
+		cpuPageProperty: cpuPageProperty,
+		gpuVA:           resource.GetGPUVirtualAddress(),
+		device:          d,
 	}
 
 	// Map at creation if requested
