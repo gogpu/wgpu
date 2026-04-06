@@ -846,3 +846,121 @@ func newFrameCompletionBlock(frameSemaphore chan struct{}) uintptr {
 
 	return uintptr(unsafe.Pointer(block))
 }
+
+// --------------------------------------------------------------------------
+// GPU Completion Tracking Block — actual GPU completion index for PollCompleted
+// --------------------------------------------------------------------------
+//
+// addCompletedHandler: expects a block with signature:
+//
+//	void (^)(id<MTLCommandBuffer> commandBuffer)
+//
+// Block invoke: void(block_ptr, cmdBuffer) — 2 pointer-sized args.
+//
+// When the GPU finishes executing the last command buffer of a Submit batch,
+// Metal invokes the block. We look up the block ID in the registry, retrieve
+// the captured submission index, and atomically store it in the target counter.
+// This provides actual GPU completion tracking for PollCompleted(), matching
+// the Rust wgpu-hal Metal backend pattern (Fence.completed_value: Arc<AtomicU64>
+// updated via addCompletedHandler in Queue::submit).
+
+// gpuCompletionEntry holds the target atomic counter and the submission index
+// value to store when the GPU finishes the associated command buffer.
+type gpuCompletionEntry struct {
+	target *atomic.Uint64
+	value  uint64
+}
+
+// gpuCompletionRegistry maps block IDs to their completion tracking state.
+// Entries are added in newGPUCompletionBlock and removed when the GPU
+// invokes the completion handler.
+var gpuCompletionRegistry sync.Map // map[uint64]*gpuCompletionEntry
+
+// gpuCompletionBlockInvoke is the ffi.NewCallback trampoline for
+// GPU completion tracking handler blocks.
+// Initialized lazily via sync.Once.
+var (
+	gpuCompletionBlockInvokeOnce sync.Once
+	gpuCompletionBlockInvokePtr  uintptr
+)
+
+// getGPUCompletionBlockInvoke returns the C function pointer for GPU
+// completion tracking block invocations. Created once and reused.
+func getGPUCompletionBlockInvoke() uintptr {
+	gpuCompletionBlockInvokeOnce.Do(func() {
+		// Block invoke signature: void (block_ptr uintptr, cmdBuffer uintptr)
+		gpuCompletionBlockInvokePtr = ffi.NewCallback(func(blockPtr, _ uintptr) uintptr {
+			if blockPtr == 0 {
+				return 0
+			}
+			// Read blockID from the block literal at the fixed offset.
+			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
+			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+
+			hal.Logger().Debug("metal: GPU completion tracking fired", "blockID", blockID)
+
+			blockPinRegistry.Delete(blockID)
+			if val, ok := gpuCompletionRegistry.LoadAndDelete(blockID); ok {
+				entry := val.(*gpuCompletionEntry)
+				// Atomically store the submission index. This runs on a Metal-owned
+				// thread, so atomic.Uint64 provides the necessary thread safety.
+				// Only advance the completed index forward — out-of-order completion
+				// handlers must not regress the value.
+				for {
+					current := entry.target.Load()
+					if entry.value <= current {
+						break // Already at or past this value
+					}
+					if entry.target.CompareAndSwap(current, entry.value) {
+						break
+					}
+				}
+			}
+			return 0
+		})
+	})
+	return gpuCompletionBlockInvokePtr
+}
+
+// newGPUCompletionBlock creates an ObjC block for MTLCommandBuffer
+// addCompletedHandler: that atomically stores the given submission index
+// into the target counter when the GPU finishes executing the command buffer.
+//
+// This provides actual GPU completion tracking for PollCompleted(), replacing
+// the conservative heuristic (submissionIndex - maxFramesInFlight) with
+// precise completion information from the GPU.
+//
+// Returns a block pointer suitable for passing to addCompletedHandler:,
+// or 0 if block support is unavailable.
+func newGPUCompletionBlock(target *atomic.Uint64, submissionIndex uint64) uintptr {
+	if symNSConcreteGlobalBlock == 0 || target == nil {
+		return 0
+	}
+
+	invokePtr := getGPUCompletionBlockInvoke()
+	if invokePtr == 0 {
+		return 0
+	}
+
+	// Allocate block ID and register the completion tracking entry.
+	id := nextBlockID()
+	gpuCompletionRegistry.Store(id, &gpuCompletionEntry{
+		target: target,
+		value:  submissionIndex,
+	})
+
+	// Allocate block as global — Block_copy() is a no-op (no PAC re-signing).
+	block := &blockLiteral{
+		isa:        symNSConcreteGlobalBlock,
+		flags:      blockIsGlobal,
+		reserved:   0,
+		invoke:     invokePtr,
+		descriptor: uintptr(unsafe.Pointer(sharedEventBlockDescriptor)),
+		blockID:    id,
+	}
+
+	// Pin the block so GC doesn't collect it before the callback fires.
+	blockPinRegistry.Store(id, block)
+
+	return uintptr(unsafe.Pointer(block))
+}

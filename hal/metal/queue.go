@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -26,6 +27,12 @@ type Queue struct {
 
 	// submissionIndex is a monotonically increasing counter for tracking submissions.
 	submissionIndex uint64
+
+	// completedIndex tracks the highest submission index completed by the GPU.
+	// Updated atomically by addCompletedHandler blocks that fire when the GPU
+	// finishes executing the last command buffer of each Submit batch.
+	// This matches Rust wgpu-hal's Fence.completed_value pattern.
+	completedIndex atomic.Uint64
 
 	// frameSemaphore limits CPU-ahead-of-GPU frames. Each Submit consumes a
 	// slot from the buffered channel; the GPU's addCompletedHandler callback
@@ -66,17 +73,18 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 			continue
 		}
 
-		// Schedule presentation BEFORE commit (Metal requirement)
-		if cb.drawable != 0 {
-			_ = MsgSend(cb.raw, Sel("presentDrawable:"), uintptr(cb.drawable))
-			hal.Logger().Debug("metal: presentDrawable scheduled")
-		}
+		// On the last command buffer, register completion handlers.
+		if i == lastIdx {
+			// Track actual GPU completion for PollCompleted().
+			// Uses addCompletedHandler to atomically store the submission index
+			// when the GPU finishes, matching Rust wgpu-hal Fence.completed_value.
+			q.registerSubmissionCompletionHandler(cb.raw, subIdx)
 
-		// On the last command buffer, register a completion handler to release
-		// the frame semaphore slot when the GPU finishes this batch.
-		if i == lastIdx && q.frameSemaphore != nil {
-			q.registerFrameCompletionHandler(cb.raw)
-			hal.Logger().Debug("metal: frame completion handler registered")
+			// Release frame semaphore slot for CPU-ahead throttling.
+			if q.frameSemaphore != nil {
+				q.registerFrameCompletionHandler(cb.raw)
+				hal.Logger().Debug("metal: frame completion handler registered")
+			}
 		}
 
 		// Commit the command buffer
@@ -93,16 +101,32 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 }
 
 // PollCompleted returns the highest submission index known to be completed by the GPU.
-// Metal tracks completion via completion handlers; this returns the last known completed index.
+// Updated atomically by addCompletedHandler blocks registered in Submit.
+// This matches Rust wgpu-hal's Fence.get_latest() / Device.get_fence_value() pattern.
 func (q *Queue) PollCompleted() uint64 {
-	// Metal uses completion handlers for tracking. Since we don't have a shared
-	// event counter exposed here, we conservatively return the last submission
-	// minus frames-in-flight (or 0 if too early). The frame semaphore provides
-	// the actual throttling.
-	if q.submissionIndex <= maxFramesInFlight {
-		return 0
+	return q.completedIndex.Load()
+}
+
+// registerSubmissionCompletionHandler attaches an addCompletedHandler: block to
+// the command buffer that atomically stores the submission index when the GPU
+// finishes execution. This provides accurate GPU completion tracking for
+// PollCompleted(), replacing the conservative heuristic that returned
+// submissionIndex - maxFramesInFlight.
+//
+// If block creation fails, the completedIndex is updated immediately as a
+// fallback — this is conservative (reports completion too early rather than
+// too late) but prevents maintain() from never recycling resources.
+func (q *Queue) registerSubmissionCompletionHandler(cmdBuffer ID, subIdx uint64) {
+	blockPtr := newGPUCompletionBlock(&q.completedIndex, subIdx)
+	if blockPtr == 0 {
+		// Block creation failed — update immediately as fallback.
+		hal.Logger().Warn("metal: submission completion block creation failed, updating immediately")
+		q.completedIndex.Store(subIdx)
+		return
 	}
-	return q.submissionIndex - maxFramesInFlight
+
+	_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
+	hal.Logger().Debug("metal: submission completion handler registered", "subIdx", subIdx)
 }
 
 // registerFrameCompletionHandler attaches an addCompletedHandler: block to the
