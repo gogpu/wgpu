@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.24.1] - 2026-04-07
 
 ### Fixed
 
@@ -25,6 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching Rust wgpu-core `CommandAllocator` pattern. Encoder travels:
   Pool → CommandEncoder → CommandBuffer → Submit → GPU done → ResetAll → Pool.
   Fixes ~7.5 MB/min memory leak on DX12. (BUG-DX12-004)
+
+- **Unified single encoder pool per device** — User command encoders and
+  PendingWrites internal staging encoders now share single `encoderPool`,
+  matching Rust wgpu-core single `device.command_allocator` (allocator.rs).
+  PendingWrites borrows pool reference, does not own or destroy it.
+  (CLEANUP-ENCODER-003)
+
+- **CommandBuffer.Release()** — Explicit cleanup for non-submitted command buffers.
+  Returns HAL encoder to pool and drops tracked resource refs. Matches Rust
+  `InnerCommandEncoder::Drop` (command/mod.rs:726-738). A CommandBuffer must be
+  either Submit()'d or Release()'d to avoid encoder leak. (CLEANUP-ENCODER-001)
+
+- **Vulkan VkCommandPool double-free fix** — In pool-managed mode, CommandBuffer
+  no longer carries VkCommandPool ref (cb.pool=0). Encoder exclusively owns pool.
+  Prevents triple-free at shutdown (FreeCommandBuffer + encoder.Destroy +
+  destroyAllocators). (BUG-DX12-004)
+
+- **Shutdown order: WaitIdle → Triage → FlushAll → pool.destroy → hal.Destroy** —
+  WaitIdle ensures PollCompleted returns final index so all deferred encoder
+  recycling callbacks fire before pool destruction. Prevents vkDestroyCommandPool
+  crash on shutdown. (BUG-DX12-004)
 
 - **All WriteBuffer through staging + DX12 HEAP_TYPE_CUSTOM** — MapWrite buffers
   bypassed PendingWrites with direct memcpy, causing data races when CPU overwrites
