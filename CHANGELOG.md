@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+#### Metal
+
+- **Actual GPU completion tracking via addCompletedHandler** — `PollCompleted()`
+  returned a conservative heuristic (`submissionIndex - maxFramesInFlight`)
+  causing `maintain()` to recycle staging belt chunks before GPU finished using
+  them. Result: texture flickering on macOS. Now uses `atomic.Uint64` updated by
+  Metal completion handler — same pattern as Rust wgpu-hal `Fence.completed_value`.
+  CAS loop ensures monotonic-only updates. (BUG-METAL-001)
+
 ## [0.24.0] - 2026-04-06
 
 ### Added
