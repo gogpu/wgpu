@@ -307,6 +307,36 @@ type CommandBuffer struct {
 	halEncoder hal.CommandEncoder
 }
 
+// Release releases a CommandBuffer that will NOT be submitted to the GPU.
+// This returns the HAL encoder to the device pool and drops tracked resource refs.
+//
+// In normal flow, Submit() takes ownership of the encoder and handles recycling
+// after GPU completion. Release() is for error paths and canceled operations
+// where the CommandBuffer is discarded without submitting.
+//
+// Matches Rust wgpu-core InnerCommandEncoder::Drop (command/mod.rs:726-738)
+// which always calls reset_all + release_encoder regardless of whether the
+// command buffer was submitted.
+//
+// A CommandBuffer MUST be either Submit()'d or Release()'d. Failing to do
+// either leaks the HAL encoder (DX12 ~64KB allocator, Vulkan VkCommandPool).
+func (cb *CommandBuffer) Release() {
+	if cb == nil {
+		return
+	}
+	// Return encoder to pool (reset native allocator).
+	if cb.halEncoder != nil && cb.device != nil && cb.device.cmdEncoderPool != nil {
+		cb.halEncoder.ResetAll(nil)
+		cb.device.cmdEncoderPool.release(cb.halEncoder)
+		cb.halEncoder = nil
+	}
+	// Drop tracked resource refs.
+	for _, ref := range cb.trackedRefs {
+		ref.Drop()
+	}
+	cb.trackedRefs = nil
+}
+
 // halBuffer returns the underlying HAL command buffer.
 func (cb *CommandBuffer) halBuffer() hal.CommandBuffer {
 	if cb.core == nil {
