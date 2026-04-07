@@ -38,7 +38,7 @@ func TestEGLInit(t *testing.T) {
 	}
 
 	// Get EGL display (will use surfaceless if no DISPLAY/WAYLAND_DISPLAY set)
-	display, windowKind, err := egl.GetEGLDisplay()
+	display, windowKind, displayOwner, err := egl.GetEGLDisplay()
 	if err != nil {
 		t.Fatalf("egl.GetEGLDisplay() failed: %v", err)
 	}
@@ -61,11 +61,16 @@ func TestEGLInit(t *testing.T) {
 	extensions := egl.QueryString(display, egl.Extensions)
 	t.Logf("EGL display extensions: %s", extensions)
 
-	// Terminate
+	// Terminate EGL display first, then close native display connection
 	if egl.Terminate(display) == egl.False {
 		t.Errorf("egl.Terminate() failed: error 0x%x", egl.GetError())
 	}
 	t.Log("EGL terminated successfully")
+
+	// Close native display connection (X11) after eglTerminate
+	if displayOwner != nil {
+		displayOwner.Close()
+	}
 }
 
 // TestEGLContext tests EGL context creation.

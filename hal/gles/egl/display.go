@@ -215,61 +215,71 @@ func DetectWindowKind() WindowKind {
 
 // GetEGLDisplay returns an EGL display for the detected platform.
 // It automatically detects the window system and uses the appropriate EGL platform.
-func GetEGLDisplay() (EGLDisplay, WindowKind, error) {
+//
+// When the display is backed by an X11 connection, the returned DisplayOwner
+// holds that connection open. The caller MUST keep the DisplayOwner alive for
+// the lifetime of the EGL display and call DisplayOwner.Close() only AFTER
+// eglTerminate. Closing the DisplayOwner earlier causes a use-after-close
+// SIGSEGV when EGL accesses the underlying X11 connection.
+//
+// For Wayland and Surfaceless platforms the returned DisplayOwner is nil
+// because those paths do not open a native display connection that must be
+// kept alive.
+func GetEGLDisplay() (EGLDisplay, WindowKind, *DisplayOwner, error) {
 	windowKind := DetectWindowKind()
 
 	switch windowKind {
 	case WindowKindX11:
 		owner := OpenX11Display()
 		if owner == nil {
-			return NoDisplay, WindowKindUnknown, fmt.Errorf("failed to open X11 display")
+			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("failed to open X11 display")
 		}
-		defer owner.Close()
 
 		// Try EGL 1.5 platform extension first
 		display := GetPlatformDisplay(PlatformX11KHR, owner.display, nil)
 		if display != NoDisplay {
-			return display, WindowKindX11, nil
+			return display, WindowKindX11, owner, nil
 		}
 
 		// Fallback to EGL 1.4
 		display = GetDisplay(EGLNativeDisplayType(owner.display))
 		if display == NoDisplay {
-			return NoDisplay, WindowKindUnknown, fmt.Errorf("eglGetDisplay failed for X11")
+			owner.Close()
+			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("eglGetDisplay failed for X11")
 		}
-		return display, WindowKindX11, nil
+		return display, WindowKindX11, owner, nil
 
 	case WindowKindWayland:
 		// For Wayland, we use the default display (NULL)
 		// The actual Wayland connection will be managed by the window system
 		display := GetPlatformDisplay(PlatformWaylandKHR, 0, nil)
 		if display != NoDisplay {
-			return display, WindowKindWayland, nil
+			return display, WindowKindWayland, nil, nil
 		}
 
 		// Fallback to EGL 1.4
 		display = GetDisplay(DefaultDisplay)
 		if display == NoDisplay {
-			return NoDisplay, WindowKindUnknown, fmt.Errorf("eglGetDisplay failed for Wayland")
+			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("eglGetDisplay failed for Wayland")
 		}
-		return display, WindowKindWayland, nil
+		return display, WindowKindWayland, nil, nil
 
 	case WindowKindSurfaceless:
 		// Surfaceless rendering (headless)
 		display := GetPlatformDisplay(PlatformSurfacelessMesa, 0, nil)
 		if display != NoDisplay {
-			return display, WindowKindSurfaceless, nil
+			return display, WindowKindSurfaceless, nil, nil
 		}
 
 		// Fallback to default display
 		display = GetDisplay(DefaultDisplay)
 		if display == NoDisplay {
-			return NoDisplay, WindowKindUnknown, fmt.Errorf("eglGetDisplay failed for surfaceless")
+			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("eglGetDisplay failed for surfaceless")
 		}
-		return display, WindowKindSurfaceless, nil
+		return display, WindowKindSurfaceless, nil, nil
 
 	default:
-		return NoDisplay, WindowKindUnknown, fmt.Errorf("unknown window system")
+		return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("unknown window system")
 	}
 }
 

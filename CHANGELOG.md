@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.3] - 2026-04-07
+
+### Fixed
+
+#### GLES
+
+- **X11 display use-after-close in eglInitialize** — `GetEGLDisplay()` closed X11
+  display connection (`defer owner.Close()`) before returning. EGL display referenced
+  the closed X11 → SIGSEGV in `eglInitialize` on Linux. `DisplayOwner` now stored in
+  `Context` and closed after `eglTerminate` in `Destroy()`. Matches Rust wgpu-hal
+  where `DisplayOwner` lives in Instance, `XCloseDisplay` only in `Drop`.
+  Fixes SIGSEGV on Linux GLES (ui#66, gogpu#155). (BUG-GLES-001)
+
 ## [0.24.2] - 2026-04-07
 
 ### Fixed
