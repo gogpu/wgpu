@@ -5,9 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.24.3] - 2026-04-07
+## [0.24.4] - 2026-04-07
 
 ### Added
+
+- **Software backend windowed rendering** — `Present()` now auto-blits CPU
+  framebuffer to Win32 window via GDI `StretchDIBits`. gogpu calls `Present()`
+  identically for all backends — no backend-specific knowledge needed. Headless
+  (hwnd=0) remains no-op. RGBA→BGRA conversion with reusable buffer.
+  Platform files: `blit_windows.go` (GDI), `blit_other.go` (stub Linux/macOS).
+
+- **Software triangle example** — `cmd/sw-triangle` renders red triangle on blue
+  background using only CPU rasterizer + GDI blit. ~30 FPS at 800×600. Proves
+  software backend works end-to-end with windowed output.
+
+- **Software backend headless test** — `cmd/sw-test` validates instance, adapter,
+  device, shader compilation, pipeline creation on CPU adapter.
+
+- **Software rasterizer Float32x3 vertex color** — `hasVertexColors` now recognizes
+  RGB (Float32x3) in addition to RGBA (Float32x4). Vertex attributes padded to 4
+  components (alpha=1.0) for interpolated color rendering.
 
 - **Adapter selection logging** — `RequestAdapter` now logs which adapter was
   selected with name, backend, and device type via slog. Helps diagnose fallback

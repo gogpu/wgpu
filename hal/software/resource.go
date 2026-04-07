@@ -135,6 +135,8 @@ type Surface struct {
 	mu          sync.RWMutex // Protects framebuffer access
 	presentMode hal.PresentMode
 	alphaMode   hal.CompositeAlphaMode
+	hwnd        uintptr // window handle for platform blit (0 = headless)
+	blitBuf     []byte  // reusable BGRA buffer to avoid per-frame allocation
 }
 
 // Configure configures the surface with the given settings.

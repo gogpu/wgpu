@@ -54,11 +54,40 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	return nil
 }
 
-// Present simulates surface presentation.
-// In software backend, this is essentially a no-op since framebuffer is already updated.
-func (q *Queue) Present(_ hal.Surface, _ hal.SurfaceTexture) error {
-	// In software backend, the framebuffer is already updated by render operations
-	// Present just marks the frame as complete
+// Present presents the rendered framebuffer to the window.
+// If the surface has a valid window handle, it blits the framebuffer via
+// platform-native APIs (GDI StretchDIBits on Windows).
+// In headless mode (hwnd == 0), this is a no-op.
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture) error {
+	s, ok := surface.(*Surface)
+	if !ok || s.hwnd == 0 {
+		return nil // headless mode — no window to blit to
+	}
+
+	s.mu.RLock()
+	fb := s.framebuffer
+	width := int32(s.width)
+	height := int32(s.height)
+	s.mu.RUnlock()
+
+	if len(fb) == 0 || width <= 0 || height <= 0 {
+		return nil
+	}
+
+	// Convert RGBA -> BGRA and blit to window.
+	// Reuse blitBuf on Surface to avoid per-frame allocation.
+	needed := int(width) * int(height) * 4
+	if len(s.blitBuf) < needed {
+		s.blitBuf = make([]byte, needed)
+	}
+	for i := 0; i < needed; i += 4 {
+		s.blitBuf[i+0] = fb[i+2] // B
+		s.blitBuf[i+1] = fb[i+1] // G
+		s.blitBuf[i+2] = fb[i+0] // R
+		s.blitBuf[i+3] = fb[i+3] // A
+	}
+
+	blitFramebufferToWindow(s.hwnd, s.blitBuf[:needed], width, height)
 	return nil
 }
 
