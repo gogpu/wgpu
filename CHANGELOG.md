@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.24.3] - 2026-04-07
 
+### Added
+
+- **Adapter selection logging** — `RequestAdapter` now logs which adapter was
+  selected with name, backend, and device type via slog. Helps diagnose fallback
+  issues — previously no indication which backend was chosen.
+
+- **Software backend test** — `cmd/sw-test` validates software rasterizer:
+  instance, CPU adapter, device, shader compilation, render pipeline creation.
+  Headless (no window needed).
+
 ### Fixed
 
 #### GLES
