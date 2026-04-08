@@ -188,9 +188,11 @@ func (l *PipelineLayout) Destroy() {
 
 // RenderPipeline implements hal.RenderPipeline for Metal.
 type RenderPipeline struct {
-	raw    ID // id<MTLRenderPipelineState>
-	device *Device
-	layout *PipelineLayout // for SetBindGroup slot offset lookup
+	raw       ID // id<MTLRenderPipelineState>
+	device    *Device
+	layout    *PipelineLayout // for SetBindGroup slot offset lookup
+	cullMode  MTLCullMode
+	frontFace MTLWinding
 }
 
 // Destroy releases the render pipeline.

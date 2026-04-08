@@ -418,6 +418,8 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	e.pipeline = p
 	e.currentLayout = p.layout // store for SetBindGroup slot offset lookup
 	_ = MsgSend(e.raw, Sel("setRenderPipelineState:"), uintptr(p.raw))
+	_ = MsgSend(e.raw, Sel("setCullMode:"), uintptr(p.cullMode))
+	_ = MsgSend(e.raw, Sel("setFrontFacingWinding:"), uintptr(p.frontFace))
 }
 
 // bindSlotAssignment holds the computed per-type Metal slot index for a bind group entry.

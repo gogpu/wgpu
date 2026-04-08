@@ -658,7 +658,13 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if pl, ok := desc.Layout.(*PipelineLayout); ok {
 		pipeLayout = pl
 	}
-	return &RenderPipeline{raw: pipelineState, device: d, layout: pipeLayout}, nil
+	return &RenderPipeline{
+		raw:       pipelineState,
+		device:    d,
+		layout:    pipeLayout,
+		cullMode:  cullModeToMTL(desc.Primitive.CullMode),
+		frontFace: frontFaceToMTL(desc.Primitive.FrontFace),
+	}, nil
 }
 
 // buildVertexDescriptor creates an MTLVertexDescriptor from WebGPU vertex buffer layouts.
