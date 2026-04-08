@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.5] - 2026-04-08
+
+### Fixed
+
+- **Metal: cull mode and front face winding** — `RenderPipelineDescriptor.Primitive.CullMode`
+  and `FrontFace` were not applied on Metal. Now stored in `RenderPipeline` and set on the
+  render encoder via `setCullMode:` / `setFrontFacingWinding:` at `SetPipeline` time.
+  (PR #132 by @jdbann)
+
 ## [0.24.4] - 2026-04-08
 
 ### Added
