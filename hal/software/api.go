@@ -23,9 +23,11 @@ func (API) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 type Instance struct{}
 
 // CreateSurface creates a software rendering surface.
-// Always succeeds regardless of display/window handles.
-func (i *Instance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
-	return &Surface{}, nil
+// If a valid window handle is provided, Present() will automatically blit
+// the framebuffer to the window via platform-native APIs (GDI on Windows).
+// If window is 0 (headless mode), Present() is a no-op.
+func (i *Instance) CreateSurface(_, window uintptr) (hal.Surface, error) {
+	return &Surface{hwnd: window}, nil
 }
 
 // EnumerateAdapters returns a single default software adapter.

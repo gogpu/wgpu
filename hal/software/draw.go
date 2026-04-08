@@ -257,6 +257,12 @@ func (r *RenderPassEncoder) fetchTriangles(
 			sv.Attributes = append(sv.Attributes, vals...)
 		}
 
+		// Ensure at least 4 attribute components (RGBA) for interpolated color.
+		// RGB vertex colors (Float32x3) need alpha=1.0 padding.
+		for len(sv.Attributes) < 4 {
+			sv.Attributes = append(sv.Attributes, 1.0)
+		}
+
 		vertices = append(vertices, sv)
 	}
 
@@ -349,9 +355,9 @@ func (r *RenderPassEncoder) hasVertexColors(layouts []gputypes.VertexBufferLayou
 		if attr.ShaderLocation == 0 {
 			continue
 		}
-		// 4-component attribute is likely RGBA color.
+		// 3 or 4-component attribute is likely RGB/RGBA color.
 		switch attr.Format {
-		case gputypes.VertexFormatFloat32x4, gputypes.VertexFormatUnorm8x4:
+		case gputypes.VertexFormatFloat32x3, gputypes.VertexFormatFloat32x4, gputypes.VertexFormatUnorm8x4:
 			return true
 		}
 	}

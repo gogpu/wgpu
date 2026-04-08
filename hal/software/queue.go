@@ -54,11 +54,29 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	return nil
 }
 
-// Present simulates surface presentation.
-// In software backend, this is essentially a no-op since framebuffer is already updated.
-func (q *Queue) Present(_ hal.Surface, _ hal.SurfaceTexture) error {
-	// In software backend, the framebuffer is already updated by render operations
-	// Present just marks the frame as complete
+// Present blits the software-rendered framebuffer to the window.
+// The framebuffer is in BGRA byte order (matching the surface format) after
+// executeFullscreenBlit's RGBA→BGRA swizzle. GDI BI_RGB 32-bit expects BGRA,
+// so no additional conversion is needed — the framebuffer is passed directly.
+// In headless mode (hwnd == 0), this is a no-op.
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture) error {
+	s, ok := surface.(*Surface)
+	if !ok || s.hwnd == 0 {
+		return nil
+	}
+
+	s.mu.RLock()
+	fb := s.framebuffer
+	w := s.width
+	h := s.height
+	s.mu.RUnlock()
+
+	if len(fb) == 0 || w == 0 || h == 0 {
+		return nil
+	}
+
+	// Framebuffer is BGRA — pass directly to GDI, no swap needed.
+	blitFramebufferToWindow(s.hwnd, fb, int32(w), int32(h))
 	return nil
 }
 

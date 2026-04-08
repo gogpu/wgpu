@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // InstanceDescriptor configures instance creation.
@@ -87,6 +88,12 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to get adapter limits: %w", err)
 	}
+
+	hal.Logger().Info("wgpu: adapter selected",
+		"name", info.Name,
+		"backend", info.Backend,
+		"type", info.DeviceType,
+	)
 
 	hub := core.GetGlobal().Hub()
 	coreAdapter, err := hub.GetAdapter(adapterID)

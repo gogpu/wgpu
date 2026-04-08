@@ -271,7 +271,7 @@ func TestFilterBackendsByMask(t *testing.T) {
 		{
 			name:    "Vulkan only",
 			mask:    gputypes.BackendsVulkan,
-			wantLen: 2, // Vulkan + Empty (always included)
+			wantLen: 2, // Vulkan + Empty (always included as fallback)
 			wantHas: []gputypes.Backend{gputypes.BackendVulkan, gputypes.BackendEmpty},
 			wantNot: []gputypes.Backend{gputypes.BackendMetal, gputypes.BackendDX12},
 		},

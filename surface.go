@@ -3,6 +3,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -16,6 +17,15 @@ type Surface struct {
 	instance *Instance
 	device   *Device
 	released bool
+
+	// displayHandle and windowHandle are stored for deferred HAL surface
+	// re-creation when the device's backend differs from the initially
+	// selected one (e.g., software adapter via ForceFallbackAdapter when
+	// the initial surface was created on Vulkan/DX12).
+	displayHandle  uintptr
+	windowHandle   uintptr
+	currentBackend gputypes.Backend // backend type of the current HAL surface
+	surfaceCreated bool             // true after first ensureHALSurface
 }
 
 // CreateSurface creates a rendering surface from platform-specific handles.
@@ -39,10 +49,23 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
 	}
 
+	// Determine the backend of the initial HAL instance.
+	var initialBackend gputypes.Backend
+	for b, inst := range i.core.HALInstanceMap() {
+		if inst == halInstance {
+			initialBackend = b
+			break
+		}
+	}
+
 	coreSurface := core.NewSurface(halSurface, "")
 	return &Surface{
-		core:     coreSurface,
-		instance: i,
+		core:           coreSurface,
+		instance:       i,
+		displayHandle:  displayHandle,
+		windowHandle:   windowHandle,
+		currentBackend: initialBackend,
+		surfaceCreated: true,
 	}, nil
 }
 
@@ -66,6 +89,14 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		Usage:       config.Usage,
 		PresentMode: config.PresentMode,
 		AlphaMode:   config.AlphaMode,
+	}
+
+	// Create or re-create the HAL surface on the correct backend's HAL instance.
+	// Surface creation is deferred from CreateSurface() to here because we need
+	// to know the device's backend. Creating a Vulkan surface then destroying it
+	// (when device is software) corrupts GDI state on some drivers.
+	if err := s.ensureHALSurface(device.core.Backend()); err != nil {
+		return err
 	}
 
 	s.device = device
@@ -144,6 +175,28 @@ func (s *Surface) DiscardTexture() {
 		return
 	}
 	s.core.DiscardTexture()
+}
+
+// ensureHALSurface creates or re-creates the HAL surface for the given backend.
+func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
+	if s.surfaceCreated && s.currentBackend == backend {
+		return nil
+	}
+	targetInstance := s.instance.core.HALInstanceForBackend(backend)
+	if targetInstance == nil {
+		return fmt.Errorf("wgpu: no HAL instance for backend %v", backend)
+	}
+	if s.core.RawSurface() != nil {
+		s.core.RawSurface().Destroy()
+	}
+	halSurface, err := targetInstance.CreateSurface(s.displayHandle, s.windowHandle)
+	if err != nil {
+		return fmt.Errorf("wgpu: failed to create surface for backend %v: %w", backend, err)
+	}
+	s.core.SetRawSurface(halSurface)
+	s.currentBackend = backend
+	s.surfaceCreated = true
+	return nil
 }
 
 // HAL returns the underlying HAL surface for backward compatibility.

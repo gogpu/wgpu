@@ -29,6 +29,12 @@ type Instance struct {
 	// These are destroyed when the Instance is destroyed.
 	halInstances []hal.Instance
 
+	// halInstanceMap maps backend type to its HAL instance for backend-specific
+	// surface creation. When a device uses a different backend than the initially
+	// selected one (e.g., software adapter with ForceFallbackAdapter), the surface
+	// must be re-created on the correct backend's HAL instance.
+	halInstanceMap map[gputypes.Backend]hal.Instance
+
 	// deferredGLES holds GLES HAL instances whose adapter enumeration is deferred
 	// until a surface is available. OpenGL requires a GL context (obtained from a
 	// surface) to query adapter capabilities. These are enumerated lazily on the
@@ -56,11 +62,12 @@ func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 	}
 
 	i := &Instance{
-		backends:     desc.Backends,
-		flags:        desc.Flags,
-		adapters:     []AdapterID{},
-		halInstances: []hal.Instance{},
-		useMock:      false,
+		backends:       desc.Backends,
+		flags:          desc.Flags,
+		adapters:       []AdapterID{},
+		halInstances:   []hal.Instance{},
+		halInstanceMap: make(map[gputypes.Backend]hal.Instance),
+		useMock:        false,
 	}
 
 	// Try to enumerate real adapters via HAL backends
@@ -85,11 +92,12 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 	}
 
 	i := &Instance{
-		backends:     desc.Backends,
-		flags:        desc.Flags,
-		adapters:     []AdapterID{},
-		halInstances: []hal.Instance{},
-		useMock:      true,
+		backends:       desc.Backends,
+		flags:          desc.Flags,
+		adapters:       []AdapterID{},
+		halInstances:   []hal.Instance{},
+		halInstanceMap: make(map[gputypes.Backend]hal.Instance),
+		useMock:        true,
 	}
 
 	i.createMockAdapter()
@@ -151,12 +159,14 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool
 		// a placeholder adapter with nil glCtx that crashes on use.
 		if provider.Variant() == gputypes.BackendGL {
 			i.halInstances = append(i.halInstances, halInstance)
+			i.halInstanceMap[provider.Variant()] = halInstance
 			i.deferredGLES = append(i.deferredGLES, halInstance)
 			continue
 		}
 
 		// Track HAL instance for cleanup
 		i.halInstances = append(i.halInstances, halInstance)
+		i.halInstanceMap[provider.Variant()] = halInstance
 
 		// Enumerate adapters from this backend
 		exposedAdapters := halInstance.EnumerateAdapters(nil)
@@ -476,6 +486,24 @@ func (i *Instance) HALInstance() hal.Instance {
 		return i.halInstances[0]
 	}
 	return nil
+}
+
+// HALInstanceForBackend returns the HAL instance for a specific backend type.
+// Returns nil if no instance exists for the given backend.
+// Used to re-create surfaces when the device's backend differs from the
+// initially selected one (e.g., software adapter via ForceFallbackAdapter).
+func (i *Instance) HALInstanceForBackend(backend gputypes.Backend) hal.Instance {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.halInstanceMap[backend]
+}
+
+// HALInstanceMap returns the backend-to-instance mapping.
+// Used to determine which backend a given HAL instance belongs to.
+func (i *Instance) HALInstanceMap() map[gputypes.Backend]hal.Instance {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.halInstanceMap
 }
 
 // Destroy releases all resources associated with this instance.
