@@ -193,6 +193,11 @@ type RenderPipeline struct {
 	layout    *PipelineLayout // for SetBindGroup slot offset lookup
 	cullMode  MTLCullMode
 	frontFace MTLWinding
+
+	depthStencil    ID // id<MTLDepthStencilState>
+	depthBias       float32
+	depthSlopeScale float32
+	depthClamp      float32
 }
 
 // Destroy releases the render pipeline.

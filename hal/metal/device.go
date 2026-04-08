@@ -624,6 +624,24 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		}
 	}
 
+	var depthStencilState ID
+	var depthBias, depthSlopeScale, depthClamp float32
+	if desc.DepthStencil != nil {
+		// Set depth attachment format
+		_ = MsgSend(pipelineDesc, Sel("setDepthAttachmentPixelFormat:"), uintptr(d.adapter.mapTextureFormat(desc.DepthStencil.Format)))
+
+		// Create depth stencil state
+		depthStencilDesc := MsgSend(ID(GetClass("MTLDepthStencilDescriptor")), Sel("new"))
+		_ = MsgSend(depthStencilDesc, Sel("setDepthCompareFunction:"), uintptr(compareFunctionToMTL(desc.DepthStencil.DepthCompare)))
+		msgSendVoid(depthStencilDesc, Sel("setDepthWriteEnabled:"), argBool(desc.DepthStencil.DepthWriteEnabled))
+		depthStencilState = MsgSend(d.raw, Sel("newDepthStencilStateWithDescriptor:"), uintptr(depthStencilDesc))
+
+		// Record bias values to set in render pass
+		depthBias = float32(desc.DepthStencil.DepthBias)
+		depthSlopeScale = desc.DepthStencil.DepthBiasSlopeScale
+		depthClamp = desc.DepthStencil.DepthBiasClamp
+	}
+
 	// Set sample count
 	sampleCount := desc.Multisample.Count
 	if sampleCount == 0 {
@@ -664,6 +682,11 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		layout:    pipeLayout,
 		cullMode:  cullModeToMTL(desc.Primitive.CullMode),
 		frontFace: frontFaceToMTL(desc.Primitive.FrontFace),
+
+		depthStencil:    depthStencilState,
+		depthBias:       depthBias,
+		depthSlopeScale: depthSlopeScale,
+		depthClamp:      depthClamp,
 	}, nil
 }
 
