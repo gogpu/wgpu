@@ -99,7 +99,8 @@ func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Simple RGBA8 clear (4 bytes per pixel)
+	// Software backend always stores RGBA byte order internally.
+	// Format conversion (RGBA→BGRA for GDI) is done at blit time.
 	r := uint8(color.R * 255)
 	g := uint8(color.G * 255)
 	b := uint8(color.B * 255)
@@ -136,7 +137,6 @@ type Surface struct {
 	presentMode hal.PresentMode
 	alphaMode   hal.CompositeAlphaMode
 	hwnd        uintptr // window handle for platform blit (0 = headless)
-	blitBuf     []byte  // reusable BGRA buffer to avoid per-frame allocation
 }
 
 // Configure configures the surface with the given settings.
@@ -201,8 +201,10 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 // DiscardTexture is a no-op (framebuffer stays allocated).
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
 
-// GetFramebuffer returns a copy of the current framebuffer data (thread-safe).
-// This is the key method for reading rendered results in software backend.
+// GetFramebuffer returns a copy of the current framebuffer data in RGBA byte
+// order (thread-safe). If the surface format is BGRA, R and B channels are
+// swapped so callers always receive consistent RGBA data. This allows
+// platform blit code to do a single RGBA→BGRA conversion for GDI/X11.
 func (s *Surface) GetFramebuffer() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -213,6 +215,16 @@ func (s *Surface) GetFramebuffer() []byte {
 
 	result := make([]byte, len(s.framebuffer))
 	copy(result, s.framebuffer)
+
+	// If surface format is BGRA, the framebuffer stores BGRA bytes.
+	// Swap R↔B so the returned data is always RGBA.
+	if s.format == gputypes.TextureFormatBGRA8Unorm ||
+		s.format == gputypes.TextureFormatBGRA8UnormSrgb {
+		for i := 0; i < len(result)-3; i += 4 {
+			result[i+0], result[i+2] = result[i+2], result[i+0]
+		}
+	}
+
 	return result
 }
 

@@ -3,43 +3,40 @@
 package software
 
 import (
+	"syscall"
 	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 var (
-	user32Blit = windows.NewLazySystemDLL("user32.dll")
-	gdi32Blit  = windows.NewLazySystemDLL("gdi32.dll")
+	user32DLL = syscall.MustLoadDLL("user32.dll")
+	gdi32DLL  = syscall.MustLoadDLL("gdi32.dll")
 
-	procGetDC         = user32Blit.NewProc("GetDC")
-	procReleaseDC     = user32Blit.NewProc("ReleaseDC")
-	procStretchDIBits = gdi32Blit.NewProc("StretchDIBits")
+	procGetDC         = user32DLL.MustFindProc("GetDC")
+	procReleaseDC     = user32DLL.MustFindProc("ReleaseDC")
+	procStretchDIBits = gdi32DLL.MustFindProc("StretchDIBits")
 )
 
 const (
+	srccopy      = 0x00CC0020
 	dibRGBColors = 0
-	srcCopy      = 0x00CC0020
-	biRGB        = 0
 )
 
-// bitmapInfoHeader is the Windows BITMAPINFOHEADER structure.
 type bitmapInfoHeader struct {
-	Size          uint32
-	Width         int32
-	Height        int32
-	Planes        uint16
-	BitCount      uint16
-	Compression   uint32
-	SizeImage     uint32
-	XPelsPerMeter int32
-	YPelsPerMeter int32
-	ClrUsed       uint32
-	ClrImportant  uint32
+	biSize          uint32
+	biWidth         int32
+	biHeight        int32
+	biPlanes        uint16
+	biBitCount      uint16
+	biCompression   uint32
+	biSizeImage     uint32
+	biXPelsPerMeter int32
+	biYPelsPerMeter int32
+	biClrUsed       uint32
+	biClrImportant  uint32
 }
 
-// blitFramebufferToWindow blits a BGRA framebuffer to the window using GDI StretchDIBits.
-// The caller must provide pre-converted BGRA data (not RGBA).
+// blitFramebufferToWindow blits BGRA framebuffer to window via GDI StretchDIBits.
+// GDI BI_RGB 32-bit expects BGRA byte order — no conversion needed.
 func blitFramebufferToWindow(hwnd uintptr, bgra []byte, width, height int32) {
 	if len(bgra) == 0 || width <= 0 || height <= 0 {
 		return
@@ -52,25 +49,20 @@ func blitFramebufferToWindow(hwnd uintptr, bgra []byte, width, height int32) {
 	defer procReleaseDC.Call(hwnd, hdc) //nolint:errcheck
 
 	bmi := bitmapInfoHeader{
-		Size:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
-		Width:       width,
-		Height:      -height, // negative = top-down DIB
-		Planes:      1,
-		BitCount:    32,
-		Compression: biRGB,
+		biSize:     uint32(unsafe.Sizeof(bitmapInfoHeader{})),
+		biWidth:    width,
+		biHeight:   -height, // negative = top-down DIB
+		biPlanes:   1,
+		biBitCount: 32,
 	}
 
 	procStretchDIBits.Call( //nolint:errcheck
 		hdc,
-		0, 0, // dest x, y
-		uintptr(width),
-		uintptr(height),
-		0, 0, // src x, y
-		uintptr(width),
-		uintptr(height),
+		0, 0, uintptr(width), uintptr(height),
+		0, 0, uintptr(width), uintptr(height),
 		uintptr(unsafe.Pointer(&bgra[0])),
 		uintptr(unsafe.Pointer(&bmi)),
 		uintptr(dibRGBColors),
-		uintptr(srcCopy),
+		uintptr(srccopy),
 	)
 }

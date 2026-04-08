@@ -54,40 +54,29 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	return nil
 }
 
-// Present presents the rendered framebuffer to the window.
-// If the surface has a valid window handle, it blits the framebuffer via
-// platform-native APIs (GDI StretchDIBits on Windows).
+// Present blits the software-rendered framebuffer to the window.
+// The framebuffer is in BGRA byte order (matching the surface format) after
+// executeFullscreenBlit's RGBA→BGRA swizzle. GDI BI_RGB 32-bit expects BGRA,
+// so no additional conversion is needed — the framebuffer is passed directly.
 // In headless mode (hwnd == 0), this is a no-op.
 func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture) error {
 	s, ok := surface.(*Surface)
 	if !ok || s.hwnd == 0 {
-		return nil // headless mode — no window to blit to
+		return nil
 	}
 
 	s.mu.RLock()
 	fb := s.framebuffer
-	width := int32(s.width)
-	height := int32(s.height)
+	w := s.width
+	h := s.height
 	s.mu.RUnlock()
 
-	if len(fb) == 0 || width <= 0 || height <= 0 {
+	if len(fb) == 0 || w == 0 || h == 0 {
 		return nil
 	}
 
-	// Convert RGBA -> BGRA and blit to window.
-	// Reuse blitBuf on Surface to avoid per-frame allocation.
-	needed := int(width) * int(height) * 4
-	if len(s.blitBuf) < needed {
-		s.blitBuf = make([]byte, needed)
-	}
-	for i := 0; i < needed; i += 4 {
-		s.blitBuf[i+0] = fb[i+2] // B
-		s.blitBuf[i+1] = fb[i+1] // G
-		s.blitBuf[i+2] = fb[i+0] // R
-		s.blitBuf[i+3] = fb[i+3] // A
-	}
-
-	blitFramebufferToWindow(s.hwnd, s.blitBuf[:needed], width, height)
+	// Framebuffer is BGRA — pass directly to GDI, no swap needed.
+	blitFramebufferToWindow(s.hwnd, fb, int32(w), int32(h))
 	return nil
 }
 

@@ -117,6 +117,14 @@ type Device struct {
 	errorScopeManager *ErrorScopeManager
 }
 
+// Backend returns the backend type of the device's adapter.
+func (d *Device) Backend() gputypes.Backend {
+	if d.adapter != nil {
+		return d.adapter.Backend
+	}
+	return gputypes.BackendEmpty
+}
+
 // NewDevice creates a new Device wrapping a HAL device.
 //
 // This is the constructor for devices with full HAL integration.
@@ -1524,4 +1532,12 @@ func NewSurface(
 // RawSurface returns the underlying HAL surface.
 func (s *Surface) RawSurface() hal.Surface {
 	return s.raw
+}
+
+// SetRawSurface replaces the underlying HAL surface.
+// Used when the surface needs to be re-created on a different backend's HAL
+// instance (e.g., switching from Vulkan surface to software surface during
+// Configure when the device's backend differs from the original surface).
+func (s *Surface) SetRawSurface(raw hal.Surface) {
+	s.raw = raw
 }

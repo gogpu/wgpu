@@ -12,7 +12,6 @@ import (
 
 var (
 	user32   = windows.NewLazySystemDLL("user32.dll")
-	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
@@ -31,9 +30,8 @@ var (
 	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
 	procLoadCursorW        = user32.NewProc("LoadCursorW")
 	procSetCursor          = user32.NewProc("SetCursor")
-	procGetDC              = user32.NewProc("GetDC")
-	procReleaseDC          = user32.NewProc("ReleaseDC")
-	procStretchDIBits      = gdi32.NewProc("StretchDIBits")
+	procBeginPaint         = user32.NewProc("BeginPaint")
+	procEndPaint           = user32.NewProc("EndPaint")
 )
 
 const (
@@ -62,11 +60,6 @@ const (
 
 	// WM_SETCURSOR hit test codes
 	htClient = 1
-
-	// DIB constants
-	dibRGBColors = 0
-	srcCopy      = 0x00CC0020
-	biRGB        = 0
 )
 
 type wndClassExW struct {
@@ -105,22 +98,20 @@ type rect struct {
 	Bottom int32
 }
 
-// bitmapInfoHeader is the BITMAPINFOHEADER structure for GDI blitting.
-type bitmapInfoHeader struct {
-	Size          uint32
-	Width         int32
-	Height        int32
-	Planes        uint16
-	BitCount      uint16
-	Compression   uint32
-	SizeImage     uint32
-	XPelsPerMeter int32
-	YPelsPerMeter int32
-	ClrUsed       uint32
-	ClrImportant  uint32
+// paintStruct is the Windows PAINTSTRUCT.
+type paintStruct struct {
+	HDC         uintptr
+	FErase      int32
+	RcPaintL    int32
+	RcPaintT    int32
+	RcPaintR    int32
+	RcPaintB    int32
+	FRestore    int32
+	FIncUpdate  int32
+	RGBReserved [32]byte
 }
 
-// Window represents a platform window with GDI blit support for software rendering.
+// Window represents a platform window for software rendering.
 type Window struct {
 	hwnd      uintptr
 	hInstance uintptr
@@ -136,11 +127,6 @@ type Window struct {
 	pendingH    atomic.Int32
 
 	animating atomic.Bool
-
-	// GDI blit framebuffer (BGRA format, kept between frames for WM_PAINT)
-	blitBuf    []byte
-	blitWidth  int32
-	blitHeight int32
 }
 
 // Global window pointer for wndProc callback.
@@ -275,68 +261,6 @@ func (w *Window) PollEvents() bool {
 	return w.running
 }
 
-// BlitFramebuffer copies an RGBA framebuffer to the window using GDI SetDIBitsToDevice.
-// The RGBA bytes are converted to BGRA in-place for GDI compatibility.
-func (w *Window) BlitFramebuffer(rgba []byte, width, height int32) {
-	if len(rgba) == 0 || width <= 0 || height <= 0 {
-		return
-	}
-
-	// Convert RGBA -> BGRA for GDI (swap R and B channels).
-	// Keep a reusable buffer to avoid allocation each frame.
-	needed := int(width) * int(height) * 4
-	if len(w.blitBuf) < needed {
-		w.blitBuf = make([]byte, needed)
-	}
-	for i := 0; i < needed; i += 4 {
-		w.blitBuf[i+0] = rgba[i+2] // B
-		w.blitBuf[i+1] = rgba[i+1] // G
-		w.blitBuf[i+2] = rgba[i+0] // R
-		w.blitBuf[i+3] = rgba[i+3] // A
-	}
-	w.blitWidth = width
-	w.blitHeight = height
-
-	w.blitToWindow()
-}
-
-// blitToWindow performs the actual GDI blit of w.blitBuf to the window.
-func (w *Window) blitToWindow() {
-	if len(w.blitBuf) == 0 || w.blitWidth <= 0 || w.blitHeight <= 0 {
-		return
-	}
-
-	hdc, _, _ := procGetDC.Call(w.hwnd)
-	if hdc == 0 {
-		return
-	}
-	defer procReleaseDC.Call(w.hwnd, hdc) //nolint:errcheck
-
-	bmi := bitmapInfoHeader{
-		Size:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
-		Width:       w.blitWidth,
-		Height:      -w.blitHeight, // negative = top-down DIB
-		Planes:      1,
-		BitCount:    32,
-		Compression: biRGB,
-	}
-
-	ret, _, _ := procStretchDIBits.Call(
-		hdc,
-		0, 0, // dest x, y
-		uintptr(w.blitWidth),
-		uintptr(w.blitHeight),
-		0, 0, // src x, y
-		uintptr(w.blitWidth),
-		uintptr(w.blitHeight),
-		uintptr(unsafe.Pointer(&w.blitBuf[0])), //nolint:gosec // G103: GDI needs raw pointer
-		uintptr(unsafe.Pointer(&bmi)),          //nolint:gosec // G103: GDI needs raw pointer
-		uintptr(dibRGBColors),
-		uintptr(srcCopy),
-	)
-	_ = ret
-}
-
 // wndProc is the window procedure callback.
 func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 	w := globalWindow
@@ -351,10 +275,13 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case wmPaint:
-		// Re-blit the last rendered frame on WM_PAINT (window exposed/restored).
-		w.blitToWindow()
-		ret, _, _ := procDefWindowProcW.Call(hwnd, message, wParam, lParam)
-		return ret
+		// Validate the region to prevent continuous WM_PAINT.
+		// Software backend renders via direct GetDC blit in Present(),
+		// so WM_PAINT just needs to validate without erasing.
+		var ps paintStruct
+		procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps))) //nolint:errcheck,gosec
+		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))   //nolint:errcheck,gosec
+		return 0
 
 	case wmEnterSizeMove:
 		w.inSizeMove.Store(true)

@@ -15,7 +15,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
+
+	_ "github.com/gogpu/wgpu/hal/allbackends" // register all backends
 )
 
 func init() {
@@ -41,15 +42,13 @@ func surfaceConfig(w, h uint32) *wgpu.SurfaceConfiguration {
 	}
 }
 
-// renderFrame renders one frame: clear to blue, draw triangle, present, GDI blit.
+// renderFrame renders one frame: clear to blue, draw triangle, present.
 // Returns false if the frame was skipped due to a recoverable error.
 func renderFrame(
-	window *Window,
 	surface *wgpu.Surface,
 	device *wgpu.Device,
 	pipeline *wgpu.RenderPipeline,
 	vertexBuffer *wgpu.Buffer,
-	swSurface *software.Surface,
 ) bool {
 	surfaceTex, _, err := surface.GetCurrentTexture()
 	if err != nil {
@@ -83,19 +82,16 @@ func renderFrame(
 	_ = renderPass.End()
 	commands, _ := encoder.Finish()
 	_, _ = device.Queue().Submit(commands)
-	_ = surface.Present(surfaceTex)
-
-	// Blit the software framebuffer to the Win32 window via GDI.
-	fb := swSurface.GetFramebuffer()
-	cw, ch := window.Size()
-
-	if len(fb) > 0 && cw > 0 && ch > 0 {
-		window.BlitFramebuffer(fb, cw, ch)
+	// Present() auto-blits framebuffer to window via GDI (hal/software/queue.go).
+	// Same API as GPU backends — no manual framebuffer access needed.
+	if presentErr := surface.Present(surfaceTex); presentErr != nil {
+		log.Printf("Present: %v", presentErr)
+		return false
 	}
 	return true
 }
 
-//nolint:funlen,gocyclo,cyclop // example code — sequential setup is intentionally verbose
+//nolint:funlen // example code — sequential setup is intentionally verbose
 func run() error {
 	log.Println("=== Software Triangle (GDI Blit) ===")
 
@@ -105,7 +101,12 @@ func run() error {
 	}
 	defer window.Destroy()
 
-	instance, err := wgpu.CreateInstance(nil)
+	// Use software-only backend mask. Creating Vulkan/DX12 instances (even without
+	// surfaces) loads GPU drivers that interfere with GDI StretchDIBits on some
+	// systems (Intel Iris Xe). 1 << BackendEmpty filters to software only.
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
+		Backends: wgpu.Backends(1 << gputypes.BackendEmpty),
+	})
 	if err != nil {
 		return fmt.Errorf("instance: %w", err)
 	}
@@ -214,12 +215,6 @@ func run() error {
 	}
 	defer pipeline.Release()
 
-	// Get the software HAL surface for framebuffer access.
-	swSurface, ok := surface.HAL().(*software.Surface)
-	if !ok {
-		return fmt.Errorf("HAL surface is not software.Surface — wrong backend?")
-	}
-
 	log.Println("Render loop started")
 	frameCount := 0
 	startTime := time.Now()
@@ -236,7 +231,7 @@ func run() error {
 			}
 		}
 
-		if !renderFrame(window, surface, device, pipeline, vertexBuffer, swSurface) {
+		if !renderFrame(surface, device, pipeline, vertexBuffer) {
 			continue
 		}
 
