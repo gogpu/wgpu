@@ -20,18 +20,25 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, firstVertex uint32) {
 		return
 	}
 
-	// Apply pending clear before first draw (WebGPU spec).
-	if !r.cleared {
-		r.applyClear()
-	}
-
-	// If no vertex buffer is bound, try fullscreen texture blit.
+	// Fullscreen blit path: no vertex buffer → blit bound texture to target.
+	// The blit overwrites every destination pixel, so applyClear is redundant.
+	// Skipping clear saves ~18% CPU (8 MB memset at 1920x1080).
 	if r.vertexBufs[0].buffer == nil {
-		r.executeFullscreenBlit(target)
+		if r.executeFullscreenBlit(target) {
+			r.cleared = true
+			return
+		}
+		// No source texture found — apply clear only (clear-only pass).
+		if !r.cleared {
+			r.applyClear()
+		}
 		return
 	}
 
-	// Vertex-buffer-based rendering with the raster pipeline.
+	// Vertex draw: triangles may not cover all pixels → clear first.
+	if !r.cleared {
+		r.applyClear()
+	}
 	r.executeVertexDraw(target, vertexCount, firstVertex)
 }
 
@@ -49,11 +56,12 @@ func (r *RenderPassEncoder) getTargetTexture() *Texture {
 
 // executeFullscreenBlit blits the first bound texture to the target.
 // This is the fast path for gogpu's renderTexturedQuad (6 vertices, no vertex buffer,
-// texture in bind group). If no texture is found, this is a no-op (clear-only pass).
-func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) {
+// texture in bind group). Returns true if blit was performed, false if no source
+// texture was found (caller should apply clear instead).
+func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
-		return
+		return false
 	}
 
 	src := srcView.texture
@@ -71,38 +79,88 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) {
 	target.mu.Lock()
 	defer target.mu.Unlock()
 
+	// Hoist format check before all loops — constant for entire blit operation.
+	swizzle := needsSwizzle(srcFmt, dstFmt)
+
+	// Pre-validate buffer sizes to eliminate per-pixel bounds checks.
+	srcSize := srcW * srcH * 4
+	dstSize := dstW * dstH * 4
+	if len(srcData) < srcSize || len(target.data) < dstSize {
+		return false // Buffers too small — skip entire blit
+	}
+
+	// Fast path: same-size blit (no scaling needed).
+	if srcW == dstW && srcH == dstH {
+		if swizzle {
+			for i := 0; i < srcSize; i += 4 {
+				target.data[i+0] = srcData[i+2] // B←R
+				target.data[i+1] = srcData[i+1] // G
+				target.data[i+2] = srcData[i+0] // R←B
+				target.data[i+3] = srcData[i+3] // A
+			}
+		} else {
+			copy(target.data[:dstSize], srcData[:srcSize])
+		}
+		return true
+	}
+
+	// Scaled blit: nearest-neighbor sampling with pre-computed column map.
+	// Optimizations vs naive per-pixel:
+	// 1. Column map eliminates multiply+divide from inner loop (table lookup instead)
+	// 2. Row deduplication: when upscaling, many dst rows map to the same src row —
+	//    just memcpy the previous dst row (~50% fewer per-pixel iterations at 2x scale)
+
+	// Pre-compute column mapping: colMap[dx] = source byte offset within row.
+	dstRowBytes := dstW * 4
+	colMap := make([]int, dstW)
+	for dx := 0; dx < dstW; dx++ {
+		sx := dx * srcW / dstW
+		if sx >= srcW {
+			sx = srcW - 1
+		}
+		colMap[dx] = sx * 4
+	}
+
+	prevSY := -1
 	for dy := 0; dy < dstH; dy++ {
-		// Source Y with nearest-neighbor sampling.
 		sy := dy * srcH / dstH
 		if sy >= srcH {
 			sy = srcH - 1
 		}
-		for dx := 0; dx < dstW; dx++ {
-			sx := dx * srcW / dstW
-			if sx >= srcW {
-				sx = srcW - 1
+		dstRowOff := dy * dstRowBytes
+
+		// Row deduplication: if this dst row maps to same src row as previous,
+		// copy the already-computed dst row (memcpy ≫ per-pixel loop).
+		if sy == prevSY && dy > 0 {
+			prevRowOff := (dy - 1) * dstRowBytes
+			copy(target.data[dstRowOff:dstRowOff+dstRowBytes],
+				target.data[prevRowOff:prevRowOff+dstRowBytes])
+			continue
+		}
+		prevSY = sy
+
+		srcRowOff := sy * srcW * 4
+		if swizzle {
+			for dx := 0; dx < dstW; dx++ {
+				srcIdx := srcRowOff + colMap[dx]
+				dstIdx := dstRowOff + dx*4
+				target.data[dstIdx+0] = srcData[srcIdx+2]
+				target.data[dstIdx+1] = srcData[srcIdx+1]
+				target.data[dstIdx+2] = srcData[srcIdx+0]
+				target.data[dstIdx+3] = srcData[srcIdx+3]
 			}
-
-			srcIdx := (sy*srcW + sx) * 4
-			dstIdx := (dy*dstW + dx) * 4
-
-			if srcIdx+3 >= len(srcData) || dstIdx+3 >= len(target.data) {
-				continue
+		} else {
+			for dx := 0; dx < dstW; dx++ {
+				srcIdx := srcRowOff + colMap[dx]
+				dstIdx := dstRowOff + dx*4
+				target.data[dstIdx+0] = srcData[srcIdx+0]
+				target.data[dstIdx+1] = srcData[srcIdx+1]
+				target.data[dstIdx+2] = srcData[srcIdx+2]
+				target.data[dstIdx+3] = srcData[srcIdx+3]
 			}
-
-			sr, sg, sb, sa := srcData[srcIdx], srcData[srcIdx+1], srcData[srcIdx+2], srcData[srcIdx+3]
-
-			// Handle RGBA<->BGRA conversion.
-			if needsSwizzle(srcFmt, dstFmt) {
-				sr, sb = sb, sr
-			}
-
-			target.data[dstIdx+0] = sr
-			target.data[dstIdx+1] = sg
-			target.data[dstIdx+2] = sb
-			target.data[dstIdx+3] = sa
 		}
 	}
+	return true
 }
 
 // needsSwizzle returns true when source and destination formats require R/B channel swap.

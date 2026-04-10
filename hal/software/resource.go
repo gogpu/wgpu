@@ -1,6 +1,7 @@
 package software
 
 import (
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -94,23 +95,29 @@ func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
 // NativeHandle returns the texture's unique ID for handle resolution.
 func (t *Texture) NativeHandle() uintptr { return uintptr(t.id) }
 
-// Clear fills the texture with a color value.
+// Clear fills the texture with a color value in the texture's native format.
+// BGRA textures store [B,G,R,A] per pixel; RGBA textures store [R,G,B,A].
 func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Software backend always stores RGBA byte order internally.
-	// Format conversion (RGBA→BGRA for GDI) is done at blit time.
 	r := uint8(color.R * 255)
 	g := uint8(color.G * 255)
 	b := uint8(color.B * 255)
 	a := uint8(color.A * 255)
 
+	// Write bytes in format-appropriate order so the data is correct
+	// for direct consumption by GDI (BGRA) or other readers.
+	c0, c1, c2, c3 := r, g, b, a
+	if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
+		c0, c2 = b, r
+	}
+
 	for i := 0; i < len(t.data); i += 4 {
-		t.data[i+0] = r
-		t.data[i+1] = g
-		t.data[i+2] = b
-		t.data[i+3] = a
+		t.data[i+0] = c0
+		t.data[i+1] = c1
+		t.data[i+2] = c2
+		t.data[i+3] = c3
 	}
 }
 
@@ -128,15 +135,16 @@ func (v *TextureView) NativeHandle() uintptr { return uintptr(v.id) }
 // Surface implements hal.Surface for the software backend.
 type Surface struct {
 	Resource
-	configured  bool
-	width       uint32
-	height      uint32
-	format      gputypes.TextureFormat
-	framebuffer []byte
-	mu          sync.RWMutex // Protects framebuffer access
-	presentMode hal.PresentMode
-	alphaMode   hal.CompositeAlphaMode
-	hwnd        uintptr // window handle for platform blit (0 = headless)
+	configured   bool
+	width        uint32
+	height       uint32
+	format       gputypes.TextureFormat
+	framebuffer  []byte
+	mu           sync.RWMutex // Protects framebuffer access
+	presentMode  hal.PresentMode
+	alphaMode    hal.CompositeAlphaMode
+	hwnd         uintptr // window handle for platform blit (0 = headless)
+	platformBlit         // Windows: DIB section for DWM-friendly presentation
 }
 
 // Configure configures the surface with the given settings.
@@ -161,9 +169,15 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 	s.presentMode = config.PresentMode
 	s.alphaMode = config.AlphaMode
 
-	// Allocate framebuffer (assuming 4 bytes per pixel - RGBA8)
-	size := int(config.Width) * int(config.Height) * 4
-	s.framebuffer = make([]byte, size)
+	// Allocate framebuffer. On Windows with a window handle, use CreateDIBSection
+	// (GDI-managed bitmap) for DWM-friendly presentation via BitBlt.
+	// This follows the SDL3/Qt6 enterprise pattern and avoids the DWM freeze
+	// that occurs with GetDC+StretchDIBits from a non-UI thread.
+	// On headless or non-Windows, fall back to plain Go memory.
+	s.framebuffer = s.allocateFramebuffer(config.Width, config.Height)
+
+	slog.Debug("software: Surface.Configure",
+		"width", config.Width, "height", config.Height)
 
 	return nil
 }
@@ -174,13 +188,40 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 	defer s.mu.Unlock()
 
 	s.configured = false
+	s.destroyPlatformFramebuffer()
 	s.framebuffer = nil
+}
+
+// allocateFramebuffer creates a framebuffer for the given dimensions.
+// Prefers platform DIB section (Windows) for DWM-safe presentation.
+// Falls back to Go heap memory with buffer reuse to avoid GC pressure.
+func (s *Surface) allocateFramebuffer(width, height uint32) []byte {
+	if fb := s.createPlatformFramebuffer(int32(width), int32(height)); fb != nil {
+		return fb
+	}
+	// Fallback: Go heap memory (headless, non-Windows, or DIB creation failure).
+	// Reuse if capacity sufficient to avoid GC pressure during drag resize.
+	size := int(width) * int(height) * 4
+	oldSize := len(s.framebuffer)
+	if cap(s.framebuffer) >= size {
+		fb := s.framebuffer[:size]
+		if size > oldSize {
+			clear(fb[oldSize:])
+		}
+		return fb
+	}
+	return make([]byte, size)
 }
 
 // AcquireTexture returns a surface texture backed by the framebuffer.
 func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if len(s.framebuffer) > 0 {
+		slog.Debug("software: AcquireTexture",
+			"width", s.width, "height", s.height)
+	}
 
 	return &hal.AcquiredSurfaceTexture{
 		Texture: &SurfaceTexture{

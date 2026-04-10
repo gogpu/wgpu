@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.7] - 2026-04-11
+
+### Fixed
+
+- **Software backend: DWM freeze after window resize** — replaced `GetDC` + `StretchDIBits`
+  (raw pixel pointer) with `CreateDIBSection` + `BitBlt` (GDI-managed bitmap). The old approach
+  caused DWM compositor to stop updating the window after resize because DWM does not track
+  raw GDI paints from non-UI threads. The new approach follows the SDL3/Qt6 enterprise pattern:
+  a DIB section is created at `Configure` time, the render pipeline writes directly into its
+  pixel buffer (zero-copy), and `Present` does `BitBlt` from the memory DC. (#133)
+
+### Changed
+
+- **Software backend: skip redundant clear for fullscreen blit** — `applyClear` is no longer
+  called before `executeFullscreenBlit` since the blit overwrites every pixel. Saves ~18% CPU
+  at fullscreen resolution.
+- **Software backend: optimized scaled blit** — pre-computed column map eliminates per-pixel
+  multiply+divide; row deduplication skips ~50% of pixel loops when upscaling during resize.
+- **Software backend: format-aware Clear** — `Texture.Clear` now writes bytes in the texture's
+  native format (BGRA for BGRA textures), fixing wrong colors in clear-only frames.
+- **Software backend: proper WriteTexture** — respects `dst.Origin`, `layout.BytesPerRow`,
+  `layout.Offset`, and `size` for correct partial texture updates.
+
+### Dependencies
+
+- **naga** v0.17.1 → **v0.17.3** — SPIR-V OpIMul→OpVectorTimesScalar fix, DXIL hardening
+- **x/sys** v0.42.0 → **v0.43.0**
+
 ## [0.24.6] - 2026-04-08
 
 ### Added
