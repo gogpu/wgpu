@@ -258,7 +258,7 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 
 ### Software Backend
 
-Full-featured CPU rasterizer for headless rendering. Always compiled — no build tags or GPU hardware required.
+Full-featured CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
 // Software backend auto-registers via init().
@@ -283,6 +283,11 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - 6-plane frustum clipping (Sutherland-Hodgman)
 - 8x8 tile-based parallel rendering
 
+**Windows Presentation:**
+- DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern)
+- Zero-copy: render pipeline writes directly into GDI bitmap pixels
+- Correct display during and after window resize
+
 ---
 
 ## Ecosystem
@@ -293,7 +298,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 |---------|-------------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
 | **gogpu/wgpu** | **Pure Go WebGPU (this repo)** |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL) |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library with GPU SDF acceleration |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit: 22+ widgets, 4 themes |
 | [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU type definitions |
