@@ -81,50 +81,6 @@ func (q *Queue) PollCompleted() uint64 {
 	return q.device.completedFrameFenceValue()
 }
 
-// ReadBuffer reads data from a GPU buffer into the provided byte slice.
-// The buffer must have been created with MapRead usage (readback heap).
-// If the buffer is already mapped, data is copied directly.
-// Otherwise, the buffer is temporarily mapped for the read.
-func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	buf, ok := buffer.(*Buffer)
-	if !ok || buf.raw == nil {
-		return fmt.Errorf("dx12: invalid buffer for ReadBuffer")
-	}
-
-	if buf.mappedPointer != nil {
-		// Buffer is already mapped — copy directly
-		src := unsafe.Slice((*byte)(unsafe.Add(buf.mappedPointer, int(offset))), len(data))
-		copy(data, src)
-		return nil
-	}
-
-	// Buffer is not mapped — temporarily map, copy, unmap
-	if !buf.isReadback() {
-		return fmt.Errorf("dx12: buffer is not a readback buffer, cannot read")
-	}
-
-	readRange := &d3d12.D3D12_RANGE{
-		Begin: uintptr(offset),
-		End:   uintptr(offset + uint64(len(data))),
-	}
-	ptr, err := buf.raw.Map(0, readRange)
-	if err != nil {
-		return fmt.Errorf("dx12: buffer Map failed for ReadBuffer: %w", err)
-	}
-
-	src := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
-	copy(data, src)
-
-	// Unmap with nil written range (we only read, not write)
-	buf.raw.Unmap(0, nil)
-
-	return nil
-}
-
 // WriteBuffer writes data to a buffer immediately.
 // For upload heap buffers, data is copied directly via CPU mapping.
 // For default heap buffers, a staging buffer + GPU copy command is used.

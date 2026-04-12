@@ -98,6 +98,16 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	// Post-submit bookkeeping: track refs, recycle encoders, triage destroys.
 	q.postSubmit(subIdx, commandBuffers)
 
+	// Auto-poll pending buffer map requests after each Submit. Mirrors
+	// Rust wgpu-core queue.rs:1429 which calls maintain() at the tail
+	// of queue_submit. Non-blocking — drains whatever has already
+	// completed so beginner code paths that read a buffer right after a
+	// Submit see the mapping resolve without having to call Device.Poll
+	// explicitly. (FEAT-WGPU-MAPPING-001)
+	if q.device != nil && q.device.core != nil && q.device.core.HasPendingMaps() {
+		q.device.core.PollMaps(q.hal.PollCompleted())
+	}
+
 	return subIdx, nil
 }
 
@@ -192,23 +202,6 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)
-}
-
-// ReadBuffer reads data from a GPU buffer.
-func (q *Queue) ReadBuffer(buffer *Buffer, offset uint64, data []byte) error {
-	if q.hal == nil {
-		return fmt.Errorf("wgpu: queue not available")
-	}
-	if buffer == nil {
-		return fmt.Errorf("wgpu: buffer is nil")
-	}
-
-	halBuffer := buffer.halBuffer()
-	if halBuffer == nil {
-		return ErrReleased
-	}
-
-	return q.hal.ReadBuffer(halBuffer, offset, data)
 }
 
 // WriteTexture writes data to a texture.

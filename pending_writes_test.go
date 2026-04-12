@@ -2,6 +2,7 @@ package wgpu
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -901,11 +902,17 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// Read back from noop buffer to verify data was written.
-	readBack := make([]byte, 4)
-	if err := q.ReadBuffer(buf, 4, readBack); err != nil {
-		t.Fatalf("ReadBuffer: %v", err)
+	// Read back from noop buffer to verify data was written, using the
+	// new HAL MapBuffer path (replaces legacy Queue.ReadBuffer removed
+	// in FEAT-WGPU-MAPPING-001).
+	mapping, mapErr := dev.MapBuffer(buf, 0, 16)
+	if mapErr != nil {
+		t.Fatalf("MapBuffer: %v", mapErr)
 	}
+	readBack := make([]byte, 4)
+	src := unsafe.Slice((*byte)(unsafe.Add(mapping.Ptr, 4)), 4)
+	copy(readBack, src)
+	_ = dev.UnmapBuffer(buf)
 
 	for i, b := range readBack {
 		if b != data[i] {

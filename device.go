@@ -672,6 +672,42 @@ func (d *Device) destroyQueue() *core.DestroyQueue {
 	return d.core.DestroyQueueRef()
 }
 
+// Poll drives the per-device pending-map triage loop.
+//
+// PollPoll drains any buffer mappings whose associated GPU submissions
+// have already completed and returns immediately. This is the fast path
+// for game loops and is called automatically from Queue.Submit, so
+// beginner code paths never need to call Poll explicitly.
+//
+// PollWait blocks until every currently-pending map resolves: it issues
+// WaitIdle on the HAL device, then drains all buckets. This is the
+// primary path used by Buffer.Map and is appropriate for shutdown
+// drains and short scripts that do not run a render loop.
+//
+// The return value reports whether Poll observed any in-flight maps —
+// tests use it to assert that Submit-driven auto-polling drained
+// everything without needing an explicit Poll call.
+func (d *Device) Poll(pollType PollType) bool {
+	if d == nil || d.core == nil {
+		return false
+	}
+	switch pollType {
+	case PollWait:
+		// Wait on the HAL device so all submissions complete, then drain.
+		if halDev, ok := d.core.HalDeviceHandle(); ok {
+			_ = halDev.WaitIdle()
+		}
+		// Drain with a sentinel "all indices completed".
+		return d.core.PollMaps(^uint64(0))
+	default:
+		completed := uint64(0)
+		if d.queue != nil && d.queue.hal != nil {
+			completed = d.queue.hal.PollCompleted()
+		}
+		return d.core.PollMaps(completed)
+	}
+}
+
 // lastSubmissionIndex returns the latest submission index from the queue.
 // Used by Release() methods to schedule deferred destruction.
 func (d *Device) lastSubmissionIndex() uint64 {

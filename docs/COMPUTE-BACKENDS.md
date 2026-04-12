@@ -10,7 +10,7 @@ This document describes compute shader support across wgpu's HAL backends.
 | Storage buffers | Yes | Yes | Yes | Yes | No | No |
 | Timestamp queries | Yes | Stub | Stub | Stub | No | No |
 | Indirect dispatch | Yes | Yes | Yes | Yes | No | No |
-| ReadBuffer (GPU->CPU) | Yes | Yes | Yes | Yes | No | No |
+| Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | No |
 | Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | N/A | N/A |
 | Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | N/A | N/A |
 
@@ -128,7 +128,12 @@ Large compute workloads may exhaust GPU memory. Monitor for `ErrDeviceOutOfMemor
 To read compute results back to the CPU:
 1. Create the output buffer with `BufferUsageStorage | BufferUsageCopySrc`.
 2. Create a staging (readback) buffer with `BufferUsageMapRead | BufferUsageCopyDst`.
-3. Use `CopyBufferToBuffer` to copy from output to staging.
-4. Use `Queue.ReadBuffer` to read the staging buffer.
+3. Use `CopyBufferToBuffer` to copy from output to staging inside a command encoder.
+4. Submit the command buffer.
+5. Use `Buffer.Map(ctx, MapModeRead, 0, size)` to map the staging buffer (blocks until GPU completes, or returns `ctx.Err()` on cancellation).
+6. Use `Buffer.MappedRange(offset, size)` to access the bytes.
+7. Call `Buffer.Unmap()` when done.
 
 This two-step process is required because GPU-optimal memory is typically not directly accessible by the CPU.
+
+For non-blocking readback (game loops, frame-budgeted compute), use `Buffer.MapAsync` + `Device.Poll(PollPoll)` instead. See [COMPUTE-SHADERS.md](COMPUTE-SHADERS.md#step-3-map-and-read-back-data) for full examples, and [dev/research/ADR-BUFFER-MAPPING-API.md](dev/research/ADR-BUFFER-MAPPING-API.md) for design rationale.

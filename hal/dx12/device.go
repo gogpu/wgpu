@@ -1033,6 +1033,70 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 }
 
+// MapBuffer establishes a CPU-visible mapping for the given byte range.
+//
+// DX12 UPLOAD / READBACK / CUSTOM heaps are always backed by host-visible
+// memory; ID3D12Resource::Map is effectively free when the buffer is already
+// mapped (reference-counted inside D3D12). If MappedAtCreation kept the
+// mapping live, we reuse the cached pointer; otherwise we call Map(0, ...)
+// and remember it so subsequent re-maps and UnmapBuffer are symmetric.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if !buf.isMappable() {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+
+	if buf.mappedPointer == nil {
+		// For read-back buffers, specify the full range we may read.
+		// For upload/write buffers, pass a zero range (no reads).
+		var readRange *d3d12.D3D12_RANGE
+		if buf.isReadback() {
+			readRange = &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(buf.size)}
+		} else {
+			readRange = &d3d12.D3D12_RANGE{Begin: 0, End: 0}
+		}
+		ptr, err := buf.raw.Map(0, readRange)
+		if err != nil {
+			return hal.BufferMapping{}, fmt.Errorf("dx12: MapBuffer: %w", err)
+		}
+		buf.mappedPointer = ptr
+	}
+
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(uintptr(buf.mappedPointer) + uintptr(offset)),
+		IsCoherent: true, // DX12 UPLOAD/READBACK are always coherent with CPU.
+	}, nil
+}
+
+// UnmapBuffer releases a CPU-visible mapping.
+//
+// DX12 allows persistent mappings across many Map/Unmap calls; we drop the
+// cached mappedPointer only when core explicitly requests unmap, and we
+// pass a full-range written hint for writable heaps so the driver can
+// invalidate write-combine buffers.
+func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == nil {
+		return nil
+	}
+	if buf.mappedPointer == nil {
+		return nil
+	}
+	var writtenRange *d3d12.D3D12_RANGE
+	if !buf.isReadback() {
+		writtenRange = &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(buf.size)}
+	}
+	buf.raw.Unmap(0, writtenRange)
+	buf.mappedPointer = nil
+	return nil
+}
+
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {

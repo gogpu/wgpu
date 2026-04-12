@@ -72,4 +72,9 @@ var (
 	//
 	// See: https://github.com/gogpu/wgpu/issues/24
 	ErrDriverBug = errors.New("hal: driver bug detected (API spec violation)")
+
+	// ErrInvalidMapRange indicates MapBuffer was called with an offset+size
+	// range that exceeds the buffer, or the buffer has no host-visible memory
+	// so it cannot be mapped on the CPU.
+	ErrInvalidMapRange = errors.New("hal: invalid buffer map range or non-mappable buffer")
 )

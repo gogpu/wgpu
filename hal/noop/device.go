@@ -3,6 +3,7 @@ package noop
 import (
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 )
@@ -10,20 +11,37 @@ import (
 // Device implements hal.Device for the noop backend.
 type Device struct{}
 
-// CreateBuffer creates a noop buffer.
-// Optionally stores data if MappedAtCreation is true.
+// CreateBuffer creates a noop buffer with in-memory backing storage.
+//
+// All noop buffers allocate a Go slice so tests can round-trip data through
+// WriteBuffer/MapBuffer without backend-specific plumbing.
 func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Noop.CreateBuffer — core validation gap")
 	}
-	if desc.MappedAtCreation {
-		return &Buffer{data: make([]byte, desc.Size)}, nil
-	}
-	return &Resource{}, nil
+	return &Buffer{data: make([]byte, desc.Size), size: desc.Size}, nil
 }
 
 // DestroyBuffer is a no-op.
 func (d *Device) DestroyBuffer(_ hal.Buffer) {}
+
+// MapBuffer returns a pointer into the in-memory noop buffer.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.data == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > uint64(len(buf.data)) {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(&buf.data[offset]),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer is a no-op for the noop backend.
+func (d *Device) UnmapBuffer(_ hal.Buffer) error { return nil }
 
 // CreateTexture creates a noop texture.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {

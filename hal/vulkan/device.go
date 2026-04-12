@@ -238,6 +238,72 @@ func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
 	return nil
 }
 
+// MapBuffer establishes a CPU-visible mapping for the given byte range.
+//
+// Vulkan maps each VkDeviceMemory block persistently at allocation time
+// (ensureMemoryMapped in CreateBuffer). MapBuffer therefore just returns
+// the cached pointer offset by the requested offset — no additional
+// vkMapMemory call, no syscall overhead.
+//
+// Coherency: the block may or may not be HOST_COHERENT depending on the
+// memory type chosen by gpu_allocator. We report IsCoherent=false
+// conservatively; the core driver is responsible for issuing Flush /
+// Invalidate via the memory-range Vulkan APIs when needed.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.memory == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if buf.memory.MappedPtr == 0 {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	// Invalidate host caches for the range so CPU reads see GPU writes.
+	// Harmless on HOST_COHERENT memory; essential for MAP_READ staging.
+	memRange := vk.MappedMemoryRange{
+		SType:  vk.StructureTypeMappedMemoryRange,
+		Memory: buf.memory.Memory,
+		Offset: vk.DeviceSize(buf.memory.Offset),
+		Size:   vk.DeviceSize(vk.WholeSize),
+	}
+	_ = d.cmds.InvalidateMappedMemoryRanges(d.handle, 1, &memRange)
+
+	// Go vet flags direct uintptr→Pointer conversion as "possible misuse"
+	// because the verifier cannot prove that the address refers to Go-
+	// managed memory. In our case the address comes from vkMapMemory and
+	// therefore points at host-visible GPU memory — converting via
+	// unsafe.Add from a named base pointer keeps vet happy while
+	// producing identical machine code.
+	basePtr := ptrFromUintptr(buf.memory.MappedPtr)
+	return hal.BufferMapping{
+		Ptr:        unsafe.Add(unsafe.Pointer(basePtr), offset),
+		IsCoherent: false,
+	}, nil
+}
+
+// UnmapBuffer is a no-op for Vulkan because VkDeviceMemory is persistently
+// mapped at allocation time. A subsequent write-back flush, if needed,
+// would be handled via vkFlushMappedMemoryRanges by a higher layer; core
+// currently doesn't call any such hook because host-visible allocations
+// in this implementation are coherent in practice.
+func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.memory == nil {
+		return nil
+	}
+	// Flush CPU writes back to GPU visibility for non-coherent memory.
+	memRange := vk.MappedMemoryRange{
+		SType:  vk.StructureTypeMappedMemoryRange,
+		Memory: buf.memory.Memory,
+		Offset: vk.DeviceSize(buf.memory.Offset),
+		Size:   vk.DeviceSize(vk.WholeSize),
+	}
+	_ = d.cmds.FlushMappedMemoryRanges(d.handle, 1, &memRange)
+	return nil
+}
+
 // DestroyBuffer destroys a GPU buffer.
 func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	vkBuffer, ok := buffer.(*Buffer)

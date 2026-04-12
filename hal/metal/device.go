@@ -103,6 +103,41 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	}, nil
 }
 
+// MapBuffer returns a CPU-visible pointer into the given Metal buffer.
+//
+// Buffers created with MTLStorageModeShared or MTLStorageModeManaged expose
+// host-visible memory via MTLBuffer.contents(). Private buffers do not and
+// return an error; core must route such reads through a staging buffer at
+// a higher layer.
+//
+// Metal Shared memory is always coherent with CPU access, so the driver
+// reports IsCoherent=true; Managed storage would need didModifyRange
+// for CPU→GPU writes but the Go wgpu path currently uses only Shared
+// host-visible buffers.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == 0 {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	ptr := buf.Contents()
+	if ptr == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Add(ptr, int(offset)),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer is a no-op on Metal because Shared-storage buffers are
+// persistently mapped and coherent with the GPU.
+func (d *Device) UnmapBuffer(_ hal.Buffer) error {
+	return nil
+}
+
 // DestroyBuffer destroys a GPU buffer.
 func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	mtlBuffer, ok := buffer.(*Buffer)

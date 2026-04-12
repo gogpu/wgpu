@@ -10,10 +10,12 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"math"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -282,8 +284,19 @@ func dispatchAndReadBack(device *wgpu.Device, pipeline *wgpu.ComputePipeline, bi
 
 	fmt.Print("8. Reading results... ")
 	resultBytes := make([]byte, bufSize)
-	if err := device.Queue().ReadBuffer(bufs.staging, 0, resultBytes); err != nil {
-		return nil, fmt.Errorf("read buffer: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bufs.staging.Map(ctx, wgpu.MapModeRead, 0, bufSize); err != nil {
+		return nil, fmt.Errorf("map staging buffer: %w", err)
+	}
+	rng, err := bufs.staging.MappedRange(0, bufSize)
+	if err != nil {
+		_ = bufs.staging.Unmap()
+		return nil, fmt.Errorf("staging MappedRange: %w", err)
+	}
+	copy(resultBytes, rng.Bytes())
+	if err := bufs.staging.Unmap(); err != nil {
+		return nil, fmt.Errorf("unmap staging buffer: %w", err)
 	}
 	fmt.Println("OK")
 	return resultBytes, nil

@@ -96,6 +96,12 @@ type Device struct {
 	// Matches Rust wgpu-core's LifetimeTracker pattern.
 	destroyQueue *DestroyQueue
 
+	// pendingMapTrackerSlot holds a lazily-allocated deviceMapTracker
+	// (FEAT-WGPU-MAPPING-001) through an indirection so that the outer
+	// Device struct remains copyable (the legacy ID-based Hub API still
+	// passes Device by value). The slot wraps an atomic.Pointer.
+	pendingMapTrackerSlot *mapTrackerSlot
+
 	// === Common fields ===
 
 	// Label is a debug label for the device.
@@ -398,10 +404,20 @@ func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) 
 	// 10. Wrap in core Buffer
 	buffer := NewBuffer(halBuffer, d, desc.Usage, desc.Size, desc.Label)
 
-	// 11. Handle MappedAtCreation
+	// 11. Handle MappedAtCreation — install the HAL mapping eagerly so
+	// the caller can write via Buffer.MappedRange without going through
+	// the Pending state machine.
 	if desc.MappedAtCreation {
-		buffer.SetMapState(BufferMapStateMapped)
-		// Mark entire buffer as initialized when mapped at creation
+		if err := buffer.InstallMappedAtCreation(guard, *halDevice); err != nil {
+			// HAL can't map the buffer despite MappedAtCreation — roll
+			// back and report as a CreateBuffer failure.
+			(*halDevice).DestroyBuffer(halBuffer)
+			return nil, &CreateBufferError{
+				Kind:     CreateBufferErrorHAL,
+				Label:    desc.Label,
+				HALError: err,
+			}
+		}
 		buffer.MarkInitialized(0, desc.Size)
 	}
 
@@ -462,6 +478,12 @@ type Buffer struct {
 	// When the GPU completes the submission, the clone is Drop()'d.
 	// This keeps the resource alive exactly as long as needed.
 	Ref *ResourceRef
+
+	// mapDataSlot holds a lazily-allocated BufferMapData pointer.
+	// The indirection keeps core.Buffer copyable (noCopy-marker-free)
+	// as required by the legacy ID-based Hub API, while still letting
+	// concurrent code load the slot atomically.
+	mapDataSlot *mapDataSlot
 }
 
 // BufferMapState represents the current mapping state of a buffer.
@@ -537,7 +559,8 @@ func NewBuffer(
 		trackingData: NewTrackingData(
 			device.TrackerIndices(),
 		),
-		mapState: BufferMapStateIdle,
+		mapState:    BufferMapStateIdle,
+		mapDataSlot: &mapDataSlot{},
 	}
 	trackResource(uintptr(unsafe.Pointer(b)), "Buffer") //nolint:gosec // debug tracking uses pointer as unique ID
 	return b
@@ -638,6 +661,13 @@ func (b *Buffer) TrackingData() *TrackingData {
 // This method is idempotent - calling it multiple times is safe.
 // After calling Destroy(), Raw() returns nil.
 func (b *Buffer) Destroy() {
+	// Transition the buffer map state machine to Destroyed and signal
+	// any waiter with ErrBufferDestroyed before actually freeing the
+	// HAL handle. This prevents a CVE-2026-5281-style UAF where Device
+	// Poll would try to Map a buffer that is about to be freed.
+	if b.loadMapData() != nil {
+		b.MarkDestroyed()
+	}
 	untrackResource(uintptr(unsafe.Pointer(b))) //nolint:gosec // debug tracking uses pointer as unique ID
 
 	if b.device == nil || b.device.SnatchLock() == nil || b.raw == nil {

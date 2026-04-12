@@ -2,9 +2,34 @@ package hal
 
 import (
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 )
+
+// BufferMapping describes a CPU-visible mapping of a GPU buffer.
+//
+// Returned by Device.MapBuffer. The memory remains valid until the
+// corresponding Device.UnmapBuffer call. Callers must ensure the GPU
+// is not writing to the mapped region during CPU access — this is the
+// caller's responsibility (core coordinates this via submission fences).
+//
+// Matches Rust wgpu-hal's hal::BufferMapping (wgpu-hal/src/lib.rs:826).
+type BufferMapping struct {
+	// Ptr is the host-visible pointer to the start of the mapped range.
+	// Never nil on success.
+	Ptr unsafe.Pointer
+
+	// IsCoherent indicates whether the underlying memory is coherent
+	// with GPU writes without explicit flush/invalidate.
+	//   - true  → DX12 (always), Metal Shared storage, coherent Vulkan memory
+	//   - false → non-coherent Vulkan memory; caller must invalidate before
+	//             reading GPU-written data and flush after writing
+	//
+	// When false, core is responsible for calling FlushMappedRanges /
+	// InvalidateMappedRanges at the appropriate times.
+	IsCoherent bool
+}
 
 // Backend identifies a graphics backend implementation.
 // Backends are registered globally and provide factory methods for instances.
@@ -88,6 +113,38 @@ type Device interface {
 
 	// DestroyBuffer destroys a GPU buffer.
 	DestroyBuffer(buffer Buffer)
+
+	// MapBuffer establishes a CPU-visible mapping for the given byte range
+	// of a host-visible buffer.
+	//
+	// The buffer must have been created with BufferUsageMapRead or
+	// BufferUsageMapWrite (or have been created with MappedAtCreation: true,
+	// in which case backends may return the existing mapping directly).
+	//
+	// Thread-safety contract: the caller (core) must ensure the GPU is not
+	// writing to the mapped range while the mapping is active. Typically
+	// this means core has observed a submission fence reaching completion
+	// before calling MapBuffer.
+	//
+	// Some backends (Vulkan, Metal Shared, DX12 UPLOAD/READBACK, software)
+	// keep buffers persistently mapped; MapBuffer for those backends returns
+	// the cached pointer and is cheap. Backends without persistent mappings
+	// call the native map API on each call.
+	//
+	// Returns ErrInvalidMapRange if offset+size exceeds the buffer size or
+	// the buffer has no host-visible memory.
+	MapBuffer(buffer Buffer, offset, size uint64) (BufferMapping, error)
+
+	// UnmapBuffer releases a CPU-visible mapping established by MapBuffer.
+	//
+	// For backends with persistent mappings this is a no-op that simply
+	// returns nil. For backends without persistent mappings the native
+	// unmap API is called.
+	//
+	// Calling UnmapBuffer on a buffer that is not mapped is undefined —
+	// core guarantees the state machine never calls this on an unmapped
+	// buffer.
+	UnmapBuffer(buffer Buffer) error
 
 	// CreateTexture creates a GPU texture.
 	CreateTexture(desc *TextureDescriptor) (Texture, error)
@@ -211,11 +268,6 @@ type Queue interface {
 	// This is a convenience method that creates a staging buffer internally.
 	// Returns an error if the buffer is invalid or the write fails.
 	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
-
-	// ReadBuffer reads data from a GPU buffer into the provided byte slice.
-	// The buffer must have been created with BufferUsageMapRead.
-	// The caller must ensure the GPU has finished writing before calling this.
-	ReadBuffer(buffer Buffer, offset uint64, data []byte) error
 
 	// WriteTexture writes data to a texture immediately.
 	// This is a convenience method that creates a staging buffer internally.

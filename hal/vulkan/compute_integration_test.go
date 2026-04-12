@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"math"
 	"testing"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -298,11 +299,15 @@ func TestComputeSDFIntegration(t *testing.T) {
 		t.Fatal("fence not signaled after 5s timeout")
 	}
 
-	// Step 11: Read back results
+	// Step 11: Read back results via the HAL MapBuffer path.
+	// (queue.ReadBuffer removed in FEAT-WGPU-MAPPING-001).
 	resultBytes := make([]byte, outputBufferSize)
-	if err := queue.ReadBuffer(stagingBuffer, 0, resultBytes); err != nil {
-		t.Fatalf("ReadBuffer failed: %v", err)
+	mapping, mErr := device.MapBuffer(stagingBuffer, 0, outputBufferSize)
+	if mErr != nil {
+		t.Fatalf("MapBuffer failed: %v", mErr)
 	}
+	copy(resultBytes, unsafe.Slice((*byte)(mapping.Ptr), outputBufferSize))
+	_ = device.UnmapBuffer(stagingBuffer)
 
 	// Step 12: Parse results and compare with CPU reference
 	gpuResults := make([]float32, totalPixels)

@@ -1,8 +1,10 @@
 package wgpu_test
 
 import (
+	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -564,7 +566,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 // --- Read buffer tests ---
 
 // TestIntegrationQueueReadBuffer writes data to a buffer via Queue.WriteBuffer,
-// reads it back via Queue.ReadBuffer, and verifies the contents match.
+// reads it back via Buffer.Map + MappedRange (the WebGPU spec-compliant
+// replacement for the removed Queue.ReadBuffer), and verifies the
+// contents match.
 func TestIntegrationQueueReadBuffer(t *testing.T) {
 	instance, adapter, device := createTestDevice(t)
 	defer instance.Release()
@@ -576,7 +580,7 @@ func TestIntegrationQueueReadBuffer(t *testing.T) {
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "readback-buf",
 		Size:  bufSize,
-		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst | wgpu.BufferUsageCopySrc,
+		Usage: wgpu.BufferUsageMapRead | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
 		t.Fatalf("CreateBuffer: %v", err)
@@ -598,11 +602,21 @@ func TestIntegrationQueueReadBuffer(t *testing.T) {
 		t.Fatalf("WriteBuffer failed: %v", err)
 	}
 
-	// Read it back.
+	// Read it back via the WebGPU buffer map API.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := buf.Map(ctx, wgpu.MapModeRead, 0, bufSize); err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	rng, rErr := buf.MappedRange(0, bufSize)
+	if rErr != nil {
+		_ = buf.Unmap()
+		t.Fatalf("MappedRange: %v", rErr)
+	}
 	readData := make([]byte, bufSize)
-	err = q.ReadBuffer(buf, 0, readData)
-	if err != nil {
-		t.Fatalf("ReadBuffer: %v", err)
+	copy(readData, rng.Bytes())
+	if err := buf.Unmap(); err != nil {
+		t.Fatalf("Unmap: %v", err)
 	}
 
 	// Verify contents match.

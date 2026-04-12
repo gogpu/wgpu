@@ -330,38 +330,6 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 	return fmt.Errorf("vulkan: WriteBuffer: buffer is not mapped")
 }
 
-// ReadBuffer reads data from a GPU buffer.
-// The buffer must have host-visible memory (created with MapRead usage).
-// Uses fence-based synchronization instead of vkQueueWaitIdle.
-//
-// Both paths use the unified deviceFence: timeline semaphore (VK-IMPL-001)
-// or binary fence pool (VK-IMPL-003).
-func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	vkBuffer, ok := buffer.(*Buffer)
-	if !ok || vkBuffer.memory == nil {
-		return fmt.Errorf("vulkan: invalid buffer for ReadBuffer")
-	}
-
-	// Wait for the last queue submission to complete before CPU reads.
-	q.waitForGPU()
-
-	if vkBuffer.memory.MappedPtr != 0 {
-		// Invalidate CPU cache so we see the latest GPU writes.
-		// Required for non-HOST_COHERENT memory; harmless on coherent memory.
-		memRange := vk.MappedMemoryRange{
-			SType:  vk.StructureTypeMappedMemoryRange,
-			Memory: vkBuffer.memory.Memory,
-			Offset: vk.DeviceSize(vkBuffer.memory.Offset),
-			Size:   vk.DeviceSize(vk.WholeSize),
-		}
-		_ = q.device.cmds.InvalidateMappedMemoryRanges(q.device.handle, 1, &memRange)
-
-		copyFromMappedMemory(data, vkBuffer.memory.MappedPtr, offset)
-		return nil
-	}
-	return fmt.Errorf("vulkan: buffer is not mapped, cannot read")
-}
-
 // WriteTexture writes data to a texture immediately.
 // Returns an error if any step fails (VK-003: no more silent error swallowing).
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {

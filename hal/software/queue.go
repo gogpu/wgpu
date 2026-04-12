@@ -25,16 +25,6 @@ func (q *Queue) PollCompleted() uint64 {
 	return q.submissionIndex
 }
 
-// ReadBuffer reads data from a buffer.
-func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	if b, ok := buffer.(*Buffer); ok && b.data != nil {
-		b.mu.RLock()
-		copy(data, b.data[offset:])
-		b.mu.RUnlock()
-	}
-	return nil
-}
-
 // WriteBuffer performs immediate buffer writes with real data storage.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	b, ok := buffer.(*Buffer)

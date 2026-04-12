@@ -124,6 +124,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.25.0** | 2026-04 | **WebGPU-compliant Buffer mapping API** (`Buffer.Map`/`MapAsync`/`MappedRange`/`Unmap`, `Device.Poll`). Fixes DX12 compute readback data race. Removes `Queue.ReadBuffer`. Zero-alloc primary path. See [ADR](docs/dev/research/ADR-BUFFER-MAPPING-API.md). |
+| **v0.24.7** | 2026-04 | DWM-safe software presentation (CreateDIBSection+BitBlt), rendering optimizations |
 | **v0.23.8** | 2026-04 | Metal vertex buffer fix, GLES per-type binding counters, StagingBelt alignment |
 | **v0.23.7** | 2026-04 | naga v0.16.4 (HLSL 72/72 parity, 330× faster FXC array init) |
 | **v0.23.6** | 2026-04 | Deferred resource destruction, DX12 shader cache, DRED diagnostics |
