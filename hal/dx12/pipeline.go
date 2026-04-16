@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -495,6 +496,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 			return nil, fmt.Errorf("dx12: invalid vertex shader module type")
 		}
 		bytecode := shaderModule.EntryPointBytecode(desc.Vertex.EntryPoint)
+		if path := os.Getenv("GOGPU_DX12_DXIL_OVERRIDE_VS"); path != "" {
+			if override, err := os.ReadFile(path); err == nil {
+				bytecode = override
+				fmt.Fprintf(os.Stderr, "[dx12] VS DXIL overridden from %s (%d bytes)\n", path, len(override))
+			} else {
+				return nil, fmt.Errorf("dx12: failed to read GOGPU_DX12_DXIL_OVERRIDE_VS %q: %w", path, err)
+			}
+		}
 		if len(bytecode) > 0 {
 			psoDesc.VS = d3d12.D3D12_SHADER_BYTECODE{
 				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
@@ -512,6 +521,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 			return nil, fmt.Errorf("dx12: invalid fragment shader module type")
 		}
 		bytecode := shaderModule.EntryPointBytecode(desc.Fragment.EntryPoint)
+		if path := os.Getenv("GOGPU_DX12_DXIL_OVERRIDE_PS"); path != "" {
+			if override, err := os.ReadFile(path); err == nil {
+				bytecode = override
+				fmt.Fprintf(os.Stderr, "[dx12] PS DXIL overridden from %s (%d bytes)\n", path, len(override))
+			} else {
+				return nil, fmt.Errorf("dx12: failed to read GOGPU_DX12_DXIL_OVERRIDE_PS %q: %w", path, err)
+			}
+		}
 		if len(bytecode) > 0 {
 			psoDesc.PS = d3d12.D3D12_SHADER_BYTECODE{
 				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
