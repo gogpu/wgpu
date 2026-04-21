@@ -24,10 +24,14 @@ type Instance struct{}
 
 // CreateSurface creates a software rendering surface.
 // If a valid window handle is provided, Present() will automatically blit
-// the framebuffer to the window via platform-native APIs (GDI on Windows).
+// the framebuffer to the window via platform-native APIs (GDI on Windows,
+// XPutImage on Linux X11).
 // If window is 0 (headless mode), Present() is a no-op.
-func (i *Instance) CreateSurface(_, window uintptr) (hal.Surface, error) {
-	return &Surface{hwnd: window}, nil
+//
+// displayHandle is platform-specific: X11 Display* on Linux, 0 elsewhere.
+// windowHandle is the native window: HWND on Windows, X11 Window on Linux.
+func (i *Instance) CreateSurface(displayHandle, window uintptr) (hal.Surface, error) {
+	return &Surface{displayHandle: displayHandle, hwnd: window}, nil
 }
 
 // EnumerateAdapters returns a single default software adapter.

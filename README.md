@@ -327,10 +327,10 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - 6-plane frustum clipping (Sutherland-Hodgman)
 - 8x8 tile-based parallel rendering
 
-**Windows Presentation:**
-- DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern)
-- Zero-copy: render pipeline writes directly into GDI bitmap pixels
-- Correct display during and after window resize
+**Windowed Presentation:**
+- **Windows:** DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern), zero-copy into GDI bitmap
+- **Linux X11:** `XPutImage` via goffi (Skia pattern), BGRA = X11 ZPixmap native format
+- **macOS:** Planned (CGImage + CALayer)
 
 ---
 

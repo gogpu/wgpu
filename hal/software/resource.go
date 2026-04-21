@@ -135,16 +135,17 @@ func (v *TextureView) NativeHandle() uintptr { return uintptr(v.id) }
 // Surface implements hal.Surface for the software backend.
 type Surface struct {
 	Resource
-	configured   bool
-	width        uint32
-	height       uint32
-	format       gputypes.TextureFormat
-	framebuffer  []byte
-	mu           sync.RWMutex // Protects framebuffer access
-	presentMode  hal.PresentMode
-	alphaMode    hal.CompositeAlphaMode
-	hwnd         uintptr // window handle for platform blit (0 = headless)
-	platformBlit         // Windows: DIB section for DWM-friendly presentation
+	configured    bool
+	width         uint32
+	height        uint32
+	format        gputypes.TextureFormat
+	framebuffer   []byte
+	mu            sync.RWMutex // Protects framebuffer access
+	presentMode   hal.PresentMode
+	alphaMode     hal.CompositeAlphaMode
+	displayHandle uintptr // X11: Display*, macOS/Windows: 0
+	hwnd          uintptr // window handle for platform blit (0 = headless)
+	platformBlit          // platform-specific blit resources (Windows: DIB section, Linux: X11 GC)
 }
 
 // Configure configures the surface with the given settings.

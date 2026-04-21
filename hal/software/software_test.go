@@ -1073,6 +1073,26 @@ func TestSurfaceAcquireTexture(t *testing.T) {
 	surface.DiscardTexture(acquired.Texture)
 }
 
+func TestSurfaceStoresDisplayHandle(t *testing.T) {
+	backend := API{}
+	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
+	defer instance.Destroy()
+
+	surface, err := instance.CreateSurface(0xDEAD, 0xBEEF)
+	if err != nil {
+		t.Fatalf("CreateSurface failed: %v", err)
+	}
+	defer surface.Destroy()
+
+	s := surface.(*Surface)
+	if s.displayHandle != 0xDEAD {
+		t.Errorf("displayHandle = %#x, want 0xDEAD", s.displayHandle)
+	}
+	if s.hwnd != 0xBEEF {
+		t.Errorf("hwnd = %#x, want 0xBEEF", s.hwnd)
+	}
+}
+
 func TestSurfaceGetFramebufferNil(t *testing.T) {
 	s := &Surface{}
 	fb := s.GetFramebuffer()
