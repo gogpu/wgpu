@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -42,6 +43,27 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 
 // DestroyBuffer is a no-op (Go GC handles cleanup).
 func (d *Device) DestroyBuffer(_ hal.Buffer) {}
+
+// MapBuffer returns a pointer into the buffer's backing Go slice.
+// Software buffers are always host-visible and coherent.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.data == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	// Pointer arithmetic into a Go slice is safe as long as the slice is
+	// kept alive by the caller (core retains the Buffer via ResourceRef).
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(&buf.data[offset]),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer is a no-op — software buffers are persistently host-visible.
+func (d *Device) UnmapBuffer(_ hal.Buffer) error { return nil }
 
 // CreateTexture creates a software texture with real pixel storage.
 func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {

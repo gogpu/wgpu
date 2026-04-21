@@ -148,83 +148,6 @@ func (q *Queue) registerFrameCompletionHandler(cmdBuffer ID) {
 	_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
 }
 
-// ReadBuffer reads data from a buffer.
-//
-// Fast path: if the buffer is CPU-mappable, reads directly. Slow path: if the
-// buffer is GPU-only, blits to a staging buffer and reads from that.
-func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	buf, ok := buffer.(*Buffer)
-	if !ok || buf == nil {
-		return fmt.Errorf("metal: ReadBuffer: invalid buffer")
-	}
-	if len(data) == 0 {
-		return nil
-	}
-
-	// Fast path: buffer is mappable.
-	ptr := buf.Contents()
-	if ptr != nil {
-		src := unsafe.Slice((*byte)(unsafe.Add(ptr, int(offset))), len(data))
-		copy(data, src)
-		return nil
-	}
-
-	// Slow path: buffer is Private — blit to staging buffer, then read.
-	return q.readBufferStaged(buf, offset, data)
-}
-
-// readBufferStaged reads from a Private-mode buffer via a temporary staging buffer.
-func (q *Queue) readBufferStaged(buf *Buffer, offset uint64, data []byte) error {
-	hal.Logger().Debug("metal: ReadBuffer using staging path",
-		"size", len(data), "offset", offset)
-
-	pool := NewAutoreleasePool()
-	defer pool.Drain()
-
-	// Create temporary Shared staging buffer.
-	staging := MsgSend(q.device.raw, Sel("newBufferWithLength:options:"),
-		uintptr(len(data)), uintptr(MTLResourceStorageModeShared))
-	if staging == 0 {
-		return fmt.Errorf("metal: ReadBuffer: staging buffer creation failed (size=%d)", len(data))
-	}
-	defer Release(staging)
-
-	// Blit from source to staging.
-	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
-		return fmt.Errorf("metal: ReadBuffer: command buffer creation failed")
-	}
-	Retain(cmdBuffer)
-	defer Release(cmdBuffer)
-
-	blitEncoder := MsgSend(cmdBuffer, Sel("blitCommandEncoder"))
-	if blitEncoder == 0 {
-		return fmt.Errorf("metal: ReadBuffer: blit encoder creation failed")
-	}
-
-	msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:"),
-		argPointer(uintptr(buf.raw)),
-		argUint64(offset),
-		argPointer(uintptr(staging)),
-		argUint64(0),
-		argUint64(uint64(len(data))),
-	)
-	_ = MsgSend(blitEncoder, Sel("endEncoding"))
-
-	// Must wait synchronously — caller needs the data immediately.
-	_ = MsgSend(cmdBuffer, Sel("commit"))
-	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
-
-	// Read from staging buffer.
-	stagingPtr := MsgSend(staging, Sel("contents"))
-	if stagingPtr == 0 {
-		return fmt.Errorf("metal: ReadBuffer: staging buffer not mappable")
-	}
-	src := unsafe.Slice((*byte)(unsafe.Pointer(stagingPtr)), len(data))
-	copy(data, src)
-	return nil
-}
-
 // WriteBuffer writes data to a buffer immediately.
 //
 // Fast path: if the buffer is CPU-mappable (Shared/Managed storage), copies
@@ -298,14 +221,13 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 
 	// Try async release via completion handler (same pattern as WriteTexture).
-	blockPtr, blockID := newCompletedHandlerBlock(staging)
+	blockPtr := newCompletedHandlerBlock(staging)
 	if blockPtr != 0 {
 		_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
 		_ = MsgSend(cmdBuffer, Sel("commit"))
 		Release(cmdBuffer)
 		// Block is pinned via blockPinRegistry until the completion callback
 		// fires and unpins it. No runtime.KeepAlive needed.
-		_ = blockID
 		return nil
 	}
 
@@ -393,7 +315,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
 		argPointer(uintptr(stagingBuffer)),
-		argUint64(uint64(layout.Offset)),
+		argUint64(layout.Offset),
 		argUint64(uint64(bytesPerRow)),
 		argUint64(uint64(bytesPerImage)),
 		argStruct(sourceSize, mtlSizeType),
@@ -408,7 +330,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Try async path: register a completion handler to release the staging
 	// buffer when the GPU finishes the blit. This avoids a full pipeline stall
 	// that waitUntilCompleted causes (multi-ms per 4K texture).
-	blockPtr, blockID := newCompletedHandlerBlock(stagingBuffer)
+	blockPtr := newCompletedHandlerBlock(stagingBuffer)
 	if blockPtr != 0 {
 		// Register completion handler BEFORE commit.
 		// addCompletedHandler: retains the command buffer internally.
@@ -423,7 +345,6 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 		// Block is pinned via blockPinRegistry until the completion callback
 		// fires and unpins it. No runtime.KeepAlive needed.
-		_ = blockID
 
 		hal.Logger().Debug("metal: WriteTexture committed (async)",
 			"width", size.Width,

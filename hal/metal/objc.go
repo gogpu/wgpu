@@ -193,11 +193,6 @@ func argUint64(val uint64) objcArg {
 	return objcArg{typ: types.UInt64TypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
 }
 
-func argInt64(val int64) objcArg {
-	v := val
-	return objcArg{typ: types.SInt64TypeDescriptor, ptr: unsafe.Pointer(&v), keepAlive: &v}
-}
-
 func argBool(val bool) objcArg {
 	var v uint8
 	if val {
@@ -411,7 +406,7 @@ func (p *AutoreleasePool) Drain() {
 // to return a retained object (not autoreleased) for explicit ownership.
 func NSString(s string) ID {
 	nsStringClass := ID(GetClass("NSString"))
-	if len(s) == 0 {
+	if s == "" {
 		// Use alloc/init for empty string to get +1 retained object
 		obj := MsgSend(nsStringClass, Sel("alloc"))
 		return MsgSend(obj, Sel("init"))
@@ -480,8 +475,6 @@ func goStringFromCStr(cstr uintptr) string {
 
 // blockLiteral is the Go representation of an ObjC Block_literal struct.
 // It matches the C ABI layout expected by the Objective-C runtime.
-//
-//nolint:unused // Fields are accessed via unsafe pointer arithmetic from C callbacks
 type blockLiteral struct {
 	isa        uintptr // Class pointer: _NSConcreteStackBlock
 	flags      int32   // Block flags
@@ -492,8 +485,6 @@ type blockLiteral struct {
 }
 
 // blockDescriptor is the descriptor referenced by blockLiteral.
-//
-//nolint:unused // Fields are read by the ObjC runtime
 type blockDescriptor struct {
 	reserved uint64 // Always 0
 	size     uint64 // sizeof(blockLiteral)
@@ -702,21 +693,18 @@ func getCompletedHandlerBlockInvoke() uintptr {
 // It uses the same blockLiteral layout and blockID mechanism as the shared
 // event notification blocks.
 //
-// Returns (block pointer, block ID) or (0, 0) on failure.
+// Returns a block pointer suitable for passing to addCompletedHandler:,
+// or 0 if block support is unavailable.
 // The caller must keep the returned block pointer alive (via runtime.KeepAlive)
 // until after addCompletedHandler: and commit have been called.
-//
-// If the block will not be used (e.g., fallback to sync), call
-// cancelCompletedHandlerBlock(blockID) to remove the registry entry and
-// avoid leaking the staging buffer reference.
-func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
+func newCompletedHandlerBlock(stagingBuffer ID) uintptr {
 	if symNSConcreteGlobalBlock == 0 {
-		return 0, 0
+		return 0
 	}
 
 	invokePtr := getCompletedHandlerBlockInvoke()
 	if invokePtr == 0 {
-		return 0, 0
+		return 0
 	}
 
 	// Allocate block ID and register the staging buffer
@@ -736,18 +724,7 @@ func newCompletedHandlerBlock(stagingBuffer ID) (uintptr, uint64) {
 	// Pin the block so GC doesn't collect it before the callback fires.
 	blockPinRegistry.Store(id, block)
 
-	return uintptr(unsafe.Pointer(block)), id
-}
-
-// cancelCompletedHandlerBlock removes a completed handler block entry from
-// the registry without releasing the staging buffer. Returns the staging
-// buffer ID so the caller can release it in the synchronous fallback path.
-func cancelCompletedHandlerBlock(id uint64) ID {
-	blockPinRegistry.Delete(id)
-	if val, ok := completedHandlerRegistry.LoadAndDelete(id); ok {
-		return val.(ID)
-	}
-	return 0
+	return uintptr(unsafe.Pointer(block))
 }
 
 // --------------------------------------------------------------------------
@@ -829,7 +806,8 @@ func newFrameCompletionBlock(frameSemaphore chan struct{}) uintptr {
 	// Allocate block ID and register the semaphore channel.
 	id := nextBlockID()
 	// Store as chan<- struct{} (send-only) to match the registry type.
-	frameCompletionRegistry.Store(id, (chan<- struct{})(frameSemaphore))
+	var sendOnly chan<- struct{} = frameSemaphore
+	frameCompletionRegistry.Store(id, sendOnly)
 
 	// Allocate block as global — Block_copy() is a no-op (no PAC re-signing).
 	block := &blockLiteral{

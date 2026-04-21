@@ -82,6 +82,61 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 }
 
+// MapBuffer establishes a CPU-visible mapping for a GL buffer via a CPU
+// shadow slice. See device.go (Windows variant) for rationale.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if buf.mapped == nil {
+		buf.mapped = make([]byte, buf.size)
+		if buf.usage&gputypes.BufferUsageMapRead != 0 {
+			switch {
+			case len(buf.data) == int(buf.size):
+				copy(buf.mapped, buf.data)
+			case buf.id != 0:
+				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
+				glPtr := d.glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
+				if glPtr != 0 {
+					basePtr := *(**byte)(unsafe.Pointer(&glPtr))
+					src := unsafe.Slice(basePtr, buf.size)
+					copy(buf.mapped, src)
+					d.glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
+				}
+				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+			}
+		}
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(&buf.mapped[offset]),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer releases a GL buffer mapping. Writable buffers push the
+// shadow back into the GL buffer via glBufferSubData; the shadow is then
+// released so subsequent MapBuffer calls pick up fresh contents.
+func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return nil
+	}
+	if buf.mapped == nil {
+		return nil
+	}
+	if buf.usage&gputypes.BufferUsageMapWrite != 0 && buf.id != 0 {
+		d.glCtx.BindBuffer(buf.target, buf.id)
+		d.glCtx.BufferSubData(buf.target, 0, len(buf.mapped), uintptr(unsafe.Pointer(&buf.mapped[0])))
+		d.glCtx.BindBuffer(buf.target, 0)
+	}
+	buf.mapped = nil
+	return nil
+}
+
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	id := d.glCtx.GenTextures(1)

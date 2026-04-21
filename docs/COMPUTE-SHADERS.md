@@ -271,29 +271,66 @@ if err != nil {
 }
 ```
 
-### Step 2: Submit and Wait
+### Step 2: Submit
 
 ```go
-// Queue.Submit() is non-blocking — returns submission index for tracking
+// Queue.Submit() is non-blocking — returns submission index for tracking.
+// Auto-polls pending buffer mappings at tail, so simple readback paths
+// don't need an explicit Device.Poll call.
 _, err = device.Queue().Submit(cmdBuffer)
 if err != nil {
     log.Fatal("failed to submit:", err)
 }
-// Wait for GPU to finish before reading back results
-device.WaitIdle()
 ```
 
-### Step 3: Read Back Data
+### Step 3: Map and Read Back Data
+
+Use the WebGPU-spec-compliant mapping API. `Buffer.Map` blocks until the
+GPU finishes writing the buffer (or `ctx` is cancelled). See
+[ADR-BUFFER-MAPPING-API](dev/research/ADR-BUFFER-MAPPING-API.md) for the
+full design rationale.
 
 ```go
-resultBytes := make([]byte, outputBufferSize)
-err = device.Queue().ReadBuffer(readbackBuffer, 0, resultBytes)
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+// Block until the staging buffer is ready (auto-polled from Submit tail).
+if err := readbackBuffer.Map(ctx, wgpu.MapModeRead, 0, outputBufferSize); err != nil {
+    log.Fatal("failed to map buffer:", err)
+}
+defer readbackBuffer.Unmap()
+
+// Get a typed view into the mapped region (zero copy — backed by GPU memory).
+rng, err := readbackBuffer.MappedRange(0, outputBufferSize)
 if err != nil {
-    log.Fatal("failed to read buffer:", err)
+    log.Fatal("failed to get mapped range:", err)
 }
 
-// Convert bytes back to float32 slice
-results := unsafe.Slice((*float32)(unsafe.Pointer(&resultBytes[0])), numElements)
+// Convert bytes back to float32 slice. Valid until Unmap is called.
+results := unsafe.Slice((*float32)(unsafe.Pointer(&rng.Bytes()[0])), numElements)
+
+// ... use results immediately ...
+// The defer above will Unmap when the function returns.
+```
+
+For game loops and interactive renderers that cannot afford to block,
+use the async escape hatch:
+
+```go
+// Non-blocking: kick off mapping and continue rendering.
+pending, _ := readbackBuffer.MapAsync(wgpu.MapModeRead, 0, outputBufferSize)
+
+// Render next frames...
+for i := 0; i < 3; i++ {
+    renderFrame()
+}
+
+// Non-blocking status check.
+if ready, _ := pending.Status(); ready {
+    rng, _ := readbackBuffer.MappedRange(0, outputBufferSize)
+    process(rng.Bytes())
+    readbackBuffer.Unmap()
+}
 ```
 
 ## Timestamp Queries for Profiling
@@ -353,9 +390,16 @@ timestampBuffer, _ := halDevice.CreateBuffer(&hal.BufferDescriptor{
 // Resolve timestamps into the buffer
 halEncoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
 
-// After submit + wait, read back and compute elapsed time
-timestampBytes := make([]byte, 16)
-halQueue.ReadBuffer(timestampBuffer, 0, timestampBytes)
+// After submit, map the timestamp buffer. At the HAL layer this is a
+// direct call to Device.MapBuffer (the high-level Buffer.Map wraps this
+// with state-machine tracking and context support).
+mapping, err := halDevice.MapBuffer(timestampBuffer, 0, 16)
+if err != nil {
+    log.Fatal("failed to map timestamp buffer:", err)
+}
+defer halDevice.UnmapBuffer(timestampBuffer)
+
+timestampBytes := unsafe.Slice((*byte)(mapping.Ptr), 16)
 
 timestamps := unsafe.Slice((*uint64)(unsafe.Pointer(&timestampBytes[0])), 2)
 begin := timestamps[0]

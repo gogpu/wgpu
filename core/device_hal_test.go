@@ -113,6 +113,10 @@ func (m *mockHALDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error
 	return mockBuffer{}, nil
 }
 func (m *mockHALDevice) DestroyBuffer(_ hal.Buffer) {}
+func (m *mockHALDevice) MapBuffer(_ hal.Buffer, _, _ uint64) (hal.BufferMapping, error) {
+	return hal.BufferMapping{}, nil
+}
+func (m *mockHALDevice) UnmapBuffer(_ hal.Buffer) error { return nil }
 func (m *mockHALDevice) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
 	return mockTexture{}, nil
 }

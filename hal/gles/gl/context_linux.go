@@ -1333,6 +1333,67 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	return result
 }
 
+// --- Renderbuffers ---
+
+// GenRenderbuffers generates a single renderbuffer object and returns its name.
+func (c *Context) GenRenderbuffers(n int32) uint32 {
+	var rbo uint32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&rbo),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glGenRenderbuffers, nil, args[:])
+	return rbo
+}
+
+// DeleteRenderbuffers deletes the named renderbuffer objects.
+func (c *Context) DeleteRenderbuffers(renderbuffers ...uint32) {
+	if len(renderbuffers) == 0 {
+		return
+	}
+	n := int32(len(renderbuffers))
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&renderbuffers[0]),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glDeleteRenderbuffers, nil, args[:])
+}
+
+// BindRenderbuffer binds a renderbuffer object to the given target
+// (typically GL_RENDERBUFFER).
+func (c *Context) BindRenderbuffer(target, renderbuffer uint32) {
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&renderbuffer),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glBindRenderbuffer, nil, args[:])
+}
+
+// RenderbufferStorage allocates storage for the currently bound renderbuffer.
+// internalFormat is a sized format like GL_RGBA8 or GL_DEPTH24_STENCIL8.
+func (c *Context) RenderbufferStorage(target, internalFormat uint32, width, height int32) {
+	uw, uh := uint32(width), uint32(height)
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&internalFormat),
+		unsafe.Pointer(&uw),
+		unsafe.Pointer(&uh),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glRenderbufferStorage, nil, args[:])
+}
+
+// FramebufferRenderbuffer attaches a renderbuffer to the currently bound
+// framebuffer at the specified attachment point.
+func (c *Context) FramebufferRenderbuffer(target, attachment, renderbufferTarget, renderbuffer uint32) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&attachment),
+		unsafe.Pointer(&renderbufferTarget),
+		unsafe.Pointer(&renderbuffer),
+	}
+	_ = ffi.CallFunction(&cifVoid4, c.glFramebufferRenderbuffer, nil, args[:])
+}
+
 // --- Pixel Read/Store ---
 
 // ReadPixels reads a block of pixels from the framebuffer.

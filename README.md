@@ -134,9 +134,53 @@ cmdBuffer, _ := encoder.Finish()
 _, _ = device.Queue().Submit(cmdBuffer)  // returns (submissionIndex, error)
 ```
 
+### Buffer Mapping (GPU → CPU readback)
+
+WebGPU-spec-compliant dual-layer API. Primary path is blocking + `context.Context`
+(idiomatic Go, zero allocation); escape hatch `MapAsync` + `Device.Poll` is for
+game loops that cannot afford to block.
+
+```go
+// Primary: blocking, idiomatic, zero-alloc.
+// Map blocks until the GPU finishes writing the buffer (or ctx cancels).
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+if err := stagingBuf.Map(ctx, wgpu.MapModeRead, 0, size); err != nil {
+    log.Fatal(err)
+}
+defer stagingBuf.Unmap()
+
+rng, _ := stagingBuf.MappedRange(0, size)
+data := rng.Bytes()  // []byte view, zero copy, valid until Unmap
+process(data)
+```
+
+```go
+// Escape hatch: async, non-blocking, for render loops.
+pending, _ := stagingBuf.MapAsync(wgpu.MapModeRead, 0, size)
+
+// Continue rendering; auto-polled on next Queue.Submit.
+renderFrame()
+
+if ready, _ := pending.Status(); ready {
+    rng, _ := stagingBuf.MappedRange(0, size)
+    process(rng.Bytes())
+    stagingBuf.Unmap()
+}
+```
+
+Safety guarantees: UAF protection via generation counters on `MappedRange`,
+`ErrBufferDestroyed` on destroy-during-pending, `ErrMapCancelled` on unmap-during-pending,
+`ErrMapRangeOverlap` for overlapping `MappedRange` calls, `MAP_ALIGNMENT = 8`
+validation, thread-safe concurrent `Device.Poll`.
+
+See [ADR-BUFFER-MAPPING-API](docs/dev/research/ADR-BUFFER-MAPPING-API.md) for the
+full design rationale and comparison with Rust wgpu.
+
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)
 
-Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan), GPU-to-CPU readback.
+Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
 
 ---
 
@@ -287,6 +331,18 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern)
 - Zero-copy: render pipeline writes directly into GDI bitmap pixels
 - Correct display during and after window resize
+
+---
+
+## Environment Variables
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `GOGPU_DX12_DXIL` | `1` | Enable DXIL direct compilation on DX12 (experimental). Bypasses HLSL→FXC, generates DXIL bytecode directly from naga IR. SM 6.0+, zero external dependencies. Default: off (uses HLSL→FXC). |
+| `GOGPU_DX12_DXIL_OVERRIDE_VS` | file path | Replace vertex shader DXIL with contents of the given file. For debugging only. |
+| `GOGPU_DX12_DXIL_OVERRIDE_PS` | file path | Replace pixel shader DXIL with contents of the given file. For debugging only. |
+
+> **Note:** Backend selection (`GOGPU_GRAPHICS_API`) is handled by `gogpu` (the app framework), not by `wgpu` directly. See [gogpu documentation](https://github.com/gogpu/gogpu) for `GOGPU_GRAPHICS_API=vulkan|dx12|metal|gles|software`.
 
 ---
 

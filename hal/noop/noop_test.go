@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -851,11 +852,16 @@ func TestNoopComputeE2E(t *testing.T) {
 
 	// 9. Noop is synchronous — submission is immediately complete.
 
-	// 10. Read back results
+	// 10. Read back results via MapBuffer (queue.ReadBuffer removed in
+	// FEAT-WGPU-MAPPING-001).
 	result := make([]byte, bufferSize)
-	if err := queue.ReadBuffer(buffer, 0, result); err != nil {
-		t.Fatalf("ReadBuffer failed: %v", err)
+	mapping, mErr := device.MapBuffer(buffer, 0, uint64(bufferSize))
+	if mErr != nil {
+		t.Fatalf("MapBuffer failed: %v", mErr)
 	}
+	copy(result, unsafe.Slice((*byte)(mapping.Ptr), bufferSize))
+	_ = device.UnmapBuffer(buffer)
+	_ = queue // keep variable alive for earlier submission.
 
 	// Note: noop backend doesn't execute the shader, so results won't be
 	// modified. This test verifies the full API flow completes without errors.
@@ -886,11 +892,14 @@ func TestNoopWriteReadBufferRoundTrip(t *testing.T) {
 		t.Fatalf("WriteBuffer failed: %v", err)
 	}
 
-	// Read back
+	// Read back via MapBuffer (queue.ReadBuffer removed).
 	readData := make([]byte, 64)
-	if err := queue.ReadBuffer(buffer, 0, readData); err != nil {
-		t.Fatalf("ReadBuffer failed: %v", err)
+	mapping, mErr := device.MapBuffer(buffer, 0, 64)
+	if mErr != nil {
+		t.Fatalf("MapBuffer failed: %v", mErr)
 	}
+	copy(readData, unsafe.Slice((*byte)(mapping.Ptr), 64))
+	_ = device.UnmapBuffer(buffer)
 
 	// Verify round-trip
 	for i := range writeData {
@@ -922,11 +931,14 @@ func TestNoopWriteReadBufferWithOffset(t *testing.T) {
 		t.Fatalf("WriteBuffer failed: %v", err)
 	}
 
-	// Read back at same offset
+	// Read back at same offset via MapBuffer.
 	readData := make([]byte, 4)
-	if err := queue.ReadBuffer(buffer, 128, readData); err != nil {
-		t.Fatalf("ReadBuffer failed: %v", err)
+	mapping, mErr := device.MapBuffer(buffer, 128, 4)
+	if mErr != nil {
+		t.Fatalf("MapBuffer failed: %v", mErr)
 	}
+	copy(readData, unsafe.Slice((*byte)(mapping.Ptr), 4))
+	_ = device.UnmapBuffer(buffer)
 
 	for i := range writeData {
 		if readData[i] != writeData[i] {

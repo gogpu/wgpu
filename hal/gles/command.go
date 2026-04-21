@@ -230,17 +230,31 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 	e.setupOffscreenTarget(desc, ca, tv, rpe)
 }
 
-// setupSurfaceTarget binds the default framebuffer and sets viewport to surface dimensions.
+// setupSurfaceTarget binds the Surface's swapchain offscreen framebuffer and
+// sets viewport to surface dimensions. The swapchain FBO is a persistent GL
+// framebuffer owned by the Surface (allocated in Surface.Configure). User
+// render passes target this FBO — never the default framebuffer (FBO 0) —
+// because the scene is intentionally rendered upside-down via naga's in-shader
+// Y-flip (WriterFlagAdjustCoordinateSpace). Queue.Present performs an explicit
+// Y-flipping glBlitFramebuffer from this FBO to FBO 0 before SwapBuffers.
+// Mirrors Rust wgpu-hal/src/gles/egl.rs Surface::configure/Surface::present.
 func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView, rpe *RenderPassEncoder) {
-	e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
-	if tv.surfaceTex != nil && tv.surfaceTex.surface.config != nil {
-		cfg := tv.surfaceTex.surface.config
-		rpe.fbHeight = cfg.Height
-		e.commands = append(e.commands, &SetViewportCommand{
-			width:  float32(cfg.Width),
-			height: float32(cfg.Height),
-		})
+	if tv.surfaceTex != nil && tv.surfaceTex.surface != nil {
+		surf := tv.surfaceTex.surface
+		e.commands = append(e.commands, &BindSurfaceFramebufferCommand{surface: surf})
+		if surf.config != nil {
+			cfg := surf.config
+			rpe.fbHeight = cfg.Height
+			e.commands = append(e.commands, &SetViewportCommand{
+				width:  float32(cfg.Width),
+				height: float32(cfg.Height),
+			})
+		}
+		return
 	}
+	// Fallback: no surface texture (shouldn't normally happen for isSurface=true
+	// views, but preserves prior behavior for tests / degenerate cases).
+	e.commands = append(e.commands, &BindFramebufferCommand{fbo: 0})
 }
 
 // setupOffscreenTarget configures an offscreen FBO, depth/stencil attachment, and MSAA resolve.
@@ -304,30 +318,54 @@ type RenderPassEncoder struct {
 	resolveToSurface bool     // True when resolve target is the default framebuffer (FBO 0)
 }
 
+// resolveTargetSurface extracts the *Surface owning the resolve target (if the
+// resolve target is a surface texture view). Returns nil otherwise.
+func (e *RenderPassEncoder) resolveTargetSurface() *Surface {
+	if len(e.desc.ColorAttachments) == 0 {
+		return nil
+	}
+	rv, ok := e.desc.ColorAttachments[0].ResolveTarget.(*TextureView)
+	if !ok || rv == nil || rv.surfaceTex == nil {
+		return nil
+	}
+	return rv.surfaceTex.surface
+}
+
+// emitMSAAResolve appends the appropriate MSAAResolveCommand when the pass has
+// an MSAA resolve target. Must only be called when e.msaaTexture != nil.
+func (e *RenderPassEncoder) emitMSAAResolve() {
+	w := int32(e.msaaTexture.size.Width)
+	h := int32(e.msaaTexture.size.Height)
+	if e.resolveToSurface {
+		// Resolve into the Surface's swapchain offscreen FBO (not FBO 0).
+		// The Y-flip happens once at Present time (Queue.Present), not here.
+		e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+			msaaTexture:      e.msaaTexture,
+			resolveToSurface: true,
+			surface:          e.resolveTargetSurface(),
+			width:            w,
+			height:           h,
+		})
+		return
+	}
+	if e.resolveTexture != nil {
+		// Resolve into an offscreen texture FBO.
+		e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
+			msaaTexture:    e.msaaTexture,
+			resolveTexture: e.resolveTexture,
+			width:          w,
+			height:         h,
+		})
+	}
+}
+
 // End finishes the render pass.
 // If MSAA resolve is needed, blits the MSAA FBO to the resolve target FBO.
 // If the pass was rendering to an offscreen FBO, rebinds the default framebuffer
 // so subsequent operations do not accidentally target the offscreen texture.
 func (e *RenderPassEncoder) End() {
-	// Perform MSAA resolve if a resolve target was recorded.
 	if e.msaaTexture != nil {
-		if e.resolveToSurface {
-			// Resolve to the default framebuffer (FBO 0).
-			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
-				msaaTexture:      e.msaaTexture,
-				resolveToSurface: true,
-				width:            int32(e.msaaTexture.size.Width),
-				height:           int32(e.msaaTexture.size.Height),
-			})
-		} else if e.resolveTexture != nil {
-			// Resolve to an offscreen texture FBO.
-			e.encoder.commands = append(e.encoder.commands, &MSAAResolveCommand{
-				msaaTexture:    e.msaaTexture,
-				resolveTexture: e.resolveTexture,
-				width:          int32(e.msaaTexture.size.Width),
-				height:         int32(e.msaaTexture.size.Height),
-			})
-		}
+		e.emitMSAAResolve()
 	}
 
 	// Check if we were rendering to an offscreen target.
@@ -607,6 +645,22 @@ func (c *BindFramebufferCommand) Execute(ctx *gl.Context) {
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, c.fbo)
 }
 
+// BindSurfaceFramebufferCommand binds the Surface's swapchain offscreen
+// framebuffer. Reads surface.swapchainFBO at execute time so reconfigure
+// (e.g. window resize) between encode and submit is handled correctly.
+// Mirrors Rust wgpu-hal/src/gles/egl.rs Surface::configure swapchain FBO.
+type BindSurfaceFramebufferCommand struct {
+	surface *Surface
+}
+
+func (c *BindSurfaceFramebufferCommand) Execute(ctx *gl.Context) {
+	if c.surface == nil {
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		return
+	}
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, c.surface.swapchainFBO)
+}
+
 // EnsureOffscreenFBOCommand lazily creates a framebuffer object for an offscreen
 // texture and binds it. If the texture already has an FBO, it simply binds it.
 type EnsureOffscreenFBOCommand struct {
@@ -657,10 +711,17 @@ func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 // MSAAResolveCommand resolves an MSAA framebuffer to a single-sample framebuffer
 // using glBlitFramebuffer. This is recorded at render pass End() when a
 // ResolveTarget is specified in the color attachment.
+//
+// When resolveToSurface is true, the destination is the Surface's swapchain
+// offscreen FBO (NOT FBO 0). No Y-flip is applied here — the Y-flip is the
+// sole responsibility of Queue.Present, which blits the swapchain FBO to FBO 0
+// with srcY0=height, srcY1=0 before SwapBuffers. Mirrors Rust wgpu-hal:
+// MSAA resolve lands in an offscreen target, present blit un-flips.
 type MSAAResolveCommand struct {
 	msaaTexture      *Texture // MSAA source texture (SampleCount > 1)
 	resolveTexture   *Texture // Single-sample resolve target (nil when resolveToSurface)
-	resolveToSurface bool     // True to resolve to default framebuffer (FBO 0)
+	resolveToSurface bool     // True to resolve into the Surface's swapchain FBO
+	surface          *Surface // Surface owning the swapchain FBO (resolveToSurface only)
 	width, height    int32
 }
 
@@ -675,31 +736,25 @@ func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
 
 	// Bind the draw target.
 	if c.resolveToSurface {
-		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+		// Resolve into the Surface's swapchain offscreen FBO. The Y-flip is
+		// performed at Present time, not here, so the resolve is a straight
+		// (non-flipped) MSAA resolve.
+		var drawFBO uint32
+		if c.surface != nil {
+			drawFBO = c.surface.swapchainFBO
+		}
+		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, drawFBO)
 	} else if !c.ensureResolveFBO(ctx) {
 		return
 	}
 
-	// Blit (resolve) the MSAA framebuffer to the single-sample framebuffer.
-	// With ADJUST_COORDINATE_SPACE, the scene is rendered upside-down in the MSAA FBO.
-	// When resolving to the surface (FBO 0) for presentation, we Y-flip the source rect
-	// to produce the correct orientation on screen. This matches Rust wgpu-hal GLES
-	// present blit (egl.rs:1292-1305): srcY0=height, srcY1=0 flips the image.
-	// For offscreen resolve (texture target), no flip — the texture stays in GL orientation
-	// and subsequent render passes (also flipped) will read it correctly.
-	if c.resolveToSurface {
-		ctx.BlitFramebuffer(
-			0, c.height, c.width, 0, // source Y-flipped: top→bottom
-			0, 0, c.width, c.height, // dest: normal
-			gl.COLOR_BUFFER_BIT, gl.NEAREST,
-		)
-	} else {
-		ctx.BlitFramebuffer(
-			0, 0, c.width, c.height,
-			0, 0, c.width, c.height,
-			gl.COLOR_BUFFER_BIT, gl.NEAREST,
-		)
-	}
+	// Straight MSAA resolve — no Y-flip. Both source and destination use the
+	// same upside-down orientation; Queue.Present un-flips at SwapBuffers time.
+	ctx.BlitFramebuffer(
+		0, 0, c.width, c.height,
+		0, 0, c.width, c.height,
+		gl.COLOR_BUFFER_BIT, gl.NEAREST,
+	)
 
 	// Restore default framebuffer binding.
 	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, 0)

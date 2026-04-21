@@ -12,11 +12,13 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -279,15 +281,28 @@ func simulate(device *wgpu.Device, pipeline *wgpu.ComputePipeline, bg *wgpu.Bind
 			return fmt.Errorf("submit: %w", err)
 		}
 
-		// Read back particle[0] position
-		result := make([]byte, bufSize)
-		if err := device.Queue().ReadBuffer(stagingBuf, 0, result); err != nil {
-			return fmt.Errorf("read buffer: %w", err)
+		// Read back particle[0] position via the WebGPU buffer map API.
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := stagingBuf.Map(readCtx, wgpu.MapModeRead, 0, bufSize); err != nil {
+			cancelRead()
+			return fmt.Errorf("map staging buffer: %w", err)
 		}
+		rng, err := stagingBuf.MappedRange(0, bufSize)
+		if err != nil {
+			_ = stagingBuf.Unmap()
+			cancelRead()
+			return fmt.Errorf("staging MappedRange: %w", err)
+		}
+		result := rng.Bytes()
 		x := math.Float32frombits(binary.LittleEndian.Uint32(result[0:4]))
 		y := math.Float32frombits(binary.LittleEndian.Uint32(result[4:8]))
 		vx := math.Float32frombits(binary.LittleEndian.Uint32(result[8:12]))
 		vy := math.Float32frombits(binary.LittleEndian.Uint32(result[12:16]))
+		if err := stagingBuf.Unmap(); err != nil {
+			cancelRead()
+			return fmt.Errorf("unmap staging buffer: %w", err)
+		}
+		cancelRead()
 		fmt.Printf("Step %2d: particle[0] pos=(%.3f, %.3f) vel=(%.4f, %.4f)\n", step, x, y, vx, vy)
 	}
 

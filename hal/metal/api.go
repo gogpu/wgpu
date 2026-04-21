@@ -58,13 +58,14 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		deviceName := DeviceName(device)
 
 		// Determine device type
-		deviceType := gputypes.DeviceTypeIntegratedGPU
-		if DeviceIsHeadless(device) {
+		var deviceType gputypes.DeviceType
+		switch {
+		case DeviceIsHeadless(device):
 			deviceType = gputypes.DeviceTypeOther
-		} else if DeviceIsRemovable(device) {
+		case DeviceIsRemovable(device), !DeviceIsLowPower(device):
 			deviceType = gputypes.DeviceTypeDiscreteGPU
-		} else if !DeviceIsLowPower(device) {
-			deviceType = gputypes.DeviceTypeDiscreteGPU
+		default:
+			deviceType = gputypes.DeviceTypeIntegratedGPU
 		}
 
 		// Build features

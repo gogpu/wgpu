@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -490,35 +491,25 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 
 	// Set vertex shader
 	if desc.Vertex.Module != nil {
-		shaderModule, ok := desc.Vertex.Module.(*ShaderModule)
-		if !ok {
-			return nil, fmt.Errorf("dx12: invalid vertex shader module type")
+		bc, err := resolveShaderBytecode(desc.Vertex.Module, desc.Vertex.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_VS")
+		if err != nil {
+			return nil, fmt.Errorf("dx12: vertex shader: %w", err)
 		}
-		bytecode := shaderModule.EntryPointBytecode(desc.Vertex.EntryPoint)
-		if len(bytecode) > 0 {
-			psoDesc.VS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
-				BytecodeLength: uintptr(len(bytecode)),
-			}
-		} else {
-			return nil, fmt.Errorf("dx12: vertex shader entry point %q not found in module", desc.Vertex.EntryPoint)
+		psoDesc.VS = d3d12.D3D12_SHADER_BYTECODE{
+			ShaderBytecode: unsafe.Pointer(&bc[0]),
+			BytecodeLength: uintptr(len(bc)),
 		}
 	}
 
 	// Set pixel (fragment) shader
 	if desc.Fragment != nil && desc.Fragment.Module != nil {
-		shaderModule, ok := desc.Fragment.Module.(*ShaderModule)
-		if !ok {
-			return nil, fmt.Errorf("dx12: invalid fragment shader module type")
+		bc, err := resolveShaderBytecode(desc.Fragment.Module, desc.Fragment.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_PS")
+		if err != nil {
+			return nil, fmt.Errorf("dx12: fragment shader: %w", err)
 		}
-		bytecode := shaderModule.EntryPointBytecode(desc.Fragment.EntryPoint)
-		if len(bytecode) > 0 {
-			psoDesc.PS = d3d12.D3D12_SHADER_BYTECODE{
-				ShaderBytecode: unsafe.Pointer(&bytecode[0]),
-				BytecodeLength: uintptr(len(bytecode)),
-			}
-		} else {
-			return nil, fmt.Errorf("dx12: fragment shader entry point %q not found in module", desc.Fragment.EntryPoint)
+		psoDesc.PS = d3d12.D3D12_SHADER_BYTECODE{
+			ShaderBytecode: unsafe.Pointer(&bc[0]),
+			BytecodeLength: uintptr(len(bc)),
 		}
 	}
 
@@ -609,6 +600,26 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 }
 
 // buildDepthStencilDesc builds a D3D12_DEPTH_STENCIL_DESC from a depth/stencil state.
+func resolveShaderBytecode(module hal.ShaderModule, entryPoint, overrideEnv string) ([]byte, error) {
+	sm, ok := module.(*ShaderModule)
+	if !ok {
+		return nil, fmt.Errorf("invalid shader module type")
+	}
+	bytecode := sm.EntryPointBytecode(entryPoint)
+	if path := os.Getenv(overrideEnv); path != "" {
+		override, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s %q: %w", overrideEnv, path, err)
+		}
+		bytecode = override
+		fmt.Fprintf(os.Stderr, "[dx12] shader overridden from %s (%d bytes)\n", path, len(override))
+	}
+	if len(bytecode) == 0 {
+		return nil, fmt.Errorf("entry point %q not found in module", entryPoint)
+	}
+	return bytecode, nil
+}
+
 func buildDepthStencilDesc(ds *hal.DepthStencilState) d3d12.D3D12_DEPTH_STENCIL_DESC {
 	desc := d3d12.D3D12_DEPTH_STENCIL_DESC{
 		DepthEnable:      1, // TRUE - enable depth testing

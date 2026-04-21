@@ -81,6 +81,80 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	}
 }
 
+// MapBuffer establishes a CPU-visible mapping for a GL buffer.
+//
+// GLES has no persistent host-mapped memory on legacy contexts, so this
+// implementation mirrors Rust wgpu-hal's CPU-shadow approach: for
+// BufferUsageMapRead we copy GPU contents into a Go slice via
+// glGetBufferSubData, hand out a pointer into that slice, and release it on
+// UnmapBuffer. For MapWrite we hand out a pointer into a zero-initialized
+// shadow and push it back to the GL buffer on UnmapBuffer.
+//
+// Because the shadow is a Go-allocated byte slice, the returned pointer is
+// valid Go memory and therefore always coherent; IsCoherent=true is safe.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if buf.mapped == nil {
+		// Allocate CPU shadow for the full buffer so offset arithmetic is simple.
+		buf.mapped = make([]byte, buf.size)
+
+		// For MapRead, pull the current GL contents down into the shadow.
+		// Prefer the CPU-side copy populated by CopyTextureToBuffer (buf.data)
+		// when available; otherwise map via glMapBuffer and copy out.
+		if buf.usage&gputypes.BufferUsageMapRead != 0 {
+			switch {
+			case len(buf.data) == int(buf.size):
+				copy(buf.mapped, buf.data)
+			case buf.id != 0:
+				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
+				glPtr := d.glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
+				if glPtr != 0 {
+					// GL returned a host pointer via FFI uintptr.
+					// Use double-indirection to satisfy go vet.
+					basePtr := *(**byte)(unsafe.Pointer(&glPtr))
+					src := unsafe.Slice(basePtr, buf.size)
+					copy(buf.mapped, src)
+					d.glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
+				}
+				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+			}
+		}
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(&buf.mapped[offset]),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer releases a GL buffer mapping.
+//
+// For writable buffers the CPU shadow is pushed back into the GL buffer via
+// glBufferSubData. The shadow is then released so subsequent MapBuffer calls
+// pick up fresh contents.
+func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return nil
+	}
+	if buf.mapped == nil {
+		return nil
+	}
+	// Only push back if the buffer was writable.
+	if buf.usage&gputypes.BufferUsageMapWrite != 0 && buf.id != 0 {
+		d.glCtx.BindBuffer(buf.target, buf.id)
+		d.glCtx.BufferSubData(buf.target, 0, len(buf.mapped), unsafe.Pointer(&buf.mapped[0]))
+		d.glCtx.BindBuffer(buf.target, 0)
+	}
+	buf.mapped = nil
+	return nil
+}
+
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {

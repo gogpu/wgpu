@@ -8,6 +8,7 @@ package dx12
 import (
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 	"sync"
@@ -101,6 +102,12 @@ type Device struct {
 	// bypassing the HLSL->FXC path. Opt-in via GOGPU_DX12_DXIL=1 env var.
 	// Requires SM 6.0+ and AgilitySDK 1.615+ for BYPASS hash support.
 	useDXIL bool
+
+	// dxilValidate runs naga.dxil.Validate (IDxcValidator) on every
+	// DXIL blob right after Compile so real HRESULT errors surface in
+	// the wgpu log instead of being folded into E_INVALIDARG by D3D12
+	// pipeline creation. Opt-in via GOGPU_DX12_DXIL_VALIDATE=1.
+	dxilValidate bool
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -247,6 +254,7 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 	// Enable DXIL direct compilation if requested via environment variable.
 	// DXIL path uses naga dxil backend (SM 6.0, BYPASS hash) instead of HLSL->FXC.
 	dev.useDXIL = os.Getenv("GOGPU_DX12_DXIL") == "1"
+	dev.dxilValidate = os.Getenv("GOGPU_DX12_DXIL_VALIDATE") == "1"
 
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(dev, (*Device).Destroy)
@@ -1031,6 +1039,70 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	if b, ok := buffer.(*Buffer); ok && b != nil {
 		b.Destroy()
 	}
+}
+
+// MapBuffer establishes a CPU-visible mapping for the given byte range.
+//
+// DX12 UPLOAD / READBACK / CUSTOM heaps are always backed by host-visible
+// memory; ID3D12Resource::Map is effectively free when the buffer is already
+// mapped (reference-counted inside D3D12). If MappedAtCreation kept the
+// mapping live, we reuse the cached pointer; otherwise we call Map(0, ...)
+// and remember it so subsequent re-maps and UnmapBuffer are symmetric.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if !buf.isMappable() {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+
+	if buf.mappedPointer == nil {
+		// For read-back buffers, specify the full range we may read.
+		// For upload/write buffers, pass a zero range (no reads).
+		var readRange *d3d12.D3D12_RANGE
+		if buf.isReadback() {
+			readRange = &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(buf.size)}
+		} else {
+			readRange = &d3d12.D3D12_RANGE{Begin: 0, End: 0}
+		}
+		ptr, err := buf.raw.Map(0, readRange)
+		if err != nil {
+			return hal.BufferMapping{}, fmt.Errorf("dx12: MapBuffer: %w", err)
+		}
+		buf.mappedPointer = ptr
+	}
+
+	return hal.BufferMapping{
+		Ptr:        unsafe.Pointer(uintptr(buf.mappedPointer) + uintptr(offset)),
+		IsCoherent: true, // DX12 UPLOAD/READBACK are always coherent with CPU.
+	}, nil
+}
+
+// UnmapBuffer releases a CPU-visible mapping.
+//
+// DX12 allows persistent mappings across many Map/Unmap calls; we drop the
+// cached mappedPointer only when core explicitly requests unmap, and we
+// pass a full-range written hint for writable heaps so the driver can
+// invalidate write-combine buffers.
+func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == nil {
+		return nil
+	}
+	if buf.mappedPointer == nil {
+		return nil
+	}
+	var writtenRange *d3d12.D3D12_RANGE
+	if !buf.isReadback() {
+		writtenRange = &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(buf.size)}
+	}
+	buf.raw.Unmap(0, writtenRange)
+	buf.mappedPointer = nil
+	return nil
 }
 
 // CreateTexture creates a GPU texture.
@@ -1878,9 +1950,57 @@ func (d *Device) compileWGSLModule(wgslSource string, nagaOpts *hlsl.Options, mo
 	}
 
 	if d.useDXIL {
-		return d.compileWGSLModuleDXIL(wgslSource, irModule, module)
+		return d.compileWGSLModuleDXIL(wgslSource, irModule, nagaOpts, module)
 	}
 	return d.compileWGSLModuleHLSL(irModule, nagaOpts, module)
+}
+
+// hlslToDXILBindingMap converts an hlsl.BindingMap (used to build the
+// D3D12 root signature for the HLSL→FXC path) into a dxil.BindingMap
+// consumed by the naga DXIL backend. Both maps share the same
+// (group, binding) → (space, register) contract — the only difference
+// is the concrete struct types, since dxil does not import hlsl.
+//
+// Returns nil if the input is nil, preserving the "no remap" default.
+func hlslToDXILBindingMap(m map[hlsl.ResourceBinding]hlsl.BindTarget) dxil.BindingMap {
+	if m == nil {
+		return nil
+	}
+	out := make(dxil.BindingMap, len(m))
+	for k, v := range m {
+		out[dxil.BindingLocation{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
+			Space:    uint32(v.Space),
+			Register: v.Register,
+		}
+	}
+	return out
+}
+
+func hlslToDXILSamplerBufferBindingMap(m map[uint32]hlsl.BindTarget) map[uint32]dxil.BindTarget {
+	if m == nil {
+		return nil
+	}
+	out := make(map[uint32]dxil.BindTarget, len(m))
+	for group, v := range m {
+		out[group] = dxil.BindTarget{
+			Space:    uint32(v.Space),
+			Register: v.Register,
+		}
+	}
+	return out
+}
+
+func hlslToDXILSamplerHeapTargets(t hlsl.SamplerHeapBindTargets) *dxil.SamplerHeapBindTargets {
+	return &dxil.SamplerHeapBindTargets{
+		StandardSamplers: dxil.BindTarget{
+			Space:    uint32(t.StandardSamplers.Space),
+			Register: t.StandardSamplers.Register,
+		},
+		ComparisonSamplers: dxil.BindTarget{
+			Space:    uint32(t.ComparisonSamplers.Space),
+			Register: t.ComparisonSamplers.Register,
+		},
+	}
 }
 
 // compileWGSLModuleHLSL compiles IR to per-entry-point DXBC via HLSL→FXC.
@@ -1950,12 +2070,23 @@ func (d *Device) compileWGSLModuleHLSL(irModule *ir.Module, nagaOpts *hlsl.Optio
 // compileWGSLModuleDXIL compiles IR to per-entry-point DXIL bytecode directly.
 // Pipeline: IR → naga dxil.Compile → DXBC container (with DXIL bitcode + BYPASS hash)
 // Eliminates the HLSL→FXC dependency — no d3dcompiler_47.dll needed.
-func (d *Device) compileWGSLModuleDXIL(wgslSource string, irModule *ir.Module, module *ShaderModule) error {
+//
+// The binding map from nagaOpts (built by PipelineLayout to match the D3D12
+// root signature) is converted to dxil.BindingMap and passed to the DXIL
+// backend so it emits (space, register) pairs matching the root signature.
+// Without this, DXIL would use raw WGSL @group/@binding numbers and D3D12
+// would reject the PSO with E_INVALIDARG (see FEAT-DXIL-002, BUG-DX12-011).
+func (d *Device) compileWGSLModuleDXIL(wgslSource string, irModule *ir.Module, nagaOpts *hlsl.Options, module *ShaderModule) error {
 	hal.Logger().Debug("dx12: compiling DXIL direct",
 		"entryPoints", len(irModule.EntryPoints),
 	)
 
 	opts := dxil.DefaultOptions()
+	if nagaOpts != nil {
+		opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
+		opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
+		opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
+	}
 
 	// Compile each entry point separately by creating a single-entry-point IR module.
 	// dxil.Compile always compiles EntryPoints[0], so we isolate each entry point
@@ -1994,6 +2125,22 @@ func (d *Device) compileWGSLModuleDXIL(wgslSource string, irModule *ir.Module, m
 		dxilBytes, err := dxil.Compile(singleEPModule, opts)
 		if err != nil {
 			return fmt.Errorf("dx12: DXIL compile entry point %q: %w", ep.Name, err)
+		}
+
+		// Pre-validate via naga's IDxcValidator wrapper when
+		// GOGPU_DX12_DXIL_VALIDATE=1 is set. Surfaces the exact
+		// HRESULT+text that dxil.dll would emit, instead of the
+		// opaque E_INVALIDARG that D3D12 CreateGraphicsPipelineState
+		// folds everything into. Also dumps the offending blob to
+		// tmp/ for post-mortem dxilval --corpus replay.
+		if d.dxilValidate {
+			if verr := dxil.Validate(dxilBytes, dxil.ValidateFull); verr != nil {
+				_ = os.WriteFile(
+					fmt.Sprintf("D:/projects/gogpu/wgpu/tmp/dbg_stage%d_%s.dxil", int(ep.Stage), ep.Name),
+					dxilBytes, 0o644,
+				)
+				return fmt.Errorf("dx12: DXIL validation rejected %q (stage %d): %w", ep.Name, ep.Stage, verr)
+			}
 		}
 
 		// Store in cache for future pipelines using the same shader.
@@ -2093,6 +2240,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	pso, err := d.raw.CreateGraphicsPipelineState(psoDesc)
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
+		slog.Error("dx12: CreateGraphicsPipelineState failed",
+			"label", desc.Label,
+			"vs", desc.Vertex.EntryPoint,
+			"fs", func() string {
+				if desc.Fragment != nil {
+					return desc.Fragment.EntryPoint
+				}
+				return ""
+			}(),
+			"vertexBuffers", len(desc.Vertex.Buffers),
+			"err", err,
+		)
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 			d.logDREDBreadcrumbs()
 			return nil, fmt.Errorf("dx12: CreateGraphicsPipelineState failed (device removed: %w): %w", reason, err)
@@ -2209,6 +2368,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	pso, err := d.raw.CreateComputePipelineState(&psoDesc)
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
+		slog.Error("dx12: CreateComputePipelineState failed",
+			"label", desc.Label,
+			"entryPoint", desc.Compute.EntryPoint,
+			"err", err,
+		)
 		if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 			d.logDREDBreadcrumbs()
 			return nil, fmt.Errorf("dx12: CreateComputePipelineState failed (device removed: %w): %w", reason, err)

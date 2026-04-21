@@ -23,6 +23,15 @@ type Surface struct {
 	renderer   string
 	configured bool
 	config     *hal.SurfaceConfiguration
+
+	// Swapchain offscreen framebuffer. User render passes that target this
+	// Surface render into swapchainFBO (backed by colorRenderbuffer), not FBO 0.
+	// Queue.Present blits this FBO to the default framebuffer with an explicit
+	// Y-flip before SwapBuffers. Mirrors Rust wgpu-hal/src/gles/egl.rs
+	// Surface::configure (1537-1562) / Surface::present (1280-1308).
+	swapchainFBO        uint32
+	colorRenderbuffer   uint32
+	fboWidth, fboHeight uint32
 }
 
 // GetAdapterInfo returns adapter information from this surface's GL context.
@@ -113,6 +122,12 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 		}
 	}
 
+	// Allocate / resize the swapchain offscreen FBO. User render passes
+	// target this FBO; Present blits it to FBO 0 with Y-flip.
+	if err := s.reconfigureSwapchainFBO(config.Format, config.Width, config.Height); err != nil {
+		return fmt.Errorf("gles: failed to configure swapchain framebuffer: %w", err)
+	}
+
 	s.configured = true
 	s.config = config
 	return nil
@@ -120,6 +135,11 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 
 // Unconfigure marks the surface as unconfigured.
 func (s *Surface) Unconfigure(_ hal.Device) {
+	destroySwapchainFBO(s.glCtx, s.swapchainFBO, s.colorRenderbuffer)
+	s.swapchainFBO = 0
+	s.colorRenderbuffer = 0
+	s.fboWidth = 0
+	s.fboHeight = 0
 	s.configured = false
 	s.config = nil
 }
@@ -139,6 +159,10 @@ func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
 
 // Destroy releases the surface resources.
 func (s *Surface) Destroy() {
+	// Release swapchain FBO before tearing down the GL context.
+	destroySwapchainFBO(s.glCtx, s.swapchainFBO, s.colorRenderbuffer)
+	s.swapchainFBO = 0
+	s.colorRenderbuffer = 0
 	if s.wglCtx != nil {
 		s.wglCtx.Destroy(s.hwnd)
 		s.wglCtx = nil

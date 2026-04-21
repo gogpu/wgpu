@@ -5,6 +5,130 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-04-21
+
+### Added
+
+- **WebGPU-compliant Buffer mapping API** (FEAT-WGPU-MAPPING-001) — `Buffer.Map(ctx)`,
+  `Buffer.MapAsync`, `Buffer.MappedRange`, `Buffer.Unmap`, `Buffer.MapState`, and
+  `Device.Poll(PollType)`. Follows WebGPU spec §5.3 with a Go-idiomatic dual-layer design:
+  a primary blocking path driven by `context.Context` (the 95% path) and an async escape
+  hatch (`MapAsync` + `MapPending` + `Device.Poll(PollPoll)`) for game loops and event-driven
+  renderers. Both layers are zero-allocation in steady state (benchmarked: `0 B/op, 0 allocs/op`
+  on both `BenchmarkBufferMapReadPrimary` and `BenchmarkBufferMapAsyncEscapeHatch`).
+
+  Example — primary blocking path (matches `database/sql` idiom):
+  ```go
+  if err := buf.Map(ctx, wgpu.MapModeRead, 0, size); err != nil { return err }
+  defer buf.Unmap()
+  rng, _ := buf.MappedRange(0, size)
+  data := rng.Bytes()
+  ```
+
+  Example — async escape hatch (for frame-budgeted readback):
+  ```go
+  pending, _ := buf.MapAsync(wgpu.MapModeRead, 0, size)
+  // ... continue rendering other frames ...
+  device.Poll(wgpu.PollPoll)
+  if ready, _ := pending.Status(); ready {
+      rng, _ := buf.MappedRange(0, size)
+      handle(rng.Bytes())
+      buf.Unmap()
+  }
+  ```
+
+  Typed error taxonomy: `ErrMapAlignment`, `ErrMapAlreadyPending`, `ErrMapAlreadyMapped`,
+  `ErrMapNotMapped`, `ErrMapRangeOverlap`, `ErrMapRangeOverflow`, `ErrMapRangeDetached`,
+  `ErrMapInvalidMode`, `ErrMapCanceled`, `ErrBufferDestroyed`, `ErrMapDeviceLost` — all usable
+  with `errors.Is`.
+
+  Core state machine mirrors Rust wgpu-core `BufferMapState` +
+  `LifetimeTracker::triage_submissions` (`wgpu-core/src/device/life.rs:319`). A per-device
+  `pendingMaps` map tracks which buffers are waiting on which submission index; `Device.Poll`
+  drains completed submissions and issues the HAL `MapBuffer` call. `Queue.Submit` auto-polls
+  at its tail (matching Rust `queue.rs:1429-1431`) so beginner code paths never have to call
+  `Device.Poll` explicitly.
+
+  Safety (all CVE classes from the WebGPU real-world history are mitigated):
+  - **Destroy during pending map** (CVE-2026-5281 Dawn UAF pattern) → state transitions to
+    `BufferMapStateDestroyed` under the buffer mutex; Poll triage checks it before calling HAL.
+  - **Unmap during pending map** → `ErrMapCanceled` signalled to waiter.
+  - **Overlapping MappedRange** → `ErrMapRangeOverlap` (spec §5.3.4).
+  - **UAF after Unmap** → per-buffer atomic generation counter; stale `MappedRange.Bytes()`
+    returns nil rather than exposing freed memory.
+  - **Alignment** → WebGPU `MAP_ALIGNMENT=8`, size multiple of 4, checked synchronously.
+  - **Concurrent Device.Poll** → safe (mutex-protected `pendingMaps`, short critical section
+    dropped around each HAL call).
+- HAL interface now exposes `Device.MapBuffer(buf, offset, size) (BufferMapping, error)` and
+  `Device.UnmapBuffer(buf)`. All 6 backends (DX12, Vulkan, Metal, GLES, software, noop)
+  implement them. DX12 persists mapped pointers across calls; Vulkan returns the cached
+  `VkDeviceMemory` map pointer; Metal calls `MTLBuffer.contents()`; GLES uses a CPU shadow
+  slice plus `glMapBuffer` fallback; software returns a slice pointer; noop reuses its
+  in-memory backing storage.
+
+- **GLES: swapchain offscreen FBO + Present Y-flip blit** (BUG-GLES-YFLIP-001) — added the
+  missing swapchain FBO architecture matching Rust wgpu-hal/gles. Previously, non-MSAA
+  render-to-surface paths rendered upside-down because GLES Y-axis is inverted vs WebGPU.
+  Now all GLES rendering goes through an offscreen FBO with a Y-flipping blit at Present time.
+- **DX12: in-process DXIL validation + BindingMap plumbing** — naga IR → DXIL direct
+  compilation pipeline with register binding remapping matching the root signature layout.
+  Enables `GOGPU_DX12_DXIL=1` for compute and graphics pipelines.
+- **DX12: sampler heap plumbing for DXIL** (BUG-DXIL-028) — forward `SamplerBufferBindingMap`
+  and `SamplerHeapTargets` from HLSL options to DXIL options so texture/sampler pipelines
+  match the root signature. Without this, any DXIL shader using textures/samplers got
+  `E_INVALIDARG` from `CreateGraphicsPipelineState`.
+- **DX12: pipeline error logging** — `CreateGraphicsPipelineState` and
+  `CreateComputePipelineState` failures now log via `slog.Error` with pipeline label,
+  entry points, and HRESULT. Previously errors were silently swallowed because
+  `hal.Logger()` defaults to nop.
+- **DX12: headless triangle example** — `examples/triangle-headless` for DXIL debugging
+  with `GOGPU_DX12_DXIL_OVERRIDE_VS` / `GOGPU_DX12_DXIL_OVERRIDE_PS` env-var hooks.
+- **DX12: ID3D12InfoQueue.GetMessage** now accepts `S_FALSE` on size query (was incorrectly
+  treated as error).
+
+### Fixed
+
+- **DX12 compute readback data race** — the removed `Queue.ReadBuffer` mapped the staging
+  buffer before the GPU finished the `CopyBufferToBuffer`, so `compute-copy`/`compute-sum`
+  returned all zeros on DX12. The new state-machine-driven mapping path waits on the
+  submission fence via `Device.Poll` before calling HAL `MapBuffer`, fixing the race at the
+  root. Verified: `GOGPU_GRAPHICS_API=dx12 go run ./examples/compute-copy` returns 1024/1024
+  matches; `compute-sum` CPU sum matches GPU sum.
+
+### Removed (breaking)
+
+- `Queue.ReadBuffer` removed from both the public `wgpu.Queue` API and the `hal.Queue`
+  interface; all 6 backends dropped their `ReadBuffer` implementation. Callers migrate to
+  the WebGPU spec-compliant `Buffer.Map(ctx, wgpu.MapModeRead, 0, size) + MappedRange + Unmap`
+  flow.
+
+  Migration — before:
+  ```go
+  data := make([]byte, size)
+  queue.ReadBuffer(buf, 0, data)
+  ```
+
+  Migration — after:
+  ```go
+  if err := buf.Map(ctx, wgpu.MapModeRead, 0, size); err != nil { return err }
+  defer buf.Unmap()
+  rng, _ := buf.MappedRange(0, size)
+  copy(data, rng.Bytes())
+  ```
+
+  `Queue.WriteBuffer` is **kept** — it is legitimate `GPUQueue.writeBuffer` from the WebGPU
+  spec and is distinct from mapping.
+
+- All three in-repo examples (`compute-copy`, `compute-sum`, `compute-particles`) migrated
+  to the new API. Downstream repos (`gogpu/gg`, `gogpu/gogpu`, `gogpu/ui`, `gogpu/g3d`) have
+  separate migration tasks in their kanban.
+
+### Dependencies
+
+- **naga** v0.17.3 → **v0.17.4** — DXIL full rendering (55 commits: DCE pass, inline pass,
+  mem2reg, phi promotion, sampler heap config, CBV struct layout, register packing).
+  First Pure Go DXIL generator that renders full 2D applications (text, SDF shapes, widgets).
+
 ## [0.24.7] - 2026-04-11
 
 ### Fixed

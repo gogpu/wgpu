@@ -163,7 +163,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
 		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
 			argPointer(uintptr(srcBuf.raw)),
-			argUint64(uint64(region.BufferLayout.Offset)),
+			argUint64(region.BufferLayout.Offset),
 			argUint64(uint64(bytesPerRow)),
 			argUint64(uint64(bytesPerImage)),
 			argStruct(sourceSize, mtlSizeType),
@@ -207,7 +207,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 			argStruct(sourceOrigin, mtlOriginType),
 			argStruct(sourceSize, mtlSizeType),
 			argPointer(uintptr(dstBuf.raw)),
-			argUint64(uint64(region.BufferLayout.Offset)),
+			argUint64(region.BufferLayout.Offset),
 			argUint64(uint64(bytesPerRow)),
 			argUint64(uint64(bytesPerImage)),
 		)
@@ -288,7 +288,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			msgSendClearColor(attachment, Sel("setClearColor:"), clearColor)
 		}
 		storeAction := storeOpToMTL(ca.StoreOp)
-		if ca.ResolveTarget != nil {
+		if ca.ResolveTarget != nil { //nolint:nestif // sequential Metal descriptor setup
 			if rtv, ok := ca.ResolveTarget.(*TextureView); ok && rtv != nil {
 				_ = MsgSend(attachment, Sel("setResolveTexture:"), uintptr(rtv.raw))
 				// Metal requires MultisampleResolve store action when a resolve
@@ -303,7 +303,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		}
 		_ = MsgSend(attachment, Sel("setStoreAction:"), uintptr(storeAction))
 	}
-	if desc.DepthStencilAttachment != nil {
+	if desc.DepthStencilAttachment != nil { //nolint:nestif // sequential Metal descriptor setup
 		dsa := desc.DepthStencilAttachment
 
 		// Depth attachment

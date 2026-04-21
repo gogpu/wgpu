@@ -18,11 +18,11 @@ func (r *Resource) Destroy() {}
 // NativeHandle returns 0 for noop resources (no real handle).
 func (r *Resource) NativeHandle() uintptr { return 0 }
 
-// Buffer implements hal.Buffer with optional data storage.
-// If created with MappedAtCreation, it stores the buffer data.
+// Buffer implements hal.Buffer with in-memory data storage.
 type Buffer struct {
 	Resource
 	data []byte
+	size uint64
 }
 
 // NativeHandle returns 0 for noop buffers.

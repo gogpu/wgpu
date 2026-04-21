@@ -162,8 +162,8 @@ type SurfaceTexture struct {
 
 // CurrentUsage returns 0 — Metal has no explicit resource state tracking.
 func (st *SurfaceTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
-func (t *SurfaceTexture) AddPendingRef()                       {}
-func (t *SurfaceTexture) DecPendingRef()                       {}
+func (st *SurfaceTexture) AddPendingRef()                      {}
+func (st *SurfaceTexture) DecPendingRef()                      {}
 
 // Destroy releases the surface texture.
 func (st *SurfaceTexture) Destroy() {

@@ -54,10 +54,15 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap ma
 		BindingMap:         bindingMap,
 		// ADJUST_COORDINATE_SPACE: naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
 		// at the end of vertex shaders. This flips Y and remaps Z from [0,1] to [-1,1].
-		// The scene renders upside-down in GL; the present blit (MSAAResolveCommand) flips it back.
-		// This matches Rust wgpu-hal GLES (device.rs:1160) and fixes gl_FragCoord.y convention:
-		// with the flip, gl_FragCoord.y=0 is at the top (WebGPU convention), not bottom (GL convention).
-		// Without this, rrect_clip_coverage() in fragment shaders gets wrong Y values (BUG-GLES-SCROLLBAR-001).
+		// The scene renders upside-down inside the Surface's swapchain offscreen FBO
+		// (hal/gles/surface.go). Queue.Present performs an explicit Y-flipping
+		// glBlitFramebuffer from the swapchain FBO to the default framebuffer (FBO 0)
+		// before SwapBuffers — see Surface.blitSwapchainToDefault and Rust reference
+		// wgpu-hal/src/gles/egl.rs Surface::present (1280-1308).
+		// The flip also fixes gl_FragCoord.y convention in fragment shaders: with
+		// the flip, gl_FragCoord.y=0 is at the top (WebGPU convention), not bottom
+		// (GL convention). Without it, rrect_clip_coverage() in fragment shaders
+		// gets wrong Y values (BUG-GLES-SCROLLBAR-001).
 		WriterFlags: glsl.WriterFlagAdjustCoordinateSpace | glsl.WriterFlagForcePointSize,
 	})
 	if err != nil {

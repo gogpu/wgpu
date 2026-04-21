@@ -720,6 +720,44 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	return uint32(r)
 }
 
+// --- Renderbuffers ---
+
+// GenRenderbuffers generates a single renderbuffer object and returns its name.
+func (c *Context) GenRenderbuffers(n int32) uint32 {
+	var rbo uint32
+	syscall.SyscallN(c.glGenRenderbuffers, uintptr(n), uintptr(unsafe.Pointer(&rbo)))
+	return rbo
+}
+
+// DeleteRenderbuffers deletes the named renderbuffer objects.
+func (c *Context) DeleteRenderbuffers(renderbuffers ...uint32) {
+	if len(renderbuffers) == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDeleteRenderbuffers, uintptr(len(renderbuffers)),
+		uintptr(unsafe.Pointer(&renderbuffers[0])))
+}
+
+// BindRenderbuffer binds a renderbuffer object to the given target
+// (typically GL_RENDERBUFFER).
+func (c *Context) BindRenderbuffer(target, renderbuffer uint32) {
+	syscall.SyscallN(c.glBindRenderbuffer, uintptr(target), uintptr(renderbuffer))
+}
+
+// RenderbufferStorage allocates storage for the currently bound renderbuffer.
+// internalFormat is a sized format like GL_RGBA8 or GL_DEPTH24_STENCIL8.
+func (c *Context) RenderbufferStorage(target, internalFormat uint32, width, height int32) {
+	syscall.SyscallN(c.glRenderbufferStorage, uintptr(target), uintptr(internalFormat),
+		uintptr(width), uintptr(height))
+}
+
+// FramebufferRenderbuffer attaches a renderbuffer to the currently bound
+// framebuffer at the specified attachment point.
+func (c *Context) FramebufferRenderbuffer(target, attachment, renderbufferTarget, renderbuffer uint32) {
+	syscall.SyscallN(c.glFramebufferRenderbuffer, uintptr(target), uintptr(attachment),
+		uintptr(renderbufferTarget), uintptr(renderbuffer))
+}
+
 // --- Pixel Read/Store ---
 
 // ReadPixels reads a block of pixels from the framebuffer.

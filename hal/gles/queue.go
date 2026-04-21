@@ -53,56 +53,6 @@ func (q *Queue) PollCompleted() uint64 {
 	return q.submissionIndex
 }
 
-// ReadBuffer reads data from a GPU buffer into the provided byte slice.
-// If the buffer has CPU-side data (populated by CopyTextureToBuffer), it reads
-// from there directly. Otherwise it falls back to glMapBuffer with GL_READ_ONLY.
-func (q *Queue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	buf, ok := buffer.(*Buffer)
-	if !ok {
-		return fmt.Errorf("gles: invalid buffer for ReadBuffer")
-	}
-
-	// If the buffer has CPU-side data (from CopyTextureToBuffer), read from it.
-	if len(buf.data) > 0 {
-		end := offset + uint64(len(data))
-		if end > uint64(len(buf.data)) {
-			return fmt.Errorf("gles: ReadBuffer offset+size (%d) exceeds buffer data length (%d)", end, len(buf.data))
-		}
-		copy(data, buf.data[offset:end])
-		return nil
-	}
-
-	// Fall back to GL buffer mapping for GPU-resident buffers.
-	if buf.id == 0 {
-		return fmt.Errorf("gles: invalid buffer for ReadBuffer (no GL ID and no CPU data)")
-	}
-
-	// Bind buffer to COPY_READ_BUFFER target (avoids disturbing other bindings)
-	q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
-
-	// Map the buffer for reading
-	ptr := q.glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
-	if ptr == 0 {
-		q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
-		return fmt.Errorf("gles: glMapBuffer returned null (function may not be available)")
-	}
-
-	// Copy from the mapped pointer at the given offset into data.
-	// Use the same ptrFromUintptr pattern as the gl package (double pointer indirection).
-	src := unsafe.Slice(*(**byte)(unsafe.Pointer(&ptr)), uint64(len(data))+offset)
-	copy(data, src[offset:])
-
-	// Unmap and unbind
-	q.glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
-	q.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
-
-	return nil
-}
-
 // WriteBuffer writes data to a buffer immediately.
 func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	buf, ok := buffer.(*Buffer)
@@ -159,11 +109,19 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 }
 
 // Present presents a surface texture to the screen.
+//
+// Before SwapBuffers, blits the Surface's swapchain offscreen FBO to the
+// default framebuffer (FBO 0) with an explicit Y-flip. User render passes
+// render upside-down into the swapchain FBO (driven by naga's in-shader
+// Y-flip); the blit un-flips for presentation. Mirrors Rust wgpu-hal
+// src/gles/egl.rs Surface::present (1280-1308).
 func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture) error {
 	surf, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("gles: invalid surface type")
 	}
+
+	surf.blitSwapchainToDefault()
 
 	return surf.wglCtx.SwapBuffers()
 }

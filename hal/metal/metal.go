@@ -16,8 +16,7 @@ import (
 )
 
 var (
-	metalLib  unsafe.Pointer
-	quartzLib unsafe.Pointer
+	metalLib unsafe.Pointer
 
 	// Metal framework functions
 	symMTLCreateSystemDefaultDevice unsafe.Pointer
@@ -27,16 +26,16 @@ var (
 	cifCopyAllDevices      types.CallInterface
 
 	initOnce sync.Once
-	initErr  error
+	errInit  error
 )
 
 // Init initializes the Metal framework.
 // Must be called before using any other Metal functions.
 func Init() error {
 	initOnce.Do(func() {
-		initErr = doInit()
+		errInit = doInit()
 	})
-	return initErr
+	return errInit
 }
 
 func doInit() error {
@@ -54,8 +53,7 @@ func doInit() error {
 	}
 
 	// Load QuartzCore.framework for CAMetalLayer
-	quartzLib, err = ffi.LoadLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
-	if err != nil {
+	if _, err := ffi.LoadLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore"); err != nil {
 		return fmt.Errorf("metal: failed to load QuartzCore.framework: %w", err)
 	}
 
@@ -66,7 +64,7 @@ func doInit() error {
 	symMTLCopyAllDevices, _ = ffi.GetSymbol(metalLib, "MTLCopyAllDevices") // Optional
 
 	// Prepare CallInterfaces
-	if err = prepareMetalCallInterfaces(); err != nil {
+	if err := prepareMetalCallInterfaces(); err != nil {
 		return err
 	}
 

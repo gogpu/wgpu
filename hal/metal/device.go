@@ -23,6 +23,9 @@ import (
 // This maximizes the gap between uniform/storage buffers and vertex buffers.
 const maxVertexBuffers = 31
 
+// unknownError is the default error message when Metal returns a nil NSError.
+const unknownError = "unknown error"
+
 // Device implements hal.Device for Metal.
 type Device struct {
 	raw           ID // id<MTLDevice>
@@ -101,6 +104,41 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		options: options,
 		device:  d,
 	}, nil
+}
+
+// MapBuffer returns a CPU-visible pointer into the given Metal buffer.
+//
+// Buffers created with MTLStorageModeShared or MTLStorageModeManaged expose
+// host-visible memory via MTLBuffer.contents(). Private buffers do not and
+// return an error; core must route such reads through a staging buffer at
+// a higher layer.
+//
+// Metal Shared memory is always coherent with CPU access, so the driver
+// reports IsCoherent=true; Managed storage would need didModifyRange
+// for CPU→GPU writes but the Go wgpu path currently uses only Shared
+// host-visible buffers.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == 0 {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	ptr := buf.Contents()
+	if ptr == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Add(ptr, int(offset)),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer is a no-op on Metal because Shared-storage buffers are
+// persistently mapped and coherent with the GPU.
+func (d *Device) UnmapBuffer(_ hal.Buffer) error {
+	return nil
 }
 
 // DestroyBuffer destroys a GPU buffer.
@@ -429,7 +467,7 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	// If WGSL source is provided, compile to MSL
-	if desc.Source.WGSL != "" {
+	if desc.Source.WGSL != "" { //nolint:nestif // WGSL→MSL pipeline is sequential; splitting would scatter coupled logic
 		start := time.Now()
 
 		// Parse WGSL to AST
@@ -469,7 +507,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			uintptr(mslString), 0, uintptr(unsafe.Pointer(&errorPtr)))
 
 		if library == 0 {
-			errMsg := "unknown error"
+			errMsg := unknownError
 			if errorPtr != 0 {
 				if details := formatNSError(errorPtr); details != "" {
 					errMsg = details
@@ -655,7 +693,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		uintptr(pipelineDesc), uintptr(unsafe.Pointer(&errorPtr)))
 
 	if pipelineState == 0 {
-		errMsg := "unknown error"
+		errMsg := unknownError
 		if errorPtr != 0 {
 			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
 			if errDesc != 0 {
@@ -762,7 +800,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		uintptr(computeFunc), uintptr(unsafe.Pointer(&errorPtr)))
 
 	if pipelineState == 0 {
-		errMsg := "unknown error"
+		errMsg := unknownError
 		if errorPtr != 0 {
 			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
 			if errDesc != 0 {
@@ -921,7 +959,7 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	}
 
 	// Try event-driven path using MTLSharedEvent notification.
-	if result, err, attempted := d.waitEventDriven(mtlFence, value, timeout); attempted {
+	if result, attempted, err := d.waitEventDriven(mtlFence, value, timeout); attempted {
 		return result, err
 	}
 
@@ -930,18 +968,18 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 }
 
 // waitEventDriven attempts to wait using MTLSharedEvent.notifyListener:atValue:block:.
-// Returns (result, error, true) if the event-driven path was used.
-// Returns (false, nil, false) if the path is unavailable and caller should fall back.
-func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error, bool) {
+// Returns (result, true, nil/error) if the event-driven path was used.
+// Returns (false, false, nil) if the path is unavailable and caller should fall back.
+func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Duration) (bool, bool, error) {
 	hal.Logger().Debug("metal: Wait", "value", value, "timeout", timeout, "path", "event-driven")
 	listener := d.getOrCreateEventListener()
 	if listener == 0 {
-		return false, nil, false
+		return false, false, nil
 	}
 
 	blockPtr, blockID, done := newSharedEventNotificationBlock()
 	if blockPtr == 0 {
-		return false, nil, false
+		return false, false, nil
 	}
 	defer releaseBlock(blockID)
 
@@ -960,15 +998,15 @@ func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Dur
 	// Wait for the callback or timeout.
 	select {
 	case <-done:
-		return true, nil, true
+		return true, true, nil
 	case <-time.After(timeout):
 		// Timeout — check once more in case the event fired between
 		// the select evaluation and now.
 		select {
 		case <-done:
-			return true, nil, true
+			return true, true, nil
 		default:
-			return false, nil, true
+			return false, true, nil
 		}
 	}
 }
@@ -1115,7 +1153,8 @@ func extractWorkgroupSizes(module *ir.Module) map[string][3]uint32 {
 		return nil
 	}
 	result := make(map[string][3]uint32)
-	for _, ep := range module.EntryPoints {
+	for i := range module.EntryPoints {
+		ep := &module.EntryPoints[i]
 		if ep.Stage == ir.StageCompute {
 			result[ep.Name] = ep.Workgroup
 		}

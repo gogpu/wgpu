@@ -6,6 +6,7 @@ package noop_test
 import (
 	"runtime"
 	"testing"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -418,8 +419,11 @@ func BenchmarkNoopWriteBuffer(b *testing.B) {
 	}
 }
 
-// BenchmarkNoopReadBuffer measures ReadBuffer overhead for various sizes.
-func BenchmarkNoopReadBuffer(b *testing.B) {
+// BenchmarkNoopMapBuffer measures the overhead of HAL Device.MapBuffer /
+// UnmapBuffer for various sizes. This replaces BenchmarkNoopReadBuffer
+// after FEAT-WGPU-MAPPING-001 removed Queue.ReadBuffer from the HAL
+// interface.
+func BenchmarkNoopMapBuffer(b *testing.B) {
 	sizes := []struct {
 		name string
 		size int
@@ -435,6 +439,7 @@ func BenchmarkNoopReadBuffer(b *testing.B) {
 			b.ReportAllocs()
 			device, queue, cleanup := setupNoopDevice(b)
 			defer cleanup()
+			_ = queue // queue is used only for cleanup bookkeeping here.
 
 			buffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
 				Size:             uint64(s.size),
@@ -448,7 +453,9 @@ func BenchmarkNoopReadBuffer(b *testing.B) {
 			b.ResetTimer()
 			b.SetBytes(int64(s.size))
 			for i := 0; i < b.N; i++ {
-				_ = queue.ReadBuffer(buffer, 0, data)
+				mapping, _ := device.MapBuffer(buffer, 0, uint64(s.size))
+				copy(data, unsafe.Slice((*byte)(mapping.Ptr), s.size))
+				_ = device.UnmapBuffer(buffer)
 			}
 		})
 	}

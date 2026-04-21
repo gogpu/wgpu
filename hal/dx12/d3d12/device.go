@@ -1587,8 +1587,18 @@ func (m *D3D12Message) Description() string {
 // GetMessage retrieves a message by index. The caller must free the returned
 // buffer with CoTaskMemFree (or just let Go GC it since we copy the data).
 // Returns nil if the index is out of range or the call fails.
+//
+// D3D12's GetMessage follows the two-call COM idiom: first call with
+// pMessage=nil returns S_FALSE (HRESULT=1) and writes the required buffer
+// size into pMessageByteLength; second call with an allocated buffer of
+// that size returns S_OK (HRESULT=0) and writes the message. SUCCEEDED(hr)
+// in COM treats any hr with sign bit clear as success, so we must check
+// int32(ret) < 0 rather than ret != 0 — otherwise the S_FALSE from the
+// size-query phase is mistakenly treated as failure and the caller sees
+// a populated queue (GetNumStoredMessages > 0) but gets nil from every
+// retrieval.
 func (q *ID3D12InfoQueue) GetMessage(index uint64) *D3D12Message {
-	// First call: get required buffer size.
+	// First call: get required buffer size. Returns S_FALSE on success.
 	var msgSize uintptr
 	ret, _, _ := syscall.Syscall6(
 		q.vtbl.GetMessage,
@@ -1599,11 +1609,11 @@ func (q *ID3D12InfoQueue) GetMessage(index uint64) *D3D12Message {
 		uintptr(unsafe.Pointer(&msgSize)),
 		0, 0,
 	)
-	if ret != 0 || msgSize == 0 {
+	if int32(ret) < 0 || msgSize == 0 {
 		return nil
 	}
 
-	// Allocate buffer and retrieve the message.
+	// Allocate buffer and retrieve the message. Returns S_OK on success.
 	buf := make([]byte, msgSize)
 	ret, _, _ = syscall.Syscall6(
 		q.vtbl.GetMessage,
@@ -1614,7 +1624,7 @@ func (q *ID3D12InfoQueue) GetMessage(index uint64) *D3D12Message {
 		uintptr(unsafe.Pointer(&msgSize)),
 		0, 0,
 	)
-	if ret != 0 {
+	if int32(ret) < 0 {
 		return nil
 	}
 
