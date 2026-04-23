@@ -186,14 +186,18 @@ func (e *CommandEncoder) DiscardEncoding() {
 	e.returnEncoderToPool()
 }
 
-// returnEncoderToPool returns the HAL encoder to the device's pool.
+// returnEncoderToPool resets and returns the HAL encoder to the device's pool.
 // Called when the encoder will not be submitted (error or discard).
-// The encoder must not be in recording state (DiscardEncoding or error
-// path must have been called first).
+// ResetAll must be called before release to ensure the command pool is reset
+// and all command buffers return to initial state — otherwise the next
+// BeginEncoding will fail with VUID-vkBeginCommandBuffer-commandBuffer-00049
+// because CBs from an unreset pool may still be in executable/recording state.
+// Matches Rust wgpu-core InnerCommandEncoder::drop (command/mod.rs:726-738).
 func (e *CommandEncoder) returnEncoderToPool() {
 	if e.halEncoder == nil || e.device == nil || e.device.cmdEncoderPool == nil {
 		return
 	}
+	e.halEncoder.ResetAll(nil)
 	e.device.cmdEncoderPool.release(e.halEncoder)
 	e.halEncoder = nil
 }

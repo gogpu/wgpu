@@ -13,8 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with industry-standard free list pattern. Each `CommandEncoder` owns a pool of pre-allocated
   command buffers (batch 16, matching Rust `ALLOCATION_GRANULARITY`). `BeginEncoding` pops from
   free list, `EndEncoding` returns handle to caller, `ResetAll` recycles via `vkResetCommandPool`.
-  Fixes VUID-vkBeginCommandBuffer-commandBuffer-00049 (double begin on recording CB).
   Enterprise parity: Khronos, NVIDIA, ARM, Mesa, Rust wgpu-hal.
+
+### Fixed
+
+- **Vulkan: `recyclePool` now calls `vkResetCommandPool`** before returning pool to free list.
+  Without this, recycled pools had CBs in executable state, causing validation errors on reuse.
+- **`returnEncoderToPool` calls `ResetAll`** before release — ensures command pool is reset when
+  encoder is returned on error/discard path. Matches Rust `InnerCommandEncoder::drop`
+  (`command/mod.rs:726-738`).
+
+### Dependencies
+
+- **naga** v0.17.5 → **v0.17.6**
 
 ## [0.25.5] - 2026-04-23
 
