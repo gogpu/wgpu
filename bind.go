@@ -140,6 +140,18 @@ func (l *PipelineLayout) Release() {
 	})
 }
 
+// LateBufferBindingInfo records the actual buffer binding size for a layout entry
+// with MinBindingSize == 0. At draw/dispatch time, these sizes are compared against
+// the shader-required minimums stored on the pipeline.
+//
+// Matches Rust wgpu-core's BindGroupLateBufferBindingInfo (binding_model.rs:1167-1173).
+type LateBufferBindingInfo struct {
+	// BindingIndex is the binding number from the layout entry.
+	BindingIndex uint32
+	// Size is the actual buffer binding size at bind group creation time.
+	Size uint64
+}
+
 // BindGroup represents bound GPU resources for shader access.
 type BindGroup struct {
 	hal      hal.BindGroup
@@ -148,6 +160,10 @@ type BindGroup struct {
 	// layout is the bind group layout used to create this bind group.
 	// Stored for draw-time compatibility validation via the binder.
 	layout *BindGroupLayout
+	// lateBufferBindingInfos records actual buffer sizes for layout entries
+	// with MinBindingSize == 0. Listed in iteration order of the layout entries,
+	// matching Rust wgpu-core's BindGroup.late_buffer_binding_infos.
+	lateBufferBindingInfos []LateBufferBindingInfo
 	// ref is the GPU-aware reference counter for this bind group (Phase 2).
 	// Clone'd when used in a render/compute pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef

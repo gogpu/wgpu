@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
+	naga "github.com/gogpu/naga"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -212,7 +214,25 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
 	}
 
-	return &ShaderModule{hal: halModule, device: d}, nil
+	sm := &ShaderModule{hal: halModule, device: d}
+
+	// Parse WGSL source to naga IR for shader introspection (late binding validation).
+	// Matches Rust wgpu-core which stores the naga Module on ShaderModule for use
+	// by Interface::check_stage during pipeline creation.
+	// SPIR-V shaders skip this — they go directly to HAL without IR-level introspection.
+	if desc.WGSL != "" {
+		ast, parseErr := naga.Parse(desc.WGSL)
+		if parseErr == nil {
+			irModule, lowerErr := naga.Lower(ast)
+			if lowerErr == nil {
+				sm.irModule = irModule
+			}
+		}
+		// Parse/lower failures are non-fatal here — the HAL already compiled the shader
+		// successfully. Late binding validation will be skipped if IR is unavailable.
+	}
+
+	return sm, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -332,12 +352,52 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
 
+	// Build late buffer binding info for layout entries with MinBindingSize == 0.
+	// These record the actual bound buffer size at bind group creation time,
+	// to be validated against shader requirements at draw/dispatch time.
+	// Matches Rust wgpu-core's BindGroup.late_buffer_binding_infos population
+	// in Device::create_bind_group (binding_model.rs:1187-1189).
+	var lateInfos []LateBufferBindingInfo
+	entryMap := buildBindGroupEntryMap(desc.Entries)
+	for _, layoutEntry := range desc.Layout.entries {
+		if layoutEntry.Buffer == nil || layoutEntry.Buffer.MinBindingSize != 0 {
+			continue
+		}
+		// This is a buffer entry with MinBindingSize == 0.
+		var boundSize uint64
+		if bgEntry, ok := entryMap[layoutEntry.Binding]; ok && bgEntry.Buffer != nil {
+			boundSize = bgEntry.Size
+			if boundSize == 0 {
+				// Size == 0 means "rest of buffer" — use actual buffer size minus offset.
+				bufSize := bgEntry.Buffer.Size()
+				if bgEntry.Offset < bufSize {
+					boundSize = bufSize - bgEntry.Offset
+				}
+			}
+		}
+		lateInfos = append(lateInfos, LateBufferBindingInfo{
+			BindingIndex: layoutEntry.Binding,
+			Size:         boundSize,
+		})
+	}
+
 	return &BindGroup{
-		hal:    halGroup,
-		device: d,
-		layout: desc.Layout,
-		ref:    core.NewResourceRef("BindGroup:"+desc.Label, nil),
+		hal:                    halGroup,
+		device:                 d,
+		layout:                 desc.Layout,
+		lateBufferBindingInfos: lateInfos,
+		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, nil),
 	}, nil
+}
+
+// buildBindGroupEntryMap builds a lookup map from binding index to BindGroupEntry
+// for efficient access during late buffer binding info construction.
+func buildBindGroupEntryMap(entries []BindGroupEntry) map[uint32]*BindGroupEntry {
+	m := make(map[uint32]*BindGroupEntry, len(entries))
+	for i := range entries {
+		m[entries[i].Binding] = &entries[i]
+	}
+	return m
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -385,6 +445,16 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		}
 	}
 
+	// Build shader binding sizes across all stages (vertex + fragment).
+	// Matches Rust wgpu-core's check_stage calls that accumulate shader_binding_sizes
+	// with max across stages for the same binding (validation.rs:1126-1139).
+	shaderBindingSizes := mergeShaderBindingSizes(
+		desc.Vertex.Module,
+		fragmentShaderModule(desc.Fragment),
+	)
+
+	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
+
 	return &RenderPipeline{
 		hal:                   halPipeline,
 		device:                d,
@@ -392,8 +462,43 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		bindGroupLayouts:      bgLayouts,
 		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
 		blendConstantRequired: needsBlendConstant,
+		lateSizedBufferGroups: lateGroups,
 		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, nil),
 	}, nil
+}
+
+// fragmentShaderModule extracts the ShaderModule from a FragmentState, or nil if absent.
+func fragmentShaderModule(fs *FragmentState) *ShaderModule {
+	if fs == nil {
+		return nil
+	}
+	return fs.Module
+}
+
+// mergeShaderBindingSizes merges binding sizes from vertex and fragment shader stages,
+// taking the max size when both stages reference the same binding. Matches Rust
+// wgpu-core's pattern of calling check_stage for each stage with the same
+// shader_binding_sizes map, where Entry::Occupied takes max (validation.rs:1131-1133).
+func mergeShaderBindingSizes(
+	vertexModule *ShaderModule,
+	fragModule *ShaderModule,
+) map[ir.ResourceBinding]uint64 {
+	result := make(map[ir.ResourceBinding]uint64)
+
+	if vertexModule != nil && vertexModule.irModule != nil {
+		for rb, size := range extractShaderBindingSizes(vertexModule.irModule) {
+			result[rb] = size
+		}
+	}
+	if fragModule != nil && fragModule.irModule != nil {
+		for rb, size := range extractShaderBindingSizes(fragModule.irModule) {
+			if existing, ok := result[rb]; !ok || size > existing {
+				result[rb] = size
+			}
+		}
+	}
+
+	return result
 }
 
 // CreateComputePipeline creates a compute pipeline.
@@ -427,12 +532,22 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		bgCount = desc.Layout.bindGroupCount
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
+
+	// Build shader binding sizes for the compute stage.
+	var shaderBindingSizes map[ir.ResourceBinding]uint64
+	if desc.Module != nil && desc.Module.irModule != nil {
+		shaderBindingSizes = extractShaderBindingSizes(desc.Module.irModule)
+	}
+
+	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
+
 	return &ComputePipeline{
-		hal:              halPipeline,
-		device:           d,
-		bindGroupCount:   bgCount,
-		bindGroupLayouts: bgLayouts,
-		ref:              core.NewResourceRef("ComputePipeline:"+desc.Label, nil),
+		hal:                   halPipeline,
+		device:                d,
+		bindGroupCount:        bgCount,
+		bindGroupLayouts:      bgLayouts,
+		lateSizedBufferGroups: lateGroups,
+		ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, nil),
 	}, nil
 }
 

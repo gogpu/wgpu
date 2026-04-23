@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 )
 
 func TestBinderReset(t *testing.T) {
@@ -481,3 +482,345 @@ func TestBinderMultipleSlots(t *testing.T) {
 		})
 	}
 }
+
+// --- Late buffer binding tests (VAL-006) ---
+
+func TestExtractShaderBindingSizes(t *testing.T) {
+	// Build a minimal IR module with 3 globals:
+	// - @group(0) @binding(0): uniform buffer (struct, 64 bytes)
+	// - @group(0) @binding(1): storage buffer (array<f32, 16>, stride=4, 16*4=64)
+	// - @group(1) @binding(0): sampler (should be skipped)
+	module := &ir.Module{
+		Types: []ir.Type{
+			{Inner: ir.StructType{Span: 64}}, // handle 0: struct, 64 bytes
+			{Inner: ir.ArrayType{ // handle 1: array<f32, 16>
+				Stride: 4,
+				Size:   ir.ArraySize{Constant: ptrUint32(16)},
+			}},
+			{Inner: ir.SamplerType{Comparison: false}}, // handle 2: sampler
+		},
+		GlobalVariables: []ir.GlobalVariable{
+			{
+				Name:    "uniforms",
+				Space:   ir.SpaceUniform,
+				Binding: &ir.ResourceBinding{Group: 0, Binding: 0},
+				Type:    0, // struct, 64 bytes
+			},
+			{
+				Name:    "data",
+				Space:   ir.SpaceStorage,
+				Binding: &ir.ResourceBinding{Group: 0, Binding: 1},
+				Type:    1, // array, 64 bytes
+			},
+			{
+				Name:    "samp",
+				Space:   ir.SpaceUniform,
+				Binding: &ir.ResourceBinding{Group: 1, Binding: 0},
+				Type:    2, // sampler — should be skipped
+			},
+			{
+				Name:  "local_var",
+				Space: ir.SpaceFunction,
+				// No binding — should be skipped
+				Type: 0,
+			},
+		},
+	}
+
+	sizes := extractShaderBindingSizes(module)
+	if sizes == nil {
+		t.Fatal("extractShaderBindingSizes returned nil")
+	}
+
+	// Check uniform buffer at (0,0)
+	rb00 := ir.ResourceBinding{Group: 0, Binding: 0}
+	if got, ok := sizes[rb00]; !ok {
+		t.Error("missing binding (0,0)")
+	} else if got != 64 {
+		t.Errorf("binding (0,0) size = %d, want 64", got)
+	}
+
+	// Check storage buffer at (0,1)
+	rb01 := ir.ResourceBinding{Group: 0, Binding: 1}
+	if got, ok := sizes[rb01]; !ok {
+		t.Error("missing binding (0,1)")
+	} else if got != 64 {
+		t.Errorf("binding (0,1) size = %d, want 64", got)
+	}
+
+	// Sampler at (1,0) should NOT be in the map
+	rb10 := ir.ResourceBinding{Group: 1, Binding: 0}
+	if _, ok := sizes[rb10]; ok {
+		t.Error("sampler binding (1,0) should not be in sizes map")
+	}
+
+	// Total entries: exactly 2
+	if len(sizes) != 2 {
+		t.Errorf("sizes map has %d entries, want 2", len(sizes))
+	}
+}
+
+func TestExtractShaderBindingSizesNilModule(t *testing.T) {
+	sizes := extractShaderBindingSizes(nil)
+	if sizes != nil {
+		t.Errorf("extractShaderBindingSizes(nil) = %v, want nil", sizes)
+	}
+}
+
+func TestCheckLateBufferBindingsPass(t *testing.T) {
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+
+	// Pipeline requires 64 bytes, buffer has 128 bytes — should pass.
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
+	}
+	b.assignBindGroup(0, bg)
+
+	if err := b.checkLateBufferBindings(); err != nil {
+		t.Errorf("checkLateBufferBindings() = %v, want nil (buffer >= shader requirement)", err)
+	}
+}
+
+func TestCheckLateBufferBindingsExactSize(t *testing.T) {
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+
+	// Pipeline requires 64 bytes, buffer has exactly 64 bytes — should pass.
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 64}},
+	}
+	b.assignBindGroup(0, bg)
+
+	if err := b.checkLateBufferBindings(); err != nil {
+		t.Errorf("checkLateBufferBindings() = %v, want nil (buffer == shader requirement)", err)
+	}
+}
+
+func TestCheckLateBufferBindingsFail(t *testing.T) {
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+
+	// Pipeline requires 64 bytes, buffer has only 32 — should fail.
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 5, Size: 32}},
+	}
+	b.assignBindGroup(0, bg)
+
+	err := b.checkLateBufferBindings()
+	if err == nil {
+		t.Fatal("checkLateBufferBindings() = nil, want error for undersized buffer")
+	}
+	if !strings.Contains(err.Error(), "group 0") {
+		t.Errorf("error should mention group 0: %v", err)
+	}
+	if !strings.Contains(err.Error(), "binding 5") {
+		t.Errorf("error should mention binding 5: %v", err)
+	}
+	if !strings.Contains(err.Error(), "size 32") {
+		t.Errorf("error should mention bound size 32: %v", err)
+	}
+	if !strings.Contains(err.Error(), "minimum of 64") {
+		t.Errorf("error should mention shader minimum 64: %v", err)
+	}
+}
+
+func TestCheckLateBufferBindingsNoLateEntries(t *testing.T) {
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+
+	// No late groups — should always pass.
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	if err := b.checkLateBufferBindings(); err != nil {
+		t.Errorf("checkLateBufferBindings() = %v, want nil (no late entries)", err)
+	}
+}
+
+func TestCheckLateBufferBindingsBindGroupBeforePipeline(t *testing.T) {
+	// Test order-independence: bind group set BEFORE pipeline.
+	// Matches WebGPU spec behavior and Rust wgpu-core Binder.
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+	b.assign(0, l)
+
+	// Set bind group FIRST (no pipeline yet — lateBufferBindings empty).
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
+	}
+	b.assignBindGroup(0, bg)
+
+	// Then set pipeline (should merge into existing entries).
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	if err := b.checkLateBufferBindings(); err != nil {
+		t.Errorf("checkLateBufferBindings() = %v, want nil (bind group before pipeline, sufficient size)", err)
+	}
+}
+
+func TestCheckLateBufferBindingsPipelineBeforeBindGroup(t *testing.T) {
+	// Test order-independence: pipeline set BEFORE bind group.
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+	b.assign(0, l)
+
+	// Set pipeline FIRST.
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	// Then set bind group with insufficient size.
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 3, Size: 32}},
+	}
+	b.assignBindGroup(0, bg)
+
+	err := b.checkLateBufferBindings()
+	if err == nil {
+		t.Fatal("checkLateBufferBindings() = nil, want error (pipeline before bind group, undersized)")
+	}
+	if !strings.Contains(err.Error(), "size 32") {
+		t.Errorf("error should mention bound size: %v", err)
+	}
+}
+
+func TestCheckLateBufferBindingsMultipleGroups(t *testing.T) {
+	var b binder
+	l0 := &BindGroupLayout{}
+	l1 := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	b.assign(0, l0)
+	b.assign(1, l1)
+
+	// Group 0: ok (128 >= 64), Group 1: undersized (16 < 48).
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	lateGroups[1] = LateSizedBufferGroup{ShaderSizes: []uint64{48}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	bg0 := &BindGroup{
+		layout:                 l0,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
+	}
+	bg1 := &BindGroup{
+		layout:                 l1,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 16}},
+	}
+	b.assignBindGroup(0, bg0)
+	b.assignBindGroup(1, bg1)
+
+	err := b.checkLateBufferBindings()
+	if err == nil {
+		t.Fatal("checkLateBufferBindings() = nil, want error for group 1 undersized")
+	}
+	if !strings.Contains(err.Error(), "group 1") {
+		t.Errorf("error should mention group 1: %v", err)
+	}
+}
+
+func TestMakeLateSizedBufferGroups(t *testing.T) {
+	shaderSizes := map[ir.ResourceBinding]uint64{
+		{Group: 0, Binding: 0}: 64,
+		{Group: 0, Binding: 2}: 128,
+		{Group: 1, Binding: 0}: 32,
+	}
+
+	layouts := []*BindGroupLayout{
+		{entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}},                            // late: should get 64
+			{Binding: 1, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 256}},                          // NOT late: MinBindingSize != 0
+			{Binding: 2, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}},                            // late: should get 128
+			{Binding: 3, Sampler: &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering}}, // not buffer
+		}},
+		{entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}}, // late: should get 32
+		}},
+	}
+
+	groups := makeLateSizedBufferGroups(shaderSizes, layouts)
+
+	// Group 0: 2 late entries (bindings 0 and 2)
+	if len(groups[0].ShaderSizes) != 2 {
+		t.Fatalf("group 0 has %d late entries, want 2", len(groups[0].ShaderSizes))
+	}
+	if groups[0].ShaderSizes[0] != 64 {
+		t.Errorf("group 0 entry 0 = %d, want 64", groups[0].ShaderSizes[0])
+	}
+	if groups[0].ShaderSizes[1] != 128 {
+		t.Errorf("group 0 entry 1 = %d, want 128", groups[0].ShaderSizes[1])
+	}
+
+	// Group 1: 1 late entry (binding 0)
+	if len(groups[1].ShaderSizes) != 1 {
+		t.Fatalf("group 1 has %d late entries, want 1", len(groups[1].ShaderSizes))
+	}
+	if groups[1].ShaderSizes[0] != 32 {
+		t.Errorf("group 1 entry 0 = %d, want 32", groups[1].ShaderSizes[0])
+	}
+
+	// Groups 2-7: no late entries
+	for i := 2; i < MaxBindGroups; i++ {
+		if len(groups[i].ShaderSizes) != 0 {
+			t.Errorf("group %d has %d late entries, want 0", i, len(groups[i].ShaderSizes))
+		}
+	}
+}
+
+func TestBinderResetClearsLateBindings(t *testing.T) {
+	var b binder
+	l := &BindGroupLayout{}
+	b.updateExpectations([]*BindGroupLayout{l})
+
+	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	b.updateLateBufferBindingsFromPipeline(lateGroups)
+
+	bg := &BindGroup{
+		layout:                 l,
+		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 32}},
+	}
+	b.assignBindGroup(0, bg)
+
+	// Before reset, should have late bindings.
+	if b.payloads[0].lateBindingsEffectiveCount == 0 {
+		t.Fatal("expected late bindings before reset")
+	}
+
+	b.reset()
+
+	// After reset, late bindings should be cleared.
+	if b.payloads[0].lateBindingsEffectiveCount != 0 {
+		t.Error("lateBindingsEffectiveCount should be 0 after reset")
+	}
+	if len(b.payloads[0].lateBufferBindings) != 0 {
+		t.Error("lateBufferBindings should be empty after reset")
+	}
+}
+
+func ptrUint32(v uint32) *uint32 { return &v }
