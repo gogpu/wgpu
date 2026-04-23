@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.5] - 2026-04-23
+
+### Changed
+
+- **WASM platform split** (WASM-001 Phase 0) — root package files split into
+  `_native.go` / `_browser.go` variants with build tags. Browser stubs compile for
+  `GOOS=js GOARCH=wasm` but panic at runtime (Phase 1+ adds real implementations).
+  All `core/`, `hal/`, and `internal/` directories excluded from WASM build via
+  `//go:build !(js && wasm)`. Native path unchanged — zero behavior differences.
+  304 files touched, pure structural refactoring.
+
 ## [0.25.4] - 2026-04-23
 
 ### Added

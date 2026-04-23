@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package core provides tracker index allocators for resource tracking.
 //
 // TrackerIndexAllocators manages per-resource-type indices used by the

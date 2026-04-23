@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package memory provides GPU memory allocation for Vulkan backend.
 //
 // # Architecture

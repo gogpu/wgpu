@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package noop provides a no-operation GPU backend.
 //
 // The noop backend implements all HAL interfaces but performs no actual GPU operations.

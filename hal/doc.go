@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package hal provides the Hardware Abstraction Layer for WebGPU implementations.
 //
 // The HAL defines backend-agnostic interfaces for GPU operations, allowing

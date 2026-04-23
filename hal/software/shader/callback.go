@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package shader
 
 import "github.com/gogpu/wgpu/hal/software/raster"

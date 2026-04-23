@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package raster provides CPU-based triangle rasterization for the software backend.
 //
 // The raster package implements the core rendering pipeline using the Edge Function

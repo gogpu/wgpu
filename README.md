@@ -31,7 +31,7 @@
 | Category | Capabilities |
 |----------|--------------|
 | **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software |
-| **Platforms** | Windows, Linux, macOS, iOS |
+| **Platforms** | Windows, Linux, macOS, iOS, Browser (WASM — in progress) |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |

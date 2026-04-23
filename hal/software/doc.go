@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package software provides a CPU-based software rendering backend.
 //
 // Status: IMPLEMENTED (Phase 1 - Headless Rendering)

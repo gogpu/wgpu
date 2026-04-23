@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package raster
 
 // ClipSpaceVertex is the output of vertex shader processing.

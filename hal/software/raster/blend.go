@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package raster
 
 // BlendFactor specifies the blend factor for source or destination color.

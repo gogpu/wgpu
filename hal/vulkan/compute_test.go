@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build linux || windows
+//go:build (linux || windows) && !(js && wasm)
 
 package vulkan
 

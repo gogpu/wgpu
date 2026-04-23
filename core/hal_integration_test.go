@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build integration
+//go:build integration && !(js && wasm)
 
 package core_test
 

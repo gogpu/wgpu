@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package raster
 
 // ClipPlane represents a clipping plane in homogeneous clip space.

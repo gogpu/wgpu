@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !(js && wasm)
 
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT

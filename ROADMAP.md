@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.25.3
+## Current State: v0.25.5
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -43,6 +43,9 @@
 ✅ **Software Linux X11 presentation** — XPutImage via goffi (Skia pattern)
 ✅ **Vulkan maxMemoryAllocationSize enforcement** — prevents SIGSEGV on large writes
 ✅ **Staging belt auto-chunking** — writes >64MB automatically split (Rust wgpu parity)
+✅ **Late buffer binding validation** — draw/dispatch-time MinBindingSize=0 checks (Rust parity)
+✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
+✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
 
 ### Remaining validation (planned)
 - Late buffer binding size (SPIR-V reflection → min binding size)
@@ -127,6 +130,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.25.5** | 2026-04 | WASM platform split (Phase 0): _native.go/_browser.go file split, core/hal excluded from WASM |
+| **v0.25.4** | 2026-04 | Late buffer binding validation (VAL-006) + Vulkan relay semaphores (VK-SYNC-001) |
 | **v0.25.3** | 2026-04 | Fix SIGSEGV on large WriteBuffer (#142): maxMemoryAllocationSize enforcement, staging belt auto-chunking, MappedSize bounds checking |
 | **v0.25.2** | 2026-04 | gputypes v0.5.0 (PrimitiveState zero defaults) |
 | **v0.25.1** | 2026-04 | Linux X11 software presentation via XPutImage (Skia pattern) |
