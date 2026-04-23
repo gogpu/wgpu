@@ -57,7 +57,7 @@ func TestVulkanComputePipelineCreation(t *testing.T) {
 // TestVulkanComputeDispatch tests basic dispatch execution.
 func TestVulkanComputeDispatch(t *testing.T) {
 	t.Run("encoder initialization", func(t *testing.T) {
-		encoder := &CommandEncoder{isRecording: true}
+		encoder := &CommandEncoder{active: 1}
 		cpe := &ComputePassEncoder{encoder: encoder}
 		if cpe.encoder != encoder {
 			t.Error("encoder not set correctly")
@@ -77,7 +77,7 @@ func TestVulkanComputeDispatch(t *testing.T) {
 			{1, 1, 1}, {64, 1, 1}, {8, 8, 8}, {256, 256, 1}, {0, 0, 0},
 		}
 		for _, tt := range tests {
-			cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
+			cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 0}}
 			cpe.Dispatch(tt.x, tt.y, tt.z) // Should not panic
 		}
 	})
@@ -86,14 +86,14 @@ func TestVulkanComputeDispatch(t *testing.T) {
 // TestVulkanComputeDispatchIndirect tests indirect dispatch from buffer.
 func TestVulkanComputeDispatchIndirect(t *testing.T) {
 	t.Run("nil buffer", func(t *testing.T) {
-		cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: true}}
+		cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 1}}
 		cpe.DispatchIndirect(nil, 0) // Should not panic
 	})
 
 	t.Run("offset validation", func(t *testing.T) {
 		offsets := []uint64{0, 16, 256, 4096}
 		for _, offset := range offsets {
-			cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
+			cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 0}}
 			cpe.DispatchIndirect(nil, offset) // Should not panic
 		}
 	})
@@ -104,7 +104,7 @@ func TestVulkanComputeDispatchIndirect(t *testing.T) {
 			size:   256,
 			usage:  gputypes.BufferUsageIndirect | gputypes.BufferUsageStorage,
 		}
-		cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
+		cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 0}}
 		cpe.DispatchIndirect(buffer, 0) // Should not panic
 	})
 }
@@ -181,7 +181,7 @@ func TestVulkanComputeMultipleBindGroups(t *testing.T) {
 
 	t.Run("SetBindGroup nil group", func(t *testing.T) {
 		cpe := &ComputePassEncoder{
-			encoder:  &CommandEncoder{isRecording: true},
+			encoder:  &CommandEncoder{active: 1},
 			pipeline: &ComputePipeline{handle: vk.Pipeline(100), layout: vk.PipelineLayout(200)},
 		}
 		cpe.SetBindGroup(0, nil, nil) // Should not panic
@@ -195,7 +195,7 @@ func TestVulkanComputeMultipleBindGroups(t *testing.T) {
 			{0, nil}, {0, []uint32{0, 256}}, {1, nil}, {2, []uint32{0, 128}},
 		}
 		for _, tt := range tests {
-			cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
+			cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 0}}
 			bg := &BindGroup{handle: vk.DescriptorSet(100)}
 			cpe.SetBindGroup(tt.index, bg, tt.offsets) // Should not panic
 		}
@@ -237,7 +237,7 @@ func TestVulkanComputeShaderStages(t *testing.T) {
 // TestVulkanComputeSetPipeline tests compute pipeline binding.
 func TestVulkanComputeSetPipeline(t *testing.T) {
 	t.Run("nil pipeline", func(t *testing.T) {
-		cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: true}}
+		cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 1}}
 		cpe.SetPipeline(nil) // Should not panic
 		if cpe.pipeline != nil {
 			t.Error("pipeline should remain nil")
@@ -245,7 +245,7 @@ func TestVulkanComputeSetPipeline(t *testing.T) {
 	})
 
 	t.Run("not recording", func(t *testing.T) {
-		cpe := &ComputePassEncoder{encoder: &CommandEncoder{isRecording: false}}
+		cpe := &ComputePassEncoder{encoder: &CommandEncoder{active: 0}}
 		pipeline := &ComputePipeline{handle: vk.Pipeline(12345)}
 		cpe.SetPipeline(pipeline)
 		if cpe.pipeline != nil {
@@ -257,7 +257,7 @@ func TestVulkanComputeSetPipeline(t *testing.T) {
 // TestVulkanBeginComputePass tests compute pass creation.
 func TestVulkanBeginComputePass(t *testing.T) {
 	t.Run("returns encoder", func(t *testing.T) {
-		cmdEncoder := &CommandEncoder{isRecording: true}
+		cmdEncoder := &CommandEncoder{active: 1}
 		cpe := cmdEncoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "test"})
 		if cpe == nil {
 			t.Fatal("BeginComputePass returned nil")
@@ -268,7 +268,7 @@ func TestVulkanBeginComputePass(t *testing.T) {
 	})
 
 	t.Run("nil descriptor", func(t *testing.T) {
-		cmdEncoder := &CommandEncoder{isRecording: true}
+		cmdEncoder := &CommandEncoder{active: 1}
 		if cpe := cmdEncoder.BeginComputePass(nil); cpe == nil {
 			t.Fatal("BeginComputePass returned nil for nil descriptor")
 		}

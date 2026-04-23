@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.6] - 2026-04-24
+
+### Changed
+
+- **Vulkan: command buffer free list architecture** (VK-CMD-001) — replaced single-CB-per-encoder
+  with industry-standard free list pattern. Each `CommandEncoder` owns a pool of pre-allocated
+  command buffers (batch 16, matching Rust `ALLOCATION_GRANULARITY`). `BeginEncoding` pops from
+  free list, `EndEncoding` returns handle to caller, `ResetAll` recycles via `vkResetCommandPool`.
+  Fixes VUID-vkBeginCommandBuffer-commandBuffer-00049 (double begin on recording CB).
+  Enterprise parity: Khronos, NVIDIA, ARM, Mesa, Rust wgpu-hal.
+
 ## [0.25.5] - 2026-04-23
 
 ### Changed

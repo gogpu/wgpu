@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.25.5
+## Current State: v0.25.6
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -46,6 +46,7 @@
 ✅ **Late buffer binding validation** — draw/dispatch-time MinBindingSize=0 checks (Rust parity)
 ✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
 ✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
+✅ **Vulkan command buffer free list** — batch alloc 16 CBs, pool reset (Khronos/NVIDIA/ARM/Mesa/Rust parity)
 
 ### Remaining validation (planned)
 - Late buffer binding size (SPIR-V reflection → min binding size)
@@ -130,6 +131,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.25.6** | 2026-04 | Vulkan command buffer free list (VK-CMD-001): batch alloc, pool reset, enterprise parity |
 | **v0.25.5** | 2026-04 | WASM platform split (Phase 0): _native.go/_browser.go file split, core/hal excluded from WASM |
 | **v0.25.4** | 2026-04 | Late buffer binding validation (VAL-006) + Vulkan relay semaphores (VK-SYNC-001) |
 | **v0.25.3** | 2026-04 | Fix SIGSEGV on large WriteBuffer (#142): maxMemoryAllocationSize enforcement, staging belt auto-chunking, MappedSize bounds checking |

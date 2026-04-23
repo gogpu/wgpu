@@ -33,84 +33,139 @@ func (c *CommandBuffer) Destroy() {
 	cmdBufferResultPool.Put(c)
 }
 
+// allocationGranularity is the number of VkCommandBuffers to batch-allocate
+// when the free list is empty. Matches Rust wgpu-hal ALLOCATION_GRANULARITY.
+// 16 amortizes the cost of vkAllocateCommandBuffers across many BeginEncoding
+// calls and aligns with NVIDIA/ARM best practices for command buffer pooling.
+const allocationGranularity = 16
+
 // CommandEncoder implements hal.CommandEncoder for Vulkan.
+//
+// Uses the free list pattern (Rust wgpu-hal parity): the encoder owns a
+// VkCommandPool and manages a pool of VkCommandBuffer handles internally.
+// BeginEncoding pops from the free list (batch-allocating if empty),
+// EndEncoding detaches the active handle, and ResetAll recycles completed
+// and discarded handles back to the free list with a single vkResetCommandPool.
 //
 // Two ownership modes:
 //   - Standalone (poolManaged=false): After EndEncoding, the encoder detaches its
-//     pool+cmdBuffer to the CommandBuffer result and returns itself to encoderPool
+//     pool to the CommandBuffer result and returns itself to encoderPool
 //     (sync.Pool for struct reuse). FreeCommandBuffer recycles the Vulkan resources.
 //     This is the default mode for user-created command encoders.
 //   - Pool-managed (poolManaged=true): After EndEncoding, the encoder retains
 //     ownership of its VkCommandPool. After GPU completion, ResetAll resets the
-//     pool (restoring the cmdBuffer to initial state) so the encoder can be
-//     reused via the wgpu-level encoder pool. Used by pendingWrites.
+//     pool so the encoder can be reused via the wgpu-level encoder pool.
+//     Used by pendingWrites.
 //
 // Pooled via encoderPool to avoid per-frame heap allocation (VK-PERF-003).
+//
+// Reference: Rust wgpu-hal vulkan/mod.rs:939-965 (struct),
+// vulkan/command.rs:7-192 (begin/end/discard/reset_all).
 type CommandEncoder struct {
-	device      *Device
-	pool        vk.CommandPool
-	cmdBuffer   vk.CommandBuffer
+	device *Device
+	pool   vk.CommandPool
+
+	// active is the current recording VkCommandBuffer. Zero means not recording.
+	// Replaces the old isRecording bool — matches Rust wgpu-hal's self.active
+	// null check pattern (vulkan/command.rs:153).
+	active vk.CommandBuffer
+
+	// free holds available VkCommandBuffers in Vulkan "initial" state.
+	// BeginEncoding pops from here; batch-allocates allocationGranularity
+	// handles via vkAllocateCommandBuffers when empty.
+	free []vk.CommandBuffer
+
+	// discarded holds used VkCommandBuffers that were abandoned via
+	// DiscardEncoding. They could be in any Vulkan state except "pending".
+	// ResetAll moves them back to free after vkResetCommandPool.
+	discarded []vk.CommandBuffer
+
 	label       string
-	isRecording bool
 	poolManaged bool // true when managed by wgpu-level encoder pool
 }
 
 // BeginEncoding begins command recording.
-// Returns an error if the command buffer handle is null (VK-001: prevents SIGSEGV
-// from null VkCommandBuffer dispatch table dereference).
+//
+// Pops a VkCommandBuffer from the free list. If the free list is empty,
+// batch-allocates allocationGranularity (16) command buffers from the pool.
+// This matches Rust wgpu-hal begin_encoding (vulkan/command.rs:122-151).
+//
+// Returns an error if the device is nil or if Vulkan allocation/begin fails.
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 
-	// VK-001: Validate command buffer handle before use.
-	// A null handle causes SIGSEGV at addr=0x10 when the ICD dereferences
-	// the dispatch table pointer (gogpu#119).
-	if e.cmdBuffer == 0 {
-		return fmt.Errorf("vulkan: BeginEncoding called with null command buffer handle")
-	}
 	if e.device == nil {
 		return fmt.Errorf("vulkan: BeginEncoding called with nil device")
 	}
 
-	// Begin command buffer
+	// Batch-allocate command buffers when free list is empty.
+	if len(e.free) == 0 {
+		allocInfo := vk.CommandBufferAllocateInfo{
+			SType:              vk.StructureTypeCommandBufferAllocateInfo,
+			CommandPool:        e.pool,
+			Level:              vk.CommandBufferLevelPrimary,
+			CommandBufferCount: allocationGranularity,
+		}
+		buffers := make([]vk.CommandBuffer, allocationGranularity)
+		result := e.device.cmds.AllocateCommandBuffers(e.device.handle, &allocInfo, &buffers[0])
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
+		}
+		e.free = append(e.free, buffers...)
+	}
+
+	// Pop from free list.
+	raw := e.free[len(e.free)-1]
+	e.free = e.free[:len(e.free)-1]
+
+	// VK-001: Validate handle after allocation. goffi returns zeros on nil
+	// function pointer (no crash, no error), so vkAllocateCommandBuffers
+	// could "succeed" with a null handle (gogpu#119).
+	if raw == 0 {
+		return fmt.Errorf("vulkan: allocated command buffer has null handle")
+	}
+
+	// Begin command buffer with ONE_TIME_SUBMIT for per-frame recording.
 	beginInfo := vk.CommandBufferBeginInfo{
 		SType: vk.StructureTypeCommandBufferBeginInfo,
 		Flags: vk.CommandBufferUsageFlags(vk.CommandBufferUsageOneTimeSubmitBit),
 	}
 
-	result := vkBeginCommandBuffer(e.device.cmds, e.cmdBuffer, &beginInfo)
+	result := vkBeginCommandBuffer(e.device.cmds, raw, &beginInfo)
 	if result != vk.Success {
+		// Return the buffer to the free list on failure — it is still in
+		// initial state and can be reused.
+		e.free = append(e.free, raw)
 		return fmt.Errorf("vulkan: vkBeginCommandBuffer failed: %d", result)
 	}
 
-	e.isRecording = true
+	e.active = raw
 	return nil
 }
 
 // EndEncoding finishes command recording and returns a command buffer.
 // Uses sync.Pool for CommandBuffer struct reuse (VK-PERF-004).
 //
-// In standalone mode (default): detaches pool+cmdBuffer to the result and
+// In standalone mode (default): detaches pool to the result and
 // returns the encoder struct to encoderPool for reuse.
 // In pool-managed mode: the encoder retains ownership of its VkCommandPool.
 // After GPU completion, call ResetAll to prepare for the next BeginEncoding cycle.
+//
+// Reference: Rust wgpu-hal end_encoding (vulkan/command.rs:153-163).
 func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
-	if !e.isRecording {
+	if e.active == 0 {
 		return nil, fmt.Errorf("vulkan: command encoder is not recording")
 	}
-	if e.cmdBuffer == 0 {
-		return nil, fmt.Errorf("vulkan: EndEncoding called with null command buffer handle")
-	}
 
-	result := vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
+	result := vkEndCommandBuffer(e.device.cmds, e.active)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkEndCommandBuffer failed: %d", result)
 	}
 
-	e.isRecording = false
-
 	// Reuse CommandBuffer struct from pool (VK-PERF-004).
 	cb := cmdBufferResultPool.Get().(*CommandBuffer)
-	cb.handle = e.cmdBuffer
+	cb.handle = e.active
+	e.active = 0
 
 	if e.poolManaged {
 		// Pool-managed mode: encoder retains VkCommandPool ownership.
@@ -121,53 +176,75 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	} else {
 		// Standalone mode: CommandBuffer takes ownership of pool.
 		cb.pool = e.pool
-	}
 
-	if !e.poolManaged {
-		// Standalone mode: detach resources to CommandBuffer, return encoder struct.
+		// Detach resources to CommandBuffer, return encoder struct.
+		// The pool goes with the CommandBuffer; free/discarded buffers
+		// are abandoned (they belong to the pool and will be reset when
+		// the pool is recycled via FreeCommandBuffer).
 		e.device = nil
 		e.pool = 0
-		e.cmdBuffer = 0
+		e.free = e.free[:0]
+		e.discarded = e.discarded[:0]
 		e.label = ""
 		encoderPool.Put(e)
 	}
-	// Pool-managed mode: encoder retains pool+cmdBuffer for ResetAll+reuse.
 
 	return cb, nil
 }
 
-// DiscardEncoding discards the encoder without creating a command buffer.
-// In standalone mode, recycles pool+cmdBuffer pair for reuse.
-// In pool-managed mode, retains resources for the encoder pool.
+// DiscardEncoding discards the current recording without creating a command buffer.
+// The active command buffer is moved to the discarded list for later pool reset.
+// Rust wgpu-hal does NOT call vkEndCommandBuffer on discarded buffers —
+// vkResetCommandPool handles them in any state (vulkan/command.rs:165-173).
+//
+// In standalone mode, recycles the pool and returns the encoder struct.
+// In pool-managed mode, retains resources for ResetAll+reuse.
 func (e *CommandEncoder) DiscardEncoding() {
-	if e.isRecording {
-		// End the command buffer even though we're discarding it.
-		_ = vkEndCommandBuffer(e.device.cmds, e.cmdBuffer)
-		e.isRecording = false
+	if e.active != 0 {
+		e.discarded = append(e.discarded, e.active)
+		e.active = 0
 	}
 
 	if !e.poolManaged {
-		// Standalone mode: recycle pool+buffer pair and encoder struct (VK-POOL-001).
-		if e.device != nil && e.pool != 0 && e.cmdBuffer != 0 {
-			e.device.recycleAllocator(commandAllocator{pool: e.pool, cmdBuffer: e.cmdBuffer})
+		// Standalone mode: recycle pool and encoder struct (VK-POOL-001).
+		// The pool contains all free+discarded buffers; they will be reset
+		// when the pool is recycled via FreeCommandBuffer/acquireAllocator.
+		if e.device != nil && e.pool != 0 {
+			e.device.recyclePool(e.pool)
 		}
 		e.device = nil
 		e.pool = 0
-		e.cmdBuffer = 0
+		e.free = e.free[:0]
+		e.discarded = e.discarded[:0]
 		e.label = ""
 		encoderPool.Put(e)
 	}
 	// Pool-managed mode: encoder retains resources for ResetAll+reuse.
 }
 
-// ResetAll resets the encoder's command pool, restoring the cmdBuffer to initial
-// state. After this call, the encoder is ready for a new BeginEncoding cycle.
-// The commandBuffers parameter is unused — Vulkan resets all buffers in the pool.
+// ResetAll recycles completed command buffers and discarded buffers back to the
+// free list, then resets the entire command pool. After this call, all buffers
+// in the free list are in Vulkan "initial" state, ready for vkBeginCommandBuffer.
+//
+// This is much cheaper than individual vkResetCommandBuffer calls (NVIDIA, ARM).
+// Reference: Rust wgpu-hal reset_all (vulkan/command.rs:175-192).
 func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
+	// Recycle completed command buffers back to the free list.
+	for _, cb := range commandBuffers {
+		if vcb, ok := cb.(*CommandBuffer); ok && vcb.handle != 0 {
+			e.free = append(e.free, vcb.handle)
+		}
+	}
+
+	// Recycle discarded buffers.
+	e.free = append(e.free, e.discarded...)
+	e.discarded = e.discarded[:0]
+
+	// Batch reset entire pool — one call resets all command buffers to
+	// initial state. Much cheaper than N individual resets (NVIDIA, ARM docs).
 	if e.device != nil && e.pool != 0 {
 		vkResetCommandPool(e.device.cmds, e.device.handle, e.pool, 0)
 	}
-	_ = commandBuffers // Individual buffers are reset with the pool
 }
 
 // SetPoolManaged marks this encoder as managed by the wgpu-level encoder pool.
@@ -179,22 +256,22 @@ func (e *CommandEncoder) SetPoolManaged(managed bool) {
 }
 
 // Destroy releases the VkCommandPool owned by this encoder.
+// Destroying the pool implicitly frees all command buffers allocated from it.
 // Must be called when the encoder is permanently retired (e.g., device shutdown).
 func (e *CommandEncoder) Destroy() {
 	if e.device != nil && e.pool != 0 {
 		vkDestroyCommandPool(e.device.cmds, e.device.handle, e.pool, nil)
 	}
 	e.pool = 0
-	e.cmdBuffer = 0
+	e.active = 0
+	e.free = nil
+	e.discarded = nil
 	e.device = nil
 }
 
 // TransitionBuffers transitions buffer states for synchronization.
 func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
-	if !e.isRecording || len(barriers) == 0 {
-		return
-	}
-	if e.cmdBuffer == 0 {
+	if e.active == 0 || len(barriers) == 0 {
 		return
 	}
 
@@ -228,7 +305,7 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 	// Use vkCmdPipelineBarrier with buffer memory barriers
 	vkCmdPipelineBarrier(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
 		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
 		0,      // dependencyFlags
@@ -240,12 +317,7 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 
 // TransitionTextures transitions texture states for synchronization.
 func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
-	if !e.isRecording || len(barriers) == 0 {
-		return
-	}
-	// VK-001: Defense-in-depth null guard. Prevents SIGSEGV at addr=0x10
-	// if cmdBuffer is somehow null while isRecording is true (gogpu#119).
-	if e.cmdBuffer == 0 {
+	if e.active == 0 || len(barriers) == 0 {
 		return
 	}
 
@@ -284,7 +356,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 
 	vkCmdPipelineBarrier(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
 		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
 		0,
@@ -296,7 +368,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 
 // ClearBuffer clears a buffer region to zero.
 func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.active == 0 {
 		return
 	}
 
@@ -306,12 +378,12 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 	}
 
 	// vkCmdFillBuffer fills with a 32-bit value (0 for zero fill)
-	vkCmdFillBuffer(e.device.cmds, e.cmdBuffer, buf.handle, vk.DeviceSize(offset), vk.DeviceSize(size), 0)
+	vkCmdFillBuffer(e.device.cmds, e.active, buf.handle, vk.DeviceSize(offset), vk.DeviceSize(size), 0)
 }
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.active == 0 {
 		return
 	}
 
@@ -330,7 +402,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 		}
 	}
 
-	vkCmdCopyBuffer(e.device.cmds, e.cmdBuffer, srcBuf.handle, dstBuf.handle, uint32(len(vkRegions)), &vkRegions[0])
+	vkCmdCopyBuffer(e.device.cmds, e.active, srcBuf.handle, dstBuf.handle, uint32(len(vkRegions)), &vkRegions[0])
 }
 
 // blockCopySize returns the number of bytes per block for a given texture format.
@@ -421,7 +493,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.active == 0 {
 		return
 	}
 
@@ -434,7 +506,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	vkRegions := convertBufferImageCopyRegions(regions, dstTex.format)
 	vkCmdCopyBufferToImage(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		srcBuf.handle,
 		dstTex.handle,
 		vk.ImageLayoutTransferDstOptimal,
@@ -445,7 +517,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.active == 0 {
 		return
 	}
 
@@ -458,7 +530,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	vkRegions := convertBufferImageCopyRegions(regions, srcTex.format)
 	vkCmdCopyImageToBuffer(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		srcTex.handle,
 		vk.ImageLayoutTransferSrcOptimal,
 		dstBuf.handle,
@@ -469,7 +541,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 
 // CopyTextureToTexture copies data between textures.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	if !e.isRecording || e.cmdBuffer == 0 {
+	if e.active == 0 {
 		return
 	}
 
@@ -514,7 +586,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 
 	vkCmdCopyImage(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		srcTex.handle,
 		vk.ImageLayoutTransferSrcOptimal,
 		dstTex.handle,
@@ -529,7 +601,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 // This uses vkCmdCopyQueryPoolResults under the hood.
 func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
 	qs, ok := querySet.(*QuerySet)
-	if !ok || qs.pool == 0 || !e.isRecording || e.cmdBuffer == 0 {
+	if !ok || qs.pool == 0 || e.active == 0 {
 		return
 	}
 	buf, ok := destination.(*Buffer)
@@ -545,7 +617,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 	}
 	vkCmdPipelineBarrier(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		vk.PipelineStageFlags(vk.PipelineStageAllCommandsBit),
 		vk.PipelineStageFlags(vk.PipelineStageTransferBit),
 		0,
@@ -559,7 +631,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 	// Flags: VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT.
 	vkCmdCopyQueryPoolResults(
 		e.device.cmds,
-		e.cmdBuffer,
+		e.active,
 		qs.pool,
 		firstQuery,
 		queryCount,
@@ -583,7 +655,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe.renderPass = 0
 	rpe.framebuffer = 0
 
-	if !e.isRecording || e.cmdBuffer == 0 || len(desc.ColorAttachments) == 0 {
+	if e.active == 0 || len(desc.ColorAttachments) == 0 {
 		return rpe
 	}
 
@@ -728,7 +800,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		PClearValues:    &clearValues[0],
 	}
 
-	vkCmdBeginRenderPass(e.device.cmds, e.cmdBuffer, &renderPassBegin, vk.SubpassContentsInline)
+	vkCmdBeginRenderPass(e.device.cmds, e.active, &renderPassBegin, vk.SubpassContentsInline)
 	runtime.KeepAlive(clearValues)
 
 	// Set default viewport and scissor for the render area.
@@ -752,19 +824,19 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		MinDepth: 0.0,
 		MaxDepth: 1.0,
 	}
-	vkCmdSetViewport(e.device.cmds, e.cmdBuffer, 0, 1, &viewport)
+	vkCmdSetViewport(e.device.cmds, e.active, 0, 1, &viewport)
 
 	scissor := vk.Rect2D{
 		Offset: vk.Offset2D{X: 0, Y: 0},
 		Extent: vk.Extent2D{Width: max(renderWidth, 1), Height: max(renderHeight, 1)},
 	}
-	vkCmdSetScissor(e.device.cmds, e.cmdBuffer, 0, 1, &scissor)
+	vkCmdSetScissor(e.device.cmds, e.active, 0, 1, &scissor)
 
 	// Set default blend constants and stencil reference.
 	// All pipelines declare these as dynamic state (matching Rust wgpu),
 	// so they must be initialized before any draw call (VK-PIPE-001).
-	vkCmdSetBlendConstants(e.device.cmds, e.cmdBuffer, &[4]float32{0, 0, 0, 0})
-	vkCmdSetStencilReference(e.device.cmds, e.cmdBuffer,
+	vkCmdSetBlendConstants(e.device.cmds, e.active, &[4]float32{0, 0, 0, 0})
+	vkCmdSetStencilReference(e.device.cmds, e.active,
 		vk.StencilFaceFlags(vk.StencilFaceFrontAndBack), 0)
 
 	return rpe
@@ -779,16 +851,16 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	cpe.timestampWrites = nil
 
 	// Write beginning-of-pass timestamp if requested.
-	// VK-001: Defense-in-depth — check both isRecording and cmdBuffer != 0
-	// to prevent SIGSEGV from null dispatch table dereference (gogpu#119).
+	// active != 0 check prevents SIGSEGV from null dispatch table
+	// dereference (VK-001, gogpu#119).
 	if desc != nil && desc.TimestampWrites != nil {
 		cpe.timestampWrites = desc.TimestampWrites
 		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.isRecording && e.cmdBuffer != 0 {
+			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.active != 0 {
 				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
-				e.device.cmds.CmdResetQueryPool(e.cmdBuffer, qs.pool, idx, 1)
+				e.device.cmds.CmdResetQueryPool(e.active, qs.pool, idx, 1)
 				e.device.cmds.CmdWriteTimestamp(
-					e.cmdBuffer,
+					e.active,
 					vk.PipelineStageTopOfPipeBit,
 					qs.pool,
 					idx,
@@ -814,13 +886,13 @@ type RenderPassEncoder struct {
 // End finishes the render pass.
 // Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
 	// Use vkCmdEndRenderPass (VkRenderPass handles layout transitions automatically
 	// via FinalLayout in AttachmentDescription)
-	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.cmdBuffer)
+	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.active)
 
 	// Return to pool for reuse.
 	e.encoder = nil
@@ -834,17 +906,17 @@ func (e *RenderPassEncoder) End() {
 // SetPipeline sets the render pipeline.
 func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	p, ok := pipeline.(*RenderPipeline)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 	e.pipeline = p
-	vkCmdBindPipeline(e.encoder.device.cmds, e.encoder.cmdBuffer, vk.PipelineBindPointGraphics, p.handle)
+	vkCmdBindPipeline(e.encoder.device.cmds, e.encoder.active, vk.PipelineBindPointGraphics, p.handle)
 }
 
 // SetBindGroup sets a bind group.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
@@ -855,7 +927,7 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 
 	vkCmdBindDescriptorSets(
 		e.encoder.device.cmds,
-		e.encoder.cmdBuffer,
+		e.encoder.active,
 		vk.PipelineBindPointGraphics,
 		e.pipeline.layout,
 		index,
@@ -870,7 +942,7 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 // Uses stack variables instead of slice allocations (VK-PERF-007).
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
@@ -878,13 +950,13 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 	vkOffset := vk.DeviceSize(offset)
 	vkBuffer := buf.handle
 
-	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.cmdBuffer, slot, 1, &vkBuffer, &vkOffset)
+	vkCmdBindVertexBuffers(e.encoder.device.cmds, e.encoder.active, slot, 1, &vkBuffer, &vkOffset)
 }
 
 // SetIndexBuffer sets the index buffer.
 func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
@@ -894,13 +966,13 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 		indexType = vk.IndexTypeUint32
 	}
 
-	vkCmdBindIndexBuffer(e.encoder.device.cmds, e.encoder.cmdBuffer, buf.handle, vk.DeviceSize(offset), indexType)
+	vkCmdBindIndexBuffer(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset), indexType)
 }
 
 // SetViewport sets the viewport.
 // NOTE: Applies Y-flip for WebGPU/OpenGL coordinate system compatibility (matches Rust wgpu).
 func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
@@ -914,12 +986,12 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 		MaxDepth: maxDepth,
 	}
 
-	vkCmdSetViewport(e.encoder.device.cmds, e.encoder.cmdBuffer, 0, 1, &viewport)
+	vkCmdSetViewport(e.encoder.device.cmds, e.encoder.active, 0, 1, &viewport)
 }
 
 // SetScissorRect sets the scissor rectangle.
 func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
@@ -928,12 +1000,12 @@ func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
 		Extent: vk.Extent2D{Width: width, Height: height},
 	}
 
-	vkCmdSetScissor(e.encoder.device.cmds, e.encoder.cmdBuffer, 0, 1, &scissor)
+	vkCmdSetScissor(e.encoder.device.cmds, e.encoder.active, 0, 1, &scissor)
 }
 
 // SetBlendConstant sets the blend constant.
 func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 || color == nil {
+	if e.encoder.active == 0 || color == nil {
 		return
 	}
 
@@ -944,66 +1016,66 @@ func (e *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 		float32(color.A),
 	}
 
-	vkCmdSetBlendConstants(e.encoder.device.cmds, e.encoder.cmdBuffer, &blendConstants)
+	vkCmdSetBlendConstants(e.encoder.device.cmds, e.encoder.active, &blendConstants)
 }
 
 // SetStencilReference sets the stencil reference value.
 func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
 	// Set for both front and back faces
-	vkCmdSetStencilReference(e.encoder.device.cmds, e.encoder.cmdBuffer, vk.StencilFaceFlags(vk.StencilFaceFrontAndBack), ref)
+	vkCmdSetStencilReference(e.encoder.device.cmds, e.encoder.active, vk.StencilFaceFlags(vk.StencilFaceFrontAndBack), ref)
 }
 
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
-	vkCmdDraw(e.encoder.device.cmds, e.encoder.cmdBuffer, vertexCount, instanceCount, firstVertex, firstInstance)
+	vkCmdDraw(e.encoder.device.cmds, e.encoder.active, vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDrawIndexed(e.encoder.device.cmds, e.encoder.cmdBuffer, indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	vkCmdDrawIndexed(e.encoder.device.cmds, e.encoder.active, indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.cmdBuffer, buf.handle, vk.DeviceSize(offset), 1, 0)
+	vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset), 1, 0)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDrawIndexedIndirect(e.encoder.device.cmds, e.encoder.cmdBuffer, buf.handle, vk.DeviceSize(offset), 1, 0)
+	vkCmdDrawIndexedIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset), 1, 0)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 	vkBundle, ok := bundle.(*RenderBundle)
-	if !ok || vkBundle == nil || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || vkBundle == nil || e.encoder.active == 0 {
 		return
 	}
 
 	// Execute the secondary command buffer
 	e.encoder.device.cmds.CmdExecuteCommands(
-		e.encoder.cmdBuffer,
+		e.encoder.active,
 		1,
 		&vkBundle.commandBuffer,
 	)
@@ -1024,9 +1096,9 @@ type ComputePassEncoder struct {
 // writing, causing stale/zero reads.
 // Returns the encoder to the pool for reuse (VK-PERF-005).
 func (e *ComputePassEncoder) End() {
-	// VK-001: Defense-in-depth — check both isRecording and cmdBuffer != 0
-	// to prevent SIGSEGV from null dispatch table dereference (gogpu#119).
-	if e.encoder == nil || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	// VK-001: Defense-in-depth — active == 0 check prevents SIGSEGV from
+	// null dispatch table dereference (gogpu#119).
+	if e.encoder == nil || e.encoder.active == 0 {
 		return
 	}
 
@@ -1035,9 +1107,9 @@ func (e *ComputePassEncoder) End() {
 		if qs, ok := e.timestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
 			if e.timestampWrites.EndOfPassWriteIndex != nil {
 				idx := *e.timestampWrites.EndOfPassWriteIndex
-				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.cmdBuffer, qs.pool, idx, 1)
+				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.active, qs.pool, idx, 1)
 				e.encoder.device.cmds.CmdWriteTimestamp(
-					e.encoder.cmdBuffer,
+					e.encoder.active,
 					vk.PipelineStageBottomOfPipeBit,
 					qs.pool,
 					idx,
@@ -1054,7 +1126,7 @@ func (e *ComputePassEncoder) End() {
 	}
 	vkCmdPipelineBarrier(
 		e.encoder.device.cmds,
-		e.encoder.cmdBuffer,
+		e.encoder.active,
 		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit),
 		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit|vk.PipelineStageTransferBit|vk.PipelineStageHostBit),
 		0,
@@ -1073,18 +1145,18 @@ func (e *ComputePassEncoder) End() {
 // SetPipeline sets the compute pipeline.
 func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	p, ok := pipeline.(*ComputePipeline)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 	e.pipeline = p
 
-	vkCmdBindPipeline(e.encoder.device.cmds, e.encoder.cmdBuffer, vk.PipelineBindPointCompute, p.handle)
+	vkCmdBindPipeline(e.encoder.device.cmds, e.encoder.active, vk.PipelineBindPointCompute, p.handle)
 }
 
 // SetBindGroup sets a bind group.
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 || e.pipeline == nil {
+	if !ok || e.encoder.active == 0 || e.pipeline == nil {
 		return
 	}
 
@@ -1095,7 +1167,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 	vkCmdBindDescriptorSets(
 		e.encoder.device.cmds,
-		e.encoder.cmdBuffer,
+		e.encoder.active,
 		vk.PipelineBindPointCompute,
 		e.pipeline.layout,
 		index,
@@ -1108,21 +1180,21 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 // Dispatch dispatches compute work.
 func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
-	if !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDispatch(e.encoder.device.cmds, e.encoder.cmdBuffer, x, y, z)
+	vkCmdDispatch(e.encoder.device.cmds, e.encoder.active, x, y, z)
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || e.encoder.cmdBuffer == 0 {
+	if !ok || e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDispatchIndirect(e.encoder.device.cmds, e.encoder.cmdBuffer, buf.handle, vk.DeviceSize(offset))
+	vkCmdDispatchIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset))
 }
 
 // --- Helper functions ---

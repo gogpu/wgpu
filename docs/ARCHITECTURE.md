@@ -92,6 +92,7 @@ Pure Go Vulkan 1.0+ implementation using `cgo_import_dynamic` for function loadi
 
 - `vk/` — Low-level Vulkan bindings (generated types, function signatures, loader)
 - `memory/` — GPU memory allocator (buddy allocation, `maxMemoryAllocationSize` enforcement)
+- Command encoder: free list of pre-allocated VkCommandBuffers (batch 16), `vkResetCommandPool` for batch reset (Rust wgpu-hal parity)
 - Platform surface: VkWin32, VkXlib, VkMetal
 
 ### `hal/metal/` — Metal Backend

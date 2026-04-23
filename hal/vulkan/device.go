@@ -19,20 +19,15 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// commandAllocator pairs a VkCommandPool with a pre-allocated VkCommandBuffer.
-// Each CreateCommandEncoder gets its own dedicated pool+buffer pair. After GPU
-// completion, FreeCommandBuffer recycles the pair back to the free list for reuse.
-//
-// This design eliminates the race between per-frame bulk pool reset and individual
-// command buffer freeing that caused "Couldn't find VkCommandBuffer Object" crashes.
-// Pool reset (vkResetCommandPool flag 0) restores the command buffer to initial
-// state without destroying the handle, enabling fast recycle (VK-POOL-001).
+// commandAllocator holds a recycled VkCommandPool.
+// Each CreateCommandEncoder gets its own dedicated pool. The encoder manages
+// its own free list of VkCommandBuffers internally (VK-CMD-001).
+// After GPU completion, FreeCommandBuffer recycles the pool back for reuse.
 //
 // Reference: Rust wgpu-hal uses the same per-encoder pool pattern — each
-// CommandEncoder owns its own VkCommandPool.
+// CommandEncoder owns its own VkCommandPool with internal free list.
 type commandAllocator struct {
-	pool      vk.CommandPool
-	cmdBuffer vk.CommandBuffer
+	pool vk.CommandPool
 }
 
 // encoderPool reuses CommandEncoder structs across CreateCommandEncoder calls.
@@ -76,11 +71,10 @@ type Device struct {
 	// with a single timeline semaphore. Falls back to binary fences on older drivers.
 	timelineFence *deviceFence
 
-	// Per-encoder command pool recycling (VK-POOL-001).
-	// Each CreateCommandEncoder gets a dedicated VkCommandPool + VkCommandBuffer pair.
-	// After GPU completion, FreeCommandBuffer recycles the pair for reuse.
-	// This eliminates the race between per-frame pool reset and individual buffer freeing
-	// that caused "Couldn't find VkCommandBuffer Object" crashes.
+	// Per-encoder command pool recycling (VK-POOL-001, VK-CMD-001).
+	// Each CreateCommandEncoder gets a dedicated VkCommandPool.
+	// The encoder manages its own command buffer free list internally.
+	// After GPU completion, FreeCommandBuffer recycles the pool for reuse.
 	freeAllocators []commandAllocator
 	allocatorMu    sync.Mutex // protects freeAllocators
 
@@ -1141,35 +1135,26 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 	vkModule.device = nil
 }
 
-// acquireAllocator returns a command allocator (pool+buffer pair) for a new encoder.
-// If the free list has a recycled pair, it pops one and resets its pool.
-// Otherwise, it creates a new VkCommandPool with TRANSIENT_BIT and allocates
-// a single primary command buffer from it (VK-POOL-001).
+// acquireAllocator returns a command allocator (pool) for a new encoder.
+// If the free list has a recycled pool, it pops one. Otherwise, it creates
+// a new VkCommandPool with TRANSIENT_BIT (VK-POOL-001, VK-CMD-001).
+//
+// Command buffer allocation is deferred to BeginEncoding — the encoder's
+// internal free list batch-allocates via vkAllocateCommandBuffers on demand.
 func (d *Device) acquireAllocator() (commandAllocator, error) {
 	d.allocatorMu.Lock()
 	if n := len(d.freeAllocators); n > 0 {
 		alloc := d.freeAllocators[n-1]
 		d.freeAllocators = d.freeAllocators[:n-1]
 		d.allocatorMu.Unlock()
-
-		// Reset the pool: restores the command buffer to initial state
-		// without destroying its handle (flag 0). This is faster than
-		// vkFreeCommandBuffers + vkAllocateCommandBuffers.
-		result := d.cmds.ResetCommandPool(d.handle, alloc.pool, 0)
-		if result != vk.Success {
-			return commandAllocator{}, fmt.Errorf("vulkan: vkResetCommandPool failed: %d", result)
-		}
-
-		// Post-condition: validate recycled handle is still valid (VK-001).
-		if alloc.cmdBuffer == 0 {
-			return commandAllocator{}, fmt.Errorf("vulkan: recycled allocator has null command buffer handle")
-		}
-
 		return alloc, nil
 	}
 	d.allocatorMu.Unlock()
 
 	// Create a new dedicated pool with TRANSIENT_BIT (short-lived buffers).
+	// No RESET_COMMAND_BUFFER_BIT — we use vkResetCommandPool for batch reset
+	// instead of individual vkResetCommandBuffer. Mesa explicitly warns against
+	// RESET_COMMAND_BUFFER_BIT: it prevents single large allocator optimization.
 	createInfo := vk.CommandPoolCreateInfo{
 		SType:            vk.StructureTypeCommandPoolCreateInfo,
 		Flags:            vk.CommandPoolCreateFlags(vk.CommandPoolCreateTransientBit),
@@ -1182,44 +1167,26 @@ func (d *Device) acquireAllocator() (commandAllocator, error) {
 		return commandAllocator{}, fmt.Errorf("vulkan: vkCreateCommandPool failed: %d", result)
 	}
 
-	// Allocate a single primary command buffer from the new pool.
-	allocInfo := vk.CommandBufferAllocateInfo{
-		SType:              vk.StructureTypeCommandBufferAllocateInfo,
-		CommandPool:        pool,
-		Level:              vk.CommandBufferLevelPrimary,
-		CommandBufferCount: 1,
-	}
-
-	var cmdBuffer vk.CommandBuffer
-	result = vkAllocateCommandBuffers(d.cmds, d.handle, &allocInfo, &cmdBuffer)
-	if result != vk.Success {
-		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
-		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers failed: %d", result)
-	}
-
-	// Post-condition: validate handle is non-null (VK-001).
-	// goffi returns zeros on nil function pointer (no crash, no error),
-	// so vkAllocateCommandBuffers could "succeed" with cmdBuffer=0.
-	if cmdBuffer == 0 {
-		vkDestroyCommandPool(d.cmds, d.handle, pool, nil)
-		return commandAllocator{}, fmt.Errorf("vulkan: vkAllocateCommandBuffers returned null command buffer handle")
-	}
-
 	d.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "CommandPool")
 
-	return commandAllocator{pool: pool, cmdBuffer: cmdBuffer}, nil
+	return commandAllocator{pool: pool}, nil
 }
 
-// recycleAllocator returns a command allocator back to the free list for reuse.
-// The pool is NOT reset here — it will be reset lazily in the next acquireAllocator call.
-func (d *Device) recycleAllocator(alloc commandAllocator) {
+// recyclePool returns a command pool back to the free list for reuse.
+// The pool is NOT reset here — the encoder's ResetAll handles that,
+// or acquireAllocator can reset lazily if needed.
+func (d *Device) recyclePool(pool vk.CommandPool) {
+	if pool == 0 {
+		return
+	}
 	d.allocatorMu.Lock()
-	d.freeAllocators = append(d.freeAllocators, alloc)
+	d.freeAllocators = append(d.freeAllocators, commandAllocator{pool: pool})
 	d.allocatorMu.Unlock()
 }
 
 // CreateCommandEncoder creates a command encoder with its own dedicated
-// VkCommandPool + VkCommandBuffer pair. This per-encoder pool design matches
+// VkCommandPool. Command buffers are allocated on demand from the pool's
+// internal free list (VK-CMD-001). This per-encoder pool design matches
 // Rust wgpu-hal and eliminates races between pool reset and buffer freeing
 // that caused "Couldn't find VkCommandBuffer Object" crashes (VK-POOL-001).
 // Uses sync.Pool for CommandEncoder struct reuse (VK-PERF-003).
@@ -1233,9 +1200,11 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 	e := encoderPool.Get().(*CommandEncoder)
 	e.device = d
 	e.pool = alloc.pool
-	e.cmdBuffer = alloc.cmdBuffer
+	e.active = 0
 	e.label = desc.Label
-	e.isRecording = false
+	// free and discarded slices may retain capacity from previous use — clear length.
+	e.free = e.free[:0]
+	e.discarded = e.discarded[:0]
 	return e, nil
 }
 
@@ -1263,18 +1232,22 @@ func (d *Device) ResetCommandPool() error {
 	return nil
 }
 
-// FreeCommandBuffer recycles a command buffer's pool+buffer pair for reuse.
+// FreeCommandBuffer recycles a command buffer's pool for reuse.
 // Only call this AFTER the GPU has finished using the command buffer (after fence wait).
-// The pool is returned to the free list; it will be reset lazily on next acquire.
-// No vkFreeCommandBuffers call is needed because pool reset restores the buffer.
+// The pool is returned to the free list and reset on next acquireAllocator.
+// This is only called for standalone-mode encoders where the CommandBuffer
+// carries pool ownership. Pool-managed encoders use ResetAll instead.
 func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	vkCmdBuf, ok := cmdBuffer.(*CommandBuffer)
 	if !ok || vkCmdBuf.handle == 0 || vkCmdBuf.pool == 0 {
 		return
 	}
 
-	// Recycle the pool+buffer pair back to the free list.
-	d.recycleAllocator(commandAllocator{pool: vkCmdBuf.pool, cmdBuffer: vkCmdBuf.handle})
+	// Recycle the pool back to the free list.
+	// The pool contains all command buffers (active + free + discarded from
+	// the encoder). Destroying the pool frees them all; resetting the pool
+	// puts them all back to initial state.
+	d.recyclePool(vkCmdBuf.pool)
 
 	vkCmdBuf.handle = 0
 	vkCmdBuf.pool = 0
@@ -1456,10 +1429,6 @@ func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.Com
 //nolint:unparam // Vulkan API wrapper — signature mirrors vkDestroyCommandPool spec
 func vkDestroyCommandPool(cmds *vk.Commands, device vk.Device, pool vk.CommandPool, allocator *vk.AllocationCallbacks) {
 	cmds.DestroyCommandPool(device, pool, allocator)
-}
-
-func vkAllocateCommandBuffers(cmds *vk.Commands, device vk.Device, allocInfo *vk.CommandBufferAllocateInfo, cmdBuffers *vk.CommandBuffer) vk.Result {
-	return cmds.AllocateCommandBuffers(device, allocInfo, cmdBuffers)
 }
 
 func vkCreateSampler(cmds *vk.Commands, device vk.Device, createInfo *vk.SamplerCreateInfo, allocator *vk.AllocationCallbacks, sampler *vk.Sampler) vk.Result {
