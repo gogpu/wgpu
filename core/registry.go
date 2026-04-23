@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package core
 
 // Registry manages the lifecycle of resources of a specific type.

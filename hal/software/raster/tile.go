@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package raster
 
 // TileSize is the size of each tile in pixels (8x8).

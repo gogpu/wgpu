@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
+//go:build windows && !(js && wasm)
 
 // Package d3dcompile provides Pure Go bindings to d3dcompiler_47.dll.
 //

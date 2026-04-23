@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package hal
 
 import "github.com/gogpu/gputypes"

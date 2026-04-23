@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package core provides validation and state management for WebGPU resources.
 //
 // This package implements the core layer between the user-facing API and

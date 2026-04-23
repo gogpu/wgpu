@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build linux
+//go:build linux && !(js && wasm)
 
 package gles
 

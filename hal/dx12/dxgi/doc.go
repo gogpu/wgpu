@@ -1,7 +1,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows
+//go:build windows && !(js && wasm)
 
 // Package dxgi provides low-level DXGI (DirectX Graphics Infrastructure) COM bindings for Windows.
 //

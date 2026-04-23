@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package core provides the snatch pattern for safe deferred destruction of HAL resources.
 //
 // The Snatchable[T] pattern allows resources to be safely destroyed while

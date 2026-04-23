@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !(js && wasm)
 
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT

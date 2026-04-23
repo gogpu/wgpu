@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Package track provides resource state tracking infrastructure.
 //
 // TrackerIndex provides dense indexing for efficient O(1) access to resource
