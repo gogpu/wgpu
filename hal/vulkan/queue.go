@@ -308,6 +308,14 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 
 	// Map, copy, unmap
 	if vkBuffer.memory.MappedPtr != 0 {
+		// Bounds check: verify the write fits within the mapped region (BUG-VK-001).
+		// Without this, a partial/failed vkAllocateMemory that returned a too-small
+		// mapping would cause SIGSEGV in copyToMappedMemory.
+		if vkBuffer.memory.MappedSize > 0 && offset+uint64(len(data)) > vkBuffer.memory.MappedSize {
+			return fmt.Errorf("vulkan: WriteBuffer: write of %d bytes at offset %d exceeds mapped size %d (BUG-VK-001)",
+				len(data), offset, vkBuffer.memory.MappedSize)
+		}
+
 		// Already mapped - direct copy using Vulkan mapped memory from vkMapMemory
 		// Use copyToMappedMemory to avoid go vet false positive about unsafe.Pointer
 		copyToMappedMemory(vkBuffer.memory.MappedPtr, offset, data)

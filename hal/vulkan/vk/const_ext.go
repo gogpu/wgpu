@@ -19,6 +19,10 @@ const (
 	// StructureTypePhysicalDeviceProperties2 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
 	StructureTypePhysicalDeviceProperties2 StructureType = 1000059001
 
+	// StructureTypePhysicalDeviceMaintenance3Properties = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES
+	// Vulkan 1.1 core — used to query maxMemoryAllocationSize.
+	StructureTypePhysicalDeviceMaintenance3Properties StructureType = 1000168000
+
 	// === Vulkan 1.2 Core (promoted from VK_KHR_timeline_semaphore) ===
 
 	// StructureTypePhysicalDeviceTimelineSemaphoreFeatures = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES

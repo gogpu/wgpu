@@ -72,6 +72,11 @@ type MemoryBlock struct {
 	// MappedPtr holds the mapped pointer if memory is mapped.
 	// Set by Map(), cleared by Unmap().
 	MappedPtr uintptr
+
+	// MappedSize is the size in bytes of the mapped region accessible
+	// through MappedPtr. Used for bounds checking before copyToMappedMemory
+	// to prevent SIGSEGV on partial/failed allocations (BUG-VK-001).
+	MappedSize uint64
 }
 
 // IsDedicated returns true if this is a dedicated allocation.

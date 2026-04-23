@@ -91,7 +91,7 @@ Key interfaces (defined in `hal/api.go`):
 Pure Go Vulkan 1.0+ implementation using `cgo_import_dynamic` for function loading.
 
 - `vk/` — Low-level Vulkan bindings (generated types, function signatures, loader)
-- `memory/` — GPU memory allocator (buddy allocation)
+- `memory/` — GPU memory allocator (buddy allocation, `maxMemoryAllocationSize` enforcement)
 - Platform surface: VkWin32, VkXlib, VkMetal
 
 ### `hal/metal/` — Metal Backend
@@ -187,7 +187,7 @@ Queue.Submit(userCmds)    │
 
 **Batching backends** (DX12, Vulkan, Metal): sub-allocate from StagingBelt chunks, record `CopyBufferToBuffer`/`CopyBufferToTexture` via command encoder. Encoder pool recycles allocators after GPU completion.
 
-**StagingBelt** (`staging_belt.go`): ring-buffer of reusable 256KB staging chunks with bump-pointer sub-allocation. Matches Rust wgpu `util::StagingBelt` (belt.rs). Zero heap allocations in steady state — chunks are pre-allocated and recycled after GPU completion. Oversized writes (> chunkSize) fall back to one-off buffers.
+**StagingBelt** (`staging_belt.go`): ring-buffer of reusable 256KB staging chunks with bump-pointer sub-allocation. Matches Rust wgpu `util::StagingBelt` (belt.rs). Zero heap allocations in steady state — chunks are pre-allocated and recycled after GPU completion. Oversized writes (> chunkSize) are automatically chunked into multiple staging buffers capped at 64MB (Rust wgpu parity: `1 << 26`), each followed by a `CopyBufferToBuffer` command. This prevents SIGSEGV when writes exceed `maxMemoryAllocationSize`.
 
 ```
 Chunk lifecycle:  free → active (sub-allocating) → closed (GPU in-flight) → free (recycled)

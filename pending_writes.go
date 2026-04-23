@@ -92,6 +92,11 @@ type inflightSubmission struct {
 // wgpu-core which uses a single device.command_allocator for both user command
 // encoders and internal PendingWrites (queue.rs:1373). pool may be nil for
 // non-batching backends (GLES/Software).
+//
+// The staging belt's maxStagingBufferSize is automatically queried from the HAL
+// device via the optional hal.MaxStagingBufferSizer interface (BUG-VK-001).
+// For Vulkan, this returns min(64MB, maxMemoryAllocationSize). For backends
+// that do not implement the interface, the default 64MB cap is used.
 func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPool) *pendingWrites {
 	pw := &pendingWrites{
 		halDevice:    halDevice,
@@ -102,7 +107,15 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 	}
 	if pw.usesBatching {
 		pw.pool = pool
-		pw.belt = newStagingBelt(halDevice, halQueue, 0, 0) // 0 = defaults (256KB chunks, 8-byte alignment)
+		// Query the device for its maximum staging buffer allocation size.
+		// Vulkan devices report min(64MB, maxMemoryAllocationSize) to prevent
+		// vkAllocateMemory from silently failing on oversized requests (BUG-VK-001).
+		// Other backends return 0 (use default 64MB), which is safe.
+		var maxStaging uint64
+		if sizer, ok := halDevice.(hal.MaxStagingBufferSizer); ok {
+			maxStaging = sizer.MaxStagingBufferSize()
+		}
+		pw.belt = newStagingBelt(halDevice, halQueue, 0, 0, maxStaging)
 	}
 	return pw
 }
@@ -142,14 +155,31 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, usage gputypes.BufferUsa
 		return fmt.Errorf("wgpu: pending writes: activate encoder: %w", err)
 	}
 
-	// Record GPU copy from staging chunk to destination buffer.
-	// Stack-allocate copy region to avoid slice heap escape.
-	copyRegion := [1]hal.BufferCopy{{
-		SrcOffset: alloc.offset,
-		DstOffset: offset,
-		Size:      dataLen,
-	}}
-	enc.CopyBufferToBuffer(alloc.buffer, buffer, copyRegion[:])
+	// Check if the allocation was chunked (BUG-VK-001).
+	// For chunked writes, we issue one CopyBufferToBuffer per chunk at
+	// the correct destination offset. Each chunk has its own staging buffer.
+	if len(pw.belt.chunkedAllocs) > 1 {
+		dstOffset := offset
+		for _, chunk := range pw.belt.chunkedAllocs {
+			copyRegion := [1]hal.BufferCopy{{
+				SrcOffset: chunk.offset,
+				DstOffset: dstOffset,
+				Size:      chunk.size,
+			}}
+			enc.CopyBufferToBuffer(chunk.buffer, buffer, copyRegion[:])
+			dstOffset += chunk.size
+		}
+		pw.belt.chunkedAllocs = pw.belt.chunkedAllocs[:0]
+	} else {
+		// Normal (non-chunked) path: single CopyBufferToBuffer.
+		// Stack-allocate copy region to avoid slice heap escape.
+		copyRegion := [1]hal.BufferCopy{{
+			SrcOffset: alloc.offset,
+			DstOffset: offset,
+			Size:      dataLen,
+		}}
+		enc.CopyBufferToBuffer(alloc.buffer, buffer, copyRegion[:])
+	}
 
 	// Track destination buffer for barrier computation at flush time.
 	pw.dstBuffers[buffer] = usage

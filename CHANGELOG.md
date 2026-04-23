@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.3] - 2026-04-23
+
+### Fixed
+
+- **SIGSEGV on large Queue.WriteBuffer** (#142) — `copyToMappedMemory` crashed when writing
+  data larger than `maxMemoryAllocationSize` (e.g., 544MB on Lavapipe with 256MB limit).
+  Root cause: `vkAllocateMemory` silently fails on oversized requests; the staging belt then
+  wrote past the valid mapped region. Four fixes applied:
+  1. **Query and enforce `maxMemoryAllocationSize`** (Vulkan 1.1 core) — allocator rejects
+     allocations exceeding the driver limit with `ErrAllocationTooLarge`
+  2. **Chunk large writes** — staging belt caps individual staging buffers at 64MB (Rust wgpu
+     parity: `1 << 26`), automatically splits larger writes into multiple CopyBufferToBuffer
+  3. **MappedPtr null check** — `ensureMemoryMapped` returns error if `vkMapMemory` returns null
+  4. **MappedSize bounds check** — `WriteBuffer` verifies `offset + len(data) <= MappedSize`
+     before `copyToMappedMemory`, turning SIGSEGV into a clear error message
+
+### Added
+
+- `hal.MaxStagingBufferSizer` optional interface — backends can advertise their maximum
+  staging buffer size. Vulkan returns `min(64MB, maxMemoryAllocationSize)`. Non-implementing
+  backends default to 64MB.
+- `memory.ErrAllocationTooLarge` sentinel error for allocations exceeding device limits.
+- `MemoryBlock.MappedSize` field for bounds checking mapped memory access.
+
 ## [0.25.2] - 2026-04-21
 
 ### Dependencies

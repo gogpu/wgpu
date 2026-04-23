@@ -10,7 +10,7 @@ func createTestBelt(t *testing.T, chunkSize uint64) *stagingBelt {
 	t.Helper()
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
-	return newStagingBelt(dev, q, chunkSize, 0)
+	return newStagingBelt(dev, q, chunkSize, 0, 0)
 }
 
 func TestStagingBelt_AllocateSubAllocates(t *testing.T) {
@@ -277,7 +277,7 @@ func TestStagingBelt_AlignUp64(t *testing.T) {
 func TestStagingBelt_DefaultChunkSize(t *testing.T) {
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
-	belt := newStagingBelt(dev, q, 0, 0) // 0 = defaults
+	belt := newStagingBelt(dev, q, 0, 0, 0) // 0 = defaults
 	defer belt.destroy()
 
 	if belt.chunkSize != stagingBeltDefaultChunkSize {
@@ -312,5 +312,195 @@ func TestStagingBelt_FinishNoWork(t *testing.T) {
 	s := belt.stats()
 	if s.ClosedSubs != 0 {
 		t.Errorf("expected 0 closed submissions from empty finish, got %d", s.ClosedSubs)
+	}
+}
+
+func TestStagingBelt_ChunkedAllocation(t *testing.T) {
+	// Create a belt with maxStagingBufferSize = 100 bytes.
+	// An oversized write of 250 bytes should be split into 3 chunks:
+	// 100 + 100 + 50.
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 64, 0, 100) // chunkSize=64, maxStaging=100
+	defer belt.destroy()
+
+	data := make([]byte, 250)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+
+	alloc, err := belt.allocate(250, data)
+	if err != nil {
+		t.Fatalf("allocate chunked: %v", err)
+	}
+
+	// First chunk should be returned as primary allocation.
+	if alloc.buffer == nil {
+		t.Fatal("expected non-nil buffer from chunked allocation")
+	}
+	if alloc.offset != 0 {
+		t.Errorf("expected offset=0 for chunked allocation, got %d", alloc.offset)
+	}
+
+	// Should have 3 chunks in chunkedAllocs.
+	if len(belt.chunkedAllocs) != 3 {
+		t.Fatalf("expected 3 chunked allocs, got %d", len(belt.chunkedAllocs))
+	}
+
+	// Verify chunk sizes.
+	expectedSizes := []uint64{100, 100, 50}
+	for i, ca := range belt.chunkedAllocs {
+		if ca.size != expectedSizes[i] {
+			t.Errorf("chunk %d: expected size %d, got %d", i, expectedSizes[i], ca.size)
+		}
+		if ca.buffer == nil {
+			t.Errorf("chunk %d: expected non-nil buffer", i)
+		}
+	}
+
+	// All chunks should be in oversized (not activeChunks).
+	if len(belt.oversized) != 3 {
+		t.Errorf("expected 3 oversized buffers, got %d", len(belt.oversized))
+	}
+	s := belt.stats()
+	if s.ActiveChunks != 0 {
+		t.Errorf("expected 0 active chunks, got %d", s.ActiveChunks)
+	}
+}
+
+func TestStagingBelt_ChunkedSingleChunk(t *testing.T) {
+	// When oversized write fits in maxStagingBufferSize, should NOT chunk.
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 64, 0, 200) // chunkSize=64, maxStaging=200
+	defer belt.destroy()
+
+	data := make([]byte, 150)
+	alloc, err := belt.allocate(150, data)
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+
+	if alloc.buffer == nil {
+		t.Fatal("expected non-nil buffer")
+	}
+
+	// Should NOT have chunked — single oversized buffer.
+	if len(belt.chunkedAllocs) != 0 {
+		t.Errorf("expected 0 chunked allocs (not chunked), got %d", len(belt.chunkedAllocs))
+	}
+	if len(belt.oversized) != 1 {
+		t.Errorf("expected 1 oversized buffer, got %d", len(belt.oversized))
+	}
+}
+
+func TestStagingBelt_ChunkedExactMultiple(t *testing.T) {
+	// Write is exact multiple of maxStagingBufferSize.
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 64, 0, 100) // chunkSize=64, maxStaging=100
+	defer belt.destroy()
+
+	data := make([]byte, 300)
+	_, err := belt.allocate(300, data)
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+
+	// Should have 3 chunks of 100 each.
+	if len(belt.chunkedAllocs) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(belt.chunkedAllocs))
+	}
+	for i, ca := range belt.chunkedAllocs {
+		if ca.size != 100 {
+			t.Errorf("chunk %d: expected size 100, got %d", i, ca.size)
+		}
+	}
+}
+
+func TestStagingBelt_MaxStagingBufferSizeDefault(t *testing.T) {
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 0, 0, 0) // all defaults
+	defer belt.destroy()
+
+	if belt.maxStagingBufferSize != stagingBeltMaxOversizedSize {
+		t.Errorf("expected default maxStagingBufferSize=%d, got %d",
+			stagingBeltMaxOversizedSize, belt.maxStagingBufferSize)
+	}
+}
+
+func TestStagingBelt_ChunkedDataIntegrity(t *testing.T) {
+	// Verify that chunked allocation splits data correctly across multiple
+	// staging buffers. This is the core of BUG-VK-001 Fix 2: writes larger
+	// than maxStagingBufferSize must be split, and each chunk must contain
+	// the correct slice of the source data.
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 32, 0, 80) // chunkSize=32, maxStaging=80
+	defer belt.destroy()
+
+	// Write 200 bytes of recognizable data (should produce 3 chunks: 80+80+40).
+	data := make([]byte, 200)
+	for i := range data {
+		data[i] = byte(i)
+	}
+
+	alloc, err := belt.allocate(200, data)
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if alloc.buffer == nil {
+		t.Fatal("expected non-nil buffer")
+	}
+
+	// Verify chunks.
+	if len(belt.chunkedAllocs) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(belt.chunkedAllocs))
+	}
+
+	wantSizes := []uint64{80, 80, 40}
+	wantDstOffsets := []uint64{0, 80, 160} // cumulative offsets for CopyBufferToBuffer
+	dstOffset := uint64(0)
+	for i, ca := range belt.chunkedAllocs {
+		if ca.size != wantSizes[i] {
+			t.Errorf("chunk %d: size=%d, want %d", i, ca.size, wantSizes[i])
+		}
+		if dstOffset != wantDstOffsets[i] {
+			t.Errorf("chunk %d: dst offset=%d, want %d", i, dstOffset, wantDstOffsets[i])
+		}
+		dstOffset += ca.size
+	}
+
+	// Total data transferred must equal original size.
+	if dstOffset != 200 {
+		t.Errorf("total chunked size=%d, want 200", dstOffset)
+	}
+}
+
+func TestStagingBelt_SmallMaxStagingBufferSize(t *testing.T) {
+	// Simulate a device with very small maxMemoryAllocationSize (e.g., 16 bytes).
+	// This exercises the extreme case where even normal-sized writes must be chunked.
+	dev := &noop.Device{}
+	q := &mockBatchingQueue{}
+	belt := newStagingBelt(dev, q, 8, 0, 16) // chunkSize=8, maxStaging=16
+	defer belt.destroy()
+
+	// Write 50 bytes. Should produce ceil(50/16)=4 chunks: 16+16+16+2.
+	data := make([]byte, 50)
+	_, err := belt.allocate(50, data)
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+
+	if len(belt.chunkedAllocs) != 4 {
+		t.Fatalf("expected 4 chunks, got %d", len(belt.chunkedAllocs))
+	}
+
+	wantSizes := []uint64{16, 16, 16, 2}
+	for i, ca := range belt.chunkedAllocs {
+		if ca.size != wantSizes[i] {
+			t.Errorf("chunk %d: size=%d, want %d", i, ca.size, wantSizes[i])
+		}
 	}
 }

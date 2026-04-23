@@ -78,6 +78,12 @@ type GpuAllocator struct {
 	config   AllocatorConfig
 	selector *MemoryTypeSelector
 
+	// maxAllocationSize is the maximum single VkDeviceMemory allocation
+	// allowed by the driver (from VkPhysicalDeviceMaintenance3Properties).
+	// Allocations exceeding this size are rejected with ErrAllocationTooLarge.
+	// Vulkan 1.1 core — guaranteed available on all target devices (BUG-VK-001).
+	maxAllocationSize uint64
+
 	// pools contains per-memory-type pools.
 	// Index matches Vulkan memory type index.
 	pools []*MemoryPool
@@ -107,6 +113,11 @@ var (
 
 	// ErrInvalidBlock indicates an invalid memory block.
 	ErrInvalidBlock = errors.New("allocator: invalid memory block")
+
+	// ErrAllocationTooLarge indicates the requested allocation exceeds
+	// VkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize.
+	// Callers should chunk large writes into smaller pieces (BUG-VK-001).
+	ErrAllocationTooLarge = errors.New("allocator: allocation exceeds maxMemoryAllocationSize")
 )
 
 // NewGpuAllocator creates a new GPU memory allocator.
@@ -115,8 +126,10 @@ var (
 //   - device: Vulkan device handle
 //   - cmds: Vulkan commands for memory operations
 //   - props: Device memory properties from vkGetPhysicalDeviceMemoryProperties
+//   - maxAllocationSize: VkPhysicalDeviceMaintenance3Properties.maxMemoryAllocationSize
+//     (Vulkan 1.1 core). Pass 0 to use a safe fallback (256MB).
 //   - config: Allocator configuration (use DefaultConfig() for defaults)
-func NewGpuAllocator(device vk.Device, cmds *vk.Commands, props DeviceMemoryProperties, config AllocatorConfig) (*GpuAllocator, error) {
+func NewGpuAllocator(device vk.Device, cmds *vk.Commands, props DeviceMemoryProperties, maxAllocationSize uint64, config AllocatorConfig) (*GpuAllocator, error) {
 	// Validate config
 	if !isPowerOfTwo(config.BlockSize) {
 		return nil, fmt.Errorf("BlockSize must be power of 2: %d", config.BlockSize)
@@ -129,6 +142,12 @@ func NewGpuAllocator(device vk.Device, cmds *vk.Commands, props DeviceMemoryProp
 	}
 
 	selector := NewMemoryTypeSelector(props)
+
+	// Safe fallback if maxAllocationSize is not available (pre-Vulkan 1.1
+	// or query failure). 256MB is conservative but safe for all GPUs.
+	if maxAllocationSize == 0 {
+		maxAllocationSize = 256 << 20 // 256 MB
+	}
 
 	// Create pools for each memory type
 	pools := make([]*MemoryPool, len(props.MemoryTypes))
@@ -143,12 +162,13 @@ func NewGpuAllocator(device vk.Device, cmds *vk.Commands, props DeviceMemoryProp
 	}
 
 	return &GpuAllocator{
-		device:    device,
-		cmds:      cmds,
-		config:    config,
-		selector:  selector,
-		pools:     pools,
-		dedicated: make(map[vk.DeviceMemory]*MemoryBlock),
+		device:            device,
+		cmds:              cmds,
+		config:            config,
+		selector:          selector,
+		maxAllocationSize: maxAllocationSize,
+		pools:             pools,
+		dedicated:         make(map[vk.DeviceMemory]*MemoryBlock),
 	}, nil
 }
 
@@ -395,7 +415,13 @@ func (a *GpuAllocator) Destroy() {
 }
 
 // vulkanAllocate wraps vkAllocateMemory.
+// Rejects allocations exceeding maxMemoryAllocationSize (BUG-VK-001).
 func (a *GpuAllocator) vulkanAllocate(size uint64, memTypeIndex uint32) (vk.DeviceMemory, error) {
+	if size > a.maxAllocationSize {
+		return 0, fmt.Errorf("%w: requested %d bytes, limit %d bytes",
+			ErrAllocationTooLarge, size, a.maxAllocationSize)
+	}
+
 	allocInfo := vk.MemoryAllocateInfo{
 		SType:           vk.StructureTypeMemoryAllocateInfo,
 		AllocationSize:  vk.DeviceSize(size),
@@ -409,6 +435,12 @@ func (a *GpuAllocator) vulkanAllocate(size uint64, memTypeIndex uint32) (vk.Devi
 	}
 
 	return memory, nil
+}
+
+// MaxAllocationSize returns the maximum single VkDeviceMemory allocation
+// size allowed by the driver.
+func (a *GpuAllocator) MaxAllocationSize() uint64 {
+	return a.maxAllocationSize
 }
 
 // vulkanFree wraps vkFreeMemory.

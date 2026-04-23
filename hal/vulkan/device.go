@@ -121,8 +121,13 @@ func (d *Device) initAllocator() error {
 		}
 	}
 
+	// Query maxMemoryAllocationSize (Vulkan 1.1 core, BUG-VK-001).
+	// This prevents SIGSEGV from vkAllocateMemory silently failing
+	// when the requested size exceeds what the driver supports.
+	maxAllocSize := d.queryMaxMemoryAllocationSize()
+
 	// Create allocator with default config
-	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, memory.DefaultConfig())
+	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, maxAllocSize, memory.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("failed to create memory allocator: %w", err)
 	}
@@ -130,6 +135,55 @@ func (d *Device) initAllocator() error {
 	d.allocator = allocator
 
 	return nil
+}
+
+// queryMaxMemoryAllocationSize queries VkPhysicalDeviceMaintenance3Properties
+// to determine the maximum single VkDeviceMemory allocation size.
+// Returns 0 if the query is not available (pre-Vulkan 1.1), in which case
+// the allocator uses a safe fallback.
+func (d *Device) queryMaxMemoryAllocationSize() uint64 {
+	// vkGetPhysicalDeviceProperties2 is Vulkan 1.1 core.
+	// GetPhysicalDeviceProperties2 has an internal nil-check on its function pointer
+	// and returns silently if unavailable (pre-1.1 drivers).
+	// We rely on the SType being properly initialized for the pNext chain.
+
+	// Chain PhysicalDeviceMaintenance3Properties into PhysicalDeviceProperties2.
+	var maint3Props vk.PhysicalDeviceMaintenance3Properties
+	maint3Props.SType = vk.StructureTypePhysicalDeviceMaintenance3Properties
+
+	props2 := vk.PhysicalDeviceProperties2{
+		SType: vk.StructureTypePhysicalDeviceProperties2,
+		PNext: (*uintptr)(unsafe.Pointer(&maint3Props)),
+	}
+
+	d.instance.cmds.GetPhysicalDeviceProperties2(d.physicalDevice, &props2)
+
+	maxSize := uint64(maint3Props.MaxMemoryAllocationSize)
+	if maxSize > 0 {
+		hal.Logger().Info("vulkan: maxMemoryAllocationSize queried",
+			"maxSize", maxSize,
+			"maxSizeMB", maxSize/(1<<20),
+		)
+	}
+
+	return maxSize
+}
+
+// MaxStagingBufferSize returns the maximum safe staging buffer allocation size.
+// This is min(64MB, maxMemoryAllocationSize) from the Vulkan allocator.
+// Used by the staging belt to cap individual staging buffers, preventing
+// vkAllocateMemory from silently failing on oversized requests (BUG-VK-001).
+// Implements hal.MaxStagingBufferSizer.
+func (d *Device) MaxStagingBufferSize() uint64 {
+	if d.allocator == nil {
+		return 0
+	}
+	maxAlloc := d.allocator.MaxAllocationSize()
+	const defaultMax = 64 << 20 // 64 MB, matching Rust wgpu's 1 << 26
+	if maxAlloc > 0 && maxAlloc < defaultMax {
+		return maxAlloc
+	}
+	return defaultMax
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -231,10 +285,14 @@ func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
 		if result != vk.Success {
 			return fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
 		}
+		if mappedPtr == 0 {
+			return fmt.Errorf("vulkan: vkMapMemory returned null pointer (BUG-VK-001)")
+		}
 		d.mappedMemory[block.Memory] = mappedPtr
 		basePtr = mappedPtr
 	}
 	block.MappedPtr = basePtr + uintptr(block.Offset)
+	block.MappedSize = block.Size // Valid mapped region = allocated block size (BUG-VK-001)
 	return nil
 }
 

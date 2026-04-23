@@ -37,6 +37,17 @@ func (q *mockBatchingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte,
 	return q.Queue.WriteTexture(dst, data, layout, size)
 }
 
+// mockStagingSizeDevice wraps noop.Device and implements hal.MaxStagingBufferSizer.
+// Used to verify that newPendingWrites queries the device for the max staging buffer size.
+type mockStagingSizeDevice struct {
+	noop.Device
+	maxStaging uint64
+}
+
+func (d *mockStagingSizeDevice) MaxStagingBufferSize() uint64 {
+	return d.maxStaging
+}
+
 // mockNonBatchingQueue wraps noop.Queue and tracks direct calls.
 type mockNonBatchingQueue struct {
 	noop.Queue
@@ -918,5 +929,46 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 		if b != data[i] {
 			t.Errorf("byte %d: got 0x%02x, want 0x%02x", i, b, data[i])
 		}
+	}
+}
+
+func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
+	// Verify that newPendingWrites queries the hal.MaxStagingBufferSizer
+	// interface from the device and propagates it to the staging belt.
+	// This is the core of BUG-VK-001: on Vulkan, maxMemoryAllocationSize
+	// must cap the staging belt to prevent oversized allocations.
+	dev := &mockStagingSizeDevice{maxStaging: 1 << 20} // 1MB
+	q := &mockBatchingQueue{}
+	pool := newEncoderPool(&dev.Device)
+	pw := newPendingWrites(dev, q, pool)
+	defer pw.destroy()
+	defer pool.destroy()
+
+	if pw.belt == nil {
+		t.Fatal("expected non-nil belt for batching backend")
+	}
+
+	if pw.belt.maxStagingBufferSize != 1<<20 {
+		t.Errorf("belt.maxStagingBufferSize = %d, want %d", pw.belt.maxStagingBufferSize, 1<<20)
+	}
+}
+
+func TestPendingWrites_MaxStagingBufferSizerDefaultWhenNotImplemented(t *testing.T) {
+	// Verify that when the device does NOT implement MaxStagingBufferSizer,
+	// the belt uses the default 64MB cap.
+	dev := &noop.Device{} // noop.Device does NOT implement MaxStagingBufferSizer
+	q := &mockBatchingQueue{}
+	pool := newEncoderPool(dev)
+	pw := newPendingWrites(dev, q, pool)
+	defer pw.destroy()
+	defer pool.destroy()
+
+	if pw.belt == nil {
+		t.Fatal("expected non-nil belt for batching backend")
+	}
+
+	if pw.belt.maxStagingBufferSize != stagingBeltMaxOversizedSize {
+		t.Errorf("belt.maxStagingBufferSize = %d, want default %d",
+			pw.belt.maxStagingBufferSize, stagingBeltMaxOversizedSize)
 	}
 }

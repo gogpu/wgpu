@@ -34,6 +34,12 @@ type stagingBelt struct {
 	chunkSize uint64 // size of each pre-allocated chunk
 	alignment uint64 // minimum sub-allocation alignment (power of two)
 
+	// maxStagingBufferSize caps the maximum size of a single staging buffer.
+	// Set to min(stagingBeltMaxOversizedSize, device maxMemoryAllocationSize).
+	// Writes larger than this are automatically chunked into multiple
+	// staging buffers + CopyBufferToBuffer commands (BUG-VK-001).
+	maxStagingBufferSize uint64
+
 	// activeChunks are being sub-allocated via bump pointer.
 	// Typically 1 chunk is active; more are activated when the current
 	// chunk's remaining space can't fit an allocation.
@@ -50,6 +56,12 @@ type stagingBelt struct {
 	// These are not recycled — destroyed after GPU completion (too large
 	// to keep in the pool without wasting memory).
 	oversized []hal.Buffer
+
+	// chunkedAllocs temporarily holds chunk allocations from allocateChunked.
+	// Consumed by pendingWrites.writeBuffer to issue CopyBufferToBuffer for
+	// each chunk. Reset at the start of each allocateChunked call.
+	// Only valid between allocateChunked and the next writeBuffer call.
+	chunkedAllocs []stagingChunkedAllocation
 }
 
 // stagingChunk is a large staging buffer with a bump-pointer allocator.
@@ -78,24 +90,36 @@ const stagingBeltDefaultChunkSize = 256 * 1024
 // cache performance. Configurable via newStagingBelt alignment parameter.
 const stagingBeltDefaultAlignment uint64 = 8
 
+// stagingBeltMaxOversizedSize caps individual staging buffer allocations at 64MB.
+// Rust wgpu caps staging buffers at 1 << 26 (64MB). This prevents
+// vkAllocateMemory from failing when size exceeds maxMemoryAllocationSize,
+// which causes SIGSEGV via null/partial mapped pointer (BUG-VK-001).
+// Writes larger than this are automatically chunked.
+const stagingBeltMaxOversizedSize uint64 = 64 << 20 // 64 MB
+
 // newStagingBelt creates a staging belt with the given chunk size and alignment.
 // If chunkSize is 0, uses the default (256KB).
 // If alignment is 0, uses the default (8 bytes, Rust wgpu parity).
+// If maxStagingBufferSize is 0, uses the default (64MB, Rust wgpu parity).
 // Alignment must be a power of two.
 // Matches Rust wgpu StagingBelt::allocate() where alignment is per-allocation;
 // we simplify to per-belt since the belt is internal to pendingWrites.
-func newStagingBelt(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment uint64) *stagingBelt { //nolint:unparam // alignment is configurable for future callers and testing
+func newStagingBelt(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment, maxStagingBufferSize uint64) *stagingBelt { //nolint:unparam // alignment and maxStagingBufferSize are configurable for testing and future callers
 	if chunkSize == 0 {
 		chunkSize = stagingBeltDefaultChunkSize
 	}
 	if alignment == 0 {
 		alignment = stagingBeltDefaultAlignment
 	}
+	if maxStagingBufferSize == 0 {
+		maxStagingBufferSize = stagingBeltMaxOversizedSize
+	}
 	return &stagingBelt{
-		halDevice: halDevice,
-		halQueue:  halQueue,
-		chunkSize: chunkSize,
-		alignment: alignment,
+		halDevice:            halDevice,
+		halQueue:             halQueue,
+		chunkSize:            chunkSize,
+		alignment:            alignment,
+		maxStagingBufferSize: maxStagingBufferSize,
 	}
 }
 
@@ -170,10 +194,34 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 	return alloc, nil
 }
 
-// allocateOversized creates a one-off staging buffer for writes larger
-// than chunkSize. The buffer is tracked separately and destroyed after
-// GPU completion (not recycled into the chunk pool).
+// allocateOversized creates one or more one-off staging buffers for writes
+// larger than chunkSize. Each staging buffer is capped at maxStagingBufferSize
+// (default 64MB, matching Rust wgpu's 1 << 26 cap). Writes larger than this
+// cap are split into multiple staging buffers.
+//
+// Returns the first staging allocation. If the write was split, additional
+// staging buffers are tracked in b.oversized but the caller only needs the
+// first allocation's buffer for the CopyBufferToBuffer source — the chunked
+// copies are handled internally by allocateChunked.
+//
+// Defense-in-depth: validates that CreateBuffer returns a usable mapped
+// pointer before writing data, preventing SIGSEGV (BUG-VK-001 Fix 3).
 func (b *stagingBelt) allocateOversized(size uint64, data []byte) (stagingAllocation, error) {
+	// If the write fits in a single staging buffer, use the simple path.
+	if size <= b.maxStagingBufferSize {
+		return b.allocateSingleOversized(size, data)
+	}
+
+	// Large write: chunk into multiple staging buffers.
+	// Each chunk gets its own staging buffer + is tracked as oversized.
+	// The caller (pendingWrites.writeBuffer) will issue CopyBufferToBuffer
+	// for each chunk separately via allocateChunked.
+	return b.allocateChunked(size, data)
+}
+
+// allocateSingleOversized creates a single one-off staging buffer.
+// Validates the mapped pointer before writing (BUG-VK-001 Fix 3).
+func (b *stagingBelt) allocateSingleOversized(size uint64, data []byte) (stagingAllocation, error) {
 	desc := hal.BufferDescriptor{
 		Label:            "(wgpu internal) staging oversized",
 		Size:             size,
@@ -182,7 +230,7 @@ func (b *stagingBelt) allocateOversized(size uint64, data []byte) (stagingAlloca
 	}
 	buf, err := b.halDevice.CreateBuffer(&desc)
 	if err != nil {
-		return stagingAllocation{}, fmt.Errorf("staging belt: create oversized buffer: %w", err)
+		return stagingAllocation{}, fmt.Errorf("staging belt: create oversized buffer (%d bytes): %w", size, err)
 	}
 	if err := b.halQueue.WriteBuffer(buf, 0, data); err != nil {
 		b.halDevice.DestroyBuffer(buf)
@@ -190,6 +238,61 @@ func (b *stagingBelt) allocateOversized(size uint64, data []byte) (stagingAlloca
 	}
 	b.oversized = append(b.oversized, buf)
 	return stagingAllocation{buffer: buf, offset: 0}, nil
+}
+
+// stagingChunkedAllocation holds one chunk of a multi-chunk oversized write.
+// Used by allocateChunked to return all chunks for CopyBufferToBuffer commands.
+type stagingChunkedAllocation struct {
+	buffer hal.Buffer // staging buffer for this chunk
+	offset uint64     // always 0 for oversized (dedicated buffer per chunk)
+	size   uint64     // bytes of data in this chunk
+}
+
+// allocateChunked splits a large write into multiple staging buffers, each
+// capped at maxStagingBufferSize. Returns the first chunk as the primary
+// allocation and stores all chunks in b.chunkedAllocs for the caller to
+// issue CopyBufferToBuffer commands.
+func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAllocation, error) {
+	maxChunk := b.maxStagingBufferSize
+	remaining := totalSize
+	dataOffset := uint64(0)
+
+	b.chunkedAllocs = b.chunkedAllocs[:0]
+
+	for remaining > 0 {
+		chunkSize := remaining
+		if chunkSize > maxChunk {
+			chunkSize = maxChunk
+		}
+
+		chunkData := data[dataOffset : dataOffset+chunkSize]
+		alloc, err := b.allocateSingleOversized(chunkSize, chunkData)
+		if err != nil {
+			// Clean up any chunks we already allocated.
+			for _, ca := range b.chunkedAllocs {
+				b.halDevice.DestroyBuffer(ca.buffer)
+			}
+			b.chunkedAllocs = b.chunkedAllocs[:0]
+			return stagingAllocation{}, fmt.Errorf("staging belt: allocate chunk at offset %d: %w", dataOffset, err)
+		}
+
+		b.chunkedAllocs = append(b.chunkedAllocs, stagingChunkedAllocation{
+			buffer: alloc.buffer,
+			offset: alloc.offset,
+			size:   chunkSize,
+		})
+
+		dataOffset += chunkSize
+		remaining -= chunkSize
+	}
+
+	if len(b.chunkedAllocs) == 0 {
+		return stagingAllocation{}, nil
+	}
+
+	// Return the first chunk as the primary allocation.
+	first := b.chunkedAllocs[0]
+	return stagingAllocation{buffer: first.buffer, offset: first.offset}, nil
 }
 
 // finish moves all active chunks and oversized buffers to closed state.
@@ -316,6 +419,10 @@ func (b *stagingBelt) destroy() {
 		b.halDevice.DestroyBuffer(buf)
 	}
 	b.oversized = nil
+
+	// chunkedAllocs only holds references to buffers already in oversized —
+	// no extra DestroyBuffer needed, just nil the slice.
+	b.chunkedAllocs = nil
 }
 
 // beltStats holds belt statistics for diagnostics/logging.

@@ -289,3 +289,19 @@ type Queue interface {
 	// directly to the HAL without batching.
 	SupportsCommandBufferCopies() bool
 }
+
+// MaxStagingBufferSizer is an optional interface implemented by HAL devices
+// that can report the maximum safe staging buffer allocation size.
+//
+// For Vulkan, this returns min(64MB, maxMemoryAllocationSize) from
+// VkPhysicalDeviceMaintenance3Properties. Without this limit, staging belt
+// allocations can silently fail when they exceed the driver's maximum
+// allocation size, leading to SIGSEGV (BUG-VK-001).
+//
+// Backends that do not implement this interface default to 64MB
+// (stagingBeltMaxOversizedSize), which is safe for DX12, Metal, and GLES.
+type MaxStagingBufferSizer interface {
+	// MaxStagingBufferSize returns the maximum size in bytes for a single
+	// staging buffer allocation. Returns 0 to use the default (64MB).
+	MaxStagingBufferSize() uint64
+}

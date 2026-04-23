@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.25.0
+## Current State: v0.25.3
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -40,6 +40,9 @@
 ✅ **GLES Y-flip fix** — swapchain offscreen FBO + Present blit (Rust wgpu-hal parity)
 ✅ **Encoder pool** — per-Device shared pool (Rust CommandAllocator pattern)
 ✅ **Software DWM-safe presentation** — CreateDIBSection+BitBlt (SDL3/Qt6 pattern)
+✅ **Software Linux X11 presentation** — XPutImage via goffi (Skia pattern)
+✅ **Vulkan maxMemoryAllocationSize enforcement** — prevents SIGSEGV on large writes
+✅ **Staging belt auto-chunking** — writes >64MB automatically split (Rust wgpu parity)
 
 ### Remaining validation (planned)
 - Late buffer binding size (SPIR-V reflection → min binding size)
@@ -50,7 +53,7 @@
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
 | GLES | Windows, Linux | ✅ Stable — text rendering, SamplerBindMap, texture completeness |
-| Software | All | ✅ Partial (SW-002) |
+| Software | Windows, Linux | ✅ Stable — windowed presentation (GDI/X11), macOS planned |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
@@ -124,6 +127,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.25.3** | 2026-04 | Fix SIGSEGV on large WriteBuffer (#142): maxMemoryAllocationSize enforcement, staging belt auto-chunking, MappedSize bounds checking |
+| **v0.25.2** | 2026-04 | gputypes v0.5.0 (PrimitiveState zero defaults) |
+| **v0.25.1** | 2026-04 | Linux X11 software presentation via XPutImage (Skia pattern) |
 | **v0.25.0** | 2026-04 | **WebGPU Buffer mapping API**, **DXIL full rendering** (naga v0.17.4), GLES Y-flip fix, sampler heap plumbing, pipeline error logging. Breaking: `Queue.ReadBuffer` removed. |
 | **v0.24.7** | 2026-04 | DWM-safe software presentation (CreateDIBSection+BitBlt), rendering optimizations |
 | **v0.23.8** | 2026-04 | Metal vertex buffer fix, GLES per-type binding counters, StagingBelt alignment |
