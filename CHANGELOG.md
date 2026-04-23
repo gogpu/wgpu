@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.4] - 2026-04-23
+
+### Added
+
+- **Late buffer binding size validation** (VAL-006) — WebGPU spec compliance: when
+  `MinBindingSize = 0`, buffer sizes are validated at draw/dispatch time against shader
+  requirements. Full Rust wgpu-core parity: naga IR stored on ShaderModule, `LateSizedBufferGroup`
+  on pipelines, `LateBufferBindingInfo` on bind groups, order-independent binder tracking.
+  12 new tests.
+- **Vulkan relay semaphores** (VK-SYNC-001) — two alternating binary VkSemaphores chain
+  consecutive `vkQueueSubmit` calls for GPU-side execution ordering. Fixes undefined behavior
+  in WriteTexture staging→draw path. Mesa ANV bug #5508 workaround. Rust wgpu-hal parity.
+
+### Dependencies
+
+- **naga** v0.17.4 → **v0.17.5** — `ir.TypeSize()` for buffer size reflection (VAL-006)
+
 ## [0.25.3] - 2026-04-23
 
 ### Fixed

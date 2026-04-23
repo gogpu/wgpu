@@ -71,6 +71,7 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		p.blendConstantRequired = true
 	}
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
+	p.binder.updateLateBufferBindingsFromPipeline(pipeline.lateSizedBufferGroups)
 	p.trackRef(pipeline.ref)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
@@ -85,6 +86,7 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 		return
 	}
 	p.binder.assign(index, group.layout)
+	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
@@ -161,6 +163,13 @@ func (p *RenderPassEncoder) validateDrawState(method string) bool {
 			"wgpu: RenderPass.%s: blend constant needs to be set (pipeline uses BlendFactorConstant)",
 			method,
 		))
+		return false
+	}
+	// Late buffer binding size validation: check that bound buffers are large enough
+	// for bindings with MinBindingSize == 0. Matches Rust wgpu-core's is_ready()
+	// call to check_late_buffer_bindings before draw (render.rs:542-545).
+	if err := p.binder.checkLateBufferBindings(); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w", method, err))
 		return false
 	}
 	return true

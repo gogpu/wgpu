@@ -51,6 +51,7 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
+	p.binder.updateLateBufferBindingsFromPipeline(pipeline.lateSizedBufferGroups)
 	p.trackRef(pipeline.ref)
 	raw := p.core.RawPass()
 	if raw != nil && pipeline.hal != nil {
@@ -65,6 +66,7 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 		return
 	}
 	p.binder.assign(index, group.layout)
+	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
@@ -81,6 +83,13 @@ func (p *ComputePassEncoder) validateDispatchState(method string) bool {
 		return false
 	}
 	if err := p.binder.checkCompatibility(); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
+		return false
+	}
+	// Late buffer binding size validation: check that bound buffers are large enough
+	// for bindings with MinBindingSize == 0. Matches Rust wgpu-core's is_ready()
+	// call to check_late_buffer_bindings before dispatch (compute.rs:278-285).
+	if err := p.binder.checkLateBufferBindings(); err != nil {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
 		return false
 	}

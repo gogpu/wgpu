@@ -1407,6 +1407,12 @@ func (d *Device) Destroy() {
 		d.timelineFence = nil
 	}
 
+	// VK-SYNC-001: Destroy relay semaphores used for submission ordering.
+	if d.queue != nil && d.queue.relay != nil {
+		d.queue.relay.destroy(d.cmds, d.handle)
+		d.queue.relay = nil
+	}
+
 	// Destroy all recycled command pools (VK-POOL-001).
 	d.destroyAllocators()
 

@@ -24,6 +24,98 @@ var cmdBufferPool = sync.Pool{
 	},
 }
 
+// relaySemaphores enforces GPU-side ordering between consecutive vkQueueSubmit calls.
+//
+// The wgpu_hal Queue trait (lib.rs:1059-1068) promises that if two calls to Submit
+// are ordered, the first submission finishes on the GPU before the second begins.
+// Vulkan only guarantees that submissions START in order, not that they finish in order.
+// Relay semaphores close this gap by chaining a wait-then-signal dependency between
+// every pair of consecutive submissions.
+//
+// We alternate between two binary semaphores instead of reusing one. This works around
+// Mesa ANV driver bug #5508 (https://gitlab.freedesktop.org/mesa/mesa/-/issues/5508)
+// where a single binary semaphore waited and signaled in consecutive submissions hangs.
+// The bug is fixed in Mesa, but the workaround should be retained until at least Oct 2026.
+//
+// Reference: Rust wgpu-hal vulkan/mod.rs:526-598.
+type relaySemaphores struct {
+	// wait is the semaphore the next submission should wait on before beginning
+	// execution on the GPU. Zero for the first submission (no dependency yet).
+	wait vk.Semaphore
+
+	// signal is the semaphore the next submission should signal when it finishes
+	// execution on the GPU. Always valid (non-zero).
+	signal vk.Semaphore
+}
+
+// newRelaySemaphores creates the initial relay state with one binary semaphore.
+// The first submission will signal this semaphore without waiting on anything.
+func newRelaySemaphores(cmds *vk.Commands, device vk.Device) (*relaySemaphores, error) {
+	createInfo := vk.SemaphoreCreateInfo{
+		SType: vk.StructureTypeSemaphoreCreateInfo,
+	}
+	var sem vk.Semaphore
+	result := cmds.CreateSemaphore(device, &createInfo, nil, &sem)
+	if result != vk.Success {
+		return nil, fmt.Errorf("vulkan: vkCreateSemaphore (relay 1) failed: %d", result)
+	}
+	return &relaySemaphores{
+		wait:   0, // first submission has no predecessor to wait on
+		signal: sem,
+	}, nil
+}
+
+// advance returns the (wait, signal) semaphores for the current submission and
+// prepares the state for the next one.
+//
+// State machine:
+//
+//	Submit 1: returns (0, sem1) — no wait, signal sem1.    State becomes (sem1, sem2).
+//	Submit 2: returns (sem1, sem2) — wait sem1, signal sem2. State becomes (sem2, sem1) [swap].
+//	Submit 3: returns (sem2, sem1) — wait sem2, signal sem1. State becomes (sem1, sem2) [swap].
+//	...alternating indefinitely.
+//
+// The second semaphore is created on demand (during the transition from first to second
+// submission) to avoid allocating a semaphore that might never be needed.
+func (r *relaySemaphores) advance(cmds *vk.Commands, device vk.Device) (wait, signal vk.Semaphore, err error) {
+	// Capture current state for the caller.
+	wait = r.wait
+	signal = r.signal
+
+	if r.wait == 0 {
+		// First submission just happened. The second submission should wait on
+		// what we just signaled, and signal a new semaphore.
+		r.wait = r.signal
+		createInfo := vk.SemaphoreCreateInfo{
+			SType: vk.StructureTypeSemaphoreCreateInfo,
+		}
+		var sem2 vk.Semaphore
+		result := cmds.CreateSemaphore(device, &createInfo, nil, &sem2)
+		if result != vk.Success {
+			return 0, 0, fmt.Errorf("vulkan: vkCreateSemaphore (relay 2) failed: %d", result)
+		}
+		r.signal = sem2
+	} else {
+		// Subsequent submissions: swap wait and signal so the next submission
+		// waits on what this one signals, and signals the one this one waited on.
+		r.wait, r.signal = r.signal, r.wait
+	}
+
+	return wait, signal, nil
+}
+
+// destroy releases both relay semaphores.
+func (r *relaySemaphores) destroy(cmds *vk.Commands, device vk.Device) {
+	if r.wait != 0 {
+		cmds.DestroySemaphore(device, r.wait, nil)
+		r.wait = 0
+	}
+	if r.signal != 0 {
+		cmds.DestroySemaphore(device, r.signal, nil)
+		r.signal = 0
+	}
+}
+
 // Queue implements hal.Queue for Vulkan.
 type Queue struct {
 	handle          vk.Queue
@@ -31,12 +123,16 @@ type Queue struct {
 	familyIndex     uint32
 	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
 	acquireUsed     bool       // True if acquire semaphore was consumed by a submit
+	relay           *relaySemaphores
 	mu              sync.Mutex // Protects Submit() and Present() from concurrent access
 }
 
 // Submit submits command buffers to the GPU.
 // Returns a monotonically increasing submission index for tracking completion.
 // The HAL internally manages fence/timeline semaphore synchronization.
+//
+// VK-SYNC-001: Every submission chains through relay semaphores to guarantee
+// GPU-side execution ordering between consecutive vkQueueSubmit calls.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -63,29 +159,66 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		cmdBufferPool.Put(pooledSlice)
 	}()
 
-	submitInfo := vk.SubmitInfo{
-		SType:              vk.StructureTypeSubmitInfo,
-		CommandBufferCount: uint32(len(vkCmdBuffers)),
-		PCommandBuffers:    &vkCmdBuffers[0],
-	}
+	// Build wait/signal semaphore arrays. Maximum sizes:
+	//   wait:   acquire(1) + relay(1) = 2
+	//   signal: present(1) + relay(1) + timeline(1) = 3
+	var (
+		waitSems   [2]vk.Semaphore
+		waitStages [2]vk.PipelineStageFlags
+		waitCount  uint32
+
+		signalSems  [3]vk.Semaphore
+		signalCount uint32
+	)
 
 	// If we have an active swapchain, use its semaphores for GPU-side synchronization.
 	// CRITICAL: Semaphores can only be used ONCE per frame.
 	// - Wait on currentAcquireSem: ONLY on first submit (signaled by acquire)
 	// - Signal presentSemaphores: ONLY on first submit (waited on by present)
 	// Subsequent submits in the same frame run without semaphore synchronization.
-	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-	consumedAcquire := false // tracks whether THIS submit consumes the acquire semaphore
+	consumedAcquire := false
 	if q.activeSwapchain != nil && !q.acquireUsed {
-		acquireSem := q.activeSwapchain.currentAcquireSem
-		presentSem := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
-		submitInfo.WaitSemaphoreCount = 1
-		submitInfo.PWaitSemaphores = &acquireSem
-		submitInfo.PWaitDstStageMask = &waitStage
-		submitInfo.SignalSemaphoreCount = 1
-		submitInfo.PSignalSemaphores = &presentSem
+		waitSems[waitCount] = q.activeSwapchain.currentAcquireSem
+		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+		waitCount++
+
+		signalSems[signalCount] = q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
+		signalCount++
+
 		q.acquireUsed = true
 		consumedAcquire = true
+	}
+
+	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.
+	// This ensures that barriers from one submission are visible to the next
+	// (required by the wgpu_hal Queue trait, not guaranteed by Vulkan spec).
+	if q.relay != nil {
+		relayWait, relaySignal, err := q.relay.advance(q.device.cmds, q.device.handle)
+		if err != nil {
+			return 0, fmt.Errorf("vulkan: relay semaphore advance: %w", err)
+		}
+		if relayWait != 0 {
+			waitSems[waitCount] = relayWait
+			waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
+			waitCount++
+		}
+		signalSems[signalCount] = relaySignal
+		signalCount++
+	}
+
+	submitInfo := vk.SubmitInfo{
+		SType:              vk.StructureTypeSubmitInfo,
+		CommandBufferCount: uint32(len(vkCmdBuffers)),
+		PCommandBuffers:    &vkCmdBuffers[0],
+	}
+	if waitCount > 0 {
+		submitInfo.WaitSemaphoreCount = waitCount
+		submitInfo.PWaitSemaphores = &waitSems[0]
+		submitInfo.PWaitDstStageMask = &waitStages[0]
+	}
+	if signalCount > 0 {
+		submitInfo.SignalSemaphoreCount = signalCount
+		submitInfo.PSignalSemaphores = &signalSems[0]
 	}
 
 	signalValue := q.device.timelineFence.nextSignalValue()
@@ -93,50 +226,38 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	// Timeline path (VK-IMPL-001): Attach timeline semaphore signal to the real submit.
 	// This enables waitForGPU to track the latest submission.
 	var timelineSubmitInfo vk.TimelineSemaphoreSubmitInfo
-	if q.device.timelineFence.isTimeline { //nolint:nestif // timeline PNext chaining requires conditional semaphore setup
+	if q.device.timelineFence.isTimeline {
 		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
 		// Pre-acquire wait in acquireNextImage() uses this to ensure the GPU
 		// has finished before reusing the semaphore.
 		if consumedAcquire {
 			q.activeSwapchain.acquireFenceValues[q.activeSwapchain.currentAcquireIdx] = signalValue
 		}
+
+		// Add timeline semaphore to the signal list.
+		signalSems[signalCount] = q.device.timelineFence.timelineSemaphore
+		signalCount++
+		submitInfo.SignalSemaphoreCount = signalCount
+		submitInfo.PSignalSemaphores = &signalSems[0]
+
+		// Build timeline values arrays. For binary semaphores the value is 0
+		// (ignored by the driver), for the timeline semaphore it is signalValue.
+		// The values arrays MUST have the same count as the semaphore arrays.
+		var waitValues [2]uint64   // all zeros — binary semaphores
+		var signalValues [3]uint64 // zeros for binary, signalValue for timeline (always last)
+		signalValues[signalCount-1] = signalValue
+
 		timelineSubmitInfo = vk.TimelineSemaphoreSubmitInfo{
-			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
-			SignalSemaphoreValueCount: 1,
-			PSignalSemaphoreValues:    &signalValue,
+			SType: vk.StructureTypeTimelineSemaphoreSubmitInfo,
 		}
+		if waitCount > 0 {
+			timelineSubmitInfo.WaitSemaphoreValueCount = waitCount
+			timelineSubmitInfo.PWaitSemaphoreValues = &waitValues[0]
+		}
+		timelineSubmitInfo.SignalSemaphoreValueCount = signalCount
+		timelineSubmitInfo.PSignalSemaphoreValues = &signalValues[0]
 
-		// Chain timeline submit info into the submit info.
-		// If there are already signal semaphores (e.g., present semaphore),
-		// we need to add our timeline semaphore to the signal list.
-		if submitInfo.SignalSemaphoreCount > 0 {
-			// Already have a signal semaphore (present path).
-			// We need to signal BOTH the present semaphore AND the timeline semaphore.
-			signalSems := [2]vk.Semaphore{
-				*submitInfo.PSignalSemaphores,            // original (e.g., present semaphore)
-				q.device.timelineFence.timelineSemaphore, // timeline
-			}
-			signalValues := [2]uint64{
-				0,           // binary semaphore: value ignored
-				signalValue, // timeline semaphore: value to signal
-			}
-			submitInfo.SignalSemaphoreCount = 2
-			submitInfo.PSignalSemaphores = &signalSems[0]
-			timelineSubmitInfo.SignalSemaphoreValueCount = 2
-			timelineSubmitInfo.PSignalSemaphoreValues = &signalValues[0]
-		} else {
-			// No existing signal semaphores — just signal the timeline.
-			submitInfo.SignalSemaphoreCount = 1
-			submitInfo.PSignalSemaphores = &q.device.timelineFence.timelineSemaphore
-		}
 		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
-
-		// Also chain timeline wait values if we have wait semaphores.
-		if submitInfo.WaitSemaphoreCount > 0 {
-			waitValue := uint64(0) // Binary semaphore wait: value ignored.
-			timelineSubmitInfo.WaitSemaphoreValueCount = 1
-			timelineSubmitInfo.PWaitSemaphoreValues = &waitValue
-		}
 
 		result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
 		if result != vk.Success {
@@ -195,6 +316,9 @@ func (q *Queue) PollCompleted() uint64 {
 }
 
 // SubmitForPresent submits command buffers with swapchain synchronization.
+//
+// VK-SYNC-001: Every submission chains through relay semaphores to guarantee
+// GPU-side execution ordering between consecutive vkQueueSubmit calls.
 func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *Swapchain) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -221,21 +345,51 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		cmdBufferPool.Put(pooledSlice)
 	}()
 
-	waitStage := vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	// Build wait/signal semaphore arrays. Maximum sizes:
+	//   wait:   acquire(1) + relay(1) = 2
+	//   signal: present(1) + relay(1) + timeline(1) = 3
+	var (
+		waitSems   [2]vk.Semaphore
+		waitStages [2]vk.PipelineStageFlags
+		waitCount  uint32
 
-	// Use the rotating acquire semaphore and per-image present semaphore (wgpu-style).
-	acquireSem := swapchain.currentAcquireSem
-	presentSem := swapchain.presentSemaphores[swapchain.currentImage]
+		signalSems  [3]vk.Semaphore
+		signalCount uint32
+	)
+
+	// Acquire semaphore: always present for SubmitForPresent.
+	waitSems[waitCount] = swapchain.currentAcquireSem
+	waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	waitCount++
+
+	// Present semaphore: always present for SubmitForPresent.
+	signalSems[signalCount] = swapchain.presentSemaphores[swapchain.currentImage]
+	signalCount++
+
+	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.
+	if q.relay != nil {
+		relayWait, relaySignal, err := q.relay.advance(q.device.cmds, q.device.handle)
+		if err != nil {
+			return fmt.Errorf("vulkan: relay semaphore advance: %w", err)
+		}
+		if relayWait != 0 {
+			waitSems[waitCount] = relayWait
+			waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
+			waitCount++
+		}
+		signalSems[signalCount] = relaySignal
+		signalCount++
+	}
 
 	submitInfo := vk.SubmitInfo{
 		SType:                vk.StructureTypeSubmitInfo,
-		WaitSemaphoreCount:   1,
-		PWaitSemaphores:      &acquireSem,
-		PWaitDstStageMask:    &waitStage,
+		WaitSemaphoreCount:   waitCount,
+		PWaitSemaphores:      &waitSems[0],
+		PWaitDstStageMask:    &waitStages[0],
 		CommandBufferCount:   uint32(len(vkCmdBuffers)),
 		PCommandBuffers:      &vkCmdBuffers[0],
-		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    &presentSem,
+		SignalSemaphoreCount: signalCount,
+		PSignalSemaphores:    &signalSems[0],
 	}
 
 	// Timeline path (VK-IMPL-001): Also signal the timeline semaphore on this submit.
@@ -245,18 +399,23 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
 		swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
 
-		signalSems := [2]vk.Semaphore{presentSem, q.device.timelineFence.timelineSemaphore}
-		signalValues := [2]uint64{0, signalValue} // 0 for binary, value for timeline
-		waitValue := uint64(0)                    // Binary acquire semaphore: value ignored
-
-		submitInfo.SignalSemaphoreCount = 2
+		// Add timeline semaphore to the signal list.
+		signalSems[signalCount] = q.device.timelineFence.timelineSemaphore
+		signalCount++
+		submitInfo.SignalSemaphoreCount = signalCount
 		submitInfo.PSignalSemaphores = &signalSems[0]
+
+		// Build timeline values arrays. Binary semaphores get value 0 (ignored),
+		// timeline semaphore (always last) gets signalValue.
+		var waitValues [2]uint64
+		var signalValues [3]uint64
+		signalValues[signalCount-1] = signalValue
 
 		timelineSubmitInfo := vk.TimelineSemaphoreSubmitInfo{
 			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
-			WaitSemaphoreValueCount:   1,
-			PWaitSemaphoreValues:      &waitValue,
-			SignalSemaphoreValueCount: 2,
+			WaitSemaphoreValueCount:   waitCount,
+			PWaitSemaphoreValues:      &waitValues[0],
+			SignalSemaphoreValueCount: signalCount,
 			PSignalSemaphoreValues:    &signalValues[0],
 		}
 		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
