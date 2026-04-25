@@ -483,6 +483,12 @@ func (q *Queue) SupportsCommandBufferCopies() bool {
 	return true
 }
 
+// SetSwapchainSuppressed is a no-op on DX12.
+// DX12 does not use swapchain semaphores — presentation synchronization is
+// handled by DXGI fence signaling, which is not affected by submit ordering.
+// See BUG-WGPU-VK-005 (Vulkan-specific issue).
+func (q *Queue) SetSwapchainSuppressed(_ bool) {}
+
 // -----------------------------------------------------------------------------
 // Compile-time interface assertions
 // -----------------------------------------------------------------------------

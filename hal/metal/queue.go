@@ -417,3 +417,9 @@ func (q *Queue) GetTimestampPeriod() float32 {
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return true
 }
+
+// SetSwapchainSuppressed is a no-op on Metal.
+// Metal presents via CAMetalDrawable which is not affected by command buffer
+// submission ordering — each presentDrawable: call operates on a specific
+// drawable, not on implicit semaphore state. See BUG-WGPU-VK-005 (Vulkan-specific).
+func (q *Queue) SetSwapchainSuppressed(_ bool) {}

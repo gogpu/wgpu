@@ -67,3 +67,7 @@ func (q *Queue) GetTimestampPeriod() float32 {
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return false
 }
+
+// SetSwapchainSuppressed is a no-op on the noop backend.
+// See BUG-WGPU-VK-005 (Vulkan-specific).
+func (q *Queue) SetSwapchainSuppressed(_ bool) {}
