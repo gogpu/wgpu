@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.2] - 2026-04-25
+
+### Fixed
+
+- **Automatic Buffer/BindGroup cleanup via `runtime.AddCleanup`** (BUG-WGPU-RESOURCE-LIFECYCLE-001) —
+  per-frame resources that are not explicitly Released are now automatically scheduled for deferred
+  destruction when collected by GC. Prevents resource leaks (120 buffers/sec) that caused stuttering
+  on Intel Iris Xe. Matches Rust wgpu `Arc<T>` + `Drop` pattern and gogpu `Texture` `AddCleanup` pattern.
+  Leak detection: `slog.Warn` when GC releases a forgotten resource. Explicit `Release()` still preferred
+  and cancels the cleanup (no double-free). ADR-018.
+
+- **Interior pointer bug in `released` field** — changed `Buffer.released` and `BindGroup.released`
+  from embedded `atomic.Bool` to heap-allocated `*atomic.Bool`. The embedded value created an interior
+  pointer in the cleanup ref, preventing GC from ever collecting the object.
+
+### Changed
+
+- **Zero-allocation WriteBuffer batching** — pre-allocate `[1]hal.BufferCopy` in `pendingWrites`
+  struct to avoid heap escape through `hal.CommandEncoder` interface method call. Stack-allocate
+  `[8]hal.BufferBarrier` for flush barriers. Batching path: 43 B/op → 19 B/op, 1 alloc → **0 allocs**.
+  All PendingWrites hot paths now 0 allocs/op.
+
 ## [0.26.1] - 2026-04-25
 
 ### Added
