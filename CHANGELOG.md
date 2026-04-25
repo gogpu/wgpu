@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.4] - 2026-04-25
+
+### Fixed
+
+- **Vulkan: missing PRESENT_SRC_KHR layout transition** (BUG-WGPU-VK-006) — swapchain image
+  presented in `VK_IMAGE_LAYOUT_UNDEFINED` when render pass didn't directly target it (blit-only,
+  resolve, offscreen paths) → validation error VUID-VkPresentInfoKHR-pImageIndices-01430 → flickering.
+  Fix: track swapchain image layout per-image, insert explicit pipeline barrier before
+  `vkQueuePresentKHR` when layout ≠ PRESENT_SRC_KHR. Fence-synchronized barrier pool prevents
+  `vkResetCommandPool` on pending command buffers (VUID-vkResetCommandPool-commandPool-00040).
+  Zero overhead in common case (render pass sets finalLayout). ADR-020.
+
 ## [0.26.3] - 2026-04-25
 
 ### Fixed

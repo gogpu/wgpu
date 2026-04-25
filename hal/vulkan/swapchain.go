@@ -39,6 +39,27 @@ type Swapchain struct {
 	imageAcquired     bool
 	surfaceTextures   []*SwapchainTexture
 	acquireFence      vk.Fence // Post-acquire fence for frame pacing (Rust wgpu pattern)
+
+	// BUG-WGPU-VK-006: Swapchain image layout tracking.
+	// Tracks the current Vulkan image layout for each swapchain image. Used to
+	// determine whether an explicit barrier to PRESENT_SRC_KHR is needed before
+	// vkQueuePresentKHR. Set to UNDEFINED on acquire (per Vulkan spec), updated
+	// to PRESENT_SRC_KHR when a render pass with that finalLayout targets the
+	// swapchain image, and checked in present() to insert a defensive barrier
+	// when the layout is not PRESENT_SRC_KHR (e.g., blit-only or offscreen paths).
+	imageLayouts []vk.ImageLayout
+
+	// barrierPool is a dedicated VkCommandPool for recording layout transition
+	// barriers before present. Separate from user command pools to avoid
+	// interference with encoder lifecycle. Created lazily on first barrier need.
+	barrierPool vk.CommandPool
+
+	// barrierFence synchronizes the barrier command buffer submission in
+	// ensurePresentLayout. We must wait for the barrier to complete on the GPU
+	// before resetting the command pool, otherwise the command buffer is still
+	// pending (VUID-vkResetCommandPool-commandPool-00040). Created lazily
+	// alongside barrierPool.
+	barrierFence vk.Fence
 }
 
 // SwapchainTexture wraps a swapchain image as a SurfaceTexture.
@@ -300,6 +321,13 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		}
 	}
 
+	// BUG-WGPU-VK-006: Initialize per-image layout tracking.
+	// All swapchain images start in UNDEFINED layout (Vulkan spec).
+	imgLayouts := make([]vk.ImageLayout, len(images))
+	for i := range imgLayouts {
+		imgLayouts[i] = vk.ImageLayoutUndefined
+	}
+
 	// Store swapchain
 	swapchain := &Swapchain{
 		handle:             swapchainHandle,
@@ -315,6 +343,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		nextAcquireIdx:     0,
 		presentSemaphores:  presentSemaphores,
 		surfaceTextures:    surfaceTextures,
+		imageLayouts:       imgLayouts,
 	}
 
 	// Create post-acquire fence for frame pacing (Rust wgpu pattern).
@@ -403,6 +432,17 @@ func (sc *Swapchain) destroyResources() {
 		sc.device.cmds.DestroyFence(sc.device.handle, sc.acquireFence, nil)
 		sc.acquireFence = 0
 	}
+
+	// BUG-WGPU-VK-006: Destroy barrier fence and command pool.
+	if sc.barrierFence != 0 {
+		sc.device.cmds.DestroyFence(sc.device.handle, sc.barrierFence, nil)
+		sc.barrierFence = 0
+	}
+	if sc.barrierPool != 0 {
+		sc.device.cmds.DestroyCommandPool(sc.device.handle, sc.barrierPool, nil)
+		sc.barrierPool = 0
+	}
+	sc.imageLayouts = nil
 }
 
 // Destroy destroys the swapchain completely.
@@ -495,6 +535,14 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 
 	sc.currentImage = imageIndex
 	sc.imageAcquired = true
+
+	// BUG-WGPU-VK-006: Per Vulkan spec, acquired swapchain images are in
+	// UNDEFINED layout regardless of previous usage. Track this so present()
+	// can insert a barrier if no render pass transitions to PRESENT_SRC_KHR.
+	if int(imageIndex) < len(sc.imageLayouts) {
+		sc.imageLayouts[imageIndex] = vk.ImageLayoutUndefined
+	}
+
 	return sc.surfaceTextures[imageIndex], result == vk.SuboptimalKhr, nil
 }
 
@@ -508,6 +556,19 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error {
 	if !sc.imageAcquired {
 		return fmt.Errorf("vulkan: no image acquired to present")
+	}
+
+	// BUG-WGPU-VK-006: Ensure the swapchain image is in PRESENT_SRC_KHR layout
+	// before vkQueuePresentKHR. When a render pass directly targets the swapchain
+	// image with finalLayout=PRESENT_SRC_KHR, the layout is already correct and
+	// this is a no-op (zero overhead in the common case). When the image was used
+	// differently (blit-only, offscreen-only, resolve target without PRESENT_SRC),
+	// this inserts an explicit pipeline barrier to transition the layout.
+	if err := sc.ensurePresentLayout(queue); err != nil {
+		hal.Logger().Warn("vulkan: present layout transition failed",
+			"err", err, "imageIndex", sc.currentImage)
+		// Non-fatal: attempt present anyway. The validation layer will report
+		// the layout mismatch, but many drivers tolerate it.
 	}
 
 	// Use the present semaphore for the current image.
@@ -565,6 +626,200 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 	default:
 		return fmt.Errorf("vulkan: vkQueuePresentKHR failed: %d", result)
 	}
+}
+
+// SetImageLayout updates the tracked layout for a swapchain image.
+// Called from BeginRenderPass when the render pass finalLayout is known for a
+// swapchain color attachment. This allows present() to skip the barrier when
+// the render pass already transitions to PRESENT_SRC_KHR.
+//
+// BUG-WGPU-VK-006: Without this tracking, present() would either always insert
+// a barrier (unnecessary overhead) or never insert one (the bug).
+func (sc *Swapchain) SetImageLayout(imageIndex uint32, layout vk.ImageLayout) {
+	if int(imageIndex) < len(sc.imageLayouts) {
+		sc.imageLayouts[imageIndex] = layout
+	}
+}
+
+// ensurePresentLayout checks whether the current swapchain image needs an
+// explicit layout transition to PRESENT_SRC_KHR before vkQueuePresentKHR.
+//
+// In the common case (render pass directly targets the swapchain image with
+// finalLayout = PRESENT_SRC_KHR), the tracked layout already matches and this
+// function returns immediately — zero overhead.
+//
+// When the tracked layout differs (blit-only path, offscreen-only, image never
+// rendered to), a one-shot command buffer is recorded with a pipeline barrier
+// and submitted to the queue. This matches Chrome/Dawn's approach for the same
+// edge case. The extra vkQueueSubmit is the minimum cost to guarantee spec
+// compliance.
+//
+// BUG-WGPU-VK-006: Fixes VUID-VkPresentInfoKHR-pImageIndices-01430.
+func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
+	idx := sc.currentImage
+	if int(idx) >= len(sc.imageLayouts) {
+		return nil // defensive: out of range
+	}
+
+	currentLayout := sc.imageLayouts[idx]
+	if currentLayout == vk.ImageLayoutPresentSrcKhr {
+		// Common case: render pass already transitioned. Nothing to do.
+		return nil
+	}
+
+	// Need to transition. Create the barrier pool and fence lazily on first use.
+	if sc.barrierPool == 0 {
+		createInfo := vk.CommandPoolCreateInfo{
+			SType:            vk.StructureTypeCommandPoolCreateInfo,
+			Flags:            vk.CommandPoolCreateFlags(vk.CommandPoolCreateTransientBit | vk.CommandPoolCreateResetCommandBufferBit),
+			QueueFamilyIndex: sc.device.graphicsFamily,
+		}
+		var pool vk.CommandPool
+		result := sc.device.cmds.CreateCommandPool(sc.device.handle, &createInfo, nil, &pool)
+		if result != vk.Success {
+			return fmt.Errorf("vulkan: vkCreateCommandPool (barrier) failed: %d", result)
+		}
+		sc.device.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "PresentBarrierPool")
+		sc.barrierPool = pool
+
+		// Create the fence used to wait for barrier submission completion.
+		// VUID-vkResetCommandPool-commandPool-00040 requires all command buffers
+		// allocated from the pool to not be in pending state before reset.
+		fenceInfo := vk.FenceCreateInfo{
+			SType: vk.StructureTypeFenceCreateInfo,
+		}
+		var fence vk.Fence
+		fenceResult := sc.device.cmds.CreateFence(sc.device.handle, &fenceInfo, nil, &fence)
+		if fenceResult != vk.Success {
+			return fmt.Errorf("vulkan: vkCreateFence (barrier) failed: %d", fenceResult)
+		}
+		sc.device.setObjectName(vk.ObjectTypeFence, uint64(fence), "PresentBarrierFence")
+		sc.barrierFence = fence
+	}
+
+	// Allocate a one-shot command buffer from the barrier pool.
+	allocInfo := vk.CommandBufferAllocateInfo{
+		SType:              vk.StructureTypeCommandBufferAllocateInfo,
+		CommandPool:        sc.barrierPool,
+		Level:              vk.CommandBufferLevelPrimary,
+		CommandBufferCount: 1,
+	}
+	var cmdBuf vk.CommandBuffer
+	result := sc.device.cmds.AllocateCommandBuffers(sc.device.handle, &allocInfo, &cmdBuf)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkAllocateCommandBuffers (barrier) failed: %d", result)
+	}
+
+	// Begin recording.
+	beginInfo := vk.CommandBufferBeginInfo{
+		SType: vk.StructureTypeCommandBufferBeginInfo,
+		Flags: vk.CommandBufferUsageFlags(vk.CommandBufferUsageOneTimeSubmitBit),
+	}
+	result = sc.device.cmds.BeginCommandBuffer(cmdBuf, &beginInfo)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkBeginCommandBuffer (barrier) failed: %d", result)
+	}
+
+	// Determine source access mask and pipeline stage based on the tracked layout.
+	// The oldLayout must match what the GPU actually sees when this barrier executes.
+	var srcAccess vk.AccessFlags
+	var srcStage vk.PipelineStageFlags
+	switch currentLayout {
+	case vk.ImageLayoutColorAttachmentOptimal:
+		srcAccess = vk.AccessFlags(vk.AccessColorAttachmentWriteBit)
+		srcStage = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+	case vk.ImageLayoutTransferDstOptimal:
+		srcAccess = vk.AccessFlags(vk.AccessTransferWriteBit)
+		srcStage = vk.PipelineStageFlags(vk.PipelineStageTransferBit)
+	case vk.ImageLayoutTransferSrcOptimal:
+		srcAccess = vk.AccessFlags(vk.AccessTransferReadBit)
+		srcStage = vk.PipelineStageFlags(vk.PipelineStageTransferBit)
+	default:
+		// UNDEFINED or unknown: no prior access to synchronize.
+		// OldLayout = UNDEFINED is safe here because either:
+		// 1. The image was never written to this frame (content is undefined anyway)
+		// 2. The image is in an untracked layout (conservative: may discard, but
+		//    this path only fires when no render pass targeted the swapchain,
+		//    meaning nothing meaningful was rendered to it)
+		srcAccess = 0
+		srcStage = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
+	}
+
+	barrier := vk.ImageMemoryBarrier{
+		SType:               vk.StructureTypeImageMemoryBarrier,
+		SrcAccessMask:       srcAccess,
+		DstAccessMask:       0, // Present engine does not need explicit access
+		OldLayout:           currentLayout,
+		NewLayout:           vk.ImageLayoutPresentSrcKhr,
+		SrcQueueFamilyIndex: vk.QueueFamilyIgnored,
+		DstQueueFamilyIndex: vk.QueueFamilyIgnored,
+		Image:               sc.images[idx],
+		SubresourceRange: vk.ImageSubresourceRange{
+			AspectMask:     vk.ImageAspectFlags(vk.ImageAspectColorBit),
+			BaseMipLevel:   0,
+			LevelCount:     1,
+			BaseArrayLayer: 0,
+			LayerCount:     1,
+		},
+	}
+
+	sc.device.cmds.CmdPipelineBarrier(
+		cmdBuf,
+		srcStage,
+		vk.PipelineStageFlags(vk.PipelineStageBottomOfPipeBit),
+		0,      // dependencyFlags
+		0, nil, // memory barriers
+		0, nil, // buffer barriers
+		1, &barrier,
+	)
+
+	// End recording.
+	result = sc.device.cmds.EndCommandBuffer(cmdBuf)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkEndCommandBuffer (barrier) failed: %d", result)
+	}
+
+	// Submit the barrier command buffer with the barrier fence. No semaphores —
+	// this runs after the user's submit (which already waited on acquire and
+	// signaled present semaphores). The barrier just needs to complete before
+	// vkQueuePresentKHR, which is guaranteed by Vulkan's implicit ordering of
+	// vkQueueSubmit calls on the same queue.
+	//
+	// The fence is required so we can wait for GPU completion before resetting
+	// the command pool (VUID-vkResetCommandPool-commandPool-00040).
+	submitInfo := vk.SubmitInfo{
+		SType:              vk.StructureTypeSubmitInfo,
+		CommandBufferCount: 1,
+		PCommandBuffers:    &cmdBuf,
+	}
+	result = sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, sc.barrierFence)
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkQueueSubmit (barrier) failed: %d", result)
+	}
+
+	// Update tracked layout.
+	sc.imageLayouts[idx] = vk.ImageLayoutPresentSrcKhr
+
+	// Wait for the barrier submission to complete on the GPU before resetting
+	// the command pool. Without this wait, the command buffer is still pending
+	// and vkResetCommandPool violates VUID-vkResetCommandPool-commandPool-00040.
+	//
+	// This wait is synchronous but only occurs when the barrier fires (uncommon
+	// case: blit-only or offscreen paths where no render pass transitions the
+	// swapchain image to PRESENT_SRC_KHR). In the common case (render pass with
+	// finalLayout = PRESENT_SRC_KHR), ensurePresentLayout returns early above.
+	const barrierTimeout = uint64(1_000_000_000) // 1 second
+	sc.device.cmds.WaitForFences(sc.device.handle, 1, &sc.barrierFence, vk.True, barrierTimeout)
+	sc.device.cmds.ResetFences(sc.device.handle, 1, &sc.barrierFence)
+
+	// Reset the command pool so the buffer can be reused next frame.
+	// Safe now because WaitForFences guarantees the command buffer is complete.
+	sc.device.cmds.ResetCommandPool(sc.device.handle, sc.barrierPool, 0)
+
+	hal.Logger().Debug("vulkan: inserted PRESENT_SRC_KHR barrier",
+		"imageIndex", idx, "oldLayout", currentLayout)
+
+	return nil
 }
 
 // presentModeToVk converts HAL PresentMode to Vulkan PresentModeKHR.

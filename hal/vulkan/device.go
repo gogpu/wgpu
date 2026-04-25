@@ -570,6 +570,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			size:        t.size,
 			image:       t.handle,
 			isSwapchain: true,
+			swapchain:   t.swapchain,
 			vkFormat:    textureFormatToVk(t.format),
 		}
 		d.setObjectName(vk.ObjectTypeImageView, uint64(t.view),

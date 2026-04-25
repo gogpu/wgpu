@@ -712,6 +712,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		}
 	}
 
+	// BUG-WGPU-VK-006: Update swapchain image layout tracking.
+	updateSwapchainLayout(view, resolveView, hasMSAAResolve, colorFinalLayout)
+
 	// Build render pass key
 	rpKey := RenderPassKey{
 		ColorFormat:      colorFormat,
@@ -1198,6 +1201,21 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 }
 
 // --- Helper functions ---
+
+// updateSwapchainLayout updates swapchain image layout tracking for
+// BUG-WGPU-VK-006. When a render pass targets a swapchain image (directly
+// or via MSAA resolve), the Vulkan render pass finalLayout transitions the
+// image automatically. Recording the expected layout lets present() skip
+// the defensive barrier when it's not needed (zero overhead common case).
+func updateSwapchainLayout(view *TextureView, resolveView *TextureView, hasMSAAResolve bool, finalLayout vk.ImageLayout) {
+	if !hasMSAAResolve && view.isSwapchain && view.swapchain != nil {
+		// Non-MSAA: the color attachment IS the swapchain image.
+		view.swapchain.SetImageLayout(view.swapchain.currentImage, finalLayout)
+	} else if hasMSAAResolve && resolveView != nil && resolveView.isSwapchain && resolveView.swapchain != nil {
+		// MSAA: the resolve target IS the swapchain image.
+		resolveView.swapchain.SetImageLayout(resolveView.swapchain.currentImage, finalLayout)
+	}
+}
 
 //nolint:unparam // stage will be used when barrier optimization is implemented
 func bufferUsageToAccessAndStage(usage gputypes.BufferUsage) (vk.AccessFlags, vk.PipelineStageFlags) {
