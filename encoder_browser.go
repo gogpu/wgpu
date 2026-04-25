@@ -27,6 +27,11 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	panic("wgpu: browser backend not yet implemented")
 }
 
+// CopyTextureToTexture copies data between textures.
+func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []TextureCopy) {
+	panic("wgpu: browser backend not yet implemented")
+}
+
 // TransitionTextures transitions texture states for synchronization.
 func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	panic("wgpu: browser backend not yet implemented")

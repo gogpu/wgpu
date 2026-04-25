@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.5] - 2026-04-26
+
+### Added
+
+- **Public API: `CommandEncoder.CopyTextureToTexture`** — WebGPU spec
+  `GPUCommandEncoder.copyTextureToTexture()`. DMA hardware copy between textures with
+  sub-region support (Origin + Size). Uses Copy engine, not 3D engine — significantly
+  cheaper than render pass blit. Enables dirty-region-only present path for UI frameworks.
+  Implemented in all 6 HAL backends, now exposed on public API.
+- `TextureCopy` descriptor type for texture-to-texture copy regions.
+
 ## [0.26.4] - 2026-04-25
 
 ### Fixed

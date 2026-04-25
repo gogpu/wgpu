@@ -255,6 +255,13 @@ type TextureBarrier struct {
 	Usage   TextureUsageTransition
 }
 
+// TextureCopy describes a texture-to-texture copy region.
+type TextureCopy struct {
+	Source      ImageCopyTexture
+	Destination ImageCopyTexture
+	Size        Extent3D
+}
+
 // BufferTextureCopy defines a buffer-texture copy region.
 type BufferTextureCopy struct {
 	BufferLayout ImageDataLayout

@@ -146,6 +146,34 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	raw.CopyTextureToBuffer(src.hal, halDst, halRegions)
 }
 
+// CopyTextureToTexture copies data between textures using DMA hardware copy.
+// WebGPU spec: GPUCommandEncoder.copyTextureToTexture()
+func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []TextureCopy) {
+	if e.released {
+		return
+	}
+	if src == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: source texture is nil"))
+		return
+	}
+	if dst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: destination texture is nil"))
+		return
+	}
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+	if src.hal == nil || dst.hal == nil {
+		return
+	}
+	halRegions := make([]hal.TextureCopy, len(regions))
+	for i, r := range regions {
+		halRegions[i] = r.toHAL()
+	}
+	raw.CopyTextureToTexture(src.hal, dst.hal, halRegions)
+}
+
 // TransitionTextures transitions texture states for synchronization.
 // This is needed on Vulkan for layout transitions between render pass
 // and copy operations (e.g., after MSAA resolve before CopyTextureToBuffer).
