@@ -91,10 +91,11 @@ type TextureView struct {
 	handle      vk.ImageView
 	texture     *Texture
 	device      *Device
-	size        Extent3D  // Size of the view (for render pass setup)
-	image       vk.Image  // The underlying VkImage handle (for barriers)
-	isSwapchain bool      // True if this view is for a swapchain image
-	vkFormat    vk.Format // Vulkan format (for swapchain views where texture is nil)
+	size        Extent3D   // Size of the view (for render pass setup)
+	image       vk.Image   // The underlying VkImage handle (for barriers)
+	isSwapchain bool       // True if this view is for a swapchain image
+	swapchain   *Swapchain // Back-pointer to owning swapchain (VK-006: layout tracking)
+	vkFormat    vk.Format  // Vulkan format (for swapchain views where texture is nil)
 }
 
 // Destroy releases the texture view.
