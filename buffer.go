@@ -4,17 +4,37 @@ package wgpu
 
 import (
 	"context"
+	"log/slog"
+	"runtime"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
+// bufferCleanupRef holds the data needed to destroy a buffer's HAL resources
+// from a runtime.AddCleanup callback. This struct must NOT reference the Buffer
+// itself — runtime.AddCleanup requires the callback argument to be independent
+// of the cleaned-up object to avoid preventing garbage collection.
+type bufferCleanupRef struct {
+	label        string
+	released     *atomic.Bool
+	destroyQueue *core.DestroyQueue
+	lastSubIdx   func() uint64
+	destroyFn    func()
+}
+
 // Buffer represents a GPU buffer.
 type Buffer struct {
-	core     *core.Buffer
-	device   *Device
-	released bool
+	core    *core.Buffer
+	device  *Device
+	cleanup runtime.Cleanup
+	// released is heap-allocated separately so that the cleanup ref can share
+	// it without holding an interior pointer into the Buffer struct. An interior
+	// pointer would make the Buffer reachable from the cleanup arg, preventing
+	// GC collection and causing the cleanup to never fire.
+	released *atomic.Bool
 }
 
 // Size returns the buffer size in bytes.
@@ -31,10 +51,12 @@ func (b *Buffer) Label() string { return b.core.Label() }
 // that may reference it. This prevents use-after-free on DX12/Vulkan when a
 // buffer is released while the GPU is still reading from it (BUG-DX12-TDR).
 func (b *Buffer) Release() {
-	if b.released {
+	if b.released == nil || !b.released.CompareAndSwap(false, true) {
 		return
 	}
-	b.released = true
+
+	// Cancel the GC cleanup — we are destroying explicitly.
+	b.cleanup.Stop()
 
 	if b.device == nil {
 		b.core.Destroy()
@@ -243,4 +265,49 @@ func (b *Buffer) halBuffer() hal.Buffer {
 	guard := b.device.core.SnatchLock().Read()
 	defer guard.Release()
 	return b.core.Raw(guard)
+}
+
+// registerBufferCleanup registers a runtime.AddCleanup handler on the buffer.
+// When GC collects the buffer without an explicit Release(), the cleanup
+// schedules deferred destruction via DestroyQueue — the same path as Release().
+//
+// The cleanup ref struct captures only the label, released flag, DestroyQueue,
+// and core destroy function — NOT the Buffer pointer itself. This is a Go 1.24
+// runtime.AddCleanup requirement: the callback argument must not reference the
+// object being cleaned up.
+func registerBufferCleanup(buf *Buffer, dev *Device, coreBuf *core.Buffer, label string) runtime.Cleanup {
+	dq := dev.destroyQueue()
+	if dq == nil {
+		// No DestroyQueue — register cleanup that destroys immediately.
+		return runtime.AddCleanup(buf, func(ref bufferCleanupRef) {
+			if !ref.released.CompareAndSwap(false, true) {
+				return
+			}
+			slog.Warn("wgpu: Buffer released by GC (missing explicit Release)", "label", ref.label)
+			ref.destroyFn()
+		}, bufferCleanupRef{
+			label:    label,
+			released: buf.released,
+			destroyFn: func() {
+				coreBuf.Destroy()
+			},
+		})
+	}
+
+	return runtime.AddCleanup(buf, func(ref bufferCleanupRef) {
+		if !ref.released.CompareAndSwap(false, true) {
+			return
+		}
+		slog.Warn("wgpu: Buffer released by GC (missing explicit Release)", "label", ref.label)
+		subIdx := ref.lastSubIdx()
+		ref.destroyQueue.Defer(subIdx, "Buffer(GC):"+ref.label, ref.destroyFn)
+	}, bufferCleanupRef{
+		label:        label,
+		released:     buf.released,
+		destroyQueue: dq,
+		lastSubIdx:   dev.lastSubmissionIndex,
+		destroyFn: func() {
+			coreBuf.Destroy()
+		},
+	})
 }

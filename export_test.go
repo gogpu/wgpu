@@ -38,3 +38,24 @@ func (d *Device) TestCmdEncoderPoolSize() int {
 	defer d.cmdEncoderPool.mu.Unlock()
 	return len(d.cmdEncoderPool.free)
 }
+
+// TestReleased returns true if the buffer has been released (testing only).
+func (b *Buffer) TestReleased() bool {
+	if b.released == nil {
+		return false
+	}
+	return b.released.Load()
+}
+
+// TestDestroyQueue returns the device's DestroyQueue (testing only).
+func (d *Device) TestDestroyQueue() *core.DestroyQueue {
+	return d.destroyQueue()
+}
+
+// TestBindGroupReleased returns true if the bind group has been released (testing only).
+func (g *BindGroup) TestBindGroupReleased() bool {
+	if g.released == nil {
+		return false
+	}
+	return g.released.Load()
+}
