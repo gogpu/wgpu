@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.1] - 2026-04-25
+
+### Added
+
+- **Vulkan: damage-aware present via `VK_KHR_incremental_present`** — chains
+  `VkPresentRegionsKHR` into `VkPresentInfoKHR.pNext` when damage rects provided.
+  Extension probed at adapter enumeration; graceful fallback when unavailable.
+- **DX12: damage-aware present via `IDXGISwapChain1::Present1`** — passes
+  `DXGI_PRESENT_PARAMETERS.pDirtyRects` to DWM compositor. Requires opt-in
+  `EnableDamagePresent: true` in `SurfaceConfiguration` (selects `FLIP_SEQUENTIAL`).
+  Triple guard: damage rects + FLIP_SEQUENTIAL + no tearing. Falls back to `Present()`.
+- **GLES: damage-aware present via `eglSwapBuffersWithDamageKHR`** (Linux only) —
+  probes extension at init, Y-flips coordinates (EGL bottom-left → WebGPU top-left).
+  Falls back to `eglSwapBuffers` when extension unavailable. WGL (Windows) unchanged.
+- `hal.SurfaceConfiguration.EnableDamagePresent` — opt-in flag for DX12 `FLIP_SEQUENTIAL`.
+- Zero allocations maintained: stack arrays `[8]vk.RectLayerKHR`, `[8]dxgi.RECT`,
+  `[32]int32` for ≤8 damage rects across all backends.
+
 ## [0.26.0] - 2026-04-25
 
 ### Added

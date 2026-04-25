@@ -158,6 +158,18 @@ type SurfaceConfiguration struct {
 
 	// AlphaMode controls alpha compositing.
 	AlphaMode gputypes.CompositeAlphaMode
+
+	// EnableDamagePresent requests the backend to configure for damage-aware
+	// presentation. On DX12, this selects DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
+	// instead of FLIP_DISCARD, enabling IDXGISwapChain1::Present1 with dirty
+	// rects. On other backends this flag is ignored (they handle damage rects
+	// without special surface configuration).
+	//
+	// Default false = current behavior (FLIP_DISCARD on DX12).
+	// Should only be set for GUI/widget workloads where partial surface
+	// updates are common. Games and full-screen renderers should leave this
+	// false because FLIP_DISCARD has lower overhead.
+	EnableDamagePresent bool
 }
 
 // BufferDescriptor describes how to create a buffer.

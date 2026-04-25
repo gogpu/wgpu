@@ -908,6 +908,29 @@ func (s *IDXGISwapChain4) Present(syncInterval, flags uint32) error {
 	return nil
 }
 
+// Present1 presents a rendered frame with dirty rectangle information.
+// This is IDXGISwapChain1::Present1 — requires FLIP_SEQUENTIAL swap effect
+// for the dirty rects to be meaningful. With FLIP_DISCARD or when params
+// is nil, this behaves identically to Present().
+//
+// params.DirtyRectsCount=0 with nil DirtyRects signals full-surface update.
+func (s *IDXGISwapChain4) Present1(syncInterval, flags uint32, params *DXGI_PRESENT_PARAMETERS) error {
+	ret, _, _ := syscall.Syscall6(
+		s.vtbl.Present1,
+		4,
+		uintptr(unsafe.Pointer(s)),
+		uintptr(syncInterval),
+		uintptr(flags),
+		uintptr(unsafe.Pointer(params)),
+		0, 0,
+	)
+
+	if ret != 0 {
+		return d3d12.HRESULTError(ret)
+	}
+	return nil
+}
+
 // GetBuffer retrieves a back buffer from the swap chain.
 func (s *IDXGISwapChain4) GetBuffer(index uint32, riid *GUID) (unsafe.Pointer, error) {
 	var resource unsafe.Pointer

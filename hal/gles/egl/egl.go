@@ -18,48 +18,54 @@ var (
 	eglLib unsafe.Pointer
 
 	// EGL 1.0+ core function symbols
-	symEglGetError             unsafe.Pointer
-	symEglGetDisplay           unsafe.Pointer
-	symEglInitialize           unsafe.Pointer
-	symEglTerminate            unsafe.Pointer
-	symEglQueryString          unsafe.Pointer
-	symEglChooseConfig         unsafe.Pointer
-	symEglGetConfigAttrib      unsafe.Pointer
-	symEglCreateWindowSurface  unsafe.Pointer
-	symEglCreatePbufferSurface unsafe.Pointer
-	symEglDestroySurface       unsafe.Pointer
-	symEglBindAPI              unsafe.Pointer
-	symEglSwapInterval         unsafe.Pointer
-	symEglCreateContext        unsafe.Pointer
-	symEglDestroyContext       unsafe.Pointer
-	symEglMakeCurrent          unsafe.Pointer
-	symEglGetCurrentContext    unsafe.Pointer
-	symEglGetCurrentDisplay    unsafe.Pointer
-	symEglSwapBuffers          unsafe.Pointer
-	symEglGetProcAddress       unsafe.Pointer
-	symEglGetPlatformDisplay   unsafe.Pointer // EGL 1.5, may be nil
+	symEglGetError                 unsafe.Pointer
+	symEglGetDisplay               unsafe.Pointer
+	symEglInitialize               unsafe.Pointer
+	symEglTerminate                unsafe.Pointer
+	symEglQueryString              unsafe.Pointer
+	symEglChooseConfig             unsafe.Pointer
+	symEglGetConfigAttrib          unsafe.Pointer
+	symEglCreateWindowSurface      unsafe.Pointer
+	symEglCreatePbufferSurface     unsafe.Pointer
+	symEglDestroySurface           unsafe.Pointer
+	symEglBindAPI                  unsafe.Pointer
+	symEglSwapInterval             unsafe.Pointer
+	symEglCreateContext            unsafe.Pointer
+	symEglDestroyContext           unsafe.Pointer
+	symEglMakeCurrent              unsafe.Pointer
+	symEglGetCurrentContext        unsafe.Pointer
+	symEglGetCurrentDisplay        unsafe.Pointer
+	symEglSwapBuffers              unsafe.Pointer
+	symEglGetProcAddress           unsafe.Pointer
+	symEglGetPlatformDisplay       unsafe.Pointer // EGL 1.5, may be nil
+	symEglSwapBuffersWithDamageKHR unsafe.Pointer // EGL_KHR_swap_buffers_with_damage, may be nil
 
 	// CallInterfaces for each function signature
-	cifEglGetError             types.CallInterface
-	cifEglGetDisplay           types.CallInterface
-	cifEglInitialize           types.CallInterface
-	cifEglTerminate            types.CallInterface
-	cifEglQueryString          types.CallInterface
-	cifEglChooseConfig         types.CallInterface
-	cifEglGetConfigAttrib      types.CallInterface
-	cifEglCreateWindowSurface  types.CallInterface
-	cifEglCreatePbufferSurface types.CallInterface
-	cifEglDestroySurface       types.CallInterface
-	cifEglBindAPI              types.CallInterface
-	cifEglSwapInterval         types.CallInterface
-	cifEglCreateContext        types.CallInterface
-	cifEglDestroyContext       types.CallInterface
-	cifEglMakeCurrent          types.CallInterface
-	cifEglGetCurrentContext    types.CallInterface
-	cifEglGetCurrentDisplay    types.CallInterface
-	cifEglSwapBuffers          types.CallInterface
-	cifEglGetProcAddress       types.CallInterface
-	cifEglGetPlatformDisplay   types.CallInterface
+	cifEglGetError                 types.CallInterface
+	cifEglGetDisplay               types.CallInterface
+	cifEglInitialize               types.CallInterface
+	cifEglTerminate                types.CallInterface
+	cifEglQueryString              types.CallInterface
+	cifEglChooseConfig             types.CallInterface
+	cifEglGetConfigAttrib          types.CallInterface
+	cifEglCreateWindowSurface      types.CallInterface
+	cifEglCreatePbufferSurface     types.CallInterface
+	cifEglDestroySurface           types.CallInterface
+	cifEglBindAPI                  types.CallInterface
+	cifEglSwapInterval             types.CallInterface
+	cifEglCreateContext            types.CallInterface
+	cifEglDestroyContext           types.CallInterface
+	cifEglMakeCurrent              types.CallInterface
+	cifEglGetCurrentContext        types.CallInterface
+	cifEglGetCurrentDisplay        types.CallInterface
+	cifEglSwapBuffers              types.CallInterface
+	cifEglGetProcAddress           types.CallInterface
+	cifEglGetPlatformDisplay       types.CallInterface
+	cifEglSwapBuffersWithDamageKHR types.CallInterface
+
+	// hasSwapBuffersWithDamage is true when eglSwapBuffersWithDamageKHR
+	// was successfully loaded (EGL_KHR_swap_buffers_with_damage extension).
+	hasSwapBuffersWithDamage bool
 )
 
 // Init loads the EGL library and initializes function pointers.
@@ -80,7 +86,14 @@ func Init() error {
 		return err
 	}
 
-	return prepareEGLCallInterfaces()
+	if err := prepareEGLCallInterfaces(); err != nil {
+		return err
+	}
+
+	// Probe optional EGL extensions via eglGetProcAddress (must be done
+	// after core symbols and CIFs are prepared).
+	loadOptionalExtensions()
+	return nil
 }
 
 // loadEGLSymbols loads all required EGL function symbols.
@@ -621,6 +634,60 @@ func GetProcAddress(procname string) uintptr {
 		unsafe.Pointer(&ptr),
 	}
 	_ = ffi.CallFunction(&cifEglGetProcAddress, symEglGetProcAddress, unsafe.Pointer(&result), args[:])
+	return result
+}
+
+// loadOptionalExtensions probes for optional EGL extensions via
+// eglGetProcAddress and prepares their CallInterfaces. Called once
+// during Init after core CIFs are ready.
+func loadOptionalExtensions() {
+	// EGL_KHR_swap_buffers_with_damage — allows telling the compositor
+	// which surface regions changed, enabling partial recomposition.
+	addr := GetProcAddress("eglSwapBuffersWithDamageKHR")
+	if addr != 0 {
+		//nolint:govet // Converting eglGetProcAddress result to unsafe.Pointer is required for goffi
+		symEglSwapBuffersWithDamageKHR = unsafe.Pointer(addr)
+		// EGLBoolean eglSwapBuffersWithDamageKHR(EGLDisplay, EGLSurface, EGLint*, EGLint)
+		err := ffi.PrepareCallInterface(&cifEglSwapBuffersWithDamageKHR, types.DefaultCall,
+			types.UInt32TypeDescriptor, // EGLBoolean
+			[]*types.TypeDescriptor{
+				types.PointerTypeDescriptor, // EGLDisplay
+				types.PointerTypeDescriptor, // EGLSurface
+				types.PointerTypeDescriptor, // EGLint* rects
+				types.UInt32TypeDescriptor,  // EGLint n_rects
+			})
+		if err == nil {
+			hasSwapBuffersWithDamage = true
+		}
+	}
+}
+
+// HasSwapBuffersWithDamage reports whether the EGL_KHR_swap_buffers_with_damage
+// extension was successfully loaded and is available for use.
+func HasSwapBuffersWithDamage() bool {
+	return hasSwapBuffersWithDamage
+}
+
+// SwapBuffersWithDamage presents the EGL surface with damage rectangle hints.
+// rects is a packed array of int32 quadruples {x, y, width, height} using
+// bottom-left origin (EGL convention — caller must Y-flip from top-left).
+// nRects is the number of rectangles (NOT the number of ints).
+// Returns False on failure.
+//
+// Falls back to SwapBuffers when EGL_KHR_swap_buffers_with_damage is
+// not available or nRects is 0.
+func SwapBuffersWithDamage(dpy EGLDisplay, surface EGLSurface, rects *int32, nRects int32) EGLBoolean {
+	if !hasSwapBuffersWithDamage || nRects == 0 {
+		return SwapBuffers(dpy, surface)
+	}
+	var result EGLBoolean
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&dpy),
+		unsafe.Pointer(&surface),
+		unsafe.Pointer(&rects),
+		unsafe.Pointer(&nRects),
+	}
+	_ = ffi.CallFunction(&cifEglSwapBuffersWithDamageKHR, symEglSwapBuffersWithDamageKHR, unsafe.Pointer(&result), args[:])
 	return result
 }
 

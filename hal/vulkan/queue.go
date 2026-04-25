@@ -669,9 +669,12 @@ func (q *Queue) waitForGPU() {
 
 // Present presents a surface texture to the screen.
 //
-// damageRects is accepted but ignored in this phase — Vulkan damage-aware
-// present requires VK_KHR_incremental_present extension (Phase 2, ADR-017).
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
+// damageRects is an optional list of rectangles (physical pixels, top-left
+// origin) indicating which surface regions changed this frame. When non-empty
+// and VK_KHR_incremental_present is supported, the rects are chained into
+// VkPresentInfoKHR.PNext as a compositor hint. When empty or the extension
+// is unavailable, the present path is identical to a full-surface present.
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects []image.Rectangle) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -684,7 +687,7 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 		return fmt.Errorf("vulkan: surface not configured")
 	}
 
-	err := vkSurface.swapchain.present(q)
+	err := vkSurface.swapchain.present(q, damageRects)
 	q.activeSwapchain = nil
 	return err
 }

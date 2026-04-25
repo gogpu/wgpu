@@ -66,6 +66,12 @@ type Device struct {
 	queue               *Queue               // Primary queue (for swapchain synchronization)
 	renderPassCache     *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
 
+	// supportsIncrementalPresent is true when VK_KHR_incremental_present
+	// is enabled on this device. When true, Present can chain
+	// VkPresentRegionsKHR into VkPresentInfoKHR.PNext to hint the
+	// compositor about which surface regions changed (damage rects).
+	supportsIncrementalPresent bool
+
 	// Timeline semaphore fence (VK-IMPL-001).
 	// When available (Vulkan 1.2+), replaces both frame fences and transfer fence
 	// with a single timeline semaphore. Falls back to binary fences on older drivers.

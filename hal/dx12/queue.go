@@ -372,10 +372,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // Present presents a surface texture to the screen.
 // The texture must have been acquired via Surface.AcquireTexture.
 //
-// damageRects is accepted but ignored in this phase — DX12 damage-aware
-// present requires FLIP_SEQUENTIAL swap effect (Phase 3, ADR-017).
-// Current FLIP_DISCARD does not support dirty rects.
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
+// damageRects is an optional list of rectangles (physical pixels, top-left
+// origin) indicating which surface regions changed this frame. When non-empty
+// and the surface was configured with EnableDamagePresent (FLIP_SEQUENTIAL),
+// IDXGISwapChain1::Present1 is called with DXGI_PRESENT_PARAMETERS containing
+// the dirty rects. Otherwise, the standard Present() path is used.
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects []image.Rectangle) error {
 	dx12Surface, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("dx12: surface is not a DX12 surface")
@@ -415,13 +417,40 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 		syncInterval = 1
 	}
 
-	// Present the frame
+	// Present the frame. Use Present1 with dirty rects when the surface
+	// is configured for damage-aware present (FLIP_SEQUENTIAL) and the
+	// caller provided damage rects. Otherwise use standard Present.
 	presentStart := time.Now()
-	if err := dx12Surface.swapchain.Present(syncInterval, presentFlags); err != nil {
-		return fmt.Errorf("dx12: Present failed: %w", err)
+
+	if len(damageRects) > 0 && dx12Surface.damagePresent {
+		// Convert image.Rectangle to DXGI RECT (top-left origin, same
+		// coordinate system). Stack-allocate up to 8 to avoid heap alloc.
+		var stackRects [8]dxgi.RECT
+		rects := stackRects[:0]
+		for _, r := range damageRects {
+			rects = append(rects, dxgi.RECT{
+				Left:   int32(r.Min.X),
+				Top:    int32(r.Min.Y),
+				Right:  int32(r.Max.X),
+				Bottom: int32(r.Max.Y),
+			})
+		}
+		params := dxgi.DXGI_PRESENT_PARAMETERS{
+			DirtyRectsCount: uint32(len(rects)),
+			DirtyRects:      &rects[0],
+		}
+		if err := dx12Surface.swapchain.Present1(syncInterval, presentFlags, &params); err != nil {
+			return fmt.Errorf("dx12: Present1 failed: %w", err)
+		}
+	} else {
+		if err := dx12Surface.swapchain.Present(syncInterval, presentFlags); err != nil {
+			return fmt.Errorf("dx12: Present failed: %w", err)
+		}
 	}
+
 	hal.Logger().Debug("dx12: present",
 		"syncInterval", syncInterval,
+		"damageRects", len(damageRects),
 		"elapsed", time.Since(presentStart),
 	)
 
