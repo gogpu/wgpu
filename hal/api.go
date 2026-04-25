@@ -299,6 +299,33 @@ type Queue interface {
 	// GLES, Software). When false, PendingWrites passes WriteBuffer/WriteTexture
 	// directly to the HAL without batching.
 	SupportsCommandBufferCopies() bool
+
+	// SetSwapchainSuppressed temporarily disables swapchain semaphore binding
+	// for subsequent Submit calls. Used for offscreen renders (e.g., RepaintBoundary)
+	// that must not consume acquire/present semaphores intended for the compositor
+	// submit. Call with true before offscreen submits, false after.
+	//
+	// BUG-WGPU-VK-005: Without this, the first Submit per frame hijacks swapchain
+	// semaphores even when rendering to an offscreen texture, causing the compositor
+	// submit to run without synchronization (race condition -> flickering).
+	//
+	// Only meaningful on Vulkan — other backends are no-ops (DX12/Metal/GLES/Software
+	// have different synchronization models that don't exhibit this issue).
+	//
+	// Thread-safe: acquires the queue mutex internally.
+	// Zero allocations: two pointer writes + one bool write.
+	//
+	// Callers must restore state with SetSwapchainSuppressed(false) after offscreen
+	// submits complete. Use defer for safety:
+	//
+	//   queue.SetSwapchainSuppressed(true)
+	//   defer queue.SetSwapchainSuppressed(false)
+	//   queue.Submit(offscreenCmds)
+	//
+	// Precedent: VK-004 save/restore pattern in WriteTexture (queue.go:620-634).
+	// Long-term: Phase B (ADR-019) will add surface_textures to Submit signature
+	// matching Rust wgpu-hal, eliminating the need for this method.
+	SetSwapchainSuppressed(suppressed bool)
 }
 
 // MaxStagingBufferSizer is an optional interface implemented by HAL devices

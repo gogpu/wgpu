@@ -128,6 +128,14 @@ type Queue struct {
 	acquireUsed     bool       // True if acquire semaphore was consumed by a submit
 	relay           *relaySemaphores
 	mu              sync.Mutex // Protects Submit() and Present() from concurrent access
+
+	// BUG-WGPU-VK-005: Offscreen submit semaphore suppression.
+	// When swapchainSuppressed is true, Submit skips swapchain semaphore binding.
+	// savedSwapchain/savedAcquireUsed hold the original values for restoration.
+	// Same pattern as VK-004 (WriteTexture, lines 620-634) but caller-controlled.
+	swapchainSuppressed bool
+	savedSwapchain      *Swapchain
+	savedAcquireUsed    bool
 }
 
 // Submit submits command buffers to the GPU.
@@ -702,6 +710,40 @@ func (q *Queue) GetTimestampPeriod() float32 {
 // Vulkan uses command buffers for copy operations — PendingWrites batches them.
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return true
+}
+
+// SetSwapchainSuppressed temporarily disables swapchain semaphore binding
+// for subsequent Submit calls. Used for offscreen renders that must not
+// consume acquire/present semaphores intended for the compositor submit.
+//
+// BUG-WGPU-VK-005: When ui uses RepaintBoundary with GPU texture caching,
+// there are two Submit calls per frame (offscreen + compositor). Without
+// suppression, the first (offscreen) submit hijacks swapchain semaphores,
+// leaving the compositor submit without synchronization -> race -> flickering.
+//
+// When suppressed is true: saves activeSwapchain/acquireUsed, clears activeSwapchain.
+// When suppressed is false: restores saved values.
+//
+// Same save/restore pattern as VK-004 in WriteTexture (lines 620-634).
+func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if suppressed {
+		// Save current swapchain state and suppress semaphore binding.
+		q.savedSwapchain = q.activeSwapchain
+		q.savedAcquireUsed = q.acquireUsed
+		q.activeSwapchain = nil
+		q.swapchainSuppressed = true
+	} else if q.swapchainSuppressed {
+		// Restore saved swapchain state so the next Submit (compositor)
+		// correctly binds acquire/present semaphores.
+		q.activeSwapchain = q.savedSwapchain
+		q.acquireUsed = q.savedAcquireUsed
+		q.savedSwapchain = nil
+		q.savedAcquireUsed = false
+		q.swapchainSuppressed = false
+	}
 }
 
 // Vulkan function wrapper

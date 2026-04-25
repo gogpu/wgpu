@@ -236,6 +236,29 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
 }
 
+// SetSwapchainSuppressed temporarily disables swapchain semaphore binding
+// for subsequent Submit calls. Used for offscreen renders (e.g., RepaintBoundary)
+// that must not consume acquire/present semaphores intended for the compositor
+// submit.
+//
+// BUG-WGPU-VK-005: When rendering to an offscreen texture before compositing
+// to the swapchain surface, the offscreen submit must not hijack swapchain
+// semaphores. Without suppression, the compositor submit runs without GPU-side
+// synchronization, causing a race condition (flickering).
+//
+// Call with true before offscreen submits, false after:
+//
+//	queue.SetSwapchainSuppressed(true)
+//	defer queue.SetSwapchainSuppressed(false)
+//	queue.Submit(offscreenCmds...)
+//
+// Only meaningful on Vulkan — other backends are no-ops.
+func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
+	if q.hal != nil {
+		q.hal.SetSwapchainSuppressed(suppressed)
+	}
+}
+
 // LastSubmissionIndex returns the most recent submission index.
 // Used by resource Release() methods to schedule deferred destruction.
 func (q *Queue) LastSubmissionIndex() uint64 {

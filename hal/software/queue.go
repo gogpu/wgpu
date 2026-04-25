@@ -155,3 +155,7 @@ func (q *Queue) GetTimestampPeriod() float32 {
 func (q *Queue) SupportsCommandBufferCopies() bool {
 	return false
 }
+
+// SetSwapchainSuppressed is a no-op on the software backend.
+// Software backend has no GPU semaphores. See BUG-WGPU-VK-005 (Vulkan-specific).
+func (q *Queue) SetSwapchainSuppressed(_ bool) {}

@@ -27,6 +27,10 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	panic("wgpu: browser backend not yet implemented")
 }
 
+// SetSwapchainSuppressed is a no-op on the browser backend.
+// WebGPU browser API handles swapchain synchronization internally.
+func (q *Queue) SetSwapchainSuppressed(_ bool) {}
+
 // LastSubmissionIndex returns the most recent submission index.
 func (q *Queue) LastSubmissionIndex() uint64 {
 	return 0
