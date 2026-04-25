@@ -237,7 +237,7 @@ Backend.CreateInstance()
         → Device.Destroy*(res)     // release
 ```
 
-All resources must be explicitly released. The `core/` layer provides leak detection.
+Resources should be explicitly Released for deterministic cleanup. `runtime.AddCleanup` (Go 1.24+) provides a GC-based safety net for Buffer and BindGroup — unreleased resources are automatically scheduled for deferred destruction via DestroyQueue when collected. Leak detection logs `slog.Warn` when GC cleans up a forgotten resource (ADR-018).
 
 ## Pure Go Approach
 

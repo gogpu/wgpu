@@ -54,6 +54,11 @@ type pendingWrites struct {
 	// completes the submission that references them. Moved to inflight on flush.
 	staging []hal.Buffer
 
+	// copyRegion is a pre-allocated single-element BufferCopy slice used by
+	// writeBuffer to avoid heap escape when calling CopyBufferToBuffer through
+	// the hal.CommandEncoder interface. Reused across writes within a frame.
+	copyRegion [1]hal.BufferCopy
+
 	// dstBuffers tracks buffers that have pending writes, keyed by HAL buffer
 	// with their creation usage flags as values. Usage is passed from the wgpu
 	// public API level (matching Rust wgpu-core where usage lives on core::Buffer,
@@ -174,13 +179,13 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, usage gputypes.BufferUsa
 		pw.belt.chunkedAllocs = pw.belt.chunkedAllocs[:0]
 	} else {
 		// Normal (non-chunked) path: single CopyBufferToBuffer.
-		// Stack-allocate copy region to avoid slice heap escape.
-		copyRegion := [1]hal.BufferCopy{{
+		// Use pre-allocated pw.copyRegion to avoid heap escape through interface call.
+		pw.copyRegion[0] = hal.BufferCopy{
 			SrcOffset: alloc.offset,
 			DstOffset: offset,
 			Size:      dataLen,
-		}}
-		enc.CopyBufferToBuffer(alloc.buffer, buffer, copyRegion[:])
+		}
+		enc.CopyBufferToBuffer(alloc.buffer, buffer, pw.copyRegion[:])
 	}
 
 	// Track destination buffer for barrier computation at flush time.
@@ -412,7 +417,8 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	// We extract read-only flags (VERTEX|INDEX|UNIFORM|INDIRECT) from the creation
 	// usage to determine the target state.
 	if len(pw.dstBuffers) > 0 {
-		barriers := make([]hal.BufferBarrier, 0, len(pw.dstBuffers))
+		var stackBarriers [8]hal.BufferBarrier
+		barriers := stackBarriers[:0]
 		for buf, usage := range pw.dstBuffers {
 			readUsage := bufferReadUsage(usage)
 			if readUsage != 0 {

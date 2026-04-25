@@ -3,10 +3,26 @@
 package wgpu
 
 import (
+	"log/slog"
+	"runtime"
+	"sync/atomic"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
+
+// bindGroupCleanupRef holds the data needed to destroy a bind group's HAL
+// resources from a runtime.AddCleanup callback. This struct must NOT reference
+// the BindGroup itself — runtime.AddCleanup requires the callback argument to
+// be independent of the cleaned-up object.
+type bindGroupCleanupRef struct {
+	label        string
+	released     *atomic.Bool
+	destroyQueue *core.DestroyQueue
+	lastSubIdx   func() uint64
+	destroyFn    func()
+}
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
@@ -156,9 +172,14 @@ type LateBufferBindingInfo struct {
 
 // BindGroup represents bound GPU resources for shader access.
 type BindGroup struct {
-	hal      hal.BindGroup
-	device   *Device
-	released bool
+	hal     hal.BindGroup
+	device  *Device
+	cleanup runtime.Cleanup
+	// released is heap-allocated separately so that the cleanup ref can share
+	// it without holding an interior pointer into the BindGroup struct. An interior
+	// pointer would make the BindGroup reachable from the cleanup arg, preventing
+	// GC collection and causing the cleanup to never fire.
+	released *atomic.Bool
 	// layout is the bind group layout used to create this bind group.
 	// Stored for draw-time compatibility validation via the binder.
 	layout *BindGroupLayout
@@ -180,10 +201,12 @@ type BindGroup struct {
 // Matches Rust wgpu pattern: BindGroup::drop() only fires after
 // triage_submissions confirms fence completion.
 func (g *BindGroup) Release() {
-	if g.released {
+	if g.released == nil || !g.released.CompareAndSwap(false, true) {
 		return
 	}
-	g.released = true
+
+	// Cancel the GC cleanup — we are destroying explicitly.
+	g.cleanup.Stop()
 
 	if g.device == nil {
 		return
@@ -204,5 +227,52 @@ func (g *BindGroup) Release() {
 	halBG := g.hal
 	dq.Defer(subIdx, "BindGroup", func() {
 		halDevice.DestroyBindGroup(halBG)
+	})
+}
+
+// registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
+// When GC collects the bind group without an explicit Release(), the cleanup
+// schedules deferred destruction via DestroyQueue — the same path as Release().
+func registerBindGroupCleanup(bg *BindGroup, dev *Device, label string) runtime.Cleanup {
+	halDevice := dev.halDevice()
+	if halDevice == nil {
+		// No HAL device — nothing to destroy.
+		return runtime.Cleanup{}
+	}
+
+	halBG := bg.hal
+	destroyFn := func() {
+		halDevice.DestroyBindGroup(halBG)
+	}
+
+	dq := dev.destroyQueue()
+	if dq == nil {
+		// No DestroyQueue — register cleanup that destroys immediately.
+		return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
+			if !ref.released.CompareAndSwap(false, true) {
+				return
+			}
+			slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
+			ref.destroyFn()
+		}, bindGroupCleanupRef{
+			label:     label,
+			released:  bg.released,
+			destroyFn: destroyFn,
+		})
+	}
+
+	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
+		if !ref.released.CompareAndSwap(false, true) {
+			return
+		}
+		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
+		subIdx := ref.lastSubIdx()
+		ref.destroyQueue.Defer(subIdx, "BindGroup(GC):"+ref.label, ref.destroyFn)
+	}, bindGroupCleanupRef{
+		label:        label,
+		released:     bg.released,
+		destroyQueue: dq,
+		lastSubIdx:   dev.lastSubmissionIndex,
+		destroyFn:    destroyFn,
 	})
 }

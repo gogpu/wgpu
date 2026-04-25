@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogpu/gputypes"
@@ -82,7 +83,15 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 	// The Ref tracks in-flight usage: Clone'd on encoding, Drop'd on GPU completion.
 	coreBuffer.Ref = core.NewResourceRef("Buffer:"+desc.Label, nil)
 
-	return &Buffer{core: coreBuffer, device: d}, nil
+	buf := &Buffer{core: coreBuffer, device: d, released: new(atomic.Bool)}
+
+	// Safety net: if the buffer is garbage collected without Release(),
+	// schedule deferred destruction via DestroyQueue. This prevents
+	// resource leaks when callers create per-frame buffers without
+	// explicit lifecycle management (BUG-WGPU-RESOURCE-LIFECYCLE-001).
+	buf.cleanup = registerBufferCleanup(buf, d, coreBuffer, desc.Label)
+
+	return buf, nil
 }
 
 // CreateTexture creates a GPU texture.
@@ -383,13 +392,20 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		})
 	}
 
-	return &BindGroup{
+	bg := &BindGroup{
 		hal:                    halGroup,
 		device:                 d,
+		released:               new(atomic.Bool),
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
 		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, nil),
-	}, nil
+	}
+
+	// Safety net: if the bind group is garbage collected without Release(),
+	// schedule deferred destruction via DestroyQueue (BUG-WGPU-RESOURCE-LIFECYCLE-001).
+	bg.cleanup = registerBindGroupCleanup(bg, d, desc.Label)
+
+	return bg, nil
 }
 
 // buildBindGroupEntryMap builds a lookup map from binding index to BindGroupEntry
