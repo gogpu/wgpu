@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"image"
 	"time"
 	"unsafe"
 
@@ -370,7 +371,11 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 // Present presents a surface texture to the screen.
 // The texture must have been acquired via Surface.AcquireTexture.
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+//
+// damageRects is accepted but ignored in this phase — DX12 damage-aware
+// present requires FLIP_SEQUENTIAL swap effect (Phase 3, ADR-017).
+// Current FLIP_DISCARD does not support dirty rects.
+func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
 	dx12Surface, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("dx12: surface is not a DX12 surface")

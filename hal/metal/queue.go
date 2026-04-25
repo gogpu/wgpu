@@ -7,6 +7,7 @@ package metal
 
 import (
 	"fmt"
+	"image"
 	"sync/atomic"
 	"unsafe"
 
@@ -375,7 +376,10 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // Creates a dedicated command buffer, calls presentDrawable:, and commits.
 // This matches the Rust wgpu Metal backend pattern where presentation is
 // handled in a separate command buffer from rendering work.
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+//
+// damageRects is accepted but ignored — Metal has no compositor damage API.
+// Apple's WindowServer does not accept damage hints from Metal applications.
+func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
 	hal.Logger().Debug("metal: Present")
 	st, ok := texture.(*SurfaceTexture)
 	if !ok || st == nil {

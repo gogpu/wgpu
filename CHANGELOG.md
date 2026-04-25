@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-04-25
+
+### Added
+
+- **Damage-aware surface presentation** (#150) — first WebGPU implementation with compositor
+  damage hints. `Surface.PresentWithDamage(texture, rects)` passes dirty rectangles to the
+  display compositor (DWM, Wayland), allowing it to skip recompositing unchanged pixels.
+  `Present()` remains unchanged — calls `PresentWithDamage(nil)` internally.
+  - **Software backend:** partial `BitBlt` (Windows) and `XPutImage` (Linux) per damage rect
+  - **All GPU backends:** accept damage rects parameter (Vulkan/DX12/GLES implementation in
+    future phases — currently pass through to standard present)
+  - **Zero allocations:** 0 B/op for nil path (identical to old Present), 0 B/op for ≤8 rects
+    (stack-allocated platform struct conversion)
+  - Coordinates: physical pixels, top-left origin (`image.Rectangle`)
+  - Neither Rust wgpu, Dawn, nor wgpu-native support this feature
+
 ## [0.25.7] - 2026-04-24
 
 ### Fixed

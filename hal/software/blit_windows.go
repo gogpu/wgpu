@@ -3,6 +3,7 @@
 package software
 
 import (
+	"image"
 	"syscall"
 	"unsafe"
 )
@@ -176,4 +177,52 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		uintptr(dibRGBColors),
 		uintptr(srccopy),
 	)
+}
+
+// blitDamageRectsToWindow copies only the specified damage regions from the
+// DIB section to the window via BitBlt. Each rect is clipped to surface bounds
+// before blitting. This is the damage-aware presentation path — only changed
+// regions are sent to the compositor (DWM), reducing bandwidth for GUI apps
+// where most of the surface is unchanged between frames.
+//
+// Requires DIB section path (memDC != 0). If the DIB section is not active,
+// falls back to full-surface StretchDIBits (damage rects cannot be used with
+// the raw pixel data path because StretchDIBits does not support sub-region
+// source offsets without recalculating the bitmap origin).
+func (s *Surface) blitDamageRectsToWindow(_ []byte, width, height int32, rects []image.Rectangle) {
+	if s.hwnd == 0 || width <= 0 || height <= 0 {
+		return
+	}
+
+	windowDC, _, _ := procGetDC.Call(s.hwnd)
+	if windowDC == 0 {
+		return
+	}
+	defer procReleaseDC.Call(s.hwnd, windowDC) //nolint:errcheck
+
+	if s.memDC == 0 {
+		// No DIB section — cannot do partial blit with StretchDIBits.
+		// Fall back to full-surface blit via blitFramebufferToWindow.
+		return
+	}
+
+	// Surface bounds for clipping damage rects.
+	bounds := image.Rect(0, 0, int(width), int(height))
+
+	for _, r := range rects {
+		// Clip to surface bounds.
+		r = r.Intersect(bounds)
+		if r.Empty() {
+			continue
+		}
+
+		procBitBlt.Call( //nolint:errcheck
+			windowDC,
+			uintptr(r.Min.X), uintptr(r.Min.Y),
+			uintptr(r.Dx()), uintptr(r.Dy()),
+			s.memDC,
+			uintptr(r.Min.X), uintptr(r.Min.Y),
+			uintptr(srccopy),
+		)
+	}
 }

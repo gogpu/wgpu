@@ -3,6 +3,7 @@
 package software
 
 import (
+	"image"
 	"log/slog"
 	"sync"
 	"unsafe"
@@ -265,22 +266,22 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 
 	// Construct XImage on stack pointing to our pixel buffer.
 	// Fields follow Skia RasterWindowContext_unix.cpp exactly.
-	var image ximage
-	image.width = width
-	image.height = height
-	image.format = zPixmap
-	image.data = uintptr(unsafe.Pointer(&data[0]))
-	image.byteOrder = lsbFirst
-	image.bitmapUnit = 32
-	image.bitmapBitOrder = lsbFirst
-	image.bitmapPad = 32
-	image.depth = 24
-	image.bytesPerLine = 0 // XInitImage calculates this
-	image.bitsPerPixel = 32
+	var ximg ximage
+	ximg.width = width
+	ximg.height = height
+	ximg.format = zPixmap
+	ximg.data = uintptr(unsafe.Pointer(&data[0]))
+	ximg.byteOrder = lsbFirst
+	ximg.bitmapUnit = 32
+	ximg.bitmapBitOrder = lsbFirst
+	ximg.bitmapPad = 32
+	ximg.depth = 24
+	ximg.bytesPerLine = 0 // XInitImage calculates this
+	ximg.bitsPerPixel = 32
 
 	// XInitImage fills the function pointer struct at the end of XImage.
 	// Without this call, XPutImage would crash dereferencing nil func ptrs.
-	imagePtr := uintptr(unsafe.Pointer(&image))
+	imagePtr := uintptr(unsafe.Pointer(&ximg))
 	var status int32
 	initArgs := [1]unsafe.Pointer{unsafe.Pointer(&imagePtr)}
 	_ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
@@ -310,6 +311,108 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 
 	// XFlush ensures the X server processes the put request immediately.
 	// Without this, pixels may not appear until the next X event.
+	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
+	_ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
+}
+
+// blitDamageRectsToWindow copies only the specified damage regions from the
+// framebuffer to the X11 window via XPutImage. Each rect is clipped to surface
+// bounds before blitting. XPutImage supports sub-region coordinates natively
+// via (srcX, srcY, dstX, dstY, width, height) parameters.
+//
+// This is the damage-aware presentation path for Linux software backend.
+// Only changed regions are sent to the X server, reducing bandwidth for GUI
+// apps where most of the surface is unchanged between frames.
+func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rects []image.Rectangle) {
+	if s.hwnd == 0 || s.displayHandle == 0 || width <= 0 || height <= 0 || len(data) == 0 {
+		return
+	}
+
+	// Lazy-load libX11 on first blit.
+	x11Once.Do(initX11)
+	if !x11Ready {
+		return
+	}
+
+	display := s.displayHandle
+	window := s.hwnd
+
+	// Lazy-create GC on first blit.
+	if s.gc == 0 {
+		var valuemask uintptr
+		var values uintptr
+		var gc uintptr
+		args := [4]unsafe.Pointer{
+			unsafe.Pointer(&display),
+			unsafe.Pointer(&window),
+			unsafe.Pointer(&valuemask),
+			unsafe.Pointer(&values),
+		}
+		_ = ffi.CallFunction(&cifXCreateGC, symXCreateGC, unsafe.Pointer(&gc), args[:])
+		if gc == 0 {
+			slog.Warn("software: XCreateGC failed — damage blit skipped")
+			return
+		}
+		s.gc = gc
+	}
+
+	// Construct XImage on stack pointing to our pixel buffer.
+	// Same setup as blitFramebufferToWindow — fields follow Skia pattern.
+	var img ximage
+	img.width = width
+	img.height = height
+	img.format = zPixmap
+	img.data = uintptr(unsafe.Pointer(&data[0]))
+	img.byteOrder = lsbFirst
+	img.bitmapUnit = 32
+	img.bitmapBitOrder = lsbFirst
+	img.bitmapPad = 32
+	img.depth = 24
+	img.bytesPerLine = 0 // XInitImage calculates this
+	img.bitsPerPixel = 32
+
+	imagePtr := uintptr(unsafe.Pointer(&img))
+	var status int32
+	initArgs := [1]unsafe.Pointer{unsafe.Pointer(&imagePtr)}
+	_ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
+	if status == 0 {
+		slog.Warn("software: XInitImage failed — damage blit skipped")
+		return
+	}
+
+	// Surface bounds for clipping damage rects.
+	bounds := image.Rect(0, 0, int(width), int(height))
+	gc := s.gc
+
+	for _, r := range rects {
+		// Clip to surface bounds.
+		r = r.Intersect(bounds)
+		if r.Empty() {
+			continue
+		}
+
+		srcX := int32(r.Min.X)
+		srcY := int32(r.Min.Y)
+		dstX := int32(r.Min.X)
+		dstY := int32(r.Min.Y)
+		w := uint32(r.Dx())
+		h := uint32(r.Dy())
+		putArgs := [10]unsafe.Pointer{
+			unsafe.Pointer(&display),
+			unsafe.Pointer(&window),
+			unsafe.Pointer(&gc),
+			unsafe.Pointer(&imagePtr),
+			unsafe.Pointer(&srcX),
+			unsafe.Pointer(&srcY),
+			unsafe.Pointer(&dstX),
+			unsafe.Pointer(&dstY),
+			unsafe.Pointer(&w),
+			unsafe.Pointer(&h),
+		}
+		_ = ffi.CallFunction(&cifXPutImage, symXPutImage, nil, putArgs[:])
+	}
+
+	// XFlush ensures the X server processes all put requests immediately.
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
 	_ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
 }

@@ -7,6 +7,7 @@ package vulkan
 
 import (
 	"fmt"
+	"image"
 	"sync"
 	"time"
 	"unsafe"
@@ -667,7 +668,10 @@ func (q *Queue) waitForGPU() {
 }
 
 // Present presents a surface texture to the screen.
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+//
+// damageRects is accepted but ignored in this phase — Vulkan damage-aware
+// present requires VK_KHR_incremental_present extension (Phase 2, ADR-017).
+func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
