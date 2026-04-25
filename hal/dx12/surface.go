@@ -52,6 +52,19 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	// Add frame latency waitable object flag for better frame pacing
 	swapchainFlags |= uint32(dxgi.DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
 
+	// Select swap effect. FLIP_SEQUENTIAL preserves back buffer content across
+	// Present calls, enabling IDXGISwapChain1::Present1 with dirty rects.
+	// FLIP_DISCARD is the default (lower overhead, back buffer undefined after
+	// Present). Damage-aware present is only meaningful with FLIP_SEQUENTIAL.
+	//
+	// FLIP_SEQUENTIAL is NOT compatible with ALLOW_TEARING, so we only use it
+	// when damage present is requested AND tearing is not enabled.
+	swapEffect := dxgi.DXGI_SWAP_EFFECT_FLIP_DISCARD
+	useDamagePresent := config.EnableDamagePresent && !s.allowTearing
+	if useDamagePresent {
+		swapEffect = dxgi.DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
+	}
+
 	// Create swapchain description
 	desc := dxgi.DXGI_SWAP_CHAIN_DESC1{
 		Width:       config.Width,
@@ -62,7 +75,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		BufferUsage: dxgi.DXGI_USAGE_RENDER_TARGET_OUTPUT,
 		BufferCount: defaultBufferCount,
 		Scaling:     dxgi.DXGI_SCALING_STRETCH,
-		SwapEffect:  dxgi.DXGI_SWAP_EFFECT_FLIP_DISCARD,
+		SwapEffect:  swapEffect,
 		AlphaMode:   compositeAlphaModeToDXGI(config.AlphaMode),
 		Flags:       swapchainFlags,
 	}
@@ -93,6 +106,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	s.height = config.Height
 	s.presentMode = config.PresentMode
 	s.swapchainFlags = swapchainFlags
+	s.damagePresent = useDamagePresent
 
 	// Set maximum frame latency
 	if err := swapchain4.SetMaximumFrameLatency(maxFrameLatency); err != nil {

@@ -58,9 +58,33 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		PQueuePriorities: &queuePriority,
 	}
 
+	// Query supported device extensions to enable optional features.
+	hasIncrementalPresent := false
+	{
+		var extCount uint32
+		a.instance.cmds.EnumerateDeviceExtensionProperties(a.physicalDevice, 0, &extCount, nil)
+		if extCount > 0 {
+			extProps := make([]vk.ExtensionProperties, extCount)
+			a.instance.cmds.EnumerateDeviceExtensionProperties(a.physicalDevice, 0, &extCount, &extProps[0])
+			for i := range extProps {
+				name := cStringToGo(extProps[i].ExtensionName[:])
+				if name == "VK_KHR_incremental_present" {
+					hasIncrementalPresent = true
+					break
+				}
+			}
+		}
+	}
+
 	// Required extensions
 	extensions := []string{
 		"VK_KHR_swapchain\x00",
+	}
+	// Optional: VK_KHR_incremental_present for damage-aware presentation.
+	// Allows chaining VkPresentRegionsKHR into VkPresentInfoKHR.PNext
+	// so the compositor can skip recompositing unchanged pixels.
+	if hasIncrementalPresent {
+		extensions = append(extensions, "VK_KHR_incremental_present\x00")
 	}
 	extensionPtrs := make([]uintptr, len(extensions))
 	for i, ext := range extensions {
@@ -119,11 +143,12 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	vkGetDeviceQueue(&deviceCmds, device, uint32(graphicsFamily), 0, &queue)
 
 	dev := &Device{
-		handle:         device,
-		physicalDevice: a.physicalDevice,
-		instance:       a.instance,
-		graphicsFamily: uint32(graphicsFamily),
-		cmds:           &deviceCmds,
+		handle:                     device,
+		physicalDevice:             a.physicalDevice,
+		instance:                   a.instance,
+		graphicsFamily:             uint32(graphicsFamily),
+		cmds:                       &deviceCmds,
+		supportsIncrementalPresent: hasIncrementalPresent,
 	}
 
 	// Initialize synchronization fence (VK-IMPL-001 / VK-IMPL-003).

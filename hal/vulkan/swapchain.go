@@ -7,6 +7,8 @@ package vulkan
 
 import (
 	"fmt"
+	"image"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -497,7 +499,13 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 }
 
 // present presents the current image to the screen.
-func (sc *Swapchain) present(queue *Queue) error {
+//
+// damageRects is an optional list of rectangles (physical pixels, top-left
+// origin) indicating which surface regions changed this frame. When non-empty
+// and the device supports VK_KHR_incremental_present, a VkPresentRegionsKHR
+// structure is chained into VkPresentInfoKHR.PNext as a compositor hint.
+// When empty or unsupported, the present path is identical to a full present.
+func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error {
 	if !sc.imageAcquired {
 		return fmt.Errorf("vulkan: no image acquired to present")
 	}
@@ -513,6 +521,34 @@ func (sc *Swapchain) present(queue *Queue) error {
 		SwapchainCount:     1,
 		PSwapchains:        &sc.handle,
 		PImageIndices:      &sc.currentImage,
+	}
+
+	// VK_KHR_incremental_present: chain damage rects as a compositor hint.
+	// Stack-allocate up to 8 rects to avoid heap allocation in the common case.
+	var (
+		stackRects     [8]vk.RectLayerKHR
+		presentRegion  vk.PresentRegionKHR
+		presentRegions vk.PresentRegionsKHR
+	)
+	if len(damageRects) > 0 && sc.device.supportsIncrementalPresent {
+		vkRects := stackRects[:0]
+		for _, r := range damageRects {
+			vkRects = append(vkRects, vk.RectLayerKHR{
+				Offset: vk.Offset2D{X: int32(r.Min.X), Y: int32(r.Min.Y)},
+				Extent: vk.Extent2D{Width: uint32(r.Dx()), Height: uint32(r.Dy())},
+				Layer:  0,
+			})
+		}
+		presentRegion = vk.PresentRegionKHR{
+			RectangleCount: uint32(len(vkRects)),
+			PRectangles:    &vkRects[0],
+		}
+		presentRegions = vk.PresentRegionsKHR{
+			SType:          vk.StructureTypePresentRegionsKhr,
+			SwapchainCount: 1,
+			PRegions:       &presentRegion,
+		}
+		presentInfo.PNext = (*uintptr)(unsafe.Pointer(&presentRegions))
 	}
 
 	result := vkQueuePresentKHR(queue, &presentInfo)

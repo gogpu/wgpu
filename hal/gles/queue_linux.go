@@ -117,9 +117,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // Y-flip); the blit un-flips for presentation. Mirrors Rust wgpu-hal
 // src/gles/egl.rs Surface::present (1280-1308).
 //
-// damageRects is accepted but ignored in this phase — GLES damage-aware
-// present via eglSwapBuffersWithDamageKHR is Phase 4 (ADR-017).
-func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
+// damageRects is an optional list of rectangles (physical pixels, top-left
+// origin) indicating which surface regions changed this frame. When non-empty
+// and EGL_KHR_swap_buffers_with_damage is available, the rects are passed to
+// eglSwapBuffersWithDamageKHR as compositor hints. EGL uses bottom-left
+// origin, so Y coordinates are flipped here. When the extension is unavailable
+// or no rects are provided, the standard eglSwapBuffers path is used.
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects []image.Rectangle) error {
 	surf, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("gles: invalid surface type")
@@ -127,7 +131,32 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, _ []image.Rec
 
 	surf.blitSwapchainToDefault()
 
-	// Use EGL SwapBuffers to present the rendered content
+	// Use damage-aware swap when the extension is available and rects provided.
+	if len(damageRects) > 0 && egl.HasSwapBuffersWithDamage() {
+		// Convert image.Rectangle (top-left origin) to EGL packed int32 array
+		// (bottom-left origin). Each rect is {x, y, width, height}.
+		// Stack-allocate for up to 8 rects (8 * 4 = 32 ints).
+		var stackInts [32]int32
+		ints := stackInts[:0]
+		surfaceHeight := int32(surf.fboHeight)
+		for _, r := range damageRects {
+			// Y-flip: EGL uses bottom-left origin.
+			// egl_y = surface_height - rect.Max.Y
+			ints = append(ints,
+				int32(r.Min.X),
+				surfaceHeight-int32(r.Max.Y),
+				int32(r.Dx()),
+				int32(r.Dy()),
+			)
+		}
+		result := egl.SwapBuffersWithDamage(surf.eglDisplay, surf.eglSurface, &ints[0], int32(len(damageRects)))
+		if result == egl.False {
+			return fmt.Errorf("gles: eglSwapBuffersWithDamageKHR failed: error 0x%x", egl.GetError())
+		}
+		return nil
+	}
+
+	// Standard full-surface swap.
 	result := egl.SwapBuffers(surf.eglDisplay, surf.eglSurface)
 	if result == egl.False {
 		return fmt.Errorf("gles: eglSwapBuffers failed: error 0x%x", egl.GetError())

@@ -353,6 +353,11 @@ type Surface struct {
 	swapchainFlags             uint32
 	allowTearing               bool
 	frameLatencyWaitableObject uintptr // HANDLE from GetFrameLatencyWaitableObject
+
+	// damagePresent is true when the swapchain was created with
+	// DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL (instead of FLIP_DISCARD).
+	// Only in this mode can Present1 with dirty rects be used.
+	damagePresent bool
 }
 
 // Configure configures the surface for presentation.
