@@ -509,6 +509,22 @@ func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
 	}
 }
 
+// TextureCopy describes a texture-to-texture copy region.
+// WebGPU spec: GPUCommandEncoder.copyTextureToTexture()
+type TextureCopy struct {
+	Source      ImageCopyTexture
+	Destination ImageCopyTexture
+	Size        Extent3D
+}
+
+func (t *TextureCopy) toHAL() hal.TextureCopy {
+	return hal.TextureCopy{
+		SrcBase: *t.Source.toHAL(),
+		DstBase: *t.Destination.toHAL(),
+		Size:    t.Size.toHAL(),
+	}
+}
+
 // TextureUsageTransition defines a texture usage state transition.
 type TextureUsageTransition struct {
 	OldUsage TextureUsage
