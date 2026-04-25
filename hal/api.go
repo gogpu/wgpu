@@ -3,6 +3,7 @@
 package hal
 
 import (
+	"image"
 	"time"
 	"unsafe"
 
@@ -279,7 +280,15 @@ type Queue interface {
 	// Present presents a surface texture to the screen.
 	// The texture must have been acquired via Surface.AcquireTexture.
 	// After this call, the texture is consumed and must not be used.
-	Present(surface Surface, texture SurfaceTexture) error
+	//
+	// damageRects is an optional list of rectangles (physical pixels, top-left
+	// origin) indicating which regions of the surface changed this frame.
+	// When nil or empty, the entire surface is presented — EXACT same code
+	// path as a call without damage. Backends that support damage rects
+	// (DX12 FLIP_SEQUENTIAL, Vulkan VK_KHR_incremental_present, GLES
+	// EGL_KHR_swap_buffers_with_damage, software partial blit) use them
+	// as compositor hints. Backends without support accept and ignore them.
+	Present(surface Surface, texture SurfaceTexture, damageRects []image.Rectangle) error
 
 	// GetTimestampPeriod returns the timestamp period in nanoseconds.
 	// Used to convert timestamp query results to real time.

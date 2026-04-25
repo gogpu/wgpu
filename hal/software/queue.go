@@ -4,6 +4,7 @@ package software
 
 import (
 	"fmt"
+	"image"
 	"log/slog"
 
 	"github.com/gogpu/wgpu/hal"
@@ -86,11 +87,20 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // so no additional conversion is needed — the framebuffer is passed directly.
 // In headless mode (hwnd == 0), this is a no-op.
 //
+// When damageRects is non-empty, only the specified regions are blitted to the
+// window (partial BitBlt on Windows, partial XPutImage on Linux). This is the
+// damage-aware presentation path for GUI frameworks where only a small region
+// (spinner, cursor blink) changed between frames. Rects are clipped to surface
+// bounds before blitting.
+//
+// When damageRects is nil or empty, the entire surface is blitted — identical
+// to the legacy full-surface present path.
+//
 // IMPORTANT: Uses the SurfaceTexture's buffer (captured at AcquireTexture time),
 // NOT s.framebuffer (which may have been replaced by Configure during resize).
 // This prevents race: render draws into acquired buffer, Configure allocates new one,
 // Present must blit the buffer that was actually rendered into.
-func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, damageRects []image.Rectangle) error {
 	s, ok := surface.(*Surface)
 	if !ok || s.hwnd == 0 {
 		return nil
@@ -106,8 +116,13 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		}
 		slog.Debug("software: Present",
 			"tex_w", w, "tex_h", h,
-			"surface_w", s.width, "surface_h", s.height)
-		s.blitFramebufferToWindow(st.data, int32(w), int32(h))
+			"surface_w", s.width, "surface_h", s.height,
+			"damageRects", len(damageRects))
+		if len(damageRects) > 0 {
+			s.blitDamageRectsToWindow(st.data, int32(w), int32(h), damageRects)
+		} else {
+			s.blitFramebufferToWindow(st.data, int32(w), int32(h))
+		}
 		return nil
 	}
 
@@ -122,7 +137,11 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
 		return nil
 	}
 
-	s.blitFramebufferToWindow(fb, int32(w), int32(h))
+	if len(damageRects) > 0 {
+		s.blitDamageRectsToWindow(fb, int32(w), int32(h), damageRects)
+	} else {
+		s.blitFramebufferToWindow(fb, int32(w), int32(h))
+	}
 	return nil
 }
 

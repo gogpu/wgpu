@@ -4,6 +4,7 @@ package core
 
 import (
 	"errors"
+	"image"
 
 	"github.com/gogpu/wgpu/hal"
 )
@@ -148,6 +149,20 @@ func (s *Surface) AcquireTexture(fence hal.Fence) (*hal.AcquiredSurfaceTexture, 
 // The surface must be in the Acquired state. After presenting, the surface
 // returns to the Configured state and is ready to acquire again.
 func (s *Surface) Present(queue hal.Queue) error {
+	return s.PresentWithDamage(queue, nil)
+}
+
+// PresentWithDamage presents the acquired surface texture to the screen,
+// passing optional damage rectangles to the compositor.
+//
+// damageRects specifies which regions of the surface changed this frame
+// (physical pixels, top-left origin). When nil or empty, the entire surface
+// is presented — identical code path to Present(). Backends that support
+// damage rects use them as compositor hints; others accept and ignore them.
+//
+// The surface must be in the Acquired state. After presenting, the surface
+// returns to the Configured state and is ready to acquire again.
+func (s *Surface) PresentWithDamage(queue hal.Queue, damageRects []image.Rectangle) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -155,7 +170,7 @@ func (s *Surface) Present(queue hal.Queue) error {
 		return ErrSurfaceNoTextureAcquired
 	}
 
-	err := queue.Present(s.raw, s.acquiredTex)
+	err := queue.Present(s.raw, s.acquiredTex, damageRects)
 	s.acquiredTex = nil
 	s.state = SurfaceStateConfigured
 	return err

@@ -2,6 +2,8 @@
 
 package software
 
+import "image"
+
 // platformBlit is a no-op on platforms without native blit support.
 // Windows has GDI (blit_windows.go), Linux has X11 (blit_linux.go).
 type platformBlit struct{}
@@ -15,3 +17,6 @@ func (s *Surface) destroyPlatformFramebuffer() {}
 // blitFramebufferToWindow is a no-op on unsupported platforms.
 // TODO: implement CGImage+CALayer blit for macOS (Phase 2).
 func (s *Surface) blitFramebufferToWindow(_ []byte, _, _ int32) {}
+
+// blitDamageRectsToWindow is a no-op on unsupported platforms.
+func (s *Surface) blitDamageRectsToWindow(_ []byte, _, _ int32, _ []image.Rectangle) {}

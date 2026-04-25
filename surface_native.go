@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
@@ -140,6 +141,19 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 
 // Present presents a surface texture to the screen.
 func (s *Surface) Present(texture *SurfaceTexture) error {
+	return s.PresentWithDamage(texture, nil)
+}
+
+// PresentWithDamage presents a surface texture to the screen, passing optional
+// damage rectangles to the compositor.
+//
+// damageRects specifies which regions of the surface changed this frame
+// (physical pixels, top-left origin). When nil or empty, the entire surface
+// is presented — identical to Present(). Backends that support damage rects
+// (software partial blit, and in future: DX12 Present1, Vulkan
+// VK_KHR_incremental_present, GLES eglSwapBuffersWithDamageKHR) use them
+// as compositor hints; others accept and ignore them.
+func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image.Rectangle) error {
 	if s.released {
 		return ErrReleased
 	}
@@ -154,7 +168,7 @@ func (s *Surface) Present(texture *SurfaceTexture) error {
 		return fmt.Errorf("wgpu: surface texture is nil")
 	}
 
-	return s.core.Present(s.device.queue.hal)
+	return s.core.PresentWithDamage(s.device.queue.hal, damageRects)
 }
 
 // SetPrepareFrame registers a platform hook called before each GetCurrentTexture.

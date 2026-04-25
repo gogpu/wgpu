@@ -7,6 +7,7 @@ package gles
 
 import (
 	"fmt"
+	"image"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -115,7 +116,10 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // render upside-down into the swapchain FBO (driven by naga's in-shader
 // Y-flip); the blit un-flips for presentation. Mirrors Rust wgpu-hal
 // src/gles/egl.rs Surface::present (1280-1308).
-func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture) error {
+//
+// damageRects is accepted but ignored in this phase — GLES damage-aware
+// present via eglSwapBuffersWithDamageKHR is Phase 4 (ADR-017).
+func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
 	surf, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("gles: invalid surface type")

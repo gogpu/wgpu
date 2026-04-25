@@ -4,6 +4,7 @@ package core
 
 import (
 	"errors"
+	"image"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -364,5 +365,119 @@ func TestSurfaceUnconfigureWhenUnconfigured(t *testing.T) {
 
 	if surface.State() != SurfaceStateUnconfigured {
 		t.Errorf("state after no-op Unconfigure = %d, want SurfaceStateUnconfigured", surface.State())
+	}
+}
+
+// --- Damage-aware present tests (ADR-017 Phase 1) ---
+
+func TestPresent_NilDamage_IdenticalToLegacy(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// Acquire
+	_, err := surface.AcquireTexture(nil)
+	if err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+
+	// Present with nil damage — must behave identically to legacy Present.
+	if err := surface.PresentWithDamage(queue, nil); err != nil {
+		t.Fatalf("PresentWithDamage(nil): %v", err)
+	}
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after PresentWithDamage(nil) = %d, want SurfaceStateConfigured",
+			surface.State())
+	}
+}
+
+func TestPresent_WithDamageRects(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	_, err := surface.AcquireTexture(nil)
+	if err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+
+	// Present with damage rects — noop backend accepts and ignores them.
+	rects := []image.Rectangle{
+		image.Rect(10, 20, 100, 80),
+		image.Rect(200, 300, 400, 500),
+	}
+	if err := surface.PresentWithDamage(queue, rects); err != nil {
+		t.Fatalf("PresentWithDamage(rects): %v", err)
+	}
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after PresentWithDamage(rects) = %d, want SurfaceStateConfigured",
+			surface.State())
+	}
+}
+
+func TestPresent_EmptySlice_SameAsNil(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	_, err := surface.AcquireTexture(nil)
+	if err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+
+	// Present with empty slice — must behave identically to nil.
+	if err := surface.PresentWithDamage(queue, []image.Rectangle{}); err != nil {
+		t.Fatalf("PresentWithDamage(empty): %v", err)
+	}
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after PresentWithDamage(empty) = %d, want SurfaceStateConfigured",
+			surface.State())
+	}
+}
+
+func TestPresent_LegacyCallsNewPath(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	_, err := surface.AcquireTexture(nil)
+	if err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+
+	// Legacy Present() must work unchanged — it internally calls PresentWithDamage(nil).
+	if err := surface.Present(queue); err != nil {
+		t.Fatalf("Present: %v", err)
+	}
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after Present = %d, want SurfaceStateConfigured",
+			surface.State())
+	}
+}
+
+func TestPresentWithDamage_WithoutAcquire(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// PresentWithDamage without acquire should fail with same error as Present.
+	err := surface.PresentWithDamage(queue, nil)
+	if !errors.Is(err, ErrSurfaceNoTextureAcquired) {
+		t.Errorf("PresentWithDamage without acquire = %v, want ErrSurfaceNoTextureAcquired", err)
 	}
 }

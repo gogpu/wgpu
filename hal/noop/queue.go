@@ -4,6 +4,7 @@ package noop
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/gogpu/wgpu/hal"
 )
@@ -51,8 +52,8 @@ func (q *Queue) WriteTexture(_ *hal.ImageCopyTexture, _ []byte, _ *hal.ImageData
 }
 
 // Present simulates surface presentation.
-// Always succeeds.
-func (q *Queue) Present(_ hal.Surface, _ hal.SurfaceTexture) error {
+// Always succeeds. damageRects is accepted and ignored (noop backend).
+func (q *Queue) Present(_ hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
 	return nil
 }
 

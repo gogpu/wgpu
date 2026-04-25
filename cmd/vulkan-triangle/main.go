@@ -469,7 +469,7 @@ func renderFrame(gpu *gpuResources) error {
 	}
 
 	// Present
-	if err := gpu.queue.Present(gpu.surface, acquired.Texture); err != nil {
+	if err := gpu.queue.Present(gpu.surface, acquired.Texture, nil); err != nil {
 		return fmt.Errorf("present: %w", err)
 	}
 

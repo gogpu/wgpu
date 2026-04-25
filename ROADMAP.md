@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.25.6
+## Current State: v0.26.0
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -47,6 +47,7 @@
 ✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
 ✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
 ✅ **Vulkan command buffer free list** — batch alloc 16 CBs, pool reset (Khronos/NVIDIA/ARM/Mesa/Rust parity)
+✅ **Damage-aware surface presentation** — `PresentWithDamage()` with compositor dirty rects. First WebGPU implementation. Phase 1: Software backend (BitBlt/XPutImage per rect). GPU backends in future phases.
 
 ### Remaining validation (planned)
 - Late buffer binding size (SPIR-V reflection → min binding size)

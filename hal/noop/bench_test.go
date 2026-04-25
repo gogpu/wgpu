@@ -6,6 +6,7 @@
 package noop_test
 
 import (
+	"image"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -471,7 +472,70 @@ func BenchmarkNoopPresent(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := queue.Present(nil, nil)
+		err := queue.Present(nil, nil, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkPresent_NilDamage verifies that Present with nil damage rects
+// has zero allocations — proves the nil path is zero-cost (ADR-017).
+func BenchmarkPresent_NilDamage(b *testing.B) {
+	b.ReportAllocs()
+	_, queue, cleanup := setupNoopDevice(b)
+	defer cleanup()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := queue.Present(nil, nil, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkPresent_WithDamage_1Rect verifies that Present with 1 damage rect
+// has zero allocations — stack-allocated conversion (ADR-017).
+func BenchmarkPresent_WithDamage_1Rect(b *testing.B) {
+	b.ReportAllocs()
+	_, queue, cleanup := setupNoopDevice(b)
+	defer cleanup()
+
+	rects := []image.Rectangle{
+		image.Rect(10, 20, 100, 80),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := queue.Present(nil, nil, rects)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkPresent_WithDamage_8Rects verifies that Present with 8 damage rects
+// has zero allocations — stack array fits 8 rects (ADR-017).
+func BenchmarkPresent_WithDamage_8Rects(b *testing.B) {
+	b.ReportAllocs()
+	_, queue, cleanup := setupNoopDevice(b)
+	defer cleanup()
+
+	rects := []image.Rectangle{
+		image.Rect(0, 0, 48, 48),
+		image.Rect(100, 100, 200, 200),
+		image.Rect(300, 50, 400, 150),
+		image.Rect(500, 0, 600, 100),
+		image.Rect(0, 300, 100, 400),
+		image.Rect(200, 200, 300, 300),
+		image.Rect(400, 400, 500, 500),
+		image.Rect(600, 300, 700, 400),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := queue.Present(nil, nil, rects)
 		if err != nil {
 			b.Fatal(err)
 		}
