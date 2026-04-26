@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.26.2
+## Current State: v0.26.7
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -44,6 +44,12 @@
 ✅ **Vulkan maxMemoryAllocationSize enforcement** — prevents SIGSEGV on large writes
 ✅ **Staging belt auto-chunking** — writes >64MB automatically split (Rust wgpu parity)
 ✅ **Late buffer binding validation** — draw/dispatch-time MinBindingSize=0 checks (Rust parity)
+✅ **Compute dispatch barriers** — per-dispatch memory barriers on all GPU backends (Rust parity)
+✅ **Dispatch workgroup validation** — count + size limits checked before dispatch
+✅ **DX12 buffer state tracking** — per-buffer D3D12_RESOURCE_STATES with automatic transition barriers (Rust BufferTracker pattern)
+✅ **Pipeline constants passthrough** — Constants map flows from public API through HAL
+✅ **Zero-init workgroup memory** — WebGPU spec default, plumbed through all layers
+✅ **CopyTextureToTexture public API** — DMA hardware copy with sub-region support
 ✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
 ✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
 ✅ **Vulkan command buffer free list** — batch alloc 16 CBs, pool reset (Khronos/NVIDIA/ARM/Mesa/Rust parity)

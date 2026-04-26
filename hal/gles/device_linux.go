@@ -510,6 +510,15 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 }
 
 // CreateComputePipeline creates a compute pipeline.
+//
+// TODO(compute-constants): Apply desc.Compute.Constants via naga's
+// pipeline_constants::process_overrides before GLSL emission. Rust wgpu-hal
+// GLES calls naga::back::pipeline_constants::process_overrides() in
+// create_shader (gles/device.rs:226).
+//
+// TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
+// to naga GLSL options. Rust wgpu-hal sets naga_options.zero_initialize_workgroup_memory
+// per-stage (gles/device.rs:268).
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	start := time.Now()
 	layout, ok := desc.Layout.(*PipelineLayout)

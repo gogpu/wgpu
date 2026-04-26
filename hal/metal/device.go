@@ -775,6 +775,17 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 }
 
 // CreateComputePipeline creates a compute pipeline.
+//
+// TODO(compute-constants): Apply desc.Compute.Constants via naga's
+// pipeline_constants::process_overrides before MSL emission, or use Metal's
+// MTLFunctionConstantValues API for runtime specialization. Rust wgpu-hal
+// Metal calls naga::back::pipeline_constants::process_overrides() in
+// create_shader (metal/device.rs:134) and passes the processed module to
+// the MSL writer.
+//
+// TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
+// to naga MSL options. Rust wgpu-hal sets pipeline_options.zero_initialize_workgroup_memory
+// per-stage (metal/device.rs:179).
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
