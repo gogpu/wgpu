@@ -84,11 +84,19 @@ type Device struct {
 	freeAllocators []commandAllocator
 	allocatorMu    sync.Mutex // protects freeAllocators
 
+	// nonCoherentAtomSize is the minimum alignment for Invalidate/Flush
+	// mapped memory range operations (from VkPhysicalDeviceLimits).
+	// Vulkan spec requires offset and size passed to vkInvalidateMappedMemoryRanges
+	// and vkFlushMappedMemoryRanges to be multiples of this value.
+	// Queried during initAllocator. (BUG-VK-009 Fix 2)
+	nonCoherentAtomSize uint64
+
 	// mappedMemory tracks persistently mapped VkDeviceMemory objects.
 	// Vulkan only allows one active vkMapMemory per VkDeviceMemory;
 	// with suballocation multiple buffers share the same VkDeviceMemory,
 	// so we map each VkDeviceMemory once from offset 0 and reuse it.
-	mappedMemory map[vk.DeviceMemory]uintptr
+	mappedMemory   map[vk.DeviceMemory]uintptr
+	mappedMemoryMu sync.Mutex // protects mappedMemory map (concurrent CreateBuffer)
 
 	// debugNameBuf is a reusable buffer for null-terminating debug label strings
 	// passed to vkSetDebugUtilsObjectNameEXT. Avoids heap allocation per
@@ -128,11 +136,25 @@ func (d *Device) initAllocator() error {
 	// when the requested size exceeds what the driver supports.
 	maxAllocSize := d.queryMaxMemoryAllocationSize()
 
+	// Query nonCoherentAtomSize from physical device limits (BUG-VK-009 Fix 2).
+	// This is the minimum alignment for Invalidate/Flush mapped memory ranges.
+	// Rust wgpu-hal stores this as non_coherent_map_mask = atomSize - 1 (adapter.rs:1921).
+	d.queryNonCoherentAtomSize()
+
 	// Create allocator with default config
 	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, maxAllocSize, memory.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("failed to create memory allocator: %w", err)
 	}
+
+	// Register callback to clear stale entries from mappedMemory cache
+	// when VkDeviceMemory is freed. Prevents use-after-free when the driver
+	// recycles a handle. (BUG-VK-009 Fix 4)
+	allocator.SetOnFreeCallback(func(mem vk.DeviceMemory) {
+		d.mappedMemoryMu.Lock()
+		delete(d.mappedMemory, mem)
+		d.mappedMemoryMu.Unlock()
+	})
 
 	d.allocator = allocator
 
@@ -169,6 +191,40 @@ func (d *Device) queryMaxMemoryAllocationSize() uint64 {
 	}
 
 	return maxSize
+}
+
+// queryNonCoherentAtomSize reads VkPhysicalDeviceLimits.NonCoherentAtomSize
+// from the physical device properties. This value is the minimum alignment
+// required by the Vulkan spec for vkInvalidateMappedMemoryRanges and
+// vkFlushMappedMemoryRanges offset/size parameters.
+//
+// Guaranteed to be a power of two. Falls back to 256 (safe for all GPUs) if
+// the query returns 0. Intel Iris Xe reports 1 (always aligned).
+// Rust wgpu-hal stores atomSize - 1 as non_coherent_map_mask (adapter.rs:1921).
+func (d *Device) queryNonCoherentAtomSize() {
+	var props vk.PhysicalDeviceProperties
+	d.instance.cmds.GetPhysicalDeviceProperties(d.physicalDevice, &props)
+
+	atomSize := uint64(props.Limits.NonCoherentAtomSize)
+	if atomSize == 0 {
+		atomSize = 256 // safe fallback
+	}
+	d.nonCoherentAtomSize = atomSize
+
+	hal.Logger().Debug("vulkan: nonCoherentAtomSize queried",
+		"atomSize", atomSize,
+	)
+}
+
+// alignedMappedRange aligns offset down and size up to nonCoherentAtomSize
+// for Invalidate/Flush mapped memory range operations. The Vulkan spec requires
+// these parameters to be multiples of nonCoherentAtomSize. Matches Rust wgpu-hal
+// make_memory_ranges (device.rs:233-246). (BUG-VK-009 Fix 2)
+func (d *Device) alignedMappedRange(blockOffset, blockSize uint64) (offset, size vk.DeviceSize) {
+	mask := d.nonCoherentAtomSize - 1 // atomSize is power of 2
+	alignedOffset := blockOffset & ^mask
+	alignedEnd := (blockOffset + blockSize + mask) & ^mask
+	return vk.DeviceSize(alignedOffset), vk.DeviceSize(alignedEnd - alignedOffset)
 }
 
 // MaxStagingBufferSize returns the maximum safe staging buffer allocation size.
@@ -215,13 +271,17 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var memReqs vk.MemoryRequirements
 	d.cmds.GetBufferMemoryRequirements(d.handle, buffer, &memReqs)
 
-	// Determine usage flags for memory allocation
-	// For CopyDst buffers or MappedAtCreation, we need host-visible memory
-	// so that WriteBuffer can write directly without staging
+	// Determine usage flags for memory allocation.
+	// Only MAP_READ/MAP_WRITE buffers (and MappedAtCreation) need host-visible memory.
+	// CopyDst buffers stay DEVICE_LOCAL — writes go through the staging belt
+	// (CopySrc staging buffer + GPU CopyBufferToBuffer). Matches Rust wgpu-hal
+	// device.rs:971-988. (BUG-VK-009 Fix 1)
 	memUsage := memory.UsageFastDeviceAccess
-	if desc.Usage&(gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite) != 0 ||
-		desc.Usage&gputypes.BufferUsageCopyDst != 0 || desc.MappedAtCreation {
-		memUsage = memory.UsageHostAccess | memory.UsageUpload
+	if desc.Usage&(gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite) != 0 || desc.MappedAtCreation {
+		memUsage = memory.UsageHostAccess
+		if desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation {
+			memUsage |= memory.UsageUpload
+		}
 		if desc.Usage&gputypes.BufferUsageMapRead != 0 {
 			memUsage |= memory.UsageDownload
 		}
@@ -276,6 +336,9 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 // With suballocation, multiple buffers share the same VkDeviceMemory,
 // so we map from offset 0 once and compute per-buffer pointers.
 func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
+	d.mappedMemoryMu.Lock()
+	defer d.mappedMemoryMu.Unlock()
+
 	if d.mappedMemory == nil {
 		d.mappedMemory = make(map[vk.DeviceMemory]uintptr)
 	}
@@ -302,13 +365,13 @@ func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
 //
 // Vulkan maps each VkDeviceMemory block persistently at allocation time
 // (ensureMemoryMapped in CreateBuffer). MapBuffer therefore just returns
-// the cached pointer offset by the requested offset — no additional
+// the cached pointer offset by the requested offset -- no additional
 // vkMapMemory call, no syscall overhead.
 //
-// Coherency: the block may or may not be HOST_COHERENT depending on the
-// memory type chosen by gpu_allocator. We report IsCoherent=false
-// conservatively; the core driver is responsible for issuing Flush /
-// Invalidate via the memory-range Vulkan APIs when needed.
+// Coherency is reported accurately from the memory type's HOST_COHERENT bit.
+// Non-coherent memory requires Invalidate before CPU reads (MAP_READ) and
+// Flush after CPU writes (MAP_WRITE). Matches Rust wgpu-hal map_buffer
+// which reads is_coherent from block.props() (device.rs:1072-1075).
 func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil || buf.memory == nil {
@@ -320,47 +383,71 @@ func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMa
 	if buf.memory.MappedPtr == 0 {
 		return hal.BufferMapping{}, hal.ErrInvalidMapRange
 	}
-	// Invalidate host caches for the range so CPU reads see GPU writes.
-	// Harmless on HOST_COHERENT memory; essential for MAP_READ staging.
-	memRange := vk.MappedMemoryRange{
-		SType:  vk.StructureTypeMappedMemoryRange,
-		Memory: buf.memory.Memory,
-		Offset: vk.DeviceSize(buf.memory.Offset),
-		Size:   vk.DeviceSize(vk.WholeSize),
-	}
-	_ = d.cmds.InvalidateMappedMemoryRanges(d.handle, 1, &memRange)
 
-	// Go vet flags direct uintptr→Pointer conversion as "possible misuse"
+	// Diagnostic logging for debugging mapped pointer issues (BUG-VK-009 Fix 6).
+	hal.Logger().Debug("vulkan: MapBuffer",
+		"basePtr", fmt.Sprintf("%#x", buf.memory.MappedPtr),
+		"offset", offset,
+		"size", size,
+		"blockOffset", buf.memory.Offset,
+		"blockSize", buf.memory.Size,
+		"isCoherent", buf.memory.IsCoherent,
+	)
+
+	// Invalidate host caches so CPU reads see GPU writes. Only needed for
+	// non-coherent memory on MAP_READ. Coherent memory is automatically
+	// visible. Matches Rust wgpu-hal which only calls invalidate when
+	// !is_coherent. (BUG-VK-009 Fix 5)
+	if !buf.memory.IsCoherent {
+		alignedOffset, alignedSize := d.alignedMappedRange(buf.memory.Offset, buf.memory.Size)
+		memRange := vk.MappedMemoryRange{
+			SType:  vk.StructureTypeMappedMemoryRange,
+			Memory: buf.memory.Memory,
+			Offset: alignedOffset,
+			Size:   alignedSize,
+		}
+		// Check return value instead of silently ignoring (BUG-VK-009 Fix 3).
+		if result := d.cmds.InvalidateMappedMemoryRanges(d.handle, 1, &memRange); result != vk.Success {
+			return hal.BufferMapping{}, fmt.Errorf("vulkan: vkInvalidateMappedMemoryRanges failed: %d", result)
+		}
+	}
+
+	// Go vet flags direct uintptr->Pointer conversion as "possible misuse"
 	// because the verifier cannot prove that the address refers to Go-
 	// managed memory. In our case the address comes from vkMapMemory and
-	// therefore points at host-visible GPU memory — converting via
+	// therefore points at host-visible GPU memory -- converting via
 	// unsafe.Add from a named base pointer keeps vet happy while
 	// producing identical machine code.
 	basePtr := ptrFromUintptr(buf.memory.MappedPtr)
 	return hal.BufferMapping{
 		Ptr:        unsafe.Add(unsafe.Pointer(basePtr), offset),
-		IsCoherent: false,
+		IsCoherent: buf.memory.IsCoherent,
 	}, nil
 }
 
 // UnmapBuffer is a no-op for Vulkan because VkDeviceMemory is persistently
-// mapped at allocation time. A subsequent write-back flush, if needed,
-// would be handled via vkFlushMappedMemoryRanges by a higher layer; core
-// currently doesn't call any such hook because host-visible allocations
-// in this implementation are coherent in practice.
+// mapped at allocation time. However, for non-coherent memory we flush CPU
+// writes back to GPU visibility so that subsequent GPU reads see the data.
+// Coherent memory requires no flush. (BUG-VK-009 Fix 2/5)
 func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil || buf.memory == nil {
 		return nil
 	}
-	// Flush CPU writes back to GPU visibility for non-coherent memory.
-	memRange := vk.MappedMemoryRange{
-		SType:  vk.StructureTypeMappedMemoryRange,
-		Memory: buf.memory.Memory,
-		Offset: vk.DeviceSize(buf.memory.Offset),
-		Size:   vk.DeviceSize(vk.WholeSize),
+	// Flush CPU writes back to GPU visibility, but only for non-coherent memory.
+	// Coherent memory is automatically visible. (BUG-VK-009 Fix 5)
+	if !buf.memory.IsCoherent {
+		alignedOffset, alignedSize := d.alignedMappedRange(buf.memory.Offset, buf.memory.Size)
+		memRange := vk.MappedMemoryRange{
+			SType:  vk.StructureTypeMappedMemoryRange,
+			Memory: buf.memory.Memory,
+			Offset: alignedOffset,
+			Size:   alignedSize,
+		}
+		if result := d.cmds.FlushMappedMemoryRanges(d.handle, 1, &memRange); result != vk.Success {
+			return fmt.Errorf("vulkan: vkFlushMappedMemoryRanges failed: %d", result)
+		}
 	}
-	_ = d.cmds.FlushMappedMemoryRanges(d.handle, 1, &memRange)
 	return nil
 }
 

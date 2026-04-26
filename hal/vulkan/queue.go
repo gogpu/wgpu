@@ -476,36 +476,40 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 	// This prevents race conditions where GPU reads stale/partial data.
 	q.waitForGPU()
 
-	// Map, copy, unmap
-	if vkBuffer.memory.MappedPtr != 0 {
-		// Bounds check: verify the write fits within the mapped region (BUG-VK-001).
-		// Without this, a partial/failed vkAllocateMemory that returned a too-small
-		// mapping would cause SIGSEGV in copyToMappedMemory.
-		if vkBuffer.memory.MappedSize > 0 && offset+uint64(len(data)) > vkBuffer.memory.MappedSize {
-			return fmt.Errorf("vulkan: WriteBuffer: write of %d bytes at offset %d exceeds mapped size %d (BUG-VK-001)",
-				len(data), offset, vkBuffer.memory.MappedSize)
-		}
+	// Buffer must be mapped (host-visible) for direct CPU writes.
+	// Device-local buffers require staging at the public API level.
+	if vkBuffer.memory.MappedPtr == 0 {
+		return fmt.Errorf("vulkan: WriteBuffer: buffer is not mapped")
+	}
 
-		// Already mapped - direct copy using Vulkan mapped memory from vkMapMemory
-		// Use copyToMappedMemory to avoid go vet false positive about unsafe.Pointer
-		copyToMappedMemory(vkBuffer.memory.MappedPtr, offset, data)
+	// Bounds check: verify the write fits within the mapped region (BUG-VK-001).
+	// Without this, a partial/failed vkAllocateMemory that returned a too-small
+	// mapping would cause SIGSEGV in copyToMappedMemory.
+	if vkBuffer.memory.MappedSize > 0 && offset+uint64(len(data)) > vkBuffer.memory.MappedSize {
+		return fmt.Errorf("vulkan: WriteBuffer: write of %d bytes at offset %d exceeds mapped size %d (BUG-VK-001)",
+			len(data), offset, vkBuffer.memory.MappedSize)
+	}
 
-		// Flush mapped memory to ensure GPU sees CPU writes.
-		// Required for non-HOST_COHERENT memory; harmless on coherent memory.
+	// Direct copy using Vulkan mapped memory from vkMapMemory.
+	// Use copyToMappedMemory to avoid go vet false positive about unsafe.Pointer.
+	copyToMappedMemory(vkBuffer.memory.MappedPtr, offset, data)
+
+	// Flush mapped memory to ensure GPU sees CPU writes.
+	// Only needed for non-coherent memory. (BUG-VK-009 Fix 2/5)
+	if !vkBuffer.memory.IsCoherent {
+		alignedOffset, alignedSize := q.device.alignedMappedRange(vkBuffer.memory.Offset, vkBuffer.memory.Size)
 		memRange := vk.MappedMemoryRange{
 			SType:  vk.StructureTypeMappedMemoryRange,
 			Memory: vkBuffer.memory.Memory,
-			Offset: vk.DeviceSize(vkBuffer.memory.Offset),
-			Size:   vk.DeviceSize(vk.WholeSize),
+			Offset: alignedOffset,
+			Size:   alignedSize,
 		}
 		result := q.device.cmds.FlushMappedMemoryRanges(q.device.handle, 1, &memRange)
 		if result != vk.Success {
 			return fmt.Errorf("vulkan: WriteBuffer: FlushMappedMemoryRanges failed: %d", result)
 		}
-		return nil
 	}
-	// Note(v0.6.0): Staging buffer needed for device-local memory writes.
-	return fmt.Errorf("vulkan: WriteBuffer: buffer is not mapped")
+	return nil
 }
 
 // WriteTexture writes data to a texture immediately.

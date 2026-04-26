@@ -170,10 +170,14 @@ func TestComputeSDFIntegration(t *testing.T) {
 	binary.LittleEndian.PutUint32(uniformData[8:12], math.Float32bits(radius))
 	binary.LittleEndian.PutUint32(uniformData[12:16], gridWidth)
 
+	// MapWrite is required for HAL-level WriteBuffer (direct CPU writes).
+	// CopyDst alone no longer allocates host-visible memory (BUG-VK-009 Fix 1:
+	// CopyDst buffers stay DEVICE_LOCAL, writes go through staging belt at
+	// the public API level). At the HAL level, use MapWrite for CPU-writable.
 	uniformBuffer, err := device.CreateBuffer(&hal.BufferDescriptor{
 		Label: "sdf-params",
 		Size:  16,
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageMapWrite,
 	})
 	if err != nil {
 		t.Fatalf("CreateBuffer (uniform) failed: %v", err)
