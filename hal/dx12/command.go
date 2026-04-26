@@ -891,6 +891,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	}
 
 	e.encoder.cmdList.Dispatch(x, y, z)
+	e.insertUAVBarrier()
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -904,6 +905,14 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	// For now, this is a stub
 	_ = buf
 	_ = offset
+}
+
+// insertUAVBarrier inserts a global UAV barrier after a dispatch.
+// VAL-008: ensures UAV writes from one dispatch are visible to subsequent
+// dispatches. NULL resource = global barrier across all UAV resources.
+func (e *ComputePassEncoder) insertUAVBarrier() {
+	barrier := d3d12.NewUAVBarrier(nil)
+	e.encoder.cmdList.ResourceBarrier(1, &barrier)
 }
 
 // --- Helper functions ---

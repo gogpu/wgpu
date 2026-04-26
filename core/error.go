@@ -605,6 +605,12 @@ const (
 	CreateComputePipelineErrorMissingEntryPoint
 	// CreateComputePipelineErrorHAL indicates the HAL backend failed to create the pipeline.
 	CreateComputePipelineErrorHAL
+	// CreateComputePipelineErrorWorkgroupSizeExceeded indicates a workgroup dimension exceeds device limits.
+	CreateComputePipelineErrorWorkgroupSizeExceeded
+	// CreateComputePipelineErrorWorkgroupSizeZero indicates a workgroup dimension is zero.
+	CreateComputePipelineErrorWorkgroupSizeZero
+	// CreateComputePipelineErrorTooManyInvocations indicates total invocations exceed device limit.
+	CreateComputePipelineErrorTooManyInvocations
 )
 
 // CreateComputePipelineError represents an error during compute pipeline creation.
@@ -612,6 +618,14 @@ type CreateComputePipelineError struct {
 	Kind     CreateComputePipelineErrorKind
 	Label    string
 	HALError error
+	// Dimension is the axis name ("X", "Y", "Z") for workgroup size errors.
+	Dimension string
+	// Size is the workgroup size value that caused the error.
+	Size uint32
+	// Limit is the device limit that was exceeded.
+	Limit uint32
+	// TotalInvocations is the product x*y*z for TooManyInvocations errors.
+	TotalInvocations uint64
 }
 
 // Error implements the error interface.
@@ -628,6 +642,14 @@ func (e *CreateComputePipelineError) Error() string {
 		return fmt.Sprintf("compute pipeline %q: compute entry point must not be empty", label)
 	case CreateComputePipelineErrorHAL:
 		return fmt.Sprintf("compute pipeline %q: HAL error: %v", label, e.HALError)
+	case CreateComputePipelineErrorWorkgroupSizeExceeded:
+		return fmt.Sprintf("compute pipeline %q: workgroup_size %s = %d exceeds device limit %d",
+			label, e.Dimension, e.Size, e.Limit)
+	case CreateComputePipelineErrorWorkgroupSizeZero:
+		return fmt.Sprintf("compute pipeline %q: workgroup_size %s must not be zero", label, e.Dimension)
+	case CreateComputePipelineErrorTooManyInvocations:
+		return fmt.Sprintf("compute pipeline %q: total workgroup invocations %d exceeds device limit %d",
+			label, e.TotalInvocations, e.Limit)
 	default:
 		return fmt.Sprintf("compute pipeline %q: unknown error", label)
 	}

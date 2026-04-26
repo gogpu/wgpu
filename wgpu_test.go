@@ -2171,3 +2171,160 @@ func TestRenderPassDrawIndexedWithIndexBuffer(t *testing.T) {
 	// May fail for other HAL reasons, but index buffer check should pass.
 	_, _ = encoder.Finish()
 }
+
+// =============================================================================
+// VAL-009: Dispatch workgroup count validation
+// =============================================================================
+
+func TestComputePassDispatchWorkgroupCountExceedsLimit(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "val009-shader",
+		WGSL:  "@compute @workgroup_size(1) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "val009-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err != nil {
+		t.Skipf("CreateComputePipeline not supported: %v", err)
+	}
+	defer pipeline.Release()
+
+	pass.SetPipeline(pipeline)
+
+	// Default limit is 65535. Dispatch with a value exceeding it.
+	pass.Dispatch(100000, 1, 1)
+	_ = pass.End()
+
+	_, err = encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when dispatch workgroup count exceeds limit")
+	}
+}
+
+func TestComputePassDispatchZeroWorkgroupsAllowed(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "val009-zero-shader",
+		WGSL:  "@compute @workgroup_size(1) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "val009-zero-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err != nil {
+		t.Skipf("CreateComputePipeline not supported: %v", err)
+	}
+	defer pipeline.Release()
+
+	pass.SetPipeline(pipeline)
+
+	// (0, 0, 0) is valid per spec — it is a no-op.
+	pass.Dispatch(0, 0, 0)
+	_ = pass.End()
+
+	_, err = encoder.Finish()
+	if err != nil {
+		t.Fatalf("Finish() should succeed for zero dispatch: %v", err)
+	}
+}
+
+// =============================================================================
+// VAL-010: CreateComputePipeline workgroup_size validation
+// =============================================================================
+
+func TestCreateComputePipelineWorkgroupSizeTooLarge(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	// Default MaxComputeWorkgroupSizeX is 256.
+	// This shader uses @workgroup_size(512) which exceeds it.
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "val010-too-large",
+		WGSL:  "@compute @workgroup_size(512) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	_, err = device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "val010-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err == nil {
+		t.Fatal("CreateComputePipeline should reject workgroup_size(512) when limit is 256")
+	}
+}
+
+func TestCreateComputePipelineTotalInvocationsExceeded(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	// Default MaxComputeInvocationsPerWorkgroup is 256.
+	// @workgroup_size(32, 32, 1) = 1024 invocations, exceeds 256.
+	// But each dimension (32) is within per-dimension limits (256).
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "val010-total",
+		WGSL:  "@compute @workgroup_size(32, 32, 1) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	_, err = device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "val010-total-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err == nil {
+		t.Fatal("CreateComputePipeline should reject when total invocations exceed limit")
+	}
+}
+
+func TestCreateComputePipelineWorkgroupSizeValid(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	// @workgroup_size(16, 16, 1) = 256 invocations, exactly at default limit.
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "val010-valid",
+		WGSL:  "@compute @workgroup_size(16, 16, 1) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "val010-valid-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err != nil {
+		t.Skipf("CreateComputePipeline not supported: %v", err)
+	}
+	pipeline.Release()
+}

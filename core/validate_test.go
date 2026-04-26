@@ -1113,6 +1113,30 @@ func TestCreateComputePipelineError_Error(t *testing.T) {
 			err:      &CreateComputePipelineError{Kind: CreateComputePipelineErrorMissingEntryPoint, Label: "test"},
 			contains: "entry point",
 		},
+		{
+			name: "workgroup size exceeded",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorWorkgroupSizeExceeded, Label: "test",
+				Dimension: "X", Size: 512, Limit: 256,
+			},
+			contains: "workgroup_size X = 512 exceeds device limit 256",
+		},
+		{
+			name: "workgroup size zero",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorWorkgroupSizeZero, Label: "test",
+				Dimension: "Y",
+			},
+			contains: "workgroup_size Y must not be zero",
+		},
+		{
+			name: "too many invocations",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorTooManyInvocations, Label: "test",
+				TotalInvocations: 2048, Limit: 256,
+			},
+			contains: "total workgroup invocations 2048 exceeds device limit 256",
+		},
 	}
 
 	for _, tt := range tests {

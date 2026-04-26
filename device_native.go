@@ -539,6 +539,14 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, err
 	}
 
+	// VAL-010: Validate workgroup_size against device limits.
+	// Matches Rust wgpu-core validation.rs:1243-1264.
+	if desc.Module != nil && desc.Module.irModule != nil {
+		if err := d.validateComputeWorkgroupSize(desc.Label, desc.EntryPoint, desc.Module); err != nil {
+			return nil, err
+		}
+	}
+
 	halPipeline, err := halDevice.CreateComputePipeline(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
@@ -567,6 +575,71 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		lateSizedBufferGroups: lateGroups,
 		ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, nil),
 	}, nil
+}
+
+// validateComputeWorkgroupSize checks shader workgroup_size against device limits.
+// VAL-010: Matches Rust wgpu-core validation.rs:1243-1264.
+func (d *Device) validateComputeWorkgroupSize(label, entryPoint string, module *ShaderModule) error {
+	irMod := module.irModule
+	if irMod == nil {
+		return nil
+	}
+
+	// Find the entry point matching the requested name.
+	for i := range irMod.EntryPoints {
+		ep := &irMod.EntryPoints[i]
+		if ep.Name != entryPoint || ep.Stage != ir.StageCompute {
+			continue
+		}
+
+		wg := ep.Workgroup
+		limits := d.core.Limits
+
+		// Check each dimension for zero.
+		dimNames := [3]string{"X", "Y", "Z"}
+		for dim := 0; dim < 3; dim++ {
+			if wg[dim] == 0 {
+				return &core.CreateComputePipelineError{
+					Kind:      core.CreateComputePipelineErrorWorkgroupSizeZero,
+					Label:     label,
+					Dimension: dimNames[dim],
+				}
+			}
+		}
+
+		// Check each dimension against device limits.
+		dimLimits := [3]uint32{
+			limits.MaxComputeWorkgroupSizeX,
+			limits.MaxComputeWorkgroupSizeY,
+			limits.MaxComputeWorkgroupSizeZ,
+		}
+		for dim := 0; dim < 3; dim++ {
+			if wg[dim] > dimLimits[dim] {
+				return &core.CreateComputePipelineError{
+					Kind:      core.CreateComputePipelineErrorWorkgroupSizeExceeded,
+					Label:     label,
+					Dimension: dimNames[dim],
+					Size:      wg[dim],
+					Limit:     dimLimits[dim],
+				}
+			}
+		}
+
+		// Check total invocations (x*y*z) against MaxComputeInvocationsPerWorkgroup.
+		total := uint64(wg[0]) * uint64(wg[1]) * uint64(wg[2])
+		if total > uint64(limits.MaxComputeInvocationsPerWorkgroup) {
+			return &core.CreateComputePipelineError{
+				Kind:             core.CreateComputePipelineErrorTooManyInvocations,
+				Label:            label,
+				TotalInvocations: total,
+				Limit:            limits.MaxComputeInvocationsPerWorkgroup,
+			}
+		}
+
+		break
+	}
+
+	return nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.

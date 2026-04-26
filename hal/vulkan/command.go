@@ -1188,6 +1188,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	}
 
 	vkCmdDispatch(e.encoder.device.cmds, e.encoder.active, x, y, z)
+	e.insertComputeBarrier()
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -1198,6 +1199,29 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	}
 
 	vkCmdDispatchIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset))
+	e.insertComputeBarrier()
+}
+
+// insertComputeBarrier inserts a compute→compute memory barrier after a dispatch.
+// VAL-008: ensures storage buffer writes from one dispatch are visible to subsequent
+// dispatches. This is the "global barrier" approach (Option B) — always correct,
+// slightly over-synchronizes but avoids the complexity of per-resource usage tracking.
+func (e *ComputePassEncoder) insertComputeBarrier() {
+	memBarrier := vk.MemoryBarrier{
+		SType:         vk.StructureTypeMemoryBarrier,
+		SrcAccessMask: vk.AccessFlags(vk.AccessShaderWriteBit),
+		DstAccessMask: vk.AccessFlags(vk.AccessShaderReadBit | vk.AccessShaderWriteBit),
+	}
+	vkCmdPipelineBarrier(
+		e.encoder.device.cmds,
+		e.encoder.active,
+		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit),
+		vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit),
+		0,
+		1, &memBarrier,
+		0, nil,
+		0, nil,
+	)
 }
 
 // --- Helper functions ---

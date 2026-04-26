@@ -288,6 +288,14 @@ const (
 	MTLIndexTypeUInt32 MTLIndexType = 1
 )
 
+// MTLBarrierScope represents the set of resources affected by a memory barrier.
+type MTLBarrierScope NSUInteger
+
+const (
+	MTLBarrierScopeBuffers  MTLBarrierScope = 1 << 0
+	MTLBarrierScopeTextures MTLBarrierScope = 1 << 1
+)
+
 // MTLCullMode represents face culling modes.
 type MTLCullMode NSUInteger
 
