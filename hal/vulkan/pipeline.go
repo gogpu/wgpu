@@ -362,6 +362,18 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 }
 
 // CreateComputePipeline creates a compute pipeline.
+//
+// TODO(compute-constants): Apply desc.Compute.Constants via naga's
+// pipeline_constants::process_overrides before SPIR-V emission, or map to
+// VkSpecializationInfo on the pipeline stage. Rust wgpu-hal calls
+// naga::back::pipeline_constants::process_overrides() in fill_stage_info
+// (vulkan/device.rs:783) and then writes the processed module to SPIR-V.
+//
+// TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
+// to naga SPIR-V options. When the VK_KHR_zero_initialize_workgroup_memory
+// device feature is available (Vulkan 1.3), use Native mode; otherwise naga
+// inserts explicit zero-stores. Rust wgpu-hal checks private_caps and sets
+// spv::ZeroInitializeWorkgroupMemoryMode accordingly (vulkan/device.rs:773).
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in Vulkan.CreateComputePipeline — core validation gap")

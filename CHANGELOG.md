@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.7] - 2026-04-26
+
+### Added
+
+- **DX12: buffer state tracking** (BUG-DX12-012) — per-buffer `D3D12_RESOURCE_STATES`
+  tracking with automatic transition barriers before copy commands. Storage buffers
+  marked `UNORDERED_ACCESS` after compute dispatch. Implements DX12 implicit promotion
+  rules. Follows Rust wgpu-core `BufferTracker` pattern. 11 tests, 27+ test cases.
+- **Pipeline overridable constants passthrough** (FEAT-COMPUTE-001) — `Constants
+  map[string]float64` now flows from public API through HAL to all backends.
+  Backend-specific implementation (VkSpecializationInfo, MTLFunctionConstantValues)
+  tracked as TODOs.
+- **Zero-initialize workgroup memory** (FEAT-COMPUTE-002) — `ZeroInitializeWorkgroupMemory`
+  field added to compute pipeline descriptor. Defaults to `true` per WebGPU spec.
+  `*bool` in public API (nil = true), plain `bool` at HAL boundary.
+
 ## [0.26.5] - 2026-04-26
 
 ### Added

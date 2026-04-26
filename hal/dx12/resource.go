@@ -28,6 +28,22 @@ type Buffer struct {
 	gpuVA           uint64                        // GPU virtual address for binding
 	device          *Device
 	mappedPointer   unsafe.Pointer // Non-nil if buffer is currently mapped
+
+	// currentState tracks the D3D12 resource state for barrier correctness.
+	// DX12 requires explicit D3D12_RESOURCE_BARRIER transitions between states
+	// (e.g., UNORDERED_ACCESS -> COPY_SOURCE). Without tracking, missing barriers
+	// cause DEVICE_REMOVED on compute -> copy sequences (BUG-DX12-012).
+	//
+	// Set to the initial state in CreateBuffer, updated by:
+	//   - ComputePassEncoder.Dispatch() -> UNORDERED_ACCESS for bound storage buffers
+	//   - CopyBufferToBuffer -> COPY_SOURCE/COPY_DEST for src/dst
+	//   - CopyBufferToTexture -> COPY_SOURCE for src
+	//   - CopyTextureToBuffer -> COPY_DEST for dst
+	//
+	// Thread safety: buffers are used single-threaded within a command encoder
+	// recording scope, matching the WebGPU spec (command encoders are not
+	// thread-safe). No atomic needed.
+	currentState d3d12.D3D12_RESOURCE_STATES
 }
 
 // isMappable returns true if the buffer can be mapped for CPU access.

@@ -361,6 +361,24 @@ type ComputePipelineDescriptor struct {
 	Layout     *PipelineLayout
 	Module     *ShaderModule
 	EntryPoint string
+
+	// Constants are pipeline-overridable constants (WebGPU spec).
+	// Keys are constant identifiers defined in the shader, values are float64 overrides.
+	// Nil or empty means no overrides are applied.
+	//
+	// Matches Rust wgpu PipelineConstants (wgpu-types). Each backend applies these
+	// during shader compilation via naga's override processing.
+	Constants map[string]float64
+
+	// ZeroInitializeWorkgroupMemory controls whether workgroup-scoped shared memory
+	// is zero-initialized before compute shader execution (WebGPU spec default: true).
+	//
+	// When nil (zero value for *bool), defaults to true per WebGPU spec.
+	// Set to false only for cross-platform applications that do not rely on
+	// zero-initialized workgroup memory and want to avoid the overhead.
+	//
+	// Matches Rust wgpu ProgrammableStage.zero_initialize_workgroup_memory.
+	ZeroInitializeWorkgroupMemory *bool
 }
 
 // toHAL converts a ComputePipelineDescriptor to a hal.ComputePipelineDescriptor.
@@ -373,10 +391,19 @@ func (d *ComputePipelineDescriptor) toHAL() *hal.ComputePipelineDescriptor {
 		halDesc.Layout = d.Layout.hal
 	}
 
+	// WebGPU spec: zero_initialize_workgroup_memory defaults to true.
+	// When the caller does not set the field (nil), we default to true.
+	zeroInit := true
+	if d.ZeroInitializeWorkgroupMemory != nil {
+		zeroInit = *d.ZeroInitializeWorkgroupMemory
+	}
+
 	if d.Module != nil {
 		halDesc.Compute = hal.ComputeState{
-			Module:     d.Module.hal,
-			EntryPoint: d.EntryPoint,
+			Module:                        d.Module.hal,
+			EntryPoint:                    d.EntryPoint,
+			Constants:                     d.Constants,
+			ZeroInitializeWorkgroupMemory: zeroInit,
 		}
 	}
 

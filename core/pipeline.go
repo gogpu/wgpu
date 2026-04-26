@@ -31,6 +31,11 @@ type ProgrammableStage struct {
 	// Constants are pipeline-overridable constants.
 	// The keys are the constant names and values are their overridden values.
 	Constants map[string]float64
+
+	// ZeroInitializeWorkgroupMemory controls whether workgroup-scoped shared
+	// memory is zero-initialized before compute shader execution.
+	// WebGPU spec default is true. Matches hal.ComputeState.ZeroInitializeWorkgroupMemory.
+	ZeroInitializeWorkgroupMemory bool
 }
 
 // DeviceCreateComputePipeline creates a compute pipeline on this device.

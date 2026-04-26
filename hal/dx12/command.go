@@ -244,6 +244,10 @@ func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 }
 
 // CopyBufferToBuffer copies data between buffers.
+// Inserts D3D12_RESOURCE_BARRIER transitions when buffers are not already in
+// the required state (COPY_SOURCE for src, COPY_DEST for dst). This is the
+// DX12-specific fix for BUG-DX12-012: missing UNORDERED_ACCESS -> COPY_SOURCE
+// barrier after compute dispatch causes DEVICE_REMOVED.
 func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
 	if !e.isRecording {
 		return
@@ -255,6 +259,13 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 		return
 	}
 
+	// Insert transition barriers for buffers not in the required copy state.
+	// COMMON state allows implicit promotion to COPY_DEST (D3D12 spec) but NOT
+	// to COPY_SOURCE — an explicit barrier is required for COPY_SOURCE.
+	// Batch multiple barriers into a single ResourceBarrier call (Rust pattern).
+	e.transitionBuffersForCopy(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE,
+		dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
+
 	for _, r := range regions {
 		hal.Logger().Debug("dx12: copy buffer region", "label", e.label, "offset", r.DstOffset, "size", r.Size)
 		e.cmdList.CopyBufferRegion(dstBuf.raw, r.DstOffset, srcBuf.raw, r.SrcOffset, r.Size)
@@ -262,6 +273,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 }
 
 // CopyBufferToTexture copies data from a buffer to a texture.
+// Inserts a transition barrier if the source buffer is not in COPY_SOURCE state.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
 	if !e.isRecording {
 		return
@@ -272,6 +284,9 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if !srcOk || !dstOk {
 		return
 	}
+
+	// Transition source buffer to COPY_SOURCE if needed.
+	e.transitionBufferIfNeeded(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
 
 	for _, r := range regions {
 		// Source location (buffer)
@@ -309,6 +324,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
+// Inserts a transition barrier if the destination buffer is not in COPY_DEST state.
 func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
 	if !e.isRecording {
 		return
@@ -319,6 +335,9 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !srcOk || !dstOk {
 		return
 	}
+
+	// Transition destination buffer to COPY_DEST if needed.
+	e.transitionBufferIfNeeded(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
 
 	for _, r := range regions {
 		// Source location (texture)
@@ -826,6 +845,17 @@ type ComputePassEncoder struct {
 	encoder            *CommandEncoder
 	pipeline           *ComputePipeline
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
+
+	// boundStorageBuffers tracks storage buffers from SetBindGroup calls.
+	// After Dispatch(), these buffers' currentState is updated to UNORDERED_ACCESS
+	// so that subsequent CopyBufferToBuffer can insert the correct transition
+	// barrier (UNORDERED_ACCESS -> COPY_SOURCE). Without this tracking, the
+	// copy command would not know the buffer was used as UAV (BUG-DX12-012).
+	//
+	// Matches Rust wgpu-core pattern: compute pass tracks buffer usage per
+	// dispatch via BufferUsageScope, then drains barriers on state transitions
+	// (wgpu-core/src/command/compute.rs:326-377).
+	boundStorageBuffers []*Buffer
 }
 
 // End finishes the compute pass.
@@ -881,6 +911,14 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 	// Bind the group using compute root descriptor tables.
 	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
+
+	// Track storage buffers from this bind group for state tracking.
+	// After Dispatch(), these buffers will be marked as UNORDERED_ACCESS
+	// so that subsequent copy commands can insert correct transition barriers.
+	// storageBuffers is populated at CreateBindGroup time by matching layout
+	// entry types (BindingTypeStorageBuffer) with buffer binding handles.
+	e.boundStorageBuffers = append(e.boundStorageBuffers, bg.storageBuffers...)
+
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -892,6 +930,18 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 	e.encoder.cmdList.Dispatch(x, y, z)
 	e.insertUAVBarrier()
+
+	// Mark all bound storage buffers as UNORDERED_ACCESS. After a compute
+	// dispatch, storage buffers are left in UAV state. This enables correct
+	// transition barriers when subsequent commands (e.g., CopyBufferToBuffer)
+	// need these buffers in a different state (e.g., COPY_SOURCE).
+	// Matches Rust wgpu-core pattern: flush_bindings sets BufferUses::STORAGE_READ_WRITE
+	// on bound storage buffers, then drain_barriers emits transitions.
+	for _, buf := range e.boundStorageBuffers {
+		buf.currentState = d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+	}
+	// Clear for next dispatch (same pattern as Rust per-dispatch usage scope).
+	e.boundStorageBuffers = e.boundStorageBuffers[:0]
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -913,6 +963,102 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 func (e *ComputePassEncoder) insertUAVBarrier() {
 	barrier := d3d12.NewUAVBarrier(nil)
 	e.encoder.cmdList.ResourceBarrier(1, &barrier)
+}
+
+// --- Buffer state transition helpers ---
+
+// needsExplicitBarrier returns true if transitioning from the given current state
+// to the target state requires an explicit D3D12_RESOURCE_BARRIER.
+//
+// DX12 implicit promotion rules (D3D12 spec, "Using Resource Barriers"):
+//   - COMMON state allows implicit promotion to: COPY_DEST, VERTEX_AND_CONSTANT_BUFFER,
+//     INDEX_BUFFER, NON_PIXEL_SHADER_RESOURCE, PIXEL_SHADER_RESOURCE, INDIRECT_ARGUMENT.
+//   - COMMON does NOT allow implicit promotion to: COPY_SOURCE, UNORDERED_ACCESS.
+//   - Same state -> same state: no barrier needed.
+func needsExplicitBarrier(current, target d3d12.D3D12_RESOURCE_STATES) bool {
+	if current == target {
+		return false
+	}
+	// COMMON state allows implicit promotion to several read states and COPY_DEST,
+	// but NOT to COPY_SOURCE or UNORDERED_ACCESS.
+	if current == d3d12.D3D12_RESOURCE_STATE_COMMON {
+		switch target {
+		case d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
+			d3d12.D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+			d3d12.D3D12_RESOURCE_STATE_INDEX_BUFFER,
+			d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+			d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+			d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT:
+			return false // Implicit promotion allowed
+		}
+	}
+	return true
+}
+
+// transitionBufferIfNeeded inserts a transition barrier for a single buffer if
+// its current state requires an explicit barrier to reach the target state.
+// Updates the buffer's currentState to the target state after the barrier.
+func (e *CommandEncoder) transitionBufferIfNeeded(buf *Buffer, targetState d3d12.D3D12_RESOURCE_STATES) {
+	if !needsExplicitBarrier(buf.currentState, targetState) {
+		// Even with implicit promotion, update the tracked state.
+		if buf.currentState != targetState {
+			buf.currentState = targetState
+		}
+		return
+	}
+
+	barrier := d3d12.NewTransitionBarrier(buf.raw, buf.currentState, targetState,
+		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
+	e.cmdList.ResourceBarrier(1, &barrier)
+	hal.Logger().Debug("dx12: buffer state transition",
+		"label", e.label,
+		"from", buf.currentState,
+		"to", targetState)
+	buf.currentState = targetState
+}
+
+// transitionBuffersForCopy inserts batched transition barriers for a source and
+// destination buffer pair used in a copy command. Barriers are batched into a
+// single ResourceBarrier call when both buffers need transitions (Rust pattern:
+// drain_barriers emits all pending transitions at once).
+func (e *CommandEncoder) transitionBuffersForCopy(
+	srcBuf *Buffer, srcTarget d3d12.D3D12_RESOURCE_STATES,
+	dstBuf *Buffer, dstTarget d3d12.D3D12_RESOURCE_STATES,
+) {
+	var barriers [2]d3d12.D3D12_RESOURCE_BARRIER
+	count := 0
+
+	srcNeedsBarrier := needsExplicitBarrier(srcBuf.currentState, srcTarget)
+	dstNeedsBarrier := needsExplicitBarrier(dstBuf.currentState, dstTarget)
+
+	if srcNeedsBarrier {
+		barriers[count] = d3d12.NewTransitionBarrier(srcBuf.raw, srcBuf.currentState, srcTarget,
+			d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
+		count++
+		hal.Logger().Debug("dx12: buffer state transition (copy src)",
+			"label", e.label,
+			"from", srcBuf.currentState,
+			"to", srcTarget)
+	}
+
+	if dstNeedsBarrier {
+		barriers[count] = d3d12.NewTransitionBarrier(dstBuf.raw, dstBuf.currentState, dstTarget,
+			d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
+		count++
+		hal.Logger().Debug("dx12: buffer state transition (copy dst)",
+			"label", e.label,
+			"from", dstBuf.currentState,
+			"to", dstTarget)
+	}
+
+	if count > 0 {
+		e.cmdList.ResourceBarrier(uint32(count), &barriers[0])
+	}
+
+	// Update tracked state. Do this even for implicit promotions so the
+	// tracker stays consistent with actual GPU state.
+	srcBuf.currentState = srcTarget
+	dstBuf.currentState = dstTarget
 }
 
 // --- Helper functions ---
