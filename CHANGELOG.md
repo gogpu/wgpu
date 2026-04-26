@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.8] - 2026-04-26
+
+### Fixed
+
+- **Vulkan: buffer mapping spec compliance** (BUG-VK-009) — 6 fixes from Rust wgpu-hal audit:
+  1. **CopyDst buffers no longer force host-visible memory** — only MapRead/MapWrite/MappedAtCreation
+     get HOST_ACCESS. CopyDst stays DEVICE_LOCAL (Rust parity). Fixes wrong memory type selection.
+  2. **nonCoherentAtomSize alignment** for InvalidateMappedMemoryRanges/FlushMappedMemoryRanges.
+     Offset aligned down, size aligned up. Fixes Vulkan spec violation on non-Intel GPUs.
+  3. **InvalidateMappedMemoryRanges return value checked** — was silently ignored (`_ =`).
+  4. **mappedMemory cache invalidated on vkFreeMemory** — prevents use-after-free via
+     VkDeviceMemory handle recycling. Allocator notifies Device via onFreeCallback.
+  5. **Conditional invalidation** — skip for HOST_COHERENT memory (Intel, most desktop GPUs).
+     `BufferMapping.IsCoherent` now reports actual coherency from memory type properties.
+  6. **Diagnostic logging** in MapBuffer — slog.Debug with pointer chain for debugging.
+
 ## [0.26.7] - 2026-04-26
 
 ### Added

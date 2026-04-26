@@ -79,6 +79,12 @@ type MemoryBlock struct {
 	// through MappedPtr. Used for bounds checking before copyToMappedMemory
 	// to prevent SIGSEGV on partial/failed allocations (BUG-VK-001).
 	MappedSize uint64
+
+	// IsCoherent is true when the memory type has VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.
+	// When true, Invalidate/Flush are no-ops and can be skipped. Matches Rust wgpu-hal
+	// which checks block.props().contains(HOST_COHERENT) in map_buffer and only calls
+	// invalidate_mapped_ranges for non-coherent memory. (BUG-VK-009 Fix 5)
+	IsCoherent bool
 }
 
 // IsDedicated returns true if this is a dedicated allocation.

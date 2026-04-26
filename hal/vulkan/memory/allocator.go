@@ -95,6 +95,12 @@ type GpuAllocator struct {
 
 	// stats tracks global statistics.
 	stats AllocatorStats
+
+	// onFreeCallback is invoked with the VkDeviceMemory handle just before
+	// vkFreeMemory. This allows the Device to remove stale entries from its
+	// mappedMemory cache, preventing use-after-free when a VkDeviceMemory
+	// handle is recycled by the driver. (BUG-VK-009 Fix 4)
+	onFreeCallback func(vk.DeviceMemory)
 }
 
 // AllocatorStats contains allocator-wide statistics.
@@ -216,12 +222,20 @@ func (a *GpuAllocator) allocDedicated(size uint64, memTypeIndex uint32) (*Memory
 		return nil, err
 	}
 
+	// Check if this memory type has HOST_COHERENT property (BUG-VK-009 Fix 5).
+	isCoherent := false
+	if int(memTypeIndex) < len(a.selector.properties.MemoryTypes) {
+		flags := a.selector.properties.MemoryTypes[memTypeIndex].PropertyFlags
+		isCoherent = flags&vk.MemoryPropertyFlags(vk.MemoryPropertyHostCoherentBit) != 0
+	}
+
 	block := &MemoryBlock{
 		Memory:          memory,
 		Offset:          0,
 		Size:            size,
 		memoryTypeIndex: memTypeIndex,
 		dedicated:       true,
+		IsCoherent:      isCoherent,
 	}
 
 	a.dedicated[memory] = block
@@ -237,6 +251,13 @@ func (a *GpuAllocator) allocDedicated(size uint64, memTypeIndex uint32) (*Memory
 func (a *GpuAllocator) allocPooled(size uint64, memTypeIndex uint32) (*MemoryBlock, error) {
 	pool := a.pools[memTypeIndex]
 
+	// Check if this memory type has HOST_COHERENT property (BUG-VK-009 Fix 5).
+	isCoherent := false
+	if int(memTypeIndex) < len(a.selector.properties.MemoryTypes) {
+		flags := a.selector.properties.MemoryTypes[memTypeIndex].PropertyFlags
+		isCoherent = flags&vk.MemoryPropertyFlags(vk.MemoryPropertyHostCoherentBit) != 0
+	}
+
 	// Try to allocate from existing blocks
 	for _, block := range pool.blocks {
 		buddyBlock, err := block.buddy.Alloc(size)
@@ -248,6 +269,7 @@ func (a *GpuAllocator) allocPooled(size uint64, memTypeIndex uint32) (*MemoryBlo
 				memoryTypeIndex: memTypeIndex,
 				dedicated:       false,
 				buddyBlock:      buddyBlock,
+				IsCoherent:      isCoherent,
 			}
 
 			pool.stats.UsedSize += buddyBlock.Size
@@ -302,6 +324,7 @@ func (a *GpuAllocator) allocPooled(size uint64, memTypeIndex uint32) (*MemoryBlo
 		memoryTypeIndex: memTypeIndex,
 		dedicated:       false,
 		buddyBlock:      buddyBlock,
+		IsCoherent:      isCoherent,
 	}
 
 	pool.stats.UsedSize += buddyBlock.Size
@@ -445,9 +468,20 @@ func (a *GpuAllocator) MaxAllocationSize() uint64 {
 	return a.maxAllocationSize
 }
 
-// vulkanFree wraps vkFreeMemory.
+// vulkanFree wraps vkFreeMemory. Invokes onFreeCallback first so the Device
+// can remove stale entries from its mappedMemory cache. (BUG-VK-009 Fix 4)
 func (a *GpuAllocator) vulkanFree(memory vk.DeviceMemory) {
+	if a.onFreeCallback != nil {
+		a.onFreeCallback(memory)
+	}
 	a.cmds.FreeMemory(a.device, memory, nil)
+}
+
+// SetOnFreeCallback registers a callback invoked with the VkDeviceMemory handle
+// just before vkFreeMemory. Used by Device to clear stale entries from its
+// mappedMemory cache. (BUG-VK-009 Fix 4)
+func (a *GpuAllocator) SetOnFreeCallback(cb func(vk.DeviceMemory)) {
+	a.onFreeCallback = cb
 }
 
 // Selector returns the memory type selector.
