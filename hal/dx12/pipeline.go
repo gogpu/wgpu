@@ -151,6 +151,13 @@ type BindGroup struct {
 	// Sampler index buffer (StructuredBuffer<uint> containing sampler pool indices).
 	// This GPU buffer is allocated per bind group if the group has any samplers.
 	samplerIndexBuffer *d3d12.ID3D12Resource
+
+	// storageBuffers holds references to storage buffers bound in this group.
+	// Populated at CreateBindGroup time by matching layout entries with type
+	// BindingTypeStorageBuffer against the corresponding buffer bindings.
+	// Used by ComputePassEncoder to track which buffers transition to
+	// UNORDERED_ACCESS after Dispatch() (BUG-DX12-012 fix).
+	storageBuffers []*Buffer
 }
 
 // Destroy releases the bind group resources and recycles descriptor heap slots.

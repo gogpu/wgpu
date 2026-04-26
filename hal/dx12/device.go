@@ -1019,6 +1019,7 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		cpuPageProperty: cpuPageProperty,
 		gpuVA:           resource.GetGPUVirtualAddress(),
 		device:          d,
+		currentState:    initialState,
 	}
 
 	// Map at creation if requested
@@ -1654,6 +1655,28 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			samplerPoolIndices = append(samplerPoolIndices, sampler.samplerPoolSlot)
 		default: // BufferBinding, TextureViewBinding
 			viewEntries = append(viewEntries, entry)
+		}
+	}
+
+	// Collect storage buffer references for DX12 resource state tracking.
+	// Match layout entries (which know the binding type) with bind group entries
+	// (which carry the buffer handle) to identify storage buffers.
+	// These references are used by ComputePassEncoder to mark buffers as
+	// UNORDERED_ACCESS after Dispatch(), enabling correct transition barriers
+	// before subsequent copy commands (BUG-DX12-012).
+	for _, layoutEntry := range layout.entries {
+		if layoutEntry.Type != BindingTypeStorageBuffer {
+			continue
+		}
+		for _, bgEntry := range desc.Entries {
+			if bgEntry.Binding != layoutEntry.Binding {
+				continue
+			}
+			if bufBinding, ok := bgEntry.Resource.(gputypes.BufferBinding); ok && bufBinding.Buffer != 0 {
+				buf := (*Buffer)(unsafe.Pointer(bufBinding.Buffer)) //nolint:govet // intentional: HAL handle -> concrete type
+				bg.storageBuffers = append(bg.storageBuffers, buf)
+			}
+			break
 		}
 	}
 
