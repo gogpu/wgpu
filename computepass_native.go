@@ -103,6 +103,18 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	if !p.validateDispatchState("Dispatch") {
 		return
 	}
+
+	// VAL-009: Validate workgroup counts against device limits.
+	// Matches Rust wgpu-core compute.rs:853-870.
+	// (0, 0, 0) is allowed as a no-op per spec.
+	limit := p.encoder.device.core.Limits.MaxComputeWorkgroupsPerDimension
+	if x > limit || y > limit || z > limit {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: ComputePass.Dispatch: workgroup count (%d, %d, %d) exceeds device limit %d",
+			x, y, z, limit))
+		return
+	}
+
 	p.core.Dispatch(x, y, z)
 }
 

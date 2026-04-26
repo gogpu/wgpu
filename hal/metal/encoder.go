@@ -704,6 +704,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		argStruct(threadgroupsPerGrid, mtlSizeType),
 		argStruct(threadsPerThreadgroup, mtlSizeType),
 	)
+	e.insertComputeBarrier()
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -722,6 +723,18 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 		argUint64(offset),
 		argStruct(threadsPerThreadgroup, mtlSizeType),
 	)
+	e.insertComputeBarrier()
+}
+
+// insertComputeBarrier inserts a buffer+texture memory barrier after a dispatch.
+// VAL-008: ensures storage buffer/texture writes from one dispatch are visible
+// to subsequent dispatches. Uses memoryBarrierWithScope: on the compute encoder.
+func (e *ComputePassEncoder) insertComputeBarrier() {
+	if e.raw == 0 {
+		return
+	}
+	scope := MTLBarrierScopeBuffers | MTLBarrierScopeTextures
+	_ = MsgSend(e.raw, Sel("memoryBarrierWithScope:"), uintptr(scope))
 }
 
 // msgSendClearColor sends an Objective-C message with an MTLClearColor argument.

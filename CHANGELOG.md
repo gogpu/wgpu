@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Implemented in all 6 HAL backends, now exposed on public API.
 - `TextureCopy` descriptor type for texture-to-texture copy regions.
 
+## [0.26.6] - 2026-04-26
+
+### Added
+
+- **Compute dispatch memory barriers** (VAL-008) — automatic compute→compute memory barrier
+  after every `Dispatch` and `DispatchIndirect` across all GPU backends. Prevents silent
+  data corruption when consecutive dispatches share storage buffers. Vulkan:
+  `vkCmdPipelineBarrier`, DX12: global UAV barrier, Metal: `memoryBarrierWithScope:`, GLES:
+  already had per-dispatch barriers. Matches Rust wgpu-core `flush_bindings` pattern.
+- **Dispatch workgroup count validation** (VAL-009) — `Dispatch(x, y, z)` checks each
+  dimension against `MaxComputeWorkgroupsPerDimension`. Returns clean error instead of
+  driver crash. `(0, 0, 0)` allowed as no-op per WebGPU spec.
+- **CreateComputePipeline workgroup_size validation** (VAL-010) — validates each dimension
+  against `MaxComputeWorkgroupSizeX/Y/Z` and total invocations against
+  `MaxComputeInvocationsPerWorkgroup`. Rejects workgroup_size containing 0.
+
 ## [0.26.4] - 2026-04-25
 
 ### Fixed
