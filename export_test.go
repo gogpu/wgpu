@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/core"
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core"
+)
 
 // SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.
 // This method is only available in test builds.
@@ -58,4 +61,26 @@ func (g *BindGroup) TestBindGroupReleased() bool {
 		return false
 	}
 	return g.released.Load()
+}
+
+// SetTestBindGroupLayouts sets the bindGroupLayouts field on a RenderPipeline for testing.
+func (p *RenderPipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
+	p.bindGroupLayouts = layouts
+	p.bindGroupCount = uint32(len(layouts))
+}
+
+// SetTestBindGroupLayouts sets the bindGroupLayouts field on a ComputePipeline for testing.
+func (p *ComputePipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
+	p.bindGroupLayouts = layouts
+	p.bindGroupCount = uint32(len(layouts))
+}
+
+// SetTestEntries sets the entries field on a BindGroupLayout for testing.
+func (l *BindGroupLayout) SetTestEntries(entries []gputypes.BindGroupLayoutEntry) {
+	l.entries = entries
+}
+
+// SetTestLayout sets the layout field on a BindGroup for testing.
+func (g *BindGroup) SetTestLayout(layout *BindGroupLayout) {
+	g.layout = layout
 }

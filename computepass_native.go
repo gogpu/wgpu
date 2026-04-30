@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
@@ -70,6 +71,13 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	p.binder.assign(index, group.layout)
 	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
+	// Track bind group resources for submit-time validation (VAL-A6).
+	for _, buf := range group.boundBuffers {
+		p.encoder.trackBuffer(buf)
+	}
+	for _, tex := range group.boundTextures {
+		p.encoder.trackTexture(tex)
+	}
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
@@ -79,20 +87,29 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 // validateDispatchState checks that a pipeline has been set and all bind groups
 // are compatible before a dispatch call.
 // Returns true if validation passes, false if an error was recorded.
+//
+// Each validation failure wraps a typed sentinel error so that callers can
+// use errors.Is() to identify the failure category programmatically.
+// Matches Rust wgpu-core State::is_ready (command/compute.rs:278-284).
 func (p *ComputePassEncoder) validateDispatchState(method string) bool {
 	if !p.pipelineSet {
-		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: no pipeline set (call SetPipeline first)", method))
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: no pipeline set (call SetPipeline first): %w",
+			method, ErrDispatchMissingPipeline))
 		return false
 	}
 	if err := p.binder.checkCompatibility(); err != nil {
-		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
+		sentinel := ErrDispatchMissingBindGroup
+		if errors.Is(err, errBindGroupIncompatible) {
+			sentinel = ErrDispatchIncompatibleBindGroup
+		}
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w: %w", method, sentinel, err))
 		return false
 	}
 	// Late buffer binding size validation: check that bound buffers are large enough
 	// for bindings with MinBindingSize == 0. Matches Rust wgpu-core's is_ready()
 	// call to check_late_buffer_bindings before dispatch (compute.rs:278-285).
 	if err := p.binder.checkLateBufferBindings(); err != nil {
-		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w: %w", method, ErrDispatchLateBufferTooSmall, err))
 		return false
 	}
 	return true
@@ -110,8 +127,8 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	limit := p.encoder.device.core.Limits.MaxComputeWorkgroupsPerDimension
 	if x > limit || y > limit || z > limit {
 		p.encoder.setError(fmt.Errorf(
-			"wgpu: ComputePass.Dispatch: workgroup count (%d, %d, %d) exceeds device limit %d",
-			x, y, z, limit))
+			"wgpu: ComputePass.Dispatch: workgroup count (%d, %d, %d) exceeds device limit %d: %w",
+			x, y, z, limit, ErrDispatchWorkgroupCountExceeded))
 		return
 	}
 
@@ -128,6 +145,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 		return
 	}
 	p.trackRef(buffer.core.Ref)
+	p.encoder.trackBuffer(buffer)
 	p.core.DispatchIndirect(buffer.coreBuffer(), offset)
 }
 

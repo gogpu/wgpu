@@ -2328,3 +2328,308 @@ func TestCreateComputePipelineWorkgroupSizeValid(t *testing.T) {
 	}
 	pipeline.Release()
 }
+
+// =============================================================================
+// VAL-A3: Draw-time sentinel errors — errors.Is() support
+// =============================================================================
+
+func TestDrawMissingPipelineSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.Draw(3, 1, 0, 0) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Draw called without SetPipeline")
+	}
+	if !errors.Is(err, wgpu.ErrDrawMissingPipeline) {
+		t.Errorf("error should match ErrDrawMissingPipeline via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawMissingBindGroupSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline with 1 bind group layout (index 0).
+	layout := &wgpu.BindGroupLayout{}
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{layout})
+	pass.SetPipeline(pipeline)
+
+	// No bind group at index 0.
+	pass.Draw(3, 1, 0, 0)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Draw called without required bind group")
+	}
+	if !errors.Is(err, wgpu.ErrDrawMissingBindGroup) {
+		t.Errorf("error should match ErrDrawMissingBindGroup via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	expectedLayout := &wgpu.BindGroupLayout{}
+	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+	})
+	wrongLayout := &wgpu.BindGroupLayout{}
+	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
+	})
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{expectedLayout})
+	pass.SetPipeline(pipeline)
+
+	// Set a bind group with incompatible layout.
+	group := &wgpu.BindGroup{}
+	group.SetTestLayout(wrongLayout)
+	pass.SetBindGroup(0, group, nil)
+
+	pass.Draw(3, 1, 0, 0)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Draw called with incompatible bind group")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIncompatibleBindGroup) {
+		t.Errorf("error should match ErrDrawIncompatibleBindGroup via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawMissingVertexBufferSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(2) // needs 2
+	pass.SetPipeline(pipeline)
+
+	// Set only 1 vertex buffer.
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "vb",
+		Size:  64,
+		Usage: wgpu.BufferUsageVertex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+	pass.SetVertexBuffer(0, buf, 0)
+
+	pass.Draw(3, 1, 0, 0)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when not enough vertex buffers are set")
+	}
+	if !errors.Is(err, wgpu.ErrDrawMissingVertexBuffer) {
+		t.Errorf("error should match ErrDrawMissingVertexBuffer via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawMissingIndexBufferSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	pass.DrawIndexed(3, 1, 0, 0, 0) // no index buffer
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexed called without SetIndexBuffer")
+	}
+	if !errors.Is(err, wgpu.ErrDrawMissingIndexBuffer) {
+		t.Errorf("error should match ErrDrawMissingIndexBuffer via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawMissingIndexBufferIndirectSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  20,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndexedIndirect(buf, 0) // no index buffer
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexedIndirect called without SetIndexBuffer")
+	}
+	if !errors.Is(err, wgpu.ErrDrawMissingIndexBuffer) {
+		t.Errorf("error should match ErrDrawMissingIndexBuffer via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchMissingPipelineSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pass.Dispatch(1, 1, 1) // no pipeline set
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Dispatch called without SetPipeline")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchMissingPipeline) {
+		t.Errorf("error should match ErrDispatchMissingPipeline via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchMissingBindGroupSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	layout := &wgpu.BindGroupLayout{}
+	pipeline := &wgpu.ComputePipeline{}
+	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{layout})
+	pass.SetPipeline(pipeline)
+
+	// No bind group at index 0.
+	pass.Dispatch(1, 1, 1)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Dispatch called without required bind group")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchMissingBindGroup) {
+		t.Errorf("error should match ErrDispatchMissingBindGroup via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchIncompatibleBindGroupSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	expectedLayout := &wgpu.BindGroupLayout{}
+	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageCompute},
+	})
+	wrongLayout := &wgpu.BindGroupLayout{}
+	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
+	})
+
+	pipeline := &wgpu.ComputePipeline{}
+	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{expectedLayout})
+	pass.SetPipeline(pipeline)
+
+	group := &wgpu.BindGroup{}
+	group.SetTestLayout(wrongLayout)
+	pass.SetBindGroup(0, group, nil)
+
+	pass.Dispatch(1, 1, 1)
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when Dispatch called with incompatible bind group")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchIncompatibleBindGroup) {
+		t.Errorf("error should match ErrDispatchIncompatibleBindGroup via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchWorkgroupCountSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "sentinel-shader",
+		WGSL:  "@compute @workgroup_size(1) fn main() {}",
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer shader.Release()
+
+	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "sentinel-pipeline",
+		Module:     shader,
+		EntryPoint: "main",
+	})
+	if err != nil {
+		t.Skipf("CreateComputePipeline not supported: %v", err)
+	}
+	defer pipeline.Release()
+
+	pass.SetPipeline(pipeline)
+	pass.Dispatch(100000, 1, 1) // exceeds default limit 65535
+	_ = pass.End()
+
+	_, err = encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when dispatch workgroup count exceeds limit")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchWorkgroupCountExceeded) {
+		t.Errorf("error should match ErrDispatchWorkgroupCountExceeded via errors.Is, got: %v", err)
+	}
+}
+
+// TestDrawSentinelErrorsAreDistinct verifies that all draw/dispatch sentinel
+// errors are distinct values (not accidentally aliased).
+func TestDrawSentinelErrorsAreDistinct(t *testing.T) {
+	sentinels := []struct {
+		name string
+		err  error
+	}{
+		{"ErrDrawMissingPipeline", wgpu.ErrDrawMissingPipeline},
+		{"ErrDrawMissingBindGroup", wgpu.ErrDrawMissingBindGroup},
+		{"ErrDrawIncompatibleBindGroup", wgpu.ErrDrawIncompatibleBindGroup},
+		{"ErrDrawMissingVertexBuffer", wgpu.ErrDrawMissingVertexBuffer},
+		{"ErrDrawMissingIndexBuffer", wgpu.ErrDrawMissingIndexBuffer},
+		{"ErrDrawMissingBlendConstant", wgpu.ErrDrawMissingBlendConstant},
+		{"ErrDrawLateBufferTooSmall", wgpu.ErrDrawLateBufferTooSmall},
+		{"ErrDispatchMissingPipeline", wgpu.ErrDispatchMissingPipeline},
+		{"ErrDispatchMissingBindGroup", wgpu.ErrDispatchMissingBindGroup},
+		{"ErrDispatchIncompatibleBindGroup", wgpu.ErrDispatchIncompatibleBindGroup},
+		{"ErrDispatchLateBufferTooSmall", wgpu.ErrDispatchLateBufferTooSmall},
+		{"ErrDispatchWorkgroupCountExceeded", wgpu.ErrDispatchWorkgroupCountExceeded},
+	}
+
+	for i, a := range sentinels {
+		if a.err == nil {
+			t.Errorf("%s is nil", a.name)
+			continue
+		}
+		if a.err.Error() == "" {
+			t.Errorf("%s has empty error message", a.name)
+		}
+		for j, b := range sentinels {
+			if i != j && errors.Is(a.err, b.err) {
+				t.Errorf("%s and %s should be distinct errors", a.name, b.name)
+			}
+		}
+	}
+}

@@ -542,11 +542,17 @@ func (e *CoreCommandEncoder) setError(err error) {
 }
 
 // statusError returns an error for invalid status.
+// When the encoder is in the Error state, the deferred error is attached
+// as the Cause so that errors.Is/errors.As work through the chain.
 func (e *CoreCommandEncoder) statusError(operation string) error {
-	return &EncoderStateError{
+	ese := &EncoderStateError{
 		Operation: operation,
 		Status:    e.Status(),
 	}
+	if e.Status() == CommandEncoderStatusError {
+		ese.Cause = e.error
+	}
+	return ese
 }
 
 // convertRenderPassDescriptor converts a core descriptor to HAL descriptor.

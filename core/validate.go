@@ -270,6 +270,45 @@ func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor) error {
 	return nil
 }
 
+// ValidatePipelineLayoutDescriptor validates a pipeline layout descriptor against device limits.
+// Returns nil if valid, or a *CreatePipelineLayoutError describing the first validation failure.
+//
+// Checks: bind group layout count <= maxBindGroups (typically 4).
+// Rust: wgpu-core device/resource.rs:3562-3568.
+func ValidatePipelineLayoutDescriptor(desc *hal.PipelineLayoutDescriptor, limits gputypes.Limits) error {
+	label := desc.Label
+
+	// PL1: Bind group layout count must not exceed maxBindGroups.
+	if len(desc.BindGroupLayouts) > int(limits.MaxBindGroups) {
+		return &CreatePipelineLayoutError{
+			Kind:      CreatePipelineLayoutErrorTooManyGroups,
+			Label:     label,
+			Count:     len(desc.BindGroupLayouts),
+			MaxGroups: limits.MaxBindGroups,
+		}
+	}
+
+	return nil
+}
+
+// isDepthStencilFormat returns true if the format is a depth and/or stencil format.
+// These formats do not have a color aspect and cannot be used as color targets.
+//
+// Matches Rust wgpu-types TextureFormat::is_depth_stencil_format().
+// See: https://gpuweb.github.io/gpuweb/#depth-formats
+func isDepthStencilFormat(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatStencil8,
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
 // ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits.
 // Returns nil if valid, or a *CreateRenderPipelineError describing the first validation failure.
 func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits gputypes.Limits) error {
@@ -295,6 +334,33 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 	if desc.Fragment != nil {
 		if err := validateFragmentStage(desc.Fragment, label, limits); err != nil {
 			return err
+		}
+	}
+
+	// RP8: Color target formats must be color formats (not depth/stencil).
+	// Rust: resource.rs:4083-4085 — FormatNotColor
+	if desc.Fragment != nil {
+		for i, ct := range desc.Fragment.Targets {
+			if ct.Format != gputypes.TextureFormatUndefined && isDepthStencilFormat(ct.Format) {
+				return &CreateRenderPipelineError{
+					Kind:        CreateRenderPipelineErrorColorTargetDepthFormat,
+					Label:       label,
+					TargetIndex: uint32(i),
+					Format:      ct.Format.String(),
+				}
+			}
+		}
+	}
+
+	// RP9: Depth/stencil format must be a depth/stencil format (not color).
+	// Rust: resource.rs:4144-4165 — FormatNotDepth / FormatNotStencil
+	if desc.DepthStencil != nil {
+		if desc.DepthStencil.Format != gputypes.TextureFormatUndefined && !isDepthStencilFormat(desc.DepthStencil.Format) {
+			return &CreateRenderPipelineError{
+				Kind:   CreateRenderPipelineErrorDepthStencilColorFormat,
+				Label:  label,
+				Format: desc.DepthStencil.Format.String(),
+			}
 		}
 	}
 
@@ -445,9 +511,35 @@ func ValidateBindGroupLayoutDescriptor(desc *hal.BindGroupLayoutDescriptor, limi
 	return nil
 }
 
+// BindGroupBufferInfo carries buffer metadata needed for bind group validation.
+// The core validation layer cannot access buffer objects directly (they are uintptr
+// handles in gputypes.BindGroupEntry), so the caller extracts this info from the
+// public API's typed *Buffer objects and passes it alongside the descriptor.
+type BindGroupBufferInfo struct {
+	// Binding is the binding number this info corresponds to.
+	Binding uint32
+	// Usage is the buffer's usage flags (from Buffer.Usage()).
+	Usage gputypes.BufferUsage
+	// BufferSize is the total size of the buffer in bytes (from Buffer.Size()).
+	BufferSize uint64
+	// Offset is the byte offset into the buffer for this binding.
+	Offset uint64
+	// Size is the requested binding size (0 means "rest of buffer from offset").
+	Size uint64
+}
+
 // ValidateBindGroupDescriptor validates a bind group descriptor.
+// layoutEntries are the entries from the bind group layout — passed separately because
+// the hal.BindGroupLayout interface does not expose entries (they live in core.BindGroupLayout).
+// bufferInfos carries buffer metadata for entries that bind buffers (may be nil if no buffers).
+// limits are the device limits for alignment and size checks.
 // Returns nil if valid, or a *CreateBindGroupError describing the first validation failure.
-func ValidateBindGroupDescriptor(desc *hal.BindGroupDescriptor) error {
+func ValidateBindGroupDescriptor(
+	desc *hal.BindGroupDescriptor,
+	layoutEntries []gputypes.BindGroupLayoutEntry,
+	bufferInfos []BindGroupBufferInfo,
+	limits gputypes.Limits,
+) error {
 	// BG1: Layout must not be nil.
 	if desc.Layout == nil {
 		return &CreateBindGroupError{
@@ -456,7 +548,229 @@ func ValidateBindGroupDescriptor(desc *hal.BindGroupDescriptor) error {
 		}
 	}
 
+	// BG2: Entry count must match layout entry count.
+	// Rust: wgpu-core device/resource.rs:3106-3111 — BindingsNumMismatch
+	if len(desc.Entries) != len(layoutEntries) {
+		return &CreateBindGroupError{
+			Kind:     CreateBindGroupErrorBindingsNumMismatch,
+			Label:    desc.Label,
+			Expected: len(layoutEntries),
+			Actual:   len(desc.Entries),
+		}
+	}
+
+	// BG3: Each entry binding must exist in layout, and no duplicates.
+	// Rust: wgpu-core device/resource.rs:3135-3138 — MissingBindingDeclaration
+	// Rust: wgpu-core device/resource.rs:3275-3278 — DuplicateBinding
+	//
+	// Build a map of layout entries by binding number for O(1) lookup.
+	layoutByBinding := make(map[uint32]*gputypes.BindGroupLayoutEntry, len(layoutEntries))
+	for i := range layoutEntries {
+		layoutByBinding[layoutEntries[i].Binding] = &layoutEntries[i]
+	}
+
+	seen := make(map[uint32]bool, len(desc.Entries))
+	for _, entry := range desc.Entries {
+		// Check duplicate binding numbers in descriptor entries.
+		if seen[entry.Binding] {
+			return &CreateBindGroupError{
+				Kind:    CreateBindGroupErrorDuplicateBinding,
+				Label:   desc.Label,
+				Binding: entry.Binding,
+			}
+		}
+		seen[entry.Binding] = true
+
+		// Check that each entry binding has a corresponding declaration in the layout.
+		if _, ok := layoutByBinding[entry.Binding]; !ok {
+			return &CreateBindGroupError{
+				Kind:    CreateBindGroupErrorMissingBindingDeclaration,
+				Label:   desc.Label,
+				Binding: entry.Binding,
+			}
+		}
+	}
+
+	// BG4-BG9: Buffer binding validation.
+	// Rust: wgpu-core device/resource.rs:2747-2834
+	return validateBindGroupBufferEntries(desc.Label, layoutByBinding, bufferInfos, limits)
+}
+
+// validateBindGroupBufferEntries validates each buffer binding entry against its
+// layout declaration and device limits. Checks usage compatibility, offset alignment,
+// binding size limits, bounds overflow, zero-size, and storage 4-byte alignment.
+//
+// Rust reference: wgpu-core device/resource.rs:2747-2834
+func validateBindGroupBufferEntries(
+	label string,
+	layoutByBinding map[uint32]*gputypes.BindGroupLayoutEntry,
+	bufferInfos []BindGroupBufferInfo,
+	limits gputypes.Limits,
+) error {
+	for _, info := range bufferInfos {
+		layoutEntry, ok := layoutByBinding[info.Binding]
+		if !ok || layoutEntry.Buffer == nil {
+			// No buffer layout declaration for this binding -- skip.
+			// (This would be caught by resource type mismatch validation, not buffer validation.)
+			continue
+		}
+
+		if err := validateSingleBufferEntry(label, layoutEntry.Buffer, info, limits); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// bufferBindingParams holds the resolved parameters for a buffer binding type.
+type bufferBindingParams struct {
+	requiredUsage    gputypes.BufferUsage
+	maxBindingSize   uint64
+	offsetAlignment  uint32
+	isStorageBinding bool
+}
+
+// resolveBufferBindingParams returns the required usage, max size, alignment, and
+// whether it is a storage binding for the given buffer binding type.
+// Returns ok=false for unknown binding types.
+func resolveBufferBindingParams(bindingType gputypes.BufferBindingType, limits gputypes.Limits) (bufferBindingParams, bool) {
+	switch bindingType {
+	case gputypes.BufferBindingTypeUniform:
+		return bufferBindingParams{
+			requiredUsage:    gputypes.BufferUsageUniform,
+			maxBindingSize:   limits.MaxUniformBufferBindingSize,
+			offsetAlignment:  limits.MinUniformBufferOffsetAlignment,
+			isStorageBinding: false,
+		}, true
+	case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+		return bufferBindingParams{
+			requiredUsage:    gputypes.BufferUsageStorage,
+			maxBindingSize:   limits.MaxStorageBufferBindingSize,
+			offsetAlignment:  limits.MinStorageBufferOffsetAlignment,
+			isStorageBinding: true,
+		}, true
+	default:
+		return bufferBindingParams{}, false
+	}
+}
+
+// validateSingleBufferEntry validates one buffer binding entry against its layout
+// declaration and device limits.
+func validateSingleBufferEntry(
+	label string,
+	bufLayout *gputypes.BufferBindingLayout,
+	info BindGroupBufferInfo,
+	limits gputypes.Limits,
+) error {
+	params, ok := resolveBufferBindingParams(bufLayout.Type, limits)
+	if !ok {
+		return nil // Unknown binding type -- skip.
+	}
+
+	// BG4: Buffer usage must include the required flag.
+	if !info.Usage.Contains(params.requiredUsage) {
+		return &CreateBindGroupError{
+			Kind:          CreateBindGroupErrorBufferUsageMismatch,
+			Label:         label,
+			Binding:       info.Binding,
+			ExpectedUsage: uint64(params.requiredUsage),
+			ActualUsage:   uint64(info.Usage),
+		}
+	}
+
+	// BG5: Buffer offset must be aligned.
+	if params.offsetAlignment > 0 && info.Offset%uint64(params.offsetAlignment) != 0 {
+		return &CreateBindGroupError{
+			Kind:      CreateBindGroupErrorBufferOffsetAlignment,
+			Label:     label,
+			Binding:   info.Binding,
+			Offset:    info.Offset,
+			Alignment: uint64(params.offsetAlignment),
+		}
+	}
+
+	// Resolve effective binding size: 0 means "rest of buffer from offset".
+	effectiveSize := info.Size
+	if effectiveSize == 0 && info.Offset <= info.BufferSize {
+		effectiveSize = info.BufferSize - info.Offset
+	}
+
+	// BG9: Effective binding size must not be zero.
+	// Rust: wgpu-core device/resource.rs:2828 -- BindingZeroSize
+	if effectiveSize == 0 {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorBufferBindingZeroSize,
+			Label:   label,
+			Binding: info.Binding,
+		}
+	}
+
+	// BG7: offset + bindingSize must not exceed buffer size.
+	// Rust: wgpu-core resource.rs:517-535 -- BindingRangeTooLarge / BindingOffsetTooLarge
+	if err := validateBufferBounds(label, info); err != nil {
+		return err
+	}
+
+	// BG8: Storage buffer binding size must be a multiple of 4.
+	// Rust: wgpu-core device/resource.rs:2784-2793
+	if params.isStorageBinding && effectiveSize%4 != 0 {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorStorageBufferSizeAlignment,
+			Label:   label,
+			Binding: info.Binding,
+			Size:    effectiveSize,
+		}
+	}
+
+	// BG6: Effective binding size must not exceed the maximum for its type.
+	// Rust: wgpu-core device/resource.rs:2798-2804 -- BufferRangeTooLarge
+	if effectiveSize > params.maxBindingSize {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorBufferBindingSizeTooLarge,
+			Label:   label,
+			Binding: info.Binding,
+			Size:    effectiveSize,
+			MaxSize: params.maxBindingSize,
+		}
+	}
+
+	return nil
+}
+
+// validateBufferBounds checks that offset + size does not exceed the buffer size.
+func validateBufferBounds(label string, info BindGroupBufferInfo) error {
+	if info.Size != 0 {
+		// Explicit size: check offset + size <= bufferSize (with overflow protection).
+		end, overflow := addUint64(info.Offset, info.Size)
+		if overflow || end > info.BufferSize {
+			return &CreateBindGroupError{
+				Kind:       CreateBindGroupErrorBufferBoundsOverflow,
+				Label:      label,
+				Binding:    info.Binding,
+				Offset:     info.Offset,
+				Size:       info.Size,
+				BufferSize: info.BufferSize,
+			}
+		}
+	} else if info.Offset > info.BufferSize {
+		// Implicit size (0 = rest of buffer): offset must not exceed buffer size.
+		return &CreateBindGroupError{
+			Kind:       CreateBindGroupErrorBufferBoundsOverflow,
+			Label:      label,
+			Binding:    info.Binding,
+			Offset:     info.Offset,
+			Size:       0,
+			BufferSize: info.BufferSize,
+		}
+	}
+	return nil
+}
+
+// addUint64 adds a and b, returning the result and whether it overflowed.
+func addUint64(a, b uint64) (uint64, bool) {
+	sum := a + b
+	return sum, sum < a
 }
 
 // maxMips calculates the maximum number of mip levels for a texture.

@@ -535,6 +535,14 @@ const (
 	CreateRenderPipelineErrorTooManyColorTargets
 	// CreateRenderPipelineErrorInvalidSampleCount indicates an invalid multisample count.
 	CreateRenderPipelineErrorInvalidSampleCount
+	// CreateRenderPipelineErrorColorTargetDepthFormat indicates a depth/stencil format was used as a color target.
+	// WebGPU spec: color target format must have a color aspect.
+	// Rust: pipeline::ColorStateError::FormatNotColor
+	CreateRenderPipelineErrorColorTargetDepthFormat
+	// CreateRenderPipelineErrorDepthStencilColorFormat indicates a color format was used as a depth/stencil format.
+	// WebGPU spec: depth/stencil format must be a depth/stencil format.
+	// Rust: pipeline::DepthStencilStateError::FormatNotDepth / FormatNotStencil
+	CreateRenderPipelineErrorDepthStencilColorFormat
 	// CreateRenderPipelineErrorHAL indicates the HAL backend failed to create the pipeline.
 	CreateRenderPipelineErrorHAL
 )
@@ -546,7 +554,11 @@ type CreateRenderPipelineError struct {
 	TargetCount uint32
 	MaxTargets  uint32
 	SampleCount uint32
-	HALError    error
+	// TargetIndex is the color target index for format errors.
+	TargetIndex uint32
+	// Format is the texture format that caused the error.
+	Format   string
+	HALError error
 }
 
 // Error implements the error interface.
@@ -573,6 +585,12 @@ func (e *CreateRenderPipelineError) Error() string {
 	case CreateRenderPipelineErrorInvalidSampleCount:
 		return fmt.Sprintf("render pipeline %q: invalid sample count %d (must be 1 or 4)",
 			label, e.SampleCount)
+	case CreateRenderPipelineErrorColorTargetDepthFormat:
+		return fmt.Sprintf("render pipeline %q: color target [%d] format %s does not have a color aspect",
+			label, e.TargetIndex, e.Format)
+	case CreateRenderPipelineErrorDepthStencilColorFormat:
+		return fmt.Sprintf("render pipeline %q: depth/stencil format %s is not a depth/stencil format",
+			label, e.Format)
 	case CreateRenderPipelineErrorHAL:
 		return fmt.Sprintf("render pipeline %q: HAL error: %v", label, e.HALError)
 	default:
@@ -734,15 +752,65 @@ type CreateBindGroupErrorKind int
 const (
 	// CreateBindGroupErrorMissingLayout indicates the layout was nil.
 	CreateBindGroupErrorMissingLayout CreateBindGroupErrorKind = iota
+	// CreateBindGroupErrorBindingsNumMismatch indicates the number of entries
+	// in the bind group descriptor does not match the number of entries
+	// defined in the bind group layout.
+	// Rust: wgpu-core binding_model.rs CreateBindGroupError::BindingsNumMismatch
+	CreateBindGroupErrorBindingsNumMismatch
+	// CreateBindGroupErrorMissingBindingDeclaration indicates a bind group entry
+	// references a binding number that is not declared in the layout.
+	// Rust: wgpu-core binding_model.rs CreateBindGroupError::MissingBindingDeclaration
+	CreateBindGroupErrorMissingBindingDeclaration
+	// CreateBindGroupErrorDuplicateBinding indicates two or more bind group entries
+	// share the same binding number.
+	// Rust: wgpu-core binding_model.rs CreateBindGroupError::DuplicateBinding
+	CreateBindGroupErrorDuplicateBinding
+	// CreateBindGroupErrorBufferUsageMismatch indicates the buffer does not have the
+	// usage flag required by the layout entry's buffer binding type.
+	// E.g., binding a VERTEX buffer where UNIFORM is required.
+	// Rust: wgpu-core resource.rs MissingBufferUsageError
+	CreateBindGroupErrorBufferUsageMismatch
+	// CreateBindGroupErrorBufferOffsetAlignment indicates the buffer offset is not
+	// aligned to the required alignment for its binding type.
+	// Uniform: minUniformBufferOffsetAlignment, Storage: minStorageBufferOffsetAlignment.
+	// Rust: wgpu-core device/resource.rs UnalignedBufferOffset
+	CreateBindGroupErrorBufferOffsetAlignment
+	// CreateBindGroupErrorBufferBindingSizeTooLarge indicates the effective binding
+	// size exceeds the maximum allowed for its binding type.
+	// Uniform: maxUniformBufferBindingSize, Storage: maxStorageBufferBindingSize.
+	// Rust: wgpu-core device/resource.rs BufferRangeTooLarge
+	CreateBindGroupErrorBufferBindingSizeTooLarge
+	// CreateBindGroupErrorBufferBoundsOverflow indicates offset + bindingSize exceeds
+	// the buffer's total size.
+	// Rust: wgpu-core resource.rs BindingRangeTooLarge / BindingOffsetTooLarge
+	CreateBindGroupErrorBufferBoundsOverflow
+	// CreateBindGroupErrorBufferBindingZeroSize indicates the effective binding size
+	// resolved to zero. WebGPU requires a non-zero binding size.
+	// Rust: wgpu-core device/resource.rs BindingZeroSize
+	CreateBindGroupErrorBufferBindingZeroSize
+	// CreateBindGroupErrorStorageBufferSizeAlignment indicates a storage buffer binding
+	// size is not a multiple of 4 bytes, as required by the WebGPU spec.
+	// Rust: wgpu-core device/resource.rs UnalignedEffectiveBufferBindingSizeForStorage
+	CreateBindGroupErrorStorageBufferSizeAlignment
 	// CreateBindGroupErrorHAL indicates the HAL backend failed.
 	CreateBindGroupErrorHAL
 )
 
 // CreateBindGroupError represents an error during bind group creation.
 type CreateBindGroupError struct {
-	Kind     CreateBindGroupErrorKind
-	Label    string
-	HALError error
+	Kind          CreateBindGroupErrorKind
+	Label         string
+	Expected      int    // expected entry count (for BindingsNumMismatch)
+	Actual        int    // actual entry count (for BindingsNumMismatch)
+	Binding       uint32 // binding number (for MissingBindingDeclaration, DuplicateBinding, buffer errors)
+	ExpectedUsage uint64 // required buffer usage flag (for BufferUsageMismatch)
+	ActualUsage   uint64 // actual buffer usage flags (for BufferUsageMismatch)
+	Offset        uint64 // buffer offset (for alignment/bounds errors)
+	Size          uint64 // effective binding size (for size-related errors)
+	BufferSize    uint64 // total buffer size (for bounds overflow)
+	MaxSize       uint64 // maximum allowed binding size (for BindingSizeTooLarge)
+	Alignment     uint64 // required alignment (for alignment errors)
+	HALError      error
 }
 
 // Error implements the error interface.
@@ -755,6 +823,33 @@ func (e *CreateBindGroupError) Error() string {
 	switch e.Kind {
 	case CreateBindGroupErrorMissingLayout:
 		return fmt.Sprintf("bind group %q: layout must not be nil", label)
+	case CreateBindGroupErrorBindingsNumMismatch:
+		return fmt.Sprintf("bind group %q: number of bindings in descriptor (%d) does not match the number defined in the layout (%d)",
+			label, e.Actual, e.Expected)
+	case CreateBindGroupErrorMissingBindingDeclaration:
+		return fmt.Sprintf("bind group %q: unable to find a corresponding declaration for binding %d",
+			label, e.Binding)
+	case CreateBindGroupErrorDuplicateBinding:
+		return fmt.Sprintf("bind group %q: binding %d is used at least twice in the descriptor",
+			label, e.Binding)
+	case CreateBindGroupErrorBufferUsageMismatch:
+		return fmt.Sprintf("bind group %q: binding %d buffer usage mismatch: expected 0x%x, actual 0x%x",
+			label, e.Binding, e.ExpectedUsage, e.ActualUsage)
+	case CreateBindGroupErrorBufferOffsetAlignment:
+		return fmt.Sprintf("bind group %q: binding %d buffer offset %d is not aligned to %d",
+			label, e.Binding, e.Offset, e.Alignment)
+	case CreateBindGroupErrorBufferBindingSizeTooLarge:
+		return fmt.Sprintf("bind group %q: binding %d buffer binding size %d exceeds maximum %d",
+			label, e.Binding, e.Size, e.MaxSize)
+	case CreateBindGroupErrorBufferBoundsOverflow:
+		return fmt.Sprintf("bind group %q: binding %d buffer range overflows: offset %d + size %d > buffer size %d",
+			label, e.Binding, e.Offset, e.Size, e.BufferSize)
+	case CreateBindGroupErrorBufferBindingZeroSize:
+		return fmt.Sprintf("bind group %q: binding %d has zero effective binding size",
+			label, e.Binding)
+	case CreateBindGroupErrorStorageBufferSizeAlignment:
+		return fmt.Sprintf("bind group %q: binding %d storage buffer binding size %d is not a multiple of 4",
+			label, e.Binding, e.Size)
 	case CreateBindGroupErrorHAL:
 		return fmt.Sprintf("bind group %q: HAL error: %v", label, e.HALError)
 	default:
@@ -773,15 +868,84 @@ func IsCreateBindGroupError(err error) bool {
 	return errors.As(err, &cbge)
 }
 
+// =============================================================================
+// Pipeline Layout Creation Errors
+// =============================================================================
+
+// CreatePipelineLayoutErrorKind represents the type of pipeline layout creation error.
+type CreatePipelineLayoutErrorKind int
+
+const (
+	// CreatePipelineLayoutErrorTooManyGroups indicates the number of bind group layouts
+	// exceeds the device limit (maxBindGroups, typically 4).
+	// Rust: binding_model::CreatePipelineLayoutError::TooManyGroups
+	CreatePipelineLayoutErrorTooManyGroups CreatePipelineLayoutErrorKind = iota
+	// CreatePipelineLayoutErrorHAL indicates the HAL backend failed to create the pipeline layout.
+	CreatePipelineLayoutErrorHAL
+)
+
+// CreatePipelineLayoutError represents an error during pipeline layout creation.
+type CreatePipelineLayoutError struct {
+	Kind      CreatePipelineLayoutErrorKind
+	Label     string
+	Count     int
+	MaxGroups uint32
+	HALError  error
+}
+
+// Error implements the error interface.
+func (e *CreatePipelineLayoutError) Error() string {
+	label := e.Label
+	if label == "" {
+		label = unnamedLabel
+	}
+
+	switch e.Kind {
+	case CreatePipelineLayoutErrorTooManyGroups:
+		return fmt.Sprintf("pipeline layout %q: bind group layout count %d exceeds device limit %d",
+			label, e.Count, e.MaxGroups)
+	case CreatePipelineLayoutErrorHAL:
+		return fmt.Sprintf("pipeline layout %q: HAL error: %v", label, e.HALError)
+	default:
+		return fmt.Sprintf("pipeline layout %q: unknown error", label)
+	}
+}
+
+// Unwrap returns the underlying HAL error, if any.
+func (e *CreatePipelineLayoutError) Unwrap() error {
+	return e.HALError
+}
+
+// IsCreatePipelineLayoutError returns true if the error is a CreatePipelineLayoutError.
+func IsCreatePipelineLayoutError(err error) bool {
+	var cple *CreatePipelineLayoutError
+	return errors.As(err, &cple)
+}
+
 // EncoderStateError represents an invalid state transition error.
+// When the encoder is in the Error state (due to a deferred validation error),
+// the Cause field carries the original error so that errors.Is/errors.As
+// work through the chain.
 type EncoderStateError struct {
 	Operation string
 	Status    CommandEncoderStatus
+	// Cause is the deferred error that put the encoder into the Error state.
+	// Non-nil only when Status == CommandEncoderStatusError.
+	Cause error
 }
 
 // Error implements the error interface.
 func (e *EncoderStateError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("cannot %s: encoder in %v state: %v", e.Operation, e.Status, e.Cause)
+	}
 	return fmt.Sprintf("cannot %s: encoder in %v state", e.Operation, e.Status)
+}
+
+// Unwrap returns the deferred validation error that caused the encoder
+// to enter the Error state. Returns nil for non-error state transitions.
+func (e *EncoderStateError) Unwrap() error {
+	return e.Cause
 }
 
 // IsEncoderStateError returns true if the error is an EncoderStateError.

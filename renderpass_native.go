@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
@@ -90,6 +91,13 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	p.binder.assign(index, group.layout)
 	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
+	// Track bind group resources for submit-time validation (VAL-A6).
+	for _, buf := range group.boundBuffers {
+		p.encoder.trackBuffer(buf)
+	}
+	for _, tex := range group.boundTextures {
+		p.encoder.trackTexture(tex)
+	}
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
@@ -106,6 +114,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 		p.vertexBufferCount = slot + 1
 	}
 	p.trackRef(buffer.core.Ref)
+	p.encoder.trackBuffer(buffer)
 	p.core.SetVertexBuffer(slot, buffer.coreBuffer(), offset)
 }
 
@@ -117,6 +126,7 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 	}
 	p.indexBufferSet = true
 	p.trackRef(buffer.core.Ref)
+	p.encoder.trackBuffer(buffer)
 	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
 }
 
@@ -144,26 +154,39 @@ func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
 // validateDrawState checks that a pipeline has been set, all bind groups
 // are compatible, and enough vertex buffers have been set before a draw call.
 // Returns true if validation passes, false if an error was recorded.
+//
+// Each validation failure wraps a typed sentinel error so that callers can
+// use errors.Is() to identify the failure category programmatically.
+// Matches Rust wgpu-core State::is_ready (command/render.rs:542-593).
 func (p *RenderPassEncoder) validateDrawState(method string) bool {
 	if !p.pipelineSet {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: no pipeline set (call SetPipeline first)", method))
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: no pipeline set (call SetPipeline first): %w",
+			method, ErrDrawMissingPipeline))
 		return false
 	}
 	if err := p.binder.checkCompatibility(); err != nil {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w", method, err))
+		// Wrap the binder error with the appropriate draw-time sentinel
+		// so errors.Is works for both the specific binder cause and the
+		// public draw-time category.
+		sentinel := ErrDrawMissingBindGroup
+		if errors.Is(err, errBindGroupIncompatible) {
+			sentinel = ErrDrawIncompatibleBindGroup
+		}
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w: %w", method, sentinel, err))
 		return false
 	}
 	if p.vertexBufferCount < p.requiredVertexBuffers {
 		p.encoder.setError(fmt.Errorf(
-			"wgpu: RenderPass.%s: pipeline requires %d vertex buffer(s) but only %d set",
+			"wgpu: RenderPass.%s: pipeline requires %d vertex buffer(s) but only %d set: %w",
 			method, p.requiredVertexBuffers, p.vertexBufferCount,
+			ErrDrawMissingVertexBuffer,
 		))
 		return false
 	}
 	if p.blendConstantRequired && !p.blendConstantSet {
 		p.encoder.setError(fmt.Errorf(
-			"wgpu: RenderPass.%s: blend constant needs to be set (pipeline uses BlendFactorConstant)",
-			method,
+			"wgpu: RenderPass.%s: %w",
+			method, ErrDrawMissingBlendConstant,
 		))
 		return false
 	}
@@ -171,7 +194,7 @@ func (p *RenderPassEncoder) validateDrawState(method string) bool {
 	// for bindings with MinBindingSize == 0. Matches Rust wgpu-core's is_ready()
 	// call to check_late_buffer_bindings before draw (render.rs:542-545).
 	if err := p.binder.checkLateBufferBindings(); err != nil {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w", method, err))
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.%s: %w: %w", method, ErrDrawLateBufferTooSmall, err))
 		return false
 	}
 	return true
@@ -191,7 +214,8 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 		return
 	}
 	if !p.indexBufferSet {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexed: no index buffer set (call SetIndexBuffer first)"))
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexed: no index buffer set (call SetIndexBuffer first): %w",
+			ErrDrawMissingIndexBuffer))
 		return
 	}
 	p.core.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
@@ -207,6 +231,7 @@ func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 		return
 	}
 	p.trackRef(buffer.core.Ref)
+	p.encoder.trackBuffer(buffer)
 	p.core.DrawIndirect(buffer.coreBuffer(), offset)
 }
 
@@ -216,7 +241,8 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 		return
 	}
 	if !p.indexBufferSet {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: no index buffer set (call SetIndexBuffer first)"))
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: no index buffer set (call SetIndexBuffer first): %w",
+			ErrDrawMissingIndexBuffer))
 		return
 	}
 	if buffer == nil {
@@ -224,6 +250,7 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 		return
 	}
 	p.trackRef(buffer.core.Ref)
+	p.encoder.trackBuffer(buffer)
 	p.core.DrawIndexedIndirect(buffer.coreBuffer(), offset)
 }
 
