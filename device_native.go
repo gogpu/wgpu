@@ -525,6 +525,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		bindGroupLayouts:      bgLayouts,
 		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
 		blendConstantRequired: needsBlendConstant,
+		stripIndexFormat:      desc.Primitive.StripIndexFormat,
 		lateSizedBufferGroups: lateGroups,
 		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, nil),
 	}, nil

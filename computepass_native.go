@@ -71,6 +71,8 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	p.binder.assign(index, group.layout)
 	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
+	// Track bind group itself for submit-time validation (VAL-B5).
+	p.encoder.trackBindGroup(group)
 	// Track bind group resources for submit-time validation (VAL-A6).
 	for _, buf := range group.boundBuffers {
 		p.encoder.trackBuffer(buf)
@@ -136,12 +138,36 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
-func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
+func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) { //nolint:dupl // compute vs render use different sentinel errors and arg sizes
 	if !p.validateDispatchState("DispatchIndirect") {
 		return
 	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: buffer is nil"))
+		return
+	}
+	// VAL-B3: Validate indirect buffer has INDIRECT usage.
+	// Matches Rust wgpu-core compute.rs:896 (check_usage(BufferUsages::INDIRECT)).
+	if buffer.Usage()&BufferUsageIndirect == 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: ComputePass.DispatchIndirect: buffer %q missing BufferUsageIndirect usage: %w",
+			buffer.Label(), ErrDispatchIndirectBufferUsage))
+		return
+	}
+	// VAL-B3: Validate indirect buffer offset is 4-byte aligned.
+	// Matches Rust wgpu-core compute.rs:899 (offset % 4 != 0).
+	if offset%4 != 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: ComputePass.DispatchIndirect: offset %d is not 4-byte aligned: %w",
+			offset, ErrDispatchIndirectOffsetAlignment))
+		return
+	}
+	// VAL-B3: Validate indirect args fit within buffer.
+	// DispatchIndirect args: 3 × uint32 = 12 bytes. Matches Rust compute.rs:903-909.
+	if offset+12 > buffer.Size() {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: ComputePass.DispatchIndirect: offset %d + 12 bytes exceeds buffer size %d: %w",
+			offset, buffer.Size(), ErrDispatchIndirectBufferOverrun))
 		return
 	}
 	p.trackRef(buffer.core.Ref)

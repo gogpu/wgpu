@@ -543,6 +543,14 @@ const (
 	// WebGPU spec: depth/stencil format must be a depth/stencil format.
 	// Rust: pipeline::DepthStencilStateError::FormatNotDepth / FormatNotStencil
 	CreateRenderPipelineErrorDepthStencilColorFormat
+	// CreateRenderPipelineErrorDepthFormatNoDepthAspect indicates depth operations are enabled
+	// but the format has no depth aspect (e.g. Stencil8 with depth write enabled).
+	// Rust: pipeline::DepthStencilStateError::FormatNotDepth
+	CreateRenderPipelineErrorDepthFormatNoDepthAspect
+	// CreateRenderPipelineErrorDepthFormatNoStencilAspect indicates stencil operations are enabled
+	// but the format has no stencil aspect (e.g. Depth16Unorm with stencil ops != Keep).
+	// Rust: pipeline::DepthStencilStateError::FormatNotStencil
+	CreateRenderPipelineErrorDepthFormatNoStencilAspect
 	// CreateRenderPipelineErrorHAL indicates the HAL backend failed to create the pipeline.
 	CreateRenderPipelineErrorHAL
 )
@@ -590,6 +598,12 @@ func (e *CreateRenderPipelineError) Error() string {
 			label, e.TargetIndex, e.Format)
 	case CreateRenderPipelineErrorDepthStencilColorFormat:
 		return fmt.Sprintf("render pipeline %q: depth/stencil format %s is not a depth/stencil format",
+			label, e.Format)
+	case CreateRenderPipelineErrorDepthFormatNoDepthAspect:
+		return fmt.Sprintf("render pipeline %q: depth/stencil format %s does not have a depth aspect but depth operations are enabled",
+			label, e.Format)
+	case CreateRenderPipelineErrorDepthFormatNoStencilAspect:
+		return fmt.Sprintf("render pipeline %q: depth/stencil format %s does not have a stencil aspect but stencil operations are enabled",
 			label, e.Format)
 	case CreateRenderPipelineErrorHAL:
 		return fmt.Sprintf("render pipeline %q: HAL error: %v", label, e.HALError)
@@ -792,25 +806,30 @@ const (
 	// size is not a multiple of 4 bytes, as required by the WebGPU spec.
 	// Rust: wgpu-core device/resource.rs UnalignedEffectiveBufferBindingSizeForStorage
 	CreateBindGroupErrorStorageBufferSizeAlignment
+	// CreateBindGroupErrorMinBindingSizeMismatch indicates the effective binding size
+	// is smaller than the MinBindingSize declared in the bind group layout entry.
+	// Rust: wgpu-core device/resource.rs:2817-2826 BindingSizeTooSmall
+	CreateBindGroupErrorMinBindingSizeMismatch
 	// CreateBindGroupErrorHAL indicates the HAL backend failed.
 	CreateBindGroupErrorHAL
 )
 
 // CreateBindGroupError represents an error during bind group creation.
 type CreateBindGroupError struct {
-	Kind          CreateBindGroupErrorKind
-	Label         string
-	Expected      int    // expected entry count (for BindingsNumMismatch)
-	Actual        int    // actual entry count (for BindingsNumMismatch)
-	Binding       uint32 // binding number (for MissingBindingDeclaration, DuplicateBinding, buffer errors)
-	ExpectedUsage uint64 // required buffer usage flag (for BufferUsageMismatch)
-	ActualUsage   uint64 // actual buffer usage flags (for BufferUsageMismatch)
-	Offset        uint64 // buffer offset (for alignment/bounds errors)
-	Size          uint64 // effective binding size (for size-related errors)
-	BufferSize    uint64 // total buffer size (for bounds overflow)
-	MaxSize       uint64 // maximum allowed binding size (for BindingSizeTooLarge)
-	Alignment     uint64 // required alignment (for alignment errors)
-	HALError      error
+	Kind           CreateBindGroupErrorKind
+	Label          string
+	Expected       int    // expected entry count (for BindingsNumMismatch)
+	Actual         int    // actual entry count (for BindingsNumMismatch)
+	Binding        uint32 // binding number (for MissingBindingDeclaration, DuplicateBinding, buffer errors)
+	ExpectedUsage  uint64 // required buffer usage flag (for BufferUsageMismatch)
+	ActualUsage    uint64 // actual buffer usage flags (for BufferUsageMismatch)
+	Offset         uint64 // buffer offset (for alignment/bounds errors)
+	Size           uint64 // effective binding size (for size-related errors)
+	BufferSize     uint64 // total buffer size (for bounds overflow)
+	MaxSize        uint64 // maximum allowed binding size (for BindingSizeTooLarge)
+	Alignment      uint64 // required alignment (for alignment errors)
+	MinBindingSize uint64 // layout-declared minimum binding size (for MinBindingSizeMismatch)
+	HALError       error
 }
 
 // Error implements the error interface.
@@ -850,6 +869,9 @@ func (e *CreateBindGroupError) Error() string {
 	case CreateBindGroupErrorStorageBufferSizeAlignment:
 		return fmt.Sprintf("bind group %q: binding %d storage buffer binding size %d is not a multiple of 4",
 			label, e.Binding, e.Size)
+	case CreateBindGroupErrorMinBindingSizeMismatch:
+		return fmt.Sprintf("bind group %q: binding %d effective binding size %d is less than minimum %d declared in layout",
+			label, e.Binding, e.Size, e.MinBindingSize)
 	case CreateBindGroupErrorHAL:
 		return fmt.Sprintf("bind group %q: HAL error: %v", label, e.HALError)
 	default:

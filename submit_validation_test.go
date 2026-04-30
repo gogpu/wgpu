@@ -372,3 +372,111 @@ func TestSubmitNoCommandBuffers(t *testing.T) {
 		t.Fatalf("Submit() with no command buffers should succeed: %v", err)
 	}
 }
+
+// =============================================================================
+// VAL-B5: BindGroup destruction tracking at Submit
+// Rust wgpu-core device/queue.rs:1815-1817
+// =============================================================================
+
+// TestSubmitWithDestroyedBindGroup verifies that submitting a command buffer
+// that references a released bind group returns ErrSubmitBindGroupDestroyed.
+// Matches Rust wgpu-core validate_command_buffer bind_group.try_raw()
+// (device/queue.rs:1815-1817).
+func TestSubmitWithDestroyedBindGroup(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label:   "val-b5-bgl",
+		Entries: []wgpu.BindGroupLayoutEntry{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer layout.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "val-b5-destroyed-bg",
+		Layout: layout,
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	// Use a compute pass to bind the group so it gets tracked.
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetBindGroup(0, bg, nil)
+	_ = pass.End()
+
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// Release the bind group AFTER encoding but BEFORE submit.
+	bg.Release()
+
+	_, err = device.Queue().Submit(cmdBuf)
+	if err == nil {
+		t.Fatal("Submit should fail: command buffer references destroyed bind group")
+	}
+	if !errors.Is(err, wgpu.ErrSubmitBindGroupDestroyed) {
+		t.Errorf("expected ErrSubmitBindGroupDestroyed, got: %v", err)
+	}
+}
+
+// TestSubmitWithValidBindGroup verifies that Submit succeeds when a command
+// buffer references a bind group that is still alive.
+func TestSubmitWithValidBindGroup(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label:   "val-b5-valid-bgl",
+		Entries: []wgpu.BindGroupLayoutEntry{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer layout.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "val-b5-valid-bg",
+		Layout: layout,
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	defer bg.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetBindGroup(0, bg, nil)
+	_ = pass.End()
+
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// Bind group is still alive -- Submit should succeed.
+	_, err = device.Queue().Submit(cmdBuf)
+	if err != nil {
+		t.Fatalf("Submit should succeed: %v", err)
+	}
+}

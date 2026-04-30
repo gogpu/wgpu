@@ -38,6 +38,13 @@ type RenderPassEncoder struct {
 	// indexBufferSet tracks whether SetIndexBuffer has been called.
 	// DrawIndexed and DrawIndexedIndirect require an index buffer.
 	indexBufferSet bool
+	// indexBufferFormat stores the format passed to the most recent SetIndexBuffer call.
+	// Used to validate against the pipeline's StripIndexFormat at DrawIndexed/DrawIndexedIndirect time.
+	// Matches Rust wgpu-core State.index.buffer_format (render.rs:568-582).
+	indexBufferFormat IndexFormat
+	// currentStripIndexFormat stores the pipeline's StripIndexFormat for draw-time validation.
+	// Set by SetPipeline from RenderPipeline.stripIndexFormat.
+	currentStripIndexFormat *IndexFormat
 	// blendConstantRequired is true if the current pipeline uses
 	// BlendFactorConstant or BlendFactorOneMinusConstant.
 	// Set by SetPipeline from RenderPipeline.blendConstantRequired.
@@ -70,6 +77,7 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.requiredVertexBuffers = pipeline.requiredVertexBuffers
+	p.currentStripIndexFormat = pipeline.stripIndexFormat
 	if pipeline.blendConstantRequired {
 		p.blendConstantRequired = true
 	}
@@ -91,6 +99,8 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	p.binder.assign(index, group.layout)
 	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
+	// Track bind group itself for submit-time validation (VAL-B5).
+	p.encoder.trackBindGroup(group)
 	// Track bind group resources for submit-time validation (VAL-A6).
 	for _, buf := range group.boundBuffers {
 		p.encoder.trackBuffer(buf)
@@ -125,6 +135,7 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 		return
 	}
 	p.indexBufferSet = true
+	p.indexBufferFormat = format
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
 	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
@@ -218,16 +229,48 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 			ErrDrawMissingIndexBuffer))
 		return
 	}
+	// VAL-B2: Validate index format matches pipeline's strip index format.
+	// Matches Rust wgpu-core render.rs:568-582 (UnmatchedIndexFormats).
+	if p.currentStripIndexFormat != nil && p.indexBufferFormat != *p.currentStripIndexFormat {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndexed: index buffer format %v does not match pipeline strip index format %v: %w",
+			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
+		return
+	}
 	p.core.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
-func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
+func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) { //nolint:dupl // render vs compute use different sentinel errors and arg sizes
 	if !p.validateDrawState("DrawIndirect") {
 		return
 	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndirect: buffer is nil"))
+		return
+	}
+	// VAL-B3: Validate indirect buffer has INDIRECT usage.
+	// Matches Rust wgpu-core render.rs:2763 (check_usage(BufferUsages::INDIRECT)).
+	if buffer.Usage()&BufferUsageIndirect == 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: buffer %q missing BufferUsageIndirect usage: %w",
+			buffer.Label(), ErrDrawIndirectBufferUsage))
+		return
+	}
+	// VAL-B3: Validate indirect buffer offset is 4-byte aligned.
+	// Matches Rust wgpu-core render.rs:2766 (offset % 4 != 0).
+	if offset%4 != 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: offset %d is not 4-byte aligned: %w",
+			offset, ErrDrawIndirectOffsetAlignment))
+		return
+	}
+	// VAL-B3: Validate indirect args fit within buffer.
+	// DrawIndirect args: 4 × uint32 = 16 bytes. Matches Rust render.rs:2772-2779.
+	if offset+16 > buffer.Size() {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: offset %d + 16 bytes exceeds buffer size %d: %w",
+			offset, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
 	p.trackRef(buffer.core.Ref)
@@ -245,8 +288,40 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 			ErrDrawMissingIndexBuffer))
 		return
 	}
+	// VAL-B2: Validate index format matches pipeline's strip index format.
+	// Matches Rust wgpu-core render.rs:568-582 (UnmatchedIndexFormats).
+	if p.currentStripIndexFormat != nil && p.indexBufferFormat != *p.currentStripIndexFormat {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndexedIndirect: index buffer format %v does not match pipeline strip index format %v: %w",
+			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
+		return
+	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: buffer is nil"))
+		return
+	}
+	// VAL-B3: Validate indirect buffer has INDIRECT usage.
+	// Matches Rust wgpu-core render.rs:2763 (check_usage(BufferUsages::INDIRECT)).
+	if buffer.Usage()&BufferUsageIndirect == 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndexedIndirect: buffer %q missing BufferUsageIndirect usage: %w",
+			buffer.Label(), ErrDrawIndirectBufferUsage))
+		return
+	}
+	// VAL-B3: Validate indirect buffer offset is 4-byte aligned.
+	// Matches Rust wgpu-core render.rs:2766 (offset % 4 != 0).
+	if offset%4 != 0 {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndexedIndirect: offset %d is not 4-byte aligned: %w",
+			offset, ErrDrawIndirectOffsetAlignment))
+		return
+	}
+	// VAL-B3: Validate indirect args fit within buffer.
+	// DrawIndexedIndirect args: 5 × uint32 = 20 bytes. Matches Rust render.rs:2772-2779.
+	if offset+20 > buffer.Size() {
+		p.encoder.setError(fmt.Errorf(
+			"wgpu: RenderPass.DrawIndexedIndirect: offset %d + 20 bytes exceeds buffer size %d: %w",
+			offset, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
 	p.trackRef(buffer.core.Ref)

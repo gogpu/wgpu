@@ -56,7 +56,7 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Textu
 
 Validation layer between the public API and HAL. Core validates exhaustively — HAL assumes validated input.
 
-- **Spec validation** — `core/validate.go` implements 30+ WebGPU spec rules for textures (dimensions, limits, multisampling, formats), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets), bind groups and layouts. Draw-time validation includes blend constant tracking (VAL-005) and resource usage conflict detection (BufferTracker)
+- **Spec validation** — `core/validate.go` implements 45+ WebGPU spec rules (Phase A+B): textures (dimensions, limits, multisampling, formats, depth/stencil aspects), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets, format type guards), bind groups (entry matching, buffer usage/alignment/bounds, MinBindingSize), pipeline layouts (bind group count). Draw-time validation includes pipeline/bind group/vertex buffer state, index buffer format matching, indirect buffer bounds, blend constant tracking (VAL-005), and resource usage conflict detection (BufferTracker). Queue.Submit validates buffer/texture/bind group lifecycle.
 - **Typed errors** — `core/error.go` defines 7 typed error types (`CreateTextureError`, `CreateSamplerError`, `CreateShaderModuleError`, `CreateRenderPipelineError`, `CreateComputePipelineError`, `CreateBindGroupLayoutError`, `CreateBindGroupError`) with specific error kinds and context fields, supporting `errors.As()` for programmatic handling
 - **Deferred errors** — WebGPU pattern: encoding-phase errors are recorded via `SetError()` and surface at `End()` / `Finish()`
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)

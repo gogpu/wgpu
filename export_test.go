@@ -84,3 +84,9 @@ func (l *BindGroupLayout) SetTestEntries(entries []gputypes.BindGroupLayoutEntry
 func (g *BindGroup) SetTestLayout(layout *BindGroupLayout) {
 	g.layout = layout
 }
+
+// SetTestStripIndexFormat sets the stripIndexFormat field on a RenderPipeline for testing.
+// Pass nil for non-strip topologies, or a pointer to the expected IndexFormat for strip topologies.
+func (p *RenderPipeline) SetTestStripIndexFormat(format *IndexFormat) {
+	p.stripIndexFormat = format
+}

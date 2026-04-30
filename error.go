@@ -85,6 +85,41 @@ var (
 	// ErrDispatchWorkgroupCountExceeded is returned when Dispatch is called with
 	// workgroup counts exceeding the device limit.
 	ErrDispatchWorkgroupCountExceeded = errors.New("wgpu: dispatch workgroup count exceeds device limit")
+
+	// ErrDrawIndexFormatMismatch is returned when the index buffer format
+	// does not match the pipeline's StripIndexFormat for strip topologies.
+	// Matches Rust wgpu-core DrawError::UnmatchedIndexFormats (render.rs:576-580).
+	ErrDrawIndexFormatMismatch = errors.New("wgpu: index buffer format does not match pipeline strip index format")
+
+	// ErrDrawIndirectBufferUsage is returned when DrawIndirect or
+	// DrawIndexedIndirect is called with a buffer that lacks BufferUsageIndirect.
+	// Matches Rust wgpu-core check_usage(BufferUsages::INDIRECT) (render.rs:2763).
+	ErrDrawIndirectBufferUsage = errors.New("wgpu: indirect draw buffer missing INDIRECT usage")
+
+	// ErrDrawIndirectOffsetAlignment is returned when DrawIndirect or
+	// DrawIndexedIndirect is called with an offset that is not 4-byte aligned.
+	// Matches Rust wgpu-core UnalignedIndirectBufferOffset (render.rs:2766).
+	ErrDrawIndirectOffsetAlignment = errors.New("wgpu: indirect draw buffer offset not 4-byte aligned")
+
+	// ErrDispatchIndirectBufferUsage is returned when DispatchIndirect is called
+	// with a buffer that lacks BufferUsageIndirect.
+	// Matches Rust wgpu-core check_usage(BufferUsages::INDIRECT) (compute.rs:896).
+	ErrDispatchIndirectBufferUsage = errors.New("wgpu: indirect dispatch buffer missing INDIRECT usage")
+
+	// ErrDispatchIndirectOffsetAlignment is returned when DispatchIndirect is
+	// called with an offset that is not 4-byte aligned.
+	// Matches Rust wgpu-core UnalignedIndirectBufferOffset (compute.rs:899).
+	ErrDispatchIndirectOffsetAlignment = errors.New("wgpu: indirect dispatch buffer offset not 4-byte aligned")
+
+	// ErrDrawIndirectBufferOverrun is returned when DrawIndirect or
+	// DrawIndexedIndirect args extend past the end of the buffer.
+	// Matches Rust wgpu-core IndirectBufferOverrun (render.rs:2772-2779).
+	ErrDrawIndirectBufferOverrun = errors.New("wgpu: indirect draw args exceed buffer size")
+
+	// ErrDispatchIndirectBufferOverrun is returned when DispatchIndirect
+	// args extend past the end of the buffer.
+	// Matches Rust wgpu-core IndirectBufferOverrun (compute.rs:903-909).
+	ErrDispatchIndirectBufferOverrun = errors.New("wgpu: indirect dispatch args exceed buffer size")
 )
 
 // Queue.Submit validation sentinel errors (VAL-A6).
@@ -107,6 +142,12 @@ var (
 	// references a texture that has been released/destroyed.
 	// Matches Rust QueueSubmitError::DestroyedResource for textures.
 	ErrSubmitTextureDestroyed = errors.New("wgpu: Submit: command buffer references destroyed texture")
+
+	// ErrSubmitBindGroupDestroyed is returned when a submitted command buffer
+	// references a bind group that has been released/destroyed.
+	// Matches Rust wgpu-core validate_command_buffer bind_group.try_raw()
+	// (device/queue.rs:1815-1817).
+	ErrSubmitBindGroupDestroyed = errors.New("wgpu: Submit: command buffer references destroyed bind group")
 
 	// ErrSubmitCommandBufferInvalid is returned when a command buffer has
 	// already been submitted or was never properly finished.

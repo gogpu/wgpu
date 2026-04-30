@@ -2616,6 +2616,11 @@ func TestDrawSentinelErrorsAreDistinct(t *testing.T) {
 		{"ErrDispatchIncompatibleBindGroup", wgpu.ErrDispatchIncompatibleBindGroup},
 		{"ErrDispatchLateBufferTooSmall", wgpu.ErrDispatchLateBufferTooSmall},
 		{"ErrDispatchWorkgroupCountExceeded", wgpu.ErrDispatchWorkgroupCountExceeded},
+		{"ErrDrawIndexFormatMismatch", wgpu.ErrDrawIndexFormatMismatch},
+		{"ErrDrawIndirectBufferUsage", wgpu.ErrDrawIndirectBufferUsage},
+		{"ErrDrawIndirectOffsetAlignment", wgpu.ErrDrawIndirectOffsetAlignment},
+		{"ErrDispatchIndirectBufferUsage", wgpu.ErrDispatchIndirectBufferUsage},
+		{"ErrDispatchIndirectOffsetAlignment", wgpu.ErrDispatchIndirectOffsetAlignment},
 	}
 
 	for i, a := range sentinels {
@@ -2631,5 +2636,423 @@ func TestDrawSentinelErrorsAreDistinct(t *testing.T) {
 				t.Errorf("%s and %s should be distinct errors", a.name, b.name)
 			}
 		}
+	}
+}
+
+// =============================================================================
+// VAL-B2: Index buffer format mismatch for strip topologies
+// =============================================================================
+
+func TestDrawIndexedFormatMismatchSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline with StripIndexFormat = Uint32.
+	u32 := gputypes.IndexFormatUint32
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pipeline.SetTestStripIndexFormat(&u32)
+	pass.SetPipeline(pipeline)
+
+	// Set index buffer with Uint16 format (mismatch).
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf-u16",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+	pass.DrawIndexed(3, 1, 0, 0, 0) // format mismatch: buffer=Uint16, pipeline=Uint32
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error for index format mismatch")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndexFormatMismatch) {
+		t.Errorf("error should match ErrDrawIndexFormatMismatch via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawIndexedFormatMatchesStripFormat(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline with StripIndexFormat = Uint16.
+	u16 := gputypes.IndexFormatUint16
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pipeline.SetTestStripIndexFormat(&u16)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf-u16",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0) // matches pipeline
+	pass.DrawIndexed(3, 1, 0, 0, 0)
+	_ = pass.End()
+
+	// Should not fail with format mismatch (may fail for other HAL reasons).
+	_, err := encoder.Finish()
+	if errors.Is(err, wgpu.ErrDrawIndexFormatMismatch) {
+		t.Errorf("should not get ErrDrawIndexFormatMismatch when formats match, got: %v", err)
+	}
+}
+
+func TestDrawIndexedNoStripFormatSkipsCheck(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline without StripIndexFormat (non-strip topology).
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	// No SetTestStripIndexFormat — nil by default.
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+	pass.DrawIndexed(3, 1, 0, 0, 0) // no strip format → no format check
+	_ = pass.End()
+
+	// Should not fail with format mismatch.
+	_, err := encoder.Finish()
+	if errors.Is(err, wgpu.ErrDrawIndexFormatMismatch) {
+		t.Errorf("should not get ErrDrawIndexFormatMismatch for non-strip topology, got: %v", err)
+	}
+}
+
+func TestDrawIndexedIndirectFormatMismatchSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Pipeline with StripIndexFormat = Uint16.
+	u16 := gputypes.IndexFormatUint16
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pipeline.SetTestStripIndexFormat(&u16)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf-u32",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint32, 0) // mismatch: buffer=Uint32, pipeline=Uint16
+
+	indirectBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  20,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer indirectBuf.Release()
+
+	pass.DrawIndexedIndirect(indirectBuf, 0) // format mismatch
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error for index format mismatch in DrawIndexedIndirect")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndexFormatMismatch) {
+		t.Errorf("error should match ErrDrawIndexFormatMismatch via errors.Is, got: %v", err)
+	}
+}
+
+// =============================================================================
+// VAL-B3: Indirect buffer usage + offset alignment
+// =============================================================================
+
+func TestDrawIndirectBufferMissingUsageSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	// Buffer WITHOUT Indirect usage.
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "no-indirect-usage",
+		Size:  16,
+		Usage: wgpu.BufferUsageStorage,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndirect(buf, 0) // missing INDIRECT usage
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndirect buffer lacks INDIRECT usage")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndirectBufferUsage) {
+		t.Errorf("error should match ErrDrawIndirectBufferUsage via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawIndirectOffsetUnalignedSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndirect(buf, 3) // 3 is not 4-byte aligned
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndirect offset is not 4-byte aligned")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndirectOffsetAlignment) {
+		t.Errorf("error should match ErrDrawIndirectOffsetAlignment via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawIndirectValidBufferAndOffset(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DrawIndirect(buf, 0) // valid: INDIRECT usage, 0 offset (aligned)
+	_ = pass.End()
+
+	// Should not fail with indirect buffer validation errors.
+	_, err := encoder.Finish()
+	if errors.Is(err, wgpu.ErrDrawIndirectBufferUsage) {
+		t.Errorf("should not get ErrDrawIndirectBufferUsage for valid buffer, got: %v", err)
+	}
+	if errors.Is(err, wgpu.ErrDrawIndirectOffsetAlignment) {
+		t.Errorf("should not get ErrDrawIndirectOffsetAlignment for aligned offset, got: %v", err)
+	}
+}
+
+func TestDrawIndexedIndirectBufferMissingUsageSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+
+	// Buffer WITHOUT Indirect usage.
+	indBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "no-indirect",
+		Size:  20,
+		Usage: wgpu.BufferUsageStorage,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer indBuf.Release()
+
+	pass.DrawIndexedIndirect(indBuf, 0) // missing INDIRECT usage
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexedIndirect buffer lacks INDIRECT usage")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndirectBufferUsage) {
+		t.Errorf("error should match ErrDrawIndirectBufferUsage via errors.Is, got: %v", err)
+	}
+}
+
+func TestDrawIndexedIndirectOffsetUnalignedSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "idx-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer idxBuf.Release()
+
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+
+	indBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer indBuf.Release()
+
+	pass.DrawIndexedIndirect(indBuf, 5) // 5 is not 4-byte aligned
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DrawIndexedIndirect offset is not 4-byte aligned")
+	}
+	if !errors.Is(err, wgpu.ErrDrawIndirectOffsetAlignment) {
+		t.Errorf("error should match ErrDrawIndirectOffsetAlignment via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchIndirectBufferMissingUsageSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	// Need a pipeline set to pass validateDispatchState.
+	pipeline := &wgpu.ComputePipeline{}
+	pass.SetPipeline(pipeline)
+
+	// Buffer WITHOUT Indirect usage.
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "no-indirect",
+		Size:  12,
+		Usage: wgpu.BufferUsageStorage,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DispatchIndirect(buf, 0) // missing INDIRECT usage
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DispatchIndirect buffer lacks INDIRECT usage")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchIndirectBufferUsage) {
+		t.Errorf("error should match ErrDispatchIndirectBufferUsage via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchIndirectOffsetUnalignedSentinel(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.ComputePipeline{}
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DispatchIndirect(buf, 2) // 2 is not 4-byte aligned
+	_ = pass.End()
+
+	_, err := encoder.Finish()
+	if err == nil {
+		t.Fatal("Finish() should return error when DispatchIndirect offset is not 4-byte aligned")
+	}
+	if !errors.Is(err, wgpu.ErrDispatchIndirectOffsetAlignment) {
+		t.Errorf("error should match ErrDispatchIndirectOffsetAlignment via errors.Is, got: %v", err)
+	}
+}
+
+func TestDispatchIndirectValidBufferAndOffset(t *testing.T) {
+	device, encoder, pass := newEncoderWithComputePass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.ComputePipeline{}
+	pass.SetPipeline(pipeline)
+
+	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect-buf",
+		Size:  12,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if bufErr != nil {
+		t.Fatalf("CreateBuffer: %v", bufErr)
+	}
+	defer buf.Release()
+
+	pass.DispatchIndirect(buf, 0) // valid: INDIRECT usage, 0 offset (aligned)
+	_ = pass.End()
+
+	// Should not fail with indirect buffer validation errors.
+	_, err := encoder.Finish()
+	if errors.Is(err, wgpu.ErrDispatchIndirectBufferUsage) {
+		t.Errorf("should not get ErrDispatchIndirectBufferUsage for valid buffer, got: %v", err)
+	}
+	if errors.Is(err, wgpu.ErrDispatchIndirectOffsetAlignment) {
+		t.Errorf("should not get ErrDispatchIndirectOffsetAlignment for aligned offset, got: %v", err)
 	}
 }

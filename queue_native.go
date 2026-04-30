@@ -378,6 +378,14 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 		}
 	}
 
+	// 4. Check referenced bind groups (matches Rust queue.rs:1815-1817).
+	for bg := range cb.usedBindGroups {
+		if bg.released != nil && bg.released.Load() {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released bind group: %w",
+				index, ErrSubmitBindGroupDestroyed)
+		}
+	}
+
 	return nil
 }
 
