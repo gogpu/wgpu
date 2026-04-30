@@ -31,6 +31,22 @@ var (
 	ErrTimeout = errors.New("wgpu: timeout")
 )
 
+// Draw-time validation sentinel errors.
+var (
+	ErrDrawMissingPipeline            = errors.New("wgpu: draw called without SetPipeline")
+	ErrDrawMissingBindGroup           = errors.New("wgpu: draw called with missing bind group")
+	ErrDrawIncompatibleBindGroup      = errors.New("wgpu: draw called with incompatible bind group layout")
+	ErrDrawMissingVertexBuffer        = errors.New("wgpu: draw called with insufficient vertex buffers")
+	ErrDrawMissingIndexBuffer         = errors.New("wgpu: DrawIndexed called without SetIndexBuffer")
+	ErrDrawMissingBlendConstant       = errors.New("wgpu: draw called without SetBlendConstant (pipeline uses constant blend factor)")
+	ErrDrawLateBufferTooSmall         = errors.New("wgpu: bound buffer smaller than shader-required minimum")
+	ErrDispatchMissingPipeline        = errors.New("wgpu: dispatch called without SetPipeline")
+	ErrDispatchMissingBindGroup       = errors.New("wgpu: dispatch called with missing bind group")
+	ErrDispatchIncompatibleBindGroup  = errors.New("wgpu: dispatch called with incompatible bind group layout")
+	ErrDispatchLateBufferTooSmall     = errors.New("wgpu: dispatch: bound buffer smaller than shader-required minimum")
+	ErrDispatchWorkgroupCountExceeded = errors.New("wgpu: dispatch workgroup count exceeds device limit")
+)
+
 // GPUError represents a GPU error.
 type GPUError struct {
 	Message string

@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // lateBufferBinding tracks a single buffer binding that requires late validation.
 // Populated from two independent sources (order-independent, matching Rust):
@@ -173,6 +176,9 @@ func validateSetBindGroup(passName string, index uint32, group *BindGroup, offse
 // shader-required minimum. This is the "late" validation for entries with
 // MinBindingSize == 0.
 //
+// The returned error wraps errLateBufferTooSmall so callers can re-wrap with
+// the appropriate public sentinel (ErrDrawLateBufferTooSmall or ErrDispatchLateBufferTooSmall).
+//
 // Matches Rust wgpu-core's Binder::check_late_buffer_bindings (command/bind.rs:480-499).
 func (b *binder) checkLateBufferBindings() error {
 	for groupIndex := uint32(0); groupIndex < b.maxSlots; groupIndex++ {
@@ -186,14 +192,23 @@ func (b *binder) checkLateBufferBindings() error {
 			if lb.BoundSize < lb.ShaderExpectSize {
 				return fmt.Errorf(
 					"wgpu: buffer binding at group %d, binding %d has size %d, "+
-						"but the shader requires a minimum of %d (set MinBindingSize in layout to avoid late validation)",
+						"but the shader requires a minimum of %d (set MinBindingSize in layout to avoid late validation): %w",
 					groupIndex, lb.BindingIndex, lb.BoundSize, lb.ShaderExpectSize,
+					errLateBufferTooSmall,
 				)
 			}
 		}
 	}
 	return nil
 }
+
+// Unexported sentinel errors for binder validation. Callers re-wrap with
+// the appropriate public sentinel (ErrDrawMissing*/ErrDispatchMissing*).
+var (
+	errBindGroupMissing      = errors.New("bind group missing")
+	errBindGroupIncompatible = errors.New("bind group incompatible")
+	errLateBufferTooSmall    = errors.New("late buffer too small")
+)
 
 // checkCompatibility validates that all slots expected by the current pipeline
 // have compatible bind groups assigned. Returns an error describing the first
@@ -204,6 +219,9 @@ func (b *binder) checkLateBufferBindings() error {
 // have the same bindings with matching types, visibility, and counts.
 // This allows equivalent layouts created via separate CreateBindGroupLayout
 // calls to be considered compatible.
+//
+// The returned error wraps errBindGroupMissing or errBindGroupIncompatible
+// so callers can re-wrap with the appropriate public sentinel.
 func (b *binder) checkCompatibility() error {
 	for i := uint32(0); i < b.maxSlots; i++ {
 		exp := b.expected[i]
@@ -214,14 +232,14 @@ func (b *binder) checkCompatibility() error {
 		asg := b.assigned[i]
 		if asg == nil {
 			return fmt.Errorf(
-				"wgpu: bind group at index %d is required by the pipeline but not set (call SetBindGroup)",
-				i,
+				"wgpu: bind group at index %d is required by the pipeline but not set (call SetBindGroup): %w",
+				i, errBindGroupMissing,
 			)
 		}
 		if !asg.isCompatibleWith(exp) {
 			return fmt.Errorf(
-				"wgpu: bind group at index %d has incompatible layout (assigned layout %p != expected layout %p)",
-				i, asg, exp,
+				"wgpu: bind group at index %d has incompatible layout (assigned layout %p != expected layout %p): %w",
+				i, asg, exp, errBindGroupIncompatible,
 			)
 		}
 	}

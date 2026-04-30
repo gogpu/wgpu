@@ -309,6 +309,10 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		BindGroupLayouts: halLayouts,
 	}
 
+	if err := core.ValidatePipelineLayoutDescriptor(halDesc, d.core.Limits); err != nil {
+		return nil, err
+	}
+
 	halLayout, err := halDevice.CreatePipelineLayout(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
@@ -358,6 +362,24 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		Entries: halEntries,
 	}
 
+	// Build buffer metadata for core validation.
+	var bufferInfos []core.BindGroupBufferInfo
+	for _, entry := range desc.Entries {
+		if entry.Buffer != nil {
+			bufferInfos = append(bufferInfos, core.BindGroupBufferInfo{
+				Binding:    entry.Binding,
+				Usage:      entry.Buffer.Usage(),
+				BufferSize: entry.Buffer.Size(),
+				Offset:     entry.Offset,
+				Size:       entry.Size,
+			})
+		}
+	}
+
+	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.entries, bufferInfos, d.core.Limits); err != nil {
+		return nil, err
+	}
+
 	halGroup, err := halDevice.CreateBindGroup(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
@@ -392,6 +414,9 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		})
 	}
 
+	// Collect buffer and texture references for submit-time validation (VAL-A6).
+	boundBuffers, boundTextures := collectBindGroupResources(desc.Entries)
+
 	bg := &BindGroup{
 		hal:                    halGroup,
 		device:                 d,
@@ -399,6 +424,8 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
 		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, nil),
+		boundBuffers:           boundBuffers,
+		boundTextures:          boundTextures,
 	}
 
 	// Safety net: if the bind group is garbage collected without Release(),
@@ -406,6 +433,24 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	bg.cleanup = registerBindGroupCleanup(bg, d, desc.Label)
 
 	return bg, nil
+}
+
+// collectBindGroupResources extracts buffer and texture references from bind
+// group entries for submit-time validation (VAL-A6). Matches Rust wgpu-core
+// where bind group creation stores resource references that are later checked
+// via trackers.buffers/textures.used_resources() in validate_command_buffer.
+func collectBindGroupResources(entries []BindGroupEntry) ([]*Buffer, []*Texture) {
+	var buffers []*Buffer
+	var textures []*Texture
+	for i := range entries {
+		if entries[i].Buffer != nil {
+			buffers = append(buffers, entries[i].Buffer)
+		}
+		if entries[i].TextureView != nil && entries[i].TextureView.texture != nil {
+			textures = append(textures, entries[i].TextureView.texture)
+		}
+	}
+	return buffers, textures
 }
 
 // buildBindGroupEntryMap builds a lookup map from binding index to BindGroupEntry

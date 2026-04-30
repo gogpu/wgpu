@@ -46,6 +46,7 @@
 ✅ **Late buffer binding validation** — draw/dispatch-time MinBindingSize=0 checks (Rust parity)
 ✅ **Compute dispatch barriers** — per-dispatch memory barriers on all GPU backends (Rust parity)
 ✅ **Dispatch workgroup validation** — count + size limits checked before dispatch
+✅ **Validation Phase A — crash prevention** — 18 P0 checks (WriteBuffer bounds, BindGroup buffer validation, draw-time state with typed sentinel errors, PipelineLayout count, format type guards, Queue.Submit resource state). Coverage 22% → 37% of Rust wgpu-core.
 ✅ **DX12 buffer state tracking** — per-buffer D3D12_RESOURCE_STATES with automatic transition barriers (Rust BufferTracker pattern)
 ✅ **Pipeline constants passthrough** — Constants map flows from public API through HAL
 ✅ **Zero-init workgroup memory** — WebGPU spec default, plumbed through all layers
@@ -58,7 +59,9 @@
 ✅ **Zero-allocation WriteBuffer batching** — pre-allocated BufferCopy + stack barrier arrays. All PendingWrites hot paths 0 allocs/op.
 
 ### Remaining validation (planned)
-- Late buffer binding size (SPIR-V reflection → min binding size)
+- **Phase B** (P1): Texture format checks, vertex buffer validation, sampler/texture type matching
+- **Phase C** (P2): Spec compliance edge cases, feature gates
+- See [ADR-VALIDATION-PHASES.md](docs/dev/research/ADR-VALIDATION-PHASES.md)
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -140,6 +143,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.26.9** | 2026-04 | **Validation Phase A** — 18 P0 crash prevention checks (WriteBuffer bounds, BindGroup buffer, draw-time state, PipelineLayout, format guards, Submit resource state). Coverage 22% → 37%. |
 | **v0.25.6** | 2026-04 | Vulkan command buffer free list (VK-CMD-001): batch alloc, pool reset, enterprise parity |
 | **v0.25.5** | 2026-04 | WASM platform split (Phase 0): _native.go/_browser.go file split, core/hal excluded from WASM |
 | **v0.25.4** | 2026-04 | Late buffer binding validation (VAL-006) + Vulkan relay semaphores (VK-SYNC-001) |

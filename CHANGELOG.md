@@ -199,6 +199,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **naga** v0.17.4 → **v0.17.5** — `ir.TypeSize()` for buffer size reflection (VAL-006)
 
+## [0.26.9] - 2026-04-30
+
+### Added
+
+- **WebGPU validation Phase A — crash prevention** (ADR-VALIDATION-PHASES) — 18 P0 checks
+  matching Rust wgpu-core, preventing GPU crashes from invalid API usage:
+
+  **Queue.WriteBuffer bounds** (VAL-A1):
+  - Buffer not mapped, COPY_DST usage required, offset/size 4-byte alignment, bounds check
+
+  **CreateBindGroup buffer validation** (VAL-A2):
+  - Buffer usage matches binding type (UNIFORM/STORAGE), offset alignment
+    (minUniformBufferOffsetAlignment/minStorageBufferOffsetAlignment), binding size limits,
+    offset+size bounds, zero-size rejection, storage 4-byte alignment
+
+  **Draw-time state validation** (VAL-A3):
+  - 12 typed sentinel errors with `errors.Is()` support: `ErrDrawMissingPipeline`,
+    `ErrDrawMissingBindGroup`, `ErrDrawIncompatibleBindGroup`, `ErrDrawMissingVertexBuffer`,
+    `ErrDrawMissingIndexBuffer`, `ErrDrawMissingBlendConstant`, `ErrDrawLateBufferTooSmall`,
+    `ErrDispatchMissingPipeline`, `ErrDispatchMissingBindGroup`,
+    `ErrDispatchIncompatibleBindGroup`, `ErrDispatchLateBufferTooSmall`,
+    `ErrDispatchWorkgroupCountExceeded`
+  - `EncoderStateError.Unwrap()` — error chain preserved through Finish()
+
+  **CreatePipelineLayout validation** (VAL-A4):
+  - Bind group layout count vs `MaxBindGroups` limit
+
+  **Format type guards** (VAL-A5):
+  - Color target must be color format (not depth/stencil)
+  - Depth/stencil attachment must be depth/stencil format (not color)
+
+  **Queue.Submit resource validation** (VAL-A6):
+  - Referenced buffers not destroyed, not mapped
+  - Referenced textures not destroyed
+  - Double-submit prevention
+  - Resource tracking during encoding (SetBindGroup, SetVertexBuffer, SetIndexBuffer, etc.)
+
+- `CreatePipelineLayoutError` typed error with `errors.As()` support
+- `CreateBindGroupError` extended with 6 buffer validation error kinds
+- `CreateRenderPipelineError` extended with color/depth format guard error kinds
+
+### Dependencies
+
+- **naga** v0.17.6 → **v0.17.8**
+
+### Research
+
+- **[Validation Gap Analysis](docs/dev/research/VALIDATION-GAP-ANALYSIS-RUST-WGPU.md)** — 121-check
+  comparison vs Rust wgpu-core. Coverage: 22% → ~37% after Phase A.
+- **[ADR: Validation Phases](docs/dev/research/ADR-VALIDATION-PHASES.md)** — phased implementation
+  plan (A: crash prevention, B: correctness, C: spec compliance)
+
 ## [0.25.3] - 2026-04-23
 
 ### Fixed

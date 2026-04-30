@@ -28,6 +28,17 @@ type CommandEncoder struct {
 	// On Finish(), ownership transfers to the CommandBuffer for post-GPU recycling.
 	// On DiscardEncoding(), the encoder is reset and returned to the pool immediately.
 	halEncoder hal.CommandEncoder
+
+	// usedBuffers tracks root-level buffers referenced during encoding for
+	// submit-time validation (VAL-A6). At Submit, each buffer is checked for
+	// destroyed/mapped state. Using a map for O(1) deduplication — the same
+	// buffer may be set as vertex, index, and bind group buffer in a single pass.
+	usedBuffers map[*Buffer]struct{}
+
+	// usedTextures tracks root-level textures referenced during encoding for
+	// submit-time validation (VAL-A6). At Submit, each texture is checked for
+	// destroyed state.
+	usedTextures map[*Texture]struct{}
 }
 
 // setError records a deferred error on the underlying command encoder.
@@ -47,6 +58,30 @@ func (e *CommandEncoder) trackRef(ref *core.ResourceRef) {
 		ref.Clone()
 		e.trackedRefs = append(e.trackedRefs, ref)
 	}
+}
+
+// trackBuffer records a buffer reference for submit-time validation (VAL-A6).
+// The map is lazily initialized to avoid allocation when no buffers are used.
+func (e *CommandEncoder) trackBuffer(buf *Buffer) {
+	if buf == nil {
+		return
+	}
+	if e.usedBuffers == nil {
+		e.usedBuffers = make(map[*Buffer]struct{})
+	}
+	e.usedBuffers[buf] = struct{}{}
+}
+
+// trackTexture records a texture reference for submit-time validation (VAL-A6).
+// The map is lazily initialized to avoid allocation when no textures are used.
+func (e *CommandEncoder) trackTexture(tex *Texture) {
+	if tex == nil {
+		return
+	}
+	if e.usedTextures == nil {
+		e.usedTextures = make(map[*Texture]struct{})
+	}
+	e.usedTextures[tex] = struct{}{}
 }
 
 // BeginRenderPass begins a render pass.
@@ -103,6 +138,8 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	}
 	e.trackRef(src.core.Ref)
 	e.trackRef(dst.core.Ref)
+	e.trackBuffer(src)
+	e.trackBuffer(dst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -131,6 +168,8 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is nil"))
 		return
 	}
+	e.trackTexture(src)
+	e.trackBuffer(dst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -160,6 +199,8 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: destination texture is nil"))
 		return
 	}
+	e.trackTexture(src)
+	e.trackTexture(dst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -263,13 +304,17 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	}
 
 	cb := &CommandBuffer{
-		core:        coreCmdBuffer,
-		device:      e.device,
-		trackedRefs: e.trackedRefs,
-		halEncoder:  e.halEncoder,
+		core:         coreCmdBuffer,
+		device:       e.device,
+		trackedRefs:  e.trackedRefs,
+		halEncoder:   e.halEncoder,
+		usedBuffers:  e.usedBuffers,
+		usedTextures: e.usedTextures,
 	}
 	e.trackedRefs = nil
-	e.halEncoder = nil // ownership transferred
+	e.halEncoder = nil   // ownership transferred
+	e.usedBuffers = nil  // ownership transferred
+	e.usedTextures = nil // ownership transferred
 	return cb, nil
 }
 
@@ -339,6 +384,24 @@ type CommandBuffer struct {
 	// Matches Rust wgpu-core where the encoder travels:
 	// CommandEncoder -> CommandBuffer -> EncoderInFlight -> GPU done -> pool
 	halEncoder hal.CommandEncoder
+
+	// usedBuffers tracks all buffers referenced during encoding (VAL-A6).
+	// Validated at Submit time: destroyed or mapped buffers cause an error.
+	// Matches Rust wgpu-core's cmd_buf_data.trackers.buffers.used_resources()
+	// (device/queue.rs:1780-1787).
+	usedBuffers map[*Buffer]struct{}
+
+	// usedTextures tracks all textures referenced during encoding (VAL-A6).
+	// Validated at Submit time: destroyed textures cause an error.
+	// Matches Rust wgpu-core's cmd_buf_data.trackers.textures.used_resources()
+	// (device/queue.rs:1791-1808).
+	usedTextures map[*Texture]struct{}
+
+	// submitted is set to true after this command buffer has been submitted
+	// to a queue. A command buffer cannot be submitted twice.
+	// Matches Rust wgpu-core's CommandBuffer::take_finished() which consumes
+	// the buffer, preventing reuse.
+	submitted bool
 }
 
 // Release releases a CommandBuffer that will NOT be submitted to the GPU.

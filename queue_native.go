@@ -49,6 +49,20 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		}
 	}
 
+	// --- VAL-A6: Submit-time resource state validation ---
+	// Matches Rust wgpu-core validate_command_buffer (device/queue.rs:1764-1828).
+	// Each command buffer is checked for: valid state, buffer destroyed/mapped,
+	// texture destroyed.
+	for i, cb := range commandBuffers {
+		if cb == nil {
+			return 0, fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+		}
+		if err := validateCommandBufferForSubmit(cb, i); err != nil {
+			return 0, err
+		}
+	}
+	// --- end VAL-A6 ---
+
 	// Build combined command buffer list: pending first, then user buffers.
 	var allBuffers []hal.CommandBuffer
 	if pendingCmdBuf != nil {
@@ -58,10 +72,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		allBuffers = make([]hal.CommandBuffer, 0, len(commandBuffers))
 	}
 
-	for i, cb := range commandBuffers {
-		if cb == nil {
-			return 0, fmt.Errorf("wgpu: command buffer at index %d is nil", i)
-		}
+	for _, cb := range commandBuffers {
 		allBuffers = append(allBuffers, cb.halBuffer())
 	}
 
@@ -123,6 +134,13 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		return
 	}
 
+	// Mark all command buffers as submitted to prevent double-submit (VAL-A6).
+	for _, cb := range commandBuffers {
+		if cb != nil {
+			cb.submitted = true
+		}
+	}
+
 	// Collect tracked refs from command buffers and associate with this submission.
 	// Phase 2: per-command-buffer resource tracking — refs are Drop'd when GPU completes.
 	var allRefs []*core.ResourceRef
@@ -182,10 +200,54 @@ func (q *Queue) Poll() uint64 {
 // directly via HAL without staging — GPU copy into upload heap is undefined
 // behavior on DX12 (upload heap is GENERIC_READ, read-only to GPU).
 // See BUG-DX12-003.
+//
+// Validation (VAL-A1, WebGPU spec §21.1):
+//   - Buffer must not be currently mapped
+//   - Buffer must have CopyDst usage
+//   - offset must be 4-byte aligned
+//   - data size must be 4-byte aligned
+//   - offset + data size must not exceed buffer size
+//
+// Matches Rust wgpu-core queue.rs:647-672 (validate_write_buffer_impl).
 func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	if q.hal == nil || buffer == nil {
 		return fmt.Errorf("wgpu: WriteBuffer: queue or buffer is nil")
 	}
+
+	// --- VAL-A1: bounds + state validation (before HAL access) ---
+
+	// 1. Buffer must not be mapped (write to mapped buffer = data race).
+	// Rust: !matches!(&*buffer.map_state.lock(), BufferMapState::Idle)
+	if buffer.MapState() != MapStateUnmapped {
+		return fmt.Errorf("wgpu: WriteBuffer: buffer is currently mapped")
+	}
+
+	// 2. Buffer must have COPY_DST usage.
+	// Rust: buffer.check_usage(wgt::BufferUsages::COPY_DST)
+	if buffer.Usage()&BufferUsageCopyDst == 0 {
+		return fmt.Errorf("wgpu: WriteBuffer: buffer missing CopyDst usage")
+	}
+
+	// 3. Offset must be 4-byte aligned (COPY_BUFFER_ALIGNMENT = 4).
+	// Rust: buffer_offset % wgt::COPY_BUFFER_ALIGNMENT != 0
+	if offset%4 != 0 {
+		return fmt.Errorf("wgpu: WriteBuffer: offset %d not 4-byte aligned", offset)
+	}
+
+	// 4. Data size must be 4-byte aligned.
+	// Rust: buffer_size.get() % wgt::COPY_BUFFER_ALIGNMENT != 0
+	dataSize := uint64(len(data))
+	if dataSize%4 != 0 {
+		return fmt.Errorf("wgpu: WriteBuffer: data size %d not 4-byte aligned", dataSize)
+	}
+
+	// 5. Write must not exceed buffer bounds.
+	// Rust: buffer_offset + buffer_size.get() > buffer.size
+	if offset+dataSize > buffer.Size() {
+		return fmt.Errorf("wgpu: WriteBuffer: offset %d + size %d exceeds buffer size %d", offset, dataSize, buffer.Size())
+	}
+
+	// --- end VAL-A1 ---
 
 	halBuffer := buffer.halBuffer()
 	if halBuffer == nil {
@@ -270,6 +332,52 @@ func (q *Queue) destroyQueue() *core.DestroyQueue {
 	if q.device != nil && q.device.core != nil {
 		return q.device.core.DestroyQueueRef()
 	}
+	return nil
+}
+
+// validateCommandBufferForSubmit checks that a command buffer and all its
+// referenced resources are in a valid state for submission.
+//
+// This is the Go equivalent of Rust wgpu-core's validate_command_buffer
+// (device/queue.rs:1764-1828). It checks:
+//   - Command buffer has not already been submitted (double-submit prevention)
+//   - All referenced buffers are not destroyed/released
+//   - All referenced buffers are not mapped (mapped buffer in GPU commands = data race)
+//   - All referenced textures are not destroyed/released
+//
+// The index parameter identifies which command buffer in the Submit() call
+// failed validation, for clearer error messages.
+func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
+	// 1. Check double-submit.
+	if cb.submitted {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d: %w",
+			index, ErrSubmitCommandBufferInvalid)
+	}
+
+	// 2. Check referenced buffers (matches Rust queue.rs:1780-1787).
+	for buf := range cb.usedBuffers {
+		// Check destroyed/released.
+		if buf.released != nil && buf.released.Load() {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released buffer %q: %w",
+				index, buf.Label(), ErrSubmitBufferDestroyed)
+		}
+
+		// Check mapped state.
+		// Rust: BufferMapState::Idle is the only valid state for submit.
+		if buf.MapState() != MapStateUnmapped {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references mapped buffer %q: %w",
+				index, buf.Label(), ErrSubmitBufferMapped)
+		}
+	}
+
+	// 3. Check referenced textures (matches Rust queue.rs:1791-1808).
+	for tex := range cb.usedTextures {
+		if tex.released {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
+				index, ErrSubmitTextureDestroyed)
+		}
+	}
+
 	return nil
 }
 

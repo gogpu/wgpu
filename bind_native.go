@@ -190,6 +190,14 @@ type BindGroup struct {
 	// ref is the GPU-aware reference counter for this bind group (Phase 2).
 	// Clone'd when used in a render/compute pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef
+	// boundBuffers holds references to buffers bound in this bind group (VAL-A6).
+	// Used at Submit time to verify that referenced buffers are still alive
+	// and not mapped. Matches Rust wgpu-core's pattern where
+	// validate_command_buffer iterates cmd_buf_data.trackers.buffers.
+	boundBuffers []*Buffer
+	// boundTextures holds references to textures bound in this bind group (VAL-A6).
+	// Used at Submit time to verify that referenced textures are still alive.
+	boundTextures []*Texture
 }
 
 // Release marks the bind group for destruction. The underlying HAL BindGroup
