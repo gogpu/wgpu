@@ -1205,6 +1205,9 @@ func TestValidateRenderPipelineDescriptor_ValidDepthStencil(t *testing.T) {
 				},
 				DepthStencil: &hal.DepthStencilState{
 					Format: f, // valid depth/stencil format
+					// Explicitly disable depth testing so stencil-only formats
+					// (Stencil8) don't trigger RP9b (FormatNotDepth).
+					DepthCompare: gputypes.CompareFunctionAlways,
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
@@ -1438,6 +1441,16 @@ func TestCreateRenderPipelineError_Error(t *testing.T) {
 			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthStencilColorFormat, Label: "test", Format: "RGBA8Unorm"},
 			contains: "not a depth/stencil format",
 		},
+		{
+			name:     "depth format no depth aspect",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoDepthAspect, Label: "test", Format: "Stencil8"},
+			contains: "does not have a depth aspect",
+		},
+		{
+			name:     "depth format no stencil aspect",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoStencilAspect, Label: "test", Format: "Depth16Unorm"},
+			contains: "does not have a stencil aspect",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1630,6 +1643,11 @@ func TestCreateBindGroupError_Error(t *testing.T) {
 			name:     "storage buffer size alignment",
 			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorStorageBufferSizeAlignment, Label: "test", Binding: 0, Size: 13},
 			contains: "not a multiple of 4",
+		},
+		{
+			name:     "min binding size mismatch",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorMinBindingSizeMismatch, Label: "test", Binding: 0, Size: 32, MinBindingSize: 64},
+			contains: "less than minimum",
 		},
 		{
 			name:     "HAL error",
@@ -2026,5 +2044,358 @@ func TestValidateBindGroupDescriptor_BufferBoundsExact(t *testing.T) {
 	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
 	if err != nil {
 		t.Fatalf("expected nil error for exact-fit buffer binding, got: %v", err)
+	}
+}
+
+// --- VAL-B1: MinBindingSize early check tests ---
+
+func TestValidateBindGroupDescriptor_MinBindingSize_TooSmall(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=32 -> error.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 32
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err == nil {
+		t.Fatal("expected error for effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+	if cbge.Size != 32 {
+		t.Errorf("expected Size=32, got %d", cbge.Size)
+	}
+	if cbge.MinBindingSize != 64 {
+		t.Errorf("expected MinBindingSize=64, got %d", cbge.MinBindingSize)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_Exact(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=64 -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 64
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err != nil {
+		t.Fatalf("expected nil error for effective size == MinBindingSize, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_Larger(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=128 -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 128
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err != nil {
+		t.Fatalf("expected nil error for effective size > MinBindingSize, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_ZeroMeansNoCheck(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=0 (no constraint), small binding -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 0
+	bufferInfos[0].Size = 4
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err != nil {
+		t.Fatalf("expected nil error for MinBindingSize=0 (no constraint), got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_ImplicitSize(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=512.
+	// Buffer is 256 bytes, offset=0, Size=0 (implicit: effectiveSize = 256).
+	// 256 < 512 -> error.
+	layoutEntries[0].Buffer.MinBindingSize = 512
+	bufferInfos[0].Size = 0
+	bufferInfos[0].Offset = 0
+	bufferInfos[0].BufferSize = 256
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err == nil {
+		t.Fatal("expected error for implicit effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_StorageBuffer(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Test with storage buffer binding type.
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	layoutEntries[0].Buffer.MinBindingSize = 128
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Size = 64 // multiple of 4, but less than MinBindingSize
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	if err == nil {
+		t.Fatal("expected error for storage buffer effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+}
+
+// --- VAL-B4: Depth/stencil format aspect granularity tests ---
+
+func TestValidateRenderPipelineDescriptor_Depth16Unorm_StencilOpsEnabled(t *testing.T) {
+	// Depth16Unorm has NO stencil aspect. Enabling stencil ops should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format: gputypes.TextureFormatDepth16Unorm,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationReplace, // non-Keep -> stencil enabled
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for Depth16Unorm with stencil ops enabled (no stencil aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Errorf("expected DepthFormatNoStencilAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_DepthWriteEnabled(t *testing.T) {
+	// Stencil8 has NO depth aspect. Enabling depth write should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatStencil8,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionAlways,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for Stencil8 with depth write enabled (no depth aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoDepthAspect {
+		t.Errorf("expected DepthFormatNoDepthAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_DepthCompareNotAlways(t *testing.T) {
+	// Stencil8 has NO depth aspect. DepthCompare != Always triggers isDepthEnabled.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatStencil8,
+			DepthCompare: gputypes.CompareFunctionLess, // not Always -> depth enabled
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for Stencil8 with DepthCompare=Less (no depth aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoDepthAspect {
+		t.Errorf("expected DepthFormatNoDepthAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Depth24PlusStencil8_BothEnabled(t *testing.T) {
+	// Depth24PlusStencil8 has BOTH depth and stencil aspects. Should pass.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionLess,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationReplace,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error for Depth24PlusStencil8 with both depth+stencil enabled, got: %v", err)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Depth32Float_StencilOpsEnabled(t *testing.T) {
+	// Depth32Float has NO stencil aspect. Enabling stencil ops should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatDepth32Float,
+			DepthCompare: gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionLess, // non-Always compare -> stencil enabled
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for Depth32Float with stencil ops enabled (no stencil aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Errorf("expected DepthFormatNoStencilAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_DepthOnly_NoStencilOps(t *testing.T) {
+	// Depth-only format with stencil ops all set to IGNORE (default) -> should pass.
+	depthOnlyFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth32Float,
+	}
+	for _, f := range depthOnlyFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				DepthStencil: &hal.DepthStencilState{
+					Format:            f,
+					DepthWriteEnabled: true,
+					DepthCompare:      gputypes.CompareFunctionLess,
+					// Stencil faces = IGNORE (all Keep + Compare=Always)
+					StencilFront: hal.StencilFaceState{
+						Compare: gputypes.CompareFunctionAlways,
+						FailOp:  hal.StencilOperationKeep,
+						PassOp:  hal.StencilOperationKeep,
+					},
+					StencilBack: hal.StencilFaceState{
+						Compare: gputypes.CompareFunctionAlways,
+						FailOp:  hal.StencilOperationKeep,
+						PassOp:  hal.StencilOperationKeep,
+					},
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			if err != nil {
+				t.Fatalf("expected nil error for depth-only format %s with stencil IGNORE, got: %v", f, err)
+			}
+		})
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_NoDepthOps(t *testing.T) {
+	// Stencil8 with depth disabled (compare=Always, write=false) -> should pass.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionAlways, // depth disabled
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationReplace,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error for Stencil8 with depth disabled, got: %v", err)
 	}
 }

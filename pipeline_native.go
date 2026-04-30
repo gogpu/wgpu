@@ -71,6 +71,11 @@ type RenderPipeline struct {
 	// in the pipeline's vertex state. Draw calls validate that at least this
 	// many vertex buffers have been set via SetVertexBuffer.
 	requiredVertexBuffers uint32
+	// stripIndexFormat is the index format required by strip topologies.
+	// Nil for non-strip topologies. When non-nil, DrawIndexed/DrawIndexedIndirect
+	// validate that the bound index buffer format matches this value.
+	// Matches Rust wgpu-core RenderPipeline.strip_index_format (render.rs:568-582).
+	stripIndexFormat *IndexFormat
 	// blendConstantRequired is true if any color target uses BlendFactorConstant
 	// or BlendFactorOneMinusConstant. Draw calls validate that SetBlendConstant
 	// has been called when this is true.

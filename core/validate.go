@@ -309,6 +309,66 @@ func isDepthStencilFormat(f gputypes.TextureFormat) bool {
 	return false
 }
 
+// hasDepthAspect returns true if the format has a depth aspect.
+// Stencil8 is stencil-only and does NOT have a depth aspect.
+//
+// Matches Rust hal::FormatAspects::from(format).contains(DEPTH).
+func hasDepthAspect(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
+// hasStencilAspect returns true if the format has a stencil aspect.
+// Depth16Unorm, Depth24Plus, Depth32Float are depth-only and do NOT have a stencil aspect.
+//
+// Matches Rust hal::FormatAspects::from(format).contains(STENCIL).
+func hasStencilAspect(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatStencil8,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
+// isDepthEnabled returns true if depth testing is enabled on the depth/stencil state.
+// Matches Rust wgpu-types DepthStencilState::is_depth_enabled():
+//
+//	depth_compare != Always || depth_write_enabled
+func isDepthEnabled(ds *hal.DepthStencilState) bool {
+	return ds.DepthCompare != gputypes.CompareFunctionAlways || ds.DepthWriteEnabled
+}
+
+// stencilFaceIgnored returns true if the stencil face state is the "ignore" state
+// (compare=Always, all ops=Keep). Matches Rust StencilFaceState::IGNORE.
+func stencilFaceIgnored(face hal.StencilFaceState) bool {
+	return face.Compare == gputypes.CompareFunctionAlways &&
+		face.FailOp == hal.StencilOperationKeep &&
+		face.DepthFailOp == hal.StencilOperationKeep &&
+		face.PassOp == hal.StencilOperationKeep
+}
+
+// isStencilEnabled returns true if stencil testing is enabled on the depth/stencil state.
+// Matches Rust wgpu-types StencilState::is_enabled():
+//
+//	(front != IGNORE || back != IGNORE) && (read_mask != 0 || write_mask != 0)
+func isStencilEnabled(ds *hal.DepthStencilState) bool {
+	frontIgnored := stencilFaceIgnored(ds.StencilFront)
+	backIgnored := stencilFaceIgnored(ds.StencilBack)
+	if frontIgnored && backIgnored {
+		return false
+	}
+	return ds.StencilReadMask != 0 || ds.StencilWriteMask != 0
+}
+
 // ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits.
 // Returns nil if valid, or a *CreateRenderPipelineError describing the first validation failure.
 func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits gputypes.Limits) error {
@@ -358,6 +418,27 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 		if desc.DepthStencil.Format != gputypes.TextureFormatUndefined && !isDepthStencilFormat(desc.DepthStencil.Format) {
 			return &CreateRenderPipelineError{
 				Kind:   CreateRenderPipelineErrorDepthStencilColorFormat,
+				Label:  label,
+				Format: desc.DepthStencil.Format.String(),
+			}
+		}
+
+		// RP9b: If depth operations are enabled, format must have a depth aspect.
+		// Rust: resource.rs:4158 — ds.is_depth_enabled() && !aspect.contains(DEPTH)
+		// is_depth_enabled: depth_compare != Always || depth_write_enabled
+		if isDepthEnabled(desc.DepthStencil) && !hasDepthAspect(desc.DepthStencil.Format) {
+			return &CreateRenderPipelineError{
+				Kind:   CreateRenderPipelineErrorDepthFormatNoDepthAspect,
+				Label:  label,
+				Format: desc.DepthStencil.Format.String(),
+			}
+		}
+
+		// RP9c: If stencil operations are enabled, format must have a stencil aspect.
+		// Rust: resource.rs:4161 — ds.stencil.is_enabled() && !aspect.contains(STENCIL)
+		if isStencilEnabled(desc.DepthStencil) && !hasStencilAspect(desc.DepthStencil.Format) {
+			return &CreateRenderPipelineError{
+				Kind:   CreateRenderPipelineErrorDepthFormatNoStencilAspect,
 				Label:  label,
 				Format: desc.DepthStencil.Format.String(),
 			}
@@ -732,6 +813,18 @@ func validateSingleBufferEntry(
 			Binding: info.Binding,
 			Size:    effectiveSize,
 			MaxSize: params.maxBindingSize,
+		}
+	}
+
+	// BG10: If MinBindingSize is set, effective binding size must be >= MinBindingSize.
+	// Rust: wgpu-core device/resource.rs:2817-2826 -- BindingSizeTooSmall
+	if bufLayout.MinBindingSize > 0 && effectiveSize < bufLayout.MinBindingSize {
+		return &CreateBindGroupError{
+			Kind:           CreateBindGroupErrorMinBindingSizeMismatch,
+			Label:          label,
+			Binding:        info.Binding,
+			Size:           effectiveSize,
+			MinBindingSize: bufLayout.MinBindingSize,
 		}
 	}
 

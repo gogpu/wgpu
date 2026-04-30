@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.10] - 2026-04-30
+
+### Added
+
+- **Validation Phase B — correctness checks** (5 P1 checks, full Rust wgpu-core parity):
+  - **VAL-B1:** CreateBindGroup `MinBindingSize` early check — rejects buffer smaller than
+    layout-declared minimum at bind group creation (not deferred to draw time)
+  - **VAL-B2:** DrawIndexed index buffer format mismatch — validates format matches pipeline's
+    `StripIndexFormat` for strip topologies
+  - **VAL-B3:** Indirect buffer validation — `INDIRECT` usage check, 4-byte offset alignment,
+    and buffer overrun bounds check (DrawIndirect 16B, DrawIndexedIndirect 20B,
+    DispatchIndirect 12B)
+  - **VAL-B4:** Depth/stencil format aspect granularity — `hasDepthAspect`/`hasStencilAspect`
+    helpers, rejects depth-only format with stencil ops or stencil-only with depth ops
+  - **VAL-B5:** BindGroup destruction tracking at Queue.Submit — tracks bind group references
+    during encoding, validates not destroyed at submit time
+
+- 7 new sentinel errors: `ErrDrawIndexFormatMismatch`, `ErrDrawIndirectBufferUsage`,
+  `ErrDrawIndirectOffsetAlignment`, `ErrDrawIndirectBufferOverrun`,
+  `ErrDispatchIndirectBufferUsage`, `ErrDispatchIndirectOffsetAlignment`,
+  `ErrDispatchIndirectBufferOverrun`, `ErrSubmitBindGroupDestroyed`
+
 ## [0.26.8] - 2026-04-26
 
 ### Fixed

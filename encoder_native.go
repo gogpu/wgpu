@@ -39,6 +39,12 @@ type CommandEncoder struct {
 	// submit-time validation (VAL-A6). At Submit, each texture is checked for
 	// destroyed state.
 	usedTextures map[*Texture]struct{}
+
+	// usedBindGroups tracks bind groups referenced during encoding for
+	// submit-time validation (VAL-B5). At Submit, each bind group is checked
+	// for destroyed state. Matches Rust wgpu-core's cmd_buf_data.trackers.bind_groups
+	// (device/queue.rs:1815-1817).
+	usedBindGroups map[*BindGroup]struct{}
 }
 
 // setError records a deferred error on the underlying command encoder.
@@ -82,6 +88,19 @@ func (e *CommandEncoder) trackTexture(tex *Texture) {
 		e.usedTextures = make(map[*Texture]struct{})
 	}
 	e.usedTextures[tex] = struct{}{}
+}
+
+// trackBindGroup records a bind group reference for submit-time validation (VAL-B5).
+// The map is lazily initialized to avoid allocation when no bind groups are used.
+// Matches Rust wgpu-core's cmd_buf_data.trackers.bind_groups (device/queue.rs:1815-1817).
+func (e *CommandEncoder) trackBindGroup(bg *BindGroup) {
+	if bg == nil {
+		return
+	}
+	if e.usedBindGroups == nil {
+		e.usedBindGroups = make(map[*BindGroup]struct{})
+	}
+	e.usedBindGroups[bg] = struct{}{}
 }
 
 // BeginRenderPass begins a render pass.
@@ -304,17 +323,19 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	}
 
 	cb := &CommandBuffer{
-		core:         coreCmdBuffer,
-		device:       e.device,
-		trackedRefs:  e.trackedRefs,
-		halEncoder:   e.halEncoder,
-		usedBuffers:  e.usedBuffers,
-		usedTextures: e.usedTextures,
+		core:           coreCmdBuffer,
+		device:         e.device,
+		trackedRefs:    e.trackedRefs,
+		halEncoder:     e.halEncoder,
+		usedBuffers:    e.usedBuffers,
+		usedTextures:   e.usedTextures,
+		usedBindGroups: e.usedBindGroups,
 	}
 	e.trackedRefs = nil
-	e.halEncoder = nil   // ownership transferred
-	e.usedBuffers = nil  // ownership transferred
-	e.usedTextures = nil // ownership transferred
+	e.halEncoder = nil     // ownership transferred
+	e.usedBuffers = nil    // ownership transferred
+	e.usedTextures = nil   // ownership transferred
+	e.usedBindGroups = nil // ownership transferred
 	return cb, nil
 }
 
@@ -396,6 +417,12 @@ type CommandBuffer struct {
 	// Matches Rust wgpu-core's cmd_buf_data.trackers.textures.used_resources()
 	// (device/queue.rs:1791-1808).
 	usedTextures map[*Texture]struct{}
+
+	// usedBindGroups tracks all bind groups referenced during encoding (VAL-B5).
+	// Validated at Submit time: destroyed bind groups cause an error.
+	// Matches Rust wgpu-core's cmd_buf_data.trackers.bind_groups
+	// (device/queue.rs:1815-1817).
+	usedBindGroups map[*BindGroup]struct{}
 
 	// submitted is set to true after this command buffer has been submitted
 	// to a queue. A command buffer cannot be submitted twice.
