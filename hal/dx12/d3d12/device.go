@@ -1052,6 +1052,31 @@ func (c *ID3D12GraphicsCommandList) CopyTextureRegion(dst *D3D12_TEXTURE_COPY_LO
 	)
 }
 
+// ExecuteIndirect executes a command signature (indirect draw/dispatch).
+// countBuffer may be nil for single-command execution.
+// On amd64, uintptr is 64 bits so uint64 values pass through without splitting.
+func (c *ID3D12GraphicsCommandList) ExecuteIndirect(
+	commandSignature *ID3D12CommandSignature,
+	maxCommandCount uint32,
+	argumentBuffer *ID3D12Resource,
+	argumentBufferOffset uint64,
+	countBuffer *ID3D12Resource,
+	countBufferOffset uint64,
+) {
+	_, _, _ = syscall.Syscall9(
+		c.vtbl.ExecuteIndirect,
+		7,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(unsafe.Pointer(commandSignature)),
+		uintptr(maxCommandCount),
+		uintptr(unsafe.Pointer(argumentBuffer)),
+		uintptr(argumentBufferOffset),
+		uintptr(unsafe.Pointer(countBuffer)),
+		uintptr(countBufferOffset),
+		0, 0,
+	)
+}
+
 // -----------------------------------------------------------------------------
 // ID3D12Fence methods
 // -----------------------------------------------------------------------------

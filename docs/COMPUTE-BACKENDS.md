@@ -40,6 +40,7 @@ Vulkan provides the most complete compute shader implementation:
 - **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, SM 6.0+, no external dependencies).
 - **Timestamp queries:** `CreateQuerySet` currently returns `ErrTimestampsNotSupported`. The underlying D3D12 API supports timestamp queries via `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Implementation is planned.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup (D3D12 spec).
+- **Indirect dispatch:** `DispatchIndirect` via `ExecuteIndirect` with pre-created `ID3D12CommandSignature` (dispatch args: 3 × uint32 = 12 bytes). Also supports `DrawIndirect` (16B) and `DrawIndexedIndirect` (20B).
 - **Root signature:** Compute pipelines use a separate root signature from graphics pipelines. Descriptor heaps are bound lazily on first `SetBindGroup` call.
 
 ### DX12-Specific Notes

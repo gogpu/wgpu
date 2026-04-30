@@ -809,29 +809,33 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
+// The buffer must contain a D3D12_DRAW_ARGUMENTS struct at the given offset
+// (vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation — 16 bytes).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
 
-	// Note: ExecuteIndirect requires a pre-created ID3D12CommandSignature.
-	// For now, this is a stub
-	_ = buf
-	_ = offset
+	e.encoder.cmdList.ExecuteIndirect(
+		e.encoder.device.cmdSignatures.draw,
+		1, buf.raw, offset, nil, 0,
+	)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+// The buffer must contain a D3D12_DRAW_INDEXED_ARGUMENTS struct at the given offset
+// (indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation — 20 bytes).
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
 
-	// Note: ExecuteIndirect requires a pre-created ID3D12CommandSignature.
-	// For now, this is a stub
-	_ = buf
-	_ = offset
+	e.encoder.cmdList.ExecuteIndirect(
+		e.encoder.device.cmdSignatures.drawIndexed,
+		1, buf.raw, offset, nil, 0,
+	)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.
@@ -945,16 +949,27 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
+// The buffer must contain a D3D12_DISPATCH_ARGUMENTS struct at the given offset
+// (threadGroupCountX, threadGroupCountY, threadGroupCountZ — 12 bytes).
 func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
 	}
 
-	// Note: ExecuteIndirect requires a pre-created ID3D12CommandSignature.
-	// For now, this is a stub
-	_ = buf
-	_ = offset
+	e.encoder.cmdList.ExecuteIndirect(
+		e.encoder.device.cmdSignatures.dispatch,
+		1, buf.raw, offset, nil, 0,
+	)
+	e.insertUAVBarrier()
+
+	// Mark bound storage buffers as UNORDERED_ACCESS, matching Dispatch() pattern.
+	// After an indirect dispatch, storage buffers are left in UAV state for correct
+	// transition barriers on subsequent commands.
+	for _, b := range e.boundStorageBuffers {
+		b.currentState = d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+	}
+	e.boundStorageBuffers = e.boundStorageBuffers[:0]
 }
 
 // insertUAVBarrier inserts a global UAV barrier after a dispatch.

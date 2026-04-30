@@ -143,6 +143,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.26.11** | 2026-04 | **DX12 indirect dispatch/draw** — ExecuteIndirect + CommandSignature (was last GPU backend with stubs) |
 | **v0.26.10** | 2026-04 | **Validation Phase B** — 5 P1 correctness checks (MinBindingSize, index format mismatch, indirect bounds, depth/stencil aspects, BindGroup Submit). Coverage 37% → 45%. |
 | **v0.26.9** | 2026-04 | **Validation Phase A** — 18 P0 crash prevention checks (WriteBuffer bounds, BindGroup buffer, draw-time state, PipelineLayout, format guards, Submit resource state). Coverage 22% → 37%. |
 | **v0.25.6** | 2026-04 | Vulkan command buffer free list (VK-CMD-001): batch alloc, pool reset, enterprise parity |

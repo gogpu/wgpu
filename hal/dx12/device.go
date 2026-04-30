@@ -108,6 +108,22 @@ type Device struct {
 	// the wgpu log instead of being folded into E_INVALIDARG by D3D12
 	// pipeline creation. Opt-in via GOGPU_DX12_DXIL_VALIDATE=1.
 	dxilValidate bool
+
+	// Pre-created command signatures for indirect draw/dispatch.
+	// DX12 ExecuteIndirect requires an ID3D12CommandSignature that describes
+	// the indirect argument layout. These are created once at device init
+	// and shared across all encoders.
+	// Matches Rust wgpu-hal DeviceShared.cmd_signatures (dx12/mod.rs:683).
+	cmdSignatures commandSignatures
+}
+
+// commandSignatures holds pre-created ID3D12CommandSignature objects for
+// indirect draw and dispatch operations. Created once at device initialization.
+// Matches Rust wgpu-hal CommandSignatures (dx12/mod.rs:673-678).
+type commandSignatures struct {
+	draw        *d3d12.ID3D12CommandSignature
+	drawIndexed *d3d12.ID3D12CommandSignature
+	dispatch    *d3d12.ID3D12CommandSignature
 }
 
 // DescriptorHeap wraps a D3D12 descriptor heap with allocation tracking.
@@ -255,6 +271,15 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 	// DXIL path uses naga dxil backend (SM 6.0, BYPASS hash) instead of HLSL->FXC.
 	dev.useDXIL = os.Getenv("GOGPU_DX12_DXIL") == "1"
 	dev.dxilValidate = os.Getenv("GOGPU_DX12_DXIL_VALIDATE") == "1"
+
+	// Create pre-built command signatures for indirect draw/dispatch.
+	// DX12 ExecuteIndirect requires an ID3D12CommandSignature that describes
+	// the indirect argument layout. Created once, shared across all encoders.
+	// Matches Rust wgpu-hal device init (dx12/device.rs:142-174).
+	if err := dev.createCommandSignatures(); err != nil {
+		dev.cleanup()
+		return nil, err
+	}
 
 	// Set a finalizer to ensure cleanup
 	runtime.SetFinalizer(dev, (*Device).Destroy)
@@ -419,6 +444,60 @@ func (d *Device) createFence() error {
 	d.fenceEvent = event
 	d.fenceValue = 0
 	return nil
+}
+
+// createCommandSignatures creates the three pre-built command signatures required
+// by ID3D12GraphicsCommandList::ExecuteIndirect for indirect draw/dispatch.
+// Each signature describes one indirect argument type with its byte stride:
+//   - dispatch:    D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH    (12 bytes: x, y, z uint32)
+//   - draw:        D3D12_INDIRECT_ARGUMENT_TYPE_DRAW        (16 bytes: vertexCount, instanceCount, firstVertex, firstInstance)
+//   - drawIndexed: D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED (20 bytes: indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+//
+// Matches Rust wgpu-hal DeviceShared initialization (dx12/device.rs:142-174).
+func (d *Device) createCommandSignatures() error {
+	var err error
+
+	// Dispatch: 3 x uint32 = 12 bytes (x, y, z thread group counts).
+	d.cmdSignatures.dispatch, err = d.createCommandSignature(
+		d3d12.D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH, 12,
+	)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to create dispatch command signature: %w", err)
+	}
+
+	// Draw: 4 x uint32 = 16 bytes (vertexCount, instanceCount, firstVertex, firstInstance).
+	d.cmdSignatures.draw, err = d.createCommandSignature(
+		d3d12.D3D12_INDIRECT_ARGUMENT_TYPE_DRAW, 16,
+	)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to create draw command signature: %w", err)
+	}
+
+	// DrawIndexed: 5 x uint32 = 20 bytes (indexCount, instanceCount, firstIndex, baseVertex, firstInstance).
+	d.cmdSignatures.drawIndexed, err = d.createCommandSignature(
+		d3d12.D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED, 20,
+	)
+	if err != nil {
+		return fmt.Errorf("dx12: failed to create draw indexed command signature: %w", err)
+	}
+
+	return nil
+}
+
+// createCommandSignature creates a single ID3D12CommandSignature for the given
+// indirect argument type and byte stride. Uses pRootSignature=nil since these
+// are simple single-argument signatures with no root parameter changes.
+func (d *Device) createCommandSignature(argType d3d12.D3D12_INDIRECT_ARGUMENT_TYPE, byteStride uint32) (*d3d12.ID3D12CommandSignature, error) {
+	argDesc := d3d12.D3D12_INDIRECT_ARGUMENT_DESC{
+		Type: argType,
+	}
+	desc := d3d12.D3D12_COMMAND_SIGNATURE_DESC{
+		ByteStride:       byteStride,
+		NumArgumentDescs: 1,
+		ArgumentDescs:    &argDesc,
+		NodeMask:         0,
+	}
+	return d.raw.CreateCommandSignature(&desc, nil)
 }
 
 // waitForGPU blocks until all GPU work completes.
@@ -810,6 +889,20 @@ func (d *Device) cleanup() {
 	if d.emptyRootSignature != nil {
 		d.emptyRootSignature.Release()
 		d.emptyRootSignature = nil
+	}
+
+	// Release indirect command signatures.
+	if d.cmdSignatures.dispatch != nil {
+		d.cmdSignatures.dispatch.Release()
+		d.cmdSignatures.dispatch = nil
+	}
+	if d.cmdSignatures.draw != nil {
+		d.cmdSignatures.draw.Release()
+		d.cmdSignatures.draw = nil
+	}
+	if d.cmdSignatures.drawIndexed != nil {
+		d.cmdSignatures.drawIndexed.Release()
+		d.cmdSignatures.drawIndexed = nil
 	}
 
 	if d.fenceEvent != 0 {
