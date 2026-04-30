@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.11] - 2026-04-30
+
+### Fixed
+
+- **DX12: DispatchIndirect, DrawIndirect, DrawIndexedIndirect** (BUG-DX12-012) — all three
+  were no-op stubs. Implemented via `ID3D12GraphicsCommandList::ExecuteIndirect` with
+  pre-created `ID3D12CommandSignature` objects (Rust wgpu-hal pattern). Three command
+  signatures created at device init: dispatch (12B stride), draw (16B), draw indexed (20B).
+  DX12 was the only GPU backend with stub indirect methods — now all 4 GPU backends
+  (Vulkan, Metal, GLES, DX12) have full indirect dispatch/draw support.
+
 ## [0.26.10] - 2026-04-30
 
 ### Added
