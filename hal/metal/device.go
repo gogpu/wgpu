@@ -522,16 +522,16 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		)
 
 		return &ShaderModule{
-			source:                    desc.Source,
-			library:                   library,
-			device:                    d,
-			workgroupSizes:            workgroupSizes,
-			translatedEntrypointNames: info.EntryPointNames,
+			source:          desc.Source,
+			library:         library,
+			device:          d,
+			workgroupSizes:  workgroupSizes,
+			entrypointNames: info.EntryPointNames,
 		}, nil
 	}
 
 	// No WGSL source - just store the descriptor for later
-	return &ShaderModule{source: desc.Source, device: d, translatedEntrypointNames: map[string]string{}}, nil
+	return &ShaderModule{source: desc.Source, device: d}, nil
 }
 
 func formatNSError(errObj ID) string {
@@ -604,7 +604,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Resolve translated entrypoint name
 	entrypointName := desc.Vertex.EntryPoint
-	if translated, ok := fragmentModule.translatedEntrypointNames[entrypointName]; ok {
+	if translated, ok := vertexModule.entrypointNames[entrypointName]; ok {
 		entrypointName = translated
 	}
 
@@ -633,7 +633,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if fragmentModule != nil && desc.Fragment != nil {
 		// Resolve translated entrypoint name
 		entrypointName := desc.Fragment.EntryPoint
-		if translated, ok := fragmentModule.translatedEntrypointNames[entrypointName]; ok {
+		if translated, ok := fragmentModule.entrypointNames[entrypointName]; ok {
 			entrypointName = translated
 		}
 
@@ -811,7 +811,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 
 	// Resolve translated entrypoint name
 	entrypointName := desc.Compute.EntryPoint
-	if translated, ok := computeModule.translatedEntrypointNames[entrypointName]; ok {
+	if translated, ok := computeModule.entrypointNames[entrypointName]; ok {
 		entrypointName = translated
 	}
 
@@ -842,7 +842,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	// Get workgroup size from shader module metadata
-	workgroupSize := getWorkgroupSize(computeModule, entrypointName)
+	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
 
 	hal.Logger().Debug("metal: compute pipeline created",
 		"entryPoint", desc.Compute.EntryPoint,
