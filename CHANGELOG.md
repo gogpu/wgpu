@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.26.12] - 2026-04-30
+## [0.26.12] - 2026-05-01
 
 ### Added
 
@@ -19,8 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Metal: entry point name resolution** (#168, PR #167 by @k-chimi) — naga MSL renames
+  reserved words (`main` → `main_`), but the Metal HAL used the original name to look up
+  functions in MTLLibrary. Now stores `TranslationInfo.EntryPointNames` from naga compile
+  and uses the translated name at pipeline creation. Applies to vertex, fragment, and compute.
 - **Codecov ignore patterns** — `hal/**/*` format did not exclude GPU backends from coverage
   calculation. Changed to `hal/` (matching gogpu pattern). Badge now reflects testable code only.
+
+### Dependencies
+
+- **naga** v0.17.8 → **v0.17.10**
 
 ## [0.26.11] - 2026-04-30
 

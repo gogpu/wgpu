@@ -143,7 +143,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.26.12** | 2026-04 | **Test coverage boost** — core 85.5%, root 78.4%, codecov ignore fix |
+| **v0.26.12** | 2026-05 | **Test coverage** (core 85.5%, root 78.4%), Metal entry point fix (#168 by @k-chimi), naga v0.17.10 |
 | **v0.26.11** | 2026-04 | **DX12 indirect dispatch/draw** — ExecuteIndirect + CommandSignature (was last GPU backend with stubs) |
 | **v0.26.10** | 2026-04 | **Validation Phase B** — 5 P1 correctness checks (MinBindingSize, index format mismatch, indirect bounds, depth/stencil aspects, BindGroup Submit). Coverage 37% → 45%. |
 | **v0.26.9** | 2026-04 | **Validation Phase A** — 18 P0 crash prevention checks (WriteBuffer bounds, BindGroup buffer, draw-time state, PipelineLayout, format guards, Submit resource state). Coverage 22% → 37%. |
