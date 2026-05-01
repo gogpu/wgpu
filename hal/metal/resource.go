@@ -106,10 +106,11 @@ func (s *Sampler) NativeHandle() uintptr { return uintptr(s.raw) }
 
 // ShaderModule implements hal.ShaderModule for Metal.
 type ShaderModule struct {
-	source         hal.ShaderSource
-	library        ID // id<MTLLibrary>
-	device         *Device
-	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size
+	source                    hal.ShaderSource
+	library                   ID // id<MTLLibrary>
+	device                    *Device
+	workgroupSizes            map[string][3]uint32 // entry point name -> workgroup size
+	translatedEntrypointNames map[string]string
 }
 
 // Destroy releases the shader module.

@@ -486,7 +486,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		workgroupSizes := extractWorkgroupSizes(irModule)
 
 		// Compile IR to MSL
-		mslSource, _, err := msl.Compile(irModule, msl.DefaultOptions())
+		mslSource, info, err := msl.Compile(irModule, msl.DefaultOptions())
 		if err != nil {
 			return nil, fmt.Errorf("metal: failed to compile to MSL: %w", err)
 		}
@@ -522,15 +522,16 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		)
 
 		return &ShaderModule{
-			source:         desc.Source,
-			library:        library,
-			device:         d,
-			workgroupSizes: workgroupSizes,
+			source:                    desc.Source,
+			library:                   library,
+			device:                    d,
+			workgroupSizes:            workgroupSizes,
+			translatedEntrypointNames: info.EntryPointNames,
 		}, nil
 	}
 
 	// No WGSL source - just store the descriptor for later
-	return &ShaderModule{source: desc.Source, device: d}, nil
+	return &ShaderModule{source: desc.Source, device: d, translatedEntrypointNames: map[string]string{}}, nil
 }
 
 func formatNSError(errObj ID) string {
@@ -601,12 +602,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		Release(label)
 	}
 
+	// Resolve translated entrypoint name
+	entrypointName := desc.Vertex.EntryPoint
+	if translated, ok := fragmentModule.translatedEntrypointNames[entrypointName]; ok {
+		entrypointName = translated
+	}
+
 	// Get vertex function from library
-	vertexFuncName := NSString(desc.Vertex.EntryPoint)
+	vertexFuncName := NSString(entrypointName)
 	vertexFunc := MsgSend(vertexModule.library, Sel("newFunctionWithName:"), uintptr(vertexFuncName))
 	Release(vertexFuncName)
 	if vertexFunc == 0 {
-		return nil, fmt.Errorf("metal: vertex function '%s' not found", desc.Vertex.EntryPoint)
+		return nil, fmt.Errorf("metal: vertex function '%s' not found", entrypointName)
 	}
 	defer Release(vertexFunc)
 
@@ -624,11 +631,17 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Get and set fragment function if present
 	if fragmentModule != nil && desc.Fragment != nil {
-		fragmentFuncName := NSString(desc.Fragment.EntryPoint)
+		// Resolve translated entrypoint name
+		entrypointName := desc.Fragment.EntryPoint
+		if translated, ok := fragmentModule.translatedEntrypointNames[entrypointName]; ok {
+			entrypointName = translated
+		}
+
+		fragmentFuncName := NSString(entrypointName)
 		fragmentFunc := MsgSend(fragmentModule.library, Sel("newFunctionWithName:"), uintptr(fragmentFuncName))
 		Release(fragmentFuncName)
 		if fragmentFunc == 0 {
-			return nil, fmt.Errorf("metal: fragment function '%s' not found", desc.Fragment.EntryPoint)
+			return nil, fmt.Errorf("metal: fragment function '%s' not found", entrypointName)
 		}
 		defer Release(fragmentFunc)
 
@@ -796,12 +809,18 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, fmt.Errorf("metal: invalid compute shader module")
 	}
 
+	// Resolve translated entrypoint name
+	entrypointName := desc.Compute.EntryPoint
+	if translated, ok := computeModule.translatedEntrypointNames[entrypointName]; ok {
+		entrypointName = translated
+	}
+
 	// Get compute function from library
-	funcName := NSString(desc.Compute.EntryPoint)
+	funcName := NSString(entrypointName)
 	computeFunc := MsgSend(computeModule.library, Sel("newFunctionWithName:"), uintptr(funcName))
 	Release(funcName)
 	if computeFunc == 0 {
-		return nil, fmt.Errorf("metal: compute function '%s' not found", desc.Compute.EntryPoint)
+		return nil, fmt.Errorf("metal: compute function '%s' not found", entrypointName)
 	}
 	defer Release(computeFunc)
 
@@ -823,7 +842,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	// Get workgroup size from shader module metadata
-	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
+	workgroupSize := getWorkgroupSize(computeModule, entrypointName)
 
 	hal.Logger().Debug("metal: compute pipeline created",
 		"entryPoint", desc.Compute.EntryPoint,
