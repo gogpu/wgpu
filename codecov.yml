@@ -14,14 +14,10 @@ coverage:
 # Ignore paths from coverage calculation
 # HAL backend implementations require real GPU hardware and cannot be unit tested
 ignore:
-  - "hal/vulkan/**/*"
-  - "hal/metal/**/*"
-  - "hal/dx12/**/*"
-  - "hal/gles/**/*"
-  - "hal/software/**/*"
-  - "hal/noop/**/*"
-  - "examples/**/*"
-  - "cmd/**/*"
+  - "hal/"
+  - "examples/"
+  - "cmd/"
+  - "tmp/"
 
 # Go-specific parser settings
 parsers:
