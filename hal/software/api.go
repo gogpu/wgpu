@@ -61,7 +61,7 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				},
 				DownlevelCapabilities: hal.DownlevelCapabilities{
 					ShaderModel: 0,
-					Flags:       0,
+					Flags:       hal.DownlevelFlagsComputeShaders,
 				},
 			},
 		},

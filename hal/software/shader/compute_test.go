@@ -3,8 +3,11 @@
 package shader
 
 import (
+	"encoding/binary"
 	"math"
 	"testing"
+
+	naga "github.com/gogpu/naga"
 )
 
 // =============================================================================
@@ -517,6 +520,141 @@ func TestDispatchComputeMultipleWorkgroups(t *testing.T) {
 		got := readUint32LE(outputBuf[i*4:])
 		if got != uint32(i) {
 			t.Errorf("output[%d] = %d, want %d", i, got, i)
+		}
+	}
+}
+
+// =============================================================================
+// Naga Integration Tests: WGSL -> SPIR-V -> interpreter
+// =============================================================================
+
+// TestNagaComputeScaledCopy compiles a WGSL compute shader via naga, parses the
+// resulting SPIR-V, dispatches through the interpreter, and verifies output.
+// This is the definitive integration test: real naga-generated SPIR-V must work.
+//
+// Naga generates OpTypeRuntimeArray for array<f32> in storage buffers, and uses
+// two-step OpAccessChain (struct member -> runtime array element) instead of the
+// single-step pattern in hand-built SPIR-V.
+func TestNagaComputeScaledCopy(t *testing.T) {
+	wgsl := `
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    output[i] = input[i] * 2.5;
+}
+`
+	spirvBytes, err := naga.Compile(wgsl)
+	if err != nil {
+		t.Fatalf("naga.Compile failed: %v", err)
+	}
+	if len(spirvBytes)%4 != 0 {
+		t.Fatalf("naga SPIR-V bytes not word-aligned: %d bytes", len(spirvBytes))
+	}
+
+	words := make([]uint32, len(spirvBytes)/4)
+	for i := range words {
+		words[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+	}
+
+	m, err := ParseModule(words)
+	if err != nil {
+		t.Fatalf("ParseModule failed: %v", err)
+	}
+
+	// Verify workgroup size was parsed.
+	wgSize := m.GetWorkgroupSize("main")
+	if wgSize != [3]uint32{64, 1, 1} {
+		t.Fatalf("workgroup size = %v, want {64, 1, 1}", wgSize)
+	}
+
+	// Prepare input buffer: [1.0, 2.0, 3.0, ..., 64.0]
+	const numElements = 64
+	const bufSize = numElements * 4
+	inputBuf := make([]byte, bufSize)
+	for i := 0; i < numElements; i++ {
+		binary.LittleEndian.PutUint32(inputBuf[i*4:], math.Float32bits(float32(i+1)))
+	}
+
+	outputBuf := make([]byte, bufSize)
+
+	ctx := &ExecutionContext{
+		Buffers: map[BindingKey][]byte{
+			{Group: 0, Binding: 0}: inputBuf,
+			{Group: 0, Binding: 1}: outputBuf,
+		},
+	}
+
+	// Dispatch 1 workgroup of 64 invocations.
+	err = m.DispatchCompute("main", ctx, 1, 1, 1)
+	if err != nil {
+		t.Fatalf("DispatchCompute failed: %v", err)
+	}
+
+	// Verify: output[i] = input[i] * 2.5 = (i+1) * 2.5
+	for i := 0; i < numElements; i++ {
+		got := math.Float32frombits(binary.LittleEndian.Uint32(outputBuf[i*4:]))
+		want := float32(i+1) * 2.5
+		if math.Abs(float64(got-want)) > 1e-6 {
+			t.Errorf("output[%d] = %f, want %f", i, got, want)
+		}
+	}
+}
+
+// TestNagaComputeIntegerMul tests a naga-compiled integer multiply compute shader.
+// This ensures u32 storage buffers work correctly with naga's OpTypeRuntimeArray.
+func TestNagaComputeIntegerMul(t *testing.T) {
+	wgsl := `
+@group(0) @binding(0) var<storage, read> input: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output: array<u32>;
+@compute @workgroup_size(4)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    output[i] = input[i] * 3u;
+}
+`
+	spirvBytes, err := naga.Compile(wgsl)
+	if err != nil {
+		t.Fatalf("naga.Compile failed: %v", err)
+	}
+
+	words := make([]uint32, len(spirvBytes)/4)
+	for i := range words {
+		words[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+	}
+
+	m, err := ParseModule(words)
+	if err != nil {
+		t.Fatalf("ParseModule failed: %v", err)
+	}
+
+	const numElements = 4
+	const bufSize = numElements * 4
+	inputBuf := make([]byte, bufSize)
+	for i := uint32(0); i < numElements; i++ {
+		binary.LittleEndian.PutUint32(inputBuf[i*4:], i+10)
+	}
+
+	outputBuf := make([]byte, bufSize)
+
+	ctx := &ExecutionContext{
+		Buffers: map[BindingKey][]byte{
+			{Group: 0, Binding: 0}: inputBuf,
+			{Group: 0, Binding: 1}: outputBuf,
+		},
+	}
+
+	err = m.DispatchCompute("main", ctx, 1, 1, 1)
+	if err != nil {
+		t.Fatalf("DispatchCompute failed: %v", err)
+	}
+
+	for i := uint32(0); i < numElements; i++ {
+		got := binary.LittleEndian.Uint32(outputBuf[i*4:])
+		want := (i + 10) * 3
+		if got != want {
+			t.Errorf("output[%d] = %d, want %d", i, got, want)
 		}
 	}
 }

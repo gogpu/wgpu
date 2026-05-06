@@ -301,6 +301,16 @@ type BindGroup struct {
 	buffers      map[uint32]*Buffer      // binding index -> resolved buffer
 }
 
+// ComputePipeline stores compute pipeline configuration for the software backend.
+// It holds a reference to the parsed SPIR-V module and entry point name, which
+// are used by ComputePassEncoder.Dispatch to invoke the SPIR-V interpreter.
+type ComputePipeline struct {
+	Resource
+	desc       *hal.ComputePipelineDescriptor
+	module     *ShaderModule
+	entryPoint string
+}
+
 // ShaderModule stores shader source for the software backend.
 // When SPIR-V bytecode is available (directly or compiled from WGSL via naga),
 // the parsed Module is cached for use by the SPIR-V interpreter in draw calls.

@@ -3,12 +3,20 @@
 package software
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the software backend.
-type CommandEncoder struct{}
+// It holds a device reference so that compute passes can resolve bind group
+// resources during dispatch.
+type CommandEncoder struct {
+	device *Device
+}
 
 // BeginEncoding is a no-op.
 func (c *CommandEncoder) BeginEncoding(_ string) error {
@@ -162,9 +170,12 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 }
 
 // BeginComputePass begins a compute pass and returns an encoder.
+// The device reference is passed through so Dispatch can resolve bind group
+// buffer data.
 func (c *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
 	return &ComputePassEncoder{
-		desc: desc,
+		desc:   desc,
+		device: c.device,
 	}
 }
 
@@ -340,21 +351,97 @@ func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64) {}
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 
 // ComputePassEncoder implements hal.ComputePassEncoder for the software backend.
+// It collects pipeline and bind group state, then executes the SPIR-V interpreter
+// on Dispatch. Buffer writes from storage buffer bindings are reflected in-place.
 type ComputePassEncoder struct {
-	desc *hal.ComputePassDescriptor
+	desc   *hal.ComputePassDescriptor
+	device *Device
+
+	// Pipeline and resource state set during encoding.
+	pipeline   *ComputePipeline
+	bindGroups [4]*BindGroup // max 4 per WebGPU spec
 }
 
-// End is a no-op.
+// End finishes the compute pass. Currently a no-op since all work is done
+// synchronously in Dispatch.
 func (c *ComputePassEncoder) End() {}
 
-// SetPipeline is a no-op (compute not supported).
-func (c *ComputePassEncoder) SetPipeline(_ hal.ComputePipeline) {}
+// SetPipeline stores the compute pipeline for subsequent Dispatch calls.
+func (c *ComputePassEncoder) SetPipeline(p hal.ComputePipeline) {
+	if cp, ok := p.(*ComputePipeline); ok {
+		c.pipeline = cp
+	}
+}
 
-// SetBindGroup is a no-op.
-func (c *ComputePassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) {}
+// SetBindGroup stores a bind group at the given index for compute dispatch.
+func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+	if index < 4 {
+		if b, ok := bg.(*BindGroup); ok {
+			c.bindGroups[index] = b
+		}
+	}
+}
 
-// Dispatch is a no-op (compute not supported).
-func (c *ComputePassEncoder) Dispatch(_, _, _ uint32) {}
+// Dispatch executes the compute shader for x*y*z workgroups.
+//
+// The implementation:
+//  1. Gets the parsed SPIR-V module from the pipeline's shader module.
+//  2. Reads the workgroup size from the entry point's OpExecutionMode LocalSize.
+//  3. Builds an ExecutionContext with Buffers populated from bound bind groups.
+//  4. Delegates to Module.DispatchCompute which iterates over all workgroups
+//     and invocations, calling ExecuteCompute for each.
+//  5. Storage buffer writes are reflected in-place through shared []byte slices.
+func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
+	if c.pipeline == nil {
+		slog.Warn("software: ComputePassEncoder.Dispatch called without a pipeline set")
+		return
+	}
 
-// DispatchIndirect is a no-op.
-func (c *ComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64) {}
+	parsedModule := c.pipeline.module.ParsedModule()
+	if parsedModule == nil {
+		slog.Warn("software: ComputePassEncoder.Dispatch: pipeline has no parsed SPIR-V module")
+		return
+	}
+
+	entryPoint := c.pipeline.entryPoint
+
+	// Build the execution context with buffer bindings from all bind groups.
+	ctx := &shader.ExecutionContext{
+		Buffers: make(map[shader.BindingKey][]byte),
+	}
+
+	for groupIdx, bg := range c.bindGroups {
+		if bg == nil {
+			continue
+		}
+		for bindingIdx, buf := range bg.buffers {
+			if buf == nil {
+				continue
+			}
+			// Share the buffer's data slice directly so storage buffer writes
+			// from the interpreter are reflected in the HAL buffer.
+			buf.mu.Lock()
+			ctx.Buffers[shader.BindingKey{
+				Group:   uint32(groupIdx),
+				Binding: bindingIdx,
+			}] = buf.data
+			buf.mu.Unlock()
+		}
+	}
+
+	slog.Debug("software: ComputePassEncoder.Dispatch",
+		"entryPoint", entryPoint,
+		"workgroups", fmt.Sprintf("(%d,%d,%d)", x, y, z),
+	)
+
+	if err := parsedModule.DispatchCompute(entryPoint, ctx, x, y, z); err != nil {
+		slog.Error("software: compute dispatch failed", "error", err)
+	}
+}
+
+// DispatchIndirect is not yet implemented in the software backend.
+// Indirect dispatch requires reading the dispatch parameters from a GPU buffer,
+// which is straightforward but not needed for the current use cases.
+func (c *ComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64) {
+	slog.Warn("software: DispatchIndirect not implemented")
+}

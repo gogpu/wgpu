@@ -22,6 +22,7 @@ const (
 	OpTypeFloat            = 22
 	OpTypeVector           = 23
 	OpTypeArray            = 28
+	OpTypeRuntimeArray     = 29
 	OpTypeStruct           = 30
 	OpTypePointer          = 32
 	OpTypeFunction         = 33

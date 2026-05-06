@@ -273,6 +273,20 @@ func ParseModule(words []uint32) (*Module, error) {
 				Length:   length,
 			}
 
+		case OpTypeRuntimeArray:
+			// OpTypeRuntimeArray: result elementType
+			// Runtime arrays are unsized (length determined by buffer size at runtime).
+			// Represented as TypeArray with Length=0, which the buffer access chain
+			// handles by computing byte offsets from element type size.
+			if len(operands) < 2 {
+				break
+			}
+			m.Types[operands[0]] = &TypeInfo{
+				Kind:     TypeArray,
+				ElemType: operands[1],
+				Length:   0, // Unsized: length determined by bound buffer size.
+			}
+
 		case OpTypePointer:
 			if len(operands) < 3 {
 				break
