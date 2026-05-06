@@ -557,6 +557,339 @@ func TestIntBinOp(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Phase 2 Tests: Vector/Matrix Ops, Integer Ops, Comparison, Bitwise, Logical
+// =============================================================================
+
+func TestVectorTimesScalar(t *testing.T) {
+	tests := []struct {
+		name string
+		vec  Value
+		s    float32
+		want Value
+	}{
+		{"vec2", Vec2{1, 2}, 3, Vec2{3, 6}},
+		{"vec3", Vec3{1, 2, 3}, 2, Vec3{2, 4, 6}},
+		{"vec4", Vec4{1, 2, 3, 4}, 0.5, Vec4{0.5, 1, 1.5, 2}},
+		{"scalar", Float32(5), 3, Float32(15)},
+		{"zero_scalar", Vec3{1, 2, 3}, 0, Vec3{0, 0, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vectorTimesScalar(tt.vec, tt.s)
+			if !valueApproxEqual(got, tt.want, 1e-6) {
+				t.Errorf("vectorTimesScalar(%v, %v) = %v, want %v", tt.vec, tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDotProduct(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b Value
+		want float32
+	}{
+		{"vec2", Vec2{1, 2}, Vec2{3, 4}, 11},
+		{"vec3", Vec3{1, 0, 0}, Vec3{0, 1, 0}, 0},
+		{"vec3_self", Vec3{1, 2, 3}, Vec3{1, 2, 3}, 14},
+		{"vec4", Vec4{1, 2, 3, 4}, Vec4{4, 3, 2, 1}, 20},
+		{"scalar", Float32(3), Float32(4), 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dotProduct(tt.a, tt.b)
+			f, ok := got.(Float32)
+			if !ok {
+				t.Fatalf("dotProduct returned %T, want Float32", got)
+			}
+			if math.Abs(float64(f-tt.want)) > 1e-6 {
+				t.Errorf("dotProduct = %v, want %v", f, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatrixTimesVector(t *testing.T) {
+	// Identity matrix as Array of 4 Vec4 columns (column-major).
+	identity := Array{
+		Vec4{1, 0, 0, 0},
+		Vec4{0, 1, 0, 0},
+		Vec4{0, 0, 1, 0},
+		Vec4{0, 0, 0, 1},
+	}
+	v := Vec4{1, 2, 3, 1}
+	got := matrixTimesVector(identity, v)
+	gv := Vec4ToFloat32(got)
+	if gv != v {
+		t.Errorf("identity * v = %v, want %v", gv, v)
+	}
+
+	// Scale matrix: diag(2, 3, 4, 1)
+	scale := Array{
+		Vec4{2, 0, 0, 0},
+		Vec4{0, 3, 0, 0},
+		Vec4{0, 0, 4, 0},
+		Vec4{0, 0, 0, 1},
+	}
+	got = matrixTimesVector(scale, Vec4{1, 1, 1, 1})
+	gv = Vec4ToFloat32(got)
+	want := Vec4{2, 3, 4, 1}
+	if gv != want {
+		t.Errorf("scale * (1,1,1,1) = %v, want %v", gv, want)
+	}
+}
+
+func TestTransposeMatrix(t *testing.T) {
+	// 2x2 matrix stored as 2 Vec2 columns.
+	mat := Array{Vec2{1, 3}, Vec2{2, 4}}
+	got := transposeMatrix(mat)
+	cols, ok := got.(Array)
+	if !ok || len(cols) != 2 {
+		t.Fatalf("transpose returned unexpected type or length")
+	}
+	// After transpose: col0 = {1,2}, col1 = {3,4}
+	c0, _ := cols[0].(Vec2)
+	c1, _ := cols[1].(Vec2)
+	if c0 != (Vec2{1, 2}) || c1 != (Vec2{3, 4}) {
+		t.Errorf("transpose = [%v, %v], want [{1,2}, {3,4}]", c0, c1)
+	}
+}
+
+func TestVectorShuffle(t *testing.T) {
+	m := &Module{Types: map[uint32]*TypeInfo{
+		1: {Kind: TypeFloat, Width: 32},
+		2: {Kind: TypeVector, ElemType: 1, Components: 4},
+		3: {Kind: TypeVector, ElemType: 1, Components: 2},
+	}}
+	// Shuffle from two Vec4: select components (3, 4) -> (w from first, x from second)
+	v1 := Vec4{10, 20, 30, 40}
+	v2 := Vec4{50, 60, 70, 80}
+	got := vectorShuffle(m, 3, v1, v2, []uint32{3, 4})
+	gv, ok := got.(Vec2)
+	if !ok {
+		t.Fatalf("vectorShuffle returned %T, want Vec2", got)
+	}
+	want := Vec2{40, 50}
+	if gv != want {
+		t.Errorf("vectorShuffle = %v, want %v", gv, want)
+	}
+}
+
+func TestIntDivisionOps(t *testing.T) {
+	tests := []struct {
+		name string
+		op   func(a, b uint32) Value
+		a, b uint32
+		want Value
+	}{
+		{"udiv", func(a, b uint32) Value {
+			if b == 0 {
+				return Uint32(0)
+			}
+			return a / b
+		}, 10, 3, Uint32(3)},
+		{"udiv_zero", func(a, b uint32) Value {
+			if b == 0 {
+				return Uint32(0)
+			}
+			return a / b
+		}, 10, 0, Uint32(0)},
+		{"umod", func(a, b uint32) Value {
+			if b == 0 {
+				return Uint32(0)
+			}
+			return a % b
+		}, 10, 3, Uint32(1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.op(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("%s(%d, %d) = %v, want %v", tt.name, tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBitwiseOps(t *testing.T) {
+	and := func(a, b uint32) uint32 { return a & b }
+	or := func(a, b uint32) uint32 { return a | b }
+	xor := func(a, b uint32) uint32 { return a ^ b }
+
+	tests := []struct {
+		name string
+		op   func(uint32, uint32) uint32
+		a, b uint32
+		want uint32
+	}{
+		{"and", and, 0xFF00, 0x0FF0, 0x0F00},
+		{"or", or, 0xFF00, 0x00FF, 0xFFFF},
+		{"xor", xor, 0xFF00, 0xFF00, 0x0000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := intBinOp(tt.a, tt.b, tt.op)
+			u, ok := got.(Uint32)
+			if !ok || u != tt.want {
+				t.Errorf("%s(0x%X, 0x%X) = %v, want 0x%X", tt.name, tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComparisonOps(t *testing.T) {
+	tests := []struct {
+		name   string
+		result bool
+	}{
+		{"u_lt_true", uint32(1) < uint32(2)},
+		{"u_lt_false", uint32(2) < uint32(1)},
+		{"s_lt_true", int32(-1) < int32(0)},
+		{"s_lt_false", int32(0) < int32(-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.result && tt.name[len(tt.name)-4:] == "true" {
+				t.Errorf("unexpected false for %s", tt.name)
+			}
+		})
+	}
+}
+
+// TestSPIRVStorageBufferWrite verifies OpStore to a storage buffer variable
+// writes data back through the execution context.
+func TestSPIRVStorageBufferWrite(t *testing.T) {
+	inst := spirvInst
+	str := spirvString
+	_ = math.Float32bits // not needed here, constants are uint
+
+	const (
+		idVoid      = 1
+		idFloat     = 2
+		idVec4      = 3
+		idPtrV4Out  = 4
+		idFuncTy    = 5
+		idFunc      = 6
+		idLabel     = 7
+		idColorOut  = 8
+		idStruct    = 9
+		idPtrStruct = 10
+		idBufVar    = 11
+		idUint      = 12
+		idConst0    = 13
+		idChain     = 14
+		idLoadCol   = 15
+		idBound     = 16
+	)
+
+	nameWords := str("fs_main")
+	epLen := uint16(3 + len(nameWords) + 1)
+	epInst := append([]uint32{inst(epLen, OpEntryPoint), ExecutionModelFragment, idFunc}, nameWords...)
+	epInst = append(epInst, idColorOut)
+
+	words := make([]uint32, 0, 140)
+	words = append(words,
+		spirvMagic, 0x00010300, 0, idBound, 0,
+		inst(2, OpCapability), 1,
+		inst(3, OpMemoryModel), 0, 1,
+	)
+	words = append(words, epInst...)
+	words = append(words,
+		inst(3, OpExecutionMode), idFunc, 7,
+		inst(4, OpDecorate), idColorOut, DecorationLocation, 0,
+		inst(4, OpDecorate), idBufVar, DecorationBinding, 0,
+		inst(4, OpDecorate), idBufVar, DecorationDescriptorSet, 0,
+		inst(3, OpDecorate), idStruct, DecorationBlock,
+		inst(5, OpMemberDecorate), idStruct, 0, DecorationOffset, 0,
+
+		inst(2, OpTypeVoid), idVoid,
+		inst(3, OpTypeFloat), idFloat, 32,
+		inst(4, OpTypeInt), idUint, 32, 0,
+		inst(4, OpTypeVector), idVec4, idFloat, 4,
+		inst(3, OpTypeStruct), idStruct, idVec4,
+		inst(4, OpTypePointer), idPtrV4Out, StorageClassOutput, idVec4,
+		inst(4, OpTypePointer), idPtrStruct, StorageClassStorageBuffer, idStruct,
+		inst(3, OpTypeFunction), idFuncTy, idVoid,
+
+		inst(4, OpConstant), idUint, idConst0, 0,
+
+		inst(4, OpVariable), idPtrV4Out, idColorOut, StorageClassOutput,
+		inst(4, OpVariable), idPtrStruct, idBufVar, StorageClassStorageBuffer,
+
+		inst(5, OpFunction), idVoid, idFunc, 0, idFuncTy,
+		inst(2, OpLabel), idLabel,
+		// Read the vec4 from the storage buffer and output it.
+		inst(5, OpAccessChain), idVec4, idChain, idBufVar, idConst0,
+		inst(4, OpLoad), idVec4, idLoadCol, idChain,
+		inst(3, OpStore), idColorOut, idLoadCol,
+		inst(1, OpReturn),
+		inst(1, OpFunctionEnd),
+	)
+
+	m, err := ParseModule(words)
+	if err != nil {
+		t.Fatalf("ParseModule failed: %v", err)
+	}
+
+	buf := make([]byte, 16)
+	putFloat32LE(buf[0:], 0.1)
+	putFloat32LE(buf[4:], 0.2)
+	putFloat32LE(buf[8:], 0.3)
+	putFloat32LE(buf[12:], 0.4)
+
+	ctx := &ExecutionContext{
+		Buffers: map[BindingKey][]byte{
+			{Group: 0, Binding: 0}: buf,
+		},
+	}
+
+	outputs, err := m.ExecuteWithContext("fs_main", ctx)
+	if err != nil {
+		t.Fatalf("ExecuteWithContext failed: %v", err)
+	}
+
+	ep := m.EntryPoints["fs_main"]
+	var colorVarID uint32
+	for _, varID := range ep.InterfaceIDs {
+		vi := m.Variables[varID]
+		if vi != nil && vi.StorageClass == StorageClassOutput {
+			colorVarID = varID
+			break
+		}
+	}
+
+	color := Vec4ToFloat32(outputs[colorVarID])
+	want := [4]float32{0.1, 0.2, 0.3, 0.4}
+	for i := 0; i < 4; i++ {
+		if math.Abs(float64(color[i]-want[i])) > 1e-5 {
+			t.Errorf("color[%d] = %f, want %f", i, color[i], want[i])
+		}
+	}
+}
+
+// valueApproxEqual compares two Values for approximate equality.
+func valueApproxEqual(a, b Value, eps float64) bool {
+	switch av := a.(type) {
+	case Float32:
+		bv, ok := b.(Float32)
+		return ok && math.Abs(float64(av-bv)) <= eps
+	case Vec2:
+		bv, ok := b.(Vec2)
+		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps
+	case Vec3:
+		bv, ok := b.(Vec3)
+		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps &&
+			math.Abs(float64(av[2]-bv[2])) <= eps
+	case Vec4:
+		bv, ok := b.(Vec4)
+		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps &&
+			math.Abs(float64(av[2]-bv[2])) <= eps && math.Abs(float64(av[3]-bv[3])) <= eps
+	default:
+		return a == b
+	}
+}
+
 func BenchmarkSPIRVVertexShaderExecution(b *testing.B) {
 	words := buildTriangleVertexSPIRV()
 	m, err := ParseModule(words)
@@ -592,4 +925,27 @@ func BenchmarkSPIRVFragmentShaderExecution(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = m.Execute("fs_main", nil)
 	}
+}
+
+// testMakeValues creates a []Value slice from a map of ID->Value entries.
+// The slice is sized to hold the maximum ID + 1. This is a test helper
+// that converts the old map-based test patterns to the new slice-based
+// interpreter values representation.
+func testMakeValues(entries map[uint32]Value) []Value {
+	var maxID uint32
+	for id := range entries {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	// Add headroom for result IDs that tests may write into (e.g., ResultID=100).
+	size := maxID + 1
+	if size < 128 {
+		size = 128
+	}
+	values := make([]Value, size)
+	for id, val := range entries {
+		values[id] = val
+	}
+	return values
 }

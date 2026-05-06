@@ -142,12 +142,13 @@ Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 
 ### `hal/software/` — Software Backend
 
-CPU-based rasterizer. Always compiled (no build tags required). Pure Go, zero system dependencies.
+CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags required). Pure Go, zero system dependencies.
 
-- `raster/` — Triangle rasterization, blending, depth/stencil, tiling
-- `shader/` — SPIR-V interpreter (CPU shader execution) + legacy callback shaders
+- `raster/` — Triangle rasterization, blending, depth/stencil, tiling, per-pixel fragment shader callback
+- `shader/` — Full SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders. GLSL.std.450 math intrinsics (30+), texture sampling, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace.
+- `compute_test.go` — Naga WGSL→SPIR-V integration tests for compute shaders
 
-Use cases: headless rendering (servers, CI/CD), testing without GPU, embedded systems, fallback when no GPU available.
+Use cases: headless rendering (servers, CI/CD), testing without GPU, shader debugging, embedded systems, fallback when no GPU available. Verified: triangle + 4096-particle compute+render simulation.
 
 ### `hal/noop/` — No-op Backend
 

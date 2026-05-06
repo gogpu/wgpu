@@ -537,6 +537,98 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	}
 }
 
+// FragmentShaderFunc computes the output RGBA color for a single fragment
+// given its interpolated per-vertex attributes. This is the raster-level
+// callback — it receives the raw interpolated float32 attribute slice and
+// returns [R, G, B, A] in [0,1]. Used by DrawTrianglesWithFragmentShader
+// to execute a SPIR-V fragment shader per pixel.
+type FragmentShaderFunc func(attrs []float32) [4]float32
+
+// DrawTrianglesWithFragmentShader rasterizes triangles and invokes fragFunc
+// per pixel with the interpolated vertex attributes. This is identical to
+// DrawTrianglesInterpolated except the per-pixel color comes from fragFunc
+// instead of treating the first 4 attributes as direct RGBA.
+func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFunc FragmentShaderFunc) {
+	p.mu.Lock()
+	viewport := p.viewport
+	depthTest := p.depthTest
+	depthWrite := p.depthWrite
+	depthCompare := p.depthCompare
+	cullMode := p.cullMode
+	frontFace := p.frontFace
+	blendState := p.blendState
+	stencilBuffer := p.stencilBuffer
+	stencilState := p.stencilState
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
+	p.mu.Unlock()
+
+	for i := range triangles {
+		tri := &triangles[i]
+
+		// Face culling
+		if ShouldCull(*tri, cullMode, frontFace) {
+			continue
+		}
+
+		// Rasterize triangle
+		Rasterize(*tri, viewport, func(frag Fragment) {
+			// Bounds check
+			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
+				return
+			}
+
+			// Scissor test
+			if !p.passesScissorTest(frag.X, frag.Y, scissor) {
+				return
+			}
+
+			// Depth and stencil tests
+			result := p.performDepthStencilTest(
+				frag.X, frag.Y, frag.Depth,
+				depthTest, depthWrite, depthCompare,
+				stencilBuffer, stencilState,
+			)
+			if !result.passed {
+				return
+			}
+			if result.writeDepth {
+				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
+			}
+
+			// Execute fragment shader with interpolated attributes.
+			srcColor := fragFunc(frag.Attributes)
+
+			// Apply blending if enabled
+			idx := (frag.Y*p.width + frag.X) * 4
+			p.mu.Lock()
+			if blendState.Enabled {
+				r, g, b, a := BlendFloatToByte(srcColor,
+					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+					blendState)
+				p.colorBuffer[idx+0] = r
+				p.colorBuffer[idx+1] = g
+				p.colorBuffer[idx+2] = b
+				p.colorBuffer[idx+3] = a
+			} else {
+				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
+				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
+				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
+				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+			}
+			p.mu.Unlock()
+		})
+	}
+}
+
 // DrawTrianglesParallel uses tile-based parallel rasterization.
 // This can significantly speed up rendering for large numbers of triangles
 // by distributing work across multiple CPU cores.

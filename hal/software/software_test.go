@@ -292,47 +292,42 @@ func TestSurfaceFramebufferReadback(t *testing.T) {
 	surface.Unconfigure(openDev.Device)
 }
 
-func TestComputePipelineNotSupported(t *testing.T) {
-	backend := API{}
-	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
-	defer instance.Destroy()
+func TestComputePipelineNilDescriptor(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
 
-	adapters := instance.EnumerateAdapters(nil)
-	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
-	defer openDev.Device.Destroy()
-
-	_, err := openDev.Device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label: "Test Compute",
-	})
-	if err == nil {
-		t.Fatal("expected error for compute pipeline creation, got nil")
-	}
-	if !errors.Is(err, ErrComputeNotSupported) {
-		t.Errorf("expected ErrComputeNotSupported, got: %v", err)
-	}
-}
-
-func TestComputePipelineNotSupportedNilDescriptor(t *testing.T) {
-	backend := API{}
-	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
-	defer instance.Destroy()
-
-	adapters := instance.EnumerateAdapters(nil)
-	adapter := adapters[0].Adapter
-	openDev, _ := adapter.Open(0, gputypes.DefaultLimits())
-	defer openDev.Device.Destroy()
-
-	_, err := openDev.Device.CreateComputePipeline(nil)
+	_, err := dev.CreateComputePipeline(nil)
 	if err == nil {
 		t.Fatal("expected error for nil compute pipeline descriptor, got nil")
 	}
-	if !errors.Is(err, ErrComputeNotSupported) {
-		t.Errorf("expected ErrComputeNotSupported, got: %v", err)
+}
+
+func TestComputePipelineNoSPIRV(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	// Create a shader module with no SPIR-V (empty source).
+	sm, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: "empty"})
+	if err != nil {
+		t.Fatalf("CreateShaderModule failed: %v", err)
+	}
+
+	_, err = dev.CreateComputePipeline(&hal.ComputePipelineDescriptor{
+		Label: "no-spirv",
+		Compute: hal.ComputeState{
+			Module:     sm,
+			EntryPoint: "main",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for compute pipeline with no SPIR-V")
+	}
+	if !errors.Is(err, ErrComputeRequiresSPIRV) {
+		t.Errorf("expected ErrComputeRequiresSPIRV, got: %v", err)
 	}
 }
 
-func TestAdapterDownlevelNoCompute(t *testing.T) {
+func TestAdapterDownlevelHasCompute(t *testing.T) {
 	backend := API{}
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
@@ -343,8 +338,8 @@ func TestAdapterDownlevelNoCompute(t *testing.T) {
 	}
 
 	caps := adapters[0].Capabilities
-	if caps.DownlevelCapabilities.Flags&hal.DownlevelFlagsComputeShaders != 0 {
-		t.Error("software backend should not report compute shader support")
+	if caps.DownlevelCapabilities.Flags&hal.DownlevelFlagsComputeShaders == 0 {
+		t.Error("software backend should report compute shader support")
 	}
 }
 
@@ -987,17 +982,18 @@ func TestRenderPassEncoderAllNoOps(t *testing.T) {
 // Compute Pass Encoder Tests
 // =============================================================================
 
-func TestComputePassEncoderAllNoOps(t *testing.T) {
+func TestComputePassEncoderNoPipeline(t *testing.T) {
 	dev, _, cleanup := createSoftwareDevice(t)
 	defer cleanup()
 
 	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
 	pass := enc.BeginComputePass(&hal.ComputePassDescriptor{Label: "test-cp"})
 
+	// These should not panic even without a pipeline set.
 	pass.SetPipeline(nil)
 	pass.SetBindGroup(0, nil, nil)
-	pass.Dispatch(1, 1, 1)
-	pass.DispatchIndirect(nil, 0)
+	pass.Dispatch(1, 1, 1)        // warns but does not crash
+	pass.DispatchIndirect(nil, 0) // warns but does not crash
 	pass.End()
 }
 

@@ -9,19 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Software backend: SPIR-V interpreter** (FEAT-SW-004) — minimal CPU interpreter for
-  SPIR-V shaders. Executes vertex and fragment shaders on the software backend, enabling
-  `gogpu/examples/triangle` to render a visible triangle with `GOGPU_GRAPHICS_API=software`.
-  Handles: OpLoad/OpStore, OpAccessChain, OpCompositeConstruct/Extract, OpConvertUToF,
-  arithmetic ops, `@builtin(vertex_index)` input, `@builtin(position)` output, `@location(0)`
-  fragment output. WGSL automatically compiled to SPIR-V via naga when no SPIR-V provided.
-  ~650 LOC, 14 tests, 2 benchmarks. Phase 1 of 5 (triangle only — uniforms, textures,
-  control flow, compute planned).
+- **Software backend: full SPIR-V interpreter** (FEAT-SW-004) — CPU interpreter for SPIR-V
+  shaders enabling real shader execution on the software backend. ~10K LOC, 370+ tests, 84%
+  coverage. Seven phases:
+  - **Phase 1**: Basic vertex/fragment (triangle renders red)
+  - **Phase 2**: Uniform/storage buffers, vector/matrix ops
+  - **Phase 3**: Texture sampling (nearest, bilinear, 3 wrap modes)
+  - **Phase 4**: GLSL.std.450 math intrinsics (30+ functions)
+  - **Phase 5**: Control flow (loops, phi nodes, function calls, switch)
+  - **Phase 6**: Compute shaders (dispatch, atomics, workgroup shared memory)
+  - **Phase 7**: Shader debugger (DebugContext, breakpoints, JSON trace, zero overhead)
+- **Software compute HAL integration** — `CreateComputePipeline` + `ComputePassEncoder.Dispatch`
+  execute SPIR-V compute shaders via interpreter. Naga WGSL→SPIR-V compilation in
+  `CreateShaderModule`. Full integration with storage buffers.
+- **Per-pixel SPIR-V fragment shader** — `DrawTrianglesWithFragmentShader` in raster pipeline.
+  Executes fragment shader per-pixel with interpolated `@location` inputs from vertex outputs.
+- **Instanced rendering + TriangleStrip** on software backend — instance-rate vertex buffers,
+  `@builtin(vertex_index)` + `@builtin(instance_index)`, alternating winding.
+- **Software-test example** — `examples/software-test/` end-to-end compute verification.
+
+### Changed
+
+- **SPIR-V interpreter performance** — 3× faster, 75% less memory. Slice-based values
+  (replaced `map[uint32]Value`), Pointer pool, optimized compositeConstruct.
+  Vertex: 18→8 allocs (-56%), 2848→712 B (-75%). Fragment: 11→4 allocs (-64%).
 
 ### Fixed
 
-- **Software backend: RGBA→BGRA pixel order** in SPIR-V draw path — raster pipeline outputs
-  RGBA but framebuffer is BGRA for GDI/X11. Without swap, red triangle appeared blue.
+- **RGBA→BGRA pixel order** — unified `writeRasterToTarget` helper for all draw paths
+  (SPIR-V, vertex buffer, fragment shader). Framebuffer is BGRA for GDI/X11.
+- **OpAccessChain on function-local composites** — SubPointer type ensures struct member
+  writes propagate to parent variable (was creating disconnected copies).
+- **Struct byte size calculation** — uses MemberDecorate Offset instead of naive fallback
+  (wrong stride caused storage buffer corruption for RuntimeArray elements).
+- **zeroValueForVar for TypeStruct** — creates zero-initialized Array with per-member
+  recursion (was returning Uint32(0), breaking struct navigation).
+- **All 71 lint warnings resolved** — 0 issues on Windows, Linux, macOS.
 
 ## [0.26.12] - 2026-05-01
 

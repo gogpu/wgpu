@@ -15,10 +15,10 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
-// ErrComputeNotSupported indicates that compute shaders are not available
-// in the software backend. The software backend only supports rasterization;
-// use a GPU-accelerated backend (Vulkan, Metal, DX12) for compute workloads.
-var ErrComputeNotSupported = errors.New("software: compute shaders not supported")
+// ErrComputeRequiresSPIRV indicates that a compute pipeline requires a shader
+// module with SPIR-V bytecode. WGSL shaders must be compilable to SPIR-V via
+// naga for the SPIR-V interpreter to execute them.
+var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SPIR-V shader (WGSL compilation may have failed)")
 
 // Device implements hal.Device for the software backend.
 // It maintains a resource registry for resolving handle-based bind group entries
@@ -210,10 +210,26 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 // DestroyRenderPipeline is a no-op.
 func (d *Device) DestroyRenderPipeline(_ hal.RenderPipeline) {}
 
-// CreateComputePipeline returns ErrComputeNotSupported.
-// The software backend does not support compute shaders.
-func (d *Device) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, ErrComputeNotSupported
+// CreateComputePipeline creates a software compute pipeline backed by the SPIR-V
+// interpreter. The shader module must contain SPIR-V bytecode (either provided
+// directly or compiled from WGSL via naga).
+func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in Software.CreateComputePipeline")
+	}
+	sm, ok := desc.Compute.Module.(*ShaderModule)
+	if !ok || sm == nil {
+		return nil, fmt.Errorf("software: compute pipeline requires a software ShaderModule")
+	}
+	// Verify that SPIR-V is available (ParsedModule will parse on first access).
+	if sm.ParsedModule() == nil {
+		return nil, ErrComputeRequiresSPIRV
+	}
+	return &ComputePipeline{
+		desc:       desc,
+		module:     sm,
+		entryPoint: desc.Compute.EntryPoint,
+	}, nil
 }
 
 // DestroyComputePipeline is a no-op.
@@ -228,8 +244,10 @@ func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error)
 func (d *Device) DestroyQuerySet(_ hal.QuerySet) {}
 
 // CreateCommandEncoder creates a software command encoder.
+// The encoder holds a device reference so compute passes can resolve bind group
+// resources during dispatch.
 func (d *Device) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	return &CommandEncoder{}, nil
+	return &CommandEncoder{device: d}, nil
 }
 
 // CreateFence creates a software fence with atomic counter.
