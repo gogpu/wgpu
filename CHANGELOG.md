@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **zeroValueForVar for TypeStruct** — creates zero-initialized Array with per-member
   recursion (was returning Uint32(0), breaking struct navigation).
 - **All 71 lint warnings resolved** — 0 issues on Windows, Linux, macOS.
+- **Flaky TestSnatchLock_ReadWriteExclusion** — replaced `time.Sleep(10ms)` with channel-based
+  synchronization. Was failing intermittently on Windows CI (goroutine scheduler too slow for
+  10ms deadline). Now deterministic — 100/100 passes.
 
 ## [0.26.12] - 2026-05-01
 

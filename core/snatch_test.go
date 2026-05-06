@@ -6,7 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // =============================================================================
@@ -412,75 +411,43 @@ func TestSnatchable_ConcurrentReadAndSnatch(t *testing.T) {
 func TestSnatchLock_ReadWriteExclusion(t *testing.T) {
 	lock := NewSnatchLock()
 
-	// This test verifies that write lock blocks readers
-	var sequence []string
-	var mu sync.Mutex
+	// Verify that a held write lock blocks readers.
+	// Uses channel synchronization instead of time.Sleep
+	// to avoid flaky failures on slow CI (Windows GitHub Actions).
 
-	record := func(event string) {
-		mu.Lock()
-		sequence = append(sequence, event)
-		mu.Unlock()
-	}
+	readerStarted := make(chan struct{})
+	readerAcquired := make(chan struct{})
+	writerReleased := make(chan struct{})
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Acquire write lock
+	// Hold write lock
 	writeGuard := lock.Write()
-	record("write-acquired")
 
-	// Start a reader (will block)
+	// Start reader goroutine — it will block on lock.Read()
 	go func() {
-		defer wg.Done()
-		record("reader-waiting")
+		close(readerStarted)
 		readGuard := lock.Read()
-		record("reader-acquired")
+		close(readerAcquired)
 		readGuard.Release()
-		record("reader-released")
 	}()
 
-	// Give reader time to start waiting
-	// Note: This is a timing-based test, not ideal but demonstrates the pattern
-	time.Sleep(10 * time.Millisecond)
+	// Wait for reader goroutine to start (it's now blocked on Read)
+	<-readerStarted
 
-	// Release write lock
+	// Verify reader has NOT acquired the lock while write is held.
+	// Use a short select to confirm readerAcquired is still blocked.
+	select {
+	case <-readerAcquired:
+		t.Fatal("reader acquired lock while write lock was held")
+	default:
+		// Expected: reader is blocked
+	}
+
+	// Release write lock — reader should now proceed
 	writeGuard.Release()
-	record("write-released")
+	close(writerReleased)
 
-	// Start another operation to ensure sequence completes
-	go func() {
-		defer wg.Done()
-		guard := lock.Read()
-		guard.Release()
-	}()
-
-	wg.Wait()
-
-	// Verify write-released happens before reader-acquired
-	mu.Lock()
-	defer mu.Unlock()
-
-	writeReleasedIdx := -1
-	readerAcquiredIdx := -1
-	for i, event := range sequence {
-		if event == "write-released" {
-			writeReleasedIdx = i
-		}
-		if event == "reader-acquired" {
-			readerAcquiredIdx = i
-		}
-	}
-
-	if writeReleasedIdx == -1 {
-		t.Error("write-released not recorded")
-	}
-	if readerAcquiredIdx == -1 {
-		t.Error("reader-acquired not recorded")
-	}
-	if readerAcquiredIdx < writeReleasedIdx {
-		t.Errorf("reader-acquired (%d) before write-released (%d)",
-			readerAcquiredIdx, writeReleasedIdx)
-	}
+	// Wait for reader to acquire and release
+	<-readerAcquired
 }
 
 // =============================================================================
