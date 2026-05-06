@@ -179,14 +179,20 @@ func (interp *interpreter) initResourceVariables() {
 				interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
 				continue
 			}
-			// Deserialize the buffer data into a structured Value based on the pointee type.
 			pointeeType := m.PointeeType(vi.TypeID)
 			if pointeeType == nil {
 				interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
 				continue
 			}
-			val := interp.readValueFromBuffer(bufData, 0, pointeeType)
-			interp.values[varID] = &Pointer{Value: val}
+			if vi.StorageClass == StorageClassStorageBuffer {
+				// Storage buffers use BufferPointer for direct read/write to raw bytes.
+				// This ensures OpStore writes are immediately reflected in the buffer.
+				interp.values[varID] = &BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType}
+			} else {
+				// Uniform and push constant buffers are read-only -- deserialize once.
+				val := interp.readValueFromBuffer(bufData, 0, pointeeType)
+				interp.values[varID] = &Pointer{Value: val}
+			}
 
 		case StorageClassUniformConstant:
 			// UniformConstant is used for textures/samplers -- handled separately.
@@ -497,9 +503,17 @@ func (interp *interpreter) run() error {
 				break
 			}
 			ptrID := inst.Operands[0]
-			if ptr, ok := interp.values[ptrID].(*Pointer); ok {
-				interp.values[inst.ResultID] = ptr.Value
-			} else {
+			switch p := interp.values[ptrID].(type) {
+			case *Pointer:
+				interp.values[inst.ResultID] = p.Value
+			case *BufferPointer:
+				// Read directly from the raw buffer.
+				if p.Type != nil {
+					interp.values[inst.ResultID] = interp.readValueFromBuffer(p.Buffer, p.Offset, p.Type)
+				} else {
+					interp.values[inst.ResultID] = Uint32(0)
+				}
+			default:
 				// Direct value fallback (shouldn't happen in valid SPIR-V).
 				interp.values[inst.ResultID] = interp.values[ptrID]
 			}
@@ -511,8 +525,12 @@ func (interp *interpreter) run() error {
 			}
 			ptrID := inst.Operands[0]
 			valID := inst.Operands[1]
-			if ptr, ok := interp.values[ptrID].(*Pointer); ok {
-				ptr.Value = interp.values[valID]
+			switch p := interp.values[ptrID].(type) {
+			case *Pointer:
+				p.Value = interp.values[valID]
+			case *BufferPointer:
+				// Write directly to the raw buffer.
+				writeValueToBuffer(p.Buffer, p.Offset, interp.values[valID])
 			}
 
 		case OpAccessChain:
@@ -1052,6 +1070,19 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = Int32(a >> b)
 			}
 
+		case OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange,
+			OpAtomicSMin, OpAtomicUMin, OpAtomicSMax, OpAtomicUMax,
+			OpAtomicIIncrement, OpAtomicIDecrement, OpAtomicLoad:
+			interp.values[inst.ResultID] = interp.executeAtomicOp(inst)
+
+		case OpAtomicStore:
+			interp.executeAtomicOp(inst)
+
+		case OpControlBarrier, OpMemoryBarrier:
+			// In a single-threaded interpreter, barriers are no-ops.
+			// All invocations within a workgroup run sequentially,
+			// so there is no need for synchronization.
+
 		case OpUndef:
 			// OpUndef produces an undefined value -- use zero.
 			interp.values[inst.ResultID] = Uint32(0)
@@ -1209,9 +1240,14 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 }
 
 // accessChain navigates into a composite value through a chain of indexes,
-// returning a Pointer to the innermost element.
-func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) *Pointer {
+// returning a Pointer or BufferPointer to the innermost element.
+func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	baseVal := interp.values[baseID]
+
+	// If base is a BufferPointer, compute byte offset through the chain.
+	if bp, ok := baseVal.(*BufferPointer); ok {
+		return interp.bufferAccessChain(bp, indexes)
+	}
 
 	// If base is a Pointer, unwrap.
 	if ptr, ok := baseVal.(*Pointer); ok {
@@ -1226,6 +1262,60 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) *Pointer
 	}
 
 	return &Pointer{Value: current}
+}
+
+// bufferAccessChain computes a byte offset through a chain of indexes into
+// a raw buffer, returning a BufferPointer at the final element position.
+func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32) *BufferPointer {
+	m := interp.module
+	offset := bp.Offset
+	currentType := bp.Type
+
+	for _, idxID := range indexes {
+		idx := toUint32(interp.values[idxID])
+
+		if currentType == nil {
+			break
+		}
+
+		switch currentType.Kind {
+		case TypeStruct:
+			// For struct members, use the MemberDecorate Offset if available.
+			structTypeID := interp.findTypeID(currentType)
+			memberOffset := m.GetMemberOffset(structTypeID, idx)
+			offset += memberOffset
+			if int(idx) < len(currentType.MemberIDs) {
+				currentType = m.Types[currentType.MemberIDs[idx]]
+			} else {
+				currentType = nil
+			}
+
+		case TypeArray:
+			elemType := m.Types[currentType.ElemType]
+			if elemType != nil {
+				elemSize := typeByteSize(m, elemType)
+				offset += idx * elemSize
+			}
+			currentType = m.Types[currentType.ElemType]
+
+		case TypeVector:
+			// Indexing into a vector component.
+			elemType := m.Types[currentType.ElemType]
+			if elemType != nil {
+				elemSize := typeByteSize(m, elemType)
+				offset += idx * elemSize
+				currentType = elemType
+			} else {
+				offset += idx * 4
+				currentType = &TypeInfo{Kind: TypeFloat, Width: 32}
+			}
+
+		default:
+			break
+		}
+	}
+
+	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType}
 }
 
 // indexComposite extracts element at the given index from a composite value.

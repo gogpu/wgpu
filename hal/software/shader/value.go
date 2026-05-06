@@ -72,6 +72,14 @@ const (
 	FilterLinear  = 1
 )
 
+// BufferPointer provides direct read/write access to a position within a raw byte buffer.
+// Used for storage buffer access chains where OpStore must write back to the buffer.
+type BufferPointer struct {
+	Buffer []byte    // raw buffer data
+	Offset uint32    // byte offset within the buffer
+	Type   *TypeInfo // type of the pointed-to element
+}
+
 // SampledImageValue combines a texture reference and a sampler reference.
 // Created by OpSampledImage, consumed by OpImageSample* opcodes.
 type SampledImageValue struct {
