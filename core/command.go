@@ -67,17 +67,24 @@ const (
 	CommandEncoderStatusConsumed
 )
 
+// Common state names shared between CommandEncoderStatus and CommandEncoderPassState.
+const (
+	stateRecording = "Recording"
+	stateFinished  = "Finished"
+	stateError     = "Error"
+)
+
 // String returns a human-readable representation of the status.
 func (s CommandEncoderStatus) String() string {
 	switch s {
 	case CommandEncoderStatusRecording:
-		return "Recording"
+		return stateRecording
 	case CommandEncoderStatusLocked:
 		return "Locked"
 	case CommandEncoderStatusFinished:
-		return "Finished"
+		return stateFinished
 	case CommandEncoderStatusError:
-		return "Error"
+		return stateError
 	case CommandEncoderStatusConsumed:
 		return "Consumed"
 	default:

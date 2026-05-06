@@ -377,20 +377,30 @@ func cStringToGo(b []byte) string {
 	return string(b)
 }
 
+// GPU vendor names used in vendorIDToName and adapter info.
+const (
+	vendorAMD      = "AMD"
+	vendorNVIDIA   = "NVIDIA"
+	vendorIntel    = "Intel"
+	vendorARM      = "ARM"
+	vendorQualcomm = "Qualcomm"
+	vendorImgTec   = "ImgTec"
+)
+
 func vendorIDToName(id uint32) string {
 	switch id {
 	case 0x1002:
-		return "AMD"
+		return vendorAMD
 	case 0x10DE:
-		return "NVIDIA"
+		return vendorNVIDIA
 	case 0x8086:
-		return "Intel"
+		return vendorIntel
 	case 0x13B5:
-		return "ARM"
+		return vendorARM
 	case 0x5143:
-		return "Qualcomm"
+		return vendorQualcomm
 	case 0x1010:
-		return "ImgTec"
+		return vendorImgTec
 	default:
 		return fmt.Sprintf("0x%04X", id)
 	}

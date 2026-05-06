@@ -1278,15 +1278,15 @@ const (
 func (s CommandEncoderPassState) String() string {
 	switch s {
 	case CommandEncoderPassStateRecording:
-		return "Recording"
+		return stateRecording
 	case CommandEncoderPassStateInRenderPass:
 		return "InRenderPass"
 	case CommandEncoderPassStateInComputePass:
 		return "InComputePass"
 	case CommandEncoderPassStateFinished:
-		return "Finished"
+		return stateFinished
 	case CommandEncoderPassStateError:
-		return "Error"
+		return stateError
 	default:
 		return fmt.Sprintf("Unknown(%d)", s)
 	}
