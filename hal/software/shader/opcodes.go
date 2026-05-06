@@ -79,6 +79,100 @@ const (
 	OpFOrdGreaterThan      = 186
 	OpFOrdLessThanEqual    = 188
 	OpFOrdGreaterThanEqual = 190
+
+	// Additional opcodes for Phases 2-6.
+	OpDot               = 148
+	OpVectorTimesScalar = 142
+	OpMatrixTimesVector = 145
+	OpMatrixTimesScalar = 143
+	OpMatrixTimesMatrix = 146
+	OpTranspose         = 84
+	OpVectorShuffle     = 79
+
+	OpFunctionCall = 57
+
+	OpSwitch      = 251
+	OpKill        = 252
+	OpUnreachable = 255
+
+	// Comparison ops (integer, unsigned).
+	OpULessThan         = 176
+	OpUGreaterThan      = 172
+	OpULessThanEqual    = 178
+	OpUGreaterThanEqual = 174
+	OpSLessThan         = 177
+	OpSGreaterThan      = 173
+	OpSLessThanEqual    = 179
+	OpSGreaterThanEqual = 175
+
+	// Logical ops.
+	OpLogicalAnd = 167
+	OpLogicalOr  = 166
+	OpLogicalNot = 168
+
+	// Bitwise ops.
+	OpBitwiseAnd           = 199
+	OpBitwiseOr            = 197
+	OpBitwiseXor           = 198
+	OpNot                  = 200
+	OpShiftLeftLogical     = 196
+	OpShiftRightLogical    = 194
+	OpShiftRightArithmetic = 195
+
+	// Image / sampler ops.
+	OpTypeImage              = 25
+	OpTypeSampler            = 26
+	OpTypeSampledImage       = 27
+	OpSampledImage           = 86
+	OpImageSampleImplicitLod = 87
+	OpImageSampleExplicitLod = 88
+	OpImageFetch             = 95
+	OpImageQuerySize         = 104
+
+	// Atomic ops.
+	OpAtomicLoad            = 227
+	OpAtomicStore           = 228
+	OpAtomicExchange        = 229
+	OpAtomicCompareExchange = 230
+	OpAtomicIIncrement      = 232
+	OpAtomicIDecrement      = 233
+	OpAtomicIAdd            = 234
+	OpAtomicISub            = 235
+	OpAtomicSMin            = 236
+	OpAtomicUMin            = 237
+	OpAtomicSMax            = 238
+	OpAtomicUMax            = 239
+
+	// Barrier ops.
+	OpControlBarrier = 224
+	OpMemoryBarrier  = 225
+
+	// Type conversion ops.
+	OpConvertFToS = 110
+	OpSConvert    = 114
+	OpUConvert    = 113
+	OpFConvert    = 115
+
+	// Misc ops.
+	OpCopyObject = 83
+	OpFMod       = 141
+	OpSMod       = 139
+	OpUMod       = 137
+	OpSRem       = 138
+	OpFRem       = 140
+	OpSNegate    = 126
+
+	// Constant ops.
+	OpConstantTrue      = 41
+	OpConstantFalse     = 42
+	OpSpecConstant      = 48
+	OpSpecConstantTrue  = 49
+	OpSpecConstantFalse = 50
+
+	// Image operand masks.
+	ImageOperandBiasMask = 0x1
+	ImageOperandLodMask  = 0x2
+	ImageOperandGradMask = 0x4
 )
 
 // SPIR-V storage classes.
@@ -100,22 +194,49 @@ const (
 
 // SPIR-V decoration constants.
 const (
-	DecorationBuiltIn     = 11
-	DecorationLocation    = 30
-	DecorationBinding     = 33
-	DecorationArrayStride = 6
+	DecorationArrayStride   = 6
+	DecorationBuiltIn       = 11
+	DecorationBinding       = 33
+	DecorationDescriptorSet = 34
+	DecorationLocation      = 30
+	DecorationOffset        = 35
+	DecorationBlock         = 2
+	DecorationBufferBlock   = 3
+	DecorationColMajor      = 5
+	DecorationMatrixStride  = 7
+	DecorationNonWritable   = 24
+	DecorationNonReadable   = 25
 )
 
 // SPIR-V BuiltIn values.
 const (
-	BuiltInPosition    = 0
-	BuiltInVertexIndex = 42
+	BuiltInPosition           = 0
+	BuiltInPointSize          = 1
+	BuiltInVertexIndex        = 42
+	BuiltInInstanceIndex      = 43
+	BuiltInFragCoord          = 15
+	BuiltInFrontFacing        = 17
+	BuiltInSampleId           = 18
+	BuiltInSampleMask         = 20
+	BuiltInFragDepth          = 22
+	BuiltInGlobalInvocationId = 28
+	BuiltInLocalInvocationId  = 27
+	BuiltInWorkgroupId        = 26
+	BuiltInNumWorkgroups      = 24
+	BuiltInLocalInvocationIdx = 29
+	BuiltInWorkgroupSize      = 25
 )
 
 // SPIR-V execution model constants.
 const (
-	ExecutionModelVertex   = 0
-	ExecutionModelFragment = 4
+	ExecutionModelVertex    = 0
+	ExecutionModelFragment  = 4
+	ExecutionModelGLCompute = 5
+)
+
+// Execution mode constants.
+const (
+	ExecutionModeLocalSize = 17
 )
 
 // spirvMagic is the SPIR-V binary magic number.

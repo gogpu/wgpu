@@ -350,6 +350,16 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 			m.Constants[resultID] = elems
 
+		case OpConstantTrue:
+			if len(operands) >= 2 {
+				m.Constants[operands[1]] = true
+			}
+
+		case OpConstantFalse:
+			if len(operands) >= 2 {
+				m.Constants[operands[1]] = false
+			}
+
 		case OpConstantNull:
 			if len(operands) < 2 {
 				break
