@@ -53,6 +53,7 @@
 ✅ **Zero-init workgroup memory** — WebGPU spec default, plumbed through all layers
 ✅ **CopyTextureToTexture public API** — DMA hardware copy with sub-region support
 ✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
+✅ **Software SPIR-V interpreter** — CPU shader execution for vertex/fragment (Phase 1: triangle)
 ✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
 ✅ **Vulkan command buffer free list** — batch alloc 16 CBs, pool reset (Khronos/NVIDIA/ARM/Mesa/Rust parity)
 ✅ **Damage-aware surface presentation** — `PresentWithDamage()` with compositor dirty rects. First WebGPU implementation. Software + Vulkan + DX12 + GLES backends.

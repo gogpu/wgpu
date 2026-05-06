@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // nextResourceID is a monotonic counter for assigning unique IDs to software resources.
@@ -301,7 +302,28 @@ type BindGroup struct {
 }
 
 // ShaderModule stores shader source for the software backend.
+// When SPIR-V bytecode is available (directly or compiled from WGSL via naga),
+// the parsed Module is cached for use by the SPIR-V interpreter in draw calls.
 type ShaderModule struct {
 	Resource
-	desc *hal.ShaderModuleDescriptor
+	desc   *hal.ShaderModuleDescriptor
+	spirv  []uint32       // SPIR-V bytecode (nil if unavailable)
+	parsed *shader.Module // parsed SPIR-V module (nil until first use)
+}
+
+// ParsedModule returns the parsed SPIR-V module, parsing on first access.
+// Returns nil if no SPIR-V bytecode is available.
+func (sm *ShaderModule) ParsedModule() *shader.Module {
+	if sm.parsed != nil {
+		return sm.parsed
+	}
+	if len(sm.spirv) == 0 {
+		return nil
+	}
+	m, err := shader.ParseModule(sm.spirv)
+	if err != nil {
+		return nil
+	}
+	sm.parsed = m
+	return sm.parsed
 }

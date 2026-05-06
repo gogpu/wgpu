@@ -145,7 +145,7 @@ Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 CPU-based rasterizer. Always compiled (no build tags required). Pure Go, zero system dependencies.
 
 - `raster/` — Triangle rasterization, blending, depth/stencil, tiling
-- `shader/` — Software shader execution (callback-based)
+- `shader/` — SPIR-V interpreter (CPU shader execution) + legacy callback shaders
 
 Use cases: headless rendering (servers, CI/CD), testing without GPU, embedded systems, fallback when no GPU available.
 

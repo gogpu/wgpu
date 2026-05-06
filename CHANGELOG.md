@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Software backend: SPIR-V interpreter** (FEAT-SW-004) — minimal CPU interpreter for
+  SPIR-V shaders. Executes vertex and fragment shaders on the software backend, enabling
+  `gogpu/examples/triangle` to render a visible triangle with `GOGPU_GRAPHICS_API=software`.
+  Handles: OpLoad/OpStore, OpAccessChain, OpCompositeConstruct/Extract, OpConvertUToF,
+  arithmetic ops, `@builtin(vertex_index)` input, `@builtin(position)` output, `@location(0)`
+  fragment output. WGSL automatically compiled to SPIR-V via naga when no SPIR-V provided.
+  ~650 LOC, 14 tests, 2 benchmarks. Phase 1 of 5 (triangle only — uniforms, textures,
+  control flow, compute planned).
+
+### Fixed
+
+- **Software backend: RGBA→BGRA pixel order** in SPIR-V draw path — raster pipeline outputs
+  RGBA but framebuffer is BGRA for GDI/X11. Without swap, red triangle appeared blue.
+
 ## [0.26.12] - 2026-05-01
 
 ### Added

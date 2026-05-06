@@ -1,10 +1,17 @@
 //go:build !(js && wasm)
 
-// Package shader provides callback-based shader execution for the software backend.
+// Package shader provides shader execution for the software backend.
 //
-// Since there is no SPIR-V interpreter in Go, we use callback functions to define
-// vertex and fragment shaders. This allows testing the rendering pipeline without
-// full shader compilation.
+// Two execution paths are supported:
+//
+//   - SPIR-V interpreter: parses and executes SPIR-V bytecode (compiled from WGSL
+//     via naga). This enables rendering shaders that use @builtin(vertex_index) with
+//     no vertex buffers (e.g. the gogpu triangle example). See Module, ParseModule,
+//     and Module.Execute.
+//
+//   - Callback shaders: Go functions implementing VertexShaderFunc / FragmentShaderFunc
+//     for programmatic shader definition without SPIR-V. Useful for testing and
+//     built-in effects (solid color, vertex color, textured).
 //
 // # Shader Types
 //

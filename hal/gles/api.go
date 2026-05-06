@@ -14,6 +14,10 @@ import (
 	"github.com/gogpu/wgpu/hal/gles/wgl"
 )
 
+// vendorUnknown is the placeholder vendor name used when the actual GPU vendor
+// cannot be determined (e.g., no surface available during adapter enumeration).
+const vendorUnknown = "Unknown"
+
 // Backend implements hal.Backend for OpenGL ES / OpenGL 3.3+.
 type Backend struct{}
 
@@ -92,7 +96,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			Adapter: &Adapter{},
 			Info: gputypes.AdapterInfo{
 				Name:       "OpenGL Adapter",
-				Vendor:     "Unknown",
+				Vendor:     vendorUnknown,
 				VendorID:   0,
 				DeviceID:   0,
 				DeviceType: gputypes.DeviceTypeOther,

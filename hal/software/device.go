@@ -3,6 +3,7 @@
 package software
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	naga "github.com/gogpu/naga"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -173,8 +175,28 @@ func (d *Device) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.Pipe
 func (d *Device) DestroyPipelineLayout(_ hal.PipelineLayout) {}
 
 // CreateShaderModule creates a software shader module.
+// If the source is WGSL, it compiles to SPIR-V via naga for interpretation.
+// If SPIR-V is provided directly, it is stored as-is.
+// Compilation failure is non-fatal: the module falls back to the existing
+// callback-based shader path (fullscreen blit, vertex buffer draw).
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	return &ShaderModule{desc: desc}, nil
+	sm := &ShaderModule{desc: desc}
+
+	switch {
+	case len(desc.Source.SPIRV) > 0:
+		sm.spirv = desc.Source.SPIRV
+	case desc.Source.WGSL != "":
+		spirvBytes, err := naga.Compile(desc.Source.WGSL)
+		if err == nil && len(spirvBytes)%4 == 0 {
+			sm.spirv = make([]uint32, len(spirvBytes)/4)
+			for i := range sm.spirv {
+				sm.spirv[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+			}
+		}
+		// Compilation failure is non-fatal — existing draw paths don't need SPIR-V.
+	}
+
+	return sm, nil
 }
 
 // DestroyShaderModule is a no-op.

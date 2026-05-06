@@ -433,6 +433,26 @@ func (h *Hub) UnregisterQuerySet(id QuerySetID) (QuerySet, error) {
 	return h.querySets.Unregister(id)
 }
 
+// Resource type keys used in ResourceCounts and diagnostics.
+const (
+	keyAdapters         = "adapters"
+	keyDevices          = "devices"
+	keyQueues           = "queues"
+	keyBuffers          = "buffers"
+	keyTextures         = "textures"
+	keyTextureViews     = "textureViews"
+	keySamplers         = "samplers"
+	keyBindGroupLayouts = "bindGroupLayouts"
+	keyPipelineLayouts  = "pipelineLayouts"
+	keyBindGroups       = "bindGroups"
+	keyShaderModules    = "shaderModules"
+	keyRenderPipelines  = "renderPipelines"
+	keyComputePipelines = "computePipelines"
+	keyCommandEncoders  = "commandEncoders"
+	keyCommandBuffers   = "commandBuffers"
+	keyQuerySets        = "querySets"
+)
+
 // ResourceCounts returns the count of each resource type in the hub.
 // Useful for debugging and diagnostics.
 func (h *Hub) ResourceCounts() map[string]uint64 {
@@ -440,22 +460,22 @@ func (h *Hub) ResourceCounts() map[string]uint64 {
 	defer h.mu.RUnlock()
 
 	return map[string]uint64{
-		"adapters":         h.adapters.Count(),
-		"devices":          h.devices.Count(),
-		"queues":           h.queues.Count(),
-		"buffers":          h.buffers.Count(),
-		"textures":         h.textures.Count(),
-		"textureViews":     h.textureViews.Count(),
-		"samplers":         h.samplers.Count(),
-		"bindGroupLayouts": h.bindGroupLayouts.Count(),
-		"pipelineLayouts":  h.pipelineLayouts.Count(),
-		"bindGroups":       h.bindGroups.Count(),
-		"shaderModules":    h.shaderModules.Count(),
-		"renderPipelines":  h.renderPipelines.Count(),
-		"computePipelines": h.computePipelines.Count(),
-		"commandEncoders":  h.commandEncoders.Count(),
-		"commandBuffers":   h.commandBuffers.Count(),
-		"querySets":        h.querySets.Count(),
+		keyAdapters:         h.adapters.Count(),
+		keyDevices:          h.devices.Count(),
+		keyQueues:           h.queues.Count(),
+		keyBuffers:          h.buffers.Count(),
+		keyTextures:         h.textures.Count(),
+		keyTextureViews:     h.textureViews.Count(),
+		keySamplers:         h.samplers.Count(),
+		keyBindGroupLayouts: h.bindGroupLayouts.Count(),
+		keyPipelineLayouts:  h.pipelineLayouts.Count(),
+		keyBindGroups:       h.bindGroups.Count(),
+		keyShaderModules:    h.shaderModules.Count(),
+		keyRenderPipelines:  h.renderPipelines.Count(),
+		keyComputePipelines: h.computePipelines.Count(),
+		keyCommandEncoders:  h.commandEncoders.Count(),
+		keyCommandBuffers:   h.commandBuffers.Count(),
+		keyQuerySets:        h.querySets.Count(),
 	}
 }
 
