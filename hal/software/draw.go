@@ -28,20 +28,20 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 		return
 	}
 
-	// No vertex buffer bound — try SPIR-V shader path or fullscreen blit.
+	// No vertex buffer bound — try fullscreen blit or SPIR-V shader path.
 	if r.vertexBufs[0].buffer == nil {
+		// Fullscreen blit path (FAST): direct memcpy/swizzle from bound texture.
+		// Must be checked BEFORE SPIR-V — memcpy is 100x faster than interpreting
+		// a fragment shader per-pixel (ADR-020: 60 FPS vs 0.65 FPS).
+		if r.executeFullscreenBlit(target) {
+			r.cleared = true
+			return
+		}
+
 		// SPIR-V path: when the pipeline has no vertex buffer layouts but has
 		// a shader module with SPIR-V (e.g. @builtin(vertex_index) triangle),
 		// execute the shader via the interpreter.
 		if r.executeSPIRVDraw(target, vertexCount, instanceCount, firstVertex, firstInstance) {
-			return
-		}
-
-		// Fullscreen blit path: blit bound texture to target.
-		// The blit overwrites every destination pixel, so applyClear is redundant.
-		// Skipping clear saves ~18% CPU (8 MB memset at 1920x1080).
-		if r.executeFullscreenBlit(target) {
-			r.cleared = true
 			return
 		}
 		// No source texture found — apply clear only (clear-only pass).
