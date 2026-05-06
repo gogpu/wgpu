@@ -333,10 +333,10 @@ func TestAtomicOps(t *testing.T) {
 			ptr := &Pointer{Value: tt.initial}
 			interp := &interpreter{
 				module: m,
-				values: map[uint32]Value{
+				values: testMakeValues(map[uint32]Value{
 					1: ptr,
 					2: tt.operand,
-				},
+				}),
 			}
 
 			inst := Instruction{
@@ -376,11 +376,11 @@ func TestAtomicCompareExchange(t *testing.T) {
 	ptr := &Pointer{Value: Uint32(10)}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			1: ptr,
 			2: Uint32(42), // new value
 			3: Uint32(10), // comparator
-		},
+		}),
 	}
 
 	inst := Instruction{

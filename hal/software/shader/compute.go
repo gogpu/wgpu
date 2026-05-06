@@ -39,25 +39,19 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 		return fmt.Errorf("spirv: function body for %q not found", entryPoint)
 	}
 
-	interp := &interpreter{
-		module: m,
-		ep:     ep,
-		fn:     fn,
-		ctx:    ctx,
-		values: make(map[uint32]Value, m.Bound),
-		labels: make(map[uint32]int),
-	}
+	// Acquire a pooled interpreter to avoid allocating per call.
+	interp := m.getInterpreter()
+	interp.ep = ep
+	interp.fn = fn
+	interp.ctx = ctx
+	interp.prevBlock = 0
+	interp.iterationCount = 0
+	interp.callDepth = 0
+	interp.returnValue = nil
 
 	// Seed constants.
 	for id, val := range m.Constants {
 		interp.values[id] = val
-	}
-
-	// Build label index.
-	for i, inst := range fn.Instructions {
-		if inst.Opcode == OpLabel {
-			interp.labels[inst.ResultID] = i
-		}
 	}
 
 	// Initialize compute built-in inputs.
@@ -71,12 +65,14 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 
 	// Execute.
 	if err := interp.run(); err != nil {
+		m.putInterpreter(interp)
 		return err
 	}
 
 	// Write storage buffer changes back to the context's raw buffer data.
 	interp.writeStorageBufferBack()
 
+	m.putInterpreter(interp)
 	return nil
 }
 
@@ -135,7 +131,7 @@ func (interp *interpreter) initComputeBuiltins() {
 			continue
 		}
 
-		interp.values[varID] = &Pointer{Value: val}
+		interp.values[varID] = interp.allocPointer(val)
 	}
 }
 
@@ -159,14 +155,14 @@ func (interp *interpreter) initWorkgroupVariables() {
 				pointeeType := m.PointeeType(vi.TypeID)
 				if pointeeType != nil {
 					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType)
-					interp.values[varID] = &Pointer{Value: val}
+					interp.values[varID] = interp.allocPointer(val)
 					continue
 				}
 			}
 		}
 
 		// Default: zero-initialized.
-		interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
+		interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
 	}
 }
 

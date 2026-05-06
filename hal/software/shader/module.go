@@ -12,6 +12,7 @@ package shader
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // Module is a parsed SPIR-V module ready for interpretation.
@@ -52,6 +53,10 @@ type Module struct {
 
 	// Bound is the upper bound of all IDs in the module.
 	Bound uint32
+
+	// interpPool recycles interpreter structs across Execute calls to avoid
+	// allocating the values slice (sized to Bound) on every invocation.
+	interpPool sync.Pool
 }
 
 // memberDecorationKey uniquely identifies a member decoration.
@@ -147,6 +152,11 @@ type Function struct {
 	ReturnType   uint32
 	FunctionType uint32
 	Instructions []Instruction
+
+	// Labels maps label ID to instruction index. Built once during ParseModule
+	// to avoid rebuilding on every Execute call. OpBranch and OpBranchConditional
+	// use this for control flow.
+	Labels map[uint32]int
 }
 
 // VariableInfo describes an OpVariable.
@@ -528,6 +538,17 @@ func ParseModule(words []uint32) (*Module, error) {
 
 	// Store all functions by ID for OpFunctionCall dispatch.
 	m.FunctionsByID = funcsByID
+
+	// Pre-build label indexes for all functions. This avoids rebuilding
+	// the label map on every Execute call (saves one map alloc per call).
+	for _, fn := range funcsByID {
+		fn.Labels = make(map[uint32]int, len(fn.Instructions)/4)
+		for i, inst := range fn.Instructions {
+			if inst.Opcode == OpLabel {
+				fn.Labels[inst.ResultID] = i
+			}
+		}
+	}
 
 	return m, nil
 }

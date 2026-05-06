@@ -66,26 +66,21 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 		return nil, fmt.Errorf("spirv: function body for %q not found", entryPoint)
 	}
 
-	interp := &interpreter{
-		module: m,
-		ep:     ep,
-		fn:     fn,
-		ctx:    ctx,
-		values: make(map[uint32]Value, m.Bound),
-		labels: make(map[uint32]int),
-		debug:  debug,
-	}
+	// Acquire a pooled interpreter to avoid allocating per call.
+	interp := m.getInterpreter()
 
-	// Seed constants into the value map.
+	interp.ep = ep
+	interp.fn = fn
+	interp.ctx = ctx
+	interp.debug = debug
+	interp.prevBlock = 0
+	interp.iterationCount = 0
+	interp.callDepth = 0
+	interp.returnValue = nil
+
+	// Seed constants into the value slice.
 	for id, val := range m.Constants {
 		interp.values[id] = val
-	}
-
-	// Build label index for OpBranch targets.
-	for i, inst := range fn.Instructions {
-		if inst.Opcode == OpLabel {
-			interp.labels[inst.ResultID] = i
-		}
 	}
 
 	// Initialize interface variables (inputs/outputs) and resource bindings.
@@ -95,6 +90,7 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 
 	// Execute the function body.
 	if err := interp.run(); err != nil {
+		m.putInterpreter(interp)
 		return nil, err
 	}
 
@@ -113,6 +109,9 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 		}
 	}
 
+	// Return interpreter to pool for reuse.
+	m.putInterpreter(interp)
+
 	return outputs, nil
 }
 
@@ -120,13 +119,16 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 const maxIterations = 100000
 
 // interpreter holds execution state for a single entry point invocation.
+//
+// Values are stored in a flat slice indexed by SSA ID (pre-allocated to module Bound size)
+// instead of a map. This eliminates map creation, hashing, and growth allocations on
+// the hot path. The Bound field from the SPIR-V header gives the exact size needed.
 type interpreter struct {
 	module *Module
 	ep     *EntryPoint
 	fn     *Function
 	ctx    *ExecutionContext
-	values map[uint32]Value
-	labels map[uint32]int // label ID -> instruction index
+	values []Value // indexed by SSA ID, length == module.Bound
 
 	// prevBlock tracks the predecessor block ID for OpPhi resolution.
 	prevBlock uint32
@@ -143,6 +145,58 @@ type interpreter struct {
 	// debug holds the debug context for breakpoints, tracing, and watch variables.
 	// When nil, all debug logic is skipped (zero overhead on the hot path).
 	debug *DebugContext
+
+	// ptrPool is a pre-allocated pool of Pointer objects to avoid heap
+	// allocation for the common case of OpVariable and OpAccessChain.
+	// ptrPoolIdx tracks the next available slot.
+	ptrPool    []Pointer
+	ptrPoolIdx int
+}
+
+// ptrPoolSize is the initial capacity of the Pointer pool per interpreter.
+// Most shaders use fewer than 32 pointer allocations per Execute call.
+const ptrPoolSize = 32
+
+// allocPointer returns a Pointer initialized with the given value.
+// Uses the pre-allocated pool when possible, falling back to heap allocation.
+func (interp *interpreter) allocPointer(val Value) *Pointer {
+	if interp.ptrPoolIdx < len(interp.ptrPool) {
+		p := &interp.ptrPool[interp.ptrPoolIdx]
+		p.Value = val
+		interp.ptrPoolIdx++
+		return p
+	}
+	return &Pointer{Value: val}
+}
+
+// getInterpreter returns a pooled interpreter, allocating one if the pool is empty.
+// The returned interpreter has its values slice cleared and ready for reuse.
+func (m *Module) getInterpreter() *interpreter {
+	if v := m.interpPool.Get(); v != nil {
+		interp := v.(*interpreter)
+		// Clear all values from previous execution without reallocating.
+		// This is O(n) but avoids map creation which is the dominant cost.
+		clear(interp.values)
+		// Reset pointer pool index so pooled Pointers are reused.
+		interp.ptrPoolIdx = 0
+		return interp
+	}
+	return &interpreter{
+		module:  m,
+		values:  make([]Value, m.Bound),
+		ptrPool: make([]Pointer, ptrPoolSize),
+	}
+}
+
+// putInterpreter returns an interpreter to the pool for reuse.
+func (m *Module) putInterpreter(interp *interpreter) {
+	// Clear references to help GC, but keep the values slice.
+	interp.ep = nil
+	interp.fn = nil
+	interp.ctx = nil
+	interp.debug = nil
+	interp.returnValue = nil
+	m.interpPool.Put(interp)
 }
 
 // initVariables sets up input, output, and function-local variables.
@@ -163,10 +217,10 @@ func (interp *interpreter) initVariables(inputs map[uint32]Value) {
 				// Default zero value based on pointee type.
 				val = zeroValueForVar(m, vi.TypeID)
 			}
-			interp.values[varID] = &Pointer{Value: val}
+			interp.values[varID] = interp.allocPointer(val)
 
 		case StorageClassOutput:
-			interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
+			interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
 		}
 	}
 }
@@ -193,12 +247,12 @@ func (interp *interpreter) initResourceVariables() {
 			}
 			if bufData == nil {
 				// No buffer bound -- initialize as zero.
-				interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
+				interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
 				continue
 			}
 			pointeeType := m.PointeeType(vi.TypeID)
 			if pointeeType == nil {
-				interp.values[varID] = &Pointer{Value: zeroValueForVar(m, vi.TypeID)}
+				interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
 				continue
 			}
 			if vi.StorageClass == StorageClassStorageBuffer {
@@ -208,7 +262,7 @@ func (interp *interpreter) initResourceVariables() {
 			} else {
 				// Uniform and push constant buffers are read-only -- deserialize once.
 				val := interp.readValueFromBuffer(bufData, 0, pointeeType)
-				interp.values[varID] = &Pointer{Value: val}
+				interp.values[varID] = interp.allocPointer(val)
 			}
 
 		case StorageClassUniformConstant:
@@ -218,7 +272,7 @@ func (interp *interpreter) initResourceVariables() {
 				continue
 			}
 			// Store the binding key as the value so OpLoad can resolve texture/sampler.
-			interp.values[varID] = &Pointer{Value: bk}
+			interp.values[varID] = interp.allocPointer(bk)
 		}
 	}
 }
@@ -575,7 +629,7 @@ func (interp *interpreter) run() error {
 			storageClass := inst.Operands[0]
 			if storageClass == StorageClassFunction {
 				val := zeroValueForVar(interp.module, inst.TypeID)
-				interp.values[inst.ResultID] = &Pointer{Value: val}
+				interp.values[inst.ResultID] = interp.allocPointer(val)
 			}
 
 		case OpLoad:
@@ -719,7 +773,7 @@ func (interp *interpreter) run() error {
 				break
 			}
 			targetLabel := inst.Operands[0]
-			if idx, ok := interp.labels[targetLabel]; ok {
+			if idx, ok := interp.fn.Labels[targetLabel]; ok {
 				// Track predecessor block for OpPhi.
 				interp.prevBlock = interp.currentBlockLabel(pc - 1)
 				// Detect backward branches (loops) and enforce iteration limit.
@@ -751,7 +805,7 @@ func (interp *interpreter) run() error {
 				if toBool(cond) {
 					target = trueLabel
 				}
-				if idx, ok := interp.labels[target]; ok {
+				if idx, ok := interp.fn.Labels[target]; ok {
 					interp.prevBlock = interp.currentBlockLabel(pc - 1)
 					if idx < pc {
 						interp.iterationCount++
@@ -860,7 +914,7 @@ func (interp *interpreter) run() error {
 						break
 					}
 				}
-				if idx, ok := interp.labels[target]; ok {
+				if idx, ok := interp.fn.Labels[target]; ok {
 					interp.prevBlock = interp.currentBlockLabel(pc - 1)
 					pc = idx + 1
 				}
@@ -1271,7 +1325,8 @@ const maxCallDepth = 64
 
 // callFunction invokes a non-entry-point function by ID with the given arguments.
 // Each call creates a fresh value scope (local variables) while sharing the
-// module-level constants and context.
+// module-level constants and context. Uses the interpreter pool to avoid
+// allocating a new values slice per call.
 func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, error) {
 	if interp.callDepth >= maxCallDepth {
 		return nil, fmt.Errorf("spirv: exceeded maximum call depth (%d)", maxCallDepth)
@@ -1282,27 +1337,19 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 		return nil, fmt.Errorf("spirv: function %d not found", funcID)
 	}
 
-	// Create a child interpreter with its own value scope.
-	child := &interpreter{
-		module:    interp.module,
-		ep:        interp.ep,
-		fn:        fn,
-		ctx:       interp.ctx,
-		values:    make(map[uint32]Value, interp.module.Bound),
-		labels:    make(map[uint32]int),
-		callDepth: interp.callDepth + 1,
-	}
+	// Acquire a pooled child interpreter to avoid allocating per call.
+	child := interp.module.getInterpreter()
+	child.ep = interp.ep
+	child.fn = fn
+	child.ctx = interp.ctx
+	child.callDepth = interp.callDepth + 1
+	child.prevBlock = 0
+	child.iterationCount = 0
+	child.returnValue = nil
 
-	// Copy constants.
+	// Seed constants into the child value slice.
 	for id, val := range interp.module.Constants {
 		child.values[id] = val
-	}
-
-	// Build label index.
-	for i, inst := range fn.Instructions {
-		if inst.Opcode == OpLabel {
-			child.labels[inst.ResultID] = i
-		}
 	}
 
 	// Bind parameters: find OpFunctionParameter instructions and assign argument values.
@@ -1320,7 +1367,7 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 	for varID, vi := range interp.module.Variables {
 		if vi.StorageClass == StorageClassUniform || vi.StorageClass == StorageClassStorageBuffer ||
 			vi.StorageClass == StorageClassPushConstant || vi.StorageClass == StorageClassUniformConstant {
-			if v, ok := interp.values[varID]; ok {
+			if v := interp.values[varID]; v != nil {
 				child.values[varID] = v
 			}
 		}
@@ -1328,14 +1375,13 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 
 	// Execute the callee.
 	if err := child.run(); err != nil {
+		interp.module.putInterpreter(child)
 		return nil, err
 	}
 
-	// Collect the return value. We look for OpReturnValue which stores
-	// the return value ID in Operands[0].
-	// Since run() returns on OpReturnValue, the last-returned value is
-	// whatever OpReturnValue pointed to.
-	return child.returnValue, nil
+	retVal := child.returnValue
+	interp.module.putInterpreter(child)
+	return retVal, nil
 }
 
 // accessChain navigates into a composite value through a chain of indexes,
@@ -1360,7 +1406,7 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 		current = indexComposite(current, idx)
 	}
 
-	return &Pointer{Value: current}
+	return interp.allocPointer(current)
 }
 
 // bufferAccessChain computes a byte offset through a chain of indexes into
@@ -1449,30 +1495,96 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 
 	switch ti.Kind {
 	case TypeVector:
-		// Flatten constituents: each may be scalar or smaller vector.
-		var components []float32
+		// Fast path: if constituent count matches component count and all are
+		// scalars, build the vector directly without allocating a temporary slice.
+		if uint32(len(constituentIDs)) == ti.Components {
+			allScalar := true
+			for _, id := range constituentIDs {
+				switch interp.values[id].(type) {
+				case Float32, Uint32, Int32:
+					// scalar -- OK
+				default:
+					allScalar = false
+				}
+				if !allScalar {
+					break
+				}
+			}
+			if allScalar {
+				switch ti.Components {
+				case 2:
+					return Vec2{
+						toFloat32(interp.values[constituentIDs[0]]),
+						toFloat32(interp.values[constituentIDs[1]]),
+					}
+				case 3:
+					return Vec3{
+						toFloat32(interp.values[constituentIDs[0]]),
+						toFloat32(interp.values[constituentIDs[1]]),
+						toFloat32(interp.values[constituentIDs[2]]),
+					}
+				case 4:
+					return Vec4{
+						toFloat32(interp.values[constituentIDs[0]]),
+						toFloat32(interp.values[constituentIDs[1]]),
+						toFloat32(interp.values[constituentIDs[2]]),
+						toFloat32(interp.values[constituentIDs[3]]),
+					}
+				}
+			}
+		}
+
+		// General path: flatten constituents (may include sub-vectors) using
+		// a stack-allocated array to avoid heap allocation for small vectors.
+		var buf [4]float32
+		n := 0
 		for _, id := range constituentIDs {
-			components = appendComponents(components, interp.values[id])
+			val := interp.values[id]
+			switch v := val.(type) {
+			case Float32:
+				if n < len(buf) {
+					buf[n] = v
+					n++
+				}
+			case Uint32:
+				if n < len(buf) {
+					buf[n] = float32(v)
+					n++
+				}
+			case Int32:
+				if n < len(buf) {
+					buf[n] = float32(v)
+					n++
+				}
+			case Vec2:
+				for j := 0; j < 2 && n < len(buf); j++ {
+					buf[n] = v[j]
+					n++
+				}
+			case Vec3:
+				for j := 0; j < 3 && n < len(buf); j++ {
+					buf[n] = v[j]
+					n++
+				}
+			case Vec4:
+				for j := 0; j < 4 && n < len(buf); j++ {
+					buf[n] = v[j]
+					n++
+				}
+			default:
+				if n < len(buf) {
+					buf[n] = 0
+					n++
+				}
+			}
 		}
 		switch ti.Components {
 		case 2:
-			var v Vec2
-			for i := 0; i < 2 && i < len(components); i++ {
-				v[i] = components[i]
-			}
-			return v
+			return Vec2{buf[0], buf[1]}
 		case 3:
-			var v Vec3
-			for i := 0; i < 3 && i < len(components); i++ {
-				v[i] = components[i]
-			}
-			return v
+			return Vec3{buf[0], buf[1], buf[2]}
 		case 4:
-			var v Vec4
-			for i := 0; i < 4 && i < len(components); i++ {
-				v[i] = components[i]
-			}
-			return v
+			return Vec4{buf[0], buf[1], buf[2], buf[3]}
 		}
 
 	case TypeArray:

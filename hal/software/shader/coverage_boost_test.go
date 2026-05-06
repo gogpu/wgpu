@@ -348,10 +348,10 @@ func TestAtomicMinMaxOps(t *testing.T) {
 			ptr := &Pointer{Value: tt.initial}
 			interp := &interpreter{
 				module: m,
-				values: map[uint32]Value{
+				values: testMakeValues(map[uint32]Value{
 					1: ptr,
 					2: tt.operand,
-				},
+				}),
 			}
 			inst := Instruction{
 				Opcode:   tt.opcode,
@@ -381,7 +381,7 @@ func TestAtomicLoadAndStore(t *testing.T) {
 		ptr := &Pointer{Value: Uint32(42)}
 		interp := &interpreter{
 			module: m,
-			values: map[uint32]Value{1: ptr},
+			values: testMakeValues(map[uint32]Value{1: ptr}),
 		}
 		inst := Instruction{
 			Opcode:   OpAtomicLoad,
@@ -403,10 +403,10 @@ func TestAtomicLoadAndStore(t *testing.T) {
 		ptr := &Pointer{Value: Uint32(0)}
 		interp := &interpreter{
 			module: m,
-			values: map[uint32]Value{
+			values: testMakeValues(map[uint32]Value{
 				1: ptr,
 				2: Uint32(99),
-			},
+			}),
 		}
 		inst := Instruction{
 			Opcode:   OpAtomicStore,
@@ -429,9 +429,9 @@ func TestAtomicOpNonPointer(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			1: Uint32(42), // Not a pointer
-		},
+		}),
 	}
 	inst := Instruction{
 		Opcode:   OpAtomicIAdd,
@@ -483,11 +483,11 @@ func TestGLSLSmoothStepEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: map[uint32]Value{
+				values: testMakeValues(map[uint32]Value{
 					10: Float32(tt.edge0),
 					11: Float32(tt.edge1),
 					12: Float32(tt.x),
-				},
+				}),
 			}
 			got := interp.executeGLSLExtInst(GLSLSmoothStep, []uint32{10, 11, 12})
 			f := toFloat32(got)
@@ -509,11 +509,11 @@ func TestGLSLFClampMinGreaterThanMax(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Float32(5),  // x
 			11: Float32(10), // min (greater than max!)
 			12: Float32(3),  // max
-		},
+		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLFClamp, []uint32{10, 11, 12})
 	f := toFloat32(got)
@@ -536,10 +536,10 @@ func TestGLSLPowNegativeBase(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Float32(-2),
 			11: Float32(3),
-		},
+		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLPow, []uint32{10, 11})
 	f := toFloat32(got)
@@ -574,7 +574,7 @@ func TestGLSLAtan2Quadrants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: map[uint32]Value{10: Float32(tt.y), 11: Float32(tt.x)},
+				values: testMakeValues(map[uint32]Value{10: Float32(tt.y), 11: Float32(tt.x)}),
 			}
 			got := interp.executeGLSLExtInst(GLSLAtan2, []uint32{10, 11})
 			f := toFloat32(got)
@@ -596,10 +596,10 @@ func TestGLSLReflectViaExtInst(t *testing.T) {
 	// Reflect incident (1, -1, 0) around normal (0, 1, 0) -> (1, 1, 0)
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Vec3{1, -1, 0},
 			11: Vec3{0, 1, 0},
-		},
+		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLReflect, []uint32{10, 11})
 	gv, ok := got.(Vec3)
@@ -635,11 +635,11 @@ func TestGLSLFMix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: map[uint32]Value{
+				values: testMakeValues(map[uint32]Value{
 					10: Float32(tt.x),
 					11: Float32(tt.y),
 					12: Float32(tt.a),
-				},
+				}),
 			}
 			got := interp.executeGLSLExtInst(GLSLFMix, []uint32{10, 11, 12})
 			f := toFloat32(got)
@@ -659,7 +659,7 @@ func TestGLSLLengthScalar(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{10: Float32(-5)},
+		values: testMakeValues(map[uint32]Value{10: Float32(-5)}),
 	}
 	got := interp.executeGLSLExtInst(GLSLLength, []uint32{10})
 	f := toFloat32(got)
@@ -677,10 +677,10 @@ func TestGLSLDistanceVec3(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Vec3{1, 0, 0},
 			11: Vec3{4, 0, 0},
-		},
+		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLDistance, []uint32{10, 11})
 	f := toFloat32(got)
@@ -707,11 +707,11 @@ func TestGLSLTernaryVec2Vec3(t *testing.T) {
 	t.Run("vec2", func(t *testing.T) {
 		interp := &interpreter{
 			module: m,
-			values: map[uint32]Value{
+			values: testMakeValues(map[uint32]Value{
 				1: Vec2{-1, 5},
 				2: Vec2{0, 0},
 				3: Vec2{1, 1},
-			},
+			}),
 		}
 		got := interp.glslTernaryFloat([]uint32{1, 2, 3}, clamp)
 		v, ok := got.(Vec2)
@@ -726,11 +726,11 @@ func TestGLSLTernaryVec2Vec3(t *testing.T) {
 	t.Run("vec3", func(t *testing.T) {
 		interp := &interpreter{
 			module: m,
-			values: map[uint32]Value{
+			values: testMakeValues(map[uint32]Value{
 				1: Vec3{-1, 0.5, 5},
 				2: Vec3{0, 0, 0},
 				3: Vec3{1, 1, 1},
-			},
+			}),
 		}
 		got := interp.glslTernaryFloat([]uint32{1, 2, 3}, clamp)
 		v, ok := got.(Vec3)
@@ -811,6 +811,7 @@ func TestInitWorkgroupVariablesFromSharedMemory(t *testing.T) {
 		Constants:         map[uint32]Value{},
 		Decorations:       map[decorationKey]uint32{},
 		MemberDecorations: map[memberDecorationKey]uint32{},
+		Bound:             idVarID + 1,
 	}
 
 	// Pre-populate shared memory with value 42.0.
@@ -825,7 +826,7 @@ func TestInitWorkgroupVariablesFromSharedMemory(t *testing.T) {
 		module: m,
 		ctx:    ctx,
 		ep:     &EntryPoint{},
-		values: make(map[uint32]Value),
+		values: make([]Value, m.Bound),
 	}
 	interp.initWorkgroupVariables()
 
@@ -857,6 +858,7 @@ func TestInitWorkgroupVariablesDefault(t *testing.T) {
 		Constants:         map[uint32]Value{},
 		Decorations:       map[decorationKey]uint32{},
 		MemberDecorations: map[memberDecorationKey]uint32{},
+		Bound:             idVarID + 1,
 	}
 
 	ctx := &ExecutionContext{} // No shared memory
@@ -865,7 +867,7 @@ func TestInitWorkgroupVariablesDefault(t *testing.T) {
 		module: m,
 		ctx:    ctx,
 		ep:     &EntryPoint{},
-		values: make(map[uint32]Value),
+		values: make([]Value, m.Bound),
 	}
 	interp.initWorkgroupVariables()
 
@@ -1423,26 +1425,20 @@ func TestComparisonOpsViaInterpreter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			fn := &Function{
+				Instructions: []Instruction{
+					{Opcode: OpLabel, ResultID: 100},
+					{Opcode: tt.opcode, ResultID: 10, Operands: []uint32{1, 2}},
+					{Opcode: OpReturn},
+				},
+				Labels: map[uint32]int{100: 0},
+			}
 			interp := &interpreter{
 				module: m,
-				fn:     &Function{Instructions: []Instruction{}},
+				fn:     fn,
 				ep:     &EntryPoint{},
 				ctx:    &ExecutionContext{},
-				values: map[uint32]Value{1: tt.a, 2: tt.b},
-				labels: map[uint32]int{},
-			}
-
-			interp.fn.Instructions = []Instruction{
-				{Opcode: OpLabel, ResultID: 100},
-				{Opcode: tt.opcode, ResultID: 10, Operands: []uint32{1, 2}},
-				{Opcode: OpReturn},
-			}
-
-			// Build label index.
-			for i, inst := range interp.fn.Instructions {
-				if inst.Opcode == OpLabel {
-					interp.labels[inst.ResultID] = i
-				}
+				values: testMakeValues(map[uint32]Value{1: tt.a, 2: tt.b}),
 			}
 
 			err := interp.run()
@@ -1497,22 +1493,17 @@ func TestDivisionByZeroOpcodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				fn:     &Function{Instructions: []Instruction{}},
+				fn: &Function{
+					Instructions: []Instruction{
+						{Opcode: OpLabel, ResultID: 100},
+						{Opcode: tt.opcode, ResultID: 10, Operands: []uint32{1, 2}},
+						{Opcode: OpReturn},
+					},
+					Labels: map[uint32]int{100: 0},
+				},
 				ep:     &EntryPoint{},
 				ctx:    &ExecutionContext{},
-				values: map[uint32]Value{1: Uint32(42), 2: Uint32(0)},
-				labels: map[uint32]int{},
-			}
-
-			interp.fn.Instructions = []Instruction{
-				{Opcode: OpLabel, ResultID: 100},
-				{Opcode: tt.opcode, ResultID: 10, Operands: []uint32{1, 2}},
-				{Opcode: OpReturn},
-			}
-			for i, inst := range interp.fn.Instructions {
-				if inst.Opcode == OpLabel {
-					interp.labels[inst.ResultID] = i
-				}
+				values: testMakeValues(map[uint32]Value{1: Uint32(42), 2: Uint32(0)}),
 			}
 
 			// Should not panic.

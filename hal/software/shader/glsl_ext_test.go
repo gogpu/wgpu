@@ -428,11 +428,11 @@ func TestGLSLIntOps(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Int32(-42),
 			11: Int32(0),
 			12: Int32(7),
-		},
+		}),
 	}
 
 	// SAbs(-42) = 42

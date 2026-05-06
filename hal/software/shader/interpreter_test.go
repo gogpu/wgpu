@@ -926,3 +926,26 @@ func BenchmarkSPIRVFragmentShaderExecution(b *testing.B) {
 		_, _ = m.Execute("fs_main", nil)
 	}
 }
+
+// testMakeValues creates a []Value slice from a map of ID->Value entries.
+// The slice is sized to hold the maximum ID + 1. This is a test helper
+// that converts the old map-based test patterns to the new slice-based
+// interpreter values representation.
+func testMakeValues(entries map[uint32]Value) []Value {
+	var maxID uint32
+	for id := range entries {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	// Add headroom for result IDs that tests may write into (e.g., ResultID=100).
+	size := maxID + 1
+	if size < 128 {
+		size = 128
+	}
+	values := make([]Value, size)
+	for id, val := range entries {
+		values[id] = val
+	}
+	return values
+}

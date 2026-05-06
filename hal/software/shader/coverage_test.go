@@ -411,7 +411,7 @@ func TestCompositeConstructStruct(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{10: Float32(1), 11: Float32(2)},
+		values: testMakeValues(map[uint32]Value{10: Float32(1), 11: Float32(2)}),
 	}
 
 	got := interp.compositeConstruct(1, []uint32{10, 11})
@@ -484,14 +484,14 @@ func TestGlslTernaryFloat(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			1: Float32(5),
 			2: Float32(0),
 			3: Float32(10),
 			4: Vec4{5, 5, 5, 5},
 			5: Vec4{0, 0, 0, 0},
 			6: Vec4{10, 10, 10, 10},
-		},
+		}),
 	}
 
 	// Test scalar clamp.
@@ -521,7 +521,7 @@ func TestGlslBinaryUint(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{1: Uint32(5), 2: Uint32(3)},
+		values: testMakeValues(map[uint32]Value{1: Uint32(5), 2: Uint32(3)}),
 	}
 	got := interp.glslBinaryUint([]uint32{1, 2}, func(a, b uint32) uint32 {
 		if a < b {
@@ -538,7 +538,7 @@ func TestGlslBinaryInt(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{1: Int32(-5), 2: Int32(3)},
+		values: testMakeValues(map[uint32]Value{1: Int32(-5), 2: Int32(3)}),
 	}
 	got := interp.glslBinaryInt([]uint32{1, 2}, func(a, b int32) int32 {
 		if a < b {
@@ -703,9 +703,9 @@ func TestCompositeConstructArray(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: map[uint32]Value{
+		values: testMakeValues(map[uint32]Value{
 			10: Float32(1), 11: Float32(2), 12: Float32(3),
-		},
+		}),
 	}
 
 	got := interp.compositeConstruct(2, []uint32{10, 11, 12})

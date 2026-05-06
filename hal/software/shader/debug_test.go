@@ -186,9 +186,11 @@ func TestDebugWatchVariable(t *testing.T) {
 		OnInstruction: func(event InstructionEvent) DebugAction {
 			// The OnInstruction fires when the watch triggers stepping.
 			// Check if the watched variable now has a value.
-			if val, ok := event.Values[watchID]; ok && val != nil {
-				watchTriggered = true
-				capturedValue = val
+			if int(watchID) < len(event.Values) {
+				if val := event.Values[watchID]; val != nil {
+					watchTriggered = true
+					capturedValue = val
+				}
 			}
 			return DebugContinue
 		},

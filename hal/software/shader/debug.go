@@ -102,7 +102,7 @@ type DebugContext struct {
 }
 
 // InstructionEvent provides information about the current instruction during
-// a debug callback. The Values map is a read-only snapshot -- modifications
+// a debug callback. The Values slice is a read-only snapshot -- modifications
 // are ignored by the interpreter.
 type InstructionEvent struct {
 	// PC is the 0-based instruction index within the current function.
@@ -112,9 +112,10 @@ type InstructionEvent struct {
 	// and OnBreakpoint) or just executed (for watch triggers).
 	Instruction Instruction
 
-	// Values is the current SSA value map. This is a direct reference to the
-	// interpreter's live values -- callers should treat it as read-only.
-	Values map[uint32]Value
+	// Values is the current SSA value slice indexed by SPIR-V ID. This is a
+	// direct reference to the interpreter's live values -- callers should
+	// treat it as read-only.
+	Values []Value
 
 	// BlockLabel is the result ID of the current basic block's OpLabel.
 	BlockLabel uint32
@@ -145,16 +146,21 @@ type traceEntry struct {
 // writeTrace writes a single JSON-lines trace entry for the executed instruction.
 // Called after instruction execution when TraceEnabled is true and the instruction
 // produces a result (ResultID != 0).
-func writeTrace(_ io.Writer, enc *json.Encoder, entry *traceEntry, pc int, inst Instruction, values map[uint32]Value) {
+func writeTrace(_ io.Writer, enc *json.Encoder, entry *traceEntry, pc int, inst Instruction, values []Value) {
 	if inst.ResultID == 0 {
 		return
+	}
+
+	var val Value
+	if int(inst.ResultID) < len(values) {
+		val = values[inst.ResultID]
 	}
 
 	entry.PC = pc
 	entry.Op = opcodeName(inst.Opcode)
 	entry.Result = inst.ResultID
-	entry.Value = formatTraceValue(values[inst.ResultID])
-	entry.Type = valueTypeName(values[inst.ResultID])
+	entry.Value = formatTraceValue(val)
+	entry.Type = valueTypeName(val)
 
 	// Encoder writes one JSON object followed by a newline.
 	_ = enc.Encode(entry)
