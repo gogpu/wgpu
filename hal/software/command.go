@@ -334,8 +334,10 @@ func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
 // It performs vertex fetch, viewport transform, and triangle rasterization
 // using the raster/ package. If no vertex buffer is bound and a texture is
 // available in a bind group, it performs a fullscreen texture blit.
+// Supports instanced rendering: instanceCount > 1 draws the same vertices
+// multiple times, advancing instance-rate vertex buffers per instance.
 func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	r.executeDraw(vertexCount, firstVertex)
+	r.executeDraw(vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
 // DrawIndexed is a no-op (indexed drawing not yet implemented).
