@@ -80,6 +80,24 @@ type BufferPointer struct {
 	Type   *TypeInfo // type of the pointed-to element
 }
 
+// SubPointer provides write-through access to a member of a composite value
+// stored in a parent Pointer. When SPIR-V uses OpAccessChain on a function-local
+// variable (e.g. var p: Particle; p.pos), OpStore to the resulting pointer must
+// update the parent composite -- not just a disconnected copy.
+//
+// Without SubPointer, accessChain creates a new Pointer wrapping a copy of the
+// sub-element, so OpStore modifies the copy but not the original struct. This
+// bug caused compute shaders with struct member updates (p.pos += ...) to
+// silently discard writes.
+//
+// SubPointer solves this by storing a reference to the parent Pointer and the
+// index path. OpLoad reads the current value through the parent. OpStore
+// writes back through the parent, rebuilding the composite at each level.
+type SubPointer struct {
+	Parent  *Pointer // root variable pointer
+	Indexes []uint32 // index path from parent to sub-element (literal values, not SSA IDs)
+}
+
 // SampledImageValue combines a texture reference and a sampler reference.
 // Created by OpSampledImage, consumed by OpImageSample* opcodes.
 type SampledImageValue struct {

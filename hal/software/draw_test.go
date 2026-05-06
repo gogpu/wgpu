@@ -1264,3 +1264,235 @@ func TestCreateShaderModuleReturnsTyped(t *testing.T) {
 		t.Errorf("shader label = %q, want %q", shader.desc.Label, "typed-sm")
 	}
 }
+
+// TestParticlesComputeAndRender is a full HAL-level integration test that
+// reproduces the gogpu/examples/particles pipeline: compute shader updates
+// particle positions, then render pipeline draws particles via instanced
+// triangle-strip with instance-rate vertex buffer.
+//
+// This test covers two bugs that were fixed:
+//  1. SubPointer: OpAccessChain on function-local struct variables created
+//     disconnected copies — OpStore to p.pos did not update p (SPIR-V semantics
+//     require write-through to the parent composite).
+//  2. typeByteSize: struct size computed from naive i*4 fallback instead of
+//     MemberDecorate Offset — caused wrong stride for RuntimeArray<struct>,
+//     corrupting adjacent storage buffer elements.
+func TestParticlesComputeAndRender(t *testing.T) {
+	dev, q, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	const numParticles = 4
+	const particleBytes = 16
+	const bufSize = uint64(numParticles * particleBytes)
+
+	// Simple compute shader: move particles by velocity.
+	const computeWGSL = `
+struct Particle { pos: vec2<f32>, vel: vec2<f32>, }
+struct Params { dt: f32, count: u32, }
+
+@group(0) @binding(0) var<storage, read> pin: array<Particle>;
+@group(0) @binding(1) var<storage, read_write> pout: array<Particle>;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    if (i >= params.count) { return; }
+    var p = pin[i];
+    p.pos += p.vel * params.dt;
+    pout[i] = p;
+}
+`
+
+	// Render shader: instanced triangle-strip quads from particle positions.
+	const renderWGSL = `
+struct Out {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) col: vec3<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vid: u32, @location(0) center: vec2<f32>, @location(1) vel: vec2<f32>) -> Out {
+    let x = f32(vid & 1u) * 2.0 - 1.0;
+    let y = f32((vid >> 1u) & 1u) * 2.0 - 1.0;
+    let size = 0.1;
+    var o: Out;
+    o.pos = vec4<f32>(center.x + x * size, center.y + y * size, 0.0, 1.0);
+    o.col = vec3<f32>(1.0, 0.3, 0.5);
+    return o;
+}
+@fragment
+fn fs_main(@location(0) col: vec3<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(col, 1.0);
+}
+`
+
+	// --- Create buffers ---
+	usage := gputypes.BufferUsageStorage | gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst
+	bufA, err := dev.CreateBuffer(&hal.BufferDescriptor{Label: "A", Size: bufSize, Usage: usage})
+	if err != nil {
+		t.Fatalf("CreateBuffer A: %v", err)
+	}
+	bufB, err := dev.CreateBuffer(&hal.BufferDescriptor{Label: "B", Size: bufSize, Usage: usage})
+	if err != nil {
+		t.Fatalf("CreateBuffer B: %v", err)
+	}
+	uniformBuf, err := dev.CreateBuffer(&hal.BufferDescriptor{
+		Label: "params", Size: 8,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer uniform: %v", err)
+	}
+
+	// Init particles at known positions with known velocities.
+	type particle struct{ px, py, vx, vy float32 }
+	particles := []particle{
+		{0.5, 0.5, 0.1, 0.0},
+		{-0.5, -0.5, 0.0, 0.1},
+		{0.3, -0.3, -0.1, 0.0},
+		{-0.3, 0.3, 0.0, -0.1},
+	}
+	initData := make([]byte, bufSize)
+	for i, p := range particles {
+		o := i * particleBytes
+		binary.LittleEndian.PutUint32(initData[o:], math.Float32bits(p.px))
+		binary.LittleEndian.PutUint32(initData[o+4:], math.Float32bits(p.py))
+		binary.LittleEndian.PutUint32(initData[o+8:], math.Float32bits(p.vx))
+		binary.LittleEndian.PutUint32(initData[o+12:], math.Float32bits(p.vy))
+	}
+	q.WriteBuffer(bufA, 0, initData)
+
+	paramData := make([]byte, 8)
+	binary.LittleEndian.PutUint32(paramData[0:], math.Float32bits(1.0)) // dt=1.0
+	binary.LittleEndian.PutUint32(paramData[4:], numParticles)
+	q.WriteBuffer(uniformBuf, 0, paramData)
+
+	// --- Compute pipeline ---
+	cs, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label:  "compute",
+		Source: hal.ShaderSource{WGSL: computeWGSL},
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule (compute): %v", err)
+	}
+	cp, err := dev.CreateComputePipeline(&hal.ComputePipelineDescriptor{
+		Label:   "compute-pipe",
+		Compute: hal.ComputeState{Module: cs, EntryPoint: "main"},
+	})
+	if err != nil {
+		t.Fatalf("CreateComputePipeline: %v", err)
+	}
+
+	// Bind group: pin=A, pout=B, params=uniform
+	bg, err := dev.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label: "compute-bg",
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{Buffer: bufA.NativeHandle(), Size: bufSize}},
+			{Binding: 1, Resource: gputypes.BufferBinding{Buffer: bufB.NativeHandle(), Size: bufSize}},
+			{Binding: 2, Resource: gputypes.BufferBinding{Buffer: uniformBuf.NativeHandle(), Size: 8}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+
+	// Dispatch compute.
+	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	cpass := enc.BeginComputePass(nil)
+	cpass.SetPipeline(cp)
+	cpass.SetBindGroup(0, bg, nil)
+	cpass.Dispatch(1, 1, 1)
+	cpass.End()
+
+	// Verify compute results: pos_new = pos_old + vel * dt.
+	outBuf := bufB.(*Buffer)
+	outData := outBuf.GetData()
+	for i, p := range particles {
+		o := i * particleBytes
+		gotPx := math.Float32frombits(binary.LittleEndian.Uint32(outData[o:]))
+		gotPy := math.Float32frombits(binary.LittleEndian.Uint32(outData[o+4:]))
+		gotVx := math.Float32frombits(binary.LittleEndian.Uint32(outData[o+8:]))
+		gotVy := math.Float32frombits(binary.LittleEndian.Uint32(outData[o+12:]))
+		wantPx := p.px + p.vx
+		wantPy := p.py + p.vy
+
+		if math.Abs(float64(gotPx-wantPx)) > 0.001 ||
+			math.Abs(float64(gotPy-wantPy)) > 0.001 {
+			t.Errorf("particle %d position: got (%.4f,%.4f), want (%.4f,%.4f)",
+				i, gotPx, gotPy, wantPx, wantPy)
+		}
+		if math.Abs(float64(gotVx-p.vx)) > 0.001 ||
+			math.Abs(float64(gotVy-p.vy)) > 0.001 {
+			t.Errorf("particle %d velocity: got (%.4f,%.4f), want (%.4f,%.4f)",
+				i, gotVx, gotVy, p.vx, p.vy)
+		}
+	}
+
+	// --- Render pipeline (instanced triangle-strip) ---
+	const texW, texH = 100, 100
+	tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+		Label:  "target",
+		Size:   hal.Extent3D{Width: texW, Height: texH, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
+	})
+	texView, _ := dev.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+
+	rs, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label:  "render",
+		Source: hal.ShaderSource{WGSL: renderWGSL},
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule (render): %v", err)
+	}
+
+	rp, err := dev.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label: "render-pipe",
+		Vertex: hal.VertexState{
+			Module: rs, EntryPoint: "vs_main",
+			Buffers: []gputypes.VertexBufferLayout{{
+				ArrayStride: particleBytes,
+				StepMode:    gputypes.VertexStepModeInstance,
+				Attributes: []gputypes.VertexAttribute{
+					{Format: gputypes.VertexFormatFloat32x2, Offset: 0, ShaderLocation: 0},
+					{Format: gputypes.VertexFormatFloat32x2, Offset: 8, ShaderLocation: 1},
+				},
+			}},
+		},
+		Primitive: gputypes.PrimitiveState{Topology: gputypes.PrimitiveTopologyTriangleStrip},
+		Fragment: &hal.FragmentState{
+			Module: rs, EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{{
+				Format:    gputypes.TextureFormatRGBA8Unorm,
+				WriteMask: gputypes.ColorWriteMaskAll,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateRenderPipeline: %v", err)
+	}
+
+	enc2, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	rpEnc := enc2.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{{
+			View: texView, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	rpEnc.SetPipeline(rp)
+	rpEnc.SetVertexBuffer(0, bufB, 0)
+	rpEnc.Draw(4, numParticles, 0, 0) // 4 vertices per quad, numParticles instances
+	rpEnc.End()
+
+	// Verify render result: at least some pixels should be non-black.
+	texData := tex.(*Texture).GetData()
+	nonBlack := 0
+	for i := 0; i < len(texData); i += 4 {
+		if texData[i] > 0 || texData[i+1] > 0 || texData[i+2] > 0 {
+			nonBlack++
+		}
+	}
+	if nonBlack == 0 {
+		t.Error("render produced black screen — no particles visible")
+	}
+}

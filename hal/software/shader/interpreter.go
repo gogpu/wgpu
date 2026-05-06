@@ -409,7 +409,16 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 		}
 		return typeByteSize(m, elemType) * ti.Length
 	case TypeStruct:
-		// For structs, sum member sizes (respecting offsets if decorated).
+		// Compute struct size from the highest (offset + size) across all members.
+		// Look up the struct type ID for MemberDecorate offset decorations.
+		structTypeID := uint32(0)
+		for id, t := range m.Types {
+			if t == ti {
+				structTypeID = id
+				break
+			}
+		}
+
 		var maxEnd uint32
 		for i, memberTypeID := range ti.MemberIDs {
 			memberType := m.Types[memberTypeID]
@@ -417,8 +426,21 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 				continue
 			}
 			memberSize := typeByteSize(m, memberType)
-			// Use the end of this member as candidate for total size.
-			end := uint32(i)*4 + memberSize // fallback without decoration
+
+			// Use the decorated offset if available, otherwise fall back to
+			// sequential packing (4 bytes per prior member).
+			memberOffset := uint32(0)
+			if structTypeID != 0 {
+				memberOffset = m.GetMemberOffset(structTypeID, uint32(i))
+			}
+			if memberOffset == 0 && i > 0 {
+				// No decoration: estimate offset from index. This fallback is
+				// rarely correct for non-trivial structs, but keeps backward
+				// compatibility with undecorated types.
+				memberOffset = uint32(i) * 4
+			}
+
+			end := memberOffset + memberSize
 			if end > maxEnd {
 				maxEnd = end
 			}
@@ -538,6 +560,12 @@ func zeroValueForVar(m *Module, ptrTypeID uint32) Value {
 			}
 			return arr
 		}
+	case TypeStruct:
+		members := make(Array, len(ti.MemberIDs))
+		for i, memberTypeID := range ti.MemberIDs {
+			members[i] = zeroValue(m.Types, memberTypeID)
+		}
+		return members
 	}
 	return Uint32(0)
 }
@@ -641,6 +669,9 @@ func (interp *interpreter) run() error {
 			switch p := interp.values[ptrID].(type) {
 			case *Pointer:
 				interp.values[inst.ResultID] = p.Value
+			case *SubPointer:
+				// Read through parent pointer, navigating the index path.
+				interp.values[inst.ResultID] = subPointerLoad(p)
 			case *BufferPointer:
 				// Read directly from the raw buffer.
 				if p.Type != nil {
@@ -663,6 +694,9 @@ func (interp *interpreter) run() error {
 			switch p := interp.values[ptrID].(type) {
 			case *Pointer:
 				p.Value = interp.values[valID]
+			case *SubPointer:
+				// Write through parent pointer, updating the composite at each level.
+				subPointerStore(p, interp.values[valID])
 			case *BufferPointer:
 				// Write directly to the raw buffer.
 				writeValueToBuffer(p.Buffer, p.Offset, interp.values[valID])
@@ -1385,7 +1419,14 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 }
 
 // accessChain navigates into a composite value through a chain of indexes,
-// returning a Pointer or BufferPointer to the innermost element.
+// returning a Pointer, SubPointer, or BufferPointer to the innermost element.
+//
+// For BufferPointers (storage buffers), byte-offset navigation is used so writes
+// go directly to the raw buffer.
+//
+// For Pointers (function-local variables), a SubPointer is returned that maintains
+// a reference back to the root Pointer. This ensures OpStore writes propagate
+// through to the parent composite (e.g. updating p.pos modifies the struct in p).
 func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	baseVal := interp.values[baseID]
 
@@ -1394,12 +1435,26 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 		return interp.bufferAccessChain(bp, indexes)
 	}
 
-	// If base is a Pointer, unwrap.
-	if ptr, ok := baseVal.(*Pointer); ok {
-		baseVal = ptr.Value
+	// If base is a SubPointer, extend the index path.
+	if sp, ok := baseVal.(*SubPointer); ok {
+		resolvedIndexes := make([]uint32, len(sp.Indexes), len(sp.Indexes)+len(indexes))
+		copy(resolvedIndexes, sp.Indexes)
+		for _, idxID := range indexes {
+			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
+		}
+		return &SubPointer{Parent: sp.Parent, Indexes: resolvedIndexes}
 	}
 
-	// Navigate through each index.
+	// If base is a Pointer to a composite, return a SubPointer for write-through.
+	if ptr, ok := baseVal.(*Pointer); ok {
+		resolvedIndexes := make([]uint32, 0, len(indexes))
+		for _, idxID := range indexes {
+			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
+		}
+		return &SubPointer{Parent: ptr, Indexes: resolvedIndexes}
+	}
+
+	// Fallback: navigate through each index on a raw value.
 	current := baseVal
 	for _, idxID := range indexes {
 		idx := toUint32(interp.values[idxID])
@@ -1484,6 +1539,90 @@ func indexComposite(composite Value, index uint32) Value {
 		}
 	}
 	return Float32(0)
+}
+
+// subPointerLoad reads the current value of a sub-element through the parent
+// Pointer by navigating the index path. Each index dereferences one level of
+// composite (struct member or array element or vector component).
+func subPointerLoad(sp *SubPointer) Value {
+	current := sp.Parent.Value
+	for _, idx := range sp.Indexes {
+		current = indexComposite(current, idx)
+	}
+	return current
+}
+
+// subPointerStore writes a value to a sub-element of the parent Pointer's
+// composite, rebuilding the composite at each level so the parent reflects the
+// change. This is the key operation that makes function-local struct member
+// updates work correctly (e.g. p.pos = newPos modifies the struct in p).
+func subPointerStore(sp *SubPointer, val Value) {
+	if len(sp.Indexes) == 0 {
+		sp.Parent.Value = val
+		return
+	}
+	sp.Parent.Value = setCompositeElement(sp.Parent.Value, sp.Indexes, val)
+}
+
+// setCompositeElement returns a copy of composite with the element at the
+// given index path replaced by val. Handles Array, Vec2, Vec3, Vec4 composites.
+// For nested composites (e.g. struct containing struct), the function recurses
+// through the index path.
+func setCompositeElement(composite Value, indexes []uint32, val Value) Value {
+	if len(indexes) == 0 {
+		return val
+	}
+	idx := indexes[0]
+	rest := indexes[1:]
+
+	switch v := composite.(type) {
+	case Array:
+		if int(idx) >= len(v) {
+			return composite
+		}
+		// Clone the array to avoid mutating shared references.
+		newArr := make(Array, len(v))
+		copy(newArr, v)
+		if len(rest) == 0 {
+			newArr[idx] = val
+		} else {
+			newArr[idx] = setCompositeElement(v[idx], rest, val)
+		}
+		return newArr
+
+	case Vec2:
+		if idx >= 2 {
+			return composite
+		}
+		newVec := v // copy (fixed-size array = value type)
+		if len(rest) == 0 {
+			newVec[idx] = toFloat32(val)
+		}
+		return newVec
+
+	case Vec3:
+		if idx >= 3 {
+			return composite
+		}
+		newVec := v
+		if len(rest) == 0 {
+			newVec[idx] = toFloat32(val)
+		}
+		return newVec
+
+	case Vec4:
+		if idx >= 4 {
+			return composite
+		}
+		newVec := v
+		if len(rest) == 0 {
+			newVec[idx] = toFloat32(val)
+		}
+		return newVec
+
+	default:
+		return composite
+	}
 }
 
 // compositeConstruct builds a composite value from constituent IDs.
