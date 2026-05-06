@@ -963,6 +963,21 @@ func (interp *interpreter) run() error {
 			// OpUndef produces an undefined value -- use zero.
 			interp.values[inst.ResultID] = Uint32(0)
 
+		case OpExtInst:
+			// OpExtInst: type resultID setID instructionNumber operands...
+			// Operands[0] = setID (result of OpExtInstImport)
+			// Operands[1] = instruction number
+			// Operands[2:] = instruction-specific operands
+			if len(inst.Operands) >= 2 {
+				setID := inst.Operands[0]
+				instNum := inst.Operands[1]
+				extOps := inst.Operands[2:]
+				setName := interp.module.ExtInstImports[setID]
+				if setName == "GLSL.std.450" {
+					interp.values[inst.ResultID] = interp.executeGLSLExtInst(instNum, extOps)
+				}
+			}
+
 		case OpSampledImage:
 			// OpSampledImage: type resultID image sampler
 			// Combines a texture and sampler into a SampledImage pair.
