@@ -19,16 +19,16 @@ func TestConvertSignedToFloat(t *testing.T) {
 		val  Value
 		want float32
 	}{
-		{"int32_pos", Int32(42), 42},
-		{"int32_neg", Int32(-7), -7},
-		{"uint32_as_signed", Uint32(100), 100},
-		{"float32_passthrough", Float32(3.14), 3.14},
-		{"nil", nil, 0},
+		{"int32_pos", ValInt(42), 42},
+		{"int32_neg", ValInt(-7), -7},
+		{"uint32_as_signed", ValUint(100), 100},
+		{"float32_passthrough", ValFloat(3.14), 3.14},
+		{"nil", Value{}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := convertSignedToFloat(tt.val)
-			f, ok := got.(Float32)
+			f, ok := testIsFloat32(got)
 			if !ok {
 				t.Fatalf("returned %T, want Float32", got)
 			}
@@ -45,10 +45,10 @@ func TestConvertFloatToUint(t *testing.T) {
 		val  Value
 		want uint32
 	}{
-		{"float_5", Float32(5), 5},
-		{"uint_pass", Uint32(10), 10},
-		{"int_pass", Int32(7), 7},
-		{"nil", nil, 0},
+		{"float_5", ValFloat(5), 5},
+		{"uint_pass", ValUint(10), 10},
+		{"int_pass", ValInt(7), 7},
+		{"nil", Value{}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,15 +67,15 @@ func TestToBoolTypes(t *testing.T) {
 		val  Value
 		want bool
 	}{
-		{"bool_true", true, true},
-		{"bool_false", false, false},
-		{"uint_nonzero", Uint32(1), true},
-		{"uint_zero", Uint32(0), false},
-		{"int_nonzero", Int32(-1), true},
-		{"int_zero", Int32(0), false},
-		{"float_nonzero", Float32(0.1), true},
-		{"float_zero", Float32(0), false},
-		{"nil", nil, false},
+		{"bool_true", ValBool(true), true},
+		{"bool_false", ValBool(false), false},
+		{"uint_nonzero", ValUint(1), true},
+		{"uint_zero", ValUint(0), false},
+		{"int_nonzero", ValInt(-1), true},
+		{"int_zero", ValInt(0), false},
+		{"float_nonzero", ValFloat(0.1), true},
+		{"float_zero", ValFloat(0), false},
+		{"nil", Value{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,10 +93,10 @@ func TestToFloat32Types(t *testing.T) {
 		val  Value
 		want float32
 	}{
-		{"float", Float32(3.14), 3.14},
-		{"uint", Uint32(42), 42},
-		{"int", Int32(-5), -5},
-		{"nil", nil, 0},
+		{"float", ValFloat(3.14), 3.14},
+		{"uint", ValUint(42), 42},
+		{"int", ValInt(-5), -5},
+		{"nil", Value{}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,12 +114,12 @@ func TestToUint32Types(t *testing.T) {
 		val  Value
 		want uint32
 	}{
-		{"uint", Uint32(42), 42},
-		{"int", Int32(7), 7},
-		{"float", Float32(5.9), 5},
-		{"bool_true", true, 1},
-		{"bool_false", false, 0},
-		{"nil", nil, 0},
+		{"uint", ValUint(42), 42},
+		{"int", ValInt(7), 7},
+		{"float", ValFloat(5.9), 5},
+		{"bool_true", ValBool(true), 1},
+		{"bool_false", ValBool(false), 0},
+		{"nil", Value{}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,13 +133,13 @@ func TestToUint32Types(t *testing.T) {
 
 func TestAppendComponentsAllTypes(t *testing.T) {
 	var out []float32
-	out = appendComponents(out, Float32(1))
-	out = appendComponents(out, Vec2{2, 3})
-	out = appendComponents(out, Vec3{4, 5, 6})
-	out = appendComponents(out, Vec4{7, 8, 9, 10})
-	out = appendComponents(out, Uint32(11))
-	out = appendComponents(out, Int32(12))
-	out = appendComponents(out, nil) // default
+	out = appendComponents(out, ValFloat(1))
+	out = appendComponents(out, ValVec2(2, 3))
+	out = appendComponents(out, ValVec3(4, 5, 6))
+	out = appendComponents(out, ValVec4(7, 8, 9, 10))
+	out = appendComponents(out, ValUint(11))
+	out = appendComponents(out, ValInt(12))
+	out = appendComponents(out, Value{}) // default
 
 	want := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0}
 	if len(out) != len(want) {
@@ -358,7 +358,7 @@ func TestZeroValueForVar(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			val := zeroValueForVar(m, tt.ptrType)
-			if val == nil {
+			if val.IsNone() {
 				t.Fatalf("zeroValueForVar returned nil")
 			}
 		})
@@ -405,17 +405,17 @@ func TestCompositeConstructStruct(t *testing.T) {
 			2: {Kind: TypeFloat, Width: 32},
 		},
 		Constants: map[uint32]Value{
-			10: Float32(1),
-			11: Float32(2),
+			10: ValFloat(1),
+			11: ValFloat(2),
 		},
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{10: Float32(1), 11: Float32(2)}),
+		values: testMakeValues(map[uint32]any{10: ValFloat(1), 11: ValFloat(2)}),
 	}
 
 	got := interp.compositeConstruct(1, []uint32{10, 11})
-	arr, ok := got.(Array)
+	arr, ok := testIsArray(got)
 	if !ok || len(arr) != 2 {
 		t.Fatalf("compositeConstruct struct returned %T", got)
 	}
@@ -429,14 +429,14 @@ func TestFloatBinOpMismatch(t *testing.T) {
 	add := func(a, b float32) float32 { return a + b }
 
 	// Vec2 + non-Vec2 returns a (unchanged).
-	got := floatBinOp(Vec2{1, 2}, Float32(3), add)
-	if _, ok := got.(Vec2); !ok {
+	got := floatBinOp(ValVec2From(Vec2{1, 2}), ValFloat(3), add)
+	if _, ok := testIsVec2(got); !ok {
 		t.Errorf("vec2 + scalar returned %T, want Vec2", got)
 	}
 
 	// Non-float types.
-	got = floatBinOp(nil, nil, add)
-	if _, ok := got.(Float32); !ok {
+	got = floatBinOp(Value{}, Value{}, add)
+	if _, ok := testIsFloat32(got); !ok {
 		t.Errorf("nil + nil returned %T, want Float32", got)
 	}
 }
@@ -448,16 +448,16 @@ func TestFloatUnaryOpAllTypes(t *testing.T) {
 		name string
 		val  Value
 	}{
-		{"scalar", Float32(5)},
-		{"vec2", Vec2{1, 2}},
-		{"vec3", Vec3{1, 2, 3}},
-		{"vec4", Vec4{1, 2, 3, 4}},
-		{"nil", nil},
+		{"scalar", ValFloat(5)},
+		{"vec2", ValVec2From(Vec2{1, 2})},
+		{"vec3", ValVec3From(Vec3{1, 2, 3})},
+		{"vec4", ValVec4From(Vec4{1, 2, 3, 4})},
+		{"nil", Value{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := floatUnaryOp(tt.val, neg)
-			if got == nil {
+			if got.IsNone() {
 				t.Fatal("returned nil")
 			}
 		})
@@ -465,9 +465,9 @@ func TestFloatUnaryOpAllTypes(t *testing.T) {
 }
 
 func TestWriteValueToBufferArray(t *testing.T) {
-	arr := Array{Float32(1), Float32(2), Float32(3)}
+	arr := Array{ValFloat(1), ValFloat(2), ValFloat(3)}
 	buf := make([]byte, 12)
-	writeValueToBuffer(buf, 0, arr)
+	writeValueToBuffer(buf, 0, ValArray(arr))
 
 	for i := 0; i < 3; i++ {
 		got := readFloat32LE(buf[i*4:])
@@ -484,10 +484,10 @@ func TestGlslTernaryFloat(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			1: Float32(5),
-			2: Float32(0),
-			3: Float32(10),
+		values: testMakeValues(map[uint32]any{
+			1: ValFloat(5),
+			2: ValFloat(0),
+			3: ValFloat(10),
 			4: Vec4{5, 5, 5, 5},
 			5: Vec4{0, 0, 0, 0},
 			6: Vec4{10, 10, 10, 10},
@@ -506,13 +506,13 @@ func TestGlslTernaryFloat(t *testing.T) {
 	}
 
 	got := interp.glslTernaryFloat([]uint32{1, 2, 3}, clamp)
-	if f, ok := got.(Float32); !ok || f != 5 {
+	if f, ok := testIsFloat32(got); !ok || f != 5 {
 		t.Errorf("clamp(5, 0, 10) = %v, want 5", got)
 	}
 
 	// Test vec4 clamp.
 	got = interp.glslTernaryFloat([]uint32{4, 5, 6}, clamp)
-	if v, ok := got.(Vec4); !ok || v[0] != 5 {
+	if v, ok := testIsVec4(got); !ok || v[0] != 5 {
 		t.Errorf("vec4 clamp = %v, want all 5s", got)
 	}
 }
@@ -521,7 +521,7 @@ func TestGlslBinaryUint(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{1: Uint32(5), 2: Uint32(3)}),
+		values: testMakeValues(map[uint32]any{1: ValUint(5), 2: ValUint(3)}),
 	}
 	got := interp.glslBinaryUint([]uint32{1, 2}, func(a, b uint32) uint32 {
 		if a < b {
@@ -529,7 +529,7 @@ func TestGlslBinaryUint(t *testing.T) {
 		}
 		return b
 	})
-	if u, ok := got.(Uint32); !ok || u != 3 {
+	if got.Tag != TagUint32 || got.AsUint32() != 3 {
 		t.Errorf("umin(5,3) = %v, want 3", got)
 	}
 }
@@ -538,7 +538,7 @@ func TestGlslBinaryInt(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{1: Int32(-5), 2: Int32(3)}),
+		values: testMakeValues(map[uint32]any{1: ValInt(-5), 2: ValInt(3)}),
 	}
 	got := interp.glslBinaryInt([]uint32{1, 2}, func(a, b int32) int32 {
 		if a < b {
@@ -546,7 +546,7 @@ func TestGlslBinaryInt(t *testing.T) {
 		}
 		return b
 	})
-	if v, ok := got.(Int32); !ok || v != -5 {
+	if got.Tag != TagInt32 || got.AsInt32() != -5 {
 		t.Errorf("smin(-5,3) = %v, want -5", got)
 	}
 }
@@ -583,13 +583,13 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 
 	// Test float read.
 	val := interp.readValueFromBuffer(buf, 0, m.Types[1])
-	if f, ok := val.(Float32); !ok || math.Abs(float64(f-3.14)) > 0.01 {
+	if val.Tag != TagFloat32 || math.Abs(float64(val.AsFloat32()-3.14)) > 0.01 {
 		t.Errorf("float read = %v, want ~3.14", val)
 	}
 
 	// Test signed int read.
 	val = interp.readValueFromBuffer(buf, 4, m.Types[2])
-	if v, ok := val.(Int32); !ok || v != -7 {
+	if val.Tag != TagInt32 || val.AsInt32() != -7 {
 		t.Errorf("signed int read = %v, want -7", val)
 	}
 
@@ -597,14 +597,14 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	putFloat32LE(buf[8:], 0)
 	buf[8] = 42
 	val = interp.readValueFromBuffer(buf, 8, m.Types[3])
-	if v, ok := val.(Uint32); !ok || v != 42 {
+	if val.Tag != TagUint32 || val.AsUint32() != 42 {
 		t.Errorf("unsigned int read = %v, want 42", val)
 	}
 
 	// Test bool read.
 	buf[12] = 1
 	val = interp.readValueFromBuffer(buf, 12, m.Types[4])
-	if v, ok := val.(bool); !ok || !v {
+	if val.Tag != TagBool || !val.AsBool() {
 		t.Errorf("bool read = %v, want true", val)
 	}
 
@@ -612,7 +612,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	putFloat32LE(buf[0:], 1.0)
 	putFloat32LE(buf[4:], 2.0)
 	val = interp.readValueFromBuffer(buf, 0, m.Types[5])
-	if v, ok := val.(Vec2); !ok || v[0] != 1.0 || v[1] != 2.0 {
+	if val.Tag != TagVec2 || val.F[0] != 1.0 || val.F[1] != 2.0 {
 		t.Errorf("vec2 read = %v, want {1, 2}", val)
 	}
 
@@ -621,7 +621,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	putFloat32LE(buf[4:], 2.0)
 	putFloat32LE(buf[8:], 3.0)
 	val = interp.readValueFromBuffer(buf, 0, m.Types[6])
-	if v, ok := val.(Vec3); !ok || v != (Vec3{1, 2, 3}) {
+	if val.Tag != TagVec3 || val.AsVec3() != (Vec3{1, 2, 3}) {
 		t.Errorf("vec3 read = %v, want {1, 2, 3}", val)
 	}
 
@@ -632,27 +632,27 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	buf[6] = 0
 	buf[7] = 0
 	val = interp.readValueFromBuffer(buf, 0, m.Types[9])
-	arr, ok := val.(Array)
+	arr, ok := testIsArray(val)
 	if !ok || len(arr) != 2 {
 		t.Fatalf("struct read returned unexpected type or length")
 	}
-	if f, ok := arr[0].(Float32); !ok || f != 5.0 {
+	if arr[0].Tag != TagFloat32 || arr[0].AsFloat32() != 5.0 {
 		t.Errorf("struct[0] = %v, want 5.0", arr[0])
 	}
-	if u, ok := arr[1].(Uint32); !ok || u != 10 {
+	if arr[1].Tag != TagUint32 || arr[1].AsUint32() != 10 {
 		t.Errorf("struct[1] = %v, want 10", arr[1])
 	}
 
 	// Test short buffer (should return zeros).
 	val = interp.readValueFromBuffer(buf[:2], 0, m.Types[1])
-	if f, ok := val.(Float32); !ok || f != 0 {
+	if val.Tag != TagFloat32 || val.AsFloat32() != 0 {
 		t.Errorf("short buffer read = %v, want 0", val)
 	}
 }
 
 func TestWriteValueToBufferVec3(t *testing.T) {
 	buf := make([]byte, 12)
-	writeValueToBuffer(buf, 0, Vec3{1, 2, 3})
+	writeValueToBuffer(buf, 0, ValVec3(1, 2, 3))
 	for i := 0; i < 3; i++ {
 		got := readFloat32LE(buf[i*4:])
 		if got != float32(i+1) {
@@ -661,9 +661,9 @@ func TestWriteValueToBufferVec3(t *testing.T) {
 	}
 }
 
-func TestWriteValueToBufferInt32(t *testing.T) {
+func TestWriteValueToBufferValInt(t *testing.T) {
 	buf := make([]byte, 4)
-	writeValueToBuffer(buf, 0, Int32(-42))
+	writeValueToBuffer(buf, 0, ValInt(-42))
 	got := readUint32LE(buf)
 	if int32(got) != -42 {
 		t.Errorf("int32 write = %d, want -42", int32(got))
@@ -677,11 +677,11 @@ func TestIndexCompositeAllTypes(t *testing.T) {
 		idx  uint32
 		want float32
 	}{
-		{"array", Array{Float32(10), Float32(20)}, 1, 20},
-		{"vec2", Vec2{1, 2}, 1, 2},
-		{"vec3", Vec3{1, 2, 3}, 2, 3},
-		{"vec4", Vec4{1, 2, 3, 4}, 3, 4},
-		{"oob_array", Array{Float32(10)}, 5, 0},
+		{"array", ValArray(Array{ValFloat(10), ValFloat(20)}), 1, 20},
+		{"vec2", ValVec2From(Vec2{1, 2}), 1, 2},
+		{"vec3", ValVec3From(Vec3{1, 2, 3}), 2, 3},
+		{"vec4", ValVec4From(Vec4{1, 2, 3, 4}), 3, 4},
+		{"oob_array", ValArray(Array{ValFloat(10)}), 5, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -703,13 +703,13 @@ func TestCompositeConstructArray(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			10: Float32(1), 11: Float32(2), 12: Float32(3),
+		values: testMakeValues(map[uint32]any{
+			10: ValFloat(1), 11: ValFloat(2), 12: ValFloat(3),
 		}),
 	}
 
 	got := interp.compositeConstruct(2, []uint32{10, 11, 12})
-	arr, ok := got.(Array)
+	arr, ok := testIsArray(got)
 	if !ok || len(arr) != 3 {
 		t.Fatalf("compositeConstruct array returned %T", got)
 	}
@@ -721,8 +721,8 @@ func TestVectorShuffleUndefined(t *testing.T) {
 		2: {Kind: TypeVector, ElemType: 1, Components: 2},
 	}}
 	// 0xFFFFFFFF = undefined component
-	got := vectorShuffle(m, 2, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8}, []uint32{0, 0xFFFFFFFF})
-	gv, ok := got.(Vec2)
+	got := vectorShuffle(m, 2, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 0xFFFFFFFF})
+	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("returned %T, want Vec2", got)
 	}
@@ -732,19 +732,19 @@ func TestVectorShuffleUndefined(t *testing.T) {
 }
 
 func TestMatrixTimesScalarAndMatrix(t *testing.T) {
-	identity := Array{Vec4{1, 0, 0, 0}, Vec4{0, 1, 0, 0}, Vec4{0, 0, 1, 0}, Vec4{0, 0, 0, 1}}
+	identity := Array{ValVec4(1, 0, 0, 0), ValVec4(0, 1, 0, 0), ValVec4(0, 0, 1, 0), ValVec4(0, 0, 0, 1)}
 
 	// Scale by 2.
-	scaled := matrixTimesScalar(identity, Float32(2))
-	cols, _ := scaled.(Array)
+	scaled := matrixTimesScalar(ValArray(identity), ValFloat(2))
+	cols := scaled.AsArray()
 	c0 := Vec4ToFloat32(cols[0])
 	if c0[0] != 2 {
 		t.Errorf("matrixTimesScalar: col0[0] = %f, want 2", c0[0])
 	}
 
 	// Identity * Identity = Identity.
-	product := matrixTimesMatrix(identity, identity)
-	pCols, _ := product.(Array)
+	product := matrixTimesMatrix(ValArray(identity), ValArray(identity))
+	pCols := product.AsArray()
 	p0 := Vec4ToFloat32(pCols[0])
 	if p0[0] != 1 || p0[1] != 0 {
 		t.Errorf("matrixTimesMatrix: col0 = %v, want {1,0,0,0}", p0)
@@ -796,10 +796,10 @@ func TestConstantTrueFalseParser(t *testing.T) {
 		t.Fatalf("ParseModule failed: %v", err)
 	}
 
-	if v, ok := m.Constants[idTrue]; !ok || v != true {
+	if v, ok := m.Constants[idTrue]; !ok || !v.AsBool() {
 		t.Errorf("OpConstantTrue not parsed correctly: %v", v)
 	}
-	if v, ok := m.Constants[idFalse]; !ok || v != false {
+	if v, ok := m.Constants[idFalse]; !ok || v.AsBool() {
 		t.Errorf("OpConstantFalse not parsed correctly: %v", v)
 	}
 }

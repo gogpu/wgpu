@@ -316,7 +316,7 @@ func TestSPIRVTextureSample(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := &ExecutionContext{
-				Inputs: map[uint32]Value{uvVarID: tt.uv},
+				Inputs: map[uint32]Value{uvVarID: testval(tt.uv)},
 				Textures: map[BindingKey]*Texture2D{
 					{Group: 0, Binding: 0}: tex,
 				},
@@ -382,7 +382,7 @@ func TestSPIRVTextureSampleBilinear(t *testing.T) {
 
 	// Bilinear at center of 2x2: average of all four texels.
 	ctx := &ExecutionContext{
-		Inputs: map[uint32]Value{uvVarID: Vec2{0.5, 0.5}},
+		Inputs: map[uint32]Value{uvVarID: ValVec2(0.5, 0.5)},
 		Textures: map[BindingKey]*Texture2D{
 			{Group: 0, Binding: 0}: tex,
 		},
@@ -433,7 +433,7 @@ func TestSPIRVTextureMissing(t *testing.T) {
 
 	// No texture bound -- should return magenta.
 	ctx := &ExecutionContext{
-		Inputs: map[uint32]Value{uvVarID: Vec2{0.5, 0.5}},
+		Inputs: map[uint32]Value{uvVarID: ValVec2(0.5, 0.5)},
 	}
 	outputs, err := m.ExecuteWithContext("fs_main", ctx)
 	if err != nil {
@@ -460,24 +460,25 @@ func TestFetchTexel(t *testing.T) {
 			255, 255, 255, 255, // (1,1) white
 		},
 	}
-
-	interp := &interpreter{ctx: &ExecutionContext{}}
+	bk := BindingKey{Group: 0, Binding: 0}
+	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
 
 	tests := []struct {
 		name  string
 		coord Value
 		want  Vec4
 	}{
-		{"pixel_00", Vec2{0, 0}, Vec4{1, 0, 0, 1}},
-		{"pixel_10", Vec2{1, 0}, Vec4{0, 1, 0, 1}},
-		{"pixel_01", Vec2{0, 1}, Vec4{0, 0, 1, 1}},
-		{"pixel_11", Vec2{1, 1}, Vec4{1, 1, 1, 1}},
-		{"clamped", Vec2{5, 5}, Vec4{1, 1, 1, 1}}, // Clamped to (1,1)
+		{"pixel_00", ValVec2(0, 0), Vec4{1, 0, 0, 1}},
+		{"pixel_10", ValVec2(1, 0), Vec4{0, 1, 0, 1}},
+		{"pixel_01", ValVec2(0, 1), Vec4{0, 0, 1, 1}},
+		{"pixel_11", ValVec2(1, 1), Vec4{1, 1, 1, 1}},
+		{"clamped", ValVec2(5, 5), Vec4{1, 1, 1, 1}}, // Clamped to (1,1)
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := interp.fetchTexel(tex, tt.coord)
+			got := interp.fetchTexel(ValBindingKey(bk), tt.coord)
+			_ = bk // used in test setup
 			gv := Vec4ToFloat32(got)
 			for i := 0; i < 4; i++ {
 				if math.Abs(float64(gv[i]-tt.want[i])) > 0.01 {
@@ -491,26 +492,25 @@ func TestFetchTexel(t *testing.T) {
 func TestSampledImageValue(t *testing.T) {
 	// Verify SampledImageValue correctly combines image and sampler references.
 	si := &SampledImageValue{
-		Image:   BindingKey{Group: 0, Binding: 0},
-		Sampler: BindingKey{Group: 0, Binding: 1},
+		Image:   ValBindingKey(BindingKey{Group: 0, Binding: 0}),
+		Sampler: ValBindingKey(BindingKey{Group: 0, Binding: 1}),
 	}
 
-	imgBK, ok := si.Image.(BindingKey)
-	if !ok || imgBK.Binding != 0 {
+	if si.Image.Tag != TagBindingKey || si.Image.AsBindingKey().Binding != 0 {
 		t.Errorf("SampledImageValue.Image = %v, want BindingKey{0,0}", si.Image)
 	}
-	sampBK, ok := si.Sampler.(BindingKey)
-	if !ok || sampBK.Binding != 1 {
+	if si.Sampler.Tag != TagBindingKey || si.Sampler.AsBindingKey().Binding != 1 {
 		t.Errorf("SampledImageValue.Sampler = %v, want BindingKey{0,1}", si.Sampler)
 	}
 }
 
 func TestQueryImageSize(t *testing.T) {
-	interp := &interpreter{ctx: &ExecutionContext{}}
-
 	tex := &Texture2D{Width: 512, Height: 256}
-	got := interp.queryImageSize(tex)
-	gv, ok := got.(Vec2)
+	bk := BindingKey{Group: 0, Binding: 0}
+	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
+
+	got := interp.queryImageSize(ValBindingKey(bk))
+	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("queryImageSize returned %T, want Vec2", got)
 	}
@@ -519,9 +519,9 @@ func TestQueryImageSize(t *testing.T) {
 	}
 
 	// Nil texture returns zero.
-	got = interp.queryImageSize(nil)
-	gv, ok = got.(Vec2)
-	if !ok || gv != (Vec2{0, 0}) {
+	got = interp.queryImageSize(Value{})
+	gv = got.AsVec2()
+	if got.Tag != TagVec2 || gv != (Vec2{0, 0}) {
 		t.Errorf("queryImageSize(nil) = %v, want {0, 0}", got)
 	}
 }

@@ -270,12 +270,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			// operands[2] is the ID of the constant holding the length.
 			length := uint32(0)
 			if cval, ok := m.Constants[operands[2]]; ok {
-				switch cv := cval.(type) {
-				case Uint32:
-					length = cv
-				case Int32:
-					length = uint32(cv)
-				}
+				length = toUint32(cval)
 			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:     TypeArray,
@@ -366,22 +361,22 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 			resultID := operands[1]
 			constituents := operands[2:]
-			elems := make(Array, len(constituents))
+			elems := make([]Value, len(constituents))
 			for i, cid := range constituents {
 				if v, ok := m.Constants[cid]; ok {
 					elems[i] = v
 				}
 			}
-			m.Constants[resultID] = elems
+			m.Constants[resultID] = ValArray(elems)
 
 		case OpConstantTrue:
 			if len(operands) >= 2 {
-				m.Constants[operands[1]] = true
+				m.Constants[operands[1]] = ValBool(true)
 			}
 
 		case OpConstantFalse:
 			if len(operands) >= 2 {
-				m.Constants[operands[1]] = false
+				m.Constants[operands[1]] = ValBool(false)
 			}
 
 		case OpConstantNull:
@@ -738,52 +733,17 @@ func decodeString(words []uint32) (string, uint32) {
 func resolveConstant(types map[uint32]*TypeInfo, typeID uint32, literals []uint32) Value {
 	ti, ok := types[typeID]
 	if !ok || len(literals) == 0 {
-		return Uint32(0)
+		return ValUint(0)
 	}
 	switch ti.Kind {
 	case TypeFloat:
-		return math.Float32frombits(literals[0])
+		return ValFloat(math.Float32frombits(literals[0]))
 	case TypeInt:
 		if ti.Signed {
-			return int32(literals[0])
+			return ValInt(int32(literals[0]))
 		}
-		return literals[0]
+		return ValUint(literals[0])
 	default:
-		return literals[0]
+		return ValUint(literals[0])
 	}
-}
-
-// zeroValue returns the zero/default value for a given type.
-func zeroValue(types map[uint32]*TypeInfo, typeID uint32) Value {
-	ti, ok := types[typeID]
-	if !ok {
-		return Uint32(0)
-	}
-	switch ti.Kind {
-	case TypeFloat:
-		return Float32(0)
-	case TypeInt:
-		if ti.Signed {
-			return Int32(0)
-		}
-		return Uint32(0)
-	case TypeVector:
-		switch ti.Components {
-		case 2:
-			return Vec2{}
-		case 3:
-			return Vec3{}
-		case 4:
-			return Vec4{}
-		}
-	case TypeArray:
-		if ti.Length > 0 {
-			arr := make(Array, ti.Length)
-			for i := range arr {
-				arr[i] = zeroValue(types, ti.ElemType)
-			}
-			return arr
-		}
-	}
-	return Uint32(0)
 }

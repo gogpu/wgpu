@@ -47,7 +47,7 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 	interp.prevBlock = 0
 	interp.iterationCount = 0
 	interp.callDepth = 0
-	interp.returnValue = nil
+	interp.returnValue = Value{}
 
 	// Seed constants.
 	for id, val := range m.Constants {
@@ -126,12 +126,12 @@ func (interp *interpreter) initComputeBuiltins() {
 		case BuiltInWorkgroupSize:
 			val = uvec3ToValue(ctx.WorkgroupSize)
 		case BuiltInLocalInvocationIdx:
-			val = ctx.LocalInvocationIndex
+			val = ValUint(ctx.LocalInvocationIndex)
 		default:
 			continue
 		}
 
-		interp.values[varID] = interp.allocPointer(val)
+		interp.values[varID] = ValPointer(interp.allocPointer(val))
 	}
 }
 
@@ -155,23 +155,23 @@ func (interp *interpreter) initWorkgroupVariables() {
 				pointeeType := m.PointeeType(vi.TypeID)
 				if pointeeType != nil {
 					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType)
-					interp.values[varID] = interp.allocPointer(val)
+					interp.values[varID] = ValPointer(interp.allocPointer(val))
 					continue
 				}
 			}
 		}
 
 		// Default: zero-initialized.
-		interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
+		interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 	}
 }
 
-// uvec3ToValue converts a [3]uint32 to a Vec3 of floats.
+// uvec3ToValue converts a [3]uint32 to an Array of 3 Uint32 values.
 // SPIR-V represents compute built-ins as uvec3 (vector of 3 uint32).
-// For simplicity, we store them as Vec3 but retrieve via toUint32.
 func uvec3ToValue(v [3]uint32) Value {
 	// Store as an Array of 3 Uint32 values for proper integer handling.
-	return Array{v[0], v[1], v[2]}
+	arr := []Value{ValUint(v[0]), ValUint(v[1]), ValUint(v[2])}
+	return ValArray(arr)
 }
 
 // DispatchCompute executes a compute shader for all invocations in the dispatch.
@@ -257,36 +257,37 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 	// Atomic ops: OpAtomicIAdd, OpAtomicISub, etc.
 	// Operands: pointer, scope, semantics [, value]
 	if len(inst.Operands) < 3 {
-		return Uint32(0)
+		return ValUint(0)
 	}
 
 	ptrID := inst.Operands[0]
 	// scope and semantics are inst.Operands[1] and [2] -- ignored in single-threaded.
 
-	ptr, ok := interp.values[ptrID].(*Pointer)
-	if !ok {
-		return Uint32(0)
+	pv := interp.values[ptrID]
+	if pv.Tag != TagPointer {
+		return ValUint(0)
 	}
+	ptr := pv.AsPointer()
 
 	atomicMu.Lock()
 	defer atomicMu.Unlock()
 
-	oldVal := toUint32(ptr.Value)
+	oldVal := toUint32(ptr.Val)
 
 	switch inst.Opcode {
 	case OpAtomicIAdd:
 		if len(inst.Operands) >= 4 {
 			addVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Value = oldVal + addVal
+			ptr.Val = ValUint(oldVal + addVal)
 		}
 	case OpAtomicISub:
 		if len(inst.Operands) >= 4 {
 			subVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Value = oldVal - subVal
+			ptr.Val = ValUint(oldVal - subVal)
 		}
 	case OpAtomicExchange:
 		if len(inst.Operands) >= 4 {
-			ptr.Value = interp.values[inst.Operands[3]]
+			ptr.Val = interp.values[inst.Operands[3]]
 		}
 	case OpAtomicCompareExchange:
 		// Operands: pointer, scope, equal_sem, unequal_sem, value, comparator
@@ -294,7 +295,7 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			newVal := toUint32(interp.values[inst.Operands[4]])
 			comparator := toUint32(interp.values[inst.Operands[5]])
 			if oldVal == comparator {
-				ptr.Value = newVal
+				ptr.Val = ValUint(newVal)
 			}
 		}
 	case OpAtomicSMin:
@@ -302,14 +303,14 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v < old {
-				ptr.Value = uint32(v)
+				ptr.Val = ValUint(uint32(v))
 			}
 		}
 	case OpAtomicUMin:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v < oldVal {
-				ptr.Value = v
+				ptr.Val = ValUint(v)
 			}
 		}
 	case OpAtomicSMax:
@@ -317,31 +318,31 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v > old {
-				ptr.Value = uint32(v)
+				ptr.Val = ValUint(uint32(v))
 			}
 		}
 	case OpAtomicUMax:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v > oldVal {
-				ptr.Value = v
+				ptr.Val = ValUint(v)
 			}
 		}
 	case OpAtomicIIncrement:
-		ptr.Value = oldVal + 1
+		ptr.Val = ValUint(oldVal + 1)
 	case OpAtomicIDecrement:
-		ptr.Value = oldVal - 1
+		ptr.Val = ValUint(oldVal - 1)
 	case OpAtomicLoad:
 		// Load is just a read -- no modification.
 	case OpAtomicStore:
 		// Store is special: no return value.
 		if len(inst.Operands) >= 4 {
-			ptr.Value = interp.values[inst.Operands[3]]
+			ptr.Val = interp.values[inst.Operands[3]]
 		}
-		return nil
+		return Value{}
 	}
 
-	return oldVal
+	return ValUint(oldVal)
 }
 
 // writeStorageBufferBack writes modified storage buffer values back to the
@@ -366,8 +367,9 @@ func (interp *interpreter) writeStorageBufferBack() {
 		if bufData == nil {
 			continue
 		}
-		if ptr, ok := interp.values[varID].(*Pointer); ok {
-			writeValueToBuffer(bufData, 0, ptr.Value)
+		v := interp.values[varID]
+		if v.Tag == TagPointer {
+			writeValueToBuffer(bufData, 0, v.AsPointer().Val)
 		}
 	}
 }

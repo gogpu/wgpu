@@ -218,20 +218,20 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 		if len(operands) >= 1 {
 			v := int32(toUint32(interp.values[operands[0]]))
 			if v < 0 {
-				return -v
+				return ValInt(-v)
 			}
-			return v
+			return ValInt(v)
 		}
 	case GLSLSSign:
 		if len(operands) >= 1 {
 			v := int32(toUint32(interp.values[operands[0]]))
 			if v > 0 {
-				return Int32(1)
+				return ValInt(1)
 			}
 			if v < 0 {
-				return Int32(-1)
+				return ValInt(-1)
 			}
-			return Int32(0)
+			return ValInt(0)
 		}
 
 	// --- Interpolation ---
@@ -267,13 +267,13 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 	// --- Geometric ops ---
 	case GLSLLength:
 		if len(operands) >= 1 {
-			return Float32(vectorLength(interp.values[operands[0]]))
+			return ValFloat(vectorLength(interp.values[operands[0]]))
 		}
 	case GLSLDistance:
 		if len(operands) >= 2 {
 			diff := floatBinOp(interp.values[operands[0]], interp.values[operands[1]],
 				func(a, b float32) float32 { return a - b })
-			return Float32(vectorLength(diff))
+			return ValFloat(vectorLength(diff))
 		}
 	case GLSLNormalize:
 		if len(operands) >= 1 {
@@ -289,7 +289,7 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 		}
 	}
 
-	return Uint32(0)
+	return ValUint(0)
 }
 
 // =============================================================================
@@ -299,7 +299,7 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 // glslUnaryFloat applies a unary float function to a scalar or vector value.
 func (interp *interpreter) glslUnaryFloat(operands []uint32, fn func(float32) float32) Value {
 	if len(operands) < 1 {
-		return Float32(0)
+		return ValFloat(0)
 	}
 	return floatUnaryOp(interp.values[operands[0]], fn)
 }
@@ -307,7 +307,7 @@ func (interp *interpreter) glslUnaryFloat(operands []uint32, fn func(float32) fl
 // glslBinaryFloat applies a binary float function to two scalar or vector values.
 func (interp *interpreter) glslBinaryFloat(operands []uint32, fn func(float32, float32) float32) Value {
 	if len(operands) < 2 {
-		return Float32(0)
+		return ValFloat(0)
 	}
 	return floatBinOp(interp.values[operands[0]], interp.values[operands[1]], fn)
 }
@@ -315,52 +315,46 @@ func (interp *interpreter) glslBinaryFloat(operands []uint32, fn func(float32, f
 // glslTernaryFloat applies a ternary float function component-wise.
 func (interp *interpreter) glslTernaryFloat(operands []uint32, fn func(float32, float32, float32) float32) Value {
 	if len(operands) < 3 {
-		return Float32(0)
+		return ValFloat(0)
 	}
 	a := interp.values[operands[0]]
 	b := interp.values[operands[1]]
 	c := interp.values[operands[2]]
 
-	switch av := a.(type) {
-	case Float32:
-		return Float32(fn(av, toFloat32(b), toFloat32(c)))
-	case Vec2:
-		bv, _ := b.(Vec2)
-		cv, _ := c.(Vec2)
-		return Vec2{fn(av[0], bv[0], cv[0]), fn(av[1], bv[1], cv[1])}
-	case Vec3:
-		bv, _ := b.(Vec3)
-		cv, _ := c.(Vec3)
-		return Vec3{fn(av[0], bv[0], cv[0]), fn(av[1], bv[1], cv[1]), fn(av[2], bv[2], cv[2])}
-	case Vec4:
-		bv, _ := b.(Vec4)
-		cv, _ := c.(Vec4)
-		return Vec4{
-			fn(av[0], bv[0], cv[0]), fn(av[1], bv[1], cv[1]),
-			fn(av[2], bv[2], cv[2]), fn(av[3], bv[3], cv[3]),
-		}
+	switch a.Tag {
+	case TagFloat32:
+		return ValFloat(fn(a.F[0], toFloat32(b), toFloat32(c)))
+	case TagVec2:
+		return ValVec2(fn(a.F[0], b.F[0], c.F[0]), fn(a.F[1], b.F[1], c.F[1]))
+	case TagVec3:
+		return ValVec3(fn(a.F[0], b.F[0], c.F[0]), fn(a.F[1], b.F[1], c.F[1]), fn(a.F[2], b.F[2], c.F[2]))
+	case TagVec4:
+		return ValVec4(
+			fn(a.F[0], b.F[0], c.F[0]), fn(a.F[1], b.F[1], c.F[1]),
+			fn(a.F[2], b.F[2], c.F[2]), fn(a.F[3], b.F[3], c.F[3]),
+		)
 	}
-	return Float32(fn(toFloat32(a), toFloat32(b), toFloat32(c)))
+	return ValFloat(fn(toFloat32(a), toFloat32(b), toFloat32(c)))
 }
 
 // glslBinaryUint applies a binary uint function.
 func (interp *interpreter) glslBinaryUint(operands []uint32, fn func(uint32, uint32) uint32) Value {
 	if len(operands) < 2 {
-		return Uint32(0)
+		return ValUint(0)
 	}
 	a := toUint32(interp.values[operands[0]])
 	b := toUint32(interp.values[operands[1]])
-	return fn(a, b)
+	return ValUint(fn(a, b))
 }
 
 // glslBinaryInt applies a binary signed int function.
 func (interp *interpreter) glslBinaryInt(operands []uint32, fn func(int32, int32) int32) Value {
 	if len(operands) < 2 {
-		return Int32(0)
+		return ValInt(0)
 	}
 	a := int32(toUint32(interp.values[operands[0]]))
 	b := int32(toUint32(interp.values[operands[1]]))
-	return fn(a, b)
+	return ValInt(fn(a, b))
 }
 
 // =============================================================================
@@ -369,21 +363,20 @@ func (interp *interpreter) glslBinaryInt(operands []uint32, fn func(int32, int32
 
 // vectorLength computes the Euclidean length of a vector.
 func vectorLength(val Value) float32 {
-	switch v := val.(type) {
-	case Float32:
-		return float32(math.Abs(float64(v)))
-	case Vec2:
-		return float32(math.Sqrt(float64(v[0]*v[0] + v[1]*v[1])))
-	case Vec3:
-		return float32(math.Sqrt(float64(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])))
-	case Vec4:
-		return float32(math.Sqrt(float64(v[0]*v[0] + v[1]*v[1] + v[2]*v[2] + v[3]*v[3])))
+	switch val.Tag {
+	case TagFloat32:
+		return float32(math.Abs(float64(val.F[0])))
+	case TagVec2:
+		return float32(math.Sqrt(float64(val.F[0]*val.F[0] + val.F[1]*val.F[1])))
+	case TagVec3:
+		return float32(math.Sqrt(float64(val.F[0]*val.F[0] + val.F[1]*val.F[1] + val.F[2]*val.F[2])))
+	case TagVec4:
+		return float32(math.Sqrt(float64(val.F[0]*val.F[0] + val.F[1]*val.F[1] + val.F[2]*val.F[2] + val.F[3]*val.F[3])))
 	}
 	return 0
 }
 
 // normalizeVector returns a unit-length vector in the same direction.
-// Returns zero vector if the input has zero length.
 func normalizeVector(val Value) Value {
 	length := vectorLength(val)
 	if length == 0 {
@@ -395,23 +388,20 @@ func normalizeVector(val Value) Value {
 
 // crossProduct computes the cross product of two Vec3 values.
 func crossProduct(a, b Value) Value {
-	av, aOK := a.(Vec3)
-	bv, bOK := b.(Vec3)
-	if !aOK || !bOK {
-		return Vec3{}
+	if a.Tag != TagVec3 || b.Tag != TagVec3 {
+		return ValVec3(0, 0, 0)
 	}
-	return Vec3{
-		av[1]*bv[2] - av[2]*bv[1],
-		av[2]*bv[0] - av[0]*bv[2],
-		av[0]*bv[1] - av[1]*bv[0],
-	}
+	return ValVec3(
+		a.F[1]*b.F[2]-a.F[2]*b.F[1],
+		a.F[2]*b.F[0]-a.F[0]*b.F[2],
+		a.F[0]*b.F[1]-a.F[1]*b.F[0],
+	)
 }
 
 // reflectVector computes the reflection of incident vector I around normal N.
 // reflect(I, N) = I - 2*dot(N, I)*N
 func reflectVector(incident, normal Value) Value {
 	d := toFloat32(dotProduct(normal, incident))
-	// 2 * dot(N, I) * N
 	scaled := vectorTimesScalar(normal, 2*d)
 	return floatBinOp(incident, scaled, func(a, b float32) float32 { return a - b })
 }

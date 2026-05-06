@@ -169,23 +169,27 @@ func writeTrace(_ io.Writer, enc *json.Encoder, entry *traceEntry, pc int, inst 
 // formatTraceValue converts a runtime Value into a JSON-friendly representation.
 // Vectors become float arrays, scalars become their native type.
 func formatTraceValue(val Value) any {
-	switch v := val.(type) {
-	case Float32:
-		return v
-	case Uint32:
-		return v
-	case Int32:
-		return v
-	case bool:
-		return v
-	case Vec2:
-		return [2]float32{v[0], v[1]}
-	case Vec3:
-		return [3]float32{v[0], v[1], v[2]}
-	case Vec4:
-		return [4]float32{v[0], v[1], v[2], v[3]}
-	case *Pointer:
-		return formatTraceValue(v.Value)
+	switch val.Tag {
+	case TagFloat32:
+		return val.F[0]
+	case TagUint32:
+		return val.U[0]
+	case TagInt32:
+		return int32(val.U[0])
+	case TagBool:
+		return val.U[0] != 0
+	case TagVec2:
+		return [2]float32{val.F[0], val.F[1]}
+	case TagVec3:
+		return [3]float32{val.F[0], val.F[1], val.F[2]}
+	case TagVec4:
+		return [4]float32{val.F[0], val.F[1], val.F[2], val.F[3]}
+	case TagPointer:
+		ptr := val.AsPointer()
+		if ptr != nil {
+			return formatTraceValue(ptr.Val)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -193,24 +197,24 @@ func formatTraceValue(val Value) any {
 
 // valueTypeName returns a human-readable type name for trace output.
 func valueTypeName(val Value) string {
-	switch val.(type) {
-	case Float32:
+	switch val.Tag {
+	case TagFloat32:
 		return typeNameFloat32
-	case Uint32:
+	case TagUint32:
 		return typeNameUint32
-	case Int32:
+	case TagInt32:
 		return typeNameInt32
-	case bool:
+	case TagBool:
 		return typeNameBool
-	case Vec2:
+	case TagVec2:
 		return typeNameVec2
-	case Vec3:
+	case TagVec3:
 		return typeNameVec3
-	case Vec4:
+	case TagVec4:
 		return typeNameVec4
-	case *Pointer:
+	case TagPointer:
 		return typeNamePtr
-	case Array:
+	case TagArray:
 		return typeNameArray
 	default:
 		return ""
@@ -220,37 +224,25 @@ func valueTypeName(val Value) string {
 // valuesEqual compares two Values for equality, used by watch variable tracking.
 // Returns true if the values are structurally identical.
 func valuesEqual(a, b Value) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
+	if a.Tag != b.Tag {
 		return false
 	}
-	switch av := a.(type) {
-	case Float32:
-		bv, ok := b.(Float32)
-		return ok && av == bv
-	case Uint32:
-		bv, ok := b.(Uint32)
-		return ok && av == bv
-	case Int32:
-		bv, ok := b.(Int32)
-		return ok && av == bv
-	case bool:
-		bv, ok := b.(bool)
-		return ok && av == bv
-	case Vec2:
-		bv, ok := b.(Vec2)
-		return ok && av == bv
-	case Vec3:
-		bv, ok := b.(Vec3)
-		return ok && av == bv
-	case Vec4:
-		bv, ok := b.(Vec4)
-		return ok && av == bv
+	switch a.Tag {
+	case TagNone:
+		return true
+	case TagFloat32:
+		return a.F[0] == b.F[0]
+	case TagUint32, TagInt32, TagBool:
+		return a.U[0] == b.U[0]
+	case TagVec2:
+		return a.F[0] == b.F[0] && a.F[1] == b.F[1]
+	case TagVec3:
+		return a.F[0] == b.F[0] && a.F[1] == b.F[1] && a.F[2] == b.F[2]
+	case TagVec4:
+		return a.F == b.F
 	default:
-		// For complex types (Array, Pointer), fall back to reference equality.
-		return a == b
+		// For complex types (Array, Pointer), fall back to pointer equality.
+		return a.Ref == b.Ref
 	}
 }
 

@@ -187,7 +187,7 @@ func TestDebugWatchVariable(t *testing.T) {
 			// The OnInstruction fires when the watch triggers stepping.
 			// Check if the watched variable now has a value.
 			if int(watchID) < len(event.Values) {
-				if val := event.Values[watchID]; val != nil {
+				if val := event.Values[watchID]; !val.IsNone() {
 					watchTriggered = true
 					capturedValue = val
 				}
@@ -252,7 +252,7 @@ func TestDebugAbort(t *testing.T) {
 	}
 
 	ctx := &ExecutionContext{
-		Inputs: map[uint32]Value{idxVarID: Uint32(0)},
+		Inputs: map[uint32]Value{idxVarID: ValUint(0)},
 	}
 	_, err = m.ExecuteWithDebug("vs_main", ctx, debug)
 
@@ -292,7 +292,7 @@ func TestDebugZeroOverhead(t *testing.T) {
 	}
 
 	// Run both paths to verify they produce identical results.
-	inputs := map[uint32]Value{idxVarID: Uint32(0)}
+	inputs := map[uint32]Value{idxVarID: ValUint(0)}
 	ctx1 := &ExecutionContext{Inputs: inputs}
 	ctx2 := &ExecutionContext{Inputs: inputs}
 
@@ -502,7 +502,7 @@ func TestDebugTraceVertexShader(t *testing.T) {
 	}
 
 	ctx := &ExecutionContext{
-		Inputs: map[uint32]Value{idxVarID: Uint32(0)},
+		Inputs: map[uint32]Value{idxVarID: ValUint(0)},
 	}
 	_, err = m.ExecuteWithDebug("vs_main", ctx, debug)
 	if err != nil {
@@ -589,7 +589,7 @@ func TestDebugMultipleBreakpoints(t *testing.T) {
 	}
 
 	ctx := &ExecutionContext{
-		Inputs: map[uint32]Value{idxVarID: Uint32(0)},
+		Inputs: map[uint32]Value{idxVarID: ValUint(0)},
 	}
 	_, err = m.ExecuteWithDebug("vs_main", ctx, debug)
 	if err != nil {
@@ -697,24 +697,24 @@ func TestValuesEqual(t *testing.T) {
 		a, b Value
 		want bool
 	}{
-		{"nil_nil", nil, nil, true},
-		{"nil_val", nil, Float32(0), false},
-		{"val_nil", Float32(0), nil, false},
-		{"float_eq", Float32(1.5), Float32(1.5), true},
-		{"float_ne", Float32(1.0), Float32(2.0), false},
-		{"uint_eq", Uint32(42), Uint32(42), true},
-		{"uint_ne", Uint32(1), Uint32(2), false},
-		{"int_eq", Int32(-5), Int32(-5), true},
-		{"int_ne", Int32(-5), Int32(5), false},
-		{"bool_eq", true, true, true},
-		{"bool_ne", true, false, false},
-		{"vec2_eq", Vec2{1, 2}, Vec2{1, 2}, true},
-		{"vec2_ne", Vec2{1, 2}, Vec2{1, 3}, false},
-		{"vec3_eq", Vec3{1, 2, 3}, Vec3{1, 2, 3}, true},
-		{"vec3_ne", Vec3{1, 2, 3}, Vec3{1, 2, 4}, false},
-		{"vec4_eq", Vec4{1, 2, 3, 4}, Vec4{1, 2, 3, 4}, true},
-		{"vec4_ne", Vec4{1, 2, 3, 4}, Vec4{1, 2, 3, 5}, false},
-		{"type_mismatch", Float32(1), Uint32(1), false},
+		{"nil_nil", Value{}, Value{}, true},
+		{"nil_val", Value{}, ValFloat(0), false},
+		{"val_nil", ValFloat(0), Value{}, false},
+		{"float_eq", ValFloat(1.5), ValFloat(1.5), true},
+		{"float_ne", ValFloat(1.0), ValFloat(2.0), false},
+		{"uint_eq", ValUint(42), ValUint(42), true},
+		{"uint_ne", ValUint(1), ValUint(2), false},
+		{"int_eq", ValInt(-5), ValInt(-5), true},
+		{"int_ne", ValInt(-5), ValInt(5), false},
+		{"bool_eq", ValBool(true), ValBool(true), true},
+		{"bool_ne", ValBool(true), ValBool(false), false},
+		{"vec2_eq", ValVec2(1, 2), ValVec2(1, 2), true},
+		{"vec2_ne", ValVec2(1, 2), ValVec2(1, 3), false},
+		{"vec3_eq", ValVec3(1, 2, 3), ValVec3(1, 2, 3), true},
+		{"vec3_ne", ValVec3(1, 2, 3), ValVec3(1, 2, 4), false},
+		{"vec4_eq", ValVec4(1, 2, 3, 4), ValVec4(1, 2, 3, 4), true},
+		{"vec4_ne", ValVec4(1, 2, 3, 4), ValVec4(1, 2, 3, 5), false},
+		{"type_mismatch", ValFloat(1), ValUint(1), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -754,15 +754,15 @@ func TestFormatTraceValue(t *testing.T) {
 		name string
 		val  Value
 	}{
-		{"float", Float32(3.14)},
-		{"uint", Uint32(42)},
-		{"int", Int32(-7)},
-		{"bool", true},
-		{"vec2", Vec2{1, 2}},
-		{"vec3", Vec3{1, 2, 3}},
-		{"vec4", Vec4{1, 2, 3, 4}},
-		{"ptr", &Pointer{Value: Float32(5)}},
-		{"nil", nil},
+		{"float", ValFloat(3.14)},
+		{"uint", ValUint(42)},
+		{"int", ValInt(-7)},
+		{"bool", ValBool(true)},
+		{"vec2", ValVec2(1, 2)},
+		{"vec3", ValVec3(1, 2, 3)},
+		{"vec4", ValVec4(1, 2, 3, 4)},
+		{"ptr", ValPointer(&Pointer{Val: ValFloat(5)})},
+		{"nil", Value{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -782,16 +782,16 @@ func TestValueTypeName(t *testing.T) {
 		val  Value
 		want string
 	}{
-		{Float32(0), "float32"},
-		{Uint32(0), "uint32"},
-		{Int32(0), "int32"},
-		{true, "bool"},
-		{Vec2{}, "vec2"},
-		{Vec3{}, "vec3"},
-		{Vec4{}, "vec4"},
-		{&Pointer{}, "ptr"},
-		{Array{}, "array"},
-		{nil, ""},
+		{ValFloat(0), "float32"},
+		{ValUint(0), "uint32"},
+		{ValInt(0), "int32"},
+		{ValBool(true), "bool"},
+		{ValVec2From(Vec2{}), "vec2"},
+		{ValVec3From(Vec3{}), "vec3"},
+		{ValVec4From(Vec4{}), "vec4"},
+		{ValPointer(&Pointer{}), "ptr"},
+		{ValArray(Array{}), "array"},
+		{Value{}, ""},
 	}
 	for _, tt := range tests {
 		got := valueTypeName(tt.val)
@@ -870,7 +870,7 @@ func BenchmarkExecuteBaseline(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		inputs := map[uint32]Value{idxVarID: uint32(i % 3)}
+		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		_, _ = m.Execute("vs_main", inputs)
 	}
 }
@@ -895,7 +895,7 @@ func BenchmarkDebugNilOverhead(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		inputs := map[uint32]Value{idxVarID: uint32(i % 3)}
+		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		ctx := &ExecutionContext{Inputs: inputs}
 		_, _ = m.ExecuteWithDebug("vs_main", ctx, nil)
 	}
@@ -924,7 +924,7 @@ func BenchmarkDebugWithTrace(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		inputs := map[uint32]Value{idxVarID: uint32(i % 3)}
+		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		ctx := &ExecutionContext{Inputs: inputs}
 		debug := &DebugContext{
 			TraceEnabled: true,

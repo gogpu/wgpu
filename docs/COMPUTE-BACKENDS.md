@@ -6,13 +6,13 @@ This document describes compute shader support across wgpu's HAL backends.
 
 | Feature | Vulkan | DX12 | Metal | GLES | Software | Noop |
 |---------|:------:|:----:|:-----:|:----:|:--------:|:----:|
-| Compute shaders | Yes | Yes | Yes | Partial | No | No |
-| Storage buffers | Yes | Yes | Yes | Yes | No | No |
+| Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | No |
+| Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | No |
 | Timestamp queries | Yes | Stub | Stub | Stub | No | No |
 | Indirect dispatch | Yes | Yes | Yes | Yes | No | No |
 | Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | No |
-| Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | N/A | N/A |
-| Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | N/A | N/A |
+| Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | N/A |
+| Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | 1024 | N/A |
 
 ## Vulkan
 
@@ -80,17 +80,24 @@ Vulkan provides the most complete compute shader implementation:
 
 ## Software Backend
 
-**Status:** Compute shaders are **not supported**.
+**Status:** Compute shaders supported via SPIR-V interpreter (v0.27.0+).
 
-The software backend is a CPU rasterizer designed for headless rendering and testing. It does not execute compute shaders.
+The software backend executes compute shaders on CPU through a built-in SPIR-V interpreter. **Designed for shader debugging, CI/CD testing, and GPU-less environments — not for production workloads** (interpreted, ~100× slower than JIT software renderers).
 
-- `CreateQuerySet` returns an error.
-- `BeginComputePass` returns a valid encoder, but `Dispatch` is a no-op.
-- Use the software backend only for render pipeline testing or as a fallback when no GPU is available.
+- **Shader compilation:** WGSL → SPIR-V (via `gogpu/naga`), then interpreted instruction-by-instruction.
+- **Storage buffers:** Full read/write support. Buffer writes from compute shader are immediately visible.
+- **Atomics:** OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange, OpAtomicSMin/SMax/UMin/UMax.
+- **Workgroup shared memory:** Per-workgroup allocation, zeroed at dispatch start.
+- **Barriers:** OpControlBarrier accepted (sequential execution, no-op for synchronization).
+- **Shader debugger:** DebugContext with breakpoints, JSON trace, watch variables. Zero overhead when disabled.
+- **Workgroup size:** Read from OpExecutionMode LocalSize in SPIR-V.
+- `CreateQuerySet` returns an error (timestamps not supported).
+- `DispatchIndirect` logs a warning (not yet implemented).
 
-### Future Plans
+### Verified
 
-A CPU-based compute shader interpreter may be added in the future (tracked as CS-013).
+`wgpu/examples/software-test/` — 256-element scaled-copy compute shader, all values match.
+`gogpu/examples/particles/` — 4096-particle orbital simulation (compute + instanced render).
 
 ## Noop Backend
 

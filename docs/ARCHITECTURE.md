@@ -145,10 +145,10 @@ Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags required). Pure Go, zero system dependencies.
 
 - `raster/` — Triangle rasterization, blending, depth/stencil, tiling, per-pixel fragment shader callback
-- `shader/` — Full SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders. GLSL.std.450 math intrinsics (30+), texture sampling, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace.
+- `shader/` — Full SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders. GLSL.std.450 math intrinsics (30+), texture sampling, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. **Not for production rendering** — interpreted execution is ~100× slower than JIT (SwiftShader/llvmpipe). Designed for shader debugging, CI/CD testing, and GPU-less fallback.
 - `compute_test.go` — Naga WGSL→SPIR-V integration tests for compute shaders
 
-Use cases: headless rendering (servers, CI/CD), testing without GPU, shader debugging, embedded systems, fallback when no GPU available. Verified: triangle + 4096-particle compute+render simulation.
+Use cases: **shader debugging** (step through every SPIR-V instruction), **CI/CD testing** (no GPU required), **headless rendering** (servers), **GPU-less fallback** (embedded systems). NOT for real-time production rendering — use GPU backends (Vulkan/DX12/Metal/GLES) for that. Verified: triangle + 4096-particle compute+render simulation.
 
 ### `hal/noop/` — No-op Backend
 

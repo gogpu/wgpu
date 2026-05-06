@@ -466,11 +466,11 @@ func TestWriteValueToBuffer(t *testing.T) {
 		val  Value
 		size uint32
 	}{
-		{"float32", Float32(3.14), 4},
-		{"uint32", Uint32(42), 4},
-		{"int32", Int32(-7), 4},
-		{"vec2", Vec2{1.0, 2.0}, 8},
-		{"vec4", Vec4{1, 2, 3, 4}, 16},
+		{"float32", ValFloat(3.14), 4},
+		{"uint32", ValUint(42), 4},
+		{"int32", ValInt(-7), 4},
+		{"vec2", ValVec2From(Vec2{1.0, 2.0}), 8},
+		{"vec4", ValVec4From(Vec4{1, 2, 3, 4}), 16},
 	}
 
 	for _, tt := range tests {
@@ -479,18 +479,19 @@ func TestWriteValueToBuffer(t *testing.T) {
 			writeValueToBuffer(buf, 0, tt.val)
 
 			// Verify round-trip through readFloat/readUint.
-			switch v := tt.val.(type) {
-			case Float32:
+			switch tt.val.Tag {
+			case TagFloat32:
 				got := readFloat32LE(buf[0:])
-				if math.Abs(float64(got-float32(v))) > 1e-6 {
-					t.Errorf("round-trip float = %f, want %f", got, v)
+				if math.Abs(float64(got-tt.val.AsFloat32())) > 1e-6 {
+					t.Errorf("round-trip float = %f, want %f", got, tt.val.AsFloat32())
 				}
-			case Uint32:
+			case TagUint32:
 				got := readUint32LE(buf[0:])
-				if got != v {
-					t.Errorf("round-trip uint = %d, want %d", got, v)
+				if got != tt.val.AsUint32() {
+					t.Errorf("round-trip uint = %d, want %d", got, tt.val.AsUint32())
 				}
-			case Vec4:
+			case TagVec4:
+				v := tt.val.AsVec4()
 				for i := 0; i < 4; i++ {
 					got := readFloat32LE(buf[i*4:])
 					if math.Abs(float64(got-v[i])) > 1e-6 {
@@ -508,13 +509,13 @@ func TestValueByteSize(t *testing.T) {
 		val  Value
 		want uint32
 	}{
-		{"float32", Float32(0), 4},
-		{"uint32", Uint32(0), 4},
-		{"int32", Int32(0), 4},
-		{"vec2", Vec2{}, 8},
-		{"vec3", Vec3{}, 12},
-		{"vec4", Vec4{}, 16},
-		{"array_of_float", Array{Float32(0), Float32(0)}, 8},
+		{"float32", ValFloat(0), 4},
+		{"uint32", ValUint(0), 4},
+		{"int32", ValInt(0), 4},
+		{"vec2", ValVec2(0, 0), 8},
+		{"vec3", ValVec3(0, 0, 0), 12},
+		{"vec4", ValVec4(0, 0, 0, 0), 16},
+		{"array_of_float", ValArray(Array{ValFloat(0), ValFloat(0)}), 8},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

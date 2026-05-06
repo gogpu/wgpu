@@ -345,10 +345,10 @@ func TestAtomicMinMaxOps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ptr := &Pointer{Value: tt.initial}
+			ptr := &Pointer{Val: ValUint(tt.initial)}
 			interp := &interpreter{
 				module: m,
-				values: testMakeValues(map[uint32]Value{
+				values: testMakeValues(map[uint32]any{
 					1: ptr,
 					2: tt.operand,
 				}),
@@ -360,7 +360,7 @@ func TestAtomicMinMaxOps(t *testing.T) {
 			}
 			old := interp.executeAtomicOp(inst)
 			gotOld := toUint32(old)
-			gotNew := toUint32(ptr.Value)
+			gotNew := toUint32(ptr.Val)
 			if gotOld != tt.wantOld {
 				t.Errorf("old = %d, want %d", gotOld, tt.wantOld)
 			}
@@ -378,10 +378,10 @@ func TestAtomicLoadAndStore(t *testing.T) {
 
 	// AtomicLoad: read value without modification.
 	t.Run("atomic_load", func(t *testing.T) {
-		ptr := &Pointer{Value: Uint32(42)}
+		ptr := &Pointer{Val: ValUint(42)}
 		interp := &interpreter{
 			module: m,
-			values: testMakeValues(map[uint32]Value{1: ptr}),
+			values: testMakeValues(map[uint32]any{1: ptr}),
 		}
 		inst := Instruction{
 			Opcode:   OpAtomicLoad,
@@ -393,19 +393,19 @@ func TestAtomicLoadAndStore(t *testing.T) {
 			t.Errorf("AtomicLoad returned %d, want 42", toUint32(result))
 		}
 		// Value unchanged.
-		if toUint32(ptr.Value) != 42 {
-			t.Errorf("AtomicLoad modified ptr to %d, should remain 42", toUint32(ptr.Value))
+		if toUint32(ptr.Val) != 42 {
+			t.Errorf("AtomicLoad modified ptr to %d, should remain 42", toUint32(ptr.Val))
 		}
 	})
 
 	// AtomicStore: write value, return nil.
 	t.Run("atomic_store", func(t *testing.T) {
-		ptr := &Pointer{Value: Uint32(0)}
+		ptr := &Pointer{Val: ValUint(0)}
 		interp := &interpreter{
 			module: m,
-			values: testMakeValues(map[uint32]Value{
+			values: testMakeValues(map[uint32]any{
 				1: ptr,
-				2: Uint32(99),
+				2: ValUint(99),
 			}),
 		}
 		inst := Instruction{
@@ -414,11 +414,11 @@ func TestAtomicLoadAndStore(t *testing.T) {
 			Operands: []uint32{1, 0, 0, 2},
 		}
 		result := interp.executeAtomicOp(inst)
-		if result != nil {
+		if !result.IsNone() {
 			t.Errorf("AtomicStore returned %v, want nil", result)
 		}
-		if toUint32(ptr.Value) != 99 {
-			t.Errorf("AtomicStore wrote %d, want 99", toUint32(ptr.Value))
+		if toUint32(ptr.Val) != 99 {
+			t.Errorf("AtomicStore wrote %d, want 99", toUint32(ptr.Val))
 		}
 	})
 }
@@ -429,8 +429,8 @@ func TestAtomicOpNonPointer(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			1: Uint32(42), // Not a pointer
+		values: testMakeValues(map[uint32]any{
+			1: ValUint(42), // Not a pointer
 		}),
 	}
 	inst := Instruction{
@@ -438,7 +438,7 @@ func TestAtomicOpNonPointer(t *testing.T) {
 		ResultID: 100,
 		Operands: []uint32{1, 0, 0, 1},
 	}
-	// Should return Uint32(0), not crash.
+	// Should return ValUint(0), not crash.
 	result := interp.executeAtomicOp(inst)
 	if toUint32(result) != 0 {
 		t.Errorf("atomic on non-pointer returned %d, want 0", toUint32(result))
@@ -483,10 +483,10 @@ func TestGLSLSmoothStepEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: testMakeValues(map[uint32]Value{
-					10: Float32(tt.edge0),
-					11: Float32(tt.edge1),
-					12: Float32(tt.x),
+				values: testMakeValues(map[uint32]any{
+					10: ValFloat(tt.edge0),
+					11: ValFloat(tt.edge1),
+					12: ValFloat(tt.x),
 				}),
 			}
 			got := interp.executeGLSLExtInst(GLSLSmoothStep, []uint32{10, 11, 12})
@@ -509,10 +509,10 @@ func TestGLSLFClampMinGreaterThanMax(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			10: Float32(5),  // x
-			11: Float32(10), // min (greater than max!)
-			12: Float32(3),  // max
+		values: testMakeValues(map[uint32]any{
+			10: ValFloat(5),  // x
+			11: ValFloat(10), // min (greater than max!)
+			12: ValFloat(3),  // max
 		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLFClamp, []uint32{10, 11, 12})
@@ -536,9 +536,9 @@ func TestGLSLPowNegativeBase(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			10: Float32(-2),
-			11: Float32(3),
+		values: testMakeValues(map[uint32]any{
+			10: ValFloat(-2),
+			11: ValFloat(3),
 		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLPow, []uint32{10, 11})
@@ -574,7 +574,7 @@ func TestGLSLAtan2Quadrants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: testMakeValues(map[uint32]Value{10: Float32(tt.y), 11: Float32(tt.x)}),
+				values: testMakeValues(map[uint32]any{10: ValFloat(tt.y), 11: ValFloat(tt.x)}),
 			}
 			got := interp.executeGLSLExtInst(GLSLAtan2, []uint32{10, 11})
 			f := toFloat32(got)
@@ -596,13 +596,13 @@ func TestGLSLReflectViaExtInst(t *testing.T) {
 	// Reflect incident (1, -1, 0) around normal (0, 1, 0) -> (1, 1, 0)
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
+		values: testMakeValues(map[uint32]any{
 			10: Vec3{1, -1, 0},
 			11: Vec3{0, 1, 0},
 		}),
 	}
 	got := interp.executeGLSLExtInst(GLSLReflect, []uint32{10, 11})
-	gv, ok := got.(Vec3)
+	gv, ok := testIsVec3(got)
 	if !ok {
 		t.Fatalf("reflect returned %T, want Vec3", got)
 	}
@@ -635,10 +635,10 @@ func TestGLSLFMix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interp := &interpreter{
 				module: m,
-				values: testMakeValues(map[uint32]Value{
-					10: Float32(tt.x),
-					11: Float32(tt.y),
-					12: Float32(tt.a),
+				values: testMakeValues(map[uint32]any{
+					10: ValFloat(tt.x),
+					11: ValFloat(tt.y),
+					12: ValFloat(tt.a),
 				}),
 			}
 			got := interp.executeGLSLExtInst(GLSLFMix, []uint32{10, 11, 12})
@@ -659,7 +659,7 @@ func TestGLSLLengthScalar(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{10: Float32(-5)}),
+		values: testMakeValues(map[uint32]any{10: ValFloat(-5)}),
 	}
 	got := interp.executeGLSLExtInst(GLSLLength, []uint32{10})
 	f := toFloat32(got)
@@ -677,7 +677,7 @@ func TestGLSLDistanceVec3(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
+		values: testMakeValues(map[uint32]any{
 			10: Vec3{1, 0, 0},
 			11: Vec3{4, 0, 0},
 		}),
@@ -707,14 +707,14 @@ func TestGLSLTernaryVec2Vec3(t *testing.T) {
 	t.Run("vec2", func(t *testing.T) {
 		interp := &interpreter{
 			module: m,
-			values: testMakeValues(map[uint32]Value{
+			values: testMakeValues(map[uint32]any{
 				1: Vec2{-1, 5},
 				2: Vec2{0, 0},
 				3: Vec2{1, 1},
 			}),
 		}
 		got := interp.glslTernaryFloat([]uint32{1, 2, 3}, clamp)
-		v, ok := got.(Vec2)
+		v, ok := testIsVec2(got)
 		if !ok {
 			t.Fatalf("returned %T, want Vec2", got)
 		}
@@ -726,14 +726,14 @@ func TestGLSLTernaryVec2Vec3(t *testing.T) {
 	t.Run("vec3", func(t *testing.T) {
 		interp := &interpreter{
 			module: m,
-			values: testMakeValues(map[uint32]Value{
+			values: testMakeValues(map[uint32]any{
 				1: Vec3{-1, 0.5, 5},
 				2: Vec3{0, 0, 0},
 				3: Vec3{1, 1, 1},
 			}),
 		}
 		got := interp.glslTernaryFloat([]uint32{1, 2, 3}, clamp)
-		v, ok := got.(Vec3)
+		v, ok := testIsVec3(got)
 		if !ok {
 			t.Fatalf("returned %T, want Vec3", got)
 		}
@@ -830,11 +830,12 @@ func TestInitWorkgroupVariablesFromSharedMemory(t *testing.T) {
 	}
 	interp.initWorkgroupVariables()
 
-	ptr, ok := interp.values[idVarID].(*Pointer)
+	ptr := interp.values[idVarID].AsPointer()
+	ok := ptr != nil
 	if !ok {
 		t.Fatalf("workgroup variable is %T, want *Pointer", interp.values[idVarID])
 	}
-	f := toFloat32(ptr.Value)
+	f := toFloat32(ptr.Val)
 	if math.Abs(float64(f-42.0)) > 1e-5 {
 		t.Errorf("workgroup variable value = %v, want 42.0", f)
 	}
@@ -871,11 +872,12 @@ func TestInitWorkgroupVariablesDefault(t *testing.T) {
 	}
 	interp.initWorkgroupVariables()
 
-	ptr, ok := interp.values[idVarID].(*Pointer)
+	ptr := interp.values[idVarID].AsPointer()
+	ok := ptr != nil
 	if !ok {
 		t.Fatalf("workgroup variable is %T, want *Pointer", interp.values[idVarID])
 	}
-	f := toFloat32(ptr.Value)
+	f := toFloat32(ptr.Val)
 	if f != 0 {
 		t.Errorf("default workgroup variable = %v, want 0", f)
 	}
@@ -945,23 +947,23 @@ func TestVectorShuffleVariants(t *testing.T) {
 		want       Value
 	}{
 		// Identity shuffle (first 4 from v1)
-		{"identity", 2, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8},
-			[]uint32{0, 1, 2, 3}, Vec4{1, 2, 3, 4}},
+		{"identity", 2, ValVec4(1, 2, 3, 4), ValVec4(5, 6, 7, 8),
+			[]uint32{0, 1, 2, 3}, ValVec4(1, 2, 3, 4)},
 		// Reverse shuffle
-		{"reverse", 2, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8},
-			[]uint32{3, 2, 1, 0}, Vec4{4, 3, 2, 1}},
+		{"reverse", 2, ValVec4(1, 2, 3, 4), ValVec4(5, 6, 7, 8),
+			[]uint32{3, 2, 1, 0}, ValVec4(4, 3, 2, 1)},
 		// Two-source shuffle: take last 2 from v1, first 2 from v2
-		{"cross_source", 2, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8},
-			[]uint32{2, 3, 4, 5}, Vec4{3, 4, 5, 6}},
+		{"cross_source", 2, ValVec4(1, 2, 3, 4), ValVec4(5, 6, 7, 8),
+			[]uint32{2, 3, 4, 5}, ValVec4(3, 4, 5, 6)},
 		// Vec3 result
-		{"to_vec3", 3, Vec4{10, 20, 30, 40}, Vec4{50, 60, 70, 80},
-			[]uint32{0, 4, 2}, Vec3{10, 50, 30}},
+		{"to_vec3", 3, ValVec4(10, 20, 30, 40), ValVec4(50, 60, 70, 80),
+			[]uint32{0, 4, 2}, ValVec3(10, 50, 30)},
 		// Vec2 from vec4 (single-component extract equivalent)
-		{"to_vec2", 4, Vec4{10, 20, 30, 40}, Vec4{0, 0, 0, 0},
-			[]uint32{1, 3}, Vec2{20, 40}},
+		{"to_vec2", 4, ValVec4(10, 20, 30, 40), ValVec4(0, 0, 0, 0),
+			[]uint32{1, 3}, ValVec2(20, 40)},
 		// With undefined component (0xFFFFFFFF)
-		{"with_undef", 3, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8},
-			[]uint32{0, 0xFFFFFFFF, 2}, Vec3{1, 0, 3}},
+		{"with_undef", 3, ValVec4(1, 2, 3, 4), ValVec4(5, 6, 7, 8),
+			[]uint32{0, 0xFFFFFFFF, 2}, ValVec3(1, 0, 3)},
 	}
 
 	for _, tt := range tests {
@@ -979,30 +981,30 @@ func TestVectorShuffleNoTypeInfo(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}} // No type info for result
 
 	// Should fall back to inferring from component count.
-	got := vectorShuffle(m, 999, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8}, []uint32{0, 1, 2, 3})
-	_, ok := got.(Vec4)
+	got := vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2, 3})
+	_, ok := testIsVec4(got)
 	if !ok {
 		t.Errorf("vectorShuffle fallback returned %T, want Vec4", got)
 	}
 
 	// 3-component fallback
-	got = vectorShuffle(m, 999, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8}, []uint32{0, 1, 2})
-	_, ok = got.(Vec3)
+	got = vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2})
+	_, ok = testIsVec3(got)
 	if !ok {
 		t.Errorf("vectorShuffle 3-component fallback returned %T, want Vec3", got)
 	}
 
 	// 2-component fallback
-	got = vectorShuffle(m, 999, Vec4{1, 2, 3, 4}, Vec4{5, 6, 7, 8}, []uint32{0, 1})
-	_, ok = got.(Vec2)
+	got = vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1})
+	_, ok = testIsVec2(got)
 	if !ok {
 		t.Errorf("vectorShuffle 2-component fallback returned %T, want Vec2", got)
 	}
 
-	// 1-component fallback (degenerate case: vectorShuffle returns Float32(0)
+	// 1-component fallback (degenerate case: vectorShuffle returns ValFloat(0)
 	// because it only handles 2/3/4 component counts)
-	got = vectorShuffle(m, 999, Vec4{42, 0, 0, 0}, Vec4{0, 0, 0, 0}, []uint32{0})
-	_, ok = got.(Float32)
+	got = vectorShuffle(m, 999, ValVec4From(Vec4{42, 0, 0, 0}), ValVec4From(Vec4{0, 0, 0, 0}), []uint32{0})
+	_, ok = testIsFloat32(got)
 	if !ok {
 		t.Fatalf("vectorShuffle 1-component returned %T, want Float32", got)
 	}
@@ -1085,10 +1087,11 @@ func TestFetchTexelNegativeCoords(t *testing.T) {
 			255, 255, 255, 255,
 		},
 	}
-	interp := &interpreter{ctx: &ExecutionContext{}}
+	bk := BindingKey{Group: 0, Binding: 0}
+	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
 
 	// Negative coords should clamp to 0.
-	got := interp.fetchTexel(tex, Vec2{-5, -5})
+	got := interp.fetchTexel(ValBindingKey(bk), ValVec2(-5, -5))
 	gv := Vec4ToFloat32(got)
 	// (0,0) is red
 	if math.Abs(float64(gv[0]-1)) > 0.01 || math.Abs(float64(gv[1])) > 0.01 {
@@ -1106,10 +1109,11 @@ func TestFetchTexelScalarCoord(t *testing.T) {
 			255, 255, 255, 255, // (2,0) white
 		},
 	}
-	interp := &interpreter{ctx: &ExecutionContext{}}
+	bk := BindingKey{Group: 0, Binding: 0}
+	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
 
 	// Scalar coord should be treated as x, y=0.
-	got := interp.fetchTexel(tex, Uint32(2))
+	got := interp.fetchTexel(ValBindingKey(bk), ValUint(2))
 	gv := Vec4ToFloat32(got)
 	if math.Abs(float64(gv[0]-1)) > 0.01 {
 		t.Errorf("fetchTexel(scalar 2) = %v, want white", gv)
@@ -1119,7 +1123,7 @@ func TestFetchTexelScalarCoord(t *testing.T) {
 // TestFetchTexelNilTexture verifies graceful handling of nil texture.
 func TestFetchTexelNilTexture(t *testing.T) {
 	interp := &interpreter{ctx: &ExecutionContext{}}
-	got := interp.fetchTexel(nil, Vec2{0, 0})
+	got := interp.fetchTexel(ValBindingKey(BindingKey{}), ValVec2(0, 0))
 	gv := Vec4ToFloat32(got)
 	if gv != (Vec4{0, 0, 0, 0}) {
 		t.Errorf("fetchTexel(nil) = %v, want zero", gv)
@@ -1137,17 +1141,18 @@ func TestFetchTexelVec3Vec4Coords(t *testing.T) {
 			255, 255, 255, 255, // (1,1)
 		},
 	}
-	interp := &interpreter{ctx: &ExecutionContext{}}
+	bk := BindingKey{Group: 0, Binding: 0}
+	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
 
 	// Vec3 coord: use x,y components
-	got := interp.fetchTexel(tex, Vec3{1, 1, 0})
+	got := interp.fetchTexel(ValBindingKey(bk), ValVec3(1, 1, 0))
 	gv := Vec4ToFloat32(got)
 	if gv != (Vec4{1, 1, 1, 1}) {
 		t.Errorf("fetchTexel(Vec3{1,1,0}) = %v, want white", gv)
 	}
 
 	// Vec4 coord: use x,y components
-	got = interp.fetchTexel(tex, Vec4{0, 1, 0, 0})
+	got = interp.fetchTexel(ValBindingKey(bk), ValVec4(0, 1, 0, 0))
 	gv = Vec4ToFloat32(got)
 	// (0,1) = blue
 	if math.Abs(float64(gv[2]-1)) > 0.01 {
@@ -1238,19 +1243,19 @@ func TestSampleTextureCoordTypes(t *testing.T) {
 	}
 
 	si := &SampledImageValue{
-		Image:   BindingKey{Group: 0, Binding: 0},
-		Sampler: BindingKey{Group: 0, Binding: 1},
+		Image:   ValBindingKey(BindingKey{Group: 0, Binding: 0}),
+		Sampler: ValBindingKey(BindingKey{Group: 0, Binding: 1}),
 	}
 
 	// Vec3 coord: should use first 2 components as UV.
-	got := interp.sampleTexture(si, Vec3{0, 0, 999}, 0)
+	got := interp.sampleTexture(ValSampledImage(si), ValVec3(0, 0, 999), 0)
 	gv := Vec4ToFloat32(got)
 	if math.Abs(float64(gv[0]-1)) > 0.05 { // Red at (0,0)
 		t.Errorf("sampleTexture(Vec3) = %v, want red", gv)
 	}
 
 	// Scalar coord: should use as U, V=0.
-	got = interp.sampleTexture(si, Float32(0), 0)
+	got = interp.sampleTexture(ValSampledImage(si), ValFloat(0), 0)
 	gv = Vec4ToFloat32(got)
 	// u=0, v=0 -> (0,0) = Red
 	if math.Abs(float64(gv[0]-1)) > 0.05 {
@@ -1276,19 +1281,19 @@ func TestReadValueFromBufferShortBuffers(t *testing.T) {
 
 	// Signed int on short buffer returns zero.
 	got := interp.readValueFromBuffer(short, 0, m.Types[1])
-	if v, ok := got.(Int32); !ok || v != 0 {
-		t.Errorf("short signed int = %v, want Int32(0)", got)
+	if got.Tag != TagInt32 || got.AsInt32() != 0 {
+		t.Errorf("short signed int = %v, want ValInt(0)", got)
 	}
 
 	// Unsigned int on short buffer returns zero.
 	got = interp.readValueFromBuffer(short, 0, m.Types[2])
-	if v, ok := got.(Uint32); !ok || v != 0 {
-		t.Errorf("short unsigned int = %v, want Uint32(0)", got)
+	if got.Tag != TagUint32 || got.AsUint32() != 0 {
+		t.Errorf("short unsigned int = %v, want ValUint(0)", got)
 	}
 
 	// Bool on short buffer returns false.
 	got = interp.readValueFromBuffer(short, 0, m.Types[3])
-	if v, ok := got.(bool); !ok || v != false {
+	if v, ok := testIsBool(got); !ok || v != false {
 		t.Errorf("short bool = %v, want false", got)
 	}
 }
@@ -1301,9 +1306,9 @@ func TestReadValueFromBufferShortBuffers(t *testing.T) {
 func TestWriteValueToBufferShortBuffer(t *testing.T) {
 	// Writing to a buffer that is too short should not panic.
 	short := make([]byte, 2)
-	writeValueToBuffer(short, 0, Float32(3.14))
-	writeValueToBuffer(short, 0, Uint32(42))
-	writeValueToBuffer(short, 0, Int32(-7))
+	writeValueToBuffer(short, 0, ValFloat(3.14))
+	writeValueToBuffer(short, 0, ValUint(42))
+	writeValueToBuffer(short, 0, ValInt(-7))
 	// If we get here without panic, the test passes.
 }
 
@@ -1378,7 +1383,7 @@ func TestOpUndef(t *testing.T) {
 		vi := m.Variables[varID]
 		if vi != nil && vi.StorageClass == StorageClassOutput {
 			color := Vec4ToFloat32(outputs[varID])
-			// OpUndef should produce 0 (our implementation uses Uint32(0)).
+			// OpUndef should produce 0 (our implementation uses ValUint(0)).
 			if color[0] != 0 {
 				t.Errorf("OpUndef produced %v, want 0", color[0])
 			}
@@ -1402,25 +1407,25 @@ func TestComparisonOpsViaInterpreter(t *testing.T) {
 		a, b   Value
 		want   bool
 	}{
-		{"u_gt_true", OpUGreaterThan, Uint32(10), Uint32(3), true},
-		{"u_gt_false", OpUGreaterThan, Uint32(3), Uint32(10), false},
-		{"u_le_true", OpULessThanEqual, Uint32(3), Uint32(3), true},
-		{"u_le_false", OpULessThanEqual, Uint32(4), Uint32(3), false},
-		{"u_ge_true", OpUGreaterThanEqual, Uint32(3), Uint32(3), true},
-		{"u_ge_false", OpUGreaterThanEqual, Uint32(2), Uint32(3), false},
-		{"s_gt_true", OpSGreaterThan, Uint32(5), Uint32(0xFFFFFFFB), true},            // 5 > -5 (signed)
-		{"s_le_true", OpSLessThanEqual, Uint32(0xFFFFFFFB), Uint32(0xFFFFFFFB), true}, // -5 <= -5 (signed)
-		{"s_ge_true", OpSGreaterThanEqual, Uint32(0), Uint32(0xFFFFFFFF), true},       // 0 >= -1 (signed)
-		{"ieq_true", OpIEqual, Uint32(42), Uint32(42), true},
-		{"ieq_false", OpIEqual, Uint32(1), Uint32(2), false},
-		{"ine_true", OpINotEqual, Uint32(1), Uint32(2), true},
-		{"ine_false", OpINotEqual, Uint32(5), Uint32(5), false},
-		{"ford_eq_true", OpFOrdEqual, Float32(3.14), Float32(3.14), true},
-		{"ford_eq_false", OpFOrdEqual, Float32(1), Float32(2), false},
-		{"ford_lt_true", OpFOrdLessThan, Float32(1), Float32(2), true},
-		{"ford_gt_true", OpFOrdGreaterThan, Float32(2), Float32(1), true},
-		{"ford_le_true", OpFOrdLessThanEqual, Float32(1), Float32(1), true},
-		{"ford_ge_true", OpFOrdGreaterThanEqual, Float32(2), Float32(2), true},
+		{"u_gt_true", OpUGreaterThan, ValUint(10), ValUint(3), true},
+		{"u_gt_false", OpUGreaterThan, ValUint(3), ValUint(10), false},
+		{"u_le_true", OpULessThanEqual, ValUint(3), ValUint(3), true},
+		{"u_le_false", OpULessThanEqual, ValUint(4), ValUint(3), false},
+		{"u_ge_true", OpUGreaterThanEqual, ValUint(3), ValUint(3), true},
+		{"u_ge_false", OpUGreaterThanEqual, ValUint(2), ValUint(3), false},
+		{"s_gt_true", OpSGreaterThan, ValUint(5), ValUint(0xFFFFFFFB), true},            // 5 > -5 (signed)
+		{"s_le_true", OpSLessThanEqual, ValUint(0xFFFFFFFB), ValUint(0xFFFFFFFB), true}, // -5 <= -5 (signed)
+		{"s_ge_true", OpSGreaterThanEqual, ValUint(0), ValUint(0xFFFFFFFF), true},       // 0 >= -1 (signed)
+		{"ieq_true", OpIEqual, ValUint(42), ValUint(42), true},
+		{"ieq_false", OpIEqual, ValUint(1), ValUint(2), false},
+		{"ine_true", OpINotEqual, ValUint(1), ValUint(2), true},
+		{"ine_false", OpINotEqual, ValUint(5), ValUint(5), false},
+		{"ford_eq_true", OpFOrdEqual, ValFloat(3.14), ValFloat(3.14), true},
+		{"ford_eq_false", OpFOrdEqual, ValFloat(1), ValFloat(2), false},
+		{"ford_lt_true", OpFOrdLessThan, ValFloat(1), ValFloat(2), true},
+		{"ford_gt_true", OpFOrdGreaterThan, ValFloat(2), ValFloat(1), true},
+		{"ford_le_true", OpFOrdLessThanEqual, ValFloat(1), ValFloat(1), true},
+		{"ford_ge_true", OpFOrdGreaterThanEqual, ValFloat(2), ValFloat(2), true},
 	}
 
 	for _, tt := range tests {
@@ -1438,7 +1443,7 @@ func TestComparisonOpsViaInterpreter(t *testing.T) {
 				fn:     fn,
 				ep:     &EntryPoint{},
 				ctx:    &ExecutionContext{},
-				values: testMakeValues(map[uint32]Value{1: tt.a, 2: tt.b}),
+				values: testMakeValues(map[uint32]any{1: tt.a, 2: tt.b}),
 			}
 
 			err := interp.run()
@@ -1446,7 +1451,7 @@ func TestComparisonOpsViaInterpreter(t *testing.T) {
 				t.Fatalf("run() failed: %v", err)
 			}
 
-			got, ok := interp.values[10].(bool)
+			got, ok := testIsBool(interp.values[10])
 			if !ok {
 				t.Fatalf("comparison result is %T, want bool", interp.values[10])
 			}
@@ -1464,7 +1469,7 @@ func TestComparisonOpsViaInterpreter(t *testing.T) {
 
 func TestValueByteSizeDefault(t *testing.T) {
 	// An unknown type (string, struct pointer, etc.) should return 4.
-	got := valueByteSize("not_a_value_type")
+	got := valueByteSize(Value{})
 	if got != 4 {
 		t.Errorf("valueByteSize(string) = %d, want 4", got)
 	}
@@ -1503,7 +1508,7 @@ func TestDivisionByZeroOpcodes(t *testing.T) {
 				},
 				ep:     &EntryPoint{},
 				ctx:    &ExecutionContext{},
-				values: testMakeValues(map[uint32]Value{1: Uint32(42), 2: Uint32(0)}),
+				values: testMakeValues(map[uint32]any{1: ValUint(42), 2: ValUint(0)}),
 			}
 
 			// Should not panic.

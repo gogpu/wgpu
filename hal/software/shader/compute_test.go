@@ -330,10 +330,10 @@ func TestAtomicOps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ptr := &Pointer{Value: tt.initial}
+			ptr := &Pointer{Val: ValUint(tt.initial)}
 			interp := &interpreter{
 				module: m,
-				values: testMakeValues(map[uint32]Value{
+				values: testMakeValues(map[uint32]any{
 					1: ptr,
 					2: tt.operand,
 				}),
@@ -354,7 +354,7 @@ func TestAtomicOps(t *testing.T) {
 
 			old := interp.executeAtomicOp(inst)
 			gotOld := toUint32(old)
-			gotNew := toUint32(ptr.Value)
+			gotNew := toUint32(ptr.Val)
 
 			if gotOld != tt.wantOld {
 				t.Errorf("old value = %d, want %d", gotOld, tt.wantOld)
@@ -373,13 +373,13 @@ func TestAtomicCompareExchange(t *testing.T) {
 	}
 
 	// CAS succeeds: value=10, comparator=10, newValue=42
-	ptr := &Pointer{Value: Uint32(10)}
+	ptr := &Pointer{Val: ValUint(10)}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
+		values: testMakeValues(map[uint32]any{
 			1: ptr,
-			2: Uint32(42), // new value
-			3: Uint32(10), // comparator
+			2: ValUint(42), // new value
+			3: ValUint(10), // comparator
 		}),
 	}
 
@@ -395,23 +395,23 @@ func TestAtomicCompareExchange(t *testing.T) {
 	if toUint32(old) != 10 {
 		t.Errorf("CAS old = %d, want 10", toUint32(old))
 	}
-	if toUint32(ptr.Value) != 42 {
-		t.Errorf("CAS new = %d, want 42 (should have swapped)", toUint32(ptr.Value))
+	if toUint32(ptr.Val) != 42 {
+		t.Errorf("CAS new = %d, want 42 (should have swapped)", toUint32(ptr.Val))
 	}
 
 	// CAS fails: value=42, comparator=99 (doesn't match)
-	ptr.Value = Uint32(42)
-	interp.values[3] = Uint32(99) // wrong comparator
+	ptr.Val = ValUint(42)
+	interp.values[3] = ValUint(99) // wrong comparator
 	old = interp.executeAtomicOp(inst)
-	if toUint32(ptr.Value) != 42 {
-		t.Errorf("failed CAS new = %d, want 42 (should NOT have swapped)", toUint32(ptr.Value))
+	if toUint32(ptr.Val) != 42 {
+		t.Errorf("failed CAS new = %d, want 42 (should NOT have swapped)", toUint32(ptr.Val))
 	}
 	_ = old
 }
 
 func TestUvec3ToValue(t *testing.T) {
 	v := uvec3ToValue([3]uint32{10, 20, 30})
-	arr, ok := v.(Array)
+	arr, ok := testIsArray(v)
 	if !ok || len(arr) != 3 {
 		t.Fatalf("uvec3ToValue returned %T, want Array of 3", v)
 	}
@@ -678,7 +678,7 @@ func TestTriangleStillWorks(t *testing.T) {
 		}
 	}
 
-	inputs := map[uint32]Value{idxVarID: Uint32(0)}
+	inputs := map[uint32]Value{idxVarID: ValUint(0)}
 	outputs, err := m.Execute("vs_main", inputs)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)

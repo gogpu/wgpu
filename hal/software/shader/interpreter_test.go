@@ -277,7 +277,7 @@ func TestSPIRVTriangleVertexShader(t *testing.T) {
 
 	for idx, want := range expected {
 		inputs := map[uint32]Value{
-			idxVarID: uint32(idx),
+			idxVarID: ValUint(uint32(idx)),
 		}
 
 		outputs, err := m.Execute("vs_main", inputs)
@@ -393,7 +393,7 @@ func TestSPIRVAccessChainOutOfBounds(t *testing.T) {
 	// Index 10 is out of bounds for a 3-element array.
 	// The interpreter should not crash; it returns a zero element.
 	inputs := map[uint32]Value{
-		idxVarID: Uint32(10),
+		idxVarID: ValUint(10),
 	}
 	_, err = m.Execute("vs_main", inputs)
 	// Should not error — out-of-bounds returns zero.
@@ -409,16 +409,16 @@ func TestSPIRVConvertUToF(t *testing.T) {
 		val  Value
 		want float32
 	}{
-		{"uint32_0", Uint32(0), 0},
-		{"uint32_42", Uint32(42), 42},
-		{"int32_neg", Int32(-5), -5},
-		{"float32", Float32(3.14), 3.14},
+		{"uint32_0", ValUint(0), 0},
+		{"uint32_42", ValUint(42), 42},
+		{"int32_neg", ValInt(-5), -5},
+		{"float32", ValFloat(3.14), 3.14},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := convertToFloat(tt.val)
-			f, ok := result.(Float32)
+			f, ok := testIsFloat32(result)
 			if !ok {
 				t.Fatalf("convertToFloat returned %T, want Float32", result)
 			}
@@ -449,7 +449,7 @@ func TestSPIRVCompositeConstruct(t *testing.T) {
 		}
 	}
 
-	inputs := map[uint32]Value{idxVarID: Uint32(0)}
+	inputs := map[uint32]Value{idxVarID: ValUint(0)}
 	outputs, err := m.Execute("vs_main", inputs)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -501,11 +501,11 @@ func TestVec4ToFloat32(t *testing.T) {
 		val  Value
 		want [4]float32
 	}{
-		{"vec4", Vec4{1, 2, 3, 4}, [4]float32{1, 2, 3, 4}},
-		{"vec3", Vec3{1, 2, 3}, [4]float32{1, 2, 3, 0}},
-		{"vec2", Vec2{1, 2}, [4]float32{1, 2, 0, 0}},
-		{"float", Float32(5), [4]float32{5, 0, 0, 0}},
-		{"nil", nil, [4]float32{0, 0, 0, 0}},
+		{"vec4", ValVec4From(Vec4{1, 2, 3, 4}), [4]float32{1, 2, 3, 4}},
+		{"vec3", ValVec3From(Vec3{1, 2, 3}), [4]float32{1, 2, 3, 0}},
+		{"vec2", ValVec2From(Vec2{1, 2}), [4]float32{1, 2, 0, 0}},
+		{"float", ValFloat(5), [4]float32{5, 0, 0, 0}},
+		{"nil", Value{}, [4]float32{0, 0, 0, 0}},
 	}
 
 	for _, tt := range tests {
@@ -519,17 +519,16 @@ func TestVec4ToFloat32(t *testing.T) {
 }
 
 func TestIndexComposite(t *testing.T) {
-	arr := Array{Float32(10), Float32(20), Float32(30)}
-	v := indexComposite(arr, 1)
-	f, ok := v.(Float32)
+	arr := Array{ValFloat(10), ValFloat(20), ValFloat(30)}
+	v := indexComposite(ValArray(arr), 1)
+	f, ok := testIsFloat32(v)
 	if !ok || f != 20 {
-		t.Errorf("indexComposite(arr, 1) = %v, want Float32(20)", v)
+		t.Errorf("indexComposite(ValArray(arr), 1) = %v, want Float32(20)", v)
 	}
 
 	vec := Vec4{1, 2, 3, 4}
-	v = indexComposite(vec, 2)
-	f, ok = v.(Float32)
-	if !ok || f != 3 {
+	v = indexComposite(ValVec4From(vec), 2)
+	if v.Tag != TagFloat32 || v.F[0] != 3 {
 		t.Errorf("indexComposite(vec4, 2) = %v, want Float32(3)", v)
 	}
 }
@@ -537,13 +536,13 @@ func TestIndexComposite(t *testing.T) {
 func TestFloatBinOp(t *testing.T) {
 	add := func(a, b float32) float32 { return a + b }
 
-	result := floatBinOp(Float32(3), Float32(4), add)
-	if f, ok := result.(Float32); !ok || f != 7 {
+	result := floatBinOp(ValFloat(3), ValFloat(4), add)
+	if f, ok := testIsFloat32(result); !ok || f != 7 {
 		t.Errorf("floatBinOp scalar = %v, want 7", result)
 	}
 
-	result = floatBinOp(Vec2{1, 2}, Vec2{3, 4}, add)
-	if v, ok := result.(Vec2); !ok || v != (Vec2{4, 6}) {
+	result = floatBinOp(ValVec2(1, 2), ValVec2(3, 4), add)
+	if result.Tag != TagVec2 || result.AsVec2() != (Vec2{4, 6}) {
 		t.Errorf("floatBinOp vec2 = %v, want [4, 6]", result)
 	}
 }
@@ -551,8 +550,8 @@ func TestFloatBinOp(t *testing.T) {
 func TestIntBinOp(t *testing.T) {
 	add := func(a, b uint32) uint32 { return a + b }
 
-	result := intBinOp(Uint32(3), Uint32(4), add)
-	if u, ok := result.(Uint32); !ok || u != 7 {
+	result := intBinOp(ValUint(3), ValUint(4), add)
+	if u, ok := testIsUint32(result); !ok || u != 7 {
 		t.Errorf("intBinOp = %v, want 7", result)
 	}
 }
@@ -568,11 +567,11 @@ func TestVectorTimesScalar(t *testing.T) {
 		s    float32
 		want Value
 	}{
-		{"vec2", Vec2{1, 2}, 3, Vec2{3, 6}},
-		{"vec3", Vec3{1, 2, 3}, 2, Vec3{2, 4, 6}},
-		{"vec4", Vec4{1, 2, 3, 4}, 0.5, Vec4{0.5, 1, 1.5, 2}},
-		{"scalar", Float32(5), 3, Float32(15)},
-		{"zero_scalar", Vec3{1, 2, 3}, 0, Vec3{0, 0, 0}},
+		{"vec2", ValVec2From(Vec2{1, 2}), 3, ValVec2From(Vec2{3, 6})},
+		{"vec3", ValVec3From(Vec3{1, 2, 3}), 2, ValVec3From(Vec3{2, 4, 6})},
+		{"vec4", ValVec4From(Vec4{1, 2, 3, 4}), 0.5, ValVec4From(Vec4{0.5, 1, 1.5, 2})},
+		{"scalar", ValFloat(5), 3, ValFloat(15)},
+		{"zero_scalar", ValVec3From(Vec3{1, 2, 3}), 0, ValVec3From(Vec3{0, 0, 0})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -590,16 +589,16 @@ func TestDotProduct(t *testing.T) {
 		a, b Value
 		want float32
 	}{
-		{"vec2", Vec2{1, 2}, Vec2{3, 4}, 11},
-		{"vec3", Vec3{1, 0, 0}, Vec3{0, 1, 0}, 0},
-		{"vec3_self", Vec3{1, 2, 3}, Vec3{1, 2, 3}, 14},
-		{"vec4", Vec4{1, 2, 3, 4}, Vec4{4, 3, 2, 1}, 20},
-		{"scalar", Float32(3), Float32(4), 12},
+		{"vec2", ValVec2(1, 2), ValVec2(3, 4), 11},
+		{"vec3", ValVec3(1, 0, 0), ValVec3(0, 1, 0), 0},
+		{"vec3_self", ValVec3(1, 2, 3), ValVec3(1, 2, 3), 14},
+		{"vec4", ValVec4(1, 2, 3, 4), ValVec4(4, 3, 2, 1), 20},
+		{"scalar", ValFloat(3), ValFloat(4), 12},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := dotProduct(tt.a, tt.b)
-			f, ok := got.(Float32)
+			f, ok := testIsFloat32(got)
 			if !ok {
 				t.Fatalf("dotProduct returned %T, want Float32", got)
 			}
@@ -613,26 +612,26 @@ func TestDotProduct(t *testing.T) {
 func TestMatrixTimesVector(t *testing.T) {
 	// Identity matrix as Array of 4 Vec4 columns (column-major).
 	identity := Array{
-		Vec4{1, 0, 0, 0},
-		Vec4{0, 1, 0, 0},
-		Vec4{0, 0, 1, 0},
-		Vec4{0, 0, 0, 1},
+		ValVec4(1, 0, 0, 0),
+		ValVec4(0, 1, 0, 0),
+		ValVec4(0, 0, 1, 0),
+		ValVec4(0, 0, 0, 1),
 	}
-	v := Vec4{1, 2, 3, 1}
-	got := matrixTimesVector(identity, v)
+	v := ValVec4(1, 2, 3, 1)
+	got := matrixTimesVector(ValArray(identity), v)
 	gv := Vec4ToFloat32(got)
-	if gv != v {
+	if gv != v.AsVec4() {
 		t.Errorf("identity * v = %v, want %v", gv, v)
 	}
 
 	// Scale matrix: diag(2, 3, 4, 1)
 	scale := Array{
-		Vec4{2, 0, 0, 0},
-		Vec4{0, 3, 0, 0},
-		Vec4{0, 0, 4, 0},
-		Vec4{0, 0, 0, 1},
+		ValVec4(2, 0, 0, 0),
+		ValVec4(0, 3, 0, 0),
+		ValVec4(0, 0, 4, 0),
+		ValVec4(0, 0, 0, 1),
 	}
-	got = matrixTimesVector(scale, Vec4{1, 1, 1, 1})
+	got = matrixTimesVector(ValArray(scale), ValVec4(1, 1, 1, 1))
 	gv = Vec4ToFloat32(got)
 	want := Vec4{2, 3, 4, 1}
 	if gv != want {
@@ -642,15 +641,15 @@ func TestMatrixTimesVector(t *testing.T) {
 
 func TestTransposeMatrix(t *testing.T) {
 	// 2x2 matrix stored as 2 Vec2 columns.
-	mat := Array{Vec2{1, 3}, Vec2{2, 4}}
-	got := transposeMatrix(mat)
-	cols, ok := got.(Array)
+	mat := Array{ValVec2(1, 3), ValVec2(2, 4)}
+	got := transposeMatrix(ValArray(mat))
+	cols, ok := testIsArray(got)
 	if !ok || len(cols) != 2 {
 		t.Fatalf("transpose returned unexpected type or length")
 	}
 	// After transpose: col0 = {1,2}, col1 = {3,4}
-	c0, _ := cols[0].(Vec2)
-	c1, _ := cols[1].(Vec2)
+	c0 := cols[0].AsVec2()
+	c1 := cols[1].AsVec2()
 	if c0 != (Vec2{1, 2}) || c1 != (Vec2{3, 4}) {
 		t.Errorf("transpose = [%v, %v], want [{1,2}, {3,4}]", c0, c1)
 	}
@@ -665,8 +664,8 @@ func TestVectorShuffle(t *testing.T) {
 	// Shuffle from two Vec4: select components (3, 4) -> (w from first, x from second)
 	v1 := Vec4{10, 20, 30, 40}
 	v2 := Vec4{50, 60, 70, 80}
-	got := vectorShuffle(m, 3, v1, v2, []uint32{3, 4})
-	gv, ok := got.(Vec2)
+	got := vectorShuffle(m, 3, ValVec4From(v1), ValVec4From(v2), []uint32{3, 4})
+	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("vectorShuffle returned %T, want Vec2", got)
 	}
@@ -685,22 +684,22 @@ func TestIntDivisionOps(t *testing.T) {
 	}{
 		{"udiv", func(a, b uint32) Value {
 			if b == 0 {
-				return Uint32(0)
+				return ValUint(0)
 			}
-			return a / b
-		}, 10, 3, Uint32(3)},
+			return ValUint(a / b)
+		}, 10, 3, ValUint(3)},
 		{"udiv_zero", func(a, b uint32) Value {
 			if b == 0 {
-				return Uint32(0)
+				return ValUint(0)
 			}
-			return a / b
-		}, 10, 0, Uint32(0)},
+			return ValUint(a / b)
+		}, 10, 0, ValUint(0)},
 		{"umod", func(a, b uint32) Value {
 			if b == 0 {
-				return Uint32(0)
+				return ValUint(0)
 			}
-			return a % b
-		}, 10, 3, Uint32(1)},
+			return ValUint(a % b)
+		}, 10, 3, ValUint(1)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -729,8 +728,9 @@ func TestBitwiseOps(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := intBinOp(tt.a, tt.b, tt.op)
-			u, ok := got.(Uint32)
+			got := intBinOp(ValUint(tt.a), ValUint(tt.b), tt.op)
+			u := got.AsUint32()
+			ok := got.Tag == TagUint32
 			if !ok || u != tt.want {
 				t.Errorf("%s(0x%X, 0x%X) = %v, want 0x%X", tt.name, tt.a, tt.b, got, tt.want)
 			}
@@ -868,27 +868,7 @@ func TestSPIRVStorageBufferWrite(t *testing.T) {
 	}
 }
 
-// valueApproxEqual compares two Values for approximate equality.
-func valueApproxEqual(a, b Value, eps float64) bool {
-	switch av := a.(type) {
-	case Float32:
-		bv, ok := b.(Float32)
-		return ok && math.Abs(float64(av-bv)) <= eps
-	case Vec2:
-		bv, ok := b.(Vec2)
-		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps
-	case Vec3:
-		bv, ok := b.(Vec3)
-		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps &&
-			math.Abs(float64(av[2]-bv[2])) <= eps
-	case Vec4:
-		bv, ok := b.(Vec4)
-		return ok && math.Abs(float64(av[0]-bv[0])) <= eps && math.Abs(float64(av[1]-bv[1])) <= eps &&
-			math.Abs(float64(av[2]-bv[2])) <= eps && math.Abs(float64(av[3]-bv[3])) <= eps
-	default:
-		return a == b
-	}
-}
+// valueApproxEqual is defined in testhelpers_test.go
 
 func BenchmarkSPIRVVertexShaderExecution(b *testing.B) {
 	words := buildTriangleVertexSPIRV()
@@ -908,7 +888,7 @@ func BenchmarkSPIRVVertexShaderExecution(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		inputs := map[uint32]Value{
-			idxVarID: uint32(i % 3),
+			idxVarID: ValUint(uint32(i % 3)),
 		}
 		_, _ = m.Execute("vs_main", inputs)
 	}
@@ -927,25 +907,4 @@ func BenchmarkSPIRVFragmentShaderExecution(b *testing.B) {
 	}
 }
 
-// testMakeValues creates a []Value slice from a map of ID->Value entries.
-// The slice is sized to hold the maximum ID + 1. This is a test helper
-// that converts the old map-based test patterns to the new slice-based
-// interpreter values representation.
-func testMakeValues(entries map[uint32]Value) []Value {
-	var maxID uint32
-	for id := range entries {
-		if id > maxID {
-			maxID = id
-		}
-	}
-	// Add headroom for result IDs that tests may write into (e.g., ResultID=100).
-	size := maxID + 1
-	if size < 128 {
-		size = 128
-	}
-	values := make([]Value, size)
-	for id, val := range entries {
-		values[id] = val
-	}
-	return values
-}
+// testMakeValues is defined in testhelpers_test.go

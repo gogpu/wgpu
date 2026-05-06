@@ -5,12 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.27.0] - 2026-05-06
 
 ### Added
 
 - **Software backend: full SPIR-V interpreter** (FEAT-SW-004) — CPU interpreter for SPIR-V
-  shaders enabling real shader execution on the software backend. ~10K LOC, 370+ tests, 84%
+  shaders. Designed for **shader debugging, CI/CD testing, and GPU-less fallback** — not for
+  production rendering (interpreted, ~100× slower than JIT). ~10K LOC, 370+ tests, 84%
   coverage. Seven phases:
   - **Phase 1**: Basic vertex/fragment (triangle renders red)
   - **Phase 2**: Uniform/storage buffers, vector/matrix ops
@@ -48,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Flaky TestSnatchLock_ReadWriteExclusion** — replaced `time.Sleep(10ms)` with channel-based
   synchronization. Was failing intermittently on Windows CI (goroutine scheduler too slow for
   10ms deadline). Now deterministic — 100/100 passes.
+
+### Changed
+
+- **Tagged union Value** — SPIR-V interpreter values replaced from `any` (interface boxing,
+  heap alloc per scalar) to 48-byte tagged struct with inline F[4]float32 + U[4]uint32.
+  Fragment shader: 4→3 allocs (-25%), 490→438 ns (-11%).
+- **Fullscreen blit priority** (ADR-020) — `executeFullscreenBlit` (memcpy) checked before
+  `executeSPIRVDraw` (interpreted). 60 FPS vs 0.65 FPS for textured quad blit.
+
+### Dependencies
+
+- **naga** v0.17.10 → **v0.17.11** — fix #170 (SIGSEGV → error for `dot(v)` wrong arg count),
+  BUG-DXIL-041 (fine.wgsl 100% valid), lint hardening. gg production: 61/61 DXIL valid.
 
 ## [0.26.12] - 2026-05-01
 

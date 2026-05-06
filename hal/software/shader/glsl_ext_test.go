@@ -343,11 +343,11 @@ func TestVectorLength(t *testing.T) {
 		val  Value
 		want float32
 	}{
-		{"scalar", Float32(3), 3},
-		{"vec2", Vec2{3, 4}, 5},
-		{"vec3", Vec3{1, 2, 2}, 3},
-		{"vec4", Vec4{1, 0, 0, 0}, 1},
-		{"zero", Vec3{0, 0, 0}, 0},
+		{"scalar", ValFloat(3), 3},
+		{"vec2", ValVec2From(Vec2{3, 4}), 5},
+		{"vec3", ValVec3From(Vec3{1, 2, 2}), 3},
+		{"vec4", ValVec4From(Vec4{1, 0, 0, 0}), 1},
+		{"zero", ValVec3From(Vec3{0, 0, 0}), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -361,18 +361,18 @@ func TestVectorLength(t *testing.T) {
 
 func TestNormalizeVector(t *testing.T) {
 	// Normalize (3, 4, 0) -> (0.6, 0.8, 0)
-	got := normalizeVector(Vec3{3, 4, 0})
-	gv, ok := got.(Vec3)
+	got := normalizeVector(ValVec3From(Vec3{3, 4, 0}))
+	gv, ok := testIsVec3(got)
 	if !ok {
-		t.Fatalf("normalizeVector returned %T, want Vec3", got)
+		t.Fatalf("normalizeVector returned %T, want Value", got)
 	}
 	if math.Abs(float64(gv[0]-0.6)) > 1e-5 || math.Abs(float64(gv[1]-0.8)) > 1e-5 {
 		t.Errorf("normalize(3,4,0) = %v, want (0.6, 0.8, 0)", gv)
 	}
 
 	// Zero-length vector should return zero vector unchanged.
-	got = normalizeVector(Vec3{0, 0, 0})
-	gv, _ = got.(Vec3)
+	got = normalizeVector(ValVec3From(Vec3{0, 0, 0}))
+	gv = got.AsVec3()
 	if gv != (Vec3{0, 0, 0}) {
 		t.Errorf("normalize(0,0,0) = %v, want (0,0,0)", gv)
 	}
@@ -381,23 +381,24 @@ func TestNormalizeVector(t *testing.T) {
 func TestCrossProduct(t *testing.T) {
 	tests := []struct {
 		name string
-		a, b Vec3
-		want Vec3
+		a, b Value
+		want Value
 	}{
-		{"x_cross_y", Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{0, 0, 1}},
-		{"y_cross_x", Vec3{0, 1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, -1}},
-		{"parallel", Vec3{1, 0, 0}, Vec3{2, 0, 0}, Vec3{0, 0, 0}},
+		{"x_cross_y", ValVec3(1, 0, 0), ValVec3(0, 1, 0), ValVec3(0, 0, 1)},
+		{"y_cross_x", ValVec3(0, 1, 0), ValVec3(1, 0, 0), ValVec3(0, 0, -1)},
+		{"parallel", ValVec3(1, 0, 0), ValVec3(2, 0, 0), ValVec3(0, 0, 0)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := crossProduct(tt.a, tt.b)
-			gv, ok := got.(Vec3)
+			gv, ok := testIsVec3(got)
 			if !ok {
-				t.Fatalf("crossProduct returned %T, want Vec3", got)
+				t.Fatalf("crossProduct returned %T, want Value", got)
 			}
 			for i := 0; i < 3; i++ {
-				if math.Abs(float64(gv[i]-tt.want[i])) > 1e-5 {
-					t.Errorf("cross[%d] = %v, want %v", i, gv[i], tt.want[i])
+				wv := tt.want.AsVec3()
+				if math.Abs(float64(gv[i]-wv[i])) > 1e-5 {
+					t.Errorf("cross[%d] = %v, want %v", i, gv[i], wv[i])
 				}
 			}
 		})
@@ -406,10 +407,10 @@ func TestCrossProduct(t *testing.T) {
 
 func TestReflectVector(t *testing.T) {
 	// Reflect (1, -1, 0) around normal (0, 1, 0) -> (1, 1, 0)
-	got := reflectVector(Vec3{1, -1, 0}, Vec3{0, 1, 0})
-	gv, ok := got.(Vec3)
+	got := reflectVector(ValVec3From(Vec3{1, -1, 0}), ValVec3From(Vec3{0, 1, 0}))
+	gv, ok := testIsVec3(got)
 	if !ok {
-		t.Fatalf("reflect returned %T, want Vec3", got)
+		t.Fatalf("reflect returned %T, want Value", got)
 	}
 	want := Vec3{1, 1, 0}
 	for i := 0; i < 3; i++ {
@@ -428,34 +429,34 @@ func TestGLSLIntOps(t *testing.T) {
 	}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]Value{
-			10: Int32(-42),
-			11: Int32(0),
-			12: Int32(7),
+		values: testMakeValues(map[uint32]any{
+			10: ValInt(-42),
+			11: ValInt(0),
+			12: ValInt(7),
 		}),
 	}
 
 	// SAbs(-42) = 42
 	got := interp.executeGLSLExtInst(GLSLSAbs, []uint32{10})
-	if v, ok := got.(Int32); !ok || v != 42 {
+	if got.Tag != TagInt32 || got.AsInt32() != 42 {
 		t.Errorf("SAbs(-42) = %v, want 42", got)
 	}
 
 	// SSign(-42) = -1
 	got = interp.executeGLSLExtInst(GLSLSSign, []uint32{10})
-	if v, ok := got.(Int32); !ok || v != -1 {
+	if got.Tag != TagInt32 || got.AsInt32() != -1 {
 		t.Errorf("SSign(-42) = %v, want -1", got)
 	}
 
 	// SSign(0) = 0
 	got = interp.executeGLSLExtInst(GLSLSSign, []uint32{11})
-	if v, ok := got.(Int32); !ok || v != 0 {
+	if got.Tag != TagInt32 || got.AsInt32() != 0 {
 		t.Errorf("SSign(0) = %v, want 0", got)
 	}
 
 	// SSign(7) = 1
 	got = interp.executeGLSLExtInst(GLSLSSign, []uint32{12})
-	if v, ok := got.(Int32); !ok || v != 1 {
+	if got.Tag != TagInt32 || got.AsInt32() != 1 {
 		t.Errorf("SSign(7) = %v, want 1", got)
 	}
 }

@@ -76,7 +76,7 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 	interp.prevBlock = 0
 	interp.iterationCount = 0
 	interp.callDepth = 0
-	interp.returnValue = nil
+	interp.returnValue = Value{}
 
 	// Seed constants into the value slice.
 	for id, val := range m.Constants {
@@ -104,8 +104,9 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 		if vi.StorageClass != StorageClassOutput {
 			continue
 		}
-		if ptr, ok := interp.values[varID].(*Pointer); ok {
-			outputs[varID] = ptr.Value
+		v := interp.values[varID]
+		if v.Tag == TagPointer {
+			outputs[varID] = v.AsPointer().Val
 		}
 	}
 
@@ -162,11 +163,11 @@ const ptrPoolSize = 32
 func (interp *interpreter) allocPointer(val Value) *Pointer {
 	if interp.ptrPoolIdx < len(interp.ptrPool) {
 		p := &interp.ptrPool[interp.ptrPoolIdx]
-		p.Value = val
+		p.Val = val
 		interp.ptrPoolIdx++
 		return p
 	}
-	return &Pointer{Value: val}
+	return &Pointer{Val: val}
 }
 
 // getInterpreter returns a pooled interpreter, allocating one if the pool is empty.
@@ -195,7 +196,7 @@ func (m *Module) putInterpreter(interp *interpreter) {
 	interp.fn = nil
 	interp.ctx = nil
 	interp.debug = nil
-	interp.returnValue = nil
+	interp.returnValue = Value{}
 	m.interpPool.Put(interp)
 }
 
@@ -213,14 +214,14 @@ func (interp *interpreter) initVariables(inputs map[uint32]Value) {
 		case StorageClassInput:
 			// Seed from caller-provided inputs.
 			val := inputs[varID]
-			if val == nil {
+			if val.IsNone() {
 				// Default zero value based on pointee type.
 				val = zeroValueForVar(m, vi.TypeID)
 			}
-			interp.values[varID] = interp.allocPointer(val)
+			interp.values[varID] = ValPointer(interp.allocPointer(val))
 
 		case StorageClassOutput:
-			interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
+			interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 		}
 	}
 }
@@ -247,22 +248,22 @@ func (interp *interpreter) initResourceVariables() {
 			}
 			if bufData == nil {
 				// No buffer bound -- initialize as zero.
-				interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
+				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 				continue
 			}
 			pointeeType := m.PointeeType(vi.TypeID)
 			if pointeeType == nil {
-				interp.values[varID] = interp.allocPointer(zeroValueForVar(m, vi.TypeID))
+				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 				continue
 			}
 			if vi.StorageClass == StorageClassStorageBuffer {
 				// Storage buffers use BufferPointer for direct read/write to raw bytes.
 				// This ensures OpStore writes are immediately reflected in the buffer.
-				interp.values[varID] = &BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType}
+				interp.values[varID] = ValBufferPointer(&BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType})
 			} else {
 				// Uniform and push constant buffers are read-only -- deserialize once.
 				val := interp.readValueFromBuffer(bufData, 0, pointeeType)
-				interp.values[varID] = interp.allocPointer(val)
+				interp.values[varID] = ValPointer(interp.allocPointer(val))
 			}
 
 		case StorageClassUniformConstant:
@@ -272,7 +273,7 @@ func (interp *interpreter) initResourceVariables() {
 				continue
 			}
 			// Store the binding key as the value so OpLoad can resolve texture/sampler.
-			interp.values[varID] = interp.allocPointer(bk)
+			interp.values[varID] = ValPointer(interp.allocPointer(ValBindingKey(bk)))
 		}
 	}
 }
@@ -284,33 +285,33 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 	switch ti.Kind {
 	case TypeFloat:
 		if offset+4 > uint32(len(data)) {
-			return Float32(0)
+			return ValFloat(0)
 		}
 		bits := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 			uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
-		return Float32(math.Float32frombits(bits))
+		return ValFloat(math.Float32frombits(bits))
 
 	case TypeInt:
 		if offset+4 > uint32(len(data)) {
 			if ti.Signed {
-				return Int32(0)
+				return ValInt(0)
 			}
-			return Uint32(0)
+			return ValUint(0)
 		}
 		bits := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 			uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 		if ti.Signed {
-			return int32(bits)
+			return ValInt(int32(bits))
 		}
-		return bits
+		return ValUint(bits)
 
 	case TypeBool:
 		if offset+4 > uint32(len(data)) {
-			return false
+			return ValBool(false)
 		}
 		bits := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 			uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
-		return bits != 0
+		return ValBool(bits != 0)
 
 	case TypeVector:
 		elemType := m.Types[ti.ElemType]
@@ -320,59 +321,59 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		elemSize := typeByteSize(m, elemType)
 		switch ti.Components {
 		case 2:
-			var v Vec2
+			var v [2]float32
 			for i := uint32(0); i < 2; i++ {
 				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
 				v[i] = toFloat32(f)
 			}
-			return v
+			return ValVec2(v[0], v[1])
 		case 3:
-			var v Vec3
+			var v [3]float32
 			for i := uint32(0); i < 3; i++ {
 				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
 				v[i] = toFloat32(f)
 			}
-			return v
+			return ValVec3(v[0], v[1], v[2])
 		case 4:
-			var v Vec4
+			var v [4]float32
 			for i := uint32(0); i < 4; i++ {
 				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
 				v[i] = toFloat32(f)
 			}
-			return v
+			return ValVec4(v[0], v[1], v[2], v[3])
 		}
-		return Uint32(0)
+		return ValUint(0)
 
 	case TypeArray:
 		elemType := m.Types[ti.ElemType]
 		if elemType == nil || ti.Length == 0 {
-			return Array{}
+			return ValArray(nil)
 		}
 		// Use ArrayStride decoration if available, otherwise compute.
 		elemSize := typeByteSize(m, elemType)
-		arr := make(Array, ti.Length)
+		arr := make([]Value, ti.Length)
 		for i := uint32(0); i < ti.Length; i++ {
 			arr[i] = interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
 		}
-		return arr
+		return ValArray(arr)
 
 	case TypeStruct:
-		members := make(Array, len(ti.MemberIDs))
+		members := make([]Value, len(ti.MemberIDs))
 		// For each struct member, look up its type and use MemberDecorate Offset.
 		structTypeID := interp.findTypeID(ti)
 		for i, memberTypeID := range ti.MemberIDs {
 			memberType := m.Types[memberTypeID]
 			if memberType == nil {
-				members[i] = Uint32(0)
+				members[i] = ValUint(0)
 				continue
 			}
 			memberOffset := m.GetMemberOffset(structTypeID, uint32(i))
 			members[i] = interp.readValueFromBuffer(data, offset+memberOffset, memberType)
 		}
-		return members
+		return ValArray(members)
 
 	default:
-		return Uint32(0)
+		return ValUint(0)
 	}
 }
 
@@ -449,125 +450,6 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 	default:
 		return 4
 	}
-}
-
-// writeValueToBuffer serializes a SPIR-V typed value into raw buffer bytes.
-// Used for storage buffer writes via OpStore.
-func writeValueToBuffer(data []byte, offset uint32, val Value) {
-	switch v := val.(type) {
-	case Float32:
-		if offset+4 > uint32(len(data)) {
-			return
-		}
-		bits := math.Float32bits(float32(v))
-		data[offset] = byte(bits)
-		data[offset+1] = byte(bits >> 8)
-		data[offset+2] = byte(bits >> 16)
-		data[offset+3] = byte(bits >> 24)
-	case Uint32:
-		if offset+4 > uint32(len(data)) {
-			return
-		}
-		data[offset] = byte(v)
-		data[offset+1] = byte(v >> 8)
-		data[offset+2] = byte(v >> 16)
-		data[offset+3] = byte(v >> 24)
-	case Int32:
-		if offset+4 > uint32(len(data)) {
-			return
-		}
-		u := uint32(v)
-		data[offset] = byte(u)
-		data[offset+1] = byte(u >> 8)
-		data[offset+2] = byte(u >> 16)
-		data[offset+3] = byte(u >> 24)
-	case Vec2:
-		writeValueToBuffer(data, offset, Float32(v[0]))
-		writeValueToBuffer(data, offset+4, Float32(v[1]))
-	case Vec3:
-		writeValueToBuffer(data, offset, Float32(v[0]))
-		writeValueToBuffer(data, offset+4, Float32(v[1]))
-		writeValueToBuffer(data, offset+8, Float32(v[2]))
-	case Vec4:
-		writeValueToBuffer(data, offset, Float32(v[0]))
-		writeValueToBuffer(data, offset+4, Float32(v[1]))
-		writeValueToBuffer(data, offset+8, Float32(v[2]))
-		writeValueToBuffer(data, offset+12, Float32(v[3]))
-	case Array:
-		off := offset
-		for _, elem := range v {
-			writeValueToBuffer(data, off, elem)
-			off += valueByteSize(elem)
-		}
-	}
-}
-
-// valueByteSize returns the byte size of a runtime Value.
-func valueByteSize(val Value) uint32 {
-	switch v := val.(type) {
-	case Float32:
-		return 4
-	case Uint32:
-		return 4
-	case Int32:
-		return 4
-	case Vec2:
-		return 8
-	case Vec3:
-		return 12
-	case Vec4:
-		return 16
-	case Array:
-		var total uint32
-		for _, elem := range v {
-			total += valueByteSize(elem)
-		}
-		return total
-	default:
-		_ = v
-		return 4
-	}
-}
-
-// zeroValueForVar creates a zero value matching the pointee type of a pointer type.
-func zeroValueForVar(m *Module, ptrTypeID uint32) Value {
-	ti := m.PointeeType(ptrTypeID)
-	if ti == nil {
-		return Uint32(0)
-	}
-	switch ti.Kind {
-	case TypeFloat:
-		return Float32(0)
-	case TypeInt:
-		if ti.Signed {
-			return Int32(0)
-		}
-		return Uint32(0)
-	case TypeVector:
-		switch ti.Components {
-		case 2:
-			return Vec2{}
-		case 3:
-			return Vec3{}
-		case 4:
-			return Vec4{}
-		}
-	case TypeArray:
-		if ti.Length > 0 {
-			arr := make(Array, ti.Length)
-			for i := range arr {
-				arr[i] = zeroValue(m.Types, ti.ElemType)
-			}
-			return arr
-		}
-	case TypeStruct:
-		members := make(Array, len(ti.MemberIDs))
-		for i, memberTypeID := range ti.MemberIDs {
-			members[i] = zeroValue(m.Types, memberTypeID)
-		}
-		return members
-	}
-	return Uint32(0)
 }
 
 // errDebugAbort is a sentinel error returned when a debug callback requests DebugAbort.
@@ -657,7 +539,7 @@ func (interp *interpreter) run() error {
 			storageClass := inst.Operands[0]
 			if storageClass == StorageClassFunction {
 				val := zeroValueForVar(interp.module, inst.TypeID)
-				interp.values[inst.ResultID] = interp.allocPointer(val)
+				interp.values[inst.ResultID] = ValPointer(interp.allocPointer(val))
 			}
 
 		case OpLoad:
@@ -666,18 +548,20 @@ func (interp *interpreter) run() error {
 				break
 			}
 			ptrID := inst.Operands[0]
-			switch p := interp.values[ptrID].(type) {
-			case *Pointer:
-				interp.values[inst.ResultID] = p.Value
-			case *SubPointer:
+			pv := interp.values[ptrID]
+			switch pv.Tag {
+			case TagPointer:
+				interp.values[inst.ResultID] = pv.AsPointer().Val
+			case TagSubPointer:
 				// Read through parent pointer, navigating the index path.
-				interp.values[inst.ResultID] = subPointerLoad(p)
-			case *BufferPointer:
+				interp.values[inst.ResultID] = subPointerLoad(pv.AsSubPointer())
+			case TagBufferPointer:
 				// Read directly from the raw buffer.
-				if p.Type != nil {
-					interp.values[inst.ResultID] = interp.readValueFromBuffer(p.Buffer, p.Offset, p.Type)
+				bp := pv.AsBufferPointer()
+				if bp.Type != nil {
+					interp.values[inst.ResultID] = interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type)
 				} else {
-					interp.values[inst.ResultID] = Uint32(0)
+					interp.values[inst.ResultID] = ValUint(0)
 				}
 			default:
 				// Direct value fallback (shouldn't happen in valid SPIR-V).
@@ -691,15 +575,16 @@ func (interp *interpreter) run() error {
 			}
 			ptrID := inst.Operands[0]
 			valID := inst.Operands[1]
-			switch p := interp.values[ptrID].(type) {
-			case *Pointer:
-				p.Value = interp.values[valID]
-			case *SubPointer:
+			pv := interp.values[ptrID]
+			switch pv.Tag {
+			case TagPointer:
+				pv.AsPointer().Val = interp.values[valID]
+			case TagSubPointer:
 				// Write through parent pointer, updating the composite at each level.
-				subPointerStore(p, interp.values[valID])
-			case *BufferPointer:
+				subPointerStore(pv.AsSubPointer(), interp.values[valID])
+			case TagBufferPointer:
 				// Write directly to the raw buffer.
-				writeValueToBuffer(p.Buffer, p.Offset, interp.values[valID])
+				writeValueToBuffer(pv.AsBufferPointer().Buffer, pv.AsBufferPointer().Offset, interp.values[valID])
 			}
 
 		case OpAccessChain:
@@ -867,49 +752,49 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a == b
+				interp.values[inst.ResultID] = ValBool(a == b)
 			}
 
 		case OpINotEqual:
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a != b
+				interp.values[inst.ResultID] = ValBool(a != b)
 			}
 
 		case OpFOrdEqual:
 			if len(inst.Operands) >= 2 {
 				a := toFloat32(interp.values[inst.Operands[0]])
 				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a == b
+				interp.values[inst.ResultID] = ValBool(a == b)
 			}
 
 		case OpFOrdLessThan:
 			if len(inst.Operands) >= 2 {
 				a := toFloat32(interp.values[inst.Operands[0]])
 				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a < b
+				interp.values[inst.ResultID] = ValBool(a < b)
 			}
 
 		case OpFOrdGreaterThan:
 			if len(inst.Operands) >= 2 {
 				a := toFloat32(interp.values[inst.Operands[0]])
 				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a > b
+				interp.values[inst.ResultID] = ValBool(a > b)
 			}
 
 		case OpFOrdLessThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := toFloat32(interp.values[inst.Operands[0]])
 				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a <= b
+				interp.values[inst.ResultID] = ValBool(a <= b)
 			}
 
 		case OpFOrdGreaterThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := toFloat32(interp.values[inst.Operands[0]])
 				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a >= b
+				interp.values[inst.ResultID] = ValBool(a >= b)
 			}
 
 		case OpPhi:
@@ -1032,9 +917,9 @@ func (interp *interpreter) run() error {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
 				if b != 0 {
-					interp.values[inst.ResultID] = a / b
+					interp.values[inst.ResultID] = ValInt(a / b)
 				} else {
-					interp.values[inst.ResultID] = Int32(0)
+					interp.values[inst.ResultID] = ValInt(0)
 				}
 			}
 
@@ -1043,9 +928,9 @@ func (interp *interpreter) run() error {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
 				if b != 0 {
-					interp.values[inst.ResultID] = a / b
+					interp.values[inst.ResultID] = ValUint(a / b)
 				} else {
-					interp.values[inst.ResultID] = Uint32(0)
+					interp.values[inst.ResultID] = ValUint(0)
 				}
 			}
 
@@ -1054,9 +939,9 @@ func (interp *interpreter) run() error {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
 				if b != 0 {
-					interp.values[inst.ResultID] = a % b
+					interp.values[inst.ResultID] = ValInt(a % b)
 				} else {
-					interp.values[inst.ResultID] = Int32(0)
+					interp.values[inst.ResultID] = ValInt(0)
 				}
 			}
 
@@ -1065,9 +950,9 @@ func (interp *interpreter) run() error {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
 				if b != 0 {
-					interp.values[inst.ResultID] = a % b
+					interp.values[inst.ResultID] = ValUint(a % b)
 				} else {
-					interp.values[inst.ResultID] = Uint32(0)
+					interp.values[inst.ResultID] = ValUint(0)
 				}
 			}
 
@@ -1077,9 +962,9 @@ func (interp *interpreter) run() error {
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
 				if b != 0 {
 					// SPIR-V SRem: remainder has same sign as dividend.
-					interp.values[inst.ResultID] = a % b
+					interp.values[inst.ResultID] = ValInt(a % b)
 				} else {
-					interp.values[inst.ResultID] = Int32(0)
+					interp.values[inst.ResultID] = ValInt(0)
 				}
 			}
 
@@ -1115,13 +1000,13 @@ func (interp *interpreter) run() error {
 		case OpSNegate:
 			if len(inst.Operands) >= 1 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				interp.values[inst.ResultID] = -a
+				interp.values[inst.ResultID] = ValInt(-a)
 			}
 
 		case OpConvertFToS:
 			if len(inst.Operands) >= 1 {
 				f := toFloat32(interp.values[inst.Operands[0]])
-				interp.values[inst.ResultID] = int32(f)
+				interp.values[inst.ResultID] = ValInt(int32(f))
 			}
 
 		case OpSConvert, OpUConvert, OpFConvert:
@@ -1134,71 +1019,71 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a < b
+				interp.values[inst.ResultID] = ValBool(a < b)
 			}
 
 		case OpUGreaterThan:
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a > b
+				interp.values[inst.ResultID] = ValBool(a > b)
 			}
 
 		case OpULessThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a <= b
+				interp.values[inst.ResultID] = ValBool(a <= b)
 			}
 
 		case OpUGreaterThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := toUint32(interp.values[inst.Operands[0]])
 				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = a >= b
+				interp.values[inst.ResultID] = ValBool(a >= b)
 			}
 
 		case OpSLessThan:
 			if len(inst.Operands) >= 2 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = a < b
+				interp.values[inst.ResultID] = ValBool(a < b)
 			}
 
 		case OpSGreaterThan:
 			if len(inst.Operands) >= 2 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = a > b
+				interp.values[inst.ResultID] = ValBool(a > b)
 			}
 
 		case OpSLessThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = a <= b
+				interp.values[inst.ResultID] = ValBool(a <= b)
 			}
 
 		case OpSGreaterThanEqual:
 			if len(inst.Operands) >= 2 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = a >= b
+				interp.values[inst.ResultID] = ValBool(a >= b)
 			}
 
 		case OpLogicalAnd:
 			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = toBool(interp.values[inst.Operands[0]]) && toBool(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(toBool(interp.values[inst.Operands[0]]) && toBool(interp.values[inst.Operands[1]]))
 			}
 
 		case OpLogicalOr:
 			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = toBool(interp.values[inst.Operands[0]]) || toBool(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(toBool(interp.values[inst.Operands[0]]) || toBool(interp.values[inst.Operands[1]]))
 			}
 
 		case OpLogicalNot:
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = !toBool(interp.values[inst.Operands[0]])
+				interp.values[inst.ResultID] = ValBool(!toBool(interp.values[inst.Operands[0]]))
 			}
 
 		case OpBitwiseAnd:
@@ -1219,7 +1104,7 @@ func (interp *interpreter) run() error {
 		case OpNot:
 			if len(inst.Operands) >= 1 {
 				a := toUint32(interp.values[inst.Operands[0]])
-				interp.values[inst.ResultID] = ^a
+				interp.values[inst.ResultID] = ValUint(^a)
 			}
 
 		case OpShiftLeftLogical:
@@ -1236,7 +1121,7 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				a := int32(toUint32(interp.values[inst.Operands[0]]))
 				b := toUint32(interp.values[inst.Operands[1]]) & 31
-				interp.values[inst.ResultID] = a >> b
+				interp.values[inst.ResultID] = ValInt(a >> b)
 			}
 
 		case OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange,
@@ -1254,7 +1139,7 @@ func (interp *interpreter) run() error {
 
 		case OpUndef:
 			// OpUndef produces an undefined value -- use zero.
-			interp.values[inst.ResultID] = Uint32(0)
+			interp.values[inst.ResultID] = ValUint(0)
 
 		case OpExtInst:
 			// OpExtInst: type resultID setID instructionNumber operands...
@@ -1277,7 +1162,7 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				imgVal := interp.values[inst.Operands[0]]
 				sampVal := interp.values[inst.Operands[1]]
-				interp.values[inst.ResultID] = &SampledImageValue{Image: imgVal, Sampler: sampVal}
+				interp.values[inst.ResultID] = ValSampledImage(&SampledImageValue{Image: imgVal, Sampler: sampVal})
 			}
 
 		case OpImageSampleImplicitLod:
@@ -1363,12 +1248,12 @@ const maxCallDepth = 64
 // allocating a new values slice per call.
 func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, error) {
 	if interp.callDepth >= maxCallDepth {
-		return nil, fmt.Errorf("spirv: exceeded maximum call depth (%d)", maxCallDepth)
+		return Value{}, fmt.Errorf("spirv: exceeded maximum call depth (%d)", maxCallDepth)
 	}
 
 	fn, ok := interp.module.FunctionsByID[funcID]
 	if !ok {
-		return nil, fmt.Errorf("spirv: function %d not found", funcID)
+		return Value{}, fmt.Errorf("spirv: function %d not found", funcID)
 	}
 
 	// Acquire a pooled child interpreter to avoid allocating per call.
@@ -1379,7 +1264,7 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 	child.callDepth = interp.callDepth + 1
 	child.prevBlock = 0
 	child.iterationCount = 0
-	child.returnValue = nil
+	child.returnValue = Value{}
 
 	// Seed constants into the child value slice.
 	for id, val := range interp.module.Constants {
@@ -1401,7 +1286,8 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 	for varID, vi := range interp.module.Variables {
 		if vi.StorageClass == StorageClassUniform || vi.StorageClass == StorageClassStorageBuffer ||
 			vi.StorageClass == StorageClassPushConstant || vi.StorageClass == StorageClassUniformConstant {
-			if v := interp.values[varID]; v != nil {
+			v := interp.values[varID]
+			if !v.IsNone() {
 				child.values[varID] = v
 			}
 		}
@@ -1410,7 +1296,7 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 	// Execute the callee.
 	if err := child.run(); err != nil {
 		interp.module.putInterpreter(child)
-		return nil, err
+		return Value{}, err
 	}
 
 	retVal := child.returnValue
@@ -1431,27 +1317,28 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	baseVal := interp.values[baseID]
 
 	// If base is a BufferPointer, compute byte offset through the chain.
-	if bp, ok := baseVal.(*BufferPointer); ok {
-		return interp.bufferAccessChain(bp, indexes)
+	if baseVal.Tag == TagBufferPointer {
+		return ValBufferPointer(interp.bufferAccessChain(baseVal.AsBufferPointer(), indexes))
 	}
 
 	// If base is a SubPointer, extend the index path.
-	if sp, ok := baseVal.(*SubPointer); ok {
+	if baseVal.Tag == TagSubPointer {
+		sp := baseVal.AsSubPointer()
 		resolvedIndexes := make([]uint32, len(sp.Indexes), len(sp.Indexes)+len(indexes))
 		copy(resolvedIndexes, sp.Indexes)
 		for _, idxID := range indexes {
 			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
 		}
-		return &SubPointer{Parent: sp.Parent, Indexes: resolvedIndexes}
+		return ValSubPointer(&SubPointer{Parent: sp.Parent, Indexes: resolvedIndexes})
 	}
 
 	// If base is a Pointer to a composite, return a SubPointer for write-through.
-	if ptr, ok := baseVal.(*Pointer); ok {
+	if baseVal.Tag == TagPointer {
 		resolvedIndexes := make([]uint32, 0, len(indexes))
 		for _, idxID := range indexes {
 			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
 		}
-		return &SubPointer{Parent: ptr, Indexes: resolvedIndexes}
+		return ValSubPointer(&SubPointer{Parent: baseVal.AsPointer(), Indexes: resolvedIndexes})
 	}
 
 	// Fallback: navigate through each index on a raw value.
@@ -1461,7 +1348,7 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 		current = indexComposite(current, idx)
 	}
 
-	return interp.allocPointer(current)
+	return ValPointer(interp.allocPointer(current))
 }
 
 // bufferAccessChain computes a byte offset through a chain of indexes into
@@ -1518,34 +1405,10 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType}
 }
 
-// indexComposite extracts element at the given index from a composite value.
-func indexComposite(composite Value, index uint32) Value {
-	switch v := composite.(type) {
-	case Array:
-		if int(index) < len(v) {
-			return v[index]
-		}
-	case Vec2:
-		if index < 2 {
-			return Float32(v[index])
-		}
-	case Vec3:
-		if index < 3 {
-			return Float32(v[index])
-		}
-	case Vec4:
-		if index < 4 {
-			return Float32(v[index])
-		}
-	}
-	return Float32(0)
-}
-
 // subPointerLoad reads the current value of a sub-element through the parent
-// Pointer by navigating the index path. Each index dereferences one level of
-// composite (struct member or array element or vector component).
+// Pointer by navigating the index path.
 func subPointerLoad(sp *SubPointer) Value {
-	current := sp.Parent.Value
+	current := sp.Parent.Val
 	for _, idx := range sp.Indexes {
 		current = indexComposite(current, idx)
 	}
@@ -1553,83 +1416,20 @@ func subPointerLoad(sp *SubPointer) Value {
 }
 
 // subPointerStore writes a value to a sub-element of the parent Pointer's
-// composite, rebuilding the composite at each level so the parent reflects the
-// change. This is the key operation that makes function-local struct member
-// updates work correctly (e.g. p.pos = newPos modifies the struct in p).
+// composite, rebuilding the composite at each level so the parent reflects the change.
 func subPointerStore(sp *SubPointer, val Value) {
 	if len(sp.Indexes) == 0 {
-		sp.Parent.Value = val
+		sp.Parent.Val = val
 		return
 	}
-	sp.Parent.Value = setCompositeElement(sp.Parent.Value, sp.Indexes, val)
-}
-
-// setCompositeElement returns a copy of composite with the element at the
-// given index path replaced by val. Handles Array, Vec2, Vec3, Vec4 composites.
-// For nested composites (e.g. struct containing struct), the function recurses
-// through the index path.
-func setCompositeElement(composite Value, indexes []uint32, val Value) Value {
-	if len(indexes) == 0 {
-		return val
-	}
-	idx := indexes[0]
-	rest := indexes[1:]
-
-	switch v := composite.(type) {
-	case Array:
-		if int(idx) >= len(v) {
-			return composite
-		}
-		// Clone the array to avoid mutating shared references.
-		newArr := make(Array, len(v))
-		copy(newArr, v)
-		if len(rest) == 0 {
-			newArr[idx] = val
-		} else {
-			newArr[idx] = setCompositeElement(v[idx], rest, val)
-		}
-		return newArr
-
-	case Vec2:
-		if idx >= 2 {
-			return composite
-		}
-		newVec := v // copy (fixed-size array = value type)
-		if len(rest) == 0 {
-			newVec[idx] = toFloat32(val)
-		}
-		return newVec
-
-	case Vec3:
-		if idx >= 3 {
-			return composite
-		}
-		newVec := v
-		if len(rest) == 0 {
-			newVec[idx] = toFloat32(val)
-		}
-		return newVec
-
-	case Vec4:
-		if idx >= 4 {
-			return composite
-		}
-		newVec := v
-		if len(rest) == 0 {
-			newVec[idx] = toFloat32(val)
-		}
-		return newVec
-
-	default:
-		return composite
-	}
+	sp.Parent.Val = setCompositeElement(sp.Parent.Val, sp.Indexes, val)
 }
 
 // compositeConstruct builds a composite value from constituent IDs.
 func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []uint32) Value {
 	ti, ok := interp.module.Types[typeID]
 	if !ok {
-		return Vec4{}
+		return ValVec4(0, 0, 0, 0)
 	}
 
 	switch ti.Kind {
@@ -1639,36 +1439,32 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 		if uint32(len(constituentIDs)) == ti.Components {
 			allScalar := true
 			for _, id := range constituentIDs {
-				switch interp.values[id].(type) {
-				case Float32, Uint32, Int32:
-					// scalar -- OK
-				default:
+				tag := interp.values[id].Tag
+				if tag != TagFloat32 && tag != TagUint32 && tag != TagInt32 {
 					allScalar = false
-				}
-				if !allScalar {
 					break
 				}
 			}
 			if allScalar {
 				switch ti.Components {
 				case 2:
-					return Vec2{
+					return ValVec2(
 						toFloat32(interp.values[constituentIDs[0]]),
 						toFloat32(interp.values[constituentIDs[1]]),
-					}
+					)
 				case 3:
-					return Vec3{
+					return ValVec3(
 						toFloat32(interp.values[constituentIDs[0]]),
 						toFloat32(interp.values[constituentIDs[1]]),
 						toFloat32(interp.values[constituentIDs[2]]),
-					}
+					)
 				case 4:
-					return Vec4{
+					return ValVec4(
 						toFloat32(interp.values[constituentIDs[0]]),
 						toFloat32(interp.values[constituentIDs[1]]),
 						toFloat32(interp.values[constituentIDs[2]]),
 						toFloat32(interp.values[constituentIDs[3]]),
-					}
+					)
 				}
 			}
 		}
@@ -1679,35 +1475,35 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 		n := 0
 		for _, id := range constituentIDs {
 			val := interp.values[id]
-			switch v := val.(type) {
-			case Float32:
+			switch val.Tag {
+			case TagFloat32:
 				if n < len(buf) {
-					buf[n] = v
+					buf[n] = val.F[0]
 					n++
 				}
-			case Uint32:
+			case TagUint32:
 				if n < len(buf) {
-					buf[n] = float32(v)
+					buf[n] = float32(val.U[0])
 					n++
 				}
-			case Int32:
+			case TagInt32:
 				if n < len(buf) {
-					buf[n] = float32(v)
+					buf[n] = float32(int32(val.U[0]))
 					n++
 				}
-			case Vec2:
+			case TagVec2:
 				for j := 0; j < 2 && n < len(buf); j++ {
-					buf[n] = v[j]
+					buf[n] = val.F[j]
 					n++
 				}
-			case Vec3:
+			case TagVec3:
 				for j := 0; j < 3 && n < len(buf); j++ {
-					buf[n] = v[j]
+					buf[n] = val.F[j]
 					n++
 				}
-			case Vec4:
+			case TagVec4:
 				for j := 0; j < 4 && n < len(buf); j++ {
-					buf[n] = v[j]
+					buf[n] = val.F[j]
 					n++
 				}
 			default:
@@ -1719,29 +1515,29 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 		}
 		switch ti.Components {
 		case 2:
-			return Vec2{buf[0], buf[1]}
+			return ValVec2(buf[0], buf[1])
 		case 3:
-			return Vec3{buf[0], buf[1], buf[2]}
+			return ValVec3(buf[0], buf[1], buf[2])
 		case 4:
-			return Vec4{buf[0], buf[1], buf[2], buf[3]}
+			return ValVec4(buf[0], buf[1], buf[2], buf[3])
 		}
 
 	case TypeArray:
-		arr := make(Array, len(constituentIDs))
+		arr := make([]Value, len(constituentIDs))
 		for i, id := range constituentIDs {
 			arr[i] = interp.values[id]
 		}
-		return arr
+		return ValArray(arr)
 
 	case TypeStruct:
-		arr := make(Array, len(constituentIDs))
+		arr := make([]Value, len(constituentIDs))
 		for i, id := range constituentIDs {
 			arr[i] = interp.values[id]
 		}
-		return arr
+		return ValArray(arr)
 	}
 
-	return Uint32(0)
+	return ValUint(0)
 }
 
 // compositeExtract navigates literal indexes to extract a scalar from a composite.
@@ -1753,298 +1549,76 @@ func (interp *interpreter) compositeExtract(composite Value, indexes []uint32) V
 	return current
 }
 
-// appendComponents flattens a value into float32 components.
-func appendComponents(dst []float32, val Value) []float32 {
-	switch v := val.(type) {
-	case Float32:
-		return append(dst, v)
-	case Vec2:
-		return append(dst, v[0], v[1])
-	case Vec3:
-		return append(dst, v[0], v[1], v[2])
-	case Vec4:
-		return append(dst, v[0], v[1], v[2], v[3])
-	case Uint32:
-		return append(dst, float32(v))
-	case Int32:
-		return append(dst, float32(v))
-	default:
-		return append(dst, 0)
-	}
-}
-
-// convertToFloat converts an unsigned integer value to float32.
-func convertToFloat(val Value) Value {
-	switch v := val.(type) {
-	case Uint32:
-		return Float32(float32(v))
-	case Int32:
-		return Float32(float32(v))
-	case Float32:
-		return v
-	default:
-		return Float32(0)
-	}
-}
-
-// convertSignedToFloat converts a signed integer value to float32.
-func convertSignedToFloat(val Value) Value {
-	switch v := val.(type) {
-	case Int32:
-		return Float32(float32(v))
-	case Uint32:
-		return Float32(float32(int32(v)))
-	case Float32:
-		return v
-	default:
-		return Float32(0)
-	}
-}
-
-// convertFloatToUint converts a float value to uint32.
-func convertFloatToUint(val Value) Value {
-	switch v := val.(type) {
-	case Float32:
-		return uint32(v)
-	case Uint32:
-		return v
-	case Int32:
-		return uint32(v)
-	default:
-		return Uint32(0)
-	}
-}
-
-// toFloat32 extracts a float32 from a Value.
-func toFloat32(val Value) float32 {
-	switch v := val.(type) {
-	case Float32:
-		return v
-	case Uint32:
-		return float32(v)
-	case Int32:
-		return float32(v)
-	default:
-		return 0
-	}
-}
-
-// toUint32 extracts a uint32 from a Value.
-func toUint32(val Value) uint32 {
-	switch v := val.(type) {
-	case Uint32:
-		return v
-	case Int32:
-		return uint32(v)
-	case Float32:
-		return uint32(v)
-	case bool:
-		if v {
-			return 1
-		}
-		return 0
-	default:
-		return 0
-	}
-}
-
-// toBool converts a Value to boolean.
-func toBool(val Value) bool {
-	switch v := val.(type) {
-	case bool:
-		return v
-	case Uint32:
-		return v != 0
-	case Int32:
-		return v != 0
-	case Float32:
-		return v != 0
-	default:
-		return false
-	}
-}
-
-// floatBinOp applies a binary operation to two float-typed values.
-// Works on scalars and vectors component-wise.
-func floatBinOp(a, b Value, op func(float32, float32) float32) Value {
-	switch av := a.(type) {
-	case Float32:
-		bv := toFloat32(b)
-		return Float32(op(av, bv))
-	case Vec2:
-		bv, ok := b.(Vec2)
-		if !ok {
-			return a
-		}
-		return Vec2{op(av[0], bv[0]), op(av[1], bv[1])}
-	case Vec3:
-		bv, ok := b.(Vec3)
-		if !ok {
-			return a
-		}
-		return Vec3{op(av[0], bv[0]), op(av[1], bv[1]), op(av[2], bv[2])}
-	case Vec4:
-		bv, ok := b.(Vec4)
-		if !ok {
-			return a
-		}
-		return Vec4{op(av[0], bv[0]), op(av[1], bv[1]), op(av[2], bv[2]), op(av[3], bv[3])}
-	default:
-		return Float32(0)
-	}
-}
-
-// floatUnaryOp applies a unary operation to a float-typed value.
-func floatUnaryOp(a Value, op func(float32) float32) Value {
-	switch av := a.(type) {
-	case Float32:
-		return Float32(op(av))
-	case Vec2:
-		return Vec2{op(av[0]), op(av[1])}
-	case Vec3:
-		return Vec3{op(av[0]), op(av[1]), op(av[2])}
-	case Vec4:
-		return Vec4{op(av[0]), op(av[1]), op(av[2]), op(av[3])}
-	default:
-		return Float32(0)
-	}
-}
-
-// intBinOp applies a binary operation to two integer values.
-func intBinOp(a, b Value, op func(uint32, uint32) uint32) Value {
-	av := toUint32(a)
-	bv := toUint32(b)
-	return op(av, bv)
-}
-
-// Vec4ToFloat32 extracts a Vec4 from a Value, returning zeros if type doesn't match.
-func Vec4ToFloat32(val Value) [4]float32 {
-	switch v := val.(type) {
-	case Vec4:
-		return v
-	case Vec3:
-		return [4]float32{v[0], v[1], v[2], 0}
-	case Vec2:
-		return [4]float32{v[0], v[1], 0, 0}
-	case Float32:
-		return [4]float32{v, 0, 0, 0}
-	default:
-		return [4]float32{}
-	}
-}
-
-// Float32BitsToUint32 converts a float32 to its bit representation as uint32.
-// Used for SPIR-V constant encoding in tests.
-func Float32BitsToUint32(f float32) uint32 {
-	return math.Float32bits(f)
-}
-
-// vectorTimesScalar multiplies each component of a vector by a scalar.
-func vectorTimesScalar(vec Value, s float32) Value {
-	switch v := vec.(type) {
-	case Vec2:
-		return Vec2{v[0] * s, v[1] * s}
-	case Vec3:
-		return Vec3{v[0] * s, v[1] * s, v[2] * s}
-	case Vec4:
-		return Vec4{v[0] * s, v[1] * s, v[2] * s, v[3] * s}
-	default:
-		return Float32(toFloat32(vec) * s)
-	}
-}
-
-// dotProduct computes the dot product of two vectors.
-func dotProduct(a, b Value) Value {
-	switch av := a.(type) {
-	case Vec2:
-		bv, ok := b.(Vec2)
-		if !ok {
-			return Float32(0)
-		}
-		return Float32(av[0]*bv[0] + av[1]*bv[1])
-	case Vec3:
-		bv, ok := b.(Vec3)
-		if !ok {
-			return Float32(0)
-		}
-		return Float32(av[0]*bv[0] + av[1]*bv[1] + av[2]*bv[2])
-	case Vec4:
-		bv, ok := b.(Vec4)
-		if !ok {
-			return Float32(0)
-		}
-		return Float32(av[0]*bv[0] + av[1]*bv[1] + av[2]*bv[2] + av[3]*bv[3])
-	default:
-		return Float32(toFloat32(a) * toFloat32(b))
-	}
-}
+// =============================================================================
+// Matrix Operations
+// =============================================================================
 
 // matrixTimesVector multiplies a matrix (Array of column vectors) by a vector.
 // SPIR-V stores matrices in column-major order as arrays of column vectors.
 func matrixTimesVector(mat, vec Value) Value {
-	cols, ok := mat.(Array)
-	if !ok {
+	if mat.Tag != TagArray {
 		return vec
 	}
-	v, ok := vec.(Vec4)
-	if !ok {
+	cols := mat.AsArray()
+	if vec.Tag != TagVec4 {
 		return vec
 	}
+	v := vec.F
 	numCols := len(cols)
 	if numCols < 2 {
 		return vec
 	}
 
 	// Extract columns as Vec4 (padding with zeros if needed).
-	colVecs := make([]Vec4, numCols)
+	colVecs := make([][4]float32, numCols)
 	for i, c := range cols {
 		colVecs[i] = Vec4ToFloat32(c)
 	}
 
 	// result = col[0]*v[0] + col[1]*v[1] + ...
-	var result Vec4
+	var result [4]float32
 	for i := 0; i < numCols && i < 4; i++ {
 		for j := 0; j < 4; j++ {
 			result[j] += colVecs[i][j] * v[i]
 		}
 	}
-	return result
+	return ValVec4(result[0], result[1], result[2], result[3])
 }
 
 // matrixTimesScalar multiplies every element of a matrix by a scalar.
 func matrixTimesScalar(mat, scalar Value) Value {
-	cols, ok := mat.(Array)
-	if !ok {
+	if mat.Tag != TagArray {
 		return mat
 	}
+	cols := mat.AsArray()
 	s := toFloat32(scalar)
-	result := make(Array, len(cols))
+	result := make([]Value, len(cols))
 	for i, c := range cols {
 		result[i] = vectorTimesScalar(c, s)
 	}
-	return result
+	return ValArray(result)
 }
 
 // matrixTimesMatrix multiplies two matrices (both stored as Array of column vectors).
 // C = A * B means C[j] = A * B[j] for each column j of B.
 func matrixTimesMatrix(left, right Value) Value {
-	rightCols, ok := right.(Array)
-	if !ok {
+	if right.Tag != TagArray {
 		return right
 	}
-	result := make(Array, len(rightCols))
+	rightCols := right.AsArray()
+	result := make([]Value, len(rightCols))
 	for j, col := range rightCols {
 		result[j] = matrixTimesVector(left, col)
 	}
-	return result
+	return ValArray(result)
 }
 
 // transposeMatrix transposes a matrix stored as Array of column vectors.
 func transposeMatrix(mat Value) Value {
-	cols, ok := mat.(Array)
-	if !ok {
+	if mat.Tag != TagArray {
 		return mat
 	}
+	cols := mat.AsArray()
 	numCols := len(cols)
 	if numCols == 0 {
 		return mat
@@ -2052,40 +1626,38 @@ func transposeMatrix(mat Value) Value {
 
 	// Determine the number of rows from the first column.
 	var numRows int
-	switch cols[0].(type) {
-	case Vec2:
+	switch cols[0].Tag {
+	case TagVec2:
 		numRows = 2
-	case Vec3:
+	case TagVec3:
 		numRows = 3
-	case Vec4:
+	case TagVec4:
 		numRows = 4
 	default:
 		return mat
 	}
 
 	// Build transposed columns (each row of the original becomes a column).
-	result := make(Array, numRows)
+	result := make([]Value, numRows)
 	for r := 0; r < numRows; r++ {
-		var row Vec4
+		var row [4]float32
 		for c := 0; c < numCols && c < 4; c++ {
 			row[c] = toFloat32(indexComposite(cols[c], uint32(r)))
 		}
 		// Return the correct vector type based on column count.
 		switch numCols {
 		case 2:
-			result[r] = Vec2{row[0], row[1]}
+			result[r] = ValVec2(row[0], row[1])
 		case 3:
-			result[r] = Vec3{row[0], row[1], row[2]}
+			result[r] = ValVec3(row[0], row[1], row[2])
 		default:
-			result[r] = row
+			result[r] = ValVec4(row[0], row[1], row[2], row[3])
 		}
 	}
-	return result
+	return ValArray(result)
 }
 
 // vectorShuffle creates a new vector by selecting components from two input vectors.
-// Components are literal indices where 0..N-1 select from vec1 and N..2N-1 from vec2.
-// A component value of 0xFFFFFFFF means the result component is undefined (zero).
 func vectorShuffle(m *Module, typeID uint32, vec1, vec2 Value, components []uint32) Value {
 	// Flatten both vectors into a combined component array.
 	var pool []float32
@@ -2108,36 +1680,36 @@ func vectorShuffle(m *Module, typeID uint32, vec1, vec2 Value, components []uint
 	if ti != nil && ti.Kind == TypeVector {
 		switch ti.Components {
 		case 2:
-			var v Vec2
+			var v [2]float32
 			for i := 0; i < 2 && i < len(out); i++ {
 				v[i] = out[i]
 			}
-			return v
+			return ValVec2(v[0], v[1])
 		case 3:
-			var v Vec3
+			var v [3]float32
 			for i := 0; i < 3 && i < len(out); i++ {
 				v[i] = out[i]
 			}
-			return v
+			return ValVec3(v[0], v[1], v[2])
 		case 4:
-			var v Vec4
+			var v [4]float32
 			for i := 0; i < 4 && i < len(out); i++ {
 				v[i] = out[i]
 			}
-			return v
+			return ValVec4(v[0], v[1], v[2], v[3])
 		}
 	}
 
 	// Fallback: infer from component count.
 	switch len(out) {
 	case 2:
-		return Vec2{out[0], out[1]}
+		return ValVec2(out[0], out[1])
 	case 3:
-		return Vec3{out[0], out[1], out[2]}
+		return ValVec3(out[0], out[1], out[2])
 	case 4:
-		return Vec4{out[0], out[1], out[2], out[3]}
+		return ValVec4(out[0], out[1], out[2], out[3])
 	default:
-		return Float32(0)
+		return ValFloat(0)
 	}
 }
 
@@ -2146,46 +1718,40 @@ func vectorShuffle(m *Module, typeID uint32, vec1, vec2 Value, components []uint
 // =============================================================================
 
 // resolveTexture looks up a Texture2D from a value that may be a BindingKey
-// or already a *Texture2D.
+// or already stored via another mechanism.
 func (interp *interpreter) resolveTexture(val Value) *Texture2D {
-	switch v := val.(type) {
-	case *Texture2D:
-		return v
-	case BindingKey:
+	if val.Tag == TagBindingKey {
+		bk := val.AsBindingKey()
 		if interp.ctx != nil && interp.ctx.Textures != nil {
-			return interp.ctx.Textures[v]
+			return interp.ctx.Textures[bk]
 		}
 	}
 	return nil
 }
 
-// resolveSampler looks up a Sampler from a value that may be a BindingKey
-// or already a *Sampler.
+// resolveSampler looks up a Sampler from a value that may be a BindingKey.
 func (interp *interpreter) resolveSampler(val Value) *Sampler {
-	switch v := val.(type) {
-	case *Sampler:
-		return v
-	case BindingKey:
+	if val.Tag == TagBindingKey {
+		bk := val.AsBindingKey()
 		if interp.ctx != nil && interp.ctx.Samplers != nil {
-			return interp.ctx.Samplers[v]
+			return interp.ctx.Samplers[bk]
 		}
 	}
 	return nil
 }
 
 // sampleTexture samples a texture using the given sampled image and UV coordinates.
-// lod is the level-of-detail (only LOD 0 is supported).
 func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, lod float32) Value {
 	_ = lod // LOD levels not implemented; always sample base level.
 
-	si, ok := sampledImg.(*SampledImageValue)
-	if !ok {
-		return Vec4{1, 0, 1, 1} // Magenta for error.
+	if sampledImg.Tag != TagSampledImage {
+		return ValVec4(1, 0, 1, 1) // Magenta for error.
 	}
+	si := sampledImg.AsSampledImage()
 
 	tex := interp.resolveTexture(si.Image)
 	if tex == nil || tex.Width == 0 || tex.Height == 0 || len(tex.Data) == 0 {
-		return Vec4{1, 0, 1, 1} // Magenta for missing texture.
+		return ValVec4(1, 0, 1, 1) // Magenta for missing texture.
 	}
 
 	samp := interp.resolveSampler(si.Sampler)
@@ -2195,13 +1761,13 @@ func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, lod floa
 
 	// Extract UV coordinates.
 	var u, v float32
-	switch c := coord.(type) {
-	case Vec2:
-		u, v = c[0], c[1]
-	case Vec3:
-		u, v = c[0], c[1]
-	case Vec4:
-		u, v = c[0], c[1]
+	switch coord.Tag {
+	case TagVec2:
+		u, v = coord.F[0], coord.F[1]
+	case TagVec3:
+		u, v = coord.F[0], coord.F[1]
+	case TagVec4:
+		u, v = coord.F[0], coord.F[1]
 	default:
 		u = toFloat32(coord)
 	}
@@ -2213,26 +1779,26 @@ func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, lod floa
 	// Determine filter from the magnification filter.
 	filter := samp.MagFilter
 	if filter == FilterLinear {
-		return sampleBilinear(tex, u, v)
+		return ValVec4From(sampleBilinear(tex, u, v))
 	}
-	return sampleNearest(tex, u, v)
+	return ValVec4From(sampleNearest(tex, u, v))
 }
 
 // fetchTexel fetches a single texel by integer coordinates (no filtering).
 func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 	tex := interp.resolveTexture(imgVal)
 	if tex == nil || tex.Width == 0 || tex.Height == 0 || len(tex.Data) == 0 {
-		return Vec4{0, 0, 0, 0}
+		return ValVec4(0, 0, 0, 0)
 	}
 
 	var x, y int
-	switch c := coord.(type) {
-	case Vec2:
-		x, y = int(c[0]), int(c[1])
-	case Vec3:
-		x, y = int(c[0]), int(c[1])
-	case Vec4:
-		x, y = int(c[0]), int(c[1])
+	switch coord.Tag {
+	case TagVec2:
+		x, y = int(coord.F[0]), int(coord.F[1])
+	case TagVec3:
+		x, y = int(coord.F[0]), int(coord.F[1])
+	case TagVec4:
+		x, y = int(coord.F[0]), int(coord.F[1])
 	default:
 		x = int(toUint32(coord))
 	}
@@ -2251,20 +1817,19 @@ func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 		y = int(tex.Height) - 1
 	}
 
-	return readTexel(tex, x, y)
+	return ValVec4From(readTexel(tex, x, y))
 }
 
 // queryImageSize returns the size of a texture as a vec2 of uint32 values.
 func (interp *interpreter) queryImageSize(imgVal Value) Value {
 	tex := interp.resolveTexture(imgVal)
 	if tex == nil {
-		return Vec2{0, 0}
+		return ValVec2(0, 0)
 	}
-	return Vec2{float32(tex.Width), float32(tex.Height)}
+	return ValVec2(float32(tex.Width), float32(tex.Height))
 }
 
 // applyWrapMode wraps a texture coordinate according to the specified mode.
-// The result is in [0, 1) for repeat modes and [0, 1] for clamp.
 func applyWrapMode(coord float32, mode uint32) float32 {
 	switch mode {
 	case WrapClampToEdge:
@@ -2277,7 +1842,6 @@ func applyWrapMode(coord float32, mode uint32) float32 {
 		return coord
 
 	case WrapMirroredRepeat:
-		// Mirror: period is 2.0; within [0,1] normal, [1,2] reflected.
 		coord = float32(math.Abs(float64(coord)))
 		period := int(coord)
 		frac := coord - float32(period)
@@ -2300,7 +1864,6 @@ func sampleNearest(tex *Texture2D, u, v float32) Vec4 {
 	x := int(u * float32(tex.Width))
 	y := int(v * float32(tex.Height))
 
-	// Clamp to valid pixel range.
 	if x < 0 {
 		x = 0
 	}
@@ -2319,7 +1882,6 @@ func sampleNearest(tex *Texture2D, u, v float32) Vec4 {
 
 // sampleBilinear samples a texture at the given UV using bilinear (4-tap) filtering.
 func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
-	// Map UV to texel space (center of pixel 0 is at 0.5/width).
 	fx := u*float32(tex.Width) - 0.5
 	fy := v*float32(tex.Height) - 0.5
 
@@ -2328,11 +1890,9 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 	x1 := x0 + 1
 	y1 := y0 + 1
 
-	// Fractional part for interpolation.
 	fracX := fx - float32(x0)
 	fracY := fy - float32(y0)
 
-	// Clamp coordinates.
 	w := int(tex.Width)
 	h := int(tex.Height)
 	x0 = clampInt(x0, w-1)
@@ -2340,13 +1900,11 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 	x1 = clampInt(x1, w-1)
 	y1 = clampInt(y1, h-1)
 
-	// Fetch the four texels.
 	c00 := readTexel(tex, x0, y0)
 	c10 := readTexel(tex, x1, y0)
 	c01 := readTexel(tex, x0, y1)
 	c11 := readTexel(tex, x1, y1)
 
-	// Bilinear interpolation.
 	var result Vec4
 	for i := 0; i < 4; i++ {
 		top := c00[i]*(1-fracX) + c10[i]*fracX
@@ -2357,7 +1915,6 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 }
 
 // readTexel reads a single RGBA texel from the texture at pixel coordinates (x, y).
-// Returns normalized [0,1] float values.
 func readTexel(tex *Texture2D, x, y int) Vec4 {
 	idx := (y*int(tex.Width) + x) * 4
 	if idx+3 >= len(tex.Data) {

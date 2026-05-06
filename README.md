@@ -327,7 +327,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - Blending (13 factors, 5 operations)
 - 6-plane frustum clipping (Sutherland-Hodgman)
 - 8x8 tile-based parallel rendering
-- **SPIR-V interpreter** — executes vertex/fragment shaders on CPU (Phase 1: basic shaders)
+- **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, ~100× slower than JIT software renderers like SwiftShader). See [ADR](docs/dev/research/ADR-SPIRV-JIT-VS-INTERPRETER.md).
 
 **Windowed Presentation:**
 - **Windows:** DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern), zero-copy into GDI bitmap

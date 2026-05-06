@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.26.7
+## Current State: v0.27.0
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -144,6 +144,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.27.0** | 2026-05 | **Full SPIR-V interpreter** (7 phases, ~10K LOC), shader debugger, compute HAL, particles rendering, tagged union optimization, naga v0.17.11, flaky test fix |
 | **v0.26.12** | 2026-05 | **Test coverage** (core 85.5%, root 78.4%), Metal entry point fix (#168 by @k-chimi), naga v0.17.10 |
 | **v0.26.11** | 2026-04 | **DX12 indirect dispatch/draw** — ExecuteIndirect + CommandSignature (was last GPU backend with stubs) |
 | **v0.26.10** | 2026-04 | **Validation Phase B** — 5 P1 correctness checks (MinBindingSize, index format mismatch, indirect bounds, depth/stencil aspects, BindGroup Submit). Coverage 37% → 45%. |
