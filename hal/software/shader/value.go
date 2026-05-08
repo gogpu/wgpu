@@ -694,6 +694,14 @@ func zeroValueForVar(m *Module, ptrTypeID uint32) Value {
 		case 4:
 			return ValVec4(0, 0, 0, 0)
 		}
+	case TypeMatrix:
+		if ti.Components > 0 {
+			cols := make([]Value, ti.Components)
+			for i := range cols {
+				cols[i] = zeroValue(m.Types, ti.ElemType)
+			}
+			return ValArray(cols)
+		}
 	case TypeArray:
 		if ti.Length > 0 {
 			arr := make([]Value, ti.Length)
@@ -736,6 +744,14 @@ func zeroValue(types map[uint32]*TypeInfo, typeID uint32) Value {
 			return ValVec3(0, 0, 0)
 		case 4:
 			return ValVec4(0, 0, 0, 0)
+		}
+	case TypeMatrix:
+		if ti.Components > 0 {
+			cols := make([]Value, ti.Components)
+			for i := range cols {
+				cols[i] = zeroValue(types, ti.ElemType)
+			}
+			return ValArray(cols)
 		}
 	case TypeArray:
 		if ti.Length > 0 {

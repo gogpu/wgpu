@@ -344,6 +344,28 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		}
 		return ValUint(0)
 
+	case TypeMatrix:
+		// Matrix is stored as an array of column vectors in the buffer.
+		// mat4x4<f32> = 4 columns of vec4<f32>, each 16 bytes.
+		colType := m.Types[ti.ElemType]
+		if colType == nil || ti.Components == 0 {
+			return ValArray(nil)
+		}
+		colSize := typeByteSize(m, colType)
+		// Check for MatrixStride decoration which overrides computed stride.
+		matrixTypeID := interp.findTypeID(ti)
+		if matrixTypeID != 0 {
+			strideKey := decorationKey{TargetID: matrixTypeID, Decoration: DecorationMatrixStride}
+			if stride, ok := m.Decorations[strideKey]; ok && stride > 0 {
+				colSize = stride
+			}
+		}
+		cols := make([]Value, ti.Components)
+		for i := uint32(0); i < ti.Components; i++ {
+			cols[i] = interp.readValueFromBuffer(data, offset+i*colSize, colType)
+		}
+		return ValArray(cols)
+
 	case TypeArray:
 		elemType := m.Types[ti.ElemType]
 		if elemType == nil || ti.Length == 0 {
@@ -403,6 +425,13 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 			return 4 * ti.Components
 		}
 		return typeByteSize(m, elemType) * ti.Components
+	case TypeMatrix:
+		// Matrix = columns * columnByteSize. Each column is a vector.
+		colType := m.Types[ti.ElemType]
+		if colType == nil {
+			return 0
+		}
+		return typeByteSize(m, colType) * ti.Components
 	case TypeArray:
 		elemType := m.Types[ti.ElemType]
 		if elemType == nil {
@@ -1385,6 +1414,16 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 			}
 			currentType = m.Types[currentType.ElemType]
 
+		case TypeMatrix:
+			// Indexing into a matrix selects a column vector.
+			// Each column is ElemType (e.g. vec4<f32> = 16 bytes).
+			colType := m.Types[currentType.ElemType]
+			if colType != nil {
+				colSize := typeByteSize(m, colType)
+				offset += idx * colSize
+			}
+			currentType = m.Types[currentType.ElemType]
+
 		case TypeVector:
 			// Indexing into a vector component.
 			elemType := m.Types[currentType.ElemType]
@@ -1521,6 +1560,14 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 		case 4:
 			return ValVec4(buf[0], buf[1], buf[2], buf[3])
 		}
+
+	case TypeMatrix:
+		// Matrix is constructed from column vectors.
+		cols := make([]Value, len(constituentIDs))
+		for i, id := range constituentIDs {
+			cols[i] = interp.values[id]
+		}
+		return ValArray(cols)
 
 	case TypeArray:
 		arr := make([]Value, len(constituentIDs))

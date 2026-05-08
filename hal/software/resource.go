@@ -292,13 +292,25 @@ type RenderPipeline struct {
 	desc *hal.RenderPipelineDescriptor
 }
 
+// SamplerResource implements hal.Sampler with actual sampler parameters.
+// Used by the SPIR-V interpreter for texture filtering and addressing modes.
+type SamplerResource struct {
+	Resource
+	id   uint64         // unique ID for handle resolution
+	Desc *hal.SamplerDescriptor
+}
+
+// NativeHandle returns the sampler's unique ID for handle resolution.
+func (s *SamplerResource) NativeHandle() uintptr { return uintptr(s.id) }
+
 // BindGroup stores bound resources for the software backend.
 // It resolves handle-based entries to concrete software resource pointers.
 type BindGroup struct {
 	Resource
 	desc         *hal.BindGroupDescriptor
-	textureViews map[uint32]*TextureView // binding index -> resolved texture view
-	buffers      map[uint32]*Buffer      // binding index -> resolved buffer
+	textureViews map[uint32]*TextureView     // binding index -> resolved texture view
+	buffers      map[uint32]*Buffer           // binding index -> resolved buffer
+	samplers     map[uint32]*SamplerResource  // binding index -> resolved sampler
 }
 
 // ComputePipeline stores compute pipeline configuration for the software backend.

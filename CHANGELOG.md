@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns `IMAGE_LAYOUT_GENERAL` for mixed-usage textures (render + sample), matching Rust
   wgpu `derive_image_layout()` behavior.
 
+### Added
+
+- **Software: OpTypeMatrix in SPIR-V interpreter** (BUG-SW-003) — `mat4x4<f32>` uniform
+  support. Enables textured_quad shader execution (ortho projection matrix). Required for
+  offscreen texture compositing on software backend.
+- **Software: SamplerBinding in CreateBindGroup** (BUG-SW-004) — sampler resources now
+  registered and wired into SPIR-V ExecutionContext for correct texture filtering.
+- **Damage rect pixel-level tests** — 29 tests + 3 benchmarks: partial blit correctness,
+  BGRA byte order, rect clipping, integration with multiple Present calls.
+
 ### Dependencies
 
 - **naga** v0.17.11 → **v0.17.12** — ARCH-001 internal packages, 12/18 coverage ≥80%,

@@ -129,6 +129,7 @@ const (
 	TypeInt
 	TypeFloat
 	TypeVector
+	TypeMatrix
 	TypeArray
 	TypePointer
 	TypeFunction
@@ -261,6 +262,19 @@ func ParseModule(words []uint32) (*Module, error) {
 				Kind:       TypeVector,
 				ElemType:   operands[1],
 				Components: operands[2],
+			}
+
+		case OpTypeMatrix:
+			// OpTypeMatrix: resultID columnTypeID columnCount
+			// SPIR-V matrices are arrays of column vectors.
+			// mat4x4<f32> = 4 columns of vec4<f32>.
+			if len(operands) < 3 {
+				break
+			}
+			m.Types[operands[0]] = &TypeInfo{
+				Kind:       TypeMatrix,
+				ElemType:   operands[1], // column vector type (e.g. vec4<f32>)
+				Components: operands[2], // number of columns
 			}
 
 		case OpTypeArray:

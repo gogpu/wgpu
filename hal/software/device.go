@@ -25,8 +25,9 @@ var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SP
 // back to typed software resources.
 type Device struct {
 	mu           sync.RWMutex
-	textureViews map[uintptr]*TextureView // handle -> TextureView
-	buffers      map[uintptr]*Buffer      // handle -> Buffer
+	textureViews map[uintptr]*TextureView     // handle -> TextureView
+	buffers      map[uintptr]*Buffer           // handle -> Buffer
+	samplers     map[uintptr]*SamplerResource  // handle -> SamplerResource
 }
 
 // CreateBuffer creates a software buffer with real data storage.
@@ -122,9 +123,16 @@ func (d *Device) CreateTextureView(texture hal.Texture, _ *hal.TextureViewDescri
 // DestroyTextureView is a no-op.
 func (d *Device) DestroyTextureView(_ hal.TextureView) {}
 
-// CreateSampler creates a software sampler.
-func (d *Device) CreateSampler(_ *hal.SamplerDescriptor) (hal.Sampler, error) {
-	return &Resource{}, nil
+// CreateSampler creates a software sampler with actual parameters.
+// The sampler is stored in the device registry so CreateBindGroup can resolve
+// the handle back to a SamplerResource for the SPIR-V interpreter.
+func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
+	s := &SamplerResource{
+		id:   nextResourceID.Add(1),
+		Desc: desc,
+	}
+	d.registerSampler(s)
+	return s, nil
 }
 
 // DestroySampler is a no-op.
@@ -145,6 +153,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		desc:         desc,
 		textureViews: make(map[uint32]*TextureView),
 		buffers:      make(map[uint32]*Buffer),
+		samplers:     make(map[uint32]*SamplerResource),
 	}
 	if desc != nil {
 		for _, entry := range desc.Entries {
@@ -156,6 +165,10 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			case gputypes.BufferBinding:
 				if buf := d.lookupBuffer(res.Buffer); buf != nil {
 					bg.buffers[entry.Binding] = buf
+				}
+			case gputypes.SamplerBinding:
+				if samp := d.lookupSampler(res.Sampler); samp != nil {
+					bg.samplers[entry.Binding] = samp
 				}
 			}
 		}
@@ -313,6 +326,9 @@ func (d *Device) initRegistry() {
 	if d.buffers == nil {
 		d.buffers = make(map[uintptr]*Buffer)
 	}
+	if d.samplers == nil {
+		d.samplers = make(map[uintptr]*SamplerResource)
+	}
 }
 
 // registerTextureView adds a texture view to the device registry.
@@ -329,6 +345,27 @@ func (d *Device) registerBuffer(buf *Buffer) {
 	defer d.mu.Unlock()
 	d.initRegistry()
 	d.buffers[uintptr(buf.id)] = buf
+}
+
+// registerSampler adds a sampler to the device registry.
+func (d *Device) registerSampler(s *SamplerResource) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initRegistry()
+	d.samplers[uintptr(s.id)] = s
+}
+
+// lookupSampler finds a sampler by its handle.
+func (d *Device) lookupSampler(handle uintptr) *SamplerResource {
+	if handle == 0 {
+		return nil
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.samplers == nil {
+		return nil
+	}
+	return d.samplers[handle]
 }
 
 // lookupTextureView finds a texture view by its handle.

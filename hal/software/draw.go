@@ -710,11 +710,55 @@ func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
 			}
 			tv.texture.mu.RUnlock()
 		}
-		// Samplers are not stored as separate objects in the software backend's
-		// BindGroup struct; the interpreter uses defaults when nil.
+		// Samplers.
+		for bindingIdx, samp := range bg.samplers {
+			if samp == nil {
+				continue
+			}
+			ctx.Samplers[shader.BindingKey{
+				Group:   uint32(groupIdx),
+				Binding: bindingIdx,
+			}] = samplerResourceToShader(samp)
+		}
 	}
 
 	return ctx
+}
+
+// samplerResourceToShader converts a SamplerResource to a shader.Sampler
+// using the addressing and filtering modes from the HAL descriptor.
+func samplerResourceToShader(s *SamplerResource) *shader.Sampler {
+	if s == nil || s.Desc == nil {
+		return &shader.Sampler{} // Default: nearest, repeat.
+	}
+	return &shader.Sampler{
+		MinFilter: filterModeToShader(s.Desc.MinFilter),
+		MagFilter: filterModeToShader(s.Desc.MagFilter),
+		WrapU:     wrapModeToShader(s.Desc.AddressModeU),
+		WrapV:     wrapModeToShader(s.Desc.AddressModeV),
+	}
+}
+
+// filterModeToShader converts a gputypes.FilterMode to shader filter constant.
+func filterModeToShader(mode gputypes.FilterMode) uint32 {
+	switch mode {
+	case gputypes.FilterModeLinear:
+		return shader.FilterLinear
+	default:
+		return shader.FilterNearest
+	}
+}
+
+// wrapModeToShader converts a gputypes.AddressMode to shader wrap constant.
+func wrapModeToShader(mode gputypes.AddressMode) uint32 {
+	switch mode {
+	case gputypes.AddressModeClampToEdge:
+		return shader.WrapClampToEdge
+	case gputypes.AddressModeMirrorRepeat:
+		return shader.WrapMirroredRepeat
+	default: // AddressModeRepeat or undefined
+		return shader.WrapRepeat
+	}
 }
 
 // floatsToShaderValue converts a float32 slice into the appropriate shader Value type.
