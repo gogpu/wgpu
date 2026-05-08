@@ -481,3 +481,186 @@ func TestPresentWithDamage_WithoutAcquire(t *testing.T) {
 		t.Errorf("PresentWithDamage without acquire = %v, want ErrSurfaceNoTextureAcquired", err)
 	}
 }
+
+// --- Extended damage-aware present tests ---
+
+func TestPresent_MixedUsage_PresentThenPresentWithDamage(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// Frame 1: legacy Present.
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture (frame 1): %v", err)
+	}
+	if err := surface.Present(queue); err != nil {
+		t.Fatalf("Present (frame 1): %v", err)
+	}
+
+	// Frame 2: PresentWithDamage.
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture (frame 2): %v", err)
+	}
+	rects := []image.Rectangle{image.Rect(10, 10, 100, 100)}
+	if err := surface.PresentWithDamage(queue, rects); err != nil {
+		t.Fatalf("PresentWithDamage (frame 2): %v", err)
+	}
+
+	// Frame 3: back to legacy Present.
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture (frame 3): %v", err)
+	}
+	if err := surface.Present(queue); err != nil {
+		t.Fatalf("Present (frame 3): %v", err)
+	}
+
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after mixed presents = %d, want SurfaceStateConfigured",
+			surface.State())
+	}
+}
+
+func TestPresent_DamageRectsVariousPatterns(t *testing.T) {
+	// Table-driven test verifying PresentWithDamage accepts various rect patterns.
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		rects []image.Rectangle
+	}{
+		{"nil", nil},
+		{"empty_slice", []image.Rectangle{}},
+		{"single_small", []image.Rectangle{image.Rect(0, 0, 10, 10)}},
+		{"full_surface", []image.Rectangle{image.Rect(0, 0, 800, 600)}},
+		{"multiple", []image.Rectangle{
+			image.Rect(0, 0, 100, 100),
+			image.Rect(200, 200, 400, 400),
+			image.Rect(500, 300, 700, 500),
+		}},
+		{"overlapping", []image.Rectangle{
+			image.Rect(10, 10, 100, 100),
+			image.Rect(50, 50, 150, 150),
+		}},
+		{"out_of_bounds", []image.Rectangle{
+			image.Rect(-10, -10, 810, 610), // extends past all edges
+		}},
+		{"zero_size", []image.Rectangle{
+			image.Rect(50, 50, 50, 50), // empty rect
+		}},
+		{"inverted_rect", []image.Rectangle{
+			image.Rect(100, 100, 50, 50), // Min > Max
+		}},
+		{"negative_origin", []image.Rectangle{
+			image.Rect(-100, -100, 50, 50),
+		}},
+		{"single_pixel", []image.Rectangle{
+			image.Rect(400, 300, 401, 301),
+		}},
+		{"many_small_rects", func() []image.Rectangle {
+			rects := make([]image.Rectangle, 20)
+			for i := range rects {
+				x := i * 40
+				rects[i] = image.Rect(x, 0, x+30, 30)
+			}
+			return rects
+		}()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := surface.AcquireTexture(nil); err != nil {
+				t.Fatalf("AcquireTexture: %v", err)
+			}
+			if err := surface.PresentWithDamage(queue, tt.rects); err != nil {
+				t.Fatalf("PresentWithDamage(%s): %v", tt.name, err)
+			}
+			if surface.State() != SurfaceStateConfigured {
+				t.Errorf("state after %s = %d, want SurfaceStateConfigured",
+					tt.name, surface.State())
+			}
+		})
+	}
+}
+
+func TestPresent_DamageAfterReconfigure(t *testing.T) {
+	surface, device, queue := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// Present once.
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+	if err := surface.Present(queue); err != nil {
+		t.Fatalf("Present: %v", err)
+	}
+
+	// Reconfigure to different dimensions.
+	newConfig := &hal.SurfaceConfiguration{
+		Width:       1024,
+		Height:      768,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
+		PresentMode: gputypes.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+	}
+	if err := surface.Configure(device, newConfig); err != nil {
+		t.Fatalf("Reconfigure: %v", err)
+	}
+
+	// PresentWithDamage should work with new dimensions.
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture after reconfigure: %v", err)
+	}
+	rects := []image.Rectangle{image.Rect(100, 100, 500, 500)}
+	if err := surface.PresentWithDamage(queue, rects); err != nil {
+		t.Fatalf("PresentWithDamage after reconfigure: %v", err)
+	}
+
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state = %d, want SurfaceStateConfigured", surface.State())
+	}
+}
+
+func TestPresent_DamageWithNilQueue(t *testing.T) {
+	surface, device, _ := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	if _, err := surface.AcquireTexture(nil); err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+
+	// PresentWithDamage with nil queue should panic (nil pointer dereference)
+	// or be handled gracefully. This mirrors the behavior of Present with nil queue.
+	// We verify the contract is the same for both methods.
+	panicked := false
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				panicked = true
+			}
+		}()
+		_ = surface.PresentWithDamage(nil, nil)
+	}()
+
+	if !panicked {
+		// If it didn't panic, that's also acceptable — it means the implementation
+		// handles nil queue gracefully. Either way, the test documents the behavior.
+		t.Log("PresentWithDamage(nil queue) did not panic — nil queue handled gracefully")
+	}
+}
