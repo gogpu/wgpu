@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Vulkan offscreen texture trail artifacts** (BUG-WGPU-VK-007) — offscreen textures with
+  `TextureBinding` usage were left in `COLOR_ATTACHMENT_OPTIMAL` layout after render pass.
+  When subsequently sampled by a fragment shader, Intel CCS (Color Compression Subsystem)
+  metadata was not decompressed → stale pixels → visual trails. Fix: `offscreenFinalLayout()`
+  returns `IMAGE_LAYOUT_GENERAL` for mixed-usage textures (render + sample), matching Rust
+  wgpu `derive_image_layout()` behavior.
+
+### Dependencies
+
+- **naga** v0.17.11 → **v0.17.12** — ARCH-001 internal packages, 12/18 coverage ≥80%,
+  13 panics→errors.
+
 ## [0.27.0] - 2026-05-06
 
 ### Added
