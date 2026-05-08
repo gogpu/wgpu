@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns `IMAGE_LAYOUT_GENERAL` for mixed-usage textures (render + sample), matching Rust
   wgpu `derive_image_layout()` behavior.
 
+- **Vulkan MSAA resolve target stale pixels** (BUG-WGPU-MSAA-RESOLVE-001) — resolve
+  attachment had `LoadOp=DONT_CARE`, leaving uncovered pixels with previous frame content
+  (trail artifacts). Fix: `LoadOp=CLEAR` with MSAA clear color, matching Rust wgpu.
+  Only Vulkan affected — DX12/GLES/Metal/Software already resolve all pixels.
 - **Software: persistent stencil buffer** (BUG-SW-005) — stencil buffer was recreated per
   Draw() call, losing stencil writes from previous draws within the same render pass. On GPU
   the stencil buffer is the depth/stencil attachment texture — persistent for the entire pass.

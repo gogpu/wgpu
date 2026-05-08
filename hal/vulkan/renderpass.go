@@ -172,11 +172,18 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 	}
 
 	// Resolve attachment (attachment 1, only for MSAA)
+	//
+	// BUG-WGPU-MSAA-RESOLVE-001: The resolve target MUST use LoadOp=Clear so that
+	// pixels without MSAA fragment coverage are filled with the clear color instead
+	// of retaining stale content from the previous frame (trail artifacts).
+	// Rust wgpu sets AttachmentOps::STORE (no LOAD bit) on the resolve target,
+	// which map_attachment_ops converts to loadOp=CLEAR, storeOp=STORE.
+	// InitialLayout=Undefined is valid with LoadOp=Clear (driver discards old data).
 	if hasMSAAResolve && key.ColorFormat != vk.FormatUndefined {
 		attachments = append(attachments, vk.AttachmentDescription{
 			Format:         key.ColorFormat,
 			Samples:        vk.SampleCountFlagBits(1), // Resolve target is always single-sample
-			LoadOp:         vk.AttachmentLoadOpDontCare,
+			LoadOp:         vk.AttachmentLoadOpClear,
 			StoreOp:        vk.AttachmentStoreOpStore,
 			StencilLoadOp:  vk.AttachmentLoadOpDontCare,
 			StencilStoreOp: vk.AttachmentStoreOpDontCare,

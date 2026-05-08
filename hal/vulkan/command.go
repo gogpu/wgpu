@@ -787,9 +787,18 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	))
 
 	if hasMSAAResolve {
-		// Resolve attachment clear value (not used since LoadOp is DontCare,
-		// but Vulkan requires one clear value per attachment)
-		clearValues = append(clearValues, vk.ClearValueColor(0, 0, 0, 0))
+		// Resolve attachment clear value — must match the MSAA color clear value so
+		// pixels without fragment coverage are cleared to the same color as the
+		// MSAA source. Vulkan requires one clear value per attachment when LoadOp
+		// is Clear (BUG-WGPU-MSAA-RESOLVE-001). Rust wgpu uses mem::zeroed() here
+		// because the resolve overwrites all pixels; we use the actual clear color
+		// for correctness on implementations that may skip uncovered pixels.
+		clearValues = append(clearValues, vk.ClearValueColor(
+			float32(ca.ClearValue.R),
+			float32(ca.ClearValue.G),
+			float32(ca.ClearValue.B),
+			float32(ca.ClearValue.A),
+		))
 	}
 
 	if desc.DepthStencilAttachment != nil {
