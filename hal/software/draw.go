@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/raster"
 	"github.com/gogpu/wgpu/hal/software/shader"
 )
@@ -74,6 +75,10 @@ func (r *RenderPassEncoder) getTargetTexture() *Texture {
 // This is the fast path for gogpu's renderTexturedQuad (6 vertices, no vertex buffer,
 // texture in bind group). Returns true if blit was performed, false if no source
 // texture was found (caller should apply clear instead).
+//
+// When scissor is active, only pixels within the scissor rect are written.
+// The blit loop bounds are clamped to the scissor rect to maintain the
+// fast-path advantage (no per-pixel branch, just narrowed iteration range).
 func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
@@ -105,8 +110,21 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 		return false // Buffers too small — skip entire blit
 	}
 
-	// Fast path: same-size blit (no scaling needed).
-	if srcW == dstW && srcH == dstH {
+	// Determine blit bounds. Without scissor, the full destination is written.
+	// With scissor, clamp iteration range to the scissor rect so that pixels
+	// outside the rect remain untouched — no per-pixel branch needed.
+	blitMinX, blitMinY := 0, 0
+	blitMaxX, blitMaxY := dstW, dstH
+	if r.hasScissor {
+		blitMinX, blitMinY, blitMaxX, blitMaxY = clampBlitBounds(
+			blitMinX, blitMinY, blitMaxX, blitMaxY, r.scissorRect)
+		if blitMinX >= blitMaxX || blitMinY >= blitMaxY {
+			return true // Scissor is fully outside — nothing to blit, but blit "succeeded"
+		}
+	}
+
+	// Fast path: same-size blit without scissor (no scaling, no clipping).
+	if srcW == dstW && srcH == dstH && !r.hasScissor {
 		if swizzle {
 			for i := 0; i < srcSize; i += 4 {
 				target.data[i+0] = srcData[i+2] // B←R
@@ -120,16 +138,11 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 		return true
 	}
 
-	// Scaled blit: nearest-neighbor sampling with pre-computed column map.
-	// Optimizations vs naive per-pixel:
-	// 1. Column map eliminates multiply+divide from inner loop (table lookup instead)
-	// 2. Row deduplication: when upscaling, many dst rows map to the same src row —
-	//    just memcpy the previous dst row (~50% fewer per-pixel iterations at 2x scale)
-
-	// Pre-compute column mapping: colMap[dx] = source byte offset within row.
+	// General blit: handles scaling and/or scissor clipping.
+	// Uses nearest-neighbor sampling with pre-computed column map.
 	dstRowBytes := dstW * 4
 	colMap := make([]int, dstW)
-	for dx := 0; dx < dstW; dx++ {
+	for dx := blitMinX; dx < blitMaxX; dx++ {
 		sx := dx * srcW / dstW
 		if sx >= srcW {
 			sx = srcW - 1
@@ -137,38 +150,26 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 		colMap[dx] = sx * 4
 	}
 
-	prevSY := -1
-	for dy := 0; dy < dstH; dy++ {
+	for dy := blitMinY; dy < blitMaxY; dy++ {
 		sy := dy * srcH / dstH
 		if sy >= srcH {
 			sy = srcH - 1
 		}
-		dstRowOff := dy * dstRowBytes
-
-		// Row deduplication: if this dst row maps to same src row as previous,
-		// copy the already-computed dst row (memcpy ≫ per-pixel loop).
-		if sy == prevSY && dy > 0 {
-			prevRowOff := (dy - 1) * dstRowBytes
-			copy(target.data[dstRowOff:dstRowOff+dstRowBytes],
-				target.data[prevRowOff:prevRowOff+dstRowBytes])
-			continue
-		}
-		prevSY = sy
 
 		srcRowOff := sy * srcW * 4
 		if swizzle {
-			for dx := 0; dx < dstW; dx++ {
+			for dx := blitMinX; dx < blitMaxX; dx++ {
 				srcIdx := srcRowOff + colMap[dx]
-				dstIdx := dstRowOff + dx*4
+				dstIdx := dy*dstRowBytes + dx*4
 				target.data[dstIdx+0] = srcData[srcIdx+2]
 				target.data[dstIdx+1] = srcData[srcIdx+1]
 				target.data[dstIdx+2] = srcData[srcIdx+0]
 				target.data[dstIdx+3] = srcData[srcIdx+3]
 			}
 		} else {
-			for dx := 0; dx < dstW; dx++ {
+			for dx := blitMinX; dx < blitMaxX; dx++ {
 				srcIdx := srcRowOff + colMap[dx]
-				dstIdx := dstRowOff + dx*4
+				dstIdx := dy*dstRowBytes + dx*4
 				target.data[dstIdx+0] = srcData[srcIdx+0]
 				target.data[dstIdx+1] = srcData[srcIdx+1]
 				target.data[dstIdx+2] = srcData[srcIdx+2]
@@ -259,6 +260,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	h := int(target.height)
 
 	pipe := raster.NewPipeline(w, h)
+	r.configureRasterPipeline(pipe, w, h)
 
 	// Copy current framebuffer into the raster pipeline so draws composite.
 	target.mu.RLock()
@@ -994,6 +996,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 	h := int(target.height)
 
 	pipe := raster.NewPipeline(w, h)
+	r.configureRasterPipeline(pipe, w, h)
 
 	// Copy current framebuffer so draws composite correctly.
 	target.mu.RLock()
@@ -1251,5 +1254,139 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc 
 			return [4]float32{1, 1, 1, 1}
 		}
 		return shader.Vec4ToFloat32(colorVal)
+	}
+}
+
+// clampBlitBounds narrows blit iteration bounds to the scissor rectangle.
+// Returns the clamped (minX, minY, maxX, maxY).
+func clampBlitBounds(minX, minY, maxX, maxY int, scissor [4]uint32) (int, int, int, int) {
+	sx := int(scissor[0])
+	sy := int(scissor[1])
+	sw := int(scissor[2])
+	sh := int(scissor[3])
+	if sx > minX {
+		minX = sx
+	}
+	if sy > minY {
+		minY = sy
+	}
+	if sx+sw < maxX {
+		maxX = sx + sw
+	}
+	if sy+sh < maxY {
+		maxY = sy + sh
+	}
+	return minX, minY, maxX, maxY
+}
+
+// configureRasterPipeline applies scissor, depth, and stencil state from the
+// command encoder to a newly created raster.Pipeline. This is the single point
+// where WebGPU render pass state is translated to the raster package's config.
+func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline, w, h int) {
+	// Scissor: clip fragments to the scissor rectangle set by SetScissorRect.
+	if r.hasScissor {
+		pipe.SetScissor(&raster.Rect{
+			X:      int(r.scissorRect[0]),
+			Y:      int(r.scissorRect[1]),
+			Width:  int(r.scissorRect[2]),
+			Height: int(r.scissorRect[3]),
+		})
+	}
+
+	// Depth and stencil state from the render pipeline descriptor.
+	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.DepthStencil == nil {
+		return
+	}
+	ds := r.pipeline.desc.DepthStencil
+
+	// Depth testing.
+	depthCompare := convertCompareFunction(ds.DepthCompare)
+	depthEnabled := ds.DepthCompare != gputypes.CompareFunctionUndefined &&
+		ds.DepthCompare != gputypes.CompareFunctionAlways
+	pipe.SetDepthTest(depthEnabled, depthCompare)
+	pipe.SetDepthWrite(ds.DepthWriteEnabled)
+
+	// Stencil state: use front-face state (software rasterizer does not
+	// distinguish front/back face stencil; use front as the common case).
+	sf := ds.StencilFront
+	stencilEnabled := isStencilEnabled(sf)
+	if stencilEnabled && r.passStencilBuffer != nil {
+		// Use the persistent stencil buffer created at BeginRenderPass.
+		// This is the same buffer for ALL draw calls in this pass, matching
+		// GPU behavior where the depth/stencil attachment texture persists.
+		pipe.SetStencilBuffer(r.passStencilBuffer)
+		pipe.SetStencilState(raster.StencilState{
+			Enabled:     true,
+			ReadMask:    uint8(ds.StencilReadMask),
+			WriteMask:   uint8(ds.StencilWriteMask),
+			Compare:     convertCompareFunction(sf.Compare),
+			FailOp:      convertStencilOp(sf.FailOp),
+			DepthFailOp: convertStencilOp(sf.DepthFailOp),
+			PassOp:      convertStencilOp(sf.PassOp),
+			Reference:   uint8(r.stencilRef),
+		})
+	}
+}
+
+// isStencilEnabled returns true if the stencil face state defines any
+// non-trivial operations (not all Keep + Always).
+func isStencilEnabled(sf hal.StencilFaceState) bool {
+	// WebGPU default: Compare=Always, all ops=Keep. This is effectively disabled.
+	if sf.Compare == gputypes.CompareFunctionAlways &&
+		sf.FailOp == hal.StencilOperationKeep &&
+		sf.DepthFailOp == hal.StencilOperationKeep &&
+		sf.PassOp == hal.StencilOperationKeep {
+		return false
+	}
+	// Also treat Undefined compare as disabled.
+	if sf.Compare == gputypes.CompareFunctionUndefined {
+		return false
+	}
+	return true
+}
+
+// convertCompareFunction maps gputypes.CompareFunction to raster.CompareFunc.
+func convertCompareFunction(cf gputypes.CompareFunction) raster.CompareFunc {
+	switch cf {
+	case gputypes.CompareFunctionNever:
+		return raster.CompareNever
+	case gputypes.CompareFunctionLess:
+		return raster.CompareLess
+	case gputypes.CompareFunctionEqual:
+		return raster.CompareEqual
+	case gputypes.CompareFunctionLessEqual:
+		return raster.CompareLessEqual
+	case gputypes.CompareFunctionGreater:
+		return raster.CompareGreater
+	case gputypes.CompareFunctionNotEqual:
+		return raster.CompareNotEqual
+	case gputypes.CompareFunctionGreaterEqual:
+		return raster.CompareGreaterEqual
+	case gputypes.CompareFunctionAlways:
+		return raster.CompareAlways
+	default:
+		return raster.CompareAlways
+	}
+}
+
+// convertStencilOp maps hal.StencilOperation to raster.StencilOp.
+func convertStencilOp(op hal.StencilOperation) raster.StencilOp {
+	switch op {
+	case hal.StencilOperationZero:
+		return raster.StencilOpZero
+	case hal.StencilOperationReplace:
+		return raster.StencilOpReplace
+	case hal.StencilOperationInvert:
+		return raster.StencilOpInvert
+	case hal.StencilOperationIncrementClamp:
+		return raster.StencilOpIncrementClamp
+	case hal.StencilOperationDecrementClamp:
+		return raster.StencilOpDecrementClamp
+	case hal.StencilOperationIncrementWrap:
+		return raster.StencilOpIncrementWrap
+	case hal.StencilOperationDecrementWrap:
+		return raster.StencilOpDecrementWrap
+	default: // Keep or undefined
+		return raster.StencilOpKeep
 	}
 }

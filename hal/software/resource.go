@@ -296,7 +296,7 @@ type RenderPipeline struct {
 // Used by the SPIR-V interpreter for texture filtering and addressing modes.
 type SamplerResource struct {
 	Resource
-	id   uint64         // unique ID for handle resolution
+	id   uint64 // unique ID for handle resolution
 	Desc *hal.SamplerDescriptor
 }
 
@@ -309,8 +309,8 @@ type BindGroup struct {
 	Resource
 	desc         *hal.BindGroupDescriptor
 	textureViews map[uint32]*TextureView     // binding index -> resolved texture view
-	buffers      map[uint32]*Buffer           // binding index -> resolved buffer
-	samplers     map[uint32]*SamplerResource  // binding index -> resolved sampler
+	buffers      map[uint32]*Buffer          // binding index -> resolved buffer
+	samplers     map[uint32]*SamplerResource // binding index -> resolved sampler
 }
 
 // ComputePipeline stores compute pipeline configuration for the software backend.

@@ -26,8 +26,8 @@ var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SP
 type Device struct {
 	mu           sync.RWMutex
 	textureViews map[uintptr]*TextureView     // handle -> TextureView
-	buffers      map[uintptr]*Buffer           // handle -> Buffer
-	samplers     map[uintptr]*SamplerResource  // handle -> SamplerResource
+	buffers      map[uintptr]*Buffer          // handle -> Buffer
+	samplers     map[uintptr]*SamplerResource // handle -> SamplerResource
 }
 
 // CreateBuffer creates a software buffer with real data storage.

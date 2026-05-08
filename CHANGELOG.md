@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns `IMAGE_LAYOUT_GENERAL` for mixed-usage textures (render + sample), matching Rust
   wgpu `derive_image_layout()` behavior.
 
+- **Software: persistent stencil buffer** (BUG-SW-005) — stencil buffer was recreated per
+  Draw() call, losing stencil writes from previous draws within the same render pass. On GPU
+  the stencil buffer is the depth/stencil attachment texture — persistent for the entire pass.
+  Fix: create once at BeginRenderPass, reuse for all Draw() calls. Enables stencil-based
+  clipping (gg clip_demo rounded rect clip).
+
 ### Added
 
 - **Software: OpTypeMatrix in SPIR-V interpreter** (BUG-SW-003) — `mat4x4<f32>` uniform

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/raster"
 	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
@@ -163,10 +164,29 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
 
 // BeginRenderPass begins a render pass and returns an encoder.
+// If a depth/stencil attachment is present, a persistent stencil buffer is
+// created for the entire pass (matching GPU behavior where the stencil buffer
+// is the attachment texture, not recreated per draw call).
 func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
-	return &RenderPassEncoder{
+	r := &RenderPassEncoder{
 		desc: desc,
 	}
+
+	// Create persistent stencil buffer from depth/stencil attachment.
+	if desc.DepthStencilAttachment != nil {
+		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
+			w := int(dsView.texture.width)
+			h := int(dsView.texture.height)
+			if w > 0 && h > 0 {
+				r.passStencilBuffer = raster.NewStencilBuffer(w, h)
+				if desc.DepthStencilAttachment.StencilLoadOp == gputypes.LoadOpClear {
+					r.passStencilBuffer.Clear(uint8(desc.DepthStencilAttachment.StencilClearValue))
+				}
+			}
+		}
+	}
+
+	return r
 }
 
 // BeginComputePass begins a compute pass and returns an encoder.
@@ -204,6 +224,17 @@ type RenderPassEncoder struct {
 	scissorRect [4]uint32  // x, y, w, h
 	hasViewport bool
 	hasScissor  bool
+
+	// Stencil reference value set by SetStencilReference.
+	stencilRef uint32
+
+	// Persistent stencil buffer for the render pass — created once at
+	// BeginRenderPass, reused across all Draw() calls. On GPU backends
+	// the stencil buffer is the depth/stencil attachment texture; here
+	// we emulate that by keeping a single raster.StencilBuffer alive
+	// for the entire pass. Without this, stencil writes from pass 1
+	// (clip shape) would be lost before pass 2 (content draw).
+	passStencilBuffer *raster.StencilBuffer
 
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
@@ -327,8 +358,11 @@ func (r *RenderPassEncoder) SetScissorRect(x, y, w, h uint32) {
 // SetBlendConstant is a no-op (blend constants not yet wired to raster pipeline).
 func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 
-// SetStencilReference is a no-op (stencil not yet wired).
-func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
+// SetStencilReference stores the stencil reference value for subsequent draw calls.
+// The reference value is used by stencil comparison and StencilOpReplace.
+func (r *RenderPassEncoder) SetStencilReference(ref uint32) {
+	r.stencilRef = ref
+}
 
 // Draw executes a non-indexed draw call.
 // It performs vertex fetch, viewport transform, and triangle rasterization
