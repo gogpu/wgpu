@@ -403,6 +403,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[ADR: Validation Phases](docs/dev/research/ADR-VALIDATION-PHASES.md)** — phased implementation
   plan (A: crash prevention, B: correctness, C: spec compliance)
 
+## [0.25.4] - 2026-04-23
+
+### Fixed
+
+- **Vulkan: GetTimestampPeriod returned hardcoded 1.0** — now reads
+  `VkPhysicalDeviceLimits.TimestampPeriod` from the physical device at init.
+  Previously all timestamp durations were incorrect on AMD/NVIDIA GPUs
+  (Intel typically has period=1.0, but others vary).
+
 ## [0.25.3] - 2026-04-23
 
 ### Fixed
