@@ -91,6 +91,11 @@ type Device struct {
 	// Queried during initAllocator. (BUG-VK-009 Fix 2)
 	nonCoherentAtomSize uint64
 
+	// timestampPeriod is the number of nanoseconds per timestamp query tick
+	// (from VkPhysicalDeviceLimits.TimestampPeriod). Intel typically 1.0,
+	// AMD/NVIDIA vary. Queried during initAllocator.
+	timestampPeriod float32
+
 	// mappedMemory tracks persistently mapped VkDeviceMemory objects.
 	// Vulkan only allows one active vkMapMemory per VkDeviceMemory;
 	// with suballocation multiple buffers share the same VkDeviceMemory,
@@ -211,8 +216,14 @@ func (d *Device) queryNonCoherentAtomSize() {
 	}
 	d.nonCoherentAtomSize = atomSize
 
-	hal.Logger().Debug("vulkan: nonCoherentAtomSize queried",
-		"atomSize", atomSize,
+	d.timestampPeriod = props.Limits.TimestampPeriod
+	if d.timestampPeriod <= 0 {
+		d.timestampPeriod = 1.0
+	}
+
+	hal.Logger().Debug("vulkan: device limits queried",
+		"nonCoherentAtomSize", atomSize,
+		"timestampPeriod", d.timestampPeriod,
 	)
 }
 

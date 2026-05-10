@@ -69,14 +69,40 @@ func (e *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {
 // Destroy is a no-op for OpenGL (no persistent GPU resources owned by encoder).
 func (e *CommandEncoder) Destroy() {}
 
-// TransitionBuffers transitions buffer states.
-func (e *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {
-	// No-op for OpenGL - no explicit barriers needed
+// TransitionBuffers emits memory barriers for buffer state transitions.
+// GLES only needs explicit barriers when transitioning FROM storage write
+// (compute shader output) to any other usage (vertex, uniform, draw).
+// Matches Rust wgpu-hal/gles command.rs:279-298.
+func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
+	var bits uint32
+	for _, bar := range barriers {
+		if bar.Usage.OldUsage&gputypes.BufferUsageStorage != 0 {
+			bits |= gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT |
+				gl.VERTEX_ATTRIB_ARRAY_BARRIER_BIT | gl.ELEMENT_ARRAY_BARRIER_BIT |
+				gl.UNIFORM_BARRIER_BIT | gl.COMMAND_BARRIER_BIT
+		}
+	}
+	if bits != 0 {
+		e.commands = append(e.commands, &MemoryBarrierCommand{barriers: bits})
+	}
 }
 
-// TransitionTextures transitions texture states.
-func (e *CommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {
-	// No-op for OpenGL - no explicit barriers needed
+// TransitionTextures emits memory barriers for texture state transitions.
+// GLES only needs explicit barriers when transitioning FROM storage write
+// to any other usage (texture fetch, framebuffer attachment).
+// Matches Rust wgpu-hal/gles command.rs:300-327.
+func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+	var bits uint32
+	for _, bar := range barriers {
+		if bar.Usage.OldUsage&gputypes.TextureUsageStorageBinding != 0 {
+			bits |= gl.TEXTURE_FETCH_BARRIER_BIT | gl.SHADER_IMAGE_ACCESS_BARRIER_BIT |
+				gl.FRAMEBUFFER_BARRIER_BIT | gl.TEXTURE_UPDATE_BARRIER_BIT |
+				gl.PIXEL_BUFFER_BARRIER_BIT
+		}
+	}
+	if bits != 0 {
+		e.commands = append(e.commands, &MemoryBarrierCommand{barriers: bits})
+	}
 }
 
 // ClearBuffer clears a buffer region to zero.
@@ -614,6 +640,16 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 }
 
 // --- GL Command implementations ---
+
+// MemoryBarrierCommand inserts a glMemoryBarrier call.
+// Ensures compute shader writes are visible to subsequent draw/dispatch commands.
+type MemoryBarrierCommand struct {
+	barriers uint32
+}
+
+func (c *MemoryBarrierCommand) Execute(ctx *gl.Context) {
+	ctx.MemoryBarrier(c.barriers)
+}
 
 // ClearBufferCommand clears a buffer region.
 type ClearBufferCommand struct {

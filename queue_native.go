@@ -4,13 +4,21 @@ package wgpu
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
 // Queue handles command submission and data transfers.
+//
+// Queue is safe for concurrent use from multiple goroutines. All mutating
+// operations (Submit, WriteBuffer, WriteTexture) are serialized via an
+// internal mutex, matching Rust wgpu-core which uses RwLock::write() on
+// device.fence + device.command_indices during submit (queue.rs:1171-1173).
 type Queue struct {
+	mu sync.Mutex // serializes Submit, WriteBuffer, WriteTexture (Rust wgpu parity)
+
 	hal       hal.Queue
 	halDevice hal.Device
 	device    *Device
@@ -19,6 +27,7 @@ type Queue struct {
 	// lastSubmissionIndex is the most recent submission index returned by
 	// hal.Queue.Submit(). Used by DestroyQueue to conservatively defer
 	// resource destruction until after the latest known submission completes.
+	// Protected by mu.
 	lastSubmissionIndex uint64
 }
 
@@ -29,6 +38,9 @@ type Queue struct {
 // If there are pending WriteBuffer/WriteTexture operations, they are flushed
 // and prepended before the user command buffers in a single HAL submit.
 func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if q.hal == nil {
 		return 0, fmt.Errorf("wgpu: queue not available")
 	}
@@ -210,6 +222,9 @@ func (q *Queue) Poll() uint64 {
 //
 // Matches Rust wgpu-core queue.rs:647-672 (validate_write_buffer_impl).
 func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if q.hal == nil || buffer == nil {
 		return fmt.Errorf("wgpu: WriteBuffer: queue or buffer is nil")
 	}
@@ -274,6 +289,9 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 // Resource barriers are computed from the texture's tracked CurrentUsage().
 // For GLES/Software backends, the write is performed immediately via HAL.
 func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if q.hal == nil || dst == nil {
 		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
@@ -323,8 +341,12 @@ func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
 
 // LastSubmissionIndex returns the most recent submission index.
 // Used by resource Release() methods to schedule deferred destruction.
+// Safe for concurrent use — reads under the queue mutex.
 func (q *Queue) LastSubmissionIndex() uint64 {
-	return q.lastSubmissionIndex
+	q.mu.Lock()
+	idx := q.lastSubmissionIndex
+	q.mu.Unlock()
+	return idx
 }
 
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.

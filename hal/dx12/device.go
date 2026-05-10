@@ -2532,16 +2532,7 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 	}
 }
 
-// CreateQuerySet creates a query set.
-// TODO: implement using ID3D12Device::CreateQueryHeap for full timestamp support.
-func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
-	return nil, hal.ErrTimestampsNotSupported
-}
-
-// DestroyQuerySet destroys a query set.
-func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
-	// Stub: DX12 query set implementation pending.
-}
+// CreateQuerySet and DestroyQuerySet are in query.go.
 
 // CreateCommandEncoder creates a command encoder.
 // The encoder is a lightweight shell — command allocator and list are created

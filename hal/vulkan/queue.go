@@ -704,10 +704,11 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 	return err
 }
 
-// GetTimestampPeriod returns the timestamp period in nanoseconds.
+// GetTimestampPeriod returns the timestamp period in nanoseconds per tick.
+// Queried from VkPhysicalDeviceLimits.TimestampPeriod at device init.
+// Intel typically 1.0, AMD/NVIDIA vary.
 func (q *Queue) GetTimestampPeriod() float32 {
-	// Note: Should query VkPhysicalDeviceLimits.timestampPeriod.
-	return 1.0
+	return q.device.timestampPeriod
 }
 
 // SupportsCommandBufferCopies returns true for Vulkan.

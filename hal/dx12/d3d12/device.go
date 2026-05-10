@@ -1077,6 +1077,45 @@ func (c *ID3D12GraphicsCommandList) ExecuteIndirect(
 	)
 }
 
+// EndQuery ends a query (also used for timestamp writes).
+// DX12 uses EndQuery for timestamps — there is no begin/end pair for timestamp queries.
+// Rust wgpu-hal: command.rs write_timestamp uses EndQuery with D3D12_QUERY_TYPE_TIMESTAMP.
+func (c *ID3D12GraphicsCommandList) EndQuery(queryHeap *ID3D12QueryHeap, queryType D3D12_QUERY_TYPE, index uint32) {
+	_, _, _ = syscall.Syscall6(
+		c.vtbl.EndQuery,
+		4,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(unsafe.Pointer(queryHeap)),
+		uintptr(queryType),
+		uintptr(index),
+		0, 0,
+	)
+}
+
+// ResolveQueryData copies query results from a query heap into a destination buffer.
+// The destination buffer must be in D3D12_RESOURCE_STATE_COPY_DEST state.
+// Each timestamp result is a uint64 (8 bytes).
+func (c *ID3D12GraphicsCommandList) ResolveQueryData(
+	queryHeap *ID3D12QueryHeap,
+	queryType D3D12_QUERY_TYPE,
+	startIndex, numQueries uint32,
+	destinationBuffer *ID3D12Resource,
+	alignedDestinationBufferOffset uint64,
+) {
+	_, _, _ = syscall.Syscall9(
+		c.vtbl.ResolveQueryData,
+		7,
+		uintptr(unsafe.Pointer(c)),
+		uintptr(unsafe.Pointer(queryHeap)),
+		uintptr(queryType),
+		uintptr(startIndex),
+		uintptr(numQueries),
+		uintptr(unsafe.Pointer(destinationBuffer)),
+		uintptr(alignedDestinationBufferOffset),
+		0, 0,
+	)
+}
+
 // -----------------------------------------------------------------------------
 // ID3D12Fence methods
 // -----------------------------------------------------------------------------

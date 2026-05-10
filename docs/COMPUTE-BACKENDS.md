@@ -8,7 +8,7 @@ This document describes compute shader support across wgpu's HAL backends.
 |---------|:------:|:----:|:-----:|:----:|:--------:|:----:|
 | Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | No |
 | Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | No |
-| Timestamp queries | Yes | Stub | Stub | Stub | No | No |
+| Timestamp queries | Yes | Yes | Stub | Stub | No | No |
 | Indirect dispatch | Yes | Yes | Yes | Yes | No | No |
 | Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | No |
 | Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | N/A |
@@ -35,10 +35,10 @@ Vulkan provides the most complete compute shader implementation:
 
 ## DirectX 12
 
-**Status:** Compute shaders work. Timestamp queries are stubbed.
+**Status:** Compute shaders work. Timestamp queries supported.
 
 - **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, SM 6.0+, no external dependencies).
-- **Timestamp queries:** `CreateQuerySet` currently returns `ErrTimestampsNotSupported`. The underlying D3D12 API supports timestamp queries via `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Implementation is planned.
+- **Timestamp queries:** Fully implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup (D3D12 spec).
 - **Indirect dispatch:** `DispatchIndirect` via `ExecuteIndirect` with pre-created `ID3D12CommandSignature` (dispatch args: 3 × uint32 = 12 bytes). Also supports `DrawIndirect` (16B) and `DrawIndexedIndirect` (20B).
 - **Root signature:** Compute pipelines use a separate root signature from graphics pipelines. Descriptor heaps are bound lazily on first `SetBindGroup` call.

@@ -181,7 +181,7 @@ full design rationale and comparison with Rust wgpu.
 
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)
 
-Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
+Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan, DX12), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
 
 ---
 

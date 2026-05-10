@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.2] - 2026-05-10
+
+### Added
+
+- **DX12: timestamp queries** — `CreateQuerySet`, `DestroyQuerySet`, `ResolveQuerySet`,
+  begin/end-of-pass timestamp writes. Uses `EndQuery` for timestamps (DX12 pattern, not
+  begin/end pair). FFI wrappers: `EndQuery`, `ResolveQueryData`. Matches Rust wgpu-hal
+  dx12 command.rs:834-887.
+
+### Fixed
+
+- **Vulkan: GetTimestampPeriod** returned hardcoded 1.0 — now reads
+  `VkPhysicalDeviceLimits.TimestampPeriod` at device init. Previously incorrect on
+  AMD/NVIDIA GPUs.
+- **GLES: compute memory barriers** — `TransitionBuffers`/`TransitionTextures` were no-ops.
+  Compute shader writes not guaranteed visible to subsequent draw/dispatch. Now emits
+  `glMemoryBarrier` with appropriate barrier bits when transitioning from storage usage.
+  Matches Rust wgpu-hal/gles command.rs:279-327.
+- **Queue thread safety** — `Submit`, `WriteBuffer`, `WriteTexture`, `LastSubmissionIndex`
+  serialized via `sync.Mutex`. Matches Rust wgpu-core which uses `RwLock::write()` on
+  `device.fence` + `device.command_indices` during submit (queue.rs:1171-1173). Prevents
+  data race on `lastSubmissionIndex` from concurrent goroutines.
+
 ## [0.27.1] - 2026-05-08
 
 ### Fixed
@@ -402,6 +425,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison vs Rust wgpu-core. Coverage: 22% → ~37% after Phase A.
 - **[ADR: Validation Phases](docs/dev/research/ADR-VALIDATION-PHASES.md)** — phased implementation
   plan (A: crash prevention, B: correctness, C: spec compliance)
+
+## [0.25.4] - 2026-04-23
+
+### Fixed
+
+- **Vulkan: GetTimestampPeriod returned hardcoded 1.0** — now reads
+  `VkPhysicalDeviceLimits.TimestampPeriod` from the physical device at init.
+  Previously all timestamp durations were incorrect on AMD/NVIDIA GPUs
+  (Intel typically has period=1.0, but others vary).
 
 ## [0.25.3] - 2026-04-23
 

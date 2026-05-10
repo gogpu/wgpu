@@ -431,9 +431,66 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 }
 
 // ResolveQuerySet copies query results from a query set into a destination buffer.
-// TODO: implement using ID3D12GraphicsCommandList::ResolveQueryData when QuerySet is implemented.
-func (e *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {
-	// Stub: DX12 timestamp query implementation pending.
+// Each timestamp result is a uint64 (8 bytes).
+// Rust wgpu-hal reference: dx12/command.rs copy_query_results.
+func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
+	if !e.isRecording {
+		return
+	}
+	qs, ok := querySet.(*QuerySet)
+	if !ok || qs == nil || qs.raw == nil {
+		return
+	}
+	buf, ok := destination.(*Buffer)
+	if !ok || buf == nil || buf.raw == nil {
+		return
+	}
+	e.cmdList.ResolveQueryData(qs.raw, qs.rawTy, firstQuery, queryCount, buf.raw, destinationOffset)
+}
+
+// timestampWrites is a common interface for render/compute pass timestamp writes.
+// Both hal.RenderPassTimestampWrites and hal.ComputePassTimestampWrites share
+// the same fields; this interface avoids duplicating extraction logic.
+type timestampWrites interface {
+	querySet() hal.QuerySet
+	beginIndex() *uint32
+	endIndex() *uint32
+}
+
+type renderTSW struct {
+	w *hal.RenderPassTimestampWrites
+}
+
+func (r renderTSW) querySet() hal.QuerySet { return r.w.QuerySet }
+func (r renderTSW) beginIndex() *uint32    { return r.w.BeginningOfPassWriteIndex }
+func (r renderTSW) endIndex() *uint32      { return r.w.EndOfPassWriteIndex }
+
+type computeTSW struct {
+	w *hal.ComputePassTimestampWrites
+}
+
+func (c computeTSW) querySet() hal.QuerySet { return c.w.QuerySet }
+func (c computeTSW) beginIndex() *uint32    { return c.w.BeginningOfPassWriteIndex }
+func (c computeTSW) endIndex() *uint32      { return c.w.EndOfPassWriteIndex }
+
+// writeBeginTimestamp writes the beginning-of-pass timestamp (if requested) and
+// returns the query heap + index for the end-of-pass timestamp write.
+// DX12 uses EndQuery for timestamps (NOT begin/end pair).
+// Rust wgpu-hal reference: dx12/command.rs begin_render_pass / begin_compute_pass.
+func (e *CommandEncoder) writeBeginTimestamp(halQS hal.QuerySet, tw timestampWrites) (*d3d12.ID3D12QueryHeap, uint32) {
+	qs, ok := halQS.(*QuerySet)
+	if !ok || qs == nil || qs.raw == nil {
+		return nil, 0
+	}
+
+	if idx := tw.beginIndex(); idx != nil {
+		e.cmdList.EndQuery(qs.raw, d3d12.D3D12_QUERY_TYPE_TIMESTAMP, *idx)
+	}
+
+	if idx := tw.endIndex(); idx != nil {
+		return qs.raw, *idx
+	}
+	return nil, 0
 }
 
 // BeginRenderPass begins a render pass.
@@ -532,15 +589,27 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		e.cmdList.RSSetScissorRects(1, &scissor)
 	}
 
+	// Write beginning-of-pass timestamp and store end-of-pass for later.
+	if desc.TimestampWrites != nil {
+		tw := renderTSW{desc.TimestampWrites}
+		rpe.endOfPassTimerHeap, rpe.endOfPassTimerIndex = e.writeBeginTimestamp(tw.querySet(), tw)
+	}
+
 	return rpe
 }
 
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	_ = desc // Compute passes don't need special setup in D3D12
-	return &ComputePassEncoder{
+	cpe := &ComputePassEncoder{
 		encoder: e,
 	}
+
+	if e.isRecording && desc != nil && desc.TimestampWrites != nil {
+		tw := computeTSW{desc.TimestampWrites}
+		cpe.endOfPassTimerHeap, cpe.endOfPassTimerIndex = e.writeBeginTimestamp(tw.querySet(), tw)
+	}
+
+	return cpe
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for DirectX 12.
@@ -550,14 +619,28 @@ type RenderPassEncoder struct {
 	pipeline           *RenderPipeline
 	indexFormat        gputypes.IndexFormat
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
+
+	// endOfPassTimerQuery stores the query heap and index for the end-of-pass
+	// timestamp write. Set during BeginRenderPass, consumed in End().
+	// Rust wgpu-hal reference: dx12/mod.rs end_of_pass_timer_query field.
+	endOfPassTimerHeap  *d3d12.ID3D12QueryHeap
+	endOfPassTimerIndex uint32
 }
 
 // End finishes the render pass.
-// Handles MSAA resolve (if ResolveTarget is set) and transitions surface
-// textures back to PRESENT state for presentation.
+// Handles MSAA resolve (if ResolveTarget is set), writes end-of-pass
+// timestamp, and transitions surface textures back to PRESENT state.
 func (e *RenderPassEncoder) End() {
 	if e.desc == nil || e.encoder == nil || !e.encoder.isRecording {
 		return
+	}
+
+	// Write end-of-pass timestamp before state transitions.
+	// Rust wgpu-hal reference: dx12/command.rs end_render_pass calls
+	// write_pass_end_timestamp_if_requested after resolves but before end_pass.
+	if e.endOfPassTimerHeap != nil {
+		e.encoder.cmdList.EndQuery(e.endOfPassTimerHeap, d3d12.D3D12_QUERY_TYPE_TIMESTAMP, e.endOfPassTimerIndex)
+		e.endOfPassTimerHeap = nil
 	}
 
 	for _, ca := range e.desc.ColorAttachments {
@@ -860,11 +943,24 @@ type ComputePassEncoder struct {
 	// dispatch via BufferUsageScope, then drains barriers on state transitions
 	// (wgpu-core/src/command/compute.rs:326-377).
 	boundStorageBuffers []*Buffer
+
+	// endOfPassTimerQuery stores the query heap and index for the end-of-pass
+	// timestamp write. Set during BeginComputePass, consumed in End().
+	endOfPassTimerHeap  *d3d12.ID3D12QueryHeap
+	endOfPassTimerIndex uint32
 }
 
 // End finishes the compute pass.
+// Writes end-of-pass timestamp if requested.
+// Rust wgpu-hal reference: dx12/command.rs end_compute_pass.
 func (e *ComputePassEncoder) End() {
-	// No explicit end needed for D3D12 compute passes
+	if e.encoder == nil || !e.encoder.isRecording {
+		return
+	}
+	if e.endOfPassTimerHeap != nil {
+		e.encoder.cmdList.EndQuery(e.endOfPassTimerHeap, d3d12.D3D12_QUERY_TYPE_TIMESTAMP, e.endOfPassTimerIndex)
+		e.endOfPassTimerHeap = nil
+	}
 }
 
 // SetPipeline sets the compute pipeline.
