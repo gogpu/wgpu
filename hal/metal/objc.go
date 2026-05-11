@@ -348,7 +348,14 @@ func alignUp(val, align uintptr) uintptr {
 	return val + (align - rem)
 }
 
-// MsgSend calls an Objective-C method on an object.
+// MsgSend calls an Objective-C method on an object and returns the result as ID.
+//
+// For void-returning ObjC methods (setters like setTextureType:, setLabel:,
+// commit, waitUntilCompleted), the return value is meaningless — objc_msgSend
+// always returns a register-sized value regardless of the method's actual return
+// type. Callers discard with `_ = MsgSend(...)`. This is the standard pattern
+// for Go↔ObjC bridges without CGO; Rust wgpu-hal/metal uses the same approach
+// via the objc crate's msg_send! macro which also ignores void returns.
 func MsgSend(obj ID, sel SEL, args ...uintptr) ID {
 	return msgSendID(obj, sel, pointerArgs(args)...)
 }
