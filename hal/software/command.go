@@ -3,7 +3,9 @@
 package software
 
 import (
+	"context"
 	"fmt"
+	"image"
 	"log/slog"
 
 	"github.com/gogpu/gputypes"
@@ -172,6 +174,22 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		desc: desc,
 	}
 
+	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
+		var w, h uint32
+		loadOp := gputypes.LoadOpClear
+		if len(desc.ColorAttachments) > 0 {
+			loadOp = desc.ColorAttachments[0].LoadOp
+			if tv, ok := desc.ColorAttachments[0].View.(*TextureView); ok && tv.texture != nil {
+				w, h = tv.texture.width, tv.texture.height
+			}
+		}
+		hal.Logger().Debug("software: BeginRenderPass",
+			"width", w, "height", h,
+			"colorLoadOp", loadOp,
+			"attachments", len(desc.ColorAttachments),
+		)
+	}
+
 	// Create persistent stencil buffer from depth/stencil attachment.
 	if desc.DepthStencilAttachment != nil { //nolint:nestif // sequential attachment init
 		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
@@ -239,12 +257,21 @@ type RenderPassEncoder struct {
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
 	cleared bool
+
+	// drawCount tracks total Draw/DrawIndexed calls for Stats().
+	drawCount uint32
 }
 
 // End finishes the render pass.
 // If no draw calls were issued and LoadOp is Clear, the clear is applied now.
 // MSAA resolve: copies color attachment pixels to resolve target (WebGPU spec).
 func (r *RenderPassEncoder) End() {
+	hal.Logger().Debug("software: End",
+		"draws", r.drawCount,
+		"hasScissor", r.hasScissor,
+		"scissor", r.scissorRect,
+	)
+
 	// If no draw happened, apply pending clears.
 	if !r.cleared {
 		r.applyClear()
@@ -353,6 +380,7 @@ func (r *RenderPassEncoder) SetViewport(x, y, w, h, minDepth, maxDepth float32) 
 func (r *RenderPassEncoder) SetScissorRect(x, y, w, h uint32) {
 	r.scissorRect = [4]uint32{x, y, w, h}
 	r.hasScissor = true
+	hal.Logger().Debug("software: SetScissorRect", "x", x, "y", y, "w", w, "h", h)
 }
 
 // SetBlendConstant is a no-op (blend constants not yet wired to raster pipeline).
@@ -371,6 +399,8 @@ func (r *RenderPassEncoder) SetStencilReference(ref uint32) {
 // Supports instanced rendering: instanceCount > 1 draws the same vertices
 // multiple times, advancing instance-rate vertex buffers per instance.
 func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	r.drawCount++
+	hal.Logger().Debug("software: Draw", "vertices", vertexCount, "instances", instanceCount, "drawIndex", r.drawCount)
 	r.executeDraw(vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
@@ -385,6 +415,29 @@ func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64) {}
 
 // ExecuteBundle is a no-op.
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
+
+// Stats returns render pass statistics after End(). Designed for CI e2e
+// test assertions — zero overhead (fields already tracked during encoding).
+func (r *RenderPassEncoder) Stats() RenderPassStats {
+	s := RenderPassStats{
+		DrawCount:  r.drawCount,
+		HasScissor: r.hasScissor,
+	}
+	if r.hasScissor {
+		s.ScissorRect = image.Rect(
+			int(r.scissorRect[0]), int(r.scissorRect[1]),
+			int(r.scissorRect[0]+r.scissorRect[2]), int(r.scissorRect[1]+r.scissorRect[3]),
+		)
+	}
+	if r.desc != nil && len(r.desc.ColorAttachments) > 0 {
+		s.ColorLoadOp = r.desc.ColorAttachments[0].LoadOp
+		if tv, ok := r.desc.ColorAttachments[0].View.(*TextureView); ok && tv.texture != nil {
+			s.Width = tv.texture.width
+			s.Height = tv.texture.height
+		}
+	}
+	return s
+}
 
 // ComputePassEncoder implements hal.ComputePassEncoder for the software backend.
 // It collects pipeline and bind group state, then executes the SPIR-V interpreter
