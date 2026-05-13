@@ -275,18 +275,18 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 		return
 	}
 
-	// Convert to Vulkan buffer memory barriers
-	bufferBarriers := make([]vk.BufferMemoryBarrier, len(barriers))
-	for i, b := range barriers {
+	bufferBarriers := make([]vk.BufferMemoryBarrier, 0, len(barriers))
+	for _, b := range barriers {
 		buf, ok := b.Buffer.(*Buffer)
-		if !ok {
+		if !ok || buf.handle == 0 {
+			hal.Logger().Warn("TransitionBuffers: skipping invalid buffer (nil or destroyed)")
 			continue
 		}
 
 		srcAccess, srcStage := bufferUsageToAccessAndStage(b.Usage.OldUsage)
 		dstAccess, dstStage := bufferUsageToAccessAndStage(b.Usage.NewUsage)
 
-		bufferBarriers[i] = vk.BufferMemoryBarrier{
+		bufferBarriers = append(bufferBarriers, vk.BufferMemoryBarrier{
 			SType:               vk.StructureTypeBufferMemoryBarrier,
 			SrcAccessMask:       srcAccess,
 			DstAccessMask:       dstAccess,
@@ -295,14 +295,16 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 			Buffer:              buf.handle,
 			Offset:              0,
 			Size:                vk.DeviceSize(vk.WholeSize),
-		}
+		})
 
-		// Track pipeline stages for the barrier command
 		_ = srcStage
 		_ = dstStage
 	}
 
-	// Use vkCmdPipelineBarrier with buffer memory barriers
+	if len(bufferBarriers) == 0 {
+		return
+	}
+
 	vkCmdPipelineBarrier(
 		e.device.cmds,
 		e.active,
@@ -321,18 +323,18 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 		return
 	}
 
-	// Convert to Vulkan image memory barriers
-	imageBarriers := make([]vk.ImageMemoryBarrier, len(barriers))
-	for i, b := range barriers {
+	imageBarriers := make([]vk.ImageMemoryBarrier, 0, len(barriers))
+	for _, b := range barriers {
 		tex, ok := b.Texture.(*Texture)
-		if !ok {
+		if !ok || tex.handle == 0 {
+			hal.Logger().Warn("TransitionTextures: skipping invalid texture (nil or destroyed)")
 			continue
 		}
 
 		srcAccess, srcStage, oldLayout := textureUsageToAccessStageLayout(b.Usage.OldUsage)
 		dstAccess, dstStage, newLayout := textureUsageToAccessStageLayout(b.Usage.NewUsage)
 
-		imageBarriers[i] = vk.ImageMemoryBarrier{
+		imageBarriers = append(imageBarriers, vk.ImageMemoryBarrier{
 			SType:               vk.StructureTypeImageMemoryBarrier,
 			SrcAccessMask:       srcAccess,
 			DstAccessMask:       dstAccess,
@@ -348,10 +350,14 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 				BaseArrayLayer: b.Range.BaseArrayLayer,
 				LayerCount:     arrayLayerCountOrRemaining(b.Range.ArrayLayerCount),
 			},
-		}
+		})
 
 		_ = srcStage
 		_ = dstStage
+	}
+
+	if len(imageBarriers) == 0 {
+		return
 	}
 
 	vkCmdPipelineBarrier(

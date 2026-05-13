@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.27.4
+## Current State: v0.27.5
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -149,6 +149,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.27.5** | 2026-05 | Defensive NULL handle guard in TransitionTextures/Buffers (Vulkan, DX12, public API). Prevents crash on destroyed resource barriers. |
 | **v0.27.4** | 2026-05 | goffi v0.5.1 (struct ABI, XMM return, CGO_ENABLED=1), x/sys v0.44.0, flaky TestThread_CallAsync fix |
 | **v0.27.3** | 2026-05 | Software render pass instrumentation (slog + RenderPassStats), Metal MsgSend docs |
 | **v0.27.2** | 2026-05 | DX12 timestamp queries, Queue mutex, GLES compute barriers, Vulkan timestampPeriod fix |

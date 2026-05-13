@@ -158,14 +158,14 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 	d3dBarriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(barriers))
 	for _, b := range barriers {
 		buf, ok := b.Buffer.(*Buffer)
-		if !ok {
+		if !ok || buf.raw == nil {
+			hal.Logger().Warn("TransitionBuffers: skipping invalid buffer (nil or destroyed)")
 			continue
 		}
 
 		beforeState := bufferUsageToD3D12State(b.Usage.OldUsage)
 		afterState := bufferUsageToD3D12State(b.Usage.NewUsage)
 
-		// Skip if no transition needed
 		if beforeState == afterState {
 			continue
 		}
@@ -188,7 +188,8 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	d3dBarriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(barriers))
 	for _, b := range barriers {
 		tex, ok := b.Texture.(*Texture)
-		if !ok {
+		if !ok || tex.raw == nil {
+			hal.Logger().Warn("TransitionTextures: skipping invalid texture (nil or destroyed)")
 			continue
 		}
 

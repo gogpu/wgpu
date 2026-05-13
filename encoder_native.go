@@ -246,11 +246,16 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	if raw == nil {
 		return
 	}
-	halBarriers := make([]hal.TextureBarrier, len(barriers))
-	for i, b := range barriers {
-		halBarriers[i] = b.toHAL()
+	halBarriers := make([]hal.TextureBarrier, 0, len(barriers))
+	for _, b := range barriers {
+		if b.Texture == nil || b.Texture.hal == nil {
+			continue
+		}
+		halBarriers = append(halBarriers, b.toHAL())
 	}
-	raw.TransitionTextures(halBarriers)
+	if len(halBarriers) > 0 {
+		raw.TransitionTextures(halBarriers)
+	}
 }
 
 // DiscardEncoding discards the encoder without producing a command buffer.

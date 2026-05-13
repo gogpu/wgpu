@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.5] - 2026-05-14
+
+### Fixed
+
+- **Vulkan: crash on destroyed texture barrier** — `TransitionTextures` passed NULL VkImage
+  to `vkCmdPipelineBarrier` when a destroyed texture (handle=0) was in the barrier array,
+  causing access violation (Exception 0xc0000005 at address 0x23e). Now skips invalid
+  barriers with a warning log. Same fix applied to `TransitionBuffers`.
+  Rust wgpu prevents this at the core layer via `Snatchable<TextureInner>` + `SnatchGuard`.
+  Our fix adds defense-in-depth at three levels:
+  1. **Public API** (`encoder_native.go`) — filters nil/destroyed textures before HAL
+  2. **Vulkan HAL** (`hal/vulkan/command.go`) — skips barriers with handle=0
+  3. **DX12 HAL** (`hal/dx12/command.go`) — skips barriers with nil raw resource
+
 ## [0.27.4] - 2026-05-13
 
 ### Fixed

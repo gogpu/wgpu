@@ -282,6 +282,63 @@ func TestResetAllRecyclesCBs(t *testing.T) {
 	}
 }
 
+// TestTransitionTexturesDestroyedHandle verifies that TransitionTextures
+// skips barriers with a destroyed texture (handle == 0) instead of crashing.
+// Regression test for vkCmdPipelineBarrier access violation (0xc0000005).
+func TestTransitionTexturesDestroyedHandle(t *testing.T) {
+	enc := &CommandEncoder{
+		device: &Device{},
+		active: 42,
+	}
+
+	// Should not panic — destroyed texture (handle=0) is skipped.
+	enc.TransitionTextures([]hal.TextureBarrier{
+		{Texture: &Texture{handle: 0}},
+	})
+}
+
+// TestTransitionTexturesNilTexture verifies that TransitionTextures
+// skips barriers with a nil texture interface.
+func TestTransitionTexturesNilTexture(t *testing.T) {
+	enc := &CommandEncoder{
+		device: &Device{},
+		active: 42,
+	}
+
+	// Should not panic — nil texture is skipped.
+	enc.TransitionTextures([]hal.TextureBarrier{
+		{Texture: nil},
+	})
+}
+
+// TestTransitionBuffersDestroyedHandle verifies that TransitionBuffers
+// skips barriers with a destroyed buffer (handle == 0) instead of crashing.
+func TestTransitionBuffersDestroyedHandle(t *testing.T) {
+	enc := &CommandEncoder{
+		device: &Device{},
+		active: 42,
+	}
+
+	// Should not panic — destroyed buffer (handle=0) is skipped.
+	enc.TransitionBuffers([]hal.BufferBarrier{
+		{Buffer: &Buffer{handle: 0}},
+	})
+}
+
+// TestTransitionBuffersNilBuffer verifies that TransitionBuffers
+// skips barriers with a nil buffer interface.
+func TestTransitionBuffersNilBuffer(t *testing.T) {
+	enc := &CommandEncoder{
+		device: &Device{},
+		active: 42,
+	}
+
+	// Should not panic — nil buffer is skipped.
+	enc.TransitionBuffers([]hal.BufferBarrier{
+		{Buffer: nil},
+	})
+}
+
 // TestAllocationGranularity verifies the batch allocation constant.
 func TestAllocationGranularity(t *testing.T) {
 	if allocationGranularity != 16 {
