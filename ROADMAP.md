@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.27.0
+## Current State: v0.27.4
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -53,12 +53,16 @@
 ✅ **Zero-init workgroup memory** — WebGPU spec default, plumbed through all layers
 ✅ **CopyTextureToTexture public API** — DMA hardware copy with sub-region support
 ✅ **Vulkan relay semaphores** — GPU-side submission ordering (Mesa ANV workaround)
-✅ **Software SPIR-V interpreter** — CPU shader execution for vertex/fragment (Phase 1: triangle)
 ✅ **WASM platform split** — root package _native.go/_browser.go, core/hal excluded from WASM build
 ✅ **Vulkan command buffer free list** — batch alloc 16 CBs, pool reset (Khronos/NVIDIA/ARM/Mesa/Rust parity)
 ✅ **Damage-aware surface presentation** — `PresentWithDamage()` with compositor dirty rects. First WebGPU implementation. Software + Vulkan + DX12 + GLES backends.
 ✅ **Automatic resource lifecycle** — `runtime.AddCleanup` for Buffer/BindGroup (ADR-018, Rust Arc+Drop pattern). GC safety net prevents per-frame resource leaks.
 ✅ **Zero-allocation WriteBuffer batching** — pre-allocated BufferCopy + stack barrier arrays. All PendingWrites hot paths 0 allocs/op.
+✅ **Full SPIR-V interpreter** — 7 phases (~10K LOC): vertex/fragment/compute on CPU, texture sampling, GLSL.std.450 intrinsics, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. For debugging/CI, not production.
+✅ **DX12 timestamp queries** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity)
+✅ **Queue thread safety** — Submit/WriteBuffer/WriteTexture serialized via sync.Mutex (Rust wgpu-core parity)
+✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
+✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -70,7 +74,7 @@
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
 | GLES | Windows, Linux | ✅ Stable — text rendering, SamplerBindMap, texture completeness |
-| Software | Windows, Linux | ✅ Stable — windowed presentation (GDI/X11), macOS planned |
+| Software | Windows, Linux | ✅ Stable — windowed presentation (GDI/X11), SPIR-V interpreter, macOS planned (#163) |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
@@ -78,11 +82,12 @@
 
 ## Upcoming
 
-### Next: v0.26.0
+### Next
 
+- [ ] GLES Phase 1 — CopyBufferToTexture, CopyTextureToTexture, glFenceSync
+- [ ] macOS software presentation — CGImage + CALayer (#163, contributor @k-chimi)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
-- [ ] Vulkan relay semaphores for multi-submission ordering (VK-SYNC-001)
 - [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
 - [ ] DXIL as default DX12 shader path (currently opt-in via `GOGPU_DX12_DXIL=1`)
 
@@ -98,7 +103,7 @@
 - [x] Text rendering on all GPU backends
 - [x] Blend constant tracking + resource usage conflict detection
 - [ ] Full render/compute pass validation (resource transitions)
-- [ ] Late buffer binding size validation (SPIR-V reflection → min binding size)
+- [x] Late buffer binding size validation (VAL-006, draw/dispatch-time checks)
 - [ ] Comprehensive documentation
 - [ ] Conformance test suite
 
@@ -144,6 +149,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.27.4** | 2026-05 | goffi v0.5.1 (struct ABI, XMM return, CGO_ENABLED=1), x/sys v0.44.0, flaky TestThread_CallAsync fix |
+| **v0.27.3** | 2026-05 | Software render pass instrumentation (slog + RenderPassStats), Metal MsgSend docs |
+| **v0.27.2** | 2026-05 | DX12 timestamp queries, Queue mutex, GLES compute barriers, Vulkan timestampPeriod fix |
+| **v0.27.1** | 2026-05 | MSAA resolve LoadOp=CLEAR, Vulkan offscreen ImageLayoutGeneral, persistent stencil, naga v0.17.13 |
 | **v0.27.0** | 2026-05 | **Full SPIR-V interpreter** (7 phases, ~10K LOC), shader debugger, compute HAL, particles rendering, tagged union optimization, naga v0.17.11, flaky test fix |
 | **v0.26.12** | 2026-05 | **Test coverage** (core 85.5%, root 78.4%), Metal entry point fix (#168 by @k-chimi), naga v0.17.10 |
 | **v0.26.11** | 2026-04 | **DX12 indirect dispatch/draw** — ExecuteIndirect + CommandSignature (was last GPU backend with stubs) |

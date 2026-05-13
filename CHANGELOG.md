@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.4] - 2026-05-13
+
+### Fixed
+
+- **Flaky TestThread_CallAsync on Windows CI** — replaced `time.Sleep(10ms)` with
+  channel-based synchronization. Same deterministic pattern as SnatchLock fix (f940eb7).
+  Verified: 100/100 passes with `-count=100`.
+
+### Changed
+
+- **goffi v0.5.0 → v0.5.1** — struct by-value argument passing (System V AMD64 ABI),
+  9-16B struct return via XMM registers (NSPoint, CGSize — critical for Metal backend),
+  callback struct arguments, CGO_ENABLED=1 support (race detector), E2E test infra.
+  Contributors: @jiyeyuran (CGO), @pekim (callbacks).
+- **x/sys v0.43.0 → v0.44.0** — latest platform syscall definitions.
+
 ## [0.27.3] - 2026-05-11
 
 ### Added

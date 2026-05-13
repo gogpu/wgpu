@@ -54,7 +54,7 @@ go get github.com/gogpu/wgpu
 CGO_ENABLED=0 go build
 ```
 
-> **Note:** wgpu uses Pure Go FFI via `cgo_import_dynamic`, which requires `CGO_ENABLED=0`. This enables zero C compiler dependency and easy cross-compilation.
+> **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
 
 ---
 
