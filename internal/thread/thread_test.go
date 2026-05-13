@@ -6,21 +6,19 @@
 package thread
 
 import (
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestThread_CallVoid(t *testing.T) {
 	th := New()
 	defer th.Stop()
 
-	var called atomic.Bool
+	var called bool
 	th.CallVoid(func() {
-		called.Store(true)
+		called = true
 	})
 
-	if !called.Load() {
+	if !called {
 		t.Error("CallVoid did not execute function")
 	}
 }
@@ -42,17 +40,12 @@ func TestThread_CallAsync(t *testing.T) {
 	th := New()
 	defer th.Stop()
 
-	var called atomic.Bool
+	done := make(chan struct{})
 	th.CallAsync(func() {
-		called.Store(true)
+		close(done)
 	})
 
-	// Wait for async call to complete
-	time.Sleep(10 * time.Millisecond)
-
-	if !called.Load() {
-		t.Error("CallAsync did not execute function")
-	}
+	<-done
 }
 
 func TestThread_Stop(t *testing.T) {
