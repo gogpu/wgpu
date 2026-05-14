@@ -386,6 +386,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - [WebGPU Specification](https://www.w3.org/TR/webgpu/) — W3C standard
 - [wgpu (Rust)](https://github.com/gfx-rs/wgpu) — Reference implementation
 - [Dawn (C++)](https://dawn.googlesource.com/dawn) — Google's implementation
+- [Architecture Deep-Dive (Chinese)](https://chenxutan.com/d/1987.html) — Performance benchmarks, Snatchable pattern analysis, zero-alloc hot paths
 
 ---
 
