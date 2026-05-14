@@ -1,4 +1,4 @@
-//go:build !windows && !linux && !(js && wasm)
+//go:build !windows && !linux && !darwin && !(js && wasm)
 
 package software
 
