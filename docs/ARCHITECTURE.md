@@ -12,23 +12,22 @@ This document describes the architecture of `wgpu` — a Pure Go WebGPU implemen
 └──────────────────────┬──────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────┐
-│              Root Package (wgpu/)                │
+│              Root Package (wgpu/)               │
 │  Safe, ergonomic public API (WebGPU-aligned)    │
 │  Instance · Adapter · Device · Queue · Buffer   │
-│  Texture · Pipeline · CommandEncoder · Surface   │
-└──────────────────────┬──────────────────────────┘
-                       │ wraps
-┌──────────────────────▼──────────────────────────┐
-│                  core/                          │
-│      Validation, state tracking, error scopes   │
-│   (Instance, Adapter, Device, Queue, Pipeline)  │
-└──────────────────────┬──────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────┐
+│  Texture · Pipeline · CommandEncoder · Surface  │
+└──────────┬──────────────────────────┬───────────┘
+           │ native                   │ browser (WASM)
+           │ *_native.go              │ *_browser.go
+┌──────────▼──────────┐   ┌──────────▼───────────┐
+│       core/         │   │  internal/browser/   │
+│  Validation, state  │   │  syscall/js →        │
+│  tracking, scopes   │   │  navigator.gpu       │
+└──────────┬──────────┘   │  (bypasses core/hal) │
+           │              └──────────────────────┘
+┌──────────▼──────────────────────────────────────┐
 │                  hal/                           │
 │     Hardware Abstraction Layer (interfaces)     │
-│  Backend · Instance · Adapter · Device · Queue  │
-│  CommandEncoder · RenderPass · ComputePass      │
 └──────┬────────┬────────┬────────┬────────┬──────┘
        │        │        │        │        │
 ┌──────▼──┐┌───▼────┐┌──▼───┐┌────▼───┐┌───▼──────┐
@@ -154,6 +153,27 @@ Use cases: **shader debugging** (step through every SPIR-V instruction), **CI/CD
 
 Stub implementation for testing. All operations succeed without GPU interaction.
 
+### `internal/browser/` — Browser WebGPU Backend
+
+Browser WebGPU via `syscall/js` → `navigator.gpu`. Bypasses `core/` and `hal/` entirely — browser validates internally (same W3C spec as our public API). Matches Rust wgpu's `backend/webgpu.rs` top-level bypass architecture.
+
+```
+wgpu public API
+  ├── [native]  core/ → hal/ → Vulkan/Metal/DX12/GLES/Software
+  └── [browser] internal/browser/ → syscall/js → navigator.gpu
+```
+
+- Build tags: `//go:build js && wasm` on all browser files
+- Root `*_browser.go` files are thin wrappers delegating to `internal/browser/`
+- Pre-bound JS methods (Ebiten pattern): `method.Call("bind", obj)` at construction, avoiding `.Get()` on hot paths
+- Promise→goroutine: `AwaitPromise()` blocks via `Promise.then/catch` + channel
+- Data transfer: `js.CopyBytesToGo`/`js.CopyBytesToJS` for GPU↔CPU
+- Shaders: WGSL string passthrough to browser `createShaderModule()` — no naga on browser path
+- Surface: HTML Canvas + `GPUCanvasContext`, present is no-op (browser auto-presents)
+- ~6500 LOC total (4000 internal/browser + 2500 root wrappers), zero external dependencies
+
+Key files: `promise.go` (async→sync), `convert_enums.go` (97 TextureFormats, 31 VertexFormats + all WebGPU enums), `convert_resources.go` (JS descriptor builders), `surface.go` (Canvas + GPUCanvasContext).
+
 ## Backend Registration
 
 Backends register via `init()` functions. Import `hal/allbackends` to auto-register platform-appropriate backends:
@@ -261,5 +281,6 @@ gogpu (app framework) / gg (2D graphics)
 
 External dependencies:
 - `github.com/gogpu/naga` — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
-- `github.com/gogpu/gputypes` v0.4.0 — shared WebGPU type definitions
-- `github.com/go-webgpu/goffi` v0.5.0 — Pure Go FFI for Vulkan/Metal symbol loading
+- `github.com/gogpu/gputypes` v0.5.0 — shared WebGPU type definitions
+- `github.com/go-webgpu/goffi` v0.5.1 — Pure Go FFI for Vulkan/Metal symbol loading
+- `golang.org/x/sys` v0.44.0 — platform syscall definitions

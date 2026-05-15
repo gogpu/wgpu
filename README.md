@@ -30,8 +30,8 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software |
-| **Platforms** | Windows, Linux, macOS, iOS, Browser (WASM — in progress) |
+| **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU** |
+| **Platforms** | Windows, Linux, macOS, iOS, **Browser (WASM)** |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |
@@ -55,6 +55,13 @@ CGO_ENABLED=0 go build
 ```
 
 > **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
+
+**Browser (WASM):**
+```bash
+GOOS=js GOARCH=wasm go build -o app.wasm .
+```
+
+> Browser backend uses `syscall/js` → `navigator.gpu` directly, bypassing core/hal. Same public API, same user code — just a different build target. Zero external dependencies.
 
 ---
 

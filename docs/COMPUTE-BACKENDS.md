@@ -4,15 +4,15 @@ This document describes compute shader support across wgpu's HAL backends.
 
 ## Support Matrix
 
-| Feature | Vulkan | DX12 | Metal | GLES | Software | Noop |
-|---------|:------:|:----:|:-----:|:----:|:--------:|:----:|
-| Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | No |
-| Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | No |
-| Timestamp queries | Yes | Yes | Stub | Stub | No | No |
-| Indirect dispatch | Yes | Yes | Yes | Yes | No | No |
-| Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | No |
-| Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | N/A |
-| Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | 1024 | N/A |
+| Feature | Vulkan | DX12 | Metal | GLES | Software | Browser | Noop |
+|---------|:------:|:----:|:-----:|:----:|:--------:|:-------:|:----:|
+| Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | Yes | No |
+| Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | Yes | No |
+| Timestamp queries | Yes | Yes | Stub | Stub | No | No | No |
+| Indirect dispatch | Yes | Yes | Yes | Yes | No | Yes | No |
+| Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | Yes | No |
+| Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
+| Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
 
 ## Vulkan
 
@@ -98,6 +98,25 @@ The software backend executes compute shaders on CPU through a built-in SPIR-V i
 
 `wgpu/examples/software-test/` — 256-element scaled-copy compute shader, all values match.
 `gogpu/examples/particles/` — 4096-particle orbital simulation (compute + instanced render).
+
+## Browser WebGPU Backend
+
+**Status:** Full compute support via browser WebGPU API.
+
+The browser backend delegates compute operations directly to the browser's WebGPU implementation via `syscall/js`. No shader compilation in Go — WGSL is passed as a string to `createShaderModule()`.
+
+- **Shader compilation:** Browser handles WGSL compilation internally.
+- **Storage buffers:** Full support via browser `GPUBuffer`.
+- **Timestamp queries:** Not yet wired (browser support varies).
+- **Indirect dispatch:** `dispatchWorkgroupsIndirect` via `syscall/js`.
+- **Buffer mapping:** `mapAsync` + `getMappedRange` → `js.CopyBytesToGo`.
+- **Workgroup limits:** Determined by browser/GPU combination.
+
+### Browser-Specific Notes
+
+- All compute passes are recorded and submitted like native — `beginComputePass`, `setPipeline`, `setBindGroup`, `dispatchWorkgroups`, `end`, `queue.submit`.
+- Data transfer uses `js.CopyBytesToJS`/`js.CopyBytesToGo` for crossing the JS/WASM boundary.
+- Build: `GOOS=js GOARCH=wasm go build`.
 
 ## Noop Backend
 

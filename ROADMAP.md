@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.27.5
+## Current State: v0.28.0
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -63,6 +63,7 @@
 ✅ **Queue thread safety** — Submit/WriteBuffer/WriteTexture serialized via sync.Mutex (Rust wgpu-core parity)
 ✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
+✅ **Browser WebGPU backend** — complete `syscall/js` → `navigator.gpu` implementation (~6500 LOC). Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -109,10 +110,9 @@
 
 ### Future — Platform Expansion
 
-- [ ] **WebAssembly (browser WebGPU)** — ADR approved, research complete. Top-level
-  `backend/browser/` via `syscall/js` → `navigator.gpu` (bypasses core/hal, like Rust
-  wgpu `ContextWebGpu`). WebGL2 fallback via GLES backend + `_js.go`.
-  See `docs/dev/research/ADR-WASM-WEBGPU-ARCHITECTURE.md`
+- [x] **WebAssembly (browser WebGPU)** — DONE (v0.28.0). `internal/browser/` via `syscall/js` →
+  `navigator.gpu` (bypasses core/hal, Rust wgpu `ContextWebGpu` pattern). ~6500 LOC, zero deps.
+- [ ] **WebGL2 fallback** — GLES backend `_js.go` files for browsers without WebGPU.
 - [ ] **Android** — Vulkan surface via `vkCreateAndroidSurfaceKHR` (S estimate).
   Depends on gogpu platform layer
 - [ ] **iOS** — Metal backend ready (naga MSL 91/91), needs platform integration
@@ -149,6 +149,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.0** | 2026-05 | **Browser WebGPU backend** (WASM-001). Complete `syscall/js` → `navigator.gpu`. 6500 LOC, 5 phases, zero deps. First Pure Go WebGPU in the browser. |
 | **v0.27.5** | 2026-05 | Defensive NULL handle guard in TransitionTextures/Buffers (Vulkan, DX12, public API). Prevents crash on destroyed resource barriers. |
 | **v0.27.4** | 2026-05 | goffi v0.5.1 (struct ABI, XMM return, CGO_ENABLED=1), x/sys v0.44.0, flaky TestThread_CallAsync fix |
 | **v0.27.3** | 2026-05 | Software render pass instrumentation (slog + RenderPassStats), Metal MsgSend docs |

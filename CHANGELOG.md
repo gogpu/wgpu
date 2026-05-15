@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-05-14
+
+### Added
+
+- **Browser WebGPU backend** (WASM-001) — complete browser WebGPU support via `syscall/js` →
+  `navigator.gpu`. Same public API, same user code — `GOOS=js GOARCH=wasm go build` produces
+  a working WASM binary. ~6500 LOC across 5 phases:
+  - **Phase 1:** Instance, Adapter, Device — `navigator.gpu` access, pre-bound JS methods (Ebiten pattern)
+  - **Phase 2:** Resources + Pipelines — Buffer, Texture, ShaderModule (WGSL passthrough), BindGroup,
+    RenderPipeline, ComputePipeline. 97 TextureFormats + 31 VertexFormats + all WebGPU enum conversions
+  - **Phase 3:** Command Recording + Submit — CommandEncoder, RenderPassEncoder (13 methods),
+    ComputePassEncoder, Queue.Submit/WriteBuffer/WriteTexture with `js.CopyBytesToJS` data transfer
+  - **Phase 4:** Surface/Canvas — HTMLCanvasElement + GPUCanvasContext, Configure, GetCurrentTexture,
+    Present (no-op — browser auto-presents), preferred format detection
+  - **Phase 5:** Buffer Mapping — MapAsync (Promise→goroutine), MappedRange with lazy copy
+    (Rust OnceCell pattern), dirty write-back on Release (Rust Drop pattern)
+  - Architecture: bypasses core/hal (browser validates internally), matches Rust wgpu `backend/webgpu.rs`
+  - Zero external dependencies — only `syscall/js` from Go stdlib
+  - 29+ enum conversion tests running on native (no WASM required)
+
 ## [0.27.5] - 2026-05-14
 
 ### Fixed
