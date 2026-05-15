@@ -287,6 +287,16 @@ func (d *Device) Poll(pollType PollType) bool {
 	return true
 }
 
+// FreeCommandBuffer is a no-op on browser — JS GC handles GPU resource cleanup.
+// This exists for API compatibility with the native backend where command buffers
+// must be explicitly freed after GPU submission completes.
+func (d *Device) FreeCommandBuffer(_ *CommandBuffer) {}
+
+// HalDevice returns nil on browser — there is no HAL layer.
+// The browser backend talks directly to the browser WebGPU API.
+// This exists for API compatibility with the native backend.
+func (d *Device) HalDevice() any { return nil }
+
 // Release releases the device and all associated resources.
 func (d *Device) Release() {
 	if d.released {

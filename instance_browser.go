@@ -5,13 +5,16 @@ package wgpu
 import (
 	"syscall/js"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
 // InstanceDescriptor configures instance creation.
+// On browser, Backends and Flags are accepted for API compatibility but
+// ignored — the browser has exactly one WebGPU backend.
 type InstanceDescriptor struct {
 	Backends Backends
-	Flags    uint32
+	Flags    gputypes.InstanceFlags
 }
 
 // Instance is the entry point for GPU operations.

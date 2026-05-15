@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"fmt"
+	"image"
 	"syscall/js"
 
 	"github.com/gogpu/wgpu/internal/browser"
@@ -170,6 +171,13 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 func (s *Surface) Present(_ *SurfaceTexture) error {
 	// No-op on browser. Presentation is automatic.
 	return nil
+}
+
+// PresentWithDamage presents a surface texture, optionally with damage rects.
+// On browser, damage rects are ignored — the browser composites the full canvas.
+// This method exists for API compatibility with the native backend.
+func (s *Surface) PresentWithDamage(st *SurfaceTexture, _ []image.Rectangle) error {
+	return s.Present(st)
 }
 
 // DiscardTexture discards the acquired surface texture without presenting it.
