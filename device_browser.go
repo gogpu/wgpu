@@ -45,11 +45,22 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		desc.MappedAtCreation,
 	)
 	bb := d.browser.CreateBufferFromDesc(jsDesc)
+
+	state := MapStateUnmapped
+	if desc.MappedAtCreation {
+		// When mappedAtCreation is true the buffer starts in the Mapped state
+		// with the entire range [0, size) mapped. Record this so that
+		// MappedRange / Unmap work without calling MapAsync first.
+		bb.SetMappedAtCreation()
+		state = MapStateMapped
+	}
+
 	return &Buffer{
 		browser:  bb,
 		size:     desc.Size,
 		usage:    desc.Usage,
 		released: false,
+		mapState: state,
 	}, nil
 }
 
