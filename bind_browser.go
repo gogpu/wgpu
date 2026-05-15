@@ -2,8 +2,11 @@
 
 package wgpu
 
+import "github.com/gogpu/wgpu/internal/browser"
+
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
+	browser  *browser.BindGroupLayout
 	released bool
 }
 
@@ -17,6 +20,7 @@ func (l *BindGroupLayout) Release() {
 
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
 type PipelineLayout struct {
+	browser  *browser.PipelineLayout
 	released bool
 }
 
@@ -37,6 +41,7 @@ type LateBufferBindingInfo struct {
 
 // BindGroup represents bound GPU resources for shader access.
 type BindGroup struct {
+	browser  *browser.BindGroup
 	released bool
 }
 

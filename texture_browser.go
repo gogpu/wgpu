@@ -2,8 +2,11 @@
 
 package wgpu
 
+import "github.com/gogpu/wgpu/internal/browser"
+
 // Texture represents a GPU texture.
 type Texture struct {
+	browser  *browser.Texture
 	format   TextureFormat
 	released bool
 }
@@ -17,10 +20,14 @@ func (t *Texture) Release() {
 		return
 	}
 	t.released = true
+	if t.browser != nil {
+		t.browser.Destroy()
+	}
 }
 
 // TextureView represents a view into a texture.
 type TextureView struct {
+	browser  *browser.TextureView
 	released bool
 }
 

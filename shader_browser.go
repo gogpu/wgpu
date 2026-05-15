@@ -2,8 +2,11 @@
 
 package wgpu
 
+import "github.com/gogpu/wgpu/internal/browser"
+
 // ShaderModule represents a compiled shader module.
 type ShaderModule struct {
+	browser  *browser.ShaderModule
 	released bool
 }
 

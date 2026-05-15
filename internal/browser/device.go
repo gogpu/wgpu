@@ -136,6 +136,60 @@ func (d *Device) CreateSampler() js.Value { return d.fnCreateSampler }
 // CreateQuerySet returns the pre-bound createQuerySet function.
 func (d *Device) CreateQuerySet() js.Value { return d.fnCreateQuerySet }
 
+// CreateBufferFromDesc creates a GPUBuffer from a JS descriptor object.
+func (d *Device) CreateBufferFromDesc(desc js.Value) *Buffer {
+	jsBuffer := d.fnCreateBuffer.Invoke(desc)
+	return NewBuffer(jsBuffer)
+}
+
+// CreateTextureFromDesc creates a GPUTexture from a JS descriptor object.
+func (d *Device) CreateTextureFromDesc(desc js.Value) *Texture {
+	jsTexture := d.fnCreateTexture.Invoke(desc)
+	return NewTexture(jsTexture)
+}
+
+// CreateSamplerFromDesc creates a GPUSampler from a JS descriptor object.
+func (d *Device) CreateSamplerFromDesc(desc js.Value) *Sampler {
+	jsSampler := d.fnCreateSampler.Invoke(desc)
+	return NewSampler(jsSampler)
+}
+
+// CreateShaderModuleFromDesc creates a GPUShaderModule from a JS descriptor object.
+func (d *Device) CreateShaderModuleFromDesc(desc js.Value) *ShaderModule {
+	jsModule := d.fnCreateShaderModule.Invoke(desc)
+	return NewShaderModule(jsModule)
+}
+
+// CreateBindGroupLayoutFromDesc creates a GPUBindGroupLayout from a JS descriptor object.
+func (d *Device) CreateBindGroupLayoutFromDesc(desc js.Value) *BindGroupLayout {
+	jsLayout := d.fnCreateBindGroupLayout.Invoke(desc)
+	return NewBindGroupLayout(jsLayout)
+}
+
+// CreateBindGroupFromDesc creates a GPUBindGroup from a JS descriptor object.
+func (d *Device) CreateBindGroupFromDesc(desc js.Value) *BindGroup {
+	jsGroup := d.fnCreateBindGroup.Invoke(desc)
+	return NewBindGroup(jsGroup)
+}
+
+// CreatePipelineLayoutFromDesc creates a GPUPipelineLayout from a JS descriptor object.
+func (d *Device) CreatePipelineLayoutFromDesc(desc js.Value) *PipelineLayout {
+	jsLayout := d.fnCreatePipelineLayout.Invoke(desc)
+	return NewPipelineLayout(jsLayout)
+}
+
+// CreateRenderPipelineFromDesc creates a GPURenderPipeline from a JS descriptor object.
+func (d *Device) CreateRenderPipelineFromDesc(desc js.Value) *RenderPipeline {
+	jsPipeline := d.fnCreateRenderPipeline.Invoke(desc)
+	return NewRenderPipeline(jsPipeline)
+}
+
+// CreateComputePipelineFromDesc creates a GPUComputePipeline from a JS descriptor object.
+func (d *Device) CreateComputePipelineFromDesc(desc js.Value) *ComputePipeline {
+	jsPipeline := d.fnCreateComputePipeline.Invoke(desc)
+	return NewComputePipeline(jsPipeline)
+}
+
 // Destroy calls GPUDevice.destroy() to release GPU resources.
 // After this call the device is no longer usable.
 func (d *Device) Destroy() {

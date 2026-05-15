@@ -2,8 +2,11 @@
 
 package wgpu
 
+import "github.com/gogpu/wgpu/internal/browser"
+
 // Sampler represents a texture sampler.
 type Sampler struct {
+	browser  *browser.Sampler
 	released bool
 }
 
