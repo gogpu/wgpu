@@ -712,6 +712,199 @@ func (bc *BlendComponentJS) ToJS() js.Value {
 	return obj
 }
 
+// --- Command encoder descriptor ---
+
+// BuildCommandEncoderDescriptor constructs a JS GPUCommandEncoderDescriptor.
+func BuildCommandEncoderDescriptor(label string) js.Value {
+	desc := newJSObject()
+	if label != "" {
+		desc.Set("label", label)
+	}
+	return desc
+}
+
+// --- Render pass descriptor ---
+
+// RenderPassColorAttachmentJS holds data for building a GPURenderPassColorAttachment.
+type RenderPassColorAttachmentJS struct {
+	View          js.Value // GPUTextureView
+	ResolveTarget js.Value // GPUTextureView or js.Undefined()
+	LoadOp        string   // "load" or "clear"
+	StoreOp       string   // "store" or "discard"
+	ClearR        float64
+	ClearG        float64
+	ClearB        float64
+	ClearA        float64
+}
+
+// RenderPassDepthStencilAttachmentJS holds data for building a
+// GPURenderPassDepthStencilAttachment.
+type RenderPassDepthStencilAttachmentJS struct {
+	View              js.Value // GPUTextureView
+	DepthLoadOp       string   // "load" or "clear"
+	DepthStoreOp      string   // "store" or "discard"
+	DepthClearValue   float32
+	DepthReadOnly     bool
+	StencilLoadOp     string // "load" or "clear"
+	StencilStoreOp    string // "store" or "discard"
+	StencilClearValue uint32
+	StencilReadOnly   bool
+}
+
+// BuildRenderPassDescriptor constructs a JS GPURenderPassDescriptor.
+//
+// Matches Rust wgpu's begin_render_pass which builds GpuRenderPassDescriptor
+// with color attachments array and optional depth-stencil attachment.
+func BuildRenderPassDescriptor(
+	label string,
+	colorAttachments []RenderPassColorAttachmentJS,
+	depthStencil *RenderPassDepthStencilAttachmentJS,
+) js.Value {
+	// Build color attachments array.
+	arr := newJSArray()
+	for _, ca := range colorAttachments {
+		att := newJSObject()
+		att.Set("view", ca.View)
+		att.Set("loadOp", ca.LoadOp)
+		att.Set("storeOp", ca.StoreOp)
+
+		// Set clear value when loadOp is "clear".
+		if ca.LoadOp == "clear" {
+			clearColor := newJSObject()
+			clearColor.Set("r", ca.ClearR)
+			clearColor.Set("g", ca.ClearG)
+			clearColor.Set("b", ca.ClearB)
+			clearColor.Set("a", ca.ClearA)
+			att.Set("clearValue", clearColor)
+		}
+
+		if !ca.ResolveTarget.IsUndefined() && !ca.ResolveTarget.IsNull() {
+			att.Set("resolveTarget", ca.ResolveTarget)
+		}
+
+		arr.Call("push", att)
+	}
+
+	desc := newJSObject()
+	if label != "" {
+		desc.Set("label", label)
+	}
+	desc.Set("colorAttachments", arr)
+
+	// Depth-stencil attachment (optional).
+	if depthStencil != nil {
+		ds := newJSObject()
+		ds.Set("view", depthStencil.View)
+
+		if !depthStencil.DepthReadOnly {
+			ds.Set("depthLoadOp", depthStencil.DepthLoadOp)
+			ds.Set("depthStoreOp", depthStencil.DepthStoreOp)
+			if depthStencil.DepthLoadOp == "clear" {
+				ds.Set("depthClearValue", depthStencil.DepthClearValue)
+			}
+		}
+		ds.Set("depthReadOnly", depthStencil.DepthReadOnly)
+
+		if !depthStencil.StencilReadOnly {
+			ds.Set("stencilLoadOp", depthStencil.StencilLoadOp)
+			ds.Set("stencilStoreOp", depthStencil.StencilStoreOp)
+			if depthStencil.StencilLoadOp == "clear" {
+				ds.Set("stencilClearValue", depthStencil.StencilClearValue)
+			}
+		}
+		ds.Set("stencilReadOnly", depthStencil.StencilReadOnly)
+
+		desc.Set("depthStencilAttachment", ds)
+	}
+
+	return desc
+}
+
+// --- Compute pass descriptor ---
+
+// BuildComputePassDescriptor constructs a JS GPUComputePassDescriptor.
+func BuildComputePassDescriptor(label string) js.Value {
+	desc := newJSObject()
+	if label != "" {
+		desc.Set("label", label)
+	}
+	return desc
+}
+
+// --- Image copy descriptors (for copyBufferToTexture / copyTextureToBuffer) ---
+
+// BuildImageCopyBuffer constructs a JS GPUTexelCopyBufferInfo (formerly GPUImageCopyBuffer).
+func BuildImageCopyBuffer(buffer js.Value, offset uint64, bytesPerRow, rowsPerImage uint32) js.Value {
+	obj := newJSObject()
+	obj.Set("buffer", buffer)
+	if offset > 0 {
+		obj.Set("offset", float64(offset))
+	}
+	if bytesPerRow > 0 {
+		obj.Set("bytesPerRow", bytesPerRow)
+	}
+	if rowsPerImage > 0 {
+		obj.Set("rowsPerImage", rowsPerImage)
+	}
+	return obj
+}
+
+// BuildImageCopyTexture constructs a JS GPUTexelCopyTextureInfo (formerly GPUImageCopyTexture).
+func BuildImageCopyTexture(texture js.Value, mipLevel uint32, originX, originY, originZ uint32) js.Value {
+	obj := newJSObject()
+	obj.Set("texture", texture)
+	if mipLevel > 0 {
+		obj.Set("mipLevel", mipLevel)
+	}
+	if originX > 0 || originY > 0 || originZ > 0 {
+		origin := newJSObject()
+		origin.Set("x", originX)
+		origin.Set("y", originY)
+		origin.Set("z", originZ)
+		obj.Set("origin", origin)
+	}
+	return obj
+}
+
+// BuildExtent3D constructs a JS GPUExtent3DDict.
+func BuildExtent3D(width, height, depthOrArrayLayers uint32) js.Value {
+	obj := newJSObject()
+	obj.Set("width", width)
+	if height > 0 {
+		obj.Set("height", height)
+	}
+	if depthOrArrayLayers > 0 {
+		obj.Set("depthOrArrayLayers", depthOrArrayLayers)
+	}
+	return obj
+}
+
+// BuildColorDict constructs a JS GPUColorDict { r, g, b, a }.
+func BuildColorDict(r, g, b, a float64) js.Value {
+	obj := newJSObject()
+	obj.Set("r", r)
+	obj.Set("g", g)
+	obj.Set("b", b)
+	obj.Set("a", a)
+	return obj
+}
+
+// BuildTexelCopyBufferLayout constructs a JS GPUTexelCopyBufferLayout
+// (formerly GPUImageDataLayout).
+func BuildTexelCopyBufferLayout(offset uint64, bytesPerRow, rowsPerImage uint32) js.Value {
+	obj := newJSObject()
+	if offset > 0 {
+		obj.Set("offset", float64(offset))
+	}
+	if bytesPerRow > 0 {
+		obj.Set("bytesPerRow", bytesPerRow)
+	}
+	if rowsPerImage > 0 {
+		obj.Set("rowsPerImage", rowsPerImage)
+	}
+	return obj
+}
+
 // --- Compute pipeline descriptor ---
 
 // BuildComputePipelineDescriptor constructs a JS GPUComputePipelineDescriptor.

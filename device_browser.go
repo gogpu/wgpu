@@ -224,9 +224,21 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.
-// Phase 3 — not yet implemented for browser.
 func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
-	panic("wgpu: browser CreateCommandEncoder not yet implemented (Phase 3)")
+	if d.released {
+		return nil, ErrReleased
+	}
+	label := ""
+	if desc != nil {
+		label = desc.Label
+	}
+	jsDesc := browser.BuildCommandEncoderDescriptor(label)
+	jsEncoder := d.browser.CreateCommandEncoder().Invoke(jsDesc)
+	be := browser.NewCommandEncoder(jsEncoder)
+	return &CommandEncoder{
+		browser:  be,
+		released: false,
+	}, nil
 }
 
 // CreateFence creates a GPU synchronization fence.

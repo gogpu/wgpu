@@ -469,3 +469,29 @@ func StorageTextureAccessToJS(a gputypes.StorageTextureAccess) string {
 		return "write-only"
 	}
 }
+
+// LoadOpToJS converts a gputypes.LoadOp to the WebGPU JS string.
+// Returns "load" for LoadOpLoad, "clear" for LoadOpClear, and "load" as default.
+func LoadOpToJS(op gputypes.LoadOp) string {
+	switch op {
+	case gputypes.LoadOpClear:
+		return "clear"
+	case gputypes.LoadOpLoad:
+		return "load"
+	default:
+		return "load"
+	}
+}
+
+// StoreOpToJS converts a gputypes.StoreOp to the WebGPU JS string.
+// Returns "store" for StoreOpStore, "discard" for StoreOpDiscard, and "store" as default.
+func StoreOpToJS(op gputypes.StoreOp) string {
+	switch op {
+	case gputypes.StoreOpDiscard:
+		return "discard"
+	case gputypes.StoreOpStore:
+		return "store"
+	default:
+		return "store"
+	}
+}
