@@ -3,7 +3,8 @@
 package wgpu
 
 // Fence is a GPU synchronization primitive.
-// On browser, fences are not needed (browser auto-polls).
+// On browser, fences are no-ops — the browser auto-polls GPU completion
+// via its internal event loop. This type exists for API compatibility.
 type Fence struct {
 	released bool
 }
