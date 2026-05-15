@@ -5,6 +5,7 @@ package wgpu
 import (
 	"syscall/js"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
@@ -78,9 +79,42 @@ type SurfaceCapabilities struct {
 }
 
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
-// Phase 4 — not yet implemented for browser.
+//
+// On browser, capabilities are statically defined per the WebGPU spec:
+//   - Formats: rgba8unorm, bgra8unorm, rgba16float (preferred format first)
+//   - PresentModes: Fifo only (browser controls VSync)
+//   - AlphaModes: Opaque only (browser default)
+//
+// The preferred format is obtained from navigator.gpu.getPreferredCanvasFormat()
+// and placed first in the formats list.
+//
+// Matches Rust wgpu SurfaceInterface::get_capabilities for WebSurface.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	panic("wgpu: browser GetSurfaceCapabilities not yet implemented (Phase 4)")
+	// Browser WebGPU supports these three formats per spec:
+	// https://gpuweb.github.io/gpuweb/#supported-context-formats
+	formats := []TextureFormat{
+		TextureFormatRGBA8Unorm,
+		TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatRGBA16Float,
+	}
+
+	// Put the preferred format first (Rust wgpu does the same swap).
+	if surface != nil && surface.browser != nil {
+		preferredStr := surface.browser.GetPreferredCanvasFormat()
+		preferredFmt := browser.TextureFormatFromJS(preferredStr)
+		for i, f := range formats {
+			if f == preferredFmt {
+				formats[0], formats[i] = formats[i], formats[0]
+				break
+			}
+		}
+	}
+
+	return &SurfaceCapabilities{
+		Formats:      formats,
+		PresentModes: []PresentMode{PresentModeFifo},
+		AlphaModes:   []CompositeAlphaMode{gputypes.CompositeAlphaModeOpaque},
+	}
 }
 
 // Release releases the adapter.

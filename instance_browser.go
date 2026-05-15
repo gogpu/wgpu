@@ -70,11 +70,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	}, nil
 }
 
-// CreateSurface creates a rendering surface from platform-specific handles.
-// Phase 4 — not yet implemented for browser.
-func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
-	panic("wgpu: browser CreateSurface not yet implemented (Phase 4)")
-}
+// CreateSurface and CreateSurfaceFromCanvas are defined in surface_browser.go.
 
 // Release releases the instance and all associated resources.
 func (i *Instance) Release() {
