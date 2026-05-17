@@ -224,6 +224,14 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		return fmt.Errorf("vulkan: vkGetSwapchainImagesKHR (images) failed: %d", result)
 	}
 
+	// Log actual swapchain creation result (wgpu#185: HiDPI diagnostic).
+	hal.Logger().Info("vulkan: swapchain created",
+		"extent", fmt.Sprintf("%dx%d", extent.Width, extent.Height),
+		"images", swapchainImageCount,
+		"format", vkFormat,
+		"presentMode", presentMode,
+	)
+
 	// Create image views
 	imageViews := make([]vk.ImageView, len(images))
 	for i, img := range images {
