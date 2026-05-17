@@ -180,6 +180,16 @@ func (s *Surface) PresentWithDamage(st *SurfaceTexture, _ []image.Rectangle) err
 	return s.Present(st)
 }
 
+// ActualExtent returns the configured surface dimensions.
+// On browser, the canvas dimensions are always used as-is (no driver clamping).
+// Returns (0, 0) if the surface is not configured.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	if s.released || s.browser == nil {
+		return 0, 0
+	}
+	return s.browser.Width(), s.browser.Height()
+}
+
 // DiscardTexture discards the acquired surface texture without presenting it.
 //
 // On browser, this is a NO-OP. The browser does not support discarding a

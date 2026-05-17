@@ -46,6 +46,7 @@ func (m *mockSurface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, 
 	}, nil
 }
 func (m *mockSurface) DiscardTexture(_ hal.SurfaceTexture) {}
+func (m *mockSurface) ActualExtent() (uint32, uint32)      { return 0, 0 }
 func (m *mockSurface) Destroy()                            {}
 
 // mockSurfaceTexture is a minimal surface texture implementation for testing.

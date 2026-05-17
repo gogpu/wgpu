@@ -183,6 +183,31 @@ func (s *Surface) SetPrepareFrame(fn core.PrepareFrameFunc) {
 	s.core.SetPrepareFrame(fn)
 }
 
+// ActualExtent returns the actual swapchain dimensions after driver clamping.
+//
+// On Vulkan, the driver may clamp the requested extent to its supported range
+// (e.g., on X11 HiDPI where the compositor reports physical pixels that differ
+// from the application's logical pixels). The returned values reflect what the
+// swapchain was actually created with, which may differ from the configured
+// SurfaceConfiguration.Width/Height.
+//
+// On non-Vulkan backends (DX12, Metal, GLES, Software), the returned values
+// match the configured dimensions since those backends do not clamp the extent.
+// Returns (0, 0) if the surface is not configured.
+//
+// Use this to size MSAA resolve textures, offscreen targets, and any other
+// resources that must match the true swapchain size.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	if s.released {
+		return 0, 0
+	}
+	raw := s.core.RawSurface()
+	if raw == nil {
+		return 0, 0
+	}
+	return raw.ActualExtent()
+}
+
 // DiscardTexture discards the acquired surface texture without presenting it.
 // Use this if rendering failed or was canceled. If no texture is currently
 // acquired, this is a no-op.

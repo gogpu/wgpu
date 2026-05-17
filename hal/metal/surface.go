@@ -145,6 +145,13 @@ func (s *Surface) DiscardTexture(tex hal.SurfaceTexture) {
 	}
 }
 
+// ActualExtent returns the configured surface dimensions.
+// Metal does not clamp the extent, so these always match the requested values.
+// Returns (0, 0) if the surface is not configured.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	return s.width, s.height
+}
+
 // Destroy releases the surface.
 func (s *Surface) Destroy() {
 	hal.Logger().Debug("metal: surface destroyed")

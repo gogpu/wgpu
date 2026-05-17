@@ -135,6 +135,19 @@ type Surface interface {
 	// DiscardTexture discards a surface texture without presenting it.
 	// Use this if rendering failed or was canceled.
 	DiscardTexture(texture SurfaceTexture)
+
+	// ActualExtent returns the actual swapchain dimensions after driver clamping.
+	//
+	// On Vulkan, the driver may clamp the requested extent to its supported
+	// range (e.g., on X11 HiDPI where the compositor reports a different
+	// physical size). The returned values reflect what the swapchain was
+	// actually created with, which may differ from the requested
+	// SurfaceConfiguration.Width/Height.
+	//
+	// On non-Vulkan backends (DX12, Metal, GLES, Software), the returned
+	// values match the configured dimensions since those backends do not
+	// clamp the extent. Returns (0, 0) if the surface is not configured.
+	ActualExtent() (width, height uint32)
 }
 
 // SurfaceTexture is a texture acquired from a surface.

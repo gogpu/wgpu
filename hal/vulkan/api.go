@@ -291,6 +291,16 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	return s.createSwapchain(vkDevice, config)
 }
 
+// ActualExtent returns the actual swapchain dimensions after driver clamping.
+// On Vulkan, the driver may clamp the requested extent to its supported range
+// (e.g., on X11 HiDPI). Returns (0, 0) if no swapchain is configured.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	if s.swapchain == nil {
+		return 0, 0
+	}
+	return s.swapchain.extent.Width, s.swapchain.extent.Height
+}
+
 // Unconfigure removes surface configuration.
 func (s *Surface) Unconfigure(_ hal.Device) {
 	if s.swapchain != nil {

@@ -72,6 +72,12 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 // DiscardTexture is a no-op.
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
 
+// ActualExtent returns (0, 0) for the noop backend.
+// The noop backend does not track configured dimensions.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	return 0, 0
+}
+
 // SurfaceTexture implements hal.SurfaceTexture.
 type SurfaceTexture struct {
 	Texture

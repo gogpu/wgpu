@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.2] - 2026-05-17
+
+### Added
+
+- **`Surface.ActualExtent()`** — returns actual swapchain dimensions after driver clamping.
+  On Vulkan, the driver may clamp the requested extent to its capabilities range (common on
+  X11 HiDPI where compositor reports physical pixels). Previously silent — now logged with
+  `slog.Warn` when clamping occurs. All 8 backends implement the HAL interface method.
+  Non-Vulkan backends return configured dimensions (no clamping). Closes #183.
+
 ## [0.28.0] - 2026-05-14
 
 ### Added

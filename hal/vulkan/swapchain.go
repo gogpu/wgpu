@@ -116,11 +116,34 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		Height: config.Height,
 	}
 
+	// Log surface capabilities for HiDPI diagnostics (BUG-VK-HIDPI-001).
+	hal.Logger().Debug("vulkan: surface capabilities",
+		"requestedWidth", config.Width,
+		"requestedHeight", config.Height,
+		"currentExtent", [2]uint32{capabilities.CurrentExtent.Width, capabilities.CurrentExtent.Height},
+		"minExtent", [2]uint32{capabilities.MinImageExtent.Width, capabilities.MinImageExtent.Height},
+		"maxExtent", [2]uint32{capabilities.MaxImageExtent.Width, capabilities.MaxImageExtent.Height},
+	)
+
 	// Clamp to driver-reported range when CurrentExtent is defined.
 	// CurrentExtent of 0xFFFFFFFF means the surface size is determined by the swapchain.
 	if capabilities.CurrentExtent.Width != 0xFFFFFFFF {
 		extent.Width = clampUint32(extent.Width, capabilities.MinImageExtent.Width, capabilities.MaxImageExtent.Width)
 		extent.Height = clampUint32(extent.Height, capabilities.MinImageExtent.Height, capabilities.MaxImageExtent.Height)
+	}
+
+	// Warn if the driver clamped the extent to different dimensions than
+	// requested. This commonly happens on X11 HiDPI where the compositor
+	// reports physical pixels that differ from the application's logical
+	// pixels. Downstream code (e.g., MSAA textures) should use
+	// Surface.ActualExtent() to match the real swapchain size.
+	if extent.Width != config.Width || extent.Height != config.Height {
+		hal.Logger().Warn("vulkan: swapchain extent clamped by driver",
+			"requestedWidth", config.Width,
+			"requestedHeight", config.Height,
+			"actualWidth", extent.Width,
+			"actualHeight", extent.Height,
+		)
 	}
 
 	// Zero extent means the window is minimized -- skip swapchain creation.

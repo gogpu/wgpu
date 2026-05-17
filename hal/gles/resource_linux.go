@@ -140,6 +140,16 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 // DiscardTexture discards a previously acquired texture.
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
 
+// ActualExtent returns the configured surface dimensions.
+// GLES does not clamp the extent, so these always match the requested values.
+// Returns (0, 0) if the surface is not configured.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	if s.config == nil {
+		return 0, 0
+	}
+	return s.config.Width, s.config.Height
+}
+
 // Destroy releases the surface resources.
 func (s *Surface) Destroy() {
 	// Release swapchain FBO before tearing down the GL context.

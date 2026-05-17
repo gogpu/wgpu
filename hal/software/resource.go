@@ -246,6 +246,15 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 // DiscardTexture is a no-op (framebuffer stays allocated).
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
 
+// ActualExtent returns the configured surface dimensions.
+// The software backend does not clamp the extent, so these always match
+// the requested values. Returns (0, 0) if the surface is not configured.
+func (s *Surface) ActualExtent() (width, height uint32) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.width, s.height
+}
+
 // GetFramebuffer returns a copy of the current framebuffer data in RGBA byte
 // order (thread-safe). If the surface format is BGRA, R and B channels are
 // swapped so callers always receive consistent RGBA data. This allows
