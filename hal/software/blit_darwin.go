@@ -209,9 +209,9 @@ func blitDamageRectsToWindowCALayer(objc *objcReflect, l caLayer, img cgImage, w
 
 		cgr := cgRect{
 			Origin: cgPoint{X: float64(r.Min.X), Y: float64(r.Min.Y)},
-			size: cgSize{
+			Size: cgSize{
 				Width:  float64(r.Dx()),
-				Height: float64(r.Dx()),
+				Height: float64(r.Dy()),
 			},
 		}
 
@@ -817,7 +817,7 @@ type cgSize struct {
 
 type cgRect struct {
 	Origin cgPoint
-	size   cgSize
+	Size   cgSize
 }
 
 type cgPoint struct {
