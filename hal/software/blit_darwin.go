@@ -103,19 +103,7 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 	isMetalNeeded := false
 
 	if mtl != nil {
-		clsCAMetalLayer, err := objc.LoopUpClass("CAMetalLayer")
-		if err != nil {
-			slog.Debug("software: failed to get CAMetalLayer class", slog.Any("error", err))
-			return
-		}
-
-		lClass, err := objc.GetClass(l.objcAnyOpaque)
-		if err != nil {
-			slog.Debug("software: failed to get object class", slog.Any("error", err))
-			return
-		}
-
-		isMetalNeeded = lClass.IsSamePointer(&clsCAMetalLayer)
+		isMetalNeeded = isCAMetalLayer(objc, l)
 	}
 
 	if isMetalNeeded {
@@ -145,32 +133,110 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 
 		blitFrameBufferToWindowMetal(objc, queue, ml, uint64(width), uint64(height), data, 4*uint64(width))
 	} else {
-		dataProvider, err := cg.DataProviderCreateWithData(objcAnyOpaqueNil, objcAnyOpaqueFromPointer(unsafe.Pointer(unsafe.SliceData(data))), uintptr(len(data)), objcAnyOpaqueNil)
-		if err != nil {
-			slog.Debug("software: failed to create CGDataProvider", slog.Any("error", err))
-			return
-		}
-
-		defer cg.DataProviderRelease(dataProvider)
-
-		binfo := cgBitmapInfoByteOrder32Little.
-			WithImageAlphaInfo(cgImageAlphaPremultipliedFirst)
-
-		img, err := cg.ImageCreate(uintptr(width), uintptr(height), 8, 32, 4*uintptr(width), colorSpace, binfo, dataProvider, objcAnyOpaqueNil, false, cgColorRenderingIntentDefault)
-		if err != nil {
-			slog.Debug("software: failed to create CGImage", slog.Any("error", err))
-			return
-		}
-
-		defer cg.ImageRelease(img)
+		img, release := createCGImageByFramebuffer(cg, colorSpace, data, width, height)
+		defer release()
 
 		blitFrameBufferToWindowCALayer(objc, l, img)
 	}
 }
 
 // blitDamageRectsToWindow is a no-op on unsupported platforms.
-func (s *Surface) blitDamageRectsToWindow(_ []byte, _, _ int32, _ []image.Rectangle) {
+func (s *Surface) blitDamageRectsToWindow(src []byte, w, h int32, rects []image.Rectangle) {
+	if s.hwnd == 0 || len(rects) == 0 {
+		return
+	}
 
+	if !s.platformBlit.onceInit() {
+		return
+	}
+
+	objc, cg, colorSpace, mtl := s.platformBlit.objc, s.platformBlit.cg, s.platformBlit.colorSpace, s.platformBlit.mtl
+	l := caLayer{objcAnyOpaqueFromPointer(unsafe.Pointer(s.hwnd))}
+
+	isMetalNeeded := false
+	if mtl != nil {
+		isMetalNeeded = isCAMetalLayer(objc, l)
+	}
+
+	if isMetalNeeded {
+
+	} else {
+		img, release := createCGImageByFramebuffer(cg, colorSpace, src, w, h)
+		defer release()
+
+		blitDamageRectsToWindowCALayer(objc, l, img, w, h, rects)
+	}
+}
+
+func createCGImageByFramebuffer(cg *coreGraphics, colorSpace cgColorSpace, data []byte, width, height int32) (img cgImage, release func()) {
+	dataProvider, err := cg.DataProviderCreateWithData(objcAnyOpaqueNil, objcAnyOpaqueFromPointer(unsafe.Pointer(unsafe.SliceData(data))), uintptr(len(data)), objcAnyOpaqueNil)
+	if err != nil {
+		slog.Debug("software: failed to create CGDataProvider", slog.Any("error", err))
+		return
+	}
+
+	binfo := cgBitmapInfoByteOrder32Little.
+		WithImageAlphaInfo(cgImageAlphaPremultipliedFirst)
+
+	img, err = cg.ImageCreate(uintptr(width), uintptr(height), 8, 32, 4*uintptr(width), colorSpace, binfo, dataProvider, objcAnyOpaqueNil, false, cgColorRenderingIntentDefault)
+	if err != nil {
+		cg.DataProviderRelease(dataProvider)
+
+		slog.Debug("software: failed to create CGImage", slog.Any("error", err))
+		return
+	}
+
+	release = func() {
+		defer cg.DataProviderRelease(dataProvider)
+		defer cg.ImageRelease(img)
+	}
+
+	return img, release
+}
+
+func blitDamageRectsToWindowCALayer(objc *objcReflect, l caLayer, img cgImage, w, h int32, rects []image.Rectangle) {
+	if err := l.SetContents(objc, img.objcAnyOpaque); err != nil {
+		slog.Debug("software: failed to [caLayer setContents: img]", slog.Any("error", err), slog.Any("img", img))
+		return
+	}
+
+	bounds := image.Rect(0, 0, int(w), int(h))
+	for _, rect := range rects {
+		r := bounds.Intersect(rect)
+		if r.Empty() {
+			continue
+		}
+
+		cgr := cgRect{
+			Origin: cgPoint{X: float64(r.Min.X), Y: float64(r.Min.Y)},
+			size: cgSize{
+				Width:  float64(r.Dx()),
+				Height: float64(r.Dx()),
+			},
+		}
+
+		err := l.SetNeedsDisplayInRect(objc, cgr)
+		if err != nil {
+			slog.Debug("software: failed to [caLayer setNeedsDisplayInRect:cgRect]", slog.Any("error", err), slog.Any("cgRect", cgr))
+			continue
+		}
+	}
+}
+
+func isCAMetalLayer(objc *objcReflect, l caLayer) bool {
+	clsCAMetalLayer, err := objc.LoopUpClass("CAMetalLayer")
+	if err != nil {
+		slog.Debug("software: failed to get CAMetalLayer class", slog.Any("error", err))
+		return false
+	}
+
+	lClass, err := objc.GetClass(l.objcAnyOpaque)
+	if err != nil {
+		slog.Debug("software: failed to get object class", slog.Any("error", err))
+		return false
+	}
+
+	return lClass.IsSamePointer(&clsCAMetalLayer)
 }
 
 func blitFrameBufferToWindowCALayer(objc *objcReflect, layer caLayer, img cgImage) {
@@ -633,6 +699,21 @@ func (m *metal) errorf(f string, args ...any) error {
 
 type caLayer struct{ objcAnyOpaque }
 
+func (c *caLayer) SetNeedsDisplayInRect(objc *objcReflect, rect cgRect) error {
+	sel, err := objc.SelRegisterName("setNeedsDisplayInRect:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	src := objcBoxedWith(rect, cgRectTypeDescriptor)
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, src); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // ref: https://developer.apple.com/documentation/quartzcore/calayer/setneedsdisplay()?language=objc
 func (c *caLayer) SetNeedsDisplay(objc *objcReflect) error {
 	sel, err := objc.SelRegisterName("setNeedsDisplay")
@@ -734,12 +815,35 @@ type cgSize struct {
 	Height float64
 }
 
+type cgRect struct {
+	Origin cgPoint
+	size   cgSize
+}
+
+type cgPoint struct {
+	X, Y float64
+}
+
 var (
 	cgSizeTypeDescriptor = &types.TypeDescriptor{
 		Kind: types.StructType,
 		Members: []*types.TypeDescriptor{
 			types.DoubleTypeDescriptor,
 			types.DoubleTypeDescriptor,
+		},
+	}
+	cgPointTypeDescriptor = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+	cgRectTypeDescriptor = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			cgPointTypeDescriptor,
+			cgSizeTypeDescriptor,
 		},
 	}
 	cifCoreGraphicsImageCreate = &types.CallInterface{
