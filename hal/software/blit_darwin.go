@@ -14,6 +14,10 @@ import (
 	"github.com/go-webgpu/goffi/types"
 )
 
+func init() {
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+}
+
 // platformBlit is a no-op on platforms without native blit support.
 // Windows has GDI (blit_windows.go), Linux has X11 (blit_linux.go).
 type platformBlit struct {
@@ -371,8 +375,7 @@ func (c *caMetalLayer) Device(objc *objcReflect) (d mtlDevice, err error) {
 		return mtlDevice{objcAnyOpaqueNil}, err
 	}
 
-	d.typ = types.PointerTypeDescriptor
-	d.ptr = unsafe.Pointer(nil)
+	d.objcAnyOpaque = objcAnyOpaqueNil
 
 	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &d); err != nil {
 		return mtlDevice{objcAnyOpaqueNil}, err
@@ -401,10 +404,8 @@ func (c *caMetalLayer) ColorSpace(objc *objcReflect) (col cgColorSpace, err erro
 		return cgColorSpace{objcAnyOpaqueNil}, err
 	}
 
-	col.typ = types.PointerTypeDescriptor
-	col.ptr = unsafe.Pointer(nil)
-
-	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &col.objcAnyOpaque); err != nil {
+	col.objcAnyOpaque = objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &col); err != nil {
 		return cgColorSpace{objcAnyOpaqueNil}, err
 	}
 
@@ -431,8 +432,7 @@ func (c *caMetalLayer) NextDrawable(objc *objcReflect) (dr caMTLDrawable, err er
 		return caMTLDrawable{objcAnyOpaqueNil}, err
 	}
 
-	dr.typ = types.PointerTypeDescriptor
-	dr.ptr = unsafe.Pointer(nil)
+	dr.objcAnyOpaque = objcAnyOpaqueNil
 
 	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &dr); err != nil {
 		return caMTLDrawable{objcAnyOpaqueNil}, err
@@ -449,8 +449,7 @@ func (c *caMTLDrawable) Texture(objc *objcReflect) (tex mtlTexture, err error) {
 		return mtlTexture{objcAnyOpaqueNil}, err
 	}
 
-	tex.typ = types.PointerTypeDescriptor
-	tex.ptr = unsafe.Pointer(nil)
+	tex.objcAnyOpaque = objcAnyOpaqueNil
 
 	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &tex.objcAnyOpaque); err != nil {
 		return mtlTexture{objcAnyOpaqueNil}, err
@@ -618,10 +617,9 @@ func (m *metal) Open(objc *objcReflect) (err error) {
 // }
 
 func (m *metal) CreateSystemDefaultDevice() (d mtlDevice, err error) {
-	d.typ = types.PointerTypeDescriptor
-	d.ptr = unsafe.Pointer(nil)
+	d.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(&cifMTLCreateSystemDefaultDevice, m.symMTLCreateSystemDefaultDevice, unsafe.Pointer(&d.ptr), []unsafe.Pointer{})
+	err = ffi.CallFunction(&cifMTLCreateSystemDefaultDevice, m.symMTLCreateSystemDefaultDevice, unsafe.Pointer(&d.data), []unsafe.Pointer{})
 	if err != nil {
 		return mtlDevice{objcAnyOpaqueNil}, m.errorf("failed to MTLRegionMake2D: %w", err)
 	}
@@ -864,10 +862,8 @@ func (c *coreGraphics) ImageCreate(
 	shouldInterpolate bool,
 	intent cgColorRenderingIntent,
 ) (cgimg cgImage, err error) {
-	cgimg.typ = types.PointerTypeDescriptor
-
 	// CGImageRef: (struct CGImage)*
-	cgimg.ptr = unsafe.Pointer(nil)
+	cgimg.objcAnyOpaque = objcAnyOpaqueNil
 
 	err = ffi.CallFunction(cifCoreGraphicsImageCreate, c.symCGImageCreate, unsafe.Pointer(cgimg.Pointer()), []unsafe.Pointer{
 		unsafe.Pointer(&width),
@@ -895,10 +891,8 @@ func (c *coreGraphics) DataProviderCreateWithData(
 	size uintptr,
 	releaseDataCallback objcAnyOpaque,
 ) (cgprovider cgDataProvider, err error) {
-	cgprovider.typ = types.PointerTypeDescriptor
-
 	// CGDataProviderRef: (struct CGDataProvider)*
-	cgprovider.ptr = unsafe.Pointer(nil)
+	cgprovider.objcAnyOpaque = objcAnyOpaqueNil
 
 	err = ffi.CallFunction(cifCoreGraphicsDataProviderCreateWithData, c.symCGDataProviderCreateWithData, unsafe.Pointer(cgprovider.Pointer()), []unsafe.Pointer{
 		unsafe.Pointer(info.Pointer()),
@@ -932,10 +926,9 @@ func (c *coreGraphics) DataProviderRelease(cgprovider cgDataProvider) error {
 }
 
 func (c *coreGraphics) ColorSpaceCreateDeviceRGB() (cgspace cgColorSpace, err error) {
-	cgspace.typ = types.PointerTypeDescriptor
-	cgspace.ptr = unsafe.Pointer(nil)
+	cgspace.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifCoreGraphicsColorSpaceCreateDeviceRGB, c.symCGColorSpaceCreateDeviceRGB, unsafe.Pointer(&cgspace.ptr), []unsafe.Pointer{})
+	err = ffi.CallFunction(cifCoreGraphicsColorSpaceCreateDeviceRGB, c.symCGColorSpaceCreateDeviceRGB, unsafe.Pointer(&cgspace.data), []unsafe.Pointer{})
 	if err != nil {
 		return cgColorSpace{objcAnyOpaqueNil}, c.errorf("failed to CGColorSpaceCreateDeviceRGB: %w", err)
 	}
@@ -1028,14 +1021,14 @@ func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcPoin
 	}
 
 	argPtrs := make([]unsafe.Pointer, 2+len(args))
-	argPtrs[0] = unsafe.Pointer(self.Pointer())
-	argPtrs[1] = unsafe.Pointer(op.Pointer())
+	argPtrs[0] = self.Pointer()
+	argPtrs[1] = op.Pointer()
 	for i, arg := range args {
-		argPtrs[2+i] = unsafe.Pointer(arg.Pointer())
+		argPtrs[2+i] = arg.Pointer()
 	}
 
 	fn := o.objcMsgSendSymbol(ret.Type())
-	err := ffi.CallFunction(cif, fn, unsafe.Pointer(ret.Pointer()), argPtrs)
+	err := ffi.CallFunction(cif, fn, ret.Pointer(), argPtrs)
 	runtime.KeepAlive(args)
 
 	return err
@@ -1062,20 +1055,19 @@ func (o *objcReflect) SelRegisterName(name string) (sel objcSEL, err error) {
 		return cached.(objcSEL), nil
 	}
 
-	sel.typ = types.PointerTypeDescriptor
-	sel.ptr = unsafe.Pointer(nil)
+	sel.objcAnyOpaque = objcAnyOpaqueNil
 
 	cname := append([]byte(name), 0)
 	selname := unsafe.SliceData(cname)
 
-	err = ffi.CallFunction(cifOBJCSelRegisterName, o.symSelRegisterName, unsafe.Pointer(&sel.ptr), []unsafe.Pointer{
+	err = ffi.CallFunction(cifOBJCSelRegisterName, o.symSelRegisterName, unsafe.Pointer(&sel.data), []unsafe.Pointer{
 		unsafe.Pointer(&selname),
 	})
 	if err != nil {
 		return objcSEL{objcAnyOpaqueNil}, err
 	}
 
-	if sel.ptr == nil {
+	if sel.IsSamePointer(&objcAnyOpaqueNil) {
 		return objcSEL{objcAnyOpaqueNil}, o.errorf("failed to sel_registerName: name=%s, selname_ptr=%v, selname_str=%s", name, selname, unsafe.String((*byte)(selname), len(name)))
 	}
 
@@ -1089,20 +1081,19 @@ func (o *objcReflect) LoopUpClass(name string) (cls objcAnyOpaque, err error) {
 		return cached.(objcAnyOpaque), nil
 	}
 
-	cls.typ = types.PointerTypeDescriptor
-	cls.ptr = unsafe.Pointer(nil)
+	cls = objcAnyOpaqueNil
 
 	cname := append([]byte(name), 0)
 	selname := unsafe.SliceData(cname)
 
-	err = ffi.CallFunction(cifOBJCLookUpClass, o.symOBJCLookUpClass, unsafe.Pointer(&cls.ptr), []unsafe.Pointer{
+	err = ffi.CallFunction(cifOBJCLookUpClass, o.symOBJCLookUpClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
 		unsafe.Pointer(&selname),
 	})
 	if err != nil {
 		return objcAnyOpaqueNil, err
 	}
 
-	if cls.ptr == nil {
+	if cls.data == nil {
 		return objcAnyOpaqueNil, o.errorf("failed to objc_lookUpClass: name=%s, selname_ptr=%v, selname_str=%s", name, selname, unsafe.String((*byte)(selname), len(name)))
 	}
 
@@ -1112,10 +1103,9 @@ func (o *objcReflect) LoopUpClass(name string) (cls objcAnyOpaque, err error) {
 }
 
 func (o *objcReflect) GetClass(obj objcAnyOpaque) (cls objcAnyOpaque, err error) {
-	cls.typ = types.PointerTypeDescriptor
-	cls.ptr = unsafe.Pointer(nil)
+	cls = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifOBJCGetClass, o.symObjectGetClass, unsafe.Pointer(&cls.ptr), []unsafe.Pointer{
+	err = ffi.CallFunction(cifOBJCGetClass, o.symObjectGetClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
 		unsafe.Pointer(obj.Pointer()),
 	})
 	if err != nil {
@@ -1136,35 +1126,7 @@ type objcPointer interface {
 	IsSamePointer(objcPointer) bool
 }
 
-type objcAnyOpaque struct {
-	typ *types.TypeDescriptor
-	ptr unsafe.Pointer
-}
-
-func (o *objcAnyOpaque) OBJCAnyOpaque() *objcAnyOpaque {
-	return o
-}
-
-func (o *objcAnyOpaque) Type() *types.TypeDescriptor {
-	return o.typ
-}
-
-func (o *objcAnyOpaque) Pointer() unsafe.Pointer {
-	return unsafe.Pointer(&o.ptr)
-}
-
-func (o *objcAnyOpaque) IsSamePointer(y objcPointer) bool {
-	switch y := y.(type) {
-	case *objcAnyOpaque:
-		return o.ptr == y.ptr
-
-	case interface{ OBJCAnyOpaque() *objcAnyOpaque }:
-		return o.ptr == y.OBJCAnyOpaque().ptr
-
-	default:
-		return o.Pointer() == y.Pointer()
-	}
-}
+type objcAnyOpaque = objcBoxed[unsafe.Pointer]
 
 type objcBoxed[T any] struct {
 	typ  *types.TypeDescriptor
@@ -1180,18 +1142,24 @@ func (o *objcBoxed[T]) Pointer() unsafe.Pointer {
 }
 
 func (o *objcBoxed[T]) IsSamePointer(y objcPointer) bool {
-	return unsafe.Pointer(&o.data) == y.Pointer()
+	switch y := y.(type) {
+	case *objcBoxed[T]:
+		return any(o.data) == any(y.data)
+
+	default:
+		return o.Pointer() == y.Pointer()
+	}
 }
 
 func objcAnyOpaqueFromPointer(ptr unsafe.Pointer) objcAnyOpaque {
-	return objcAnyOpaque{typ: types.PointerTypeDescriptor, ptr: ptr}
+	return *objcBoxedWith(ptr, types.PointerTypeDescriptor)
 }
 
 func objcBoxedWith[T any](data T, typ *types.TypeDescriptor) *objcBoxed[T] {
 	return &objcBoxed[T]{typ, data}
 }
 
-var objcAnyOpaqueNil = objcAnyOpaque{typ: types.PointerTypeDescriptor, ptr: unsafe.Pointer(nil)}
+var objcAnyOpaqueNil = objcAnyOpaqueFromPointer(unsafe.Pointer(nil))
 
 func typeSize(td *types.TypeDescriptor) uintptr {
 	if td == nil {
