@@ -14,10 +14,6 @@ import (
 	"github.com/go-webgpu/goffi/types"
 )
 
-func init() {
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-}
-
 // platformBlit is a no-op on platforms without native blit support.
 // Windows has GDI (blit_windows.go), Linux has X11 (blit_linux.go).
 type platformBlit struct {
@@ -224,7 +220,7 @@ func blitDamageRectsToWindowCALayer(objc *objcReflect, l caLayer, img cgImage, w
 }
 
 func isCAMetalLayer(objc *objcReflect, l caLayer) bool {
-	clsCAMetalLayer, err := objc.LoopUpClass("CAMetalLayer")
+	clsCAMetalLayer, err := objc.LookUpClass("CAMetalLayer")
 	if err != nil {
 		slog.Debug("software: failed to get CAMetalLayer class", slog.Any("error", err))
 		return false
@@ -1180,7 +1176,7 @@ func (o *objcReflect) SelRegisterName(name string) (sel objcSEL, err error) {
 	return sel, nil
 }
 
-func (o *objcReflect) LoopUpClass(name string) (cls objcAnyOpaque, err error) {
+func (o *objcReflect) LookUpClass(name string) (cls objcAnyOpaque, err error) {
 	if cached, ok := o.clsCaches.Load(name); ok {
 		return cached.(objcAnyOpaque), nil
 	}
