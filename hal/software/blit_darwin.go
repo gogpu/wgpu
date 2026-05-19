@@ -21,6 +21,9 @@ type platformBlit struct {
 	objc           *objcReflect
 	cg             *coreGraphics
 	colorSpace     cgColorSpace
+	mtl            *metal
+	mtlDevice      mtlDevice
+	mtlQueue       mtlCommandQueue
 	isIinitialized bool
 }
 
@@ -38,6 +41,23 @@ func (p *platformBlit) init() (err error) {
 	p.colorSpace, err = p.cg.ColorSpaceCreateDeviceRGB()
 	if err != nil {
 		return err
+	}
+
+	p.mtl = new(metal)
+	if err := p.mtl.Open(p.objc); err != nil {
+		p.mtl = nil
+	}
+
+	if p.mtl != nil {
+		p.mtlDevice, err = p.mtl.CreateSystemDefaultDevice()
+		if err != nil {
+			return err
+		}
+
+		p.mtlQueue, err = p.mtlDevice.NewCommandQueue(p.objc)
+		if err != nil {
+			return err
+		}
 	}
 
 	p.isIinitialized = true
@@ -72,36 +92,75 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		return
 	}
 
-	objc, cg, colorSpace := s.platformBlit.objc, s.platformBlit.cg, s.platformBlit.colorSpace
-
-	dataProvider, err := cg.DataProviderCreateWithData(objcAnyOpaqueNil, objcAnyOpaqueFromPointer(unsafe.Pointer(unsafe.SliceData(data))), uintptr(len(data)), objcAnyOpaqueNil)
-	if err != nil {
-		slog.Debug("software: failed to create CGDataProvider", slog.Any("error", err))
-		return
-	}
-	defer cg.DataProviderRelease(dataProvider)
-
-	binfo := cgBitmapInfoByteOrder32Little.
-		WithImageAlphaInfo(cgImageAlphaPremultipliedFirst)
-
-	img, err := cg.ImageCreate(uintptr(width), uintptr(height), 8, 32, 4*uintptr(width), colorSpace, binfo, dataProvider, objcAnyOpaqueNil, false, cgColorRenderingIntentDefault)
-	if err != nil {
-		slog.Debug("software: failed to create CGImage", slog.Any("error", err))
-		return
-	}
-
-	defer cg.ImageRelease(img)
-
+	objc, cg, colorSpace, mtl := s.platformBlit.objc, s.platformBlit.cg, s.platformBlit.colorSpace, s.platformBlit.mtl
 	l := caLayer{objcAnyOpaqueFromPointer(unsafe.Pointer(s.hwnd))}
 
-	if err := l.SetNeedsDisplay(objc); err != nil {
-		slog.Debug("software: failed to set NeedsDisplay", slog.Any("error", err))
-		return
+	// true when s.hwnd is CAMetalLayer
+	isMetalNeeded := false
+
+	if mtl != nil {
+		clsCAMetalLayer, err := objc.LoopUpClass("CAMetalLayer")
+		if err != nil {
+			slog.Debug("software: failed to get CAMetalLayer class", slog.Any("error", err))
+			return
+		}
+
+		lClass, err := objc.GetClass(l.objcAnyOpaque)
+		if err != nil {
+			slog.Debug("software: failed to get object class", slog.Any("error", err))
+			return
+		}
+
+		isMetalNeeded = lClass.IsSamePointer(&clsCAMetalLayer)
 	}
 
-	if err := l.SetContents(objc, img.objcAnyOpaque); err != nil {
-		slog.Debug("software: failed to [caLayer setContents: img]", slog.Any("error", err), slog.Any("img", img))
-		return
+	if isMetalNeeded {
+		// CAMetalLayer does not support `setContents:`
+		// slog.Warn("software: blitFrameBufferToWindow does not support CAMetalLayer. (Did you try using metal backend?)")
+
+		device, queue := s.platformBlit.mtlDevice, s.platformBlit.mtlQueue
+
+		ml := caMetalLayer{l}
+
+		d, err := ml.Device(objc)
+		if err != nil {
+			slog.Debug("software: failed to get device", slog.Any("error", err))
+		} else if d.IsSamePointer(&objcAnyOpaqueNil) {
+			d = device
+			ml.SetDevice(objc, d)
+		}
+
+		col, err := ml.ColorSpace(objc)
+		if err != nil {
+			slog.Debug("software: failed to get colorspace", slog.Any("error", err))
+		} else if col.IsSamePointer(&objcAnyOpaqueNil) {
+			if err := ml.SetColorSpace(objc, colorSpace); err != nil {
+				slog.Debug("software: failed to set colorspace", slog.Any("error", err))
+			}
+		}
+
+		blitFrameBufferToWindowMetal(objc, queue, ml, uint64(width), uint64(height), data, 4*uint64(width))
+	} else {
+		dataProvider, err := cg.DataProviderCreateWithData(objcAnyOpaqueNil, objcAnyOpaqueFromPointer(unsafe.Pointer(unsafe.SliceData(data))), uintptr(len(data)), objcAnyOpaqueNil)
+		if err != nil {
+			slog.Debug("software: failed to create CGDataProvider", slog.Any("error", err))
+			return
+		}
+
+		defer cg.DataProviderRelease(dataProvider)
+
+		binfo := cgBitmapInfoByteOrder32Little.
+			WithImageAlphaInfo(cgImageAlphaPremultipliedFirst)
+
+		img, err := cg.ImageCreate(uintptr(width), uintptr(height), 8, 32, 4*uintptr(width), colorSpace, binfo, dataProvider, objcAnyOpaqueNil, false, cgColorRenderingIntentDefault)
+		if err != nil {
+			slog.Debug("software: failed to create CGImage", slog.Any("error", err))
+			return
+		}
+
+		defer cg.ImageRelease(img)
+
+		blitFrameBufferToWindowCALayer(objc, l, img)
 	}
 }
 
@@ -110,7 +169,469 @@ func (s *Surface) blitDamageRectsToWindow(_ []byte, _, _ int32, _ []image.Rectan
 
 }
 
+func blitFrameBufferToWindowCALayer(objc *objcReflect, layer caLayer, img cgImage) {
+	if err := layer.SetContents(objc, img.objcAnyOpaque); err != nil {
+		slog.Debug("software: failed to [caLayer setContents: img]", slog.Any("error", err), slog.Any("img", img))
+		return
+	}
+
+	if err := layer.SetNeedsDisplay(objc); err != nil {
+		slog.Debug("software: failed to set NeedsDisplay", slog.Any("error", err))
+		return
+	}
+}
+
+func blitFrameBufferToWindowMetal(objc *objcReflect, queue mtlCommandQueue, layer caMetalLayer, w, h uint64, data []byte, bytesPerRow uint64) {
+	if err := layer.SetDrawableSize(objc, cgSize{
+		Width:  float64(w),
+		Height: float64(h),
+	}); err != nil {
+		slog.Debug("software: failed to [caMetalLayer setDrawableSize:size]", slog.Any("error", err))
+		return
+	}
+
+	dr, err := layer.NextDrawable(objc)
+	if err != nil || dr.IsSamePointer(&objcAnyOpaqueNil) {
+		slog.Debug("software: failed to [caMetalLayer nextDrawable]", slog.Any("error", err), slog.Any("dr", dr))
+		return
+	}
+
+	tex, err := dr.Texture(objc)
+	if err != nil || tex.IsSamePointer(&objcAnyOpaqueNil) {
+		slog.Debug("software: failed to [caMetalDrawable texture]", slog.Any("error", err))
+		return
+	}
+
+	region := metalRegion{
+		Origin: metalOrigin{
+			X: 0,
+			Y: 0,
+			Z: 0,
+		},
+		Size: metalSize{
+			Width:  w,
+			Height: h,
+			Depth:  1,
+		},
+	}
+
+	err = tex.ReplaceRegion_MipmapLevel_WithBytes_BytesPerRow(objc, region, 0, data, bytesPerRow)
+	if err != nil {
+		slog.Debug("software: failed to [mtlTexture replaceRegion:mipmapLevel:withBytes:bytesPerRow:]", slog.Any("region", region), slog.Any("bytesPerRow", bytesPerRow))
+		return
+	}
+
+	buf, err := queue.CommandBuffer(objc)
+	if err != nil {
+		slog.Debug("software: failed to [mtlQueue commandBuffer]", slog.Any("error", err))
+		return
+	}
+
+	if err := buf.PresentDrawable(objc, dr); err != nil {
+		slog.Debug("software: failed to [mtlCommandBuffer presentDrawable:nextDrawable]", slog.Any("error", err), slog.Any("nextDrawable", dr))
+		return
+	}
+
+	if err := buf.Commit(objc); err != nil {
+		slog.Debug("software: failed to [mtlCommandBufer commit]", slog.Any("error", err))
+		return
+	}
+
+	if err := layer.SetNeedsDisplay(objc); err != nil {
+		slog.Debug("software: failed set needsDisplay", slog.Any("error", err))
+		return
+	}
+}
+
 // --- BEGIN OBJC BINDING ---
+
+type mtlCommandQueue struct{ objcAnyOpaque }
+
+func (m *mtlCommandQueue) CommandBuffer(objc *objcReflect) (b mtlCommandBuffer, err error) {
+	sel, err := objc.SelRegisterName("commandBuffer")
+	if err != nil {
+		return mtlCommandBuffer{objcAnyOpaqueNil}, err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, &ret); err != nil {
+		return mtlCommandBuffer{objcAnyOpaqueNil}, err
+	}
+
+	return mtlCommandBuffer{ret}, nil
+}
+
+type mtlCommandBuffer struct{ objcAnyOpaque }
+
+func (m *mtlCommandBuffer) PresentDrawable(objc *objcReflect, dr caMTLDrawable) error {
+	sel, err := objc.SelRegisterName("presentDrawable:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, &ret, &dr); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *mtlCommandBuffer) Commit(objc *objcReflect) error {
+	sel, err := objc.SelRegisterName("commit")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, &ret); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type mtlDevice struct{ objcAnyOpaque }
+
+func (m *mtlDevice) NewCommandQueue(objc *objcReflect) (b mtlCommandQueue, err error) {
+	sel, err := objc.SelRegisterName("newCommandQueue")
+	if err != nil {
+		return mtlCommandQueue{objcAnyOpaqueNil}, err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, &ret); err != nil {
+		return mtlCommandQueue{objcAnyOpaqueNil}, err
+	}
+
+	return mtlCommandQueue{ret}, nil
+}
+
+type caMetalLayer struct{ caLayer }
+
+func (c *caMetalLayer) PixelFormat(objc *objcReflect) (pixfmt uint64, err error) {
+	sel, err := objc.SelRegisterName("pixelFormat")
+	if err != nil {
+		return 0, err
+	}
+
+	ret := objcBoxedWith(uint64(0), types.UInt64TypeDescriptor)
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, ret); err != nil {
+		return 0, err
+	}
+
+	return ret.data, nil
+}
+
+func (c *caMetalLayer) SetPixelFormat(objc *objcReflect, pixfmt uint64) error {
+	sel, err := objc.SelRegisterName("setPixelFormat:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, objcBoxedWith(pixfmt, types.UInt64TypeDescriptor)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *caMetalLayer) DrawableSize(objc *objcReflect) (sz cgSize, err error) {
+	sel, err := objc.SelRegisterName("drawableSize")
+	if err != nil {
+		return sz, err
+	}
+
+	ret := objcBoxedWith(sz, cgSizeTypeDescriptor)
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, ret); err != nil {
+		return sz, err
+	}
+
+	return ret.data, nil
+}
+
+func (c *caMetalLayer) SetDrawableSize(objc *objcReflect, sz cgSize) error {
+	sel, err := objc.SelRegisterName("setDrawableSize:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, objcBoxedWith(sz, cgSizeTypeDescriptor)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *caMetalLayer) Device(objc *objcReflect) (d mtlDevice, err error) {
+	sel, err := objc.SelRegisterName("device")
+	if err != nil {
+		return mtlDevice{objcAnyOpaqueNil}, err
+	}
+
+	d.typ = types.PointerTypeDescriptor
+	d.ptr = unsafe.Pointer(nil)
+
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &d); err != nil {
+		return mtlDevice{objcAnyOpaqueNil}, err
+	}
+
+	return d, nil
+}
+
+func (c *caMetalLayer) SetDevice(objc *objcReflect, device mtlDevice) error {
+	sel, err := objc.SelRegisterName("setDevice:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, &device); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *caMetalLayer) ColorSpace(objc *objcReflect) (col cgColorSpace, err error) {
+	sel, err := objc.SelRegisterName("colorspace")
+	if err != nil {
+		return cgColorSpace{objcAnyOpaqueNil}, err
+	}
+
+	col.typ = types.PointerTypeDescriptor
+	col.ptr = unsafe.Pointer(nil)
+
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &col.objcAnyOpaque); err != nil {
+		return cgColorSpace{objcAnyOpaqueNil}, err
+	}
+
+	return col, nil
+}
+
+func (c *caMetalLayer) SetColorSpace(objc *objcReflect, col cgColorSpace) error {
+	sel, err := objc.SelRegisterName("setColorspace:")
+	if err != nil {
+		return err
+	}
+
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, &col.objcAnyOpaque); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *caMetalLayer) NextDrawable(objc *objcReflect) (dr caMTLDrawable, err error) {
+	sel, err := objc.SelRegisterName("nextDrawable")
+	if err != nil {
+		return caMTLDrawable{objcAnyOpaqueNil}, err
+	}
+
+	dr.typ = types.PointerTypeDescriptor
+	dr.ptr = unsafe.Pointer(nil)
+
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &dr); err != nil {
+		return caMTLDrawable{objcAnyOpaqueNil}, err
+	}
+
+	return dr, nil
+}
+
+type caMTLDrawable struct{ objcAnyOpaque }
+
+func (c *caMTLDrawable) Texture(objc *objcReflect) (tex mtlTexture, err error) {
+	sel, err := objc.SelRegisterName("texture")
+	if err != nil {
+		return mtlTexture{objcAnyOpaqueNil}, err
+	}
+
+	tex.typ = types.PointerTypeDescriptor
+	tex.ptr = unsafe.Pointer(nil)
+
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &tex.objcAnyOpaque); err != nil {
+		return mtlTexture{objcAnyOpaqueNil}, err
+	}
+
+	return tex, nil
+}
+
+type mtlTexture struct{ objcAnyOpaque }
+
+// ref: https://developer.apple.com/documentation/metal/mtltexture/replace(region:mipmaplevel:withbytes:bytesperrow:)?language=objc
+func (m *mtlTexture) ReplaceRegion_MipmapLevel_WithBytes_BytesPerRow(
+	objc *objcReflect,
+	region metalRegion,
+	mipmapLevel uint64,
+	withBytes []byte,
+	bytesPerRow uint64,
+) error {
+	sel, err := objc.SelRegisterName("replaceRegion:mipmapLevel:withBytes:bytesPerRow:")
+	if err != nil {
+		return err
+	}
+
+	err = objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, &objcAnyOpaqueNil,
+		objcBoxedWith(region, metalRegionType),
+		objcBoxedWith(mipmapLevel, types.UInt64TypeDescriptor),
+		objcBoxedWith(unsafe.Pointer(unsafe.SliceData(withBytes)), types.PointerTypeDescriptor),
+		objcBoxedWith(bytesPerRow, types.UInt64TypeDescriptor),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *mtlTexture) Width(objc *objcReflect) (w uint64, err error) {
+	sel, err := objc.SelRegisterName("width")
+	if err != nil {
+		return 0, err
+	}
+
+	ret := objcBoxedWith(0, types.PointerTypeDescriptor)
+	err = objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, ret)
+	if err != nil {
+		return 0, err
+	}
+
+	slog.Debug("software: width ret", slog.Any("ret", ret))
+
+	return uint64(ret.data), nil
+}
+
+func (m *mtlTexture) Height(objc *objcReflect) (h uint64, err error) {
+	sel, err := objc.SelRegisterName("height")
+	if err != nil {
+		return 0, err
+	}
+
+	ret := objcBoxedWith(0, types.PointerTypeDescriptor)
+	err = objc.MsgSend(m.objcAnyOpaque, sel.objcAnyOpaque, ret)
+	if err != nil {
+		return 0, err
+	}
+
+	slog.Debug("software: width ret", slog.Any("ret", ret))
+
+	return uint64(ret.data), nil
+}
+
+type metalRegion struct {
+	Origin metalOrigin
+	Size   metalSize
+}
+
+type metalOrigin struct {
+	X, Y, Z uint64
+}
+
+type metalSize struct {
+	Width, Height, Depth uint64
+}
+
+var (
+	metalOriginType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	metalSizeType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	metalRegionType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			metalOriginType,
+			metalSizeType,
+		},
+	}
+	cifMetalRegionMake2D = &types.CallInterface{
+		ArgCount: 4,
+		ArgTypes: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+		ReturnType: metalRegionType,
+	}
+	cifMTLCreateSystemDefaultDevice = types.CallInterface{
+		ArgCount:   0,
+		ReturnType: types.PointerTypeDescriptor,
+	}
+)
+
+const metalLibraryLocation = "/System/Library/Frameworks/Metal.framework/Metal"
+
+type metal struct {
+	lib unsafe.Pointer
+	// symMTLRegionMake2D              unsafe.Pointer
+	symMTLCreateSystemDefaultDevice unsafe.Pointer
+
+	objc *objcReflect
+}
+
+func (m *metal) Open(objc *objcReflect) (err error) {
+	m.objc = objc
+
+	if m.lib, err = ffi.LoadLibrary(metalLibraryLocation); err != nil {
+		return m.errorf("failed to load metal library: %w", err)
+	}
+
+	// if m.symMTLRegionMake2D, err = ffi.GetSymbol(m.lib, "MTLRegionMake2D"); err != nil {
+	// 	return m.errorf("MTLRegionMake2D is not found: %w", err)
+	// }
+
+	if m.symMTLCreateSystemDefaultDevice, err = ffi.GetSymbol(m.lib, "MTLCreateSystemDefaultDevice"); err != nil {
+		return m.errorf("MTLCreateSystemDefaultDevice is not found: %w", err)
+	}
+
+	return nil
+}
+
+// func (m *metal) RegionMake2D(x, y, w, h uint64) (region metalRegion, err error) {
+// 	err = ffi.CallFunction(cifMetalRegionMake2D, m.symMTLRegionMake2D, unsafe.Pointer(&region), []unsafe.Pointer{
+// 		unsafe.Pointer(&x),
+// 		unsafe.Pointer(&y),
+// 		unsafe.Pointer(&w),
+// 		unsafe.Pointer(&h),
+// 	})
+// 	if err != nil {
+// 		return region, m.errorf("failed to MTLRegionMake2D: %w", err)
+// 	}
+
+// 	return region, nil
+// }
+
+func (m *metal) CreateSystemDefaultDevice() (d mtlDevice, err error) {
+	d.typ = types.PointerTypeDescriptor
+	d.ptr = unsafe.Pointer(nil)
+
+	err = ffi.CallFunction(&cifMTLCreateSystemDefaultDevice, m.symMTLCreateSystemDefaultDevice, unsafe.Pointer(&d.ptr), []unsafe.Pointer{})
+	if err != nil {
+		return mtlDevice{objcAnyOpaqueNil}, m.errorf("failed to MTLRegionMake2D: %w", err)
+	}
+
+	return d, nil
+}
+
+func (m *metal) errorf(f string, args ...any) error {
+	return fmt.Errorf("software.metal: "+f, args...)
+}
 
 type caLayer struct{ objcAnyOpaque }
 
@@ -121,8 +642,8 @@ func (c *caLayer) SetNeedsDisplay(objc *objcReflect) error {
 		return err
 	}
 
-	ret := objcAnyOpaqueFromPointer(unsafe.Pointer(new(uintptr)))
-	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, ret); err != nil {
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret); err != nil {
 		return err
 	}
 
@@ -135,8 +656,8 @@ func (c *caLayer) SetContents(objc *objcReflect, obj objcAnyOpaque) error {
 		return err
 	}
 
-	ret := objcAnyOpaqueFromPointer(unsafe.Pointer(new(uintptr)))
-	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, ret, obj); err != nil {
+	ret := objcAnyOpaqueNil
+	if err := objc.MsgSend(c.objcAnyOpaque, sel.objcAnyOpaque, &ret, &obj); err != nil {
 		return err
 	}
 
@@ -210,8 +731,19 @@ const (
 type cgDataProvider struct{ objcAnyOpaque }
 type cgColorSpace struct{ objcAnyOpaque }
 type cgImage struct{ objcAnyOpaque }
+type cgSize struct {
+	Width  float64
+	Height float64
+}
 
 var (
+	cgSizeTypeDescriptor = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
 	cifCoreGraphicsImageCreate = &types.CallInterface{
 		ArgCount: 11,
 		ArgTypes: []*types.TypeDescriptor{
@@ -337,7 +869,7 @@ func (c *coreGraphics) ImageCreate(
 	// CGImageRef: (struct CGImage)*
 	cgimg.ptr = unsafe.Pointer(nil)
 
-	err = ffi.CallFunction(cifCoreGraphicsImageCreate, c.symCGImageCreate, unsafe.Pointer(&cgimg.ptr), []unsafe.Pointer{
+	err = ffi.CallFunction(cifCoreGraphicsImageCreate, c.symCGImageCreate, unsafe.Pointer(cgimg.Pointer()), []unsafe.Pointer{
 		unsafe.Pointer(&width),
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&bitsPerComponent),
@@ -368,7 +900,7 @@ func (c *coreGraphics) DataProviderCreateWithData(
 	// CGDataProviderRef: (struct CGDataProvider)*
 	cgprovider.ptr = unsafe.Pointer(nil)
 
-	err = ffi.CallFunction(cifCoreGraphicsDataProviderCreateWithData, c.symCGDataProviderCreateWithData, unsafe.Pointer(&cgprovider.ptr), []unsafe.Pointer{
+	err = ffi.CallFunction(cifCoreGraphicsDataProviderCreateWithData, c.symCGDataProviderCreateWithData, unsafe.Pointer(cgprovider.Pointer()), []unsafe.Pointer{
 		unsafe.Pointer(info.Pointer()),
 		unsafe.Pointer(data.Pointer()),
 		unsafe.Pointer(&size),
@@ -428,6 +960,8 @@ var (
 		},
 		ReturnType: types.PointerTypeDescriptor,
 	}
+	cifOBJCLookUpClass = cifOBJCSelRegisterName
+	cifOBJCGetClass    = cifOBJCSelRegisterName
 )
 
 type objcReflect struct {
@@ -436,8 +970,11 @@ type objcReflect struct {
 	symMsgSendStRet    unsafe.Pointer
 	symMsgSendFpRet    unsafe.Pointer
 	symSelRegisterName unsafe.Pointer
+	symOBJCLookUpClass unsafe.Pointer
+	symObjectGetClass  unsafe.Pointer
 
 	selCaches sync.Map
+	clsCaches sync.Map
 }
 
 func (o *objcReflect) Open() (err error) {
@@ -462,10 +999,18 @@ func (o *objcReflect) Open() (err error) {
 		return o.errorf("sel_registerName not found: %w", err)
 	}
 
+	if o.symOBJCLookUpClass, err = ffi.GetSymbol(o.lib, "objc_lookUpClass"); err != nil {
+		return o.errorf("objc_lookUpClass not found: %w", err)
+	}
+
+	if o.symObjectGetClass, err = ffi.GetSymbol(o.lib, "object_getClass"); err != nil {
+		return o.errorf("object_getClass not found: %w", err)
+	}
+
 	return nil
 }
 
-func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcAnyOpaque, args ...objcAnyOpaque) error {
+func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcPointer, args ...objcPointer) error {
 	if self.Pointer() == nil || op.Pointer() == nil {
 		return nil
 	}
@@ -474,7 +1019,7 @@ func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcAnyO
 	argTypes[0] = types.PointerTypeDescriptor
 	argTypes[1] = types.PointerTypeDescriptor
 	for i, arg := range args {
-		argTypes[2+i] = arg.typ
+		argTypes[2+i] = arg.Type()
 	}
 
 	cif := &types.CallInterface{}
@@ -494,6 +1039,22 @@ func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcAnyO
 	runtime.KeepAlive(args)
 
 	return err
+}
+
+func (o *objcReflect) objcMsgSendSymbol(retType *types.TypeDescriptor) unsafe.Pointer {
+	if retType != nil && retType.Kind == types.StructType && runtime.GOARCH == "amd64" {
+		if o.symMsgSendStRet != nil && typeSize(retType) > 16 {
+			return o.symMsgSendStRet
+		}
+	}
+
+	if retType != nil && (retType.Kind == types.FloatType || retType.Kind == types.DoubleType) && runtime.GOARCH == "amd64" {
+		if o.symMsgSendFpRet != nil {
+			return o.symMsgSendFpRet
+		}
+	}
+
+	return o.symMsgSend
 }
 
 func (o *objcReflect) SelRegisterName(name string) (sel objcSEL, err error) {
@@ -523,20 +1084,45 @@ func (o *objcReflect) SelRegisterName(name string) (sel objcSEL, err error) {
 	return sel, nil
 }
 
-func (o *objcReflect) objcMsgSendSymbol(retType *types.TypeDescriptor) unsafe.Pointer {
-	if retType != nil && retType.Kind == types.StructType && runtime.GOARCH == "amd64" {
-		if o.symMsgSendStRet != nil && typeSize(retType) > 16 {
-			return o.symMsgSendStRet
-		}
+func (o *objcReflect) LoopUpClass(name string) (cls objcAnyOpaque, err error) {
+	if cached, ok := o.clsCaches.Load(name); ok {
+		return cached.(objcAnyOpaque), nil
 	}
 
-	if retType != nil && (retType.Kind == types.FloatType || retType.Kind == types.DoubleType) && runtime.GOARCH == "amd64" {
-		if o.symMsgSendFpRet != nil {
-			return o.symMsgSendFpRet
-		}
+	cls.typ = types.PointerTypeDescriptor
+	cls.ptr = unsafe.Pointer(nil)
+
+	cname := append([]byte(name), 0)
+	selname := unsafe.SliceData(cname)
+
+	err = ffi.CallFunction(cifOBJCLookUpClass, o.symOBJCLookUpClass, unsafe.Pointer(&cls.ptr), []unsafe.Pointer{
+		unsafe.Pointer(&selname),
+	})
+	if err != nil {
+		return objcAnyOpaqueNil, err
 	}
 
-	return o.symMsgSend
+	if cls.ptr == nil {
+		return objcAnyOpaqueNil, o.errorf("failed to objc_lookUpClass: name=%s, selname_ptr=%v, selname_str=%s", name, selname, unsafe.String((*byte)(selname), len(name)))
+	}
+
+	o.clsCaches.Store(name, cls)
+
+	return cls, nil
+}
+
+func (o *objcReflect) GetClass(obj objcAnyOpaque) (cls objcAnyOpaque, err error) {
+	cls.typ = types.PointerTypeDescriptor
+	cls.ptr = unsafe.Pointer(nil)
+
+	err = ffi.CallFunction(cifOBJCGetClass, o.symObjectGetClass, unsafe.Pointer(&cls.ptr), []unsafe.Pointer{
+		unsafe.Pointer(obj.Pointer()),
+	})
+	if err != nil {
+		return objcAnyOpaqueNil, err
+	}
+
+	return cls, nil
 }
 
 // attach module name for traceability when it's paniced.
@@ -544,21 +1130,65 @@ func (o *objcReflect) errorf(f string, vals ...any) error {
 	return fmt.Errorf("hal/software.objcReflect: "+f, vals...)
 }
 
+type objcPointer interface {
+	Type() *types.TypeDescriptor
+	Pointer() unsafe.Pointer
+	IsSamePointer(objcPointer) bool
+}
+
 type objcAnyOpaque struct {
 	typ *types.TypeDescriptor
 	ptr unsafe.Pointer
 }
 
-func (o objcAnyOpaque) Type() *types.TypeDescriptor {
+func (o *objcAnyOpaque) OBJCAnyOpaque() *objcAnyOpaque {
+	return o
+}
+
+func (o *objcAnyOpaque) Type() *types.TypeDescriptor {
 	return o.typ
 }
 
-func (o objcAnyOpaque) Pointer() *unsafe.Pointer {
-	return &o.ptr
+func (o *objcAnyOpaque) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(&o.ptr)
+}
+
+func (o *objcAnyOpaque) IsSamePointer(y objcPointer) bool {
+	switch y := y.(type) {
+	case *objcAnyOpaque:
+		return o.ptr == y.ptr
+
+	case interface{ OBJCAnyOpaque() *objcAnyOpaque }:
+		return o.ptr == y.OBJCAnyOpaque().ptr
+
+	default:
+		return o.Pointer() == y.Pointer()
+	}
+}
+
+type objcBoxed[T any] struct {
+	typ  *types.TypeDescriptor
+	data T
+}
+
+func (o *objcBoxed[T]) Type() *types.TypeDescriptor {
+	return o.typ
+}
+
+func (o *objcBoxed[T]) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(&o.data)
+}
+
+func (o *objcBoxed[T]) IsSamePointer(y objcPointer) bool {
+	return unsafe.Pointer(&o.data) == y.Pointer()
 }
 
 func objcAnyOpaqueFromPointer(ptr unsafe.Pointer) objcAnyOpaque {
 	return objcAnyOpaque{typ: types.PointerTypeDescriptor, ptr: ptr}
+}
+
+func objcBoxedWith[T any](data T, typ *types.TypeDescriptor) *objcBoxed[T] {
+	return &objcBoxed[T]{typ, data}
 }
 
 var objcAnyOpaqueNil = objcAnyOpaque{typ: types.PointerTypeDescriptor, ptr: unsafe.Pointer(nil)}
