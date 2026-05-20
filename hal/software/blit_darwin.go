@@ -58,9 +58,11 @@ func (p *platformBlit) init() (err error) {
 			return err
 		}
 
-		p.mtlQueue, err = p.mtlDevice.NewCommandQueue(p.objc)
-		if err != nil {
-			return err
+		if !p.mtlDevice.IsSamePointer(&objcAnyOpaqueNil) {
+			p.mtlQueue, err = p.mtlDevice.NewCommandQueue(p.objc)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -123,7 +125,7 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 
 // blitDamageRectsToWindow is a no-op on unsupported platforms.
 func (s *Surface) blitDamageRectsToWindow(src []byte, w, h int32, rects []image.Rectangle) {
-	if s.hwnd == 0 || len(rects) == 0 {
+	if s.hwnd == 0 || len(rects) == 0 || len(src) == 0 {
 		return
 	}
 
