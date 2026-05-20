@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"os"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -655,6 +656,10 @@ type metal struct {
 
 func (m *metal) Open(objc *objcReflect) (err error) {
 	m.objc = objc
+
+	if _, err := os.Stat(metalLibraryLocation); err != nil {
+		return m.errorf("metal framework not found: %w", err)
+	}
 
 	if m.lib, err = ffi.LoadLibrary(metalLibraryLocation); err != nil {
 		return m.errorf("failed to load metal library: %w", err)
