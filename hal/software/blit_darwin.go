@@ -17,14 +17,17 @@ import (
 // platformBlit is a no-op on platforms without native blit support.
 // Windows has GDI (blit_windows.go), Linux has X11 (blit_linux.go).
 type platformBlit struct {
-	once           sync.Once
-	objc           *objcReflect
-	cg             *coreGraphics
-	colorSpace     cgColorSpace
-	mtl            *metal
-	mtlDevice      mtlDevice
-	mtlQueue       mtlCommandQueue
-	isIinitialized bool
+	once sync.Once
+	objc *objcReflect
+	cg   *coreGraphics
+
+	// It's does not release, becuse colorSpace are lives for process lifetime.
+	colorSpace cgColorSpace
+
+	mtl           *metal
+	mtlDevice     mtlDevice
+	mtlQueue      mtlCommandQueue
+	isInitialized bool
 }
 
 func (p *platformBlit) init() (err error) {
@@ -60,7 +63,7 @@ func (p *platformBlit) init() (err error) {
 		}
 	}
 
-	p.isIinitialized = true
+	p.isInitialized = true
 
 	return nil
 }
@@ -72,7 +75,7 @@ func (p *platformBlit) onceInit() bool {
 		}
 	})
 
-	return p.isIinitialized
+	return p.isInitialized
 }
 
 // createPlatformFramebuffer returns nil — use Go heap memory.
@@ -82,7 +85,6 @@ func (s *Surface) createPlatformFramebuffer(_, _ int32) []byte { return nil }
 func (s *Surface) destroyPlatformFramebuffer() {}
 
 // blitFramebufferToWindow is a no-op on unsupported platforms.
-// TODO: implement CGImage+CALayer blit for macOS (Phase 2).
 func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 	if s.hwnd == 0 {
 		return
@@ -104,35 +106,17 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 
 	if isMetalNeeded {
 		// CAMetalLayer does not support `setContents:`
-		// slog.Warn("software: blitFrameBufferToWindow does not support CAMetalLayer. (Did you try using metal backend?)")
 
 		device, queue := s.platformBlit.mtlDevice, s.platformBlit.mtlQueue
 
-		ml := caMetalLayer{l}
+		ml := initCAMetalLayer(objc, device, colorSpace, l)
 
-		d, err := ml.Device(objc)
-		if err != nil {
-			slog.Debug("software: failed to get device", slog.Any("error", err))
-		} else if d.IsSamePointer(&objcAnyOpaqueNil) {
-			d = device
-			ml.SetDevice(objc, d)
-		}
-
-		col, err := ml.ColorSpace(objc)
-		if err != nil {
-			slog.Debug("software: failed to get colorspace", slog.Any("error", err))
-		} else if col.IsSamePointer(&objcAnyOpaqueNil) {
-			if err := ml.SetColorSpace(objc, colorSpace); err != nil {
-				slog.Debug("software: failed to set colorspace", slog.Any("error", err))
-			}
-		}
-
-		blitFrameBufferToWindowMetal(objc, queue, ml, uint64(width), uint64(height), data, 4*uint64(width))
+		blitFramebufferToWindowMetal(objc, queue, ml, uint64(width), uint64(height), data, 4*uint64(width))
 	} else {
 		img, release := createCGImageByFramebuffer(cg, colorSpace, data, width, height)
 		defer release()
 
-		blitFrameBufferToWindowCALayer(objc, l, img)
+		blitFramebufferToWindowCALayer(objc, l, img)
 	}
 }
 
@@ -155,7 +139,11 @@ func (s *Surface) blitDamageRectsToWindow(src []byte, w, h int32, rects []image.
 	}
 
 	if isMetalNeeded {
+		device, queue := s.platformBlit.mtlDevice, s.platformBlit.mtlQueue
 
+		ml := initCAMetalLayer(objc, device, colorSpace, l)
+
+		blitFramebufferToWindowMetal(objc, queue, ml, uint64(w), uint64(h), src, 4*uint64(w))
 	} else {
 		img, release := createCGImageByFramebuffer(cg, colorSpace, src, w, h)
 		defer release()
@@ -235,7 +223,29 @@ func isCAMetalLayer(objc *objcReflect, l caLayer) bool {
 	return lClass.IsSamePointer(&clsCAMetalLayer)
 }
 
-func blitFrameBufferToWindowCALayer(objc *objcReflect, layer caLayer, img cgImage) {
+func initCAMetalLayer(objc *objcReflect, device mtlDevice, colorSpace cgColorSpace, l caLayer) caMetalLayer {
+	ml := caMetalLayer{l}
+	d, err := ml.Device(objc)
+	if err != nil {
+		slog.Debug("software: failed to get device", slog.Any("error", err))
+	} else if d.IsSamePointer(&objcAnyOpaqueNil) {
+		d = device
+		ml.SetDevice(objc, d)
+	}
+
+	col, err := ml.ColorSpace(objc)
+	if err != nil {
+		slog.Debug("software: failed to get colorspace", slog.Any("error", err))
+	} else if col.IsSamePointer(&objcAnyOpaqueNil) {
+		if err := ml.SetColorSpace(objc, colorSpace); err != nil {
+			slog.Debug("software: failed to set colorspace", slog.Any("error", err))
+		}
+	}
+
+	return ml
+}
+
+func blitFramebufferToWindowCALayer(objc *objcReflect, layer caLayer, img cgImage) {
 	if err := layer.SetContents(objc, img.objcAnyOpaque); err != nil {
 		slog.Debug("software: failed to [caLayer setContents: img]", slog.Any("error", err), slog.Any("img", img))
 		return
@@ -247,7 +257,7 @@ func blitFrameBufferToWindowCALayer(objc *objcReflect, layer caLayer, img cgImag
 	}
 }
 
-func blitFrameBufferToWindowMetal(objc *objcReflect, queue mtlCommandQueue, layer caMetalLayer, w, h uint64, data []byte, bytesPerRow uint64) {
+func blitFramebufferToWindowMetal(objc *objcReflect, queue mtlCommandQueue, layer caMetalLayer, w, h uint64, data []byte, bytesPerRow uint64) {
 	if err := layer.SetDrawableSize(objc, cgSize{
 		Width:  float64(w),
 		Height: float64(h),
@@ -578,8 +588,6 @@ func (m *mtlTexture) Height(objc *objcReflect) (h uint64, err error) {
 		return 0, err
 	}
 
-	slog.Debug("software: width ret", slog.Any("ret", ret))
-
 	return uint64(ret.data), nil
 }
 
@@ -639,8 +647,7 @@ var (
 const metalLibraryLocation = "/System/Library/Frameworks/Metal.framework/Metal"
 
 type metal struct {
-	lib unsafe.Pointer
-	// symMTLRegionMake2D              unsafe.Pointer
+	lib                             unsafe.Pointer
 	symMTLCreateSystemDefaultDevice unsafe.Pointer
 
 	objc *objcReflect
@@ -653,30 +660,12 @@ func (m *metal) Open(objc *objcReflect) (err error) {
 		return m.errorf("failed to load metal library: %w", err)
 	}
 
-	// if m.symMTLRegionMake2D, err = ffi.GetSymbol(m.lib, "MTLRegionMake2D"); err != nil {
-	// 	return m.errorf("MTLRegionMake2D is not found: %w", err)
-	// }
-
 	if m.symMTLCreateSystemDefaultDevice, err = ffi.GetSymbol(m.lib, "MTLCreateSystemDefaultDevice"); err != nil {
 		return m.errorf("MTLCreateSystemDefaultDevice is not found: %w", err)
 	}
 
 	return nil
 }
-
-// func (m *metal) RegionMake2D(x, y, w, h uint64) (region metalRegion, err error) {
-// 	err = ffi.CallFunction(cifMetalRegionMake2D, m.symMTLRegionMake2D, unsafe.Pointer(&region), []unsafe.Pointer{
-// 		unsafe.Pointer(&x),
-// 		unsafe.Pointer(&y),
-// 		unsafe.Pointer(&w),
-// 		unsafe.Pointer(&h),
-// 	})
-// 	if err != nil {
-// 		return region, m.errorf("failed to MTLRegionMake2D: %w", err)
-// 	}
-
-// 	return region, nil
-// }
 
 func (m *metal) CreateSystemDefaultDevice() (d mtlDevice, err error) {
 	d.objcAnyOpaque = objcAnyOpaqueNil
@@ -903,8 +892,6 @@ var (
 		ArgCount:   0,
 		ReturnType: types.PointerTypeDescriptor,
 	}
-
-	// cifCoreGraphicsColorSpaceRelease = cifCoreGraphicsImageRelease
 )
 
 const coreGraphicsLibraryLocation = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -918,7 +905,6 @@ type coreGraphics struct {
 	symCGImageRelease               unsafe.Pointer
 	symCGDataProviderRelease        unsafe.Pointer
 	symCGColorSpaceCreateDeviceRGB  unsafe.Pointer
-	symCGColorSpaceRelease          unsafe.Pointer
 }
 
 func (c *coreGraphics) Open(objc *objcReflect) (err error) {
@@ -944,10 +930,6 @@ func (c *coreGraphics) Open(objc *objcReflect) (err error) {
 
 	if c.symCGColorSpaceCreateDeviceRGB, err = ffi.GetSymbol(c.lib, "CGColorSpaceCreateDeviceRGB"); err != nil {
 		return c.errorf("CGColorSpaceCreateDeviceRGB not found: %w", err)
-	}
-
-	if c.symCGColorSpaceRelease, err = ffi.GetSymbol(c.lib, "CGColorSpaceRelease"); err != nil {
-		return c.errorf("CGColorSpaceRelease not found: %w", err)
 	}
 
 	return nil
