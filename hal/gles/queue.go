@@ -17,40 +17,38 @@ import (
 )
 
 // Queue implements hal.Queue for OpenGL.
+// Holds a shared *AdapterContext (owned by Instance).
 type Queue struct {
-	glCtx           *gl.Context
-	wglCtx          *wgl.Context
+	ctx             *AdapterContext
 	submissionIndex uint64
 	fence           *Fence // signaled at each submit for GPU completion tracking
 }
 
 // Submit submits command buffers to the GPU.
-// After executing all commands and flushing, signals the fence with a GL sync object
-// so that fence wait/poll can track actual GPU completion.
+// Acquires the AdapterContext lock, makes context current on hidden window DC,
+// executes all GL commands, flushes, and signals the fence.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
 	for _, cb := range commandBuffers {
 		cmdBuf, ok := cb.(*CommandBuffer)
 		if !ok {
 			return 0, fmt.Errorf("gles: invalid command buffer type")
 		}
 
-		// Execute recorded commands with GL error checking.
 		for i, cmd := range cmdBuf.commands {
-			cmd.Execute(q.glCtx)
-			if glErr := q.glCtx.GetError(); glErr != 0 {
+			cmd.Execute(glCtx)
+			if glErr := glCtx.GetError(); glErr != 0 {
 				hal.Logger().Warn("gles: GL error after command", "error", fmt.Sprintf("0x%x", glErr), "index", i, "command", fmt.Sprintf("%T", cmd))
 			}
 		}
 	}
 
-	// Flush GL commands
-	q.glCtx.Flush()
+	glCtx.Flush()
 
 	q.submissionIndex++
 
-	// Signal the fence with a GL sync object at this submission index.
-	// This enables fence.Wait() to track real GPU completion instead of
-	// assuming all work is done immediately after Flush.
 	if q.fence != nil {
 		q.fence.Signal(q.submissionIndex)
 	}
@@ -79,9 +77,12 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 		return nil
 	}
 
-	q.glCtx.BindBuffer(buf.target, buf.id)
-	q.glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
-	q.glCtx.BindBuffer(buf.target, 0)
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
+	glCtx.BindBuffer(buf.target, buf.id)
+	glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
+	glCtx.BindBuffer(buf.target, 0)
 	return nil
 }
 
@@ -92,28 +93,26 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("gles: invalid texture type for WriteTexture")
 	}
 
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
 	_, format, dataType := textureFormatToGL(tex.format)
 
-	q.glCtx.BindTexture(tex.target, tex.id)
+	glCtx.BindTexture(tex.target, tex.id)
 
 	if tex.target == gl.TEXTURE_2D {
-		// Set alignment to 1 for single-channel formats (R8) whose row stride
-		// may not be a multiple of the default 4-byte GL_UNPACK_ALIGNMENT.
 		if tex.format == gputypes.TextureFormatR8Unorm {
-			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
 		}
-		// Use TexSubImage2D to update existing texture data (Rust wgpu-hal pattern).
-		// TexImage2D reallocates storage on every call; TexSubImage2D updates in-place.
-		q.glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
+		glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
 			0, 0, int32(size.Width), int32(size.Height), format, dataType,
 			unsafe.Pointer(&data[0]))
-		// Restore default alignment after upload.
 		if tex.format == gputypes.TextureFormatR8Unorm {
-			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
 		}
 	}
 
-	q.glCtx.BindTexture(tex.target, 0)
+	glCtx.BindTexture(tex.target, 0)
 
 	hal.Logger().Debug("gles: texture written",
 		"format", tex.format,
@@ -126,23 +125,33 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 // Present presents a surface texture to the screen.
 //
-// Before SwapBuffers, blits the Surface's swapchain offscreen FBO to the
-// default framebuffer (FBO 0) with an explicit Y-flip. User render passes
-// render upside-down into the swapchain FBO (driven by naga's in-shader
-// Y-flip); the blit un-flips for presentation. Mirrors Rust wgpu-hal
-// src/gles/egl.rs Surface::present (1280-1308).
+// Makes the GL context current on the user window's DC (via LockForDC),
+// blits the swapchain FBO to the default framebuffer with Y-flip, then
+// SwapBuffers. Mirrors Rust wgpu-hal wgl.rs Surface::present (682-750):
+// GetDC → lock_with_dc → blit → SwapBuffers → ReleaseDC.
 //
 // damageRects is accepted but ignored on Windows WGL — WGL has no
-// damage-aware swap API. GLES damage support is Linux-only (Phase 4, ADR-017).
+// damage-aware swap API.
 func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
 	surf, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("gles: invalid surface type")
 	}
 
-	surf.blitSwapchainToDefault()
+	// Get fresh DC for the user window (Rust: Gdi::GetDC(self.window)).
+	hdc := wgl.GetDC(surf.hwnd)
+	if hdc == 0 {
+		return fmt.Errorf("gles: GetDC failed for hwnd 0x%x", surf.hwnd)
+	}
+	defer wgl.ReleaseDC(surf.hwnd, hdc)
 
-	return surf.wglCtx.SwapBuffers()
+	// MakeCurrent to user window DC for presentation.
+	glCtx := q.ctx.LockForDC(hdc)
+	defer q.ctx.Unlock()
+
+	surf.blitSwapchainToDefaultWith(glCtx)
+
+	return wgl.SwapBuffers(hdc)
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds.

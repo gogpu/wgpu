@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.6] - 2026-05-21
+
+### Fixed
+
+- **GLES: Instance-owned GL context on hidden window (Rust wgpu parity)** — GL context
+  now lives on a hidden 1×1 HWND owned by Instance, surviving any user Surface destruction.
+  Previously the context was tied to the user window — closing the window killed the context,
+  leaving Adapter/Device/Queue with dangling references. New `AdapterContext` wraps the context
+  with `sync.Mutex`-protected `MakeCurrent` switching: `Lock()` → hidden DC for resource
+  creation/submit, `LockForDC()` → user DC for presentation. Surface is lightweight (no context
+  ownership). Windows WGL Phase 1; Linux EGL Phase 2 planned.
+  Follows Rust wgpu-hal/src/gles/wgl.rs `AdapterContext::lock()`/`lock_with_dc()` pattern.
+
 ## [0.28.5] - 2026-05-21
 
 ### Fixed

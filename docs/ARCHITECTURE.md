@@ -126,12 +126,25 @@ Pure Go DX12 implementation via COM interfaces.
 
 Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 
+**Context Architecture (Rust wgpu parity):**
+- GL context lives on a hidden 1×1 window (WGL/Windows) owned by Instance
+- `AdapterContext` — `sync.Mutex`-protected wrapper shared by Adapter → Device → Queue
+- `Lock()` → `wglMakeCurrent(hiddenDC)` for resource creation and command execution
+- `LockForDC(userDC)` → `wglMakeCurrent(userDC)` for presentation (blit + SwapBuffers)
+- `Unlock()` → `wglMakeCurrent(NULL)` — context unmade current between operations
+- Surface is lightweight — stores only user HWND + reference to shared AdapterContext
+- Adapter, Device, Queue survive user window destruction (context lives on hidden window)
+- Follows Rust wgpu-hal/src/gles/wgl.rs `AdapterContext::lock()` / `lock_with_dc()` pattern
+
+**Packages:**
 - `gl/` — OpenGL function bindings (Windows syscall + Linux goffi)
 - `egl/` — EGL context and display management (Linux)
-- `wgl/` — WGL context for Windows
+- `wgl/` — WGL context + hidden window lifecycle (Windows)
 - `shader.go` — WGSL → GLSL 4.30 via naga, with BindingMap for flat binding indices
 - `sampler.go` — GL sampler objects (glGenSamplers/glBindSampler, GL 3.3+)
 - `command.go` — SamplerBindMap: maps WGSL separate texture+sampler to GLSL combined sampler2D (from naga TextureMappings)
+
+**Key patterns:**
 - Texture completeness: `GL_TEXTURE_MAX_LEVEL = MipLevelCount-1` at creation (default 1000 makes non-mipmapped textures incomplete)
 - Texture updates via `glTexSubImage2D` (not `glTexImage2D`) — matches Rust wgpu-hal pattern
 - `GL_DYNAMIC_DRAW` for all writable buffers (Rust wgpu-hal parity — some vendors freeze STATIC_DRAW buffers)

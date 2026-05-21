@@ -14,10 +14,6 @@ import (
 	"github.com/gogpu/wgpu/hal/gles/wgl"
 )
 
-// vendorUnknown is the placeholder vendor name used when the actual GPU vendor
-// cannot be determined (e.g., no surface available during adapter enumeration).
-const vendorUnknown = "Unknown"
-
 // Backend implements hal.Backend for OpenGL ES / OpenGL 3.3+.
 type Backend struct{}
 
@@ -27,93 +23,147 @@ func (Backend) Variant() gputypes.Backend {
 }
 
 // CreateInstance creates a new OpenGL instance.
+//
+// Creates a hidden 1×1 window and initializes a GL context on it. The context
+// lives for the Instance lifetime and survives any user Surface destruction.
+// Follows Rust wgpu-hal/src/gles/wgl.rs Instance::init (lines 448-563).
 func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
-	// Initialize WGL on Windows
 	if err := wgl.Init(); err != nil {
 		return nil, fmt.Errorf("gles: failed to initialize WGL: %w", err)
 	}
-	hal.Logger().Info("gles: instance created", "platform", "windows")
-	return &Instance{}, nil
+
+	// Create hidden 1×1 window to host the GL context (Rust: create_instance_device).
+	// GL context is NOT created here — it will be lazily created on the render
+	// thread's first Lock() call, avoiding cross-thread WGL issues.
+	hiddenWindow, err := wgl.NewHiddenWindow()
+	if err != nil {
+		return nil, fmt.Errorf("gles: failed to create hidden window: %w", err)
+	}
+
+	// Set pixel format on hidden window DC. This is thread-safe and must be
+	// done before wglCreateContext (which happens lazily in AdapterContext).
+	pfd := wgl.DefaultPixelFormat()
+	format, err := wgl.ChoosePixelFormat(hiddenWindow.DC(), &pfd)
+	if err != nil {
+		hiddenWindow.Destroy()
+		return nil, fmt.Errorf("gles: hidden window ChoosePixelFormat: %w", err)
+	}
+	if err := wgl.SetPixelFormat(hiddenWindow.DC(), format, &pfd); err != nil {
+		hiddenWindow.Destroy()
+		return nil, fmt.Errorf("gles: hidden window SetPixelFormat: %w", err)
+	}
+
+	ctx := NewAdapterContext(hiddenWindow.DC())
+
+	hal.Logger().Info("gles: instance created",
+		"platform", "windows",
+		"hiddenDC", fmt.Sprintf("0x%x", hiddenWindow.DC()),
+	)
+
+	return &Instance{
+		ctx:          ctx,
+		hiddenWindow: hiddenWindow,
+	}, nil
 }
 
 // Instance implements hal.Instance for the OpenGL backend.
-type Instance struct{}
+// Owns the hidden 1×1 window. The GL context is lazily created on the
+// render thread via AdapterContext.ensureInit().
+type Instance struct {
+	ctx          *AdapterContext
+	hiddenWindow *wgl.HiddenWindow
+}
 
 // CreateSurface creates an OpenGL surface from window handles.
 // On Windows: displayHandle is ignored, windowHandle is HWND.
+//
+// The Surface is lightweight — it does NOT own the GL context. The context
+// lives on the hidden window owned by Instance. Surface only stores the user
+// HWND and a reference to the shared AdapterContext. SetPixelFormat is called
+// on the user window DC so that wglMakeCurrent can switch between hidden and
+// user DCs during Present.
+//
+// Follows Rust wgpu-hal/src/gles/wgl.rs Instance::create_surface (lines 624-670).
 func (i *Instance) CreateSurface(_, windowHandle uintptr) (hal.Surface, error) {
-	// Create WGL context for the window
-	ctx, err := wgl.NewContext(wgl.HWND(windowHandle))
+	hwnd := wgl.HWND(windowHandle)
+
+	// Set pixel format on user window DC. Required for wglMakeCurrent to
+	// accept this DC with the hidden window's HGLRC — pixel formats must match.
+	hdc := wgl.GetDC(hwnd)
+	if hdc == 0 {
+		return nil, fmt.Errorf("gles: GetDC failed for window 0x%x", windowHandle)
+	}
+	pfd := wgl.DefaultPixelFormat()
+	format, err := wgl.ChoosePixelFormat(hdc, &pfd)
 	if err != nil {
-		return nil, fmt.Errorf("gles: failed to create WGL context: %w", err)
+		wgl.ReleaseDC(hwnd, hdc)
+		return nil, fmt.Errorf("gles: surface ChoosePixelFormat: %w", err)
 	}
-
-	// Make it current to load GL functions
-	if err := ctx.MakeCurrent(); err != nil {
-		ctx.Destroy(wgl.HWND(windowHandle))
-		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
+	if err := wgl.SetPixelFormat(hdc, format, &pfd); err != nil {
+		wgl.ReleaseDC(hwnd, hdc)
+		return nil, fmt.Errorf("gles: surface SetPixelFormat: %w", err)
 	}
+	wgl.ReleaseDC(hwnd, hdc)
 
-	// Load GL function pointers
-	glCtx := &gl.Context{}
-	if err := glCtx.Load(wgl.GetGLProcAddress); err != nil {
-		ctx.Destroy(wgl.HWND(windowHandle))
-		return nil, fmt.Errorf("gles: failed to load GL functions: %w", err)
-	}
-
-	// Query OpenGL version
-	version := glCtx.GetString(gl.VERSION)
-	renderer := glCtx.GetString(gl.RENDERER)
-
-	hal.Logger().Info("gles: surface created",
-		"version", version,
-		"renderer", renderer,
-	)
+	hal.Logger().Info("gles: surface created", "hwnd", fmt.Sprintf("0x%x", windowHandle))
 
 	return &Surface{
-		hwnd:     wgl.HWND(windowHandle),
-		wglCtx:   ctx,
-		glCtx:    glCtx,
-		version:  version,
-		renderer: renderer,
+		hwnd: hwnd,
+		ctx:  i.ctx,
 	}, nil
 }
 
 // EnumerateAdapters returns available OpenGL adapters.
-// For OpenGL, there's typically one adapter per display.
-func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
-	// If we have a surface, use its GL context for info
-	if surface, ok := surfaceHint.(*Surface); ok {
-		return []hal.ExposedAdapter{
-			surface.GetAdapterInfo(),
-		}
+// Triggers lazy GL context creation on the calling thread (render thread).
+func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
+	glCtx := i.ctx.Lock()
+	defer i.ctx.Unlock()
+
+	if glCtx == nil {
+		hal.Logger().Error("gles: EnumerateAdapters: GL context not available")
+		return nil
 	}
 
-	// Without a surface, we can't query OpenGL info
-	// Return a placeholder that will be updated when surface is created
+	caps := queryAdapterCapabilities(glCtx)
+
+	version := glCtx.GetString(gl.VERSION)
+	renderer := glCtx.GetString(gl.RENDERER)
+
+	driverInfo := "OpenGL 3.3+"
+	if caps.IsES {
+		driverInfo = fmt.Sprintf("OpenGL ES %d.%d", caps.GLMajor, caps.GLMinor)
+	} else if caps.GLMajor > 0 {
+		driverInfo = fmt.Sprintf("OpenGL %d.%d", caps.GLMajor, caps.GLMinor)
+	}
+
 	return []hal.ExposedAdapter{
 		{
-			Adapter: &Adapter{},
+			Adapter: &Adapter{
+				ctx:      i.ctx,
+				version:  version,
+				renderer: renderer,
+				caps:     caps,
+			},
 			Info: gputypes.AdapterInfo{
-				Name:       "OpenGL Adapter",
-				Vendor:     vendorUnknown,
-				VendorID:   0,
+				Name:       caps.Renderer,
+				Vendor:     caps.Vendor,
+				VendorID:   caps.VendorID,
 				DeviceID:   0,
-				DeviceType: gputypes.DeviceTypeOther,
-				Driver:     "OpenGL",
-				DriverInfo: "OpenGL 3.3+ / ES 3.0+",
+				DeviceType: caps.DeviceType,
+				Driver:     caps.Version,
+				DriverInfo: driverInfo,
 				Backend:    gputypes.BackendGL,
 			},
-			Features: 0,
+			Features: caps.Features,
 			Capabilities: hal.Capabilities{
-				Limits: gputypes.DefaultLimits(),
+				Limits: caps.Limits,
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
-					BufferCopyPitch:  256,
+					BufferCopyPitch:  4,
 				},
 				DownlevelCapabilities: hal.DownlevelCapabilities{
 					ShaderModel: 50, // SM5.0
-					Flags:       0,
+					Flags:       caps.DownlevelFlags,
 				},
 			},
 		},
@@ -122,5 +172,11 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 // Destroy releases the instance resources.
 func (i *Instance) Destroy() {
-	// Nothing to clean up at instance level
+	if i.ctx != nil {
+		i.ctx.Destroy()
+	}
+	if i.hiddenWindow != nil {
+		i.hiddenWindow.Destroy()
+		i.hiddenWindow = nil
+	}
 }

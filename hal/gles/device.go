@@ -14,14 +14,13 @@ import (
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
-	"github.com/gogpu/wgpu/hal/gles/wgl"
 )
 
 // Device implements hal.Device for OpenGL.
+// Holds a shared *AdapterContext (owned by Instance). All GL operations
+// acquire the context lock, do MakeCurrent, execute, and unlock.
 type Device struct {
-	glCtx           *gl.Context
-	wglCtx          *wgl.Context
-	hwnd            wgl.HWND
+	ctx             *AdapterContext
 	vao             uint32 // persistent VAO (Core Profile requires one bound)
 	maxTextureUnits int32  // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
 }
@@ -31,7 +30,11 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in GLES.CreateBuffer — core validation gap")
 	}
-	id := d.glCtx.GenBuffers(1)
+
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
+	id := glCtx.GenBuffers(1)
 
 	// Determine GL buffer target from usage
 	target := uint32(gl.ARRAY_BUFFER)
@@ -54,16 +57,16 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 		usage = gl.DYNAMIC_READ
 	}
 
-	d.glCtx.BindBuffer(target, id)
-	d.glCtx.BufferData(target, int(desc.Size), nil, usage)
-	d.glCtx.BindBuffer(target, 0)
+	glCtx.BindBuffer(target, id)
+	glCtx.BufferData(target, int(desc.Size), nil, usage)
+	glCtx.BindBuffer(target, 0)
 
 	buf := &Buffer{
 		id:     id,
 		target: target,
 		size:   desc.Size,
 		usage:  desc.Usage,
-		glCtx:  d.glCtx,
+		glCtx:  glCtx,
 	}
 
 	// Handle MappedAtCreation
@@ -82,16 +85,6 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 }
 
 // MapBuffer establishes a CPU-visible mapping for a GL buffer.
-//
-// GLES has no persistent host-mapped memory on legacy contexts, so this
-// implementation mirrors Rust wgpu-hal's CPU-shadow approach: for
-// BufferUsageMapRead we copy GPU contents into a Go slice via
-// glGetBufferSubData, hand out a pointer into that slice, and release it on
-// UnmapBuffer. For MapWrite we hand out a pointer into a zero-initialized
-// shadow and push it back to the GL buffer on UnmapBuffer.
-//
-// Because the shadow is a Go-allocated byte slice, the returned pointer is
-// valid Go memory and therefore always coherent; IsCoherent=true is safe.
 func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil {
@@ -101,29 +94,25 @@ func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMa
 		return hal.BufferMapping{}, hal.ErrInvalidMapRange
 	}
 	if buf.mapped == nil {
-		// Allocate CPU shadow for the full buffer so offset arithmetic is simple.
 		buf.mapped = make([]byte, buf.size)
 
-		// For MapRead, pull the current GL contents down into the shadow.
-		// Prefer the CPU-side copy populated by CopyTextureToBuffer (buf.data)
-		// when available; otherwise map via glMapBuffer and copy out.
 		if buf.usage&gputypes.BufferUsageMapRead != 0 {
+			glCtx := d.ctx.Lock()
 			switch {
 			case len(buf.data) == int(buf.size):
 				copy(buf.mapped, buf.data)
 			case buf.id != 0:
-				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
-				glPtr := d.glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
+				glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
+				glPtr := glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
 				if glPtr != 0 {
-					// GL returned a host pointer via FFI uintptr.
-					// Use double-indirection to satisfy go vet.
 					basePtr := *(**byte)(unsafe.Pointer(&glPtr))
 					src := unsafe.Slice(basePtr, buf.size)
 					copy(buf.mapped, src)
-					d.glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
+					glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
 				}
-				d.glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+				glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
 			}
+			d.ctx.Unlock()
 		}
 	}
 	return hal.BufferMapping{
@@ -133,10 +122,6 @@ func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMa
 }
 
 // UnmapBuffer releases a GL buffer mapping.
-//
-// For writable buffers the CPU shadow is pushed back into the GL buffer via
-// glBufferSubData. The shadow is then released so subsequent MapBuffer calls
-// pick up fresh contents.
 func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 	buf, ok := buffer.(*Buffer)
 	if !ok || buf == nil {
@@ -145,11 +130,12 @@ func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 	if buf.mapped == nil {
 		return nil
 	}
-	// Only push back if the buffer was writable.
 	if buf.usage&gputypes.BufferUsageMapWrite != 0 && buf.id != 0 {
-		d.glCtx.BindBuffer(buf.target, buf.id)
-		d.glCtx.BufferSubData(buf.target, 0, len(buf.mapped), unsafe.Pointer(&buf.mapped[0]))
-		d.glCtx.BindBuffer(buf.target, 0)
+		glCtx := d.ctx.Lock()
+		glCtx.BindBuffer(buf.target, buf.id)
+		glCtx.BufferSubData(buf.target, 0, len(buf.mapped), unsafe.Pointer(&buf.mapped[0]))
+		glCtx.BindBuffer(buf.target, 0)
+		d.ctx.Unlock()
 	}
 	buf.mapped = nil
 	return nil
@@ -160,7 +146,11 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: texture descriptor is nil in GLES.CreateTexture — core validation gap")
 	}
-	id := d.glCtx.GenTextures(1)
+
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
+	id := glCtx.GenTextures(1)
 
 	sampleCount := desc.SampleCount
 	if sampleCount == 0 {
@@ -198,7 +188,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		}
 	}
 
-	d.glCtx.BindTexture(target, id)
+	glCtx.BindTexture(target, id)
 
 	// Get GL format info
 	internalFormat, format, dataType := textureFormatToGL(desc.Format)
@@ -206,15 +196,14 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	// Allocate texture storage
 	switch target {
 	case gl.TEXTURE_2D_MULTISAMPLE:
-		// Multisample textures use TexImage2DMultisample (no mip levels).
-		d.glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
+		glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
 			int32(desc.Size.Width), int32(desc.Size.Height), true)
 
 	case gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
-			d.glCtx.TexImage2D(target, int32(level), int32(internalFormat),
+			glCtx.TexImage2D(target, int32(level), int32(internalFormat),
 				width, height, 0, format, dataType, nil)
 		}
 
@@ -224,29 +213,21 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			for level := uint32(0); level < desc.MipLevelCount; level++ {
 				width := maxInt32(1, int32(desc.Size.Width>>level))
 				height := maxInt32(1, int32(desc.Size.Height>>level))
-				d.glCtx.TexImage2D(faceTarget, int32(level), int32(internalFormat),
+				glCtx.TexImage2D(faceTarget, int32(level), int32(internalFormat),
 					width, height, 0, format, dataType, nil)
 			}
 		}
 	}
 
-	// Set default texture parameters (multisample textures don't support these).
 	if target != gl.TEXTURE_2D_MULTISAMPLE {
-		// Set NEAREST filter and MAX_LEVEL on all textures for completeness.
-		// Default GL_TEXTURE_MIN_FILTER is GL_NEAREST_MIPMAP_LINEAR and default
-		// GL_TEXTURE_MAX_LEVEL is 1000. For non-mipmapped textures (MipLevelCount=1),
-		// this combination makes the texture INCOMPLETE — sampling returns (0,0,0,0)
-		// because GL expects mip levels 0..1000 but only level 0 exists.
-		// Setting MAX_LEVEL = MipLevelCount-1 tells GL the actual mip chain length.
-		// Sampler objects override MIN/MAG_FILTER but NOT MAX_LEVEL.
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-		d.glCtx.TexParameteri(target, gl.TEXTURE_MAX_LEVEL, int32(desc.MipLevelCount-1))
-		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-		d.glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+		glCtx.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		glCtx.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		glCtx.TexParameteri(target, gl.TEXTURE_MAX_LEVEL, int32(desc.MipLevelCount-1))
+		glCtx.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		glCtx.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	}
 
-	d.glCtx.BindTexture(target, 0)
+	glCtx.BindTexture(target, 0)
 
 	hal.Logger().Debug("gles: texture created",
 		"label", desc.Label,
@@ -263,7 +244,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		size:        desc.Size,
 		mipLevels:   desc.MipLevelCount,
 		sampleCount: sampleCount,
-		glCtx:       d.glCtx,
+		glCtx:       glCtx,
 	}, nil
 }
 
@@ -310,13 +291,16 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 
 // CreateSampler creates a texture sampler using GL sampler objects (GL 3.3+).
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (hal.Sampler, error) {
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
 	if desc == nil {
-		return &Sampler{glCtx: d.glCtx}, nil
+		return &Sampler{glCtx: glCtx}, nil
 	}
-	id := configureSampler(d.glCtx, desc)
+	id := configureSampler(glCtx, desc)
 	return &Sampler{
 		id:    id,
-		glCtx: d.glCtx,
+		glCtx: glCtx,
 	}, nil
 }
 
@@ -385,10 +369,9 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (hal.ShaderMod
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: shader module descriptor is nil in GLES.CreateShaderModule — core validation gap")
 	}
-	// For now, store the source - compilation happens at pipeline creation
 	return &ShaderModule{
 		source: desc.Source,
-		glCtx:  d.glCtx,
+		glCtx:  d.ctx.GL(),
 	}, nil
 }
 
@@ -404,6 +387,10 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in GLES.CreateRenderPipeline — core validation gap")
 	}
+
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
 	start := time.Now()
 	// Handle nil layout (auto-layout for shaders without bindings).
 	var layout *PipelineLayout
@@ -428,18 +415,18 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
 
-	vertexID := d.glCtx.CreateShader(gl.VERTEX_SHADER)
-	d.glCtx.ShaderSource(vertexID, vertexGLSL)
-	d.glCtx.CompileShader(vertexID)
+	vertexID := glCtx.CreateShader(gl.VERTEX_SHADER)
+	glCtx.ShaderSource(vertexID, vertexGLSL)
+	glCtx.CompileShader(vertexID)
 
 	var status int32
-	d.glCtx.GetShaderiv(vertexID, gl.COMPILE_STATUS, &status)
+	glCtx.GetShaderiv(vertexID, gl.COMPILE_STATUS, &status)
 	if status == gl.FALSE {
-		log := d.glCtx.GetShaderInfoLog(vertexID)
-		d.glCtx.DeleteShader(vertexID)
+		log := glCtx.GetShaderInfoLog(vertexID)
+		glCtx.DeleteShader(vertexID)
 		return nil, fmt.Errorf("gles: vertex shader compilation failed: %s", log)
 	}
-	if infoLog := d.glCtx.GetShaderInfoLog(vertexID); infoLog != "" {
+	if infoLog := glCtx.GetShaderInfoLog(vertexID); infoLog != "" {
 		hal.Logger().Debug("gles: vertex shader compile info", "info", infoLog)
 	}
 
@@ -448,39 +435,39 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, fragmentTranslationInfo, err = d.compileFragmentShader(desc.Fragment, layout.bindingMap)
+		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, desc.Fragment, layout.bindingMap)
 		if err != nil {
-			d.glCtx.DeleteShader(vertexID)
+			glCtx.DeleteShader(vertexID)
 			return nil, err
 		}
 	}
 
 	// Link program
-	programID := d.glCtx.CreateProgram()
-	d.glCtx.AttachShader(programID, vertexID)
+	programID := glCtx.CreateProgram()
+	glCtx.AttachShader(programID, vertexID)
 	if fragmentID != 0 {
-		d.glCtx.AttachShader(programID, fragmentID)
+		glCtx.AttachShader(programID, fragmentID)
 	}
-	d.glCtx.LinkProgram(programID)
+	glCtx.LinkProgram(programID)
 
-	d.glCtx.GetProgramiv(programID, gl.LINK_STATUS, &status)
+	glCtx.GetProgramiv(programID, gl.LINK_STATUS, &status)
 	if status == gl.FALSE {
-		log := d.glCtx.GetProgramInfoLog(programID)
-		d.glCtx.DeleteShader(vertexID)
+		log := glCtx.GetProgramInfoLog(programID)
+		glCtx.DeleteShader(vertexID)
 		if fragmentID != 0 {
-			d.glCtx.DeleteShader(fragmentID)
+			glCtx.DeleteShader(fragmentID)
 		}
-		d.glCtx.DeleteProgram(programID)
+		glCtx.DeleteProgram(programID)
 		return nil, fmt.Errorf("gles: program linking failed: %s", log)
 	}
-	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
+	if infoLog := glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: program link info", "info", infoLog)
 	}
 
 	// Shaders can be deleted after linking
-	d.glCtx.DeleteShader(vertexID)
+	glCtx.DeleteShader(vertexID)
 	if fragmentID != 0 {
-		d.glCtx.DeleteShader(fragmentID)
+		glCtx.DeleteShader(fragmentID)
 	}
 
 	hal.Logger().Debug("gles: render pipeline created",
@@ -500,7 +487,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	pipeline := &RenderPipeline{
 		programID:         programID,
 		layout:            layout,
-		glCtx:             d.glCtx,
+		glCtx:             glCtx,
 		primitiveTopology: desc.Primitive.Topology,
 		cullMode:          desc.Primitive.CullMode,
 		frontFace:         desc.Primitive.FrontFace,
@@ -555,6 +542,10 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in GLES.CreateComputePipeline — core validation gap")
 	}
+
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
 	start := time.Now()
 	layout, ok := desc.Layout.(*PipelineLayout)
 	if !ok {
@@ -572,38 +563,38 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
 
-	computeID := d.glCtx.CreateShader(gl.COMPUTE_SHADER)
-	d.glCtx.ShaderSource(computeID, computeGLSL)
-	d.glCtx.CompileShader(computeID)
+	computeID := glCtx.CreateShader(gl.COMPUTE_SHADER)
+	glCtx.ShaderSource(computeID, computeGLSL)
+	glCtx.CompileShader(computeID)
 
 	var status int32
-	d.glCtx.GetShaderiv(computeID, gl.COMPILE_STATUS, &status)
+	glCtx.GetShaderiv(computeID, gl.COMPILE_STATUS, &status)
 	if status == gl.FALSE {
-		log := d.glCtx.GetShaderInfoLog(computeID)
-		d.glCtx.DeleteShader(computeID)
+		log := glCtx.GetShaderInfoLog(computeID)
+		glCtx.DeleteShader(computeID)
 		return nil, fmt.Errorf("gles: compute shader compilation failed: %s", log)
 	}
-	if infoLog := d.glCtx.GetShaderInfoLog(computeID); infoLog != "" {
+	if infoLog := glCtx.GetShaderInfoLog(computeID); infoLog != "" {
 		hal.Logger().Debug("gles: compute shader compile info", "info", infoLog)
 	}
 
 	// Link program
-	programID := d.glCtx.CreateProgram()
-	d.glCtx.AttachShader(programID, computeID)
-	d.glCtx.LinkProgram(programID)
+	programID := glCtx.CreateProgram()
+	glCtx.AttachShader(programID, computeID)
+	glCtx.LinkProgram(programID)
 
-	d.glCtx.GetProgramiv(programID, gl.LINK_STATUS, &status)
+	glCtx.GetProgramiv(programID, gl.LINK_STATUS, &status)
 	if status == gl.FALSE {
-		log := d.glCtx.GetProgramInfoLog(programID)
-		d.glCtx.DeleteShader(computeID)
-		d.glCtx.DeleteProgram(programID)
+		log := glCtx.GetProgramInfoLog(programID)
+		glCtx.DeleteShader(computeID)
+		glCtx.DeleteProgram(programID)
 		return nil, fmt.Errorf("gles: compute program linking failed: %s", log)
 	}
-	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
+	if infoLog := glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: compute program link info", "info", infoLog)
 	}
 
-	d.glCtx.DeleteShader(computeID)
+	glCtx.DeleteShader(computeID)
 
 	hal.Logger().Debug("gles: compute pipeline created",
 		"programID", programID,
@@ -614,7 +605,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	return &ComputePipeline{
 		programID: programID,
 		layout:    layout,
-		glCtx:     d.glCtx,
+		glCtx:     glCtx,
 	}, nil
 }
 
@@ -633,11 +624,14 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 		return nil, fmt.Errorf("gles: query set descriptor is nil")
 	}
 
+	glCtx := d.ctx.Lock()
+	defer d.ctx.Unlock()
+
 	// Determine GL query target.
 	var target uint32
 	switch desc.Type {
 	case hal.QueryTypeTimestamp:
-		if !d.glCtx.SupportsTimestampQueries() {
+		if !glCtx.SupportsTimestampQueries() {
 			return nil, hal.ErrTimestampsNotSupported
 		}
 		target = gl.TIMESTAMP
@@ -648,11 +642,11 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 	// Create GL query objects.
 	queries := make([]uint32, desc.Count)
 	for i := uint32(0); i < desc.Count; i++ {
-		q := d.glCtx.GenQueries(1)
+		q := glCtx.GenQueries(1)
 		if q == 0 {
 			// Clean up already-created queries on failure.
 			for j := uint32(0); j < i; j++ {
-				d.glCtx.DeleteQueries(1, &queries[j])
+				glCtx.DeleteQueries(1, &queries[j])
 			}
 			return nil, fmt.Errorf("gles: failed to create query object %d/%d", i, desc.Count)
 		}
@@ -662,7 +656,7 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 	return &QuerySet{
 		queries: queries,
 		target:  target,
-		glCtx:   d.glCtx,
+		glCtx:   glCtx,
 	}, nil
 }
 
@@ -676,7 +670,7 @@ func (d *Device) DestroyQuerySet(qs hal.QuerySet) {
 // CreateCommandEncoder creates a command encoder.
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return &CommandEncoder{
-		glCtx:           d.glCtx,
+		glCtx:           d.ctx.GL(),
 		vao:             d.vao,
 		maxTextureUnits: d.maxTextureUnits,
 	}, nil
@@ -684,7 +678,7 @@ func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandE
 
 // CreateFence creates a synchronization fence.
 func (d *Device) CreateFence() (hal.Fence, error) {
-	return NewFence(d.glCtx), nil
+	return NewFence(d.ctx.GL()), nil
 }
 
 // DestroyFence destroys a fence.
@@ -738,16 +732,18 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
-	if d.glCtx != nil {
-		d.glCtx.Finish()
-	}
+	glCtx := d.ctx.Lock()
+	glCtx.Finish()
+	d.ctx.Unlock()
 	return nil
 }
 
 // Destroy releases the device.
 func (d *Device) Destroy() {
-	if d.vao != 0 && d.glCtx != nil {
-		d.glCtx.DeleteVertexArrays(d.vao)
+	if d.vao != 0 {
+		glCtx := d.ctx.Lock()
+		glCtx.DeleteVertexArrays(d.vao)
+		d.ctx.Unlock()
 		d.vao = 0
 	}
 }
@@ -819,7 +815,9 @@ func maxInt32(a, b int32) int32 {
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
-func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
+// Caller must hold the AdapterContext lock. glCtx is passed explicitly to avoid
+// re-locking (this is called from CreateRenderPipeline which already holds the lock).
+func compileFragmentShader(glCtx *gl.Context, frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
@@ -830,18 +828,18 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[g
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}
 
-	fragmentID := d.glCtx.CreateShader(gl.FRAGMENT_SHADER)
-	d.glCtx.ShaderSource(fragmentID, fragmentGLSL)
-	d.glCtx.CompileShader(fragmentID)
+	fragmentID := glCtx.CreateShader(gl.FRAGMENT_SHADER)
+	glCtx.ShaderSource(fragmentID, fragmentGLSL)
+	glCtx.CompileShader(fragmentID)
 
 	var status int32
-	d.glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
+	glCtx.GetShaderiv(fragmentID, gl.COMPILE_STATUS, &status)
 	if status == gl.FALSE {
-		log := d.glCtx.GetShaderInfoLog(fragmentID)
-		d.glCtx.DeleteShader(fragmentID)
+		log := glCtx.GetShaderInfoLog(fragmentID)
+		glCtx.DeleteShader(fragmentID)
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader compilation failed: %s", log)
 	}
-	if infoLog := d.glCtx.GetShaderInfoLog(fragmentID); infoLog != "" {
+	if infoLog := glCtx.GetShaderInfoLog(fragmentID); infoLog != "" {
 		hal.Logger().Debug("gles: fragment shader compile info", "info", infoLog)
 	}
 

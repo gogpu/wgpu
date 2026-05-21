@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.5
+## Current State: v0.28.6
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -64,6 +64,7 @@
 ✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
 ✅ **Browser WebGPU backend** — complete `syscall/js` → `navigator.gpu` implementation (~6500 LOC). Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
+✅ **GLES hidden window context (Windows)** — GL context owned by Instance on hidden 1×1 HWND, shared via mutex-protected `AdapterContext`. Adapter/Device/Queue survive Surface destruction. Follows Rust wgpu-hal `wgl.rs` `AdapterContext::lock()`/`lock_with_dc()` pattern. Surface lightweight — no context ownership.
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -74,7 +75,7 @@
 | Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
-| GLES | Windows, Linux | ✅ Stable — glFenceSync, copy commands, timestamps, real adapter capabilities, compute barriers |
+| GLES | Windows, Linux | ✅ Stable — hidden window context (Rust parity), glFenceSync, copy commands, timestamps, real adapter capabilities, compute barriers |
 | Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/CG+Metal), SPIR-V interpreter. All 3 desktop platforms. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
@@ -85,7 +86,8 @@
 
 ### Next
 
-- [ ] GLES Phase 1 — CopyBufferToTexture, CopyTextureToTexture, glFenceSync
+- [x] GLES hidden window context (Windows) — Instance-owned GL context, Rust wgpu parity (FEAT-GLES-002)
+- [ ] GLES hidden window context (Linux) — EGL surfaceless/pbuffer, Phase 2 of FEAT-GLES-002
 - [x] macOS software presentation — CGImage + CAMetalLayer (PR #187, @k-chimi, v0.28.4)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
@@ -149,6 +151,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.6** | 2026-05 | **GLES hidden window context** (Rust parity). Instance-owned GL context, AdapterContext mutex, Surface lightweight. Fixes context death on window close. |
 | **v0.28.5** | 2026-05 | Metal: defer pool.Drain, drawable count. Core: indirect validation nil guard (#189). |
 | **v0.28.4** | 2026-05 | macOS blit (@k-chimi), GLES Rust parity (fence+copies+timestamps+adapter), GPU dispatch indirect validation. |
 | **v0.28.0** | 2026-05 | **Browser WebGPU backend** (WASM-001). Complete `syscall/js` → `navigator.gpu`. 6500 LOC, 5 phases, zero deps. First Pure Go WebGPU in the browser. |
