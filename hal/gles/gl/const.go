@@ -315,4 +315,15 @@ const (
 
 	// Shader storage buffer (OpenGL ES 3.1+ / OpenGL 4.3+)
 	SHADER_STORAGE_BUFFER = 0x90D2
+
+	// Query objects (GL 3.3+ / GL_EXT_disjoint_timer_query)
+	TIMESTAMP    = 0x8E28
+	QUERY_RESULT = 0x8866
+
+	// Sync object status (GL 3.2+)
+	SIGNALED    = 0x9119
+	SYNC_STATUS = 0x9114
+
+	// Pixel storage (GL 3.0+ / ES 3.0+)
+	UNPACK_ROW_LENGTH = 0x0CF2
 )

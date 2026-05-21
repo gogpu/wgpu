@@ -130,7 +130,7 @@ func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 	}
 	if buf.usage&gputypes.BufferUsageMapWrite != 0 && buf.id != 0 {
 		d.glCtx.BindBuffer(buf.target, buf.id)
-		d.glCtx.BufferSubData(buf.target, 0, len(buf.mapped), uintptr(unsafe.Pointer(&buf.mapped[0])))
+		d.glCtx.BufferSubData(buf.target, 0, len(buf.mapped), unsafe.Pointer(&buf.mapped[0]))
 		d.glCtx.BindBuffer(buf.target, 0)
 	}
 	buf.mapped = nil

@@ -137,13 +137,26 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	}
 }
 
-// CopyBufferToTexture copies buffer data to a texture.
-// Note: Requires glTexSubImage2D with pixel unpack buffer binding.
-// Currently a no-op stub - texture uploads should use Queue.WriteTexture.
+// CopyBufferToTexture copies buffer data to a texture via PBO (pixel unpack buffer).
+// Binds the source buffer as GL_PIXEL_UNPACK_BUFFER, then calls glTexSubImage2D
+// with offset 0 so that GL reads pixel data from the bound PBO.
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyBufferToTexture command.
 func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
-	_ = src
-	_ = dst
-	_ = regions
+	srcBuf, srcOK := src.(*Buffer)
+	dstTex, dstOK := dst.(*Texture)
+	if !srcOK || !dstOK || srcBuf == nil || dstTex == nil {
+		return
+	}
+
+	for _, region := range regions {
+		e.commands = append(e.commands, &CopyBufferToTextureCommand{
+			srcBuffer: srcBuf,
+			dstTex:    dstTex,
+			origin:    [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
+			copySize:  [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
+			bufOffset: region.BufferLayout.Offset,
+		})
+	}
 }
 
 // CopyTextureToBuffer copies texture data to a buffer via FBO + glReadPixels.
@@ -169,19 +182,48 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	}
 }
 
-// CopyTextureToTexture copies between textures.
-// Note: Requires glCopyImageSubData (GL 4.3+ / GLES 3.2+).
-// For older GL versions, requires framebuffer blit workaround.
+// CopyTextureToTexture copies between textures using FBO read + glCopyTexSubImage2D.
+// Attaches the source texture to the read framebuffer, then copies pixels into the
+// destination texture. This works on GL 3.0+ / ES 3.0+ without glCopyImageSubData.
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyTextureToTexture command.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	_ = src
-	_ = dst
-	_ = regions
+	srcTex, srcOK := src.(*Texture)
+	dstTex, dstOK := dst.(*Texture)
+	if !srcOK || !dstOK || srcTex == nil || dstTex == nil {
+		return
+	}
+
+	for _, region := range regions {
+		e.commands = append(e.commands, &CopyTextureToTextureCommand{
+			srcTex:    srcTex,
+			dstTex:    dstTex,
+			srcOrigin: [3]uint32{region.SrcBase.Origin.X, region.SrcBase.Origin.Y, region.SrcBase.Origin.Z},
+			dstOrigin: [3]uint32{region.DstBase.Origin.X, region.DstBase.Origin.Y, region.DstBase.Origin.Z},
+			copySize:  [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
+			srcMip:    region.SrcBase.MipLevel,
+			dstMip:    region.DstBase.MipLevel,
+		})
+	}
 }
 
 // ResolveQuerySet copies query results from a query set into a destination buffer.
-// TODO: implement using GL_EXT_disjoint_timer_query when query sets are supported.
-func (e *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {
-	// Stub: GLES timestamp query implementation pending.
+// Each result is a uint64 (8 bytes) written starting at destinationOffset.
+// Uses glGetQueryObjectui64v to read results, then glBufferSubData to write them.
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyQueryResults command (fallback path).
+func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
+	qs, qsOK := querySet.(*QuerySet)
+	dstBuf, bufOK := destination.(*Buffer)
+	if !qsOK || !bufOK || qs == nil || dstBuf == nil {
+		return
+	}
+
+	e.commands = append(e.commands, &ResolveQuerySetCommand{
+		querySet:   qs,
+		firstQuery: firstQuery,
+		queryCount: queryCount,
+		dstBuffer:  dstBuf,
+		dstOffset:  destinationOffset,
+	})
 }
 
 // BeginRenderPass begins a render pass.
@@ -230,6 +272,13 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 				stencil: int32(dsa.StencilClearValue),
 			})
 		}
+	}
+
+	// Emit beginning-of-pass timestamp if requested.
+	if desc.TimestampWrites != nil {
+		e.emitTimestamp(desc.TimestampWrites.QuerySet, desc.TimestampWrites.BeginningOfPassWriteIndex)
+		rpe.endTimestampQuerySet = desc.TimestampWrites.QuerySet
+		rpe.endTimestampIndex = desc.TimestampWrites.EndOfPassWriteIndex
 	}
 
 	return rpe
@@ -321,10 +370,36 @@ func (e *CommandEncoder) setupOffscreenTarget(
 }
 
 // BeginComputePass begins a compute pass.
-func (e *CommandEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	return &ComputePassEncoder{
+func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	cpe := &ComputePassEncoder{
 		encoder: e,
 	}
+
+	// Emit beginning-of-pass timestamp if requested.
+	if desc != nil && desc.TimestampWrites != nil {
+		e.emitTimestamp(desc.TimestampWrites.QuerySet, desc.TimestampWrites.BeginningOfPassWriteIndex)
+		cpe.endTimestampQuerySet = desc.TimestampWrites.QuerySet
+		cpe.endTimestampIndex = desc.TimestampWrites.EndOfPassWriteIndex
+	}
+
+	return cpe
+}
+
+// emitTimestamp records a glQueryCounter command for a timestamp write index.
+// Used for render/compute pass beginning/end timestamp queries.
+func (e *CommandEncoder) emitTimestamp(querySet hal.QuerySet, index *uint32) {
+	if index == nil {
+		return
+	}
+	qs, ok := querySet.(*QuerySet)
+	if !ok || qs == nil {
+		return
+	}
+	idx := *index
+	if int(idx) >= len(qs.queries) {
+		return
+	}
+	e.commands = append(e.commands, &TimestampQueryCommand{query: qs.queries[idx]})
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for OpenGL.
@@ -342,6 +417,10 @@ type RenderPassEncoder struct {
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
 	resolveTexture   *Texture // The single-sample resolve target (nil when resolveToSurface)
 	resolveToSurface bool     // True when resolve target is the default framebuffer (FBO 0)
+
+	// End-of-pass timestamp write (deferred to End()).
+	endTimestampQuerySet hal.QuerySet
+	endTimestampIndex    *uint32
 }
 
 // resolveTargetSurface extracts the *Surface owning the resolve target (if the
@@ -392,6 +471,11 @@ func (e *RenderPassEncoder) emitMSAAResolve() {
 func (e *RenderPassEncoder) End() {
 	if e.msaaTexture != nil {
 		e.emitMSAAResolve()
+	}
+
+	// Emit end-of-pass timestamp if requested.
+	if e.endTimestampIndex != nil {
+		e.encoder.emitTimestamp(e.endTimestampQuerySet, e.endTimestampIndex)
 	}
 
 	// Check if we were rendering to an offscreen target.
@@ -584,10 +668,19 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 type ComputePassEncoder struct {
 	encoder  *CommandEncoder
 	pipeline *ComputePipeline
+
+	// End-of-pass timestamp write (deferred to End()).
+	endTimestampQuerySet hal.QuerySet
+	endTimestampIndex    *uint32
 }
 
 // End finishes the compute pass.
-func (e *ComputePassEncoder) End() {}
+func (e *ComputePassEncoder) End() {
+	// Emit end-of-pass timestamp if requested.
+	if e.endTimestampIndex != nil {
+		e.encoder.emitTimestamp(e.endTimestampQuerySet, e.endTimestampIndex)
+	}
+}
 
 // SetPipeline sets the compute pipeline.
 func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
@@ -1368,6 +1461,144 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 
 	// Restore the previous FBO binding.
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+}
+
+// CopyBufferToTextureCommand copies buffer data to a texture using a pixel unpack
+// buffer. Binds the source GL buffer as GL_PIXEL_UNPACK_BUFFER, then calls
+// glTexSubImage2D with offset=0 so GL reads from the bound PBO.
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyBufferToTexture.
+type CopyBufferToTextureCommand struct {
+	srcBuffer *Buffer
+	dstTex    *Texture
+	origin    [3]uint32 // x, y, z
+	copySize  [3]uint32 // width, height, depthOrArrayLayers
+	bufOffset uint64
+}
+
+func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
+	width := int32(c.copySize[0])
+	height := int32(c.copySize[1])
+	if width == 0 || height == 0 {
+		return
+	}
+
+	_, format, dataType := textureFormatToGL(c.dstTex.format)
+
+	// Bind source buffer as pixel unpack buffer (PBO).
+	ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, c.srcBuffer.id)
+
+	// Bind destination texture.
+	ctx.BindTexture(c.dstTex.target, c.dstTex.id)
+
+	// Set pixel alignment to 1 for formats whose rows may not be 4-byte aligned.
+	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, 0) // use default (tightly packed)
+
+	// Upload from PBO. When a PBO is bound, the pixels pointer is interpreted
+	// as a byte offset into the bound buffer.
+	offset := unsafe.Pointer(uintptr(c.bufOffset))
+	ctx.TexSubImage2D(c.dstTex.target, 0,
+		int32(c.origin[0]), int32(c.origin[1]),
+		width, height,
+		format, dataType, offset)
+
+	// Restore defaults.
+	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+	ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, 0)
+	ctx.BindTexture(c.dstTex.target, 0)
+}
+
+// CopyTextureToTextureCommand copies pixels between textures using an FBO.
+// Attaches the source texture to GL_READ_FRAMEBUFFER, then copies into the
+// destination via glCopyTexSubImage2D.
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyTextureToTexture.
+type CopyTextureToTextureCommand struct {
+	srcTex    *Texture
+	dstTex    *Texture
+	srcOrigin [3]uint32 // x, y, z
+	dstOrigin [3]uint32 // x, y, z
+	copySize  [3]uint32 // width, height, depthOrArrayLayers
+	srcMip    uint32
+	dstMip    uint32
+}
+
+func (c *CopyTextureToTextureCommand) Execute(ctx *gl.Context) {
+	width := int32(c.copySize[0])
+	height := int32(c.copySize[1])
+	if width == 0 || height == 0 {
+		return
+	}
+
+	// Save current FBO binding.
+	var prevFBO int32
+	ctx.GetIntegerv(gl.FRAMEBUFFER_BINDING, &prevFBO)
+
+	// Create a temporary FBO for reading from the source texture.
+	readFBO := ctx.GenFramebuffers(1)
+	ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, readFBO)
+	ctx.FramebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+		c.srcTex.target, c.srcTex.id, int32(c.srcMip))
+
+	// Bind destination texture and copy pixels from the read framebuffer.
+	ctx.BindTexture(c.dstTex.target, c.dstTex.id)
+	ctx.CopyTexSubImage2D(c.dstTex.target, int32(c.dstMip),
+		int32(c.dstOrigin[0]), int32(c.dstOrigin[1]),
+		int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
+		width, height)
+	ctx.BindTexture(c.dstTex.target, 0)
+
+	// Clean up temporary FBO.
+	ctx.DeleteFramebuffers(readFBO)
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+}
+
+// ResolveQuerySetCommand reads query results via glGetQueryObjectui64v and
+// writes them into the destination buffer via glBufferSubData.
+// Uses the CPU fallback path (no QUERY_BUFFER) to stay compatible with
+// GLES 3.0+ / GL 3.3+. Each result is a uint64 (8 bytes).
+// Matches Rust wgpu-hal/src/gles/queue.rs CopyQueryResults (fallback path).
+type ResolveQuerySetCommand struct {
+	querySet   *QuerySet
+	firstQuery uint32
+	queryCount uint32
+	dstBuffer  *Buffer
+	dstOffset  uint64
+}
+
+func (c *ResolveQuerySetCommand) Execute(ctx *gl.Context) {
+	if c.querySet == nil || len(c.querySet.queries) == 0 {
+		return
+	}
+
+	// Read query results into a temporary slice.
+	results := make([]uint64, c.queryCount)
+	for i := uint32(0); i < c.queryCount; i++ {
+		idx := c.firstQuery + i
+		if int(idx) >= len(c.querySet.queries) {
+			break
+		}
+		ctx.GetQueryObjectui64v(c.querySet.queries[idx], gl.QUERY_RESULT, &results[i])
+	}
+
+	// Write results into the destination GL buffer via glBufferSubData.
+	if c.dstBuffer.id != 0 {
+		queryData := unsafe.Slice((*byte)(unsafe.Pointer(&results[0])), len(results)*8)
+		ctx.BindBuffer(c.dstBuffer.target, c.dstBuffer.id)
+		ctx.BufferSubData(c.dstBuffer.target, int(c.dstOffset), len(queryData),
+			unsafe.Pointer(&queryData[0]))
+		ctx.BindBuffer(c.dstBuffer.target, 0)
+	}
+}
+
+// TimestampQueryCommand records a timestamp via glQueryCounter.
+// Used internally by render/compute pass timestamp writes.
+// Matches Rust wgpu-hal/src/gles/queue.rs TimestampQuery command.
+type TimestampQueryCommand struct {
+	query uint32 // GL query object ID
+}
+
+func (c *TimestampQueryCommand) Execute(ctx *gl.Context) {
+	ctx.QueryCounter(c.query, gl.TIMESTAMP)
 }
 
 // vertexFormatToGL converts a WebGPU vertex format to GL component count and type.

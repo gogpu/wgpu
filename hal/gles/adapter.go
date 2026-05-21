@@ -71,6 +71,7 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	queue := &Queue{
 		glCtx:  a.glCtx,
 		wglCtx: a.wglCtx,
+		fence:  NewFence(a.glCtx),
 	}
 
 	return hal.OpenDevice{

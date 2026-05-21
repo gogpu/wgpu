@@ -164,6 +164,15 @@ type Context struct {
 	glBindSampler       uintptr
 	glSamplerParameteri uintptr
 	glSamplerParameterf uintptr
+
+	// Query objects (GL 3.3+ / GL_EXT_disjoint_timer_query)
+	glGenQueries          uintptr
+	glDeleteQueries       uintptr
+	glQueryCounter        uintptr
+	glGetQueryObjectui64v uintptr
+	glCopyBufferSubData   uintptr
+	glCopyTexSubImage2D   uintptr
+	glGetSynciv           uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -321,6 +330,15 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glBindSampler = getProcAddr("glBindSampler")
 	c.glSamplerParameteri = getProcAddr("glSamplerParameteri")
 	c.glSamplerParameterf = getProcAddr("glSamplerParameterf")
+
+	// Query objects (optional - GL 3.3+ / GL_EXT_disjoint_timer_query)
+	c.glGenQueries = getProcAddr("glGenQueries")
+	c.glDeleteQueries = getProcAddr("glDeleteQueries")
+	c.glQueryCounter = getProcAddr("glQueryCounter")
+	c.glGetQueryObjectui64v = getProcAddr("glGetQueryObjectui64v")
+	c.glCopyBufferSubData = getProcAddr("glCopyBufferSubData")
+	c.glCopyTexSubImage2D = getProcAddr("glCopyTexSubImage2D")
+	c.glGetSynciv = getProcAddr("glGetSynciv")
 
 	return nil
 }
@@ -939,6 +957,125 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 // SupportsCompute returns true if compute shaders are supported.
 func (c *Context) SupportsCompute() bool {
 	return c.glDispatchCompute != 0
+}
+
+// --- Query Objects ---
+
+// GenQueries generates query object names.
+// Returns 0 if query objects are not supported.
+func (c *Context) GenQueries(n int32) uint32 {
+	if c.glGenQueries == 0 {
+		return 0
+	}
+	var query uint32
+	syscall.SyscallN(c.glGenQueries, uintptr(n), uintptr(unsafe.Pointer(&query)))
+	return query
+}
+
+// DeleteQueries deletes query objects.
+func (c *Context) DeleteQueries(n int32, queries *uint32) {
+	if c.glDeleteQueries == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDeleteQueries, uintptr(n), uintptr(unsafe.Pointer(queries)))
+}
+
+// QueryCounter records a timestamp into a query object.
+// Requires GL_ARB_timer_query (GL 3.3+) or GL_EXT_disjoint_timer_query (ES 3.0+).
+func (c *Context) QueryCounter(query, target uint32) {
+	if c.glQueryCounter == 0 {
+		return
+	}
+	syscall.SyscallN(c.glQueryCounter, uintptr(query), uintptr(target))
+}
+
+// GetQueryObjectui64v retrieves a 64-bit query result.
+func (c *Context) GetQueryObjectui64v(query, pname uint32, result *uint64) {
+	if c.glGetQueryObjectui64v == 0 {
+		return
+	}
+	syscall.SyscallN(c.glGetQueryObjectui64v, uintptr(query), uintptr(pname), uintptr(unsafe.Pointer(result)))
+}
+
+// SupportsTimestampQueries returns true if timestamp queries are supported.
+func (c *Context) SupportsTimestampQueries() bool {
+	return c.glQueryCounter != 0 && c.glGenQueries != 0
+}
+
+// --- Sync Object Wrappers ---
+
+// FenceSync creates a sync object and inserts it into the GL command stream.
+// Returns the sync object handle, or 0 on failure.
+func (c *Context) FenceSync(condition, flags uint32) uintptr {
+	if c.glFenceSync == 0 {
+		return 0
+	}
+	r, _, _ := syscall.SyscallN(c.glFenceSync, uintptr(condition), uintptr(flags))
+	return r
+}
+
+// DeleteSync deletes a sync object.
+func (c *Context) DeleteSync(sync uintptr) {
+	if c.glDeleteSync == 0 || sync == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDeleteSync, sync)
+}
+
+// ClientWaitSync blocks until the sync object is signaled or timeout expires.
+// Returns ALREADY_SIGNALED, CONDITION_SATISFIED, TIMEOUT_EXPIRED, or WAIT_FAILED.
+func (c *Context) ClientWaitSync(sync uintptr, flags uint32, timeout uint64) uint32 {
+	if c.glClientWaitSync == 0 || sync == 0 {
+		return WAIT_FAILED
+	}
+	r, _, _ := syscall.SyscallN(c.glClientWaitSync, sync, uintptr(flags),
+		uintptr(timeout), uintptr(timeout>>32))
+	return uint32(r)
+}
+
+// GetSyncStatus returns the signaled status of a sync object.
+func (c *Context) GetSyncStatus(sync uintptr) uint32 {
+	if c.glGetSynciv == 0 || sync == 0 {
+		return SIGNALED // assume signaled if not supported
+	}
+	var value int32
+	var length int32
+	pname := uint32(SYNC_STATUS)
+	one := int32(1)
+	syscall.SyscallN(c.glGetSynciv, sync, uintptr(pname), uintptr(one),
+		uintptr(unsafe.Pointer(&length)), uintptr(unsafe.Pointer(&value)))
+	return uint32(value)
+}
+
+// SupportsFenceSync returns true if GL fence sync objects are available.
+func (c *Context) SupportsFenceSync() bool {
+	return c.glFenceSync != 0
+}
+
+// --- Copy Operations ---
+
+// CopyBufferSubData copies part of one buffer to another.
+// Requires GL 3.1+ / ES 3.0+.
+func (c *Context) CopyBufferSubData(readTarget, writeTarget uint32, readOffset, writeOffset, size int) {
+	if c.glCopyBufferSubData == 0 {
+		return
+	}
+	syscall.SyscallN(c.glCopyBufferSubData,
+		uintptr(readTarget), uintptr(writeTarget),
+		uintptr(readOffset), uintptr(writeOffset), uintptr(size))
+}
+
+// CopyTexSubImage2D copies pixels from the read framebuffer into a 2D texture.
+// Reads from the currently bound GL_READ_FRAMEBUFFER.
+func (c *Context) CopyTexSubImage2D(target uint32, level, xoffset, yoffset, x, y, width, height int32) {
+	if c.glCopyTexSubImage2D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glCopyTexSubImage2D,
+		uintptr(target), uintptr(level),
+		uintptr(xoffset), uintptr(yoffset),
+		uintptr(x), uintptr(y),
+		uintptr(width), uintptr(height))
 }
 
 // --- Helpers ---

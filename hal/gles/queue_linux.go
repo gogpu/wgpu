@@ -21,10 +21,12 @@ type Queue struct {
 	glCtx           *gl.Context
 	eglCtx          *egl.Context
 	submissionIndex uint64
+	fence           *Fence // signaled at each submit for GPU completion tracking
 }
 
 // Submit submits command buffers to the GPU.
-// GLES is synchronous, so the submission is effectively complete immediately after Flush.
+// After executing all commands and flushing, signals the fence with a GL sync object
+// so that fence wait/poll can track actual GPU completion.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	for _, cb := range commandBuffers {
 		cmdBuf, ok := cb.(*CommandBuffer)
@@ -45,12 +47,23 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	q.glCtx.Flush()
 
 	q.submissionIndex++
+
+	// Signal the fence with a GL sync object at this submission index.
+	if q.fence != nil {
+		q.fence.Signal(q.submissionIndex)
+	}
+
 	return q.submissionIndex, nil
 }
 
 // PollCompleted returns the highest submission index known to be completed.
-// GLES is synchronous — after Flush, all submitted work is complete.
+// When GL fence sync is available, polls pending sync objects. Otherwise,
+// assumes all work is complete after Flush (GLES is synchronous).
 func (q *Queue) PollCompleted() uint64 {
+	if q.fence != nil {
+		q.fence.Maintain()
+		return q.fence.GetLatest()
+	}
 	return q.submissionIndex
 }
 
@@ -65,7 +78,7 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 	}
 
 	q.glCtx.BindBuffer(buf.target, buf.id)
-	q.glCtx.BufferSubData(buf.target, int(offset), len(data), uintptr(unsafe.Pointer(&data[0])))
+	q.glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
 	q.glCtx.BindBuffer(buf.target, 0)
 	return nil
 }
@@ -91,7 +104,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		// TexImage2D reallocates storage on every call; TexSubImage2D updates in-place.
 		q.glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
 			0, 0, int32(size.Width), int32(size.Height), format, dataType,
-			uintptr(unsafe.Pointer(&data[0])))
+			unsafe.Pointer(&data[0]))
 		// Restore default alignment after upload.
 		if tex.format == gputypes.TextureFormatR8Unorm {
 			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)

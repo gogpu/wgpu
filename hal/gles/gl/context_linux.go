@@ -530,6 +530,15 @@ type Context struct {
 	glBindSampler       unsafe.Pointer
 	glSamplerParameteri unsafe.Pointer
 	glSamplerParameterf unsafe.Pointer
+
+	// Query objects (GL 3.3+ / GL_EXT_disjoint_timer_query)
+	glGenQueries          unsafe.Pointer
+	glDeleteQueries       unsafe.Pointer
+	glQueryCounter        unsafe.Pointer
+	glGetQueryObjectui64v unsafe.Pointer
+	glCopyBufferSubData   unsafe.Pointer
+	glCopyTexSubImage2D   unsafe.Pointer
+	glGetSynciv           unsafe.Pointer
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -692,6 +701,15 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glBindSampler = getProcAddr("glBindSampler")
 	c.glSamplerParameteri = getProcAddr("glSamplerParameteri")
 	c.glSamplerParameterf = getProcAddr("glSamplerParameterf")
+
+	// Query objects (optional - GL 3.3+ / GL_EXT_disjoint_timer_query)
+	c.glGenQueries = getProcAddr("glGenQueries")
+	c.glDeleteQueries = getProcAddr("glDeleteQueries")
+	c.glQueryCounter = getProcAddr("glQueryCounter")
+	c.glGetQueryObjectui64v = getProcAddr("glGetQueryObjectui64v")
+	c.glCopyBufferSubData = getProcAddr("glCopyBufferSubData")
+	c.glCopyTexSubImage2D = getProcAddr("glCopyTexSubImage2D")
+	c.glGetSynciv = getProcAddr("glGetSynciv")
 
 	return nil
 }
@@ -990,14 +1008,14 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 	_ = ffi.CallFunction(&cifVoid4Buffer, c.glBufferData, nil, args[:])
 }
 
-func (c *Context) BufferSubData(target uint32, offset, size int, data uintptr) {
+func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
 	offsetPtr := uintptr(offset)
 	sizePtr := uintptr(size)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&offsetPtr),
 		unsafe.Pointer(&sizePtr),
-		unsafe.Pointer(data), //nolint:govet // FFI requires uintptr-to-pointer conversion
+		data,
 	}
 	_ = ffi.CallFunction(&cifVoid4SubBuf, c.glBufferSubData, nil, args[:])
 }
@@ -1144,7 +1162,7 @@ func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, w
 	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexImage2D, nil, args[:])
 }
 
-func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, width, height int32, format, typ uint32, pixels uintptr) {
+func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, width, height int32, format, typ uint32, pixels unsafe.Pointer) {
 	args := [9]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&level),
@@ -1154,7 +1172,7 @@ func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, wi
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&typ),
-		unsafe.Pointer(pixels), //nolint:govet // FFI requires uintptr-to-pointer conversion
+		pixels,
 	}
 	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexSubImage2D, nil, args[:])
 }
@@ -1678,6 +1696,218 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 // SupportsCompute returns true if compute shaders are supported.
 func (c *Context) SupportsCompute() bool {
 	return c.glDispatchCompute != nil
+}
+
+// --- Query Objects ---
+
+// GenQueries generates query object names.
+// Returns 0 if query objects are not supported.
+func (c *Context) GenQueries(n int32) uint32 {
+	if c.glGenQueries == nil {
+		return 0
+	}
+	var query uint32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&query),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glGenQueries, nil, args[:])
+	return query
+}
+
+// DeleteQueries deletes query objects.
+func (c *Context) DeleteQueries(n int32, queries *uint32) {
+	if c.glDeleteQueries == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(queries),
+	}
+	_ = ffi.CallFunction(&cifVoid2, c.glDeleteQueries, nil, args[:])
+}
+
+// QueryCounter records a timestamp into a query object.
+// Requires GL_ARB_timer_query (GL 3.3+) or GL_EXT_disjoint_timer_query (ES 3.0+).
+func (c *Context) QueryCounter(query, target uint32) {
+	if c.glQueryCounter == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&query),
+		unsafe.Pointer(&target),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glQueryCounter, nil, args[:])
+}
+
+// GetQueryObjectui64v retrieves a 64-bit query result.
+func (c *Context) GetQueryObjectui64v(query, pname uint32, result *uint64) {
+	if c.glGetQueryObjectui64v == nil {
+		return
+	}
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&query),
+		unsafe.Pointer(&pname),
+		unsafe.Pointer(result),
+	}
+	_ = ffi.CallFunction(&cifVoid3Shader, c.glGetQueryObjectui64v, nil, args[:])
+}
+
+// SupportsTimestampQueries returns true if timestamp queries are supported.
+func (c *Context) SupportsTimestampQueries() bool {
+	return c.glQueryCounter != nil && c.glGenQueries != nil
+}
+
+// --- Sync Object Wrappers ---
+
+// FenceSync creates a sync object and inserts it into the GL command stream.
+// Returns the sync object handle, or 0 on failure.
+func (c *Context) FenceSync(condition, flags uint32) uintptr {
+	if c.glFenceSync == nil {
+		return 0
+	}
+	var result uintptr
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&condition),
+		unsafe.Pointer(&flags),
+	}
+	_ = ffi.CallFunction(&cifPtr2UU, c.glFenceSync, unsafe.Pointer(&result), args[:])
+	return result
+}
+
+// DeleteSync deletes a sync object.
+func (c *Context) DeleteSync(sync uintptr) {
+	if c.glDeleteSync == nil || sync == 0 {
+		return
+	}
+	args := [1]unsafe.Pointer{unsafe.Pointer(&sync)}
+	_ = ffi.CallFunction(&cifVoid1, c.glDeleteSync, nil, args[:])
+}
+
+// ClientWaitSync blocks until the sync object is signaled or timeout expires.
+// Returns ALREADY_SIGNALED, CONDITION_SATISFIED, TIMEOUT_EXPIRED, or WAIT_FAILED.
+func (c *Context) ClientWaitSync(sync uintptr, flags uint32, timeout uint64) uint32 {
+	if c.glClientWaitSync == nil || sync == 0 {
+		return WAIT_FAILED
+	}
+	// glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout)
+	// goffi needs a custom CIF for (pointer, uint32, uint64) -> uint32
+	var cifCWS types.CallInterface
+	_ = ffi.PrepareCallInterface(&cifCWS, types.DefaultCall,
+		types.UInt32TypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		})
+	var result uint32
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&sync),
+		unsafe.Pointer(&flags),
+		unsafe.Pointer(&timeout),
+	}
+	_ = ffi.CallFunction(&cifCWS, c.glClientWaitSync, unsafe.Pointer(&result), args[:])
+	return result
+}
+
+// GetSyncStatus returns the signaled status of a sync object.
+func (c *Context) GetSyncStatus(sync uintptr) uint32 {
+	if c.glGetSynciv == nil || sync == 0 {
+		return SIGNALED // assume signaled if not supported
+	}
+	// glGetSynciv(GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values)
+	var cifGSI types.CallInterface
+	_ = ffi.PrepareCallInterface(&cifGSI, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // sync
+			types.UInt32TypeDescriptor,  // pname
+			types.SInt32TypeDescriptor,  // count
+			types.PointerTypeDescriptor, // length
+			types.PointerTypeDescriptor, // values
+		})
+	pname := uint32(SYNC_STATUS)
+	count := int32(1)
+	var length int32
+	var value int32
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&sync),
+		unsafe.Pointer(&pname),
+		unsafe.Pointer(&count),
+		unsafe.Pointer(&length),
+		unsafe.Pointer(&value),
+	}
+	_ = ffi.CallFunction(&cifGSI, c.glGetSynciv, nil, args[:])
+	return uint32(value)
+}
+
+// SupportsFenceSync returns true if GL fence sync objects are available.
+func (c *Context) SupportsFenceSync() bool {
+	return c.glFenceSync != nil
+}
+
+// --- Copy Operations ---
+
+// CopyBufferSubData copies part of one buffer to another.
+// Requires GL 3.1+ / ES 3.0+.
+func (c *Context) CopyBufferSubData(readTarget, writeTarget uint32, readOffset, writeOffset, size int) {
+	if c.glCopyBufferSubData == nil {
+		return
+	}
+	ro := uintptr(readOffset)
+	wo := uintptr(writeOffset)
+	sz := uintptr(size)
+	var cifCBS types.CallInterface
+	_ = ffi.PrepareCallInterface(&cifCBS, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+		})
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&readTarget),
+		unsafe.Pointer(&writeTarget),
+		unsafe.Pointer(&ro),
+		unsafe.Pointer(&wo),
+		unsafe.Pointer(&sz),
+	}
+	_ = ffi.CallFunction(&cifCBS, c.glCopyBufferSubData, nil, args[:])
+}
+
+// CopyTexSubImage2D copies pixels from the read framebuffer into a 2D texture.
+// Reads from the currently bound GL_READ_FRAMEBUFFER.
+func (c *Context) CopyTexSubImage2D(target uint32, level, xoffset, yoffset, x, y, width, height int32) {
+	if c.glCopyTexSubImage2D == nil {
+		return
+	}
+	// 8 arguments: uint32, int32, int32, int32, int32, int32, int32, int32
+	var cifCTSI types.CallInterface
+	_ = ffi.PrepareCallInterface(&cifCTSI, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // target
+			types.SInt32TypeDescriptor, // level
+			types.SInt32TypeDescriptor, // xoffset
+			types.SInt32TypeDescriptor, // yoffset
+			types.SInt32TypeDescriptor, // x
+			types.SInt32TypeDescriptor, // y
+			types.SInt32TypeDescriptor, // width
+			types.SInt32TypeDescriptor, // height
+		})
+	args := [8]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&xoffset),
+		unsafe.Pointer(&yoffset),
+		unsafe.Pointer(&x),
+		unsafe.Pointer(&y),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+	}
+	_ = ffi.CallFunction(&cifCTSI, c.glCopyTexSubImage2D, nil, args[:])
 }
 
 // --- Helpers ---
