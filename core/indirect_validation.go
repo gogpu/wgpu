@@ -160,6 +160,12 @@ func NewIndirectValidation(halDevice hal.Device, limits gputypes.Limits) *Indire
 		return nil
 	}
 
+	// Check that the backend supports compute shaders (noop/test backends don't).
+	// Rust wgpu checks DownlevelFlags::INDIRECT_EXECUTION + instance flag.
+	if limits.MaxComputeWorkgroupSizeX == 0 {
+		return nil
+	}
+
 	b := &indirectValidationBuilder{device: halDevice}
 	iv, err := buildIndirectValidation(halDevice, maxWorkgroups, b)
 	if err != nil {
@@ -262,6 +268,9 @@ func buildIndirectValidation(
 	}
 
 	// 7. Create destination bind group (group 0: dst buffer + params uniform).
+	if b.dstBuffer == nil || b.paramsBuffer == nil {
+		return nil, fmt.Errorf("buffer creation returned nil")
+	}
 	b.dstBindGroup, err = halDevice.CreateBindGroup(&hal.BindGroupDescriptor{
 		Label:  "wgpu_indirect_dispatch_dst_group",
 		Layout: b.dstBindGroupLayout,
