@@ -21,6 +21,11 @@ type Adapter struct {
 	hwnd     wgl.HWND
 	version  string
 	renderer string
+
+	// caps holds the probed adapter capabilities (extensions, features,
+	// limits, MSAA support). Populated by queryAdapterCapabilities during
+	// adapter enumeration.
+	caps AdapterCapabilities
 }
 
 // Open creates a logical device with the requested features and limits.
@@ -81,44 +86,9 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 }
 
 // TextureFormatCapabilities returns capabilities for a texture format.
+// Uses probed GL extension and MSAA information for accurate per-format detection.
 func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
-	// OpenGL 3.3+ supports most common formats
-	// Note: Full format support querying requires glGetInternalformativ (GL 4.2+).
-	flags := hal.TextureFormatCapabilitySampled
-
-	switch format {
-	case gputypes.TextureFormatRGBA8Unorm,
-		gputypes.TextureFormatRGBA8UnormSrgb,
-		gputypes.TextureFormatBGRA8Unorm,
-		gputypes.TextureFormatBGRA8UnormSrgb,
-		gputypes.TextureFormatRGBA16Float,
-		gputypes.TextureFormatRGBA32Float:
-		flags |= hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityBlendable |
-			hal.TextureFormatCapabilityMultisample |
-			hal.TextureFormatCapabilityMultisampleResolve
-
-	case gputypes.TextureFormatR8Unorm,
-		gputypes.TextureFormatRG8Unorm,
-		gputypes.TextureFormatR16Float,
-		gputypes.TextureFormatRG16Float,
-		gputypes.TextureFormatR32Float,
-		gputypes.TextureFormatRG32Float:
-		flags |= hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityBlendable
-
-	case gputypes.TextureFormatDepth16Unorm,
-		gputypes.TextureFormatDepth24Plus,
-		gputypes.TextureFormatDepth24PlusStencil8,
-		gputypes.TextureFormatDepth32Float,
-		gputypes.TextureFormatDepth32FloatStencil8:
-		flags |= hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityMultisample
-	}
-
-	return hal.TextureFormatCapabilities{
-		Flags: flags,
-	}
+	return queryTextureFormatCapabilities(format, a.caps.Features, a.caps.MaxMSAASamples, a.caps.Extensions)
 }
 
 // SurfaceCapabilities returns surface capabilities.

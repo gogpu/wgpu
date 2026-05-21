@@ -173,6 +173,9 @@ type Context struct {
 	glCopyBufferSubData   uintptr
 	glCopyTexSubImage2D   uintptr
 	glGetSynciv           uintptr
+
+	// Indexed string query (GL 3.0+ / ES 3.0+)
+	glGetStringi uintptr
 }
 
 // ProcAddressFunc is a function that returns the address of an OpenGL function.
@@ -340,6 +343,9 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glCopyTexSubImage2D = getProcAddr("glCopyTexSubImage2D")
 	c.glGetSynciv = getProcAddr("glGetSynciv")
 
+	// Indexed string query (GL 3.0+ / ES 3.0+)
+	c.glGetStringi = getProcAddr("glGetStringi")
+
 	return nil
 }
 
@@ -360,6 +366,20 @@ func (c *Context) GetString(name uint32) string {
 
 func (c *Context) GetIntegerv(pname uint32, data *int32) {
 	syscall.SyscallN(c.glGetIntegerv, uintptr(pname), uintptr(unsafe.Pointer(data)))
+}
+
+// GetStringi returns an indexed string from an OpenGL string array (GL 3.0+).
+// Used for querying GL_EXTENSIONS one at a time (the modern way).
+// Returns "" if glGetStringi is not available or the index is out of range.
+func (c *Context) GetStringi(name, index uint32) string {
+	if c.glGetStringi == 0 {
+		return ""
+	}
+	r, _, _ := syscall.SyscallN(c.glGetStringi, uintptr(name), uintptr(index))
+	if r == 0 {
+		return ""
+	}
+	return goString(r)
 }
 
 func (c *Context) Enable(capability uint32) {

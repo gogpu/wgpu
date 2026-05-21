@@ -35,25 +35,16 @@ type Surface struct {
 }
 
 // GetAdapterInfo returns adapter information from this surface's GL context.
+// Probes GL version, extensions, features, limits, and MSAA support to build
+// an accurate ExposedAdapter. Follows Rust wgpu-hal adapter.rs expose pattern.
 func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
-	vendor := s.glCtx.GetString(gl.VENDOR)
+	caps := queryAdapterCapabilities(s.glCtx)
 
-	// Query capabilities
-	var maxTextureSize int32
-	s.glCtx.GetIntegerv(gl.MAX_TEXTURE_SIZE, &maxTextureSize)
-
-	var maxDrawBuffers int32
-	s.glCtx.GetIntegerv(gl.MAX_DRAW_BUFFERS, &maxDrawBuffers)
-
-	var maxTextureUnits int32
-	s.glCtx.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &maxTextureUnits)
-
-	limits := gputypes.DefaultLimits()
-	limits.MaxTextureDimension1D = uint32(maxTextureSize)
-	limits.MaxTextureDimension2D = uint32(maxTextureSize)
-	limits.MaxColorAttachments = uint32(maxDrawBuffers)
-	if maxTextureUnits > 0 {
-		limits.MaxSampledTexturesPerShaderStage = uint32(maxTextureUnits)
+	driverInfo := "OpenGL 3.3+"
+	if caps.IsES {
+		driverInfo = fmt.Sprintf("OpenGL ES %d.%d", caps.GLMajor, caps.GLMinor)
+	} else if caps.GLMajor > 0 {
+		driverInfo = fmt.Sprintf("OpenGL %d.%d", caps.GLMajor, caps.GLMinor)
 	}
 
 	return hal.ExposedAdapter{
@@ -63,27 +54,28 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 			hwnd:     s.hwnd,
 			version:  s.version,
 			renderer: s.renderer,
+			caps:     caps,
 		},
 		Info: gputypes.AdapterInfo{
-			Name:       s.renderer,
-			Vendor:     vendor,
-			VendorID:   0,
+			Name:       caps.Renderer,
+			Vendor:     caps.Vendor,
+			VendorID:   caps.VendorID,
 			DeviceID:   0,
-			DeviceType: gputypes.DeviceTypeDiscreteGPU,
-			Driver:     s.version,
-			DriverInfo: "OpenGL 3.3+",
+			DeviceType: caps.DeviceType,
+			Driver:     caps.Version,
+			DriverInfo: driverInfo,
 			Backend:    gputypes.BackendGL,
 		},
-		Features: 0, // Note: Feature detection requires GL extension queries.
+		Features: caps.Features,
 		Capabilities: hal.Capabilities{
-			Limits: limits,
+			Limits: caps.Limits,
 			AlignmentsMask: hal.Alignments{
 				BufferCopyOffset: 4,
-				BufferCopyPitch:  256,
+				BufferCopyPitch:  4,
 			},
 			DownlevelCapabilities: hal.DownlevelCapabilities{
 				ShaderModel: 50, // SM5.0
-				Flags:       0,
+				Flags:       caps.DownlevelFlags,
 			},
 		},
 	}
