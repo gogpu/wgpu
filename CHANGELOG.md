@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.5] - 2026-05-21
+
+### Fixed
+
+- **Metal: autorelease pool leak in Present()** — `pool.Drain()` now deferred, preventing
+  ObjC autorelease pool leak on panic. Rust wgpu uses closure-scoped `autoreleasepool`.
+
+- **Metal: explicit drawable count in Configure()** — added `setMaximumDrawableCount:3`
+  matching Rust wgpu `surface.rs:176` (`maximum_frame_latency + 1`).
+
+- **Core: indirect validation nil pointer on noop backend** (#189) — `NewIndirectValidation`
+  now checks `MaxComputeWorkgroupSizeX > 0` before creating GPU resources. Noop/test backends
+  skip validation gracefully. Rust wgpu checks `DownlevelFlags::INDIRECT_EXECUTION`.
+
 ## [0.28.4] - 2026-05-21
 
 ### Added

@@ -388,8 +388,8 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 
 	if st.drawable != 0 {
 		pool := NewAutoreleasePool()
+		defer pool.Drain()
 
-		// Create a dedicated command buffer for presentation
 		cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
 		if cmdBuffer != 0 {
 			_ = MsgSend(cmdBuffer, Sel("presentDrawable:"), uintptr(st.drawable))
@@ -399,8 +399,6 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 
 		Release(st.drawable)
 		st.drawable = 0
-
-		pool.Drain()
 	}
 
 	return nil

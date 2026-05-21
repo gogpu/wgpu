@@ -61,6 +61,11 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	framebufferOnly := config.Usage&gputypes.TextureUsageStorageBinding == 0
 	msgSendVoid(s.layer, Sel("setFramebufferOnly:"), argBool(framebufferOnly))
 
+	// Set maximum drawable count for frame latency control.
+	// Rust wgpu: set_maximum_drawable_count(maximum_frame_latency + 1).
+	// Default maximum_frame_latency=2 → drawable_count=3 (Metal default).
+	_ = MsgSend(s.layer, Sel("setMaximumDrawableCount:"), uintptr(3))
+
 	// Set present mode
 	s.presentMode = config.PresentMode
 	// VSync is controlled by displaySyncEnabled (available since macOS 10.13)

@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.4
+## Current State: v0.28.5
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -149,6 +149,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.5** | 2026-05 | Metal: defer pool.Drain, drawable count. Core: indirect validation nil guard (#189). |
 | **v0.28.4** | 2026-05 | macOS blit (@k-chimi), GLES Rust parity (fence+copies+timestamps+adapter), GPU dispatch indirect validation. |
 | **v0.28.0** | 2026-05 | **Browser WebGPU backend** (WASM-001). Complete `syscall/js` → `navigator.gpu`. 6500 LOC, 5 phases, zero deps. First Pure Go WebGPU in the browser. |
 | **v0.27.5** | 2026-05 | Defensive NULL handle guard in TransitionTextures/Buffers (Vulkan, DX12, public API). Prevents crash on destroyed resource barriers. |
