@@ -131,8 +131,8 @@ func NewHiddenWindow() (*HiddenWindow, error) {
 		&hiddenClassName[0], // lpClassName
 		nil,                 // lpWindowName
 		0,                   // dwStyle (no WS_VISIBLE)
-		0, 0, 1, 1,         // x, y, w, h
-		0, 0, 0, 0,         // parent, menu, instance, param
+		0, 0, 1, 1,          // x, y, w, h
+		0, 0, 0, 0, // parent, menu, instance, param
 	)
 	if err != nil {
 		return nil, fmt.Errorf("wgl: CreateWindowExW: %w", err)
