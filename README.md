@@ -344,7 +344,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 **Windowed Presentation:**
 - **Windows:** DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern), zero-copy into GDI bitmap
 - **Linux X11:** `XPutImage` via goffi (Skia pattern), BGRA = X11 ZPixmap native format
-- **macOS:** Planned (CGImage + CALayer)
+- **macOS:** CGImage + `setContents:` (CALayer) or Metal `nextDrawable` + `replaceRegion` (CAMetalLayer). Contributor: @k-chimi
 
 ---
 

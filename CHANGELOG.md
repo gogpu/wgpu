@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.4] - 2026-05-21
+
+### Added
+
+- **macOS software backend presentation** (PR #187 by @k-chimi) — windowed rendering via
+  CoreGraphics (CALayer `setContents:`) and Metal (CAMetalLayer `nextDrawable` + `replaceRegion`).
+  Dual-path: runtime detection selects CALayer or CAMetalLayer. Damage rects supported on CALayer,
+  full-blit fallback on CAMetalLayer. Self-contained ObjC bindings with selector caching (`sync.Map`).
+  Headless CI guard via `os.Stat` before Metal framework load. 1310 LOC. Closes #163.
+  **All 3 desktop platforms now have software backend presentation** (Windows GDI, Linux X11, macOS CG+Metal).
+
+## [0.28.4] - 2026-05-21
+
+### Added
+
+- **macOS software backend windowed presentation** (PR #187 by @k-chimi) — `blit_darwin.go`
+  (1310 LOC). Dual-path architecture:
+  - **CALayer:** CGImage via `CGImageCreate` + `setContents:` + `setNeedsDisplay`
+  - **CAMetalLayer:** Metal `nextDrawable` + `replaceRegion` + `presentDrawable` + `commit`
+  - Damage rects: CALayer partial update via `setNeedsDisplayInRect:`, CAMetalLayer full blit fallback
+  - Self-contained ObjC bindings with selector caching (`sync.Map`)
+  - Headless CI guard: `os.Stat` check before Metal framework load
+  - **All 3 desktop platforms now have software backend presentation** (Windows GDI, Linux X11, macOS CG/Metal)
+  - Closes #163.
+
 ## [0.28.3] - 2026-05-17
 
 ### Fixed

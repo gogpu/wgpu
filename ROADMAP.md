@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.0
+## Current State: v0.28.4
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -75,7 +75,7 @@
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
 | GLES | Windows, Linux | ✅ Stable — text rendering, SamplerBindMap, texture completeness |
-| Software | Windows, Linux | ✅ Stable — windowed presentation (GDI/X11), SPIR-V interpreter, macOS planned (#163) |
+| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/CG+Metal), SPIR-V interpreter. All 3 desktop platforms. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
@@ -86,7 +86,7 @@
 ### Next
 
 - [ ] GLES Phase 1 — CopyBufferToTexture, CopyTextureToTexture, glFenceSync
-- [ ] macOS software presentation — CGImage + CALayer (#163, contributor @k-chimi)
+- [x] macOS software presentation — CGImage + CAMetalLayer (PR #187, @k-chimi, v0.28.4)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
 - [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
@@ -149,6 +149,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.4** | 2026-05 | macOS software blit (PR #187, @k-chimi) — CG + Metal dual path. All 3 desktop platforms complete. |
 | **v0.28.0** | 2026-05 | **Browser WebGPU backend** (WASM-001). Complete `syscall/js` → `navigator.gpu`. 6500 LOC, 5 phases, zero deps. First Pure Go WebGPU in the browser. |
 | **v0.27.5** | 2026-05 | Defensive NULL handle guard in TransitionTextures/Buffers (Vulkan, DX12, public API). Prevents crash on destroyed resource barriers. |
 | **v0.27.4** | 2026-05 | goffi v0.5.1 (struct ABI, XMM return, CGO_ENABLED=1), x/sys v0.44.0, flaky TestThread_CallAsync fix |
