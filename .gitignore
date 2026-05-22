@@ -29,6 +29,8 @@ Thumbs.db
 # Build output
 bin/
 dist/
+*.wasm
+wasm_exec.js
 
 # Debug
 __debug_bin*

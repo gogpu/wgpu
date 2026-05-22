@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>wgpu Browser Smoke Test</title>
+    <style>
+        body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 20px; }
+        h1 { color: #569cd6; }
+        #log { white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>wgpu Browser WebGPU Smoke Test</h1>
+    <div id="log">Loading WASM...</div>
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("test.wasm"), go.importObject).then((result) => {
+            document.getElementById("log").innerHTML = "";
+            go.run(result.instance);
+        }).catch(err => {
+            document.getElementById("log").innerHTML = "WASM load error: " + err;
+        });
+    </script>
+</body>
+</html>
