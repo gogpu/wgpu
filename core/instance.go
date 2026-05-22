@@ -155,10 +155,9 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool
 			continue
 		}
 
-		// GLES/GL backends require a surface (GL context) to enumerate adapters
-		// properly. Defer their enumeration until RequestAdapterWithSurface is
-		// called with a surface hint. Without a surface, EnumerateAdapters returns
-		// a placeholder adapter with nil glCtx that crashes on use.
+		// GLES/GL backends use lazy GL context initialization (hidden window,
+		// v0.28.6+). Defer enumeration until RequestAdapter, where the first
+		// Lock() call creates the GL context on the render thread via sync.Once.
 		if provider.Variant() == gputypes.BackendGL {
 			i.halInstances = append(i.halInstances, halInstance)
 			i.halInstanceMap[provider.Variant()] = halInstance
@@ -248,6 +247,13 @@ func (i *Instance) EnumerateAdapters() []AdapterID {
 //
 // If options is nil, the first available adapter is returned.
 func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (AdapterID, error) { //nolint:gocognit // adapter selection with GPU preference logic
+	// Trigger deferred GLES adapter enumeration if not yet done.
+	// Since v0.28.6, GLES uses a hidden window GL context (not a surface),
+	// so EnumerateAdapters is safe to call with nil surfaceHint.
+	// Must be called BEFORE RLock to avoid deadlock (enumerateDeferredGLES
+	// acquires a write lock internally).
+	i.enumerateDeferredGLES(nil)
+
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
@@ -341,24 +347,22 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 }
 
 // RequestAdapterWithSurface requests an adapter matching the given options,
-// using the provided HAL surface as a hint for backends that require it (GLES).
+// using the provided HAL surface as a hint for backends that require it.
 //
-// For GLES/GL backends, adapter enumeration is deferred until a surface is
-// available because OpenGL requires a GL context to query capabilities.
-// This method triggers that deferred enumeration when surfaceHint is non-nil.
-//
-// If surfaceHint is nil, this behaves identically to RequestAdapter.
+// Since v0.28.6, GLES uses a hidden window GL context and does not need a
+// surface hint for enumeration. Deferred enumeration is now triggered in
+// RequestAdapter itself. This method is kept for API compatibility.
 func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOptions, surfaceHint hal.Surface) (AdapterID, error) {
-	// Enumerate deferred GLES adapters if we have a surface and haven't done so yet.
-	if surfaceHint != nil {
-		i.enumerateDeferredGLES(surfaceHint)
-	}
-
+	// surfaceHint passed through for potential future use (multi-GPU selection).
+	// Deferred GLES enumeration happens in RequestAdapter (safe with nil since v0.28.6).
 	return i.RequestAdapter(options)
 }
 
-// enumerateDeferredGLES enumerates adapters for deferred GLES HAL instances
-// using the provided surface hint. This is called at most once per instance.
+// enumerateDeferredGLES enumerates adapters for deferred GLES HAL instances.
+// Called at most once per instance (guarded by glesEnumerated flag).
+//
+// Since v0.28.6, surfaceHint may be nil — GLES EnumerateAdapters uses the
+// hidden window GL context and ignores the surface parameter.
 //
 // Must NOT be called with i.mu held (it acquires mu internally).
 func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
