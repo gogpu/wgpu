@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.7] - 2026-05-21
+
+### Fixed
+
+- **Core: trigger deferred GLES enumeration in RequestAdapter** — `RequestAdapter()` now
+  calls `enumerateDeferredGLES(nil)` before adapter selection. Previously, GLES adapters
+  were only enumerated via `RequestAdapterWithSurface(surface)` with a non-nil surface hint.
+  After gogpu LIFECYCLE Phase 2 decoupled adapter from surface, `RequestAdapter(nil)` skipped
+  GLES enumeration entirely, returning "Software Renderer" instead of "Intel Iris Xe". Safe
+  with nil since v0.28.6 (hidden window GL context ignores surface parameter).
+
 ## [0.28.6] - 2026-05-21
 
 ### Fixed

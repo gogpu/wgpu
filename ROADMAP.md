@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.6
+## Current State: v0.28.7
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -151,6 +151,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.7** | 2026-05 | Core: deferred GLES enumeration in RequestAdapter (adapter name fix). |
 | **v0.28.6** | 2026-05 | **GLES hidden window context** (Rust parity). Instance-owned GL context, AdapterContext mutex, Surface lightweight. Fixes context death on window close. |
 | **v0.28.5** | 2026-05 | Metal: defer pool.Drain, drawable count. Core: indirect validation nil guard (#189). |
 | **v0.28.4** | 2026-05 | macOS blit (@k-chimi), GLES Rust parity (fence+copies+timestamps+adapter), GPU dispatch indirect validation. |
