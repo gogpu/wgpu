@@ -276,6 +276,8 @@ Backend.CreateInstance()
 
 Resources should be explicitly Released for deterministic cleanup. Buffer destruction is **refcount-driven** (Rust `Arc<Buffer>` Drop parity): `ResourceRef.Clone()` during encoding (SetBindGroup, SetVertexBuffer, CopyBufferToBuffer), `Drop()` on GPU completion via `DestroyQueue.Triage`. The `onZero` callback fires `core.Buffer.Destroy()` only when the last reference drops — safe even if `Release()` is called before `Submit()`. `runtime.AddCleanup` (Go 1.24+) provides a GC-based safety net: unreleased resources trigger `Ref.Drop()` when collected, with `slog.Warn` for leak detection (ADR-018).
 
+**Tracking architecture:** Pass encoders (ComputePassEncoder, RenderPassEncoder) write tracked ResourceRefs directly to the parent CommandEncoder's `trackedRefs` slice — no per-pass intermediate storage. At `Finish()`, the slice moves to CommandBuffer; at `Submit()`, to `DestroyQueue.TrackSubmission`. This matches Rust wgpu where trackers live in the command encoder throughout recording (zero intermediate copies, zero abandoned backing arrays).
+
 ## Pure Go Approach
 
 All backends are implemented without CGO:

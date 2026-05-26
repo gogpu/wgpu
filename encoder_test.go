@@ -5,6 +5,7 @@ package wgpu_test
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -335,6 +336,105 @@ func TestCommandBufferReleaseFull(t *testing.T) {
 	}
 }
 
+// TestComputePass_DirectWriteTrackedRefs verifies that ComputePassEncoder.trackRef
+// writes directly to the parent CommandEncoder's trackedRefs (not a pass-level
+// intermediate slice). This eliminates per-pass backing array allocations and
+// the copy at End(). Matches Rust wgpu tracker architecture.
+func TestComputePass_DirectWriteTrackedRefs(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	// Before compute pass, encoder has no tracked refs.
+	if refs := enc.TestTrackedRefs(); len(refs) != 0 {
+		t.Fatalf("encoder should have 0 tracked refs before pass, got %d", len(refs))
+	}
+
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+
+	// Create a bind group with a buffer to trigger trackRef in SetBindGroup.
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "direct-write-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageStorage,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer buf.Release()
+
+	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "direct-write-bgl",
+		Entries: []wgpu.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: wgpu.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer layout.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "direct-write-bg",
+		Layout: layout,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Size: 64},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	defer bg.Release()
+
+	pass.SetBindGroup(0, bg, nil)
+
+	// After SetBindGroup INSIDE the pass, encoder should already have tracked refs
+	// (direct write, no intermediate pass-level slice).
+	refsBeforeEnd := enc.TestTrackedRefs()
+	if len(refsBeforeEnd) == 0 {
+		t.Log("encoder tracked refs empty — may be mock device without ResourceRef")
+	} else {
+		t.Logf("encoder has %d tracked refs after SetBindGroup (before End)", len(refsBeforeEnd))
+	}
+
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+
+	// After End(), encoder refs should be the SAME count (no additional copy).
+	refsAfterEnd := enc.TestTrackedRefs()
+	if len(refsAfterEnd) != len(refsBeforeEnd) {
+		t.Errorf("encoder refs changed at End(): before=%d, after=%d (should be same — direct write)",
+			len(refsBeforeEnd), len(refsAfterEnd))
+	}
+
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// After Finish, encoder should be nil (transferred to CB).
+	if enc.TestTrackedRefs() != nil {
+		t.Error("encoder should have nil trackedRefs after Finish")
+	}
+
+	// CommandBuffer should carry all refs.
+	if cbRefs := cmdBuf.TestTrackedRefs(); len(refsBeforeEnd) > 0 && len(cbRefs) == 0 {
+		t.Error("command buffer should carry tracked refs")
+	}
+
+	cmdBuf.Release()
+}
+
 func TestCommandBufferReleaseNil(t *testing.T) {
 	// Release on nil CommandBuffer should not panic.
 	var cb *wgpu.CommandBuffer
@@ -510,4 +610,108 @@ func TestCopyTextureToBufferReleasedEncoder(t *testing.T) {
 
 	// CopyTextureToBuffer on released encoder is a no-op.
 	enc.CopyTextureToBuffer(nil, nil, nil)
+}
+
+// BenchmarkComputePassTrackedRefs measures allocation overhead of Phase 2
+// resource tracking in a Born ML-like workload: N dispatches per pass,
+// each SetBindGroup tracking ~2 refs (BindGroup + Buffer).
+func BenchmarkComputePassTrackedRefs(b *testing.B) {
+	inst, err := wgpu.CreateInstance(nil)
+	if err != nil {
+		b.Fatalf("CreateInstance: %v", err)
+	}
+	defer inst.Release()
+
+	adapter, err := inst.RequestAdapter(nil)
+	if err != nil {
+		b.Fatalf("RequestAdapter: %v", err)
+	}
+	defer adapter.Release()
+
+	device, err := adapter.RequestDevice(nil)
+	if err != nil {
+		b.Fatalf("RequestDevice: %v", err)
+	}
+	defer device.Release()
+
+	q := device.Queue()
+	if q == nil {
+		b.Skip("skipping: device has no HAL integration")
+	}
+
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "bench-buf",
+		Size:  64,
+		Usage: wgpu.BufferUsageStorage,
+	})
+	if err != nil {
+		b.Fatalf("CreateBuffer: %v", err)
+	}
+	defer buf.Release()
+
+	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "bench-bgl",
+		Entries: []wgpu.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: wgpu.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+		},
+	})
+	if err != nil {
+		b.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer layout.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "bench-bg",
+		Layout: layout,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Size: 64},
+		},
+	})
+	if err != nil {
+		b.Fatalf("CreateBindGroup: %v", err)
+	}
+	defer bg.Release()
+
+	// Baseline: encoder lifecycle without SetBindGroup.
+	b.Run("baseline-no-bindgroup", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			enc, _ := device.CreateCommandEncoder(nil)
+			pass, _ := enc.BeginComputePass(nil)
+			pass.End()
+			cb, _ := enc.Finish()
+			cb.Release()
+		}
+	})
+
+	// 100 SetBindGroup calls (Born ML: ~100 dispatches per encoder).
+	b.Run("100-setbindgroup", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			enc, _ := device.CreateCommandEncoder(nil)
+			pass, _ := enc.BeginComputePass(nil)
+			for j := 0; j < 100; j++ {
+				pass.SetBindGroup(0, bg, nil)
+			}
+			pass.End()
+			cb, _ := enc.Finish()
+			cb.Release()
+		}
+	})
+
+	// 1000 SetBindGroup calls (stress test).
+	b.Run("1000-setbindgroup", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			enc, _ := device.CreateCommandEncoder(nil)
+			pass, _ := enc.BeginComputePass(nil)
+			for j := 0; j < 1000; j++ {
+				pass.SetBindGroup(0, bg, nil)
+			}
+			pass.End()
+			cb, _ := enc.Finish()
+			cb.Release()
+		}
+	})
 }
