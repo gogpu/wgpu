@@ -5,16 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.11] - 2026-05-26
+
+### Fixed
+
+- **Core: eliminate intermediate trackedRefs copies in pass encoders** — Pass encoders
+  now write tracked ResourceRefs directly to the parent CommandEncoder's slice, eliminating
+  per-pass intermediate slices and the copy at End(). Previously each pass had its own
+  `trackedRefs` slice copied to the encoder via `append()` at End(), creating abandoned
+  backing arrays. Encoder pre-allocates trackedRefs with capacity 64. For Born ML (10K
+  dispatches × 4 buffers): eliminates 40K pointer copies per pass + all intermediate arrays.
+  Matches Rust wgpu where trackers live in the command encoder throughout recording.
+
 ## [0.28.10] - 2026-05-26
 
 ### Fixed
 
 - **Core: pre-allocate trackedRefs slices in pass encoders** — `BeginComputePass`,
   `BeginRenderPass`, and `CreateCommandEncoder` now pre-allocate `trackedRefs` with
-  capacity 64. Previously Phase 2 tracking (v0.28.8) used bare `append()` starting
-  from nil, causing O(log N) reallocations and abandoned backing arrays for GC. With
-  10K dispatches × 4 buffers per step, each encoder accumulated 40K pointer entries via
-  17 doublings. Pre-allocation eliminates all intermediate backing arrays.
+  capacity 64.
 
 ## [0.28.9] - 2026-05-26
 

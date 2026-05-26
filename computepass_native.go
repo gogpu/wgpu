@@ -41,19 +41,16 @@ type ComputePassEncoder struct {
 	// binder tracks bind group assignments and validates compatibility
 	// at dispatch time, matching Rust wgpu-core's Binder pattern.
 	binder binder
-	// trackedRefs accumulates Clone'd ResourceRefs for resources used in
-	// this compute pass. Transferred to the parent CommandEncoder on End().
-	// Phase 2: per-command-buffer resource tracking.
-	trackedRefs []*core.ResourceRef
 }
 
-// trackRef Clone()'s a ResourceRef and accumulates it for later transfer
-// to the parent CommandEncoder. This keeps the resource alive until the
-// GPU completes the submission containing this compute pass.
+// trackRef Clone()'s a ResourceRef and appends directly to the parent
+// CommandEncoder's trackedRefs. Eliminates intermediate pass-level slice
+// and the copy at End(). Matches Rust where trackers live in the command
+// encoder throughout recording — no per-pass intermediate storage.
 func (p *ComputePassEncoder) trackRef(ref *core.ResourceRef) {
 	if ref != nil {
 		ref.Clone()
-		p.trackedRefs = append(p.trackedRefs, ref)
+		p.encoder.trackedRefs = append(p.encoder.trackedRefs, ref)
 	}
 }
 
@@ -374,10 +371,5 @@ func (p *ComputePassEncoder) restoreComputeState(raw hal.ComputePassEncoder) {
 
 // End ends the compute pass.
 func (p *ComputePassEncoder) End() error {
-	// Transfer tracked refs to parent CommandEncoder before ending.
-	if len(p.trackedRefs) > 0 {
-		p.encoder.trackedRefs = append(p.encoder.trackedRefs, p.trackedRefs...)
-		p.trackedRefs = nil
-	}
 	return p.core.End()
 }
