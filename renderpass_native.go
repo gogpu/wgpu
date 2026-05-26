@@ -52,19 +52,14 @@ type RenderPassEncoder struct {
 	// blendConstantSet tracks whether SetBlendConstant has been called.
 	// Matches Rust wgpu-core OptionalState for blend_constant.
 	blendConstantSet bool
-	// trackedRefs accumulates Clone'd ResourceRefs for resources used in
-	// this render pass. Transferred to the parent CommandEncoder on End().
-	// Phase 2: per-command-buffer resource tracking.
-	trackedRefs []*core.ResourceRef
 }
 
-// trackRef Clone()'s a ResourceRef and accumulates it for later transfer
-// to the parent CommandEncoder. This keeps the resource alive until the
-// GPU completes the submission containing this render pass.
+// trackRef Clone()'s a ResourceRef and appends directly to the parent
+// CommandEncoder's trackedRefs. No intermediate pass-level slice.
 func (p *RenderPassEncoder) trackRef(ref *core.ResourceRef) {
 	if ref != nil {
 		ref.Clone()
-		p.trackedRefs = append(p.trackedRefs, ref)
+		p.encoder.trackedRefs = append(p.encoder.trackedRefs, ref)
 	}
 }
 
@@ -341,10 +336,5 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 // End ends the render pass.
 // After this call, the encoder cannot be used again.
 func (p *RenderPassEncoder) End() error {
-	// Transfer tracked refs to parent CommandEncoder before ending.
-	if len(p.trackedRefs) > 0 {
-		p.encoder.trackedRefs = append(p.encoder.trackedRefs, p.trackedRefs...)
-		p.trackedRefs = nil
-	}
 	return p.core.End()
 }
