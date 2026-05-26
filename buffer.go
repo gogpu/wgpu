@@ -21,7 +21,7 @@ type bufferCleanupRef struct {
 	label     string
 	released  *atomic.Bool
 	ref       *core.ResourceRef // for Ref.Drop() in GC path
-	destroyFn func()           // fallback if no ResourceRef
+	destroyFn func()            // fallback if no ResourceRef
 }
 
 // Buffer represents a GPU buffer.
