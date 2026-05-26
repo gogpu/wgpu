@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.8] - 2026-05-26
+
+### Fixed
+
+- **Core: Clone buffer ResourceRefs in SetBindGroup (use-after-free prevention)** —
+  `SetBindGroup` now calls `ResourceRef.Clone()` on each buffer referenced by the bind group,
+  keeping buffers alive until GPU completes the submission. Previously only `BindGroup.ref` was
+  Clone'd — individual buffer refs were tracked for validation only (VAL-A6), not refcounted.
+  If a caller called `Buffer.Release()` before `Queue.Submit()`, the buffer could be
+  HAL-destroyed while still referenced by a pending command buffer. Matches Rust wgpu
+  `merge_bind_group` → `ResourceMetadata.insert(Arc<Buffer>)` pattern. Affects both
+  `RenderPassEncoder.SetBindGroup` and `ComputePassEncoder.SetBindGroup`.
+
 ## [0.28.7] - 2026-05-21
 
 ### Fixed

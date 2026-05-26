@@ -99,6 +99,15 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	p.binder.assign(index, group.layout)
 	p.binder.assignBindGroup(index, group)
 	p.trackRef(group.ref)
+	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
+	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
+	// Without this, Buffer.Release() before Submit can HAL-destroy buffers
+	// that are still referenced by a pending command buffer.
+	for _, buf := range group.boundBuffers {
+		if buf.core != nil && buf.core.Ref != nil {
+			p.trackRef(buf.core.Ref)
+		}
+	}
 	// Track bind group itself for submit-time validation (VAL-B5).
 	p.encoder.trackBindGroup(group)
 	// Track bind group resources for submit-time validation (VAL-A6).
