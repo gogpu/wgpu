@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.9
+## Current State: v0.28.10
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -151,6 +151,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.10** | 2026-05 | Core: pre-allocate trackedRefs in pass encoders (ML OOM fix). |
 | **v0.28.9** | 2026-05 | Core: refcount-driven Buffer destruction via onZero (Rust Drop parity). Eliminates Phase 1 stale index risk. |
 | **v0.28.8** | 2026-05 | Core: Clone buffer ResourceRefs in SetBindGroup — prevents use-after-free (Rust wgpu parity). |
 | **v0.28.7** | 2026-05 | Core: deferred GLES enumeration in RequestAdapter (adapter name fix). |

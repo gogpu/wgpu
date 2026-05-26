@@ -118,7 +118,11 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 		return nil, err
 	}
 
-	return &RenderPassEncoder{core: corePass, encoder: e}, nil
+	return &RenderPassEncoder{
+		core:        corePass,
+		encoder:     e,
+		trackedRefs: make([]*core.ResourceRef, 0, 64),
+	}, nil
 }
 
 // BeginComputePass begins a compute pass.
@@ -139,7 +143,11 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 		return nil, err
 	}
 
-	return &ComputePassEncoder{core: corePass, encoder: e}, nil
+	return &ComputePassEncoder{
+		core:        corePass,
+		encoder:     e,
+		trackedRefs: make([]*core.ResourceRef, 0, 64),
+	}, nil
 }
 
 // CopyBufferToBuffer copies data between buffers.

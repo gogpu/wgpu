@@ -734,7 +734,12 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 			return nil, err
 		}
 
-		return &CommandEncoder{core: coreEncoder, device: d, halEncoder: halEnc}, nil
+		return &CommandEncoder{
+			core:        coreEncoder,
+			device:      d,
+			halEncoder:  halEnc,
+			trackedRefs: make([]*core.ResourceRef, 0, 64),
+		}, nil
 	}
 
 	// Fallback: no pool available (e.g., non-HAL device). Use core's built-in
