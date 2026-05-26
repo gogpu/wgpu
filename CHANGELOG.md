@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.9] - 2026-05-26
+
+### Fixed
+
+- **Core: refcount-driven Buffer destruction via onZero (Rust Drop parity)** —
+  `Buffer.Release()` now calls `ResourceRef.Drop()` instead of Phase 1
+  `DestroyQueue.Defer(lastSubmissionIndex)`. The onZero callback on ResourceRef
+  fires `core.Buffer.Destroy()` only when the last reference drops — either
+  from explicit Release (refCount 1→0 if never encoded) or from Phase 2
+  Triage after GPU completion (refCount 1→0 when tracked Clone'd refs drop).
+  Previously Phase 1 used `lastSubmissionIndex` which could be stale if
+  Release() was called before Submit(), allowing premature HAL destruction
+  while GPU still used the buffer. Now Phase 2 Clone/Drop is the sole
+  mechanism for buffer lifetime — deterministic, refcount-driven, Rust parity.
+
 ## [0.28.8] - 2026-05-26
 
 ### Fixed

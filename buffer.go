@@ -18,11 +18,10 @@ import (
 // itself — runtime.AddCleanup requires the callback argument to be independent
 // of the cleaned-up object to avoid preventing garbage collection.
 type bufferCleanupRef struct {
-	label        string
-	released     *atomic.Bool
-	destroyQueue *core.DestroyQueue
-	lastSubIdx   func() uint64
-	destroyFn    func()
+	label     string
+	released  *atomic.Bool
+	ref       *core.ResourceRef // for Ref.Drop() in GC path
+	destroyFn func()           // fallback if no ResourceRef
 }
 
 // Buffer represents a GPU buffer.
@@ -46,36 +45,35 @@ func (b *Buffer) Usage() BufferUsage { return b.core.Usage() }
 // Label returns the buffer's debug label.
 func (b *Buffer) Label() string { return b.core.Label() }
 
-// Release destroys the buffer. The underlying HAL buffer is not freed
-// immediately — destruction is deferred until the GPU completes any submission
-// that may reference it. This prevents use-after-free on DX12/Vulkan when a
-// buffer is released while the GPU is still reading from it (BUG-DX12-TDR).
+// Release drops the application's ownership reference to the buffer.
+//
+// If the buffer is still referenced by in-flight GPU submissions (Clone'd
+// via SetBindGroup/SetVertexBuffer/CopyBufferToBuffer), the HAL buffer
+// stays alive until the GPU completes and Phase 2 Triage drops all tracked
+// refs. The onZero callback (set at CreateBuffer) fires only when the last
+// reference drops, HAL-destroying the buffer. This matches Rust wgpu's
+// Arc<Buffer> Drop behavior — deterministic, refcount-driven destruction.
+//
+// If the buffer was never encoded, refcount goes 1→0 immediately and the
+// HAL buffer is destroyed inline.
 func (b *Buffer) Release() {
 	if b.released == nil || !b.released.CompareAndSwap(false, true) {
 		return
 	}
 
-	// Cancel the GC cleanup — we are destroying explicitly.
 	b.cleanup.Stop()
 
-	if b.device == nil {
-		b.core.Destroy()
+	if b.core == nil {
 		return
 	}
 
-	dq := b.device.destroyQueue()
-	if dq == nil {
-		// No DestroyQueue (legacy path or no HAL) — destroy immediately.
-		b.core.Destroy()
+	if b.core.Ref != nil {
+		b.core.Ref.Drop()
 		return
 	}
 
-	// Defer destruction until GPU completes the latest known submission.
-	subIdx := b.device.lastSubmissionIndex()
-	label := b.core.Label()
-	dq.Defer(subIdx, "Buffer:"+label, func() {
-		b.core.Destroy()
-	})
+	// Fallback: no ResourceRef (legacy or test path) — destroy immediately.
+	b.core.Destroy()
 }
 
 // MapState returns the current mapping state of the buffer.
@@ -275,37 +273,21 @@ func (b *Buffer) halBuffer() hal.Buffer {
 // and core destroy function — NOT the Buffer pointer itself. This is a Go 1.24
 // runtime.AddCleanup requirement: the callback argument must not reference the
 // object being cleaned up.
-func registerBufferCleanup(buf *Buffer, dev *Device, coreBuf *core.Buffer, label string) runtime.Cleanup {
-	dq := dev.destroyQueue()
-	if dq == nil {
-		// No DestroyQueue — register cleanup that destroys immediately.
-		return runtime.AddCleanup(buf, func(ref bufferCleanupRef) {
-			if !ref.released.CompareAndSwap(false, true) {
-				return
-			}
-			slog.Warn("wgpu: Buffer released by GC (missing explicit Release)", "label", ref.label)
-			ref.destroyFn()
-		}, bufferCleanupRef{
-			label:    label,
-			released: buf.released,
-			destroyFn: func() {
-				coreBuf.Destroy()
-			},
-		})
-	}
-
+func registerBufferCleanup(buf *Buffer, _ *Device, coreBuf *core.Buffer, label string) runtime.Cleanup {
 	return runtime.AddCleanup(buf, func(ref bufferCleanupRef) {
 		if !ref.released.CompareAndSwap(false, true) {
 			return
 		}
 		slog.Warn("wgpu: Buffer released by GC (missing explicit Release)", "label", ref.label)
-		subIdx := ref.lastSubIdx()
-		ref.destroyQueue.Defer(subIdx, "Buffer(GC):"+ref.label, ref.destroyFn)
+		if ref.ref != nil {
+			ref.ref.Drop()
+		} else {
+			ref.destroyFn()
+		}
 	}, bufferCleanupRef{
-		label:        label,
-		released:     buf.released,
-		destroyQueue: dq,
-		lastSubIdx:   dev.lastSubmissionIndex,
+		label:    label,
+		released: buf.released,
+		ref:      coreBuf.Ref,
 		destroyFn: func() {
 			coreBuf.Destroy()
 		},

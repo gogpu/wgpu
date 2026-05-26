@@ -78,10 +78,16 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		return nil, err
 	}
 
-	// Phase 2: initialize ResourceRef for per-command-buffer tracking.
-	// onZero is nil — destruction is handled by Phase 1's DestroyQueue.Defer().
-	// The Ref tracks in-flight usage: Clone'd on encoding, Drop'd on GPU completion.
-	coreBuffer.Ref = core.NewResourceRef("Buffer:"+desc.Label, nil)
+	// Initialize ResourceRef with onZero callback for refcount-driven destruction.
+	// When the last reference drops (either from explicit Release or Phase 2
+	// Triage after GPU completion), onZero fires and HAL-destroys the buffer.
+	// This matches Rust wgpu's Arc<Buffer> Drop behavior.
+	//
+	// Clone'd during encoding (SetBindGroup, SetVertexBuffer, CopyBufferToBuffer),
+	// Drop'd when GPU completes submission via DestroyQueue.Triage.
+	coreBuffer.Ref = core.NewResourceRef("Buffer:"+desc.Label, func() {
+		coreBuffer.Destroy()
+	})
 
 	buf := &Buffer{core: coreBuffer, device: d, released: new(atomic.Bool)}
 

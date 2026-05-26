@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.8
+## Current State: v0.28.9
 
 ✅ **All 5 HAL backends complete** (~127K LOC)
 ✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
@@ -29,7 +29,7 @@
 ✅ **DX12 TDR fixed** — deferred resource destruction + DRED diagnostics
 ✅ **PendingWrites batching** — Rust wgpu-core pattern for WriteBuffer/WriteTexture
 ✅ **Enterprise fence architecture** — HAL owns fences, SubmissionIndex tracking
-✅ **Deferred resource destruction** — ResourceRef (Go Arc) + DestroyQueue (Rust LifetimeTracker)
+✅ **Deferred resource destruction** — ResourceRef (Go Arc) + DestroyQueue (Rust LifetimeTracker). Buffer onZero callback (Rust Drop parity) — refcount-driven HAL destruction, no stale submission index risk.
 ✅ **Per-command-buffer resource tracking** — Clone/Drop in encoders (Rust EncoderInFlight)
 ✅ **DX12 HLSL shader cache** — in-memory SHA-256 keyed, LRU eviction
 ✅ **DX12 DRED diagnostics** — auto-breadcrumbs + page fault tracking on TDR
@@ -151,6 +151,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.28.9** | 2026-05 | Core: refcount-driven Buffer destruction via onZero (Rust Drop parity). Eliminates Phase 1 stale index risk. |
 | **v0.28.8** | 2026-05 | Core: Clone buffer ResourceRefs in SetBindGroup — prevents use-after-free (Rust wgpu parity). |
 | **v0.28.7** | 2026-05 | Core: deferred GLES enumeration in RequestAdapter (adapter name fix). |
 | **v0.28.6** | 2026-05 | **GLES hidden window context** (Rust parity). Instance-owned GL context, AdapterContext mutex, Surface lightweight. Fixes context death on window close. |

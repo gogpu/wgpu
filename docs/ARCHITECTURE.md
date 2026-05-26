@@ -274,7 +274,7 @@ Backend.CreateInstance()
         → Device.Destroy*(res)     // release
 ```
 
-Resources should be explicitly Released for deterministic cleanup. `runtime.AddCleanup` (Go 1.24+) provides a GC-based safety net for Buffer and BindGroup — unreleased resources are automatically scheduled for deferred destruction via DestroyQueue when collected. Leak detection logs `slog.Warn` when GC cleans up a forgotten resource (ADR-018).
+Resources should be explicitly Released for deterministic cleanup. Buffer destruction is **refcount-driven** (Rust `Arc<Buffer>` Drop parity): `ResourceRef.Clone()` during encoding (SetBindGroup, SetVertexBuffer, CopyBufferToBuffer), `Drop()` on GPU completion via `DestroyQueue.Triage`. The `onZero` callback fires `core.Buffer.Destroy()` only when the last reference drops — safe even if `Release()` is called before `Submit()`. `runtime.AddCleanup` (Go 1.24+) provides a GC-based safety net: unreleased resources trigger `Ref.Drop()` when collected, with `slog.Warn` for leak detection (ADR-018).
 
 ## Pure Go Approach
 

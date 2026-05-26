@@ -55,6 +55,11 @@ func (d *Device) TestDestroyQueue() *core.DestroyQueue {
 	return d.destroyQueue()
 }
 
+// TestResourceCounts returns resource counts from the global hub (testing only).
+func (d *Device) TestResourceCounts() map[string]uint64 {
+	return core.GetGlobal().Stats()
+}
+
 // TestBindGroupReleased returns true if the bind group has been released (testing only).
 func (g *BindGroup) TestBindGroupReleased() bool {
 	if g.released == nil {
