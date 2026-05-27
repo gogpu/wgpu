@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu_test
 
@@ -81,8 +81,7 @@ func TestNewSurfaceFromHALWithLabel(t *testing.T) {
 }
 
 // =============================================================================
-// HalDevice / HalQueue — edge cases on live and released device
-// Covers wrap.go lines 92-109
+// HalDevice — edge cases on live and released device
 // =============================================================================
 
 func TestHalDeviceOnLiveDevice(t *testing.T) {
@@ -90,21 +89,9 @@ func TestHalDeviceOnLiveDevice(t *testing.T) {
 	defer device.Release()
 	requireHAL(t, device)
 
-	// On a live device with HAL, HalDevice should return non-nil.
 	hal := device.HalDevice()
 	if hal == nil {
 		t.Error("HalDevice() should return non-nil on live device")
-	}
-}
-
-func TestHalQueueOnLiveDevice(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	q := device.HalQueue()
-	if q == nil {
-		t.Error("HalQueue() should return non-nil on live device")
 	}
 }
 
@@ -116,14 +103,6 @@ func TestHalDeviceOnReleasedDevice(t *testing.T) {
 	if hal != nil {
 		t.Error("HalDevice() on released device should return nil")
 	}
-}
-
-func TestHalQueueOnReleasedDevice(t *testing.T) {
-	_, _, device := newDevice(t)
-	device.Release()
-
-	// Queue on released device — should not panic.
-	_ = device.HalQueue()
 }
 
 // =============================================================================

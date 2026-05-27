@@ -1,8 +1,8 @@
 # wgpu Roadmap
 
-> **Pure Go WebGPU Implementation**
+> **Unified Go WebGPU Package — Three Implementations, One API**
 >
-> All 5 HAL backends: Vulkan, Metal, DX12, GLES, Software. Zero CGO.
+> Native Go (5 HAL backends), Rust FFI (wgpu-native), Browser (WASM). Zero CGO.
 
 ---
 
@@ -19,10 +19,11 @@
 
 ---
 
-## Current State: v0.28.11
+## Current State: v0.29.0
 
-✅ **All 5 HAL backends complete** (~127K LOC)
-✅ **Three-layer WebGPU stack** — wgpu API → wgpu/core → wgpu/hal
+✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
+✅ **All 5 Native HAL backends complete** (~127K LOC)
+✅ **Three-layer Native stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
 ✅ **Core validation layer** — 15/17 Rust wgpu-core checks
 ✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES

@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu
 
@@ -96,13 +96,4 @@ func NewSamplerFromHAL(halSampler hal.Sampler, device *Device) *Sampler {
 // Returns nil if the device has been released or has no HAL backend.
 func (d *Device) HalDevice() hal.Device {
 	return d.halDevice()
-}
-
-// HalQueue returns the underlying HAL queue.
-// Returns nil if the device has been released or has no HAL backend.
-func (d *Device) HalQueue() hal.Queue {
-	if d.queue == nil {
-		return nil
-	}
-	return d.queue.hal
 }
