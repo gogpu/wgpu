@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu
 
@@ -16,18 +16,6 @@ type Texture struct {
 
 // Format returns the texture format.
 func (t *Texture) Format() TextureFormat { return t.format }
-
-// HalTexture returns the underlying HAL texture for advanced use cases.
-// This enables interop with code that needs direct HAL access (e.g., gg
-// GPU accelerator texture barriers and copy operations).
-//
-// Returns nil if the texture has been released.
-func (t *Texture) HalTexture() hal.Texture {
-	if t.released {
-		return nil
-	}
-	return t.hal
-}
 
 // Release destroys the texture. The underlying HAL texture is not freed
 // immediately — destruction is deferred until the GPU completes any submission
@@ -62,18 +50,6 @@ type TextureView struct {
 	device   *Device
 	texture  *Texture
 	released bool
-}
-
-// HalTextureView returns the underlying HAL texture view for advanced use cases.
-// This enables interop with code that needs direct HAL access (e.g., gg
-// GPU accelerator surface rendering).
-//
-// Returns nil if the view has been released.
-func (v *TextureView) HalTextureView() hal.TextureView {
-	if v.released {
-		return nil
-	}
-	return v.hal
 }
 
 // Release marks the texture view for destruction. The underlying HAL TextureView

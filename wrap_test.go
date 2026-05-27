@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu_test
 
@@ -48,33 +48,20 @@ func TestNewSamplerFromHAL(t *testing.T) {
 	}
 }
 
-func TestDeviceHalDeviceAndQueue(t *testing.T) {
+func TestDeviceHalDeviceOnLive(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
 
-	// HalDevice may return nil or non-nil depending on backend.
-	// The test ensures no panic.
 	_ = device.HalDevice()
-	_ = device.HalQueue()
 }
 
 func TestDeviceHalDeviceReleasedDevice(t *testing.T) {
 	_, _, device := newDevice(t)
 	device.Release()
 
-	// HalDevice on released device should return nil without panic.
 	hal := device.HalDevice()
 	if hal != nil {
 		t.Error("HalDevice on released device should return nil")
 	}
-}
-
-func TestDeviceHalQueueReleasedDevice(t *testing.T) {
-	_, _, device := newDevice(t)
-	device.Release()
-
-	// HalQueue on released device — queue may be freed or nil.
-	// Should not panic.
-	_ = device.HalQueue()
 }

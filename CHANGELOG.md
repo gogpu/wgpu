@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-05-27
+
+### Added
+
+- **ADR-038: Rust backend at public API level (browser pattern)** — Triple-backend architecture via build tags. `(default)` Pure Go core→HAL, `(-tags rust)` go-webgpu/webgpu v0.5.0 → wgpu-native v29, `(js,wasm)` Browser WebGPU. 24 new `_rust.go` files with platform-specific surface creation (Windows HWND, macOS Metal, Linux X11/Wayland). Same `*wgpu.Device`, `*wgpu.Buffer`, `*wgpu.Texture` API on all backends.
+
+### Removed
+
+- **ADR-039: Speculative Hal* escape hatches** — Removed `HalTexture()`, `HalTextureView()`, `HalQueue()` from public API. Zero production callers across ecosystem. Browser backend already lacked them. HAL is an internal detail of the Native Go path, not part of cross-backend API.
+
+### Changed
+
+- **deps:** go-webgpu/webgpu v0.5.1 (direct), goffi v0.5.2, x/sys v0.45.0 (Rust backend)
+
 ## [0.28.11] - 2026-05-26
 
 ### Fixed

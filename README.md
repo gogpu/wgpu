@@ -1,8 +1,8 @@
 <h1 align="center">wgpu</h1>
 
 <p align="center">
-  <strong>Pure Go WebGPU Implementation</strong><br>
-  No Rust. No CGO. Just Go.
+  <strong>Unified Go WebGPU — Three Backends, One API</strong><br>
+  Pure Go · Rust FFI · Browser WASM — build tag selects the stack
 </p>
 
 <p align="center">
@@ -24,13 +24,13 @@
 
 ## Overview
 
-**wgpu** is a complete WebGPU implementation written entirely in Go. It provides direct GPU access through multiple hardware abstraction layer (HAL) backends without requiring Rust, CGO, or any external dependencies.
+**wgpu** is the unified Go WebGPU package with three independent implementations selected by build tags — like Chrome (Dawn) and Firefox (wgpu) implementing the same W3C spec.
 
 ### Key Features
 
 | Category | Capabilities |
 |----------|--------------|
-| **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU** |
+| **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU**, **Rust FFI** |
 | **Platforms** | Windows, Linux, macOS, iOS, **Browser (WASM)** |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
@@ -56,12 +56,24 @@ CGO_ENABLED=0 go build
 
 > **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
 
+**Rust FFI backend** (optional, battle-tested wgpu-native drivers):
+```bash
+go build -tags rust
+```
+
+> Requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) v29 binary. Set `WGPU_NATIVE_PATH` or place in system PATH. See [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) for details.
+
 **Browser (WASM):**
 ```bash
 GOOS=js GOARCH=wasm go build -o app.wasm .
 ```
 
-> Browser backend uses `syscall/js` → `navigator.gpu` directly, bypassing core/hal. Same public API, same user code — just a different build target. Zero external dependencies.
+> Three implementations, one API — build tags select the stack:
+> | Build Tag | Implementation | Use Case |
+> |-----------|---------------|----------|
+> | (default) | Pure Go → core → HAL → Vulkan/Metal/DX12/GLES/Software | Zero deps, cross-compile |
+> | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | Battle-tested GPU drivers |
+> | `GOOS=js` | syscall/js → Browser WebGPU | Web applications |
 
 ---
 
@@ -220,17 +232,17 @@ The root package (`import "github.com/gogpu/wgpu"`) provides a safe, ergonomic A
 
 ```
 User Application
-  ↓ import "github.com/gogpu/wgpu"
-Root Package (public API)
-  ↓ wraps
-core/ (validation) + hal/ (backend interfaces)
-  ↓
-vulkan/ | metal/ | dx12/ | gles/ | software/
+  ↓ import "github.com/gogpu/wgpu"    ← always the same import
+Root Package (public API: *Device, *Buffer, *Texture...)
+  ↓ build tag selects implementation
+  ├─ [default]      _native.go  → core/ → hal/ → vulkan/metal/dx12/gles/software
+  ├─ [-tags rust]   _rust.go    → go-webgpu/webgpu → wgpu-native
+  └─ [js,wasm]      _browser.go → syscall/js → Browser WebGPU
 ```
 
-### HAL Backend Integration
+### Native HAL Backend Integration
 
-Backends auto-register via blank imports:
+For the default (Pure Go) path, backends auto-register via blank imports:
 
 ```go
 import _ "github.com/gogpu/wgpu/hal/allbackends"
@@ -367,7 +379,8 @@ import _ "github.com/gogpu/wgpu/hal/software"
 | Project | Description |
 |---------|-------------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
-| **gogpu/wgpu** | **Pure Go WebGPU (this repo)** |
+| **gogpu/wgpu** | **Unified Go WebGPU (this repo)** — Pure Go + Rust FFI + Browser |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Rust FFI backend (wgpu-native v29) |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library with GPU SDF acceleration |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit: 22+ widgets, 4 themes |

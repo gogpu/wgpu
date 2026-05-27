@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu_test
 
@@ -546,13 +546,4 @@ func TestNewDeviceFromHALNilDevice(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewDeviceFromHAL(nil device) should fail")
 	}
-}
-
-func TestHalDeviceOnNilQueue(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-
-	// HalQueue returns nil when queue is not HAL-backed. On mock device
-	// the queue may be nil.
-	_ = device.HalQueue()
 }

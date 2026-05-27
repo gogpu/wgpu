@@ -1,30 +1,25 @@
 # Architecture
 
-This document describes the architecture of `wgpu` — a Pure Go WebGPU implementation.
+This document describes the architecture of `wgpu` — the unified Go WebGPU package with three independent implementations (ADR-038).
 
 ## Overview
+
+Like Chrome (Dawn) and Firefox (wgpu) implementing the same W3C WebGPU spec, `wgpu` provides three backend paths selected by build tags:
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                   User Code                     │
 │   import "github.com/gogpu/wgpu"                │
-│   _ "github.com/gogpu/wgpu/hal/allbackends"     │
-└──────────────────────┬──────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────┐
-│              Root Package (wgpu/)               │
-│  Safe, ergonomic public API (WebGPU-aligned)    │
-│  Instance · Adapter · Device · Queue · Buffer   │
-│  Texture · Pipeline · CommandEncoder · Surface  │
-└──────────┬──────────────────────────┬───────────┘
-           │ native                   │ browser (WASM)
-           │ *_native.go              │ *_browser.go
-┌──────────▼──────────┐   ┌──────────▼───────────┐
-│       core/         │   │  internal/browser/   │
-│  Validation, state  │   │  syscall/js →        │
-│  tracking, scopes   │   │  navigator.gpu       │
-└──────────┬──────────┘   │  (bypasses core/hal) │
-           │              └──────────────────────┘
+│   Same *Device, *Buffer, *Texture on all paths  │
+└──────────┬──────────────────┬──────────────┬────┘
+           │ (default)        │ -tags rust   │ js,wasm
+           │ *_native.go      │ *_rust.go    │ *_browser.go
+┌──────────▼──────────┐ ┌────▼──────────┐ ┌─▼─────────────┐
+│       core/         │ │ go-webgpu/    │ │internal/browser│
+│  Validation, state  │ │ webgpu v0.5+  │ │ syscall/js →   │
+│  tracking, scopes   │ │ → wgpu-native │ │ navigator.gpu  │
+└──────────┬──────────┘ │   v29 (Rust)  │ └────────────────┘
+           │            └───────────────┘
 ┌──────────▼──────────────────────────────────────┐
 │                  hal/                           │
 │     Hardware Abstraction Layer (interfaces)     │
@@ -35,6 +30,10 @@ This document describes the architecture of `wgpu` — a Pure Go WebGPU implemen
 │ Vulkan  ││ Metal  ││ DX12 ││OpenGLES││  CPU     │
 │1.0+ API ││ macOS  ││ Win  ││ 3.0+   ││rasterizer│
 └─────────┘└────────┘└──────┘└────────┘└──────────┘
+
+Native Go path: core/ → hal/ → GPU drivers (default, zero dependencies)
+Rust FFI path:  go-webgpu/webgpu → wgpu-native (battle-tested drivers)
+Browser path:   syscall/js → Browser WebGPU API (WASM target)
 ```
 
 ## Layers

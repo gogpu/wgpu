@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgpu_test
 
@@ -181,37 +181,6 @@ func TestTextureFormat(t *testing.T) {
 	}
 }
 
-func TestTextureHalTexture(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
-		Label:         "hal-texture",
-		Size:          wgpu.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
-		Usage:         wgpu.TextureUsageTextureBinding,
-	})
-	if err != nil {
-		t.Fatalf("CreateTexture: %v", err)
-	}
-
-	// Before release, HalTexture should be non-nil.
-	if tex.HalTexture() == nil {
-		t.Error("HalTexture() is nil on live texture")
-	}
-
-	tex.Release()
-
-	// After release, HalTexture should be nil.
-	if tex.HalTexture() != nil {
-		t.Error("HalTexture() should be nil after Release")
-	}
-}
-
 func TestTextureReleaseIdempotent(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
@@ -238,41 +207,6 @@ func TestTextureReleaseIdempotent(t *testing.T) {
 // TextureView accessor tests
 // Covers texture_native.go TextureView missed lines
 // =============================================================================
-
-func TestTextureViewHalTextureView(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
-		Label:         "tv-hal-texture",
-		Size:          wgpu.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
-		Usage:         wgpu.TextureUsageTextureBinding,
-	})
-	if err != nil {
-		t.Fatalf("CreateTexture: %v", err)
-	}
-	defer tex.Release()
-
-	view, err := device.CreateTextureView(tex, nil)
-	if err != nil {
-		t.Fatalf("CreateTextureView: %v", err)
-	}
-
-	if view.HalTextureView() == nil {
-		t.Error("HalTextureView() is nil on live view")
-	}
-
-	view.Release()
-
-	if view.HalTextureView() != nil {
-		t.Error("HalTextureView() should be nil after Release")
-	}
-}
 
 func TestTextureViewReleaseIdempotent(t *testing.T) {
 	_, _, device := newDevice(t)
