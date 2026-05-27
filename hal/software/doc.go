@@ -2,31 +2,35 @@
 
 // Package software provides a CPU-based software rendering backend.
 //
-// Status: IMPLEMENTED (Phase 1 - Headless Rendering)
-//
 // The software backend implements all HAL interfaces using pure Go CPU rendering.
-// Unlike the noop backend, it actually performs rendering operations in memory.
+// Unlike the noop backend, it actually performs rendering operations in memory,
+// including full SPIR-V shader execution for vertex, fragment, and compute stages.
 //
 // Use cases:
-//   - Headless rendering (servers, CI/CD)
-//   - Screenshot/image generation without GPU
-//   - Testing rendering logic without GPU hardware
-//   - Embedded systems without GPU
-//   - Fallback when no GPU backend is available
+//   - Shader debugging (step through every SPIR-V instruction with breakpoints)
+//   - CI/CD testing (no GPU required)
+//   - Headless rendering (servers, screenshot generation)
+//   - GPU-less fallback (embedded systems)
+//   - NOT for real-time production rendering — use GPU backends for that
 //
-// Implemented features (Phase 1):
+// Implemented features:
 //   - Real data storage for buffers and textures
-//   - Clear operations (fill framebuffer/texture with color)
+//   - SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders on CPU
+//   - Compute shaders: CreateComputePipeline + Dispatch via SPIR-V interpreter
+//   - Texture sampling (nearest, bilinear, 3 wrap modes)
+//   - GLSL.std.450 math intrinsics (30+ functions)
+//   - Control flow (loops, phi, function calls, switch)
+//   - Atomics and workgroup shared memory
+//   - Shader debugger (DebugContext, breakpoints, JSON trace, zero overhead when disabled)
 //   - Buffer/texture copy operations
-//   - Framebuffer readback via Surface.GetFramebuffer()
+//   - Clear operations
+//   - Windowed presentation (Windows GDI, Linux X11, macOS CG+Metal)
 //   - Thread-safe resource access
 //
 // Limitations:
-//   - Much slower than GPU backends (CPU-bound)
+//   - Much slower than GPU backends (CPU-bound, interpreter, not JIT)
 //   - No hardware acceleration
-//   - No compute shaders (returns error)
-//   - No rasterization yet (draw calls are no-op - Phase 2)
-//   - No shader execution (basic resources only)
+//   - DispatchIndirect not implemented
 //
 // Always compiled (no build tags required).
 //
