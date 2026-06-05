@@ -478,16 +478,20 @@ func bufferReleaseCb(_, wlBuffer uintptr) {
 	bufferBusyMu.Unlock()
 }
 
-// cString reads a null-terminated C string from a pointer.
+// cString reads a null-terminated C string from a uintptr (C char*).
+// Uses unsafe.Pointer conversion required for FFI interop with libwayland.
+//
+//go:nosplit
+//go:nocheckptr
 func cString(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
-	//nolint:govet // Converting uintptr (C string address) to unsafe.Pointer is required for FFI
-	p := (*byte)(unsafe.Pointer(ptr))
+	p := *(*unsafe.Pointer)(unsafe.Pointer(&ptr))
+	bp := (*byte)(p)
 	length := 0
 	for i := 0; i < 256; i++ {
-		b := unsafe.Slice(p, i+1)
+		b := unsafe.Slice(bp, i+1)
 		if b[i] == 0 {
 			length = i
 			break
@@ -496,7 +500,7 @@ func cString(ptr uintptr) string {
 	if length == 0 {
 		return ""
 	}
-	result := unsafe.Slice(p, length)
+	result := unsafe.Slice(bp, length)
 	return string(result)
 }
 
