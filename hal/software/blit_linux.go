@@ -246,10 +246,17 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		return
 	}
 
-	// Detect Wayland vs X11 on first blit.
+	// Detect Wayland vs X11 on first blit. Eagerly obtain wl_shm here
+	// to avoid a wl_display_roundtrip in the present hot path.
+	// NOTE: blitFramebufferToWindow is called on the render thread
+	// (from Queue.Present), not the main thread. Full thread safety
+	// requires gogpu threading model work (BUG-WL-001).
 	if !s.wlState.detected {
 		s.wlState.detected = true
-		s.wlState.isWayland = isWaylandDisplay(s.displayHandle)
+		s.wlState.isWayland = isWaylandDisplay()
+		if s.wlState.isWayland {
+			s.wlState.wlShm = obtainWlShm(s.displayHandle)
+		}
 	}
 
 	// Route to Wayland SHM path if display is Wayland.
@@ -350,10 +357,13 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 		return
 	}
 
-	// Detect Wayland vs X11 on first blit.
+	// Detect Wayland vs X11 on first blit (same eager init as blitFramebufferToWindow).
 	if !s.wlState.detected {
 		s.wlState.detected = true
-		s.wlState.isWayland = isWaylandDisplay(s.displayHandle)
+		s.wlState.isWayland = isWaylandDisplay()
+		if s.wlState.isWayland {
+			s.wlState.wlShm = obtainWlShm(s.displayHandle)
+		}
 	}
 
 	// Route to Wayland SHM damage path if display is Wayland.

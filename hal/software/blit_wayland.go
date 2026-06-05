@@ -8,6 +8,7 @@ package software
 import (
 	"image"
 	"log/slog"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -31,9 +32,11 @@ import (
 //  4. Register wl_buffer.release listener (Qt6 pattern: qwaylandbuffer.cpp)
 //  5. Copy pixels, wl_surface_attach + damage_buffer + commit + flush
 //
-// Double-buffering uses wl_buffer.release to avoid writing into a buffer
-// the compositor is still reading. If both buffers are busy, the frame is
-// skipped (no corruption, no tearing — same as Qt6 qwaylandshmbackingstore.cpp).
+// Triple-buffering (3 SHM buffers) with wl_buffer.release avoids writing
+// into a buffer the compositor is still reading. If all buffers are busy,
+// the frame is skipped (no corruption, no tearing). Qt6 uses up to 5
+// buffers (qwaylandshmbackingstore.cpp); 3 is the minimum for skip-free
+// presentation on slow compositors (e.g. pixman renderer).
 //
 // Pixel format: Software backend stores BGRA byte order. On little-endian
 // (all supported Linux), BGRA bytes = uint32 0xAARRGGBB = wl_shm ARGB8888.
@@ -49,10 +52,8 @@ var (
 	wlClientLib unsafe.Pointer
 
 	// wl_display functions
-	symWlDisplayGetFD       unsafe.Pointer
-	symWlDisplayGetRegistry unsafe.Pointer
-	symWlDisplayRoundtrip   unsafe.Pointer
-	symWlDisplayFlush       unsafe.Pointer
+	symWlDisplayRoundtrip unsafe.Pointer
+	symWlDisplayFlush     unsafe.Pointer
 
 	// wl_registry / wl_shm / wl_shm_pool / wl_surface / wl_buffer / proxy functions
 	symWlProxyMarshalConstructor          unsafe.Pointer
@@ -65,10 +66,7 @@ var (
 	wlRegistryInterface unsafe.Pointer
 	wlShmPoolInterface  unsafe.Pointer
 	wlBufferInterface   unsafe.Pointer
-	wlCallbackInterface unsafe.Pointer
 
-	// CIF for wl_display_get_fd(wl_display*) -> int
-	cifWlDisplayGetFD types.CallInterface
 	// CIF for wl_display_roundtrip(wl_display*) -> int
 	cifWlDisplayRoundtrip types.CallInterface
 	// CIF for wl_display_flush(wl_display*) -> int
@@ -77,24 +75,26 @@ var (
 	cifWlProxyMarshalConstructor types.CallInterface
 	// CIF for wl_proxy_add_listener(proxy*, listener_impl**, data*) -> int
 	cifWlProxyAddListener types.CallInterface
-	// CIF for wl_proxy_marshal(proxy*, opcode, ...) -> void
-	// We use variadic-like calls via the raw CIF, passing args as uintptr.
-	cifWlProxyMarshal types.CallInterface
 	// CIF for wl_proxy_destroy(proxy*) -> void
 	cifWlProxyDestroy types.CallInterface
 )
 
-// waylandBlitState holds per-Surface Wayland SHM resources for double-buffered
+// waylandBlitState holds per-Surface Wayland SHM resources for triple-buffered
 // presentation. Embedded in platformBlit (blit_linux.go).
+//
+// Triple-buffering (3 buffers) guarantees a free buffer even when the
+// compositor holds two (previous + current). Qt6 uses up to 5
+// (qwaylandshmbackingstore.cpp); 3 is the minimum for skip-free
+// presentation on slow compositors (e.g. pixman renderer).
 type waylandBlitState struct {
 	isWayland bool // true if displayHandle is wl_display* (detected once)
 	detected  bool // true if detection has been performed
 
 	wlShm uintptr // bound wl_shm global (0 if not yet obtained)
 
-	// Double-buffer state: two SHM buffers, toggle between them.
+	// Triple-buffer state: three SHM buffers, pick first non-busy.
 	// This avoids writing to a buffer the compositor is still reading.
-	buffers  [2]waylandShmBuffer
+	buffers  [3]waylandShmBuffer
 	frontIdx int // index of the buffer last submitted to compositor
 }
 
@@ -140,25 +140,13 @@ var (
 	bufferBusyMap = map[uintptr]*waylandShmBuffer{}
 )
 
-// isWaylandDisplay checks whether the given display handle is a Wayland
-// wl_display by attempting wl_display_get_fd. A valid Wayland display
-// returns fd >= 0. An X11 Display* passed to this function will either
-// return a negative value or crash would be caught — but since the library
-// was loaded successfully, the call is safe (wl_display_get_fd validates
-// its argument before accessing members via the display magic number).
-//
-// This detection is conservative: if libwayland-client.so is not available,
-// we assume X11.
-func isWaylandDisplay(displayHandle uintptr) bool {
-	waylandOnce.Do(initWayland)
-	if !waylandReady {
-		return false
-	}
-
-	var fd int32
-	args := [1]unsafe.Pointer{unsafe.Pointer(&displayHandle)}
-	_ = ffi.CallFunction(&cifWlDisplayGetFD, symWlDisplayGetFD, unsafe.Pointer(&fd), args[:])
-	return fd >= 0
+// isWaylandDisplay returns true if the session is running under Wayland.
+// Uses WAYLAND_DISPLAY env var — same pattern as hal/vulkan/api_linux.go.
+// The previous fd-probe approach (wl_display_get_fd on the display handle)
+// was unsafe: an X11 Display* passed to wl_display_get_fd reads garbage
+// from an unrelated struct and can return a false-positive fd >= 0.
+func isWaylandDisplay() bool {
+	return os.Getenv("WAYLAND_DISPLAY") != ""
 }
 
 // initWayland loads libwayland-client.so and prepares CIFs for SHM presentation.
@@ -179,8 +167,6 @@ func initWayland() {
 		name string
 		dst  *unsafe.Pointer
 	}{
-		{"wl_display_get_fd", &symWlDisplayGetFD},
-		{"wl_display_get_registry", &symWlDisplayGetRegistry},
 		{"wl_display_roundtrip", &symWlDisplayRoundtrip},
 		{"wl_display_flush", &symWlDisplayFlush},
 		{"wl_proxy_marshal_constructor", &symWlProxyMarshalConstructor},
@@ -204,7 +190,6 @@ func initWayland() {
 		{"wl_registry_interface", &wlRegistryInterface},
 		{"wl_shm_pool_interface", &wlShmPoolInterface},
 		{"wl_buffer_interface", &wlBufferInterface},
-		{"wl_callback_interface", &wlCallbackInterface},
 	}
 	for _, iface := range interfaces {
 		*iface.dst, err = ffi.GetSymbol(wlClientLib, iface.name)
@@ -215,13 +200,6 @@ func initWayland() {
 	}
 
 	// Prepare CIFs.
-
-	// int wl_display_get_fd(wl_display*)
-	if err = ffi.PrepareCallInterface(&cifWlDisplayGetFD, types.DefaultCall,
-		types.SInt32TypeDescriptor,
-		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
-		return
-	}
 
 	// wl_registry* wl_display_get_registry(wl_display*)
 	// Actually wl_proxy_marshal_constructor, but we'll use the direct symbol.
@@ -263,22 +241,6 @@ func initWayland() {
 			types.PointerTypeDescriptor, // proxy
 			types.PointerTypeDescriptor, // implementation
 			types.PointerTypeDescriptor, // data
-		}); err != nil {
-		return
-	}
-
-	// void wl_proxy_marshal(wl_proxy*, uint32 opcode, ...)
-	// We need multiple arities. Prepare a 7-arg version (covers create_buffer's 6 args + opcode).
-	if err = ffi.PrepareCallInterface(&cifWlProxyMarshal, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // proxy
-			types.UInt32TypeDescriptor,  // opcode
-			types.PointerTypeDescriptor, // arg1
-			types.PointerTypeDescriptor, // arg2
-			types.PointerTypeDescriptor, // arg3
-			types.PointerTypeDescriptor, // arg4
-			types.PointerTypeDescriptor, // arg5
 		}); err != nil {
 		return
 	}
@@ -334,9 +296,10 @@ func initWayland() {
 }
 
 // obtainWlShm gets the wl_shm global by creating a wl_registry, listening
-// for the wl_shm global, and doing a roundtrip. This is called once per
-// surface on first Wayland blit.
+// for the wl_shm global, and doing a roundtrip. Called eagerly from the
+// detection block in blit_linux.go (once per surface).
 func obtainWlShm(display uintptr) uintptr {
+	waylandOnce.Do(initWayland)
 	if !waylandReady {
 		return 0
 	}
@@ -730,27 +693,29 @@ func waylandDestroyShmBuffer(buf *waylandShmBuffer) {
 }
 
 // waylandPresent copies pixel data into the SHM buffer and commits the surface.
+// wl_shm must be obtained eagerly (in blit_linux.go detection block) before
+// this method is called. If wlShm is 0, init failed and we bail out.
 func (s *Surface) waylandPresent(data []byte, width, height int32) {
 	wl := &s.wlState
 	if wl.wlShm == 0 {
-		wl.wlShm = obtainWlShm(s.displayHandle)
-		if wl.wlShm == 0 {
-			return
-		}
+		return
 	}
 
-	// Pick a non-busy buffer (Qt6 qwaylandshmbackingstore.cpp:349 pattern).
-	backIdx := 1 - wl.frontIdx
-	buf := &wl.buffers[backIdx]
-	if buf.busy {
-		// Try the other buffer.
-		buf = &wl.buffers[wl.frontIdx]
-		if buf.busy {
-			// Both busy — skip frame to avoid corruption.
-			return
+	// Pick a non-busy buffer (Qt6 qwaylandshmbackingstore.cpp pattern).
+	// Iterate all 3 buffers starting after frontIdx; skip busy ones.
+	backIdx := -1
+	for i := 1; i <= len(wl.buffers); i++ {
+		idx := (wl.frontIdx + i) % len(wl.buffers)
+		if !wl.buffers[idx].busy {
+			backIdx = idx
+			break
 		}
-		backIdx = wl.frontIdx
 	}
+	if backIdx < 0 {
+		// All buffers busy — skip frame to avoid corruption.
+		return
+	}
+	buf := &wl.buffers[backIdx]
 
 	// Reallocate if dimensions changed.
 	if buf.buffer == 0 || buf.width != width || buf.height != height {
@@ -799,25 +764,27 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 }
 
 // waylandPresentDamage copies pixel data and commits with damage rects.
+// wl_shm must be obtained eagerly (in blit_linux.go detection block) before
+// this method is called. If wlShm is 0, init failed and we bail out.
 func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects []image.Rectangle) {
 	wl := &s.wlState
 	if wl.wlShm == 0 {
-		wl.wlShm = obtainWlShm(s.displayHandle)
-		if wl.wlShm == 0 {
-			return
-		}
+		return
 	}
 
-	// Pick a non-busy buffer.
-	backIdx := 1 - wl.frontIdx
-	buf := &wl.buffers[backIdx]
-	if buf.busy {
-		buf = &wl.buffers[wl.frontIdx]
-		if buf.busy {
-			return
+	// Pick a non-busy buffer (same logic as waylandPresent).
+	backIdx := -1
+	for i := 1; i <= len(wl.buffers); i++ {
+		idx := (wl.frontIdx + i) % len(wl.buffers)
+		if !wl.buffers[idx].busy {
+			backIdx = idx
+			break
 		}
-		backIdx = wl.frontIdx
 	}
+	if backIdx < 0 {
+		return
+	}
+	buf := &wl.buffers[backIdx]
 
 	if buf.buffer == 0 || buf.width != width || buf.height != height {
 		if buf.buffer != 0 {
