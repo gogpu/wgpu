@@ -1129,6 +1129,20 @@ func (c *Context) VertexAttribPointer(index uint32, size int32, typ uint32, norm
 	_ = ffi.CallFunction(&cifVoid6Attrib, c.glVertexAttribPointer, nil, args[:])
 }
 
+// VertexAttribDivisor sets the instance divisor for a vertex attribute.
+// divisor=0 means per-vertex, divisor=1 means per-instance.
+// Matches Rust wgpu-hal/src/gles/queue.rs vertex_attrib_divisor call.
+func (c *Context) VertexAttribDivisor(index, divisor uint32) {
+	if c.glVertexAttribDivisor == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&divisor),
+	}
+	_ = ffi.CallFunction(&cifVoid2UU, c.glVertexAttribDivisor, nil, args[:])
+}
+
 // --- Textures ---
 
 func (c *Context) GenTextures(n int32) uint32 {

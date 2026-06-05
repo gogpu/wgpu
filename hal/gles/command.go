@@ -620,16 +620,25 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	topology := gputypes.PrimitiveTopologyTriangleList // default
+	if e.pipeline != nil {
+		topology = e.pipeline.primitiveTopology
+	}
 	e.encoder.commands = append(e.encoder.commands, &DrawCommand{
 		vertexCount:   vertexCount,
 		instanceCount: instanceCount,
 		firstVertex:   firstVertex,
 		firstInstance: firstInstance,
+		topology:      topology,
 	})
 }
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	topology := gputypes.PrimitiveTopologyTriangleList // default
+	if e.pipeline != nil {
+		topology = e.pipeline.primitiveTopology
+	}
 	e.encoder.commands = append(e.encoder.commands, &DrawIndexedCommand{
 		indexCount:    indexCount,
 		instanceCount: instanceCount,
@@ -637,6 +646,7 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 		baseVertex:    baseVertex,
 		firstInstance: firstInstance,
 		indexFormat:   e.indexFormat,
+		topology:      topology,
 	})
 }
 
@@ -1109,23 +1119,16 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			offset := int(res.Offset)
 			size := int(res.Size)
 
-			// Apply dynamic offset if available.
-			if c.dynamicOffsets != nil && dynamicIdx < len(c.dynamicOffsets) {
-				if c.group.layout != nil {
-					for _, le := range c.group.layout.entries {
-						if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
-							offset += int(c.dynamicOffsets[dynamicIdx])
-							dynamicIdx++
-							break
-						}
-					}
-				}
-			}
+			// Determine GL buffer target and apply dynamic offset from layout entry.
+			// Storage buffers use GL_SHADER_STORAGE_BUFFER, uniform buffers use GL_UNIFORM_BUFFER.
+			// Matches Rust wgpu-hal/src/gles/command.rs:731-746 (set_bind_group).
+			target, dynOff := c.resolveBufferTarget(entry.Binding, &dynamicIdx)
+			offset += dynOff
 
 			if size > 0 {
-				ctx.BindBufferRange(gl.UNIFORM_BUFFER, glBinding, bufID, offset, size)
+				ctx.BindBufferRange(target, glBinding, bufID, offset, size)
 			} else {
-				ctx.BindBufferBase(gl.UNIFORM_BUFFER, glBinding, bufID)
+				ctx.BindBufferBase(target, glBinding, bufID)
 			}
 
 		case gputypes.TextureViewBinding:
@@ -1200,6 +1203,33 @@ func (c *SetBindGroupCommand) resolveSamplerUnit(glBinding uint32) uint32 {
 	return glBinding
 }
 
+// resolveBufferTarget determines the GL buffer target (UNIFORM_BUFFER or SHADER_STORAGE_BUFFER)
+// and dynamic offset for a binding number by looking up the bind group layout entry.
+// Returns the GL target and the dynamic offset to apply (0 if none).
+// Matches Rust wgpu-hal/src/gles/command.rs:731-746 buffer target selection.
+func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32, dynamicIdx *int) (uint32, int) {
+	target := uint32(gl.UNIFORM_BUFFER)
+	dynOffset := 0
+	if c.group.layout == nil {
+		return target, dynOffset
+	}
+	for _, le := range c.group.layout.entries {
+		if le.Binding != binding || le.Buffer == nil {
+			continue
+		}
+		if le.Buffer.Type == gputypes.BufferBindingTypeStorage ||
+			le.Buffer.Type == gputypes.BufferBindingTypeReadOnlyStorage {
+			target = gl.SHADER_STORAGE_BUFFER
+		}
+		if le.Buffer.HasDynamicOffset && c.dynamicOffsets != nil && *dynamicIdx < len(c.dynamicOffsets) {
+			dynOffset = int(c.dynamicOffsets[*dynamicIdx])
+			*dynamicIdx++
+		}
+		break
+	}
+	return target, dynOffset
+}
+
 // SetVertexBufferCommand binds a vertex buffer and configures vertex attributes.
 // In OpenGL, vertex attributes must be configured explicitly via
 // glVertexAttribPointer + glEnableVertexAttribArray. The layout describes
@@ -1219,12 +1249,22 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 	stride := int32(c.layout.ArrayStride)
+	// Determine divisor from step mode: 0=per-vertex, 1=per-instance.
+	// Matches Rust wgpu-hal/src/gles/queue.rs vertex_attrib_divisor call.
+	var divisor uint32
+	if c.layout.StepMode == gputypes.VertexStepModeInstance {
+		divisor = 1
+	}
 	for _, attr := range c.layout.Attributes {
 		loc := attr.ShaderLocation
 		size, typ, normalized := vertexFormatToGL(attr.Format)
 		attrOffset := uintptr(c.offset) + uintptr(attr.Offset)
 		ctx.EnableVertexAttribArray(loc)
 		ctx.VertexAttribPointer(loc, size, typ, normalized, stride, attrOffset)
+		// Set the instance divisor. Per-vertex attributes get divisor=0 (reset),
+		// per-instance attributes get divisor=1. Without this, instanced rendering
+		// reads the same instance data for all instances.
+		ctx.VertexAttribDivisor(loc, divisor)
 	}
 }
 
@@ -1300,13 +1340,15 @@ func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
 type DrawCommand struct {
 	vertexCount, instanceCount uint32
 	firstVertex, firstInstance uint32
+	topology                   gputypes.PrimitiveTopology
 }
 
 func (c *DrawCommand) Execute(ctx *gl.Context) {
+	mode := primitiveTopologyToGL(c.topology)
 	if c.instanceCount <= 1 {
-		ctx.DrawArrays(gl.TRIANGLES, int32(c.firstVertex), int32(c.vertexCount))
+		ctx.DrawArrays(mode, int32(c.firstVertex), int32(c.vertexCount))
 	} else {
-		ctx.DrawArraysInstanced(gl.TRIANGLES, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
+		ctx.DrawArraysInstanced(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
 	}
 }
 
@@ -1317,6 +1359,7 @@ type DrawIndexedCommand struct {
 	baseVertex                int32
 	firstInstance             uint32
 	indexFormat               gputypes.IndexFormat
+	topology                  gputypes.PrimitiveTopology
 }
 
 func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
@@ -1328,11 +1371,12 @@ func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
 	}
 
 	offset := uintptr(c.firstIndex) * indexSize
+	mode := primitiveTopologyToGL(c.topology)
 
 	if c.instanceCount <= 1 {
-		ctx.DrawElements(gl.TRIANGLES, int32(c.indexCount), indexType, offset)
+		ctx.DrawElements(mode, int32(c.indexCount), indexType, offset)
 	} else {
-		ctx.DrawElementsInstanced(gl.TRIANGLES, int32(c.indexCount), indexType, offset, int32(c.instanceCount))
+		ctx.DrawElementsInstanced(mode, int32(c.indexCount), indexType, offset, int32(c.instanceCount))
 	}
 }
 
@@ -1762,5 +1806,24 @@ func blendOperationToGL(op gputypes.BlendOperation) uint32 {
 		return gl.MAX
 	default:
 		return gl.FUNC_ADD
+	}
+}
+
+// primitiveTopologyToGL converts a WebGPU primitive topology to the corresponding GL constant.
+// Matches Rust wgpu-hal/src/gles/conv.rs map_primitive_topology.
+func primitiveTopologyToGL(topology gputypes.PrimitiveTopology) uint32 {
+	switch topology {
+	case gputypes.PrimitiveTopologyPointList:
+		return gl.POINTS
+	case gputypes.PrimitiveTopologyLineList:
+		return gl.LINES
+	case gputypes.PrimitiveTopologyLineStrip:
+		return gl.LINE_STRIP
+	case gputypes.PrimitiveTopologyTriangleList:
+		return gl.TRIANGLES
+	case gputypes.PrimitiveTopologyTriangleStrip:
+		return gl.TRIANGLE_STRIP
+	default:
+		return gl.TRIANGLES
 	}
 }

@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resource_linux.go` creates EGL window surface via wl_egl_window. EGL 1.5
   `eglCreatePlatformWindowSurface` with runtime detection + EGL 1.4 fallback (Rust wgpu-hal
   `egl.rs:1479` parity). Correct destroy order (eglDestroySurface before wl_egl_window_destroy).
+- **GLES: fix compute shaders, instanced rendering, primitive topology** (Rust wgpu-hal parity) —
+  Three critical bugs in `command.go` fixed: (1) storage buffers now bind as
+  `GL_SHADER_STORAGE_BUFFER` instead of `GL_UNIFORM_BUFFER` — compute shaders work
+  (Rust `command.rs:731-746`); (2) draw commands use pipeline topology instead of
+  hardcoded `GL_TRIANGLES` — PointList/LineList/LineStrip/TriangleStrip all correct;
+  (3) `glVertexAttribDivisor` called for per-instance vertex attributes — instanced
+  rendering works (Rust `queue.rs:1372`). Verified: particles example renders 4096
+  compute-driven particles on GLES.
 
 ## [0.29.2] - 2026-06-05
 
