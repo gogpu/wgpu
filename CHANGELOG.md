@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.3] - 2026-06-05
+
+### Fixed
+
+- **Software: Wayland SHM present (enterprise quality)** (ADR-042/043, gogpu#292) —
+  `blit_wayland.go` implements Wayland-native presentation via wl_shm triple-buffered
+  SHM. Auto-detects Wayland vs X11 via `WAYLAND_DISPLAY` env var. Loads
+  libwayland-client.so independently. No pixel format conversion (BGRA = ARGB8888 on LE).
+  Enterprise features validated against Qt6, Rust wgpu-hal, SDL3, GLFW:
+  - `wl_buffer.release` listener (Qt6 `qwaylandbuffer.cpp` pattern) — compositor signals
+    when buffer is safe to reuse, prevents data race on busy buffers
+  - Triple-buffering (Qt6 uses up to 5) — eliminates frame skips on slow compositors
+  - `PrepareVariadicCallInterface` (goffi v0.5.2+ ADR-043) — correct ARM64 AAPCS64
+    variadic ABI for `wl_proxy_marshal` / `wl_proxy_marshal_constructor` (7 CIFs)
+  - Cached CIFs — zero heap allocations per frame in present hot path
+  - `wl_surface.damage_buffer` opcode 9 (buffer coordinates, HiDPI correct)
+  - Row-based partial copy — `waylandPresentDamage` copies only damaged regions
+    (1080p small damage: 332µs → 1.6µs, 208× speedup)
+  - Eager `obtainWlShm` init — roundtrip removed from per-frame hot path
+  - Dedicated helpers: `waylandSurfaceAttach`/`waylandSurfaceDamageBuffer`/`waylandSurfaceCommit`
+- **GLES: Wayland EGL window surface (Rust wgpu-hal parity)** (ADR-042, gogpu#292) —
+  `egl/wayland_egl.go` loads libwayland-egl.so for `wl_egl_window_create/destroy/resize`.
+  `resource_linux.go` creates EGL window surface via wl_egl_window. EGL 1.5
+  `eglCreatePlatformWindowSurface` with runtime detection + EGL 1.4 fallback (Rust wgpu-hal
+  `egl.rs:1479` parity). Correct destroy order (eglDestroySurface before wl_egl_window_destroy).
+- **GLES: fix compute shaders, instanced rendering, primitive topology** (Rust wgpu-hal parity) —
+  Three critical bugs in `command.go` fixed: (1) storage buffers now bind as
+  `GL_SHADER_STORAGE_BUFFER` instead of `GL_UNIFORM_BUFFER` — compute shaders work
+  (Rust `command.rs:731-746`); (2) draw commands use pipeline topology instead of
+  hardcoded `GL_TRIANGLES` — PointList/LineList/LineStrip/TriangleStrip all correct;
+  (3) `glVertexAttribDivisor` called for per-instance vertex attributes — instanced
+  rendering works (Rust `queue.rs:1372`). Verified: particles example renders 4096
+  compute-driven particles on GLES.
+
 ## [0.29.2] - 2026-06-05
 
 ### Fixed

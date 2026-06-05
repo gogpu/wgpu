@@ -605,6 +605,13 @@ func (c *Context) VertexAttribPointer(index uint32, size int32, typ uint32, norm
 		uintptr(typ), norm, uintptr(stride), offset)
 }
 
+// VertexAttribDivisor sets the instance divisor for a vertex attribute.
+// divisor=0 means per-vertex, divisor=1 means per-instance.
+// Matches Rust wgpu-hal/src/gles/queue.rs vertex_attrib_divisor call.
+func (c *Context) VertexAttribDivisor(index, divisor uint32) {
+	syscall.SyscallN(c.glVertexAttribDivisor, uintptr(index), uintptr(divisor))
+}
+
 // --- Textures ---
 
 func (c *Context) GenTextures(n int32) uint32 {

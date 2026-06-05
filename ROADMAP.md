@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.0
+## Current State: v0.29.3
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -76,8 +76,8 @@
 | Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
-| GLES | Windows, Linux | ✅ Stable — hidden window context (Rust parity), glFenceSync, copy commands, timestamps, real adapter capabilities, compute barriers |
-| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/CG+Metal), SPIR-V interpreter. All 3 desktop platforms. |
+| GLES | Windows, Linux | ✅ Stable — hidden window context (Rust parity), Wayland EGL (EGL 1.5 + fallback), glFenceSync, copy commands, timestamps, real adapter capabilities, compute barriers |
+| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. All 3 desktop platforms + Wayland. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
@@ -88,6 +88,8 @@
 ### Next
 
 - [x] GLES hidden window context (Windows) — Instance-owned GL context, Rust wgpu parity (FEAT-GLES-002)
+- [x] Wayland SHM presentation (Software backend) — triple-buffered wl_shm, release listener, partial copy, variadic ABI (ADR-042/043)
+- [x] Wayland EGL window surface (GLES backend) — wl_egl_window, EGL 1.5 eglCreatePlatformWindowSurface (ADR-042)
 - [ ] GLES hidden window context (Linux) — EGL surfaceless/pbuffer, Phase 2 of FEAT-GLES-002
 - [x] macOS software presentation — CGImage + CAMetalLayer (PR #187, @k-chimi, v0.28.4)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
