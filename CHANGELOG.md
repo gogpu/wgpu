@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.2] - 2026-06-05
+
+### Fixed
+
+- **Vulkan: comprehensive VK_ERROR_SURFACE_LOST_KHR handling (Rust wgpu parity)** —
+  `acquireNextImage`, `present`, and `createSwapchain` now handle
+  `VK_ERROR_SURFACE_LOST_KHR` → `hal.ErrSurfaceLost` in all code paths, matching
+  Rust wgpu-hal `native.rs` (acquire line 452, present line 584, create line 228).
+  Added defensive `sc.handle == 0` guard in `present()`. Triggered by Wayland
+  SIGSEGV investigation (gogpu#292) — two users on Intel ANV and AMD RADV confirmed
+  crash in `vkQueuePresentKHR`. While the root cause is in gogpu's Wayland surface
+  lifecycle (missing configure gate + thread safety), robust error handling in the
+  Vulkan HAL prevents future crashes from surfacing as segfaults.
+
+### Changed
+
+- **deps:** goffi v0.5.2 → v0.5.3
+
 ## [0.29.1] - 2026-05-27
 
 ### Changed

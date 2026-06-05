@@ -99,6 +99,9 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	var capabilities vk.SurfaceCapabilitiesKHR
 	result := vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s.instance, device.physicalDevice, s.handle, &capabilities)
 	if result != vk.Success {
+		if result == vk.ErrorSurfaceLostKhr {
+			return hal.ErrSurfaceLost
+		}
 		return fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: %d", result)
 	}
 
@@ -200,7 +203,12 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	var swapchainHandle vk.SwapchainKHR
 	result = vkCreateSwapchainKHR(device, &createInfo, nil, &swapchainHandle)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
+		switch result {
+		case vk.ErrorSurfaceLostKhr, vk.ErrorInitializationFailed:
+			return hal.ErrSurfaceLost
+		default:
+			return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
+		}
 	}
 
 	// Destroy old swapchain AFTER creating new (Vulkan requirement)
@@ -538,6 +546,10 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		// Surface needs reconfiguration
 		// (wgpu: returns Err(Outdated))
 		return nil, false, hal.ErrSurfaceOutdated
+	case vk.ErrorSurfaceLostKhr:
+		// Surface destroyed (e.g., Wayland compositor killed it).
+		// (wgpu: returns Err(Lost))
+		return nil, false, hal.ErrSurfaceLost
 	default:
 		return nil, false, fmt.Errorf("vulkan: vkAcquireNextImageKHR failed: %d", result)
 	}
@@ -587,6 +599,9 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error {
 	if !sc.imageAcquired {
 		return fmt.Errorf("vulkan: no image acquired to present")
+	}
+	if sc.handle == 0 {
+		return hal.ErrSurfaceLost
 	}
 
 	// BUG-WGPU-VK-006: Ensure the swapchain image is in PRESENT_SRC_KHR layout
@@ -654,6 +669,8 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 		return nil
 	case vk.ErrorOutOfDateKhr:
 		return hal.ErrSurfaceOutdated
+	case vk.ErrorSurfaceLostKhr:
+		return hal.ErrSurfaceLost
 	default:
 		return fmt.Errorf("vulkan: vkQueuePresentKHR failed: %d", result)
 	}
