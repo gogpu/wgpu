@@ -9,6 +9,6 @@ require (
 )
 
 require (
-	github.com/go-webgpu/goffi v0.5.2 // indirect
+	github.com/go-webgpu/goffi v0.5.3 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )
