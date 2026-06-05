@@ -28,7 +28,12 @@ import (
 //  1. memfd_create + mmap → shared memory pool
 //  2. wl_shm_create_pool → wl_shm_pool
 //  3. wl_shm_pool::create_buffer → wl_buffer
-//  4. Copy pixels, wl_surface_attach + damage + commit + flush
+//  4. Register wl_buffer.release listener (Qt6 pattern: qwaylandbuffer.cpp)
+//  5. Copy pixels, wl_surface_attach + damage_buffer + commit + flush
+//
+// Double-buffering uses wl_buffer.release to avoid writing into a buffer
+// the compositor is still reading. If both buffers are busy, the frame is
+// skipped (no corruption, no tearing — same as Qt6 qwaylandshmbackingstore.cpp).
 //
 // Pixel format: Software backend stores BGRA byte order. On little-endian
 // (all supported Linux), BGRA bytes = uint32 0xAARRGGBB = wl_shm ARGB8888.
@@ -101,7 +106,18 @@ type waylandShmBuffer struct {
 	buffer uintptr // wl_buffer proxy
 	width  int32
 	height int32
+	busy   bool // true while compositor owns this buffer (Qt6 qwaylandbuffer.cpp pattern)
 }
+
+// Cached CIFs for per-frame marshal calls (zero alloc after init).
+var (
+	// wl_proxy_marshal(proxy, opcode) — commit (opcode 6), pool destroy, buffer destroy.
+	cifMarshal2 types.CallInterface
+	// wl_proxy_marshal(proxy, opcode, buffer, x, y) — wl_surface_attach (opcode 1).
+	cifSurfaceAttach types.CallInterface
+	// wl_proxy_marshal(proxy, opcode, x, y, w, h) — wl_surface_damage_buffer (opcode 9).
+	cifSurfaceDamageBuffer types.CallInterface
+)
 
 // Global registry listener callback state.
 // Protected by waylandOnce (only one goroutine does init).
@@ -109,9 +125,19 @@ var (
 	registryListenerFuncs [2]uintptr // global, announce, remove
 	registryListenersOnce sync.Once
 
+	// Buffer release listener: wl_buffer has one event (release, opcode 0).
+	// Single callback slot — all buffers share the same function.
+	bufferListenerFuncs [1]uintptr
+	bufferListenerOnce  sync.Once
+
 	// pendingShmBindName stores the wl_shm global name during registry roundtrip.
 	pendingShmBindMu   sync.Mutex
 	pendingShmBindName uint32
+
+	// bufferBusyMap maps wl_buffer proxy address to the waylandShmBuffer owning it.
+	// Protected by bufferBusyMu. Used by the release callback to clear busy flag.
+	bufferBusyMu  sync.Mutex
+	bufferBusyMap = map[uintptr]*waylandShmBuffer{}
 )
 
 // isWaylandDisplay checks whether the given display handle is a Wayland
@@ -261,6 +287,45 @@ func initWayland() {
 	if err = ffi.PrepareCallInterface(&cifWlProxyDestroy, types.DefaultCall,
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
+		return
+	}
+
+	// Cached CIFs for per-frame calls (zero alloc after init).
+
+	// marshal2: wl_proxy_marshal(proxy, opcode) — for commit, pool destroy, buffer destroy.
+	if err = ffi.PrepareCallInterface(&cifMarshal2, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // proxy
+			types.UInt32TypeDescriptor,  // opcode
+		}); err != nil {
+		return
+	}
+
+	// attach: wl_proxy_marshal(proxy, opcode, buffer, x, y) — wl_surface_attach.
+	if err = ffi.PrepareCallInterface(&cifSurfaceAttach, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // proxy (surface)
+			types.UInt32TypeDescriptor,  // opcode (1)
+			types.PointerTypeDescriptor, // buffer
+			types.SInt32TypeDescriptor,  // x
+			types.SInt32TypeDescriptor,  // y
+		}); err != nil {
+		return
+	}
+
+	// damage_buffer: wl_proxy_marshal(proxy, opcode, x, y, w, h) — opcode 9.
+	if err = ffi.PrepareCallInterface(&cifSurfaceDamageBuffer, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // proxy (surface)
+			types.UInt32TypeDescriptor,  // opcode (9)
+			types.SInt32TypeDescriptor,  // x
+			types.SInt32TypeDescriptor,  // y
+			types.SInt32TypeDescriptor,  // w
+			types.SInt32TypeDescriptor,  // h
+		}); err != nil {
 		return
 	}
 
@@ -429,6 +494,17 @@ func registryGlobalCb(data, registry, name, ifaceName, version uintptr) {
 // registryGlobalRemoveCb: void(data, wl_registry, name)
 func registryGlobalRemoveCb(_, _, _ uintptr) {}
 
+// bufferReleaseCb is called by the compositor when it no longer needs the
+// wl_buffer contents. Matches Qt6 qwaylandbuffer.cpp:30-37 pattern.
+// Signature: void(data, wl_buffer)
+func bufferReleaseCb(_, wlBuffer uintptr) {
+	bufferBusyMu.Lock()
+	if buf, ok := bufferBusyMap[wlBuffer]; ok {
+		buf.busy = false
+	}
+	bufferBusyMu.Unlock()
+}
+
 // cString reads a null-terminated C string from a pointer.
 func cString(ptr uintptr) string {
 	if ptr == 0 {
@@ -575,7 +651,7 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 	// (Same pattern as CSD code.)
 	destroyPool(pool)
 
-	return &waylandShmBuffer{
+	buf := &waylandShmBuffer{
 		fd:     fd,
 		data:   data,
 		pool:   0, // already destroyed
@@ -583,26 +659,36 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 		width:  width,
 		height: height,
 	}
+
+	// Register wl_buffer.release listener (Qt6 qwaylandbuffer.cpp pattern).
+	// wl_buffer has one event: release (opcode 0). The listener array has 1 slot.
+	bufferListenerOnce.Do(func() {
+		bufferListenerFuncs[0] = ffi.NewCallback(bufferReleaseCb)
+	})
+
+	bufferBusyMu.Lock()
+	bufferBusyMap[buffer] = buf
+	bufferBusyMu.Unlock()
+
+	listenerPtr := uintptr(unsafe.Pointer(&bufferListenerFuncs[0]))
+	var listenerData uintptr
+	addArgs := [3]unsafe.Pointer{
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&listenerPtr),
+		unsafe.Pointer(&listenerData),
+	}
+	var addResult int32
+	_ = ffi.CallFunction(&cifWlProxyAddListener, symWlProxyAddListener, unsafe.Pointer(&addResult), addArgs[:])
+
+	return buf
 }
 
 // destroyPool calls wl_shm_pool::destroy (opcode 1) then wl_proxy_destroy.
 func destroyPool(pool uintptr) {
-	// wl_proxy_marshal(pool, 1) — destroy opcode
 	var destroyOpcode uint32 = 1
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&pool),
 		unsafe.Pointer(&destroyOpcode),
-	}
-
-	// Need a 2-arg CIF for marshal(proxy, opcode).
-	var cifMarshal2 types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifMarshal2, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // proxy
-			types.UInt32TypeDescriptor,  // opcode
-		}); err != nil {
-		return
 	}
 	_ = ffi.CallFunction(&cifMarshal2, symWlProxyMarshal, nil, args[:])
 
@@ -616,21 +702,19 @@ func waylandDestroyShmBuffer(buf *waylandShmBuffer) {
 		return
 	}
 	if buf.buffer != 0 {
+		// Remove from release callback map before destroying.
+		bufferBusyMu.Lock()
+		delete(bufferBusyMap, buf.buffer)
+		bufferBusyMu.Unlock()
+
 		// wl_buffer::destroy opcode = 0
 		var destroyOpcode uint32
-		var cifMarshal2 types.CallInterface
-		if err := ffi.PrepareCallInterface(&cifMarshal2, types.DefaultCall,
-			types.VoidTypeDescriptor,
-			[]*types.TypeDescriptor{
-				types.PointerTypeDescriptor,
-				types.UInt32TypeDescriptor,
-			}); err == nil {
-			marshalArgs := [2]unsafe.Pointer{
-				unsafe.Pointer(&buf.buffer),
-				unsafe.Pointer(&destroyOpcode),
-			}
-			_ = ffi.CallFunction(&cifMarshal2, symWlProxyMarshal, nil, marshalArgs[:])
+		marshalArgs := [2]unsafe.Pointer{
+			unsafe.Pointer(&buf.buffer),
+			unsafe.Pointer(&destroyOpcode),
 		}
+		_ = ffi.CallFunction(&cifMarshal2, symWlProxyMarshal, nil, marshalArgs[:])
+
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&buf.buffer)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
 		buf.buffer = 0
@@ -655,9 +739,18 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 		}
 	}
 
-	// Pick the back buffer (not the one last submitted).
+	// Pick a non-busy buffer (Qt6 qwaylandshmbackingstore.cpp:349 pattern).
 	backIdx := 1 - wl.frontIdx
 	buf := &wl.buffers[backIdx]
+	if buf.busy {
+		// Try the other buffer.
+		buf = &wl.buffers[wl.frontIdx]
+		if buf.busy {
+			// Both busy — skip frame to avoid corruption.
+			return
+		}
+		backIdx = wl.frontIdx
+	}
 
 	// Reallocate if dimensions changed.
 	if buf.buffer == 0 || buf.width != width || buf.height != height {
@@ -685,13 +778,17 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 	surface := s.hwnd
 
 	// wl_surface_attach(surface, buffer, 0, 0) — opcode 1
-	waylandSurfaceMarshal4(surface, 1, buf.buffer, 0, 0)
+	waylandSurfaceAttach(surface, buf.buffer, 0, 0)
 
-	// wl_surface_damage(surface, 0, 0, width, height) — opcode 2
-	waylandSurfaceMarshal4(surface, 2, 0, uintptr(uint32(width)), uintptr(uint32(height)))
+	// wl_surface_damage_buffer(surface, 0, 0, width, height) — opcode 9
+	// Preferred over deprecated wl_surface_damage (opcode 2) since wl_surface v4.
+	waylandSurfaceDamageBuffer(surface, 0, 0, width, height)
 
 	// wl_surface_commit(surface) — opcode 6
-	waylandSurfaceMarshal0(surface, 6)
+	waylandSurfaceCommit(surface)
+
+	// Mark buffer as owned by compositor until release callback fires.
+	buf.busy = true
 
 	// wl_display_flush
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&s.displayHandle)}
@@ -711,8 +808,16 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 		}
 	}
 
+	// Pick a non-busy buffer.
 	backIdx := 1 - wl.frontIdx
 	buf := &wl.buffers[backIdx]
+	if buf.busy {
+		buf = &wl.buffers[wl.frontIdx]
+		if buf.busy {
+			return
+		}
+		backIdx = wl.frontIdx
+	}
 
 	if buf.buffer == 0 || buf.width != width || buf.height != height {
 		if buf.buffer != 0 {
@@ -737,22 +842,21 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 
 	surface := s.hwnd
 
-	// wl_surface_attach
-	waylandSurfaceMarshal4(surface, 1, buf.buffer, 0, 0)
+	waylandSurfaceAttach(surface, buf.buffer, 0, 0)
 
-	// Issue damage for each rect.
-	// wl_surface_damage has 4 int args (x, y, width, height) — use the
-	// dedicated helper that prepares a 6-arg CIF (proxy, opcode, x, y, w, h).
+	// Issue damage_buffer for each rect (opcode 9, buffer coordinates).
 	bounds := image.Rect(0, 0, int(width), int(height))
 	for _, r := range rects {
 		r = r.Intersect(bounds)
 		if r.Empty() {
 			continue
 		}
-		waylandSurfaceDamage(surface, int32(r.Min.X), int32(r.Min.Y), int32(r.Dx()), int32(r.Dy()))
+		waylandSurfaceDamageBuffer(surface, int32(r.Min.X), int32(r.Min.Y), int32(r.Dx()), int32(r.Dy()))
 	}
 
-	waylandSurfaceMarshal0(surface, 6) // commit
+	waylandSurfaceCommit(surface)
+
+	buf.busy = true
 
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&s.displayHandle)}
 	var flushResult int32
@@ -761,17 +865,9 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 	wl.frontIdx = backIdx
 }
 
-// waylandSurfaceMarshal0 calls wl_proxy_marshal(surface, opcode) with no extra args.
-func waylandSurfaceMarshal0(surface uintptr, opcode uint32) {
-	var cifMarshal2 types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifMarshal2, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor,
-			types.UInt32TypeDescriptor,
-		}); err != nil {
-		return
-	}
+// waylandSurfaceCommit calls wl_surface_commit (opcode 6).
+func waylandSurfaceCommit(surface uintptr) {
+	var opcode uint32 = 6
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&opcode),
@@ -779,35 +875,24 @@ func waylandSurfaceMarshal0(surface uintptr, opcode uint32) {
 	_ = ffi.CallFunction(&cifMarshal2, symWlProxyMarshal, nil, args[:])
 }
 
-// waylandSurfaceMarshal4 calls wl_proxy_marshal(surface, opcode, a1, a2, a3).
-// Used for attach (buffer, x, y) and damage (x, y, w) — but damage needs 4 args.
-func waylandSurfaceMarshal4(surface uintptr, opcode uint32, a1, a2, a3 uintptr) {
+// waylandSurfaceAttach calls wl_surface_attach(surface, buffer, x, y) — opcode 1.
+func waylandSurfaceAttach(surface, buffer uintptr, x, y int32) {
+	var opcode uint32 = 1
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&opcode),
-		unsafe.Pointer(&a1),
-		unsafe.Pointer(&a2),
-		unsafe.Pointer(&a3),
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&x),
+		unsafe.Pointer(&y),
 	}
-	_ = ffi.CallFunction(&cifWlProxyMarshal, symWlProxyMarshal, nil, args[:])
+	_ = ffi.CallFunction(&cifSurfaceAttach, symWlProxyMarshal, nil, args[:])
 }
 
-// waylandSurfaceDamage calls wl_surface_damage(surface, x, y, w, h) — opcode 2 with 4 int args.
-func waylandSurfaceDamage(surface uintptr, x, y, w, h int32) {
-	var cifDamage types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifDamage, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // proxy
-			types.UInt32TypeDescriptor,  // opcode
-			types.SInt32TypeDescriptor,  // x
-			types.SInt32TypeDescriptor,  // y
-			types.SInt32TypeDescriptor,  // w
-			types.SInt32TypeDescriptor,  // h
-		}); err != nil {
-		return
-	}
-	var opcode uint32 = 2
+// waylandSurfaceDamageBuffer calls wl_surface_damage_buffer(surface, x, y, w, h) — opcode 9.
+// Preferred over deprecated wl_surface_damage (opcode 2) since wl_surface v4 (Wayland 1.10, 2016).
+// Uses buffer coordinates instead of surface coordinates — correct on HiDPI.
+func waylandSurfaceDamageBuffer(surface uintptr, x, y, w, h int32) {
+	var opcode uint32 = 9
 	args := [6]unsafe.Pointer{
 		unsafe.Pointer(&surface),
 		unsafe.Pointer(&opcode),
@@ -816,7 +901,7 @@ func waylandSurfaceDamage(surface uintptr, x, y, w, h int32) {
 		unsafe.Pointer(&w),
 		unsafe.Pointer(&h),
 	}
-	_ = ffi.CallFunction(&cifDamage, symWlProxyMarshal, nil, args[:])
+	_ = ffi.CallFunction(&cifSurfaceDamageBuffer, symWlProxyMarshal, nil, args[:])
 }
 
 // destroyWaylandBlitState releases all Wayland SHM resources for a surface.

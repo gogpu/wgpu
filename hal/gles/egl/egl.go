@@ -18,54 +18,60 @@ var (
 	eglLib unsafe.Pointer
 
 	// EGL 1.0+ core function symbols
-	symEglGetError                 unsafe.Pointer
-	symEglGetDisplay               unsafe.Pointer
-	symEglInitialize               unsafe.Pointer
-	symEglTerminate                unsafe.Pointer
-	symEglQueryString              unsafe.Pointer
-	symEglChooseConfig             unsafe.Pointer
-	symEglGetConfigAttrib          unsafe.Pointer
-	symEglCreateWindowSurface      unsafe.Pointer
-	symEglCreatePbufferSurface     unsafe.Pointer
-	symEglDestroySurface           unsafe.Pointer
-	symEglBindAPI                  unsafe.Pointer
-	symEglSwapInterval             unsafe.Pointer
-	symEglCreateContext            unsafe.Pointer
-	symEglDestroyContext           unsafe.Pointer
-	symEglMakeCurrent              unsafe.Pointer
-	symEglGetCurrentContext        unsafe.Pointer
-	symEglGetCurrentDisplay        unsafe.Pointer
-	symEglSwapBuffers              unsafe.Pointer
-	symEglGetProcAddress           unsafe.Pointer
-	symEglGetPlatformDisplay       unsafe.Pointer // EGL 1.5, may be nil
-	symEglSwapBuffersWithDamageKHR unsafe.Pointer // EGL_KHR_swap_buffers_with_damage, may be nil
+	symEglGetError                    unsafe.Pointer
+	symEglGetDisplay                  unsafe.Pointer
+	symEglInitialize                  unsafe.Pointer
+	symEglTerminate                   unsafe.Pointer
+	symEglQueryString                 unsafe.Pointer
+	symEglChooseConfig                unsafe.Pointer
+	symEglGetConfigAttrib             unsafe.Pointer
+	symEglCreateWindowSurface         unsafe.Pointer
+	symEglCreatePbufferSurface        unsafe.Pointer
+	symEglDestroySurface              unsafe.Pointer
+	symEglBindAPI                     unsafe.Pointer
+	symEglSwapInterval                unsafe.Pointer
+	symEglCreateContext               unsafe.Pointer
+	symEglDestroyContext              unsafe.Pointer
+	symEglMakeCurrent                 unsafe.Pointer
+	symEglGetCurrentContext           unsafe.Pointer
+	symEglGetCurrentDisplay           unsafe.Pointer
+	symEglSwapBuffers                 unsafe.Pointer
+	symEglGetProcAddress              unsafe.Pointer
+	symEglGetPlatformDisplay          unsafe.Pointer // EGL 1.5, may be nil
+	symEglCreatePlatformWindowSurface unsafe.Pointer // EGL 1.5, may be nil
+	symEglSwapBuffersWithDamageKHR    unsafe.Pointer // EGL_KHR_swap_buffers_with_damage, may be nil
 
 	// CallInterfaces for each function signature
-	cifEglGetError                 types.CallInterface
-	cifEglGetDisplay               types.CallInterface
-	cifEglInitialize               types.CallInterface
-	cifEglTerminate                types.CallInterface
-	cifEglQueryString              types.CallInterface
-	cifEglChooseConfig             types.CallInterface
-	cifEglGetConfigAttrib          types.CallInterface
-	cifEglCreateWindowSurface      types.CallInterface
-	cifEglCreatePbufferSurface     types.CallInterface
-	cifEglDestroySurface           types.CallInterface
-	cifEglBindAPI                  types.CallInterface
-	cifEglSwapInterval             types.CallInterface
-	cifEglCreateContext            types.CallInterface
-	cifEglDestroyContext           types.CallInterface
-	cifEglMakeCurrent              types.CallInterface
-	cifEglGetCurrentContext        types.CallInterface
-	cifEglGetCurrentDisplay        types.CallInterface
-	cifEglSwapBuffers              types.CallInterface
-	cifEglGetProcAddress           types.CallInterface
-	cifEglGetPlatformDisplay       types.CallInterface
-	cifEglSwapBuffersWithDamageKHR types.CallInterface
+	cifEglGetError                    types.CallInterface
+	cifEglGetDisplay                  types.CallInterface
+	cifEglInitialize                  types.CallInterface
+	cifEglTerminate                   types.CallInterface
+	cifEglQueryString                 types.CallInterface
+	cifEglChooseConfig                types.CallInterface
+	cifEglGetConfigAttrib             types.CallInterface
+	cifEglCreateWindowSurface         types.CallInterface
+	cifEglCreatePbufferSurface        types.CallInterface
+	cifEglDestroySurface              types.CallInterface
+	cifEglBindAPI                     types.CallInterface
+	cifEglSwapInterval                types.CallInterface
+	cifEglCreateContext               types.CallInterface
+	cifEglDestroyContext              types.CallInterface
+	cifEglMakeCurrent                 types.CallInterface
+	cifEglGetCurrentContext           types.CallInterface
+	cifEglGetCurrentDisplay           types.CallInterface
+	cifEglSwapBuffers                 types.CallInterface
+	cifEglGetProcAddress              types.CallInterface
+	cifEglGetPlatformDisplay          types.CallInterface
+	cifEglCreatePlatformWindowSurface types.CallInterface
+	cifEglSwapBuffersWithDamageKHR    types.CallInterface
 
 	// hasSwapBuffersWithDamage is true when eglSwapBuffersWithDamageKHR
 	// was successfully loaded (EGL_KHR_swap_buffers_with_damage extension).
 	hasSwapBuffersWithDamage bool
+
+	// hasPlatformWindowSurface is true when eglCreatePlatformWindowSurface
+	// was loaded (EGL 1.5 or EGL_EXT_platform_base).
+	hasPlatformWindowSurface bool
 )
 
 // Init loads the EGL library and initializes function pointers.
@@ -160,7 +166,8 @@ func loadEGLSymbols() error {
 	}
 
 	// EGL 1.5 optional
-	symEglGetPlatformDisplay, _ = ffi.GetSymbol(eglLib, "eglGetPlatformDisplay") // ignore error, optional
+	symEglGetPlatformDisplay, _ = ffi.GetSymbol(eglLib, "eglGetPlatformDisplay")                   // ignore error, optional
+	symEglCreatePlatformWindowSurface, _ = ffi.GetSymbol(eglLib, "eglCreatePlatformWindowSurface") // ignore error, optional
 
 	return nil
 }
@@ -514,6 +521,36 @@ func CreateWindowSurface(dpy EGLDisplay, config EGLConfig, win EGLNativeWindowTy
 	return result
 }
 
+// HasPlatformWindowSurface reports whether eglCreatePlatformWindowSurface (EGL 1.5)
+// is available. When true, CreatePlatformWindowSurface should be preferred over
+// CreateWindowSurface on Wayland for spec-correct void* native window handling.
+func HasPlatformWindowSurface() bool {
+	return hasPlatformWindowSurface
+}
+
+// CreatePlatformWindowSurface creates a new EGL window surface using the EGL 1.5
+// platform-aware API. Takes void* native window instead of EGLNativeWindowType.
+// On Wayland: nativeWindow is wl_egl_window*. Attribs use EGLAttrib (pointer-sized).
+// Rust wgpu-hal egl.rs:1485 uses this when EGL 1.5 is available.
+// Falls back to CreateWindowSurface when EGL 1.5 is not available.
+func CreatePlatformWindowSurface(dpy EGLDisplay, config EGLConfig, nativeWindow uintptr, attribList *EGLAttrib) EGLSurface {
+	if !hasPlatformWindowSurface {
+		// Fallback: cast to EGLNativeWindowType (works on x86_64 where sizes match).
+		attribs := []EGLInt{None}
+		return CreateWindowSurface(dpy, config, EGLNativeWindowType(nativeWindow), &attribs[0])
+	}
+	var result EGLSurface
+	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&dpy),
+		unsafe.Pointer(&config),
+		unsafe.Pointer(&nativeWindow),
+		unsafe.Pointer(&attribListPtr),
+	}
+	_ = ffi.CallFunction(&cifEglCreatePlatformWindowSurface, symEglCreatePlatformWindowSurface, unsafe.Pointer(&result), args[:])
+	return result
+}
+
 // CreatePbufferSurface creates a new EGL pixel buffer surface.
 func CreatePbufferSurface(dpy EGLDisplay, config EGLConfig, attribList *EGLInt) EGLSurface {
 	var result EGLSurface
@@ -658,6 +695,25 @@ func loadOptionalExtensions() {
 			})
 		if err == nil {
 			hasSwapBuffersWithDamage = true
+		}
+	}
+
+	// EGL 1.5: eglCreatePlatformWindowSurface — spec-correct void* native window.
+	// Loaded from libEGL symbol table (not via eglGetProcAddress) since it's a core
+	// EGL 1.5 function. CIF prepared here to keep prepareEGLCallInterfaces focused
+	// on mandatory EGL 1.0-1.4 functions.
+	// Rust wgpu-hal egl.rs:1485 uses this when available.
+	if symEglCreatePlatformWindowSurface != nil {
+		err := ffi.PrepareCallInterface(&cifEglCreatePlatformWindowSurface, types.DefaultCall,
+			types.PointerTypeDescriptor, // EGLSurface
+			[]*types.TypeDescriptor{
+				types.PointerTypeDescriptor, // EGLDisplay
+				types.PointerTypeDescriptor, // EGLConfig
+				types.PointerTypeDescriptor, // void* (native window)
+				types.PointerTypeDescriptor, // EGLAttrib* (attrib list)
+			})
+		if err == nil {
+			hasPlatformWindowSurface = true
 		}
 	}
 }

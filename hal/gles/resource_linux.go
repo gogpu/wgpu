@@ -153,7 +153,9 @@ func (s *Surface) createEGLWindowSurface(width, height uint32) error {
 }
 
 // createWaylandEGLSurface creates a wl_egl_window then an EGL window surface.
-// Requires libwayland-egl.so.
+// Prefers EGL 1.5 eglCreatePlatformWindowSurface (spec-correct void* native window)
+// with fallback to EGL 1.4 eglCreateWindowSurface.
+// Rust wgpu-hal egl.rs:1479-1491 uses the same preference order.
 func (s *Surface) createWaylandEGLSurface(width, height uint32) error {
 	if !egl.InitWaylandEGL() {
 		return fmt.Errorf("libwayland-egl.so not available — cannot create Wayland EGL surface")
@@ -165,16 +167,23 @@ func (s *Surface) createWaylandEGLSurface(width, height uint32) error {
 	}
 	s.eglWindow = eglWin
 
-	attribs := []egl.EGLInt{egl.None}
-	eglSurface := egl.CreateWindowSurface(s.eglDisplay, s.eglCtx.Config(), egl.EGLNativeWindowType(eglWin), &attribs[0])
+	// EGL 1.5 path: eglCreatePlatformWindowSurface takes void* — spec-correct for Wayland.
+	// Falls back to eglCreateWindowSurface internally if EGL 1.5 unavailable.
+	attribs := []egl.EGLAttrib{egl.EGLAttrib(egl.None)}
+	eglSurface := egl.CreatePlatformWindowSurface(s.eglDisplay, s.eglCtx.Config(), eglWin, &attribs[0])
 	if eglSurface == egl.NoSurface {
 		egl.WlEGLWindowDestroy(eglWin)
 		s.eglWindow = 0
-		return fmt.Errorf("eglCreateWindowSurface failed for wl_egl_window: error 0x%x", egl.GetError())
+		return fmt.Errorf("eglCreatePlatformWindowSurface failed for wl_egl_window: error 0x%x", egl.GetError())
 	}
 	s.eglSurface = eglSurface
 
+	eglPath := "eglCreateWindowSurface (EGL 1.4)"
+	if egl.HasPlatformWindowSurface() {
+		eglPath = "eglCreatePlatformWindowSurface (EGL 1.5)"
+	}
 	hal.Logger().Info("gles: Wayland EGL window surface created",
+		"path", eglPath,
 		"eglWindow", fmt.Sprintf("0x%x", eglWin),
 		"eglSurface", fmt.Sprintf("0x%x", eglSurface),
 		"width", width, "height", height,

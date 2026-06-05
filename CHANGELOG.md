@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Software: Wayland SHM present** (ADR-042, gogpu#292) — `blit_wayland.go` implements Wayland-native presentation via wl_shm double-buffered SHM. Auto-detects Wayland vs X11 at runtime. Loads libwayland-client.so independently. No pixel format conversion (BGRA = ARGB8888 on LE). ~840 LOC.
-- **GLES: Wayland EGL window surface** (ADR-042, gogpu#292) — `egl/wayland_egl.go` loads libwayland-egl.so for `wl_egl_window_create/destroy/resize`. `resource_linux.go` creates proper EGL window surface on Wayland via wl_egl_window. Handles resize and cleanup (eglDestroySurface before wl_egl_window_destroy).
+- **Software: Wayland SHM present (enterprise quality)** (ADR-042, gogpu#292) —
+  `blit_wayland.go` implements Wayland-native presentation via wl_shm double-buffered
+  SHM. Auto-detects Wayland vs X11 at runtime. Loads libwayland-client.so independently.
+  No pixel format conversion (BGRA = ARGB8888 on LE). Enterprise fixes: `wl_buffer.release`
+  listener (Qt6 `qwaylandbuffer.cpp` pattern) for safe double-buffering, cached CIFs (zero
+  alloc per frame), `wl_surface.damage_buffer` opcode 9 (buffer coordinates, HiDPI correct),
+  dedicated `waylandSurfaceAttach`/`waylandSurfaceDamageBuffer`/`waylandSurfaceCommit` helpers.
+- **GLES: Wayland EGL window surface (Rust wgpu-hal parity)** (ADR-042, gogpu#292) —
+  `egl/wayland_egl.go` loads libwayland-egl.so for `wl_egl_window_create/destroy/resize`.
+  `resource_linux.go` creates EGL window surface via wl_egl_window. EGL 1.5
+  `eglCreatePlatformWindowSurface` with runtime detection + EGL 1.4 fallback (Rust wgpu-hal
+  `egl.rs:1479` parity). Correct destroy order (eglDestroySurface before wl_egl_window_destroy).
 
 ## [0.29.2] - 2026-06-05
 
