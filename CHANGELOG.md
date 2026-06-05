@@ -9,13 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Software: Wayland SHM present (enterprise quality)** (ADR-042, gogpu#292) —
-  `blit_wayland.go` implements Wayland-native presentation via wl_shm double-buffered
-  SHM. Auto-detects Wayland vs X11 at runtime. Loads libwayland-client.so independently.
-  No pixel format conversion (BGRA = ARGB8888 on LE). Enterprise fixes: `wl_buffer.release`
-  listener (Qt6 `qwaylandbuffer.cpp` pattern) for safe double-buffering, cached CIFs (zero
-  alloc per frame), `wl_surface.damage_buffer` opcode 9 (buffer coordinates, HiDPI correct),
-  dedicated `waylandSurfaceAttach`/`waylandSurfaceDamageBuffer`/`waylandSurfaceCommit` helpers.
+- **Software: Wayland SHM present (enterprise quality)** (ADR-042/043, gogpu#292) —
+  `blit_wayland.go` implements Wayland-native presentation via wl_shm triple-buffered
+  SHM. Auto-detects Wayland vs X11 via `WAYLAND_DISPLAY` env var. Loads
+  libwayland-client.so independently. No pixel format conversion (BGRA = ARGB8888 on LE).
+  Enterprise features validated against Qt6, Rust wgpu-hal, SDL3, GLFW:
+  - `wl_buffer.release` listener (Qt6 `qwaylandbuffer.cpp` pattern) — compositor signals
+    when buffer is safe to reuse, prevents data race on busy buffers
+  - Triple-buffering (Qt6 uses up to 5) — eliminates frame skips on slow compositors
+  - `PrepareVariadicCallInterface` (goffi v0.5.2+ ADR-043) — correct ARM64 AAPCS64
+    variadic ABI for `wl_proxy_marshal` / `wl_proxy_marshal_constructor` (7 CIFs)
+  - Cached CIFs — zero heap allocations per frame in present hot path
+  - `wl_surface.damage_buffer` opcode 9 (buffer coordinates, HiDPI correct)
+  - Row-based partial copy — `waylandPresentDamage` copies only damaged regions
+    (1080p small damage: 332µs → 1.6µs, 208× speedup)
+  - Eager `obtainWlShm` init — roundtrip removed from per-frame hot path
+  - Dedicated helpers: `waylandSurfaceAttach`/`waylandSurfaceDamageBuffer`/`waylandSurfaceCommit`
 - **GLES: Wayland EGL window surface (Rust wgpu-hal parity)** (ADR-042, gogpu#292) —
   `egl/wayland_egl.go` loads libwayland-egl.so for `wl_egl_window_create/destroy/resize`.
   `resource_linux.go` creates EGL window surface via wl_egl_window. EGL 1.5
