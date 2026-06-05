@@ -256,6 +256,7 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		s.wlState.isWayland = isWaylandDisplay()
 		if s.wlState.isWayland {
 			s.wlState.wlShm = obtainWlShm(s.displayHandle)
+			s.wlState.shmQueue = createShmQueue(s.displayHandle)
 		}
 	}
 
@@ -363,6 +364,7 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 		s.wlState.isWayland = isWaylandDisplay()
 		if s.wlState.isWayland {
 			s.wlState.wlShm = obtainWlShm(s.displayHandle)
+			s.wlState.shmQueue = createShmQueue(s.displayHandle)
 		}
 	}
 

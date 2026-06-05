@@ -52,8 +52,10 @@ var (
 	wlClientLib unsafe.Pointer
 
 	// wl_display functions
-	symWlDisplayRoundtrip unsafe.Pointer
-	symWlDisplayFlush     unsafe.Pointer
+	symWlDisplayRoundtrip      unsafe.Pointer
+	symWlDisplayFlush          unsafe.Pointer
+	symWlDisplayCreateQueue    unsafe.Pointer // wl_display_create_queue(display) -> queue*
+	symWlDisplayDispatchQueueP unsafe.Pointer // wl_display_dispatch_queue_pending(display, queue) -> int
 
 	// wl_registry / wl_shm / wl_shm_pool / wl_surface / wl_buffer / proxy functions
 	symWlProxyMarshalConstructor          unsafe.Pointer
@@ -61,6 +63,8 @@ var (
 	symWlProxyAddListener                 unsafe.Pointer
 	symWlProxyMarshal                     unsafe.Pointer
 	symWlProxyDestroy                     unsafe.Pointer
+	symWlProxySetQueue                    unsafe.Pointer // wl_proxy_set_queue(proxy, queue) -> void
+	symWlEventQueueDestroy                unsafe.Pointer // wl_event_queue_destroy(queue) -> void
 
 	// wl_interface pointers (loaded from libwayland-client.so data section)
 	wlRegistryInterface unsafe.Pointer
@@ -71,12 +75,20 @@ var (
 	cifWlDisplayRoundtrip types.CallInterface
 	// CIF for wl_display_flush(wl_display*) -> int
 	cifWlDisplayFlush types.CallInterface
+	// CIF for wl_display_create_queue(wl_display*) -> wl_event_queue*
+	cifWlDisplayCreateQueue types.CallInterface
+	// CIF for wl_display_dispatch_queue_pending(wl_display*, wl_event_queue*) -> int
+	cifWlDisplayDispatchQueueP types.CallInterface
 	// CIF for wl_proxy_marshal_constructor(proxy*, opcode, interface*, ...) -> proxy*
 	cifWlProxyMarshalConstructor types.CallInterface
 	// CIF for wl_proxy_add_listener(proxy*, listener_impl**, data*) -> int
 	cifWlProxyAddListener types.CallInterface
 	// CIF for wl_proxy_destroy(proxy*) -> void
 	cifWlProxyDestroy types.CallInterface
+	// CIF for wl_proxy_set_queue(wl_proxy*, wl_event_queue*) -> void
+	cifWlProxySetQueue types.CallInterface
+	// CIF for wl_event_queue_destroy(wl_event_queue*) -> void
+	cifWlEventQueueDestroy types.CallInterface
 )
 
 // waylandBlitState holds per-Surface Wayland SHM resources for triple-buffered
@@ -91,6 +103,15 @@ type waylandBlitState struct {
 	detected  bool // true if detection has been performed
 
 	wlShm uintptr // bound wl_shm global (0 if not yet obtained)
+
+	// shmQueue is a dedicated wl_event_queue for SHM buffer proxies.
+	// SHM wl_buffer proxies created via wl_proxy_marshal_constructor live
+	// on the default Wayland queue. gogpu's DispatchDefaultQueue dispatches
+	// a separate app queue, so wl_buffer.release events on the default queue
+	// are never processed — all buffers stay busy=true forever after 3 frames.
+	// Moving buffer proxies to shmQueue via wl_proxy_set_queue and dispatching
+	// it after flush in present ensures release callbacks fire. SDL3/GLFW pattern.
+	shmQueue uintptr // 0 until first buffer created
 
 	// Triple-buffer state: three SHM buffers, pick first non-busy.
 	// This avoids writing to a buffer the compositor is still reading.
@@ -170,10 +191,14 @@ func initWayland() {
 	}{
 		{"wl_display_roundtrip", &symWlDisplayRoundtrip},
 		{"wl_display_flush", &symWlDisplayFlush},
+		{"wl_display_create_queue", &symWlDisplayCreateQueue},
+		{"wl_display_dispatch_queue_pending", &symWlDisplayDispatchQueueP},
 		{"wl_proxy_marshal_constructor", &symWlProxyMarshalConstructor},
 		{"wl_proxy_add_listener", &symWlProxyAddListener},
 		{"wl_proxy_marshal", &symWlProxyMarshal},
 		{"wl_proxy_destroy", &symWlProxyDestroy},
+		{"wl_proxy_set_queue", &symWlProxySetQueue},
+		{"wl_event_queue_destroy", &symWlEventQueueDestroy},
 	}
 	for _, s := range symbols {
 		*s.dst, err = ffi.GetSymbol(wlClientLib, s.name)
@@ -221,6 +246,23 @@ func initWayland() {
 		return
 	}
 
+	// wl_event_queue* wl_display_create_queue(wl_display*)
+	if err = ffi.PrepareCallInterface(&cifWlDisplayCreateQueue, types.DefaultCall,
+		types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
+		return
+	}
+
+	// int wl_display_dispatch_queue_pending(wl_display*, wl_event_queue*)
+	if err = ffi.PrepareCallInterface(&cifWlDisplayDispatchQueueP, types.DefaultCall,
+		types.SInt32TypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // display
+			types.PointerTypeDescriptor, // queue
+		}); err != nil {
+		return
+	}
+
 	// wl_proxy* wl_proxy_marshal_constructor(wl_proxy*, uint32 opcode, wl_interface*, ...)
 	// Variadic: 3 fixed args (proxy, opcode, interface), rest variadic.
 	// nfixedargs=3 ensures correct ABI on ARM64 (Apple AAPCS64 variadic convention).
@@ -249,6 +291,23 @@ func initWayland() {
 
 	// void wl_proxy_destroy(wl_proxy*)
 	if err = ffi.PrepareCallInterface(&cifWlProxyDestroy, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
+		return
+	}
+
+	// void wl_proxy_set_queue(wl_proxy*, wl_event_queue*)
+	if err = ffi.PrepareCallInterface(&cifWlProxySetQueue, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // proxy
+			types.PointerTypeDescriptor, // queue
+		}); err != nil {
+		return
+	}
+
+	// void wl_event_queue_destroy(wl_event_queue*)
+	if err = ffi.PrepareCallInterface(&cifWlEventQueueDestroy, types.DefaultCall,
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
 		return
@@ -450,6 +509,22 @@ func obtainWlShm(display uintptr) uintptr {
 	return shm
 }
 
+// createShmQueue creates a dedicated wl_event_queue for SHM buffer proxies.
+// Returns 0 if Wayland is not ready or queue creation fails.
+func createShmQueue(display uintptr) uintptr {
+	waylandOnce.Do(initWayland)
+	if !waylandReady {
+		return 0
+	}
+	var queue uintptr
+	args := [1]unsafe.Pointer{unsafe.Pointer(&display)}
+	_ = ffi.CallFunction(&cifWlDisplayCreateQueue, symWlDisplayCreateQueue, unsafe.Pointer(&queue), args[:])
+	if queue == 0 {
+		slog.Warn("software: wl_display_create_queue failed for SHM buffers")
+	}
+	return queue
+}
+
 // registryGlobalCb: void(data, wl_registry, name, interface_name, version)
 func registryGlobalCb(data, registry, name, ifaceName, version uintptr) {
 	// Read interface name string.
@@ -505,7 +580,10 @@ func cString(ptr uintptr) string {
 }
 
 // waylandCreateShmBuffer creates a new SHM buffer for the given dimensions.
-func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer {
+// If shmQueue is non-zero, the buffer proxy is moved to that queue via
+// wl_proxy_set_queue so that wl_buffer.release events are dispatched there
+// instead of on the default queue (which gogpu never dispatches).
+func waylandCreateShmBuffer(shm, shmQueue uintptr, width, height int32) *waylandShmBuffer {
 	stride := width * 4
 	size := int(stride) * int(height)
 
@@ -661,6 +739,17 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 	var addResult int32
 	_ = ffi.CallFunction(&cifWlProxyAddListener, symWlProxyAddListener, unsafe.Pointer(&addResult), addArgs[:])
 
+	// Move buffer proxy to the dedicated SHM queue so that release events
+	// are dispatched by our dispatch_queue_pending call, not left on the
+	// default queue that gogpu never dispatches.
+	if shmQueue != 0 {
+		setQueueArgs := [2]unsafe.Pointer{
+			unsafe.Pointer(&buffer),
+			unsafe.Pointer(&shmQueue),
+		}
+		_ = ffi.CallFunction(&cifWlProxySetQueue, symWlProxySetQueue, nil, setQueueArgs[:])
+	}
+
 	return buf
 }
 
@@ -741,7 +830,7 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 			waylandDestroyShmBuffer(buf)
 			*buf = waylandShmBuffer{fd: -1}
 		}
-		newBuf := waylandCreateShmBuffer(wl.wlShm, width, height)
+		newBuf := waylandCreateShmBuffer(wl.wlShm, wl.shmQueue, width, height)
 		if newBuf == nil {
 			return
 		}
@@ -773,10 +862,15 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 	// Mark buffer as owned by compositor until release callback fires.
 	buf.busy = true
 
-	// wl_display_flush
+	// wl_display_flush sends the commit to the compositor.
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&s.displayHandle)}
 	var flushResult int32
 	_ = ffi.CallFunction(&cifWlDisplayFlush, symWlDisplayFlush, unsafe.Pointer(&flushResult), flushArgs[:])
+
+	// Dispatch pending release events on the SHM queue. This processes
+	// wl_buffer.release callbacks for buffers the compositor has finished
+	// reading, marking them non-busy for reuse on the next frame.
+	waylandDispatchShmQueue(s.displayHandle, wl.shmQueue)
 
 	wl.frontIdx = backIdx
 }
@@ -809,7 +903,7 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 			waylandDestroyShmBuffer(buf)
 			*buf = waylandShmBuffer{fd: -1}
 		}
-		newBuf := waylandCreateShmBuffer(wl.wlShm, width, height)
+		newBuf := waylandCreateShmBuffer(wl.wlShm, wl.shmQueue, width, height)
 		if newBuf == nil {
 			return
 		}
@@ -841,6 +935,9 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&s.displayHandle)}
 	var flushResult int32
 	_ = ffi.CallFunction(&cifWlDisplayFlush, symWlDisplayFlush, unsafe.Pointer(&flushResult), flushArgs[:])
+
+	// Dispatch pending release events on the SHM queue.
+	waylandDispatchShmQueue(s.displayHandle, wl.shmQueue)
 
 	wl.frontIdx = backIdx
 }
@@ -921,12 +1018,37 @@ func waylandSurfaceDamageBuffer(surface uintptr, x, y, w, h int32) {
 	_ = ffi.CallFunction(&cifSurfaceDamageBuffer, symWlProxyMarshal, nil, args[:])
 }
 
+// waylandDispatchShmQueue dispatches pending events on the SHM queue.
+// This is a non-blocking call — it processes only events already read into
+// the queue, it does not read from the socket. Safe to call from the render
+// thread because the SHM queue is private to this surface and not touched
+// by the main event loop.
+func waylandDispatchShmQueue(display, queue uintptr) {
+	if queue == 0 {
+		return
+	}
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&display),
+		unsafe.Pointer(&queue),
+	}
+	var result int32
+	_ = ffi.CallFunction(&cifWlDisplayDispatchQueueP, symWlDisplayDispatchQueueP, unsafe.Pointer(&result), args[:])
+}
+
 // destroyWaylandBlitState releases all Wayland SHM resources for a surface.
 func (s *Surface) destroyWaylandBlitState() {
 	wl := &s.wlState
 	for i := range wl.buffers {
 		waylandDestroyShmBuffer(&wl.buffers[i])
 		wl.buffers[i] = waylandShmBuffer{fd: -1}
+	}
+	// Destroy the SHM event queue after all buffers are destroyed.
+	// Buffers must be destroyed first because wl_event_queue_destroy
+	// asserts no proxies remain assigned to the queue.
+	if wl.shmQueue != 0 {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&wl.shmQueue)}
+		_ = ffi.CallFunction(&cifWlEventQueueDestroy, symWlEventQueueDestroy, nil, args[:])
+		wl.shmQueue = 0
 	}
 	wl.wlShm = 0
 }

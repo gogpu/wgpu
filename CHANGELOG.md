@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.4] - 2026-06-06
+
+### Fixed
+
+- **Software: dedicated wl_event_queue for SHM buffer release dispatch** — SHM `wl_buffer`
+  proxies were on Wayland default queue, but gogpu dispatches a separate app queue — release
+  callbacks never fired, causing triple-buffer exhaustion after 3 frames. Fix: per-surface
+  `wl_event_queue` via `wl_display_create_queue`, buffer proxies moved via `wl_proxy_set_queue`,
+  `wl_display_dispatch_queue_pending` after flush processes release events. No race with main
+  thread (queue is per-surface, render thread only).
+
 ## [0.29.3] - 2026-06-05
 
 ### Fixed
