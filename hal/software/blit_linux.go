@@ -189,18 +189,28 @@ func initX11() {
 	slog.Debug("software: X11 blit initialized — XPutImage path available")
 }
 
-// platformBlit holds X11 GC for blit operations.
+// platformBlit holds platform-specific blit resources for Linux.
+// On X11: uses XCreateGC/XPutImage. On Wayland: uses wl_shm.
 // Embedded in Surface via build tags.
 type platformBlit struct {
-	gc uintptr // X11 GC (Graphics Context), lazy-initialized on first blit
+	gc      uintptr          // X11 GC (Graphics Context), lazy-initialized on first blit
+	wlState waylandBlitState // Wayland SHM state (lazy-initialized on first Wayland blit)
 }
 
 // createPlatformFramebuffer returns nil on Linux — we use Go heap memory
 // and blit via XPutImage (unlike Windows which uses kernel-allocated DIB section).
 func (s *Surface) createPlatformFramebuffer(_, _ int32) []byte { return nil }
 
-// destroyPlatformFramebuffer releases the X11 GC if one was created.
+// destroyPlatformFramebuffer releases platform blit resources.
+// On X11: frees the GC. On Wayland: destroys SHM buffers.
 func (s *Surface) destroyPlatformFramebuffer() {
+	// Clean up Wayland SHM resources if any.
+	if s.wlState.isWayland {
+		s.destroyWaylandBlitState()
+		return
+	}
+
+	// X11 cleanup.
 	if s.gc == 0 || s.displayHandle == 0 {
 		return
 	}
@@ -233,6 +243,18 @@ func (s *Surface) destroyPlatformFramebuffer() {
 // Skia and SDL3 set byte_order=LSBFirst and depth=24 with bits_per_pixel=32.
 func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 	if s.hwnd == 0 || s.displayHandle == 0 || width <= 0 || height <= 0 || len(data) == 0 {
+		return
+	}
+
+	// Detect Wayland vs X11 on first blit.
+	if !s.wlState.detected {
+		s.wlState.detected = true
+		s.wlState.isWayland = isWaylandDisplay(s.displayHandle)
+	}
+
+	// Route to Wayland SHM path if display is Wayland.
+	if s.wlState.isWayland {
+		s.waylandPresent(data, width, height)
 		return
 	}
 
@@ -325,6 +347,18 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 // apps where most of the surface is unchanged between frames.
 func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rects []image.Rectangle) {
 	if s.hwnd == 0 || s.displayHandle == 0 || width <= 0 || height <= 0 || len(data) == 0 {
+		return
+	}
+
+	// Detect Wayland vs X11 on first blit.
+	if !s.wlState.detected {
+		s.wlState.detected = true
+		s.wlState.isWayland = isWaylandDisplay(s.displayHandle)
+	}
+
+	// Route to Wayland SHM damage path if display is Wayland.
+	if s.wlState.isWayland {
+		s.waylandPresentDamage(data, width, height, rects)
 		return
 	}
 

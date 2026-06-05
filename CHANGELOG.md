@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.3] - 2026-06-05
+
+### Fixed
+
+- **Software: Wayland SHM present** (ADR-042, gogpu#292) — `blit_wayland.go` implements Wayland-native presentation via wl_shm double-buffered SHM. Auto-detects Wayland vs X11 at runtime. Loads libwayland-client.so independently. No pixel format conversion (BGRA = ARGB8888 on LE). ~840 LOC.
+- **GLES: Wayland EGL window surface** (ADR-042, gogpu#292) — `egl/wayland_egl.go` loads libwayland-egl.so for `wl_egl_window_create/destroy/resize`. `resource_linux.go` creates proper EGL window surface on Wayland via wl_egl_window. Handles resize and cleanup (eglDestroySurface before wl_egl_window_destroy).
+
 ## [0.29.2] - 2026-06-05
 
 ### Fixed
