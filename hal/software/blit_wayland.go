@@ -100,13 +100,14 @@ type waylandBlitState struct {
 
 // waylandShmBuffer holds one SHM buffer for Wayland presentation.
 type waylandShmBuffer struct {
-	fd     int     // memfd file descriptor (-1 if unused)
-	data   []byte  // mmap'd pixel data
-	pool   uintptr // wl_shm_pool proxy
-	buffer uintptr // wl_buffer proxy
-	width  int32
-	height int32
-	busy   bool // true while compositor owns this buffer (Qt6 qwaylandbuffer.cpp pattern)
+	fd            int     // memfd file descriptor (-1 if unused)
+	data          []byte  // mmap'd pixel data
+	pool          uintptr // wl_shm_pool proxy
+	buffer        uintptr // wl_buffer proxy
+	width         int32
+	height        int32
+	busy          bool // true while compositor owns this buffer (Qt6 qwaylandbuffer.cpp pattern)
+	needsFullCopy bool // true after allocation — first frame must be full copy
 }
 
 // Cached CIFs for per-frame marshal calls (zero alloc after init).
@@ -221,9 +222,10 @@ func initWayland() {
 	}
 
 	// wl_proxy* wl_proxy_marshal_constructor(wl_proxy*, uint32 opcode, wl_interface*, ...)
-	// Variadic, but goffi treats extra args as pointer-sized. We'll prepare for 4 args
-	// (proxy, opcode, interface, NULL) which covers get_registry and create_pool.
-	if err = ffi.PrepareCallInterface(&cifWlProxyMarshalConstructor, types.DefaultCall,
+	// Variadic: 3 fixed args (proxy, opcode, interface), rest variadic.
+	// nfixedargs=3 ensures correct ABI on ARM64 (Apple AAPCS64 variadic convention).
+	if err = ffi.PrepareVariadicCallInterface(&cifWlProxyMarshalConstructor, types.DefaultCall,
+		3, // nfixedargs: proxy, opcode, interface are fixed
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy
@@ -255,7 +257,9 @@ func initWayland() {
 	// Cached CIFs for per-frame calls (zero alloc after init).
 
 	// marshal2: wl_proxy_marshal(proxy, opcode) — for commit, pool destroy, buffer destroy.
-	if err = ffi.PrepareCallInterface(&cifMarshal2, types.DefaultCall,
+	// wl_proxy_marshal is variadic: nfixedargs=2 (proxy, opcode), no variadic args in this CIF.
+	if err = ffi.PrepareVariadicCallInterface(&cifMarshal2, types.DefaultCall,
+		2, // nfixedargs: proxy + opcode are fixed
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy
@@ -265,28 +269,32 @@ func initWayland() {
 	}
 
 	// attach: wl_proxy_marshal(proxy, opcode, buffer, x, y) — wl_surface_attach.
-	if err = ffi.PrepareCallInterface(&cifSurfaceAttach, types.DefaultCall,
+	// wl_proxy_marshal is variadic: nfixedargs=2 (proxy, opcode), buffer/x/y are variadic.
+	if err = ffi.PrepareVariadicCallInterface(&cifSurfaceAttach, types.DefaultCall,
+		2, // nfixedargs: proxy + opcode are fixed
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy (surface)
 			types.UInt32TypeDescriptor,  // opcode (1)
-			types.PointerTypeDescriptor, // buffer
-			types.SInt32TypeDescriptor,  // x
-			types.SInt32TypeDescriptor,  // y
+			types.PointerTypeDescriptor, // buffer (variadic)
+			types.SInt32TypeDescriptor,  // x (variadic)
+			types.SInt32TypeDescriptor,  // y (variadic)
 		}); err != nil {
 		return
 	}
 
 	// damage_buffer: wl_proxy_marshal(proxy, opcode, x, y, w, h) — opcode 9.
-	if err = ffi.PrepareCallInterface(&cifSurfaceDamageBuffer, types.DefaultCall,
+	// wl_proxy_marshal is variadic: nfixedargs=2 (proxy, opcode), x/y/w/h are variadic.
+	if err = ffi.PrepareVariadicCallInterface(&cifSurfaceDamageBuffer, types.DefaultCall,
+		2, // nfixedargs: proxy + opcode are fixed
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy (surface)
 			types.UInt32TypeDescriptor,  // opcode (9)
-			types.SInt32TypeDescriptor,  // x
-			types.SInt32TypeDescriptor,  // y
-			types.SInt32TypeDescriptor,  // w
-			types.SInt32TypeDescriptor,  // h
+			types.SInt32TypeDescriptor,  // x (variadic)
+			types.SInt32TypeDescriptor,  // y (variadic)
+			types.SInt32TypeDescriptor,  // w (variadic)
+			types.SInt32TypeDescriptor,  // h (variadic)
 		}); err != nil {
 		return
 	}
@@ -379,18 +387,20 @@ func obtainWlShm(display uintptr) uintptr {
 	// Prepare CIF for versioned: wl_proxy*(proxy, opcode, interface, version, name, ifaceName, version, NULL)
 	// The actual signature for wl_registry_bind is:
 	//   wl_proxy_marshal_constructor_versioned(registry, 0, &wl_shm_interface, 1, name, "wl_shm", 1, NULL)
+	// Variadic: nfixedargs=4 (proxy, opcode, interface, version), rest variadic.
 	var cifVersioned types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifVersioned, types.DefaultCall,
+	if err := ffi.PrepareVariadicCallInterface(&cifVersioned, types.DefaultCall,
+		4, // nfixedargs: proxy, opcode, interface, version are fixed
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy (registry)
 			types.UInt32TypeDescriptor,  // opcode (0 = bind)
 			types.PointerTypeDescriptor, // interface (&wl_shm_interface)
 			types.UInt32TypeDescriptor,  // version
-			types.UInt32TypeDescriptor,  // name
-			types.PointerTypeDescriptor, // interface_name string
-			types.UInt32TypeDescriptor,  // version (repeated)
-			types.PointerTypeDescriptor, // NULL terminator
+			types.UInt32TypeDescriptor,  // name (variadic)
+			types.PointerTypeDescriptor, // interface_name string (variadic)
+			types.UInt32TypeDescriptor,  // version (variadic, repeated)
+			types.PointerTypeDescriptor, // NULL terminator (variadic)
 		}); err != nil {
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
@@ -524,17 +534,18 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 	sizeVal := uintptr(uint32(size))
 
 	// wl_proxy_marshal_constructor for create_pool: proxy, opcode, interface, NULL_id, fd, size
-	// We need a 6-arg CIF.
+	// Variadic: nfixedargs=3 (proxy, opcode, interface), rest variadic.
 	var cifCreatePool types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifCreatePool, types.DefaultCall,
+	if err := ffi.PrepareVariadicCallInterface(&cifCreatePool, types.DefaultCall,
+		3, // nfixedargs: proxy, opcode, interface are fixed
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy (shm)
 			types.UInt32TypeDescriptor,  // opcode
 			types.PointerTypeDescriptor, // interface
-			types.PointerTypeDescriptor, // new_id (NULL placeholder)
-			types.PointerTypeDescriptor, // fd
-			types.PointerTypeDescriptor, // size
+			types.PointerTypeDescriptor, // new_id (variadic, NULL placeholder)
+			types.PointerTypeDescriptor, // fd (variadic)
+			types.PointerTypeDescriptor, // size (variadic)
 		}); err != nil {
 		_ = unix.Munmap(data)
 		_ = unix.Close(fd)
@@ -569,19 +580,21 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 	strideArg := uintptr(uint32(stride))
 	var format uintptr // 0 = ARGB8888
 
+	// Variadic: nfixedargs=3 (proxy, opcode, interface), rest variadic.
 	var cifCreateBuffer types.CallInterface
-	if err := ffi.PrepareCallInterface(&cifCreateBuffer, types.DefaultCall,
+	if err := ffi.PrepareVariadicCallInterface(&cifCreateBuffer, types.DefaultCall,
+		3, // nfixedargs: proxy, opcode, interface are fixed
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor, // proxy (pool)
 			types.UInt32TypeDescriptor,  // opcode
 			types.PointerTypeDescriptor, // interface
-			types.PointerTypeDescriptor, // new_id (NULL placeholder)
-			types.PointerTypeDescriptor, // offset
-			types.PointerTypeDescriptor, // width
-			types.PointerTypeDescriptor, // height
-			types.PointerTypeDescriptor, // stride
-			types.PointerTypeDescriptor, // format
+			types.PointerTypeDescriptor, // new_id (variadic, NULL placeholder)
+			types.PointerTypeDescriptor, // offset (variadic)
+			types.PointerTypeDescriptor, // width (variadic)
+			types.PointerTypeDescriptor, // height (variadic)
+			types.PointerTypeDescriptor, // stride (variadic)
+			types.PointerTypeDescriptor, // format (variadic)
 		}); err != nil {
 		_ = unix.Munmap(data)
 		_ = unix.Close(fd)
@@ -615,12 +628,13 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 	destroyPool(pool)
 
 	buf := &waylandShmBuffer{
-		fd:     fd,
-		data:   data,
-		pool:   0, // already destroyed
-		buffer: buffer,
-		width:  width,
-		height: height,
+		fd:            fd,
+		data:          data,
+		pool:          0, // already destroyed
+		buffer:        buffer,
+		width:         width,
+		height:        height,
+		needsFullCopy: true, // first frame must be full copy
 	}
 
 	// Register wl_buffer.release listener (Qt6 qwaylandbuffer.cpp pattern).
@@ -798,14 +812,9 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 		*buf = *newBuf
 	}
 
-	n := int(width) * int(height) * 4
-	if n > len(data) {
-		n = len(data)
-	}
-	if n > len(buf.data) {
-		n = len(buf.data)
-	}
-	copy(buf.data[:n], data[:n])
+	// Copy pixels: full copy for new buffers or when no damage rects provided,
+	// partial row-based copy for damaged regions only.
+	waylandCopyPixels(buf, data, width, height, rects)
 
 	surface := s.hwnd
 
@@ -830,6 +839,43 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 	_ = ffi.CallFunction(&cifWlDisplayFlush, symWlDisplayFlush, unsafe.Pointer(&flushResult), flushArgs[:])
 
 	wl.frontIdx = backIdx
+}
+
+// waylandCopyPixels copies pixel data into a SHM buffer. On first use
+// (needsFullCopy) or when no damage rects are provided, a full-frame copy
+// is performed. Otherwise only the damaged rows are copied.
+func waylandCopyPixels(buf *waylandShmBuffer, data []byte, width, height int32, rects []image.Rectangle) {
+	if buf.needsFullCopy || len(rects) == 0 {
+		n := int(width) * int(height) * 4
+		if n > len(data) {
+			n = len(data)
+		}
+		if n > len(buf.data) {
+			n = len(buf.data)
+		}
+		copy(buf.data[:n], data[:n])
+		buf.needsFullCopy = false
+		return
+	}
+
+	// Row-based partial copy — only damaged regions.
+	stride := int(width) * 4
+	bounds := image.Rect(0, 0, int(width), int(height))
+	for _, r := range rects {
+		r = r.Intersect(bounds)
+		if r.Empty() {
+			continue
+		}
+		rowBytes := r.Dx() * 4
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			off := y*stride + r.Min.X*4
+			end := off + rowBytes
+			if end > len(data) || end > len(buf.data) {
+				continue
+			}
+			copy(buf.data[off:end], data[off:end])
+		}
+	}
 }
 
 // waylandSurfaceCommit calls wl_surface_commit (opcode 6).
