@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.8] - 2026-06-06
+
+### Fixed
+
+- **Software: Wayland queue mismatch — display wrapper pattern (gogpu#292)** —
+  `obtainWlShm()` created `wl_registry` and `wl_shm` via raw `wl_display*`,
+  placing them on the DEFAULT queue. gogpu dispatches only its `appQueue`
+  (ADR-041) — DEFAULT queue events were never dispatched, causing proxy state
+  corruption and SIGSEGV on frame 2. Fix: create a display wrapper via
+  `wl_proxy_create_wrapper(display)` + `wl_proxy_set_queue(wrapper, shmQueue)`
+  so all child proxies (registry, wl_shm, pool, buffer) inherit `shmQueue`.
+  Uses `wl_display_roundtrip_queue` instead of `wl_display_roundtrip` to dispatch
+  the correct queue. Matches Qt6 ephemeral wrapper pattern
+  (`qwaylandwindow.cpp:1799-1802`). Also fixes proxy leak: registry and wl_shm
+  now properly destroyed in `destroyWaylandBlitState`. Removes manual
+  `wl_proxy_set_queue` on buffer proxies — queue inheritance is automatic via
+  libwayland `proxy_create` (`wayland-client.c:492`).
+
 ## [0.29.7] - 2026-06-06
 
 ### Fixed

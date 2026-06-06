@@ -64,6 +64,9 @@ var (
 	symWlProxyMarshal                     unsafe.Pointer
 	symWlProxyDestroy                     unsafe.Pointer
 	symWlProxySetQueue                    unsafe.Pointer // wl_proxy_set_queue(proxy, queue) -> void
+	symWlProxyCreateWrapper               unsafe.Pointer // wl_proxy_create_wrapper(proxy) -> wrapper*
+	symWlProxyWrapperDestroy              unsafe.Pointer // wl_proxy_wrapper_destroy(wrapper) -> void
+	symWlDisplayRoundtripQueue            unsafe.Pointer // wl_display_roundtrip_queue(display, queue) -> int
 	symWlEventQueueDestroy                unsafe.Pointer // wl_event_queue_destroy(queue) -> void
 
 	// wl_interface pointers (loaded from libwayland-client.so data section)
@@ -87,6 +90,12 @@ var (
 	cifWlProxyDestroy types.CallInterface
 	// CIF for wl_proxy_set_queue(wl_proxy*, wl_event_queue*) -> void
 	cifWlProxySetQueue types.CallInterface
+	// CIF for wl_proxy_create_wrapper(void*) -> wl_proxy*
+	cifWlProxyCreateWrapper types.CallInterface
+	// CIF for wl_proxy_wrapper_destroy(void*) -> void
+	cifWlProxyWrapperDestroy types.CallInterface
+	// CIF for wl_display_roundtrip_queue(wl_display*, wl_event_queue*) -> int
+	cifWlDisplayRoundtripQueue types.CallInterface
 	// CIF for wl_event_queue_destroy(wl_event_queue*) -> void
 	cifWlEventQueueDestroy types.CallInterface
 )
@@ -102,15 +111,22 @@ type waylandBlitState struct {
 	isWayland bool // true if displayHandle is wl_display* (detected once)
 	detected  bool // true if detection has been performed
 
-	wlShm uintptr // bound wl_shm global (0 if not yet obtained)
+	wlShm    uintptr // bound wl_shm global (on shmQueue, 0 if not yet obtained)
+	registry uintptr // wl_registry proxy (on shmQueue, for proper cleanup)
 
-	// shmQueue is a dedicated wl_event_queue for SHM buffer proxies.
-	// SHM wl_buffer proxies created via wl_proxy_marshal_constructor live
-	// on the default Wayland queue. gogpu's DispatchDefaultQueue dispatches
-	// a separate app queue, so wl_buffer.release events on the default queue
-	// are never processed — all buffers stay busy=true forever after 3 frames.
-	// Moving buffer proxies to shmQueue via wl_proxy_set_queue and dispatching
-	// it after flush in present ensures release callbacks fire. SDL3/GLFW pattern.
+	// shmQueue is a dedicated wl_event_queue for ALL software backend Wayland
+	// proxies (registry, wl_shm, wl_shm_pool, wl_buffer). Created via
+	// wl_display_create_queue. All proxies inherit shmQueue through the
+	// wl_proxy_create_wrapper pattern (Qt6 qwaylanddisplay.cpp:335-341):
+	// wrapper = wl_proxy_create_wrapper(display)
+	// wl_proxy_set_queue(wrapper, shmQueue)
+	// registry = wl_display_get_registry(wrapper) → on shmQueue
+	// wl_shm = wl_registry_bind(registry) → on shmQueue
+	// pool/buffer inherit from wl_shm → on shmQueue
+	//
+	// This eliminates queue mismatch with gogpu's appQueue (ADR-041):
+	// gogpu dispatches ONLY appQueue, so objects on DEFAULT queue would
+	// never receive events. See BUG-SW-WAYLAND-002.
 	shmQueue uintptr // 0 until first buffer created
 
 	// Triple-buffer state: three SHM buffers, pick first non-busy.
@@ -198,6 +214,9 @@ func initWayland() {
 		{"wl_proxy_marshal", &symWlProxyMarshal},
 		{"wl_proxy_destroy", &symWlProxyDestroy},
 		{"wl_proxy_set_queue", &symWlProxySetQueue},
+		{"wl_proxy_create_wrapper", &symWlProxyCreateWrapper},
+		{"wl_proxy_wrapper_destroy", &symWlProxyWrapperDestroy},
+		{"wl_display_roundtrip_queue", &symWlDisplayRoundtripQueue},
 		{"wl_event_queue_destroy", &symWlEventQueueDestroy},
 	}
 	for _, s := range symbols {
@@ -306,6 +325,30 @@ func initWayland() {
 		return
 	}
 
+	// wl_proxy* wl_proxy_create_wrapper(void* proxy)
+	if err = ffi.PrepareCallInterface(&cifWlProxyCreateWrapper, types.DefaultCall,
+		types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
+		return
+	}
+
+	// void wl_proxy_wrapper_destroy(void* wrapper)
+	if err = ffi.PrepareCallInterface(&cifWlProxyWrapperDestroy, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{types.PointerTypeDescriptor}); err != nil {
+		return
+	}
+
+	// int wl_display_roundtrip_queue(wl_display*, wl_event_queue*)
+	if err = ffi.PrepareCallInterface(&cifWlDisplayRoundtripQueue, types.DefaultCall,
+		types.SInt32TypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // display
+			types.PointerTypeDescriptor, // queue
+		}); err != nil {
+		return
+	}
+
 	// void wl_event_queue_destroy(wl_event_queue*)
 	if err = ffi.PrepareCallInterface(&cifWlEventQueueDestroy, types.DefaultCall,
 		types.VoidTypeDescriptor,
@@ -363,30 +406,62 @@ func initWayland() {
 }
 
 // obtainWlShm gets the wl_shm global by creating a wl_registry, listening
-// for the wl_shm global, and doing a roundtrip. Called eagerly from the
-// detection block in blit_linux.go (once per surface).
-func obtainWlShm(display uintptr) uintptr {
+// for the wl_shm global, and doing a roundtrip. Called eagerly from
+// configurePlatformBlit (once per surface, on the main thread).
+//
+// All proxies (registry, wl_shm) are created through a display wrapper
+// assigned to shmQueue — so they inherit shmQueue, NOT the default queue.
+// This matches the Qt6 pattern (qwaylanddisplay.cpp:335-341):
+//
+//	wrapper = wl_proxy_create_wrapper(display)
+//	wl_proxy_set_queue(wrapper, queue)
+//	registry = wl_display_get_registry(wrapper)
+//
+// Without this, proxies end up on the DEFAULT queue which gogpu never
+// dispatches (ADR-041), causing events to accumulate and crash.
+// See BUG-SW-WAYLAND-002.
+//
+// Returns (wl_shm, wl_registry) — both on shmQueue. Caller stores registry
+// for proper cleanup in destroyWaylandBlitState.
+func obtainWlShm(display, shmQueue uintptr) (uintptr, uintptr) {
 	waylandOnce.Do(initWayland)
 	if !waylandReady {
-		return 0
+		return 0, 0
 	}
 
-	// wl_display_get_registry = wl_proxy_marshal_constructor(display, 1, &wl_registry_interface, NULL)
-	// WL_DISPLAY_GET_REGISTRY opcode = 1
+	wrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
+	var wrapper uintptr
+	_ = ffi.CallFunction(&cifWlProxyCreateWrapper, symWlProxyCreateWrapper, unsafe.Pointer(&wrapper), wrapperArgs[:])
+	if wrapper == 0 {
+		slog.Warn("software: wl_proxy_create_wrapper failed")
+		return 0, 0
+	}
+	setQueueArgs := [2]unsafe.Pointer{
+		unsafe.Pointer(&wrapper),
+		unsafe.Pointer(&shmQueue),
+	}
+	_ = ffi.CallFunction(&cifWlProxySetQueue, symWlProxySetQueue, nil, setQueueArgs[:])
+
+	// wl_display_get_registry via WRAPPER → registry inherits shmQueue.
 	var opcode uint32 = 1
 	var null uintptr
 	ifacePtr := uintptr(wlRegistryInterface)
 	args := [4]unsafe.Pointer{
-		unsafe.Pointer(&display),
+		unsafe.Pointer(&wrapper), // wrapper, NOT raw display
 		unsafe.Pointer(&opcode),
 		unsafe.Pointer(&ifacePtr),
 		unsafe.Pointer(&null),
 	}
 	var registry uintptr
 	_ = ffi.CallFunction(&cifWlProxyMarshalConstructor, symWlProxyMarshalConstructor, unsafe.Pointer(&registry), args[:])
+
+	// Wrapper no longer needed — child proxies already inherited the queue.
+	destroyWrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&wrapper)}
+	_ = ffi.CallFunction(&cifWlProxyWrapperDestroy, symWlProxyWrapperDestroy, nil, destroyWrapperArgs[:])
+
 	if registry == 0 {
 		slog.Warn("software: wl_display_get_registry failed")
-		return 0
+		return 0, 0
 	}
 
 	// Add registry listener to catch wl_shm global.
@@ -400,7 +475,7 @@ func obtainWlShm(display uintptr) uintptr {
 	pendingShmBindMu.Unlock()
 
 	listenerPtr := uintptr(unsafe.Pointer(&registryListenerFuncs[0]))
-	var listenerData uintptr // not used, callbacks access globals
+	var listenerData uintptr
 	addArgs := [3]unsafe.Pointer{
 		unsafe.Pointer(&registry),
 		unsafe.Pointer(&listenerPtr),
@@ -409,10 +484,13 @@ func obtainWlShm(display uintptr) uintptr {
 	var addResult int32
 	_ = ffi.CallFunction(&cifWlProxyAddListener, symWlProxyAddListener, unsafe.Pointer(&addResult), addArgs[:])
 
-	// Roundtrip to receive registry events.
-	roundtripArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
+	// Roundtrip on shmQueue (not default) to receive registry events.
+	roundtripArgs := [2]unsafe.Pointer{
+		unsafe.Pointer(&display),
+		unsafe.Pointer(&shmQueue),
+	}
 	var rtResult int32
-	_ = ffi.CallFunction(&cifWlDisplayRoundtrip, symWlDisplayRoundtrip, unsafe.Pointer(&rtResult), roundtripArgs[:])
+	_ = ffi.CallFunction(&cifWlDisplayRoundtripQueue, symWlDisplayRoundtripQueue, unsafe.Pointer(&rtResult), roundtripArgs[:])
 
 	pendingShmBindMu.Lock()
 	shmName := pendingShmBindName
@@ -420,10 +498,9 @@ func obtainWlShm(display uintptr) uintptr {
 
 	if shmName == 0 {
 		slog.Warn("software: wl_shm not found in registry")
-		// Destroy registry proxy.
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
-		return 0
+		return 0, 0
 	}
 
 	// Bind wl_shm: wl_registry_bind = wl_proxy_marshal_constructor_versioned
@@ -440,7 +517,7 @@ func obtainWlShm(display uintptr) uintptr {
 		slog.Warn("software: wl_proxy_marshal_constructor_versioned not found")
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
-		return 0
+		return 0, 0
 	}
 
 	// Prepare CIF for versioned: wl_proxy*(proxy, opcode, interface, version, name, ifaceName, version, NULL)
@@ -463,7 +540,7 @@ func obtainWlShm(display uintptr) uintptr {
 		}); err != nil {
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
-		return 0
+		return 0, 0
 	}
 
 	// Get wl_shm_interface pointer.
@@ -473,7 +550,7 @@ func obtainWlShm(display uintptr) uintptr {
 		slog.Warn("software: wl_shm_interface not found")
 		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
 		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
-		return 0
+		return 0, 0
 	}
 
 	shmIfacePtr := uintptr(symShmInterface)
@@ -495,18 +572,17 @@ func obtainWlShm(display uintptr) uintptr {
 	var shm uintptr
 	_ = ffi.CallFunction(&cifVersioned, symVersioned, unsafe.Pointer(&shm), bindArgs[:])
 
-	// Roundtrip again to ensure bind completes.
-	_ = ffi.CallFunction(&cifWlDisplayRoundtrip, symWlDisplayRoundtrip, unsafe.Pointer(&rtResult), roundtripArgs[:])
-
-	// Don't destroy registry — keep it alive for the display lifetime.
-	// (Destroying it is safe but unnecessary; the proxy is tiny.)
+	// Roundtrip on shmQueue to ensure bind completes.
+	_ = ffi.CallFunction(&cifWlDisplayRoundtripQueue, symWlDisplayRoundtripQueue, unsafe.Pointer(&rtResult), roundtripArgs[:])
 
 	if shm == 0 {
 		slog.Warn("software: wl_registry_bind for wl_shm failed")
-	} else {
-		slog.Debug("software: wl_shm bound successfully", "shm", shm)
+		destroyArgs := [1]unsafe.Pointer{unsafe.Pointer(&registry)}
+		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, destroyArgs[:])
+		return 0, 0
 	}
-	return shm
+	slog.Debug("software: wl_shm bound successfully", "shm", shm, "queue", "shmQueue")
+	return shm, registry
 }
 
 // createShmQueue creates a dedicated wl_event_queue for SHM buffer proxies.
@@ -580,10 +656,9 @@ func cString(ptr uintptr) string {
 }
 
 // waylandCreateShmBuffer creates a new SHM buffer for the given dimensions.
-// If shmQueue is non-zero, the buffer proxy is moved to that queue via
-// wl_proxy_set_queue so that wl_buffer.release events are dispatched there
-// instead of on the default queue (which gogpu never dispatches).
-func waylandCreateShmBuffer(shm, shmQueue uintptr, width, height int32) *waylandShmBuffer {
+// The buffer proxy inherits shmQueue from wl_shm via the display wrapper
+// pattern (BUG-SW-WAYLAND-002) — no manual wl_proxy_set_queue needed.
+func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer {
 	stride := width * 4
 	size := int(stride) * int(height)
 
@@ -739,16 +814,10 @@ func waylandCreateShmBuffer(shm, shmQueue uintptr, width, height int32) *wayland
 	var addResult int32
 	_ = ffi.CallFunction(&cifWlProxyAddListener, symWlProxyAddListener, unsafe.Pointer(&addResult), addArgs[:])
 
-	// Move buffer proxy to the dedicated SHM queue so that release events
-	// are dispatched by our dispatch_queue_pending call, not left on the
-	// default queue that gogpu never dispatches.
-	if shmQueue != 0 {
-		setQueueArgs := [2]unsafe.Pointer{
-			unsafe.Pointer(&buffer),
-			unsafe.Pointer(&shmQueue),
-		}
-		_ = ffi.CallFunction(&cifWlProxySetQueue, symWlProxySetQueue, nil, setQueueArgs[:])
-	}
+	// Buffer proxy inherits shmQueue from wl_shm (via pool) through the
+	// display wrapper pattern (BUG-SW-WAYLAND-002). No wl_proxy_set_queue
+	// needed — queue assignment is automatic via libwayland proxy_create
+	// (wayland-client.c:492: proxy->queue = factory->queue).
 
 	return buf
 }
@@ -830,7 +899,7 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 			waylandDestroyShmBuffer(buf)
 			*buf = waylandShmBuffer{fd: -1}
 		}
-		newBuf := waylandCreateShmBuffer(wl.wlShm, wl.shmQueue, width, height)
+		newBuf := waylandCreateShmBuffer(wl.wlShm, width, height)
 		if newBuf == nil {
 			return
 		}
@@ -903,7 +972,7 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 			waylandDestroyShmBuffer(buf)
 			*buf = waylandShmBuffer{fd: -1}
 		}
-		newBuf := waylandCreateShmBuffer(wl.wlShm, wl.shmQueue, width, height)
+		newBuf := waylandCreateShmBuffer(wl.wlShm, width, height)
 		if newBuf == nil {
 			return
 		}
@@ -1036,19 +1105,31 @@ func waylandDispatchShmQueue(display, queue uintptr) {
 }
 
 // destroyWaylandBlitState releases all Wayland SHM resources for a surface.
+// Destruction order: buffers → wl_shm → registry → shmQueue.
+// Proxies must be destroyed before the queue they're assigned to.
 func (s *Surface) destroyWaylandBlitState() {
 	wl := &s.wlState
 	for i := range wl.buffers {
 		waylandDestroyShmBuffer(&wl.buffers[i])
 		wl.buffers[i] = waylandShmBuffer{fd: -1}
 	}
-	// Destroy the SHM event queue after all buffers are destroyed.
-	// Buffers must be destroyed first because wl_event_queue_destroy
-	// asserts no proxies remain assigned to the queue.
+	// Destroy wl_shm proxy (was leaked before BUG-SW-WAYLAND-002 fix).
+	if wl.wlShm != 0 {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&wl.wlShm)}
+		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, args[:])
+		wl.wlShm = 0
+	}
+	// Destroy registry proxy (was leaked before BUG-SW-WAYLAND-002 fix).
+	if wl.registry != 0 {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&wl.registry)}
+		_ = ffi.CallFunction(&cifWlProxyDestroy, symWlProxyDestroy, nil, args[:])
+		wl.registry = 0
+	}
+	// Destroy the SHM event queue LAST — all proxies assigned to it
+	// must be destroyed first (wl_event_queue_destroy asserts this).
 	if wl.shmQueue != 0 {
 		args := [1]unsafe.Pointer{unsafe.Pointer(&wl.shmQueue)}
 		_ = ffi.CallFunction(&cifWlEventQueueDestroy, symWlEventQueueDestroy, nil, args[:])
 		wl.shmQueue = 0
 	}
-	wl.wlShm = 0
 }
