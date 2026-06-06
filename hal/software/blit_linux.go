@@ -218,8 +218,10 @@ func (s *Surface) configurePlatformBlit() {
 		s.wlState.detected = true
 		s.wlState.isWayland = isWaylandDisplay()
 		if s.wlState.isWayland {
-			s.wlState.wlShm = obtainWlShm(s.displayHandle)
+			// Create shmQueue FIRST — obtainWlShm needs it for the
+			// display wrapper so all proxies inherit this queue.
 			s.wlState.shmQueue = createShmQueue(s.displayHandle)
+			s.wlState.wlShm, s.wlState.registry = obtainWlShm(s.displayHandle, s.wlState.shmQueue)
 		}
 	}
 }
