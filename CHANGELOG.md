@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.5] - 2026-06-06
+
+### Fixed
+
+- **GLES: fence sync ordering — glFenceSync before glFlush (Rust parity)** —
+  `Queue.Submit()` called `glFlush()` before `fence.Signal()` (`glFenceSync`),
+  leaving the fence in an unflushed client-side buffer. `PollCompleted()` uses
+  non-blocking `glGetSynciv` (no implicit flush), so the fence returned
+  `GL_UNSIGNALED` indefinitely — stalling deferred resource destruction in
+  headless/compute workloads. Headed rendering was unaffected (`SwapBuffers`
+  provides implicit flush). Reordered to match Rust wgpu-hal `queue.rs:1915-1921`:
+  `fence.Maintain` → `fence.Signal` → `glFlush`. Confirmed by ANGLE bug 6464
+  (Samsung deadlock in production), virglrenderer commit `21bbc9ea` (Windows/macOS
+  stalls), Mesa Gallium (internally flushes in `glFenceSync`, masking the bug on
+  Linux). Affects both Windows WGL and Linux EGL paths.
+- **GLES: remove redundant Maintain() from PollCompleted** — Rust wgpu-hal only
+  calls `get_latest()` in the poll path (`device.rs:1564`); fence cleanup happens
+  during `Submit()`. Removes double `GetLatest()` per poll cycle.
+
 ## [0.29.4] - 2026-06-06
 
 ### Fixed

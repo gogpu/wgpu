@@ -261,7 +261,8 @@ func NewFence(glCtx *gl.Context) *Fence {
 }
 
 // Signal inserts a GL fence sync object into the command stream at the given value.
-// Must be called on the GL thread after glFlush.
+// Must be called on the GL thread BEFORE glFlush — the flush sends both the
+// preceding commands and this fence to the GPU together.
 // Matches Rust wgpu-hal/src/gles/fence.rs Fence::signal.
 func (f *Fence) Signal(value uint64) {
 	if f.glCtx == nil || !f.glCtx.SupportsFenceSync() {

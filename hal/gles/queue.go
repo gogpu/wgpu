@@ -26,7 +26,7 @@ type Queue struct {
 
 // Submit submits command buffers to the GPU.
 // Acquires the AdapterContext lock, makes context current on hidden window DC,
-// executes all GL commands, flushes, and signals the fence.
+// executes all GL commands, signals the fence, and flushes.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	glCtx := q.ctx.Lock()
 	defer q.ctx.Unlock()
@@ -45,23 +45,29 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		}
 	}
 
-	glCtx.Flush()
-
 	q.submissionIndex++
 
+	// Rust wgpu-hal queue.rs:1915-1921: fence.maintain → fence.signal → gl.flush.
+	// FenceSync must be inserted BEFORE Flush so the sync object tracks the
+	// commands being flushed. Flushing first would leave the fence un-flushed.
 	if q.fence != nil {
+		q.fence.Maintain()
 		q.fence.Signal(q.submissionIndex)
 	}
+
+	glCtx.Flush()
 
 	return q.submissionIndex, nil
 }
 
 // PollCompleted returns the highest submission index known to be completed.
-// When GL fence sync is available, polls pending sync objects. Otherwise,
-// assumes all work is complete after Flush (GLES is synchronous).
+// Polls pending GL sync objects via glGetSynciv (non-blocking, no flush).
+// Safe because Submit() always flushes after inserting the fence — the fence
+// is guaranteed to be in the GPU command queue by the time we poll it.
+// Maintenance (cleanup of completed sync objects) happens in Submit(), not here
+// (matches Rust wgpu-hal device.rs:1564 get_fence_value).
 func (q *Queue) PollCompleted() uint64 {
 	if q.fence != nil {
-		q.fence.Maintain()
 		return q.fence.GetLatest()
 	}
 	return q.submissionIndex
