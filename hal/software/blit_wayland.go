@@ -800,9 +800,9 @@ func waylandCreateShmBuffer(shm uintptr, width, height int32) *waylandShmBuffer 
 		bufferListenerFuncs[0] = ffi.NewCallback(bufferReleaseCb)
 	})
 
-	bufferBusyMu.Lock()
-	bufferBusyMap[buffer] = buf
-	bufferBusyMu.Unlock()
+	// NOTE: do NOT register in bufferBusyMap here — the caller does
+	// *buf = *newBuf (value copy into wl.buffers[idx]). The map must point
+	// to &wl.buffers[idx], not to this local buf. Caller registers after copy.
 
 	listenerPtr := uintptr(unsafe.Pointer(&bufferListenerFuncs[0]))
 	var listenerData uintptr
@@ -878,7 +878,6 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 	}
 
 	// Pick a non-busy buffer (Qt6 qwaylandshmbackingstore.cpp pattern).
-	// Iterate all 3 buffers starting after frontIdx; skip busy ones.
 	backIdx := -1
 	for i := 1; i <= len(wl.buffers); i++ {
 		idx := (wl.frontIdx + i) % len(wl.buffers)
@@ -888,7 +887,6 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 		}
 	}
 	if backIdx < 0 {
-		// All buffers busy — skip frame to avoid corruption.
 		return
 	}
 	buf := &wl.buffers[backIdx]
@@ -904,31 +902,20 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 			return
 		}
 		*buf = *newBuf
+		// Register AFTER value copy — buf points to wl.buffers[backIdx],
+		// so release callback sets busy=false on the actual array element.
+		bufferBusyMu.Lock()
+		bufferBusyMap[buf.buffer] = buf
+		bufferBusyMu.Unlock()
 	}
 
-	// Copy pixels into the SHM buffer.
-	n := int(width) * int(height) * 4
-	if n > len(data) {
-		n = len(data)
-	}
-	if n > len(buf.data) {
-		n = len(buf.data)
-	}
-	copy(buf.data[:n], data[:n])
+	copy(buf.data[:min(len(data), len(buf.data))], data[:min(len(data), len(buf.data))])
 
 	surface := s.hwnd
-
-	// wl_surface_attach(surface, buffer, 0, 0) — opcode 1
 	waylandSurfaceAttach(surface, buf.buffer, 0, 0)
-
-	// wl_surface_damage_buffer(surface, 0, 0, width, height) — opcode 9
-	// Preferred over deprecated wl_surface_damage (opcode 2) since wl_surface v4.
 	waylandSurfaceDamageBuffer(surface, 0, 0, width, height)
-
-	// wl_surface_commit(surface) — opcode 6
 	waylandSurfaceCommit(surface)
 
-	// Mark buffer as owned by compositor until release callback fires.
 	buf.busy = true
 
 	// wl_display_flush sends the commit to the compositor.
@@ -936,9 +923,6 @@ func (s *Surface) waylandPresent(data []byte, width, height int32) {
 	var flushResult int32
 	_ = ffi.CallFunction(&cifWlDisplayFlush, symWlDisplayFlush, unsafe.Pointer(&flushResult), flushArgs[:])
 
-	// Dispatch pending release events on the SHM queue. This processes
-	// wl_buffer.release callbacks for buffers the compositor has finished
-	// reading, marking them non-busy for reuse on the next frame.
 	waylandDispatchShmQueue(s.displayHandle, wl.shmQueue)
 
 	wl.frontIdx = backIdx
@@ -977,6 +961,9 @@ func (s *Surface) waylandPresentDamage(data []byte, width, height int32, rects [
 			return
 		}
 		*buf = *newBuf
+		bufferBusyMu.Lock()
+		bufferBusyMap[buf.buffer] = buf
+		bufferBusyMu.Unlock()
 	}
 
 	// Copy pixels: full copy for new buffers or when no damage rects provided,
@@ -1087,11 +1074,16 @@ func waylandSurfaceDamageBuffer(surface uintptr, x, y, w, h int32) {
 	_ = ffi.CallFunction(&cifSurfaceDamageBuffer, symWlProxyMarshal, nil, args[:])
 }
 
-// waylandDispatchShmQueue dispatches pending events on the SHM queue.
-// This is a non-blocking call — it processes only events already read into
-// the queue, it does not read from the socket. Safe to call from the render
-// thread because the SHM queue is private to this surface and not touched
-// by the main event loop.
+// waylandDispatchShmQueue reads and dispatches events on the SHM queue.
+// Uses wl_display_roundtrip_queue which does prepare_read → read_events →
+// dispatch_queue — ensuring release events are actually read from the
+// socket, not just dispatched from an empty queue.
+//
+// wl_display_dispatch_queue_pending (the previous approach) only dispatches
+// already-read events. But nobody reads events into shmQueue — gogpu's
+// read_events routes events to their queue, but the render thread calling
+// dispatch_queue_pending may run before main thread reads. Result: empty
+// queue, release callbacks never fire, all 3 buffers stuck busy=true.
 func waylandDispatchShmQueue(display, queue uintptr) {
 	if queue == 0 {
 		return
@@ -1101,7 +1093,7 @@ func waylandDispatchShmQueue(display, queue uintptr) {
 		unsafe.Pointer(&queue),
 	}
 	var result int32
-	_ = ffi.CallFunction(&cifWlDisplayDispatchQueueP, symWlDisplayDispatchQueueP, unsafe.Pointer(&result), args[:])
+	_ = ffi.CallFunction(&cifWlDisplayRoundtripQueue, symWlDisplayRoundtripQueue, unsafe.Pointer(&result), args[:])
 }
 
 // destroyWaylandBlitState releases all Wayland SHM resources for a surface.

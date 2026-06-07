@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.9] - 2026-06-07
+
+### Fixed
+
+- **Software: Wayland SHM triple-buffer freeze — bufferBusyMap pointer fix** —
+  `bufferBusyMap` stored pointer to temporary struct from `waylandCreateShmBuffer`,
+  but caller did `*buf = *newBuf` (value copy into `wl.buffers[idx]`). Release
+  callback set `busy=false` on the dead heap object, not on the array element —
+  all 3 buffers stuck `busy=true` after 3 frames, presentation frozen. Fix: register
+  in `bufferBusyMap` AFTER value copy, with pointer to `&wl.buffers[idx]`.
+- **Software: Wayland SHM dispatch — roundtrip_queue instead of dispatch_queue_pending** —
+  `wl_display_dispatch_queue_pending` only processes already-read events.
+  Nobody reads wire data into `shmQueue` — gogpu's `read_events` runs on the
+  main thread independently. Result: `dispatch_queue_pending` sees empty queue,
+  release callbacks never fire. Fix: `wl_display_roundtrip_queue(display, shmQueue)`
+  which does prepare_read → read_events → dispatch in one call.
+
 ## [0.29.8] - 2026-06-06
 
 ### Fixed
