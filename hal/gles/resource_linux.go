@@ -15,6 +15,9 @@ import (
 )
 
 // Surface implements hal.Surface for OpenGL on Linux.
+// When Instance has a pre-created context (X11/headless), ownsContext=false —
+// Surface shares Instance's context (like Windows AdapterContext pattern).
+// When Instance has no context (Wayland), ownsContext=true — Surface owns its own.
 type Surface struct {
 	displayHandle uintptr
 	windowHandle  uintptr
@@ -22,6 +25,7 @@ type Surface struct {
 	eglDisplay    egl.EGLDisplay
 	eglSurface    egl.EGLSurface
 	glCtx         *gl.Context
+	ownsContext   bool // true = Surface owns context, false = shared from Instance
 	version       string
 	renderer      string
 	configured    bool
@@ -271,10 +275,13 @@ func (s *Surface) Destroy() {
 		s.eglWindow = 0
 	}
 
-	if s.eglCtx != nil {
+	// Only destroy context if Surface owns it (Wayland path).
+	// When shared from Instance (X11/headless), Instance.Destroy handles cleanup.
+	if s.ownsContext && s.eglCtx != nil {
 		s.eglCtx.Destroy()
-		s.eglCtx = nil
 	}
+	s.eglCtx = nil
+	s.glCtx = nil
 }
 
 // SurfaceTexture implements hal.SurfaceTexture for OpenGL.

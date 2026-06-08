@@ -81,45 +81,60 @@ type Instance struct {
 // On Linux: displayHandle and windowHandle are platform-specific.
 // For X11: displayHandle is X11 Display*, windowHandle is Window.
 // For Wayland: displayHandle is wl_display*, windowHandle is wl_surface*.
+//
+// When Instance has a pre-created EGL context (X11/headless), the context is
+// SHARED — Surface only creates an EGL window surface for presentation. This
+// matches the Windows pattern where Instance owns AdapterContext and Surface
+// is lightweight (just HWND + reference to shared ctx).
+//
+// When Instance has no context (Wayland — no wl_display* at init), CreateSurface
+// creates a new EGL context with the caller's displayHandle.
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
-	// Create EGL context with automatic platform detection.
-	// NativeDisplay must be the app's wl_display* on Wayland so EGL shares the
-	// same display connection as the wl_surface — see egl.GetEGLDisplay.
+	// Path A: share Instance context (X11/headless — context already exists).
+	if i.eglCtx != nil && i.glCtx != nil {
+		hal.Logger().Info("gles: surface sharing Instance EGL context")
+		return &Surface{
+			displayHandle: displayHandle,
+			windowHandle:  windowHandle,
+			eglCtx:        i.eglCtx,
+			glCtx:         i.glCtx,
+			ownsContext:   false, // Instance owns context, Surface only references it
+			version:       i.glCtx.GetString(gl.VERSION),
+			renderer:      i.glCtx.GetString(gl.RENDERER),
+		}, nil
+	}
+
+	// Path B: create new context (Wayland — Instance had no wl_display* at init).
 	config := egl.DefaultContextConfig()
-	config.GLES = false // Use desktop OpenGL
+	config.GLES = false
 	config.NativeDisplay = displayHandle
 	ctx, err := egl.NewContext(config)
 	if err != nil {
 		return nil, fmt.Errorf("gles: failed to create EGL context: %w", err)
 	}
 
-	// Make it current to load GL functions
 	if err := ctx.MakeCurrent(); err != nil {
 		ctx.Destroy()
 		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
 	}
 
-	// Load GL function pointers
 	glCtx := &gl.Context{}
 	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
 		ctx.Destroy()
 		return nil, fmt.Errorf("gles: failed to load GL functions: %w", err)
 	}
 
-	// Query OpenGL version
 	version := glCtx.GetString(gl.VERSION)
 	renderer := glCtx.GetString(gl.RENDERER)
-
-	hal.Logger().Info("gles: surface created",
-		"version", version,
-		"renderer", renderer,
-	)
+	hal.Logger().Info("gles: surface created with new EGL context",
+		"version", version, "renderer", renderer)
 
 	return &Surface{
 		displayHandle: displayHandle,
 		windowHandle:  windowHandle,
 		eglCtx:        ctx,
 		glCtx:         glCtx,
+		ownsContext:   true, // Surface owns this context (no Instance context)
 		version:       version,
 		renderer:      renderer,
 	}, nil

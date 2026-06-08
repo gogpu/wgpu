@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.11] - 2026-06-08
+
+### Added
+
+- **GLES: shared context in CreateSurface (Windows AdapterContext parity)** —
+  When Instance has a pre-created EGL context (X11/headless), `CreateSurface`
+  shares it instead of creating a new one. Surface stores `ownsContext=false` and
+  only references the Instance context. On Wayland (no Instance context),
+  `CreateSurface` creates its own (`ownsContext=true`). Matches Windows pattern
+  where Surface is lightweight (HWND + shared AdapterContext reference).
+- **GLES: tiered EGL config selection (Rust wgpu-hal egl.rs:218-293 parity)** —
+  `chooseEGLConfig` now tries WINDOW+PBUFFER first, falls back to PBUFFER-only.
+  Ensures the chosen config supports both headless rendering (pbuffer) and later
+  window presentation.
+- **GLES: CI GL object creation test** — `TestGLObjectCreation` verifies
+  `GenBuffers`, `GenTextures`, `GenVertexArrays`, `GenFramebuffers` return non-zero
+  IDs through goffi. Catches the FFI pointer convention bug (PR #210, ADR-044)
+  that went undetected because CI previously only tested EGL init.
+
 ## [0.29.10] - 2026-06-08
 
 ### Added

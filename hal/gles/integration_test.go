@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
+	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // TestEGLInit tests basic EGL initialization.
@@ -102,6 +103,67 @@ func TestEGLContext(t *testing.T) {
 	// Destroy context
 	ctx.Destroy()
 	t.Log("Context destroyed")
+}
+
+// TestGLObjectCreation verifies that GL object creation works through goffi.
+// This catches the fundamental FFI pointer convention bug found by @lkmavi
+// (PR #210): pointer-type args must use unsafe.Pointer(&ptr), not unsafe.Pointer(&value).
+// Without this test, the bug went undetected because CI only tested EGL init.
+func TestGLObjectCreation(t *testing.T) {
+	if err := egl.Init(); err != nil {
+		t.Fatalf("egl.Init() failed: %v", err)
+	}
+
+	config := egl.DefaultContextConfig()
+	config.GLES = false
+	ctx, err := egl.NewContext(config)
+	if err != nil {
+		t.Skipf("egl.NewContext() failed: %v", err)
+	}
+	defer ctx.Destroy()
+
+	if err := ctx.MakeCurrent(); err != nil {
+		t.Fatalf("MakeCurrent failed: %v", err)
+	}
+
+	glCtx := &gl.Context{}
+	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
+		t.Fatalf("GL load failed: %v", err)
+	}
+
+	// GenBuffers — would return 0 with old FFI bug (garbage pointer to OpenGL)
+	buf := glCtx.GenBuffers(1)
+	if buf == 0 {
+		t.Fatal("GenBuffers returned 0 — FFI pointer convention bug (see ADR-044)")
+	}
+	t.Logf("GenBuffers: %d", buf)
+	glCtx.DeleteBuffers(buf)
+
+	// GenTextures
+	tex := glCtx.GenTextures(1)
+	if tex == 0 {
+		t.Fatal("GenTextures returned 0")
+	}
+	t.Logf("GenTextures: %d", tex)
+	glCtx.DeleteTextures(tex)
+
+	// GenVertexArrays
+	vao := glCtx.GenVertexArrays(1)
+	if vao == 0 {
+		t.Fatal("GenVertexArrays returned 0")
+	}
+	t.Logf("GenVertexArrays: %d", vao)
+	glCtx.DeleteVertexArrays(vao)
+
+	// GenFramebuffers
+	fbo := glCtx.GenFramebuffers(1)
+	if fbo == 0 {
+		t.Fatal("GenFramebuffers returned 0")
+	}
+	t.Logf("GenFramebuffers: %d", fbo)
+	glCtx.DeleteFramebuffers(fbo)
+
+	t.Log("All GL object creation/deletion passed — FFI pointer convention correct")
 }
 
 // TestGLESBackend tests the full GLES backend integration.

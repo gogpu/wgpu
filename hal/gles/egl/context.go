@@ -157,9 +157,15 @@ func chooseEGLConfig(display EGLDisplay, config ContextConfig) (EGLConfig, error
 		renderableType = OpenGLBit
 	}
 
-	// Build attribute list
-	attribs := []EGLInt{
-		SurfaceType, PbufferBit,
+	// Tiered config selection (Rust wgpu-hal egl.rs:218-293).
+	// Try from best to worst: the config must support pbuffer (for headless
+	// MakeCurrent) and ideally window (for later CreateWindowSurface).
+	tiers := []EGLInt{
+		WindowBit | PbufferBit, // Tier 1: window + pbuffer (can present later)
+		PbufferBit,             // Tier 0: pbuffer only (headless/CI fallback)
+	}
+
+	baseAttribs := []EGLInt{
 		RenderableType, renderableType,
 		RedSize, 8,
 		GreenSize, 8,
@@ -167,21 +173,25 @@ func chooseEGLConfig(display EGLDisplay, config ContextConfig) (EGLConfig, error
 		AlphaSize, 8,
 		DepthSize, 24,
 		StencilSize, 8,
-		None,
 	}
 
-	// Choose config
-	var eglConfig EGLConfig
-	var numConfigs EGLInt
-	if ChooseConfig(display, &attribs[0], &eglConfig, 1, &numConfigs) == False {
-		return 0, fmt.Errorf("eglChooseConfig failed: error 0x%x", GetError())
+	for _, surfaceType := range tiers {
+		attribs := make([]EGLInt, 0, len(baseAttribs)+3)
+		attribs = append(attribs, SurfaceType, surfaceType)
+		attribs = append(attribs, baseAttribs...)
+		attribs = append(attribs, None)
+
+		var eglConfig EGLConfig
+		var numConfigs EGLInt
+		if ChooseConfig(display, &attribs[0], &eglConfig, 1, &numConfigs) == False {
+			continue
+		}
+		if numConfigs > 0 {
+			return eglConfig, nil
+		}
 	}
 
-	if numConfigs == 0 {
-		return 0, fmt.Errorf("no suitable EGL configs found")
-	}
-
-	return eglConfig, nil
+	return 0, fmt.Errorf("no suitable EGL configs found (tried window+pbuffer and pbuffer-only)")
 }
 
 // createEGLContext creates an EGL rendering context.
@@ -224,13 +234,38 @@ func createPbufferSurface(display EGLDisplay, config EGLConfig) EGLSurface {
 	return CreatePbufferSurface(display, config, &attribs[0])
 }
 
-// MakeCurrent makes this context current for the calling thread.
+// MakeCurrent makes this context current on the pbuffer (headless rendering).
 func (c *Context) MakeCurrent() error {
 	if MakeCurrent(c.display, c.pbuffer, c.pbuffer, c.context) == False {
 		return fmt.Errorf("eglMakeCurrent failed: error 0x%x", GetError())
 	}
 	return nil
 }
+
+// MakeCurrentSurface makes this context current on a window surface (for Present).
+func (c *Context) MakeCurrentSurface(surface EGLSurface) error {
+	if MakeCurrent(c.display, surface, surface, c.context) == False {
+		return fmt.Errorf("eglMakeCurrent(surface) failed: error 0x%x", GetError())
+	}
+	return nil
+}
+
+// CreateWindowSurface creates an EGL window surface for presentation.
+// The surface shares this context's display and config.
+func (c *Context) CreateWindowSurface(nativeWindow uintptr) (EGLSurface, error) {
+	attribs := []EGLInt{None}
+	surface := CreateWindowSurface(c.display, c.config, EGLNativeWindowType(nativeWindow), &attribs[0])
+	if surface == NoSurface {
+		return NoSurface, fmt.Errorf("eglCreateWindowSurface failed: error 0x%x", GetError())
+	}
+	return surface, nil
+}
+
+// Display returns the EGL display handle.
+func (c *Context) Display() EGLDisplay { return c.display }
+
+// Config returns the EGL config handle.
+func (c *Context) Config() EGLConfig { return c.config }
 
 // Destroy releases the context and its associated resources.
 // Order matters: EGL resources first, then the native display connection.
@@ -257,16 +292,6 @@ func (c *Context) Destroy() {
 		c.displayOwner.Close()
 		c.displayOwner = nil
 	}
-}
-
-// Display returns the EGL display.
-func (c *Context) Display() EGLDisplay {
-	return c.display
-}
-
-// Config returns the EGL config.
-func (c *Context) Config() EGLConfig {
-	return c.config
 }
 
 // EGLContext returns the EGL context handle.

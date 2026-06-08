@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.4
+## Current State: v0.29.11
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -66,6 +66,11 @@
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
 ✅ **Browser WebGPU backend** — complete `syscall/js` → `navigator.gpu` implementation (~6500 LOC). Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
 ✅ **GLES hidden window context (Windows)** — GL context owned by Instance on hidden 1×1 HWND, shared via mutex-protected `AdapterContext`. Adapter/Device/Queue survive Surface destruction. Follows Rust wgpu-hal `wgl.rs` `AdapterContext::lock()`/`lock_with_dc()` pattern. Surface lightweight — no context ownership.
+✅ **GLES instance-level EGL context (Linux)** — surfaceless/pbuffer context at CreateInstance (Rust wgpu-hal `egl.rs:846` parity). Tiered config selection WINDOW+PBUFFER → PBUFFER-only (Rust `egl.rs:218-293`). Shared context in CreateSurface on X11/headless, own context on Wayland.
+✅ **GLES FFI pointer convention fix (Linux)** — 30+ GL calls in `context_linux.go` fixed: pointer-type args corrected for goffi `CallFunction` (PR #210, @lkmavi). ADR-044 documents convention. CI test verifies GenBuffers/GenTextures through goffi.
+✅ **GLES fence sync ordering** — `glFenceSync` before `glFlush` (was reversed). PollCompleted uses non-blocking `glGetSynciv`. Confirmed by ANGLE bug 6464, virglrenderer commit 21bbc9ea, Mesa Gallium. `Fence.Signal` returns error (Rust parity).
+✅ **Wayland SHM presentation (enterprise quality)** — display wrapper pattern (Qt6 parity), `wl_display_roundtrip_queue`, proper proxy cleanup, triple-buffer freeze fix (bufferBusyMap pointer + roundtrip_queue dispatch). Verified on WSL2.
+✅ **Codecov OIDC** — replaced token + GPG verification with GitHub OIDC. No more intermittent CI failures from GPG keyserver.
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -76,8 +81,8 @@
 | Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
-| GLES | Windows, Linux | ✅ Stable — hidden window context (Rust parity), Wayland EGL (EGL 1.5 + fallback), glFenceSync, copy commands, timestamps, real adapter capabilities, compute barriers |
-| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. All 3 desktop platforms + Wayland. |
+| GLES | Windows, Linux | ✅ Stable — hidden window (Win), instance-level EGL (Linux), FFI pointer fix (@lkmavi), fence sync ordering, Wayland EGL (EGL 1.5 + fallback), surfaceless/pbuffer, tiered config, compute barriers |
+| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. Wayland: display wrapper pattern, roundtrip_queue, triple-buffer. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 
@@ -90,7 +95,8 @@
 - [x] GLES hidden window context (Windows) — Instance-owned GL context, Rust wgpu parity (FEAT-GLES-002)
 - [x] Wayland SHM presentation (Software backend) — triple-buffered wl_shm, release listener, partial copy, variadic ABI (ADR-042/043)
 - [x] Wayland EGL window surface (GLES backend) — wl_egl_window, EGL 1.5 eglCreatePlatformWindowSurface (ADR-042)
-- [ ] GLES hidden window context (Linux) — EGL surfaceless/pbuffer, Phase 2 of FEAT-GLES-002
+- [x] GLES instance-level EGL context (Linux) — surfaceless/pbuffer, tiered config, shared context (v0.29.10-v0.29.11)
+- [ ] GLES shared AdapterContext (Linux) — full Windows parity with Lock/LockForSurface/Unlock (FEAT-GLES-003)
 - [x] macOS software presentation — CGImage + CAMetalLayer (PR #187, @k-chimi, v0.28.4)
 - [ ] DX12 DeviceTextureTracker for proper barrier state tracking
 - [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
@@ -154,6 +160,18 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.29.11** | 2026-06 | GLES: shared context + tiered config + CI GL test. Completes ADR-045 enterprise parity. |
+| **v0.29.10** | 2026-06 | GLES: instance-level EGL context (Linux), surfaceless fallback, FFI pointer fix (PR #210, @lkmavi). |
+| **v0.29.9** | 2026-06 | Software: Wayland SHM triple-buffer freeze fix (bufferBusyMap + roundtrip_queue). |
+| **v0.29.8** | 2026-06 | Software: Wayland display wrapper pattern — queue mismatch fix. |
+| **v0.29.7** | 2026-06 | Software: eager Wayland wl_shm init in Configure (SIGSEGV fix, gogpu#292). |
+| **v0.29.6** | 2026-06 | GLES: Fence.Signal returns error on glFenceSync failure (Rust parity). |
+| **v0.29.5** | 2026-06 | GLES: fence sync ordering — glFenceSync before glFlush. Confirmed by ANGLE/virglrenderer/Mesa. |
+| **v0.29.4** | 2026-06 | Software: dedicated wl_event_queue for SHM buffer release dispatch. |
+| **v0.29.3** | 2026-06 | Software: Wayland SHM present (enterprise). GLES: compute/instancing/topology fixes. |
+| **v0.29.2** | 2026-06 | Vulkan: VK_ERROR_SURFACE_LOST_KHR (Rust parity). goffi v0.5.3. |
+| **v0.29.1** | 2026-05 | go-webgpu/webgpu v0.5.2. |
+| **v0.29.0** | 2026-05 | ADR-038: Rust backend at public API level (browser pattern). |
 | **v0.28.11** | 2026-05 | Core: direct-write trackedRefs (pass → encoder, zero intermediate copies). |
 | **v0.28.10** | 2026-05 | Core: pre-allocate trackedRefs in pass encoders (ML OOM fix). |
 | **v0.28.9** | 2026-05 | Core: refcount-driven Buffer destruction via onZero (Rust Drop parity). Eliminates Phase 1 stale index risk. |
