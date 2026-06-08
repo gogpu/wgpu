@@ -23,8 +23,9 @@ type Device struct {
 	eglCtx          *egl.Context
 	displayHandle   uintptr
 	windowHandle    uintptr
-	vao             uint32 // persistent VAO (Core Profile requires one bound)
-	maxTextureUnits int32  // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
+	vao             uint32       // persistent VAO (Core Profile requires one bound)
+	maxTextureUnits int32        // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
+	glslVersion     glsl.Version // derived from caps at device creation, never changes
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -394,7 +395,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
+	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap, d.glslVersion)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -479,6 +480,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		multisample:       desc.Multisample,
 		blend:             blend,
 		colorWriteMask:    colorWriteMask,
+		vertexBuffers:     desc.Vertex.Buffers,
 	}
 
 	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.
@@ -532,7 +534,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
+	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap, d.glslVersion)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -753,7 +755,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[g
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap, d.glslVersion)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

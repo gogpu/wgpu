@@ -40,8 +40,9 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 
 	// Try to create instance-level EGL context (Rust wgpu-hal parity).
 	// NativeDisplay=0 uses EGL_DEFAULT_DISPLAY or EGL_MESA_platform_surfaceless.
+	// Desktop GL (GLES=false) works on X11/headless. On Wayland this fails
+	// (expected — no wl_display* yet); CreateSurface Path B handles Wayland.
 	config := egl.DefaultContextConfig()
-	config.GLES = false
 	ctx, err := egl.NewContext(config)
 	if err != nil {
 		hal.Logger().Info("gles: instance context unavailable (expected on Wayland)", "err", err)
@@ -107,9 +108,14 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 	}
 
 	// Path B: create new context (Wayland — Instance had no wl_display* at init).
-	config := egl.DefaultContextConfig()
-	config.GLES = false
-	config.NativeDisplay = displayHandle
+	// GLES=true: Wayland Mesa EGL only exposes EGL_OPENGL_ES3_BIT configs, not
+	// EGL_OPENGL_BIT. Desktop GL 3.3 request fails with "no suitable EGL configs".
+	config := egl.ContextConfig{
+		GLVersionMajor: 3,
+		GLVersionMinor: 0,
+		GLES:           true,
+		NativeDisplay:  displayHandle,
+	}
 	ctx, err := egl.NewContext(config)
 	if err != nil {
 		return nil, fmt.Errorf("gles: failed to create EGL context: %w", err)

@@ -16,10 +16,27 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// GLSLVersionFromCaps selects the GLSL target version from probed adapter capabilities.
+// For GLES: ES 3.2 → VersionES320, ES 3.1 → VersionES310 (compute), ES 3.0 → VersionES300.
+// For desktop GL: always Version430 (layout(binding=N) + compute).
+func GLSLVersionFromCaps(caps AdapterCapabilities) glsl.Version {
+	if caps.IsES {
+		switch {
+		case caps.GLMajor > 3 || (caps.GLMajor == 3 && caps.GLMinor >= 2):
+			return glsl.VersionES320
+		case caps.GLMajor == 3 && caps.GLMinor >= 1:
+			return glsl.VersionES310
+		default:
+			return glsl.VersionES300
+		}
+	}
+	return glsl.Version430
+}
+
 // compileWGSLToGLSL compiles a WGSL shader source to GLSL for the given entry point.
-// OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL 4.30 core.
-// GLSL 4.30 is required because naga emits layout(binding=N) qualifiers which are
-// not available in GLSL 3.30. OpenGL 4.3+ is supported on all modern GPUs (2012+).
+// OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL.
+// version must be glsl.Version430 for desktop GL or glsl.VersionES3xx for GLES;
+// use GLSLVersionFromCaps to derive it from the adapter capabilities.
 //
 // The bindingMap parameter provides the pre-computed (group, binding) -> GL slot mapping
 // from PipelineLayout (computed via per-type sequential counters in CreatePipelineLayout).
@@ -27,7 +44,7 @@ import (
 //
 // Returns the GLSL source and TranslationInfo containing TextureMappings for
 // SamplerBindMap construction (which sampler goes with which texture unit).
-func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
+func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap map[glsl.BindingMapKey]uint8, version glsl.Version) (string, glsl.TranslationInfo, error) {
 	if source.WGSL == "" {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
@@ -44,11 +61,10 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap ma
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL lower error: %w", err)
 	}
 
-	// Compile IR to GLSL 4.30 core.
-	// Version 4.30 is needed for layout(binding=N) resource binding qualifiers
-	// and compute shader support (local_size_x/y/z).
+	// Compile IR to GLSL. version is Version430 for desktop GL or VersionES3xx for GLES.
+	// Both support layout(binding=N); ES 3.10+ also supports compute shaders.
 	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
-		LangVersion:        glsl.Version430,
+		LangVersion:        version,
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
 		BindingMap:         bindingMap,

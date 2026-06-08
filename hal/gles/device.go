@@ -410,7 +410,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
+	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap, glsl.Version430)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -558,7 +558,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
+	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap, glsl.Version430)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -823,7 +823,7 @@ func compileFragmentShader(glCtx *gl.Context, frag *hal.FragmentState, bindingMa
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap, glsl.Version430)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

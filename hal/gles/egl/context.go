@@ -204,8 +204,9 @@ func createEGLContext(display EGLDisplay, config EGLConfig, cfg ContextConfig) E
 		ContextMinorVersion, EGLInt(cfg.GLVersionMinor),
 	)
 
-	// Set profile (core vs compatibility)
-	if cfg.CoreProfile {
+	// Set profile (core vs compatibility) — desktop OpenGL only.
+	// EGL_CONTEXT_OPENGL_PROFILE_MASK is invalid for GLES and some drivers reject it.
+	if cfg.CoreProfile && !cfg.GLES {
 		attribs = append(attribs,
 			ContextOpenGLProfileMask, ContextOpenGLCoreProfileBit,
 		)
