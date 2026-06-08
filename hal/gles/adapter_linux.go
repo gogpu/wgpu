@@ -73,7 +73,7 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 		windowHandle:    a.windowHandle,
 		vao:             vao,
 		maxTextureUnits: maxTexUnits,
-		glslVersion:     GLSLVersionFromCaps(a.caps),
+		glslVersion:     GLSLVersionFromCaps(&a.caps),
 	}
 
 	queue := &Queue{

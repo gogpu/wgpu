@@ -19,7 +19,7 @@ import (
 // GLSLVersionFromCaps selects the GLSL target version from probed adapter capabilities.
 // For GLES: ES 3.2 → VersionES320, ES 3.1 → VersionES310 (compute), ES 3.0 → VersionES300.
 // For desktop GL: always Version430 (layout(binding=N) + compute).
-func GLSLVersionFromCaps(caps AdapterCapabilities) glsl.Version {
+func GLSLVersionFromCaps(caps *AdapterCapabilities) glsl.Version {
 	if caps.IsES {
 		switch {
 		case caps.GLMajor > 3 || (caps.GLMajor == 3 && caps.GLMinor >= 2):
