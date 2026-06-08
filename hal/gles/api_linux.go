@@ -44,9 +44,12 @@ type Instance struct{}
 // For X11: displayHandle is X11 Display*, windowHandle is Window.
 // For Wayland: displayHandle is wl_display*, windowHandle is wl_surface*.
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
-	// Create EGL context with automatic platform detection
+	// Create EGL context with automatic platform detection.
+	// NativeDisplay must be the app's wl_display* on Wayland so EGL shares the
+	// same display connection as the wl_surface — see egl.GetEGLDisplay.
 	config := egl.DefaultContextConfig()
 	config.GLES = false // Use desktop OpenGL
+	config.NativeDisplay = displayHandle
 	ctx, err := egl.NewContext(config)
 	if err != nil {
 		return nil, fmt.Errorf("gles: failed to create EGL context: %w", err)

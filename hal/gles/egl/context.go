@@ -34,6 +34,11 @@ type ContextConfig struct {
 	GLES bool
 	// Surfaceless creates a context without a surface (headless rendering).
 	Surfaceless bool
+	// NativeDisplay is the native display handle to use for EGL display creation.
+	// On Wayland: must be the app's wl_display* — passing 0 causes EGL to open
+	// a second connection, which makes wl_surface proxies mismatched on configure.
+	// On X11: the X11 Display*. Zero uses the default display.
+	NativeDisplay uintptr
 }
 
 // DefaultContextConfig returns a sensible default context configuration.
@@ -55,7 +60,7 @@ func DefaultContextConfig() ContextConfig {
 func NewContext(config ContextConfig) (*Context, error) {
 	// Get EGL display for the detected platform.
 	// displayOwner (non-nil for X11) keeps the native display connection alive.
-	display, windowKind, displayOwner, err := GetEGLDisplay()
+	display, windowKind, displayOwner, err := GetEGLDisplay(config.NativeDisplay)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get EGL display: %w", err)
 	}

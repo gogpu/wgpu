@@ -214,18 +214,12 @@ func DetectWindowKind() WindowKind {
 }
 
 // GetEGLDisplay returns an EGL display for the detected platform.
-// It automatically detects the window system and uses the appropriate EGL platform.
-//
-// When the display is backed by an X11 connection, the returned DisplayOwner
-// holds that connection open. The caller MUST keep the DisplayOwner alive for
-// the lifetime of the EGL display and call DisplayOwner.Close() only AFTER
-// eglTerminate. Closing the DisplayOwner earlier causes a use-after-close
-// SIGSEGV when EGL accesses the underlying X11 connection.
-//
-// For Wayland and Surfaceless platforms the returned DisplayOwner is nil
-// because those paths do not open a native display connection that must be
-// kept alive.
-func GetEGLDisplay() (EGLDisplay, WindowKind, *DisplayOwner, error) {
+// nativeDisplay is the platform-specific native display handle:
+//   - Wayland: the app's wl_display* — must NOT be 0, otherwise EGL opens a
+//     second wl_display connection and wl_surface proxies will mismatch on configure.
+//   - X11: the X11 Display* (0 = use DISPLAY env var via OpenX11Display).
+//   - Surfaceless: ignored.
+func GetEGLDisplay(nativeDisplay uintptr) (EGLDisplay, WindowKind, *DisplayOwner, error) {
 	windowKind := DetectWindowKind()
 
 	switch windowKind {
@@ -250,15 +244,18 @@ func GetEGLDisplay() (EGLDisplay, WindowKind, *DisplayOwner, error) {
 		return display, WindowKindX11, owner, nil
 
 	case WindowKindWayland:
-		// For Wayland, we use the default display (NULL)
-		// The actual Wayland connection will be managed by the window system
-		display := GetPlatformDisplay(PlatformWaylandKHR, 0, nil)
+		// Use the caller's wl_display so EGL shares the same Wayland connection
+		// as the window. Passing 0 would make EGL open a second connection via
+		// wl_display_connect(NULL), causing "Proxy and queue point to different
+		// wl_displays" when eglCreatePlatformWindowSurface tries to register
+		// protocol objects on the app's wl_surface.
+		display := GetPlatformDisplay(PlatformWaylandKHR, nativeDisplay, nil)
 		if display != NoDisplay {
 			return display, WindowKindWayland, nil, nil
 		}
 
-		// Fallback to EGL 1.4
-		display = GetDisplay(DefaultDisplay)
+		// Fallback to EGL 1.4 with same native display
+		display = GetDisplay(EGLNativeDisplayType(nativeDisplay))
 		if display == NoDisplay {
 			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("eglGetDisplay failed for Wayland")
 		}

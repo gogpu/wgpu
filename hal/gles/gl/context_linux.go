@@ -742,7 +742,7 @@ func (c *Context) GetString(name uint32) string {
 func (c *Context) GetIntegerv(pname uint32, data *int32) {
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&pname),
-		unsafe.Pointer(data),
+		unsafe.Pointer(&data),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGetIntegerv, nil, args[:])
 }
@@ -872,11 +872,16 @@ func (c *Context) ShaderSource(shader uint32, source string) {
 	defer free()
 	count := int32(1)
 	length := int32(len(source))
+	// goffi PointerType: FFI reads 8 bytes from args[i] to fill the register.
+	// For a pointer argument P, args[i] must point to a location that contains P,
+	// so that the FFI dereference yields P — not *P.
+	stringsPtr := &csource // **byte; FFI reads csource → OpenGL gets &csource as strings
+	lengthsPtr := &length  // *int32; FFI reads &length → OpenGL gets &length as lengths
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&shader),
 		unsafe.Pointer(&count),
-		unsafe.Pointer(&csource),
-		unsafe.Pointer(&length),
+		unsafe.Pointer(&stringsPtr),
+		unsafe.Pointer(&lengthsPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid4Shader, c.glShaderSource, nil, args[:])
 }
@@ -890,7 +895,7 @@ func (c *Context) GetShaderiv(shader uint32, pname uint32, params *int32) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&shader),
 		unsafe.Pointer(&pname),
-		unsafe.Pointer(params),
+		unsafe.Pointer(&params), // FFI reads params (= &int32) → OpenGL writes output to *params
 	}
 	_ = ffi.CallFunction(&cifVoid3Shader, c.glGetShaderiv, nil, args[:])
 }
@@ -903,11 +908,13 @@ func (c *Context) GetShaderInfoLog(shader uint32) string {
 	}
 	buf := make([]byte, length)
 	maxLen := uint32(length)
+	lenPtr := &length // *int32; FFI reads &length → OpenGL writes actual log length
+	bufPtr := &buf[0] // *byte;  FFI reads &buf[0]  → OpenGL writes log text
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&shader),
 		unsafe.Pointer(&maxLen),
-		unsafe.Pointer(&length),
-		unsafe.Pointer(&buf[0]),
+		unsafe.Pointer(&lenPtr),
+		unsafe.Pointer(&bufPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid4Log, c.glGetShaderInfoLog, nil, args[:])
 	return string(buf[:length])
@@ -946,7 +953,7 @@ func (c *Context) GetProgramiv(program uint32, pname uint32, params *int32) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&program),
 		unsafe.Pointer(&pname),
-		unsafe.Pointer(params),
+		unsafe.Pointer(&params), // FFI reads params (= &int32) → OpenGL writes output to *params
 	}
 	_ = ffi.CallFunction(&cifVoid3Shader, c.glGetProgramiv, nil, args[:])
 }
@@ -959,11 +966,13 @@ func (c *Context) GetProgramInfoLog(program uint32) string {
 	}
 	buf := make([]byte, length)
 	maxLen := uint32(length)
+	lenPtr := &length // *int32; FFI reads &length → OpenGL writes actual log length
+	bufPtr := &buf[0] // *byte;  FFI reads &buf[0]  → OpenGL writes log text
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&program),
 		unsafe.Pointer(&maxLen),
-		unsafe.Pointer(&length),
-		unsafe.Pointer(&buf[0]),
+		unsafe.Pointer(&lenPtr),
+		unsafe.Pointer(&bufPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid4Log, c.glGetProgramInfoLog, nil, args[:])
 	return string(buf[:length])
@@ -975,7 +984,7 @@ func (c *Context) GetUniformLocation(program uint32, name string) int32 {
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&program),
-		unsafe.Pointer(cname),
+		unsafe.Pointer(&cname), // FFI reads cname → OpenGL gets char* name
 	}
 	_ = ffi.CallFunction(&cifInt322, c.glGetUniformLocation, unsafe.Pointer(&result), args[:])
 	return result
@@ -987,7 +996,7 @@ func (c *Context) GetAttribLocation(program uint32, name string) int32 {
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&program),
-		unsafe.Pointer(cname),
+		unsafe.Pointer(&cname), // FFI reads cname → OpenGL gets char* name
 	}
 	_ = ffi.CallFunction(&cifInt322, c.glGetAttribLocation, unsafe.Pointer(&result), args[:])
 	return result
@@ -997,9 +1006,10 @@ func (c *Context) GetAttribLocation(program uint32, name string) int32 {
 
 func (c *Context) GenBuffers(n int32) uint32 {
 	var buffer uint32
+	pBuffer := &buffer // *uint32; FFI reads &buffer → OpenGL writes new ID into buffer
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&pBuffer),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenBuffers, nil, args[:])
 	return buffer
@@ -1007,9 +1017,10 @@ func (c *Context) GenBuffers(n int32) uint32 {
 
 func (c *Context) DeleteBuffers(buffers ...uint32) {
 	n := int32(len(buffers))
+	pBuffers := &buffers[0] // *uint32; FFI reads &buffers[0] → OpenGL reads IDs from slice
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&buffers[0]),
+		unsafe.Pointer(&pBuffers),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteBuffers, nil, args[:])
 }
@@ -1027,7 +1038,7 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&sizePtr),
-		unsafe.Pointer(data), //nolint:govet // FFI requires uintptr-to-pointer conversion
+		unsafe.Pointer(&data), // FFI reads data (address of buffer) → OpenGL gets void*
 		unsafe.Pointer(&usage),
 	}
 	_ = ffi.CallFunction(&cifVoid4Buffer, c.glBufferData, nil, args[:])
@@ -1036,11 +1047,12 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
 	offsetPtr := uintptr(offset)
 	sizePtr := uintptr(size)
+	dataPtr := data // unsafe.Pointer; FFI reads dataPtr → OpenGL gets void*
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&offsetPtr),
 		unsafe.Pointer(&sizePtr),
-		data,
+		unsafe.Pointer(&dataPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid4SubBuf, c.glBufferSubData, nil, args[:])
 }
@@ -1079,9 +1091,10 @@ func (c *Context) UnmapBuffer(target uint32) bool {
 
 func (c *Context) GenVertexArrays(n int32) uint32 {
 	var vao uint32
+	pVao := &vao
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&vao),
+		unsafe.Pointer(&pVao),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenVertexArrays, nil, args[:])
 	return vao
@@ -1089,9 +1102,10 @@ func (c *Context) GenVertexArrays(n int32) uint32 {
 
 func (c *Context) DeleteVertexArrays(arrays ...uint32) {
 	n := int32(len(arrays))
+	pArrays := &arrays[0]
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&arrays[0]),
+		unsafe.Pointer(&pArrays),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteVertexArrays, nil, args[:])
 }
@@ -1147,9 +1161,10 @@ func (c *Context) VertexAttribDivisor(index, divisor uint32) {
 
 func (c *Context) GenTextures(n int32) uint32 {
 	var tex uint32
+	pTex := &tex
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&tex),
+		unsafe.Pointer(&pTex),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenTextures, nil, args[:])
 	return tex
@@ -1157,9 +1172,10 @@ func (c *Context) GenTextures(n int32) uint32 {
 
 func (c *Context) DeleteTextures(textures ...uint32) {
 	n := int32(len(textures))
+	pTextures := &textures[0]
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&textures[0]),
+		unsafe.Pointer(&pTextures),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteTextures, nil, args[:])
 }
@@ -1196,12 +1212,13 @@ func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, w
 		unsafe.Pointer(&border),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&typ),
-		unsafe.Pointer(pixels), //nolint:govet // FFI requires uintptr-to-pointer conversion
+		unsafe.Pointer(&pixels),
 	}
 	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexImage2D, nil, args[:])
 }
 
 func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, width, height int32, format, typ uint32, pixels unsafe.Pointer) {
+	pixelsPtr := pixels
 	args := [9]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&level),
@@ -1211,7 +1228,7 @@ func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, wi
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&typ),
-		pixels,
+		unsafe.Pointer(&pixelsPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid9TexImg, c.glTexSubImage2D, nil, args[:])
 }
@@ -1275,9 +1292,10 @@ func (c *Context) GenSamplers(n int32) uint32 {
 		return 0
 	}
 	var sampler uint32
+	pSampler := &sampler
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&sampler),
+		unsafe.Pointer(&pSampler),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenSamplers, nil, args[:])
 	return sampler
@@ -1290,9 +1308,10 @@ func (c *Context) DeleteSamplers(samplers ...uint32) {
 		return
 	}
 	n := int32(len(samplers))
+	pSamplers := &samplers[0]
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&samplers[0]),
+		unsafe.Pointer(&pSamplers),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteSamplers, nil, args[:])
 }
@@ -1347,9 +1366,10 @@ func (c *Context) SupportsSamplerObjects() bool {
 
 func (c *Context) GenFramebuffers(n int32) uint32 {
 	var fbo uint32
+	pFbo := &fbo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&fbo),
+		unsafe.Pointer(&pFbo),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenFramebuffers, nil, args[:])
 	return fbo
@@ -1357,9 +1377,10 @@ func (c *Context) GenFramebuffers(n int32) uint32 {
 
 func (c *Context) DeleteFramebuffers(framebuffers ...uint32) {
 	n := int32(len(framebuffers))
+	pFramebuffers := &framebuffers[0]
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&framebuffers[0]),
+		unsafe.Pointer(&pFramebuffers),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteFramebuffers, nil, args[:])
 }
@@ -1395,9 +1416,10 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 // GenRenderbuffers generates a single renderbuffer object and returns its name.
 func (c *Context) GenRenderbuffers(n int32) uint32 {
 	var rbo uint32
+	pRbo := &rbo
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&rbo),
+		unsafe.Pointer(&pRbo),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenRenderbuffers, nil, args[:])
 	return rbo
@@ -1409,9 +1431,10 @@ func (c *Context) DeleteRenderbuffers(renderbuffers ...uint32) {
 		return
 	}
 	n := int32(len(renderbuffers))
+	pRenderbuffers := &renderbuffers[0]
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&renderbuffers[0]),
+		unsafe.Pointer(&pRenderbuffers),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteRenderbuffers, nil, args[:])
 }
@@ -1455,6 +1478,7 @@ func (c *Context) FramebufferRenderbuffer(target, attachment, renderbufferTarget
 
 // ReadPixels reads a block of pixels from the framebuffer.
 func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32, pixels unsafe.Pointer) {
+	pixelsPtr := pixels
 	args := [7]unsafe.Pointer{
 		unsafe.Pointer(&x),
 		unsafe.Pointer(&y),
@@ -1462,7 +1486,7 @@ func (c *Context) ReadPixels(x, y, width, height int32, format, dataType uint32,
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&dataType),
-		pixels,
+		unsafe.Pointer(&pixelsPtr),
 	}
 	_ = ffi.CallFunction(&cifVoid7ReadPx, c.glReadPixels, nil, args[:])
 }
@@ -1554,7 +1578,7 @@ func (c *Context) GetUniformBlockIndex(program uint32, name string) uint32 {
 	var result int32
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&program),
-		unsafe.Pointer(cname),
+		unsafe.Pointer(&cname), // FFI reads cname → OpenGL gets char* name
 	}
 	_ = ffi.CallFunction(&cifInt322, c.glGetUniformBlockIndex, unsafe.Pointer(&result), args[:])
 	return uint32(result)
@@ -1681,7 +1705,7 @@ func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, in
 		unsafe.Pointer(&mode),
 		unsafe.Pointer(&count),
 		unsafe.Pointer(&typ),
-		unsafe.Pointer(indices), //nolint:govet // FFI requires uintptr-to-pointer conversion
+		unsafe.Pointer(&indices), // FFI reads &indices → OpenGL gets indices value as void*
 		unsafe.Pointer(&instanceCount),
 	}
 	_ = ffi.CallFunction(&cifVoid5DrawElem, c.glDrawElementsInstanced, nil, args[:])
@@ -1746,9 +1770,10 @@ func (c *Context) GenQueries(n int32) uint32 {
 		return 0
 	}
 	var query uint32
+	pQuery := &query
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(&query),
+		unsafe.Pointer(&pQuery),
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glGenQueries, nil, args[:])
 	return query
@@ -1761,7 +1786,7 @@ func (c *Context) DeleteQueries(n int32, queries *uint32) {
 	}
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&n),
-		unsafe.Pointer(queries),
+		unsafe.Pointer(&queries), // FFI reads queries (= *uint32) → OpenGL gets pointer to IDs
 	}
 	_ = ffi.CallFunction(&cifVoid2, c.glDeleteQueries, nil, args[:])
 }
@@ -1787,7 +1812,7 @@ func (c *Context) GetQueryObjectui64v(query, pname uint32, result *uint64) {
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&query),
 		unsafe.Pointer(&pname),
-		unsafe.Pointer(result),
+		unsafe.Pointer(&result),
 	}
 	_ = ffi.CallFunction(&cifVoid3Shader, c.glGetQueryObjectui64v, nil, args[:])
 }
@@ -1869,12 +1894,14 @@ func (c *Context) GetSyncStatus(sync uintptr) uint32 {
 	count := int32(1)
 	var length int32
 	var value int32
+	pLength := &length
+	pValue := &value
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&sync),
 		unsafe.Pointer(&pname),
 		unsafe.Pointer(&count),
-		unsafe.Pointer(&length),
-		unsafe.Pointer(&value),
+		unsafe.Pointer(&pLength), // FFI reads pLength (= &length) → OpenGL writes to length
+		unsafe.Pointer(&pValue),  // FFI reads pValue (= &value) → OpenGL writes to value
 	}
 	_ = ffi.CallFunction(&cifGSI, c.glGetSynciv, nil, args[:])
 	return uint32(value)

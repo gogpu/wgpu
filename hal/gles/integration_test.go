@@ -38,7 +38,7 @@ func TestEGLInit(t *testing.T) {
 	}
 
 	// Get EGL display (will use surfaceless if no DISPLAY/WAYLAND_DISPLAY set)
-	display, windowKind, displayOwner, err := egl.GetEGLDisplay()
+	display, windowKind, displayOwner, err := egl.GetEGLDisplay(0)
 	if err != nil {
 		t.Fatalf("egl.GetEGLDisplay() failed: %v", err)
 	}

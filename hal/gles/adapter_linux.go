@@ -6,6 +6,8 @@
 package gles
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
@@ -29,6 +31,13 @@ type Adapter struct {
 
 // Open creates a logical device with the requested features and limits.
 func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	// EnumerateAdapters(nil) path returns an adapter with nil glCtx because no
+	// EGL context can be created without a display/window handle. Return a
+	// descriptive error instead of a nil pointer dereference at GenVertexArrays.
+	if a.glCtx == nil {
+		return hal.OpenDevice{}, fmt.Errorf("gles: adapter has no GL context — pass a surface hint to CreateSurface before RequestDevice")
+	}
+
 	// Make context current if we have one
 	if a.eglCtx != nil {
 		if err := a.eglCtx.MakeCurrent(); err != nil {
