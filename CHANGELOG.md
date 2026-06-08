@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.10] - 2026-06-08
+
+### Added
+
+- **GLES: instance-level EGL context on Linux (Rust wgpu-hal parity)** —
+  `CreateInstance` now creates an EGL context via surfaceless/pbuffer at init time,
+  matching Rust wgpu-hal `egl.rs:846` and Windows hidden window pattern (v0.28.6).
+  `EnumerateAdapters` uses the instance context to return real GPU name/vendor/version
+  instead of placeholder "Unknown" values. On Wayland (no `wl_display*` at init),
+  gracefully degrades — `CreateSurface` provides context later (nil guard from PR #210).
+
+### Fixed
+
+- **GLES: EGL surfaceless context fallback (Rust wgpu-hal egl.rs:735-758 parity)** —
+  `NewContext` now checks for `EGL_KHR_surfaceless_context` or EGL 1.5+ before
+  creating pbuffer. When surfaceless is available, `MakeCurrent(EGL_NO_SURFACE)`
+  works without a dummy 1×1 pbuffer. Fallback to pbuffer on older drivers.
+- **GLES: FFI pointer convention in context_linux.go** (PR #210, @lkmavi) —
+  30+ GL calls fixed: `unsafe.Pointer(&value)` → `unsafe.Pointer(&pointer)` for
+  PointerType goffi arguments. See ADR-044. Fundamental fix enabling GLES rendering
+  on Linux for the first time.
+
 ## [0.29.9] - 2026-06-07
 
 ### Fixed

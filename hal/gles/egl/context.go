@@ -7,6 +7,7 @@ package egl
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 )
 
@@ -106,14 +107,27 @@ func NewContext(config ContextConfig) (*Context, error) {
 		return nil, fmt.Errorf("eglCreateContext failed: error 0x%x", GetError())
 	}
 
-	// Create a pbuffer surface for the context
-	// This is needed even for surfaceless rendering on some drivers
-	pbuffer := createPbufferSurface(display, eglConfig)
-	if pbuffer == NoSurface {
-		DestroyContext(display, eglContext)
-		Terminate(display)
-		closeOwner()
-		return nil, fmt.Errorf("eglCreatePbufferSurface failed: error 0x%x", GetError())
+	// Surfaceless context: EGL 1.5+ or EGL_KHR_surfaceless_context allows
+	// MakeCurrent with EGL_NO_SURFACE. Skip pbuffer creation in that case.
+	// Fallback to 1×1 pbuffer for older drivers.
+	// Matches Rust wgpu-hal egl.rs:735-758.
+	hasSurfaceless := (major > 1 || (major == 1 && minor >= 5))
+	if !hasSurfaceless {
+		displayExts := QueryString(display, Extensions)
+		hasSurfaceless = strings.Contains(displayExts, "EGL_KHR_surfaceless_context")
+	}
+
+	var pbuffer EGLSurface
+	if hasSurfaceless {
+		pbuffer = NoSurface
+	} else {
+		pbuffer = createPbufferSurface(display, eglConfig)
+		if pbuffer == NoSurface {
+			DestroyContext(display, eglContext)
+			Terminate(display)
+			closeOwner()
+			return nil, fmt.Errorf("eglCreatePbufferSurface failed and no surfaceless support: error 0x%x", GetError())
+		}
 	}
 
 	return &Context{

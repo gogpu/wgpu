@@ -26,18 +26,56 @@ func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendGL
 }
 
-// CreateInstance creates a new OpenGL instance.
+// CreateInstance creates a new OpenGL instance with an optional EGL context.
+// Attempts to create an EGL context at instance level (Rust wgpu-hal egl.rs:846
+// parity) for adapter enumeration without a surface. Uses surfaceless/pbuffer
+// context — same role as Windows hidden 1×1 HWND (v0.28.6).
+//
+// On Wayland, this may fail (EGL needs wl_display*) — that's OK, CreateSurface
+// provides the proper context later. On X11/headless, this succeeds.
 func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
-	// Initialize EGL on Linux
 	if err := egl.Init(); err != nil {
 		return nil, fmt.Errorf("gles: failed to initialize EGL: %w", err)
 	}
-	hal.Logger().Info("gles: instance created", "platform", "linux")
-	return &Instance{}, nil
+
+	// Try to create instance-level EGL context (Rust wgpu-hal parity).
+	// NativeDisplay=0 uses EGL_DEFAULT_DISPLAY or EGL_MESA_platform_surfaceless.
+	config := egl.DefaultContextConfig()
+	config.GLES = false
+	ctx, err := egl.NewContext(config)
+	if err != nil {
+		hal.Logger().Info("gles: instance context unavailable (expected on Wayland)", "err", err)
+		return &Instance{}, nil
+	}
+
+	if err := ctx.MakeCurrent(); err != nil {
+		ctx.Destroy()
+		hal.Logger().Warn("gles: instance context MakeCurrent failed", "err", err)
+		return &Instance{}, nil
+	}
+
+	glCtx := &gl.Context{}
+	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
+		ctx.Destroy()
+		hal.Logger().Warn("gles: instance GL load failed", "err", err)
+		return &Instance{}, nil
+	}
+
+	hal.Logger().Info("gles: instance created with EGL context",
+		"version", glCtx.GetString(gl.VERSION),
+		"renderer", glCtx.GetString(gl.RENDERER))
+
+	return &Instance{eglCtx: ctx, glCtx: glCtx}, nil
 }
 
 // Instance implements hal.Instance for the OpenGL backend on Linux.
-type Instance struct{}
+// eglCtx/glCtx are non-nil when an instance-level EGL context was created
+// successfully (X11/headless). On Wayland they may be nil — CreateSurface
+// provides the context when a window handle is available.
+type Instance struct {
+	eglCtx *egl.Context
+	glCtx  *gl.Context
+}
 
 // CreateSurface creates an OpenGL surface from window handles.
 // On Linux: displayHandle and windowHandle are platform-specific.
@@ -88,41 +126,68 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 }
 
 // EnumerateAdapters returns available OpenGL adapters.
-// For OpenGL, there's typically one adapter per display.
+// Uses surface context (preferred), instance context (X11/headless), or placeholder.
 func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
-	// If we have a surface, use its GL context for info
+	// Priority 1: surface provides the best context (has window handle)
 	if surface, ok := surfaceHint.(*Surface); ok {
+		return []hal.ExposedAdapter{surface.GetAdapterInfo()}
+	}
+
+	// Priority 2: instance-level context (created in CreateInstance via pbuffer/surfaceless)
+	if i.glCtx != nil {
 		return []hal.ExposedAdapter{
-			surface.GetAdapterInfo(),
+			makeAdapterFromGL(i.glCtx, i.eglCtx),
 		}
 	}
 
-	// Without a surface, we can't query OpenGL info
-	// Return a placeholder that will be updated when surface is created
+	// Priority 3: no context available (Wayland without surface hint)
+	// Return placeholder — Open() has nil guard from PR #210.
 	return []hal.ExposedAdapter{
 		{
 			Adapter: &Adapter{},
 			Info: gputypes.AdapterInfo{
 				Name:       "OpenGL Adapter",
 				Vendor:     vendorUnknown,
-				VendorID:   0,
-				DeviceID:   0,
 				DeviceType: gputypes.DeviceTypeOther,
 				Driver:     "OpenGL",
-				DriverInfo: "OpenGL 3.3+ / ES 3.0+",
+				DriverInfo: "OpenGL 3.3+ / ES 3.0+ (no context — use RequestAdapterWithSurface)",
 				Backend:    gputypes.BackendGL,
 			},
-			Features: 0,
 			Capabilities: hal.Capabilities{
 				Limits: gputypes.DefaultLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
 				},
-				DownlevelCapabilities: hal.DownlevelCapabilities{
-					ShaderModel: 50, // SM5.0
-					Flags:       0,
-				},
+			},
+		},
+	}
+}
+
+// makeAdapterFromGL creates an ExposedAdapter using a live GL context.
+func makeAdapterFromGL(glCtx *gl.Context, eglCtx *egl.Context) hal.ExposedAdapter {
+	version := glCtx.GetString(gl.VERSION)
+	renderer := glCtx.GetString(gl.RENDERER)
+	vendor := glCtx.GetString(gl.VENDOR)
+
+	return hal.ExposedAdapter{
+		Adapter: &Adapter{
+			glCtx:  glCtx,
+			eglCtx: eglCtx,
+		},
+		Info: gputypes.AdapterInfo{
+			Name:       renderer,
+			Vendor:     vendor,
+			DeviceType: gputypes.DeviceTypeIntegratedGPU,
+			Driver:     "OpenGL",
+			DriverInfo: version,
+			Backend:    gputypes.BackendGL,
+		},
+		Capabilities: hal.Capabilities{
+			Limits: gputypes.DefaultLimits(),
+			AlignmentsMask: hal.Alignments{
+				BufferCopyOffset: 4,
+				BufferCopyPitch:  256,
 			},
 		},
 	}
@@ -130,5 +195,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 // Destroy releases the instance resources.
 func (i *Instance) Destroy() {
-	// Nothing to clean up at instance level
+	if i.eglCtx != nil {
+		i.eglCtx.Destroy()
+		i.eglCtx = nil
+		i.glCtx = nil
+	}
 }
