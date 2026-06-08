@@ -28,6 +28,17 @@ type Queue struct {
 // After executing all commands, signals the fence with a GL sync object then
 // flushes — the fence must precede flush so PollCompleted sees it.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	// Ensure the GL context is current before executing any GL commands.
+	// adapter.Open() leaves the context on the pbuffer/surfaceless binding; it
+	// may not have been switched to a window surface if Configure() was skipped
+	// (zero-size Wayland window at init) or if eglMakeCurrent failed silently.
+	// Without a current context, glFenceSync returns NULL and GL commands are
+	// no-ops. Binding to the pbuffer (or surfaceless) guarantees a valid context.
+	if q.eglCtx != nil {
+		if err := q.eglCtx.MakeCurrent(); err != nil {
+			return 0, fmt.Errorf("gles: Submit: MakeCurrent failed: %w", err)
+		}
+	}
 	for _, cb := range commandBuffers {
 		cmdBuf, ok := cb.(*CommandBuffer)
 		if !ok {
@@ -146,6 +157,17 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 	surf, ok := surface.(*Surface)
 	if !ok {
 		return fmt.Errorf("gles: invalid surface type")
+	}
+
+	// Make the context current on the window surface before the Y-flip blit and
+	// eglSwapBuffers. The EGL spec (§3.10.3) requires the context to be current
+	// on the surface being swapped; Mesa returns EGL_BAD_SURFACE otherwise.
+	// blitSwapchainToDefault writes to FBO 0 (the window back buffer), which
+	// is also only valid when the window surface is the current draw surface.
+	if surf.eglCtx != nil && surf.eglSurface != 0 {
+		if err := surf.eglCtx.MakeCurrentSurface(surf.eglSurface); err != nil {
+			return fmt.Errorf("gles: Present: MakeCurrentSurface failed: %w", err)
+		}
 	}
 
 	surf.blitSwapchainToDefault()
