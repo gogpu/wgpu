@@ -523,6 +523,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		multisample:       desc.Multisample,
 		blend:             blend,
 		colorWriteMask:    colorWriteMask,
+		vertexBuffers:     desc.Vertex.Buffers,
 	}
 
 	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.

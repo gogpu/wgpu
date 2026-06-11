@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.13
+## Current State: v0.29.14
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -161,6 +161,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.29.14** | 2026-06 | GLES: missing vertexBuffers in Linux pipeline — one-line fix enables full gg rendering (SDF, text, widgets) on GLES Linux. @lkmavi. |
 | **v0.29.13** | 2026-06 | **GLES enterprise parity**: GLSL version propagation, runtime binding fallback (GL <4.2), MSAA validation, GLES function names, lazy VAO, compute VERTEX_ATTRIB barrier, Wayland EGL fixes. First triangle on GLES WSL2 Wayland. Credits: @lkmavi (PR #210, #215). |
 | **v0.29.12** | 2026-06 | GLES: Wayland EGL nativeDisplay=0 surfaceless fallback. CreateSurface Path A guard. |
 | **v0.29.11** | 2026-06 | GLES: shared context + tiered config + CI GL test. Completes ADR-045 enterprise parity. |

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.14] - 2026-06-11
+
+### Fixed
+
+- **GLES: missing vertexBuffers in Linux RenderPipeline** — `device_linux.go`
+  `CreateRenderPipeline` did not store `desc.Vertex.Buffers` in the pipeline
+  struct. Windows `device.go` had it. Without vertex buffer layout, vertex
+  attributes were never configured → all geometry silently discarded → blank
+  window. One-line fix enables full gg rendering (SDF shapes, text, widgets)
+  on GLES Linux. Found by @lkmavi (PR #215).
+
 ## [0.29.13] - 2026-06-11
 
 ### Added
