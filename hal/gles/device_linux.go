@@ -25,6 +25,19 @@ type Device struct {
 	windowHandle    uintptr
 	vao             uint32 // persistent VAO (Core Profile requires one bound)
 	maxTextureUnits int32  // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
+	maxMSAA         int32  // GL_MAX_SAMPLES (validate MSAA in CreateTexture)
+
+	// glslVersion is the target GLSL version for shader compilation, detected
+	// from the adapter's GL_SHADING_LANGUAGE_VERSION at Open time.
+	// Propagated to naga GLSL writer for correct #version directive and
+	// version-gated features (layout(binding=N) needs GLSL >= 420).
+	glslVersion glsl.Version
+
+	// shaderBindingLayout is true when the driver supports layout(binding=N)
+	// in shaders (GLSL >= 420 desktop or >= 310 ES). When false, bindings must
+	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
+	// Mirrors Rust wgpu-hal PrivateCapabilities::SHADER_BINDING_LAYOUT.
+	shaderBindingLayout bool
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -146,6 +159,14 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		sampleCount = 1
 	}
 
+	// Validate MSAA sample count against driver capability (Rust wgpu-hal parity).
+	// Mesa d3d12 GL 4.1 may only support 1x-2x for certain formats.
+	if sampleCount > 1 && d.maxMSAA > 0 && int32(sampleCount) > d.maxMSAA {
+		hal.Logger().Warn("gles: MSAA sample count clamped",
+			"requested", sampleCount, "maxMSAA", d.maxMSAA)
+		sampleCount = uint32(d.maxMSAA)
+	}
+
 	// Map dimension to GL target
 	target := uint32(gl.TEXTURE_2D)
 	switch desc.Dimension {
@@ -185,9 +206,13 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	// Allocate texture storage
 	switch target {
 	case gl.TEXTURE_2D_MULTISAMPLE:
-		// Multisample textures use TexImage2DMultisample (no mip levels).
 		d.glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
 			int32(desc.Size.Width), int32(desc.Size.Height), true)
+		if glErr := d.glCtx.GetError(); glErr != 0 {
+			d.glCtx.DeleteTextures(id)
+			return nil, fmt.Errorf("gles: TexImage2DMultisample failed: GL error 0x%x (format=0x%x, samples=%d, %dx%d)",
+				glErr, internalFormat, sampleCount, desc.Size.Width, desc.Size.Height)
+		}
 
 	case gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
@@ -195,6 +220,11 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			height := maxInt32(1, int32(desc.Size.Height>>level))
 			d.glCtx.TexImage2D(target, int32(level), int32(internalFormat),
 				width, height, 0, format, dataType, 0)
+			if glErr := d.glCtx.GetError(); glErr != 0 {
+				d.glCtx.DeleteTextures(id)
+				return nil, fmt.Errorf("gles: TexImage2D failed: GL error 0x%x (format=0x%x, level=%d, %dx%d)",
+					glErr, internalFormat, level, width, height)
+			}
 		}
 
 	case gl.TEXTURE_CUBE_MAP:
@@ -394,7 +424,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -446,6 +476,20 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: program link info", "info", infoLog)
+	}
+
+	// On GL < 4.2 (GLSL < 420), layout(binding=N) is unavailable so naga
+	// omits it. We must assign bindings at runtime after linking, following
+	// the Rust wgpu-hal pattern (device.rs:438-461).
+	if !d.shaderBindingLayout {
+		if err := assignBindingsAfterLink(d.glCtx, programID, layout, vertexTranslationInfo, fragmentTranslationInfo); err != nil {
+			d.glCtx.DeleteShader(vertexID)
+			if fragmentID != 0 {
+				d.glCtx.DeleteShader(fragmentID)
+			}
+			d.glCtx.DeleteProgram(programID)
+			return nil, err
+		}
 	}
 
 	// Shaders can be deleted after linking
@@ -532,7 +576,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -566,6 +610,15 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 	if infoLog := d.glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: compute program link info", "info", infoLog)
+	}
+
+	// Runtime binding fallback for GL < 4.2 (see CreateRenderPipeline).
+	if !d.shaderBindingLayout {
+		if err := assignBindingsAfterLink(d.glCtx, programID, layout, computeTranslationInfo); err != nil {
+			d.glCtx.DeleteShader(computeID)
+			d.glCtx.DeleteProgram(programID)
+			return nil, err
+		}
 	}
 
 	d.glCtx.DeleteShader(computeID)
@@ -602,7 +655,15 @@ func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
 }
 
 // CreateCommandEncoder creates a command encoder.
+// VAO is lazily created on first call — ensures it's allocated on the window
+// surface (after Configure), not on the pbuffer (during Open). Mesa d3d12
+// gallium invalidates GL objects when switching from pbuffer to window surface.
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	if d.vao == 0 {
+		d.vao = d.glCtx.GenVertexArrays(1)
+		d.glCtx.BindVertexArray(d.vao)
+		hal.Logger().Debug("gles: lazy VAO created", "vao", d.vao)
+	}
 	return &CommandEncoder{
 		glCtx:           d.glCtx,
 		vao:             d.vao,
@@ -753,7 +814,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[g
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, fragmentModule.source, frag.EntryPoint, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

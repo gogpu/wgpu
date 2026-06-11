@@ -39,7 +39,15 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 	}
 
 	// Try to create instance-level EGL context (Rust wgpu-hal parity).
-	// NativeDisplay=0 uses EGL_DEFAULT_DISPLAY or EGL_MESA_platform_surfaceless.
+	// Skip on Wayland: surfaceless context would create GL objects (VAO, FBO) that
+	// are invisible to the Surface's windowed context (GL objects not shared between
+	// EGL contexts). Device/Queue must use the SAME context as the window surface.
+	// On X11/headless, instance context IS the presentation context — safe to create.
+	if egl.DetectWindowKind() == egl.WindowKindWayland {
+		hal.Logger().Info("gles: skipping instance context on Wayland (surface provides context)")
+		return &Instance{}, nil
+	}
+
 	config := egl.DefaultContextConfig()
 	config.GLES = false
 	ctx, err := egl.NewContext(config)
@@ -99,20 +107,29 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 			displayHandle: displayHandle,
 			windowHandle:  windowHandle,
 			eglCtx:        i.eglCtx,
+			eglDisplay:    i.eglCtx.Display(),
 			glCtx:         i.glCtx,
-			ownsContext:   false, // Instance owns context, Surface only references it
+			ownsContext:   false,
 			version:       i.glCtx.GetString(gl.VERSION),
 			renderer:      i.glCtx.GetString(gl.RENDERER),
 		}, nil
 	}
 
 	// Path B: create new context (Wayland — Instance had no wl_display* at init).
+	// Try desktop GL first, fall back to GLES 3.0 — Mesa Wayland EGL may only
+	// expose EGL_OPENGL_ES3_BIT configs, not EGL_OPENGL_BIT. Found by @lkmavi (PR #215).
 	config := egl.DefaultContextConfig()
-	config.GLES = false
 	config.NativeDisplay = displayHandle
 	ctx, err := egl.NewContext(config)
 	if err != nil {
-		return nil, fmt.Errorf("gles: failed to create EGL context: %w", err)
+		config.GLES = true
+		config.GLVersionMajor = 3
+		config.GLVersionMinor = 0
+		config.CoreProfile = false
+		ctx, err = egl.NewContext(config)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("gles: failed to create EGL context (tried desktop GL and GLES 3.0): %w", err)
 	}
 
 	if err := ctx.MakeCurrent(); err != nil {
@@ -121,7 +138,7 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 	}
 
 	glCtx := &gl.Context{}
-	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
+	if err := glCtx.Load(egl.GetGLProcAddress, config.GLES); err != nil {
 		ctx.Destroy()
 		return nil, fmt.Errorf("gles: failed to load GL functions: %w", err)
 	}
@@ -129,14 +146,15 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 	version := glCtx.GetString(gl.VERSION)
 	renderer := glCtx.GetString(gl.RENDERER)
 	hal.Logger().Info("gles: surface created with new EGL context",
-		"version", version, "renderer", renderer)
+		"version", version, "renderer", renderer, "gles", config.GLES)
 
 	return &Surface{
 		displayHandle: displayHandle,
 		windowHandle:  windowHandle,
 		eglCtx:        ctx,
+		eglDisplay:    ctx.Display(),
 		glCtx:         glCtx,
-		ownsContext:   true, // Surface owns this context (no Instance context)
+		ownsContext:   true,
 		version:       version,
 		renderer:      renderer,
 	}, nil

@@ -130,7 +130,10 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 
 	// Make the EGL window surface current so we can allocate GL resources.
 	if s.eglSurface != 0 && s.eglDisplay != 0 {
-		egl.MakeCurrent(s.eglDisplay, s.eglSurface, s.eglSurface, s.eglCtx.EGLContext())
+		result := egl.MakeCurrent(s.eglDisplay, s.eglSurface, s.eglSurface, s.eglCtx.EGLContext())
+		if result == egl.False {
+			hal.Logger().Error("gles: Configure eglMakeCurrent FAILED", "error", fmt.Sprintf("0x%x", egl.GetError()))
+		}
 	}
 
 	// Allocate / resize the swapchain offscreen FBO. User render passes

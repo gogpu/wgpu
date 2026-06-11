@@ -38,7 +38,11 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		for i, cmd := range cmdBuf.commands {
 			cmd.Execute(q.glCtx)
 			if glErr := q.glCtx.GetError(); glErr != 0 {
-				hal.Logger().Warn("gles: GL error after command", "error", fmt.Sprintf("0x%x", glErr), "index", i, "command", fmt.Sprintf("%T", cmd))
+				detail := fmt.Sprintf("%T", cmd)
+				if vaoCmd, ok := cmd.(*BindVAOCommand); ok {
+					detail = fmt.Sprintf("%T{vao=%d}", cmd, vaoCmd.vao)
+				}
+				hal.Logger().Warn("gles: GL error after command", "error", fmt.Sprintf("0x%x", glErr), "index", i, "command", detail)
 			}
 		}
 	}

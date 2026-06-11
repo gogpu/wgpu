@@ -14,12 +14,17 @@ import (
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // compileWGSLToGLSL compiles a WGSL shader source to GLSL for the given entry point.
-// OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL 4.30 core.
-// GLSL 4.30 is required because naga emits layout(binding=N) qualifiers which are
-// not available in GLSL 3.30. OpenGL 4.3+ is supported on all modern GPUs (2012+).
+// OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL.
+//
+// The version parameter specifies the target GLSL version. On GL 4.3+ this is typically
+// Version430; on older drivers (e.g., GL 4.1 / GLSL 410) it must match the driver's
+// reported GLSL version. When version < 420 (desktop) or < 310 (ES), naga omits
+// layout(binding=N) qualifiers and the caller must assign bindings at runtime via
+// glGetUniformBlockIndex/glUniformBlockBinding/glGetUniformLocation/glUniform1i.
 //
 // The bindingMap parameter provides the pre-computed (group, binding) -> GL slot mapping
 // from PipelineLayout (computed via per-type sequential counters in CreatePipelineLayout).
@@ -27,7 +32,7 @@ import (
 //
 // Returns the GLSL source and TranslationInfo containing TextureMappings for
 // SamplerBindMap construction (which sampler goes with which texture unit).
-func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
+func compileWGSLToGLSL(version glsl.Version, source hal.ShaderSource, entryPoint string, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
 	if source.WGSL == "" {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
@@ -44,11 +49,12 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap ma
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL lower error: %w", err)
 	}
 
-	// Compile IR to GLSL 4.30 core.
-	// Version 4.30 is needed for layout(binding=N) resource binding qualifiers
-	// and compute shader support (local_size_x/y/z).
+	// Compile IR to the target GLSL version.
+	// On GL 4.3+ this emits layout(binding=N) qualifiers inline. On older versions
+	// (< 420 desktop / < 310 ES) naga omits them and the HAL assigns bindings at
+	// runtime after linking (see assignBindingsAfterLink).
 	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
-		LangVersion:        glsl.Version430,
+		LangVersion:        version,
 		EntryPoint:         entryPoint,
 		ForceHighPrecision: true,
 		BindingMap:         bindingMap,
@@ -82,6 +88,77 @@ func compileWGSLToGLSL(source hal.ShaderSource, entryPoint string, bindingMap ma
 	}
 
 	return glslCode, translationInfo, nil
+}
+
+// assignBindingsAfterLink assigns uniform block and sampler bindings at runtime
+// after glLinkProgram on GL < 4.2 where layout(binding=N) is unavailable.
+//
+// This mirrors the Rust wgpu-hal pattern (device.rs:438-461):
+//   - For each uniform block: glGetUniformBlockIndex + glUniformBlockBinding
+//   - For each texture/image sampler: glGetUniformLocation + glUniform1i
+//   - Storage buffers cannot be remapped (error if present)
+//
+// The translationInfos parameter contains reflection data from all shader stages
+// (vertex + fragment, or compute). The layout provides the binding map for
+// resolving (group, binding) to flat GL slot indices.
+func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *PipelineLayout, translationInfos ...glsl.TranslationInfo) error {
+	glCtx.UseProgram(program)
+
+	// Assign uniform/storage buffer block bindings by name.
+	for _, info := range translationInfos {
+		for _, u := range info.Uniforms {
+			key := glsl.BindingMapKey{Group: u.Binding.Group, Binding: u.Binding.Binding}
+			slot, ok := layout.bindingMap[key]
+			if !ok {
+				continue
+			}
+			if u.IsStorage {
+				// Storage buffers cannot be remapped without layout(binding) qualifiers.
+				// Rust wgpu-hal returns DeviceError::Lost here.
+				hal.Logger().Error("gles: cannot remap storage buffer binding on GL < 4.2",
+					"blockName", u.BlockName,
+					"group", u.Binding.Group,
+					"binding", u.Binding.Binding,
+				)
+				return fmt.Errorf("gles: storage buffers require GL 4.3+ (layout(binding) support)")
+			}
+			index := glCtx.GetUniformBlockIndex(program, u.BlockName)
+			if index == 0xFFFFFFFF { // GL_INVALID_INDEX
+				hal.Logger().Debug("gles: uniform block not found (may be optimized out)",
+					"blockName", u.BlockName)
+				continue
+			}
+			glCtx.UniformBlockBinding(program, index, uint32(slot))
+			hal.Logger().Debug("gles: assigned uniform block binding",
+				"blockName", u.BlockName,
+				"blockIndex", index,
+				"slot", slot,
+			)
+		}
+
+		// Assign texture/image sampler bindings by combined variable name.
+		for name, tm := range info.TextureMappings {
+			key := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+			slot, ok := layout.bindingMap[key]
+			if !ok {
+				continue
+			}
+			location := glCtx.GetUniformLocation(program, name)
+			if location < 0 {
+				hal.Logger().Debug("gles: texture uniform not found (may be optimized out)",
+					"name", name)
+				continue
+			}
+			glCtx.Uniform1i(location, int32(slot))
+			hal.Logger().Debug("gles: assigned texture uniform binding",
+				"name", name,
+				"location", location,
+				"slot", slot,
+			)
+		}
+	}
+
+	return nil
 }
 
 // computeBindingMap computes per-type sequential binding indices for all bind group

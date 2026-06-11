@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.11
+## Current State: v0.29.13
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -69,6 +69,7 @@
 ✅ **GLES instance-level EGL context (Linux)** — surfaceless/pbuffer context at CreateInstance (Rust wgpu-hal `egl.rs:846` parity). Tiered config selection WINDOW+PBUFFER → PBUFFER-only (Rust `egl.rs:218-293`). Shared context in CreateSurface on X11/headless, own context on Wayland.
 ✅ **GLES FFI pointer convention fix (Linux)** — 30+ GL calls in `context_linux.go` fixed: pointer-type args corrected for goffi `CallFunction` (PR #210, @lkmavi). ADR-044 documents convention. CI test verifies GenBuffers/GenTextures through goffi.
 ✅ **GLES fence sync ordering** — `glFenceSync` before `glFlush` (was reversed). PollCompleted uses non-blocking `glGetSynciv`. Confirmed by ANGLE bug 6464, virglrenderer commit 21bbc9ea, Mesa Gallium. `Fence.Signal` returns error (Rust parity).
+✅ **GLES GLSL version propagation (Rust parity)** — detected `GL_SHADING_LANGUAGE_VERSION` flows from adapter → device → naga GLSL writer. No more hardcoded `#version 430`. Runtime binding fallback (`glGetUniformBlockIndex` + `glUniformBlockBinding` + `glUniform1i`) for GL < 4.2 where `layout(binding=N)` unavailable. `shaderBindingLayout` capability flag (Rust `SHADER_BINDING_LAYOUT` parity). Triangle verified on WSL2 Mesa d3d12 GL 4.1.
 ✅ **Wayland SHM presentation (enterprise quality)** — display wrapper pattern (Qt6 parity), `wl_display_roundtrip_queue`, proper proxy cleanup, triple-buffer freeze fix (bufferBusyMap pointer + roundtrip_queue dispatch). Verified on WSL2.
 ✅ **Codecov OIDC** — replaced token + GPG verification with GitHub OIDC. No more intermittent CI failures from GPG keyserver.
 
@@ -81,7 +82,7 @@
 | Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
 | Metal | macOS | ✅ Stable — naga MSL 91/91 |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
-| GLES | Windows, Linux | ✅ Stable — hidden window (Win), instance-level EGL (Linux), FFI pointer fix (@lkmavi), fence sync ordering, Wayland EGL (EGL 1.5 + fallback), surfaceless/pbuffer, tiered config, compute barriers |
+| GLES | Windows, Linux | ✅ Stable — hidden window (Win), instance-level EGL (Linux), FFI pointer fix (@lkmavi), GLSL version propagation (GL 4.1+ verified), runtime binding fallback (GL <4.2), Wayland EGL surfaceless/pbuffer, tiered config (WindowBit-only for Wayland), fence sync, compute barriers |
 | Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. Wayland: display wrapper pattern, roundtrip_queue, triple-buffer. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
@@ -160,6 +161,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.29.13** | 2026-06 | **GLES enterprise parity**: GLSL version propagation, runtime binding fallback (GL <4.2), MSAA validation, GLES function names, lazy VAO, compute VERTEX_ATTRIB barrier, Wayland EGL fixes. First triangle on GLES WSL2 Wayland. Credits: @lkmavi (PR #210, #215). |
+| **v0.29.12** | 2026-06 | GLES: Wayland EGL nativeDisplay=0 surfaceless fallback. CreateSurface Path A guard. |
 | **v0.29.11** | 2026-06 | GLES: shared context + tiered config + CI GL test. Completes ADR-045 enterprise parity. |
 | **v0.29.10** | 2026-06 | GLES: instance-level EGL context (Linux), surfaceless fallback, FFI pointer fix (PR #210, @lkmavi). |
 | **v0.29.9** | 2026-06 | Software: Wayland SHM triple-buffer freeze fix (bufferBusyMap + roundtrip_queue). |

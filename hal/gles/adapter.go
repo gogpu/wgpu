@@ -58,10 +58,14 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 		"maxTextureUnits", maxTexUnits,
 	)
 
+	glslVer := GLSLVersionToNaga(a.caps.GLSLVersion, a.caps.IsES)
+
 	device := &Device{
-		ctx:             a.ctx,
-		vao:             vao,
-		maxTextureUnits: maxTexUnits,
+		ctx:                 a.ctx,
+		vao:                 vao,
+		maxTextureUnits:     maxTexUnits,
+		glslVersion:         glslVer,
+		shaderBindingLayout: glslVer.SupportsExplicitLocations(),
 	}
 
 	queue := &Queue{

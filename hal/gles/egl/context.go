@@ -158,11 +158,13 @@ func chooseEGLConfig(display EGLDisplay, config ContextConfig) (EGLConfig, error
 	}
 
 	// Tiered config selection (Rust wgpu-hal egl.rs:218-293).
-	// Try from best to worst: the config must support pbuffer (for headless
-	// MakeCurrent) and ideally window (for later CreateWindowSurface).
+	// Rust's top tier = WindowBit alone (never combined with PbufferBit).
+	// Mesa Wayland EGL does NOT support PbufferBit — any tier requiring it
+	// returns 0 configs. WindowBit alone = 48 configs on Mesa Wayland.
 	tiers := []EGLInt{
-		WindowBit | PbufferBit, // Tier 1: window + pbuffer (can present later)
-		PbufferBit,             // Tier 0: pbuffer only (headless/CI fallback)
+		WindowBit | PbufferBit, // Tier 2: X11/headless (window + pbuffer)
+		WindowBit,              // Tier 1: Wayland (no pbuffer support in Mesa)
+		PbufferBit,             // Tier 0: surfaceless/CI fallback
 	}
 
 	baseAttribs := []EGLInt{
@@ -204,8 +206,9 @@ func createEGLContext(display EGLDisplay, config EGLConfig, cfg ContextConfig) E
 		ContextMinorVersion, EGLInt(cfg.GLVersionMinor),
 	)
 
-	// Set profile (core vs compatibility)
-	if cfg.CoreProfile {
+	// Set profile (core vs compatibility) — desktop OpenGL only.
+	// EGL_CONTEXT_OPENGL_PROFILE_MASK is invalid for GLES; some drivers reject it.
+	if cfg.CoreProfile && !cfg.GLES {
 		attribs = append(attribs,
 			ContextOpenGLProfileMask, ContextOpenGLCoreProfileBit,
 		)

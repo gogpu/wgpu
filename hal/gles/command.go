@@ -1403,9 +1403,10 @@ type DispatchCommand struct {
 // Execute dispatches compute work and inserts a memory barrier.
 func (c *DispatchCommand) Execute(ctx *gl.Context) {
 	ctx.DispatchCompute(c.x, c.y, c.z)
-	// Insert barrier for storage buffer coherency after compute dispatch.
-	// This ensures subsequent reads/writes see the compute shader results.
-	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
+	// VERTEX_ATTRIB_ARRAY_BARRIER_BIT is required when compute writes an SSBO that
+	// is later read as a vertex buffer (e.g. particles ping-pong). Without it,
+	// vertex fetch reads stale pre-compute data. Found by @lkmavi (PR #215).
+	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.VERTEX_ATTRIB_ARRAY_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
 }
 
 // DispatchIndirectCommand dispatches compute work with GPU-generated parameters.
@@ -1422,8 +1423,7 @@ func (c *DispatchIndirectCommand) Execute(ctx *gl.Context) {
 	ctx.DispatchComputeIndirect(uintptr(c.offset))
 	// Unbind the indirect buffer
 	ctx.BindBuffer(gl.DISPATCH_INDIRECT_BUFFER, 0)
-	// Insert barrier for storage buffer coherency after compute dispatch
-	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
+	ctx.MemoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT | gl.VERTEX_ATTRIB_ARRAY_BARRIER_BIT | gl.BUFFER_UPDATE_BARRIER_BIT)
 }
 
 // CopyTextureToBufferCommand reads pixels from a texture's FBO into a buffer's

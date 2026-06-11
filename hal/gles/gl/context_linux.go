@@ -548,7 +548,12 @@ type Context struct {
 type ProcAddressFunc func(name string) unsafe.Pointer
 
 // Load loads all OpenGL function pointers using the provided loader.
-func (c *Context) Load(getProcAddr ProcAddressFunc) error {
+// isGLES indicates the context is OpenGL ES — some functions have different
+// names (glClearDepthf vs glClearDepth, glMapBufferRange vs glMapBuffer).
+// Mesa d3d12 gallium returns dispatch stubs for desktop GL names on GLES
+// contexts that generate GL_INVALID_ENUM at call time.
+func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
+	gles := len(isGLES) > 0 && isGLES[0]
 	// Initialize common CallInterfaces
 	if err := initCommonCallInterfaces(); err != nil {
 		return err
@@ -562,7 +567,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDisable = getProcAddr("glDisable")
 	c.glClear = getProcAddr("glClear")
 	c.glClearColor = getProcAddr("glClearColor")
-	c.glClearDepth = getProcAddr("glClearDepth")
+	if gles {
+		c.glClearDepth = getProcAddr("glClearDepthf")
+	} else {
+		c.glClearDepth = getProcAddr("glClearDepth")
+	}
 	c.glViewport = getProcAddr("glViewport")
 	c.glScissor = getProcAddr("glScissor")
 	c.glDrawArrays = getProcAddr("glDrawArrays")
@@ -608,12 +617,26 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glBufferData = getProcAddr("glBufferData")
 	c.glBufferSubData = getProcAddr("glBufferSubData")
 	c.glMapBuffer = getProcAddr("glMapBuffer")
+	if gles && c.glMapBuffer == nil {
+		c.glMapBuffer = getProcAddr("glMapBufferOES")
+	}
 	c.glUnmapBuffer = getProcAddr("glUnmapBuffer")
 
-	// VAO
+	// VAO — GLES may need OES suffix on some Mesa dispatch paths.
 	c.glGenVertexArrays = getProcAddr("glGenVertexArrays")
 	c.glDeleteVertexArrays = getProcAddr("glDeleteVertexArrays")
 	c.glBindVertexArray = getProcAddr("glBindVertexArray")
+	if gles {
+		if p := getProcAddr("glGenVertexArraysOES"); p != nil {
+			c.glGenVertexArrays = p
+		}
+		if p := getProcAddr("glDeleteVertexArraysOES"); p != nil {
+			c.glDeleteVertexArrays = p
+		}
+		if p := getProcAddr("glBindVertexArrayOES"); p != nil {
+			c.glBindVertexArray = p
+		}
+	}
 
 	// Vertex attributes
 	c.glEnableVertexAttribArray = getProcAddr("glEnableVertexAttribArray")

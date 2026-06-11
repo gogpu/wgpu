@@ -23,6 +23,18 @@ type Device struct {
 	ctx             *AdapterContext
 	vao             uint32 // persistent VAO (Core Profile requires one bound)
 	maxTextureUnits int32  // GL_MAX_TEXTURE_IMAGE_UNITS (queried at init)
+
+	// glslVersion is the target GLSL version for shader compilation, detected
+	// from the adapter's GL_SHADING_LANGUAGE_VERSION at Open time.
+	// Propagated to naga GLSL writer for correct #version directive and
+	// version-gated features (layout(binding=N) needs GLSL >= 420).
+	glslVersion glsl.Version
+
+	// shaderBindingLayout is true when the driver supports layout(binding=N)
+	// in shaders (GLSL >= 420 desktop or >= 310 ES). When false, bindings must
+	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
+	// Mirrors Rust wgpu-hal PrivateCapabilities::SHADER_BINDING_LAYOUT.
+	shaderBindingLayout bool
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -410,7 +422,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, _, err := compileWGSLToGLSL(vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -435,7 +447,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, desc.Fragment, layout.bindingMap)
+		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, d.glslVersion, desc.Fragment, layout.bindingMap)
 		if err != nil {
 			glCtx.DeleteShader(vertexID)
 			return nil, err
@@ -462,6 +474,20 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 	if infoLog := glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: program link info", "info", infoLog)
+	}
+
+	// On GL < 4.2 (GLSL < 420), layout(binding=N) is unavailable so naga
+	// omits it. We must assign bindings at runtime after linking, following
+	// the Rust wgpu-hal pattern (device.rs:438-461).
+	if !d.shaderBindingLayout {
+		if err := assignBindingsAfterLink(glCtx, programID, layout, vertexTranslationInfo, fragmentTranslationInfo); err != nil {
+			glCtx.DeleteShader(vertexID)
+			if fragmentID != 0 {
+				glCtx.DeleteShader(fragmentID)
+			}
+			glCtx.DeleteProgram(programID)
+			return nil, err
+		}
 	}
 
 	// Shaders can be deleted after linking
@@ -558,7 +584,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, _, err := compileWGSLToGLSL(computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -592,6 +618,15 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 	if infoLog := glCtx.GetProgramInfoLog(programID); infoLog != "" {
 		hal.Logger().Debug("gles: compute program link info", "info", infoLog)
+	}
+
+	// Runtime binding fallback for GL < 4.2 (see CreateRenderPipeline).
+	if !d.shaderBindingLayout {
+		if err := assignBindingsAfterLink(glCtx, programID, layout, computeTranslationInfo); err != nil {
+			glCtx.DeleteShader(computeID)
+			glCtx.DeleteProgram(programID)
+			return nil, err
+		}
 	}
 
 	glCtx.DeleteShader(computeID)
@@ -817,13 +852,13 @@ func maxInt32(a, b int32) int32 {
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
 // Caller must hold the AdapterContext lock. glCtx is passed explicitly to avoid
 // re-locking (this is called from CreateRenderPipeline which already holds the lock).
-func compileFragmentShader(glCtx *gl.Context, frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
+func compileFragmentShader(glCtx *gl.Context, version glsl.Version, frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(fragmentModule.source, frag.EntryPoint, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(version, fragmentModule.source, frag.EntryPoint, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
@@ -810,4 +811,32 @@ func queryMinPerStage(glCtx *gl.Context, vertexParam, fragmentParam uint32) int3
 		return fragment
 	}
 	return minI32(vertex, fragment)
+}
+
+// ---------------------------------------------------------------------------
+// GLSL version conversion
+// ---------------------------------------------------------------------------
+
+// GLSLVersionToNaga converts an integer GLSL version (e.g., 410, 430, 300)
+// and ES flag into a naga glsl.Version struct for shader compilation.
+//
+// The integer encoding matches GL_SHADING_LANGUAGE_VERSION parsing:
+// "4.30" -> 430, "3.30" -> 330, "3.00 ES" -> 300 with isES=true.
+// In the Version struct, Major is the hundreds digit and Minor is the tens+units.
+// For example, 430 -> {Major: 4, Minor: 30}, 300 -> {Major: 3, Minor: 0}.
+//
+// If glslVersion is 0 (detection failed), returns glsl.Version330 (desktop) or
+// glsl.VersionES300 (ES) as safe minimums matching Rust naga defaults.
+func GLSLVersionToNaga(glslVersion int, isES bool) glsl.Version {
+	if glslVersion == 0 {
+		if isES {
+			return glsl.VersionES300
+		}
+		return glsl.Version330
+	}
+	return glsl.Version{
+		Major: uint8(glslVersion / 100),
+		Minor: uint8(glslVersion % 100),
+		ES:    isES,
+	}
 }

@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.13] - 2026-06-11
+
+### Added
+
+- **GLES: GLSL version propagation from driver (Rust wgpu-hal parity)** —
+  `compileWGSLToGLSL` no longer hardcodes `glsl.Version430`. The detected
+  `GL_SHADING_LANGUAGE_VERSION` is propagated from adapter → device → naga
+  GLSL writer. On GL 4.1 (GLSL 410) emits `#version 410 core` instead of
+  `#version 430 core`. Verified on WSL2 Mesa d3d12 gallium (GL 4.1).
+  Rust reference: `adapter.rs:279-298` → `device.rs:1228` → naga Options.
+- **GLES: runtime binding fallback for GL < 4.2 (Rust device.rs:438-461)** —
+  When `layout(binding=N)` is unavailable (GLSL < 420), bindings are assigned
+  after `glLinkProgram` via `glGetUniformBlockIndex` + `glUniformBlockBinding`
+  (UBOs) and `glGetUniformLocation` + `glUniform1i` (samplers). Storage buffers
+  return error on GL < 4.2. New `shaderBindingLayout` capability flag mirrors
+  Rust `PrivateCapabilities::SHADER_BINDING_LAYOUT`.
+- **GLES: MSAA sample count validation in CreateTexture** — validates
+  `SampleCount` against `GL_MAX_SAMPLES` before texture allocation. Logs warning
+  and clamps if exceeded. `glGetError` checked after `TexImage2DMultisample` and
+  `TexImage2D` — returns proper error instead of leaving stale GL errors in queue.
+- **GLES: GLES-aware GL function loading** — `gl.Context.Load()` accepts `isGLES`
+  flag. On GLES contexts, loads `glClearDepthf` (not `glClearDepth`), tries OES
+  suffix for VAO functions. Fixes Mesa d3d12 gallium dispatch stub errors.
+- **GLES: lazy VAO creation in CreateCommandEncoder** — persistent VAO allocated
+  on first encoder creation (after Configure), not during Adapter.Open (before
+  Configure). Ensures VAO lives on the window surface context.
+- **GLES: compute dispatch VERTEX_ATTRIB_ARRAY_BARRIER_BIT** — added to memory
+  barrier after compute dispatch. Required when compute writes SSBO that is read
+  as vertex buffer (e.g. particles ping-pong). Found by @lkmavi (PR #215).
+
+### Fixed
+
+- **GLES: tiered EGL config — WindowBit-only tier for Wayland** —
+  `chooseEGLConfig` adds `WindowBit` alone as middle tier. Mesa Wayland EGL
+  does not support `PbufferBit` — combined `WindowBit|PbufferBit` returns
+  0 configs. `WindowBit` alone = 48 configs on Mesa Wayland.
+- **GLES: skip Wayland instance context** — `CreateInstance` skips EGL context
+  on Wayland (no `wl_display*` at init). Prevents second wl_display connection
+  and GL object namespace issues between pbuffer and window surface.
+- **GLES: GLES 3.0 fallback in CreateSurface** — tries desktop GL first, falls
+  back to GLES 3.0 when Mesa Wayland EGL only exposes `EGL_OPENGL_ES3_BIT`
+  configs. Found by @lkmavi (PR #215).
+- **GLES: CoreProfile guard for GLES contexts** — `createEGLContext` skips
+  `EGL_CONTEXT_OPENGL_PROFILE_MASK` on GLES (invalid, some drivers reject it).
+  Found by @lkmavi (PR #215).
+
+### Verified
+
+- **Triangle renders on GLES WSL2 Wayland** — first Pure Go GLES rendering
+  on Linux Wayland. Red triangle on gray background, GL 4.1 Core Profile,
+  Mesa d3d12 gallium, `#version 410 core`.
+
+### Known Issues
+
+- gg rendering (SDF shapes, text) not yet working on GL 4.1 — separate gg task.
+  Wayland EGL alpha channel causes transparent window (gg clears with alpha=0).
+
+### Dependencies
+
+- naga v0.17.14 — `SupportsExplicitLocations()`, `UniformInfo` reflection,
+  version-gated `layout(binding=N)` emission
+
 ## [0.29.12] - 2026-06-08
 
 ### Fixed
