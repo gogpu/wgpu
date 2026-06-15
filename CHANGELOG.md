@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-06-15
+
+### Fixed
+
+- **Remove broken gpucontext sentinel methods** — `gpucontext_sentinel.go` deleted.
+  Unexported methods don't work cross-package per Go spec.
+
+### Added
+
+- **gpucontext handle helpers** — type-safe conversion isolating `unsafe.Pointer`
+  from consumers: `DeviceFromHandle/ToHandle`, `QueueFromHandle/ToHandle`,
+  `AdapterFromHandle/ToHandle`, `SurfaceFromHandle/ToHandle`, `InstanceFromHandle/ToHandle`.
+
+### Dependencies
+
+- **gpucontext v0.21.0** — opaque struct tokens (ADR-018 pattern). New dependency:
+  wgpu → gpucontext (DIP: implementation → abstraction).
+
 ## [0.30.0] - 2026-06-15
 
 ### Changed (BREAKING)

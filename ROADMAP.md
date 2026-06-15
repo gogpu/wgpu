@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.0
+## Current State: v0.30.1
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
