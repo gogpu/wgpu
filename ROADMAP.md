@@ -172,6 +172,8 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.29.16** | 2026-06 | HAL wrapper stubs for Rust/Browser builds — public API compiles on all build targets. README updated. |
+| **v0.29.15** | 2026-06 | naga v0.17.15 (HLSL sampler fix, @georgebuilds), x/sys v0.46.0. |
 | **v0.29.14** | 2026-06 | GLES: missing vertexBuffers in Linux pipeline — one-line fix enables full gg rendering (SDF, text, widgets) on GLES Linux. @lkmavi. |
 | **v0.29.13** | 2026-06 | **GLES enterprise parity**: GLSL version propagation, runtime binding fallback (GL <4.2), MSAA validation, GLES function names, lazy VAO, compute VERTEX_ATTRIB barrier, Wayland EGL fixes. First triangle on GLES WSL2 Wayland. Credits: @lkmavi (PR #210, #215). |
 | **v0.29.12** | 2026-06 | GLES: Wayland EGL nativeDisplay=0 surfaceless fallback. CreateSurface Path A guard. |
