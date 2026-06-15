@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.16] - 2026-06-15
+
+### Fixed
+
+- **HAL wrapper stubs for Rust and Browser builds** — `NewDeviceFromHAL`,
+  `NewSurfaceFromHAL`, `NewTextureFromHAL`, `NewTextureViewFromHAL`,
+  `NewSamplerFromHAL` now have stubs in `wrap_rust.go` (error return) and
+  `wrap_browser.go` (`any` params, nil return). Previously these 5 public
+  functions disappeared with `-tags=rust` or `js/wasm`, breaking consumers
+  that reference them. Public API must compile on all build targets.
+
 ## [0.29.15] - 2026-06-15
 
 ### Dependencies

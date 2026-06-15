@@ -74,6 +74,8 @@ GOOS=js GOARCH=wasm go build -o app.wasm .
 > | (default) | Pure Go → core → HAL → Vulkan/Metal/DX12/GLES/Software | Zero deps, cross-compile |
 > | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | Battle-tested GPU drivers |
 > | `GOOS=js` | syscall/js → Browser WebGPU | Web applications |
+>
+> **API consistency:** The public API compiles on all build targets. HAL wrapper functions (`NewDeviceFromHAL`, `NewSurfaceFromHAL`, etc.) return errors or nil on Rust/Browser builds where no Go HAL layer exists. Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
 
 ---
 
