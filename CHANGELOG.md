@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.3] - 2026-06-24
+
+### Added
+
+- **SPIR-V interpreter: hyperbolic math** — `Sinh`/`Cosh`/`Tanh`/`Asinh`/`Acosh`/`Atanh`
+  (GLSL.std.450 opcodes 19–24). Previously returned silent zeros.
+- **SPIR-V interpreter: integer clamp** — `UClamp` (44) and `SClamp` (45) for unsigned
+  and signed integers. Only float `FClamp` was implemented before.
+- `glslTernaryUint`/`glslTernaryInt` helpers for ternary integer operations.
+
+### Contributors
+
+- **@amery** ([PR #225](https://github.com/gogpu/wgpu/pull/225)) — discovered and fixed
+  missing opcodes via Born ML's software backend path.
+
 ## [0.30.2] - 2026-06-17
 
 ### Dependencies
