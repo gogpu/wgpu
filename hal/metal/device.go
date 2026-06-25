@@ -685,7 +685,23 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		depthStencilDesc := MsgSend(ID(GetClass("MTLDepthStencilDescriptor")), Sel("new"))
 		_ = MsgSend(depthStencilDesc, Sel("setDepthCompareFunction:"), uintptr(compareFunctionToMTL(desc.DepthStencil.DepthCompare)))
 		msgSendVoid(depthStencilDesc, Sel("setDepthWriteEnabled:"), argBool(desc.DepthStencil.DepthWriteEnabled))
+
+		// Translate the stencil state. Without this Metal keeps its defaults
+		// (compare = Always, ops = Keep) and the stencil test is silently
+		// ignored. WebGPU masks are global, so both faces share them; the face
+		// properties copy, so each descriptor is released after assignment.
+		front := newStencilFaceDescriptor(desc.DepthStencil.StencilFront,
+			desc.DepthStencil.StencilReadMask, desc.DepthStencil.StencilWriteMask)
+		MsgSend(depthStencilDesc, Sel("setFrontFaceStencil:"), uintptr(front))
+		Release(front)
+
+		back := newStencilFaceDescriptor(desc.DepthStencil.StencilBack,
+			desc.DepthStencil.StencilReadMask, desc.DepthStencil.StencilWriteMask)
+		MsgSend(depthStencilDesc, Sel("setBackFaceStencil:"), uintptr(back))
+		Release(back)
+
 		depthStencilState = MsgSend(d.raw, Sel("newDepthStencilStateWithDescriptor:"), uintptr(depthStencilDesc))
+		Release(depthStencilDesc)
 
 		// Record bias values to set in render pass
 		depthBias = float32(desc.DepthStencil.DepthBias)
@@ -739,6 +755,20 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		depthSlopeScale: depthSlopeScale,
 		depthClamp:      depthClamp,
 	}, nil
+}
+
+// newStencilFaceDescriptor builds an MTLStencilDescriptor for one face. The
+// returned object is owned by the caller and must be Released after it is
+// assigned to the depth-stencil descriptor (whose face properties copy it).
+func newStencilFaceDescriptor(face hal.StencilFaceState, readMask, writeMask uint32) ID {
+	sd := MsgSend(ID(GetClass("MTLStencilDescriptor")), Sel("new"))
+	MsgSend(sd, Sel("setStencilCompareFunction:"), uintptr(compareFunctionToMTL(face.Compare)))
+	MsgSend(sd, Sel("setStencilFailureOperation:"), uintptr(stencilOperationToMTL(face.FailOp)))
+	MsgSend(sd, Sel("setDepthFailureOperation:"), uintptr(stencilOperationToMTL(face.DepthFailOp)))
+	MsgSend(sd, Sel("setDepthStencilPassOperation:"), uintptr(stencilOperationToMTL(face.PassOp)))
+	MsgSend(sd, Sel("setReadMask:"), uintptr(readMask))
+	MsgSend(sd, Sel("setWriteMask:"), uintptr(writeMask))
+	return sd
 }
 
 // buildVertexDescriptor creates an MTLVertexDescriptor from WebGPU vertex buffer layouts.
