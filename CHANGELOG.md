@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.4] - 2026-06-25
+
+### Fixed
+
+- **Metal: stencil state translation** — `CreateRenderPipeline` now translates
+  `StencilFront`/`StencilBack` face states (compare function, fail/depth-fail/pass ops)
+  and read/write masks into `MTLDepthStencilState`. Previously Metal kept defaults
+  (`Always` + `Keep`), silently disabling the stencil test. Visible as rounded UI
+  rendering as squares on macOS (stencil-then-cover fill path).
+- **Metal: stencil attachment pixel format** — set `stencilAttachmentPixelFormat` on
+  the render pipeline descriptor for formats with stencil aspects (`Depth24PlusStencil8`,
+  `Depth32FloatStencil8`, `Stencil8`). Matches Rust wgpu-hal Metal pattern.
+- **Metal: depth-stencil descriptor leak** — `Release(depthStencilDesc)` after
+  `newDepthStencilStateWithDescriptor:` (descriptor properties copy).
+
+### Added
+
+- `stencilOperationToMTL` — explicit WebGPU→Metal stencil operation mapping
+  (required: enum values differ, e.g. `Invert`: WebGPU=4, Metal=5).
+
+### Contributors
+
+- **@samyfodil** ([PR #227](https://github.com/gogpu/wgpu/pull/227)) — discovered and
+  fixed Metal stencil state, verified on Apple Silicon M4.
+
 ## [0.30.3] - 2026-06-24
 
 ### Added

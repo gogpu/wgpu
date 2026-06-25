@@ -678,8 +678,13 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	var depthStencilState ID
 	var depthBias, depthSlopeScale, depthClamp float32
 	if desc.DepthStencil != nil {
-		// Set depth attachment format
-		_ = MsgSend(pipelineDesc, Sel("setDepthAttachmentPixelFormat:"), uintptr(d.adapter.mapTextureFormat(desc.DepthStencil.Format)))
+		rawFormat := uintptr(d.adapter.mapTextureFormat(desc.DepthStencil.Format))
+		if desc.DepthStencil.Format.HasDepth() {
+			_ = MsgSend(pipelineDesc, Sel("setDepthAttachmentPixelFormat:"), rawFormat)
+		}
+		if desc.DepthStencil.Format.HasStencil() {
+			_ = MsgSend(pipelineDesc, Sel("setStencilAttachmentPixelFormat:"), rawFormat)
+		}
 
 		// Create depth stencil state
 		depthStencilDesc := MsgSend(ID(GetClass("MTLDepthStencilDescriptor")), Sel("new"))
