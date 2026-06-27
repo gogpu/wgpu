@@ -50,27 +50,31 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return nil
 	}
 
-	const bytesPerPixel = 4
+	// bytesPerPixel must match the texture's format, not a hardcoded 4. With a
+	// fixed 4 an R8 texture was written with a 4x row stride, spreading each
+	// source row across 4x the destination columns and corrupting sampling.
+	bytesPerPixel := formatBytesPerPixel(tex.format)
 
-	srcBytesPerRow := layout.BytesPerRow
+	srcBytesPerRow := uint64(layout.BytesPerRow)
 	if srcBytesPerRow == 0 {
-		srcBytesPerRow = size.Width * bytesPerPixel
+		srcBytesPerRow = uint64(size.Width) * bytesPerPixel
 	}
 
 	dstBytesPerRow := uint64(tex.width) * bytesPerPixel
+	rowCopyBytes := uint64(size.Width) * bytesPerPixel
 
 	tex.mu.Lock()
 	defer tex.mu.Unlock()
 
 	for row := uint32(0); row < size.Height; row++ {
-		srcStart := layout.Offset + uint64(row)*uint64(srcBytesPerRow)
-		srcEnd := srcStart + uint64(size.Width)*bytesPerPixel
+		srcStart := layout.Offset + uint64(row)*srcBytesPerRow
+		srcEnd := srcStart + rowCopyBytes
 		if srcEnd > uint64(len(data)) {
 			break
 		}
 
 		dstStart := uint64(dst.Origin.Y+row)*dstBytesPerRow + uint64(dst.Origin.X)*bytesPerPixel
-		dstEnd := dstStart + uint64(size.Width)*bytesPerPixel
+		dstEnd := dstStart + rowCopyBytes
 		if dstEnd > uint64(len(tex.data)) {
 			break
 		}

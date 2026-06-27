@@ -355,7 +355,7 @@ func (r *RenderPassEncoder) fetchTriangles(
 	// Read all vertices.
 	vertices := make([]raster.ScreenVertex, 0, vertexCount)
 	for i := uint32(0); i < vertexCount; i++ {
-		vi := firstVertex + i
+		vi := r.drawVertexIndex(firstVertex, i)
 		base := vb.offset + uint64(vi)*stride
 
 		// Read position.
@@ -516,7 +516,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 
 		vertices := make([]raster.ScreenVertex, 0, vertexCount)
 		for vert := uint32(0); vert < vertexCount; vert++ {
-			vertexID := firstVertex + vert
+			vertexID := r.drawVertexIndex(firstVertex, vert)
 
 			// Build input map for this invocation.
 			inputs := make(map[uint32]shader.Value)
@@ -706,9 +706,11 @@ func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
 				Group:   uint32(groupIdx),
 				Binding: bindingIdx,
 			}] = &shader.Texture2D{
-				Width:  tv.texture.width,
-				Height: tv.texture.height,
-				Data:   tv.texture.data,
+				Width:         tv.texture.width,
+				Height:        tv.texture.height,
+				Data:          tv.texture.data,
+				Format:        uint32(tv.texture.format),
+				BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
 			}
 			tv.texture.mu.RUnlock()
 		}

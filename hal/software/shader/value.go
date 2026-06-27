@@ -74,8 +74,12 @@ type Mat4 = [4]Vec4
 type Texture2D struct {
 	Width  uint32
 	Height uint32
-	Data   []byte // RGBA pixel data, row-major, 4 bytes per pixel.
+	Data   []byte // Pixel data, row-major, BytesPerPixel bytes per texel.
 	Format uint32 // Texture format identifier (0 = RGBA8).
+	// BytesPerPixel is the storage size of a single texel (1 for R8, 2 for
+	// RG8/R16, 4 for RGBA8/BGRA8). When zero, sampling assumes 4 (RGBA8) for
+	// backward compatibility. Single-channel formats unpack as (r, 0, 0, 1).
+	BytesPerPixel uint32
 }
 
 // Sampler describes texture sampling parameters.

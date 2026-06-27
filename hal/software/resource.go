@@ -61,6 +61,31 @@ func (b *Buffer) WriteData(offset uint64, data []byte) {
 // NativeHandle returns the buffer's unique ID for handle resolution.
 func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
+// formatBytesPerPixel returns the number of bytes per texel for the color
+// formats the software backend stores and samples. Previously the backend
+// assumed 4 bytes/pixel everywhere (RGBA8), which corrupted single- and
+// two-channel formats: an R8 texture's data was laid out and sampled with a
+// 4x horizontal stride, so a glyph atlas read at U sampled the texel at 4*U
+// (text rendered garbled/blank). Keeping this in one place ensures texture
+// allocation, WriteTexture, and the sampler agree on the layout.
+func formatBytesPerPixel(f gputypes.TextureFormat) uint64 {
+	switch f {
+	case gputypes.TextureFormatR8Unorm, gputypes.TextureFormatR8Snorm,
+		gputypes.TextureFormatR8Uint, gputypes.TextureFormatR8Sint:
+		return 1
+	case gputypes.TextureFormatRG8Unorm, gputypes.TextureFormatRG8Snorm,
+		gputypes.TextureFormatRG8Uint, gputypes.TextureFormatRG8Sint,
+		gputypes.TextureFormatR16Unorm, gputypes.TextureFormatR16Snorm,
+		gputypes.TextureFormatR16Uint, gputypes.TextureFormatR16Sint,
+		gputypes.TextureFormatR16Float:
+		return 2
+	default:
+		// RGBA8/BGRA8 and any unhandled format default to 4 bytes/pixel,
+		// preserving the previous behavior for the common color formats.
+		return 4
+	}
+}
+
 // Texture implements hal.Texture with real pixel storage.
 type Texture struct {
 	Resource

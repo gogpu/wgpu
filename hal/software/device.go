@@ -75,10 +75,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: texture descriptor is nil in Software.CreateTexture — core validation gap")
 	}
-	// Calculate total size needed for texture data
-	// Simple calculation: width * height * depth * bytesPerPixel
-	// Assuming 4 bytes per pixel (RGBA8) for now
-	bytesPerPixel := uint64(4)
+	// Calculate total size needed for texture data: width * height * depth *
+	// bytesPerPixel, where bytesPerPixel is derived from the format (R8=1,
+	// RG8/R16=2, RGBA8/BGRA8=4). Hardcoding 4 here corrupted single-channel
+	// formats such as the R8 glyph atlas.
+	bytesPerPixel := formatBytesPerPixel(desc.Format)
 	totalSize := uint64(desc.Size.Width) * uint64(desc.Size.Height) * uint64(desc.Size.DepthOrArrayLayers) * bytesPerPixel
 
 	return &Texture{
