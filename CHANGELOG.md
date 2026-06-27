@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.5] - 2026-06-27
+
+### Fixed
+
+- **Software: R8 texture sampling stride** — texture allocation, `WriteTexture`, and
+  `readTexel` all hardcoded 4 bytes/pixel (RGBA8). For R8 textures (1 byte/texel, e.g.
+  glyph coverage atlas) this caused a 4× horizontal stride: sampling at U read texel at
+  4×U, producing garbled/blank text. Now derived from format via `formatBytesPerPixel`.
+- **Software: DrawIndexed implemented** — was a no-op (`func DrawIndexed(_, _, _ uint32,
+  _ int32, _ uint32) {}`). Glyph-mask and MSDF text pipelines use indexed draws
+  exclusively, so all text vanished. Resolves index buffer (uint16/uint32, baseVertex)
+  into vertex indices shared with the non-indexed rasterizer path.
+
+### Added
+
+- `formatBytesPerPixel` helper — single source of truth for R8(1), RG8/R16(2),
+  RGBA8/BGRA8(4). Used by CreateTexture, WriteTexture, and SPIR-V sampler.
+- `readTexel` format-aware unpacking — R8→(r,0,0,1), RG8→(r,g,0,1) per WebGPU spec.
+- `Texture2D.BytesPerPixel` field for SPIR-V interpreter texture sampling.
+- Integration tests: `TestR8SampleCoordRepro`, `TestDrawIndexedRenders`.
+
+### Contributors
+
+- **@samyfodil** ([PR #229](https://github.com/gogpu/wgpu/pull/229)) — discovered and
+  fixed R8 stride + DrawIndexed via gg glyph-mask text on software backend.
+
 ## [0.30.4] - 2026-06-25
 
 ### Fixed
