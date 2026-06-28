@@ -97,10 +97,9 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
 
-		// Simple copy: just copy from buffer to texture data
-		// In a real implementation, this would respect image layout and stride
 		offset := region.BufferLayout.Offset
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(dstTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if offset+size <= uint64(len(srcBuf.data)) && size <= uint64(len(dstTex.data)) {
 			copy(dstTex.data, srcBuf.data[offset:offset+size])
@@ -124,9 +123,9 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
 
-		// Simple copy: just copy from texture to buffer data
 		offset := region.BufferLayout.Offset
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(srcTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if size <= uint64(len(srcTex.data)) && offset+size <= uint64(len(dstBuf.data)) {
 			copy(dstBuf.data[offset:offset+size], srcTex.data[:size])
@@ -150,8 +149,8 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		srcTex.mu.RLock()
 		dstTex.mu.Lock()
 
-		// Simple copy: just copy texture data
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(srcTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if size <= uint64(len(srcTex.data)) && size <= uint64(len(dstTex.data)) {
 			copy(dstTex.data[:size], srcTex.data[:size])

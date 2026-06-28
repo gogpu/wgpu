@@ -120,18 +120,29 @@ func (t *Texture) Clear(color gputypes.Color) {
 	b := uint8(color.B * 255)
 	a := uint8(color.A * 255)
 
-	// Write bytes in format-appropriate order so the data is correct
-	// for direct consumption by GDI (BGRA) or other readers.
-	c0, c1, c2, c3 := r, g, b, a
-	if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
-		c0, c2 = b, r
-	}
+	bpp := int(formatBytesPerPixel(t.format))
 
-	for i := 0; i < len(t.data); i += 4 {
-		t.data[i+0] = c0
-		t.data[i+1] = c1
-		t.data[i+2] = c2
-		t.data[i+3] = c3
+	switch bpp {
+	case 1:
+		for i := 0; i < len(t.data); i++ {
+			t.data[i] = r
+		}
+	case 2:
+		for i := 0; i+1 < len(t.data); i += 2 {
+			t.data[i] = r
+			t.data[i+1] = g
+		}
+	default:
+		c0, c1, c2, c3 := r, g, b, a
+		if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
+			c0, c2 = b, r
+		}
+		for i := 0; i+3 < len(t.data); i += bpp {
+			t.data[i+0] = c0
+			t.data[i+1] = c1
+			t.data[i+2] = c2
+			t.data[i+3] = c3
+		}
 	}
 }
 
