@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Software: format-aware Clear()** — texture clear used `i += 4` loop. Now handles
   1-byte (R8), 2-byte (RG8/R16), and 4+ byte formats correctly. R8 render target
   clear no longer writes out of format bounds.
+- **GLES: flaky integration test** — `TestGLObjectCreation` intermittently returned 0
+  from `glGenBuffers` in CI. Root cause: EGL/GL context bound to OS thread, but Go test
+  goroutines migrate between threads. Added `runtime.LockOSThread()` to all 5 EGL tests.
 
 ## [0.30.6] - 2026-06-28
 
