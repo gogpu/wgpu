@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.6] - 2026-06-28
+
+### Changed
+
+- **Migrate to `gputypes.TextureFormat.BlockCopySize()`** — canonical format size
+  from gputypes v0.5.1 replaces two independent implementations:
+  - Deleted `hal/vulkan/command.go:blockCopySize()` (30 formats, private)
+  - Simplified `hal/software/resource.go:formatBytesPerPixel()` to delegate (was 8 formats)
+  - Software backend now correctly handles RGBA16Float (8 bytes), RGBA32Float (16 bytes),
+    Stencil8 (1 byte), Depth16 (2 bytes) — previously all defaulted to 4.
+
+### Dependencies
+
+- gputypes v0.5.0 → v0.5.1 (adds `BlockCopySize()` — 87 formats, Rust wgpu-types parity)
+
 ## [0.30.5] - 2026-06-27
 
 ### Fixed
