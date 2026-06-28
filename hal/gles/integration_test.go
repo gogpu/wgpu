@@ -6,6 +6,7 @@
 package gles
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -19,6 +20,8 @@ import (
 // In CI, this uses the EGL_MESA_platform_surfaceless for headless testing.
 // Run with: go test -v -tags integration ./hal/gles/...
 func TestEGLInit(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	t.Log("Testing EGL initialization...")
 
 	// Initialize EGL library
@@ -76,6 +79,8 @@ func TestEGLInit(t *testing.T) {
 
 // TestEGLContext tests EGL context creation.
 func TestEGLContext(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	t.Log("Testing EGL context creation...")
 
 	// Initialize EGL
@@ -110,6 +115,8 @@ func TestEGLContext(t *testing.T) {
 // (PR #210): pointer-type args must use unsafe.Pointer(&ptr), not unsafe.Pointer(&value).
 // Without this test, the bug went undetected because CI only tested EGL init.
 func TestGLObjectCreation(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := egl.Init(); err != nil {
 		t.Fatalf("egl.Init() failed: %v", err)
 	}
@@ -168,6 +175,8 @@ func TestGLObjectCreation(t *testing.T) {
 
 // TestGLESBackend tests the full GLES backend integration.
 func TestGLESBackend(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	t.Log("Testing GLES backend...")
 
 	// Create backend
@@ -197,6 +206,8 @@ func TestGLESBackend(t *testing.T) {
 
 // TestGLProcAddress tests GL function loading via EGL.
 func TestGLProcAddress(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	t.Log("Testing GL function loading via EGL...")
 
 	// Initialize EGL
