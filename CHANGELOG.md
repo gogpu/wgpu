@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.7] - 2026-06-28
+
+### Fixed
+
+- **Software: format-aware copy commands** — `CopyBufferToTexture`, `CopyTextureToBuffer`,
+  `CopyTextureToTexture` used hardcoded 4 bytes/pixel. Now use `formatBytesPerPixel()` →
+  `BlockCopySize()`. R8 copies computed 4× too much data, RGBA16Float computed half.
+- **Software: format-aware Clear()** — texture clear used `i += 4` loop. Now handles
+  1-byte (R8), 2-byte (RG8/R16), and 4+ byte formats correctly. R8 render target
+  clear no longer writes out of format bounds.
+
 ## [0.30.6] - 2026-06-28
 
 ### Changed
