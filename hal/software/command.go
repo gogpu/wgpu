@@ -349,9 +349,10 @@ func (r *RenderPassEncoder) SetPipeline(p hal.RenderPipeline) {
 }
 
 // SetBindGroup stores a bind group at the given index.
-func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
 	if index < 4 {
 		if b, ok := bg.(*BindGroup); ok {
+			b.dynamicOffsets = dynamicOffsets
 			r.bindGroups[index] = b
 		}
 	}
@@ -535,9 +536,10 @@ func (c *ComputePassEncoder) SetPipeline(p hal.ComputePipeline) {
 }
 
 // SetBindGroup stores a bind group at the given index for compute dispatch.
-func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
 	if index < 4 {
 		if b, ok := bg.(*BindGroup); ok {
+			b.dynamicOffsets = dynamicOffsets
 			c.bindGroups[index] = b
 		}
 	}
@@ -575,18 +577,30 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		if bg == nil {
 			continue
 		}
-		for bindingIdx, buf := range bg.buffers {
-			if buf == nil {
+		dynIdx := 0
+		for bindingIdx, bs := range bg.bufferBindings {
+			if bs.buf == nil {
 				continue
 			}
-			// Share the buffer's data slice directly so storage buffer writes
-			// from the interpreter are reflected in the HAL buffer.
-			buf.mu.Lock()
+			bs.buf.mu.Lock()
+			data := bs.buf.data
+			off := bs.offset
+			if dynIdx < len(bg.dynamicOffsets) {
+				off += uint64(bg.dynamicOffsets[dynIdx])
+				dynIdx++
+			}
+			end := uint64(len(data))
+			if bs.size > 0 && off+bs.size <= end {
+				end = off + bs.size
+			}
+			if off < uint64(len(data)) {
+				data = data[off:end]
+			}
 			ctx.Buffers[shader.BindingKey{
 				Group:   uint32(groupIdx),
 				Binding: bindingIdx,
-			}] = buf.data
-			buf.mu.Unlock()
+			}] = data
+			bs.buf.mu.Unlock()
 		}
 	}
 

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.8] - 2026-06-28
+
+### Fixed
+
+- **Software: reject SampleCount > 1** (#234) — `CreateTexture` now returns error for
+  MSAA textures. Software backend has no real multisampling; the false acceptance caused
+  gg to allocate useless MSAA textures and perform no-op resolve copies every frame.
+  Also removed `Multisample`/`MultisampleResolve` flags from adapter capabilities.
+- **Software: BGRA swizzle on alpha blending readback** (#235) — when loading existing
+  framebuffer pixels for compositing, raw BGRA bytes were read as RGBA. On Windows
+  (BGRA8 surface) this produced incorrect colors for semi-transparent blending. Both
+  vertex-draw and SPIR-V draw paths fixed.
+- **Software: buffer binding offset/size + dynamic offsets** (#236) — `CreateBindGroup`
+  now stores `BufferBinding.Offset` and `Size`; `SetBindGroup` accepts `dynamicOffsets`;
+  `buildExecutionContext` slices buffers correctly. Previously all buffer data was passed
+  from byte 0, violating WebGPU spec for sub-allocated uniform buffers.
+
 ## [0.30.7] - 2026-06-28
 
 ### Fixed
