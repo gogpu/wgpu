@@ -261,19 +261,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
-
-	// Copy current framebuffer into the raster pipeline so draws composite.
-	target.mu.RLock()
-	existingData := make([]byte, len(target.data))
-	copy(existingData, target.data)
-	target.mu.RUnlock()
-	pipe.Clear(0, 0, 0, 0)
-	for py := 0; py < h; py++ {
-		for px := 0; px < w; px++ {
-			idx := (py*w + px) * 4
-			pipe.SetPixel(px, py, existingData[idx], existingData[idx+1], existingData[idx+2], existingData[idx+3])
-		}
-	}
+	loadFramebufferIntoPipeline(pipe, target)
 
 	// Attempt SPIR-V vertex shader path (handles @builtin + @location inputs
 	// and per-vertex output attributes for interpolation).
@@ -684,17 +672,31 @@ func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
 		if bg == nil {
 			continue
 		}
-		// Buffers (uniform/storage).
-		for bindingIdx, buf := range bg.buffers {
-			if buf == nil {
+		// Buffers (uniform/storage) — apply offset/size from BufferBinding + dynamic offsets.
+		dynIdx := 0
+		for bindingIdx, bs := range bg.bufferBindings {
+			if bs.buf == nil {
 				continue
 			}
-			buf.mu.RLock()
+			bs.buf.mu.RLock()
+			data := bs.buf.data
+			off := bs.offset
+			if dynIdx < len(bg.dynamicOffsets) {
+				off += uint64(bg.dynamicOffsets[dynIdx])
+				dynIdx++
+			}
+			end := uint64(len(data))
+			if bs.size > 0 && off+bs.size <= end {
+				end = off + bs.size
+			}
+			if off < uint64(len(data)) {
+				data = data[off:end]
+			}
 			ctx.Buffers[shader.BindingKey{
 				Group:   uint32(groupIdx),
 				Binding: bindingIdx,
-			}] = buf.data
-			buf.mu.RUnlock()
+			}] = data
+			bs.buf.mu.RUnlock()
 		}
 		// Textures.
 		for bindingIdx, tv := range bg.textureViews {
@@ -896,18 +898,25 @@ func (r *RenderPassEncoder) resolveFragmentColor() [4]float32 {
 		if bg == nil {
 			continue
 		}
-		for _, buf := range bg.buffers {
-			if buf == nil || len(buf.data) < 16 {
+		for _, bs := range bg.bufferBindings {
+			if bs.buf == nil {
+				continue
+			}
+			bs.buf.mu.RLock()
+			d := bs.buf.data
+			if bs.offset > 0 && bs.offset < uint64(len(d)) {
+				d = d[bs.offset:]
+			}
+			if len(d) < 16 {
+				bs.buf.mu.RUnlock()
 				continue
 			}
 			// Attempt to read 4 floats as RGBA color.
-			buf.mu.RLock()
-			d := buf.data
 			cr := math.Float32frombits(binary.LittleEndian.Uint32(d[0:]))
 			cg := math.Float32frombits(binary.LittleEndian.Uint32(d[4:]))
 			cb := math.Float32frombits(binary.LittleEndian.Uint32(d[8:]))
 			ca := math.Float32frombits(binary.LittleEndian.Uint32(d[12:]))
-			buf.mu.RUnlock()
+			bs.buf.mu.RUnlock()
 
 			// Sanity check: values should be in [0,1] range for normalized color.
 			if cr >= 0 && cr <= 1 && cg >= 0 && cg <= 1 && cb >= 0 && cb <= 1 && ca >= 0 && ca <= 1 {
@@ -924,38 +933,43 @@ func (r *RenderPassEncoder) resolveFragmentColor() [4]float32 {
 // triangle). Populates the interpreter's ExecutionContext with bind group
 // resources (uniform buffers, textures, samplers) so shaders can access them.
 // Returns true if the draw was handled, false if no SPIR-V module is available.
-func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, instanceCount, firstVertex, firstInstance uint32) bool {
-	if r.pipeline == nil || r.pipeline.desc == nil {
-		return false
-	}
+// spirvDrawSetup holds the parsed vertex shader state needed by executeSPIRVDraw.
+type spirvDrawSetup struct {
+	parsed             *shader.Module
+	vsEntry            string
+	vertexIndexVarID   uint32
+	instanceIndexVarID uint32
+	positionVarID      uint32
+	hasInstanceIndex   bool
+	locationOutputs    []locationVar
+}
 
-	// Get the vertex shader module.
+type locationVar struct {
+	varID    uint32
+	location int
+}
+
+// prepareSPIRVDraw validates the pipeline and resolves vertex shader interface variables.
+func (r *RenderPassEncoder) prepareSPIRVDraw() *spirvDrawSetup {
+	if r.pipeline == nil || r.pipeline.desc == nil {
+		return nil
+	}
 	vsModule, ok := r.pipeline.desc.Vertex.Module.(*ShaderModule)
 	if !ok || vsModule == nil {
-		return false
+		return nil
 	}
-
 	parsed := vsModule.ParsedModule()
 	if parsed == nil {
-		return false
+		return nil
 	}
-
-	// Find the vertex shader entry point.
 	vsEntry := r.pipeline.desc.Vertex.EntryPoint
 	ep, ok := parsed.EntryPoints[vsEntry]
 	if !ok || ep.ExecutionModel != shader.ExecutionModelVertex {
-		return false
+		return nil
 	}
 
-	// Identify input/output variable IDs by their BuiltIn/Location decorations.
-	var vertexIndexVarID, instanceIndexVarID, positionVarID uint32
-	hasVertexIndex, hasInstanceIndex, hasPosition := false, false, false
-
-	type locationVar struct {
-		varID    uint32
-		location int
-	}
-	var locationOutputs []locationVar
+	s := &spirvDrawSetup{parsed: parsed, vsEntry: vsEntry}
+	var hasVertexIndex, hasPosition bool
 
 	for _, varID := range ep.InterfaceIDs {
 		vi, exists := parsed.Variables[varID]
@@ -967,29 +981,55 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 		switch {
 		case vi.StorageClass == shader.StorageClassInput && builtIn == shader.BuiltInVertexIndex:
-			vertexIndexVarID = varID
+			s.vertexIndexVarID = varID
 			hasVertexIndex = true
 		case vi.StorageClass == shader.StorageClassInput && builtIn == shader.BuiltInInstanceIndex:
-			instanceIndexVarID = varID
-			hasInstanceIndex = true
+			s.instanceIndexVarID = varID
+			s.hasInstanceIndex = true
 		case vi.StorageClass == shader.StorageClassOutput && builtIn == shader.BuiltInPosition:
-			positionVarID = varID
+			s.positionVarID = varID
 			hasPosition = true
 		case vi.StorageClass == shader.StorageClassOutput && loc >= 0:
-			locationOutputs = append(locationOutputs, locationVar{varID: varID, location: loc})
+			s.locationOutputs = append(s.locationOutputs, locationVar{varID: varID, location: loc})
 		}
 	}
-
 	if !hasVertexIndex || !hasPosition {
+		return nil
+	}
+	return s
+}
+
+// loadFramebufferIntoPipeline copies existing target pixels into the raster pipeline
+// for correct alpha compositing, applying BGRA swizzle when needed.
+func loadFramebufferIntoPipeline(pipe *raster.Pipeline, target *Texture) {
+	w := int(target.width)
+	h := int(target.height)
+	target.mu.RLock()
+	existingData := make([]byte, len(target.data))
+	copy(existingData, target.data)
+	target.mu.RUnlock()
+	bgra := isBGRA(target.format)
+	pipe.Clear(0, 0, 0, 0)
+	for py := 0; py < h; py++ {
+		for px := 0; px < w; px++ {
+			idx := (py*w + px) * 4
+			if bgra {
+				pipe.SetPixel(px, py, existingData[idx+2], existingData[idx+1], existingData[idx], existingData[idx+3])
+			} else {
+				pipe.SetPixel(px, py, existingData[idx], existingData[idx+1], existingData[idx+2], existingData[idx+3])
+			}
+		}
+	}
+}
+
+func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, instanceCount, firstVertex, firstInstance uint32) bool {
+	s := r.prepareSPIRVDraw()
+	if s == nil {
 		return false
 	}
 
-	// Build execution context with bind group resources (uniform buffers,
-	// textures, samplers). This removes the old resource guard that rejected
-	// shaders using Uniform/UniformConstant/StorageBuffer variables.
 	ctx := r.buildExecutionContext()
 
-	// Clear before drawing (triangles may not cover all pixels).
 	if !r.cleared {
 		r.applyClear()
 	}
@@ -999,45 +1039,32 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
+	loadFramebufferIntoPipeline(pipe, target)
 
-	// Copy current framebuffer so draws composite correctly.
-	target.mu.RLock()
-	existingData := make([]byte, len(target.data))
-	copy(existingData, target.data)
-	target.mu.RUnlock()
-	pipe.Clear(0, 0, 0, 0)
-	for py := 0; py < h; py++ {
-		for px := 0; px < w; px++ {
-			idx := (py*w + px) * 4
-			pipe.SetPixel(px, py, existingData[idx], existingData[idx+1], existingData[idx+2], existingData[idx+3])
-		}
-	}
-
-	// Execute vertex shader for each (instance, vertex) pair.
 	var allTriangles []raster.Triangle
-	hasLocOutputs := len(locationOutputs) > 0
+	hasLocOutputs := len(s.locationOutputs) > 0
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
 
 		vertices := make([]raster.ScreenVertex, 0, vertexCount)
 		for vert := uint32(0); vert < vertexCount; vert++ {
-			vertexID := firstVertex + vert
+			vertexID := r.drawVertexIndex(firstVertex, vert)
 
 			inputs := map[uint32]shader.Value{
-				vertexIndexVarID: shader.ValUint(vertexID),
+				s.vertexIndexVarID: shader.ValUint(vertexID),
 			}
-			if hasInstanceIndex {
-				inputs[instanceIndexVarID] = shader.ValUint(instanceID)
+			if s.hasInstanceIndex {
+				inputs[s.instanceIndexVarID] = shader.ValUint(instanceID)
 			}
 
 			ctx.Inputs = inputs
-			outputs, err := parsed.ExecuteWithContext(vsEntry, ctx)
+			outputs, err := s.parsed.ExecuteWithContext(s.vsEntry, ctx)
 			if err != nil {
 				return false
 			}
 
-			posVal, posOK := outputs[positionVarID]
+			posVal, posOK := outputs[s.positionVarID]
 			if !posOK {
 				return false
 			}
@@ -1047,28 +1074,18 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 			if wClip == 0 {
 				wClip = 1
 			}
-			ndcX := pos[0] / wClip
-			ndcY := pos[1] / wClip
-			ndcZ := pos[2] / wClip
-
-			sx := (ndcX + 1.0) * 0.5 * float32(w)
-			sy := (1.0 - ndcY) * 0.5 * float32(h)
-
 			sv := raster.ScreenVertex{
-				X: sx,
-				Y: sy,
-				Z: ndcZ,
+				X: (pos[0]/wClip + 1.0) * 0.5 * float32(w),
+				Y: (1.0 - pos[1]/wClip) * 0.5 * float32(h),
+				Z: pos[2] / wClip,
 				W: 1.0,
 			}
 
-			// Collect @location outputs as interpolated attributes.
 			if hasLocOutputs {
-				for _, lo := range locationOutputs {
-					outVal, outOK := outputs[lo.varID]
-					if !outOK {
-						continue
+				for _, lo := range s.locationOutputs {
+					if outVal, outOK := outputs[lo.varID]; outOK {
+						sv.Attributes = append(sv.Attributes, shaderValueToFloats(outVal)...)
 					}
-					sv.Attributes = append(sv.Attributes, shaderValueToFloats(outVal)...)
 				}
 				for len(sv.Attributes) < 4 {
 					sv.Attributes = append(sv.Attributes, 1.0)
@@ -1078,11 +1095,9 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 			vertices = append(vertices, sv)
 		}
 
-		instanceTris := r.verticesToTriangles(vertices)
-		allTriangles = append(allTriangles, instanceTris...)
+		allTriangles = append(allTriangles, r.verticesToTriangles(vertices)...)
 	}
 
-	// Choose between per-pixel fragment shader, interpolated attributes, and flat color.
 	if hasLocOutputs {
 		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
 			pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc)
@@ -1090,15 +1105,10 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 			pipe.DrawTrianglesInterpolated(allTriangles)
 		}
 	} else {
-		fragColor := r.executeSPIRVFragment()
-		pipe.DrawTriangles(allTriangles, fragColor)
+		pipe.DrawTriangles(allTriangles, r.executeSPIRVFragment())
 	}
 
-	// Write raster result back to texture.
-	// Raster pipeline operates in RGBA; swap R↔B when the target is BGRA
-	// (required by GDI BitBlt on Windows and X11 ZPixmap on Linux).
 	writeRasterToTarget(pipe, target)
-
 	return true
 }
 

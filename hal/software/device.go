@@ -75,6 +75,9 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: texture descriptor is nil in Software.CreateTexture — core validation gap")
 	}
+	if desc.SampleCount > 1 {
+		return nil, fmt.Errorf("software backend does not support MSAA (SampleCount=%d)", desc.SampleCount)
+	}
 	// Calculate total size needed for texture data: width * height * depth *
 	// bytesPerPixel, where bytesPerPixel is derived from the format (R8=1,
 	// RG8/R16=2, RGBA8/BGRA8=4). Hardcoding 4 here corrupted single-channel
@@ -151,10 +154,11 @@ func (d *Device) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
 // It resolves handle-based entries to typed software resources using the device registry.
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
 	bg := &BindGroup{
-		desc:         desc,
-		textureViews: make(map[uint32]*TextureView),
-		buffers:      make(map[uint32]*Buffer),
-		samplers:     make(map[uint32]*SamplerResource),
+		desc:           desc,
+		textureViews:   make(map[uint32]*TextureView),
+		buffers:        make(map[uint32]*Buffer),
+		bufferBindings: make(map[uint32]bufferSlice),
+		samplers:       make(map[uint32]*SamplerResource),
 	}
 	if desc != nil {
 		for _, entry := range desc.Entries {
@@ -166,6 +170,11 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			case gputypes.BufferBinding:
 				if buf := d.lookupBuffer(res.Buffer); buf != nil {
 					bg.buffers[entry.Binding] = buf
+					bg.bufferBindings[entry.Binding] = bufferSlice{
+						buf:    buf,
+						offset: res.Offset,
+						size:   res.Size,
+					}
 				}
 			case gputypes.SamplerBinding:
 				if samp := d.lookupSampler(res.Sampler); samp != nil {

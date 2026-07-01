@@ -341,12 +341,21 @@ func (s *SamplerResource) NativeHandle() uintptr { return uintptr(s.id) }
 
 // BindGroup stores bound resources for the software backend.
 // It resolves handle-based entries to concrete software resource pointers.
+// bufferSlice holds a buffer reference with the offset and size from BufferBinding.
+type bufferSlice struct {
+	buf    *Buffer
+	offset uint64
+	size   uint64
+}
+
 type BindGroup struct {
 	Resource
-	desc         *hal.BindGroupDescriptor
-	textureViews map[uint32]*TextureView     // binding index -> resolved texture view
-	buffers      map[uint32]*Buffer          // binding index -> resolved buffer
-	samplers     map[uint32]*SamplerResource // binding index -> resolved sampler
+	desc           *hal.BindGroupDescriptor
+	textureViews   map[uint32]*TextureView     // binding index -> resolved texture view
+	buffers        map[uint32]*Buffer          // binding index -> resolved buffer (legacy, offset=0)
+	bufferBindings map[uint32]bufferSlice      // binding index -> buffer + offset/size
+	samplers       map[uint32]*SamplerResource // binding index -> resolved sampler
+	dynamicOffsets []uint32                    // applied via SetBindGroup
 }
 
 // ComputePipeline stores compute pipeline configuration for the software backend.
