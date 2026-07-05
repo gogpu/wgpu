@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.9] - 2026-07-05
+
+### Dependencies
+
+- goffi v0.5.5 → v0.5.6 — fixes callback stack-move corruption. Callbacks that
+  caused goroutine stack growth could corrupt `callbackArgs` pointers because Go's
+  moving GC relocates stacks. Fix uses `sync.Pool` + `runtime.Pinner` (PR go-webgpu/goffi#59, @tie).
+
 ## [0.30.8] - 2026-06-28
 
 ### Fixed
