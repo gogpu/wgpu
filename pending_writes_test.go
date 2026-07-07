@@ -769,6 +769,96 @@ func TestPendingWrites_CopyTextureDataAligned(t *testing.T) {
 			t.Errorf("layer 1: got [%d %d], want [3 4]", result[4], result[5])
 		}
 	})
+
+	t.Run("alignment 8", func(t *testing.T) {
+		// 2 rows of 3 bytes each aligned to 8: exercises alignedBytesPerRow != 4.
+		data := []byte{1, 2, 3, 4, 5, 6}
+		result := copyTextureDataAligned(data, 0, 3, 8, 2, 1, 16)
+
+		if len(result) != 16 {
+			t.Fatalf("expected len=16, got %d", len(result))
+		}
+		if result[0] != 1 || result[1] != 2 || result[2] != 3 {
+			t.Errorf("row 0 bytes: got %v, want [1 2 3]", result[0:3])
+		}
+		if result[8] != 4 || result[9] != 5 || result[10] != 6 {
+			t.Errorf("row 1 bytes: got %v, want [4 5 6]", result[8:11])
+		}
+	})
+}
+
+func TestPendingWrites_AlignTextureDataInto(t *testing.T) {
+	t.Run("no padding - returns original slice", func(t *testing.T) {
+		data := []byte{1, 2, 3, 4}
+		var buf []byte
+		result := alignTextureDataInto(&buf, data, 0, 4, 4, 1, 1, 4)
+		if &result[0] != &data[0] {
+			t.Error("expected original slice returned when no padding needed")
+		}
+	})
+
+	t.Run("allocates new buffer", func(t *testing.T) {
+		// 2 rows of 3 bytes aligned to 4 — buf starts nil, must be allocated.
+		data := []byte{1, 2, 3, 4, 5, 6}
+		var buf []byte
+		result := alignTextureDataInto(&buf, data, 0, 3, 4, 2, 1, 8)
+		if len(result) != 8 {
+			t.Fatalf("expected len=8, got %d", len(result))
+		}
+		if result[0] != 1 || result[1] != 2 || result[2] != 3 {
+			t.Errorf("row 0: got %v", result[0:4])
+		}
+	})
+
+	t.Run("reuses pre-allocated buffer", func(t *testing.T) {
+		// Pre-allocate a buffer large enough — exercises the else branch
+		// (*buf = (*buf)[:stagingSize]) instead of make().
+		data := []byte{10, 20, 30, 40, 50, 60}
+		buf := make([]byte, 0, 32) // cap 32 > stagingSize 8
+		ptr := &buf[0:1:32][0]
+		result := alignTextureDataInto(&buf, data, 0, 3, 4, 2, 1, 8)
+		if len(result) != 8 {
+			t.Fatalf("expected len=8, got %d", len(result))
+		}
+		// Verify no new allocation: the backing array should be the same.
+		if len(buf) > 0 && &buf[0] != ptr {
+			t.Error("expected pre-allocated buffer to be reused (no new make)")
+		}
+		if result[0] != 10 || result[1] != 20 || result[2] != 30 {
+			t.Errorf("row 0: got %v", result[0:4])
+		}
+	})
+}
+
+func TestPendingWrites_AlignTextureRowsIntoTruncated(t *testing.T) {
+	// data is one byte short of a full second row — the inner loop hits
+	// the srcRowStart+bytesPerRow > len(data) guard and breaks early.
+	data := []byte{1, 2, 3} // only 3 bytes; row 1 would need bytes [3,5) which are missing
+	aligned := make([]byte, 8)
+	alignTextureRowsInto(aligned, data, 0, 3, 4, 2, 1)
+	// Row 0 bytes should be copied.
+	if aligned[0] != 1 || aligned[1] != 2 || aligned[2] != 3 {
+		t.Errorf("row 0: got %v, want [1 2 3]", aligned[0:3])
+	}
+	// Row 1 must be zeroed (break fired, no copy happened).
+	if aligned[4] != 0 || aligned[5] != 0 || aligned[6] != 0 {
+		t.Errorf("row 1 should be zero after break, got %v", aligned[4:7])
+	}
+}
+
+func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
+	// Zero-length write in batching mode must return nil without allocating
+	// staging or activating the encoder.
+	pw, _, _ := createBatchingPW(t)
+	defer pw.destroy()
+
+	dstBuf := &noop.Resource{}
+	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
+		t.Fatalf("writeBuffer(empty): %v", err)
+	}
+	if pw.isRecording {
+		t.Error("empty write must not activate encoder")
+	}
 }
 
 func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {

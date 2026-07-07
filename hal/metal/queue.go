@@ -259,6 +259,13 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("metal: WriteTexture: invalid arguments")
 	}
 
+	// Apple Silicon UMA fast path: Shared textures accept synchronous CPU writes
+	// via replaceRegion:. This avoids per-upload staging buffers and one-shot
+	// blit command buffers — the main source of resize-induced memory growth.
+	if tex.isShared {
+		return q.writeTextureShared(tex, dst, data, layout, size)
+	}
+
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
@@ -371,14 +378,62 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	return nil
 }
 
+// writeTextureShared writes pixel data directly into a Shared-storage Metal texture
+// using replaceRegion:mipmapLevel:withBytes:bytesPerRow:. This is a synchronous CPU
+// write — no GPU command buffer or staging buffer is required. Valid only when
+// tex.isShared is true (Apple Silicon UMA).
+func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
+	bytesPerRow := layout.BytesPerRow
+	if bytesPerRow == 0 {
+		bytesPerRow = size.Width * 4
+	}
+	depth := size.DepthOrArrayLayers
+	if depth == 0 {
+		depth = 1
+	}
+
+	region := MTLRegion{
+		Origin: MTLOrigin{
+			X: NSUInteger(dst.Origin.X),
+			Y: NSUInteger(dst.Origin.Y),
+			Z: NSUInteger(dst.Origin.Z),
+		},
+		Size: MTLSize{
+			Width:  NSUInteger(size.Width),
+			Height: NSUInteger(size.Height),
+			Depth:  NSUInteger(depth),
+		},
+	}
+
+	src := data[layout.Offset:]
+	if len(src) == 0 {
+		return nil
+	}
+
+	// replaceRegion:mipmapLevel:withBytes:bytesPerRow: — synchronous CPU→Shared write.
+	msgSendVoid(tex.raw, Sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"),
+		argStruct(region, mtlRegionType),
+		argUint64(uint64(dst.MipLevel)),
+		argPointer(uintptr(unsafe.Pointer(&src[0]))),
+		argUint64(uint64(bytesPerRow)),
+	)
+
+	hal.Logger().Debug("metal: WriteTexture (shared direct)",
+		"width", size.Width,
+		"height", size.Height,
+		"bytesPerRow", bytesPerRow,
+	)
+	return nil
+}
+
 // Present presents a surface texture to the screen.
 //
-// Creates a dedicated command buffer, calls presentDrawable:, and commits.
-// This matches the Rust wgpu Metal backend pattern where presentation is
-// handled in a separate command buffer from rendering work.
+// When the surface uses presentsWithTransaction (default on macOS), presentation
+// follows the wgpu-hal pattern: commit an empty command buffer, wait until
+// scheduled, then call CAMetalDrawable.present. This synchronizes with Core
+// Animation during live window resize (wgpu #3756).
 //
 // damageRects is accepted but ignored — Metal has no compositor damage API.
-// Apple's WindowServer does not accept damage hints from Metal applications.
 func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []image.Rectangle) error {
 	hal.Logger().Debug("metal: Present")
 	st, ok := texture.(*SurfaceTexture)
@@ -386,20 +441,43 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 		return nil
 	}
 
-	if st.drawable != 0 {
-		pool := NewAutoreleasePool()
-		defer pool.Drain()
+	if st.drawable == 0 {
+		return nil
+	}
 
-		cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
-		if cmdBuffer != 0 {
-			_ = MsgSend(cmdBuffer, Sel("presentDrawable:"), uintptr(st.drawable))
-			_ = MsgSend(cmdBuffer, Sel("commit"))
-			hal.Logger().Debug("metal: presentDrawable committed")
-		}
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
 
+	useTransaction := false
+	if ms, ok := surface.(*Surface); ok && ms != nil {
+		useTransaction = ms.presentsWithTransaction
+	}
+
+	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
+	if cmdBuffer == 0 {
 		Release(st.drawable)
 		st.drawable = 0
+		return nil
 	}
+
+	if !useTransaction {
+		_ = MsgSend(cmdBuffer, Sel("presentDrawable:"), uintptr(st.drawable))
+	}
+	_ = MsgSend(cmdBuffer, Sel("commit"))
+
+	if useTransaction {
+		_ = MsgSend(cmdBuffer, Sel("waitUntilScheduled"))
+		_ = MsgSend(st.drawable, Sel("present"))
+		hal.Logger().Debug("metal: presentDrawable (transaction) committed")
+	} else {
+		hal.Logger().Debug("metal: presentDrawable committed")
+	}
+
+	// Present consumes the surface texture: release both retains taken in
+	// AcquireTexture. The MTLTexture retain is balanced here (not in
+	// DestroyTexture, which skips isExternal textures) — leaking it pins the
+	// drawable's IOSurface forever, accumulating gigabytes across frames.
+	st.releaseAcquired()
 
 	return nil
 }

@@ -33,6 +33,11 @@ type Device struct {
 	adapter       *Adapter
 	eventListener ID     // id<MTLSharedEventListener> — created lazily, reused
 	queue         *Queue // back-reference for WaitIdle semaphore draining
+	// hasUnifiedMemory is true on Apple Silicon (UMA). On UMA, MTLStorageModeShared
+	// textures are physically identical to Private but allow setPurgeableState(empty)
+	// and direct CPU writes without a staging blit, which eliminates the main source
+	// of resize-induced memory growth.
+	hasUnifiedMemory bool
 }
 
 // newDevice creates a new Device from a Metal device.
@@ -46,14 +51,21 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		return nil, fmt.Errorf("metal: failed to create command queue")
 	}
 
+	// Detect Apple Silicon (UMA): hasUnifiedMemory returns YES on M-series chips.
+	// On UMA, MTLStorageModeShared == Private physically, so we use Shared for all
+	// user textures to enable setPurgeableState(empty) and direct CPU writes.
+	hasUMA := MsgSend(adapter.raw, Sel("hasUnifiedMemory")) != 0
+
 	hal.Logger().Info("metal: device created",
 		"name", DeviceName(adapter.raw),
+		"hasUnifiedMemory", hasUMA,
 	)
 
 	return &Device{
-		raw:          adapter.raw,
-		commandQueue: queue,
-		adapter:      adapter,
+		raw:              adapter.raw,
+		commandQueue:     queue,
+		adapter:          adapter,
+		hasUnifiedMemory: hasUMA,
 	}, nil
 }
 
@@ -198,7 +210,20 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 
 	usage := textureUsageToMTL(desc.Usage)
 	_ = MsgSend(texDesc, Sel("setUsage:"), uintptr(usage))
-	_ = MsgSend(texDesc, Sel("setStorageMode:"), uintptr(MTLStorageModePrivate))
+
+	// On Apple Silicon (UMA), use Shared storage instead of Private.
+	// Physical memory is identical on UMA — the only differences are:
+	//   (a) Shared supports direct CPU writes via replaceRegion: (no staging copy)
+	//   (b) Shared honours setPurgeableState(empty) which immediately returns
+	//       physical pages to the OS; Private silently ignores this call.
+	// On discrete-GPU Macs, keep Private (VRAM-resident, no CPU penalty per frame).
+	storageMode := MTLStorageModePrivate
+	isShared := false
+	if d.hasUnifiedMemory {
+		storageMode = MTLStorageModeShared
+		isShared = true
+	}
+	_ = MsgSend(texDesc, Sel("setStorageMode:"), uintptr(storageMode))
 
 	raw := MsgSend(d.raw, Sel("newTextureWithDescriptor:"), uintptr(texDesc))
 	if raw == 0 {
@@ -223,16 +248,25 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		usage:      desc.Usage,
 		device:     d,
 		isExternal: false,
+		isShared:   isShared,
 	}, nil
 }
 
 // DestroyTexture destroys a GPU texture.
+//
+// setPurgeableState(empty) is called before Release so that Metal can reclaim
+// the physical memory pages immediately, even if Metal's internal retain count
+// has not yet reached zero (e.g. the texture is referenced by a completed but
+// not-yet-garbage-collected command buffer). This is safe because DestroyTexture
+// is only called from DestroyQueue.Triage after the GPU submission that last
+// used the texture has completed.
 func (d *Device) DestroyTexture(texture hal.Texture) {
 	mtlTexture, ok := texture.(*Texture)
 	if !ok || mtlTexture == nil {
 		return
 	}
 	if mtlTexture.raw != 0 && !mtlTexture.isExternal {
+		_ = MsgSend(mtlTexture.raw, Sel("setPurgeableState:"), uintptr(MTLPurgeableStateEmpty))
 		Release(mtlTexture.raw)
 		mtlTexture.raw = 0
 	}
@@ -1172,6 +1206,25 @@ func (d *Device) WaitIdle() error {
 		_ = MsgSend(cmdBuffer, Sel("commit"))
 		_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
 		Release(cmdBuffer)
+	}
+
+	// GPU is idle — all previously submitted command buffers have completed.
+	// Explicitly advance completedIndex to submissionIndex so that
+	// PollCompleted() returns the correct value immediately, without waiting
+	// for addCompletedHandler blocks to fire on Metal's dispatch thread.
+	// Those blocks fire asynchronously and may not have run yet even though
+	// waitUntilCompleted has returned (Metal runs handlers on a separate queue).
+	if d.queue != nil {
+		target := d.queue.submissionIndex
+		for {
+			current := d.queue.completedIndex.Load()
+			if current >= target {
+				break
+			}
+			if d.queue.completedIndex.CompareAndSwap(current, target) {
+				break
+			}
+		}
 	}
 
 	// Drain and refill the frame semaphore. After waitUntilCompleted, all

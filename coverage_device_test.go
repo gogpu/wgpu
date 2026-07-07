@@ -575,6 +575,31 @@ func TestWaitIdleReleasedDevice(t *testing.T) {
 }
 
 // =============================================================================
+// Device.WaitIdle — success path + maintainAfterIdle internals
+// Covers device_native.go WaitIdle happy path
+// =============================================================================
+
+func TestWaitIdleSucceeds(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	if err := device.WaitIdle(); err != nil {
+		t.Fatalf("WaitIdle: %v", err)
+	}
+}
+
+// =============================================================================
+// Device.maintainAfterIdle — nil-queue early return
+// Covers device_native.go maintainAfterIdle guard clause (d.queue == nil)
+// =============================================================================
+
+func TestMaintainAfterIdleNilQueue(t *testing.T) {
+	d := wgpu.NewBareDeviceForTest()
+	d.TestMaintainAfterIdle() // must not panic
+}
+
+// =============================================================================
 // Device.PushErrorScope / PopErrorScope — nested scopes
 // Covers device_native.go lines 840-848
 // =============================================================================

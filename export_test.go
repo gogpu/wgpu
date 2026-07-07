@@ -95,3 +95,10 @@ func (g *BindGroup) SetTestLayout(layout *BindGroupLayout) {
 func (p *RenderPipeline) SetTestStripIndexFormat(format *IndexFormat) {
 	p.stripIndexFormat = format
 }
+
+// TestMaintainAfterIdle exposes the private maintainAfterIdle for targeted coverage tests.
+func (d *Device) TestMaintainAfterIdle() { d.maintainAfterIdle() }
+
+// NewBareDeviceForTest returns a Device with no queue or HAL state (testing only).
+// Used to exercise nil-queue guard clauses in maintainAfterIdle.
+func NewBareDeviceForTest() *Device { return &Device{} }

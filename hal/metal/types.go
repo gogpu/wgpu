@@ -191,6 +191,16 @@ const (
 	MTLTextureType3D            MTLTextureType = 7
 )
 
+// MTLPurgeableState represents resource purgeability for explicit memory pressure hints.
+type MTLPurgeableState NSUInteger
+
+const (
+	MTLPurgeableStateKeepCurrent MTLPurgeableState = 1
+	MTLPurgeableStateNonVolatile MTLPurgeableState = 2
+	MTLPurgeableStateVolatile    MTLPurgeableState = 3
+	MTLPurgeableStateEmpty       MTLPurgeableState = 4
+)
+
 // MTLTextureUsage represents texture usage flags.
 type MTLTextureUsage NSUInteger
 
