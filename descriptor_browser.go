@@ -2,6 +2,8 @@
 
 package wgpu
 
+import "github.com/gogpu/gputypes"
+
 // Extent3D is a 3D size.
 type Extent3D struct {
 	Width              uint32
@@ -112,18 +114,19 @@ type PipelineLayoutDescriptor struct {
 }
 
 // StencilOperation describes a stencil operation.
-type StencilOperation uint32
+// Canonical definition in gputypes (webgpu.h spec-compliant values).
+type StencilOperation = gputypes.StencilOperation
 
-// Stencil operation constants.
+// Stencil operation constants (webgpu.h spec values).
 const (
-	StencilOperationKeep           StencilOperation = 0
-	StencilOperationZero           StencilOperation = 1
-	StencilOperationReplace        StencilOperation = 2
-	StencilOperationInvert         StencilOperation = 3
-	StencilOperationIncrementClamp StencilOperation = 4
-	StencilOperationDecrementClamp StencilOperation = 5
-	StencilOperationIncrementWrap  StencilOperation = 6
-	StencilOperationDecrementWrap  StencilOperation = 7
+	StencilOperationKeep           = gputypes.StencilOperationKeep
+	StencilOperationZero           = gputypes.StencilOperationZero
+	StencilOperationReplace        = gputypes.StencilOperationReplace
+	StencilOperationInvert         = gputypes.StencilOperationInvert
+	StencilOperationIncrementClamp = gputypes.StencilOperationIncrementClamp
+	StencilOperationDecrementClamp = gputypes.StencilOperationDecrementClamp
+	StencilOperationIncrementWrap  = gputypes.StencilOperationIncrementWrap
+	StencilOperationDecrementWrap  = gputypes.StencilOperationDecrementWrap
 )
 
 // StencilFaceState describes stencil operations for a face.
@@ -179,6 +182,14 @@ type ComputePipelineDescriptor struct {
 	Layout     *PipelineLayout
 	Module     *ShaderModule
 	EntryPoint string
+
+	// Constants are pipeline-overridable constants (WebGPU spec).
+	// Browser passes these to GPUDevice.createComputePipeline() constants dict.
+	Constants map[string]float64
+
+	// ZeroInitializeWorkgroupMemory controls workgroup memory zero-init.
+	// Browser ignores this (WebGPU spec mandates zero-init in browser).
+	ZeroInitializeWorkgroupMemory *bool
 }
 
 // RenderPassDescriptor describes a render pass.

@@ -2,9 +2,13 @@ package wgpu
 
 import "github.com/gogpu/gputypes"
 
-// MaxBindGroups is the maximum number of bind groups allowed by the WebGPU spec.
-// This is the hard cap (wgpu-hal MAX_BIND_GROUPS = 8). Actual device limits
-// may be lower (typically 4 in the WebGPU spec).
+// MinBindGroups is the minimum guaranteed number of bind groups per WebGPU spec.
+// All compliant devices support at least 4 bind groups. Portable code should
+// use no more than MinBindGroups.
+const MinBindGroups = 4
+
+// MaxBindGroups is the HAL hard cap on bind groups (wgpu-hal MAX_BIND_GROUPS = 8).
+// Devices may support up to 8, but only MinBindGroups (4) is guaranteed.
 const MaxBindGroups = 8
 
 // Backend types

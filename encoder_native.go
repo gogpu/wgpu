@@ -258,6 +258,48 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	}
 }
 
+// CopyBufferToTexture copies data from a buffer to a texture.
+// WebGPU spec: GPUCommandEncoder.copyBufferToTexture.
+func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions []BufferTextureCopy) {
+	if e.released || src == nil || dst == nil {
+		return
+	}
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+	halRegions := make([]hal.BufferTextureCopy, len(regions))
+	for i, r := range regions {
+		halRegions[i] = hal.BufferTextureCopy{
+			BufferLayout: hal.ImageDataLayout{
+				Offset:       r.BufferLayout.Offset,
+				BytesPerRow:  r.BufferLayout.BytesPerRow,
+				RowsPerImage: r.BufferLayout.RowsPerImage,
+			},
+			TextureBase: hal.ImageCopyTexture{
+				Texture:  dst.hal,
+				MipLevel: r.TextureBase.MipLevel,
+				Origin:   hal.Origin3D(r.TextureBase.Origin),
+			},
+			Size: hal.Extent3D(r.Size),
+		}
+	}
+	raw.CopyBufferToTexture(src.halBuffer(), dst.hal, halRegions)
+}
+
+// ClearBuffer clears a buffer region to zero.
+// WebGPU spec: GPUCommandEncoder.clearBuffer.
+func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
+	if e.released || buffer == nil {
+		return
+	}
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+	raw.ClearBuffer(buffer.halBuffer(), offset, size)
+}
+
 // DiscardEncoding discards the encoder without producing a command buffer.
 // Use this to abandon an in-progress encoding when an error occurs.
 // If the encoder was acquired from the pool, it is returned for reuse.

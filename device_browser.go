@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"syscall/js"
+	"time"
 
 	"github.com/gogpu/wgpu/internal/browser"
 )
@@ -262,6 +263,24 @@ func (d *Device) CreateFence() (*Fence, error) {
 	return &Fence{}, nil
 }
 
+// DestroyFence destroys a fence. No-op on browser — fences are JS-managed.
+func (d *Device) DestroyFence(f *Fence) {
+	if f != nil {
+		f.Release()
+	}
+}
+
+// ResetFence resets a fence. No-op on browser — fences auto-reset.
+func (d *Device) ResetFence(_ *Fence) error { return nil }
+
+// GetFenceStatus returns true (signaled). Browser fences resolve via JS Promises.
+func (d *Device) GetFenceStatus(_ *Fence) (bool, error) { return true, nil }
+
+// WaitForFence returns immediately on browser — GPU sync is handled by JS event loop.
+func (d *Device) WaitForFence(_ *Fence, _ uint64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
 // Phase 2 — not yet implemented for browser.
 func (d *Device) PushErrorScope(filter ErrorFilter) {
@@ -483,9 +502,7 @@ func convertStencilFaceState(s *StencilFaceState) *browser.StencilFaceStateJS {
 	}
 }
 
-// stencilOpToJS converts the local StencilOperation enum to a WebGPU JS string.
-// The local enum (descriptor_browser.go) uses 0-based values while gputypes uses
-// 1-based (with Undefined=0), so we map explicitly to be correct.
+// stencilOpToJS converts StencilOperation (gputypes, webgpu.h spec values) to WebGPU JS string.
 func stencilOpToJS(op StencilOperation) string {
 	switch op {
 	case StencilOperationKeep:

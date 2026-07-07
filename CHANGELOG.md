@@ -5,6 +5,197 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.9] - 2026-07-05
+
+### Dependencies
+
+- goffi v0.5.5 → v0.5.6 — fixes callback stack-move corruption. Callbacks that
+  caused goroutine stack growth could corrupt `callbackArgs` pointers because Go's
+  moving GC relocates stacks. Fix uses `sync.Pool` + `runtime.Pinner` (PR go-webgpu/goffi#59, @tie).
+
+## [0.30.8] - 2026-06-28
+
+### Fixed
+
+- **Software: reject SampleCount > 1** (#234) — `CreateTexture` now returns error for
+  MSAA textures. Software backend has no real multisampling; the false acceptance caused
+  gg to allocate useless MSAA textures and perform no-op resolve copies every frame.
+  Also removed `Multisample`/`MultisampleResolve` flags from adapter capabilities.
+- **Software: BGRA swizzle on alpha blending readback** (#235) — when loading existing
+  framebuffer pixels for compositing, raw BGRA bytes were read as RGBA. On Windows
+  (BGRA8 surface) this produced incorrect colors for semi-transparent blending. Both
+  vertex-draw and SPIR-V draw paths fixed.
+- **Software: buffer binding offset/size + dynamic offsets** (#236) — `CreateBindGroup`
+  now stores `BufferBinding.Offset` and `Size`; `SetBindGroup` accepts `dynamicOffsets`;
+  `buildExecutionContext` slices buffers correctly. Previously all buffer data was passed
+  from byte 0, violating WebGPU spec for sub-allocated uniform buffers.
+
+## [0.30.7] - 2026-06-28
+
+### Fixed
+
+- **Software: format-aware copy commands** — `CopyBufferToTexture`, `CopyTextureToBuffer`,
+  `CopyTextureToTexture` used hardcoded 4 bytes/pixel. Now use `formatBytesPerPixel()` →
+  `BlockCopySize()`. R8 copies computed 4× too much data, RGBA16Float computed half.
+- **Software: format-aware Clear()** — texture clear used `i += 4` loop. Now handles
+  1-byte (R8), 2-byte (RG8/R16), and 4+ byte formats correctly. R8 render target
+  clear no longer writes out of format bounds.
+- **GLES: flaky integration test** — `TestGLObjectCreation` intermittently returned 0
+  from `glGenBuffers` in CI. Root cause: EGL/GL context bound to OS thread, but Go test
+  goroutines migrate between threads. Added `runtime.LockOSThread()` to all 5 EGL tests.
+
+## [0.30.6] - 2026-06-28
+
+### Changed
+
+- **Migrate to `gputypes.TextureFormat.BlockCopySize()`** — canonical format size
+  from gputypes v0.5.1 replaces two independent implementations:
+  - Deleted `hal/vulkan/command.go:blockCopySize()` (30 formats, private)
+  - Simplified `hal/software/resource.go:formatBytesPerPixel()` to delegate (was 8 formats)
+  - Software backend now correctly handles RGBA16Float (8 bytes), RGBA32Float (16 bytes),
+    Stencil8 (1 byte), Depth16 (2 bytes) — previously all defaulted to 4.
+
+### Dependencies
+
+- gputypes v0.5.0 → v0.5.1 (adds `BlockCopySize()` — 87 formats, Rust wgpu-types parity)
+
+## [0.30.5] - 2026-06-27
+
+### Fixed
+
+- **Software: R8 texture sampling stride** — texture allocation, `WriteTexture`, and
+  `readTexel` all hardcoded 4 bytes/pixel (RGBA8). For R8 textures (1 byte/texel, e.g.
+  glyph coverage atlas) this caused a 4× horizontal stride: sampling at U read texel at
+  4×U, producing garbled/blank text. Now derived from format via `formatBytesPerPixel`.
+- **Software: DrawIndexed implemented** — was a no-op (`func DrawIndexed(_, _, _ uint32,
+  _ int32, _ uint32) {}`). Glyph-mask and MSDF text pipelines use indexed draws
+  exclusively, so all text vanished. Resolves index buffer (uint16/uint32, baseVertex)
+  into vertex indices shared with the non-indexed rasterizer path.
+
+### Added
+
+- `formatBytesPerPixel` helper — single source of truth for R8(1), RG8/R16(2),
+  RGBA8/BGRA8(4). Used by CreateTexture, WriteTexture, and SPIR-V sampler.
+- `readTexel` format-aware unpacking — R8→(r,0,0,1), RG8→(r,g,0,1) per WebGPU spec.
+- `Texture2D.BytesPerPixel` field for SPIR-V interpreter texture sampling.
+- Integration tests: `TestR8SampleCoordRepro`, `TestDrawIndexedRenders`.
+
+### Contributors
+
+- **@samyfodil** ([PR #229](https://github.com/gogpu/wgpu/pull/229)) — discovered and
+  fixed R8 stride + DrawIndexed via gg glyph-mask text on software backend.
+
+## [0.30.4] - 2026-06-25
+
+### Fixed
+
+- **Metal: stencil state translation** — `CreateRenderPipeline` now translates
+  `StencilFront`/`StencilBack` face states (compare function, fail/depth-fail/pass ops)
+  and read/write masks into `MTLDepthStencilState`. Previously Metal kept defaults
+  (`Always` + `Keep`), silently disabling the stencil test. Visible as rounded UI
+  rendering as squares on macOS (stencil-then-cover fill path).
+- **Metal: stencil attachment pixel format** — set `stencilAttachmentPixelFormat` on
+  the render pipeline descriptor for formats with stencil aspects (`Depth24PlusStencil8`,
+  `Depth32FloatStencil8`, `Stencil8`). Matches Rust wgpu-hal Metal pattern.
+- **Metal: depth-stencil descriptor leak** — `Release(depthStencilDesc)` after
+  `newDepthStencilStateWithDescriptor:` (descriptor properties copy).
+
+### Added
+
+- `stencilOperationToMTL` — explicit WebGPU→Metal stencil operation mapping
+  (required: enum values differ, e.g. `Invert`: WebGPU=4, Metal=5).
+
+### Contributors
+
+- **@samyfodil** ([PR #227](https://github.com/gogpu/wgpu/pull/227)) — discovered and
+  fixed Metal stencil state, verified on Apple Silicon M4.
+
+## [0.30.3] - 2026-06-24
+
+### Added
+
+- **SPIR-V interpreter: hyperbolic math** — `Sinh`/`Cosh`/`Tanh`/`Asinh`/`Acosh`/`Atanh`
+  (GLSL.std.450 opcodes 19–24). Previously returned silent zeros.
+- **SPIR-V interpreter: integer clamp** — `UClamp` (44) and `SClamp` (45) for unsigned
+  and signed integers. Only float `FClamp` was implemented before.
+- `glslTernaryUint`/`glslTernaryInt` helpers for ternary integer operations.
+
+### Contributors
+
+- **@amery** ([PR #225](https://github.com/gogpu/wgpu/pull/225)) — discovered and fixed
+  missing opcodes via Born ML's software backend path.
+
+## [0.30.2] - 2026-06-17
+
+### Dependencies
+
+- goffi v0.5.3 → v0.5.5
+
+## [0.30.1] - 2026-06-15
+
+### Fixed
+
+- **Remove broken gpucontext sentinel methods** — `gpucontext_sentinel.go` deleted.
+  Unexported methods don't work cross-package per Go spec.
+
+### Added
+
+- **gpucontext handle helpers** — type-safe conversion isolating `unsafe.Pointer`
+  from consumers: `DeviceFromHandle/ToHandle`, `QueueFromHandle/ToHandle`,
+  `AdapterFromHandle/ToHandle`, `SurfaceFromHandle/ToHandle`, `InstanceFromHandle/ToHandle`.
+
+### Dependencies
+
+- **gpucontext v0.21.0** — opaque struct tokens (ADR-018 pattern). New dependency:
+  wgpu → gpucontext (DIP: implementation → abstraction).
+
+## [0.30.0] - 2026-06-15
+
+### Changed (BREAKING)
+
+- **Unified public API across all build targets (ADR-047)** — 6 divergences fixed
+  between native, Rust, and browser builds. Consumer code now compiles on all targets.
+- **StencilOperation → gputypes** — canonical webgpu.h spec values (uint32, 0x1-based).
+  Was: HAL uint8 iota (0-based) on native, independent uint32 (0-based) on browser.
+  Breaking: numeric values changed (Keep: 0→0x1, Zero: 1→0x2, etc.).
+- **Device.released → atomic.Bool** — fixes data race when Release() called
+  concurrently with CreateBuffer(). Was plain bool.
+- **gpucontext sentinel methods** — `*wgpu.Device` now satisfies `gpucontext.Device`
+  interface (with sentinel). Requires gpucontext v0.20.0.
+
+### Added
+
+- **MinBindGroups = 4** — WebGPU spec guaranteed minimum. Portable code should
+  use ≤4 bind groups. MaxBindGroups (8) is HAL hard cap.
+- **CommandEncoder.CopyBufferToTexture** — WebGPU spec method, was browser-only.
+  Now available on native (routes through HAL).
+- **CommandEncoder.ClearBuffer** — WebGPU spec method, was browser-only.
+  Now available on native.
+- **Browser fence stubs** — DestroyFence, ResetFence, GetFenceStatus, WaitForFence
+  (no-op on browser, matching native signatures).
+- **Browser ComputePipelineDescriptor** — added Constants and
+  ZeroInitializeWorkgroupMemory fields (were native-only).
+- **browser-compute example** — WASM WebGPU compute validation
+  (shader → dispatch → readback).
+
+## [0.29.16] - 2026-06-15
+
+### Fixed
+
+- **HAL wrapper stubs for Rust and Browser builds** — `NewDeviceFromHAL`,
+  `NewSurfaceFromHAL`, `NewTextureFromHAL`, `NewTextureViewFromHAL`,
+  `NewSamplerFromHAL` now have stubs in `wrap_rust.go` (error return) and
+  `wrap_browser.go` (`any` params, nil return). Previously these 5 public
+  functions disappeared with `-tags=rust` or `js/wasm`, breaking consumers
+  that reference them. Public API must compile on all build targets.
+
+## [0.29.15] - 2026-06-15
+
+### Dependencies
+
+- naga v0.17.15 — HLSL sampler comparison fix (@georgebuilds first contribution, @lkmavi hardware verification)
+- golang.org/x/sys v0.46.0
+
 ## [0.29.14] - 2026-06-11
 
 ### Fixed

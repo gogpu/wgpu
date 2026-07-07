@@ -61,6 +61,17 @@ func (b *Buffer) WriteData(offset uint64, data []byte) {
 // NativeHandle returns the buffer's unique ID for handle resolution.
 func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
+// formatBytesPerPixel returns the bytes per texel for texture allocation and
+// sampling. Delegates to gputypes.TextureFormat.BlockCopySize() — the canonical
+// source of truth for all 87 WebGPU formats. Returns 4 for unknown/ambiguous
+// formats (Depth24Plus, etc.) as a safe fallback.
+func formatBytesPerPixel(f gputypes.TextureFormat) uint64 {
+	if s := f.BlockCopySize(); s > 0 {
+		return uint64(s)
+	}
+	return 4
+}
+
 // Texture implements hal.Texture with real pixel storage.
 type Texture struct {
 	Resource
@@ -109,18 +120,29 @@ func (t *Texture) Clear(color gputypes.Color) {
 	b := uint8(color.B * 255)
 	a := uint8(color.A * 255)
 
-	// Write bytes in format-appropriate order so the data is correct
-	// for direct consumption by GDI (BGRA) or other readers.
-	c0, c1, c2, c3 := r, g, b, a
-	if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
-		c0, c2 = b, r
-	}
+	bpp := int(formatBytesPerPixel(t.format))
 
-	for i := 0; i < len(t.data); i += 4 {
-		t.data[i+0] = c0
-		t.data[i+1] = c1
-		t.data[i+2] = c2
-		t.data[i+3] = c3
+	switch bpp {
+	case 1:
+		for i := 0; i < len(t.data); i++ {
+			t.data[i] = r
+		}
+	case 2:
+		for i := 0; i+1 < len(t.data); i += 2 {
+			t.data[i] = r
+			t.data[i+1] = g
+		}
+	default:
+		c0, c1, c2, c3 := r, g, b, a
+		if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
+			c0, c2 = b, r
+		}
+		for i := 0; i+3 < len(t.data); i += bpp {
+			t.data[i+0] = c0
+			t.data[i+1] = c1
+			t.data[i+2] = c2
+			t.data[i+3] = c3
+		}
 	}
 }
 
@@ -319,12 +341,21 @@ func (s *SamplerResource) NativeHandle() uintptr { return uintptr(s.id) }
 
 // BindGroup stores bound resources for the software backend.
 // It resolves handle-based entries to concrete software resource pointers.
+// bufferSlice holds a buffer reference with the offset and size from BufferBinding.
+type bufferSlice struct {
+	buf    *Buffer
+	offset uint64
+	size   uint64
+}
+
 type BindGroup struct {
 	Resource
-	desc         *hal.BindGroupDescriptor
-	textureViews map[uint32]*TextureView     // binding index -> resolved texture view
-	buffers      map[uint32]*Buffer          // binding index -> resolved buffer
-	samplers     map[uint32]*SamplerResource // binding index -> resolved sampler
+	desc           *hal.BindGroupDescriptor
+	textureViews   map[uint32]*TextureView     // binding index -> resolved texture view
+	buffers        map[uint32]*Buffer          // binding index -> resolved buffer (legacy, offset=0)
+	bufferBindings map[uint32]bufferSlice      // binding index -> buffer + offset/size
+	samplers       map[uint32]*SamplerResource // binding index -> resolved sampler
+	dynamicOffsets []uint32                    // applied via SetBindGroup
 }
 
 // ComputePipeline stores compute pipeline configuration for the software backend.

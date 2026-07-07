@@ -97,10 +97,9 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
 
-		// Simple copy: just copy from buffer to texture data
-		// In a real implementation, this would respect image layout and stride
 		offset := region.BufferLayout.Offset
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(dstTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if offset+size <= uint64(len(srcBuf.data)) && size <= uint64(len(dstTex.data)) {
 			copy(dstTex.data, srcBuf.data[offset:offset+size])
@@ -124,9 +123,9 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
 
-		// Simple copy: just copy from texture to buffer data
 		offset := region.BufferLayout.Offset
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(srcTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if size <= uint64(len(srcTex.data)) && offset+size <= uint64(len(dstBuf.data)) {
 			copy(dstBuf.data[offset:offset+size], srcTex.data[:size])
@@ -150,8 +149,8 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		srcTex.mu.RLock()
 		dstTex.mu.Lock()
 
-		// Simple copy: just copy texture data
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * 4 // 4 bytes per pixel
+		bpp := formatBytesPerPixel(srcTex.format)
+		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
 
 		if size <= uint64(len(srcTex.data)) && size <= uint64(len(dstTex.data)) {
 			copy(dstTex.data[:size], srcTex.data[:size])
@@ -236,6 +235,12 @@ type RenderPassEncoder struct {
 	indexBuffer *Buffer
 	indexFormat gputypes.IndexFormat
 	indexOffset uint64
+
+	// activeIndices, when non-nil, remaps the sequential draw position to a
+	// vertex index for the current DrawIndexed call (already including
+	// baseVertex). The vertex fetch paths consult it instead of computing
+	// firstVertex+i, so indexed and non-indexed draws share one rasterizer.
+	activeIndices []uint32
 
 	// Viewport and scissor state.
 	viewport    [6]float32 // x, y, w, h, minDepth, maxDepth
@@ -344,9 +349,10 @@ func (r *RenderPassEncoder) SetPipeline(p hal.RenderPipeline) {
 }
 
 // SetBindGroup stores a bind group at the given index.
-func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
 	if index < 4 {
 		if b, ok := bg.(*BindGroup); ok {
+			b.dynamicOffsets = dynamicOffsets
 			r.bindGroups[index] = b
 		}
 	}
@@ -404,8 +410,75 @@ func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstI
 	r.executeDraw(vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
-// DrawIndexed is a no-op (indexed drawing not yet implemented).
-func (r *RenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32) {}
+// DrawIndexed executes an indexed draw call. It resolves the index buffer into
+// a list of vertex indices (applying baseVertex) and runs the same vertex-fetch
+// and rasterization path as Draw, with vertex positions remapped through the
+// resolved indices. Previously this was a no-op, so every indexed draw (glyph
+// mask text, MSDF text) rendered nothing on the software backend.
+func (r *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	r.drawCount++
+	if indexCount == 0 || r.indexBuffer == nil {
+		return
+	}
+	indices := r.resolveIndices(indexCount, firstIndex, baseVertex)
+	if indices == nil {
+		return
+	}
+	hal.Logger().Debug("software: DrawIndexed", "indices", indexCount, "instances", instanceCount, "drawIndex", r.drawCount)
+
+	r.activeIndices = indices
+	defer func() { r.activeIndices = nil }()
+	// vertexCount == indexCount; firstVertex is unused because activeIndices
+	// supplies the per-position vertex index directly.
+	r.executeDraw(indexCount, instanceCount, 0, firstInstance)
+}
+
+// resolveIndices reads indexCount entries from the bound index buffer starting
+// at firstIndex, honoring the index format (Uint16/Uint32) and the buffer
+// offset set by SetIndexBuffer, and adds baseVertex to each. Returns nil if the
+// requested range lies outside the buffer.
+func (r *RenderPassEncoder) resolveIndices(indexCount, firstIndex uint32, baseVertex int32) []uint32 {
+	indexSize := uint64(2)
+	if r.indexFormat == gputypes.IndexFormatUint32 {
+		indexSize = 4
+	}
+
+	r.indexBuffer.mu.RLock()
+	data := r.indexBuffer.data
+	r.indexBuffer.mu.RUnlock()
+
+	start := r.indexOffset + uint64(firstIndex)*indexSize
+	end := start + uint64(indexCount)*indexSize
+	if end > uint64(len(data)) {
+		return nil
+	}
+
+	out := make([]uint32, indexCount)
+	for i := uint32(0); i < indexCount; i++ {
+		off := start + uint64(i)*indexSize
+		var idx uint32
+		if indexSize == 4 {
+			idx = uint32(data[off]) | uint32(data[off+1])<<8 | uint32(data[off+2])<<16 | uint32(data[off+3])<<24
+		} else {
+			idx = uint32(data[off]) | uint32(data[off+1])<<8
+		}
+		out[i] = uint32(int32(idx) + baseVertex)
+	}
+	return out
+}
+
+// drawVertexIndex maps a sequential draw position to the vertex index to fetch.
+// For non-indexed draws it is firstVertex+pos; for indexed draws it reads the
+// resolved index list set by DrawIndexed.
+func (r *RenderPassEncoder) drawVertexIndex(firstVertex, pos uint32) uint32 {
+	if r.activeIndices != nil {
+		if pos < uint32(len(r.activeIndices)) {
+			return r.activeIndices[pos]
+		}
+		return 0
+	}
+	return firstVertex + pos
+}
 
 // DrawIndirect is a no-op.
 func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64) {}
@@ -463,9 +536,10 @@ func (c *ComputePassEncoder) SetPipeline(p hal.ComputePipeline) {
 }
 
 // SetBindGroup stores a bind group at the given index for compute dispatch.
-func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, _ []uint32) {
+func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
 	if index < 4 {
 		if b, ok := bg.(*BindGroup); ok {
+			b.dynamicOffsets = dynamicOffsets
 			c.bindGroups[index] = b
 		}
 	}
@@ -503,18 +577,30 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		if bg == nil {
 			continue
 		}
-		for bindingIdx, buf := range bg.buffers {
-			if buf == nil {
+		dynIdx := 0
+		for bindingIdx, bs := range bg.bufferBindings {
+			if bs.buf == nil {
 				continue
 			}
-			// Share the buffer's data slice directly so storage buffer writes
-			// from the interpreter are reflected in the HAL buffer.
-			buf.mu.Lock()
+			bs.buf.mu.Lock()
+			data := bs.buf.data
+			off := bs.offset
+			if dynIdx < len(bg.dynamicOffsets) {
+				off += uint64(bg.dynamicOffsets[dynIdx])
+				dynIdx++
+			}
+			end := uint64(len(data))
+			if bs.size > 0 && off+bs.size <= end {
+				end = off + bs.size
+			}
+			if off < uint64(len(data)) {
+				data = data[off:end]
+			}
 			ctx.Buffers[shader.BindingKey{
 				Group:   uint32(groupIdx),
 				Binding: bindingIdx,
-			}] = buf.data
-			buf.mu.Unlock()
+			}] = data
+			bs.buf.mu.Unlock()
 		}
 	}
 

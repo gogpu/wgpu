@@ -273,6 +273,37 @@ func TestCompareFunctionToMTL(t *testing.T) {
 	}
 }
 
+// TestStencilOperationToMTL guards the WebGPU→Metal stencil-op mapping. The two
+// enums use different numeric values (WebGPU Keep=1, Metal Keep=0), so this must
+// be an explicit table — a missing/incorrect entry silently disables stencil ops
+// (the macOS rounded-UI-renders-as-squares regression).
+func TestStencilOperationToMTL(t *testing.T) {
+	tests := []struct {
+		name   string
+		op     gputypes.StencilOperation
+		expect MTLStencilOperation
+	}{
+		{"Keep", gputypes.StencilOperationKeep, MTLStencilOperationKeep},
+		{"Zero", gputypes.StencilOperationZero, MTLStencilOperationZero},
+		{"Replace", gputypes.StencilOperationReplace, MTLStencilOperationReplace},
+		{"Invert", gputypes.StencilOperationInvert, MTLStencilOperationInvert},
+		{"IncrementClamp", gputypes.StencilOperationIncrementClamp, MTLStencilOperationIncrementClamp},
+		{"DecrementClamp", gputypes.StencilOperationDecrementClamp, MTLStencilOperationDecrementClamp},
+		{"IncrementWrap", gputypes.StencilOperationIncrementWrap, MTLStencilOperationIncrementWrap},
+		{"DecrementWrap", gputypes.StencilOperationDecrementWrap, MTLStencilOperationDecrementWrap},
+		{"Unknown defaults to Keep", gputypes.StencilOperation(99), MTLStencilOperationKeep},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stencilOperationToMTL(tt.op)
+			if got != tt.expect {
+				t.Errorf("stencilOperationToMTL(%v) = %v, want %v", tt.op, got, tt.expect)
+			}
+		})
+	}
+}
+
 // TestPrimitiveTopologyToMTL tests primitive topology conversions.
 func TestPrimitiveTopologyToMTL(t *testing.T) {
 	tests := []struct {

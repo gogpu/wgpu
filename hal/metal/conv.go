@@ -225,6 +225,31 @@ func compareFunctionToMTL(fn gputypes.CompareFunction) MTLCompareFunction {
 	}
 }
 
+// stencilOperationToMTL maps a WebGPU stencil operation to Metal. The two enums
+// use different numeric values, so an explicit switch is required.
+func stencilOperationToMTL(op gputypes.StencilOperation) MTLStencilOperation {
+	switch op {
+	case gputypes.StencilOperationKeep:
+		return MTLStencilOperationKeep
+	case gputypes.StencilOperationZero:
+		return MTLStencilOperationZero
+	case gputypes.StencilOperationReplace:
+		return MTLStencilOperationReplace
+	case gputypes.StencilOperationInvert:
+		return MTLStencilOperationInvert
+	case gputypes.StencilOperationIncrementClamp:
+		return MTLStencilOperationIncrementClamp
+	case gputypes.StencilOperationDecrementClamp:
+		return MTLStencilOperationDecrementClamp
+	case gputypes.StencilOperationIncrementWrap:
+		return MTLStencilOperationIncrementWrap
+	case gputypes.StencilOperationDecrementWrap:
+		return MTLStencilOperationDecrementWrap
+	default:
+		return MTLStencilOperationKeep
+	}
+}
+
 // primitiveTopologyToMTL converts WebGPU primitive topology to Metal primitive type.
 func primitiveTopologyToMTL(topology gputypes.PrimitiveTopology) MTLPrimitiveType {
 	switch topology {

@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.14
+## Current State: v0.30.1
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -89,50 +89,61 @@
 
 ---
 
-## Upcoming
+## Roadmap
 
-### Next
+### Near-term (Q3 2026)
 
-- [x] GLES hidden window context (Windows) — Instance-owned GL context, Rust wgpu parity (FEAT-GLES-002)
-- [x] Wayland SHM presentation (Software backend) — triple-buffered wl_shm, release listener, partial copy, variadic ABI (ADR-042/043)
-- [x] Wayland EGL window surface (GLES backend) — wl_egl_window, EGL 1.5 eglCreatePlatformWindowSurface (ADR-042)
-- [x] GLES instance-level EGL context (Linux) — surfaceless/pbuffer, tiered config, shared context (v0.29.10-v0.29.11)
-- [ ] GLES shared AdapterContext (Linux) — full Windows parity with Lock/LockForSurface/Unlock (FEAT-GLES-003)
-- [x] macOS software presentation — CGImage + CAMetalLayer (PR #187, @k-chimi, v0.28.4)
-- [ ] DX12 DeviceTextureTracker for proper barrier state tracking
-- [ ] GLES global UNPACK_ALIGNMENT=1 (Rust pattern — set once at device open)
+**GLES Linux Enterprise Parity:**
+- [ ] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003). Windows parity.
+- [ ] Systematic GL error checking layer — `checkGL()` after every call (ADR-046)
+- [ ] GLES global UNPACK_ALIGNMENT=1 — Rust pattern, set once at device open
+
+**Public API Quality (#218):**
+- [ ] Remove HAL leaks from public API (`Surface.HAL()`, `Surface.SetPrepareFrame()`)
+- [ ] Expose `Device.CreateQuerySet` — HAL ready on all 6 backends, needs public wrapper
+- [ ] `Device.released` → `atomic.Bool` — data race fix
+- [ ] Document Surface single-thread requirement
+
+**DX12:**
+- [ ] DeviceTextureTracker — proper barrier state tracking (Rust wgpu-core parity)
+- [ ] DXIL as default shader path (currently opt-in via `GOGPU_DX12_DXIL=1`)
+
+### Mid-term (Q4 2026)
+
+**API Stabilization:**
+- [ ] Remove 31 type aliases + 46 const re-exports from `types.go` — users import `gputypes` directly
+- [ ] Move `StencilOperation` from hal alias to gputypes definition
+- [ ] `Device.CreateRenderBundleEncoder` — render bundle optimization
+- [ ] `Device.GetTextureFormatFeatures` — per-format capability query
 - [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
-- [ ] DXIL as default DX12 shader path (currently opt-in via `GOGPU_DX12_DXIL=1`)
+- [ ] Validation Phase C — spec compliance edge cases, feature gates
 
-### v1.0.0 — Production Release
-
-- [ ] Full WebGPU specification compliance
-- [ ] API stability guarantee
-- [x] Compute shader support in all GPU backends (Vulkan, DX12, Metal, GLES)
-- [x] Performance benchmarks — 115+ benchmarks, hot-path allocation optimization
-- [x] Enterprise fence architecture — HAL owns fences, SubmissionIndex tracking
-- [x] PendingWrites batching — Rust wgpu-core pattern
-- [x] Public API root package — safe, ergonomic user-facing API
-- [x] Text rendering on all GPU backends
-- [x] Blend constant tracking + resource usage conflict detection
-- [ ] Full render/compute pass validation (resource transitions)
-- [x] Late buffer binding size validation (VAL-006, draw/dispatch-time checks)
-- [ ] Comprehensive documentation
-- [ ] Conformance test suite
-
-### Future — Platform Expansion
-
-- [x] **WebAssembly (browser WebGPU)** — DONE (v0.28.0). `internal/browser/` via `syscall/js` →
-  `navigator.gpu` (bypasses core/hal, Rust wgpu `ContextWebGpu` pattern). ~6500 LOC, zero deps.
-- [ ] **WebGL2 fallback** — GLES backend `_js.go` files for browsers without WebGPU.
-- [ ] **Android** — Vulkan surface via `vkCreateAndroidSurfaceKHR` (S estimate).
-  Depends on gogpu platform layer
+**Platform Expansion:**
+- [ ] **Android** — Vulkan surface via `vkCreateAndroidSurfaceKHR`. Depends on gogpu platform layer
 - [ ] **iOS** — Metal backend ready (naga MSL 91/91), needs platform integration
 
-### Future — Advanced Features
+### v1.0.0 — Production Release (November 2027, Go 18th birthday)
 
-- [ ] Ray tracing extensions
-- [ ] Bindless resources
+Target: stable, documented, conformant WebGPU implementation in Pure Go.
+
+- [ ] Full WebGPU specification compliance
+- [ ] API stability guarantee — no breaking changes after v1.0
+- [ ] Conformance test suite (WebGPU CTS subset)
+- [ ] Comprehensive documentation (pkg.go.dev, examples, migration guide)
+- [ ] Full render/compute pass validation (resource transitions)
+- [ ] Clean public API — no HAL/core leaks, no type aliases, typed errors
+
+### Future
+
+**Platform:**
+- [ ] **WebGL2 fallback** — GLES backend `_js.go` for browsers without WebGPU
+- [ ] **Embedded Linux** — headless compute (Mesa surfaceless, Raspberry Pi)
+
+**Advanced GPU Features:**
+- [ ] Ray tracing extensions (VK_KHR_ray_tracing_pipeline)
+- [ ] Bindless resources (descriptor indexing)
+- [ ] Mesh shaders (VK_EXT_mesh_shader)
+- [ ] Video decode/encode (VK_KHR_video_queue)
 
 ---
 
@@ -161,6 +172,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.30.0** | 2026-06 | **BREAKING: Unified public API (ADR-047).** StencilOperation→gputypes, Device.released→atomic.Bool, sentinel methods, MinBindGroups, CopyBufferToTexture+ClearBuffer native, browser fence stubs, browser-compute example. |
+| **v0.29.16** | 2026-06 | HAL wrapper stubs for Rust/Browser builds — public API compiles on all build targets. README updated. |
+| **v0.29.15** | 2026-06 | naga v0.17.15 (HLSL sampler fix, @georgebuilds), x/sys v0.46.0. |
 | **v0.29.14** | 2026-06 | GLES: missing vertexBuffers in Linux pipeline — one-line fix enables full gg rendering (SDF, text, widgets) on GLES Linux. @lkmavi. |
 | **v0.29.13** | 2026-06 | **GLES enterprise parity**: GLSL version propagation, runtime binding fallback (GL <4.2), MSAA validation, GLES function names, lazy VAO, compute VERTEX_ATTRIB barrier, Wayland EGL fixes. First triangle on GLES WSL2 Wayland. Credits: @lkmavi (PR #210, #215). |
 | **v0.29.12** | 2026-06 | GLES: Wayland EGL nativeDisplay=0 surfaceless fallback. CreateSurface Path A guard. |

@@ -26,9 +26,7 @@ func (a *Adapter) TextureFormatCapabilities(_ gputypes.TextureFormat) hal.Textur
 			hal.TextureFormatCapabilityStorage |
 			hal.TextureFormatCapabilityStorageReadWrite |
 			hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityBlendable |
-			hal.TextureFormatCapabilityMultisample |
-			hal.TextureFormatCapabilityMultisampleResolve,
+			hal.TextureFormatCapabilityBlendable,
 	}
 }
 

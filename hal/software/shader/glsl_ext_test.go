@@ -301,6 +301,14 @@ func TestGLSLUnaryIntrinsics(t *testing.T) {
 		{"atan_0", GLSLAtan, 0.0, 0.0, 1e-5},
 		{"asin_0", GLSLAsin, 0.0, 0.0, 1e-5},
 		{"acos_1", GLSLAcos, 1.0, 0.0, 1e-5},
+		{"sinh_0", GLSLSinh, 0.0, 0.0, 1e-5},
+		{"cosh_0", GLSLCosh, 0.0, 1.0, 1e-5},
+		{"tanh_0", GLSLTanh, 0.0, 0.0, 1e-5},
+		{"tanh_sat", GLSLTanh, 10.0, 1.0, 1e-4},
+		{"tanh_neg", GLSLTanh, -10.0, -1.0, 1e-4},
+		{"asinh_0", GLSLAsinh, 0.0, 0.0, 1e-5},
+		{"acosh_1", GLSLAcosh, 1.0, 0.0, 1e-5},
+		{"atanh_0", GLSLAtanh, 0.0, 0.0, 1e-5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -458,5 +466,74 @@ func TestGLSLIntOps(t *testing.T) {
 	got = interp.executeGLSLExtInst(GLSLSSign, []uint32{12})
 	if got.Tag != TagInt32 || got.AsInt32() != 1 {
 		t.Errorf("SSign(7) = %v, want 1", got)
+	}
+}
+
+// TestGLSLSClamp verifies signed-integer clamp (SClamp).
+func TestGLSLSClamp(t *testing.T) {
+	m := &Module{
+		Types:          map[uint32]*TypeInfo{},
+		Constants:      map[uint32]Value{},
+		ExtInstImports: map[uint32]string{1: "GLSL.std.450"},
+	}
+	tests := []struct {
+		name        string
+		x, min, max int32
+		want        int32
+	}{
+		{"below_min", -5, 0, 10, 0},
+		{"in_range", 3, 0, 10, 3},
+		{"above_max", 20, 0, 10, 10},
+		{"negative_range", -7, -10, -1, -7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interp := &interpreter{
+				module: m,
+				values: testMakeValues(map[uint32]any{
+					10: ValInt(tt.x),
+					11: ValInt(tt.min),
+					12: ValInt(tt.max),
+				}),
+			}
+			got := interp.executeGLSLExtInst(GLSLSClamp, []uint32{10, 11, 12})
+			if got.Tag != TagInt32 || got.AsInt32() != tt.want {
+				t.Errorf("SClamp(%d,%d,%d) = %v, want %d", tt.x, tt.min, tt.max, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGLSLUClamp verifies unsigned-integer clamp (UClamp).
+func TestGLSLUClamp(t *testing.T) {
+	m := &Module{
+		Types:          map[uint32]*TypeInfo{},
+		Constants:      map[uint32]Value{},
+		ExtInstImports: map[uint32]string{1: "GLSL.std.450"},
+	}
+	tests := []struct {
+		name        string
+		x, min, max uint32
+		want        uint32
+	}{
+		{"below_min", 1, 2, 10, 2},
+		{"in_range", 7, 2, 10, 7},
+		{"above_max", 50, 2, 10, 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interp := &interpreter{
+				module: m,
+				values: testMakeValues(map[uint32]any{
+					10: ValUint(tt.x),
+					11: ValUint(tt.min),
+					12: ValUint(tt.max),
+				}),
+			}
+			got := interp.executeGLSLExtInst(GLSLUClamp, []uint32{10, 11, 12})
+			if got.Tag != TagUint32 || got.AsUint32() != tt.want {
+				t.Errorf("UClamp(%d,%d,%d) = %v, want %d", tt.x, tt.min, tt.max, got, tt.want)
+			}
+		})
 	}
 }

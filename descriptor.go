@@ -240,18 +240,19 @@ type PipelineLayoutDescriptor struct {
 }
 
 // StencilOperation describes a stencil operation.
-type StencilOperation = hal.StencilOperation
+// Canonical definition in gputypes (webgpu.h spec-compliant values).
+type StencilOperation = gputypes.StencilOperation
 
-// Stencil operation constants.
+// Stencil operation constants (webgpu.h spec values).
 const (
-	StencilOperationKeep           = hal.StencilOperationKeep
-	StencilOperationZero           = hal.StencilOperationZero
-	StencilOperationReplace        = hal.StencilOperationReplace
-	StencilOperationInvert         = hal.StencilOperationInvert
-	StencilOperationIncrementClamp = hal.StencilOperationIncrementClamp
-	StencilOperationDecrementClamp = hal.StencilOperationDecrementClamp
-	StencilOperationIncrementWrap  = hal.StencilOperationIncrementWrap
-	StencilOperationDecrementWrap  = hal.StencilOperationDecrementWrap
+	StencilOperationKeep           = gputypes.StencilOperationKeep
+	StencilOperationZero           = gputypes.StencilOperationZero
+	StencilOperationReplace        = gputypes.StencilOperationReplace
+	StencilOperationInvert         = gputypes.StencilOperationInvert
+	StencilOperationIncrementClamp = gputypes.StencilOperationIncrementClamp
+	StencilOperationDecrementClamp = gputypes.StencilOperationDecrementClamp
+	StencilOperationIncrementWrap  = gputypes.StencilOperationIncrementWrap
+	StencilOperationDecrementWrap  = gputypes.StencilOperationDecrementWrap
 )
 
 // StencilFaceState describes stencil operations for a face.

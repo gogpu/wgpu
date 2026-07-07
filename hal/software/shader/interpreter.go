@@ -1961,17 +1961,32 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 	return result
 }
 
-// readTexel reads a single RGBA texel from the texture at pixel coordinates (x, y).
+// readTexel reads a single texel from the texture at pixel coordinates (x, y),
+// unpacking it to RGBA according to the texture's bytes-per-pixel. Single- and
+// two-channel formats follow the WebGPU convention of filling missing color
+// channels with 0 and alpha with 1. A zero BytesPerPixel means "unspecified"
+// and is treated as 4 (RGBA8) for backward compatibility.
 func readTexel(tex *Texture2D, x, y int) Vec4 {
-	idx := (y*int(tex.Width) + x) * 4
-	if idx+3 >= len(tex.Data) {
+	bpp := int(tex.BytesPerPixel)
+	if bpp == 0 {
+		bpp = 4
+	}
+	idx := (y*int(tex.Width) + x) * bpp
+	if idx+bpp > len(tex.Data) {
 		return Vec4{0, 0, 0, 0}
 	}
-	return Vec4{
-		float32(tex.Data[idx+0]) / 255.0,
-		float32(tex.Data[idx+1]) / 255.0,
-		float32(tex.Data[idx+2]) / 255.0,
-		float32(tex.Data[idx+3]) / 255.0,
+	switch bpp {
+	case 1:
+		return Vec4{float32(tex.Data[idx]) / 255.0, 0, 0, 1}
+	case 2:
+		return Vec4{float32(tex.Data[idx]) / 255.0, float32(tex.Data[idx+1]) / 255.0, 0, 1}
+	default:
+		return Vec4{
+			float32(tex.Data[idx+0]) / 255.0,
+			float32(tex.Data[idx+1]) / 255.0,
+			float32(tex.Data[idx+2]) / 255.0,
+			float32(tex.Data[idx+3]) / 255.0,
+		}
 	}
 }
 

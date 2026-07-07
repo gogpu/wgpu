@@ -31,6 +31,13 @@ const (
 	GLSLAcos = 17
 	GLSLAtan = 18
 
+	GLSLSinh  = 19
+	GLSLCosh  = 20
+	GLSLTanh  = 21
+	GLSLAsinh = 22
+	GLSLAcosh = 23
+	GLSLAtanh = 24
+
 	GLSLPow         = 26
 	GLSLExp         = 27
 	GLSLLog         = 28
@@ -46,6 +53,8 @@ const (
 	GLSLUMax   = 41
 	GLSLSMax   = 42
 	GLSLFClamp = 43
+	GLSLUClamp = 44
+	GLSLSClamp = 45
 
 	GLSLFMix       = 46
 	GLSLStep       = 48
@@ -140,6 +149,32 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 			return float32(math.Atan2(float64(y), float64(x)))
 		})
 
+	// --- Hyperbolic ops ---
+	case GLSLSinh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Sinh(float64(x)))
+		})
+	case GLSLCosh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Cosh(float64(x)))
+		})
+	case GLSLTanh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Tanh(float64(x)))
+		})
+	case GLSLAsinh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Asinh(float64(x)))
+		})
+	case GLSLAcosh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Acosh(float64(x)))
+		})
+	case GLSLAtanh:
+		return interp.glslUnaryFloat(operands, func(x float32) float32 {
+			return float32(math.Atanh(float64(x)))
+		})
+
 	// --- Exponential ops ---
 	case GLSLPow:
 		return interp.glslBinaryFloat(operands, func(x, y float32) float32 {
@@ -185,6 +220,26 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 	case GLSLFClamp:
 		return interp.glslTernaryFloat(operands, func(x, minVal, maxVal float32) float32 {
 			return float32(math.Min(math.Max(float64(x), float64(minVal)), float64(maxVal)))
+		})
+	case GLSLUClamp:
+		return interp.glslTernaryUint(operands, func(x, minVal, maxVal uint32) uint32 {
+			if x < minVal {
+				x = minVal
+			}
+			if x > maxVal {
+				x = maxVal
+			}
+			return x
+		})
+	case GLSLSClamp:
+		return interp.glslTernaryInt(operands, func(x, minVal, maxVal int32) int32 {
+			if x < minVal {
+				x = minVal
+			}
+			if x > maxVal {
+				x = maxVal
+			}
+			return x
 		})
 	case GLSLUMin:
 		return interp.glslBinaryUint(operands, func(a, b uint32) uint32 {
@@ -355,6 +410,28 @@ func (interp *interpreter) glslBinaryInt(operands []uint32, fn func(int32, int32
 	a := int32(toUint32(interp.values[operands[0]]))
 	b := int32(toUint32(interp.values[operands[1]]))
 	return ValInt(fn(a, b))
+}
+
+// glslTernaryUint applies a ternary uint function.
+func (interp *interpreter) glslTernaryUint(operands []uint32, fn func(uint32, uint32, uint32) uint32) Value {
+	if len(operands) < 3 {
+		return ValUint(0)
+	}
+	a := toUint32(interp.values[operands[0]])
+	b := toUint32(interp.values[operands[1]])
+	c := toUint32(interp.values[operands[2]])
+	return ValUint(fn(a, b, c))
+}
+
+// glslTernaryInt applies a ternary signed int function.
+func (interp *interpreter) glslTernaryInt(operands []uint32, fn func(int32, int32, int32) int32) Value {
+	if len(operands) < 3 {
+		return ValInt(0)
+	}
+	a := int32(toUint32(interp.values[operands[0]]))
+	b := int32(toUint32(interp.values[operands[1]]))
+	c := int32(toUint32(interp.values[operands[2]]))
+	return ValInt(fn(a, b, c))
 }
 
 // =============================================================================

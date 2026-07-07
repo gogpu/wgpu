@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>wgpu Browser Compute Test</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+        h1 { color: #00d4ff; }
+        #log { white-space: pre-wrap; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <h1>wgpu Browser Compute Test</h1>
+    <p>Validates WebGPU compute pipeline: shader → dispatch → readback.</p>
+    <p>Input: [1.0, 2.0, 3.0, 4.0] × 2.0 = [2.0, 4.0, 6.0, 8.0]</p>
+    <hr>
+    <div id="log">Loading WASM...</div>
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("compute.wasm"), go.importObject).then((result) => {
+            go.run(result.instance);
+        });
+    </script>
+</body>
+</html>

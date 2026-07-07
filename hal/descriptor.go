@@ -661,30 +661,16 @@ type StencilFaceState struct {
 }
 
 // StencilOperation describes a stencil operation.
-type StencilOperation uint8
+// Canonical definition in gputypes with webgpu.h spec-compliant values.
+type StencilOperation = gputypes.StencilOperation
 
 const (
-	// StencilOperationKeep keeps the current value.
-	StencilOperationKeep StencilOperation = iota
-
-	// StencilOperationZero sets the value to zero.
-	StencilOperationZero
-
-	// StencilOperationReplace replaces with the reference value.
-	StencilOperationReplace
-
-	// StencilOperationInvert inverts the bits.
-	StencilOperationInvert
-
-	// StencilOperationIncrementClamp increments and clamps.
-	StencilOperationIncrementClamp
-
-	// StencilOperationDecrementClamp decrements and clamps.
-	StencilOperationDecrementClamp
-
-	// StencilOperationIncrementWrap increments and wraps.
-	StencilOperationIncrementWrap
-
-	// StencilOperationDecrementWrap decrements and wraps.
-	StencilOperationDecrementWrap
+	StencilOperationKeep           = gputypes.StencilOperationKeep
+	StencilOperationZero           = gputypes.StencilOperationZero
+	StencilOperationReplace        = gputypes.StencilOperationReplace
+	StencilOperationInvert         = gputypes.StencilOperationInvert
+	StencilOperationIncrementClamp = gputypes.StencilOperationIncrementClamp
+	StencilOperationDecrementClamp = gputypes.StencilOperationDecrementClamp
+	StencilOperationIncrementWrap  = gputypes.StencilOperationIncrementWrap
+	StencilOperationDecrementWrap  = gputypes.StencilOperationDecrementWrap
 )

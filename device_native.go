@@ -22,7 +22,7 @@ import (
 type Device struct {
 	core     *core.Device
 	queue    *Queue
-	released bool
+	released atomic.Bool
 
 	// cmdEncoderPool is the single shared encoder pool for the device.
 	// Used by both CreateCommandEncoder (user command encoders) and
@@ -59,7 +59,7 @@ func (d *Device) Limits() Limits {
 
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -102,7 +102,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -130,7 +130,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor) (*TextureView, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if texture == nil {
@@ -164,7 +164,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 
@@ -202,7 +202,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -254,7 +254,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 
 // CreateBindGroupLayout creates a bind group layout.
 func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGroupLayout, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -290,7 +290,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 
 // CreatePipelineLayout creates a pipeline layout.
 func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*PipelineLayout, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -338,7 +338,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 
 // CreateBindGroup creates a bind group.
 func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -471,7 +471,7 @@ func buildBindGroupEntryMap(entries []BindGroupEntry) map[uint32]*BindGroupEntry
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -573,7 +573,7 @@ func mergeShaderBindingSizes(
 
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -702,7 +702,7 @@ func (d *Device) validateComputeWorkgroupSize(label, entryPoint string, module *
 // on every frame. After GPU completion, the encoder is reset and returned to the
 // pool for reuse. Matches Rust wgpu-core's CommandAllocator pattern (allocator.rs).
 func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 
@@ -756,7 +756,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 // Fences are primarily used by the HAL internally for synchronization.
 // Most callers should use Queue.Submit + Queue.Poll instead.
 func (d *Device) CreateFence() (*Fence, error) {
-	if d.released {
+	if d.released.Load() {
 		return nil, ErrReleased
 	}
 	halDevice := d.halDevice()
@@ -785,7 +785,7 @@ func (d *Device) DestroyFence(f *Fence) {
 // ResetFence resets a fence to the unsignaled state.
 // The fence must not be in use by the GPU.
 func (d *Device) ResetFence(f *Fence) error {
-	if d.released {
+	if d.released.Load() {
 		return ErrReleased
 	}
 	if f == nil || f.released {
@@ -801,7 +801,7 @@ func (d *Device) ResetFence(f *Fence) error {
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
 // This is used for polling completion without blocking.
 func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
-	if d.released {
+	if d.released.Load() {
 		return false, ErrReleased
 	}
 	if f == nil || f.released {
@@ -817,7 +817,7 @@ func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
 // WaitForFence waits for a fence to reach the specified value.
 // Returns true if the fence reached the value, false if timeout expired.
 func (d *Device) WaitForFence(f *Fence, value uint64, timeout time.Duration) (bool, error) {
-	if d.released {
+	if d.released.Load() {
 		return false, ErrReleased
 	}
 	if f == nil || f.released {
@@ -834,7 +834,7 @@ func (d *Device) WaitForFence(f *Fence, value uint64, timeout time.Duration) (bo
 // This must be called after the GPU has finished using the command buffer.
 // The command buffer handle becomes invalid after this call.
 func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
-	if d.released || cb == nil {
+	if d.released.Load() || cb == nil {
 		return
 	}
 	halDevice := d.halDevice()
@@ -860,7 +860,7 @@ func (d *Device) PopErrorScope() *GPUError {
 
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
-	if d.released {
+	if d.released.Load() {
 		return ErrReleased
 	}
 	halDevice := d.halDevice()
@@ -910,10 +910,10 @@ func (d *Device) maintainAfterIdle() {
 // Rust avoids this via Arc ownership + maintain loop. In Go we must
 // be explicit: WaitIdle ensures PollCompleted returns final index.
 func (d *Device) Release() {
-	if d.released {
+	if d.released.Load() {
 		return
 	}
-	d.released = true
+	d.released.Store(true)
 
 	if d.queue != nil {
 		d.queue.release()
