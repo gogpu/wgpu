@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.10] - 2026-07-08
+
+### Fixed
+
+- **Metal: IOSurface retain leak** — `AcquireTexture` retained both the drawable and
+  MTLTexture, but nothing released the texture retain. Every presented frame leaked one
+  IOSurface pin, accumulating 4+ GB during resize-heavy sessions. Fix: `releaseAcquired()`
+  called from `SurfaceTexture.Destroy()` and `DiscardTexture`.
+- **Metal: nextDrawable nil spiral** — with default `allowsNextDrawableTimeout=true`,
+  `nextDrawable` returned nil under pool pressure, triggering surface reconfiguration
+  (positive-feedback leak loop). Fix: `allowsNextDrawableTimeout=false` (matches Rust
+  wgpu-hal and rio terminal).
+- **Metal: CA stretch artifact** — `kCAGravityResize` (default) scaled the last rendered
+  frame during live resize. Fix: `contentsGravity=topLeft`.
+- **Metal: drawable stockpiling** — `presentsWithTransaction=true` during live drag
+  synchronizes drawable swap with CA transaction, preventing old drawable accumulation.
+- **Metal: test crash** — removed incorrect `defer Release(desc)` on +0 autoreleased
+  `MTLRenderPassDescriptor`.
+
+### Added
+
+- **Metal: UMA direct writes** — `MTLStorageModeShared` on Apple Silicon; `WriteTexture`
+  uses `replaceRegion:` for zero-copy CPU→GPU upload (bypasses staging buffers).
+- **Metal: `setPurgeableState(empty)`** in `DestroyTexture` for immediate page reclaim.
+- **Metal: `frameSemaphore`** (cap=2) — CPU-side throttle for in-flight frames.
+- **Metal: `maximumDrawableCount=3`** — matches Rust wgpu and rio terminal.
+- `Surface.SetPresentsWithTransaction()` — public API for toggling transaction present.
+- `Device.maintainAfterIdle()` — processes DestroyQueue after WaitIdle.
+- `RunInFramePool()` — per-frame NSAutoreleasePool wrapper.
+- Reusable `alignBuf` in `pendingWrites` — eliminates per-upload allocation.
+
+### Contributors
+
+- **@lkmavi** ([PR #239](https://github.com/gogpu/wgpu/pull/239)) — discovered and fixed
+  Metal IOSurface leak, verified on Apple Silicon M4.
+
 ## [0.30.9] - 2026-07-05
 
 ### Dependencies
