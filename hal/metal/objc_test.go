@@ -154,11 +154,13 @@ func TestRenderPassDescriptorClearColor(t *testing.T) {
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
+	// renderPassDescriptor is a factory method (+0 autoreleased). The
+	// autorelease pool owns the lifetime; an explicit Release would
+	// over-release and crash when the pool later tries to drain.
 	desc := MsgSend(ID(GetClass("MTLRenderPassDescriptor")), Sel("renderPassDescriptor"))
 	if desc == 0 {
 		t.Fatal("MTLRenderPassDescriptor renderPassDescriptor returned nil")
 	}
-	defer Release(desc)
 
 	attachments := MsgSend(desc, Sel("colorAttachments"))
 	if attachments == 0 {

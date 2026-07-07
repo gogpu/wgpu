@@ -76,6 +76,12 @@ type pendingWrites struct {
 	// copy backends). false for GLES/Software (direct API writes).
 	// Set once at creation, never changes.
 	usesBatching bool
+
+	// alignBuf is a reusable scratch buffer for row-pitch alignment in writeTexture.
+	// Grown on demand; never shrunk. Eliminates per-upload make() when texture row
+	// stride is not a multiple of pendingWritesRowPitchAlignment.
+	// Access is safe because writeTexture always holds pw.mu.
+	alignBuf []byte
 }
 
 // inflightSubmission tracks resources from a single submission that must
@@ -230,6 +236,13 @@ func (pw *pendingWrites) writeTexture(
 		return nil
 	}
 
+	// Host-writable textures (Metal Shared on Apple Silicon UMA) accept direct
+	// CPU writes without staging buffers or GPU copy commands. Bypass the
+	// staging belt to avoid allocating ~width*height*4 bytes per frame.
+	if hw, ok := dst.Texture.(interface{ IsHostWritable() bool }); ok && hw.IsHostWritable() {
+		return pw.halQueue.WriteTexture(dst, data, layout, size)
+	}
+
 	// Calculate aligned row pitch.
 	bytesPerRow := layout.BytesPerRow
 	if bytesPerRow == 0 {
@@ -250,8 +263,9 @@ func (pw *pendingWrites) writeTexture(
 
 	stagingSize := uint64(alignedBytesPerRow) * uint64(rowsPerImage) * uint64(depthOrLayers)
 
-	// CPU copy with row pitch alignment (may return data directly if no padding needed).
-	stagingData := copyTextureDataAligned(data, layout.Offset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers, stagingSize)
+	// CPU copy with row pitch alignment. Returns data directly when no padding needed,
+	// otherwise writes into pw.alignBuf (grown on demand, never shrunk, reused each call).
+	stagingData := alignTextureDataInto(&pw.alignBuf, data, layout.Offset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers, stagingSize)
 
 	// Allocate from staging belt (ring-buffer of reusable chunks).
 	alloc, err := pw.belt.allocate(stagingSize, stagingData)
@@ -329,11 +343,35 @@ func (pw *pendingWrites) writeTexture(
 
 // copyTextureDataAligned copies texture data with row pitch alignment padding.
 // If no padding is needed (alignedBytesPerRow == bytesPerRow), returns data directly.
+// Callers that can supply a reusable scratch buffer should use alignTextureDataInto
+// to avoid per-call heap allocation.
 func copyTextureDataAligned(data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32, stagingSize uint64) []byte {
 	if alignedBytesPerRow == bytesPerRow {
 		return data
 	}
 	aligned := make([]byte, stagingSize)
+	alignTextureRowsInto(aligned, data, srcOffset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers)
+	return aligned
+}
+
+// alignTextureDataInto is the zero-allocation variant of copyTextureDataAligned.
+// If no padding is needed it returns data directly (no copy). Otherwise it grows
+// *buf to stagingSize (never shrinks) and copies rows with padding into it.
+func alignTextureDataInto(buf *[]byte, data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32, stagingSize uint64) []byte {
+	if alignedBytesPerRow == bytesPerRow {
+		return data
+	}
+	if uint64(cap(*buf)) < stagingSize {
+		*buf = make([]byte, stagingSize)
+	} else {
+		*buf = (*buf)[:stagingSize]
+	}
+	alignTextureRowsInto(*buf, data, srcOffset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers)
+	return *buf
+}
+
+// alignTextureRowsInto does the inner row-copy loop shared by both aligned functions.
+func alignTextureRowsInto(aligned, data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32) {
 	for layer := uint32(0); layer < depthOrLayers; layer++ {
 		for row := uint32(0); row < rowsPerImage; row++ {
 			dstRowStart := uint64(layer)*uint64(rowsPerImage)*uint64(alignedBytesPerRow) +
@@ -347,7 +385,6 @@ func copyTextureDataAligned(data []byte, srcOffset uint64, bytesPerRow, alignedB
 				data[srcRowStart:srcRowStart+uint64(bytesPerRow)])
 		}
 	}
-	return aligned
 }
 
 // alignUp rounds n up to the nearest multiple of alignment.

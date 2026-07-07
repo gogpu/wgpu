@@ -867,7 +867,30 @@ func (d *Device) WaitIdle() error {
 	if halDevice == nil {
 		return ErrReleased
 	}
-	return halDevice.WaitIdle()
+	if err := halDevice.WaitIdle(); err != nil {
+		return err
+	}
+	d.maintainAfterIdle()
+	return nil
+}
+
+// maintainAfterIdle recycles staging buffers and destroys deferred GPU resources
+// after the HAL reports the device is idle. Without this, WaitIdle only blocks
+// on the GPU — DestroyQueue entries scheduled before the wait are not processed
+// until the next Submit, keeping old textures alive across resize boundaries.
+func (d *Device) maintainAfterIdle() {
+	if d.queue == nil || d.queue.hal == nil {
+		return
+	}
+	completed := d.queue.hal.PollCompleted()
+	if dq := d.destroyQueue(); dq != nil {
+		dq.Triage(completed)
+	}
+	if d.queue.pending != nil {
+		d.queue.pending.mu.Lock()
+		d.queue.pending.maintain(completed)
+		d.queue.pending.mu.Unlock()
+	}
 }
 
 // Release releases the device and all associated resources.

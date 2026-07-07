@@ -126,8 +126,11 @@ func preRegisterSelectors() {
 		"computeCommandEncoder",
 		"commit",
 		"waitUntilCompleted",
+		"waitUntilScheduled",
 		"addCompletedHandler:",
 		"presentDrawable:",
+		// CAMetalDrawable
+		"present",
 		// MTLRenderCommandEncoder
 		"setRenderPipelineState:",
 		"setVertexBuffer:offset:atIndex:",
@@ -144,6 +147,9 @@ func preRegisterSelectors() {
 		"setPixelFormat:",
 		"setFramebufferOnly:",
 		"setDrawableSize:",
+		"setPresentsWithTransaction:",
+		"setMaximumDrawableCount:",
+		"setDisplaySyncEnabled:",
 		"nextDrawable",
 		// MTLSharedEvent / MTLSharedEventListener
 		"newSharedEvent",

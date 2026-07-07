@@ -100,6 +100,18 @@ var (
 			types.UInt64TypeDescriptor,
 		},
 	}
+	// mtlRegionType encodes MTLRegion = { MTLOrigin{X,Y,Z}, MTLSize{W,H,D} }.
+	mtlRegionType = &types.TypeDescriptor{
+		Kind: types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
 )
 
 // initObjCRuntime initializes the Objective-C runtime.

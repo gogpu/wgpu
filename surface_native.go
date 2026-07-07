@@ -183,6 +183,23 @@ func (s *Surface) SetPrepareFrame(fn core.PrepareFrameFunc) {
 	s.core.SetPrepareFrame(fn)
 }
 
+// SetPresentsWithTransaction toggles Core Animation transaction-based present
+// on Metal surfaces. Enable during macOS live window resize so the drawable
+// swap commits atomically with the resize CA transaction (Flutter/wgpu #3756
+// pattern); disable for normal rendering. No-op on non-Metal backends.
+func (s *Surface) SetPresentsWithTransaction(enabled bool) {
+	if s.released || s.core == nil {
+		return
+	}
+	raw := s.core.RawSurface()
+	if raw == nil {
+		return
+	}
+	if tp, ok := raw.(interface{ SetPresentsWithTransaction(bool) }); ok {
+		tp.SetPresentsWithTransaction(enabled)
+	}
+}
+
 // ActualExtent returns the actual swapchain dimensions after driver clamping.
 //
 // On Vulkan, the driver may clamp the requested extent to its supported range
