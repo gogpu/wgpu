@@ -164,6 +164,9 @@ type SurfaceTexture struct {
 	surface *Surface
 }
 
+// AsTexture returns the underlying Texture for direct WriteTexture access.
+func (st *SurfaceTexture) AsTexture() *Texture { return st.texture }
+
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
 	if st.texture == nil || st.texture.r == nil {

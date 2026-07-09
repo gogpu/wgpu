@@ -28,8 +28,13 @@ func (t *Texture) Release() {
 // TextureView represents a view into a texture.
 type TextureView struct {
 	browser  *browser.TextureView
+	texture  *Texture
 	released bool
 }
+
+// Texture returns the parent Texture that this view was created from.
+// Returns nil if the view has been released.
+func (v *TextureView) Texture() *Texture { return v.texture }
 
 // Release marks the texture view for destruction.
 func (v *TextureView) Release() {
