@@ -102,6 +102,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	bv := texture.browser.CreateView(jsDesc)
 	return &TextureView{
 		browser:  bv,
+		texture:  texture,
 		released: false,
 	}, nil
 }

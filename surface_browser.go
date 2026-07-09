@@ -219,6 +219,9 @@ type SurfaceTexture struct {
 	released bool
 }
 
+// AsTexture returns the underlying Texture for direct WriteTexture access.
+func (st *SurfaceTexture) AsTexture() *Texture { return st.texture }
+
 // CreateView creates a texture view of this surface texture.
 //
 // Pass nil for desc to create a default view (all mips, all layers, same format).

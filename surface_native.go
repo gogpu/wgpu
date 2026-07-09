@@ -280,6 +280,19 @@ type SurfaceTexture struct {
 	device  *Device
 }
 
+// AsTexture returns a lightweight Texture wrapper around this surface texture,
+// enabling use with Queue.WriteTexture() for direct CPU pixel upload without a
+// render pass. The surface must be configured with TextureUsageCopyDst.
+//
+// The returned Texture shares the underlying HAL resource — do not Release() it
+// independently. Its lifetime is tied to this SurfaceTexture.
+func (st *SurfaceTexture) AsTexture() *Texture {
+	return &Texture{
+		hal:    st.hal,
+		device: st.device,
+	}
+}
+
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
 	halDevice := st.device.halDevice()

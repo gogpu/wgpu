@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.11] - 2026-07-09
+
+### Added
+
+- **`TextureView.Texture()`** — returns parent Texture (Rust wgpu parity:
+  `TextureView::texture()`). All 3 build targets (native, Rust FFI, browser).
+  Unblocks gg BUG-SW-002 offscreen texture upload.
+- **`SurfaceTexture.AsTexture()`** — lightweight Texture wrapper for direct
+  `Queue.WriteTexture()` to surface textures. Enables spec-compliant CPU pixmap
+  display without render pass. Configure surface with `TextureUsageCopyDst`.
+
+### Fixed
+
+- **Software: hardened `executeFullscreenBlit`** — added Skia-inspired state
+  validation (`blitStateValid`): checks blend mode, depth/stencil, write mask,
+  multisampling before allowing memcpy fast path. Previously blit bypassed these
+  checks, potentially producing incorrect results with non-trivial render state.
+
 ## [0.30.10] - 2026-07-08
 
 ### Fixed

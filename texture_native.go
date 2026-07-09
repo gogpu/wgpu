@@ -52,6 +52,10 @@ type TextureView struct {
 	released bool
 }
 
+// Texture returns the parent Texture that this view was created from.
+// Returns nil if the view has been released.
+func (v *TextureView) Texture() *Texture { return v.texture }
+
 // Release marks the texture view for destruction. The underlying HAL TextureView
 // (and its descriptor heap slots) is not freed immediately — it is deferred via
 // DestroyQueue until the GPU completes any submission that may reference it.

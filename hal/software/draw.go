@@ -79,7 +79,51 @@ func (r *RenderPassEncoder) getTargetTexture() *Texture {
 // When scissor is active, only pixels within the scissor rect are written.
 // The blit loop bounds are clamped to the scissor rect to maintain the
 // fast-path advantage (no per-pixel branch, just narrowed iteration range).
+// blitStateValid checks whether the current pipeline render state allows a
+// direct memcpy blit (Skia SkSpriteBlitter_Memcpy::Supports pattern). Returns
+// false if any active state would produce different results than a raw copy.
+func (r *RenderPassEncoder) blitStateValid() bool {
+	if r.pipeline == nil || r.pipeline.desc == nil {
+		return false
+	}
+	desc := r.pipeline.desc
+	if desc.DepthStencil != nil {
+		return false
+	}
+	if desc.Multisample.Count > 1 {
+		return false
+	}
+	if desc.Fragment == nil {
+		return true
+	}
+	for _, t := range desc.Fragment.Targets {
+		if t.WriteMask != gputypes.ColorWriteMaskAll {
+			return false
+		}
+		if !isBlitSafeBlend(t.Blend) {
+			return false
+		}
+	}
+	return true
+}
+
+// isBlitSafeBlend returns true if the blend state allows a direct memcpy blit.
+// Safe modes: no blend (replace), Src (One/Zero), SrcOver (One/OneMinusSrcAlpha).
+func isBlitSafeBlend(b *gputypes.BlendState) bool {
+	if b == nil {
+		return true
+	}
+	srcOver := b.Color.SrcFactor == gputypes.BlendFactorOne &&
+		b.Color.DstFactor == gputypes.BlendFactorOneMinusSrcAlpha
+	src := b.Color.SrcFactor == gputypes.BlendFactorOne &&
+		b.Color.DstFactor == gputypes.BlendFactorZero
+	return srcOver || src
+}
+
 func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
+	if !r.blitStateValid() {
+		return false
+	}
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
 		return false
