@@ -107,6 +107,36 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 	return true
 }
 
+// isFullscreenQuad checks whether 2 triangles form an axis-aligned quad covering
+// the full render target. Tolerance of 1.5 pixels handles sub-pixel vertex positions.
+// This is the Tier 1 detection from ADR-SOFTWARE-BLIT-OPTIMIZATION.
+func isFullscreenQuad(triangles []raster.Triangle, w, h int) bool {
+	if len(triangles) != 2 {
+		return false
+	}
+	const eps = 1.5
+	fw, fh := float32(w), float32(h)
+	minX, minY := float32(fw), float32(fh)
+	maxX, maxY := float32(0), float32(0)
+	for _, tri := range triangles {
+		for _, v := range [3]raster.ScreenVertex{tri.V0, tri.V1, tri.V2} {
+			if v.X < minX {
+				minX = v.X
+			}
+			if v.Y < minY {
+				minY = v.Y
+			}
+			if v.X > maxX {
+				maxX = v.X
+			}
+			if v.Y > maxY {
+				maxY = v.Y
+			}
+		}
+	}
+	return minX < eps && minY < eps && maxX > fw-eps && maxY > fh-eps
+}
+
 // isBlitSafeBlend returns true if the blend state allows a direct memcpy blit.
 // Safe modes: no blend (replace), Src (One/Zero), SrcOver (One/OneMinusSrcAlpha).
 func isBlitSafeBlend(b *gputypes.BlendState) bool {
@@ -313,6 +343,16 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	if triangles == nil {
 		// Fallback: raw vertex buffer fetch (non-SPIR-V path, single instance only).
 		triangles = r.fetchTriangles(layouts, vertexCount, firstVertex, w, h)
+	}
+
+	// Tier 1 fast-path: if the triangles form a fullscreen quad with a bound
+	// texture and safe render state, bypass the SPIR-V fragment shader entirely
+	// and memcpy/swizzle the texture directly. This is the critical optimization
+	// for issue #241 (18 FPS → 50+ FPS on software backend).
+	if len(triangles) == 2 && r.blitStateValid() && isFullscreenQuad(triangles, w, h) {
+		if r.executeFullscreenBlit(target) {
+			return
+		}
 	}
 
 	// Determine fragment color source: if vertices carry attributes, interpolate.
