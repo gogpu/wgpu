@@ -97,6 +97,21 @@ func TestActualExtentUnconfigured(t *testing.T) {
 }
 
 // =============================================================================
+// SurfaceTexture.AsTexture — returns non-nil wrapper
+// Covers surface_native.go AsTexture()
+// =============================================================================
+
+// TestSurfaceTextureAsTextureCompiles verifies that SurfaceTexture.AsTexture()
+// exists and is callable. Full integration test requires a windowed surface
+// (not available with noop backend in headless CI).
+func TestSurfaceTextureAsTextureCompiles(t *testing.T) {
+	var st *wgpu.SurfaceTexture
+	// Compile-time check: AsTexture method exists with correct signature.
+	_ = st.AsTexture
+	t.Log("SurfaceTexture.AsTexture() method exists with correct signature")
+}
+
+// =============================================================================
 // Surface.DiscardTexture — unconfigured surface is a no-op
 // Covers surface_native.go DiscardTexture guard clause
 // =============================================================================

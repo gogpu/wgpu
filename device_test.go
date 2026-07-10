@@ -500,6 +500,40 @@ func TestDeviceCreateTextureView(t *testing.T) {
 	view.Release()
 }
 
+func TestTextureViewReturnsParentTexture(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "parent-tex",
+		Size:          wgpu.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     wgpu.TextureDimension2D,
+		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Usage:         wgpu.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		t.Fatalf("CreateTexture: %v", err)
+	}
+	defer tex.Release()
+
+	view, err := device.CreateTextureView(tex, nil)
+	if err != nil {
+		t.Fatalf("CreateTextureView: %v", err)
+	}
+	defer view.Release()
+
+	parent := view.Texture()
+	if parent == nil {
+		t.Fatal("view.Texture() returned nil — parent texture not set")
+	}
+	if parent != tex {
+		t.Error("view.Texture() returned different texture than the one used to create the view")
+	}
+}
+
 func TestDeviceCreateTextureViewWithDescriptor(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
