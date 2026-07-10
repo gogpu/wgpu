@@ -245,6 +245,7 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 	bv := st.texture.browser.CreateView(jsDesc)
 	return &TextureView{
 		browser: bv,
+		texture: st.AsTexture(),
 	}, nil
 }
 
