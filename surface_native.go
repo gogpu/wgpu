@@ -319,5 +319,5 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	return &TextureView{hal: halView, device: st.device}, nil
+	return &TextureView{hal: halView, device: st.device, texture: st.AsTexture()}, nil
 }
