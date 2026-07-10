@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.13] - 2026-07-10
+
+### Fixed
+
+- **Software: Tier 1 fullscreen quad blit detection** (#241) — when vertex buffers
+  are bound and the resulting 2 triangles form a fullscreen axis-aligned quad covering
+  the render target, bypass SPIR-V fragment shader entirely and use direct memcpy/swizzle.
+  Restores 50+ FPS from 18 FPS for textured quad render passes on software backend.
+  Detection: `isFullscreenQuad()` (bounding box check, 1.5px tolerance) + `blitStateValid()`
+  (blend, depth/stencil, write mask, multisampling).
+
 ## [0.30.12] - 2026-07-10
 
 ### Fixed
