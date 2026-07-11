@@ -3,6 +3,7 @@
 package software
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -272,6 +273,42 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 
 // DiscardTexture is a no-op (framebuffer stays allocated).
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {}
+
+// WritePixels copies RGBA pixel data directly into the surface framebuffer with
+// inline BGRA swizzle. Single-pass, zero allocation. Eliminates the 3-copy chain
+// (WriteTexture → render pass → blit) for CPU-rendered content.
+//
+// data must be RGBA8, tightly packed (bytesPerRow = width * 4).
+// The surface must be configured before calling.
+func (s *Surface) WritePixels(data []byte, width, height uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.configured || s.framebuffer == nil {
+		return fmt.Errorf("software: WritePixels: surface not configured")
+	}
+	if width != s.width || height != s.height {
+		return fmt.Errorf("software: WritePixels: size mismatch (%dx%d vs %dx%d)", width, height, s.width, s.height)
+	}
+
+	srcSize := int(width) * int(height) * 4
+	if len(data) < srcSize || len(s.framebuffer) < srcSize {
+		return fmt.Errorf("software: WritePixels: buffer too small")
+	}
+
+	bgra := isBGRA(s.format)
+	if bgra {
+		for i := 0; i < srcSize; i += 4 {
+			s.framebuffer[i+0] = data[i+2] // B←R
+			s.framebuffer[i+1] = data[i+1] // G
+			s.framebuffer[i+2] = data[i+0] // R←B
+			s.framebuffer[i+3] = data[i+3] // A
+		}
+	} else {
+		copy(s.framebuffer[:srcSize], data[:srcSize])
+	}
+	return nil
+}
 
 // ActualExtent returns the configured surface dimensions.
 // The software backend does not clamp the extent, so these always match

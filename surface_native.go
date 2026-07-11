@@ -200,6 +200,29 @@ func (s *Surface) SetPresentsWithTransaction(enabled bool) {
 	}
 }
 
+// WritePixels copies RGBA pixel data directly into the surface framebuffer,
+// bypassing render pass and texture upload. On software backend this is a
+// single-pass RGBA→BGRA swizzle+copy into the DIB section (1 copy vs 3).
+// On GPU backends, falls back to WriteTexture + present (no fast path).
+//
+// Call between GetCurrentTexture() and Present(). No render pass needed.
+// Returns ErrReleased if the surface is not configured.
+func (s *Surface) WritePixels(data []byte, width, height uint32) error {
+	if s.released || s.core == nil {
+		return ErrReleased
+	}
+	raw := s.core.RawSurface()
+	if raw == nil {
+		return ErrReleased
+	}
+	if pw, ok := raw.(interface {
+		WritePixels([]byte, uint32, uint32) error
+	}); ok {
+		return pw.WritePixels(data, width, height)
+	}
+	return fmt.Errorf("wgpu: WritePixels not supported on this backend")
+}
+
 // ActualExtent returns the actual swapchain dimensions after driver clamping.
 //
 // On Vulkan, the driver may clamp the requested extent to its supported range
