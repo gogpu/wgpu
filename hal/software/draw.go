@@ -31,24 +31,22 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 
 	// No vertex buffer bound — try fullscreen blit or SPIR-V shader path.
 	if r.vertexBufs[0].buffer == nil {
-		// Fullscreen blit path (FAST): direct memcpy/swizzle from bound texture.
-		// Must be checked BEFORE SPIR-V — memcpy is 100x faster than interpreting
-		// a fragment shader per-pixel (ADR-020: 60 FPS vs 0.65 FPS).
 		if r.executeFullscreenBlit(target) {
+			hal.Logger().Debug("software: executeDraw → Tier 0 blit (fast memcpy)",
+				"width", target.width, "height", target.height)
 			r.cleared = true
 			return
 		}
 
-		// SPIR-V path: when the pipeline has no vertex buffer layouts but has
-		// a shader module with SPIR-V (e.g. @builtin(vertex_index) triangle),
-		// execute the shader via the interpreter.
 		if r.executeSPIRVDraw(target, vertexCount, instanceCount, firstVertex, firstInstance) {
+			hal.Logger().Debug("software: executeDraw → SPIR-V path (no VB)",
+				"vertices", vertexCount)
 			return
 		}
-		// No source texture found — apply clear only (clear-only pass).
 		if !r.cleared {
 			r.applyClear()
 		}
+		hal.Logger().Debug("software: executeDraw → clear only (no VB, no texture)")
 		return
 	}
 
@@ -172,10 +170,12 @@ func isBlitSafeBlend(b *gputypes.BlendState) bool {
 
 func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	if !r.blitStateValid() {
+		hal.Logger().Debug("software: executeFullscreenBlit rejected: blitStateValid=false")
 		return false
 	}
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
+		hal.Logger().Debug("software: executeFullscreenBlit rejected: no bound texture")
 		return false
 	}
 
