@@ -31,24 +31,22 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 
 	// No vertex buffer bound — try fullscreen blit or SPIR-V shader path.
 	if r.vertexBufs[0].buffer == nil {
-		// Fullscreen blit path (FAST): direct memcpy/swizzle from bound texture.
-		// Must be checked BEFORE SPIR-V — memcpy is 100x faster than interpreting
-		// a fragment shader per-pixel (ADR-020: 60 FPS vs 0.65 FPS).
 		if r.executeFullscreenBlit(target) {
+			hal.Logger().Debug("software: executeDraw → Tier 0 blit (fast memcpy)",
+				"width", target.width, "height", target.height)
 			r.cleared = true
 			return
 		}
 
-		// SPIR-V path: when the pipeline has no vertex buffer layouts but has
-		// a shader module with SPIR-V (e.g. @builtin(vertex_index) triangle),
-		// execute the shader via the interpreter.
 		if r.executeSPIRVDraw(target, vertexCount, instanceCount, firstVertex, firstInstance) {
+			hal.Logger().Debug("software: executeDraw → SPIR-V path (no VB)",
+				"vertices", vertexCount)
 			return
 		}
-		// No source texture found — apply clear only (clear-only pass).
 		if !r.cleared {
 			r.applyClear()
 		}
+		hal.Logger().Debug("software: executeDraw → clear only (no VB, no texture)")
 		return
 	}
 
@@ -105,6 +103,26 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 		}
 	}
 	return true
+}
+
+// tryFullscreenBlit attempts Tier 1 fast-path: if 2 triangles form a fullscreen
+// quad, the bound texture matches target dimensions, and render state is safe,
+// bypass SPIR-V fragment shader with direct memcpy/swizzle.
+func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, target *Texture, w, h int) bool {
+	if len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
+		return false
+	}
+	srcView := r.findBoundTexture()
+	if srcView == nil || srcView.texture == nil {
+		return false
+	}
+	srcView.texture.mu.RLock()
+	sameSize := int(srcView.texture.width) == w && int(srcView.texture.height) == h
+	srcView.texture.mu.RUnlock()
+	if !sameSize {
+		return false
+	}
+	return r.executeFullscreenBlit(target)
 }
 
 // isFullscreenQuad checks whether 2 triangles form an axis-aligned quad covering
@@ -345,14 +363,9 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 		triangles = r.fetchTriangles(layouts, vertexCount, firstVertex, w, h)
 	}
 
-	// Tier 1 fast-path: if the triangles form a fullscreen quad with a bound
-	// texture and safe render state, bypass the SPIR-V fragment shader entirely
-	// and memcpy/swizzle the texture directly. This is the critical optimization
-	// for issue #241 (18 FPS → 50+ FPS on software backend).
-	if len(triangles) == 2 && r.blitStateValid() && isFullscreenQuad(triangles, w, h) {
-		if r.executeFullscreenBlit(target) {
-			return
-		}
+	// Tier 1 fast-path: fullscreen textured quad → direct memcpy (#241).
+	if r.tryFullscreenBlit(triangles, target, w, h) {
+		return
 	}
 
 	// Determine fragment color source: if vertices carry attributes, interpolate.

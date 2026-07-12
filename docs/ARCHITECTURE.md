@@ -162,6 +162,8 @@ CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags req
 - `blit_linux.go` — Linux X11 presentation: XPutImage via goffi (Skia pattern)
 - `blit_darwin.go` — macOS presentation: CGImage + CALayer, or Metal nextDrawable + replaceRegion for CAMetalLayer. Contributor: @k-chimi
 
+**Extensions (non-standard):** `Surface.PresentPixels()` — atomic CPU pixel write + present that bypasses the WebGPU render pass pipeline. Single-pass RGBA→BGRA swizzle into DIB/X11 framebuffer + platform blit. Reduces present overhead from 3 copies to 1 for CPU-rendered content. `hal.PixelPresenter` / `hal.PixelWriter` optional interfaces (`io.WriterTo` pattern). ADR: `docs/dev/research/ADR-SOFTWARE-ZERO-COPY-PRESENTATION.md`.
+
 Use cases: **shader debugging** (step through every SPIR-V instruction), **CI/CD testing** (no GPU required), **headless rendering** (servers), **GPU-less fallback** (embedded systems). NOT for real-time production rendering — use GPU backends (Vulkan/DX12/Metal/GLES) for that. Verified: triangle + 4096-particle compute+render simulation. All 3 desktop platforms (Windows, Linux, macOS) have windowed presentation.
 
 ### `hal/noop/` — No-op Backend

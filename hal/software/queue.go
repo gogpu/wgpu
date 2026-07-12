@@ -38,12 +38,25 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 	return nil
 }
 
+// resolveTexture extracts the underlying *Texture from a HAL texture.
+// Handles both *Texture and *SurfaceTexture (which embeds Texture by value).
+func resolveTexture(t hal.Texture) *Texture {
+	switch v := t.(type) {
+	case *Texture:
+		return v
+	case *SurfaceTexture:
+		return &v.Texture
+	default:
+		return nil
+	}
+}
+
 // WriteTexture performs immediate texture writes with real data storage.
 // Respects dst.Origin (destination position), layout.BytesPerRow (source stride),
 // layout.Offset (source data offset), and size (region dimensions).
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	tex, ok := dst.Texture.(*Texture)
-	if !ok {
+	tex := resolveTexture(dst.Texture)
+	if tex == nil {
 		return nil
 	}
 	if size == nil || len(data) == 0 {

@@ -2,7 +2,11 @@
 
 package hal
 
-import "github.com/gogpu/gputypes"
+import (
+	"image"
+
+	"github.com/gogpu/gputypes"
+)
 
 // Resource is the base interface for all GPU resources.
 // Resources must be explicitly destroyed to free GPU memory.
@@ -148,6 +152,26 @@ type Surface interface {
 	// values match the configured dimensions since those backends do not
 	// clamp the extent. Returns (0, 0) if the surface is not configured.
 	ActualExtent() (width, height uint32)
+}
+
+// PixelPresenter is an optional Surface capability for direct CPU pixel
+// presentation. Only the software backend implements this — GPU backends
+// use the standard AcquireTexture → render pass → Present flow.
+//
+// This follows the io.WriterTo pattern: optional capability interface
+// alongside the core Surface interface, not embedded in it.
+//
+// Extension: not part of WebGPU specification.
+type PixelPresenter interface {
+	PresentPixels(data []byte, width, height uint32, damageRects []image.Rectangle) error
+}
+
+// PixelWriter is an optional Surface capability for writing CPU pixels
+// into the surface framebuffer without presenting.
+//
+// Extension: not part of WebGPU specification.
+type PixelWriter interface {
+	WritePixels(data []byte, width, height uint32) error
 }
 
 // SurfaceTexture is a texture acquired from a surface.
