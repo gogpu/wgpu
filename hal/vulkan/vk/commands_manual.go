@@ -27,7 +27,7 @@ func (c *Commands) CmdWriteTimestamp(commandBuffer CommandBuffer, pipelineStage 
 		unsafe.Pointer(&queryPool),
 		unsafe.Pointer(&query),
 	}
-	_ = ffi.CallFunction(&SigVoidHandleU32HandleU32, c.cmdWriteTimestamp, nil, args[:])
+	_, _ = ffi.CallFunction(&SigVoidHandleU32HandleU32, c.cmdWriteTimestamp, nil, args[:])
 }
 
 // CmdCopyQueryPoolResults wraps vkCmdCopyQueryPoolResults.
@@ -46,7 +46,7 @@ func (c *Commands) CmdCopyQueryPoolResults(commandBuffer CommandBuffer, queryPoo
 		unsafe.Pointer(&stride),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&SigVoidCmdCopyQueryPoolResults, c.cmdCopyQueryPoolResults, nil, args[:])
+	_, _ = ffi.CallFunction(&SigVoidCmdCopyQueryPoolResults, c.cmdCopyQueryPoolResults, nil, args[:])
 }
 
 // WaitSemaphores wraps vkWaitSemaphores (VK_KHR_timeline_semaphore / Vulkan 1.2).
@@ -58,7 +58,7 @@ func (c *Commands) WaitSemaphores(device Device, pWaitInfo *SemaphoreWaitInfo, t
 		unsafe.Pointer(&pWaitInfo),
 		unsafe.Pointer(&timeout),
 	}
-	if err := ffi.CallFunction(&SigResultHandlePtrU64, c.waitSemaphores, unsafe.Pointer(&result), args[:]); err != nil {
+	if _, err := ffi.CallFunction(&SigResultHandlePtrU64, c.waitSemaphores, unsafe.Pointer(&result), args[:]); err != nil {
 		return ErrorInitializationFailed
 	}
 	return Result(result)

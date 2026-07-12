@@ -339,5 +339,5 @@ func vkDestroyDevice(device vk.Device, allocator *vk.AllocationCallbacks) { //no
 		unsafe.Pointer(&device),
 		unsafe.Pointer(&allocator),
 	}
-	_ = ffi.CallFunction(&vk.SigVoidHandlePtr, proc, nil, args[:])
+	_, _ = ffi.CallFunction(&vk.SigVoidHandlePtr, proc, nil, args[:])
 }

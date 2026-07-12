@@ -130,7 +130,7 @@ func WlEGLWindowCreate(wlSurface uintptr, width, height int32) uintptr {
 		unsafe.Pointer(&width),
 		unsafe.Pointer(&height),
 	}
-	_ = ffi.CallFunction(&cifWlEGLWindowCreate, symWlEGLWindowCreate, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifWlEGLWindowCreate, symWlEGLWindowCreate, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -142,7 +142,7 @@ func WlEGLWindowDestroy(eglWindow uintptr) {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&eglWindow),
 	}
-	_ = ffi.CallFunction(&cifWlEGLWindowDestroy, symWlEGLWindowDestroy, nil, args[:])
+	_, _ = ffi.CallFunction(&cifWlEGLWindowDestroy, symWlEGLWindowDestroy, nil, args[:])
 }
 
 // WlEGLWindowResize resizes a wl_egl_window.
@@ -157,5 +157,5 @@ func WlEGLWindowResize(eglWindow uintptr, width, height, dx, dy int32) {
 		unsafe.Pointer(&dx),
 		unsafe.Pointer(&dy),
 	}
-	_ = ffi.CallFunction(&cifWlEGLWindowResize, symWlEGLWindowResize, nil, args[:])
+	_, _ = ffi.CallFunction(&cifWlEGLWindowResize, symWlEGLWindowResize, nil, args[:])
 }

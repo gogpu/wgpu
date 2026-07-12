@@ -147,7 +147,7 @@ func GetInstanceProcAddr(instance Instance, name string) unsafe.Pointer {
 		unsafe.Pointer(&namePtr), // pointer TO the pointer
 	}
 
-	_ = ffi.CallFunction(&cifGetInstanceProcAddr, vkGetInstanceProcAddr, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifGetInstanceProcAddr, vkGetInstanceProcAddr, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -183,7 +183,7 @@ func GetDeviceProcAddr(device Device, name string) unsafe.Pointer {
 		unsafe.Pointer(&namePtr), // pointer TO the pointer
 	}
 
-	_ = ffi.CallFunction(&cifGetDeviceProcAddr, vkGetDeviceProcAddr, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifGetDeviceProcAddr, vkGetDeviceProcAddr, unsafe.Pointer(&result), args[:])
 	return result
 }
 

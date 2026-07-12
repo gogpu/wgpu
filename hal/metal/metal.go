@@ -180,7 +180,7 @@ func preRegisterSelectors() {
 // CreateSystemDefaultDevice returns the default Metal device.
 func CreateSystemDefaultDevice() ID {
 	var result ID
-	_ = ffi.CallFunction(&cifCreateDefaultDevice, symMTLCreateSystemDefaultDevice, unsafe.Pointer(&result), nil)
+	_, _ = ffi.CallFunction(&cifCreateDefaultDevice, symMTLCreateSystemDefaultDevice, unsafe.Pointer(&result), nil)
 	return result
 }
 
@@ -197,7 +197,7 @@ func CopyAllDevices() []ID {
 	}
 
 	var nsArray ID
-	_ = ffi.CallFunction(&cifCopyAllDevices, symMTLCopyAllDevices, unsafe.Pointer(&nsArray), nil)
+	_, _ = ffi.CallFunction(&cifCopyAllDevices, symMTLCopyAllDevices, unsafe.Pointer(&nsArray), nil)
 	if nsArray == 0 {
 		return nil
 	}

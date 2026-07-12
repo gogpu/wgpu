@@ -89,7 +89,7 @@ func OpenX11Display() *DisplayOwner {
 	var display uintptr
 	var displayName uintptr // NULL pointer for default display
 	args := [1]unsafe.Pointer{unsafe.Pointer(&displayName)}
-	_ = ffi.CallFunction(&cifXOpenDisplay, symXOpenDisplay, unsafe.Pointer(&display), args[:])
+	_, _ = ffi.CallFunction(&cifXOpenDisplay, symXOpenDisplay, unsafe.Pointer(&display), args[:])
 	if display == 0 {
 		return nil
 	}
@@ -147,14 +147,14 @@ func TestWaylandDisplay() *DisplayOwner {
 	var display uintptr
 	var displayName uintptr // NULL pointer for default display
 	args := [1]unsafe.Pointer{unsafe.Pointer(&displayName)}
-	_ = ffi.CallFunction(&cifWlDisplayConnect, symWlDisplayConnect, unsafe.Pointer(&display), args[:])
+	_, _ = ffi.CallFunction(&cifWlDisplayConnect, symWlDisplayConnect, unsafe.Pointer(&display), args[:])
 	if display == 0 {
 		return nil
 	}
 
 	// Immediately disconnect - we just wanted to test availability
 	argsDisconnect := [1]unsafe.Pointer{unsafe.Pointer(&display)}
-	_ = ffi.CallFunction(&cifWlDisplayDisconnect, symWlDisplayDisconnect, nil, argsDisconnect[:])
+	_, _ = ffi.CallFunction(&cifWlDisplayDisconnect, symWlDisplayDisconnect, nil, argsDisconnect[:])
 
 	return &DisplayOwner{
 		kind:    WindowKindWayland,
@@ -314,7 +314,7 @@ func (d *DisplayOwner) Close() {
 			// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
 			displayPtr := d.display
 			args := [1]unsafe.Pointer{unsafe.Pointer(&displayPtr)}
-			_ = ffi.CallFunction(&cifXCloseDisplay, symXCloseDisplay, unsafe.Pointer(&result), args[:])
+			_, _ = ffi.CallFunction(&cifXCloseDisplay, symXCloseDisplay, unsafe.Pointer(&result), args[:])
 		}
 	case WindowKindWayland:
 		// Wayland display is managed by the window system

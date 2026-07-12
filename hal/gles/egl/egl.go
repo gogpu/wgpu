@@ -3,6 +3,16 @@
 
 //go:build linux && !(js && wasm)
 
+// FFI error handling follows ADR-049 three-tier strategy:
+//
+//	Tier 1 (creation/submit): check both FFI error and API result code
+//	Tier 2 (void/hot path): infallible by GPU API contract — Vulkan §6.6, WebGPU §21.2
+//	Tier 3 (platform syscalls): use errno for diagnostics (Wayland, X11, Win32)
+//
+// Enterprise reference: Rust wgpu-hal returns () for all draw/destroy/barrier commands.
+//
+// EGL calls are Tier 2: EGL errors are reported via eglGetError(), not FFI return values.
+// EGLBoolean returns are checked after the call, not at the FFI transport level.
 package egl
 
 import (
@@ -397,7 +407,7 @@ func prepareEGLCallInterfaces() error {
 // GetError returns the last EGL error.
 func GetError() EGLInt {
 	var result EGLInt
-	_ = ffi.CallFunction(&cifEglGetError, symEglGetError, unsafe.Pointer(&result), nil)
+	_, _ = ffi.CallFunction(&cifEglGetError, symEglGetError, unsafe.Pointer(&result), nil)
 	return result
 }
 
@@ -407,7 +417,7 @@ func GetDisplay(displayID EGLNativeDisplayType) EGLDisplay {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&displayID),
 	}
-	_ = ffi.CallFunction(&cifEglGetDisplay, symEglGetDisplay, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglGetDisplay, symEglGetDisplay, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -421,7 +431,7 @@ func GetPlatformDisplay(platform EGLEnum, nativeDisplay uintptr, attribList *EGL
 			unsafe.Pointer(&nativeDisplay),
 			unsafe.Pointer(&attribList),
 		}
-		_ = ffi.CallFunction(&cifEglGetPlatformDisplay, symEglGetPlatformDisplay, unsafe.Pointer(&result), args[:])
+		_, _ = ffi.CallFunction(&cifEglGetPlatformDisplay, symEglGetPlatformDisplay, unsafe.Pointer(&result), args[:])
 		return result
 	}
 	// Fallback to eglGetDisplay
@@ -445,7 +455,7 @@ func Initialize(dpy EGLDisplay, major *EGLInt, minor *EGLInt) EGLBoolean {
 		unsafe.Pointer(&majorPtr),
 		unsafe.Pointer(&minorPtr),
 	}
-	_ = ffi.CallFunction(&cifEglInitialize, symEglInitialize, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglInitialize, symEglInitialize, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -455,7 +465,7 @@ func Terminate(dpy EGLDisplay) EGLBoolean {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 	}
-	_ = ffi.CallFunction(&cifEglTerminate, symEglTerminate, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglTerminate, symEglTerminate, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -466,7 +476,7 @@ func QueryString(dpy EGLDisplay, name EGLInt) string {
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&name),
 	}
-	_ = ffi.CallFunction(&cifEglQueryString, symEglQueryString, unsafe.Pointer(&ptr), args[:])
+	_, _ = ffi.CallFunction(&cifEglQueryString, symEglQueryString, unsafe.Pointer(&ptr), args[:])
 	if ptr == 0 {
 		return ""
 	}
@@ -487,7 +497,7 @@ func ChooseConfig(dpy EGLDisplay, attribList *EGLInt, configs *EGLConfig, config
 		unsafe.Pointer(&configSize),
 		unsafe.Pointer(&numConfigPtr),
 	}
-	_ = ffi.CallFunction(&cifEglChooseConfig, symEglChooseConfig, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglChooseConfig, symEglChooseConfig, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -502,7 +512,7 @@ func GetConfigAttrib(dpy EGLDisplay, config EGLConfig, attribute EGLInt, value *
 		unsafe.Pointer(&attribute),
 		unsafe.Pointer(&valuePtr),
 	}
-	_ = ffi.CallFunction(&cifEglGetConfigAttrib, symEglGetConfigAttrib, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglGetConfigAttrib, symEglGetConfigAttrib, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -517,7 +527,7 @@ func CreateWindowSurface(dpy EGLDisplay, config EGLConfig, win EGLNativeWindowTy
 		unsafe.Pointer(&win),
 		unsafe.Pointer(&attribListPtr),
 	}
-	_ = ffi.CallFunction(&cifEglCreateWindowSurface, symEglCreateWindowSurface, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglCreateWindowSurface, symEglCreateWindowSurface, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -547,7 +557,7 @@ func CreatePlatformWindowSurface(dpy EGLDisplay, config EGLConfig, nativeWindow 
 		unsafe.Pointer(&nativeWindow),
 		unsafe.Pointer(&attribListPtr),
 	}
-	_ = ffi.CallFunction(&cifEglCreatePlatformWindowSurface, symEglCreatePlatformWindowSurface, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglCreatePlatformWindowSurface, symEglCreatePlatformWindowSurface, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -561,7 +571,7 @@ func CreatePbufferSurface(dpy EGLDisplay, config EGLConfig, attribList *EGLInt) 
 		unsafe.Pointer(&config),
 		unsafe.Pointer(&attribListPtr),
 	}
-	_ = ffi.CallFunction(&cifEglCreatePbufferSurface, symEglCreatePbufferSurface, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglCreatePbufferSurface, symEglCreatePbufferSurface, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -572,7 +582,7 @@ func DestroySurface(dpy EGLDisplay, surface EGLSurface) EGLBoolean {
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&surface),
 	}
-	_ = ffi.CallFunction(&cifEglDestroySurface, symEglDestroySurface, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglDestroySurface, symEglDestroySurface, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -582,7 +592,7 @@ func BindAPI(api EGLEnum) EGLBoolean {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&api),
 	}
-	_ = ffi.CallFunction(&cifEglBindAPI, symEglBindAPI, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglBindAPI, symEglBindAPI, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -593,7 +603,7 @@ func SwapInterval(dpy EGLDisplay, interval EGLInt) EGLBoolean {
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&interval),
 	}
-	_ = ffi.CallFunction(&cifEglSwapInterval, symEglSwapInterval, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglSwapInterval, symEglSwapInterval, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -608,7 +618,7 @@ func CreateContext(dpy EGLDisplay, config EGLConfig, shareContext EGLContext, at
 		unsafe.Pointer(&shareContext),
 		unsafe.Pointer(&attribListPtr),
 	}
-	_ = ffi.CallFunction(&cifEglCreateContext, symEglCreateContext, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglCreateContext, symEglCreateContext, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -619,7 +629,7 @@ func DestroyContext(dpy EGLDisplay, ctx EGLContext) EGLBoolean {
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&ctx),
 	}
-	_ = ffi.CallFunction(&cifEglDestroyContext, symEglDestroyContext, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglDestroyContext, symEglDestroyContext, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -632,21 +642,21 @@ func MakeCurrent(dpy EGLDisplay, draw EGLSurface, read EGLSurface, ctx EGLContex
 		unsafe.Pointer(&read),
 		unsafe.Pointer(&ctx),
 	}
-	_ = ffi.CallFunction(&cifEglMakeCurrent, symEglMakeCurrent, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglMakeCurrent, symEglMakeCurrent, unsafe.Pointer(&result), args[:])
 	return result
 }
 
 // GetCurrentContext returns the current EGL rendering context.
 func GetCurrentContext() EGLContext {
 	var result EGLContext
-	_ = ffi.CallFunction(&cifEglGetCurrentContext, symEglGetCurrentContext, unsafe.Pointer(&result), nil)
+	_, _ = ffi.CallFunction(&cifEglGetCurrentContext, symEglGetCurrentContext, unsafe.Pointer(&result), nil)
 	return result
 }
 
 // GetCurrentDisplay returns the current EGL display connection.
 func GetCurrentDisplay() EGLDisplay {
 	var result EGLDisplay
-	_ = ffi.CallFunction(&cifEglGetCurrentDisplay, symEglGetCurrentDisplay, unsafe.Pointer(&result), nil)
+	_, _ = ffi.CallFunction(&cifEglGetCurrentDisplay, symEglGetCurrentDisplay, unsafe.Pointer(&result), nil)
 	return result
 }
 
@@ -657,7 +667,7 @@ func SwapBuffers(dpy EGLDisplay, surface EGLSurface) EGLBoolean {
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&surface),
 	}
-	_ = ffi.CallFunction(&cifEglSwapBuffers, symEglSwapBuffers, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglSwapBuffers, symEglSwapBuffers, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -670,7 +680,7 @@ func GetProcAddress(procname string) uintptr {
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&ptr),
 	}
-	_ = ffi.CallFunction(&cifEglGetProcAddress, symEglGetProcAddress, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglGetProcAddress, symEglGetProcAddress, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -743,7 +753,7 @@ func SwapBuffersWithDamage(dpy EGLDisplay, surface EGLSurface, rects *int32, nRe
 		unsafe.Pointer(&rects),
 		unsafe.Pointer(&nRects),
 	}
-	_ = ffi.CallFunction(&cifEglSwapBuffersWithDamageKHR, symEglSwapBuffersWithDamageKHR, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifEglSwapBuffersWithDamageKHR, symEglSwapBuffersWithDamageKHR, unsafe.Pointer(&result), args[:])
 	return result
 }
 
