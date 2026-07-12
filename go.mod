@@ -8,5 +8,5 @@ require (
 	github.com/gogpu/gpucontext v0.21.0
 	github.com/gogpu/gputypes v0.5.1
 	github.com/gogpu/naga v0.17.15
-	golang.org/x/sys v0.46.0
+	golang.org/x/sys v0.47.0
 )
