@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.18] - 2026-07-12
+
+### Fixed
+
+- **Vulkan crash: C array params in vk-gen** — `vkCmdSetBlendConstants(const float[4])`
+  was generated with scalar float CIF (`SigVoidHandleF32`) instead of pointer CIF
+  (`SigVoidHandlePtr`). C array function parameters decay to pointers in C ABI.
+  Generator now detects `[` in vk.xml RawXML and classifies as `ptr` with
+  double-pointer arg pattern (ADR-044). Also fixes `CmdSetFragmentShadingRateKHR`
+  and `CmdSetFragmentShadingRateEnumNV` (`combinerOps[2]`).
+- **vk-gen deterministic output** — extension enum map keys sorted before iteration.
+  Go map order is random; without sorting, `const_gen.go` changed on every
+  regeneration (1780+ line noise diffs). Now fully idempotent.
+
 ## [0.30.17] - 2026-07-12
 
 ### Changed
