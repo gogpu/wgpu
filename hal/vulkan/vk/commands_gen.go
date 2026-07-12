@@ -2114,14 +2114,15 @@ func (c *Commands) CmdSetLineWidth(commandBuffer CommandBuffer, lineWidth float3
 
 // CmdSetBlendConstants wraps vkCmdSetBlendConstants.
 func (c *Commands) CmdSetBlendConstants(commandBuffer CommandBuffer, blendConstants [4]float32) {
+	blendConstantsPtr := unsafe.Pointer(&blendConstants)
 	args := [2]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
-		unsafe.Pointer(&blendConstants),
+		unsafe.Pointer(&blendConstantsPtr),
 	}
 	if c.cmdSetBlendConstants == nil {
 		return
 	}
-	_, _ = ffi.CallFunction(&SigVoidHandleF32, c.cmdSetBlendConstants, nil, args[:])
+	_, _ = ffi.CallFunction(&SigVoidHandlePtr, c.cmdSetBlendConstants, nil, args[:])
 }
 
 // TODO: CmdSetDepthBounds - signature not yet supported: void(handle, f32, f32)
@@ -6509,7 +6510,19 @@ func (c *Commands) GetPhysicalDeviceRefreshableObjectTypesKHR(physicalDevice Phy
 	return Result(result)
 }
 
-// TODO: CmdSetFragmentShadingRateKHR - signature not yet supported: void(handle, ptr, handle)
+// CmdSetFragmentShadingRateKHR wraps vkCmdSetFragmentShadingRateKHR.
+func (c *Commands) CmdSetFragmentShadingRateKHR(commandBuffer CommandBuffer, pFragmentSize *Extent2D, combinerOps [2]FragmentShadingRateCombinerOpKHR) {
+	combinerOpsPtr := unsafe.Pointer(&combinerOps)
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&pFragmentSize),
+		unsafe.Pointer(&combinerOpsPtr),
+	}
+	if c.cmdSetFragmentShadingRateKHR == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.cmdSetFragmentShadingRateKHR, nil, args[:])
+}
 
 // GetPhysicalDeviceFragmentShadingRatesKHR wraps vkGetPhysicalDeviceFragmentShadingRatesKHR.
 func (c *Commands) GetPhysicalDeviceFragmentShadingRatesKHR(physicalDevice PhysicalDevice, pFragmentShadingRateCount *uint32, pFragmentShadingRates *PhysicalDeviceFragmentShadingRateKHR) Result {
@@ -6527,15 +6540,16 @@ func (c *Commands) GetPhysicalDeviceFragmentShadingRatesKHR(physicalDevice Physi
 
 // CmdSetFragmentShadingRateEnumNV wraps vkCmdSetFragmentShadingRateEnumNV.
 func (c *Commands) CmdSetFragmentShadingRateEnumNV(commandBuffer CommandBuffer, shadingRate FragmentShadingRateNV, combinerOps [2]FragmentShadingRateCombinerOpKHR) {
+	combinerOpsPtr := unsafe.Pointer(&combinerOps)
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&commandBuffer),
 		unsafe.Pointer(&shadingRate),
-		unsafe.Pointer(&combinerOps),
+		unsafe.Pointer(&combinerOpsPtr),
 	}
 	if c.cmdSetFragmentShadingRateEnumNV == nil {
 		return
 	}
-	_, _ = ffi.CallFunction(&SigVoidHandleHandleHandle, c.cmdSetFragmentShadingRateEnumNV, nil, args[:])
+	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.cmdSetFragmentShadingRateEnumNV, nil, args[:])
 }
 
 // TODO: GetAccelerationStructureBuildSizesKHR - signature not yet supported: void(handle, handle, ptr, ptr, ptr)
