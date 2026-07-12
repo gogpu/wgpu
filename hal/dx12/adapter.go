@@ -281,22 +281,20 @@ func (a *Adapter) deviceType() gputypes.DeviceType {
 		return gputypes.DeviceTypeCPU
 	}
 
-	// Check for dedicated video memory to distinguish discrete from integrated
-	if a.desc.DedicatedVideoMemory > 0 {
-		// Heuristic: >512MB dedicated VRAM is likely discrete
-		if a.desc.DedicatedVideoMemory > 512*1024*1024 {
-			return gputypes.DeviceTypeDiscreteGPU
-		}
+	// Heuristic: >512MB dedicated VRAM is almost always a discrete GPU
+	// (NVIDIA/AMD with dedicated GDDR). Smaller amounts (≤512MB) are typically
+	// a reserved pool from system memory on integrated GPUs (Intel HD/UHD, AMD APU).
+	if a.desc.DedicatedVideoMemory > 512*1024*1024 {
+		return gputypes.DeviceTypeDiscreteGPU
 	}
 
-	// If there's no dedicated video memory, it's likely integrated
-	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
+	if a.desc.DedicatedVideoMemory > 0 {
 		return gputypes.DeviceTypeIntegratedGPU
 	}
 
-	// Assume discrete if there's any dedicated memory
-	if a.desc.DedicatedVideoMemory > 0 {
-		return gputypes.DeviceTypeDiscreteGPU
+	// No dedicated memory + shared system memory → integrated
+	if a.desc.SharedSystemMemory > 0 {
+		return gputypes.DeviceTypeIntegratedGPU
 	}
 
 	return gputypes.DeviceTypeOther
@@ -589,11 +587,11 @@ func (a *AdapterLegacy) deviceType() gputypes.DeviceType {
 	if a.desc.DedicatedVideoMemory > 512*1024*1024 {
 		return gputypes.DeviceTypeDiscreteGPU
 	}
-	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
+	if a.desc.DedicatedVideoMemory > 0 {
 		return gputypes.DeviceTypeIntegratedGPU
 	}
-	if a.desc.DedicatedVideoMemory > 0 {
-		return gputypes.DeviceTypeDiscreteGPU
+	if a.desc.SharedSystemMemory > 0 {
+		return gputypes.DeviceTypeIntegratedGPU
 	}
 	return gputypes.DeviceTypeOther
 }
