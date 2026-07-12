@@ -4,6 +4,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"image"
 
 	"github.com/gogpu/wgpu/hal"
@@ -174,6 +175,44 @@ func (s *Surface) PresentWithDamage(queue hal.Queue, damageRects []image.Rectang
 	s.acquiredTex = nil
 	s.state = SurfaceStateConfigured
 	return err
+}
+
+// PresentPixels writes RGBA pixel data directly to the surface and presents it
+// in a single operation. This bypasses the WebGPU render pass pipeline entirely
+// (no AcquireTexture, no render pass, no Present needed).
+//
+// On the software backend, this performs RGBA→BGRA swizzle into the DIB section
+// framebuffer and immediately BitBlt's to the window — the fastest path for
+// CPU-rendered content (1 copy vs 3 in the standard pipeline).
+//
+// The surface must be in Configured or Acquired state. If a texture is currently
+// acquired, it is discarded before writing pixels (stale texture cleanup).
+// The surface remains in Configured state after this call.
+//
+// Returns an error if the backend does not support PresentPixels (only the
+// software backend implements this extension).
+func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects []image.Rectangle) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state == SurfaceStateUnconfigured {
+		return ErrSurfaceNotConfigured
+	}
+
+	// Discard stale acquired texture if any — PresentPixels replaces the
+	// entire AcquireTexture→render→Present flow.
+	if s.state == SurfaceStateAcquired && s.acquiredTex != nil {
+		s.raw.DiscardTexture(s.acquiredTex)
+		s.acquiredTex = nil
+		s.state = SurfaceStateConfigured
+	}
+
+	// Only software backend implements hal.PixelPresenter.
+	pp, ok := s.raw.(hal.PixelPresenter)
+	if !ok {
+		return fmt.Errorf("core: PresentPixels not supported on this backend")
+	}
+	return pp.PresentPixels(data, width, height, damageRects)
 }
 
 // DiscardTexture discards the acquired surface texture without presenting it.

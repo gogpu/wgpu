@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.14] - 2026-07-11
+
+### Fixed
+
+- **Software: WriteTexture SurfaceTexture bug** (BUG-SW-010) — `Queue.WriteTexture`
+  silently dropped writes to `*SurfaceTexture` due to Go type assertion failure
+  (`*SurfaceTexture` embeds `Texture` by value, not pointer). Fix: `resolveTexture()`
+  type switch handles both `*Texture` and `*SurfaceTexture`.
+- **Software: Tier 1 blit false-positive** — tightened fullscreen quad detection to
+  require bound texture dimensions match render target. Prevents incorrect blit when
+  2-triangle quad has mismatched texture.
+- **Software: removed debug logging from hot path** — `executeFullscreenBlit` rejection
+  logs removed (per-attempt overhead). Path-tracing logs (per-frame) retained.
+
+### Extensions (non-standard)
+
+- **`Surface.PresentPixels(data, width, height, damageRects)`** — software-backend-only
+  atomic pixel write + present. Single-pass RGBA→BGRA swizzle into DIB section
+  framebuffer + BitBlt to window. Bypasses entire WebGPU render pass pipeline
+  (WriteTexture → render pass → blit). 3 copies → 1 copy per frame.
+  Not part of WebGPU specification. Returns error on GPU backends.
+  Enterprise references: SDL3 `UpdateWindowSurface`, Qt6 `QBackingStore::flush`,
+  rio/softbuffer `buffer.present()`.
+- **`Surface.WritePixels(data, width, height)`** — write RGBA pixels into surface
+  framebuffer without presenting. Software-backend-only extension.
+- **`hal.PixelPresenter`** / **`hal.PixelWriter`** — optional HAL capability interfaces
+  (`io.WriterTo` pattern alongside `hal.Surface`).
+
+### Architecture
+
+- 3-layer `PresentPixels`: public API (`surface_native.go`) → core state machine
+  validation (`core/surface.go`) → HAL implementation (`hal/software/resource.go`).
+  Bypasses Acquire state — surface stays in Configured.
+- ADR: `ADR-SOFTWARE-ZERO-COPY-PRESENTATION.md` — 10 research agents, SDL3/Qt6/Skia/rio
+  enterprise reference analysis.
+
 ## [0.30.13] - 2026-07-10
 
 ### Fixed

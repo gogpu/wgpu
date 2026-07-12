@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.1
+## Current State: v0.30.14
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -66,6 +66,18 @@
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
 ✅ **Browser WebGPU backend** — complete `syscall/js` → `navigator.gpu` implementation (~6500 LOC). Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
 ✅ **GLES hidden window context (Windows)** — GL context owned by Instance on hidden 1×1 HWND, shared via mutex-protected `AdapterContext`. Adapter/Device/Queue survive Surface destruction. Follows Rust wgpu-hal `wgl.rs` `AdapterContext::lock()`/`lock_with_dc()` pattern. Surface lightweight — no context ownership.
+✅ **Metal stencil state translation** — MTLDepthStencilState front/back face states, stencilAttachmentPixelFormat, ObjC descriptor leak fix (v0.30.4, @samyfodil)
+✅ **Metal IOSurface leak fix** — retain/release balance, presentsWithTransaction, frameSemaphore, UMA StorageModeShared (v0.30.10, @lkmavi)
+✅ **Software DrawIndexed** — index buffer resolution (uint16/uint32, baseVertex), vertex fetch integration (v0.30.5, @samyfodil)
+✅ **Software R8/format-aware textures** — `formatBytesPerPixel` → `gputypes.BlockCopySize()` canonical (87 formats, Rust parity). Format-aware copy commands, Clear, readTexel (v0.30.5-v0.30.7)
+✅ **Software MSAA honest reporting** — removed false Multisample/MultisampleResolve capabilities, CreateTexture rejects SampleCount>1 (v0.30.8)
+✅ **Software BGRA swizzle on alpha blending** — framebuffer readback R↔B swap for Windows BGRA8 surfaces (v0.30.8)
+✅ **Software buffer binding offsets** — CreateBindGroup stores Offset/Size, SetBindGroup accepts dynamicOffsets (v0.30.8)
+✅ **GLES LockOSThread in integration tests** — EGL context thread affinity fix, eliminates CI flaky (v0.30.7)
+✅ **TextureView.Texture() accessor** — Rust wgpu parity, all 3 build targets (v0.30.11)
+✅ **SurfaceTexture.AsTexture()** — spec-compliant Queue.WriteTexture to surface textures (v0.30.11)
+✅ **Software blit state validation** — Skia-inspired blitStateValid() checks blend/depth/mask/MSAA (v0.30.11)
+✅ **Software PresentPixels extension** — atomic CPU pixel write + present. 3-layer (HAL→core→public), hal.PixelPresenter/PixelWriter interfaces. 3 copies → 1 copy. SDL3/Qt6/rio pattern. Non-standard WebGPU extension (v0.30.14)
 ✅ **GLES instance-level EGL context (Linux)** — surfaceless/pbuffer context at CreateInstance (Rust wgpu-hal `egl.rs:846` parity). Tiered config selection WINDOW+PBUFFER → PBUFFER-only (Rust `egl.rs:218-293`). Shared context in CreateSurface on X11/headless, own context on Wayland.
 ✅ **GLES FFI pointer convention fix (Linux)** — 30+ GL calls in `context_linux.go` fixed: pointer-type args corrected for goffi `CallFunction` (PR #210, @lkmavi). ADR-044 documents convention. CI test verifies GenBuffers/GenTextures through goffi.
 ✅ **GLES fence sync ordering** — `glFenceSync` before `glFlush` (was reversed). PollCompleted uses non-blocking `glGetSynciv`. Confirmed by ANGLE bug 6464, virglrenderer commit 21bbc9ea, Mesa Gallium. `Fence.Signal` returns error (Rust parity).
