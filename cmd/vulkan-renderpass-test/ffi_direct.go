@@ -65,7 +65,7 @@ func DirectCreatePipeline(cmds *vk.Commands, device vk.Device, createInfo *vk.Gr
 	fmt.Printf("      createInfoPtr: %p\n", createInfoPtr)
 	fmt.Printf("      pipelinePtr (output): %p, value: 0x%X\n", pipelinePtr, pipeline)
 
-	_ = ffi.CallFunction(&cif, fnPtr, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cif, fnPtr, unsafe.Pointer(&result), args[:])
 
 	fmt.Printf("      result: %d\n", result)
 	fmt.Printf("      pipeline after call: 0x%X\n", pipeline)

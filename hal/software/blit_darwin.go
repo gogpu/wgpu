@@ -1,5 +1,15 @@
 //go:build darwin && !(js && wasm)
 
+// FFI error handling follows ADR-049 three-tier strategy:
+//
+//	Tier 1 (creation/submit): check both FFI error and API result code
+//	Tier 2 (void/hot path): infallible by GPU API contract — Vulkan §6.6, WebGPU §21.2
+//	Tier 3 (platform syscalls): use errno for diagnostics (Wayland, X11, Win32)
+//
+// Enterprise reference: Rust wgpu-hal returns () for all draw/destroy/barrier commands.
+//
+// macOS CoreGraphics and ObjC calls are Tier 1: error is checked after each call.
+// objc_msgSend and CG functions can fail if symbols are missing or objects are nil.
 package software
 
 import (
@@ -647,7 +657,7 @@ func (m *metal) Open() (err error) {
 func (m *metal) CreateSystemDefaultDevice() (d mtlDevice, err error) {
 	d.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(&cifMTLCreateSystemDefaultDevice, m.symMTLCreateSystemDefaultDevice, unsafe.Pointer(&d.data), []unsafe.Pointer{})
+	_, err = ffi.CallFunction(&cifMTLCreateSystemDefaultDevice, m.symMTLCreateSystemDefaultDevice, unsafe.Pointer(&d.data), []unsafe.Pointer{})
 	if err != nil {
 		return mtlDevice{objcAnyOpaqueNil}, m.errorf("failed to MTLRegionMake2D: %w", err)
 	}
@@ -910,7 +920,7 @@ func (c *coreGraphics) ImageCreate(
 	// CGImageRef: (struct CGImage)*
 	cgimg.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifCoreGraphicsImageCreate, c.symCGImageCreate, cgimg.Pointer(), []unsafe.Pointer{
+	_, err = ffi.CallFunction(cifCoreGraphicsImageCreate, c.symCGImageCreate, cgimg.Pointer(), []unsafe.Pointer{
 		unsafe.Pointer(&width),
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&bitsPerComponent),
@@ -939,7 +949,7 @@ func (c *coreGraphics) DataProviderCreateWithData(
 	// CGDataProviderRef: (struct CGDataProvider)*
 	cgprovider.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifCoreGraphicsDataProviderCreateWithData, c.symCGDataProviderCreateWithData, cgprovider.Pointer(), []unsafe.Pointer{
+	_, err = ffi.CallFunction(cifCoreGraphicsDataProviderCreateWithData, c.symCGDataProviderCreateWithData, cgprovider.Pointer(), []unsafe.Pointer{
 		info.Pointer(),
 		data.Pointer(),
 		unsafe.Pointer(&size),
@@ -953,7 +963,7 @@ func (c *coreGraphics) DataProviderCreateWithData(
 }
 
 func (c *coreGraphics) ImageRelease(cgimage cgImage) error {
-	err := ffi.CallFunction(cifCoreGraphicsImageRelease, c.symCGImageRelease, nil, []unsafe.Pointer{cgimage.Pointer()})
+	_, err := ffi.CallFunction(cifCoreGraphicsImageRelease, c.symCGImageRelease, nil, []unsafe.Pointer{cgimage.Pointer()})
 	if err != nil {
 		return c.errorf("failed to CGImageRelease: %w", err)
 	}
@@ -962,7 +972,7 @@ func (c *coreGraphics) ImageRelease(cgimage cgImage) error {
 }
 
 func (c *coreGraphics) DataProviderRelease(cgprovider cgDataProvider) error {
-	err := ffi.CallFunction(cifCoreGraphicsDataProviderRelease, c.symCGDataProviderRelease, nil, []unsafe.Pointer{cgprovider.Pointer()})
+	_, err := ffi.CallFunction(cifCoreGraphicsDataProviderRelease, c.symCGDataProviderRelease, nil, []unsafe.Pointer{cgprovider.Pointer()})
 	if err != nil {
 		return c.errorf("failed to CGDataProviderRelease: %w", err)
 	}
@@ -973,7 +983,7 @@ func (c *coreGraphics) DataProviderRelease(cgprovider cgDataProvider) error {
 func (c *coreGraphics) ColorSpaceCreateDeviceRGB() (cgspace cgColorSpace, err error) {
 	cgspace.objcAnyOpaque = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifCoreGraphicsColorSpaceCreateDeviceRGB, c.symCGColorSpaceCreateDeviceRGB, unsafe.Pointer(&cgspace.data), []unsafe.Pointer{})
+	_, err = ffi.CallFunction(cifCoreGraphicsColorSpaceCreateDeviceRGB, c.symCGColorSpaceCreateDeviceRGB, unsafe.Pointer(&cgspace.data), []unsafe.Pointer{})
 	if err != nil {
 		return cgColorSpace{objcAnyOpaqueNil}, c.errorf("failed to CGColorSpaceCreateDeviceRGB: %w", err)
 	}
@@ -1073,7 +1083,7 @@ func (o *objcReflect) MsgSend(self objcAnyOpaque, op objcAnyOpaque, ret objcPoin
 	}
 
 	fn := o.objcMsgSendSymbol(ret.Type())
-	err := ffi.CallFunction(cif, fn, ret.Pointer(), argPtrs)
+	_, err := ffi.CallFunction(cif, fn, ret.Pointer(), argPtrs)
 	runtime.KeepAlive(args)
 
 	return err
@@ -1105,7 +1115,7 @@ func (o *objcReflect) SelRegisterName(name string) (sel objcSEL, err error) {
 	cname := append([]byte(name), 0)
 	selname := unsafe.SliceData(cname)
 
-	err = ffi.CallFunction(cifOBJCSelRegisterName, o.symSelRegisterName, unsafe.Pointer(&sel.data), []unsafe.Pointer{
+	_, err = ffi.CallFunction(cifOBJCSelRegisterName, o.symSelRegisterName, unsafe.Pointer(&sel.data), []unsafe.Pointer{
 		unsafe.Pointer(&selname),
 	})
 	if err != nil {
@@ -1131,7 +1141,7 @@ func (o *objcReflect) LookUpClass(name string) (cls objcAnyOpaque, err error) {
 	cname := append([]byte(name), 0)
 	selname := unsafe.SliceData(cname)
 
-	err = ffi.CallFunction(cifOBJCLookUpClass, o.symOBJCLookUpClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
+	_, err = ffi.CallFunction(cifOBJCLookUpClass, o.symOBJCLookUpClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
 		unsafe.Pointer(&selname),
 	})
 	if err != nil {
@@ -1150,7 +1160,7 @@ func (o *objcReflect) LookUpClass(name string) (cls objcAnyOpaque, err error) {
 func (o *objcReflect) GetClass(obj objcAnyOpaque) (cls objcAnyOpaque, err error) {
 	cls = objcAnyOpaqueNil
 
-	err = ffi.CallFunction(cifOBJCGetClass, o.symObjectGetClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
+	_, err = ffi.CallFunction(cifOBJCGetClass, o.symObjectGetClass, unsafe.Pointer(&cls.data), []unsafe.Pointer{
 		obj.Pointer(),
 	})
 	if err != nil {

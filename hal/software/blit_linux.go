@@ -1,5 +1,16 @@
 //go:build linux && !(js && wasm)
 
+// FFI error handling follows ADR-049 three-tier strategy:
+//
+//	Tier 1 (creation/submit): check both FFI error and API result code
+//	Tier 2 (void/hot path): infallible by GPU API contract — Vulkan §6.6, WebGPU §21.2
+//	Tier 3 (platform syscalls): use errno for diagnostics (Wayland, X11, Win32)
+//
+// Enterprise reference: Rust wgpu-hal returns () for all draw/destroy/barrier commands.
+//
+// X11 blit calls are Tier 2: XPutImage, XFlush, XCreateGC are void or return
+// status that is already handled by the caller. X11 does not use errno for
+// display protocol errors.
 package software
 
 import (
@@ -256,7 +267,7 @@ func (s *Surface) destroyPlatformFramebuffer() {
 		unsafe.Pointer(&display),
 		unsafe.Pointer(&gc),
 	}
-	_ = ffi.CallFunction(&cifXFreeGC, symXFreeGC, nil, args[:])
+	_, _ = ffi.CallFunction(&cifXFreeGC, symXFreeGC, nil, args[:])
 	s.gc = 0
 }
 
@@ -301,7 +312,7 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 			unsafe.Pointer(&valuemask),
 			unsafe.Pointer(&values),
 		}
-		_ = ffi.CallFunction(&cifXCreateGC, symXCreateGC, unsafe.Pointer(&gc), args[:])
+		_, _ = ffi.CallFunction(&cifXCreateGC, symXCreateGC, unsafe.Pointer(&gc), args[:])
 		if gc == 0 {
 			slog.Warn("software: XCreateGC failed — blit skipped")
 			return
@@ -329,7 +340,7 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 	imagePtr := uintptr(unsafe.Pointer(&ximg))
 	var status int32
 	initArgs := [1]unsafe.Pointer{unsafe.Pointer(&imagePtr)}
-	_ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
+	_, _ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
 	if status == 0 {
 		slog.Warn("software: XInitImage failed — blit skipped")
 		return
@@ -352,12 +363,12 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		unsafe.Pointer(&w),
 		unsafe.Pointer(&h),
 	}
-	_ = ffi.CallFunction(&cifXPutImage, symXPutImage, nil, putArgs[:])
+	_, _ = ffi.CallFunction(&cifXPutImage, symXPutImage, nil, putArgs[:])
 
 	// XFlush ensures the X server processes the put request immediately.
 	// Without this, pixels may not appear until the next X event.
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
-	_ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
+	_, _ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
 }
 
 // blitDamageRectsToWindow copies only the specified damage regions from the
@@ -399,7 +410,7 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 			unsafe.Pointer(&valuemask),
 			unsafe.Pointer(&values),
 		}
-		_ = ffi.CallFunction(&cifXCreateGC, symXCreateGC, unsafe.Pointer(&gc), args[:])
+		_, _ = ffi.CallFunction(&cifXCreateGC, symXCreateGC, unsafe.Pointer(&gc), args[:])
 		if gc == 0 {
 			slog.Warn("software: XCreateGC failed — damage blit skipped")
 			return
@@ -425,7 +436,7 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 	imagePtr := uintptr(unsafe.Pointer(&img))
 	var status int32
 	initArgs := [1]unsafe.Pointer{unsafe.Pointer(&imagePtr)}
-	_ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
+	_, _ = ffi.CallFunction(&cifXInitImage, symXInitImage, unsafe.Pointer(&status), initArgs[:])
 	if status == 0 {
 		slog.Warn("software: XInitImage failed — damage blit skipped")
 		return
@@ -460,10 +471,10 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 			unsafe.Pointer(&w),
 			unsafe.Pointer(&h),
 		}
-		_ = ffi.CallFunction(&cifXPutImage, symXPutImage, nil, putArgs[:])
+		_, _ = ffi.CallFunction(&cifXPutImage, symXPutImage, nil, putArgs[:])
 	}
 
 	// XFlush ensures the X server processes all put requests immediately.
 	flushArgs := [1]unsafe.Pointer{unsafe.Pointer(&display)}
-	_ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
+	_, _ = ffi.CallFunction(&cifXFlush, symXFlush, nil, flushArgs[:])
 }

@@ -169,7 +169,7 @@ func GetClass(name string) Class {
 	ptr := uintptr(unsafe.Pointer(&cname[0]))
 	var result Class
 	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
-	_ = ffi.CallFunction(&cifGetClass, symObjcGetClass, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifGetClass, symObjcGetClass, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -184,7 +184,7 @@ func RegisterSelector(name string) SEL {
 	ptr := uintptr(unsafe.Pointer(&cname[0]))
 	var result SEL
 	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
-	_ = ffi.CallFunction(&cifSelRegister, symSelRegisterName, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifSelRegister, symSelRegisterName, unsafe.Pointer(&result), args[:])
 
 	selectorCache.Store(name, result)
 	return result
@@ -263,7 +263,7 @@ func msgSend(obj ID, sel SEL, retType *types.TypeDescriptor, retPtr unsafe.Point
 	}
 
 	fn := objcMsgSendSymbol(retType)
-	err := ffi.CallFunction(cif, fn, retPtr, argPtrs)
+	_, err := ffi.CallFunction(cif, fn, retPtr, argPtrs)
 	runtime.KeepAlive(args)
 	return err
 }
