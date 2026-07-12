@@ -17,6 +17,7 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -322,9 +323,16 @@ func generateConstants(registry *Registry, outDir string) error {
 		}
 	}
 
-	// Generate extension enum values grouped by the type they extend
+	// Generate extension enum values grouped by the type they extend.
+	// Sort keys for deterministic output (Go map iteration is random).
 	extensionEnums := collectExtensionEnums(registry)
-	for extendsType, enums := range extensionEnums {
+	extendedTypes := make([]string, 0, len(extensionEnums))
+	for k := range extensionEnums {
+		extendedTypes = append(extendedTypes, k)
+	}
+	sort.Strings(extendedTypes)
+	for _, extendsType := range extendedTypes {
+		enums := extensionEnums[extendsType]
 		goTypeName := vkToGoType(extendsType)
 
 		// Filter out duplicates
@@ -936,10 +944,11 @@ func filterParams(params []Param) []Param {
 // classifyParamType classifies a parameter into a simplified category
 func classifyParamType(param Param) string {
 	isPointer := strings.Contains(param.RawXML, "*")
+	isArray := strings.Contains(param.RawXML, "[")
 	baseType := param.Type
 
-	// Pointer types first
-	if isPointer {
+	// In C ABI, array parameters decay to pointers (e.g., const float[4] → const float*).
+	if isPointer || isArray {
 		return "ptr"
 	}
 
@@ -1138,14 +1147,29 @@ func generateCommandMethod(f *os.File, cmd Command) error {
 		}
 	}
 
-	// Build args array
+	// Build args array.
+	// goffi convention (ADR-044): args[i] = unsafe.Pointer to VALUE.
+	// For pointer args: args[i] = unsafe.Pointer(&ptr) — pointer to pointer.
+	// C array params (e.g., const float[4]) decay to pointers in C ABI,
+	// so they need the same double-pointer treatment.
 	argCount := len(params)
+
+	// Emit local pointer vars for array params (C arrays decay to pointers).
+	for _, param := range params {
+		if strings.Contains(param.RawXML, "[") && !strings.Contains(param.RawXML, "*") {
+			fmt.Fprintf(f, "\t%sPtr := unsafe.Pointer(&%s)\n", param.Name, param.Name)
+		}
+	}
+
 	fmt.Fprintf(f, "\targs := [%d]unsafe.Pointer{\n", argCount)
 	for _, param := range params {
 		paramName := param.Name
-		// goffi API requires pointer TO value for all arguments
-		// (the args slice contains pointers to where argument values are stored)
-		fmt.Fprintf(f, "\t\tunsafe.Pointer(&%s),\n", paramName)
+		if strings.Contains(param.RawXML, "[") && !strings.Contains(param.RawXML, "*") {
+			// Array param: pass pointer-to-pointer (C array decays to pointer)
+			fmt.Fprintf(f, "\t\tunsafe.Pointer(&%sPtr),\n", paramName)
+		} else {
+			fmt.Fprintf(f, "\t\tunsafe.Pointer(&%s),\n", paramName)
+		}
 	}
 	fmt.Fprintln(f, "\t}")
 
