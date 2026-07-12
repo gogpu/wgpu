@@ -4,6 +4,7 @@ package software
 
 import (
 	"fmt"
+	"image"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -306,6 +307,32 @@ func (s *Surface) WritePixels(data []byte, width, height uint32) error {
 		}
 	} else {
 		copy(s.framebuffer[:srcSize], data[:srcSize])
+	}
+	return nil
+}
+
+// PresentPixels combines WritePixels + window blit in a single call, bypassing
+// the WebGPU render pass pipeline entirely. This is the fastest path for
+// CPU-rendered content: RGBA data is swizzled into the DIB section framebuffer
+// and immediately BitBlt'd to the window in one pass.
+//
+// damageRects restricts the blit to specific regions (nil = full surface).
+// In headless mode (hwnd=0), pixels are written to the framebuffer but no blit occurs.
+func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects []image.Rectangle) error {
+	// WritePixels handles locking, validation, and RGBA→BGRA swizzle.
+	if err := s.WritePixels(data, width, height); err != nil {
+		return err
+	}
+
+	// Blit to window (no-op if headless).
+	if s.hwnd == 0 {
+		return nil
+	}
+
+	if len(damageRects) > 0 {
+		s.blitDamageRectsToWindow(s.framebuffer, int32(width), int32(height), damageRects)
+	} else {
+		s.blitFramebufferToWindow(s.framebuffer, int32(width), int32(height))
 	}
 	return nil
 }

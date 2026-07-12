@@ -3,6 +3,7 @@
 package software
 
 import (
+	"image"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -154,5 +155,74 @@ func TestWritePixelsSizeMismatch(t *testing.T) {
 	err := s.WritePixels(make([]byte, 16), 2, 2)
 	if err == nil {
 		t.Error("WritePixels with mismatched size should return error")
+	}
+}
+
+func TestPresentPixels(t *testing.T) {
+	s := &Surface{
+		configured:  true,
+		width:       2,
+		height:      2,
+		format:      gputypes.TextureFormatBGRA8Unorm,
+		framebuffer: make([]byte, 16),
+		hwnd:        0, // headless — no blit
+	}
+
+	// RGBA input: red, green, blue, white
+	rgba := []byte{
+		255, 0, 0, 255, 0, 255, 0, 255, // row 0: red, green
+		0, 0, 255, 255, 255, 255, 255, 255, // row 1: blue, white
+	}
+
+	err := s.PresentPixels(rgba, 2, 2, nil)
+	if err != nil {
+		t.Fatalf("PresentPixels: %v", err)
+	}
+
+	// Verify BGRA swizzle happened (same as WritePixels).
+	// Red pixel → [B=0, G=0, R=255, A=255]
+	if s.framebuffer[0] != 0 || s.framebuffer[1] != 0 || s.framebuffer[2] != 255 || s.framebuffer[3] != 255 {
+		t.Errorf("pixel 0 (red→BGRA): got %v, want [0 0 255 255]", s.framebuffer[0:4])
+	}
+}
+
+func TestPresentPixelsWithDamageRects(t *testing.T) {
+	s := &Surface{
+		configured:  true,
+		width:       4,
+		height:      4,
+		format:      gputypes.TextureFormatRGBA8Unorm,
+		framebuffer: make([]byte, 64),
+		hwnd:        0, // headless — no blit, but no crash
+	}
+
+	rgba := make([]byte, 64)
+	for i := range rgba {
+		rgba[i] = byte(i)
+	}
+
+	rects := []image.Rectangle{
+		image.Rect(0, 0, 2, 2),
+	}
+
+	err := s.PresentPixels(rgba, 4, 4, rects)
+	if err != nil {
+		t.Fatalf("PresentPixels with damage rects: %v", err)
+	}
+
+	// Verify pixels were written (no swizzle for RGBA format).
+	for i := range rgba {
+		if s.framebuffer[i] != rgba[i] {
+			t.Errorf("byte %d: got %d, want %d", i, s.framebuffer[i], rgba[i])
+			break
+		}
+	}
+}
+
+func TestPresentPixelsNotConfigured(t *testing.T) {
+	s := &Surface{configured: false}
+	err := s.PresentPixels([]byte{0, 0, 0, 0}, 1, 1, nil)
+	if err == nil {
+		t.Error("PresentPixels on unconfigured surface should return error")
 	}
 }

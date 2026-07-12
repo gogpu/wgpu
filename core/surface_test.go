@@ -5,6 +5,7 @@ package core
 import (
 	"errors"
 	"image"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -662,5 +663,75 @@ func TestPresent_DamageWithNilQueue(t *testing.T) {
 		// If it didn't panic, that's also acceptable — it means the implementation
 		// handles nil queue gracefully. Either way, the test documents the behavior.
 		t.Log("PresentWithDamage(nil queue) did not panic — nil queue handled gracefully")
+	}
+}
+
+// --- PresentPixels tests ---
+
+func TestPresentPixels_Unconfigured(t *testing.T) {
+	surface, _, _ := newTestSurface(t)
+
+	err := surface.PresentPixels([]byte{0, 0, 0, 0}, 1, 1, nil)
+	if !errors.Is(err, ErrSurfaceNotConfigured) {
+		t.Errorf("PresentPixels unconfigured = %v, want ErrSurfaceNotConfigured", err)
+	}
+}
+
+func TestPresentPixels_UnsupportedBackend(t *testing.T) {
+	// noop backend does not implement PresentPixels — should return error.
+	surface, device, _ := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	err := surface.PresentPixels([]byte{0, 0, 0, 0}, 1, 1, nil)
+	if err == nil {
+		t.Error("PresentPixels on noop backend should return error")
+	}
+	// Should mention "not supported"
+	if err != nil && !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("PresentPixels error = %q, want to contain 'not supported'", err.Error())
+	}
+}
+
+func TestPresentPixels_DiscardsAcquiredTexture(t *testing.T) {
+	// After AcquireTexture, PresentPixels should discard the stale texture
+	// and succeed (on a backend that supports it). Since noop doesn't support
+	// PresentPixels, we verify the state transition: acquired → configured,
+	// then the "not supported" error comes from the duck-type check.
+	surface, device, _ := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// Acquire a texture
+	_, err := surface.AcquireTexture(nil)
+	if err != nil {
+		t.Fatalf("AcquireTexture: %v", err)
+	}
+	if surface.State() != SurfaceStateAcquired {
+		t.Fatalf("state = %d, want SurfaceStateAcquired", surface.State())
+	}
+
+	// PresentPixels discards the acquired texture, then fails because noop
+	// doesn't implement the interface.
+	err = surface.PresentPixels([]byte{0, 0, 0, 0}, 1, 1, nil)
+	if err == nil {
+		t.Error("PresentPixels on noop should return error")
+	}
+
+	// State should be Configured (texture was discarded before the duck-type check).
+	if surface.State() != SurfaceStateConfigured {
+		t.Errorf("state after PresentPixels = %d, want SurfaceStateConfigured", surface.State())
+	}
+
+	// Should be able to acquire again (proves discard happened).
+	_, err = surface.AcquireTexture(nil)
+	if err != nil {
+		t.Errorf("AcquireTexture after PresentPixels: %v", err)
 	}
 }

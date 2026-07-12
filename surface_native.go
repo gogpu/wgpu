@@ -200,6 +200,30 @@ func (s *Surface) SetPresentsWithTransaction(enabled bool) {
 	}
 }
 
+// PresentPixels writes RGBA pixel data directly to the surface and presents it
+// in a single operation, bypassing the WebGPU render pass pipeline entirely.
+//
+// On the software backend this performs RGBA→BGRA swizzle into the DIB section
+// framebuffer and immediately BitBlt's to the window — the fastest path for
+// CPU-rendered content (1 copy vs 3 in the standard pipeline). No AcquireTexture,
+// render pass, or Present call is needed.
+//
+// damageRects restricts the window blit to specific regions (nil = full surface).
+// The surface must be configured. If a texture is currently acquired, it is
+// discarded automatically (stale texture cleanup).
+//
+// Returns an error if the backend does not support PresentPixels (only the
+// software backend implements this extension).
+func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects []image.Rectangle) error {
+	if s.released {
+		return ErrReleased
+	}
+	if s.device == nil {
+		return fmt.Errorf("wgpu: surface not configured")
+	}
+	return s.core.PresentPixels(data, width, height, damageRects)
+}
+
 // WritePixels copies RGBA pixel data directly into the surface framebuffer,
 // bypassing render pass and texture upload. On software backend this is a
 // single-pass RGBA→BGRA swizzle+copy into the DIB section (1 copy vs 3).
@@ -215,9 +239,7 @@ func (s *Surface) WritePixels(data []byte, width, height uint32) error {
 	if raw == nil {
 		return ErrReleased
 	}
-	if pw, ok := raw.(interface {
-		WritePixels([]byte, uint32, uint32) error
-	}); ok {
+	if pw, ok := raw.(hal.PixelWriter); ok {
 		return pw.WritePixels(data, width, height)
 	}
 	return fmt.Errorf("wgpu: WritePixels not supported on this backend")
