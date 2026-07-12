@@ -170,12 +170,10 @@ func isBlitSafeBlend(b *gputypes.BlendState) bool {
 
 func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	if !r.blitStateValid() {
-		hal.Logger().Debug("software: executeFullscreenBlit rejected: blitStateValid=false")
 		return false
 	}
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
-		hal.Logger().Debug("software: executeFullscreenBlit rejected: no bound texture")
 		return false
 	}
 
