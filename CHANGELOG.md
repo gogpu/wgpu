@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Bump `golang.org/x/sys`** v0.46.0 → v0.47.0
+- **Bump `gpucontext`** v0.21.0 → v0.21.1
 
 ## [0.30.15] - 2026-07-11
 
