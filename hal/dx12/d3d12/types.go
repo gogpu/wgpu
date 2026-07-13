@@ -639,6 +639,14 @@ type D3D12_FEATURE_DATA_FEATURE_LEVELS struct {
 	MaxSupportedFeatureLevel D3D_FEATURE_LEVEL
 }
 
+// D3D12_FEATURE_DATA_ARCHITECTURE describes adapter architecture.
+type D3D12_FEATURE_DATA_ARCHITECTURE struct {
+	NodeIndex          uint32
+	TileBasedRenderer  int32
+	UMA                int32
+	CacheCoherentUMA   int32
+}
+
 // D3D12_RENDER_PASS_RENDER_TARGET_DESC describes a render pass render target.
 type D3D12_RENDER_PASS_RENDER_TARGET_DESC struct {
 	CPUDescriptor   D3D12_CPU_DESCRIPTOR_HANDLE
