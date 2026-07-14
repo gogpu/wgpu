@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.20] - 2026-07-14
+
+### Fixed
+
+- **PresentPixels check-before-mutate** — move `hal.PixelPresenter` type assertion
+  before acquired texture discard. Failed `PresentPixels` on GPU backends no longer
+  corrupts surface state. Validate-then-mutate pattern matches Rust wgpu.
+
+### Added
+
+- **DX12 UMA GPU classification** — `CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE)`
+  replaces DedicatedVideoMemory heuristic for integrated/discrete detection.
+  Matches Rust wgpu pattern exactly. Contributor: @Zeroes1 (#254).
+- **DX12 `CacheCoherentUMA`** — stored for future memory pool optimization
+  (`D3D12_MEMORY_POOL_L0` vs `L1`).
+- **DX12 architecture diagnostic logging** — `hal.Logger().Info("dx12: adapter architecture", ...)`
+
 ## [0.30.19] - 2026-07-12
 
 ### Changed
