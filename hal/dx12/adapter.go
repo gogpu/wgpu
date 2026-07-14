@@ -57,6 +57,10 @@ type AdapterCapabilities struct {
 
 	// IsUMA indicates Unified Memory Architecture (integrated GPU).
 	IsUMA bool
+
+	// IsCacheCoherentUMA indicates cache-coherent UMA (GPU snoops CPU cache).
+	// Used for memory pool selection: D3D12_MEMORY_POOL_L0 (UMA) vs L1 (non-UMA).
+	IsCacheCoherentUMA bool
 }
 
 // probeCapabilities probes the adapter's capabilities by creating a temporary device.
@@ -173,9 +177,16 @@ func (a *Adapter) queryArchitecture(device *d3d12.ID3D12Device) {
 		unsafe.Pointer(&arch),
 		uint32(unsafe.Sizeof(arch)),
 	)
-	if err == nil && arch.UMA != 0 {
-		a.capabilities.IsUMA = true
+	if err == nil {
+		a.capabilities.IsUMA = arch.UMA != 0
+		a.capabilities.IsCacheCoherentUMA = arch.CacheCoherentUMA != 0
 	}
+
+	hal.Logger().Info("dx12: adapter architecture",
+		"uma", a.capabilities.IsUMA,
+		"cacheCoherentUMA", a.capabilities.IsCacheCoherentUMA,
+		"tileBasedRenderer", arch.TileBasedRenderer != 0,
+	)
 }
 
 // setTextureLimits sets texture dimension limits based on feature level.
@@ -515,9 +526,16 @@ func (a *AdapterLegacy) probeCapabilities() error {
 		d3d12.D3D12_FEATURE_ARCHITECTURE,
 		unsafe.Pointer(&arch),
 		uint32(unsafe.Sizeof(arch)),
-	); err == nil && arch.UMA != 0 {
-		a.capabilities.IsUMA = true
+	); err == nil {
+		a.capabilities.IsUMA = arch.UMA != 0
+		a.capabilities.IsCacheCoherentUMA = arch.CacheCoherentUMA != 0
 	}
+
+	hal.Logger().Info("dx12: legacy adapter architecture",
+		"uma", a.capabilities.IsUMA,
+		"cacheCoherentUMA", a.capabilities.IsCacheCoherentUMA,
+		"tileBasedRenderer", arch.TileBasedRenderer != 0,
+	)
 
 	// Set default texture limits based on feature level
 	a.setTextureLimits()
