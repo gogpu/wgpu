@@ -54,6 +54,13 @@ type AdapterCapabilities struct {
 
 	// SupportsROVs indicates rasterizer ordered views support.
 	SupportsROVs bool
+
+	// IsUMA indicates Unified Memory Architecture (integrated GPU).
+	IsUMA bool
+
+	// IsCacheCoherentUMA indicates cache-coherent UMA (GPU snoops CPU cache).
+	// Used for memory pool selection: D3D12_MEMORY_POOL_L0 (UMA) vs L1 (non-UMA).
+	IsCacheCoherentUMA bool
 }
 
 // probeCapabilities probes the adapter's capabilities by creating a temporary device.
@@ -90,6 +97,9 @@ func (a *Adapter) probeCapabilities() error {
 
 	// Query D3D12 options
 	a.queryD3D12Options(tempDevice)
+
+	// Query architecture (UMA)
+	a.queryArchitecture(tempDevice)
 
 	// Set default texture limits based on feature level
 	a.setTextureLimits()
@@ -155,6 +165,27 @@ func (a *Adapter) queryD3D12Options(device *d3d12.ID3D12Device) {
 	hal.Logger().Info("dx12: adapter capabilities",
 		"resourceBindingTier", a.capabilities.ResourceBindingTier,
 		"tiledResourcesTier", a.capabilities.TiledResourcesTier,
+	)
+}
+
+// queryArchitecture queries the adapter's architecture (UMA).
+func (a *Adapter) queryArchitecture(device *d3d12.ID3D12Device) {
+	var arch d3d12.D3D12_FEATURE_DATA_ARCHITECTURE
+
+	err := device.CheckFeatureSupport(
+		d3d12.D3D12_FEATURE_ARCHITECTURE,
+		unsafe.Pointer(&arch),
+		uint32(unsafe.Sizeof(arch)),
+	)
+	if err == nil {
+		a.capabilities.IsUMA = arch.UMA != 0
+		a.capabilities.IsCacheCoherentUMA = arch.CacheCoherentUMA != 0
+	}
+
+	hal.Logger().Info("dx12: adapter architecture",
+		"uma", a.capabilities.IsUMA,
+		"cacheCoherentUMA", a.capabilities.IsCacheCoherentUMA,
+		"tileBasedRenderer", arch.TileBasedRenderer != 0,
 	)
 }
 
@@ -274,32 +305,19 @@ func (a *Adapter) limits() gputypes.Limits {
 	return limits
 }
 
-// deviceType determines the device type from the adapter flags and dedicated memory.
+// deviceType determines the device type from the adapter flags and UMA.
 func (a *Adapter) deviceType() gputypes.DeviceType {
 	// Check for software adapter (WARP)
 	if a.desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
 		return gputypes.DeviceTypeCPU
 	}
 
-	// Check for dedicated video memory to distinguish discrete from integrated
-	if a.desc.DedicatedVideoMemory > 0 {
-		// Heuristic: >512MB dedicated VRAM is likely discrete
-		if a.desc.DedicatedVideoMemory > 512*1024*1024 {
-			return gputypes.DeviceTypeDiscreteGPU
-		}
-	}
-
-	// If there's no dedicated video memory, it's likely integrated
-	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
+	// UMA means integrated GPU (shares system memory)
+	if a.capabilities.IsUMA {
 		return gputypes.DeviceTypeIntegratedGPU
 	}
 
-	// Assume discrete if there's any dedicated memory
-	if a.desc.DedicatedVideoMemory > 0 {
-		return gputypes.DeviceTypeDiscreteGPU
-	}
-
-	return gputypes.DeviceTypeOther
+	return gputypes.DeviceTypeDiscreteGPU
 }
 
 // Open opens a logical device with the requested features and limits.
@@ -502,6 +520,23 @@ func (a *AdapterLegacy) probeCapabilities() error {
 	}
 	defer tempDevice.Release()
 
+	// Query architecture (UMA)
+	var arch d3d12.D3D12_FEATURE_DATA_ARCHITECTURE
+	if err := tempDevice.CheckFeatureSupport(
+		d3d12.D3D12_FEATURE_ARCHITECTURE,
+		unsafe.Pointer(&arch),
+		uint32(unsafe.Sizeof(arch)),
+	); err == nil {
+		a.capabilities.IsUMA = arch.UMA != 0
+		a.capabilities.IsCacheCoherentUMA = arch.CacheCoherentUMA != 0
+	}
+
+	hal.Logger().Info("dx12: legacy adapter architecture",
+		"uma", a.capabilities.IsUMA,
+		"cacheCoherentUMA", a.capabilities.IsCacheCoherentUMA,
+		"tileBasedRenderer", arch.TileBasedRenderer != 0,
+	)
+
 	// Set default texture limits based on feature level
 	a.setTextureLimits()
 
@@ -581,21 +616,15 @@ func (a *AdapterLegacy) Capabilities() hal.Capabilities {
 	}
 }
 
-// deviceType determines the device type from the adapter flags and dedicated memory.
+// deviceType determines the device type from the adapter flags and UMA.
 func (a *AdapterLegacy) deviceType() gputypes.DeviceType {
 	if a.desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
 		return gputypes.DeviceTypeCPU
 	}
-	if a.desc.DedicatedVideoMemory > 512*1024*1024 {
-		return gputypes.DeviceTypeDiscreteGPU
-	}
-	if a.desc.DedicatedVideoMemory == 0 && a.desc.SharedSystemMemory > 0 {
+	if a.capabilities.IsUMA {
 		return gputypes.DeviceTypeIntegratedGPU
 	}
-	if a.desc.DedicatedVideoMemory > 0 {
-		return gputypes.DeviceTypeDiscreteGPU
-	}
-	return gputypes.DeviceTypeOther
+	return gputypes.DeviceTypeDiscreteGPU
 }
 
 // Open opens a logical device with the requested features and limits.
