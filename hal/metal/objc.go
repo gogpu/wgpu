@@ -398,24 +398,87 @@ func Release(obj ID) {
 	_ = MsgSend(obj, Sel("release"))
 }
 
-// AutoreleasePool manages an Objective-C autorelease pool.
+// AutoreleasePool manages an Objective-C autorelease pool. The caller must
+// call Drain once from the same goroutine that created the pool. Pool values
+// must not be copied, shared, or drained concurrently.
 type AutoreleasePool struct {
-	pool ID
+	pool   ID
+	locked bool
+	unlock func()
+	drain  func(ID)
+}
+
+type autoreleasePoolCallbacks struct {
+	lock   func()
+	unlock func()
+	create func() ID
+	drain  func(ID)
+}
+
+func newAutoreleasePoolWithCallbacks(callbacks autoreleasePoolCallbacks) (pool *AutoreleasePool) {
+	locked := callbacks.lock != nil
+	if callbacks.lock != nil {
+		callbacks.lock()
+	}
+
+	pool = &AutoreleasePool{
+		locked: locked,
+		unlock: callbacks.unlock,
+		drain:  callbacks.drain,
+	}
+	created := false
+	defer func() {
+		if created {
+			return
+		}
+		// A create callback can panic after the OS-thread lock is acquired. Make
+		// the partially constructed pool terminal before releasing that lock so
+		// a future recovery cannot accidentally unlock it twice.
+		pool.pool = 0
+		if pool.locked {
+			pool.locked = false
+		}
+		if locked && callbacks.unlock != nil {
+			callbacks.unlock()
+		}
+	}()
+
+	pool.pool = callbacks.create()
+	created = true
+	return pool
 }
 
 // NewAutoreleasePool creates a new autorelease pool.
 func NewAutoreleasePool() *AutoreleasePool {
-	poolClass := GetClass("NSAutoreleasePool")
-	pool := MsgSend(ID(poolClass), Sel("alloc"))
-	pool = MsgSend(pool, Sel("init"))
-	return &AutoreleasePool{pool: pool}
+	return newAutoreleasePoolWithCallbacks(autoreleasePoolCallbacks{
+		lock:   runtime.LockOSThread,
+		unlock: runtime.UnlockOSThread,
+		create: func() ID {
+			poolClass := GetClass("NSAutoreleasePool")
+			pool := MsgSend(ID(poolClass), Sel("alloc"))
+			return MsgSend(pool, Sel("init"))
+		},
+		drain: func(pool ID) {
+			_ = MsgSend(pool, Sel("drain"))
+		},
+	})
 }
 
 // Drain drains the autorelease pool.
 func (p *AutoreleasePool) Drain() {
-	if p.pool != 0 {
-		_ = MsgSend(p.pool, Sel("drain"))
-		p.pool = 0
+	if p == nil || !p.locked {
+		return
+	}
+	// Mark terminal before invoking Objective-C. Drain can panic, but a caller
+	// recovering that panic must not be able to drain or unlock this pool again.
+	pool := p.pool
+	p.pool = 0
+	p.locked = false
+	if p.unlock != nil {
+		defer p.unlock()
+	}
+	if pool != 0 && p.drain != nil {
+		p.drain(pool)
 	}
 }
 

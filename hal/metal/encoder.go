@@ -42,9 +42,9 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	// This prevents LIFO violations when pools from different frames overlap
 	// on the ObjC autorelease pool stack (macOS Tahoe SIGABRT fix).
 	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
 	if e.cmdBuffer == 0 {
-		pool.Drain()
 		return fmt.Errorf("metal: failed to create command buffer")
 	}
 	Retain(e.cmdBuffer)
@@ -53,7 +53,6 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
 		Release(nsLabel)
 	}
-	pool.Drain()
 	hal.Logger().Debug("metal: encoding started", "label", label)
 	return nil
 }
@@ -268,9 +267,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Scoped pool: rpDesc and other autoreleased objects are only needed during
 	// encoder creation. The encoder itself is Retained to survive pool drain.
 	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	rpDesc := MsgSend(ID(GetClass("MTLRenderPassDescriptor")), Sel("renderPassDescriptor"))
 	if rpDesc == 0 {
-		pool.Drain()
 		return nil
 	}
 	colorAttachments := MsgSend(rpDesc, Sel("colorAttachments"))
@@ -337,11 +336,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	encoder := MsgSend(e.cmdBuffer, Sel("renderCommandEncoderWithDescriptor:"), uintptr(rpDesc))
 	if encoder == 0 {
-		pool.Drain()
 		return nil
 	}
 	Retain(encoder)
-	pool.Drain() // drain now — encoder is Retained, rpDesc no longer needed
 	return &RenderPassEncoder{raw: encoder, device: e.device}
 }
 
@@ -353,9 +350,9 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	}
 	// Scoped pool: encoder is Retained to survive pool drain.
 	pool := NewAutoreleasePool()
+	defer pool.Drain()
 	encoder := MsgSend(e.cmdBuffer, Sel("computeCommandEncoder"))
 	if encoder == 0 {
-		pool.Drain()
 		return nil
 	}
 	Retain(encoder)
@@ -364,7 +361,6 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 		_ = MsgSend(encoder, Sel("setLabel:"), uintptr(nsLabel))
 		Release(nsLabel)
 	}
-	pool.Drain()
 	return &ComputePassEncoder{raw: encoder, device: e.device}
 }
 
