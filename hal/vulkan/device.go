@@ -56,15 +56,17 @@ var renderPassPool = sync.Pool{
 
 // Device implements hal.Device for Vulkan.
 type Device struct {
-	handle              vk.Device
-	physicalDevice      vk.PhysicalDevice
-	instance            *Instance
-	graphicsFamily      uint32
-	allocator           *memory.GpuAllocator
-	cmds                *vk.Commands
-	descriptorAllocator *DescriptorAllocator // Descriptor pool management for bind groups
-	queue               *Queue               // Primary queue (for swapchain synchronization)
-	renderPassCache     *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
+	handle                    vk.Device
+	physicalDevice            vk.PhysicalDevice
+	instance                  *Instance
+	graphicsFamily            uint32
+	allocator                 *memory.GpuAllocator
+	cmds                      *vk.Commands
+	supportsMultiDrawIndirect bool
+	maxDrawIndirectCount      uint32
+	descriptorAllocator       *DescriptorAllocator // Descriptor pool management for bind groups
+	queue                     *Queue               // Primary queue (for swapchain synchronization)
+	renderPassCache           *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain

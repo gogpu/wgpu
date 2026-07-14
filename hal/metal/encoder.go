@@ -609,24 +609,66 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
-func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
+func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || buf == nil {
+	if !ok || buf == nil || drawCount == 0 {
 		return
 	}
-	_ = MsgSend(e.raw, Sel("drawPrimitives:indirectBuffer:indirectBufferOffset:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(buf.raw), uintptr(offset))
+	if !indirectRangeFits(buf.size, offset, 16, drawCount) {
+		return
+	}
+	if _, ok := indirectRecordOffset(offset, 16, drawCount-1); !ok {
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirectRecordOffset(offset, 16, i)
+		_ = MsgSend(e.raw, Sel("drawPrimitives:indirectBuffer:indirectBufferOffset:"),
+			uintptr(MTLPrimitiveTypeTriangle), uintptr(buf.raw), uintptr(recordOffset))
+	}
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
-func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+// Metal exposes only the single-record indirect operation, so count is lowered
+// to consecutive 20-byte calls.
+func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || buf == nil || e.indexBuffer == nil {
+	if !ok || buf == nil || e.indexBuffer == nil || drawCount == 0 {
+		return
+	}
+	if !indirectRangeFits(buf.size, offset, 20, drawCount) {
+		return
+	}
+	if _, ok := indirectRecordOffset(offset, 20, drawCount-1); !ok {
 		return
 	}
 	indexType := indexFormatToMTL(e.indexFormat)
-	_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(indexType), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), uintptr(buf.raw), uintptr(offset))
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, ok := indirectRecordOffset(offset, 20, i)
+		if !ok {
+			return
+		}
+		_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"),
+			uintptr(MTLPrimitiveTypeTriangle), uintptr(indexType), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), uintptr(buf.raw), uintptr(recordOffset))
+	}
+}
+
+func indirectRecordOffset(offset, stride uint64, index uint32) (uint64, bool) {
+	delta := uint64(index) * stride
+	if offset > ^uint64(0)-delta {
+		return 0, false
+	}
+	return offset + delta, true
+}
+
+func indirectRangeFits(bufferSize, offset, stride uint64, drawCount uint32) bool {
+	if offset > bufferSize {
+		return false
+	}
+	return uint64(drawCount) <= (bufferSize-offset)/stride
+}
+
+func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
+	return indirectRecordOffset(offset, 20, index)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

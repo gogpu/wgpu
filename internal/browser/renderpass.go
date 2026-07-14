@@ -118,7 +118,7 @@ func (p *RenderPassEncoder) DrawIndirect(buffer js.Value, offset uint64) {
 	p.fnDrawIndirect.Invoke(buffer, float64(offset))
 }
 
-// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+// DrawIndexedIndirect draws one indexed primitive with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer js.Value, offset uint64) {
 	p.fnDrawIndexedIndirect.Invoke(buffer, float64(offset))
 }

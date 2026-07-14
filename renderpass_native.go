@@ -246,6 +246,15 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndirect draws consecutive primitives with GPU-generated parameters.
+// Each argument record is 16 bytes.
+func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if !p.validateDrawState("DrawIndirect") {
 		return
 	}
@@ -271,19 +280,28 @@ func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 	}
 	// VAL-B3: Validate indirect args fit within buffer.
 	// DrawIndirect args: 4 × uint32 = 16 bytes. Matches Rust render.rs:2772-2779.
-	if offset+16 > buffer.Size() {
+	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
 		p.encoder.setError(fmt.Errorf(
-			"wgpu: RenderPass.DrawIndirect: offset %d + 16 bytes exceeds buffer size %d: %w",
-			offset, buffer.Size(), ErrDrawIndirectBufferOverrun))
+			"wgpu: RenderPass.MultiDrawIndirect: offset %d + %d draw(s) exceeds buffer size %d: %w",
+			offset, drawCount, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
-	p.core.DrawIndirect(buffer.coreBuffer(), offset)
+	p.core.MultiDrawIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndexedIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndexedIndirect draws consecutive indexed primitives with
+// GPU-generated parameters. Each argument record is 20 bytes.
+func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if !p.validateDrawState("DrawIndexedIndirect") {
 		return
 	}
@@ -320,17 +338,17 @@ func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
 			offset, ErrDrawIndirectOffsetAlignment))
 		return
 	}
-	// VAL-B3: Validate indirect args fit within buffer.
-	// DrawIndexedIndirect args: 5 × uint32 = 20 bytes. Matches Rust render.rs:2772-2779.
-	if offset+20 > buffer.Size() {
+	// VAL-B3: Validate all indirect args fit within the buffer without allowing
+	// offset+drawCount*20 to wrap around uint64.
+	if !indexedIndirectRangeFits(buffer.Size(), offset, drawCount) {
 		p.encoder.setError(fmt.Errorf(
-			"wgpu: RenderPass.DrawIndexedIndirect: offset %d + 20 bytes exceeds buffer size %d: %w",
-			offset, buffer.Size(), ErrDrawIndirectBufferOverrun))
+			"wgpu: RenderPass.MultiDrawIndexedIndirect: offset %d + %d draw(s) exceeds buffer size %d: %w",
+			offset, drawCount, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
-	p.core.DrawIndexedIndirect(buffer.coreBuffer(), offset)
+	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
 // End ends the render pass.

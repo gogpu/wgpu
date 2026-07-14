@@ -866,6 +866,12 @@ type RenderPassEncoder struct {
 	framebuffer vk.Framebuffer
 }
 
+const (
+	drawIndirectStride        = uint32(16)
+	drawIndexedIndirectStride = uint32(20)
+	indexedIndirectStride     = drawIndexedIndirectStride
+)
+
 // End finishes the render pass.
 // Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
@@ -1030,23 +1036,108 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
-func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
+func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || e.encoder.active == 0 {
+	if !ok || e.encoder.active == 0 || drawCount == 0 {
 		return
 	}
-
-	vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset), 1, 0)
+	if !indirectRangeFits(buf.size, offset, uint64(drawIndirectStride), drawCount) {
+		return
+	}
+	call, batched, ok := indirectCallPlan(e.encoder.device.supportsMultiDrawIndirect,
+		e.encoder.device.maxDrawIndirectCount, offset, drawCount, uint32(drawIndirectStride))
+	if !ok {
+		return
+	}
+	if batched {
+		vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(call.offset), call.count, call.stride)
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirectRecordOffset(offset, uint64(drawIndirectStride), i)
+		vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(recordOffset), 1, drawIndirectStride)
+	}
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
-func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+// Vulkan can encode a span in one command only when the optional
+// multiDrawIndirect feature is enabled and the count fits the device limit;
+// otherwise emit the exact single-record loop.
+func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || e.encoder.active == 0 {
+	if !ok || e.encoder.active == 0 || drawCount == 0 {
+		return
+	}
+	if !indirectRangeFits(buf.size, offset, uint64(drawIndexedIndirectStride), drawCount) {
+		return
+	}
+	call, batched, ok := indirectCallPlan(
+		e.encoder.device.supportsMultiDrawIndirect,
+		e.encoder.device.maxDrawIndirectCount,
+		offset,
+		drawCount,
+		uint32(drawIndexedIndirectStride),
+	)
+	if !ok {
 		return
 	}
 
-	vkCmdDrawIndexedIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(offset), 1, 0)
+	if batched {
+		vkCmdDrawIndexedIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(call.offset), call.count, call.stride)
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, ok := indirectRecordOffset(offset, uint64(drawIndexedIndirectStride), i)
+		if !ok {
+			return
+		}
+		vkCmdDrawIndexedIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(recordOffset), call.count, call.stride)
+	}
+}
+
+type indexedIndirectCall struct {
+	offset uint64
+	count  uint32
+	stride uint32
+}
+
+// indexedIndirectCallPlan returns the first native call shape for an indexed
+// indirect draw. The plan is pure so count/stride policy can be tested without
+// constructing a Vulkan command buffer or invoking FFI.
+func indirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset uint64, drawCount, stride uint32) (indexedIndirectCall, bool, bool) {
+	if drawCount == 0 {
+		return indexedIndirectCall{}, false, false
+	}
+	if _, ok := indirectRecordOffset(offset, uint64(stride), drawCount-1); !ok {
+		return indexedIndirectCall{}, false, false
+	}
+	if supportsMultiDraw && drawCount <= maxDrawCount {
+		return indexedIndirectCall{offset: offset, count: drawCount, stride: stride}, true, true
+	}
+	return indexedIndirectCall{offset: offset, count: 1, stride: stride}, false, true
+}
+
+func indexedIndirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset uint64, drawCount uint32) (indexedIndirectCall, bool, bool) {
+	return indirectCallPlan(supportsMultiDraw, maxDrawCount, offset, drawCount, uint32(drawIndexedIndirectStride))
+}
+
+func indirectRecordOffset(offset, stride uint64, index uint32) (uint64, bool) {
+	delta := uint64(index) * stride
+	if offset > ^uint64(0)-delta {
+		return 0, false
+	}
+	return offset + delta, true
+}
+
+func indirectRangeFits(bufferSize, offset, stride uint64, drawCount uint32) bool {
+	if offset > bufferSize {
+		return false
+	}
+	return uint64(drawCount) <= (bufferSize-offset)/stride
+}
+
+func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
+	return indirectRecordOffset(offset, uint64(drawIndexedIndirectStride), index)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

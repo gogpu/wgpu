@@ -150,6 +150,8 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		instance:                   a.instance,
 		graphicsFamily:             graphicsFamily,
 		cmds:                       &deviceCmds,
+		supportsMultiDrawIndirect:  a.features.MultiDrawIndirect != 0,
+		maxDrawIndirectCount:       a.properties.Limits.MaxDrawIndirectCount,
 		supportsIncrementalPresent: hasIncrementalPresent,
 	}
 
