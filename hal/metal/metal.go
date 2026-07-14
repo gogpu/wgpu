@@ -160,9 +160,10 @@ func preRegisterSelectors() {
 		// MTLTexture
 		"width", "height", "depth",
 		"pixelFormat", "textureType",
+		"replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:",
 		"newTextureViewWithPixelFormat:",
 		// Descriptors
-		"setWidth:", "setHeight:", "setDepth:",
+		"setWidth:", "setHeight:", "setDepth:", "setArrayLength:",
 		"setPixelFormat:", "setTextureType:", "setUsage:",
 		"setStorageMode:", "setMipmapLevelCount:", "setSampleCount:",
 		// MTLRenderPipelineDescriptor

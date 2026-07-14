@@ -254,16 +254,29 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 // the bytes into the staging buffer before this method returns, so the caller
 // may reuse or free the data slice immediately.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
+	if dst == nil || layout == nil {
+		return fmt.Errorf("metal: WriteTexture: invalid arguments")
+	}
 	tex, ok := dst.Texture.(*Texture)
 	if !ok || tex == nil || len(data) == 0 || size == nil {
 		return fmt.Errorf("metal: WriteTexture: invalid arguments")
+	}
+	copyLayout, err := validateMetalTextureDataCopyLayout(uint64(len(data)), tex.format, *layout, *size)
+	if err != nil {
+		return fmt.Errorf("metal: WriteTexture: %w", err)
+	}
+	normalizedLayout := *layout
+	normalizedLayout.BytesPerRow = copyLayout.bytesPerRow
+	plan, bytesPerImage, ok := validateMetalBufferTextureCopyPlan(tex.format, tex.dimension, normalizedLayout, dst.Origin, *size)
+	if !ok || bytesPerImage != copyLayout.bytesPerImage {
+		return fmt.Errorf("metal: WriteTexture: copy address arithmetic overflows")
 	}
 
 	// Apple Silicon UMA fast path: Shared textures accept synchronous CPU writes
 	// via replaceRegion:. This avoids per-upload staging buffers and one-shot
 	// blit command buffers — the main source of resize-induced memory growth.
 	if tex.isShared {
-		return q.writeTextureShared(tex, dst, data, layout, size)
+		return q.writeTextureShared(tex, dst, data, layout, copyLayout, size, plan)
 	}
 
 	pool := NewAutoreleasePool()
@@ -295,43 +308,22 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("metal: WriteTexture: blit encoder creation failed")
 	}
 
-	// Calculate layout parameters.
-	bytesPerRow := layout.BytesPerRow
-	if bytesPerRow == 0 {
-		// Estimate bytes per row from width and format (assume 4 bytes/pixel for RGBA8).
-		bytesPerRow = size.Width * 4
+	strides := metalBlitStrides(tex.dimension, uint64(copyLayout.bytesPerRow), copyLayout.bytesPerImage)
+	for operation := uint32(0); operation < plan.operationCount; operation++ {
+		destination, _ := plan.textureRegion(tex.dimension, dst.Origin, *size, operation)
+		sourceOffset, _ := plan.bufferOffset(layout.Offset, copyLayout.bytesPerImage, operation)
+		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+			argPointer(uintptr(stagingBuffer)),
+			argUint64(sourceOffset),
+			argUint64(strides.bytesPerRow),
+			argUint64(strides.bytesPerImage),
+			argStruct(destination.size, mtlSizeType),
+			argPointer(uintptr(tex.raw)),
+			argUint64(uint64(destination.slice)),
+			argUint64(uint64(dst.MipLevel)),
+			argStruct(destination.origin, mtlOriginType),
+		)
 	}
-	layers := size.DepthOrArrayLayers
-	if layers == 0 {
-		layers = 1
-	}
-	bytesPerImage := layout.RowsPerImage * bytesPerRow
-	if bytesPerImage == 0 {
-		bytesPerImage = size.Height * bytesPerRow
-	}
-
-	sourceOrigin := MTLOrigin{
-		X: NSUInteger(dst.Origin.X),
-		Y: NSUInteger(dst.Origin.Y),
-		Z: NSUInteger(dst.Origin.Z),
-	}
-	sourceSize := MTLSize{
-		Width:  NSUInteger(size.Width),
-		Height: NSUInteger(size.Height),
-		Depth:  NSUInteger(layers),
-	}
-
-	msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
-		argPointer(uintptr(stagingBuffer)),
-		argUint64(layout.Offset),
-		argUint64(uint64(bytesPerRow)),
-		argUint64(uint64(bytesPerImage)),
-		argStruct(sourceSize, mtlSizeType),
-		argPointer(uintptr(tex.raw)),
-		argUint64(uint64(dst.Origin.Z)),
-		argUint64(uint64(dst.MipLevel)),
-		argStruct(sourceOrigin, mtlOriginType),
-	)
 
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 
@@ -378,50 +370,34 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	return nil
 }
 
-// writeTextureShared writes pixel data directly into a Shared-storage Metal texture
-// using replaceRegion:mipmapLevel:withBytes:bytesPerRow:. This is a synchronous CPU
-// write — no GPU command buffer or staging buffer is required. Valid only when
-// tex.isShared is true (Apple Silicon UMA).
-func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	bytesPerRow := layout.BytesPerRow
-	if bytesPerRow == 0 {
-		bytesPerRow = size.Width * 4
-	}
-	depth := size.DepthOrArrayLayers
-	if depth == 0 {
-		depth = 1
-	}
+// writeTextureShared writes pixel data directly into a Shared-storage Metal texture.
+// It uses the slice-aware replaceRegion form so 2D arrays and true 3D textures
+// preserve their distinct Metal layouts. The write is synchronous; no GPU command
+// buffer or staging buffer is required. Valid only when tex.isShared is true.
+func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, copyLayout metalTextureDataCopyLayout, size *hal.Extent3D, plan metalCopyPlan) error {
+	strides := metalReplaceRegionStrides(tex.dimension, uint64(copyLayout.bytesPerRow), copyLayout.bytesPerImage)
+	for operation := uint32(0); operation < plan.operationCount; operation++ {
+		offset, _ := plan.bufferOffset(layout.Offset, copyLayout.bytesPerImage, operation)
+		src := data[offset:]
+		destination, _ := plan.textureRegion(tex.dimension, dst.Origin, *size, operation)
+		region := MTLRegion{Origin: destination.origin, Size: destination.size}
 
-	region := MTLRegion{
-		Origin: MTLOrigin{
-			X: NSUInteger(dst.Origin.X),
-			Y: NSUInteger(dst.Origin.Y),
-			Z: NSUInteger(dst.Origin.Z),
-		},
-		Size: MTLSize{
-			Width:  NSUInteger(size.Width),
-			Height: NSUInteger(size.Height),
-			Depth:  NSUInteger(depth),
-		},
+		// The slice-aware form carries an image stride for true 3D writes. Array
+		// writes target one physical slice and therefore pass a zero image stride.
+		msgSendVoid(tex.raw, Sel("replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:"),
+			argStruct(region, mtlRegionType),
+			argUint64(uint64(dst.MipLevel)),
+			argUint64(uint64(destination.slice)),
+			argPointer(uintptr(unsafe.Pointer(&src[0]))),
+			argUint64(strides.bytesPerRow),
+			argUint64(strides.bytesPerImage),
+		)
 	}
-
-	src := data[layout.Offset:]
-	if len(src) == 0 {
-		return nil
-	}
-
-	// replaceRegion:mipmapLevel:withBytes:bytesPerRow: — synchronous CPU→Shared write.
-	msgSendVoid(tex.raw, Sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"),
-		argStruct(region, mtlRegionType),
-		argUint64(uint64(dst.MipLevel)),
-		argPointer(uintptr(unsafe.Pointer(&src[0]))),
-		argUint64(uint64(bytesPerRow)),
-	)
 
 	hal.Logger().Debug("metal: WriteTexture (shared direct)",
 		"width", size.Width,
 		"height", size.Height,
-		"bytesPerRow", bytesPerRow,
+		"bytesPerRow", copyLayout.bytesPerRow,
 	)
 	return nil
 }
