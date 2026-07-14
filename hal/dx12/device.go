@@ -1287,8 +1287,8 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	}
 
 	// All DEFAULT heap textures start in COMMON state (DX12 spec requirement).
-	// Matches Rust wgpu (suballocation.rs:369). Auto-promotion handles the first
-	// use transition (COMMON → COPY_DEST, COMMON → RENDER_TARGET, etc.).
+	// Matches Rust wgpu (suballocation.rs:369). The command encoder explicitly
+	// transitions textures to render, depth, resolve, and copy states as used.
 	// Previous code used non-COMMON initial states which violates the spec and
 	// causes incorrect barrier "from" states in PendingWrites (BUG-DX12-009).
 	initialState := d3d12.D3D12_RESOURCE_STATE_COMMON

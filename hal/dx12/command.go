@@ -288,6 +288,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 
 	// Transition source buffer to COPY_SOURCE if needed.
 	e.transitionBufferIfNeeded(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
+	e.transitionTextureIfNeeded(dstTex, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
 
 	for _, r := range regions {
 		// Source location (buffer)
@@ -336,6 +337,10 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !srcOk || !dstOk {
 		return
 	}
+
+	// A render target cannot be used as a copy source without an explicit
+	// transition. Use the tracked state as the barrier's source state here.
+	e.transitionTextureIfNeeded(srcTex, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
 
 	// Transition destination buffer to COPY_DEST if needed.
 	e.transitionBufferIfNeeded(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
@@ -394,6 +399,8 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	if !srcOk || !dstOk {
 		return
 	}
+	e.transitionTextureIfNeeded(srcTex, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
+	e.transitionTextureIfNeeded(dstTex, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
 
 	for _, r := range regions {
 		// Source location
@@ -507,22 +514,13 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return rpe
 	}
 
-	// Transition surface textures from PRESENT to RENDER_TARGET state.
-	// DX12 requires explicit barriers (unlike Vulkan which uses render pass layout transitions).
+	// DX12 render targets require explicit transitions from their tracked state.
 	for _, ca := range desc.ColorAttachments {
 		view, ok := ca.View.(*TextureView)
 		if !ok || view.texture == nil || view.texture.raw == nil {
 			continue
 		}
-		if view.texture.isExternal {
-			barrier := d3d12.NewTransitionBarrier(
-				view.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			e.cmdList.ResourceBarrier(1, &barrier)
-		}
+		e.transitionTextureIfNeeded(view.texture, d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET)
 	}
 
 	// Set render targets
@@ -662,21 +660,9 @@ func (e *RenderPassEncoder) End() {
 				resolveRestState = d3d12.D3D12_RESOURCE_STATE_PRESENT
 			}
 
-			// MSAA resolve: render target → resolve source, resolve target → resolve dest.
-			b1 := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			b2 := d3d12.NewTransitionBarrier(
-				resolveView.texture.raw,
-				resolveRestState,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			barriers := [2]d3d12.D3D12_RESOURCE_BARRIER{b1, b2}
-			e.encoder.cmdList.ResourceBarrier(2, &barriers[0])
+			// Resolve from the resources' actual tracked states, then commit the
+			// resting states so later passes and copies use correct before-states.
+			e.encoder.prepareTextureResolve(msaaView.texture, resolveView.texture)
 
 			// Resolve MSAA → single-sample.
 			format := textureFormatToD3D12(msaaView.texture.format)
@@ -686,34 +672,13 @@ func (e *RenderPassEncoder) End() {
 				format,
 			)
 
-			// Transition back: MSAA → render target (for next frame),
-			// resolve target → resting state.
-			b3 := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			b4 := d3d12.NewTransitionBarrier(
-				resolveView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
-				resolveRestState,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			barriers2 := [2]d3d12.D3D12_RESOURCE_BARRIER{b3, b4}
-			e.encoder.cmdList.ResourceBarrier(2, &barriers2[0])
+			e.encoder.finishTextureResolve(msaaView.texture, resolveView.texture, resolveRestState)
 			continue
 		}
 
 		// No resolve — just transition external surface back to PRESENT.
 		if msaaView.texture.isExternal {
-			barrier := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			e.encoder.cmdList.ResourceBarrier(1, &barrier)
+			e.encoder.transitionTextureIfNeeded(msaaView.texture, d3d12.D3D12_RESOURCE_STATE_PRESENT)
 		}
 	}
 }
@@ -1129,6 +1094,49 @@ func (e *CommandEncoder) transitionBufferIfNeeded(buf *Buffer, targetState d3d12
 	buf.currentState = targetState
 }
 
+// transitionTextureIfNeeded inserts a transition barrier for a texture and
+// updates its tracked state. Textures created by this backend are not marked
+// ALLOW_SIMULTANEOUS_ACCESS, so COMMON -> RENDER_TARGET requires an explicit
+// barrier (unlike buffers and simultaneous-access textures).
+func (e *CommandEncoder) transitionTextureIfNeeded(tex *Texture, targetState d3d12.D3D12_RESOURCE_STATES) {
+	if tex == nil || tex.raw == nil || tex.currentState == targetState {
+		return
+	}
+	if !needsExplicitTextureBarrier(tex.currentState, targetState) {
+		tex.currentState = targetState
+		return
+	}
+
+	barrier := d3d12.NewTransitionBarrier(tex.raw, tex.currentState, targetState,
+		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
+	transitionTextureResourceBarrier(e.cmdList, &barrier)
+	hal.Logger().Debug("dx12: texture state transition",
+		"label", e.label,
+		"from", tex.currentState,
+		"to", targetState)
+	tex.currentState = targetState
+}
+
+// transitionTextureResourceBarrier is a narrow test seam around the native
+// call used by transitionTextureIfNeeded.
+var transitionTextureResourceBarrier = func(list *d3d12.ID3D12GraphicsCommandList, barrier *d3d12.D3D12_RESOURCE_BARRIER) {
+	list.ResourceBarrier(1, barrier)
+}
+
+func needsExplicitTextureBarrier(current, target d3d12.D3D12_RESOURCE_STATES) bool {
+	return current != target
+}
+
+func (e *CommandEncoder) prepareTextureResolve(source, destination *Texture) {
+	e.transitionTextureIfNeeded(source, d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
+	e.transitionTextureIfNeeded(destination, d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST)
+}
+
+func (e *CommandEncoder) finishTextureResolve(source, destination *Texture, destinationRestState d3d12.D3D12_RESOURCE_STATES) {
+	e.transitionTextureIfNeeded(source, d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET)
+	e.transitionTextureIfNeeded(destination, destinationRestState)
+}
+
 // transitionBuffersForCopy inserts batched transition barriers for a source and
 // destination buffer pair used in a copy command. Barriers are batched into a
 // single ResourceBarrier call when both buffers need transitions (Rust pattern:
@@ -1228,6 +1236,8 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 	if !ok || !view.hasDSV {
 		return nil
 	}
+	depthState := depthStencilAttachmentState(view.texture.format, dsa.DepthReadOnly, dsa.StencilReadOnly)
+	e.transitionTextureIfNeeded(view.texture, depthState)
 
 	// Determine clear flags
 	var clearFlags d3d12.D3D12_CLEAR_FLAGS
@@ -1250,6 +1260,20 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 	}
 
 	return &view.dsvHandle
+}
+
+func depthStencilAttachmentState(format gputypes.TextureFormat, depthReadOnly, stencilReadOnly bool) d3d12.D3D12_RESOURCE_STATES {
+	readOnly := depthReadOnly
+	switch format {
+	case gputypes.TextureFormatStencil8:
+		readOnly = stencilReadOnly
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		readOnly = depthReadOnly && stencilReadOnly
+	}
+	if readOnly {
+		return d3d12.D3D12_RESOURCE_STATE_DEPTH_READ
+	}
+	return d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
 }
 
 // bufferUsageToD3D12State converts buffer usage to D3D12 resource state.
