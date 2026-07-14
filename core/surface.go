@@ -199,6 +199,14 @@ func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects [
 		return ErrSurfaceNotConfigured
 	}
 
+	// Check backend support BEFORE discarding acquired texture.
+	// GPU backends don't implement PixelPresenter — early return preserves
+	// the acquired texture so the normal render→Present path still works.
+	pp, ok := s.raw.(hal.PixelPresenter)
+	if !ok {
+		return fmt.Errorf("core: PresentPixels not supported on this backend")
+	}
+
 	// Discard stale acquired texture if any — PresentPixels replaces the
 	// entire AcquireTexture→render→Present flow.
 	if s.state == SurfaceStateAcquired && s.acquiredTex != nil {
@@ -207,11 +215,6 @@ func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects [
 		s.state = SurfaceStateConfigured
 	}
 
-	// Only software backend implements hal.PixelPresenter.
-	pp, ok := s.raw.(hal.PixelPresenter)
-	if !ok {
-		return fmt.Errorf("core: PresentPixels not supported on this backend")
-	}
 	return pp.PresentPixels(data, width, height, damageRects)
 }
 

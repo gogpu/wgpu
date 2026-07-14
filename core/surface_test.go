@@ -696,11 +696,10 @@ func TestPresentPixels_UnsupportedBackend(t *testing.T) {
 	}
 }
 
-func TestPresentPixels_DiscardsAcquiredTexture(t *testing.T) {
-	// After AcquireTexture, PresentPixels should discard the stale texture
-	// and succeed (on a backend that supports it). Since noop doesn't support
-	// PresentPixels, we verify the state transition: acquired → configured,
-	// then the "not supported" error comes from the duck-type check.
+func TestPresentPixels_PreservesAcquiredOnUnsupported(t *testing.T) {
+	// On backends that don't support PixelPresenter (like noop), PresentPixels
+	// should return an error WITHOUT discarding the acquired texture. This
+	// preserves the surface state so the normal render→Present path still works.
 	surface, device, _ := newTestSurface(t)
 	config := testSurfaceConfig()
 
@@ -708,7 +707,6 @@ func TestPresentPixels_DiscardsAcquiredTexture(t *testing.T) {
 		t.Fatalf("Configure: %v", err)
 	}
 
-	// Acquire a texture
 	_, err := surface.AcquireTexture(nil)
 	if err != nil {
 		t.Fatalf("AcquireTexture: %v", err)
@@ -717,21 +715,14 @@ func TestPresentPixels_DiscardsAcquiredTexture(t *testing.T) {
 		t.Fatalf("state = %d, want SurfaceStateAcquired", surface.State())
 	}
 
-	// PresentPixels discards the acquired texture, then fails because noop
-	// doesn't implement the interface.
+	// PresentPixels on noop should fail without side effects.
 	err = surface.PresentPixels([]byte{0, 0, 0, 0}, 1, 1, nil)
 	if err == nil {
 		t.Error("PresentPixels on noop should return error")
 	}
 
-	// State should be Configured (texture was discarded before the duck-type check).
-	if surface.State() != SurfaceStateConfigured {
-		t.Errorf("state after PresentPixels = %d, want SurfaceStateConfigured", surface.State())
-	}
-
-	// Should be able to acquire again (proves discard happened).
-	_, err = surface.AcquireTexture(nil)
-	if err != nil {
-		t.Errorf("AcquireTexture after PresentPixels: %v", err)
+	// State must stay Acquired — texture NOT discarded on unsupported backend.
+	if surface.State() != SurfaceStateAcquired {
+		t.Errorf("state after PresentPixels = %d, want SurfaceStateAcquired", surface.State())
 	}
 }
