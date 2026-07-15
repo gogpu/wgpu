@@ -647,13 +647,8 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 	return nil
 }
 
-const (
-	// D3D12 placed footprints require a 256-byte row pitch and a 512-byte
-	// starting offset. Array layers use separate footprints, so their staging
-	// strides must satisfy both alignments.
-	d3d12TexturePitchAlignment     = 256
-	d3d12TexturePlacementAlignment = 512
-)
+// D3D12 placed footprints require a 256-byte row pitch.
+const d3d12TexturePitchAlignment = 256
 
 // WriteTexture writes data to a texture immediately.
 // Creates an upload heap staging buffer, copies data with proper row pitch
@@ -663,182 +658,92 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return err
 	}
 	defer q.state.submitMu.Unlock()
-
-	if dst == nil || dst.Texture == nil || len(data) == 0 || layout == nil || size == nil {
+	if dst == nil || dst.Texture == nil || layout == nil || len(data) == 0 || size == nil {
 		return fmt.Errorf("dx12: WriteTexture: invalid arguments")
 	}
-
 	dstTex, ok := dst.Texture.(*Texture)
 	if !ok || dstTex.raw == nil {
 		return fmt.Errorf("dx12: WriteTexture: invalid texture type")
 	}
-
-	// Calculate layout parameters
-	bytesPerRow := layout.BytesPerRow
-	if bytesPerRow == 0 {
-		bytesPerRow = size.Width * 4 // Assume RGBA8 (4 bytes per pixel)
+	info, nativeLayout, sourceBPR, _, valid := writeTextureNativeLayout(dstTex, *layout, *size)
+	if !valid {
+		return fmt.Errorf("dx12: WriteTexture: layout cannot be represented")
 	}
-
-	rowsPerImage := layout.RowsPerImage
-	if rowsPerImage == 0 {
-		rowsPerImage = size.Height
+	copyBlockRows := (size.Height + info.height - 1) / info.height
+	sourceRows := layout.RowsPerImage
+	if sourceRows == 0 {
+		sourceRows = size.Height
 	}
-	blockHeight := textureFormatBlockHeight(dstTex.format)
-	sourceBlockRowsPerImage := (rowsPerImage + blockHeight - 1) / blockHeight
-	copyBlockRows := (size.Height + blockHeight - 1) / blockHeight
-
-	depthOrLayers := size.DepthOrArrayLayers
-	if depthOrLayers == 0 {
-		depthOrLayers = 1
+	sourceBlockRows := (sourceRows + info.height - 1) / info.height
+	nativeLayout.Offset = 0
+	nativeLayout.RowsPerImage = copyBlockRows * info.height
+	rowPitch := nativeLayout.BytesPerRow
+	depth := size.DepthOrArrayLayers
+	if depth == 0 {
+		depth = 1
 	}
-
-	// D3D12 requires RowPitch to be aligned to 256 bytes
-	alignedRowPitch := (bytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
-
-	stagingBlockRowsPerImage := copyBlockRows
-	stagingLayerStride := uint64(alignedRowPitch) * uint64(stagingBlockRowsPerImage)
-	if dstTex.dimension != gputypes.TextureDimension3D {
-		stagingLayerStride = (stagingLayerStride + d3d12TexturePlacementAlignment - 1) &^ uint64(d3d12TexturePlacementAlignment-1)
-		stagingBlockRowsPerImage = uint32(stagingLayerStride / uint64(alignedRowPitch))
-	}
-	stagingRowsPerImage := stagingBlockRowsPerImage * blockHeight
-	stagingSize := stagingLayerStride * uint64(depthOrLayers)
+	stagingSize := uint64(rowPitch) * uint64(copyBlockRows) * uint64(depth)
 	owner := newOneShotWriteOwner(nil, dstTex.raw)
 	defer func() {
 		if owner != nil {
 			owner.release()
 		}
 	}()
-
-	// Create upload heap staging buffer
-	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{
-		Label:            "write-texture-staging",
-		Size:             stagingSize,
-		Usage:            gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite,
-		MappedAtCreation: true,
-	})
+	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{Label: "write-texture-staging", Size: stagingSize, Usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapWrite, MappedAtCreation: true})
 	if err != nil {
 		return fmt.Errorf("dx12: WriteTexture: CreateBuffer failed: %w", err)
 	}
 	stagingBuf := staging.(*Buffer)
 	owner.staging = stagingBuf
-
-	// Repack only the image rows. Input RowsPerImage controls the source stride;
-	// staging padding is chosen independently to satisfy D3D12 placement rules.
-	srcOffset := layout.Offset
-	for z := uint32(0); z < depthOrLayers; z++ {
+	logicalRowBytes := ((uint64(size.Width) + uint64(info.width) - 1) / uint64(info.width)) * uint64(info.bytes)
+	for z := uint32(0); z < depth; z++ {
 		for row := uint32(0); row < copyBlockRows; row++ {
-			srcStart := srcOffset + uint64(z)*uint64(bytesPerRow)*uint64(sourceBlockRowsPerImage) + uint64(row)*uint64(bytesPerRow)
-			if srcStart > uint64(len(data)) || uint64(bytesPerRow) > uint64(len(data))-srcStart {
-				return fmt.Errorf("dx12: WriteTexture: source data is too short for layer %d block row %d", z, row)
+			srcStart := textureWriteSourceOffset(layout.Offset, sourceBPR, sourceBlockRows, z, row)
+			if srcStart > uint64(len(data)) || logicalRowBytes > uint64(len(data))-srcStart {
+				return fmt.Errorf("dx12: WriteTexture: data is smaller than layout")
 			}
-			dstStart := uint64(z)*stagingLayerStride + uint64(row)*uint64(alignedRowPitch)
-			src := data[srcStart : srcStart+uint64(bytesPerRow)]
-			d := unsafe.Slice((*byte)(unsafe.Add(stagingBuf.mappedPointer, int(dstStart))), bytesPerRow)
-			copy(d, src)
+			dstStart := uint64(z)*uint64(rowPitch)*uint64(copyBlockRows) + uint64(row)*uint64(rowPitch)
+			src := data[srcStart : srcStart+logicalRowBytes]
+			target := unsafe.Slice((*byte)(unsafe.Add(stagingBuf.mappedPointer, int(dstStart))), len(src))
+			copy(target, src)
 		}
 	}
-
-	// Unmap staging buffer
-	writtenRange := &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(stagingSize)}
-	stagingBuf.raw.Unmap(0, writtenRange)
+	stagingBuf.raw.Unmap(0, &d3d12.D3D12_RANGE{Begin: 0, End: uintptr(stagingSize)})
 	stagingBuf.mappedPointer = nil
-
-	// Create one-shot command encoder
-	cmdEncoder, err := q.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
-		Label: "write-texture-copy",
-	})
+	cmdEncoder, err := q.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "write-texture-copy"})
 	if err != nil {
 		return fmt.Errorf("dx12: WriteTexture: CreateCommandEncoder failed: %w", err)
 	}
-
 	encoder := cmdEncoder.(*CommandEncoder)
 	owner.encoder = encoder
 	if err := encoder.BeginEncoding("write-texture-copy"); err != nil {
 		return fmt.Errorf("dx12: WriteTexture: BeginEncoding failed: %w", err)
 	}
-
-	plans := make([]stateBarrierPlan, 0, 3)
-	if before, needsBarrier := encoder.stateTracker.transitionBuffer(stagingBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
-		plans = append(plans, stateBarrierPlan{resource: stagingBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
-	}
-	stagingLayout := hal.ImageDataLayout{BytesPerRow: alignedRowPitch, RowsPerImage: stagingRowsPerImage}
-	copyPlans := planBufferTextureCopies(dstTex, *dst, stagingLayout, *size)
-	for _, copyPlan := range copyPlans {
-		if before, needsBarrier := encoder.stateTracker.transitionTexture(dstTex, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
-			plans = append(plans, stateBarrierPlan{resource: dstTex, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+	regions := []hal.BufferTextureCopy{{BufferLayout: nativeLayout, TextureBase: *dst, Size: *size}}
+	encoder.copyBufferToTexture(stagingBuf, dstTex, regions)
+	after := d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+	for _, plan := range planBufferTextureCopies(dstTex, *dst, nativeLayout, *size) {
+		if before, barrier := encoder.stateTracker.transitionTexture(dstTex, plan.subresource, after); barrier {
+			encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: dstTex, subresource: plan.subresource, before: before, after: after}})
 		}
 	}
-	encoder.emitStateBarrierPlans(plans)
-
-	for _, copyPlan := range copyPlans {
-		srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: stagingBuf.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-		}
-		srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-			Offset: copyPlan.bufferOffset,
-			Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-				Format:   textureFormatToD3D12(dstTex.format),
-				Width:    size.Width,
-				Height:   copyPlan.footprintHeight,
-				Depth:    copyPlan.footprintDepth,
-				RowPitch: alignedRowPitch,
-			},
-		})
-
-		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: dstTex.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-		}
-		dstLoc.SetSubresourceIndex(copyPlan.subresource)
-		srcBox := d3d12.D3D12_BOX{
-			Left:   0,
-			Top:    copyPlan.bufferOriginY,
-			Front:  0,
-			Right:  size.Width,
-			Bottom: copyPlan.bufferOriginY + size.Height,
-			Back:   copyPlan.footprintDepth,
-		}
-
-		encoder.cmdList.CopyTextureRegion(
-			&dstLoc,
-			dst.Origin.X, dst.Origin.Y, copyPlan.textureOriginZ,
-			&srcLoc,
-			&srcBox,
-		)
-	}
-
-	// Transition the written subresources to shader resource state (ready for rendering).
-	afterState := d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-	for _, copyPlan := range copyPlans {
-		if before, needsBarrier := encoder.stateTracker.transitionTexture(dstTex, copyPlan.subresource, afterState); needsBarrier {
-			encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: dstTex, subresource: copyPlan.subresource, before: before, after: afterState}})
-		}
-	}
-
-	// End encoding
 	cmdBuffer, err := encoder.EndEncoding()
 	if err != nil {
 		return fmt.Errorf("dx12: WriteTexture: EndEncoding failed: %w", err)
 	}
 	owner.commandBuffer = cmdBuffer.(*CommandBuffer)
-
-	// Submit and wait for GPU completion.
 	submission, err := q.submitLocked([]hal.CommandBuffer{cmdBuffer})
 	if err != nil {
 		q.retainOneShot(owner, 0)
 		owner = nil
 		return fmt.Errorf("dx12: WriteTexture: Submit failed: %w", err)
 	}
-	// Block until GPU finishes the copy — staging buffer must remain valid.
 	if err := q.device.waitForGPU(); err != nil {
 		q.retainOneShot(owner, submission)
 		owner = nil
 		return fmt.Errorf("dx12: WriteTexture: WaitIdle failed: %w", err)
 	}
 	q.state.releaseAllOwnedLocked()
-
 	return nil
 }
 

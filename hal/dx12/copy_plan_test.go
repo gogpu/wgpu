@@ -119,6 +119,14 @@ func TestWriteTextureNativeLayoutRepacksUnalignedSourcePitch(t *testing.T) {
 	}
 }
 
+func TestWriteTextureNativeLayoutKeepsSourcePaddingOutOfStaging(t *testing.T) {
+	texture := testTexture(gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, 8, 8, 2, 1)
+	_, native, _, sourceBlockRows, ok := writeTextureNativeLayout(texture, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 8}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
+	if !ok || sourceBlockRows != 2 || native.RowsPerImage != 4 {
+		t.Fatalf("native layout = %#v, source block rows = %d, ok=%v", native, sourceBlockRows, ok)
+	}
+}
+
 func TestPlanBufferTextureCopiesPadded3DUsesAbsoluteDepth(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension3D, 32, 32, 8, 1)
 	copy := hal.ImageCopyTexture{Origin: hal.Origin3D{X: 2, Y: 3, Z: 2}, Aspect: gputypes.TextureAspectAll}

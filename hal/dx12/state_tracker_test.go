@@ -1012,39 +1012,6 @@ func TestTerminalOwnedObjectReleaseRequiresProofOfCompletion(t *testing.T) {
 	}
 }
 
-func TestFailTextureViewCreationRecyclesAllocatedDescriptors(t *testing.T) {
-	device := &Device{
-		stagingViewHeap: &DescriptorHeap{},
-		rtvHeap:         &DescriptorHeap{},
-		dsvHeap:         &DescriptorHeap{},
-	}
-	view := &TextureView{
-		texture:        &Texture{},
-		device:         device,
-		hasSRV:         true,
-		hasRTV:         true,
-		hasDSV:         true,
-		hasDSVVariants: [4]bool{true, true, true, true},
-		srvHeapIndex:   11,
-		rtvHeapIndex:   12,
-		dsvHeapIndex:   [4]uint32{20, 21, 22, 23},
-	}
-	wantErr := errors.New("descriptor allocation failed")
-	gotView, gotErr := failTextureViewCreation(view, wantErr)
-	if gotView != nil || !errors.Is(gotErr, wantErr) {
-		t.Fatalf("failure result = (%v, %v), want (nil, %v)", gotView, gotErr, wantErr)
-	}
-	if want := []uint32{11}; !equalUint32s(device.stagingViewHeap.freeList, want) {
-		t.Fatalf("freed SRVs = %v, want %v", device.stagingViewHeap.freeList, want)
-	}
-	if want := []uint32{12}; !equalUint32s(device.rtvHeap.freeList, want) {
-		t.Fatalf("freed RTVs = %v, want %v", device.rtvHeap.freeList, want)
-	}
-	if want := []uint32{20, 21, 22, 23}; !equalUint32s(device.dsvHeap.freeList, want) {
-		t.Fatalf("freed DSVs = %v, want %v", device.dsvHeap.freeList, want)
-	}
-}
-
 func TestTextureViewDestroyRecyclesOnlyAllocatedDSVVariantsOnce(t *testing.T) {
 	device := &Device{dsvHeap: &DescriptorHeap{}}
 	view := &TextureView{

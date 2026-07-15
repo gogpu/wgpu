@@ -120,14 +120,15 @@ func TestFailTextureViewCreationRecyclesAllocatedDescriptors(t *testing.T) {
 		stagingViewHeap: &DescriptorHeap{},
 	}
 	view := &TextureView{
-		texture:      &Texture{},
-		device:       device,
-		hasRTV:       true,
-		rtvHeapIndex: 2,
-		hasDSV:       true,
-		dsvHeapIndex: 3,
-		hasSRV:       true,
-		srvHeapIndex: 4,
+		texture:        &Texture{},
+		device:         device,
+		hasRTV:         true,
+		rtvHeapIndex:   2,
+		hasDSV:         true,
+		hasDSVVariants: [4]bool{true},
+		dsvHeapIndex:   [4]uint32{3},
+		hasSRV:         true,
+		srvHeapIndex:   4,
 	}
 
 	result, err := failTextureViewCreation(view, errors.New("view creation failed"))

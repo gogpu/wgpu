@@ -287,67 +287,12 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if !e.isRecording {
 		return
 	}
-
-	srcBuf, srcOk := src.(*Buffer)
-	dstTex, dstOk := dst.(*Texture)
-	if !srcOk || !dstOk {
+	srcBuf, srcOK := src.(*Buffer)
+	dstTex, dstOK := dst.(*Texture)
+	if !srcOK || !dstOK {
 		return
 	}
-
-	plans := make([]stateBarrierPlan, 0, 1+len(regions))
-	if before, needsBarrier := e.stateTracker.transitionBuffer(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
-		plans = append(plans, stateBarrierPlan{resource: srcBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
-	}
-	for _, r := range regions {
-		for _, copyPlan := range planBufferTextureCopies(dstTex, r.TextureBase, r.BufferLayout, r.Size) {
-			if before, needsBarrier := e.stateTracker.transitionTexture(dstTex, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
-				plans = append(plans, stateBarrierPlan{resource: dstTex, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
-			}
-		}
-	}
-	e.emitStateBarrierPlans(plans)
-
-	for _, r := range regions {
-		for _, copyPlan := range planBufferTextureCopies(dstTex, r.TextureBase, r.BufferLayout, r.Size) {
-			// A 2D array layer is a distinct subresource and therefore needs a
-			// distinct placed footprint with depth=1.
-			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: srcBuf.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-			}
-			srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-				Offset: copyPlan.bufferOffset,
-				Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-					Format:   textureFormatToD3D12(dstTex.format),
-					Width:    r.Size.Width,
-					Height:   copyPlan.footprintHeight,
-					Depth:    copyPlan.footprintDepth,
-					RowPitch: r.BufferLayout.BytesPerRow,
-				},
-			})
-
-			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: dstTex.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-			}
-			dstLoc.SetSubresourceIndex(copyPlan.subresource)
-			srcBox := d3d12.D3D12_BOX{
-				Left:   0,
-				Top:    copyPlan.bufferOriginY,
-				Front:  0,
-				Right:  r.Size.Width,
-				Bottom: copyPlan.bufferOriginY + r.Size.Height,
-				Back:   copyPlan.footprintDepth,
-			}
-
-			e.cmdList.CopyTextureRegion(
-				&dstLoc,
-				r.TextureBase.Origin.X, r.TextureBase.Origin.Y, copyPlan.textureOriginZ,
-				&srcLoc,
-				&srcBox,
-			)
-		}
-	}
+	e.copyBufferToTexture(srcBuf, dstTex, regions)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -356,64 +301,12 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !e.isRecording {
 		return
 	}
-
-	srcTex, srcOk := src.(*Texture)
-	dstBuf, dstOk := dst.(*Buffer)
-	if !srcOk || !dstOk {
+	srcTex, srcOK := src.(*Texture)
+	dstBuf, dstOK := dst.(*Buffer)
+	if !srcOK || !dstOK {
 		return
 	}
-
-	plans := make([]stateBarrierPlan, 0, 1+len(regions))
-	if before, needsBarrier := e.stateTracker.transitionBuffer(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
-		plans = append(plans, stateBarrierPlan{resource: dstBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
-	}
-	for _, r := range regions {
-		for _, copyPlan := range planBufferTextureCopies(srcTex, r.TextureBase, r.BufferLayout, r.Size) {
-			if before, needsBarrier := e.stateTracker.transitionTexture(srcTex, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
-				plans = append(plans, stateBarrierPlan{resource: srcTex, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
-			}
-		}
-	}
-	e.emitStateBarrierPlans(plans)
-
-	for _, r := range regions {
-		// D3D12 requires RowPitch aligned to 256 bytes.
-		// The caller should pass aligned BytesPerRow, but align defensively.
-		rowPitch := (r.BufferLayout.BytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
-		for _, copyPlan := range planBufferTextureCopies(srcTex, r.TextureBase, r.BufferLayout, r.Size) {
-			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: srcTex.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-			}
-			srcLoc.SetSubresourceIndex(copyPlan.subresource)
-
-			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: dstBuf.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-			}
-			dstLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-				Offset: copyPlan.bufferOffset,
-				Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-					Format:   textureFormatToD3D12(srcTex.format),
-					Width:    r.Size.Width,
-					Height:   copyPlan.footprintHeight,
-					Depth:    copyPlan.footprintDepth,
-					RowPitch: rowPitch,
-				},
-			})
-
-			srcBox := d3d12.D3D12_BOX{
-				Left:   r.TextureBase.Origin.X,
-				Top:    r.TextureBase.Origin.Y,
-				Front:  copyPlan.textureOriginZ,
-				Right:  r.TextureBase.Origin.X + r.Size.Width,
-				Bottom: r.TextureBase.Origin.Y + r.Size.Height,
-				Back:   copyPlan.textureOriginZ + copyPlan.footprintDepth,
-			}
-
-			e.cmdList.CopyTextureRegion(&dstLoc, 0, copyPlan.bufferOriginY, 0, &srcLoc, &srcBox)
-		}
-	}
+	e.copyTextureToBuffer(srcTex, dstBuf, regions)
 }
 
 // CopyTextureToTexture copies data between textures.
@@ -421,57 +314,12 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	if !e.isRecording {
 		return
 	}
-
-	srcTex, srcOk := src.(*Texture)
-	dstTex, dstOk := dst.(*Texture)
-	if !srcOk || !dstOk {
+	srcTex, srcOK := src.(*Texture)
+	dstTex, dstOK := dst.(*Texture)
+	if !srcOK || !dstOK {
 		return
 	}
-
-	plans := make([]stateBarrierPlan, 0, len(regions)*2)
-	for _, r := range regions {
-		for _, copyPlan := range planTextureTextureCopies(srcTex, dstTex, r) {
-			if before, needsBarrier := e.stateTracker.transitionTexture(srcTex, copyPlan.srcSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
-				plans = append(plans, stateBarrierPlan{resource: srcTex, subresource: copyPlan.srcSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
-			}
-			if before, needsBarrier := e.stateTracker.transitionTexture(dstTex, copyPlan.dstSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
-				plans = append(plans, stateBarrierPlan{resource: dstTex, subresource: copyPlan.dstSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
-			}
-		}
-	}
-	e.emitStateBarrierPlans(plans)
-
-	for _, r := range regions {
-		for _, copyPlan := range planTextureTextureCopies(srcTex, dstTex, r) {
-			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: srcTex.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-			}
-			srcLoc.SetSubresourceIndex(copyPlan.srcSubresource)
-
-			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-				Resource: dstTex.raw,
-				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-			}
-			dstLoc.SetSubresourceIndex(copyPlan.dstSubresource)
-
-			srcBox := d3d12.D3D12_BOX{
-				Left:   r.SrcBase.Origin.X,
-				Top:    r.SrcBase.Origin.Y,
-				Front:  copyPlan.srcFront,
-				Right:  r.SrcBase.Origin.X + r.Size.Width,
-				Bottom: r.SrcBase.Origin.Y + r.Size.Height,
-				Back:   copyPlan.srcBack,
-			}
-
-			e.cmdList.CopyTextureRegion(
-				&dstLoc,
-				r.DstBase.Origin.X, r.DstBase.Origin.Y, copyPlan.dstZ,
-				&srcLoc,
-				&srcBox,
-			)
-		}
-	}
+	e.copyTextureToTexture(srcTex, dstTex, regions)
 }
 
 // ResolveQuerySet copies query results from a query set into a destination buffer.

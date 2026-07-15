@@ -12,7 +12,18 @@ import (
 )
 
 func (e *CommandEncoder) copyBufferToTexture(src *Buffer, texture *Texture, regions []hal.BufferTextureCopy) {
-	e.transitionBufferIfNeeded(src, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
+	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	if before, barrier := e.stateTracker.transitionBuffer(src, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); barrier {
+		plans = append(plans, stateBarrierPlan{resource: src, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+	}
+	for _, region := range regions {
+		for _, copyPlan := range planBufferTextureCopies(texture, region.TextureBase, region.BufferLayout, region.Size) {
+			if before, barrier := e.stateTracker.transitionTexture(texture, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); barrier {
+				plans = append(plans, stateBarrierPlan{resource: texture, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
 	for _, region := range regions {
 		for _, plan := range planBufferTextureCopies(texture, region.TextureBase, region.BufferLayout, region.Size) {
 			srcLoc := placedFootprintLocation(src, texture.format, plan)
@@ -31,7 +42,18 @@ func (e *CommandEncoder) copyBufferToTexture(src *Buffer, texture *Texture, regi
 }
 
 func (e *CommandEncoder) copyTextureToBuffer(src *Texture, dst *Buffer, regions []hal.BufferTextureCopy) {
-	e.transitionBufferIfNeeded(dst, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
+	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	if before, barrier := e.stateTracker.transitionBuffer(dst, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); barrier {
+		plans = append(plans, stateBarrierPlan{resource: dst, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+	}
+	for _, region := range regions {
+		for _, copyPlan := range planBufferTextureCopies(src, region.TextureBase, region.BufferLayout, region.Size) {
+			if before, barrier := e.stateTracker.transitionTexture(src, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); barrier {
+				plans = append(plans, stateBarrierPlan{resource: src, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
 	for _, region := range regions {
 		for _, plan := range planBufferTextureCopies(src, region.TextureBase, region.BufferLayout, region.Size) {
 			srcLoc := subresourceLocation(src, plan.subresource)
@@ -50,6 +72,18 @@ func (e *CommandEncoder) copyTextureToBuffer(src *Texture, dst *Buffer, regions 
 }
 
 func (e *CommandEncoder) copyTextureToTexture(src, dst *Texture, regions []hal.TextureCopy) {
+	plans := make([]stateBarrierPlan, 0, len(regions)*2)
+	for _, region := range regions {
+		for _, copyPlan := range planTextureTextureCopies(src, dst, region) {
+			if before, barrier := e.stateTracker.transitionTexture(src, copyPlan.srcSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); barrier {
+				plans = append(plans, stateBarrierPlan{resource: src, subresource: copyPlan.srcSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+			}
+			if before, barrier := e.stateTracker.transitionTexture(dst, copyPlan.dstSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); barrier {
+				plans = append(plans, stateBarrierPlan{resource: dst, subresource: copyPlan.dstSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
 	for _, region := range regions {
 		for _, plan := range planTextureTextureCopies(src, dst, region) {
 			srcLoc := subresourceLocation(src, plan.srcSubresource)

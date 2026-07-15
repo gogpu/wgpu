@@ -120,81 +120,6 @@ func copyExtentBlocks(info textureBlockInfo, origin hal.Origin3D, extent hal.Ext
 	return endBlockX - startBlockX, endBlockY - startBlockY, true
 }
 
-func textureAspectPlanes(texture *Texture, aspect gputypes.TextureAspect) []uint32 {
-	if texture == nil || texture.planeCount() < 2 {
-		return []uint32{0}
-	}
-	if texture.format == gputypes.TextureFormatStencil8 {
-		if aspect == gputypes.TextureAspectDepthOnly {
-			return nil
-		}
-		return []uint32{1}
-	}
-	if texture.format == gputypes.TextureFormatDepth24Plus {
-		if aspect == gputypes.TextureAspectStencilOnly {
-			return nil
-		}
-		return []uint32{0}
-	}
-	switch aspect {
-	case gputypes.TextureAspectDepthOnly:
-		return []uint32{0}
-	case gputypes.TextureAspectStencilOnly:
-		return []uint32{1}
-	default:
-		return []uint32{0, 1}
-	}
-}
-
-func (t *Texture) planeCount() uint32 {
-	switch t.format {
-	case gputypes.TextureFormatDepth24Plus,
-		gputypes.TextureFormatDepth24PlusStencil8,
-		gputypes.TextureFormatDepth32FloatStencil8,
-		gputypes.TextureFormatStencil8:
-		return 2
-	default:
-		return 1
-	}
-}
-
-func (t *Texture) subresourceCount() uint32 {
-	mips := t.mipLevels
-	if mips == 0 {
-		mips = 1
-	}
-	layers := uint32(1)
-	if t.dimension != gputypes.TextureDimension3D {
-		layers = t.size.DepthOrArrayLayers
-		if layers == 0 {
-			layers = 1
-		}
-	}
-	return mips * layers * t.planeCount()
-}
-
-func (t *Texture) subresourceIndexForPlane(mipLevel, arrayLayer, plane uint32) uint32 {
-	mips := t.mipLevels
-	if mips == 0 {
-		mips = 1
-	}
-	layers := uint32(1)
-	if t.dimension != gputypes.TextureDimension3D {
-		layers = t.size.DepthOrArrayLayers
-		if layers == 0 {
-			layers = 1
-		}
-	}
-	return mipLevel + arrayLayer*mips + plane*mips*layers
-}
-
-func (t *Texture) subresourceIndex(mipLevel, arrayLayer uint32) uint32 {
-	return t.subresourceIndexForPlane(mipLevel, arrayLayer, 0)
-}
-
-// planPlacedBufferSlice aligns a logical image slice down to D3D12's 512-byte
-// placement boundary. The byte delta is represented by block-aware source
-// origins, so the selected source box still starts at the original address.
 func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeight, blockBytes, copyWidth, copyHeight uint32) (bufferOffset uint64, bufferOriginX, bufferOriginY, footprintWidth, footprintHeight uint32, ok bool) {
 	if rowPitch == 0 || blockWidth == 0 || blockHeight == 0 || blockBytes == 0 {
 		return 0, 0, 0, 0, 0, false
@@ -296,11 +221,20 @@ func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size
 	}
 	nativeLayout := layout
 	nativeLayout.BytesPerRow = nativeRowPitch
-	_, _, blockRows, ok := normalizedCopyLayout(texture, nativeLayout, size)
+	sourceRowsPerImage := layout.RowsPerImage
+	if sourceRowsPerImage == 0 {
+		sourceRowsPerImage = size.Height
+	}
+	if sourceRowsPerImage < size.Height {
+		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
+	}
+	sourceBlockRows := (sourceRowsPerImage + info.height - 1) / info.height
+	nativeLayout.RowsPerImage = size.Height
+	_, _, _, ok = normalizedCopyLayout(texture, nativeLayout, size)
 	if !ok {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
-	return info, nativeLayout, sourceBytesPerRow, blockRows, true
+	return info, nativeLayout, sourceBytesPerRow, sourceBlockRows, true
 }
 
 // planBufferTextureCopies converts a WebGPU buffer/texture copy into one plan
