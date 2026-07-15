@@ -24,14 +24,14 @@ type Adapter struct {
 }
 
 // Open creates a logical device with the requested features and limits.
-func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
-	return a.open(features, limits, nil)
+func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.open(nil)
 }
 
 // open creates a logical device, optionally constraining it to one queue
 // family. Surface-qualified adapters use the constrained path so the queue
 // selected during the surface query is the same queue passed into Open.
-func (a *Adapter) open(features gputypes.Features, limits gputypes.Limits, requestedQueueFamily *uint32) (hal.OpenDevice, error) {
+func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 	// Find queue families
 	var queueFamilyCount uint32
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, nil)
@@ -43,40 +43,19 @@ func (a *Adapter) open(features gputypes.Features, limits gputypes.Limits, reque
 	queueFamilies := make([]vk.QueueFamilyProperties, queueFamilyCount)
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, &queueFamilies[0])
 
-	// Find a graphics queue family. A surface-qualified adapter supplies the
-	// exact family selected by QualifySurface; unconstrained opens preserve the
-	// existing headless behavior and choose the first graphics family.
-	graphicsFamily := int32(-1)
-	if requestedQueueFamily != nil {
-		familyIndex := *requestedQueueFamily
-		if familyIndex >= queueFamilyCount || familyIndex >= uint32(len(queueFamilies)) {
-			return hal.OpenDevice{}, fmt.Errorf("vulkan: requested queue family %d is unavailable", familyIndex)
-		}
-		if queueFamilies[familyIndex].QueueCount == 0 {
-			return hal.OpenDevice{}, fmt.Errorf("vulkan: requested queue family %d has no queues", familyIndex)
-		}
-		if queueFamilies[familyIndex].QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) == 0 {
-			return hal.OpenDevice{}, fmt.Errorf("vulkan: requested queue family %d has no graphics queue", familyIndex)
-		}
-		graphicsFamily = int32(familyIndex)
-	} else {
-		for i, family := range queueFamilies {
-			if family.QueueCount > 0 && family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) != 0 {
-				graphicsFamily = int32(i)
-				break
-			}
-		}
+	if queueFamilyCount < uint32(len(queueFamilies)) {
+		queueFamilies = queueFamilies[:queueFamilyCount]
 	}
-
-	if graphicsFamily < 0 {
-		return hal.OpenDevice{}, fmt.Errorf("vulkan: no graphics queue family found")
+	graphicsFamily, err := selectGraphicsQueueFamily(queueFamilies, requestedQueueFamily)
+	if err != nil {
+		return hal.OpenDevice{}, err
 	}
 
 	// Create device with graphics queue
 	queuePriority := float32(1.0)
 	queueCreateInfo := vk.DeviceQueueCreateInfo{
 		SType:            vk.StructureTypeDeviceQueueCreateInfo,
-		QueueFamilyIndex: uint32(graphicsFamily),
+		QueueFamilyIndex: graphicsFamily,
 		QueueCount:       1,
 		PQueuePriorities: &queuePriority,
 	}
@@ -163,13 +142,13 @@ func (a *Adapter) open(features gputypes.Features, limits gputypes.Limits, reque
 
 	// Get queue handle
 	var queue vk.Queue
-	vkGetDeviceQueue(&deviceCmds, device, uint32(graphicsFamily), 0, &queue)
+	vkGetDeviceQueue(&deviceCmds, device, graphicsFamily, 0, &queue)
 
 	dev := &Device{
 		handle:                     device,
 		physicalDevice:             a.physicalDevice,
 		instance:                   a.instance,
-		graphicsFamily:             uint32(graphicsFamily),
+		graphicsFamily:             graphicsFamily,
 		cmds:                       &deviceCmds,
 		supportsIncrementalPresent: hasIncrementalPresent,
 	}
@@ -214,7 +193,7 @@ func (a *Adapter) open(features gputypes.Features, limits gputypes.Limits, reque
 	q := &Queue{
 		handle:      queue,
 		device:      dev,
-		familyIndex: uint32(graphicsFamily),
+		familyIndex: graphicsFamily,
 		relay:       relay,
 	}
 
@@ -235,6 +214,31 @@ func (a *Adapter) open(features gputypes.Features, limits gputypes.Limits, reque
 		Device: dev,
 		Queue:  q,
 	}, nil
+}
+
+// selectGraphicsQueueFamily preserves the exact family chosen during surface
+// qualification, while keeping the ordinary headless path first-graphics.
+func selectGraphicsQueueFamily(families []vk.QueueFamilyProperties, requested *uint32) (uint32, error) {
+	if requested != nil {
+		index := *requested
+		if index >= uint32(len(families)) {
+			return 0, fmt.Errorf("vulkan: requested queue family %d is unavailable", index)
+		}
+		family := families[index]
+		if family.QueueCount == 0 {
+			return 0, fmt.Errorf("vulkan: requested queue family %d has no queues", index)
+		}
+		if family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) == 0 {
+			return 0, fmt.Errorf("vulkan: requested queue family %d has no graphics queue", index)
+		}
+		return index, nil
+	}
+	for index, family := range families {
+		if family.QueueCount > 0 && family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) != 0 {
+			return uint32(index), nil
+		}
+	}
+	return 0, fmt.Errorf("vulkan: no graphics queue family found")
 }
 
 // TextureFormatCapabilities returns capabilities for a texture format.
@@ -297,8 +301,8 @@ type qualifiedAdapter struct {
 	snapshot    surfaceSnapshot
 }
 
-func (a *qualifiedAdapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
-	return a.base.open(features, limits, &a.queueFamily)
+func (a *qualifiedAdapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.base.open(&a.queueFamily)
 }
 
 func (a *qualifiedAdapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
@@ -429,28 +433,32 @@ func querySurfaceFormats(instance *Instance, device vk.PhysicalDevice, surface v
 }
 
 func querySurfaceFormatsWith(query func(count *uint32, formats *vk.SurfaceFormatKHR) vk.Result) ([]vk.SurfaceFormatKHR, error) {
+	return queryOptionalSurfaceValues("vkGetPhysicalDeviceSurfaceFormatsKHR", query)
+}
+
+func queryOptionalSurfaceValues[T any](operation string, query func(count *uint32, values *T) vk.Result) ([]T, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		var count uint32
 		result := query(&count, nil)
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceFormatsKHR (count) failed: %d", result)
+			return nil, fmt.Errorf("vulkan: %s count failed: %d", operation, result)
 		}
 		if count == 0 {
-			return nil, nil //nolint:nilnil // an empty query is a checked incompatible result
+			return []T{}, nil
 		}
 
-		formats := make([]vk.SurfaceFormatKHR, count)
+		values := make([]T, count)
 		returned := count
-		result = query(&returned, &formats[0])
+		result = query(&returned, &values[0])
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceFormatsKHR failed: %d", result)
+			return nil, fmt.Errorf("vulkan: %s failed: %d", operation, result)
 		}
-		if result == vk.Incomplete || returned > uint32(len(formats)) {
+		if result == vk.Incomplete || returned > uint32(len(values)) {
 			continue
 		}
-		return formats[:returned], nil
+		return values[:returned], nil
 	}
-	return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceFormatsKHR returned an unstable count")
+	return nil, fmt.Errorf("vulkan: %s returned an unstable count", operation)
 }
 
 func queryPresentModes(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) ([]vk.PresentModeKHR, error) {
@@ -460,28 +468,7 @@ func queryPresentModes(instance *Instance, device vk.PhysicalDevice, surface vk.
 }
 
 func queryPresentModesWith(query func(count *uint32, modes *vk.PresentModeKHR) vk.Result) ([]vk.PresentModeKHR, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		var count uint32
-		result := query(&count, nil)
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfacePresentModesKHR (count) failed: %d", result)
-		}
-		if count == 0 {
-			return nil, nil //nolint:nilnil // an empty query is a checked incompatible result
-		}
-
-		modes := make([]vk.PresentModeKHR, count)
-		returned := count
-		result = query(&returned, &modes[0])
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfacePresentModesKHR failed: %d", result)
-		}
-		if result == vk.Incomplete || returned > uint32(len(modes)) {
-			continue
-		}
-		return modes[:returned], nil
-	}
-	return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfacePresentModesKHR returned an unstable count")
+	return queryOptionalSurfaceValues("vkGetPhysicalDeviceSurfacePresentModesKHR", query)
 }
 
 func makeSurfaceSnapshot(capabilities vk.SurfaceCapabilitiesKHR, formats []vk.SurfaceFormatKHR, presentModes []vk.PresentModeKHR) (surfaceSnapshot, error) {
