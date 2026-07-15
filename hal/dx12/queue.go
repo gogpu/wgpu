@@ -201,7 +201,7 @@ const d3d12TexturePitchAlignment = 256
 // Creates an upload heap staging buffer, copies data with proper row pitch
 // alignment, and uses CopyTextureRegion to transfer to the GPU texture.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	if dst == nil || dst.Texture == nil || len(data) == 0 || size == nil {
+	if dst == nil || dst.Texture == nil || layout == nil || len(data) == 0 || size == nil {
 		return fmt.Errorf("dx12: WriteTexture: invalid arguments")
 	}
 
@@ -210,27 +210,16 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("dx12: WriteTexture: invalid texture type")
 	}
 
-	// Calculate layout parameters
-	bytesPerRow := layout.BytesPerRow
-	if bytesPerRow == 0 {
-		bytesPerRow = size.Width * 4 // Assume RGBA8 (4 bytes per pixel)
+	info, copyLayout, sourceBytesPerRow, blockRows, valid := writeTextureNativeLayout(dstTex, *layout, *size)
+	if !valid {
+		return fmt.Errorf("dx12: WriteTexture: layout cannot be represented")
 	}
-
-	rowsPerImage := layout.RowsPerImage
-	if rowsPerImage == 0 {
-		rowsPerImage = size.Height
-	}
-
+	rowPitch := copyLayout.BytesPerRow
 	depthOrLayers := size.DepthOrArrayLayers
 	if depthOrLayers == 0 {
 		depthOrLayers = 1
 	}
-
-	// D3D12 requires RowPitch to be aligned to 256 bytes
-	alignedRowPitch := (bytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
-
-	// Calculate staging buffer size with aligned pitch
-	stagingSize := uint64(alignedRowPitch) * uint64(rowsPerImage) * uint64(depthOrLayers)
+	stagingSize := uint64(rowPitch) * uint64(blockRows) * uint64(depthOrLayers)
 
 	// Create upload heap staging buffer
 	staging, err := q.device.CreateBuffer(&hal.BufferDescriptor{
@@ -246,31 +235,23 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	stagingBuf := staging.(*Buffer)
 
-	// Copy data to staging buffer with proper row pitch alignment
-	srcOffset := layout.Offset
-	if bytesPerRow == alignedRowPitch {
-		// No alignment padding needed — single copy
-		srcData := data[srcOffset:]
-		if uint64(len(srcData)) > stagingSize {
-			srcData = srcData[:stagingSize]
-		}
-		d := unsafe.Slice((*byte)(stagingBuf.mappedPointer), len(srcData))
-		copy(d, srcData)
-	} else {
-		// Row-by-row copy to handle alignment padding
-		for z := uint32(0); z < depthOrLayers; z++ {
-			for row := uint32(0); row < rowsPerImage; row++ {
-				srcStart := srcOffset + uint64(z)*uint64(bytesPerRow)*uint64(rowsPerImage) + uint64(row)*uint64(bytesPerRow)
-				dstStart := uint64(z)*uint64(alignedRowPitch)*uint64(rowsPerImage) + uint64(row)*uint64(alignedRowPitch)
-
-				if srcStart+uint64(bytesPerRow) > uint64(len(data)) {
-					break
-				}
-
-				src := data[srcStart : srcStart+uint64(bytesPerRow)]
-				d := unsafe.Slice((*byte)(unsafe.Add(stagingBuf.mappedPointer, int(dstStart))), bytesPerRow)
-				copy(d, src)
+	// Repack source rows into a 256-byte aligned, block-row staging layout.
+	logicalRowBytes := ((uint64(size.Width) + uint64(info.width) - 1) / uint64(info.width)) * uint64(info.bytes)
+	sourceSliceRows := blockRows
+	rowsPerImage := copyLayout.RowsPerImage
+	if rowsPerImage == 0 {
+		rowsPerImage = size.Height
+	}
+	for z := uint32(0); z < depthOrLayers; z++ {
+		for row := uint32(0); row < blockRows; row++ {
+			srcStart := textureWriteSourceOffset(copyLayout.Offset, sourceBytesPerRow, sourceSliceRows, z, row)
+			if srcStart+logicalRowBytes > uint64(len(data)) {
+				return fmt.Errorf("dx12: WriteTexture: data is smaller than layout")
 			}
+			dstStart := uint64(z)*uint64(rowPitch)*uint64(blockRows) + uint64(row)*uint64(rowPitch)
+			src := data[srcStart : srcStart+logicalRowBytes]
+			d := unsafe.Slice((*byte)(unsafe.Add(stagingBuf.mappedPointer, int(dstStart))), len(src))
+			copy(d, src)
 		}
 	}
 
@@ -306,36 +287,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		encoder.cmdList.ResourceBarrier(1, &barrierToCopy)
 	}
 
-	// Source location (staging buffer with placed footprint)
-	srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-		Resource: stagingBuf.raw,
-		Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-	}
-	srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-		Offset: 0,
-		Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-			Format:   textureFormatToD3D12(dstTex.format),
-			Width:    size.Width,
-			Height:   size.Height,
-			Depth:    depthOrLayers,
-			RowPitch: alignedRowPitch,
-		},
-	})
-
-	// Destination location (texture subresource)
-	subresource := dst.MipLevel + dst.Origin.Z*dstTex.mipLevels
-	dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-		Resource: dstTex.raw,
-		Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-	}
-	dstLoc.SetSubresourceIndex(subresource)
-
-	encoder.cmdList.CopyTextureRegion(
-		&dstLoc,
-		dst.Origin.X, dst.Origin.Y, dst.Origin.Z,
-		&srcLoc,
-		nil, // Copy entire source
-	)
+	regions := []hal.BufferTextureCopy{{
+		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: rowPitch, RowsPerImage: rowsPerImage},
+		TextureBase:  *dst,
+		Size:         *size,
+	}}
+	encoder.copyBufferToTexture(stagingBuf, dstTex, regions)
 
 	// Transition texture to shader resource state (ready for rendering)
 	afterState := d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE

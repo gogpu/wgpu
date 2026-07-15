@@ -286,42 +286,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		return
 	}
 
-	// Transition source buffer to COPY_SOURCE if needed.
-	e.transitionBufferIfNeeded(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE)
-
-	for _, r := range regions {
-		// Source location (buffer)
-		srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: srcBuf.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-		}
-		srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-			Offset: r.BufferLayout.Offset,
-			Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-				Format:   textureFormatToD3D12(dstTex.format),
-				Width:    r.Size.Width,
-				Height:   r.Size.Height,
-				Depth:    r.Size.DepthOrArrayLayers,
-				RowPitch: r.BufferLayout.BytesPerRow,
-			},
-		})
-
-		// Destination location (texture)
-		subresource := r.TextureBase.MipLevel + r.TextureBase.Origin.Z*dstTex.mipLevels
-		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: dstTex.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-		}
-		dstLoc.SetSubresourceIndex(subresource)
-
-		// Copy region (nil means entire subresource)
-		e.cmdList.CopyTextureRegion(
-			&dstLoc,
-			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
-			&srcLoc,
-			nil, // Copy entire source
-		)
-	}
+	e.copyBufferToTexture(srcBuf, dstTex, regions)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -337,50 +302,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		return
 	}
 
-	// Transition destination buffer to COPY_DEST if needed.
-	e.transitionBufferIfNeeded(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
-
-	for _, r := range regions {
-		// Source location (texture)
-		subresource := r.TextureBase.MipLevel + r.TextureBase.Origin.Z*srcTex.mipLevels
-		srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: srcTex.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-		}
-		srcLoc.SetSubresourceIndex(subresource)
-
-		// D3D12 requires RowPitch aligned to 256 bytes.
-		// The caller should pass aligned BytesPerRow, but align defensively.
-		rowPitch := (r.BufferLayout.BytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
-
-		// Destination location (buffer)
-		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: dstBuf.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-		}
-		dstLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
-			Offset: r.BufferLayout.Offset,
-			Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-				Format:   textureFormatToD3D12(srcTex.format),
-				Width:    r.Size.Width,
-				Height:   r.Size.Height,
-				Depth:    r.Size.DepthOrArrayLayers,
-				RowPitch: rowPitch,
-			},
-		})
-
-		// Source box
-		srcBox := d3d12.D3D12_BOX{
-			Left:   r.TextureBase.Origin.X,
-			Top:    r.TextureBase.Origin.Y,
-			Front:  0,
-			Right:  r.TextureBase.Origin.X + r.Size.Width,
-			Bottom: r.TextureBase.Origin.Y + r.Size.Height,
-			Back:   r.Size.DepthOrArrayLayers,
-		}
-
-		e.cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &srcBox)
-	}
+	e.copyTextureToBuffer(srcTex, dstBuf, regions)
 }
 
 // CopyTextureToTexture copies data between textures.
@@ -395,40 +317,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		return
 	}
 
-	for _, r := range regions {
-		// Source location
-		srcSubresource := r.SrcBase.MipLevel + r.SrcBase.Origin.Z*srcTex.mipLevels
-		srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: srcTex.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-		}
-		srcLoc.SetSubresourceIndex(srcSubresource)
-
-		// Destination location
-		dstSubresource := r.DstBase.MipLevel + r.DstBase.Origin.Z*dstTex.mipLevels
-		dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
-			Resource: dstTex.raw,
-			Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-		}
-		dstLoc.SetSubresourceIndex(dstSubresource)
-
-		// Source box
-		srcBox := d3d12.D3D12_BOX{
-			Left:   r.SrcBase.Origin.X,
-			Top:    r.SrcBase.Origin.Y,
-			Front:  0,
-			Right:  r.SrcBase.Origin.X + r.Size.Width,
-			Bottom: r.SrcBase.Origin.Y + r.Size.Height,
-			Back:   r.Size.DepthOrArrayLayers,
-		}
-
-		e.cmdList.CopyTextureRegion(
-			&dstLoc,
-			r.DstBase.Origin.X, r.DstBase.Origin.Y, r.DstBase.Origin.Z,
-			&srcLoc,
-			&srcBox,
-		)
-	}
+	e.copyTextureToTexture(srcTex, dstTex, regions)
 }
 
 // ResolveQuerySet copies query results from a query set into a destination buffer.
