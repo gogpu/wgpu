@@ -3,15 +3,30 @@
 package wgpu
 
 import (
+	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
 // Texture represents a GPU texture.
 type Texture struct {
-	hal      hal.Texture
-	device   *Device
-	format   TextureFormat
-	released bool
+	hal          hal.Texture
+	device       *Device
+	format       TextureFormat
+	released     bool
+	surface      *core.Surface
+	surfaceLease uint64
+}
+
+// resolveHAL is the single boundary from a public texture wrapper to HAL.
+// Surface textures are borrowed and are usable only for their acquisition.
+func (t *Texture) resolveHAL() hal.Texture {
+	if t == nil || t.released || t.hal == nil || t.device == nil || t.device.released.Load() {
+		return nil
+	}
+	if t.surface != nil && !t.surface.AcquisitionValid(t.surfaceLease) {
+		return nil
+	}
+	return t.hal
 }
 
 // Format returns the texture format.
@@ -22,6 +37,12 @@ func (t *Texture) Format() TextureFormat { return t.format }
 // that may reference it. This prevents use-after-free on DX12/Vulkan.
 func (t *Texture) Release() {
 	if t.released {
+		return
+	}
+	// Surface textures are borrowed swapchain images. The wrapper never owns
+	// their HAL lifetime, even while the acquisition is still active.
+	if t.surface != nil {
+		t.released = true
 		return
 	}
 	t.released = true
@@ -46,15 +67,36 @@ func (t *Texture) Release() {
 
 // TextureView represents a view into a texture.
 type TextureView struct {
-	hal      hal.TextureView
-	device   *Device
-	texture  *Texture
-	released bool
+	hal          hal.TextureView
+	device       *Device
+	texture      *Texture
+	released     bool
+	surface      *core.Surface
+	surfaceLease uint64
+}
+
+// resolveHAL is the single boundary from a public texture-view wrapper to HAL.
+func (v *TextureView) resolveHAL() hal.TextureView {
+	if v == nil || v.released || v.hal == nil || v.device == nil || v.device.released.Load() {
+		return nil
+	}
+	if v.surface != nil && !v.surface.AcquisitionValid(v.surfaceLease) {
+		return nil
+	}
+	if v.surface != nil && v.texture != nil && v.texture.resolveHAL() == nil {
+		return nil
+	}
+	return v.hal
 }
 
 // Texture returns the parent Texture that this view was created from.
 // Returns nil if the view has been released.
-func (v *TextureView) Texture() *Texture { return v.texture }
+func (v *TextureView) Texture() *Texture {
+	if v == nil || v.released {
+		return nil
+	}
+	return v.texture
+}
 
 // Release marks the texture view for destruction. The underlying HAL TextureView
 // (and its descriptor heap slots) is not freed immediately — it is deferred via

@@ -325,16 +325,17 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 	if s == nil {
 		return
 	}
-	if s.swapchain == nil {
-		s.device = nil
-		return
+	if s.swapchain != nil {
+		swapchain := s.swapchain
+		if err := swapchain.destroyWithError(); err != nil {
+			hal.Logger().Error("vulkan: failed to destroy swapchain during unconfigure", "error", err)
+		}
+		s.detachSwapchainFromQueue(swapchain)
+		s.swapchain = nil
 	}
-	swapchain := s.swapchain
-	if err := swapchain.destroyWithError(); err != nil {
-		hal.Logger().Error("vulkan: failed to destroy swapchain during unconfigure", "error", err)
+	if s.device != nil {
+		s.device.unregisterConfiguredSurface(s)
 	}
-	s.detachSwapchainFromQueue(swapchain)
-	s.swapchain = nil
 	s.device = nil
 }
 
@@ -401,11 +402,31 @@ func (s *Surface) Destroy() {
 		s.detachSwapchainFromQueue(swapchain)
 		s.swapchain = nil
 	}
-	s.device = nil
+	if s.device != nil {
+		s.device.unregisterConfiguredSurface(s)
+		s.device = nil
+	}
 	if s.handle != 0 && s.instance != nil {
 		s.instance.cmds.DestroySurfaceKHR(s.instance.handle, s.handle, nil)
 		s.handle = 0
 	}
+}
+
+// releaseConfiguredDevice detaches the swapchain while VkDevice is still
+// alive. Device.Destroy calls this after one device-wide idle operation.
+func (s *Surface) releaseConfiguredDevice(device *Device, drained bool) {
+	if s == nil || s.device != device {
+		return
+	}
+	if s.swapchain != nil {
+		if drained {
+			s.swapchain.destroyAfterIdle()
+		} else {
+			s.swapchain.abandonDeviceResources()
+		}
+		s.swapchain = nil
+	}
+	s.device = nil
 }
 
 // Helper functions

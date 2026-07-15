@@ -688,6 +688,14 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		tex.swapchain = swapchain
 	}
 
+	oldDevice := s.device
+	if err := device.registerConfiguredSurface(s); err != nil {
+		if destroyErr := swapchain.destroyWithError(); destroyErr != nil {
+			hal.Logger().Error("vulkan: failed to clean up unregistered swapchain", "error", destroyErr)
+		}
+		return fmt.Errorf("vulkan: register configured surface: %w", err)
+	}
+
 	// Retire the old swapchain only after the replacement has fully succeeded.
 	// Its handle remains valid until its views and synchronization primitives are
 	// released, as required by Vulkan's OldSwapchain transition rules.
@@ -699,6 +707,9 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	s.swapchain = swapchain
 	s.device = device
+	if oldDevice != nil && oldDevice != device {
+		oldDevice.unregisterConfiguredSurface(s)
+	}
 
 	return nil
 }
@@ -855,6 +866,49 @@ func swapchainCreateError(result vk.Result) error {
 	default:
 		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
 	}
+}
+
+func (sc *Swapchain) destroyAfterIdle() {
+	if sc == nil {
+		return
+	}
+	_ = sc.destroyResourcesAfterIdle()
+	if sc.handle != 0 && sc.device != nil {
+		vkDestroySwapchainKHR(sc.device, sc.handle, nil)
+	}
+	sc.handle = 0
+	sc.destroyed = true
+	sc.failureErr = nil
+	sc.device = nil
+	sc.surface = nil
+}
+
+func (sc *Swapchain) abandonDeviceResources() {
+	if sc == nil {
+		return
+	}
+	for _, texture := range sc.surfaceTextures {
+		if texture != nil {
+			texture.handle = 0
+			texture.view = 0
+			texture.swapchain = nil
+		}
+	}
+	sc.handle = 0
+	sc.images = nil
+	sc.imageViews = nil
+	sc.acquireSemaphores = nil
+	sc.acquireFenceValues = nil
+	sc.presentSemaphores = nil
+	sc.surfaceTextures = nil
+	sc.imageLayouts = nil
+	sc.acquireFence = 0
+	sc.barrierFence = 0
+	sc.barrierPool = 0
+	sc.currentAcquireSem = 0
+	sc.imageAcquired = false
+	sc.device = nil
+	sc.surface = nil
 }
 
 // acquireNextImage acquires the next available swapchain image.

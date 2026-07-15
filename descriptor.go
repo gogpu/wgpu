@@ -209,6 +209,10 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 	entry := gputypes.BindGroupEntry{
 		Binding: e.Binding,
 	}
+	var halView hal.TextureView
+	if e.TextureView != nil {
+		halView = e.TextureView.resolveHAL()
+	}
 
 	switch {
 	case e.Buffer != nil:
@@ -224,9 +228,9 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 		entry.Resource = gputypes.SamplerBinding{
 			Sampler: e.Sampler.hal.NativeHandle(),
 		}
-	case e.TextureView != nil && e.TextureView.hal != nil:
+	case halView != nil:
 		entry.Resource = gputypes.TextureViewBinding{
-			TextureView: e.TextureView.hal.NativeHandle(),
+			TextureView: halView.NativeHandle(),
 		}
 	}
 
@@ -453,10 +457,10 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			ClearValue: ca.ClearValue,
 		}
 		if ca.View != nil {
-			halCA.View = ca.View.hal
+			halCA.View = ca.View.resolveHAL()
 		}
 		if ca.ResolveTarget != nil {
-			halCA.ResolveTarget = ca.ResolveTarget.hal
+			halCA.ResolveTarget = ca.ResolveTarget.resolveHAL()
 		}
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
@@ -474,7 +478,7 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
 		if ds.View != nil {
-			halDS.View = ds.View.hal
+			halDS.View = ds.View.resolveHAL()
 		}
 		halDesc.DepthStencilAttachment = halDS
 	}
@@ -530,7 +534,7 @@ func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
 	}
 
 	return &hal.ImageCopyTexture{
-		Texture:  i.Texture.hal,
+		Texture:  i.Texture.resolveHAL(),
 		MipLevel: i.MipLevel,
 		Origin:   i.Origin.toHAL(),
 		Aspect:   i.Aspect,
@@ -580,7 +584,7 @@ type TextureBarrier struct {
 func (b TextureBarrier) toHAL() hal.TextureBarrier {
 	var t hal.Texture
 	if b.Texture != nil {
-		t = b.Texture.hal
+		t = b.Texture.resolveHAL()
 	}
 	return hal.TextureBarrier{
 		Texture: t,

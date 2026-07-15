@@ -200,7 +200,7 @@ func (s *Surface) releaseBackBuffers() {
 			s.backBuffers[i].resource = nil
 		}
 		// Recycle RTV descriptor slot for reuse (prevents heap exhaustion on resize)
-		if s.device != nil {
+		if s.device != nil && s.device.rtvHeap != nil {
 			s.device.rtvHeap.Free(s.backBuffers[i].rtvIndex, 1)
 		}
 	}

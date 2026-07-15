@@ -45,6 +45,18 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		return 0, fmt.Errorf("wgpu: queue not available")
 	}
 
+	// Validate user command buffers before closing the pending-write encoder.
+	// A validation error leaves buffered writes intact for a later valid Submit
+	// and cannot strand an ended internal command buffer.
+	for i, cb := range commandBuffers {
+		if cb == nil {
+			return 0, fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+		}
+		if err := validateCommandBufferForSubmit(cb, i); err != nil {
+			return 0, err
+		}
+	}
+
 	// Flush pending writes under lock, then release lock before HAL submit.
 	var pendingCmdBuf hal.CommandBuffer
 	var flushedEncoder hal.CommandEncoder
@@ -61,20 +73,6 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		}
 	}
 
-	// --- VAL-A6: Submit-time resource state validation ---
-	// Matches Rust wgpu-core validate_command_buffer (device/queue.rs:1764-1828).
-	// Each command buffer is checked for: valid state, buffer destroyed/mapped,
-	// texture destroyed.
-	for i, cb := range commandBuffers {
-		if cb == nil {
-			return 0, fmt.Errorf("wgpu: command buffer at index %d is nil", i)
-		}
-		if err := validateCommandBufferForSubmit(cb, i); err != nil {
-			return 0, err
-		}
-	}
-	// --- end VAL-A6 ---
-
 	// Build combined command buffer list: pending first, then user buffers.
 	var allBuffers []hal.CommandBuffer
 	if pendingCmdBuf != nil {
@@ -90,6 +88,11 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 
 	subIdx, err := q.hal.Submit(allBuffers)
 	if err != nil {
+		if q.pending != nil && pendingCmdBuf != nil {
+			q.pending.mu.Lock()
+			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures)
+			q.pending.mu.Unlock()
+		}
 		return 0, fmt.Errorf("wgpu: submit failed: %w", err)
 	}
 
@@ -295,7 +298,10 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if q.hal == nil || dst == nil {
 		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
-	if dst.Texture == nil || dst.Texture.hal == nil {
+	if dst.Texture != nil && dst.Texture.resolveHAL() == nil {
+		return ErrReleased
+	}
+	if dst.Texture == nil {
 		return fmt.Errorf("wgpu: WriteTexture: destination texture is invalid")
 	}
 	if layout == nil {
@@ -310,7 +316,7 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	halSize := size.toHAL()
 
 	if q.pending != nil {
-		return q.pending.writeTexture(halDst, data, &halLayout, &halSize)
+		return q.pending.writeTextureFor(dst.Texture, halDst, data, &halLayout, &halSize)
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
@@ -394,7 +400,7 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 
 	// 3. Check referenced textures (matches Rust queue.rs:1791-1808).
 	for tex := range cb.usedTextures {
-		if tex.released {
+		if tex.resolveHAL() == nil {
 			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
 				index, ErrSubmitTextureDestroyed)
 		}

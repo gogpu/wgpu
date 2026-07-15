@@ -323,6 +323,43 @@ func (b *stagingBelt) finish(submissionIndex uint64) {
 	b.oversized = nil
 }
 
+// discardActive abandons allocations whose copy commands will not be
+// submitted. Regular chunks return directly to the free pool; oversized
+// one-off buffers are destroyed. The caller serializes access.
+func (b *stagingBelt) discardActive() {
+	for i := range b.activeChunks {
+		b.activeChunks[i].offset = 0
+		b.freeChunks = append(b.freeChunks, b.activeChunks[i])
+	}
+	b.activeChunks = nil
+
+	for _, buf := range b.oversized {
+		b.halDevice.DestroyBuffer(buf)
+	}
+	b.oversized = nil
+
+	// chunkedAllocs only aliases buffers held by oversized.
+	b.chunkedAllocs = nil
+}
+
+// discardLastClosed rolls back the batch most recently finished with the
+// placeholder submission index. It is used only when HAL rejects Submit.
+func (b *stagingBelt) discardLastClosed() {
+	last := len(b.closedSubmissions) - 1
+	if last < 0 || b.closedSubmissions[last].submissionIndex != 0 {
+		return
+	}
+	submission := b.closedSubmissions[last]
+	b.closedSubmissions = b.closedSubmissions[:last]
+	for i := range submission.chunks {
+		submission.chunks[i].offset = 0
+		b.freeChunks = append(b.freeChunks, submission.chunks[i])
+	}
+	for _, buf := range submission.oversized {
+		b.halDevice.DestroyBuffer(buf)
+	}
+}
+
 // setLastSubmissionIndex updates the most recently finished batch with the
 // actual GPU submission index (known only after HAL Submit returns).
 // Must be called after finish() and after HAL Submit.

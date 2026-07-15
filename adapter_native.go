@@ -39,15 +39,27 @@ func (a *Adapter) Limits() Limits { return a.limits }
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.
 func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
-	if a.released {
+	if a == nil || a.released || a.instance == nil || a.instance.isReleased() {
 		return nil, ErrReleased
 	}
 
+	var (
+		device *Device
+		err    error
+	)
 	if a.core.HasHAL() {
-		return a.requestDeviceHAL(desc)
+		device, err = a.requestDeviceHAL(desc)
+	} else {
+		device, err = a.requestDeviceCore(desc)
 	}
-
-	return a.requestDeviceCore(desc)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.instance.adoptDevice(device); err != nil {
+		device.Release()
+		return nil, err
+	}
+	return device, nil
 }
 
 func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
@@ -143,7 +155,8 @@ type SurfaceCapabilities struct {
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
 // Returns nil if the adapter has no HAL (core-only path) or the surface is nil.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	if a.released || surface == nil {
+	if a == nil || a.released || a.instance == nil || a.instance.isReleased() ||
+		surface == nil || surface.released || surface.instance != a.instance {
 		return nil
 	}
 
@@ -154,7 +167,11 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 		}
 	}
 
-	halCaps := a.core.HALAdapter().SurfaceCapabilities(surface.HAL())
+	halSurface := surface.HAL()
+	if halSurface == nil {
+		return nil
+	}
+	halCaps := a.core.HALAdapter().SurfaceCapabilities(halSurface)
 	if halCaps == nil {
 		return nil
 	}

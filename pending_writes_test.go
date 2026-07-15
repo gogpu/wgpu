@@ -18,12 +18,22 @@ type mockBatchingQueue struct {
 	noop.Queue
 	writeBufferCalls  int
 	writeTextureCalls int
+	submitCalls       int
+	submitErr         error
 	lastWriteBuf      hal.Buffer
 	lastWriteOffset   uint64
 	lastWriteData     []byte
 }
 
 func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+
+func (q *mockBatchingQueue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	q.submitCalls++
+	if q.submitErr != nil {
+		return 0, q.submitErr
+	}
+	return q.Queue.Submit(commandBuffers)
+}
 
 func (q *mockBatchingQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
 	q.writeBufferCalls++
@@ -546,6 +556,18 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 
 	if pw.HasPendingWork() {
 		t.Error("expected no pending work after flush")
+	}
+}
+
+func TestContainsTextureOwnerUsesWrapperIdentity(t *testing.T) {
+	first := &Texture{}
+	second := &Texture{}
+	owners := []*Texture{nil, first}
+	if !containsTextureOwner(owners, first) {
+		t.Fatal("containsTextureOwner missed the retained wrapper")
+	}
+	if containsTextureOwner(owners, second) {
+		t.Fatal("containsTextureOwner matched a distinct wrapper")
 	}
 }
 
