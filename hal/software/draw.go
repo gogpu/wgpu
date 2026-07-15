@@ -1388,9 +1388,10 @@ func clampBlitBounds(minX, minY, maxX, maxY int, scissor [4]uint32) (int, int, i
 	return minX, minY, maxX, maxY
 }
 
-// configureRasterPipeline applies scissor, depth, and stencil state from the
-// command encoder to a newly created raster.Pipeline. This is the single point
-// where WebGPU render pass state is translated to the raster package's config.
+// configureRasterPipeline applies scissor, depth, stencil, and blend state
+// from the command encoder to a newly created raster.Pipeline. This is the
+// single point where WebGPU render pass state is translated to the raster
+// package's config.
 func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	// Scissor: clip fragments to the scissor rectangle set by SetScissorRect.
 	if r.hasScissor {
@@ -1402,8 +1403,19 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 		})
 	}
 
+	if r.pipeline == nil || r.pipeline.desc == nil {
+		return
+	}
+
+	// Blend state from the first fragment target.
+	if frag := r.pipeline.desc.Fragment; frag != nil && len(frag.Targets) > 0 {
+		if blend := frag.Targets[0].Blend; blend != nil {
+			pipe.SetBlendState(convertBlendState(blend))
+		}
+	}
+
 	// Depth and stencil state from the render pipeline descriptor.
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.DepthStencil == nil {
+	if r.pipeline.desc.DepthStencil == nil {
 		return
 	}
 	ds := r.pipeline.desc.DepthStencil
@@ -1497,5 +1509,70 @@ func convertStencilOp(op hal.StencilOperation) raster.StencilOp {
 		return raster.StencilOpDecrementWrap
 	default: // Keep or undefined
 		return raster.StencilOpKeep
+	}
+}
+
+// convertBlendState maps a gputypes.BlendState to raster.BlendState.
+func convertBlendState(bs *gputypes.BlendState) raster.BlendState {
+	return raster.BlendState{
+		Enabled:  true,
+		SrcColor: convertBlendFactor(bs.Color.SrcFactor),
+		DstColor: convertBlendFactor(bs.Color.DstFactor),
+		ColorOp:  convertBlendOp(bs.Color.Operation),
+		SrcAlpha: convertBlendFactor(bs.Alpha.SrcFactor),
+		DstAlpha: convertBlendFactor(bs.Alpha.DstFactor),
+		AlphaOp:  convertBlendOp(bs.Alpha.Operation),
+	}
+}
+
+// convertBlendFactor maps gputypes.BlendFactor to raster.BlendFactor.
+func convertBlendFactor(f gputypes.BlendFactor) raster.BlendFactor {
+	switch f {
+	case gputypes.BlendFactorZero:
+		return raster.BlendFactorZero
+	case gputypes.BlendFactorOne:
+		return raster.BlendFactorOne
+	case gputypes.BlendFactorSrc:
+		return raster.BlendFactorSrc
+	case gputypes.BlendFactorOneMinusSrc:
+		return raster.BlendFactorOneMinusSrc
+	case gputypes.BlendFactorSrcAlpha:
+		return raster.BlendFactorSrcAlpha
+	case gputypes.BlendFactorOneMinusSrcAlpha:
+		return raster.BlendFactorOneMinusSrcAlpha
+	case gputypes.BlendFactorDst:
+		return raster.BlendFactorDst
+	case gputypes.BlendFactorOneMinusDst:
+		return raster.BlendFactorOneMinusDst
+	case gputypes.BlendFactorDstAlpha:
+		return raster.BlendFactorDstAlpha
+	case gputypes.BlendFactorOneMinusDstAlpha:
+		return raster.BlendFactorOneMinusDstAlpha
+	case gputypes.BlendFactorSrcAlphaSaturated:
+		return raster.BlendFactorSrcAlphaSaturated
+	case gputypes.BlendFactorConstant:
+		return raster.BlendFactorConstant
+	case gputypes.BlendFactorOneMinusConstant:
+		return raster.BlendFactorOneMinusConstant
+	default:
+		return raster.BlendFactorOne
+	}
+}
+
+// convertBlendOp maps gputypes.BlendOperation to raster.BlendOperation.
+func convertBlendOp(op gputypes.BlendOperation) raster.BlendOperation {
+	switch op {
+	case gputypes.BlendOperationAdd:
+		return raster.BlendOpAdd
+	case gputypes.BlendOperationSubtract:
+		return raster.BlendOpSubtract
+	case gputypes.BlendOperationReverseSubtract:
+		return raster.BlendOpReverseSubtract
+	case gputypes.BlendOperationMin:
+		return raster.BlendOpMin
+	case gputypes.BlendOperationMax:
+		return raster.BlendOpMax
+	default:
+		return raster.BlendOpAdd
 	}
 }

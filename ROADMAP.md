@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.14
+## Current State: v0.30.21
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -84,6 +84,13 @@
 ✅ **GLES GLSL version propagation (Rust parity)** — detected `GL_SHADING_LANGUAGE_VERSION` flows from adapter → device → naga GLSL writer. No more hardcoded `#version 430`. Runtime binding fallback (`glGetUniformBlockIndex` + `glUniformBlockBinding` + `glUniform1i`) for GL < 4.2 where `layout(binding=N)` unavailable. `shaderBindingLayout` capability flag (Rust `SHADER_BINDING_LAYOUT` parity). Triangle verified on WSL2 Mesa d3d12 GL 4.1.
 ✅ **Wayland SHM presentation (enterprise quality)** — display wrapper pattern (Qt6 parity), `wl_display_roundtrip_queue`, proper proxy cleanup, triple-buffer freeze fix (bufferBusyMap pointer + roundtrip_queue dispatch). Verified on WSL2.
 ✅ **Codecov OIDC** — replaced token + GPG verification with GitHub OIDC. No more intermittent CI failures from GPG keyserver.
+✅ **PresentPixels check-before-mutate** — validate `hal.PixelPresenter` before discarding acquired texture. Rust wgpu validate-then-mutate pattern (v0.30.20)
+✅ **DX12 UMA GPU classification** — `CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE)` replaces VRAM heuristic. Exact Rust wgpu parity. CacheCoherentUMA stored for future memory pool optimization (v0.30.20, @Zeroes1)
+✅ **goffi v0.6.0 — ADR-049 three-tier FFI error handling** — 764 call sites migrated. Tier 1 (creation): check error. Tier 2 (void/hot path): infallible by GPU spec. Tier 3 (Wayland syscalls): errno diagnostics. Enterprise research: Rust wgpu-hal, Mesa, ash (v0.30.17)
+✅ **vk-gen enterprise improvements** — C array params decay to pointers, deterministic output (sorted map keys), auto-gofmt via go/format, correct build tag (v0.30.18)
+✅ **Software CopyTextureToBuffer row stride** — row-by-row copy respecting BytesPerRow (v0.30.21)
+✅ **Software blend state wiring** — extract blend from Fragment.Targets into raster pipeline (v0.30.21)
+✅ **Software BGRA readTexel** — R/B channel swap for BGRA8Unorm/Srgb textures (v0.30.21)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -184,6 +191,10 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.30.21** | 2026-07 | Software: CopyTextureToBuffer row stride, blend state wiring, BGRA readTexel |
+| **v0.30.20** | 2026-07 | PresentPixels check-before-mutate + DX12 UMA classification (@Zeroes1 #254) |
+| **v0.30.17-19** | 2026-07 | goffi v0.6.0 ADR-049 (764 FFI call sites), vk-gen array params + deterministic output, webgpu v0.5.3 |
+| **v0.30.15** | 2026-07 | PresentPixels/WritePixels 3-layer API, software blit debug cleanup |
 | **v0.30.0** | 2026-06 | **BREAKING: Unified public API (ADR-047).** StencilOperation→gputypes, Device.released→atomic.Bool, sentinel methods, MinBindGroups, CopyBufferToTexture+ClearBuffer native, browser fence stubs, browser-compute example. |
 | **v0.29.16** | 2026-06 | HAL wrapper stubs for Rust/Browser builds — public API compiles on all build targets. README updated. |
 | **v0.29.15** | 2026-06 | naga v0.17.15 (HLSL sampler fix, @georgebuilds), x/sys v0.46.0. |

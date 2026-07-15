@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+
+	"github.com/gogpu/gputypes"
 )
 
 // Execute runs the named entry point with the given input variable values.
@@ -1962,7 +1964,8 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 }
 
 // readTexel reads a single texel from the texture at pixel coordinates (x, y),
-// unpacking it to RGBA according to the texture's bytes-per-pixel. Single- and
+// unpacking it to RGBA according to the texture's bytes-per-pixel and format.
+// BGRA formats swap R and B channels to return normalized RGBA. Single- and
 // two-channel formats follow the WebGPU convention of filling missing color
 // channels with 0 and alpha with 1. A zero BytesPerPixel means "unspecified"
 // and is treated as 4 (RGBA8) for backward compatibility.
@@ -1981,6 +1984,14 @@ func readTexel(tex *Texture2D, x, y int) Vec4 {
 	case 2:
 		return Vec4{float32(tex.Data[idx]) / 255.0, float32(tex.Data[idx+1]) / 255.0, 0, 1}
 	default:
+		if isBGRAFormat(tex.Format) {
+			return Vec4{
+				float32(tex.Data[idx+2]) / 255.0,
+				float32(tex.Data[idx+1]) / 255.0,
+				float32(tex.Data[idx+0]) / 255.0,
+				float32(tex.Data[idx+3]) / 255.0,
+			}
+		}
 		return Vec4{
 			float32(tex.Data[idx+0]) / 255.0,
 			float32(tex.Data[idx+1]) / 255.0,
@@ -1988,6 +1999,11 @@ func readTexel(tex *Texture2D, x, y int) Vec4 {
 			float32(tex.Data[idx+3]) / 255.0,
 		}
 	}
+}
+
+// isBGRAFormat returns true if the format stores bytes in BGRA order.
+func isBGRAFormat(format uint32) bool {
+	return format == uint32(gputypes.TextureFormatBGRA8Unorm) || format == uint32(gputypes.TextureFormatBGRA8UnormSrgb)
 }
 
 // clampInt clamps an integer to [0, hi].
