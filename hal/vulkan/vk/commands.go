@@ -104,6 +104,7 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	c.createXlibSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateXlibSurfaceKHR")
 	c.createXcbSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateXcbSurfaceKHR")
 	c.createWaylandSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR")
+	c.createAndroidSurfaceKHR = GetInstanceProcAddr(instance, "vkCreateAndroidSurfaceKHR")
 	c.createMetalSurfaceEXT = GetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT")
 
 	// Vulkan 1.1+ instance functions
@@ -315,6 +316,21 @@ func (c *Commands) HasCreateXlibSurfaceKHR() bool {
 // HasCreateWaylandSurfaceKHR returns true if vkCreateWaylandSurfaceKHR is available.
 func (c *Commands) HasCreateWaylandSurfaceKHR() bool {
 	return c.createWaylandSurfaceKHR != nil
+}
+
+// HasCreateAndroidSurfaceKHR returns true if vkCreateAndroidSurfaceKHR is available.
+func (c *Commands) HasCreateAndroidSurfaceKHR() bool {
+	return c.createAndroidSurfaceKHR != nil
+}
+
+// HasWSIQueries reports whether the VK_KHR_surface commands used by the
+// backend are available. Platform surface creation is checked separately.
+func (c *Commands) HasWSIQueries() bool {
+	return c.destroySurfaceKHR != nil &&
+		c.getPhysicalDeviceSurfaceSupportKHR != nil &&
+		c.getPhysicalDeviceSurfaceCapabilitiesKHR != nil &&
+		c.getPhysicalDeviceSurfaceFormatsKHR != nil &&
+		c.getPhysicalDeviceSurfacePresentModesKHR != nil
 }
 
 // HasCreateMetalSurfaceEXT returns true if vkCreateMetalSurfaceEXT is available.

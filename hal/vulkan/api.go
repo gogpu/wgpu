@@ -25,6 +25,11 @@ func (Backend) Variant() gputypes.Backend {
 
 // CreateInstance creates a new Vulkan instance.
 func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error) {
+	platform, err := newPlatformInstanceState(desc)
+	if err != nil {
+		return nil, err
+	}
+
 	// Initialize Vulkan library
 	if err := vk.Init(); err != nil {
 		return nil, fmt.Errorf("vulkan: failed to initialize: %w", err)
@@ -123,6 +128,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		handle:       instance,
 		cmds:         *cmds,
 		debugEnabled: validationEnabled,
+		platform:     platform,
 	}
 
 	// Create debug messenger when validation layers are active.
@@ -145,6 +151,7 @@ type Instance struct {
 	cmds           vk.Commands
 	debugMessenger vk.DebugUtilsMessengerEXT
 	debugEnabled   bool
+	platform       platformInstanceState
 }
 
 // EnumerateAdapters returns available Vulkan adapters (physical devices).
@@ -296,9 +303,9 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	return s.createSwapchain(vkDevice, config)
 }
 
-// ActualExtent returns the actual swapchain dimensions after driver clamping.
-// On Vulkan, the driver may clamp the requested extent to its supported range
-// (e.g., on X11 HiDPI). Returns (0, 0) if no swapchain is configured.
+// ActualExtent returns the dimensions selected for the swapchain. A defined
+// Vulkan CurrentExtent is compositor-owned; otherwise the requested extent is
+// clamped to the supported range. Returns (0, 0) if no swapchain is configured.
 func (s *Surface) ActualExtent() (width, height uint32) {
 	if s.swapchain == nil {
 		return 0, 0

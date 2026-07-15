@@ -51,6 +51,7 @@ type Instance interface {
 	// CreateSurface creates a rendering surface from platform handles.
 	// displayHandle is platform-specific (HDC on Windows, NSWindow* on macOS, etc.).
 	// windowHandle is the window handle (HWND on Windows, NSView* on macOS, etc.).
+	// On Android, displayHandle is ignored and windowHandle is ANativeWindow*.
 	CreateSurface(displayHandle, windowHandle uintptr) (Surface, error)
 
 	// EnumerateAdapters enumerates available physical GPUs.
