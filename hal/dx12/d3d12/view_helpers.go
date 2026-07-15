@@ -43,9 +43,8 @@ func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture2DArray(mostDetailedMip, mip
 	binary.LittleEndian.PutUint32(d.Union[4:8], mipLevels)
 	binary.LittleEndian.PutUint32(d.Union[8:12], firstArraySlice)
 	binary.LittleEndian.PutUint32(d.Union[12:16], arraySize)
-	// Note: planeSlice and resourceMinLODClamp are in extended union space (handled by D3D12)
-	_ = planeSlice
-	_ = resourceMinLODClamp
+	binary.LittleEndian.PutUint32(d.Union[16:20], planeSlice)
+	binary.LittleEndian.PutUint32(d.Union[20:24], floatBits(resourceMinLODClamp))
 }
 
 // SetTexture3D sets up a 3D texture SRV.

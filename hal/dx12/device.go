@@ -1385,6 +1385,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			},
 			format:     st.format,
 			dimension:  gputypes.TextureViewDimension2D,
+			aspect:     gputypes.TextureAspectAll,
 			baseMip:    0,
 			mipCount:   1,
 			baseLayer:  0,
@@ -1450,11 +1451,15 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		texture:    tex,
 		format:     viewFormat,
 		dimension:  viewDim,
+		aspect:     gputypes.TextureAspectAll,
 		baseMip:    baseMip,
 		mipCount:   mipCount,
 		baseLayer:  baseLayer,
 		layerCount: layerCount,
 		device:     d,
+	}
+	if desc != nil && desc.Aspect != gputypes.TextureAspectUndefined {
+		view.aspect = desc.Aspect
 	}
 
 	dxgiFormat := textureFormatToD3D12(viewFormat)
@@ -1466,7 +1471,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate RTV descriptor
 		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err))
 		}
 
 		var rtvDesc d3d12.D3D12_RENDER_TARGET_VIEW_DESC
@@ -1507,7 +1512,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate DSV descriptor
 		dsvHandle, dsvIndex, err := d.allocateDSVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate DSV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate DSV descriptor: %w", err))
 		}
 
 		// For depth views, use the actual depth format, not typeless
@@ -1549,13 +1554,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate SRV descriptor
 		srvHandle, srvIndex, err := d.allocateSRVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate SRV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate SRV descriptor: %w", err))
 		}
 
-		// For depth textures, use SRV-compatible format
-		srvFormat := dxgiFormat
-		if isDepthFormat(viewFormat) {
-			srvFormat = depthFormatToSRV(viewFormat)
+		srvFormat, srvPlane := textureFormatToSRV(viewFormat, view.aspect)
+		if srvFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+			d.stagingViewHeap.Free(srvIndex, 1)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: texture format %d aspect %d cannot create an SRV", viewFormat, view.aspect))
 		}
 
 		// Create SRV desc
@@ -1570,9 +1575,9 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		case gputypes.TextureViewDimension1D:
 			srvDesc.SetTexture1D(baseMip, mipCount, 0)
 		case gputypes.TextureViewDimension2D:
-			srvDesc.SetTexture2D(baseMip, mipCount, 0, 0)
+			srvDesc.SetTexture2D(baseMip, mipCount, srvPlane, 0)
 		case gputypes.TextureViewDimension2DArray:
-			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, 0, 0)
+			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, srvPlane, 0)
 		case gputypes.TextureViewDimensionCube:
 			srvDesc.SetTextureCube(baseMip, mipCount, 0)
 		case gputypes.TextureViewDimensionCubeArray:
@@ -1588,6 +1593,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	return view, nil
+}
+
+func failTextureViewCreation(view *TextureView, err error) (hal.TextureView, error) {
+	if view != nil {
+		view.Destroy()
+	}
+	return nil, err
 }
 
 // DestroyTextureView destroys a texture view.

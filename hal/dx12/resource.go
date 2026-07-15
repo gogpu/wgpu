@@ -248,6 +248,7 @@ type TextureView struct {
 	texture      *Texture
 	format       gputypes.TextureFormat
 	dimension    gputypes.TextureViewDimension
+	aspect       gputypes.TextureAspect
 	baseMip      uint32
 	mipCount     uint32
 	baseLayer    uint32
