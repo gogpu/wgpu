@@ -272,6 +272,12 @@ type Surface struct {
 // This commonly happens when the window is minimized or not yet fully visible.
 // Wait until the window has valid dimensions before calling Configure again.
 func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration) error {
+	if s == nil {
+		return fmt.Errorf("vulkan: surface is nil")
+	}
+	if config == nil {
+		return fmt.Errorf("vulkan: surface configuration is nil")
+	}
 	// Validate dimensions first (before any side effects).
 	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
 	if config.Width == 0 || config.Height == 0 {
@@ -301,18 +307,45 @@ func (s *Surface) ActualExtent() (width, height uint32) {
 	return s.swapchain.extent.Width, s.swapchain.extent.Height
 }
 
+func (s *Surface) detachSwapchainFromQueue(swapchain *Swapchain) {
+	if s.device == nil || s.device.queue == nil {
+		return
+	}
+	queue := s.device.queue
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	if queue.activeSwapchain != swapchain {
+		return
+	}
+	queue.activeSwapchain = nil
+	queue.acquireUsed = false
+}
+
 // Unconfigure removes surface configuration.
 func (s *Surface) Unconfigure(_ hal.Device) {
-	if s.swapchain != nil {
-		s.swapchain.Destroy()
-		s.swapchain = nil
+	if s == nil {
+		return
 	}
+	if s.swapchain == nil {
+		s.device = nil
+		return
+	}
+	swapchain := s.swapchain
+	if err := swapchain.destroyWithError(); err != nil {
+		hal.Logger().Error("vulkan: failed to destroy swapchain during unconfigure", "error", err)
+		return
+	}
+	s.detachSwapchainFromQueue(swapchain)
+	s.swapchain = nil
 	s.device = nil
 }
 
 // AcquireTexture acquires the next surface texture for rendering.
 // Returns hal.ErrNotReady if no image is available (non-blocking mode).
 func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
+	if s == nil {
+		return nil, fmt.Errorf("vulkan: surface is nil")
+	}
 	if s.swapchain == nil {
 		return nil, fmt.Errorf("vulkan: surface not configured")
 	}
@@ -331,8 +364,10 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	// This ensures the queue waits for image acquisition before rendering
 	// and signals completion before present.
 	if s.device != nil && s.device.queue != nil {
+		s.device.queue.mu.Lock()
 		s.device.queue.activeSwapchain = s.swapchain
 		s.device.queue.acquireUsed = false // Reset for new frame
+		s.device.queue.mu.Unlock()
 	}
 
 	return &hal.AcquiredSurfaceTexture{
@@ -343,15 +378,27 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 
 // DiscardTexture discards a surface texture without presenting it.
 func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {
-	if s.swapchain != nil {
-		s.swapchain.imageAcquired = false
+	if s == nil {
+		return
+	}
+	if s.swapchain != nil && s.swapchain.imageAcquired {
+		s.swapchain.markBroken(fmt.Errorf("vulkan: acquired surface texture was discarded without presentation"))
+		s.detachSwapchainFromQueue(s.swapchain)
 	}
 }
 
 // Destroy releases the surface.
 func (s *Surface) Destroy() {
+	if s == nil {
+		return
+	}
 	if s.swapchain != nil {
-		s.swapchain.Destroy()
+		swapchain := s.swapchain
+		if err := swapchain.destroyWithError(); err != nil {
+			hal.Logger().Error("vulkan: failed to destroy swapchain", "error", err)
+			return
+		}
+		s.detachSwapchainFromQueue(swapchain)
 		s.swapchain = nil
 	}
 	if s.handle != 0 && s.instance != nil {
