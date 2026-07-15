@@ -122,4 +122,16 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 	if cached.halAdapter != secondHAL {
 		t.Fatal("surface request mutated cached adapter")
 	}
+
+	instance.ReleaseSurfaceAdapter(selectedID)
+	instance.ReleaseSurfaceAdapter(selectedAgain)
+	if len(instance.surfaceAdapters) != 0 {
+		t.Fatalf("surface adapter ownership after release = %d, want 0", len(instance.surfaceAdapters))
+	}
+	if _, err := hub.GetAdapter(selectedID); err == nil {
+		t.Fatal("first released surface adapter remains registered")
+	}
+	if _, err := hub.GetAdapter(selectedAgain); err == nil {
+		t.Fatal("second released surface adapter remains registered")
+	}
 }

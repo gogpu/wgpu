@@ -461,6 +461,40 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 	return selectAdapterIDs(options, candidates)
 }
 
+// ReleaseSurfaceAdapter releases a request-local adapter created by
+// RequestAdapterWithSurface. Ordinary cached adapter IDs are instance-owned and
+// intentionally ignored, so public Adapter.Release can use this method without
+// special-casing the selected backend.
+func (i *Instance) ReleaseSurfaceAdapter(id AdapterID) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	index := -1
+	for candidateIndex, candidateID := range i.surfaceAdapters {
+		if candidateID == id {
+			index = candidateIndex
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+
+	hub := GetGlobal().Hub()
+	if adapter, err := hub.GetAdapter(id); err == nil {
+		if adapter.halAdapter != nil {
+			adapter.halAdapter.Destroy()
+		}
+		_, _ = hub.UnregisterAdapter(id)
+	}
+	copy(i.surfaceAdapters[index:], i.surfaceAdapters[index+1:])
+	i.surfaceAdapters[len(i.surfaceAdapters)-1] = AdapterID{}
+	i.surfaceAdapters = i.surfaceAdapters[:len(i.surfaceAdapters)-1]
+}
+
 // enumerateDeferredGLES enumerates adapters for deferred GLES HAL instances.
 // Called at most once per instance (guarded by glesEnumerated flag).
 //
