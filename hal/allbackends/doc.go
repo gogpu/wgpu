@@ -16,14 +16,16 @@
 //   - Metal backend (macOS, iOS)
 //   - DX12 backend (Windows)
 //   - OpenGL ES backend (Windows, Linux)
-//   - No-op backend (all platforms, for testing)
 //
 // After importing, use hal.GetBackend or hal.SelectBestBackend to access backends.
 //
 // Build tags control which backends are available:
 //   - Default: All backends for the current platform
 //   - "!android": Excludes Android-specific Vulkan loader
-//   - "software": Includes software rasterizer backend
+//
+// The software and no-op providers are not registered by this package. Import
+// github.com/gogpu/wgpu/hal/software or hal/noop explicitly when those
+// providers are required.
 //
 // Example usage:
 //

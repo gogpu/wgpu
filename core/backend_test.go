@@ -13,11 +13,12 @@ import (
 type testProvider struct {
 	variant   gputypes.Backend
 	available bool
+	instance  hal.Instance
 }
 
 func (p *testProvider) Variant() gputypes.Backend { return p.variant }
 func (p *testProvider) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
-	return nil, nil //nolint:nilnil
+	return p.instance, nil
 }
 func (p *testProvider) IsAvailable() bool { return p.available }
 

@@ -11,7 +11,7 @@ import (
 func TestGetAdapterInfo(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapters := instance.EnumerateAdapters()
 	if len(adapters) == 0 {
 		t.Fatal("no adapters available")
@@ -49,7 +49,7 @@ func TestGetAdapterInfoInvalid(t *testing.T) {
 func TestGetAdapterFeatures(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapters := instance.EnumerateAdapters()
 	if len(adapters) == 0 {
 		t.Fatal("no adapters available")
@@ -80,7 +80,7 @@ func TestGetAdapterFeaturesInvalid(t *testing.T) {
 func TestGetAdapterLimits(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapters := instance.EnumerateAdapters()
 	if len(adapters) == 0 {
 		t.Fatal("no adapters available")
@@ -154,7 +154,7 @@ func TestRequestDevice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			GetGlobal().Clear()
 
-			instance := NewInstance(nil)
+			instance := NewInstanceWithMock(nil)
 			adapters := instance.EnumerateAdapters()
 			if len(adapters) == 0 {
 				t.Fatal("no adapters available")
@@ -202,7 +202,7 @@ func TestRequestDeviceInvalidAdapter(t *testing.T) {
 func TestAdapterDrop(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapters := instance.EnumerateAdapters()
 	if len(adapters) == 0 {
 		t.Fatal("no adapters available")
@@ -244,7 +244,7 @@ func TestAdapterLifecycle(t *testing.T) {
 	GetGlobal().Clear()
 
 	// 1. Create instance
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 
 	// 2. Request adapter
 	adapterID, err := instance.RequestAdapter(nil)
@@ -298,7 +298,7 @@ func TestAdapterLifecycle(t *testing.T) {
 func TestAdapterConcurrentAccess(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapterID, err := instance.RequestAdapter(nil)
 	if err != nil {
 		t.Fatalf("RequestAdapter() error: %v", err)
@@ -324,7 +324,7 @@ func TestAdapterConcurrentAccess(t *testing.T) {
 func TestRequestDeviceFeatureValidation(t *testing.T) {
 	GetGlobal().Clear()
 
-	instance := NewInstance(nil)
+	instance := NewInstanceWithMock(nil)
 	adapterID, err := instance.RequestAdapter(nil)
 	if err != nil {
 		t.Fatalf("RequestAdapter() error: %v", err)

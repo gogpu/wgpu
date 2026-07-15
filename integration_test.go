@@ -46,13 +46,13 @@ func createTestDevice(t *testing.T) (*wgpu.Instance, *wgpu.Adapter, *wgpu.Device
 		t.Skipf("cannot request device: %v", err)
 	}
 
-	// Check that the device has actual HAL integration (not a mock adapter).
-	// Mock adapters have no queue and cannot create GPU resources.
+	// Check that the device has actual HAL integration. A provider-less
+	// instance fails RequestAdapter rather than manufacturing a mock device.
 	if device.Queue() == nil {
 		device.Release()
 		adapter.Release()
 		instance.Release()
-		t.Skip("skipping: device has no HAL integration (mock adapter; no GPU backend available)")
+		t.Skip("skipping: device has no HAL integration (no GPU backend available)")
 	}
 
 	return instance, adapter, device
