@@ -28,6 +28,51 @@ env:
   CGO_ENABLED: 0
 
 jobs:
+  # Draft-only integration against the exact canonical goffi Android candidate.
+  # The script creates an ephemeral go.work; module metadata stays releasable.
+  android-arm64-preview:
+    name: Android arm64 preview - Go ${{ matrix.go-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.25.12', '1.26.5']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Checkout exact goffi Android candidate
+      uses: actions/checkout@v4
+      with:
+        repository: go-webgpu/goffi
+        ref: 8ccaae72d877a7af0af4b628bf86e92536e27d88
+        path: .ci/goffi
+        persist-credentials: false
+
+    - name: Verify exact goffi candidate
+      working-directory: .ci/goffi
+      run: test "$(git rev-parse HEAD)" = 8ccaae72d877a7af0af4b628bf86e92536e27d88
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Android NDK r29
+      run: sdkmanager 'ndk;29.0.14206865'
+
+    - name: Check Android arm64 source, tests, and ELF dependencies
+      env:
+        GOFFI_DIR: ${{ github.workspace }}/.ci/goffi
+        GOFFI_EXPECTED_HEAD: 8ccaae72d877a7af0af4b628bf86e92536e27d88
+      run: |
+        export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+        ./scripts/check-android-arm64-preview.sh
+
   # Build verification - Cross-platform
   build:
     name: Build - ${{ matrix.os }}
