@@ -6,6 +6,7 @@
 package vulkan
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"unsafe"
@@ -308,30 +309,39 @@ func querySwapchainFormats(instance *Instance, device vk.PhysicalDevice, surface
 }
 
 func querySwapchainFormatsWith(query func(count *uint32, formats *vk.SurfaceFormatKHR) vk.Result) ([]vk.SurfaceFormatKHR, error) {
+	return queryRequiredSwapchainValues(
+		"vkGetPhysicalDeviceSurfaceFormatsKHR",
+		"vkGetPhysicalDeviceSurfaceFormatsKHR",
+		"vulkan: surface returned no formats",
+		query,
+	)
+}
+
+func queryRequiredSwapchainValues[T any](countOperation, valuesOperation, emptyMessage string, query func(count *uint32, values *T) vk.Result) ([]T, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		var count uint32
 		result := query(&count, nil)
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetPhysicalDeviceSurfaceFormatsKHR (count)", result)
+			return nil, surfaceQueryError(countOperation+" (count)", result)
 		}
 		if count == 0 {
-			return nil, fmt.Errorf("vulkan: surface returned no formats")
+			return nil, errors.New(emptyMessage)
 		}
-		formats := make([]vk.SurfaceFormatKHR, count)
+		values := make([]T, count)
 		returned := count
-		result = query(&returned, &formats[0])
+		result = query(&returned, &values[0])
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetPhysicalDeviceSurfaceFormatsKHR", result)
+			return nil, surfaceQueryError(valuesOperation, result)
 		}
-		if result == vk.Incomplete || returned > uint32(len(formats)) {
+		if result == vk.Incomplete || returned > uint32(len(values)) {
 			continue
 		}
 		if returned == 0 {
-			return nil, fmt.Errorf("vulkan: surface returned no formats")
+			return nil, errors.New(emptyMessage)
 		}
-		return formats[:returned], nil
+		return values[:returned], nil
 	}
-	return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceFormatsKHR returned an unstable count")
+	return nil, fmt.Errorf("vulkan: %s returned an unstable count", valuesOperation)
 }
 
 func querySwapchainPresentModes(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) ([]vk.PresentModeKHR, error) {
@@ -341,30 +351,12 @@ func querySwapchainPresentModes(instance *Instance, device vk.PhysicalDevice, su
 }
 
 func querySwapchainPresentModesWith(query func(count *uint32, modes *vk.PresentModeKHR) vk.Result) ([]vk.PresentModeKHR, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		var count uint32
-		result := query(&count, nil)
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetPhysicalDeviceSurfacePresentModesKHR (count)", result)
-		}
-		if count == 0 {
-			return nil, fmt.Errorf("vulkan: surface returned no present modes")
-		}
-		modes := make([]vk.PresentModeKHR, count)
-		returned := count
-		result = query(&returned, &modes[0])
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetPhysicalDeviceSurfacePresentModesKHR", result)
-		}
-		if result == vk.Incomplete || returned > uint32(len(modes)) {
-			continue
-		}
-		if returned == 0 {
-			return nil, fmt.Errorf("vulkan: surface returned no present modes")
-		}
-		return modes[:returned], nil
-	}
-	return nil, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfacePresentModesKHR returned an unstable count")
+	return queryRequiredSwapchainValues(
+		"vkGetPhysicalDeviceSurfacePresentModesKHR",
+		"vkGetPhysicalDeviceSurfacePresentModesKHR",
+		"vulkan: surface returned no present modes",
+		query,
+	)
 }
 
 func querySwapchainImages(device *Device, swapchain vk.SwapchainKHR) ([]vk.Image, error) {
@@ -374,31 +366,12 @@ func querySwapchainImages(device *Device, swapchain vk.SwapchainKHR) ([]vk.Image
 }
 
 func querySwapchainImagesWith(query func(count *uint32, images *vk.Image) vk.Result) ([]vk.Image, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		var count uint32
-		result := query(&count, nil)
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetSwapchainImagesKHR (count)", result)
-		}
-		if count == 0 {
-			return nil, fmt.Errorf("vulkan: swapchain returned no images")
-		}
-
-		images := make([]vk.Image, count)
-		returned := count
-		result = query(&returned, &images[0])
-		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError("vkGetSwapchainImagesKHR (images)", result)
-		}
-		if result == vk.Incomplete || returned > uint32(len(images)) {
-			continue
-		}
-		if returned == 0 {
-			return nil, fmt.Errorf("vulkan: swapchain returned no images")
-		}
-		return images[:returned], nil
-	}
-	return nil, fmt.Errorf("vulkan: vkGetSwapchainImagesKHR returned an unstable image count")
+	return queryRequiredSwapchainValues(
+		"vkGetSwapchainImagesKHR",
+		"vkGetSwapchainImagesKHR (images)",
+		"vulkan: swapchain returned no images",
+		query,
+	)
 }
 
 // createSwapchain creates a new swapchain for the surface.
@@ -723,30 +696,39 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	// Retire the old swapchain only after the replacement has fully succeeded.
 	// Its handle remains valid until its views and synchronization primitives are
 	// released, as required by Vulkan's OldSwapchain transition rules.
-	if oldSwapchain != nil {
-		if err := oldSwapchain.destroyResourcesAfterIdle(); err != nil {
-			_ = swapchain.destroyResources()
-			vkDestroySwapchainKHR(device, swapchainHandle, nil)
-			return fmt.Errorf("vulkan: retire old swapchain: %w", err)
-		}
-		if oldSwapchainHandle != 0 {
-			vkDestroySwapchainKHR(device, oldSwapchainHandle, nil)
-		}
-		oldSwapchain.handle = 0
-		oldSwapchain.destroyed = true
-		if device.queue != nil {
-			device.queue.mu.Lock()
-			if device.queue.activeSwapchain == oldSwapchain {
-				device.queue.activeSwapchain = nil
-				device.queue.acquireUsed = false
-			}
-			device.queue.mu.Unlock()
-		}
+	if err := retireOldSwapchain(device, oldSwapchain, oldSwapchainHandle); err != nil {
+		_ = swapchain.destroyResources()
+		vkDestroySwapchainKHR(device, swapchainHandle, nil)
+		return err
 	}
 
 	s.swapchain = swapchain
 	s.device = device
 
+	return nil
+}
+
+func retireOldSwapchain(device *Device, oldSwapchain *Swapchain, oldHandle vk.SwapchainKHR) error {
+	if oldSwapchain == nil {
+		return nil
+	}
+	if err := oldSwapchain.destroyResourcesAfterIdle(); err != nil {
+		return fmt.Errorf("vulkan: retire old swapchain: %w", err)
+	}
+	if oldHandle != 0 {
+		vkDestroySwapchainKHR(device, oldHandle, nil)
+	}
+	oldSwapchain.handle = 0
+	oldSwapchain.destroyed = true
+	if device.queue == nil {
+		return nil
+	}
+	device.queue.mu.Lock()
+	if device.queue.activeSwapchain == oldSwapchain {
+		device.queue.activeSwapchain = nil
+		device.queue.acquireUsed = false
+	}
+	device.queue.mu.Unlock()
 	return nil
 }
 
