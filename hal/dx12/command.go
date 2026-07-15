@@ -1349,10 +1349,10 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 	if stencilReadOnly {
 		dsvFlags |= d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL
 	}
-	exposedPlanes := textureAspectPlanes(view.texture, view.aspect)
+	_, srvPlane := textureFormatToSRV(view.format, view.aspect)
 	plans := make([]stateBarrierPlan, 0)
 	for _, subresource := range textureViewPhysicalSubresourcePlanes(view) {
-		shaderReadable := view.hasSRV && containsPlane(exposedPlanes, subresource.plane)
+		shaderReadable := view.hasSRV && subresource.plane == srvPlane
 		state := depthStencilPlaneState(subresource.plane, depthReadOnly, stencilReadOnly, shaderReadable)
 		if before, needsBarrier := e.stateTracker.transitionTexture(view.texture, subresource.subresource, state); needsBarrier {
 			plans = append(plans, stateBarrierPlan{resource: view.texture, subresource: subresource.subresource, before: before, after: state})
@@ -1384,15 +1384,6 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 	}
 
 	return dsvHandle
-}
-
-func containsPlane(planes []uint32, target uint32) bool {
-	for _, plane := range planes {
-		if plane == target {
-			return true
-		}
-	}
-	return false
 }
 
 // bufferUsageToD3D12State converts buffer usage to D3D12 resource state.

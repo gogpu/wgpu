@@ -1570,10 +1570,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		view.hasDSVVariants[0] = true
 		view.hasDSV = true
 
-		// D3D12 encodes read-only depth/stencil planes in the DSV itself.
-		// Keep all four flag combinations so a render pass can select the
-		// descriptor matching its DepthReadOnly/StencilReadOnly attachment.
-		for mask := uint32(1); mask < 4; mask++ {
+		// D3D12 encodes read-only depth/stencil planes in the DSV itself. A
+		// stencil read-only flag is invalid for single-plane D16/D32 formats,
+		// while WebGPU's Depth24Plus and Stencil8 use packed D24S8 resources and
+		// need both physical-plane flags to protect their hidden companion.
+		for _, mask := range dsvReadOnlyVariantMasks(viewFormat) {
 			variantHandle, variantIndex, variantErr := d.allocateDSVDescriptor()
 			if variantErr != nil {
 				return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate read-only DSV descriptor: %w", variantErr))
@@ -1631,6 +1632,22 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	return view, nil
+}
+
+func dsvReadOnlyVariantMasks(format gputypes.TextureFormat) []uint32 {
+	switch format {
+	case gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
+		return []uint32{
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH),
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL),
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH | d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL),
+		}
+	default:
+		return []uint32{uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH)}
+	}
 }
 
 func failTextureViewCreation(view *TextureView, err error) (hal.TextureView, error) {
@@ -2792,14 +2809,14 @@ func (d *Device) Destroy() {
 	if waitErr != nil {
 		deviceRemoved = d.raw.GetDeviceRemovedReason() != nil
 	}
-	if state != nil && shouldReleaseTerminalOwnedObjects(waitErr, deviceRemoved) {
-		state.releaseAllOwnedLocked()
-	} else if state != nil && (len(state.preambleInFlight) > 0 || len(state.oneShotsInFlight) > 0) {
-		// A failed event registration/wait does not prove GPU completion.
-		// Retain the COM objects rather than releasing allocators, command lists,
-		// or staging resources that may still be in flight. Device removal is the
-		// only safe exception.
-		hal.Logger().Warn("dx12: retaining queue-owned GPU objects after ambiguous idle failure", "err", waitErr)
+	if state != nil {
+		state.releaseTerminalOwnedLocked(waitErr, deviceRemoved)
+		if !shouldReleaseTerminalOwnedObjects(waitErr, deviceRemoved) &&
+			(len(state.preambleInFlight) > 0 || len(state.oneShotsInFlight) > 0) {
+			// A failed event registration/wait does not prove GPU completion.
+			// Device removal is the only safe exception for in-flight work.
+			hal.Logger().Warn("dx12: retaining queue-owned GPU objects after ambiguous idle failure", "err", waitErr)
+		}
 	}
 
 	d.cleanup()

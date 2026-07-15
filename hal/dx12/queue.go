@@ -35,6 +35,8 @@ type queueState struct {
 	closed   bool
 
 	preambleInFlight []preambleInFlight
+	preambleIdle     []preambleInFlight
+	preambleOps      preambleNativeOps
 	oneShotsInFlight []oneShotInFlight
 }
 
@@ -42,7 +44,21 @@ type preambleInFlight struct {
 	submission uint64
 	allocator  *d3d12.ID3D12CommandAllocator
 	cmdList    *d3d12.ID3D12GraphicsCommandList
+	testID     uint64
 }
+
+// preambleNativeOps keeps allocator/list lifecycle effects behind a narrow
+// seam. The pool owns allocator/list pairs as one unit; tests can exercise
+// every failure path without constructing COM objects.
+type preambleNativeOps interface {
+	create(*Device) (preambleInFlight, error)
+	resetAllocator(preambleInFlight) error
+	resetCommandList(preambleInFlight) error
+	recordAndClose(preambleInFlight, []stateBarrierPlan) error
+	release(preambleInFlight)
+}
+
+type d3d12PreambleNativeOps struct{}
 
 // oneShotInFlight owns only native objects. Keeping Device/Buffer/encoder
 // wrappers here would create a finalizer cycle through Device.queueState.
@@ -166,10 +182,7 @@ func (q *Queue) submitLocked(commandBuffers []hal.CommandBuffer) (uint64, error)
 		if i < len(preambles) && len(preambles[i]) > 0 {
 			preamble, err := q.buildPreamble(preambles[i])
 			if err != nil {
-				for _, built := range nativePreambles {
-					built.cmdList.Release()
-					built.allocator.Release()
-				}
+				q.releaseBuiltPreambles(nativePreambles)
 				return 0, err
 			}
 			nativePreambles = append(nativePreambles, preamble)
@@ -216,6 +229,12 @@ func (q *Queue) submitLocked(commandBuffers []hal.CommandBuffer) (uint64, error)
 	)
 
 	return submission, nil
+}
+
+func (q *Queue) releaseBuiltPreambles(preambles []preambleInFlight) {
+	for _, preamble := range preambles {
+		q.state.releasePreamble(preamble)
+	}
 }
 
 func (q *Queue) lockOpen() error {
@@ -297,15 +316,58 @@ func (q *Queue) commitScheduledStates(final map[any]map[uint32]d3d12.D3D12_RESOU
 }
 
 func (q *Queue) buildPreamble(plans []stateBarrierPlan) (preambleInFlight, error) {
-	allocator, err := q.device.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
+	ops := q.state.nativePreambleOps()
+	if count := len(q.state.preambleIdle); count > 0 {
+		preamble := q.state.preambleIdle[count-1]
+		q.state.preambleIdle[count-1] = preambleInFlight{}
+		q.state.preambleIdle = q.state.preambleIdle[:count-1]
+		preamble.submission = 0
+
+		if err := ops.resetAllocator(preamble); err == nil {
+			if err = ops.resetCommandList(preamble); err == nil {
+				if err = ops.recordAndClose(preamble, plans); err == nil {
+					return preamble, nil
+				}
+			}
+		}
+		// A pair with any failed reset or close is no longer reusable. Release
+		// both objects before falling back to a fresh pair.
+		ops.release(preamble)
+	}
+
+	preamble, err := ops.create(q.device)
+	if err != nil {
+		return preambleInFlight{}, err
+	}
+	if err := ops.recordAndClose(preamble, plans); err != nil {
+		ops.release(preamble)
+		return preambleInFlight{}, fmt.Errorf("dx12: close state preamble command list: %w", err)
+	}
+	return preamble, nil
+}
+
+func (d3d12PreambleNativeOps) create(device *Device) (preambleInFlight, error) {
+	allocator, err := device.raw.CreateCommandAllocator(d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT)
 	if err != nil {
 		return preambleInFlight{}, fmt.Errorf("dx12: create state preamble allocator: %w", err)
 	}
-	list, err := q.device.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nil)
+	list, err := device.raw.CreateCommandList(0, d3d12.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nil)
 	if err != nil {
 		allocator.Release()
 		return preambleInFlight{}, fmt.Errorf("dx12: create state preamble command list: %w", err)
 	}
+	return preambleInFlight{allocator: allocator, cmdList: list}, nil
+}
+
+func (d3d12PreambleNativeOps) resetAllocator(preamble preambleInFlight) error {
+	return preamble.allocator.Reset()
+}
+
+func (d3d12PreambleNativeOps) resetCommandList(preamble preambleInFlight) error {
+	return preamble.cmdList.Reset(preamble.allocator, nil)
+}
+
+func (d3d12PreambleNativeOps) recordAndClose(preamble preambleInFlight, plans []stateBarrierPlan) error {
 	barriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(plans))
 	for _, plan := range plans {
 		var raw *d3d12.ID3D12Resource
@@ -321,21 +383,30 @@ func (q *Queue) buildPreamble(plans []stateBarrierPlan) (preambleInFlight, error
 		barriers = append(barriers, d3d12.NewTransitionBarrier(raw, plan.before, plan.after, plan.subresource))
 	}
 	if len(barriers) > 0 {
-		list.ResourceBarrier(uint32(len(barriers)), &barriers[0])
+		preamble.cmdList.ResourceBarrier(uint32(len(barriers)), &barriers[0])
 	}
-	if err := list.Close(); err != nil {
-		list.Release()
-		allocator.Release()
-		return preambleInFlight{}, fmt.Errorf("dx12: close state preamble command list: %w", err)
+	return preamble.cmdList.Close()
+}
+
+func (d3d12PreambleNativeOps) release(preamble preambleInFlight) {
+	if preamble.cmdList != nil {
+		preamble.cmdList.Release()
 	}
-	return preambleInFlight{allocator: allocator, cmdList: list}, nil
+	if preamble.allocator != nil {
+		preamble.allocator.Release()
+	}
 }
 
 func (q *Queue) releaseCompletedPreambles(completed uint64) {
 	keep := q.state.preambleInFlight[:0]
 	for _, preamble := range q.state.preambleInFlight {
 		if preamble.submission != 0 && preamble.submission <= completed {
-			releasePreamble(preamble)
+			preamble.submission = 0
+			if len(q.state.preambleIdle) < maxFramesInFlight {
+				q.state.preambleIdle = append(q.state.preambleIdle, preamble)
+			} else {
+				q.state.releasePreamble(preamble)
+			}
 			continue
 		}
 		keep = append(keep, preamble)
@@ -343,13 +414,15 @@ func (q *Queue) releaseCompletedPreambles(completed uint64) {
 	q.state.preambleInFlight = keep
 }
 
-func releasePreamble(preamble preambleInFlight) {
-	if preamble.cmdList != nil {
-		preamble.cmdList.Release()
+func (s *queueState) nativePreambleOps() preambleNativeOps {
+	if s.preambleOps != nil {
+		return s.preambleOps
 	}
-	if preamble.allocator != nil {
-		preamble.allocator.Release()
-	}
+	return d3d12PreambleNativeOps{}
+}
+
+func (s *queueState) releasePreamble(preamble preambleInFlight) {
+	s.nativePreambleOps().release(preamble)
 }
 
 func (q *Queue) releaseCompletedOneShots(completed uint64) {
@@ -382,13 +455,31 @@ func releaseOneShot(oneShot oneShotInFlight) {
 
 func (s *queueState) releaseAllOwnedLocked() {
 	for _, preamble := range s.preambleInFlight {
-		releasePreamble(preamble)
+		s.releasePreamble(preamble)
 	}
 	s.preambleInFlight = nil
+	s.releaseIdlePreamblesLocked()
 	for _, oneShot := range s.oneShotsInFlight {
 		releaseOneShot(oneShot)
 	}
 	s.oneShotsInFlight = nil
+}
+
+func (s *queueState) releaseIdlePreamblesLocked() {
+	for _, preamble := range s.preambleIdle {
+		s.releasePreamble(preamble)
+	}
+	s.preambleIdle = nil
+}
+
+func (s *queueState) releaseTerminalOwnedLocked(waitErr error, deviceRemoved bool) {
+	if shouldReleaseTerminalOwnedObjects(waitErr, deviceRemoved) {
+		s.releaseAllOwnedLocked()
+		return
+	}
+	// Idle pairs have already crossed a trustworthy fence. Keep only native
+	// objects whose in-flight completion remains ambiguous.
+	s.releaseIdlePreamblesLocked()
 }
 
 func (q *Queue) retainPreamblesWithoutFence(preambles []preambleInFlight) {

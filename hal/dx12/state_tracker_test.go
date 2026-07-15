@@ -182,7 +182,7 @@ func TestDepthStencilPlaneStates(t *testing.T) {
 		{name: "depth write stencil write", plane: 0, want: d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE},
 		{name: "stencil write", plane: 1, want: d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE},
 		{name: "both read", plane: 0, depthReadOnly: true, stencilReadOnly: true, shaderReadable: true, want: d3d12.D3D12_RESOURCE_STATE_DEPTH_READ | shaderRead},
-		{name: "both read stencil plane", plane: 1, depthReadOnly: true, stencilReadOnly: true, shaderReadable: true, want: d3d12.D3D12_RESOURCE_STATE_DEPTH_READ},
+		{name: "sampled read-only stencil plane", plane: 1, depthReadOnly: true, stencilReadOnly: true, shaderReadable: true, want: d3d12.D3D12_RESOURCE_STATE_DEPTH_READ | shaderRead},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestDepthStencilReadOnlyFlagsProtectUnexposedPlanes(t *testing.T) {
 		{name: "depth24plus protects backing stencil", format: gputypes.TextureFormatDepth24Plus, aspect: gputypes.TextureAspectAll, wantStencil: true},
 		{name: "stencil aspect protects depth", format: gputypes.TextureFormatDepth24PlusStencil8, aspect: gputypes.TextureAspectStencilOnly, wantDepth: true},
 		{name: "depth aspect protects stencil", format: gputypes.TextureFormatDepth32FloatStencil8, aspect: gputypes.TextureAspectDepthOnly, wantStencil: true},
-		{name: "single-plane depth has no companion stencil", format: gputypes.TextureFormatDepth32Float, aspect: gputypes.TextureAspectDepthOnly},
+		{name: "single-plane depth drops invalid stencil flag", format: gputypes.TextureFormatDepth32Float, aspect: gputypes.TextureAspectDepthOnly, stencil: true},
 		{name: "explicit flags remain set", format: gputypes.TextureFormatDepth24PlusStencil8, aspect: gputypes.TextureAspectAll, depth: true, stencil: true, wantDepth: true, wantStencil: true},
 	}
 	for _, test := range tests {
@@ -218,6 +218,71 @@ func TestDepthStencilReadOnlyFlagsProtectUnexposedPlanes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDSVReadOnlyVariantsMatchPhysicalFormat(t *testing.T) {
+	tests := []struct {
+		name   string
+		format gputypes.TextureFormat
+		want   []uint32
+	}{
+		{name: "depth16", format: gputypes.TextureFormatDepth16Unorm, want: []uint32{1}},
+		{name: "depth32", format: gputypes.TextureFormatDepth32Float, want: []uint32{1}},
+		{name: "depth24 backing stencil", format: gputypes.TextureFormatDepth24Plus, want: []uint32{1, 2, 3}},
+		{name: "stencil8 backing depth", format: gputypes.TextureFormatStencil8, want: []uint32{1, 2, 3}},
+		{name: "depth24 stencil8", format: gputypes.TextureFormatDepth24PlusStencil8, want: []uint32{1, 2, 3}},
+		{name: "depth32 stencil8", format: gputypes.TextureFormatDepth32FloatStencil8, want: []uint32{1, 2, 3}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := dsvReadOnlyVariantMasks(test.format); !equalUint32s(got, test.want) {
+				t.Fatalf("DSV read-only masks = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDSVHandleSelectionCoversLegalAndHiddenCompanionFlags(t *testing.T) {
+	packed := &TextureView{
+		dsvHandle:      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{Ptr: 100},
+		dsvHandles:     [4]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{{Ptr: 100}, {Ptr: 101}, {Ptr: 102}, {Ptr: 103}},
+		hasDSVVariants: [4]bool{true, true, true, true},
+	}
+	depth, stencil := depthStencilReadOnlyFlags(gputypes.TextureFormatStencil8, gputypes.TextureAspectAll, false, false)
+	if got := packed.dsvHandleForFlags(dsvFlags(depth, stencil)); got.Ptr != 101 {
+		t.Fatalf("Stencil8 hidden-depth descriptor = %d, want 101", got.Ptr)
+	}
+	depth, stencil = depthStencilReadOnlyFlags(gputypes.TextureFormatDepth24Plus, gputypes.TextureAspectAll, false, false)
+	if got := packed.dsvHandleForFlags(dsvFlags(depth, stencil)); got.Ptr != 102 {
+		t.Fatalf("Depth24Plus hidden-stencil descriptor = %d, want 102", got.Ptr)
+	}
+	if got := packed.dsvHandleForFlags(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH | d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL); got.Ptr != 103 {
+		t.Fatalf("fully read-only descriptor = %d, want 103", got.Ptr)
+	}
+
+	singlePlane := &TextureView{
+		dsvHandle:      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{Ptr: 200},
+		dsvHandles:     [4]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{{Ptr: 200}, {Ptr: 201}},
+		hasDSVVariants: [4]bool{true, true},
+	}
+	depth, stencil = depthStencilReadOnlyFlags(gputypes.TextureFormatDepth32Float, gputypes.TextureAspectDepthOnly, true, true)
+	if stencil {
+		t.Fatal("single-plane format retained an invalid stencil flag")
+	}
+	if got := singlePlane.dsvHandleForFlags(dsvFlags(depth, stencil)); got.Ptr != 201 {
+		t.Fatalf("single-plane read-only descriptor = %d, want 201", got.Ptr)
+	}
+}
+
+func dsvFlags(depthReadOnly, stencilReadOnly bool) d3d12.D3D12_DSV_FLAGS {
+	flags := d3d12.D3D12_DSV_FLAG_NONE
+	if depthReadOnly {
+		flags |= d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH
+	}
+	if stencilReadOnly {
+		flags |= d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL
+	}
+	return flags
 }
 
 func TestPlanBufferTextureCopiesSplitsArrayLayers(t *testing.T) {
@@ -481,6 +546,40 @@ func TestSubmissionPlannerReconcilesActualOrderWithoutMutatingInput(t *testing.T
 	}
 }
 
+func TestSubmissionPlannerDecaysBuffersOnlyAfterExecuteBoundary(t *testing.T) {
+	buffer := &Buffer{}
+	common := d3d12.D3D12_RESOURCE_STATE_COMMON
+	write := d3d12.D3D12_RESOURCE_STATE_COPY_DEST
+	read := d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE
+	commands := []commandStateSummary{
+		{commandIndex: 0, resource: buffer, states: []subresourceState{{subresource: 0, initial: common, current: write}}},
+		{commandIndex: 1, resource: buffer, states: []subresourceState{{subresource: 0, initial: common, current: read}}},
+	}
+
+	preambles, final := planSubmissionState(
+		map[any]map[uint32]d3d12.D3D12_RESOURCE_STATES{buffer: {0: common}},
+		commands,
+	)
+	if len(preambles) != 2 || len(preambles[0]) != 0 || len(preambles[1]) != 1 {
+		t.Fatalf("preambles = %#v, want second-list reconciliation only", preambles)
+	}
+	if got := preambles[1][0]; got.before != write || got.after != common {
+		t.Fatalf("second-list preamble = %#v, want COPY_DEST -> COMMON", got)
+	}
+	if got := final[buffer][0]; got != common {
+		t.Fatalf("post-execute buffer state = %d, want COMMON", got)
+	}
+
+	next, _ := planSubmissionState(final, []commandStateSummary{{
+		commandIndex: 0,
+		resource:     buffer,
+		states:       []subresourceState{{subresource: 0, initial: common, current: read}},
+	}})
+	if len(next) != 1 || len(next[0]) != 0 {
+		t.Fatalf("next execute preambles = %#v, want no transition from decayed COMMON", next)
+	}
+}
+
 func TestResourceStateSnapshotsAndCommitsAreConcurrentSafe(t *testing.T) {
 	buffer := &Buffer{currentState: d3d12.D3D12_RESOURCE_STATE_COMMON}
 	texture := &Texture{currentState: d3d12.D3D12_RESOURCE_STATE_COMMON}
@@ -506,6 +605,281 @@ func TestResourceStateSnapshotsAndCommitsAreConcurrentSafe(t *testing.T) {
 		}(worker)
 	}
 	wg.Wait()
+}
+
+type fakePreambleEvent struct {
+	op string
+	id uint64
+}
+
+type fakePreambleNativeOps struct {
+	nextID                 uint64
+	createFailures         int
+	resetAllocatorFailures int
+	resetListFailures      int
+	closeFailures          int
+	events                 []fakePreambleEvent
+	releases               map[uint64]int
+}
+
+func (f *fakePreambleNativeOps) create(*Device) (preambleInFlight, error) {
+	f.nextID++
+	f.events = append(f.events, fakePreambleEvent{op: "create", id: f.nextID})
+	if f.createFailures > 0 {
+		f.createFailures--
+		return preambleInFlight{}, errors.New("create pair")
+	}
+	return preambleInFlight{testID: f.nextID}, nil
+}
+
+func (f *fakePreambleNativeOps) resetAllocator(preamble preambleInFlight) error {
+	f.events = append(f.events, fakePreambleEvent{op: "reset allocator", id: preamble.testID})
+	if f.resetAllocatorFailures > 0 {
+		f.resetAllocatorFailures--
+		return errors.New("reset allocator")
+	}
+	return nil
+}
+
+func (f *fakePreambleNativeOps) resetCommandList(preamble preambleInFlight) error {
+	f.events = append(f.events, fakePreambleEvent{op: "reset list", id: preamble.testID})
+	if f.resetListFailures > 0 {
+		f.resetListFailures--
+		return errors.New("reset list")
+	}
+	return nil
+}
+
+func (f *fakePreambleNativeOps) recordAndClose(preamble preambleInFlight, _ []stateBarrierPlan) error {
+	f.events = append(f.events, fakePreambleEvent{op: "close", id: preamble.testID})
+	if f.closeFailures > 0 {
+		f.closeFailures--
+		return errors.New("close list")
+	}
+	return nil
+}
+
+func (f *fakePreambleNativeOps) release(preamble preambleInFlight) {
+	f.events = append(f.events, fakePreambleEvent{op: "release", id: preamble.testID})
+	if f.releases == nil {
+		f.releases = make(map[uint64]int)
+	}
+	f.releases[preamble.testID]++
+}
+
+func TestPreamblePoolWaitsForFenceThenReusesPair(t *testing.T) {
+	ops := &fakePreambleNativeOps{}
+	queue := &Queue{state: &queueState{preambleOps: ops}}
+
+	first, err := queue.buildPreamble(nil)
+	if err != nil || first.testID != 1 {
+		t.Fatalf("first preamble = (%+v, %v), want fresh pair 1", first, err)
+	}
+	first.submission = 4
+	queue.state.preambleInFlight = append(queue.state.preambleInFlight, first)
+	queue.releaseCompletedPreambles(3)
+	if len(queue.state.preambleInFlight) != 1 || len(queue.state.preambleIdle) != 0 {
+		t.Fatal("preamble became reusable before its fence completed")
+	}
+	queue.releaseCompletedPreambles(4)
+	queue.releaseCompletedPreambles(4) // polling is idempotent
+	if len(queue.state.preambleInFlight) != 0 || len(queue.state.preambleIdle) != 1 || len(ops.releases) != 0 {
+		t.Fatalf("completed pool state = in-flight %d idle %d releases %v", len(queue.state.preambleInFlight), len(queue.state.preambleIdle), ops.releases)
+	}
+
+	second, err := queue.buildPreamble(nil)
+	if err != nil || second.testID != first.testID {
+		t.Fatalf("reused preamble = (%+v, %v), want pair %d", second, err, first.testID)
+	}
+	want := []fakePreambleEvent{
+		{op: "create", id: 1},
+		{op: "close", id: 1},
+		{op: "reset allocator", id: 1},
+		{op: "reset list", id: 1},
+		{op: "close", id: 1},
+	}
+	if !equalPreambleEvents(ops.events, want) {
+		t.Fatalf("native events = %#v, want %#v", ops.events, want)
+	}
+}
+
+func TestPreamblePoolDiscardsFailedReusablePairAndFallsBackFresh(t *testing.T) {
+	tests := []struct {
+		name           string
+		resetAllocator int
+		resetList      int
+		close          int
+		wantOps        []string
+	}{
+		{name: "allocator reset", resetAllocator: 1, wantOps: []string{"reset allocator", "release", "create", "close"}},
+		{name: "list reset", resetList: 1, wantOps: []string{"reset allocator", "reset list", "release", "create", "close"}},
+		{name: "close", close: 1, wantOps: []string{"reset allocator", "reset list", "close", "release", "create", "close"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ops := &fakePreambleNativeOps{
+				nextID:                 10,
+				resetAllocatorFailures: test.resetAllocator,
+				resetListFailures:      test.resetList,
+				closeFailures:          test.close,
+			}
+			queue := &Queue{state: &queueState{
+				preambleOps:  ops,
+				preambleIdle: []preambleInFlight{{testID: 10}},
+			}}
+			got, err := queue.buildPreamble(nil)
+			if err != nil || got.testID != 11 {
+				t.Fatalf("fallback preamble = (%+v, %v), want fresh pair 11", got, err)
+			}
+			if ops.releases[10] != 1 {
+				t.Fatalf("failed pair releases = %v, want pair 10 exactly once", ops.releases)
+			}
+			if gotOps := preambleEventOps(ops.events); !equalStrings(gotOps, test.wantOps) {
+				t.Fatalf("native operations = %v, want %v", gotOps, test.wantOps)
+			}
+		})
+	}
+}
+
+func TestPreambleBuildFailuresReleaseEveryCreatedPairOnce(t *testing.T) {
+	t.Run("fresh create", func(t *testing.T) {
+		ops := &fakePreambleNativeOps{createFailures: 1}
+		queue := &Queue{state: &queueState{preambleOps: ops}}
+		if _, err := queue.buildPreamble(nil); err == nil {
+			t.Fatal("fresh create failure succeeded")
+		}
+		if len(ops.releases) != 0 {
+			t.Fatalf("create failure releases = %v, want none", ops.releases)
+		}
+	})
+
+	t.Run("fresh close", func(t *testing.T) {
+		ops := &fakePreambleNativeOps{closeFailures: 1}
+		queue := &Queue{state: &queueState{preambleOps: ops}}
+		if _, err := queue.buildPreamble(nil); err == nil {
+			t.Fatal("fresh close failure succeeded")
+		}
+		if ops.releases[1] != 1 {
+			t.Fatalf("fresh close releases = %v, want pair 1 once", ops.releases)
+		}
+	})
+
+	t.Run("later preamble", func(t *testing.T) {
+		ops := &fakePreambleNativeOps{}
+		queue := &Queue{state: &queueState{preambleOps: ops}}
+		first, err := queue.buildPreamble(nil)
+		if err != nil {
+			t.Fatalf("first preamble: %v", err)
+		}
+		ops.createFailures = 1
+		if _, err := queue.buildPreamble(nil); err == nil {
+			t.Fatal("second preamble create failure succeeded")
+		}
+		queue.releaseBuiltPreambles([]preambleInFlight{first})
+		if ops.releases[first.testID] != 1 {
+			t.Fatalf("partial unwind releases = %v, want first pair once", ops.releases)
+		}
+	})
+}
+
+func TestPreamblePoolCapsIdlePairsAndRetainsUnfencedPairs(t *testing.T) {
+	ops := &fakePreambleNativeOps{}
+	queue := &Queue{state: &queueState{preambleOps: ops}}
+	for id := uint64(1); id <= maxFramesInFlight+2; id++ {
+		queue.state.preambleInFlight = append(queue.state.preambleInFlight, preambleInFlight{submission: 7, testID: id})
+	}
+	queue.retainPreamblesWithoutFence([]preambleInFlight{{testID: 99}})
+	queue.releaseCompletedPreambles(7)
+	queue.releaseCompletedPreambles(7)
+
+	if len(queue.state.preambleIdle) != maxFramesInFlight {
+		t.Fatalf("idle pool size = %d, want cap %d", len(queue.state.preambleIdle), maxFramesInFlight)
+	}
+	if got := queue.state.preambleInFlight; len(got) != 1 || got[0].submission != 0 || got[0].testID != 99 {
+		t.Fatalf("retained unfenced pairs = %+v, want pair 99 at submission 0", got)
+	}
+	if len(ops.releases) != 2 {
+		t.Fatalf("excess releases = %v, want two pairs", ops.releases)
+	}
+
+	queue.state.releaseAllOwnedLocked()
+	if len(queue.state.preambleIdle) != 0 || len(queue.state.preambleInFlight) != 0 {
+		t.Fatal("pool destruction retained owned pairs")
+	}
+	for id, count := range ops.releases {
+		if count != 1 {
+			t.Fatalf("pair %d release count = %d, want 1", id, count)
+		}
+	}
+}
+
+func TestTerminalPreambleReleaseKeepsOnlyAmbiguousInFlightPairs(t *testing.T) {
+	tests := []struct {
+		name          string
+		waitErr       error
+		deviceRemoved bool
+		wantInFlight  int
+		wantIdle      int
+	}{
+		{name: "successful wait"},
+		{name: "confirmed removal", waitErr: errors.New("device removed"), deviceRemoved: true},
+		{name: "ambiguous wait", waitErr: errors.New("event wait failed"), wantInFlight: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ops := &fakePreambleNativeOps{}
+			state := &queueState{
+				preambleOps:      ops,
+				preambleIdle:     []preambleInFlight{{testID: 1}},
+				preambleInFlight: []preambleInFlight{{submission: 2, testID: 2}},
+			}
+			state.releaseTerminalOwnedLocked(test.waitErr, test.deviceRemoved)
+			if len(state.preambleInFlight) != test.wantInFlight || len(state.preambleIdle) != test.wantIdle {
+				t.Fatalf("terminal state = in-flight %d idle %d, want %d/%d", len(state.preambleInFlight), len(state.preambleIdle), test.wantInFlight, test.wantIdle)
+			}
+			if ops.releases[1] != 1 {
+				t.Fatalf("idle pair release count = %d, want 1", ops.releases[1])
+			}
+			if test.wantInFlight == 0 && ops.releases[2] != 1 {
+				t.Fatalf("safe in-flight pair release count = %d, want 1", ops.releases[2])
+			}
+			if test.wantInFlight == 1 && ops.releases[2] != 0 {
+				t.Fatal("ambiguous in-flight pair was released")
+			}
+		})
+	}
+}
+
+func equalPreambleEvents(got, want []fakePreambleEvent) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func preambleEventOps(events []fakePreambleEvent) []string {
+	result := make([]string, len(events))
+	for i, event := range events {
+		result[i] = event.op
+	}
+	return result
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestQueueStateReleasesTrackedAndUnfencedOwnedObjects(t *testing.T) {
@@ -668,5 +1042,21 @@ func TestFailTextureViewCreationRecyclesAllocatedDescriptors(t *testing.T) {
 	}
 	if want := []uint32{20, 21, 22, 23}; !equalUint32s(device.dsvHeap.freeList, want) {
 		t.Fatalf("freed DSVs = %v, want %v", device.dsvHeap.freeList, want)
+	}
+}
+
+func TestTextureViewDestroyRecyclesOnlyAllocatedDSVVariantsOnce(t *testing.T) {
+	device := &Device{dsvHeap: &DescriptorHeap{}}
+	view := &TextureView{
+		texture:        &Texture{},
+		device:         device,
+		hasDSV:         true,
+		hasDSVVariants: [4]bool{true, true},
+		dsvHeapIndex:   [4]uint32{20, 21},
+	}
+	view.Destroy()
+	view.Destroy()
+	if want := []uint32{20, 21}; !equalUint32s(device.dsvHeap.freeList, want) {
+		t.Fatalf("freed partial DSV variants = %v, want %v", device.dsvHeap.freeList, want)
 	}
 }

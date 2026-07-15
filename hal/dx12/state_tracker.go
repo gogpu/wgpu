@@ -128,8 +128,10 @@ func stateResourceSortKey(resource any) string {
 }
 
 // planSubmissionState computes queue preambles and the state that would be
-// scheduled after all command buffers execute in order. The input map is
-// never mutated, so a failed ExecuteCommandLists can leave ownership intact.
+// scheduled after all command buffers execute in order. Buffer target states
+// remain visible while planning command lists in the same ExecuteCommandLists
+// call, then decay to COMMON at that call boundary. The input map is never
+// mutated, so a failed ExecuteCommandLists can leave ownership intact.
 func planSubmissionState(scheduled map[any]map[uint32]d3d12.D3D12_RESOURCE_STATES, commands []commandStateSummary) ([][]stateBarrierPlan, map[any]map[uint32]d3d12.D3D12_RESOURCE_STATES) {
 	current := cloneScheduledState(scheduled)
 	commandCount := 0
@@ -160,6 +162,15 @@ func planSubmissionState(scheduled map[any]map[uint32]d3d12.D3D12_RESOURCE_STATE
 				})
 			}
 			resourceStates[state.subresource] = state.current
+		}
+	}
+
+	// D3D12 buffers decay to COMMON only after the ExecuteCommandLists call.
+	// Do this after all command-list preambles have been planned so later lists
+	// in this same call still observe the preceding list's target state.
+	for resource, states := range current {
+		if _, ok := resource.(*Buffer); ok {
+			states[0] = d3d12.D3D12_RESOURCE_STATE_COMMON
 		}
 	}
 
@@ -532,20 +543,18 @@ func planTextureTextureCopies(src, dst *Texture, copy hal.TextureCopy) []texture
 // depthStencilPlaneState returns the D3D12 state for one depth/stencil plane
 // under a render-pass attachment's independent read-only flags.
 func depthStencilPlaneState(plane uint32, depthReadOnly, stencilReadOnly, shaderReadable bool) d3d12.D3D12_RESOURCE_STATES {
-	if plane == 0 {
-		if !depthReadOnly {
-			return d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
-		}
-		state := d3d12.D3D12_RESOURCE_STATE_DEPTH_READ
-		if shaderReadable {
-			state |= d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-		}
-		return state
+	readOnly := depthReadOnly
+	if plane != 0 {
+		readOnly = stencilReadOnly
 	}
-	if stencilReadOnly {
-		return d3d12.D3D12_RESOURCE_STATE_DEPTH_READ
+	if !readOnly {
+		return d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
 	}
-	return d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
+	state := d3d12.D3D12_RESOURCE_STATE_DEPTH_READ
+	if shaderReadable {
+		state |= d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+	}
+	return state
 }
 
 // depthStencilReadOnlyFlags protects physical planes that a WebGPU view does
@@ -553,6 +562,9 @@ func depthStencilPlaneState(plane uint32, depthReadOnly, stencilReadOnly, shader
 // requires them to be in a writable depth/stencil state.
 func depthStencilReadOnlyFlags(format gputypes.TextureFormat, aspect gputypes.TextureAspect, depthReadOnly, stencilReadOnly bool) (bool, bool) {
 	switch format {
+	case gputypes.TextureFormatDepth16Unorm, gputypes.TextureFormatDepth32Float:
+		// Single-plane DSV formats cannot encode READ_ONLY_STENCIL.
+		stencilReadOnly = false
 	case gputypes.TextureFormatStencil8:
 		depthReadOnly = true
 	case gputypes.TextureFormatDepth24Plus:
