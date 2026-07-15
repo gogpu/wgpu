@@ -448,13 +448,14 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 
 	// Create surface texture wrapper
 	surfaceTexture := &SurfaceTexture{
-		surface:   s,
-		index:     index,
-		resource:  bb.resource,
-		rtvHandle: bb.rtvHandle,
-		format:    s.halFormat,
-		width:     s.width,
-		height:    s.height,
+		surface:    s,
+		index:      index,
+		resource:   bb.resource,
+		stateOwner: bb.texture,
+		rtvHandle:  bb.rtvHandle,
+		format:     s.halFormat,
+		width:      s.width,
+		height:     s.height,
 		// Note: Suboptimal detection requires DXGI_STATUS_OCCLUDED/DXGI_ERROR_DEVICE_REMOVED checks.
 		suboptimal: false,
 	}

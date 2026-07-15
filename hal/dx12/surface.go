@@ -24,6 +24,7 @@ const maxFrameLatency = 2
 // backBuffer represents a back buffer resource and its RTV.
 type backBuffer struct {
 	resource  *d3d12.ID3D12Resource
+	texture   *Texture // shared queue-scheduled state owner
 	rtvHandle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
 	rtvIndex  uint32 // Heap index for recycling on release
 }
@@ -183,10 +184,23 @@ func (s *Surface) createBackBufferRTVs() error {
 		s.device.raw.CreateRenderTargetView(resource, nil, rtvHandle)
 
 		s.backBuffers[i] = backBuffer{
-			resource:  resource,
+			resource: resource,
+			texture: &Texture{
+				raw:          resource,
+				format:       s.halFormat,
+				dimension:    gputypes.TextureDimension2D,
+				size:         hal.Extent3D{Width: s.width, Height: s.height, DepthOrArrayLayers: 1},
+				mipLevels:    1,
+				samples:      1,
+				usage:        gputypes.TextureUsageRenderAttachment,
+				device:       s.device,
+				isExternal:   true,
+				currentState: d3d12.D3D12_RESOURCE_STATE_PRESENT,
+			},
 			rtvHandle: rtvHandle,
 			rtvIndex:  rtvIndex,
 		}
+		s.backBuffers[i].texture.stateOwner.setTextureStates([]d3d12.D3D12_RESOURCE_STATES{d3d12.D3D12_RESOURCE_STATE_PRESENT})
 	}
 
 	return nil
@@ -196,6 +210,10 @@ func (s *Surface) createBackBufferRTVs() error {
 func (s *Surface) releaseBackBuffers() {
 	for i := range s.backBuffers {
 		if s.backBuffers[i].resource != nil {
+			if s.backBuffers[i].texture != nil {
+				s.backBuffers[i].texture.raw = nil
+				s.backBuffers[i].texture = nil
+			}
 			s.backBuffers[i].resource.Release()
 			s.backBuffers[i].resource = nil
 		}
@@ -414,6 +432,7 @@ type SurfaceTexture struct {
 	surface    *Surface
 	index      uint32
 	resource   *d3d12.ID3D12Resource
+	stateOwner *Texture
 	rtvHandle  d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
 	format     gputypes.TextureFormat
 	width      uint32
@@ -421,10 +440,15 @@ type SurfaceTexture struct {
 	suboptimal bool
 }
 
-// CurrentUsage returns 0 — DX12 surface textures are managed by swapchain, state tracked externally.
-func (t *SurfaceTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
-func (t *SurfaceTexture) AddPendingRef()                      {}
-func (t *SurfaceTexture) DecPendingRef()                      {}
+// CurrentUsage returns the queue-scheduled usage of the shared back-buffer owner.
+func (t *SurfaceTexture) CurrentUsage() gputypes.TextureUsage {
+	if t == nil || t.stateOwner == nil {
+		return 0
+	}
+	return t.stateOwner.CurrentUsage()
+}
+func (t *SurfaceTexture) AddPendingRef() {}
+func (t *SurfaceTexture) DecPendingRef() {}
 
 // Destroy implements hal.SurfaceTexture.
 // Surface textures are owned by the swapchain and should not be destroyed individually.

@@ -21,7 +21,9 @@ type CommandAllocator struct {
 // CommandBuffer holds a recorded D3D12 command list.
 // Allocators are managed by Device frame tracking, not by CommandBuffer.
 type CommandBuffer struct {
-	cmdList *d3d12.ID3D12GraphicsCommandList
+	cmdList          *d3d12.ID3D12GraphicsCommandList
+	stateSummaries   []commandStateSummary
+	preambleBarriers []stateBarrierPlan // populated by Queue.Submit for diagnostics/replay
 }
 
 // Destroy releases the command buffer's command list.
@@ -52,6 +54,8 @@ type CommandEncoder struct {
 	// are needed: one for CBV/SRV/UAV views and one for samplers.
 	descriptorHeaps     [2]*d3d12.ID3D12DescriptorHeap
 	descriptorHeapCount int
+
+	stateTracker commandStateTracker
 }
 
 // BeginEncoding begins command recording.
@@ -67,6 +71,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 		if err := list.Reset(e.allocator, nil); err == nil {
 			e.cmdList = list
 			e.isRecording = true
+			e.stateTracker.reset()
 			return nil
 		}
 		// Reset failed — discard this list, try next or create new.
@@ -80,6 +85,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	}
 	e.cmdList = cmdList
 	e.isRecording = true
+	e.stateTracker.reset()
 	return nil
 }
 
@@ -97,7 +103,7 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	}
 
 	e.isRecording = false
-	cb := &CommandBuffer{cmdList: e.cmdList}
+	cb := &CommandBuffer{cmdList: e.cmdList, stateSummaries: e.stateTracker.summary()}
 	e.cmdList = nil // Detach — owned by CommandBuffer until ResetAll returns it.
 	return cb, nil
 }
@@ -154,8 +160,7 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 		return
 	}
 
-	// Convert to D3D12 resource barriers
-	d3dBarriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(barriers))
+	plans := make([]stateBarrierPlan, 0, len(barriers))
 	for _, b := range barriers {
 		buf, ok := b.Buffer.(*Buffer)
 		if !ok || buf.raw == nil {
@@ -163,19 +168,13 @@ func (e *CommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 			continue
 		}
 
-		beforeState := bufferUsageToD3D12State(b.Usage.OldUsage)
 		afterState := bufferUsageToD3D12State(b.Usage.NewUsage)
-
-		if beforeState == afterState {
-			continue
+		beforeState, needsBarrier := e.stateTracker.transitionBuffer(buf, afterState)
+		if needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: beforeState, after: afterState})
 		}
-
-		d3dBarriers = append(d3dBarriers, d3d12.NewTransitionBarrier(buf.raw, beforeState, afterState, d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES))
 	}
-
-	if len(d3dBarriers) > 0 {
-		e.cmdList.ResourceBarrier(uint32(len(d3dBarriers)), &d3dBarriers[0])
-	}
+	e.emitStateBarrierPlans(plans)
 }
 
 // TransitionTextures transitions texture states for synchronization.
@@ -184,8 +183,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 		return
 	}
 
-	// Convert to D3D12 resource barriers
-	d3dBarriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(barriers))
+	plans := make([]stateBarrierPlan, 0, len(barriers))
 	for _, b := range barriers {
 		tex, ok := b.Texture.(*Texture)
 		if !ok || tex.raw == nil {
@@ -193,24 +191,32 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 			continue
 		}
 
-		beforeState := textureUsageToD3D12State(b.Usage.OldUsage)
 		afterState := textureUsageToD3D12State(b.Usage.NewUsage)
+		for _, plan := range e.stateTracker.transitionTextureRange(tex, textureRangeSubresources(tex, b.Range), afterState) {
+			plans = append(plans, plan)
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+}
 
-		// Skip if no transition needed
-		if beforeState == afterState {
+func (e *CommandEncoder) emitStateBarrierPlans(plans []stateBarrierPlan) {
+	if !e.isRecording || len(plans) == 0 {
+		return
+	}
+	d3dBarriers := make([]d3d12.D3D12_RESOURCE_BARRIER, 0, len(plans))
+	for _, plan := range plans {
+		var raw *d3d12.ID3D12Resource
+		switch resource := plan.resource.(type) {
+		case *Buffer:
+			raw = resource.raw
+		case *Texture:
+			raw = resource.raw
+		}
+		if raw == nil || plan.before == plan.after {
 			continue
 		}
-
-		// Calculate subresource or use all
-		subresource := d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
-		if b.Range.MipLevelCount == 1 && b.Range.ArrayLayerCount == 1 {
-			// Single subresource
-			subresource = b.Range.BaseMipLevel + b.Range.BaseArrayLayer*tex.mipLevels
-		}
-
-		d3dBarriers = append(d3dBarriers, d3d12.NewTransitionBarrier(tex.raw, beforeState, afterState, subresource))
+		d3dBarriers = append(d3dBarriers, d3d12.NewTransitionBarrier(raw, plan.before, plan.after, plan.subresource))
 	}
-
 	if len(d3dBarriers) > 0 {
 		hal.Logger().Debug("dx12: resource barrier", "label", e.label, "count", len(d3dBarriers))
 		e.cmdList.ResourceBarrier(uint32(len(d3dBarriers)), &d3dBarriers[0])
@@ -260,12 +266,14 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 		return
 	}
 
-	// Insert transition barriers for buffers not in the required copy state.
-	// COMMON state allows implicit promotion to COPY_DEST (D3D12 spec) but NOT
-	// to COPY_SOURCE — an explicit barrier is required for COPY_SOURCE.
-	// Batch multiple barriers into a single ResourceBarrier call (Rust pattern).
-	e.transitionBuffersForCopy(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE,
-		dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST)
+	plans := make([]stateBarrierPlan, 0, 2)
+	if before, needsBarrier := e.stateTracker.transitionBuffer(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: srcBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+	}
+	if before, needsBarrier := e.stateTracker.transitionBuffer(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: dstBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+	}
+	e.emitStateBarrierPlans(plans)
 
 	for _, r := range regions {
 		hal.Logger().Debug("dx12: copy buffer region", "label", e.label, "offset", r.DstOffset, "size", r.Size)
@@ -286,7 +294,60 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		return
 	}
 
-	e.copyBufferToTexture(srcBuf, dstTex, regions)
+	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	if before, needsBarrier := e.stateTracker.transitionBuffer(srcBuf, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: srcBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+	}
+	for _, r := range regions {
+		for _, copyPlan := range planBufferTextureCopies(dstTex, r.TextureBase, r.BufferLayout, r.Size) {
+			if before, needsBarrier := e.stateTracker.transitionTexture(dstTex, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: dstTex, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+
+	for _, r := range regions {
+		for _, copyPlan := range planBufferTextureCopies(dstTex, r.TextureBase, r.BufferLayout, r.Size) {
+			// A 2D array layer is a distinct subresource and therefore needs a
+			// distinct placed footprint with depth=1.
+			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: srcBuf.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+			}
+			srcLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
+				Offset: copyPlan.bufferOffset,
+				Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
+					Format:   textureFormatToD3D12(dstTex.format),
+					Width:    r.Size.Width,
+					Height:   copyPlan.footprintHeight,
+					Depth:    copyPlan.footprintDepth,
+					RowPitch: r.BufferLayout.BytesPerRow,
+				},
+			})
+
+			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: dstTex.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+			}
+			dstLoc.SetSubresourceIndex(copyPlan.subresource)
+			srcBox := d3d12.D3D12_BOX{
+				Left:   0,
+				Top:    copyPlan.bufferOriginY,
+				Front:  0,
+				Right:  r.Size.Width,
+				Bottom: copyPlan.bufferOriginY + r.Size.Height,
+				Back:   copyPlan.footprintDepth,
+			}
+
+			e.cmdList.CopyTextureRegion(
+				&dstLoc,
+				r.TextureBase.Origin.X, r.TextureBase.Origin.Y, copyPlan.textureOriginZ,
+				&srcLoc,
+				&srcBox,
+			)
+		}
+	}
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -302,7 +363,57 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		return
 	}
 
-	e.copyTextureToBuffer(srcTex, dstBuf, regions)
+	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	if before, needsBarrier := e.stateTracker.transitionBuffer(dstBuf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: dstBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+	}
+	for _, r := range regions {
+		for _, copyPlan := range planBufferTextureCopies(srcTex, r.TextureBase, r.BufferLayout, r.Size) {
+			if before, needsBarrier := e.stateTracker.transitionTexture(srcTex, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: srcTex, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+
+	for _, r := range regions {
+		// D3D12 requires RowPitch aligned to 256 bytes.
+		// The caller should pass aligned BytesPerRow, but align defensively.
+		rowPitch := (r.BufferLayout.BytesPerRow + d3d12TexturePitchAlignment - 1) &^ (d3d12TexturePitchAlignment - 1)
+		for _, copyPlan := range planBufferTextureCopies(srcTex, r.TextureBase, r.BufferLayout, r.Size) {
+			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: srcTex.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+			}
+			srcLoc.SetSubresourceIndex(copyPlan.subresource)
+
+			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: dstBuf.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+			}
+			dstLoc.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
+				Offset: copyPlan.bufferOffset,
+				Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
+					Format:   textureFormatToD3D12(srcTex.format),
+					Width:    r.Size.Width,
+					Height:   copyPlan.footprintHeight,
+					Depth:    copyPlan.footprintDepth,
+					RowPitch: rowPitch,
+				},
+			})
+
+			srcBox := d3d12.D3D12_BOX{
+				Left:   r.TextureBase.Origin.X,
+				Top:    r.TextureBase.Origin.Y,
+				Front:  copyPlan.textureOriginZ,
+				Right:  r.TextureBase.Origin.X + r.Size.Width,
+				Bottom: r.TextureBase.Origin.Y + r.Size.Height,
+				Back:   copyPlan.textureOriginZ + copyPlan.footprintDepth,
+			}
+
+			e.cmdList.CopyTextureRegion(&dstLoc, 0, copyPlan.bufferOriginY, 0, &srcLoc, &srcBox)
+		}
+	}
 }
 
 // CopyTextureToTexture copies data between textures.
@@ -317,7 +428,50 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		return
 	}
 
-	e.copyTextureToTexture(srcTex, dstTex, regions)
+	plans := make([]stateBarrierPlan, 0, len(regions)*2)
+	for _, r := range regions {
+		for _, copyPlan := range planTextureTextureCopies(srcTex, dstTex, r) {
+			if before, needsBarrier := e.stateTracker.transitionTexture(srcTex, copyPlan.srcSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: srcTex, subresource: copyPlan.srcSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+			}
+			if before, needsBarrier := e.stateTracker.transitionTexture(dstTex, copyPlan.dstSubresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: dstTex, subresource: copyPlan.dstSubresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+
+	for _, r := range regions {
+		for _, copyPlan := range planTextureTextureCopies(srcTex, dstTex, r) {
+			srcLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: srcTex.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+			}
+			srcLoc.SetSubresourceIndex(copyPlan.srcSubresource)
+
+			dstLoc := d3d12.D3D12_TEXTURE_COPY_LOCATION{
+				Resource: dstTex.raw,
+				Type:     d3d12.D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+			}
+			dstLoc.SetSubresourceIndex(copyPlan.dstSubresource)
+
+			srcBox := d3d12.D3D12_BOX{
+				Left:   r.SrcBase.Origin.X,
+				Top:    r.SrcBase.Origin.Y,
+				Front:  copyPlan.srcFront,
+				Right:  r.SrcBase.Origin.X + r.Size.Width,
+				Bottom: r.SrcBase.Origin.Y + r.Size.Height,
+				Back:   copyPlan.srcBack,
+			}
+
+			e.cmdList.CopyTextureRegion(
+				&dstLoc,
+				r.DstBase.Origin.X, r.DstBase.Origin.Y, copyPlan.dstZ,
+				&srcLoc,
+				&srcBox,
+			)
+		}
+	}
 }
 
 // ResolveQuerySet copies query results from a query set into a destination buffer.
@@ -334,6 +488,9 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 	buf, ok := destination.(*Buffer)
 	if !ok || buf == nil || buf.raw == nil {
 		return
+	}
+	if before, needsBarrier := e.stateTracker.transitionBuffer(buf, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); needsBarrier {
+		e.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST}})
 	}
 	e.cmdList.ResolveQueryData(qs.raw, qs.rawTy, firstQuery, queryCount, buf.raw, destinationOffset)
 }
@@ -396,23 +553,22 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return rpe
 	}
 
-	// Transition surface textures from PRESENT to RENDER_TARGET state.
-	// DX12 requires explicit barriers (unlike Vulkan which uses render pass layout transitions).
+	// Render attachments are first-use requirements in the command-local
+	// tracker. Surface views share the same owner as their swapchain back
+	// buffer, so PRESENT is captured from that owner rather than guessed here.
+	attachmentPlans := make([]stateBarrierPlan, 0)
 	for _, ca := range desc.ColorAttachments {
 		view, ok := ca.View.(*TextureView)
 		if !ok || view.texture == nil || view.texture.raw == nil {
 			continue
 		}
-		if view.texture.isExternal {
-			barrier := d3d12.NewTransitionBarrier(
-				view.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			e.cmdList.ResourceBarrier(1, &barrier)
+		for _, subresource := range textureViewSubresources(view) {
+			if before, needsBarrier := e.stateTracker.transitionTexture(view.texture, subresource, d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET); needsBarrier {
+				attachmentPlans = append(attachmentPlans, stateBarrierPlan{resource: view.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET})
+			}
 		}
 	}
+	e.emitStateBarrierPlans(attachmentPlans)
 
 	// Set render targets
 	rtvHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, 0, len(desc.ColorAttachments))
@@ -552,57 +708,52 @@ func (e *RenderPassEncoder) End() {
 			}
 
 			// MSAA resolve: render target → resolve source, resolve target → resolve dest.
-			b1 := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			b2 := d3d12.NewTransitionBarrier(
-				resolveView.texture.raw,
-				resolveRestState,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			barriers := [2]d3d12.D3D12_RESOURCE_BARRIER{b1, b2}
-			e.encoder.cmdList.ResourceBarrier(2, &barriers[0])
+			msaaSubresources := textureViewSubresources(msaaView)
+			resolveSubresources := textureViewSubresources(resolveView)
+			plans := make([]stateBarrierPlan, 0, len(msaaSubresources)+len(resolveSubresources))
+			for _, subresource := range msaaSubresources {
+				if before, needsBarrier := e.encoder.stateTracker.transitionTexture(msaaView.texture, subresource, d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE); needsBarrier {
+					plans = append(plans, stateBarrierPlan{resource: msaaView.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE})
+				}
+			}
+			for _, subresource := range resolveSubresources {
+				if before, needsBarrier := e.encoder.stateTracker.transitionTexture(resolveView.texture, subresource, d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST); needsBarrier {
+					plans = append(plans, stateBarrierPlan{resource: resolveView.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST})
+				}
+			}
+			e.encoder.emitStateBarrierPlans(plans)
 
 			// Resolve MSAA → single-sample.
 			format := textureFormatToD3D12(msaaView.texture.format)
 			e.encoder.cmdList.ResolveSubresource(
-				resolveView.texture.raw, 0,
-				msaaView.texture.raw, 0,
+				resolveView.texture.raw, resolveSubresourceIndex(resolveView),
+				msaaView.texture.raw, resolveSubresourceIndex(msaaView),
 				format,
 			)
 
-			// Transition back: MSAA → render target (for next frame),
-			// resolve target → resting state.
-			b3 := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			b4 := d3d12.NewTransitionBarrier(
-				resolveView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RESOLVE_DEST,
-				resolveRestState,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			barriers2 := [2]d3d12.D3D12_RESOURCE_BARRIER{b3, b4}
-			e.encoder.cmdList.ResourceBarrier(2, &barriers2[0])
+			// Return the resources to their command-local resting states.
+			plans = plans[:0]
+			for _, subresource := range msaaSubresources {
+				if before, needsBarrier := e.encoder.stateTracker.transitionTexture(msaaView.texture, subresource, d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET); needsBarrier {
+					plans = append(plans, stateBarrierPlan{resource: msaaView.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET})
+				}
+			}
+			for _, subresource := range resolveSubresources {
+				if before, needsBarrier := e.encoder.stateTracker.transitionTexture(resolveView.texture, subresource, resolveRestState); needsBarrier {
+					plans = append(plans, stateBarrierPlan{resource: resolveView.texture, subresource: subresource, before: before, after: resolveRestState})
+				}
+			}
+			e.encoder.emitStateBarrierPlans(plans)
 			continue
 		}
 
 		// No resolve — just transition external surface back to PRESENT.
 		if msaaView.texture.isExternal {
-			barrier := d3d12.NewTransitionBarrier(
-				msaaView.texture.raw,
-				d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET,
-				d3d12.D3D12_RESOURCE_STATE_PRESENT,
-				d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-			)
-			e.encoder.cmdList.ResourceBarrier(1, &barrier)
+			for _, subresource := range textureViewSubresources(msaaView) {
+				if before, needsBarrier := e.encoder.stateTracker.transitionTexture(msaaView.texture, subresource, d3d12.D3D12_RESOURCE_STATE_PRESENT); needsBarrier {
+					e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: msaaView.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_PRESENT}})
+				}
+			}
 		}
 	}
 }
@@ -657,6 +808,7 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 
 	// Bind the group using graphics root descriptor tables.
 	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
+	e.encoder.trackBindGroupState(bg)
 	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
 }
 
@@ -665,6 +817,9 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
+	}
+	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER); needsBarrier {
+		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
 	// Get stride from pipeline if available
@@ -687,6 +842,9 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
+	}
+	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDEX_BUFFER); needsBarrier {
+		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
 	e.indexFormat = format
@@ -789,6 +947,9 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
 	if !ok || !e.encoder.isRecording {
 		return
 	}
+	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
+		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
+	}
 
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.draw,
@@ -803,6 +964,9 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording {
 		return
+	}
+	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
+		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
 	e.encoder.cmdList.ExecuteIndirect(
@@ -824,10 +988,8 @@ type ComputePassEncoder struct {
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
 
 	// boundStorageBuffers tracks storage buffers from SetBindGroup calls.
-	// After Dispatch(), these buffers' currentState is updated to UNORDERED_ACCESS
-	// so that subsequent CopyBufferToBuffer can insert the correct transition
-	// barrier (UNORDERED_ACCESS -> COPY_SOURCE). Without this tracking, the
-	// copy command would not know the buffer was used as UAV (BUG-DX12-012).
+	// Dispatch records them as UNORDERED_ACCESS in the command-local tracker so
+	// a later copy in the same command list can transition from the UAV state.
 	//
 	// Matches Rust wgpu-core pattern: compute pass tracks buffer usage per
 	// dispatch via BufferUsageScope, then drains barriers on state transitions
@@ -901,6 +1063,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 
 	// Bind the group using compute root descriptor tables.
 	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
+	e.encoder.trackBindGroupState(bg)
 
 	// Track storage buffers from this bind group for state tracking.
 	// After Dispatch(), these buffers will be marked as UNORDERED_ACCESS
@@ -918,6 +1081,13 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		return
 	}
 
+	plans := make([]stateBarrierPlan, 0, len(e.boundStorageBuffers))
+	for _, buf := range e.boundStorageBuffers {
+		if before, needsBarrier := e.encoder.stateTracker.transitionBuffer(buf, d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS})
+		}
+	}
+	e.encoder.emitStateBarrierPlans(plans)
 	e.encoder.cmdList.Dispatch(x, y, z)
 	e.insertUAVBarrier()
 
@@ -927,9 +1097,6 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	// need these buffers in a different state (e.g., COPY_SOURCE).
 	// Matches Rust wgpu-core pattern: flush_bindings sets BufferUses::STORAGE_READ_WRITE
 	// on bound storage buffers, then drain_barriers emits transitions.
-	for _, buf := range e.boundStorageBuffers {
-		buf.currentState = d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-	}
 	// Clear for next dispatch (same pattern as Rust per-dispatch usage scope).
 	e.boundStorageBuffers = e.boundStorageBuffers[:0]
 }
@@ -942,6 +1109,16 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	if !ok || !e.encoder.isRecording {
 		return
 	}
+	plans := make([]stateBarrierPlan, 0, 1+len(e.boundStorageBuffers))
+	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target})
+	}
+	for _, storage := range e.boundStorageBuffers {
+		if before, needsBarrier := e.encoder.stateTracker.transitionBuffer(storage, d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: storage, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS})
+		}
+	}
+	e.encoder.emitStateBarrierPlans(plans)
 
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.dispatch,
@@ -952,9 +1129,6 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	// Mark bound storage buffers as UNORDERED_ACCESS, matching Dispatch() pattern.
 	// After an indirect dispatch, storage buffers are left in UAV state for correct
 	// transition barriers on subsequent commands.
-	for _, b := range e.boundStorageBuffers {
-		b.currentState = d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-	}
 	e.boundStorageBuffers = e.boundStorageBuffers[:0]
 }
 
@@ -997,25 +1171,11 @@ func needsExplicitBarrier(current, target d3d12.D3D12_RESOURCE_STATES) bool {
 }
 
 // transitionBufferIfNeeded inserts a transition barrier for a single buffer if
-// its current state requires an explicit barrier to reach the target state.
-// Updates the buffer's currentState to the target state after the barrier.
+// its command-local state requires an explicit barrier to reach the target.
 func (e *CommandEncoder) transitionBufferIfNeeded(buf *Buffer, targetState d3d12.D3D12_RESOURCE_STATES) {
-	if !needsExplicitBarrier(buf.currentState, targetState) {
-		// Even with implicit promotion, update the tracked state.
-		if buf.currentState != targetState {
-			buf.currentState = targetState
-		}
-		return
+	if before, needsBarrier := e.stateTracker.transitionBuffer(buf, targetState); needsBarrier {
+		e.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: targetState}})
 	}
-
-	barrier := d3d12.NewTransitionBarrier(buf.raw, buf.currentState, targetState,
-		d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
-	e.cmdList.ResourceBarrier(1, &barrier)
-	hal.Logger().Debug("dx12: buffer state transition",
-		"label", e.label,
-		"from", buf.currentState,
-		"to", targetState)
-	buf.currentState = targetState
 }
 
 // transitionBuffersForCopy inserts batched transition barriers for a source and
@@ -1026,40 +1186,24 @@ func (e *CommandEncoder) transitionBuffersForCopy(
 	srcBuf *Buffer, srcTarget d3d12.D3D12_RESOURCE_STATES,
 	dstBuf *Buffer, dstTarget d3d12.D3D12_RESOURCE_STATES,
 ) {
-	var barriers [2]d3d12.D3D12_RESOURCE_BARRIER
-	count := 0
-
-	srcNeedsBarrier := needsExplicitBarrier(srcBuf.currentState, srcTarget)
-	dstNeedsBarrier := needsExplicitBarrier(dstBuf.currentState, dstTarget)
-
-	if srcNeedsBarrier {
-		barriers[count] = d3d12.NewTransitionBarrier(srcBuf.raw, srcBuf.currentState, srcTarget,
-			d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
-		count++
-		hal.Logger().Debug("dx12: buffer state transition (copy src)",
-			"label", e.label,
-			"from", srcBuf.currentState,
-			"to", srcTarget)
+	plans := make([]stateBarrierPlan, 0, 2)
+	if before, needsBarrier := e.stateTracker.transitionBuffer(srcBuf, srcTarget); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: srcBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: srcTarget})
 	}
-
-	if dstNeedsBarrier {
-		barriers[count] = d3d12.NewTransitionBarrier(dstBuf.raw, dstBuf.currentState, dstTarget,
-			d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
-		count++
-		hal.Logger().Debug("dx12: buffer state transition (copy dst)",
-			"label", e.label,
-			"from", dstBuf.currentState,
-			"to", dstTarget)
+	if before, needsBarrier := e.stateTracker.transitionBuffer(dstBuf, dstTarget); needsBarrier {
+		plans = append(plans, stateBarrierPlan{resource: dstBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: dstTarget})
 	}
+	e.emitStateBarrierPlans(plans)
+}
 
-	if count > 0 {
-		e.cmdList.ResourceBarrier(uint32(count), &barriers[0])
+func resolveSubresourceIndex(view *TextureView) uint32 {
+	if view == nil || view.texture == nil {
+		return 0
 	}
-
-	// Update tracked state. Do this even for implicit promotions so the
-	// tracker stays consistent with actual GPU state.
-	srcBuf.currentState = srcTarget
-	dstBuf.currentState = dstTarget
+	if subresources := textureViewSubresources(view); len(subresources) > 0 {
+		return subresources[0]
+	}
+	return view.texture.subresourceIndex(view.baseMip, view.baseLayer)
 }
 
 // --- Helper functions ---
@@ -1106,6 +1250,85 @@ func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGr
 	}
 }
 
+func (e *CommandEncoder) trackBindGroupState(bg *BindGroup) {
+	if bg == nil {
+		return
+	}
+	plans := make([]stateBarrierPlan, 0)
+	for _, buffer := range bg.uniformBuffers {
+		if before, target, needsBarrier := e.stateTracker.transitionBufferRead(buffer, d3d12.D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: buffer, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target})
+		}
+	}
+	for _, buffer := range bg.readOnlyStorageBuffers {
+		if before, target, needsBarrier := e.stateTracker.transitionBufferRead(buffer, d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE|d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: buffer, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target})
+		}
+	}
+	for _, buffer := range bg.storageBuffers {
+		if before, needsBarrier := e.stateTracker.transitionBuffer(buffer, d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: buffer, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS})
+		}
+	}
+	for _, view := range bg.sampledTextures {
+		for _, subresource := range textureViewSubresources(view) {
+			if before, target, needsBarrier := e.stateTracker.transitionTextureRead(view.texture, subresource, d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE|d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: view.texture, subresource: subresource, before: before, after: target})
+			}
+		}
+	}
+	for _, view := range bg.storageTextures {
+		for _, subresource := range textureViewSubresources(view) {
+			if before, needsBarrier := e.stateTracker.transitionTexture(view.texture, subresource, d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS); needsBarrier {
+				plans = append(plans, stateBarrierPlan{resource: view.texture, subresource: subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS})
+			}
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+}
+
+func textureViewSubresources(view *TextureView) []uint32 {
+	if view == nil || view.texture == nil {
+		return nil
+	}
+	return textureRangeSubresources(view.texture, hal.TextureRange{
+		Aspect:          view.aspect,
+		BaseMipLevel:    view.baseMip,
+		MipLevelCount:   view.mipCount,
+		BaseArrayLayer:  view.baseLayer,
+		ArrayLayerCount: view.layerCount,
+	})
+}
+
+func textureViewSubresourcePlanes(view *TextureView) []textureSubresource {
+	if view == nil || view.texture == nil {
+		return nil
+	}
+	return textureRangeSubresourcePlanes(view.texture, hal.TextureRange{
+		Aspect:          view.aspect,
+		BaseMipLevel:    view.baseMip,
+		MipLevelCount:   view.mipCount,
+		BaseArrayLayer:  view.baseLayer,
+		ArrayLayerCount: view.layerCount,
+	})
+}
+
+func textureViewPhysicalSubresourcePlanes(view *TextureView) []textureSubresource {
+	if view == nil || view.texture == nil {
+		return nil
+	}
+	planes := []uint32{0}
+	if view.texture.planeCount() > 1 {
+		planes = []uint32{0, 1}
+	}
+	return textureRangeSubresourcePlanesForPlanes(view.texture, hal.TextureRange{
+		BaseMipLevel:    view.baseMip,
+		MipLevelCount:   view.mipCount,
+		BaseArrayLayer:  view.baseLayer,
+		ArrayLayerCount: view.layerCount,
+	}, planes)
+}
+
 // setupDepthStencilAttachment configures depth/stencil attachment for a render pass.
 // Returns the DSV handle if valid, nil otherwise.
 func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthStencilAttachment) *d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
@@ -1118,6 +1341,25 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 		return nil
 	}
 
+	depthReadOnly, stencilReadOnly := depthStencilReadOnlyFlags(view.format, view.aspect, dsa.DepthReadOnly, dsa.StencilReadOnly)
+	dsvFlags := d3d12.D3D12_DSV_FLAG_NONE
+	if depthReadOnly {
+		dsvFlags |= d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH
+	}
+	if stencilReadOnly {
+		dsvFlags |= d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL
+	}
+	exposedPlanes := textureAspectPlanes(view.texture, view.aspect)
+	plans := make([]stateBarrierPlan, 0)
+	for _, subresource := range textureViewPhysicalSubresourcePlanes(view) {
+		shaderReadable := view.hasSRV && containsPlane(exposedPlanes, subresource.plane)
+		state := depthStencilPlaneState(subresource.plane, depthReadOnly, stencilReadOnly, shaderReadable)
+		if before, needsBarrier := e.stateTracker.transitionTexture(view.texture, subresource.subresource, state); needsBarrier {
+			plans = append(plans, stateBarrierPlan{resource: view.texture, subresource: subresource.subresource, before: before, after: state})
+		}
+	}
+	e.emitStateBarrierPlans(plans)
+
 	// Determine clear flags
 	var clearFlags d3d12.D3D12_CLEAR_FLAGS
 	if dsa.DepthLoadOp == gputypes.LoadOpClear {
@@ -1127,10 +1369,13 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 		clearFlags |= d3d12.D3D12_CLEAR_FLAG_STENCIL
 	}
 
-	// Clear if needed
+	dsvHandle := view.dsvHandleForFlags(dsvFlags)
+
+	// Clear if needed. Use the same DSV variant as the pass so an unexposed or
+	// explicitly read-only companion plane stays protected during the clear.
 	if clearFlags != 0 {
 		e.cmdList.ClearDepthStencilView(
-			view.dsvHandle,
+			*dsvHandle,
 			clearFlags,
 			dsa.DepthClearValue,
 			uint8(dsa.StencilClearValue),
@@ -1138,7 +1383,16 @@ func (e *CommandEncoder) setupDepthStencilAttachment(dsa *hal.RenderPassDepthSte
 		)
 	}
 
-	return &view.dsvHandle
+	return dsvHandle
+}
+
+func containsPlane(planes []uint32, target uint32) bool {
+	for _, plane := range planes {
+		if plane == target {
+			return true
+		}
+	}
+	return false
 }
 
 // bufferUsageToD3D12State converts buffer usage to D3D12 resource state.
@@ -1193,6 +1447,9 @@ func d3d12StateToTextureUsage(state d3d12.D3D12_RESOURCE_STATES) gputypes.Textur
 		usage |= gputypes.TextureUsageStorageBinding
 	}
 	if state&d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET != 0 {
+		usage |= gputypes.TextureUsageRenderAttachment
+	}
+	if state&(d3d12.D3D12_RESOURCE_STATE_DEPTH_READ|d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE) != 0 {
 		usage |= gputypes.TextureUsageRenderAttachment
 	}
 
