@@ -123,12 +123,26 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
 
-		offset := region.BufferLayout.Offset
 		bpp := formatBytesPerPixel(srcTex.format)
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
+		srcBytesPerRow := uint64(region.Size.Width) * bpp
+		dstBytesPerRow := uint64(region.BufferLayout.BytesPerRow)
+		if dstBytesPerRow == 0 {
+			dstBytesPerRow = srcBytesPerRow
+		}
 
-		if size <= uint64(len(srcTex.data)) && offset+size <= uint64(len(dstBuf.data)) {
-			copy(dstBuf.data[offset:offset+size], srcTex.data[:size])
+		dstOffset := region.BufferLayout.Offset
+		srcOffset := (uint64(region.TextureBase.Origin.Y)*uint64(srcTex.width) + uint64(region.TextureBase.Origin.X)) * bpp
+		srcStride := uint64(srcTex.width) * bpp
+
+		for row := uint32(0); row < region.Size.Height; row++ {
+			srcStart := srcOffset + uint64(row)*srcStride
+			srcEnd := srcStart + srcBytesPerRow
+			dstStart := dstOffset + uint64(row)*dstBytesPerRow
+			dstEnd := dstStart + srcBytesPerRow
+
+			if srcEnd <= uint64(len(srcTex.data)) && dstEnd <= uint64(len(dstBuf.data)) {
+				copy(dstBuf.data[dstStart:dstEnd], srcTex.data[srcStart:srcEnd])
+			}
 		}
 
 		dstBuf.mu.Unlock()

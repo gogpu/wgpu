@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.21] - 2026-07-15
+
+### Fixed
+
+- **Software `CopyTextureToBuffer` row stride** — row-by-row copy respecting
+  `BytesPerRow` from `BufferLayout`. Was flat `copy(dst, src)` ignoring row
+  alignment, causing progressive row shift (128 bytes/row at 800px width)
+  that produced horizontal dashed-line artifacts in GPU texture readback.
+
+- **Software `configureRasterPipeline` blend state** — extract blend state from
+  `Fragment.Targets[0].Blend` into the raster pipeline. Was always `BlendDisabled`,
+  preventing premultiplied alpha compositing for textured quads. Added
+  `convertBlendState`, `convertBlendFactor`, `convertBlendOp` conversion functions.
+
+- **Software `readTexel` BGRA format** — swap R/B channels when sampling textures
+  with `BGRA8Unorm` or `BGRA8UnormSrgb` format. Was always reading as RGBA,
+  causing red/blue channel swap for offscreen BGRA textures.
+
 ## [0.30.20] - 2026-07-14
 
 ### Fixed
