@@ -198,11 +198,12 @@ func (l *PipelineLayout) Destroy() {
 
 // RenderPipeline implements hal.RenderPipeline for Metal.
 type RenderPipeline struct {
-	raw       ID // id<MTLRenderPipelineState>
-	device    *Device
-	layout    *PipelineLayout // for SetBindGroup slot offset lookup
-	cullMode  MTLCullMode
-	frontFace MTLWinding
+	raw           ID // id<MTLRenderPipelineState>
+	device        *Device
+	layout        *PipelineLayout // for SetBindGroup slot offset lookup
+	cullMode      MTLCullMode
+	frontFace     MTLWinding
+	icbCompatible bool
 
 	depthStencil    ID // id<MTLDepthStencilState>
 	depthBias       float32

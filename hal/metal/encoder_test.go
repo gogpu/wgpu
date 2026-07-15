@@ -6,10 +6,21 @@
 package metal
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 )
+
+func TestCommandEncoderRecordingErrorKeepsFirstFailure(t *testing.T) {
+	first := errors.New("first")
+	encoder := &CommandEncoder{}
+	encoder.failRecording(first)
+	encoder.failRecording(errors.New("second"))
+	if !errors.Is(encoder.recordErr, first) {
+		t.Fatalf("recording error = %v, want first failure", encoder.recordErr)
+	}
+}
 
 // TestCommandEncoder_RecordingState is a regression test for Issue #24.
 // The IsRecording() method returns cmdBuffer != 0.
@@ -99,6 +110,83 @@ func TestCommandEncoder_IsRecordingMethod(t *testing.T) {
 	enc.cmdBuffer = 0
 	if enc.IsRecording() != (enc.cmdBuffer != 0) {
 		t.Error("IsRecording() should equal (cmdBuffer != 0)")
+	}
+}
+
+func TestRenderPassDeferredStateKeepsLatestValues(t *testing.T) {
+	firstPipeline := &RenderPipeline{}
+	latestPipeline := &RenderPipeline{}
+	firstGroup := &BindGroup{}
+	latestGroup := &BindGroup{}
+	firstVertex := &Buffer{}
+	latestVertex := &Buffer{}
+	index := &Buffer{}
+	state := renderPassPendingState{}
+	pass := &RenderPassEncoder{pending: &state}
+
+	pass.SetPipeline(firstPipeline)
+	pass.SetPipeline(latestPipeline)
+	pass.SetBindGroup(1, firstGroup, []uint32{4, 8})
+	pass.SetBindGroup(1, latestGroup, []uint32{12})
+	pass.SetVertexBuffer(2, firstVertex, 16)
+	pass.SetVertexBuffer(2, latestVertex, 24)
+	pass.SetIndexBuffer(index, gputypes.IndexFormatUint32, 32)
+	pass.SetViewport(1, 2, 3, 4, 0.25, 0.75)
+	pass.SetScissorRect(5, 6, 7, 8)
+	pass.SetBlendConstant(&gputypes.Color{R: 0.1, G: 0.2, B: 0.3, A: 0.4})
+	pass.SetStencilReference(9)
+
+	if pass.pipeline != latestPipeline {
+		t.Fatal("deferred pipeline did not keep latest value")
+	}
+	group := pass.pending.bindGroups[1]
+	if !group.set || group.group != latestGroup || group.offsetCount != 1 || group.offsets[0] != 12 {
+		t.Fatalf("deferred bind group = %#v, want latest group and offsets", group)
+	}
+	vertex := pass.pending.vertexBuffers[2]
+	if !vertex.set || vertex.buffer != latestVertex || vertex.offset != 24 {
+		t.Fatalf("deferred vertex buffer = %#v, want latest buffer and offset", vertex)
+	}
+	if pass.indexBuffer != index || pass.indexFormat != gputypes.IndexFormatUint32 || pass.indexOffset != 32 {
+		t.Fatal("deferred index buffer state was not retained")
+	}
+	if !pass.pending.viewportSet || pass.pending.viewport != (MTLViewport{OriginX: 1, OriginY: 2, Width: 3, Height: 4, ZNear: 0.25, ZFar: 0.75}) {
+		t.Fatalf("deferred viewport = %#v", pass.pending.viewport)
+	}
+	if !pass.pending.scissorSet || pass.pending.scissor != (MTLScissorRect{X: 5, Y: 6, Width: 7, Height: 8}) {
+		t.Fatalf("deferred scissor = %#v", pass.pending.scissor)
+	}
+	if !pass.pending.blendSet || pass.pending.blend != (gputypes.Color{R: 0.1, G: 0.2, B: 0.3, A: 0.4}) {
+		t.Fatalf("deferred blend constant = %#v", pass.pending.blend)
+	}
+	if !pass.pending.stencilSet || pass.pending.stencil != 9 {
+		t.Fatalf("deferred stencil reference = %d", pass.pending.stencil)
+	}
+}
+
+func TestRenderPassDeferredStateUsesBoundedStorage(t *testing.T) {
+	group := &BindGroup{}
+	buffer := &Buffer{}
+	pipeline := &RenderPipeline{}
+	state := renderPassPendingState{}
+	var pass RenderPassEncoder
+	offsets := []uint32{1, 2, 3, 4}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		clear(state.bindGroups[:])
+		clear(state.vertexBuffers[:])
+		pass = RenderPassEncoder{pending: &state}
+		pass.SetPipeline(pipeline)
+		pass.SetBindGroup(0, group, offsets)
+		pass.SetVertexBuffer(0, buffer, 12)
+		pass.SetIndexBuffer(buffer, gputypes.IndexFormatUint16, 4)
+		pass.SetViewport(0, 0, 10, 10, 0, 1)
+		pass.SetScissorRect(0, 0, 10, 10)
+		pass.SetBlendConstant(&gputypes.Color{A: 1})
+		pass.SetStencilReference(2)
+	})
+	if allocs != 0 {
+		t.Fatalf("deferred state allocated %.2f objects per recording", allocs)
 	}
 }
 

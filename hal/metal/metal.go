@@ -114,6 +114,7 @@ func preRegisterSelectors() {
 		"newSamplerStateWithDescriptor:",
 		"newCommandQueue",
 		"newRenderPipelineStateWithDescriptor:error:",
+		"setSupportIndirectCommandBuffers:",
 		"newLibraryWithSource:options:error:",
 		"newFunctionWithName:",
 		"supportsFamily:",
