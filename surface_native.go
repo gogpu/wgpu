@@ -37,6 +37,7 @@ type Surface struct {
 //   - macOS: displayHandle=0, windowHandle=NSView*
 //   - Linux/X11: displayHandle=Display*, windowHandle=Window
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
+//   - Android: displayHandle ignored, windowHandle=ANativeWindow*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
 	if i.isReleased() {
 		return nil, ErrReleased
