@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.22] - 2026-07-16
+
+### Fixed
+
+- **Metal MSAA storage mode crash on Intel Mac** — use `MTLGPUFamilyApple1`
+  detection instead of `hasUnifiedMemory` for texture storage mode selection.
+  Non-Apple GPU family devices (Intel/AMD) now always use `MTLStorageModePrivate`
+  for textures. Apple Silicon keeps `MTLStorageModeShared` optimization for
+  single-sample textures. Fixes #271.
+
 ## [0.30.21] - 2026-07-15
 
 ### Fixed

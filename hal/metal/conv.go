@@ -120,6 +120,25 @@ func textureUsageToMTL(usage gputypes.TextureUsage) MTLTextureUsage {
 	return mtlUsage
 }
 
+// textureStorageMode selects the MTLStorageMode for a texture based on GPU family
+// and sample count. Returns the storage mode and whether it is Shared (CPU-writable).
+//
+// Apple GPU (A-series, M-series) + single-sample: Shared — zero-copy CPU writes via
+// replaceRegion: and setPurgeableState(empty) for immediate OS memory reclaim.
+//
+// Apple GPU + multisample: Private — MSAA textures are never CPU-read, have a
+// one-frame lifetime, and gain no benefit from Shared storage.
+//
+// Non-Apple GPU (Intel, AMD): Private always — Metal spec requires Private storage
+// for multisample textures on non-Apple GPU families, and Shared offers no advantage
+// on discrete/non-UMA architectures.
+func textureStorageMode(isAppleGPU bool, sampleCount uint32) (MTLStorageMode, bool) {
+	if isAppleGPU && sampleCount <= 1 {
+		return MTLStorageModeShared, true
+	}
+	return MTLStorageModePrivate, false
+}
+
 // textureTypeFromDimension converts WebGPU texture dimension to Metal texture type.
 func textureTypeFromDimension(dimension gputypes.TextureDimension, sampleCount, depth uint32) MTLTextureType {
 	switch dimension {

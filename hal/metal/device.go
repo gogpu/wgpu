@@ -38,6 +38,12 @@ type Device struct {
 	// and direct CPU writes without a staging blit, which eliminates the main source
 	// of resize-induced memory growth.
 	hasUnifiedMemory bool
+	// isAppleGPU is true when the device belongs to MTLGPUFamilyApple1 or higher
+	// (Apple-designed GPU: A-series, M-series). Intel/AMD GPUs on Mac report
+	// hasUnifiedMemory=true but are NOT Apple GPU family and do not support
+	// MTLStorageModeShared for multisample textures. This field drives texture
+	// storage mode selection instead of hasUnifiedMemory.
+	isAppleGPU bool
 }
 
 // newDevice creates a new Device from a Metal device.
@@ -51,14 +57,22 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		return nil, fmt.Errorf("metal: failed to create command queue")
 	}
 
-	// Detect Apple Silicon (UMA): hasUnifiedMemory returns YES on M-series chips.
-	// On UMA, MTLStorageModeShared == Private physically, so we use Shared for all
-	// user textures to enable setPurgeableState(empty) and direct CPU writes.
+	// Detect UMA: hasUnifiedMemory returns YES on Apple Silicon (M-series) and
+	// some Intel integrated GPUs (e.g. Iris Plus 655). Used for DeviceType
+	// classification and buffer storage decisions.
 	hasUMA := MsgSend(adapter.raw, Sel("hasUnifiedMemory")) != 0
+
+	// Detect Apple-designed GPU (A-series, M-series) via MTLGPUFamilyApple1.
+	// This is the correct predicate for texture storage mode: Intel/AMD GPUs
+	// may report hasUnifiedMemory=true but crash on MTLStorageModeShared for
+	// multisample textures. Only Apple GPU family supports Shared for all
+	// single-sample texture types.
+	isApple := DeviceSupportsFamily(adapter.raw, MTLGPUFamilyApple1)
 
 	hal.Logger().Info("metal: device created",
 		"name", DeviceName(adapter.raw),
 		"hasUnifiedMemory", hasUMA,
+		"isAppleGPU", isApple,
 	)
 
 	return &Device{
@@ -66,6 +80,7 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		commandQueue:     queue,
 		adapter:          adapter,
 		hasUnifiedMemory: hasUMA,
+		isAppleGPU:       isApple,
 	}, nil
 }
 
@@ -211,18 +226,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	usage := textureUsageToMTL(desc.Usage)
 	_ = MsgSend(texDesc, Sel("setUsage:"), uintptr(usage))
 
-	// On Apple Silicon (UMA), use Shared storage instead of Private.
-	// Physical memory is identical on UMA — the only differences are:
-	//   (a) Shared supports direct CPU writes via replaceRegion: (no staging copy)
-	//   (b) Shared honours setPurgeableState(empty) which immediately returns
-	//       physical pages to the OS; Private silently ignores this call.
-	// On discrete-GPU Macs, keep Private (VRAM-resident, no CPU penalty per frame).
-	storageMode := MTLStorageModePrivate
-	isShared := false
-	if d.hasUnifiedMemory {
-		storageMode = MTLStorageModeShared
-		isShared = true
-	}
+	// Select storage mode based on GPU family and sample count.
+	// Apple GPU + single-sample → Shared (zero-copy CPU writes, setPurgeableState).
+	// Apple GPU + multisample → Private (MSAA has no Shared benefit).
+	// Non-Apple GPU (Intel/AMD) → Private always (spec requirement for MSAA).
+	storageMode, isShared := textureStorageMode(d.isAppleGPU, sampleCount)
 	_ = MsgSend(texDesc, Sel("setStorageMode:"), uintptr(storageMode))
 
 	raw := MsgSend(d.raw, Sel("newTextureWithDescriptor:"), uintptr(texDesc))

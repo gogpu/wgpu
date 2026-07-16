@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.21
+## Current State: v0.30.22
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -91,6 +91,7 @@
 ✅ **Software CopyTextureToBuffer row stride** — row-by-row copy respecting BytesPerRow (v0.30.21)
 ✅ **Software blend state wiring** — extract blend from Fragment.Targets into raster pipeline (v0.30.21)
 ✅ **Software BGRA readTexel** — R/B channel swap for BGRA8Unorm/Srgb textures (v0.30.21)
+✅ **Metal MSAA storage mode fix** — `MTLGPUFamilyApple1` detection replaces `hasUnifiedMemory` for texture storage mode. Intel Mac SIGABRT on MSAA fixed. Apple Silicon keeps Shared optimization (v0.30.22, @AnyCPU #271)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -191,6 +192,7 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.30.22** | 2026-07 | Metal: MSAA storage mode crash on Intel Mac — `MTLGPUFamilyApple1` detection (#271) |
 | **v0.30.21** | 2026-07 | Software: CopyTextureToBuffer row stride, blend state wiring, BGRA readTexel |
 | **v0.30.20** | 2026-07 | PresentPixels check-before-mutate + DX12 UMA classification (@Zeroes1 #254) |
 | **v0.30.17-19** | 2026-07 | goffi v0.6.0 ADR-049 (764 FFI call sites), vk-gen array params + deterministic output, webgpu v0.5.3 |
