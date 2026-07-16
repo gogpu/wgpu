@@ -123,6 +123,44 @@ func TestTextureUsageToMTL(t *testing.T) {
 	}
 }
 
+// TestTextureStorageMode verifies the GPU-family-aware storage mode selection
+// that prevents SIGABRT on Intel Mac MSAA textures (issue #271).
+//
+// Intel integrated GPUs report hasUnifiedMemory=true but do NOT belong to
+// MTLGPUFamilyApple1. Using MTLStorageModeShared for multisample textures on
+// these GPUs triggers a Metal validation error / SIGABRT. The fix uses
+// isAppleGPU (MTLGPUFamilyApple1 membership) instead of hasUnifiedMemory.
+func TestTextureStorageMode(t *testing.T) {
+	tests := []struct {
+		name         string
+		isAppleGPU   bool
+		sampleCount  uint32
+		wantMode     MTLStorageMode
+		wantIsShared bool
+	}{
+		{"Apple GPU single-sample", true, 1, MTLStorageModeShared, true},
+		{"Apple GPU multisample 4x", true, 4, MTLStorageModePrivate, false},
+		{"Apple GPU multisample 8x", true, 8, MTLStorageModePrivate, false},
+		{"non-Apple GPU single-sample", false, 1, MTLStorageModePrivate, false},
+		{"non-Apple GPU multisample 4x", false, 4, MTLStorageModePrivate, false},
+		{"Apple GPU zero-sample (treated as single)", true, 0, MTLStorageModeShared, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMode, gotShared := textureStorageMode(tt.isAppleGPU, tt.sampleCount)
+			if gotMode != tt.wantMode {
+				t.Errorf("textureStorageMode(%v, %d) mode = %v, want %v",
+					tt.isAppleGPU, tt.sampleCount, gotMode, tt.wantMode)
+			}
+			if gotShared != tt.wantIsShared {
+				t.Errorf("textureStorageMode(%v, %d) isShared = %v, want %v",
+					tt.isAppleGPU, tt.sampleCount, gotShared, tt.wantIsShared)
+			}
+		})
+	}
+}
+
 // TestTextureTypeFromDimension tests texture type from dimension conversions.
 func TestTextureTypeFromDimension(t *testing.T) {
 	tests := []struct {

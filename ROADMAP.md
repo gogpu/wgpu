@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.21
+## Current State: v0.30.22
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -191,6 +191,7 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.30.22** | 2026-07 | Metal: MSAA storage mode crash on Intel Mac — `MTLGPUFamilyApple1` detection (#271) |
 | **v0.30.21** | 2026-07 | Software: CopyTextureToBuffer row stride, blend state wiring, BGRA readTexel |
 | **v0.30.20** | 2026-07 | PresentPixels check-before-mutate + DX12 UMA classification (@Zeroes1 #254) |
 | **v0.30.17-19** | 2026-07 | goffi v0.6.0 ADR-049 (764 FFI call sites), vk-gen array params + deterministic output, webgpu v0.5.3 |
