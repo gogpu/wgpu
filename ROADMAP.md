@@ -91,6 +91,7 @@
 ✅ **Software CopyTextureToBuffer row stride** — row-by-row copy respecting BytesPerRow (v0.30.21)
 ✅ **Software blend state wiring** — extract blend from Fragment.Targets into raster pipeline (v0.30.21)
 ✅ **Software BGRA readTexel** — R/B channel swap for BGRA8Unorm/Srgb textures (v0.30.21)
+✅ **Metal MSAA storage mode fix** — `MTLGPUFamilyApple1` detection replaces `hasUnifiedMemory` for texture storage mode. Intel Mac SIGABRT on MSAA fixed. Apple Silicon keeps Shared optimization (v0.30.22, @AnyCPU #271)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
