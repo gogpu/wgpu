@@ -60,6 +60,10 @@ The unreleased Android/arm64 Vulkan implementation is documented separately in
 [Android Vulkan preview](docs/ANDROID.md). It requires the exact canonical
 goffi candidate named there and is not yet a released support claim.
 
+New surface integrations should use the explicit safe or unsafe target API
+described in [Surface targets](docs/SURFACE-TARGETS.md). The original
+two-`uintptr` method remains available as a compatibility adapter.
+
 **Rust FFI backend** (optional, battle-tested wgpu-native drivers):
 ```bash
 go build -tags rust
