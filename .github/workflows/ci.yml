@@ -69,6 +69,7 @@ jobs:
       env:
         GOFFI_DIR: ${{ github.workspace }}/.ci/goffi
         GOFFI_EXPECTED_HEAD: 8ccaae72d877a7af0af4b628bf86e92536e27d88
+        GOFFI_EXPECTED_PATCH: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       run: |
         export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
         ./scripts/check-android-arm64-preview.sh

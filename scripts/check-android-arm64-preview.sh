@@ -3,12 +3,70 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+sha256_stream() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum
+	else
+		shasum -a 256
+	fi
+}
+
+worktree_fingerprint() {
+	local repo=$1
+	{
+		git -C "$repo" diff --binary --no-ext-diff HEAD -- .
+		git -C "$repo" ls-files --others --exclude-standard | LC_ALL=C sort |
+			while IFS= read -r file; do
+				[[ -n "$file" ]] || continue
+				printf 'UNTRACKED %s\n' "$file"
+				if command -v sha256sum >/dev/null 2>&1; then
+					sha256sum "$repo/$file" | awk '{print $1}'
+				else
+					shasum -a 256 "$repo/$file" | awk '{print $1}'
+				fi
+			done
+	} | sha256_stream | awk '{print $1}'
+}
+
+require_checkout() {
+	local label=$1
+	local repo=$2
+	local expected_head=$3
+	local expected_patch=$4
+	local actual_head
+	local actual_patch
+
+	actual_head=$(git -C "$repo" rev-parse HEAD)
+	if [[ "$actual_head" != "$expected_head" ]]; then
+		echo "$label HEAD is $actual_head, want $expected_head" >&2
+		exit 1
+	fi
+	git -C "$repo" diff --check
+	actual_patch=$(worktree_fingerprint "$repo")
+	if [[ "$actual_patch" != "$expected_patch" ]]; then
+		echo "$label working-tree fingerprint is $actual_patch, want $expected_patch" >&2
+		exit 1
+	fi
+}
+
 : "${GOFFI_DIR:?set GOFFI_DIR to the checked-out canonical goffi Android candidate}"
 : "${GOFFI_EXPECTED_HEAD:?set GOFFI_EXPECTED_HEAD to its immutable commit}"
+: "${GOFFI_EXPECTED_PATCH:?set GOFFI_EXPECTED_PATCH to its working-tree fingerprint}"
 goffi_dir=$(cd "$GOFFI_DIR" && pwd -P)
 actual_head=$(git -C "$goffi_dir" rev-parse HEAD)
-if [[ "$actual_head" != "$GOFFI_EXPECTED_HEAD" ]]; then
-	echo "goffi HEAD is $actual_head, want $GOFFI_EXPECTED_HEAD" >&2
+require_checkout goffi "$goffi_dir" "$GOFFI_EXPECTED_HEAD" "$GOFFI_EXPECTED_PATCH"
+
+webgpu_dir=
+actual_webgpu_head=
+if [[ -n "${WEBGPU_DIR:-}" ]]; then
+	: "${WEBGPU_EXPECTED_HEAD:?set WEBGPU_EXPECTED_HEAD to the helper candidate immutable commit}"
+	: "${WEBGPU_EXPECTED_PATCH:?set WEBGPU_EXPECTED_PATCH to its working-tree fingerprint}"
+	webgpu_dir=$(cd "$WEBGPU_DIR" && pwd -P)
+	actual_webgpu_head=$(git -C "$webgpu_dir" rev-parse HEAD)
+	require_checkout go-webgpu/webgpu "$webgpu_dir" "$WEBGPU_EXPECTED_HEAD" "$WEBGPU_EXPECTED_PATCH"
+elif [[ -n "${WEBGPU_EXPECTED_HEAD:-}" || -n "${WEBGPU_EXPECTED_PATCH:-}" ]]; then
+	echo "WEBGPU_DIR is required when a go-webgpu/webgpu identity is supplied" >&2
 	exit 1
 fi
 
@@ -30,7 +88,11 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 (
 	cd "$tmpdir"
-	GOWORK=off go work init "$root" "$goffi_dir"
+	workspace_modules=("$root" "$goffi_dir")
+	if [[ -n "$webgpu_dir" ]]; then
+		workspace_modules+=("$webgpu_dir")
+	fi
+	GOWORK=off go work init "${workspace_modules[@]}"
 )
 workspace="$tmpdir/go.work"
 
@@ -38,6 +100,13 @@ selected_goffi=$(GOWORK="$workspace" go list -m -f '{{.Dir}}' github.com/go-webg
 if [[ "$(cd "$selected_goffi" && pwd -P)" != "$goffi_dir" ]]; then
 	echo "workspace selected goffi from $selected_goffi, want $goffi_dir" >&2
 	exit 1
+fi
+if [[ -n "$webgpu_dir" ]]; then
+	selected_webgpu=$(GOWORK="$workspace" go list -m -f '{{.Dir}}' github.com/go-webgpu/webgpu)
+	if [[ "$(cd "$selected_webgpu" && pwd -P)" != "$webgpu_dir" ]]; then
+		echo "workspace selected go-webgpu/webgpu from $selected_webgpu, want $webgpu_dir" >&2
+		exit 1
+	fi
 fi
 
 audit_source_selection() {
@@ -80,6 +149,7 @@ audit_source_selection() {
 audit_elf() {
 	local binary=$1
 	local label=$2
+	local expected_loader=$3
 	local dynamic="$tmpdir/$label.dynamic"
 	local strings_file="$tmpdir/$label.strings"
 
@@ -88,7 +158,7 @@ audit_elf() {
 
 	grep -Eq 'Shared library: \[libc\.so\]' "$dynamic"
 	grep -Eq 'Shared library: \[libdl\.so\]' "$dynamic"
-	grep -q 'libvulkan.so' "$strings_file"
+	grep -q "$expected_loader" "$strings_file"
 
 	if grep -Eq 'Shared library: \[[^]]*\.so\.[0-9]|Shared library: \[libpthread' "$dynamic"; then
 		echo "$label contains a glibc-style or standalone pthread dependency" >&2
@@ -104,7 +174,8 @@ audit_elf() {
 run_mode() {
 	local cgo=$1
 	local label="android-arm64-cgo$cgo"
-	local binary="$tmpdir/$label"
+	local native_binary="$tmpdir/$label-native"
+	local rust_binary="$tmpdir/$label-rust"
 	local -a env_args=(
 		"GOWORK=$workspace"
 		"GOOS=android"
@@ -119,9 +190,17 @@ run_mode() {
 	(
 		cd "$root"
 		env "${env_args[@]}" go test -exec=true ./...
-		env "${env_args[@]}" go build -o "$binary" ./examples/triangle-headless
+		env "${env_args[@]}" go build -o "$native_binary" ./examples/triangle-headless
 	)
-	audit_elf "$binary" "$label"
+	audit_elf "$native_binary" "$label-native" 'libvulkan.so'
+	if [[ -n "$webgpu_dir" ]]; then
+		(
+			cd "$root"
+			env "${env_args[@]}" go test -tags rust -exec=true ./...
+			env "${env_args[@]}" go build -tags rust -o "$rust_binary" ./examples/triangle-headless
+		)
+		audit_elf "$rust_binary" "$label-rust" 'libwgpu_native.so'
+	fi
 }
 
 run_mode 0
@@ -132,4 +211,9 @@ if [[ -e "$root/go.work" || -e "$root/go.work.sum" ]]; then
 	exit 1
 fi
 git -C "$root" diff --exit-code -- go.mod go.sum
-echo "Android arm64 preview checks passed with goffi $actual_head"
+if [[ -n "$webgpu_dir" ]]; then
+	git -C "$webgpu_dir" diff --exit-code -- go.mod go.sum
+	echo "Android arm64 native and Rust checks passed with goffi $actual_head and go-webgpu/webgpu $actual_webgpu_head"
+else
+	echo "Android arm64 native checks passed with goffi $actual_head (Rust checks skipped: WEBGPU_DIR not set)"
+fi
