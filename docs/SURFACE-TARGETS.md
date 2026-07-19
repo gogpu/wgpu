@@ -86,10 +86,12 @@ backend trait.
 |-----------|--------------------------------|------------------------------|
 | `go-webgpu/webgpu/wgpu.(*Instance).CreateSurfaceFromAndroidNativeWindow` | `WGPUSurfaceSourceAndroidNativeWindow` passed to `wgpuInstanceCreateSurface` | Android-only; rejects zero before FFI, keeps the wire descriptor live for the call, retains no `ANativeWindow` reference, and returns `WGPUError` for released instance or null result |
 
-That wrapper method belongs in canonical `go-webgpu/webgpu`, not this
-repository. Its PR and an immutable released revision must land before the
-Rust-tag Android lane can be merged here; the WGPU follow-up does not vendor the
-ABI struct or add a local `replace`.
+That wrapper method belongs in canonical
+[go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), not this
+repository. This branch tests its exact clean head
+`08592c9f5916b64dfc70aba9e67a74a764bb3ef5`; #24 and an immutable released
+revision must land before the Rust-tag Android lane can merge here. The WGPU
+follow-up does not vendor the ABI struct or add a local `replace`.
 
 Like Rust `wgpu`, the native implementation attempts surface creation for
 every enabled backend and succeeds when at least one backend succeeds. It keeps

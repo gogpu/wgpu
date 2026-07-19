@@ -28,8 +28,8 @@ env:
   CGO_ENABLED: 0
 
 jobs:
-  # Draft-only integration against the exact canonical goffi Android candidate.
-  # The script creates an ephemeral go.work; module metadata stays releasable.
+  # Integration against the exact pending canonical Android candidates. The
+  # script creates an ephemeral go.work; module metadata stays releasable.
   android-arm64-preview:
     name: Android arm64 preview - Go ${{ matrix.go-version }}
     runs-on: ubuntu-latest
@@ -53,6 +53,18 @@ jobs:
       working-directory: .ci/goffi
       run: test "$(git rev-parse HEAD)" = 8ccaae72d877a7af0af4b628bf86e92536e27d88
 
+    - name: Checkout exact WebGPU Android surface candidate
+      uses: actions/checkout@v4
+      with:
+        repository: go-webgpu/webgpu
+        ref: refs/pull/24/head
+        path: .ci/webgpu
+        persist-credentials: false
+
+    - name: Verify exact WebGPU candidate
+      working-directory: .ci/webgpu
+      run: test "$(git rev-parse HEAD)" = 08592c9f5916b64dfc70aba9e67a74a764bb3ef5
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -70,6 +82,9 @@ jobs:
         GOFFI_DIR: ${{ github.workspace }}/.ci/goffi
         GOFFI_EXPECTED_HEAD: 8ccaae72d877a7af0af4b628bf86e92536e27d88
         GOFFI_EXPECTED_PATCH: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        WEBGPU_DIR: ${{ github.workspace }}/.ci/webgpu
+        WEBGPU_EXPECTED_HEAD: 08592c9f5916b64dfc70aba9e67a74a764bb3ef5
+        WEBGPU_EXPECTED_PATCH: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       run: |
         export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
         ./scripts/check-android-arm64-preview.sh

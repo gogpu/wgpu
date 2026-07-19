@@ -9,11 +9,18 @@ debug callbacks, and API 28 or older are out of scope.
 The default backend depends on the unreleased canonical goffi work in
 [go-webgpu/goffi#62](https://github.com/go-webgpu/goffi/pull/62), exactly at
 `8ccaae72d877a7af0af4b628bf86e92536e27d88`. The `rust` build-tag path also
-needs the Android surface-source helper proposed in canonical
-[`go-webgpu/webgpu`](https://github.com/go-webgpu/webgpu). Neither integration
-uses a forked module path, a `replace` directive, or a committed `go.work`.
-The proof script creates an ephemeral workspace and verifies the exact heads
-and working-tree fingerprints supplied by the caller.
+depends on canonical [go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24),
+exactly at `08592c9f5916b64dfc70aba9e67a74a764bb3ef5`. Neither integration uses a
+forked module path, a `replace` directive, or a committed `go.work`. The proof
+script creates an ephemeral workspace and verifies the exact clean heads
+supplied by the caller.
+
+API 29 is the native symbol and application install floor. API 36 is the
+downstream Java compile/Play target and the newest runtime-observer endpoint;
+it is not a distinct WGPU ABI. NDK r29 publishes native platform wrappers
+through API 35, so the native cross-build deliberately targets the supported
+API 29 floor instead of inventing an API 36 clang target. Policy tests cover
+the API 29 branch and the shared API 30-through-36 branch.
 
 ## Host contract
 
@@ -81,17 +88,22 @@ best reviewed as a follow-up on that exact head, not folded into unrelated
 prerequisites. After predecessors merge, #268 can be rebased to its Android-only
 commits and this follow-up can be replayed without changing its public design.
 
-The independent prerequisites and their original exact heads are:
+The independently reviewable prerequisites and their current exact heads are:
 
 | Prerequisite | Exact head |
 |--------------|------------|
-| [wgpu#264](https://github.com/gogpu/wgpu/pull/264), drain before device teardown | `0ed17064f8c977f35d9b49b5cde0d0c69e867ecf` |
-| [wgpu#265](https://github.com/gogpu/wgpu/pull/265), fail-closed swapchain negotiation | `a8ff52e340f0a06c8e1b6599a03856d7fc74d1a2` |
-| [wgpu#266](https://github.com/gogpu/wgpu/pull/266), explicit mock construction | `e97e4901ee76d9e5f587569c073b38114221c4e6` |
-| [wgpu#267](https://github.com/gogpu/wgpu/pull/267), surface-qualified present queue | `a3e839f94a12edce98e2496d96e5bd8d3cdd2fc3` |
-| [wgpu#269](https://github.com/gogpu/wgpu/pull/269), surface lifetime ownership | `85eeeb02a278bf4caebf66310b6baad8c328dd87` |
+| [wgpu#264](https://github.com/gogpu/wgpu/pull/264), drain before device teardown | `6acfb1ea1cca1dc14d7ab0902931c678dc13e0a6` |
+| [wgpu#265](https://github.com/gogpu/wgpu/pull/265), fail-closed swapchain negotiation | `eb48db0e7eec4c12eaa87cc998f6ea9e8f348fdd` |
+| [wgpu#266](https://github.com/gogpu/wgpu/pull/266), explicit mock construction | `e65bec3c74c56cd07265c055ce6a7ec7fbedc680` |
+| [wgpu#267](https://github.com/gogpu/wgpu/pull/267), surface-qualified present queue | `63efce782d5cf41dacab761d202da0e3d68ed2da` |
+| [wgpu#269](https://github.com/gogpu/wgpu/pull/269), surface lifetime ownership | `2a069cb1fde942339813efd7199ed305a3a2ca84` |
 | [goffi#62](https://github.com/go-webgpu/goffi/pull/62), Android/Bionic runtime | `8ccaae72d877a7af0af4b628bf86e92536e27d88` |
-| `go-webgpu/webgpu` Android surface-source helper | base `351770c3f88ab91014abf9f8a512e58684018917`; separate helper PR required |
+| [webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), Android Rust-wrapper surface source | `08592c9f5916b64dfc70aba9e67a74a764bb3ef5` |
+
+The current stacked [wgpu#268](https://github.com/gogpu/wgpu/pull/268) head is
+`041e19e65620a0a554718a712ead544794a863b5`. Once the five WGPU prerequisites
+merge, #268 drops their replayed commits and retains its four Android-owned
+commits. This typed-target follow-up is then replayed on that reduced head.
 
 [wgpu#253](https://github.com/gogpu/wgpu/pull/253) is the design precedent for
 matching Rust's typed public/HAL seam; it is not a code dependency of Android.
@@ -109,17 +121,12 @@ GOFFI_DIR=/path/to/goffi \
 GOFFI_EXPECTED_HEAD=8ccaae72d877a7af0af4b628bf86e92536e27d88 \
 GOFFI_EXPECTED_PATCH=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
 WEBGPU_DIR=/path/to/go-webgpu-webgpu \
-WEBGPU_EXPECTED_HEAD=351770c3f88ab91014abf9f8a512e58684018917 \
-WEBGPU_EXPECTED_PATCH=2f4d4b42953d17e843684e99c7b7590214a1fcaa02bf19a80c8503d8b0e26cb2 \
+WEBGPU_EXPECTED_HEAD=08592c9f5916b64dfc70aba9e67a74a764bb3ef5 \
+WEBGPU_EXPECTED_PATCH=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
 ANDROID_NDK_HOME=/path/to/android-ndk-r29 \
 GOTOOLCHAIN=go1.26.5 \
 ./scripts/check-android-arm64-preview.sh
 ```
-
-The helper fingerprint above identifies the four-file helper plus its changelog
-entry on that canonical base. Once its helper PR exists, replace the
-base/fingerprint pair with the immutable PR head and the clean-tree fingerprint
-(`e3b0c442...`).
 
 The script verifies Android-only source selection; compiles every package and
 test for both the default and `rust` implementations in cgo0 and cgo1 modes;
@@ -127,10 +134,9 @@ builds each headless example; checks the generated Go and NDK C ABI layouts;
 and audits both ELF dependency sets. It requires Bionic `libc.so`/`libdl.so`,
 confirms `libvulkan.so` for the default backend and `libwgpu_native.so` for the
 Rust backend, and rejects glibc sonames, standalone `libpthread`, desktop WSI,
-GLES, and software fallback. Current CI repeats the default lane with Go
-1.25.12 and Go 1.26.5. Supplying `WEBGPU_DIR` enables the Rust lane locally;
-that lane can become mandatory in CI as soon as the helper has a canonical
-immutable ref.
+GLES, and software fallback. Current CI repeats both the default and Rust lanes
+with Go 1.25.12 and Go 1.26.5 against the exact clean goffi#62 and webgpu#24
+heads.
 
 These are deterministic cross-build and binary-shape checks. They do not prove
 process startup, adapter enumeration, surface creation, rendering,
@@ -139,6 +145,6 @@ presentation, rotation, or lifecycle recovery on a physical device.
 Before the preview can become a released support claim, goffi#62, the canonical
 `go-webgpu/webgpu` helper, and the WGPU prerequisites must merge and ship
 through canonical refs; #268 must rebase to Android-only commits; and API 29
-plus API 30-or-newer arm64 devices must pass cgo0/cgo1 startup, known-color
+plus API 36 arm64 devices must pass cgo0/cgo1 startup, known-color
 presentation, rotation, Activity recreation, and repeated native-window
 replacement without crashes, hangs, stale frames, or validation errors.
