@@ -540,7 +540,7 @@ func TestDrawWithSurfaceTexture(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	_ = surface.Configure(dev, &hal.SurfaceConfiguration{

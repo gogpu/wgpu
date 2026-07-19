@@ -167,7 +167,7 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 		}
 	}
 
-	halSurface := surface.HAL()
+	halSurface := surface.halSurfaceForBackend(a.info.Backend)
 	if halSurface == nil {
 		return nil
 	}

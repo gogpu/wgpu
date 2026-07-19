@@ -40,6 +40,10 @@ type ContextConfig struct {
 	// a second connection, which makes wl_surface proxies mismatched on configure.
 	// On X11: the X11 Display*. Zero uses the default display.
 	NativeDisplay uintptr
+	// WindowKind selects the native window system explicitly. Nil preserves
+	// automatic environment-based detection and keeps ContextConfig's zero value
+	// independent of WindowKind's numeric constants.
+	WindowKind *WindowKind
 }
 
 // DefaultContextConfig returns a sensible default context configuration.
@@ -55,13 +59,13 @@ func DefaultContextConfig() ContextConfig {
 	}
 }
 
-// NewContext creates a new EGL context with automatic platform detection.
-// It detects the window system (X11, Wayland, or Surfaceless) and creates
-// an appropriate EGL context.
+// NewContext creates a new EGL context. An explicit WindowKind selects that
+// platform directly; otherwise it detects X11, Wayland, or Surfaceless.
 func NewContext(config ContextConfig) (*Context, error) {
-	// Get EGL display for the detected platform.
+	// Get an EGL display for the explicit or detected platform.
 	// displayOwner (non-nil for X11) keeps the native display connection alive.
-	display, windowKind, displayOwner, err := GetEGLDisplay(config.NativeDisplay)
+	windowKind := selectWindowKind(config.WindowKind, DetectWindowKind)
+	display, windowKind, displayOwner, err := getEGLDisplayForKind(config.NativeDisplay, windowKind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get EGL display: %w", err)
 	}
@@ -138,6 +142,13 @@ func NewContext(config ContextConfig) (*Context, error) {
 		windowKind:   windowKind,
 		displayOwner: displayOwner,
 	}, nil
+}
+
+func selectWindowKind(requested *WindowKind, detect func() WindowKind) WindowKind {
+	if requested != nil {
+		return *requested
+	}
+	return detect()
 }
 
 // chooseEGLConfig selects an appropriate EGL frame buffer configuration.

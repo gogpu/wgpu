@@ -48,11 +48,9 @@ type Backend interface {
 // Instance is the entry point for GPU operations.
 // An instance manages adapter enumeration and surface creation.
 type Instance interface {
-	// CreateSurface creates a rendering surface from platform handles.
-	// displayHandle is platform-specific (HDC on Windows, NSWindow* on macOS, etc.).
-	// windowHandle is the window handle (HWND on Windows, NSView* on macOS, etc.).
-	// On Android, displayHandle is ignored and windowHandle is ANativeWindow*.
-	CreateSurface(displayHandle, windowHandle uintptr) (Surface, error)
+	// CreateSurface creates a rendering surface from a typed raw platform target.
+	// The target's native objects remain caller-owned and must outlive the Surface.
+	CreateSurface(target SurfaceTarget) (Surface, error)
 
 	// EnumerateAdapters enumerates available physical GPUs.
 	// surfaceHint is optional - if provided, only adapters compatible with

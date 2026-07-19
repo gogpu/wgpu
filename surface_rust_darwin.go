@@ -2,10 +2,20 @@
 
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import (
+	"fmt"
 
-// createPlatformSurface creates a rendering surface on macOS via CAMetalLayer.
-// On macOS, displayHandle is unused (0) and windowHandle is a CAMetalLayer pointer.
-func createPlatformSurface(instance *rwgpu.Instance, _, windowHandle uintptr) (*rwgpu.Surface, error) {
-	return instance.CreateSurfaceFromMetalLayer(windowHandle)
+	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+)
+
+func surfaceTargetFromLegacyHandles(_, windowHandle uintptr) SurfaceTargetUnsafe {
+	return SurfaceTargetFromMetalLayer(windowHandle)
+}
+
+// createPlatformSurfaceTarget creates a rendering surface on macOS via CAMetalLayer.
+func createPlatformSurfaceTarget(instance *rwgpu.Instance, target SurfaceTargetUnsafe) (*rwgpu.Surface, error) {
+	if target.kind != surfaceTargetMetalLayer {
+		return nil, fmt.Errorf("%w: macOS backend requires a Metal layer", ErrUnsupportedSurfaceTarget)
+	}
+	return instance.CreateSurfaceFromMetalLayer(target.windowHandle)
 }

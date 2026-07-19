@@ -97,11 +97,22 @@ type Instance struct {
 //
 // When Instance has no context (Wayland — no wl_display* at init), CreateSurface
 // creates a new EGL context with the caller's displayHandle.
-func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	var targetWindowKind egl.WindowKind
+	switch target.Kind {
+	case hal.SurfaceTargetXlibWindow:
+		targetWindowKind = egl.WindowKindX11
+	case hal.SurfaceTargetWaylandSurface:
+		targetWindowKind = egl.WindowKindWayland
+	default:
+		return nil, fmt.Errorf("gles: %w: got %s, backend requires Xlib window or Wayland surface", hal.ErrUnsupportedSurfaceTarget, target.Kind)
+	}
+	displayHandle, windowHandle := target.DisplayHandle, target.WindowHandle
+
 	// Path A: share Instance context (X11 — context matches window system).
 	// Do NOT share if Instance context is surfaceless (headless/Wayland fallback)
 	// and Surface needs a window — the EGL display won't support eglCreateWindowSurface.
-	if i.eglCtx != nil && i.glCtx != nil && i.eglCtx.WindowKind() != egl.WindowKindSurfaceless {
+	if i.eglCtx != nil && i.glCtx != nil && i.eglCtx.WindowKind() == targetWindowKind {
 		hal.Logger().Info("gles: surface sharing Instance EGL context")
 		return &Surface{
 			displayHandle: displayHandle,
@@ -120,6 +131,7 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surfa
 	// expose EGL_OPENGL_ES3_BIT configs, not EGL_OPENGL_BIT. Found by @lkmavi (PR #215).
 	config := egl.DefaultContextConfig()
 	config.NativeDisplay = displayHandle
+	config.WindowKind = &targetWindowKind
 	ctx, err := egl.NewContext(config)
 	if err != nil {
 		config.GLES = true

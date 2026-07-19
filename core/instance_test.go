@@ -12,7 +12,7 @@ import (
 
 type providerBackedTestInstance struct{}
 
-func (*providerBackedTestInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+func (*providerBackedTestInstance) CreateSurface(hal.SurfaceTarget) (hal.Surface, error) {
 	return nil, errors.New("test instance does not create surfaces")
 }
 

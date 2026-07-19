@@ -13,16 +13,17 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// platformSurfaceExtension returns the macOS surface extension.
-func platformSurfaceExtension() string {
-	return "VK_EXT_metal_surface\x00"
+// platformSurfaceExtensions returns the macOS surface extension.
+func platformSurfaceExtensions() []string {
+	return []string{"VK_EXT_metal_surface\x00"}
 }
 
-// CreateSurface creates a Metal surface from a CAMetalLayer.
-// Parameters:
-//   - _: unused first parameter for API consistency with other platforms
-//   - metalLayer: Pointer to CAMetalLayer
-func (i *Instance) CreateSurface(_, metalLayer uintptr) (hal.Surface, error) {
+// CreateSurface creates a Metal surface from a CAMetalLayer target.
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	if err := target.RequireKind(hal.SurfaceTargetMetalLayer); err != nil {
+		return nil, fmt.Errorf("vulkan: %w", err)
+	}
+	metalLayer := target.WindowHandle
 	createInfo := vk.MetalSurfaceCreateInfoEXT{
 		SType: vk.StructureTypeMetalSurfaceCreateInfoExt,
 	}
@@ -34,7 +35,7 @@ func (i *Instance) CreateSurface(_, metalLayer uintptr) (hal.Surface, error) {
 	*(*uintptr)(unsafe.Pointer(&createInfo.PLayer)) = metalLayer
 
 	if !i.cmds.HasCreateMetalSurfaceEXT() {
-		return nil, fmt.Errorf("vulkan: vkCreateMetalSurfaceEXT not available (VK_EXT_metal_surface extension not loaded)")
+		return nil, fmt.Errorf("vulkan: %w: vkCreateMetalSurfaceEXT not available (VK_EXT_metal_surface extension not loaded)", hal.ErrUnsupportedSurfaceTarget)
 	}
 
 	var surface vk.SurfaceKHR

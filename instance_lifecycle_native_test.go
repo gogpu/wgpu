@@ -48,6 +48,60 @@ func (s *instanceLifecycleConfiguredSurface) Destroy() {
 	*s.events = append(*s.events, "surface-destroy")
 }
 
+type instanceLifecycleTargetSource struct{}
+
+func (*instanceLifecycleTargetSource) SurfaceTarget() (SurfaceTargetUnsafe, error) {
+	return SurfaceTargetFromAndroidNativeWindow(1), nil
+}
+
+type instanceLifecycleTargetSourceSurface struct {
+	noop.Surface
+	surface *Surface
+	events  *[]string
+}
+
+func (s *instanceLifecycleTargetSourceSurface) Destroy() {
+	if s.surface.targetSource == nil {
+		*s.events = append(*s.events, "source-cleared-before-surface-destroy")
+		return
+	}
+	*s.events = append(*s.events, "surface-destroy-with-source")
+}
+
+func TestSurfaceReleaseRetainsTargetSourceThroughHALDestroy(t *testing.T) {
+	events := []string{}
+	targetSource := &instanceLifecycleTargetSource{}
+	firstRawSurface := &instanceLifecycleTargetSourceSurface{events: &events}
+	secondRawSurface := &instanceLifecycleTargetSourceSurface{events: &events}
+	surface := &Surface{
+		core:           core.NewSurface(firstRawSurface, "target-source-lifecycle-test"),
+		targetSource:   targetSource,
+		currentBackend: gputypes.BackendVulkan,
+		surfaceCreated: true,
+		halSurfaces: map[gputypes.Backend]hal.Surface{
+			gputypes.BackendVulkan: firstRawSurface,
+			gputypes.BackendGL:     secondRawSurface,
+		},
+	}
+	firstRawSurface.surface = surface
+	secondRawSurface.surface = surface
+
+	surface.Release()
+
+	want := []string{"surface-destroy-with-source", "surface-destroy-with-source"}
+	if !slices.Equal(events, want) {
+		t.Fatalf("release events = %v, want %v", events, want)
+	}
+	if surface.targetSource != nil {
+		t.Fatal("surface retained target source after HAL destruction")
+	}
+
+	surface.Release()
+	if !slices.Equal(events, want) {
+		t.Fatalf("idempotent release changed events to %v", events)
+	}
+}
+
 func TestInstanceReleaseDestroysDevicesBeforeSurfaces(t *testing.T) {
 	events := []string{}
 	instance := &Instance{core: core.NewInstanceWithMock(nil)}

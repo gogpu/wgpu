@@ -25,8 +25,8 @@ func (API) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 type Instance struct{}
 
 // CreateSurface creates a noop surface.
-// Always succeeds regardless of display/window handles.
-func (i *Instance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+// Always succeeds regardless of the target.
+func (i *Instance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
 	return &Surface{}, nil
 }
 

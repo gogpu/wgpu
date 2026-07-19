@@ -96,7 +96,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	}, nil
 }
 
-// Release releases the instance and all associated resources.
+// Release releases the instance. Surfaces must be released explicitly.
 func (i *Instance) Release() {
 	if i.released {
 		return

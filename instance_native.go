@@ -73,8 +73,10 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	var adapterID core.AdapterID
 	var err error
 	if opts != nil && opts.CompatibleSurface != nil {
-		halSurface := opts.CompatibleSurface.HAL()
-		adapterID, err = i.core.RequestAdapterWithSurface(coreOpts, halSurface)
+		adapterID, err = i.core.RequestAdapterWithSurfaces(
+			coreOpts,
+			opts.CompatibleSurface.halSurfacesForAdapterRequest(),
+		)
 	} else {
 		adapterID, err = i.core.RequestAdapter(coreOpts)
 	}

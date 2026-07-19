@@ -32,7 +32,9 @@ func (b *factoryTestBackend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Inst
 // factoryTestInstance implements hal.Instance for factory tests.
 type factoryTestInstance struct{}
 
-func (i *factoryTestInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) { return nil, nil } //nolint:nilnil
+func (i *factoryTestInstance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
+	return nil, hal.ErrUnsupportedSurfaceTarget
+}
 func (i *factoryTestInstance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 	return nil
 }

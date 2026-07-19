@@ -1,21 +1,30 @@
-//go:build rust && linux
+//go:build rust && linux && !android
 
 package wgpu
 
 import (
+	"fmt"
 	"os"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
 
-// createPlatformSurface creates a rendering surface on Linux.
-// Detects Wayland vs X11 based on WAYLAND_DISPLAY environment variable,
-// matching the platform detection in gogpu's internal/platform/platform_linux.go
-// and the rust backend in gogpu/gpu/backend/rust/rust_linux.go.
-func createPlatformSurface(instance *rwgpu.Instance, displayHandle, windowHandle uintptr) (*rwgpu.Surface, error) {
+func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		return instance.CreateSurfaceFromWaylandSurface(displayHandle, windowHandle)
+		return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
 	}
-	// X11 fallback: window handle must be uint64 for Xlib Window (XID).
-	return instance.CreateSurfaceFromXlibWindow(displayHandle, uint64(windowHandle))
+	return SurfaceTargetFromXlibWindow(displayHandle, windowHandle)
+}
+
+// createPlatformSurfaceTarget creates a rendering surface from an explicit
+// Xlib or Wayland target. Environment detection is limited to the legacy API.
+func createPlatformSurfaceTarget(instance *rwgpu.Instance, target SurfaceTargetUnsafe) (*rwgpu.Surface, error) {
+	switch target.kind {
+	case surfaceTargetXlibWindow:
+		return instance.CreateSurfaceFromXlibWindow(target.displayHandle, uint64(target.windowHandle))
+	case surfaceTargetWaylandSurface:
+		return instance.CreateSurfaceFromWaylandSurface(target.displayHandle, target.windowHandle)
+	default:
+		return nil, fmt.Errorf("%w: Linux backend requires an Xlib or Wayland target", ErrUnsupportedSurfaceTarget)
+	}
 }

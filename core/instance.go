@@ -40,6 +40,10 @@ type Instance struct {
 	// halInstances tracks HAL instances created for each backend.
 	// These are destroyed when the Instance is destroyed.
 	halInstances []hal.Instance
+	// halInstanceEntries preserves backend priority alongside each HAL instance.
+	// Surface creation uses this ordered view to mirror Rust wgpu's attempt to
+	// create a raw surface for every enabled backend.
+	halInstanceEntries []HALInstanceEntry
 
 	// halInstanceMap maps backend type to its HAL instance for backend-specific
 	// surface creation. When a device uses a different backend than the initially
@@ -59,6 +63,13 @@ type Instance struct {
 	// useMock indicates whether this instance was explicitly created with mock
 	// adapters through NewInstanceWithMock.
 	useMock bool
+}
+
+// HALInstanceEntry associates an enabled backend with its HAL instance.
+// Entries are ordered by the same backend priority used during discovery.
+type HALInstanceEntry struct {
+	Backend  gputypes.Backend
+	Instance hal.Instance
 }
 
 // surfaceAdapterQualifier is an optional backend capability. It intentionally
@@ -169,6 +180,10 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 		// Lock() call creates the GL context on the render thread via sync.Once.
 		if provider.Variant() == gputypes.BackendGL {
 			i.halInstances = append(i.halInstances, halInstance)
+			i.halInstanceEntries = append(i.halInstanceEntries, HALInstanceEntry{
+				Backend:  provider.Variant(),
+				Instance: halInstance,
+			})
 			i.halInstanceMap[provider.Variant()] = halInstance
 			i.deferredGLES = append(i.deferredGLES, halInstance)
 			continue
@@ -176,6 +191,10 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 
 		// Track HAL instance for cleanup
 		i.halInstances = append(i.halInstances, halInstance)
+		i.halInstanceEntries = append(i.halInstanceEntries, HALInstanceEntry{
+			Backend:  provider.Variant(),
+			Instance: halInstance,
+		})
 		i.halInstanceMap[provider.Variant()] = halInstance
 
 		// Enumerate adapters from this backend
@@ -372,6 +391,24 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 	if surfaceHint == nil {
 		return i.RequestAdapter(options)
 	}
+	return i.requestAdapterWithSurfaceResolver(options, func(gputypes.Backend) hal.Surface {
+		return surfaceHint
+	})
+}
+
+// RequestAdapterWithSurfaces requests an adapter using the surface created for
+// each adapter's own backend. This mirrors Rust wgpu's per-backend surface map
+// while preserving RequestAdapterWithSurface for callers that own one HAL.
+func (i *Instance) RequestAdapterWithSurfaces(options *gputypes.RequestAdapterOptions, surfaces map[gputypes.Backend]hal.Surface) (AdapterID, error) {
+	if len(surfaces) == 0 {
+		return i.RequestAdapter(options)
+	}
+	return i.requestAdapterWithSurfaceResolver(options, func(backend gputypes.Backend) hal.Surface {
+		return surfaces[backend]
+	})
+}
+
+func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAdapterOptions, surfaceForBackend func(gputypes.Backend) hal.Surface) (AdapterID, error) {
 	i.surfaceRequestMu.Lock()
 	defer i.surfaceRequestMu.Unlock()
 
@@ -388,7 +425,9 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 
 	// Run deferred GLES enumeration with the real surface hint before collecting
 	// candidates. Once glesEnumerated is true this is a no-op on later calls.
-	i.enumerateDeferredGLES(surfaceHint)
+	if glesSurface := surfaceForBackend(gputypes.BackendGL); glesSurface != nil {
+		i.enumerateDeferredGLES(glesSurface)
+	}
 
 	i.mu.RLock()
 	allAdapterIDs := append([]AdapterID(nil), i.adapters...)
@@ -403,6 +442,10 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 	for _, adapterID := range allAdapterIDs {
 		adapter, err := hub.GetAdapter(adapterID)
 		if err != nil {
+			continue
+		}
+		surfaceHint := surfaceForBackend(adapter.Backend)
+		if surfaceHint == nil {
 			continue
 		}
 
@@ -598,6 +641,15 @@ func (i *Instance) HALInstance() hal.Instance {
 	return nil
 }
 
+// HALInstanceEntries returns enabled HAL instances in backend-priority order.
+// The returned slice is a snapshot and may be inspected without holding the
+// Instance lock.
+func (i *Instance) HALInstanceEntries() []HALInstanceEntry {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return append([]HALInstanceEntry(nil), i.halInstanceEntries...)
+}
+
 // HALInstanceForBackend returns the HAL instance for a specific backend type.
 // Returns nil if no instance exists for the given backend.
 // Used to re-create surfaces when the device's backend differs from the
@@ -666,5 +718,6 @@ func (i *Instance) Destroy() {
 		halInstance.Destroy()
 	}
 	i.halInstances = nil
+	i.halInstanceEntries = nil
 	i.deferredGLES = nil
 }

@@ -42,7 +42,7 @@ type trackingGLESInstance struct {
 	halAdapter   hal.Adapter // non-nil ⇒ returns a real ExposedAdapter
 }
 
-func (i *trackingGLESInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+func (i *trackingGLESInstance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
 	return nil, nil //nolint:nilnil
 }
 func (i *trackingGLESInstance) EnumerateAdapters(hint hal.Surface) []hal.ExposedAdapter {
@@ -68,7 +68,7 @@ func (i *trackingGLESInstance) Destroy() {}
 
 type countingGLESInstance struct{ callCount int }
 
-func (i *countingGLESInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+func (i *countingGLESInstance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
 	return nil, nil //nolint:nilnil
 }
 func (i *countingGLESInstance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
@@ -94,6 +94,27 @@ func TestRequestAdapterWithSurface_PassesHintToEnumerateAdapters(t *testing.T) {
 
 	if tracker.receivedHint != hint {
 		t.Errorf("EnumerateAdapters received hint %v, want %v", tracker.receivedHint, hint)
+	}
+}
+
+func TestRequestAdapterWithSurfacesPassesMatchingBackendHint(t *testing.T) {
+	GetGlobal().Clear()
+
+	tracker := &trackingGLESInstance{halAdapter: &stubHALAdapter{}}
+	instance := &Instance{
+		backends:     gputypes.BackendsAll,
+		deferredGLES: []hal.Instance{tracker},
+	}
+	vulkanHint := hal.Surface(&stubHALSurface{id: 1})
+	glHint := hal.Surface(&stubHALSurface{id: 2})
+
+	_, _ = instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{
+		gputypes.BackendVulkan: vulkanHint,
+		gputypes.BackendGL:     glHint,
+	})
+
+	if tracker.receivedHint != glHint {
+		t.Errorf("GLES EnumerateAdapters received hint %v, want matching GL hint %v", tracker.receivedHint, glHint)
 	}
 }
 

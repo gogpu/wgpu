@@ -18,13 +18,17 @@ var (
 	getModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 )
 
-// platformSurfaceExtension returns the Windows surface extension.
-func platformSurfaceExtension() string {
-	return "VK_KHR_win32_surface\x00"
+// platformSurfaceExtensions returns the Windows surface extension.
+func platformSurfaceExtensions() []string {
+	return []string{"VK_KHR_win32_surface\x00"}
 }
 
 // CreateSurface creates a Windows surface from HINSTANCE and HWND.
-func (i *Instance) CreateSurface(hinstance, hwnd uintptr) (hal.Surface, error) {
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	if err := target.RequireKind(hal.SurfaceTargetWindowsHWND); err != nil {
+		return nil, fmt.Errorf("vulkan: %w", err)
+	}
+	hinstance, hwnd := target.DisplayHandle, target.WindowHandle
 	// If hinstance is 0, get the current module handle
 	if hinstance == 0 {
 		hinstance, _, _ = getModuleHandleW.Call(0)
@@ -37,7 +41,7 @@ func (i *Instance) CreateSurface(hinstance, hwnd uintptr) (hal.Surface, error) {
 	}
 
 	if !i.cmds.HasCreateWin32SurfaceKHR() {
-		return nil, fmt.Errorf("vulkan: vkCreateWin32SurfaceKHR not available (VK_KHR_win32_surface extension not loaded)")
+		return nil, fmt.Errorf("vulkan: %w: vkCreateWin32SurfaceKHR not available (VK_KHR_win32_surface extension not loaded)", hal.ErrUnsupportedSurfaceTarget)
 	}
 
 	var surface vk.SurfaceKHR

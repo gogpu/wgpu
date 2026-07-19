@@ -3,8 +3,11 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 	"image"
+	"os"
+	"runtime"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
@@ -21,60 +24,180 @@ type Surface struct {
 	device   *Device
 	released bool
 
-	// displayHandle and windowHandle are stored for deferred HAL surface
-	// re-creation when the device's backend differs from the initially
-	// selected one (e.g., software adapter via ForceFallbackAdapter when
-	// the initial surface was created on Vulkan/DX12).
-	displayHandle  uintptr
-	windowHandle   uintptr
+	// targetSource is retained only for CreateSurfaceFromTarget. Raw handles
+	// passed through CreateSurfaceUnsafe or the compatibility CreateSurface
+	// method remain entirely caller-owned.
+	targetSource SurfaceTarget
+
+	// target is stored for a backend whose initial surface creation failed but
+	// whose device is later supplied explicitly.
+	target         SurfaceTargetUnsafe
 	currentBackend gputypes.Backend // backend type of the current HAL surface
-	surfaceCreated bool             // true after first ensureHALSurface
+	surfaceCreated bool             // true while core points at a HAL surface
+	// halSurfaces owns one successfully created surface per enabled backend,
+	// matching Rust wgpu's surface_per_backend representation. core points at
+	// exactly one of these at a time to keep its lifecycle state machine small.
+	halSurfaces map[gputypes.Backend]hal.Surface
 }
 
-// CreateSurface creates a rendering surface from platform-specific handles.
+// CreateSurface creates a rendering surface from legacy platform-specific
+// handles. New code should prefer CreateSurfaceFromTarget or
+// CreateSurfaceUnsafe so the target kind and ownership contract are explicit.
 // displayHandle and windowHandle are platform-specific:
 //   - Windows: displayHandle=0, windowHandle=HWND
-//   - macOS: displayHandle=0, windowHandle=NSView*
+//   - macOS: displayHandle=0, windowHandle=CAMetalLayer*
 //   - Linux/X11: displayHandle=Display*, windowHandle=Window
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
 //   - Android: displayHandle ignored, windowHandle=ANativeWindow*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
+	return i.createSurface(surfaceTargetFromLegacyHandles(displayHandle, windowHandle), nil)
+}
+
+// CreateSurfaceFromTarget samples a provider once and retains it until the
+// surface is released. The provider's native objects must remain valid for the
+// same lifetime.
+func (i *Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, error) {
+	if i.isReleased() {
+		return nil, ErrReleased
+	}
+	rawTarget, err := resolveSurfaceTarget(target)
+	if err != nil {
+		return nil, err
+	}
+	return i.createSurface(rawTarget, target)
+}
+
+// CreateSurfaceUnsafe creates a surface from raw platform handles without
+// retaining an ownership source. Every referenced native object must remain
+// valid until the returned Surface is released.
+func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, error) {
+	if i.isReleased() {
+		return nil, ErrReleased
+	}
+	if err := target.validate(); err != nil {
+		return nil, err
+	}
+	return i.createSurface(target, nil)
+}
+
+func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource SurfaceTarget) (*Surface, error) {
 	if i.isReleased() {
 		return nil, ErrReleased
 	}
 
-	halInstance := i.core.HALInstance()
-	if halInstance == nil {
+	entries := i.core.HALInstanceEntries()
+	if len(entries) == 0 {
 		return nil, fmt.Errorf("wgpu: no HAL instance available for surface creation")
 	}
 
-	halSurface, err := halInstance.CreateSurface(displayHandle, windowHandle)
+	halTarget, err := target.halTarget()
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
+		return nil, err
 	}
-
-	// Determine the backend of the initial HAL instance.
-	var initialBackend gputypes.Backend
-	for b, inst := range i.core.HALInstanceMap() {
-		if inst == halInstance {
-			initialBackend = b
-			break
-		}
+	halSurfaces, initialBackend, err := createHALSurfaces(entries, halTarget)
+	if err != nil {
+		return nil, err
 	}
+	halSurface := halSurfaces[initialBackend]
 
 	coreSurface := core.NewSurface(halSurface, "")
 	surface := &Surface{
 		core:           coreSurface,
-		displayHandle:  displayHandle,
-		windowHandle:   windowHandle,
+		target:         target,
+		targetSource:   targetSource,
 		currentBackend: initialBackend,
 		surfaceCreated: true,
+		halSurfaces:    halSurfaces,
 	}
 	if err := i.adoptSurface(surface); err != nil {
-		halSurface.Destroy()
+		destroyHALSurfaces(coreSurface, halSurfaces, initialBackend, true)
 		return nil, err
 	}
 	return surface, nil
+}
+
+func createHALSurfaces(entries []core.HALInstanceEntry, target hal.SurfaceTarget) (map[gputypes.Backend]hal.Surface, gputypes.Backend, error) {
+	surfaces := make(map[gputypes.Backend]hal.Surface, len(entries))
+	errs := make([]error, 0, len(entries))
+	allUnsupported := true
+	var firstBackend gputypes.Backend
+	firstSet := false
+
+	for _, entry := range entries {
+		raw, err := entry.Instance.CreateSurface(target)
+		if err == nil && raw == nil {
+			err = fmt.Errorf("backend %v returned a nil surface", entry.Backend)
+		}
+		if err != nil {
+			if !errors.Is(err, hal.ErrUnsupportedSurfaceTarget) {
+				allUnsupported = false
+			}
+			errs = append(errs, fmt.Errorf("backend %v: %w", entry.Backend, err))
+			hal.Logger().Debug("wgpu: backend surface creation failed", "backend", entry.Backend, "error", err)
+			continue
+		}
+		surfaces[entry.Backend] = raw
+		if !firstSet {
+			firstBackend = entry.Backend
+			firstSet = true
+		}
+	}
+
+	if firstSet {
+		return surfaces, firstBackend, nil
+	}
+	joined := errors.Join(errs...)
+	if allUnsupported {
+		return nil, 0, fmt.Errorf("%w: no enabled backend accepted the target: %w", ErrUnsupportedSurfaceTarget, joined)
+	}
+	return nil, 0, fmt.Errorf("wgpu: failed to create surface for every enabled backend: %w", joined)
+}
+
+func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+	switch runtime.GOOS {
+	case "windows":
+		return SurfaceTargetFromWindowsHWND(displayHandle, windowHandle)
+	case "darwin":
+		return SurfaceTargetFromMetalLayer(windowHandle)
+	case "linux":
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
+		}
+		return SurfaceTargetFromXlibWindow(displayHandle, windowHandle)
+	case "android":
+		return SurfaceTargetFromAndroidNativeWindow(windowHandle)
+	default:
+		return SurfaceTargetUnsafe{
+			kind:          surfaceTargetInvalid,
+			displayHandle: displayHandle,
+			windowHandle:  windowHandle,
+		}
+	}
+}
+
+func (t SurfaceTargetUnsafe) halTarget() (hal.SurfaceTarget, error) {
+	var kind hal.SurfaceTargetKind
+	switch t.kind {
+	case surfaceTargetWindowsHWND:
+		kind = hal.SurfaceTargetWindowsHWND
+	case surfaceTargetXlibWindow:
+		kind = hal.SurfaceTargetXlibWindow
+	case surfaceTargetWaylandSurface:
+		kind = hal.SurfaceTargetWaylandSurface
+	case surfaceTargetAndroidNativeWindow:
+		kind = hal.SurfaceTargetAndroidNativeWindow
+	case surfaceTargetMetalLayer:
+		kind = hal.SurfaceTargetMetalLayer
+	case surfaceTargetWebCanvasID:
+		return hal.SurfaceTarget{}, fmt.Errorf("%w: Web canvas target on native backend", ErrUnsupportedSurfaceTarget)
+	default:
+		return hal.SurfaceTarget{}, invalidSurfaceTarget("target kind is unknown")
+	}
+	return hal.SurfaceTarget{
+		Kind:          kind,
+		DisplayHandle: t.displayHandle,
+		WindowHandle:  t.windowHandle,
+	}, nil
 }
 
 // Configure configures the surface for presentation.
@@ -323,21 +446,44 @@ func (s *Surface) retireDevice(device *Device) {
 	s.device = nil
 }
 
+func (s *Surface) createHALSurface(backend gputypes.Backend) (hal.Surface, error) {
+	targetInstance := s.instance.core.HALInstanceForBackend(backend)
+	if targetInstance == nil {
+		return nil, fmt.Errorf("wgpu: no HAL instance for backend %v", backend)
+	}
+	halTarget, err := s.target.halTarget()
+	if err != nil {
+		return nil, err
+	}
+	halSurface, err := targetInstance.CreateSurface(halTarget)
+	if errors.Is(err, hal.ErrUnsupportedSurfaceTarget) {
+		return nil, fmt.Errorf("%w: backend %v: %w", ErrUnsupportedSurfaceTarget, backend, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create surface for backend %v: %w", backend, err)
+	}
+	return halSurface, nil
+}
+
 // ensureHALSurface creates or re-creates the HAL surface for the given backend.
 func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
 	if s.surfaceCreated && s.currentBackend == backend {
 		return nil
 	}
-	targetInstance := s.instance.core.HALInstanceForBackend(backend)
-	if targetInstance == nil {
-		return fmt.Errorf("wgpu: no HAL instance for backend %v", backend)
+	halSurface := s.halSurfaces[backend]
+	if halSurface == nil {
+		var err error
+		halSurface, err = s.createHALSurface(backend)
+		if err != nil {
+			return err
+		}
+		if s.halSurfaces == nil {
+			s.halSurfaces = make(map[gputypes.Backend]hal.Surface)
+		}
+		s.halSurfaces[backend] = halSurface
 	}
-	if s.core.RawSurface() != nil {
-		s.core.RawSurface().Destroy()
-	}
-	halSurface, err := targetInstance.CreateSurface(s.displayHandle, s.windowHandle)
-	if err != nil {
-		return fmt.Errorf("wgpu: failed to create surface for backend %v: %w", backend, err)
+	if s.core.State() != core.SurfaceStateUnconfigured {
+		s.core.Unconfigure()
 	}
 	s.core.SetRawSurface(halSurface)
 	s.currentBackend = backend
@@ -354,6 +500,35 @@ func (s *Surface) HAL() hal.Surface {
 	return s.core.RawSurface()
 }
 
+// halSurfaceForBackend returns the retained surface that belongs to an
+// adapter's backend. Legacy surfaces wrapped from one HAL handle have no
+// backend map, so they retain the historical active-surface fallback.
+func (s *Surface) halSurfaceForBackend(backend gputypes.Backend) hal.Surface {
+	if s == nil || s.released || s.core == nil {
+		return nil
+	}
+	if len(s.halSurfaces) != 0 {
+		return s.halSurfaces[backend]
+	}
+	return s.core.RawSurface()
+}
+
+func (s *Surface) halSurfacesForAdapterRequest() map[gputypes.Backend]hal.Surface {
+	if s == nil || s.released || s.core == nil {
+		return nil
+	}
+	result := make(map[gputypes.Backend]hal.Surface, len(s.halSurfaces))
+	for backend, surface := range s.halSurfaces {
+		result[backend] = surface
+	}
+	if len(result) == 0 {
+		if raw := s.core.RawSurface(); raw != nil {
+			result[s.currentBackend] = raw
+		}
+	}
+	return result
+}
+
 // Release releases the surface.
 func (s *Surface) Release() {
 	if s.released {
@@ -361,12 +536,28 @@ func (s *Surface) Release() {
 	}
 	s.released = true
 	if s.core != nil {
-		s.core.Destroy()
+		destroyHALSurfaces(s.core, s.halSurfaces, s.currentBackend, s.surfaceCreated)
 	}
 	s.core = nil
+	s.halSurfaces = nil
 	if s.instance != nil {
 		s.instance.unregisterSurface(s)
 		s.instance = nil
+	}
+	s.targetSource = nil
+}
+
+func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend]hal.Surface, currentBackend gputypes.Backend, currentSet bool) {
+	if coreSurface != nil {
+		coreSurface.Destroy()
+	}
+	for backend, surface := range surfaces {
+		if currentSet && backend == currentBackend {
+			continue
+		}
+		if surface != nil {
+			surface.Destroy()
+		}
 	}
 }
 

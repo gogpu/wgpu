@@ -95,7 +95,7 @@ func TestNoopEnumerateAdapters_WithSurfaceHint(t *testing.T) {
 	defer instance.Destroy()
 
 	// Create a surface
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface failed: %v", err)
 	}
@@ -128,7 +128,11 @@ func TestNoopCreateSurface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			surface, err := instance.CreateSurface(tt.displayHandle, tt.windowHandle)
+			surface, err := instance.CreateSurface(hal.SurfaceTarget{
+				Kind:          hal.SurfaceTargetHeadless,
+				DisplayHandle: tt.displayHandle,
+				WindowHandle:  tt.windowHandle,
+			})
 			if err != nil {
 				t.Fatalf("CreateSurface failed: %v", err)
 			}
@@ -198,7 +202,7 @@ func TestNoopAdapterCapabilities(t *testing.T) {
 	}
 
 	// Test surface capabilities
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	surfaceCaps := adapter.SurfaceCapabilities(surface)
@@ -955,7 +959,7 @@ func TestNoopSurfaceConfigure(t *testing.T) {
 	instance, _ := api.CreateInstance(nil)
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
@@ -986,7 +990,7 @@ func TestNoopSurfaceAcquireTexture(t *testing.T) {
 	instance, _ := api.CreateInstance(nil)
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
@@ -1103,7 +1107,7 @@ func TestNoopFullLifecycle(t *testing.T) {
 	defer instance.Destroy()
 
 	// Create surface
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface failed: %v", err)
 	}

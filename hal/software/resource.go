@@ -170,6 +170,7 @@ type Surface struct {
 	mu            sync.RWMutex // Protects framebuffer access
 	presentMode   hal.PresentMode
 	alphaMode     hal.CompositeAlphaMode
+	targetKind    hal.SurfaceTargetKind
 	displayHandle uintptr // X11: Display*, macOS/Windows: 0
 	hwnd          uintptr // window handle for platform blit (0 = headless)
 	platformBlit          // platform-specific blit resources (Windows: DIB section, Linux: X11 GC)

@@ -12,8 +12,8 @@ import (
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-func platformSurfaceExtension() string {
-	return "VK_KHR_android_surface\x00"
+func platformSurfaceExtensions() []string {
+	return []string{"VK_KHR_android_surface\x00"}
 }
 
 // CreateSurface creates a Vulkan surface from an ANativeWindow.
@@ -22,7 +22,11 @@ func platformSurfaceExtension() string {
 // window handle is the raw ANativeWindow pointer and must be non-zero. The host
 // retains its application reference; Vulkan owns its surface reference until
 // DestroySurfaceKHR. WGPU does not acquire or release ANativeWindow itself.
-func (i *Instance) CreateSurface(_, windowHandle uintptr) (hal.Surface, error) {
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	if err := target.RequireKind(hal.SurfaceTargetAndroidNativeWindow); err != nil {
+		return nil, fmt.Errorf("vulkan: %w", err)
+	}
+	windowHandle := target.WindowHandle
 	if err := validateAndroidSurfaceRequest(windowHandle); err != nil {
 		return nil, err
 	}

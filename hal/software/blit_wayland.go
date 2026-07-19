@@ -19,7 +19,6 @@ package software
 import (
 	"image"
 	"log/slog"
-	"os"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -120,7 +119,7 @@ var (
 // (qwaylandshmbackingstore.cpp); 3 is the minimum for skip-free
 // presentation on slow compositors (e.g. pixman renderer).
 type waylandBlitState struct {
-	isWayland bool // true if displayHandle is wl_display* (detected once)
+	isWayland bool // true when SurfaceTargetKind is Wayland
 	detected  bool // true if detection has been performed
 
 	wlShm    uintptr // bound wl_shm global (on shmQueue, 0 if not yet obtained)
@@ -189,15 +188,6 @@ var (
 	bufferBusyMu  sync.Mutex
 	bufferBusyMap = map[uintptr]*waylandShmBuffer{}
 )
-
-// isWaylandDisplay returns true if the session is running under Wayland.
-// Uses WAYLAND_DISPLAY env var — same pattern as hal/vulkan/api_linux.go.
-// The previous fd-probe approach (wl_display_get_fd on the display handle)
-// was unsafe: an X11 Display* passed to wl_display_get_fd reads garbage
-// from an unrelated struct and can return a false-positive fd >= 0.
-func isWaylandDisplay() bool {
-	return os.Getenv("WAYLAND_DISPLAY") != ""
-}
 
 // initWayland loads libwayland-client.so and prepares CIFs for SHM presentation.
 func initWayland() {

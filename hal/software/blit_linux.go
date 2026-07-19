@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // X11 constants (from X.h / Xlib.h).
@@ -208,7 +209,8 @@ type platformBlit struct {
 	wlState waylandBlitState // Wayland SHM state, initialized eagerly in Configure
 }
 
-// configurePlatformBlit detects Wayland vs X11 and eagerly obtains wl_shm.
+// configurePlatformBlit uses the surface's typed target and eagerly obtains
+// wl_shm for Wayland.
 // Called from Configure() on the MAIN thread, before the event loop or render
 // thread calls Present. This eliminates the race between wl_display_roundtrip
 // (in obtainWlShm) and concurrent wl_display_dispatch (in gogpu event loop).
@@ -227,7 +229,7 @@ func (s *Surface) configurePlatformBlit() {
 	}
 	if !s.wlState.detected {
 		s.wlState.detected = true
-		s.wlState.isWayland = isWaylandDisplay()
+		s.wlState.isWayland = s.targetKind == hal.SurfaceTargetWaylandSurface
 		if s.wlState.isWayland {
 			// Create shmQueue FIRST — obtainWlShm needs it for the
 			// display wrapper so all proxies inherit this queue.
