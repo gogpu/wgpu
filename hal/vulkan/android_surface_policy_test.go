@@ -110,7 +110,7 @@ func TestAndroidSDKPolicyStartsAtAPI29(t *testing.T) {
 	if err := validateAndroidSDKVersion(28); err == nil {
 		t.Fatal("Android API 28 was accepted")
 	}
-	for _, sdk := range []uint32{29, 30} {
+	for _, sdk := range []uint32{29, 30, 36} {
 		if err := validateAndroidSDKVersion(sdk); err != nil {
 			t.Fatalf("Android API %d rejected: %v", sdk, err)
 		}

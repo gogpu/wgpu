@@ -24,6 +24,7 @@ func TestSwapchainPlatformPolicyAcquireTimeout(t *testing.T) {
 		{name: "desktop", policy: defaultSwapchainPlatformPolicy(), want: requested},
 		{name: "Android API 29", policy: androidSwapchainPlatformPolicy(29), want: math.MaxUint64},
 		{name: "Android API 30", policy: androidSwapchainPlatformPolicy(30), want: requested},
+		{name: "Android API 36", policy: androidSwapchainPlatformPolicy(36), want: requested},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
