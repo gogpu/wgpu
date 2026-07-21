@@ -3,6 +3,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+module_state_before=$(git -C "$root" hash-object go.mod go.sum)
 
 sha256_stream() {
 	if command -v sha256sum >/dev/null 2>&1; then
@@ -50,12 +51,12 @@ require_checkout() {
 	fi
 }
 
-: "${GOFFI_DIR:?set GOFFI_DIR to the checked-out canonical goffi Android candidate}"
-: "${GOFFI_EXPECTED_HEAD:?set GOFFI_EXPECTED_HEAD to its immutable commit}"
-: "${GOFFI_EXPECTED_PATCH:?set GOFFI_EXPECTED_PATCH to its working-tree fingerprint}"
-goffi_dir=$(cd "$GOFFI_DIR" && pwd -P)
-actual_head=$(git -C "$goffi_dir" rev-parse HEAD)
-require_checkout goffi "$goffi_dir" "$GOFFI_EXPECTED_HEAD" "$GOFFI_EXPECTED_PATCH"
+goffi_module=github.com/go-webgpu/goffi
+goffi_version=v0.6.1
+(
+	cd "$root"
+	GOWORK=off go mod download "$goffi_module@$goffi_version"
+)
 
 webgpu_dir=
 actual_webgpu_head=
@@ -86,19 +87,23 @@ fi
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
-(
-	cd "$tmpdir"
-	workspace_modules=("$root" "$goffi_dir")
-	if [[ -n "$webgpu_dir" ]]; then
-		workspace_modules+=("$webgpu_dir")
-	fi
-	GOWORK=off go work init "${workspace_modules[@]}"
-)
-workspace="$tmpdir/go.work"
+workspace=off
+if [[ -n "$webgpu_dir" ]]; then
+	(
+		cd "$tmpdir"
+		GOWORK=off go work init "$root" "$webgpu_dir"
+	)
+	workspace="$tmpdir/go.work"
+fi
 
-selected_goffi=$(GOWORK="$workspace" go list -m -f '{{.Dir}}' github.com/go-webgpu/goffi)
-if [[ "$(cd "$selected_goffi" && pwd -P)" != "$goffi_dir" ]]; then
-	echo "workspace selected goffi from $selected_goffi, want $goffi_dir" >&2
+actual_goffi_version=$(GOWORK="$workspace" go list -m -f '{{.Version}}' "$goffi_module")
+if [[ "$actual_goffi_version" != "$goffi_version" ]]; then
+	echo "selected goffi version is $actual_goffi_version, want $goffi_version" >&2
+	exit 1
+fi
+goffi_replacement=$(GOWORK="$workspace" go list -m -f '{{with .Replace}}{{.Path}} {{.Version}} {{.Dir}}{{end}}' "$goffi_module")
+if [[ -n "$goffi_replacement" ]]; then
+	echo "goffi must come from its canonical module release, not replacement $goffi_replacement" >&2
 	exit 1
 fi
 if [[ -n "$webgpu_dir" ]]; then
@@ -210,10 +215,14 @@ if [[ -e "$root/go.work" || -e "$root/go.work.sum" ]]; then
 	echo "preview proof must not leave a committed/local workspace in the WGPU tree" >&2
 	exit 1
 fi
-git -C "$root" diff --exit-code -- go.mod go.sum
+module_state_after=$(git -C "$root" hash-object go.mod go.sum)
+if [[ "$module_state_after" != "$module_state_before" ]]; then
+	echo "preview proof modified go.mod or go.sum" >&2
+	exit 1
+fi
 if [[ -n "$webgpu_dir" ]]; then
 	git -C "$webgpu_dir" diff --exit-code -- go.mod go.sum
-	echo "Android arm64 native and Rust checks passed with goffi $actual_head and go-webgpu/webgpu $actual_webgpu_head"
+	echo "Android arm64 native and Rust checks passed with goffi $actual_goffi_version and go-webgpu/webgpu $actual_webgpu_head"
 else
-	echo "Android arm64 native checks passed with goffi $actual_head (Rust checks skipped: WEBGPU_DIR not set)"
+	echo "Android arm64 native checks passed with goffi $actual_goffi_version (Rust checks skipped: WEBGPU_DIR not set)"
 fi
