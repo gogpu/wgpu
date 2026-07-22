@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // CommandAllocator wraps a D3D12 command allocator.
@@ -900,10 +901,10 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 	if !ok || !e.encoder.isRecording || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, 16, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, 16, drawCount) {
 		return
 	}
-	if _, ok := indirectRecordOffset(offset, 16, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, 16, drawCount-1); !ok {
 		return
 	}
 
@@ -921,10 +922,10 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	if !ok || !e.encoder.isRecording || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, 20, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, 20, drawCount) {
 		return
 	}
-	if _, ok := indirectRecordOffset(offset, 20, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, 20, drawCount-1); !ok {
 		return
 	}
 
@@ -932,21 +933,6 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 		e.encoder.device.cmdSignatures.drawIndexed,
 		drawCount, buf.raw, offset, nil, 0,
 	)
-}
-
-func indirectRecordOffset(offset, stride uint64, index uint32) (uint64, bool) {
-	delta := uint64(index) * stride
-	if offset > ^uint64(0)-delta {
-		return 0, false
-	}
-	return offset + delta, true
-}
-
-func indirectRangeFits(bufferSize, offset, stride uint64, drawCount uint32) bool {
-	if offset > bufferSize {
-		return false
-	}
-	return uint64(drawCount) <= (bufferSize-offset)/stride
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

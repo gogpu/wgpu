@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // CommandBuffer holds a recorded Vulkan command buffer.
@@ -1041,7 +1042,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 	if !ok || e.encoder.active == 0 || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, uint64(drawIndirectStride), drawCount) {
+	if !indirect.RangeFits(buf.size, offset, uint64(drawIndirectStride), drawCount) {
 		return
 	}
 	call, batched, ok := indirectCallPlan(e.encoder.device.supportsMultiDrawIndirect,
@@ -1054,7 +1055,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indirectRecordOffset(offset, uint64(drawIndirectStride), i)
+		recordOffset, _ := indirect.RecordOffset(offset, uint64(drawIndirectStride), i)
 		vkCmdDrawIndirect(e.encoder.device.cmds, e.encoder.active, buf.handle, vk.DeviceSize(recordOffset), 1, drawIndirectStride)
 	}
 }
@@ -1068,7 +1069,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	if !ok || e.encoder.active == 0 || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, uint64(drawIndexedIndirectStride), drawCount) {
+	if !indirect.RangeFits(buf.size, offset, uint64(drawIndexedIndirectStride), drawCount) {
 		return
 	}
 	call, batched, ok := indirectCallPlan(
@@ -1087,7 +1088,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, ok := indirectRecordOffset(offset, uint64(drawIndexedIndirectStride), i)
+		recordOffset, ok := indirect.RecordOffset(offset, uint64(drawIndexedIndirectStride), i)
 		if !ok {
 			return
 		}
@@ -1108,7 +1109,7 @@ func indirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset uint64
 	if drawCount == 0 {
 		return indexedIndirectCall{}, false, false
 	}
-	if _, ok := indirectRecordOffset(offset, uint64(stride), drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, uint64(stride), drawCount-1); !ok {
 		return indexedIndirectCall{}, false, false
 	}
 	if supportsMultiDraw && drawCount <= maxDrawCount {
@@ -1121,23 +1122,8 @@ func indexedIndirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset
 	return indirectCallPlan(supportsMultiDraw, maxDrawCount, offset, drawCount, uint32(drawIndexedIndirectStride))
 }
 
-func indirectRecordOffset(offset, stride uint64, index uint32) (uint64, bool) {
-	delta := uint64(index) * stride
-	if offset > ^uint64(0)-delta {
-		return 0, false
-	}
-	return offset + delta, true
-}
-
-func indirectRangeFits(bufferSize, offset, stride uint64, drawCount uint32) bool {
-	if offset > bufferSize {
-		return false
-	}
-	return uint64(drawCount) <= (bufferSize-offset)/stride
-}
-
 func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
-	return indirectRecordOffset(offset, uint64(drawIndexedIndirectStride), index)
+	return indirect.RecordOffset(offset, uint64(drawIndexedIndirectStride), index)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

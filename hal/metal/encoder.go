@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // CommandEncoder implements hal.CommandEncoder for Metal.
@@ -614,14 +615,14 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 	if !ok || buf == nil || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, 16, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, 16, drawCount) {
 		return
 	}
-	if _, ok := indirectRecordOffset(offset, 16, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, 16, drawCount-1); !ok {
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indirectRecordOffset(offset, 16, i)
+		recordOffset, _ := indirect.RecordOffset(offset, 16, i)
 		_ = MsgSend(e.raw, Sel("drawPrimitives:indirectBuffer:indirectBufferOffset:"),
 			uintptr(MTLPrimitiveTypeTriangle), uintptr(buf.raw), uintptr(recordOffset))
 	}
@@ -635,15 +636,15 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	if !ok || buf == nil || e.indexBuffer == nil || drawCount == 0 {
 		return
 	}
-	if !indirectRangeFits(buf.size, offset, 20, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, 20, drawCount) {
 		return
 	}
-	if _, ok := indirectRecordOffset(offset, 20, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, 20, drawCount-1); !ok {
 		return
 	}
 	indexType := indexFormatToMTL(e.indexFormat)
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, ok := indirectRecordOffset(offset, 20, i)
+		recordOffset, ok := indirect.RecordOffset(offset, 20, i)
 		if !ok {
 			return
 		}
@@ -652,23 +653,8 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	}
 }
 
-func indirectRecordOffset(offset, stride uint64, index uint32) (uint64, bool) {
-	delta := uint64(index) * stride
-	if offset > ^uint64(0)-delta {
-		return 0, false
-	}
-	return offset + delta, true
-}
-
-func indirectRangeFits(bufferSize, offset, stride uint64, drawCount uint32) bool {
-	if offset > bufferSize {
-		return false
-	}
-	return uint64(drawCount) <= (bufferSize-offset)/stride
-}
-
 func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
-	return indirectRecordOffset(offset, 20, index)
+	return indirect.RecordOffset(offset, 20, index)
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

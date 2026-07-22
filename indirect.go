@@ -1,5 +1,7 @@
 package wgpu
 
+import "github.com/gogpu/wgpu/internal/indirect"
+
 const (
 	drawIndirectRecordSize        = uint64(16)
 	drawIndexedIndirectRecordSize = uint64(20)
@@ -7,18 +9,11 @@ const (
 )
 
 func indirectRangeFits(bufferSize, offset, recordSize uint64, drawCount uint32) bool {
-	if offset > bufferSize {
-		return false
-	}
-	return uint64(drawCount) <= (bufferSize-offset)/recordSize
+	return indirect.RangeFits(bufferSize, offset, recordSize, drawCount)
 }
 
 func indirectRecordOffset(offset, recordSize uint64, index uint32) (uint64, bool) {
-	delta := uint64(index) * recordSize
-	if offset > ^uint64(0)-delta {
-		return 0, false
-	}
-	return offset + delta, true
+	return indirect.RecordOffset(offset, recordSize, index)
 }
 
 func drawIndirectRangeFits(bufferSize, offset uint64, drawCount uint32) bool {
