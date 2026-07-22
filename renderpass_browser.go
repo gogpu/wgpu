@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/browser"
+import (
+	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/indirect"
+)
 
 // RenderPassEncoder records draw commands within a render pass.
 // On browser, this wraps a GPURenderPassEncoder via internal/browser.RenderPassEncoder.
@@ -96,11 +99,11 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 		return
 	}
 	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.browser.DrawIndirect(buffer.browser.Ref(), indirectDelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		p.browser.DrawIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := drawIndirectRecordOffset(offset, i)
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
 		p.browser.DrawIndirect(buffer.browser.Ref(), recordOffset)
 	}
 }
@@ -120,11 +123,11 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 		return
 	}
 	if !indexedIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), indirectDelegatedValidationOffset(buffer.Size(), offset, drawIndexedIndirectRecordSize, drawCount))
+		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndexedIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indexedIndirectRecordOffset(offset, i)
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
 		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), recordOffset)
 	}
 }

@@ -12,10 +12,6 @@ func indirectRangeFits(bufferSize, offset, recordSize uint64, drawCount uint32) 
 	return indirect.RangeFits(bufferSize, offset, recordSize, drawCount)
 }
 
-func indirectRecordOffset(offset, recordSize uint64, index uint32) (uint64, bool) {
-	return indirect.RecordOffset(offset, recordSize, index)
-}
-
 func drawIndirectRangeFits(bufferSize, offset uint64, drawCount uint32) bool {
 	return indirectRangeFits(bufferSize, offset, drawIndirectRecordSize, drawCount)
 }
@@ -27,10 +23,4 @@ func indexedIndirectRangeFits(bufferSize, offset uint64, drawCount uint32) bool 
 		return false
 	}
 	return indirectRangeFits(bufferSize, offset, drawIndexedIndirectRecordSize, drawCount)
-}
-
-// indexedIndirectRecordOffset returns the byte offset of one record in a
-// counted indexed-indirect span without allowing uint64 wraparound.
-func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
-	return indirectRecordOffset(offset, drawIndexedIndirectRecordSize, index)
 }

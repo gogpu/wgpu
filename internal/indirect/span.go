@@ -23,3 +23,17 @@ func RecordOffset(offset, recordSize uint64, index uint32) (uint64, bool) {
 	}
 	return offset + delta, true
 }
+
+// DelegatedValidationOffset returns the last record offset for a span, or the
+// buffer size when offset arithmetic overflows. Backends with single-record
+// validation can use it to delegate one deterministic failing operation.
+func DelegatedValidationOffset(bufferSize, offset, recordSize uint64, count uint32) uint64 {
+	if count == 0 {
+		return offset
+	}
+	lastOffset, ok := RecordOffset(offset, recordSize, count-1)
+	if !ok {
+		return bufferSize
+	}
+	return lastOffset
+}

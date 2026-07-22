@@ -42,3 +42,15 @@ func TestRecordOffset(t *testing.T) {
 		t.Fatalf("multiplication-overflow RecordOffset = (%d, %v), want (0, false)", got, ok)
 	}
 }
+
+func TestDelegatedValidationOffset(t *testing.T) {
+	if got := DelegatedValidationOffset(64, 4, 20, 0); got != 4 {
+		t.Fatalf("DelegatedValidationOffset empty span = %d, want offset 4", got)
+	}
+	if got := DelegatedValidationOffset(64, 4, 20, 3); got != 44 {
+		t.Fatalf("DelegatedValidationOffset valid span = %d, want 44", got)
+	}
+	if got := DelegatedValidationOffset(64, math.MaxUint64-3, 20, 2); got != 64 {
+		t.Fatalf("DelegatedValidationOffset overflowing span = %d, want buffer size 64", got)
+	}
+}

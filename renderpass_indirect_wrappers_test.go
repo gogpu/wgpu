@@ -2,7 +2,11 @@
 
 package wgpu
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gogpu/wgpu/internal/indirect"
+)
 
 func TestIndexedIndirectDelegatedValidationOffset(t *testing.T) {
 	tests := []struct {
@@ -37,7 +41,7 @@ func TestIndexedIndirectDelegatedValidationOffset(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := indirectDelegatedValidationOffset(test.bufferSize, test.offset, drawIndexedIndirectRecordSize, test.drawCount); got != test.want {
+			if got := indirect.DelegatedValidationOffset(test.bufferSize, test.offset, drawIndexedIndirectRecordSize, test.drawCount); got != test.want {
 				t.Fatalf("indexedIndirectDelegatedValidationOffset(%d, %d, %d) = %d, want %d", test.bufferSize, test.offset, test.drawCount, got, test.want)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 	"math"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
@@ -102,11 +103,11 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 		return
 	}
 	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.r.DrawIndirect(buffer.r, indirectDelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		p.r.DrawIndirect(buffer.r, indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := drawIndirectRecordOffset(offset, i)
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
 		p.r.DrawIndirect(buffer.r, recordOffset)
 	}
 }
@@ -138,11 +139,11 @@ func lowerRustIndexedIndirect(bufferSize, offset uint64, drawCount uint32, draw 
 		return
 	}
 	if !indexedIndirectRangeFits(bufferSize, offset, drawCount) {
-		draw(indirectDelegatedValidationOffset(bufferSize, offset, drawIndexedIndirectRecordSize, drawCount))
+		draw(indirect.DelegatedValidationOffset(bufferSize, offset, drawIndexedIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indexedIndirectRecordOffset(offset, i)
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
 		draw(recordOffset)
 	}
 }
