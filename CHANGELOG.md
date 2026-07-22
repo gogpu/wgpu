@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Device teardown GPU drain ordering** — `Device.Release()` now drains GPU work
+  via internal `waitIdle()` before destroying staging buffers and encoders.
+  Previously, the public `WaitIdle()` returned `ErrReleased` immediately due to
+  the released flag, leaving in-flight submissions unreferenced. Matches Rust
+  wgpu `Queue::Drop` ordering. Contributor: @besmpl (#264).
+
+- **Vulkan swapchain fail-closed lifecycle** — surface capabilities are fully
+  validated before committing to state changes, semaphore/fence errors propagate
+  instead of being silently ignored, and swapchain reconfiguration is transactional
+  (old swapchain survives until replacement is ready). Adds `broken` flag to prevent
+  reuse after synchronization failures. Contributor: @besmpl (#265).
+
+- **Explicit mock adapter construction** — `core.NewInstance` no longer fabricates
+  a mock adapter when no HAL backend yields adapters. Registration failures are
+  now observable. Tests that need a deterministic adapter opt in via
+  `NewInstanceWithMock`. Matches Rust wgpu behavior. Contributor: @besmpl (#266).
+
+- **Surface lifetime ownership** — centralized acquisition/teardown with opaque
+  lease system that invalidates retained texture wrappers on present/discard/
+  unconfigure/destruction. Instance owns deterministic release ordering (devices
+  before surfaces before native instance). Vulkan HAL gains device-level swapchain
+  tracking with orderly and device-loss abandon paths.
+  Contributor: @besmpl (#269).
+
+### Added
+
+- **Surface-qualified adapter selection** — `RequestAdapterWithSurface` validates
+  adapters against the target surface's presentation queue via
+  `vkGetPhysicalDeviceSurfaceSupportKHR`. Creates request-local adapter wrappers
+  that carry the proven queue family into `Open()`, keeping cached adapters
+  immutable. Iterates all queue families — ahead of Rust wgpu which hardcodes
+  `queue_family_index = 0`. Contributor: @besmpl (#267).
+
+### Changed
+
+- **CONTRIBUTING.md** — Smart Coding framework (AI-assisted policy), updated
+  project structure, pre-submit checklist with cross-platform lint.
+
 ## [0.30.22] - 2026-07-16
 
 ### Fixed
