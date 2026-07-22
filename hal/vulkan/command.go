@@ -1046,7 +1046,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 		return
 	}
 	call, batched, ok := indirectCallPlan(e.encoder.device.supportsMultiDrawIndirect,
-		e.encoder.device.maxDrawIndirectCount, offset, drawCount, uint32(drawIndirectStride))
+		e.encoder.device.maxDrawIndirectCount, offset, drawCount, drawIndirectStride)
 	if !ok {
 		return
 	}
@@ -1077,7 +1077,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 		e.encoder.device.maxDrawIndirectCount,
 		offset,
 		drawCount,
-		uint32(drawIndexedIndirectStride),
+		drawIndexedIndirectStride,
 	)
 	if !ok {
 		return
@@ -1119,7 +1119,7 @@ func indirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset uint64
 }
 
 func indexedIndirectCallPlan(supportsMultiDraw bool, maxDrawCount uint32, offset uint64, drawCount uint32) (indexedIndirectCall, bool, bool) {
-	return indirectCallPlan(supportsMultiDraw, maxDrawCount, offset, drawCount, uint32(drawIndexedIndirectStride))
+	return indirectCallPlan(supportsMultiDraw, maxDrawCount, offset, drawCount, drawIndexedIndirectStride)
 }
 
 func indexedIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {

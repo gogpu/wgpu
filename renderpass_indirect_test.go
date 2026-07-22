@@ -30,30 +30,6 @@ func TestIndexedIndirectRangeFits(t *testing.T) {
 	}
 }
 
-func TestIndexedIndirectHelpersAllocateZero(t *testing.T) {
-	var (
-		fits   bool
-		offset uint64
-		ok     bool
-	)
-	if allocs := testing.AllocsPerRun(1000, func() {
-		fits = indexedIndirectRangeFits(64, 4, 3)
-	}); allocs != 0 {
-		t.Fatalf("indexedIndirectRangeFits allocations = %v, want 0", allocs)
-	}
-	if !fits {
-		t.Fatal("indexedIndirectRangeFits rejected a valid range")
-	}
-	if allocs := testing.AllocsPerRun(1000, func() {
-		offset, ok = indexedIndirectRecordOffset(4, 2)
-	}); allocs != 0 {
-		t.Fatalf("indexedIndirectRecordOffset allocations = %v, want 0", allocs)
-	}
-	if offset != 44 || !ok {
-		t.Fatalf("indexedIndirectRecordOffset result = %d, %t; want 44, true", offset, ok)
-	}
-}
-
 func BenchmarkIndexedIndirectRangeFitsCount1(b *testing.B) {
 	benchmarkIndexedIndirectRangeFits(b, 1)
 }

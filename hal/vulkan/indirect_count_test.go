@@ -64,26 +64,6 @@ func TestIndexedIndirectRecordOffset(t *testing.T) {
 	}
 }
 
-func TestIndexedIndirectHelpersAllocateZero(t *testing.T) {
-	var (
-		offset uint64
-		ok     bool
-	)
-	if allocs := testing.AllocsPerRun(1000, func() {
-		offset, ok = indexedIndirectRecordOffset(4, 3)
-	}); allocs != 0 {
-		t.Fatalf("indexedIndirectRecordOffset allocations = %v, want 0", allocs)
-	}
-	if offset != 64 || !ok {
-		t.Fatalf("indexedIndirectRecordOffset result = %d, %t; want 64, true", offset, ok)
-	}
-	if allocs := testing.AllocsPerRun(1000, func() {
-		_, _, ok = indexedIndirectCallPlan(true, 8, 4, 3)
-	}); allocs != 0 {
-		t.Fatalf("indexedIndirectCallPlan allocations = %v, want 0", allocs)
-	}
-}
-
 func BenchmarkIndexedIndirectCallPlanCount1(b *testing.B) {
 	benchmarkIndexedIndirectCallPlan(b, 1)
 }

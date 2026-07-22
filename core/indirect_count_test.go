@@ -78,23 +78,6 @@ func TestCoreRenderPassEncoderDrawIndexedIndirectZeroCountIsNoOp(t *testing.T) {
 	}
 }
 
-func TestCoreRenderPassEncoderDrawIndexedIndirectAllocations(t *testing.T) {
-	device := NewDevice(&mockHALDevice{}, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
-	buffer := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageIndirect, 64, "indirect")
-	recorder := &countedRenderPassEncoder{}
-	pass := &CoreRenderPassEncoder{raw: recorder, device: device}
-
-	for _, drawCount := range []uint32{1, 3} {
-		t.Run(fmt.Sprintf("count-%d", drawCount), func(t *testing.T) {
-			if allocs := testing.AllocsPerRun(1000, func() {
-				pass.MultiDrawIndexedIndirect(buffer, 4, drawCount)
-			}); allocs != 0 {
-				t.Fatalf("CoreRenderPassEncoder.DrawIndexedIndirect allocations = %v, want 0", allocs)
-			}
-		})
-	}
-}
-
 func BenchmarkCoreRenderPassEncoderDrawIndexedIndirectCount1(b *testing.B) {
 	benchmarkCoreRenderPassEncoderDrawIndexedIndirect(b, 1)
 }

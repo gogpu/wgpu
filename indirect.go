@@ -20,18 +20,6 @@ func drawIndirectRangeFits(bufferSize, offset uint64, drawCount uint32) bool {
 	return indirectRangeFits(bufferSize, offset, drawIndirectRecordSize, drawCount)
 }
 
-func drawIndirectRecordOffset(offset uint64, index uint32) (uint64, bool) {
-	return indirectRecordOffset(offset, drawIndirectRecordSize, index)
-}
-
-func indirectDelegatedValidationOffset(bufferSize, offset, recordSize uint64, drawCount uint32) uint64 {
-	lastOffset, ok := indirectRecordOffset(offset, recordSize, drawCount-1)
-	if !ok {
-		return bufferSize
-	}
-	return lastOffset
-}
-
 // indexedIndirectRangeFits reports whether drawCount consecutive indexed
 // indirect argument records fit in a buffer without overflowing uint64 math.
 func indexedIndirectRangeFits(bufferSize, offset uint64, drawCount uint32) bool {
