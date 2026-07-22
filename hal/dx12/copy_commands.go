@@ -12,20 +12,22 @@ import (
 )
 
 func (e *CommandEncoder) copyBufferToTexture(src *Buffer, texture *Texture, regions []hal.BufferTextureCopy) {
-	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	barriers := make([]stateBarrierPlan, 0, 1+len(regions))
 	if before, barrier := e.stateTracker.transitionBuffer(src, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); barrier {
-		plans = append(plans, stateBarrierPlan{resource: src, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+		barriers = append(barriers, stateBarrierPlan{resource: src, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
 	}
-	for _, region := range regions {
-		for _, copyPlan := range planBufferTextureCopies(texture, region.TextureBase, region.BufferLayout, region.Size) {
+	regionPlans := make([][]bufferTextureCopyPlan, len(regions))
+	for i, region := range regions {
+		regionPlans[i] = planBufferTextureCopies(texture, region.TextureBase, region.BufferLayout, region.Size)
+		for _, copyPlan := range regionPlans[i] {
 			if before, barrier := e.stateTracker.transitionTexture(texture, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); barrier {
-				plans = append(plans, stateBarrierPlan{resource: texture, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+				barriers = append(barriers, stateBarrierPlan{resource: texture, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
 			}
 		}
 	}
-	e.emitStateBarrierPlans(plans)
-	for _, region := range regions {
-		for _, plan := range planBufferTextureCopies(texture, region.TextureBase, region.BufferLayout, region.Size) {
+	e.emitStateBarrierPlans(barriers)
+	for _, plans := range regionPlans {
+		for _, plan := range plans {
 			srcLoc := placedFootprintLocation(src, texture.format, plan)
 			dstLoc := subresourceLocation(texture, plan.subresource)
 			box := d3d12.D3D12_BOX{
@@ -42,20 +44,22 @@ func (e *CommandEncoder) copyBufferToTexture(src *Buffer, texture *Texture, regi
 }
 
 func (e *CommandEncoder) copyTextureToBuffer(src *Texture, dst *Buffer, regions []hal.BufferTextureCopy) {
-	plans := make([]stateBarrierPlan, 0, 1+len(regions))
+	barriers := make([]stateBarrierPlan, 0, 1+len(regions))
 	if before, barrier := e.stateTracker.transitionBuffer(dst, d3d12.D3D12_RESOURCE_STATE_COPY_DEST); barrier {
-		plans = append(plans, stateBarrierPlan{resource: dst, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
+		barriers = append(barriers, stateBarrierPlan{resource: dst, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_DEST})
 	}
-	for _, region := range regions {
-		for _, copyPlan := range planBufferTextureCopies(src, region.TextureBase, region.BufferLayout, region.Size) {
+	regionPlans := make([][]bufferTextureCopyPlan, len(regions))
+	for i, region := range regions {
+		regionPlans[i] = planBufferTextureCopies(src, region.TextureBase, region.BufferLayout, region.Size)
+		for _, copyPlan := range regionPlans[i] {
 			if before, barrier := e.stateTracker.transitionTexture(src, copyPlan.subresource, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE); barrier {
-				plans = append(plans, stateBarrierPlan{resource: src, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
+				barriers = append(barriers, stateBarrierPlan{resource: src, subresource: copyPlan.subresource, before: before, after: d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE})
 			}
 		}
 	}
-	e.emitStateBarrierPlans(plans)
-	for _, region := range regions {
-		for _, plan := range planBufferTextureCopies(src, region.TextureBase, region.BufferLayout, region.Size) {
+	e.emitStateBarrierPlans(barriers)
+	for _, plans := range regionPlans {
+		for _, plan := range plans {
 			srcLoc := subresourceLocation(src, plan.subresource)
 			dstLoc := placedFootprintLocation(dst, src.format, plan)
 			box := d3d12.D3D12_BOX{

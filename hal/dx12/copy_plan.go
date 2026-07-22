@@ -125,6 +125,15 @@ func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeig
 		return 0, 0, 0, 0, 0, false
 	}
 	bufferOffset = logicalOffset &^ (d3d12TexturePlacementAlignment - 1)
+	// Prefer an earlier placement boundary that preserves a whole-row delta.
+	// This avoids needlessly widening the footprint and keeps otherwise valid
+	// full-width copies representable when the nearest boundary falls mid-row.
+	if logicalOffset%d3d12TexturePlacementAlignment != 0 && logicalOffset >= uint64(rowPitch) {
+		previousRow := logicalOffset - uint64(rowPitch)
+		if previousRow%d3d12TexturePlacementAlignment == 0 {
+			bufferOffset = previousRow
+		}
+	}
 	delta := logicalOffset - bufferOffset
 	rowBytes := uint64(rowPitch)
 	yRows := delta / rowBytes

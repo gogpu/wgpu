@@ -303,8 +303,8 @@ func TestPlanBufferTextureCopiesSplitsArrayLayers(t *testing.T) {
 	}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
 
 	want := []bufferTextureCopyPlan{
-		{subresource: 5, bufferOffset: 1024, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 0},
-		{subresource: 7, bufferOffset: 2048, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 0},
+		{subresource: 5, bufferOffset: 1024, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 0, rowPitch: 256, copyWidth: 8, copyHeight: 4},
+		{subresource: 7, bufferOffset: 2048, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 0, rowPitch: 256, copyWidth: 8, copyHeight: 4},
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("array copy plans = %#v, want %#v", plans, want)
@@ -316,7 +316,7 @@ func TestPlanBufferTextureCopiesAlignsPlacedFootprintsByWholeRows(t *testing.T) 
 		format:    gputypes.TextureFormatRGBA8Unorm,
 		dimension: gputypes.TextureDimension2D,
 		mipLevels: 1,
-		size:      hal.Extent3D{DepthOrArrayLayers: 2},
+		size:      hal.Extent3D{Width: 192, Height: 2, DepthOrArrayLayers: 2},
 	}
 	plans := planBufferTextureCopies(texture, hal.ImageCopyTexture{
 		Aspect: gputypes.TextureAspectAll,
@@ -324,11 +324,11 @@ func TestPlanBufferTextureCopiesAlignsPlacedFootprintsByWholeRows(t *testing.T) 
 		Offset:       512,
 		BytesPerRow:  768,
 		RowsPerImage: 3,
-	}, hal.Extent3D{Width: 8, Height: 2, DepthOrArrayLayers: 2})
+	}, hal.Extent3D{Width: 192, Height: 2, DepthOrArrayLayers: 2})
 
 	want := []bufferTextureCopyPlan{
-		{subresource: 0, bufferOffset: 512, footprintHeight: 2, footprintDepth: 1},
-		{subresource: 1, bufferOffset: 2048, bufferOriginY: 1, footprintHeight: 3, footprintDepth: 1},
+		{subresource: 0, bufferOffset: 512, footprintWidth: 192, footprintHeight: 2, footprintDepth: 1, rowPitch: 768, copyWidth: 192, copyHeight: 2},
+		{subresource: 1, bufferOffset: 2048, bufferOriginY: 1, footprintWidth: 192, footprintHeight: 3, footprintDepth: 1, rowPitch: 768, copyWidth: 192, copyHeight: 2},
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("array copy plans = %#v, want %#v", plans, want)
@@ -354,8 +354,8 @@ func TestPlanBufferTextureCopiesUsesBlockRowsForCompressedLayers(t *testing.T) {
 	}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 2})
 
 	want := []bufferTextureCopyPlan{
-		{subresource: 0, bufferOffset: 512, footprintHeight: 4, footprintDepth: 1},
-		{subresource: 1, bufferOffset: 512, bufferOriginY: 4, footprintHeight: 8, footprintDepth: 1},
+		{subresource: 0, bufferOffset: 512, footprintWidth: 4, footprintHeight: 4, footprintDepth: 1, rowPitch: 256, copyWidth: 4, copyHeight: 4},
+		{subresource: 1, bufferOffset: 512, bufferOriginY: 4, footprintWidth: 4, footprintHeight: 8, footprintDepth: 1, rowPitch: 256, copyWidth: 4, copyHeight: 4},
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("compressed array copy plans = %#v, want %#v", plans, want)
@@ -378,9 +378,9 @@ func TestPlanBufferTextureCopiesKeeps3DDepthInOneSubresource(t *testing.T) {
 	})
 
 	want := []bufferTextureCopyPlan{
-		{subresource: 2, bufferOffset: 1024, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 4},
-		{subresource: 2, bufferOffset: 2048, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 5},
-		{subresource: 2, bufferOffset: 3072, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 6},
+		{subresource: 2, bufferOffset: 1024, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 4, rowPitch: 256, copyWidth: 8, copyHeight: 4},
+		{subresource: 2, bufferOffset: 2048, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 5, rowPitch: 256, copyWidth: 8, copyHeight: 4},
+		{subresource: 2, bufferOffset: 3072, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 6, rowPitch: 256, copyWidth: 8, copyHeight: 4},
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("3D copy plans = %#v, want %#v", plans, want)
@@ -400,9 +400,9 @@ func TestPlanBufferTextureCopiesPreserves3DRowsPerImageAsSliceStride(t *testing.
 		Width: 8, Height: 4, DepthOrArrayLayers: 3,
 	})
 	want := []bufferTextureCopyPlan{
-		{subresource: 0, bufferOffset: 512, footprintHeight: 4, footprintDepth: 1},
-		{subresource: 0, bufferOffset: 2560, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 1},
-		{subresource: 0, bufferOffset: 4608, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 2},
+		{subresource: 0, bufferOffset: 512, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, rowPitch: 256, copyWidth: 8, copyHeight: 4},
+		{subresource: 0, bufferOffset: 2560, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 1, rowPitch: 256, copyWidth: 8, copyHeight: 4},
+		{subresource: 0, bufferOffset: 4608, footprintWidth: 8, footprintHeight: 4, footprintDepth: 1, textureOriginZ: 2, rowPitch: 256, copyWidth: 8, copyHeight: 4},
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("3D padded-row copy plans = %#v, want %#v", plans, want)
