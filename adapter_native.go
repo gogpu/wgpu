@@ -168,8 +168,11 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 
 // Release releases the adapter.
 func (a *Adapter) Release() {
-	if a.released {
+	if a == nil || a.released {
 		return
 	}
 	a.released = true
+	if a.instance != nil && a.instance.core != nil {
+		a.instance.core.ReleaseSurfaceAdapter(a.id)
+	}
 }

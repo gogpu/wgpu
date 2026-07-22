@@ -24,7 +24,14 @@ type Adapter struct {
 }
 
 // Open creates a logical device with the requested features and limits.
-func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
+func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.open(nil)
+}
+
+// open creates a logical device, optionally constraining it to one queue
+// family. Surface-qualified adapters use the constrained path so the queue
+// selected during the surface query is the same queue passed into Open.
+func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 	// Find queue families
 	var queueFamilyCount uint32
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, nil)
@@ -36,24 +43,19 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	queueFamilies := make([]vk.QueueFamilyProperties, queueFamilyCount)
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, &queueFamilies[0])
 
-	// Find graphics queue family
-	graphicsFamily := int32(-1)
-	for i, family := range queueFamilies {
-		if family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) != 0 {
-			graphicsFamily = int32(i)
-			break
-		}
+	if queueFamilyCount < uint32(len(queueFamilies)) {
+		queueFamilies = queueFamilies[:queueFamilyCount]
 	}
-
-	if graphicsFamily < 0 {
-		return hal.OpenDevice{}, fmt.Errorf("vulkan: no graphics queue family found")
+	graphicsFamily, err := selectGraphicsQueueFamily(queueFamilies, requestedQueueFamily)
+	if err != nil {
+		return hal.OpenDevice{}, err
 	}
 
 	// Create device with graphics queue
 	queuePriority := float32(1.0)
 	queueCreateInfo := vk.DeviceQueueCreateInfo{
 		SType:            vk.StructureTypeDeviceQueueCreateInfo,
-		QueueFamilyIndex: uint32(graphicsFamily),
+		QueueFamilyIndex: graphicsFamily,
 		QueueCount:       1,
 		PQueuePriorities: &queuePriority,
 	}
@@ -140,13 +142,13 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 
 	// Get queue handle
 	var queue vk.Queue
-	vkGetDeviceQueue(&deviceCmds, device, uint32(graphicsFamily), 0, &queue)
+	vkGetDeviceQueue(&deviceCmds, device, graphicsFamily, 0, &queue)
 
 	dev := &Device{
 		handle:                     device,
 		physicalDevice:             a.physicalDevice,
 		instance:                   a.instance,
-		graphicsFamily:             uint32(graphicsFamily),
+		graphicsFamily:             graphicsFamily,
 		cmds:                       &deviceCmds,
 		supportsIncrementalPresent: hasIncrementalPresent,
 	}
@@ -191,7 +193,7 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	q := &Queue{
 		handle:      queue,
 		device:      dev,
-		familyIndex: uint32(graphicsFamily),
+		familyIndex: graphicsFamily,
 		relay:       relay,
 	}
 
@@ -212,6 +214,31 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 		Device: dev,
 		Queue:  q,
 	}, nil
+}
+
+// selectGraphicsQueueFamily preserves the exact family chosen during surface
+// qualification, while keeping the ordinary headless path first-graphics.
+func selectGraphicsQueueFamily(families []vk.QueueFamilyProperties, requested *uint32) (uint32, error) {
+	if requested != nil {
+		index := *requested
+		if index >= uint32(len(families)) {
+			return 0, fmt.Errorf("vulkan: requested queue family %d is unavailable", index)
+		}
+		family := families[index]
+		if family.QueueCount == 0 {
+			return 0, fmt.Errorf("vulkan: requested queue family %d has no queues", index)
+		}
+		if family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) == 0 {
+			return 0, fmt.Errorf("vulkan: requested queue family %d has no graphics queue", index)
+		}
+		return index, nil
+	}
+	for index, family := range families {
+		if family.QueueCount > 0 && family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) != 0 {
+			return uint32(index), nil
+		}
+	}
+	return 0, fmt.Errorf("vulkan: no graphics queue family found")
 }
 
 // TextureFormatCapabilities returns capabilities for a texture format.
@@ -242,69 +269,288 @@ func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.T
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	vkSurface, ok := surface.(*Surface)
-	if !ok || vkSurface == nil || vkSurface.handle == 0 {
+	if !ok || vkSurface == nil || vkSurface.handle == 0 || vkSurface.instance == nil || vkSurface.instance != a.instance {
 		return nil
 	}
 
-	// Query surface capabilities for alpha modes
-	var surfaceCaps vk.SurfaceCapabilitiesKHR
-	a.instance.cmds.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-		a.physicalDevice, vkSurface.handle, &surfaceCaps)
+	snapshot, err := a.querySurfaceSnapshot(vkSurface)
+	if err != nil {
+		return nil
+	}
+	return cloneSurfaceCapabilities(snapshot.public)
+}
 
-	// Query supported surface formats
-	var formatCount uint32
-	a.instance.cmds.GetPhysicalDeviceSurfaceFormatsKHR(
-		a.physicalDevice, vkSurface.handle, &formatCount, nil)
+// surfaceSnapshot keeps the exact Vulkan format/color-space pairs alongside
+// the public projection. The public HAL shape predates color spaces, so the
+// raw pairs stay private to the Vulkan adapter and are never silently reduced
+// to a fabricated format list.
+type surfaceSnapshot struct {
+	capabilities vk.SurfaceCapabilitiesKHR
+	formats      []vk.SurfaceFormatKHR
+	presentModes []vk.PresentModeKHR
+	public       hal.SurfaceCapabilities
+}
 
-	formats := make([]gputypes.TextureFormat, 0, formatCount)
-	if formatCount > 0 {
-		vkFormats := make([]vk.SurfaceFormatKHR, formatCount)
-		a.instance.cmds.GetPhysicalDeviceSurfaceFormatsKHR(
-			a.physicalDevice, vkSurface.handle, &formatCount, &vkFormats[0])
+// qualifiedAdapter is a request-local Vulkan adapter. It carries the queue
+// family proven to support both graphics and presentation for one surface and
+// opens the underlying physical device with that family unchanged.
+type qualifiedAdapter struct {
+	base        *Adapter
+	surface     *Surface
+	queueFamily uint32
+	snapshot    surfaceSnapshot
+}
 
-		for _, f := range vkFormats {
-			if tf := vkFormatToTextureFormat(f.Format); tf != gputypes.TextureFormatUndefined {
-				formats = append(formats, tf)
-			}
-		}
+func (a *qualifiedAdapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.base.open(&a.queueFamily)
+}
+
+func (a *qualifiedAdapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
+	return a.base.TextureFormatCapabilities(format)
+}
+
+func (a *qualifiedAdapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
+	vkSurface, ok := surface.(*Surface)
+	if !ok || vkSurface != a.surface {
+		return nil
+	}
+	return cloneSurfaceCapabilities(a.snapshot.public)
+}
+
+// Destroy is intentionally a no-op. The cached physical adapter owns no
+// Vulkan object, and the core instance retains ownership of the base adapter.
+func (a *qualifiedAdapter) Destroy() {}
+
+// QualifySurface selects a same-family graphics+present queue and records a
+// checked surface capability snapshot without mutating the cached adapter.
+func (a *Adapter) QualifySurface(surface hal.Surface) (hal.Adapter, error) {
+	vkSurface, ok := surface.(*Surface)
+	if !ok || vkSurface == nil || vkSurface.handle == 0 {
+		return nil, fmt.Errorf("vulkan: invalid surface for adapter qualification")
+	}
+	if vkSurface.instance == nil || vkSurface.instance != a.instance {
+		return nil, fmt.Errorf("vulkan: surface belongs to a different instance")
 	}
 
-	// Fallback if no formats found
+	queueFamilies, err := a.queueFamilies()
+	if err != nil {
+		return nil, err
+	}
+	queueFamily, err := a.presentGraphicsQueueFamily(vkSurface, queueFamilies)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshot, err := a.querySurfaceSnapshot(vkSurface)
+	if err != nil {
+		return nil, err
+	}
+
+	return &qualifiedAdapter{
+		base:        a,
+		surface:     vkSurface,
+		queueFamily: queueFamily,
+		snapshot:    snapshot,
+	}, nil
+}
+
+func (a *Adapter) queueFamilies() ([]vk.QueueFamilyProperties, error) {
+	var count uint32
+	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &count, nil)
+	if count == 0 {
+		return nil, fmt.Errorf("vulkan: no queue families found")
+	}
+
+	families := make([]vk.QueueFamilyProperties, count)
+	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &count, &families[0])
+	if count == 0 {
+		return nil, fmt.Errorf("vulkan: no queue families found")
+	}
+	if count < uint32(len(families)) {
+		families = families[:count]
+	}
+	return families, nil
+}
+
+func (a *Adapter) presentGraphicsQueueFamily(surface *Surface, families []vk.QueueFamilyProperties) (uint32, error) {
+	supports := make([]bool, len(families))
+	for index, family := range families {
+		if family.QueueCount == 0 || family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) == 0 {
+			continue
+		}
+
+		var supported vk.Bool32
+		result := a.instance.cmds.GetPhysicalDeviceSurfaceSupportKHR(
+			a.physicalDevice, uint32(index), surface.handle, &supported)
+		if result != vk.Success {
+			return 0, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceSupportKHR(queueFamily=%d) failed: %d", index, result)
+		}
+		supports[index] = supported != 0
+	}
+	return selectPresentGraphicsQueueFamily(families, supports)
+}
+
+func selectPresentGraphicsQueueFamily(families []vk.QueueFamilyProperties, supports []bool) (uint32, error) {
+	if len(supports) != len(families) {
+		return 0, fmt.Errorf("vulkan: queue family support query is incomplete")
+	}
+	for index, family := range families {
+		if family.QueueCount > 0 && family.QueueFlags&vk.QueueFlags(vk.QueueGraphicsBit) != 0 && supports[index] {
+			return uint32(index), nil
+		}
+	}
+	return 0, fmt.Errorf("vulkan: no graphics queue family supports presentation for surface")
+}
+
+func (a *Adapter) querySurfaceSnapshot(surface *Surface) (surfaceSnapshot, error) {
+	if surface == nil || surface.handle == 0 {
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: invalid surface")
+	}
+
+	var capabilities vk.SurfaceCapabilitiesKHR
+	result := a.instance.cmds.GetPhysicalDeviceSurfaceCapabilitiesKHR(
+		a.physicalDevice, surface.handle, &capabilities)
+	if result != vk.Success {
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: %d", result)
+	}
+
+	formats, err := querySurfaceFormats(a.instance, a.physicalDevice, surface.handle)
+	if err != nil {
+		return surfaceSnapshot{}, err
+	}
+
+	presentModes, err := queryPresentModes(a.instance, a.physicalDevice, surface.handle)
+	if err != nil {
+		return surfaceSnapshot{}, err
+	}
+	return makeSurfaceSnapshot(capabilities, formats, presentModes)
+}
+
+func querySurfaceFormats(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) ([]vk.SurfaceFormatKHR, error) {
+	return querySurfaceFormatsWith(func(count *uint32, formats *vk.SurfaceFormatKHR) vk.Result {
+		return instance.cmds.GetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, formats)
+	})
+}
+
+func querySurfaceFormatsWith(query func(count *uint32, formats *vk.SurfaceFormatKHR) vk.Result) ([]vk.SurfaceFormatKHR, error) {
+	return queryOptionalSurfaceValues("vkGetPhysicalDeviceSurfaceFormatsKHR", query)
+}
+
+func queryOptionalSurfaceValues[T any](operation string, query func(count *uint32, values *T) vk.Result) ([]T, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		var count uint32
+		result := query(&count, nil)
+		if result != vk.Success && result != vk.Incomplete {
+			return nil, fmt.Errorf("vulkan: %s count failed: %d", operation, result)
+		}
+		if count == 0 {
+			return []T{}, nil
+		}
+
+		values := make([]T, count)
+		returned := count
+		result = query(&returned, &values[0])
+		if result != vk.Success && result != vk.Incomplete {
+			return nil, fmt.Errorf("vulkan: %s failed: %d", operation, result)
+		}
+		if result == vk.Incomplete || returned > uint32(len(values)) {
+			continue
+		}
+		return values[:returned], nil
+	}
+	return nil, fmt.Errorf("vulkan: %s returned an unstable count", operation)
+}
+
+func queryPresentModes(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) ([]vk.PresentModeKHR, error) {
+	return queryPresentModesWith(func(count *uint32, modes *vk.PresentModeKHR) vk.Result {
+		return instance.cmds.GetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, modes)
+	})
+}
+
+func queryPresentModesWith(query func(count *uint32, modes *vk.PresentModeKHR) vk.Result) ([]vk.PresentModeKHR, error) {
+	return queryOptionalSurfaceValues("vkGetPhysicalDeviceSurfacePresentModesKHR", query)
+}
+
+func makeSurfaceSnapshot(capabilities vk.SurfaceCapabilitiesKHR, formats []vk.SurfaceFormatKHR, presentModes []vk.PresentModeKHR) (surfaceSnapshot, error) {
 	if len(formats) == 0 {
-		formats = []gputypes.TextureFormat{
-			gputypes.TextureFormatBGRA8Unorm,
-			gputypes.TextureFormatRGBA8Unorm,
-		}
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: surface returned no formats")
 	}
-
-	// Query supported present modes
-	var modeCount uint32
-	a.instance.cmds.GetPhysicalDeviceSurfacePresentModesKHR(
-		a.physicalDevice, vkSurface.handle, &modeCount, nil)
-
-	presentModes := make([]hal.PresentMode, 0, modeCount)
-	if modeCount > 0 {
-		vkModes := make([]vk.PresentModeKHR, modeCount)
-		a.instance.cmds.GetPhysicalDeviceSurfacePresentModesKHR(
-			a.physicalDevice, vkSurface.handle, &modeCount, &vkModes[0])
-
-		for _, m := range vkModes {
-			presentModes = append(presentModes, vkPresentModeToHAL(m))
-		}
-	}
-
-	// Fallback if no present modes found
 	if len(presentModes) == 0 {
-		presentModes = []hal.PresentMode{hal.PresentModeFifo}
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: surface returned no present modes")
 	}
 
-	// Convert composite alpha modes
-	alphaModes := vkCompositeAlphaToHAL(surfaceCaps.SupportedCompositeAlpha)
+	alphaModes := vkCompositeAlphaToHALChecked(capabilities.SupportedCompositeAlpha)
+	if len(alphaModes) == 0 {
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: surface returned no supported composite alpha modes")
+	}
 
-	return &hal.SurfaceCapabilities{
-		Formats:      formats,
-		PresentModes: presentModes,
+	public := hal.SurfaceCapabilities{
+		Formats:      make([]gputypes.TextureFormat, 0, len(formats)),
+		PresentModes: make([]hal.PresentMode, 0, len(presentModes)),
 		AlphaModes:   alphaModes,
+	}
+	for _, format := range formats {
+		if textureFormat := vkFormatToTextureFormat(format.Format); textureFormat != gputypes.TextureFormatUndefined {
+			public.Formats = append(public.Formats, textureFormat)
+		}
+	}
+	for _, mode := range presentModes {
+		if halMode, ok := vkPresentModeToHALChecked(mode); ok {
+			public.PresentModes = append(public.PresentModes, halMode)
+		}
+	}
+	if len(public.PresentModes) == 0 {
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: surface returned no supported present modes")
+	}
+	if len(public.Formats) == 0 {
+		return surfaceSnapshot{}, fmt.Errorf("vulkan: surface returned no supported formats")
+	}
+
+	return surfaceSnapshot{
+		capabilities: capabilities,
+		formats:      append([]vk.SurfaceFormatKHR(nil), formats...),
+		presentModes: append([]vk.PresentModeKHR(nil), presentModes...),
+		public:       public,
+	}, nil
+}
+
+func vkPresentModeToHALChecked(mode vk.PresentModeKHR) (hal.PresentMode, bool) {
+	switch mode {
+	case vk.PresentModeImmediateKhr:
+		return hal.PresentModeImmediate, true
+	case vk.PresentModeMailboxKhr:
+		return hal.PresentModeMailbox, true
+	case vk.PresentModeFifoKhr:
+		return hal.PresentModeFifo, true
+	case vk.PresentModeFifoRelaxedKhr:
+		return hal.PresentModeFifoRelaxed, true
+	default:
+		return 0, false
+	}
+}
+
+func vkCompositeAlphaToHALChecked(flags vk.CompositeAlphaFlagsKHR) []hal.CompositeAlphaMode {
+	var modes []hal.CompositeAlphaMode
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaOpaqueBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeOpaque)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaPreMultipliedBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModePremultiplied)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaPostMultipliedBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeUnpremultiplied)
+	}
+	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaInheritBitKhr) != 0 {
+		modes = append(modes, hal.CompositeAlphaModeInherit)
+	}
+	return modes
+}
+
+func cloneSurfaceCapabilities(capabilities hal.SurfaceCapabilities) *hal.SurfaceCapabilities {
+	return &hal.SurfaceCapabilities{
+		Formats:      append([]gputypes.TextureFormat(nil), capabilities.Formats...),
+		PresentModes: append([]hal.PresentMode(nil), capabilities.PresentModes...),
+		AlphaModes:   append([]hal.CompositeAlphaMode(nil), capabilities.AlphaModes...),
 	}
 }
 

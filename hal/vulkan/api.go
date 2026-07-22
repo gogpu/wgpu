@@ -171,17 +171,6 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		var features vk.PhysicalDeviceFeatures
 		i.cmds.GetPhysicalDeviceFeatures(device, &features)
 
-		// Check surface support if surface hint provided
-		if surfaceHint != nil {
-			if s, ok := surfaceHint.(*Surface); ok && s.handle != 0 {
-				var supported vk.Bool32
-				i.cmds.GetPhysicalDeviceSurfaceSupportKHR(device, 0, s.handle, &supported)
-				if supported == 0 {
-					continue // Skip devices that don't support this surface
-				}
-			}
-		}
-
 		// Convert device type
 		deviceType := gputypes.DeviceTypeOther
 		switch props.DeviceType {
@@ -205,6 +194,16 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			features:       features,
 		}
 
+		adapterForExpose := hal.Adapter(adapter)
+		if surfaceHint != nil {
+			qualified, err := adapter.QualifySurface(surfaceHint)
+			if err != nil {
+				hal.Logger().Debug("vulkan: adapter rejected surface hint", "name", deviceName, "error", err)
+				continue
+			}
+			adapterForExpose = qualified
+		}
+
 		hal.Logger().Info("vulkan: adapter found",
 			"name", deviceName,
 			"type", deviceType,
@@ -213,7 +212,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		)
 
 		adapters = append(adapters, hal.ExposedAdapter{
-			Adapter: adapter,
+			Adapter: adapterForExpose,
 			Info: gputypes.AdapterInfo{
 				Name:       deviceName,
 				Vendor:     vendorIDToName(props.VendorID),
