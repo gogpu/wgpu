@@ -193,6 +193,10 @@ func (i *Instance) surfacesForDevice(device *Device) []*Surface {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	surfaces := make([]*Surface, 0, len(i.surfaces))
+	// Device.Release marks the device released before reaching this scan, and
+	// Surface.Configure rejects a released device before assigning surface.device.
+	// The association is therefore stable for this teardown snapshot even though
+	// Surface deliberately has no second ownership lock.
 	for surface := range i.surfaces {
 		if surface != nil && surface.device == device {
 			surfaces = append(surfaces, surface)

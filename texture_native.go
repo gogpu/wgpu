@@ -19,6 +19,9 @@ type Texture struct {
 
 // resolveHAL is the single boundary from a public texture wrapper to HAL.
 // Surface textures are borrowed and are usable only for their acquisition.
+// Encoder validation and HAL conversion may call this more than once during
+// one operation; acquisition and presentation are serialized by the render
+// loop, so the lease remains stable across those calls.
 func (t *Texture) resolveHAL() hal.Texture {
 	if t == nil || t.released || t.hal == nil || t.device == nil || t.device.released.Load() {
 		return nil
@@ -76,6 +79,8 @@ type TextureView struct {
 }
 
 // resolveHAL is the single boundary from a public texture-view wrapper to HAL.
+// Like Texture.resolveHAL, callers may resolve repeatedly within one serialized
+// encoder operation without extending the surface acquisition lifetime.
 func (v *TextureView) resolveHAL() hal.TextureView {
 	if v == nil || v.released || v.hal == nil || v.device == nil || v.device.released.Load() {
 		return nil
