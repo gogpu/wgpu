@@ -40,6 +40,10 @@ func TestCoreRenderPassEncoderDrawIndirectForwardsCountOnce(t *testing.T) {
 	if recorder.drawCalls != 2 || recorder.drawCount != 3 {
 		t.Fatalf("multi forwarding = calls %d count %d; want 2, 3", recorder.drawCalls, recorder.drawCount)
 	}
+	pass.MultiDrawIndirect(nil, ^uint64(0), 0)
+	if recorder.drawCalls != 2 {
+		t.Fatalf("zero-count forwarding = calls %d, want 2", recorder.drawCalls)
+	}
 }
 
 func (p *countedRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, offset uint64, count uint32) {
@@ -56,7 +60,11 @@ func TestCoreRenderPassEncoderDrawIndexedIndirectForwardsCountOnce(t *testing.T)
 			recorder := &countedRenderPassEncoder{}
 			pass := &CoreRenderPassEncoder{raw: recorder, device: device}
 
-			pass.MultiDrawIndexedIndirect(buffer, 4, drawCount)
+			if drawCount == 1 {
+				pass.DrawIndexedIndirect(buffer, 4)
+			} else {
+				pass.MultiDrawIndexedIndirect(buffer, 4, drawCount)
+			}
 			if recorder.calls != 1 {
 				t.Fatalf("HAL DrawIndexedIndirect calls = %d, want 1", recorder.calls)
 			}
