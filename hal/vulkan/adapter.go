@@ -269,7 +269,7 @@ func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.T
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	vkSurface, ok := surface.(*Surface)
-	if !ok || vkSurface == nil || vkSurface.instance == nil || vkSurface.instance != a.instance {
+	if !ok || vkSurface == nil || vkSurface.handle == 0 || vkSurface.instance == nil || vkSurface.instance != a.instance {
 		return nil
 	}
 

@@ -131,6 +131,7 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 
 	firstCalls := 0
 	secondCalls := 0
+	cachedCapabilities := &hal.Capabilities{}
 	firstHAL := &surfaceQualificationAdapter{qualifies: &firstCalls}
 	secondHAL := &surfaceQualificationAdapter{compatible: true, qualifies: &secondCalls}
 	firstID := hub.RegisterAdapter(&Adapter{
@@ -140,10 +141,11 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 		halAdapter: firstHAL,
 	})
 	secondID := hub.RegisterAdapter(&Adapter{
-		Info:       gputypes.AdapterInfo{DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendVulkan},
-		Limits:     gputypes.DefaultLimits(),
-		Backend:    gputypes.BackendVulkan,
-		halAdapter: secondHAL,
+		Info:            gputypes.AdapterInfo{DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendVulkan},
+		Limits:          gputypes.DefaultLimits(),
+		Backend:         gputypes.BackendVulkan,
+		halAdapter:      secondHAL,
+		halCapabilities: cachedCapabilities,
 	})
 
 	instance := &Instance{
@@ -169,6 +171,9 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 	}
 	if selected.halAdapter == secondHAL {
 		t.Fatal("selected adapter retained cached HAL adapter")
+	}
+	if selected.halCapabilities != nil {
+		t.Fatal("selected adapter retained cached HAL capabilities")
 	}
 	if selected.Info.DeviceType != gputypes.DeviceTypeIntegratedGPU {
 		t.Fatalf("selected device type = %v, want integrated GPU", selected.Info.DeviceType)
@@ -207,6 +212,9 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 	}
 	if cached.halAdapter != secondHAL {
 		t.Fatal("surface request mutated cached adapter")
+	}
+	if cached.halCapabilities != cachedCapabilities {
+		t.Fatal("surface request mutated cached adapter capabilities")
 	}
 
 	instance.ReleaseSurfaceAdapter(selectedID)

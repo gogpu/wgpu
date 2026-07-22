@@ -447,6 +447,10 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 			// family and checked surface snapshot into Open().
 			qualifiedCore := adapter
 			qualifiedCore.halAdapter = qualified
+			// Capabilities belong to the cached physical adapter. The qualified
+			// wrapper carries request-local surface capabilities through its HAL
+			// adapter and must not alias the cached pointer.
+			qualifiedCore.halCapabilities = nil
 			qualifiedID := hub.RegisterAdapter(&qualifiedCore)
 			i.mu.Lock()
 			i.surfaceAdapters = append(i.surfaceAdapters, qualifiedID)
