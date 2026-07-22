@@ -389,47 +389,6 @@ func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
 
 	// Clear deferred list -- enumeration is done.
 	i.deferredGLES = nil
-
-	// If we were in mock mode and now have real adapters from GLES,
-	// remove mock adapters so real ones are selected first.
-	if i.useMock && i.hasRealAdaptersLocked(hub) {
-		i.useMock = false
-		i.removeMockAdaptersLocked(hub)
-	}
-}
-
-// hasRealAdaptersLocked checks if any adapter has a non-nil HAL adapter.
-// Caller must hold i.mu.
-func (i *Instance) hasRealAdaptersLocked(hub *Hub) bool {
-	for _, adapterID := range i.adapters {
-		adapter, err := hub.GetAdapter(adapterID)
-		if err != nil {
-			continue
-		}
-		if adapter.halAdapter != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// removeMockAdaptersLocked filters out mock adapters (halAdapter == nil) from
-// the adapter list and unregisters them from the hub.
-// Caller must hold i.mu.
-func (i *Instance) removeMockAdaptersLocked(hub *Hub) {
-	filtered := make([]AdapterID, 0, len(i.adapters))
-	for _, adapterID := range i.adapters {
-		adapter, err := hub.GetAdapter(adapterID)
-		if err != nil {
-			continue
-		}
-		if adapter.halAdapter != nil {
-			filtered = append(filtered, adapterID)
-		} else {
-			_, _ = hub.UnregisterAdapter(adapterID)
-		}
-	}
-	i.adapters = filtered
 }
 
 // matchesPowerPreference checks if a device type matches the power preference.
