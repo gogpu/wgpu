@@ -44,12 +44,9 @@ func TestCoreHALIntegration(t *testing.T) {
 	}
 	defer instance.Destroy()
 
-	// Check if we're using real adapters or mock
-	if instance.IsMock() {
-		t.Log("Instance is using mock adapters (no GPU available)")
-	} else {
-		t.Log("Instance is using real HAL adapters")
-	}
+	// NewInstance never fabricates mock adapters. Any adapters returned here
+	// therefore came from an explicitly registered HAL provider.
+	t.Log("Instance is using registered HAL adapters")
 
 	// Enumerate adapters
 	adapterIDs := instance.EnumerateAdapters()

@@ -46,7 +46,8 @@ type Instance struct {
 	// glesEnumerated tracks whether deferred GLES adapters have been enumerated.
 	glesEnumerated bool
 
-	// useMock indicates whether to use mock adapters (for testing or when no HAL available).
+	// useMock indicates whether this instance was explicitly created with mock
+	// adapters through NewInstanceWithMock.
 	useMock bool
 }
 
@@ -54,9 +55,9 @@ type Instance struct {
 // If desc is nil, default settings are used.
 //
 // The instance will enumerate available GPU adapters based on the enabled
-// backends specified in the descriptor. If HAL backends are available,
-// real GPU adapters will be enumerated. Otherwise, a mock adapter is created
-// for testing purposes.
+// backends specified in the descriptor. If no provider is available, the
+// instance remains empty and RequestAdapter reports the failure. Tests that
+// need a deterministic adapter must opt in through NewInstanceWithMock.
 func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 	if desc == nil {
 		defaultDesc := gputypes.DefaultInstanceDescriptor()
@@ -73,13 +74,7 @@ func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 	}
 
 	// Try to enumerate real adapters via HAL backends
-	realAdaptersFound := i.enumerateRealAdapters(desc)
-
-	// Fall back to mock adapter if no real adapters were found
-	if !realAdaptersFound {
-		i.useMock = true
-		i.createMockAdapter()
-	}
+	i.enumerateRealAdapters(desc)
 
 	trackResource(uintptr(unsafe.Pointer(i)), "Instance") //nolint:gosec // debug tracking uses pointer as unique ID
 	return i
@@ -107,19 +102,15 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 	return i
 }
 
-// enumerateRealAdapters attempts to enumerate real GPU adapters via HAL backends.
-// Returns true if at least one real adapter was found.
-func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool {
+// enumerateRealAdapters attempts to enumerate real GPU adapters via HAL
+// backends. If none are available, the instance remains empty.
+func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 	// First, ensure HAL backends are registered
 	RegisterHALBackends()
 
 	// Get backend providers filtered by the enabled backends mask
 	providers := FilterBackendsByMask(desc.Backends)
-	if len(providers) == 0 {
-		return false
-	}
 
-	foundAdapters := false
 	hub := GetGlobal().Hub()
 
 	// Create HAL descriptor
@@ -186,11 +177,8 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) bool
 			// Register in the hub
 			adapterID := hub.RegisterAdapter(adapter)
 			i.adapters = append(i.adapters, adapterID)
-			foundAdapters = true
 		}
 	}
-
-	return foundAdapters
 }
 
 // createMockAdapter creates a mock adapter for testing purposes.
@@ -401,47 +389,6 @@ func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
 
 	// Clear deferred list -- enumeration is done.
 	i.deferredGLES = nil
-
-	// If we were in mock mode and now have real adapters from GLES,
-	// remove mock adapters so real ones are selected first.
-	if i.useMock && i.hasRealAdaptersLocked(hub) {
-		i.useMock = false
-		i.removeMockAdaptersLocked(hub)
-	}
-}
-
-// hasRealAdaptersLocked checks if any adapter has a non-nil HAL adapter.
-// Caller must hold i.mu.
-func (i *Instance) hasRealAdaptersLocked(hub *Hub) bool {
-	for _, adapterID := range i.adapters {
-		adapter, err := hub.GetAdapter(adapterID)
-		if err != nil {
-			continue
-		}
-		if adapter.halAdapter != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// removeMockAdaptersLocked filters out mock adapters (halAdapter == nil) from
-// the adapter list and unregisters them from the hub.
-// Caller must hold i.mu.
-func (i *Instance) removeMockAdaptersLocked(hub *Hub) {
-	filtered := make([]AdapterID, 0, len(i.adapters))
-	for _, adapterID := range i.adapters {
-		adapter, err := hub.GetAdapter(adapterID)
-		if err != nil {
-			continue
-		}
-		if adapter.halAdapter != nil {
-			filtered = append(filtered, adapterID)
-		} else {
-			_, _ = hub.UnregisterAdapter(adapterID)
-		}
-	}
-	i.adapters = filtered
 }
 
 // matchesPowerPreference checks if a device type matches the power preference.
@@ -473,8 +420,8 @@ func (i *Instance) Flags() gputypes.InstanceFlags {
 }
 
 // IsMock returns true if the instance is using mock adapters.
-// Mock adapters are used when no HAL backends are available or
-// when the instance was explicitly created with NewInstanceWithMock.
+// Mock adapters are used only when the instance was explicitly created with
+// NewInstanceWithMock.
 func (i *Instance) IsMock() bool {
 	i.mu.RLock()
 	defer i.mu.RUnlock()

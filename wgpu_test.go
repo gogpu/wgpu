@@ -9,10 +9,9 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 
-	// Import noop backend. Note: the noop backend (BackendEmpty) is skipped by
-	// core.Instance during real adapter enumeration. A mock adapter is created
-	// instead. Tests that require HAL integration (CreateBuffer, CreateTexture,
-	// CreateShaderModule, etc.) are skipped when running on mock devices.
+	// Import noop backend. The noop backend is intentionally ignored during real
+	// adapter enumeration; tests that require HAL integration use an explicitly
+	// registered real backend when one is available.
 	_ "github.com/gogpu/wgpu/hal/noop"
 )
 
@@ -59,13 +58,11 @@ func newDevice(t *testing.T) (*wgpu.Instance, *wgpu.Adapter, *wgpu.Device) {
 	return inst, adapter, device
 }
 
-// requireHAL skips the test if the device was created via the mock adapter path
-// (no HAL integration). The mock path is used when no real GPU backends are
-// available, which is common in CI and headless environments.
+// requireHAL skips the test when no real HAL provider supplied the device.
 func requireHAL(t *testing.T, device *wgpu.Device) {
 	t.Helper()
 	if device.Queue() == nil {
-		t.Skip("skipping: device has no HAL integration (mock adapter; no real GPU backend available)")
+		t.Skip("skipping: device has no HAL integration (no real GPU backend available)")
 	}
 }
 

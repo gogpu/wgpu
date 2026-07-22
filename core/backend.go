@@ -66,7 +66,7 @@ var (
 		gputypes.BackendMetal,
 		gputypes.BackendDX12,
 		gputypes.BackendGL,
-		gputypes.BackendEmpty, // noop/software fallback
+		gputypes.BackendEmpty, // explicitly registered software/noop provider
 	}
 )
 
@@ -182,9 +182,8 @@ func FilterBackendsByMask(mask gputypes.Backends) []BackendProvider {
 				result = append(result, p)
 			}
 		case gputypes.BackendEmpty:
-			// Software/noop backend included as fallback for all masks.
-			// Adapter selection (RequestAdapter) prefers GPU adapters over CPU;
-			// software only wins if ForceFallbackAdapter is set or no GPU available.
+			// The software/noop provider is selectable when explicitly registered;
+			// NewInstance never fabricates an adapter when it is absent.
 			result = append(result, p)
 		default:
 			// Unknown backend types pass through if Primary is set
