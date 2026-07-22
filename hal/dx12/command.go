@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // CommandAllocator wraps a D3D12 command allocator.
@@ -895,30 +896,42 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 // DrawIndirect draws primitives with GPU-generated parameters.
 // The buffer must contain a D3D12_DRAW_ARGUMENTS struct at the given offset
 // (vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation — 16 bytes).
-func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
+func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || drawCount == 0 {
+		return
+	}
+	if !indirect.RangeFits(buf.size, offset, 16, drawCount) {
+		return
+	}
+	if _, ok := indirect.RecordOffset(offset, 16, drawCount-1); !ok {
 		return
 	}
 
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.draw,
-		1, buf.raw, offset, nil, 0,
+		drawCount, buf.raw, offset, nil, 0,
 	)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 // The buffer must contain a D3D12_DRAW_INDEXED_ARGUMENTS struct at the given offset
 // (indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation — 20 bytes).
-func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording {
+	if !ok || !e.encoder.isRecording || drawCount == 0 {
+		return
+	}
+	if !indirect.RangeFits(buf.size, offset, 20, drawCount) {
+		return
+	}
+	if _, ok := indirect.RecordOffset(offset, 20, drawCount-1); !ok {
 		return
 	}
 
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.drawIndexed,
-		1, buf.raw, offset, nil, 0,
+		drawCount, buf.raw, offset, nil, 0,
 	)
 }
 

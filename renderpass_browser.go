@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/browser"
+import (
+	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/indirect"
+)
 
 // RenderPassEncoder records draw commands within a render pass.
 // On browser, this wraps a GPURenderPassEncoder via internal/browser.RenderPassEncoder.
@@ -84,18 +87,49 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndirect draws consecutive primitives with GPU-generated parameters.
+func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if buffer == nil || buffer.browser == nil {
 		return
 	}
-	p.browser.DrawIndirect(buffer.browser.Ref(), offset)
+	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
+		p.browser.DrawIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
+		p.browser.DrawIndirect(buffer.browser.Ref(), recordOffset)
+	}
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndexedIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndexedIndirect draws consecutive indexed primitives with
+// GPU-generated parameters.
+func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if buffer == nil || buffer.browser == nil {
 		return
 	}
-	p.browser.DrawIndexedIndirect(buffer.browser.Ref(), offset)
+	if !indexedIndirectRangeFits(buffer.Size(), offset, drawCount) {
+		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndexedIndirectRecordSize, drawCount))
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
+		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), recordOffset)
+	}
 }
 
 // End ends the render pass.

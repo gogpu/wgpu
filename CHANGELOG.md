@@ -44,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Counted indirect draws** — added `RenderPassEncoder.MultiDrawIndirect` and
+  `MultiDrawIndexedIndirect` for consecutive 16-byte and 20-byte argument
+  records. Existing two-argument `DrawIndirect` and `DrawIndexedIndirect`
+  remain single-draw APIs. The Vulkan `FeatureMultiDrawIndirect` capability is
+  used only as a performance hint; Vulkan multi-draw calls fall back to exact
+  loops when unavailable or over the device limit. GLES indirect drawing
+  remains unsupported as before. `FeatureMultiDrawIndirectCount` remains
+  reserved for future GPU-driven count buffers. External HAL adapters must add
+  the `drawCount` parameter to both indirect draw methods.
+
 - **CONTRIBUTING.md** — Smart Coding framework (AI-assisted policy), updated
   project structure, pre-submit checklist with cross-platform lint.
 

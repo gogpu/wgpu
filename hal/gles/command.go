@@ -650,20 +650,20 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 	})
 }
 
-// DrawIndirect draws primitives with GPU-generated parameters.
-// Note: Requires GL_ARB_draw_indirect (GL 4.0+ / GLES 3.1+).
-// Currently not implemented - use direct Draw calls instead.
-func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64) {
+// DrawIndirect is not implemented by the GLES backend.
+func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	_ = buffer
 	_ = offset
+	_ = drawCount
 }
 
-// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
-// Note: Requires GL_ARB_draw_indirect (GL 4.0+ / GLES 3.1+).
-// Currently not implemented - use direct DrawIndexed calls instead.
-func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+// DrawIndexedIndirect is not implemented by the GLES backend.
+// OpenGL cannot apply a WebGPU index-buffer base offset to an indirect record
+// without translating that record or the bound index buffer.
+func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	_ = buffer
 	_ = offset
+	_ = drawCount
 }
 
 // ExecuteBundle executes a pre-recorded render bundle.

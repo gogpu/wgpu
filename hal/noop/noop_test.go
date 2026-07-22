@@ -1562,8 +1562,8 @@ func TestNoopRenderPassEncoder(t *testing.T) {
 	pass.SetStencilReference(0xFF)
 	pass.Draw(6, 1, 0, 0)
 	pass.DrawIndexed(6, 1, 0, 0, 0)
-	pass.DrawIndirect(buf, 0)
-	pass.DrawIndexedIndirect(buf, 0)
+	pass.DrawIndirect(buf, 0, 1)
+	pass.DrawIndexedIndirect(buf, 0, 1)
 	pass.ExecuteBundle(nil)
 	pass.End()
 }

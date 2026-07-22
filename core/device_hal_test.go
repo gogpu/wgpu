@@ -93,8 +93,8 @@ func (mockRenderPassEncoder) SetBlendConstant(_ *gputypes.Color)                
 func (mockRenderPassEncoder) SetStencilReference(_ uint32)                                  {}
 func (mockRenderPassEncoder) Draw(_, _, _, _ uint32)                                        {}
 func (mockRenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32)                 {}
-func (mockRenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64)                           {}
-func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64)                    {}
+func (mockRenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32)                 {}
+func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32)          {}
 func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                              {}
 
 // mockComputePassEncoder implements hal.ComputePassEncoder (minimal)

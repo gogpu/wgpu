@@ -239,6 +239,9 @@ func (a *Adapter) Info() gputypes.AdapterInfo {
 // Features returns supported WebGPU features.
 func (a *Adapter) Features() gputypes.Features {
 	var features gputypes.Features
+	// ExecuteIndirect supports counted draws natively. This feature is a
+	// performance hint; the public MultiDraw APIs do not gate on it.
+	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
 
 	// Map D3D12 capabilities to WebGPU features
 	// Feature level 11.0+ guarantees basic compute and texture compression
@@ -588,6 +591,7 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 // Features returns supported WebGPU features for legacy adapter.
 func (a *AdapterLegacy) Features() gputypes.Features {
 	var features gputypes.Features
+	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
 		features |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}

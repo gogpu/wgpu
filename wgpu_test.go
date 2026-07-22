@@ -1660,6 +1660,147 @@ func TestRenderPassDrawIndexedIndirectNilDeferredError(t *testing.T) {
 	}
 }
 
+func TestRenderPassDrawIndexedIndirectZeroCountIsNoOp(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	// Zero count is intentionally checked before state and buffer validation.
+	pass.MultiDrawIndexedIndirect(nil, ^uint64(0)-3, 0)
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("zero-count DrawIndexedIndirect recorded an error: %v", err)
+	}
+}
+
+func TestRenderPassMultiDrawIndirectZeroCountIsNoOp(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pass.MultiDrawIndirect(nil, ^uint64(0)-3, 0)
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("zero-count MultiDrawIndirect recorded an error: %v", err)
+	}
+}
+
+func TestRenderPassMultiDrawIndirectRangeValidation(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "count-indirect-buf",
+		Size:  31,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer buf.Release()
+
+	pass.MultiDrawIndirect(buf, 0, 2)
+	_ = pass.End()
+	if _, err := encoder.Finish(); !errors.Is(err, wgpu.ErrDrawIndirectBufferOverrun) {
+		t.Fatalf("Finish error = %v, want ErrDrawIndirectBufferOverrun", err)
+	}
+}
+
+func TestRenderPassDrawIndexedIndirectCountRangeValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		bufferSize uint64
+		offset     uint64
+		drawCount  uint32
+	}{
+		{name: "count exceeds buffer", bufferSize: 59, offset: 0, drawCount: 3},
+		{name: "offset arithmetic overflow", bufferSize: 64, offset: ^uint64(0) - 3, drawCount: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			device, encoder, pass := newEncoderWithRenderPass(t)
+			defer device.Release()
+
+			pipeline := &wgpu.RenderPipeline{}
+			pipeline.SetTestRequiredVertexBuffers(0)
+			pass.SetPipeline(pipeline)
+
+			idxBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+				Label: "count-index-buffer",
+				Size:  64,
+				Usage: wgpu.BufferUsageIndex,
+			})
+			if err != nil {
+				t.Fatalf("CreateBuffer(index): %v", err)
+			}
+			defer idxBuf.Release()
+			pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+
+			indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+				Label: "count-indirect-buffer",
+				Size:  test.bufferSize,
+				Usage: wgpu.BufferUsageIndirect,
+			})
+			if err != nil {
+				t.Fatalf("CreateBuffer(indirect): %v", err)
+			}
+			defer indirectBuf.Release()
+
+			pass.MultiDrawIndexedIndirect(indirectBuf, test.offset, test.drawCount)
+			_ = pass.End()
+			_, finishErr := encoder.Finish()
+			if finishErr == nil {
+				t.Fatal("Finish() should report an indirect buffer overrun")
+			}
+			if !errors.Is(finishErr, wgpu.ErrDrawIndirectBufferOverrun) {
+				t.Fatalf("error = %v, want ErrDrawIndirectBufferOverrun", finishErr)
+			}
+		})
+	}
+}
+
+func TestRenderPassDrawIndexedIndirectCountMany(t *testing.T) {
+	device, encoder, pass := newEncoderWithRenderPass(t)
+	defer device.Release()
+
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	idxBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "count-index-buffer",
+		Size:  64,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer(index): %v", err)
+	}
+	defer idxBuf.Release()
+	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
+
+	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "count-indirect-buffer",
+		Size:  60,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer(indirect): %v", err)
+	}
+	defer indirectBuf.Release()
+
+	pass.MultiDrawIndexedIndirect(indirectBuf, 0, 3)
+	_ = pass.End()
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("counted DrawIndexedIndirect failed: %v", err)
+	}
+}
+
 func TestComputePassSetPipelineNilDeferredError(t *testing.T) {
 	device, encoder, pass := newEncoderWithComputePass(t)
 	defer device.Release()

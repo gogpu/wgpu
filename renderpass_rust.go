@@ -6,6 +6,7 @@ import (
 	"math"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
@@ -90,18 +91,61 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndirect draws consecutive primitives with GPU-generated parameters.
+func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if buffer == nil || buffer.r == nil {
 		return
 	}
-	p.r.DrawIndirect(buffer.r, offset)
+	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
+		p.r.DrawIndirect(buffer.r, indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
+		p.r.DrawIndirect(buffer.r, recordOffset)
+	}
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
+	p.MultiDrawIndexedIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndexedIndirect draws consecutive indexed primitives with
+// GPU-generated parameters.
+func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if drawCount == 0 {
+		return
+	}
 	if buffer == nil || buffer.r == nil {
 		return
 	}
-	p.r.DrawIndexedIndirect(buffer.r, offset)
+	lowerRustIndexedIndirect(buffer.Size(), offset, drawCount, func(recordOffset uint64) {
+		p.r.DrawIndexedIndirect(buffer.r, recordOffset)
+	})
+}
+
+// lowerRustIndexedIndirect lowers one counted span through the Rust adapter's
+// single-record interface. Invalid positive spans delegate exactly one failing
+// record before any valid record can be emitted.
+func lowerRustIndexedIndirect(bufferSize, offset uint64, drawCount uint32, draw func(uint64)) {
+	if drawCount == 0 {
+		return
+	}
+	if !indexedIndirectRangeFits(bufferSize, offset, drawCount) {
+		draw(indirect.DelegatedValidationOffset(bufferSize, offset, drawIndexedIndirectRecordSize, drawCount))
+		return
+	}
+	for i := uint32(0); i < drawCount; i++ {
+		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
+		draw(recordOffset)
+	}
 }
 
 // End ends the render pass.

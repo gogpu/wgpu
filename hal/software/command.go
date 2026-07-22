@@ -495,10 +495,10 @@ func (r *RenderPassEncoder) drawVertexIndex(firstVertex, pos uint32) uint32 {
 }
 
 // DrawIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64) {}
+func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 
 // DrawIndexedIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64) {}
+func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 
 // ExecuteBundle is a no-op.
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}

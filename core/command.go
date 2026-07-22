@@ -799,7 +799,11 @@ func (p *CoreRenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstInde
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *CoreRenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
-	if p.ended {
+	p.MultiDrawIndirect(buffer, offset, 1)
+}
+
+func (p *CoreRenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if p.ended || drawCount == 0 {
 		return
 	}
 	if p.raw != nil && buffer != nil {
@@ -807,14 +811,20 @@ func (p *CoreRenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
 		defer guard.Release()
 		halBuffer := buffer.Raw(guard)
 		if halBuffer != nil {
-			p.raw.DrawIndirect(halBuffer, offset)
+			p.raw.DrawIndirect(halBuffer, offset, drawCount)
 		}
 	}
 }
 
-// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+// DrawIndexedIndirect draws one indexed primitive with GPU-generated parameters.
 func (p *CoreRenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
-	if p.ended {
+	p.MultiDrawIndexedIndirect(buffer, offset, 1)
+}
+
+// MultiDrawIndexedIndirect draws consecutive indexed primitives with
+// GPU-generated parameters.
+func (p *CoreRenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
+	if p.ended || drawCount == 0 {
 		return
 	}
 	if p.raw != nil && buffer != nil {
@@ -822,7 +832,7 @@ func (p *CoreRenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint6
 		defer guard.Release()
 		halBuffer := buffer.Raw(guard)
 		if halBuffer != nil {
-			p.raw.DrawIndexedIndirect(halBuffer, offset)
+			p.raw.DrawIndexedIndirect(halBuffer, offset, drawCount)
 		}
 	}
 }

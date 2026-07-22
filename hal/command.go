@@ -124,12 +124,12 @@ type RenderPassEncoder interface {
 	DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
 
 	// DrawIndirect draws primitives with GPU-generated parameters.
-	// buffer contains DrawIndirectArgs at the given offset.
-	DrawIndirect(buffer Buffer, offset uint64)
+	// buffer contains drawCount consecutive 16-byte DrawIndirectArgs records.
+	DrawIndirect(buffer Buffer, offset uint64, drawCount uint32)
 
 	// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
-	// buffer contains DrawIndexedIndirectArgs at the given offset.
-	DrawIndexedIndirect(buffer Buffer, offset uint64)
+	// buffer contains drawCount consecutive 20-byte DrawIndexedIndirectArgs records.
+	DrawIndexedIndirect(buffer Buffer, offset uint64, drawCount uint32)
 
 	// ExecuteBundle executes a pre-recorded render bundle.
 	// Bundles are an optimization for repeated draw calls.

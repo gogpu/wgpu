@@ -172,7 +172,6 @@ func initCommonCallInterfaces() error {
 	if err != nil {
 		return err
 	}
-
 	// int32 fn(uint32, void*)
 	err = ffi.PrepareCallInterface(&cifInt322, types.DefaultCall,
 		types.SInt32TypeDescriptor,

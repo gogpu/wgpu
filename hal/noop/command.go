@@ -102,10 +102,10 @@ func (r *RenderPassEncoder) Draw(_, _, _, _ uint32) {}
 func (r *RenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32) {}
 
 // DrawIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64) {}
+func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 
 // DrawIndexedIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64) {}
+func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 
 // ExecuteBundle is a no-op.
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
