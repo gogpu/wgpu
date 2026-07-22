@@ -149,6 +149,11 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if !ok || dstTex == nil {
 		return
 	}
+	for _, region := range regions {
+		if _, _, ok := validateMetalBufferTextureCopyPlan(dstTex.format, dstTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size); !ok {
+			return
+		}
+	}
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
@@ -156,21 +161,23 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		return
 	}
 	for _, region := range regions {
-		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
-		destOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
-		bytesPerRow := region.BufferLayout.BytesPerRow
-		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
-		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
-			argPointer(uintptr(srcBuf.raw)),
-			argUint64(region.BufferLayout.Offset),
-			argUint64(uint64(bytesPerRow)),
-			argUint64(uint64(bytesPerImage)),
-			argStruct(sourceSize, mtlSizeType),
-			argPointer(uintptr(dstTex.raw)),
-			argUint64(uint64(region.TextureBase.Origin.Z)),
-			argUint64(uint64(region.TextureBase.MipLevel)),
-			argStruct(destOrigin, mtlOriginType),
-		)
+		plan, bytesPerImage, _ := validateMetalBufferTextureCopyPlan(dstTex.format, dstTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size)
+		strides := metalBlitStrides(dstTex.dimension, uint64(region.BufferLayout.BytesPerRow), bytesPerImage)
+		for operation := uint32(0); operation < plan.operationCount; operation++ {
+			destination, _ := plan.textureRegion(dstTex.dimension, region.TextureBase.Origin, region.Size, operation)
+			sourceOffset, _ := plan.bufferOffset(region.BufferLayout.Offset, bytesPerImage, operation)
+			msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+				argPointer(uintptr(srcBuf.raw)),
+				argUint64(sourceOffset),
+				argUint64(strides.bytesPerRow),
+				argUint64(strides.bytesPerImage),
+				argStruct(destination.size, mtlSizeType),
+				argPointer(uintptr(dstTex.raw)),
+				argUint64(uint64(destination.slice)),
+				argUint64(uint64(region.TextureBase.MipLevel)),
+				argStruct(destination.origin, mtlOriginType),
+			)
+		}
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
@@ -188,6 +195,11 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !ok || dstBuf == nil {
 		return
 	}
+	for _, region := range regions {
+		if _, _, ok := validateMetalBufferTextureCopyPlan(srcTex.format, srcTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size); !ok {
+			return
+		}
+	}
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
@@ -195,21 +207,23 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		return
 	}
 	for _, region := range regions {
-		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
-		sourceOrigin := MTLOrigin{X: NSUInteger(region.TextureBase.Origin.X), Y: NSUInteger(region.TextureBase.Origin.Y), Z: NSUInteger(region.TextureBase.Origin.Z)}
-		bytesPerRow := region.BufferLayout.BytesPerRow
-		bytesPerImage := region.BufferLayout.RowsPerImage * bytesPerRow
-		msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
-			argPointer(uintptr(srcTex.raw)),
-			argUint64(uint64(region.TextureBase.Origin.Z)),
-			argUint64(uint64(region.TextureBase.MipLevel)),
-			argStruct(sourceOrigin, mtlOriginType),
-			argStruct(sourceSize, mtlSizeType),
-			argPointer(uintptr(dstBuf.raw)),
-			argUint64(region.BufferLayout.Offset),
-			argUint64(uint64(bytesPerRow)),
-			argUint64(uint64(bytesPerImage)),
-		)
+		plan, bytesPerImage, _ := validateMetalBufferTextureCopyPlan(srcTex.format, srcTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size)
+		strides := metalBlitStrides(srcTex.dimension, uint64(region.BufferLayout.BytesPerRow), bytesPerImage)
+		for operation := uint32(0); operation < plan.operationCount; operation++ {
+			source, _ := plan.textureRegion(srcTex.dimension, region.TextureBase.Origin, region.Size, operation)
+			destinationOffset, _ := plan.bufferOffset(region.BufferLayout.Offset, bytesPerImage, operation)
+			msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
+				argPointer(uintptr(srcTex.raw)),
+				argUint64(uint64(source.slice)),
+				argUint64(uint64(region.TextureBase.MipLevel)),
+				argStruct(source.origin, mtlOriginType),
+				argStruct(source.size, mtlSizeType),
+				argPointer(uintptr(dstBuf.raw)),
+				argUint64(destinationOffset),
+				argUint64(strides.bytesPerRow),
+				argUint64(strides.bytesPerImage),
+			)
+		}
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }
@@ -227,6 +241,11 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 	if !ok || dstTex == nil {
 		return
 	}
+	for _, region := range regions {
+		if _, ok := validateMetalTextureCopyPlan(srcTex.dimension, dstTex.dimension, region.SrcBase.Origin, region.DstBase.Origin, region.Size); !ok {
+			return
+		}
+	}
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 	blitEncoder := MsgSend(e.cmdBuffer, Sel("blitCommandEncoder"))
@@ -234,20 +253,22 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 		return
 	}
 	for _, region := range regions {
-		sourceSize := MTLSize{Width: NSUInteger(region.Size.Width), Height: NSUInteger(region.Size.Height), Depth: NSUInteger(region.Size.DepthOrArrayLayers)}
-		sourceOrigin := MTLOrigin{X: NSUInteger(region.SrcBase.Origin.X), Y: NSUInteger(region.SrcBase.Origin.Y), Z: NSUInteger(region.SrcBase.Origin.Z)}
-		destOrigin := MTLOrigin{X: NSUInteger(region.DstBase.Origin.X), Y: NSUInteger(region.DstBase.Origin.Y), Z: NSUInteger(region.DstBase.Origin.Z)}
-		msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
-			argPointer(uintptr(srcTex.raw)),
-			argUint64(uint64(region.SrcBase.Origin.Z)),
-			argUint64(uint64(region.SrcBase.MipLevel)),
-			argStruct(sourceOrigin, mtlOriginType),
-			argStruct(sourceSize, mtlSizeType),
-			argPointer(uintptr(dstTex.raw)),
-			argUint64(uint64(region.DstBase.Origin.Z)),
-			argUint64(uint64(region.DstBase.MipLevel)),
-			argStruct(destOrigin, mtlOriginType),
-		)
+		plan, _ := validateMetalTextureCopyPlan(srcTex.dimension, dstTex.dimension, region.SrcBase.Origin, region.DstBase.Origin, region.Size)
+		for operation := uint32(0); operation < plan.operationCount; operation++ {
+			source, _ := plan.textureRegion(srcTex.dimension, region.SrcBase.Origin, region.Size, operation)
+			destination, _ := plan.textureRegion(dstTex.dimension, region.DstBase.Origin, region.Size, operation)
+			msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+				argPointer(uintptr(srcTex.raw)),
+				argUint64(uint64(source.slice)),
+				argUint64(uint64(region.SrcBase.MipLevel)),
+				argStruct(source.origin, mtlOriginType),
+				argStruct(source.size, mtlSizeType),
+				argPointer(uintptr(dstTex.raw)),
+				argUint64(uint64(destination.slice)),
+				argUint64(uint64(region.DstBase.MipLevel)),
+				argStruct(destination.origin, mtlOriginType),
+			)
+		}
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
 }

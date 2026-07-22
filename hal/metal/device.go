@@ -205,11 +205,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	_ = MsgSend(texDesc, Sel("setWidth:"), uintptr(desc.Size.Width))
 	_ = MsgSend(texDesc, Sel("setHeight:"), uintptr(desc.Size.Height))
 
-	depth := desc.Size.DepthOrArrayLayers
-	if depth == 0 {
-		depth = 1
+	shape := metalTextureDescriptorShape(desc.Dimension, desc.Size.DepthOrArrayLayers)
+	_ = MsgSend(texDesc, Sel("setDepth:"), uintptr(shape.depth))
+	if texType == MTLTextureType1DArray || texType == MTLTextureType2DArray {
+		_ = MsgSend(texDesc, Sel("setArrayLength:"), uintptr(shape.arrayLength))
 	}
-	_ = MsgSend(texDesc, Sel("setDepth:"), uintptr(depth))
 
 	mipLevels := desc.MipLevelCount
 	if mipLevels == 0 {
@@ -249,7 +249,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		format:     desc.Format,
 		width:      desc.Size.Width,
 		height:     desc.Size.Height,
-		depth:      depth,
+		depth:      max(desc.Size.DepthOrArrayLayers, 1),
 		mipLevels:  mipLevels,
 		samples:    sampleCount,
 		dimension:  desc.Dimension,
