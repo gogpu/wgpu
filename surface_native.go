@@ -38,7 +38,7 @@ type Surface struct {
 //   - Linux/X11: displayHandle=Display*, windowHandle=Window
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
-	if i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 
@@ -62,14 +62,18 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 	}
 
 	coreSurface := core.NewSurface(halSurface, "")
-	return &Surface{
+	surface := &Surface{
 		core:           coreSurface,
-		instance:       i,
 		displayHandle:  displayHandle,
 		windowHandle:   windowHandle,
 		currentBackend: initialBackend,
 		surfaceCreated: true,
-	}, nil
+	}
+	if err := i.adoptSurface(surface); err != nil {
+		halSurface.Destroy()
+		return nil, err
+	}
+	return surface, nil
 }
 
 // Configure configures the surface for presentation.
@@ -83,6 +87,25 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	}
 	if device == nil {
 		return fmt.Errorf("wgpu: device is nil")
+	}
+	if device.released.Load() {
+		return ErrReleased
+	}
+	// Standard API objects must share an Instance so device teardown can find
+	// and retire every configured surface. Explicit HAL wrappers remain usable
+	// when both objects are intentionally unowned (instance == nil).
+	if s.instance != device.instance && (s.instance != nil || device.instance != nil) {
+		return fmt.Errorf("wgpu: surface and device belong to different instances")
+	}
+	// Reject reconfiguration while an image is acquired before touching the
+	// backend surface. ensureHALSurface may destroy and recreate the raw surface;
+	// doing that first would leave the active SurfaceTexture pointing at a
+	// destroyed image when core.Configure rejects the state transition.
+	if s.core == nil {
+		return ErrReleased
+	}
+	if s.core.State() == core.SurfaceStateAcquired {
+		return core.ErrSurfaceConfigureWhileAcquired
 	}
 
 	halConfig := &hal.SurfaceConfiguration{
@@ -127,7 +150,7 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, fmt.Errorf("wgpu: surface not configured")
 	}
 
-	acquired, err := s.core.AcquireTexture(nil)
+	acquired, lease, err := s.core.AcquireTextureWithLease(nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -136,6 +159,7 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		hal:     acquired.Texture,
 		surface: s,
 		device:  s.device,
+		lease:   lease,
 	}, acquired.Suboptimal, nil
 }
 
@@ -166,6 +190,9 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 
 	if texture == nil {
 		return fmt.Errorf("wgpu: surface texture is nil")
+	}
+	if texture.surface != s || !texture.isUsable() {
+		return ErrReleased
 	}
 
 	return s.core.PresentWithDamage(s.device.queue.hal, damageRects)
@@ -280,6 +307,21 @@ func (s *Surface) DiscardTexture() {
 	s.core.DiscardTexture()
 }
 
+func (s *Surface) discardForDevice(device *Device) {
+	if s == nil || s.core == nil || s.device != device {
+		return
+	}
+	s.core.DiscardTexture()
+}
+
+func (s *Surface) retireDevice(device *Device) {
+	if s == nil || s.core == nil || s.device != device {
+		return
+	}
+	s.core.RetireDevice(device.core)
+	s.device = nil
+}
+
 // ensureHALSurface creates or re-creates the HAL surface for the given backend.
 func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
 	if s.surfaceCreated && s.currentBackend == backend {
@@ -305,6 +347,9 @@ func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
 // HAL returns the underlying HAL surface for backward compatibility.
 // Prefer using Surface methods instead of direct HAL access.
 func (s *Surface) HAL() hal.Surface {
+	if s == nil || s.released || s.core == nil {
+		return nil
+	}
 	return s.core.RawSurface()
 }
 
@@ -314,8 +359,14 @@ func (s *Surface) Release() {
 		return
 	}
 	s.released = true
-	s.core.RawSurface().Destroy()
+	if s.core != nil {
+		s.core.Destroy()
+	}
 	s.core = nil
+	if s.instance != nil {
+		s.instance.unregisterSurface(s)
+		s.instance = nil
+	}
 }
 
 // SurfaceTexture is a texture acquired from a surface for rendering.
@@ -323,6 +374,16 @@ type SurfaceTexture struct {
 	hal     hal.SurfaceTexture
 	surface *Surface
 	device  *Device
+	lease   uint64
+}
+
+func (st *SurfaceTexture) isUsable() bool {
+	if st == nil || st.hal == nil || st.surface == nil ||
+		st.surface.released || st.surface.core == nil ||
+		st.device == nil || st.device.released.Load() {
+		return false
+	}
+	return st.surface.core.AcquisitionValid(st.lease)
 }
 
 // AsTexture returns a lightweight Texture wrapper around this surface texture,
@@ -332,14 +393,22 @@ type SurfaceTexture struct {
 // The returned Texture shares the underlying HAL resource — do not Release() it
 // independently. Its lifetime is tied to this SurfaceTexture.
 func (st *SurfaceTexture) AsTexture() *Texture {
+	if !st.isUsable() {
+		return nil
+	}
 	return &Texture{
-		hal:    st.hal,
-		device: st.device,
+		hal:          st.hal,
+		device:       st.device,
+		surface:      st.surface.core,
+		surfaceLease: st.lease,
 	}
 }
 
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
+	if !st.isUsable() {
+		return nil, ErrReleased
+	}
 	halDevice := st.device.halDevice()
 	if halDevice == nil {
 		return nil, ErrReleased
@@ -364,5 +433,6 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	return &TextureView{hal: halView, device: st.device, texture: st.AsTexture()}, nil
+	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease}
+	return &TextureView{hal: halView, device: st.device, texture: texture, surface: st.surface.core, surfaceLease: st.lease}, nil
 }

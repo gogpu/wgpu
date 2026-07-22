@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 )
@@ -77,6 +78,7 @@ func (s *Surface) Configure(device *Device, config *hal.SurfaceConfiguration) er
 		return err
 	}
 
+	s.invalidateAcquisitionLocked()
 	s.device = device
 	s.config = config
 	s.state = SurfaceStateConfigured
@@ -100,6 +102,7 @@ func (s *Surface) Unconfigure() {
 		s.raw.DiscardTexture(s.acquiredTex)
 		s.acquiredTex = nil
 	}
+	s.invalidateAcquisitionLocked()
 
 	halDevice := s.getHALDevice(s.device)
 	if halDevice != nil {
@@ -120,29 +123,53 @@ func (s *Surface) Unconfigure() {
 // After a successful acquire, the surface enters the Acquired state.
 // The caller must either Present or DiscardTexture before acquiring again.
 func (s *Surface) AcquireTexture(fence hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
+	result, _, err := s.AcquireTextureWithLease(fence)
+	return result, err
+}
+
+// AcquireTextureWithLease acquires a texture and returns its opaque lifetime
+// lease. Call AcquisitionValid before converting a retained public wrapper to
+// HAL; the lease expires on present, discard, unconfigure, or destruction.
+func (s *Surface) AcquireTextureWithLease(fence hal.Fence) (*hal.AcquiredSurfaceTexture, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.state == SurfaceStateAcquired {
-		return nil, ErrSurfaceAlreadyAcquired
+		return nil, 0, ErrSurfaceAlreadyAcquired
 	}
 	if s.state != SurfaceStateConfigured {
-		return nil, ErrSurfaceNotConfigured
+		return nil, 0, ErrSurfaceNotConfigured
 	}
 
 	// Call PrepareFrame hook if registered
 	if err := s.applyPrepareFrame(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	result, err := s.raw.AcquireTexture(fence)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	s.acquiredTex = result.Texture
+	s.nextAcquisition++
+	if s.nextAcquisition == 0 {
+		s.nextAcquisition++
+	}
+	s.acquisition = s.nextAcquisition
 	s.state = SurfaceStateAcquired
-	return result, nil
+	return result, s.acquisition, nil
+}
+
+// AcquisitionValid reports whether lease still identifies this surface's
+// current acquired texture.
+func (s *Surface) AcquisitionValid(lease uint64) bool {
+	if s == nil || lease == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state == SurfaceStateAcquired && s.acquisition == lease
 }
 
 // Present presents the acquired surface texture to the screen.
@@ -173,6 +200,7 @@ func (s *Surface) PresentWithDamage(queue hal.Queue, damageRects []image.Rectang
 
 	err := queue.Present(s.raw, s.acquiredTex, damageRects)
 	s.acquiredTex = nil
+	s.invalidateAcquisitionLocked()
 	s.state = SurfaceStateConfigured
 	return err
 }
@@ -212,6 +240,7 @@ func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects [
 	if s.state == SurfaceStateAcquired && s.acquiredTex != nil {
 		s.raw.DiscardTexture(s.acquiredTex)
 		s.acquiredTex = nil
+		s.invalidateAcquisitionLocked()
 		s.state = SurfaceStateConfigured
 	}
 
@@ -235,7 +264,70 @@ func (s *Surface) DiscardTexture() {
 	}
 
 	s.acquiredTex = nil
+	s.invalidateAcquisitionLocked()
 	s.state = SurfaceStateConfigured
+}
+
+func (s *Surface) invalidateAcquisitionLocked() {
+	s.acquisition = 0
+}
+
+// RetireDevice clears the logical configuration after its HAL device has been
+// destroyed. The public API calls this after backend device teardown so a
+// retained surface can be released or configured with another device without
+// retaining a valid acquisition from the old device.
+func (s *Surface) RetireDevice(device *Device) {
+	if s == nil || device == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.device != device {
+		s.mu.Unlock()
+		return
+	}
+	s.acquiredTex = nil
+	s.invalidateAcquisitionLocked()
+	s.device = nil
+	s.config = nil
+	s.state = SurfaceStateUnconfigured
+	s.mu.Unlock()
+}
+
+// Destroy invalidates the active acquisition and releases the owned HAL
+// surface. It deliberately does not call DiscardTexture: device-first instance
+// teardown may already have retired the backend swapchain.
+func (s *Surface) Destroy() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	raw := s.raw
+	if raw == nil {
+		s.mu.Unlock()
+		return
+	}
+	acquiredTex := s.acquiredTex
+	halDevice := s.getHALDevice(s.device)
+	s.raw = nil
+	s.acquiredTex = nil
+	s.invalidateAcquisitionLocked()
+	s.device = nil
+	s.config = nil
+	s.state = SurfaceStateUnconfigured
+	s.mu.Unlock()
+
+	// When the configured device is still alive, retire the current acquisition
+	// and configuration before destroying the platform surface. Device-first
+	// teardown leaves no HAL device here, so the backend has already retired (or
+	// abandoned) its device-owned children and only the platform handle remains.
+	if acquiredTex != nil {
+		raw.DiscardTexture(acquiredTex)
+	}
+	if halDevice != nil {
+		raw.Unconfigure(halDevice)
+	}
+	raw.Destroy()
+	untrackResource(uintptr(unsafe.Pointer(s))) //nolint:gosec // debug tracking uses pointer as unique ID
 }
 
 // State returns the current lifecycle state of the surface.

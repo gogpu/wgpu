@@ -110,6 +110,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 	if e.released {
 		return nil, ErrReleased
 	}
+	if err := validateRenderPassTextureViews(desc); err != nil {
+		return nil, err
+	}
+	trackRenderPassTextureViews(e, desc)
 
 	coreDesc := convertRenderPassDesc(desc)
 
@@ -187,6 +191,18 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is nil"))
 		return
 	}
+	halSrc := src.resolveHAL()
+	if halSrc == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: source texture is released: %w", ErrReleased))
+		return
+	}
+	for _, region := range regions {
+		if region.TextureBase.Texture != nil && region.TextureBase.Texture.resolveHAL() == nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: region texture is released: %w", ErrReleased))
+			return
+		}
+		e.trackTexture(region.TextureBase.Texture)
+	}
 	e.trackTexture(src)
 	e.trackBuffer(dst)
 	raw := e.core.RawEncoder()
@@ -194,14 +210,14 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		return
 	}
 	halDst := dst.halBuffer()
-	if src.hal == nil || halDst == nil {
+	if halDst == nil {
 		return
 	}
 	halRegions := make([]hal.BufferTextureCopy, len(regions))
 	for i, r := range regions {
 		halRegions[i] = r.toHAL()
 	}
-	raw.CopyTextureToBuffer(src.hal, halDst, halRegions)
+	raw.CopyTextureToBuffer(halSrc, halDst, halRegions)
 }
 
 // CopyTextureToTexture copies data between textures using DMA hardware copy.
@@ -218,20 +234,32 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: destination texture is nil"))
 		return
 	}
+	halSrc := src.resolveHAL()
+	halDst := dst.resolveHAL()
+	if halSrc == nil || halDst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: texture is released: %w", ErrReleased))
+		return
+	}
+	for _, region := range regions {
+		if (region.Source.Texture != nil && region.Source.Texture.resolveHAL() == nil) ||
+			(region.Destination.Texture != nil && region.Destination.Texture.resolveHAL() == nil) {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region texture is released: %w", ErrReleased))
+			return
+		}
+		e.trackTexture(region.Source.Texture)
+		e.trackTexture(region.Destination.Texture)
+	}
 	e.trackTexture(src)
 	e.trackTexture(dst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
 	}
-	if src.hal == nil || dst.hal == nil {
-		return
-	}
 	halRegions := make([]hal.TextureCopy, len(regions))
 	for i, r := range regions {
 		halRegions[i] = r.toHAL()
 	}
-	raw.CopyTextureToTexture(src.hal, dst.hal, halRegions)
+	raw.CopyTextureToTexture(halSrc, halDst, halRegions)
 }
 
 // TransitionTextures transitions texture states for synchronization.
@@ -248,9 +276,14 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	}
 	halBarriers := make([]hal.TextureBarrier, 0, len(barriers))
 	for _, b := range barriers {
-		if b.Texture == nil || b.Texture.hal == nil {
+		if b.Texture != nil && b.Texture.resolveHAL() == nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.TransitionTextures: texture is released: %w", ErrReleased))
+			return
+		}
+		if b.Texture == nil || b.Texture.resolveHAL() == nil {
 			continue
 		}
+		e.trackTexture(b.Texture)
 		halBarriers = append(halBarriers, b.toHAL())
 	}
 	if len(halBarriers) > 0 {
@@ -261,9 +294,24 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 // CopyBufferToTexture copies data from a buffer to a texture.
 // WebGPU spec: GPUCommandEncoder.copyBufferToTexture.
 func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions []BufferTextureCopy) {
-	if e.released || src == nil || dst == nil {
+	if e.released {
 		return
 	}
+	if src == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is nil"))
+		return
+	}
+	if dst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: destination texture is nil"))
+		return
+	}
+	halDst := dst.resolveHAL()
+	if halDst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: destination texture is released: %w", ErrReleased))
+		return
+	}
+	e.trackTexture(dst)
+	e.trackBuffer(src)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -277,14 +325,49 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 				RowsPerImage: r.BufferLayout.RowsPerImage,
 			},
 			TextureBase: hal.ImageCopyTexture{
-				Texture:  dst.hal,
+				Texture:  halDst,
 				MipLevel: r.TextureBase.MipLevel,
 				Origin:   hal.Origin3D(r.TextureBase.Origin),
 			},
 			Size: hal.Extent3D(r.Size),
 		}
 	}
-	raw.CopyBufferToTexture(src.halBuffer(), dst.hal, halRegions)
+	raw.CopyBufferToTexture(src.halBuffer(), halDst, halRegions)
+}
+
+func validateRenderPassTextureViews(desc *RenderPassDescriptor) error {
+	if desc == nil {
+		return nil
+	}
+	for _, attachment := range desc.ColorAttachments {
+		if attachment.View != nil && attachment.View.resolveHAL() == nil {
+			return fmt.Errorf("wgpu: BeginRenderPass: color attachment view is released: %w", ErrReleased)
+		}
+		if attachment.ResolveTarget != nil && attachment.ResolveTarget.resolveHAL() == nil {
+			return fmt.Errorf("wgpu: BeginRenderPass: resolve target view is released: %w", ErrReleased)
+		}
+	}
+	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil && attachment.View.resolveHAL() == nil {
+		return fmt.Errorf("wgpu: BeginRenderPass: depth/stencil attachment view is released: %w", ErrReleased)
+	}
+	return nil
+}
+
+func trackRenderPassTextureViews(e *CommandEncoder, desc *RenderPassDescriptor) {
+	if e == nil || desc == nil {
+		return
+	}
+	for _, attachment := range desc.ColorAttachments {
+		if attachment.View != nil {
+			e.trackTexture(attachment.View.texture)
+		}
+		if attachment.ResolveTarget != nil {
+			e.trackTexture(attachment.ResolveTarget.texture)
+		}
+	}
+	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil {
+		e.trackTexture(attachment.View.texture)
+	}
 }
 
 // ClearBuffer clears a buffer region to zero.
@@ -403,10 +486,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			ClearValue: ca.ClearValue,
 		}
 		if ca.View != nil {
-			coreCA.View = &core.TextureView{HAL: ca.View.hal}
+			coreCA.View = &core.TextureView{HAL: ca.View.resolveHAL()}
 		}
 		if ca.ResolveTarget != nil {
-			coreCA.ResolveTarget = &core.TextureView{HAL: ca.ResolveTarget.hal}
+			coreCA.ResolveTarget = &core.TextureView{HAL: ca.ResolveTarget.resolveHAL()}
 		}
 		coreDesc.ColorAttachments = append(coreDesc.ColorAttachments, coreCA)
 	}
@@ -424,7 +507,7 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
 		if ds.View != nil {
-			coreDSA.View = &core.TextureView{HAL: ds.View.hal}
+			coreDSA.View = &core.TextureView{HAL: ds.View.resolveHAL()}
 		}
 		coreDesc.DepthStencilAttachment = coreDSA
 	}

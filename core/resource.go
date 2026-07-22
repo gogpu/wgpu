@@ -1564,6 +1564,12 @@ type Surface struct {
 	// acquiredTex is the currently acquired surface texture (nil when not acquired).
 	acquiredTex hal.SurfaceTexture
 
+	// acquisition identifies the currently borrowed surface texture. A zero
+	// value means no acquisition is valid; nextAcquisition prevents an older
+	// wrapper from becoming valid after a later acquire.
+	acquisition     uint64
+	nextAcquisition uint64
+
 	// prepareFrame is an optional platform hook called before acquiring a texture.
 	prepareFrame PrepareFrameFunc
 
@@ -1594,6 +1600,11 @@ func NewSurface(
 
 // RawSurface returns the underlying HAL surface.
 func (s *Surface) RawSurface() hal.Surface {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.raw
 }
 
@@ -1602,5 +1613,12 @@ func (s *Surface) RawSurface() hal.Surface {
 // instance (e.g., switching from Vulkan surface to software surface during
 // Configure when the device's backend differs from the original surface).
 func (s *Surface) SetRawSurface(raw hal.Surface) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.raw = raw
+	s.acquiredTex = nil
+	s.invalidateAcquisitionLocked()
+	s.device = nil
+	s.config = nil
+	s.state = SurfaceStateUnconfigured
 }

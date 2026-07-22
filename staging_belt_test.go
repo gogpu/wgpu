@@ -144,6 +144,53 @@ func TestStagingBelt_AllocateOversized(t *testing.T) {
 	}
 }
 
+func TestStagingBelt_DiscardPathsRetireOnlyUnsubmittedBatches(t *testing.T) {
+	t.Run("active allocations", func(t *testing.T) {
+		belt := createTestBelt(t, 64)
+		defer belt.destroy()
+
+		if _, err := belt.allocate(16, make([]byte, 16)); err != nil {
+			t.Fatalf("allocate regular chunk: %v", err)
+		}
+		if _, err := belt.allocate(96, make([]byte, 96)); err != nil {
+			t.Fatalf("allocate oversized buffer: %v", err)
+		}
+		belt.discardActive()
+		stats := belt.stats()
+		if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || len(belt.oversized) != 0 || len(belt.chunkedAllocs) != 0 {
+			t.Fatalf("discarded active state = %+v oversized=%d chunked=%d", stats, len(belt.oversized), len(belt.chunkedAllocs))
+		}
+	})
+
+	t.Run("closed submissions", func(t *testing.T) {
+		belt := createTestBelt(t, 64)
+		defer belt.destroy()
+		belt.discardLastClosed()
+
+		if _, err := belt.allocate(16, make([]byte, 16)); err != nil {
+			t.Fatalf("allocate placeholder batch: %v", err)
+		}
+		if _, err := belt.allocate(96, make([]byte, 96)); err != nil {
+			t.Fatalf("allocate placeholder oversized buffer: %v", err)
+		}
+		belt.finish(0)
+		belt.discardLastClosed()
+		stats := belt.stats()
+		if stats.ClosedSubs != 0 || stats.FreeChunks != 1 {
+			t.Fatalf("rolled-back placeholder state = %+v", stats)
+		}
+
+		if _, err := belt.allocate(16, make([]byte, 16)); err != nil {
+			t.Fatalf("allocate submitted batch: %v", err)
+		}
+		belt.finish(7)
+		belt.discardLastClosed()
+		if stats := belt.stats(); stats.ClosedSubs != 1 {
+			t.Fatalf("submitted batch was discarded: %+v", stats)
+		}
+	})
+}
+
 func TestStagingBelt_FinishAndRecall(t *testing.T) {
 	belt := createTestBelt(t, 1024)
 	defer belt.destroy()

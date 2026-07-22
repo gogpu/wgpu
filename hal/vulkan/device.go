@@ -108,6 +108,55 @@ type Device struct {
 	// Vulkan object creation (PERF-VK-001). Not thread-safe — setObjectName
 	// is only called during resource creation which is single-threaded per device.
 	debugNameBuf []byte
+
+	// configuredSurfaces contains surfaces whose live swapchains belong to this
+	// device. Device teardown retires them before destroying VkDevice.
+	surfaceMu          sync.Mutex
+	configuredSurfaces map[*Surface]struct{}
+	destroying         bool
+}
+
+func (d *Device) registerConfiguredSurface(surface *Surface) error {
+	if d == nil || surface == nil {
+		return fmt.Errorf("vulkan: cannot register a nil configured surface")
+	}
+	d.surfaceMu.Lock()
+	defer d.surfaceMu.Unlock()
+	if d.destroying || d.handle == 0 {
+		return hal.ErrDeviceLost
+	}
+	if d.configuredSurfaces == nil {
+		d.configuredSurfaces = make(map[*Surface]struct{})
+	}
+	d.configuredSurfaces[surface] = struct{}{}
+	return nil
+}
+
+func (d *Device) unregisterConfiguredSurface(surface *Surface) {
+	if d == nil || surface == nil {
+		return
+	}
+	d.surfaceMu.Lock()
+	delete(d.configuredSurfaces, surface)
+	d.surfaceMu.Unlock()
+}
+
+func (d *Device) beginDestroy() ([]*Surface, bool) {
+	if d == nil {
+		return nil, false
+	}
+	d.surfaceMu.Lock()
+	defer d.surfaceMu.Unlock()
+	if d.destroying || d.handle == 0 {
+		return nil, false
+	}
+	d.destroying = true
+	surfaces := make([]*Surface, 0, len(d.configuredSurfaces))
+	for surface := range d.configuredSurfaces {
+		surfaces = append(surfaces, surface)
+	}
+	clear(d.configuredSurfaces)
+	return surfaces, true
 }
 
 // initAllocator initializes the memory allocator for this device.
@@ -1476,12 +1525,16 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 
 // Destroy releases the device.
 func (d *Device) Destroy() {
-	// Wait for all in-flight frames to complete before destroying resources.
-	// Without this, fences may still be in use by the GPU, causing
-	// "vkResetFences: pFences[0] is in use" validation errors.
-	// Both paths (timeline and binary pool) are handled by waitForLatest.
-	if d.timelineFence != nil {
-		_ = d.timelineFence.waitForLatest(d.cmds, d.handle, 5_000_000_000)
+	surfaces, ok := d.beginDestroy()
+	if !ok {
+		return
+	}
+
+	// One device-wide drain covers every configured swapchain. On device loss,
+	// abandon child handles and let vkDestroyDevice reclaim native storage.
+	drained := vkDeviceWaitIdle(d) == vk.Success
+	for _, surface := range surfaces {
+		surface.releaseConfiguredDevice(d, drained)
 	}
 
 	// Destroy unified fence (timeline semaphore or fencePool).

@@ -502,6 +502,9 @@ func (d *Device) createCommandSignature(argType d3d12.D3D12_INDIRECT_ARGUMENT_TY
 
 // waitForGPU blocks until all GPU work completes.
 func (d *Device) waitForGPU() error {
+	if d == nil || d.directQueue == nil || d.fence == nil || d.fenceEvent == 0 {
+		return nil
+	}
 	d.fenceMu.Lock()
 	defer d.fenceMu.Unlock()
 

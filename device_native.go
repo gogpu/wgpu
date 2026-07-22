@@ -22,6 +22,7 @@ import (
 type Device struct {
 	core     *core.Device
 	queue    *Queue
+	instance *Instance
 	released atomic.Bool
 
 	// cmdEncoderPool is the single shared encoder pool for the device.
@@ -136,6 +137,10 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if texture == nil {
 		return nil, fmt.Errorf("wgpu: texture is nil")
 	}
+	halTexture := texture.resolveHAL()
+	if halTexture == nil {
+		return nil, ErrReleased
+	}
 
 	halDevice := d.halDevice()
 	if halDevice == nil {
@@ -154,12 +159,18 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		halDesc.ArrayLayerCount = desc.ArrayLayerCount
 	}
 
-	halView, err := halDevice.CreateTextureView(texture.hal, halDesc)
+	halView, err := halDevice.CreateTextureView(halTexture, halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
 	}
 
-	return &TextureView{hal: halView, device: d, texture: texture}, nil
+	return &TextureView{
+		hal:          halView,
+		device:       d,
+		texture:      texture,
+		surface:      texture.surface,
+		surfaceLease: texture.surfaceLease,
+	}, nil
 }
 
 // CreateSampler creates a texture sampler.
@@ -359,6 +370,9 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))
 	for i, entry := range desc.Entries {
+		if entry.TextureView != nil && entry.TextureView.resolveHAL() == nil {
+			return nil, ErrReleased
+		}
 		halEntries[i] = entry.toHAL()
 	}
 
@@ -904,10 +918,12 @@ func (d *Device) maintainAfterIdle() {
 // Release releases the device and all associated resources.
 // Deferred resource destructions are flushed before the device is destroyed.
 // Shutdown order:
-//  0. WaitIdle — block until ALL GPU submissions complete
-//  1. Triage + FlushAll — deferred callbacks fire (encoders return to pool)
-//  2. Destroy encoder pool (HAL device still alive)
-//  3. Destroy core + HAL device
+//  0. Retire active surface acquisitions
+//  1. WaitIdle and maintain completed work
+//  2. Discard unsubmitted queue writes
+//  3. Triage + FlushAll — deferred callbacks fire (encoders return to pool)
+//  4. Destroy encoder pool (HAL device still alive)
+//  5. Destroy core + HAL device
 //
 // WaitIdle is required because FlushAll calls Triage(PollCompleted()),
 // but PollCompleted may return a stale index if GPU hasn't finished.
@@ -918,28 +934,42 @@ func (d *Device) maintainAfterIdle() {
 // Rust avoids this via Arc ownership + maintain loop. In Go we must
 // be explicit: WaitIdle ensures PollCompleted returns final index.
 func (d *Device) Release() {
-	if d.released.Load() {
+	if d == nil || d.released.Swap(true) {
 		return
 	}
-	d.released.Store(true)
+	var configuredSurfaces []*Surface
+	if d.instance != nil {
+		configuredSurfaces = d.instance.surfacesForDevice(d)
+	}
+	// Retire active acquisitions while the backend device is still alive.
+	// Vulkan keeps the configured swapchain itself and retires it in
+	// hal.Device.Destroy; other backends also get a chance to release borrowed
+	// drawable state before their device disappears.
+	for _, surface := range configuredSurfaces {
+		surface.discardForDevice(d)
+	}
+	if d.instance != nil {
+		defer func() {
+			d.instance.unregisterDevice(d)
+			d.instance = nil
+		}()
+	}
 
-	// Step 0: Wait for ALL GPU work to finish. This ensures PollCompleted()
-	// returns the final submission index, so Triage processes all submissions
-	// and deferred encoder recycling callbacks fire correctly.
-	// Use the internal path because the public released guard is already set to
-	// reject new work during teardown.
+	// Step 1: Wait for ALL GPU work to finish. Use the internal path because
+	// the public device has already been atomically marked released to close new
+	// entry points. This ensures PollCompleted() returns the final submission
+	// index before pending encoders or resources are destroyed.
 	_ = d.waitIdle()
 
-	// Pending writes may own staging buffers and encoders. Destroy them only
-	// after the HAL has reported idle so no in-flight submission can reference
-	// resources that are being torn down.
+	// Step 2: Pending writes that were never submitted can now be discarded;
+	// completed inflight batches were recycled by maintainAfterIdle above.
 	if d.queue != nil {
 		d.queue.release()
 	}
 
-	// Step 1: Flush deferred destructions. With GPU idle, Triage processes
-	// all submissions. Encoder recycling callbacks fire, returning encoders
-	// to cmdEncoderPool. HAL device is still alive.
+	// Step 3: Flush deferred destructions. WaitIdle above ensures PollCompleted()
+	// returns the final submission index, so Triage processes all submissions
+	// and deferred encoder recycling callbacks fire correctly.
 	if d.core != nil && d.core.DestroyQueueRef() != nil {
 		dq := d.core.DestroyQueueRef()
 		// Triage with latest completion index (GPU is idle, all done).
@@ -949,7 +979,7 @@ func (d *Device) Release() {
 		dq.FlushAll()
 	}
 
-	// Step 2: Destroy encoder pool. Each encoder.Destroy() calls
+	// Step 4: Destroy encoder pool. Each encoder.Destroy() calls
 	// vkDestroyCommandPool / ID3D12CommandAllocator.Release on the still-alive
 	// HAL device. After this, no native encoder resources remain.
 	if d.cmdEncoderPool != nil {
@@ -957,9 +987,12 @@ func (d *Device) Release() {
 		d.cmdEncoderPool = nil
 	}
 
-	// Step 3: Destroy core + HAL device. core.Destroy() calls FlushAll again
+	// Step 5: Destroy core + HAL device. core.Destroy() calls FlushAll again
 	// (idempotent — already flushed) then halDevice.Destroy().
 	d.core.Destroy()
+	for _, surface := range configuredSurfaces {
+		surface.retireDevice(d)
+	}
 }
 
 // destroyQueue returns the device's DestroyQueue for deferred resource destruction.
