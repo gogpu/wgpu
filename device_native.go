@@ -863,6 +863,14 @@ func (d *Device) WaitIdle() error {
 	if d.released.Load() {
 		return ErrReleased
 	}
+	return d.waitIdle()
+}
+
+// waitIdle drains the HAL and deferred resource queues without consulting the
+// public released bit. Release marks the device unavailable before starting
+// teardown, but the native device must remain alive while its last submission
+// is drained.
+func (d *Device) waitIdle() error {
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return ErrReleased
@@ -915,14 +923,19 @@ func (d *Device) Release() {
 	}
 	d.released.Store(true)
 
-	if d.queue != nil {
-		d.queue.release()
-	}
-
 	// Step 0: Wait for ALL GPU work to finish. This ensures PollCompleted()
 	// returns the final submission index, so Triage processes all submissions
 	// and deferred encoder recycling callbacks fire correctly.
-	_ = d.WaitIdle()
+	// Use the internal path because the public released guard is already set to
+	// reject new work during teardown.
+	_ = d.waitIdle()
+
+	// Pending writes may own staging buffers and encoders. Destroy them only
+	// after the HAL has reported idle so no in-flight submission can reference
+	// resources that are being torn down.
+	if d.queue != nil {
+		d.queue.release()
+	}
 
 	// Step 1: Flush deferred destructions. With GPU idle, Triage processes
 	// all submissions. Encoder recycling callbacks fire, returning encoders
