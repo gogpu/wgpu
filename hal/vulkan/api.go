@@ -333,7 +333,6 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 	swapchain := s.swapchain
 	if err := swapchain.destroyWithError(); err != nil {
 		hal.Logger().Error("vulkan: failed to destroy swapchain during unconfigure", "error", err)
-		return
 	}
 	s.detachSwapchainFromQueue(swapchain)
 	s.swapchain = nil
@@ -382,7 +381,10 @@ func (s *Surface) DiscardTexture(_ hal.SurfaceTexture) {
 		return
 	}
 	if s.swapchain != nil && s.swapchain.imageAcquired {
-		s.swapchain.markBroken(fmt.Errorf("vulkan: acquired surface texture was discarded without presentation"))
+		// Discarding an acquired texture is a normal lifecycle operation during
+		// resize or minimization. Match Rust wgpu-hal: release the acquisition
+		// without poisoning the swapchain and let the next frame continue.
+		s.swapchain.imageAcquired = false
 		s.detachSwapchainFromQueue(s.swapchain)
 	}
 }
@@ -396,11 +398,11 @@ func (s *Surface) Destroy() {
 		swapchain := s.swapchain
 		if err := swapchain.destroyWithError(); err != nil {
 			hal.Logger().Error("vulkan: failed to destroy swapchain", "error", err)
-			return
 		}
 		s.detachSwapchainFromQueue(swapchain)
 		s.swapchain = nil
 	}
+	s.device = nil
 	if s.handle != 0 && s.instance != nil {
 		s.instance.cmds.DestroySurfaceKHR(s.instance.handle, s.handle, nil)
 		s.handle = 0

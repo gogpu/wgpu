@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"math"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -311,18 +312,17 @@ func querySwapchainFormats(instance *Instance, device vk.PhysicalDevice, surface
 func querySwapchainFormatsWith(query func(count *uint32, formats *vk.SurfaceFormatKHR) vk.Result) ([]vk.SurfaceFormatKHR, error) {
 	return queryRequiredSwapchainValues(
 		"vkGetPhysicalDeviceSurfaceFormatsKHR",
-		"vkGetPhysicalDeviceSurfaceFormatsKHR",
 		"vulkan: surface returned no formats",
 		query,
 	)
 }
 
-func queryRequiredSwapchainValues[T any](countOperation, valuesOperation, emptyMessage string, query func(count *uint32, values *T) vk.Result) ([]T, error) {
+func queryRequiredSwapchainValues[T any](operation, emptyMessage string, query func(count *uint32, values *T) vk.Result) ([]T, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		var count uint32
 		result := query(&count, nil)
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError(countOperation+" (count)", result)
+			return nil, surfaceQueryError(operation+" (count)", result)
 		}
 		if count == 0 {
 			return nil, errors.New(emptyMessage)
@@ -331,7 +331,7 @@ func queryRequiredSwapchainValues[T any](countOperation, valuesOperation, emptyM
 		returned := count
 		result = query(&returned, &values[0])
 		if result != vk.Success && result != vk.Incomplete {
-			return nil, surfaceQueryError(valuesOperation, result)
+			return nil, surfaceQueryError(operation, result)
 		}
 		if result == vk.Incomplete || returned > uint32(len(values)) {
 			continue
@@ -341,7 +341,7 @@ func queryRequiredSwapchainValues[T any](countOperation, valuesOperation, emptyM
 		}
 		return values[:returned], nil
 	}
-	return nil, fmt.Errorf("vulkan: %s returned an unstable count", valuesOperation)
+	return nil, fmt.Errorf("vulkan: %s returned an unstable count", operation)
 }
 
 func querySwapchainPresentModes(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) ([]vk.PresentModeKHR, error) {
@@ -352,7 +352,6 @@ func querySwapchainPresentModes(instance *Instance, device vk.PhysicalDevice, su
 
 func querySwapchainPresentModesWith(query func(count *uint32, modes *vk.PresentModeKHR) vk.Result) ([]vk.PresentModeKHR, error) {
 	return queryRequiredSwapchainValues(
-		"vkGetPhysicalDeviceSurfacePresentModesKHR",
 		"vkGetPhysicalDeviceSurfacePresentModesKHR",
 		"vulkan: surface returned no present modes",
 		query,
@@ -368,7 +367,6 @@ func querySwapchainImages(device *Device, swapchain vk.SwapchainKHR) ([]vk.Image
 func querySwapchainImagesWith(query func(count *uint32, images *vk.Image) vk.Result) ([]vk.Image, error) {
 	return queryRequiredSwapchainValues(
 		"vkGetSwapchainImagesKHR",
-		"vkGetSwapchainImagesKHR (images)",
 		"vulkan: swapchain returned no images",
 		query,
 	)
@@ -413,7 +411,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		return fmt.Errorf("vulkan: surface returned invalid image extent range")
 	}
 	imageCount := capabilities.MinImageCount
-	if imageCount < ^uint32(0) {
+	if imageCount < math.MaxUint32 {
 		imageCount++
 	}
 	if capabilities.MaxImageCount > 0 && imageCount > capabilities.MaxImageCount {
@@ -505,10 +503,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	var swapchainHandle vk.SwapchainKHR
 	result := vkCreateSwapchainKHR(device, &createInfo, nil, &swapchainHandle)
 	if result != vk.Success {
-		if result == vk.ErrorSurfaceLostKhr {
-			return hal.ErrSurfaceLost
-		}
-		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
+		return swapchainCreateError(result)
 	}
 
 	// Get swapchain images
@@ -846,8 +841,20 @@ func (sc *Swapchain) destroyWithError() error {
 		sc.handle = 0
 	}
 	sc.destroyed = true
-	sc.broken = true
+	sc.failureErr = nil
 	return nil
+}
+
+func swapchainCreateError(result vk.Result) error {
+	switch result {
+	case vk.ErrorSurfaceLostKhr, vk.ErrorInitializationFailed:
+		// Rust wgpu-hal treats initialization failure as a lost surface: on
+		// common WSI implementations it means the native surface can no longer
+		// produce a swapchain and retrying the same handle cannot recover.
+		return hal.ErrSurfaceLost
+	default:
+		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
+	}
 }
 
 // acquireNextImage acquires the next available swapchain image.

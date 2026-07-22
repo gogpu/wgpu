@@ -251,6 +251,65 @@ func TestQuerySwapchainImagesRetriesIncomplete(t *testing.T) {
 	}
 }
 
+func TestSwapchainCreateErrorTreatsInitializationFailureAsSurfaceLost(t *testing.T) {
+	for _, result := range []vk.Result{vk.ErrorSurfaceLostKhr, vk.ErrorInitializationFailed} {
+		if err := swapchainCreateError(result); !errors.Is(err, hal.ErrSurfaceLost) {
+			t.Fatalf("swapchainCreateError(%v) = %v, want surface lost", result, err)
+		}
+	}
+	if err := swapchainCreateError(vk.ErrorDeviceLost); errors.Is(err, hal.ErrSurfaceLost) {
+		t.Fatalf("device-lost creation error was mapped to surface lost: %v", err)
+	}
+}
+
+func TestDiscardTextureReleasesAcquisitionWithoutBreakingSwapchain(t *testing.T) {
+	swapchain := &Swapchain{imageAcquired: true}
+	surface := &Surface{swapchain: swapchain}
+
+	surface.DiscardTexture(nil)
+
+	if swapchain.imageAcquired {
+		t.Fatal("DiscardTexture left the image acquired")
+	}
+	if swapchain.broken || swapchain.failureErr != nil {
+		t.Fatalf("DiscardTexture broke a healthy swapchain: broken=%v error=%v", swapchain.broken, swapchain.failureErr)
+	}
+}
+
+func TestSurfaceTeardownDropsReferencesAfterWaitIdleFailure(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*Surface)
+	}{
+		{name: "unconfigure", run: func(surface *Surface) { surface.Unconfigure(nil) }},
+		{name: "destroy", run: func(surface *Surface) { surface.Destroy() }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			device := &Device{cmds: &vk.Commands{}}
+			swapchain := &Swapchain{device: device, handle: 1}
+			device.queue = &Queue{device: device, activeSwapchain: swapchain, acquireUsed: true}
+			surface := &Surface{
+				handle:    1,
+				instance:  &Instance{},
+				swapchain: swapchain,
+				device:    device,
+			}
+
+			test.run(surface)
+
+			if surface.swapchain != nil || surface.device != nil {
+				t.Fatalf("surface retained failed swapchain teardown references: swapchain=%p device=%p", surface.swapchain, surface.device)
+			}
+			if device.queue.activeSwapchain != nil || device.queue.acquireUsed {
+				t.Fatal("surface teardown left the failed swapchain attached to its queue")
+			}
+			if test.name == "destroy" && surface.handle != 0 {
+				t.Fatalf("Destroy left VkSurfaceKHR handle %v after swapchain teardown failure", surface.handle)
+			}
+		})
+	}
+}
+
 func TestSwapchainLifecycleGuardsFailClosed(t *testing.T) {
 	destroyed := &Swapchain{destroyed: true}
 	if _, _, err := destroyed.acquireNextImage(); err == nil {
@@ -296,6 +355,9 @@ func TestSwapchainLifecycleGuardsFailClosed(t *testing.T) {
 	withoutDevice.Destroy()
 	if !withoutDevice.destroyed {
 		t.Fatal("Destroy() without a device did not mark the swapchain destroyed")
+	}
+	if withoutDevice.broken {
+		t.Fatal("clean Destroy() marked the swapchain broken")
 	}
 	withoutDevice.Destroy()
 }
