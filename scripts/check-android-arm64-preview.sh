@@ -61,7 +61,7 @@ goffi_version=v0.6.1
 webgpu_dir=
 actual_webgpu_head=
 if [[ -n "${WEBGPU_DIR:-}" ]]; then
-	: "${WEBGPU_EXPECTED_HEAD:?set WEBGPU_EXPECTED_HEAD to the helper candidate immutable commit}"
+	: "${WEBGPU_EXPECTED_HEAD:?set WEBGPU_EXPECTED_HEAD to the helper source immutable commit}"
 	: "${WEBGPU_EXPECTED_PATCH:?set WEBGPU_EXPECTED_PATCH to its working-tree fingerprint}"
 	webgpu_dir=$(cd "$WEBGPU_DIR" && pwd -P)
 	actual_webgpu_head=$(git -C "$webgpu_dir" rev-parse HEAD)

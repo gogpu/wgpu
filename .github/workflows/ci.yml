@@ -28,8 +28,8 @@ env:
   CGO_ENABLED: 0
 
 jobs:
-  # Integration against canonical goffi and the exact pending WebGPU Android
-  # candidate. The ephemeral go.work injects only the unpublished candidate.
+  # Integration against canonical goffi and the exact merged WebGPU Android
+  # source. The ephemeral go.work injects the change until it is released.
   android-arm64-preview:
     name: Android arm64 preview - Go ${{ matrix.go-version }}
     runs-on: ubuntu-latest
@@ -41,17 +41,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Checkout exact WebGPU Android surface candidate
+    - name: Checkout exact merged WebGPU Android surface source
       uses: actions/checkout@v4
       with:
         repository: go-webgpu/webgpu
-        ref: refs/pull/24/head
+        ref: a801aed7399042e5564ef76fc9f075da5cb70081
         path: .ci/webgpu
         persist-credentials: false
 
-    - name: Verify exact WebGPU candidate
+    - name: Verify exact WebGPU merge
       working-directory: .ci/webgpu
-      run: test "$(git rev-parse HEAD)" = 08592c9f5916b64dfc70aba9e67a74a764bb3ef5
+      run: test "$(git rev-parse HEAD)" = a801aed7399042e5564ef76fc9f075da5cb70081
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -68,7 +68,7 @@ jobs:
     - name: Check Android arm64 source, tests, and ELF dependencies
       env:
         WEBGPU_DIR: ${{ github.workspace }}/.ci/webgpu
-        WEBGPU_EXPECTED_HEAD: 08592c9f5916b64dfc70aba9e67a74a764bb3ef5
+        WEBGPU_EXPECTED_HEAD: a801aed7399042e5564ef76fc9f075da5cb70081
         WEBGPU_EXPECTED_PATCH: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       run: |
         export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"

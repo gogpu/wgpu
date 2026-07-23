@@ -10,9 +10,9 @@ The default backend consumes canonical
 [goffi v0.6.1](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1), released
 from [go-webgpu/goffi#62](https://github.com/go-webgpu/goffi/pull/62). The
 `rust` build-tag path also depends on canonical
-[go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), exactly at
-`08592c9f5916b64dfc70aba9e67a74a764bb3ef5`. goffi is declared directly in
-`go.mod` and verified by `go.sum`; only the unreleased WebGPU candidate is
+[go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), merged at
+`a801aed7399042e5564ef76fc9f075da5cb70081`. goffi is declared directly in
+`go.mod` and verified by `go.sum`; the merged but unreleased WebGPU source is
 injected through an ephemeral workspace. There is no forked module path,
 `replace` directive, or committed `go.work`.
 
@@ -81,29 +81,16 @@ filter. The canonical backend's existing application-version request remains
 unchanged; actual extensions, commands, features, and device evidence decide
 whether a Vulkan implementation works.
 
-## Proposed review order
+## Merge order
 
 The Android Vulkan work remains in
 [wgpu#268](https://github.com/gogpu/wgpu/pull/268). This typed-surface change is
-best reviewed as a follow-up on that exact head, not folded into unrelated
-prerequisites. After predecessors merge, #268 can be rebased to its Android-only
-commits and this follow-up can be replayed without changing its public design.
-
-The independently reviewable prerequisites and their current exact heads are:
-
-| Prerequisite | Exact head |
-|--------------|------------|
-| [wgpu#264](https://github.com/gogpu/wgpu/pull/264), drain before device teardown | `6acfb1ea1cca1dc14d7ab0902931c678dc13e0a6` |
-| [wgpu#265](https://github.com/gogpu/wgpu/pull/265), fail-closed swapchain negotiation | `eb48db0e7eec4c12eaa87cc998f6ea9e8f348fdd` |
-| [wgpu#266](https://github.com/gogpu/wgpu/pull/266), explicit mock construction | `e65bec3c74c56cd07265c055ce6a7ec7fbedc680` |
-| [wgpu#267](https://github.com/gogpu/wgpu/pull/267), surface-qualified present queue | `63efce782d5cf41dacab761d202da0e3d68ed2da` |
-| [wgpu#269](https://github.com/gogpu/wgpu/pull/269), surface lifetime ownership | `2a069cb1fde942339813efd7199ed305a3a2ca84` |
-| [webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), Android Rust-wrapper surface source | `08592c9f5916b64dfc70aba9e67a74a764bb3ef5` |
-
-The current stacked [wgpu#268](https://github.com/gogpu/wgpu/pull/268) head is
-`13b59db954dafd2653e6cb5ce3ea14c022782ad2`. Once the five WGPU prerequisites
-merge, #268 drops their replayed commits and retains its four Android-owned
-commits. This typed-target follow-up is then replayed on that reduced head.
+best reviewed and merged after #268. Its five WGPU prerequisites (#264, #265,
+#266, #267, and #269), goffi#62/v0.6.1, and webgpu#24 are merged. This branch is
+rebased onto the resulting WGPU `main`, so none of those five WGPU prerequisite
+commits are replayed here. Until #268 lands, its Android-owned commits remain
+below this PR's typed-target commits; they can be dropped in one final rebase
+without changing the public design.
 
 [wgpu#253](https://github.com/gogpu/wgpu/pull/253) is the design precedent for
 matching Rust's typed public/HAL seam; it is not a code dependency of Android.
@@ -113,12 +100,12 @@ that helper should be merged.
 
 ## Reproducing deterministic proof
 
-Use Android NDK r29 and clean checkouts of this branch and the canonical
-`go-webgpu/webgpu` helper candidate:
+Use Android NDK r29 and clean checkouts of this branch and the canonical merged
+`go-webgpu/webgpu` helper:
 
 ```bash
 WEBGPU_DIR=/path/to/go-webgpu-webgpu \
-WEBGPU_EXPECTED_HEAD=08592c9f5916b64dfc70aba9e67a74a764bb3ef5 \
+WEBGPU_EXPECTED_HEAD=a801aed7399042e5564ef76fc9f075da5cb70081 \
 WEBGPU_EXPECTED_PATCH=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
 ANDROID_NDK_HOME=/path/to/android-ndk-r29 \
 GOTOOLCHAIN=go1.26.5 \

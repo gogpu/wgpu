@@ -64,11 +64,11 @@ func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 func currentPlatformSurfaceTarget(t *testing.T) SurfaceTargetUnsafe {
 	t.Helper()
 	switch runtime.GOOS {
-	case "windows":
+	case platformWindows:
 		return SurfaceTargetFromWindowsHWND(1, 2)
-	case "darwin":
+	case platformDarwin:
 		return SurfaceTargetFromMetalLayer(2)
-	case "linux":
+	case platformLinux:
 		return SurfaceTargetFromXlibWindow(1, 2)
 	default:
 		t.Skipf("no software window target for %s", runtime.GOOS)
@@ -86,12 +86,12 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	vulkanSurface := &noop.Surface{}
 	vulkan := &surfaceCreateTestInstance{surface: vulkanSurface}
 	softwareSurface := &noop.Surface{}
-	software := &surfaceCreateTestInstance{surface: softwareSurface}
+	softwareInstance := &surfaceCreateTestInstance{surface: softwareSurface}
 
 	surfaces, firstBackend, err := createHALSurfaces([]core.HALInstanceEntry{
 		{Backend: gputypes.BackendGL, Instance: unsupported},
 		{Backend: gputypes.BackendVulkan, Instance: vulkan},
-		{Backend: gputypes.BackendEmpty, Instance: software},
+		{Backend: gputypes.BackendEmpty, Instance: softwareInstance},
 	}, target)
 	if err != nil {
 		t.Fatalf("createHALSurfaces: %v", err)
@@ -111,7 +111,7 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	for name, instance := range map[string]*surfaceCreateTestInstance{
 		"unsupported": unsupported,
 		"Vulkan":      vulkan,
-		"software":    software,
+		"software":    softwareInstance,
 	} {
 		if len(instance.calls) != 1 || instance.calls[0] != target {
 			t.Fatalf("%s calls = %+v, want target once", name, instance.calls)
@@ -228,26 +228,26 @@ func TestSurfaceTargetFromLegacyHandlesForPlatform(t *testing.T) {
 	}{
 		{
 			name: "Windows",
-			goos: "windows", display: 1, window: 2,
+			goos: platformWindows, display: 1, window: 2,
 			want: SurfaceTargetFromWindowsHWND(1, 2),
 		},
 		{
 			name: "Darwin",
-			goos: "darwin", display: 1, window: 2,
+			goos: platformDarwin, display: 1, window: 2,
 			want: SurfaceTargetFromMetalLayer(2),
 		},
 		{
 			name: "Linux Xlib",
-			goos: "linux", display: 1, window: 2,
+			goos: platformLinux, display: 1, window: 2,
 			want: SurfaceTargetFromXlibWindow(1, 2),
 		},
 		{
-			name: "Linux Wayland", goos: "linux", waylandDisplay: "wayland-0", display: 1, window: 2,
+			name: "Linux Wayland", goos: platformLinux, waylandDisplay: "wayland-0", display: 1, window: 2,
 			want: SurfaceTargetFromWaylandSurface(1, 2),
 		},
 		{
 			name: "Android",
-			goos: "android", display: 1, window: 2,
+			goos: platformAndroid, display: 1, window: 2,
 			want: SurfaceTargetFromAndroidNativeWindow(2),
 		},
 		{
@@ -339,7 +339,7 @@ func TestCreateSurfaceReportsBoundaryFailures(t *testing.T) {
 		t.Fatalf("native web target = (%v, %v), want ErrUnsupportedSurfaceTarget", surface, err)
 	}
 
-	if runtime.GOOS != "android" {
+	if runtime.GOOS != platformAndroid {
 		surface, err := instance.CreateSurfaceUnsafe(SurfaceTargetFromAndroidNativeWindow(1))
 		if surface != nil {
 			surface.Release()

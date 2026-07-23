@@ -14,6 +14,13 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+const (
+	platformWindows = "windows"
+	platformDarwin  = "darwin"
+	platformLinux   = "linux"
+	platformAndroid = "android"
+)
+
 // Surface represents a platform rendering surface (e.g., a window).
 //
 // Surface delegates lifecycle management to core.Surface, which enforces
@@ -172,16 +179,16 @@ func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) Surface
 
 func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
 	switch goos {
-	case "windows":
+	case platformWindows:
 		return SurfaceTargetFromWindowsHWND(displayHandle, windowHandle)
-	case "darwin":
+	case platformDarwin:
 		return SurfaceTargetFromMetalLayer(windowHandle)
-	case "linux":
+	case platformLinux:
 		if waylandDisplay != "" {
 			return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
 		}
 		return SurfaceTargetFromXlibWindow(displayHandle, windowHandle)
-	case "android":
+	case platformAndroid:
 		return SurfaceTargetFromAndroidNativeWindow(windowHandle)
 	default:
 		return SurfaceTargetUnsafe{
