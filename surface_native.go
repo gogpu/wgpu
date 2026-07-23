@@ -98,8 +98,16 @@ func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource Surfac
 	if err != nil {
 		return nil, err
 	}
-	halSurface := halSurfaces[initialBackend]
+	return i.adoptCreatedSurface(target, targetSource, halSurfaces, initialBackend)
+}
 
+func (i *Instance) adoptCreatedSurface(
+	target SurfaceTargetUnsafe,
+	targetSource SurfaceTarget,
+	halSurfaces map[gputypes.Backend]hal.Surface,
+	initialBackend gputypes.Backend,
+) (*Surface, error) {
+	halSurface := halSurfaces[initialBackend]
 	coreSurface := core.NewSurface(halSurface, "")
 	surface := &Surface{
 		core:           coreSurface,
@@ -154,13 +162,22 @@ func createHALSurfaces(entries []core.HALInstanceEntry, target hal.SurfaceTarget
 }
 
 func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
-	switch runtime.GOOS {
+	return surfaceTargetFromLegacyHandlesForPlatform(
+		runtime.GOOS,
+		os.Getenv("WAYLAND_DISPLAY"),
+		displayHandle,
+		windowHandle,
+	)
+}
+
+func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+	switch goos {
 	case "windows":
 		return SurfaceTargetFromWindowsHWND(displayHandle, windowHandle)
 	case "darwin":
 		return SurfaceTargetFromMetalLayer(windowHandle)
 	case "linux":
-		if os.Getenv("WAYLAND_DISPLAY") != "" {
+		if waylandDisplay != "" {
 			return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
 		}
 		return SurfaceTargetFromXlibWindow(displayHandle, windowHandle)
@@ -455,12 +472,19 @@ func (s *Surface) createHALSurface(backend gputypes.Backend) (hal.Surface, error
 	if err != nil {
 		return nil, err
 	}
-	halSurface, err := targetInstance.CreateSurface(halTarget)
+	return createHALSurfaceForTarget(targetInstance, backend, halTarget)
+}
+
+func createHALSurfaceForTarget(targetInstance hal.Instance, backend gputypes.Backend, target hal.SurfaceTarget) (hal.Surface, error) {
+	halSurface, err := targetInstance.CreateSurface(target)
 	if errors.Is(err, hal.ErrUnsupportedSurfaceTarget) {
 		return nil, fmt.Errorf("%w: backend %v: %w", ErrUnsupportedSurfaceTarget, backend, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create surface for backend %v: %w", backend, err)
+	}
+	if halSurface == nil {
+		return nil, fmt.Errorf("wgpu: backend %v returned a nil surface", backend)
 	}
 	return halSurface, nil
 }

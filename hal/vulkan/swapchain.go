@@ -534,7 +534,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	var swapchainHandle vk.SwapchainKHR
 	result := vkCreateSwapchainKHR(device, &createInfo, nil, &swapchainHandle)
 	if result != vk.Success {
-		return mapSwapchainCreateResult(result)
+		return swapchainCreateError(result)
 	}
 
 	// Get swapchain images
@@ -894,8 +894,10 @@ func swapchainCreateError(result vk.Result) error {
 		// common WSI implementations it means the native surface can no longer
 		// produce a swapchain and retrying the same handle cannot recover.
 		return hal.ErrSurfaceLost
+	case vk.ErrorNativeWindowInUseKhr:
+		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: native window is already in use")
 	default:
-		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %d", result)
+		return mapVulkanResult("vkCreateSwapchainKHR", result)
 	}
 }
 

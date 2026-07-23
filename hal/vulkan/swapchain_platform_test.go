@@ -96,13 +96,13 @@ func TestMapVulkanResultPreservesRecoverableErrors(t *testing.T) {
 	}
 }
 
-func TestMapSwapchainCreateResultPreservesSurfaceErrors(t *testing.T) {
+func TestSwapchainCreateErrorPreservesSurfaceErrors(t *testing.T) {
 	for _, result := range []vk.Result{vk.ErrorSurfaceLostKhr, vk.ErrorInitializationFailed} {
-		if err := mapSwapchainCreateResult(result); !errors.Is(err, hal.ErrSurfaceLost) {
-			t.Fatalf("mapSwapchainCreateResult(%d) = %v, want ErrSurfaceLost", result, err)
+		if err := swapchainCreateError(result); !errors.Is(err, hal.ErrSurfaceLost) {
+			t.Fatalf("swapchainCreateError(%d) = %v, want ErrSurfaceLost", result, err)
 		}
 	}
-	err := mapSwapchainCreateResult(vk.ErrorNativeWindowInUseKhr)
+	err := swapchainCreateError(vk.ErrorNativeWindowInUseKhr)
 	if err == nil || errors.Is(err, hal.ErrSurfaceLost) {
 		t.Fatalf("native-window-in-use error = %v, want untyped ownership conflict", err)
 	}

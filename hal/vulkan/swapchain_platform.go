@@ -67,17 +67,6 @@ func swapchainPolicyForSurface(surface *Surface) swapchainPlatformPolicy {
 	return surface.instance.platform.swapchain
 }
 
-func mapSwapchainCreateResult(result vk.Result) error {
-	switch result {
-	case vk.ErrorSurfaceLostKhr, vk.ErrorInitializationFailed:
-		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: %w", hal.ErrSurfaceLost)
-	case vk.ErrorNativeWindowInUseKhr:
-		return fmt.Errorf("vulkan: vkCreateSwapchainKHR failed: native window is already in use")
-	default:
-		return mapVulkanResult("vkCreateSwapchainKHR", result)
-	}
-}
-
 // mapVulkanResult preserves the typed HAL errors callers use for recovery.
 func mapVulkanResult(operation string, result vk.Result) error {
 	switch result {

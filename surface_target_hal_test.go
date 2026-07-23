@@ -68,6 +68,11 @@ func TestWebSurfaceTargetIsUnsupportedByNativeHAL(t *testing.T) {
 	if !errors.Is(err, ErrUnsupportedSurfaceTarget) {
 		t.Fatalf("halTarget error = %v, want ErrUnsupportedSurfaceTarget", err)
 	}
+
+	_, err = (SurfaceTargetUnsafe{kind: surfaceTargetKind(255)}).halTarget()
+	if !errors.Is(err, ErrInvalidSurfaceTarget) {
+		t.Fatalf("unknown halTarget error = %v, want ErrInvalidSurfaceTarget", err)
+	}
 }
 
 func TestSurfaceTargetUnsafeValidationAcceptsValidTargets(t *testing.T) {

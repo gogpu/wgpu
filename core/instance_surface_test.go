@@ -90,6 +90,54 @@ func TestRequestAdapterWithSurfacesUsesEachBackendsOwnSurface(t *testing.T) {
 	}
 }
 
+func TestRequestAdapterWithSurfacesEmptyMapUsesOrdinaryPath(t *testing.T) {
+	GetGlobal().Clear()
+	instance := NewInstanceWithMock(nil)
+	defer instance.Destroy()
+
+	ordinary, err := instance.RequestAdapter(nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter: %v", err)
+	}
+	selected, err := instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{})
+	if err != nil {
+		t.Fatalf("RequestAdapterWithSurfaces(empty): %v", err)
+	}
+	if selected != ordinary {
+		t.Fatalf("empty-map selection = %v, want ordinary adapter %v", selected, ordinary)
+	}
+}
+
+func TestRequestAdapterWithSurfacesSkipsBackendWithoutSurface(t *testing.T) {
+	GetGlobal().Clear()
+	hub := GetGlobal().Hub()
+	qualifications := 0
+	id := hub.RegisterAdapter(&Adapter{
+		Info: gputypes.AdapterInfo{
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
+			Backend:    gputypes.BackendVulkan,
+		},
+		Limits:     gputypes.DefaultLimits(),
+		Backend:    gputypes.BackendVulkan,
+		halAdapter: &surfaceQualificationAdapter{compatible: true, qualifies: &qualifications},
+	})
+	instance := &Instance{
+		backends: gputypes.BackendsVulkan,
+		adapters: []AdapterID{id},
+	}
+	defer instance.Destroy()
+
+	_, err := instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{
+		gputypes.BackendGL: &stubHALSurface{id: 23},
+	})
+	if err == nil {
+		t.Fatal("RequestAdapterWithSurfaces selected an adapter without a matching surface")
+	}
+	if qualifications != 0 {
+		t.Fatalf("adapter qualifications = %d, want 0", qualifications)
+	}
+}
+
 func TestRequestAdapterWithSurfaceReleasesUnselectedQualifiedAdapters(t *testing.T) {
 	GetGlobal().Clear()
 	hub := GetGlobal().Hub()
