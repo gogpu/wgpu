@@ -450,7 +450,7 @@ func TestCommandEncoderCopiesBetweenLayeredTextures(t *testing.T) {
 
 func TestQueueWriteTextureLayeredShapes(t *testing.T) {
 	device, queue := newMetalTextureCopyTestDevice(t)
-	hasUnifiedMemory := device.hasUnifiedMemory
+	supportsSharedTextures := device.isAppleGPU
 
 	shapes := []struct {
 		name      string
@@ -471,10 +471,10 @@ func TestQueueWriteTextureLayeredShapes(t *testing.T) {
 	for _, shape := range shapes {
 		for _, storage := range storageModes {
 			t.Run(shape.name+"/"+storage.name, func(t *testing.T) {
-				if storage.shared && !hasUnifiedMemory {
-					t.Skip("direct Shared-texture writes require unified memory")
+				if storage.shared && !supportsSharedTextures {
+					t.Skip("direct Shared-texture writes require an Apple GPU family")
 				}
-				device.hasUnifiedMemory = storage.shared
+				device.isAppleGPU = storage.shared
 
 				const (
 					width       = uint32(4)
