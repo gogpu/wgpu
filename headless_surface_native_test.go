@@ -363,3 +363,10 @@ func TestHeadlessSurfaceReadPixelsStateErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestSurfaceWritePixelsNil(t *testing.T) {
+	var surface *Surface
+	if err := surface.WritePixels(nil, 0, 0); !errors.Is(err, ErrReleased) {
+		t.Fatalf("WritePixels error = %v, want ErrReleased", err)
+	}
+}
