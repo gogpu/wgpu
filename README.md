@@ -57,8 +57,9 @@ CGO_ENABLED=0 go build
 > **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
 
 The unreleased Android/arm64 Vulkan implementation is documented separately in
-[Android Vulkan preview](docs/ANDROID.md). It requires the exact canonical
-goffi candidate named there and is not yet a released support claim.
+[Android Vulkan preview](docs/ANDROID.md). It consumes canonical goffi v0.6.1
+and is not yet a released support claim; the optional Rust path temporarily
+pins the exact merged WebGPU Android source until that dependency is released.
 
 New surface integrations should use the explicit safe or unsafe target API
 described in [Surface targets](docs/SURFACE-TARGETS.md). The original
