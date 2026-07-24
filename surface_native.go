@@ -409,7 +409,7 @@ func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects [
 // Call between GetCurrentTexture() and Present(). No render pass needed.
 // Returns ErrReleased if the surface is not configured.
 func (s *Surface) WritePixels(data []byte, width, height uint32) error {
-	if s.released || s.core == nil {
+	if s == nil || s.released || s.core == nil {
 		return ErrReleased
 	}
 	raw := s.core.RawSurface()
