@@ -26,6 +26,7 @@ and [core surface creation](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289
 | `SurfaceTarget` | Safe `SurfaceTarget<'window>` | A provider is sampled exactly once; the provider, not merely its raw result, is retained through backend destruction |
 | `SurfaceTarget.SurfaceTarget` | `Into<SurfaceTarget>` followed by raw-handle extraction | May return an application error; its identity is preserved with wrapping; it is never called after instance release |
 | `SurfaceTargetUnsafe` | `SurfaceTargetUnsafe::RawHandle` | Opaque closed value prevents callers from inventing a kind/handle mismatch; retains no ownership source |
+| `HeadlessSurfaceTarget` | Explicit Go software extension; Rust `wgpu` has no windowless `SurfaceTarget` variant | Zero-sized safe target with no handles or external lifetime; accepted by the Pure-Go software backend and rejected by Rust/browser implementations |
 | `SurfaceTargetFromWindowsHWND` | `RawWindowHandle::Win32` plus the optional Windows display/module handle | `HWND` is required at creation; caller owns both handles through release |
 | `SurfaceTargetFromXlibWindow` | `RawDisplayHandle::Xlib` plus `RawWindowHandle::Xlib` | Both `Display*` and `Window` are required and caller-owned |
 | `SurfaceTargetFromWaylandSurface` | `RawDisplayHandle::Wayland` plus `RawWindowHandle::Wayland` | Both `wl_display*` and `wl_surface*` are required and caller-owned |
@@ -38,6 +39,7 @@ and [core surface creation](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289
 | `(*Instance).RequestAdapter` with `CompatibleSurface` | Rust `RequestAdapterOptions::compatible_surface` | Native dispatch supplies the surface created by each candidate adapter's own backend; a missing backend surface makes that backend incompatible |
 | `(*Adapter).GetSurfaceCapabilities` | `Surface::get_capabilities`, which resolves `surface.raw(adapter.backend())` | Never substitutes the currently active surface for another backend; missing same-backend state reports no capabilities |
 | `(*Surface).Configure` backend selection | Rust core's `surface_per_backend` selection by device backend | Reuses the retained surface for that backend and leaves other backend surfaces owned but inactive |
+| `(*Surface).ReadPixels` | Explicit Go software extension; ordinary WebGPU readback uses texture-to-buffer copies | After present/discard, returns an owned, tightly packed top-left RGBA8 snapshot; unsupported implementations return an error rather than inventing pixels |
 | `(*Surface).Release` | Rust `Surface` drop and `_handle_source` field order | Destroys the active and inactive backend surfaces before clearing the safe provider; idempotent |
 | `(*Instance).Release` documentation | Rust surfaces have independent lifetimes | Native instances retire tracked surfaces; Rust-tag and browser surfaces still require explicit release, now stated without a false cascading promise |
 
@@ -63,6 +65,7 @@ backend trait.
 | `hal.SurfaceTarget` and fields `Kind`, `DisplayHandle`, `WindowHandle` | Go representation of Rust's typed display/window-handle pair | Borrowed data only; HAL does not receive a Go ownership source and must reject a mismatched kind before pointer use |
 | `hal.SurfaceTarget.RequireKind` | A Rust `match` arm on `RawWindowHandle` | Wraps `hal.ErrUnsupportedSurfaceTarget`; performs no I/O or pointer access |
 | `hal.SurfaceTargetKind.String` | `Debug` formatting of raw-window-handle variants | Stable diagnostics only; unknown numeric values remain printable and unsupported |
+| `hal.PixelReader` | Go optional-capability adaptation; no `wgpu-hal` surface method analogue | Implementations return a caller-owned, tightly packed top-left RGBA8 snapshot; adding the capability does not widen the mandatory `hal.Surface` interface |
 | `hal.Instance.CreateSurface` | `wgpu_hal::Instance::create_surface` | Signature intentionally changes from two unlabelled integers to one typed borrowed target; platform failures remain backend errors |
 | `hal/dx12.(*Instance).CreateSurface` | Rust DX12 Win32 surface creation | Accepts only `WindowsHWND`; stores a borrowed HWND and rejects other kinds first |
 | `hal/gles.(*Instance).CreateSurface` | Rust GLES WGL/EGL surface creation | Windows accepts `WindowsHWND`; Linux accepts Xlib or Wayland and explicitly selects the matching EGL display; backend errors remain wrapped |
@@ -104,6 +107,149 @@ method `unsafe`. Go has neither tagged unions nor unsafe methods, so the Go
 adaptation uses an opaque value with named constructors and validates it at the
 API boundary. The target kind remains explicit all the way into HAL; backends
 never infer Xlib versus Wayland from two unlabelled integers.
+
+## Headless software surface and readback
+
+`HeadlessSurfaceTarget` is a deliberate Pure-Go software extension, not a Rust
+`wgpu` or WebGPU surface variant. It lets tests and server-side renderers use the
+normal surface lifecycle without fabricating a platform window:
+
+1. create a headless surface;
+2. request a compatible fallback adapter;
+3. configure, acquire, render, submit, and present normally; then
+4. call `Surface.ReadPixels` after the acquired texture has been presented or
+   discarded.
+
+`ReadPixels` returns a caller-owned `width * height * 4` byte slice in tightly
+packed, top-left, row-major RGBA8 order. The output contract is the same for
+RGBA8 and BGRA8 surface configurations. Mutating the returned slice does not
+change the surface. Calling it before configuration, while a texture is
+acquired, after unconfiguration/release, or on a backend without the optional
+readback capability returns an error.
+
+The following complete clear-and-capture path uses only the public root API:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
+	_ "github.com/gogpu/wgpu/hal/allbackends"
+)
+
+func capture() ([]byte, error) {
+	instance, err := wgpu.CreateInstance(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer instance.Release()
+
+	surface, err := instance.CreateSurfaceFromTarget(wgpu.HeadlessSurfaceTarget{})
+	if err != nil {
+		return nil, err
+	}
+	defer surface.Release()
+
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		CompatibleSurface:    surface,
+		ForceFallbackAdapter: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer adapter.Release()
+
+	device, err := adapter.RequestDevice(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer device.Release()
+
+	if err := surface.Configure(device, &wgpu.SurfaceConfiguration{
+		Width:       4,
+		Height:      4,
+		Format:      wgpu.TextureFormatRGBA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
+		PresentMode: gputypes.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+	}); err != nil {
+		return nil, err
+	}
+	if width, height := surface.ActualExtent(); width != 4 || height != 4 {
+		return nil, fmt.Errorf("configured extent = %dx%d, want 4x4", width, height)
+	}
+
+	texture, _, err := surface.GetCurrentTexture()
+	if err != nil {
+		return nil, err
+	}
+	presented := false
+	defer func() {
+		if !presented {
+			surface.DiscardTexture()
+		}
+	}()
+
+	view, err := texture.CreateView(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer view.Release()
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		return nil, err
+	}
+	pass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       view,
+			LoadOp:     gputypes.LoadOpClear,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: wgpu.Color{R: 1, A: 1},
+		}},
+	})
+	if err != nil {
+		encoder.DiscardEncoding()
+		return nil, err
+	}
+	if err := pass.End(); err != nil {
+		encoder.DiscardEncoding()
+		return nil, err
+	}
+
+	commands, err := encoder.Finish()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := device.Queue().Submit(commands); err != nil {
+		commands.Release()
+		return nil, err
+	}
+	if err := surface.Present(texture); err != nil {
+		return nil, err
+	}
+	presented = true
+
+	return surface.ReadPixels()
+}
+
+func main() {
+	pixels, err := capture()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(pixels)) // 64
+}
+```
+
+`ForceFallbackAdapter` makes the all-backends example select the software
+adapter compatible with the headless surface. The Rust and browser builds
+expose the same Go method set, but reject this target with
+`ErrUnsupportedSurfaceTarget`; ordinary GPU backends also reject `ReadPixels`
+because surface readback is not part of WebGPU.
 
 ## Safe provider path
 

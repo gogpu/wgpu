@@ -24,6 +24,11 @@ func TestSurfaceTargetUnsafeMapsToTypedHALTarget(t *testing.T) {
 		want   hal.SurfaceTarget
 	}{
 		{
+			name:   "Headless",
+			target: SurfaceTargetUnsafe{kind: surfaceTargetHeadless},
+			want:   hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless},
+		},
+		{
 			name:   "Win32",
 			target: SurfaceTargetFromWindowsHWND(1, 2),
 			want:   hal.SurfaceTarget{Kind: hal.SurfaceTargetWindowsHWND, DisplayHandle: 1, WindowHandle: 2},
@@ -77,6 +82,7 @@ func TestWebSurfaceTargetIsUnsupportedByNativeHAL(t *testing.T) {
 
 func TestSurfaceTargetUnsafeValidationAcceptsValidTargets(t *testing.T) {
 	targets := []SurfaceTargetUnsafe{
+		{kind: surfaceTargetHeadless},
 		SurfaceTargetFromWindowsHWND(0, 1),
 		SurfaceTargetFromXlibWindow(1, 2),
 		SurfaceTargetFromWaylandSurface(3, 4),

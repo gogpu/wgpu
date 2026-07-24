@@ -226,6 +226,18 @@ func (s *Surface) PresentWithDamage(st *SurfaceTexture, _ []image.Rectangle) err
 	return s.Present(st)
 }
 
+// ReadPixels is not supported by browser WebGPU surfaces.
+// Headless surface readback is a Pure-Go software-backend extension.
+func (s *Surface) ReadPixels() ([]byte, error) {
+	if s == nil || s.released {
+		return nil, ErrReleased
+	}
+	if s.device == nil {
+		return nil, fmt.Errorf("wgpu: surface not configured")
+	}
+	return nil, fmt.Errorf("wgpu: ReadPixels not supported on this backend")
+}
+
 // ActualExtent returns the configured surface dimensions.
 // On browser, the canvas dimensions are always used as-is (no driver clamping).
 // Returns (0, 0) if the surface is not configured.

@@ -173,6 +173,18 @@ type PixelWriter interface {
 	WritePixels(data []byte, width, height uint32) error
 }
 
+// PixelReader is an optional Surface capability for capturing the current
+// framebuffer without exposing backend-owned memory.
+//
+// ReadPixels returns a caller-owned, tightly packed RGBA8 snapshot in top-left,
+// row-major order. The returned slice remains valid after later rendering or
+// surface destruction.
+//
+// Extension: not part of WebGPU specification.
+type PixelReader interface {
+	ReadPixels() []byte
+}
+
 // SurfaceTexture is a texture acquired from a surface.
 // Surface textures have special lifetime constraints - they must be presented
 // or discarded before the next frame.

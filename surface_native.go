@@ -202,6 +202,8 @@ func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, disp
 func (t SurfaceTargetUnsafe) halTarget() (hal.SurfaceTarget, error) {
 	var kind hal.SurfaceTargetKind
 	switch t.kind {
+	case surfaceTargetHeadless:
+		kind = hal.SurfaceTargetHeadless
 	case surfaceTargetWindowsHWND:
 		kind = hal.SurfaceTargetWindowsHWND
 	case surfaceTargetXlibWindow:
@@ -418,6 +420,35 @@ func (s *Surface) WritePixels(data []byte, width, height uint32) error {
 		return pw.WritePixels(data, width, height)
 	}
 	return fmt.Errorf("wgpu: WritePixels not supported on this backend")
+}
+
+// ReadPixels captures the current surface framebuffer as an owned, tightly
+// packed RGBA8 snapshot in top-left, row-major order.
+//
+// This is a non-WebGPU extension implemented by the Pure-Go software backend.
+// The surface must be configured, and any acquired texture must be presented
+// or discarded before capture.
+func (s *Surface) ReadPixels() ([]byte, error) {
+	if s == nil || s.released || s.core == nil {
+		return nil, ErrReleased
+	}
+
+	switch s.core.State() {
+	case core.SurfaceStateUnconfigured:
+		return nil, fmt.Errorf("wgpu: surface not configured")
+	case core.SurfaceStateAcquired:
+		return nil, fmt.Errorf("wgpu: surface texture is still acquired; present or discard it before ReadPixels")
+	}
+
+	reader, ok := s.core.RawSurface().(hal.PixelReader)
+	if !ok {
+		return nil, fmt.Errorf("wgpu: ReadPixels not supported on this backend")
+	}
+	pixels := reader.ReadPixels()
+	if pixels == nil {
+		return nil, fmt.Errorf("wgpu: ReadPixels returned no pixel data")
+	}
+	return pixels, nil
 }
 
 // ActualExtent returns the actual swapchain dimensions after driver clamping.

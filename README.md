@@ -362,8 +362,13 @@ import _ "github.com/gogpu/wgpu/hal/software"
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
-- `GetFramebuffer()` pixel readback for headless test verification
+- Public `wgpu.HeadlessSurfaceTarget` + `Surface.ReadPixels()` lifecycle for deterministic headless render verification; snapshots are owned, tightly packed RGBA8
+- HAL `GetFramebuffer()` remains as a compatibility alias for existing software-backend callers; new root API code should use `Surface.ReadPixels()`
 - Damage-aware partial blit with pixel-level test coverage
+
+See [Surface targets](docs/SURFACE-TARGETS.md#headless-software-surface-and-readback)
+for the complete configure → acquire → render → submit → present → readback
+recipe and the explicit non-WebGPU support contract.
 
 **Windowed Presentation:**
 - **Windows:** DWM-safe `CreateDIBSection` + `BitBlt` (SDL3/Qt6 pattern), zero-copy into GDI bitmap

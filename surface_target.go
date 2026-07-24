@@ -30,6 +30,7 @@ type surfaceTargetKind uint8
 
 const (
 	surfaceTargetInvalid surfaceTargetKind = iota
+	surfaceTargetHeadless
 	surfaceTargetWindowsHWND
 	surfaceTargetXlibWindow
 	surfaceTargetWaylandSurface
@@ -48,6 +49,19 @@ type SurfaceTargetUnsafe struct {
 	kind          surfaceTargetKind
 	displayHandle uintptr
 	windowHandle  uintptr
+}
+
+// HeadlessSurfaceTarget requests a surface without a native window.
+//
+// The Pure-Go software backend implements this Go-specific extension. It owns
+// no native handles, so the zero value is ready for use with
+// Instance.CreateSurfaceFromTarget. Rust and browser implementations reject
+// this target with ErrUnsupportedSurfaceTarget.
+type HeadlessSurfaceTarget struct{}
+
+// SurfaceTarget returns the raw target used by the Pure-Go software backend.
+func (HeadlessSurfaceTarget) SurfaceTarget() (SurfaceTargetUnsafe, error) {
+	return SurfaceTargetUnsafe{kind: surfaceTargetHeadless}, nil
 }
 
 // SurfaceTargetFromWindowsHWND returns a raw Win32 surface target.
@@ -107,6 +121,8 @@ func SurfaceTargetFromWebCanvasID(id uintptr) SurfaceTargetUnsafe {
 
 func (t SurfaceTargetUnsafe) validate() error {
 	switch t.kind {
+	case surfaceTargetHeadless:
+		// A headless target carries no platform handles.
 	case surfaceTargetWindowsHWND:
 		if t.windowHandle == 0 {
 			return invalidSurfaceTarget("Win32 HWND is zero")
