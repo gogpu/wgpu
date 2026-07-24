@@ -176,6 +176,8 @@ type Surface struct {
 	platformBlit          // platform-specific blit resources (Windows: DIB section, Linux: X11 GC)
 }
 
+var _ hal.PixelReader = (*Surface)(nil)
+
 // Configure configures the surface with the given settings.
 //
 // Returns hal.ErrZeroArea if width or height is zero.
@@ -347,11 +349,11 @@ func (s *Surface) ActualExtent() (width, height uint32) {
 	return s.width, s.height
 }
 
-// GetFramebuffer returns a copy of the current framebuffer data in RGBA byte
+// ReadPixels returns a copy of the current framebuffer data in RGBA byte
 // order (thread-safe). If the surface format is BGRA, R and B channels are
-// swapped so callers always receive consistent RGBA data. This allows
-// platform blit code to do a single RGBA→BGRA conversion for GDI/X11.
-func (s *Surface) GetFramebuffer() []byte {
+// swapped so callers always receive consistent RGBA data. The returned slice
+// is caller-owned and remains valid after later rendering or surface release.
+func (s *Surface) ReadPixels() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -372,6 +374,13 @@ func (s *Surface) GetFramebuffer() []byte {
 	}
 
 	return result
+}
+
+// GetFramebuffer returns an owned RGBA snapshot for compatibility with
+// existing software HAL callers. New root-wgpu callers should use
+// Surface.ReadPixels.
+func (s *Surface) GetFramebuffer() []byte {
+	return s.ReadPixels()
 }
 
 // SurfaceTexture implements hal.SurfaceTexture.
