@@ -1,10 +1,13 @@
 # Android Vulkan preview
 
-Android/arm64 support is an unreleased implementation preview in
-[gogpu/wgpu#268](https://github.com/gogpu/wgpu/pull/268), not a released support
-claim. Its current scope is Vulkan, arm64, Android API 29 or newer, and both
-`CGO_ENABLED=0` and `CGO_ENABLED=1`. GLES, software fallback, 32-bit Android,
-debug callbacks, and API 28 or older are out of scope.
+Android/arm64 support is an unreleased implementation preview on WGPU `main`,
+not a released support claim. It landed in
+[gogpu/wgpu#273](https://github.com/gogpu/wgpu/pull/273), whose squash included
+the Android WSI work prepared and discussed in
+[gogpu/wgpu#268](https://github.com/gogpu/wgpu/pull/268). Its current scope is
+Vulkan, arm64, Android API 29 or newer, and both `CGO_ENABLED=0` and
+`CGO_ENABLED=1`. GLES, software fallback, 32-bit Android, debug callbacks, and
+API 28 or older are out of scope.
 
 The default backend consumes canonical
 [goffi v0.6.1](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1), released
@@ -81,22 +84,20 @@ filter. The canonical backend's existing application-version request remains
 unchanged; actual extensions, commands, features, and device evidence decide
 whether a Vulkan implementation works.
 
-## Merge order
+## Integration status
 
-The Android Vulkan work remains in
-[wgpu#268](https://github.com/gogpu/wgpu/pull/268). This typed-surface change is
-best reviewed and merged after #268. Its five WGPU prerequisites (#264, #265,
-#266, #267, and #269), goffi#62/v0.6.1, and webgpu#24 are merged. This branch is
-rebased onto the resulting WGPU `main`, so none of those five WGPU prerequisite
-commits are replayed here. Until #268 lands, its Android-owned commits remain
-below this PR's typed-target commits; they can be dropped in one final rebase
-without changing the public design.
+The five WGPU prerequisites (#264, #265, #266, #267, and #269), goffi#62/v0.6.1,
+webgpu#24, and typed-surface PR #273 are merged. The #273 squash also included
+the Android-owned commits originally carried by #268, so WGPU `main` already
+contains both the Vulkan WSI implementation and the typed public/HAL surface
+API. PR #268 remains the implementation's design and review record rather than
+a code dependency.
 
 [wgpu#253](https://github.com/gogpu/wgpu/pull/253) is the design precedent for
 matching Rust's typed public/HAL seam; it is not a code dependency of Android.
-The default Vulkan path needs #268 and goffi v0.6.1. The `rust` build-tag path
-needs the canonical `go-webgpu/webgpu` helper as well. No WGPU-local copy of
-that helper should be merged.
+The default Vulkan path uses goffi v0.6.1. The `rust` build-tag path needs the
+canonical `go-webgpu/webgpu` helper as well. No WGPU-local copy of that helper
+should be added.
 
 ## Reproducing deterministic proof
 
@@ -126,9 +127,8 @@ These are deterministic cross-build and binary-shape checks. They do not prove
 process startup, adapter enumeration, surface creation, rendering,
 presentation, rotation, or lifecycle recovery on a physical device.
 
-Before the preview can become a released support claim, the canonical
-`go-webgpu/webgpu` helper and the WGPU prerequisites must merge and ship through
-canonical refs; #268 must rebase to Android-only commits; and API 29 plus API
-36 arm64 devices must pass startup, known-color presentation, rotation,
-Activity recreation, and repeated native-window replacement without crashes,
-hangs, stale frames, or validation errors.
+Before the preview can become a released support claim, this WGPU integration
+and a canonical `go-webgpu/webgpu` release containing the Android helper must
+ship; API 29 plus API 36 arm64 devices must also pass startup, known-color
+presentation, rotation, Activity recreation, and repeated native-window
+replacement without crashes, hangs, stale frames, or validation errors.

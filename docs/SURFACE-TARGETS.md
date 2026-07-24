@@ -10,9 +10,9 @@ target and ownership mode explicitly.
 ## Exhaustive API mapping
 
 This map covers every exported production symbol added or behaviorally changed
-by this follow-up relative to PR #268. Test-only declarations are excluded.
-Build-tagged implementations of the same package selector are one logical Go
-symbol. The Rust references are the pinned v29.0.3 sources for
+by the typed-surface integration in PR #273. Test-only declarations are
+excluded. Build-tagged implementations of the same package selector are one
+logical Go symbol. The Rust references are the pinned v29.0.3 sources for
 [`Instance::create_surface`](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu/src/api/instance.rs#L175-L280),
 [`SurfaceTarget` and `SurfaceTargetUnsafe`](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu/src/api/surface.rs#L254-L458),
 and [core surface creation](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu-core/src/instance.rs#L218-L290).
