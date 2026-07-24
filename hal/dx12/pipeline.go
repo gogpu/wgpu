@@ -157,7 +157,11 @@ type BindGroup struct {
 	// BindingTypeStorageBuffer against the corresponding buffer bindings.
 	// Used by ComputePassEncoder to track which buffers transition to
 	// UNORDERED_ACCESS after Dispatch() (BUG-DX12-012 fix).
-	storageBuffers []*Buffer
+	storageBuffers         []*Buffer
+	readOnlyStorageBuffers []*Buffer
+	uniformBuffers         []*Buffer
+	sampledTextures        []*TextureView
+	storageTextures        []*TextureView
 }
 
 // Destroy releases the bind group resources and recycles descriptor heap slots.

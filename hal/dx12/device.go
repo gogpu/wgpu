@@ -52,6 +52,7 @@ type Device struct {
 
 	// Command queue for graphics/compute operations.
 	directQueue *d3d12.ID3D12CommandQueue
+	queueState  *queueState // shared noncyclic lifetime/preamble owner
 
 	// Descriptor heaps (shared for all resources).
 	viewHeap    *DescriptorHeap // CBV/SRV/UAV (shader-visible, for bind groups)
@@ -1116,6 +1117,10 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		gpuVA:           resource.GetGPUVirtualAddress(),
 		device:          d,
 		currentState:    initialState,
+		stateOwner: resourceStateOwner{
+			bufferState:    initialState,
+			bufferStateSet: true,
+		},
 	}
 
 	// Map at creation if requested
@@ -1342,6 +1347,11 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		device:       d,
 		currentState: initialState,
 	}
+	textureStates := make([]d3d12.D3D12_RESOURCE_STATES, tex.subresourceCount())
+	for i := range textureStates {
+		textureStates[i] = initialState
+	}
+	tex.stateOwner.setTextureStates(textureStates)
 
 	// Post-creation health check: detect if CreateCommittedResource silently poisoned the device.
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
@@ -1377,17 +1387,28 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	// hasRTV=true so BeginRenderPass uses this RTV, but isExternal=true tells
 	// Destroy() to skip freeing the RTV heap slot (the Surface owns it).
 	if st, ok := texture.(*SurfaceTexture); ok {
+		owner := st.stateOwner
+		if owner == nil {
+			owner = &Texture{
+				raw:          st.resource,
+				format:       st.format,
+				dimension:    gputypes.TextureDimension2D,
+				size:         hal.Extent3D{Width: st.width, Height: st.height, DepthOrArrayLayers: 1},
+				mipLevels:    1,
+				samples:      1,
+				usage:        gputypes.TextureUsageRenderAttachment,
+				device:       d,
+				isExternal:   true,
+				currentState: d3d12.D3D12_RESOURCE_STATE_PRESENT,
+			}
+			owner.stateOwner.setTextureStates([]d3d12.D3D12_RESOURCE_STATES{d3d12.D3D12_RESOURCE_STATE_PRESENT})
+			st.stateOwner = owner
+		}
 		return &TextureView{
-			texture: &Texture{
-				raw:        st.resource,
-				format:     st.format,
-				dimension:  gputypes.TextureDimension2D,
-				size:       hal.Extent3D{Width: st.width, Height: st.height, DepthOrArrayLayers: 1},
-				mipLevels:  1,
-				isExternal: true,
-			},
+			texture:    owner,
 			format:     st.format,
 			dimension:  gputypes.TextureViewDimension2D,
+			aspect:     gputypes.TextureAspectAll,
 			baseMip:    0,
 			mipCount:   1,
 			baseLayer:  0,
@@ -1453,11 +1474,15 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		texture:    tex,
 		format:     viewFormat,
 		dimension:  viewDim,
+		aspect:     gputypes.TextureAspectAll,
 		baseMip:    baseMip,
 		mipCount:   mipCount,
 		baseLayer:  baseLayer,
 		layerCount: layerCount,
 		device:     d,
+	}
+	if desc != nil && desc.Aspect != gputypes.TextureAspectUndefined {
+		view.aspect = desc.Aspect
 	}
 
 	dxgiFormat := textureFormatToD3D12(viewFormat)
@@ -1469,7 +1494,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate RTV descriptor
 		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate RTV descriptor: %w", err))
 		}
 
 		var rtvDesc d3d12.D3D12_RENDER_TARGET_VIEW_DESC
@@ -1510,7 +1535,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate DSV descriptor
 		dsvHandle, dsvIndex, err := d.allocateDSVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate DSV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate DSV descriptor: %w", err))
 		}
 
 		// For depth views, use the actual depth format, not typeless
@@ -1543,8 +1568,27 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 		d.raw.CreateDepthStencilView(tex.raw, &dsvDesc, dsvHandle)
 		view.dsvHandle = dsvHandle
-		view.dsvHeapIndex = dsvIndex
+		view.dsvHandles[0] = dsvHandle
+		view.dsvHeapIndex[0] = dsvIndex
+		view.hasDSVVariants[0] = true
 		view.hasDSV = true
+
+		// D3D12 encodes read-only depth/stencil planes in the DSV itself. A
+		// stencil read-only flag is invalid for single-plane D16/D32 formats,
+		// while WebGPU's Depth24Plus and Stencil8 use packed D24S8 resources and
+		// need both physical-plane flags to protect their hidden companion.
+		for _, mask := range dsvReadOnlyVariantMasks(viewFormat) {
+			variantHandle, variantIndex, variantErr := d.allocateDSVDescriptor()
+			if variantErr != nil {
+				return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate read-only DSV descriptor: %w", variantErr))
+			}
+			variantDesc := dsvDesc
+			variantDesc.Flags = d3d12.D3D12_DSV_FLAGS(mask)
+			d.raw.CreateDepthStencilView(tex.raw, &variantDesc, variantHandle)
+			view.dsvHandles[mask] = variantHandle
+			view.dsvHeapIndex[mask] = variantIndex
+			view.hasDSVVariants[mask] = true
+		}
 	}
 
 	// Create SRV if texture supports texture binding
@@ -1552,13 +1596,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		// Allocate SRV descriptor
 		srvHandle, srvIndex, err := d.allocateSRVDescriptor()
 		if err != nil {
-			return nil, fmt.Errorf("dx12: failed to allocate SRV descriptor: %w", err)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: failed to allocate SRV descriptor: %w", err))
 		}
 
-		// For depth textures, use SRV-compatible format
-		srvFormat := dxgiFormat
-		if isDepthFormat(viewFormat) {
-			srvFormat = depthFormatToSRV(viewFormat)
+		srvFormat, srvPlane := textureFormatToSRV(viewFormat, view.aspect)
+		if srvFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+			d.stagingViewHeap.Free(srvIndex, 1)
+			return failTextureViewCreation(view, fmt.Errorf("dx12: texture format %d aspect %d cannot create an SRV", viewFormat, view.aspect))
 		}
 
 		// Create SRV desc
@@ -1573,9 +1617,9 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		case gputypes.TextureViewDimension1D:
 			srvDesc.SetTexture1D(baseMip, mipCount, 0)
 		case gputypes.TextureViewDimension2D:
-			srvDesc.SetTexture2D(baseMip, mipCount, 0, 0)
+			srvDesc.SetTexture2D(baseMip, mipCount, srvPlane, 0)
 		case gputypes.TextureViewDimension2DArray:
-			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, 0, 0)
+			srvDesc.SetTexture2DArray(baseMip, mipCount, baseLayer, layerCount, srvPlane, 0)
 		case gputypes.TextureViewDimensionCube:
 			srvDesc.SetTextureCube(baseMip, mipCount, 0)
 		case gputypes.TextureViewDimensionCubeArray:
@@ -1591,6 +1635,29 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 
 	return view, nil
+}
+
+func dsvReadOnlyVariantMasks(format gputypes.TextureFormat) []uint32 {
+	switch format {
+	case gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
+		return []uint32{
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH),
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL),
+			uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH | d3d12.D3D12_DSV_FLAG_READ_ONLY_STENCIL),
+		}
+	default:
+		return []uint32{uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH)}
+	}
+}
+
+func failTextureViewCreation(view *TextureView, err error) (hal.TextureView, error) {
+	if view != nil {
+		view.Destroy()
+	}
+	return nil, err
 }
 
 // DestroyTextureView destroys a texture view.
@@ -1754,23 +1821,36 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		}
 	}
 
-	// Collect storage buffer references for DX12 resource state tracking.
-	// Match layout entries (which know the binding type) with bind group entries
-	// (which carry the buffer handle) to identify storage buffers.
-	// These references are used by ComputePassEncoder to mark buffers as
-	// UNORDERED_ACCESS after Dispatch(), enabling correct transition barriers
-	// before subsequent copy commands (BUG-DX12-012).
+	// Collect resource references for DX12 command-local state tracking. The
+	// descriptor table itself does not carry enough information to emit state
+	// transitions, so retain the typed resources alongside it.
 	for _, layoutEntry := range layout.entries {
-		if layoutEntry.Type != BindingTypeStorageBuffer {
-			continue
-		}
 		for _, bgEntry := range desc.Entries {
 			if bgEntry.Binding != layoutEntry.Binding {
 				continue
 			}
-			if bufBinding, ok := bgEntry.Resource.(gputypes.BufferBinding); ok && bufBinding.Buffer != 0 {
-				buf := (*Buffer)(unsafe.Pointer(bufBinding.Buffer)) //nolint:govet // intentional: HAL handle -> concrete type
-				bg.storageBuffers = append(bg.storageBuffers, buf)
+			switch layoutEntry.Type {
+			case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
+				if bufBinding, ok := bgEntry.Resource.(gputypes.BufferBinding); ok && bufBinding.Buffer != 0 {
+					buf := (*Buffer)(unsafe.Pointer(bufBinding.Buffer)) //nolint:govet // intentional: HAL handle -> concrete type
+					switch layoutEntry.Type {
+					case BindingTypeUniformBuffer:
+						bg.uniformBuffers = append(bg.uniformBuffers, buf)
+					case BindingTypeStorageBuffer:
+						bg.storageBuffers = append(bg.storageBuffers, buf)
+					case BindingTypeReadOnlyStorageBuffer:
+						bg.readOnlyStorageBuffers = append(bg.readOnlyStorageBuffers, buf)
+					}
+				}
+			case BindingTypeSampledTexture, BindingTypeStorageTexture:
+				if textureBinding, ok := bgEntry.Resource.(gputypes.TextureViewBinding); ok && textureBinding.TextureView != 0 {
+					view := (*TextureView)(unsafe.Pointer(textureBinding.TextureView)) //nolint:govet // intentional: HAL handle -> concrete type
+					if layoutEntry.Type == BindingTypeSampledTexture {
+						bg.sampledTextures = append(bg.sampledTextures, view)
+					} else {
+						bg.storageTextures = append(bg.storageTextures, view)
+					}
+				}
 			}
 			break
 		}
@@ -2684,7 +2764,24 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
-	return d.waitForGPU()
+	if d == nil {
+		return fmt.Errorf("dx12: device is nil")
+	}
+	state := d.queueState
+	if state != nil {
+		state.submitMu.Lock()
+		defer state.submitMu.Unlock()
+		if state.closed {
+			return fmt.Errorf("dx12: device queue is closed")
+		}
+	}
+	if err := d.waitForGPU(); err != nil {
+		return err
+	}
+	if state != nil {
+		state.releaseAllOwnedLocked()
+	}
+	return nil
 }
 
 // Destroy releases the device.
@@ -2692,14 +2789,44 @@ func (d *Device) Destroy() {
 	if d == nil {
 		return
 	}
+	state := d.queueState
+	if state != nil {
+		state.submitMu.Lock()
+		defer state.submitMu.Unlock()
+		if state.closed {
+			return
+		}
+		// Closing while holding submission exclusion prevents new work from
+		// entering after the terminal idle fence has been enqueued.
+		state.closed = true
+	}
+	if d.raw == nil {
+		return
+	}
 
 	// Clear finalizer to prevent double-free
 	runtime.SetFinalizer(d, nil)
 
-	// Wait for GPU to finish before cleanup
-	_ = d.waitForGPU()
+	waitErr := d.waitForGPU()
+	deviceRemoved := false
+	if waitErr != nil {
+		deviceRemoved = d.raw.GetDeviceRemovedReason() != nil
+	}
+	if state != nil {
+		state.releaseTerminalOwnedLocked(waitErr, deviceRemoved)
+		if !shouldReleaseTerminalOwnedObjects(waitErr, deviceRemoved) &&
+			(len(state.preambleInFlight) > 0 || len(state.oneShotsInFlight) > 0) {
+			// A failed event registration/wait does not prove GPU completion.
+			// Device removal is the only safe exception for in-flight work.
+			hal.Logger().Warn("dx12: retaining queue-owned GPU objects after ambiguous idle failure", "err", waitErr)
+		}
+	}
 
 	d.cleanup()
+}
+
+func shouldReleaseTerminalOwnedObjects(waitErr error, deviceRemoved bool) bool {
+	return waitErr == nil || deviceRemoved
 }
 
 // -----------------------------------------------------------------------------

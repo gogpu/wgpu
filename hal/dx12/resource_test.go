@@ -6,6 +6,7 @@
 package dx12
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -109,5 +110,41 @@ func TestTexture_DecPendingRef_NoDeferWithoutDestroy(t *testing.T) {
 	// pendingDeath was never set, so no destroy should trigger.
 	if tex.pendingDeath {
 		t.Error("pendingDeath should remain false")
+	}
+}
+
+func TestFailTextureViewCreationRecyclesAllocatedDescriptors(t *testing.T) {
+	device := &Device{
+		rtvHeap:         &DescriptorHeap{},
+		dsvHeap:         &DescriptorHeap{},
+		stagingViewHeap: &DescriptorHeap{},
+	}
+	view := &TextureView{
+		texture:        &Texture{},
+		device:         device,
+		hasRTV:         true,
+		rtvHeapIndex:   2,
+		hasDSV:         true,
+		hasDSVVariants: [4]bool{true},
+		dsvHeapIndex:   [4]uint32{3},
+		hasSRV:         true,
+		srvHeapIndex:   4,
+	}
+
+	result, err := failTextureViewCreation(view, errors.New("view creation failed"))
+	if result != nil {
+		t.Fatal("failed texture view should not be returned")
+	}
+	if err == nil || err.Error() != "view creation failed" {
+		t.Fatalf("error = %v, want original view creation error", err)
+	}
+	if len(device.rtvHeap.freeList) != 1 || device.rtvHeap.freeList[0] != 2 {
+		t.Fatalf("RTV free list = %v, want [2]", device.rtvHeap.freeList)
+	}
+	if len(device.dsvHeap.freeList) != 1 || device.dsvHeap.freeList[0] != 3 {
+		t.Fatalf("DSV free list = %v, want [3]", device.dsvHeap.freeList)
+	}
+	if len(device.stagingViewHeap.freeList) != 1 || device.stagingViewHeap.freeList[0] != 4 {
+		t.Fatalf("SRV free list = %v, want [4]", device.stagingViewHeap.freeList)
 	}
 }

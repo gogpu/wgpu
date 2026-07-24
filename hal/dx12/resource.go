@@ -29,21 +29,16 @@ type Buffer struct {
 	device          *Device
 	mappedPointer   unsafe.Pointer // Non-nil if buffer is currently mapped
 
-	// currentState tracks the D3D12 resource state for barrier correctness.
-	// DX12 requires explicit D3D12_RESOURCE_BARRIER transitions between states
-	// (e.g., UNORDERED_ACCESS -> COPY_SOURCE). Without tracking, missing barriers
-	// cause DEVICE_REMOVED on compute -> copy sequences (BUG-DX12-012).
-	//
-	// Set to the initial state in CreateBuffer, updated by:
-	//   - ComputePassEncoder.Dispatch() -> UNORDERED_ACCESS for bound storage buffers
-	//   - CopyBufferToBuffer -> COPY_SOURCE/COPY_DEST for src/dst
-	//   - CopyBufferToTexture -> COPY_SOURCE for src
-	//   - CopyTextureToBuffer -> COPY_DEST for dst
-	//
-	// Thread safety: buffers are used single-threaded within a command encoder
-	// recording scope, matching the WebGPU spec (command encoders are not
-	// thread-safe). No atomic needed.
+	// currentState mirrors the queue-scheduled state for legacy diagnostics.
+	// Access it only while holding stateOwner.mu; command recording keeps its
+	// own state and Queue.Submit reconciles that state with stateOwner.
 	currentState d3d12.D3D12_RESOURCE_STATES
+
+	// stateOwner is the queue-scheduled state. currentState is retained for
+	// compatibility with older tests and diagnostics, but command recording
+	// must never mutate it: concurrent command buffers reconcile against this
+	// owner only at Queue.Submit.
+	stateOwner resourceStateOwner
 }
 
 // isMappable returns true if the buffer can be mapped for CPU access.
@@ -168,15 +163,116 @@ type Texture struct {
 	usage        gputypes.TextureUsage
 	device       *Device
 	isExternal   bool                        // True for swapchain images (not owned)
-	currentState d3d12.D3D12_RESOURCE_STATES // Tracked resource state for barrier correctness
-	pendingRefs  int32                       // >0 = PendingWrites in-flight, defer Destroy (BUG-DX12-006)
-	pendingDeath bool                        // true = Destroy was called while pendingRefs > 0
+	currentState d3d12.D3D12_RESOURCE_STATES // Legacy diagnostic state; use stateOwner for tracking.
+	stateOwner   resourceStateOwner
+	pendingRefs  int32 // >0 = PendingWrites in-flight, defer Destroy (BUG-DX12-006)
+	pendingDeath bool  // true = Destroy was called while pendingRefs > 0
 }
 
 // CurrentUsage returns the texture's tracked D3D12 resource state mapped to gputypes.TextureUsage.
 // Used by PendingWrites to determine the correct "before" state for copy barriers.
 func (t *Texture) CurrentUsage() gputypes.TextureUsage {
-	return d3d12StateToTextureUsage(t.currentState)
+	return d3d12StateToTextureUsage(t.scheduledStateSnapshot(0))
+}
+
+func (b *Buffer) scheduledStateSnapshot() d3d12.D3D12_RESOURCE_STATES {
+	b.stateOwner.mu.Lock()
+	defer b.stateOwner.mu.Unlock()
+	if b.stateOwner.bufferStateSet {
+		return b.stateOwner.bufferState
+	}
+	return b.currentState
+}
+
+func (b *Buffer) commitScheduledState(state d3d12.D3D12_RESOURCE_STATES) {
+	b.stateOwner.mu.Lock()
+	b.stateOwner.bufferState = state
+	b.stateOwner.bufferStateSet = true
+	// Keep the legacy field useful to diagnostics and existing callers, but
+	// keep it under the same owner lock as the authoritative state.
+	b.currentState = state
+	b.stateOwner.mu.Unlock()
+}
+
+func (t *Texture) scheduledStateSnapshot(subresource uint32) d3d12.D3D12_RESOURCE_STATES {
+	t.stateOwner.mu.Lock()
+	defer t.stateOwner.mu.Unlock()
+	if subresource < uint32(len(t.stateOwner.textureStates)) {
+		return t.stateOwner.textureStates[subresource]
+	}
+	return t.currentState
+}
+
+func (t *Texture) scheduledStateSnapshotAll() []d3d12.D3D12_RESOURCE_STATES {
+	t.stateOwner.mu.Lock()
+	defer t.stateOwner.mu.Unlock()
+	if len(t.stateOwner.textureStates) == 0 {
+		return []d3d12.D3D12_RESOURCE_STATES{t.currentState}
+	}
+	return append([]d3d12.D3D12_RESOURCE_STATES(nil), t.stateOwner.textureStates...)
+}
+
+func (t *Texture) commitScheduledStates(states []d3d12.D3D12_RESOURCE_STATES) {
+	t.stateOwner.mu.Lock()
+	t.stateOwner.textureStates = append(t.stateOwner.textureStates[:0], states...)
+	if len(states) > 0 {
+		// The legacy field is only meaningful for all-subresource views. Keep
+		// it synchronized with subresource zero under the owner lock.
+		t.currentState = states[0]
+	}
+	t.stateOwner.mu.Unlock()
+}
+
+func (t *Texture) subresourceCount() uint32 {
+	mipLevels := t.mipLevels
+	if mipLevels == 0 {
+		mipLevels = 1
+	}
+	layers := uint32(1)
+	if t.dimension != gputypes.TextureDimension3D {
+		layers = t.size.DepthOrArrayLayers
+		if layers == 0 {
+			layers = 1
+		}
+	}
+	return mipLevels * layers * t.planeCount()
+}
+
+// planeCount returns the number of D3D12 subresource planes represented by
+// this texture. D3D12 uses a separate subresource range for depth and stencil
+// planes of packed depth/stencil formats; mip levels remain the fastest
+// varying component within each array layer and plane.
+func (t *Texture) planeCount() uint32 {
+	switch t.format {
+	case gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8:
+		// DX12 represents Depth24Plus and Stencil8 with D24S8, so retain
+		// both physical planes even when WebGPU exposes only one aspect.
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (t *Texture) subresourceIndexForPlane(mipLevel, arrayLayer, plane uint32) uint32 {
+	mipLevels := t.mipLevels
+	if mipLevels == 0 {
+		mipLevels = 1
+	}
+	layers := uint32(1)
+	if t.dimension != gputypes.TextureDimension3D {
+		layers = t.size.DepthOrArrayLayers
+		if layers == 0 {
+			layers = 1
+		}
+	}
+	return mipLevel + arrayLayer*mipLevels + plane*mipLevels*layers
+}
+
+func (t *Texture) subresourceIndex(mipLevel, arrayLayer uint32) uint32 {
+	return t.subresourceIndexForPlane(mipLevel, arrayLayer, 0)
 }
 
 // AddPendingRef increments the pending reference count.
@@ -245,23 +341,26 @@ func (t *Texture) Dimension() gputypes.TextureDimension {
 
 // TextureView implements hal.TextureView for DirectX 12.
 type TextureView struct {
-	texture      *Texture
-	format       gputypes.TextureFormat
-	dimension    gputypes.TextureViewDimension
-	baseMip      uint32
-	mipCount     uint32
-	baseLayer    uint32
-	layerCount   uint32
-	device       *Device
-	srvHandle    d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // Shader resource view (for sampling)
-	rtvHandle    d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // Render target view
-	dsvHandle    d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // Depth stencil view
-	hasSRV       bool
-	hasRTV       bool
-	hasDSV       bool
-	srvHeapIndex uint32
-	rtvHeapIndex uint32
-	dsvHeapIndex uint32
+	texture        *Texture
+	format         gputypes.TextureFormat
+	dimension      gputypes.TextureViewDimension
+	aspect         gputypes.TextureAspect
+	baseMip        uint32
+	mipCount       uint32
+	baseLayer      uint32
+	layerCount     uint32
+	device         *Device
+	srvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Shader resource view (for sampling)
+	rtvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Render target view
+	dsvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Depth stencil view
+	dsvHandles     [4]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // DSV variants keyed by D3D12_DSV_FLAGS
+	hasSRV         bool
+	hasRTV         bool
+	hasDSV         bool
+	hasDSVVariants [4]bool
+	srvHeapIndex   uint32
+	rtvHeapIndex   uint32
+	dsvHeapIndex   [4]uint32
 }
 
 // Destroy releases the texture view resources and recycles descriptor heap slots.
@@ -276,12 +375,17 @@ func (v *TextureView) Destroy() {
 			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
 		}
 		if v.hasDSV && v.device.dsvHeap != nil {
-			v.device.dsvHeap.Free(v.dsvHeapIndex, 1)
+			for i := range v.dsvHeapIndex {
+				if v.hasDSVVariants[i] {
+					v.device.dsvHeap.Free(v.dsvHeapIndex[i], 1)
+				}
+			}
 		}
 	}
 	v.hasSRV = false
 	v.hasRTV = false
 	v.hasDSV = false
+	v.hasDSVVariants = [4]bool{}
 }
 
 // Texture returns the parent texture.
@@ -303,6 +407,14 @@ func (v *TextureView) RTVHandle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 // DSVHandle returns the depth stencil view descriptor handle.
 func (v *TextureView) DSVHandle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return v.dsvHandle
+}
+
+func (v *TextureView) dsvHandleForFlags(flags d3d12.D3D12_DSV_FLAGS) *d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
+	index := uint32(flags) & 3
+	if index < uint32(len(v.dsvHandles)) && v.hasDSVVariants[index] {
+		return &v.dsvHandles[index]
+	}
+	return &v.dsvHandle
 }
 
 // SRVHandle returns the shader resource view descriptor handle.

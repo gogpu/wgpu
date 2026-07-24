@@ -1178,6 +1178,17 @@ func (f *ID3D12Fence) Signal(value uint64) error {
 // ID3D12Resource methods
 // -----------------------------------------------------------------------------
 
+// AddRef increments the reference count.
+func (r *ID3D12Resource) AddRef() uint32 {
+	ret, _, _ := syscall.Syscall(
+		r.vtbl.AddRef,
+		1,
+		uintptr(unsafe.Pointer(r)),
+		0, 0,
+	)
+	return uint32(ret)
+}
+
 // Release decrements the reference count.
 func (r *ID3D12Resource) Release() uint32 {
 	ret, _, _ := syscall.Syscall(

@@ -237,6 +237,8 @@ func depthFormatToTypeless(format gputypes.TextureFormat) d3d12.DXGI_FORMAT {
 		return d3d12.DXGI_FORMAT_R32_TYPELESS
 	case gputypes.TextureFormatDepth32FloatStencil8:
 		return d3d12.DXGI_FORMAT_R32G8X24_TYPELESS
+	case gputypes.TextureFormatStencil8:
+		return d3d12.DXGI_FORMAT_R24G8_TYPELESS
 	default:
 		return d3d12.DXGI_FORMAT_UNKNOWN
 	}
@@ -256,6 +258,27 @@ func depthFormatToSRV(format gputypes.TextureFormat) d3d12.DXGI_FORMAT {
 	default:
 		return d3d12.DXGI_FORMAT_UNKNOWN
 	}
+}
+
+// textureFormatToSRV selects the typed view format and physical D3D12 plane
+// for a WebGPU texture aspect. Packed depth/stencil formats expose their
+// stencil plane through an X*TYPELESS_G8*UINT SRV. Standalone Stencil8 uses a
+// D24S8 backing resource on DX12 and therefore follows the same representation.
+func textureFormatToSRV(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (d3d12.DXGI_FORMAT, uint32) {
+	if aspect == gputypes.TextureAspectStencilOnly || format == gputypes.TextureFormatStencil8 {
+		switch format {
+		case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatStencil8:
+			return d3d12.DXGI_FORMAT_X24_TYPELESS_G8_UINT, 1
+		case gputypes.TextureFormatDepth32FloatStencil8:
+			return d3d12.DXGI_FORMAT_X32_TYPELESS_G8X24_UINT, 1
+		default:
+			return d3d12.DXGI_FORMAT_UNKNOWN, 1
+		}
+	}
+	if isDepthFormat(format) {
+		return depthFormatToSRV(format), 0
+	}
+	return textureFormatToD3D12(format), 0
 }
 
 // addressModeToD3D12 converts a WebGPU address mode to D3D12.
