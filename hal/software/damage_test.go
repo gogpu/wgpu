@@ -42,7 +42,7 @@ func createDamageTestSurface(t *testing.T, width, height uint32) (*Surface, *Dev
 	}
 	t.Cleanup(instance.Destroy)
 
-	surface, err := instance.CreateSurface(0, 0) // headless: hwnd=0
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}
@@ -77,7 +77,7 @@ func createDamageTestSurfaceBGRA(t *testing.T, width, height uint32) (*Surface, 
 	}
 	t.Cleanup(instance.Destroy)
 
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}
@@ -868,7 +868,7 @@ func BenchmarkPresent_FullSurface(b *testing.B) {
 	openDev, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0) // headless
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	_ = surface.Configure(openDev.Device, &hal.SurfaceConfiguration{
@@ -896,7 +896,7 @@ func BenchmarkPresent_SmallDamageRect(b *testing.B) {
 	openDev, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0) // headless
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	_ = surface.Configure(openDev.Device, &hal.SurfaceConfiguration{
@@ -925,7 +925,7 @@ func BenchmarkPresent_MultipleSmallRects(b *testing.B) {
 	openDev, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
 	defer openDev.Device.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	_ = surface.Configure(openDev.Device, &hal.SurfaceConfiguration{
@@ -1007,7 +1007,7 @@ func TestDamage_ReconfigureThenPresent(t *testing.T) {
 	}
 	defer instance.Destroy()
 
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}

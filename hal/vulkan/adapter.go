@@ -492,7 +492,7 @@ func makeSurfaceSnapshot(capabilities vk.SurfaceCapabilitiesKHR, formats []vk.Su
 		AlphaModes:   alphaModes,
 	}
 	for _, format := range formats {
-		if textureFormat := vkFormatToTextureFormat(format.Format); textureFormat != gputypes.TextureFormatUndefined {
+		if textureFormat := textureFormatForSurfacePair(format); textureFormat != gputypes.TextureFormatUndefined {
 			public.Formats = append(public.Formats, textureFormat)
 		}
 	}

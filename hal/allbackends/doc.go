@@ -12,7 +12,7 @@
 //	)
 //
 // This will register:
-//   - Vulkan backend (Windows, Linux, macOS)
+//   - Vulkan backend (Windows, Linux, macOS; Android/arm64 preview)
 //   - Metal backend (macOS, iOS)
 //   - DX12 backend (Windows)
 //   - OpenGL ES backend (Windows, Linux)
@@ -21,8 +21,8 @@
 // After importing, use hal.GetBackend or hal.SelectBestBackend to access backends.
 //
 // Build tags control which backends are available:
-//   - Default: All backends for the current platform
-//   - "!android": Excludes Android-specific Vulkan loader
+//   - Desktop: platform GPU backends plus software fallback
+//   - Android/arm64: Vulkan only
 //
 // The no-op provider is not registered by this package. Import
 // github.com/gogpu/wgpu/hal/noop explicitly when it is required for tests.

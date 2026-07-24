@@ -1,4 +1,4 @@
-//go:build linux && !(js && wasm)
+//go:build linux && !android && !(js && wasm)
 
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
@@ -7,45 +7,40 @@ package vulkan
 
 import (
 	"fmt"
-	"os"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
-// platformSurfaceExtensions returns all Linux surface extensions to request.
-// Both X11 and Wayland extensions are requested; the driver enables what it supports.
-func platformSurfaceExtension() string {
-	// Request both — Vulkan instance creation accepts unsupported extensions gracefully.
-	// The actual surface creation checks HasCreate*SurfaceKHR at runtime.
-	if isWayland() {
-		return "VK_KHR_wayland_surface\x00"
+// platformSurfaceExtensions returns every Linux WSI extension the backend can
+// use. CreateInstance filters this list against the loader's advertised
+// extensions, independent of DISPLAY or WAYLAND_DISPLAY.
+func platformSurfaceExtensions() []string {
+	return []string{
+		extensionWaylandSurface,
+		extensionXlibSurface,
 	}
-	return "VK_KHR_xlib_surface\x00"
 }
 
-// isWayland returns true if the session is running under Wayland.
-func isWayland() bool {
-	return os.Getenv("WAYLAND_DISPLAY") != ""
-}
-
-// CreateSurface creates a Vulkan surface from platform-specific handles.
-// On Linux, it auto-detects X11 vs Wayland based on available extensions:
-//   - Wayland: display = wl_display*, window = wl_surface* (from libwayland-client)
-//   - X11: display = Display* (from libX11), window = X11 Window ID
-func (i *Instance) CreateSurface(display, window uintptr) (hal.Surface, error) {
-	// Try Wayland first if the extension is available
-	if i.cmds.HasCreateWaylandSurfaceKHR() && isWayland() {
-		return i.createWaylandSurface(display, window)
+// CreateSurface creates a Vulkan surface from an explicit Xlib or Wayland
+// target. Both target kinds can coexist in one process; the corresponding
+// command is present when the loader advertised that WSI extension.
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	switch target.Kind {
+	case hal.SurfaceTargetXlibWindow:
+		if !i.cmds.HasCreateXlibSurfaceKHR() {
+			return nil, fmt.Errorf("vulkan: %w: vkCreateXlibSurfaceKHR not available", hal.ErrUnsupportedSurfaceTarget)
+		}
+		return i.createXlibSurface(target.DisplayHandle, target.WindowHandle)
+	case hal.SurfaceTargetWaylandSurface:
+		if !i.cmds.HasCreateWaylandSurfaceKHR() {
+			return nil, fmt.Errorf("vulkan: %w: vkCreateWaylandSurfaceKHR not available", hal.ErrUnsupportedSurfaceTarget)
+		}
+		return i.createWaylandSurface(target.DisplayHandle, target.WindowHandle)
+	default:
+		return nil, fmt.Errorf("vulkan: %w: got %s, backend requires Xlib window or Wayland surface", hal.ErrUnsupportedSurfaceTarget, target.Kind)
 	}
-
-	// Fall back to X11
-	if i.cmds.HasCreateXlibSurfaceKHR() {
-		return i.createXlibSurface(display, window)
-	}
-
-	return nil, fmt.Errorf("vulkan: no surface creation extension available (need VK_KHR_xlib_surface or VK_KHR_wayland_surface)")
 }
 
 // createXlibSurface creates an X11 surface.

@@ -31,7 +31,7 @@
 | Category | Capabilities |
 |----------|--------------|
 | **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU**, **Rust FFI** |
-| **Platforms** | Windows, Linux, macOS, iOS, **Browser (WASM)** |
+| **Platforms** | Windows, Linux, macOS, iOS, **Browser (WASM)**, **Android/arm64 (preview)** |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |
@@ -55,6 +55,14 @@ CGO_ENABLED=0 go build
 ```
 
 > **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
+
+The unreleased Android/arm64 Vulkan implementation is documented separately in
+[Android Vulkan preview](docs/ANDROID.md). It requires the exact canonical
+goffi candidate named there and is not yet a released support claim.
+
+New surface integrations should use the explicit safe or unsafe target API
+described in [Surface targets](docs/SURFACE-TARGETS.md). The original
+two-`uintptr` method remains available as a compatibility adapter.
 
 **Rust FFI backend** (optional, battle-tested wgpu-native drivers):
 ```bash
@@ -217,7 +225,7 @@ wgpu/
 │   ├── noop/           # No-op backend (testing)
 │   ├── software/       # CPU software rasterizer (~14K LOC)
 │   ├── gles/           # OpenGL ES 3.0+ (~12K LOC)
-│   ├── vulkan/         # Vulkan 1.3 (~42K LOC)
+│   ├── vulkan/         # Pure Go Vulkan backend (~42K LOC)
 │   ├── metal/          # Metal (~7K LOC)
 │   └── dx12/           # DirectX 12 (~17K LOC)
 ├── examples/
@@ -252,7 +260,8 @@ import _ "github.com/gogpu/wgpu/hal/allbackends"
 // Platform-specific backends auto-registered:
 // - Windows: Vulkan, DX12, GLES, Software
 // - Linux:   Vulkan, GLES, Software
-// - macOS:   Metal, Software
+// - macOS:   Metal, Vulkan, Software
+// - Android/arm64 preview: Vulkan only
 ```
 
 ---
@@ -261,19 +270,19 @@ import _ "github.com/gogpu/wgpu/hal/allbackends"
 
 ### Platform Support
 
-| Backend | Windows | Linux | macOS | iOS | Notes |
-|---------|:-------:|:-----:|:-----:|:---:|-------|
-| **Vulkan** | Yes | Yes | Yes | - | MoltenVK on macOS |
-| **Metal** | - | - | Yes | Yes | Native Apple GPU |
-| **DX12** | Yes | - | - | - | Windows 10+ |
-| **GLES** | Yes | Yes | - | - | OpenGL ES 3.0+ |
-| **Software** | Yes | Yes | Yes | Yes | CPU fallback |
+| Backend | Windows | Linux | macOS | iOS | Android/arm64 | Notes |
+|---------|:-------:|:-----:|:-----:|:---:|:-------------:|-------|
+| **Vulkan** | Yes | Yes | Yes | - | Preview | MoltenVK on macOS; [Android contract](docs/ANDROID.md) |
+| **Metal** | - | - | Yes | Yes | - | Native Apple GPU |
+| **DX12** | Yes | - | - | - | - | Windows 10+ |
+| **GLES** | Yes | Yes | - | - | - | OpenGL ES 3.0+ |
+| **Software** | Yes | Yes | Yes | Yes | - | CPU fallback |
 
 **Architectures:** amd64, arm64 (including Windows ARM64 / Snapdragon X)
 
 ### Vulkan Backend
 
-Full Vulkan 1.3 implementation with:
+Pure Go Vulkan backend with:
 
 - Auto-generated bindings from official `vk.xml`
 - Buddy allocator for GPU memory (O(log n), minimal fragmentation)
@@ -282,7 +291,7 @@ Full Vulkan 1.3 implementation with:
 - wgpu-style swapchain synchronization
 - MSAA render pass with automatic resolve
 - Complete resource management (Buffer, Texture, Pipeline, BindGroup)
-- Surface creation: Win32, X11, Wayland, Metal (MoltenVK)
+- Surface creation: Win32, X11, Wayland, Metal (MoltenVK), and Android `ANativeWindow` (preview)
 - Debug messenger for validation layer error capture (`VK_EXT_debug_utils`)
 - Structured diagnostic logging via `log/slog`
 

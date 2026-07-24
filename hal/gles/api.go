@@ -84,7 +84,11 @@ type Instance struct {
 // user DCs during Present.
 //
 // Follows Rust wgpu-hal/src/gles/wgl.rs Instance::create_surface (lines 624-670).
-func (i *Instance) CreateSurface(_, windowHandle uintptr) (hal.Surface, error) {
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	if err := target.RequireKind(hal.SurfaceTargetWindowsHWND); err != nil {
+		return nil, fmt.Errorf("gles: %w", err)
+	}
+	windowHandle := target.WindowHandle
 	hwnd := wgl.HWND(windowHandle)
 
 	// Set pixel format on user window DC. Required for wglMakeCurrent to

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
@@ -162,7 +163,10 @@ func testVulkanBackend() error {
 
 	// Test 3: Create surface
 	fmt.Print("  Creating surface... ")
-	surface, err := instance.CreateSurface(0, hwnd)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{
+		Kind:         hal.SurfaceTargetWindowsHWND,
+		WindowHandle: hwnd,
+	})
 	if err != nil {
 		return fmt.Errorf("CreateSurface: %w", err)
 	}

@@ -60,11 +60,17 @@ var (
 
 // vulkanLibraryName returns platform-specific Vulkan library name.
 func vulkanLibraryName() string {
-	switch runtime.GOOS {
+	return vulkanLibraryNameFor(runtime.GOOS)
+}
+
+func vulkanLibraryNameFor(goos string) string {
+	switch goos {
 	case "windows":
 		return "vulkan-1.dll"
 	case "darwin":
 		return "libvulkan.dylib" // MoltenVK
+	case "android":
+		return "libvulkan.so"
 	default: // linux, freebsd, etc.
 		return "libvulkan.so.1"
 	}

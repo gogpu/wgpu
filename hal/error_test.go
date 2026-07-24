@@ -56,7 +56,7 @@ func TestSurfaceConfigureZeroDimensions_Vulkan(t *testing.T) {
 	}
 	defer instance.Destroy()
 
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Skipf("Surface creation failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSurfaceConfigureValidDimensions(t *testing.T) {
 	}
 	defer instance.Destroy()
 
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface failed: %v", err)
 	}

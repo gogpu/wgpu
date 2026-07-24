@@ -26,7 +26,7 @@ func (m *mockBackend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, e
 // mockInstance is a minimal instance implementation for testing.
 type mockInstance struct{}
 
-func (m *mockInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+func (m *mockInstance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
 	return &mockSurface{}, nil
 }
 func (m *mockInstance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {

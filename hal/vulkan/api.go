@@ -8,11 +8,17 @@ package vulkan
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
+)
+
+const (
+	extensionWaylandSurface = "VK_KHR_wayland_surface\x00"
+	extensionXlibSurface    = "VK_KHR_xlib_surface\x00"
 )
 
 // Backend implements hal.Backend for Vulkan.
@@ -25,6 +31,11 @@ func (Backend) Variant() gputypes.Backend {
 
 // CreateInstance creates a new Vulkan instance.
 func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error) {
+	platform, err := newPlatformInstanceState(desc)
+	if err != nil {
+		return nil, err
+	}
+
 	// Initialize Vulkan library
 	if err := vk.Init(); err != nil {
 		return nil, fmt.Errorf("vulkan: failed to initialize: %w", err)
@@ -54,8 +65,14 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		"VK_KHR_surface\x00",
 	}
 
-	// Platform-specific surface extension
-	extensions = append(extensions, platformSurfaceExtension())
+	// Enable every platform WSI extension that this loader exposes. Linux can
+	// legitimately use Xlib and Wayland in the same process (for example
+	// XWayland), so ambient session variables must not select the instance ABI.
+	availableExtensions, err := enumerateInstanceExtensions(cmds)
+	if err != nil {
+		return nil, fmt.Errorf("vulkan: enumerate instance extensions: %w", err)
+	}
+	extensions = append(extensions, selectAvailableExtensions(platformSurfaceExtensions(), availableExtensions)...)
 
 	// Optional: validation layers for debug (only if available)
 	var layers []string
@@ -123,6 +140,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		handle:       instance,
 		cmds:         *cmds,
 		debugEnabled: validationEnabled,
+		platform:     platform,
 	}
 
 	// Create debug messenger when validation layers are active.
@@ -145,6 +163,7 @@ type Instance struct {
 	cmds           vk.Commands
 	debugMessenger vk.DebugUtilsMessengerEXT
 	debugEnabled   bool
+	platform       platformInstanceState
 }
 
 // EnumerateAdapters returns available Vulkan adapters (physical devices).
@@ -296,9 +315,9 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 	return s.createSwapchain(vkDevice, config)
 }
 
-// ActualExtent returns the actual swapchain dimensions after driver clamping.
-// On Vulkan, the driver may clamp the requested extent to its supported range
-// (e.g., on X11 HiDPI). Returns (0, 0) if no swapchain is configured.
+// ActualExtent returns the dimensions selected for the swapchain. A defined
+// Vulkan CurrentExtent is compositor-owned; otherwise the requested extent is
+// clamped to the supported range. Returns (0, 0) if no swapchain is configured.
 func (s *Surface) ActualExtent() (width, height uint32) {
 	if s.swapchain == nil {
 		return 0, 0
@@ -601,4 +620,43 @@ func isLayerAvailable(cmds *vk.Commands, layerName string) bool {
 		}
 	}
 	return false
+}
+
+func enumerateInstanceExtensions(cmds *vk.Commands) (map[string]struct{}, error) {
+	for range 3 {
+		var count uint32
+		result := cmds.EnumerateInstanceExtensionProperties(0, &count, nil)
+		if result != vk.Success && result != vk.Incomplete {
+			return nil, fmt.Errorf("vkEnumerateInstanceExtensionProperties(count) failed: %d", result)
+		}
+		if count == 0 {
+			return map[string]struct{}{}, nil
+		}
+
+		properties := make([]vk.ExtensionProperties, count)
+		result = cmds.EnumerateInstanceExtensionProperties(0, &count, &properties[0])
+		if result == vk.Incomplete {
+			continue
+		}
+		if result != vk.Success {
+			return nil, fmt.Errorf("vkEnumerateInstanceExtensionProperties(list) failed: %d", result)
+		}
+		available := make(map[string]struct{}, count)
+		for index := range count {
+			available[cStringToGo(properties[index].ExtensionName[:])] = struct{}{}
+		}
+		return available, nil
+	}
+	return nil, fmt.Errorf("vkEnumerateInstanceExtensionProperties remained incomplete")
+}
+
+func selectAvailableExtensions(candidates []string, available map[string]struct{}) []string {
+	selected := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		name := strings.TrimSuffix(candidate, "\x00")
+		if _, ok := available[name]; ok {
+			selected = append(selected, candidate)
+		}
+	}
+	return selected
 }

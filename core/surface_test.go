@@ -24,7 +24,7 @@ func newTestSurface(t *testing.T) (*Surface, *Device, hal.Queue) {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	halSurface, err := inst.CreateSurface(0, 0)
+	halSurface, err := inst.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}

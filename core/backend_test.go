@@ -375,7 +375,9 @@ func (b *testHALBackend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance
 
 type testHALInstance struct{}
 
-func (i *testHALInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) { return nil, nil } //nolint:nilnil
+func (i *testHALInstance) CreateSurface(_ hal.SurfaceTarget) (hal.Surface, error) {
+	return nil, hal.ErrUnsupportedSurfaceTarget
+}
 func (i *testHALInstance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 	return nil
 }

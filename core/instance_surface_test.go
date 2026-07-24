@@ -12,9 +12,10 @@ import (
 )
 
 type surfaceQualificationAdapter struct {
-	compatible bool
-	qualifies  *int
-	destroys   *int
+	compatible  bool
+	qualifies   *int
+	destroys    *int
+	lastSurface hal.Surface
 }
 
 func (a *surfaceQualificationAdapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
@@ -35,7 +36,8 @@ func (a *surfaceQualificationAdapter) Destroy() {
 	}
 }
 
-func (a *surfaceQualificationAdapter) QualifySurface(_ hal.Surface) (hal.Adapter, error) {
+func (a *surfaceQualificationAdapter) QualifySurface(surface hal.Surface) (hal.Adapter, error) {
+	a.lastSurface = surface
 	if a.qualifies != nil {
 		(*a.qualifies)++
 	}
@@ -43,6 +45,97 @@ func (a *surfaceQualificationAdapter) QualifySurface(_ hal.Surface) (hal.Adapter
 		return nil, errors.New("surface is not supported")
 	}
 	return &surfaceQualificationAdapter{compatible: true, destroys: a.destroys}, nil
+}
+
+func TestRequestAdapterWithSurfacesUsesEachBackendsOwnSurface(t *testing.T) {
+	GetGlobal().Clear()
+	hub := GetGlobal().Hub()
+
+	vulkanHAL := &surfaceQualificationAdapter{compatible: true}
+	glHAL := &surfaceQualificationAdapter{compatible: true}
+	vulkanID := hub.RegisterAdapter(&Adapter{
+		Info:       gputypes.AdapterInfo{DeviceType: gputypes.DeviceTypeDiscreteGPU, Backend: gputypes.BackendVulkan},
+		Limits:     gputypes.DefaultLimits(),
+		Backend:    gputypes.BackendVulkan,
+		halAdapter: vulkanHAL,
+	})
+	glID := hub.RegisterAdapter(&Adapter{
+		Info:       gputypes.AdapterInfo{DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendGL},
+		Limits:     gputypes.DefaultLimits(),
+		Backend:    gputypes.BackendGL,
+		halAdapter: glHAL,
+	})
+	instance := &Instance{
+		backends: gputypes.BackendsVulkan | gputypes.BackendsGL,
+		adapters: []AdapterID{vulkanID, glID},
+	}
+	defer instance.Destroy()
+
+	vulkanSurface := hal.Surface(&stubHALSurface{id: 21})
+	glSurface := hal.Surface(&stubHALSurface{id: 22})
+	selected, err := instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{
+		gputypes.BackendVulkan: vulkanSurface,
+		gputypes.BackendGL:     glSurface,
+	})
+	if err != nil {
+		t.Fatalf("RequestAdapterWithSurfaces: %v", err)
+	}
+	defer instance.ReleaseSurfaceAdapter(selected)
+
+	if vulkanHAL.lastSurface != vulkanSurface {
+		t.Fatalf("Vulkan qualification surface = %v, want %v", vulkanHAL.lastSurface, vulkanSurface)
+	}
+	if glHAL.lastSurface != glSurface {
+		t.Fatalf("GL qualification surface = %v, want %v", glHAL.lastSurface, glSurface)
+	}
+}
+
+func TestRequestAdapterWithSurfacesEmptyMapUsesOrdinaryPath(t *testing.T) {
+	GetGlobal().Clear()
+	instance := NewInstanceWithMock(nil)
+	defer instance.Destroy()
+
+	ordinary, err := instance.RequestAdapter(nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter: %v", err)
+	}
+	selected, err := instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{})
+	if err != nil {
+		t.Fatalf("RequestAdapterWithSurfaces(empty): %v", err)
+	}
+	if selected != ordinary {
+		t.Fatalf("empty-map selection = %v, want ordinary adapter %v", selected, ordinary)
+	}
+}
+
+func TestRequestAdapterWithSurfacesSkipsBackendWithoutSurface(t *testing.T) {
+	GetGlobal().Clear()
+	hub := GetGlobal().Hub()
+	qualifications := 0
+	id := hub.RegisterAdapter(&Adapter{
+		Info: gputypes.AdapterInfo{
+			DeviceType: gputypes.DeviceTypeDiscreteGPU,
+			Backend:    gputypes.BackendVulkan,
+		},
+		Limits:     gputypes.DefaultLimits(),
+		Backend:    gputypes.BackendVulkan,
+		halAdapter: &surfaceQualificationAdapter{compatible: true, qualifies: &qualifications},
+	})
+	instance := &Instance{
+		backends: gputypes.BackendsVulkan,
+		adapters: []AdapterID{id},
+	}
+	defer instance.Destroy()
+
+	_, err := instance.RequestAdapterWithSurfaces(nil, map[gputypes.Backend]hal.Surface{
+		gputypes.BackendGL: &stubHALSurface{id: 23},
+	})
+	if err == nil {
+		t.Fatal("RequestAdapterWithSurfaces selected an adapter without a matching surface")
+	}
+	if qualifications != 0 {
+		t.Fatalf("adapter qualifications = %d, want 0", qualifications)
+	}
 }
 
 func TestRequestAdapterWithSurfaceReleasesUnselectedQualifiedAdapters(t *testing.T) {

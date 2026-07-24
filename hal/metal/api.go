@@ -32,11 +32,12 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 // Instance implements hal.Instance for Metal.
 type Instance struct{}
 
-// CreateSurface creates a rendering surface from platform handles.
-func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
-	// On macOS, windowHandle is typically NSView* or CAMetalLayer*
-	// We need to get or create a CAMetalLayer from the view
-	layer := ID(windowHandle)
+// CreateSurface creates a rendering surface from a CAMetalLayer target.
+func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) {
+	if err := target.RequireKind(hal.SurfaceTargetMetalLayer); err != nil {
+		return nil, fmt.Errorf("metal: %w", err)
+	}
+	layer := ID(target.WindowHandle)
 	if layer == 0 {
 		return nil, fmt.Errorf("metal: window handle is nil")
 	}

@@ -4,6 +4,7 @@ package software
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -27,6 +28,51 @@ func TestInstanceCreation(t *testing.T) {
 		t.Fatal("Instance is nil")
 	}
 	instance.Destroy()
+}
+
+func TestSurfaceTargetSupportMatchesHostPlatform(t *testing.T) {
+	tests := []struct {
+		name string
+		goos string
+		kind hal.SurfaceTargetKind
+		want bool
+	}{
+		{name: "headless is portable", goos: "android", kind: hal.SurfaceTargetHeadless, want: true},
+		{name: "Windows accepts HWND", goos: goosWindows, kind: hal.SurfaceTargetWindowsHWND, want: true},
+		{name: "Windows rejects Xlib", goos: goosWindows, kind: hal.SurfaceTargetXlibWindow, want: false},
+		{name: "Linux accepts Xlib", goos: goosLinux, kind: hal.SurfaceTargetXlibWindow, want: true},
+		{name: "Linux accepts Wayland", goos: goosLinux, kind: hal.SurfaceTargetWaylandSurface, want: true},
+		{name: "Linux rejects Android", goos: goosLinux, kind: hal.SurfaceTargetAndroidNativeWindow, want: false},
+		{name: "Android rejects Linux", goos: "android", kind: hal.SurfaceTargetXlibWindow, want: false},
+		{name: "Android rejects native window", goos: "android", kind: hal.SurfaceTargetAndroidNativeWindow, want: false},
+		{name: "Darwin accepts Metal", goos: goosDarwin, kind: hal.SurfaceTargetMetalLayer, want: true},
+		{name: "Darwin rejects HWND", goos: goosDarwin, kind: hal.SurfaceTargetWindowsHWND, want: false},
+		{name: "unknown OS is headless only", goos: "plan9", kind: hal.SurfaceTargetMetalLayer, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := supportsSurfaceTarget(test.goos, test.kind); got != test.want {
+				t.Fatalf("supportsSurfaceTarget(%q, %v) = %v, want %v", test.goos, test.kind, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCreateSurfaceRejectsForeignTargetBeforeStoringHandles(t *testing.T) {
+	instance := &Instance{}
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{
+		Kind:          hal.SurfaceTargetAndroidNativeWindow,
+		DisplayHandle: 0x1111,
+		WindowHandle:  0x2222,
+	})
+	if surface != nil {
+		surface.Destroy()
+		t.Fatal("CreateSurface returned a surface for a foreign target")
+	}
+	if !errors.Is(err, hal.ErrUnsupportedSurfaceTarget) {
+		t.Fatalf("CreateSurface error = %v, want ErrUnsupportedSurfaceTarget", err)
+	}
 }
 
 func TestAdapterEnumeration(t *testing.T) {
@@ -224,7 +270,7 @@ func TestSurfaceConfiguration(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, err := instance.CreateSurface(0, 0)
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	if err != nil {
 		t.Fatalf("Failed to create surface: %v", err)
 	}
@@ -265,7 +311,7 @@ func TestSurfaceFramebufferReadback(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
@@ -1006,7 +1052,7 @@ func TestSurfaceZeroArea(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
@@ -1037,7 +1083,7 @@ func TestSurfaceAcquireTexture(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, _ := instance.CreateSurface(0, 0)
+	surface, _ := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetHeadless})
 	defer surface.Destroy()
 
 	adapters := instance.EnumerateAdapters(nil)
@@ -1076,7 +1122,23 @@ func TestSurfaceStoresDisplayHandle(t *testing.T) {
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
-	surface, err := instance.CreateSurface(0xDEAD, 0xBEEF)
+	var kind hal.SurfaceTargetKind
+	switch runtime.GOOS {
+	case goosWindows:
+		kind = hal.SurfaceTargetWindowsHWND
+	case goosLinux:
+		kind = hal.SurfaceTargetXlibWindow
+	case goosDarwin:
+		kind = hal.SurfaceTargetMetalLayer
+	default:
+		t.Skipf("software backend has no window target on %s", runtime.GOOS)
+	}
+
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{
+		Kind:          kind,
+		DisplayHandle: 0xDEAD,
+		WindowHandle:  0xBEEF,
+	})
 	if err != nil {
 		t.Fatalf("CreateSurface failed: %v", err)
 	}
@@ -1088,6 +1150,9 @@ func TestSurfaceStoresDisplayHandle(t *testing.T) {
 	}
 	if s.hwnd != 0xBEEF {
 		t.Errorf("hwnd = %#x, want 0xBEEF", s.hwnd)
+	}
+	if s.targetKind != kind {
+		t.Errorf("targetKind = %v, want %v", s.targetKind, kind)
 	}
 }
 

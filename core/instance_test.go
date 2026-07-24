@@ -12,7 +12,7 @@ import (
 
 type providerBackedTestInstance struct{}
 
-func (*providerBackedTestInstance) CreateSurface(_, _ uintptr) (hal.Surface, error) {
+func (*providerBackedTestInstance) CreateSurface(hal.SurfaceTarget) (hal.Surface, error) {
 	return nil, errors.New("test instance does not create surfaces")
 }
 
@@ -178,6 +178,42 @@ func TestNewInstanceUsesRegisteredProviderWithoutEnablingMock(t *testing.T) {
 	}
 	if adapters := instance.EnumerateAdapters(); len(adapters) != 1 {
 		t.Fatalf("provider-backed NewInstance returned %d adapters, want 1", len(adapters))
+	}
+}
+
+func TestNewInstanceRecordsDeferredGLESHALInstanceEntry(t *testing.T) {
+	tracker := &trackingGLESInstance{}
+	providersMu.Lock()
+	savedProviders := providers
+	providers = map[gputypes.Backend]BackendProvider{
+		gputypes.BackendGL: &testProvider{
+			variant:   gputypes.BackendGL,
+			available: true,
+			instance:  tracker,
+		},
+	}
+	providersMu.Unlock()
+	t.Cleanup(func() {
+		providersMu.Lock()
+		providers = savedProviders
+		providersMu.Unlock()
+	})
+	GetGlobal().Clear()
+
+	instance := NewInstance(&gputypes.InstanceDescriptor{Backends: gputypes.BackendsGL})
+	t.Cleanup(instance.Destroy)
+	entries := instance.HALInstanceEntries()
+	if len(entries) != 1 {
+		t.Fatalf("HAL instance entries = %d, want 1", len(entries))
+	}
+	if entries[0].Backend != gputypes.BackendGL || entries[0].Instance != tracker {
+		t.Fatalf("HAL instance entry = %+v, want GL tracker", entries[0])
+	}
+
+	entries[0] = HALInstanceEntry{}
+	snapshot := instance.HALInstanceEntries()
+	if len(snapshot) != 1 || snapshot[0].Instance != tracker {
+		t.Fatal("HALInstanceEntries returned an aliased slice")
 	}
 }
 

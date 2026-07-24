@@ -7,7 +7,7 @@
 //
 // This backend uses goffi for cross-platform Vulkan API calls, requiring no CGO.
 // Function pointers are loaded dynamically from vulkan-1.dll (Windows),
-// libvulkan.so.1 (Linux), or MoltenVK (macOS).
+// libvulkan.so.1 (Linux), MoltenVK (macOS), or libvulkan.so (Android).
 //
 // # Architecture
 //
@@ -28,4 +28,5 @@
 //   - Windows: vulkan-1.dll + VK_KHR_win32_surface
 //   - Linux: libvulkan.so.1 + VK_KHR_xlib_surface/VK_KHR_xcb_surface (planned)
 //   - macOS: MoltenVK + VK_EXT_metal_surface (planned)
+//   - Android/arm64 preview: libvulkan.so + VK_KHR_android_surface (API 29+)
 package vulkan

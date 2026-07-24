@@ -35,7 +35,10 @@ func TestSurfaceTextureCreateView(t *testing.T) {
 	}
 	instance := inst.(*Instance)
 
-	surface, err := instance.CreateSurface(0, uintptr(layer))
+	surface, err := instance.CreateSurface(hal.SurfaceTarget{
+		Kind:         hal.SurfaceTargetMetalLayer,
+		WindowHandle: uintptr(layer),
+	})
 	if err != nil {
 		t.Fatalf("CreateSurface failed: %v", err)
 	}

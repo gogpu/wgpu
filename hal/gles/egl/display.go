@@ -220,10 +220,26 @@ func DetectWindowKind() WindowKind {
 //   - X11: the X11 Display* (0 = use DISPLAY env var via OpenX11Display).
 //   - Surfaceless: ignored.
 func GetEGLDisplay(nativeDisplay uintptr) (EGLDisplay, WindowKind, *DisplayOwner, error) {
-	windowKind := DetectWindowKind()
+	return getEGLDisplayForKind(nativeDisplay, DetectWindowKind())
+}
 
+// getEGLDisplayForKind returns an EGL display for an explicit native window
+// system. It is used by typed surface targets so process-global environment
+// variables cannot redirect Xlib handles into Wayland or vice versa.
+func getEGLDisplayForKind(nativeDisplay uintptr, windowKind WindowKind) (EGLDisplay, WindowKind, *DisplayOwner, error) {
 	switch windowKind {
 	case WindowKindX11:
+		if nativeDisplay != 0 {
+			display := GetPlatformDisplay(PlatformX11KHR, nativeDisplay, nil)
+			if display != NoDisplay {
+				return display, WindowKindX11, nil, nil
+			}
+			display = GetDisplay(EGLNativeDisplayType(nativeDisplay))
+			if display == NoDisplay {
+				return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("eglGetDisplay failed for supplied X11 display")
+			}
+			return display, WindowKindX11, nil, nil
+		}
 		owner := OpenX11Display()
 		if owner == nil {
 			return NoDisplay, WindowKindUnknown, nil, fmt.Errorf("failed to open X11 display")
