@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -43,7 +44,9 @@ type Device struct {
 	// hasUnifiedMemory=true but are NOT Apple GPU family and do not support
 	// MTLStorageModeShared for multisample textures. This field drives texture
 	// storage mode selection instead of hasUnifiedMemory.
-	isAppleGPU bool
+	isAppleGPU      bool
+	icbTranslatorMu sync.Mutex
+	icbTranslators  map[gputypes.IndexFormat]indexedICBTranslator
 }
 
 // newDevice creates a new Device from a Metal device.
@@ -763,10 +766,23 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 	_ = MsgSend(pipelineDesc, Sel("setSampleCount:"), uintptr(sampleCount))
 
-	// Create pipeline state
+	// Create pipeline state. ICB support stays entirely private: eligible
+	// pipelines get one flagged attempt and transparently retry ordinary
+	// creation if Metal rejects the stricter descriptor.
 	var errorPtr ID
-	pipelineState := MsgSend(d.raw, Sel("newRenderPipelineStateWithDescriptor:error:"),
-		uintptr(pipelineDesc), uintptr(unsafe.Pointer(&errorPtr)))
+	icbCandidate := d.canCreateICBPipeline(desc, pipelineDesc)
+	pipelineState, icbCompatible := createRenderPipelineState(icbCandidate, func(icb bool) ID {
+		errorPtr = 0
+		if icbCandidate {
+			var enabled uintptr
+			if icb {
+				enabled = 1
+			}
+			_ = MsgSend(pipelineDesc, Sel("setSupportIndirectCommandBuffers:"), enabled)
+		}
+		return MsgSend(d.raw, Sel("newRenderPipelineStateWithDescriptor:error:"),
+			uintptr(pipelineDesc), uintptr(unsafe.Pointer(&errorPtr)))
+	})
 
 	if pipelineState == 0 {
 		errMsg := unknownError
@@ -791,11 +807,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		pipeLayout = pl
 	}
 	return &RenderPipeline{
-		raw:       pipelineState,
-		device:    d,
-		layout:    pipeLayout,
-		cullMode:  cullModeToMTL(desc.Primitive.CullMode),
-		frontFace: frontFaceToMTL(desc.Primitive.FrontFace),
+		raw:           pipelineState,
+		device:        d,
+		layout:        pipeLayout,
+		cullMode:      cullModeToMTL(desc.Primitive.CullMode),
+		frontFace:     frontFaceToMTL(desc.Primitive.FrontFace),
+		icbCompatible: icbCompatible,
 
 		depthStencil:    depthStencilState,
 		depthBias:       depthBias,
@@ -1176,10 +1193,7 @@ func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
 	if !ok || cb == nil {
 		return
 	}
-	if cb.raw != 0 {
-		Release(cb.raw)
-		cb.raw = 0
-	}
+	cb.Destroy()
 }
 
 // CreateRenderBundleEncoder is not supported in Metal backend.
@@ -1262,6 +1276,7 @@ func (d *Device) WaitIdle() error {
 // Destroy releases the device and associated resources.
 func (d *Device) Destroy() {
 	hal.Logger().Debug("metal: device destroyed")
+	d.releaseIndexedICBTranslators()
 	if d.eventListener != 0 {
 		Release(d.eventListener)
 		d.eventListener = 0

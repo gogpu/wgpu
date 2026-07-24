@@ -82,6 +82,13 @@ type MTLScissorRect struct {
 	Width, Height NSUInteger
 }
 
+// MTLIndirectCommandType values accepted by MTLIndirectCommandBufferDescriptor.
+type MTLIndirectCommandType NSUInteger
+
+const (
+	MTLIndirectCommandTypeDrawIndexed MTLIndirectCommandType = 1 << 1
+)
+
 // MTLPixelFormat represents a pixel format.
 type MTLPixelFormat NSUInteger
 
