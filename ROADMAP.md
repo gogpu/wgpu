@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.22
+## Current State: v0.30.22 + 17 merged (unreleased)
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -92,10 +92,24 @@
 ✅ **Software blend state wiring** — extract blend from Fragment.Targets into raster pipeline (v0.30.21)
 ✅ **Software BGRA readTexel** — R/B channel swap for BGRA8Unorm/Srgb textures (v0.30.21)
 ✅ **Metal MSAA storage mode fix** — `MTLGPUFamilyApple1` detection replaces `hasUnifiedMemory` for texture storage mode. Intel Mac SIGABRT on MSAA fixed. Apple Silicon keeps Shared optimization (v0.30.22, @AnyCPU #271)
+✅ **Device teardown GPU drain** — private `waitIdle()` bypasses released guard, `queue.release()` after drain. Rust `Queue::Drop` parity (@besmpl #264)
+✅ **Vulkan swapchain fail-closed** — transactional reconfiguration, capability snapshot validation, broken-state tracking, semaphore/fence error propagation (@besmpl #265)
+✅ **Explicit mock adapter** — `NewInstance` no longer fabricates mock adapter. Rust wgpu parity (@besmpl #266)
+✅ **Surface-qualified adapter selection** — `RequestAdapterWithSurface` validates via `vkGetPhysicalDeviceSurfaceSupportKHR`. Iterates all queue families — ahead of Rust wgpu (@besmpl #267)
+✅ **Surface lifetime ownership** — centralized acquisition/teardown with lease system. Instance owns release ordering. Vulkan device-level swapchain tracking (@besmpl #269)
+✅ **Vulkan nil pipeline layout guard** — HAL rejects nil layouts before Vulkan call (@besmpl #257)
+✅ **Metal autorelease pool thread pinning** — `LockOSThread` prevents goroutine migration between pool create/drain. Go 1.14+ async preemption fix (@besmpl #260)
+✅ **Metal texture array copy shape** — `setArrayLength` for 1D/2D arrays instead of `setDepth`. Rust wgpu `device.rs:436-453` parity. metalCopyPlan decomposition (@besmpl #261)
+✅ **Fixed-count indirect multi-draw** — `drawCount` on DrawIndirect/DrawIndexedIndirect. 2 improvements over Rust: feature check for both draw kinds + offset advance in fallback loop (gfx-rs/wgpu#9870). `internal/indirect` overflow-safe arithmetic (@besmpl #253)
+✅ **Metal ICB optimization** — indirect command buffers for large indexed multi-draws (1024-52428 commands). Original optimization beyond Rust wgpu (Rust uses simple loop). Deferred render encoder + compute dispatch (@besmpl #263)
+✅ **DX12 submission-ordered state reconciliation** — command-local state tracker, preamble barriers at submit time, per-plane depth/stencil tracking, preamble pool, COM lifecycle safety (@besmpl #262)
+✅ **Rust v29 typed surface targets** — `SurfaceTarget`/`SurfaceTargetUnsafe` with opaque constructors for Win32, Xlib, Wayland, Android NDK, Metal, Web. `hal.SurfaceTarget.RequireKind()` discriminator. Same contract across native/rust/browser (@besmpl #273)
+✅ **Android arm64 Vulkan (guarded preview)** — API 29+, Bionic loader via goffi v0.6.1, Rust v29 WSI parity. Callbacks rejected pending physical-device proof (@besmpl #268)
+✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. `hal.PixelReader` optional capability. Closes #256 (@besmpl #276)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
-- See [ADR-VALIDATION-PHASES.md](docs/dev/research/ADR-VALIDATION-PHASES.md)
+- Validation Phase C — spec compliance edge cases, feature gates
 
 | Backend | Platform | Status |
 |---------|----------|--------|
@@ -113,20 +127,25 @@
 
 ### Near-term (Q3 2026)
 
+**Release v0.31.0** (after naga #82 merge):
+- [ ] Bump deps: goffi v0.6.2, webgpu v0.5.4, naga v0.17.16
+- [ ] CODEOWNERS: @besmpl for Android paths
+- [ ] CHANGELOG for 17 merged PRs
+- [ ] Integrate `gogpu/galloc` into Vulkan memory pools (replace BuddyAllocator)
+
 **GLES Linux Enterprise Parity:**
 - [ ] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003). Windows parity.
 - [ ] Systematic GL error checking layer — `checkGL()` after every call (ADR-046)
-- [ ] GLES global UNPACK_ALIGNMENT=1 — Rust pattern, set once at device open
 
 **Public API Quality (#218):**
 - [ ] Remove HAL leaks from public API (`Surface.HAL()`, `Surface.SetPrepareFrame()`)
 - [ ] Expose `Device.CreateQuerySet` — HAL ready on all 6 backends, needs public wrapper
-- [ ] `Device.released` → `atomic.Bool` — data race fix
 - [ ] Document Surface single-thread requirement
 
 **DX12:**
-- [ ] DeviceTextureTracker — proper barrier state tracking (Rust wgpu-core parity)
+- [x] ~~DeviceTextureTracker~~ → submission-ordered state reconciliation (#262, done)
 - [ ] DXIL as default shader path (currently opt-in via `GOGPU_DX12_DXIL=1`)
+- [ ] Integrate galloc into DX12 descriptor heap management
 
 ### Mid-term (Q4 2026)
 
@@ -139,7 +158,8 @@
 - [ ] Validation Phase C — spec compliance edge cases, feature gates
 
 **Platform Expansion:**
-- [ ] **Android** — Vulkan surface via `vkCreateAndroidSurfaceKHR`. Depends on gogpu platform layer
+- [x] ~~Android~~ — Vulkan surface via typed `SurfaceTarget` (#268/#273, guarded preview)
+- [ ] Android physical-device evidence (API 29 + API 36 arm64)
 - [ ] **iOS** — Metal backend ready (naga MSL 91/91), needs platform integration
 
 ### v1.0.0 — Production Release (November 2027, Go 18th birthday)

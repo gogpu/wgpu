@@ -1383,10 +1383,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Research
 
-- **[Validation Gap Analysis](docs/dev/research/VALIDATION-GAP-ANALYSIS-RUST-WGPU.md)** — 121-check
-  comparison vs Rust wgpu-core. Coverage: 22% → ~37% after Phase A.
-- **[ADR: Validation Phases](docs/dev/research/ADR-VALIDATION-PHASES.md)** — phased implementation
-  plan (A: crash prevention, B: correctness, C: spec compliance)
+- **Validation Gap Analysis** — 121-check comparison vs Rust wgpu-core. Coverage: 22% → ~37% after Phase A.
+- **Validation Phases ADR** — phased implementation plan (A: crash prevention, B: correctness, C: spec compliance)
 
 ## [0.25.4] - 2026-04-23
 

@@ -206,8 +206,7 @@ Safety guarantees: UAF protection via generation counters on `MappedRange`,
 `ErrMapRangeOverlap` for overlapping `MappedRange` calls, `MAP_ALIGNMENT = 8`
 validation, thread-safe concurrent `Device.Poll`.
 
-See [ADR-BUFFER-MAPPING-API](docs/dev/research/ADR-BUFFER-MAPPING-API.md) for the
-full design rationale and comparison with Rust wgpu.
+Design follows Rust wgpu's buffer mapping model with Go-idiomatic error handling.
 
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)
 
@@ -358,7 +357,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - Blending (13 factors, 5 operations)
 - 6-plane frustum clipping (Sutherland-Hodgman)
 - 8x8 tile-based parallel rendering
-- **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, ~100× slower than JIT software renderers like SwiftShader). See [ADR](docs/dev/research/ADR-SPIRV-JIT-VS-INTERPRETER.md).
+- **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, ~100× slower than JIT software renderers like SwiftShader).
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
@@ -401,6 +400,7 @@ recipe and the explicit non-WebGPU support contract.
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library with GPU SDF acceleration |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit: 22+ widgets, 4 themes |
+| [gogpu/galloc](https://github.com/gogpu/galloc) | O(1) offset allocator for GPU memory sub-allocation |
 | [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU type definitions |
 | [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |
 

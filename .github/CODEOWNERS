@@ -1,2 +1,10 @@
 # Default owners for everything in the repo
 * @kolkov
+
+# Android platform (guarded preview)
+# Recursive patterns (**) cover nested directories (vk/, testdata/)
+hal/vulkan/**/*android*    @besmpl
+hal/allbackends/*android*  @besmpl
+**/surface_*android*       @besmpl
+docs/ANDROID.md            @besmpl
+scripts/**/*android*       @besmpl

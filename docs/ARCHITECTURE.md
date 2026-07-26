@@ -89,20 +89,24 @@ Key interfaces (defined in `hal/api.go`):
 Pure Go Vulkan implementation using goffi for dynamic function loading.
 
 - `vk/` — Low-level Vulkan bindings (generated types, function signatures, loader)
-- `memory/` — GPU memory allocator (buddy allocation, `maxMemoryAllocationSize` enforcement)
+- `memory/` — GPU memory allocator (buddy allocation, `maxMemoryAllocationSize` enforcement). Future: replace BuddyAllocator with [gogpu/galloc](https://github.com/gogpu/galloc) O(1) offset allocator.
 - Command encoder: free list of pre-allocated VkCommandBuffers (batch 16), `vkResetCommandPool` for batch reset (Rust wgpu-hal parity)
-- Platform surface: VkWin32, VkXlib/VkWayland, VkMetal, and Android
-  `ANativeWindow` (arm64/API 29+ preview; see [ANDROID.md](ANDROID.md))
+- Swapchain fail-closed lifecycle: transactional reconfiguration, capability snapshot validation, broken-state tracking
+- Surface-qualified adapter selection: `vkGetPhysicalDeviceSurfaceSupportKHR` across all queue families (ahead of Rust wgpu)
+- Platform surface: VkWin32, VkXlib/VkWayland, VkMetal, and Android `ANativeWindow` (arm64/API 29+ preview; see [ANDROID.md](ANDROID.md))
+- Multi-draw indirect: native `vkCmdDrawIndirect`/`vkCmdDrawIndexedIndirect` with `drawCount`, feature-gated fallback loop
 
 ### `hal/metal/` — Metal Backend
 
 Pure Go Metal implementation via Objective-C runtime message sending.
 
-- `objc.go` — Objective-C runtime (`objc_msgSend`, `NSAutoreleasePool`, selectors)
-- `encoder.go` — Command encoder, render/compute pass encoders
-- `device.go` — Device, resource creation, fence management
+- `objc.go` — Objective-C runtime (`objc_msgSend`, `NSAutoreleasePool` with OS thread pinning, selectors)
+- `encoder.go` — Command encoder, render/compute pass encoders, deferred render encoder for ICB
+- `icb_indexed.go` — Metal Indirect Command Buffers for large indexed multi-draws (1024-52428 commands). Original optimization beyond Rust wgpu.
+- `texture_copy.go` — metalCopyPlan: array layer vs 3D depth decomposition, block-compressed format support
+- `device.go` — Device, resource creation, fence management, `isAppleGPU` via `MTLGPUFamilyApple1`
 - `queue.go` — Command submission, texture writes
-- Uses scoped autorelease pools (create + drain in same function)
+- Uses scoped autorelease pools with `LockOSThread` (create + drain on same OS thread, Go 1.14+ preemption safe)
 
 ### `hal/dx12/` — DirectX 12 Backend
 
@@ -111,8 +115,10 @@ Pure Go DX12 implementation via COM interfaces.
 - `d3d12/` — D3D12 COM interfaces, GUID definitions, DRED diagnostics, loader
 - `dxgi/` — DXGI factory, adapter enumeration
 - `device.go` — Device, resource creation, descriptor heaps (SRV/sampler), dual shader compilation (HLSL→FXC or DXIL direct)
-- `command.go` — Command encoder with resource barriers (buffer/texture state transitions)
-- `queue.go` — Command submission with fence-based GPU completion tracking
+- `state_tracker.go` — Submission-ordered resource state reconciliation: command-local tracking, preamble barriers at submit time, per-plane depth/stencil. Replaces recording-time `currentState`.
+- `copy_plan.go` + `copy_commands.go` — 2D-array vs 3D volume copy decomposition, 512-byte placement alignment, block-compressed row counting
+- `command.go` — Command encoder with resource barriers (via state tracker)
+- `queue.go` — Command submission with fence-based GPU completion tracking, preamble pool (per-frame reuse, capped at maxFramesInFlight)
 - `resource.go` — Buffers (upload/default heaps), textures with deferred destruction
 - `shader_cache.go` — In-memory SHA-256 keyed LRU cache (works for both HLSL and DXIL paths)
 - **Shader compilation:** dual path — HLSL→FXC (default, SM 5.1) or DXIL direct via naga (opt-in `GOGPU_DX12_DXIL=1`, SM 6.0+, zero external dependencies)
@@ -163,7 +169,10 @@ CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags req
 - `blit_linux.go` — Linux X11 presentation: XPutImage via goffi (Skia pattern)
 - `blit_darwin.go` — macOS presentation: CGImage + CALayer, or Metal nextDrawable + replaceRegion for CAMetalLayer. Contributor: @k-chimi
 
-**Extensions (non-standard):** `Surface.PresentPixels()` — atomic CPU pixel write + present that bypasses the WebGPU render pass pipeline. Single-pass RGBA→BGRA swizzle into DIB/X11 framebuffer + platform blit. Reduces present overhead from 3 copies to 1 for CPU-rendered content. `hal.PixelPresenter` / `hal.PixelWriter` optional interfaces (`io.WriterTo` pattern). ADR: `docs/dev/research/ADR-SOFTWARE-ZERO-COPY-PRESENTATION.md`.
+**Extensions (non-standard):**
+- `Surface.PresentPixels()` — atomic CPU pixel write + present. Single-pass RGBA→BGRA swizzle + platform blit. `hal.PixelPresenter` / `hal.PixelWriter` optional interfaces.
+- `Surface.ReadPixels()` — headless surface pixel readback for golden image testing. `hal.PixelReader` optional interface. Returns owned RGBA8 snapshot. Requires `HeadlessSurfaceTarget`.
+- `HeadlessSurfaceTarget` — zero-sized safe target for display-free software rendering.
 
 Use cases: **shader debugging** (step through every SPIR-V instruction), **CI/CD testing** (no GPU required), **headless rendering** (servers), **GPU-less fallback** (embedded systems). NOT for real-time production rendering — use GPU backends (Vulkan/DX12/Metal/GLES) for that. Verified: triangle + 4096-particle compute+render simulation. All 3 desktop platforms (Windows, Linux, macOS) have windowed presentation.
 
@@ -191,6 +200,27 @@ wgpu public API
 - ~6500 LOC total (4000 internal/browser + 2500 root wrappers), zero external dependencies
 
 Key files: `promise.go` (async→sync), `convert_enums.go` (97 TextureFormats, 31 VertexFormats + all WebGPU enums), `convert_resources.go` (JS descriptor builders), `surface.go` (Canvas + GPUCanvasContext).
+
+## Typed Surface Targets (Rust v29 Parity)
+
+Surface creation uses typed targets instead of raw `uintptr` handles:
+
+```go
+// Safe targets (recommended)
+target := wgpu.SurfaceTargetFromWindowsHWND(hwnd)
+surface, _ := instance.CreateSurfaceFromTarget(target)
+
+// Unsafe targets (platform-specific)
+target := wgpu.SurfaceTargetUnsafeAndroidNDK(nativeWindow)
+surface, _ := instance.CreateSurfaceUnsafe(target)
+
+// Legacy compatibility (preserved)
+surface, _ := instance.CreateSurface(displayHandle, windowHandle)
+```
+
+`hal.SurfaceTarget.RequireKind()` discriminator ensures every backend rejects foreign handle kinds before pointer access. Platform constructors: Win32 HWND, Xlib Window, Wayland wl_surface, Android ANativeWindow, Metal CAMetalLayer, Web Canvas.
+
+See [SURFACE-TARGETS.md](SURFACE-TARGETS.md) for the exhaustive API mapping.
 
 ## Backend Registration
 
@@ -304,7 +334,10 @@ gogpu (app framework) / gg (2D graphics)
 ```
 
 External dependencies:
-- `github.com/gogpu/naga` — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
-- `github.com/gogpu/gputypes` v0.5.0 — shared WebGPU type definitions
-- `github.com/go-webgpu/goffi` v0.6.0 — Pure Go FFI for Vulkan/Metal symbol loading
-- `golang.org/x/sys` v0.44.0 — platform syscall definitions
+- `github.com/gogpu/naga` v0.17.15 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
+- `github.com/gogpu/gputypes` v0.5.1 — shared WebGPU type definitions
+- `github.com/gogpu/gpucontext` v0.21.1 — shared interfaces (DeviceProvider, PlatformProvider)
+- `github.com/go-webgpu/goffi` v0.6.2 — Pure Go FFI for Vulkan/Metal/DX12 symbol loading (Android Bionic support)
+- `github.com/go-webgpu/webgpu` v0.5.4 — Rust FFI backend (wgpu-native v29, Android surface, timestamp period)
+- `github.com/gogpu/galloc` v0.1.0 — O(1) offset allocator (planned integration for memory sub-allocation)
+- `golang.org/x/sys` v0.47.0 — platform syscall definitions
