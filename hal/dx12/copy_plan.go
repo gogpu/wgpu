@@ -120,14 +120,19 @@ func copyExtentBlocks(info textureBlockInfo, origin hal.Origin3D, extent hal.Ext
 	return endBlockX - startBlockX, endBlockY - startBlockY, true
 }
 
-func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeight, blockBytes, copyWidth, copyHeight uint32) (bufferOffset uint64, bufferOriginX, bufferOriginY, footprintWidth, footprintHeight uint32, ok bool) {
+type placedSlice struct {
+	bufferOffset    uint64
+	bufferOriginX   uint32
+	bufferOriginY   uint32
+	footprintWidth  uint32
+	footprintHeight uint32
+}
+
+func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeight, blockBytes, copyWidth, copyHeight uint32) (placedSlice, bool) {
 	if rowPitch == 0 || blockWidth == 0 || blockHeight == 0 || blockBytes == 0 {
-		return 0, 0, 0, 0, 0, false
+		return placedSlice{}, false
 	}
-	bufferOffset = logicalOffset &^ (d3d12TexturePlacementAlignment - 1)
-	// Prefer an earlier placement boundary that preserves a whole-row delta.
-	// This avoids needlessly widening the footprint and keeps otherwise valid
-	// full-width copies representable when the nearest boundary falls mid-row.
+	bufferOffset := logicalOffset &^ (d3d12TexturePlacementAlignment - 1)
 	if logicalOffset%d3d12TexturePlacementAlignment != 0 && logicalOffset >= uint64(rowPitch) {
 		previousRow := logicalOffset - uint64(rowPitch)
 		if previousRow%d3d12TexturePlacementAlignment == 0 {
@@ -139,29 +144,35 @@ func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeig
 	yRows := delta / rowBytes
 	xBytes := delta % rowBytes
 	if xBytes%uint64(blockBytes) != 0 {
-		return 0, 0, 0, 0, 0, false
+		return placedSlice{}, false
 	}
 	xBlocks := xBytes / uint64(blockBytes)
 	if xBlocks > uint64(math.MaxUint32/blockWidth) || yRows > uint64(math.MaxUint32/blockHeight) {
-		return 0, 0, 0, 0, 0, false
+		return placedSlice{}, false
 	}
-	bufferOriginX = uint32(xBlocks) * blockWidth
-	bufferOriginY = uint32(yRows) * blockHeight
-	if bufferOriginX > math.MaxUint32-copyWidth || bufferOriginY > math.MaxUint32-copyHeight {
-		return 0, 0, 0, 0, 0, false
+	originX := uint32(xBlocks) * blockWidth
+	originY := uint32(yRows) * blockHeight
+	if originX > math.MaxUint32-copyWidth || originY > math.MaxUint32-copyHeight {
+		return placedSlice{}, false
 	}
-	footprintWidth, ok = alignUint32(bufferOriginX+copyWidth, blockWidth)
+	fpWidth, ok := alignUint32(originX+copyWidth, blockWidth)
 	if !ok {
-		return 0, 0, 0, 0, 0, false
+		return placedSlice{}, false
 	}
-	footprintHeight, ok = alignUint32(bufferOriginY+copyHeight, blockHeight)
+	fpHeight, ok := alignUint32(originY+copyHeight, blockHeight)
 	if !ok {
-		return 0, 0, 0, 0, 0, false
+		return placedSlice{}, false
 	}
-	if uint64(footprintWidth/blockWidth)*uint64(blockBytes) > rowBytes {
-		return 0, 0, 0, 0, 0, false
+	if uint64(fpWidth/blockWidth)*uint64(blockBytes) > rowBytes {
+		return placedSlice{}, false
 	}
-	return bufferOffset, bufferOriginX, bufferOriginY, footprintWidth, footprintHeight, true
+	return placedSlice{
+		bufferOffset:    bufferOffset,
+		bufferOriginX:   originX,
+		bufferOriginY:   originY,
+		footprintWidth:  fpWidth,
+		footprintHeight: fpHeight,
+	}, true
 }
 
 func normalizedCopyLayout(texture *Texture, layout hal.ImageDataLayout, size hal.Extent3D) (textureBlockInfo, uint32, uint32, bool) {
@@ -239,8 +250,7 @@ func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size
 	}
 	sourceBlockRows := (sourceRowsPerImage + info.height - 1) / info.height
 	nativeLayout.RowsPerImage = size.Height
-	_, _, _, ok = normalizedCopyLayout(texture, nativeLayout, size)
-	if !ok {
+	if _, _, _, valid := normalizedCopyLayout(texture, nativeLayout, size); !valid {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
 	return info, nativeLayout, sourceBytesPerRow, sourceBlockRows, true
@@ -249,26 +259,26 @@ func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size
 // planBufferTextureCopies converts a WebGPU buffer/texture copy into one plan
 // per D3D12 subresource or 3D depth slice. It returns nil when the layout
 // cannot be represented without changing logical byte addresses.
-func planBufferTextureCopies(texture *Texture, copy hal.ImageCopyTexture, layout hal.ImageDataLayout, size hal.Extent3D) []bufferTextureCopyPlan {
+func planBufferTextureCopies(texture *Texture, region hal.ImageCopyTexture, layout hal.ImageDataLayout, size hal.Extent3D) []bufferTextureCopyPlan {
 	info, rowPitch, blockRows, ok := normalizedCopyLayout(texture, layout, size)
 	if !ok || texture == nil {
 		return nil
 	}
-	widthBlocks, heightBlocks, ok := copyExtentBlocks(info, copy.Origin, size)
+	widthBlocks, heightBlocks, ok := copyExtentBlocks(info, region.Origin, size)
 	if !ok || widthBlocks == 0 || heightBlocks == 0 {
 		return nil
 	}
-	if copy.MipLevel >= maxTextureMips(texture) {
+	if region.MipLevel >= maxTextureMips(texture) {
 		return nil
 	}
 	depth := size.DepthOrArrayLayers
 	if depth == 0 {
 		depth = 1
 	}
-	if !validTextureCopyDepth(texture, copy.Origin.Z, depth) {
+	if !validTextureCopyDepth(texture, region.Origin.Z, depth) {
 		return nil
 	}
-	planes := textureAspectPlanes(texture, copy.Aspect)
+	planes := textureAspectPlanes(texture, region.Aspect)
 	if len(planes) == 0 {
 		return nil
 	}
@@ -283,28 +293,28 @@ func planBufferTextureCopies(texture *Texture, copy hal.ImageCopyTexture, layout
 			if logicalOffset < layout.Offset {
 				return nil
 			}
-			bufferOffset, originX, originY, footprintWidth, footprintHeight, representable := planPlacedBufferSlice(
+			placed, representable := planPlacedBufferSlice(
 				logicalOffset, rowPitch, info.width, info.height, info.bytes,
 				widthBlocks*info.width, heightBlocks*info.height)
 			if !representable {
 				return nil
 			}
-			subresource := texture.subresourceIndexForPlane(copy.MipLevel, 0, plane)
-			textureOriginZ := copy.Origin.Z + slice
+			subresource := texture.subresourceIndexForPlane(region.MipLevel, 0, plane)
+			textureOriginZ := region.Origin.Z + slice
 			if texture.dimension != gputypes.TextureDimension3D {
-				subresource = texture.subresourceIndexForPlane(copy.MipLevel, copy.Origin.Z+slice, plane)
+				subresource = texture.subresourceIndexForPlane(region.MipLevel, region.Origin.Z+slice, plane)
 				textureOriginZ = 0
 			}
 			plans = append(plans, bufferTextureCopyPlan{
 				subresource:     subresource,
-				bufferOffset:    bufferOffset,
-				bufferOriginX:   originX,
-				bufferOriginY:   originY,
-				footprintWidth:  footprintWidth,
-				footprintHeight: footprintHeight,
+				bufferOffset:    placed.bufferOffset,
+				bufferOriginX:   placed.bufferOriginX,
+				bufferOriginY:   placed.bufferOriginY,
+				footprintWidth:  placed.footprintWidth,
+				footprintHeight: placed.footprintHeight,
 				footprintDepth:  1,
-				textureOriginX:  copy.Origin.X,
-				textureOriginY:  copy.Origin.Y,
+				textureOriginX:  region.Origin.X,
+				textureOriginY:  region.Origin.Y,
 				textureOriginZ:  textureOriginZ,
 				rowPitch:        rowPitch,
 				copyWidth:       widthBlocks * info.width,
@@ -339,37 +349,37 @@ func validTextureCopyDepth(texture *Texture, origin, depth uint32) bool {
 
 // planTextureTextureCopies applies D3D12's distinct 3D-volume and 2D-array
 // copy models while pairing selected source and destination planes.
-func planTextureTextureCopies(src, dst *Texture, copy hal.TextureCopy) []textureTextureCopyPlan {
+func planTextureTextureCopies(src, dst *Texture, region hal.TextureCopy) []textureTextureCopyPlan {
 	if src == nil || dst == nil || src.dimension != dst.dimension {
 		return nil
 	}
-	depth := copy.Size.DepthOrArrayLayers
+	depth := region.Size.DepthOrArrayLayers
 	if depth == 0 {
 		depth = 1
 	}
-	if copy.SrcBase.MipLevel >= maxTextureMips(src) || copy.DstBase.MipLevel >= maxTextureMips(dst) {
+	if region.SrcBase.MipLevel >= maxTextureMips(src) || region.DstBase.MipLevel >= maxTextureMips(dst) {
 		return nil
 	}
-	if !validTextureCopyDepth(src, copy.SrcBase.Origin.Z, depth) || !validTextureCopyDepth(dst, copy.DstBase.Origin.Z, depth) {
+	if !validTextureCopyDepth(src, region.SrcBase.Origin.Z, depth) || !validTextureCopyDepth(dst, region.DstBase.Origin.Z, depth) {
 		return nil
 	}
-	srcPlanes := textureAspectPlanes(src, copy.SrcBase.Aspect)
-	dstPlanes := textureAspectPlanes(dst, copy.DstBase.Aspect)
+	srcPlanes := textureAspectPlanes(src, region.SrcBase.Aspect)
+	dstPlanes := textureAspectPlanes(dst, region.DstBase.Aspect)
 	if len(srcPlanes) == 0 || len(srcPlanes) != len(dstPlanes) {
 		return nil
 	}
-	if copy.Size.Width == 0 || copy.Size.Height == 0 {
+	if region.Size.Width == 0 || region.Size.Height == 0 {
 		return nil
 	}
 	if src.dimension == gputypes.TextureDimension3D {
 		plans := make([]textureTextureCopyPlan, 0, len(srcPlanes))
 		for plane := range srcPlanes {
 			plans = append(plans, textureTextureCopyPlan{
-				srcSubresource: src.subresourceIndexForPlane(copy.SrcBase.MipLevel, 0, srcPlanes[plane]),
-				dstSubresource: dst.subresourceIndexForPlane(copy.DstBase.MipLevel, 0, dstPlanes[plane]),
-				srcFront:       copy.SrcBase.Origin.Z,
-				srcBack:        copy.SrcBase.Origin.Z + depth,
-				dstZ:           copy.DstBase.Origin.Z,
+				srcSubresource: src.subresourceIndexForPlane(region.SrcBase.MipLevel, 0, srcPlanes[plane]),
+				dstSubresource: dst.subresourceIndexForPlane(region.DstBase.MipLevel, 0, dstPlanes[plane]),
+				srcFront:       region.SrcBase.Origin.Z,
+				srcBack:        region.SrcBase.Origin.Z + depth,
+				dstZ:           region.DstBase.Origin.Z,
 			})
 		}
 		return plans
@@ -378,8 +388,8 @@ func planTextureTextureCopies(src, dst *Texture, copy hal.TextureCopy) []texture
 	for plane := range srcPlanes {
 		for layer := uint32(0); layer < depth; layer++ {
 			plans = append(plans, textureTextureCopyPlan{
-				srcSubresource: src.subresourceIndexForPlane(copy.SrcBase.MipLevel, copy.SrcBase.Origin.Z+layer, srcPlanes[plane]),
-				dstSubresource: dst.subresourceIndexForPlane(copy.DstBase.MipLevel, copy.DstBase.Origin.Z+layer, dstPlanes[plane]),
+				srcSubresource: src.subresourceIndexForPlane(region.SrcBase.MipLevel, region.SrcBase.Origin.Z+layer, srcPlanes[plane]),
+				dstSubresource: dst.subresourceIndexForPlane(region.DstBase.MipLevel, region.DstBase.Origin.Z+layer, dstPlanes[plane]),
 				srcFront:       0,
 				srcBack:        1,
 				dstZ:           0,
