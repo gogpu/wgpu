@@ -140,6 +140,8 @@ linters:
           - unparam
 
       # HAL backends - platform-specific complexity
+      # nestif excluded: DX12 COM null checks and state management require
+      # defensive nested conditions that are clearer inline than extracted.
       - path: hal/.*\.go
         linters:
           - gocyclo
@@ -147,6 +149,7 @@ linters:
           - cyclop
           - funlen
           - gosec
+          - nestif
 
       # GL context - requires unsafe for C interop
       - path: hal/gles/gl/context\.go

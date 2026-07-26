@@ -204,7 +204,7 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 
 	// Create persistent stencil buffer from depth/stencil attachment.
-	if desc.DepthStencilAttachment != nil { //nolint:nestif // sequential attachment init
+	if desc.DepthStencilAttachment != nil {
 		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
 			w := int(dsView.texture.width)
 			h := int(dsView.texture.height)

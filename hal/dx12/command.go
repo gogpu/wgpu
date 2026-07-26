@@ -193,9 +193,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 		}
 
 		afterState := textureUsageToD3D12State(b.Usage.NewUsage)
-		for _, plan := range e.stateTracker.transitionTextureRange(tex, textureRangeSubresources(tex, b.Range), afterState) {
-			plans = append(plans, plan)
-		}
+		plans = append(plans, e.stateTracker.transitionTextureRange(tex, textureRangeSubresources(tex, b.Range), afterState)...)
 	}
 	e.emitStateBarrierPlans(plans)
 }
@@ -1031,31 +1029,7 @@ func needsExplicitBarrier(current, target d3d12.D3D12_RESOURCE_STATES) bool {
 	return true
 }
 
-// transitionBufferIfNeeded inserts a transition barrier for a single buffer if
-// its command-local state requires an explicit barrier to reach the target.
-func (e *CommandEncoder) transitionBufferIfNeeded(buf *Buffer, targetState d3d12.D3D12_RESOURCE_STATES) {
-	if before, needsBarrier := e.stateTracker.transitionBuffer(buf, targetState); needsBarrier {
-		e.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: targetState}})
-	}
-}
 
-// transitionBuffersForCopy inserts batched transition barriers for a source and
-// destination buffer pair used in a copy command. Barriers are batched into a
-// single ResourceBarrier call when both buffers need transitions (Rust pattern:
-// drain_barriers emits all pending transitions at once).
-func (e *CommandEncoder) transitionBuffersForCopy(
-	srcBuf *Buffer, srcTarget d3d12.D3D12_RESOURCE_STATES,
-	dstBuf *Buffer, dstTarget d3d12.D3D12_RESOURCE_STATES,
-) {
-	plans := make([]stateBarrierPlan, 0, 2)
-	if before, needsBarrier := e.stateTracker.transitionBuffer(srcBuf, srcTarget); needsBarrier {
-		plans = append(plans, stateBarrierPlan{resource: srcBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: srcTarget})
-	}
-	if before, needsBarrier := e.stateTracker.transitionBuffer(dstBuf, dstTarget); needsBarrier {
-		plans = append(plans, stateBarrierPlan{resource: dstBuf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: dstTarget})
-	}
-	e.emitStateBarrierPlans(plans)
-}
 
 func resolveSubresourceIndex(view *TextureView) uint32 {
 	if view == nil || view.texture == nil {
