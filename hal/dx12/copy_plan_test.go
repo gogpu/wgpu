@@ -18,9 +18,9 @@ func testTexture(format gputypes.TextureFormat, dimension gputypes.TextureDimens
 
 func TestPlanBufferTextureCopiesPlacementAndArraySlices(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension2D, 128, 16, 3, 2)
-	copy := hal.ImageCopyTexture{MipLevel: 1, Origin: hal.Origin3D{X: 4, Y: 2, Z: 1}, Aspect: gputypes.TextureAspectAll}
+	region := hal.ImageCopyTexture{MipLevel: 1, Origin: hal.Origin3D{X: 4, Y: 2, Z: 1}, Aspect: gputypes.TextureAspectAll}
 	size := hal.Extent3D{Width: 8, Height: 2, DepthOrArrayLayers: 2}
-	plans := planBufferTextureCopies(texture, copy, hal.ImageDataLayout{Offset: 0, BytesPerRow: 256, RowsPerImage: 4}, size)
+	plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: 0, BytesPerRow: 256, RowsPerImage: 4}, size)
 	if len(plans) != 2 {
 		t.Fatalf("got %d plans, want 2", len(plans))
 	}
@@ -31,7 +31,7 @@ func TestPlanBufferTextureCopiesPlacementAndArraySlices(t *testing.T) {
 		if plan.subresource != texture.subresourceIndex(1, 1+uint32(i)) {
 			t.Errorf("plan %d subresource %d", i, plan.subresource)
 		}
-		if plan.textureOriginX != copy.Origin.X || plan.textureOriginY != copy.Origin.Y || plan.textureOriginZ != 0 {
+		if plan.textureOriginX != region.Origin.X || plan.textureOriginY != region.Origin.Y || plan.textureOriginZ != 0 {
 			t.Errorf("plan %d texture origin = (%d,%d,%d)", i, plan.textureOriginX, plan.textureOriginY, plan.textureOriginZ)
 		}
 	}
@@ -39,7 +39,7 @@ func TestPlanBufferTextureCopiesPlacementAndArraySlices(t *testing.T) {
 
 func TestPlanBufferTextureCopiesReconstructsPlacedDelta(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension2D, 128, 64, 1, 1)
-	copy := hal.ImageCopyTexture{Origin: hal.Origin3D{}, Aspect: gputypes.TextureAspectAll}
+	region := hal.ImageCopyTexture{Origin: hal.Origin3D{}, Aspect: gputypes.TextureAspectAll}
 	for _, tc := range []struct {
 		name   string
 		offset uint64
@@ -51,7 +51,7 @@ func TestPlanBufferTextureCopiesReconstructsPlacedDelta(t *testing.T) {
 		{name: "512", offset: 512, pitch: 256},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			plans := planBufferTextureCopies(texture, copy, hal.ImageDataLayout{Offset: tc.offset, BytesPerRow: tc.pitch, RowsPerImage: 2}, hal.Extent3D{Width: 8, Height: 2, DepthOrArrayLayers: 1})
+			plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: tc.offset, BytesPerRow: tc.pitch, RowsPerImage: 2}, hal.Extent3D{Width: 8, Height: 2, DepthOrArrayLayers: 1})
 			if len(plans) != 1 {
 				t.Fatalf("got %d plans", len(plans))
 			}
@@ -66,8 +66,8 @@ func TestPlanBufferTextureCopiesReconstructsPlacedDelta(t *testing.T) {
 
 func TestPlanBufferTextureCopiesBCAndRejectsUnrepresentableDelta(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, 64, 64, 1, 1)
-	copy := hal.ImageCopyTexture{Aspect: gputypes.TextureAspectAll}
-	plans := planBufferTextureCopies(texture, copy, hal.ImageDataLayout{Offset: 256, BytesPerRow: 512, RowsPerImage: 4}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1})
+	region := hal.ImageCopyTexture{Aspect: gputypes.TextureAspectAll}
+	plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: 256, BytesPerRow: 512, RowsPerImage: 4}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1})
 	if len(plans) != 1 {
 		t.Fatalf("got %d BC plans", len(plans))
 	}
@@ -79,7 +79,7 @@ func TestPlanBufferTextureCopiesBCAndRejectsUnrepresentableDelta(t *testing.T) {
 	if reconstructed != 256 {
 		t.Fatalf("BC reconstructed offset %d, want 256", reconstructed)
 	}
-	if got := planBufferTextureCopies(texture, copy, hal.ImageDataLayout{Offset: 4, BytesPerRow: 256, RowsPerImage: 4}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}); got != nil {
+	if got := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: 4, BytesPerRow: 256, RowsPerImage: 4}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}); got != nil {
 		t.Fatal("expected byte delta not divisible by BC block size to be rejected")
 	}
 }
@@ -129,8 +129,8 @@ func TestWriteTextureNativeLayoutKeepsSourcePaddingOutOfStaging(t *testing.T) {
 
 func TestPlanBufferTextureCopiesPadded3DUsesAbsoluteDepth(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension3D, 32, 32, 8, 1)
-	copy := hal.ImageCopyTexture{Origin: hal.Origin3D{X: 2, Y: 3, Z: 2}, Aspect: gputypes.TextureAspectAll}
-	plans := planBufferTextureCopies(texture, copy, hal.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 8}, hal.Extent3D{Width: 4, Height: 2, DepthOrArrayLayers: 3})
+	region := hal.ImageCopyTexture{Origin: hal.Origin3D{X: 2, Y: 3, Z: 2}, Aspect: gputypes.TextureAspectAll}
+	plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 8}, hal.Extent3D{Width: 4, Height: 2, DepthOrArrayLayers: 3})
 	if len(plans) != 3 {
 		t.Fatalf("got %d plans", len(plans))
 	}

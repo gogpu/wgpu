@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.23] - 2026-07-26
 
 ### Fixed
 
@@ -74,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **CONTRIBUTING.md** — Smart Coding framework (AI-assisted policy), updated
   project structure, pre-submit checklist with cross-platform lint.
+
+### Changed
+
+- **Bump naga** v0.17.15 → v0.17.16 — MSL 64-bit atomics rejection (#82, @besmpl)
+- **Bump goffi** v0.6.1 → v0.6.2 — Windows AMD64 float returns fix (#65, @besmpl)
+- **Bump webgpu** v0.5.3 → v0.5.4 — Android surface, Queue.GetTimestampPeriod, callback strings (#23-#25, @besmpl)
+- **DX12 lint cleanup** — `copy` param renamed to `region` (builtin shadow), `placedSlice` struct replaces 6 named returns, dead code removed, redundant `//nolint` directives removed
 
 ## [0.30.22] - 2026-07-16
 

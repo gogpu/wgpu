@@ -512,7 +512,7 @@ func (interp *interpreter) run() error {
 		inst := instructions[pc]
 
 		// --- Debug: pre-instruction hooks ---
-		if debug != nil { //nolint:nestif // Debug context checks require nested conditionals for breakpoints and stepping.
+		if debug != nil {
 			blockLabel := interp.currentBlockLabel(pc)
 			event := InstructionEvent{
 				PC:          pc,
@@ -747,7 +747,7 @@ func (interp *interpreter) run() error {
 			// The actual loop is driven by OpBranchConditional.
 
 		case OpBranchConditional:
-			if len(inst.Operands) >= 3 { //nolint:nestif // Branch + loop iteration guard requires nested depth checks.
+			if len(inst.Operands) >= 3 {
 				cond := interp.values[inst.Operands[0]]
 				trueLabel := inst.Operands[1]
 				falseLabel := inst.Operands[2]
@@ -1237,7 +1237,7 @@ func (interp *interpreter) run() error {
 		}
 
 		// --- Debug: post-instruction hooks ---
-		if debug != nil { //nolint:nestif // Debug trace and watch variable checks require nested conditionals.
+		if debug != nil {
 			// Trace output: write one JSON line per result-producing instruction.
 			if traceEnc != nil && inst.ResultID != 0 {
 				writeTrace(debug.TraceWriter, traceEnc, traceEnt, pc-1, inst, interp.values)
