@@ -52,7 +52,7 @@ require_checkout() {
 }
 
 goffi_module=github.com/go-webgpu/goffi
-goffi_version=v0.6.1
+goffi_version=v0.6.2
 (
 	cd "$root"
 	GOWORK=off go mod download "$goffi_module@$goffi_version"
