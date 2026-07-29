@@ -3,12 +3,29 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"syscall/js"
 
 	"github.com/gogpu/wgpu/internal/browser"
 )
+
+// Compile-time assertion: Surface must implement all public API methods (ADR-047).
+var _ interface {
+	Configure(*Device, *SurfaceConfiguration) error
+	Unconfigure()
+	GetCurrentTexture() (*SurfaceTexture, bool, error)
+	Present(*SurfaceTexture) error
+	PresentWithDamage(*SurfaceTexture, []image.Rectangle) error
+	PresentPixels([]byte, uint32, uint32, []image.Rectangle) error
+	WritePixels([]byte, uint32, uint32) error
+	ReadPixels() ([]byte, error)
+	ActualExtent() (uint32, uint32)
+	DiscardTexture()
+	SetPresentsWithTransaction(bool)
+	Release()
+} = (*Surface)(nil)
 
 // Surface represents a platform rendering surface.
 // On browser, this wraps an HTMLCanvasElement + GPUCanvasContext.
@@ -256,6 +273,26 @@ func (s *Surface) ActualExtent() (width, height uint32) {
 func (s *Surface) DiscardTexture() {
 	// No-op on browser. Cannot discard the texture.
 }
+
+// PresentPixels is not supported on browser backend.
+// Software-backend extension for direct pixel presentation.
+func (s *Surface) PresentPixels(_ []byte, _, _ uint32, _ []image.Rectangle) error {
+	return errors.New("wgpu: PresentPixels is not supported on the browser backend")
+}
+
+// WritePixels is not supported on browser backend.
+// Software-backend extension for direct framebuffer write.
+func (s *Surface) WritePixels(_ []byte, _, _ uint32) error {
+	return errors.New("wgpu: WritePixels is not supported on the browser backend")
+}
+
+// SetPrepareFrame is a no-op on browser backend.
+// Browser surfaces use requestAnimationFrame for frame timing.
+func (s *Surface) SetPrepareFrame(_ any) {}
+
+// SetPresentsWithTransaction is a no-op on browser backend.
+// Core Animation transactions are macOS-only.
+func (s *Surface) SetPresentsWithTransaction(_ bool) {}
 
 // Release releases the surface.
 func (s *Surface) Release() {

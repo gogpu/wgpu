@@ -3,11 +3,28 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 	"image"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
+
+// Compile-time assertion: Surface must implement all public API methods (ADR-047).
+var _ interface {
+	Configure(*Device, *SurfaceConfiguration) error
+	Unconfigure()
+	GetCurrentTexture() (*SurfaceTexture, bool, error)
+	Present(*SurfaceTexture) error
+	PresentWithDamage(*SurfaceTexture, []image.Rectangle) error
+	PresentPixels([]byte, uint32, uint32, []image.Rectangle) error
+	WritePixels([]byte, uint32, uint32) error
+	ReadPixels() ([]byte, error)
+	ActualExtent() (uint32, uint32)
+	DiscardTexture()
+	SetPresentsWithTransaction(bool)
+	Release()
+} = (*Surface)(nil)
 
 // Surface represents a platform rendering surface.
 // On Rust backend, this wraps go-webgpu/webgpu Surface.
@@ -192,6 +209,22 @@ func (s *Surface) SetPrepareFrame(_ any) {}
 func (s *Surface) DiscardTexture() {
 	// No-op: wgpu-native does not support texture discard.
 }
+
+// PresentPixels is not supported on Rust FFI backend.
+// Software-backend extension for direct pixel presentation.
+func (s *Surface) PresentPixels(_ []byte, _, _ uint32, _ []image.Rectangle) error {
+	return errors.New("wgpu: PresentPixels is not supported on the Rust backend")
+}
+
+// WritePixels is not supported on Rust FFI backend.
+// Software-backend extension for direct framebuffer write.
+func (s *Surface) WritePixels(_ []byte, _, _ uint32) error {
+	return errors.New("wgpu: WritePixels is not supported on the Rust backend")
+}
+
+// SetPresentsWithTransaction is a no-op on Rust backend.
+// Core Animation transactions are macOS-only.
+func (s *Surface) SetPresentsWithTransaction(_ bool) {}
 
 // Release releases the surface.
 func (s *Surface) Release() {

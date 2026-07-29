@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.24] - 2026-07-28
+
+### Fixed
+
+- **Browser/Rust Surface missing methods** — `PresentPixels`, `WritePixels`,
+  `SetPrepareFrame`, and `SetPresentsWithTransaction` now exist on all backends.
+  Missing methods return clear errors or no-op, matching ADR-047 (unified public
+  API). Fixes WASM build failure introduced by gogpu PR #370. (#281)
+
+- **Metal checkptr abort under `-race`** — ObjC block callback trampolines used
+  `unsafe.Pointer(blockPtr + 32)` which violates Go's pointer provenance rules.
+  Replaced with `unsafe.Add(unsafe.Pointer(blockPtr), 32)` (Go 1.17+) at all 4
+  block callback locations. `go test -race` now works on Metal compute. (#280)
+
+### Added
+
+- **Compile-time Surface API contract** — anonymous interface assertion
+  (`var _ interface{...} = (*Surface)(nil)`) in each backend file enforces that
+  all public methods exist at compile time (ADR-047 enforcement).
+
+- **CI cross-compile job** — `GOOS=js GOARCH=wasm` (browser) and `-tags=rust`
+  (Rust FFI) builds added to CI pipeline. Missing Surface methods now fail the
+  PR, not the downstream consumer.
+
 ## [0.30.23] - 2026-07-26
 
 ### Fixed

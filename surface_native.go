@@ -14,6 +14,22 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// Compile-time assertion: Surface must implement all public API methods (ADR-047).
+var _ interface {
+	Configure(*Device, *SurfaceConfiguration) error
+	Unconfigure()
+	GetCurrentTexture() (*SurfaceTexture, bool, error)
+	Present(*SurfaceTexture) error
+	PresentWithDamage(*SurfaceTexture, []image.Rectangle) error
+	PresentPixels([]byte, uint32, uint32, []image.Rectangle) error
+	WritePixels([]byte, uint32, uint32) error
+	ReadPixels() ([]byte, error)
+	ActualExtent() (uint32, uint32)
+	DiscardTexture()
+	SetPresentsWithTransaction(bool)
+	Release()
+} = (*Surface)(nil)
+
 const (
 	platformWindows = "windows"
 	platformDarwin  = "darwin"

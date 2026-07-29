@@ -59,11 +59,11 @@ jobs:
         go-version: ${{ matrix.go-version }}
         cache: true
 
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Accept Android SDK licenses
+      run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
     - name: Install Android NDK r29
-      run: sdkmanager 'ndk;29.0.14206865'
+      run: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install 'ndk;29.0.14206865'
 
     - name: Check Android arm64 source, tests, and ELF dependencies
       env:
@@ -101,6 +101,34 @@ jobs:
 
     - name: Build all packages
       run: go build ./...
+
+  # Cross-compile verification — ADR-047 unified public API
+  # Ensures Surface (and other build-tagged types) compile on all targets.
+  # Native is already covered by the build job; this adds browser and rust.
+  cross-compile:
+    name: Cross-compile - ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: js, goarch: wasm, tags: '', name: 'browser' }
+          - { goos: linux, goarch: amd64, tags: 'rust', name: 'rust' }
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Cross-compile ${{ matrix.name }} backend
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: go build ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} .
 
   # Unit tests - Cross-platform
   test:

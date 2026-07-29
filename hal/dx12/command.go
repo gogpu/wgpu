@@ -1029,8 +1029,6 @@ func needsExplicitBarrier(current, target d3d12.D3D12_RESOURCE_STATES) bool {
 	return true
 }
 
-
-
 func resolveSubresourceIndex(view *TextureView) uint32 {
 	if view == nil || view.texture == nil {
 		return 0
