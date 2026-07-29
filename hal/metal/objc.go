@@ -648,7 +648,7 @@ func getSharedEventBlockInvoke() uintptr {
 			}
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
-			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+			blockID := *(*uint64)(unsafe.Add(unsafe.Pointer(blockPtr), 32))
 
 			hal.Logger().Debug("metal: shared event notification fired", "blockID", blockID)
 
@@ -751,7 +751,7 @@ func getCompletedHandlerBlockInvoke() uintptr {
 			}
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
-			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+			blockID := *(*uint64)(unsafe.Add(unsafe.Pointer(blockPtr), 32))
 
 			hal.Logger().Debug("metal: completion handler fired", "blockID", blockID)
 
@@ -847,7 +847,7 @@ func getFrameCompletionBlockInvoke() uintptr {
 			}
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
-			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+			blockID := *(*uint64)(unsafe.Add(unsafe.Pointer(blockPtr), 32))
 
 			hal.Logger().Debug("metal: frame completion fired", "blockID", blockID)
 
@@ -955,7 +955,7 @@ func getGPUCompletionBlockInvoke() uintptr {
 			}
 			// Read blockID from the block literal at the fixed offset.
 			// Offset: isa(8) + flags(4) + reserved(4) + invoke(8) + descriptor(8) = 32 bytes
-			blockID := *(*uint64)(unsafe.Pointer(blockPtr + 32)) //nolint:govet // Required for ObjC block ABI access
+			blockID := *(*uint64)(unsafe.Add(unsafe.Pointer(blockPtr), 32))
 
 			hal.Logger().Debug("metal: GPU completion tracking fired", "blockID", blockID)
 
