@@ -59,11 +59,11 @@ jobs:
         go-version: ${{ matrix.go-version }}
         cache: true
 
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Accept Android SDK licenses
+      run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
     - name: Install Android NDK r29
-      run: sdkmanager 'ndk;29.0.14206865'
+      run: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install 'ndk;29.0.14206865'
 
     - name: Check Android arm64 source, tests, and ELF dependencies
       env:
