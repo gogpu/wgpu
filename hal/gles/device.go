@@ -142,7 +142,14 @@ func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 	if buf.mapped == nil {
 		return nil
 	}
-	if buf.usage&gputypes.BufferUsageMapWrite != 0 && buf.id != 0 {
+	// Flush the CPU-side shadow buffer to the GL buffer. This must happen for
+	// ALL writable mappings, not only MapWrite buffers. MappedAtCreation works
+	// with any buffer usage (Uniform, Vertex, Index, CopyDst) per the WebGPU
+	// spec: "mappedAtCreation does not require MAP_WRITE usage." Without this
+	// flush, data written via MappedRange is silently discarded and the GL
+	// buffer remains zero-filled — uniform buffers get zero matrices, vertex
+	// buffers get zero positions, etc.
+	if buf.id != 0 {
 		glCtx := d.ctx.Lock()
 		glCtx.BindBuffer(buf.target, buf.id)
 		glCtx.BufferSubData(buf.target, 0, len(buf.mapped), unsafe.Pointer(&buf.mapped[0]))

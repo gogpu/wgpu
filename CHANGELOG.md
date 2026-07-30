@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AttachDepthStencilCommand` for offscreen FBOs. 2D overlay now renders correctly
   on GLES surface targets. (#284)
 
+- **GLES: MappedAtCreation buffer data silently discarded on Unmap** —
+  `UnmapBuffer` only flushed shadow data to GL when `BufferUsageMapWrite` was set.
+  Per WebGPU spec, `MappedAtCreation` does NOT require `MapWrite` usage. Buffers
+  created with `Uniform|CopyDst` + `MappedAtCreation` (the standard g3d pattern)
+  had their data thrown away, leaving GL buffers zero-filled — zero MVP matrices,
+  zero vertices, zero indices. Root cause of invisible 3D geometry on GLES. (#284)
+
 - **GLES: 3D geometry invisible due to stale depth mask** — `ClearDepthCommand`
   did not call `glDepthMask(true)` before `glClear(GL_DEPTH_BUFFER_BIT)`. If a
   prior pipeline set `DepthWriteEnabled=false`, the depth clear was silently
