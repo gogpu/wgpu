@@ -402,6 +402,21 @@ func (c *Context) ClearColor(r, g, b, a float32) {
 		uintptr(*(*uint32)(unsafe.Pointer(&a))))
 }
 
+// ClearDepth sets the depth value used by glClear(GL_DEPTH_BUFFER_BIT).
+// Desktop GL uses glClearDepth (double); GLES uses glClearDepthf (float).
+// Both variants are loaded via getProcAddr in init.
+func (c *Context) ClearDepth(depth float64) {
+	syscall.SyscallN(c.glClearDepth, uintptr(*(*uint64)(unsafe.Pointer(&depth))))
+}
+
+// DepthRange sets the mapping of NDC depth to window depth.
+// Desktop GL: glDepthRange(double, double). GLES: glDepthRangef(float, float).
+func (c *Context) DepthRange(near, far float64) {
+	syscall.SyscallN(c.glDepthRange,
+		uintptr(*(*uint64)(unsafe.Pointer(&near))),
+		uintptr(*(*uint64)(unsafe.Pointer(&far))))
+}
+
 func (c *Context) Viewport(x, y, width, height int32) {
 	syscall.SyscallN(c.glViewport, uintptr(x), uintptr(y), uintptr(width), uintptr(height))
 }

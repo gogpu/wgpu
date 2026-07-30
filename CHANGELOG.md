@@ -17,7 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GL_DEPTH_STENCIL_ATTACHMENT` for combined formats (Rust wgpu-hal parity,
   command.rs:577-580). Also fixes the same wrong attachment point in the existing
   `AttachDepthStencilCommand` for offscreen FBOs. 2D overlay now renders correctly
-  on GLES surface targets. (#284, partial — 3D rendering under separate investigation)
+  on GLES surface targets. (#284)
+
+- **GLES: 3D geometry invisible due to stale depth mask** — `ClearDepthCommand`
+  did not call `glDepthMask(true)` before `glClear(GL_DEPTH_BUFFER_BIT)`. If a
+  prior pipeline set `DepthWriteEnabled=false`, the depth clear was silently
+  masked on subsequent frames, causing all 3D geometry to fail the depth test.
+  Also adds `glClearDepth(value)` before clear (was relying on GL default 1.0).
+  Rust ref: queue.rs:1199-1205. (#284)
+
+- **GLES: viewport depth range ignored** — `SetViewportCommand` called
+  `glViewport` but not `glDepthRange(minDepth, maxDepth)`. Depth range fields
+  were stored but never passed to GL. Rust ref: queue.rs:1295-1296. (#284)
+
+### Added
+
+- `gl.Context.ClearDepth()` and `gl.Context.DepthRange()` — wrapper methods for
+  both Windows (syscall, double) and Linux (goffi, float32 for GLES). Function
+  pointers were loaded via `getProcAddr` but had no callable methods.
 
 ### Changed
 

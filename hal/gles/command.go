@@ -321,8 +321,9 @@ func (e *CommandEncoder) setupSurfaceTarget(desc *hal.RenderPassDescriptor, tv *
 			cfg := surf.config
 			rpe.fbHeight = cfg.Height
 			e.commands = append(e.commands, &SetViewportCommand{
-				width:  float32(cfg.Width),
-				height: float32(cfg.Height),
+				width:    float32(cfg.Width),
+				height:   float32(cfg.Height),
+				maxDepth: 1,
 			})
 		}
 		// Attach depth/stencil to the swapchain FBO if requested.
@@ -364,8 +365,9 @@ func (e *CommandEncoder) setupOffscreenTarget(
 
 	rpe.fbHeight = tv.texture.size.Height
 	e.commands = append(e.commands, &SetViewportCommand{
-		width:  float32(tv.texture.size.Width),
-		height: float32(tv.texture.size.Height),
+		width:    float32(tv.texture.size.Width),
+		height:   float32(tv.texture.size.Height),
+		maxDepth: 1,
 	})
 
 	// Record MSAA resolve target if present.
@@ -976,6 +978,8 @@ type ClearDepthCommand struct {
 
 func (c *ClearDepthCommand) Execute(ctx *gl.Context) {
 	ctx.Disable(gl.SCISSOR_TEST)
+	ctx.DepthMask(true)
+	ctx.ClearDepth(c.depth)
 	ctx.Clear(gl.DEPTH_BUFFER_BIT)
 }
 
@@ -1326,6 +1330,7 @@ type SetViewportCommand struct {
 
 func (c *SetViewportCommand) Execute(ctx *gl.Context) {
 	ctx.Viewport(int32(c.x), int32(c.y), int32(c.width), int32(c.height))
+	ctx.DepthRange(float64(c.minDepth), float64(c.maxDepth))
 }
 
 // SetScissorCommand sets the scissor rectangle.
