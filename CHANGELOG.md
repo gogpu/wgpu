@@ -5,16 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.30.26] - 2026-07-30
+## [0.30.27] - 2026-07-30
 
 ### Fixed
 
 - **GLES: depth/stencil not attached to swapchain FBO on surface render pass** —
-  `setupSurfaceTarget()` had an early return that skipped depth/stencil attachment.
-  3D content with depth testing was invisible on GLES while Vulkan and DX12 worked
-  correctly. Now attaches depth/stencil to the swapchain FBO via
-  `AttachDepthStencilToFBOCommand`. Matches Rust wgpu-hal GLES `begin_render_pass`
-  which uses the same draw_fbo path for both surface and offscreen targets. (#284)
+  `setupSurfaceTarget()` had an early return that skipped depth/stencil attachment,
+  causing `GL_INVALID_FRAMEBUFFER_OPERATION` (0x506) on every draw call.
+  Now attaches depth/stencil to the swapchain FBO via `AttachDepthStencilToFBOCommand`.
+  Attachment point chosen by format: `GL_DEPTH_ATTACHMENT` for depth-only,
+  `GL_DEPTH_STENCIL_ATTACHMENT` for combined formats (Rust wgpu-hal parity,
+  command.rs:577-580). Also fixes the same wrong attachment point in the existing
+  `AttachDepthStencilCommand` for offscreen FBOs. 2D overlay now renders correctly
+  on GLES surface targets. (#284)
+
+- **GLES: MappedAtCreation buffer data silently discarded on Unmap** —
+  `UnmapBuffer` only flushed shadow data to GL when `BufferUsageMapWrite` was set.
+  Per WebGPU spec, `MappedAtCreation` does NOT require `MapWrite` usage. Buffers
+  created with `Uniform|CopyDst` + `MappedAtCreation` (the standard g3d pattern)
+  had their data thrown away, leaving GL buffers zero-filled — zero MVP matrices,
+  zero vertices, zero indices. Root cause of invisible 3D geometry on GLES. (#284)
+
+- **GLES: 3D geometry invisible due to stale depth mask** — `ClearDepthCommand`
+  did not call `glDepthMask(true)` before `glClear(GL_DEPTH_BUFFER_BIT)`. If a
+  prior pipeline set `DepthWriteEnabled=false`, the depth clear was silently
+  masked on subsequent frames, causing all 3D geometry to fail the depth test.
+  Also adds `glClearDepth(value)` before clear (was relying on GL default 1.0).
+  Rust ref: queue.rs:1199-1205. (#284)
+
+- **GLES: viewport depth range ignored** — `SetViewportCommand` called
+  `glViewport` but not `glDepthRange(minDepth, maxDepth)`. Depth range fields
+  were stored but never passed to GL. Rust ref: queue.rs:1295-1296. (#284)
+
+### Added
+
+- `gl.Context.ClearDepth()` and `gl.Context.DepthRange()` — wrapper methods for
+  both Windows (syscall, double) and Linux (goffi, float32 for GLES). Function
+  pointers were loaded via `getProcAddr` but had no callable methods.
 
 ### Changed
 
