@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.26] - 2026-07-30
+
+### Fixed
+
+- **GLES: depth/stencil not attached to swapchain FBO on surface render pass** —
+  `setupSurfaceTarget()` had an early return that skipped depth/stencil attachment.
+  3D content with depth testing was invisible on GLES while Vulkan and DX12 worked
+  correctly. Now attaches depth/stencil to the swapchain FBO via
+  `AttachDepthStencilToFBOCommand`. Matches Rust wgpu-hal GLES `begin_render_pass`
+  which uses the same draw_fbo path for both surface and offscreen targets. (#284)
+
+### Changed
+
+- **deps:** gpucontext v0.22.0 → v0.23.0
+
 ## [0.30.25] - 2026-07-29
 
 ### Changed
