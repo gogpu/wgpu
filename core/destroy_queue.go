@@ -99,17 +99,24 @@ func (q *DestroyQueue) TrackSubmission(index uint64, refs []*ResourceRef) {
 //
 // Also Drop()'s ResourceRefs from completed TrackedSubmissions (Phase 2).
 //
+// Callbacks and ref Drop()'s are executed OUTSIDE the mutex to prevent deadlocks
+// when an onZero callback re-enters the DestroyQueue (ADR-056: ref.Drop() ->
+// onZero -> dq.Defer() must not deadlock with Triage holding the lock).
+//
 // This should be called after each Queue.Submit() with the result of
 // hal.Queue.PollCompleted().
 func (q *DestroyQueue) Triage(completedIndex uint64) {
+	// Collect completed items under the lock; execute callbacks outside.
+	var completedDestroys []func()
+	var completedRefs []*ResourceRef
+
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	// Triage deferred destroys (Phase 1).
 	n := 0
 	for i := range q.pending {
 		if q.pending[i].submissionIndex <= completedIndex {
-			q.pending[i].destroyFn()
+			completedDestroys = append(completedDestroys, q.pending[i].destroyFn)
 		} else {
 			q.pending[n] = q.pending[i]
 			n++
@@ -125,9 +132,7 @@ func (q *DestroyQueue) Triage(completedIndex uint64) {
 	tn := 0
 	for i := range q.tracked {
 		if q.tracked[i].index <= completedIndex {
-			for _, ref := range q.tracked[i].refs {
-				ref.Drop()
-			}
+			completedRefs = append(completedRefs, q.tracked[i].refs...)
 		} else {
 			q.tracked[tn] = q.tracked[i]
 			tn++
@@ -137,26 +142,49 @@ func (q *DestroyQueue) Triage(completedIndex uint64) {
 		q.tracked[i] = TrackedSubmission{}
 	}
 	q.tracked = q.tracked[:tn]
+
+	q.mu.Unlock()
+
+	// Execute Phase 1 destroy callbacks outside the lock.
+	for _, fn := range completedDestroys {
+		fn()
+	}
+
+	// Drop Phase 2 refs outside the lock.
+	// onZero callbacks may call q.Defer() — safe because the lock is released.
+	for _, ref := range completedRefs {
+		ref.Drop()
+	}
 }
 
 // FlushAll destroys all pending resources regardless of GPU completion status.
 // Called during device shutdown when all GPU work is (or should be) complete.
 // Also Drop()'s all tracked submission refs (Phase 2).
+//
+// Callbacks and ref Drop()'s are executed outside the mutex to prevent deadlocks
+// when an onZero callback re-enters the DestroyQueue (ADR-056).
 func (q *DestroyQueue) FlushAll() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
-	for i := range q.pending {
-		q.pending[i].destroyFn()
-	}
+	// Take ownership of slices and clear under the lock.
+	destroys := q.pending
+	tracked := q.tracked
 	q.pending = nil
+	q.tracked = nil
 
-	for i := range q.tracked {
-		for _, ref := range q.tracked[i].refs {
+	q.mu.Unlock()
+
+	// Execute Phase 1 destroy callbacks outside the lock.
+	for i := range destroys {
+		destroys[i].destroyFn()
+	}
+
+	// Drop Phase 2 refs outside the lock.
+	for i := range tracked {
+		for _, ref := range tracked[i].refs {
 			ref.Drop()
 		}
 	}
-	q.tracked = nil
 }
 
 // Len returns the number of pending deferred destructions. For testing only.

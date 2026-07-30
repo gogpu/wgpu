@@ -17,11 +17,9 @@ import (
 // the BindGroup itself — runtime.AddCleanup requires the callback argument to
 // be independent of the cleaned-up object.
 type bindGroupCleanupRef struct {
-	label        string
-	released     *atomic.Bool
-	destroyQueue *core.DestroyQueue
-	lastSubIdx   func() uint64
-	destroyFn    func()
+	label    string
+	released *atomic.Bool
+	ref      *core.ResourceRef // for ref.Drop() in GC path (ADR-056)
 }
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
@@ -200,14 +198,15 @@ type BindGroup struct {
 	boundTextures []*Texture
 }
 
-// Release marks the bind group for destruction. The underlying HAL BindGroup
-// (and its descriptor heap slots) is not freed immediately — it is deferred via
-// DestroyQueue until the GPU completes any submission that may reference it.
-// This prevents descriptor use-after-free on DX12 with maxFramesInFlight=2
-// (BUG-DX12-007).
+// Release marks the bind group for destruction. Drops the application's
+// ownership reference via ResourceRef.Drop(). If the bind group is still
+// referenced by in-flight GPU submissions (Clone'd via SetBindGroup), the
+// HAL bind group stays alive until the GPU completes and Triage drops all
+// tracked refs. The onZero callback (set at CreateBindGroup) fires only
+// when the last reference drops, deferring HAL destruction via DestroyQueue.
 //
-// Matches Rust wgpu pattern: BindGroup::drop() only fires after
-// triage_submissions confirms fence completion.
+// This matches Rust wgpu's Arc<BindGroup> Drop behavior — deterministic,
+// refcount-driven destruction. ADR-056: unified resource lifecycle.
 func (g *BindGroup) Release() {
 	if g.released == nil || !g.released.CompareAndSwap(false, true) {
 		return
@@ -216,71 +215,26 @@ func (g *BindGroup) Release() {
 	// Cancel the GC cleanup — we are destroying explicitly.
 	g.cleanup.Stop()
 
-	if g.device == nil {
-		return
+	if g.ref != nil {
+		g.ref.Drop()
 	}
-
-	halDevice := g.device.halDevice()
-	if halDevice == nil {
-		return
-	}
-
-	dq := g.device.destroyQueue()
-	if dq == nil {
-		halDevice.DestroyBindGroup(g.hal)
-		return
-	}
-
-	subIdx := g.device.lastSubmissionIndex()
-	halBG := g.hal
-	dq.Defer(subIdx, "BindGroup", func() {
-		halDevice.DestroyBindGroup(halBG)
-	})
 }
 
 // registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
 // When GC collects the bind group without an explicit Release(), the cleanup
-// schedules deferred destruction via DestroyQueue — the same path as Release().
-func registerBindGroupCleanup(bg *BindGroup, dev *Device, label string) runtime.Cleanup {
-	halDevice := dev.halDevice()
-	if halDevice == nil {
-		// No HAL device — nothing to destroy.
-		return runtime.Cleanup{}
-	}
-
-	halBG := bg.hal
-	destroyFn := func() {
-		halDevice.DestroyBindGroup(halBG)
-	}
-
-	dq := dev.destroyQueue()
-	if dq == nil {
-		// No DestroyQueue — register cleanup that destroys immediately.
-		return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
-			if !ref.released.CompareAndSwap(false, true) {
-				return
-			}
-			slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
-			ref.destroyFn()
-		}, bindGroupCleanupRef{
-			label:     label,
-			released:  bg.released,
-			destroyFn: destroyFn,
-		})
-	}
-
+// drops the ResourceRef — the same refcount-driven path as Release(). ADR-056.
+func registerBindGroupCleanup(bg *BindGroup, _ *Device, label string) runtime.Cleanup {
 	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
 		if !ref.released.CompareAndSwap(false, true) {
 			return
 		}
 		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
-		subIdx := ref.lastSubIdx()
-		ref.destroyQueue.Defer(subIdx, "BindGroup(GC):"+ref.label, ref.destroyFn)
+		if ref.ref != nil {
+			ref.ref.Drop()
+		}
 	}, bindGroupCleanupRef{
-		label:        label,
-		released:     bg.released,
-		destroyQueue: dq,
-		lastSubIdx:   dev.lastSubmissionIndex,
-		destroyFn:    destroyFn,
+		label:    label,
+		released: bg.released,
+		ref:      bg.ref,
 	})
 }

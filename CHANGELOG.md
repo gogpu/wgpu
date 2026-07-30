@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.28] - 2026-07-30
+
+### Fixed
+
+- **Resource lifecycle: BindGroup/Pipeline Release() bypasses ref-counting** —
+  `Release()` called `dq.Defer(lastSubmissionIndex)` directly, ignoring the
+  `ResourceRef` ref-counting system. On shared encoder path, this caused
+  use-after-free: HAL resource destroyed while GPU still processing commands.
+  Now `Release()` calls `ref.Drop()` — HAL destruction deferred until ALL
+  refs (user + GPU) are dropped. Matches Rust wgpu `Arc<BindGroup>` pattern.
+  Applied to: BindGroup, RenderPipeline, ComputePipeline. (ADR-056, #287)
+
+- **DestroyQueue deadlock: Triage → onZero → Defer re-entry** —
+  `Triage()` held mutex while executing callbacks. When `onZero` fired and
+  called `Defer()`, it tried to acquire the same mutex → deadlock. Now
+  callbacks execute outside the lock. Same fix applied to `FlushAll()`.
+
 ## [0.30.27] - 2026-07-30
 
 ### Fixed
