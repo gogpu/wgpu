@@ -437,13 +437,30 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// Collect buffer and texture references for submit-time validation (VAL-A6).
 	boundBuffers, boundTextures := collectBindGroupResources(desc.Entries)
 
+	// Initialize ResourceRef with onZero callback for refcount-driven destruction.
+	// When the last reference drops (either from explicit Release or Phase 2
+	// Triage after GPU completion), onZero fires and defers HAL destruction via
+	// DestroyQueue. This matches Rust wgpu's Arc<BindGroup> Drop behavior. ADR-056.
+	halBG := halGroup
+	bgOnZero := func() {
+		dq := d.destroyQueue()
+		if dq != nil {
+			subIdx := d.lastSubmissionIndex()
+			dq.Defer(subIdx, "BindGroup", func() {
+				halDevice.DestroyBindGroup(halBG)
+			})
+		} else {
+			halDevice.DestroyBindGroup(halBG)
+		}
+	}
+
 	bg := &BindGroup{
 		hal:                    halGroup,
 		device:                 d,
 		released:               new(atomic.Bool),
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
-		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, nil),
+		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
 		boundBuffers:           boundBuffers,
 		boundTextures:          boundTextures,
 	}
@@ -538,6 +555,23 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
 
+	// Initialize ResourceRef with onZero callback for refcount-driven destruction.
+	// When the last reference drops (either from explicit Release or Phase 2
+	// Triage after GPU completion), onZero fires and defers HAL destruction via
+	// DestroyQueue. ADR-056: unified resource lifecycle.
+	halRP := halPipeline
+	rpOnZero := func() {
+		dq := d.destroyQueue()
+		if dq != nil {
+			subIdx := d.lastSubmissionIndex()
+			dq.Defer(subIdx, "RenderPipeline", func() {
+				halDevice.DestroyRenderPipeline(halRP)
+			})
+		} else {
+			halDevice.DestroyRenderPipeline(halRP)
+		}
+	}
+
 	return &RenderPipeline{
 		hal:                   halPipeline,
 		device:                d,
@@ -547,7 +581,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		blendConstantRequired: needsBlendConstant,
 		stripIndexFormat:      desc.Primitive.StripIndexFormat,
 		lateSizedBufferGroups: lateGroups,
-		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, nil),
+		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
 	}, nil
 }
 
@@ -633,13 +667,28 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
 
+	// Initialize ResourceRef with onZero callback for refcount-driven destruction.
+	// ADR-056: unified resource lifecycle.
+	halCP := halPipeline
+	cpOnZero := func() {
+		dq := d.destroyQueue()
+		if dq != nil {
+			subIdx := d.lastSubmissionIndex()
+			dq.Defer(subIdx, "ComputePipeline", func() {
+				halDevice.DestroyComputePipeline(halCP)
+			})
+		} else {
+			halDevice.DestroyComputePipeline(halCP)
+		}
+	}
+
 	return &ComputePipeline{
 		hal:                   halPipeline,
 		device:                d,
 		bindGroupCount:        bgCount,
 		bindGroupLayouts:      bgLayouts,
 		lateSizedBufferGroups: lateGroups,
-		ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, nil),
+		ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, cpOnZero),
 	}, nil
 }
 
