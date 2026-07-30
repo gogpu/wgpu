@@ -849,25 +849,41 @@ type AttachDepthStencilCommand struct {
 
 func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 	if c.colorTexture.fbo == 0 {
-		return // No FBO was created; nothing to attach to.
+		return
 	}
-	// Attach the depth/stencil texture. Using DEPTH_STENCIL_ATTACHMENT covers
-	// combined depth+stencil formats (e.g., Depth24PlusStencil8). For
-	// depth-only formats the driver silently ignores the stencil part.
-	// Use the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, c.depthTexture.target, c.depthTexture.id, 0)
+	attachment := depthStencilAttachmentPoint(c.depthTexture.format)
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, c.depthTexture.target, c.depthTexture.id, 0)
+}
+
+// depthStencilAttachmentPoint returns the GL attachment point for a depth/stencil
+// texture format. Matches Rust wgpu-hal GLES (command.rs:577-580).
+func depthStencilAttachmentPoint(format gputypes.TextureFormat) uint32 {
+	switch format {
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		return gl.DEPTH_STENCIL_ATTACHMENT
+	case gputypes.TextureFormatStencil8:
+		return gl.STENCIL_ATTACHMENT
+	default:
+		return gl.DEPTH_ATTACHMENT
+	}
 }
 
 // AttachDepthStencilToFBOCommand attaches a depth/stencil texture to the
 // currently bound FBO. Unlike AttachDepthStencilCommand, this does not
 // reference a color texture — it operates on whatever FBO is currently bound
 // (typically the surface swapchain FBO).
+//
+// The attachment point is chosen by texture format (Rust wgpu-hal command.rs:577-580):
+//   - depth-only → GL_DEPTH_ATTACHMENT
+//   - stencil-only → GL_STENCIL_ATTACHMENT
+//   - depth+stencil → GL_DEPTH_STENCIL_ATTACHMENT
 type AttachDepthStencilToFBOCommand struct {
 	depthTexture *Texture
 }
 
 func (c *AttachDepthStencilToFBOCommand) Execute(ctx *gl.Context) {
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, c.depthTexture.target, c.depthTexture.id, 0)
+	attachment := depthStencilAttachmentPoint(c.depthTexture.format)
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, c.depthTexture.target, c.depthTexture.id, 0)
 }
 
 // MSAAResolveCommand resolves an MSAA framebuffer to a single-sample framebuffer

@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **GLES: depth/stencil not attached to swapchain FBO on surface render pass** —
-  `setupSurfaceTarget()` had an early return that skipped depth/stencil attachment.
-  3D content with depth testing was invisible on GLES while Vulkan and DX12 worked
-  correctly. Now attaches depth/stencil to the swapchain FBO via
-  `AttachDepthStencilToFBOCommand`. Matches Rust wgpu-hal GLES `begin_render_pass`
-  which uses the same draw_fbo path for both surface and offscreen targets. (#284)
+  `setupSurfaceTarget()` had an early return that skipped depth/stencil attachment,
+  causing `GL_INVALID_FRAMEBUFFER_OPERATION` (0x506) on every draw call.
+  Now attaches depth/stencil to the swapchain FBO via `AttachDepthStencilToFBOCommand`.
+  Attachment point chosen by format: `GL_DEPTH_ATTACHMENT` for depth-only,
+  `GL_DEPTH_STENCIL_ATTACHMENT` for combined formats (Rust wgpu-hal parity,
+  command.rs:577-580). Also fixes the same wrong attachment point in the existing
+  `AttachDepthStencilCommand` for offscreen FBOs. 2D overlay now renders correctly
+  on GLES surface targets. (#284, partial — 3D rendering under separate investigation)
 
 ### Changed
 
