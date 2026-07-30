@@ -401,15 +401,20 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 		}
 	}
 
-	// 4. Check referenced bind groups (matches Rust queue.rs:1815-1817), then
-	// the resources they bind. A bind group already holds boundBuffers and
-	// boundTextures from CreateBindGroup, so passes track only the group
-	// itself and this walk reaches the rest — no per-draw fan-out needed.
+	// 4. Check the resources bound by every bind group. A bind group already
+	// holds boundBuffers and boundTextures from CreateBindGroup, so passes
+	// track only the group itself and this walk reaches the rest — no per-draw
+	// fan-out needed. Release() never mutates those slices, so they stay
+	// walkable after the group itself is released.
+	//
+	// This runs as its own pass, ahead of the bg.released pass below, so the
+	// specific error always wins: a released buffer reports the buffer rather
+	// than whichever bind group happens to reference it. Before the fan-out was
+	// removed these resources sat in the flat usedBuffers/usedTextures sets,
+	// checked in steps 2 and 3 ahead of any bind group, and folding the release
+	// check into this loop would make the winner depend on map iteration order
+	// whenever two bind groups are at fault.
 	for bg := range cb.usedBindGroups {
-		if bg.released != nil && bg.released.Load() {
-			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released bind group: %w",
-				index, ErrSubmitBindGroupDestroyed)
-		}
 		for _, buf := range bg.boundBuffers {
 			if err := validateSubmitBuffer(buf, index); err != nil {
 				return err
@@ -419,6 +424,14 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 			if err := validateSubmitTexture(tex, index); err != nil {
 				return err
 			}
+		}
+	}
+
+	// 5. Check the bind groups themselves (matches Rust queue.rs:1815-1817).
+	for bg := range cb.usedBindGroups {
+		if bg.released != nil && bg.released.Load() {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released bind group: %w",
+				index, ErrSubmitBindGroupDestroyed)
 		}
 	}
 
