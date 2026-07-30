@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -478,5 +479,78 @@ func TestSubmitWithValidBindGroup(t *testing.T) {
 	_, err = device.Queue().Submit(cmdBuf)
 	if err != nil {
 		t.Fatalf("Submit should succeed: %v", err)
+	}
+}
+
+// TestSubmitWithReleasedBufferInBindGroup verifies that a buffer reachable only
+// through a bind group is still validated at Submit. Passes track the bind group
+// itself, not its contents — validateCommandBufferForSubmit walks
+// BindGroup.boundBuffers to reach this buffer.
+func TestSubmitWithReleasedBufferInBindGroup(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "val-a6-bg-buf",
+		Size:  128,
+		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+
+	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "val-a6-bg-layout",
+		Entries: []wgpu.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: wgpu.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
+					MinBindingSize: 128,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer bgl.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "val-a6-bg",
+		Layout: bgl,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Offset: 0, Size: 128},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	defer bg.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetBindGroup(0, bg, nil)
+	pass.End()
+
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// Release the buffer — but not the bind group — after encoding.
+	buf.Release()
+
+	_, err = device.Queue().Submit(cmdBuf)
+	if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
+		t.Errorf("Submit with released bind group buffer = %v, want ErrSubmitBufferDestroyed", err)
 	}
 }

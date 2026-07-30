@@ -141,3 +141,22 @@ func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 		open.Device.Destroy()
 	}
 }
+
+// TestCommandBufferReleaseDropsUsedSets verifies that Release() drops the
+// encode-time validation sets. A CommandBuffer that is Finish()'d and then
+// Released without being submitted (the hal.Submit failure path) must not keep
+// pinning every resource the frame touched.
+func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
+	cb := &CommandBuffer{
+		usedBuffers:    map[*Buffer]struct{}{{}: {}},
+		usedTextures:   map[*Texture]struct{}{{}: {}},
+		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+	}
+
+	cb.Release()
+
+	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+		t.Errorf("Release left validation sets populated: buffers=%v textures=%v bindGroups=%v",
+			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+	}
+}

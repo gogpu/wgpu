@@ -147,24 +147,20 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 // 2. Schedules HAL encoder recycling via DestroyQueue (BUG-DX12-004)
 // 3. Triages deferred resource destructions
 func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
-	dq := q.destroyQueue()
-	if dq == nil {
-		return
-	}
-
 	// Mark all command buffers as submitted to prevent double-submit (VAL-A6),
-	// and drop the encode-time reference sets. usedBuffers/usedTextures/
-	// usedBindGroups exist only for validateCommandBufferForSubmit, which has
-	// already run; keeping them alive pins every resource the frame referenced
-	// for as long as the command buffer is reachable, so a per-frame bind group
-	// is never collected.
+	// and drop the encode-time reference sets. This runs before the DestroyQueue
+	// lookup below: the HAL submit has already succeeded, so these buffers are
+	// spent whether or not there is a queue to triage.
 	for _, cb := range commandBuffers {
 		if cb != nil {
 			cb.submitted = true
-			cb.usedBuffers = nil
-			cb.usedTextures = nil
-			cb.usedBindGroups = nil
+			cb.dropUsedSets()
 		}
+	}
+
+	dq := q.destroyQueue()
+	if dq == nil {
+		return
 	}
 
 	// Collect tracked refs from command buffers and associate with this submission.
@@ -393,36 +389,70 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 
 	// 2. Check referenced buffers (matches Rust queue.rs:1780-1787).
 	for buf := range cb.usedBuffers {
-		// Check destroyed/released.
-		if buf.released != nil && buf.released.Load() {
-			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released buffer %q: %w",
-				index, buf.Label(), ErrSubmitBufferDestroyed)
-		}
-
-		// Check mapped state.
-		// Rust: BufferMapState::Idle is the only valid state for submit.
-		if buf.MapState() != MapStateUnmapped {
-			return fmt.Errorf("wgpu: Submit: command buffer at index %d references mapped buffer %q: %w",
-				index, buf.Label(), ErrSubmitBufferMapped)
+		if err := validateSubmitBuffer(buf, index); err != nil {
+			return err
 		}
 	}
 
 	// 3. Check referenced textures (matches Rust queue.rs:1791-1808).
 	for tex := range cb.usedTextures {
-		if tex.resolveHAL() == nil {
-			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
-				index, ErrSubmitTextureDestroyed)
+		if err := validateSubmitTexture(tex, index); err != nil {
+			return err
 		}
 	}
 
-	// 4. Check referenced bind groups (matches Rust queue.rs:1815-1817).
+	// 4. Check referenced bind groups (matches Rust queue.rs:1815-1817), then
+	// the resources they bind. A bind group already holds boundBuffers and
+	// boundTextures from CreateBindGroup, so passes track only the group
+	// itself and this walk reaches the rest — no per-draw fan-out needed.
 	for bg := range cb.usedBindGroups {
 		if bg.released != nil && bg.released.Load() {
 			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released bind group: %w",
 				index, ErrSubmitBindGroupDestroyed)
 		}
+		for _, buf := range bg.boundBuffers {
+			if err := validateSubmitBuffer(buf, index); err != nil {
+				return err
+			}
+		}
+		for _, tex := range bg.boundTextures {
+			if err := validateSubmitTexture(tex, index); err != nil {
+				return err
+			}
+		}
 	}
 
+	return nil
+}
+
+// validateSubmitBuffer checks that a buffer is neither released nor mapped.
+func validateSubmitBuffer(buf *Buffer, index int) error {
+	if buf == nil {
+		return nil
+	}
+	// Check destroyed/released.
+	if buf.released != nil && buf.released.Load() {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released buffer %q: %w",
+			index, buf.Label(), ErrSubmitBufferDestroyed)
+	}
+	// Check mapped state.
+	// Rust: BufferMapState::Idle is the only valid state for submit.
+	if buf.MapState() != MapStateUnmapped {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d references mapped buffer %q: %w",
+			index, buf.Label(), ErrSubmitBufferMapped)
+	}
+	return nil
+}
+
+// validateSubmitTexture checks that a texture has not been released.
+func validateSubmitTexture(tex *Texture, index int) error {
+	if tex == nil {
+		return nil
+	}
+	if tex.resolveHAL() == nil {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
+			index, ErrSubmitTextureDestroyed)
+	}
 	return nil
 }
 

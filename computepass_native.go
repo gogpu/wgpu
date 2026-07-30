@@ -90,15 +90,10 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 			p.trackRef(buf.core.Ref)
 		}
 	}
-	// Track bind group itself for submit-time validation (VAL-B5).
+	// Track bind group itself for submit-time validation (VAL-B5 and, via
+	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
+	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
-	// Track bind group resources for submit-time validation (VAL-A6).
-	for _, buf := range group.boundBuffers {
-		p.encoder.trackBuffer(buf)
-	}
-	for _, tex := range group.boundTextures {
-		p.encoder.trackTexture(tex)
-	}
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)
