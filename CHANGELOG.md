@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.29] - 2026-07-30
+
+### Fixed
+
+- **Queue.LastSubmissionIndex deadlock** — `onZero` callbacks from `Triage()`
+  called `lastSubmissionIndex()` which locked `Queue.mu`, already held by
+  `Submit()`. Changed `lastSubmissionIndex` from `mutex`-protected `uint64` to
+  `atomic.Uint64` — single writer (Submit), lock-free readers (onZero callbacks).
+  ADR-056 deadlock chain: Submit→Triage→onZero→lastSubmissionIndex→mu.
+
 ## [0.30.28] - 2026-07-30
 
 ### Fixed
