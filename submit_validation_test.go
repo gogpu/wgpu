@@ -554,3 +554,85 @@ func TestSubmitWithReleasedBufferInBindGroup(t *testing.T) {
 		t.Errorf("Submit with released bind group buffer = %v, want ErrSubmitBufferDestroyed", err)
 	}
 }
+
+// TestSubmitWithReleasedTextureInBindGroup is the texture counterpart of
+// TestSubmitWithReleasedBufferInBindGroup: a texture reachable only through a
+// bind group is still validated at Submit via BindGroup.boundTextures.
+func TestSubmitWithReleasedTextureInBindGroup(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "val-a6-bg-tex",
+		Size:          wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     wgpu.TextureDimension2D,
+		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Usage:         wgpu.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		t.Fatalf("CreateTexture: %v", err)
+	}
+
+	view, err := device.CreateTextureView(tex, nil)
+	if err != nil {
+		t.Fatalf("CreateTextureView: %v", err)
+	}
+	defer view.Release()
+
+	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "val-a6-bg-tex-layout",
+		Entries: []wgpu.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: wgpu.ShaderStageCompute,
+				Texture: &gputypes.TextureBindingLayout{
+					SampleType:    gputypes.TextureSampleTypeFloat,
+					ViewDimension: gputypes.TextureViewDimension2D,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer bgl.Release()
+
+	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "val-a6-bg-tex",
+		Layout: bgl,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, TextureView: view},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	defer bg.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetBindGroup(0, bg, nil)
+	pass.End()
+
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// Release the texture — but not the bind group — after encoding.
+	tex.Release()
+
+	_, err = device.Queue().Submit(cmdBuf)
+	if !errors.Is(err, wgpu.ErrSubmitTextureDestroyed) {
+		t.Errorf("Submit with released bind group texture = %v, want ErrSubmitTextureDestroyed", err)
+	}
+}

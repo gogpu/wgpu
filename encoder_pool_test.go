@@ -160,3 +160,30 @@ func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
 			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
 	}
 }
+
+// TestPostSubmitDropsSetsWithoutDestroyQueue verifies that a command buffer is
+// marked submitted and has its validation sets dropped even when the device has
+// no DestroyQueue. postSubmit returns early in that case; the bookkeeping must
+// happen before the early return, since the HAL submit has already succeeded.
+func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
+	q := &Queue{} // nil device — destroyQueue() returns nil
+	if q.destroyQueue() != nil {
+		t.Fatal("test precondition: expected nil destroy queue")
+	}
+
+	cb := &CommandBuffer{
+		usedBuffers:    map[*Buffer]struct{}{{}: {}},
+		usedTextures:   map[*Texture]struct{}{{}: {}},
+		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+	}
+
+	q.postSubmit(1, []*CommandBuffer{cb})
+
+	if !cb.submitted {
+		t.Error("postSubmit left cb.submitted false — a double submit would not be caught")
+	}
+	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+		t.Errorf("postSubmit left validation sets populated: buffers=%v textures=%v bindGroups=%v",
+			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+	}
+}

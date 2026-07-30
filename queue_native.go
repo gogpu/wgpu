@@ -426,10 +426,9 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 }
 
 // validateSubmitBuffer checks that a buffer is neither released nor mapped.
+// Callers never pass nil: trackBuffer skips nil and collectBindGroupResources
+// only records non-nil entries.
 func validateSubmitBuffer(buf *Buffer, index int) error {
-	if buf == nil {
-		return nil
-	}
 	// Check destroyed/released.
 	if buf.released != nil && buf.released.Load() {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released buffer %q: %w",
@@ -445,10 +444,9 @@ func validateSubmitBuffer(buf *Buffer, index int) error {
 }
 
 // validateSubmitTexture checks that a texture has not been released.
+// Callers never pass nil: trackTexture skips nil and collectBindGroupResources
+// only records non-nil entries.
 func validateSubmitTexture(tex *Texture, index int) error {
-	if tex == nil {
-		return nil
-	}
 	if tex.resolveHAL() == nil {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
 			index, ErrSubmitTextureDestroyed)
