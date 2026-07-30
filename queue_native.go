@@ -5,6 +5,7 @@ package wgpu
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
@@ -27,8 +28,10 @@ type Queue struct {
 	// lastSubmissionIndex is the most recent submission index returned by
 	// hal.Queue.Submit(). Used by DestroyQueue to conservatively defer
 	// resource destruction until after the latest known submission completes.
-	// Protected by mu.
-	lastSubmissionIndex uint64
+	// Atomic: written by Submit (under mu), read by onZero callbacks which
+	// may fire during Triage while Queue.mu is held. Using atomic avoids
+	// deadlock: Submit→Triage→onZero→lastSubmissionIndex→mu (ADR-056).
+	lastSubmissionIndex atomic.Uint64
 }
 
 // Submit submits command buffers for execution. Non-blocking.
@@ -97,7 +100,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	}
 
 	// Track the latest submission index for deferred resource destruction.
-	q.lastSubmissionIndex = subIdx
+	q.lastSubmissionIndex.Store(subIdx)
 
 	// Record inflight resources and clean up completed ones.
 	// dstTextures/dstBuffers prevent premature Release (BUG-DX12-006: use-after-free).
@@ -346,13 +349,11 @@ func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
 }
 
 // LastSubmissionIndex returns the most recent submission index.
-// Used by resource Release() methods to schedule deferred destruction.
-// Safe for concurrent use — reads under the queue mutex.
+// Used by resource Release() and onZero callbacks to schedule deferred destruction.
+// Lock-free via atomic — safe to call from onZero callbacks during Triage
+// while Queue.mu is held by Submit. ADR-056 deadlock fix.
 func (q *Queue) LastSubmissionIndex() uint64 {
-	q.mu.Lock()
-	idx := q.lastSubmissionIndex
-	q.mu.Unlock()
-	return idx
+	return q.lastSubmissionIndex.Load()
 }
 
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.
