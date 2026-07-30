@@ -294,7 +294,7 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 	}
 
 	if tv.isSurface {
-		e.setupSurfaceTarget(tv, rpe)
+		e.setupSurfaceTarget(desc, tv, rpe)
 		return
 	}
 
@@ -313,7 +313,7 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 // Y-flip (WriterFlagAdjustCoordinateSpace). Queue.Present performs an explicit
 // Y-flipping glBlitFramebuffer from this FBO to FBO 0 before SwapBuffers.
 // Mirrors Rust wgpu-hal/src/gles/egl.rs Surface::configure/Surface::present.
-func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView, rpe *RenderPassEncoder) {
+func (e *CommandEncoder) setupSurfaceTarget(desc *hal.RenderPassDescriptor, tv *TextureView, rpe *RenderPassEncoder) {
 	if tv.surfaceTex != nil && tv.surfaceTex.surface != nil {
 		surf := tv.surfaceTex.surface
 		e.commands = append(e.commands, &BindSurfaceFramebufferCommand{surface: surf})
@@ -324,6 +324,17 @@ func (e *CommandEncoder) setupSurfaceTarget(tv *TextureView, rpe *RenderPassEnco
 				width:  float32(cfg.Width),
 				height: float32(cfg.Height),
 			})
+		}
+		// Attach depth/stencil to the swapchain FBO if requested.
+		// The swapchain FBO is a real GL FBO (not FBO 0), so glFramebufferTexture2D
+		// works. Matches Rust wgpu-hal GLES: BindAttachment for depth/stencil after
+		// ResetFramebuffer { is_default: false } (command.rs:575-601).
+		if desc.DepthStencilAttachment != nil {
+			if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
+				e.commands = append(e.commands, &AttachDepthStencilToFBOCommand{
+					depthTexture: dsView.texture,
+				})
+			}
 		}
 		return
 	}
@@ -844,6 +855,18 @@ func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 	// combined depth+stencil formats (e.g., Depth24PlusStencil8). For
 	// depth-only formats the driver silently ignores the stencil part.
 	// Use the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, c.depthTexture.target, c.depthTexture.id, 0)
+}
+
+// AttachDepthStencilToFBOCommand attaches a depth/stencil texture to the
+// currently bound FBO. Unlike AttachDepthStencilCommand, this does not
+// reference a color texture — it operates on whatever FBO is currently bound
+// (typically the surface swapchain FBO).
+type AttachDepthStencilToFBOCommand struct {
+	depthTexture *Texture
+}
+
+func (c *AttachDepthStencilToFBOCommand) Execute(ctx *gl.Context) {
 	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, c.depthTexture.target, c.depthTexture.id, 0)
 }
 
