@@ -4,6 +4,7 @@ package wgpu_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -441,5 +442,66 @@ func TestMixedResourceLifecycle_TrackedSubmission(t *testing.T) {
 	if pendingAfter <= pendingBefore {
 		t.Errorf("onZero callbacks should schedule deferred destruction: pending before=%d, after=%d",
 			pendingBefore, pendingAfter)
+	}
+}
+
+// TestLastSubmissionIndex_NoDeadlock_OnZeroDuringTriage verifies that onZero
+// callbacks can safely call LastSubmissionIndex() during Triage without deadlock.
+//
+// Regression test for v0.30.28 deadlock:
+//
+//	Submit() → Queue.mu.Lock()
+//	  → postSubmit() → Triage()
+//	    → onZero callback → LastSubmissionIndex() → Queue.mu.Lock() ← DEADLOCK
+//
+// Fixed in v0.30.29: lastSubmissionIndex changed to atomic.Uint64.
+func TestLastSubmissionIndex_NoDeadlock_OnZeroDuringTriage(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	dq := device.TestDestroyQueue()
+	if dq == nil {
+		t.Skip("device has no DestroyQueue")
+	}
+
+	// Create a ResourceRef whose onZero calls lastSubmissionIndex —
+	// this is the exact pattern that caused the v0.30.28 deadlock.
+	var capturedIdx uint64
+	ref := core.NewResourceRef("deadlock-test", func() {
+		capturedIdx = device.Queue().LastSubmissionIndex()
+		dq.Defer(capturedIdx, "deadlock-test", func() {})
+	})
+
+	// Simulate recording: Clone for the submission.
+	ref.Clone()
+
+	// Track in submission at index 10.
+	dq.TrackSubmission(10, []*core.ResourceRef{ref})
+
+	// Drop the "user" ref (simulates Release).
+	ref.Drop() // refCount 2→1
+
+	// Triage with completedIndex=10: drops tracked ref → refCount 1→0 → onZero.
+	// onZero calls LastSubmissionIndex() + dq.Defer().
+	// With mutex-based LastSubmissionIndex, this would deadlock if called
+	// under Queue.mu. With atomic, it completes safely.
+	//
+	// We use a timeout channel to detect deadlock.
+	done := make(chan struct{})
+	go func() {
+		dq.Triage(10)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success — no deadlock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("DEADLOCK: Triage blocked for 5s — onZero → LastSubmissionIndex likely re-locked")
+	}
+
+	if capturedIdx == 0 && ref.RefCount() != 0 {
+		t.Error("onZero should have fired and captured lastSubmissionIndex")
 	}
 }
