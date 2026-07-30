@@ -152,10 +152,18 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		return
 	}
 
-	// Mark all command buffers as submitted to prevent double-submit (VAL-A6).
+	// Mark all command buffers as submitted to prevent double-submit (VAL-A6),
+	// and drop the encode-time reference sets. usedBuffers/usedTextures/
+	// usedBindGroups exist only for validateCommandBufferForSubmit, which has
+	// already run; keeping them alive pins every resource the frame referenced
+	// for as long as the command buffer is reachable, so a per-frame bind group
+	// is never collected.
 	for _, cb := range commandBuffers {
 		if cb != nil {
 			cb.submitted = true
+			cb.usedBuffers = nil
+			cb.usedTextures = nil
+			cb.usedBindGroups = nil
 		}
 	}
 
