@@ -141,3 +141,49 @@ func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 		open.Device.Destroy()
 	}
 }
+
+// TestCommandBufferReleaseDropsUsedSets verifies that Release() drops the
+// encode-time validation sets. A CommandBuffer that is Finish()'d and then
+// Released without being submitted (the hal.Submit failure path) must not keep
+// pinning every resource the frame touched.
+func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
+	cb := &CommandBuffer{
+		usedBuffers:    map[*Buffer]struct{}{{}: {}},
+		usedTextures:   map[*Texture]struct{}{{}: {}},
+		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+	}
+
+	cb.Release()
+
+	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+		t.Errorf("Release left validation sets populated: buffers=%v textures=%v bindGroups=%v",
+			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+	}
+}
+
+// TestPostSubmitDropsSetsWithoutDestroyQueue verifies that a command buffer is
+// marked submitted and has its validation sets dropped even when the device has
+// no DestroyQueue. postSubmit returns early in that case; the bookkeeping must
+// happen before the early return, since the HAL submit has already succeeded.
+func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
+	q := &Queue{} // nil device — destroyQueue() returns nil
+	if q.destroyQueue() != nil {
+		t.Fatal("test precondition: expected nil destroy queue")
+	}
+
+	cb := &CommandBuffer{
+		usedBuffers:    map[*Buffer]struct{}{{}: {}},
+		usedTextures:   map[*Texture]struct{}{{}: {}},
+		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+	}
+
+	q.postSubmit(1, []*CommandBuffer{cb})
+
+	if !cb.submitted {
+		t.Error("postSubmit left cb.submitted false — a double submit would not be caught")
+	}
+	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+		t.Errorf("postSubmit left validation sets populated: buffers=%v textures=%v bindGroups=%v",
+			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+	}
+}

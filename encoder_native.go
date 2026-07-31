@@ -589,6 +589,18 @@ func (cb *CommandBuffer) Release() {
 		ref.Drop()
 	}
 	cb.trackedRefs = nil
+	cb.dropUsedSets()
+}
+
+// dropUsedSets releases the encode-time validation sets. usedBuffers,
+// usedTextures and usedBindGroups exist only for
+// validateCommandBufferForSubmit; once a command buffer is spent — submitted
+// or released — they are hard references pinning every resource the frame
+// touched for as long as the command buffer stays reachable.
+func (cb *CommandBuffer) dropUsedSets() {
+	cb.usedBuffers = nil
+	cb.usedTextures = nil
+	cb.usedBindGroups = nil
 }
 
 // halBuffer returns the underlying HAL command buffer.
