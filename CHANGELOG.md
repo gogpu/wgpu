@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.30] - 2026-07-31
+
+### Fixed
+
+- **Memory leak: validation maps pinned every resource per frame** —
+  `SetBindGroup` copied every bound buffer and texture into encoder maps per draw
+  call (O(bindings × draws)). Validation maps were never cleared after Submit or
+  Release, pinning BindGroup objects indefinitely. Now tracks bind groups only;
+  `validateCommandBufferForSubmit` walks `boundBuffers`/`boundTextures` transitively.
+  `dropUsedSets()` clears maps in both `postSubmit` and `Release()`.
+  Contributor: @samyfodil (#291)
+
+- **Validation error precedence: buffer/texture errors beat bind group errors** —
+  Two-pass validation: first walks all bound resources from all bind groups, then
+  checks `bg.released`. Deterministic regardless of map iteration order. Matches
+  Rust wgpu ordering (buffers 1780-1808, bind groups 1815-1817). (#291)
+
 ## [0.30.29] - 2026-07-30
 
 ### Fixed
