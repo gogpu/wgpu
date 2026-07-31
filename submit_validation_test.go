@@ -774,7 +774,6 @@ func TestSubmitResourceErrorWinsAcrossBindGroups(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateBindGroup live: %v", err)
 		}
-		defer bgLive.Release()
 
 		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
@@ -813,5 +812,12 @@ func TestSubmitResourceErrorWinsAcrossBindGroups(t *testing.T) {
 		if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
 			t.Fatalf("iteration %d: Submit = %v, want ErrSubmitBufferDestroyed", i, err)
 		}
+
+		// Released here rather than deferred: over 16 iterations the deferred
+		// form would hold every encoder and bind group to the end of the test.
+		// The submit failed validation, so the command buffer must be released
+		// to return its HAL encoder to the pool.
+		cmdBuf.Release()
+		bgLive.Release()
 	}
 }
