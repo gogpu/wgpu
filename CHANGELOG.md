@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.31] - 2026-08-01
+
+### Fixed
+
+- **Metal: block callbacks crash under `-race` (checkptr)** — all 4 ObjC block
+  callback trampolines converted `uintptr blockPtr` to `unsafe.Pointer` to read
+  `blockID` at offset 32. checkptr rejects this because `uintptr` from goffi's
+  reflect callback has no pointer provenance. Replaced with reverse map lookup
+  (`blockPtrToID sync.Map`) — block pointer used as opaque integer key only,
+  no `unsafe.Pointer` conversion. Follows purego (Ebitengine) pattern.
+  wgpu#280 fix was insufficient — fixed arithmetic but not the base conversion.
+  (#293)
+
 ## [0.30.30] - 2026-07-31
 
 ### Fixed
