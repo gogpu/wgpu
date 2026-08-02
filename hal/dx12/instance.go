@@ -380,9 +380,15 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 		return fmt.Errorf("dx12: device is not a DX12 device")
 	}
 
-	// If we already have a swapchain with the same device, resize it
+	// If we already have a swapchain with the same device, resize it —
+	// UNLESS the alpha mode changed (Opaque↔Premultiplied requires a
+	// different swap chain creation path: HWND vs DirectComposition).
 	if s.swapchain != nil && s.device == dx12Device {
-		return s.resizeSwapchain(config)
+		needsDComp := config.AlphaMode == hal.CompositeAlphaModePremultiplied
+		hasDComp := s.dcomp != nil
+		if needsDComp == hasDComp {
+			return s.resizeSwapchain(config)
+		}
 	}
 
 	// Destroy old swapchain if switching devices

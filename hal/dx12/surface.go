@@ -165,10 +165,15 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	// Without this wait, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT is a no-op.
 	s.frameLatencyWaitableObject = swapchain4.GetFrameLatencyWaitableObject()
 
-	// Disable Alt+Enter fullscreen toggle
-	if err := s.instance.factory.MakeWindowAssociation(s.hwnd, dxgi.DXGI_MWA_NO_ALT_ENTER); err != nil {
-		// Non-fatal, just continue
-		_ = err
+	// Disable Alt+Enter fullscreen toggle (HWND path only — DirectComposition
+	// swap chains are not associated with the HWND, so DXGI Alt+Enter
+	// interception does not apply). Matches Rust wgpu: MakeWindowAssociation
+	// is called only for SurfaceTarget::WndHandle.
+	if s.dcomp == nil {
+		if err := s.instance.factory.MakeWindowAssociation(s.hwnd, dxgi.DXGI_MWA_NO_ALT_ENTER); err != nil {
+			// Non-fatal, just continue
+			_ = err
+		}
 	}
 
 	// Create RTVs for back buffers
