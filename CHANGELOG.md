@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.35] - 2026-08-02
+
+### Fixed
+
+- **dx12:** DirectComposition path for per-pixel alpha transparency (#298, PR #299)
+  - `CompositeAlphaModePremultiplied` now works on DX12 via `CreateSwapChainForComposition`
+  - Lazy-loaded `dcomp.dll` bindings (IDCompositionDevice/Target/Visual)
+  - Auto-select: Premultiplied → DComp path, Opaque → HWND path (unchanged)
+  - Adapter correctly reports Premultiplied only when `dcomp.dll` available
+  - Alpha mode change detection in Configure (forces full recreate vs ResizeBuffers)
+  - MakeWindowAssociation skipped on DComp path (Rust wgpu parity)
+  - `GOGPU_DX12_FORCE_HWND=1` env var override for RenderDoc compatibility
+  - ADR-057, Rust wgpu `dcomp.rs` parity
+
 ## [0.30.34] - 2026-08-02
 
 ### Changed
