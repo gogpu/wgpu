@@ -380,6 +380,17 @@ func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.T
 
 // SurfaceCapabilities returns surface capabilities.
 func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
+	// Opaque is always supported via CreateSwapChainForHwnd.
+	// Premultiplied alpha requires DirectComposition (dcomp.dll, Windows 8+).
+	// Rust wgpu reports Premultiplied only for VisualFromWndHandle targets;
+	// we simplify by checking DComp DLL availability at runtime.
+	alphaModes := []hal.CompositeAlphaMode{
+		hal.CompositeAlphaModeOpaque,
+	}
+	if dcompAvailable() {
+		alphaModes = append(alphaModes, hal.CompositeAlphaModePremultiplied)
+	}
+
 	// D3D12 supports these formats for swap chains
 	return &hal.SurfaceCapabilities{
 		Formats: []gputypes.TextureFormat{
@@ -390,10 +401,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 			gputypes.TextureFormatRGBA16Float,
 		},
 		PresentModes: a.presentModes(),
-		AlphaModes: []hal.CompositeAlphaMode{
-			hal.CompositeAlphaModeOpaque,
-			hal.CompositeAlphaModePremultiplied,
-		},
+		AlphaModes:   alphaModes,
 	}
 }
 
@@ -671,13 +679,19 @@ func (a *AdapterLegacy) TextureFormatCapabilities(format gputypes.TextureFormat)
 
 // SurfaceCapabilities returns surface capabilities.
 func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
+	// Opaque is always supported. Premultiplied requires DirectComposition.
+	alphaModes := []hal.CompositeAlphaMode{hal.CompositeAlphaModeOpaque}
+	if dcompAvailable() {
+		alphaModes = append(alphaModes, hal.CompositeAlphaModePremultiplied)
+	}
+
 	return &hal.SurfaceCapabilities{
 		Formats: []gputypes.TextureFormat{
 			gputypes.TextureFormatBGRA8Unorm,
 			gputypes.TextureFormatRGBA8Unorm,
 		},
 		PresentModes: []hal.PresentMode{hal.PresentModeFifo},
-		AlphaModes:   []hal.CompositeAlphaMode{hal.CompositeAlphaModeOpaque},
+		AlphaModes:   alphaModes,
 	}
 }
 

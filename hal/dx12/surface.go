@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -81,22 +82,67 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		Flags:       swapchainFlags,
 	}
 
-	// Create swapchain using factory and command queue
-	swapchain1, err := s.instance.factory.CreateSwapChainForHwnd(
-		unsafe.Pointer(device.directQueue),
-		s.hwnd,
-		&desc,
-		nil, // fullscreen desc (windowed)
-		nil, // restrict to output
-	)
-	if err != nil {
-		return fmt.Errorf("dx12: CreateSwapChainForHwnd failed: %w", err)
+	// Determine swap chain creation path.
+	// DirectComposition is required for per-pixel alpha (DXGI_ALPHA_MODE_PREMULTIPLIED)
+	// because CreateSwapChainForHwnd only supports DXGI_ALPHA_MODE_IGNORE.
+	// GOGPU_DX12_FORCE_HWND=1 overrides this for RenderDoc compatibility (RenderDoc
+	// cannot capture frames through DirectComposition).
+	useDComp := config.AlphaMode == hal.CompositeAlphaModePremultiplied &&
+		os.Getenv("GOGPU_DX12_FORCE_HWND") != "1"
+
+	var swapchain1 *dxgi.IDXGISwapChain1
+
+	if useDComp {
+		// DirectComposition path — create swap chain via CreateSwapChainForComposition
+		// and bind it to a DComp visual tree rooted on the HWND.
+		s.dcomp = &dcompState{}
+		if err := s.dcomp.init(s.hwnd); err != nil {
+			s.dcomp = nil
+			return fmt.Errorf("dx12: DirectComposition init failed: %w", err)
+		}
+
+		sc, err := s.instance.factory.CreateSwapChainForComposition(
+			unsafe.Pointer(device.directQueue),
+			&desc,
+			nil, // restrict to output
+		)
+		if err != nil {
+			s.dcomp.release()
+			s.dcomp = nil
+			return fmt.Errorf("dx12: CreateSwapChainForComposition failed: %w", err)
+		}
+		swapchain1 = sc
+
+		// Bind swap chain to DComp visual and commit the composition.
+		if err := s.dcomp.bindSwapChain(swapchain1); err != nil {
+			swapchain1.Release()
+			s.dcomp.release()
+			s.dcomp = nil
+			return fmt.Errorf("dx12: DComp bindSwapChain failed: %w", err)
+		}
+	} else {
+		// Standard HWND path — swap chain is directly associated with the window.
+		sc, err := s.instance.factory.CreateSwapChainForHwnd(
+			unsafe.Pointer(device.directQueue),
+			s.hwnd,
+			&desc,
+			nil, // fullscreen desc (windowed)
+			nil, // restrict to output
+		)
+		if err != nil {
+			return fmt.Errorf("dx12: CreateSwapChainForHwnd failed: %w", err)
+		}
+		swapchain1 = sc
 	}
 
 	// Query for IDXGISwapChain4 interface (required for GetCurrentBackBufferIndex)
 	swapchain4, err := querySwapChain4(swapchain1)
 	if err != nil {
 		swapchain1.Release()
+		if s.dcomp != nil {
+			s.dcomp.release()
+			s.dcomp = nil
+		}
 		return fmt.Errorf("dx12: failed to query IDXGISwapChain4: %w", err)
 	}
 	// Release the original swapchain1 reference (swapchain4 holds a reference)
@@ -129,6 +175,10 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 	if err := s.createBackBufferRTVs(); err != nil {
 		swapchain4.Release()
 		s.swapchain = nil
+		if s.dcomp != nil {
+			s.dcomp.release()
+			s.dcomp = nil
+		}
 		return err
 	}
 
@@ -137,12 +187,23 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		return err
 	}
 
-	hal.Logger().Info("dx12: surface configured",
-		"width", config.Width,
-		"height", config.Height,
-		"format", config.Format,
-		"presentMode", config.PresentMode,
-	)
+	if useDComp {
+		hal.Logger().Info("dx12: surface configured (DirectComposition)",
+			"width", config.Width,
+			"height", config.Height,
+			"format", config.Format,
+			"presentMode", config.PresentMode,
+			"alphaMode", config.AlphaMode,
+		)
+	} else {
+		hal.Logger().Info("dx12: surface configured",
+			"width", config.Width,
+			"height", config.Height,
+			"format", config.Format,
+			"presentMode", config.PresentMode,
+			"alphaMode", config.AlphaMode,
+		)
+	}
 
 	return nil
 }

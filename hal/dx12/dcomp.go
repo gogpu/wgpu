@@ -51,15 +51,6 @@ func dcompAvailable() bool {
 	return loadDComp() == nil
 }
 
-// Compile-time usage references for functions that will be consumed by
-// surface.go in FEAT-DCOMP-003. Without these, the unused linter rejects
-// them because the calling code has not been wired up yet.
-var (
-	_ = dcompAvailable
-	_ = (*dcompState).bindSwapChain
-	_ = (*idcompositionVisual).setContent
-)
-
 // ---------------------------------------------------------------------------
 // IID for IDCompositionDevice
 // ---------------------------------------------------------------------------
