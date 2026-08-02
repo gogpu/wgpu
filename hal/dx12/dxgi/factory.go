@@ -387,6 +387,37 @@ func (f *IDXGIFactory6) CreateSwapChainForHwnd(
 	return swapChain, nil
 }
 
+// CreateSwapChainForComposition creates a swap chain for use with DirectComposition
+// or Windows.UI.Xaml. Unlike CreateSwapChainForHwnd, the swap chain is not associated
+// with an HWND — it must be attached to a DirectComposition visual via
+// IDCompositionVisual::SetContent. This is required for per-pixel alpha transparency
+// (DXGI_ALPHA_MODE_PREMULTIPLIED) on DX12.
+//
+// restrictToOutput can be nil to allow output on any display.
+func (f *IDXGIFactory6) CreateSwapChainForComposition(
+	device unsafe.Pointer, // ID3D12CommandQueue
+	desc *DXGI_SWAP_CHAIN_DESC1,
+	restrictToOutput *IDXGIOutput,
+) (*IDXGISwapChain1, error) {
+	var swapChain *IDXGISwapChain1
+
+	ret, _, _ := syscall.Syscall6(
+		f.vtbl.CreateSwapChainForComposition,
+		5,
+		uintptr(unsafe.Pointer(f)),
+		uintptr(device),
+		uintptr(unsafe.Pointer(desc)),
+		uintptr(unsafe.Pointer(restrictToOutput)),
+		uintptr(unsafe.Pointer(&swapChain)),
+		0,
+	)
+
+	if ret != 0 {
+		return nil, d3d12.HRESULTError(ret)
+	}
+	return swapChain, nil
+}
+
 // CheckFeatureSupport checks for DXGI feature support.
 func (f *IDXGIFactory6) CheckFeatureSupport(feature DXGI_FEATURE, featureData unsafe.Pointer, featureDataSize uint32) error {
 	ret, _, _ := syscall.Syscall6(

@@ -361,6 +361,11 @@ type Surface struct {
 	// DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL (instead of FLIP_DISCARD).
 	// Only in this mode can Present1 with dirty rects be used.
 	damagePresent bool
+
+	// dcomp holds the DirectComposition visual tree state when using
+	// per-pixel alpha (CreateSwapChainForComposition path). nil for
+	// the standard HWND path.
+	dcomp *dcompState
 }
 
 // Configure configures the surface for presentation.
@@ -375,9 +380,15 @@ func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration)
 		return fmt.Errorf("dx12: device is not a DX12 device")
 	}
 
-	// If we already have a swapchain with the same device, resize it
+	// If we already have a swapchain with the same device, resize it —
+	// UNLESS the alpha mode changed (Opaque↔Premultiplied requires a
+	// different swap chain creation path: HWND vs DirectComposition).
 	if s.swapchain != nil && s.device == dx12Device {
-		return s.resizeSwapchain(config)
+		needsDComp := config.AlphaMode == hal.CompositeAlphaModePremultiplied
+		hasDComp := s.dcomp != nil
+		if needsDComp == hasDComp {
+			return s.resizeSwapchain(config)
+		}
 	}
 
 	// Destroy old swapchain if switching devices
@@ -407,6 +418,13 @@ func (s *Surface) Unconfigure(_ hal.Device) {
 	if s.swapchain != nil {
 		s.swapchain.Release()
 		s.swapchain = nil
+	}
+
+	// Release DirectComposition state (must be after swapchain release —
+	// the visual holds a reference to the swap chain via SetContent).
+	if s.dcomp != nil {
+		s.dcomp.release()
+		s.dcomp = nil
 	}
 
 	s.device = nil
