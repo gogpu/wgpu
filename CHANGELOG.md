@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.36] - 2026-08-06
+
+### Fixed
+
+- **vulkan:** Accumulated present semaphores for multi-submit synchronization (ADR-058)
+  - Fixed race condition when multiple `queue.Submit()` calls target the same swapchain image per frame
+  - Present semaphore was previously signaled only by the first submit; subsequent submits had no synchronization with `vkQueuePresentKHR`
+  - New per-image semaphore pool (Rust wgpu `SwapchainPresentSemaphores` pattern): each submit signals a new semaphore, present waits on all accumulated semaphores
+  - Pools grow on demand, recycle after present (zero overhead for single-submit-per-frame common case)
+  - Fixes visual glitches on TBDR GPUs (Apple Silicon via Asahi Linux) when using multi-pass rendering (g3d#22)
+  - Acquire wait and present signal are now separate concerns: acquire waits once per frame, present signals every submit
+
 ## [0.30.35] - 2026-08-02
 
 ### Fixed

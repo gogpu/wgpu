@@ -336,7 +336,9 @@ func TestSwapchainLifecycleGuardsFailClosed(t *testing.T) {
 		currentImage:       0,
 		acquireSemaphores:  []vk.Semaphore{1},
 		acquireFenceValues: []uint64{0},
-		presentSemaphores:  []vk.Semaphore{2},
+		presentPools: []presentSemaphorePool{
+			{semaphores: []vk.Semaphore{2}, used: 0},
+		},
 	}
 	if err := validateSwapchainSubmission(valid, device); err != nil {
 		t.Fatalf("valid submission rejected: %v", err)
