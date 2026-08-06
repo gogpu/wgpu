@@ -160,7 +160,7 @@ func validateSwapchainSubmission(swapchain *Swapchain, device *Device) error {
 	if swapchain.currentAcquireIdx < 0 || swapchain.currentAcquireIdx >= len(swapchain.acquireSemaphores) || swapchain.currentAcquireIdx >= len(swapchain.acquireFenceValues) {
 		return fmt.Errorf("vulkan: swapchain acquire semaphore state is inconsistent")
 	}
-	if swapchain.currentImage >= uint32(len(swapchain.presentSemaphores)) {
+	if swapchain.currentImage >= uint32(len(swapchain.presentPools)) {
 		return fmt.Errorf("vulkan: swapchain present image index is out of range")
 	}
 	return nil
@@ -273,33 +273,39 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		signalCount uint32
 	)
 
-	// If we have an active swapchain, use its semaphores for GPU-side synchronization.
-	// CRITICAL: Semaphores can only be used ONCE per frame.
-	// - Wait on currentAcquireSem: ONLY on first submit (signaled by acquire)
-	// - Signal presentSemaphores: ONLY on first submit (waited on by present)
-	// Subsequent submits in the same frame run without semaphore synchronization.
+	// ADR-058: Acquire wait and present signal are now SEPARATE concerns.
+	//
+	// Acquire wait: ONCE per frame (first submit only). The acquire semaphore is
+	// signaled by vkAcquireNextImageKHR and must be waited on exactly once.
+	//
+	// Present signal: EVERY submit that has an active swapchain. Each submit
+	// allocates a new semaphore from the per-image pool. Present waits on ALL
+	// accumulated semaphores, ensuring every submission completes before display.
+	// This fixes g3d#22: multiple submits per frame with only the first signaling
+	// present caused a race where present didn't wait for later submissions.
 	consumedAcquire := false
 	if q.activeSwapchain != nil && !q.acquireUsed {
-		if q.activeSwapchain.currentAcquireSem == 0 || q.activeSwapchain.currentImage >= uint32(len(q.activeSwapchain.presentSemaphores)) {
-			err := fmt.Errorf("vulkan: active swapchain semaphore state is invalid")
-			q.activeSwapchain.markBroken(err)
-			return 0, err
-		}
-		presentSemaphore := q.activeSwapchain.presentSemaphores[q.activeSwapchain.currentImage]
-		if presentSemaphore == 0 {
-			err := fmt.Errorf("vulkan: active swapchain present semaphore is destroyed")
+		if q.activeSwapchain.currentAcquireSem == 0 {
+			err := fmt.Errorf("vulkan: active swapchain acquire semaphore is invalid")
 			q.activeSwapchain.markBroken(err)
 			return 0, err
 		}
 		waitSems[waitCount] = q.activeSwapchain.currentAcquireSem
 		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 		waitCount++
-
-		signalSems[signalCount] = presentSemaphore
-		signalCount++
-
 		q.acquireUsed = true
 		consumedAcquire = true
+	}
+
+	// ADR-058: Signal a present semaphore on EVERY submit with an active swapchain.
+	if q.activeSwapchain != nil {
+		presentSem, err := q.activeSwapchain.allocPresentSemaphore()
+		if err != nil {
+			q.activeSwapchain.markBroken(err)
+			return 0, err
+		}
+		signalSems[signalCount] = presentSem
+		signalCount++
 	}
 
 	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.
@@ -415,18 +421,8 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 	if q.activeSwapchain != nil && q.activeSwapchain != swapchain {
 		return fmt.Errorf("vulkan: queue has a different active swapchain")
 	}
-	if q.activeSwapchain == swapchain && q.acquireUsed {
-		swapchain.markBroken(fmt.Errorf("vulkan: swapchain acquire semaphore was already consumed"))
-		return fmt.Errorf("vulkan: swapchain acquire semaphore was already consumed")
-	}
-	if swapchain.currentAcquireSem == 0 || swapchain.currentImage >= uint32(len(swapchain.presentSemaphores)) {
+	if swapchain.currentAcquireSem == 0 || swapchain.currentImage >= uint32(len(swapchain.presentPools)) {
 		err := fmt.Errorf("vulkan: swapchain semaphore state is invalid")
-		swapchain.markBroken(err)
-		return err
-	}
-	presentSemaphore := swapchain.presentSemaphores[swapchain.currentImage]
-	if presentSemaphore == 0 {
-		err := fmt.Errorf("vulkan: swapchain present semaphore is destroyed")
 		swapchain.markBroken(err)
 		return err
 	}
@@ -461,13 +457,20 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		signalCount uint32
 	)
 
-	// Acquire semaphore: always present for SubmitForPresent.
-	waitSems[waitCount] = swapchain.currentAcquireSem
-	waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-	waitCount++
+	// ADR-058: Acquire wait — only on first submit (same as Submit()).
+	if q.activeSwapchain != swapchain || !q.acquireUsed {
+		waitSems[waitCount] = swapchain.currentAcquireSem
+		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
+		waitCount++
+	}
 
-	// Present semaphore: always present for SubmitForPresent.
-	signalSems[signalCount] = presentSemaphore
+	// ADR-058: Present signal — allocate from pool on every submit.
+	presentSem, err := swapchain.allocPresentSemaphore()
+	if err != nil {
+		swapchain.markBroken(err)
+		return err
+	}
+	signalSems[signalCount] = presentSem
 	signalCount++
 
 	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.

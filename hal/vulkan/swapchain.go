@@ -33,8 +33,12 @@ type Swapchain struct {
 	acquireFenceValues []uint64 // fence value when each acquire semaphore was last consumed by Submit
 	nextAcquireIdx     int
 
-	// Present semaphores - one per swapchain image (known after acquire).
-	presentSemaphores []vk.Semaphore
+	// ADR-058: Present semaphore pools — one pool per swapchain image.
+	// Each pool accumulates semaphores across multiple Submit() calls within a
+	// single frame. Present waits on ALL accumulated semaphores, ensuring every
+	// submission targeting the swapchain image completes before presentation.
+	// Pools grow on demand and recycle semaphores (reset used=0 after present).
+	presentPools      []presentSemaphorePool
 	currentImage      uint32       // Current swapchain image index
 	currentAcquireIdx int          // Index of acquire semaphore used for current frame
 	currentAcquireSem vk.Semaphore // The acquire semaphore used for current frame
@@ -71,6 +75,16 @@ type Swapchain struct {
 	destroyed  bool
 }
 
+// ADR-058: presentSemaphorePool manages a growable pool of binary semaphores
+// for a single swapchain image. Each Submit() that targets the swapchain
+// allocates the next semaphore (growing the pool if needed). Present waits on
+// semaphores[0:used], then resets used=0 to recycle them for the next frame.
+// This matches Rust wgpu's SwapchainPresentSemaphores pattern.
+type presentSemaphorePool struct {
+	semaphores []vk.Semaphore
+	used       int
+}
+
 // SwapchainTexture wraps a swapchain image as a SurfaceTexture.
 type SwapchainTexture struct {
 	handle    vk.Image
@@ -103,6 +117,48 @@ func (sc *Swapchain) markBroken(err error) {
 	sc.broken = true
 	sc.failureErr = err
 	sc.imageAcquired = false
+}
+
+// ADR-058: allocPresentSemaphore returns the next available semaphore from the
+// pool for the current swapchain image. If all semaphores in the pool are in use,
+// a new semaphore is created and appended. Returns an error if vkCreateSemaphore
+// fails during pool growth.
+func (sc *Swapchain) allocPresentSemaphore() (vk.Semaphore, error) {
+	idx := sc.currentImage
+	pool := &sc.presentPools[idx]
+	if pool.used < len(pool.semaphores) {
+		sem := pool.semaphores[pool.used]
+		pool.used++
+		return sem, nil
+	}
+	// Pool exhausted — grow by creating a new semaphore.
+	semaphoreInfo := vk.SemaphoreCreateInfo{
+		SType: vk.StructureTypeSemaphoreCreateInfo,
+	}
+	var sem vk.Semaphore
+	result := vkCreateSemaphore(sc.device, &semaphoreInfo, nil, &sem)
+	if result != vk.Success {
+		return 0, fmt.Errorf("vulkan: vkCreateSemaphore (presentPool grow, image %d) failed: %d", idx, result)
+	}
+	sc.device.setObjectName(vk.ObjectTypeSemaphore, uint64(sem),
+		fmt.Sprintf("PresentSemaphore(%d:%d)", idx, len(pool.semaphores)))
+	pool.semaphores = append(pool.semaphores, sem)
+	pool.used++
+	return sem, nil
+}
+
+// ADR-058: presentWaitSemaphores returns all semaphores that were signaled by
+// Submit() calls during this frame for the current swapchain image. Present
+// must wait on all of them before displaying the image.
+func (sc *Swapchain) presentWaitSemaphores() []vk.Semaphore {
+	pool := &sc.presentPools[sc.currentImage]
+	return pool.semaphores[:pool.used]
+}
+
+// ADR-058: resetPresentPool resets the used counter for the current swapchain
+// image's pool after a successful present. Semaphores are recycled, not destroyed.
+func (sc *Swapchain) resetPresentPool() {
+	sc.presentPools[sc.currentImage].used = 0
 }
 
 func (sc *Swapchain) stateError(operation string) error {
@@ -605,7 +661,9 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	// Create arrays for rotating semaphores (same count as images).
 	acquireSemaphores := make([]vk.Semaphore, len(images))
-	presentSemaphores := make([]vk.Semaphore, len(images))
+	// ADR-058: Present semaphore pools — one pool per image, each starting with
+	// 1 semaphore (common case: single submit per frame uses exactly 1).
+	presentPools := make([]presentSemaphorePool, len(images))
 
 	// Create acquire semaphores
 	for i := range acquireSemaphores {
@@ -628,28 +686,35 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 			fmt.Sprintf("AcquireSemaphore(%d)", i))
 	}
 
-	// Create present semaphores
-	for i := range presentSemaphores {
-		result = vkCreateSemaphore(device, &semaphoreInfo, nil, &presentSemaphores[i])
+	// ADR-058: Create initial present semaphore for each pool (1 per image).
+	for i := range presentPools {
+		var sem vk.Semaphore
+		result = vkCreateSemaphore(device, &semaphoreInfo, nil, &sem)
 		if result != vk.Success {
 			for j := 0; j < i; j++ {
-				vkDestroySemaphore(device, presentSemaphores[j], nil)
+				for _, s := range presentPools[j].semaphores {
+					vkDestroySemaphore(device, s, nil)
+				}
 			}
-			for _, sem := range acquireSemaphores {
-				vkDestroySemaphore(device, sem, nil)
+			for _, s := range acquireSemaphores {
+				vkDestroySemaphore(device, s, nil)
 			}
 			for _, view := range imageViews {
 				vkDestroyImageViewSwapchain(device, view, nil)
 			}
 			vkDestroySwapchainKHR(device, swapchainHandle, nil)
-			return fmt.Errorf("vulkan: vkCreateSemaphore (presentSemaphore[%d]) failed: %d", i, result)
+			return fmt.Errorf("vulkan: vkCreateSemaphore (presentPool[%d]) failed: %d", i, result)
+		}
+		presentPools[i] = presentSemaphorePool{
+			semaphores: []vk.Semaphore{sem},
+			used:       0,
 		}
 	}
 
-	// Label present semaphores for debug/validation.
-	for i, sem := range presentSemaphores {
-		device.setObjectName(vk.ObjectTypeSemaphore, uint64(sem),
-			fmt.Sprintf("PresentSemaphore(%d)", i))
+	// Label initial present semaphores for debug/validation.
+	for i := range presentPools {
+		device.setObjectName(vk.ObjectTypeSemaphore, uint64(presentPools[i].semaphores[0]),
+			fmt.Sprintf("PresentSemaphore(%d:0)", i))
 	}
 
 	// VK-IMPL-004: acquireFenceValues tracks the submission fence value when each
@@ -693,7 +758,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		acquireSemaphores:  acquireSemaphores,
 		acquireFenceValues: make([]uint64, len(acquireSemaphores)),
 		nextAcquireIdx:     0,
-		presentSemaphores:  presentSemaphores,
+		presentPools:       presentPools,
 		surfaceTextures:    surfaceTextures,
 		imageLayouts:       imgLayouts,
 	}
@@ -795,13 +860,18 @@ func (sc *Swapchain) releaseSyncResourcesAfterIdle() {
 	}
 	sc.acquireSemaphores = nil
 
-	for i, sem := range sc.presentSemaphores {
-		if sem != 0 {
-			vkDestroySemaphore(sc.device, sem, nil)
-			sc.presentSemaphores[i] = 0
+	// ADR-058: Destroy all semaphores in all present pools.
+	for i := range sc.presentPools {
+		for j, sem := range sc.presentPools[i].semaphores {
+			if sem != 0 {
+				vkDestroySemaphore(sc.device, sem, nil)
+				sc.presentPools[i].semaphores[j] = 0
+			}
 		}
+		sc.presentPools[i].semaphores = nil
+		sc.presentPools[i].used = 0
 	}
-	sc.presentSemaphores = nil
+	sc.presentPools = nil
 	sc.acquireFenceValues = nil
 	sc.imageAcquired = false
 }
@@ -932,7 +1002,7 @@ func (sc *Swapchain) abandonDeviceResources() {
 	sc.imageViews = nil
 	sc.acquireSemaphores = nil
 	sc.acquireFenceValues = nil
-	sc.presentSemaphores = nil
+	sc.presentPools = nil
 	sc.surfaceTextures = nil
 	sc.imageLayouts = nil
 	sc.acquireFence = 0
@@ -968,7 +1038,7 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		sc.markBroken(err)
 		return nil, false, err
 	}
-	if len(sc.surfaceTextures) == 0 || len(sc.images) != len(sc.surfaceTextures) || len(sc.presentSemaphores) != len(sc.surfaceTextures) || len(sc.imageLayouts) != len(sc.surfaceTextures) {
+	if len(sc.surfaceTextures) == 0 || len(sc.images) != len(sc.surfaceTextures) || len(sc.presentPools) != len(sc.surfaceTextures) || len(sc.imageLayouts) != len(sc.surfaceTextures) {
 		err := fmt.Errorf("vulkan: swapchain image state is inconsistent")
 		sc.markBroken(err)
 		return nil, false, err
@@ -1107,14 +1177,15 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 		sc.markBroken(err)
 		return err
 	}
-	if sc.handle == 0 || sc.currentImage >= uint32(len(sc.presentSemaphores)) || sc.currentImage >= uint32(len(sc.images)) || sc.images[sc.currentImage] == 0 {
+	if sc.handle == 0 || sc.currentImage >= uint32(len(sc.presentPools)) || sc.currentImage >= uint32(len(sc.images)) || sc.images[sc.currentImage] == 0 {
 		err := hal.ErrSurfaceLost
 		sc.markBroken(err)
 		return hal.ErrSurfaceLost
 	}
-	presentSem := sc.presentSemaphores[sc.currentImage]
-	if presentSem == 0 {
-		err := fmt.Errorf("vulkan: present semaphore for image %d has been destroyed", sc.currentImage)
+	// ADR-058: Collect all accumulated present semaphores for this frame.
+	waitSems := sc.presentWaitSemaphores()
+	if len(waitSems) == 0 {
+		err := fmt.Errorf("vulkan: no present semaphores accumulated for image %d", sc.currentImage)
 		sc.markBroken(err)
 		return err
 	}
@@ -1134,10 +1205,11 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 		return sc.failureErr
 	}
 
+	// ADR-058: Present waits on ALL semaphores accumulated by Submit() calls.
 	presentInfo := vk.PresentInfoKHR{
 		SType:              vk.StructureTypePresentInfoKhr,
-		WaitSemaphoreCount: 1,
-		PWaitSemaphores:    &presentSem,
+		WaitSemaphoreCount: uint32(len(waitSems)),
+		PWaitSemaphores:    &waitSems[0],
 		SwapchainCount:     1,
 		PSwapchains:        &sc.handle,
 		PImageIndices:      &sc.currentImage,
@@ -1173,6 +1245,11 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 
 	result := vkQueuePresentKHR(queue, &presentInfo)
 	sc.imageAcquired = false
+	// ADR-058: Reset the pool after present so semaphores are recycled next frame.
+	// This must happen regardless of present result — even on failure, the
+	// semaphores were consumed (signaled) by prior Submit() calls and are safe
+	// to reuse after the device drains (which happens on reconfigure/destroy).
+	sc.resetPresentPool()
 
 	switch result {
 	case vk.Success:
