@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.37] - 2026-08-07
+
+### Fixed
+
+- **vulkan:** Align swapchain render pass FinalLayout with Rust wgpu / Dawn (ADR-059)
+  - Render passes for swapchain images now use `COLOR_ATTACHMENT_OPTIMAL` instead of `PRESENT_SRC_KHR` as FinalLayout
+  - Explicit barrier `COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR` in `ensurePresentLayout()` before present
+  - Eliminated synchronous `vkWaitForFences` GPU stall — barrier submit uses no fence, command pool reset deferred to next `acquireNextImage()` where acquire fence guarantees completion
+  - Matches Rust wgpu (`device.rs:119-120`) and Dawn (`RenderPassCache.cpp:173-174`) — both use `InitialLayout == FinalLayout == COLOR_ATTACHMENT_OPTIMAL`
+  - Removes unnecessary PRESENT_SRC_KHR round-trip on multi-pass frames (TBDR: no extra decompress/compress cycle)
+
 ## [0.30.36] - 2026-08-06
 
 ### Fixed

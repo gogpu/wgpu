@@ -281,8 +281,8 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		ColorLoadOp:      vk.AttachmentLoadOpClear,
 		ColorStoreOp:     vk.AttachmentStoreOpStore,
 		SampleCount:      vk.SampleCountFlagBits(sampleCount),
-		ColorFinalLayout: vk.ImageLayoutPresentSrcKhr,
-		HasResolve:       sampleCount > 1, // MSAA pipelines need resolve attachment
+		ColorFinalLayout: vk.ImageLayoutColorAttachmentOptimal, // ADR-059: Rust wgpu parity — pipelines use COLOR_ATTACHMENT_OPTIMAL for compatibility
+		HasResolve:       sampleCount > 1,                      // MSAA pipelines need resolve attachment
 	}
 	if depthFormat != vk.FormatUndefined {
 		rpKey.DepthFormat = depthFormat

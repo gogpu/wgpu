@@ -671,14 +671,14 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// with explicit transition to ShaderReadOnlyOptimal; until then, General is
 	// safe for both color-attachment writes and shader reads.
 	// Reference: Rust wgpu derive_image_layout() uses General for mixed usage.
-	colorFinalLayout := vk.ImageLayoutPresentSrcKhr // Default for swapchain
+	colorFinalLayout := vk.ImageLayoutColorAttachmentOptimal // ADR-059: Rust wgpu/Dawn parity — render pass stays in COLOR_ATTACHMENT_OPTIMAL, barrier to PRESENT_SRC happens in ensurePresentLayout
 	if !view.isSwapchain {
 		colorFinalLayout = offscreenFinalLayout(view)
 	}
 	if hasMSAAResolve {
 		// With resolve, the final layout applies to the resolve target.
 		if resolveView.isSwapchain {
-			colorFinalLayout = vk.ImageLayoutPresentSrcKhr
+			colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal // ADR-059: MSAA resolve to swapchain — barrier handles PRESENT_SRC transition
 		} else {
 			colorFinalLayout = offscreenFinalLayout(resolveView)
 		}
