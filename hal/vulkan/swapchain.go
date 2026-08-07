@@ -60,12 +60,13 @@ type Swapchain struct {
 	// interference with encoder lifecycle. Created lazily on first barrier need.
 	barrierPool vk.CommandPool
 
-	// barrierFence synchronizes the barrier command buffer submission in
-	// ensurePresentLayout. We must wait for the barrier to complete on the GPU
-	// before resetting the command pool, otherwise the command buffer is still
-	// pending (VUID-vkResetCommandPool-commandPool-00040). Created lazily
-	// alongside barrierPool.
-	barrierFence vk.Fence
+	// ADR-059: barrierPending tracks whether a barrier command buffer from
+	// ensurePresentLayout is still potentially in-flight on the GPU. The pool
+	// reset is deferred to acquireNextImage, where the acquire fence wait
+	// guarantees the previous frame (including its barrier) has completed.
+	// This eliminates the synchronous vkWaitForFences that was previously
+	// required in ensurePresentLayout.
+	barrierPending bool
 
 	// broken is set after a synchronization, layout, or presentation failure.
 	// A broken swapchain cannot safely reuse its binary semaphores; callers must
@@ -909,10 +910,6 @@ func (sc *Swapchain) destroyResourcesAfterIdle() error {
 		sc.acquireFence = 0
 	}
 
-	if sc.barrierFence != 0 {
-		sc.device.cmds.DestroyFence(sc.device.handle, sc.barrierFence, nil)
-		sc.barrierFence = 0
-	}
 	if sc.barrierPool != 0 {
 		// vkDestroyCommandPool is a void Vulkan command; there is no result to
 		// propagate. DeviceWaitIdle above establishes the required lifetime
@@ -920,6 +917,7 @@ func (sc *Swapchain) destroyResourcesAfterIdle() error {
 		sc.device.cmds.DestroyCommandPool(sc.device.handle, sc.barrierPool, nil)
 		sc.barrierPool = 0
 	}
+	sc.barrierPending = false
 	sc.imageLayouts = nil
 	sc.currentAcquireSem = 0
 	sc.currentAcquireIdx = 0
@@ -1006,8 +1004,8 @@ func (sc *Swapchain) abandonDeviceResources() {
 	sc.surfaceTextures = nil
 	sc.imageLayouts = nil
 	sc.acquireFence = 0
-	sc.barrierFence = 0
 	sc.barrierPool = 0
+	sc.barrierPending = false
 	sc.currentAcquireSem = 0
 	sc.imageAcquired = false
 	sc.device = nil
@@ -1135,6 +1133,18 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		err := fmt.Errorf("vulkan: acquired image index %d is out of range", imageIndex)
 		sc.markBroken(err)
 		return nil, false, err
+	}
+
+	// ADR-059: Deferred barrier pool reset. The previous frame's barrier CB is
+	// guaranteed complete because acquireNextImage waits on the acquire fence,
+	// which requires the previous present (and therefore the barrier) to finish.
+	if sc.barrierPending && sc.barrierPool != 0 {
+		resetResult := sc.device.cmds.ResetCommandPool(sc.device.handle, sc.barrierPool, 0)
+		if resetResult != vk.Success {
+			sc.markBroken(mapVulkanResult("vkResetCommandPool (deferred barrier)", resetResult))
+			return nil, false, sc.failureErr
+		}
+		sc.barrierPending = false
 	}
 
 	// Store the current acquire index and semaphore for use in Submit.
@@ -1288,18 +1298,18 @@ func (sc *Swapchain) SetImageLayout(imageIndex uint32, layout vk.ImageLayout) {
 	}
 }
 
-// ensurePresentLayout checks whether the current swapchain image needs an
-// explicit layout transition to PRESENT_SRC_KHR before vkQueuePresentKHR.
+// ensurePresentLayout transitions the current swapchain image to
+// PRESENT_SRC_KHR before vkQueuePresentKHR.
 //
-// In the common case (render pass directly targets the swapchain image with
-// finalLayout = PRESENT_SRC_KHR), the tracked layout already matches and this
-// function returns immediately — zero overhead.
+// ADR-059: With render pass finalLayout = COLOR_ATTACHMENT_OPTIMAL (Rust wgpu/
+// Dawn parity), this barrier fires every frame that renders to the swapchain.
+// The barrier CB is submitted without a fence — the command pool reset is
+// deferred to acquireNextImage, where the acquire fence wait guarantees the
+// previous frame (including this barrier) has completed. This avoids a
+// synchronous vkWaitForFences per frame.
 //
-// When the tracked layout differs (blit-only path, offscreen-only, image never
-// rendered to), a one-shot command buffer is recorded with a pipeline barrier
-// and submitted to the queue. This matches Chrome/Dawn's approach for the same
-// edge case. The extra vkQueueSubmit is the minimum cost to guarantee spec
-// compliance.
+// If the tracked layout is already PRESENT_SRC_KHR (e.g., from a previous
+// barrier not followed by a render pass), the function returns immediately.
 //
 // BUG-WGPU-VK-006: Fixes VUID-VkPresentInfoKHR-pImageIndices-01430.
 func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
@@ -1317,7 +1327,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		return nil
 	}
 
-	// Need to transition. Create the barrier pool and fence lazily on first use.
+	// Need to transition. Create the barrier pool lazily on first use.
 	if sc.barrierPool == 0 {
 		createInfo := vk.CommandPoolCreateInfo{
 			SType:            vk.StructureTypeCommandPoolCreateInfo,
@@ -1331,22 +1341,6 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		}
 		sc.device.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "PresentBarrierPool")
 		sc.barrierPool = pool
-
-		// Create the fence used to wait for barrier submission completion.
-		// VUID-vkResetCommandPool-commandPool-00040 requires all command buffers
-		// allocated from the pool to not be in pending state before reset.
-		fenceInfo := vk.FenceCreateInfo{
-			SType: vk.StructureTypeFenceCreateInfo,
-		}
-		var fence vk.Fence
-		fenceResult := sc.device.cmds.CreateFence(sc.device.handle, &fenceInfo, nil, &fence)
-		if fenceResult != vk.Success {
-			sc.device.cmds.DestroyCommandPool(sc.device.handle, pool, nil)
-			sc.barrierPool = 0
-			return fmt.Errorf("vulkan: vkCreateFence (barrier) failed: %d", fenceResult)
-		}
-		sc.device.setObjectName(vk.ObjectTypeFence, uint64(fence), "PresentBarrierFence")
-		sc.barrierFence = fence
 	}
 
 	// Allocate a one-shot command buffer from the barrier pool.
@@ -1431,51 +1425,30 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		return fmt.Errorf("vulkan: vkEndCommandBuffer (barrier) failed: %d", result)
 	}
 
-	// Submit the barrier command buffer with the barrier fence. No semaphores —
+	// ADR-059: Submit the barrier command buffer without a fence. No semaphores —
 	// this runs after the user's submit (which already waited on acquire and
 	// signaled present semaphores). The barrier just needs to complete before
 	// vkQueuePresentKHR, which is guaranteed by Vulkan's implicit ordering of
 	// vkQueueSubmit calls on the same queue.
 	//
-	// The fence is required so we can wait for GPU completion before resetting
-	// the command pool (VUID-vkResetCommandPool-commandPool-00040).
+	// The command pool reset is deferred to acquireNextImage, where the acquire
+	// fence wait guarantees the previous frame (including this barrier) has
+	// completed. This eliminates the synchronous vkWaitForFences that was
+	// previously required here — a significant win now that this barrier fires
+	// every frame (render pass finalLayout = COLOR_ATTACHMENT_OPTIMAL per Rust
+	// wgpu/Dawn parity).
 	submitInfo := vk.SubmitInfo{
 		SType:              vk.StructureTypeSubmitInfo,
 		CommandBufferCount: 1,
 		PCommandBuffers:    &cmdBuf,
 	}
-	result = sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, sc.barrierFence)
+	result = sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
 	if result != vk.Success {
 		return fmt.Errorf("vulkan: vkQueueSubmit (barrier) failed: %d", result)
 	}
+	sc.barrierPending = true
 
-	// Wait for the barrier submission to complete on the GPU before resetting
-	// the command pool. Without this wait, the command buffer is still pending
-	// and vkResetCommandPool violates VUID-vkResetCommandPool-commandPool-00040.
-	//
-	// This wait is synchronous but only occurs when the barrier fires (uncommon
-	// case: blit-only or offscreen paths where no render pass transitions the
-	// swapchain image to PRESENT_SRC_KHR). In the common case (render pass with
-	// finalLayout = PRESENT_SRC_KHR), ensurePresentLayout returns early above.
-	const barrierTimeout = uint64(1_000_000_000) // 1 second
-	waitResult := sc.device.cmds.WaitForFences(sc.device.handle, 1, &sc.barrierFence, vk.True, barrierTimeout)
-	if waitResult != vk.Success {
-		return fmt.Errorf("vulkan: vkWaitForFences (barrier) failed: %d", waitResult)
-	}
-	resetResult := sc.device.cmds.ResetFences(sc.device.handle, 1, &sc.barrierFence)
-	if resetResult != vk.Success {
-		return fmt.Errorf("vulkan: vkResetFences (barrier) failed: %d", resetResult)
-	}
-
-	// Reset the command pool so the buffer can be reused next frame.
-	// Safe now because WaitForFences guarantees the command buffer is complete.
-	resetPoolResult := sc.device.cmds.ResetCommandPool(sc.device.handle, sc.barrierPool, 0)
-	if resetPoolResult != vk.Success {
-		return fmt.Errorf("vulkan: vkResetCommandPool (barrier) failed: %d", resetPoolResult)
-	}
-
-	// Update tracked layout only after the barrier completed and its command
-	// buffer was safely recycled.
+	// Update tracked layout — the barrier transitions to PRESENT_SRC_KHR.
 	sc.imageLayouts[idx] = vk.ImageLayoutPresentSrcKhr
 
 	hal.Logger().Debug("vulkan: inserted PRESENT_SRC_KHR barrier",
