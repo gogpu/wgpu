@@ -89,6 +89,22 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		allBuffers = append(allBuffers, cb.halBuffer())
 	}
 
+	// ADR-060 TODO: Merge each command buffer's textureScope into the device
+	// tracker before HAL submit. This enables submit-time barrier injection
+	// for textures — the device tracker computes state transitions and the
+	// caller records barriers into a preamble command buffer (via
+	// core.BarrierCBFromTransitions). Currently, texture barriers are handled
+	// by the HAL render pass (initialLayout/finalLayout) and ensurePresentLayout.
+	//
+	// Wiring requires:
+	// 1. core.TextureView to reference its parent Texture (for TrackerIndex)
+	// 2. Public Texture to expose its core.Texture's TrackerIndex
+	// 3. convertRenderPassDesc to propagate TrackerIndex into core descriptors
+	// 4. CoreCommandEncoder.BeginRenderPass to call textureScope.SetUsage
+	// 5. This loop to merge scopes and prepend barrier CBs to allBuffers
+	//
+	// Reference: wgpu-core device/queue.rs pre_submit_for_command_buffers
+
 	subIdx, err := q.hal.Submit(allBuffers)
 	if err != nil {
 		if q.pending != nil && pendingCmdBuf != nil {

@@ -369,6 +369,18 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 	// Begin HAL render pass
 	halPass := (*halEncoder).BeginRenderPass(halDesc)
 
+	// ADR-060 TODO: Populate textureScope from render pass color/depth attachments.
+	// When a render pass begins, its color attachments should be tracked as
+	// TextureUsesColorTarget and depth/stencil as TextureUsesDepthStencilWrite
+	// (or DepthStencilRead if read-only). This requires core.TextureView to
+	// carry its parent Texture's TrackerIndex so we can call:
+	//   e.mutable.textureScope.SetUsage(trackerIndex, track.TextureUsesColorTarget)
+	//
+	// Currently, the core TextureView is a minimal HAL handle wrapper without
+	// a parent reference. The full wiring path is documented in queue_native.go.
+	//
+	// Reference: wgpu-core command/render.rs render_pass_begin (usage_scope merge)
+
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
 

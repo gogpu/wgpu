@@ -1192,20 +1192,12 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 		sc.markBroken(err)
 		return hal.ErrSurfaceLost
 	}
-	// ADR-058: Collect all accumulated present semaphores for this frame.
-	waitSems := sc.presentWaitSemaphores()
-	if len(waitSems) == 0 {
-		err := fmt.Errorf("vulkan: no present semaphores accumulated for image %d", sc.currentImage)
-		sc.markBroken(err)
-		return err
-	}
-
-	// BUG-WGPU-VK-006: Ensure the swapchain image is in PRESENT_SRC_KHR layout
-	// before vkQueuePresentKHR. When a render pass directly targets the swapchain
-	// image with finalLayout=PRESENT_SRC_KHR, the layout is already correct and
-	// this is a no-op (zero overhead in the common case). When the image was used
-	// differently (blit-only, offscreen-only, resolve target without PRESENT_SRC),
-	// this inserts an explicit pipeline barrier to transition the layout.
+	// ADR-060: ensurePresentLayout MUST run BEFORE presentWaitSemaphores.
+	// When a layout barrier is needed, ensurePresentLayout allocates a present
+	// semaphore from the per-image pool and signals it from the barrier submit.
+	// Calling presentWaitSemaphores AFTER ensures the barrier's semaphore is
+	// included in the present wait list, so vkQueuePresentKHR correctly waits
+	// for the barrier to complete.
 	if err := sc.ensurePresentLayout(queue); err != nil {
 		sc.markBroken(fmt.Errorf("vulkan: present layout transition failed: %w", err))
 		hal.Logger().Error("vulkan: present layout transition failed",
@@ -1213,6 +1205,16 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 		// The image's semaphore/layout state is no longer safe to reuse. A
 		// reconfigure or destroy must drain the device before cleanup.
 		return sc.failureErr
+	}
+
+	// ADR-058: Collect all accumulated present semaphores for this frame.
+	// This MUST be called AFTER ensurePresentLayout so any barrier semaphore
+	// is included in the wait list.
+	waitSems := sc.presentWaitSemaphores()
+	if len(waitSems) == 0 {
+		err := fmt.Errorf("vulkan: no present semaphores accumulated for image %d", sc.currentImage)
+		sc.markBroken(err)
+		return err
 	}
 
 	// ADR-058: Present waits on ALL semaphores accumulated by Submit() calls.
@@ -1425,22 +1427,26 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		return fmt.Errorf("vulkan: vkEndCommandBuffer (barrier) failed: %d", result)
 	}
 
-	// ADR-059: Submit the barrier command buffer without a fence. No semaphores —
-	// this runs after the user's submit (which already waited on acquire and
-	// signaled present semaphores). The barrier just needs to complete before
-	// vkQueuePresentKHR, which is guaranteed by Vulkan's implicit ordering of
-	// vkQueueSubmit calls on the same queue.
+	// ADR-060: Signal a present semaphore from the barrier submit.
+	// This ensures vkQueuePresentKHR explicitly waits for the barrier to
+	// complete via the per-image present semaphore pool. The present() method
+	// calls ensurePresentLayout BEFORE presentWaitSemaphores, so this
+	// semaphore is included in the wait list.
 	//
 	// The command pool reset is deferred to acquireNextImage, where the acquire
 	// fence wait guarantees the previous frame (including this barrier) has
 	// completed. This eliminates the synchronous vkWaitForFences that was
-	// previously required here — a significant win now that this barrier fires
-	// every frame (render pass finalLayout = COLOR_ATTACHMENT_OPTIMAL per Rust
-	// wgpu/Dawn parity).
+	// previously required here.
+	barrierSem, err := sc.allocPresentSemaphore()
+	if err != nil {
+		return fmt.Errorf("vulkan: barrier present semaphore alloc: %w", err)
+	}
 	submitInfo := vk.SubmitInfo{
-		SType:              vk.StructureTypeSubmitInfo,
-		CommandBufferCount: 1,
-		PCommandBuffers:    &cmdBuf,
+		SType:                vk.StructureTypeSubmitInfo,
+		CommandBufferCount:   1,
+		PCommandBuffers:      &cmdBuf,
+		SignalSemaphoreCount: 1,
+		PSignalSemaphores:    &barrierSem,
 	}
 	result = sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
 	if result != vk.Success {

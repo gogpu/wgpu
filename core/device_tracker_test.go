@@ -5,7 +5,9 @@ package core
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core/track"
+	"github.com/gogpu/wgpu/hal"
 )
 
 func TestDeviceTracker_New(t *testing.T) {
@@ -163,3 +165,169 @@ func TestDeviceTracker_MultipleTextures(t *testing.T) {
 		t.Fatalf("Expected 2 transitions, got %d", len(transitions))
 	}
 }
+
+// =============================================================================
+// ADR-060: Submit-time barrier generation (texture tracker wiring)
+// =============================================================================
+
+// TestDeviceTracker_BarrierCBFromTransitions_SkipsNilTextures verifies that
+// BarrierCBFromTransitions safely skips destroyed textures (nil resolver).
+func TestDeviceTracker_BarrierCBFromTransitions_SkipsNilTextures(t *testing.T) {
+	t.Parallel()
+
+	transitions := []track.TexturePendingTransition{
+		{
+			Index: track.TrackerIndex(0),
+			Usage: track.TextureStateTransition{
+				From: track.TextureUsesColorTarget,
+				To:   track.TextureUsesCopySrc,
+			},
+		},
+		{
+			Index: track.TrackerIndex(1),
+			Usage: track.TextureStateTransition{
+				From: track.TextureUsesResource,
+				To:   track.TextureUsesColorTarget,
+			},
+		},
+	}
+
+	// Resolver returns nil for index 0 (destroyed) and a stub for index 1.
+	encoder := &noopEncoder{}
+	cb, err := BarrierCBFromTransitions(encoder, transitions, func(idx track.TrackerIndex) hal.Texture {
+		if idx == 1 {
+			return &noopTexture{}
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("BarrierCBFromTransitions error: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("Expected non-nil command buffer")
+	}
+	// Verify that TransitionTextures was called with 1 barrier (not 2)
+	if encoder.transitionCount != 1 {
+		t.Errorf("TransitionTextures barrier count = %d, want 1 (skipped nil texture)", encoder.transitionCount)
+	}
+}
+
+// TestDeviceTracker_BarrierCBFromTransitions_EmptyAfterFiltering verifies that
+// when all textures resolve to nil, TransitionTextures is not called.
+func TestDeviceTracker_BarrierCBFromTransitions_EmptyAfterFiltering(t *testing.T) {
+	t.Parallel()
+
+	transitions := []track.TexturePendingTransition{
+		{
+			Index: track.TrackerIndex(0),
+			Usage: track.TextureStateTransition{
+				From: track.TextureUsesColorTarget,
+				To:   track.TextureUsesCopySrc,
+			},
+		},
+	}
+
+	encoder := &noopEncoder{}
+	cb, err := BarrierCBFromTransitions(encoder, transitions, func(_ track.TrackerIndex) hal.Texture {
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("BarrierCBFromTransitions error: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("Expected non-nil command buffer even with all nil textures")
+	}
+	if encoder.transitionCount != 0 {
+		t.Errorf("TransitionTextures should not be called when all textures are nil, got %d", encoder.transitionCount)
+	}
+}
+
+// TestDeviceTracker_PresentTransitionFlow simulates the full ADR-060 flow:
+// 1. Texture starts as ColorTarget (render pass output)
+// 2. Command buffer scope records ColorTarget usage
+// 3. MergeTextureScope produces no transition (same state)
+// 4. TrackPresentTexture produces ColorTarget->Present transition
+func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	// Step 1: Texture acquired from swapchain, starts as ColorTarget
+	dt.InsertTexture(idx, track.TextureUsesColorTarget)
+
+	// Step 2: Command buffer records ColorTarget usage
+	scope := track.NewTextureUsageScope()
+	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+
+	// Step 3: Merge — same ordered state, no barrier needed
+	transitions := dt.MergeTextureScope(scope)
+	if len(transitions) != 0 {
+		t.Fatalf("Step 3: Expected 0 transitions for same ColorTarget, got %d", len(transitions))
+	}
+
+	// Step 4: Track present transition
+	trans := dt.TrackPresentTexture(idx)
+	if trans == nil {
+		t.Fatal("Step 4: Expected ColorTarget->Present transition")
+	}
+	if trans.Usage.From != track.TextureUsesColorTarget {
+		t.Errorf("Step 4: From = %d, want ColorTarget", trans.Usage.From)
+	}
+	if trans.Usage.To != track.TextureUsesPresent {
+		t.Errorf("Step 4: To = %d, want Present", trans.Usage.To)
+	}
+
+	// Device tracker should now be in Present state
+	if dt.Textures().GetUsage(idx) != track.TextureUsesPresent {
+		t.Error("Device tracker should be in Present state after TrackPresentTexture")
+	}
+}
+
+// noopEncoder is a minimal hal.CommandEncoder for testing BarrierCBFromTransitions.
+type noopEncoder struct {
+	transitionCount int
+}
+
+func (e *noopEncoder) BeginEncoding(_ string) error            { return nil }
+func (e *noopEncoder) EndEncoding() (hal.CommandBuffer, error) { return &noopCB{}, nil }
+func (e *noopEncoder) DiscardEncoding()                        {}
+func (e *noopEncoder) ResetAll(_ []hal.CommandBuffer)          {}
+func (e *noopEncoder) Destroy()                                {}
+func (e *noopEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {
+}
+func (e *noopEncoder) CopyTextureToTexture(_ hal.Texture, _ hal.Texture, _ []hal.TextureCopy) {
+}
+func (e *noopEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
+}
+func (e *noopEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []hal.BufferTextureCopy) {
+}
+func (e *noopEncoder) ClearBuffer(_ hal.Buffer, _ uint64, _ uint64) {}
+func (e *noopEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	return nil
+}
+func (e *noopEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	return nil
+}
+func (e *noopEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
+func (e *noopEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+	e.transitionCount = len(barriers)
+}
+func (e *noopEncoder) ResolveQuerySet(_ hal.QuerySet, _ uint32, _ uint32, _ hal.Buffer, _ uint64) {
+}
+
+// noopCB implements hal.CommandBuffer for testing.
+type noopCB struct{}
+
+func (c *noopCB) Destroy() {}
+
+// noopTexture implements hal.Texture for testing.
+type noopTexture struct{}
+
+func (t *noopTexture) NativeHandle() uintptr               { return 0 }
+func (t *noopTexture) Destroy()                            {}
+func (t *noopTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
+func (t *noopTexture) AddPendingRef()                      {}
+func (t *noopTexture) DecPendingRef()                      {}
