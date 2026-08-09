@@ -7,7 +7,9 @@ package metal
 
 import (
 	"fmt"
+	"math"
 	"sync"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -928,6 +930,11 @@ type ComputePassEncoder struct {
 	device        *Device
 	pipeline      *ComputePipeline
 	currentLayout *PipelineLayout // set by SetPipeline for SetBindGroup slot offsets
+
+	// bindingSizes holds the usable byte size of each bound buffer, by group
+	// and binding. A dispatch copies these sizes into naga's `_buffer_sizes`
+	// argument.
+	bindingSizes map[[2]uint32]uint64
 }
 
 // End finishes the compute pass.
@@ -986,6 +993,19 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
 			bufferSlot++
 
+			// Save the usable byte size for `_buffer_sizes`. A zero
+			// entry size means the rest of the buffer.
+			size := res.Size
+			if size == 0 {
+				if l := uint64(MsgSend(ID(res.Buffer), Sel("length"))); l > res.Offset {
+					size = l - res.Offset
+				}
+			}
+			if e.bindingSizes == nil {
+				e.bindingSizes = make(map[[2]uint32]uint64)
+			}
+			e.bindingSizes[[2]uint32{index, entry.Binding}] = size
+
 		case gputypes.TextureViewBinding:
 			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.TextureView, textureSlot)
 			textureSlot++
@@ -997,11 +1017,44 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	}
 }
 
+// bindBufferSizes binds naga's `_buffer_sizes` argument. Kernels need it when
+// they use a runtime-sized array, either through WGSL arrayLength() or through
+// naga's bounds checks on storage buffers.
+//
+// The MSL kernel takes one extra parameter. It holds one uint32 byte size for
+// each runtime-sized array. The pipeline compiled that parameter to the buffer
+// slot that follows the buffers of the pipeline layout.
+//
+// This binding is required. If it is missing, the kernel reads a size of zero,
+// and naga's arrayLength() formula, 1 + (size - offset - stride) / stride,
+// wraps around to a very large number.
+//
+// Reference: Rust wgpu-hal metal/command.rs:1736-1747.
+func (e *ComputePassEncoder) bindBufferSizes() {
+	p := e.pipeline
+	if p == nil || len(p.sizesBindings) == 0 {
+		return
+	}
+	sizes := make([]uint32, len(p.sizesBindings))
+	for i, rb := range p.sizesBindings {
+		// The fields are 32-bit, so a binding above 4 GiB reports the
+		// largest value that fits.
+		size := e.bindingSizes[[2]uint32{rb.Group, rb.Binding}]
+		if size > math.MaxUint32 {
+			size = math.MaxUint32
+		}
+		sizes[i] = uint32(size)
+	}
+	_ = MsgSend(e.raw, Sel("setBytes:length:atIndex:"),
+		uintptr(unsafe.Pointer(&sizes[0])), uintptr(4*len(sizes)), uintptr(p.sizesSlot))
+}
+
 // Dispatch dispatches compute workgroups.
 func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	if e.pipeline == nil {
 		return // No pipeline set
 	}
+	e.bindBufferSizes()
 
 	threadgroupsPerGrid := MTLSize{Width: NSUInteger(x), Height: NSUInteger(y), Depth: NSUInteger(z)}
 	// Use pipeline's workgroup size instead of hardcoded value
@@ -1023,6 +1076,7 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	if !ok || buf == nil {
 		return
 	}
+	e.bindBufferSizes()
 	// Use pipeline's workgroup size instead of hardcoded value
 	threadsPerThreadgroup := e.pipeline.workgroupSize
 	msgSendVoid(e.raw, Sel("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:"),

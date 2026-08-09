@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -114,12 +115,18 @@ func (s *Sampler) Destroy() {
 func (s *Sampler) NativeHandle() uintptr { return uintptr(s.raw) }
 
 // ShaderModule implements hal.ShaderModule for Metal.
+//
+// WGSL is parsed and lowered to naga IR here. MSL is written later, when the
+// pipeline is created, because the buffer slot for naga's `_buffer_sizes`
+// argument comes from the pipeline layout.
+//
+// Reference: Rust wgpu-hal metal/device.rs:138-145 (load_shader takes
+// `layout: &super::PipelineLayout`).
 type ShaderModule struct {
-	source          hal.ShaderSource
-	library         ID // id<MTLLibrary>
-	device          *Device
-	workgroupSizes  map[string][3]uint32 // entry point name -> workgroup size
-	entrypointNames map[string]string
+	source         hal.ShaderSource
+	irModule       *ir.Module // nil unless the module was created from WGSL
+	device         *Device
+	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size
 }
 
 // Destroy releases the shader module.
@@ -187,6 +194,14 @@ type PipelineLayout struct {
 	//
 	// Reference: Rust wgpu-hal metal/mod.rs PipelineLayout.bind_group_infos.
 	groupOffsets []GroupSlotOffsets
+
+	// totalBuffers is how many buffer bindings all bind group layouts declare
+	// together. It is also the first free Metal buffer slot, which is where
+	// naga's `_buffer_sizes` argument goes.
+	//
+	// Reference: Rust wgpu-hal metal/device.rs:851-856
+	// (info.sizes_buffer = Some(info.counters.buffers)).
+	totalBuffers int
 }
 
 // Destroy releases the pipeline layout.
@@ -224,6 +239,13 @@ type ComputePipeline struct {
 	device        *Device
 	layout        *PipelineLayout // for SetBindGroup slot offset lookup
 	workgroupSize MTLSize         // workgroup size from shader
+
+	// sizesBindings lists the bindings whose byte size the kernel needs, in the
+	// field order that naga uses. It is empty if the kernel has no
+	// runtime-sized array. sizesSlot is the buffer slot that the MSL was
+	// compiled with, and it comes from PipelineLayout.totalBuffers.
+	sizesBindings []ir.ResourceBinding
+	sizesSlot     int
 }
 
 // Destroy releases the compute pipeline.
