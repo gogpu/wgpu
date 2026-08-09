@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -97,13 +98,13 @@ func (s CommandEncoderStatus) String() string {
 // This tracks resources used within a command buffer for validation
 // and synchronization purposes.
 type CommandBufferMutable struct {
-	// pendingBufferBarriers are buffer barriers to emit.
-	// Used in CORE-007 for barrier tracking.
-	pendingBufferBarriers []hal.BufferBarrier //nolint:unused // Will be used in CORE-007
-
-	// pendingTextureBarriers are texture barriers to emit.
-	// Used in CORE-007 for barrier tracking.
-	pendingTextureBarriers []hal.TextureBarrier //nolint:unused // Will be used in CORE-007
+	// textureScope tracks per-texture usage within this command buffer
+	// for submit-time barrier generation. When the command buffer is
+	// submitted, this scope is merged into the device-level TextureTracker,
+	// which produces the PendingTransition list for barrier injection.
+	//
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.usage_scope.textures
+	textureScope *track.TextureUsageScope
 
 	// usedBuffers tracks buffer usage within this command buffer.
 	usedBuffers map[*Buffer]BufferUses
@@ -236,6 +237,7 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 		raw:    NewSnatchable(halEncoder),
 		device: d,
 		mutable: &CommandBufferMutable{
+			textureScope: track.NewTextureUsageScope(),
 			usedBuffers:  make(map[*Buffer]BufferUses),
 			usedTextures: make(map[*Texture]TextureUses),
 		},
@@ -263,6 +265,7 @@ func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, labe
 		raw:    NewSnatchable(halEncoder),
 		device: d,
 		mutable: &CommandBufferMutable{
+			textureScope: track.NewTextureUsageScope(),
 			usedBuffers:  make(map[*Buffer]BufferUses),
 			usedTextures: make(map[*Texture]TextureUses),
 		},
@@ -978,6 +981,18 @@ func (cb *CoreCommandBuffer) Device() *Device {
 // Label returns the debug label.
 func (cb *CoreCommandBuffer) Label() string {
 	return cb.label
+}
+
+// TextureScope returns the texture usage scope that was accumulated during
+// encoding. This scope is merged into the device-level TextureTracker at
+// submit time to produce barriers.
+//
+// Returns nil if the command buffer has no texture scope (e.g. ID-based API).
+func (cb *CoreCommandBuffer) TextureScope() *track.TextureUsageScope {
+	if cb.mutable == nil {
+		return nil
+	}
+	return cb.mutable.textureScope
 }
 
 // =============================================================================

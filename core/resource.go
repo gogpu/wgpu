@@ -130,6 +130,13 @@ type Device struct {
 	// or if validation resource creation failed (validation is optional).
 	// Matches Rust wgpu-core Device.indirect_validation (device/resource.rs:264).
 	indirectValidation *IndirectValidation
+
+	// tracker holds the device-level resource usage tracker. During submit,
+	// each command buffer's usage scope is merged into this tracker to produce
+	// the barriers that must be inserted between submissions.
+	//
+	// Reference: wgpu-core device/resource.rs Device.tracker (DeviceTracker)
+	tracker *DeviceTracker
 }
 
 // Backend returns the backend type of the device's adapter.
@@ -167,6 +174,7 @@ func NewDevice(
 		snatchLock:     NewSnatchLock(),
 		trackerIndices: NewTrackerIndexAllocators(),
 		destroyQueue:   NewDestroyQueue(),
+		tracker:        NewDeviceTracker(),
 		Label:          label,
 		Features:       features,
 		Limits:         limits,
@@ -312,6 +320,12 @@ func (d *Device) DestroyQueueRef() *DestroyQueue {
 // or resource creation failed during device init).
 func (d *Device) IndirectValidation() *IndirectValidation {
 	return d.indirectValidation
+}
+
+// Tracker returns the device-level resource tracker.
+// Returns nil for ID-based API devices without HAL.
+func (d *Device) Tracker() *DeviceTracker {
+	return d.tracker
 }
 
 // ParentAdapter returns the parent adapter for this device.
