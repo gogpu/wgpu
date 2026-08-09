@@ -57,8 +57,6 @@ var (
 )
 
 // initCommonCallInterfaces prepares reusable CallInterface signatures.
-//
-//nolint:maintidx // FFI initialization requires many CallInterface setups
 func initCommonCallInterfaces() error {
 	if cifInitialized {
 		return nil

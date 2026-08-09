@@ -177,8 +177,6 @@ type decorationKey struct {
 // The SPIR-V format is: 5-word header (magic, version, generator, bound, reserved)
 // followed by a stream of instructions. Each instruction's first word encodes
 // (wordCount << 16 | opcode).
-//
-//nolint:maintidx // SPIR-V opcode dispatch switch is inherently large.
 func ParseModule(words []uint32) (*Module, error) {
 	if len(words) < 5 {
 		return nil, fmt.Errorf("spirv: module too short (%d words)", len(words))

@@ -487,8 +487,6 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 var errDebugAbort = fmt.Errorf("spirv: execution aborted by debug callback")
 
 // run executes instructions sequentially, handling OpBranch for jumps.
-//
-//nolint:maintidx // Opcode dispatch switch is inherently large.
 func (interp *interpreter) run() error {
 	instructions := interp.fn.Instructions
 	pc := 0

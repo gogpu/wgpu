@@ -486,8 +486,6 @@ func (r *RenderPassEncoder) fetchTriangles(
 // vertex buffers, collecting output @location attributes for interpolation.
 // Supports instanced rendering and TriangleStrip topology.
 // Returns nil if no SPIR-V module is available (caller falls back to fetchTriangles).
-//
-//nolint:maintidx // Vertex shader dispatch with instancing + attribute binding is inherently complex.
 func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 	layouts []gputypes.VertexBufferLayout,
 	vertexCount, instanceCount, firstVertex, firstInstance uint32,

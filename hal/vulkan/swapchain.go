@@ -475,8 +475,6 @@ func querySwapchainImagesWith(query func(count *uint32, images *vk.Image) vk.Res
 }
 
 // createSwapchain creates a new swapchain for the surface.
-//
-//nolint:maintidx // Vulkan swapchain setup requires many sequential steps
 func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfiguration) error {
 	if s == nil || s.handle == 0 {
 		return fmt.Errorf("vulkan: cannot create swapchain for null surface")
