@@ -321,11 +321,37 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, err
 	}
 
+	// Create a core.Texture for TrackerIndex allocation so that render pass
+	// texture usage tracking (populateTextureScope) can record the surface
+	// texture's usage in the command buffer's TextureUsageScope. At submit
+	// time, the scope is merged into the device's DeviceTracker for barrier
+	// generation. The coreTexture is shared with any Texture/TextureView
+	// wrappers created from this SurfaceTexture.
+	var coreTexture *core.Texture
+	if s.device != nil && s.device.core != nil {
+		cfg := s.core.Config()
+		if cfg != nil {
+			coreTexture = core.NewTexture(
+				acquired.Texture, s.device.core,
+				cfg.Format,
+				gputypes.TextureDimension2D,
+				cfg.Usage,
+				gputypes.Extent3D{
+					Width:              cfg.Width,
+					Height:             cfg.Height,
+					DepthOrArrayLayers: 1,
+				},
+				1, 1, "surface",
+			)
+		}
+	}
+
 	return &SurfaceTexture{
-		hal:     acquired.Texture,
-		surface: s,
-		device:  s.device,
-		lease:   lease,
+		hal:         acquired.Texture,
+		surface:     s,
+		device:      s.device,
+		lease:       lease,
+		coreTexture: coreTexture,
 	}, acquired.Suboptimal, nil
 }
 
@@ -641,10 +667,11 @@ func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend
 
 // SurfaceTexture is a texture acquired from a surface for rendering.
 type SurfaceTexture struct {
-	hal     hal.SurfaceTexture
-	surface *Surface
-	device  *Device
-	lease   uint64
+	hal         hal.SurfaceTexture
+	surface     *Surface
+	device      *Device
+	lease       uint64
+	coreTexture *core.Texture // for TrackerIndex-based barrier generation
 }
 
 func (st *SurfaceTexture) isUsable() bool {
@@ -671,6 +698,7 @@ func (st *SurfaceTexture) AsTexture() *Texture {
 		device:       st.device,
 		surface:      st.surface.core,
 		surfaceLease: st.lease,
+		coreTexture:  st.coreTexture,
 	}
 }
 
@@ -703,6 +731,6 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease}
+	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease, coreTexture: st.coreTexture}
 	return &TextureView{hal: halView, device: st.device, texture: texture, surface: st.surface.core, surfaceLease: st.lease}, nil
 }

@@ -15,6 +15,20 @@ type Texture struct {
 	released     bool
 	surface      *core.Surface
 	surfaceLease uint64
+
+	// coreTexture holds the core.Texture for dense TrackerIndex allocation.
+	// This enables submit-time barrier injection: the TrackerIndex is used
+	// by populateTextureScope (via core.TextureView.Parent) to record per-
+	// texture usage in the command buffer's TextureUsageScope. At submit
+	// time the scope is merged into the device-level DeviceTracker which
+	// produces the barrier list.
+	//
+	// nil for textures created without HAL (e.g., test stubs or browser).
+	// Swapchain textures also get a coreTexture so barriers work for
+	// surface textures used as render targets.
+	//
+	// Reference: Rust wgpu-core resource.rs Texture (holds TrackingData)
+	coreTexture *core.Texture
 }
 
 // resolveHAL is the single boundary from a public texture wrapper to HAL.

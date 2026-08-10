@@ -126,7 +126,21 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
 	}
 
-	return &Texture{hal: halTexture, device: d, format: desc.Format}, nil
+	// Create core.Texture for TrackerIndex allocation. This enables submit-time
+	// barrier injection: the TrackerIndex is used by populateTextureScope to
+	// record per-texture usage in the command buffer's TextureUsageScope.
+	coreTexture := core.NewTexture(
+		halTexture, d.core, desc.Format, halDesc.Dimension,
+		desc.Usage,
+		gputypes.Extent3D{
+			Width:              desc.Size.Width,
+			Height:             desc.Size.Height,
+			DepthOrArrayLayers: desc.Size.DepthOrArrayLayers,
+		},
+		halDesc.MipLevelCount, halDesc.SampleCount, desc.Label,
+	)
+
+	return &Texture{hal: halTexture, device: d, format: desc.Format, coreTexture: coreTexture}, nil
 }
 
 // CreateTextureView creates a view into a texture.

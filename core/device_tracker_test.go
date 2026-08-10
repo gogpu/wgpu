@@ -286,6 +286,198 @@ func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// ADR-060: Submit-time barrier injection flow tests
+// =============================================================================
+
+// TestDeviceTracker_SubmitFlowSingleCB simulates the full submit-time barrier
+// injection flow with one command buffer:
+// 1. Create device with DeviceTracker
+// 2. Allocate a texture with TrackerIndex
+// 3. Insert texture into device tracker (initial state)
+// 4. Build a TextureUsageScope (simulating populateTextureScope)
+// 5. Merge scope into device tracker
+// 6. Verify transitions are generated when state changes
+func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	// Texture starts as UNINITIALIZED (fresh from swapchain acquire).
+	dt.InsertTexture(idx, track.TextureUsesUninitialized)
+
+	// Command buffer uses it as COLOR_TARGET (render pass attachment).
+	scope := track.NewTextureUsageScope()
+	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+
+	// Merge scope — should produce UNINITIALIZED -> COLOR_TARGET transition.
+	transitions := dt.MergeTextureScope(scope)
+	if len(transitions) != 1 {
+		t.Fatalf("Expected 1 transition, got %d", len(transitions))
+	}
+	if transitions[0].Usage.From != track.TextureUsesUninitialized {
+		t.Errorf("From = %d, want Uninitialized", transitions[0].Usage.From)
+	}
+	if transitions[0].Usage.To != track.TextureUsesColorTarget {
+		t.Errorf("To = %d, want ColorTarget", transitions[0].Usage.To)
+	}
+
+	// Device tracker should now be in ColorTarget state.
+	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
+		t.Error("Device tracker should be in ColorTarget state")
+	}
+
+	// Second submit with same usage — no barrier (same ordered state).
+	scope2 := track.NewTextureUsageScope()
+	_ = scope2.SetUsage(idx, track.TextureUsesColorTarget)
+	transitions2 := dt.MergeTextureScope(scope2)
+	if len(transitions2) != 0 {
+		t.Errorf("Expected 0 transitions for same ordered state, got %d", len(transitions2))
+	}
+}
+
+// TestDeviceTracker_SubmitFlowMultipleCBs simulates merging scopes from
+// multiple command buffers in one submit, verifying that the device tracker
+// accumulates state changes correctly.
+func TestDeviceTracker_SubmitFlowMultipleCBs(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idxA := track.TrackerIndex(0)
+	idxB := track.TrackerIndex(1)
+
+	// Both textures start as RESOURCE (previously used for sampling).
+	dt.InsertTexture(idxA, track.TextureUsesResource)
+	dt.InsertTexture(idxB, track.TextureUsesResource)
+
+	// First CB: uses A as ColorTarget
+	scope1 := track.NewTextureUsageScope()
+	_ = scope1.SetUsage(idxA, track.TextureUsesColorTarget)
+
+	// Second CB: uses B as CopyDst
+	scope2 := track.NewTextureUsageScope()
+	_ = scope2.SetUsage(idxB, track.TextureUsesCopyDst)
+
+	// Merge both scopes (simulating Submit loop)
+	trans1 := dt.MergeTextureScope(scope1)
+	trans2 := dt.MergeTextureScope(scope2)
+
+	all := make([]track.TexturePendingTransition, 0, len(trans1)+len(trans2))
+	all = append(all, trans1...)
+	all = append(all, trans2...)
+	if len(all) != 2 {
+		t.Fatalf("Expected 2 transitions from 2 CBs, got %d", len(all))
+	}
+
+	// Verify final states
+	if dt.Textures().GetUsage(idxA) != track.TextureUsesColorTarget {
+		t.Error("Texture A should be in ColorTarget state")
+	}
+	if dt.Textures().GetUsage(idxB) != track.TextureUsesCopyDst {
+		t.Error("Texture B should be in CopyDst state")
+	}
+}
+
+// TestDeviceTracker_SubmitFlowEmptyScope verifies that an empty scope
+// produces no transitions and does not affect the device tracker.
+func TestDeviceTracker_SubmitFlowEmptyScope(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+	dt.InsertTexture(idx, track.TextureUsesColorTarget)
+
+	scope := track.NewTextureUsageScope()
+	if !scope.IsEmpty() {
+		t.Fatal("New scope should be empty")
+	}
+
+	transitions := dt.MergeTextureScope(scope)
+	if len(transitions) != 0 {
+		t.Errorf("Empty scope should produce 0 transitions, got %d", len(transitions))
+	}
+
+	// State should be unchanged
+	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
+		t.Error("Device tracker state should be unchanged after empty scope merge")
+	}
+}
+
+// TestDeviceTracker_SubmitFlowNewTextureAutoInsert verifies that when a scope
+// references a texture not yet in the device tracker, it is auto-inserted
+// without producing a transition.
+func TestDeviceTracker_SubmitFlowNewTextureAutoInsert(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(42)
+
+	// Scope references a texture not yet tracked
+	scope := track.NewTextureUsageScope()
+	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+
+	// Should auto-insert without transition
+	transitions := dt.MergeTextureScope(scope)
+	if len(transitions) != 0 {
+		t.Errorf("Expected 0 transitions for auto-insert, got %d", len(transitions))
+	}
+
+	// Texture should now be tracked
+	if !dt.Textures().IsTracked(idx) {
+		t.Error("Texture should be tracked after auto-insert")
+	}
+	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
+		t.Errorf("Usage = %d, want ColorTarget", dt.Textures().GetUsage(idx))
+	}
+}
+
+// TestDeviceTracker_BarrierCBFromTransitions_FullFlow verifies the complete
+// barrier CB generation: transitions -> HAL barriers -> command buffer.
+func TestDeviceTracker_BarrierCBFromTransitions_FullFlow(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx0 := track.TrackerIndex(0)
+	idx1 := track.TrackerIndex(1)
+
+	dt.InsertTexture(idx0, track.TextureUsesResource)
+	dt.InsertTexture(idx1, track.TextureUsesResource)
+
+	scope := track.NewTextureUsageScope()
+	_ = scope.SetUsage(idx0, track.TextureUsesColorTarget) // Resource->ColorTarget
+	_ = scope.SetUsage(idx1, track.TextureUsesResource)    // same, skip
+
+	transitions := dt.MergeTextureScope(scope)
+	if len(transitions) != 1 {
+		t.Fatalf("Expected 1 transition, got %d", len(transitions))
+	}
+
+	tex0 := &noopTexture{}
+	tex1 := &noopTexture{}
+	encoder := &noopEncoder{}
+	cb, err := BarrierCBFromTransitions(encoder, transitions, func(idx track.TrackerIndex) hal.Texture {
+		switch idx {
+		case 0:
+			return tex0
+		case 1:
+			return tex1
+		default:
+			return nil
+		}
+	})
+
+	if err != nil {
+		t.Fatalf("BarrierCBFromTransitions: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("Expected non-nil barrier command buffer")
+	}
+	if encoder.transitionCount != 1 {
+		t.Errorf("TransitionTextures called with %d barriers, want 1", encoder.transitionCount)
+	}
+}
+
 // noopEncoder is a minimal hal.CommandEncoder for testing BarrierCBFromTransitions.
 type noopEncoder struct {
 	transitionCount int

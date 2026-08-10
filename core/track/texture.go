@@ -324,6 +324,11 @@ func (s *TextureUsageScope) IsUsed(index TrackerIndex) bool {
 	return int(index) < len(s.states) && s.metadata.IsOwned(index)
 }
 
+// IsEmpty returns true if no textures are tracked in this scope.
+func (s *TextureUsageScope) IsEmpty() bool {
+	return s.metadata.Count() == 0
+}
+
 // Clear resets the scope for reuse.
 func (s *TextureUsageScope) Clear() {
 	s.states = s.states[:0]

@@ -589,6 +589,29 @@ func BenchmarkTextureUsageScope_SetUsage(b *testing.B) {
 	}
 }
 
+// =============================================================================
+// TextureUsageScope.IsEmpty
+// =============================================================================
+
+func TestTextureUsageScope_IsEmpty(t *testing.T) {
+	t.Parallel()
+
+	scope := NewTextureUsageScope()
+	if !scope.IsEmpty() {
+		t.Error("New scope should be empty")
+	}
+
+	_ = scope.SetUsage(TrackerIndex(0), TextureUsesColorTarget)
+	if scope.IsEmpty() {
+		t.Error("Scope should not be empty after SetUsage")
+	}
+
+	scope.Clear()
+	if !scope.IsEmpty() {
+		t.Error("Scope should be empty after Clear")
+	}
+}
+
 func BenchmarkTextureTracker_Merge(b *testing.B) {
 	tracker := NewTextureTracker()
 	scope := NewTextureUsageScope()

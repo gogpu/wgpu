@@ -470,6 +470,9 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 }
 
 // convertRenderPassDesc converts a public descriptor to core descriptor.
+// The conversion wires core.TextureView.Parent from the public TextureView's
+// parent Texture coreTexture, enabling TrackerIndex-based usage tracking in
+// populateTextureScope for submit-time barrier injection.
 func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescriptor {
 	if desc == nil {
 		return &core.RenderPassDescriptor{}
@@ -486,10 +489,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			ClearValue: ca.ClearValue,
 		}
 		if ca.View != nil {
-			coreCA.View = &core.TextureView{HAL: ca.View.resolveHAL()}
+			coreCA.View = coreTextureViewFrom(ca.View)
 		}
 		if ca.ResolveTarget != nil {
-			coreCA.ResolveTarget = &core.TextureView{HAL: ca.ResolveTarget.resolveHAL()}
+			coreCA.ResolveTarget = coreTextureViewFrom(ca.ResolveTarget)
 		}
 		coreDesc.ColorAttachments = append(coreDesc.ColorAttachments, coreCA)
 	}
@@ -507,12 +510,24 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
 		if ds.View != nil {
-			coreDSA.View = &core.TextureView{HAL: ds.View.resolveHAL()}
+			coreDSA.View = coreTextureViewFrom(ds.View)
 		}
 		coreDesc.DepthStencilAttachment = coreDSA
 	}
 
 	return coreDesc
+}
+
+// coreTextureViewFrom creates a core.TextureView from a public TextureView,
+// wiring the Parent to the texture's coreTexture for TrackerIndex access.
+// The Parent reference enables populateTextureScope to record per-texture
+// usage in the command buffer's TextureUsageScope.
+func coreTextureViewFrom(v *TextureView) *core.TextureView {
+	cv := &core.TextureView{HAL: v.resolveHAL()}
+	if v.texture != nil && v.texture.coreTexture != nil {
+		cv.Parent = v.texture.coreTexture
+	}
+	return cv
 }
 
 // CommandBuffer holds recorded GPU commands ready for submission.
