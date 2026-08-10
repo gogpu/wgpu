@@ -492,7 +492,7 @@ func validateSubmitTexture(tex *Texture, index int) error {
 // prependTextureBarriers creates a barrier command buffer (if needed) and
 // prepends it to allBuffers. Returns the updated buffer list.
 func (q *Queue) prependTextureBarriers(allBuffers []hal.CommandBuffer, commandBuffers []*CommandBuffer) ([]hal.CommandBuffer, error) {
-	barrierCB, err := q.injectTextureBarriers(commandBuffers)
+	barrierCB, err := q.injectBarriers(commandBuffers)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: submit barrier injection: %w", err)
 	}
@@ -502,8 +502,8 @@ func (q *Queue) prependTextureBarriers(allBuffers []hal.CommandBuffer, commandBu
 	return allBuffers, nil
 }
 
-// injectTextureBarriers merges each command buffer's textureScope into the
-// device-level DeviceTracker and records any resulting texture transitions
+// injectBarriers merges each command buffer's textureScope and bufferScope
+// into the device-level DeviceTracker and records any resulting transitions
 // into a new barrier command buffer. Returns the barrier CB (or nil if no
 // transitions are needed).
 //
@@ -515,7 +515,7 @@ func (q *Queue) prependTextureBarriers(allBuffers []hal.CommandBuffer, commandBu
 // command encoders.
 //
 // Reference: wgpu-core device/queue.rs pre_submit_for_command_buffers
-func (q *Queue) injectTextureBarriers(commandBuffers []*CommandBuffer) (hal.CommandBuffer, error) {
+func (q *Queue) injectBarriers(commandBuffers []*CommandBuffer) (hal.CommandBuffer, error) {
 	if q.device == nil || q.device.core == nil {
 		return nil, nil //nolint:nilnil // no device = no barriers needed
 	}
@@ -524,15 +524,20 @@ func (q *Queue) injectTextureBarriers(commandBuffers []*CommandBuffer) (hal.Comm
 		return nil, nil //nolint:nilnil // no tracker = no barriers needed
 	}
 
-	// Build a resolver that maps TrackerIndex -> hal.Texture from all
-	// textures referenced by the submitted command buffers.
-	resolver := buildTrackerIndexResolver(commandBuffers)
+	// Build resolvers that map TrackerIndex -> hal resource from all
+	// resources referenced by the submitted command buffers.
+	texResolver := buildTrackerIndexResolver(commandBuffers)
+	bufResolver := buildBufferTrackerIndexResolver(commandBuffers)
 
 	// Merge each command buffer's textureScope into the device tracker,
 	// accumulating all pending transitions.
-	allTransitions := mergeTextureScopes(tracker, commandBuffers)
+	texTransitions := mergeTextureScopes(tracker, commandBuffers)
 
-	if len(allTransitions) == 0 {
+	// Merge each command buffer's bufferScope into the device tracker,
+	// accumulating all pending buffer transitions.
+	bufTransitions := mergeBufferScopes(tracker, commandBuffers)
+
+	if len(texTransitions) == 0 && len(bufTransitions) == 0 {
 		return nil, nil //nolint:nilnil // no transitions = no barriers needed
 	}
 
@@ -540,7 +545,7 @@ func (q *Queue) injectTextureBarriers(commandBuffers []*CommandBuffer) (hal.Comm
 	if q.device.cmdEncoderPool == nil {
 		return nil, nil //nolint:nilnil // no pool = cannot create barrier CB
 	}
-	return q.recordAndTrackBarriers(allTransitions, resolver)
+	return q.recordAndTrackAllBarriers(texTransitions, bufTransitions, texResolver, bufResolver)
 }
 
 // buildTrackerIndexResolver walks all textures referenced by the submitted
@@ -615,21 +620,88 @@ func mergeTextureScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBu
 	return allTransitions
 }
 
-// recordAndTrackBarriers acquires an encoder from the pool, records the
-// texture barriers, and schedules the encoder for recycling after GPU
-// completion.
-func (q *Queue) recordAndTrackBarriers(
-	transitions []track.TexturePendingTransition,
-	resolver map[track.TrackerIndex]hal.Texture,
+// mergeBufferScopes merges each command buffer's bufferScope into the
+// device tracker, returning all pending buffer transitions.
+func mergeBufferScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBuffer) []track.PendingTransition {
+	var allTransitions []track.PendingTransition
+	for _, cb := range commandBuffers {
+		if cb == nil || cb.core == nil {
+			continue
+		}
+		scope := cb.core.BufferScope()
+		if scope == nil {
+			continue
+		}
+		transitions := tracker.MergeBufferScope(scope)
+		allTransitions = append(allTransitions, transitions...)
+	}
+	return allTransitions
+}
+
+// buildBufferTrackerIndexResolver walks all buffers referenced by the
+// submitted command buffers and builds a mapping from TrackerIndex to
+// hal.Buffer.
+func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.TrackerIndex]hal.Buffer {
+	resolver := make(map[track.TrackerIndex]hal.Buffer)
+	for _, cb := range commandBuffers {
+		if cb == nil {
+			continue
+		}
+		for buf := range cb.usedBuffers {
+			addTrackedBuffer(resolver, buf)
+		}
+		for bg := range cb.usedBindGroups {
+			if bg == nil {
+				continue
+			}
+			for _, buf := range bg.boundBuffers {
+				addTrackedBuffer(resolver, buf)
+			}
+		}
+	}
+	return resolver
+}
+
+// addTrackedBuffer adds a single buffer to the resolver if it has a
+// valid core buffer and TrackerIndex.
+func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *Buffer) {
+	if buf == nil || buf.core == nil {
+		return
+	}
+	td := buf.core.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return
+	}
+	if _, exists := resolver[td.Index()]; exists {
+		return
+	}
+	if halBuf := buf.halBuffer(); halBuf != nil {
+		resolver[td.Index()] = halBuf
+	}
+}
+
+// recordAndTrackAllBarriers acquires an encoder from the pool, records
+// both texture and buffer barriers, and schedules the encoder for
+// recycling after GPU completion.
+func (q *Queue) recordAndTrackAllBarriers(
+	texTransitions []track.TexturePendingTransition,
+	bufTransitions []track.PendingTransition,
+	texResolver map[track.TrackerIndex]hal.Texture,
+	bufResolver map[track.TrackerIndex]hal.Buffer,
 ) (hal.CommandBuffer, error) {
-	resolveFunc := func(idx track.TrackerIndex) hal.Texture {
-		return resolver[idx]
+	texResolveFunc := func(idx track.TrackerIndex) hal.Texture {
+		return texResolver[idx]
+	}
+	bufResolveFunc := func(idx track.TrackerIndex) hal.Buffer {
+		return bufResolver[idx]
 	}
 	halEnc, err := q.device.cmdEncoderPool.acquire()
 	if err != nil {
 		return nil, fmt.Errorf("acquire barrier encoder: %w", err)
 	}
-	barrierCB, err := core.BarrierCBFromTransitions(halEnc, transitions, resolveFunc)
+	barrierCB, err := core.BarrierCBFromAllTransitions(
+		halEnc, texTransitions, bufTransitions, texResolveFunc, bufResolveFunc,
+	)
 	if err != nil {
 		halEnc.DiscardEncoding()
 		q.device.cmdEncoderPool.release(halEnc)

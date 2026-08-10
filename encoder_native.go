@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -103,6 +104,18 @@ func (e *CommandEncoder) trackBindGroup(bg *BindGroup) {
 	e.usedBindGroups[bg] = struct{}{}
 }
 
+// recordBufferUsage records a buffer usage in the core command encoder's
+// buffer scope for submit-time barrier generation. Errors (usage conflicts)
+// are recorded as deferred errors on the encoder.
+func (e *CommandEncoder) recordBufferUsage(buf *core.Buffer, usage track.BufferUses) {
+	if e.core == nil || buf == nil {
+		return
+	}
+	if err := e.core.RecordBufferUsage(buf, usage); err != nil {
+		e.setError(fmt.Errorf("wgpu: buffer usage conflict: %w", err))
+	}
+}
+
 // BeginRenderPass begins a render pass.
 // The returned RenderPassEncoder records draw commands.
 // Call RenderPassEncoder.End() when done.
@@ -163,6 +176,10 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	e.trackRef(dst.core.Ref)
 	e.trackBuffer(src)
 	e.trackBuffer(dst)
+	// Record buffer usage in the command buffer's buffer scope for
+	// submit-time barrier generation.
+	e.recordBufferUsage(src.core, track.BufferUsesCopySrc)
+	e.recordBufferUsage(dst.core, track.BufferUsesCopyDst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -205,6 +222,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	}
 	e.trackTexture(src)
 	e.trackBuffer(dst)
+	e.recordBufferUsage(dst.core, track.BufferUsesCopyDst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -312,6 +330,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	}
 	e.trackTexture(dst)
 	e.trackBuffer(src)
+	e.recordBufferUsage(src.core, track.BufferUsesCopySrc)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return

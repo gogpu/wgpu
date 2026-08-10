@@ -176,8 +176,8 @@ func TestBuffer_TrackingData(t *testing.T) {
 	if td == nil {
 		t.Fatal("TrackingData() should not return nil")
 	}
-	if td.Index() != InvalidTrackerIndex {
-		t.Error("Tracker index should be invalid (stub implementation)")
+	if !td.Index().IsValid() {
+		t.Error("Tracker index should be valid (allocated from device's buffer allocator)")
 	}
 }
 

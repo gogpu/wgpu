@@ -519,7 +519,9 @@ type Buffer struct {
 	mapState BufferMapState
 
 	// trackingData holds per-resource tracking information.
-	trackingData *TrackingData
+	// Uses the real track.TrackingData with dense index allocation
+	// for efficient usage tracking across command buffers.
+	trackingData *track.TrackingData
 
 	// Ref is the GPU-aware reference counter for this buffer (Phase 2).
 	// When a command encoder uses this buffer, it Clone()'s the Ref.
@@ -597,18 +599,25 @@ func NewBuffer(
 	size uint64,
 	label string,
 ) *Buffer {
+	// Allocate a dense tracker index from the device's buffer allocator.
+	// This enables efficient per-buffer usage tracking across command buffers.
+	var td *track.TrackingData
+	if device != nil && device.TrackerIndices() != nil {
+		td = track.NewTrackingData(device.TrackerIndices().Buffers())
+	} else {
+		td = track.NewTrackingData(nil)
+	}
+
 	b := &Buffer{
-		raw:         NewSnatchable(halBuffer),
-		device:      device,
-		usage:       usage,
-		size:        size,
-		label:       label,
-		initTracker: NewBufferInitTracker(size),
-		trackingData: NewTrackingData(
-			device.TrackerIndices(),
-		),
-		mapState:    BufferMapStateIdle,
-		mapDataSlot: &mapDataSlot{},
+		raw:          NewSnatchable(halBuffer),
+		device:       device,
+		usage:        usage,
+		size:         size,
+		label:        label,
+		initTracker:  NewBufferInitTracker(size),
+		trackingData: td,
+		mapState:     BufferMapStateIdle,
+		mapDataSlot:  &mapDataSlot{},
 	}
 	trackResource(uintptr(unsafe.Pointer(b)), "Buffer") //nolint:gosec // debug tracking uses pointer as unique ID
 	return b
@@ -700,7 +709,9 @@ func (b *Buffer) SetMapState(state BufferMapState) {
 }
 
 // TrackingData returns the tracking data for this buffer.
-func (b *Buffer) TrackingData() *TrackingData {
+// The returned TrackingData contains the dense TrackerIndex used
+// for per-buffer usage tracking in command buffer scopes.
+func (b *Buffer) TrackingData() *track.TrackingData {
 	return b.trackingData
 }
 

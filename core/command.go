@@ -106,6 +106,14 @@ type CommandBufferMutable struct {
 	// Reference: wgpu-core command/mod.rs CommandBufferMutable.usage_scope.textures
 	textureScope *track.TextureUsageScope
 
+	// bufferScope tracks per-buffer usage within this command buffer
+	// for submit-time barrier generation. When the command buffer is
+	// submitted, this scope is merged into the device-level BufferTracker,
+	// which produces PendingTransitions for buffer barrier injection.
+	//
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.usage_scope.buffers
+	bufferScope *track.BufferUsageScope
+
 	// usedBuffers tracks buffer usage within this command buffer.
 	usedBuffers map[*Buffer]BufferUses
 
@@ -260,6 +268,7 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 		device: d,
 		mutable: &CommandBufferMutable{
 			textureScope: track.NewTextureUsageScope(),
+			bufferScope:  track.NewBufferUsageScope(),
 			usedBuffers:  make(map[*Buffer]BufferUses),
 			usedTextures: make(map[*Texture]TextureUses),
 		},
@@ -288,6 +297,7 @@ func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, labe
 		device: d,
 		mutable: &CommandBufferMutable{
 			textureScope: track.NewTextureUsageScope(),
+			bufferScope:  track.NewBufferUsageScope(),
 			usedBuffers:  make(map[*Buffer]BufferUses),
 			usedTextures: make(map[*Texture]TextureUses),
 		},
@@ -345,6 +355,31 @@ func (e *CoreCommandEncoder) Device() *Device {
 	return e.device
 }
 
+// Mutable returns the mutable encoding state. This is exposed for testing
+// and for advanced usage where the buffer/texture scopes need to be accessed
+// directly (e.g., by the public API layer for bind group tracking).
+func (e *CoreCommandEncoder) Mutable() *CommandBufferMutable {
+	return e.mutable
+}
+
+// TextureScope is a convenience accessor that returns the mutable state's
+// texture scope. Returns nil if mutable is nil.
+func (m *CommandBufferMutable) TextureScope() *track.TextureUsageScope {
+	if m == nil {
+		return nil
+	}
+	return m.textureScope
+}
+
+// BufferScope is a convenience accessor that returns the mutable state's
+// buffer scope. Returns nil if mutable is nil.
+func (m *CommandBufferMutable) BufferScope() *track.BufferUsageScope {
+	if m == nil {
+		return nil
+	}
+	return m.bufferScope
+}
+
 // Error returns the error that caused the Error state, or nil.
 func (e *CoreCommandEncoder) Error() error {
 	e.mu.Lock()
@@ -396,8 +431,14 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 	// DEPTH_STENCIL_WRITE (or DEPTH_STENCIL_READ if both aspects read-only),
 	// and resolve targets as COLOR_TARGET.
 	//
+	// WebGPU spec: usage conflict (e.g. COLOR_TARGET + RESOURCE on same texture)
+	// is a validation error that should prevent the render pass from being used.
+	//
 	// Reference: wgpu-core command/render.rs RenderPassInfo::finish (scope merge)
-	e.populateTextureScope(desc)
+	if conflictErr := e.populateTextureScope(desc); conflictErr != nil {
+		e.setError(conflictErr)
+		return nil, conflictErr
+	}
 
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
@@ -895,21 +936,25 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 // This mirrors Rust wgpu-core's RenderPassInfo::finish() which calls
 // scope.textures.merge_single(texture, selector, usage) for each render attachment.
 //
-// Errors from SetUsage (usage conflicts) are recorded as deferred errors on
-// the encoder, matching the WebGPU deferred error model.
-func (e *CoreCommandEncoder) populateTextureScope(desc *RenderPassDescriptor) {
+// Returns a validation error if incompatible usages are detected (e.g., a texture
+// used as both COLOR_TARGET and RESOURCE in the same render pass). This implements
+// WebGPU spec: "A texture subresource MUST NOT be used as both a writable attachment
+// and any other usage in the same render pass."
+//
+// Reference: wgpu-core command/render.rs RenderPassInfo::check_valid
+func (e *CoreCommandEncoder) populateTextureScope(desc *RenderPassDescriptor) error {
 	if e.mutable == nil || e.mutable.textureScope == nil || desc == nil {
-		return
+		return nil
 	}
 
 	// Track color attachments and their resolve targets as COLOR_TARGET.
 	for i := range desc.ColorAttachments {
 		ca := &desc.ColorAttachments[i]
 		if err := trackViewUsage(e.mutable.textureScope, ca.View, track.TextureUsesColorTarget); err != nil {
-			e.setError(fmt.Errorf("color attachment %d: %w", i, err))
+			return fmt.Errorf("color attachment %d: %w", i, err)
 		}
 		if err := trackViewUsage(e.mutable.textureScope, ca.ResolveTarget, track.TextureUsesColorTarget); err != nil {
-			e.setError(fmt.Errorf("resolve target %d: %w", i, err))
+			return fmt.Errorf("resolve target %d: %w", i, err)
 		}
 	}
 
@@ -917,9 +962,11 @@ func (e *CoreCommandEncoder) populateTextureScope(desc *RenderPassDescriptor) {
 	if desc.DepthStencilAttachment != nil {
 		usage := depthStencilUsage(desc.DepthStencilAttachment)
 		if err := trackViewUsage(e.mutable.textureScope, desc.DepthStencilAttachment.View, usage); err != nil {
-			e.setError(fmt.Errorf("depth/stencil attachment: %w", err))
+			return fmt.Errorf("depth/stencil attachment: %w", err)
 		}
 	}
+
+	return nil
 }
 
 // trackViewUsage records a texture view's parent texture in the given scope
@@ -946,6 +993,28 @@ func depthStencilUsage(ds *RenderPassDepthStencilAttachment) track.TextureUses {
 		return track.TextureUsesDepthStencilRead
 	}
 	return track.TextureUsesDepthStencilWrite
+}
+
+// RecordBufferUsage records a buffer usage in the command buffer's buffer scope.
+// This is called by pass encoders and copy commands to track which buffers are
+// used and how, enabling submit-time barrier generation.
+//
+// The buffer must have valid TrackingData with a valid TrackerIndex. Buffers
+// without valid tracking data are silently skipped (e.g., ID-based API buffers).
+//
+// Returns an error if the buffer already has an incompatible usage in this
+// command buffer (e.g., STORAGE_WRITE and UNIFORM on the same buffer).
+//
+// Reference: wgpu-core command/render.rs merge_bind_group (buffer usage merge)
+func (e *CoreCommandEncoder) RecordBufferUsage(buffer *Buffer, usage track.BufferUses) error {
+	if e.mutable == nil || e.mutable.bufferScope == nil || buffer == nil {
+		return nil
+	}
+	td := buffer.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return nil
+	}
+	return e.mutable.bufferScope.SetUsage(td.Index(), usage)
 }
 
 // =============================================================================
@@ -1055,6 +1124,13 @@ func (p *CoreRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, off
 	if p.ended {
 		return
 	}
+	// Record buffer usage in the command buffer's buffer scope for
+	// submit-time barrier generation. Vertex buffers are read-only.
+	if buffer != nil {
+		if err := p.encoder.RecordBufferUsage(buffer, track.BufferUsesVertex); err != nil {
+			p.encoder.SetError(fmt.Errorf("SetVertexBuffer slot %d: %w", slot, err))
+		}
+	}
 	if p.raw != nil && buffer != nil {
 		guard := p.device.snatchLock.Read()
 		defer guard.Release()
@@ -1069,6 +1145,13 @@ func (p *CoreRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, off
 func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
 	if p.ended {
 		return
+	}
+	// Record buffer usage in the command buffer's buffer scope for
+	// submit-time barrier generation. Index buffers are read-only.
+	if buffer != nil {
+		if err := p.encoder.RecordBufferUsage(buffer, track.BufferUsesIndex); err != nil {
+			p.encoder.SetError(fmt.Errorf("SetIndexBuffer: %w", err))
+		}
 	}
 	if p.raw != nil && buffer != nil {
 		guard := p.device.snatchLock.Read()
@@ -1366,6 +1449,18 @@ func (cb *CoreCommandBuffer) TextureScope() *track.TextureUsageScope {
 		return nil
 	}
 	return cb.mutable.textureScope
+}
+
+// BufferScope returns the buffer usage scope that was accumulated during
+// encoding. This scope is merged into the device-level BufferTracker at
+// submit time to produce barriers.
+//
+// Returns nil if the command buffer has no buffer scope (e.g. ID-based API).
+func (cb *CoreCommandBuffer) BufferScope() *track.BufferUsageScope {
+	if cb.mutable == nil {
+		return nil
+	}
+	return cb.mutable.bufferScope
 }
 
 // =============================================================================

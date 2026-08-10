@@ -14,13 +14,13 @@ import (
 // ADR-060: Submit-time barrier injection via DeviceTracker
 // =============================================================================
 
-// TestInjectTextureBarriers_NilDevice verifies that injectTextureBarriers
+// TestInjectTextureBarriers_NilDevice verifies that injectBarriers
 // returns nil when the queue has no device.
 func TestInjectTextureBarriers_NilDevice(t *testing.T) {
 	t.Parallel()
 
 	q := &Queue{}
-	cb, err := q.injectTextureBarriers(nil)
+	cb, err := q.injectBarriers(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -29,14 +29,14 @@ func TestInjectTextureBarriers_NilDevice(t *testing.T) {
 	}
 }
 
-// TestInjectTextureBarriers_NilTracker verifies that injectTextureBarriers
+// TestInjectTextureBarriers_NilTracker verifies that injectBarriers
 // returns nil when the device has no tracker.
 func TestInjectTextureBarriers_NilTracker(t *testing.T) {
 	t.Parallel()
 
 	// Device with nil core -> Tracker() returns nil
 	q := &Queue{device: &Device{}}
-	cb, err := q.injectTextureBarriers(nil)
+	cb, err := q.injectBarriers(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestInjectTextureBarriers_EmptyScope(t *testing.T) {
 		usedTextures: make(map[*Texture]struct{}),
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestInjectTextureBarriers_WithTransition(t *testing.T) {
 		usedTextures: map[*Texture]struct{}{tex: {}},
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestInjectTextureBarriers_NoTransitionSameState(t *testing.T) {
 		usedTextures: map[*Texture]struct{}{tex: {}},
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestInjectTextureBarriers_MultipleTextures(t *testing.T) {
 		usedTextures: map[*Texture]struct{}{tex1: {}, tex2: {}},
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb1})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestInjectTextureBarriers_NilCommandBuffers(t *testing.T) {
 	defer device.Release()
 	q := device.Queue()
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{nil, nil})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{nil, nil})
 	if err != nil {
 		t.Fatalf("unexpected error with nil CBs: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestInjectTextureBarriers_NoEncoderPool(t *testing.T) {
 		usedTextures: map[*Texture]struct{}{tex: {}},
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestInjectTextureBarriers_TextureWithoutCoreTexture(t *testing.T) {
 		usedTextures: map[*Texture]struct{}{tex: {}},
 	}
 
-	barrierCB, err := q.injectTextureBarriers([]*CommandBuffer{cb})
+	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

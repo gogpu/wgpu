@@ -478,9 +478,10 @@ func TestDeviceTracker_BarrierCBFromTransitions_FullFlow(t *testing.T) {
 	}
 }
 
-// noopEncoder is a minimal hal.CommandEncoder for testing BarrierCBFromTransitions.
+// noopEncoder is a minimal hal.CommandEncoder for testing barrier generation.
 type noopEncoder struct {
-	transitionCount int
+	transitionCount       int
+	bufferTransitionCount int
 }
 
 func (e *noopEncoder) BeginEncoding(_ string) error            { return nil }
@@ -503,7 +504,9 @@ func (e *noopEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPas
 func (e *noopEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
 	return nil
 }
-func (e *noopEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
+func (e *noopEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
+	e.bufferTransitionCount = len(barriers)
+}
 func (e *noopEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	e.transitionCount = len(barriers)
 }
@@ -523,3 +526,412 @@ func (t *noopTexture) Destroy()                            {}
 func (t *noopTexture) CurrentUsage() gputypes.TextureUsage { return 0 }
 func (t *noopTexture) AddPendingRef()                      {}
 func (t *noopTexture) DecPendingRef()                      {}
+
+// noopHALBuffer implements hal.Buffer for testing.
+type noopHALBuffer struct{}
+
+func (b *noopHALBuffer) NativeHandle() uintptr { return 0 }
+func (b *noopHALBuffer) Destroy()              {}
+
+// =============================================================================
+// Task #13: Buffer Tracker Integration Tests
+// =============================================================================
+
+func TestDeviceTracker_NewHasBufferTracker(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	if dt.Buffers() == nil {
+		t.Fatal("Buffers() returned nil")
+	}
+	if dt.Buffers().Size() != 0 {
+		t.Errorf("Initial buffer tracker size = %d, want 0", dt.Buffers().Size())
+	}
+}
+
+func TestDeviceTracker_InsertRemoveBuffer(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	dt.InsertBuffer(idx, track.BufferUsesVertex)
+	if dt.Buffers().Size() != 1 {
+		t.Errorf("Size after insert = %d, want 1", dt.Buffers().Size())
+	}
+	if !dt.Buffers().IsTracked(idx) {
+		t.Error("Buffer should be tracked after insert")
+	}
+
+	dt.RemoveBuffer(idx)
+	if dt.Buffers().IsTracked(idx) {
+		t.Error("Buffer should not be tracked after remove")
+	}
+}
+
+func TestDeviceTracker_MergeBufferScope_NilSafe(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	transitions := dt.MergeBufferScope(nil)
+	if len(transitions) != 0 {
+		t.Errorf("Nil scope should produce 0 transitions, got %d", len(transitions))
+	}
+}
+
+func TestDeviceTracker_MergeBufferScope_Transition(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	// Register buffer with initial vertex usage
+	dt.InsertBuffer(idx, track.BufferUsesVertex)
+
+	// Command buffer uses it as copy destination
+	scope := track.NewBufferUsageScope()
+	_ = scope.SetUsage(idx, track.BufferUsesCopyDst)
+
+	transitions := dt.MergeBufferScope(scope)
+
+	if len(transitions) != 1 {
+		t.Fatalf("Expected 1 transition, got %d", len(transitions))
+	}
+	if transitions[0].Usage.From != track.BufferUsesVertex {
+		t.Errorf("From = %d, want Vertex", transitions[0].Usage.From)
+	}
+	if transitions[0].Usage.To != track.BufferUsesCopyDst {
+		t.Errorf("To = %d, want CopyDst", transitions[0].Usage.To)
+	}
+}
+
+func TestDeviceTracker_MergeBufferScope_NoTransition_SameState(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	dt.InsertBuffer(idx, track.BufferUsesVertex)
+	scope := track.NewBufferUsageScope()
+	_ = scope.SetUsage(idx, track.BufferUsesVertex)
+
+	transitions := dt.MergeBufferScope(scope)
+	if len(transitions) != 0 {
+		t.Errorf("Expected 0 transitions for same state, got %d", len(transitions))
+	}
+}
+
+func TestDeviceTracker_MergeBufferScope_NewBufferAutoInsert(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(42)
+
+	scope := track.NewBufferUsageScope()
+	_ = scope.SetUsage(idx, track.BufferUsesUniform)
+
+	transitions := dt.MergeBufferScope(scope)
+	if len(transitions) != 0 {
+		t.Errorf("Expected 0 transitions for auto-insert, got %d", len(transitions))
+	}
+	if !dt.Buffers().IsTracked(idx) {
+		t.Error("Buffer should be tracked after auto-insert")
+	}
+	if dt.Buffers().GetUsage(idx) != track.BufferUsesUniform {
+		t.Errorf("Usage = %d, want Uniform", dt.Buffers().GetUsage(idx))
+	}
+}
+
+// TestBuffer_TrackerIndex_Allocated verifies that NewBuffer allocates a
+// real TrackerIndex from the device's buffer allocator.
+func TestBuffer_TrackerIndex_Allocated(t *testing.T) {
+	t.Parallel()
+
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	buf := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageVertex, 256, "buf")
+	td := buf.TrackingData()
+	if td == nil {
+		t.Fatal("TrackingData() returned nil")
+	}
+	if !td.Index().IsValid() {
+		t.Error("Tracker index should be valid (allocated from device)")
+	}
+}
+
+// TestBuffer_TrackerIndex_Freed verifies that releasing tracking data
+// frees the index for reuse.
+func TestBuffer_TrackerIndex_Freed(t *testing.T) {
+	t.Parallel()
+
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	buf := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageVertex, 256, "buf")
+	td := buf.TrackingData()
+	idx := td.Index()
+	if !idx.IsValid() {
+		t.Fatal("Expected valid index")
+	}
+
+	// Release should make the index recyclable
+	td.Release()
+	if !td.IsReleased() {
+		t.Error("TrackingData should be released")
+	}
+
+	// Allocate again — should reuse the freed index
+	buf2 := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageVertex, 256, "buf2")
+	td2 := buf2.TrackingData()
+	if td2.Index() != idx {
+		t.Errorf("Expected reused index %d, got %d", idx, td2.Index())
+	}
+}
+
+// TestSubmit_MergesBufferScope verifies that the DeviceTracker merges
+// buffer scopes and produces transitions.
+func TestSubmit_MergesBufferScope(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	// Buffer starts as vertex
+	dt.InsertBuffer(idx, track.BufferUsesVertex)
+
+	// Scope: now used as copy source
+	scope := track.NewBufferUsageScope()
+	_ = scope.SetUsage(idx, track.BufferUsesCopySrc)
+
+	transitions := dt.MergeBufferScope(scope)
+	if len(transitions) != 1 {
+		t.Fatalf("Expected 1 transition, got %d", len(transitions))
+	}
+
+	// After merge, device tracker should have the new state
+	if dt.Buffers().GetUsage(idx) != track.BufferUsesCopySrc {
+		t.Error("Device tracker should be in CopySrc state after merge")
+	}
+}
+
+// TestSubmit_BufferTransition_GeneratesBarrier verifies that buffer
+// transitions are correctly converted to HAL barriers.
+func TestSubmit_BufferTransition_GeneratesBarrier(t *testing.T) {
+	t.Parallel()
+
+	dt := NewDeviceTracker()
+	idx := track.TrackerIndex(0)
+
+	dt.InsertBuffer(idx, track.BufferUsesVertex)
+
+	scope := track.NewBufferUsageScope()
+	_ = scope.SetUsage(idx, track.BufferUsesCopyDst)
+
+	transitions := dt.MergeBufferScope(scope)
+	if len(transitions) != 1 {
+		t.Fatalf("Expected 1 transition, got %d", len(transitions))
+	}
+
+	buf0 := &noopHALBuffer{}
+	encoder := &noopEncoder{}
+	cb, err := BarrierCBFromAllTransitions(
+		encoder,
+		nil, // no texture transitions
+		transitions,
+		nil, // no texture resolver
+		func(idx track.TrackerIndex) hal.Buffer {
+			if idx == 0 {
+				return buf0
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("BarrierCBFromAllTransitions: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("Expected non-nil barrier command buffer")
+	}
+	if encoder.bufferTransitionCount != 1 {
+		t.Errorf("TransitionBuffers called with %d barriers, want 1", encoder.bufferTransitionCount)
+	}
+}
+
+// TestBarrierCBFromAllTransitions_BothTypes verifies that a single barrier
+// CB can contain both texture and buffer barriers.
+func TestBarrierCBFromAllTransitions_BothTypes(t *testing.T) {
+	t.Parallel()
+
+	texTransitions := []track.TexturePendingTransition{
+		{
+			Index: track.TrackerIndex(0),
+			Usage: track.TextureStateTransition{
+				From: track.TextureUsesResource,
+				To:   track.TextureUsesColorTarget,
+			},
+		},
+	}
+	bufTransitions := []track.PendingTransition{
+		{
+			Index: track.TrackerIndex(0),
+			Usage: track.StateTransition{
+				From: track.BufferUsesVertex,
+				To:   track.BufferUsesCopyDst,
+			},
+		},
+	}
+
+	encoder := &noopEncoder{}
+	cb, err := BarrierCBFromAllTransitions(
+		encoder,
+		texTransitions,
+		bufTransitions,
+		func(_ track.TrackerIndex) hal.Texture { return &noopTexture{} },
+		func(_ track.TrackerIndex) hal.Buffer { return &noopHALBuffer{} },
+	)
+	if err != nil {
+		t.Fatalf("BarrierCBFromAllTransitions: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("Expected non-nil barrier command buffer")
+	}
+	if encoder.transitionCount != 1 {
+		t.Errorf("texture transitions = %d, want 1", encoder.transitionCount)
+	}
+	if encoder.bufferTransitionCount != 1 {
+		t.Errorf("buffer transitions = %d, want 1", encoder.bufferTransitionCount)
+	}
+}
+
+// =============================================================================
+// Task #14: Usage Conflict Validation Tests
+// =============================================================================
+
+// TestBeginRenderPass_TextureConflict_Error verifies that using a texture as
+// both COLOR_TARGET and RESOURCE in the same render pass produces an error.
+func TestBeginRenderPass_TextureConflict_Error(t *testing.T) {
+	t.Parallel()
+
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	// Create a texture with a valid tracker index
+	alloc := device.TrackerIndices().Textures()
+	td := track.NewTrackingData(alloc)
+
+	tex := &Texture{
+		raw:          NewSnatchable[hal.Texture](nil),
+		device:       device,
+		trackingData: td,
+	}
+
+	view := &TextureView{Parent: tex}
+
+	enc, err := device.CreateCommandEncoder("test")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	// Set up a scope conflict: try to use the same texture as COLOR_TARGET
+	// through two different color attachments, which is actually allowed
+	// (same exclusive usage). So instead, manually set up the scope first.
+	// First, mark the texture as RESOURCE in the scope.
+	enc.RecordBufferUsage(nil, 0) // no-op, just to access mutable
+	_ = enc.Mutable().TextureScope().SetUsage(td.Index(), track.TextureUsesResource)
+
+	// Now BeginRenderPass tries to add COLOR_TARGET to the same texture.
+	// This should produce a conflict error (RESOURCE + COLOR_TARGET).
+	desc := &RenderPassDescriptor{
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: view, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+	_, passErr := enc.BeginRenderPass(desc)
+	if passErr == nil {
+		t.Fatal("Expected texture usage conflict error, got nil")
+	}
+}
+
+// TestBeginRenderPass_NoConflict_SameUsage verifies that using a texture as
+// COLOR_TARGET in two color attachments is allowed (same exclusive usage).
+func TestBeginRenderPass_NoConflict_SameUsage(t *testing.T) {
+	t.Parallel()
+
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+
+	alloc := device.TrackerIndices().Textures()
+	td := track.NewTrackingData(alloc)
+
+	tex := &Texture{
+		raw:          NewSnatchable[hal.Texture](nil),
+		device:       device,
+		trackingData: td,
+	}
+	view := &TextureView{Parent: tex}
+
+	enc, err := device.CreateCommandEncoder("test")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+
+	// Two color attachments pointing to the same texture (same exclusive usage).
+	// This should NOT produce a conflict.
+	desc := &RenderPassDescriptor{
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: view, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: view, LoadOp: gputypes.LoadOpLoad, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+	_, passErr := enc.BeginRenderPass(desc)
+	if passErr != nil {
+		t.Fatalf("Unexpected error for same-usage: %v", passErr)
+	}
+}
+
+// TestBuffer_UsageConflict_Error verifies that using a buffer as both
+// STORAGE_WRITE and UNIFORM in the same command buffer produces an error.
+func TestBuffer_UsageConflict_Error(t *testing.T) {
+	t.Parallel()
+
+	scope := track.NewBufferUsageScope()
+	idx := track.TrackerIndex(0)
+
+	// First usage: storage write (exclusive)
+	if err := scope.SetUsage(idx, track.BufferUsesStorageWrite); err != nil {
+		t.Fatalf("First SetUsage (StorageWrite) should succeed: %v", err)
+	}
+
+	// Second usage: uniform (read-only) — incompatible with write
+	err := scope.SetUsage(idx, track.BufferUsesUniform)
+	if err == nil {
+		t.Fatal("Expected usage conflict error for StorageWrite + Uniform, got nil")
+	}
+}
+
+// TestBuffer_NoConflict_ReadOnly verifies that multiple read-only buffer
+// usages in the same scope are compatible.
+func TestBuffer_NoConflict_ReadOnly(t *testing.T) {
+	t.Parallel()
+
+	scope := track.NewBufferUsageScope()
+	idx := track.TrackerIndex(0)
+
+	// Vertex + Index are both read-only — should be compatible
+	if err := scope.SetUsage(idx, track.BufferUsesVertex); err != nil {
+		t.Fatalf("Vertex usage should succeed: %v", err)
+	}
+	if err := scope.SetUsage(idx, track.BufferUsesIndex); err != nil {
+		t.Fatalf("Index usage should succeed (both read-only): %v", err)
+	}
+
+	// Verify merged usage
+	usage := scope.GetUsage(idx)
+	if usage&track.BufferUsesVertex == 0 {
+		t.Error("Expected Vertex flag in merged usage")
+	}
+	if usage&track.BufferUsesIndex == 0 {
+		t.Error("Expected Index flag in merged usage")
+	}
+}
