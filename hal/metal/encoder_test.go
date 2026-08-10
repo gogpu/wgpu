@@ -7,9 +7,11 @@ package metal
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 )
 
 func TestCommandEncoderRecordingErrorKeepsFirstFailure(t *testing.T) {
@@ -187,6 +189,74 @@ func TestRenderPassDeferredStateUsesBoundedStorage(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("deferred state allocated %.2f objects per recording", allocs)
+	}
+}
+
+func BenchmarkComputePassEncoderBindBufferSizes(b *testing.B) {
+	if err := Init(); err != nil {
+		b.Fatalf("Init: %v", err)
+	}
+	rawDevice := CreateSystemDefaultDevice()
+	if rawDevice == 0 {
+		b.Skip("no Metal device available")
+	}
+	b.Cleanup(func() { Release(rawDevice) })
+
+	device, err := newDevice(&Adapter{raw: rawDevice})
+	if err != nil {
+		b.Fatalf("newDevice: %v", err)
+	}
+	b.Cleanup(device.Destroy)
+
+	command := &CommandEncoder{device: device}
+	if err := command.BeginEncoding("bind-buffer-sizes-benchmark"); err != nil {
+		b.Fatalf("BeginEncoding: %v", err)
+	}
+	pass, ok := command.BeginComputePass(nil).(*ComputePassEncoder)
+	if !ok || pass == nil {
+		command.DiscardEncoding()
+		b.Fatal("BeginComputePass returned no Metal compute encoder")
+	}
+	b.Cleanup(func() {
+		pass.End()
+		command.DiscardEncoding()
+	})
+
+	pipeline := &ComputePipeline{
+		sizesBindings: []ir.ResourceBinding{
+			{Group: 0, Binding: 0},
+			{Group: 0, Binding: 1},
+			{Group: 1, Binding: 0},
+			{Group: 1, Binding: 1},
+		},
+		sizesSlot: 4,
+	}
+	bindingSizes := map[[2]uint32]uint64{
+		{0, 0}: 16,
+		{0, 1}: 28,
+		{1, 0}: 64,
+		{1, 1}: 256,
+	}
+
+	// Warm the selector cache before the timed region.
+	_ = Sel("setBytes:length:atIndex:")
+
+	for _, dispatches := range []int{1, 8, 64} {
+		b.Run(fmt.Sprintf("dispatches_per_pass=%d", dispatches), func(b *testing.B) {
+			// This benchmark compares Go allocations only. Repeated setBytes
+			// calls intentionally reuse one native command encoder.
+			b.ReportAllocs()
+			for b.Loop() {
+				encoder := ComputePassEncoder{
+					raw:          pass.raw,
+					pipeline:     pipeline,
+					bindingSizes: bindingSizes,
+				}
+				for range dispatches {
+					encoder.bindBufferSizes()
+				}
+			}
+		})
 	}
 }
 

@@ -45,6 +45,28 @@ const noArrayLengthShader = `
 fn main() {}
 `
 
+const twoBufferSizesShader = `
+@group(0) @binding(0) var<storage, read_write> first: array<u32>;
+@group(0) @binding(1) var<storage, read_write> second: array<u32>;
+
+@compute @workgroup_size(1)
+fn main() {
+    first[0] = arrayLength(&first);
+    first[1] += 1u;
+    second[0] = arrayLength(&second);
+    second[1] += 1u;
+}
+`
+
+const oneBufferSizeShader = `
+@group(0) @binding(0) var<storage, read_write> first: array<u32>;
+
+@compute @workgroup_size(1)
+fn main() {
+    first[2] = arrayLength(&first);
+}
+`
+
 // arrayLengthElems is the element count bound to the storage binding.
 const arrayLengthElems = 4
 
@@ -95,6 +117,273 @@ func TestArrayLengthReportsBoundSizeWhenBindGroupPrecedesPipeline(t *testing.T) 
 // needs no sizes buffer to one that does.
 func TestArrayLengthReportsBoundSizeAfterCompatiblePipelineSwitch(t *testing.T) {
 	testArrayLengthReportsBoundSize(t, compatiblePipelineSwitch)
+}
+
+func TestBufferSizesRemainCorrectAcrossPipelineReuse(t *testing.T) {
+	fixture := newBufferSizesFixture(t)
+	firstA := newBufferSizesTestBuffer(t, fixture.device, "first-a", 4)
+	secondA := newBufferSizesTestBuffer(t, fixture.device, "second-a", 7)
+	firstB := newBufferSizesTestBuffer(t, fixture.device, "first-b", 5)
+	secondB := newBufferSizesTestBuffer(t, fixture.device, "second-b", 9)
+	groupA := fixture.newBindGroup(t, firstA, secondA)
+	groupB := fixture.newBindGroup(t, firstB, secondB)
+
+	encoder, err := fixture.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{})
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := encoder.BeginComputePass(&wgpu.ComputePassDescriptor{})
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+
+	pass.SetBindGroup(0, groupA, nil)
+	pass.SetPipeline(fixture.oneSizePipeline)
+	pass.Dispatch(1, 1, 1)
+
+	pass.SetPipeline(fixture.twoSizesPipeline)
+	pass.Dispatch(1, 1, 1)
+
+	pass.SetBindGroup(0, groupB, nil)
+	pass.Dispatch(1, 1, 1)
+
+	pass.SetPipeline(fixture.oneSizePipeline)
+	pass.Dispatch(1, 1, 1)
+
+	pass.SetPipeline(fixture.twoSizesPipeline)
+	pass.Dispatch(1, 1, 1)
+	if err := pass.End(); err != nil {
+		t.Fatalf("ComputePass.End: %v", err)
+	}
+
+	got := fixture.submitAndRead(t, encoder, firstA, secondA, firstB, secondB)
+	assertBufferSizesValues(t, "first-a", got[0], []uint32{4, 1, 4})
+	assertBufferSizesValues(t, "second-a", got[1], []uint32{7, 1})
+	assertBufferSizesValues(t, "first-b", got[2], []uint32{5, 2, 5})
+	assertBufferSizesValues(t, "second-b", got[3], []uint32{9, 2})
+}
+
+func TestBufferSizesRemainCorrectForIndirectDispatch(t *testing.T) {
+	fixture := newBufferSizesFixture(t)
+	first := newBufferSizesTestBuffer(t, fixture.device, "indirect-first", 6)
+	second := newBufferSizesTestBuffer(t, fixture.device, "indirect-second", 11)
+	group := fixture.newBindGroup(t, first, second)
+
+	indirect, err := fixture.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "buffer-sizes-indirect-arguments",
+		Size:  12,
+		Usage: gputypes.BufferUsageIndirect | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer(indirect): %v", err)
+	}
+	t.Cleanup(indirect.Release)
+	arguments := make([]byte, 12)
+	binary.LittleEndian.PutUint32(arguments[0:4], 1)
+	binary.LittleEndian.PutUint32(arguments[4:8], 1)
+	binary.LittleEndian.PutUint32(arguments[8:12], 1)
+	if err := fixture.device.Queue().WriteBuffer(indirect, 0, arguments); err != nil {
+		t.Fatalf("WriteBuffer(indirect): %v", err)
+	}
+
+	encoder, err := fixture.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{})
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := encoder.BeginComputePass(&wgpu.ComputePassDescriptor{})
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetPipeline(fixture.twoSizesPipeline)
+	pass.SetBindGroup(0, group, nil)
+	pass.DispatchIndirect(indirect, 0)
+	if err := pass.End(); err != nil {
+		t.Fatalf("ComputePass.End: %v", err)
+	}
+
+	got := fixture.submitAndRead(t, encoder, first, second)
+	assertBufferSizesValues(t, "indirect-first", got[0], []uint32{6, 1})
+	assertBufferSizesValues(t, "indirect-second", got[1], []uint32{11, 1})
+}
+
+type bufferSizesFixture struct {
+	device           *wgpu.Device
+	layout           *wgpu.BindGroupLayout
+	twoSizesPipeline *wgpu.ComputePipeline
+	oneSizePipeline  *wgpu.ComputePipeline
+}
+
+func newBufferSizesFixture(t *testing.T) *bufferSizesFixture {
+	t.Helper()
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.BackendsPrimary})
+	if err != nil {
+		t.Skipf("CreateInstance: %v", err)
+	}
+	t.Cleanup(instance.Release)
+
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		PowerPreference: gputypes.PowerPreferenceHighPerformance,
+	})
+	if err != nil {
+		t.Skipf("RequestAdapter: %v", err)
+	}
+	t.Cleanup(adapter.Release)
+
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "buffer-sizes-test"})
+	if err != nil {
+		t.Skipf("RequestDevice: %v", err)
+	}
+	t.Cleanup(device.Release)
+
+	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Entries: []wgpu.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: wgpu.ShaderStageCompute,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage},
+			},
+			{
+				Binding:    1,
+				Visibility: wgpu.ShaderStageCompute,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	t.Cleanup(layout.Release)
+
+	pipelineLayout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+		BindGroupLayouts: []*wgpu.BindGroupLayout{layout},
+	})
+	if err != nil {
+		t.Fatalf("CreatePipelineLayout: %v", err)
+	}
+	t.Cleanup(pipelineLayout.Release)
+
+	newPipeline := func(label, source string) *wgpu.ComputePipeline {
+		t.Helper()
+		shader, shaderErr := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+			Label: label,
+			WGSL:  source,
+		})
+		if shaderErr != nil {
+			t.Fatalf("CreateShaderModule(%s): %v", label, shaderErr)
+		}
+		t.Cleanup(shader.Release)
+		pipeline, pipelineErr := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+			Label:      label,
+			Layout:     pipelineLayout,
+			Module:     shader,
+			EntryPoint: "main",
+		})
+		if pipelineErr != nil {
+			t.Fatalf("CreateComputePipeline(%s): %v", label, pipelineErr)
+		}
+		t.Cleanup(pipeline.Release)
+		return pipeline
+	}
+
+	return &bufferSizesFixture{
+		device:           device,
+		layout:           layout,
+		twoSizesPipeline: newPipeline("two-buffer-sizes", twoBufferSizesShader),
+		oneSizePipeline:  newPipeline("one-buffer-size", oneBufferSizeShader),
+	}
+}
+
+type bufferSizesTestBuffer struct {
+	storage  *wgpu.Buffer
+	staging  *wgpu.Buffer
+	elements uint32
+}
+
+func newBufferSizesTestBuffer(t *testing.T, device *wgpu.Device, label string, elements uint32) *bufferSizesTestBuffer {
+	t.Helper()
+	nbytes := uint64(elements) * 4
+	storage, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: label,
+		Size:  nbytes,
+		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst | gputypes.BufferUsageCopySrc,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer(%s): %v", label, err)
+	}
+	t.Cleanup(storage.Release)
+	if err := device.Queue().WriteBuffer(storage, 0, make([]byte, nbytes)); err != nil {
+		t.Fatalf("WriteBuffer(%s): %v", label, err)
+	}
+
+	staging, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: label + "-staging",
+		Size:  nbytes,
+		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer(%s staging): %v", label, err)
+	}
+	t.Cleanup(staging.Release)
+	return &bufferSizesTestBuffer{storage: storage, staging: staging, elements: elements}
+}
+
+func (f *bufferSizesFixture) newBindGroup(t *testing.T, first, second *bufferSizesTestBuffer) *wgpu.BindGroup {
+	t.Helper()
+	group, err := f.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Layout: f.layout,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: first.storage, Size: uint64(first.elements) * 4},
+			{Binding: 1, Buffer: second.storage, Size: uint64(second.elements) * 4},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	t.Cleanup(group.Release)
+	return group
+}
+
+func (f *bufferSizesFixture) submitAndRead(t *testing.T, encoder *wgpu.CommandEncoder, buffers ...*bufferSizesTestBuffer) [][]uint32 {
+	t.Helper()
+	for _, buffer := range buffers {
+		nbytes := uint64(buffer.elements) * 4
+		encoder.CopyBufferToBuffer(buffer.storage, 0, buffer.staging, 0, nbytes)
+	}
+	command, err := encoder.Finish()
+	if err != nil {
+		t.Fatalf("CommandEncoder.Finish: %v", err)
+	}
+	if _, err := f.device.Queue().Submit(command); err != nil {
+		t.Fatalf("Queue.Submit: %v", err)
+	}
+
+	results := make([][]uint32, len(buffers))
+	for i, buffer := range buffers {
+		nbytes := uint64(buffer.elements) * 4
+		if err := buffer.staging.Map(context.Background(), wgpu.MapModeRead, 0, nbytes); err != nil {
+			t.Fatalf("Buffer.Map(%d): %v", i, err)
+		}
+		rng, err := buffer.staging.MappedRange(0, nbytes)
+		if err != nil {
+			t.Fatalf("Buffer.MappedRange(%d): %v", i, err)
+		}
+		values := make([]uint32, buffer.elements)
+		for j := range values {
+			values[j] = binary.LittleEndian.Uint32(rng.Bytes()[j*4:])
+		}
+		buffer.staging.Unmap()
+		results[i] = values
+	}
+	return results
+}
+
+func assertBufferSizesValues(t *testing.T, name string, got, want []uint32) {
+	t.Helper()
+	for i, value := range want {
+		if got[i] != value {
+			t.Errorf("%s[%d] = %d; want %d (full result: %v)", name, i, got[i], value, got)
+		}
+	}
 }
 
 func testArrayLengthReportsBoundSize(t *testing.T, order arrayLengthBindOrder) {

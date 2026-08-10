@@ -143,6 +143,8 @@ func preRegisterSelectors() {
 		"drawPrimitives:vertexStart:vertexCount:",
 		"drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:",
 		"endEncoding",
+		// MTLComputeCommandEncoder
+		"setBytes:length:atIndex:",
 		// CAMetalLayer
 		"setDevice:",
 		"setPixelFormat:",

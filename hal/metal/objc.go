@@ -29,6 +29,7 @@ var (
 
 	cifGetClass    types.CallInterface
 	cifSelRegister types.CallInterface
+	cifSetBytes    types.CallInterface
 )
 
 // selectorCache caches registered selectors for performance.
@@ -159,6 +160,19 @@ func prepareObjCCallInterfaces() error {
 		return fmt.Errorf("metal: failed to prepare sel_registerName: %w", err)
 	}
 
+	err = ffi.PrepareCallInterface(&cifSetBytes, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		})
+	if err != nil {
+		return fmt.Errorf("metal: failed to prepare setBytes:length:atIndex: call: %w", err)
+	}
+
 	return nil
 }
 
@@ -270,6 +284,31 @@ func msgSend(obj ID, sel SEL, retType *types.TypeDescriptor, retPtr unsafe.Point
 
 func msgSendVoid(obj ID, sel SEL, args ...objcArg) {
 	_ = msgSend(obj, sel, types.VoidTypeDescriptor, nil, args...)
+}
+
+func msgSendSetBytes(obj ID, sel SEL, bytes unsafe.Pointer, length, index NSUInteger) error {
+	if obj == 0 || sel == 0 {
+		return nil
+	}
+
+	self := uintptr(obj)
+	cmd := uintptr(sel)
+	lengthValue := uint64(length)
+	indexValue := uint64(index)
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&self),
+		unsafe.Pointer(&cmd),
+		unsafe.Pointer(&bytes),
+		unsafe.Pointer(&lengthValue),
+		unsafe.Pointer(&indexValue),
+	}
+
+	// Use a per-call copy because goffi requires separate CallInterface
+	// instances for concurrent calls. The prepared type data is immutable.
+	cif := cifSetBytes
+	_, err := ffi.CallFunction(&cif, symObjcMsgSend, nil, args[:])
+	runtime.KeepAlive(bytes)
+	return err
 }
 
 func msgSendID(obj ID, sel SEL, args ...objcArg) ID {
