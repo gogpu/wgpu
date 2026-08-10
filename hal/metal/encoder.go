@@ -8,6 +8,7 @@ package metal
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -1045,8 +1046,9 @@ func (e *ComputePassEncoder) bindBufferSizes() {
 		}
 		sizes[i] = uint32(size)
 	}
-	_ = MsgSend(e.raw, Sel("setBytes:length:atIndex:"),
-		uintptr(unsafe.Pointer(&sizes[0])), uintptr(4*len(sizes)), uintptr(p.sizesSlot))
+	_ = msgSendSetBytes(e.raw, Sel("setBytes:length:atIndex:"),
+		unsafe.Pointer(&sizes[0]), NSUInteger(4*len(sizes)), NSUInteger(p.sizesSlot))
+	runtime.KeepAlive(sizes)
 }
 
 // Dispatch dispatches compute workgroups.
