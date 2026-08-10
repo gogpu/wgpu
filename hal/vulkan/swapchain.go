@@ -1298,18 +1298,21 @@ func (sc *Swapchain) SetImageLayout(imageIndex uint32, layout vk.ImageLayout) {
 	}
 }
 
-// ensurePresentLayout transitions the current swapchain image to
-// PRESENT_SRC_KHR before vkQueuePresentKHR.
+// ensurePresentLayout transitions the swapchain image to PRESENT_SRC_KHR if needed.
 //
-// ADR-059: With render pass finalLayout = COLOR_ATTACHMENT_OPTIMAL (Rust wgpu/
-// Dawn parity), this barrier fires every frame that renders to the swapchain.
-// The barrier CB is submitted without a fence — the command pool reset is
+// ADR-060: In the common case (render pass targeting swapchain), the inline barrier
+// in CommandEncoder.EndEncoding() already transitions to PRESENT_SRC_KHR. This
+// function serves as a FALLBACK for edge cases where no render pass targeted the
+// swapchain (blit-only, offscreen-only paths) or when the inline barrier was not
+// injected.
+//
+// ADR-059: The barrier CB is submitted without a fence -- the command pool reset is
 // deferred to acquireNextImage, where the acquire fence wait guarantees the
 // previous frame (including this barrier) has completed. This avoids a
 // synchronous vkWaitForFences per frame.
 //
 // If the tracked layout is already PRESENT_SRC_KHR (e.g., from a previous
-// barrier not followed by a render pass), the function returns immediately.
+// barrier or from the inline EndEncoding barrier), the function returns immediately.
 //
 // BUG-WGPU-VK-006: Fixes VUID-VkPresentInfoKHR-pImageIndices-01430.
 func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {

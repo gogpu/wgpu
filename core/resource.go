@@ -13,8 +13,8 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
-// Resource placeholder types - will be properly defined later.
-// These types represent the actual WebGPU resources managed by the hub.
+// Core WebGPU resource types with full HAL integration.
+// Each type wraps a HAL handle and provides safe lifecycle management.
 
 // Adapter represents a physical GPU adapter.
 type Adapter struct {
@@ -562,7 +562,9 @@ type BufferInitTracker struct {
 // Each resource that needs state tracking during command encoding
 // embeds a TrackingData struct to hold its tracker index.
 //
-// This is a stub - full implementation in CORE-006.
+// Buffer and Texture use the real track.TrackingData with dense index
+// allocation. Other resource types (Sampler, BindGroup, Pipeline, etc.)
+// use this lightweight version until they are migrated to track.TrackingData.
 type TrackingData struct {
 	index TrackerIndex
 }
@@ -571,8 +573,6 @@ type TrackingData struct {
 //
 // Unlike resource IDs (which use epochs and may be sparse), tracker indices
 // are always dense (0, 1, 2, ...) for efficient array access.
-//
-// This is a stub - full implementation in CORE-006.
 type TrackerIndex uint32
 
 // InvalidTrackerIndex represents an unassigned tracker index.
@@ -644,7 +644,8 @@ func NewBufferInitTracker(size uint64) *BufferInitTracker {
 
 // NewTrackingData creates tracking data for a resource.
 //
-// This is a stub - full implementation in CORE-006.
+// This is a lightweight version for resource types not yet migrated to
+// track.TrackingData. Buffer and Texture use track.NewTrackingData instead.
 func NewTrackingData(_ *TrackerIndexAllocators) *TrackingData {
 	return &TrackingData{
 		index: InvalidTrackerIndex,

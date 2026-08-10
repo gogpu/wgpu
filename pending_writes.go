@@ -329,9 +329,9 @@ func (pw *pendingWrites) writeTextureFor(
 	enc.CopyBufferToTexture(alloc.buffer, dst.Texture, texCopy[:])
 
 	// Transition texture to SHADER_RESOURCE for rendering.
-	// Unlike Rust wgpu-core (which defers this to submit-time via DeviceTextureTracker),
-	// we do it eagerly because we lack a centralized tracker. This is correct but slightly
-	// suboptimal — an extra barrier if the next usage is also COPY_DST.
+	// ADR-060: The centralized TextureTracker now handles render pass -> submit barriers.
+	// These eager barriers remain for the pending_writes -> render path until the tracker
+	// also covers queue write operations (pending_writes integration, future work).
 	postBarrier := [1]hal.TextureBarrier{{
 		Texture: dst.Texture,
 		Range: hal.TextureRange{
