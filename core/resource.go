@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -846,7 +847,9 @@ type Texture struct {
 	label string
 
 	// trackingData holds per-resource tracking information.
-	trackingData *TrackingData
+	// Uses the real track.TrackingData with dense index allocation
+	// for efficient usage tracking across command buffers.
+	trackingData *track.TrackingData
 
 	// Ref is the GPU-aware reference counter for this texture (Phase 2).
 	Ref *ResourceRef
@@ -875,6 +878,15 @@ func NewTexture(
 	sampleCount uint32,
 	label string,
 ) *Texture {
+	// Allocate a dense tracker index from the device's texture allocator.
+	// This enables efficient per-texture usage tracking across command buffers.
+	var td *track.TrackingData
+	if device != nil && device.TrackerIndices() != nil {
+		td = track.NewTrackingData(device.TrackerIndices().Textures())
+	} else {
+		td = track.NewTrackingData(nil)
+	}
+
 	t := &Texture{
 		raw:           NewSnatchable(halTexture),
 		device:        device,
@@ -885,7 +897,7 @@ func NewTexture(
 		mipLevelCount: mipLevelCount,
 		sampleCount:   sampleCount,
 		label:         label,
-		trackingData:  NewTrackingData(device.TrackerIndices()),
+		trackingData:  td,
 	}
 	trackResource(uintptr(unsafe.Pointer(t)), "Texture") //nolint:gosec // debug tracking uses pointer as unique ID
 	return t
@@ -903,11 +915,37 @@ func (t *Texture) Raw(guard SnatchGuard) hal.Texture {
 	return *p
 }
 
+// Device returns the parent device for this texture.
+func (t *Texture) Device() *Device {
+	return t.device
+}
+
+// TrackingData returns the tracking data for this texture.
+// The returned TrackingData contains the dense TrackerIndex used
+// for per-texture usage tracking in command buffer scopes.
+func (t *Texture) TrackingData() *track.TrackingData {
+	return t.trackingData
+}
+
 // TextureView represents a view into a texture.
+//
+// TextureView wraps a HAL texture view handle and carries a reference to
+// its parent Texture. The parent reference is needed for usage tracking:
+// when a render pass uses a texture view as an attachment, the parent
+// texture's TrackerIndex must be recorded in the command buffer's
+// TextureUsageScope for barrier generation at submit time.
+//
+// Reference: Rust wgpu-core resource.rs TextureView { parent: Arc<Texture>, ... }
 type TextureView struct {
 	// HAL is the underlying HAL texture view handle.
 	// Set by the public API layer when creating texture views with real HAL backends.
 	HAL hal.TextureView
+
+	// Parent is the texture that this view was created from.
+	// Used to access the parent texture's TrackerIndex for usage tracking.
+	// May be nil for texture views created without a parent (e.g., swapchain
+	// views where the parent texture lifecycle is managed externally).
+	Parent *Texture
 }
 
 // Sampler represents a texture sampler with HAL integration.

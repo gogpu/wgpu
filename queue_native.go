@@ -85,8 +85,14 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		allBuffers = make([]hal.CommandBuffer, 0, len(commandBuffers))
 	}
 
+	// Flatten multi-CB command buffers: each CommandBuffer may contain
+	// multiple HAL command buffers from multi-CB recording (OpenPass/
+	// CloseCB/CloseAndSwap/CloseAndPushFront). All CBs are submitted
+	// together in submission order.
+	//
+	// Reference: Rust wgpu-core queue.rs submit — iterates encoder.list
 	for _, cb := range commandBuffers {
-		allBuffers = append(allBuffers, cb.halBuffer())
+		allBuffers = append(allBuffers, cb.halBufferList()...)
 	}
 
 	// ADR-060 TODO: Merge each command buffer's textureScope into the device
@@ -198,6 +204,9 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 	// resets the DX12 ID3D12CommandAllocator or Vulkan VkCommandPool) and
 	// returned to the device's encoder pool for reuse.
 	//
+	// For multi-CB encoders, ALL HAL command buffers must be passed to
+	// ResetAll so the underlying pool/allocator can reclaim them all.
+	//
 	// Matches Rust wgpu-core's CommandAllocator::release_encoder pattern where
 	// encoders travel: CommandEncoder -> CommandBuffer -> EncoderInFlight -> pool.
 	for _, cb := range commandBuffers {
@@ -205,12 +214,12 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 			continue
 		}
 		halEnc := cb.halEncoder
-		halCmdBuf := cb.halBuffer()
-		cb.halEncoder = nil // ownership moves to deferred callback
+		halCmdBufs := cb.halBufferList() // all CBs from this encoder
+		cb.halEncoder = nil              // ownership moves to deferred callback
 
 		pool := q.device.cmdEncoderPool
 		dq.Defer(subIdx, "CmdEncoder", func() {
-			halEnc.ResetAll([]hal.CommandBuffer{halCmdBuf})
+			halEnc.ResetAll(halCmdBufs)
 			pool.release(halEnc)
 		})
 	}

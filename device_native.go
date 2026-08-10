@@ -896,6 +896,7 @@ func (d *Device) WaitForFence(f *Fence, value uint64, timeout time.Duration) (bo
 // FreeCommandBuffer returns a command buffer to the command pool.
 // This must be called after the GPU has finished using the command buffer.
 // The command buffer handle becomes invalid after this call.
+// For multi-CB encoders, all accumulated HAL command buffers are freed.
 func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
 	if d.released.Load() || cb == nil {
 		return
@@ -904,9 +905,10 @@ func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
 	if halDevice == nil {
 		return
 	}
-	raw := cb.halBuffer()
-	if raw != nil {
-		halDevice.FreeCommandBuffer(raw)
+	for _, buf := range cb.halBufferList() {
+		if buf != nil {
+			halDevice.FreeCommandBuffer(buf)
+		}
 	}
 }
 

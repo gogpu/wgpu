@@ -579,8 +579,10 @@ func (cb *CommandBuffer) Release() {
 		return
 	}
 	// Return encoder to pool (reset native allocator).
+	// For multi-CB encoders, pass all HAL command buffers to ResetAll
+	// so the underlying pool/allocator can reclaim them.
 	if cb.halEncoder != nil && cb.device != nil && cb.device.cmdEncoderPool != nil {
-		cb.halEncoder.ResetAll(nil)
+		cb.halEncoder.ResetAll(cb.halBufferList())
 		cb.device.cmdEncoderPool.release(cb.halEncoder)
 		cb.halEncoder = nil
 	}
@@ -603,10 +605,15 @@ func (cb *CommandBuffer) dropUsedSets() {
 	cb.usedBindGroups = nil
 }
 
-// halBuffer returns the underlying HAL command buffer.
-func (cb *CommandBuffer) halBuffer() hal.CommandBuffer {
+// halBufferList returns all HAL command buffers in submission order.
+// For single-CB recording (the common case), returns a single-element slice.
+// For multi-CB recording (via OpenPass/CloseCB/CloseAndSwap/CloseAndPushFront),
+// returns all accumulated CBs.
+//
+// Reference: Rust wgpu-core BakedCommands.encoder.list (command/mod.rs:742-749)
+func (cb *CommandBuffer) halBufferList() []hal.CommandBuffer {
 	if cb.core == nil {
 		return nil
 	}
-	return cb.core.Raw()
+	return cb.core.HalBufferList()
 }

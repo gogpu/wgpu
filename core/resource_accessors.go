@@ -48,11 +48,17 @@ func (t *Texture) Label() string {
 	return t.label
 }
 
-// Destroy releases the HAL texture.
+// Destroy releases the HAL texture and frees the tracker index.
 //
 // This method is idempotent - calling it multiple times is safe.
-// After calling Destroy(), Raw() returns nil.
+// After calling Destroy(), Raw() returns nil and the tracker index
+// is returned to the allocator for reuse.
 func (t *Texture) Destroy() {
+	// Release the tracker index first (safe to call multiple times).
+	if t.trackingData != nil {
+		t.trackingData.Release()
+	}
+
 	untrackResource(uintptr(unsafe.Pointer(t))) //nolint:gosec // debug tracking uses pointer as unique ID
 
 	if t.device == nil || t.device.SnatchLock() == nil || t.raw == nil {

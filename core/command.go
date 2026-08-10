@@ -163,6 +163,14 @@ const (
 // recording to HAL command encoders. The state machine ensures commands
 // are recorded in the correct order and validates encoder state transitions.
 //
+// Multi-CB support: A single CoreCommandEncoder can produce multiple HAL
+// command buffers via OpenPass/CloseCB/CloseAndSwap/CloseAndPushFront.
+// All CBs are submitted together in one HAL queue submit, enabling
+// barrier CB insertion before/after render pass CBs in the same submit.
+//
+// Reference: Rust wgpu-core InnerCommandEncoder (command/mod.rs:530-738)
+// which holds a Vec<CommandBuffer> list, not just one.
+//
 // CoreCommandEncoder is thread-safe for concurrent access.
 type CoreCommandEncoder struct {
 	// raw is the HAL encoder wrapped for safe destruction.
@@ -185,6 +193,20 @@ type CoreCommandEncoder struct {
 
 	// label is the debug label for this encoder.
 	label string
+
+	// cbList accumulates command buffers from multiple open/close cycles.
+	// All CBs in this list are submitted together in one HAL queue submit.
+	// This enables inserting barrier CBs before/after render pass CBs.
+	//
+	// Reference: Rust wgpu-core InnerCommandEncoder.list (command/mod.rs:551)
+	cbList []hal.CommandBuffer
+
+	// cbListOpen is true when the HAL encoder is in the "recording" state
+	// for a multi-CB pass (opened via OpenPass). When false, the encoder
+	// is between passes and not recording.
+	//
+	// Reference: Rust wgpu-core InnerCommandEncoder.is_open (command/mod.rs:561)
+	cbListOpen bool
 }
 
 // CreateCommandEncoder creates a new command encoder on this device.
@@ -369,17 +391,13 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 	// Begin HAL render pass
 	halPass := (*halEncoder).BeginRenderPass(halDesc)
 
-	// ADR-060 TODO: Populate textureScope from render pass color/depth attachments.
-	// When a render pass begins, its color attachments should be tracked as
-	// TextureUsesColorTarget and depth/stencil as TextureUsesDepthStencilWrite
-	// (or DepthStencilRead if read-only). This requires core.TextureView to
-	// carry its parent Texture's TrackerIndex so we can call:
-	//   e.mutable.textureScope.SetUsage(trackerIndex, track.TextureUsesColorTarget)
+	// Populate textureScope from render pass attachments.
+	// Each color attachment is tracked as COLOR_TARGET, depth/stencil as
+	// DEPTH_STENCIL_WRITE (or DEPTH_STENCIL_READ if both aspects read-only),
+	// and resolve targets as COLOR_TARGET.
 	//
-	// Currently, the core TextureView is a minimal HAL handle wrapper without
-	// a parent reference. The full wiring path is documented in queue_native.go.
-	//
-	// Reference: wgpu-core command/render.rs render_pass_begin (usage_scope merge)
+	// Reference: wgpu-core command/render.rs RenderPassInfo::finish (scope merge)
+	e.populateTextureScope(desc)
 
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
@@ -500,6 +518,13 @@ func (e *CoreCommandEncoder) EndComputePass(pass *CoreComputePassEncoder) error 
 // The encoder must be in the Recording state (not in a pass).
 // After this call, the encoder transitions to the Finished state.
 //
+// If multiple command buffers were accumulated via OpenPass/CloseCB/
+// CloseAndSwap/CloseAndPushFront, the current open recording (if any)
+// is closed first via CloseIfOpen, and ALL accumulated CBs are included
+// in the returned CoreCommandBuffer. If no multi-CB passes were used,
+// the encoder ends the single recording and returns a single CB (backward
+// compatible).
+//
 // Returns the command buffer and nil on success.
 // Returns nil and an error if the encoder is not in Recording state.
 func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
@@ -519,7 +544,31 @@ func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 		return nil, ErrResourceDestroyed
 	}
 
-	// End encoding
+	// Multi-CB path: close any open recording and collect all CBs.
+	if len(e.cbList) > 0 || e.cbListOpen {
+		if err := e.closeIfOpenLocked(*halEncoder); err != nil {
+			e.setError(err)
+			return nil, err
+		}
+
+		e.status.Store(int32(CommandEncoderStatusFinished))
+		untrackResource(uintptr(unsafe.Pointer(e))) //nolint:gosec // debug tracking uses pointer as unique ID
+
+		cb := &CoreCommandBuffer{
+			device:     e.device,
+			mutable:    e.mutable,
+			label:      e.label,
+			halBuffers: e.cbList,
+		}
+		// Set raw to the first CB for backward compatibility with Raw().
+		if len(e.cbList) > 0 {
+			cb.raw = e.cbList[0]
+		}
+		e.cbList = nil
+		return cb, nil
+	}
+
+	// Single-CB path (backward compatible): end the one recording.
 	halCmdBuffer, err := (*halEncoder).EndEncoding()
 	if err != nil {
 		e.setError(err)
@@ -537,6 +586,225 @@ func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 		mutable: e.mutable,
 		label:   e.label,
 	}, nil
+}
+
+// =============================================================================
+// Multi-CB Encoder Methods (Rust InnerCommandEncoder parity)
+// =============================================================================
+
+// OpenPass starts recording a new command buffer for a render or compute pass.
+// If a recording is already open, it is closed first (CloseIfOpen pattern).
+// The label is passed to HAL BeginEncoding.
+//
+// This enables the multi-CB pattern where barrier CBs are inserted before/after
+// render pass CBs within the same encoder, all submitted together.
+//
+// The encoder must be in the Recording state (not in a pass or finished).
+//
+// Reference: Rust wgpu-core InnerCommandEncoder::open_pass (command/mod.rs:711-723)
+func (e *CoreCommandEncoder) OpenPass(label string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.Status() != CommandEncoderStatusRecording {
+		return e.statusError("open pass")
+	}
+
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return ErrResourceDestroyed
+	}
+
+	// Close any open recording before starting a new one.
+	if err := e.closeIfOpenLocked(*halEncoder); err != nil {
+		e.setError(err)
+		return err
+	}
+
+	// Begin recording a new command buffer.
+	e.cbListOpen = true
+	if err := (*halEncoder).BeginEncoding(label); err != nil {
+		e.cbListOpen = false
+		e.setError(err)
+		return err
+	}
+
+	return nil
+}
+
+// CloseCB ends the current command buffer recording and pushes it to the
+// end of the CB list. The HAL encoder transitions to the closed state.
+//
+// The encoder must have an open recording (cbListOpen == true).
+//
+// Reference: Rust wgpu-core InnerCommandEncoder::close (command/mod.rs:641-650)
+func (e *CoreCommandEncoder) CloseCB() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.cbListOpen {
+		return fmt.Errorf("core: CloseCB: no command buffer is currently open")
+	}
+
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return ErrResourceDestroyed
+	}
+
+	halCmdBuffer, err := (*halEncoder).EndEncoding()
+	if err != nil {
+		e.setError(err)
+		return err
+	}
+
+	e.cbList = append(e.cbList, halCmdBuffer)
+	e.cbListOpen = false
+	return nil
+}
+
+// CloseAndSwap ends the current CB and inserts it BEFORE the last element
+// in the CB list. This is used for inserting barrier CBs before render pass
+// CBs: the render pass CB is already at the end of the list, and the barrier
+// CB needs to go right before it.
+//
+// The encoder must have an open recording AND at least one CB already in the list.
+//
+// Reference: Rust wgpu-core InnerCommandEncoder::close_and_swap (command/mod.rs:599-607)
+func (e *CoreCommandEncoder) CloseAndSwap() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.cbListOpen {
+		return fmt.Errorf("core: CloseAndSwap: no command buffer is currently open")
+	}
+	if len(e.cbList) == 0 {
+		return fmt.Errorf("core: CloseAndSwap: CB list is empty, need at least one CB to swap before")
+	}
+
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return ErrResourceDestroyed
+	}
+
+	halCmdBuffer, err := (*halEncoder).EndEncoding()
+	if err != nil {
+		e.setError(err)
+		return err
+	}
+
+	// Insert before the last element: [A, B, C] -> [A, B, NEW, C]
+	// Matches Rust: self.list.insert(self.list.len() - 1, new)
+	insertPos := len(e.cbList) - 1
+	e.cbList = append(e.cbList, nil)                   // grow by one
+	copy(e.cbList[insertPos+1:], e.cbList[insertPos:]) // shift last element right
+	e.cbList[insertPos] = halCmdBuffer
+
+	e.cbListOpen = false
+	return nil
+}
+
+// CloseAndPushFront ends the current CB and inserts it at position 0 in the
+// CB list. This is used for submit-time device tracker barriers that must
+// execute before all other commands in the submission.
+//
+// The encoder must have an open recording.
+//
+// Reference: Rust wgpu-core InnerCommandEncoder::close_and_push_front (command/mod.rs:620-628)
+func (e *CoreCommandEncoder) CloseAndPushFront() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.cbListOpen {
+		return fmt.Errorf("core: CloseAndPushFront: no command buffer is currently open")
+	}
+
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return ErrResourceDestroyed
+	}
+
+	halCmdBuffer, err := (*halEncoder).EndEncoding()
+	if err != nil {
+		e.setError(err)
+		return err
+	}
+
+	// Insert at position 0: [A, B] -> [NEW, A, B]
+	// Matches Rust: self.list.insert(0, new)
+	e.cbList = append([]hal.CommandBuffer{halCmdBuffer}, e.cbList...)
+
+	e.cbListOpen = false
+	return nil
+}
+
+// CloseIfOpen closes the current CB if one is being recorded, appending it
+// to the end of the CB list. If no recording is open, this is a no-op.
+//
+// This is safe to call at any time and is used by Finish() to finalize
+// any open recording before returning the accumulated CB list.
+//
+// Reference: Rust wgpu-core InnerCommandEncoder::close_if_open (command/mod.rs:662-671)
+func (e *CoreCommandEncoder) CloseIfOpen() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		if e.cbListOpen {
+			return ErrResourceDestroyed
+		}
+		return nil
+	}
+
+	return e.closeIfOpenLocked(*halEncoder)
+}
+
+// closeIfOpenLocked is the lock-free inner implementation of CloseIfOpen.
+// Caller must hold e.mu and provide a valid HAL encoder.
+func (e *CoreCommandEncoder) closeIfOpenLocked(halEncoder hal.CommandEncoder) error {
+	if !e.cbListOpen {
+		return nil
+	}
+
+	halCmdBuffer, err := halEncoder.EndEncoding()
+	if err != nil {
+		return err
+	}
+
+	e.cbList = append(e.cbList, halCmdBuffer)
+	e.cbListOpen = false
+	return nil
+}
+
+// CBListLen returns the number of command buffers accumulated so far.
+// This is useful for testing and debugging.
+func (e *CoreCommandEncoder) CBListLen() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.cbList)
+}
+
+// IsCBOpen returns whether a command buffer is currently being recorded
+// in the multi-CB path. This is useful for testing.
+func (e *CoreCommandEncoder) IsCBOpen() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.cbListOpen
 }
 
 // MarkConsumed marks the encoder as consumed after submission.
@@ -618,6 +886,66 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 	}
 
 	return halDesc
+}
+
+// populateTextureScope records texture usage from the render pass descriptor
+// into the command buffer's textureScope. Each attachment's parent texture
+// is tracked with the appropriate usage flags for submit-time barrier generation.
+//
+// This mirrors Rust wgpu-core's RenderPassInfo::finish() which calls
+// scope.textures.merge_single(texture, selector, usage) for each render attachment.
+//
+// Errors from SetUsage (usage conflicts) are recorded as deferred errors on
+// the encoder, matching the WebGPU deferred error model.
+func (e *CoreCommandEncoder) populateTextureScope(desc *RenderPassDescriptor) {
+	if e.mutable == nil || e.mutable.textureScope == nil || desc == nil {
+		return
+	}
+
+	// Track color attachments and their resolve targets as COLOR_TARGET.
+	for i := range desc.ColorAttachments {
+		ca := &desc.ColorAttachments[i]
+		if err := trackViewUsage(e.mutable.textureScope, ca.View, track.TextureUsesColorTarget); err != nil {
+			e.setError(fmt.Errorf("color attachment %d: %w", i, err))
+		}
+		if err := trackViewUsage(e.mutable.textureScope, ca.ResolveTarget, track.TextureUsesColorTarget); err != nil {
+			e.setError(fmt.Errorf("resolve target %d: %w", i, err))
+		}
+	}
+
+	// Track depth/stencil attachment.
+	if desc.DepthStencilAttachment != nil {
+		usage := depthStencilUsage(desc.DepthStencilAttachment)
+		if err := trackViewUsage(e.mutable.textureScope, desc.DepthStencilAttachment.View, usage); err != nil {
+			e.setError(fmt.Errorf("depth/stencil attachment: %w", err))
+		}
+	}
+}
+
+// trackViewUsage records a texture view's parent texture in the given scope
+// with the specified usage. Returns nil if the view is nil, has no parent,
+// or has no valid tracker index.
+func trackViewUsage(scope *track.TextureUsageScope, view *TextureView, usage track.TextureUses) error {
+	if view == nil || view.Parent == nil {
+		return nil
+	}
+	td := view.Parent.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return nil
+	}
+	return scope.SetUsage(td.Index(), usage)
+}
+
+// depthStencilUsage returns the appropriate texture usage for a depth/stencil
+// attachment. When both depth and stencil aspects are read-only, it returns
+// DEPTH_STENCIL_READ; otherwise DEPTH_STENCIL_WRITE.
+//
+// Reference: Rust wgpu-core command/render.rs depth stencil usage selection
+func depthStencilUsage(ds *RenderPassDepthStencilAttachment) track.TextureUses {
+	if ds.DepthReadOnly && ds.StencilReadOnly {
+		return track.TextureUsesDepthStencilRead
+	}
+	return track.TextureUsesDepthStencilWrite
 }
 
 // =============================================================================
@@ -966,9 +1294,22 @@ func (p *CoreComputePassEncoder) End() error {
 //
 // This is created by CoreCommandEncoder.Finish() and can be submitted
 // to a queue for execution.
+//
+// A CoreCommandBuffer may contain multiple HAL command buffers when the
+// encoder used multi-CB recording (OpenPass/CloseCB/CloseAndSwap/CloseAndPushFront).
+// All CBs are submitted together in one HAL queue submit call.
+//
+// Reference: Rust wgpu-core BakedCommands.encoder.list (command/mod.rs:742-749)
 type CoreCommandBuffer struct {
-	// raw is the HAL command buffer.
+	// raw is the primary HAL command buffer (first in the list, or the only one).
+	// Maintained for backward compatibility with Raw().
 	raw hal.CommandBuffer
+
+	// halBuffers holds all HAL command buffers when multi-CB recording was used.
+	// nil for single-CB recording (common case). When non-nil, raw equals halBuffers[0].
+	//
+	// Reference: Rust wgpu-core InnerCommandEncoder.list (command/mod.rs:551)
+	halBuffers []hal.CommandBuffer
 
 	// device is the parent device.
 	device *Device
@@ -980,9 +1321,29 @@ type CoreCommandBuffer struct {
 	label string
 }
 
-// Raw returns the underlying HAL command buffer.
+// Raw returns the primary underlying HAL command buffer.
+// For multi-CB encoders, this returns the first CB in the list.
+// Use HalBufferList() to get all CBs for submission.
 func (cb *CoreCommandBuffer) Raw() hal.CommandBuffer {
 	return cb.raw
+}
+
+// HalBufferList returns all HAL command buffers in submission order.
+// For single-CB recording (the common case), this returns a single-element
+// slice containing Raw(). For multi-CB recording, returns all accumulated CBs.
+//
+// This is used by Queue.Submit() to flatten multiple CBs from a single
+// encoder into the combined submission list.
+//
+// Reference: Rust wgpu-core BakedCommands.encoder.list
+func (cb *CoreCommandBuffer) HalBufferList() []hal.CommandBuffer {
+	if len(cb.halBuffers) > 0 {
+		return cb.halBuffers
+	}
+	if cb.raw == nil {
+		return nil
+	}
+	return []hal.CommandBuffer{cb.raw}
 }
 
 // Device returns the parent device.
