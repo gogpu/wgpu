@@ -395,7 +395,12 @@ func (e *CommandEncoder) DiscardEncoding() {
 	}
 
 	// ADR-060: Clear inline present barrier tracking — discarded work
-	// should not trigger a layout transition.
+	// should not trigger a layout transition. Reset the swapchain image
+	// layout to UNDEFINED so ensurePresentLayout sees the real GPU state
+	// (the discarded render pass never executed).
+	if e.swapchain != nil {
+		e.swapchain.SetImageLayout(e.swapchain.currentImage, vk.ImageLayoutUndefined)
+	}
 	e.swapchainImage = 0
 	e.swapchainLayout = 0
 	e.swapchain = nil

@@ -64,6 +64,15 @@ func (t *Texture) Release() {
 	}
 	t.released = true
 
+	// ADR-060: Release TrackerIndex to prevent monotonic growth (#307).
+	// Surface textures handle this in Surface.destroySwapchainTexture.
+	if t.coreTexture != nil {
+		td := t.coreTexture.TrackingData()
+		if td != nil {
+			td.Release()
+		}
+	}
+
 	halDevice := t.device.halDevice()
 	if halDevice == nil {
 		return

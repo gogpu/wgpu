@@ -33,6 +33,12 @@ type Queue struct {
 	// may fire during Triage while Queue.mu is held. Using atomic avoids
 	// deadlock: Submit→Triage→onZero→lastSubmissionIndex→mu (ADR-056).
 	lastSubmissionIndex atomic.Uint64
+
+	// barrierEncoder/barrierCB hold the barrier encoder from the current
+	// Submit's prependTextureBarriers. Deferred recycling happens in postSubmit
+	// with the ACTUAL submission index (not the stale lastSubmissionIndex).
+	barrierEncoder hal.CommandEncoder
+	barrierCB      hal.CommandBuffer
 }
 
 // Submit submits command buffers for execution. Non-blocking.
@@ -219,6 +225,21 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 			halEnc.ResetAll(halCmdBufs)
 			pool.release(halEnc)
 		})
+	}
+
+	// ADR-060: Defer barrier encoder recycling with the CURRENT submission index.
+	// This was previously done in recordAndTrackAllBarriers with lastSubmissionIndex
+	// (stale — set before hal.Submit). Now uses the actual subIdx.
+	if q.barrierEncoder != nil && q.barrierCB != nil {
+		halEnc := q.barrierEncoder
+		barrierBuf := q.barrierCB
+		pool := q.device.cmdEncoderPool
+		dq.Defer(subIdx, "BarrierEncoder", func() {
+			halEnc.ResetAll([]hal.CommandBuffer{barrierBuf})
+			pool.release(halEnc)
+		})
+		q.barrierEncoder = nil
+		q.barrierCB = nil
 	}
 
 	// Triage deferred resource destructions from the DestroyQueue.
@@ -708,17 +729,11 @@ func (q *Queue) recordAndTrackAllBarriers(
 		return nil, fmt.Errorf("record barriers: %w", err)
 	}
 
-	// Track the barrier encoder for recycling after GPU completion.
-	// The encoder is returned to the pool via DestroyQueue.Defer, matching
-	// the lifecycle of user command encoders in postSubmit.
-	if dq := q.destroyQueue(); dq != nil {
-		pool := q.device.cmdEncoderPool
-		barrierBuf := barrierCB
-		dq.Defer(q.lastSubmissionIndex.Load(), "BarrierEncoder", func() {
-			halEnc.ResetAll([]hal.CommandBuffer{barrierBuf})
-			pool.release(halEnc)
-		})
-	}
+	// Store the encoder for deferred recycling. The actual Defer call happens
+	// in postSubmit with the CURRENT submission index (not the stale
+	// lastSubmissionIndex that was set before hal.Submit).
+	q.barrierEncoder = halEnc
+	q.barrierCB = barrierCB
 
 	return barrierCB, nil
 }
