@@ -250,6 +250,14 @@ func (s *BufferUsageScope) SetUsage(index TrackerIndex, usage BufferUses) error 
 	return nil
 }
 
+// ReplaceUsage replaces the usage recorded for a buffer after all resources in
+// a multi-resource command have been validated.
+func (s *BufferUsageScope) ReplaceUsage(index TrackerIndex, usage BufferUses) {
+	s.ensureSize(int(index) + 1)
+	s.states[index] = BufferState{usage: usage}
+	s.metadata.SetOwned(index, true)
+}
+
 // GetUsage returns the current usage in this scope.
 func (s *BufferUsageScope) GetUsage(index TrackerIndex) BufferUses {
 	if int(index) < len(s.states) && s.metadata.IsOwned(index) {

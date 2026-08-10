@@ -311,6 +311,15 @@ func (s *TextureUsageScope) SetUsage(index TrackerIndex, usage TextureUses) erro
 	return nil
 }
 
+// ReplaceUsage replaces the usage recorded for a texture. It is used after an
+// explicit texture transition, where the scope must describe the state after
+// the transition rather than merge incompatible before/after usages.
+func (s *TextureUsageScope) ReplaceUsage(index TrackerIndex, usage TextureUses) {
+	s.ensureSize(int(index) + 1)
+	s.states[index] = TextureState{usage: usage}
+	s.metadata.SetOwned(index, true)
+}
+
 // GetUsage returns the current usage in this scope.
 func (s *TextureUsageScope) GetUsage(index TrackerIndex) TextureUses {
 	if int(index) < len(s.states) && s.metadata.IsOwned(index) {
