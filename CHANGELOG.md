@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-08-10
+
+### Added
+
+- **core:** Full resource tracker — TextureTracker + BufferTracker + DeviceTracker (ADR-060, #308)
+  - `core/track/texture.go` — TextureUses flags (10 states, Rust wgpu-types bit-exact parity), SkipBarrier, TextureUsageScope with conflict detection, TextureTracker with Merge + barrier generation
+  - `core/device_tracker.go` — DeviceTracker wrapping texture + buffer trackers, MergeTextureScope/MergeBufferScope, TrackPresentTexture, BarrierCBFromAllTransitions
+  - Wire dormant BufferTracker (built 8 months ago, never used) to Submit path
+  - TrackerIndex allocation for Texture + Buffer resources via real allocators
+  - Usage conflict validation in BeginRenderPass (WebGPU spec: no concurrent COLOR_TARGET + RESOURCE)
+
+- **core:** Multi-CB encoder — Rust wgpu `InnerCommandEncoder` parity (ADR-060, #308)
+  - `OpenPass`/`CloseCB`/`CloseAndSwap`/`CloseAndPushFront`/`CloseIfOpen` methods
+  - `Finish()` returns ALL CBs, `Submit()` flattens via `halBufferList()`
+  - Enables barrier CB injection before/after render passes in same submit
+
+- **core:** Submit-time texture + buffer barrier injection via DeviceTracker (ADR-060, #308)
+  - `prependTextureBarriers` merges scopes into device tracker, generates PendingTransitions
+  - Barrier CB prepended before user CBs in same `vkQueueSubmit`
+
+### Fixed
+
+- **vulkan:** Inline present barrier in EndEncoding — zero extra `vkQueueSubmit` (ADR-060, #308)
+  - Barrier `COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR` injected inside user's command buffer before `vkEndCommandBuffer`
+  - `ensurePresentLayout()` becomes fallback (early-returns when inline barrier fired)
+  - Reverse barrier `PRESENT_SRC → COLOR_ATTACHMENT` for multi-submit `LoadOp::Load`
+  - Single-submit frames: 1 `vkQueueSubmit` (was 2 in v0.30.37)
+- **vulkan:** Barrier submit signals present semaphore (ADR-060)
+  - `ensurePresentLayout()` fallback now allocates present semaphore via `allocPresentSemaphore()`
+  - `present()` reordered: `ensurePresentLayout` before `presentWaitSemaphores` — barrier semaphore included in wait list
+- **surface:** Cache swapchain `core.Texture` per-surface, not per-frame (#307, ADR-060)
+  - `GetCurrentTexture()` was creating new `core.Texture` + `TrackerIndex` every frame — leaked monotonically
+  - Now cached on `Surface.swapchainTexture`, destroyed on Unconfigure/Release
+- **core:** Barrier encoder deferred recycling uses actual submission index (not stale `lastSubmissionIndex`)
+- **core:** `Texture.Release()` now frees TrackerIndex — prevents leak for user-created textures
+- **vulkan:** `DiscardEncoding` resets swapchain layout tracking to UNDEFINED
+
+### Changed
+
+- **core:** Removed `pendingBufferBarriers`/`pendingTextureBarriers` unused stubs from `core/command.go`
+- **core:** `populateTextureScope` records COLOR_TARGET/DEPTH_STENCIL usage in BeginRenderPass
+- **core:** Activated `TrackingData` — wired to real `TrackerIndexAllocator` (was returning `InvalidTrackerIndex`)
+- **docs:** Updated stale comments in `core/resource.go`, `hal/software/shader/interpreter.go`, `hal/vulkan/swapchain.go`
+- **lint:** Moved `maintidx` exclusion to `.golangci.yml` HAL path, removed 10 redundant `//nolint:maintidx`
+- **deps:** gpucontext v0.24.0 → v0.26.0 (damage tracking interfaces, Key enum redesign)
+
 ## [0.30.37] - 2026-08-07
 
 ### Fixed

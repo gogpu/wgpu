@@ -621,6 +621,99 @@ func TestSurfaceTextureLeaseAcrossReconfigureAndUnconfigure(t *testing.T) {
 	surface.Release()
 }
 
+// TestSurfaceSwapchainTextureCaching verifies that GetCurrentTexture reuses
+// the same core.Texture (and TrackerIndex) across frames instead of leaking
+// a new TrackerIndex every frame (#307).
+func TestSurfaceSwapchainTextureCaching(t *testing.T) {
+	t.Parallel()
+
+	rawDevice := &surfaceTextureLifetimeDevice{}
+	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cache-test")
+	queue := &Queue{hal: &noop.Queue{}, halDevice: rawDevice}
+	device := &Device{core: coreDevice, queue: queue}
+	queue.device = device
+	defer device.Release()
+
+	rawSurface := &noop.Surface{}
+	surface := &Surface{
+		core:           core.NewSurface(rawSurface, "cache-test"),
+		device:         device,
+		surfaceCreated: true,
+		currentBackend: gputypes.BackendEmpty,
+	}
+	config := &SurfaceConfiguration{
+		Width:       1,
+		Height:      1,
+		Format:      gputypes.TextureFormatRGBA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
+		PresentMode: gputypes.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeAuto,
+	}
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// Simulate 100 frames — TrackerIndex must stay stable.
+	var firstIndex uint32
+	for i := range 100 {
+		st, _, err := surface.GetCurrentTexture()
+		if err != nil {
+			t.Fatalf("frame %d: GetCurrentTexture: %v", i, err)
+		}
+		if st.coreTexture == nil {
+			t.Fatalf("frame %d: coreTexture is nil", i)
+		}
+		td := st.coreTexture.TrackingData()
+		if td == nil || !td.Index().IsValid() {
+			t.Fatalf("frame %d: invalid TrackerIndex", i)
+		}
+		idx := uint32(td.Index())
+		if i == 0 {
+			firstIndex = idx
+		} else if idx != firstIndex {
+			t.Fatalf("frame %d: TrackerIndex changed from %d to %d (leak!)", i, firstIndex, idx)
+		}
+		if err := surface.Present(st); err != nil {
+			t.Fatalf("frame %d: Present: %v", i, err)
+		}
+	}
+
+	// After 100 frames, texture allocator should have exactly 1 active texture index
+	// (the cached swapchain texture), not 100.
+	texAlloc := coreDevice.TrackerIndices().Textures()
+	if texAlloc.Size() < 1 {
+		t.Fatalf("expected at least 1 active texture index, got %d", texAlloc.Size())
+	}
+
+	// Unconfigure should release the cached TrackerIndex.
+	surface.Unconfigure()
+	if surface.swapchainTexture != nil {
+		t.Fatal("swapchainTexture should be nil after Unconfigure")
+	}
+
+	// Reconfigure and verify a fresh TrackerIndex is allocated.
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("re-Configure: %v", err)
+	}
+	st, _, err := surface.GetCurrentTexture()
+	if err != nil {
+		t.Fatalf("GetCurrentTexture after reconfigure: %v", err)
+	}
+	if st.coreTexture == nil {
+		t.Fatal("coreTexture nil after reconfigure")
+	}
+	// The reused index from the free list should be the same as firstIndex.
+	td := st.coreTexture.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		t.Fatal("invalid TrackerIndex after reconfigure")
+	}
+	if err := surface.Present(st); err != nil {
+		t.Fatalf("Present after reconfigure: %v", err)
+	}
+
+	surface.Release()
+}
+
 func TestSurfaceTextureDerivedWrappersInvalidateAfterDeviceRelease(t *testing.T) {
 	surface, surfaceTexture, device, rawDevice := newAcquiredSurfaceForLifetimeTest(t)
 

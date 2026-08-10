@@ -18,8 +18,6 @@ import (
 const defaultEntryPoint = "main"
 
 // CreateRenderPipeline creates a render pipeline.
-//
-//nolint:maintidx // Pipeline creation is inherently complex due to all the state it configures.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: render pipeline descriptor is nil in Vulkan.CreateRenderPipeline — core validation gap")

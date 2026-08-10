@@ -142,6 +142,9 @@ linters:
       # HAL backends - platform-specific complexity
       # nestif excluded: DX12 COM null checks and state management require
       # defensive nested conditions that are clearer inline than extracted.
+      # maintidx excluded: HAL entry points (BeginRenderPass, Submit, present)
+      # aggregate platform-specific logic that is clearer as a single flow
+      # than split across multiple indirection layers.
       - path: hal/.*\.go
         linters:
           - gocyclo
@@ -150,6 +153,7 @@ linters:
           - funlen
           - gosec
           - nestif
+          - maintidx
 
       # GL context - requires unsafe for C interop
       - path: hal/gles/gl/context\.go

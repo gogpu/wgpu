@@ -203,8 +203,6 @@ type pipelineLayoutResult struct {
 //   - Per-group sampler index buffer SRV in the CBV/SRV/UAV table
 //   - Global sampler heap root parameter (2x2048 sampler ranges)
 //   - Full naga HLSL options with BindingMap and SamplerBufferBindingMap
-//
-//nolint:maintidx // inherent complexity: Rust wgpu-hal root signature construction with monotonic register counters
 func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (*pipelineLayoutResult, error) {
 	var rootParams []d3d12.D3D12_ROOT_PARAMETER
 	var allRanges []d3d12.D3D12_DESCRIPTOR_RANGE // flat slice to prevent reallocation

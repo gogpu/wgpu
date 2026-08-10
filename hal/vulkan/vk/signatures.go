@@ -230,8 +230,6 @@ var (
 
 // InitSignatures prepares all CallInterface templates.
 // Must be called once after loading Vulkan library.
-//
-//nolint:maintidx // This function initializes all 60+ signature types - high complexity is inherent
 func InitSignatures() error {
 	var err error
 

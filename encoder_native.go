@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -103,6 +104,18 @@ func (e *CommandEncoder) trackBindGroup(bg *BindGroup) {
 	e.usedBindGroups[bg] = struct{}{}
 }
 
+// recordBufferUsage records a buffer usage in the core command encoder's
+// buffer scope for submit-time barrier generation. Errors (usage conflicts)
+// are recorded as deferred errors on the encoder.
+func (e *CommandEncoder) recordBufferUsage(buf *core.Buffer, usage track.BufferUses) {
+	if e.core == nil || buf == nil {
+		return
+	}
+	if err := e.core.RecordBufferUsage(buf, usage); err != nil {
+		e.setError(fmt.Errorf("wgpu: buffer usage conflict: %w", err))
+	}
+}
+
 // BeginRenderPass begins a render pass.
 // The returned RenderPassEncoder records draw commands.
 // Call RenderPassEncoder.End() when done.
@@ -163,6 +176,10 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	e.trackRef(dst.core.Ref)
 	e.trackBuffer(src)
 	e.trackBuffer(dst)
+	// Record buffer usage in the command buffer's buffer scope for
+	// submit-time barrier generation.
+	e.recordBufferUsage(src.core, track.BufferUsesCopySrc)
+	e.recordBufferUsage(dst.core, track.BufferUsesCopyDst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -205,6 +222,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	}
 	e.trackTexture(src)
 	e.trackBuffer(dst)
+	e.recordBufferUsage(dst.core, track.BufferUsesCopyDst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -312,6 +330,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	}
 	e.trackTexture(dst)
 	e.trackBuffer(src)
+	e.recordBufferUsage(src.core, track.BufferUsesCopySrc)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -470,6 +489,9 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 }
 
 // convertRenderPassDesc converts a public descriptor to core descriptor.
+// The conversion wires core.TextureView.Parent from the public TextureView's
+// parent Texture coreTexture, enabling TrackerIndex-based usage tracking in
+// populateTextureScope for submit-time barrier injection.
 func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescriptor {
 	if desc == nil {
 		return &core.RenderPassDescriptor{}
@@ -486,10 +508,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			ClearValue: ca.ClearValue,
 		}
 		if ca.View != nil {
-			coreCA.View = &core.TextureView{HAL: ca.View.resolveHAL()}
+			coreCA.View = coreTextureViewFrom(ca.View)
 		}
 		if ca.ResolveTarget != nil {
-			coreCA.ResolveTarget = &core.TextureView{HAL: ca.ResolveTarget.resolveHAL()}
+			coreCA.ResolveTarget = coreTextureViewFrom(ca.ResolveTarget)
 		}
 		coreDesc.ColorAttachments = append(coreDesc.ColorAttachments, coreCA)
 	}
@@ -507,12 +529,24 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
 		if ds.View != nil {
-			coreDSA.View = &core.TextureView{HAL: ds.View.resolveHAL()}
+			coreDSA.View = coreTextureViewFrom(ds.View)
 		}
 		coreDesc.DepthStencilAttachment = coreDSA
 	}
 
 	return coreDesc
+}
+
+// coreTextureViewFrom creates a core.TextureView from a public TextureView,
+// wiring the Parent to the texture's coreTexture for TrackerIndex access.
+// The Parent reference enables populateTextureScope to record per-texture
+// usage in the command buffer's TextureUsageScope.
+func coreTextureViewFrom(v *TextureView) *core.TextureView {
+	cv := &core.TextureView{HAL: v.resolveHAL()}
+	if v.texture != nil && v.texture.coreTexture != nil {
+		cv.Parent = v.texture.coreTexture
+	}
+	return cv
 }
 
 // CommandBuffer holds recorded GPU commands ready for submission.
@@ -579,8 +613,10 @@ func (cb *CommandBuffer) Release() {
 		return
 	}
 	// Return encoder to pool (reset native allocator).
+	// For multi-CB encoders, pass all HAL command buffers to ResetAll
+	// so the underlying pool/allocator can reclaim them.
 	if cb.halEncoder != nil && cb.device != nil && cb.device.cmdEncoderPool != nil {
-		cb.halEncoder.ResetAll(nil)
+		cb.halEncoder.ResetAll(cb.halBufferList())
 		cb.device.cmdEncoderPool.release(cb.halEncoder)
 		cb.halEncoder = nil
 	}
@@ -603,10 +639,15 @@ func (cb *CommandBuffer) dropUsedSets() {
 	cb.usedBindGroups = nil
 }
 
-// halBuffer returns the underlying HAL command buffer.
-func (cb *CommandBuffer) halBuffer() hal.CommandBuffer {
+// halBufferList returns all HAL command buffers in submission order.
+// For single-CB recording (the common case), returns a single-element slice.
+// For multi-CB recording (via OpenPass/CloseCB/CloseAndSwap/CloseAndPushFront),
+// returns all accumulated CBs.
+//
+// Reference: Rust wgpu-core BakedCommands.encoder.list (command/mod.rs:742-749)
+func (cb *CommandBuffer) halBufferList() []hal.CommandBuffer {
 	if cb.core == nil {
 		return nil
 	}
-	return cb.core.Raw()
+	return cb.core.HalBufferList()
 }

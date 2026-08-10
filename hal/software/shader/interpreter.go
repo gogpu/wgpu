@@ -3,17 +3,19 @@
 // SPIR-V interpreter for the software backend.
 //
 // Executes a single SPIR-V entry point with provided inputs and returns outputs.
-// This is a minimal interpreter sufficient for the gogpu triangle shader:
+// Supported features:
 //   - OpLoad / OpStore for variable access
 //   - OpAccessChain for array/composite indexing
 //   - OpCompositeConstruct / OpCompositeExtract for building/decomposing vectors
 //   - OpVariable for local storage
-//   - OpBranch for unconditional jumps between basic blocks
+//   - Control flow: OpBranch, OpBranchConditional, OpSelectionMerge, OpLoopMerge,
+//     OpPhi, OpSwitch, OpSelect (loops, conditionals, switch fully supported)
+//   - OpFunctionCall for function invocation
 //   - OpConvertUToF for uint-to-float conversion
 //   - Basic arithmetic: OpFAdd, OpFSub, OpFMul, OpFDiv, OpFNegate
 //   - Basic integer arithmetic: OpIAdd, OpISub, OpIMul
-//
-// Control flow beyond OpBranch (loops, conditionals) is NOT implemented.
+//   - Comparison: OpFOrd*, OpIEqual, OpINotEqual
+//   - GLSL.std.450 extended instruction set (math intrinsics)
 
 package shader
 
@@ -487,8 +489,6 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 var errDebugAbort = fmt.Errorf("spirv: execution aborted by debug callback")
 
 // run executes instructions sequentially, handling OpBranch for jumps.
-//
-//nolint:maintidx // Opcode dispatch switch is inherently large.
 func (interp *interpreter) run() error {
 	instructions := interp.fn.Instructions
 	pc := 0

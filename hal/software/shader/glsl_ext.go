@@ -75,8 +75,6 @@ const (
 // executeGLSLExtInst dispatches a GLSL.std.450 extended instruction.
 // instNum is the instruction number from the GLSL set.
 // operands are the remaining SPIR-V operands after the set ID and instruction number.
-//
-//nolint:maintidx // Large switch is inherent to GLSL.std.450 opcode dispatch.
 func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32) Value {
 	switch instNum {
 	// --- Scalar/vector unary float ops ---

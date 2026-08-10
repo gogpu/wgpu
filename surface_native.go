@@ -61,6 +61,16 @@ type Surface struct {
 	// matching Rust wgpu's surface_per_backend representation. core points at
 	// exactly one of these at a time to keep its lifecycle state machine small.
 	halSurfaces map[gputypes.Backend]hal.Surface
+
+	// swapchainTexture is the cached core.Texture for surface texture tracking.
+	// A swapchain has a bounded number of images (typically 2-3). All of them
+	// share a single TrackerIndex because surface texture usage is always the
+	// same (RenderAttachment) and the swapchain serializes image access.
+	// Created lazily on first GetCurrentTexture(), destroyed on Unconfigure/
+	// Release/reconfigure. This prevents TrackerIndex leak: without caching,
+	// a new core.Texture (and TrackerIndex) was allocated every frame, causing
+	// monotonic index growth and unbounded memory usage (#307).
+	swapchainTexture *core.Texture
 }
 
 // CreateSurface creates a rendering surface from legacy platform-specific
@@ -291,6 +301,11 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		return err
 	}
 
+	// Destroy the cached swapchain texture on reconfigure. The new swapchain
+	// may have different format, usage, or dimensions. A fresh core.Texture
+	// will be lazily created on the next GetCurrentTexture().
+	s.destroySwapchainTexture()
+
 	s.device = device
 	return s.core.Configure(device.core, halConfig)
 }
@@ -300,6 +315,7 @@ func (s *Surface) Unconfigure() {
 	if s.released {
 		return
 	}
+	s.destroySwapchainTexture()
 	s.core.Unconfigure()
 }
 
@@ -321,11 +337,41 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, err
 	}
 
+	// Reuse the cached core.Texture for TrackerIndex stability. A swapchain
+	// has a bounded number of images (typically 2-3), and they all share a
+	// single TrackerIndex because the swapchain serializes image access.
+	// Without caching, a new core.Texture (with a new TrackerIndex) was
+	// created every frame, causing monotonic index growth and unbounded
+	// memory consumption (#307).
+	//
+	// The coreTexture is shared with any Texture/TextureView wrappers
+	// created from this SurfaceTexture. At submit time, the TrackerIndex
+	// is used by populateTextureScope to record surface texture usage in
+	// the command buffer's TextureUsageScope for barrier generation.
+	if s.swapchainTexture == nil && s.device != nil && s.device.core != nil {
+		cfg := s.core.Config()
+		if cfg != nil {
+			s.swapchainTexture = core.NewTexture(
+				acquired.Texture, s.device.core,
+				cfg.Format,
+				gputypes.TextureDimension2D,
+				cfg.Usage,
+				gputypes.Extent3D{
+					Width:              cfg.Width,
+					Height:             cfg.Height,
+					DepthOrArrayLayers: 1,
+				},
+				1, 1, "surface",
+			)
+		}
+	}
+
 	return &SurfaceTexture{
-		hal:     acquired.Texture,
-		surface: s,
-		device:  s.device,
-		lease:   lease,
+		hal:         acquired.Texture,
+		surface:     s,
+		device:      s.device,
+		lease:       lease,
+		coreTexture: s.swapchainTexture,
 	}, acquired.Suboptimal, nil
 }
 
@@ -513,6 +559,10 @@ func (s *Surface) retireDevice(device *Device) {
 	if s == nil || s.core == nil || s.device != device {
 		return
 	}
+	// The swapchainTexture holds a reference to this device's TrackerIndex
+	// allocator. Destroy it before retiring the device to prevent leaks
+	// and dangling references.
+	s.destroySwapchainTexture()
 	s.core.RetireDevice(device.core)
 	s.device = nil
 }
@@ -613,6 +663,7 @@ func (s *Surface) Release() {
 		return
 	}
 	s.released = true
+	s.destroySwapchainTexture()
 	if s.core != nil {
 		destroyHALSurfaces(s.core, s.halSurfaces, s.currentBackend, s.surfaceCreated)
 	}
@@ -623,6 +674,21 @@ func (s *Surface) Release() {
 		s.instance = nil
 	}
 	s.targetSource = nil
+}
+
+// destroySwapchainTexture releases the cached core.Texture's TrackerIndex.
+// The core.Texture for a swapchain does not own the HAL texture (that is
+// owned by the swapchain), so we only release the tracking data to recycle
+// the TrackerIndex. We must NOT call core.Texture.Destroy() which would
+// attempt to destroy the swapchain's HAL image.
+func (s *Surface) destroySwapchainTexture() {
+	if s.swapchainTexture != nil {
+		td := s.swapchainTexture.TrackingData()
+		if td != nil {
+			td.Release()
+		}
+		s.swapchainTexture = nil
+	}
 }
 
 func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend]hal.Surface, currentBackend gputypes.Backend, currentSet bool) {
@@ -641,10 +707,11 @@ func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend
 
 // SurfaceTexture is a texture acquired from a surface for rendering.
 type SurfaceTexture struct {
-	hal     hal.SurfaceTexture
-	surface *Surface
-	device  *Device
-	lease   uint64
+	hal         hal.SurfaceTexture
+	surface     *Surface
+	device      *Device
+	lease       uint64
+	coreTexture *core.Texture // for TrackerIndex-based barrier generation
 }
 
 func (st *SurfaceTexture) isUsable() bool {
@@ -671,6 +738,7 @@ func (st *SurfaceTexture) AsTexture() *Texture {
 		device:       st.device,
 		surface:      st.surface.core,
 		surfaceLease: st.lease,
+		coreTexture:  st.coreTexture,
 	}
 }
 
@@ -703,6 +771,6 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease}
+	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease, coreTexture: st.coreTexture}
 	return &TextureView{hal: halView, device: st.device, texture: texture, surface: st.surface.core, surfaceLease: st.lease}, nil
 }
