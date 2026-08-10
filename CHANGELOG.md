@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.31.0] - 2026-08-10
 
 ### Added
 
@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** Activated `TrackingData` — wired to real `TrackerIndexAllocator` (was returning `InvalidTrackerIndex`)
 - **docs:** Updated stale comments in `core/resource.go`, `hal/software/shader/interpreter.go`, `hal/vulkan/swapchain.go`
 - **lint:** Moved `maintidx` exclusion to `.golangci.yml` HAL path, removed 10 redundant `//nolint:maintidx`
+- **deps:** gpucontext v0.24.0 → v0.26.0 (damage tracking interfaces, Key enum redesign)
 
 ## [0.30.37] - 2026-08-07
 
