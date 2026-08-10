@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -94,6 +95,135 @@ func TestSurfaceConfigure(t *testing.T) {
 	if surface.Config().Width != 800 || surface.Config().Height != 600 {
 		t.Errorf("config dimensions = %dx%d, want 800x600",
 			surface.Config().Width, surface.Config().Height)
+	}
+}
+
+func TestSurfaceConfigureCopiesInputConfig(t *testing.T) {
+	surface, device, _ := newTestSurface(t)
+	config := testSurfaceConfig()
+
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	config.Width = 1024
+	config.Height = 768
+	config.EnableDamagePresent = true
+
+	got := surface.Config()
+	if got == nil {
+		t.Fatal("Config() returned nil after Configure")
+	}
+	if got == config {
+		t.Fatal("Configure retained the caller's configuration pointer")
+	}
+	if got.Width != 800 || got.Height != 600 || got.EnableDamagePresent {
+		t.Fatalf("stored config changed with caller mutation: %+v", *got)
+	}
+}
+
+func TestSurfaceConfigReturnsCopy(t *testing.T) {
+	surface, device, _ := newTestSurface(t)
+	if err := surface.Configure(device, testSurfaceConfig()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	got := surface.Config()
+	if got == nil {
+		t.Fatal("Config() returned nil after Configure")
+	}
+	got.Width = 1024
+	got.Height = 768
+	got.EnableDamagePresent = true
+
+	stored := surface.Config()
+	if stored == nil {
+		t.Fatal("Config() returned nil after returned-copy mutation")
+	}
+	if stored == got {
+		t.Fatal("Config() returned the internal configuration pointer")
+	}
+	if stored.Width != 800 || stored.Height != 600 || stored.EnableDamagePresent {
+		t.Fatalf("returned config mutation changed surface state: %+v", *stored)
+	}
+}
+
+func TestSurfaceConfigOwnershipDoesNotRace(t *testing.T) {
+	surface, device, _ := newTestSurface(t)
+	config := testSurfaceConfig()
+	if err := surface.Configure(device, config); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			config.Width = uint32(800 + i%2)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			_ = surface.Config().Width
+		}
+	}()
+	close(start)
+	wg.Wait()
+}
+
+var errTestSurfaceConfigure = errors.New("test surface configure failed")
+
+type failingConfigureSurface struct {
+	noop.Surface
+	fail bool
+}
+
+func (s *failingConfigureSurface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) error {
+	if s.fail {
+		return errTestSurfaceConfigure
+	}
+	return s.Surface.Configure(nil, config)
+}
+
+func TestSurfaceFailedConfigureDoesNotCommit(t *testing.T) {
+	_, device, _ := newTestSurface(t)
+	raw := &failingConfigureSurface{}
+	surface := NewSurface(raw, "failed-configure-test")
+	initial := testSurfaceConfig()
+	if err := surface.Configure(device, initial); err != nil {
+		t.Fatalf("initial Configure: %v", err)
+	}
+
+	raw.fail = true
+	replacement := *initial
+	replacement.Width = 1024
+	replacement.Height = 768
+	if err := surface.Configure(device, &replacement); !errors.Is(err, errTestSurfaceConfigure) {
+		t.Fatalf("failed Configure = %v, want %v", err, errTestSurfaceConfigure)
+	}
+
+	got := surface.Config()
+	if got == nil {
+		t.Fatal("Config() returned nil after failed reconfigure")
+	}
+	if got.Width != initial.Width || got.Height != initial.Height {
+		t.Fatalf("failed reconfigure committed config %+v, want %dx%d", *got, initial.Width, initial.Height)
+	}
+	if surface.State() != SurfaceStateConfigured {
+		t.Fatalf("state after failed reconfigure = %v, want configured", surface.State())
+	}
+
+	initialSurface := NewSurface(&failingConfigureSurface{fail: true}, "failed-initial-configure-test")
+	if err := initialSurface.Configure(device, initial); !errors.Is(err, errTestSurfaceConfigure) {
+		t.Fatalf("failed initial Configure = %v, want %v", err, errTestSurfaceConfigure)
+	}
+	if initialSurface.State() != SurfaceStateUnconfigured || initialSurface.Config() != nil {
+		t.Fatalf("failed initial Configure committed state=%v config=%v", initialSurface.State(), initialSurface.Config())
 	}
 }
 
