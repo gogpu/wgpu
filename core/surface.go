@@ -54,7 +54,8 @@ func (s *Surface) SetPrepareFrame(fn PrepareFrameFunc) {
 // configured, it will be reconfigured with the new settings.
 //
 // After Configure, the surface enters the Configured state and is ready
-// to acquire textures.
+// to acquire textures. The configuration is copied; the surface does not
+// retain the caller's pointer.
 func (s *Surface) Configure(device *Device, config *hal.SurfaceConfiguration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -74,13 +75,17 @@ func (s *Surface) Configure(device *Device, config *hal.SurfaceConfiguration) er
 		return ErrDeviceDestroyed
 	}
 
-	if err := s.raw.Configure(halDevice, config); err != nil {
+	// Keep the caller's configuration private to the surface. Backends may
+	// inspect the configuration after Configure returns, so pass the copy to
+	// the HAL as well as storing it only after a successful configure.
+	configCopy := *config
+	if err := s.raw.Configure(halDevice, &configCopy); err != nil {
 		return err
 	}
 
 	s.invalidateAcquisitionLocked()
 	s.device = device
-	s.config = config
+	s.config = &configCopy
 	s.state = SurfaceStateConfigured
 	return nil
 }
@@ -337,12 +342,17 @@ func (s *Surface) State() SurfaceState {
 	return s.state
 }
 
-// Config returns the current surface configuration.
-// Returns nil if the surface is unconfigured.
+// Config returns a copy of the current surface configuration.
+// Returns nil if the surface is unconfigured. Mutating the returned value does
+// not change the surface or reconfigure its HAL surface.
 func (s *Surface) Config() *hal.SurfaceConfiguration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.config
+	if s.config == nil {
+		return nil
+	}
+	configCopy := *s.config
+	return &configCopy
 }
 
 // applyPrepareFrame calls the PrepareFrame hook and reconfigures if dimensions changed.
