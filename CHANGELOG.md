@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-08-11
+
+### Fixed
+
+- **core:** Own surface configuration state — defensive copy prevents aliasing (#311, @besmpl)
+  - `Surface.Configure` copies input config, `Config()` returns independent copy
+  - Failed configure/reconfigure preserves previous state
+  - Race-safe under concurrent access
+
+### Changed
+
+- **deps:** gputypes v0.5.1 → v0.5.2 (`Features.Contains` all-bits fix)
+
 ## [0.31.0] - 2026-08-10
 
 ### Added
