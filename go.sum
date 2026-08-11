@@ -4,8 +4,8 @@ github.com/go-webgpu/webgpu v0.5.5 h1:pIrXzRg0LRlNjNmR+ZNo/ERN88YaObzbCY5oYhir5S
 github.com/go-webgpu/webgpu v0.5.5/go.mod h1:vgIuNTa1UlZ4njCGY6Pmp/0c5T5o2Ml2fQ0znLc7B98=
 github.com/gogpu/gpucontext v0.26.0 h1:5s1mAa9RULjzBDw0Ej09EVqTh3q3+44BKJ/zCljVWAI=
 github.com/gogpu/gpucontext v0.26.0/go.mod h1:OrT137boh5yPhqBEhF4UQKIOu1Jq74SLQzYa/m6JbNo=
-github.com/gogpu/gputypes v0.5.1 h1:X38OPcP6umQqqubzzJYL6Nm1tXHSNQj6TRSAoxdAJmg=
-github.com/gogpu/gputypes v0.5.1/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
+github.com/gogpu/gputypes v0.5.2 h1:3sbKI0+XW36Ekd3d4QhkbpdY7gbgMVgp8Q4+ZNdGhtE=
+github.com/gogpu/gputypes v0.5.2/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
 github.com/gogpu/naga v0.18.0 h1:2y83HUcAnlwEZMuHOiYTMdNYM9J8rev40gkI4zJ96Uk=
 github.com/gogpu/naga v0.18.0/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
