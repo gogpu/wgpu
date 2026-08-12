@@ -110,20 +110,6 @@ func (e *CommandEncoder) trackBindGroup(bg *BindGroup) {
 	e.usedBindGroups[bg] = struct{}{}
 }
 
-// recordBufferUsage records a buffer usage in the core command encoder's
-// buffer scope for submit-time barrier generation. Errors (usage conflicts)
-// are recorded as deferred errors on the encoder.
-func (e *CommandEncoder) recordBufferUsage(buf *core.Buffer, usage track.BufferUses) bool {
-	if e.core == nil || buf == nil {
-		return true
-	}
-	if err := e.core.RecordBufferUsage(buf, usage); err != nil {
-		e.setError(fmt.Errorf("wgpu: buffer usage conflict: %w", err))
-		return false
-	}
-	return true
-}
-
 // copyTextureUsage describes one texture endpoint of a copy command.
 type copyTextureUsage struct {
 	texture *Texture

@@ -14,7 +14,7 @@ func TestCopyUsageHelpersSkipUntrackedResources(t *testing.T) {
 	t.Parallel()
 
 	encoder := &CommandEncoder{}
-	if !encoder.recordBufferUsage(nil, track.BufferUsesCopySrc) {
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{usage: track.BufferUsesCopySrc}}) {
 		t.Fatal("nil buffer should be ignored")
 	}
 	if !encoder.recordCopyUsages(nil, nil, track.BufferUsesNone) {
@@ -59,7 +59,7 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
 	defer encoder.DiscardEncoding()
-	if !encoder.recordBufferUsage(nil, track.BufferUsesCopySrc) {
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{usage: track.BufferUsesCopySrc}}) {
 		t.Fatal("nil buffer with live core encoder should be ignored")
 	}
 
@@ -133,8 +133,8 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 		t.Fatalf("compatible buffer preflight = (usage %v, tracked %v, err %v), want Vertex|Uniform", usage, tracked, err)
 	}
 	encoder.core.Mutable().BufferScope().ReplaceUsage(bufferIndex, track.BufferUsesStorageWrite)
-	if encoder.recordBufferUsage(buffer.core, track.BufferUsesCopySrc) {
-		t.Fatal("recordBufferUsage accepted incompatible usage")
+	if encoder.recordCopyBufferUsages([]copyBufferUsage{{buffer: buffer.core, usage: track.BufferUsesCopySrc}}) {
+		t.Fatal("recordCopyBufferUsages accepted incompatible usage")
 	}
 }
 

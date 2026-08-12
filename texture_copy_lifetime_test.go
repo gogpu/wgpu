@@ -35,7 +35,7 @@ func TestTextureCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
-	if !enc.recordBufferUsage(buffer.core, track.BufferUsesCopySrc) {
+	if !enc.recordCopyBufferUsages([]copyBufferUsage{{buffer: buffer.core, usage: track.BufferUsesCopySrc}}) {
 		t.Fatal("failed to establish conflicting CopySrc usage")
 	}
 	enc.CopyTextureToBuffer(texture, buffer, nil)
