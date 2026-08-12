@@ -384,6 +384,84 @@ func TestCopyUsageConflictsAreAtomic(t *testing.T) {
 	}
 }
 
+func TestCopyBufferToBufferUsageRecordingIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	_, _, device := newTestDeviceWithTracker(t)
+	defer device.Release()
+	src := createCopyScopeBuffer(t, device, "atomic-buffer-src")
+	defer src.Release()
+	dst := createCopyScopeBuffer(t, device, "atomic-buffer-dst")
+	defer dst.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	mustSetBufferScopeUsage(t, enc, dst, track.BufferUsesCopySrc)
+	enc.CopyBufferToBuffer(src, 0, dst, 0, 64)
+
+	scope := enc.core.Mutable().BufferScope()
+	if index := src.core.TrackingData().Index(); scope.IsUsed(index) {
+		t.Fatalf("failed copy recorded source usage %v", scope.GetUsage(index))
+	}
+	dstIndex := dst.core.TrackingData().Index()
+	if got := scope.GetUsage(dstIndex); got != track.BufferUsesCopySrc {
+		t.Errorf("destination usage = %v, want preserved %v", got, track.BufferUsesCopySrc)
+	}
+	if got := len(enc.trackedRefs); got != 0 {
+		t.Errorf("failed copy retained %d refs, want 0", got)
+	}
+	if len(enc.usedBuffers) != 0 {
+		t.Errorf("failed copy changed submit validation set: buffers=%d", len(enc.usedBuffers))
+	}
+	if _, err := enc.Finish(); err == nil {
+		t.Fatal("Finish succeeded after copy usage conflict")
+	}
+}
+
+func TestCopyBufferToBufferRecordsBothUsages(t *testing.T) {
+	t.Parallel()
+
+	_, _, device := newTestDeviceWithTracker(t)
+	defer device.Release()
+	src := createCopyScopeBuffer(t, device, "buffer-copy-src")
+	defer src.Release()
+	dst := createCopyScopeBuffer(t, device, "buffer-copy-dst")
+	defer dst.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	enc.CopyBufferToBuffer(src, 0, dst, 0, 64)
+	cb, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	defer cb.Release()
+
+	if got := cb.core.BufferScope().GetUsage(src.core.TrackingData().Index()); got != track.BufferUsesCopySrc {
+		t.Errorf("source usage = %v, want %v", got, track.BufferUsesCopySrc)
+	}
+	if got := cb.core.BufferScope().GetUsage(dst.core.TrackingData().Index()); got != track.BufferUsesCopyDst {
+		t.Errorf("destination usage = %v, want %v", got, track.BufferUsesCopyDst)
+	}
+}
+
+func createCopyScopeBuffer(t *testing.T, device *Device, label string) *Buffer {
+	t.Helper()
+	buffer, err := device.CreateBuffer(&BufferDescriptor{
+		Label: label,
+		Size:  256,
+		Usage: BufferUsageCopySrc | BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	return buffer
+}
+
 func mustSetTextureScopeUsage(t *testing.T, enc *CommandEncoder, texture *Texture, usage track.TextureUses) {
 	t.Helper()
 	if err := enc.core.Mutable().TextureScope().SetUsage(texture.coreTexture.TrackingData().Index(), usage); err != nil {

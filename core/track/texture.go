@@ -311,9 +311,9 @@ func (s *TextureUsageScope) SetUsage(index TrackerIndex, usage TextureUses) erro
 	return nil
 }
 
-// ReplaceUsage replaces the usage recorded for a texture. It is used after an
-// explicit texture transition, where the scope must describe the state after
-// the transition rather than merge incompatible before/after usages.
+// ReplaceUsage unconditionally replaces the usage recorded for a texture. It
+// is intended only after preflight validation, or after an explicit transition
+// where the scope must describe the state after the encoded barrier.
 func (s *TextureUsageScope) ReplaceUsage(index TrackerIndex, usage TextureUses) {
 	s.ensureSize(int(index) + 1)
 	s.states[index] = TextureState{usage: usage}

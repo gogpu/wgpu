@@ -136,6 +136,74 @@ type preparedCopyTextureUsage struct {
 	usage   track.TextureUses
 }
 
+type copyBufferUsage struct {
+	buffer *core.Buffer
+	usage  track.BufferUses
+}
+
+type preparedCopyBufferUsage struct {
+	index track.TrackerIndex
+	usage track.BufferUses
+}
+
+// recordCopyBufferUsages preflights every buffer endpoint before committing
+// any usage. This keeps failed multi-buffer copies atomic, matching the mixed
+// texture/buffer copy paths below.
+func (e *CommandEncoder) recordCopyBufferUsages(requests []copyBufferUsage) bool {
+	if e.core == nil {
+		return true
+	}
+
+	prepared := make([]preparedCopyBufferUsage, 0, len(requests))
+	positions := make(map[track.TrackerIndex]int, len(requests))
+	for _, request := range requests {
+		if request.buffer == nil {
+			continue
+		}
+		td := request.buffer.TrackingData()
+		if td == nil || !td.Index().IsValid() {
+			continue
+		}
+
+		index := td.Index()
+		if position, exists := positions[index]; exists {
+			existing := prepared[position].usage
+			if !existing.IsCompatible(request.usage) {
+				e.setError(fmt.Errorf("wgpu: buffer usage conflict: %w", &track.UsageConflictError{
+					Index: index, Existing: existing, New: request.usage,
+				}))
+				return false
+			}
+			prepared[position].usage = existing | request.usage
+			continue
+		}
+
+		positions[index] = len(prepared)
+		prepared = append(prepared, preparedCopyBufferUsage{index: index, usage: request.usage})
+	}
+
+	scope := e.core.Mutable().BufferScope()
+	for i := range prepared {
+		request := &prepared[i]
+		if !scope.IsUsed(request.index) {
+			continue
+		}
+		existing := scope.GetUsage(request.index)
+		if !existing.IsCompatible(request.usage) {
+			e.setError(fmt.Errorf("wgpu: buffer usage conflict: %w", &track.UsageConflictError{
+				Index: request.index, Existing: existing, New: request.usage,
+			}))
+			return false
+		}
+		request.usage |= existing
+	}
+
+	for _, request := range prepared {
+		scope.ReplaceUsage(request.index, request.usage)
+	}
+	return true
+}
+
 // recordCopyUsages preflights every resource scope update before committing any
 // of them. Copy commands span multiple independently tracked resources, so a
 // conflict on one endpoint must not leave another endpoint recorded.
@@ -306,14 +374,6 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: destination buffer is nil"))
 		return
 	}
-	e.trackRef(src.core.Ref)
-	e.trackRef(dst.core.Ref)
-	e.trackBuffer(src)
-	e.trackBuffer(dst)
-	// Record buffer usage in the command buffer's buffer scope for
-	// submit-time barrier generation.
-	e.recordBufferUsage(src.core, track.BufferUsesCopySrc)
-	e.recordBufferUsage(dst.core, track.BufferUsesCopyDst)
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -321,8 +381,19 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	halSrc := src.halBuffer()
 	halDst := dst.halBuffer()
 	if halSrc == nil || halDst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source or destination buffer is released: %w", ErrReleased))
 		return
 	}
+	if !e.recordCopyBufferUsages([]copyBufferUsage{
+		{buffer: src.core, usage: track.BufferUsesCopySrc},
+		{buffer: dst.core, usage: track.BufferUsesCopyDst},
+	}) {
+		return
+	}
+	e.trackRef(src.core.Ref)
+	e.trackRef(dst.core.Ref)
+	e.trackBuffer(src)
+	e.trackBuffer(dst)
 	raw.CopyBufferToBuffer(halSrc, halDst, []hal.BufferCopy{
 		{SrcOffset: srcOffset, DstOffset: dstOffset, Size: size},
 	})

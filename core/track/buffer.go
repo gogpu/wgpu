@@ -250,8 +250,9 @@ func (s *BufferUsageScope) SetUsage(index TrackerIndex, usage BufferUses) error 
 	return nil
 }
 
-// ReplaceUsage replaces the usage recorded for a buffer after all resources in
-// a multi-resource command have been validated.
+// ReplaceUsage unconditionally replaces the usage recorded for a buffer. It is
+// intended only after every resource in a multi-resource command has passed
+// preflight validation, so committing the command cannot partially fail.
 func (s *BufferUsageScope) ReplaceUsage(index TrackerIndex, usage BufferUses) {
 	s.ensureSize(int(index) + 1)
 	s.states[index] = BufferState{usage: usage}

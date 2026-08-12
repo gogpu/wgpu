@@ -1023,6 +1023,8 @@ func (e *CoreCommandEncoder) RecordBufferUsage(buffer *Buffer, usage track.Buffe
 //
 // Textures without valid tracking data are silently skipped. Returns an error
 // if the texture already has an incompatible usage in this command buffer.
+//
+// Reference: wgpu-core command/transfer.rs copy texture usage validation
 func (e *CoreCommandEncoder) RecordTextureUsage(texture *Texture, usage track.TextureUses) error {
 	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
 		return nil
@@ -1037,6 +1039,8 @@ func (e *CoreCommandEncoder) RecordTextureUsage(texture *Texture, usage track.Te
 // ReplaceTextureUsage records the state after an explicit texture transition.
 // Unlike RecordTextureUsage, it replaces an incompatible earlier state because
 // the caller has already encoded the barrier between those states.
+//
+// Reference: wgpu-core command/transfer.rs explicit texture transitions
 func (e *CoreCommandEncoder) ReplaceTextureUsage(texture *Texture, usage track.TextureUses) {
 	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
 		return
