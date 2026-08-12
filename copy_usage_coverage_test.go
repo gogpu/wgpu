@@ -62,6 +62,9 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{usage: track.BufferUsesCopySrc}}) {
 		t.Fatal("nil buffer with live core encoder should be ignored")
 	}
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{buffer: &core.Buffer{}, usage: track.BufferUsesCopySrc}}) {
+		t.Fatal("buffer without tracking data should be ignored")
+	}
 
 	textureIndex := texture.coreTexture.TrackingData().Index()
 	if err := encoder.core.Mutable().TextureScope().SetUsage(textureIndex, track.TextureUsesColorTarget); err != nil {
@@ -115,6 +118,9 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 	}
 	invalidBuffer := core.NewBuffer(nil, nil, gputypes.BufferUsageCopySrc, 4, "invalid-tracking")
 	defer invalidBuffer.Destroy()
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{buffer: invalidBuffer, usage: track.BufferUsesCopySrc}}) {
+		t.Fatal("buffer with invalid tracker index should be ignored")
+	}
 	if _, _, tracked, err := encoder.preflightCopyBufferUsage(invalidBuffer, track.BufferUsesCopySrc); err != nil || tracked {
 		t.Fatalf("buffer with invalid tracker index = (tracked %v, err %v), want ignored", tracked, err)
 	}
@@ -128,13 +134,57 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 	}
 	defer buffer.Release()
 	bufferIndex := buffer.core.TrackingData().Index()
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{
+		{buffer: buffer.core, usage: track.BufferUsesCopySrc},
+		{buffer: buffer.core, usage: track.BufferUsesUniform},
+	}) {
+		t.Fatal("duplicate buffer endpoint rejected compatible usages")
+	}
+	if got := encoder.core.Mutable().BufferScope().GetUsage(bufferIndex); got != track.BufferUsesCopySrc|track.BufferUsesUniform {
+		t.Fatalf("combined duplicate buffer usage = %v, want CopySrc|Uniform", got)
+	}
+	encoder.core.Mutable().BufferScope().ReplaceUsage(bufferIndex, track.BufferUsesNone)
+
+	if encoder.recordCopyBufferUsages([]copyBufferUsage{
+		{buffer: buffer.core, usage: track.BufferUsesCopySrc},
+		{buffer: buffer.core, usage: track.BufferUsesCopyDst},
+	}) {
+		t.Fatal("duplicate buffer endpoint accepted incompatible usages")
+	}
+
 	encoder.core.Mutable().BufferScope().ReplaceUsage(bufferIndex, track.BufferUsesVertex)
+	if !encoder.recordCopyBufferUsages([]copyBufferUsage{{buffer: buffer.core, usage: track.BufferUsesUniform}}) {
+		t.Fatal("compatible existing buffer usage was rejected")
+	}
+	if got := encoder.core.Mutable().BufferScope().GetUsage(bufferIndex); got != track.BufferUsesVertex|track.BufferUsesUniform {
+		t.Fatalf("merged compatible buffer usage = %v, want Vertex|Uniform", got)
+	}
 	if _, usage, tracked, err := encoder.preflightCopyBufferUsage(buffer.core, track.BufferUsesUniform); err != nil || !tracked || usage != track.BufferUsesVertex|track.BufferUsesUniform {
 		t.Fatalf("compatible buffer preflight = (usage %v, tracked %v, err %v), want Vertex|Uniform", usage, tracked, err)
 	}
 	encoder.core.Mutable().BufferScope().ReplaceUsage(bufferIndex, track.BufferUsesStorageWrite)
 	if encoder.recordCopyBufferUsages([]copyBufferUsage{{buffer: buffer.core, usage: track.BufferUsesCopySrc}}) {
 		t.Fatal("recordCopyBufferUsages accepted incompatible usage")
+	}
+}
+
+func TestCopyBufferToBufferRejectsReleasedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	_, _, device := newTestDeviceWithTracker(t)
+	defer device.Release()
+	src := createCopyScopeBuffer(t, device, "released-copy-src")
+	dst := createCopyScopeBuffer(t, device, "released-copy-dst")
+	defer dst.Release()
+	src.Release()
+
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	encoder.CopyBufferToBuffer(src, 0, dst, 0, 4)
+	if _, err := encoder.Finish(); err == nil {
+		t.Fatal("Finish succeeded after copying from a released buffer")
 	}
 }
 
