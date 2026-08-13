@@ -374,7 +374,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 // It uses the slice-aware replaceRegion form so 2D arrays and true 3D textures
 // preserve their distinct Metal layouts. The write is synchronous; no GPU command
 // buffer or staging buffer is required. Valid only when tex.isShared is true.
-func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, copyLayout metalTextureDataCopyLayout, size *hal.Extent3D, plan metalCopyPlan) error {
+func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, copyLayout metalTextureDataCopyLayout, size *hal.Extent3D, plan metalCopyPlan) error { //nolint:unparam // error return for API parity with writeTextureStaged
 	strides := metalReplaceRegionStrides(tex.dimension, uint64(copyLayout.bytesPerRow), copyLayout.bytesPerImage)
 	for operation := uint32(0); operation < plan.operationCount; operation++ {
 		offset, _ := plan.bufferOffset(layout.Offset, copyLayout.bytesPerImage, operation)
