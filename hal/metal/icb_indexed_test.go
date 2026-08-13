@@ -13,7 +13,7 @@ import (
 )
 
 func TestIndexedICBArenaCapacityIsGeometricAndBounded(t *testing.T) {
-	const max = uint32(52428)
+	const maxCount = uint32(52428)
 	for _, test := range []struct {
 		count uint32
 		want  uint32
@@ -21,10 +21,10 @@ func TestIndexedICBArenaCapacityIsGeometricAndBounded(t *testing.T) {
 		{1024, 1024},
 		{1025, 2048},
 		{10000, 16384},
-		{max, max},
-		{max + 1, 0},
+		{maxCount, maxCount},
+		{maxCount + 1, 0},
 	} {
-		if got := indexedICBArenaCapacity(test.count, max); got != test.want {
+		if got := indexedICBArenaCapacity(test.count, maxCount); got != test.want {
 			t.Fatalf("capacity(%d) = %d, want %d", test.count, got, test.want)
 		}
 	}

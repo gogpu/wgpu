@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"fmt"
 	"syscall/js"
 	"time"
 
@@ -39,6 +40,9 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 	if d.released {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: buffer descriptor is nil")
+	}
 	jsDesc := browser.BuildBufferDescriptor(
 		desc.Label,
 		desc.Size,
@@ -70,6 +74,9 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if d.released {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
+	}
 	jsDesc := browser.BuildTextureDescriptor(
 		desc.Label,
 		desc.Size.Width, desc.Size.Height, desc.Size.DepthOrArrayLayers,
@@ -93,6 +100,9 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if texture == nil || texture.browser == nil {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		desc = &TextureViewDescriptor{}
+	}
 	jsDesc := browser.BuildTextureViewDescriptor(
 		desc.Label,
 		desc.Format, desc.Dimension, desc.Aspect,
@@ -111,6 +121,9 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 	if d.released {
 		return nil, ErrReleased
+	}
+	if desc == nil {
+		desc = &SamplerDescriptor{}
 	}
 	jsDesc := browser.BuildSamplerDescriptor(
 		desc.Label,
@@ -133,6 +146,9 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	if d.released {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: shader module descriptor is nil")
+	}
 	jsDesc := browser.BuildShaderModuleDescriptor(desc.Label, desc.WGSL)
 	bm := d.browser.CreateShaderModuleFromDesc(jsDesc)
 	return &ShaderModule{
@@ -145,6 +161,9 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGroupLayout, error) {
 	if d.released {
 		return nil, ErrReleased
+	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: bind group layout descriptor is nil")
 	}
 	entries := convertBindGroupLayoutEntries(desc.Entries)
 	jsDesc := browser.BuildBindGroupLayoutDescriptor(desc.Label, entries)
@@ -159,6 +178,9 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*PipelineLayout, error) {
 	if d.released {
 		return nil, ErrReleased
+	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: pipeline layout descriptor is nil")
 	}
 	refs := make([]js.Value, len(desc.BindGroupLayouts))
 	for i, bgl := range desc.BindGroupLayouts {
@@ -181,6 +203,9 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	if d.released {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
+	}
 	var layoutRef js.Value
 	if desc.Layout != nil && desc.Layout.browser != nil {
 		layoutRef = desc.Layout.browser.Ref()
@@ -201,6 +226,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	if d.released {
 		return nil, ErrReleased
 	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
+	}
 	jsDesc := convertRenderPipelineDescriptor(desc)
 	bp := d.browser.CreateRenderPipelineFromDesc(jsDesc)
 	return &RenderPipeline{
@@ -213,6 +241,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
 	if d.released {
 		return nil, ErrReleased
+	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
 	}
 	var layoutRef js.Value
 	if desc.Layout != nil && desc.Layout.browser != nil {

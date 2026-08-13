@@ -766,7 +766,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 
 	// Get and set fragment function if present
-	if fragmentModule != nil && desc.Fragment != nil { //nolint:nestif // sequential Metal pipeline setup
+	if fragmentModule != nil && desc.Fragment != nil {
 		// Resolve translated entrypoint name
 		entrypointName := desc.Fragment.EntryPoint
 		if translated, ok := fragmentLib.entrypointNames[entrypointName]; ok {

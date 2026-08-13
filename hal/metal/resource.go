@@ -57,7 +57,7 @@ type Texture struct {
 	isExternal bool
 	// isShared is true when this texture was created with MTLStorageModeShared
 	// (Apple Silicon UMA only). Shared textures support direct CPU writes via
-	// replaceRegion: and honour setPurgeableState(empty) for immediate OS reclaim.
+	// replaceRegion: and honor setPurgeableState(empty) for immediate OS reclaim.
 	isShared bool
 }
 

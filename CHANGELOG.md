@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.3] - 2026-08-13
+
+### Fixed
+
+- **browser:** Nil descriptor guards for all `Device.Create*` methods (#315, @darkliquid)
+  - `CreateTextureView` panicked on nil descriptor — now defaults to empty view (WebGPU spec)
+  - `CreateSampler` panicked on nil descriptor — now defaults to empty sampler (WebGPU spec)
+  - `CreateBuffer`, `CreateTexture`, `CreateShaderModule`, `CreateBindGroupLayout`, `CreatePipelineLayout`, `CreateBindGroup`, `CreateRenderPipeline`, `CreateComputePipeline` — return error on nil (consistent with native/rust backends)
+  - Unblocks ironwail-go WASM HUD rendering in Chrome/Edge
+
 ## [0.31.2] - 2026-08-11
 
 ### Changed

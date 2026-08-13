@@ -555,10 +555,6 @@ func newMetalTextureCopyTestDevice(t *testing.T) (*Device, *Queue) {
 	return device, queue
 }
 
-func createMetalTextureCopyTestArray(t *testing.T, device *Device, width, height, layers uint32) *Texture {
-	return createMetalTextureCopyTestTexture(t, device, gputypes.TextureDimension2D, width, height, layers)
-}
-
 func createMetalTextureCopyTestTexture(t *testing.T, device *Device, dimension gputypes.TextureDimension, width, height, depthOrLayers uint32) *Texture {
 	t.Helper()
 	raw, err := device.CreateTexture(&hal.TextureDescriptor{

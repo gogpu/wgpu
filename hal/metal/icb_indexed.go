@@ -92,18 +92,18 @@ func indexedICBCountEligible(count uint32) bool {
 	return count >= indexedICBMinCommands && count <= indexedICBMaxCommands
 }
 
-func indexedICBArenaCapacity(count, max uint32) uint32 {
-	if count == 0 || max == 0 || count > max {
+func indexedICBArenaCapacity(count, maxCount uint32) uint32 {
+	if count == 0 || maxCount == 0 || count > maxCount {
 		return 0
 	}
 	capacity := indexedICBMinCommands
-	if capacity > max {
-		capacity = max
+	if capacity > maxCount {
+		capacity = maxCount
 	}
 	for capacity < count {
 		next := capacity * 2
-		if next < capacity || next > max {
-			capacity = max
+		if next < capacity || next > maxCount {
+			capacity = maxCount
 			break
 		}
 		capacity = next
@@ -331,7 +331,7 @@ func (e *RenderPassEncoder) prepareIndexedICB(arguments *Buffer, offset uint64, 
 	_ = MsgSend(compute, Sel("setBuffer:offset:atIndex:"), uintptr(arena.argumentBuffer), 0, 1)
 	_ = MsgSend(compute, Sel("setBuffer:offset:atIndex:"), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), 2)
 	params := indexedICBParams{count: count}
-	_ = MsgSend(compute, Sel("setBytes:length:atIndex:"), uintptr(unsafe.Pointer(&params)), uintptr(unsafe.Sizeof(params)), 3)
+	_ = MsgSend(compute, Sel("setBytes:length:atIndex:"), uintptr(unsafe.Pointer(&params)), unsafe.Sizeof(params), 3)
 	_ = MsgSend(compute, Sel("useResource:usage:"), uintptr(arguments.raw), 1)
 	_ = MsgSend(compute, Sel("useResource:usage:"), uintptr(arena.argumentBuffer), 1)
 	_ = MsgSend(compute, Sel("useResource:usage:"), uintptr(e.indexBuffer.raw), 1)

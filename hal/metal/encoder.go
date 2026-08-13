@@ -374,7 +374,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			msgSendClearColor(attachment, Sel("setClearColor:"), clearColor)
 		}
 		storeAction := storeOpToMTL(ca.StoreOp)
-		if ca.ResolveTarget != nil { //nolint:nestif // sequential Metal descriptor setup
+		if ca.ResolveTarget != nil {
 			if rtv, ok := ca.ResolveTarget.(*TextureView); ok && rtv != nil {
 				_ = MsgSend(attachment, Sel("setResolveTexture:"), uintptr(rtv.raw))
 				// Metal requires MultisampleResolve store action when a resolve
@@ -389,7 +389,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		}
 		_ = MsgSend(attachment, Sel("setStoreAction:"), uintptr(storeAction))
 	}
-	if desc.DepthStencilAttachment != nil { //nolint:nestif // sequential Metal descriptor setup
+	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
 
 		// Depth attachment
@@ -685,7 +685,6 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 }
 
 func (e *RenderPassEncoder) applyBindGroup(index uint32, bg *BindGroup, offsets []uint32) {
-
 	// Metal uses per-type sequential indices: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
 	// naga MSL generates these indices sequentially across ALL bind groups in the
 	// pipeline layout. Group 0 starts at 0; group 1 starts where group 0 ended, etc.
