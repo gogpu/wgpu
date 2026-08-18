@@ -77,6 +77,19 @@ func (m *MappedRange) Bytes() []byte {
 	return unsafe.Slice((*byte)(m.data), m.size) //nolint:gosec // range validated at MappedRange creation
 }
 
+// BytesMut returns a mutable byte slice for writing into the mapped region.
+// On native backend, this returns the same underlying data as Bytes() since
+// the mapped range is already writable through the direct mapping.
+func (m *MappedRange) BytesMut() []byte {
+	return m.Bytes()
+}
+
+// Flush writes the cached data back. On native backend, data is written through
+// the direct pointer, so this is a no-op.
+func (m *MappedRange) Flush() error {
+	return nil
+}
+
 // Len returns the size of the mapped range in bytes.
 func (m *MappedRange) Len() int {
 	if m == nil {
