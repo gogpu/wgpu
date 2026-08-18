@@ -233,6 +233,24 @@ func TestBufferUsageScope_SetUsage(t *testing.T) {
 	}
 }
 
+func TestBufferUsageScope_ReplaceUsage(t *testing.T) {
+	t.Parallel()
+
+	scope := NewBufferUsageScope()
+	idx := TrackerIndex(7)
+	if err := scope.SetUsage(idx, BufferUsesCopySrc); err != nil {
+		t.Fatalf("SetUsage: %v", err)
+	}
+
+	scope.ReplaceUsage(idx, BufferUsesCopyDst)
+	if got := scope.GetUsage(idx); got != BufferUsesCopyDst {
+		t.Fatalf("usage = %v, want CopyDst", got)
+	}
+	if !scope.IsUsed(idx) {
+		t.Fatal("replaced buffer is not marked used")
+	}
+}
+
 func TestBufferUsageScope_Clear(t *testing.T) {
 	scope := NewBufferUsageScope()
 

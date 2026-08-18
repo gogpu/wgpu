@@ -376,6 +376,24 @@ func TestTextureUsageScope_Clear(t *testing.T) {
 	}
 }
 
+func TestTextureUsageScope_ReplaceUsage(t *testing.T) {
+	t.Parallel()
+
+	scope := NewTextureUsageScope()
+	idx := TrackerIndex(7)
+	if err := scope.SetUsage(idx, TextureUsesColorTarget); err != nil {
+		t.Fatalf("SetUsage: %v", err)
+	}
+
+	scope.ReplaceUsage(idx, TextureUsesCopySrc)
+	if got := scope.GetUsage(idx); got != TextureUsesCopySrc {
+		t.Fatalf("usage = %v, want CopySrc", got)
+	}
+	if !scope.IsUsed(idx) {
+		t.Fatal("replaced texture is not marked used")
+	}
+}
+
 func TestTextureTracker_Merge_Transition(t *testing.T) {
 	t.Parallel()
 
