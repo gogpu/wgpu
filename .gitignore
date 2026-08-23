@@ -50,3 +50,6 @@ __debug_bin*
 docs/dev/
 
 tmp/
+
+# Investigation backups
+.backup-investigation/
