@@ -65,7 +65,7 @@ wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
 
 ## Current Version
 
-v0.30.22 | Go 1.25+ | Dependencies: naga v0.17.15, gpucontext v0.21.1, gputypes v0.5.1, goffi v0.6.1, webgpu v0.5.3
+v0.31.6 | Go 1.25+ | Dependencies: naga v0.18.0, gpucontext v0.28.0, gputypes v0.5.2, goffi v0.6.3, webgpu v0.5.5
 
 ## Build & Test
 

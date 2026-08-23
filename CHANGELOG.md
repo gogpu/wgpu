@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.6] - 2026-08-23
+
+### Added
+
+- **core:** Atomic copy usage tracking for all 4 copy commands (#312, @besmpl)
+  - `CopyBufferToBuffer`, `CopyBufferToTexture`, `CopyTextureToBuffer`, `CopyTextureToTexture` — preflight validates ALL endpoints before committing any scope mutation
+  - `ReplaceUsage` on `BufferUsageScope` / `TextureUsageScope` for post-preflight unconditional commit
+  - `RecordTextureUsage` / `ReplaceTextureUsage` on `CoreCommandEncoder`
+  - `explicitTextureTransitions` map for barrier-aware scope resolution
+  - Released buffer check in `CopyBufferToBuffer` (was silently returning)
+  - 1,100+ LOC tests: atomicity invariants, refcount lifecycle, guard branches
+
+### Fixed
+
+- **docs:** Update stale dependency versions in AGENTS.md, README.md, ARCHITECTURE.md
+
 ## [0.31.5] - 2026-08-18
 
 ### Added
