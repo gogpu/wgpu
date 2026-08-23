@@ -175,19 +175,36 @@ linters:
         linters:
           - errcheck
 
+      # Rust FFI backend (//go:build rust): invisible to CI lint (GOOS=linux).
+      # nolint directives appear "unused" because suppressed linters never run.
+      - path: .*_rust\.go
+        linters:
+          - nolintlint
+
+      # Browser-only mapped range (//go:build js && wasm): same CI blind spot.
+      - path: mapped_range_browser\.go
+        linters:
+          - nolintlint
+
       # Internal utilities
       - path: internal/.*\.go
         linters:
           - gocyclo
           - cyclop
 
-      # Browser backend enum-to-string conversions: repeated string literals
-      # in switch/default are intentional for readability (each function is
-      # a self-contained WebGPU spec mapping).
-      - path: internal/browser/convert_.*\.go
+      # Browser backend (//go:build js && wasm): invisible to CI lint runner
+      # (ubuntu, GOOS=linux). nolintlint false positives (golangci-lint#3833).
+      # revive var-naming: ref_ field intentionally underscore-suffixed to avoid
+      # collision with Ref() method (Go disallows same-name field + method).
+      # gocritic/nestif: browser JS interop has unavoidable nesting (DOM-style
+      # null checks on js.Value chains).
+      - path: internal/browser/.*\.go
         linters:
           - goconst
           - nolintlint
+          - revive
+          - gocritic
+          - nestif
 
       # DX12 COM bindings - Windows API naming conventions preserved
       # D3D12_* types match the Windows SDK headers exactly for documentation cross-reference
