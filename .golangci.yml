@@ -184,9 +184,10 @@ linters:
       # Browser backend enum-to-string conversions: repeated string literals
       # in switch/default are intentional for readability (each function is
       # a self-contained WebGPU spec mapping).
-      - path: internal/browser/convert_enums\.go
+      - path: internal/browser/convert_.*\.go
         linters:
           - goconst
+          - nolintlint
 
       # DX12 COM bindings - Windows API naming conventions preserved
       # D3D12_* types match the Windows SDK headers exactly for documentation cross-reference
