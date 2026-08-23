@@ -1017,6 +1017,41 @@ func (e *CoreCommandEncoder) RecordBufferUsage(buffer *Buffer, usage track.Buffe
 	return e.mutable.bufferScope.SetUsage(td.Index(), usage)
 }
 
+// RecordTextureUsage records a texture usage in the command buffer's texture
+// scope. This is called by commands that use a texture without going through a
+// texture view, such as copy commands.
+//
+// Textures without valid tracking data are silently skipped. Returns an error
+// if the texture already has an incompatible usage in this command buffer.
+//
+// Reference: wgpu-core command/transfer.rs copy texture usage validation
+func (e *CoreCommandEncoder) RecordTextureUsage(texture *Texture, usage track.TextureUses) error {
+	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
+		return nil
+	}
+	td := texture.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return nil
+	}
+	return e.mutable.textureScope.SetUsage(td.Index(), usage)
+}
+
+// ReplaceTextureUsage records the state after an explicit texture transition.
+// Unlike RecordTextureUsage, it replaces an incompatible earlier state because
+// the caller has already encoded the barrier between those states.
+//
+// Reference: wgpu-core command/transfer.rs explicit texture transitions
+func (e *CoreCommandEncoder) ReplaceTextureUsage(texture *Texture, usage track.TextureUses) {
+	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
+		return
+	}
+	td := texture.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return
+	}
+	e.mutable.textureScope.ReplaceUsage(td.Index(), usage)
+}
+
 // =============================================================================
 // Core Render Pass Encoder
 // =============================================================================
