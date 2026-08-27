@@ -511,7 +511,14 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		"elapsed", time.Since(start),
 	)
 
-	// Extract blend state and color write mask from the first color target.
+	// Extract color target blend/write-mask configuration.
+	//
+	// TODO(MRT-GLES): store ALL color targets, not just [0]. Rust wgpu-hal
+	// stores a full ColorTargetDesc slice and uses per-draw-buffer GL calls
+	// (glBlendFuncSeparatei, glColorMaski, glEnablei) to apply independent
+	// blend state for each MRT output (gles/queue.rs:1483-1525). Our GL
+	// context bindings do not yet expose the indexed variants, so for now we
+	// only apply target[0] globally. Single-target rendering is unaffected.
 	var blend *gputypes.BlendState
 	colorWriteMask := gputypes.ColorWriteMaskAll
 	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {

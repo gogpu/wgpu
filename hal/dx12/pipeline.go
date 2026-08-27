@@ -574,10 +574,14 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 		psoDesc.RasterizerState.SlopeScaledDepthBias = desc.DepthStencil.DepthBiasSlopeScale
 	}
 
-	// Blend state
+	// Blend state — IndependentBlendEnable must be TRUE so that D3D12 uses
+	// the per-target blend descriptors in RenderTarget[0..N] instead of
+	// replicating RenderTarget[0] across all targets. This is required for
+	// correct MRT (multiple render targets) behavior.
+	// Matches Rust wgpu-hal: IndependentBlendEnable: true.into() (dx12/device.rs:1980).
 	psoDesc.BlendState = d3d12.D3D12_BLEND_DESC{
 		AlphaToCoverageEnable:  boolToInt32(desc.Multisample.AlphaToCoverageEnabled),
-		IndependentBlendEnable: 0, // Will set to 1 if we have different blend states per target
+		IndependentBlendEnable: 1, // TRUE: each render target has its own blend state
 	}
 
 	// Color targets
