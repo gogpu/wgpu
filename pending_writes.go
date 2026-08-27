@@ -298,16 +298,11 @@ func (pw *pendingWrites) writeTextureFor(
 
 	// Transition texture to COPY_DST using its actual tracked state.
 	currentUsage := dst.Texture.CurrentUsage()
+	copyRange := textureCopyRange(owner, dst, size)
 	if currentUsage != gputypes.TextureUsageCopyDst {
 		barrier := [1]hal.TextureBarrier{{
 			Texture: dst.Texture,
-			Range: hal.TextureRange{
-				Aspect:          gputypes.TextureAspectAll,
-				BaseMipLevel:    dst.MipLevel,
-				MipLevelCount:   1,
-				BaseArrayLayer:  0,
-				ArrayLayerCount: 1,
-			},
+			Range:   copyRange,
 			Usage: hal.TextureUsageTransition{
 				OldUsage: currentUsage,
 				NewUsage: gputypes.TextureUsageCopyDst,
@@ -334,13 +329,7 @@ func (pw *pendingWrites) writeTextureFor(
 	// also covers queue write operations (pending_writes integration, future work).
 	postBarrier := [1]hal.TextureBarrier{{
 		Texture: dst.Texture,
-		Range: hal.TextureRange{
-			Aspect:          gputypes.TextureAspectAll,
-			BaseMipLevel:    dst.MipLevel,
-			MipLevelCount:   1,
-			BaseArrayLayer:  0,
-			ArrayLayerCount: 1,
-		},
+		Range:   copyRange,
 		Usage: hal.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageCopyDst,
 			NewUsage: gputypes.TextureUsageTextureBinding,
@@ -360,6 +349,25 @@ func (pw *pendingWrites) writeTextureFor(
 	pw.dstTextures[dst.Texture] = owners
 
 	return nil
+}
+
+func textureCopyRange(owner *Texture, dst *hal.ImageCopyTexture, size *hal.Extent3D) hal.TextureRange {
+	baseLayer := uint32(0)
+	layerCount := uint32(1)
+	if owner != nil && owner.coreTexture != nil && owner.coreTexture.Dimension() != gputypes.TextureDimension3D {
+		baseLayer = dst.Origin.Z
+		layerCount = size.DepthOrArrayLayers
+		if layerCount == 0 {
+			layerCount = 1
+		}
+	}
+	return hal.TextureRange{
+		Aspect:          dst.Aspect,
+		BaseMipLevel:    dst.MipLevel,
+		MipLevelCount:   1,
+		BaseArrayLayer:  baseLayer,
+		ArrayLayerCount: layerCount,
+	}
 }
 
 func containsTextureOwner(owners []*Texture, target *Texture) bool {
