@@ -1583,6 +1583,37 @@ func (d *Device) GetRenderPassCache() *RenderPassCache {
 	return d.renderPassCache
 }
 
+// --- Ray tracing stubs (VK_KHR_acceleration_structure) ---
+// Actual Vulkan RT implementation will use VK_KHR_acceleration_structure +
+// VK_KHR_ray_tracing_pipeline. For now, stubs satisfy the hal.Device interface.
+
+// CreateAccelerationStructure creates an acceleration structure (BLAS or TLAS).
+// Stub — Vulkan RT not yet implemented.
+func (d *Device) CreateAccelerationStructure(desc *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("ray tracing not yet implemented on Vulkan backend")
+}
+
+// DestroyAccelerationStructure destroys an acceleration structure.
+// Stub — Vulkan RT not yet implemented.
+func (d *Device) DestroyAccelerationStructure(as hal.AccelerationStructure) {}
+
+// GetAccelerationStructureBuildSizes returns the sizes needed for building an AS.
+// Stub — Vulkan RT not yet implemented.
+func (d *Device) GetAccelerationStructureBuildSizes(desc *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+// GetAccelerationStructureDeviceAddress returns the GPU device address of an AS.
+// Stub — Vulkan RT not yet implemented.
+func (d *Device) GetAccelerationStructureDeviceAddress(as hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+// TlasInstanceToBytes converts a TlasInstance to the backend-specific 64-byte
+// packed format (VkAccelerationStructureInstanceKHR).
+// Stub — Vulkan RT not yet implemented.
+func (d *Device) TlasInstanceToBytes(instance hal.TlasInstance) []byte { return nil }
+
 // Vulkan function wrappers using Commands methods
 
 func vkCreateCommandPool(cmds *vk.Commands, device vk.Device, createInfo *vk.CommandPoolCreateInfo, allocator *vk.AllocationCallbacks, pool *vk.CommandPool) vk.Result {

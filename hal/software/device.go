@@ -322,6 +322,28 @@ func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor)
 // DestroyRenderBundle is a no-op for the software device.
 func (d *Device) DestroyRenderBundle(_ hal.RenderBundle) {}
 
+// CreateAccelerationStructure is not supported in the software backend.
+// CPU-based BVH traversal is planned for a future release.
+func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("ray tracing not yet implemented on software backend")
+}
+
+// DestroyAccelerationStructure is a no-op (RT not supported).
+func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+
+// GetAccelerationStructureBuildSizes returns zero sizes (RT not supported).
+func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+// GetAccelerationStructureDeviceAddress returns 0 (RT not supported).
+func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+// TlasInstanceToBytes returns nil (RT not supported).
+func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+
 // WaitIdle is a no-op for the software device.
 func (d *Device) WaitIdle() error { return nil }
 

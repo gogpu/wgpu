@@ -1308,6 +1308,22 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 // command buffers execute in order on the same queue, this guarantees all
 // previously submitted work has finished.
 //
+func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("metal: ray tracing not yet implemented")
+}
+
+func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+
+func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+
 // After the GPU is idle, we drain and refill the frame semaphore to ensure
 // all in-flight slots are reclaimed. This prevents deadlocks when the caller
 // wants to submit new work after WaitIdle returns.

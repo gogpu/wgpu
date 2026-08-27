@@ -512,6 +512,12 @@ func (e *noopEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 }
 func (e *noopEncoder) ResolveQuerySet(_ hal.QuerySet, _ uint32, _ uint32, _ hal.Buffer, _ uint64) {
 }
+func (e *noopEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+func (e *noopEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier)     {}
+func (e *noopEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+func (e *noopEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
 
 // noopCB implements hal.CommandBuffer for testing.
 type noopCB struct{}

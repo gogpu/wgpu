@@ -55,6 +55,20 @@ func (c *CommandEncoder) CopyTextureToTexture(_, _ hal.Texture, _ []hal.TextureC
 // ResolveQuerySet is a no-op.
 func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
 
+// BuildAccelerationStructures is a no-op.
+func (c *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+
+// PlaceAccelerationStructureBarrier is a no-op.
+func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure is a no-op.
+func (c *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+
+// ReadAccelerationStructureCompactSize is a no-op.
+func (c *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
+
 // BeginRenderPass returns a noop render pass encoder.
 func (c *CommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return &RenderPassEncoder{}

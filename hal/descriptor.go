@@ -47,6 +47,12 @@ type Alignments struct {
 
 	// BufferCopyPitch is the required alignment for buffer copy pitch (bytes per row).
 	BufferCopyPitch uint64
+
+	// RawTlasInstanceSize is the per-backend packed instance size in bytes (Vulkan=64, DX12=64, Metal=64).
+	RawTlasInstanceSize uint32
+
+	// RayTracingScratchBufferAlignment is the required alignment for AS scratch buffers.
+	RayTracingScratchBufferAlignment uint32
 }
 
 // DownlevelCapabilities describes capabilities for downlevel backends (GL/GLES).

@@ -182,6 +182,28 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is a no-op for the noop device.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// CreateAccelerationStructure returns an error because the noop backend
+// does not support ray tracing.
+func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("noop: ray tracing not supported")
+}
+
+// DestroyAccelerationStructure is a no-op.
+func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+
+// GetAccelerationStructureBuildSizes returns zero sizes (noop backend).
+func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+// GetAccelerationStructureDeviceAddress returns 0 (noop backend).
+func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+// TlasInstanceToBytes returns nil (noop backend).
+func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+
 // WaitIdle is a no-op for the noop device.
 func (d *Device) WaitIdle() error { return nil }
 

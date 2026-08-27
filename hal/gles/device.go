@@ -777,6 +777,28 @@ func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescript
 // DestroyRenderBundle is not supported in GLES backend.
 func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 
+// CreateAccelerationStructure returns an error because the GLES backend
+// does not support ray tracing. OpenGL ES has no acceleration structure API.
+func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("gles: ray tracing not supported")
+}
+
+// DestroyAccelerationStructure is a no-op (GLES has no ray tracing).
+func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+
+// GetAccelerationStructureBuildSizes returns zero sizes (GLES has no ray tracing).
+func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+// GetAccelerationStructureDeviceAddress returns 0 (GLES has no ray tracing).
+func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+// TlasInstanceToBytes returns nil (GLES has no ray tracing).
+func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
 	glCtx := d.ctx.Lock()

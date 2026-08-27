@@ -226,6 +226,20 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 	})
 }
 
+// BuildAccelerationStructures is a no-op (GLES has no ray tracing).
+func (e *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+
+// PlaceAccelerationStructureBarrier is a no-op (GLES has no ray tracing).
+func (e *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure is a no-op (GLES has no ray tracing).
+func (e *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+
+// ReadAccelerationStructureCompactSize is a no-op (GLES has no ray tracing).
+func (e *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
+
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{

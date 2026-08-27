@@ -2858,6 +2858,32 @@ func (f *Fence) GetCompletedValue() uint64 {
 }
 
 // -----------------------------------------------------------------------------
+// Ray Tracing stubs (DXR not yet implemented)
+// -----------------------------------------------------------------------------
+
+// CreateAccelerationStructure returns an error because DXR ray tracing
+// is not yet implemented on the DX12 backend.
+func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("ray tracing not yet implemented on DX12 backend")
+}
+
+// DestroyAccelerationStructure is a no-op (DXR not yet implemented).
+func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+
+// GetAccelerationStructureBuildSizes returns zero sizes (DXR not yet implemented).
+func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+
+// GetAccelerationStructureDeviceAddress returns 0 (DXR not yet implemented).
+func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+
+// TlasInstanceToBytes returns nil (DXR not yet implemented).
+func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+
+// -----------------------------------------------------------------------------
 // Compile-time interface assertions
 // -----------------------------------------------------------------------------
 

@@ -178,6 +178,20 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 // ResolveQuerySet is a no-op (query sets not supported in software backend).
 func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
 
+// BuildAccelerationStructures is a no-op (RT not supported in software backend).
+func (c *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+
+// PlaceAccelerationStructureBarrier is a no-op (RT not supported in software backend).
+func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure is a no-op (RT not supported in software backend).
+func (c *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+
+// ReadAccelerationStructureCompactSize is a no-op (RT not supported in software backend).
+func (c *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
+
 // BeginRenderPass begins a render pass and returns an encoder.
 // If a depth/stencil attachment is present, a persistent stencil buffer is
 // created for the entire pass (matching GPU behavior where the stencil buffer
