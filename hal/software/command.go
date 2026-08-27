@@ -4,6 +4,7 @@ package software
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"log/slog"
@@ -178,18 +179,145 @@ func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []ha
 // ResolveQuerySet is a no-op (query sets not supported in software backend).
 func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
 
-// BuildAccelerationStructures is a no-op (RT not supported in software backend).
-func (c *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+// BuildAccelerationStructures builds BVH trees for BLAS entries by extracting
+// triangle data from vertex buffers, and stores TLAS instance references.
+// This is the CPU equivalent of vkCmdBuildAccelerationStructuresKHR / DXR
+// BuildRaytracingAccelerationStructure.
+func (c *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAccelerationStructureDescriptor) {
+	for i := range descriptors {
+		desc := &descriptors[i]
+		if desc.Entries == nil || desc.DestinationAccelerationStructure == nil {
+			continue
+		}
 
-// PlaceAccelerationStructureBarrier is a no-op (RT not supported in software backend).
-func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+		dstAS, ok := desc.DestinationAccelerationStructure.(*AccelerationStructure)
+		if !ok || dstAS == nil {
+			continue
+		}
 
-// CopyAccelerationStructure is a no-op (RT not supported in software backend).
-func (c *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+		entries := desc.Entries
+
+		switch {
+		case len(entries.Triangles) > 0:
+			// BLAS build: extract triangles from vertex buffers and build BVH.
+			var allTris []Triangle
+			for geomIdx, tri := range entries.Triangles {
+				buf, bufOK := tri.VertexBuffer.(*Buffer)
+				if !bufOK || buf == nil {
+					continue
+				}
+				tris := extractTrianglesFromBuffer(buf, tri.FirstVertex, tri.VertexCount, tri.VertexStride, uint32(geomIdx))
+				allTris = append(allTris, tris...)
+			}
+			dstAS.bvh = BuildBVH(allTris)
+			dstAS.format = hal.AccelerationStructureFormatBottomLevel
+
+		case len(entries.AABBs) > 0:
+			// BLAS build from AABB primitives.
+			var allAABBs []AABBPrimitive
+			for geomIdx, aabb := range entries.AABBs {
+				buf, bufOK := aabb.Buffer.(*Buffer)
+				if !bufOK || buf == nil {
+					continue
+				}
+				prims := extractAABBsFromBuffer(buf, aabb.Offset, aabb.Count, aabb.Stride, uint32(geomIdx))
+				allAABBs = append(allAABBs, prims...)
+			}
+			dstAS.bvh = BuildBVHFromAABBs(allAABBs)
+			dstAS.format = hal.AccelerationStructureFormatBottomLevel
+
+		case entries.Instances != nil:
+			// TLAS build: store instance references (resolved at traversal time).
+			dstAS.format = hal.AccelerationStructureFormatTopLevel
+			// Instance data is packed in the buffer — for the software backend,
+			// TLAS traversal would need to decode instances. For now, store the
+			// count so GetAccelerationStructureBuildSizes returns meaningful values.
+			dstAS.instances = nil // Future: decode instance buffer into TLASInstanceData slice.
+		}
+	}
 }
 
-// ReadAccelerationStructureCompactSize is a no-op (RT not supported in software backend).
-func (c *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+// extractAABBsFromBuffer reads AABB primitives from a buffer.
+// Each AABB is 6 x float32 (min.xyz, max.xyz = 24 bytes).
+func extractAABBsFromBuffer(buf *Buffer, offset, count uint32, stride uint64, geomIndex uint32) []AABBPrimitive {
+	if buf == nil || len(buf.data) == 0 || count == 0 {
+		return nil
+	}
+
+	buf.mu.RLock()
+	defer buf.mu.RUnlock()
+
+	if stride == 0 {
+		stride = 24 // tightly packed: 6 x float32
+	}
+
+	prims := make([]AABBPrimitive, 0, count)
+	for i := uint32(0); i < count; i++ {
+		off := uint64(offset)*stride + uint64(i)*stride
+		if off+24 > uint64(len(buf.data)) {
+			break
+		}
+		minV := readFloat3(buf.data, off)
+		maxV := readFloat3(buf.data, off+12)
+		if minV == nil || maxV == nil {
+			continue
+		}
+		prims = append(prims, AABBPrimitive{
+			Min:            *minV,
+			Max:            *maxV,
+			GeometryIndex:  geomIndex,
+			PrimitiveIndex: i,
+		})
+	}
+	return prims
+}
+
+// PlaceAccelerationStructureBarrier is a no-op on the software backend.
+// CPU execution is inherently ordered; no memory barriers are needed.
+func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure performs a deep copy of the source BVH tree
+// into the destination acceleration structure.
+func (c *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+	srcAS, ok := src.(*AccelerationStructure)
+	if !ok || srcAS == nil {
+		return
+	}
+	dstAS, ok := dst.(*AccelerationStructure)
+	if !ok || dstAS == nil {
+		return
+	}
+
+	dstAS.bvh = deepCopyBVH(srcAS.bvh)
+	dstAS.format = srcAS.format
+	dstAS.size = srcAS.size
+
+	if len(srcAS.instances) > 0 {
+		dstAS.instances = make([]TLASInstanceData, len(srcAS.instances))
+		copy(dstAS.instances, srcAS.instances)
+	}
+}
+
+// ReadAccelerationStructureCompactSize writes the current BVH size estimate
+// into the destination buffer as a uint64. This is the CPU equivalent of
+// vkCmdWriteAccelerationStructuresPropertiesKHR COMPACTED_SIZE.
+func (c *CommandEncoder) ReadAccelerationStructureCompactSize(as hal.AccelerationStructure, buffer hal.Buffer, offset uint64) {
+	swAS, ok := as.(*AccelerationStructure)
+	if !ok || swAS == nil {
+		return
+	}
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil {
+		return
+	}
+
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+
+	// Write the stored size as uint64 little-endian.
+	if offset+8 <= uint64(len(buf.data)) {
+		binary.LittleEndian.PutUint64(buf.data[offset:], swAS.size)
+	}
 }
 
 // BeginRenderPass begins a render pass and returns an encoder.

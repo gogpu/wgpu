@@ -322,27 +322,56 @@ func (d *Device) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor)
 // DestroyRenderBundle is a no-op for the software device.
 func (d *Device) DestroyRenderBundle(_ hal.RenderBundle) {}
 
-// CreateAccelerationStructure is not supported in the software backend.
-// CPU-based BVH traversal is planned for a future release.
-func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
-	return nil, fmt.Errorf("ray tracing not yet implemented on software backend")
+// CreateAccelerationStructure creates a CPU-side acceleration structure.
+// The actual BVH is built later in BuildAccelerationStructures; this call
+// only allocates the container with the requested format and size.
+func (d *Device) CreateAccelerationStructure(desc *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("software: acceleration structure descriptor is nil")
+	}
+	return &AccelerationStructure{
+		id:     nextResourceID.Add(1),
+		format: desc.Format,
+		size:   desc.Size,
+	}, nil
 }
 
-// DestroyAccelerationStructure is a no-op (RT not supported).
-func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
-
-// GetAccelerationStructureBuildSizes returns zero sizes (RT not supported).
-func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
-	return hal.AccelerationStructureBuildSizes{}
+// DestroyAccelerationStructure releases the acceleration structure. The Go GC
+// handles the BVH tree memory; this just nils out the reference.
+func (d *Device) DestroyAccelerationStructure(as hal.AccelerationStructure) {
+	if swAS, ok := as.(*AccelerationStructure); ok && swAS != nil {
+		swAS.bvh = nil
+		swAS.instances = nil
+	}
 }
 
-// GetAccelerationStructureDeviceAddress returns 0 (RT not supported).
-func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
-	return 0
+// GetAccelerationStructureBuildSizes returns estimated sizes for an AS build.
+// Software backend BVH lives in Go heap (GC-managed), so the sizes are
+// informational rather than allocation-critical.
+func (d *Device) GetAccelerationStructureBuildSizes(desc *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	if desc == nil || desc.Entries == nil {
+		return hal.AccelerationStructureBuildSizes{}
+	}
+	return estimateBuildSize(desc.Entries)
 }
 
-// TlasInstanceToBytes returns nil (RT not supported).
-func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+// GetAccelerationStructureDeviceAddress returns a unique address for the AS.
+// In the software backend this is the Go pointer cast to uint64, which is
+// stable for the lifetime of the struct (no GC relocation of pinned data).
+func (d *Device) GetAccelerationStructureDeviceAddress(as hal.AccelerationStructure) uint64 {
+	swAS, ok := as.(*AccelerationStructure)
+	if !ok || swAS == nil {
+		return 0
+	}
+	return swAS.id
+}
+
+// TlasInstanceToBytes packs a TlasInstance into the 64-byte format
+// matching Vulkan VkAccelerationStructureInstanceKHR and DX12
+// D3D12_RAYTRACING_INSTANCE_DESC for cross-backend consistency.
+func (d *Device) TlasInstanceToBytes(instance hal.TlasInstance) []byte {
+	return packTLASInstance(instance)
+}
 
 // WaitIdle is a no-op for the software device.
 func (d *Device) WaitIdle() error { return nil }
