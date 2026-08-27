@@ -1307,22 +1307,6 @@ func textureUsageToD3D12State(usage gputypes.TextureUsage) d3d12.D3D12_RESOURCE_
 	return state
 }
 
-// --- Ray Tracing stubs (DXR not yet implemented) ---
-
-// BuildAccelerationStructures is a no-op (DXR not yet implemented).
-func (e *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
-
-// PlaceAccelerationStructureBarrier is a no-op (DXR not yet implemented).
-func (e *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
-
-// CopyAccelerationStructure is a no-op (DXR not yet implemented).
-func (e *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
-}
-
-// ReadAccelerationStructureCompactSize is a no-op (DXR not yet implemented).
-func (e *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
-}
-
 // --- Compile-time interface assertions ---
 
 var (
