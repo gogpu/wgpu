@@ -1870,3 +1870,296 @@ func TestDepthStencilStateWiring(t *testing.T) {
 			data[idx], data[idx+1], data[idx+2])
 	}
 }
+
+// =============================================================================
+// Multiple Render Targets (MRT) Tests
+// =============================================================================
+
+// TestMRTPerAttachmentClear verifies that each color attachment in a render
+// pass with multiple targets gets its own clear color applied independently.
+func TestMRTPerAttachmentClear(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	const w, h = 4, 4
+
+	// Create two render target textures.
+	tex0, _ := dev.CreateTexture(&hal.TextureDescriptor{
+		Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
+	})
+	defer dev.DestroyTexture(tex0)
+	view0, _ := dev.CreateTextureView(tex0, &hal.TextureViewDescriptor{})
+	defer dev.DestroyTextureView(view0)
+
+	tex1, _ := dev.CreateTexture(&hal.TextureDescriptor{
+		Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
+	})
+	defer dev.DestroyTexture(tex1)
+	view1, _ := dev.CreateTextureView(tex1, &hal.TextureViewDescriptor{})
+	defer dev.DestroyTextureView(view1)
+
+	// Begin a render pass with two color attachments, each with different clear colors.
+	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{
+			{
+				View:       view0,
+				LoadOp:     gputypes.LoadOpClear,
+				ClearValue: gputypes.Color{R: 1, G: 0, B: 0, A: 1}, // Red
+			},
+			{
+				View:       view1,
+				LoadOp:     gputypes.LoadOpClear,
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 1, A: 1}, // Blue
+			},
+		},
+	})
+	// No draws — just clear.
+	pass.End()
+
+	// Verify target 0 is red.
+	data0 := tex0.(*Texture).GetData()
+	if data0[0] != 255 || data0[1] != 0 || data0[2] != 0 || data0[3] != 255 {
+		t.Errorf("MRT target 0: got (%d,%d,%d,%d), want red (255,0,0,255)",
+			data0[0], data0[1], data0[2], data0[3])
+	}
+
+	// Verify target 1 is blue.
+	data1 := tex1.(*Texture).GetData()
+	if data1[0] != 0 || data1[1] != 0 || data1[2] != 255 || data1[3] != 255 {
+		t.Errorf("MRT target 1: got (%d,%d,%d,%d), want blue (0,0,255,255)",
+			data1[0], data1[1], data1[2], data1[3])
+	}
+}
+
+// TestMRTHelpers verifies the MRT helper functions work correctly.
+func TestMRTHelpers(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	const w, h = 4, 4
+
+	t.Run("hasMRT_single", func(t *testing.T) {
+		tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex)
+		view, _ := dev.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+		defer dev.DestroyTextureView(view)
+
+		enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+		pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+			ColorAttachments: []hal.RenderPassColorAttachment{
+				{View: view, LoadOp: gputypes.LoadOpClear},
+			},
+		})
+
+		rpe := pass.(*RenderPassEncoder)
+		if rpe.hasMRT() {
+			t.Error("hasMRT() should be false for single attachment")
+		}
+		pass.End()
+	})
+
+	t.Run("hasMRT_multiple", func(t *testing.T) {
+		tex0, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex0)
+		view0, _ := dev.CreateTextureView(tex0, &hal.TextureViewDescriptor{})
+		defer dev.DestroyTextureView(view0)
+
+		tex1, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex1)
+		view1, _ := dev.CreateTextureView(tex1, &hal.TextureViewDescriptor{})
+		defer dev.DestroyTextureView(view1)
+
+		enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+		pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+			ColorAttachments: []hal.RenderPassColorAttachment{
+				{View: view0, LoadOp: gputypes.LoadOpClear},
+				{View: view1, LoadOp: gputypes.LoadOpClear},
+			},
+		})
+
+		rpe := pass.(*RenderPassEncoder)
+		if !rpe.hasMRT() {
+			t.Error("hasMRT() should be true for two attachments")
+		}
+
+		targets := rpe.getTargetTextures()
+		if len(targets) != 2 {
+			t.Errorf("getTargetTextures() returned %d targets, want 2", len(targets))
+		}
+		if targets[0] == nil || targets[1] == nil {
+			t.Error("getTargetTextures() returned nil targets")
+		}
+
+		pass.End()
+	})
+
+	t.Run("getPerTargetBlendStates", func(t *testing.T) {
+		tex0, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex0)
+		view0, _ := dev.CreateTextureView(tex0, &hal.TextureViewDescriptor{})
+		defer dev.DestroyTextureView(view0)
+
+		tex1, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex1)
+		view1, _ := dev.CreateTextureView(tex1, &hal.TextureViewDescriptor{})
+		defer dev.DestroyTextureView(view1)
+
+		pipeline, _ := dev.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+			Label: "mrt-blend",
+			Fragment: &hal.FragmentState{
+				Targets: []gputypes.ColorTargetState{
+					{
+						WriteMask: gputypes.ColorWriteMaskAll,
+						Blend: &gputypes.BlendState{
+							Color: gputypes.BlendComponent{
+								SrcFactor: gputypes.BlendFactorOne,
+								DstFactor: gputypes.BlendFactorZero,
+								Operation: gputypes.BlendOperationAdd,
+							},
+							Alpha: gputypes.BlendComponent{
+								SrcFactor: gputypes.BlendFactorOne,
+								DstFactor: gputypes.BlendFactorZero,
+								Operation: gputypes.BlendOperationAdd,
+							},
+						},
+					},
+					{
+						WriteMask: gputypes.ColorWriteMaskAll,
+						Blend: &gputypes.BlendState{
+							Color: gputypes.BlendComponent{
+								SrcFactor: gputypes.BlendFactorSrcAlpha,
+								DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+								Operation: gputypes.BlendOperationAdd,
+							},
+							Alpha: gputypes.BlendComponent{
+								SrcFactor: gputypes.BlendFactorOne,
+								DstFactor: gputypes.BlendFactorZero,
+								Operation: gputypes.BlendOperationAdd,
+							},
+						},
+					},
+				},
+			},
+		})
+		defer dev.DestroyRenderPipeline(pipeline)
+
+		enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+		pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+			ColorAttachments: []hal.RenderPassColorAttachment{
+				{View: view0, LoadOp: gputypes.LoadOpClear},
+				{View: view1, LoadOp: gputypes.LoadOpClear},
+			},
+		})
+
+		rpe := pass.(*RenderPassEncoder)
+		rpe.SetPipeline(pipeline)
+
+		blendStates := rpe.getPerTargetBlendStates()
+		if len(blendStates) != 2 {
+			t.Fatalf("getPerTargetBlendStates() returned %d states, want 2", len(blendStates))
+		}
+		if blendStates[0] == nil {
+			t.Error("blend state 0 should not be nil")
+		}
+		if blendStates[1] == nil {
+			t.Error("blend state 1 should not be nil")
+		}
+		pass.End()
+	})
+}
+
+// TestMRTWriteColorToTarget verifies per-pixel writing to individual render
+// targets with BGRA format support and blending.
+func TestMRTWriteColorToTarget(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	t.Run("RGBA_no_blend", func(t *testing.T) {
+		tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex)
+
+		target := tex.(*Texture)
+		// Clear to black.
+		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
+
+		// Write red to pixel (0,0).
+		writeColorToTarget(target, 0, 0, [4]float32{1, 0, 0, 1}, nil)
+
+		data := target.GetData()
+		if data[0] != 255 || data[1] != 0 || data[2] != 0 || data[3] != 255 {
+			t.Errorf("RGBA write: got (%d,%d,%d,%d), want (255,0,0,255)",
+				data[0], data[1], data[2], data[3])
+		}
+	})
+
+	t.Run("BGRA_no_blend", func(t *testing.T) {
+		tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatBGRA8Unorm,
+		})
+		defer dev.DestroyTexture(tex)
+
+		target := tex.(*Texture)
+		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
+
+		// Write red (RGBA) to pixel (0,0). For BGRA target, bytes should be B,G,R,A.
+		writeColorToTarget(target, 0, 0, [4]float32{1, 0, 0, 1}, nil)
+
+		data := target.GetData()
+		// BGRA layout: B=0, G=0, R=255, A=255
+		if data[0] != 0 || data[1] != 0 || data[2] != 255 || data[3] != 255 {
+			t.Errorf("BGRA write: got (%d,%d,%d,%d), want BGRA (0,0,255,255)",
+				data[0], data[1], data[2], data[3])
+		}
+	})
+
+	t.Run("out_of_bounds", func(t *testing.T) {
+		tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+			Size:   hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
+			Format: gputypes.TextureFormatRGBA8Unorm,
+		})
+		defer dev.DestroyTexture(tex)
+
+		target := tex.(*Texture)
+		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
+
+		// Out-of-bounds writes should not panic.
+		writeColorToTarget(target, -1, 0, [4]float32{1, 0, 0, 1}, nil)
+		writeColorToTarget(target, 0, -1, [4]float32{1, 0, 0, 1}, nil)
+		writeColorToTarget(target, 5, 0, [4]float32{1, 0, 0, 1}, nil)
+		writeColorToTarget(target, 0, 5, [4]float32{1, 0, 0, 1}, nil)
+
+		// All pixels should still be black.
+		data := target.GetData()
+		for i := 0; i < len(data); i += 4 {
+			if data[i] != 0 || data[i+1] != 0 || data[i+2] != 0 {
+				t.Errorf("pixel %d: got (%d,%d,%d), want black after out-of-bounds writes",
+					i/4, data[i], data[i+1], data[i+2])
+				break
+			}
+		}
+	})
+}
