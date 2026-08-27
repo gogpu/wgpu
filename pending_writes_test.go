@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
 )
@@ -23,6 +24,25 @@ type mockBatchingQueue struct {
 	lastWriteBuf      hal.Buffer
 	lastWriteOffset   uint64
 	lastWriteData     []byte
+}
+
+type barrierCaptureEncoder struct {
+	noop.CommandEncoder
+	textureBarriers []hal.TextureBarrier
+}
+
+func (e *barrierCaptureEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+	e.textureBarriers = append(e.textureBarriers, barriers...)
+}
+
+type barrierCaptureDevice struct {
+	noop.Device
+	encoder *barrierCaptureEncoder
+}
+
+func (d *barrierCaptureDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	d.encoder = &barrierCaptureEncoder{}
+	return d.encoder, nil
 }
 
 func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
@@ -326,6 +346,67 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	pw.mu.Unlock()
 	if !tracked {
 		t.Error("expected texture to be tracked in dstTextures")
+	}
+}
+
+func captureTextureWriteBarriers(t *testing.T, dimension gputypes.TextureDimension, origin hal.Origin3D, size hal.Extent3D) []hal.TextureBarrier {
+	t.Helper()
+	dev := &barrierCaptureDevice{}
+	q := &mockBatchingQueue{}
+	pool := newEncoderPool(dev)
+	pw := newPendingWrites(dev, q, pool)
+	t.Cleanup(func() {
+		pw.destroy()
+		pool.destroy()
+	})
+
+	halTexture := &noop.Texture{}
+	coreTexture := core.NewTexture(
+		halTexture, nil, gputypes.TextureFormatRGBA8Unorm,
+		dimension, gputypes.TextureUsageCopyDst,
+		gputypes.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 2},
+		1, 1, "texture",
+	)
+	texture := &Texture{hal: halTexture, coreTexture: coreTexture}
+	dst := &hal.ImageCopyTexture{
+		Texture: halTexture,
+		Origin:  origin,
+		Aspect:  gputypes.TextureAspectAll,
+	}
+	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: size.Height}
+	data := make([]byte, size.Width*size.Height*size.DepthOrArrayLayers*4)
+
+	if err := pw.writeTextureFor(texture, dst, data, layout, &size); err != nil {
+		t.Fatalf("writeTextureFor: %v", err)
+	}
+	return dev.encoder.textureBarriers
+}
+
+func TestPendingWrites_WriteTextureTransitionsArrayLayers(t *testing.T) {
+	barriers := captureTextureWriteBarriers(t, gputypes.TextureDimension2D, hal.Origin3D{Z: 1}, hal.Extent3D{
+		Width: 1, Height: 1, DepthOrArrayLayers: 1,
+	})
+	if len(barriers) != 2 {
+		t.Fatalf("texture barriers = %d, want 2", len(barriers))
+	}
+	for i, barrier := range barriers {
+		if barrier.Range.BaseArrayLayer != 1 || barrier.Range.ArrayLayerCount != 1 {
+			t.Errorf("barrier %d array range = %d+%d, want 1+1", i, barrier.Range.BaseArrayLayer, barrier.Range.ArrayLayerCount)
+		}
+	}
+}
+
+func TestPendingWrites_WriteTextureTransitions3DDepth(t *testing.T) {
+	barriers := captureTextureWriteBarriers(t, gputypes.TextureDimension3D, hal.Origin3D{Z: 1}, hal.Extent3D{
+		Width: 1, Height: 1, DepthOrArrayLayers: 1,
+	})
+	if len(barriers) != 2 {
+		t.Fatalf("texture barriers = %d, want 2", len(barriers))
+	}
+	for i, barrier := range barriers {
+		if barrier.Range.BaseArrayLayer != 0 || barrier.Range.ArrayLayerCount != 1 {
+			t.Errorf("barrier %d array range = %d+%d, want 0+1", i, barrier.Range.BaseArrayLayer, barrier.Range.ArrayLayerCount)
+		}
 	}
 }
 

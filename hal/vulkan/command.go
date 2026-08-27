@@ -614,7 +614,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 // convertBufferImageCopyRegions converts HAL BufferTextureCopy regions to Vulkan BufferImageCopy.
 // The format parameter is the texture format, used to determine block copy size
 // for correct bytes-to-texels conversion of bufferRowLength.
-func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat) []vk.BufferImageCopy {
+func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat, dimension gputypes.TextureDimension) []vk.BufferImageCopy {
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
 	blockSize := format.BlockCopySize()
 	if blockSize == 0 {
@@ -629,6 +629,19 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 		if r.BufferLayout.BytesPerRow > 0 {
 			bufferRowLength = r.BufferLayout.BytesPerRow / blockSize
 		}
+		baseArrayLayer := uint32(0)
+		layerCount := uint32(1)
+		imageOffsetZ := int32(r.TextureBase.Origin.Z)
+		imageExtentDepth := r.Size.DepthOrArrayLayers
+		if dimension != gputypes.TextureDimension3D {
+			baseArrayLayer = r.TextureBase.Origin.Z
+			layerCount = r.Size.DepthOrArrayLayers
+			if layerCount == 0 {
+				layerCount = 1
+			}
+			imageOffsetZ = 0
+			imageExtentDepth = 1
+		}
 
 		vkRegions[i] = vk.BufferImageCopy{
 			BufferOffset:      vk.DeviceSize(r.BufferLayout.Offset),
@@ -637,18 +650,18 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 			ImageSubresource: vk.ImageSubresourceLayers{
 				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),
 				MipLevel:       r.TextureBase.MipLevel,
-				BaseArrayLayer: 0,
-				LayerCount:     1,
+				BaseArrayLayer: baseArrayLayer,
+				LayerCount:     layerCount,
 			},
 			ImageOffset: vk.Offset3D{
 				X: int32(r.TextureBase.Origin.X),
 				Y: int32(r.TextureBase.Origin.Y),
-				Z: int32(r.TextureBase.Origin.Z),
+				Z: imageOffsetZ,
 			},
 			ImageExtent: vk.Extent3D{
 				Width:  r.Size.Width,
 				Height: r.Size.Height,
-				Depth:  r.Size.DepthOrArrayLayers,
+				Depth:  imageExtentDepth,
 			},
 		}
 	}
@@ -667,7 +680,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		return
 	}
 
-	vkRegions := convertBufferImageCopyRegions(regions, dstTex.format)
+	vkRegions := convertBufferImageCopyRegions(regions, dstTex.format, dstTex.dimension)
 	vkCmdCopyBufferToImage(
 		e.device.cmds,
 		e.active,
@@ -691,7 +704,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		return
 	}
 
-	vkRegions := convertBufferImageCopyRegions(regions, srcTex.format)
+	vkRegions := convertBufferImageCopyRegions(regions, srcTex.format, srcTex.dimension)
 	vkCmdCopyImageToBuffer(
 		e.device.cmds,
 		e.active,
