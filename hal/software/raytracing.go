@@ -45,6 +45,15 @@ type AccelerationStructure struct {
 // NativeHandle returns a unique identifier for this acceleration structure.
 func (a *AccelerationStructure) NativeHandle() uintptr { return uintptr(a.id) }
 
+// BVH returns the root BVH node for CPU ray traversal.
+// Returns nil if the acceleration structure has not been built yet.
+func (a *AccelerationStructure) BVH() *BVHNode {
+	if a == nil {
+		return nil
+	}
+	return a.bvh
+}
+
 // Compile-time interface assertion.
 var _ hal.AccelerationStructure = (*AccelerationStructure)(nil)
 
