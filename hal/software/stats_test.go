@@ -11,7 +11,7 @@ import (
 )
 
 func TestRenderPassStats_ScissorAndDrawCount(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 	adapters := instance.EnumerateAdapters(nil)
@@ -68,7 +68,7 @@ func TestRenderPassStats_ScissorAndDrawCount(t *testing.T) {
 }
 
 func TestRenderPassStats_NoScissor(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 	adapters := instance.EnumerateAdapters(nil)

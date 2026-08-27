@@ -22,7 +22,7 @@ var benchHALSink any
 func setupHALDevice(b *testing.B) (hal.Device, hal.Queue, func()) {
 	b.Helper()
 
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		b.Fatalf("CreateInstance failed: %v", err)

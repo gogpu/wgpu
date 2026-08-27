@@ -37,6 +37,9 @@ import (
 // Backend implements hal.Backend for DirectX 12.
 type Backend struct{}
 
+// NewBackend returns a DX12 backend instance.
+func NewBackend() Backend { return Backend{} }
+
 // Variant returns the backend type identifier.
 func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendDX12

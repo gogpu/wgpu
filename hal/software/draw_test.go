@@ -536,7 +536,7 @@ func TestDrawWithSurfaceTexture(t *testing.T) {
 	defer cleanup()
 
 	// Configure a surface.
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 

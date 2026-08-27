@@ -35,7 +35,7 @@ func createDamageTestSurface(t *testing.T, width, height uint32) (*Surface, *Dev
 	dev, q, cleanup := createSoftwareDevice(t)
 	t.Cleanup(cleanup)
 
-	backend := API{}
+	backend := NewBackend()
 	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
@@ -70,7 +70,7 @@ func createDamageTestSurfaceBGRA(t *testing.T, width, height uint32) (*Surface, 
 	dev, q, cleanup := createSoftwareDevice(t)
 	t.Cleanup(cleanup)
 
-	backend := API{}
+	backend := NewBackend()
 	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
@@ -860,7 +860,7 @@ func TestDamage_IsBGRA(t *testing.T) {
 // =============================================================================
 
 func BenchmarkPresent_FullSurface(b *testing.B) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -888,7 +888,7 @@ func BenchmarkPresent_FullSurface(b *testing.B) {
 }
 
 func BenchmarkPresent_SmallDamageRect(b *testing.B) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -917,7 +917,7 @@ func BenchmarkPresent_SmallDamageRect(b *testing.B) {
 }
 
 func BenchmarkPresent_MultipleSmallRects(b *testing.B) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -1000,7 +1000,7 @@ func TestDamage_ReconfigureThenPresent(t *testing.T) {
 	dev, q, cleanup := createSoftwareDevice(t)
 	defer cleanup()
 
-	backend := API{}
+	backend := NewBackend()
 	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)

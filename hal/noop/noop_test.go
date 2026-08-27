@@ -16,7 +16,7 @@ import (
 
 // TestNoopBackendVariant tests the backend variant identification.
 func TestNoopBackendVariant(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	if api.Variant() != gputypes.BackendEmpty {
 		t.Errorf("expected BackendEmpty, got %v", api.Variant())
 	}
@@ -24,7 +24,7 @@ func TestNoopBackendVariant(t *testing.T) {
 
 // TestNoopCreateInstance tests instance creation.
 func TestNoopCreateInstance(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	desc := &hal.InstanceDescriptor{
 		Backends: gputypes.BackendsPrimary,
 		Flags:    0,
@@ -44,7 +44,7 @@ func TestNoopCreateInstance(t *testing.T) {
 
 // TestNoopCreateInstance_NilDescriptor tests that nil descriptor is handled.
 func TestNoopCreateInstance_NilDescriptor(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance with nil descriptor failed: %v", err)
@@ -57,7 +57,7 @@ func TestNoopCreateInstance_NilDescriptor(t *testing.T) {
 
 // TestNoopEnumerateAdapters tests adapter enumeration.
 func TestNoopEnumerateAdapters(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -87,7 +87,7 @@ func TestNoopEnumerateAdapters(t *testing.T) {
 
 // TestNoopEnumerateAdapters_WithSurfaceHint tests enumeration with surface hint.
 func TestNoopEnumerateAdapters_WithSurfaceHint(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -110,7 +110,7 @@ func TestNoopEnumerateAdapters_WithSurfaceHint(t *testing.T) {
 
 // TestNoopCreateSurface tests surface creation.
 func TestNoopCreateSurface(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -146,7 +146,7 @@ func TestNoopCreateSurface(t *testing.T) {
 
 // TestNoopAdapterOpen tests opening a device from an adapter.
 func TestNoopAdapterOpen(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -185,7 +185,7 @@ func TestNoopAdapterOpen(t *testing.T) {
 
 // TestNoopAdapterCapabilities tests adapter capability queries.
 func TestNoopAdapterCapabilities(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -955,7 +955,7 @@ func TestNoopWriteReadBufferWithOffset(t *testing.T) {
 
 // TestNoopSurfaceConfigure tests surface configuration.
 func TestNoopSurfaceConfigure(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, _ := api.CreateInstance(nil)
 	defer instance.Destroy()
 
@@ -986,7 +986,7 @@ func TestNoopSurfaceConfigure(t *testing.T) {
 
 // TestNoopSurfaceAcquireTexture tests surface texture acquisition.
 func TestNoopSurfaceAcquireTexture(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, _ := api.CreateInstance(nil)
 	defer instance.Destroy()
 
@@ -1099,7 +1099,7 @@ func TestNoopFenceWait(t *testing.T) {
 // TestNoopFullLifecycle tests complete workflow from instance to rendering.
 func TestNoopFullLifecycle(t *testing.T) {
 	// Create instance
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -1640,7 +1640,7 @@ func TestNoopDestroyMethods(t *testing.T) {
 func createTestDevice(t *testing.T) (hal.Device, func()) {
 	t.Helper()
 
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -1664,7 +1664,7 @@ func createTestDevice(t *testing.T) (hal.Device, func()) {
 func createTestDeviceAndQueue(t *testing.T) (hal.Device, hal.Queue, func()) {
 	t.Helper()
 
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)

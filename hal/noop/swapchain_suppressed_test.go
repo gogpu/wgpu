@@ -17,7 +17,7 @@ import (
 // does not panic on the noop backend. This is the minimum contract for non-Vulkan
 // backends: accept the call silently.
 func TestSetSwapchainSuppressed_NoopNoPanic(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -45,7 +45,7 @@ func TestSetSwapchainSuppressed_NoopNoPanic(t *testing.T) {
 // normally while swapchain is suppressed. On noop this is trivially true but
 // confirms the interface contract holds end-to-end.
 func TestSetSwapchainSuppressed_SubmitDuringSuppression(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -101,7 +101,7 @@ func TestSetSwapchainSuppressed_SubmitDuringSuppression(t *testing.T) {
 // SetSwapchainSuppressed(true) twice or SetSwapchainSuppressed(false) twice
 // does not panic or corrupt state.
 func TestSetSwapchainSuppressed_Idempotent(t *testing.T) {
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
@@ -136,7 +136,7 @@ func TestSetSwapchainSuppressed_Idempotent(t *testing.T) {
 func BenchmarkSetSwapchainSuppressed(b *testing.B) {
 	b.ReportAllocs()
 
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, _ := api.CreateInstance(nil)
 	defer instance.Destroy()
 

@@ -17,16 +17,19 @@ const (
 )
 
 // API implements hal.Backend for the software backend.
-type API struct{}
+type Backend struct{}
+
+// NewBackend returns a software backend instance.
+func NewBackend() Backend { return Backend{} }
 
 // Variant returns the backend type identifier.
-func (API) Variant() gputypes.Backend {
+func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendEmpty
 }
 
 // CreateInstance creates a new software rendering instance.
 // Always succeeds and returns a CPU-based rendering instance.
-func (API) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
+func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 	return &Instance{}, nil
 }
 

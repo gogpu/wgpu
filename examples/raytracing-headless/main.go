@@ -183,7 +183,7 @@ func renderImage(bvh *software.BVHNode) error {
 }
 
 func createSoftwareDevice() (hal.Device, hal.Queue, func(), error) {
-	backend := software.API{}
+	backend := software.NewBackend()
 	inst, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("instance: %w", err)

@@ -12,14 +12,14 @@ import (
 )
 
 func TestBackendRegistration(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	if backend.Variant() != gputypes.BackendEmpty {
 		t.Errorf("Expected BackendEmpty, got %v", backend.Variant())
 	}
 }
 
 func TestInstanceCreation(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("Failed to create instance: %v", err)
@@ -76,7 +76,7 @@ func TestCreateSurfaceRejectsForeignTargetBeforeStoringHandles(t *testing.T) {
 }
 
 func TestAdapterEnumeration(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -95,7 +95,7 @@ func TestAdapterEnumeration(t *testing.T) {
 }
 
 func TestDeviceCreation(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -117,7 +117,7 @@ func TestDeviceCreation(t *testing.T) {
 }
 
 func TestBufferCreation(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -152,7 +152,7 @@ func TestBufferCreation(t *testing.T) {
 }
 
 func TestBufferWriteRead(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -186,7 +186,7 @@ func TestBufferWriteRead(t *testing.T) {
 }
 
 func TestTextureCreation(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -229,7 +229,7 @@ func TestTextureCreation(t *testing.T) {
 }
 
 func TestTextureClear(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -266,7 +266,7 @@ func TestTextureClear(t *testing.T) {
 }
 
 func TestSurfaceConfiguration(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -307,7 +307,7 @@ func TestSurfaceConfiguration(t *testing.T) {
 }
 
 func TestSurfaceFramebufferReadback(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -374,7 +374,7 @@ func TestComputePipelineNoSPIRV(t *testing.T) {
 }
 
 func TestAdapterDownlevelHasCompute(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -395,7 +395,7 @@ func TestAdapterDownlevelHasCompute(t *testing.T) {
 
 func createSoftwareDevice(t *testing.T) (*Device, hal.Queue, func()) {
 	t.Helper()
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	adapters := instance.EnumerateAdapters(nil)
 	openDev, _ := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
@@ -1048,7 +1048,7 @@ func TestComputePassEncoderNoPipeline(t *testing.T) {
 // =============================================================================
 
 func TestSurfaceZeroArea(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -1079,7 +1079,7 @@ func TestSurfaceZeroArea(t *testing.T) {
 }
 
 func TestSurfaceAcquireTexture(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
@@ -1118,7 +1118,7 @@ func TestSurfaceAcquireTexture(t *testing.T) {
 }
 
 func TestSurfaceStoresDisplayHandle(t *testing.T) {
-	backend := API{}
+	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
 
