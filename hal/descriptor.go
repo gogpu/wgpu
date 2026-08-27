@@ -4,6 +4,15 @@ package hal
 
 import "github.com/gogpu/gputypes"
 
+// MaxColorAttachments is the WebGPU specification limit for the number of
+// color attachments per render pass. Matches Rust wgpu MAX_COLOR_ATTACHMENTS.
+const MaxColorAttachments = 8
+
+// MaxTotalAttachments is the maximum number of Vulkan attachments in a single
+// render pass: up to 8 color + 8 resolve (one per color for MSAA) + 1 depth/stencil.
+// Matches Rust wgpu-hal vulkan MAX_TOTAL_ATTACHMENTS.
+const MaxTotalAttachments = MaxColorAttachments*2 + 1
+
 // InstanceDescriptor describes how to create a GPU instance.
 type InstanceDescriptor struct {
 	// Backends specifies which backends to enable.
