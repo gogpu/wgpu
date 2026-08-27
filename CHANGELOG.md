@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.7] - 2026-08-27
+
+### Fixed
+
+- **vulkan:** Fix array texture uploads — `Origin.Z` now maps to `BaseArrayLayer` for 2D textures (#323, @dvoyni)
+  - Non-3D textures: `Origin.Z` / `DepthOrArrayLayers` → array layers (was incorrectly mapped to depth offset)
+  - Pending-write barriers now target correct array subresources (was hardcoded `BaseArrayLayer: 0`)
+  - Barrier `Aspect` uses caller-supplied value instead of hardcoded `TextureAspectAll`
+
+### Changed
+
+- **deps:** naga v0.18.0 → v0.19.0
+
 ## [0.31.6] - 2026-08-23
 
 ### Added
