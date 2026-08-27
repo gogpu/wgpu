@@ -155,10 +155,10 @@ linters:
           - nestif
           - maintidx
 
-      # Metal backend (//go:build darwin): nolintlint false positives on
-      # cross-GOOS lint (golangci-lint#3833). unparam doesn't trigger without
-      # full darwin type info, so //nolint:unparam appears "unused".
-      - path: hal/metal/.*\.go
+      # Metal queue (//go:build darwin): nolintlint false positive on
+      # //nolint:unparam — unparam doesn't trigger on cross-GOOS lint without
+      # full darwin type info (golangci-lint#3833).
+      - path: hal/metal/queue\.go
         linters:
           - nolintlint
 
