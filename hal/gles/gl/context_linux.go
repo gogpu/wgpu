@@ -494,6 +494,7 @@ type Context struct {
 	glFramebufferTexture2D   unsafe.Pointer
 	glCheckFramebufferStatus unsafe.Pointer
 	glDrawBuffers            unsafe.Pointer
+	glClearBufferfv          unsafe.Pointer // GL 3.0+ — per-buffer float clear
 
 	// Pixel read/store (GL 1.0+)
 	glReadPixels  unsafe.Pointer
@@ -692,6 +693,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glFramebufferTexture2D = getProcAddr("glFramebufferTexture2D")
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
+	c.glClearBufferfv = getProcAddr("glClearBufferfv")
 
 	// Pixel read/store
 	c.glReadPixels = getProcAddr("glReadPixels")
@@ -1486,6 +1488,36 @@ func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	args := [1]unsafe.Pointer{unsafe.Pointer(&target)}
 	_, _ = ffi.CallFunction(&cifUInt321, c.glCheckFramebufferStatus, unsafe.Pointer(&result), args[:])
 	return result
+}
+
+// DrawBuffers specifies a list of color buffers to be drawn into.
+// Matches Rust wgpu-hal GLES SetDrawColorBuffers (queue.rs:1202-1207).
+func (c *Context) DrawBuffers(bufs []uint32) {
+	if len(bufs) == 0 {
+		return
+	}
+	n := int32(len(bufs))
+	pBufs := &bufs[0]
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&n),
+		unsafe.Pointer(&pBufs),
+	}
+	_, _ = ffi.CallFunction(&cifVoid2, c.glDrawBuffers, nil, args[:])
+}
+
+// ClearBufferfv clears a specific draw buffer with float values.
+// buffer must be GL_COLOR, drawBuffer is the index (0..MAX_DRAW_BUFFERS-1),
+// value points to 4 float32 values (RGBA).
+// Matches Rust wgpu-hal GLES ClearColorF (queue.rs:1222).
+func (c *Context) ClearBufferfv(buffer uint32, drawBuffer int32, value *[4]float32) {
+	db := uint32(drawBuffer)
+	pValue := unsafe.Pointer(value)
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&buffer),
+		unsafe.Pointer(&db),
+		unsafe.Pointer(&pValue),
+	}
+	_, _ = ffi.CallFunction(&cifVoid3Shader, c.glClearBufferfv, nil, args[:])
 }
 
 // --- Renderbuffers ---

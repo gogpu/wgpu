@@ -368,18 +368,31 @@ func TestRenderPassEncoder_ClearColorOnLoad(t *testing.T) {
 	}
 	_ = enc.BeginRenderPass(desc)
 
-	if len(enc.commands) != 1 {
-		t.Fatalf("expected 1 command for clear, got %d", len(enc.commands))
+	// BeginRenderPass emits: SetDrawColorBuffersCommand + ClearColorBufferCommand
+	if len(enc.commands) != 2 {
+		t.Fatalf("expected 2 commands (draw buffers + clear), got %d", len(enc.commands))
 	}
 
-	cmd, ok := enc.commands[0].(*ClearColorCommand)
+	// First command: SetDrawColorBuffersCommand
+	drawBufsCmd, ok := enc.commands[0].(*SetDrawColorBuffersCommand)
 	if !ok {
-		t.Fatalf("expected ClearColorCommand, got %T", enc.commands[0])
+		t.Fatalf("expected SetDrawColorBuffersCommand, got %T", enc.commands[0])
+	}
+	if drawBufsCmd.count != 1 {
+		t.Errorf("draw buffer count = %d, want 1", drawBufsCmd.count)
 	}
 
-	if cmd.r != 1.0 || cmd.g != 0.5 || cmd.b != 0.25 || cmd.a != 1.0 {
-		t.Errorf("clear color = (%v, %v, %v, %v), want (1.0, 0.5, 0.25, 1.0)",
-			cmd.r, cmd.g, cmd.b, cmd.a)
+	// Second command: ClearColorBufferCommand (per-buffer clear via glClearBufferfv)
+	cmd, ok := enc.commands[1].(*ClearColorBufferCommand)
+	if !ok {
+		t.Fatalf("expected ClearColorBufferCommand, got %T", enc.commands[1])
+	}
+
+	if cmd.drawBuffer != 0 {
+		t.Errorf("drawBuffer = %d, want 0", cmd.drawBuffer)
+	}
+	if cmd.color != [4]float32{1.0, 0.5, 0.25, 1.0} {
+		t.Errorf("clear color = %v, want [1.0, 0.5, 0.25, 1.0]", cmd.color)
 	}
 }
 

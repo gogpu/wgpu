@@ -97,6 +97,7 @@ type Context struct {
 	glFramebufferTexture2D   uintptr
 	glCheckFramebufferStatus uintptr
 	glDrawBuffers            uintptr
+	glClearBufferfv          uintptr // GL 3.0+ — per-buffer float clear
 
 	// Pixel read/store (GL 1.0+)
 	glReadPixels  uintptr
@@ -266,6 +267,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glFramebufferTexture2D = getProcAddr("glFramebufferTexture2D")
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
+	c.glClearBufferfv = getProcAddr("glClearBufferfv")
 
 	// Pixel read/store
 	c.glReadPixels = getProcAddr("glReadPixels")
@@ -778,6 +780,26 @@ func (c *Context) FramebufferTexture2D(target, attachment, textarget, texture ui
 func (c *Context) CheckFramebufferStatus(target uint32) uint32 {
 	r, _, _ := syscall.SyscallN(c.glCheckFramebufferStatus, uintptr(target))
 	return uint32(r)
+}
+
+// DrawBuffers specifies a list of color buffers to be drawn into.
+// Matches Rust wgpu-hal GLES SetDrawColorBuffers (queue.rs:1202-1207).
+// bufs must contain GL_COLOR_ATTACHMENT0..N or GL_NONE values.
+func (c *Context) DrawBuffers(bufs []uint32) {
+	if len(bufs) == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawBuffers, uintptr(len(bufs)),
+		uintptr(unsafe.Pointer(&bufs[0])))
+}
+
+// ClearBufferfv clears a specific draw buffer with float values.
+// buffer must be GL_COLOR, drawBuffer is the index (0..MAX_DRAW_BUFFERS-1),
+// value points to 4 float32 values (RGBA).
+// Matches Rust wgpu-hal GLES ClearColorF (queue.rs:1222).
+func (c *Context) ClearBufferfv(buffer uint32, drawBuffer int32, value *[4]float32) {
+	syscall.SyscallN(c.glClearBufferfv, uintptr(buffer), uintptr(drawBuffer),
+		uintptr(unsafe.Pointer(value)))
 }
 
 // --- Renderbuffers ---
