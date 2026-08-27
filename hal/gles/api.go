@@ -17,6 +17,9 @@ import (
 // Backend implements hal.Backend for OpenGL ES / OpenGL 3.3+.
 type Backend struct{}
 
+// NewBackend returns a GLES backend instance.
+func NewBackend() Backend { return Backend{} }
+
 // Variant returns the backend type identifier.
 func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendGL

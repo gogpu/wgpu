@@ -201,6 +201,22 @@ wgpu public API
 
 Key files: `promise.go` (async→sync), `convert_enums.go` (97 TextureFormats, 31 VertexFormats + all WebGPU enums), `convert_resources.go` (JS descriptor builders), `surface.go` (Canvas + GPUCanvasContext).
 
+### `internal/raytracing/` — Ray Tracing Resources & Validation (ADR-062)
+
+Ray tracing build orchestration, compaction state machine, and validation — isolated in `internal/` per ADR-069 (struct ownership + callback interface pattern). Core holds pointers, calls directly.
+
+- `types.go` — CompactionState (Idle→Waiting→Ready→Compacted), BlasAction enums
+- `blas.go`, `tlas.go` — BLAS/TLAS resource structs with helpers (IsBuilt, AllowsCompaction)
+- `build.go` — BuildContext: scratch buffer alignment, BLAS→TLAS dependency tracking (built_index)
+- `compaction.go` — per-state handler functions (nestif ≤4 compliance)
+- `validate.go` — 9 validation checks: feature gate, geometry/instance counts, build ordering, alignment, compact state
+- `errors.go` — typed ValidationError with operation constants
+- `context.go` — DeviceContext callback interface (core.Device implements without import cycle)
+
+HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. All 4 GPU backends implement real API calls (Vulkan VK_KHR, DX12 DXR, Metal MTL, Software CPU BVH). GLES/Noop return ErrUnsupported.
+
+~1,300 LOC internal, 73 tests, 96.8% coverage. Example: `examples/raytracing-headless/`.
+
 ## Typed Surface Targets (Rust v29 Parity)
 
 Surface creation uses typed targets instead of raw `uintptr` handles:

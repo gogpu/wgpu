@@ -15,6 +15,9 @@ import (
 // Backend implements hal.Backend for Metal.
 type Backend struct{}
 
+// NewBackend returns a Metal backend instance.
+func NewBackend() Backend { return Backend{} }
+
 // Variant returns the backend type identifier.
 func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendMetal

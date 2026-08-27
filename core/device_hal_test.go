@@ -77,6 +77,13 @@ func (mockCommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buf
 func (mockCommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	return mockRenderPassEncoder{}
 }
+func (mockCommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {
+}
+func (mockCommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+func (mockCommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+func (mockCommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
 func (mockCommandEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
 	return mockComputePassEncoder{}
 }
@@ -174,8 +181,19 @@ func (m *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDesc
 	return nil, fmt.Errorf("mock: render bundles not supported")
 }
 func (m *mockHALDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
-func (m *mockHALDevice) WaitIdle() error                        { return nil }
-func (m *mockHALDevice) Destroy()                               { m.destroyed = true }
+func (m *mockHALDevice) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("mock: ray tracing not supported")
+}
+func (m *mockHALDevice) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+func (m *mockHALDevice) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+func (m *mockHALDevice) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+func (m *mockHALDevice) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+func (m *mockHALDevice) WaitIdle() error                               { return nil }
+func (m *mockHALDevice) Destroy()                                      { m.destroyed = true }
 
 func TestDevice_NewDevice(t *testing.T) {
 	adapter := &Adapter{Info: gputypes.AdapterInfo{Name: "Test"}}

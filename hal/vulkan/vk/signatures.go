@@ -226,6 +226,21 @@ var (
 
 	// VkResult(handle, ptr, u64) - vkWaitSemaphores
 	SigResultHandlePtrU64 types.CallInterface
+
+	// === Ray tracing signatures ===
+
+	// void(handle, u32, ptr, ptr) - vkCmdBuildAccelerationStructuresKHR
+	SigVoidCmdBuildAccelerationStructures types.CallInterface
+
+	// void(handle, u32, ptr, u32, handle, u32) - vkCmdWriteAccelerationStructuresPropertiesKHR
+	SigVoidCmdWriteASProperties types.CallInterface
+
+	// VkDeviceAddress(handle, ptr) - vkGetBufferDeviceAddress, vkGetAccelerationStructureDeviceAddressKHR
+	// Returns uint64 (device address), not VkResult.
+	SigU64HandlePtr types.CallInterface
+
+	// void(handle, handle, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
+	SigVoidHandleHandlePtrPtrPtr types.CallInterface
 )
 
 // InitSignatures prepares all CallInterface templates.
@@ -715,6 +730,36 @@ func InitSignatures() error {
 	// VkResult(handle, ptr, u64) - vkWaitSemaphores
 	err = ffi.PrepareCallInterface(&SigResultHandlePtrU64, types.DefaultCall, resultRet,
 		[]*types.TypeDescriptor{u64, ptr, u64})
+	if err != nil {
+		return err
+	}
+
+	// === Ray tracing signatures ===
+
+	// void(handle, u32, ptr, ptr) - vkCmdBuildAccelerationStructuresKHR
+	err = ffi.PrepareCallInterface(&SigVoidCmdBuildAccelerationStructures, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u32, ptr, ptr})
+	if err != nil {
+		return err
+	}
+
+	// void(handle, u32, ptr, u32, handle, u32) - vkCmdWriteAccelerationStructuresPropertiesKHR
+	err = ffi.PrepareCallInterface(&SigVoidCmdWriteASProperties, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u32, ptr, u32, u64, u32})
+	if err != nil {
+		return err
+	}
+
+	// VkDeviceAddress(handle, ptr) - returns uint64
+	err = ffi.PrepareCallInterface(&SigU64HandlePtr, types.DefaultCall, u64,
+		[]*types.TypeDescriptor{u64, ptr})
+	if err != nil {
+		return err
+	}
+
+	// void(handle, handle, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
+	err = ffi.PrepareCallInterface(&SigVoidHandleHandlePtrPtrPtr, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u64, ptr, ptr, ptr})
 	if err != nil {
 		return err
 	}

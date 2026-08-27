@@ -8,16 +8,19 @@ import (
 )
 
 // API implements hal.Backend for the noop backend.
-type API struct{}
+type Backend struct{}
+
+// NewBackend returns a noop backend instance.
+func NewBackend() Backend { return Backend{} }
 
 // Variant returns the backend type identifier.
-func (API) Variant() gputypes.Backend {
+func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendEmpty
 }
 
 // CreateInstance creates a new noop instance.
 // Always succeeds and returns a placeholder instance.
-func (API) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
+func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 	return &Instance{}, nil
 }
 

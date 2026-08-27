@@ -24,6 +24,9 @@ const (
 // Backend implements hal.Backend for Vulkan.
 type Backend struct{}
 
+// NewBackend returns a Vulkan backend instance.
+func NewBackend() Backend { return Backend{} }
+
 // Variant returns the backend type identifier.
 func (Backend) Variant() gputypes.Backend {
 	return gputypes.BackendVulkan

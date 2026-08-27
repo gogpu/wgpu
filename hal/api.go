@@ -248,6 +248,24 @@ type Device interface {
 	// Call this before destroying resources to ensure the GPU is not using them.
 	WaitIdle() error
 
+	// CreateAccelerationStructure creates an acceleration structure (BLAS or TLAS).
+	// Requires FeatureRayQuery. Returns ErrUnsupported if RT is not available.
+	CreateAccelerationStructure(desc *AccelerationStructureDescriptor) (AccelerationStructure, error)
+
+	// DestroyAccelerationStructure destroys an acceleration structure.
+	DestroyAccelerationStructure(as AccelerationStructure)
+
+	// GetAccelerationStructureBuildSizes returns the sizes needed for building an AS.
+	GetAccelerationStructureBuildSizes(desc *GetAccelerationStructureBuildSizesDescriptor) AccelerationStructureBuildSizes
+
+	// GetAccelerationStructureDeviceAddress returns the GPU device address of an AS.
+	// Used for TLAS instance buffer population (BlasAddress field).
+	GetAccelerationStructureDeviceAddress(as AccelerationStructure) uint64
+
+	// TlasInstanceToBytes converts a TlasInstance to the backend-specific
+	// packed byte representation (64 bytes for Vulkan/DX12/Metal).
+	TlasInstanceToBytes(instance TlasInstance) []byte
+
 	// Destroy releases the device.
 	// All resources created from this device must be destroyed first.
 	Destroy()

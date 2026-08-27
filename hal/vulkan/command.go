@@ -1509,6 +1509,9 @@ func (e *ComputePassEncoder) insertComputeBarrier() {
 	)
 }
 
+// Ray tracing methods (BuildAccelerationStructures, PlaceAccelerationStructureBarrier,
+// CopyAccelerationStructure, ReadAccelerationStructureCompactSize) are in raytracing.go.
+
 // --- Helper functions ---
 
 // offscreenFinalLayout returns the Vulkan image layout that an offscreen

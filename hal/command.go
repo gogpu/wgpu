@@ -74,6 +74,21 @@ type CommandEncoder interface {
 	// BeginComputePass begins a compute pass.
 	// Returns a compute pass encoder for recording dispatch commands.
 	BeginComputePass(desc *ComputePassDescriptor) ComputePassEncoder
+
+	// BuildAccelerationStructures builds one or more acceleration structures.
+	// Batched to match Vulkan vkCmdBuildAccelerationStructuresKHR.
+	// No-op on backends without RT support.
+	BuildAccelerationStructures(descriptors []BuildAccelerationStructureDescriptor)
+
+	// PlaceAccelerationStructureBarrier inserts an AS memory barrier.
+	PlaceAccelerationStructureBarrier(barrier AccelerationStructureBarrier)
+
+	// CopyAccelerationStructure copies or compacts an AS.
+	CopyAccelerationStructure(src, dst AccelerationStructure, copyMode gputypes.AccelerationStructureCopyMode)
+
+	// ReadAccelerationStructureCompactSize reads the post-compact size of an AS
+	// into the given buffer. Used for the compaction state machine.
+	ReadAccelerationStructureCompactSize(as AccelerationStructure, buffer Buffer, offset uint64)
 }
 
 // RenderPassEncoder records render commands within a render pass.

@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.31.8
+## Current State: v0.32.0
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete** (~127K LOC)
@@ -106,6 +106,9 @@
 ✅ **Rust v29 typed surface targets** — `SurfaceTarget`/`SurfaceTargetUnsafe` with opaque constructors for Win32, Xlib, Wayland, Android NDK, Metal, Web. `hal.SurfaceTarget.RequireKind()` discriminator. Same contract across native/rust/browser (@besmpl #273)
 ✅ **Android arm64 Vulkan (guarded preview)** — API 29+, Bionic loader via goffi v0.6.1, Rust v29 WSI parity. Callbacks rejected pending physical-device proof (@besmpl #268)
 ✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. `hal.PixelReader` optional capability. Closes #256 (@besmpl #276)
+✅ **MRT fix** — Multiple Render Targets across all 5 backends (#322, @darkliquid)
+✅ **Ray Tracing Extensions (experimental, ADR-062)** — inline ray queries, 4 backends (Vulkan VK_KHR + DX12 DXR + Metal macOS 15+ + Software CPU BVH). `internal/raytracing/` with build orchestration, compaction state machine, 9 validation checks. 96.8% coverage. Visual verification example. ~8,000 LOC.
+✅ **Unified backend naming** — `NewBackend()` constructor on all 6 backends, `API` → `Backend` (software/noop)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
@@ -180,7 +183,8 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 - [ ] **Embedded Linux** — headless compute (Mesa surfaceless, Raspberry Pi)
 
 **Advanced GPU Features:**
-- [ ] Ray tracing extensions (VK_KHR_ray_tracing_pipeline)
+- [x] ~~Ray tracing extensions~~ → v0.32.0 (ADR-062: Vulkan + DX12 + Metal + Software, inline ray queries)
+- [ ] Ray tracing pipelines (VK_KHR_ray_tracing_pipeline) — future, after ray query stabilization
 - [ ] Bindless resources (descriptor indexing)
 - [ ] Mesh shaders (VK_EXT_mesh_shader)
 - [ ] Video decode/encode (VK_KHR_video_queue)

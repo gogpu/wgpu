@@ -30,7 +30,7 @@ func (d *releaseTrackingDevice) Destroy() {
 }
 
 func TestDeviceReleaseWaitsBeforeHALDestroy(t *testing.T) {
-	instance, err := (noop.API{}).CreateInstance(nil)
+	instance, err := (noop.NewBackend()).CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("noop CreateInstance: %v", err)
 	}

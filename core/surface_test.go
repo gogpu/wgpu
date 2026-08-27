@@ -19,7 +19,7 @@ import (
 func newTestSurface(t *testing.T) (*Surface, *Device, hal.Queue) {
 	t.Helper()
 
-	api := noop.API{}
+	api := noop.NewBackend()
 	inst, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)

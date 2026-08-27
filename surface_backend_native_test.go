@@ -49,7 +49,7 @@ func (s *surfaceDestroyCounter) Destroy() {
 
 func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 	t.Helper()
-	hal.RegisterBackend(software.API{})
+	hal.RegisterBackend(software.NewBackend())
 	instance, err := CreateInstance(&InstanceDescriptor{Backends: BackendsAll})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)

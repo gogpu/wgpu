@@ -124,7 +124,7 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 // createNoopDeviceForTest creates a noop HAL device for testing.
 func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 	t.Helper()
-	api := noop.API{}
+	api := noop.NewBackend()
 	inst, err := api.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("noop.CreateInstance failed: %v", err)
