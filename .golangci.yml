@@ -155,6 +155,14 @@ linters:
           - nestif
           - maintidx
 
+      # Metal queue (//go:build darwin): nolintlint false positive on
+      # //nolint:unparam — unparam doesn't trigger on cross-GOOS lint without
+      # full darwin type info (golangci-lint#3833).
+      - path: hal/metal/queue\.go
+        linters:
+          - nolintlint
+        text: "unparam"
+
       # GL context - requires unsafe for C interop
       - path: hal/gles/gl/context\.go
         linters:
