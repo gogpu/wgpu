@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.8] - 2026-08-27
+
+### Fixed
+
+- **all backends:** Multiple Render Targets (MRT) — render passes now honor all `ColorAttachments`, not just `[0]` (#322, @dvoyni, @darkliquid)
+  - **Vulkan:** `RenderPassKey`/`FramebufferKey` refactored from scalar to `[MaxColorAttachments]` arrays; `BeginRenderPass` iterates all attachments; `createRenderPass` builds N `VkAttachmentReference` entries; `CreateRenderPipeline` multi-target blend (ADR-061)
+  - **DX12:** `IndependentBlendEnable` set to TRUE (was hardcoded 0 — D3D12 replicated `RenderTarget[0]` across all targets)
+  - **GLES:** `glDrawBuffers` + per-attachment `glClearBufferfv` + FBO multi-attachment + `ColorTargetDesc` per-target blend (Rust wgpu parity)
+  - **Software:** SPIR-V interpreter multi-output (`@location(N)`), per-target blend, `MRTFragmentShaderFunc`
+  - **Metal:** verified already MRT-ready (iterates all attachments)
+  - **Core validation:** `ValidateRenderPassDescriptor` (attachment count/sampleCount/dimensions), `RenderPassContext.CheckCompatible` (pipeline/pass format+sampleCount+depthStencil match)
+  - Constants: `MaxColorAttachments=8`, `MaxTotalAttachments=17` (Rust wgpu parity)
+  - Zero heap allocations in MRT hot paths (benchmarked: RenderPassKey 192B stack, FramebufferKey 160B stack)
+  - Validated against Rust wgpu reference and WebGPU specification
+
 ## [0.31.7] - 2026-08-27
 
 ### Fixed

@@ -69,6 +69,23 @@ func (r *RenderPassEncoder) getTargetTexture() *Texture {
 	return view.texture
 }
 
+// getTargetTextures returns textures for all color attachments.
+// Index i corresponds to @location(i) in the fragment shader.
+func (r *RenderPassEncoder) getTargetTextures() []*Texture {
+	targets := make([]*Texture, len(r.desc.ColorAttachments))
+	for i, att := range r.desc.ColorAttachments {
+		if view, ok := att.View.(*TextureView); ok && view.texture != nil {
+			targets[i] = view.texture
+		}
+	}
+	return targets
+}
+
+// hasMRT returns true if the render pass has more than one color attachment.
+func (r *RenderPassEncoder) hasMRT() bool {
+	return len(r.desc.ColorAttachments) > 1
+}
+
 // executeFullscreenBlit blits the first bound texture to the target.
 // This is the fast path for gogpu's renderTexturedQuad (6 vertices, no vertex buffer,
 // texture in bind group). Returns true if blit was performed, false if no source
@@ -376,6 +393,30 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 			break
 		}
 	}
+
+	// MRT path: when multiple color attachments exist, use the MRT fragment
+	// shader to write outputs for all @location(N) targets simultaneously.
+	targets := r.getTargetTextures()
+	if r.hasMRT() && hasAttrs {
+		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+			blendStates := r.getPerTargetBlendStates()
+			pipe.DrawTrianglesWithMRTShader(triangles, mrtFunc, func(x, y int, colors [][4]float32) {
+				// Write locations 1+ to their respective target textures.
+				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
+					if targets[loc] != nil {
+						var bs *raster.BlendState
+						if loc < len(blendStates) {
+							bs = blendStates[loc]
+						}
+						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
+					}
+				}
+			})
+			writeRasterToTarget(pipe, target)
+			return
+		}
+	}
+
 	switch {
 	case hasAttrs:
 		// Try per-pixel fragment shader first; fall back to direct attribute interpolation.
@@ -1193,6 +1234,27 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 		allTriangles = append(allTriangles, r.verticesToTriangles(vertices)...)
 	}
 
+	// MRT path for SPIR-V draws with multiple color attachments.
+	targets := r.getTargetTextures()
+	if r.hasMRT() && hasLocOutputs {
+		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+			blendStates := r.getPerTargetBlendStates()
+			pipe.DrawTrianglesWithMRTShader(allTriangles, mrtFunc, func(x, y int, colors [][4]float32) {
+				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
+					if targets[loc] != nil {
+						var bs *raster.BlendState
+						if loc < len(blendStates) {
+							bs = blendStates[loc]
+						}
+						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
+					}
+				}
+			})
+			writeRasterToTarget(pipe, target)
+			return true
+		}
+	}
+
 	if hasLocOutputs {
 		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
 			pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc)
@@ -1362,6 +1424,195 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc 
 		}
 		return shader.Vec4ToFloat32(colorVal)
 	}
+}
+
+// buildMRTFragmentShaderFunc creates a raster.MRTFragmentShaderFunc that executes
+// the SPIR-V fragment shader per pixel and returns colors for ALL @location(N)
+// outputs, supporting Multiple Render Targets. The returned slice is indexed by
+// location number (0..N).
+//
+// Returns nil if the pipeline has no fragment shader with @location inputs, or
+// if there is only a single output (in which case buildFragmentShaderFunc is used).
+func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShaderFunc {
+	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
+		return nil
+	}
+
+	fsModule, ok := r.pipeline.desc.Fragment.Module.(*ShaderModule)
+	if !ok || fsModule == nil {
+		return nil
+	}
+
+	parsed := fsModule.ParsedModule()
+	if parsed == nil {
+		return nil
+	}
+
+	fsEntry := r.pipeline.desc.Fragment.EntryPoint
+	ep, ok := parsed.EntryPoints[fsEntry]
+	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
+		return nil
+	}
+
+	// Classify fragment shader interface variables.
+	type fragLocVar struct {
+		varID    uint32
+		location int
+	}
+	var locationInputs []fragLocVar
+	var locationOutputs []fragLocVar
+
+	for _, varID := range ep.InterfaceIDs {
+		vi, exists := parsed.Variables[varID]
+		if !exists {
+			continue
+		}
+		loc := parsed.GetLocation(varID)
+		if vi.StorageClass == shader.StorageClassInput && loc >= 0 {
+			locationInputs = append(locationInputs, fragLocVar{varID: varID, location: loc})
+		}
+		if vi.StorageClass == shader.StorageClassOutput && loc >= 0 {
+			locationOutputs = append(locationOutputs, fragLocVar{varID: varID, location: loc})
+		}
+	}
+
+	if len(locationInputs) == 0 || len(locationOutputs) == 0 {
+		return nil
+	}
+
+	// Determine the max output location to size the result slice.
+	maxLoc := 0
+	for _, lo := range locationOutputs {
+		if lo.location > maxLoc {
+			maxLoc = lo.location
+		}
+	}
+	numOutputs := maxLoc + 1
+
+	ctx := r.buildExecutionContext()
+
+	return func(attrs []float32) [][4]float32 {
+		inputs := make(map[uint32]shader.Value)
+
+		// Feed interpolated attributes into fragment shader @location inputs.
+		offset := 0
+		for _, li := range locationInputs {
+			if offset >= len(attrs) {
+				break
+			}
+			width := parsed.GetTypeComponentCount(li.varID)
+			if width == 0 {
+				width = 4
+			}
+			end := offset + width
+			if end > len(attrs) {
+				end = len(attrs)
+			}
+			inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
+			offset = end
+		}
+
+		ctx.Inputs = inputs
+		outputs, err := parsed.ExecuteWithContext(fsEntry, ctx)
+		if err != nil {
+			// On error, return white for all targets.
+			result := make([][4]float32, numOutputs)
+			for i := range result {
+				result[i] = [4]float32{1, 1, 1, 1}
+			}
+			return result
+		}
+
+		// Collect outputs by location.
+		result := make([][4]float32, numOutputs)
+		for _, lo := range locationOutputs {
+			colorVal, ok := outputs[lo.varID]
+			if !ok {
+				result[lo.location] = [4]float32{0, 0, 0, 0}
+				continue
+			}
+			result[lo.location] = shader.Vec4ToFloat32(colorVal)
+		}
+		return result
+	}
+}
+
+// writeColorToTarget writes a single fragment color to a render target texture
+// at pixel coordinates (x, y), applying per-attachment blend state. This is
+// used for MRT outputs beyond location 0 (which is handled by the raster pipeline).
+func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *raster.BlendState) {
+	w := int(target.width)
+	h := int(target.height)
+	if x < 0 || x >= w || y < 0 || y >= h {
+		return
+	}
+	idx := (y*w + x) * 4
+	bgra := isBGRA(target.format)
+
+	target.mu.Lock()
+	if blend != nil && blend.Enabled {
+		r, g, b, a := raster.BlendFloatToByte(color,
+			target.data[idx+0], target.data[idx+1],
+			target.data[idx+2], target.data[idx+3],
+			*blend)
+		if bgra {
+			target.data[idx+0] = b
+			target.data[idx+1] = g
+			target.data[idx+2] = r
+			target.data[idx+3] = a
+		} else {
+			target.data[idx+0] = r
+			target.data[idx+1] = g
+			target.data[idx+2] = b
+			target.data[idx+3] = a
+		}
+	} else {
+		cr := clampBytef(color[0] * 255)
+		cg := clampBytef(color[1] * 255)
+		cb := clampBytef(color[2] * 255)
+		ca := clampBytef(color[3] * 255)
+		if bgra {
+			target.data[idx+0] = cb
+			target.data[idx+1] = cg
+			target.data[idx+2] = cr
+			target.data[idx+3] = ca
+		} else {
+			target.data[idx+0] = cr
+			target.data[idx+1] = cg
+			target.data[idx+2] = cb
+			target.data[idx+3] = ca
+		}
+	}
+	target.mu.Unlock()
+}
+
+// clampBytef clamps a float32 to [0,255] and returns as byte.
+func clampBytef(v float32) byte {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return byte(v)
+}
+
+// getPerTargetBlendStates returns blend states for all color attachment targets.
+// Index i corresponds to Fragment.Targets[i]. Returns nil entries for targets
+// without blend state.
+func (r *RenderPassEncoder) getPerTargetBlendStates() []*raster.BlendState {
+	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
+		return nil
+	}
+	frag := r.pipeline.desc.Fragment
+	result := make([]*raster.BlendState, len(r.desc.ColorAttachments))
+	for i := range result {
+		if i < len(frag.Targets) && frag.Targets[i].Blend != nil {
+			bs := convertBlendState(frag.Targets[i].Blend)
+			result[i] = &bs
+		}
+	}
+	return result
 }
 
 // clampBlitBounds narrows blit iteration bounds to the scissor rectangle.

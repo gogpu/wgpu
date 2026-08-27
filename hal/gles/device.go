@@ -509,12 +509,18 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		"elapsed", time.Since(start),
 	)
 
-	// Extract blend state and color write mask from the first color target.
-	var blend *gputypes.BlendState
-	colorWriteMask := gputypes.ColorWriteMaskAll
-	if desc.Fragment != nil && len(desc.Fragment.Targets) > 0 {
-		blend = desc.Fragment.Targets[0].Blend
-		colorWriteMask = desc.Fragment.Targets[0].WriteMask
+	// Extract per-target blend/write-mask configuration for MRT.
+	// Matches Rust wgpu-hal GLES device.rs:1559-1570: stores ALL color targets
+	// so that SetPipeline can apply per-draw-buffer blend state.
+	var colorTargets []ColorTargetDesc
+	if desc.Fragment != nil {
+		colorTargets = make([]ColorTargetDesc, len(desc.Fragment.Targets))
+		for i, ct := range desc.Fragment.Targets {
+			colorTargets[i] = ColorTargetDesc{
+				Blend:     ct.Blend,
+				WriteMask: ct.WriteMask,
+			}
+		}
 	}
 
 	pipeline := &RenderPipeline{
@@ -526,8 +532,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		frontFace:         desc.Primitive.FrontFace,
 		depthStencil:      desc.DepthStencil,
 		multisample:       desc.Multisample,
-		blend:             blend,
-		colorWriteMask:    colorWriteMask,
+		colorTargets:      colorTargets,
 		vertexBuffers:     desc.Vertex.Buffers,
 	}
 

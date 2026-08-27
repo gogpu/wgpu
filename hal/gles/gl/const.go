@@ -258,6 +258,9 @@ const (
 	DEPTH_BUFFER_BIT   = 0x00000100
 	STENCIL_BUFFER_BIT = 0x00000400
 
+	// Clear buffer target (for glClearBufferfv/iv/uiv)
+	COLOR = 0x1800
+
 	// Get parameters
 	VENDOR                           = 0x1F00
 	RENDERER                         = 0x1F01

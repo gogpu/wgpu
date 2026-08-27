@@ -629,6 +629,106 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 	}
 }
 
+// MRTFragmentShaderFunc computes output colors for multiple render targets.
+// It receives interpolated per-vertex attributes and returns a slice of RGBA
+// colors, one per render target (indexed by @location). The primary target
+// (location 0) is written to the pipeline's color buffer; additional targets
+// are written by the caller via the MRTOutput callback.
+type MRTFragmentShaderFunc func(attrs []float32) [][4]float32
+
+// MRTOutput is called by DrawTrianglesWithMRTShader for each fragment that
+// passes depth/stencil/scissor tests. It receives the pixel coordinates and
+// per-location output colors (index 0 = location 0, etc.). The caller uses
+// this to write colors beyond location 0 to their respective target textures.
+type MRTOutput func(x, y int, colors [][4]float32)
+
+// DrawTrianglesWithMRTShader rasterizes triangles and invokes fragFunc per
+// pixel for Multiple Render Targets. Location 0 is written to the pipeline's
+// color buffer (with blending). The mrtOut callback receives all per-location
+// colors so the caller can write locations 1+ to their respective textures.
+func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRTFragmentShaderFunc, mrtOut MRTOutput) {
+	p.mu.Lock()
+	viewport := p.viewport
+	depthTest := p.depthTest
+	depthWrite := p.depthWrite
+	depthCompare := p.depthCompare
+	cullMode := p.cullMode
+	frontFace := p.frontFace
+	blendState := p.blendState
+	stencilBuffer := p.stencilBuffer
+	stencilState := p.stencilState
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
+	p.mu.Unlock()
+
+	for i := range triangles {
+		tri := &triangles[i]
+
+		if ShouldCull(*tri, cullMode, frontFace) {
+			continue
+		}
+
+		Rasterize(*tri, viewport, func(frag Fragment) {
+			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
+				return
+			}
+
+			if !p.passesScissorTest(frag.X, frag.Y, scissor) {
+				return
+			}
+
+			result := p.performDepthStencilTest(
+				frag.X, frag.Y, frag.Depth,
+				depthTest, depthWrite, depthCompare,
+				stencilBuffer, stencilState,
+			)
+			if !result.passed {
+				return
+			}
+			if result.writeDepth {
+				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
+			}
+
+			colors := fragFunc(frag.Attributes)
+
+			// Write location 0 to the pipeline's color buffer.
+			if len(colors) > 0 {
+				srcColor := colors[0]
+				idx := (frag.Y*p.width + frag.X) * 4
+				p.mu.Lock()
+				if blendState.Enabled {
+					r, g, b, a := BlendFloatToByte(srcColor,
+						p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+						p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+						blendState)
+					p.colorBuffer[idx+0] = r
+					p.colorBuffer[idx+1] = g
+					p.colorBuffer[idx+2] = b
+					p.colorBuffer[idx+3] = a
+				} else {
+					p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
+					p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
+					p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
+					p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+				}
+				p.mu.Unlock()
+			}
+
+			// Notify caller about all per-location outputs for targets 1+.
+			if mrtOut != nil && len(colors) > 1 {
+				mrtOut(frag.X, frag.Y, colors)
+			}
+		})
+	}
+}
+
 // DrawTrianglesParallel uses tile-based parallel rasterization.
 // This can significantly speed up rendering for large numbers of triangles
 // by distributing work across multiple CPU cores.

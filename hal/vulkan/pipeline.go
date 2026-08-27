@@ -263,31 +263,36 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Create compatible render pass for pipeline (not dynamic rendering).
 	// This is required for Intel drivers that don't properly support VK_KHR_dynamic_rendering.
-	var depthFormat vk.Format
-	if desc.DepthStencil != nil {
-		depthFormat = textureFormatToVk(desc.DepthStencil.Format)
-	}
-
-	// Build render pass key for pipeline-compatible render pass
-	var colorFormat vk.Format
-	if len(colorFormats) > 0 {
-		colorFormat = colorFormats[0]
-	}
-
+	//
+	// Build a RenderPassKey with one entry per fragment target so that the
+	// pipeline render pass has the correct number of color attachments.
+	// This is critical for MRT: the pipeline and render pass must agree on
+	// the number and format of color attachments (Vulkan spec VUID-VkGraphicsPipelineCreateInfo).
 	rpKey := RenderPassKey{
-		ColorFormat:      colorFormat,
-		ColorLoadOp:      vk.AttachmentLoadOpClear,
-		ColorStoreOp:     vk.AttachmentStoreOpStore,
-		SampleCount:      vk.SampleCountFlagBits(sampleCount),
-		ColorFinalLayout: vk.ImageLayoutColorAttachmentOptimal, // ADR-059: Rust wgpu parity — pipelines use COLOR_ATTACHMENT_OPTIMAL for compatibility
-		HasResolve:       sampleCount > 1,                      // MSAA pipelines need resolve attachment
+		ColorCount:  len(colorFormats),
+		SampleCount: vk.SampleCountFlagBits(sampleCount),
 	}
-	if depthFormat != vk.FormatUndefined {
-		rpKey.DepthFormat = depthFormat
-		rpKey.DepthLoadOp = vk.AttachmentLoadOpClear
-		rpKey.DepthStoreOp = vk.AttachmentStoreOpDontCare
-		rpKey.StencilLoadOp = vk.AttachmentLoadOpDontCare
-		rpKey.StencilStoreOp = vk.AttachmentStoreOpDontCare
+	for i, cf := range colorFormats {
+		if i >= hal.MaxColorAttachments {
+			break
+		}
+		rpKey.Colors[i] = ColorAttachmentKeyEntry{
+			Format:      cf,
+			LoadOp:      vk.AttachmentLoadOpClear,
+			StoreOp:     vk.AttachmentStoreOpStore,
+			FinalLayout: vk.ImageLayoutColorAttachmentOptimal, // ADR-059: pipelines use COLOR_ATTACHMENT_OPTIMAL for compatibility
+			HasResolve:  sampleCount > 1,                      // MSAA pipelines need resolve attachment
+		}
+	}
+	if desc.DepthStencil != nil {
+		depthFormat := textureFormatToVk(desc.DepthStencil.Format)
+		if depthFormat != vk.FormatUndefined {
+			rpKey.DepthFormat = depthFormat
+			rpKey.DepthLoadOp = vk.AttachmentLoadOpClear
+			rpKey.DepthStoreOp = vk.AttachmentStoreOpDontCare
+			rpKey.StencilLoadOp = vk.AttachmentLoadOpDontCare
+			rpKey.StencilStoreOp = vk.AttachmentStoreOpDontCare
+		}
 	}
 
 	// Get or create compatible render pass

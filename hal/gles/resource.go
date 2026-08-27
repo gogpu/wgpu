@@ -179,6 +179,13 @@ type PipelineLayout struct {
 // Destroy is a no-op for pipeline layouts.
 func (l *PipelineLayout) Destroy() {}
 
+// ColorTargetDesc describes per-render-target blend and write mask state.
+// Matches Rust wgpu-hal GLES ColorTargetDesc (mod.rs:770-773).
+type ColorTargetDesc struct {
+	Blend     *gputypes.BlendState
+	WriteMask gputypes.ColorWriteMask
+}
+
 // RenderPipeline implements hal.RenderPipeline for OpenGL.
 type RenderPipeline struct {
 	programID uint32 // GL program object ID
@@ -192,11 +199,11 @@ type RenderPipeline struct {
 	depthStencil      *hal.DepthStencilState
 	multisample       gputypes.MultisampleState
 
-	// Blend state from the first color target (nil = no blending).
-	blend *gputypes.BlendState
-
-	// Color write mask from the first color target.
-	colorWriteMask gputypes.ColorWriteMask
+	// Per-target blend and write mask state for MRT.
+	// Matches Rust wgpu-hal GLES RenderPipeline.color_targets (mod.rs:798).
+	// When len == 1, uniform blend/mask is applied globally.
+	// When len > 1, indexed GL calls are used if available (GLES 3.2 / GL 4.0).
+	colorTargets []ColorTargetDesc
 
 	// Vertex buffer layouts from the pipeline descriptor.
 	// OpenGL requires explicit glVertexAttribPointer calls to configure

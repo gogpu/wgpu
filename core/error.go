@@ -975,3 +975,166 @@ func IsEncoderStateError(err error) bool {
 	var ese *EncoderStateError
 	return errors.As(err, &ese)
 }
+
+// =============================================================================
+// Render Pass Validation Errors (MRT — Multiple Render Targets)
+// =============================================================================
+
+// RenderPassValidationErrorKind represents the type of render pass validation error.
+type RenderPassValidationErrorKind int
+
+const (
+	// RenderPassErrorTooManyColorAttachments indicates the number of color
+	// attachments exceeds device.limits.maxColorAttachments.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#dom-gpudevice-createcommandencoder
+	RenderPassErrorTooManyColorAttachments RenderPassValidationErrorKind = iota
+
+	// RenderPassErrorSampleCountMismatch indicates color attachments have
+	// different sample counts. All attachments must have the same sampleCount.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#render-pass-encoder-creation
+	RenderPassErrorSampleCountMismatch
+
+	// RenderPassErrorDimensionMismatch indicates color attachments have
+	// different width/height. All attachment textures must match dimensions.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#render-pass-encoder-creation
+	RenderPassErrorDimensionMismatch
+)
+
+// RenderPassValidationError represents a validation error during render pass creation.
+type RenderPassValidationError struct {
+	Kind  RenderPassValidationErrorKind
+	Label string
+
+	// For TooManyColorAttachments:
+	Given uint32
+	Limit uint32
+
+	// For SampleCountMismatch:
+	AttachmentIndex int
+	ExpectedSamples uint32
+	ActualSamples   uint32
+	ReferenceIndex  int // index of the attachment that set the expected value
+
+	// For DimensionMismatch:
+	ExpectedWidth  uint32
+	ExpectedHeight uint32
+	ActualWidth    uint32
+	ActualHeight   uint32
+}
+
+// Error implements the error interface.
+func (e *RenderPassValidationError) Error() string {
+	label := e.Label
+	if label == "" {
+		label = unnamedLabel
+	}
+
+	switch e.Kind {
+	case RenderPassErrorTooManyColorAttachments:
+		return fmt.Sprintf(
+			"render pass %q: color attachment count %d exceeds device limit maxColorAttachments=%d (WebGPU spec §10.1)",
+			label, e.Given, e.Limit)
+	case RenderPassErrorSampleCountMismatch:
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d] has sample count %d, but attachment [%d] has sample count %d; all attachments must have the same sample count (WebGPU spec §10.1)",
+			label, e.AttachmentIndex, e.ActualSamples, e.ReferenceIndex, e.ExpectedSamples)
+	case RenderPassErrorDimensionMismatch:
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d] has dimensions %dx%d, but attachment [%d] has dimensions %dx%d; all attachments must have the same dimensions (WebGPU spec §10.1)",
+			label, e.AttachmentIndex, e.ActualWidth, e.ActualHeight, e.ReferenceIndex, e.ExpectedWidth, e.ExpectedHeight)
+	default:
+		return fmt.Sprintf("render pass %q: unknown validation error", label)
+	}
+}
+
+// IsRenderPassValidationError returns true if the error is a RenderPassValidationError.
+func IsRenderPassValidationError(err error) bool {
+	var rpve *RenderPassValidationError
+	return errors.As(err, &rpve)
+}
+
+// =============================================================================
+// Render Pass Compatibility Errors (pipeline vs pass)
+// =============================================================================
+
+// RenderPassCompatibilityErrorKind represents the type of pipeline/pass mismatch.
+type RenderPassCompatibilityErrorKind int
+
+const (
+	// RenderPassCompatibilityErrorColorTargetCount indicates the pipeline's
+	// fragment target count does not match the render pass's color attachment count.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#dom-gpurenderpassencoder-setpipeline
+	RenderPassCompatibilityErrorColorTargetCount RenderPassCompatibilityErrorKind = iota
+
+	// RenderPassCompatibilityErrorColorTargetFormat indicates a pipeline's
+	// fragment target format does not match the render pass's color attachment format.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#dom-gpurenderpassencoder-setpipeline
+	RenderPassCompatibilityErrorColorTargetFormat
+
+	// RenderPassCompatibilityErrorSampleCount indicates the pipeline's sample
+	// count does not match the render pass's sample count.
+	// WebGPU spec: https://www.w3.org/TR/webgpu/#dom-gpurenderpassencoder-setpipeline
+	RenderPassCompatibilityErrorSampleCount
+
+	// RenderPassCompatibilityErrorDepthStencilFormat indicates the pipeline's
+	// depth/stencil format does not match the render pass's depth/stencil format.
+	// Matches Rust wgpu-core check_compatible: self.attachments.depth_stencil != other.attachments.depth_stencil
+	RenderPassCompatibilityErrorDepthStencilFormat
+)
+
+// RenderPassCompatibilityError represents a compatibility mismatch between
+// a render pipeline and the current render pass.
+//
+// Matches Rust wgpu-core device/mod.rs RenderPassCompatibilityError.
+type RenderPassCompatibilityError struct {
+	Kind          RenderPassCompatibilityErrorKind
+	PipelineLabel string
+
+	// For ColorTargetCount:
+	PipelineTargets uint32
+	PassAttachments uint32
+
+	// For ColorTargetFormat:
+	TargetIndex    int
+	PipelineFormat string
+	PassFormat     string
+
+	// For SampleCount:
+	PipelineSamples uint32
+	PassSamples     uint32
+}
+
+// Error implements the error interface.
+func (e *RenderPassCompatibilityError) Error() string {
+	pipelineLabel := e.PipelineLabel
+	if pipelineLabel == "" {
+		pipelineLabel = unnamedLabel
+	}
+
+	switch e.Kind {
+	case RenderPassCompatibilityErrorColorTargetCount:
+		return fmt.Sprintf(
+			"pipeline %q has %d fragment targets but render pass has %d color attachments; counts must match (WebGPU spec §10.3)",
+			pipelineLabel, e.PipelineTargets, e.PassAttachments)
+	case RenderPassCompatibilityErrorColorTargetFormat:
+		return fmt.Sprintf(
+			"pipeline %q fragment target [%d] format %s does not match render pass color attachment format %s (WebGPU spec §10.3)",
+			pipelineLabel, e.TargetIndex, e.PipelineFormat, e.PassFormat)
+	case RenderPassCompatibilityErrorSampleCount:
+		return fmt.Sprintf(
+			"pipeline %q sample count %d does not match render pass sample count %d (WebGPU spec §10.3)",
+			pipelineLabel, e.PipelineSamples, e.PassSamples)
+	case RenderPassCompatibilityErrorDepthStencilFormat:
+		return fmt.Sprintf(
+			"pipeline %q depth/stencil format %s does not match render pass depth/stencil format %s (WebGPU spec §10.3)",
+			pipelineLabel, e.PipelineFormat, e.PassFormat)
+	default:
+		return fmt.Sprintf("pipeline %q: unknown render pass compatibility error", pipelineLabel)
+	}
+}
+
+// IsRenderPassCompatibilityError returns true if the error is a RenderPassCompatibilityError.
+func IsRenderPassCompatibilityError(err error) bool {
+	var rpce *RenderPassCompatibilityError
+	return errors.As(err, &rpce)
+}

@@ -860,6 +860,245 @@ func validateBufferBounds(label string, info BindGroupBufferInfo) error {
 	return nil
 }
 
+// =============================================================================
+// Render Pass Context (MRT validation)
+// =============================================================================
+
+// RenderPassContext stores the attachment configuration of a render pass
+// or a render pipeline. Used for compatibility checks between a pipeline
+// and the render pass it is used in.
+//
+// Matches Rust wgpu-core device/mod.rs RenderPassContext.
+type RenderPassContext struct {
+	// ColorFormats are the formats of each color attachment slot.
+	// TextureFormatUndefined means the slot is unused (nil attachment).
+	ColorFormats []gputypes.TextureFormat
+
+	// DepthStencilFormat is the format of the depth/stencil attachment.
+	// TextureFormatUndefined if no depth/stencil attachment.
+	DepthStencilFormat gputypes.TextureFormat
+
+	// SampleCount is the sample count of the attachments.
+	// All attachments must share the same sample count.
+	SampleCount uint32
+}
+
+// CheckCompatible validates that a render pipeline's pass context is
+// compatible with this render pass context.
+//
+// This is the Go equivalent of Rust wgpu-core RenderPassContext::check_compatible.
+// Called at draw-time (SetPipeline) to ensure the pipeline was created with
+// formats/sample counts matching the current render pass.
+func (ctx *RenderPassContext) CheckCompatible(pipeline *RenderPassContext, pipelineLabel string) error {
+	// Check color target count.
+	if len(pipeline.ColorFormats) != len(ctx.ColorFormats) {
+		return &RenderPassCompatibilityError{
+			Kind:            RenderPassCompatibilityErrorColorTargetCount,
+			PipelineLabel:   pipelineLabel,
+			PipelineTargets: uint32(len(pipeline.ColorFormats)), //nolint:gosec // len bounded by MaxColorAttachments
+			PassAttachments: uint32(len(ctx.ColorFormats)),      //nolint:gosec // len bounded by MaxColorAttachments
+		}
+	}
+
+	// Check color target formats match.
+	for i := range ctx.ColorFormats {
+		if pipeline.ColorFormats[i] != ctx.ColorFormats[i] {
+			return &RenderPassCompatibilityError{
+				Kind:           RenderPassCompatibilityErrorColorTargetFormat,
+				PipelineLabel:  pipelineLabel,
+				TargetIndex:    i,
+				PipelineFormat: pipeline.ColorFormats[i].String(),
+				PassFormat:     ctx.ColorFormats[i].String(),
+			}
+		}
+	}
+
+	// Check sample count.
+	if pipeline.SampleCount != ctx.SampleCount {
+		return &RenderPassCompatibilityError{
+			Kind:            RenderPassCompatibilityErrorSampleCount,
+			PipelineLabel:   pipelineLabel,
+			PipelineSamples: pipeline.SampleCount,
+			PassSamples:     ctx.SampleCount,
+		}
+	}
+
+	// Check depth/stencil format.
+	// Matches Rust wgpu-core: self.attachments.depth_stencil != other.attachments.depth_stencil
+	if pipeline.DepthStencilFormat != ctx.DepthStencilFormat {
+		return &RenderPassCompatibilityError{
+			Kind:           RenderPassCompatibilityErrorDepthStencilFormat,
+			PipelineLabel:  pipelineLabel,
+			PipelineFormat: pipeline.DepthStencilFormat.String(),
+			PassFormat:     ctx.DepthStencilFormat.String(),
+		}
+	}
+
+	return nil
+}
+
+// ValidateRenderPassDescriptor validates a render pass descriptor against
+// device limits and WebGPU spec rules for multiple render targets:
+//
+//  1. len(ColorAttachments) <= device.limits.MaxColorAttachments
+//  2. All color attachments must have the same sample count
+//  3. All color attachments must have the same width/height
+//
+// Returns the resolved RenderPassContext for later pipeline compatibility
+// checks, or an error if validation fails.
+//
+// Reference: Rust wgpu-core command/render.rs begin_render_pass_inner → fill_arc_desc
+// and command/render.rs encode_render_pass → add_view + sample_count checks.
+func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Limits) (*RenderPassContext, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("render pass descriptor is nil")
+	}
+
+	// MRT-1: Color attachment count must not exceed maxColorAttachments.
+	maxCA := limits.MaxColorAttachments
+	if uint32(len(desc.ColorAttachments)) > maxCA { //nolint:gosec // len bounded by spec
+		return nil, &RenderPassValidationError{
+			Kind:  RenderPassErrorTooManyColorAttachments,
+			Label: desc.Label,
+			Given: uint32(len(desc.ColorAttachments)), //nolint:gosec // len bounded by spec
+			Limit: maxCA,
+		}
+	}
+
+	// Resolve the pass context from actual attachments.
+	ctx := &RenderPassContext{
+		ColorFormats: make([]gputypes.TextureFormat, len(desc.ColorAttachments)),
+	}
+
+	var (
+		sampleCount    uint32
+		refSampleIdx   int // index of attachment that set sampleCount
+		width, height  uint32
+		refDimIdx      int // index of attachment that set width/height
+		hasDimensions  bool
+		hasSampleCount bool
+	)
+
+	for i := range desc.ColorAttachments {
+		ca := &desc.ColorAttachments[i]
+
+		// Skip nil views (sparse MRT slot).
+		if ca.View == nil || ca.View.Parent == nil {
+			ctx.ColorFormats[i] = gputypes.TextureFormatUndefined
+			continue
+		}
+
+		tex := ca.View.Parent
+		ctx.ColorFormats[i] = tex.Format()
+		texSize := tex.Size()
+		texSamples := tex.SampleCount()
+
+		// MRT-2: All color attachments must have the same sample count.
+		if !hasSampleCount {
+			sampleCount = texSamples
+			refSampleIdx = i
+			hasSampleCount = true
+		} else if texSamples != sampleCount {
+			return nil, &RenderPassValidationError{
+				Kind:            RenderPassErrorSampleCountMismatch,
+				Label:           desc.Label,
+				AttachmentIndex: i,
+				ExpectedSamples: sampleCount,
+				ActualSamples:   texSamples,
+				ReferenceIndex:  refSampleIdx,
+			}
+		}
+
+		// MRT-3: All color attachments must have the same width/height.
+		if !hasDimensions {
+			width = texSize.Width
+			height = texSize.Height
+			refDimIdx = i
+			hasDimensions = true
+		} else if texSize.Width != width || texSize.Height != height {
+			return nil, &RenderPassValidationError{
+				Kind:            RenderPassErrorDimensionMismatch,
+				Label:           desc.Label,
+				AttachmentIndex: i,
+				ReferenceIndex:  refDimIdx,
+				ExpectedWidth:   width,
+				ExpectedHeight:  height,
+				ActualWidth:     texSize.Width,
+				ActualHeight:    texSize.Height,
+			}
+		}
+	}
+
+	// Include depth/stencil in sample count and dimension checks.
+	if err := validateDepthStencilAttachment(desc, &sampleCount, &hasSampleCount, refSampleIdx,
+		&width, &height, &hasDimensions, refDimIdx, ctx); err != nil {
+		return nil, err
+	}
+
+	// Store the resolved sample count (default 1 if no attachments).
+	if hasSampleCount {
+		ctx.SampleCount = sampleCount
+	} else {
+		ctx.SampleCount = 1
+	}
+
+	return ctx, nil
+}
+
+// validateDepthStencilAttachment checks that the depth/stencil attachment
+// (if present) has the same sample count and dimensions as the color attachments.
+func validateDepthStencilAttachment(
+	desc *RenderPassDescriptor,
+	sampleCount *uint32, hasSampleCount *bool, refSampleIdx int,
+	width, height *uint32, hasDimensions *bool, refDimIdx int,
+	ctx *RenderPassContext,
+) error {
+	if desc.DepthStencilAttachment == nil {
+		return nil
+	}
+	if desc.DepthStencilAttachment.View == nil || desc.DepthStencilAttachment.View.Parent == nil {
+		return nil
+	}
+
+	dsTex := desc.DepthStencilAttachment.View.Parent
+	ctx.DepthStencilFormat = dsTex.Format()
+	dsSize := dsTex.Size()
+	dsSamples := dsTex.SampleCount()
+
+	if !*hasSampleCount {
+		*sampleCount = dsSamples
+		*hasSampleCount = true
+	} else if dsSamples != *sampleCount {
+		return &RenderPassValidationError{
+			Kind:            RenderPassErrorSampleCountMismatch,
+			Label:           desc.Label,
+			AttachmentIndex: -1, // -1 signals depth/stencil
+			ExpectedSamples: *sampleCount,
+			ActualSamples:   dsSamples,
+			ReferenceIndex:  refSampleIdx,
+		}
+	}
+
+	if !*hasDimensions {
+		*width = dsSize.Width
+		*height = dsSize.Height
+		*hasDimensions = true
+	} else if dsSize.Width != *width || dsSize.Height != *height {
+		return &RenderPassValidationError{
+			Kind:            RenderPassErrorDimensionMismatch,
+			Label:           desc.Label,
+			AttachmentIndex: -1, // -1 signals depth/stencil
+			ReferenceIndex:  refDimIdx,
+			ExpectedWidth:   *width,
+			ExpectedHeight:  *height,
+			ActualWidth:     dsSize.Width,
+			ActualHeight:    dsSize.Height,
+		}
+	}
+
+	return nil
+}
+
 // addUint64 adds a and b, returning the result and whether it overflowed.
 func addUint64(a, b uint64) (uint64, bool) {
 	sum := a + b

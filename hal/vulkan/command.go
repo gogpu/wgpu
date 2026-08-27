@@ -821,8 +821,10 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
-// Supports MSAA render passes with resolve targets and depth/stencil attachments.
-// Uses sync.Pool for RenderPassEncoder reuse (VK-PERF-006).
+// Supports up to MaxColorAttachments (8) color attachments with optional MSAA resolve,
+// plus an optional depth/stencil attachment. Uses sync.Pool for RenderPassEncoder reuse.
+//
+// Reference: Rust wgpu-hal begin_render_pass (vulkan/command.rs:803-933).
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := renderPassPool.Get().(*RenderPassEncoder)
 	rpe.encoder = e
@@ -836,83 +838,136 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return rpe
 	}
 
-	// Get first color attachment info
-	ca := desc.ColorAttachments[0]
-	view, ok := ca.View.(*TextureView)
-	if !ok {
-		return rpe
-	}
-
-	renderWidth := view.size.Width
-	renderHeight := view.size.Height
-
-	// Determine color format from the view
-	var colorFormat vk.Format
-	if view.texture != nil {
-		colorFormat = textureFormatToVk(view.texture.format)
-	} else if view.isSwapchain {
-		// Use the format stored in the view (set when creating swapchain view)
-		colorFormat = view.vkFormat
-	}
-
-	// Get sample count from the view's texture (defaults to 1)
-	sampleCount := vk.SampleCountFlagBits(1)
-	if view.texture != nil && view.texture.samples > 1 {
-		sampleCount = vk.SampleCountFlagBits(view.texture.samples)
-	}
-
-	// Check for MSAA resolve target.
-	// Resolve is only meaningful when the color attachment has multiple samples.
-	// The resolve attachment count must match between render pass and framebuffer,
-	// so we use hasMSAAResolve consistently for both.
-	var resolveView *TextureView
-	if ca.ResolveTarget != nil {
-		resolveView, _ = ca.ResolveTarget.(*TextureView)
-	}
-	hasMSAAResolve := resolveView != nil && sampleCount > vk.SampleCountFlagBits(1)
-
-	// Determine the final layout for the "output" attachment:
-	// - Without MSAA: the color attachment itself
-	// - With MSAA: the resolve target (the MSAA color stays ColorAttachmentOptimal)
-	//
-	// BUG-WGPU-VK-007: offscreen textures that are ALSO sampled (TextureBinding)
-	// must end in ImageLayoutGeneral, NOT ColorAttachmentOptimal. Without this,
-	// Intel CCS (Color Compression Subsystem) metadata written by the render pass
-	// is not decompressed on the next fragment-shader read, producing stale pixels
-	// ("trail artifacts"). The proper fix is automatic barrier tracking (CORE-007)
-	// with explicit transition to ShaderReadOnlyOptimal; until then, General is
-	// safe for both color-attachment writes and shader reads.
-	// Reference: Rust wgpu derive_image_layout() uses General for mixed usage.
-	colorFinalLayout := vk.ImageLayoutColorAttachmentOptimal // ADR-059: Rust wgpu/Dawn parity — render pass stays in COLOR_ATTACHMENT_OPTIMAL, barrier to PRESENT_SRC happens in ensurePresentLayout
-	if !view.isSwapchain {
-		colorFinalLayout = offscreenFinalLayout(view)
-	}
-	if hasMSAAResolve {
-		// With resolve, the final layout applies to the resolve target.
-		if resolveView.isSwapchain {
-			colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal // ADR-059: MSAA resolve to swapchain — barrier handles PRESENT_SRC transition
-		} else {
-			colorFinalLayout = offscreenFinalLayout(resolveView)
+	// Determine render area from the first valid color attachment.
+	var renderWidth, renderHeight uint32
+	for _, ca := range desc.ColorAttachments {
+		if ca.View == nil {
+			continue
 		}
+		view, ok := ca.View.(*TextureView)
+		if !ok {
+			continue
+		}
+		renderWidth = view.size.Width
+		renderHeight = view.size.Height
+		break
 	}
 
-	// ADR-060: Check swapchain layout BEFORE updateSwapchainLayout overwrites
-	// it. The reverse barrier needs to see the actual current layout (which may
-	// be PRESENT_SRC_KHR from a previous submit's inline barrier), not the
-	// layout the render pass will transition to.
-	e.setupInlinePresentBarrier(view, resolveView, hasMSAAResolve, colorFinalLayout, ca.LoadOp)
+	// Determine sample count from the first valid color attachment (all must match).
+	sampleCount := vk.SampleCountFlagBits(1)
+	for _, ca := range desc.ColorAttachments {
+		if ca.View == nil {
+			continue
+		}
+		view, ok := ca.View.(*TextureView)
+		if !ok {
+			continue
+		}
+		if view.texture != nil && view.texture.samples > 1 {
+			sampleCount = vk.SampleCountFlagBits(view.texture.samples)
+		}
+		break
+	}
 
-	// BUG-WGPU-VK-006: Update swapchain image layout tracking.
-	updateSwapchainLayout(view, resolveView, hasMSAAResolve, colorFinalLayout)
-
-	// Build render pass key
+	// Build render pass key and framebuffer key from ALL color attachments.
 	rpKey := RenderPassKey{
-		ColorFormat:      colorFormat,
-		ColorLoadOp:      loadOpToVk(ca.LoadOp),
-		ColorStoreOp:     storeOpToVk(ca.StoreOp),
-		SampleCount:      sampleCount,
-		ColorFinalLayout: colorFinalLayout,
-		HasResolve:       hasMSAAResolve,
+		ColorCount:  len(desc.ColorAttachments),
+		SampleCount: sampleCount,
+	}
+	fbKey := FramebufferKey{
+		Width:  renderWidth,
+		Height: renderHeight,
+	}
+
+	// Clear values array: one per VkAttachment (color + resolve + depth).
+	// Using a fixed-size array avoids heap allocation on this per-frame path.
+	var clearValuesArr [hal.MaxTotalAttachments]vk.ClearValue
+	clearValues := clearValuesArr[:0]
+
+	for i, ca := range desc.ColorAttachments {
+		if i >= hal.MaxColorAttachments {
+			break
+		}
+
+		view, ok := ca.View.(*TextureView)
+		if !ok || view == nil {
+			// Absent slot — leave the key entry zero-valued (FormatUndefined).
+			continue
+		}
+
+		// Determine color format from the view.
+		var colorFormat vk.Format
+		if view.texture != nil {
+			colorFormat = textureFormatToVk(view.texture.format)
+		} else if view.isSwapchain {
+			colorFormat = view.vkFormat
+		}
+
+		// Check for MSAA resolve target.
+		var resolveView *TextureView
+		if ca.ResolveTarget != nil {
+			resolveView, _ = ca.ResolveTarget.(*TextureView)
+		}
+		hasMSAAResolve := resolveView != nil && sampleCount > vk.SampleCountFlagBits(1)
+
+		// Determine the final layout for the "output" attachment.
+		// BUG-WGPU-VK-007: offscreen textures with TextureBinding must end in
+		// ImageLayoutGeneral to prevent Intel CCS stale-pixel artifacts.
+		colorFinalLayout := vk.ImageLayoutColorAttachmentOptimal
+		if !view.isSwapchain {
+			colorFinalLayout = offscreenFinalLayout(view)
+		}
+		if hasMSAAResolve {
+			if resolveView.isSwapchain {
+				colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
+			} else {
+				colorFinalLayout = offscreenFinalLayout(resolveView)
+			}
+		}
+
+		// ADR-060: Inline present barrier for swapchain targets.
+		// Only the FIRST swapchain attachment drives the barrier; additional
+		// swapchain attachments are unusual and would need separate tracking.
+		if e.swapchainImage == 0 {
+			e.setupInlinePresentBarrier(view, resolveView, hasMSAAResolve, colorFinalLayout, ca.LoadOp)
+		}
+
+		// BUG-WGPU-VK-006: Update swapchain image layout tracking.
+		updateSwapchainLayout(view, resolveView, hasMSAAResolve, colorFinalLayout)
+
+		rpKey.Colors[i] = ColorAttachmentKeyEntry{
+			Format:      colorFormat,
+			LoadOp:      loadOpToVk(ca.LoadOp),
+			StoreOp:     storeOpToVk(ca.StoreOp),
+			FinalLayout: colorFinalLayout,
+			HasResolve:  hasMSAAResolve,
+		}
+
+		// Framebuffer: color view
+		fbKey.Views[fbKey.ViewCount] = view.handle
+		fbKey.ViewCount++
+
+		// Clear value for color attachment
+		clearValues = append(clearValues, vk.ClearValueColor(
+			float32(ca.ClearValue.R),
+			float32(ca.ClearValue.G),
+			float32(ca.ClearValue.B),
+			float32(ca.ClearValue.A),
+		))
+
+		if hasMSAAResolve {
+			// Framebuffer: resolve view (immediately after color)
+			fbKey.Views[fbKey.ViewCount] = resolveView.handle
+			fbKey.ViewCount++
+
+			// Clear value for resolve attachment.
+			clearValues = append(clearValues, vk.ClearValueColor(
+				float32(ca.ClearValue.R),
+				float32(ca.ClearValue.G),
+				float32(ca.ClearValue.B),
+				float32(ca.ClearValue.A),
+			))
+		}
 	}
 
 	// Handle depth/stencil attachment
@@ -924,7 +979,11 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			rpKey.DepthStoreOp = storeOpToVk(dsa.DepthStoreOp)
 			rpKey.StencilLoadOp = loadOpToVk(dsa.StencilLoadOp)
 			rpKey.StencilStoreOp = storeOpToVk(dsa.StencilStoreOp)
+
+			fbKey.Views[fbKey.ViewCount] = dsView.handle
+			fbKey.ViewCount++
 		}
+		clearValues = append(clearValues, vk.ClearValueDepthStencil(dsa.DepthClearValue, dsa.StencilClearValue))
 	}
 
 	// Get or create render pass from cache
@@ -935,21 +994,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	}
 	rpe.renderPass = renderPass
 
-	// Build framebuffer key with all attachment views
-	fbKey := FramebufferKey{
-		RenderPass: renderPass,
-		ColorView:  view.handle,
-		Width:      renderWidth,
-		Height:     renderHeight,
-	}
-	if hasMSAAResolve {
-		fbKey.ResolveView = resolveView.handle
-	}
-	if desc.DepthStencilAttachment != nil {
-		if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok {
-			fbKey.DepthView = dsView.handle
-		}
-	}
+	fbKey.RenderPass = renderPass
 
 	// Get or create framebuffer from cache
 	framebuffer, err := cache.GetOrCreateFramebuffer(fbKey)
@@ -957,37 +1002,6 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		return rpe
 	}
 	rpe.framebuffer = framebuffer
-
-	// Prepare clear values on the stack (max 3: color + resolve + depth/stencil).
-	// Using a fixed-size array avoids heap allocation on this per-frame path (VK-PERF-002).
-	var clearValuesArr [3]vk.ClearValue
-	clearValues := clearValuesArr[:0]
-	clearValues = append(clearValues, vk.ClearValueColor(
-		float32(ca.ClearValue.R),
-		float32(ca.ClearValue.G),
-		float32(ca.ClearValue.B),
-		float32(ca.ClearValue.A),
-	))
-
-	if hasMSAAResolve {
-		// Resolve attachment clear value — must match the MSAA color clear value so
-		// pixels without fragment coverage are cleared to the same color as the
-		// MSAA source. Vulkan requires one clear value per attachment when LoadOp
-		// is Clear (BUG-WGPU-MSAA-RESOLVE-001). Rust wgpu uses mem::zeroed() here
-		// because the resolve overwrites all pixels; we use the actual clear color
-		// for correctness on implementations that may skip uncovered pixels.
-		clearValues = append(clearValues, vk.ClearValueColor(
-			float32(ca.ClearValue.R),
-			float32(ca.ClearValue.G),
-			float32(ca.ClearValue.B),
-			float32(ca.ClearValue.A),
-		))
-	}
-
-	if desc.DepthStencilAttachment != nil {
-		dsa := desc.DepthStencilAttachment
-		clearValues = append(clearValues, vk.ClearValueDepthStencil(dsa.DepthClearValue, dsa.StencilClearValue))
-	}
 
 	// Begin render pass
 	renderPassBegin := vk.RenderPassBeginInfo{
@@ -999,25 +1013,21 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			Extent: vk.Extent2D{Width: renderWidth, Height: renderHeight},
 		},
 		ClearValueCount: uint32(len(clearValues)),
-		PClearValues:    &clearValues[0],
+	}
+	if len(clearValues) > 0 {
+		renderPassBegin.PClearValues = &clearValues[0]
 	}
 
 	vkCmdBeginRenderPass(e.device.cmds, e.active, &renderPassBegin, vk.SubpassContentsInline)
 	runtime.KeepAlive(clearValues)
 
 	// Set default viewport and scissor for the render area.
-	// These are required since the pipeline uses dynamic viewport/scissor state.
-	// NOTE: Viewport Y-flip is required for WebGPU/OpenGL coordinate system compatibility.
-	// Vulkan has Y pointing down, WebGPU has Y pointing up.
-	// Solution: Start Y at height and use negative height (matches Rust wgpu).
-	// Always set viewport/scissor -- the pipeline declares them as dynamic state,
+	// Always set viewport/scissor — the pipeline declares them as dynamic state,
 	// so they must be initialized before any draw call regardless of dimensions.
-	// Use max(1, dim) as safety net to satisfy Vulkan spec minimum extent.
 	viewW := max(float32(renderWidth), 1.0)
 	viewH := max(float32(renderHeight), 1.0)
 
 	// Y-flip for WebGPU compatibility: Vulkan Y points down, WebGPU Y points up.
-	// Use negative height and start Y at bottom (matches Rust wgpu approach).
 	viewport := vk.Viewport{
 		X:        0,
 		Y:        viewH, // Start at bottom

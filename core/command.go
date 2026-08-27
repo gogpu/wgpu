@@ -409,6 +409,15 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		return nil, err
 	}
 
+	// Validate MRT rules: attachment count, sample count consistency,
+	// dimension consistency. This produces the RenderPassContext used
+	// for draw-time pipeline compatibility checks.
+	passCtx, valErr := ValidateRenderPassDescriptor(desc, e.device.Limits)
+	if valErr != nil {
+		e.setError(valErr)
+		return nil, valErr
+	}
+
 	// Convert to HAL descriptor
 	halDesc := e.convertRenderPassDescriptor(desc)
 
@@ -444,9 +453,10 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 	e.status.Store(int32(CommandEncoderStatusLocked))
 
 	pass := &CoreRenderPassEncoder{
-		raw:     halPass,
-		encoder: e,
-		device:  e.device,
+		raw:         halPass,
+		encoder:     e,
+		device:      e.device,
+		passContext: passCtx,
 	}
 	e.mutable.activePass = pass
 
@@ -1135,6 +1145,14 @@ type CoreRenderPassEncoder struct {
 
 	// ended indicates whether End() has been called.
 	ended bool
+
+	// passContext stores the resolved attachment configuration of this
+	// render pass. Used for draw-time validation: when SetPipeline is
+	// called, the pipeline's passContext is checked against this to
+	// ensure format and sample count compatibility.
+	//
+	// Matches Rust wgpu-core command/render.rs RenderPassInfo.context.
+	passContext *RenderPassContext
 }
 
 // RawPass returns the underlying HAL render pass encoder for direct HAL access.
@@ -1143,10 +1161,27 @@ func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
 }
 
 // SetPipeline sets the render pipeline.
+//
+// Draw-time validation (WebGPU spec §10.3): the pipeline's fragment target
+// count, formats, and sample count must match the current render pass's
+// color attachments. If they do not match, a validation error is recorded
+// on the parent command encoder.
+//
+// Matches Rust wgpu-core command/render.rs set_pipeline → context.check_compatible.
 func (p *CoreRenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	if p.ended {
 		return
 	}
+
+	// Draw-time validation: pipeline pass context must be compatible
+	// with the render pass context.
+	if pipeline != nil && pipeline.PassContext() != nil && p.passContext != nil {
+		if err := p.passContext.CheckCompatible(pipeline.PassContext(), pipeline.label); err != nil {
+			p.encoder.SetError(fmt.Errorf("SetPipeline: %w", err))
+			return
+		}
+	}
+
 	p.pipeline = pipeline
 	// Note: HAL SetPipeline pending (requires core.RenderPipeline with HAL).
 	// if p.raw != nil && pipeline.Raw() != nil {
