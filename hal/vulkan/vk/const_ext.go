@@ -61,6 +61,20 @@ const (
 
 	// StructureTypeCommandBufferInheritanceRenderingInfo = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO
 	StructureTypeCommandBufferInheritanceRenderingInfo StructureType = 1000044004
+
+	// === VK_KHR_buffer_device_address (Vulkan 1.2 Core) ===
+
+	// StructureTypeBufferDeviceAddressInfo = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO
+	StructureTypeBufferDeviceAddressInfo StructureType = 1000244001
+
+	// BufferUsageShaderDeviceAddressBit = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+	// Vulkan 1.2 core — required for AS backing buffers and scratch buffers.
+	BufferUsageShaderDeviceAddressBit BufferUsageFlagBits = 1 << 17
+
+	// === VK_KHR_acceleration_structure object type ===
+
+	// ObjectTypeAccelerationStructureKHR = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR (1000150000)
+	ObjectTypeAccelerationStructureKHR ObjectType = 1000150000
 )
 
 // ClearValueColor creates a ClearValue from RGBA float values.

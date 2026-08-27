@@ -1509,31 +1509,8 @@ func (e *ComputePassEncoder) insertComputeBarrier() {
 	)
 }
 
-// --- Ray tracing stubs (VK_KHR_acceleration_structure) ---
-// Actual Vulkan RT implementation will use vkCmdBuildAccelerationStructuresKHR,
-// vkCmdCopyAccelerationStructureKHR, etc. For now, stubs satisfy the
-// hal.CommandEncoder interface.
-
-// BuildAccelerationStructures builds one or more acceleration structures.
-// Stub — Vulkan RT not yet implemented.
-func (e *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAccelerationStructureDescriptor) {
-}
-
-// PlaceAccelerationStructureBarrier inserts an AS memory barrier.
-// Stub — Vulkan RT not yet implemented.
-func (e *CommandEncoder) PlaceAccelerationStructureBarrier(barrier hal.AccelerationStructureBarrier) {
-}
-
-// CopyAccelerationStructure copies or compacts an acceleration structure.
-// Stub — Vulkan RT not yet implemented.
-func (e *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStructure, copyMode gputypes.AccelerationStructureCopyMode) {
-}
-
-// ReadAccelerationStructureCompactSize reads the post-compact size of an AS
-// into the given buffer.
-// Stub — Vulkan RT not yet implemented.
-func (e *CommandEncoder) ReadAccelerationStructureCompactSize(as hal.AccelerationStructure, buffer hal.Buffer, offset uint64) {
-}
+// Ray tracing methods (BuildAccelerationStructures, PlaceAccelerationStructureBarrier,
+// CopyAccelerationStructure, ReadAccelerationStructureCompactSize) are in raytracing.go.
 
 // --- Helper functions ---
 
