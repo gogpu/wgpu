@@ -41,10 +41,10 @@ const (
 
 // AccelerationStructureDescriptor describes an acceleration structure to create.
 type AccelerationStructureDescriptor struct {
-	Label            string
-	Size             uint64
-	Format           AccelerationStructureFormat
-	AllowCompaction  bool
+	Label           string
+	Size            uint64
+	Format          AccelerationStructureFormat
+	AllowCompaction bool
 }
 
 // AccelerationStructureBuildSizes contains the sizes needed for AS build.
@@ -136,10 +136,9 @@ type AccelerationStructureUsageTransition struct {
 // This is the CPU-side representation; TlasInstanceToBytes converts it
 // to the backend-specific 64-byte packed format.
 type TlasInstance struct {
-	Transform    [12]float32
-	CustomData   uint32
-	Mask         uint8
-	BlasAddress  uint64
+	Transform                      [12]float32
+	CustomData                     uint32
+	Mask                           uint8
+	BlasAddress                    uint64
 	ShaderBindingTableRecordOffset uint32
 }
-
