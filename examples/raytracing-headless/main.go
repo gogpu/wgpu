@@ -150,12 +150,12 @@ func renderImage(bvh *software.BVHNode) error {
 				hits++
 				shade := clamp(1.0-dist/10.0, 0.15, 1.0)
 				img.SetRGBA(x, y, color.RGBA{
-					R: uint8(shade * 80),  					G: uint8(shade * 160), 					B: uint8(shade * 255), 					A: 255,
+					R: uint8(shade * 80), G: uint8(shade * 160), B: uint8(shade * 255), A: 255,
 				})
 			} else {
 				ty := float64(y) / float64(h)
 				img.SetRGBA(x, y, color.RGBA{
-					R: uint8(100 + ty*80),  					G: uint8(180 + ty*40),  					B: 235,
+					R: uint8(100 + ty*80), G: uint8(180 + ty*40), B: 235,
 					A: 255,
 				})
 			}
