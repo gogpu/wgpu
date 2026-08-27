@@ -310,7 +310,7 @@ func TestRenderPipeline_Accessors(t *testing.T) {
 	halDevice := &mockHALDevice{}
 	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	rp := NewRenderPipeline(mockRenderPipeline{}, device, "TestRP")
+	rp := NewRenderPipeline(mockRenderPipeline{}, device, "TestRP", nil)
 
 	if rp.Label() != "TestRP" {
 		t.Errorf("Label() = %q, want %q", rp.Label(), "TestRP")
@@ -321,7 +321,7 @@ func TestRenderPipeline_Destroy(t *testing.T) {
 	halDevice := &mockHALDevice{}
 	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	rp := NewRenderPipeline(mockRenderPipeline{}, device, "DestroyTest")
+	rp := NewRenderPipeline(mockRenderPipeline{}, device, "DestroyTest", nil)
 
 	if rp.IsDestroyed() {
 		t.Error("RenderPipeline should not be destroyed initially")

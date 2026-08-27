@@ -1259,6 +1259,14 @@ type RenderPipeline struct {
 
 	// Ref is the GPU-aware reference counter for this render pipeline (Phase 2).
 	Ref *ResourceRef
+
+	// passContext stores the attachment configuration this pipeline expects.
+	// Used for draw-time validation: when SetPipeline is called, the pipeline's
+	// passContext is checked against the render pass's context to ensure the
+	// pipeline's fragment target formats and sample count match the pass.
+	//
+	// Matches Rust wgpu-core pipeline.rs RenderPipeline.pass_context.
+	passContext *RenderPassContext
 }
 
 // NewRenderPipeline creates a core RenderPipeline wrapping a HAL render pipeline.
@@ -1267,19 +1275,29 @@ type RenderPipeline struct {
 //   - halPipeline: The HAL render pipeline to wrap (ownership transferred)
 //   - device: The parent device
 //   - label: Debug label for the render pipeline
+//   - passCtx: The render pass context describing expected attachment formats
+//     and sample count (may be nil for pipelines created without fragment stage)
 func NewRenderPipeline(
 	halPipeline hal.RenderPipeline,
 	device *Device,
 	label string,
+	passCtx *RenderPassContext,
 ) *RenderPipeline {
 	rp := &RenderPipeline{
 		raw:          NewSnatchable(halPipeline),
 		device:       device,
 		label:        label,
 		trackingData: NewTrackingData(device.TrackerIndices()),
+		passContext:  passCtx,
 	}
 	trackResource(uintptr(unsafe.Pointer(rp)), "RenderPipeline") //nolint:gosec // debug tracking uses pointer as unique ID
 	return rp
+}
+
+// PassContext returns the render pass context this pipeline expects.
+// Returns nil if the pipeline was created without fragment targets.
+func (rp *RenderPipeline) PassContext() *RenderPassContext {
+	return rp.passContext
 }
 
 // Raw returns the underlying HAL render pipeline if it hasn't been snatched.
