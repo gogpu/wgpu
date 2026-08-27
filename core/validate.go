@@ -923,6 +923,17 @@ func (ctx *RenderPassContext) CheckCompatible(pipeline *RenderPassContext, pipel
 		}
 	}
 
+	// Check depth/stencil format.
+	// Matches Rust wgpu-core: self.attachments.depth_stencil != other.attachments.depth_stencil
+	if pipeline.DepthStencilFormat != ctx.DepthStencilFormat {
+		return &RenderPassCompatibilityError{
+			Kind:           RenderPassCompatibilityErrorDepthStencilFormat,
+			PipelineLabel:  pipelineLabel,
+			PipelineFormat: pipeline.DepthStencilFormat.String(),
+			PassFormat:     ctx.DepthStencilFormat.String(),
+		}
+	}
+
 	return nil
 }
 

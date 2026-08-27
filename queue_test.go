@@ -330,7 +330,7 @@ func TestWriteBufferTableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := make([]byte, tt.size)
 			err := device.Queue().WriteBuffer(buf, tt.offset, data)
-			if tt.wantErr == "" { //nolint:nestif // table-driven test validation
+			if tt.wantErr == "" {
 				if err != nil {
 					t.Errorf("expected no error, got: %v", err)
 				}

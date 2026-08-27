@@ -1075,6 +1075,11 @@ const (
 	// count does not match the render pass's sample count.
 	// WebGPU spec: https://www.w3.org/TR/webgpu/#dom-gpurenderpassencoder-setpipeline
 	RenderPassCompatibilityErrorSampleCount
+
+	// RenderPassCompatibilityErrorDepthStencilFormat indicates the pipeline's
+	// depth/stencil format does not match the render pass's depth/stencil format.
+	// Matches Rust wgpu-core check_compatible: self.attachments.depth_stencil != other.attachments.depth_stencil
+	RenderPassCompatibilityErrorDepthStencilFormat
 )
 
 // RenderPassCompatibilityError represents a compatibility mismatch between
@@ -1119,6 +1124,10 @@ func (e *RenderPassCompatibilityError) Error() string {
 		return fmt.Sprintf(
 			"pipeline %q sample count %d does not match render pass sample count %d (WebGPU spec §10.3)",
 			pipelineLabel, e.PipelineSamples, e.PassSamples)
+	case RenderPassCompatibilityErrorDepthStencilFormat:
+		return fmt.Sprintf(
+			"pipeline %q depth/stencil format %s does not match render pass depth/stencil format %s (WebGPU spec §10.3)",
+			pipelineLabel, e.PipelineFormat, e.PassFormat)
 	default:
 		return fmt.Sprintf("pipeline %q: unknown render pass compatibility error", pipelineLabel)
 	}
