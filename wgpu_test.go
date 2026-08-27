@@ -4,6 +4,7 @@ package wgpu_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -63,6 +64,44 @@ func requireHAL(t *testing.T, device *wgpu.Device) {
 	t.Helper()
 	if device.Queue() == nil {
 		t.Skip("skipping: device has no HAL integration (no real GPU backend available)")
+	}
+}
+
+func assertExpectedError(t *testing.T, err error, buf *wgpu.Buffer) {
+	t.Helper()
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if buf != nil {
+		buf.Release()
+		t.Error("expected nil buffer on error")
+	}
+}
+
+func assertNoError(t *testing.T, err error, buf *wgpu.Buffer) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if buf == nil {
+		t.Error("expected non-nil buffer")
+	} else {
+		buf.Release()
+	}
+}
+
+func assertErrorContains(t *testing.T, err error, wantSubstring string) {
+	t.Helper()
+	if wantSubstring == "" {
+		if err != nil {
+			t.Errorf("expected no error, got: %v", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Errorf("expected error containing %q, got nil", wantSubstring)
+	} else if !strings.Contains(err.Error(), wantSubstring) {
+		t.Errorf("expected error containing %q, got: %v", wantSubstring, err)
 	}
 }
 
@@ -1295,22 +1334,9 @@ func TestDeviceCreateBufferTableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			buf, err := device.CreateBuffer(tt.desc)
 			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				if buf != nil {
-					buf.Release()
-					t.Error("expected nil buffer on error")
-				}
+				assertExpectedError(t, err, buf)
 			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if buf == nil {
-					t.Error("expected non-nil buffer")
-				} else {
-					buf.Release()
-				}
+				assertNoError(t, err, buf)
 			}
 		})
 	}

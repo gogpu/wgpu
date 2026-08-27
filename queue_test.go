@@ -330,17 +330,7 @@ func TestWriteBufferTableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := make([]byte, tt.size)
 			err := device.Queue().WriteBuffer(buf, tt.offset, data)
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Errorf("expected no error, got: %v", err)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.wantErr)
-				} else if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
-				}
-			}
+			assertErrorContains(t, err, tt.wantErr)
 		})
 	}
 }

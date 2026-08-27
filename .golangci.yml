@@ -125,9 +125,7 @@ linters:
           - revive
         text: "var-naming: avoid meaningless package names"
 
-      # Test files - allow more flexibility. Test assertions naturally
-      # nest (setup → act → verify → sub-verify). Standard practice to
-      # exclude complexity linters from tests.
+      # Test files - allow more flexibility
       - path: _test\.go
         linters:
           - gocyclo
@@ -140,7 +138,6 @@ linters:
           - dupl
           - gocognit
           - unparam
-          - nestif
 
       # HAL backends - platform-specific complexity
       # nestif excluded: DX12 COM null checks and state management require
