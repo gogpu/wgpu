@@ -344,14 +344,52 @@ func (e *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buff
 	// Stub: Metal timestamp query implementation pending.
 }
 
-func (e *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
-
-func (e *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
-
-func (e *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+// BuildAccelerationStructures builds one or more acceleration structures.
+//
+// Delegates to buildAccelerationStructures in raytracing.go which creates a
+// transient MTLAccelerationStructureCommandEncoder and issues build/refit
+// commands for each descriptor.
+//
+// Reference: Rust wgpu-hal metal/command.rs:1840-1879.
+func (e *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAccelerationStructureDescriptor) {
+	if e.cmdBuffer == 0 {
+		return
+	}
+	e.buildAccelerationStructures(descriptors)
 }
 
-func (e *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+// PlaceAccelerationStructureBarrier is a no-op on Metal.
+//
+// Metal handles acceleration structure synchronization internally through
+// its command buffer scheduling model. Explicit barriers are not required.
+//
+// Reference: Rust wgpu-hal metal/command.rs:1881-1885 (empty body).
+func (e *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure copies or compacts an acceleration structure.
+//
+// Delegates to copyAccelerationStructure in raytracing.go which creates a
+// transient MTLAccelerationStructureCommandEncoder and issues copy/compact.
+//
+// Reference: Rust wgpu-hal metal/command.rs:746-764.
+func (e *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStructure, copyMode gputypes.AccelerationStructureCopyMode) {
+	if e.cmdBuffer == 0 {
+		return
+	}
+	e.copyAccelerationStructure(src, dst, copyMode)
+}
+
+// ReadAccelerationStructureCompactSize writes the post-compaction size
+// of an acceleration structure into a buffer.
+//
+// Delegates to readAccelerationStructureCompactSize in raytracing.go.
+//
+// Reference: Rust wgpu-hal metal/command.rs:1887-1898.
+func (e *CommandEncoder) ReadAccelerationStructureCompactSize(accelStruct hal.AccelerationStructure, buffer hal.Buffer, offset uint64) {
+	if e.cmdBuffer == 0 {
+		return
+	}
+	e.readAccelerationStructureCompactSize(accelStruct, buffer, offset)
 }
 
 // BeginRenderPass begins a render pass.

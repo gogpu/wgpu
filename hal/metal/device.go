@@ -1308,21 +1308,87 @@ func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
 // command buffers execute in order on the same queue, this guarantees all
 // previously submitted work has finished.
 //
-func (d *Device) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
-	return nil, fmt.Errorf("metal: ray tracing not yet implemented")
+// CreateAccelerationStructure creates an acceleration structure (BLAS or TLAS).
+//
+// Allocates a Metal acceleration structure with the requested size via
+// [MTLDevice newAccelerationStructureWithSize:].
+//
+// Reference: Rust wgpu-hal metal/device.rs:2100-2114.
+func (d *Device) CreateAccelerationStructure(desc *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("metal: acceleration structure descriptor is nil")
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	raw := MsgSend(d.raw, Sel("newAccelerationStructureWithSize:"), uintptr(desc.Size))
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create acceleration structure (size=%d)", desc.Size)
+	}
+
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	hal.Logger().Debug("metal: acceleration structure created",
+		"label", desc.Label,
+		"size", desc.Size,
+		"format", desc.Format,
+	)
+
+	return &AccelerationStructure{raw: raw, device: d}, nil
 }
 
-func (d *Device) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
-
-func (d *Device) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
-	return hal.AccelerationStructureBuildSizes{}
+// DestroyAccelerationStructure destroys an acceleration structure.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2116-2121.
+func (d *Device) DestroyAccelerationStructure(accelStruct hal.AccelerationStructure) {
+	mtlAS, ok := accelStruct.(*AccelerationStructure)
+	if !ok || mtlAS == nil {
+		return
+	}
+	if mtlAS.raw != 0 {
+		Release(mtlAS.raw)
+		mtlAS.raw = 0
+	}
+	mtlAS.device = nil
 }
 
-func (d *Device) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
-	return 0
+// GetAccelerationStructureBuildSizes returns the sizes needed for building an AS.
+//
+// Delegates to getAccelerationStructureBuildSizes in raytracing.go which creates
+// a transient descriptor and queries Metal for the sizes.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2076-2091.
+func (d *Device) GetAccelerationStructureBuildSizes(desc *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return d.getAccelerationStructureBuildSizes(desc)
 }
 
-func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+// GetAccelerationStructureDeviceAddress returns the GPU resource ID of an AS.
+//
+// Uses Metal 3+ gpuResourceID property. Returns 0 if the AS is nil or the
+// property is unavailable on older GPU families.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2093-2098.
+func (d *Device) GetAccelerationStructureDeviceAddress(accelStruct hal.AccelerationStructure) uint64 {
+	mtlAS, ok := accelStruct.(*AccelerationStructure)
+	if !ok || mtlAS == nil || mtlAS.raw == 0 {
+		return 0
+	}
+	// gpuResourceID returns MTLResourceID (a uint64 on Metal 3+).
+	// On older devices without Metal 3, this returns 0.
+	return uint64(MsgSend(mtlAS.raw, Sel("gpuResourceID")))
+}
+
+// TlasInstanceToBytes converts a TlasInstance to Metal's 64-byte packed format.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2123-2159.
+func (d *Device) TlasInstanceToBytes(instance hal.TlasInstance) []byte {
+	return tlasInstanceToBytes(instance)
+}
 
 // After the GPU is idle, we drain and refill the frame semaphore to ensure
 // all in-flight slots are reclaimed. This prevents deadlocks when the caller
