@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-08-27
+
+### Added
+
+- **Ray Tracing Extensions** (experimental, ADR-062) — inline ray queries across 4 GPU backends + CPU
+  - **HAL interface**: `AccelerationStructure`, 5 Device + 4 CommandEncoder methods
+  - **Vulkan**: VK_KHR_acceleration_structure + VK_KHR_ray_query (real FFI calls)
+  - **DX12**: DXR Tier 1.1 + SM 6.5 (COM bindings for ID3D12Device5/CommandList4)
+  - **Metal**: MTLAccelerationStructure (macOS 15.0+)
+  - **Software**: CPU BVH build + Möller-Trumbore intersection (for CI/testing without GPU)
+  - **`internal/raytracing/`**: build orchestration, compaction state machine, 9 validation checks (96.8% coverage)
+  - **Example**: `examples/raytracing-headless/` — visual RT verification on software backend
+- **`NewBackend()` constructors** on all 6 backends (enterprise API consistency)
+
+### Changed
+
+- `software.API` / `noop.API` renamed to `Backend` (consistent with Vulkan/DX12/Metal/GLES)
+- **deps**: gputypes v0.5.2 → v0.6.0, gpucontext v0.28.0 → v0.29.0
+
 ## [0.31.8] - 2026-08-27
 
 ### Fixed
