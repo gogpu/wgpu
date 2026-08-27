@@ -161,6 +161,7 @@ linters:
       - path: hal/metal/queue\.go
         linters:
           - nolintlint
+        text: "unparam"
 
       # GL context - requires unsafe for C interop
       - path: hal/gles/gl/context\.go
