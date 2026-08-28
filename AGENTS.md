@@ -62,10 +62,23 @@ wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
 | `wgpu/hal/dx12` | DirectX 12 backend (Windows) |
 | `wgpu/hal/gles` | OpenGL ES backend |
 | `wgpu/hal/software` | CPU software renderer |
+| `wgpu/internal/raytracing` | RT build orchestration, compaction, validation (ADR-062) |
+
+### Ray Tracing (experimental, v0.32.0)
+
+Inline ray queries matching Rust wgpu's `EXPERIMENTAL_RAY_QUERY`. Feature-gated by `FeatureRayQuery`.
+
+- **Vulkan**: VK_KHR_acceleration_structure + VK_KHR_ray_query
+- **DX12**: DXR Tier 1.1, SM 6.5
+- **Metal**: MTLAccelerationStructure (macOS 15.0+, iOS 18.0+)
+- **Software**: CPU BVH (Moller-Trumbore) for CI/testing without GPU
+- **GLES**: Not supported
+
+Example: `examples/raytracing-headless/` — visual RT verification on software backend.
 
 ## Current Version
 
-v0.31.8 | Go 1.25+ | Dependencies: naga v0.19.0, gpucontext v0.28.0, gputypes v0.5.2, goffi v0.6.3, webgpu v0.5.5
+v0.32.0 | Go 1.25+ | Dependencies: naga v0.19.0, gpucontext v0.29.0, gputypes v0.6.0, goffi v0.6.3, webgpu v0.5.5
 
 ## Build & Test
 
