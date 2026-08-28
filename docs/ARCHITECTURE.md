@@ -2,6 +2,14 @@
 
 This document describes the architecture of `wgpu` — the unified Go WebGPU package with three independent implementations (ADR-038).
 
+## Design Principle
+
+**If implementation CAN be hidden — it MUST be hidden.**
+
+The root package (`github.com/gogpu/wgpu`) exposes only exported types and thin delegation methods. All implementation logic lives in `internal/` sub-packages. pkg.go.dev shows one clean public API package. Contributors working within the module have full access to `internal/`. External users interact exclusively through the public API.
+
+This is enforced by Go's `internal/` package mechanism and documented in ADR-070.
+
 ## Overview
 
 Like Chrome (Dawn) and Firefox (wgpu) implementing the same W3C WebGPU spec, `wgpu` provides three backend paths selected by build tags:
