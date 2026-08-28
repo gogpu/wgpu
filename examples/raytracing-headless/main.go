@@ -1,3 +1,6 @@
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 // Ray tracing headless verification — proves RT pipeline correctness on software backend.
 //
 // Creates one triangle, builds BLAS, traces one ray → verifies hit.
@@ -67,7 +70,9 @@ func buildTriangleBLAS(dev hal.Device, queue hal.Queue) (hal.AccelerationStructu
 		return nil, nil, fmt.Errorf("vertex buffer: %w", err)
 	}
 	defer dev.DestroyBuffer(vbuf)
-	_ = queue.WriteBuffer(vbuf, 0, vertexData)
+	if err := queue.WriteBuffer(vbuf, 0, vertexData); err != nil {
+		return nil, nil, fmt.Errorf("write vertices: %w", err)
+	}
 
 	blas, err := dev.CreateAccelerationStructure(&hal.AccelerationStructureDescriptor{
 		Label:  "tri-blas",
@@ -101,7 +106,9 @@ func buildTriangleBLAS(dev hal.Device, queue hal.Queue) (hal.AccelerationStructu
 	if err != nil {
 		return nil, nil, fmt.Errorf("end: %w", err)
 	}
-	_, _ = queue.Submit([]hal.CommandBuffer{cb})
+	if _, err = queue.Submit([]hal.CommandBuffer{cb}); err != nil {
+		return nil, nil, fmt.Errorf("submit: %w", err)
+	}
 
 	swBlas := blas.(*software.AccelerationStructure)
 	bvh := swBlas.BVH()

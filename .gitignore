@@ -52,4 +52,5 @@ docs/dev/
 tmp/
 
 # Investigation backups
-.backup-investigation/
+.backup-investigation/*.json
+VP_VULKANINFO*.json

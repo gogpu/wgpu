@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **RT example**: copyright header + proper error handling on `WriteBuffer`/`Submit`
+- **CHANGELOG**: Software backend description — "full RT on any platform without GPU" (was "CI/testing only")
+
+### Changed
+
+- **docs**: `docs/RAY-TRACING.md` — public RT documentation (backends, architecture, limitations)
+- **docs**: AGENTS.md updated to v0.32.0 with RT section and corrected dependency versions
+- **docs**: README.md — ray tracing added to features table and examples
+- **docs**: ROADMAP.md + ARCHITECTURE.md updated for v0.32.0
+
 ## [0.32.0] - 2026-08-27
 
 ### Added
@@ -14,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Vulkan**: VK_KHR_acceleration_structure + VK_KHR_ray_query (real FFI calls)
   - **DX12**: DXR Tier 1.1 + SM 6.5 (COM bindings for ID3D12Device5/CommandList4)
   - **Metal**: MTLAccelerationStructure (macOS 15.0+)
-  - **Software**: CPU BVH build + Möller-Trumbore intersection (for CI/testing without GPU)
+  - **Software**: CPU BVH build + Möller-Trumbore intersection — full RT on any platform without GPU (servers, CI, containers, embedded)
   - **`internal/raytracing/`**: build orchestration, compaction state machine, 9 validation checks (96.8% coverage)
   - **Example**: `examples/raytracing-headless/` — visual RT verification on software backend
 - **`NewBackend()` constructors** on all 6 backends (enterprise API consistency)
