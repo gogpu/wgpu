@@ -87,9 +87,9 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				DriverInfo: "CPU-based software rendering backend",
 				Backend:    gputypes.BackendEmpty,
 			},
-			Features: 0, // No optional features supported
+			Features: gputypes.Features(gputypes.FeatureRayQuery),
 			Capabilities: hal.Capabilities{
-				Limits: gputypes.DefaultLimits(),
+				Limits: softwareLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
@@ -101,6 +101,16 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 			},
 		},
 	}
+}
+
+func softwareLimits() gputypes.Limits {
+	l := gputypes.DefaultLimits()
+	l.MaxBlasPrimitiveCount = 1 << 20
+	l.MaxBlasGeometryCount = 64
+	l.MaxTlasInstanceCount = 1 << 16
+	l.MaxAccelerationStructuresPerShaderStage = 16
+	l.MaxBuffersAndAccelerationStructuresPerShaderStage = 28
+	return l
 }
 
 // Destroy is a no-op for the software instance.
