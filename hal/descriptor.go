@@ -55,17 +55,6 @@ type Alignments struct {
 	RayTracingScratchBufferAlignment uint32
 }
 
-// DownlevelFlags is an alias for backward compatibility.
-// Canonical type is gputypes.DownlevelFlags.
-type DownlevelFlags = gputypes.DownlevelFlags
-
-// Backward-compatible aliases for downlevel flag constants.
-const (
-	DownlevelFlagsComputeShaders          = gputypes.DownlevelFlagsComputeShaders
-	DownlevelFlagsFragmentWritableStorage = gputypes.DownlevelFlagsFragmentWritableStorage
-	DownlevelFlagsAnisotropicFiltering    = gputypes.DownlevelFlagsAnisotropicFiltering
-	DownlevelFlagsBaseVertexBaseInstance  = gputypes.DownlevelFlagsBaseVertex
-)
 
 // TextureFormatCapabilities describes texture format capabilities.
 type TextureFormatCapabilities struct {

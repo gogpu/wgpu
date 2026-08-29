@@ -255,29 +255,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
 				},
-				DownlevelCapabilities: gputypes.DownlevelCapabilities{
-					ShaderModel: gputypes.ShaderModelSm5,
-					Limits:      gputypes.DownlevelLimits{},
-					Flags: gputypes.DownlevelFlagsComputeShaders |
-						gputypes.DownlevelFlagsFragmentWritableStorage |
-						gputypes.DownlevelFlagsIndirectExecution |
-						gputypes.DownlevelFlagsBaseVertex |
-						gputypes.DownlevelFlagsReadOnlyDepthStencil |
-						gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures |
-						gputypes.DownlevelFlagsComparisonSamplers |
-						gputypes.DownlevelFlagsVertexStorage |
-						gputypes.DownlevelFlagsAnisotropicFiltering |
-						gputypes.DownlevelFlagsFragmentStorage |
-						gputypes.DownlevelFlagsDepthTextureAndBufferCopies |
-						gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned |
-						gputypes.DownlevelFlagsUnrestrictedIndexBuffer |
-						gputypes.DownlevelFlagsViewFormats |
-						gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies |
-						gputypes.DownlevelFlagsNonblockingQueryResolve |
-						gputypes.DownlevelFlagsShaderF16InF32 |
-						gputypes.DownlevelFlagsMSL21 |
-						gputypes.DownlevelFlagsLinearInterpolation,
-				},
+				DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 			},
 		})
 	}
