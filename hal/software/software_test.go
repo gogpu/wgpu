@@ -384,7 +384,7 @@ func TestAdapterDownlevelHasCompute(t *testing.T) {
 	}
 
 	caps := adapters[0].Capabilities
-	if caps.DownlevelCapabilities.Flags&hal.DownlevelFlagsComputeShaders == 0 {
+	if caps.DownlevelCapabilities.Flags&gputypes.DownlevelFlagsComputeShaders == 0 {
 		t.Error("software backend should report compute shader support")
 	}
 }

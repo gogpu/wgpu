@@ -203,12 +203,13 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 			exposed := &exposedAdapters[idx] // Use pointer to avoid copy
 			// Create core.Adapter wrapping the HAL adapter
 			adapter := &Adapter{
-				Info:            exposed.Info,
-				Features:        exposed.Features,
-				Limits:          exposed.Capabilities.Limits,
-				Backend:         exposed.Info.Backend,
-				halAdapter:      exposed.Adapter,
-				halCapabilities: &exposed.Capabilities,
+				Info:                  exposed.Info,
+				Features:              exposed.Features,
+				Limits:                exposed.Capabilities.Limits,
+				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
+				Backend:               exposed.Info.Backend,
+				halAdapter:            exposed.Adapter,
+				halCapabilities:       &exposed.Capabilities,
 			}
 
 			// Register in the hub
@@ -569,12 +570,13 @@ func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
 		for idx := range exposedAdapters {
 			exposed := &exposedAdapters[idx]
 			adapter := &Adapter{
-				Info:            exposed.Info,
-				Features:        exposed.Features,
-				Limits:          exposed.Capabilities.Limits,
-				Backend:         exposed.Info.Backend,
-				halAdapter:      exposed.Adapter,
-				halCapabilities: &exposed.Capabilities,
+				Info:                  exposed.Info,
+				Features:              exposed.Features,
+				Limits:                exposed.Capabilities.Limits,
+				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
+				Backend:               exposed.Info.Backend,
+				halAdapter:            exposed.Adapter,
+				halCapabilities:       &exposed.Capabilities,
 			}
 
 			adapterID := hub.RegisterAdapter(adapter)

@@ -18,13 +18,14 @@ type DeviceDescriptor struct {
 
 // Adapter represents a physical GPU.
 type Adapter struct {
-	id       core.AdapterID
-	core     *core.Adapter
-	info     AdapterInfo
-	features Features
-	limits   Limits
-	instance *Instance
-	released bool
+	id        core.AdapterID
+	core      *core.Adapter
+	info      AdapterInfo
+	features  Features
+	limits    Limits
+	downlevel gputypes.DownlevelCapabilities
+	instance  *Instance
+	released  bool
 }
 
 // Info returns adapter metadata.
@@ -35,6 +36,10 @@ func (a *Adapter) Features() Features { return a.features }
 
 // Limits returns the adapter's resource limits.
 func (a *Adapter) Limits() Limits { return a.limits }
+
+// DownlevelCapabilities returns backend capability flags for downlevel adapters.
+// Matches Rust wgpu Adapter::get_downlevel_capabilities() (adapter.rs:174).
+func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities { return a.downlevel }
 
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.

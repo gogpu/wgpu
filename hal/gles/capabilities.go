@@ -53,7 +53,7 @@ type AdapterCapabilities struct {
 	Limits gputypes.Limits
 
 	// Downlevel capability flags.
-	DownlevelFlags hal.DownlevelFlags
+	DownlevelFlags gputypes.DownlevelFlags
 
 	// Inferred device type.
 	DeviceType gputypes.DeviceType
@@ -491,8 +491,8 @@ func queryLimits(glCtx *gl.Context, glMajor, glMinor int, isES bool, exts map[st
 
 // queryDownlevelFlags computes the downlevel capability flags from the GL context.
 // Follows Rust wgpu-hal adapter.rs downlevel_flags logic.
-func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMinor int, isES bool) hal.DownlevelFlags {
-	var flags hal.DownlevelFlags
+func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMinor int, isES bool) gputypes.DownlevelFlags {
+	var flags gputypes.DownlevelFlags
 
 	supportsCompute := glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 1}, [2]int{4, 3}) ||
 		hasExtension(exts, "GL_ARB_compute_shader")
@@ -500,20 +500,20 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 		hasExtension(exts, "GL_ARB_shader_storage_buffer_object")
 
 	if supportsCompute {
-		flags |= hal.DownlevelFlagsComputeShaders
+		flags |= gputypes.DownlevelFlagsComputeShaders
 	}
 
 	if supportsStorage {
 		var maxSSBOSize int32
 		glCtx.GetIntegerv(gl.MAX_SHADER_STORAGE_BLOCK_SIZE, &maxSSBOSize)
 		if maxSSBOSize > 0 {
-			flags |= hal.DownlevelFlagsFragmentWritableStorage
+			flags |= gputypes.DownlevelFlagsFragmentWritableStorage
 		}
 	}
 
 	// Base vertex support: ES 3.2+ / GL 3.2+
 	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{3, 2}) {
-		flags |= hal.DownlevelFlagsBaseVertexBaseInstance
+		flags |= gputypes.DownlevelFlagsBaseVertex
 	}
 
 	// Anisotropic filtering
@@ -521,7 +521,7 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 		var maxAniso int32
 		glCtx.GetIntegerv(gl.MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso)
 		if maxAniso >= 16 {
-			flags |= hal.DownlevelFlagsAnisotropicFiltering
+			flags |= gputypes.DownlevelFlagsAnisotropicFiltering
 		}
 	}
 
