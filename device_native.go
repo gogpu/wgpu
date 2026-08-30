@@ -1123,3 +1123,49 @@ func (d *Device) halDevice() hal.Device {
 	defer guard.Release()
 	return d.core.Raw(guard)
 }
+
+// CreateQuerySet creates a set of timestamp or occlusion queries.
+func (d *Device) CreateQuerySet(desc *QuerySetDescriptor) (*QuerySet, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: query set descriptor is nil")
+	}
+
+	if d.released.Load() {
+		return nil, ErrReleased
+	}
+
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return nil, ErrReleased
+	}
+
+	halQuerySet, err := halDevice.CreateQuerySet(desc.toHAL())
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create query set: %w", err)
+	}
+
+	return &QuerySet{hal: halQuerySet, device: d}, nil
+}
+
+// CreateRenderBundleEncoder creates an encoder for reusable render commands.
+func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
+	}
+
+	if d.released.Load() {
+		return nil, ErrReleased
+	}
+
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return nil, ErrReleased
+	}
+
+	halEncoder, err := halDevice.CreateRenderBundleEncoder(desc.toHAL())
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create render bundle encoder: %w", err)
+	}
+
+	return &RenderBundleEncoder{hal: halEncoder, device: d}, nil
+}

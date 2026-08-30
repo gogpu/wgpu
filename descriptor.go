@@ -165,6 +165,42 @@ type CommandEncoderDescriptor struct {
 	Label string
 }
 
+// QuerySetDescriptor describes a set of timestamp or occlusion queries.
+type QuerySetDescriptor struct {
+	Label string
+	Type  QueryType
+	Count uint32
+}
+
+func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
+	if d == nil {
+		return nil
+	}
+	return &hal.QuerySetDescriptor{Label: d.Label, Type: hal.QueryType(d.Type), Count: d.Count}
+}
+
+// RenderBundleEncoderDescriptor describes the render pass compatibility of a
+// render bundle recorded by a RenderBundleEncoder.
+type RenderBundleEncoderDescriptor struct {
+	Label              string
+	ColorFormats       []TextureFormat
+	DepthStencilFormat TextureFormat
+	SampleCount        uint32
+	DepthReadOnly      bool
+	StencilReadOnly    bool
+}
+
+func (d *RenderBundleEncoderDescriptor) toHAL() *hal.RenderBundleEncoderDescriptor {
+	if d == nil {
+		return nil
+	}
+	return &hal.RenderBundleEncoderDescriptor{
+		Label: d.Label, ColorFormats: d.ColorFormats,
+		DepthStencilFormat: d.DepthStencilFormat, SampleCount: d.SampleCount,
+		DepthReadOnly: d.DepthReadOnly, StencilReadOnly: d.StencilReadOnly,
+	}
+}
+
 // toHAL converts a CommandEncoderDescriptor to a hal.CommandEncoderDescriptor.
 func (d *CommandEncoderDescriptor) toHAL() *hal.CommandEncoderDescriptor {
 	return &hal.CommandEncoderDescriptor{

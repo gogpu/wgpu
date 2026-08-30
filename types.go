@@ -109,6 +109,14 @@ type LoadOp = gputypes.LoadOp
 type StoreOp = gputypes.StoreOp
 type Color = gputypes.Color
 
+// QueryType identifies the kind of data stored in a query set.
+type QueryType uint32
+
+const (
+	QueryTypeOcclusion QueryType = iota
+	QueryTypeTimestamp
+)
+
 // Bind group types
 type BindGroupLayoutEntry = gputypes.BindGroupLayoutEntry
 type VertexBufferLayout = gputypes.VertexBufferLayout
