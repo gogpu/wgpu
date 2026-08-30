@@ -373,7 +373,7 @@ func TestComputePipelineNoSPIRV(t *testing.T) {
 	}
 }
 
-func TestAdapterDownlevelHasCompute(t *testing.T) {
+func TestAdapterDownlevelCapabilities(t *testing.T) {
 	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
@@ -383,9 +383,48 @@ func TestAdapterDownlevelHasCompute(t *testing.T) {
 		t.Fatal("no adapters found")
 	}
 
-	caps := adapters[0].Capabilities
-	if caps.DownlevelCapabilities.Flags&gputypes.DownlevelFlagsComputeShaders == 0 {
-		t.Error("software backend should report compute shader support")
+	dc := adapters[0].Capabilities.DownlevelCapabilities
+
+	if dc.ShaderModel != gputypes.ShaderModelSm5 {
+		t.Errorf("ShaderModel = %v, want Sm5", dc.ShaderModel)
+	}
+
+	requiredFlags := []struct {
+		flag gputypes.DownlevelFlags
+		name string
+	}{
+		{gputypes.DownlevelFlagsComputeShaders, "ComputeShaders"},
+		{gputypes.DownlevelFlagsFragmentWritableStorage, "FragmentWritableStorage"},
+		{gputypes.DownlevelFlagsBaseVertex, "BaseVertex"},
+		{gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures, "NonPowerOfTwoMipmappedTextures"},
+		{gputypes.DownlevelFlagsIndependentBlend, "IndependentBlend"},
+		{gputypes.DownlevelFlagsVertexStorage, "VertexStorage"},
+		{gputypes.DownlevelFlagsFragmentStorage, "FragmentStorage"},
+		{gputypes.DownlevelFlagsDepthTextureAndBufferCopies, "DepthTextureAndBufferCopies"},
+		{gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned, "BufferBindingsNot16ByteAligned"},
+		{gputypes.DownlevelFlagsUnrestrictedIndexBuffer, "UnrestrictedIndexBuffer"},
+		{gputypes.DownlevelFlagsFullDrawIndexUint32, "FullDrawIndexUint32"},
+		{gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies, "UnrestrictedExternalTextureCopies"},
+		{gputypes.DownlevelFlagsLinearInterpolation, "LinearInterpolation"},
+	}
+	for _, rf := range requiredFlags {
+		if !dc.Flags.Contains(rf.flag) {
+			t.Errorf("software backend should report %s", rf.name)
+		}
+	}
+
+	absentFlags := []struct {
+		flag gputypes.DownlevelFlags
+		name string
+	}{
+		{gputypes.DownlevelFlagsIndirectExecution, "IndirectExecution"},
+		{gputypes.DownlevelFlagsAnisotropicFiltering, "AnisotropicFiltering"},
+		{gputypes.DownlevelFlagsMultisampledShading, "MultisampledShading"},
+	}
+	for _, af := range absentFlags {
+		if dc.Flags.Contains(af.flag) {
+			t.Errorf("software backend should NOT report %s", af.name)
+		}
 	}
 }
 

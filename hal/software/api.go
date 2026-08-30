@@ -97,7 +97,19 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				DownlevelCapabilities: gputypes.DownlevelCapabilities{
 					ShaderModel: gputypes.ShaderModelSm5,
 					Limits:      gputypes.DownlevelLimits{},
-					Flags:       gputypes.DownlevelFlagsComputeShaders,
+					Flags: gputypes.DownlevelFlagsComputeShaders |
+						gputypes.DownlevelFlagsFragmentWritableStorage |
+						gputypes.DownlevelFlagsBaseVertex |
+						gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures |
+						gputypes.DownlevelFlagsIndependentBlend |
+						gputypes.DownlevelFlagsVertexStorage |
+						gputypes.DownlevelFlagsFragmentStorage |
+						gputypes.DownlevelFlagsDepthTextureAndBufferCopies |
+						gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned |
+						gputypes.DownlevelFlagsUnrestrictedIndexBuffer |
+						gputypes.DownlevelFlagsFullDrawIndexUint32 |
+						gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies |
+						gputypes.DownlevelFlagsLinearInterpolation,
 				},
 			},
 		},
