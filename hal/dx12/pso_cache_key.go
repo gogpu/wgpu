@@ -193,15 +193,15 @@ func writeRenderTargetBlend(h hash.Hash, rt *d3d12.D3D12_RENDER_TARGET_BLEND_DES
 	buf[6] = byte(rt.DestBlendAlpha)
 	buf[7] = byte(rt.BlendOpAlpha)
 	buf[8] = byte(rt.LogicOp)
-	binary.LittleEndian.PutUint32(buf[12:16], rt.RenderTargetWriteMask)
-	_, _ = h.Write(buf[:16])
+	buf[9] = rt.RenderTargetWriteMask
+	_, _ = h.Write(buf[:10])
 }
 
 func writeColorTarget(h hash.Hash, target *gputypes.ColorTargetState) {
 	var buf [12]byte
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(target.Format))
-	buf[4] = boolByte(target.Blend != nil)
-	buf[5] = boolByte(target.WriteMask != 0)
+	buf[4] = flagByte(target.Blend != nil)
+	buf[5] = flagByte(target.WriteMask != 0)
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(target.WriteMask))
 	_, _ = h.Write(buf[:12])
 	if target.Blend != nil {
@@ -220,6 +220,13 @@ func writeBlendComponent(h hash.Hash, bc *gputypes.BlendComponent) {
 
 func boolByte(v int32) byte {
 	if v != 0 {
+		return 1
+	}
+	return 0
+}
+
+func flagByte(v bool) byte {
+	if v {
 		return 1
 	}
 	return 0
