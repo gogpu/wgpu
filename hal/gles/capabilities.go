@@ -508,21 +508,79 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 		glCtx.GetIntegerv(gl.MAX_SHADER_STORAGE_BLOCK_SIZE, &maxSSBOSize)
 		if maxSSBOSize > 0 {
 			flags |= gputypes.DownlevelFlagsFragmentWritableStorage
+			flags |= gputypes.DownlevelFlagsFragmentStorage
+		}
+
+		if !isES {
+			var maxVertSSBO int32
+			glCtx.GetIntegerv(gl.MAX_VERTEX_SHADER_STORAGE_BLOCKS, &maxVertSSBO)
+			if maxVertSSBO > 0 {
+				flags |= gputypes.DownlevelFlagsVertexStorage
+			}
+		} else if supportsStorage {
+			flags |= gputypes.DownlevelFlagsVertexStorage
 		}
 	}
 
-	// Base vertex support: ES 3.2+ / GL 3.2+
 	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{3, 2}) {
 		flags |= gputypes.DownlevelFlagsBaseVertex
 	}
 
-	// Anisotropic filtering
 	if hasExtension(exts, "EXT_texture_filter_anisotropic", "GL_EXT_texture_filter_anisotropic") {
 		var maxAniso int32
 		glCtx.GetIntegerv(gl.MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso)
 		if maxAniso >= 16 {
 			flags |= gputypes.DownlevelFlagsAnisotropicFiltering
 		}
+	}
+
+	// Rust: NPOT mipmaps always on GL/ES 3.0+
+	flags |= gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures
+
+	// Rust: comparison samplers always on GL 3.3+ / ES 3.0+
+	flags |= gputypes.DownlevelFlagsComparisonSamplers
+
+	// Rust: ShaderF16InF32 always (quantizeToF16, pack/unpack2x16float)
+	flags |= gputypes.DownlevelFlagsShaderF16InF32
+
+	if supportsCompute {
+		flags |= gputypes.DownlevelFlagsIndirectExecution
+	}
+
+	// GL 4.0+ / OES_draw_buffers_indexed
+	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{4, 0}) ||
+		hasExtension(exts, "OES_draw_buffers_indexed") {
+		flags |= gputypes.DownlevelFlagsIndependentBlend
+	}
+
+	// GL 4.0+ / OES_sample_shading
+	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{4, 0}) ||
+		hasExtension(exts, "OES_sample_shading", "GL_OES_sample_shading") {
+		flags |= gputypes.DownlevelFlagsMultisampledShading
+	}
+
+	// GL 4.0+ / EXT_texture_cube_map_array
+	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{4, 0}) ||
+		hasExtension(exts, "EXT_texture_cube_map_array", "GL_EXT_texture_cube_map_array") {
+		flags |= gputypes.DownlevelFlagsCubeArrayTextures
+	}
+
+	// Desktop GL only capabilities (not available on ES)
+	if !isES {
+		flags |= gputypes.DownlevelFlagsDepthTextureAndBufferCopies
+		flags |= gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned
+		flags |= gputypes.DownlevelFlagsUnrestrictedIndexBuffer
+		flags |= gputypes.DownlevelFlagsFullDrawIndexUint32
+		flags |= gputypes.DownlevelFlagsReadOnlyDepthStencil
+		flags |= gputypes.DownlevelFlagsNonblockingQueryResolve
+		flags |= gputypes.DownlevelFlagsLinearInterpolation
+		flags |= gputypes.DownlevelFlagsViewFormats
+	}
+
+	// GL 4.3+ / ARB_polygon_offset_clamp
+	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{0, 0}, [2]int{4, 3}) ||
+		hasExtension(exts, "ARB_polygon_offset_clamp", "GL_ARB_polygon_offset_clamp") {
+		flags |= gputypes.DownlevelFlagsDepthBiasClamp
 	}
 
 	return flags
