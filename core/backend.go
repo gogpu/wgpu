@@ -59,6 +59,8 @@ var (
 	// providers stores registered backend providers by type.
 	providers = make(map[gputypes.Backend]BackendProvider)
 
+	registerHALBackendsOnce sync.Once
+
 	// providerPriority defines the order in which backends are tried.
 	// Higher priority backends are tried first.
 	providerPriority = []gputypes.Backend{
@@ -148,12 +150,14 @@ func SelectBestBackendProvider() BackendProvider {
 // This function queries the HAL registry for all registered backends and creates
 // wrapper providers for them.
 func RegisterHALBackends() {
-	for _, variant := range hal.AvailableBackends() {
-		backend, ok := hal.GetBackend(variant)
-		if ok {
-			RegisterBackendProvider(&halBackendProvider{backend: backend})
+	registerHALBackendsOnce.Do(func() {
+		for _, variant := range hal.AvailableBackends() {
+			backend, ok := hal.GetBackend(variant)
+			if ok {
+				RegisterBackendProvider(&halBackendProvider{backend: backend})
+			}
 		}
-	}
+	})
 }
 
 // FilterBackendsByMask filters backend providers by the enabled backends mask.

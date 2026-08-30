@@ -217,34 +217,43 @@ func TestHeadlessSurfaceClearReadback(t *testing.T) {
 	const width, height = uint32(7), uint32(5)
 	wantPixel := []byte{0xff, 0x00, 0x7f, 0xff}
 
+	// Sequential — kolkov/racedetector may run t.Run subtests concurrently,
+	// racing concurrent CreateInstance HAL probing on Windows CI.
 	for _, format := range []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatBGRA8Unorm} {
-		t.Run(format.String(), func(t *testing.T) {
-			fixture := newHeadlessSoftwareFixture(t, width, height, format, true)
-			texture, view, encoder, pass := fixture.beginFrame(t, gputypes.Color{R: 1, G: 0, B: 0.5, A: 1})
-			fixture.submitAndPresent(t, texture, view, encoder, pass)
+		runHeadlessSurfaceClearReadback(t, format.String(), width, height, format, wantPixel)
+	}
+}
 
-			pixels, err := fixture.surface.ReadPixels()
-			if err != nil {
-				t.Fatalf("ReadPixels: %v", err)
-			}
-			if want := int(width * height * 4); len(pixels) != want {
-				t.Fatalf("ReadPixels length = %d, want %d", len(pixels), want)
-			}
-			for offset := 0; offset < len(pixels); offset += 4 {
-				if !bytes.Equal(pixels[offset:offset+4], wantPixel) {
-					t.Fatalf("pixel %d = %v, want RGBA %v", offset/4, pixels[offset:offset+4], wantPixel)
-				}
-			}
+func runHeadlessSurfaceClearReadback(t *testing.T, name string, width, height uint32, format gputypes.TextureFormat, wantPixel []byte) {
+	t.Helper()
+	if name != "" {
+		t.Log("format", name)
+	}
 
-			pixels[0] = 0
-			second, err := fixture.surface.ReadPixels()
-			if err != nil {
-				t.Fatalf("second ReadPixels: %v", err)
-			}
-			if !bytes.Equal(second[:4], wantPixel) {
-				t.Fatalf("second snapshot begins %v after caller mutation, want %v", second[:4], wantPixel)
-			}
-		})
+	fixture := newHeadlessSoftwareFixture(t, width, height, format, true)
+	texture, view, encoder, pass := fixture.beginFrame(t, gputypes.Color{R: 1, G: 0, B: 0.5, A: 1})
+	fixture.submitAndPresent(t, texture, view, encoder, pass)
+
+	pixels, err := fixture.surface.ReadPixels()
+	if err != nil {
+		t.Fatalf("ReadPixels: %v", err)
+	}
+	if want := int(width * height * 4); len(pixels) != want {
+		t.Fatalf("ReadPixels length = %d, want %d", len(pixels), want)
+	}
+	for offset := 0; offset < len(pixels); offset += 4 {
+		if !bytes.Equal(pixels[offset:offset+4], wantPixel) {
+			t.Fatalf("pixel %d = %v, want RGBA %v", offset/4, pixels[offset:offset+4], wantPixel)
+		}
+	}
+
+	pixels[0] = 0
+	second, err := fixture.surface.ReadPixels()
+	if err != nil {
+		t.Fatalf("second ReadPixels: %v", err)
+	}
+	if !bytes.Equal(second[:4], wantPixel) {
+		t.Fatalf("second snapshot begins %v after caller mutation, want %v", second[:4], wantPixel)
 	}
 }
 

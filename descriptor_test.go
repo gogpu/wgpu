@@ -245,71 +245,60 @@ func TestComputePipelineDescriptorToHAL(t *testing.T) {
 		}
 	})
 
-	t.Run("zero init workgroup memory defaults to true", func(t *testing.T) {
-		// When ZeroInitializeWorkgroupMemory is nil (not set), the default
-		// should be true per WebGPU spec.
-		desc := ComputePipelineDescriptor{
-			Label:      "compute-default-zero-init",
-			EntryPoint: "main",
+	// Zero-init cases run sequentially in one block. kolkov/racedetector on
+	// Windows CI may execute t.Run subtests concurrently; separate subtests
+	// previously raced on stack-scoped *bool fields during toHAL().
+	t.Run("zero init workgroup memory", func(t *testing.T) {
+		{
+			desc := ComputePipelineDescriptor{
+				Label:      "compute-default-zero-init",
+				EntryPoint: "main",
+			}
+			halDesc := desc.toHAL()
+			if desc.ZeroInitializeWorkgroupMemory != nil {
+				t.Error("ZeroInitializeWorkgroupMemory should be nil by default")
+			}
+			zeroInit := true
+			if desc.ZeroInitializeWorkgroupMemory != nil {
+				zeroInit = *desc.ZeroInitializeWorkgroupMemory
+			}
+			if !zeroInit {
+				t.Error("default zero_initialize_workgroup_memory should be true")
+			}
+			_ = halDesc
 		}
-		halDesc := desc.toHAL()
-		// Module is nil so ComputeState won't be filled; verify by checking
-		// the conversion logic directly.
-		if desc.ZeroInitializeWorkgroupMemory != nil {
-			t.Error("ZeroInitializeWorkgroupMemory should be nil by default")
+		{
+			explicitFalse := false
+			desc := ComputePipelineDescriptor{
+				Label:                         "compute-no-zero-init",
+				EntryPoint:                    "main",
+				ZeroInitializeWorkgroupMemory: &explicitFalse,
+			}
+			zeroInit := true
+			if desc.ZeroInitializeWorkgroupMemory != nil {
+				zeroInit = *desc.ZeroInitializeWorkgroupMemory
+			}
+			if zeroInit {
+				t.Error("explicit false should yield zero_initialize_workgroup_memory=false")
+			}
+			_ = desc.toHAL()
 		}
-
-		// Verify the default logic: nil -> true
-		zeroInit := true
-		if desc.ZeroInitializeWorkgroupMemory != nil {
-			zeroInit = *desc.ZeroInitializeWorkgroupMemory
+		{
+			explicitTrue := true
+			desc := ComputePipelineDescriptor{
+				Label:                         "compute-explicit-zero-init",
+				EntryPoint:                    "main",
+				ZeroInitializeWorkgroupMemory: &explicitTrue,
+			}
+			zeroInit := true
+			if desc.ZeroInitializeWorkgroupMemory != nil {
+				zeroInit = *desc.ZeroInitializeWorkgroupMemory
+			}
+			if !zeroInit {
+				t.Error("explicit true should yield zero_initialize_workgroup_memory=true")
+			}
+			_ = desc.toHAL()
 		}
-		if !zeroInit {
-			t.Error("default zero_initialize_workgroup_memory should be true")
-		}
-
-		_ = halDesc // used above
-	})
-
-	t.Run("zero init workgroup memory explicit false", func(t *testing.T) {
-		explicitFalse := false
-		desc := ComputePipelineDescriptor{
-			Label:                         "compute-no-zero-init",
-			EntryPoint:                    "main",
-			ZeroInitializeWorkgroupMemory: &explicitFalse,
-		}
-
-		// Verify the conversion logic: explicit false -> false
-		zeroInit := true
-		if desc.ZeroInitializeWorkgroupMemory != nil {
-			zeroInit = *desc.ZeroInitializeWorkgroupMemory
-		}
-		if zeroInit {
-			t.Error("explicit false should yield zero_initialize_workgroup_memory=false")
-		}
-
-		halDesc := desc.toHAL()
-		_ = halDesc
-	})
-
-	t.Run("zero init workgroup memory explicit true", func(t *testing.T) {
-		explicitTrue := true
-		desc := ComputePipelineDescriptor{
-			Label:                         "compute-explicit-zero-init",
-			EntryPoint:                    "main",
-			ZeroInitializeWorkgroupMemory: &explicitTrue,
-		}
-
-		zeroInit := true
-		if desc.ZeroInitializeWorkgroupMemory != nil {
-			zeroInit = *desc.ZeroInitializeWorkgroupMemory
-		}
-		if !zeroInit {
-			t.Error("explicit true should yield zero_initialize_workgroup_memory=true")
-		}
-
-		halDesc := desc.toHAL()
-		_ = halDesc
 	})
 }
 
