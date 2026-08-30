@@ -543,19 +543,24 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 	// Rust: ShaderF16InF32 always (quantizeToF16, pack/unpack2x16float)
 	flags |= gputypes.DownlevelFlagsShaderF16InF32
 
+	// Rust: MSL2_1 always set for GLES (informational — about naga codegen target, not GL driver)
+	flags |= gputypes.DownlevelFlagsMSL21
+
 	if supportsCompute {
 		flags |= gputypes.DownlevelFlagsIndirectExecution
 	}
 
-	// GL 4.0+ / OES_draw_buffers_indexed
+	// GL 4.0+ / OES_draw_buffers_indexed / GL_EXT_draw_buffers_indexed
 	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{4, 0}) ||
-		hasExtension(exts, "OES_draw_buffers_indexed") {
+		hasExtension(exts, "OES_draw_buffers_indexed", "GL_OES_draw_buffers_indexed",
+			"EXT_draw_buffers_indexed", "GL_EXT_draw_buffers_indexed") {
 		flags |= gputypes.DownlevelFlagsIndependentBlend
 	}
 
-	// GL 4.0+ / OES_sample_shading
+	// GL 4.0+ / OES_sample_shading / OES_sample_variables
 	if glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 2}, [2]int{4, 0}) ||
-		hasExtension(exts, "OES_sample_shading", "GL_OES_sample_shading") {
+		hasExtension(exts, "OES_sample_shading", "GL_OES_sample_shading",
+			"OES_sample_variables", "GL_OES_sample_variables") {
 		flags |= gputypes.DownlevelFlagsMultisampledShading
 	}
 
