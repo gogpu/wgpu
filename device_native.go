@@ -642,6 +642,12 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
 	}
 
+	// Validate that the device supports compute shaders (downlevel check).
+	// Matches Rust wgpu-core resource.rs:4367 — first validation in create_compute_pipeline_or_error.
+	if err := d.core.RequireDownlevelFlags(gputypes.DownlevelFlagsComputeShaders); err != nil {
+		return nil, fmt.Errorf("wgpu: CreateComputePipeline: %w", err)
+	}
+
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return nil, ErrReleased
