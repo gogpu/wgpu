@@ -166,7 +166,7 @@ func TestRenderPassEncoderSetViewportNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.SetViewport(0, 0, 800, 600, 0, 1)
+	rpe.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
 }
 
 // TestRenderPassEncoderSetScissorNullActive verifies that SetScissorRect
@@ -179,7 +179,7 @@ func TestRenderPassEncoderSetScissorNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.SetScissorRect(0, 0, 800, 600)
+	rpe.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 }
 
 // TestCopyBufferToBufferNullActive verifies that CopyBufferToBuffer

@@ -1194,7 +1194,7 @@ func TestSetViewport(t *testing.T) {
 		t.Error("hasViewport should be false initially")
 	}
 
-	pass.SetViewport(10, 20, 800, 600, 0.0, 1.0)
+	pass.SetViewport(hal.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
 
 	if !encoder.hasViewport {
 		t.Error("hasViewport should be true after SetViewport")
@@ -1547,7 +1547,7 @@ func TestScissorBlitClipsToRect(t *testing.T) {
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
 	// Scissor: top-left 2x2 region only.
-	pass.SetScissorRect(0, 0, 2, 2)
+	pass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 2, Height: 2})
 	pass.Draw(6, 1, 0, 0)
 	pass.End()
 
@@ -1637,7 +1637,7 @@ func TestScissorTriangleDrawClipsToRect(t *testing.T) {
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, 0)
 	// Scissor: right half only (x=4, y=0, w=4, h=8).
-	pass.SetScissorRect(4, 0, 4, 8)
+	pass.SetScissorRect(hal.ScissorRect{X: 4, Y: 0, Width: 4, Height: 8})
 	pass.Draw(3, 1, 0, 0)
 	pass.End()
 
@@ -1733,7 +1733,7 @@ func TestScissorBlitScaledClipsToRect(t *testing.T) {
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
 	// Scissor: bottom-right 2x2 only.
-	pass.SetScissorRect(2, 2, 2, 2)
+	pass.SetScissorRect(hal.ScissorRect{X: 2, Y: 2, Width: 2, Height: 2})
 	pass.Draw(6, 1, 0, 0)
 	pass.End()
 

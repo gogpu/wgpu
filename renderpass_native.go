@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
@@ -142,12 +143,17 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 
 // SetViewport sets the viewport transformation.
 func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	p.core.SetViewport(x, y, width, height, minDepth, maxDepth)
+	p.core.SetViewport(hal.Viewport{
+		X: x, Y: y, Width: width, Height: height,
+		MinDepth: minDepth, MaxDepth: maxDepth,
+	})
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
 func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	p.core.SetScissorRect(x, y, width, height)
+	p.core.SetScissorRect(hal.ScissorRect{
+		X: x, Y: y, Width: width, Height: height,
+	})
 }
 
 // SetBlendConstant sets the blend constant color.

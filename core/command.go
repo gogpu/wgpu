@@ -1234,22 +1234,22 @@ func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.I
 }
 
 // SetViewport sets the viewport.
-func (p *CoreRenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+func (p *CoreRenderPassEncoder) SetViewport(vp hal.Viewport) {
 	if p.ended {
 		return
 	}
 	if p.raw != nil {
-		p.raw.SetViewport(x, y, width, height, minDepth, maxDepth)
+		p.raw.SetViewport(vp)
 	}
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (p *CoreRenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+func (p *CoreRenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
 	if p.ended {
 		return
 	}
 	if p.raw != nil {
-		p.raw.SetScissorRect(x, y, width, height)
+		p.raw.SetScissorRect(rect)
 	}
 }
 

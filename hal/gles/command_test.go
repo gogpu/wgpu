@@ -211,7 +211,7 @@ func TestRenderPassEncoder_SetViewport(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.SetViewport(10, 20, 800, 600, 0.0, 1.0)
+	rpe.SetViewport(hal.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -239,7 +239,7 @@ func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.SetScissorRect(50, 50, 400, 300)
+	rpe.SetScissorRect(hal.ScissorRect{X: 50, Y: 50, Width: 400, Height: 300})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -298,7 +298,7 @@ func TestRenderPassEncoder_SetScissorRect_PassThrough(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc).(*RenderPassEncoder)
 
-	rpe.SetScissorRect(50, 100, 400, 200)
+	rpe.SetScissorRect(hal.ScissorRect{X: 50, Y: 100, Width: 400, Height: 200})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))

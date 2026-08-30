@@ -41,7 +41,7 @@ func TestRenderPassStats_ScissorAndDrawCount(t *testing.T) {
 		},
 	})
 
-	pass.SetScissorRect(24, 64, 48, 48)
+	pass.SetScissorRect(hal.ScissorRect{X: 24, Y: 64, Width: 48, Height: 48})
 	pass.Draw(6, 1, 0, 0)
 	pass.Draw(6, 1, 0, 0)
 	pass.Draw(3, 1, 0, 0)

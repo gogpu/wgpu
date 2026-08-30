@@ -98,10 +98,10 @@ func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
 func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
 
 // SetViewport is a no-op.
-func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
+func (r *RenderPassEncoder) SetViewport(_ hal.Viewport) {}
 
 // SetScissorRect is a no-op.
-func (r *RenderPassEncoder) SetScissorRect(_, _, _, _ uint32) {}
+func (r *RenderPassEncoder) SetScissorRect(_ hal.ScissorRect) {}
 
 // SetBlendConstant is a no-op.
 func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}

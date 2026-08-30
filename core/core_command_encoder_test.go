@@ -446,7 +446,7 @@ func TestCoreRenderPassEncoder_SetViewport(t *testing.T) {
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
 
 	// Should not panic
-	pass.SetViewport(0, 0, 800, 600, 0.0, 1.0)
+	pass.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
 }
 
 func TestCoreRenderPassEncoder_SetScissorRect(t *testing.T) {
@@ -457,7 +457,7 @@ func TestCoreRenderPassEncoder_SetScissorRect(t *testing.T) {
 	pass, _ := encoder.BeginRenderPass(&RenderPassDescriptor{Label: "TestPass"})
 
 	// Should not panic
-	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 }
 
 func TestCoreRenderPassEncoder_SetBlendConstant(t *testing.T) {
@@ -513,8 +513,8 @@ func TestCoreRenderPassEncoder_AfterEnd(t *testing.T) {
 	_ = pass.End()
 
 	// All methods should silently return after End
-	pass.SetViewport(0, 0, 800, 600, 0.0, 1.0)
-	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
+	pass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 1, B: 1, A: 1})
 	pass.SetStencilReference(1)
 	pass.Draw(3, 1, 0, 0)

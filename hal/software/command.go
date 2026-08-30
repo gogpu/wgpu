@@ -533,16 +533,16 @@ func (r *RenderPassEncoder) SetIndexBuffer(buf hal.Buffer, format gputypes.Index
 }
 
 // SetViewport stores the viewport transformation.
-func (r *RenderPassEncoder) SetViewport(x, y, w, h, minDepth, maxDepth float32) {
-	r.viewport = [6]float32{x, y, w, h, minDepth, maxDepth}
+func (r *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+	r.viewport = [6]float32{vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth}
 	r.hasViewport = true
 }
 
 // SetScissorRect stores the scissor rectangle.
-func (r *RenderPassEncoder) SetScissorRect(x, y, w, h uint32) {
-	r.scissorRect = [4]uint32{x, y, w, h}
+func (r *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+	r.scissorRect = [4]uint32{rect.X, rect.Y, rect.Width, rect.Height}
 	r.hasScissor = true
-	hal.Logger().Debug("software: SetScissorRect", "x", x, "y", y, "w", w, "h", h)
+	hal.Logger().Debug("software: SetScissorRect", "x", rect.X, "y", rect.Y, "w", rect.Width, "h", rect.Height)
 }
 
 // SetBlendConstant is a no-op (blend constants not yet wired to raster pipeline).

@@ -710,34 +710,34 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
 	if !e.encoder.isRecording {
 		return
 	}
 
 	viewport := d3d12.D3D12_VIEWPORT{
-		TopLeftX: x,
-		TopLeftY: y,
-		Width:    width,
-		Height:   height,
-		MinDepth: minDepth,
-		MaxDepth: maxDepth,
+		TopLeftX: vp.X,
+		TopLeftY: vp.Y,
+		Width:    vp.Width,
+		Height:   vp.Height,
+		MinDepth: vp.MinDepth,
+		MaxDepth: vp.MaxDepth,
 	}
 
 	e.encoder.cmdList.RSSetViewports(1, &viewport)
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
 	if !e.encoder.isRecording {
 		return
 	}
 
 	scissor := d3d12.D3D12_RECT{
-		Left:   int32(x),
-		Top:    int32(y),
-		Right:  int32(x + width),
-		Bottom: int32(y + height),
+		Left:   int32(rect.X),
+		Top:    int32(rect.Y),
+		Right:  int32(rect.X + rect.Width),
+		Bottom: int32(rect.Y + rect.Height),
 	}
 
 	e.encoder.cmdList.RSSetScissorRects(1, &scissor)

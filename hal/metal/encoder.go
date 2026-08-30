@@ -815,8 +815,8 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	viewport := MTLViewport{OriginX: float64(x), OriginY: float64(y), Width: float64(width), Height: float64(height), ZNear: float64(minDepth), ZFar: float64(maxDepth)}
+func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+	viewport := MTLViewport{OriginX: float64(vp.X), OriginY: float64(vp.Y), Width: float64(vp.Width), Height: float64(vp.Height), ZNear: float64(vp.MinDepth), ZFar: float64(vp.MaxDepth)}
 	if e.pending != nil {
 		e.pending.viewport = viewport
 		e.pending.viewportSet = true
@@ -828,8 +828,8 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	scissor := MTLScissorRect{X: NSUInteger(x), Y: NSUInteger(y), Width: NSUInteger(width), Height: NSUInteger(height)}
+func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+	scissor := MTLScissorRect{X: NSUInteger(rect.X), Y: NSUInteger(rect.Y), Width: NSUInteger(rect.Width), Height: NSUInteger(rect.Height)}
 	if e.pending != nil {
 		e.pending.scissor = scissor
 		e.pending.scissorSet = true
