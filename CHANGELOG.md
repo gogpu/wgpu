@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.1] - 2026-08-30
+
+### Changed
+
+- **HAL: SetViewport/SetScissorRect struct params** (#340) — positional parameters replaced with `hal.Viewport` and `hal.ScissorRect` structs on `hal.RenderPassEncoder` interface. Maps 1:1 to native GPU API structs (VkViewport, MTLViewport, D3D12_VIEWPORT). Public API unchanged (still positional per W3C spec). Rust wgpu HAL uses `Rect<f32>` + `Range<f32>` (`lib.rs:1667`); our monolithic `Viewport` avoids the split because Go interfaces don't support generic methods.
+- **deps:** gpucontext v0.30.0 → v0.31.2
+
 ## [0.33.0] - 2026-08-30
 
 ### Added
