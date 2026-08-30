@@ -225,6 +225,39 @@ HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor ty
 
 ~1,300 LOC internal, 73 tests, 96.8% coverage. Example: `examples/raytracing-headless/`.
 
+## DownlevelCapabilities (ADR-071)
+
+Tracks backend capabilities that may be absent on non-conformant adapters (GLES 3.0, WebGL2). **This is a Rust wgpu extension — not a W3C WebGPU spec concept** (the term "downlevel" does not appear in the 18.5K-line spec). Of 27 flags, 24 track capabilities REQUIRED by the spec for core adapters, 1 (AnisotropicFiltering) is correctly not required, and 2 (MSL21, SurfaceViewFormats) are backend-specific.
+
+**Types:** Defined in `gputypes/downlevel.go` — 27 `DownlevelFlags` with explicit `1 << N` bit positions matching Rust wgpu-types (`limits.rs:1102-1246`). `DownlevelCapabilities` struct (Flags, Limits, ShaderModel). `IsWebGPUCompliant()` checks compliance.
+
+**Data flow:**
+```
+HAL backend (per-adapter)
+  → hal.ExposedAdapter.Capabilities.DownlevelCapabilities
+  → core.Adapter.DownlevelCapabilities (extracted at enumeration)
+  → core.Device.downlevel (copied at device creation)
+  → wgpu.Adapter.DownlevelCapabilities() (public API)
+  → gpucontext.DeviceProvider.DownlevelCapabilities() (ecosystem interface)
+  → gg.CheckGPUComputeSupport(provider) (consumer)
+```
+
+**Per-backend implementation:**
+
+| Backend | Approach | Flags |
+|---------|----------|-------|
+| Vulkan | 18 unconditional + 8 conditional from `VkPhysicalDeviceFeatures` | Rust adapter.rs:684-719 parity |
+| Metal | `DefaultDownlevelCapabilities()` | All conditionals pass on macOS 15+ |
+| DX12 | `DefaultDownlevelCapabilities()` | FL 11.0+ guarantees all |
+| GLES | Dynamic `queryDownlevelFlags()` (~20 checks) | Rust adapter.rs:387-452 parity |
+| Software | 13 explicit flags | Each verified against implementation code |
+| Noop | `DefaultDownlevelCapabilities()` | Rust noop/mod.rs parity |
+| Browser/Rust | `DefaultDownlevelCapabilities()` | WebGPU/Rust fully compliant |
+
+**Validation:** `core.Device.RequireDownlevelFlags()` rejects operations when flags are missing. Called in `CreateComputePipeline` (Rust `resource.rs:4367` parity). GLES 3.0 gets clean error instead of HAL crash.
+
+**Consumer gate:** gg checks `CheckGPUComputeSupport(provider)` BEFORE creating compute pipelines in both init paths (SetDeviceProvider + standalone). Matches Skia Graphite `computeSupport()` gate (`AtlasProvider.cpp:42`).
+
 ## Typed Surface Targets (Rust v29 Parity)
 
 Surface creation uses typed targets instead of raw `uintptr` handles:
