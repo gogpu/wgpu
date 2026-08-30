@@ -546,7 +546,12 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 	// Rust: MSL2_1 always set for GLES (informational — about naga codegen target, not GL driver)
 	flags |= gputypes.DownlevelFlagsMSL21
 
-	if supportsCompute {
+	// Rust adapter.rs:382-383: indirect draw/dispatch available when GL version
+	// supports it natively (ES 3.1+ / GL 4.3+) OR when the ARB_draw_indirect
+	// extension is present together with compute shader support.
+	indirectExecution := glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 1}, [2]int{4, 3}) ||
+		(hasExtension(exts, "GL_ARB_draw_indirect") && supportsCompute)
+	if indirectExecution {
 		flags |= gputypes.DownlevelFlagsIndirectExecution
 	}
 
