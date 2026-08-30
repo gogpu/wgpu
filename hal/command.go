@@ -91,6 +91,19 @@ type CommandEncoder interface {
 	ReadAccelerationStructureCompactSize(as AccelerationStructure, buffer Buffer, offset uint64)
 }
 
+// Viewport describes viewport transformation parameters.
+// Maps 1:1 to VkViewport, MTLViewport, D3D12_VIEWPORT.
+type Viewport struct {
+	X, Y, Width, Height float32
+	MinDepth, MaxDepth  float32
+}
+
+// ScissorRect describes scissor clipping rectangle.
+// Maps 1:1 to VkRect2D (offset+extent), MTLScissorRect, D3D12_RECT.
+type ScissorRect struct {
+	X, Y, Width, Height uint32
+}
+
 // RenderPassEncoder records render commands within a render pass.
 // Render passes define rendering targets and operations.
 type RenderPassEncoder interface {
@@ -112,10 +125,10 @@ type RenderPassEncoder interface {
 	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
 
 	// SetViewport sets the viewport transformation.
-	SetViewport(x, y, width, height, minDepth, maxDepth float32)
+	SetViewport(vp Viewport)
 
 	// SetScissorRect sets the scissor rectangle for clipping.
-	SetScissorRect(x, y, width, height uint32)
+	SetScissorRect(rect ScissorRect)
 
 	// SetBlendConstant sets the blend constant color.
 	SetBlendConstant(color *gputypes.Color)

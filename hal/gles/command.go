@@ -639,18 +639,18 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
 	e.encoder.commands = append(e.encoder.commands, &SetViewportCommand{
-		x: x, y: y, width: width, height: height,
-		minDepth: minDepth, maxDepth: maxDepth,
+		x: vp.X, y: vp.Y, width: vp.Width, height: vp.Height,
+		minDepth: vp.MinDepth, maxDepth: vp.MaxDepth,
 	})
 }
 
 // SetScissorRect sets the scissor rectangle.
 // With ADJUST_COORDINATE_SPACE, no Y-flip is needed — coordinates pass through directly.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
 	e.encoder.commands = append(e.encoder.commands, &SetScissorCommand{
-		x: x, y: y, width: width, height: height,
+		x: rect.X, y: rect.Y, width: rect.Width, height: rect.Height,
 	})
 }
 

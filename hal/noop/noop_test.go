@@ -700,8 +700,8 @@ func TestNoopRenderPass(t *testing.T) {
 	})
 
 	// Test render pass commands
-	renderPass.SetViewport(0, 0, 256, 256, 0, 1)
-	renderPass.SetScissorRect(0, 0, 256, 256)
+	renderPass.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 256, Height: 256, MinDepth: 0, MaxDepth: 1})
+	renderPass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 256, Height: 256})
 	renderPass.Draw(3, 1, 0, 0)
 	renderPass.End()
 
@@ -1560,8 +1560,8 @@ func TestNoopRenderPassEncoder(t *testing.T) {
 	pass.SetBindGroup(1, nil, []uint32{0, 256})
 	pass.SetVertexBuffer(0, buf, 0)
 	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 0)
-	pass.SetViewport(0, 0, 800, 600, 0, 1)
-	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
+	pass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 0, B: 0, A: 1})
 	pass.SetStencilReference(0xFF)
 	pass.Draw(6, 1, 0, 0)
