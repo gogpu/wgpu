@@ -255,10 +255,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
 				},
-				DownlevelCapabilities: hal.DownlevelCapabilities{
-					ShaderModel: 60, // SM6.0 equivalent
-					Flags:       0,
-				},
+				DownlevelCapabilities: downlevelCapabilitiesFromFeatures(&features),
 			},
 		})
 	}
@@ -550,6 +547,80 @@ func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) gputypes.Fe
 	result |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 
 	return result
+}
+
+// downlevelCapabilitiesFromFeatures builds DownlevelCapabilities by querying
+// VkPhysicalDeviceFeatures instead of assuming all flags.
+// Reference: wgpu-hal/src/vulkan/adapter.rs:662-719 (PhysicalDeviceFeatures::to_wgpu)
+//
+// Vulkan unconditionally supports 17 downlevel flags (compute, base vertex,
+// depth copies, etc.). Eight flags depend on actual physical device features
+// and are set conditionally from VkPhysicalDeviceFeatures fields.
+//
+// Note: SURFACE_VIEW_FORMATS depends on VK_KHR_swapchain_mutable_format
+// extension support. We currently don't enumerate device extensions at adapter
+// discovery time (only during Device creation in Open). Since all Vulkan
+// implementations that lack the extension still support swapchains, and wgpu
+// Rust sets the flag to true when the swapchain extension is absent, we default
+// to true here. This matches Rust: the flag is only false when the driver has
+// VK_KHR_swapchain but NOT VK_KHR_swapchain_mutable_format, which is rare.
+func downlevelCapabilitiesFromFeatures(features *vk.PhysicalDeviceFeatures) gputypes.DownlevelCapabilities {
+	// Start with the 17 unconditional flags (Rust adapter.rs:684-700).
+	flags := gputypes.DownlevelFlagsComputeShaders |
+		gputypes.DownlevelFlagsBaseVertex |
+		gputypes.DownlevelFlagsReadOnlyDepthStencil |
+		gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures |
+		gputypes.DownlevelFlagsComparisonSamplers |
+		gputypes.DownlevelFlagsVertexStorage |
+		gputypes.DownlevelFlagsFragmentStorage |
+		gputypes.DownlevelFlagsDepthTextureAndBufferCopies |
+		gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned |
+		gputypes.DownlevelFlagsUnrestrictedIndexBuffer |
+		gputypes.DownlevelFlagsIndirectExecution |
+		gputypes.DownlevelFlagsViewFormats |
+		gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies |
+		gputypes.DownlevelFlagsNonblockingQueryResolve |
+		gputypes.DownlevelFlagsShaderF16InF32 |
+		gputypes.DownlevelFlagsMSL21 |
+		gputypes.DownlevelFlagsLinearInterpolation
+
+	// SURFACE_VIEW_FORMATS: true unless driver has VK_KHR_swapchain but not
+	// VK_KHR_swapchain_mutable_format. We default to true (see comment above).
+	flags |= gputypes.DownlevelFlagsSurfaceViewFormats
+
+	// 8 conditional flags from VkPhysicalDeviceFeatures (Rust adapter.rs:702-719).
+	if features.ImageCubeArray != 0 {
+		flags |= gputypes.DownlevelFlagsCubeArrayTextures
+	}
+	if features.SamplerAnisotropy != 0 {
+		flags |= gputypes.DownlevelFlagsAnisotropicFiltering
+	}
+	if features.FragmentStoresAndAtomics != 0 {
+		flags |= gputypes.DownlevelFlagsFragmentWritableStorage
+	}
+	if features.SampleRateShading != 0 {
+		flags |= gputypes.DownlevelFlagsMultisampledShading
+	}
+	if features.IndependentBlend != 0 {
+		flags |= gputypes.DownlevelFlagsIndependentBlend
+	}
+	if features.FullDrawIndexUint32 != 0 {
+		flags |= gputypes.DownlevelFlagsFullDrawIndexUint32
+	}
+	if features.DepthBiasClamp != 0 {
+		flags |= gputypes.DownlevelFlagsDepthBiasClamp
+	}
+	// TEXTURE_COMPRESSION: BC || (ETC2 && ASTC) per W3C WebGPU spec.
+	if features.TextureCompressionBC != 0 ||
+		(features.TextureCompressionETC2 != 0 && features.TextureCompressionASTC_LDR != 0) {
+		flags |= gputypes.DownlevelFlagsTextureCompression
+	}
+
+	return gputypes.DownlevelCapabilities{
+		Flags:       flags,
+		Limits:      gputypes.DownlevelLimits{},
+		ShaderModel: gputypes.ShaderModelSm5,
+	}
 }
 
 // limitsFromProps maps Vulkan physical device limits to WebGPU limits.

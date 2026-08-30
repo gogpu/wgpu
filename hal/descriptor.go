@@ -37,7 +37,7 @@ type Capabilities struct {
 	AlignmentsMask Alignments
 
 	// DownlevelCapabilities for GL/GLES backends.
-	DownlevelCapabilities DownlevelCapabilities
+	DownlevelCapabilities gputypes.DownlevelCapabilities
 }
 
 // Alignments specifies buffer alignment requirements.
@@ -54,38 +54,6 @@ type Alignments struct {
 	// RayTracingScratchBufferAlignment is the required alignment for AS scratch buffers.
 	RayTracingScratchBufferAlignment uint32
 }
-
-// DownlevelCapabilities describes capabilities for downlevel backends (GL/GLES).
-type DownlevelCapabilities struct {
-	// ShaderModel is the supported shader model (5.0, 5.1, 6.0, etc.).
-	ShaderModel uint32
-
-	// Flags are downlevel-specific capability flags.
-	Flags DownlevelFlags
-}
-
-// DownlevelFlags are capability flags for downlevel backends.
-type DownlevelFlags uint32
-
-const (
-	// DownlevelFlagsComputeShaders indicates compute shader support.
-	DownlevelFlagsComputeShaders DownlevelFlags = 1 << iota
-
-	// DownlevelFlagsFragmentWritableStorage indicates fragment shader writable storage support.
-	DownlevelFlagsFragmentWritableStorage
-
-	// DownlevelFlagsIndirectFirstInstance indicates DrawIndirect with firstInstance support.
-	DownlevelFlagsIndirectFirstInstance
-
-	// DownlevelFlagsBaseVertexBaseInstance indicates baseVertex/baseInstance support.
-	DownlevelFlagsBaseVertexBaseInstance
-
-	// DownlevelFlagsReadOnlyDepthStencil indicates read-only depth/stencil support.
-	DownlevelFlagsReadOnlyDepthStencil
-
-	// DownlevelFlagsAnisotropicFiltering indicates anisotropic filtering support.
-	DownlevelFlagsAnisotropicFiltering
-)
 
 // TextureFormatCapabilities describes texture format capabilities.
 type TextureFormatCapabilities struct {

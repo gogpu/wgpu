@@ -37,6 +37,12 @@ func (a *Adapter) Features() Features { return a.features }
 // Limits returns the adapter's resource limits.
 func (a *Adapter) Limits() Limits { return a.limits }
 
+// DownlevelCapabilities returns backend capability flags for downlevel adapters.
+// Rust wgpu handles real values internally; from Go FFI we return fully compliant defaults.
+func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return gputypes.DefaultDownlevelCapabilities()
+}
+
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.
 func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {

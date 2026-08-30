@@ -73,8 +73,9 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 				BufferCopyOffset: 4,
 				BufferCopyPitch:  4,
 			},
-			DownlevelCapabilities: hal.DownlevelCapabilities{
-				ShaderModel: 50,
+			DownlevelCapabilities: gputypes.DownlevelCapabilities{
+				ShaderModel: gputypes.ShaderModelSm5,
+				Limits:      gputypes.DownlevelLimits{},
 				Flags:       caps.DownlevelFlags,
 			},
 		},

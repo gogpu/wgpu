@@ -270,10 +270,7 @@ func (a *Adapter) Capabilities() hal.Capabilities {
 			BufferCopyOffset: 512, // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 			BufferCopyPitch:  256, // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
 		},
-		DownlevelCapabilities: hal.DownlevelCapabilities{
-			ShaderModel: uint32(a.capabilities.ShaderModel),
-			Flags:       hal.DownlevelFlagsComputeShaders | hal.DownlevelFlagsAnisotropicFiltering,
-		},
+		DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 	}
 }
 
@@ -621,10 +618,7 @@ func (a *AdapterLegacy) Capabilities() hal.Capabilities {
 			BufferCopyOffset: 512,
 			BufferCopyPitch:  256,
 		},
-		DownlevelCapabilities: hal.DownlevelCapabilities{
-			ShaderModel: uint32(a.capabilities.ShaderModel),
-			Flags:       hal.DownlevelFlagsComputeShaders | hal.DownlevelFlagsAnisotropicFiltering,
-		},
+		DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 	}
 }
 

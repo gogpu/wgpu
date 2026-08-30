@@ -584,3 +584,146 @@ func TestFeaturesFromPhysicalDevice(t *testing.T) {
 		})
 	}
 }
+
+// TestDownlevelCapabilitiesFromFeatures verifies conditional flag queries
+// from VkPhysicalDeviceFeatures (Rust adapter.rs:662-719 parity).
+func TestDownlevelCapabilitiesFromFeatures(t *testing.T) {
+	// unconditionalFlags are the 18 flags always set for Vulkan adapters
+	// (17 from Rust + SURFACE_VIEW_FORMATS default-true).
+	unconditionalFlags := gputypes.DownlevelFlagsComputeShaders |
+		gputypes.DownlevelFlagsBaseVertex |
+		gputypes.DownlevelFlagsReadOnlyDepthStencil |
+		gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures |
+		gputypes.DownlevelFlagsComparisonSamplers |
+		gputypes.DownlevelFlagsVertexStorage |
+		gputypes.DownlevelFlagsFragmentStorage |
+		gputypes.DownlevelFlagsDepthTextureAndBufferCopies |
+		gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned |
+		gputypes.DownlevelFlagsUnrestrictedIndexBuffer |
+		gputypes.DownlevelFlagsIndirectExecution |
+		gputypes.DownlevelFlagsViewFormats |
+		gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies |
+		gputypes.DownlevelFlagsSurfaceViewFormats |
+		gputypes.DownlevelFlagsNonblockingQueryResolve |
+		gputypes.DownlevelFlagsShaderF16InF32 |
+		gputypes.DownlevelFlagsMSL21 |
+		gputypes.DownlevelFlagsLinearInterpolation
+
+	tests := []struct {
+		name      string
+		features  vk.PhysicalDeviceFeatures
+		wantFlags gputypes.DownlevelFlags
+	}{
+		{
+			name:      "no features — only unconditional flags",
+			features:  vk.PhysicalDeviceFeatures{},
+			wantFlags: unconditionalFlags,
+		},
+		{
+			name: "cube array textures",
+			features: vk.PhysicalDeviceFeatures{
+				ImageCubeArray: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsCubeArrayTextures,
+		},
+		{
+			name: "anisotropic filtering",
+			features: vk.PhysicalDeviceFeatures{
+				SamplerAnisotropy: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsAnisotropicFiltering,
+		},
+		{
+			name: "fragment writable storage",
+			features: vk.PhysicalDeviceFeatures{
+				FragmentStoresAndAtomics: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsFragmentWritableStorage,
+		},
+		{
+			name: "multisampled shading",
+			features: vk.PhysicalDeviceFeatures{
+				SampleRateShading: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsMultisampledShading,
+		},
+		{
+			name: "independent blend",
+			features: vk.PhysicalDeviceFeatures{
+				IndependentBlend: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsIndependentBlend,
+		},
+		{
+			name: "full draw index uint32",
+			features: vk.PhysicalDeviceFeatures{
+				FullDrawIndexUint32: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsFullDrawIndexUint32,
+		},
+		{
+			name: "depth bias clamp",
+			features: vk.PhysicalDeviceFeatures{
+				DepthBiasClamp: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsDepthBiasClamp,
+		},
+		{
+			name: "texture compression BC only",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionBC: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsTextureCompression,
+		},
+		{
+			name: "texture compression ETC2 only — NOT compliant (needs ASTC too)",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionETC2: 1,
+			},
+			wantFlags: unconditionalFlags, // BC || (ETC2 && ASTC) — ETC2 alone is insufficient
+		},
+		{
+			name: "texture compression ETC2 + ASTC — compliant",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionETC2:     1,
+				TextureCompressionASTC_LDR: 1,
+			},
+			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsTextureCompression,
+		},
+		{
+			name: "all conditional features",
+			features: vk.PhysicalDeviceFeatures{
+				ImageCubeArray:           1,
+				SamplerAnisotropy:        1,
+				FragmentStoresAndAtomics: 1,
+				SampleRateShading:        1,
+				IndependentBlend:         1,
+				FullDrawIndexUint32:      1,
+				DepthBiasClamp:           1,
+				TextureCompressionBC:     1,
+			},
+			wantFlags: unconditionalFlags |
+				gputypes.DownlevelFlagsCubeArrayTextures |
+				gputypes.DownlevelFlagsAnisotropicFiltering |
+				gputypes.DownlevelFlagsFragmentWritableStorage |
+				gputypes.DownlevelFlagsMultisampledShading |
+				gputypes.DownlevelFlagsIndependentBlend |
+				gputypes.DownlevelFlagsFullDrawIndexUint32 |
+				gputypes.DownlevelFlagsDepthBiasClamp |
+				gputypes.DownlevelFlagsTextureCompression,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caps := downlevelCapabilitiesFromFeatures(&tt.features)
+			if caps.Flags != tt.wantFlags {
+				t.Errorf("downlevelCapabilitiesFromFeatures().Flags = %#x, want %#x",
+					uint32(caps.Flags), uint32(tt.wantFlags))
+			}
+			if caps.ShaderModel != gputypes.ShaderModelSm5 {
+				t.Errorf("ShaderModel = %d, want %d", caps.ShaderModel, gputypes.ShaderModelSm5)
+			}
+		})
+	}
+}

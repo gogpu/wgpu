@@ -26,6 +26,9 @@ type Adapter struct {
 	Limits gputypes.Limits
 	// Backend identifies which graphics backend this adapter uses.
 	Backend gputypes.Backend
+	// DownlevelCapabilities contains backend capability flags for downlevel adapters.
+	// Matches Rust wgpu-types DownlevelCapabilities.
+	DownlevelCapabilities gputypes.DownlevelCapabilities
 
 	// === HAL integration fields ===
 
@@ -114,6 +117,10 @@ type Device struct {
 	// Limits contains the resource limits of this device.
 	Limits gputypes.Limits
 
+	// downlevel stores the adapter's downlevel capabilities for validation.
+	// Matches Rust wgpu-core Device downlevel field (resource.rs).
+	downlevel gputypes.DownlevelCapabilities
+
 	// valid indicates whether the device is still valid for use.
 	// Once a device is destroyed, this becomes false.
 	valid *atomic.Bool
@@ -169,6 +176,11 @@ func NewDevice(
 	limits gputypes.Limits,
 	label string,
 ) *Device {
+	var downlevel gputypes.DownlevelCapabilities
+	if adapter != nil {
+		downlevel = adapter.DownlevelCapabilities
+	}
+
 	d := &Device{
 		raw:            NewSnatchable(halDevice),
 		adapter:        adapter,
@@ -179,6 +191,7 @@ func NewDevice(
 		Label:          label,
 		Features:       features,
 		Limits:         limits,
+		downlevel:      downlevel,
 	}
 	valid := &atomic.Bool{}
 	valid.Store(true)
@@ -334,6 +347,23 @@ func (d *Device) Tracker() *DeviceTracker {
 // Returns nil if the device has no HAL integration.
 func (d *Device) ParentAdapter() *Adapter {
 	return d.adapter
+}
+
+// DownlevelCapabilitiesRef returns the device's downlevel capabilities.
+// Matches Rust wgpu-core Device.downlevel (resource.rs).
+func (d *Device) DownlevelCapabilitiesRef() gputypes.DownlevelCapabilities {
+	return d.downlevel
+}
+
+// RequireDownlevelFlags validates that the device supports the required downlevel flags.
+// Returns an error if any required flags are missing.
+// Matches Rust wgpu-core Device::require_downlevel_flags() (resource.rs:437-446).
+func (d *Device) RequireDownlevelFlags(flags gputypes.DownlevelFlags) error {
+	missing := flags &^ d.downlevel.Flags
+	if missing != 0 {
+		return fmt.Errorf("missing required downlevel flags: %s", missing)
+	}
+	return nil
 }
 
 // AssociatedQueue returns the associated queue for this device.

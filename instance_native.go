@@ -116,12 +116,13 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	}
 
 	adapter := &Adapter{
-		id:       adapterID,
-		core:     &coreAdapter,
-		info:     info,
-		features: features,
-		limits:   limits,
-		instance: i,
+		id:        adapterID,
+		core:      &coreAdapter,
+		info:      info,
+		features:  features,
+		limits:    limits,
+		downlevel: coreAdapter.DownlevelCapabilities,
+		instance:  i,
 	}
 	keepAdapter = true
 	return adapter, nil
