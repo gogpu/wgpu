@@ -25,6 +25,9 @@ func TestUserCachePath(t *testing.T) {
 }
 
 func TestUserCachePathError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows resolves UserCacheDir without HOME/USERPROFILE")
+	}
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("XDG_CACHE_HOME", "")
