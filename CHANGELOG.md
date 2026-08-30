@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-08-30
+
+### Added
+
+- **DownlevelCapabilities** (ADR-071) — 27 Rust-parity capability flags for graceful degradation on non-conformant adapters. The W3C WebGPU spec excludes non-conformant adapters; as a native Go library, we degrade gracefully instead of refusing to run.
+  - **Public API**: `Adapter.DownlevelCapabilities()` on native, browser, and Rust FFI variants. Matches Rust wgpu `Adapter::get_downlevel_capabilities()` (`adapter.rs:174`)
+  - **Types**: `gputypes.DownlevelCapabilities` struct (Flags, Limits, ShaderModel — 3 fields), 27 `DownlevelFlags` with explicit `1 << N` bit positions matching Rust wgpu-types (`limits.rs:1102-1246`)
+  - **Device validation**: `core.Device.RequireDownlevelFlags()` validates at pipeline creation time. `CreateComputePipeline` gates on `DownlevelFlagsComputeShaders` (Rust `resource.rs:4367` parity)
+  - **gpucontext**: `DeviceProvider.DownlevelCapabilities()` — 7th interface method, follows `Features()` precedent. Flutter pattern: "check capabilities, not backend type"
+
+### Fixed
+
+- **Vulkan/Metal**: `DownlevelFlags: 0` → `DefaultDownlevelCapabilities()`. All modern Vulkan/Metal hardware supports all capabilities
+- **Vulkan**: 8 conditional flags queried from `VkPhysicalDeviceFeatures` (Rust `adapter.rs:684-719` parity): CubeArrayTextures, AnisotropicFiltering, FragmentWritableStorage, MultisampledShading, IndependentBlend, FullDrawIndexUint32, DepthBiasClamp, TextureCompression
+- **DX12**: Both `Adapter` and `AdapterLegacy` use `DefaultDownlevelCapabilities()` (DX12 FL 11.0+ guarantees all)
+- **GLES**: `queryDownlevelFlags()` expanded from 4 to ~20 dynamic checks (Rust `adapter.rs:387-452` parity). IndirectExecution exact Rust logic. MSL2_1 unconditional. Both OES + GL_EXT extension variants
+- **Software**: 1 flag → 13 flags, each verified against implementation code (BaseVertex, IndependentBlend, FullDrawIndexUint32, etc.)
+- **Noop**: `DefaultDownlevelCapabilities()` (Rust `noop/mod.rs:188-192` parity)
+- **TEXTURE_COMPRESSION**: `BC || (ETC2 && ASTC)` per W3C WebGPU spec (was `BC || ETC2 || ASTC`)
+- **Flag naming**: `IndirectFirstInstance` → `IndirectExecution` (different concept), `BaseVertexBaseInstance` → `BaseVertex` (Rust name)
+- **Bit positions**: `AnisotropicFiltering` moved from bit 5 to bit 10 (Rust position). Dead backward-compat aliases removed
+
+### Changed
+
+- **deps**: gputypes v0.6.0 → v0.7.0 (DownlevelCapabilities types), gpucontext v0.29.0 → v0.30.0 (DeviceProvider method)
+- **hal/descriptor.go**: Local DownlevelFlags/DownlevelCapabilities types replaced with gputypes imports
+- **ShaderModel**: Raw `uint32` (50, 60) → `gputypes.ShaderModel` named type (Sm2/Sm4/Sm5)
+
 ## [0.32.1] - 2026-08-28
 
 ### Fixed

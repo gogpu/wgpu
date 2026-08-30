@@ -55,7 +55,6 @@ type Alignments struct {
 	RayTracingScratchBufferAlignment uint32
 }
 
-
 // TextureFormatCapabilities describes texture format capabilities.
 type TextureFormatCapabilities struct {
 	// Flags indicate what operations are supported for this format.
