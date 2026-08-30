@@ -56,11 +56,7 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
 				},
-				DownlevelCapabilities: gputypes.DownlevelCapabilities{
-					ShaderModel: 0,
-					Limits:      gputypes.DownlevelLimits{},
-					Flags:       0,
-				},
+				DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 			},
 		},
 	}
