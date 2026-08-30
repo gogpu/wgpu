@@ -610,10 +610,9 @@ func downlevelCapabilitiesFromFeatures(features *vk.PhysicalDeviceFeatures) gput
 	if features.DepthBiasClamp != 0 {
 		flags |= gputypes.DownlevelFlagsDepthBiasClamp
 	}
-	// TEXTURE_COMPRESSION: true when any compression format is supported.
+	// TEXTURE_COMPRESSION: BC || (ETC2 && ASTC) per W3C WebGPU spec.
 	if features.TextureCompressionBC != 0 ||
-		features.TextureCompressionETC2 != 0 ||
-		features.TextureCompressionASTC_LDR != 0 {
+		(features.TextureCompressionETC2 != 0 && features.TextureCompressionASTC_LDR != 0) {
 		flags |= gputypes.DownlevelFlagsTextureCompression
 	}
 

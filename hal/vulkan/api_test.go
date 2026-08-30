@@ -676,9 +676,17 @@ func TestDownlevelCapabilitiesFromFeatures(t *testing.T) {
 			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsTextureCompression,
 		},
 		{
-			name: "texture compression ETC2 only",
+			name: "texture compression ETC2 only — NOT compliant (needs ASTC too)",
 			features: vk.PhysicalDeviceFeatures{
 				TextureCompressionETC2: 1,
+			},
+			wantFlags: unconditionalFlags, // BC || (ETC2 && ASTC) — ETC2 alone is insufficient
+		},
+		{
+			name: "texture compression ETC2 + ASTC — compliant",
+			features: vk.PhysicalDeviceFeatures{
+				TextureCompressionETC2:     1,
+				TextureCompressionASTC_LDR: 1,
 			},
 			wantFlags: unconditionalFlags | gputypes.DownlevelFlagsTextureCompression,
 		},
