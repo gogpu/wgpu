@@ -227,7 +227,25 @@ HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor ty
 
 ## DownlevelCapabilities (ADR-071)
 
-Tracks backend capabilities that may be absent on non-conformant adapters (GLES 3.0, WebGL2). **This is a Rust wgpu extension — not a W3C WebGPU spec concept** (the term "downlevel" does not appear in the 18.5K-line spec). Of 27 flags, 24 track capabilities REQUIRED by the spec for core adapters, 1 (AnisotropicFiltering) is correctly not required, and 2 (MSL21, SurfaceViewFormats) are backend-specific.
+### Why This Exists
+
+The W3C WebGPU specification assumes all adapters meet a baseline: compute shaders, indirect draw, base vertex, independent blend — all mandatory. `requestAdapter()` simply doesn't return adapters that can't meet this baseline. In a browser, the user sees "WebGPU not supported."
+
+**We can't do that.** As a native Go library, we run on hardware where the only available backend may be GLES 3.0 (no compute), an old Metal GPU (no fragment writable storage), or our own CPU software rasterizer. Refusing to run is not an option — we must **degrade gracefully**.
+
+DownlevelCapabilities tracks exactly what each backend can and cannot do, enabling consumers like gg to make informed decisions: use GPU compute path when available, fall back to CPU rasterizer when not. This is the Skia Graphite pattern (`caps->computeSupport()` gates the Vello compute renderer) and the Flutter Impeller pattern (`SupportsCompute()` gates compute-dependent features).
+
+**How the three WebGPU implementations handle non-conformant hardware:**
+
+| Implementation | Approach |
+|---------------|----------|
+| **W3C Spec / Dawn (browsers)** | Non-conformant adapters excluded from `requestAdapter()`. No degradation — just "not supported" |
+| **Rust wgpu** | `DownlevelCapabilities` — 27 granular flags. Supports GLES/WebGL below spec baseline |
+| **gogpu/wgpu** | Follows Rust — supports GLES 3.0 + Software. Graceful degradation via capability queries |
+
+### Technical Details
+
+**This is a Rust wgpu extension — not a W3C WebGPU spec concept** (the term "downlevel" does not appear in the 18.5K-line spec). Of 27 flags, 24 track capabilities REQUIRED by the spec for core adapters, 1 (AnisotropicFiltering) is correctly not required, and 2 (MSL21, SurfaceViewFormats) are backend-specific.
 
 **Types:** Defined in `gputypes/downlevel.go` — 27 `DownlevelFlags` with explicit `1 << N` bit positions matching Rust wgpu-types (`limits.rs:1102-1246`). `DownlevelCapabilities` struct (Flags, Limits, ShaderModel). `IsWebGPUCompliant()` checks compliance.
 
