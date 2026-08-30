@@ -67,6 +67,8 @@ type Device struct {
 	descriptorAllocator       *DescriptorAllocator // Descriptor pool management for bind groups
 	queue                     *Queue               // Primary queue (for swapchain synchronization)
 	renderPassCache           *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
+	pipelineCache             vk.PipelineCache     // Driver-compiled ISA cache (#331)
+	pipelineCachePath         string               // Disk path for pipeline cache persistence
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain
@@ -1563,6 +1565,8 @@ func (d *Device) Destroy() {
 		d.renderPassCache.Destroy()
 		d.renderPassCache = nil
 	}
+
+	d.destroyPipelineCache()
 
 	if d.allocator != nil {
 		d.allocator.Destroy()

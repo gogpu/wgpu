@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Pipeline disk cache** (#331) — driver-compiled GPU ISA persistence for faster cold starts on repeat launches
+  - **Vulkan**: `VkPipelineCache` created at device init, passed to all `vkCreateGraphicsPipelines` / `vkCreateComputePipelines`, saved via `vkGetPipelineCacheData` on device destroy. Disk path: `UserCacheDir()/gogpu/vulkan/<adapterKey>/pipeline.cache`
+  - **DX12**: `GetCachedBlob` after PSO creation, `D3D12_CACHED_PIPELINE_STATE` on restore. Per-PSO blobs keyed by root signature + shader bytecode + fixed-function state hash. Disk path: `UserCacheDir()/gogpu/dx12/<adapterKey>/`
+  - **`internal/pipelinecache`**: shared atomic blob I/O and adapter key helpers (DRY across backends)
+
 ## [0.34.1] - 2026-08-31
 
 ### Changed

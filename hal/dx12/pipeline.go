@@ -6,6 +6,7 @@
 package dx12
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"unsafe"
@@ -107,12 +108,13 @@ type rootParamMapping struct {
 // It wraps an ID3D12RootSignature and stores naga HLSL options for deferred
 // shader compilation, matching Rust wgpu-hal architecture.
 type PipelineLayout struct {
-	rootSignature    *d3d12.ID3D12RootSignature
-	bindGroupLayouts []*BindGroupLayout
-	groupMappings    []rootParamMapping // actual root param indices per bind group
-	samplerRootIndex int                // root param index for global sampler heap table, or -1
-	nagaOptions      *hlsl.Options      // HLSL compile options with proper BindingMap
-	device           *Device
+	rootSignature     *d3d12.ID3D12RootSignature
+	rootSignatureHash [32]byte // SHA-256 of serialized root signature blob (PSO cache key)
+	bindGroupLayouts  []*BindGroupLayout
+	groupMappings     []rootParamMapping // actual root param indices per bind group
+	samplerRootIndex  int                // root param index for global sampler heap table, or -1
+	nagaOptions       *hlsl.Options      // HLSL compile options with proper BindingMap
+	device            *Device
 }
 
 // Destroy releases the pipeline layout resources.
@@ -190,10 +192,11 @@ func (g *BindGroup) GPUDescriptorHandle() d3d12.D3D12_GPU_DESCRIPTOR_HANDLE {
 
 // pipelineLayoutResult holds the output of root signature creation.
 type pipelineLayoutResult struct {
-	rootSignature    *d3d12.ID3D12RootSignature
-	groupMappings    []rootParamMapping
-	samplerRootIndex int
-	nagaOptions      *hlsl.Options
+	rootSignature     *d3d12.ID3D12RootSignature
+	rootSignatureHash [32]byte
+	groupMappings     []rootParamMapping
+	samplerRootIndex  int
+	nagaOptions       *hlsl.Options
 }
 
 // createRootSignatureFromLayouts creates a D3D12 root signature from bind group layouts.
@@ -411,6 +414,8 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	}
 	defer blob.Release()
 
+	rootSigHash := sha256.Sum256(unsafe.Slice((*byte)(blob.GetBufferPointer()), blob.GetBufferSize()))
+
 	// Check if device is already lost before attempting to create root signature.
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 		d.logDREDBreadcrumbs()
@@ -438,10 +443,11 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	}
 
 	return &pipelineLayoutResult{
-		rootSignature:    rootSig,
-		groupMappings:    groupMappings,
-		samplerRootIndex: samplerRootIndex,
-		nagaOptions:      nagaOpts,
+		rootSignature:     rootSig,
+		rootSignatureHash: rootSigHash,
+		groupMappings:     groupMappings,
+		samplerRootIndex:  samplerRootIndex,
+		nagaOptions:       nagaOpts,
 	}, nil
 }
 

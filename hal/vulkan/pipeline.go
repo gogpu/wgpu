@@ -321,7 +321,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 
 	var pipeline vk.Pipeline
-	result := vkCreateGraphicsPipelines(d.cmds, d.handle, 0, 1, &createInfo, nil, &pipeline)
+	result := vkCreateGraphicsPipelines(d.cmds, d.handle, d.pipelineCache, 1, &createInfo, nil, &pipeline)
 
 	// Keep all data structures alive until after the Vulkan call completes.
 	// This is critical because unsafe.Pointer→uintptr conversions break GC tracking.
@@ -433,7 +433,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	var pipeline vk.Pipeline
-	result := vkCreateComputePipelines(d.cmds, d.handle, 0, 1, &createInfo, nil, &pipeline)
+	result := vkCreateComputePipelines(d.cmds, d.handle, d.pipelineCache, 1, &createInfo, nil, &pipeline)
 	if result != vk.Success {
 		return nil, fmt.Errorf("vulkan: vkCreateComputePipelines failed: %d", result)
 	}
