@@ -355,7 +355,7 @@ type Surface struct {
 	height                     uint32
 	format                     dxgi.DXGI_FORMAT
 	halFormat                  gputypes.TextureFormat
-	presentMode                hal.PresentMode
+	presentMode                gputypes.PresentMode
 	swapchainFlags             uint32
 	allowTearing               bool
 	frameLatencyWaitableObject uintptr // HANDLE from GetFrameLatencyWaitableObject

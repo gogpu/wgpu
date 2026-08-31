@@ -5,6 +5,7 @@ package wgpu
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 )
@@ -240,7 +241,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 	})
 }
 
-func createCopyScopeTexture(t *testing.T, device *Device, label string, copyUsage TextureUsage) *Texture {
+func createCopyScopeTexture(t *testing.T, device *Device, label string, copyUsage gputypes.TextureUsage) *Texture {
 	t.Helper()
 	tex, err := device.CreateTexture(&TextureDescriptor{
 		Label:         label,

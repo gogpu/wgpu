@@ -14,7 +14,7 @@ import (
 // On Rust backend, Backends and Flags are accepted for API compatibility
 // but the Rust wgpu-native handles backend selection internally.
 type InstanceDescriptor struct {
-	Backends Backends
+	Backends gputypes.Backends
 	Flags    gputypes.InstanceFlags
 }
 
@@ -68,7 +68,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to get adapter info: %w", err)
 	}
-	info := AdapterInfo{
+	info := gputypes.AdapterInfo{
 		Name:       rInfo.Description,
 		Vendor:     rInfo.Vendor,
 		VendorID:   rInfo.VendorID,

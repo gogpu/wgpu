@@ -8,6 +8,7 @@ import (
 	"image"
 	"syscall/js"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
@@ -41,7 +42,7 @@ type Surface struct {
 	targetSource SurfaceTarget
 
 	// Cached configuration for GetCurrentTexture texture creation.
-	configFormat TextureFormat
+	configFormat gputypes.TextureFormat
 }
 
 // CreateSurface creates a rendering surface from a legacy numeric canvas

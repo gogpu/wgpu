@@ -381,7 +381,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 	// Premultiplied alpha requires DirectComposition (dcomp.dll, Windows 8+).
 	// Rust wgpu reports Premultiplied only for VisualFromWndHandle targets;
 	// we simplify by checking DComp DLL availability at runtime.
-	alphaModes := []hal.CompositeAlphaMode{
+	alphaModes := []gputypes.CompositeAlphaMode{
 		hal.CompositeAlphaModeOpaque,
 	}
 	if dcompAvailable() {
@@ -403,8 +403,8 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 }
 
 // presentModes returns supported present modes.
-func (a *Adapter) presentModes() []hal.PresentMode {
-	modes := []hal.PresentMode{
+func (a *Adapter) presentModes() []gputypes.PresentMode {
+	modes := []gputypes.PresentMode{
 		hal.PresentModeFifo, // Always supported (vsync)
 	}
 
@@ -674,7 +674,7 @@ func (a *AdapterLegacy) TextureFormatCapabilities(format gputypes.TextureFormat)
 // SurfaceCapabilities returns surface capabilities.
 func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	// Opaque is always supported. Premultiplied requires DirectComposition.
-	alphaModes := []hal.CompositeAlphaMode{hal.CompositeAlphaModeOpaque}
+	alphaModes := []gputypes.CompositeAlphaMode{hal.CompositeAlphaModeOpaque}
 	if dcompAvailable() {
 		alphaModes = append(alphaModes, hal.CompositeAlphaModePremultiplied)
 	}
@@ -684,7 +684,7 @@ func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCap
 			gputypes.TextureFormatBGRA8Unorm,
 			gputypes.TextureFormatRGBA8Unorm,
 		},
-		PresentModes: []hal.PresentMode{hal.PresentModeFifo},
+		PresentModes: []gputypes.PresentMode{hal.PresentModeFifo},
 		AlphaModes:   alphaModes,
 	}
 }

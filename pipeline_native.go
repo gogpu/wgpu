@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
@@ -75,7 +76,7 @@ type RenderPipeline struct {
 	// Nil for non-strip topologies. When non-nil, DrawIndexed/DrawIndexedIndirect
 	// validate that the bound index buffer format matches this value.
 	// Matches Rust wgpu-core RenderPipeline.strip_index_format (render.rs:568-582).
-	stripIndexFormat *IndexFormat
+	stripIndexFormat *gputypes.IndexFormat
 	// blendConstantRequired is true if any color target uses BlendFactorConstant
 	// or BlendFactorOneMinusConstant. Draw calls validate that SetBlendConstant
 	// has been called when this is true.

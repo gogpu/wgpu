@@ -106,11 +106,11 @@ func (a *Adapter) SurfaceCapabilities(_ hal.Surface) *hal.SurfaceCapabilities {
 			gputypes.TextureFormatBGRA8UnormSrgb,
 			gputypes.TextureFormatRGBA8UnormSrgb,
 		},
-		PresentModes: []hal.PresentMode{
+		PresentModes: []gputypes.PresentMode{
 			hal.PresentModeFifo,      // VSync on
 			hal.PresentModeImmediate, // VSync off (if supported)
 		},
-		AlphaModes: []hal.CompositeAlphaMode{
+		AlphaModes: []gputypes.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
 			hal.CompositeAlphaModePremultiplied,
 		},

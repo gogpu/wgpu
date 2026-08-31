@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 )
 
 // Buffer represents a GPU buffer.
@@ -26,7 +27,7 @@ func (b *Buffer) Size() uint64 {
 }
 
 // Usage returns the buffer's usage flags.
-func (b *Buffer) Usage() BufferUsage {
+func (b *Buffer) Usage() gputypes.BufferUsage {
 	if b.r == nil {
 		return 0
 	}

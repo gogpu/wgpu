@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -11,7 +12,7 @@ import (
 type Texture struct {
 	hal          hal.Texture
 	device       *Device
-	format       TextureFormat
+	format       gputypes.TextureFormat
 	released     bool
 	surface      *core.Surface
 	surfaceLease uint64
@@ -47,7 +48,7 @@ func (t *Texture) resolveHAL() hal.Texture {
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() TextureFormat { return t.format }
+func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
 // Release destroys the texture. The underlying HAL texture is not freed
 // immediately — destruction is deferred until the GPU completes any submission

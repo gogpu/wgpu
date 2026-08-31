@@ -168,8 +168,8 @@ type Surface struct {
 	format        gputypes.TextureFormat
 	framebuffer   []byte
 	mu            sync.RWMutex // Protects framebuffer access
-	presentMode   hal.PresentMode
-	alphaMode     hal.CompositeAlphaMode
+	presentMode   gputypes.PresentMode
+	alphaMode     gputypes.CompositeAlphaMode
 	targetKind    hal.SurfaceTargetKind
 	displayHandle uintptr // X11: Display*, macOS/Windows: 0
 	hwnd          uintptr // window handle for platform blit (0 = headless)

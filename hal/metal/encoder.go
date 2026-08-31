@@ -815,7 +815,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	viewport := MTLViewport{OriginX: float64(vp.X), OriginY: float64(vp.Y), Width: float64(vp.Width), Height: float64(vp.Height), ZNear: float64(vp.MinDepth), ZFar: float64(vp.MaxDepth)}
 	if e.pending != nil {
 		e.pending.viewport = viewport
@@ -828,7 +828,7 @@ func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	scissor := MTLScissorRect{X: NSUInteger(rect.X), Y: NSUInteger(rect.Y), Width: NSUInteger(rect.Width), Height: NSUInteger(rect.Height)}
 	if e.pending != nil {
 		e.pending.scissor = scissor
@@ -877,7 +877,7 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !e.beginNative() {
 		return
 	}
@@ -886,7 +886,7 @@ func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.indexBuffer == nil || !e.beginNative() {
 		return
 	}

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] - 2026-08-31
+
+### Changed
+
+- **Remove ALL type aliases** (ADR-073) — 35 type aliases in `types.go` + 7 in `hal/` replaced with direct `gputypes.X` qualified imports. Go type aliases (`type X = Y`) are designed for gradual migration (Russ Cox proposal, Go 1.9), not permanent architecture. Google Go style guide: "Don't use type aliasing when it is not needed." Our data: 94.6% of ecosystem callers (580/613) already used `gputypes` directly — aliases served 33 of 613 use cases. Users import `gputypes` alongside `wgpu` (IDE auto-import, zero friction). 99 files changed, net -63 LOC.
+
 ## [0.34.0] - 2026-08-31
 
 ### Changed

@@ -94,7 +94,7 @@ func run() error {
 		Fragment: &wgpu.FragmentState{
 			Module:     shader,
 			EntryPoint: "fs_main",
-			Targets: []wgpu.ColorTargetState{{
+			Targets: []gputypes.ColorTargetState{{
 				Format: gputypes.TextureFormatRGBA8Unorm,
 			}},
 		},

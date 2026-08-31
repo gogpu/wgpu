@@ -223,7 +223,7 @@ func (snapshot swapchainSurfaceSnapshot) formatFor(requested gputypes.TextureFor
 	return *fallback, nil
 }
 
-func (snapshot swapchainSurfaceSnapshot) presentModeFor(requested hal.PresentMode) (vk.PresentModeKHR, error) {
+func (snapshot swapchainSurfaceSnapshot) presentModeFor(requested gputypes.PresentMode) (vk.PresentModeKHR, error) {
 	requestedVk, ok := presentModeToVkChecked(requested)
 	if !ok {
 		return 0, fmt.Errorf("vulkan: unsupported present mode %v", requested)
@@ -236,7 +236,7 @@ func (snapshot swapchainSurfaceSnapshot) presentModeFor(requested hal.PresentMod
 	return 0, fmt.Errorf("vulkan: surface does not support present mode %v", requested)
 }
 
-func compositeAlphaFor(flags vk.CompositeAlphaFlagsKHR, requested hal.CompositeAlphaMode) (vk.CompositeAlphaFlagBitsKHR, error) {
+func compositeAlphaFor(flags vk.CompositeAlphaFlagsKHR, requested gputypes.CompositeAlphaMode) (vk.CompositeAlphaFlagBitsKHR, error) {
 	available := func(flag vk.CompositeAlphaFlagBitsKHR) bool {
 		return vk.Flags(flags)&vk.Flags(flag) != 0
 	}
@@ -264,7 +264,7 @@ func compositeAlphaFor(flags vk.CompositeAlphaFlagsKHR, requested hal.CompositeA
 	return requestedFlag, nil
 }
 
-func mapCompositeAlphaToVk(mode hal.CompositeAlphaMode) (vk.CompositeAlphaFlagBitsKHR, bool) {
+func mapCompositeAlphaToVk(mode gputypes.CompositeAlphaMode) (vk.CompositeAlphaFlagBitsKHR, bool) {
 	switch mode {
 	case hal.CompositeAlphaModeOpaque:
 		return vk.CompositeAlphaOpaqueBitKhr, true
@@ -279,7 +279,7 @@ func mapCompositeAlphaToVk(mode hal.CompositeAlphaMode) (vk.CompositeAlphaFlagBi
 	}
 }
 
-func presentModeToVkChecked(mode hal.PresentMode) (vk.PresentModeKHR, bool) {
+func presentModeToVkChecked(mode gputypes.PresentMode) (vk.PresentModeKHR, bool) {
 	switch mode {
 	case hal.PresentModeImmediate:
 		return vk.PresentModeImmediateKhr, true
@@ -1465,7 +1465,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 }
 
 // presentModeToVk converts HAL PresentMode to Vulkan PresentModeKHR.
-func presentModeToVk(mode hal.PresentMode) vk.PresentModeKHR {
+func presentModeToVk(mode gputypes.PresentMode) vk.PresentModeKHR {
 	switch mode {
 	case hal.PresentModeImmediate:
 		return vk.PresentModeImmediateKhr

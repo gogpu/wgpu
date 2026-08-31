@@ -1189,7 +1189,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 
 // SetViewport sets the viewport.
 // NOTE: Applies Y-flip for WebGPU/OpenGL coordinate system compatibility (matches Rust wgpu).
-func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	if e.encoder.active == 0 {
 		return
 	}
@@ -1208,7 +1208,7 @@ func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	if e.encoder.active == 0 {
 		return
 	}
@@ -1248,7 +1248,7 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if e.encoder.active == 0 {
 		return
 	}
@@ -1256,7 +1256,7 @@ func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.encoder.active == 0 {
 		return
 	}

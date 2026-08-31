@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
@@ -13,7 +14,7 @@ import (
 type Buffer struct {
 	browser  *browser.Buffer
 	size     uint64
-	usage    BufferUsage
+	usage    gputypes.BufferUsage
 	released bool
 
 	// mapState tracks the current mapping state. Updated by MapAsync/Unmap.
@@ -26,7 +27,7 @@ func (b *Buffer) Size() uint64 {
 }
 
 // Usage returns the buffer's usage flags.
-func (b *Buffer) Usage() BufferUsage {
+func (b *Buffer) Usage() gputypes.BufferUsage {
 	return b.usage
 }
 

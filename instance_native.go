@@ -13,7 +13,7 @@ import (
 
 // InstanceDescriptor configures instance creation.
 type InstanceDescriptor struct {
-	Backends Backends
+	Backends gputypes.Backends
 	// Flags controls instance features like debug layers and validation.
 	// Use gputypes.InstanceFlagsDebug to enable GPU debug layer.
 	Flags gputypes.InstanceFlags

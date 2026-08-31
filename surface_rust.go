@@ -8,6 +8,7 @@ import (
 	"image"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -37,7 +38,7 @@ type Surface struct {
 	targetSource SurfaceTarget
 
 	// Cached configuration for texture creation.
-	configFormat TextureFormat
+	configFormat gputypes.TextureFormat
 	configWidth  uint32
 	configHeight uint32
 }

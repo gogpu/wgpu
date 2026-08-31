@@ -82,7 +82,7 @@ func TestTextureDescriptorToHAL(t *testing.T) {
 		SampleCount:   1,
 		Format:        TextureFormatRGBA8Unorm,
 		Usage:         TextureUsageTextureBinding | TextureUsageCopyDst,
-		ViewFormats:   []TextureFormat{TextureFormatRGBA8Unorm},
+		ViewFormats:   []gputypes.TextureFormat{TextureFormatRGBA8Unorm},
 	}
 
 	halDesc := desc.toHAL()
@@ -179,7 +179,7 @@ func TestCommandEncoderDescriptorToHAL(t *testing.T) {
 func TestBindGroupLayoutDescriptorToHAL(t *testing.T) {
 	desc := BindGroupLayoutDescriptor{
 		Label:   "test-bgl",
-		Entries: []BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	}
 	halDesc := desc.toHAL()
 	if halDesc.Label != desc.Label {
@@ -366,7 +366,7 @@ func TestRenderPassDescriptorToHAL(t *testing.T) {
 		Label: "render-pass",
 		ColorAttachments: []RenderPassColorAttachment{
 			{
-				ClearValue: Color{R: 1, G: 0, B: 0, A: 1},
+				ClearValue: gputypes.Color{R: 1, G: 0, B: 0, A: 1},
 			},
 		},
 		DepthStencilAttachment: &RenderPassDepthStencilAttachment{

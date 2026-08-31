@@ -455,7 +455,7 @@ func renderFrame(gpu *gpuResources) error {
 	})
 
 	renderPass.SetPipeline(gpu.pipeline)
-	renderPass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	renderPass.End()
 
 	// End encoding

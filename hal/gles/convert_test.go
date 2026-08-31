@@ -300,7 +300,7 @@ func TestVertexFormatToGL(t *testing.T) {
 func TestStencilOpToGL(t *testing.T) {
 	tests := []struct {
 		name string
-		op   hal.StencilOperation
+		op   gputypes.StencilOperation
 		want uint32
 	}{
 		{"Keep", hal.StencilOperationKeep, gl.KEEP},
@@ -311,7 +311,7 @@ func TestStencilOpToGL(t *testing.T) {
 		{"DecrementClamp", hal.StencilOperationDecrementClamp, gl.DECR},
 		{"IncrementWrap", hal.StencilOperationIncrementWrap, gl.INCR_WRAP},
 		{"DecrementWrap", hal.StencilOperationDecrementWrap, gl.DECR_WRAP},
-		{"Unknown defaults to Keep", hal.StencilOperation(99), gl.KEEP},
+		{"Unknown defaults to Keep", gputypes.StencilOperation(99), gl.KEEP},
 	}
 
 	for _, tt := range tests {

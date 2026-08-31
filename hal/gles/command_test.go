@@ -147,7 +147,7 @@ func TestRenderPassEncoder_Draw(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	rpe.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -179,7 +179,7 @@ func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
 	idxBuf := &Buffer{id: 5}
 	rpe.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint32, 0)
 
-	rpe.DrawIndexed(hal.DrawIndexedArgs{IndexCount: 36, InstanceCount: 2})
+	rpe.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 36, InstanceCount: 2})
 
 	// Should have SetIndexBufferCommand and DrawIndexedCommand
 	if len(enc.commands) < 2 {
@@ -211,7 +211,7 @@ func TestRenderPassEncoder_SetViewport(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.SetViewport(hal.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
+	rpe.SetViewport(gputypes.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -239,7 +239,7 @@ func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.SetScissorRect(hal.ScissorRect{X: 50, Y: 50, Width: 400, Height: 300})
+	rpe.SetScissorRect(gputypes.ScissorRect{X: 50, Y: 50, Width: 400, Height: 300})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -298,7 +298,7 @@ func TestRenderPassEncoder_SetScissorRect_PassThrough(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc).(*RenderPassEncoder)
 
-	rpe.SetScissorRect(hal.ScissorRect{X: 50, Y: 100, Width: 400, Height: 200})
+	rpe.SetScissorRect(gputypes.ScissorRect{X: 50, Y: 100, Width: 400, Height: 200})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))

@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 )
 
 // Device represents a logical GPU device.
@@ -17,8 +18,8 @@ type Device struct {
 	r        *rwgpu.Device
 	instance *Instance // stored for PopErrorScope which needs Instance handle
 	queue    *Queue
-	features Features
-	limits   Limits
+	features gputypes.Features
+	limits   gputypes.Limits
 	released bool
 }
 
@@ -28,12 +29,12 @@ func (d *Device) Queue() *Queue {
 }
 
 // Features returns the device's enabled features.
-func (d *Device) Features() Features {
+func (d *Device) Features() gputypes.Features {
 	return d.features
 }
 
 // Limits returns the device's resource limits.
-func (d *Device) Limits() Limits {
+func (d *Device) Limits() gputypes.Limits {
 	return d.limits
 }
 
@@ -452,7 +453,7 @@ func (d *Device) Release() {
 // --- Descriptor conversion helpers ---
 
 // convertBindGroupLayoutEntry converts a gputypes.BindGroupLayoutEntry to rwgpu.
-func convertBindGroupLayoutEntry(e BindGroupLayoutEntry) rwgpu.BindGroupLayoutEntry {
+func convertBindGroupLayoutEntry(e gputypes.BindGroupLayoutEntry) rwgpu.BindGroupLayoutEntry {
 	re := rwgpu.BindGroupLayoutEntry{
 		Binding:    e.Binding,
 		Visibility: e.Visibility,
@@ -556,7 +557,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 
 // convertVertexBufferLayouts converts vertex buffer layouts.
 // go-webgpu uses C-style pointer+count for attributes (FFI layer).
-func convertVertexBufferLayouts(layouts []VertexBufferLayout) []rwgpu.VertexBufferLayout {
+func convertVertexBufferLayouts(layouts []gputypes.VertexBufferLayout) []rwgpu.VertexBufferLayout {
 	result := make([]rwgpu.VertexBufferLayout, len(layouts))
 	for i, l := range layouts {
 		attrs := make([]rwgpu.VertexAttribute, len(l.Attributes))

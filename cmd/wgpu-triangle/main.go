@@ -129,7 +129,7 @@ func run() error {
 			continue
 		}
 		renderPass.SetPipeline(pipeline)
-		renderPass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 		_ = renderPass.End()
 		commands, _ := encoder.Finish()
 		_, _ = device.Queue().Submit(commands)

@@ -121,7 +121,7 @@ func TestCreateInstance(t *testing.T) {
 func TestCreateInstanceWithDescriptor(t *testing.T) {
 	tests := []struct {
 		name     string
-		backends wgpu.Backends
+		backends gputypes.Backends
 	}{
 		{"all backends", wgpu.BackendsAll},
 		{"primary backends", wgpu.BackendsPrimary},
@@ -375,7 +375,7 @@ func TestDeviceCreateTexture(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
 	})
 	if err != nil {
@@ -386,7 +386,7 @@ func TestDeviceCreateTexture(t *testing.T) {
 	}
 	defer tex.Release()
 
-	if tex.Format() != wgpu.TextureFormatRGBA8Unorm {
+	if tex.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format() = %v, want RGBA8Unorm", tex.Format())
 	}
 }
@@ -481,7 +481,7 @@ func TestDeviceCreateBindGroupLayout(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "test-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -937,7 +937,7 @@ func TestReleasedDeviceReturnsError(t *testing.T) {
 			Size:          wgpu.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
 			MipLevelCount: 1,
 			SampleCount:   1,
-			Format:        wgpu.TextureFormatRGBA8Unorm,
+			Format:        gputypes.TextureFormatRGBA8Unorm,
 			Usage:         wgpu.TextureUsageTextureBinding,
 		})
 		if !errors.Is(err, wgpu.ErrReleased) {
@@ -1370,7 +1370,7 @@ func TestBackendConstants(t *testing.T) {
 	// Verify backend constants are accessible and have expected values.
 	backends := []struct {
 		name string
-		b    wgpu.Backend
+		b    gputypes.Backend
 	}{
 		{"Vulkan", wgpu.BackendVulkan},
 		{"Metal", wgpu.BackendMetal},
@@ -1378,7 +1378,7 @@ func TestBackendConstants(t *testing.T) {
 		{"GL", wgpu.BackendGL},
 	}
 
-	seen := make(map[wgpu.Backend]string)
+	seen := make(map[gputypes.Backend]string)
 	for _, b := range backends {
 		t.Run(b.name, func(t *testing.T) {
 			if prev, exists := seen[b.b]; exists {
@@ -1404,7 +1404,7 @@ func TestBufferUsageConstants(t *testing.T) {
 	// Verify buffer usage constants are distinct flags.
 	usages := []struct {
 		name string
-		u    wgpu.BufferUsage
+		u    gputypes.BufferUsage
 	}{
 		{"MapRead", wgpu.BufferUsageMapRead},
 		{"MapWrite", wgpu.BufferUsageMapWrite},
@@ -1436,7 +1436,7 @@ func TestBufferUsageConstants(t *testing.T) {
 func TestTextureUsageConstants(t *testing.T) {
 	usages := []struct {
 		name string
-		u    wgpu.TextureUsage
+		u    gputypes.TextureUsage
 	}{
 		{"CopySrc", wgpu.TextureUsageCopySrc},
 		{"CopyDst", wgpu.TextureUsageCopyDst},
@@ -1457,7 +1457,7 @@ func TestTextureUsageConstants(t *testing.T) {
 func TestShaderStageConstants(t *testing.T) {
 	stages := []struct {
 		name string
-		s    wgpu.ShaderStages
+		s    gputypes.ShaderStages
 	}{
 		{"Vertex", wgpu.ShaderStageVertex},
 		{"Fragment", wgpu.ShaderStageFragment},
@@ -1517,7 +1517,7 @@ func TestDefaultLimitsFunction(t *testing.T) {
 func TestPresentModeConstants(t *testing.T) {
 	modes := []struct {
 		name string
-		m    wgpu.PresentMode
+		m    gputypes.PresentMode
 	}{
 		{"Immediate", wgpu.PresentModeImmediate},
 		{"Mailbox", wgpu.PresentModeMailbox},
@@ -1525,7 +1525,7 @@ func TestPresentModeConstants(t *testing.T) {
 		{"FifoRelaxed", wgpu.PresentModeFifoRelaxed},
 	}
 
-	seen := make(map[wgpu.PresentMode]string)
+	seen := make(map[gputypes.PresentMode]string)
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
 			if prev, exists := seen[m.m]; exists {
@@ -1539,14 +1539,14 @@ func TestPresentModeConstants(t *testing.T) {
 func TestTextureFormatConstants(t *testing.T) {
 	formats := []struct {
 		name string
-		f    wgpu.TextureFormat
+		f    gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", wgpu.TextureFormatRGBA8Unorm},
-		{"RGBA8UnormSrgb", wgpu.TextureFormatRGBA8UnormSrgb},
-		{"BGRA8Unorm", wgpu.TextureFormatBGRA8Unorm},
-		{"BGRA8UnormSrgb", wgpu.TextureFormatBGRA8UnormSrgb},
-		{"Depth24Plus", wgpu.TextureFormatDepth24Plus},
-		{"Depth32Float", wgpu.TextureFormatDepth32Float},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm},
+		{"RGBA8UnormSrgb", gputypes.TextureFormatRGBA8UnormSrgb},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm},
+		{"BGRA8UnormSrgb", gputypes.TextureFormatBGRA8UnormSrgb},
+		{"Depth24Plus", gputypes.TextureFormatDepth24Plus},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float},
 	}
 
 	for _, f := range formats {
@@ -1578,7 +1578,7 @@ func newEncoderWithRenderPass(t *testing.T) (*wgpu.Device, *wgpu.CommandEncoder,
 			{
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: wgpu.Color{R: 0, G: 0, B: 0, A: 1},
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
 			},
 		},
 	})
@@ -1924,7 +1924,7 @@ func TestRenderPassDrawWithoutPipelineDeferredError(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -1937,7 +1937,7 @@ func TestRenderPassDrawIndexedWithoutPipelineDeferredError(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no pipeline set
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2210,7 +2210,7 @@ func TestRenderPassDrawWithInsufficientVertexBuffers(t *testing.T) {
 	defer buf.Release()
 
 	pass.SetVertexBuffer(0, buf, 0)
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should fail: need 2, have 1
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should fail: need 2, have 1
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2239,7 +2239,7 @@ func TestRenderPassDrawWithSufficientVertexBuffers(t *testing.T) {
 	defer buf.Release()
 
 	pass.SetVertexBuffer(0, buf, 0)
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass vertex buffer check
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass vertex buffer check
 	_ = pass.End()
 
 	// May still fail for other reasons (no real HAL pipeline), but vertex buffer
@@ -2256,7 +2256,7 @@ func TestRenderPassDrawWithZeroRequiredVertexBuffers(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass: no vertex buffers needed
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass: no vertex buffers needed
 	_ = pass.End()
 
 	_, _ = encoder.Finish()
@@ -2274,7 +2274,7 @@ func TestRenderPassDrawIndexedWithoutIndexBuffer(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer set
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2329,7 +2329,7 @@ func TestRenderPassDrawIndexedWithIndexBuffer(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, 0, 0)
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // index buffer is set
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // index buffer is set
 	_ = pass.End()
 
 	// May fail for other HAL reasons, but index buffer check should pass.
@@ -2501,7 +2501,7 @@ func TestDrawMissingPipelineSentinel(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2525,7 +2525,7 @@ func TestDrawMissingBindGroupSentinel(t *testing.T) {
 	pass.SetPipeline(pipeline)
 
 	// No bind group at index 0.
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2560,7 +2560,7 @@ func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
 	group.SetTestLayout(wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2592,7 +2592,7 @@ func TestDrawMissingVertexBufferSentinel(t *testing.T) {
 	defer buf.Release()
 	pass.SetVertexBuffer(0, buf, 0)
 
-	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2612,7 +2612,7 @@ func TestDrawMissingIndexBufferSentinel(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2830,7 +2830,7 @@ func TestDrawIndexedFormatMismatchSentinel(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // format mismatch: buffer=Uint16, pipeline=Uint32
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // format mismatch: buffer=Uint16, pipeline=Uint32
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2864,7 +2864,7 @@ func TestDrawIndexedFormatMatchesStripFormat(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0) // matches pipeline
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	// Should not fail with format mismatch (may fail for other HAL reasons).
@@ -2895,7 +2895,7 @@ func TestDrawIndexedNoStripFormatSkipsCheck(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
-	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no strip format → no format check
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no strip format → no format check
 	_ = pass.End()
 
 	// Should not fail with format mismatch.

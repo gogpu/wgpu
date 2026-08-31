@@ -5,6 +5,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
@@ -45,7 +46,7 @@ type CommandEncoder struct {
 	// for each texture. When a following command uses that exact state, its
 	// usage replaces (rather than conflicts with) the pre-transition scope
 	// state because the caller already encoded the intervening barrier.
-	explicitTextureTransitions map[*Texture]TextureUsage
+	explicitTextureTransitions map[*Texture]gputypes.TextureUsage
 
 	// usedBindGroups tracks bind groups referenced during encoding for
 	// submit-time validation (VAL-B5). At Submit, each bind group is checked
@@ -517,7 +518,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	if len(halBarriers) > 0 {
 		raw.TransitionTextures(halBarriers)
 		if e.explicitTextureTransitions == nil {
-			e.explicitTextureTransitions = make(map[*Texture]TextureUsage)
+			e.explicitTextureTransitions = make(map[*Texture]gputypes.TextureUsage)
 		}
 		for _, b := range validBarriers {
 			e.explicitTextureTransitions[b.Texture] = b.Usage.NewUsage

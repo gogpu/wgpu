@@ -5,6 +5,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -13,8 +14,8 @@ import (
 func NewDeviceFromHAL(
 	_ hal.Device,
 	_ hal.Queue,
-	_ Features,
-	_ Limits,
+	_ gputypes.Features,
+	_ gputypes.Limits,
 	_ string,
 ) (*Device, error) {
 	return nil, fmt.Errorf("wgpu: NewDeviceFromHAL not available with Rust backend — use RequestDevice instead")
@@ -26,7 +27,7 @@ func NewSurfaceFromHAL(_ hal.Surface, _ string) *Surface {
 }
 
 // NewTextureFromHAL is not supported with the Rust FFI backend.
-func NewTextureFromHAL(_ hal.Texture, _ *Device, _ TextureFormat) *Texture {
+func NewTextureFromHAL(_ hal.Texture, _ *Device, _ gputypes.TextureFormat) *Texture {
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 
 	_ "github.com/gogpu/wgpu/hal/noop"
@@ -135,7 +136,7 @@ func TestBindGroup_CleanupOnGC(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "gc-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -187,7 +188,7 @@ func TestBindGroup_ExplicitRelease_CancelsCleanup(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "release-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -229,7 +230,7 @@ func TestBindGroup_DoubleRelease_NoPanic(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "dbl-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -320,7 +321,7 @@ func BenchmarkCreateBindGroup(b *testing.B) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "bench-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		b.Fatalf("CreateBindGroupLayout: %v", err)
