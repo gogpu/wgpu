@@ -5,14 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.34.2] - 2026-08-31
 
 ### Added
 
-- **Pipeline disk cache** (#331) — driver-compiled GPU ISA persistence for faster cold starts on repeat launches
-  - **Vulkan**: `VkPipelineCache` created at device init, passed to all `vkCreateGraphicsPipelines` / `vkCreateComputePipelines`, saved via `vkGetPipelineCacheData` on device destroy. Disk path: `UserCacheDir()/gogpu/vulkan/<adapterKey>/pipeline.cache`
-  - **DX12**: `GetCachedBlob` after PSO creation, `D3D12_CACHED_PIPELINE_STATE` on restore. Per-PSO blobs keyed by root signature + shader bytecode + fixed-function state hash. Disk path: `UserCacheDir()/gogpu/dx12/<adapterKey>/`
-  - **`internal/pipelinecache`**: shared atomic blob I/O and adapter key helpers (DRY across backends)
+- **Pipeline disk cache** (#331, @lkmavi) — driver-compiled GPU ISA persistence for faster cold starts on repeat launches. Extends existing in-memory shader cache to disk.
+  - **Vulkan**: `VkPipelineCache` created at device init, passed to all `vkCreateGraphicsPipelines` / `vkCreateComputePipelines`, saved via `vkGetPipelineCacheData` on device destroy. Graceful fallback on stale/corrupt cache. Adapter key includes vendorID + deviceID + driverVersion + PipelineCacheUUID. Disk path: `UserCacheDir()/gogpu/vulkan/<adapterKey>/pipeline.cache`
+  - **DX12**: `GetCachedBlob` after PSO creation, `D3D12_CACHED_PIPELINE_STATE` on restore. Per-PSO blobs keyed by root signature + shader bytecode + fixed-function state SHA-256 (including full depth/stencil hash with all stencil ops). Stale blob → E_INVALIDARG → automatic retry without cache. DX12 PSO caching is **ahead of Rust wgpu** (which has an empty stub). Disk path: `UserCacheDir()/gogpu/dx12/<adapterKey>/`
+  - **`internal/pipelinecache`**: shared atomic blob I/O (`write-tmp + rename` for crash safety) and adapter-scoped cache path helpers. Follows ADR-069 internal package pattern. 179 LOC tests.
+  - Pipeline cache init is **non-fatal** — failure logs warning and continues with `pipelineCache = 0` (VK_NULL_HANDLE) or nil PSO cache.
+
+### Fixed
+
+- **Race conditions** (@lkmavi) — `RegisterHALBackends()` wrapped in `sync.Once` (prevents double registration on concurrent `CreateInstance`), `instanceEnumerateMu` mutex serializes adapter probing (Windows driver init not thread-safe).
+- **codecov.yml** — `hal/**` glob pattern for nested packages (was `hal/` which missed sub-packages), patch coverage target 85%.
 
 ## [0.34.1] - 2026-08-31
 

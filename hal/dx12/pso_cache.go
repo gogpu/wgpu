@@ -6,6 +6,7 @@
 package dx12
 
 import (
+	"errors"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -93,7 +94,8 @@ func isInvalidCachedPSOError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if hr, ok := err.(d3d12.HRESULTError); ok {
+	var hr d3d12.HRESULTError
+	if errors.As(err, &hr) {
 		return hr == d3d12.E_INVALIDARG
 	}
 	return false

@@ -132,7 +132,7 @@ func writeGraphicsFixedState(
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(psoDesc.PrimitiveTopologyType))
 	binary.LittleEndian.PutUint32(buf[4:8], psoDesc.NumRenderTargets)
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(psoDesc.DSVFormat))
-	binary.LittleEndian.PutUint32(buf[12:16], uint32(psoDesc.SampleDesc.Count))
+	binary.LittleEndian.PutUint32(buf[12:16], psoDesc.SampleDesc.Count)
 	binary.LittleEndian.PutUint32(buf[16:20], psoDesc.SampleDesc.Quality)
 	binary.LittleEndian.PutUint32(buf[20:24], uint32(psoDesc.IBStripCutValue))
 	_, _ = h.Write(buf[:24])
