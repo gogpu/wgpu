@@ -1234,7 +1234,7 @@ func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.I
 }
 
 // SetViewport sets the viewport.
-func (p *CoreRenderPassEncoder) SetViewport(vp hal.Viewport) {
+func (p *CoreRenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	if p.ended {
 		return
 	}
@@ -1244,7 +1244,7 @@ func (p *CoreRenderPassEncoder) SetViewport(vp hal.Viewport) {
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (p *CoreRenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+func (p *CoreRenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	if p.ended {
 		return
 	}
@@ -1274,22 +1274,22 @@ func (p *CoreRenderPassEncoder) SetStencilReference(reference uint32) {
 }
 
 // Draw draws primitives.
-func (p *CoreRenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (p *CoreRenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if p.ended {
 		return
 	}
 	if p.raw != nil {
-		p.raw.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+		p.raw.Draw(args)
 	}
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *CoreRenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (p *CoreRenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if p.ended {
 		return
 	}
 	if p.raw != nil {
-		p.raw.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+		p.raw.DrawIndexed(args)
 	}
 }
 

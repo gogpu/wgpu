@@ -210,7 +210,7 @@ func runSampleCoordTest(t *testing.T, format wgpu.TextureFormat, bytesPerPixel i
 	}
 	rp.SetPipeline(pipeline)
 	rp.SetBindGroup(0, bg, nil)
-	rp.Draw(3, 1, 0, 0)
+	rp.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = rp.End()
 
 	enc.TransitionTextures([]wgpu.TextureBarrier{{Texture: outTex, Usage: wgpu.TextureUsageTransition{OldUsage: gputypes.TextureUsageRenderAttachment, NewUsage: gputypes.TextureUsageCopySrc}}})
@@ -366,7 +366,7 @@ func TestDrawIndexedRenders(t *testing.T) {
 	rp.SetPipeline(pipeline)
 	rp.SetVertexBuffer(0, vbuf, 0)
 	rp.SetIndexBuffer(ibuf, gputypes.IndexFormatUint16, 0)
-	rp.DrawIndexed(6, 1, 0, 0, 0)
+	rp.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 6, InstanceCount: 1})
 	_ = rp.End()
 	enc.TransitionTextures([]wgpu.TextureBarrier{{Texture: outTex, Usage: wgpu.TextureUsageTransition{OldUsage: gputypes.TextureUsageRenderAttachment, NewUsage: gputypes.TextureUsageCopySrc}}})
 	staging, _ := device.CreateBuffer(&wgpu.BufferDescriptor{Size: W * H * 4, Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst})

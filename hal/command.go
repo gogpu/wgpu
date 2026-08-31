@@ -91,18 +91,19 @@ type CommandEncoder interface {
 	ReadAccelerationStructureCompactSize(as AccelerationStructure, buffer Buffer, offset uint64)
 }
 
-// Viewport describes viewport transformation parameters.
+// Viewport is an alias for gputypes.Viewport describing viewport transformation parameters.
 // Maps 1:1 to VkViewport, MTLViewport, D3D12_VIEWPORT.
-type Viewport struct {
-	X, Y, Width, Height float32
-	MinDepth, MaxDepth  float32
-}
+type Viewport = gputypes.Viewport
 
-// ScissorRect describes scissor clipping rectangle.
+// ScissorRect is an alias for gputypes.ScissorRect describing scissor clipping rectangle.
 // Maps 1:1 to VkRect2D (offset+extent), MTLScissorRect, D3D12_RECT.
-type ScissorRect struct {
-	X, Y, Width, Height uint32
-}
+type ScissorRect = gputypes.ScissorRect
+
+// DrawArgs is an alias for gputypes.DrawArgs describing non-indexed draw call parameters.
+type DrawArgs = gputypes.DrawArgs
+
+// DrawIndexedArgs is an alias for gputypes.DrawIndexedArgs describing indexed draw call parameters.
+type DrawIndexedArgs = gputypes.DrawIndexedArgs
 
 // RenderPassEncoder records render commands within a render pass.
 // Render passes define rendering targets and operations.
@@ -137,19 +138,10 @@ type RenderPassEncoder interface {
 	SetStencilReference(reference uint32)
 
 	// Draw draws primitives.
-	// vertexCount is the number of vertices to draw.
-	// instanceCount is the number of instances to draw.
-	// firstVertex is the offset into the vertex buffer.
-	// firstInstance is the offset into the instance data.
-	Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32)
+	Draw(args DrawArgs)
 
 	// DrawIndexed draws indexed primitives.
-	// indexCount is the number of indices to draw.
-	// instanceCount is the number of instances to draw.
-	// firstIndex is the offset into the index buffer.
-	// baseVertex is added to each index before fetching vertex data.
-	// firstInstance is the offset into the instance data.
-	DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
+	DrawIndexed(args DrawIndexedArgs)
 
 	// DrawIndirect draws primitives with GPU-generated parameters.
 	// buffer contains drawCount consecutive 16-byte DrawIndirectArgs records.
@@ -208,10 +200,10 @@ type RenderBundleEncoder interface {
 	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
 
 	// Draw draws primitives.
-	Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32)
+	Draw(args DrawArgs)
 
 	// DrawIndexed draws indexed primitives.
-	DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
+	DrawIndexed(args DrawIndexedArgs)
 
 	// Finish finalizes the bundle and returns it.
 	// The encoder cannot be used after this call.

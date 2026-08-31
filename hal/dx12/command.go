@@ -769,21 +769,21 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
 	if !e.encoder.isRecording {
 		return
 	}
 
-	e.encoder.cmdList.DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance)
+	e.encoder.cmdList.DrawInstanced(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
 	if !e.encoder.isRecording {
 		return
 	}
 
-	e.encoder.cmdList.DrawIndexedInstanced(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	e.encoder.cmdList.DrawIndexedInstanced(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

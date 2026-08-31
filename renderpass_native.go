@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
@@ -142,18 +141,13 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 }
 
 // SetViewport sets the viewport transformation.
-func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	p.core.SetViewport(hal.Viewport{
-		X: x, Y: y, Width: width, Height: height,
-		MinDepth: minDepth, MaxDepth: maxDepth,
-	})
+func (p *RenderPassEncoder) SetViewport(vp Viewport) {
+	p.core.SetViewport(vp)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
-func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	p.core.SetScissorRect(hal.ScissorRect{
-		X: x, Y: y, Width: width, Height: height,
-	})
+func (p *RenderPassEncoder) SetScissorRect(rect ScissorRect) {
+	p.core.SetScissorRect(rect)
 }
 
 // SetBlendConstant sets the blend constant color.
@@ -217,15 +211,15 @@ func (p *RenderPassEncoder) validateDrawState(method string) bool {
 }
 
 // Draw draws primitives.
-func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (p *RenderPassEncoder) Draw(args DrawArgs) {
 	if !p.validateDrawState("Draw") {
 		return
 	}
-	p.core.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+	p.core.Draw(args)
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (p *RenderPassEncoder) DrawIndexed(args DrawIndexedArgs) {
 	if !p.validateDrawState("DrawIndexed") {
 		return
 	}
@@ -242,7 +236,7 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
 		return
 	}
-	p.core.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	p.core.DrawIndexed(args)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

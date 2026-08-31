@@ -678,32 +678,32 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
 	}
 	e.encoder.commands = append(e.encoder.commands, &DrawCommand{
-		vertexCount:   vertexCount,
-		instanceCount: instanceCount,
-		firstVertex:   firstVertex,
-		firstInstance: firstInstance,
+		vertexCount:   args.VertexCount,
+		instanceCount: args.InstanceCount,
+		firstVertex:   args.FirstVertex,
+		firstInstance: args.FirstInstance,
 		topology:      topology,
 	})
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
 	}
 	e.encoder.commands = append(e.encoder.commands, &DrawIndexedCommand{
-		indexCount:    indexCount,
-		instanceCount: instanceCount,
-		firstIndex:    firstIndex,
-		baseVertex:    baseVertex,
-		firstInstance: firstInstance,
+		indexCount:    args.IndexCount,
+		instanceCount: args.InstanceCount,
+		firstIndex:    args.FirstIndex,
+		baseVertex:    args.BaseVertex,
+		firstInstance: args.FirstInstance,
 		indexFormat:   e.indexFormat,
 		topology:      topology,
 	})

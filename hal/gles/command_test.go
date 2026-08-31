@@ -147,7 +147,7 @@ func TestRenderPassEncoder_Draw(t *testing.T) {
 	}
 	rpe := enc.BeginRenderPass(desc)
 
-	rpe.Draw(3, 1, 0, 0)
+	rpe.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 
 	if len(enc.commands) != 1 {
 		t.Fatalf("expected 1 command, got %d", len(enc.commands))
@@ -179,7 +179,7 @@ func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
 	idxBuf := &Buffer{id: 5}
 	rpe.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint32, 0)
 
-	rpe.DrawIndexed(36, 2, 0, 0, 0)
+	rpe.DrawIndexed(hal.DrawIndexedArgs{IndexCount: 36, InstanceCount: 2})
 
 	// Should have SetIndexBufferCommand and DrawIndexedCommand
 	if len(enc.commands) < 2 {

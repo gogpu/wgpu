@@ -1924,7 +1924,7 @@ func TestRenderPassDrawWithoutPipelineDeferredError(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.Draw(3, 1, 0, 0) // no pipeline set
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -1937,7 +1937,7 @@ func TestRenderPassDrawIndexedWithoutPipelineDeferredError(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.DrawIndexed(3, 1, 0, 0, 0) // no pipeline set
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2210,7 +2210,7 @@ func TestRenderPassDrawWithInsufficientVertexBuffers(t *testing.T) {
 	defer buf.Release()
 
 	pass.SetVertexBuffer(0, buf, 0)
-	pass.Draw(3, 1, 0, 0) // should fail: need 2, have 1
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should fail: need 2, have 1
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2239,7 +2239,7 @@ func TestRenderPassDrawWithSufficientVertexBuffers(t *testing.T) {
 	defer buf.Release()
 
 	pass.SetVertexBuffer(0, buf, 0)
-	pass.Draw(3, 1, 0, 0) // should pass vertex buffer check
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass vertex buffer check
 	_ = pass.End()
 
 	// May still fail for other reasons (no real HAL pipeline), but vertex buffer
@@ -2256,7 +2256,7 @@ func TestRenderPassDrawWithZeroRequiredVertexBuffers(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.Draw(3, 1, 0, 0) // should pass: no vertex buffers needed
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass: no vertex buffers needed
 	_ = pass.End()
 
 	_, _ = encoder.Finish()
@@ -2274,7 +2274,7 @@ func TestRenderPassDrawIndexedWithoutIndexBuffer(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.DrawIndexed(3, 1, 0, 0, 0) // no index buffer set
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2329,7 +2329,7 @@ func TestRenderPassDrawIndexedWithIndexBuffer(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, 0, 0)
-	pass.DrawIndexed(3, 1, 0, 0, 0) // index buffer is set
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // index buffer is set
 	_ = pass.End()
 
 	// May fail for other HAL reasons, but index buffer check should pass.
@@ -2501,7 +2501,7 @@ func TestDrawMissingPipelineSentinel(t *testing.T) {
 	device, encoder, pass := newEncoderWithRenderPass(t)
 	defer device.Release()
 
-	pass.Draw(3, 1, 0, 0) // no pipeline set
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1}) // no pipeline set
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2525,7 +2525,7 @@ func TestDrawMissingBindGroupSentinel(t *testing.T) {
 	pass.SetPipeline(pipeline)
 
 	// No bind group at index 0.
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2560,7 +2560,7 @@ func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
 	group.SetTestLayout(wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2592,7 +2592,7 @@ func TestDrawMissingVertexBufferSentinel(t *testing.T) {
 	defer buf.Release()
 	pass.SetVertexBuffer(0, buf, 0)
 
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2612,7 +2612,7 @@ func TestDrawMissingIndexBufferSentinel(t *testing.T) {
 	pipeline.SetTestRequiredVertexBuffers(0)
 	pass.SetPipeline(pipeline)
 
-	pass.DrawIndexed(3, 1, 0, 0, 0) // no index buffer
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2830,7 +2830,7 @@ func TestDrawIndexedFormatMismatchSentinel(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
-	pass.DrawIndexed(3, 1, 0, 0, 0) // format mismatch: buffer=Uint16, pipeline=Uint32
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // format mismatch: buffer=Uint16, pipeline=Uint32
 	_ = pass.End()
 
 	_, err := encoder.Finish()
@@ -2864,7 +2864,7 @@ func TestDrawIndexedFormatMatchesStripFormat(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0) // matches pipeline
-	pass.DrawIndexed(3, 1, 0, 0, 0)
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	// Should not fail with format mismatch (may fail for other HAL reasons).
@@ -2895,7 +2895,7 @@ func TestDrawIndexedNoStripFormatSkipsCheck(t *testing.T) {
 	defer idxBuf.Release()
 
 	pass.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint16, 0)
-	pass.DrawIndexed(3, 1, 0, 0, 0) // no strip format → no format check
+	pass.DrawIndexed(wgpu.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no strip format → no format check
 	_ = pass.End()
 
 	// Should not fail with format mismatch.

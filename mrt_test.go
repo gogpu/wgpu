@@ -154,7 +154,7 @@ func TestMRTTwoTargetRenderPass(t *testing.T) {
 	}
 
 	pass.SetPipeline(pipeline)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	// --- Transition textures from render attachment to copy source ---

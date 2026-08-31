@@ -114,7 +114,7 @@ func TestRenderPassEncoderDrawNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.Draw(3, 1, 0, 0)
+	rpe.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 }
 
 // TestRenderPassEncoderEndNullActive verifies that End silently returns
