@@ -214,6 +214,13 @@ linters:
           - gocritic
           - nestif
 
+      # DX12 PSO cache - createGraphicsPSO/createComputePSO are structurally
+      # similar but handle different COM types (ID3D12GraphicsPipelineState vs
+      # ID3D12ComputePipelineState). Duplication is inherent to the D3D12 API.
+      - path: hal/dx12/pso_cache\.go
+        linters:
+          - dupl
+
       # DX12 COM bindings - Windows API naming conventions preserved
       # D3D12_* types match the Windows SDK headers exactly for documentation cross-reference
       - path: hal/dx12/d3d12/.*\.go

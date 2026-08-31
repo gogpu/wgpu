@@ -237,7 +237,7 @@ func (h *DescriptorHeap) HandleToIndex(handle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE)
 
 // newDevice creates a new DX12 device from a DXGI adapter.
 // adapterPtr is the IUnknown pointer to the DXGI adapter.
-func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
+func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
 	// Create D3D12 device
 	rawDevice, err := instance.d3d12Lib.CreateDevice(adapterPtr, featureLevel)
 	if err != nil {
