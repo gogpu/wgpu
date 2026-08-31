@@ -464,7 +464,7 @@ func primitiveTopologyToD3D12(topology gputypes.PrimitiveTopology) d3d12.D3D_PRI
 }
 
 // stencilOpToD3D12 converts a HAL stencil operation to D3D12.
-func stencilOpToD3D12(op hal.StencilOperation) d3d12.D3D12_STENCIL_OP {
+func stencilOpToD3D12(op gputypes.StencilOperation) d3d12.D3D12_STENCIL_OP {
 	switch op {
 	case hal.StencilOperationKeep:
 		return d3d12.D3D12_STENCIL_OP_KEEP

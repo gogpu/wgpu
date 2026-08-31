@@ -639,7 +639,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	e.encoder.commands = append(e.encoder.commands, &SetViewportCommand{
 		x: vp.X, y: vp.Y, width: vp.Width, height: vp.Height,
 		minDepth: vp.MinDepth, maxDepth: vp.MaxDepth,
@@ -648,7 +648,7 @@ func (e *RenderPassEncoder) SetViewport(vp hal.Viewport) {
 
 // SetScissorRect sets the scissor rectangle.
 // With ADJUST_COORDINATE_SPACE, no Y-flip is needed — coordinates pass through directly.
-func (e *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	e.encoder.commands = append(e.encoder.commands, &SetScissorCommand{
 		x: rect.X, y: rect.Y, width: rect.Width, height: rect.Height,
 	})
@@ -678,7 +678,7 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
@@ -693,7 +693,7 @@ func (e *RenderPassEncoder) Draw(args hal.DrawArgs) {
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
@@ -1865,7 +1865,7 @@ func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32, nor
 }
 
 // stencilOpToGL converts a HAL stencil operation to the corresponding GL constant.
-func stencilOpToGL(op hal.StencilOperation) uint32 {
+func stencilOpToGL(op gputypes.StencilOperation) uint32 {
 	switch op {
 	case hal.StencilOperationKeep:
 		return gl.KEEP

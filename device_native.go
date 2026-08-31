@@ -49,12 +49,12 @@ func (d *Device) Queue() *Queue {
 }
 
 // Features returns the device's enabled features.
-func (d *Device) Features() Features {
+func (d *Device) Features() gputypes.Features {
 	return d.core.Features
 }
 
 // Limits returns the device's resource limits.
-func (d *Device) Limits() Limits {
+func (d *Device) Limits() gputypes.Limits {
 	return d.core.Limits
 }
 

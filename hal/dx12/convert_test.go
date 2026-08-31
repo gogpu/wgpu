@@ -549,7 +549,7 @@ func TestPrimitiveTopologyToD3D12(t *testing.T) {
 func TestStencilOpToD3D12(t *testing.T) {
 	tests := []struct {
 		name   string
-		op     hal.StencilOperation
+		op     gputypes.StencilOperation
 		expect d3d12.D3D12_STENCIL_OP
 	}{
 		{"Keep", hal.StencilOperationKeep, d3d12.D3D12_STENCIL_OP_KEEP},
@@ -560,7 +560,7 @@ func TestStencilOpToD3D12(t *testing.T) {
 		{"DecrementClamp", hal.StencilOperationDecrementClamp, d3d12.D3D12_STENCIL_OP_DECR_SAT},
 		{"IncrementWrap", hal.StencilOperationIncrementWrap, d3d12.D3D12_STENCIL_OP_INCR},
 		{"DecrementWrap", hal.StencilOperationDecrementWrap, d3d12.D3D12_STENCIL_OP_DECR},
-		{"Unknown defaults to Keep", hal.StencilOperation(99), d3d12.D3D12_STENCIL_OP_KEEP},
+		{"Unknown defaults to Keep", gputypes.StencilOperation(99), d3d12.D3D12_STENCIL_OP_KEEP},
 	}
 
 	for _, tt := range tests {
@@ -748,14 +748,14 @@ func TestTextureFormatToDXGI(t *testing.T) {
 func TestCompositeAlphaModeToDXGI(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   hal.CompositeAlphaMode
+		mode   gputypes.CompositeAlphaMode
 		expect dxgi.DXGI_ALPHA_MODE
 	}{
 		{"Premultiplied", hal.CompositeAlphaModePremultiplied, dxgi.DXGI_ALPHA_MODE_PREMULTIPLIED},
 		{"Unpremultiplied", hal.CompositeAlphaModeUnpremultiplied, dxgi.DXGI_ALPHA_MODE_STRAIGHT},
 		{"Inherit", hal.CompositeAlphaModeInherit, dxgi.DXGI_ALPHA_MODE_UNSPECIFIED},
 		{"Opaque", hal.CompositeAlphaModeOpaque, dxgi.DXGI_ALPHA_MODE_IGNORE},
-		{"Unknown defaults to Ignore", hal.CompositeAlphaMode(99), dxgi.DXGI_ALPHA_MODE_IGNORE},
+		{"Unknown defaults to Ignore", gputypes.CompositeAlphaMode(99), dxgi.DXGI_ALPHA_MODE_IGNORE},
 	}
 
 	for _, tt := range tests {

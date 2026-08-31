@@ -23,7 +23,7 @@ func TestBufferAccessorsTableDriven(t *testing.T) {
 		name  string
 		label string
 		size  uint64
-		usage wgpu.BufferUsage
+		usage gputypes.BufferUsage
 	}{
 		{"small_vertex", "small-vertex-buf", 64, wgpu.BufferUsageVertex | wgpu.BufferUsageCopyDst},
 		{"large_storage", "large-storage-buf", 4096, wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst},
@@ -151,10 +151,10 @@ func TestTextureFormat(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		format wgpu.TextureFormat
+		format gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", wgpu.TextureFormatRGBA8Unorm},
-		{"BGRA8Unorm", wgpu.TextureFormatBGRA8Unorm},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm},
 		{"R8Unorm", gputypes.TextureFormatR8Unorm},
 	}
 
@@ -192,7 +192,7 @@ func TestTextureReleaseIdempotent(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})
 	if err != nil {
@@ -219,7 +219,7 @@ func TestTextureViewReleaseIdempotent(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})
 	if err != nil {
@@ -395,7 +395,7 @@ func TestBindGroupLayoutReleaseIdempotent(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "release-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -417,7 +417,7 @@ func TestPipelineLayoutReleaseIdempotent(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "pl-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -456,7 +456,7 @@ func TestBindGroupWithBufferResource(t *testing.T) {
 	}
 	defer buf.Release()
 
-	bufLayoutEntry := wgpu.BindGroupLayoutEntry{
+	bufLayoutEntry := gputypes.BindGroupLayoutEntry{
 		Binding:    0,
 		Visibility: wgpu.ShaderStageVertex | wgpu.ShaderStageFragment,
 		Buffer: &gputypes.BufferBindingLayout{
@@ -467,7 +467,7 @@ func TestBindGroupWithBufferResource(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "bg-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{bufLayoutEntry},
+		Entries: []gputypes.BindGroupLayoutEntry{bufLayoutEntry},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -498,7 +498,7 @@ func TestBindGroupReleaseTrackesReleasedFlag(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "bg-release-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)

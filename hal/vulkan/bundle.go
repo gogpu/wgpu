@@ -114,7 +114,7 @@ func (e *RenderBundleEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.
 }
 
 // Draw draws primitives.
-func (e *RenderBundleEncoder) Draw(args hal.DrawArgs) {
+func (e *RenderBundleEncoder) Draw(args gputypes.DrawArgs) {
 	if e.finished {
 		return
 	}
@@ -122,7 +122,7 @@ func (e *RenderBundleEncoder) Draw(args hal.DrawArgs) {
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderBundleEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
+func (e *RenderBundleEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.finished {
 		return
 	}

@@ -94,12 +94,12 @@ func (mockRenderPassEncoder) SetPipeline(_ hal.RenderPipeline)                  
 func (mockRenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32)            {}
 func (mockRenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64)              {}
 func (mockRenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
-func (mockRenderPassEncoder) SetViewport(_ hal.Viewport)                                    {}
-func (mockRenderPassEncoder) SetScissorRect(_ hal.ScissorRect)                              {}
+func (mockRenderPassEncoder) SetViewport(_ gputypes.Viewport)                               {}
+func (mockRenderPassEncoder) SetScissorRect(_ gputypes.ScissorRect)                         {}
 func (mockRenderPassEncoder) SetBlendConstant(_ *gputypes.Color)                            {}
 func (mockRenderPassEncoder) SetStencilReference(_ uint32)                                  {}
-func (mockRenderPassEncoder) Draw(_ hal.DrawArgs)                                           {}
-func (mockRenderPassEncoder) DrawIndexed(_ hal.DrawIndexedArgs)                             {}
+func (mockRenderPassEncoder) Draw(_ gputypes.DrawArgs)                                      {}
+func (mockRenderPassEncoder) DrawIndexed(_ gputypes.DrawIndexedArgs)                        {}
 func (mockRenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32)                 {}
 func (mockRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32)          {}
 func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                              {}

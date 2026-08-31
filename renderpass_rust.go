@@ -6,6 +6,7 @@ import (
 	"math"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/indirect"
 )
 
@@ -43,7 +44,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 }
 
 // SetIndexBuffer sets the index buffer.
-func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, offset uint64) {
+func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
 	if buffer == nil || buffer.r == nil {
 		return
 	}
@@ -52,17 +53,17 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 }
 
 // SetViewport sets the viewport transformation.
-func (p *RenderPassEncoder) SetViewport(vp Viewport) {
+func (p *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	p.r.SetViewport(vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
-func (p *RenderPassEncoder) SetScissorRect(rect ScissorRect) {
+func (p *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	p.r.SetScissorRect(rect.X, rect.Y, rect.Width, rect.Height)
 }
 
 // SetBlendConstant sets the blend constant color.
-func (p *RenderPassEncoder) SetBlendConstant(color *Color) {
+func (p *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if color == nil {
 		return
 	}
@@ -80,12 +81,12 @@ func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
 }
 
 // Draw draws primitives.
-func (p *RenderPassEncoder) Draw(args DrawArgs) {
+func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	p.r.Draw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *RenderPassEncoder) DrawIndexed(args DrawIndexedArgs) {
+func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	p.r.DrawIndexed(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 

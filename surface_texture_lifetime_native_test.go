@@ -250,7 +250,7 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		}
 		defer view.Release()
 		layout, err := device.CreateBindGroupLayout(&BindGroupLayoutDescriptor{
-			Entries: []BindGroupLayoutEntry{{
+			Entries: []gputypes.BindGroupLayoutEntry{{
 				Binding:    0,
 				Visibility: ShaderStageFragment,
 				Texture: &gputypes.TextureBindingLayout{

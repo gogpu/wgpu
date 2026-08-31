@@ -91,20 +91,6 @@ type CommandEncoder interface {
 	ReadAccelerationStructureCompactSize(as AccelerationStructure, buffer Buffer, offset uint64)
 }
 
-// Viewport is an alias for gputypes.Viewport describing viewport transformation parameters.
-// Maps 1:1 to VkViewport, MTLViewport, D3D12_VIEWPORT.
-type Viewport = gputypes.Viewport
-
-// ScissorRect is an alias for gputypes.ScissorRect describing scissor clipping rectangle.
-// Maps 1:1 to VkRect2D (offset+extent), MTLScissorRect, D3D12_RECT.
-type ScissorRect = gputypes.ScissorRect
-
-// DrawArgs is an alias for gputypes.DrawArgs describing non-indexed draw call parameters.
-type DrawArgs = gputypes.DrawArgs
-
-// DrawIndexedArgs is an alias for gputypes.DrawIndexedArgs describing indexed draw call parameters.
-type DrawIndexedArgs = gputypes.DrawIndexedArgs
-
 // RenderPassEncoder records render commands within a render pass.
 // Render passes define rendering targets and operations.
 type RenderPassEncoder interface {
@@ -126,10 +112,10 @@ type RenderPassEncoder interface {
 	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
 
 	// SetViewport sets the viewport transformation.
-	SetViewport(vp Viewport)
+	SetViewport(vp gputypes.Viewport)
 
 	// SetScissorRect sets the scissor rectangle for clipping.
-	SetScissorRect(rect ScissorRect)
+	SetScissorRect(rect gputypes.ScissorRect)
 
 	// SetBlendConstant sets the blend constant color.
 	SetBlendConstant(color *gputypes.Color)
@@ -138,10 +124,10 @@ type RenderPassEncoder interface {
 	SetStencilReference(reference uint32)
 
 	// Draw draws primitives.
-	Draw(args DrawArgs)
+	Draw(args gputypes.DrawArgs)
 
 	// DrawIndexed draws indexed primitives.
-	DrawIndexed(args DrawIndexedArgs)
+	DrawIndexed(args gputypes.DrawIndexedArgs)
 
 	// DrawIndirect draws primitives with GPU-generated parameters.
 	// buffer contains drawCount consecutive 16-byte DrawIndirectArgs records.
@@ -200,10 +186,10 @@ type RenderBundleEncoder interface {
 	SetIndexBuffer(buffer Buffer, format gputypes.IndexFormat, offset uint64)
 
 	// Draw draws primitives.
-	Draw(args DrawArgs)
+	Draw(args gputypes.DrawArgs)
 
 	// DrawIndexed draws indexed primitives.
-	DrawIndexed(args DrawIndexedArgs)
+	DrawIndexed(args gputypes.DrawIndexedArgs)
 
 	// Finish finalizes the bundle and returns it.
 	// The encoder cannot be used after this call.

@@ -533,13 +533,13 @@ func (r *RenderPassEncoder) SetIndexBuffer(buf hal.Buffer, format gputypes.Index
 }
 
 // SetViewport stores the viewport transformation.
-func (r *RenderPassEncoder) SetViewport(vp hal.Viewport) {
+func (r *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	r.viewport = [6]float32{vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth}
 	r.hasViewport = true
 }
 
 // SetScissorRect stores the scissor rectangle.
-func (r *RenderPassEncoder) SetScissorRect(rect hal.ScissorRect) {
+func (r *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	r.scissorRect = [4]uint32{rect.X, rect.Y, rect.Width, rect.Height}
 	r.hasScissor = true
 	hal.Logger().Debug("software: SetScissorRect", "x", rect.X, "y", rect.Y, "w", rect.Width, "h", rect.Height)
@@ -560,7 +560,7 @@ func (r *RenderPassEncoder) SetStencilReference(ref uint32) {
 // available in a bind group, it performs a fullscreen texture blit.
 // Supports instanced rendering: instanceCount > 1 draws the same vertices
 // multiple times, advancing instance-rate vertex buffers per instance.
-func (r *RenderPassEncoder) Draw(args hal.DrawArgs) {
+func (r *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	r.drawCount++
 	hal.Logger().Debug("software: Draw", "vertices", args.VertexCount, "instances", args.InstanceCount, "drawIndex", r.drawCount)
 	r.executeDraw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
@@ -571,7 +571,7 @@ func (r *RenderPassEncoder) Draw(args hal.DrawArgs) {
 // and rasterization path as Draw, with vertex positions remapped through the
 // resolved indices. Previously this was a no-op, so every indexed draw (glyph
 // mask text, MSDF text) rendered nothing on the software backend.
-func (r *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
+func (r *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	r.drawCount++
 	if args.IndexCount == 0 || r.indexBuffer == nil {
 		return

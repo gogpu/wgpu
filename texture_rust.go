@@ -2,19 +2,22 @@
 
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import (
+	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
+)
 
 // Texture represents a GPU texture.
 // On Rust backend, this wraps go-webgpu/webgpu Texture.
 type Texture struct {
 	r        *rwgpu.Texture
 	device   *Device
-	format   TextureFormat
+	format   gputypes.TextureFormat
 	released bool
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() TextureFormat { return t.format }
+func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
 // Release destroys the texture.
 func (t *Texture) Release() {

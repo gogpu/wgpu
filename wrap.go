@@ -5,6 +5,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -19,8 +20,8 @@ import (
 func NewDeviceFromHAL(
 	halDevice hal.Device,
 	halQueue hal.Queue,
-	features Features,
-	limits Limits,
+	features gputypes.Features,
+	limits gputypes.Limits,
 	label string,
 ) (*Device, error) {
 	if halDevice == nil {
@@ -75,7 +76,7 @@ func NewSurfaceFromHAL(halSurface hal.Surface, label string) *Surface {
 
 // NewTextureFromHAL creates a Texture wrapping an existing HAL texture.
 // Used for backward compatibility and testing.
-func NewTextureFromHAL(halTexture hal.Texture, device *Device, format TextureFormat) *Texture {
+func NewTextureFromHAL(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
 	return &Texture{hal: halTexture, device: device, format: format}
 }
 

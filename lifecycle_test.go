@@ -38,7 +38,7 @@ func TestBindGroup_ReleaseUsesRefDrop(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "lifecycle-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -116,7 +116,7 @@ func TestBindGroup_ReleaseWithoutClone_DestroysImmediately(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "immediate-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -291,7 +291,7 @@ func TestBindGroup_WithBuffer_ReleaseUsesRefDrop(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "lifecycle-buf-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageVertex | wgpu.ShaderStageFragment,
@@ -371,7 +371,7 @@ func TestMixedResourceLifecycle_TrackedSubmission(t *testing.T) {
 	// Create resources.
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "mixed-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)

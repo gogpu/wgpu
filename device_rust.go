@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 )
 
 // Device represents a logical GPU device.
@@ -17,8 +18,8 @@ type Device struct {
 	r        *rwgpu.Device
 	instance *Instance // stored for PopErrorScope which needs Instance handle
 	queue    *Queue
-	features Features
-	limits   Limits
+	features gputypes.Features
+	limits   gputypes.Limits
 	released bool
 }
 
@@ -28,12 +29,12 @@ func (d *Device) Queue() *Queue {
 }
 
 // Features returns the device's enabled features.
-func (d *Device) Features() Features {
+func (d *Device) Features() gputypes.Features {
 	return d.features
 }
 
 // Limits returns the device's resource limits.
-func (d *Device) Limits() Limits {
+func (d *Device) Limits() gputypes.Limits {
 	return d.limits
 }
 

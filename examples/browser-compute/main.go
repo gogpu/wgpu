@@ -8,6 +8,7 @@ import (
 	"math"
 	"syscall/js"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -67,7 +68,7 @@ func main() {
 	// Create bind group layout
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "compute-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Visibility: wgpu.ShaderStagesCompute, Buffer: &wgpu.BufferBindingLayout{Type: wgpu.BufferBindingTypeReadOnlyStorage}},
 			{Binding: 1, Visibility: wgpu.ShaderStagesCompute, Buffer: &wgpu.BufferBindingLayout{Type: wgpu.BufferBindingTypeStorage}},
 		},

@@ -35,7 +35,7 @@ type headlessSoftwareFixture struct {
 	surface  *Surface
 	width    uint32
 	height   uint32
-	format   TextureFormat
+	format   gputypes.TextureFormat
 }
 
 type emptyPixelReaderSurface struct {
@@ -44,7 +44,7 @@ type emptyPixelReaderSurface struct {
 
 func (*emptyPixelReaderSurface) ReadPixels() []byte { return nil }
 
-func newHeadlessSoftwareFixture(t *testing.T, width, height uint32, format TextureFormat, configure bool) *headlessSoftwareFixture {
+func newHeadlessSoftwareFixture(t *testing.T, width, height uint32, format gputypes.TextureFormat, configure bool) *headlessSoftwareFixture {
 	t.Helper()
 
 	instance, err := CreateInstance(nil)
@@ -118,7 +118,7 @@ func (f *headlessSoftwareFixture) configure(t *testing.T) {
 	}
 }
 
-func (f *headlessSoftwareFixture) beginFrame(t *testing.T, clearColor Color) (*SurfaceTexture, *TextureView, *CommandEncoder, *RenderPassEncoder) {
+func (f *headlessSoftwareFixture) beginFrame(t *testing.T, clearColor gputypes.Color) (*SurfaceTexture, *TextureView, *CommandEncoder, *RenderPassEncoder) {
 	t.Helper()
 
 	texture, suboptimal, err := f.surface.GetCurrentTexture()
@@ -203,7 +203,7 @@ func newConfiguredWrappedSurface(t *testing.T, raw hal.Surface) *Surface {
 	if err := surface.Configure(device, &SurfaceConfiguration{
 		Width:       2,
 		Height:      2,
-		Format:      TextureFormatRGBA8Unorm,
+		Format:      gputypes.TextureFormatRGBA8Unorm,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		PresentMode: gputypes.PresentModeFifo,
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
@@ -217,10 +217,10 @@ func TestHeadlessSurfaceClearReadback(t *testing.T) {
 	const width, height = uint32(7), uint32(5)
 	wantPixel := []byte{0xff, 0x00, 0x7f, 0xff}
 
-	for _, format := range []TextureFormat{TextureFormatRGBA8Unorm, TextureFormatBGRA8Unorm} {
+	for _, format := range []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatBGRA8Unorm} {
 		t.Run(format.String(), func(t *testing.T) {
 			fixture := newHeadlessSoftwareFixture(t, width, height, format, true)
-			texture, view, encoder, pass := fixture.beginFrame(t, Color{R: 1, G: 0, B: 0.5, A: 1})
+			texture, view, encoder, pass := fixture.beginFrame(t, gputypes.Color{R: 1, G: 0, B: 0.5, A: 1})
 			fixture.submitAndPresent(t, texture, view, encoder, pass)
 
 			pixels, err := fixture.surface.ReadPixels()
@@ -250,7 +250,7 @@ func TestHeadlessSurfaceClearReadback(t *testing.T) {
 
 func TestHeadlessSurfaceTriangleReadback(t *testing.T) {
 	const width, height = uint32(32), uint32(32)
-	fixture := newHeadlessSoftwareFixture(t, width, height, TextureFormatRGBA8Unorm, true)
+	fixture := newHeadlessSoftwareFixture(t, width, height, gputypes.TextureFormatRGBA8Unorm, true)
 
 	shader, err := fixture.device.CreateShaderModule(&ShaderModuleDescriptor{
 		Label: "headless-triangle",
@@ -267,8 +267,8 @@ func TestHeadlessSurfaceTriangleReadback(t *testing.T) {
 		Fragment: &FragmentState{
 			Module:     shader,
 			EntryPoint: "fs_main",
-			Targets: []ColorTargetState{{
-				Format:    TextureFormatRGBA8Unorm,
+			Targets: []gputypes.ColorTargetState{{
+				Format:    gputypes.TextureFormatRGBA8Unorm,
 				WriteMask: gputypes.ColorWriteMaskAll,
 			}},
 		},
@@ -280,9 +280,9 @@ func TestHeadlessSurfaceTriangleReadback(t *testing.T) {
 	}
 	defer pipeline.Release()
 
-	texture, view, encoder, pass := fixture.beginFrame(t, Color{R: 0, G: 0, B: 1, A: 1})
+	texture, view, encoder, pass := fixture.beginFrame(t, gputypes.Color{R: 0, G: 0, B: 1, A: 1})
 	pass.SetPipeline(pipeline)
-	pass.Draw(DrawArgs{VertexCount: 3, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	fixture.submitAndPresent(t, texture, view, encoder, pass)
 
 	pixels, err := fixture.surface.ReadPixels()
@@ -316,14 +316,14 @@ func TestHeadlessSurfaceReadPixelsStateErrors(t *testing.T) {
 	})
 
 	t.Run("Unconfigured", func(t *testing.T) {
-		fixture := newHeadlessSoftwareFixture(t, 2, 2, TextureFormatRGBA8Unorm, false)
+		fixture := newHeadlessSoftwareFixture(t, 2, 2, gputypes.TextureFormatRGBA8Unorm, false)
 		if _, err := fixture.surface.ReadPixels(); err == nil || !strings.Contains(err.Error(), "not configured") {
 			t.Fatalf("ReadPixels error = %v, want not configured", err)
 		}
 	})
 
 	t.Run("Acquired", func(t *testing.T) {
-		fixture := newHeadlessSoftwareFixture(t, 2, 2, TextureFormatRGBA8Unorm, true)
+		fixture := newHeadlessSoftwareFixture(t, 2, 2, gputypes.TextureFormatRGBA8Unorm, true)
 		if _, _, err := fixture.surface.GetCurrentTexture(); err != nil {
 			t.Fatalf("GetCurrentTexture: %v", err)
 		}
@@ -334,7 +334,7 @@ func TestHeadlessSurfaceReadPixelsStateErrors(t *testing.T) {
 	})
 
 	t.Run("AfterUnconfigure", func(t *testing.T) {
-		fixture := newHeadlessSoftwareFixture(t, 2, 2, TextureFormatRGBA8Unorm, true)
+		fixture := newHeadlessSoftwareFixture(t, 2, 2, gputypes.TextureFormatRGBA8Unorm, true)
 		fixture.surface.Unconfigure()
 		if _, err := fixture.surface.ReadPixels(); err == nil || !strings.Contains(err.Error(), "not configured") {
 			t.Fatalf("ReadPixels error = %v, want not configured", err)
@@ -342,7 +342,7 @@ func TestHeadlessSurfaceReadPixelsStateErrors(t *testing.T) {
 	})
 
 	t.Run("AfterRelease", func(t *testing.T) {
-		fixture := newHeadlessSoftwareFixture(t, 2, 2, TextureFormatRGBA8Unorm, true)
+		fixture := newHeadlessSoftwareFixture(t, 2, 2, gputypes.TextureFormatRGBA8Unorm, true)
 		fixture.surface.Release()
 		if _, err := fixture.surface.ReadPixels(); !errors.Is(err, ErrReleased) {
 			t.Fatalf("ReadPixels error = %v, want ErrReleased", err)

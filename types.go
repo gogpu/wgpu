@@ -11,10 +11,6 @@ const MinBindGroups = 4
 // Devices may support up to 8, but only MinBindGroups (4) is guaranteed.
 const MaxBindGroups = 8
 
-// Backend types
-type Backend = gputypes.Backend
-type Backends = gputypes.Backends
-
 // Backend constants
 const (
 	BackendVulkan = gputypes.BackendVulkan
@@ -33,13 +29,7 @@ const (
 	BackendsGL      = gputypes.BackendsGL
 )
 
-// Feature and limit types
-type Features = gputypes.Features
-type Limits = gputypes.Limits
-
-// Buffer usage
-type BufferUsage = gputypes.BufferUsage
-
+// Buffer usage constants
 const (
 	BufferUsageMapRead      = gputypes.BufferUsageMapRead
 	BufferUsageMapWrite     = gputypes.BufferUsageMapWrite
@@ -53,9 +43,7 @@ const (
 	BufferUsageQueryResolve = gputypes.BufferUsageQueryResolve
 )
 
-// Texture types
-type TextureUsage = gputypes.TextureUsage
-
+// Texture usage constants
 const (
 	TextureUsageCopySrc          = gputypes.TextureUsageCopySrc
 	TextureUsageCopyDst          = gputypes.TextureUsageCopyDst
@@ -63,11 +51,6 @@ const (
 	TextureUsageStorageBinding   = gputypes.TextureUsageStorageBinding
 	TextureUsageRenderAttachment = gputypes.TextureUsageRenderAttachment
 )
-
-type TextureFormat = gputypes.TextureFormat
-type TextureDimension = gputypes.TextureDimension
-type TextureViewDimension = gputypes.TextureViewDimension
-type TextureAspect = gputypes.TextureAspect
 
 // Texture dimension constants
 const (
@@ -86,55 +69,14 @@ const (
 	TextureFormatDepth32Float   = gputypes.TextureFormatDepth32Float
 )
 
-// Shader types
-type ShaderStages = gputypes.ShaderStages
-
+// Shader stage constants
 const (
 	ShaderStageVertex   = gputypes.ShaderStageVertex
 	ShaderStageFragment = gputypes.ShaderStageFragment
 	ShaderStageCompute  = gputypes.ShaderStageCompute
 )
 
-// Primitive types
-type PrimitiveTopology = gputypes.PrimitiveTopology
-type IndexFormat = gputypes.IndexFormat
-type FrontFace = gputypes.FrontFace
-type CullMode = gputypes.CullMode
-
-type PrimitiveState = gputypes.PrimitiveState
-type MultisampleState = gputypes.MultisampleState
-
-// Render types
-type LoadOp = gputypes.LoadOp
-type StoreOp = gputypes.StoreOp
-type Color = gputypes.Color
-
-// Viewport describes viewport transformation parameters.
-type Viewport = gputypes.Viewport
-
-// ScissorRect describes scissor clipping rectangle.
-type ScissorRect = gputypes.ScissorRect
-
-// DrawArgs describes parameters for a non-indexed draw call.
-type DrawArgs = gputypes.DrawArgs
-
-// DrawIndexedArgs describes parameters for an indexed draw call.
-type DrawIndexedArgs = gputypes.DrawIndexedArgs
-
-// Bind group types
-type BindGroupLayoutEntry = gputypes.BindGroupLayoutEntry
-type VertexBufferLayout = gputypes.VertexBufferLayout
-type ColorTargetState = gputypes.ColorTargetState
-
-// Sampler types
-type AddressMode = gputypes.AddressMode
-type FilterMode = gputypes.FilterMode
-type CompareFunction = gputypes.CompareFunction
-
-// Surface/presentation types
-type PresentMode = gputypes.PresentMode
-type CompositeAlphaMode = gputypes.CompositeAlphaMode
-
+// Present mode constants
 const (
 	PresentModeImmediate   = gputypes.PresentModeImmediate
 	PresentModeMailbox     = gputypes.PresentModeMailbox
@@ -142,10 +84,12 @@ const (
 	PresentModeFifoRelaxed = gputypes.PresentModeFifoRelaxed
 )
 
-// Adapter types
-type AdapterInfo = gputypes.AdapterInfo
-type DeviceType = gputypes.DeviceType
-type PowerPreference = gputypes.PowerPreference
+// Power preference constants
+const (
+	PowerPreferenceNone            = gputypes.PowerPreferenceNone
+	PowerPreferenceLowPower        = gputypes.PowerPreferenceLowPower
+	PowerPreferenceHighPerformance = gputypes.PowerPreferenceHighPerformance
+)
 
 // RequestAdapterOptions controls adapter selection.
 //
@@ -155,7 +99,7 @@ type PowerPreference = gputypes.PowerPreference
 // enumeration when RequestAdapter is called.
 type RequestAdapterOptions struct {
 	// PowerPreference indicates power consumption preference.
-	PowerPreference PowerPreference
+	PowerPreference gputypes.PowerPreference
 	// ForceFallbackAdapter forces the use of a fallback (software) adapter.
 	ForceFallbackAdapter bool
 	// CompatibleSurface, if non-nil, indicates that the adapter must support
@@ -163,12 +107,6 @@ type RequestAdapterOptions struct {
 	// adapter enumeration using the surface's GL context.
 	CompatibleSurface *Surface
 }
-
-const (
-	PowerPreferenceNone            = gputypes.PowerPreferenceNone
-	PowerPreferenceLowPower        = gputypes.PowerPreferenceLowPower
-	PowerPreferenceHighPerformance = gputypes.PowerPreferenceHighPerformance
-)
 
 // Default functions (re-exported for convenience)
 var (

@@ -97,7 +97,7 @@ func TestCopyUsagePreflightGuardBranches(t *testing.T) {
 	}
 	encoder.core.Mutable().TextureScope().ReplaceUsage(textureIndex, track.TextureUsesColorTarget)
 
-	encoder.explicitTextureTransitions = map[*Texture]TextureUsage{
+	encoder.explicitTextureTransitions = map[*Texture]gputypes.TextureUsage{
 		texture: TextureUsageCopyDst,
 	}
 	if err := encoder.preflightCopyTextureUsages([]preparedCopyTextureUsage{request}); err == nil {

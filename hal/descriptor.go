@@ -99,10 +99,7 @@ type SurfaceCapabilities struct {
 	AlphaModes []gputypes.CompositeAlphaMode
 }
 
-// PresentMode is an alias for gputypes.PresentMode for backward compatibility.
-type PresentMode = gputypes.PresentMode
-
-// PresentMode constants for backward compatibility.
+// PresentMode constants re-exported for convenience.
 const (
 	PresentModeImmediate   = gputypes.PresentModeImmediate
 	PresentModeMailbox     = gputypes.PresentModeMailbox
@@ -110,10 +107,7 @@ const (
 	PresentModeFifoRelaxed = gputypes.PresentModeFifoRelaxed
 )
 
-// CompositeAlphaMode is an alias for gputypes.CompositeAlphaMode for backward compatibility.
-type CompositeAlphaMode = gputypes.CompositeAlphaMode
-
-// CompositeAlphaMode constants for backward compatibility.
+// CompositeAlphaMode constants re-exported for convenience.
 const (
 	CompositeAlphaModeAuto            = gputypes.CompositeAlphaModeAuto
 	CompositeAlphaModeOpaque          = gputypes.CompositeAlphaModeOpaque
@@ -634,19 +628,16 @@ type StencilFaceState struct {
 	Compare gputypes.CompareFunction
 
 	// FailOp is the operation when stencil test fails.
-	FailOp StencilOperation
+	FailOp gputypes.StencilOperation
 
 	// DepthFailOp is the operation when depth test fails.
-	DepthFailOp StencilOperation
+	DepthFailOp gputypes.StencilOperation
 
 	// PassOp is the operation when both tests pass.
-	PassOp StencilOperation
+	PassOp gputypes.StencilOperation
 }
 
-// StencilOperation describes a stencil operation.
-// Canonical definition in gputypes with webgpu.h spec-compliant values.
-type StencilOperation = gputypes.StencilOperation
-
+// StencilOperation constants re-exported for convenience.
 const (
 	StencilOperationKeep           = gputypes.StencilOperationKeep
 	StencilOperationZero           = gputypes.StencilOperationZero

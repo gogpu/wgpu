@@ -19,7 +19,7 @@ type Surface struct {
 	format      gputypes.TextureFormat
 	width       uint32
 	height      uint32
-	presentMode hal.PresentMode
+	presentMode gputypes.PresentMode
 	// presentsWithTransaction enables Core Animation transaction-based present.
 	// Required for smooth live window resize on macOS (wgpu #3756, Flutter/Skia).
 	presentsWithTransaction bool

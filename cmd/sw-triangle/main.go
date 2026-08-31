@@ -78,7 +78,7 @@ func renderFrame(
 	}
 	renderPass.SetPipeline(pipeline)
 	renderPass.SetVertexBuffer(0, vertexBuffer, 0)
-	renderPass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = renderPass.End()
 	commands, _ := encoder.Finish()
 	_, _ = device.Queue().Submit(commands)
@@ -105,7 +105,7 @@ func run() error {
 	// surfaces) loads GPU drivers that interfere with GDI StretchDIBits on some
 	// systems (Intel Iris Xe). 1 << BackendEmpty filters to software only.
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
-		Backends: wgpu.Backends(1 << gputypes.BackendEmpty),
+		Backends: gputypes.Backends(1 << gputypes.BackendEmpty),
 	})
 	if err != nil {
 		return fmt.Errorf("instance: %w", err)
@@ -201,7 +201,7 @@ func run() error {
 		},
 		Fragment: &wgpu.FragmentState{
 			Module: shader, EntryPoint: "fs_main",
-			Targets: []wgpu.ColorTargetState{{
+			Targets: []gputypes.ColorTargetState{{
 				Format:    gputypes.TextureFormatRGBA8Unorm,
 				WriteMask: gputypes.ColorWriteMaskAll,
 			}},

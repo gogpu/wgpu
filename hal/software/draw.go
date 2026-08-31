@@ -1739,8 +1739,8 @@ func convertCompareFunction(cf gputypes.CompareFunction) raster.CompareFunc {
 	}
 }
 
-// convertStencilOp maps hal.StencilOperation to raster.StencilOp.
-func convertStencilOp(op hal.StencilOperation) raster.StencilOp {
+// convertStencilOp maps gputypes.StencilOperation to raster.StencilOp.
+func convertStencilOp(op gputypes.StencilOperation) raster.StencilOp {
 	switch op {
 	case hal.StencilOperationZero:
 		return raster.StencilOpZero

@@ -114,7 +114,7 @@ func TestRenderPassEncoderDrawNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	rpe.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 }
 
 // TestRenderPassEncoderEndNullActive verifies that End silently returns
@@ -166,7 +166,7 @@ func TestRenderPassEncoderSetViewportNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.SetViewport(hal.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
+	rpe.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
 }
 
 // TestRenderPassEncoderSetScissorNullActive verifies that SetScissorRect
@@ -179,7 +179,7 @@ func TestRenderPassEncoderSetScissorNullActive(t *testing.T) {
 	rpe := &RenderPassEncoder{encoder: enc}
 
 	// Should not panic.
-	rpe.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
+	rpe.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 }
 
 // TestCopyBufferToBufferNullActive verifies that CopyBufferToBuffer

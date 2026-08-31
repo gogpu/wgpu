@@ -14,7 +14,7 @@ import (
 // On Rust backend, Backends and Flags are accepted for API compatibility
 // but the Rust wgpu-native handles backend selection internally.
 type InstanceDescriptor struct {
-	Backends Backends
+	Backends gputypes.Backends
 	Flags    gputypes.InstanceFlags
 }
 
