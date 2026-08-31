@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Dispatch(x, y, z uint32)` — stays positional (3 params, convention strong)
   - Struct field order byte-identical to VkDrawIndirectCommand / D3D12_DRAW_ARGUMENTS (GPU ABI compatible)
 - **HAL type aliases** — `hal.Viewport`, `hal.ScissorRect`, `hal.DrawArgs`, `hal.DrawIndexedArgs` are now type aliases to `gputypes` (no local struct definitions). `renderpass_native.go` no longer imports `hal/`. Unblocks ADR-070 (hal/ → internal/).
-- **deps:** gputypes v0.7.0 → v0.8.0
+- **deps:** gputypes v0.7.0 → v0.8.0, gpucontext v0.31.2 → v0.31.3
+
+### Why
+
+Go has no named arguments — 4-6 same-type positional params (e.g., `SetViewport(x, y, w, h, minDepth, maxDepth float32)`) are a silent swap bug risk. The compiler cannot distinguish `width` from `height` when both are `float32`. Every native GPU API (Vulkan, Metal, DX12, SDL3, Qt6 QRhi) uses structs for viewport/scissor/draw. The W3C WebGPU spec uses positional because JavaScript has no cheap value types — Go does. Struct params are extensible after v1.0 (new fields with zero-value defaults = backward compatible); positional params are frozen forever. ADR-072 documents this decision with enterprise references.
 
 ## [0.33.1] - 2026-08-30
 
