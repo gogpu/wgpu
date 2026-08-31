@@ -114,19 +114,19 @@ func (e *RenderBundleEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.
 }
 
 // Draw draws primitives.
-func (e *RenderBundleEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderBundleEncoder) Draw(args hal.DrawArgs) {
 	if e.finished {
 		return
 	}
-	e.device.cmds.CmdDraw(e.commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance)
+	e.device.cmds.CmdDraw(e.commandBuffer, args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderBundleEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderBundleEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
 	if e.finished {
 		return
 	}
-	e.device.cmds.CmdDrawIndexed(e.commandBuffer, indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	e.device.cmds.CmdDrawIndexed(e.commandBuffer, args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
 // Finish finalizes the bundle and returns it.

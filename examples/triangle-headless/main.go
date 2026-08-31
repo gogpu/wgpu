@@ -236,7 +236,7 @@ func renderTriangle(device *wgpu.Device, view *wgpu.TextureView, texture *wgpu.T
 	}
 
 	pass.SetPipeline(pipeline)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 
 	if err := pass.End(); err != nil {
 		return fmt.Errorf("end render pass: %w", err)

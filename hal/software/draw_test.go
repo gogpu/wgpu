@@ -240,7 +240,7 @@ func TestDrawTexturedQuad(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// Verify the destination texture has the source's red pixels.
@@ -310,7 +310,7 @@ func TestDrawClearsBeforeBlit(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// The result should be green (from blit), NOT blue (from clear) or white (pre-fill).
@@ -342,7 +342,7 @@ func TestDrawWithoutPipeline(t *testing.T) {
 	})
 
 	// Draw without SetPipeline — should be a no-op (not panic).
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// Only clear should have happened.
@@ -386,7 +386,7 @@ func TestDrawWithoutTexture(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0) // no source texture — should only clear
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1}) // no source texture — should only clear
 	pass.End()
 
 	// Only clear to blue should have happened.
@@ -447,7 +447,7 @@ func TestDrawBGRAToRGBAConversion(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// RGBA(255,0,128,200) -> BGRA should be (128,0,255,200).
@@ -507,7 +507,7 @@ func TestDrawScaling(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// Verify corners with nearest-neighbor scaling.
@@ -586,7 +586,7 @@ func TestDrawWithSurfaceTexture(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// The surface framebuffer should now have green pixels.
@@ -654,7 +654,7 @@ func TestDrawMultipleBindGroups(t *testing.T) {
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg0, nil) // no texture
 	pass.SetBindGroup(1, bg1, nil) // texture is here
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// Should find texture from bind group 1 and blit.
@@ -738,7 +738,7 @@ func TestDrawTriangleFromVertexBuffer(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, 0)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
 
 	// The triangle covers the top-left area. Check pixel (1,1) is white (default color).
@@ -831,7 +831,7 @@ func TestDrawTriangleWithVertexColors(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, 0)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
 
 	// Center pixel should be a blend of R/G/B. Verify it is not black (was rendered).
@@ -918,7 +918,7 @@ func TestDrawMultipleTriangles(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, 0)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	// All pixels should be white (two triangles cover full viewport, default white color).
@@ -992,7 +992,7 @@ func TestDrawWithVertexBufferOffset(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, padding) // offset=64
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
 
 	// Center pixel should be white (triangle covers full viewport).
@@ -1035,7 +1035,7 @@ func TestDrawClearBeforeDraw(t *testing.T) {
 		},
 	})
 	pass.SetPipeline(pipeline)
-	pass.Draw(6, 1, 0, 0) // No vertex buffer, no texture -> just clear
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1}) // No vertex buffer, no texture -> just clear
 	pass.End()
 
 	// Should be blue (clear happened before draw, no texture to blit).
@@ -1105,7 +1105,7 @@ func TestDrawWithFirstVertex(t *testing.T) {
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetVertexBuffer(0, vb, 0)
-	pass.Draw(3, 1, 3, 0) // firstVertex=3
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: 3}) // firstVertex=3
 	pass.End()
 
 	// Center pixel should be white.
@@ -1481,7 +1481,7 @@ fn fs_main(@location(0) col: vec3<f32>) -> @location(0) vec4<f32> {
 	})
 	rpEnc.SetPipeline(rp)
 	rpEnc.SetVertexBuffer(0, bufB, 0)
-	rpEnc.Draw(4, numParticles, 0, 0) // 4 vertices per quad, numParticles instances
+	rpEnc.Draw(hal.DrawArgs{VertexCount: 4, InstanceCount: numParticles}) // 4 vertices per quad, numParticles instances
 	rpEnc.End()
 
 	// Verify render result: at least some pixels should be non-black.
@@ -1548,7 +1548,7 @@ func TestScissorBlitClipsToRect(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	// Scissor: top-left 2x2 region only.
 	pass.SetScissorRect(hal.ScissorRect{X: 0, Y: 0, Width: 2, Height: 2})
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	data := dstTex.(*Texture).GetData()
@@ -1638,7 +1638,7 @@ func TestScissorTriangleDrawClipsToRect(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, 0)
 	// Scissor: right half only (x=4, y=0, w=4, h=8).
 	pass.SetScissorRect(hal.ScissorRect{X: 4, Y: 0, Width: 4, Height: 8})
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
 
 	data := dstTex.(*Texture).GetData()
@@ -1734,7 +1734,7 @@ func TestScissorBlitScaledClipsToRect(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	// Scissor: bottom-right 2x2 only.
 	pass.SetScissorRect(hal.ScissorRect{X: 2, Y: 2, Width: 2, Height: 2})
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	data := dstTex.(*Texture).GetData()
@@ -1855,9 +1855,9 @@ func TestDepthStencilStateWiring(t *testing.T) {
 	pass.SetPipeline(pipeline1)
 	pass.SetVertexBuffer(0, vb, 0)
 	// Draw near triangle (vertices 0-2).
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	// Draw far triangle (vertices 3-5) — should be hidden by depth test.
-	pass.Draw(3, 1, 3, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: 3})
 	pass.End()
 
 	// All pixels should be white (near triangle wins over far triangle).

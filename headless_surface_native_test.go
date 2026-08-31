@@ -282,7 +282,7 @@ func TestHeadlessSurfaceTriangleReadback(t *testing.T) {
 
 	texture, view, encoder, pass := fixture.beginFrame(t, Color{R: 0, G: 0, B: 1, A: 1})
 	pass.SetPipeline(pipeline)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(DrawArgs{VertexCount: 3, InstanceCount: 1})
 	fixture.submitAndPresent(t, texture, view, encoder, pass)
 
 	pixels, err := fixture.surface.ReadPixels()

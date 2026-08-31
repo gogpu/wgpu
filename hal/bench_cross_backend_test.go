@@ -175,7 +175,7 @@ func BenchmarkHALRenderPassEncoding(b *testing.B) {
 		encoder, _ := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
 		_ = encoder.BeginEncoding("bench")
 		rp := encoder.BeginRenderPass(rpDesc)
-		rp.Draw(3, 1, 0, 0)
+		rp.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
 		rp.End()
 		cb, _ := encoder.EndEncoding()
 		benchHALSink = cb
@@ -240,9 +240,9 @@ func BenchmarkHALFullFrameSimulation(b *testing.B) {
 		_ = encoder.BeginEncoding("frame")
 
 		rp := encoder.BeginRenderPass(rpDesc)
-		rp.Draw(3, 1, 0, 0)
-		rp.Draw(6, 1, 0, 0)
-		rp.Draw(36, 1, 0, 0)
+		rp.Draw(hal.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		rp.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
+		rp.Draw(hal.DrawArgs{VertexCount: 36, InstanceCount: 1})
 		rp.End()
 
 		cb, _ := encoder.EndEncoding()

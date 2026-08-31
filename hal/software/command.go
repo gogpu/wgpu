@@ -560,10 +560,10 @@ func (r *RenderPassEncoder) SetStencilReference(ref uint32) {
 // available in a bind group, it performs a fullscreen texture blit.
 // Supports instanced rendering: instanceCount > 1 draws the same vertices
 // multiple times, advancing instance-rate vertex buffers per instance.
-func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (r *RenderPassEncoder) Draw(args hal.DrawArgs) {
 	r.drawCount++
-	hal.Logger().Debug("software: Draw", "vertices", vertexCount, "instances", instanceCount, "drawIndex", r.drawCount)
-	r.executeDraw(vertexCount, instanceCount, firstVertex, firstInstance)
+	hal.Logger().Debug("software: Draw", "vertices", args.VertexCount, "instances", args.InstanceCount, "drawIndex", r.drawCount)
+	r.executeDraw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed executes an indexed draw call. It resolves the index buffer into
@@ -571,22 +571,22 @@ func (r *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstI
 // and rasterization path as Draw, with vertex positions remapped through the
 // resolved indices. Previously this was a no-op, so every indexed draw (glyph
 // mask text, MSDF text) rendered nothing on the software backend.
-func (r *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (r *RenderPassEncoder) DrawIndexed(args hal.DrawIndexedArgs) {
 	r.drawCount++
-	if indexCount == 0 || r.indexBuffer == nil {
+	if args.IndexCount == 0 || r.indexBuffer == nil {
 		return
 	}
-	indices := r.resolveIndices(indexCount, firstIndex, baseVertex)
+	indices := r.resolveIndices(args.IndexCount, args.FirstIndex, args.BaseVertex)
 	if indices == nil {
 		return
 	}
-	hal.Logger().Debug("software: DrawIndexed", "indices", indexCount, "instances", instanceCount, "drawIndex", r.drawCount)
+	hal.Logger().Debug("software: DrawIndexed", "indices", args.IndexCount, "instances", args.InstanceCount, "drawIndex", r.drawCount)
 
 	r.activeIndices = indices
 	defer func() { r.activeIndices = nil }()
 	// vertexCount == indexCount; firstVertex is unused because activeIndices
 	// supplies the per-position vertex index directly.
-	r.executeDraw(indexCount, instanceCount, 0, firstInstance)
+	r.executeDraw(args.IndexCount, args.InstanceCount, 0, args.FirstInstance)
 }
 
 // resolveIndices reads indexCount entries from the bound index buffer starting

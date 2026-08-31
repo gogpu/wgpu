@@ -110,10 +110,10 @@ func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
 
 // Draw is a no-op.
-func (r *RenderPassEncoder) Draw(_, _, _, _ uint32) {}
+func (r *RenderPassEncoder) Draw(_ hal.DrawArgs) {}
 
 // DrawIndexed is a no-op.
-func (r *RenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32) {}
+func (r *RenderPassEncoder) DrawIndexed(_ hal.DrawIndexedArgs) {}
 
 // DrawIndirect is a no-op.
 func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}

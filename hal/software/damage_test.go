@@ -1153,7 +1153,7 @@ func renderSolidColor(t *testing.T, dev *Device, surf *Surface, cr, cg, cb, ca f
 	})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(hal.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 }
 

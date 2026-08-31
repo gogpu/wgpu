@@ -78,7 +78,7 @@ func renderFrame(
 	}
 	renderPass.SetPipeline(pipeline)
 	renderPass.SetVertexBuffer(0, vertexBuffer, 0)
-	renderPass.Draw(3, 1, 0, 0)
+	renderPass.Draw(wgpu.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = renderPass.End()
 	commands, _ := encoder.Finish()
 	_, _ = device.Queue().Submit(commands)

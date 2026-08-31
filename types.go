@@ -109,6 +109,18 @@ type LoadOp = gputypes.LoadOp
 type StoreOp = gputypes.StoreOp
 type Color = gputypes.Color
 
+// Viewport describes viewport transformation parameters.
+type Viewport = gputypes.Viewport
+
+// ScissorRect describes scissor clipping rectangle.
+type ScissorRect = gputypes.ScissorRect
+
+// DrawArgs describes parameters for a non-indexed draw call.
+type DrawArgs = gputypes.DrawArgs
+
+// DrawIndexedArgs describes parameters for an indexed draw call.
+type DrawIndexedArgs = gputypes.DrawIndexedArgs
+
 // Bind group types
 type BindGroupLayoutEntry = gputypes.BindGroupLayoutEntry
 type VertexBufferLayout = gputypes.VertexBufferLayout

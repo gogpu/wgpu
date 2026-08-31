@@ -52,13 +52,13 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 }
 
 // SetViewport sets the viewport transformation.
-func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	p.r.SetViewport(x, y, width, height, minDepth, maxDepth)
+func (p *RenderPassEncoder) SetViewport(vp Viewport) {
+	p.r.SetViewport(vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
-func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	p.r.SetScissorRect(x, y, width, height)
+func (p *RenderPassEncoder) SetScissorRect(rect ScissorRect) {
+	p.r.SetScissorRect(rect.X, rect.Y, rect.Width, rect.Height)
 }
 
 // SetBlendConstant sets the blend constant color.
@@ -80,13 +80,13 @@ func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
 }
 
 // Draw draws primitives.
-func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	p.r.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+func (p *RenderPassEncoder) Draw(args DrawArgs) {
+	p.r.Draw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	p.r.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+func (p *RenderPassEncoder) DrawIndexed(args DrawIndexedArgs) {
+	p.r.DrawIndexed(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
