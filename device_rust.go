@@ -453,7 +453,7 @@ func (d *Device) Release() {
 // --- Descriptor conversion helpers ---
 
 // convertBindGroupLayoutEntry converts a gputypes.BindGroupLayoutEntry to rwgpu.
-func convertBindGroupLayoutEntry(e BindGroupLayoutEntry) rwgpu.BindGroupLayoutEntry {
+func convertBindGroupLayoutEntry(e gputypes.BindGroupLayoutEntry) rwgpu.BindGroupLayoutEntry {
 	re := rwgpu.BindGroupLayoutEntry{
 		Binding:    e.Binding,
 		Visibility: e.Visibility,
@@ -557,7 +557,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 
 // convertVertexBufferLayouts converts vertex buffer layouts.
 // go-webgpu uses C-style pointer+count for attributes (FFI layer).
-func convertVertexBufferLayouts(layouts []VertexBufferLayout) []rwgpu.VertexBufferLayout {
+func convertVertexBufferLayouts(layouts []gputypes.VertexBufferLayout) []rwgpu.VertexBufferLayout {
 	result := make([]rwgpu.VertexBufferLayout, len(layouts))
 	for i, l := range layouts {
 		attrs := make([]rwgpu.VertexAttribute, len(l.Attributes))

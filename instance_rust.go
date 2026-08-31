@@ -68,7 +68,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to get adapter info: %w", err)
 	}
-	info := AdapterInfo{
+	info := gputypes.AdapterInfo{
 		Name:       rInfo.Description,
 		Vendor:     rInfo.Vendor,
 		VendorID:   rInfo.VendorID,
