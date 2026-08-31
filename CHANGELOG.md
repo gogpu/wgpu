@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-08-31
+
+### Changed
+
+- **Public API struct params** (ADR-072, #342) — `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` now take struct params instead of 4-6 positional same-type args. Go has no named arguments — struct params prevent silent swap bugs. Extensible for v1.0+ (new fields with zero-value defaults).
+  - `SetViewport(vp gputypes.Viewport)` — was `(x, y, w, h, minDepth, maxDepth float32)`
+  - `SetScissorRect(rect gputypes.ScissorRect)` — was `(x, y, w, h uint32)`
+  - `Draw(args gputypes.DrawArgs)` — was `(vertexCount, instanceCount, firstVertex, firstInstance uint32)`
+  - `DrawIndexed(args gputypes.DrawIndexedArgs)` — was `(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)`
+  - `Dispatch(x, y, z uint32)` — stays positional (3 params, convention strong)
+  - Struct field order byte-identical to VkDrawIndirectCommand / D3D12_DRAW_ARGUMENTS (GPU ABI compatible)
+- **HAL type aliases** — `hal.Viewport`, `hal.ScissorRect`, `hal.DrawArgs`, `hal.DrawIndexedArgs` are now type aliases to `gputypes` (no local struct definitions). `renderpass_native.go` no longer imports `hal/`. Unblocks ADR-070 (hal/ → internal/).
+- **deps:** gputypes v0.7.0 → v0.8.0
+
 ## [0.33.1] - 2026-08-30
 
 ### Changed
