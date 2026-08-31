@@ -11,6 +11,11 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// instanceEnumerateMu serializes HAL backend probing during NewInstance.
+// Concurrent CreateInstance calls on Windows CI (kolkov/racedetector) can
+// otherwise race inside driver init while enumerating adapters.
+var instanceEnumerateMu sync.Mutex
+
 // Instance represents a WebGPU instance for GPU discovery and initialization.
 // The instance is responsible for enumerating available GPU adapters and
 // creating adapters based on application requirements.
@@ -134,6 +139,9 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 // enumerateRealAdapters attempts to enumerate real GPU adapters via HAL
 // backends. If none are available, the instance remains empty.
 func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
+	instanceEnumerateMu.Lock()
+	defer instanceEnumerateMu.Unlock()
+
 	// First, ensure HAL backends are registered
 	RegisterHALBackends()
 
