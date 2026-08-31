@@ -8,13 +8,14 @@ package dx12
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"hash"
+	"math"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
-	"github.com/gogpu/wgpu/internal/pipelinecache"
 )
 
 func graphicsPSOCacheKey(
@@ -28,7 +29,7 @@ func graphicsPSOCacheKey(
 	writeShaderBytecode(h, psoDesc.PS)
 	writeInputLayout(h, psoDesc.InputLayout)
 	writeGraphicsFixedState(h, desc, psoDesc)
-	return pipelinecache.HexKey(digestBytes(h))
+	return hex.EncodeToString(digestBytes(h))
 }
 
 func computePSOCacheKey(
@@ -40,7 +41,7 @@ func computePSOCacheKey(
 	writeBytes(h, rootSignatureHash[:])
 	writeShaderBytecode(h, psoDesc.CS)
 	_ = desc // reserved for future specialization constants
-	return pipelinecache.HexKey(digestBytes(h))
+	return hex.EncodeToString(digestBytes(h))
 }
 
 func rootSignatureHashForLayout(layout *PipelineLayout, emptyHash *[32]byte) [32]byte {
@@ -90,15 +91,15 @@ func writeInputLayout(h hash.Hash, layout d3d12.D3D12_INPUT_LAYOUT_DESC) {
 }
 
 func writeInputElement(h hash.Hash, el *d3d12.D3D12_INPUT_ELEMENT_DESC) {
-	var header [16]byte
+	var header [12]byte
 	binary.LittleEndian.PutUint32(header[0:4], el.InputSlot)
 	binary.LittleEndian.PutUint32(header[4:8], el.AlignedByteOffset)
 	binary.LittleEndian.PutUint32(header[8:12], uint32(el.Format))
-	header[12] = byte(el.InputSlotClass)
-	header[13] = byte(el.InstanceDataStepRate & 0xFF)
-	header[14] = byte((el.InstanceDataStepRate >> 8) & 0xFF)
-	header[15] = byte((el.InstanceDataStepRate >> 16) & 0xFF)
 	_, _ = h.Write(header[:])
+	var classStep [5]byte
+	classStep[0] = byte(el.InputSlotClass)
+	binary.LittleEndian.PutUint32(classStep[1:5], el.InstanceDataStepRate)
+	_, _ = h.Write(classStep[:])
 	if el.SemanticName != nil {
 		name := unsafe.String(el.SemanticName, findNull(el.SemanticName))
 		_, _ = h.Write([]byte(name))
@@ -156,20 +157,33 @@ func writeRasterizer(h hash.Hash, rs *d3d12.D3D12_RASTERIZER_DESC) {
 	buf[4] = boolByte(rs.MultisampleEnable)
 	buf[5] = boolByte(rs.AntialiasedLineEnable)
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(rs.DepthBias))
-	binary.LittleEndian.PutUint32(buf[12:16], uint32(rs.DepthBiasClamp))
-	binary.LittleEndian.PutUint32(buf[16:20], uint32(rs.SlopeScaledDepthBias))
+	binary.LittleEndian.PutUint32(buf[12:16], math.Float32bits(rs.DepthBiasClamp))
+	binary.LittleEndian.PutUint32(buf[16:20], math.Float32bits(rs.SlopeScaledDepthBias))
 	binary.LittleEndian.PutUint32(buf[20:24], rs.ForcedSampleCount)
 	buf[24] = byte(rs.ConservativeRaster)
 	_, _ = h.Write(buf[:25])
 }
 
 func writeDepthStencil(h hash.Hash, ds *d3d12.D3D12_DEPTH_STENCIL_DESC) {
-	var buf [24]byte
+	var buf [6]byte
 	buf[0] = boolByte(ds.DepthEnable)
 	buf[1] = byte(ds.DepthWriteMask)
 	buf[2] = byte(ds.DepthFunc)
 	buf[3] = boolByte(ds.StencilEnable)
-	_, _ = h.Write(buf[:4])
+	buf[4] = ds.StencilReadMask
+	buf[5] = ds.StencilWriteMask
+	_, _ = h.Write(buf[:])
+	writeStencilOp(h, &ds.FrontFace)
+	writeStencilOp(h, &ds.BackFace)
+}
+
+func writeStencilOp(h hash.Hash, op *d3d12.D3D12_DEPTH_STENCILOP_DESC) {
+	var buf [4]byte
+	buf[0] = byte(op.StencilFailOp)
+	buf[1] = byte(op.StencilDepthFailOp)
+	buf[2] = byte(op.StencilPassOp)
+	buf[3] = byte(op.StencilFunc)
+	_, _ = h.Write(buf[:])
 }
 
 func writeBlend(h hash.Hash, blend *d3d12.D3D12_BLEND_DESC) {

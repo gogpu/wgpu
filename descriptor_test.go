@@ -245,9 +245,8 @@ func TestComputePipelineDescriptorToHAL(t *testing.T) {
 		}
 	})
 
-	// Zero-init cases run sequentially in one block. kolkov/racedetector on
-	// Windows CI may execute t.Run subtests concurrently; separate subtests
-	// previously raced on stack-scoped *bool fields during toHAL().
+	// Zero-init cases run sequentially in one block; separate t.Run subtests
+	// previously reused stack-scoped *bool fields during toHAL().
 	t.Run("zero init workgroup memory", func(t *testing.T) {
 		{
 			desc := ComputePipelineDescriptor{

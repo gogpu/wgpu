@@ -6,7 +6,7 @@
 package vulkan
 
 import (
-	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal"
@@ -17,8 +17,10 @@ import (
 const vulkanPipelineCacheFile = "pipeline.cache"
 
 // initPipelineCache creates or restores the device-wide VkPipelineCache from disk.
+// Pipeline cache is a performance optimization — failures are logged and the
+// device continues with pipelineCache = 0 (VK_NULL_HANDLE).
 // Reference: wgpu-hal/src/vulkan/device.rs (pipeline cache create/restore).
-func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) error {
+func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) {
 	adapterKey := pipelinecache.VulkanAdapterKey(
 		props.VendorID,
 		props.DeviceID,
@@ -27,7 +29,10 @@ func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) error {
 	)
 	cachePath, err := pipelinecache.UserCachePath("vulkan", adapterKey, vulkanPipelineCacheFile)
 	if err != nil {
-		return err
+		hal.Logger().Warn("vulkan: pipeline cache disabled, cache directory unavailable",
+			"error", err,
+		)
+		return
 	}
 	d.pipelineCachePath = cachePath
 
@@ -50,6 +55,7 @@ func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) error {
 
 	var cache vk.PipelineCache
 	result := d.cmds.CreatePipelineCache(d.handle, &createInfo, nil, &cache)
+	runtime.KeepAlive(initialData)
 	if result == vk.ErrorInitializationFailed && len(initialData) > 0 {
 		hal.Logger().Info("vulkan: stale pipeline cache rejected by driver, recreating empty",
 			"path", cachePath,
@@ -60,7 +66,10 @@ func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) error {
 		result = d.cmds.CreatePipelineCache(d.handle, &createInfo, nil, &cache)
 	}
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkCreatePipelineCache failed: %d", result)
+		hal.Logger().Warn("vulkan: vkCreatePipelineCache failed, pipeline cache disabled",
+			"result", result,
+		)
+		return
 	}
 
 	d.pipelineCache = cache
@@ -70,7 +79,6 @@ func (d *Device) initPipelineCache(props *vk.PhysicalDeviceProperties) error {
 			"bytes", len(initialData),
 		)
 	}
-	return nil
 }
 
 // savePipelineCache persists the VkPipelineCache blob to disk.
@@ -86,8 +94,9 @@ func (d *Device) savePipelineCache() {
 	}
 
 	data := make([]byte, size)
-	dataPtr := uintptr(unsafe.Pointer(&data[0]))
-	result = d.cmds.GetPipelineCacheData(d.handle, d.pipelineCache, &size, &dataPtr)
+	bufPtr := (*uintptr)(unsafe.Pointer(&data[0]))
+	result = d.cmds.GetPipelineCacheData(d.handle, d.pipelineCache, &size, bufPtr)
+	runtime.KeepAlive(data)
 	if result != vk.Success {
 		hal.Logger().Warn("vulkan: failed to read pipeline cache data",
 			"result", result,

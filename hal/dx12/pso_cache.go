@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"path/filepath"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
@@ -30,6 +31,7 @@ func (d *Device) createGraphicsPSO(
 			CachedBlobSizeInBytes: uintptr(len(cachedBlob)),
 		}
 		pso, err := d.raw.CreateGraphicsPipelineState(psoDesc)
+		runtime.KeepAlive(cachedBlob)
 		psoDesc.CachedPSO = d3d12.D3D12_CACHED_PIPELINE_STATE{}
 		if err == nil {
 			return pso, nil
@@ -64,6 +66,7 @@ func (d *Device) createComputePSO(
 			CachedBlobSizeInBytes: uintptr(len(cachedBlob)),
 		}
 		pso, err := d.raw.CreateComputePipelineState(psoDesc)
+		runtime.KeepAlive(cachedBlob)
 		psoDesc.CachedPSO = d3d12.D3D12_CACHED_PIPELINE_STATE{}
 		if err == nil {
 			return pso, nil

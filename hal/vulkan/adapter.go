@@ -181,12 +181,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to initialize allocator: %w", err)
 	}
 
-	if err := dev.initPipelineCache(&a.properties); err != nil {
-		dev.allocator.Destroy()
-		dev.timelineFence.destroy(dev.cmds, dev.handle)
-		vkDestroyDevice(device, nil)
-		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to initialize pipeline cache: %w", err)
-	}
+	dev.initPipelineCache(&a.properties)
 
 	// VK-SYNC-001: Create relay semaphores for GPU-side submission ordering.
 	// This ensures consecutive vkQueueSubmit calls execute in order on the GPU,
