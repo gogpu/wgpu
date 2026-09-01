@@ -347,6 +347,22 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
+// ExecuteBundles executes reusable render command bundles in this render pass.
+func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
+	raw := p.core.RawPass()
+	if raw == nil {
+		return
+	}
+
+	for _, bundle := range bundles {
+		if bundle == nil || bundle.released.Load() || bundle.hal == nil {
+			continue
+		}
+
+		raw.ExecuteBundle(bundle.hal)
+	}
+}
+
 // End ends the render pass.
 // After this call, the encoder cannot be used again.
 func (p *RenderPassEncoder) End() error {

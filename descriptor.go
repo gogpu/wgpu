@@ -165,6 +165,15 @@ type CommandEncoderDescriptor struct {
 	Label string
 }
 
+// QueryType identifies the kind of data stored in a query set.
+// The HAL definition is the single source of truth for native builds.
+type QueryType = hal.QueryType
+
+const (
+	QueryTypeOcclusion = hal.QueryTypeOcclusion
+	QueryTypeTimestamp = hal.QueryTypeTimestamp
+)
+
 // QuerySetDescriptor describes a set of timestamp or occlusion queries.
 type QuerySetDescriptor struct {
 	Label string
@@ -176,18 +185,23 @@ func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
 	if d == nil {
 		return nil
 	}
-	return &hal.QuerySetDescriptor{Label: d.Label, Type: hal.QueryType(d.Type), Count: d.Count}
+	return &hal.QuerySetDescriptor{Label: d.Label, Type: d.Type, Count: d.Count}
 }
 
 // RenderBundleEncoderDescriptor describes the render pass compatibility of a
 // render bundle recorded by a RenderBundleEncoder.
 type RenderBundleEncoderDescriptor struct {
 	Label              string
-	ColorFormats       []TextureFormat
-	DepthStencilFormat TextureFormat
+	ColorFormats       []gputypes.TextureFormat
+	DepthStencilFormat gputypes.TextureFormat
 	SampleCount        uint32
 	DepthReadOnly      bool
 	StencilReadOnly    bool
+}
+
+// RenderBundleDescriptor describes a completed render bundle.
+type RenderBundleDescriptor struct {
+	Label string
 }
 
 func (d *RenderBundleEncoderDescriptor) toHAL() *hal.RenderBundleEncoderDescriptor {
@@ -452,6 +466,14 @@ type RenderPassDescriptor struct {
 	Label                  string
 	ColorAttachments       []RenderPassColorAttachment
 	DepthStencilAttachment *RenderPassDepthStencilAttachment
+	TimestampWrites        *RenderPassTimestampWrites
+}
+
+// RenderPassTimestampWrites describes timestamp query writes at render pass boundaries.
+type RenderPassTimestampWrites struct {
+	QuerySet                  *QuerySet
+	BeginningOfPassWriteIndex *uint32
+	EndOfPassWriteIndex       *uint32
 }
 
 // RenderPassColorAttachment describes a color attachment.
@@ -513,6 +535,14 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			halDS.View = ds.View.resolveHAL()
 		}
 		halDesc.DepthStencilAttachment = halDS
+	}
+
+	if writes := d.TimestampWrites; writes != nil && writes.QuerySet != nil && !writes.QuerySet.released.Load() && writes.QuerySet.hal != nil {
+		halDesc.TimestampWrites = &hal.RenderPassTimestampWrites{
+			QuerySet:                  writes.QuerySet.hal,
+			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+		}
 	}
 
 	return halDesc

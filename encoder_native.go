@@ -630,6 +630,42 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	raw.ClearBuffer(buffer.halBuffer(), offset, size)
 }
 
+// ResolveQuerySet copies query results into a buffer.
+func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCount uint32, dst *Buffer, dstOffset uint64) {
+	if e.released {
+		return
+	}
+	if querySet == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is nil"))
+		return
+	}
+	if dst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is nil"))
+		return
+	}
+	if querySet.released.Load() || querySet.hal == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", ErrReleased))
+		return
+	}
+	if dst.released == nil || dst.released.Load() {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		return
+	}
+
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+
+	halDestination := dst.halBuffer()
+	if halDestination == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		return
+	}
+
+	raw.ResolveQuerySet(querySet.hal, firstQuery, queryCount, halDestination, dstOffset)
+}
+
 // DiscardEncoding discards the encoder without producing a command buffer.
 // Use this to abandon an in-progress encoding when an error occurs.
 // If the encoder was acquired from the pool, it is returned for reuse.
