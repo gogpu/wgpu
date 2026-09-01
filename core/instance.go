@@ -11,6 +11,11 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// instanceEnumerateMu serializes HAL backend probing during NewInstance.
+// Concurrent CreateInstance calls on Windows CI (kolkov/racedetector) can
+// otherwise race inside driver init while enumerating adapters.
+var instanceEnumerateMu sync.Mutex
+
 // Instance represents a WebGPU instance for GPU discovery and initialization.
 // The instance is responsible for enumerating available GPU adapters and
 // creating adapters based on application requirements.
@@ -134,6 +139,9 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 // enumerateRealAdapters attempts to enumerate real GPU adapters via HAL
 // backends. If none are available, the instance remains empty.
 func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
+	instanceEnumerateMu.Lock()
+	defer instanceEnumerateMu.Unlock()
+
 	// First, ensure HAL backends are registered
 	RegisterHALBackends()
 
@@ -203,12 +211,13 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 			exposed := &exposedAdapters[idx] // Use pointer to avoid copy
 			// Create core.Adapter wrapping the HAL adapter
 			adapter := &Adapter{
-				Info:            exposed.Info,
-				Features:        exposed.Features,
-				Limits:          exposed.Capabilities.Limits,
-				Backend:         exposed.Info.Backend,
-				halAdapter:      exposed.Adapter,
-				halCapabilities: &exposed.Capabilities,
+				Info:                  exposed.Info,
+				Features:              exposed.Features,
+				Limits:                exposed.Capabilities.Limits,
+				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
+				Backend:               exposed.Info.Backend,
+				halAdapter:            exposed.Adapter,
+				halCapabilities:       &exposed.Capabilities,
 			}
 
 			// Register in the hub
@@ -569,12 +578,13 @@ func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
 		for idx := range exposedAdapters {
 			exposed := &exposedAdapters[idx]
 			adapter := &Adapter{
-				Info:            exposed.Info,
-				Features:        exposed.Features,
-				Limits:          exposed.Capabilities.Limits,
-				Backend:         exposed.Info.Backend,
-				halAdapter:      exposed.Adapter,
-				halCapabilities: &exposed.Capabilities,
+				Info:                  exposed.Info,
+				Features:              exposed.Features,
+				Limits:                exposed.Capabilities.Limits,
+				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
+				Backend:               exposed.Info.Backend,
+				halAdapter:            exposed.Adapter,
+				halCapabilities:       &exposed.Capabilities,
 			}
 
 			adapterID := hub.RegisterAdapter(adapter)

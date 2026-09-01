@@ -30,7 +30,7 @@ func TestRenderPipelineWithLayout(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "rp-layout-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -80,7 +80,7 @@ func TestRenderPipelineWithVertexBuffers(t *testing.T) {
 		Vertex: wgpu.VertexState{
 			Module:     mod,
 			EntryPoint: "vs_main",
-			Buffers: []wgpu.VertexBufferLayout{
+			Buffers: []gputypes.VertexBufferLayout{
 				{
 					ArrayStride: 16,
 					StepMode:    gputypes.VertexStepModeVertex,
@@ -132,7 +132,7 @@ func TestComputePipelineWithLayout(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "cp-layout-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -237,7 +237,7 @@ func TestBindGroupLayoutCompatibility(t *testing.T) {
 	defer device.Release()
 	requireHAL(t, device)
 
-	entries := []wgpu.BindGroupLayoutEntry{
+	entries := []gputypes.BindGroupLayoutEntry{
 		{
 			Binding:    0,
 			Visibility: wgpu.ShaderStageVertex,
@@ -307,7 +307,7 @@ func TestBindGroupReleaseIdempotent(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "bg-release-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -334,7 +334,7 @@ func TestBindGroupHasRef(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "bg-ref-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)

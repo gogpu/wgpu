@@ -41,10 +41,10 @@ func TestRenderPassStats_ScissorAndDrawCount(t *testing.T) {
 		},
 	})
 
-	pass.SetScissorRect(24, 64, 48, 48)
-	pass.Draw(6, 1, 0, 0)
-	pass.Draw(6, 1, 0, 0)
-	pass.Draw(3, 1, 0, 0)
+	pass.SetScissorRect(gputypes.ScissorRect{X: 24, Y: 64, Width: 48, Height: 48})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
 
 	stats := pass.(*RenderPassEncoder).Stats()
@@ -91,7 +91,7 @@ func TestRenderPassStats_NoScissor(t *testing.T) {
 			{View: view, LoadOp: gputypes.LoadOpClear},
 		},
 	})
-	pass.Draw(6, 1, 0, 0)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
 
 	stats := pass.(*RenderPassEncoder).Stats()

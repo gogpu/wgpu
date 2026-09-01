@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.2] - 2026-08-31
+
+### Added
+
+- **Pipeline disk cache** (#331, @lkmavi) — driver-compiled GPU ISA persistence for faster cold starts on repeat launches. Extends existing in-memory shader cache to disk.
+  - **Vulkan**: `VkPipelineCache` created at device init, passed to all `vkCreateGraphicsPipelines` / `vkCreateComputePipelines`, saved via `vkGetPipelineCacheData` on device destroy. Graceful fallback on stale/corrupt cache. Adapter key includes vendorID + deviceID + driverVersion + PipelineCacheUUID. Disk path: `UserCacheDir()/gogpu/vulkan/<adapterKey>/pipeline.cache`
+  - **DX12**: `GetCachedBlob` after PSO creation, `D3D12_CACHED_PIPELINE_STATE` on restore. Per-PSO blobs keyed by root signature + shader bytecode + fixed-function state SHA-256 (including full depth/stencil hash with all stencil ops). Stale blob → E_INVALIDARG → automatic retry without cache. DX12 PSO caching is **ahead of Rust wgpu** (which has an empty stub). Disk path: `UserCacheDir()/gogpu/dx12/<adapterKey>/`
+  - **`internal/pipelinecache`**: shared atomic blob I/O (`write-tmp + rename` for crash safety) and adapter-scoped cache path helpers. Follows ADR-069 internal package pattern. 179 LOC tests.
+  - Pipeline cache init is **non-fatal** — failure logs warning and continues with `pipelineCache = 0` (VK_NULL_HANDLE) or nil PSO cache.
+
+### Fixed
+
+- **Race conditions** (@lkmavi) — `RegisterHALBackends()` wrapped in `sync.Once` (prevents double registration on concurrent `CreateInstance`), `instanceEnumerateMu` mutex serializes adapter probing (Windows driver init not thread-safe).
+- **codecov.yml** — `hal/**` glob pattern for nested packages (was `hal/` which missed sub-packages), patch coverage target 85%.
+
+## [0.34.1] - 2026-08-31
+
+### Changed
+
+- **Remove ALL type aliases** (ADR-073) — 35 type aliases in `types.go` + 7 in `hal/` replaced with direct `gputypes.X` qualified imports. Go type aliases (`type X = Y`) are designed for gradual migration (Russ Cox proposal, Go 1.9), not permanent architecture. Google Go style guide: "Don't use type aliasing when it is not needed." Our data: 94.6% of ecosystem callers (580/613) already used `gputypes` directly — aliases served 33 of 613 use cases. Users import `gputypes` alongside `wgpu` (IDE auto-import, zero friction). 99 files changed, net -63 LOC.
+
+## [0.34.0] - 2026-08-31
+
+### Changed
+
+- **Public API struct params** (ADR-072, #342) — `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` now take struct params instead of 4-6 positional same-type args. Go has no named arguments — struct params prevent silent swap bugs. Extensible for v1.0+ (new fields with zero-value defaults).
+  - `SetViewport(vp gputypes.Viewport)` — was `(x, y, w, h, minDepth, maxDepth float32)`
+  - `SetScissorRect(rect gputypes.ScissorRect)` — was `(x, y, w, h uint32)`
+  - `Draw(args gputypes.DrawArgs)` — was `(vertexCount, instanceCount, firstVertex, firstInstance uint32)`
+  - `DrawIndexed(args gputypes.DrawIndexedArgs)` — was `(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)`
+  - `Dispatch(x, y, z uint32)` — stays positional (3 params, convention strong)
+  - Struct field order byte-identical to VkDrawIndirectCommand / D3D12_DRAW_ARGUMENTS (GPU ABI compatible)
+- **HAL type aliases** — `hal.Viewport`, `hal.ScissorRect`, `hal.DrawArgs`, `hal.DrawIndexedArgs` are now type aliases to `gputypes` (no local struct definitions). `renderpass_native.go` no longer imports `hal/`. Unblocks ADR-070 (hal/ → internal/).
+- **deps:** gputypes v0.7.0 → v0.8.0, gpucontext v0.31.2 → v0.31.3
+
+### Why
+
+Go has no named arguments — 4-6 same-type positional params (e.g., `SetViewport(x, y, w, h, minDepth, maxDepth float32)`) are a silent swap bug risk. The compiler cannot distinguish `width` from `height` when both are `float32`. Every native GPU API (Vulkan, Metal, DX12, SDL3, Qt6 QRhi) uses structs for viewport/scissor/draw. The W3C WebGPU spec uses positional because JavaScript has no cheap value types — Go does. Struct params are extensible after v1.0 (new fields with zero-value defaults = backward compatible); positional params are frozen forever. ADR-072 documents this decision with enterprise references.
+
+## [0.33.1] - 2026-08-30
+
+### Changed
+
+- **HAL: SetViewport/SetScissorRect struct params** (#340) — positional parameters replaced with `hal.Viewport` and `hal.ScissorRect` structs on `hal.RenderPassEncoder` interface. Maps 1:1 to native GPU API structs (VkViewport, MTLViewport, D3D12_VIEWPORT). Public API unchanged (still positional per W3C spec). Rust wgpu HAL uses `Rect<f32>` + `Range<f32>` (`lib.rs:1667`); our monolithic `Viewport` avoids the split because Go interfaces don't support generic methods.
+- **deps:** gpucontext v0.30.0 → v0.31.2
+
+## [0.33.0] - 2026-08-30
+
+### Added
+
+- **DownlevelCapabilities** (ADR-071) — 27 Rust-parity capability flags for graceful degradation on non-conformant adapters. The W3C WebGPU spec excludes non-conformant adapters; as a native Go library, we degrade gracefully instead of refusing to run.
+  - **Public API**: `Adapter.DownlevelCapabilities()` on native, browser, and Rust FFI variants. Matches Rust wgpu `Adapter::get_downlevel_capabilities()` (`adapter.rs:174`)
+  - **Types**: `gputypes.DownlevelCapabilities` struct (Flags, Limits, ShaderModel — 3 fields), 27 `DownlevelFlags` with explicit `1 << N` bit positions matching Rust wgpu-types (`limits.rs:1102-1246`)
+  - **Device validation**: `core.Device.RequireDownlevelFlags()` validates at pipeline creation time. `CreateComputePipeline` gates on `DownlevelFlagsComputeShaders` (Rust `resource.rs:4367` parity)
+  - **gpucontext**: `DeviceProvider.DownlevelCapabilities()` — 7th interface method, follows `Features()` precedent. Flutter pattern: "check capabilities, not backend type"
+
+### Fixed
+
+- **Vulkan/Metal**: `DownlevelFlags: 0` → `DefaultDownlevelCapabilities()`. All modern Vulkan/Metal hardware supports all capabilities
+- **Vulkan**: 8 conditional flags queried from `VkPhysicalDeviceFeatures` (Rust `adapter.rs:684-719` parity): CubeArrayTextures, AnisotropicFiltering, FragmentWritableStorage, MultisampledShading, IndependentBlend, FullDrawIndexUint32, DepthBiasClamp, TextureCompression
+- **DX12**: Both `Adapter` and `AdapterLegacy` use `DefaultDownlevelCapabilities()` (DX12 FL 11.0+ guarantees all)
+- **GLES**: `queryDownlevelFlags()` expanded from 4 to ~20 dynamic checks (Rust `adapter.rs:387-452` parity). IndirectExecution exact Rust logic. MSL2_1 unconditional. Both OES + GL_EXT extension variants
+- **Software**: 1 flag → 13 flags, each verified against implementation code (BaseVertex, IndependentBlend, FullDrawIndexUint32, etc.)
+- **Noop**: `DefaultDownlevelCapabilities()` (Rust `noop/mod.rs:188-192` parity)
+- **TEXTURE_COMPRESSION**: `BC || (ETC2 && ASTC)` per W3C WebGPU spec (was `BC || ETC2 || ASTC`)
+- **Flag naming**: `IndirectFirstInstance` → `IndirectExecution` (different concept), `BaseVertexBaseInstance` → `BaseVertex` (Rust name)
+- **Bit positions**: `AnisotropicFiltering` moved from bit 5 to bit 10 (Rust position). Dead backward-compat aliases removed
+
+### Changed
+
+- **deps**: gputypes v0.6.0 → v0.7.0 (DownlevelCapabilities types), gpucontext v0.29.0 → v0.30.0 (DeviceProvider method)
+- **hal/descriptor.go**: Local DownlevelFlags/DownlevelCapabilities types replaced with gputypes imports
+- **ShaderModel**: Raw `uint32` (50, 60) → `gputypes.ShaderModel` named type (Sm2/Sm4/Sm5)
+
 ## [0.32.1] - 2026-08-28
 
 ### Fixed

@@ -49,12 +49,12 @@ func (d *Device) Queue() *Queue {
 }
 
 // Features returns the device's enabled features.
-func (d *Device) Features() Features {
+func (d *Device) Features() gputypes.Features {
 	return d.core.Features
 }
 
 // Limits returns the device's resource limits.
-func (d *Device) Limits() Limits {
+func (d *Device) Limits() gputypes.Limits {
 	return d.core.Limits
 }
 
@@ -640,6 +640,12 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
+	}
+
+	// Validate that the device supports compute shaders (downlevel check).
+	// Matches Rust wgpu-core resource.rs:4367 — first validation in create_compute_pipeline_or_error.
+	if err := d.core.RequireDownlevelFlags(gputypes.DownlevelFlagsComputeShaders); err != nil {
+		return nil, fmt.Errorf("wgpu: CreateComputePipeline: %w", err)
 	}
 
 	halDevice := d.halDevice()

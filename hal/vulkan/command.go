@@ -1189,33 +1189,33 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 
 // SetViewport sets the viewport.
 // NOTE: Applies Y-flip for WebGPU/OpenGL coordinate system compatibility (matches Rust wgpu).
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	if e.encoder.active == 0 {
 		return
 	}
 
 	// Y-flip: Start Y at y+height, use negative height
 	viewport := vk.Viewport{
-		X:        x,
-		Y:        y + height, // Y-flip: start at bottom
-		Width:    width,
-		Height:   -height, // Y-flip: negative height
-		MinDepth: minDepth,
-		MaxDepth: maxDepth,
+		X:        vp.X,
+		Y:        vp.Y + vp.Height, // Y-flip: start at bottom
+		Width:    vp.Width,
+		Height:   -vp.Height, // Y-flip: negative height
+		MinDepth: vp.MinDepth,
+		MaxDepth: vp.MaxDepth,
 	}
 
 	vkCmdSetViewport(e.encoder.device.cmds, e.encoder.active, 0, 1, &viewport)
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	if e.encoder.active == 0 {
 		return
 	}
 
 	scissor := vk.Rect2D{
-		Offset: vk.Offset2D{X: int32(x), Y: int32(y)},
-		Extent: vk.Extent2D{Width: width, Height: height},
+		Offset: vk.Offset2D{X: int32(rect.X), Y: int32(rect.Y)},
+		Extent: vk.Extent2D{Width: rect.Width, Height: rect.Height},
 	}
 
 	vkCmdSetScissor(e.encoder.device.cmds, e.encoder.active, 0, 1, &scissor)
@@ -1248,20 +1248,20 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if e.encoder.active == 0 {
 		return
 	}
-	vkCmdDraw(e.encoder.device.cmds, e.encoder.active, vertexCount, instanceCount, firstVertex, firstInstance)
+	vkCmdDraw(e.encoder.device.cmds, e.encoder.active, args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.encoder.active == 0 {
 		return
 	}
 
-	vkCmdDrawIndexed(e.encoder.device.cmds, e.encoder.active, indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	vkCmdDrawIndexed(e.encoder.device.cmds, e.encoder.active, args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

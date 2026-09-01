@@ -54,7 +54,7 @@ func TestMRTTwoTargetRenderPass(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageRenderAttachment | wgpu.TextureUsageCopySrc,
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func TestMRTTwoTargetRenderPass(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageRenderAttachment | wgpu.TextureUsageCopySrc,
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestMRTTwoTargetRenderPass(t *testing.T) {
 	}
 
 	pass.SetPipeline(pipeline)
-	pass.Draw(3, 1, 0, 0)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	_ = pass.End()
 
 	// --- Transition textures from render attachment to copy source ---

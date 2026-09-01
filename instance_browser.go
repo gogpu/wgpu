@@ -13,7 +13,7 @@ import (
 // On browser, Backends and Flags are accepted for API compatibility but
 // ignored — the browser has exactly one WebGPU backend.
 type InstanceDescriptor struct {
-	Backends Backends
+	Backends gputypes.Backends
 	Flags    gputypes.InstanceFlags
 }
 
@@ -61,7 +61,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 
 	// WebGPU browser API does not expose detailed adapter info.
 	// Return minimal info matching Rust wgpu's WebAdapter::get_info().
-	info := AdapterInfo{
+	info := gputypes.AdapterInfo{
 		Name: "WebGPU Adapter",
 	}
 

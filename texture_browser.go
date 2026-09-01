@@ -2,17 +2,20 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/browser"
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/browser"
+)
 
 // Texture represents a GPU texture.
 type Texture struct {
 	browser  *browser.Texture
-	format   TextureFormat
+	format   gputypes.TextureFormat
 	released bool
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() TextureFormat { return t.format }
+func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
 // Release destroys the texture.
 func (t *Texture) Release() {

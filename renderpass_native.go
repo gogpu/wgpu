@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 )
 
@@ -41,10 +42,10 @@ type RenderPassEncoder struct {
 	// indexBufferFormat stores the format passed to the most recent SetIndexBuffer call.
 	// Used to validate against the pipeline's StripIndexFormat at DrawIndexed/DrawIndexedIndirect time.
 	// Matches Rust wgpu-core State.index.buffer_format (render.rs:568-582).
-	indexBufferFormat IndexFormat
+	indexBufferFormat gputypes.IndexFormat
 	// currentStripIndexFormat stores the pipeline's StripIndexFormat for draw-time validation.
 	// Set by SetPipeline from RenderPipeline.stripIndexFormat.
-	currentStripIndexFormat *IndexFormat
+	currentStripIndexFormat *gputypes.IndexFormat
 	// blendConstantRequired is true if the current pipeline uses
 	// BlendFactorConstant or BlendFactorOneMinusConstant.
 	// Set by SetPipeline from RenderPipeline.blendConstantRequired.
@@ -128,7 +129,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 }
 
 // SetIndexBuffer sets the index buffer.
-func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, offset uint64) {
+func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetIndexBuffer: buffer is nil"))
 		return
@@ -141,17 +142,17 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 }
 
 // SetViewport sets the viewport transformation.
-func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	p.core.SetViewport(x, y, width, height, minDepth, maxDepth)
+func (p *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
+	p.core.SetViewport(vp)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
-func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	p.core.SetScissorRect(x, y, width, height)
+func (p *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
+	p.core.SetScissorRect(rect)
 }
 
 // SetBlendConstant sets the blend constant color.
-func (p *RenderPassEncoder) SetBlendConstant(color *Color) {
+func (p *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	p.blendConstantSet = true
 	p.core.SetBlendConstant(color)
 }
@@ -211,15 +212,15 @@ func (p *RenderPassEncoder) validateDrawState(method string) bool {
 }
 
 // Draw draws primitives.
-func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !p.validateDrawState("Draw") {
 		return
 	}
-	p.core.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+	p.core.Draw(args)
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if !p.validateDrawState("DrawIndexed") {
 		return
 	}
@@ -236,7 +237,7 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
 		return
 	}
-	p.core.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+	p.core.DrawIndexed(args)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

@@ -181,6 +181,8 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to initialize allocator: %w", err)
 	}
 
+	dev.initPipelineCache(&a.properties)
+
 	// VK-SYNC-001: Create relay semaphores for GPU-side submission ordering.
 	// This ensures consecutive vkQueueSubmit calls execute in order on the GPU,
 	// which is required by the wgpu_hal Queue trait but not guaranteed by Vulkan.
@@ -488,7 +490,7 @@ func makeSurfaceSnapshot(capabilities vk.SurfaceCapabilitiesKHR, formats []vk.Su
 
 	public := hal.SurfaceCapabilities{
 		Formats:      make([]gputypes.TextureFormat, 0, len(formats)),
-		PresentModes: make([]hal.PresentMode, 0, len(presentModes)),
+		PresentModes: make([]gputypes.PresentMode, 0, len(presentModes)),
 		AlphaModes:   alphaModes,
 	}
 	for _, format := range formats {
@@ -516,7 +518,7 @@ func makeSurfaceSnapshot(capabilities vk.SurfaceCapabilitiesKHR, formats []vk.Su
 	}, nil
 }
 
-func vkPresentModeToHALChecked(mode vk.PresentModeKHR) (hal.PresentMode, bool) {
+func vkPresentModeToHALChecked(mode vk.PresentModeKHR) (gputypes.PresentMode, bool) {
 	switch mode {
 	case vk.PresentModeImmediateKhr:
 		return hal.PresentModeImmediate, true
@@ -531,8 +533,8 @@ func vkPresentModeToHALChecked(mode vk.PresentModeKHR) (hal.PresentMode, bool) {
 	}
 }
 
-func vkCompositeAlphaToHALChecked(flags vk.CompositeAlphaFlagsKHR) []hal.CompositeAlphaMode {
-	var modes []hal.CompositeAlphaMode
+func vkCompositeAlphaToHALChecked(flags vk.CompositeAlphaFlagsKHR) []gputypes.CompositeAlphaMode {
+	var modes []gputypes.CompositeAlphaMode
 	if vk.Flags(flags)&vk.Flags(vk.CompositeAlphaOpaqueBitKhr) != 0 {
 		modes = append(modes, hal.CompositeAlphaModeOpaque)
 	}
@@ -551,8 +553,8 @@ func vkCompositeAlphaToHALChecked(flags vk.CompositeAlphaFlagsKHR) []hal.Composi
 func cloneSurfaceCapabilities(capabilities hal.SurfaceCapabilities) *hal.SurfaceCapabilities {
 	return &hal.SurfaceCapabilities{
 		Formats:      append([]gputypes.TextureFormat(nil), capabilities.Formats...),
-		PresentModes: append([]hal.PresentMode(nil), capabilities.PresentModes...),
-		AlphaModes:   append([]hal.CompositeAlphaMode(nil), capabilities.AlphaModes...),
+		PresentModes: append([]gputypes.PresentMode(nil), capabilities.PresentModes...),
+		AlphaModes:   append([]gputypes.CompositeAlphaMode(nil), capabilities.AlphaModes...),
 	}
 }
 

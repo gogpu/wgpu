@@ -225,6 +225,71 @@ HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor ty
 
 ~1,300 LOC internal, 73 tests, 96.8% coverage. Example: `examples/raytracing-headless/`.
 
+## DownlevelCapabilities (ADR-071)
+
+### Why This Exists
+
+The W3C WebGPU specification assumes all adapters meet a baseline: compute shaders, indirect draw, base vertex, independent blend — all mandatory. `requestAdapter()` simply doesn't return adapters that can't meet this baseline. In a browser, the user sees "WebGPU not supported."
+
+**We can't do that.** As a native Go library, we run on hardware where the only available backend may be GLES 3.0 (no compute), an old Metal GPU (no fragment writable storage), or our own CPU software rasterizer. Refusing to run is not an option — we must **degrade gracefully**.
+
+DownlevelCapabilities tracks exactly what each backend can and cannot do, enabling consumers like gg to make informed decisions: use GPU compute path when available, fall back to CPU rasterizer when not. This is the Skia Graphite pattern (`caps->computeSupport()` gates the Vello compute renderer) and the Flutter Impeller pattern (`SupportsCompute()` gates compute-dependent features).
+
+**How the three WebGPU implementations handle non-conformant hardware:**
+
+| Implementation | Approach |
+|---------------|----------|
+| **W3C Spec / Dawn (browsers)** | Non-conformant adapters excluded from `requestAdapter()`. No degradation — just "not supported" |
+| **Rust wgpu** | `DownlevelCapabilities` — 27 granular flags. Supports GLES/WebGL below spec baseline |
+| **gogpu/wgpu** | Follows Rust — supports GLES 3.0 + Software. Graceful degradation via capability queries |
+
+### Technical Details
+
+**This is a Rust wgpu extension — not a W3C WebGPU spec concept** (the term "downlevel" does not appear in the 18.5K-line spec). Of 27 flags, 24 track capabilities REQUIRED by the spec for core adapters, 1 (AnisotropicFiltering) is correctly not required, and 2 (MSL21, SurfaceViewFormats) are backend-specific.
+
+**Types:** Defined in `gputypes/downlevel.go` — 27 `DownlevelFlags` with explicit `1 << N` bit positions matching Rust wgpu-types (`limits.rs:1102-1246`). `DownlevelCapabilities` struct (Flags, Limits, ShaderModel). `IsWebGPUCompliant()` checks compliance.
+
+**Data flow:**
+```
+HAL backend (per-adapter)
+  → hal.ExposedAdapter.Capabilities.DownlevelCapabilities
+  → core.Adapter.DownlevelCapabilities (extracted at enumeration)
+  → core.Device.downlevel (copied at device creation)
+  → wgpu.Adapter.DownlevelCapabilities() (public API)
+  → gpucontext.DeviceProvider.DownlevelCapabilities() (ecosystem interface)
+  → gg.CheckGPUComputeSupport(provider) (consumer)
+```
+
+**Per-backend implementation:**
+
+| Backend | Approach | Flags |
+|---------|----------|-------|
+| Vulkan | 18 unconditional + 8 conditional from `VkPhysicalDeviceFeatures` | Rust adapter.rs:684-719 parity |
+| Metal | `DefaultDownlevelCapabilities()` | All conditionals pass on macOS 15+ |
+| DX12 | `DefaultDownlevelCapabilities()` | FL 11.0+ guarantees all |
+| GLES | Dynamic `queryDownlevelFlags()` (~20 checks) | Rust adapter.rs:387-452 parity |
+| Software | 13 explicit flags | Each verified against implementation code |
+| Noop | `DefaultDownlevelCapabilities()` | Rust noop/mod.rs parity |
+| Browser/Rust | `DefaultDownlevelCapabilities()` | WebGPU/Rust fully compliant |
+
+**Validation:** `core.Device.RequireDownlevelFlags()` rejects operations when flags are missing. Called in `CreateComputePipeline` (Rust `resource.rs:4367` parity). GLES 3.0 gets clean error instead of HAL crash.
+
+**Consumer gate:** gg checks `CheckGPUComputeSupport(provider)` BEFORE creating compute pipelines in both init paths (SetDeviceProvider + standalone). Matches Skia Graphite `computeSupport()` gate (`AtlasProvider.cpp:42`).
+
+## Pipeline Disk Cache (#331)
+
+Persists driver-compiled GPU ISA across process launches for faster cold starts. Extends the existing in-memory shader cache (`hal/dx12/shader_cache.go`) to disk.
+
+**Vulkan:** One device-wide `VkPipelineCache` created at device init, passed to all `vkCreateGraphicsPipelines`/`vkCreateComputePipelines`, saved via `vkGetPipelineCacheData` on device destroy. Matches Rust wgpu and Dawn monolithic cache pattern.
+
+**DX12:** `GetCachedBlob` after each PSO creation → per-PSO `.pso` blobs on disk. On next launch: `D3D12_CACHED_PIPELINE_STATE` with saved blob. Stale blob → `E_INVALIDARG` → automatic retry without cache. **Ahead of Rust wgpu** (which has an empty DX12 pipeline cache stub).
+
+**Shared infrastructure:** `internal/pipelinecache/` — atomic blob I/O (`write-tmp + rename`), adapter-scoped cache paths (`os.UserCacheDir()/gogpu/{backend}/{adapterKey}/`). Follows ADR-069 internal package pattern.
+
+**Non-fatal:** Pipeline cache init failure logs warning and continues with uncached pipelines. Cache is a performance optimization, not a correctness requirement.
+
+**Race hardening:** `RegisterHALBackends()` wrapped in `sync.Once`, `instanceEnumerateMu` serializes concurrent adapter probing.
+
 ## Typed Surface Targets (Rust v29 Parity)
 
 Surface creation uses typed targets instead of raw `uintptr` handles:

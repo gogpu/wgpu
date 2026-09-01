@@ -23,6 +23,8 @@ import (
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 	"github.com/gogpu/wgpu/hal/dx12/d3dcompile"
+	"github.com/gogpu/wgpu/hal/dx12/dxgi"
+	"github.com/gogpu/wgpu/internal/pipelinecache"
 	"golang.org/x/sys/windows"
 )
 
@@ -98,6 +100,14 @@ type Device struct {
 	// Caches FXC compilation results keyed by HLSL source hash + entry point + stage + target.
 	// Matches Rust wgpu ShaderCache pattern (wgpu-hal/src/dx12/mod.rs:1136).
 	shaderCache ShaderCache
+
+	// Disk-backed driver PSO blob cache (#331). Complements shaderCache — stores
+	// driver-compiled GPU ISA, not shader bytecode.
+	psoCache *PSOBlobStore
+
+	// SHA-256 of serialized empty root signature blob (pipelines without layout).
+	emptyRootSignatureHash    [32]byte
+	hasEmptyRootSignatureHash bool
 
 	// useDXIL enables direct DXIL compilation via naga dxil backend,
 	// bypassing the HLSL->FXC path. Opt-in via GOGPU_DX12_DXIL=1 env var.
@@ -227,7 +237,7 @@ func (h *DescriptorHeap) HandleToIndex(handle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE)
 
 // newDevice creates a new DX12 device from a DXGI adapter.
 // adapterPtr is the IUnknown pointer to the DXGI adapter.
-func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
+func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
 	// Create D3D12 device
 	rawDevice, err := instance.d3d12Lib.CreateDevice(adapterPtr, featureLevel)
 	if err != nil {
@@ -280,6 +290,19 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, featureLevel d3d12
 	if err := dev.createCommandSignatures(); err != nil {
 		dev.cleanup()
 		return nil, err
+	}
+
+	adapterKey := pipelinecache.DX12AdapterKey(
+		adapterDesc.AdapterLuid.LowPart,
+		adapterDesc.AdapterLuid.HighPart,
+		adapterDesc.VendorID,
+		adapterDesc.DeviceID,
+		adapterDesc.Revision,
+	)
+	if psoCache, err := NewPSOBlobStore(adapterKey); err != nil {
+		hal.Logger().Warn("dx12: failed to init PSO disk cache", "error", err)
+	} else {
+		dev.psoCache = psoCache
 	}
 
 	// Set a finalizer to ensure cleanup
@@ -654,12 +677,16 @@ func (d *Device) getOrCreateEmptyRootSignature() (*d3d12.ID3D12RootSignature, er
 	}
 	defer blob.Release()
 
+	rootSigHash := sha256.Sum256(unsafe.Slice((*byte)(blob.GetBufferPointer()), blob.GetBufferSize()))
+
 	rootSig, err := d.raw.CreateRootSignature(0, blob.GetBufferPointer(), blob.GetBufferSize())
 	if err != nil {
 		return nil, fmt.Errorf("dx12: failed to create empty root signature: %w", err)
 	}
 
 	d.emptyRootSignature = rootSig
+	d.emptyRootSignatureHash = rootSigHash
+	d.hasEmptyRootSignatureHash = true
 	return rootSig, nil
 }
 
@@ -2071,12 +2098,13 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	)
 
 	return &PipelineLayout{
-		rootSignature:    result.rootSignature,
-		bindGroupLayouts: bgLayouts,
-		groupMappings:    result.groupMappings,
-		samplerRootIndex: result.samplerRootIndex,
-		nagaOptions:      result.nagaOptions,
-		device:           d,
+		rootSignature:     result.rootSignature,
+		rootSignatureHash: result.rootSignatureHash,
+		bindGroupLayouts:  bgLayouts,
+		groupMappings:     result.groupMappings,
+		samplerRootIndex:  result.samplerRootIndex,
+		nagaOptions:       result.nagaOptions,
+		device:            d,
 	}, nil
 }
 
@@ -2433,8 +2461,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		return nil, err
 	}
 
+	var emptyRootHash *[32]byte
+	if d.hasEmptyRootSignatureHash {
+		emptyRootHash = &d.emptyRootSignatureHash
+	}
+	cacheKey := graphicsPSOCacheKey(desc, psoDesc, rootSignatureHashForLayout(pipelineLayout, emptyRootHash))
+	var cachedBlob []byte
+	if d.psoCache != nil {
+		cachedBlob, _ = d.psoCache.Load(cacheKey)
+	}
+
 	// Create the pipeline state object
-	pso, err := d.raw.CreateGraphicsPipelineState(psoDesc)
+	pso, err := d.createGraphicsPSO(psoDesc, cacheKey, cachedBlob)
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
 		slog.Error("dx12: CreateGraphicsPipelineState failed",
@@ -2572,8 +2610,18 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, fmt.Errorf("dx12: compute shader entry point %q not found in module", desc.Compute.EntryPoint)
 	}
 
+	var emptyRootHash *[32]byte
+	if d.hasEmptyRootSignatureHash {
+		emptyRootHash = &d.emptyRootSignatureHash
+	}
+	cacheKey := computePSOCacheKey(desc, &psoDesc, rootSignatureHashForLayout(pipelineLayout, emptyRootHash))
+	var cachedBlob []byte
+	if d.psoCache != nil {
+		cachedBlob, _ = d.psoCache.Load(cacheKey)
+	}
+
 	// Create the pipeline state object
-	pso, err := d.raw.CreateComputePipelineState(&psoDesc)
+	pso, err := d.createComputePSO(&psoDesc, cacheKey, cachedBlob)
 	d.DrainDebugMessages() // Check for validation warnings/errors during PSO creation
 	if err != nil {
 		slog.Error("dx12: CreateComputePipelineState failed",

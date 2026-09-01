@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -29,11 +30,11 @@ func TestNewDeviceFromHALBothNil(t *testing.T) {
 func TestNewTextureFromHALFormats(t *testing.T) {
 	formats := []struct {
 		name   string
-		format wgpu.TextureFormat
+		format gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", wgpu.TextureFormatRGBA8Unorm},
-		{"BGRA8Unorm", wgpu.TextureFormatBGRA8Unorm},
-		{"Depth32Float", wgpu.TextureFormatDepth32Float},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm},
+		{"Depth32Float", gputypes.TextureFormatDepth32Float},
 	}
 
 	for _, tt := range formats {
@@ -201,7 +202,7 @@ func TestAllCreateMethodsOnReleasedDevice(t *testing.T) {
 		{"CreateTexture", func() error {
 			_, err := device.CreateTexture(&wgpu.TextureDescriptor{
 				Size: wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}, MipLevelCount: 1, SampleCount: 1,
-				Format: wgpu.TextureFormatRGBA8Unorm, Usage: wgpu.TextureUsageTextureBinding,
+				Format: gputypes.TextureFormatRGBA8Unorm, Usage: wgpu.TextureUsageTextureBinding,
 			})
 			return err
 		}},

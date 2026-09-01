@@ -41,6 +41,17 @@ func GetAdapterLimits(id AdapterID) (gputypes.Limits, error) {
 	return adapter.Limits, nil
 }
 
+// GetAdapterDownlevelCapabilities returns the downlevel capabilities of the specified adapter.
+// Returns an error if the adapter ID is invalid.
+func GetAdapterDownlevelCapabilities(id AdapterID) (gputypes.DownlevelCapabilities, error) {
+	hub := GetGlobal().Hub()
+	adapter, err := hub.GetAdapter(id)
+	if err != nil {
+		return gputypes.DownlevelCapabilities{}, fmt.Errorf("failed to get adapter downlevel capabilities: %w", err)
+	}
+	return adapter.DownlevelCapabilities, nil
+}
+
 // RequestDevice creates a logical device from the specified adapter.
 // The device is configured according to the provided descriptor.
 //

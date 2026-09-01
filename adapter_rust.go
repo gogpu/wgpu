@@ -13,29 +13,35 @@ import (
 // DeviceDescriptor configures device creation.
 type DeviceDescriptor struct {
 	Label            string
-	RequiredFeatures Features
-	RequiredLimits   Limits
+	RequiredFeatures gputypes.Features
+	RequiredLimits   gputypes.Limits
 }
 
 // Adapter represents a physical GPU.
 // On Rust backend, this wraps go-webgpu/webgpu Adapter.
 type Adapter struct {
 	r        *rwgpu.Adapter
-	info     AdapterInfo
-	features Features
-	limits   Limits
+	info     gputypes.AdapterInfo
+	features gputypes.Features
+	limits   gputypes.Limits
 	instance *Instance
 	released bool
 }
 
 // Info returns adapter metadata.
-func (a *Adapter) Info() AdapterInfo { return a.info }
+func (a *Adapter) Info() gputypes.AdapterInfo { return a.info }
 
 // Features returns supported features.
-func (a *Adapter) Features() Features { return a.features }
+func (a *Adapter) Features() gputypes.Features { return a.features }
 
 // Limits returns the adapter's resource limits.
-func (a *Adapter) Limits() Limits { return a.limits }
+func (a *Adapter) Limits() gputypes.Limits { return a.limits }
+
+// DownlevelCapabilities returns backend capability flags for downlevel adapters.
+// Rust wgpu handles real values internally; from Go FFI we return fully compliant defaults.
+func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return gputypes.DefaultDownlevelCapabilities()
+}
 
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.
@@ -77,9 +83,9 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 
 // SurfaceCapabilities describes what a surface supports on this adapter.
 type SurfaceCapabilities struct {
-	Formats      []TextureFormat
-	PresentModes []PresentMode
-	AlphaModes   []CompositeAlphaMode
+	Formats      []gputypes.TextureFormat
+	PresentModes []gputypes.PresentMode
+	AlphaModes   []gputypes.CompositeAlphaMode
 }
 
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.

@@ -26,7 +26,7 @@ func TestCopyTextureToBufferValid(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageCopySrc,
 	})
 	if err != nil {
@@ -90,7 +90,7 @@ func TestCopyTextureToTextureValidPath(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageCopySrc,
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestCopyTextureToTextureValidPath(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageCopyDst,
 	})
 	if err != nil {
@@ -149,7 +149,7 @@ func TestTransitionTexturesWithBarrier(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageCopySrc | wgpu.TextureUsageRenderAttachment,
 	})
 	if err != nil {
@@ -244,7 +244,7 @@ func TestEncoderTrackBindGroupTransfer(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "track-bg-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -483,7 +483,7 @@ func TestCreateBindGroupWithTextureView(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})
 	if err != nil {
@@ -499,7 +499,7 @@ func TestCreateBindGroupWithTextureView(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "bg-tv-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageFragment,

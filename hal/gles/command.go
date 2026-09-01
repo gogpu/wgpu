@@ -639,18 +639,18 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	e.encoder.commands = append(e.encoder.commands, &SetViewportCommand{
-		x: x, y: y, width: width, height: height,
-		minDepth: minDepth, maxDepth: maxDepth,
+		x: vp.X, y: vp.Y, width: vp.Width, height: vp.Height,
+		minDepth: vp.MinDepth, maxDepth: vp.MaxDepth,
 	})
 }
 
 // SetScissorRect sets the scissor rectangle.
 // With ADJUST_COORDINATE_SPACE, no Y-flip is needed — coordinates pass through directly.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	e.encoder.commands = append(e.encoder.commands, &SetScissorCommand{
-		x: x, y: y, width: width, height: height,
+		x: rect.X, y: rect.Y, width: rect.Width, height: rect.Height,
 	})
 }
 
@@ -678,32 +678,32 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
 	}
 	e.encoder.commands = append(e.encoder.commands, &DrawCommand{
-		vertexCount:   vertexCount,
-		instanceCount: instanceCount,
-		firstVertex:   firstVertex,
-		firstInstance: firstInstance,
+		vertexCount:   args.VertexCount,
+		instanceCount: args.InstanceCount,
+		firstVertex:   args.FirstVertex,
+		firstInstance: args.FirstInstance,
 		topology:      topology,
 	})
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
 	}
 	e.encoder.commands = append(e.encoder.commands, &DrawIndexedCommand{
-		indexCount:    indexCount,
-		instanceCount: instanceCount,
-		firstIndex:    firstIndex,
-		baseVertex:    baseVertex,
-		firstInstance: firstInstance,
+		indexCount:    args.IndexCount,
+		instanceCount: args.InstanceCount,
+		firstIndex:    args.FirstIndex,
+		baseVertex:    args.BaseVertex,
+		firstInstance: args.FirstInstance,
 		indexFormat:   e.indexFormat,
 		topology:      topology,
 	})
@@ -1865,7 +1865,7 @@ func vertexFormatToGL(format gputypes.VertexFormat) (size int32, typ uint32, nor
 }
 
 // stencilOpToGL converts a HAL stencil operation to the corresponding GL constant.
-func stencilOpToGL(op hal.StencilOperation) uint32 {
+func stencilOpToGL(op gputypes.StencilOperation) uint32 {
 	switch op {
 	case hal.StencilOperationKeep:
 		return gl.KEEP

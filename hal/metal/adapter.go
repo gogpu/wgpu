@@ -120,12 +120,12 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 			gputypes.TextureFormatRGBA8UnormSrgb,
 			gputypes.TextureFormatRGBA16Float,
 		},
-		PresentModes: []hal.PresentMode{
+		PresentModes: []gputypes.PresentMode{
 			hal.PresentModeFifo,
 			hal.PresentModeImmediate,
 			hal.PresentModeMailbox,
 		},
-		AlphaModes: []hal.CompositeAlphaMode{
+		AlphaModes: []gputypes.CompositeAlphaMode{
 			hal.CompositeAlphaModeOpaque,
 			hal.CompositeAlphaModePremultiplied,
 		},

@@ -144,10 +144,10 @@ func benchmarkMetalIndexedFrame(b *testing.B, count uint32, forceLoop bool) {
 		pass.SetVertexBuffer(0, vertex, 0)
 		pass.SetIndexBuffer(index, gputypes.IndexFormatUint16, 0)
 		if count == 0 {
-			pass.DrawIndexed(3, 1, 0, 0, 0)
+			pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
 		} else {
 			if forceLoop {
-				pass.Draw(0, 0, 0, 0)
+				pass.Draw(gputypes.DrawArgs{})
 			}
 			pass.MultiDrawIndexedIndirect(indirect, 0, count)
 		}

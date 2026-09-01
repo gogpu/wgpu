@@ -12,29 +12,34 @@ import (
 // DeviceDescriptor configures device creation.
 type DeviceDescriptor struct {
 	Label            string
-	RequiredFeatures Features
-	RequiredLimits   Limits
+	RequiredFeatures gputypes.Features
+	RequiredLimits   gputypes.Limits
 }
 
 // Adapter represents a physical GPU.
 type Adapter struct {
-	id       core.AdapterID
-	core     *core.Adapter
-	info     AdapterInfo
-	features Features
-	limits   Limits
-	instance *Instance
-	released bool
+	id        core.AdapterID
+	core      *core.Adapter
+	info      gputypes.AdapterInfo
+	features  gputypes.Features
+	limits    gputypes.Limits
+	downlevel gputypes.DownlevelCapabilities
+	instance  *Instance
+	released  bool
 }
 
 // Info returns adapter metadata.
-func (a *Adapter) Info() AdapterInfo { return a.info }
+func (a *Adapter) Info() gputypes.AdapterInfo { return a.info }
 
 // Features returns supported features.
-func (a *Adapter) Features() Features { return a.features }
+func (a *Adapter) Features() gputypes.Features { return a.features }
 
 // Limits returns the adapter's resource limits.
-func (a *Adapter) Limits() Limits { return a.limits }
+func (a *Adapter) Limits() gputypes.Limits { return a.limits }
+
+// DownlevelCapabilities returns backend capability flags for downlevel adapters.
+// Matches Rust wgpu Adapter::get_downlevel_capabilities() (adapter.rs:174).
+func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities { return a.downlevel }
 
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.

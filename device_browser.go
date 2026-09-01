@@ -7,6 +7,7 @@ import (
 	"syscall/js"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
@@ -15,8 +16,8 @@ import (
 type Device struct {
 	browser  *browser.Device
 	queue    *Queue
-	features Features
-	limits   Limits
+	features gputypes.Features
+	limits   gputypes.Limits
 	released bool
 }
 
@@ -26,12 +27,12 @@ func (d *Device) Queue() *Queue {
 }
 
 // Features returns the device's enabled features.
-func (d *Device) Features() Features {
+func (d *Device) Features() gputypes.Features {
 	return d.features
 }
 
 // Limits returns the device's resource limits.
-func (d *Device) Limits() Limits {
+func (d *Device) Limits() gputypes.Limits {
 	return d.limits
 }
 
@@ -363,7 +364,7 @@ func (d *Device) Release() {
 
 // convertBindGroupLayoutEntries converts Go BindGroupLayoutEntry slice to
 // browser.BindGroupLayoutEntryJS slice for JS object construction.
-func convertBindGroupLayoutEntries(entries []BindGroupLayoutEntry) []browser.BindGroupLayoutEntryJS {
+func convertBindGroupLayoutEntries(entries []gputypes.BindGroupLayoutEntry) []browser.BindGroupLayoutEntryJS {
 	result := make([]browser.BindGroupLayoutEntryJS, len(entries))
 	for i, e := range entries {
 		entry := browser.BindGroupLayoutEntryJS{
@@ -487,7 +488,7 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 }
 
 // convertVertexBufferLayouts converts Go VertexBufferLayout slice to JS types.
-func convertVertexBufferLayouts(layouts []VertexBufferLayout) []browser.VertexBufferLayoutJS {
+func convertVertexBufferLayouts(layouts []gputypes.VertexBufferLayout) []browser.VertexBufferLayoutJS {
 	result := make([]browser.VertexBufferLayoutJS, len(layouts))
 	for i, l := range layouts {
 		jsLayout := browser.VertexBufferLayoutJS{
@@ -535,7 +536,7 @@ func convertStencilFaceState(s *StencilFaceState) *browser.StencilFaceStateJS {
 }
 
 // stencilOpToJS converts StencilOperation (gputypes, webgpu.h spec values) to WebGPU JS string.
-func stencilOpToJS(op StencilOperation) string {
+func stencilOpToJS(op gputypes.StencilOperation) string {
 	switch op {
 	case StencilOperationKeep:
 		return "keep"

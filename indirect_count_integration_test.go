@@ -297,7 +297,7 @@ func runCountedIndexedICBCase(t *testing.T, vertices []float32, indexData []byte
 	pass.SetVertexBuffer(0, vertexBuffer, 0)
 	pass.SetIndexBuffer(indexBuffer, indexFormat, indexOffset)
 	if forceLoop {
-		pass.Draw(0, 0, 0, 0)
+		pass.Draw(gputypes.DrawArgs{})
 	}
 	pass.MultiDrawIndexedIndirect(indirectBuffer, argumentsOffset, drawCount)
 	if err := pass.End(); err != nil {

@@ -700,9 +700,9 @@ func TestNoopRenderPass(t *testing.T) {
 	})
 
 	// Test render pass commands
-	renderPass.SetViewport(0, 0, 256, 256, 0, 1)
-	renderPass.SetScissorRect(0, 0, 256, 256)
-	renderPass.Draw(3, 1, 0, 0)
+	renderPass.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: 256, Height: 256, MinDepth: 0, MaxDepth: 1})
+	renderPass.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: 256, Height: 256})
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	renderPass.End()
 
 	_, _ = encoder.EndEncoding()
@@ -1197,7 +1197,7 @@ func TestNoopFullLifecycle(t *testing.T) {
 	})
 	renderPass.SetPipeline(pipeline)
 	renderPass.SetVertexBuffer(0, buffer, 0)
-	renderPass.Draw(3, 1, 0, 0)
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	renderPass.End()
 
 	cmdBuffer, _ := encoder.EndEncoding()
@@ -1560,12 +1560,12 @@ func TestNoopRenderPassEncoder(t *testing.T) {
 	pass.SetBindGroup(1, nil, []uint32{0, 256})
 	pass.SetVertexBuffer(0, buf, 0)
 	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 0)
-	pass.SetViewport(0, 0, 800, 600, 0, 1)
-	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
+	pass.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 0, B: 0, A: 1})
 	pass.SetStencilReference(0xFF)
-	pass.Draw(6, 1, 0, 0)
-	pass.DrawIndexed(6, 1, 0, 0, 0)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 6, InstanceCount: 1})
 	pass.DrawIndirect(buf, 0, 1)
 	pass.DrawIndexedIndirect(buf, 0, 1)
 	pass.ExecuteBundle(nil)

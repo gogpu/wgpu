@@ -2,6 +2,8 @@
 
 package wgpu
 
+import "github.com/gogpu/gputypes"
+
 // Extent3D is a 3D size.
 type Extent3D struct {
 	Width              uint32
@@ -27,7 +29,7 @@ type ImageDataLayout struct {
 type BufferDescriptor struct {
 	Label            string
 	Size             uint64
-	Usage            BufferUsage
+	Usage            gputypes.BufferUsage
 	MappedAtCreation bool
 }
 
@@ -37,18 +39,18 @@ type TextureDescriptor struct {
 	Size          Extent3D
 	MipLevelCount uint32
 	SampleCount   uint32
-	Dimension     TextureDimension
-	Format        TextureFormat
-	Usage         TextureUsage
-	ViewFormats   []TextureFormat
+	Dimension     gputypes.TextureDimension
+	Format        gputypes.TextureFormat
+	Usage         gputypes.TextureUsage
+	ViewFormats   []gputypes.TextureFormat
 }
 
 // TextureViewDescriptor describes texture view creation parameters.
 type TextureViewDescriptor struct {
 	Label           string
-	Format          TextureFormat
-	Dimension       TextureViewDimension
-	Aspect          TextureAspect
+	Format          gputypes.TextureFormat
+	Dimension       gputypes.TextureViewDimension
+	Aspect          gputypes.TextureAspect
 	BaseMipLevel    uint32
 	MipLevelCount   uint32
 	BaseArrayLayer  uint32
@@ -58,15 +60,15 @@ type TextureViewDescriptor struct {
 // SamplerDescriptor describes sampler creation parameters.
 type SamplerDescriptor struct {
 	Label        string
-	AddressModeU AddressMode
-	AddressModeV AddressMode
-	AddressModeW AddressMode
-	MagFilter    FilterMode
-	MinFilter    FilterMode
-	MipmapFilter FilterMode
+	AddressModeU gputypes.AddressMode
+	AddressModeV gputypes.AddressMode
+	AddressModeW gputypes.AddressMode
+	MagFilter    gputypes.FilterMode
+	MinFilter    gputypes.FilterMode
+	MipmapFilter gputypes.FilterMode
 	LodMinClamp  float32
 	LodMaxClamp  float32
-	Compare      CompareFunction
+	Compare      gputypes.CompareFunction
 	Anisotropy   uint16
 }
 
@@ -91,10 +93,10 @@ type ComputePassDescriptor struct {
 type SurfaceConfiguration struct {
 	Width       uint32
 	Height      uint32
-	Format      TextureFormat
-	Usage       TextureUsage
-	PresentMode PresentMode
-	AlphaMode   CompositeAlphaMode
+	Format      gputypes.TextureFormat
+	Usage       gputypes.TextureUsage
+	PresentMode gputypes.PresentMode
+	AlphaMode   gputypes.CompositeAlphaMode
 }
 
 // StencilOperation describes a stencil operation.
@@ -114,7 +116,7 @@ const (
 
 // StencilFaceState describes stencil operations for a face.
 type StencilFaceState struct {
-	Compare     CompareFunction
+	Compare     gputypes.CompareFunction
 	FailOp      StencilOperation
 	DepthFailOp StencilOperation
 	PassOp      StencilOperation
@@ -122,9 +124,9 @@ type StencilFaceState struct {
 
 // DepthStencilState describes depth and stencil testing configuration.
 type DepthStencilState struct {
-	Format              TextureFormat
+	Format              gputypes.TextureFormat
 	DepthWriteEnabled   bool
-	DepthCompare        CompareFunction
+	DepthCompare        gputypes.CompareFunction
 	StencilFront        StencilFaceState
 	StencilBack         StencilFaceState
 	StencilReadMask     uint32
@@ -145,20 +147,20 @@ type RenderPassDescriptor struct {
 type RenderPassColorAttachment struct {
 	View          *TextureView
 	ResolveTarget *TextureView
-	LoadOp        LoadOp
-	StoreOp       StoreOp
-	ClearValue    Color
+	LoadOp        gputypes.LoadOp
+	StoreOp       gputypes.StoreOp
+	ClearValue    gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.
 type RenderPassDepthStencilAttachment struct {
 	View              *TextureView
-	DepthLoadOp       LoadOp
-	DepthStoreOp      StoreOp
+	DepthLoadOp       gputypes.LoadOp
+	DepthStoreOp      gputypes.StoreOp
 	DepthClearValue   float32
 	DepthReadOnly     bool
-	StencilLoadOp     LoadOp
-	StencilStoreOp    StoreOp
+	StencilLoadOp     gputypes.LoadOp
+	StencilStoreOp    gputypes.StoreOp
 	StencilClearValue uint32
 	StencilReadOnly   bool
 }
@@ -166,7 +168,7 @@ type RenderPassDepthStencilAttachment struct {
 // BindGroupLayoutDescriptor describes a bind group layout.
 type BindGroupLayoutDescriptor struct {
 	Label   string
-	Entries []BindGroupLayoutEntry
+	Entries []gputypes.BindGroupLayoutEntry
 }
 
 // PipelineLayoutDescriptor describes a pipeline layout.
@@ -197,9 +199,9 @@ type RenderPipelineDescriptor struct {
 	Label        string
 	Layout       *PipelineLayout
 	Vertex       VertexState
-	Primitive    PrimitiveState
+	Primitive    gputypes.PrimitiveState
 	DepthStencil *DepthStencilState
-	Multisample  MultisampleState
+	Multisample  gputypes.MultisampleState
 	Fragment     *FragmentState
 }
 
@@ -207,14 +209,14 @@ type RenderPipelineDescriptor struct {
 type VertexState struct {
 	Module     *ShaderModule
 	EntryPoint string
-	Buffers    []VertexBufferLayout
+	Buffers    []gputypes.VertexBufferLayout
 }
 
 // FragmentState describes the fragment shader stage.
 type FragmentState struct {
 	Module     *ShaderModule
 	EntryPoint string
-	Targets    []ColorTargetState
+	Targets    []gputypes.ColorTargetState
 }
 
 // ComputePipelineDescriptor describes a compute pipeline.
@@ -230,18 +232,18 @@ type ImageCopyTexture struct {
 	Texture  *Texture
 	MipLevel uint32
 	Origin   Origin3D
-	Aspect   TextureAspect
+	Aspect   gputypes.TextureAspect
 }
 
 // TextureUsageTransition defines a texture usage state transition.
 type TextureUsageTransition struct {
-	OldUsage TextureUsage
-	NewUsage TextureUsage
+	OldUsage gputypes.TextureUsage
+	NewUsage gputypes.TextureUsage
 }
 
 // TextureRange specifies a range of texture subresources.
 type TextureRange struct {
-	Aspect          TextureAspect
+	Aspect          gputypes.TextureAspect
 	BaseMipLevel    uint32
 	MipLevelCount   uint32
 	BaseArrayLayer  uint32

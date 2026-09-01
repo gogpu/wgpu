@@ -373,7 +373,7 @@ func TestComputePipelineNoSPIRV(t *testing.T) {
 	}
 }
 
-func TestAdapterDownlevelHasCompute(t *testing.T) {
+func TestAdapterDownlevelCapabilities(t *testing.T) {
 	backend := NewBackend()
 	instance, _ := backend.CreateInstance(&hal.InstanceDescriptor{})
 	defer instance.Destroy()
@@ -383,9 +383,48 @@ func TestAdapterDownlevelHasCompute(t *testing.T) {
 		t.Fatal("no adapters found")
 	}
 
-	caps := adapters[0].Capabilities
-	if caps.DownlevelCapabilities.Flags&hal.DownlevelFlagsComputeShaders == 0 {
-		t.Error("software backend should report compute shader support")
+	dc := adapters[0].Capabilities.DownlevelCapabilities
+
+	if dc.ShaderModel != gputypes.ShaderModelSm5 {
+		t.Errorf("ShaderModel = %v, want Sm5", dc.ShaderModel)
+	}
+
+	requiredFlags := []struct {
+		flag gputypes.DownlevelFlags
+		name string
+	}{
+		{gputypes.DownlevelFlagsComputeShaders, "ComputeShaders"},
+		{gputypes.DownlevelFlagsFragmentWritableStorage, "FragmentWritableStorage"},
+		{gputypes.DownlevelFlagsBaseVertex, "BaseVertex"},
+		{gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures, "NonPowerOfTwoMipmappedTextures"},
+		{gputypes.DownlevelFlagsIndependentBlend, "IndependentBlend"},
+		{gputypes.DownlevelFlagsVertexStorage, "VertexStorage"},
+		{gputypes.DownlevelFlagsFragmentStorage, "FragmentStorage"},
+		{gputypes.DownlevelFlagsDepthTextureAndBufferCopies, "DepthTextureAndBufferCopies"},
+		{gputypes.DownlevelFlagsBufferBindingsNot16ByteAligned, "BufferBindingsNot16ByteAligned"},
+		{gputypes.DownlevelFlagsUnrestrictedIndexBuffer, "UnrestrictedIndexBuffer"},
+		{gputypes.DownlevelFlagsFullDrawIndexUint32, "FullDrawIndexUint32"},
+		{gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies, "UnrestrictedExternalTextureCopies"},
+		{gputypes.DownlevelFlagsLinearInterpolation, "LinearInterpolation"},
+	}
+	for _, rf := range requiredFlags {
+		if !dc.Flags.Contains(rf.flag) {
+			t.Errorf("software backend should report %s", rf.name)
+		}
+	}
+
+	absentFlags := []struct {
+		flag gputypes.DownlevelFlags
+		name string
+	}{
+		{gputypes.DownlevelFlagsIndirectExecution, "IndirectExecution"},
+		{gputypes.DownlevelFlagsAnisotropicFiltering, "AnisotropicFiltering"},
+		{gputypes.DownlevelFlagsMultisampledShading, "MultisampledShading"},
+	}
+	for _, af := range absentFlags {
+		if dc.Flags.Contains(af.flag) {
+			t.Errorf("software backend should NOT report %s", af.name)
+		}
 	}
 }
 
@@ -1012,12 +1051,12 @@ func TestRenderPassEncoderAllNoOps(t *testing.T) {
 	pass.SetBindGroup(0, nil, nil)
 	pass.SetVertexBuffer(0, buf, 0)
 	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 0)
-	pass.SetViewport(0, 0, 800, 600, 0, 1)
-	pass.SetScissorRect(0, 0, 800, 600)
+	pass.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1})
+	pass.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: 800, Height: 600})
 	pass.SetBlendConstant(&gputypes.Color{R: 1, G: 1, B: 1, A: 1})
 	pass.SetStencilReference(0xFF)
-	pass.Draw(3, 1, 0, 0)
-	pass.DrawIndexed(6, 1, 0, 0, 0)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 6, InstanceCount: 1})
 	pass.DrawIndirect(buf, 0, 1)
 	pass.DrawIndexedIndirect(buf, 0, 1)
 	pass.ExecuteBundle(nil)

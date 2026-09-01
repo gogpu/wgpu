@@ -98,10 +98,10 @@ func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
 func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
 
 // SetViewport is a no-op.
-func (r *RenderPassEncoder) SetViewport(_, _, _, _, _, _ float32) {}
+func (r *RenderPassEncoder) SetViewport(_ gputypes.Viewport) {}
 
 // SetScissorRect is a no-op.
-func (r *RenderPassEncoder) SetScissorRect(_, _, _, _ uint32) {}
+func (r *RenderPassEncoder) SetScissorRect(_ gputypes.ScissorRect) {}
 
 // SetBlendConstant is a no-op.
 func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
@@ -110,10 +110,10 @@ func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
 func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
 
 // Draw is a no-op.
-func (r *RenderPassEncoder) Draw(_, _, _, _ uint32) {}
+func (r *RenderPassEncoder) Draw(_ gputypes.DrawArgs) {}
 
 // DrawIndexed is a no-op.
-func (r *RenderPassEncoder) DrawIndexed(_, _, _ uint32, _ int32, _ uint32) {}
+func (r *RenderPassEncoder) DrawIndexed(_ gputypes.DrawIndexedArgs) {}
 
 // DrawIndirect is a no-op.
 func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}

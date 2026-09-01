@@ -194,7 +194,7 @@ func run() error {
 			}
 
 			renderPass.SetPipeline(pipeline)
-			renderPass.Draw(3, 1, 0, 0)
+			renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 			if err := renderPass.End(); err != nil {
 				frameErr = fmt.Errorf("end: %w", err)
 				view.Release()

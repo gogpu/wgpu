@@ -270,10 +270,7 @@ func (a *Adapter) Capabilities() hal.Capabilities {
 			BufferCopyOffset: 512, // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 			BufferCopyPitch:  256, // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
 		},
-		DownlevelCapabilities: hal.DownlevelCapabilities{
-			ShaderModel: uint32(a.capabilities.ShaderModel),
-			Flags:       hal.DownlevelFlagsComputeShaders | hal.DownlevelFlagsAnisotropicFiltering,
-		},
+		DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 	}
 }
 
@@ -332,7 +329,7 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	}
 
 	// Create device using the adapter
-	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), a.capabilities.FeatureLevel)
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel)
 	if err != nil {
 		return hal.OpenDevice{}, err
 	}
@@ -384,7 +381,7 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 	// Premultiplied alpha requires DirectComposition (dcomp.dll, Windows 8+).
 	// Rust wgpu reports Premultiplied only for VisualFromWndHandle targets;
 	// we simplify by checking DComp DLL availability at runtime.
-	alphaModes := []hal.CompositeAlphaMode{
+	alphaModes := []gputypes.CompositeAlphaMode{
 		hal.CompositeAlphaModeOpaque,
 	}
 	if dcompAvailable() {
@@ -406,8 +403,8 @@ func (a *Adapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilit
 }
 
 // presentModes returns supported present modes.
-func (a *Adapter) presentModes() []hal.PresentMode {
-	modes := []hal.PresentMode{
+func (a *Adapter) presentModes() []gputypes.PresentMode {
+	modes := []gputypes.PresentMode{
 		hal.PresentModeFifo, // Always supported (vsync)
 	}
 
@@ -621,10 +618,7 @@ func (a *AdapterLegacy) Capabilities() hal.Capabilities {
 			BufferCopyOffset: 512,
 			BufferCopyPitch:  256,
 		},
-		DownlevelCapabilities: hal.DownlevelCapabilities{
-			ShaderModel: uint32(a.capabilities.ShaderModel),
-			Flags:       hal.DownlevelFlagsComputeShaders | hal.DownlevelFlagsAnisotropicFiltering,
-		},
+		DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities(),
 	}
 }
 
@@ -648,7 +642,7 @@ func (a *AdapterLegacy) Open(features gputypes.Features, limits gputypes.Limits)
 	}
 
 	// Create device using the legacy adapter
-	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), a.capabilities.FeatureLevel)
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel)
 	if err != nil {
 		return hal.OpenDevice{}, err
 	}
@@ -680,7 +674,7 @@ func (a *AdapterLegacy) TextureFormatCapabilities(format gputypes.TextureFormat)
 // SurfaceCapabilities returns surface capabilities.
 func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
 	// Opaque is always supported. Premultiplied requires DirectComposition.
-	alphaModes := []hal.CompositeAlphaMode{hal.CompositeAlphaModeOpaque}
+	alphaModes := []gputypes.CompositeAlphaMode{hal.CompositeAlphaModeOpaque}
 	if dcompAvailable() {
 		alphaModes = append(alphaModes, hal.CompositeAlphaModePremultiplied)
 	}
@@ -690,7 +684,7 @@ func (a *AdapterLegacy) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCap
 			gputypes.TextureFormatBGRA8Unorm,
 			gputypes.TextureFormatRGBA8Unorm,
 		},
-		PresentModes: []hal.PresentMode{hal.PresentModeFifo},
+		PresentModes: []gputypes.PresentMode{hal.PresentModeFifo},
 		AlphaModes:   alphaModes,
 	}
 }

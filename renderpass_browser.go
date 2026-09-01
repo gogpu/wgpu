@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/indirect"
 )
@@ -42,7 +43,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 }
 
 // SetIndexBuffer sets the index buffer.
-func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, offset uint64) {
+func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
 	if buffer == nil || buffer.browser == nil {
 		return
 	}
@@ -52,17 +53,17 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, o
 }
 
 // SetViewport sets the viewport transformation.
-func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	p.browser.SetViewport(x, y, width, height, minDepth, maxDepth)
+func (p *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
+	p.browser.SetViewport(vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
-func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	p.browser.SetScissorRect(x, y, width, height)
+func (p *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
+	p.browser.SetScissorRect(rect.X, rect.Y, rect.Width, rect.Height)
 }
 
 // SetBlendConstant sets the blend constant color.
-func (p *RenderPassEncoder) SetBlendConstant(color *Color) {
+func (p *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if color == nil {
 		return
 	}
@@ -76,13 +77,13 @@ func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
 }
 
 // Draw draws primitives.
-func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	p.browser.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
+	p.browser.Draw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
 // DrawIndexed draws indexed primitives.
-func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	p.browser.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
+	p.browser.DrawIndexed(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

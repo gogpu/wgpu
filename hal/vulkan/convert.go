@@ -502,7 +502,7 @@ func blendOperationToVk(op gputypes.BlendOperation) vk.BlendOp {
 }
 
 // stencilOperationToVk converts HAL stencil operation to Vulkan stencil op.
-func stencilOperationToVk(op hal.StencilOperation) vk.StencilOp {
+func stencilOperationToVk(op gputypes.StencilOperation) vk.StencilOp {
 	switch op {
 	case hal.StencilOperationKeep:
 		return vk.StencilOpKeep

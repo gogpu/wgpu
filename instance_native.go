@@ -13,7 +13,7 @@ import (
 
 // InstanceDescriptor configures instance creation.
 type InstanceDescriptor struct {
-	Backends Backends
+	Backends gputypes.Backends
 	// Flags controls instance features like debug layers and validation.
 	// Use gputypes.InstanceFlagsDebug to enable GPU debug layer.
 	Flags gputypes.InstanceFlags
@@ -116,12 +116,13 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	}
 
 	adapter := &Adapter{
-		id:       adapterID,
-		core:     &coreAdapter,
-		info:     info,
-		features: features,
-		limits:   limits,
-		instance: i,
+		id:        adapterID,
+		core:      &coreAdapter,
+		info:      info,
+		features:  features,
+		limits:    limits,
+		downlevel: coreAdapter.DownlevelCapabilities,
+		instance:  i,
 	}
 	keepAdapter = true
 	return adapter, nil

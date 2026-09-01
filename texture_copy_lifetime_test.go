@@ -5,6 +5,7 @@ package wgpu
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -58,8 +59,8 @@ func TestTextureCopyBufferRefHeldUntilQueueRetirement(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		bufferUsage BufferUsage
-		textureUse  TextureUsage
+		bufferUsage gputypes.BufferUsage
+		textureUse  gputypes.TextureUsage
 		record      func(*CommandEncoder, *Buffer, *Texture)
 	}{
 		{

@@ -2,15 +2,19 @@
 
 package wgpu
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/gogpu/gputypes"
+)
 
 // NewDeviceFromHAL is not supported in the browser.
 // The browser backend uses navigator.gpu (WebGPU JS API), not Go HAL.
 func NewDeviceFromHAL(
 	_ any,
 	_ any,
-	_ Features,
-	_ Limits,
+	_ gputypes.Features,
+	_ gputypes.Limits,
 	_ string,
 ) (*Device, error) {
 	return nil, fmt.Errorf("wgpu: NewDeviceFromHAL not available in browser — use RequestDevice instead")
@@ -22,7 +26,7 @@ func NewSurfaceFromHAL(_ any, _ string) *Surface {
 }
 
 // NewTextureFromHAL is not supported in the browser.
-func NewTextureFromHAL(_ any, _ *Device, _ TextureFormat) *Texture {
+func NewTextureFromHAL(_ any, _ *Device, _ gputypes.TextureFormat) *Texture {
 	return nil
 }
 

@@ -176,7 +176,7 @@ func TestIntegrationCreateTexture(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
 	})
 	if err != nil {
@@ -184,7 +184,7 @@ func TestIntegrationCreateTexture(t *testing.T) {
 	}
 	defer tex.Release()
 
-	if tex.Format() != wgpu.TextureFormatRGBA8Unorm {
+	if tex.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format() = %v, want RGBA8Unorm", tex.Format())
 	}
 }
@@ -202,7 +202,7 @@ func TestIntegrationCreateTextureView(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})
 	if err != nil {
@@ -212,7 +212,7 @@ func TestIntegrationCreateTextureView(t *testing.T) {
 
 	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
 		Label:           "integration-view",
-		Format:          wgpu.TextureFormatRGBA8Unorm,
+		Format:          gputypes.TextureFormatRGBA8Unorm,
 		BaseMipLevel:    0,
 		MipLevelCount:   1,
 		BaseArrayLayer:  0,
@@ -291,7 +291,7 @@ func TestIntegrationCreateBindGroupLayout(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "integration-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -319,7 +319,7 @@ func TestIntegrationCreatePipelineLayout(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "pipeline-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -457,7 +457,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 	// 2. Create bind group layout.
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "compute-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -647,9 +647,9 @@ func TestIntegrationQueueWriteTexture(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
-		ViewFormats:   []wgpu.TextureFormat{wgpu.TextureFormatRGBA8Unorm},
+		ViewFormats:   []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
 	})
 	if err != nil {
 		t.Fatalf("CreateTexture: %v", err)

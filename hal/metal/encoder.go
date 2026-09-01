@@ -815,8 +815,8 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 }
 
 // SetViewport sets the viewport.
-func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	viewport := MTLViewport{OriginX: float64(x), OriginY: float64(y), Width: float64(width), Height: float64(height), ZNear: float64(minDepth), ZFar: float64(maxDepth)}
+func (e *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
+	viewport := MTLViewport{OriginX: float64(vp.X), OriginY: float64(vp.Y), Width: float64(vp.Width), Height: float64(vp.Height), ZNear: float64(vp.MinDepth), ZFar: float64(vp.MaxDepth)}
 	if e.pending != nil {
 		e.pending.viewport = viewport
 		e.pending.viewportSet = true
@@ -828,8 +828,8 @@ func (e *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 }
 
 // SetScissorRect sets the scissor rectangle.
-func (e *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	scissor := MTLScissorRect{X: NSUInteger(x), Y: NSUInteger(y), Width: NSUInteger(width), Height: NSUInteger(height)}
+func (e *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
+	scissor := MTLScissorRect{X: NSUInteger(rect.X), Y: NSUInteger(rect.Y), Width: NSUInteger(rect.Width), Height: NSUInteger(rect.Height)}
 	if e.pending != nil {
 		e.pending.scissor = scissor
 		e.pending.scissorSet = true
@@ -877,16 +877,16 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 }
 
 // Draw draws primitives.
-func (e *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !e.beginNative() {
 		return
 	}
 	_ = MsgSend(e.raw, Sel("drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(firstVertex), uintptr(vertexCount), uintptr(instanceCount), uintptr(firstInstance))
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(args.FirstVertex), uintptr(args.VertexCount), uintptr(args.InstanceCount), uintptr(args.FirstInstance))
 }
 
 // DrawIndexed draws indexed primitives.
-func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.indexBuffer == nil || !e.beginNative() {
 		return
 	}
@@ -895,10 +895,10 @@ func (e *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 	if e.indexFormat == gputypes.IndexFormatUint32 {
 		indexSize = 4
 	}
-	offset := e.indexOffset + uint64(firstIndex)*uint64(indexSize)
+	offset := e.indexOffset + uint64(args.FirstIndex)*uint64(indexSize)
 	_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(indexCount), uintptr(indexType),
-		uintptr(e.indexBuffer.raw), uintptr(offset), uintptr(instanceCount), uintptr(baseVertex), uintptr(firstInstance))
+		uintptr(MTLPrimitiveTypeTriangle), uintptr(args.IndexCount), uintptr(indexType),
+		uintptr(e.indexBuffer.raw), uintptr(offset), uintptr(args.InstanceCount), uintptr(args.BaseVertex), uintptr(args.FirstInstance))
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

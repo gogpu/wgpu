@@ -602,7 +602,7 @@ func TestBlendOperationToVk(t *testing.T) {
 func TestStencilOperationToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		op     hal.StencilOperation
+		op     gputypes.StencilOperation
 		expect vk.StencilOp
 	}{
 		{"Keep", hal.StencilOperationKeep, vk.StencilOpKeep},
@@ -613,7 +613,7 @@ func TestStencilOperationToVk(t *testing.T) {
 		{"DecrementClamp", hal.StencilOperationDecrementClamp, vk.StencilOpDecrementAndClamp},
 		{"IncrementWrap", hal.StencilOperationIncrementWrap, vk.StencilOpIncrementAndWrap},
 		{"DecrementWrap", hal.StencilOperationDecrementWrap, vk.StencilOpDecrementAndWrap},
-		{"Unknown defaults to Keep", hal.StencilOperation(99), vk.StencilOpKeep},
+		{"Unknown defaults to Keep", gputypes.StencilOperation(99), vk.StencilOpKeep},
 	}
 
 	for _, tt := range tests {
@@ -914,14 +914,14 @@ func TestStoreOpToVk(t *testing.T) {
 func TestPresentModeToVk(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   hal.PresentMode
+		mode   gputypes.PresentMode
 		expect vk.PresentModeKHR
 	}{
 		{"Immediate", hal.PresentModeImmediate, vk.PresentModeImmediateKhr},
 		{"Mailbox", hal.PresentModeMailbox, vk.PresentModeMailboxKhr},
 		{"Fifo", hal.PresentModeFifo, vk.PresentModeFifoKhr},
 		{"FifoRelaxed", hal.PresentModeFifoRelaxed, vk.PresentModeFifoRelaxedKhr},
-		{"Unknown defaults to Fifo", hal.PresentMode(99), vk.PresentModeFifoKhr},
+		{"Unknown defaults to Fifo", gputypes.PresentMode(99), vk.PresentModeFifoKhr},
 	}
 
 	for _, tt := range tests {

@@ -37,7 +37,7 @@ type Capabilities struct {
 	AlignmentsMask Alignments
 
 	// DownlevelCapabilities for GL/GLES backends.
-	DownlevelCapabilities DownlevelCapabilities
+	DownlevelCapabilities gputypes.DownlevelCapabilities
 }
 
 // Alignments specifies buffer alignment requirements.
@@ -54,38 +54,6 @@ type Alignments struct {
 	// RayTracingScratchBufferAlignment is the required alignment for AS scratch buffers.
 	RayTracingScratchBufferAlignment uint32
 }
-
-// DownlevelCapabilities describes capabilities for downlevel backends (GL/GLES).
-type DownlevelCapabilities struct {
-	// ShaderModel is the supported shader model (5.0, 5.1, 6.0, etc.).
-	ShaderModel uint32
-
-	// Flags are downlevel-specific capability flags.
-	Flags DownlevelFlags
-}
-
-// DownlevelFlags are capability flags for downlevel backends.
-type DownlevelFlags uint32
-
-const (
-	// DownlevelFlagsComputeShaders indicates compute shader support.
-	DownlevelFlagsComputeShaders DownlevelFlags = 1 << iota
-
-	// DownlevelFlagsFragmentWritableStorage indicates fragment shader writable storage support.
-	DownlevelFlagsFragmentWritableStorage
-
-	// DownlevelFlagsIndirectFirstInstance indicates DrawIndirect with firstInstance support.
-	DownlevelFlagsIndirectFirstInstance
-
-	// DownlevelFlagsBaseVertexBaseInstance indicates baseVertex/baseInstance support.
-	DownlevelFlagsBaseVertexBaseInstance
-
-	// DownlevelFlagsReadOnlyDepthStencil indicates read-only depth/stencil support.
-	DownlevelFlagsReadOnlyDepthStencil
-
-	// DownlevelFlagsAnisotropicFiltering indicates anisotropic filtering support.
-	DownlevelFlagsAnisotropicFiltering
-)
 
 // TextureFormatCapabilities describes texture format capabilities.
 type TextureFormatCapabilities struct {
@@ -131,10 +99,7 @@ type SurfaceCapabilities struct {
 	AlphaModes []gputypes.CompositeAlphaMode
 }
 
-// PresentMode is an alias for gputypes.PresentMode for backward compatibility.
-type PresentMode = gputypes.PresentMode
-
-// PresentMode constants for backward compatibility.
+// PresentMode constants re-exported for convenience.
 const (
 	PresentModeImmediate   = gputypes.PresentModeImmediate
 	PresentModeMailbox     = gputypes.PresentModeMailbox
@@ -142,10 +107,7 @@ const (
 	PresentModeFifoRelaxed = gputypes.PresentModeFifoRelaxed
 )
 
-// CompositeAlphaMode is an alias for gputypes.CompositeAlphaMode for backward compatibility.
-type CompositeAlphaMode = gputypes.CompositeAlphaMode
-
-// CompositeAlphaMode constants for backward compatibility.
+// CompositeAlphaMode constants re-exported for convenience.
 const (
 	CompositeAlphaModeAuto            = gputypes.CompositeAlphaModeAuto
 	CompositeAlphaModeOpaque          = gputypes.CompositeAlphaModeOpaque
@@ -666,19 +628,16 @@ type StencilFaceState struct {
 	Compare gputypes.CompareFunction
 
 	// FailOp is the operation when stencil test fails.
-	FailOp StencilOperation
+	FailOp gputypes.StencilOperation
 
 	// DepthFailOp is the operation when depth test fails.
-	DepthFailOp StencilOperation
+	DepthFailOp gputypes.StencilOperation
 
 	// PassOp is the operation when both tests pass.
-	PassOp StencilOperation
+	PassOp gputypes.StencilOperation
 }
 
-// StencilOperation describes a stencil operation.
-// Canonical definition in gputypes with webgpu.h spec-compliant values.
-type StencilOperation = gputypes.StencilOperation
-
+// StencilOperation constants re-exported for convenience.
 const (
 	StencilOperationKeep           = gputypes.StencilOperationKeep
 	StencilOperationZero           = gputypes.StencilOperationZero

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -40,7 +41,7 @@ type Buffer struct {
 func (b *Buffer) Size() uint64 { return b.core.Size() }
 
 // Usage returns the buffer's usage flags.
-func (b *Buffer) Usage() BufferUsage { return b.core.Usage() }
+func (b *Buffer) Usage() gputypes.BufferUsage { return b.core.Usage() }
 
 // Label returns the buffer's debug label.
 func (b *Buffer) Label() string { return b.core.Label() }

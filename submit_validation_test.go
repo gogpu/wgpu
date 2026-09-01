@@ -131,7 +131,7 @@ func TestSubmitWithDestroyedTexture(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageCopySrc | wgpu.TextureUsageCopyDst,
 	})
 	if err != nil {
@@ -390,7 +390,7 @@ func TestSubmitWithDestroyedBindGroup(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "val-b5-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -443,7 +443,7 @@ func TestSubmitWithValidBindGroup(t *testing.T) {
 
 	layout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "val-b5-valid-bgl",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout: %v", err)
@@ -502,7 +502,7 @@ func TestSubmitWithReleasedBufferInBindGroup(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "val-a6-bg-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -569,7 +569,7 @@ func TestSubmitWithReleasedTextureInBindGroup(t *testing.T) {
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
-		Format:        wgpu.TextureFormatRGBA8Unorm,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         wgpu.TextureUsageTextureBinding,
 	})
 	if err != nil {
@@ -584,7 +584,7 @@ func TestSubmitWithReleasedTextureInBindGroup(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "val-a6-bg-tex-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -657,7 +657,7 @@ func TestSubmitReleasedBufferBeatsReleasedBindGroup(t *testing.T) {
 
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "val-a6-precedence-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -728,7 +728,7 @@ func TestSubmitResourceErrorWinsAcrossBindGroups(t *testing.T) {
 
 	bufLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "val-a6-cross-buf-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -746,7 +746,7 @@ func TestSubmitResourceErrorWinsAcrossBindGroups(t *testing.T) {
 
 	emptyLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label:   "val-a6-cross-empty-layout",
-		Entries: []wgpu.BindGroupLayoutEntry{},
+		Entries: []gputypes.BindGroupLayoutEntry{},
 	})
 	if err != nil {
 		t.Fatalf("CreateBindGroupLayout empty: %v", err)
