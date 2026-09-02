@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core"
 )
 
 func TestValidateIndirectCountBuffers(t *testing.T) {
@@ -78,6 +79,31 @@ func TestValidateIndirectCountBuffers(t *testing.T) {
 			maxDrawCount: 1,
 			stride:       drawIndirectRecordSize,
 			wantErr:      ErrDrawIndirectBufferOverrun,
+		},
+		{
+			name:         "nil count buffer",
+			indirect:     indirect,
+			count:        nil,
+			maxDrawCount: 1,
+			stride:       drawIndirectRecordSize,
+			wantErrMsg:   "count buffer is nil",
+		},
+		{
+			name:         "missing count usage",
+			indirect:     indirect,
+			count:        NewTestBuffer(4, gputypes.BufferUsageCopyDst, "no-indirect-count"),
+			maxDrawCount: 1,
+			stride:       drawIndirectRecordSize,
+			wantErr:      ErrDrawIndirectBufferUsage,
+		},
+		{
+			name:         "unaligned count offset",
+			indirect:     indirect,
+			count:        count,
+			countOff:     1,
+			maxDrawCount: 1,
+			stride:       drawIndirectRecordSize,
+			wantErr:      ErrDrawIndirectOffsetAlignment,
 		},
 		{
 			name:         "indirect span overrun",
@@ -209,4 +235,84 @@ func TestExecuteIndirectCountDraw_ZeroCountNoOp(t *testing.T) {
 	if recorded {
 		t.Fatal("zero maxDrawCount should be a no-op")
 	}
+}
+
+func TestExecuteIndirectCountDraw_IndexedPreValidateFails(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	pass := &RenderPassEncoder{
+		encoder:     NewTestCommandEncoderForDevice(device),
+		pipelineSet: true,
+	}
+	indirect := NewTestBuffer(80, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+	recorded := false
+	pass.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndexedIndirect",
+		featureResource: "MultiDrawIndexedIndirectCount",
+		indirectBuffer:  indirect,
+		countBuffer:     count,
+		maxDrawCount:    1,
+		recordStride:    drawIndexedIndirectRecordSize,
+		preValidate:     pass.validateIndexedIndirectCountPreconditions,
+		record:          func() { recorded = true },
+	})
+	if recorded {
+		t.Fatal("preValidate should block record without index buffer")
+	}
+}
+
+func TestExecuteIndirectCountDraw_IndexedSuccess(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	pass := &RenderPassEncoder{
+		encoder:           NewTestCommandEncoderForDevice(device),
+		pipelineSet:       true,
+		indexBufferSet:    true,
+		indexBufferFormat: gputypes.IndexFormatUint32,
+	}
+	indirect := NewTestBuffer(80, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+	recorded := false
+	pass.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndexedIndirect",
+		featureResource: "MultiDrawIndexedIndirectCount",
+		indirectBuffer:  indirect,
+		countBuffer:     count,
+		maxDrawCount:    1,
+		recordStride:    drawIndexedIndirectRecordSize,
+		preValidate:     pass.validateIndexedIndirectCountPreconditions,
+		record:          func() { recorded = true },
+	})
+	if !recorded {
+		t.Fatal("indexed indirect count draw should record when preconditions pass")
+	}
+}
+
+func TestMultiDrawIndirectCount_PublicAPI(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	pass := &RenderPassEncoder{
+		encoder:     NewTestCommandEncoderForDevice(device),
+		pipelineSet: true,
+		core:        &core.CoreRenderPassEncoder{},
+	}
+	indirect := NewTestBuffer(64, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+	pass.MultiDrawIndirectCount(indirect, 0, count, 0, 1)
+}
+
+func TestMultiDrawIndexedIndirectCount_PublicAPI(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	pass := &RenderPassEncoder{
+		encoder:           NewTestCommandEncoderForDevice(device),
+		pipelineSet:       true,
+		indexBufferSet:    true,
+		indexBufferFormat: gputypes.IndexFormatUint32,
+		core:              &core.CoreRenderPassEncoder{},
+	}
+	indirect := NewTestBuffer(80, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+	pass.MultiDrawIndexedIndirectCount(indirect, 0, count, 0, 1)
 }

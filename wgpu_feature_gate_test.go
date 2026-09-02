@@ -341,3 +341,119 @@ func TestFeatureGate_IndirectFirstInstance_WithFeature(t *testing.T) {
 		t.Fatalf("Finish() unexpected error: %v", err)
 	}
 }
+
+func TestFeatureGate_IndirectFirstInstance_DrawIndexed_NoFeature(t *testing.T) {
+	_, _, device := newDeviceWithoutFeatures(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Size:  16,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indexBuf.Release()
+	pass.SetIndexBuffer(indexBuf, gputypes.IndexFormatUint32, 0)
+
+	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1, FirstInstance: 1})
+	_ = pass.End()
+	_, finishErr := encoder.Finish()
+	if finishErr == nil {
+		t.Fatal("Finish() should fail without FeatureIndirectFirstInstance")
+	}
+	var fe *core.FeatureError
+	if !errors.As(finishErr, &fe) {
+		t.Fatalf("error = %T (%v), want *core.FeatureError", finishErr, finishErr)
+	}
+}
+
+func TestFeatureGate_MultiDrawIndexedIndirect_NoFeature(t *testing.T) {
+	_, _, device := newDeviceWithoutFeatures(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Size:  16,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indexBuf.Release()
+	pass.SetIndexBuffer(indexBuf, gputypes.IndexFormatUint32, 0)
+
+	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Size:  40,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indirectBuf.Release()
+
+	pass.MultiDrawIndexedIndirect(indirectBuf, 0, 2)
+	_ = pass.End()
+	_, finishErr := encoder.Finish()
+	if finishErr == nil {
+		t.Fatal("Finish() should fail without FeatureMultiDrawIndirect")
+	}
+	var fe *core.FeatureError
+	if !errors.As(finishErr, &fe) {
+		t.Fatalf("error = %T (%v), want *core.FeatureError", finishErr, finishErr)
+	}
+}
+
+func TestFeatureGate_MultiDrawIndexedIndirectCount_NoFeature(t *testing.T) {
+	_, _, device := newDeviceWithoutFeatures(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Size:  16,
+		Usage: wgpu.BufferUsageIndex,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indexBuf.Release()
+	pass.SetIndexBuffer(indexBuf, gputypes.IndexFormatUint32, 0)
+
+	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{Size: 40, Usage: wgpu.BufferUsageIndirect})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indirectBuf.Release()
+	countBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{Size: 4, Usage: wgpu.BufferUsageIndirect})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer countBuf.Release()
+
+	pass.MultiDrawIndexedIndirectCount(indirectBuf, 0, countBuf, 0, 2)
+	_ = pass.End()
+	_, finishErr := encoder.Finish()
+	if finishErr == nil {
+		t.Fatal("Finish() should fail without FeatureMultiDrawIndirectCount")
+	}
+	var fe *core.FeatureError
+	if !errors.As(finishErr, &fe) {
+		t.Fatalf("error = %T (%v), want *core.FeatureError", finishErr, finishErr)
+	}
+}
