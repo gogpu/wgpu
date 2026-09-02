@@ -106,7 +106,7 @@ func (mockRenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buf
 }
 func (mockRenderPassEncoder) DrawIndexedIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
 }
-func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle)                              {}
+func (mockRenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 
 // mockComputePassEncoder implements hal.ComputePassEncoder (minimal)
 func (mockComputePassEncoder) End()                                               {}

@@ -56,22 +56,22 @@ var renderPassPool = sync.Pool{
 
 // Device implements hal.Device for Vulkan.
 type Device struct {
-	handle                    vk.Device
-	physicalDevice            vk.PhysicalDevice
-	instance                  *Instance
-	graphicsFamily            uint32
-	allocator                 *memory.GpuAllocator
-	cmds                      *vk.Commands
-	supportsMultiDrawIndirect bool
-	supportsDrawIndirectCount bool
-	maxDrawIndirectCount      uint32
-	cmdDrawIndirectCount      pfnCmdDrawIndirectCount
+	handle                      vk.Device
+	physicalDevice              vk.PhysicalDevice
+	instance                    *Instance
+	graphicsFamily              uint32
+	allocator                   *memory.GpuAllocator
+	cmds                        *vk.Commands
+	supportsMultiDrawIndirect   bool
+	supportsDrawIndirectCount   bool
+	maxDrawIndirectCount        uint32
+	cmdDrawIndirectCount        pfnCmdDrawIndirectCount
 	cmdDrawIndexedIndirectCount pfnCmdDrawIndexedIndirectCount
-	descriptorAllocator       *DescriptorAllocator // Descriptor pool management for bind groups
-	queue                     *Queue               // Primary queue (for swapchain synchronization)
-	renderPassCache           *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
-	pipelineCache             vk.PipelineCache     // Driver-compiled ISA cache (#331)
-	pipelineCachePath         string               // Disk path for pipeline cache persistence
+	descriptorAllocator         *DescriptorAllocator // Descriptor pool management for bind groups
+	queue                       *Queue               // Primary queue (for swapchain synchronization)
+	renderPassCache             *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
+	pipelineCache               vk.PipelineCache     // Driver-compiled ISA cache (#331)
+	pipelineCachePath           string               // Disk path for pipeline cache persistence
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain

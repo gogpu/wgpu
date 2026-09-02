@@ -400,14 +400,14 @@ func (p *RenderPassEncoder) MultiDrawIndirectCount(
 	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
 ) {
 	p.executeIndirectCountDraw(indirectCountDrawConfig{
-		validateDrawOp:    "DrawIndirect",
-		featureResource:   "MultiDrawIndirectCount",
-		indirectBuffer:    indirectBuffer,
-		indirectOffset:    indirectOffset,
-		countBuffer:       countBuffer,
-		countOffset:       countOffset,
-		maxDrawCount:      maxDrawCount,
-		recordStride:      drawIndirectRecordSize,
+		validateDrawOp:  "DrawIndirect",
+		featureResource: "MultiDrawIndirectCount",
+		indirectBuffer:  indirectBuffer,
+		indirectOffset:  indirectOffset,
+		countBuffer:     countBuffer,
+		countOffset:     countOffset,
+		maxDrawCount:    maxDrawCount,
+		recordStride:    drawIndirectRecordSize,
 		record: func() {
 			p.core.DrawIndirectCount(
 				indirectBuffer.coreBuffer(), indirectOffset,
@@ -423,15 +423,15 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirectCount(
 	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
 ) {
 	p.executeIndirectCountDraw(indirectCountDrawConfig{
-		validateDrawOp:    "DrawIndexedIndirect",
-		featureResource:   "MultiDrawIndexedIndirectCount",
-		indirectBuffer:    indirectBuffer,
-		indirectOffset:    indirectOffset,
-		countBuffer:       countBuffer,
-		countOffset:       countOffset,
-		maxDrawCount:      maxDrawCount,
-		recordStride:      drawIndexedIndirectRecordSize,
-		preValidate:       p.validateIndexedIndirectCountPreconditions,
+		validateDrawOp:  "DrawIndexedIndirect",
+		featureResource: "MultiDrawIndexedIndirectCount",
+		indirectBuffer:  indirectBuffer,
+		indirectOffset:  indirectOffset,
+		countBuffer:     countBuffer,
+		countOffset:     countOffset,
+		maxDrawCount:    maxDrawCount,
+		recordStride:    drawIndexedIndirectRecordSize,
+		preValidate:     p.validateIndexedIndirectCountPreconditions,
 		record: func() {
 			p.core.DrawIndexedIndirectCount(
 				indirectBuffer.coreBuffer(), indirectOffset,

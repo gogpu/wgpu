@@ -402,37 +402,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		Entries: halEntries,
 	}
 
-	// Build buffer metadata for core validation.
-	var bufferInfos []core.BindGroupBufferInfo
-	var samplerInfos []core.BindGroupSamplerInfo
-	var textureInfos []core.BindGroupTextureInfo
-	for _, entry := range desc.Entries {
-		if entry.Buffer != nil {
-			bufferInfos = append(bufferInfos, core.BindGroupBufferInfo{
-				Binding:    entry.Binding,
-				Usage:      entry.Buffer.Usage(),
-				BufferSize: entry.Buffer.Size(),
-				Offset:     entry.Offset,
-				Size:       entry.Size,
-			})
-		}
-		if entry.Sampler != nil {
-			samplerInfos = append(samplerInfos, core.BindGroupSamplerInfo{
-				Binding: entry.Binding,
-				Desc: &hal.SamplerDescriptor{
-					MagFilter:    entry.Sampler.magFilter,
-					MinFilter:    entry.Sampler.minFilter,
-					MipmapFilter: entry.Sampler.mipmapFilter,
-				},
-			})
-		}
-		if entry.TextureView != nil && entry.TextureView.texture != nil {
-			textureInfos = append(textureInfos, core.BindGroupTextureInfo{
-				Binding: entry.Binding,
-				Format:  entry.TextureView.texture.Format(),
-			})
-		}
-	}
+	bufferInfos, samplerInfos, textureInfos := buildBindGroupValidationInfos(desc.Entries)
 
 	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.entries, bufferInfos, samplerInfos, textureInfos, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
@@ -448,29 +418,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// to be validated against shader requirements at draw/dispatch time.
 	// Matches Rust wgpu-core's BindGroup.late_buffer_binding_infos population
 	// in Device::create_bind_group (binding_model.rs:1187-1189).
-	var lateInfos []LateBufferBindingInfo
-	entryMap := buildBindGroupEntryMap(desc.Entries)
-	for _, layoutEntry := range desc.Layout.entries {
-		if layoutEntry.Buffer == nil || layoutEntry.Buffer.MinBindingSize != 0 {
-			continue
-		}
-		// This is a buffer entry with MinBindingSize == 0.
-		var boundSize uint64
-		if bgEntry, ok := entryMap[layoutEntry.Binding]; ok && bgEntry.Buffer != nil {
-			boundSize = bgEntry.Size
-			if boundSize == 0 {
-				// Size == 0 means "rest of buffer" — use actual buffer size minus offset.
-				bufSize := bgEntry.Buffer.Size()
-				if bgEntry.Offset < bufSize {
-					boundSize = bufSize - bgEntry.Offset
-				}
-			}
-		}
-		lateInfos = append(lateInfos, LateBufferBindingInfo{
-			BindingIndex: layoutEntry.Binding,
-			Size:         boundSize,
-		})
-	}
+	lateInfos := buildLateBufferBindingInfos(desc.Layout.entries, desc.Entries)
 
 	// Collect buffer and texture references for submit-time validation (VAL-A6).
 	boundBuffers, boundTextures := collectBindGroupResources(desc.Entries)
@@ -508,6 +456,69 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	bg.cleanup = registerBindGroupCleanup(bg, d, desc.Label)
 
 	return bg, nil
+}
+
+func buildBindGroupValidationInfos(entries []BindGroupEntry) (
+	[]core.BindGroupBufferInfo,
+	[]core.BindGroupSamplerInfo,
+	[]core.BindGroupTextureInfo,
+) {
+	var bufferInfos []core.BindGroupBufferInfo
+	var samplerInfos []core.BindGroupSamplerInfo
+	var textureInfos []core.BindGroupTextureInfo
+	for _, entry := range entries {
+		if entry.Buffer != nil {
+			bufferInfos = append(bufferInfos, core.BindGroupBufferInfo{
+				Binding:    entry.Binding,
+				Usage:      entry.Buffer.Usage(),
+				BufferSize: entry.Buffer.Size(),
+				Offset:     entry.Offset,
+				Size:       entry.Size,
+			})
+		}
+		if entry.Sampler != nil {
+			samplerInfos = append(samplerInfos, core.BindGroupSamplerInfo{
+				Binding: entry.Binding,
+				Desc: &hal.SamplerDescriptor{
+					MagFilter:    entry.Sampler.magFilter,
+					MinFilter:    entry.Sampler.minFilter,
+					MipmapFilter: entry.Sampler.mipmapFilter,
+				},
+			})
+		}
+		if entry.TextureView != nil && entry.TextureView.texture != nil {
+			textureInfos = append(textureInfos, core.BindGroupTextureInfo{
+				Binding: entry.Binding,
+				Format:  entry.TextureView.texture.Format(),
+			})
+		}
+	}
+	return bufferInfos, samplerInfos, textureInfos
+}
+
+func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []LateBufferBindingInfo {
+	entryMap := buildBindGroupEntryMap(entries)
+	var lateInfos []LateBufferBindingInfo
+	for _, layoutEntry := range layoutEntries {
+		if layoutEntry.Buffer == nil || layoutEntry.Buffer.MinBindingSize != 0 {
+			continue
+		}
+		var boundSize uint64
+		if bgEntry, ok := entryMap[layoutEntry.Binding]; ok && bgEntry.Buffer != nil {
+			boundSize = bgEntry.Size
+			if boundSize == 0 {
+				bufSize := bgEntry.Buffer.Size()
+				if bgEntry.Offset < bufSize {
+					boundSize = bufSize - bgEntry.Offset
+				}
+			}
+		}
+		lateInfos = append(lateInfos, LateBufferBindingInfo{
+			BindingIndex: layoutEntry.Binding,
+			Size:         boundSize,
+		})
+	}
+	return lateInfos
 }
 
 // collectBindGroupResources extracts buffer and texture references from bind

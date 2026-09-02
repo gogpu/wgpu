@@ -76,13 +76,14 @@ func TestValidateSPIRVShaderFeatures_Float64_WithFeature(t *testing.T) {
 const spirvCapShader = 1
 
 func buildSPIRVWithCapabilities(caps ...uint32) []uint32 {
-	words := []uint32{
+	words := make([]uint32, 0, 5+2*len(caps))
+	words = append(words,
 		spirvMagic,
 		0x00010400, // SPIR-V 1.4
 		0,
 		1,
 		0,
-	}
+	)
 	for _, capID := range caps {
 		words = append(words, (2<<16)|spirvOpCodeCap, capID)
 	}

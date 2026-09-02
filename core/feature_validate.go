@@ -17,16 +17,16 @@ type FeatureRequirement struct {
 // Rust wgpu-core reference paths for the feature registry.
 const (
 	rustRefDeviceResource = "wgpu-core/device/resource.rs"
-	rustRefCommandRender    = "wgpu-core/command/render.rs"
-	rustRefRaytracing       = "internal/raytracing/validate.go"
+	rustRefCommandRender  = "wgpu-core/command/render.rs"
+	rustRefRaytracing     = "internal/raytracing/validate.go"
 )
 
 // Resource entry points referenced by multiple feature requirements.
 const (
-	resourceCreateTexture       = "CreateTexture"
-	resourceCreateShaderModule  = "CreateShaderModule"
+	resourceCreateTexture        = "CreateTexture"
+	resourceCreateShaderModule   = "CreateShaderModule"
 	resourceCreateRenderPipeline = "CreateRenderPipeline"
-	resourceCreateQuerySet      = "CreateQuerySet"
+	resourceCreateQuerySet       = "CreateQuerySet"
 )
 
 // AllFeatureRequirements is the canonical registry of feature-gated operations.

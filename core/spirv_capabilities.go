@@ -21,10 +21,10 @@ const (
 	spirvCapGroupNonUniform           = 61
 	spirvCapGroupNonUniformVote       = 62
 	spirvCapGroupNonUniformArithmetic = 63
-	spirvCapGroupNonUniformBallot      = 64
-	spirvCapGroupNonUniformShuffle     = 65
-	spirvCapGroupNonUniformShuffleRel  = 66
-	spirvCapGroupNonUniformQuad        = 68
+	spirvCapGroupNonUniformBallot     = 64
+	spirvCapGroupNonUniformShuffle    = 65
+	spirvCapGroupNonUniformShuffleRel = 66
+	spirvCapGroupNonUniformQuad       = 68
 )
 
 func scanSPIRVCapabilities(spirv []uint32) ([]uint32, error) {

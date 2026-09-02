@@ -86,7 +86,7 @@ func TestValidateRenderPipelineDescriptor_UnclippedDepth_NoFeature(t *testing.T)
 			Module:     mockShaderModule{},
 			EntryPoint: "vs_main",
 		},
-		Primitive: gputypes.PrimitiveState{UnclippedDepth: true},
+		Primitive:   gputypes.PrimitiveState{UnclippedDepth: true},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
 	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))

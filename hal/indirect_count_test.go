@@ -59,5 +59,5 @@ func TestRecordIndirectCountMax_IgnoresCountBuffer(t *testing.T) {
 
 type bufferHandle uintptr
 
-func (bufferHandle) Destroy()           {}
+func (bufferHandle) Destroy()                {}
 func (h bufferHandle) NativeHandle() uintptr { return uintptr(h) }
