@@ -145,16 +145,19 @@ func TestVulkanComputeStorageBuffer(t *testing.T) {
 
 	t.Run("binding type conversion", func(t *testing.T) {
 		tests := []struct {
-			bindingType gputypes.BufferBindingType
-			expect      vk.DescriptorType
+			bindingType      gputypes.BufferBindingType
+			hasDynamicOffset bool
+			expect           vk.DescriptorType
 		}{
-			{gputypes.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
-			{gputypes.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
-			{gputypes.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
+			{gputypes.BufferBindingTypeStorage, false, vk.DescriptorTypeStorageBuffer},
+			{gputypes.BufferBindingTypeStorage, true, vk.DescriptorTypeStorageBufferDynamic},
+			{gputypes.BufferBindingTypeReadOnlyStorage, false, vk.DescriptorTypeStorageBuffer},
+			{gputypes.BufferBindingTypeUniform, false, vk.DescriptorTypeUniformBuffer},
+			{gputypes.BufferBindingTypeUniform, true, vk.DescriptorTypeUniformBufferDynamic},
 		}
 		for _, tt := range tests {
-			if got := bufferBindingTypeToVk(tt.bindingType); got != tt.expect {
-				t.Errorf("bufferBindingTypeToVk(%v) = %v, want %v", tt.bindingType, got, tt.expect)
+			if got := bufferBindingTypeToVk(tt.bindingType, tt.hasDynamicOffset); got != tt.expect {
+				t.Errorf("bufferBindingTypeToVk(%v, dynamic=%v) = %v, want %v", tt.bindingType, tt.hasDynamicOffset, got, tt.expect)
 			}
 		}
 	})

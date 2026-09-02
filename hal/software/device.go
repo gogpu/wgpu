@@ -142,9 +142,21 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 // DestroySampler is a no-op.
 func (d *Device) DestroySampler(_ hal.Sampler) {}
 
+// BindGroupLayout stores layout entries for the software backend.
+// Entries are needed at draw time to determine which buffer bindings
+// have HasDynamicOffset and should consume dynamic offset values.
+type BindGroupLayout struct {
+	Resource
+	entries []gputypes.BindGroupLayoutEntry
+}
+
 // CreateBindGroupLayout creates a software bind group layout.
-func (d *Device) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	return &Resource{}, nil
+func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
+	bgl := &BindGroupLayout{}
+	if desc != nil {
+		bgl.entries = desc.Entries
+	}
+	return bgl, nil
 }
 
 // DestroyBindGroupLayout is a no-op.
@@ -152,15 +164,28 @@ func (d *Device) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
 
 // CreateBindGroup creates a software bind group.
 // It resolves handle-based entries to typed software resources using the device registry.
+// Layout entries are inspected to build the hasDynamicOffset map so that dynamic
+// offsets are only applied to bindings explicitly marked with HasDynamicOffset.
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
 	bg := &BindGroup{
-		desc:           desc,
-		textureViews:   make(map[uint32]*TextureView),
-		buffers:        make(map[uint32]*Buffer),
-		bufferBindings: make(map[uint32]bufferSlice),
-		samplers:       make(map[uint32]*SamplerResource),
+		desc:             desc,
+		textureViews:     make(map[uint32]*TextureView),
+		buffers:          make(map[uint32]*Buffer),
+		bufferBindings:   make(map[uint32]bufferSlice),
+		samplers:         make(map[uint32]*SamplerResource),
+		hasDynamicOffset: make(map[uint32]bool),
 	}
+
+	// Extract HasDynamicOffset from layout entries.
 	if desc != nil {
+		if bgl, ok := desc.Layout.(*BindGroupLayout); ok && bgl != nil {
+			for _, le := range bgl.entries {
+				if le.Buffer != nil && le.Buffer.HasDynamicOffset {
+					bg.hasDynamicOffset[le.Binding] = true
+				}
+			}
+		}
+
 		for _, entry := range desc.Entries {
 			switch res := entry.Resource.(type) {
 			case gputypes.TextureViewBinding:

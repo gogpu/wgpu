@@ -741,6 +741,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		if bg == nil {
 			continue
 		}
+		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
 		dynIdx := 0
 		for bindingIdx, bs := range bg.bufferBindings {
 			if bs.buf == nil {
@@ -749,7 +750,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 			bs.buf.mu.Lock()
 			data := bs.buf.data
 			off := bs.offset
-			if dynIdx < len(bg.dynamicOffsets) {
+			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
 				off += uint64(bg.dynamicOffsets[dynIdx])
 				dynIdx++
 			}

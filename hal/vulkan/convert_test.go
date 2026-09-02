@@ -358,19 +358,23 @@ func TestShaderStagesToVk(t *testing.T) {
 // TestBufferBindingTypeToVk tests buffer binding type conversions.
 func TestBufferBindingTypeToVk(t *testing.T) {
 	tests := []struct {
-		name        string
-		bindingType gputypes.BufferBindingType
-		expect      vk.DescriptorType
+		name             string
+		bindingType      gputypes.BufferBindingType
+		hasDynamicOffset bool
+		expect           vk.DescriptorType
 	}{
-		{"Uniform", gputypes.BufferBindingTypeUniform, vk.DescriptorTypeUniformBuffer},
-		{"Storage", gputypes.BufferBindingTypeStorage, vk.DescriptorTypeStorageBuffer},
-		{"ReadOnlyStorage", gputypes.BufferBindingTypeReadOnlyStorage, vk.DescriptorTypeStorageBuffer},
-		{"Unknown defaults to Uniform", gputypes.BufferBindingType(99), vk.DescriptorTypeUniformBuffer},
+		{"Uniform", gputypes.BufferBindingTypeUniform, false, vk.DescriptorTypeUniformBuffer},
+		{"UniformDynamic", gputypes.BufferBindingTypeUniform, true, vk.DescriptorTypeUniformBufferDynamic},
+		{"Storage", gputypes.BufferBindingTypeStorage, false, vk.DescriptorTypeStorageBuffer},
+		{"StorageDynamic", gputypes.BufferBindingTypeStorage, true, vk.DescriptorTypeStorageBufferDynamic},
+		{"ReadOnlyStorage", gputypes.BufferBindingTypeReadOnlyStorage, false, vk.DescriptorTypeStorageBuffer},
+		{"ReadOnlyStorageDynamic", gputypes.BufferBindingTypeReadOnlyStorage, true, vk.DescriptorTypeStorageBufferDynamic},
+		{"Unknown defaults to Uniform", gputypes.BufferBindingType(99), false, vk.DescriptorTypeUniformBuffer},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := bufferBindingTypeToVk(tt.bindingType)
+			got := bufferBindingTypeToVk(tt.bindingType, tt.hasDynamicOffset)
 			if got != tt.expect {
 				t.Errorf("bufferBindingTypeToVk() = %v, want %v", got, tt.expect)
 			}

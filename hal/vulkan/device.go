@@ -952,14 +952,24 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			StageFlags:      shaderStagesToVk(entry.Visibility),
 		}
 
-		// Determine descriptor type based on which binding is set
+		// Determine descriptor type based on which binding is set.
+		// For buffers, pass HasDynamicOffset so Vulkan gets the correct
+		// dynamic descriptor type (VK_DESCRIPTOR_TYPE_*_BUFFER_DYNAMIC).
 		switch {
 		case entry.Buffer != nil:
-			binding.DescriptorType = bufferBindingTypeToVk(entry.Buffer.Type)
-			if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
-				counts.UniformBuffers++
+			binding.DescriptorType = bufferBindingTypeToVk(entry.Buffer.Type, entry.Buffer.HasDynamicOffset)
+			if entry.Buffer.HasDynamicOffset {
+				if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
+					counts.UniformBuffersDynamic++
+				} else {
+					counts.StorageBuffersDynamic++
+				}
 			} else {
-				counts.StorageBuffers++
+				if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
+					counts.UniformBuffers++
+				} else {
+					counts.StorageBuffers++
+				}
 			}
 		case entry.Sampler != nil:
 			binding.DescriptorType = vk.DescriptorTypeSampler

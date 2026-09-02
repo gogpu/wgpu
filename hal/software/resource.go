@@ -424,12 +424,13 @@ type bufferSlice struct {
 
 type BindGroup struct {
 	Resource
-	desc           *hal.BindGroupDescriptor
-	textureViews   map[uint32]*TextureView     // binding index -> resolved texture view
-	buffers        map[uint32]*Buffer          // binding index -> resolved buffer (legacy, offset=0)
-	bufferBindings map[uint32]bufferSlice      // binding index -> buffer + offset/size
-	samplers       map[uint32]*SamplerResource // binding index -> resolved sampler
-	dynamicOffsets []uint32                    // applied via SetBindGroup
+	desc             *hal.BindGroupDescriptor
+	textureViews     map[uint32]*TextureView     // binding index -> resolved texture view
+	buffers          map[uint32]*Buffer          // binding index -> resolved buffer (legacy, offset=0)
+	bufferBindings   map[uint32]bufferSlice      // binding index -> buffer + offset/size
+	samplers         map[uint32]*SamplerResource // binding index -> resolved sampler
+	dynamicOffsets   []uint32                    // applied via SetBindGroup
+	hasDynamicOffset map[uint32]bool             // binding index -> true if HasDynamicOffset
 }
 
 // ComputePipeline stores compute pipeline configuration for the software backend.
