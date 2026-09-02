@@ -55,6 +55,44 @@ func TestValidateFloat32FilterableBindings_WithFeature(t *testing.T) {
 	}
 }
 
+func TestValidateFloat32FilterableBindings_EmptyTextures(t *testing.T) {
+	t.Parallel()
+	if err := validateFloat32FilterableBindings(nil, nil, nil, gputypes.Features(0)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFloat32FilterableBindings_NonFloatFormatSkipped(t *testing.T) {
+	t.Parallel()
+	layout := []gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Texture: &gputypes.TextureBindingLayout{SampleType: gputypes.TextureSampleTypeFloat}},
+	}
+	textures := []BindGroupTextureInfo{{Binding: 0, Format: gputypes.TextureFormatRGBA8Unorm}}
+	if err := validateFloat32FilterableBindings(layout, nil, textures, gputypes.Features(0)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSamplerUsesFiltering(t *testing.T) {
+	t.Parallel()
+	if samplerUsesFiltering(nil) {
+		t.Fatal("nil sampler should not use filtering")
+	}
+	if !samplerUsesFiltering(&hal.SamplerDescriptor{MinFilter: gputypes.FilterModeLinear}) {
+		t.Fatal("linear min filter should count as filtering")
+	}
+}
+
+func TestIsUnfilterable32BitFloatFormat(t *testing.T) {
+	t.Parallel()
+	if !isUnfilterable32BitFloatFormat(gputypes.TextureFormatRG32Float) {
+		t.Fatal("RG32Float should be unfilterable")
+	}
+	if isUnfilterable32BitFloatFormat(gputypes.TextureFormatRGBA8Unorm) {
+		t.Fatal("RGBA8Unorm should not be unfilterable 32-bit float")
+	}
+}
+
 func TestValidateSPIRVShaderFeatures_Float64_NoFeature(t *testing.T) {
 	t.Parallel()
 	spirv := buildSPIRVWithCapabilities(spirvCapFloat64, spirvCapShader)

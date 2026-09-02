@@ -45,7 +45,7 @@ func scanSPIRVCapabilities(spirv []uint32) ([]uint32, error) {
 		if i+wordCount > len(spirv) {
 			break
 		}
-		if opcode == spirvOpCodeCap && wordCount >= 2 {
+		if opcode == spirvOpCodeCap && wordCount >= 2 && i+1 < len(spirv) {
 			caps = append(caps, spirv[i+1])
 		}
 		i += wordCount

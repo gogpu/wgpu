@@ -143,3 +143,70 @@ func TestValidateIndexedIndirectCountPreconditions(t *testing.T) {
 		t.Fatalf("error = %v, want ErrDrawIndexFormatMismatch", err)
 	}
 }
+
+func TestExecuteIndirectCountDraw_FeatureMissing(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(0)
+	pass := &RenderPassEncoder{
+		encoder:     NewTestCommandEncoderForDevice(device),
+		pipelineSet: true,
+	}
+	indirect := NewTestBuffer(64, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+
+	pass.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndirect",
+		featureResource: "MultiDrawIndirectCount",
+		indirectBuffer:  indirect,
+		countBuffer:     count,
+		maxDrawCount:    1,
+		recordStride:    drawIndirectRecordSize,
+		record:          func() { t.Fatal("record should not run without feature") },
+	})
+}
+
+func TestExecuteIndirectCountDraw_RecordsAndTracks(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	enc := NewTestCommandEncoderForDevice(device)
+	pass := &RenderPassEncoder{encoder: enc, pipelineSet: true}
+	indirect := NewTestBuffer(64, gputypes.BufferUsageIndirect, "indirect")
+	count := NewTestBuffer(4, gputypes.BufferUsageIndirect, "count")
+
+	recorded := false
+	pass.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndirect",
+		featureResource: "MultiDrawIndirectCount",
+		indirectBuffer:  indirect,
+		countBuffer:     count,
+		maxDrawCount:    1,
+		recordStride:    drawIndirectRecordSize,
+		record:          func() { recorded = true },
+	})
+	if !recorded {
+		t.Fatal("record callback not invoked")
+	}
+	if len(enc.trackedRefs) == 0 {
+		t.Fatal("expected tracked buffer refs")
+	}
+	if len(enc.usedBuffers) == 0 {
+		t.Fatal("expected usedBuffers tracking")
+	}
+}
+
+func TestExecuteIndirectCountDraw_ZeroCountNoOp(t *testing.T) {
+	t.Parallel()
+	device := NewTestDeviceWithFeatures(gputypes.Features(gputypes.FeatureMultiDrawIndirectCount))
+	pass := &RenderPassEncoder{
+		encoder:     NewTestCommandEncoderForDevice(device),
+		pipelineSet: true,
+	}
+	recorded := false
+	pass.executeIndirectCountDraw(indirectCountDrawConfig{
+		maxDrawCount: 0,
+		record:       func() { recorded = true },
+	})
+	if recorded {
+		t.Fatal("zero maxDrawCount should be a no-op")
+	}
+}

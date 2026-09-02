@@ -243,4 +243,101 @@ func TestFeatureGate_CreateQuerySet_WithFeature(t *testing.T) {
 	if qs.Count() != 2 {
 		t.Errorf("Count() = %d, want 2", qs.Count())
 	}
+	if qs.Type() != wgpu.QueryTypeTimestamp {
+		t.Errorf("Type() = %v, want Timestamp", qs.Type())
+	}
+}
+
+func TestFeatureGate_CreateQuerySet_NilDescriptor(t *testing.T) {
+	_, _, device := newDeviceWithoutFeatures(t)
+	defer device.Release()
+
+	if _, err := device.CreateQuerySet(nil); err == nil {
+		t.Fatal("expected error for nil descriptor")
+	}
+}
+
+func TestFeatureGate_MultiDrawIndirectCount_WithFeature(t *testing.T) {
+	features := gputypes.Features(gputypes.FeatureMultiDrawIndirectCount)
+	_, _, device := newDeviceWithFeatures(t, features)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "indirect",
+		Size:  32,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer indirectBuf.Release()
+
+	countBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "count",
+		Size:  4,
+		Usage: wgpu.BufferUsageIndirect,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer countBuf.Release()
+
+	pass.MultiDrawIndirectCount(indirectBuf, 0, countBuf, 0, 2)
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("Finish() unexpected error: %v", err)
+	}
+}
+
+func TestFeatureGate_IndirectFirstInstance_NoFeature(t *testing.T) {
+	_, _, device := newDeviceWithoutFeatures(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstInstance: 1})
+	_ = pass.End()
+	_, finishErr := encoder.Finish()
+	if finishErr == nil {
+		t.Fatal("Finish() should fail without FeatureIndirectFirstInstance")
+	}
+	var fe *core.FeatureError
+	if !errors.As(finishErr, &fe) {
+		t.Fatalf("error = %T (%v), want *core.FeatureError", finishErr, finishErr)
+	}
+	if fe.Feature != gputypes.FeatureIndirectFirstInstance.String() {
+		t.Errorf("Feature = %q, want %q", fe.Feature, gputypes.FeatureIndirectFirstInstance.String())
+	}
+}
+
+func TestFeatureGate_IndirectFirstInstance_WithFeature(t *testing.T) {
+	features := gputypes.Features(gputypes.FeatureIndirectFirstInstance)
+	_, _, device := newDeviceWithFeatures(t, features)
+	defer device.Release()
+	requireHAL(t, device)
+
+	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
+	pipeline := &wgpu.RenderPipeline{}
+	pipeline.SetTestRequiredVertexBuffers(0)
+	pass.SetPipeline(pipeline)
+
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstInstance: 1})
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("Finish() unexpected error: %v", err)
+	}
 }
