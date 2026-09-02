@@ -656,7 +656,14 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	// Bind the group using graphics root descriptor tables.
 	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
 	e.encoder.trackBindGroupState(bg)
-	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
+
+	// TODO(#343): DX12 dynamic uniform buffer offsets require root CBV descriptors
+	// (not descriptor tables) so the GPU virtual address can be adjusted per-draw.
+	// Rust wgpu-hal uses DynamicBuffer::Uniform(gpu_base) with root descriptor slots
+	// and DynamicBuffer::Storage with root constants for storage buffer offsets.
+	// This requires restructuring CreatePipelineLayout to allocate root parameter
+	// slots for each dynamic buffer binding. See Rust wgpu-hal dx12/command.rs:1175-1236.
+	_ = offsets
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -931,7 +938,10 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	// entry types (BindingTypeStorageBuffer) with buffer binding handles.
 	e.boundStorageBuffers = append(e.boundStorageBuffers, bg.storageBuffers...)
 
-	_ = offsets // Dynamic offsets handled via root constants (simplified for now)
+	// TODO(#343): DX12 dynamic buffer offsets — same as RenderPassEncoder.SetBindGroup.
+	// Requires root CBV slots for dynamic uniform buffers and root constants for
+	// dynamic storage buffer offsets. See Rust wgpu-hal dx12/command.rs:1175-1236.
+	_ = offsets
 }
 
 // Dispatch dispatches compute work.

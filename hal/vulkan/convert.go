@@ -284,13 +284,20 @@ func shaderStagesToVk(stages gputypes.ShaderStages) vk.ShaderStageFlags {
 }
 
 // bufferBindingTypeToVk converts WebGPU buffer binding type to Vulkan descriptor type.
-func bufferBindingTypeToVk(bindingType gputypes.BufferBindingType) vk.DescriptorType {
+// When hasDynamicOffset is true, returns the corresponding dynamic descriptor type
+// (VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC or VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC)
+// which tells Vulkan to apply dynamic offsets at vkCmdBindDescriptorSets time.
+func bufferBindingTypeToVk(bindingType gputypes.BufferBindingType, hasDynamicOffset bool) vk.DescriptorType {
 	switch bindingType {
 	case gputypes.BufferBindingTypeUniform:
+		if hasDynamicOffset {
+			return vk.DescriptorTypeUniformBufferDynamic
+		}
 		return vk.DescriptorTypeUniformBuffer
-	case gputypes.BufferBindingTypeStorage:
-		return vk.DescriptorTypeStorageBuffer
-	case gputypes.BufferBindingTypeReadOnlyStorage:
+	case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+		if hasDynamicOffset {
+			return vk.DescriptorTypeStorageBufferDynamic
+		}
 		return vk.DescriptorTypeStorageBuffer
 	default:
 		return vk.DescriptorTypeUniformBuffer
