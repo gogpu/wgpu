@@ -108,7 +108,7 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 	}
 
 	// VAL-C14..C18: Usage flag compatibility at creation.
-	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Dimension, desc.Format); err != nil {
+	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Format); err != nil {
 		var cte *CreateTextureError
 		if errors.As(err, &cte) && cte.Label == "" {
 			cte.Label = label

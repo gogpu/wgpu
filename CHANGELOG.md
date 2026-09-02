@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Feature registry** — `AllFeatureRequirements` documents 25 WebGPU features with resource entry points and Rust references.
   - **Format feature gates** (VAL-C5..C11) — BC/ETC2/ASTC compression, Depth32FloatStencil8, RG11B10Ufloat renderable, BGRA8 storage, unclipped depth in `ValidateTextureDescriptor` / `ValidateRenderPipelineDescriptor`.
   - **Shader feature gates** (VAL-C12/C19/C20) — WGSL f16/f64 via naga capability validation; subgroup operations/barrier via source scan in `ValidateShaderModuleDescriptor`.
-  - **Texture usage matrix** (VAL-C14..C18) — `ValidateTextureUsageFlags` rejects invalid compressed/depth/storage combinations; exhaustive `IsCompatible` matrix tests in `core/track`.
+  - **Texture usage matrix** (VAL-C14..C18) — `ValidateTextureUsageFlags` rejects invalid compressed usages, depth+storage, and multisampled storage; storage+render and depth+render allowed at creation (W3C); exhaustive `IsCompatible` matrix tests in `core/track`.
   - **Render pass gates** (VAL-C1/C3) — `FeatureMultiDrawIndirect` when `drawCount > 1`; `FeatureIndirectFirstInstance` when `firstInstance != 0`.
   - **Query set gates** (VAL-C24) — `ValidateQuerySetDescriptor` for timestamp queries; public `Device.CreateQuerySet` (#330).
   - **Float32 filterable** (VAL-C21) — bind-time validation in `ValidateBindGroupDescriptor` when filtering 32-bit float textures.

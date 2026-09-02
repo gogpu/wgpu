@@ -57,7 +57,6 @@ func TestValidateTextureUsageFlags_CompressedRenderAttachment(t *testing.T) {
 	err := ValidateTextureUsageFlags(
 		gputypes.TextureUsageRenderAttachment,
 		1,
-		gputypes.TextureDimension2D,
 		gputypes.TextureFormatBC1RGBAUnorm,
 	)
 	if err == nil {
@@ -70,11 +69,22 @@ func TestValidateTextureUsageFlags_StorageAndRenderAttachment(t *testing.T) {
 	err := ValidateTextureUsageFlags(
 		gputypes.TextureUsageStorageBinding|gputypes.TextureUsageRenderAttachment,
 		1,
-		gputypes.TextureDimension2D,
 		gputypes.TextureFormatRGBA8Unorm,
 	)
-	if err == nil {
-		t.Fatal("expected invalid usage for storage+render attachment")
+	if err != nil {
+		t.Fatalf("storage+render attachment is valid at creation: %v", err)
+	}
+}
+
+func TestValidateTextureUsageFlags_DepthRenderAttachment(t *testing.T) {
+	t.Parallel()
+	err := ValidateTextureUsageFlags(
+		gputypes.TextureUsageRenderAttachment,
+		1,
+		gputypes.TextureFormatDepth24Plus,
+	)
+	if err != nil {
+		t.Fatalf("depth render attachment is valid: %v", err)
 	}
 }
 
@@ -170,7 +180,6 @@ func TestValidateTextureUsageFlags_DepthStorageBinding(t *testing.T) {
 	err := ValidateTextureUsageFlags(
 		gputypes.TextureUsageStorageBinding,
 		1,
-		gputypes.TextureDimension2D,
 		gputypes.TextureFormatDepth24Plus,
 	)
 	if err == nil {
@@ -183,7 +192,6 @@ func TestValidateTextureUsageFlags_MultisampleStorage(t *testing.T) {
 	err := ValidateTextureUsageFlags(
 		gputypes.TextureUsageStorageBinding,
 		4,
-		gputypes.TextureDimension2D,
 		gputypes.TextureFormatRGBA8Unorm,
 	)
 	if err == nil {
@@ -196,7 +204,6 @@ func TestValidateTextureUsageFlags_ValidCopySrc(t *testing.T) {
 	err := ValidateTextureUsageFlags(
 		gputypes.TextureUsageCopySrc,
 		1,
-		gputypes.TextureDimension2D,
 		gputypes.TextureFormatRGBA8Unorm,
 	)
 	if err != nil {
