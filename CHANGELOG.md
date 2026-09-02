@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Validation Phase C** (#333) — usage-time feature gates and texture usage validation toward ~70% Rust wgpu-core parity.
+  - **`core.RequireFeature`** / **`FeatureError`** — canonical helper for all feature-gated operations (VAL-C0).
+  - **Feature registry** — `AllFeatureRequirements` documents 25 WebGPU features with resource entry points and Rust references.
+  - **Format feature gates** (VAL-C5..C11) — BC/ETC2/ASTC compression, Depth32FloatStencil8, RG11B10Ufloat renderable, BGRA8 storage, unclipped depth in `ValidateTextureDescriptor` / `ValidateRenderPipelineDescriptor`.
+  - **Shader feature gates** (VAL-C12/C19/C20) — WGSL f16/f64 via naga capability validation; subgroup operations/barrier via source scan in `ValidateShaderModuleDescriptor`.
+  - **Texture usage matrix** (VAL-C14..C18) — `ValidateTextureUsageFlags` rejects invalid compressed/depth/storage combinations; exhaustive `IsCompatible` matrix tests in `core/track`.
+  - **Render pass gates** (VAL-C1/C3) — `FeatureMultiDrawIndirect` when `drawCount > 1`; `FeatureIndirectFirstInstance` when `firstInstance != 0`.
+  - **Query set gates** (VAL-C24) — `ValidateQuerySetDescriptor` for timestamp queries; public `Device.CreateQuerySet` (#330).
+  - **Float32 filterable** (VAL-C21) — bind-time validation in `ValidateBindGroupDescriptor` when filtering 32-bit float textures.
+  - **SPIR-V capability introspection** — `OpCapability` scan for f16/f64/subgroup features in `ValidateShaderModuleDescriptor`.
+  - **MultiDrawIndirectCount** (VAL-C2) — public `MultiDrawIndirectCount` / `MultiDrawIndexedIndirectCount` with `FeatureMultiDrawIndirectCount` gate; Vulkan `vkCmdDrawIndirectCount` when available.
+  - **Test infrastructure** — `core/testutil.ValidationEnv` fixture builder; registry-driven `featureGateCases`; root `wgpu_feature_gate_test.go` smoke tests.
+
 ## [0.34.2] - 2026-08-31
 
 ### Added

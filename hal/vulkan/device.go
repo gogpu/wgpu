@@ -63,7 +63,10 @@ type Device struct {
 	allocator                 *memory.GpuAllocator
 	cmds                      *vk.Commands
 	supportsMultiDrawIndirect bool
+	supportsDrawIndirectCount bool
 	maxDrawIndirectCount      uint32
+	cmdDrawIndirectCount      pfnCmdDrawIndirectCount
+	cmdDrawIndexedIndirectCount pfnCmdDrawIndexedIndirectCount
 	descriptorAllocator       *DescriptorAllocator // Descriptor pool management for bind groups
 	queue                     *Queue               // Primary queue (for swapchain synchronization)
 	renderPassCache           *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects

@@ -725,6 +725,14 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	_ = drawCount
 }
 
+// DrawIndirectCount is not supported by the GLES backend.
+func (e *RenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
+// DrawIndexedIndirectCount is not supported by the GLES backend.
+func (e *RenderPassEncoder) DrawIndexedIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
 // ExecuteBundle executes a pre-recorded render bundle.
 // Note: Render bundles are not natively supported in OpenGL.
 // OpenGL uses display lists (deprecated) or VAO/VBO state caching.

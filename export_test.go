@@ -102,3 +102,11 @@ func (d *Device) TestMaintainAfterIdle() { d.maintainAfterIdle() }
 // NewBareDeviceForTest returns a Device with no queue or HAL state (testing only).
 // Used to exercise nil-queue guard clauses in maintainAfterIdle.
 func NewBareDeviceForTest() *Device { return &Device{} }
+
+// NewTestBuffer returns a Buffer backed by core state only (testing only).
+// HAL is nil; sufficient for validation unit tests that read Size/Usage/Label.
+func NewTestBuffer(size uint64, usage gputypes.BufferUsage, label string) *Buffer {
+	return &Buffer{
+		core: core.NewBuffer(nil, nil, usage, size, label),
+	}
+}

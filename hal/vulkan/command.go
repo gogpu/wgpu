@@ -1324,6 +1324,38 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	}
 }
 
+// DrawIndirectCount draws primitives using a GPU-provided draw count.
+func (e *RenderPassEncoder) DrawIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	var native vulkanIndirectCountNativeCmd
+	if e.encoder.device.cmdDrawIndirectCount != nil {
+		cmd := e.encoder.device.cmdDrawIndirectCount
+		native = func(cmdBuf vk.CommandBuffer, indirect vk.Buffer, off vk.DeviceSize, count vk.Buffer, countOff vk.DeviceSize, maxCount uint32) {
+			cmd(cmdBuf, indirect, off, count, countOff, maxCount)
+		}
+	}
+	e.drawIndirectCount(buffer, offset, countBuffer, countOffset, maxDrawCount, drawIndirectStride, native, vkCmdDrawIndirect)
+}
+
+// DrawIndexedIndirectCount draws indexed primitives using a GPU-provided draw count.
+func (e *RenderPassEncoder) DrawIndexedIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	var native vulkanIndirectCountNativeCmd
+	if e.encoder.device.cmdDrawIndexedIndirectCount != nil {
+		cmd := e.encoder.device.cmdDrawIndexedIndirectCount
+		native = func(cmdBuf vk.CommandBuffer, indirect vk.Buffer, off vk.DeviceSize, count vk.Buffer, countOff vk.DeviceSize, maxCount uint32) {
+			cmd(cmdBuf, indirect, off, count, countOff, maxCount)
+		}
+	}
+	e.drawIndirectCount(buffer, offset, countBuffer, countOffset, maxDrawCount, drawIndexedIndirectStride, native, vkCmdDrawIndexedIndirect)
+}
+
 type indexedIndirectCall struct {
 	offset uint64
 	count  uint32

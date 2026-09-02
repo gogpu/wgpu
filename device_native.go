@@ -117,7 +117,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 
 	halDesc := desc.toHAL()
 
-	if err := core.ValidateTextureDescriptor(halDesc, d.core.Limits); err != nil {
+	if err := core.ValidateTextureDescriptor(halDesc, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -213,7 +213,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		halDesc.Anisotropy = desc.Anisotropy
 	}
 
-	if err := core.ValidateSamplerDescriptor(halDesc); err != nil {
+	if err := core.ValidateSamplerDescriptor(halDesc, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -222,7 +222,13 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
 	}
 
-	return &Sampler{hal: halSampler, device: d}, nil
+	return &Sampler{
+		hal:          halSampler,
+		device:       d,
+		magFilter:    halDesc.MagFilter,
+		minFilter:    halDesc.MinFilter,
+		mipmapFilter: halDesc.MipmapFilter,
+	}, nil
 }
 
 // CreateShaderModule creates a shader module.
@@ -247,7 +253,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		},
 	}
 
-	if err := core.ValidateShaderModuleDescriptor(halDesc); err != nil {
+	if err := core.ValidateShaderModuleDescriptor(halDesc, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -340,7 +346,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		BindGroupLayouts: halLayouts,
 	}
 
-	if err := core.ValidatePipelineLayoutDescriptor(halDesc, d.core.Limits); err != nil {
+	if err := core.ValidatePipelineLayoutDescriptor(halDesc, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -398,6 +404,8 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	// Build buffer metadata for core validation.
 	var bufferInfos []core.BindGroupBufferInfo
+	var samplerInfos []core.BindGroupSamplerInfo
+	var textureInfos []core.BindGroupTextureInfo
 	for _, entry := range desc.Entries {
 		if entry.Buffer != nil {
 			bufferInfos = append(bufferInfos, core.BindGroupBufferInfo{
@@ -408,9 +416,25 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 				Size:       entry.Size,
 			})
 		}
+		if entry.Sampler != nil {
+			samplerInfos = append(samplerInfos, core.BindGroupSamplerInfo{
+				Binding: entry.Binding,
+				Desc: &hal.SamplerDescriptor{
+					MagFilter:    entry.Sampler.magFilter,
+					MinFilter:    entry.Sampler.minFilter,
+					MipmapFilter: entry.Sampler.mipmapFilter,
+				},
+			})
+		}
+		if entry.TextureView != nil && entry.TextureView.texture != nil {
+			textureInfos = append(textureInfos, core.BindGroupTextureInfo{
+				Binding: entry.Binding,
+				Format:  entry.TextureView.texture.Format(),
+			})
+		}
 	}
 
-	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.entries, bufferInfos, d.core.Limits); err != nil {
+	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.entries, bufferInfos, samplerInfos, textureInfos, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -530,7 +554,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 
 	halDesc := desc.toHAL()
 
-	if err := core.ValidateRenderPipelineDescriptor(halDesc, d.core.Limits); err != nil {
+	if err := core.ValidateRenderPipelineDescriptor(halDesc, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
 

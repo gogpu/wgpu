@@ -137,6 +137,13 @@ type RenderPassEncoder interface {
 	// buffer contains drawCount consecutive 20-byte DrawIndexedIndirectArgs records.
 	DrawIndexedIndirect(buffer Buffer, offset uint64, drawCount uint32)
 
+	// DrawIndirectCount draws primitives using a GPU count buffer (Vulkan 1.2+).
+	// countBuffer holds a single uint32 draw count at countOffset.
+	DrawIndirectCount(buffer Buffer, offset uint64, countBuffer Buffer, countOffset uint64, maxDrawCount uint32)
+
+	// DrawIndexedIndirectCount draws indexed primitives using a GPU count buffer.
+	DrawIndexedIndirectCount(buffer Buffer, offset uint64, countBuffer Buffer, countOffset uint64, maxDrawCount uint32)
+
 	// ExecuteBundle executes a pre-recorded render bundle.
 	// Bundles are an optimization for repeated draw calls.
 	ExecuteBundle(bundle RenderBundle)
