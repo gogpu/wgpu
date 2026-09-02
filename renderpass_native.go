@@ -216,6 +216,17 @@ func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !p.validateDrawState("Draw") {
 		return
 	}
+	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
+	if args.FirstInstance != 0 {
+		if err := core.RequireFeature(
+			p.encoder.device.Features(),
+			gputypes.FeatureIndirectFirstInstance,
+			"Draw",
+		); err != nil {
+			p.encoder.setError(err)
+			return
+		}
+	}
 	p.core.Draw(args)
 }
 
@@ -237,6 +248,17 @@ func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
 		return
 	}
+	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
+	if args.FirstInstance != 0 {
+		if err := core.RequireFeature(
+			p.encoder.device.Features(),
+			gputypes.FeatureIndirectFirstInstance,
+			"DrawIndexed",
+		); err != nil {
+			p.encoder.setError(err)
+			return
+		}
+	}
 	p.core.DrawIndexed(args)
 }
 
@@ -253,6 +275,18 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 	}
 	if !p.validateDrawState("DrawIndirect") {
 		return
+	}
+	// VAL-C1: Multi-draw indirect requires FeatureMultiDrawIndirect when drawCount > 1.
+	// Reference: wgpu-core command/render.rs multi-draw feature check.
+	if drawCount > 1 {
+		if err := core.RequireFeature(
+			p.encoder.device.Features(),
+			gputypes.FeatureMultiDrawIndirect,
+			"MultiDrawIndirect",
+		); err != nil {
+			p.encoder.setError(err)
+			return
+		}
 	}
 	if buffer == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndirect: buffer is nil"))
@@ -301,6 +335,18 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	if !p.validateDrawState("DrawIndexedIndirect") {
 		return
 	}
+	// VAL-C1: Multi-draw indexed indirect requires FeatureMultiDrawIndirect when drawCount > 1.
+	// Reference: wgpu-core command/render.rs multi-draw feature check.
+	if drawCount > 1 {
+		if err := core.RequireFeature(
+			p.encoder.device.Features(),
+			gputypes.FeatureMultiDrawIndirect,
+			"MultiDrawIndexedIndirect",
+		); err != nil {
+			p.encoder.setError(err)
+			return
+		}
+	}
 	if !p.indexBufferSet {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.DrawIndexedIndirect: no index buffer set (call SetIndexBuffer first): %w",
 			ErrDrawMissingIndexBuffer))
@@ -345,6 +391,104 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
 	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
+}
+
+// MultiDrawIndirectCount draws primitives with a GPU-provided draw count.
+// countBuffer must hold a uint32 count at countOffset. VAL-C2: requires FeatureMultiDrawIndirectCount.
+func (p *RenderPassEncoder) MultiDrawIndirectCount(
+	indirectBuffer *Buffer, indirectOffset uint64,
+	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
+) {
+	p.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndirect",
+		featureResource: "MultiDrawIndirectCount",
+		indirectBuffer:  indirectBuffer,
+		indirectOffset:  indirectOffset,
+		countBuffer:     countBuffer,
+		countOffset:     countOffset,
+		maxDrawCount:    maxDrawCount,
+		recordStride:    drawIndirectRecordSize,
+		record: func() {
+			p.core.DrawIndirectCount(
+				indirectBuffer.coreBuffer(), indirectOffset,
+				countBuffer.coreBuffer(), countOffset, maxDrawCount,
+			)
+		},
+	})
+}
+
+// MultiDrawIndexedIndirectCount draws indexed primitives with a GPU-provided draw count.
+func (p *RenderPassEncoder) MultiDrawIndexedIndirectCount(
+	indirectBuffer *Buffer, indirectOffset uint64,
+	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
+) {
+	p.executeIndirectCountDraw(indirectCountDrawConfig{
+		validateDrawOp:  "DrawIndexedIndirect",
+		featureResource: "MultiDrawIndexedIndirectCount",
+		indirectBuffer:  indirectBuffer,
+		indirectOffset:  indirectOffset,
+		countBuffer:     countBuffer,
+		countOffset:     countOffset,
+		maxDrawCount:    maxDrawCount,
+		recordStride:    drawIndexedIndirectRecordSize,
+		preValidate:     p.validateIndexedIndirectCountPreconditions,
+		record: func() {
+			p.core.DrawIndexedIndirectCount(
+				indirectBuffer.coreBuffer(), indirectOffset,
+				countBuffer.coreBuffer(), countOffset, maxDrawCount,
+			)
+		},
+	})
+}
+
+func (p *RenderPassEncoder) validateIndirectCountBuffers(
+	indirectBuffer *Buffer, indirectOffset uint64,
+	countBuffer *Buffer, countOffset uint64,
+	maxDrawCount uint32, recordStride uint64,
+) error {
+	if indirectBuffer == nil {
+		return fmt.Errorf("wgpu: RenderPass.DrawIndirect: indirect buffer is nil")
+	}
+	if countBuffer == nil {
+		return fmt.Errorf("wgpu: RenderPass.DrawIndirect: count buffer is nil")
+	}
+	if indirectBuffer.Usage()&BufferUsageIndirect == 0 {
+		return fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: buffer %q missing BufferUsageIndirect usage: %w",
+			indirectBuffer.Label(), ErrDrawIndirectBufferUsage)
+	}
+	if countBuffer.Usage()&BufferUsageIndirect == 0 {
+		return fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: count buffer %q missing BufferUsageIndirect usage: %w",
+			countBuffer.Label(), ErrDrawIndirectBufferUsage)
+	}
+	if indirectOffset%4 != 0 {
+		return fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: offset %d is not 4-byte aligned: %w",
+			indirectOffset, ErrDrawIndirectOffsetAlignment)
+	}
+	if countOffset%4 != 0 {
+		return fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: count offset %d is not 4-byte aligned: %w",
+			countOffset, ErrDrawIndirectOffsetAlignment)
+	}
+	if countOffset+4 > countBuffer.Size() {
+		return fmt.Errorf(
+			"wgpu: RenderPass.DrawIndirect: count offset %d + 4 exceeds count buffer size %d: %w",
+			countOffset, countBuffer.Size(), ErrDrawIndirectBufferOverrun)
+	}
+	if recordStride == drawIndirectRecordSize {
+		if !drawIndirectRangeFits(indirectBuffer.Size(), indirectOffset, maxDrawCount) {
+			return fmt.Errorf(
+				"wgpu: RenderPass.MultiDrawIndirectCount: offset %d + max %d draw(s) exceeds buffer size %d: %w",
+				indirectOffset, maxDrawCount, indirectBuffer.Size(), ErrDrawIndirectBufferOverrun)
+		}
+	} else if !indexedIndirectRangeFits(indirectBuffer.Size(), indirectOffset, maxDrawCount) {
+		return fmt.Errorf(
+			"wgpu: RenderPass.MultiDrawIndexedIndirectCount: offset %d + max %d draw(s) exceeds buffer size %d: %w",
+			indirectOffset, maxDrawCount, indirectBuffer.Size(), ErrDrawIndirectBufferOverrun)
+	}
+	return nil
 }
 
 // End ends the render pass.

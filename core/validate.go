@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"math/bits"
 
@@ -10,9 +11,9 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
-// ValidateTextureDescriptor validates a texture descriptor against device limits.
+// ValidateTextureDescriptor validates a texture descriptor against device limits and features.
 // Returns nil if valid, or a *CreateTextureError describing the first validation failure.
-func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limits) error {
+func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limits, features gputypes.Features) error {
 	label := desc.Label
 	w := desc.Size.Width
 	h := desc.Size.Height
@@ -99,6 +100,20 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 		if err := validateTextureMultisample(desc, label); err != nil {
 			return err
 		}
+	}
+
+	// VAL-C6..C11: Format feature gates.
+	if err := validateTextureFormatFeatures(desc.Format, desc.Usage, features); err != nil {
+		return err
+	}
+
+	// VAL-C14..C18: Usage flag compatibility at creation.
+	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Format); err != nil {
+		var cte *CreateTextureError
+		if errors.As(err, &cte) && cte.Label == "" {
+			cte.Label = label
+		}
+		return err
 	}
 
 	return nil
@@ -202,9 +217,9 @@ func validateTextureMultisample(desc *hal.TextureDescriptor, label string) error
 	return nil
 }
 
-// ValidateSamplerDescriptor validates a sampler descriptor.
+// ValidateSamplerDescriptor validates a sampler descriptor and enabled features.
 // Returns nil if valid, or a *CreateSamplerError describing the first validation failure.
-func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor) error {
+func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor, features gputypes.Features) error {
 	label := desc.Label
 
 	// S1: LodMinClamp >= 0.
@@ -241,12 +256,16 @@ func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor) error {
 		}
 	}
 
+	// FeatureFloat32Filterable is enforced at sampled-texture bind/draw time when
+	// filtering unfilterable float formats; sampler descriptors carry no format.
+
+	_ = features
 	return nil
 }
 
-// ValidateShaderModuleDescriptor validates a shader module descriptor.
-// Returns nil if valid, or a *CreateShaderModuleError describing the first validation failure.
-func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor) error {
+// ValidateShaderModuleDescriptor validates a shader module descriptor and features.
+// Returns nil if valid, or an error describing the first validation failure.
+func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor, features gputypes.Features) error {
 	label := desc.Label
 	hasWGSL := desc.Source.WGSL != ""
 	hasSPIRV := len(desc.Source.SPIRV) > 0
@@ -267,15 +286,16 @@ func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor) error {
 		}
 	}
 
-	return nil
+	return validateShaderModuleFeatures(desc, features)
 }
 
-// ValidatePipelineLayoutDescriptor validates a pipeline layout descriptor against device limits.
-// Returns nil if valid, or a *CreatePipelineLayoutError describing the first validation failure.
+// ValidatePipelineLayoutDescriptor validates a pipeline layout descriptor against device limits
+// and enabled features.
+// Returns nil if valid, or a validation error describing the first failure.
 //
 // Checks: bind group layout count <= maxBindGroups (typically 4).
 // Rust: wgpu-core device/resource.rs:3562-3568.
-func ValidatePipelineLayoutDescriptor(desc *hal.PipelineLayoutDescriptor, limits gputypes.Limits) error {
+func ValidatePipelineLayoutDescriptor(desc *hal.PipelineLayoutDescriptor, limits gputypes.Limits, features gputypes.Features) error {
 	label := desc.Label
 
 	// PL1: Bind group layout count must not exceed maxBindGroups.
@@ -285,6 +305,14 @@ func ValidatePipelineLayoutDescriptor(desc *hal.PipelineLayoutDescriptor, limits
 			Label:     label,
 			Count:     len(desc.BindGroupLayouts),
 			MaxGroups: limits.MaxBindGroups,
+		}
+	}
+
+	// VAL-C4: Push constants require FeaturePushConstants.
+	// Reference: wgpu-core device/resource.rs push constant validation.
+	if len(desc.PushConstantRanges) > 0 {
+		if err := RequireFeature(features, gputypes.FeaturePushConstants, "CreatePipelineLayout"); err != nil {
+			return err
 		}
 	}
 
@@ -369,9 +397,9 @@ func isStencilEnabled(ds *hal.DepthStencilState) bool {
 	return ds.StencilReadMask != 0 || ds.StencilWriteMask != 0
 }
 
-// ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits.
+// ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits and features.
 // Returns nil if valid, or a *CreateRenderPipelineError describing the first validation failure.
-func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits gputypes.Limits) error {
+func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits gputypes.Limits, features gputypes.Features) error {
 	label := desc.Label
 
 	// RP1: Vertex module must not be nil.
@@ -454,7 +482,7 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 		}
 	}
 
-	return nil
+	return validateRenderPipelineFormatFeatures(desc, features)
 }
 
 // validateFragmentStage checks RP3-RP6 fragment stage constraints.
@@ -619,7 +647,10 @@ func ValidateBindGroupDescriptor(
 	desc *hal.BindGroupDescriptor,
 	layoutEntries []gputypes.BindGroupLayoutEntry,
 	bufferInfos []BindGroupBufferInfo,
+	samplerInfos []BindGroupSamplerInfo,
+	textureInfos []BindGroupTextureInfo,
 	limits gputypes.Limits,
+	features gputypes.Features,
 ) error {
 	// BG1: Layout must not be nil.
 	if desc.Layout == nil {
@@ -674,7 +705,12 @@ func ValidateBindGroupDescriptor(
 
 	// BG4-BG9: Buffer binding validation.
 	// Rust: wgpu-core device/resource.rs:2747-2834
-	return validateBindGroupBufferEntries(desc.Label, layoutByBinding, bufferInfos, limits)
+	if err := validateBindGroupBufferEntries(desc.Label, layoutByBinding, bufferInfos, limits); err != nil {
+		return err
+	}
+
+	// VAL-C21: Float32 filterable textures at bind time.
+	return validateFloat32FilterableBindings(layoutEntries, samplerInfos, textureInfos, features)
 }
 
 // validateBindGroupBufferEntries validates each buffer binding entry against its

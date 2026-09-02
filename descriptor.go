@@ -142,6 +142,31 @@ func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 	}
 }
 
+// QueryType specifies the type of queries in a query set.
+type QueryType = hal.QueryType
+
+// Query type constants.
+const (
+	QueryTypeOcclusion = hal.QueryTypeOcclusion
+	QueryTypeTimestamp = hal.QueryTypeTimestamp
+)
+
+// QuerySetDescriptor describes query set creation parameters.
+type QuerySetDescriptor struct {
+	Label string
+	Type  QueryType
+	Count uint32
+}
+
+// toHAL converts a QuerySetDescriptor to a hal.QuerySetDescriptor.
+func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
+	return &hal.QuerySetDescriptor{
+		Label: d.Label,
+		Type:  d.Type,
+		Count: d.Count,
+	}
+}
+
 // ShaderModuleDescriptor describes shader module creation parameters.
 type ShaderModuleDescriptor struct {
 	Label string

@@ -834,6 +834,24 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	)
 }
 
+// DrawIndirectCount draws using maxDrawCount when GPU count buffer is unavailable.
+func (e *RenderPassEncoder) DrawIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	hal.RecordIndirectCountMax(e.DrawIndirect, buffer, offset, countBuffer, countOffset, maxDrawCount)
+}
+
+// DrawIndexedIndirectCount draws using maxDrawCount when GPU count buffer is unavailable.
+func (e *RenderPassEncoder) DrawIndexedIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	hal.RecordIndirectCountMax(e.DrawIndexedIndirect, buffer, offset, countBuffer, countOffset, maxDrawCount)
+}
+
 // ExecuteBundle executes a pre-recorded render bundle.
 func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 	// Note: DX12 bundles use ID3D12GraphicsCommandList created with D3D12_COMMAND_LIST_TYPE_BUNDLE.

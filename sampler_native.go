@@ -2,13 +2,20 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
+)
 
 // Sampler represents a texture sampler.
 type Sampler struct {
 	hal      hal.Sampler
 	device   *Device
 	released bool
+	// Filter modes retained for bind-time float32-filterable validation (VAL-C21).
+	magFilter    gputypes.FilterMode
+	minFilter    gputypes.FilterMode
+	mipmapFilter gputypes.FilterMode
 }
 
 // Release destroys the sampler. Destruction is deferred until the GPU
