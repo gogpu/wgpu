@@ -32,6 +32,7 @@ const (
 	TagBufferPointer          // *BufferPointer stored via Ref
 	TagSampledImage           // *SampledImageValue stored via Ref
 	TagBindingKey             // BindingKey stored in U[0..1]
+	TagFloat64                // IEEE-754 binary64 bits in U[0]=lo, U[1]=hi
 )
 
 // Value is a tagged union representing a runtime value in the SPIR-V interpreter.
@@ -237,6 +238,12 @@ func ValBindingKey(bk BindingKey) Value {
 	return Value{Tag: TagBindingKey, U: [4]uint32{bk.Group, bk.Binding}}
 }
 
+// ValFloat64 returns a float64 scalar Value stored as IEEE-754 bits in U[0..1].
+func ValFloat64(f float64) Value {
+	bits := math.Float64bits(f)
+	return Value{Tag: TagFloat64, U: [4]uint32{uint32(bits), uint32(bits >> 32)}}
+}
+
 // =============================================================================
 // Value Accessors
 // =============================================================================
@@ -308,6 +315,15 @@ func (v Value) AsSampledImage() *SampledImageValue {
 // AsBindingKey extracts a BindingKey from U[0..1].
 func (v Value) AsBindingKey() BindingKey {
 	return BindingKey{Group: v.U[0], Binding: v.U[1]}
+}
+
+// AsFloat64 extracts a float64 from TagFloat64 bits. Returns 0 for other tags.
+func (v Value) AsFloat64() float64 {
+	if v.Tag != TagFloat64 {
+		return 0
+	}
+	bits := uint64(v.U[0]) | uint64(v.U[1])<<32
+	return math.Float64frombits(bits)
 }
 
 // =============================================================================
