@@ -78,7 +78,7 @@ Example: `examples/raytracing-headless/` — visual RT verification on software 
 
 ## Current Version
 
-v0.34.2 | Go 1.25+ | Dependencies: naga v0.19.0, gpucontext v0.31.3, gputypes v0.8.0, goffi v0.6.3, webgpu v0.5.5
+v0.34.3 | Go 1.25+ | Dependencies: naga v0.19.0, gpucontext v0.31.3, gputypes v0.8.0, goffi v0.6.3, webgpu v0.5.5
 
 ## Build & Test
 

@@ -452,7 +452,7 @@ func (s *Surface) releaseConfiguredDevice(device *Device, drained bool) {
 
 // vkMakeVersion packs Vulkan version components (major.minor.patch).
 //
-//nolint:unparam // patch is exercised in api_test.go; production call sites use patch 0.
+//nolint:unparam,nolintlint // patch exercised in tests; unparam fires on Linux only (cross-GOOS).
 func vkMakeVersion(major, minor, patch uint32) uint32 {
 	return (major << 22) | (minor << 12) | patch
 }
