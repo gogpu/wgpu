@@ -142,6 +142,31 @@ func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 	}
 }
 
+// QueryType specifies the type of queries in a query set.
+type QueryType = hal.QueryType
+
+// Query type constants.
+const (
+	QueryTypeOcclusion = hal.QueryTypeOcclusion
+	QueryTypeTimestamp = hal.QueryTypeTimestamp
+)
+
+// QuerySetDescriptor describes query set creation parameters.
+type QuerySetDescriptor struct {
+	Label string
+	Type  QueryType
+	Count uint32
+}
+
+// toHAL converts a QuerySetDescriptor to a hal.QuerySetDescriptor.
+func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
+	return &hal.QuerySetDescriptor{
+		Label: d.Label,
+		Type:  d.Type,
+		Count: d.Count,
+	}
+}
+
 // ShaderModuleDescriptor describes shader module creation parameters.
 type ShaderModuleDescriptor struct {
 	Label string
@@ -163,29 +188,6 @@ func (d *ShaderModuleDescriptor) toHAL() *hal.ShaderModuleDescriptor {
 // CommandEncoderDescriptor describes command encoder creation.
 type CommandEncoderDescriptor struct {
 	Label string
-}
-
-// QueryType identifies the kind of data stored in a query set.
-// The HAL definition is the single source of truth for native builds.
-type QueryType = hal.QueryType
-
-const (
-	QueryTypeOcclusion = hal.QueryTypeOcclusion
-	QueryTypeTimestamp = hal.QueryTypeTimestamp
-)
-
-// QuerySetDescriptor describes a set of timestamp or occlusion queries.
-type QuerySetDescriptor struct {
-	Label string
-	Type  QueryType
-	Count uint32
-}
-
-func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
-	if d == nil {
-		return nil
-	}
-	return &hal.QuerySetDescriptor{Label: d.Label, Type: d.Type, Count: d.Count}
 }
 
 // RenderBundleEncoderDescriptor describes the render pass compatibility of a
@@ -537,9 +539,13 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 		halDesc.DepthStencilAttachment = halDS
 	}
 
-	if writes := d.TimestampWrites; writes != nil && writes.QuerySet != nil && !writes.QuerySet.released.Load() && writes.QuerySet.hal != nil {
+	if writes := d.TimestampWrites; writes != nil {
+		halQuerySet := writes.QuerySet.halQuerySet()
+		if halQuerySet == nil {
+			return halDesc
+		}
 		halDesc.TimestampWrites = &hal.RenderPassTimestampWrites{
-			QuerySet:                  writes.QuerySet.hal,
+			QuerySet:                  halQuerySet,
 			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
 			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
 		}

@@ -16,21 +16,26 @@ import (
 
 // DescriptorCounts tracks the number of descriptors by type.
 // Used to determine pool sizes for allocation.
+// Dynamic buffer counts are tracked separately because Vulkan requires
+// separate pool size entries for VK_DESCRIPTOR_TYPE_*_BUFFER_DYNAMIC.
 type DescriptorCounts struct {
-	Samplers           uint32
-	SampledImages      uint32
-	StorageImages      uint32
-	UniformBuffers     uint32
-	StorageBuffers     uint32
-	UniformTexelBuffer uint32
-	StorageTexelBuffer uint32
-	InputAttachments   uint32
+	Samplers              uint32
+	SampledImages         uint32
+	StorageImages         uint32
+	UniformBuffers        uint32
+	StorageBuffers        uint32
+	UniformBuffersDynamic uint32
+	StorageBuffersDynamic uint32
+	UniformTexelBuffer    uint32
+	StorageTexelBuffer    uint32
+	InputAttachments      uint32
 }
 
 // Total returns the total number of descriptors.
 func (c DescriptorCounts) Total() uint32 {
 	return c.Samplers + c.SampledImages + c.StorageImages +
 		c.UniformBuffers + c.StorageBuffers +
+		c.UniformBuffersDynamic + c.StorageBuffersDynamic +
 		c.UniformTexelBuffer + c.StorageTexelBuffer + c.InputAttachments
 }
 
@@ -42,14 +47,16 @@ func (c DescriptorCounts) IsEmpty() bool {
 // Multiply multiplies all counts by a factor.
 func (c DescriptorCounts) Multiply(factor uint32) DescriptorCounts {
 	return DescriptorCounts{
-		Samplers:           c.Samplers * factor,
-		SampledImages:      c.SampledImages * factor,
-		StorageImages:      c.StorageImages * factor,
-		UniformBuffers:     c.UniformBuffers * factor,
-		StorageBuffers:     c.StorageBuffers * factor,
-		UniformTexelBuffer: c.UniformTexelBuffer * factor,
-		StorageTexelBuffer: c.StorageTexelBuffer * factor,
-		InputAttachments:   c.InputAttachments * factor,
+		Samplers:              c.Samplers * factor,
+		SampledImages:         c.SampledImages * factor,
+		StorageImages:         c.StorageImages * factor,
+		UniformBuffers:        c.UniformBuffers * factor,
+		StorageBuffers:        c.StorageBuffers * factor,
+		UniformBuffersDynamic: c.UniformBuffersDynamic * factor,
+		StorageBuffersDynamic: c.StorageBuffersDynamic * factor,
+		UniformTexelBuffer:    c.UniformTexelBuffer * factor,
+		StorageTexelBuffer:    c.StorageTexelBuffer * factor,
+		InputAttachments:      c.InputAttachments * factor,
 	}
 }
 
@@ -217,6 +224,7 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 	// different bind group layouts (e.g., uniform-only vs sampler+texture)
 	// share the same pool. Requested counts scale the primary types;
 	// all other types get a reasonable baseline allocation.
+	// Dynamic buffer types are included when any dynamic offsets are used.
 	poolSizes := []vk.DescriptorPoolSize{
 		{Type: vk.DescriptorTypeSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
 		{Type: vk.DescriptorTypeSampledImage, DescriptorCount: max(counts.SampledImages, 1) * poolSize},
@@ -224,6 +232,18 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		{Type: vk.DescriptorTypeUniformBuffer, DescriptorCount: max(counts.UniformBuffers, 1) * poolSize},
 		{Type: vk.DescriptorTypeStorageBuffer, DescriptorCount: max(counts.StorageBuffers*poolSize, poolSize/2)},
 		{Type: vk.DescriptorTypeCombinedImageSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
+	}
+	if counts.UniformBuffersDynamic > 0 {
+		poolSizes = append(poolSizes, vk.DescriptorPoolSize{
+			Type:            vk.DescriptorTypeUniformBufferDynamic,
+			DescriptorCount: counts.UniformBuffersDynamic * poolSize,
+		})
+	}
+	if counts.StorageBuffersDynamic > 0 {
+		poolSizes = append(poolSizes, vk.DescriptorPoolSize{
+			Type:            vk.DescriptorTypeStorageBufferDynamic,
+			DescriptorCount: counts.StorageBuffersDynamic * poolSize,
+		})
 	}
 
 	createInfo := vk.DescriptorPoolCreateInfo{

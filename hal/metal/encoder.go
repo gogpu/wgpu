@@ -954,6 +954,24 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 	}
 }
 
+// DrawIndirectCount falls back to maxDrawCount sequential indirect draws on Metal.
+func (e *RenderPassEncoder) DrawIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	hal.RecordIndirectCountMax(e.DrawIndirect, buffer, offset, countBuffer, countOffset, maxDrawCount)
+}
+
+// DrawIndexedIndirectCount falls back to maxDrawCount sequential indexed indirect draws.
+func (e *RenderPassEncoder) DrawIndexedIndirectCount(
+	buffer hal.Buffer, offset uint64,
+	countBuffer hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	hal.RecordIndirectCountMax(e.DrawIndexedIndirect, buffer, offset, countBuffer, countOffset, maxDrawCount)
+}
+
 func (e *RenderPassEncoder) tryFirstIndexedICB(buffer *Buffer, offset uint64, count uint32) bool {
 	commands, ok := e.prepareIndexedICB(buffer, offset, count)
 	if !ok {

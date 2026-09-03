@@ -52,6 +52,99 @@ func (p *countedRenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, offset uint
 	p.count = count
 }
 
+type indirectCountHALRecorder struct {
+	mockRenderPassEncoder
+	calls          int
+	indirectOffset uint64
+	countOffset    uint64
+	maxDrawCount   uint32
+}
+
+func (p *indirectCountHALRecorder) DrawIndirectCount(
+	_ hal.Buffer, indirectOffset uint64,
+	_ hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	p.calls++
+	p.indirectOffset = indirectOffset
+	p.countOffset = countOffset
+	p.maxDrawCount = maxDrawCount
+}
+
+func (p *indirectCountHALRecorder) DrawIndexedIndirectCount(
+	_ hal.Buffer, indirectOffset uint64,
+	_ hal.Buffer, countOffset uint64,
+	maxDrawCount uint32,
+) {
+	p.calls++
+	p.indirectOffset = indirectOffset
+	p.countOffset = countOffset
+	p.maxDrawCount = maxDrawCount
+}
+
+func TestCoreRenderPassEncoderIndirectCountInactive(t *testing.T) {
+	t.Parallel()
+	pass := &CoreRenderPassEncoder{}
+	if !pass.indirectCountInactive(0) {
+		t.Fatal("maxDrawCount 0 should be inactive")
+	}
+	pass.ended = true
+	if !pass.indirectCountInactive(1) {
+		t.Fatal("ended pass should be inactive")
+	}
+	pass.ended = false
+	if pass.indirectCountInactive(2) {
+		t.Fatal("active pass with non-zero count should not be inactive")
+	}
+}
+
+func TestCoreRenderPassEncoderDrawIndirectCountForwardsOnce(t *testing.T) {
+	t.Parallel()
+	device := NewDevice(&mockHALDevice{}, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	indirect := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageIndirect, 64, "indirect")
+	count := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageIndirect, 4, "count")
+	recorder := &indirectCountHALRecorder{}
+	pass := &CoreRenderPassEncoder{raw: recorder, device: device}
+
+	pass.DrawIndirectCount(indirect, 8, count, 0, 2)
+	if recorder.calls != 1 || recorder.indirectOffset != 8 || recorder.countOffset != 0 || recorder.maxDrawCount != 2 {
+		t.Fatalf("forward = calls %d offset %d countOffset %d max %d; want 1, 8, 0, 2",
+			recorder.calls, recorder.indirectOffset, recorder.countOffset, recorder.maxDrawCount)
+	}
+
+	pass.DrawIndirectCount(nil, 0, count, 0, 1)
+	if recorder.calls != 1 {
+		t.Fatalf("nil indirect buffer should not forward, calls = %d", recorder.calls)
+	}
+
+	pass.ended = true
+	pass.DrawIndirectCount(indirect, 8, count, 0, 1)
+	if recorder.calls != 1 {
+		t.Fatalf("ended pass should not forward, calls = %d", recorder.calls)
+	}
+
+	pass.ended = false
+	pass.DrawIndirectCount(indirect, 8, count, 0, 0)
+	if recorder.calls != 1 {
+		t.Fatalf("zero maxDrawCount should not forward, calls = %d", recorder.calls)
+	}
+}
+
+func TestCoreRenderPassEncoderDrawIndexedIndirectCountForwardsOnce(t *testing.T) {
+	t.Parallel()
+	device := NewDevice(&mockHALDevice{}, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	indirect := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageIndirect, 80, "indirect")
+	count := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageIndirect, 4, "count")
+	recorder := &indirectCountHALRecorder{}
+	pass := &CoreRenderPassEncoder{raw: recorder, device: device}
+
+	pass.DrawIndexedIndirectCount(indirect, 20, count, 0, 3)
+	if recorder.calls != 1 || recorder.indirectOffset != 20 || recorder.maxDrawCount != 3 {
+		t.Fatalf("forward = calls %d offset %d max %d; want 1, 20, 3",
+			recorder.calls, recorder.indirectOffset, recorder.maxDrawCount)
+	}
+}
+
 func TestCoreRenderPassEncoderDrawIndexedIndirectForwardsCountOnce(t *testing.T) {
 	for _, drawCount := range []uint32{1, 3} {
 		t.Run(fmt.Sprintf("count-%d", drawCount), func(t *testing.T) {

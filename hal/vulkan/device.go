@@ -56,19 +56,22 @@ var renderPassPool = sync.Pool{
 
 // Device implements hal.Device for Vulkan.
 type Device struct {
-	handle                    vk.Device
-	physicalDevice            vk.PhysicalDevice
-	instance                  *Instance
-	graphicsFamily            uint32
-	allocator                 *memory.GpuAllocator
-	cmds                      *vk.Commands
-	supportsMultiDrawIndirect bool
-	maxDrawIndirectCount      uint32
-	descriptorAllocator       *DescriptorAllocator // Descriptor pool management for bind groups
-	queue                     *Queue               // Primary queue (for swapchain synchronization)
-	renderPassCache           *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
-	pipelineCache             vk.PipelineCache     // Driver-compiled ISA cache (#331)
-	pipelineCachePath         string               // Disk path for pipeline cache persistence
+	handle                      vk.Device
+	physicalDevice              vk.PhysicalDevice
+	instance                    *Instance
+	graphicsFamily              uint32
+	allocator                   *memory.GpuAllocator
+	cmds                        *vk.Commands
+	supportsMultiDrawIndirect   bool
+	supportsDrawIndirectCount   bool
+	maxDrawIndirectCount        uint32
+	cmdDrawIndirectCount        pfnCmdDrawIndirectCount
+	cmdDrawIndexedIndirectCount pfnCmdDrawIndexedIndirectCount
+	descriptorAllocator         *DescriptorAllocator // Descriptor pool management for bind groups
+	queue                       *Queue               // Primary queue (for swapchain synchronization)
+	renderPassCache             *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
+	pipelineCache               vk.PipelineCache     // Driver-compiled ISA cache (#331)
+	pipelineCachePath           string               // Disk path for pipeline cache persistence
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain
@@ -949,14 +952,24 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			StageFlags:      shaderStagesToVk(entry.Visibility),
 		}
 
-		// Determine descriptor type based on which binding is set
+		// Determine descriptor type based on which binding is set.
+		// For buffers, pass HasDynamicOffset so Vulkan gets the correct
+		// dynamic descriptor type (VK_DESCRIPTOR_TYPE_*_BUFFER_DYNAMIC).
 		switch {
 		case entry.Buffer != nil:
-			binding.DescriptorType = bufferBindingTypeToVk(entry.Buffer.Type)
-			if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
-				counts.UniformBuffers++
+			binding.DescriptorType = bufferBindingTypeToVk(entry.Buffer.Type, entry.Buffer.HasDynamicOffset)
+			if entry.Buffer.HasDynamicOffset {
+				if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
+					counts.UniformBuffersDynamic++
+				} else {
+					counts.StorageBuffersDynamic++
+				}
 			} else {
-				counts.StorageBuffers++
+				if entry.Buffer.Type == gputypes.BufferBindingTypeUniform {
+					counts.UniformBuffers++
+				} else {
+					counts.StorageBuffers++
+				}
 			}
 		case entry.Sampler != nil:
 			binding.DescriptorType = vk.DescriptorTypeSampler

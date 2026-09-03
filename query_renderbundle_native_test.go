@@ -52,23 +52,14 @@ func (e *captureCommandEncoder) BeginRenderPass(*hal.RenderPassDescriptor) hal.R
 type captureDevice struct {
 	hal.Device
 	commandEncoder         hal.CommandEncoder
-	querySet               hal.QuerySet
-	querySetErr            error
 	renderBundleEncoder    hal.RenderBundleEncoder
 	renderBundleEncoderErr error
-	destroyedQuerySets     int
 	destroyedRenderBundles int
 }
 
 func (d *captureDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return d.commandEncoder, nil
 }
-
-func (d *captureDevice) CreateQuerySet(*hal.QuerySetDescriptor) (hal.QuerySet, error) {
-	return d.querySet, d.querySetErr
-}
-
-func (d *captureDevice) DestroyQuerySet(hal.QuerySet) { d.destroyedQuerySets++ }
 
 func (d *captureDevice) CreateRenderBundleEncoder(*hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
 	return d.renderBundleEncoder, d.renderBundleEncoderErr
@@ -79,6 +70,13 @@ func (d *captureDevice) DestroyRenderBundle(hal.RenderBundle) { d.destroyedRende
 func newCaptureDevice(h *captureDevice) *Device {
 	limits := DefaultLimits()
 	return &Device{core: core.NewDevice(h, nil, 0, limits, "query-render-bundle-test")}
+}
+
+func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
+	return &QuerySet{
+		core:   core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
+		device: device,
+	}
 }
 
 type testRenderBundleEncoder struct {
@@ -116,55 +114,6 @@ func (e *testRenderBundleEncoder) commandCalls() int {
 		e.setIndexBufferCalls + e.drawCalls + e.drawIndexedCalls
 }
 
-func TestQueryTypeAliasesHAL(t *testing.T) {
-	tests := []struct {
-		name string
-		got  QueryType
-		want hal.QueryType
-	}{
-		{name: "occlusion", got: QueryTypeOcclusion, want: hal.QueryTypeOcclusion},
-		{name: "timestamp", got: QueryTypeTimestamp, want: hal.QueryTypeTimestamp},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Fatalf("QueryType = %v, want %v", tt.got, tt.want)
-			}
-		})
-	}
-}
-
-func TestQuerySetDescriptorToHAL(t *testing.T) {
-	tests := []struct {
-		name string
-		desc *QuerySetDescriptor
-		want *hal.QuerySetDescriptor
-	}{
-		{name: "nil", desc: nil, want: nil},
-		{
-			name: "timestamp query set",
-			desc: &QuerySetDescriptor{Label: "queries", Type: QueryTypeTimestamp, Count: 4},
-			want: &hal.QuerySetDescriptor{Label: "queries", Type: hal.QueryTypeTimestamp, Count: 4},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.desc.toHAL()
-			if got == nil || tt.want == nil {
-				if got != tt.want {
-					t.Fatalf("toHAL() = %+v, want %+v", got, tt.want)
-				}
-				return
-			}
-			if *got != *tt.want {
-				t.Fatalf("toHAL() = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRenderBundleEncoderDescriptorToHAL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -199,9 +148,10 @@ func TestRenderBundleEncoderDescriptorToHAL(t *testing.T) {
 func TestRenderPassDescriptorTimestampWrites(t *testing.T) {
 	begin, end := uint32(2), uint32(3)
 	resource := &testHALResource{}
-	active := &QuerySet{hal: resource}
-	released := &QuerySet{hal: resource}
-	released.released.Store(true)
+	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
+	active := newTestQuerySet(resource, device)
+	released := newTestQuerySet(resource, device)
+	released.released = true
 
 	tests := []struct {
 		name    string
@@ -302,37 +252,6 @@ func TestRenderBundleEncoderFinish(t *testing.T) {
 	}
 }
 
-func TestDeviceCreateQuerySet(t *testing.T) {
-	resource := &testHALResource{}
-	tests := []struct {
-		name       string
-		desc       *QuerySetDescriptor
-		released   bool
-		halErr     error
-		wantErr    bool
-		wantResult bool
-	}{
-		{name: "nil descriptor", wantErr: true},
-		{name: "released device", desc: &QuerySetDescriptor{Count: 1}, released: true, wantErr: true},
-		{name: "HAL error", desc: &QuerySetDescriptor{Count: 1}, halErr: errors.New("create failed"), wantErr: true},
-		{name: "success", desc: &QuerySetDescriptor{Type: QueryTypeTimestamp, Count: 2}, wantResult: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &captureDevice{Device: &noop.Device{}, querySet: resource, querySetErr: tt.halErr}
-			device := newCaptureDevice(h)
-			if tt.released {
-				device.released.Store(true)
-			}
-			got, err := device.CreateQuerySet(tt.desc)
-			if (err != nil) != tt.wantErr || (got != nil) != tt.wantResult {
-				t.Fatalf("CreateQuerySet() = (%v, %v)", got, err)
-			}
-		})
-	}
-}
-
 func TestDeviceCreateRenderBundleEncoder(t *testing.T) {
 	resource := &testHALResource{}
 	tests := []struct {
@@ -365,31 +284,17 @@ func TestDeviceCreateRenderBundleEncoder(t *testing.T) {
 	}
 }
 
-func TestQuerySetAndRenderBundleRelease(t *testing.T) {
+func TestRenderBundleRelease(t *testing.T) {
 	resource := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}}
 	device := newCaptureDevice(h)
-	tests := []struct {
-		name    string
-		release func()
-		count   func() int
-	}{
-		{name: "query set", release: (&QuerySet{hal: resource, device: device}).Release, count: func() int { return h.destroyedQuerySets }},
-		{name: "render bundle", release: (&RenderBundle{hal: resource, device: device}).Release, count: func() int { return h.destroyedRenderBundles }},
+	bundle := &RenderBundle{hal: resource, device: device}
+	bundle.Release()
+	bundle.Release()
+	if got := h.destroyedRenderBundles; got != 1 {
+		t.Fatalf("HAL destroy calls = %d, want 1", got)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.release()
-			tt.release()
-			if got := tt.count(); got != 1 {
-				t.Fatalf("HAL destroy calls = %d, want 1", got)
-			}
-		})
-	}
-	var nilQuerySet *QuerySet
 	var nilRenderBundle *RenderBundle
-	nilQuerySet.Release()
 	nilRenderBundle.Release()
 }
 
@@ -408,7 +313,7 @@ func TestResolveQuerySetAndExecuteBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
 	}
-	querySet := &QuerySet{hal: resource, device: device}
+	querySet := newTestQuerySet(resource, device)
 	encoder.ResolveQuerySet(querySet, 0, 1, buffer, 0)
 	if command.resolved != 1 || command.querySet != resource || command.buffer == nil {
 		t.Fatalf("ResolveQuerySet delegation = (%d, %v, %v)", command.resolved, command.querySet, command.buffer)
@@ -435,9 +340,9 @@ func TestResolveQuerySetGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
 	}
-	querySet := &QuerySet{hal: resource}
-	releasedQuerySet := &QuerySet{hal: resource}
-	releasedQuerySet.released.Store(true)
+	querySet := newTestQuerySet(resource, device)
+	releasedQuerySet := newTestQuerySet(resource, device)
+	releasedQuerySet.released = true
 	activeDestination := &Buffer{released: &atomic.Bool{}}
 	releasedDestination := &Buffer{released: &atomic.Bool{}}
 	releasedDestination.released.Store(true)
@@ -484,23 +389,23 @@ func TestResolveQuerySetRecordsErrors(t *testing.T) {
 	resource := &testHALResource{}
 	tests := []struct {
 		name        string
-		querySet    *QuerySet
+		querySet    func(*Device) *QuerySet
 		destination *Buffer
 	}{
 		{name: "nil query set", destination: &Buffer{released: &atomic.Bool{}}},
-		{name: "nil destination", querySet: &QuerySet{hal: resource}},
-		{name: "released query set", querySet: func() *QuerySet {
-			q := &QuerySet{hal: resource}
-			q.released.Store(true)
+		{name: "nil destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }},
+		{name: "released query set", querySet: func(d *Device) *QuerySet {
+			q := newTestQuerySet(resource, d)
+			q.released = true
 			return q
-		}(), destination: &Buffer{released: &atomic.Bool{}}},
-		{name: "released destination", querySet: &QuerySet{hal: resource}, destination: func() *Buffer {
+		}, destination: &Buffer{released: &atomic.Bool{}}},
+		{name: "released destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: func() *Buffer {
 			b := &Buffer{released: &atomic.Bool{}}
 			b.released.Store(true)
 			return b
 		}()},
-		{name: "nil HAL query set", querySet: &QuerySet{}, destination: &Buffer{released: &atomic.Bool{}}},
-		{name: "nil HAL destination", querySet: &QuerySet{hal: resource}, destination: &Buffer{released: &atomic.Bool{}}},
+		{name: "nil HAL query set", querySet: func(*Device) *QuerySet { return &QuerySet{} }, destination: &Buffer{released: &atomic.Bool{}}},
+		{name: "nil HAL destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: &Buffer{released: &atomic.Bool{}}},
 	}
 
 	for _, tt := range tests {
@@ -511,7 +416,11 @@ func TestResolveQuerySetRecordsErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CreateCommandEncoder() error = %v", err)
 			}
-			encoder.ResolveQuerySet(tt.querySet, 0, 1, tt.destination, 0)
+			var querySet *QuerySet
+			if tt.querySet != nil {
+				querySet = tt.querySet(device)
+			}
+			encoder.ResolveQuerySet(querySet, 0, 1, tt.destination, 0)
 			if command.resolved != 0 {
 				t.Fatalf("HAL ResolveQuerySet calls = %d, want 0", command.resolved)
 			}
@@ -542,7 +451,6 @@ func TestCreationWithoutHALDevice(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{name: "query set", call: func() error { _, err := device.CreateQuerySet(&QuerySetDescriptor{Count: 1}); return err }},
 		{name: "render bundle encoder", call: func() error { _, err := device.CreateRenderBundleEncoder(&RenderBundleEncoderDescriptor{}); return err }},
 	}
 	for _, tt := range tests {

@@ -1714,8 +1714,23 @@ func TestRenderPassMultiDrawIndirectZeroCountIsNoOp(t *testing.T) {
 }
 
 func TestRenderPassMultiDrawIndirectRangeValidation(t *testing.T) {
-	device, encoder, pass := newEncoderWithRenderPass(t)
+	_, _, device := newDeviceWithFeatures(t, gputypes.Features(gputypes.FeatureMultiDrawIndirect))
 	defer device.Release()
+	requireHAL(t, device)
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "test-pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BeginRenderPass: %v", err)
+	}
 
 	pipeline := &wgpu.RenderPipeline{}
 	pipeline.SetTestRequiredVertexBuffers(0)
@@ -1750,8 +1765,30 @@ func TestRenderPassDrawIndexedIndirectCountRangeValidation(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			device, encoder, pass := newEncoderWithRenderPass(t)
+			var device *wgpu.Device
+			var encoder *wgpu.CommandEncoder
+			var pass *wgpu.RenderPassEncoder
+			if test.drawCount > 1 {
+				_, _, device = newDeviceWithFeatures(t, gputypes.Features(gputypes.FeatureMultiDrawIndirect))
+			} else {
+				_, _, device = newDevice(t)
+			}
 			defer device.Release()
+			requireHAL(t, device)
+			encoder, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatalf("CreateCommandEncoder: %v", err)
+			}
+			pass, err = encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+				Label: "test-pass",
+				ColorAttachments: []wgpu.RenderPassColorAttachment{{
+					LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore,
+					ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+				}},
+			})
+			if err != nil {
+				t.Fatalf("BeginRenderPass: %v", err)
+			}
 
 			pipeline := &wgpu.RenderPipeline{}
 			pipeline.SetTestRequiredVertexBuffers(0)
@@ -1792,8 +1829,23 @@ func TestRenderPassDrawIndexedIndirectCountRangeValidation(t *testing.T) {
 }
 
 func TestRenderPassDrawIndexedIndirectCountMany(t *testing.T) {
-	device, encoder, pass := newEncoderWithRenderPass(t)
+	_, _, device := newDeviceWithFeatures(t, gputypes.Features(gputypes.FeatureMultiDrawIndirect))
 	defer device.Release()
+	requireHAL(t, device)
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	pass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "test-pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BeginRenderPass: %v", err)
+	}
 
 	pipeline := &wgpu.RenderPipeline{}
 	pipeline.SetTestRequiredVertexBuffers(0)

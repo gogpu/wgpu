@@ -248,7 +248,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: gputypes.BackendVulkan,
 			},
-			Features: featuresFromPhysicalDevice(&features),
+			Features: featuresFromPhysicalDevice(&features, props.ApiVersion),
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
@@ -450,6 +450,9 @@ func (s *Surface) releaseConfiguredDevice(device *Device, drained bool) {
 
 // Helper functions
 
+// vkMakeVersion packs Vulkan version components (major.minor.patch).
+//
+//nolint:unparam,nolintlint // patch exercised in tests; unparam fires on Linux only (cross-GOOS).
 func vkMakeVersion(major, minor, patch uint32) uint32 {
 	return (major << 22) | (minor << 12) | patch
 }
@@ -506,7 +509,7 @@ func vendorIDToName(id uint32) string {
 
 // featuresFromPhysicalDevice maps Vulkan physical device features to WebGPU features.
 // Reference: wgpu-hal/src/vulkan/adapter.rs:584-829
-func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) gputypes.Features {
+func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures, apiVersion uint32) gputypes.Features {
 	var result gputypes.Features
 
 	// Texture compression features
@@ -526,6 +529,11 @@ func featuresFromPhysicalDevice(features *vk.PhysicalDeviceFeatures) gputypes.Fe
 	}
 	if features.MultiDrawIndirect != 0 {
 		result |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
+	}
+
+	// DrawIndirectCount is core in Vulkan 1.2+ (FeatureMultiDrawIndirectCount).
+	if supportsDrawIndirectCountFeature(apiVersion) {
+		result |= gputypes.Features(gputypes.FeatureMultiDrawIndirectCount)
 	}
 
 	// Depth/clipping features

@@ -1333,6 +1333,28 @@ func (p *CoreRenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset 
 	}
 }
 
+// DrawIndirectCount draws primitives with a GPU-provided draw count.
+func (p *CoreRenderPassEncoder) DrawIndirectCount(
+	indirectBuffer *Buffer, indirectOffset uint64,
+	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
+) {
+	p.forwardIndirectCount(indirectBuffer, countBuffer, indirectOffset, countOffset, maxDrawCount,
+		func(halIndirect, halCount hal.Buffer, indirectOffset, countOffset uint64, maxDrawCount uint32) {
+			p.raw.DrawIndirectCount(halIndirect, indirectOffset, halCount, countOffset, maxDrawCount)
+		})
+}
+
+// DrawIndexedIndirectCount draws indexed primitives with a GPU-provided draw count.
+func (p *CoreRenderPassEncoder) DrawIndexedIndirectCount(
+	indirectBuffer *Buffer, indirectOffset uint64,
+	countBuffer *Buffer, countOffset uint64, maxDrawCount uint32,
+) {
+	p.forwardIndirectCount(indirectBuffer, countBuffer, indirectOffset, countOffset, maxDrawCount,
+		func(halIndirect, halCount hal.Buffer, indirectOffset, countOffset uint64, maxDrawCount uint32) {
+			p.raw.DrawIndexedIndirectCount(halIndirect, indirectOffset, halCount, countOffset, maxDrawCount)
+		})
+}
+
 // End ends the render pass.
 func (p *CoreRenderPassEncoder) End() error {
 	if p.ended {

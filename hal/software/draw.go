@@ -808,7 +808,8 @@ func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
 		if bg == nil {
 			continue
 		}
-		// Buffers (uniform/storage) — apply offset/size from BufferBinding + dynamic offsets.
+		// Buffers (uniform/storage) — apply offset/size from BufferBinding.
+		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
 		dynIdx := 0
 		for bindingIdx, bs := range bg.bufferBindings {
 			if bs.buf == nil {
@@ -817,7 +818,7 @@ func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
 			bs.buf.mu.RLock()
 			data := bs.buf.data
 			off := bs.offset
-			if dynIdx < len(bg.dynamicOffsets) {
+			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
 				off += uint64(bg.dynamicOffsets[dynIdx])
 				dynIdx++
 			}

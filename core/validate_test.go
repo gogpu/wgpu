@@ -27,7 +27,7 @@ func validTextureDesc() *hal.TextureDescriptor {
 // --- ValidateTextureDescriptor tests ---
 
 func TestValidateTextureDescriptor_Valid(t *testing.T) {
-	err := ValidateTextureDescriptor(validTextureDesc(), gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(validTextureDesc(), gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid descriptor, got: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestValidateTextureDescriptor_InvalidDimension(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Dimension = gputypes.TextureDimensionUndefined
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for undefined dimension")
 	}
@@ -54,7 +54,7 @@ func TestValidateTextureDescriptor_InvalidFormat(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Format = gputypes.TextureFormatUndefined
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for undefined format")
 	}
@@ -84,7 +84,7 @@ func TestValidateTextureDescriptor_ZeroDimension(t *testing.T) {
 			desc := validTextureDesc()
 			desc.Size = hal.Extent3D{Width: tt.width, Height: tt.height, DepthOrArrayLayers: tt.depth}
 
-			err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err == nil {
 				t.Fatal("expected error for zero dimension")
 			}
@@ -110,7 +110,7 @@ func TestValidateTextureDescriptor_MaxDimension1D(t *testing.T) {
 	desc.Dimension = gputypes.TextureDimension1D
 	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension1D + 1, Height: 1, DepthOrArrayLayers: 1}
 
-	err := ValidateTextureDescriptor(desc, limits)
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for exceeding 1D max dimension")
 	}
@@ -131,7 +131,7 @@ func TestValidateTextureDescriptor_MaxDimension2D(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension2D + 1, Height: 1, DepthOrArrayLayers: 1}
 
-	err := ValidateTextureDescriptor(desc, limits)
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for exceeding 2D max dimension")
 	}
@@ -150,7 +150,7 @@ func TestValidateTextureDescriptor_MaxDimension3D(t *testing.T) {
 	desc.Dimension = gputypes.TextureDimension3D
 	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension3D + 1, Height: 1, DepthOrArrayLayers: 1}
 
-	err := ValidateTextureDescriptor(desc, limits)
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for exceeding 3D max dimension")
 	}
@@ -168,7 +168,7 @@ func TestValidateTextureDescriptor_MaxArrayLayers(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: limits.MaxTextureArrayLayers + 1}
 
-	err := ValidateTextureDescriptor(desc, limits)
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for exceeding max array layers")
 	}
@@ -185,7 +185,7 @@ func TestValidateTextureDescriptor_EmptyUsage(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Usage = gputypes.TextureUsageNone
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for empty usage")
 	}
@@ -202,7 +202,7 @@ func TestValidateTextureDescriptor_InvalidUsage(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Usage = gputypes.TextureUsage(1 << 30) // Unknown flag
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for invalid usage")
 	}
@@ -219,7 +219,7 @@ func TestValidateTextureDescriptor_InvalidMipLevelCount_Zero(t *testing.T) {
 	desc := validTextureDesc()
 	desc.MipLevelCount = 0
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for zero mip level count")
 	}
@@ -240,7 +240,7 @@ func TestValidateTextureDescriptor_InvalidMipLevelCount_TooMany(t *testing.T) {
 	desc.Size = hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1}
 	desc.MipLevelCount = 100 // max for 256x256 is 9
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for too many mip levels")
 	}
@@ -264,7 +264,7 @@ func TestValidateTextureDescriptor_InvalidSampleCount(t *testing.T) {
 		desc := validTextureDesc()
 		desc.SampleCount = sc
 
-		err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+		err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 		if err == nil {
 			t.Fatalf("expected error for sample count %d", sc)
 		}
@@ -286,7 +286,7 @@ func TestValidateTextureDescriptor_MultisampleMipLevel(t *testing.T) {
 	desc.SampleCount = 4
 	desc.MipLevelCount = 2
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for multisampled texture with mip levels > 1")
 	}
@@ -306,7 +306,7 @@ func TestValidateTextureDescriptor_MultisampleDimension(t *testing.T) {
 	desc.MipLevelCount = 1
 	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for multisampled non-2D texture")
 	}
@@ -325,7 +325,7 @@ func TestValidateTextureDescriptor_MultisampleArrayLayers(t *testing.T) {
 	desc.MipLevelCount = 1
 	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 2}
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for multisampled texture with array layers > 1")
 	}
@@ -345,7 +345,7 @@ func TestValidateTextureDescriptor_MultisampleStorageBinding(t *testing.T) {
 	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
 	desc.Usage = gputypes.TextureUsageTextureBinding | gputypes.TextureUsageStorageBinding
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for multisampled texture with storage binding")
 	}
@@ -365,7 +365,7 @@ func TestValidateTextureDescriptor_ValidMultisample(t *testing.T) {
 	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
 	desc.Usage = gputypes.TextureUsageRenderAttachment
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid multisampled texture, got: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestValidateTextureDescriptor_ValidMaxMips(t *testing.T) {
 	desc.Size = hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1}
 	desc.MipLevelCount = 9 // log2(256) + 1 = 9
 
-	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for max valid mip count, got: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestValidateSamplerDescriptor_Valid(t *testing.T) {
 		MipmapFilter: gputypes.FilterModeLinear,
 		Anisotropy:   1,
 	}
-	err := ValidateSamplerDescriptor(desc)
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestValidateSamplerDescriptor_NegativeLodMinClamp(t *testing.T) {
 		LodMinClamp: -1.0,
 		LodMaxClamp: 32,
 	}
-	err := ValidateSamplerDescriptor(desc)
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for negative LodMinClamp")
 	}
@@ -425,7 +425,7 @@ func TestValidateSamplerDescriptor_LodMaxClampLessThanMin(t *testing.T) {
 		LodMinClamp: 10.0,
 		LodMaxClamp: 5.0,
 	}
-	err := ValidateSamplerDescriptor(desc)
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for LodMaxClamp < LodMinClamp")
 	}
@@ -451,7 +451,7 @@ func TestValidateSamplerDescriptor_AnisotropyRequiresLinear(t *testing.T) {
 		MipmapFilter: gputypes.FilterModeLinear,
 		Anisotropy:   4,
 	}
-	err := ValidateSamplerDescriptor(desc)
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for anisotropy with non-linear filtering")
 	}
@@ -473,7 +473,7 @@ func TestValidateSamplerDescriptor_ZeroAnisotropyIsValid(t *testing.T) {
 		MinFilter:   gputypes.FilterModeNearest,
 		Anisotropy:  0, // treated as 1
 	}
-	err := ValidateSamplerDescriptor(desc)
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for zero anisotropy, got: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestValidateShaderModuleDescriptor_ValidWGSL(t *testing.T) {
 		Label:  "test",
 		Source: hal.ShaderSource{WGSL: "@vertex fn main() -> @builtin(position) vec4f { return vec4f(); }"},
 	}
-	err := ValidateShaderModuleDescriptor(desc)
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestValidateShaderModuleDescriptor_ValidSPIRV(t *testing.T) {
 		Label:  "test",
 		Source: hal.ShaderSource{SPIRV: []uint32{0x07230203, 0x00010000}},
 	}
-	err := ValidateShaderModuleDescriptor(desc)
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestValidateShaderModuleDescriptor_ValidSPIRV(t *testing.T) {
 
 func TestValidateShaderModuleDescriptor_NoSource(t *testing.T) {
 	desc := &hal.ShaderModuleDescriptor{Label: "test"}
-	err := ValidateShaderModuleDescriptor(desc)
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for no source")
 	}
@@ -526,7 +526,7 @@ func TestValidateShaderModuleDescriptor_DualSource(t *testing.T) {
 			SPIRV: []uint32{0x07230203},
 		},
 	}
-	err := ValidateShaderModuleDescriptor(desc)
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for dual source")
 	}
@@ -555,7 +555,7 @@ func TestValidateRenderPipelineDescriptor_Valid(t *testing.T) {
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestValidateRenderPipelineDescriptor_MissingVertexModule(t *testing.T) {
 			EntryPoint: "vs_main",
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for nil vertex module")
 	}
@@ -590,7 +590,7 @@ func TestValidateRenderPipelineDescriptor_MissingVertexEntryPoint(t *testing.T) 
 			EntryPoint: "",
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for empty vertex entry point")
 	}
@@ -616,7 +616,7 @@ func TestValidateRenderPipelineDescriptor_MissingFragmentModule(t *testing.T) {
 			Targets:    []gputypes.ColorTargetState{{}},
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for nil fragment module")
 	}
@@ -642,7 +642,7 @@ func TestValidateRenderPipelineDescriptor_MissingFragmentEntryPoint(t *testing.T
 			Targets:    []gputypes.ColorTargetState{{}},
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for empty fragment entry point")
 	}
@@ -668,7 +668,7 @@ func TestValidateRenderPipelineDescriptor_NoFragmentTargets(t *testing.T) {
 			Targets:    []gputypes.ColorTargetState{},
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for empty fragment targets")
 	}
@@ -696,7 +696,7 @@ func TestValidateRenderPipelineDescriptor_TooManyColorTargets(t *testing.T) {
 			Targets:    targets,
 		},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, limits)
+	err := ValidateRenderPipelineDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for too many color targets")
 	}
@@ -721,7 +721,7 @@ func TestValidateRenderPipelineDescriptor_InvalidSampleCount(t *testing.T) {
 		},
 		Multisample: gputypes.MultisampleState{Count: 3},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for invalid sample count")
 	}
@@ -743,7 +743,7 @@ func TestValidateRenderPipelineDescriptor_NoFragment(t *testing.T) {
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for depth-only pipeline, got: %v", err)
 	}
@@ -888,7 +888,7 @@ func TestValidateBindGroupDescriptor_Valid(t *testing.T) {
 			{Binding: 2},
 		},
 	}
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, gputypes.Limits{})
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -900,7 +900,7 @@ func TestValidateBindGroupDescriptor_MissingLayout(t *testing.T) {
 		Layout: nil,
 	}
 	// layoutEntries value does not matter -- nil layout is checked first.
-	err := ValidateBindGroupDescriptor(desc, nil, nil, gputypes.Limits{})
+	err := ValidateBindGroupDescriptor(desc, nil, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for nil layout")
 	}
@@ -929,7 +929,7 @@ func TestValidateBindGroupDescriptor_BindingsNumMismatch(t *testing.T) {
 			{Binding: 3},
 		},
 	}
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, gputypes.Limits{})
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for entry count mismatch (3 entries vs 4 layout entries)")
 	}
@@ -961,7 +961,7 @@ func TestValidateBindGroupDescriptor_MissingBindingDeclaration(t *testing.T) {
 			{Binding: 5}, // not declared in layout
 		},
 	}
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, gputypes.Limits{})
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for binding 5 not declared in layout")
 	}
@@ -990,7 +990,7 @@ func TestValidateBindGroupDescriptor_DuplicateBinding(t *testing.T) {
 			{Binding: 0}, // duplicate
 		},
 	}
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, gputypes.Limits{})
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for duplicate binding 0")
 	}
@@ -1018,7 +1018,7 @@ func TestValidatePipelineLayoutDescriptor_Valid(t *testing.T) {
 		Label:            "test",
 		BindGroupLayouts: layouts,
 	}
-	err := ValidatePipelineLayoutDescriptor(desc, limits)
+	err := ValidatePipelineLayoutDescriptor(desc, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid descriptor with %d bind group layouts, got: %v",
 			limits.MaxBindGroups, err)
@@ -1030,7 +1030,7 @@ func TestValidatePipelineLayoutDescriptor_Empty(t *testing.T) {
 		Label:            "test",
 		BindGroupLayouts: nil,
 	}
-	err := ValidatePipelineLayoutDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidatePipelineLayoutDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for empty bind group layouts, got: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestValidatePipelineLayoutDescriptor_TooManyGroups(t *testing.T) {
 		Label:            "test",
 		BindGroupLayouts: layouts,
 	}
-	err := ValidatePipelineLayoutDescriptor(desc, limits)
+	err := ValidatePipelineLayoutDescriptor(desc, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for too many bind group layouts")
 	}
@@ -1092,7 +1092,7 @@ func TestValidateRenderPipelineDescriptor_ColorTargetDepthFormat(t *testing.T) {
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
-			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err == nil {
 				t.Fatalf("expected error for depth/stencil format %s as color target", f)
 			}
@@ -1130,7 +1130,7 @@ func TestValidateRenderPipelineDescriptor_ColorTargetDepthFormat_SecondTarget(t 
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for depth format as second color target")
 	}
@@ -1167,7 +1167,7 @@ func TestValidateRenderPipelineDescriptor_DepthStencilColorFormat(t *testing.T) 
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
-			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err == nil {
 				t.Fatalf("expected error for color format %s as depth/stencil", f)
 			}
@@ -1211,7 +1211,7 @@ func TestValidateRenderPipelineDescriptor_ValidDepthStencil(t *testing.T) {
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
-			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err != nil {
 				t.Fatalf("expected nil error for valid depth/stencil format %s, got: %v", f, err)
 			}
@@ -1243,7 +1243,7 @@ func TestValidateRenderPipelineDescriptor_ValidColorTargetFormats(t *testing.T) 
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
-			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err != nil {
 				t.Fatalf("expected nil error for valid color format %s, got: %v", f, err)
 			}
@@ -1710,7 +1710,7 @@ func validBindGroupBufferSetup() (
 
 func TestValidateBindGroupDescriptor_BufferValid(t *testing.T) {
 	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid buffer binding, got: %v", err)
 	}
@@ -1722,7 +1722,7 @@ func TestValidateBindGroupDescriptor_BufferValidImplicitSize(t *testing.T) {
 	bufferInfos[0].Size = 0
 	bufferInfos[0].Offset = 256
 	bufferInfos[0].BufferSize = 1024
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid implicit-size buffer binding, got: %v", err)
 	}
@@ -1733,7 +1733,7 @@ func TestValidateBindGroupDescriptor_BufferUsageMismatch_UniformAsStorage(t *tes
 	// Layout wants uniform, but buffer only has storage usage.
 	bufferInfos[0].Usage = gputypes.BufferUsageStorage
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for buffer usage mismatch")
 	}
@@ -1757,7 +1757,7 @@ func TestValidateBindGroupDescriptor_BufferUsageMismatch_StorageAsUniform(t *tes
 	bufferInfos[0].Usage = gputypes.BufferUsageUniform
 	bufferInfos[0].Size = 64 // multiple of 4 to avoid storage alignment error
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for storage binding with uniform-only buffer")
 	}
@@ -1775,7 +1775,7 @@ func TestValidateBindGroupDescriptor_BufferOffsetMisaligned_Uniform(t *testing.T
 	// Default MinUniformBufferOffsetAlignment is 256. Use offset 100.
 	bufferInfos[0].Offset = 100
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for misaligned uniform buffer offset")
 	}
@@ -1802,7 +1802,7 @@ func TestValidateBindGroupDescriptor_BufferOffsetMisaligned_Storage(t *testing.T
 	bufferInfos[0].Size = 128
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for misaligned storage buffer offset")
 	}
@@ -1822,7 +1822,7 @@ func TestValidateBindGroupDescriptor_BufferOffsetAligned(t *testing.T) {
 	bufferInfos[0].Size = 256
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for aligned offset, got: %v", err)
 	}
@@ -1834,7 +1834,7 @@ func TestValidateBindGroupDescriptor_BufferBindingSizeTooLarge_Uniform(t *testin
 	bufferInfos[0].Size = 65537
 	bufferInfos[0].BufferSize = 1 << 20 // 1 MiB buffer to avoid bounds error
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for binding size exceeding max uniform buffer binding size")
 	}
@@ -1859,7 +1859,7 @@ func TestValidateBindGroupDescriptor_BufferBindingSizeTooLarge_Storage(t *testin
 	bufferInfos[0].Size = 134217732     // 128 MiB + 4
 	bufferInfos[0].BufferSize = 1 << 28 // 256 MiB buffer
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for binding size exceeding max storage buffer binding size")
 	}
@@ -1879,7 +1879,7 @@ func TestValidateBindGroupDescriptor_BufferBoundsOverflow_ExplicitSize(t *testin
 	bufferInfos[0].Size = 600
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for buffer bounds overflow")
 	}
@@ -1908,7 +1908,7 @@ func TestValidateBindGroupDescriptor_BufferBoundsOverflow_ImplicitSize(t *testin
 	bufferInfos[0].Offset = 2048
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for buffer offset beyond buffer end with implicit size")
 	}
@@ -1929,7 +1929,7 @@ func TestValidateBindGroupDescriptor_BufferBindingZeroSize_ExplicitZeroBuffer(t 
 	bufferInfos[0].Offset = 0
 	bufferInfos[0].BufferSize = 0
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for zero effective binding size")
 	}
@@ -1949,7 +1949,7 @@ func TestValidateBindGroupDescriptor_StorageBufferSizeNotMultipleOf4(t *testing.
 	bufferInfos[0].Size = 13 // not a multiple of 4
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for storage buffer size not multiple of 4")
 	}
@@ -1972,7 +1972,7 @@ func TestValidateBindGroupDescriptor_StorageBufferSizeMultipleOf4_ReadOnly(t *te
 	bufferInfos[0].Size = 15 // not a multiple of 4
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for read-only storage buffer size not multiple of 4")
 	}
@@ -1993,7 +1993,7 @@ func TestValidateBindGroupDescriptor_StorageBufferValid(t *testing.T) {
 	bufferInfos[0].Offset = 0
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for valid storage buffer binding, got: %v", err)
 	}
@@ -2028,7 +2028,7 @@ func TestValidateBindGroupDescriptor_BufferNoBufferLayoutEntry(t *testing.T) {
 	}
 	limits := gputypes.DefaultLimits()
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error when buffer info binding has no buffer layout, got: %v", err)
 	}
@@ -2041,7 +2041,7 @@ func TestValidateBindGroupDescriptor_BufferBoundsExact(t *testing.T) {
 	bufferInfos[0].Size = 1024
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for exact-fit buffer binding, got: %v", err)
 	}
@@ -2056,7 +2056,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_TooSmall(t *testing.T) {
 	bufferInfos[0].Size = 32
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for effective size < MinBindingSize")
 	}
@@ -2082,7 +2082,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_Exact(t *testing.T) {
 	bufferInfos[0].Size = 64
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for effective size == MinBindingSize, got: %v", err)
 	}
@@ -2095,7 +2095,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_Larger(t *testing.T) {
 	bufferInfos[0].Size = 128
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for effective size > MinBindingSize, got: %v", err)
 	}
@@ -2108,7 +2108,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_ZeroMeansNoCheck(t *testing.
 	bufferInfos[0].Size = 4
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for MinBindingSize=0 (no constraint), got: %v", err)
 	}
@@ -2124,7 +2124,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_ImplicitSize(t *testing.T) {
 	bufferInfos[0].Offset = 0
 	bufferInfos[0].BufferSize = 256
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for implicit effective size < MinBindingSize")
 	}
@@ -2146,7 +2146,7 @@ func TestValidateBindGroupDescriptor_MinBindingSize_StorageBuffer(t *testing.T) 
 	bufferInfos[0].Size = 64 // multiple of 4, but less than MinBindingSize
 	bufferInfos[0].BufferSize = 1024
 
-	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, limits)
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for storage buffer effective size < MinBindingSize")
 	}
@@ -2186,7 +2186,7 @@ func TestValidateRenderPipelineDescriptor_Depth16Unorm_StencilOpsEnabled(t *test
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for Depth16Unorm with stencil ops enabled (no stencil aspect)")
 	}
@@ -2214,7 +2214,7 @@ func TestValidateRenderPipelineDescriptor_Stencil8_DepthWriteEnabled(t *testing.
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for Stencil8 with depth write enabled (no depth aspect)")
 	}
@@ -2241,7 +2241,7 @@ func TestValidateRenderPipelineDescriptor_Stencil8_DepthCompareNotAlways(t *test
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for Stencil8 with DepthCompare=Less (no depth aspect)")
 	}
@@ -2281,7 +2281,7 @@ func TestValidateRenderPipelineDescriptor_Depth24PlusStencil8_BothEnabled(t *tes
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for Depth24PlusStencil8 with both depth+stencil enabled, got: %v", err)
 	}
@@ -2313,7 +2313,7 @@ func TestValidateRenderPipelineDescriptor_Depth32Float_StencilOpsEnabled(t *test
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err == nil {
 		t.Fatal("expected error for Depth32Float with stencil ops enabled (no stencil aspect)")
 	}
@@ -2359,7 +2359,7 @@ func TestValidateRenderPipelineDescriptor_DepthOnly_NoStencilOps(t *testing.T) {
 				},
 				Multisample: gputypes.MultisampleState{Count: 1},
 			}
-			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 			if err != nil {
 				t.Fatalf("expected nil error for depth-only format %s with stencil IGNORE, got: %v", f, err)
 			}
@@ -2394,7 +2394,7 @@ func TestValidateRenderPipelineDescriptor_Stencil8_NoDepthOps(t *testing.T) {
 		},
 		Multisample: gputypes.MultisampleState{Count: 1},
 	}
-	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits())
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
 	if err != nil {
 		t.Fatalf("expected nil error for Stencil8 with depth disabled, got: %v", err)
 	}

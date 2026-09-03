@@ -635,16 +635,9 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 	if e.released {
 		return
 	}
-	if querySet == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is nil"))
-		return
-	}
+
 	if dst == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is nil"))
-		return
-	}
-	if querySet.released.Load() || querySet.hal == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", ErrReleased))
 		return
 	}
 	if dst.released == nil || dst.released.Load() {
@@ -663,7 +656,13 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		return
 	}
 
-	raw.ResolveQuerySet(querySet.hal, firstQuery, queryCount, halDestination, dstOffset)
+	halQuerySet := querySet.halQuerySet()
+	if halQuerySet == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", ErrReleased))
+		return
+	}
+
+	raw.ResolveQuerySet(halQuerySet, firstQuery, queryCount, halDestination, dstOffset)
 }
 
 // DiscardEncoding discards the encoder without producing a command buffer.

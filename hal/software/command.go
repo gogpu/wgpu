@@ -642,6 +642,14 @@ func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 // DrawIndexedIndirect is a no-op.
 func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
 
+// DrawIndirectCount is a no-op (count-buffer indirect not supported in software backend).
+func (r *RenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
+// DrawIndexedIndirectCount is a no-op.
+func (r *RenderPassEncoder) DrawIndexedIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
 // ExecuteBundle is a no-op.
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 
@@ -733,6 +741,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		if bg == nil {
 			continue
 		}
+		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
 		dynIdx := 0
 		for bindingIdx, bs := range bg.bufferBindings {
 			if bs.buf == nil {
@@ -741,7 +750,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 			bs.buf.mu.Lock()
 			data := bs.buf.data
 			off := bs.offset
-			if dynIdx < len(bg.dynamicOffsets) {
+			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
 				off += uint64(bg.dynamicOffsets[dynIdx])
 				dynIdx++
 			}
