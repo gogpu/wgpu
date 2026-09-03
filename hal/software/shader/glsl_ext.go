@@ -77,17 +77,17 @@ const (
 	GLSLFrexpStruct = 52
 	GLSLLdexp       = 53
 
-	GLSLPackSnorm4x8    = 54
-	GLSLPackUnorm4x8    = 55
-	GLSLPackSnorm2x16   = 56
-	GLSLPackUnorm2x16   = 57
-	GLSLPackHalf2x16    = 58
-	GLSLPackDouble2x32  = 59
-	GLSLUnpackSnorm2x16 = 60
-	GLSLUnpackUnorm2x16 = 61
-	GLSLUnpackHalf2x16  = 62
-	GLSLUnpackSnorm4x8  = 63
-	GLSLUnpackUnorm4x8  = 64
+	GLSLPackSnorm4x8     = 54
+	GLSLPackUnorm4x8     = 55
+	GLSLPackSnorm2x16    = 56
+	GLSLPackUnorm2x16    = 57
+	GLSLPackHalf2x16     = 58
+	GLSLPackDouble2x32   = 59
+	GLSLUnpackSnorm2x16  = 60
+	GLSLUnpackUnorm2x16  = 61
+	GLSLUnpackHalf2x16   = 62
+	GLSLUnpackSnorm4x8   = 63
+	GLSLUnpackUnorm4x8   = 64
 	GLSLUnpackDouble2x32 = 65
 
 	GLSLLength      = 66
