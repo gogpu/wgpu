@@ -89,6 +89,29 @@ func TestFloat16RoundTrip(t *testing.T) {
 	}
 }
 
+func TestFloat32ToFloat16Denorm(t *testing.T) {
+	// Regression: denorm path must not apply an extra >>13 after shift.
+	cases := []struct {
+		f    float32
+		want uint16
+	}{
+		{3.0517578125e-05, 0x0200}, // 2^-15
+		{3.814697265625e-06, 0x0040},
+		{5.960464477539063e-08, 0x0001}, // smallest positive f16 denorm
+		{4.57763671875e-05, 0x0300},
+	}
+	for _, tc := range cases {
+		got := float32ToFloat16bits(tc.f)
+		if got != tc.want {
+			t.Errorf("float32ToFloat16bits(%g) = %#x, want %#x", tc.f, got, tc.want)
+		}
+		back := float16bitsToFloat32(got)
+		if math.Abs(float64(back-tc.f))/float64(tc.f) > 0.02 && tc.f != 0 {
+			t.Errorf("denorm roundtrip %g → %#x → %g", tc.f, got, back)
+		}
+	}
+}
+
 func TestPackViaExtInst(t *testing.T) {
 	interp := newGLSLInterp(map[uint32]any{
 		10: ValVec4(1, 0, 0, 1),

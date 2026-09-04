@@ -105,3 +105,64 @@ func TestMatrixInverseViaExtInst(t *testing.T) {
 		t.Errorf("inv3[0][0] = %v, want 0.5", cols[0].AsVec3()[0])
 	}
 }
+
+// mulMatVec multiplies a column-major matrix by a column vector.
+func mulMatVec(cols []Value, v []float32) []float32 {
+	n := len(cols)
+	out := make([]float32, n)
+	for r := 0; r < n; r++ {
+		var sum float32
+		for c := 0; c < n; c++ {
+			sum += matElem(cols, r, c) * v[c]
+		}
+		out[r] = sum
+	}
+	return out
+}
+
+func assertMatMulIdentity(t *testing.T, name string, m, inv Value) {
+	t.Helper()
+	a := m.AsArray()
+	b := inv.AsArray()
+	n := len(a)
+	if len(b) != n {
+		t.Fatalf("%s: column count mismatch %d vs %d", name, n, len(b))
+	}
+	for i := 0; i < n; i++ {
+		e := make([]float32, n)
+		e[i] = 1
+		got := mulMatVec(b, mulMatVec(a, e))
+		for j := 0; j < n; j++ {
+			want := float32(0)
+			if j == i {
+				want = 1
+			}
+			if math.Abs(float64(got[j]-want)) > 1e-4 {
+				t.Fatalf("%s: (A*inv) e_%d = %v, want identity column", name, i, got)
+			}
+		}
+	}
+}
+
+func TestMatrixInverse3Nonsymmetric(t *testing.T) {
+	// Column-major [[1,2,3],[0,1,4],[5,6,0]] — non-symmetric so transpose bugs show up.
+	m := ValArray([]Value{
+		ValVec3(1, 0, 5),
+		ValVec3(2, 1, 6),
+		ValVec3(3, 4, 0),
+	})
+	inv := matrixInverse(m)
+	assertMatMulIdentity(t, "mat3", m, inv)
+}
+
+func TestMatrixInverse4Nonsymmetric(t *testing.T) {
+	// Non-symmetric mat4 (column-major) with det ≠ 0.
+	m := ValArray([]Value{
+		ValVec4(1, 0, 2, 1),
+		ValVec4(2, 1, 0, 0),
+		ValVec4(0, 3, 1, 2),
+		ValVec4(1, 0, 0, 1),
+	})
+	inv := matrixInverse(m)
+	assertMatMulIdentity(t, "mat4", m, inv)
+}

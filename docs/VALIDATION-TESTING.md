@@ -3,10 +3,6 @@
 > How feature gates, texture usage rules, and Phase C validation are tested in `wgpu/core`.  
 > Issue: [#333](https://github.com/gogpu/wgpu/issues/333) · Implementation branch: `feat/validation-phase-c`
 
-For the full implementation plan (phases, VAL-C IDs, wiring checklist), see the local dev doc  
-[`docs/dev/validation-phase-c-plan.md`](dev/validation-phase-c-plan.md) (gitignored — not committed).  
-RU version of this guide: [`VALIDATION-TESTING.ru.md`](VALIDATION-TESTING.ru.md).
-
 ---
 
 ## Goals

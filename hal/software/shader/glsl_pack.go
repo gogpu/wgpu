@@ -218,10 +218,10 @@ func float32ToFloat16bits(f float32) uint16 {
 		if exp < 103 {
 			return sign
 		}
-		mant |= 0x800000
-		shift := uint32(126 - exp) // exp in [103,112]
-		mant = (mant + (1 << (shift - 1))) >> shift
-		return sign | uint16(mant>>13)
+		mant |= 0x800000                            // 24 bits with implicit 1
+		shift := uint32(126 - exp)                  // shift ∈ [14,23]
+		mant = (mant + (1 << (shift - 1))) >> shift // already in 10-bit range
+		return sign | uint16(mant)
 	default:
 		newExp := uint16(exp - 127 + 15)
 		return sign | (newExp << 10) | uint16(mant>>13)
@@ -231,7 +231,7 @@ func float32ToFloat16bits(f float32) uint16 {
 // float16bitsToFloat32 converts IEEE-754 binary16 bits to binary32.
 func float16bitsToFloat32(h uint16) float32 {
 	sign := uint32(h&0x8000) << 16
-	exp := (h >> 10) & 0x1f
+	exp := int((h >> 10) & 0x1f)
 	mant := uint32(h & 0x3ff)
 
 	switch exp {
@@ -239,14 +239,14 @@ func float16bitsToFloat32(h uint16) float32 {
 		if mant == 0 {
 			return math.Float32frombits(sign)
 		}
-		// Normalize denormal.
+		// Normalize denormal (exp is int so decrement stays well-defined).
 		for mant < 0x400 {
 			mant <<= 1
 			exp--
 		}
 		mant &= 0x3ff
 		exp++
-		fexp := uint32(int(exp) - 15 + 127)
+		fexp := uint32(exp - 15 + 127)
 		return math.Float32frombits(sign | (fexp << 23) | (mant << 13))
 	case 0x1f:
 		if mant != 0 {
@@ -254,10 +254,13 @@ func float16bitsToFloat32(h uint16) float32 {
 		}
 		return math.Float32frombits(sign | 0x7f800000)
 	default:
-		fexp := uint32(int(exp) - 15 + 127)
+		fexp := uint32(exp - 15 + 127)
 		return math.Float32frombits(sign | (fexp << 23) | (mant << 13))
 	}
 }
+
+// TODO: GLSL.std.450 FindILsb/FindSMsb/FindUMsb accept scalar or vector integers
+// and return component-wise results. Current helpers only handle scalars.
 
 // findILsb returns the bit number of the least-significant 1 bit, or -1 if value is 0.
 func findILsb(v uint32) int32 {

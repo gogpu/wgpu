@@ -132,9 +132,10 @@ func inverse3(cols []Value) Value {
 			cof[r][c] = sign * minor2From3(cols, r, c)
 		}
 	}
+	// Adjugate is the transpose of the cofactor matrix; emit column-major columns.
 	out := make([]Value, 3)
 	for c := 0; c < 3; c++ {
-		out[c] = ValVec3(cof[0][c]*inv, cof[1][c]*inv, cof[2][c]*inv)
+		out[c] = ValVec3(cof[c][0]*inv, cof[c][1]*inv, cof[c][2]*inv)
 	}
 	return ValArray(out)
 }
@@ -175,9 +176,10 @@ func inverse4(cols []Value) Value {
 			cof[r][c] = sign * minor3(cols, r, c)
 		}
 	}
+	// Adjugate is the transpose of the cofactor matrix; emit column-major columns.
 	out := make([]Value, 4)
 	for c := 0; c < 4; c++ {
-		out[c] = ValVec4(cof[0][c]*inv, cof[1][c]*inv, cof[2][c]*inv, cof[3][c]*inv)
+		out[c] = ValVec4(cof[c][0]*inv, cof[c][1]*inv, cof[c][2]*inv, cof[c][3]*inv)
 	}
 	return ValArray(out)
 }
