@@ -217,8 +217,8 @@ func TestRenderBundleEncoderCommandsAfterFinish(t *testing.T) {
 		{name: "SetBindGroup", call: func(e *RenderBundleEncoder) { e.SetBindGroup(0, &BindGroup{hal: resource}, nil) }},
 		{name: "SetVertexBuffer", call: func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, &Buffer{}, 0) }},
 		{name: "SetIndexBuffer", call: func(e *RenderBundleEncoder) { e.SetIndexBuffer(&Buffer{}, gputypes.IndexFormatUint16, 0) }},
-		{name: "Draw", call: func(e *RenderBundleEncoder) { e.Draw(3, 1, 0, 0) }},
-		{name: "DrawIndexed", call: func(e *RenderBundleEncoder) { e.DrawIndexed(3, 1, 0, 0, 0) }},
+		{name: "Draw", call: func(e *RenderBundleEncoder) { e.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) }},
+		{name: "DrawIndexed", call: func(e *RenderBundleEncoder) { e.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) }},
 	}
 
 	for _, tt := range tests {
@@ -490,6 +490,46 @@ func TestCreationWithoutHALDevice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.call(); !errors.Is(err, ErrReleased) {
 				t.Fatalf("error = %v, want ErrReleased", err)
+			}
+		})
+	}
+}
+
+func TestRenderPassDescriptorTimestampWritesToHAL(t *testing.T) {
+	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
+	resource := &testHALResource{}
+	active := newTestQuerySet(resource, device)
+	defer device.destroyQueue().FlushAll()
+	defer active.Release()
+	released := newTestQuerySet(resource, device)
+	released.Release()
+	begin, end := uint32(1), uint32(3)
+	tests := []struct {
+		name   string
+		writes *RenderPassTimestampWrites
+		want   bool
+	}{
+		{name: "absent"},
+		{name: "nil query set", writes: &RenderPassTimestampWrites{}},
+		{name: "released query set", writes: &RenderPassTimestampWrites{QuerySet: released}},
+		{name: "both boundaries", writes: &RenderPassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &begin, EndOfPassWriteIndex: &end}, want: true},
+		{name: "begin only", writes: &RenderPassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &begin}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (&RenderPassDescriptor{Label: "pass", TimestampWrites: tt.writes}).toHAL()
+			if got.Label != "pass" {
+				t.Fatalf("Label = %q", got.Label)
+			}
+			if !tt.want {
+				if got.TimestampWrites != nil {
+					t.Fatalf("TimestampWrites = %+v, want nil", got.TimestampWrites)
+				}
+				return
+			}
+			writes := got.TimestampWrites
+			if writes == nil || writes.QuerySet != resource || writes.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex || writes.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
+				t.Fatalf("TimestampWrites = %+v, want %+v", writes, tt.writes)
 			}
 		})
 	}

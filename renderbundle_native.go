@@ -49,31 +49,20 @@ func (e *RenderBundleEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.Ind
 	e.hal.SetIndexBuffer(buffer.halBuffer(), format, offset)
 }
 
-func (e *RenderBundleEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (e *RenderBundleEncoder) Draw(args gputypes.DrawArgs) {
 	if e.finished.Load() {
 		return
 	}
 
-	e.hal.Draw(gputypes.DrawArgs{
-		VertexCount:   vertexCount,
-		InstanceCount: instanceCount,
-		FirstVertex:   firstVertex,
-		FirstInstance: firstInstance,
-	})
+	e.hal.Draw(args)
 }
 
-func (e *RenderBundleEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+func (e *RenderBundleEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	if e.finished.Load() {
 		return
 	}
 
-	e.hal.DrawIndexed(gputypes.DrawIndexedArgs{
-		IndexCount:    indexCount,
-		InstanceCount: instanceCount,
-		FirstIndex:    firstIndex,
-		BaseVertex:    baseVertex,
-		FirstInstance: firstInstance,
-	})
+	e.hal.DrawIndexed(args)
 }
 
 // Finish completes recording and returns the reusable render bundle.
