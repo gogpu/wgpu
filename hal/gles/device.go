@@ -89,11 +89,15 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	return buf, nil
 }
 
-// DestroyBuffer destroys a GPU buffer.
+// DestroyBuffer destroys a GPU buffer under the AdapterContext lock.
 func (d *Device) DestroyBuffer(buffer hal.Buffer) {
-	if b, ok := buffer.(*Buffer); ok {
-		b.Destroy()
+	b, ok := buffer.(*Buffer)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	b.Destroy()
 }
 
 // MapBuffer establishes a CPU-visible mapping for a GL buffer.
@@ -267,11 +271,15 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	}, nil
 }
 
-// DestroyTexture destroys a GPU texture.
+// DestroyTexture destroys a GPU texture under the AdapterContext lock.
 func (d *Device) DestroyTexture(texture hal.Texture) {
-	if t, ok := texture.(*Texture); ok {
-		t.Destroy()
+	t, ok := texture.(*Texture)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	t.Destroy()
 }
 
 // CreateTextureView creates a view into a texture.
@@ -323,11 +331,15 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (hal.Sampler, error) {
 	}, nil
 }
 
-// DestroySampler destroys a sampler.
+// DestroySampler destroys a sampler under the AdapterContext lock.
 func (d *Device) DestroySampler(sampler hal.Sampler) {
-	if s, ok := sampler.(*Sampler); ok {
-		s.Destroy()
+	s, ok := sampler.(*Sampler)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	s.Destroy()
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -394,11 +406,15 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (hal.ShaderMod
 	}, nil
 }
 
-// DestroyShaderModule destroys a shader module.
+// DestroyShaderModule destroys a shader module under the AdapterContext lock.
 func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
-	if m, ok := module.(*ShaderModule); ok {
-		m.Destroy()
+	m, ok := module.(*ShaderModule)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	m.Destroy()
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -557,11 +573,15 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	return pipeline, nil
 }
 
-// DestroyRenderPipeline destroys a render pipeline.
+// DestroyRenderPipeline destroys a render pipeline under the AdapterContext lock.
 func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
-	if p, ok := pipeline.(*RenderPipeline); ok {
-		p.Destroy()
+	p, ok := pipeline.(*RenderPipeline)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	p.Destroy()
 }
 
 // CreateComputePipeline creates a compute pipeline.
@@ -656,11 +676,15 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}, nil
 }
 
-// DestroyComputePipeline destroys a compute pipeline.
+// DestroyComputePipeline destroys a compute pipeline under the AdapterContext lock.
 func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
-	if p, ok := pipeline.(*ComputePipeline); ok {
-		p.Destroy()
+	p, ok := pipeline.(*ComputePipeline)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	p.Destroy()
 }
 
 // CreateQuerySet creates a query set with GL query objects.
@@ -728,11 +752,15 @@ func (d *Device) CreateFence() (hal.Fence, error) {
 	return NewFence(d.ctx.GL()), nil
 }
 
-// DestroyFence destroys a fence.
+// DestroyFence destroys a fence under the AdapterContext lock.
 func (d *Device) DestroyFence(fence hal.Fence) {
-	if f, ok := fence.(*Fence); ok {
-		f.Destroy()
+	f, ok := fence.(*Fence)
+	if !ok || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	f.Destroy()
 }
 
 // Wait waits for a fence to reach the specified value.

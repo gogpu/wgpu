@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -215,6 +216,52 @@ func TestQueue_WriteBuffer_InvalidType(t *testing.T) {
 	err := q.WriteBuffer(nil, 0, []byte{1})
 	if err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("WriteBuffer(nil) error = %v", err)
+	}
+}
+
+func TestDevice_DestroyBuffer_NilCtxSafe(t *testing.T) {
+	d := &Device{} // no AdapterContext
+	d.DestroyBuffer(&Buffer{id: 42, glCtx: &gl.Context{}})
+	// Must not panic; without ctx we skip GL delete.
+}
+
+func TestDevice_DestroyPaths_AcquireLock(t *testing.T) {
+	glCtx := &gl.Context{}
+	ctx := NewAdapterContext(nil, glCtx, false)
+	d := &Device{ctx: ctx}
+
+	// All Destroy* paths must Lock/Unlock even with nil EGL (no MakeCurrent).
+	d.DestroyBuffer(&Buffer{glCtx: glCtx})
+	d.DestroyTexture(&Texture{glCtx: glCtx})
+	d.DestroySampler(&Sampler{glCtx: glCtx})
+	d.DestroyShaderModule(&ShaderModule{glCtx: glCtx})
+	d.DestroyRenderPipeline(&RenderPipeline{glCtx: glCtx})
+	d.DestroyComputePipeline(&ComputePipeline{glCtx: glCtx})
+	d.DestroyFence(&Fence{glCtx: glCtx})
+}
+
+func TestAdapterContext_Destroy_SerializedWithLock(t *testing.T) {
+	glCtx := &gl.Context{}
+	ctx := NewAdapterContext(nil, glCtx, true)
+
+	_ = ctx.Lock()
+	done := make(chan struct{})
+	go func() {
+		ctx.Destroy() // must wait until Unlock
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Destroy must not complete while Lock is held")
+	case <-time.After(50 * time.Millisecond):
+	}
+	ctx.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Destroy did not complete after Unlock")
 	}
 }
 

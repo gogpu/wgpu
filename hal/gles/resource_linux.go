@@ -138,8 +138,11 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 		}
 	}
 
-	// Make the EGL window surface current and allocate swapchain FBO.
-	glCtx := s.ctx.LockForSurface(s.eglSurface)
+	// Allocate swapchain FBO on the pbuffer/surfaceless drawable (Lock), matching
+	// Windows Configure which uses Lock(hiddenDC) for FBO — not LockForDC.
+	// Present uses LockForSurface for blit+swap. Avoids Mesa pbuffer↔window
+	// invalidation when Submit (Lock) and Present (LockForSurface) alternate.
+	glCtx := s.ctx.Lock()
 	defer s.ctx.Unlock()
 
 	if err := s.reconfigureSwapchainFBOWith(glCtx, config.Format, config.Width, config.Height); err != nil {

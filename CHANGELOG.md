@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `AdapterContext` with `Lock()` / `LockForSurface()` / `Unlock()` — `sync.Mutex` + `runtime.LockOSThread` + `eglMakeCurrent`.
   - Instance owns shared context on X11/headless; Wayland keeps Surface-owned context (intentional divergence).
   - Device/Queue/Surface GL paths acquire the lock; Present rebinds the window EGLSurface before blit + swap.
+  - Configure allocates swapchain FBO via `Lock()` (pbuffer), matching Windows hidden-DC pattern — avoids Mesa pbuffer↔window invalidation.
+  - `Destroy*` paths lock before `glDelete*`; `AdapterContext.Destroy` takes the mutex.
   - Removes Phase-1 `surface_linux_compat.go` wrappers in favor of shared `*With` swapchain helpers.
   - Unit tests for ownership, nil-safe Lock/Unlock, mutex serialization, Surface/Instance wiring; integration tests for Lock round-trip and CreateInstance wrapping.
 

@@ -107,7 +107,10 @@ func (c *AdapterContext) EGL() *egl.Context {
 }
 
 // Destroy deletes the EGL context when this AdapterContext owns it.
+// Takes the mutex so Destroy cannot race with Lock/Unlock on another goroutine.
 func (c *AdapterContext) Destroy() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.owns && c.eglCtx != nil {
 		c.eglCtx.Destroy()
 		c.eglCtx = nil
