@@ -17,17 +17,20 @@ import (
 )
 
 // Queue implements hal.Queue for OpenGL on Linux.
+// Holds a shared *AdapterContext (owned by Instance or Surface).
 type Queue struct {
-	glCtx           *gl.Context
-	eglCtx          *egl.Context
+	ctx             *AdapterContext
 	submissionIndex uint64
 	fence           *Fence // signaled at each submit for GPU completion tracking
 }
 
 // Submit submits command buffers to the GPU.
-// After executing all commands, signals the fence with a GL sync object then
-// flushes — the fence must precede flush so PollCompleted sees it.
+// Acquires the AdapterContext lock, makes context current on pbuffer/surfaceless,
+// executes all GL commands, signals the fence, and flushes.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
 	for _, cb := range commandBuffers {
 		cmdBuf, ok := cb.(*CommandBuffer)
 		if !ok {
@@ -36,8 +39,8 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 
 		// Execute recorded commands with GL error checking.
 		for i, cmd := range cmdBuf.commands {
-			cmd.Execute(q.glCtx)
-			if glErr := q.glCtx.GetError(); glErr != 0 {
+			cmd.Execute(glCtx)
+			if glErr := glCtx.GetError(); glErr != 0 {
 				detail := fmt.Sprintf("%T", cmd)
 				if vaoCmd, ok := cmd.(*BindVAOCommand); ok {
 					detail = fmt.Sprintf("%T{vao=%d}", cmd, vaoCmd.vao)
@@ -59,7 +62,7 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		}
 	}
 
-	q.glCtx.Flush()
+	glCtx.Flush()
 
 	return q.submissionIndex, nil
 }
@@ -87,9 +90,12 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 		return nil
 	}
 
-	q.glCtx.BindBuffer(buf.target, buf.id)
-	q.glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
-	q.glCtx.BindBuffer(buf.target, 0)
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
+	glCtx.BindBuffer(buf.target, buf.id)
+	glCtx.BufferSubData(buf.target, int(offset), len(data), unsafe.Pointer(&data[0]))
+	glCtx.BindBuffer(buf.target, 0)
 	return nil
 }
 
@@ -100,28 +106,31 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("gles: invalid texture type for WriteTexture")
 	}
 
+	glCtx := q.ctx.Lock()
+	defer q.ctx.Unlock()
+
 	_, format, dataType := textureFormatToGL(tex.format)
 
-	q.glCtx.BindTexture(tex.target, tex.id)
+	glCtx.BindTexture(tex.target, tex.id)
 
 	if tex.target == gl.TEXTURE_2D {
 		// Set alignment to 1 for single-channel formats (R8) whose row stride
 		// may not be a multiple of the default 4-byte GL_UNPACK_ALIGNMENT.
 		if tex.format == gputypes.TextureFormatR8Unorm {
-			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
 		}
 		// Use TexSubImage2D to update existing texture data (Rust wgpu-hal pattern).
 		// TexImage2D reallocates storage on every call; TexSubImage2D updates in-place.
-		q.glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
+		glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
 			0, 0, int32(size.Width), int32(size.Height), format, dataType,
 			unsafe.Pointer(&data[0]))
 		// Restore default alignment after upload.
 		if tex.format == gputypes.TextureFormatR8Unorm {
-			q.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
 		}
 	}
 
-	q.glCtx.BindTexture(tex.target, 0)
+	glCtx.BindTexture(tex.target, 0)
 
 	hal.Logger().Debug("gles: texture written",
 		"format", tex.format,
@@ -134,11 +143,10 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 // Present presents a surface texture to the screen.
 //
-// Before SwapBuffers, blits the Surface's swapchain offscreen FBO to the
-// default framebuffer (FBO 0) with an explicit Y-flip. User render passes
-// render upside-down into the swapchain FBO (driven by naga's in-shader
-// Y-flip); the blit un-flips for presentation. Mirrors Rust wgpu-hal
-// src/gles/egl.rs Surface::present (1280-1308).
+// Makes the GL context current on the window EGLSurface (via LockForSurface),
+// blits the Surface's swapchain offscreen FBO to the default framebuffer with
+// an explicit Y-flip, then SwapBuffers. Mirrors Rust wgpu-hal
+// src/gles/egl.rs Surface::present (1280-1308) and Windows LockForDC present.
 //
 // damageRects is an optional list of rectangles (physical pixels, top-left
 // origin) indicating which surface regions changed this frame. When non-empty
@@ -152,7 +160,10 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 		return fmt.Errorf("gles: invalid surface type")
 	}
 
-	surf.blitSwapchainToDefault()
+	glCtx := q.ctx.LockForSurface(surf.eglSurface)
+	defer q.ctx.Unlock()
+
+	surf.blitSwapchainToDefaultWith(glCtx)
 
 	// Use damage-aware swap when the extension is available and rects provided.
 	if len(damageRects) > 0 && egl.HasSwapBuffersWithDamage() {
