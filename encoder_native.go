@@ -797,6 +797,17 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 		coreDesc.DepthStencilAttachment = coreDSA
 	}
 
+	if writes := desc.TimestampWrites; writes != nil {
+		halQuerySet := writes.QuerySet.halQuerySet()
+		if halQuerySet != nil {
+			coreDesc.TimestampWrites = &core.RenderPassTimestampWrites{
+				QuerySet:                  writes.QuerySet.core,
+				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+			}
+		}
+	}
+
 	return coreDesc
 }
 

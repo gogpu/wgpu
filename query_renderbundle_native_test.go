@@ -30,10 +30,11 @@ func (p *captureRenderPass) ExecuteBundle(bundle hal.RenderBundle) {
 
 type captureCommandEncoder struct {
 	*noop.CommandEncoder
-	resolved   int
-	querySet   hal.QuerySet
-	buffer     hal.Buffer
-	renderPass *captureRenderPass
+	resolved       int
+	querySet       hal.QuerySet
+	buffer         hal.Buffer
+	renderPass     *captureRenderPass
+	renderPassDesc *hal.RenderPassDescriptor
 }
 
 func (e *captureCommandEncoder) ResolveQuerySet(querySet hal.QuerySet, _, _ uint32, buffer hal.Buffer, _ uint64) {
@@ -42,7 +43,8 @@ func (e *captureCommandEncoder) ResolveQuerySet(querySet hal.QuerySet, _, _ uint
 	e.buffer = buffer
 }
 
-func (e *captureCommandEncoder) BeginRenderPass(*hal.RenderPassDescriptor) hal.RenderPassEncoder {
+func (e *captureCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	e.renderPassDesc = desc
 	if e.renderPass == nil {
 		return nil
 	}
@@ -145,10 +147,11 @@ func TestRenderBundleEncoderDescriptorToHAL(t *testing.T) {
 	}
 }
 
-func TestRenderPassDescriptorTimestampWrites(t *testing.T) {
+func TestBeginRenderPassTimestampWrites(t *testing.T) {
 	begin, end := uint32(2), uint32(3)
 	resource := &testHALResource{}
-	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
+	h := &captureDevice{Device: &noop.Device{}}
+	device := newCaptureDevice(h)
 	active := newTestQuerySet(resource, device)
 	released := newTestQuerySet(resource, device)
 	released.released = true
@@ -173,7 +176,24 @@ func TestRenderPassDescriptorTimestampWrites(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := (&RenderPassDescriptor{TimestampWrites: tt.writes}).toHAL().TimestampWrites
+			command := &captureCommandEncoder{
+				CommandEncoder: &noop.CommandEncoder{},
+				renderPass:     &captureRenderPass{RenderPassEncoder: &noop.RenderPassEncoder{}},
+			}
+			h.commandEncoder = command
+			encoder, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{TimestampWrites: tt.writes})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pass.End()
+			if command.renderPassDesc == nil {
+				t.Fatal("HAL BeginRenderPass was not called")
+			}
+			got := command.renderPassDesc.TimestampWrites
 			if tt.wantNil {
 				if got != nil {
 					t.Fatalf("TimestampWrites = %+v, want nil", got)
@@ -288,9 +308,22 @@ func TestRenderBundleRelease(t *testing.T) {
 	resource := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}}
 	device := newCaptureDevice(h)
+	device.queue = &Queue{}
+	device.queue.lastSubmissionIndex.Store(7)
 	bundle := &RenderBundle{hal: resource, device: device}
 	bundle.Release()
 	bundle.Release()
+	if got := h.destroyedRenderBundles; got != 0 {
+		t.Fatalf("early HAL destroy calls = %d", got)
+	}
+	device.destroyQueue().Triage(6)
+	if got := h.destroyedRenderBundles; got != 0 {
+		t.Fatalf("in-flight HAL destroy calls = %d", got)
+	}
+	device.destroyQueue().Triage(7)
+	device.destroyQueue().Triage(7)
+	(&RenderBundle{}).Release()
+	(&RenderBundle{hal: resource}).Release()
 	if got := h.destroyedRenderBundles; got != 1 {
 		t.Fatalf("HAL destroy calls = %d, want 1", got)
 	}

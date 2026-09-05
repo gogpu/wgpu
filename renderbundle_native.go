@@ -97,12 +97,25 @@ type RenderBundle struct {
 	released atomic.Bool
 }
 
-// Release destroys the render bundle. It is safe to call Release more than once.
+// Release defers destruction until the GPU completes any submission that may
+// reference the bundle. It is safe to call Release more than once.
 func (b *RenderBundle) Release() {
 	if b == nil || b.released.Swap(true) {
 		return
 	}
-	if device := b.device.halDevice(); device != nil {
-		device.DestroyRenderBundle(b.hal)
+	if b.device == nil || b.hal == nil {
+		return
 	}
+	device := b.device.halDevice()
+	if device == nil {
+		return
+	}
+	dq := b.device.destroyQueue()
+	if dq == nil {
+		device.DestroyRenderBundle(b.hal)
+		return
+	}
+	dq.Defer(b.device.lastSubmissionIndex(), "RenderBundle", func() {
+		device.DestroyRenderBundle(b.hal)
+	})
 }
