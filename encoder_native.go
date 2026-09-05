@@ -630,6 +630,41 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	raw.ClearBuffer(buffer.halBuffer(), offset, size)
 }
 
+// ResolveQuerySet copies query results into a buffer.
+func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCount uint32, dst *Buffer, dstOffset uint64) {
+	if e.released {
+		return
+	}
+
+	if dst == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is nil"))
+		return
+	}
+	if dst.released == nil || dst.released.Load() {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		return
+	}
+
+	raw := e.core.RawEncoder()
+	if raw == nil {
+		return
+	}
+
+	halDestination := dst.halBuffer()
+	if halDestination == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		return
+	}
+
+	halQuerySet := querySet.halQuerySet()
+	if halQuerySet == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", ErrReleased))
+		return
+	}
+
+	raw.ResolveQuerySet(halQuerySet, firstQuery, queryCount, halDestination, dstOffset)
+}
+
 // DiscardEncoding discards the encoder without producing a command buffer.
 // Use this to abandon an in-progress encoding when an error occurs.
 // If the encoder was acquired from the pool, it is returned for reuse.
@@ -760,6 +795,17 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 			coreDSA.View = coreTextureViewFrom(ds.View)
 		}
 		coreDesc.DepthStencilAttachment = coreDSA
+	}
+
+	if writes := desc.TimestampWrites; writes != nil {
+		halQuerySet := writes.QuerySet.halQuerySet()
+		if halQuerySet != nil {
+			coreDesc.TimestampWrites = &core.RenderPassTimestampWrites{
+				QuerySet:                  writes.QuerySet.core,
+				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+			}
+		}
 	}
 
 	return coreDesc

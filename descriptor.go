@@ -190,6 +190,33 @@ type CommandEncoderDescriptor struct {
 	Label string
 }
 
+// RenderBundleEncoderDescriptor describes the render pass compatibility of a
+// render bundle recorded by a RenderBundleEncoder.
+type RenderBundleEncoderDescriptor struct {
+	Label              string
+	ColorFormats       []gputypes.TextureFormat
+	DepthStencilFormat gputypes.TextureFormat
+	SampleCount        uint32
+	DepthReadOnly      bool
+	StencilReadOnly    bool
+}
+
+// RenderBundleDescriptor describes a completed render bundle.
+type RenderBundleDescriptor struct {
+	Label string
+}
+
+func (d *RenderBundleEncoderDescriptor) toHAL() *hal.RenderBundleEncoderDescriptor {
+	if d == nil {
+		return nil
+	}
+	return &hal.RenderBundleEncoderDescriptor{
+		Label: d.Label, ColorFormats: d.ColorFormats,
+		DepthStencilFormat: d.DepthStencilFormat, SampleCount: d.SampleCount,
+		DepthReadOnly: d.DepthReadOnly, StencilReadOnly: d.StencilReadOnly,
+	}
+}
+
 // toHAL converts a CommandEncoderDescriptor to a hal.CommandEncoderDescriptor.
 func (d *CommandEncoderDescriptor) toHAL() *hal.CommandEncoderDescriptor {
 	return &hal.CommandEncoderDescriptor{
@@ -441,6 +468,14 @@ type RenderPassDescriptor struct {
 	Label                  string
 	ColorAttachments       []RenderPassColorAttachment
 	DepthStencilAttachment *RenderPassDepthStencilAttachment
+	TimestampWrites        *RenderPassTimestampWrites
+}
+
+// RenderPassTimestampWrites describes timestamp query writes at render pass boundaries.
+type RenderPassTimestampWrites struct {
+	QuerySet                  *QuerySet
+	BeginningOfPassWriteIndex *uint32
+	EndOfPassWriteIndex       *uint32
 }
 
 // RenderPassColorAttachment describes a color attachment.
@@ -502,6 +537,18 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			halDS.View = ds.View.resolveHAL()
 		}
 		halDesc.DepthStencilAttachment = halDS
+	}
+
+	if writes := d.TimestampWrites; writes != nil {
+		halQuerySet := writes.QuerySet.halQuerySet()
+		if halQuerySet == nil {
+			return halDesc
+		}
+		halDesc.TimestampWrites = &hal.RenderPassTimestampWrites{
+			QuerySet:                  halQuerySet,
+			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+		}
 	}
 
 	return halDesc

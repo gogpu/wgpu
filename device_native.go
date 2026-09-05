@@ -1164,3 +1164,26 @@ func (d *Device) halDevice() hal.Device {
 	defer guard.Release()
 	return d.core.Raw(guard)
 }
+
+// CreateRenderBundleEncoder creates an encoder for reusable render commands.
+func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
+	}
+
+	if d.released.Load() {
+		return nil, ErrReleased
+	}
+
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return nil, ErrReleased
+	}
+
+	halEncoder, err := halDevice.CreateRenderBundleEncoder(desc.toHAL())
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create render bundle encoder: %w", err)
+	}
+
+	return &RenderBundleEncoder{hal: halEncoder, device: d}, nil
+}

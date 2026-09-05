@@ -393,6 +393,22 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
+// ExecuteBundles executes reusable render command bundles in this render pass.
+func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
+	raw := p.core.RawPass()
+	if raw == nil {
+		return
+	}
+
+	for _, bundle := range bundles {
+		if bundle == nil || bundle.released.Load() || bundle.hal == nil {
+			continue
+		}
+
+		raw.ExecuteBundle(bundle.hal)
+	}
+}
+
 // MultiDrawIndirectCount draws primitives with a GPU-provided draw count.
 // countBuffer must hold a uint32 count at countOffset. VAL-C2: requires FeatureMultiDrawIndirectCount.
 func (p *RenderPassEncoder) MultiDrawIndirectCount(

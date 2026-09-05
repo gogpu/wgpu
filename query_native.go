@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // QuerySet represents a set of GPU queries (occlusion, timestamp, etc.).
@@ -29,6 +30,19 @@ func (qs *QuerySet) Count() uint32 {
 		return 0
 	}
 	return qs.core.Count()
+}
+
+// halQuerySet returns the underlying HAL query set while holding the device
+// snatch lock, or nil after the query set or its device has been released.
+func (qs *QuerySet) halQuerySet() hal.QuerySet {
+	if qs == nil || qs.core == nil || qs.device == nil || qs.device.core == nil || qs.released {
+		return nil
+	}
+
+	guard := qs.device.core.SnatchLock().Read()
+	defer guard.Release()
+
+	return qs.core.Raw(guard)
 }
 
 // Release destroys the query set. Destruction is deferred until the GPU
