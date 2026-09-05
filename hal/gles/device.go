@@ -733,9 +733,13 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 
 // DestroyQuerySet destroys a query set and releases GL query objects.
 func (d *Device) DestroyQuerySet(qs hal.QuerySet) {
-	if q, ok := qs.(*QuerySet); ok && q != nil {
-		q.Destroy()
+	q, ok := qs.(*QuerySet)
+	if !ok || q == nil || d.ctx == nil {
+		return
 	}
+	_ = d.ctx.Lock()
+	defer d.ctx.Unlock()
+	q.Destroy()
 }
 
 // CreateCommandEncoder creates a command encoder.
