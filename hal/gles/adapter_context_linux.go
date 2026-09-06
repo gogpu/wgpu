@@ -96,7 +96,8 @@ func (c *AdapterContext) Unlock() {
 	c.mu.Unlock()
 }
 
-// GL returns the GL function table. Must be called while locked (or after init).
+// GL returns the GL function table.
+// Safe to read without Lock; GL calls on the returned context require Lock.
 func (c *AdapterContext) GL() *gl.Context {
 	return c.gl
 }

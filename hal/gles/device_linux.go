@@ -713,8 +713,8 @@ func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error)
 }
 
 // DestroyQuerySet destroys a query set.
+// Stub — add Lock when GL query objects are implemented.
 func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
-	// Stub: GLES query set implementation pending.
 }
 
 // CreateCommandEncoder creates a command encoder.
