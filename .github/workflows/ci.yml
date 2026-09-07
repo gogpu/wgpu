@@ -299,7 +299,7 @@ jobs:
 
   # Dependency freshness check
   # Uses go-mod-outdated (https://github.com/psampaz/go-mod-outdated)
-  # Non-blocking: reports outdated deps as warnings
+  # Non-blocking: reports outdated deps as warnings; never fails the workflow.
   deps:
     name: Dependencies
     runs-on: ubuntu-latest
@@ -314,10 +314,27 @@ jobs:
         go-version: '1.25'
         cache: true
 
+    # Pin the module version so each run does not re-resolve @latest.
+    # Retry: proxy.golang.org occasionally returns INTERNAL_ERROR / stream
+    # resets (seen as red Dependencies checks on otherwise-green PRs).
+    # continue-on-error: the direct-deps step is advisory only; ecosystem
+    # checks below do not need this binary.
     - name: Install go-mod-outdated
-      run: go install github.com/psampaz/go-mod-outdated@latest
+      id: install-outdated
+      continue-on-error: true
+      run: |
+        for attempt in 1 2 3; do
+          if go install github.com/psampaz/go-mod-outdated@v0.9.0; then
+            exit 0
+          fi
+          echo "install attempt ${attempt} failed; retrying..."
+          sleep $((attempt * 5))
+        done
+        echo "::warning::Failed to install go-mod-outdated after retries; skipping direct-deps check"
+        exit 1
 
     - name: Check direct dependencies for updates
+      if: steps.install-outdated.outcome == 'success'
       run: |
         echo "## Direct Dependencies with Updates"
         OUTDATED=$(go list -u -m -json all 2>/dev/null | go-mod-outdated -update -direct || true)
