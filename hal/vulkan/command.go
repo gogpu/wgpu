@@ -819,6 +819,58 @@ func (e *CommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, quer
 	)
 }
 
+// renderAreaView returns the attachment view that defines a pass's render
+// area and sample count: the first color attachment carrying one, or the
+// depth/stencil attachment when the pass declares no usable color attachment
+// at all.
+//
+// A pass with no color attachments is legal in WebGPU -- it is how a shadow map
+// is drawn -- and Vulkan still needs an extent and a sample count to build the
+// framebuffer, which only the attachments can supply.
+//
+// Returns nil when nothing resolves to a view of this backend, which means
+// there is nothing to render into and no pass worth beginning.
+//
+// Rust wgpu-hal has no equivalent: its RenderPassDescriptor carries extent
+// and sample_count as fields the caller supplies, so begin_render_pass reads
+// them straight off the descriptor (wgpu-hal/src/vulkan/command.rs). This
+// HAL's descriptor carries neither, so a pass has to derive both from its
+// attachments -- and a depth-only pass has only the depth attachment to
+// derive them from.
+func renderAreaView(desc *hal.RenderPassDescriptor) *TextureView {
+	if desc == nil {
+		return nil
+	}
+	for _, ca := range desc.ColorAttachments {
+		if view := asTextureView(ca.View); view != nil {
+			return view
+		}
+	}
+	if desc.DepthStencilAttachment != nil {
+		return asTextureView(desc.DepthStencilAttachment.View)
+	}
+	return nil
+}
+
+// asTextureView narrows a HAL view to this backend's, treating an absent view,
+// a typed-nil pointer and a view belonging to another backend alike: each comes
+// back as nil. The comma-ok assertion is what makes that true -- a failed
+// assertion yields a nil *TextureView -- so callers get a pointer they can
+// compare against nil rather than one they must not dereference.
+func asTextureView(view hal.TextureView) *TextureView {
+	v, _ := view.(*TextureView)
+	return v
+}
+
+// attachmentSampleCount reports the sample count a pass's attachments share.
+// Swapchain views carry no texture and are always single-sampled.
+func attachmentSampleCount(view *TextureView) vk.SampleCountFlagBits {
+	if view != nil && view.texture != nil && view.texture.samples > 1 {
+		return vk.SampleCountFlagBits(view.texture.samples)
+	}
+	return vk.SampleCountFlagBits(1)
+}
+
 // BeginRenderPass begins a render pass using VkRenderPass (classic Vulkan approach).
 // This is compatible with Intel drivers that don't properly support dynamic rendering.
 // Supports up to MaxColorAttachments (8) color attachments with optional MSAA resolve,
@@ -833,41 +885,22 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe.indexFormat = 0
 	rpe.renderPass = 0
 	rpe.framebuffer = 0
+	rpe.begun = false
 
-	if e.active == 0 || len(desc.ColorAttachments) == 0 {
+	if e.active == 0 {
 		return rpe
 	}
 
-	// Determine render area from the first valid color attachment.
-	var renderWidth, renderHeight uint32
-	for _, ca := range desc.ColorAttachments {
-		if ca.View == nil {
-			continue
-		}
-		view, ok := ca.View.(*TextureView)
-		if !ok {
-			continue
-		}
-		renderWidth = view.size.Width
-		renderHeight = view.size.Height
-		break
+	// Render area and sample count both come from the attachment that defines
+	// the pass -- the first color attachment, or the depth attachment when the
+	// pass has no color attachments at all. Every early return below leaves
+	// rpe.begun false, so End knows not to end a pass that was never begun.
+	areaView := renderAreaView(desc)
+	if areaView == nil {
+		return rpe
 	}
-
-	// Determine sample count from the first valid color attachment (all must match).
-	sampleCount := vk.SampleCountFlagBits(1)
-	for _, ca := range desc.ColorAttachments {
-		if ca.View == nil {
-			continue
-		}
-		view, ok := ca.View.(*TextureView)
-		if !ok {
-			continue
-		}
-		if view.texture != nil && view.texture.samples > 1 {
-			sampleCount = vk.SampleCountFlagBits(view.texture.samples)
-		}
-		break
-	}
+	renderWidth, renderHeight := areaView.size.Width, areaView.size.Height
+	sampleCount := attachmentSampleCount(areaView)
 
 	// Build render pass key and framebuffer key from ALL color attachments.
 	rpKey := RenderPassKey{
@@ -1020,6 +1053,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 
 	vkCmdBeginRenderPass(e.device.cmds, e.active, &renderPassBegin, vk.SubpassContentsInline)
 	runtime.KeepAlive(clearValues)
+	rpe.begun = true
 
 	// Set default viewport and scissor for the render area.
 	// Always set viewport/scissor — the pipeline declares them as dynamic state,
@@ -1093,6 +1127,9 @@ type RenderPassEncoder struct {
 	// For VkRenderPass-based rendering (not dynamic rendering)
 	renderPass  vk.RenderPass
 	framebuffer vk.Framebuffer
+	// begun records whether vkCmdBeginRenderPass actually ran, which End needs
+	// because BeginRenderPass returns an encoder either way.
+	begun bool
 }
 
 const (
@@ -1104,13 +1141,17 @@ const (
 // End finishes the render pass.
 // Returns the encoder to the pool for reuse (VK-PERF-006).
 func (e *RenderPassEncoder) End() {
-	if e.encoder.active == 0 {
-		return
-	}
-
+	// BeginRenderPass returns an encoder even when it declined to begin a pass:
+	// an inactive command buffer, attachments that do not resolve, or a render
+	// pass or framebuffer that could not be created. Ending a pass that was
+	// never begun is undefined behavior -- the driver faults inside
+	// vkCmdEndRenderPass rather than reporting a validation error.
+	//
 	// Use vkCmdEndRenderPass (VkRenderPass handles layout transitions automatically
 	// via FinalLayout in AttachmentDescription)
-	vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.active)
+	if e.begun && e.encoder.active != 0 {
+		vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.active)
+	}
 
 	// Return to pool for reuse.
 	e.encoder = nil
@@ -1118,6 +1159,7 @@ func (e *RenderPassEncoder) End() {
 	e.pipeline = nil
 	e.renderPass = 0
 	e.framebuffer = 0
+	e.begun = false
 	renderPassPool.Put(e)
 }
 
