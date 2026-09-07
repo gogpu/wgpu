@@ -936,6 +936,19 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 		halDesc.DepthStencilAttachment = halDS
 	}
 
+	if writes := desc.TimestampWrites; writes != nil && writes.QuerySet != nil {
+		guard := e.device.snatchLock.Read()
+		raw := writes.QuerySet.Raw(guard)
+		guard.Release()
+		if raw != nil {
+			halDesc.TimestampWrites = &hal.RenderPassTimestampWrites{
+				QuerySet:                  raw,
+				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+			}
+		}
+	}
+
 	return halDesc
 }
 
@@ -1076,6 +1089,9 @@ type RenderPassDescriptor struct {
 
 	// DepthStencilAttachment is the depth/stencil target (optional).
 	DepthStencilAttachment *RenderPassDepthStencilAttachment
+
+	// TimestampWrites are timestamp queries to write at pass boundaries (optional).
+	TimestampWrites *RenderPassTimestampWrites
 }
 
 // RenderPassColorAttachment describes a color attachment.
@@ -1124,6 +1140,20 @@ type RenderPassDepthStencilAttachment struct {
 
 	// StencilReadOnly makes the stencil aspect read-only.
 	StencilReadOnly bool
+}
+
+// RenderPassTimestampWrites describes timestamp queries at render pass boundaries.
+type RenderPassTimestampWrites struct {
+	// QuerySet is the timestamp query set that receives the writes.
+	QuerySet *QuerySet
+
+	// BeginningOfPassWriteIndex is the query index to write at pass start.
+	// If nil, no timestamp is written at the beginning of the pass.
+	BeginningOfPassWriteIndex *uint32
+
+	// EndOfPassWriteIndex is the query index to write at pass end.
+	// If nil, no timestamp is written at the end of the pass.
+	EndOfPassWriteIndex *uint32
 }
 
 // CoreRenderPassEncoder records render commands within a pass.
