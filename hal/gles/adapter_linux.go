@@ -10,14 +10,14 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // Adapter implements hal.Adapter for OpenGL on Linux.
+// Holds a shared *AdapterContext (owned by Instance on X11/headless, or by
+// Surface on Wayland).
 type Adapter struct {
-	glCtx         *gl.Context
-	eglCtx        *egl.Context
+	ctx           *AdapterContext
 	displayHandle uintptr
 	windowHandle  uintptr
 	version       string
@@ -31,19 +31,15 @@ type Adapter struct {
 
 // Open creates a logical device with the requested features and limits.
 func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
-	// EnumerateAdapters(nil) path returns an adapter with nil glCtx because no
+	// EnumerateAdapters(nil) path returns an adapter with nil ctx because no
 	// EGL context can be created without a display/window handle. Return a
 	// descriptive error instead of a nil pointer dereference at GenVertexArrays.
-	if a.glCtx == nil {
+	if a.ctx == nil || a.ctx.GL() == nil {
 		return hal.OpenDevice{}, fmt.Errorf("gles: adapter has no GL context — pass a surface hint to CreateSurface before RequestDevice")
 	}
 
-	// Make context current if we have one
-	if a.eglCtx != nil {
-		if err := a.eglCtx.MakeCurrent(); err != nil {
-			return hal.OpenDevice{}, err
-		}
-	}
+	glCtx := a.ctx.Lock()
+	defer a.ctx.Unlock()
 
 	// VAO is created lazily in CreateCommandEncoder — ensures it's allocated
 	// on the window surface (after Configure), not on the pbuffer (during Open).
@@ -51,12 +47,12 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 
 	// Query hardware texture unit limit for binding validation.
 	var maxTexUnits int32
-	a.glCtx.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &maxTexUnits)
+	glCtx.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &maxTexUnits)
 	if maxTexUnits <= 0 {
 		maxTexUnits = 8 // Conservative default
 	}
 
-	vendor := a.glCtx.GetString(gl.VENDOR)
+	vendor := glCtx.GetString(gl.VENDOR)
 
 	hal.Logger().Info("gles: device opened",
 		"vendor", vendor,
@@ -68,8 +64,7 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	glslVer := GLSLVersionToNaga(a.caps.GLSLVersion, a.caps.IsES)
 
 	device := &Device{
-		glCtx:               a.glCtx,
-		eglCtx:              a.eglCtx,
+		ctx:                 a.ctx,
 		displayHandle:       a.displayHandle,
 		windowHandle:        a.windowHandle,
 		vao:                 vao,
@@ -80,9 +75,8 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	}
 
 	queue := &Queue{
-		glCtx:  a.glCtx,
-		eglCtx: a.eglCtx,
-		fence:  NewFence(a.glCtx),
+		ctx:   a.ctx,
+		fence: NewFence(glCtx),
 	}
 
 	return hal.OpenDevice{

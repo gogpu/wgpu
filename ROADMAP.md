@@ -137,7 +137,7 @@
 - [ ] Integrate `gogpu/galloc` into Vulkan memory pools (replace BuddyAllocator)
 
 **GLES Linux Enterprise Parity:**
-- [ ] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003). Windows parity.
+- [x] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003, #332). Windows parity.
 - [ ] Systematic GL error checking layer — `checkGL()` after every call (ADR-046)
 
 **Public API Quality (#218):**

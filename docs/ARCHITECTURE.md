@@ -141,14 +141,15 @@ Pure Go DX12 implementation via COM interfaces.
 Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 
 **Context Architecture (Rust wgpu parity):**
-- GL context lives on a hidden 1×1 window (WGL/Windows) owned by Instance
-- `AdapterContext` — `sync.Mutex`-protected wrapper shared by Adapter → Device → Queue
-- `Lock()` → `wglMakeCurrent(hiddenDC)` for resource creation and command execution
-- `LockForDC(userDC)` → `wglMakeCurrent(userDC)` for presentation (blit + SwapBuffers)
-- `Unlock()` → `wglMakeCurrent(NULL)` — context unmade current between operations
-- Surface is lightweight — stores only user HWND + reference to shared AdapterContext
-- Adapter, Device, Queue survive user window destruction (context lives on hidden window)
-- Follows Rust wgpu-hal/src/gles/wgl.rs `AdapterContext::lock()` / `lock_with_dc()` pattern
+- **Windows (WGL):** GL context lives on a hidden 1×1 window owned by Instance
+- **Linux (EGL):** GL context lives on Instance pbuffer/surfaceless (X11/headless) or Surface-owned context (Wayland — intentional divergence; no `wl_display*` at Instance init)
+- `AdapterContext` — `sync.Mutex` + `runtime.LockOSThread`-protected wrapper shared by Adapter → Device → Queue
+- `Lock()` → MakeCurrent to hidden DC (Windows) / pbuffer-surfaceless (Linux) for resource creation and command execution
+- `LockForDC(userDC)` / `LockForSurface(eglSurface)` → MakeCurrent for presentation (blit + SwapBuffers)
+- `Unlock()` → UnmakeCurrent — context unmade between operations
+- Surface is lightweight when sharing Instance context (X11/Windows); Wayland Surface owns its `AdapterContext`
+- Adapter, Device, Queue survive user window destruction when context is Instance-owned
+- Follows Rust wgpu-hal `AdapterContext::lock()` / `lock_with_dc()` (WGL) and EGL present MakeCurrent pattern
 
 **Packages:**
 - `gl/` — OpenGL function bindings (Windows syscall + Linux goffi)

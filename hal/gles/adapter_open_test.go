@@ -13,13 +13,12 @@ import (
 )
 
 // TestAdapter_Open_NilGLCtxReturnsDescriptiveError verifies that calling
-// Open() on an Adapter with nil glCtx returns a clear error message instead
-// of panicking at GenVertexArrays. This is the defense-in-depth guard for the
-// path where EnumerateAdapters(nil) returns a zero-value Adapter.
+// Open() on an Adapter with nil AdapterContext returns a clear error message
+// instead of panicking. This is the defense-in-depth guard for the path where
+// EnumerateAdapters(nil) returns a zero-value Adapter.
 func TestAdapter_Open_NilGLCtxReturnsDescriptiveError(t *testing.T) {
 	a := &Adapter{
-		glCtx:  nil, // zero-value: no EGL context was created
-		eglCtx: nil,
+		ctx: nil, // zero-value: no EGL context was created
 	}
 
 	defer func() {
@@ -30,17 +29,17 @@ func TestAdapter_Open_NilGLCtxReturnsDescriptiveError(t *testing.T) {
 
 	_, err := a.Open(gputypes.Features(0), gputypes.DefaultLimits())
 	if err == nil {
-		t.Fatal("Open() with nil glCtx should return an error, got nil")
+		t.Fatal("Open() with nil ctx should return an error, got nil")
 	}
 	if !strings.Contains(err.Error(), "surface hint") {
 		t.Errorf("error %q should mention 'surface hint' to guide the caller", err.Error())
 	}
 }
 
-// TestAdapter_Open_NilGLCtxErrorMentionsSurfaceHint verifies the error message
-// from the nil-glCtx guard is actionable (tells the caller what to do).
+// TestAdapter_Open_NilGLCtxErrorIsActionable verifies the error message
+// from the nil-ctx guard is actionable (tells the caller what to do).
 func TestAdapter_Open_NilGLCtxErrorIsActionable(t *testing.T) {
-	a := &Adapter{glCtx: nil}
+	a := &Adapter{ctx: nil}
 
 	_, err := a.Open(gputypes.Features(0), gputypes.DefaultLimits())
 	if err == nil {

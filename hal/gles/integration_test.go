@@ -273,4 +273,157 @@ func TestHALInterface(t *testing.T) {
 	// Verify Queue implements hal.Queue
 	var _ hal.Queue = (*Queue)(nil)
 	t.Log("Queue implements hal.Queue")
+
+	// Verify Surface implements hal.Surface
+	var _ hal.Surface = (*Surface)(nil)
+	t.Log("Surface implements hal.Surface")
+}
+
+// TestAdapterContext_LockUnlockRoundTrip verifies mutex + LockOSThread + MakeCurrent
+// via AdapterContext on a real EGL pbuffer/surfaceless context (#332).
+func TestAdapterContext_LockUnlockRoundTrip(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if err := egl.Init(); err != nil {
+		t.Fatalf("egl.Init() failed: %v", err)
+	}
+
+	config := egl.DefaultContextConfig()
+	config.GLES = false
+	eglCtx, err := egl.NewContext(config)
+	if err != nil {
+		t.Skipf("egl.NewContext() failed: %v", err)
+	}
+
+	if err := eglCtx.MakeCurrent(); err != nil {
+		eglCtx.Destroy()
+		t.Fatalf("MakeCurrent failed: %v", err)
+	}
+
+	glCtx := &gl.Context{}
+	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
+		eglCtx.Destroy()
+		t.Fatalf("GL load failed: %v", err)
+	}
+
+	// Unmake so AdapterContext.Lock must re-bind.
+	_ = egl.MakeCurrent(eglCtx.Display(), egl.NoSurface, egl.NoSurface, egl.NoContext)
+
+	ctx := NewAdapterContext(eglCtx, glCtx, true)
+	defer ctx.Destroy()
+
+	got := ctx.Lock()
+	if got != glCtx {
+		ctx.Unlock()
+		t.Fatalf("Lock() returned %p, want %p", got, glCtx)
+	}
+	if egl.GetCurrentContext() == egl.NoContext {
+		ctx.Unlock()
+		t.Fatal("Lock() left no current EGL context")
+	}
+
+	// GL call while locked — GenBuffers must succeed.
+	buf := got.GenBuffers(1)
+	if buf == 0 {
+		ctx.Unlock()
+		t.Fatal("GenBuffers returned 0 under AdapterContext.Lock")
+	}
+	got.DeleteBuffers(buf)
+	ctx.Unlock()
+
+	if egl.GetCurrentContext() != egl.NoContext {
+		t.Fatal("Unlock() should unmake the EGL context")
+	}
+}
+
+// TestAdapterContext_LockForSurface_PbufferAsSurface uses the context's own
+// pbuffer as the surface stand-in (no native window in headless CI).
+func TestAdapterContext_LockForSurface_PbufferAsSurface(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if err := egl.Init(); err != nil {
+		t.Fatalf("egl.Init() failed: %v", err)
+	}
+
+	config := egl.DefaultContextConfig()
+	config.GLES = false
+	eglCtx, err := egl.NewContext(config)
+	if err != nil {
+		t.Skipf("egl.NewContext() failed: %v", err)
+	}
+
+	if err := eglCtx.MakeCurrent(); err != nil {
+		eglCtx.Destroy()
+		t.Fatalf("MakeCurrent failed: %v", err)
+	}
+
+	glCtx := &gl.Context{}
+	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
+		eglCtx.Destroy()
+		t.Fatalf("GL load failed: %v", err)
+	}
+	_ = egl.MakeCurrent(eglCtx.Display(), egl.NoSurface, egl.NoSurface, egl.NoContext)
+
+	ctx := NewAdapterContext(eglCtx, glCtx, true)
+	defer ctx.Destroy()
+
+	surf := eglCtx.Pbuffer()
+	if surf == egl.NoSurface {
+		// Surfaceless context — LockForSurface(NoSurface) is still valid EGL.
+		t.Log("surfaceless context: LockForSurface(NoSurface)")
+	}
+
+	got := ctx.LockForSurface(surf)
+	defer ctx.Unlock()
+
+	if egl.GetCurrentContext() == egl.NoContext {
+		t.Fatal("LockForSurface left no current EGL context")
+	}
+	if got.GetString(gl.VERSION) == "" {
+		t.Fatal("GL_VERSION empty after LockForSurface")
+	}
+}
+
+// TestInstance_CreateInstance_WrapsAdapterContext checks that a successful
+// CreateInstance stores a non-nil AdapterContext (X11/headless). On Wayland
+// skip-instance-context is intentional — then ctx may be nil.
+func TestInstance_CreateInstance_WrapsAdapterContext(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	backend := Backend{}
+	raw, err := backend.CreateInstance(nil)
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	defer raw.Destroy()
+
+	inst, ok := raw.(*Instance)
+	if !ok {
+		t.Fatalf("CreateInstance type = %T", raw)
+	}
+
+	if egl.DetectWindowKind() == egl.WindowKindWayland {
+		if inst.ctx != nil {
+			t.Log("Wayland with non-nil instance ctx (unusual but allowed if display available)")
+		}
+		return
+	}
+
+	if inst.ctx == nil {
+		t.Skip("instance AdapterContext unavailable (no EGL display in environment)")
+	}
+
+	glCtx := inst.ctx.Lock()
+	defer inst.ctx.Unlock()
+	if glCtx == nil {
+		t.Fatal("AdapterContext.GL is nil after CreateInstance")
+	}
+	version := glCtx.GetString(gl.VERSION)
+	if version == "" {
+		t.Fatal("empty GL_VERSION from instance AdapterContext")
+	}
+	t.Logf("instance AdapterContext OK: %s", version)
 }

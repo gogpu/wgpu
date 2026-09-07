@@ -147,7 +147,8 @@ func (c *AdapterContext) Unlock() {
 	c.mu.Unlock()
 }
 
-// GL returns the GL function table. Must be called while locked.
+// GL returns the GL function table.
+// Safe to read without Lock; GL calls on the returned context require Lock.
 func (c *AdapterContext) GL() *gl.Context {
 	return c.gl
 }
@@ -158,7 +159,10 @@ func (c *AdapterContext) HGLRC() wgl.HGLRC {
 }
 
 // Destroy deletes the GL context if it was created.
+// Takes the mutex so Destroy cannot race with Lock/Unlock on another goroutine.
 func (c *AdapterContext) Destroy() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.hglrc != 0 {
 		_ = wgl.MakeCurrent(0, 0)
 		_ = wgl.DeleteContext(c.hglrc)
