@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.5] - 2026-09-07
+
+### Fixed
+
+- **Vulkan depth-only render passes** (#353, @dvoyni) — BeginRenderPass derives render area and sample count from the depth/stencil attachment when there are no usable color attachments (shadow maps), and End calls `vkCmdEndRenderPass` only if Begin actually ran. Previously depth-only passes skipped Begin and End faulted inside the driver (`vkCmdEndRenderPass` without a matching begin).
+
+### Changed
+
+- **CI Dependencies job** (#354, @lkmavi) — pin `go-mod-outdated@v0.9.0`, retry install up to 3 times, and `continue-on-error` so transient `proxy.golang.org` flakes no longer fail the advisory check.
+
 ## [0.34.4] - 2026-09-07
 
 ### Added

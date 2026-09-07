@@ -103,6 +103,7 @@ Pure Go Vulkan implementation using goffi for dynamic function loading.
 - Surface-qualified adapter selection: `vkGetPhysicalDeviceSurfaceSupportKHR` across all queue families (ahead of Rust wgpu)
 - Platform surface: VkWin32, VkXlib/VkWayland, VkMetal, and Android `ANativeWindow` (arm64/API 29+ preview; see [ANDROID.md](ANDROID.md))
 - Multi-draw indirect: native `vkCmdDrawIndirect`/`vkCmdDrawIndexedIndirect` with `drawCount`, feature-gated fallback loop
+- Depth-only render passes: render area and sample count fall back to the depth/stencil attachment; `End` is gated on a begun pass (v0.34.5)
 
 ### `hal/metal/` — Metal Backend
 
