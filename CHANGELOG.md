@@ -5,18 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.34.4] - 2026-09-07
 
 ### Added
 
-- **GLES Linux AdapterContext** (#332, FEAT-GLES-003) — thread-safe EGL context switching matching Windows WGL parity.
+- **RenderBundle public API** (#330, #337, @gusevgrishaem1) — reusable render command recording.
+  - `Device.CreateRenderBundleEncoder(desc)` / `RenderBundleEncoder` with `SetPipeline`, `SetBindGroup`, `SetVertexBuffer`, `SetIndexBuffer`, `Draw(DrawArgs)`, `DrawIndexed(DrawIndexedArgs)`, `Finish(desc)`.
+  - `RenderBundle` with DestroyQueue-deferred `Release()` (ADR-056).
+  - `RenderPassEncoder.ExecuteBundles(bundles...)` — execute pre-recorded bundles in a render pass.
+  - Post-Finish encoder guards on all methods (W3C encoder state machine compliance).
+- **QuerySet companion methods** (#330, #337, @gusevgrishaem1) — complete the QuerySet API from v0.34.3.
+  - `CommandEncoder.ResolveQuerySet(querySet, firstQuery, queryCount, dst, dstOffset)` — copy query results to buffer.
+  - `RenderPassDescriptor.TimestampWrites` — attach timestamp queries to render pass boundaries.
+  - Wired through both public `toHAL()` and live `convertRenderPassDesc` → core → HAL paths.
+- **GLES Linux AdapterContext** (#332, #351, @lkmavi, FEAT-GLES-003) — thread-safe EGL context switching matching Windows WGL parity.
   - `AdapterContext` with `Lock()` / `LockForSurface()` / `Unlock()` — `sync.Mutex` + `runtime.LockOSThread` + `eglMakeCurrent`.
   - Instance owns shared context on X11/headless; Wayland keeps Surface-owned context (intentional divergence).
   - Device/Queue/Surface GL paths acquire the lock; Present rebinds the window EGLSurface before blit + swap.
   - Configure allocates swapchain FBO via `Lock()` (pbuffer), matching Windows hidden-DC pattern — avoids Mesa pbuffer↔window invalidation.
-  - `Destroy*` paths lock before `glDelete*`; `AdapterContext.Destroy` takes the mutex.
+  - `Destroy*` paths lock before `glDelete*`; `AdapterContext.Destroy` takes the mutex (both Linux and Windows).
   - Removes Phase-1 `surface_linux_compat.go` wrappers in favor of shared `*With` swapchain helpers.
-  - Unit tests for ownership, nil-safe Lock/Unlock, mutex serialization, Surface/Instance wiring; integration tests for Lock round-trip and CreateInstance wrapping.
+
+### Fixed
+
+- **GLSL.std.450 opcodes** (#334, #350, @lkmavi) — implement missing software SPIR-V interpreter opcodes.
+  - `MatrixInverse` (adjugate method), `Determinant` (mat2/mat3/mat4), `PackSnorm4x8`/`PackUnorm4x8`/`UnpackSnorm4x8`/`UnpackUnorm4x8`, `PackHalf2x16`/`UnpackHalf2x16` (f16 denorm-safe), `ModfStruct`/`FrexpStruct`/`Ldexp`, `FindILsb`/`FindSMsb`/`FindUMsb`, `NMin`/`NMax`/`NClamp` (NaN-aware).
+  - Correct `MatrixInverse` adjugate cofactor signs and `PackHalf2x16` denorm packing.
 
 ## [0.34.3] - 2026-09-02
 
