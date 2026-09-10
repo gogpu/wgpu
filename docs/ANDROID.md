@@ -10,7 +10,7 @@ Vulkan, arm64, Android API 29 or newer, and both `CGO_ENABLED=0` and
 API 28 or older are out of scope.
 
 The default backend consumes canonical
-[goffi v0.6.1](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1), released
+[goffi v0.6.4](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1), released
 from [go-webgpu/goffi#62](https://github.com/go-webgpu/goffi/pull/62). The
 `rust` build-tag path also depends on canonical
 [go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), merged at
@@ -95,7 +95,7 @@ a code dependency.
 
 [wgpu#253](https://github.com/gogpu/wgpu/pull/253) is the design precedent for
 matching Rust's typed public/HAL seam; it is not a code dependency of Android.
-The default Vulkan path uses goffi v0.6.1. The `rust` build-tag path needs the
+The default Vulkan path uses goffi v0.6.4. The `rust` build-tag path needs the
 canonical `go-webgpu/webgpu` helper as well. No WGPU-local copy of that helper
 should be added.
 
@@ -113,7 +113,7 @@ GOTOOLCHAIN=go1.26.5 \
 ./scripts/check-android-arm64-preview.sh
 ```
 
-The script first asserts that the module graph selects canonical goffi v0.6.1.
+The script first asserts that the module graph selects canonical goffi v0.6.4.
 It then verifies Android-only source selection; compiles every package and test
 for both the default and `rust` implementations in cgo0 and cgo1 modes; builds
 each headless example; checks the generated Go and NDK C ABI layouts; and
@@ -121,7 +121,7 @@ audits both ELF dependency sets. It requires Bionic `libc.so`/`libdl.so`,
 confirms `libvulkan.so` for the default backend and `libwgpu_native.so` for the
 Rust backend, and rejects glibc sonames, standalone `libpthread`, desktop WSI,
 GLES, and software fallback. Current CI repeats both lanes with Go 1.25.12 and
-Go 1.26.5 against canonical goffi v0.6.1 and the exact clean webgpu#24 head.
+Go 1.26.5 against canonical goffi v0.6.4 and the exact clean webgpu#24 head.
 
 These are deterministic cross-build and binary-shape checks. They do not prove
 process startup, adapter enumeration, surface creation, rendering,
