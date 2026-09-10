@@ -10,8 +10,7 @@ Vulkan, arm64, Android API 29 or newer, and both `CGO_ENABLED=0` and
 API 28 or older are out of scope.
 
 The default backend consumes canonical
-[goffi v0.6.4](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1), released
-from [go-webgpu/goffi#62](https://github.com/go-webgpu/goffi/pull/62). The
+[goffi v0.6.4](https://github.com/go-webgpu/goffi/releases/tag/v0.6.4) (Android preview originally landed in [goffi v0.6.1](https://github.com/go-webgpu/goffi/releases/tag/v0.6.1) / [goffi#62](https://github.com/go-webgpu/goffi/pull/62)). The
 `rust` build-tag path also depends on canonical
 [go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), merged at
 `a801aed7399042e5564ef76fc9f075da5cb70081`. goffi is declared directly in
