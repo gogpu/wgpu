@@ -92,9 +92,18 @@ func TestWGLInstanceLifecycle(t *testing.T) {
 	if len(adapters) == 0 {
 		t.Skip("no GL adapter (GL context could not be created)")
 	}
-	open, err := adapters[0].Adapter.Open(0, adapters[0].Capabilities.Limits)
+	adapter := adapters[0].Adapter.(*Adapter)
+	if !adapter.caps.IsES && (adapter.caps.GLMajor < 3 || (adapter.caps.GLMajor == 3 && adapter.caps.GLMinor < 1)) {
+		t.Skipf("GL %d.%d < 3.1: glCopyBufferSubData unavailable", adapter.caps.GLMajor, adapter.caps.GLMinor)
+	}
+
+	open, err := adapter.Open(0, adapters[0].Capabilities.Limits)
 	if err != nil {
 		t.Skipf("GL device unavailable: %v", err)
 	}
-	open.Device.Destroy()
+	defer open.Device.Destroy()
+
+	d := &glTestDevice{adapter: adapter, device: open.Device, queue: open.Queue}
+	t.Run("CopyBufferToBuffer", func(t *testing.T) { testGLCopyBufferToBuffer(t, d) })
+	t.Run("ComputePairSum", func(t *testing.T) { testGLComputePairSum(t, d) })
 }

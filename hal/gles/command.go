@@ -1543,17 +1543,27 @@ func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
 	}
 }
 
-// CopyBufferCommand copies between buffers.
+// CopyBufferCommand copies a region of one GL buffer object into another.
 type CopyBufferCommand struct {
 	srcID, dstID         uint32
 	srcOffset, dstOffset uint64
 	size                 uint64
 }
 
+// Execute performs the copy with glCopyBufferSubData through the dedicated
+// COPY_READ_BUFFER / COPY_WRITE_BUFFER binding points, so the copy does not
+// disturb the buffers bound to the vertex, index or uniform targets.
+// Mirrors Rust wgpu-hal gles/queue.rs C::CopyBufferToBuffer (raw → raw case).
+// Desktop GL and GLES 3.0 allow any buffer role on the copy targets; the
+// ELEMENT_ARRAY_BUFFER special case in Rust exists only for WebGL.
 func (c *CopyBufferCommand) Execute(ctx *gl.Context) {
+	if c.size == 0 || c.srcID == 0 || c.dstID == 0 {
+		return
+	}
 	ctx.BindBuffer(gl.COPY_READ_BUFFER, c.srcID)
 	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, c.dstID)
-	// glCopyBufferSubData would go here
+	ctx.CopyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER,
+		int(c.srcOffset), int(c.dstOffset), int(c.size))
 	ctx.BindBuffer(gl.COPY_READ_BUFFER, 0)
 	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, 0)
 }
