@@ -19,6 +19,16 @@ const D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING = 0x1688
 // D3D12_SHADER_RESOURCE_VIEW_DESC helpers
 // -----------------------------------------------------------------------------
 
+// SetBuffer sets up a buffer SRV (D3D12_BUFFER_SRV union member):
+// UINT64 FirstElement, UINT NumElements, UINT StructureByteStride, Flags.
+func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetBuffer(firstElement uint64, numElements, structureByteStride uint32, flags D3D12_BUFFER_SRV_FLAGS) {
+	d.ViewDimension = D3D12_SRV_DIMENSION_BUFFER
+	binary.LittleEndian.PutUint64(d.Union[0:8], firstElement)
+	binary.LittleEndian.PutUint32(d.Union[8:12], numElements)
+	binary.LittleEndian.PutUint32(d.Union[12:16], structureByteStride)
+	binary.LittleEndian.PutUint32(d.Union[16:20], uint32(flags))
+}
+
 // SetTexture1D sets up a 1D texture SRV.
 func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture1D(mostDetailedMip, mipLevels uint32, resourceMinLODClamp float32) {
 	d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D
@@ -71,6 +81,22 @@ func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTextureCubeArray(mostDetailedMip, m
 	binary.LittleEndian.PutUint32(d.Union[8:12], first2DArrayFace)
 	binary.LittleEndian.PutUint32(d.Union[12:16], numCubes)
 	_ = resourceMinLODClamp // Extended union space
+}
+
+// -----------------------------------------------------------------------------
+// D3D12_UNORDERED_ACCESS_VIEW_DESC helpers
+// -----------------------------------------------------------------------------
+
+// SetBuffer sets up a buffer UAV (D3D12_BUFFER_UAV union member):
+// UINT64 FirstElement, UINT NumElements, UINT StructureByteStride,
+// UINT64 CounterOffsetInBytes, Flags.
+func (d *D3D12_UNORDERED_ACCESS_VIEW_DESC) SetBuffer(firstElement uint64, numElements, structureByteStride uint32, counterOffsetInBytes uint64, flags D3D12_BUFFER_UAV_FLAGS) {
+	d.ViewDimension = D3D12_UAV_DIMENSION_BUFFER
+	binary.LittleEndian.PutUint64(d.Union[0:8], firstElement)
+	binary.LittleEndian.PutUint32(d.Union[8:12], numElements)
+	binary.LittleEndian.PutUint32(d.Union[12:16], structureByteStride)
+	binary.LittleEndian.PutUint64(d.Union[16:24], counterOffsetInBytes)
+	binary.LittleEndian.PutUint32(d.Union[24:28], uint32(flags))
 }
 
 // -----------------------------------------------------------------------------

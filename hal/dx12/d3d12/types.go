@@ -220,11 +220,18 @@ type D3D12_SHADER_RESOURCE_VIEW_DESC struct {
 }
 
 // D3D12_UNORDERED_ACCESS_VIEW_DESC describes an unordered access view.
+//
+// The C union is as large as its largest member, D3D12_BUFFER_UAV
+// (UINT64 FirstElement, UINT NumElements, UINT StructureByteStride,
+// UINT64 CounterOffsetInBytes, D3D12_BUFFER_UAV_FLAGS Flags = 28 bytes,
+// padded to 32 by its 8-byte alignment). The union starts at offset 8, so the
+// whole struct is 40 bytes, matching sizeof(D3D12_UNORDERED_ACCESS_VIEW_DESC)
+// in d3d12.h. A smaller Union would let the driver read past the Go value.
 type D3D12_UNORDERED_ACCESS_VIEW_DESC struct {
 	Format        DXGI_FORMAT
 	ViewDimension D3D12_UAV_DIMENSION
 	// Union of different view types
-	Union [16]byte
+	Union [32]byte
 }
 
 // D3D12_RENDER_TARGET_VIEW_DESC describes a render target view.

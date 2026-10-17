@@ -631,6 +631,28 @@ const (
 	D3D12_UAV_DIMENSION_TEXTURE3D      D3D12_UAV_DIMENSION = 8
 )
 
+// D3D12_BUFFER_SRV_FLAGS specifies options for a buffer shader resource view.
+type D3D12_BUFFER_SRV_FLAGS uint32
+
+// Buffer SRV flag constants.
+const (
+	D3D12_BUFFER_SRV_FLAG_NONE D3D12_BUFFER_SRV_FLAGS = 0
+	// D3D12_BUFFER_SRV_FLAG_RAW views the buffer as raw bytes (HLSL ByteAddressBuffer).
+	// Requires Format DXGI_FORMAT_R32_TYPELESS and StructureByteStride 0.
+	D3D12_BUFFER_SRV_FLAG_RAW D3D12_BUFFER_SRV_FLAGS = 0x1
+)
+
+// D3D12_BUFFER_UAV_FLAGS specifies options for a buffer unordered access view.
+type D3D12_BUFFER_UAV_FLAGS uint32
+
+// Buffer UAV flag constants.
+const (
+	D3D12_BUFFER_UAV_FLAG_NONE D3D12_BUFFER_UAV_FLAGS = 0
+	// D3D12_BUFFER_UAV_FLAG_RAW views the buffer as raw bytes (HLSL RWByteAddressBuffer).
+	// Requires Format DXGI_FORMAT_R32_TYPELESS and StructureByteStride 0.
+	D3D12_BUFFER_UAV_FLAG_RAW D3D12_BUFFER_UAV_FLAGS = 0x1
+)
+
 // D3D12_RTV_DIMENSION specifies render target view dimension.
 type D3D12_RTV_DIMENSION uint32
 

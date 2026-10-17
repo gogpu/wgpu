@@ -1832,18 +1832,11 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 		device: d,
 	}
 
-	// Classify entries into CBV/SRV/UAV vs Sampler
-	var viewEntries []gputypes.BindGroupEntry // CBV, SRV, UAV
-	var samplerPoolIndices []uint32           // global sampler pool indices
-
-	for _, entry := range desc.Entries {
-		switch res := entry.Resource.(type) {
-		case gputypes.SamplerBinding:
-			sampler := (*Sampler)(unsafe.Pointer(res.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
-			samplerPoolIndices = append(samplerPoolIndices, sampler.samplerPoolSlot)
-		default: // BufferBinding, TextureViewBinding
-			viewEntries = append(viewEntries, entry)
-		}
+	// Classify entries into CBV/SRV/UAV vs Sampler, in layout order so the
+	// descriptor table matches the root signature ranges.
+	viewEntries, samplerPoolIndices, err := orderBindGroupEntries(layout, desc.Entries)
+	if err != nil {
+		return nil, err
 	}
 
 	// Collect resource references for DX12 command-local state tracking. The
@@ -1897,7 +1890,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 
 // populateBindGroupDescriptors allocates view heap descriptors and writes CBV/SRV/UAV
 // entries plus the sampler index buffer SRV into the contiguous GPU descriptor range.
-func (d *Device) populateBindGroupDescriptors(bg *BindGroup, totalViewDescs uint32, viewEntries []gputypes.BindGroupEntry, samplerPoolIndices []uint32) error {
+func (d *Device) populateBindGroupDescriptors(bg *BindGroup, totalViewDescs uint32, viewEntries []viewBinding, samplerPoolIndices []uint32) error {
 	if totalViewDescs == 0 || d.viewHeap == nil {
 		return nil
 	}
@@ -1982,61 +1975,53 @@ func (d *Device) createSamplerIndexBuffer(indices []uint32) (*d3d12.ID3D12Resour
 func (d *Device) createBufferSRV(resource *d3d12.ID3D12Resource, numElements, structureByteStride uint32, dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE) {
 	srvDesc := d3d12.D3D12_SHADER_RESOURCE_VIEW_DESC{
 		Format:                  d3d12.DXGI_FORMAT_UNKNOWN,
-		ViewDimension:           d3d12.D3D12_SRV_DIMENSION_BUFFER,
 		Shader4ComponentMapping: d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
 	}
-	// Set buffer SRV union: FirstElement=0, NumElements, StructureByteStride, Flags=0
-	type bufferSRV struct {
-		FirstElement        uint64
-		NumElements         uint32
-		StructureByteStride uint32
-		Flags               uint32
-	}
-	buf := (*bufferSRV)(unsafe.Pointer(&srvDesc.Union[0]))
-	buf.FirstElement = 0
-	buf.NumElements = numElements
-	buf.StructureByteStride = structureByteStride
-	buf.Flags = 0
+	srvDesc.SetBuffer(0, numElements, structureByteStride, d3d12.D3D12_BUFFER_SRV_FLAG_NONE)
 
 	d.raw.CreateShaderResourceView(resource, &srvDesc, dest)
 }
 
 // writeViewDescriptorsBatched writes CBV/SRV/UAV descriptors for all view entries.
-// CBVs are created inline (cannot be batched), while SRV copies from scattered
-// source handles are batched into a single CopyDescriptors call.
-func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entries []gputypes.BindGroupEntry) error {
+// The descriptor kind is chosen from the layout entry type, matching the
+// descriptor range type the root signature declares for that slot
+// (bindingTypeToD3D12DescriptorRangeType) and the HLSL resource naga emits:
+//   - uniform buffer           → CBV                 (cbuffer, b#)
+//   - read-only storage buffer → raw buffer SRV      (ByteAddressBuffer, t#)
+//   - storage buffer           → raw buffer UAV      (RWByteAddressBuffer, u#)
+//   - texture                  → copy of the view SRV
+//
+// Mirrors Rust wgpu-hal dx12/device.rs create_bind_group (BindingType::Buffer arm).
+// CBV/SRV/UAV buffer views are created inline; texture SRV copies from scattered
+// staging handles are batched into a single CopyDescriptors call.
+func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entries []viewBinding) error {
 	// Collect SRV copy sources for batching.
 	// destHandles[i] = destination in GPU-visible heap, srcHandles[i] = source from staging heap.
 	var srvDestHandles []d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
 	var srvSrcHandles []d3d12.D3D12_CPU_DESCRIPTOR_HANDLE
 
-	for i, entry := range entries {
+	for i, vb := range entries {
 		dest := cpuStart.Offset(i, d.viewHeap.incrementSize)
 
-		switch res := entry.Resource.(type) {
+		switch res := vb.entry.Resource.(type) {
 		case gputypes.BufferBinding:
 			buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
-			size := res.Size
-			if size == 0 {
-				size = buf.size - res.Offset
+			if err := d.writeBufferViewDescriptor(vb.layout, buf, res, dest); err != nil {
+				return err
 			}
-			// Align CBV size to 256 bytes (D3D12 requirement).
-			alignedSize := (size + 255) &^ 255
-			d.raw.CreateConstantBufferView(&d3d12.D3D12_CONSTANT_BUFFER_VIEW_DESC{
-				BufferLocation: buf.gpuVA + res.Offset,
-				SizeInBytes:    uint32(alignedSize),
-			}, dest)
 
 		case gputypes.TextureViewBinding:
+			// Storage textures need a UAV, which TextureView does not create yet;
+			// they keep the sampled SRV here (pre-existing behavior).
 			view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle → concrete type
 			if !view.hasSRV {
-				return fmt.Errorf("dx12: texture view has no SRV for binding %d", entry.Binding)
+				return fmt.Errorf("dx12: texture view has no SRV for binding %d", vb.entry.Binding)
 			}
 			srvDestHandles = append(srvDestHandles, dest)
 			srvSrcHandles = append(srvSrcHandles, view.srvHandle)
 
 		default:
-			return fmt.Errorf("dx12: unsupported binding resource type: %T", entry.Resource)
+			return fmt.Errorf("dx12: unsupported binding resource type: %T", vb.entry.Resource)
 		}
 	}
 
