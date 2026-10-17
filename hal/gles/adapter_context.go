@@ -160,12 +160,41 @@ func (c *AdapterContext) HGLRC() wgl.HGLRC {
 
 // Destroy deletes the GL context if it was created.
 // Takes the mutex so Destroy cannot race with Lock/Unlock on another goroutine.
+//
+// Destroy may run on any OS thread (typically the goroutine that calls
+// Instance.Release), not the one that created the context. The context is
+// therefore made current on the hidden window DC on the destroying thread,
+// released, and only then deleted — all while pinned to one OS thread.
+// This is the Rust wgpu-hal order: wgl.rs Inner::drop makes the context
+// current, drops the GL state and unmakes it (CurrentGuard), then
+// WglContext::drop calls wglDeleteContext.
+//
+// Observed with Intel's GL ICD (igxelpicd64.dll): wglDeleteContext on an OS
+// thread other than the one that created the context, without first making
+// it current there, crashed with an access violation inside the driver in
+// about 30% of runs; with the make-current step it did not crash in 90 runs.
+// The likely cause is per-thread driver state that exists only for threads
+// that have made a context current. Either way the make-current step is
+// required, not cosmetic.
+// Must be called before the hidden window (and its DC) is destroyed.
 func (c *AdapterContext) Destroy() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.hglrc != 0 {
-		_ = wgl.MakeCurrent(0, 0)
-		_ = wgl.DeleteContext(c.hglrc)
-		c.hglrc = 0
+	if c.hglrc == 0 {
+		return
 	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if err := wgl.MakeCurrent(c.hiddenDC, c.hglrc); err != nil {
+		slog.Warn("gles: AdapterContext.Destroy MakeCurrent failed", "err", err)
+	}
+	if err := wgl.MakeCurrent(0, 0); err != nil {
+		slog.Warn("gles: AdapterContext.Destroy UnmakeCurrent failed", "err", err)
+	}
+	if err := wgl.DeleteContext(c.hglrc); err != nil {
+		slog.Error("gles: AdapterContext.Destroy wglDeleteContext failed", "err", err)
+	}
+	c.hglrc = 0
 }
