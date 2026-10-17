@@ -266,9 +266,46 @@ func (t *TextureTracker) Merge(scope *TextureUsageScope) []TexturePendingTransit
 	return transitions
 }
 
-// TextureUsageScope tracks texture usage within a command buffer or pass.
-// Each command buffer has its own scope that gets merged into the device
-// tracker on submit.
+// MergeEncoder merges a submitted command buffer's tracker into the device
+// tracker. For every texture the command buffer uses, a transition from the
+// device's current state to the command buffer's start state is returned
+// (unless SkipBarrier allows omitting it), and the device state becomes the
+// command buffer's end state. Textures the device does not track yet are
+// inserted with the end state and need no barrier.
+//
+// Reference: wgpu-core track/texture.rs DeviceTextureTracker::set_from_tracker_and_drain_transitions
+func (t *TextureTracker) MergeEncoder(enc *EncoderTextureTracker) []TexturePendingTransition {
+	if enc == nil {
+		return nil
+	}
+	var transitions []TexturePendingTransition
+	for i := range enc.end {
+		index, valid := trackerIndexAt(i)
+		if !valid || !enc.metadata.IsOwned(index) {
+			continue
+		}
+		start, end := enc.start[i], enc.end[i]
+		if !t.IsTracked(index) {
+			t.InsertSingle(index, end)
+			continue
+		}
+		current := t.states[index].usage
+		if !SkipBarrier(current, start) {
+			transitions = append(transitions, TexturePendingTransition{
+				Index: index,
+				Usage: TextureStateTransition{From: current, To: start},
+			})
+		}
+		t.states[index].usage = end
+	}
+	return transitions
+}
+
+// TextureUsageScope tracks texture usage within ONE WebGPU usage scope: a
+// render pass, a compute dispatch, or a single copy command. Adding a usage
+// that is incompatible with an earlier usage in the same scope is a
+// validation error. Usages across different scopes are not merged here; the
+// command buffer's EncoderTextureTracker transitions between them.
 //
 // Reference: wgpu-core track/texture.rs TextureUsageScope
 type TextureUsageScope struct {

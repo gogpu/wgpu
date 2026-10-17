@@ -210,9 +210,44 @@ func (t *BufferTracker) Merge(scope *BufferUsageScope) []PendingTransition {
 	return transitions
 }
 
-// BufferUsageScope tracks buffer usage within a command buffer or pass.
-// Each command buffer has its own scope that gets merged into the device
-// tracker on submit.
+// MergeEncoder merges a submitted command buffer's tracker into the device
+// tracker: a transition from the device's current state to the command
+// buffer's start state is returned (unless SkipBufferBarrier allows omitting
+// it), and the device state becomes the command buffer's end state. Buffers
+// the device does not track yet are inserted with the end state.
+//
+// Reference: wgpu-core track/buffer.rs DeviceBufferTracker::set_from_tracker_and_drain_transitions
+func (t *BufferTracker) MergeEncoder(enc *EncoderBufferTracker) []PendingTransition {
+	if enc == nil {
+		return nil
+	}
+	var transitions []PendingTransition
+	for i := range enc.end {
+		index, valid := trackerIndexAt(i)
+		if !valid || !enc.metadata.IsOwned(index) {
+			continue
+		}
+		start, end := enc.start[i], enc.end[i]
+		if !t.IsTracked(index) {
+			t.InsertSingle(index, end)
+			continue
+		}
+		current := t.states[index].usage
+		if !SkipBufferBarrier(current, start) {
+			transitions = append(transitions, PendingTransition{
+				Index: index,
+				Usage: StateTransition{From: current, To: start},
+			})
+		}
+		t.states[index].usage = end
+	}
+	return transitions
+}
+
+// BufferUsageScope tracks buffer usage within ONE WebGPU usage scope: a
+// render pass, a compute dispatch, or a single copy command. Incompatible
+// usages inside the scope are a validation error; usages in different scopes
+// are transitioned by the command buffer's EncoderBufferTracker instead.
 type BufferUsageScope struct {
 	states   []BufferState
 	metadata ResourceMetadata

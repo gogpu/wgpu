@@ -228,7 +228,7 @@ func TestBeginRenderPass_PopulatesTextureScope_ColorAttachment(t *testing.T) {
 		t.Fatal("Texture should be tracked in scope after BeginRenderPass")
 	}
 
-	usage := scope.GetUsage(trackerIdx)
+	usage := scope.EndUsage(trackerIdx)
 	if !usage.Contains(track.TextureUsesColorTarget) {
 		t.Errorf("Usage = %d, want COLOR_TARGET (%d) set", usage, track.TextureUsesColorTarget)
 	}
@@ -285,7 +285,7 @@ func TestBeginRenderPass_PopulatesTextureScope_DepthStencil(t *testing.T) {
 		t.Fatal("Depth texture should be tracked in scope")
 	}
 
-	usage := scope.GetUsage(trackerIdx)
+	usage := scope.EndUsage(trackerIdx)
 	if !usage.Contains(track.TextureUsesDepthStencilWrite) {
 		t.Errorf("Usage = %d, want DEPTH_STENCIL_WRITE (%d) set", usage, track.TextureUsesDepthStencilWrite)
 	}
@@ -333,7 +333,7 @@ func TestBeginRenderPass_PopulatesTextureScope_DepthReadOnly(t *testing.T) {
 
 	scope := cmdBuf.TextureScope()
 	trackerIdx := depthTex.TrackingData().Index()
-	usage := scope.GetUsage(trackerIdx)
+	usage := scope.EndUsage(trackerIdx)
 
 	// When both depth and stencil are read-only, usage should be DEPTH_STENCIL_READ.
 	if !usage.Contains(track.TextureUsesDepthStencilRead) {
@@ -429,7 +429,7 @@ func TestBeginRenderPass_PopulatesTextureScope_MultipleAttachments(t *testing.T)
 			t.Errorf("%s: texture not tracked in scope", tc.name)
 			continue
 		}
-		usage := scope.GetUsage(idx)
+		usage := scope.EndUsage(idx)
 		if !usage.Contains(tc.usage) {
 			t.Errorf("%s: usage = %d, want %s (%d) set", tc.name, usage, tc.useName, tc.usage)
 		}
@@ -497,12 +497,12 @@ func TestBeginRenderPass_PopulatesTextureScope_ResolveTarget(t *testing.T) {
 		t.Error("Resolve target should be tracked in scope")
 	}
 
-	msaaUsage := scope.GetUsage(msaaIdx)
+	msaaUsage := scope.EndUsage(msaaIdx)
 	if !msaaUsage.Contains(track.TextureUsesColorTarget) {
 		t.Errorf("MSAA usage = %d, want COLOR_TARGET set", msaaUsage)
 	}
 
-	resolveUsage := scope.GetUsage(resolveIdx)
+	resolveUsage := scope.EndUsage(resolveIdx)
 	if !resolveUsage.Contains(track.TextureUsesColorTarget) {
 		t.Errorf("Resolve usage = %d, want COLOR_TARGET set", resolveUsage)
 	}

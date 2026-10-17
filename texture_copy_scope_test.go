@@ -89,7 +89,7 @@ func TestCopyCommandsPopulateTextureScope(t *testing.T) {
 			scope := cb.core.TextureScope()
 			for tex, want := range tt.want {
 				idx := tex.coreTexture.TrackingData().Index()
-				if got := scope.GetUsage(idx); got != want {
+				if got := scope.EndUsage(idx); got != want {
 					t.Errorf("texture %q usage = %v, want %v", tex.coreTexture.Label(), got, want)
 				}
 			}
@@ -207,7 +207,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 
 		idx := tex.coreTexture.TrackingData().Index()
 		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
-			t.Fatalf("failed copy recorded texture usage %v", scope.GetUsage(idx))
+			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
 		if _, err := enc.Finish(); err == nil {
 			t.Fatal("Finish succeeded after copy to released buffer")
@@ -233,7 +233,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 
 		idx := tex.coreTexture.TrackingData().Index()
 		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
-			t.Fatalf("failed copy recorded texture usage %v", scope.GetUsage(idx))
+			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
 		if _, err := enc.Finish(); err == nil {
 			t.Fatal("Finish succeeded after copy from released buffer")
@@ -258,84 +258,80 @@ func createCopyScopeTexture(t *testing.T, device *Device, label string, copyUsag
 	return tex
 }
 
-func TestCopyUsageConflictsAreAtomic(t *testing.T) {
+// TestCopyAfterEarlierCommandUsageIsNotAConflict: a copy is its own usage
+// scope. A resource left in an "incompatible" usage by an earlier command of
+// the same encoder is transitioned, not rejected. (Before the fix, #312's
+// encoder-wide scope rejected all of these cases.)
+func TestCopyAfterEarlierCommandUsageIsNotAConflict(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name       string
-		seed       func(*testing.T, *CommandEncoder, *Texture, *Texture, *Buffer)
+		seed       func(*CommandEncoder, *Texture, *Texture, *Buffer)
 		record     func(*CommandEncoder, *Texture, *Texture, *Buffer)
 		wantSrc    track.TextureUses
 		wantDst    track.TextureUses
 		wantBuffer track.BufferUses
 	}{
 		{
-			name: "texture to buffer texture conflict leaves buffer untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, src, _ *Texture, _ *Buffer) {
-				mustSetTextureScopeUsage(t, enc, src, track.TextureUsesCopyDst)
+			name: "texture written earlier is copied to a buffer",
+			seed: func(enc *CommandEncoder, src, _ *Texture, _ *Buffer) {
+				seedTextureUsage(enc, src, track.TextureUsesCopyDst)
 			},
 			record: func(enc *CommandEncoder, src, _ *Texture, buffer *Buffer) {
 				enc.CopyTextureToBuffer(src, buffer, nil)
 			},
-			wantSrc: track.TextureUsesCopyDst,
+			wantSrc: track.TextureUsesCopySrc, wantBuffer: track.BufferUsesCopyDst,
 		},
 		{
-			name: "texture to buffer buffer conflict leaves texture untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, _, _ *Texture, buffer *Buffer) {
-				mustSetBufferScopeUsage(t, enc, buffer, track.BufferUsesCopySrc)
+			name: "buffer read earlier receives a texture copy",
+			seed: func(enc *CommandEncoder, _, _ *Texture, buffer *Buffer) {
+				seedBufferUsage(enc, buffer, track.BufferUsesCopySrc)
 			},
 			record: func(enc *CommandEncoder, src, _ *Texture, buffer *Buffer) {
 				enc.CopyTextureToBuffer(src, buffer, nil)
 			},
-			wantBuffer: track.BufferUsesCopySrc,
+			wantSrc: track.TextureUsesCopySrc, wantBuffer: track.BufferUsesCopyDst,
 		},
 		{
-			name: "buffer to texture texture conflict leaves buffer untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, _, dst *Texture, _ *Buffer) {
-				mustSetTextureScopeUsage(t, enc, dst, track.TextureUsesCopySrc)
+			name: "texture read earlier receives a buffer upload",
+			seed: func(enc *CommandEncoder, _, dst *Texture, _ *Buffer) {
+				seedTextureUsage(enc, dst, track.TextureUsesCopySrc)
 			},
 			record: func(enc *CommandEncoder, _, dst *Texture, buffer *Buffer) {
 				enc.CopyBufferToTexture(buffer, dst, nil)
 			},
-			wantDst: track.TextureUsesCopySrc,
+			wantDst: track.TextureUsesCopyDst, wantBuffer: track.BufferUsesCopySrc,
 		},
 		{
-			name: "buffer to texture buffer conflict leaves texture untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, _, _ *Texture, buffer *Buffer) {
-				mustSetBufferScopeUsage(t, enc, buffer, track.BufferUsesCopyDst)
+			name: "buffer written earlier is uploaded to a texture",
+			seed: func(enc *CommandEncoder, _, _ *Texture, buffer *Buffer) {
+				seedBufferUsage(enc, buffer, track.BufferUsesCopyDst)
 			},
 			record: func(enc *CommandEncoder, _, dst *Texture, buffer *Buffer) {
 				enc.CopyBufferToTexture(buffer, dst, nil)
 			},
-			wantBuffer: track.BufferUsesCopyDst,
+			wantDst: track.TextureUsesCopyDst, wantBuffer: track.BufferUsesCopySrc,
 		},
 		{
-			name: "texture to texture source conflict leaves destination untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, src, _ *Texture, _ *Buffer) {
-				mustSetTextureScopeUsage(t, enc, src, track.TextureUsesCopyDst)
+			name: "render target is copied to another texture",
+			seed: func(enc *CommandEncoder, src, _ *Texture, _ *Buffer) {
+				seedTextureUsage(enc, src, track.TextureUsesColorTarget)
 			},
 			record: func(enc *CommandEncoder, src, dst *Texture, _ *Buffer) {
 				enc.CopyTextureToTexture(src, dst, nil)
 			},
-			wantSrc: track.TextureUsesCopyDst,
+			wantSrc: track.TextureUsesCopySrc, wantDst: track.TextureUsesCopyDst,
 		},
 		{
-			name: "texture to texture destination conflict leaves source untouched",
-			seed: func(t *testing.T, enc *CommandEncoder, _, dst *Texture, _ *Buffer) {
-				mustSetTextureScopeUsage(t, enc, dst, track.TextureUsesCopySrc)
+			name: "sampled texture receives a texture copy",
+			seed: func(enc *CommandEncoder, _, dst *Texture, _ *Buffer) {
+				seedTextureUsage(enc, dst, track.TextureUsesResource)
 			},
 			record: func(enc *CommandEncoder, src, dst *Texture, _ *Buffer) {
 				enc.CopyTextureToTexture(src, dst, nil)
 			},
-			wantDst: track.TextureUsesCopySrc,
-		},
-		{
-			name: "texture to texture same endpoint conflict leaves scope untouched",
-			seed: func(_ *testing.T, _ *CommandEncoder, _, _ *Texture, _ *Buffer) {
-			},
-			record: func(enc *CommandEncoder, src, _ *Texture, _ *Buffer) {
-				enc.CopyTextureToTexture(src, src, nil)
-			},
+			wantSrc: track.TextureUsesCopySrc, wantDst: track.TextureUsesCopyDst,
 		},
 	}
 
@@ -343,81 +339,96 @@ func TestCopyUsageConflictsAreAtomic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, device := newTestDeviceWithTracker(t)
 			defer device.Release()
-			src := createCopyScopeTexture(t, device, "atomic-src", TextureUsageCopySrc|TextureUsageCopyDst)
+			src := createCopyScopeTexture(t, device, "earlier-src", TextureUsageCopySrc|TextureUsageCopyDst)
 			defer src.Release()
-			dst := createCopyScopeTexture(t, device, "atomic-dst", TextureUsageCopySrc|TextureUsageCopyDst)
+			dst := createCopyScopeTexture(t, device, "earlier-dst", TextureUsageCopySrc|TextureUsageCopyDst)
 			defer dst.Release()
-			buffer, err := device.CreateBuffer(&BufferDescriptor{
-				Size: 256, Usage: BufferUsageCopySrc | BufferUsageCopyDst,
-			})
-			if err != nil {
-				t.Fatalf("CreateBuffer: %v", err)
-			}
+			buffer := createCopyScopeBuffer(t, device, "earlier-buffer")
 			defer buffer.Release()
 
 			enc, err := device.CreateCommandEncoder(nil)
 			if err != nil {
 				t.Fatalf("CreateCommandEncoder: %v", err)
 			}
-			tt.seed(t, enc, src, dst, buffer)
+			tt.seed(enc, src, dst, buffer)
 			tt.record(enc, src, dst, buffer)
 
-			textureScope := enc.core.Mutable().TextureScope()
-			if got := textureScope.GetUsage(src.coreTexture.TrackingData().Index()); got != tt.wantSrc {
-				t.Errorf("source texture usage = %v, want %v", got, tt.wantSrc)
+			textures := enc.core.Mutable().TextureScope()
+			if want := tt.wantSrc; want != 0 {
+				if got := textures.EndUsage(src.coreTexture.TrackingData().Index()); got != want {
+					t.Errorf("source texture usage = %v, want %v", got, want)
+				}
 			}
-			if got := textureScope.GetUsage(dst.coreTexture.TrackingData().Index()); got != tt.wantDst {
-				t.Errorf("destination texture usage = %v, want %v", got, tt.wantDst)
+			if want := tt.wantDst; want != 0 {
+				if got := textures.EndUsage(dst.coreTexture.TrackingData().Index()); got != want {
+					t.Errorf("destination texture usage = %v, want %v", got, want)
+				}
 			}
-			if got := enc.core.Mutable().BufferScope().GetUsage(buffer.core.TrackingData().Index()); got != tt.wantBuffer {
+			if got := enc.core.Mutable().BufferScope().EndUsage(buffer.core.TrackingData().Index()); got != tt.wantBuffer {
 				t.Errorf("buffer usage = %v, want %v", got, tt.wantBuffer)
 			}
-			if got := len(enc.trackedRefs); got != 0 {
-				t.Errorf("failed copy retained %d refs, want 0", got)
+			cb, err := enc.Finish()
+			if err != nil {
+				t.Fatalf("Finish: %v", err)
 			}
-			if len(enc.usedTextures) != 0 || len(enc.usedBuffers) != 0 {
-				t.Errorf("failed copy changed submit validation sets: textures=%d buffers=%d", len(enc.usedTextures), len(enc.usedBuffers))
-			}
-			if _, err := enc.Finish(); err == nil {
-				t.Fatal("Finish succeeded after copy usage conflict")
-			}
+			cb.Release()
 		})
 	}
 }
 
-func TestCopyBufferToBufferUsageRecordingIsAtomic(t *testing.T) {
+// TestCopyOntoItselfIsRejectedAtomically: the copy's own usage scope makes a
+// resource that is both source and destination a conflict. The rejected copy
+// must leave the tracker, the retained refs and the submit validation sets
+// untouched.
+func TestCopyOntoItselfIsRejectedAtomically(t *testing.T) {
 	t.Parallel()
 
-	_, _, device := newTestDeviceWithTracker(t)
-	defer device.Release()
-	src := createCopyScopeBuffer(t, device, "atomic-buffer-src")
-	defer src.Release()
-	dst := createCopyScopeBuffer(t, device, "atomic-buffer-dst")
-	defer dst.Release()
+	tests := []struct {
+		name   string
+		record func(*CommandEncoder, *Texture, *Buffer)
+	}{
+		{
+			name:   "texture to same texture",
+			record: func(enc *CommandEncoder, tex *Texture, _ *Buffer) { enc.CopyTextureToTexture(tex, tex, nil) },
+		},
+		{
+			name:   "buffer to same buffer",
+			record: func(enc *CommandEncoder, _ *Texture, buf *Buffer) { enc.CopyBufferToBuffer(buf, 0, buf, 128, 64) },
+		},
+	}
 
-	enc, err := device.CreateCommandEncoder(nil)
-	if err != nil {
-		t.Fatalf("CreateCommandEncoder: %v", err)
-	}
-	mustSetBufferScopeUsage(t, enc, dst, track.BufferUsesCopySrc)
-	enc.CopyBufferToBuffer(src, 0, dst, 0, 64)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, device := newTestDeviceWithTracker(t)
+			defer device.Release()
+			tex := createCopyScopeTexture(t, device, "self-copy", TextureUsageCopySrc|TextureUsageCopyDst)
+			defer tex.Release()
+			buf := createCopyScopeBuffer(t, device, "self-copy")
+			defer buf.Release()
 
-	scope := enc.core.Mutable().BufferScope()
-	if index := src.core.TrackingData().Index(); scope.IsUsed(index) {
-		t.Fatalf("failed copy recorded source usage %v", scope.GetUsage(index))
-	}
-	dstIndex := dst.core.TrackingData().Index()
-	if got := scope.GetUsage(dstIndex); got != track.BufferUsesCopySrc {
-		t.Errorf("destination usage = %v, want preserved %v", got, track.BufferUsesCopySrc)
-	}
-	if got := len(enc.trackedRefs); got != 0 {
-		t.Errorf("failed copy retained %d refs, want 0", got)
-	}
-	if len(enc.usedBuffers) != 0 {
-		t.Errorf("failed copy changed submit validation set: buffers=%d", len(enc.usedBuffers))
-	}
-	if _, err := enc.Finish(); err == nil {
-		t.Fatal("Finish succeeded after copy usage conflict")
+			enc, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatalf("CreateCommandEncoder: %v", err)
+			}
+			tt.record(enc, tex, buf)
+
+			if enc.core.Mutable().TextureScope().IsUsed(tex.coreTexture.TrackingData().Index()) {
+				t.Error("rejected copy recorded the texture in the command buffer tracker")
+			}
+			if enc.core.Mutable().BufferScope().IsUsed(buf.core.TrackingData().Index()) {
+				t.Error("rejected copy recorded the buffer in the command buffer tracker")
+			}
+			if got := len(enc.trackedRefs); got != 0 {
+				t.Errorf("rejected copy retained %d refs, want 0", got)
+			}
+			if len(enc.usedTextures) != 0 || len(enc.usedBuffers) != 0 {
+				t.Errorf("rejected copy changed submit validation sets: textures=%d buffers=%d",
+					len(enc.usedTextures), len(enc.usedBuffers))
+			}
+			if _, err := enc.Finish(); err == nil {
+				t.Fatal("Finish succeeded after a copy onto itself")
+			}
+		})
 	}
 }
 
@@ -442,10 +453,10 @@ func TestCopyBufferToBufferRecordsBothUsages(t *testing.T) {
 	}
 	defer cb.Release()
 
-	if got := cb.core.BufferScope().GetUsage(src.core.TrackingData().Index()); got != track.BufferUsesCopySrc {
+	if got := cb.core.BufferScope().EndUsage(src.core.TrackingData().Index()); got != track.BufferUsesCopySrc {
 		t.Errorf("source usage = %v, want %v", got, track.BufferUsesCopySrc)
 	}
-	if got := cb.core.BufferScope().GetUsage(dst.core.TrackingData().Index()); got != track.BufferUsesCopyDst {
+	if got := cb.core.BufferScope().EndUsage(dst.core.TrackingData().Index()); got != track.BufferUsesCopyDst {
 		t.Errorf("destination usage = %v, want %v", got, track.BufferUsesCopyDst)
 	}
 }
@@ -463,16 +474,14 @@ func createCopyScopeBuffer(t *testing.T, device *Device, label string) *Buffer {
 	return buffer
 }
 
-func mustSetTextureScopeUsage(t *testing.T, enc *CommandEncoder, texture *Texture, usage track.TextureUses) {
-	t.Helper()
-	if err := enc.core.Mutable().TextureScope().SetUsage(texture.coreTexture.TrackingData().Index(), usage); err != nil {
-		t.Fatalf("seed texture scope: %v", err)
-	}
+// seedTextureUsage simulates an earlier command of the encoder that left the
+// texture in usage.
+func seedTextureUsage(enc *CommandEncoder, texture *Texture, usage track.TextureUses) {
+	enc.core.Mutable().TextureScope().SetSingle(texture.coreTexture.TrackingData().Index(), usage)
 }
 
-func mustSetBufferScopeUsage(t *testing.T, enc *CommandEncoder, buffer *Buffer, usage track.BufferUses) {
-	t.Helper()
-	if err := enc.core.Mutable().BufferScope().SetUsage(buffer.core.TrackingData().Index(), usage); err != nil {
-		t.Fatalf("seed buffer scope: %v", err)
-	}
+// seedBufferUsage simulates an earlier command of the encoder that left the
+// buffer in usage.
+func seedBufferUsage(enc *CommandEncoder, buffer *Buffer, usage track.BufferUses) {
+	enc.core.Mutable().BufferScope().SetSingle(buffer.core.TrackingData().Index(), usage)
 }

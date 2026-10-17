@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -15,13 +14,14 @@ type delayedCompletionQueue struct {
 	completed uint64
 }
 
-func TestTextureCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
+// TestCopyUsageConflictDoesNotCloneBufferRef checks that a copy rejected by
+// its own usage scope (a buffer copied onto itself) does not retain a
+// reference to the buffer.
+func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 	t.Parallel()
 
 	_, _, device := newTestDeviceWithTracker(t)
 	defer device.Release()
-	texture := createCopyScopeTexture(t, device, "conflicting-copy", TextureUsageCopySrc)
-	defer texture.Release()
 	buffer, err := device.CreateBuffer(&BufferDescriptor{
 		Size:  256,
 		Usage: BufferUsageCopySrc | BufferUsageCopyDst,
@@ -36,10 +36,7 @@ func TestTextureCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
-	if !enc.recordCopyBufferUsages([]copyBufferUsage{{buffer: buffer.core, usage: track.BufferUsesCopySrc}}) {
-		t.Fatal("failed to establish conflicting CopySrc usage")
-	}
-	enc.CopyTextureToBuffer(texture, buffer, nil)
+	enc.CopyBufferToBuffer(buffer, 0, buffer, 128, 64)
 
 	if got := ref.RefCount(); got != 1 {
 		t.Fatalf("failed copy changed buffer refcount to %d, want 1", got)

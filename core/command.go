@@ -98,21 +98,21 @@ func (s CommandEncoderStatus) String() string {
 // This tracks resources used within a command buffer for validation
 // and synchronization purposes.
 type CommandBufferMutable struct {
-	// textureScope tracks per-texture usage within this command buffer
-	// for submit-time barrier generation. When the command buffer is
-	// submitted, this scope is merged into the device-level TextureTracker,
-	// which produces the PendingTransition list for barrier injection.
+	// textureTracker records, for every texture this command buffer uses,
+	// the first usage (start) and the current usage (end). It never reports
+	// usage conflicts: conflicts only exist inside one usage scope (a render
+	// pass or a single copy command), which is validated separately. Between
+	// usage scopes the tracker yields the transitions to record. At submit the
+	// device TextureTracker emits barriers into the start states and adopts
+	// the end states.
 	//
-	// Reference: wgpu-core command/mod.rs CommandBufferMutable.usage_scope.textures
-	textureScope *track.TextureUsageScope
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.trackers.textures
+	textureTracker *track.EncoderTextureTracker
 
-	// bufferScope tracks per-buffer usage within this command buffer
-	// for submit-time barrier generation. When the command buffer is
-	// submitted, this scope is merged into the device-level BufferTracker,
-	// which produces PendingTransitions for buffer barrier injection.
+	// bufferTracker is the buffer counterpart of textureTracker.
 	//
-	// Reference: wgpu-core command/mod.rs CommandBufferMutable.usage_scope.buffers
-	bufferScope *track.BufferUsageScope
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.trackers.buffers
+	bufferTracker *track.EncoderBufferTracker
 
 	// usedBuffers tracks buffer usage within this command buffer.
 	usedBuffers map[*Buffer]BufferUses
@@ -267,10 +267,10 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 		raw:    NewSnatchable(halEncoder),
 		device: d,
 		mutable: &CommandBufferMutable{
-			textureScope: track.NewTextureUsageScope(),
-			bufferScope:  track.NewBufferUsageScope(),
-			usedBuffers:  make(map[*Buffer]BufferUses),
-			usedTextures: make(map[*Texture]TextureUses),
+			textureTracker: track.NewEncoderTextureTracker(),
+			bufferTracker:  track.NewEncoderBufferTracker(),
+			usedBuffers:    make(map[*Buffer]BufferUses),
+			usedTextures:   make(map[*Texture]TextureUses),
 		},
 		label: label,
 	}
@@ -296,10 +296,10 @@ func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, labe
 		raw:    NewSnatchable(halEncoder),
 		device: d,
 		mutable: &CommandBufferMutable{
-			textureScope: track.NewTextureUsageScope(),
-			bufferScope:  track.NewBufferUsageScope(),
-			usedBuffers:  make(map[*Buffer]BufferUses),
-			usedTextures: make(map[*Texture]TextureUses),
+			textureTracker: track.NewEncoderTextureTracker(),
+			bufferTracker:  track.NewEncoderBufferTracker(),
+			usedBuffers:    make(map[*Buffer]BufferUses),
+			usedTextures:   make(map[*Texture]TextureUses),
 		},
 		label: label,
 	}
@@ -362,22 +362,23 @@ func (e *CoreCommandEncoder) Mutable() *CommandBufferMutable {
 	return e.mutable
 }
 
-// TextureScope is a convenience accessor that returns the mutable state's
-// texture scope. Returns nil if mutable is nil.
-func (m *CommandBufferMutable) TextureScope() *track.TextureUsageScope {
+// TextureScope returns the command buffer's texture tracker (first and last
+// usage of every texture, see CommandBufferMutable.textureTracker). Returns
+// nil if mutable is nil.
+func (m *CommandBufferMutable) TextureScope() *track.EncoderTextureTracker {
 	if m == nil {
 		return nil
 	}
-	return m.textureScope
+	return m.textureTracker
 }
 
-// BufferScope is a convenience accessor that returns the mutable state's
-// buffer scope. Returns nil if mutable is nil.
-func (m *CommandBufferMutable) BufferScope() *track.BufferUsageScope {
+// BufferScope returns the command buffer's buffer tracker. Returns nil if
+// mutable is nil.
+func (m *CommandBufferMutable) BufferScope() *track.EncoderBufferTracker {
 	if m == nil {
 		return nil
 	}
-	return m.bufferScope
+	return m.bufferTracker
 }
 
 // Error returns the error that caused the Error state, or nil.
@@ -418,6 +419,15 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		return nil, valErr
 	}
 
+	// The pass is one usage scope: validate its attachments against each
+	// other before anything is recorded. Usages by earlier commands of this
+	// encoder belong to other usage scopes and never conflict with the pass.
+	attachments, scopeErr := buildRenderPassAttachmentScope(desc)
+	if scopeErr != nil {
+		e.setError(scopeErr)
+		return nil, scopeErr
+	}
+
 	// Convert to HAL descriptor
 	halDesc := e.convertRenderPassDescriptor(desc)
 
@@ -432,22 +442,13 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		return nil, err
 	}
 
+	// Transition attachments from their state after earlier commands of this
+	// encoder (e.g. CopyDst after an upload) into their pass state. Must be
+	// recorded before the HAL pass begins.
+	e.transitionRenderPassAttachments(*halEncoder, desc, attachments, guard)
+
 	// Begin HAL render pass
 	halPass := (*halEncoder).BeginRenderPass(halDesc)
-
-	// Populate textureScope from render pass attachments.
-	// Each color attachment is tracked as COLOR_TARGET, depth/stencil as
-	// DEPTH_STENCIL_WRITE (or DEPTH_STENCIL_READ if both aspects read-only),
-	// and resolve targets as COLOR_TARGET.
-	//
-	// WebGPU spec: usage conflict (e.g. COLOR_TARGET + RESOURCE on same texture)
-	// is a validation error that should prevent the render pass from being used.
-	//
-	// Reference: wgpu-core command/render.rs RenderPassInfo::finish (scope merge)
-	if conflictErr := e.populateTextureScope(desc); conflictErr != nil {
-		e.setError(conflictErr)
-		return nil, conflictErr
-	}
 
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
@@ -457,6 +458,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		encoder:     e,
 		device:      e.device,
 		passContext: passCtx,
+		bufferScope: track.NewBufferUsageScope(),
 	}
 	e.mutable.activePass = pass
 
@@ -481,6 +483,21 @@ func (e *CoreCommandEncoder) EndRenderPass(pass *CoreRenderPassEncoder) error {
 	}
 
 	// End HAL render pass (already called by CoreRenderPassEncoder.End())
+
+	// Apply the pass's buffer usage scope (vertex/index buffers) to the
+	// command buffer tracker so later commands and the submit-time merge see
+	// the correct current state.
+	//
+	// Known gap: Rust wgpu-core records the transitions returned here into a
+	// separate "transit" command buffer inserted BEFORE the pass (barriers
+	// cannot be recorded inside a pass). That requires routing render passes
+	// through the multi-CB path (OpenPass/CloseAndPushFront), which the public
+	// render pass does not use yet, so intra-encoder transitions of buffers
+	// first bound inside a pass are not recorded. The first use of a buffer in
+	// the command buffer is still covered by the submit-time barrier.
+	if e.mutable.bufferTracker != nil {
+		_ = e.mutable.bufferTracker.SetFromScope(pass.bufferScope)
+	}
 
 	// Return to recording state
 	e.status.Store(int32(CommandEncoderStatusRecording))
@@ -952,50 +969,51 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 	return halDesc
 }
 
-// populateTextureScope records texture usage from the render pass descriptor
-// into the command buffer's textureScope. Each attachment's parent texture
-// is tracked with the appropriate usage flags for submit-time barrier generation.
-//
-// This mirrors Rust wgpu-core's RenderPassInfo::finish() which calls
-// scope.textures.merge_single(texture, selector, usage) for each render attachment.
-//
-// Returns a validation error if incompatible usages are detected (e.g., a texture
-// used as both COLOR_TARGET and RESOURCE in the same render pass). This implements
-// WebGPU spec: "A texture subresource MUST NOT be used as both a writable attachment
-// and any other usage in the same render pass."
-//
-// Reference: wgpu-core command/render.rs RenderPassInfo::check_valid
-func (e *CoreCommandEncoder) populateTextureScope(desc *RenderPassDescriptor) error {
-	if e.mutable == nil || e.mutable.textureScope == nil || desc == nil {
-		return nil
-	}
-
-	// Track color attachments and their resolve targets as COLOR_TARGET.
-	for i := range desc.ColorAttachments {
-		ca := &desc.ColorAttachments[i]
-		if err := trackViewUsage(e.mutable.textureScope, ca.View, track.TextureUsesColorTarget); err != nil {
-			return fmt.Errorf("color attachment %d: %w", i, err)
-		}
-		if err := trackViewUsage(e.mutable.textureScope, ca.ResolveTarget, track.TextureUsesColorTarget); err != nil {
-			return fmt.Errorf("resolve target %d: %w", i, err)
-		}
-	}
-
-	// Track depth/stencil attachment.
-	if desc.DepthStencilAttachment != nil {
-		usage := depthStencilUsage(desc.DepthStencilAttachment)
-		if err := trackViewUsage(e.mutable.textureScope, desc.DepthStencilAttachment.View, usage); err != nil {
-			return fmt.Errorf("depth/stencil attachment: %w", err)
-		}
-	}
-
-	return nil
+// renderPassAttachmentScope is the texture part of one render pass's usage
+// scope, built from the pass attachments, plus the attachment views keyed by
+// tracker index so transitions can be resolved to HAL textures.
+type renderPassAttachmentScope struct {
+	scope *track.TextureUsageScope
+	views map[track.TrackerIndex]*TextureView
 }
 
-// trackViewUsage records a texture view's parent texture in the given scope
-// with the specified usage. Returns nil if the view is nil, has no parent,
-// or has no valid tracker index.
-func trackViewUsage(scope *track.TextureUsageScope, view *TextureView, usage track.TextureUses) error {
+// buildRenderPassAttachmentScope builds the usage scope of a render pass from
+// its attachments: color attachments and resolve targets as COLOR_TARGET,
+// the depth/stencil attachment as DEPTH_STENCIL_WRITE (or _READ when both
+// aspects are read-only).
+//
+// A render pass is ONE usage scope: incompatible usages of the same texture
+// inside this pass (for example the same texture as color and depth/stencil
+// attachment) are a validation error. Usages by earlier commands of the
+// encoder are a different usage scope and are not checked here.
+//
+// Reference: wgpu-core command/render.rs RenderPassInfo::start
+// (scope.textures.merge_single for each attachment)
+func buildRenderPassAttachmentScope(desc *RenderPassDescriptor) (*renderPassAttachmentScope, error) {
+	pass := &renderPassAttachmentScope{
+		scope: track.NewTextureUsageScope(),
+		views: make(map[track.TrackerIndex]*TextureView, len(desc.ColorAttachments)+1),
+	}
+	for i := range desc.ColorAttachments {
+		ca := &desc.ColorAttachments[i]
+		if err := pass.add(ca.View, track.TextureUsesColorTarget); err != nil {
+			return nil, fmt.Errorf("color attachment %d: %w", i, err)
+		}
+		if err := pass.add(ca.ResolveTarget, track.TextureUsesColorTarget); err != nil {
+			return nil, fmt.Errorf("resolve target %d: %w", i, err)
+		}
+	}
+	if ds := desc.DepthStencilAttachment; ds != nil {
+		if err := pass.add(ds.View, depthStencilUsage(ds)); err != nil {
+			return nil, fmt.Errorf("depth/stencil attachment: %w", err)
+		}
+	}
+	return pass, nil
+}
+
+// add merges one attachment view into the pass scope. Views without a parent
+// texture or without a valid tracker index are not tracked.
+func (p *renderPassAttachmentScope) add(view *TextureView, usage track.TextureUses) error {
 	if view == nil || view.Parent == nil {
 		return nil
 	}
@@ -1003,7 +1021,52 @@ func trackViewUsage(scope *track.TextureUsageScope, view *TextureView, usage tra
 	if td == nil || !td.Index().IsValid() {
 		return nil
 	}
-	return scope.SetUsage(td.Index(), usage)
+	if err := p.scope.SetUsage(td.Index(), usage); err != nil {
+		return err
+	}
+	if _, seen := p.views[td.Index()]; !seen {
+		p.views[td.Index()] = view
+	}
+	return nil
+}
+
+// transitionRenderPassAttachments applies the pass's attachment scope to the
+// command buffer tracker and records the resulting transitions on the HAL
+// encoder. It must run before the HAL render pass begins: barriers cannot be
+// recorded inside a render pass.
+//
+// Reference: wgpu-core command/render.rs (pass scope merged into the command
+// buffer tracker, barriers recorded ahead of the pass)
+func (e *CoreCommandEncoder) transitionRenderPassAttachments(
+	halEncoder hal.CommandEncoder,
+	desc *RenderPassDescriptor,
+	pass *renderPassAttachmentScope,
+	guard SnatchGuard,
+) {
+	if e.mutable == nil || e.mutable.textureTracker == nil {
+		return
+	}
+	transitions := e.mutable.textureTracker.SetFromScope(pass.scope)
+	if len(transitions) == 0 {
+		return
+	}
+	barriers := make([]hal.TextureBarrier, 0, len(transitions))
+	for _, transition := range transitions {
+		view := pass.views[transition.Index]
+		var halTexture hal.Texture
+		if desc.ResolveAttachmentTexture != nil {
+			halTexture = desc.ResolveAttachmentTexture(view)
+		} else {
+			halTexture = view.Parent.Raw(guard)
+		}
+		if halTexture == nil {
+			continue
+		}
+		barriers = append(barriers, transition.IntoHAL(halTexture))
+	}
+	if len(barriers) > 0 {
+		halEncoder.TransitionTextures(barriers)
+	}
 }
 
 // depthStencilUsage returns the appropriate texture usage for a depth/stencil
@@ -1018,61 +1081,30 @@ func depthStencilUsage(ds *RenderPassDepthStencilAttachment) track.TextureUses {
 	return track.TextureUsesDepthStencilWrite
 }
 
-// RecordBufferUsage records a buffer usage in the command buffer's buffer scope.
-// This is called by pass encoders and copy commands to track which buffers are
-// used and how, enabling submit-time barrier generation.
+// RecordTextureTransition records a texture barrier the caller has already
+// encoded explicitly on the HAL encoder (public CommandEncoder.
+// TransitionTextures). The command buffer tracker adopts newUsage as the
+// texture's current state, so later commands transition from the state the
+// explicit barrier left the texture in instead of repeating that barrier.
+// If this is the texture's first use in the command buffer, oldUsage is the
+// state the command buffer expects on entry (its start state).
 //
-// The buffer must have valid TrackingData with a valid TrackerIndex. Buffers
-// without valid tracking data are silently skipped (e.g., ID-based API buffers).
+// Textures without valid tracking data are skipped.
 //
-// Returns an error if the buffer already has an incompatible usage in this
-// command buffer (e.g., STORAGE_WRITE and UNIFORM on the same buffer).
-//
-// Reference: wgpu-core command/render.rs merge_bind_group (buffer usage merge)
-func (e *CoreCommandEncoder) RecordBufferUsage(buffer *Buffer, usage track.BufferUses) error {
-	if e.mutable == nil || e.mutable.bufferScope == nil || buffer == nil {
-		return nil
-	}
-	td := buffer.TrackingData()
-	if td == nil || !td.Index().IsValid() {
-		return nil
-	}
-	return e.mutable.bufferScope.SetUsage(td.Index(), usage)
-}
-
-// RecordTextureUsage records a texture usage in the command buffer's texture
-// scope. This is called by commands that use a texture without going through a
-// texture view, such as copy commands.
-//
-// Textures without valid tracking data are silently skipped. Returns an error
-// if the texture already has an incompatible usage in this command buffer.
-//
-// Reference: wgpu-core command/transfer.rs copy texture usage validation
-func (e *CoreCommandEncoder) RecordTextureUsage(texture *Texture, usage track.TextureUses) error {
-	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
-		return nil
-	}
-	td := texture.TrackingData()
-	if td == nil || !td.Index().IsValid() {
-		return nil
-	}
-	return e.mutable.textureScope.SetUsage(td.Index(), usage)
-}
-
-// ReplaceTextureUsage records the state after an explicit texture transition.
-// Unlike RecordTextureUsage, it replaces an incompatible earlier state because
-// the caller has already encoded the barrier between those states.
-//
-// Reference: wgpu-core command/transfer.rs explicit texture transitions
-func (e *CoreCommandEncoder) ReplaceTextureUsage(texture *Texture, usage track.TextureUses) {
-	if e.mutable == nil || e.mutable.textureScope == nil || texture == nil {
+// Reference: wgpu-core command/transition_resources.rs (explicit transitions
+// go through the command buffer tracker)
+func (e *CoreCommandEncoder) RecordTextureTransition(texture *Texture, oldUsage, newUsage gputypes.TextureUsage) {
+	if e.mutable == nil || e.mutable.textureTracker == nil || texture == nil {
 		return
 	}
 	td := texture.TrackingData()
 	if td == nil || !td.Index().IsValid() {
 		return
 	}
-	e.mutable.textureScope.ReplaceUsage(td.Index(), usage)
+	depthStencil := texture.Format().IsDepthStencil()
+	e.mutable.textureTracker.RecordTransition(td.Index(),
+		track.TextureUsesFromUsage(oldUsage, depthStencil),
+		track.TextureUsesFromUsage(newUsage, depthStencil))
 }
 
 // =============================================================================
@@ -1092,6 +1124,15 @@ type RenderPassDescriptor struct {
 
 	// TimestampWrites are timestamp queries to write at pass boundaries (optional).
 	TimestampWrites *RenderPassTimestampWrites
+
+	// ResolveAttachmentTexture returns the HAL texture an attachment view
+	// renders into. It is used for the transitions recorded before the pass
+	// begins (for example CopyDst -> ColorTarget when an earlier command of
+	// the same encoder uploaded into the attachment). Optional: when nil,
+	// the view parent's own HAL handle (Texture.Raw) is used. The public API
+	// sets it because a borrowed surface texture shares one core Texture
+	// across all swapchain images.
+	ResolveAttachmentTexture func(view *TextureView) hal.Texture
 }
 
 // RenderPassColorAttachment describes a color attachment.
@@ -1183,11 +1224,34 @@ type CoreRenderPassEncoder struct {
 	//
 	// Matches Rust wgpu-core command/render.rs RenderPassInfo.context.
 	passContext *RenderPassContext
+
+	// bufferScope is this render pass's buffer usage scope (vertex and index
+	// buffers). Conflicts are validated inside the pass only; on End the
+	// scope is applied to the command buffer's tracker.
+	//
+	// Reference: wgpu-core command/render.rs State.scope (UsageScope per pass)
+	bufferScope *track.BufferUsageScope
 }
 
 // RawPass returns the underlying HAL render pass encoder for direct HAL access.
 func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
 	return p.raw
+}
+
+// recordBufferUsage records a buffer usage in this render pass's usage scope.
+// Buffers without valid tracking data are skipped. Returns an error if the
+// buffer already has an incompatible usage in this pass.
+//
+// Reference: wgpu-core command/render.rs (scope.buffers.merge_single)
+func (p *CoreRenderPassEncoder) recordBufferUsage(buffer *Buffer, usage track.BufferUses) error {
+	if p.bufferScope == nil || buffer == nil {
+		return nil
+	}
+	td := buffer.TrackingData()
+	if td == nil || !td.Index().IsValid() {
+		return nil
+	}
+	return p.bufferScope.SetUsage(td.Index(), usage)
 }
 
 // SetPipeline sets the render pipeline.
@@ -1224,10 +1288,10 @@ func (p *CoreRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, off
 	if p.ended {
 		return
 	}
-	// Record buffer usage in the command buffer's buffer scope for
-	// submit-time barrier generation. Vertex buffers are read-only.
+	// Record the usage in this pass's usage scope (vertex buffers are
+	// read-only); it reaches the command buffer tracker on End.
 	if buffer != nil {
-		if err := p.encoder.RecordBufferUsage(buffer, track.BufferUsesVertex); err != nil {
+		if err := p.recordBufferUsage(buffer, track.BufferUsesVertex); err != nil {
 			p.encoder.SetError(fmt.Errorf("SetVertexBuffer slot %d: %w", slot, err))
 		}
 	}
@@ -1246,10 +1310,10 @@ func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.I
 	if p.ended {
 		return
 	}
-	// Record buffer usage in the command buffer's buffer scope for
-	// submit-time barrier generation. Index buffers are read-only.
+	// Record the usage in this pass's usage scope (index buffers are
+	// read-only); it reaches the command buffer tracker on End.
 	if buffer != nil {
-		if err := p.encoder.RecordBufferUsage(buffer, track.BufferUsesIndex); err != nil {
+		if err := p.recordBufferUsage(buffer, track.BufferUsesIndex); err != nil {
 			p.encoder.SetError(fmt.Errorf("SetIndexBuffer: %w", err))
 		}
 	}
@@ -1561,28 +1625,29 @@ func (cb *CoreCommandBuffer) Label() string {
 	return cb.label
 }
 
-// TextureScope returns the texture usage scope that was accumulated during
-// encoding. This scope is merged into the device-level TextureTracker at
-// submit time to produce barriers.
+// TextureScope returns the command buffer's texture tracker: the first and
+// the last usage of every texture the command buffer uses. At submit time it
+// is merged into the device-level TextureTracker (DeviceTracker.
+// MergeTextureScope), which emits barriers into the first usages and adopts
+// the last usages.
 //
-// Returns nil if the command buffer has no texture scope (e.g. ID-based API).
-func (cb *CoreCommandBuffer) TextureScope() *track.TextureUsageScope {
+// Returns nil if the command buffer has no tracker (e.g. ID-based API).
+func (cb *CoreCommandBuffer) TextureScope() *track.EncoderTextureTracker {
 	if cb.mutable == nil {
 		return nil
 	}
-	return cb.mutable.textureScope
+	return cb.mutable.textureTracker
 }
 
-// BufferScope returns the buffer usage scope that was accumulated during
-// encoding. This scope is merged into the device-level BufferTracker at
-// submit time to produce barriers.
+// BufferScope returns the command buffer's buffer tracker (first and last
+// usage of every buffer). See TextureScope.
 //
-// Returns nil if the command buffer has no buffer scope (e.g. ID-based API).
-func (cb *CoreCommandBuffer) BufferScope() *track.BufferUsageScope {
+// Returns nil if the command buffer has no tracker (e.g. ID-based API).
+func (cb *CoreCommandBuffer) BufferScope() *track.EncoderBufferTracker {
 	if cb.mutable == nil {
 		return nil
 	}
-	return cb.mutable.bufferScope
+	return cb.mutable.bufferTracker
 }
 
 // =============================================================================

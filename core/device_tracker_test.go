@@ -3,6 +3,8 @@
 package core
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -65,8 +67,8 @@ func TestDeviceTracker_MergeTextureScope_Transition(t *testing.T) {
 	dt.InsertTexture(idx, track.TextureUsesColorTarget)
 
 	// Command buffer uses it as copy source
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx, track.TextureUsesCopySrc)
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx, track.TextureUsesCopySrc)
 
 	transitions := dt.MergeTextureScope(scope)
 
@@ -89,8 +91,8 @@ func TestDeviceTracker_MergeTextureScope_NoTransition(t *testing.T) {
 
 	// Same ordered state
 	dt.InsertTexture(idx, track.TextureUsesResource)
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx, track.TextureUsesResource)
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx, track.TextureUsesResource)
 
 	transitions := dt.MergeTextureScope(scope)
 	if len(transitions) != 0 {
@@ -154,10 +156,10 @@ func TestDeviceTracker_MultipleTextures(t *testing.T) {
 	dt.InsertTexture(idx1, track.TextureUsesResource)
 	dt.InsertTexture(idx2, track.TextureUsesResource)
 
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx0, track.TextureUsesCopySrc)     // transition needed
-	_ = scope.SetUsage(idx1, track.TextureUsesResource)    // same ordered, skip
-	_ = scope.SetUsage(idx2, track.TextureUsesColorTarget) // transition needed
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx0, track.TextureUsesCopySrc)     // transition needed
+	scope.SetSingle(idx1, track.TextureUsesResource)    // same ordered, skip
+	scope.SetSingle(idx2, track.TextureUsesColorTarget) // transition needed
 
 	transitions := dt.MergeTextureScope(scope)
 
@@ -259,8 +261,8 @@ func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
 	dt.InsertTexture(idx, track.TextureUsesColorTarget)
 
 	// Step 2: Command buffer records ColorTarget usage
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx, track.TextureUsesColorTarget)
 
 	// Step 3: Merge — same ordered state, no barrier needed
 	transitions := dt.MergeTextureScope(scope)
@@ -295,8 +297,8 @@ func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
 // 1. Create device with DeviceTracker
 // 2. Allocate a texture with TrackerIndex
 // 3. Insert texture into device tracker (initial state)
-// 4. Build a TextureUsageScope (simulating populateTextureScope)
-// 5. Merge scope into device tracker
+// 4. Build a command buffer tracker (simulating a render pass attachment)
+// 5. Merge it into the device tracker
 // 6. Verify transitions are generated when state changes
 func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 	t.Parallel()
@@ -308,8 +310,8 @@ func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 	dt.InsertTexture(idx, track.TextureUsesUninitialized)
 
 	// Command buffer uses it as COLOR_TARGET (render pass attachment).
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx, track.TextureUsesColorTarget)
 
 	// Merge scope — should produce UNINITIALIZED -> COLOR_TARGET transition.
 	transitions := dt.MergeTextureScope(scope)
@@ -329,8 +331,8 @@ func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 	}
 
 	// Second submit with same usage — no barrier (same ordered state).
-	scope2 := track.NewTextureUsageScope()
-	_ = scope2.SetUsage(idx, track.TextureUsesColorTarget)
+	scope2 := track.NewEncoderTextureTracker()
+	scope2.SetSingle(idx, track.TextureUsesColorTarget)
 	transitions2 := dt.MergeTextureScope(scope2)
 	if len(transitions2) != 0 {
 		t.Errorf("Expected 0 transitions for same ordered state, got %d", len(transitions2))
@@ -352,12 +354,12 @@ func TestDeviceTracker_SubmitFlowMultipleCBs(t *testing.T) {
 	dt.InsertTexture(idxB, track.TextureUsesResource)
 
 	// First CB: uses A as ColorTarget
-	scope1 := track.NewTextureUsageScope()
-	_ = scope1.SetUsage(idxA, track.TextureUsesColorTarget)
+	scope1 := track.NewEncoderTextureTracker()
+	scope1.SetSingle(idxA, track.TextureUsesColorTarget)
 
 	// Second CB: uses B as CopyDst
-	scope2 := track.NewTextureUsageScope()
-	_ = scope2.SetUsage(idxB, track.TextureUsesCopyDst)
+	scope2 := track.NewEncoderTextureTracker()
+	scope2.SetSingle(idxB, track.TextureUsesCopyDst)
 
 	// Merge both scopes (simulating Submit loop)
 	trans1 := dt.MergeTextureScope(scope1)
@@ -388,7 +390,7 @@ func TestDeviceTracker_SubmitFlowEmptyScope(t *testing.T) {
 	idx := track.TrackerIndex(0)
 	dt.InsertTexture(idx, track.TextureUsesColorTarget)
 
-	scope := track.NewTextureUsageScope()
+	scope := track.NewEncoderTextureTracker()
 	if !scope.IsEmpty() {
 		t.Fatal("New scope should be empty")
 	}
@@ -414,8 +416,8 @@ func TestDeviceTracker_SubmitFlowNewTextureAutoInsert(t *testing.T) {
 	idx := track.TrackerIndex(42)
 
 	// Scope references a texture not yet tracked
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx, track.TextureUsesColorTarget)
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx, track.TextureUsesColorTarget)
 
 	// Should auto-insert without transition
 	transitions := dt.MergeTextureScope(scope)
@@ -444,9 +446,9 @@ func TestDeviceTracker_BarrierCBFromTransitions_FullFlow(t *testing.T) {
 	dt.InsertTexture(idx0, track.TextureUsesResource)
 	dt.InsertTexture(idx1, track.TextureUsesResource)
 
-	scope := track.NewTextureUsageScope()
-	_ = scope.SetUsage(idx0, track.TextureUsesColorTarget) // Resource->ColorTarget
-	_ = scope.SetUsage(idx1, track.TextureUsesResource)    // same, skip
+	scope := track.NewEncoderTextureTracker()
+	scope.SetSingle(idx0, track.TextureUsesColorTarget) // Resource->ColorTarget
+	scope.SetSingle(idx1, track.TextureUsesResource)    // same, skip
 
 	transitions := dt.MergeTextureScope(scope)
 	if len(transitions) != 1 {
@@ -595,8 +597,8 @@ func TestDeviceTracker_MergeBufferScope_Transition(t *testing.T) {
 	dt.InsertBuffer(idx, track.BufferUsesVertex)
 
 	// Command buffer uses it as copy destination
-	scope := track.NewBufferUsageScope()
-	_ = scope.SetUsage(idx, track.BufferUsesCopyDst)
+	scope := track.NewEncoderBufferTracker()
+	scope.SetSingle(idx, track.BufferUsesCopyDst)
 
 	transitions := dt.MergeBufferScope(scope)
 
@@ -618,8 +620,8 @@ func TestDeviceTracker_MergeBufferScope_NoTransition_SameState(t *testing.T) {
 	idx := track.TrackerIndex(0)
 
 	dt.InsertBuffer(idx, track.BufferUsesVertex)
-	scope := track.NewBufferUsageScope()
-	_ = scope.SetUsage(idx, track.BufferUsesVertex)
+	scope := track.NewEncoderBufferTracker()
+	scope.SetSingle(idx, track.BufferUsesVertex)
 
 	transitions := dt.MergeBufferScope(scope)
 	if len(transitions) != 0 {
@@ -633,8 +635,8 @@ func TestDeviceTracker_MergeBufferScope_NewBufferAutoInsert(t *testing.T) {
 	dt := NewDeviceTracker()
 	idx := track.TrackerIndex(42)
 
-	scope := track.NewBufferUsageScope()
-	_ = scope.SetUsage(idx, track.BufferUsesUniform)
+	scope := track.NewEncoderBufferTracker()
+	scope.SetSingle(idx, track.BufferUsesUniform)
 
 	transitions := dt.MergeBufferScope(scope)
 	if len(transitions) != 0 {
@@ -707,8 +709,8 @@ func TestSubmit_MergesBufferScope(t *testing.T) {
 	dt.InsertBuffer(idx, track.BufferUsesVertex)
 
 	// Scope: now used as copy source
-	scope := track.NewBufferUsageScope()
-	_ = scope.SetUsage(idx, track.BufferUsesCopySrc)
+	scope := track.NewEncoderBufferTracker()
+	scope.SetSingle(idx, track.BufferUsesCopySrc)
 
 	transitions := dt.MergeBufferScope(scope)
 	if len(transitions) != 1 {
@@ -731,8 +733,8 @@ func TestSubmit_BufferTransition_GeneratesBarrier(t *testing.T) {
 
 	dt.InsertBuffer(idx, track.BufferUsesVertex)
 
-	scope := track.NewBufferUsageScope()
-	_ = scope.SetUsage(idx, track.BufferUsesCopyDst)
+	scope := track.NewEncoderBufferTracker()
+	scope.SetSingle(idx, track.BufferUsesCopyDst)
 
 	transitions := dt.MergeBufferScope(scope)
 	if len(transitions) != 1 {
@@ -814,48 +816,164 @@ func TestBarrierCBFromAllTransitions_BothTypes(t *testing.T) {
 // Task #14: Usage Conflict Validation Tests
 // =============================================================================
 
-// TestBeginRenderPass_TextureConflict_Error verifies that using a texture as
-// both COLOR_TARGET and RESOURCE in the same render pass produces an error.
+// TestBeginRenderPass_TextureConflict_Error verifies that one texture used
+// with incompatible usages INSIDE one render pass (here as color attachment
+// and as depth/stencil attachment) is a usage-scope conflict, detected
+// before the HAL render pass begins.
 func TestBeginRenderPass_TextureConflict_Error(t *testing.T) {
 	t.Parallel()
 
 	halDevice := &mockHALDevice{}
 	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 
-	// Create a texture with a valid tracker index
 	alloc := device.TrackerIndices().Textures()
 	td := track.NewTrackingData(alloc)
-
 	tex := &Texture{
 		raw:          NewSnatchable[hal.Texture](nil),
 		device:       device,
 		trackingData: td,
 	}
-
 	view := &TextureView{Parent: tex}
 
-	enc, err := device.CreateCommandEncoder("test")
+	halEncoder := &passOrderEncoder{}
+	enc, err := device.CreateCommandEncoderWithHAL(halEncoder, "test")
 	if err != nil {
-		t.Fatalf("CreateCommandEncoder: %v", err)
+		t.Fatalf("CreateCommandEncoderWithHAL: %v", err)
 	}
 
-	// Set up a scope conflict: try to use the same texture as COLOR_TARGET
-	// through two different color attachments, which is actually allowed
-	// (same exclusive usage). So instead, manually set up the scope first.
-	// First, mark the texture as RESOURCE in the scope.
-	enc.RecordBufferUsage(nil, 0) // no-op, just to access mutable
-	_ = enc.Mutable().TextureScope().SetUsage(td.Index(), track.TextureUsesResource)
-
-	// Now BeginRenderPass tries to add COLOR_TARGET to the same texture.
-	// This should produce a conflict error (RESOURCE + COLOR_TARGET).
 	desc := &RenderPassDescriptor{
 		ColorAttachments: []RenderPassColorAttachment{
 			{View: view, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
 		},
+		DepthStencilAttachment: &RenderPassDepthStencilAttachment{
+			View:         view,
+			DepthLoadOp:  gputypes.LoadOpClear,
+			DepthStoreOp: gputypes.StoreOpStore,
+		},
 	}
 	_, passErr := enc.BeginRenderPass(desc)
-	if passErr == nil {
-		t.Fatal("Expected texture usage conflict error, got nil")
+	var conflict *track.TextureUsageConflictError
+	if !errors.As(passErr, &conflict) {
+		t.Fatalf("BeginRenderPass = %v, want TextureUsageConflictError", passErr)
+	}
+	if len(halEncoder.events) != 0 {
+		t.Errorf("conflicting pass reached the HAL encoder: %v", halEncoder.events)
+	}
+}
+
+// passOrderEncoder records the order of barrier and render pass calls.
+type passOrderEncoder struct {
+	noopEncoder
+	events   []string
+	barriers []hal.TextureBarrier
+}
+
+func (e *passOrderEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+	e.events = append(e.events, "barrier")
+	e.barriers = append(e.barriers, barriers...)
+}
+
+func (e *passOrderEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	e.events = append(e.events, "begin-pass")
+	return nil
+}
+
+// TestBeginRenderPass_EarlierUsageIsTransitionedNotConflict verifies the
+// WebGPU usage-scope rule for render passes: a texture used differently by
+// an EARLIER command of the encoder (sampled, uploaded, copied) is not a
+// conflict. The attachment is transitioned into COLOR_TARGET, and the
+// barrier is recorded before the HAL render pass begins.
+func TestBeginRenderPass_EarlierUsageIsTransitionedNotConflict(t *testing.T) {
+	t.Parallel()
+
+	for _, earlier := range []track.TextureUses{
+		track.TextureUsesResource,
+		track.TextureUsesCopyDst,
+		track.TextureUsesCopySrc,
+	} {
+		halDevice := &mockHALDevice{}
+		device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+		td := track.NewTrackingData(device.TrackerIndices().Textures())
+		tex := &Texture{
+			raw:          NewSnatchable[hal.Texture](&noopTexture{}),
+			device:       device,
+			trackingData: td,
+		}
+
+		halEncoder := &passOrderEncoder{}
+		enc, err := device.CreateCommandEncoderWithHAL(halEncoder, "test")
+		if err != nil {
+			t.Fatalf("CreateCommandEncoderWithHAL: %v", err)
+		}
+		enc.Mutable().TextureScope().SetSingle(td.Index(), earlier)
+
+		pass, err := enc.BeginRenderPass(&RenderPassDescriptor{
+			ColorAttachments: []RenderPassColorAttachment{
+				{View: &TextureView{Parent: tex}, LoadOp: gputypes.LoadOpLoad, StoreOp: gputypes.StoreOpStore},
+			},
+		})
+		if err != nil {
+			t.Fatalf("earlier %v: BeginRenderPass: %v", earlier, err)
+		}
+		if got := strings.Join(halEncoder.events, ","); got != "barrier,begin-pass" {
+			t.Errorf("earlier %v: HAL call order = %q, want barrier before begin-pass", earlier, got)
+		}
+		if len(halEncoder.barriers) != 1 ||
+			halEncoder.barriers[0].Usage.OldUsage != earlier.ToTextureUsage() ||
+			halEncoder.barriers[0].Usage.NewUsage != gputypes.TextureUsageRenderAttachment {
+			t.Errorf("earlier %v: barriers = %+v, want %v -> RenderAttachment", earlier, halEncoder.barriers, earlier)
+		}
+		if err := pass.End(); err != nil {
+			t.Fatalf("End: %v", err)
+		}
+		tracker := enc.Mutable().TextureScope()
+		if got := tracker.StartUsage(td.Index()); got != earlier {
+			t.Errorf("start usage = %v, want %v", got, earlier)
+		}
+		if got := tracker.EndUsage(td.Index()); got != track.TextureUsesColorTarget {
+			t.Errorf("end usage = %v, want ColorTarget", got)
+		}
+	}
+}
+
+// TestRenderPass_VertexBufferScopeIsPerPass verifies that vertex/index buffer
+// usages are validated per pass and applied to the command buffer tracker
+// when the pass ends, so a later pass (or a copy) can use the buffer
+// differently.
+func TestRenderPass_VertexBufferScopeIsPerPass(t *testing.T) {
+	t.Parallel()
+
+	halDevice := &mockHALDevice{}
+	device := NewDevice(halDevice, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	buf := NewBuffer(mockBuffer{}, device, gputypes.BufferUsageVertex|gputypes.BufferUsageCopyDst, 256, "vb")
+	t.Cleanup(buf.Destroy)
+	idx := buf.TrackingData().Index()
+
+	enc, err := device.CreateCommandEncoderWithHAL(&passOrderEncoder{}, "test")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoderWithHAL: %v", err)
+	}
+	// An earlier copy wrote the buffer.
+	enc.Mutable().BufferScope().SetSingle(idx, track.BufferUsesCopyDst)
+
+	pass, err := enc.BeginRenderPass(&RenderPassDescriptor{})
+	if err != nil {
+		t.Fatalf("BeginRenderPass: %v", err)
+	}
+	pass.SetVertexBuffer(0, buf, 0)
+	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 0)
+	if err := pass.End(); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if encErr := enc.Error(); encErr != nil {
+		t.Fatalf("encoder error after vertex+index use of a previously copied buffer: %v", encErr)
+	}
+	tracker := enc.Mutable().BufferScope()
+	if got := tracker.StartUsage(idx); got != track.BufferUsesCopyDst {
+		t.Errorf("start usage = %v, want CopyDst", got)
+	}
+	if got := tracker.EndUsage(idx); got != track.BufferUsesVertex|track.BufferUsesIndex {
+		t.Errorf("end usage = %v, want Vertex|Index", got)
 	}
 }
 

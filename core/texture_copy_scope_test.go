@@ -9,40 +9,89 @@ import (
 	"github.com/gogpu/wgpu/core/track"
 )
 
-func TestCoreCommandEncoderRecordTextureUsage(t *testing.T) {
+// TestCoreCommandEncoderRecordTextureTransition verifies that an explicit
+// barrier updates the command buffer tracker: the first explicit barrier on a
+// texture defines its start state (the barrier's old usage), every barrier
+// moves its end state.
+func TestCoreCommandEncoderRecordTextureTransition(t *testing.T) {
 	t.Parallel()
 
-	device := NewDevice(&mockHALDevice{}, &Adapter{}, 0, gputypes.DefaultLimits(), "copy-scope")
-	texture := NewTexture(
+	device := NewDevice(&mockHALDevice{}, &Adapter{}, 0, gputypes.DefaultLimits(), "explicit-transition")
+	color := NewTexture(
 		mockTexture{}, device,
 		gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension2D,
-		gputypes.TextureUsageCopySrc|gputypes.TextureUsageCopyDst,
+		gputypes.TextureUsageCopySrc|gputypes.TextureUsageRenderAttachment,
 		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
-		1, 1, "copy-texture",
+		1, 1, "color",
 	)
-	encoder, err := device.CreateCommandEncoder("copy-scope")
+	depth := NewTexture(
+		mockTexture{}, device,
+		gputypes.TextureFormatDepth32Float, gputypes.TextureDimension2D,
+		gputypes.TextureUsageCopySrc|gputypes.TextureUsageRenderAttachment,
+		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
+		1, 1, "depth",
+	)
+	encoder, err := device.CreateCommandEncoder("explicit-transition")
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
+	tracker := encoder.Mutable().TextureScope()
 
-	if err := encoder.RecordTextureUsage(texture, track.TextureUsesCopySrc); err != nil {
-		t.Fatalf("RecordTextureUsage: %v", err)
+	encoder.RecordTextureTransition(color, gputypes.TextureUsageRenderAttachment, gputypes.TextureUsageCopySrc)
+	colorIdx := color.TrackingData().Index()
+	if got := tracker.StartUsage(colorIdx); got != track.TextureUsesColorTarget {
+		t.Errorf("color start = %v, want ColorTarget", got)
 	}
-	idx := texture.TrackingData().Index()
-	if got := encoder.Mutable().TextureScope().GetUsage(idx); got != track.TextureUsesCopySrc {
-		t.Fatalf("usage = %v, want CopySrc", got)
+	if got := tracker.EndUsage(colorIdx); got != track.TextureUsesCopySrc {
+		t.Errorf("color end = %v, want CopySrc", got)
 	}
-	if err := encoder.RecordTextureUsage(texture, track.TextureUsesCopyDst); err == nil {
-		t.Fatal("incompatible CopyDst usage succeeded")
+	encoder.RecordTextureTransition(color, gputypes.TextureUsageCopySrc, gputypes.TextureUsageRenderAttachment)
+	if got := tracker.StartUsage(colorIdx); got != track.TextureUsesColorTarget {
+		t.Errorf("color start after second barrier = %v, want unchanged ColorTarget", got)
+	}
+	if got := tracker.EndUsage(colorIdx); got != track.TextureUsesColorTarget {
+		t.Errorf("color end after second barrier = %v, want ColorTarget", got)
 	}
 
-	encoder.ReplaceTextureUsage(texture, track.TextureUsesCopyDst)
-	if got := encoder.Mutable().TextureScope().GetUsage(idx); got != track.TextureUsesCopyDst {
-		t.Fatalf("replacement usage = %v, want CopyDst", got)
+	// RenderAttachment on a depth format is a depth/stencil target.
+	encoder.RecordTextureTransition(depth, 0, gputypes.TextureUsageRenderAttachment)
+	depthIdx := depth.TrackingData().Index()
+	if got := tracker.StartUsage(depthIdx); got != track.TextureUsesDepthStencilWrite {
+		t.Errorf("depth start = %v, want DepthStencilWrite (undefined old usage falls back to new)", got)
+	}
+}
+
+// TestCoreCommandEncoderRecordTextureTransitionGuards verifies that missing
+// state or tracking data is ignored instead of panicking.
+func TestCoreCommandEncoderRecordTextureTransitionGuards(t *testing.T) {
+	t.Parallel()
+
+	encoders := []*CoreCommandEncoder{
+		{},
+		{mutable: &CommandBufferMutable{}},
+		{mutable: &CommandBufferMutable{textureTracker: track.NewEncoderTextureTracker()}},
+	}
+	for _, encoder := range encoders {
+		encoder.RecordTextureTransition(nil, gputypes.TextureUsageCopySrc, gputypes.TextureUsageCopyDst)
 	}
 
-	if err := encoder.RecordTextureUsage(nil, track.TextureUsesCopySrc); err != nil {
-		t.Fatalf("nil texture should be ignored: %v", err)
+	encoder := &CoreCommandEncoder{
+		mutable: &CommandBufferMutable{textureTracker: track.NewEncoderTextureTracker()},
 	}
-	encoder.ReplaceTextureUsage(nil, track.TextureUsesCopySrc)
+	encoder.RecordTextureTransition(&Texture{}, gputypes.TextureUsageCopySrc, gputypes.TextureUsageCopyDst)
+
+	invalidTrackingData := NewTexture(
+		nil, nil,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureDimension2D,
+		gputypes.TextureUsageCopySrc,
+		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
+		1, 1, "invalid-tracking",
+	)
+	t.Cleanup(invalidTrackingData.Destroy)
+	encoder.RecordTextureTransition(invalidTrackingData, gputypes.TextureUsageCopySrc, gputypes.TextureUsageCopyDst)
+
+	if !encoder.mutable.textureTracker.IsEmpty() {
+		t.Fatal("guarded texture transition unexpectedly mutated the tracker")
+	}
 }

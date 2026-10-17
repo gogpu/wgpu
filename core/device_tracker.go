@@ -39,34 +39,39 @@ func (dt *DeviceTracker) Buffers() *track.BufferTracker {
 	return dt.buffers
 }
 
-// MergeTextureScope merges a command buffer's texture usage scope into the
-// device tracker and returns any barriers that need to be emitted.
+// MergeTextureScope merges a command buffer's texture tracker (see
+// CoreCommandBuffer.TextureScope) into the device tracker and returns the
+// barriers that bring each texture from its device state into the state the
+// command buffer first uses it in. Afterwards the device state of every
+// texture is the state the command buffer leaves it in.
 //
 // Each returned TexturePendingTransition must be converted to a
 // hal.TextureBarrier (via IntoHAL) and recorded into a command encoder
 // before the command buffer executes.
 //
 // Reference: wgpu-core device/queue.rs pre_submit_for_command_buffers
-func (dt *DeviceTracker) MergeTextureScope(scope *track.TextureUsageScope) []track.TexturePendingTransition {
-	if scope == nil {
+func (dt *DeviceTracker) MergeTextureScope(cmdTracker *track.EncoderTextureTracker) []track.TexturePendingTransition {
+	if cmdTracker == nil {
 		return nil
 	}
-	return dt.textures.Merge(scope)
+	return dt.textures.MergeEncoder(cmdTracker)
 }
 
-// MergeBufferScope merges a command buffer's buffer usage scope into the
-// device tracker and returns any barriers that need to be emitted.
+// MergeBufferScope merges a command buffer's buffer tracker (see
+// CoreCommandBuffer.BufferScope) into the device tracker and returns the
+// barriers into each buffer's first usage in the command buffer. Afterwards
+// the device state of every buffer is the command buffer's last usage.
 //
 // Each returned PendingTransition must be converted to a hal.BufferBarrier
 // (via IntoHAL) and recorded into a command encoder before the command
 // buffer executes.
 //
 // Reference: wgpu-core device/queue.rs pre_submit_for_command_buffers
-func (dt *DeviceTracker) MergeBufferScope(scope *track.BufferUsageScope) []track.PendingTransition {
-	if scope == nil {
+func (dt *DeviceTracker) MergeBufferScope(cmdTracker *track.EncoderBufferTracker) []track.PendingTransition {
+	if cmdTracker == nil {
 		return nil
 	}
-	return dt.buffers.Merge(scope)
+	return dt.buffers.MergeEncoder(cmdTracker)
 }
 
 // InsertBuffer registers a buffer in the device tracker with its initial usage.

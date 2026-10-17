@@ -122,7 +122,7 @@ func TestInjectTextureBarriers_WithTransition(t *testing.T) {
 	if scope == nil {
 		t.Fatal("textureScope should not be nil")
 	}
-	_ = scope.SetUsage(td.Index(), track.TextureUsesColorTarget)
+	scope.SetSingle(td.Index(), track.TextureUsesColorTarget)
 
 	cb := &CommandBuffer{
 		core:         coreCB,
@@ -173,7 +173,7 @@ func TestInjectTextureBarriers_NoTransitionSameState(t *testing.T) {
 	}
 
 	scope := coreCB.TextureScope()
-	_ = scope.SetUsage(td.Index(), track.TextureUsesResource)
+	scope.SetSingle(td.Index(), track.TextureUsesResource)
 
 	cb := &CommandBuffer{
 		core:         coreCB,
@@ -222,8 +222,8 @@ func TestInjectTextureBarriers_MultipleTextures(t *testing.T) {
 	}
 
 	scope1 := coreCB1.TextureScope()
-	_ = scope1.SetUsage(td1.Index(), track.TextureUsesColorTarget)
-	_ = scope1.SetUsage(td2.Index(), track.TextureUsesResource)
+	scope1.SetSingle(td1.Index(), track.TextureUsesColorTarget)
+	scope1.SetSingle(td2.Index(), track.TextureUsesResource)
 
 	cb1 := &CommandBuffer{
 		core:         coreCB1,
@@ -298,7 +298,7 @@ func TestInjectTextureBarriers_NoEncoderPool(t *testing.T) {
 	}
 
 	scope := coreCB.TextureScope()
-	_ = scope.SetUsage(td.Index(), track.TextureUsesColorTarget)
+	scope.SetSingle(td.Index(), track.TextureUsesColorTarget)
 
 	cb := &CommandBuffer{
 		core:         coreCB,
