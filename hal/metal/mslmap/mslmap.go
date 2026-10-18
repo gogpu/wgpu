@@ -43,27 +43,48 @@ const maxBufferSlot = 255
 // That is the first free slot, directly after the last declared buffer. Rust
 // wgpu-hal picks the slot the same way, after it walks the pipeline layout.
 func Options(module *ir.Module, sizesSlot int) (msl.Options, error) {
+	if sizesSlot < 0 || sizesSlot > maxBufferSlot {
+		return msl.DefaultOptions(), fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
+	}
+	return StageOptions(module, module, sizesSlot)
+}
+
+// StageOptions returns MSL options for module, which naga.ProcessOverrides
+// made from source for one pipeline stage. The resources are numbered from
+// the globals of source, the same way naga numbers the whole module. The
+// specialized module keeps only the globals its entry point uses, so naga's
+// own numbering of it would move the other resources to other slots than the
+// ones the encoder binds.
+//
+// If sizesSlot is negative, the options give no slot to naga's
+// `_buffer_sizes` argument, as msl.DefaultOptions does not; otherwise it is
+// the slot, as for Options.
+func StageOptions(source, module *ir.Module, sizesSlot int) (msl.Options, error) {
 	opts := msl.DefaultOptions()
-	if module == nil {
+	if source == nil || module == nil {
 		return opts, fmt.Errorf("mslmap: nil IR module")
 	}
-	if sizesSlot < 0 || sizesSlot > maxBufferSlot {
+	if sizesSlot > maxBufferSlot {
 		return opts, fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
 	}
 
-	resources, err := autoResourceMap(module)
+	resources, err := autoResourceMap(source)
 	if err != nil {
 		return opts, err
 	}
 
-	slot := uint8(sizesSlot)
+	var sizes *uint8
+	if sizesSlot >= 0 {
+		slot := uint8(sizesSlot)
+		sizes = &slot
+	}
 	perEP := make(map[string]msl.EntryPointResources, len(module.EntryPoints))
 	for i := range module.EntryPoints {
 		// The key is the WGSL entry point name, which is the IR name.
 		// It is not the MSL function name, which naga can rename.
 		perEP[module.EntryPoints[i].Name] = msl.EntryPointResources{
 			Resources:   resources,
-			SizesBuffer: &slot,
+			SizesBuffer: sizes,
 		}
 	}
 	opts.PerEntryPointMap = perEP
@@ -190,7 +211,8 @@ func typeNeedsArrayLength(module *ir.Module, handle ir.TypeHandle) bool {
 	}
 	switch inner := module.Types[handle].Inner.(type) {
 	case ir.ArrayType:
-		return inner.Size.Constant == nil
+		// A size given by an override (Pending) is not runtime-sized.
+		return inner.Size.IsRuntimeSized()
 	case ir.StructType:
 		if len(inner.Members) == 0 {
 			return false

@@ -3,7 +3,6 @@
 package software
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,8 +10,10 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
-	naga "github.com/gogpu/naga"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // ErrComputeRequiresSPIRV indicates that a compute pipeline requires a shader
@@ -227,6 +228,9 @@ func (d *Device) DestroyPipelineLayout(_ hal.PipelineLayout) {}
 // If SPIR-V is provided directly, it is stored as-is.
 // Compilation failure is non-fatal: the module falls back to the existing
 // callback-based shader path (fullscreen blit, vertex buffer draw).
+//
+// A WGSL module with overrides keeps only its IR; every pipeline stage
+// specializes it (specializeStage).
 func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
 	sm := &ShaderModule{desc: desc}
 
@@ -234,17 +238,42 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case len(desc.Source.SPIRV) > 0:
 		sm.spirv = desc.Source.SPIRV
 	case desc.Source.WGSL != "":
-		spirvBytes, err := naga.Compile(desc.Source.WGSL)
-		if err == nil && len(spirvBytes)%4 == 0 {
-			sm.spirv = make([]uint32, len(spirvBytes)/4)
-			for i := range sm.spirv {
-				sm.spirv[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
-			}
+		// Compilation failure is non-fatal — existing draw paths don't need
+		// SPIR-V, so the module then has neither IR nor SPIR-V.
+		sm.irModule, _ = shaderir.LowerValidated(desc.Source.WGSL)
+		if sm.irModule != nil && !shaderir.PerStage(sm.irModule, nil) {
+			sm.spirv, _ = shaderir.SPIRV(sm.irModule)
 		}
-		// Compilation failure is non-fatal — existing draw paths don't need SPIR-V.
 	}
 
 	return sm, nil
+}
+
+// stageModule returns the parsed SPIR-V of one pipeline stage. When the
+// module has overrides or the stage gives pipeline constants, the module's IR
+// is specialized for this stage (Rust wgpu-hal calls process_overrides for
+// every pipeline stage, vulkan/device.rs:804). Otherwise it is the module's
+// own SPIR-V, which is nil if the module has none.
+func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (*shader.Module, error) {
+	if sm.irModule == nil && len(constants) > 0 {
+		return nil, fmt.Errorf("software: pipeline constants need a WGSL shader module that compiles")
+	}
+	if sm.irModule == nil || !shaderir.PerStage(sm.irModule, constants) {
+		return sm.ParsedModule(), nil
+	}
+	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
+	if err != nil {
+		return nil, fmt.Errorf("software: %w", err)
+	}
+	spirv, err := shaderir.SPIRV(module)
+	if err != nil {
+		return nil, fmt.Errorf("software: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
+	}
+	parsed, err := shader.ParseModule(spirv)
+	if err != nil {
+		return nil, fmt.Errorf("software: parse SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
+	}
+	return parsed, nil
 }
 
 // DestroyShaderModule is a no-op.
@@ -252,7 +281,29 @@ func (d *Device) DestroyShaderModule(_ hal.ShaderModule) {}
 
 // CreateRenderPipeline creates a software render pipeline.
 func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return &RenderPipeline{desc: desc}, nil
+	p := &RenderPipeline{desc: desc}
+	if desc == nil {
+		return p, nil
+	}
+	// The HAL render stages carry no pipeline constants yet: overrides take
+	// their defaults.
+	if sm, ok := desc.Vertex.Module.(*ShaderModule); ok && sm != nil {
+		vs, err := stageModule(sm, ir.StageVertex, desc.Vertex.EntryPoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		p.vertex = vs
+	}
+	if desc.Fragment != nil {
+		if sm, ok := desc.Fragment.Module.(*ShaderModule); ok && sm != nil {
+			fs, err := stageModule(sm, ir.StageFragment, desc.Fragment.EntryPoint, nil)
+			if err != nil {
+				return nil, err
+			}
+			p.fragment = fs
+		}
+	}
+	return p, nil
 }
 
 // DestroyRenderPipeline is a no-op.
@@ -269,13 +320,16 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	if !ok || sm == nil {
 		return nil, fmt.Errorf("software: compute pipeline requires a software ShaderModule")
 	}
-	// Verify that SPIR-V is available (ParsedModule will parse on first access).
-	if sm.ParsedModule() == nil {
+	module, err := stageModule(sm, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants)
+	if err != nil {
+		return nil, err
+	}
+	if module == nil {
 		return nil, ErrComputeRequiresSPIRV
 	}
 	return &ComputePipeline{
 		desc:       desc,
-		module:     sm,
+		module:     module,
 		entryPoint: desc.Compute.EntryPoint,
 	}, nil
 }

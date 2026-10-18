@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/glsl"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
@@ -428,11 +429,11 @@ func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {}
 
 // CreateShaderModule creates a shader module.
 func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	// For now, store the source - compilation happens at pipeline creation
-	return &ShaderModule{
-		source: desc.Source,
-		glCtx:  d.ctx.GL(),
-	}, nil
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: shader module descriptor is nil in GLES.CreateShaderModule — core validation gap")
+	}
+	// Lower WGSL to IR now; GLSL is written at pipeline creation.
+	return newShaderModule(desc, d.ctx.GL())
 }
 
 // DestroyShaderModule destroys a shader module.
@@ -470,7 +471,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule.source, desc.Vertex.EntryPoint, layout.bindingMap)
+	// The HAL render stages carry no pipeline constants yet: overrides take
+	// their defaults.
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -611,10 +614,8 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 //
-// TODO(compute-constants): Apply desc.Compute.Constants via naga's
-// pipeline_constants::process_overrides before GLSL emission. Rust wgpu-hal
-// GLES calls naga::back::pipeline_constants::process_overrides() in
-// create_shader (gles/device.rs:226).
+// desc.Compute.Constants are applied by compileWGSLToGLSL
+// (naga.ProcessOverrides before GLSL emission, Rust gles/device.rs:385).
 //
 // TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
 // to naga GLSL options. Rust wgpu-hal sets naga_options.zero_initialize_workgroup_memory
@@ -635,7 +636,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule.source, desc.Compute.EntryPoint, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -912,7 +913,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[g
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, fragmentModule.source, frag.EntryPoint, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

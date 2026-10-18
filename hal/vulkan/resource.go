@@ -7,6 +7,7 @@ package vulkan
 
 import (
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
@@ -139,9 +140,17 @@ func (s *Sampler) NativeHandle() uintptr {
 }
 
 // ShaderModule implements hal.ShaderModule for Vulkan.
+//
+// A module from WGSL without overrides is compiled to one VkShaderModule at
+// creation, and every pipeline uses it. A module with overrides keeps only
+// its IR: every pipeline stage specializes it and compiles a temporary
+// VkShaderModule (Rust wgpu-hal ShaderModule::Raw vs ::Intermediate,
+// vulkan/device.rs:1919-1960).
 type ShaderModule struct {
-	handle vk.ShaderModule
-	device *Device
+	handle   vk.ShaderModule // 0 when the module is compiled per pipeline stage
+	irModule *ir.Module      // lowered WGSL; nil for SPIR-V input
+	label    string
+	device   *Device
 }
 
 // Destroy releases the shader module.
@@ -151,7 +160,8 @@ func (m *ShaderModule) Destroy() {
 	}
 }
 
-// Handle returns the VkShaderModule handle.
+// Handle returns the VkShaderModule handle. It is 0 for a module with
+// overrides, which has a VkShaderModule per pipeline stage instead.
 func (m *ShaderModule) Handle() vk.ShaderModule {
 	return m.handle
 }

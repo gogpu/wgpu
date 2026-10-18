@@ -19,6 +19,7 @@ import (
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/metal/mslmap"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Vertex buffer indices are assigned from the end of the range and count down.
@@ -572,6 +573,24 @@ type compiledLibrary struct {
 	// sizesSlot is the buffer slot that the `_buffer_sizes` argument was
 	// compiled with. It has a meaning only if sizesBindings is not empty.
 	sizesSlot int
+	// specialized is true when the library holds only one entry point, the
+	// shader module specialized for one pipeline stage (librarySpec).
+	specialized bool
+	// workgroupSize is the workgroup size of that entry point when
+	// specialized; otherwise the shader module's sizes apply.
+	workgroupSize [3]uint32
+}
+
+// librarySpec selects what compileLibrary writes: the whole module, or, when
+// the module has overrides or the stage gives pipeline constants, the module
+// specialized for one stage with naga.ProcessOverrides (Rust wgpu-hal
+// metal/device.rs:174, load_shader). The MSL backend no longer resolves
+// override defaults itself, so a module with overrides must be specialized
+// even without constants.
+type librarySpec struct {
+	stage      ir.ShaderStage
+	entryPoint string
+	constants  map[string]float64
 }
 
 // compileLibrary writes MSL for the shader module and builds an MTLLibrary
@@ -582,7 +601,7 @@ type compiledLibrary struct {
 // the bindings on its own, and the MSL is the same as in earlier releases.
 //
 // Reference: Rust wgpu-hal metal/device.rs:138-145.
-func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bindSizes bool) (*compiledLibrary, error) {
+func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bindSizes bool, spec librarySpec) (*compiledLibrary, error) {
 	if module == nil || module.irModule == nil {
 		return nil, fmt.Errorf("metal: shader module has no WGSL source")
 	}
@@ -590,31 +609,25 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	start := time.Now()
 
 	out := &compiledLibrary{}
-	options := msl.DefaultOptions()
-	if bindSizes {
-		bindings, err := mslmap.RuntimeArrayBindings(module.irModule)
+	irModule := module.irModule
+	if shaderir.PerStage(irModule, spec.constants) {
+		var err error
+		irModule, err = shaderir.Specialize(irModule, spec.stage, spec.entryPoint, spec.constants)
 		if err != nil {
 			return nil, fmt.Errorf("metal: %w", err)
 		}
-		if len(bindings) > 0 {
-			if layout == nil {
-				// Without a slot, the `_buffer_sizes` argument
-				// stays unbound and arrayLength() reads
-				// whatever the slot happens to hold.
-				return nil, fmt.Errorf("metal: shader uses runtime-sized arrays but has no pipeline layout")
-			}
-			options, err = mslmap.Options(module.irModule, layout.totalBuffers)
-			if err != nil {
-				return nil, fmt.Errorf("metal: %w", err)
-			}
-			out.sizesBindings = bindings
-			out.sizesSlot = layout.totalBuffers
-		}
+		out.specialized = true
+		out.workgroupSize = irModule.EntryPoints[0].Workgroup
 	}
 
-	mslSource, info, err := msl.Compile(module.irModule, options)
+	options, err := libraryOptions(module.irModule, irModule, out.specialized, layout, bindSizes, out)
 	if err != nil {
-		return nil, fmt.Errorf("metal: failed to compile to MSL: %w", err)
+		return nil, err
+	}
+
+	mslSource, info, err := msl.Compile(irModule, options)
+	if err != nil {
+		return nil, fmt.Errorf("metal: failed to compile to MSL: %w", shaderir.BackendError(err))
 	}
 	if info.RequiresSizesBuffer && len(out.sizesBindings) == 0 && bindSizes {
 		return nil, fmt.Errorf("metal: shader requires a buffer sizes argument but no runtime-sized array binding was found")
@@ -650,6 +663,51 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	out.library = library
 
 	return out, nil
+}
+
+// libraryOptions returns the MSL options for irModule, which is source or,
+// if specialized, source specialized for one stage. It sets the sizes
+// bindings of out when the `_buffer_sizes` argument is bound.
+//
+// A specialized module keeps only the globals its entry point uses, so its
+// resources are numbered from source (mslmap.StageOptions): the slots then
+// equal the ones of the whole module, which the encoder binds.
+func libraryOptions(source, irModule *ir.Module, specialized bool, layout *PipelineLayout, bindSizes bool, out *compiledLibrary) (msl.Options, error) {
+	sizesSlot := -1
+	if bindSizes {
+		bindings, err := mslmap.RuntimeArrayBindings(irModule)
+		if err != nil {
+			return msl.Options{}, fmt.Errorf("metal: %w", err)
+		}
+		if len(bindings) > 0 {
+			if layout == nil {
+				// Without a slot, the `_buffer_sizes` argument
+				// stays unbound and arrayLength() reads
+				// whatever the slot happens to hold.
+				return msl.Options{}, fmt.Errorf("metal: shader uses runtime-sized arrays but has no pipeline layout")
+			}
+			sizesSlot = layout.totalBuffers
+			out.sizesBindings = bindings
+			out.sizesSlot = layout.totalBuffers
+		}
+	}
+
+	switch {
+	case specialized:
+		options, err := mslmap.StageOptions(source, irModule, sizesSlot)
+		if err != nil {
+			return msl.Options{}, fmt.Errorf("metal: %w", err)
+		}
+		return options, nil
+	case sizesSlot >= 0:
+		options, err := mslmap.Options(irModule, sizesSlot)
+		if err != nil {
+			return msl.Options{}, fmt.Errorf("metal: %w", err)
+		}
+		return options, nil
+	default:
+		return msl.DefaultOptions(), nil
+	}
 }
 
 func formatNSError(errObj ID) string {
@@ -702,7 +760,10 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if !ok || vertexModule == nil {
 		return nil, fmt.Errorf("metal: invalid vertex shader module")
 	}
-	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout, false)
+	// The HAL render stages carry no pipeline constants yet: overrides take
+	// their defaults.
+	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout, false,
+		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint})
 	if err != nil {
 		return nil, err
 	}
@@ -715,8 +776,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		if !ok || fragmentModule == nil {
 			return nil, fmt.Errorf("metal: invalid fragment shader module")
 		}
-		if fragmentModule != vertexModule {
-			fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout, false)
+		// One library serves both stages only when it holds the whole
+		// module; a library specialized for the vertex stage has only the
+		// vertex entry point.
+		if fragmentModule != vertexModule || vertexLib.specialized {
+			fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout, false,
+				librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint})
 			if err != nil {
 				return nil, err
 			}
@@ -970,12 +1035,8 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 
 // CreateComputePipeline creates a compute pipeline.
 //
-// TODO(compute-constants): Apply desc.Compute.Constants via naga's
-// pipeline_constants::process_overrides before MSL emission, or use Metal's
-// MTLFunctionConstantValues API for runtime specialization. Rust wgpu-hal
-// Metal calls naga::back::pipeline_constants::process_overrides() in
-// create_shader (metal/device.rs:134) and passes the processed module to
-// the MSL writer.
+// desc.Compute.Constants are applied by compileLibrary (naga.ProcessOverrides
+// before MSL emission, Rust metal/device.rs:174).
 //
 // TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
 // to naga MSL options. Rust wgpu-hal sets pipeline_options.zero_initialize_workgroup_memory
@@ -996,7 +1057,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	// Write the MSL now, because the pipeline layout gives the sizes slot.
-	lib, err := d.compileLibrary(computeModule, pipeLayout, true)
+	lib, err := d.compileLibrary(computeModule, pipeLayout, true, librarySpec{
+		stage:      ir.StageCompute,
+		entryPoint: desc.Compute.EntryPoint,
+		constants:  desc.Compute.Constants,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1034,8 +1099,17 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, fmt.Errorf("metal: failed to create compute pipeline state: %s", errMsg)
 	}
 
-	// Get workgroup size from shader module metadata
+	// Get workgroup size from shader module metadata, or, for a module with
+	// overrides, from the specialized entry point: the size may come from an
+	// override (BUG-OVERRIDE-WORKGROUP-001).
 	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
+	if lib.specialized {
+		workgroupSize = MTLSize{
+			Width:  NSUInteger(lib.workgroupSize[0]),
+			Height: NSUInteger(lib.workgroupSize[1]),
+			Depth:  NSUInteger(lib.workgroupSize[2]),
+		}
+	}
 
 	hal.Logger().Debug("metal: compute pipeline created",
 		"entryPoint", desc.Compute.EntryPoint,
