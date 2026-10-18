@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`examples/triangle-headless` output path** — the PNG is written through `os.Root` opened on the target directory, so the file name given on the command line cannot leave that directory through `..` or a symlink. Same paths as before; this also clears gosec G703, which the latest golangci-lint reports and which failed the Lint job for every PR.
+
 ## [0.34.5] - 2026-09-07
 
 ### Fixed

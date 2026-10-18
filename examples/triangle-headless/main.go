@@ -315,8 +315,19 @@ func writeImage(outputPath string, pixels []byte, bytesPerRow uint32) error {
 	if err := png.Encode(&buf, img); err != nil {
 		return fmt.Errorf("encode png: %w", err)
 	}
-	if err := os.WriteFile(outputPath, buf.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write png: %w", err)
+	// Write through os.Root: the PNG lands in the directory the caller named
+	// and cannot leave it through ".." or a symlink (gosec G703).
+	root, err := os.OpenRoot(filepath.Dir(outputPath))
+	if err != nil {
+		return fmt.Errorf("open output directory: %w", err)
+	}
+	writeErr := root.WriteFile(filepath.Base(outputPath), buf.Bytes(), 0o600)
+	closeErr := root.Close()
+	if writeErr != nil {
+		return fmt.Errorf("write png: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close output directory: %w", closeErr)
 	}
 	fmt.Printf("PNG written: %s (%d bytes)\n", outputPath, buf.Len())
 	fmt.Printf("Non-background pixels: %d / %d\n", nonBg, texWidth*texHeight)
