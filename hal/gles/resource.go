@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/glsl"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
@@ -121,6 +122,7 @@ type ShaderModule struct {
 	fragmentID uint32 // GL shader object ID for fragment
 	computeID  uint32 // GL shader object ID for compute
 	source     hal.ShaderSource
+	irModule   *ir.Module // lowered WGSL, specialized per pipeline stage; nil without WGSL
 	glCtx      *gl.Context
 }
 

@@ -537,11 +537,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 	}
 
 	// Get the vertex shader module.
-	vsModule, ok := r.pipeline.desc.Vertex.Module.(*ShaderModule)
-	if !ok || vsModule == nil {
-		return nil
-	}
-	parsed := vsModule.ParsedModule()
+	parsed := r.pipeline.vertex
 	if parsed == nil {
 		return nil
 	}
@@ -1091,11 +1087,7 @@ func (r *RenderPassEncoder) prepareSPIRVDraw() *spirvDrawSetup {
 	if r.pipeline == nil || r.pipeline.desc == nil {
 		return nil
 	}
-	vsModule, ok := r.pipeline.desc.Vertex.Module.(*ShaderModule)
-	if !ok || vsModule == nil {
-		return nil
-	}
-	parsed := vsModule.ParsedModule()
+	parsed := r.pipeline.vertex
 	if parsed == nil {
 		return nil
 	}
@@ -1277,12 +1269,7 @@ func (r *RenderPassEncoder) executeSPIRVFragment() [4]float32 {
 		return [4]float32{1, 1, 1, 1}
 	}
 
-	fsModuleSW, ok := r.pipeline.desc.Fragment.Module.(*ShaderModule)
-	if !ok || fsModuleSW == nil {
-		return [4]float32{1, 1, 1, 1}
-	}
-
-	parsed := fsModuleSW.ParsedModule()
+	parsed := r.pipeline.fragment
 	if parsed == nil {
 		return [4]float32{1, 1, 1, 1}
 	}
@@ -1337,12 +1324,7 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc 
 		return nil
 	}
 
-	fsModule, ok := r.pipeline.desc.Fragment.Module.(*ShaderModule)
-	if !ok || fsModule == nil {
-		return nil
-	}
-
-	parsed := fsModule.ParsedModule()
+	parsed := r.pipeline.fragment
 	if parsed == nil {
 		return nil
 	}
@@ -1439,12 +1421,7 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShade
 		return nil
 	}
 
-	fsModule, ok := r.pipeline.desc.Fragment.Module.(*ShaderModule)
-	if !ok || fsModule == nil {
-		return nil
-	}
-
-	parsed := fsModule.ParsedModule()
+	parsed := r.pipeline.fragment
 	if parsed == nil {
 		return nil
 	}

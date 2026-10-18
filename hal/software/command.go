@@ -724,7 +724,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		return
 	}
 
-	parsedModule := c.pipeline.module.ParsedModule()
+	parsedModule := c.pipeline.module
 	if parsedModule == nil {
 		slog.Warn("software: ComputePassEncoder.Dispatch: pipeline has no parsed SPIR-V module")
 		return

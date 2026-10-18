@@ -11,11 +11,27 @@ import (
 	"log/slog"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/glsl"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
+
+// newShaderModule lowers the WGSL of desc to IR once. GLSL is written per
+// pipeline stage (compileWGSLToGLSL), because the GL binding slots come from
+// the pipeline layout and override values from the pipeline.
+func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*ShaderModule, error) {
+	sm := &ShaderModule{source: desc.Source, glCtx: glCtx}
+	if desc.Source.WGSL != "" {
+		irModule, err := shaderir.Lower(desc.Source.WGSL)
+		if err != nil {
+			return nil, fmt.Errorf("gles: WGSL: %w", err)
+		}
+		sm.irModule = irModule
+	}
+	return sm, nil
+}
 
 // compileWGSLToGLSL compiles a WGSL shader source to GLSL for the given entry point.
 // OpenGL does not understand WGSL, so we use naga to parse WGSL and emit GLSL.
@@ -32,21 +48,22 @@ import (
 //
 // Returns the GLSL source and TranslationInfo containing TextureMappings for
 // SamplerBindMap construction (which sampler goes with which texture unit).
-func compileWGSLToGLSL(version glsl.Version, source hal.ShaderSource, entryPoint string, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
-	if source.WGSL == "" {
+//
+// The module's IR is specialized for the stage first when it has overrides or
+// the stage gives pipeline constants (Rust wgpu-hal gles/device.rs:385 calls
+// process_overrides in create_shader).
+func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
+	if sm.irModule == nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
 
-	// Parse WGSL to AST.
-	ast, err := naga.Parse(source.WGSL)
-	if err != nil {
-		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL parse error: %w", err)
-	}
-
-	// Lower AST to IR.
-	module, err := naga.Lower(ast)
-	if err != nil {
-		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: WGSL lower error: %w", err)
+	module := sm.irModule
+	if shaderir.PerStage(module, constants) {
+		var err error
+		module, err = shaderir.Specialize(module, stage, entryPoint, constants)
+		if err != nil {
+			return "", glsl.TranslationInfo{}, fmt.Errorf("gles: %w", err)
+		}
 	}
 
 	// Compile IR to the target GLSL version.
@@ -72,7 +89,7 @@ func compileWGSLToGLSL(version glsl.Version, source hal.ShaderSource, entryPoint
 		WriterFlags: glsl.WriterFlagAdjustCoordinateSpace | glsl.WriterFlagForcePointSize,
 	})
 	if err != nil {
-		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, err)
+		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, shaderir.BackendError(err))
 	}
 
 	hal.Logger().Debug("gles: GLSL generated",

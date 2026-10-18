@@ -126,7 +126,7 @@ type ShaderModule struct {
 	source         hal.ShaderSource
 	irModule       *ir.Module // nil unless the module was created from WGSL
 	device         *Device
-	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size
+	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size; not final for a module with overrides (see compiledLibrary)
 }
 
 // Destroy releases the shader module.

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/shader"
 )
@@ -400,6 +401,11 @@ type Fence struct {
 type RenderPipeline struct {
 	Resource
 	desc *hal.RenderPipelineDescriptor
+	// vertex and fragment are the parsed SPIR-V of the stages for this
+	// pipeline (see stageModule): specialized for it when the shader module
+	// has overrides. nil if the shader module has no SPIR-V.
+	vertex   *shader.Module
+	fragment *shader.Module
 }
 
 // SamplerResource implements hal.Sampler with actual sampler parameters.
@@ -439,18 +445,22 @@ type BindGroup struct {
 type ComputePipeline struct {
 	Resource
 	desc       *hal.ComputePipelineDescriptor
-	module     *ShaderModule
+	module     *shader.Module // parsed SPIR-V of the compute stage (see stageModule)
 	entryPoint string
 }
 
 // ShaderModule stores shader source for the software backend.
 // When SPIR-V bytecode is available (directly or compiled from WGSL via naga),
 // the parsed Module is cached for use by the SPIR-V interpreter in draw calls.
+//
+// A WGSL module with overrides has no SPIR-V of its own: every pipeline
+// stage specializes irModule and parses its own SPIR-V (stageModule).
 type ShaderModule struct {
 	Resource
-	desc   *hal.ShaderModuleDescriptor
-	spirv  []uint32       // SPIR-V bytecode (nil if unavailable)
-	parsed *shader.Module // parsed SPIR-V module (nil until first use)
+	desc     *hal.ShaderModuleDescriptor
+	irModule *ir.Module     // lowered WGSL (nil for SPIR-V input or if lowering failed)
+	spirv    []uint32       // SPIR-V bytecode (nil if unavailable)
+	parsed   *shader.Module // parsed SPIR-V module (nil until first use)
 }
 
 // ParsedModule returns the parsed SPIR-V module, parsing on first access.
