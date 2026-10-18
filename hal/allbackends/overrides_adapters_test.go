@@ -81,6 +81,11 @@ func subtestName(adapter string) string {
 
 func runOverrideCasesOnAdapter(t *testing.T, a *hal.ExposedAdapter) {
 	t.Helper()
+	// Every case is a compute pipeline; skip adapters without compute, as
+	// Rust wgpu's harness does with TestParameters::downlevel_flags.
+	if a.Capabilities.DownlevelCapabilities.Flags&gputypes.DownlevelFlagsComputeShaders == 0 {
+		t.Skipf("%s has no compute shaders (DownlevelFlagsComputeShaders unset)", a.Info.Name)
+	}
 	open, err := a.Adapter.Open(0, a.Capabilities.Limits)
 	if err != nil {
 		t.Fatalf("Open %q: %v", a.Info.Name, err)
