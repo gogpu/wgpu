@@ -150,11 +150,12 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 
 	for _, region := range regions {
 		e.commands = append(e.commands, &CopyBufferToTextureCommand{
-			srcBuffer: srcBuf,
-			dstTex:    dstTex,
-			origin:    [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
-			copySize:  [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
-			bufOffset: region.BufferLayout.Offset,
+			srcBuffer:   srcBuf,
+			dstTex:      dstTex,
+			origin:      [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
+			copySize:    [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
+			bufOffset:   region.BufferLayout.Offset,
+			bytesPerRow: region.BufferLayout.BytesPerRow,
 		})
 	}
 }
@@ -1620,17 +1621,35 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 
-	// Calculate byte sizes. Assume RGBA8 (4 bytes per pixel) for readback.
-	bpp := uint32(4)
+	// Read in the texture's own pixel transfer format and type, as Rust
+	// wgpu-hal does (gles/queue.rs CopyTextureToBuffer: format_desc.external,
+	// data_type). A hard-coded GL_BGRA swapped R and B for RGBA8 textures.
+	_, dataFormat, dataType := textureFormatToGL(c.srcTexture.format)
+	bpp := glPixelBytes(dataFormat, dataType)
+	if bpp == 0 {
+		return // depth/stencil: no color read path (DepthTextureAndBufferCopies is not reported)
+	}
 	rowBytes := uint32(width) * bpp
 	totalBytes := uint64(rowBytes) * uint64(height)
 
-	// Ensure destination buffer has enough CPU-side storage.
-	requiredSize := c.dstOffset + totalBytes
-	if uint64(len(c.dstBuffer.data)) < requiredSize {
-		newData := make([]byte, requiredSize)
-		copy(newData, c.dstBuffer.data)
-		c.dstBuffer.data = newData
+	// Rows land at the caller's bytesPerRow (WebGPU requires a multiple of 256
+	// for multi-row copies); writing them tightly packed sheared the image.
+	stride := uint64(c.bytesPerRow)
+	if stride < uint64(rowBytes) {
+		stride = uint64(rowBytes) // bytesPerRow may be omitted for a single row
+	}
+
+	requiredSize := c.dstOffset + stride*uint64(height-1) + uint64(rowBytes)
+	if requiredSize > c.dstBuffer.size {
+		return // core validates copy bounds; never write past the buffer
+	}
+	// The readback lands in the buffer's CPU shadow, and MapBuffer uses the
+	// shadow only when it covers the whole buffer (otherwise it reads the GL
+	// buffer, which this copy never wrote). Start a full-size shadow from the
+	// GL buffer's current contents so bytes outside the copied rows keep
+	// their values. Removing the shadows is ADR-076 (glMapBufferRange).
+	if uint64(len(c.dstBuffer.data)) != c.dstBuffer.size {
+		c.dstBuffer.data = readGLBuffer(ctx, c.dstBuffer)
 	}
 
 	// Save the current FBO binding so we can restore it after the read.
@@ -1661,23 +1680,64 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	ctx.ReadPixels(
 		int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
 		width, height,
-		gl.BGRA, gl.UNSIGNED_BYTE,
+		dataFormat, dataType,
 		unsafe.Pointer(&tmpBuf[0]),
 	)
 
-	// Copy the pixel data into the destination buffer's CPU-side storage.
-	// OpenGL reads bottom-to-top, but callers expect top-to-bottom order.
-	// Flip the rows during copy.
-	for row := int32(0); row < height; row++ {
-		// OpenGL row 0 = bottom. We want row 0 = top.
-		srcRow := (height - 1 - row)
-		srcStart := uint64(srcRow) * uint64(rowBytes)
-		dstStart := c.dstOffset + uint64(row)*uint64(rowBytes)
+	// Copy the rows in memory order. Shaders are compiled with naga's
+	// ADJUST_COORDINATE_SPACE, so texture row 0 is already the top row of
+	// the image (Present does the Y flip for the window); flipping here
+	// turned every readback upside down. Rust wgpu-hal does not flip either.
+	for row := uint64(0); row < uint64(height); row++ {
+		srcStart := row * uint64(rowBytes)
+		dstStart := c.dstOffset + row*stride
 		copy(c.dstBuffer.data[dstStart:dstStart+uint64(rowBytes)], tmpBuf[srcStart:srcStart+uint64(rowBytes)])
 	}
 
 	// Restore the previous FBO binding.
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
+}
+
+// readGLBuffer returns a copy of buf's full GL contents (zeros if the buffer
+// cannot be mapped). Caller holds the context.
+func readGLBuffer(ctx *gl.Context, buf *Buffer) []byte {
+	data := make([]byte, buf.size)
+	if buf.id == 0 || buf.size == 0 {
+		return data
+	}
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
+	if ptr := ctx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY); ptr != 0 {
+		src := unsafe.Slice(*(**byte)(unsafe.Pointer(&ptr)), buf.size)
+		copy(data, src)
+		ctx.UnmapBuffer(gl.COPY_READ_BUFFER)
+	}
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+	return data
+}
+
+// glPixelBytes returns the size of one pixel that glReadPixels writes for a
+// color transfer format and type, or 0 for formats it cannot read here.
+func glPixelBytes(dataFormat, dataType uint32) uint32 {
+	var components uint32
+	switch dataFormat {
+	case gl.RED, gl.RED_INTEGER:
+		components = 1
+	case gl.RG, gl.RG_INTEGER:
+		components = 2
+	case gl.RGBA, gl.BGRA, gl.RGBA_INTEGER:
+		components = 4
+	default:
+		return 0
+	}
+	switch dataType {
+	case gl.UNSIGNED_BYTE, gl.BYTE:
+		return components
+	case gl.HALF_FLOAT, gl.UNSIGNED_SHORT, gl.SHORT:
+		return components * 2
+	case gl.FLOAT, gl.UNSIGNED_INT, gl.INT:
+		return components * 4
+	}
+	return 0
 }
 
 // CopyBufferToTextureCommand copies buffer data to a texture using a pixel unpack
@@ -1690,6 +1750,8 @@ type CopyBufferToTextureCommand struct {
 	origin    [3]uint32 // x, y, z
 	copySize  [3]uint32 // width, height, depthOrArrayLayers
 	bufOffset uint64
+	// bytesPerRow of the source layout; 0 means tightly packed rows.
+	bytesPerRow uint32
 }
 
 func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
@@ -1709,7 +1771,15 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 
 	// Set pixel alignment to 1 for formats whose rows may not be 4-byte aligned.
 	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, 0) // use default (tightly packed)
+	// Source rows are bytesPerRow apart (a multiple of 256 for multi-row
+	// copies), so tell GL the row length in texels, as Rust wgpu-hal does
+	// (gles/queue.rs CopyBufferToTexture: row_texels = bytes_per_row / block
+	// size). Leaving it at 0 read padded rows as tightly packed.
+	var rowTexels int32
+	if bpp := glPixelBytes(format, dataType); bpp != 0 && c.bytesPerRow != 0 {
+		rowTexels = int32(c.bytesPerRow / bpp)
+	}
+	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, rowTexels)
 
 	// Upload from PBO. When a PBO is bound, the pixels pointer is interpreted
 	// as a byte offset into the bound buffer.
@@ -1721,6 +1791,7 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 
 	// Restore defaults.
 	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, 0)
 	ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, 0)
 	ctx.BindTexture(c.dstTex.target, 0)
 }

@@ -232,6 +232,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	// Get GL format info
 	internalFormat, format, dataType := textureFormatToGL(desc.Format)
 
+	// glGetError is sticky: an error left by an earlier call was reported as
+	// this allocation's failure (seen on Mesa's d3d12 driver in WSL, where the
+	// first CreateTexture after device creation failed with GL_INVALID_ENUM and
+	// the next one succeeded). Drain and log it, so the checks below see only
+	// their own call. Bounded: a lost context can keep returning an error.
+	for i := 0; i < 8; i++ {
+		stale := glCtx.GetError()
+		if stale == 0 {
+			break
+		}
+		hal.Logger().Warn("gles: stale GL error before texture allocation",
+			"error", fmt.Sprintf("0x%x", stale))
+	}
+
 	// Allocate texture storage
 	switch target {
 	case gl.TEXTURE_2D_MULTISAMPLE:
