@@ -98,12 +98,33 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
 
-		offset := region.BufferLayout.Offset
+		// Copy row by row: the source rows are bytesPerRow apart (a multiple
+		// of 256 for multi-row copies) and the region starts at the texture
+		// origin. Copying one tight block to offset 0 sheared padded uploads
+		// and ignored the origin. Mirrors CopyTextureToBuffer below.
 		bpp := formatBytesPerPixel(dstTex.format)
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
+		rowBytes := uint64(region.Size.Width) * bpp
+		srcStride := uint64(region.BufferLayout.BytesPerRow)
+		if srcStride == 0 {
+			srcStride = rowBytes
+		}
+		srcRows := uint64(region.BufferLayout.RowsPerImage)
+		if srcRows == 0 {
+			srcRows = uint64(region.Size.Height)
+		}
+		dstStride := uint64(dstTex.width) * bpp
+		dstImage := dstStride * uint64(dstTex.height)
+		origin := region.TextureBase.Origin
+		layers := max(region.Size.DepthOrArrayLayers, 1)
 
-		if offset+size <= uint64(len(srcBuf.data)) && size <= uint64(len(dstTex.data)) {
-			copy(dstTex.data, srcBuf.data[offset:offset+size])
+		for z := uint32(0); z < layers; z++ {
+			for row := uint32(0); row < region.Size.Height; row++ {
+				srcStart := region.BufferLayout.Offset + uint64(z)*srcRows*srcStride + uint64(row)*srcStride
+				dstStart := uint64(origin.Z+z)*dstImage + uint64(origin.Y+row)*dstStride + uint64(origin.X)*bpp
+				if srcStart+rowBytes <= uint64(len(srcBuf.data)) && dstStart+rowBytes <= uint64(len(dstTex.data)) {
+					copy(dstTex.data[dstStart:dstStart+rowBytes], srcBuf.data[srcStart:srcStart+rowBytes])
+				}
+			}
 		}
 
 		dstTex.mu.Unlock()
@@ -724,7 +745,7 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		return
 	}
 
-	parsedModule := c.pipeline.module.ParsedModule()
+	parsedModule := c.pipeline.module
 	if parsedModule == nil {
 		slog.Warn("software: ComputePassEncoder.Dispatch: pipeline has no parsed SPIR-V module")
 		return

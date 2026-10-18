@@ -13,6 +13,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/hlsl"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 )
@@ -22,11 +23,14 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShaderModule implements hal.ShaderModule for DirectX 12.
-// Stores raw WGSL source for deferred compilation. Compilation happens during
-// pipeline creation when the PipelineLayout (with naga options) is available.
+// Stores the WGSL lowered to IR for deferred compilation. Compilation happens
+// during pipeline creation when the PipelineLayout (with naga options) is
+// available. A module with overrides is compiled per pipeline stage and never
+// fills entryPoints (Device.stageBytecode).
 // For pre-compiled SPIR-V, entryPoints is populated directly.
 type ShaderModule struct {
-	wgslSource  string            // Raw WGSL source (for deferred compilation)
+	wgslSource  string            // Raw WGSL source (shader cache key of the DXIL path)
+	irModule    *ir.Module        // WGSL lowered to IR; nil for pre-compiled input
 	entryPoints map[string][]byte // entryName → DXBC bytecode (populated on pipeline creation or from SPIR-V)
 	device      *Device
 }
@@ -34,6 +38,7 @@ type ShaderModule struct {
 // Destroy releases the shader module resources.
 func (m *ShaderModule) Destroy() {
 	m.wgslSource = ""
+	m.irModule = nil
 	m.entryPoints = nil
 	m.device = nil
 }
@@ -478,10 +483,12 @@ func bindingTypeToD3D12DescriptorRangeType(t BindingType) (d3d12.D3D12_DESCRIPTO
 
 // buildGraphicsPipelineStateDesc builds a D3D12_GRAPHICS_PIPELINE_STATE_DESC from a render pipeline descriptor.
 // Note: semanticNames is passed to keep the byte slices alive during PSO creation (D3D12 reads the pointers).
+// vsBytecode and psBytecode are the compiled stages (Device.stageBytecode).
 func (d *Device) buildGraphicsPipelineStateDesc(
 	desc *hal.RenderPipelineDescriptor,
 	inputElements []d3d12.D3D12_INPUT_ELEMENT_DESC,
 	_ [][]byte, // Keep semantic name strings alive (prevents GC during PSO creation)
+	vsBytecode, psBytecode []byte,
 ) (*d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC, error) {
 	psoDesc := &d3d12.D3D12_GRAPHICS_PIPELINE_STATE_DESC{}
 
@@ -506,7 +513,7 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 
 	// Set vertex shader
 	if desc.Vertex.Module != nil {
-		bc, err := resolveShaderBytecode(desc.Vertex.Module, desc.Vertex.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_VS")
+		bc, err := resolveShaderBytecode(desc.Vertex.Module, vsBytecode, desc.Vertex.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_VS")
 		if err != nil {
 			return nil, fmt.Errorf("dx12: vertex shader: %w", err)
 		}
@@ -518,7 +525,7 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 
 	// Set pixel (fragment) shader
 	if desc.Fragment != nil && desc.Fragment.Module != nil {
-		bc, err := resolveShaderBytecode(desc.Fragment.Module, desc.Fragment.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_PS")
+		bc, err := resolveShaderBytecode(desc.Fragment.Module, psBytecode, desc.Fragment.EntryPoint, "GOGPU_DX12_DXIL_OVERRIDE_PS")
 		if err != nil {
 			return nil, fmt.Errorf("dx12: fragment shader: %w", err)
 		}
@@ -619,12 +626,10 @@ func (d *Device) buildGraphicsPipelineStateDesc(
 }
 
 // buildDepthStencilDesc builds a D3D12_DEPTH_STENCIL_DESC from a depth/stencil state.
-func resolveShaderBytecode(module hal.ShaderModule, entryPoint, overrideEnv string) ([]byte, error) {
-	sm, ok := module.(*ShaderModule)
-	if !ok {
+func resolveShaderBytecode(module hal.ShaderModule, bytecode []byte, entryPoint, overrideEnv string) ([]byte, error) {
+	if _, ok := module.(*ShaderModule); !ok {
 		return nil, fmt.Errorf("invalid shader module type")
 	}
-	bytecode := sm.EntryPointBytecode(entryPoint)
 	if path := os.Getenv(overrideEnv); path != "" {
 		override, err := os.ReadFile(path)
 		if err != nil {

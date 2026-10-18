@@ -6,17 +6,18 @@
 package vulkan
 
 import (
-	"encoding/binary"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // commandAllocator holds a recycled VkCommandPool.
@@ -1233,24 +1234,30 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		return nil, fmt.Errorf("BUG: shader module descriptor is nil in Vulkan.CreateShaderModule — core validation gap")
 	}
 
+	sm := &ShaderModule{label: desc.Label, device: d}
 	var spirv []uint32
+	sourceType := "SPIR-V"
 
 	// Compile shader source to SPIR-V.
 	// WGSL compilation via naga is required for Intel Iris Xe compatibility -
 	// hardcoded SPIR-V from external tools can fail silently on Intel drivers.
 	switch {
 	case desc.Source.WGSL != "":
-		spirvBytes, err := naga.Compile(desc.Source.WGSL)
+		sourceType = "WGSL"
+		irModule, err := shaderir.LowerValidated(desc.Source.WGSL)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
-		// Convert bytes to uint32 slice
-		if len(spirvBytes)%4 != 0 {
-			return nil, fmt.Errorf("vulkan: naga output size not aligned to 4 bytes")
+		sm.irModule = irModule
+		if shaderir.PerStage(irModule, nil) {
+			// Overrides: compiled per pipeline stage (compileStage).
+			hal.Logger().Debug("vulkan: shader module with overrides, compiled per pipeline stage",
+				"overrides", len(irModule.Overrides))
+			return sm, nil
 		}
-		spirv = make([]uint32, len(spirvBytes)/4)
-		for i := range spirv {
-			spirv[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+		spirv, err = shaderir.SPIRV(irModule)
+		if err != nil {
+			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
 	case len(desc.Source.SPIRV) > 0:
 		spirv = desc.Source.SPIRV
@@ -1258,6 +1265,24 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		return nil, fmt.Errorf("vulkan: shader module requires WGSL or SPIR-V source")
 	}
 
+	module, err := d.createVkShaderModule(spirv, desc.Label, "ShaderModule("+sourceType+")")
+	if err != nil {
+		return nil, err
+	}
+	hal.Logger().Debug("vulkan: shader module compiled",
+		"source", sourceType,
+		"spirvWords", len(spirv),
+	)
+	sm.handle = module
+	return sm, nil
+}
+
+// createVkShaderModule creates a VkShaderModule from SPIR-V words and names it
+// label, or fallbackName if label is empty.
+func (d *Device) createVkShaderModule(spirv []uint32, label, fallbackName string) (vk.ShaderModule, error) {
+	if len(spirv) == 0 {
+		return 0, fmt.Errorf("vulkan: empty SPIR-V")
+	}
 	createInfo := vk.ShaderModuleCreateInfo{
 		SType:    vk.StructureTypeShaderModuleCreateInfo,
 		CodeSize: uintptr(len(spirv) * 4), // Size in bytes (uint32 = 4 bytes)
@@ -1266,29 +1291,59 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	var module vk.ShaderModule
 	result := vkCreateShaderModule(d.cmds, d.handle, &createInfo, nil, &module)
+	runtime.KeepAlive(spirv)
 	if result != vk.Success {
-		return nil, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
+		return 0, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
+	}
+	if label == "" {
+		label = fallbackName
+	}
+	d.setObjectName(vk.ObjectTypeShaderModule, uint64(module), label)
+	return module, nil
+}
+
+// compileStage returns the VkShaderModule for one pipeline stage. For a
+// module with overrides, or when the stage gives pipeline constants, it
+// specializes the module's IR for the stage and creates a temporary
+// VkShaderModule, which the caller destroys after the pipeline is created
+// (temp is true). Otherwise it returns the module's own handle.
+//
+// Reference: Rust wgpu-hal vulkan/device.rs:735-845 (compile_stage,
+// process_overrides at :804, temp_raw_module).
+func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (handle vk.ShaderModule, temp bool, err error) {
+	if sm.irModule == nil {
+		if len(constants) > 0 {
+			return 0, false, fmt.Errorf("vulkan: pipeline constants need a WGSL shader module (SPIR-V input cannot be specialized)")
+		}
+		return sm.handle, false, nil
+	}
+	if !shaderir.PerStage(sm.irModule, constants) {
+		return sm.handle, false, nil
 	}
 
-	sourceType := "SPIR-V"
-	if desc.Source.WGSL != "" {
-		sourceType = "WGSL"
+	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
+	if err != nil {
+		return 0, false, fmt.Errorf("vulkan: %w", err)
 	}
-	hal.Logger().Debug("vulkan: shader module compiled",
-		"source", sourceType,
-		"spirvWords", len(spirv),
-	)
+	spirv, err := shaderir.SPIRV(module)
+	if err != nil {
+		return 0, false, fmt.Errorf("vulkan: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
+	}
+	handle, err = d.createVkShaderModule(spirv, sm.label, "ShaderModule(WGSL, "+entryPoint+")")
+	if err != nil {
+		return 0, false, err
+	}
+	return handle, true, nil
+}
 
-	sm := &ShaderModule{
-		handle: module,
-		device: d,
+// destroyTempShaderModules destroys the temporary VkShaderModules that
+// compileStage created for one pipeline.
+func (d *Device) destroyTempShaderModules(modules []vk.ShaderModule) {
+	for _, m := range modules {
+		if m != 0 {
+			vkDestroyShaderModule(d.cmds, d.handle, m, nil)
+		}
 	}
-	if desc.Label != "" {
-		d.setObjectName(vk.ObjectTypeShaderModule, uint64(module), desc.Label)
-	} else {
-		d.setObjectName(vk.ObjectTypeShaderModule, uint64(module), "ShaderModule("+sourceType+")")
-	}
-	return sm, nil
 }
 
 // DestroyShaderModule destroys a shader module.
