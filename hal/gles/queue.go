@@ -69,10 +69,17 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 // Maintenance (cleanup of completed sync objects) happens in Submit(), not here
 // (matches Rust wgpu-hal device.rs:1564 get_fence_value).
 func (q *Queue) PollCompleted() uint64 {
-	if q.fence != nil {
-		return q.fence.GetLatest()
+	if q.fence == nil {
+		return q.submissionIndex
 	}
-	return q.submissionIndex
+	// glGetSynciv needs the context current on this OS thread, and the lock
+	// also orders the read of the pending fences against Submit. Rust
+	// wgpu-hal locks the context here too (gles/device.rs get_fence_value).
+	if q.ctx != nil {
+		_ = q.ctx.Lock()
+		defer q.ctx.Unlock()
+	}
+	return q.fence.GetLatest()
 }
 
 // WriteBuffer writes data to a buffer immediately.
