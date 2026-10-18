@@ -425,10 +425,10 @@ gogpu (app framework) / gg (2D graphics)
 ```
 
 External dependencies:
-- `github.com/gogpu/naga` v0.19.0 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
+- `github.com/gogpu/naga` v0.20.3 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
 - `github.com/gogpu/gputypes` v0.5.2 — shared WebGPU type definitions
 - `github.com/gogpu/gpucontext` v0.28.0 — shared interfaces (DeviceProvider, PlatformProvider)
-- `github.com/go-webgpu/goffi` v0.6.3 — Pure Go FFI for Vulkan/Metal/DX12 symbol loading (Android Bionic support)
+- `github.com/go-webgpu/goffi` v0.6.7 — Pure Go FFI for Vulkan/Metal/DX12 symbol loading (Android Bionic support)
 - `github.com/go-webgpu/webgpu` v0.5.5 — Rust FFI backend (wgpu-native v29, Android surface, timestamp period)
 - `github.com/gogpu/galloc` v0.1.0 — O(1) offset allocator (planned integration for memory sub-allocation)
 - `golang.org/x/sys` v0.47.0 — platform syscall definitions

@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.6] - 2026-10-18
+
 ### Fixed
 
+- **Pipeline-overridable constants were ignored; `@workgroup_size(<override>)` compiled as 1** — every backend compiled shaders without processing WGSL `override` declarations, so `ComputePipelineDescriptor.Constants` had no effect and an override-sized workgroup ran with size 1 (a `@workgroup_size(n, 2)` shader with `n = 4` ran 2 invocations instead of 8, on Vulkan, DX12 and GLES). Each backend now specializes the module per pipeline stage with `naga.ProcessOverrides` before the shader backend, as Rust wgpu-hal does; modules without overrides keep the compile-once path. Vulkan, DX12 (FXC and DXIL; constants are part of the DXIL cache key), GLES and Software are tested on Intel and NVIDIA; Metal has the same change and is covered by unit tests, not yet by a run on a Mac.
+- **GLES fence polling without the GL context** — `Queue.PollCompleted`, `Device.Wait` and `Device.GetFenceStatus` called `glGetSynciv` / `glClientWaitSync` without taking the adapter context, so the call ran on whatever OS thread the caller was on, with no GL context current; with Intel's Windows GL driver `Device.Poll` (e.g. from `Buffer.Map`) could crash with an access violation. They now take the context first, as Rust wgpu-hal does. Windows (WGL) and Linux (EGL).
 - **GLES Linux surface context lifetime** (#362, @admin-else) — a Surface that had to create its own
   EGL context (Wayland, or when the detected window kind did not match the real
   window) owned that context and freed it in `Surface.Destroy`. The Adapter,
@@ -27,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The command buffer keeps a tracker with the first and last usage of every resource. Copy commands and render pass attachments record the transition from the previous usage before they execute (e.g. `ColorTarget → CopySrc` before a readback copy).
   - Submit-time barriers go from the device state into the command buffer's first usage, and the device then adopts its last usage. Previously one OR-ed usage was used for both.
   - `CommandEncoder.TransitionTextures` updates the tracker, so explicit barriers are not repeated by the next command.
+
+### Changed
+
+- **Unknown pipeline-constant keys are an error** — `CreateComputePipeline` with a `Constants` key that names no override in the shader now fails with naga's `*PipelineConstantError` instead of being ignored. Per the WebGPU spec the key of `@id(N) override x` is `"N"`; the name `x` is not accepted for it.
+- **Dependencies** — naga v0.19.0 → v0.20.3 (`naga.ProcessOverrides`), goffi v0.6.3 → v0.6.7. goffi v0.6.6+ refuses calls whose argument count differs from the call interface; all 770 `ffi.CallFunction` sites in wgpu were checked and match. macOS/Metal on the new goffi has not been run on hardware yet.
 
 ## [0.34.5] - 2026-09-07
 
