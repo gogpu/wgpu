@@ -48,8 +48,10 @@ var overrideBackends = []overrideBackend{
 }
 
 // forEachOverrideBackend runs fn with a device of every backend that has an
-// adapter here. A backend without one is skipped.
-func forEachOverrideBackend(t *testing.T, fn func(t *testing.T, device *wgpu.Device)) {
+// adapter here. A backend without one, or whose adapter lacks any of the
+// required downlevel flags, is skipped — as Rust wgpu's test harness does with
+// TestParameters::downlevel_flags (e.g. Mesa d3d12 GL in WSL has no compute).
+func forEachOverrideBackend(t *testing.T, required gputypes.DownlevelFlags, fn func(t *testing.T, device *wgpu.Device)) {
 	t.Helper()
 	for _, b := range overrideBackends {
 		t.Run(b.name, func(t *testing.T) {
@@ -59,12 +61,12 @@ func forEachOverrideBackend(t *testing.T, fn func(t *testing.T, device *wgpu.Dev
 			} else {
 				t.Setenv("GOGPU_DX12_DXIL", "0")
 			}
-			fn(t, openOverrideDevice(t, b))
+			fn(t, openOverrideDevice(t, b, required))
 		})
 	}
 }
 
-func openOverrideDevice(t *testing.T, b overrideBackend) *wgpu.Device {
+func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags) *wgpu.Device {
 	t.Helper()
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: b.backends})
 	if err != nil {
@@ -88,6 +90,9 @@ func openOverrideDevice(t *testing.T, b overrideBackend) *wgpu.Device {
 	if b.software != isCPU || (!b.software && info.Backend != b.backend) {
 		t.Skipf("no %s adapter (got %s, backend %v)", b.name, info.Name, info.Backend)
 	}
+	if missing := required &^ adapter.DownlevelCapabilities().Flags; missing != 0 {
+		t.Skipf("%s lacks required downlevel flags %#x", info.Name, uint32(missing))
+	}
 
 	device, err := adapter.RequestDevice(nil)
 	if err != nil {
@@ -103,7 +108,7 @@ func openOverrideDevice(t *testing.T, b overrideBackend) *wgpu.Device {
 // arithmetic from defaults and from pipeline constants by @id and by name,
 // and an array sized by an anonymous override.
 func TestOverrideCompute(t *testing.T) {
-	forEachOverrideBackend(t, func(t *testing.T, device *wgpu.Device) {
+	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
 		for _, c := range overrideCases() {
 			t.Run(c.name, func(t *testing.T) {
 				out, err := runPublicCompute(t, device, c.wgsl, c.constants, c.inputs)
@@ -273,7 +278,7 @@ fn main() {
 // override fails pipeline creation (WebGPU "validating GPUProgrammableStage")
 // with naga's error, for a module with overrides and for one without.
 func TestOverrideUnknownConstant(t *testing.T) {
-	forEachOverrideBackend(t, func(t *testing.T, device *wgpu.Device) {
+	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
 		for _, tc := range []struct {
 			name string
 			wgsl string
@@ -327,7 +332,7 @@ const (
 // fragment stage of one shader module, with their defaults (the public render
 // stages have no pipeline constants), and checks a pixel.
 func TestOverrideRenderStages(t *testing.T) {
-	forEachOverrideBackend(t, func(t *testing.T, device *wgpu.Device) {
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
 		want := [4]byte{0, 255, 0, 255}
 		px := renderAndRead(t, device, overrideRenderShader)
 		if px == want {
