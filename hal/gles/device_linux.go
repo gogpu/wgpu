@@ -760,6 +760,12 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	if !ok {
 		return false, fmt.Errorf("gles: invalid fence type")
 	}
+	// glClientWaitSync needs the context current on this OS thread (Rust
+	// wgpu-hal locks it in Device::wait, gles/device.rs).
+	if d.ctx != nil {
+		_ = d.ctx.Lock()
+		defer d.ctx.Unlock()
+	}
 	return f.Wait(value, timeout), nil
 }
 
@@ -778,6 +784,11 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	f, ok := fence.(*Fence)
 	if !ok {
 		return false, fmt.Errorf("gles: invalid fence type")
+	}
+	// GetValue polls with glGetSynciv, which needs the context current.
+	if d.ctx != nil {
+		_ = d.ctx.Lock()
+		defer d.ctx.Unlock()
 	}
 	return f.GetValue() > 0, nil
 }
