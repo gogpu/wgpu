@@ -5,6 +5,7 @@ package wgpu
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 )
 
 // SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.
@@ -125,3 +126,12 @@ func NewTestCommandEncoderForDevice(device *Device) *CommandEncoder {
 		core:   &core.CoreCommandEncoder{},
 	}
 }
+
+// TestBufferRef returns the core ResourceRef of a Buffer (testing only).
+func (b *Buffer) TestBufferRef() *core.ResourceRef { return b.core.Ref }
+
+// TestBufferTrackingData returns the core tracking data of a Buffer (testing only).
+func (b *Buffer) TestBufferTrackingData() *track.TrackingData { return b.core.TrackingData() }
+
+// TestBufferTrackerAllocSize returns the device tracker's live buffer count (testing only).
+func (d *Device) TestBufferTrackerAllocSize() int { return d.core.Tracker().Buffers().Size() }

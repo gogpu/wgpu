@@ -746,10 +746,26 @@ func (b *Buffer) TrackingData() *track.TrackingData {
 	return b.trackingData
 }
 
-// Destroy releases the HAL buffer.
+// Destroy releases the HAL buffer and returns the tracker index to the
+// device's buffer allocator for reuse.
 //
 // This method is idempotent - calling it multiple times is safe.
 // After calling Destroy(), Raw() returns nil.
+//
+// Tracker-index hygiene: Buffer.Destroy is reached only when the buffer's
+// ResourceRef count reaches zero (device_native CreateBuffer onZero callback,
+// DestroyQueue.Triage after GPU completion) or through the legacy no-Ref
+// path. By that point every in-flight submission Clone'd its own reference
+// and the GPU has finished with the buffer, so releasing the tracker index
+// here cannot free anything still in use. The index is returned to the
+// allocator so per-scope BufferUsageSlice growth stays bounded by the
+// peak concurrent buffer population instead of growing with cumulative
+// buffer allocations.
+//
+// The device tracker slot for this index is cleared before the index is
+// recycled, so the next buffer allocated at this index starts untracked and
+// its first submit inserts fresh usage state without synthesizing a
+// transition against the previous buffer's last usage.
 func (b *Buffer) Destroy() {
 	// Transition the buffer map state machine to Destroyed and signal
 	// any waiter with ErrBufferDestroyed before actually freeing the
@@ -759,6 +775,22 @@ func (b *Buffer) Destroy() {
 		b.MarkDestroyed()
 	}
 	untrackResource(uintptr(unsafe.Pointer(b))) //nolint:gosec // debug tracking uses pointer as unique ID
+
+	// Clear the device-tracker slot first so a recycled index never merges
+	// against the destroyed buffer's last usage state, then return the
+	// index itself to the allocator. Both steps are no-ops when the device
+	// is gone (device teardown path) or when tracking data was already
+	// released (Texture.Destroy-style double calls).
+	if b.device != nil {
+		if tracker := b.device.Tracker(); tracker != nil {
+			if b.trackingData != nil && b.trackingData.Index().IsValid() {
+				tracker.Buffers().Remove(b.trackingData.Index())
+			}
+		}
+	}
+	if b.trackingData != nil {
+		b.trackingData.Release()
+	}
 
 	if b.device == nil || b.device.SnatchLock() == nil || b.raw == nil {
 		return
