@@ -138,6 +138,10 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		cmds.DestroyInstance(instance, nil)
 		return nil, fmt.Errorf("vulkan: failed to load instance commands: %w", err)
 	}
+	if !cmds.HasWSIQueries() {
+		cmds.DestroyInstance(instance, nil)
+		return nil, fmt.Errorf("vulkan: failed to load WSI query functions (VK_KHR_surface)")
+	}
 
 	// Set vkGetDeviceProcAddr for device function loading.
 	// Some drivers (e.g., Intel) don't support loading it with instance=0.
