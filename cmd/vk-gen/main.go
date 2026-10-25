@@ -126,14 +126,15 @@ type ExtensionRequire struct {
 	Types []ExtensionType `xml:"type"`
 }
 
-// ExtensionEnum is an enum value added by an extension
+// ExtensionEnum is an enum value added by an extension or a core version
 type ExtensionEnum struct {
-	Name    string `xml:"name,attr"`
-	Value   string `xml:"value,attr"`
-	Offset  string `xml:"offset,attr"`
-	Extends string `xml:"extends,attr"`
-	Bitpos  string `xml:"bitpos,attr"`
-	Dir     string `xml:"dir,attr"` // "-" for negative values
+	Name      string `xml:"name,attr"`
+	Value     string `xml:"value,attr"`
+	Offset    string `xml:"offset,attr"`
+	Extnumber string `xml:"extnumber,attr"` // overrides the enclosing extension's number
+	Extends   string `xml:"extends,attr"`
+	Bitpos    string `xml:"bitpos,attr"`
+	Dir       string `xml:"dir,attr"` // "-" for negative values
 }
 
 // ExtensionType is a type reference in an extension
@@ -216,15 +217,11 @@ type Feature struct {
 
 type Require struct {
 	Types    []RequireType    `xml:"type"`
-	Enums    []RequireEnum    `xml:"enum"`
+	Enums    []ExtensionEnum  `xml:"enum"`
 	Commands []RequireCommand `xml:"command"`
 }
 
 type RequireType struct {
-	Name string `xml:"name,attr"`
-}
-
-type RequireEnum struct {
 	Name string `xml:"name,attr"`
 }
 
@@ -369,9 +366,21 @@ type ExtensionEnumValue struct {
 	Value int64
 }
 
-// collectExtensionEnums collects all extension enums and calculates their values
+// collectExtensionEnums collects the enum values that core versions and
+// extensions add to existing enums, and calculates their values
 func collectExtensionEnums(registry *Registry) map[string][]ExtensionEnumValue {
 	result := make(map[string][]ExtensionEnumValue)
+
+	for _, feature := range registry.Features {
+		if !isVulkanAPI(feature.API) {
+			continue
+		}
+		for _, req := range feature.Require {
+			for _, e := range req.Enums {
+				collectExtensionEnum(result, e, 0)
+			}
+		}
+	}
 
 	for _, ext := range registry.Extensions.Extensions {
 		// Skip unsupported/disabled extensions
@@ -381,50 +390,74 @@ func collectExtensionEnums(registry *Registry) map[string][]ExtensionEnumValue {
 
 		for _, req := range ext.Requires {
 			for _, e := range req.Enums {
-				if e.Extends == "" {
-					continue // Not extending an existing enum
-				}
-
-				var value int64
-				if e.Value != "" {
-					// Direct value
-					v, err := strconv.ParseInt(e.Value, 0, 64)
-					if err != nil {
-						continue
-					}
-					value = v
-				} else if e.Offset != "" {
-					// Calculate from extension number and offset
-					// Formula: base + (ext_number - 1) * 1000 + offset
-					// where base = 1000000000 for positive values
-					offset, err := strconv.Atoi(e.Offset)
-					if err != nil {
-						continue
-					}
-					value = 1000000000 + int64(ext.Number-1)*1000 + int64(offset)
-					if e.Dir == "-" {
-						value = -value
-					}
-				} else if e.Bitpos != "" {
-					// Bit position
-					bitpos, err := strconv.Atoi(e.Bitpos)
-					if err != nil {
-						continue
-					}
-					value = 1 << bitpos
-				} else {
-					continue // No value, skip
-				}
-
-				result[e.Extends] = append(result[e.Extends], ExtensionEnumValue{
-					Name:  e.Name,
-					Value: value,
-				})
+				collectExtensionEnum(result, e, ext.Number)
 			}
 		}
 	}
 
 	return result
+}
+
+// isVulkanAPI reports whether a comma-separated api attribute includes "vulkan".
+func isVulkanAPI(api string) bool {
+	for _, a := range strings.Split(api, ",") {
+		if a == "vulkan" {
+			return true
+		}
+	}
+	return false
+}
+
+// collectExtensionEnum adds e to result if it extends an existing enum.
+// extNumber is the enclosing extension's number, used unless e names its own.
+func collectExtensionEnum(result map[string][]ExtensionEnumValue, e ExtensionEnum, extNumber int) {
+	if e.Extends == "" {
+		return // Not extending an existing enum
+	}
+
+	var value int64
+	switch {
+	case e.Value != "":
+		// Direct value
+		v, err := strconv.ParseInt(e.Value, 0, 64)
+		if err != nil {
+			return
+		}
+		value = v
+	case e.Offset != "":
+		// Calculate from extension number and offset
+		// Formula: base + (ext_number - 1) * 1000 + offset
+		// where base = 1000000000 for positive values
+		offset, err := strconv.Atoi(e.Offset)
+		if err != nil {
+			return
+		}
+		if e.Extnumber != "" {
+			n, err := strconv.Atoi(e.Extnumber)
+			if err != nil {
+				return
+			}
+			extNumber = n
+		}
+		value = 1000000000 + int64(extNumber-1)*1000 + int64(offset)
+		if e.Dir == "-" {
+			value = -value
+		}
+	case e.Bitpos != "":
+		// Bit position
+		bitpos, err := strconv.Atoi(e.Bitpos)
+		if err != nil {
+			return
+		}
+		value = 1 << bitpos
+	default:
+		return // No value, skip
+	}
+
+	result[e.Extends] = append(result[e.Extends], ExtensionEnumValue{
+		Name:  e.Name,
+		Value: value,
+	})
 }
 
 func generateTypes(registry *Registry, outDir string) error {

@@ -10,67 +10,9 @@ import (
 	"unsafe"
 )
 
-// Additional constants not generated from vk.xml but needed for Vulkan 1.2/1.3 features.
+// Additional constants not generated from vk.xml.
 
 const (
-	// === Vulkan 1.1 Core (promoted from KHR extensions) ===
-
-	// StructureTypePhysicalDeviceFeatures2 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
-	StructureTypePhysicalDeviceFeatures2 StructureType = 1000059000
-
-	// StructureTypePhysicalDeviceProperties2 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
-	StructureTypePhysicalDeviceProperties2 StructureType = 1000059001
-
-	// StructureTypePhysicalDeviceMaintenance3Properties = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES
-	// Vulkan 1.1 core — used to query maxMemoryAllocationSize.
-	StructureTypePhysicalDeviceMaintenance3Properties StructureType = 1000168000
-
-	// === Vulkan 1.2 Core (promoted from VK_KHR_timeline_semaphore) ===
-
-	// StructureTypePhysicalDeviceTimelineSemaphoreFeatures = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
-	StructureTypePhysicalDeviceTimelineSemaphoreFeatures StructureType = 1000207000
-
-	// StructureTypeSemaphoreTypeCreateInfo = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
-	StructureTypeSemaphoreTypeCreateInfo StructureType = 1000207002
-
-	// StructureTypeTimelineSemaphoreSubmitInfo = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
-	StructureTypeTimelineSemaphoreSubmitInfo StructureType = 1000207003
-
-	// StructureTypeSemaphoreWaitInfo = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO
-	StructureTypeSemaphoreWaitInfo StructureType = 1000207004
-
-	// StructureTypeSemaphoreSignalInfo = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO
-	StructureTypeSemaphoreSignalInfo StructureType = 1000207005
-
-	// StructureTypePhysicalDeviceVulkan12Features = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
-	StructureTypePhysicalDeviceVulkan12Features StructureType = 51
-
-	// === Vulkan 1.3 Core (promoted from VK_KHR_dynamic_rendering) ===
-
-	// StructureTypeRenderingInfo = VK_STRUCTURE_TYPE_RENDERING_INFO
-	StructureTypeRenderingInfo StructureType = 1000044000
-
-	// StructureTypeRenderingAttachmentInfo = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO
-	StructureTypeRenderingAttachmentInfo StructureType = 1000044001
-
-	// StructureTypePipelineRenderingCreateInfo = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO
-	StructureTypePipelineRenderingCreateInfo StructureType = 1000044002
-
-	// StructureTypePhysicalDeviceDynamicRenderingFeatures = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
-	StructureTypePhysicalDeviceDynamicRenderingFeatures StructureType = 1000044003
-
-	// StructureTypeCommandBufferInheritanceRenderingInfo = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO
-	StructureTypeCommandBufferInheritanceRenderingInfo StructureType = 1000044004
-
-	// === VK_KHR_buffer_device_address (Vulkan 1.2 Core) ===
-
-	// StructureTypeBufferDeviceAddressInfo = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO
-	StructureTypeBufferDeviceAddressInfo StructureType = 1000244001
-
-	// BufferUsageShaderDeviceAddressBit = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-	// Vulkan 1.2 core — required for AS backing buffers and scratch buffers.
-	BufferUsageShaderDeviceAddressBit BufferUsageFlagBits = 1 << 17
-
 	// === VK_KHR_acceleration_structure object type ===
 
 	// ObjectTypeAccelerationStructureKHR = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR (1000150000)
