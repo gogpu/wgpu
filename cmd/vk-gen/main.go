@@ -1409,6 +1409,8 @@ func vkToGoBaseType(vkType string) string {
 		return "float32"
 	case "double":
 		return "float64"
+	case "int":
+		return "int32"
 	case "int8_t":
 		return "int8"
 	case "uint8_t":

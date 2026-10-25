@@ -2835,7 +2835,7 @@ type ImportMemoryFdInfoKHR struct {
 	SType      StructureType
 	PNext      *uintptr
 	HandleType ExternalMemoryHandleTypeFlagBits
-	Fd         int
+	Fd         int32
 }
 
 // VkMemoryFdPropertiesKHR
@@ -2957,7 +2957,7 @@ type ImportSemaphoreFdInfoKHR struct {
 	Semaphore  Semaphore
 	Flags      SemaphoreImportFlags
 	HandleType ExternalSemaphoreHandleTypeFlagBits
-	Fd         int
+	Fd         int32
 }
 
 // VkSemaphoreGetFdInfoKHR
@@ -3044,7 +3044,7 @@ type ImportFenceFdInfoKHR struct {
 	Fence      Fence
 	Flags      FenceImportFlags
 	HandleType ExternalFenceHandleTypeFlagBits
-	Fd         int
+	Fd         int32
 }
 
 // VkFenceGetFdInfoKHR
@@ -4418,9 +4418,9 @@ type NativeBufferANDROID struct {
 	SType  StructureType
 	PNext  *uintptr
 	Handle *uintptr
-	Stride int
-	Format int
-	Usage  int
+	Stride int32
+	Format int32
+	Usage  int32
 	Usage2 NativeBufferUsage2ANDROID
 }
 
