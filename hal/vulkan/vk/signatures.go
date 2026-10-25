@@ -227,6 +227,9 @@ var (
 	// VkResult(handle, ptr, u64) - vkWaitSemaphores
 	SigResultHandlePtrU64 types.CallInterface
 
+	// void(handle, handle, u32, u32, u32, ptr) - vkCmdPushConstants
+	SigVoidCmdPushConstants types.CallInterface
+
 	// === Ray tracing signatures ===
 
 	// void(handle, u32, ptr, ptr) - vkCmdBuildAccelerationStructuresKHR
@@ -730,6 +733,13 @@ func InitSignatures() error {
 	// VkResult(handle, ptr, u64) - vkWaitSemaphores
 	err = ffi.PrepareCallInterface(&SigResultHandlePtrU64, types.DefaultCall, resultRet,
 		[]*types.TypeDescriptor{u64, ptr, u64})
+	if err != nil {
+		return err
+	}
+
+	// void(handle, handle, u32, u32, u32, ptr) - vkCmdPushConstants
+	err = ffi.PrepareCallInterface(&SigVoidCmdPushConstants, types.DefaultCall, voidRet,
+		[]*types.TypeDescriptor{u64, u64, u32, u32, u32, ptr})
 	if err != nil {
 		return err
 	}

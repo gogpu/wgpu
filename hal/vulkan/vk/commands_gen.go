@@ -2631,7 +2631,21 @@ func (c *Commands) CmdResetQueryPool(commandBuffer CommandBuffer, queryPool Quer
 
 // TODO: CmdCopyQueryPoolResults - signature not yet supported: void(handle, handle, u32, u32, handle, u64, u64, u32)
 
-// TODO: CmdPushConstants - signature not yet supported: void(handle, handle, u32, u32, u32, ptr)
+// CmdPushConstants wraps vkCmdPushConstants.
+func (c *Commands) CmdPushConstants(commandBuffer CommandBuffer, layout PipelineLayout, stageFlags ShaderStageFlags, offset uint32, size uint32, pValues *uintptr) {
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&layout),
+		unsafe.Pointer(&stageFlags),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&size),
+		unsafe.Pointer(&pValues),
+	}
+	if c.cmdPushConstants == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidCmdPushConstants, c.cmdPushConstants, nil, args[:])
+}
 
 // CmdBeginRenderPass wraps vkCmdBeginRenderPass.
 func (c *Commands) CmdBeginRenderPass(commandBuffer CommandBuffer, pRenderPassBegin *RenderPassBeginInfo, contents SubpassContents) {

@@ -910,6 +910,7 @@ func signatureToCallInterface(sig commandSignature) (string, bool) {
 
 		// Cmd-specific complex signatures (using custom CallInterface)
 		"void(handle, u32, u32, u32, u32, ptr, u32, ptr, u32, ptr)": "SigVoidCmdPipelineBarrier",    // vkCmdPipelineBarrier (10 params)
+		"void(handle, handle, u32, u32, u32, ptr)":                  "SigVoidCmdPushConstants",      // vkCmdPushConstants
 		"void(handle, handle, handle, u32, ptr)":                    "SigVoidCmdCopyBuffer",         // vkCmdCopyBuffer
 		"void(handle, handle, u64, u64, u32)":                       "SigVoidCmdFillBuffer",         // vkCmdFillBuffer
 		"void(handle, handle, handle, u32, u32, ptr)":               "SigVoidCmdCopyBufferToImage",  // vkCmdCopyBufferToImage
