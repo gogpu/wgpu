@@ -110,6 +110,7 @@ func (c *Commands) LoadInstance(instance Instance) error {
 	// Vulkan 1.1+ instance functions
 	c.getPhysicalDeviceFeatures2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2")
 	c.getPhysicalDeviceProperties2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2")
+	c.getPhysicalDeviceFormatProperties2 = GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties2")
 
 	// VK_EXT_debug_utils (instance extension — MUST use GetInstanceProcAddr).
 	// Loading via GetDeviceProcAddr bypasses the validation layer's handle
@@ -273,6 +274,11 @@ func (c *Commands) LoadDevice(device Device) error {
 	c.getSemaphoreCounterValue = GetDeviceProcAddr(device, "vkGetSemaphoreCounterValue")
 	c.waitSemaphores = GetDeviceProcAddr(device, "vkWaitSemaphores")
 	c.signalSemaphore = GetDeviceProcAddr(device, "vkSignalSemaphore")
+
+	// VK_KHR_external_memory_fd and VK_EXT_image_drm_format_modifier
+	c.getMemoryFdKHR = GetDeviceProcAddr(device, "vkGetMemoryFdKHR")
+	c.getMemoryFdPropertiesKHR = GetDeviceProcAddr(device, "vkGetMemoryFdPropertiesKHR")
+	c.getImageDrmFormatModifierPropertiesEXT = GetDeviceProcAddr(device, "vkGetImageDrmFormatModifierPropertiesEXT")
 
 	// Swapchain functions (WSI)
 	c.createSwapchainKHR = GetDeviceProcAddr(device, "vkCreateSwapchainKHR")
