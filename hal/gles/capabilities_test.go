@@ -11,34 +11,77 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
+// TestParseGLVersion follows Rust wgpu-hal gles/adapter.rs parse_full_version
+// and parse_version: there is no fallback version; a string that parses
+// neither way reports ok=false (no adapter). Before v0.34.6 "" and garbage
+// were treated as GL 3.3, so a broken context passed as a usable one.
 func TestParseGLVersion(t *testing.T) {
 	tests := []struct {
 		input     string
 		wantMajor int
 		wantMinor int
 		wantES    bool
+		wantOK    bool
 	}{
 		// Desktop GL
-		{"4.6.0 NVIDIA 536.23", 4, 6, false},
-		{"3.3 Mesa 23.0.0", 3, 3, false},
-		{"4.5", 4, 5, false},
-		{"3.3.0 - Build 31.0.101.2125", 3, 3, false},
+		{"4.6.0 NVIDIA 536.23", 4, 6, false, true},
+		{"3.3 Mesa 23.0.0", 3, 3, false, true},
+		{"4.5", 4, 5, false, true},
+		{"3.3.0 - Build 31.0.101.2125", 3, 3, false, true},
+		{"1.1.0", 1, 1, false, true},
+		{"2.1 Mesa 20", 2, 1, false, true},
+		{"3.0 Mesa 23.0.4", 3, 0, false, true},
+		{"3.2 (Core Profile) Mesa 23", 3, 2, false, true},
+		{"4.1 ATI-4.8.54", 4, 1, false, true},
+		{"4.10", 4, 1, false, true}, // Rust trims trailing zeros of the minor
 
 		// OpenGL ES
-		{"OpenGL ES 3.2 V@490.0", 3, 2, true},
-		{"OpenGL ES 3.0 Mesa 23.0.4", 3, 0, true},
-		{"OpenGL ES 3.1 Adreno (TM) 730", 3, 1, true},
+		{"OpenGL ES 3.2 V@490.0", 3, 2, true, true},
+		{"OpenGL ES 3.0 Mesa 23.0.4", 3, 0, true, true},
+		{"OpenGL ES 3.1 Adreno (TM) 730", 3, 1, true, true},
+		{"OpenGL ES 3.0", 3, 0, true, true},
+		{"OpenGL ES 2.0", 2, 0, true, true},
 
-		// Edge cases / fallbacks
-		{"", 3, 3, false},        // empty -> fallback
-		{"garbage", 3, 3, false}, // unparseable -> fallback
+		// Unparseable: no adapter
+		{"OpenGL ES-CM 1.1", 0, 0, false, false},
+		{"", 0, 0, false, false},
+		{"garbage", 0, 0, false, false},
+		{"3", 0, 0, false, false},
 	}
 
 	for _, tt := range tests {
-		major, minor, isES := parseGLVersion(tt.input)
-		if major != tt.wantMajor || minor != tt.wantMinor || isES != tt.wantES {
-			t.Errorf("parseGLVersion(%q) = (%d, %d, %v), want (%d, %d, %v)",
-				tt.input, major, minor, isES, tt.wantMajor, tt.wantMinor, tt.wantES)
+		major, minor, isES, ok := parseGLVersion(tt.input)
+		if major != tt.wantMajor || minor != tt.wantMinor || isES != tt.wantES || ok != tt.wantOK {
+			t.Errorf("parseGLVersion(%q) = (%d, %d, %v, %v), want (%d, %d, %v, %v)",
+				tt.input, major, minor, isES, ok, tt.wantMajor, tt.wantMinor, tt.wantES, tt.wantOK)
+		}
+	}
+}
+
+// TestCheckGLVersion: the adapter gate is OpenGL ES 3.0 or desktop OpenGL 3.3
+// (Rust wgpu-hal gles/adapter.rs expose). The windows-latest CI runner exposed a
+// context below it and crashed in glGenVertexArrays when a test opened it.
+func TestCheckGLVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		wantErr bool
+	}{
+		{"1.1.0", true},
+		{"2.1 Mesa 20", true},
+		{"3.0 Mesa 23.0.4", true},
+		{"3.2 (Core Profile) Mesa 23", true},
+		{"3.3.0 - Build 31.0.101.2125", false},
+		{"4.6.0 NVIDIA 536.23", false},
+		{"OpenGL ES 2.0", true},
+		{"OpenGL ES 3.0", false},
+		{"OpenGL ES 3.2 V@490.0", false},
+		{"OpenGL ES-CM 1.1", true},
+		{"", true},
+	}
+	for _, tt := range tests {
+		_, _, _, err := checkGLVersion(tt.version)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("checkGLVersion(%q) error = %v, want error %v", tt.version, err, tt.wantErr)
 		}
 	}
 }

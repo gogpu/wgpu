@@ -36,19 +36,17 @@ type Surface struct {
 
 // GetAdapterInfo returns adapter information from this surface's GL context.
 // Not used in the new architecture (Instance.EnumerateAdapters queries directly),
-// but kept for interface compatibility.
-func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
+// but kept for interface compatibility. ok is false when the context is below
+// OpenGL 3.3 / ES 3.0 (no adapter).
+func (s *Surface) GetAdapterInfo() (adapter hal.ExposedAdapter, ok bool) {
 	glCtx := s.ctx.Lock()
 	defer s.ctx.Unlock()
 
-	caps := queryAdapterCapabilities(glCtx)
-
-	driverInfo := "OpenGL 3.3+"
-	if caps.IsES {
-		driverInfo = fmt.Sprintf("OpenGL ES %d.%d", caps.GLMajor, caps.GLMinor)
-	} else if caps.GLMajor > 0 {
-		driverInfo = fmt.Sprintf("OpenGL %d.%d", caps.GLMajor, caps.GLMinor)
+	caps, err := queryAdapterCapabilities(glCtx)
+	if err != nil {
+		return hal.ExposedAdapter{}, false
 	}
+	driverInfo := glDriverInfo(&caps)
 
 	return hal.ExposedAdapter{
 		Adapter: &Adapter{
@@ -79,7 +77,7 @@ func (s *Surface) GetAdapterInfo() hal.ExposedAdapter {
 				Flags:       caps.DownlevelFlags,
 			},
 		},
-	}
+	}, true
 }
 
 // Configure configures the surface for presentation.

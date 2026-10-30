@@ -172,7 +172,10 @@ func TestSurface_Destroy_OwnedCallsAdapterContextDestroy(t *testing.T) {
 
 func TestSurface_GetAdapterInfo_NilCtxReturnsPlaceholder(t *testing.T) {
 	surf := &Surface{}
-	info := surf.GetAdapterInfo()
+	info, ok := surf.GetAdapterInfo()
+	if !ok {
+		t.Fatal("GetAdapterInfo without a context: ok=false, want the placeholder")
+	}
 	if info.Adapter == nil {
 		t.Fatal("expected placeholder adapter")
 	}
