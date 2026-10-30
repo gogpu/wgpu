@@ -88,7 +88,7 @@ func ClearValueColor(r, g, b, a float32) ClearValue {
 func ClearValueDepthStencil(depth float32, stencil uint32) ClearValue {
 	var cv ClearValue
 	*(*float32)(unsafe.Pointer(&cv)) = depth
-	*(*uint32)(unsafe.Pointer(uintptr(unsafe.Pointer(&cv)) + 4)) = stencil
+	*(*uint32)(unsafe.Add(unsafe.Pointer(&cv), 4)) = stencil
 	return cv
 }
 
@@ -100,7 +100,7 @@ func (cv *ClearValue) GetColorFloat32() [4]float32 {
 // GetDepthStencil extracts depth and stencil values from a ClearValue.
 func (cv *ClearValue) GetDepthStencil() (depth float32, stencil uint32) {
 	depth = *(*float32)(unsafe.Pointer(cv))
-	stencil = *(*uint32)(unsafe.Pointer(uintptr(unsafe.Pointer(cv)) + 4))
+	stencil = *(*uint32)(unsafe.Add(unsafe.Pointer(cv), 4))
 	return
 }
 

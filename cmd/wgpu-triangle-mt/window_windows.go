@@ -8,14 +8,13 @@ package main
 import (
 	"fmt"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 var (
-	user32   = windows.NewLazySystemDLL("user32.dll")
-	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	user32   = syscall.NewLazyDLL("user32.dll")
+	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 
 	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
@@ -126,11 +125,11 @@ var globalWindow *Window
 func NewWindow(title string, width, height int32) (*Window, error) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
-	className, err := windows.UTF16PtrFromString("VulkanTriangleWindow")
+	className, err := syscall.UTF16PtrFromString("VulkanTriangleWindow")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create class name: %w", err)
 	}
-	windowTitle, err := windows.UTF16PtrFromString(title)
+	windowTitle, err := syscall.UTF16PtrFromString(title)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create window title: %w", err)
 	}
@@ -141,7 +140,7 @@ func NewWindow(title string, width, height int32) (*Window, error) {
 	wc := wndClassExW{
 		Size:      uint32(unsafe.Sizeof(wndClassExW{})),
 		Style:     csOwnDC,
-		WndProc:   windows.NewCallback(wndProc),
+		WndProc:   syscall.NewCallback(wndProc),
 		Instance:  hInstance,
 		Cursor:    cursor,
 		ClassName: className,

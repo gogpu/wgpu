@@ -447,9 +447,11 @@ func Initialize(dpy EGLDisplay, major *EGLInt, minor *EGLInt) EGLBoolean {
 
 	var result EGLBoolean
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	// For pointer arguments, store as uintptr and pass address of that
-	majorPtr := uintptr(unsafe.Pointer(major))
-	minorPtr := uintptr(unsafe.Pointer(minor))
+	// For pointer arguments, store the pointer in an unsafe.Pointer variable and pass the address of
+	// that. Never a uintptr: the GC and the stack copier do not see it, so a pointer to a stack
+	// variable would go stale if the stack moved before the call (P1-VK-012).
+	majorPtr := unsafe.Pointer(major)
+	minorPtr := unsafe.Pointer(minor)
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&majorPtr),
@@ -487,9 +489,9 @@ func QueryString(dpy EGLDisplay, name EGLInt) string {
 func ChooseConfig(dpy EGLDisplay, attribList *EGLInt, configs *EGLConfig, configSize EGLInt, numConfig *EGLInt) EGLBoolean {
 	var result EGLBoolean
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	attribListPtr := uintptr(unsafe.Pointer(attribList))
-	configsPtr := uintptr(unsafe.Pointer(configs))
-	numConfigPtr := uintptr(unsafe.Pointer(numConfig))
+	attribListPtr := unsafe.Pointer(attribList)
+	configsPtr := unsafe.Pointer(configs)
+	numConfigPtr := unsafe.Pointer(numConfig)
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&attribListPtr),
@@ -505,7 +507,7 @@ func ChooseConfig(dpy EGLDisplay, attribList *EGLInt, configs *EGLConfig, config
 func GetConfigAttrib(dpy EGLDisplay, config EGLConfig, attribute EGLInt, value *EGLInt) EGLBoolean {
 	var result EGLBoolean
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	valuePtr := uintptr(unsafe.Pointer(value))
+	valuePtr := unsafe.Pointer(value)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
@@ -520,7 +522,7 @@ func GetConfigAttrib(dpy EGLDisplay, config EGLConfig, attribute EGLInt, value *
 func CreateWindowSurface(dpy EGLDisplay, config EGLConfig, win EGLNativeWindowType, attribList *EGLInt) EGLSurface {
 	var result EGLSurface
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	attribListPtr := unsafe.Pointer(attribList)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
@@ -550,7 +552,7 @@ func CreatePlatformWindowSurface(dpy EGLDisplay, config EGLConfig, nativeWindow 
 		return CreateWindowSurface(dpy, config, EGLNativeWindowType(nativeWindow), &attribs[0])
 	}
 	var result EGLSurface
-	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	attribListPtr := unsafe.Pointer(attribList)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
@@ -565,7 +567,7 @@ func CreatePlatformWindowSurface(dpy EGLDisplay, config EGLConfig, nativeWindow 
 func CreatePbufferSurface(dpy EGLDisplay, config EGLConfig, attribList *EGLInt) EGLSurface {
 	var result EGLSurface
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	attribListPtr := unsafe.Pointer(attribList)
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
@@ -611,7 +613,7 @@ func SwapInterval(dpy EGLDisplay, interval EGLInt) EGLBoolean {
 func CreateContext(dpy EGLDisplay, config EGLConfig, shareContext EGLContext, attribList *EGLInt) EGLContext {
 	var result EGLContext
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	attribListPtr := uintptr(unsafe.Pointer(attribList))
+	attribListPtr := unsafe.Pointer(attribList)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&dpy),
 		unsafe.Pointer(&config),
@@ -676,7 +678,7 @@ func GetProcAddress(procname string) uintptr {
 	cname := append([]byte(procname), 0)
 	var result uintptr
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	ptr := uintptr(unsafe.Pointer(&cname[0]))
+	ptr := unsafe.Pointer(&cname[0])
 	args := [1]unsafe.Pointer{
 		unsafe.Pointer(&ptr),
 	}

@@ -278,6 +278,10 @@ func (a *DescriptorAllocator) setObjectName(objectType vk.ObjectType, handle uin
 		return
 	}
 	nameBytes := append([]byte(name), 0)
+	// PObjectName is a uintptr: pin the bytes so a stack move cannot leave it
+	// pointing at the old stack (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&nameBytes[0])
 	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
 		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
 		ObjectType:   objectType,
@@ -285,7 +289,7 @@ func (a *DescriptorAllocator) setObjectName(objectType vk.ObjectType, handle uin
 		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
 	}
 	_ = a.cmds.SetDebugUtilsObjectNameEXT(a.device, &nameInfo)
-	runtime.KeepAlive(nameBytes)
+	pinner.Unpin()
 }
 
 // Destroy releases all descriptor pools.

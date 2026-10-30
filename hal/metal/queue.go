@@ -8,6 +8,7 @@ package metal
 import (
 	"fmt"
 	"image"
+	"runtime"
 	"sync/atomic"
 	"unsafe"
 
@@ -188,10 +189,14 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
-	// Create temporary Shared staging buffer with the data.
+	// Create temporary Shared staging buffer with the data. The bytes travel
+	// as a uintptr; pin them for the call (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&data[0])
 	staging := MsgSend(q.device.raw, Sel("newBufferWithBytes:length:options:"),
 		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)),
 		uintptr(MTLResourceStorageModeShared))
+	pinner.Unpin()
 	if staging == 0 {
 		return fmt.Errorf("metal: WriteBuffer: staging buffer creation failed (size=%d)", len(data))
 	}
@@ -285,8 +290,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Create a temporary staging buffer with Shared storage mode.
 	// newBufferWithBytes copies data[] into GPU-visible memory synchronously,
 	// so the caller's slice is consumed before this method returns.
+	// The bytes travel as a uintptr; pin them for the call (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&data[0])
 	stagingBuffer := MsgSend(q.device.raw, Sel("newBufferWithBytes:length:options:"),
 		uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(MTLStorageModeShared))
+	pinner.Unpin()
 	if stagingBuffer == 0 {
 		return fmt.Errorf("metal: WriteTexture: staging buffer creation failed (dataSize=%d)", len(data))
 	}
@@ -384,6 +393,9 @@ func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data
 
 		// The slice-aware form carries an image stride for true 3D writes. Array
 		// writes target one physical slice and therefore pass a zero image stride.
+		// The bytes travel as a uintptr; pin them for the call (P1-VK-012).
+		var pinner runtime.Pinner
+		pinner.Pin(&src[0])
 		msgSendVoid(tex.raw, Sel("replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:"),
 			argStruct(region, mtlRegionType),
 			argUint64(uint64(dst.MipLevel)),
@@ -392,6 +404,7 @@ func (q *Queue) writeTextureShared(tex *Texture, dst *hal.ImageCopyTexture, data
 			argUint64(strides.bytesPerRow),
 			argUint64(strides.bytesPerImage),
 		)
+		pinner.Unpin()
 	}
 
 	hal.Logger().Debug("metal: WriteTexture (shared direct)",

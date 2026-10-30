@@ -646,9 +646,15 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 
 	// Create MTLLibrary from source
 	// MTLLibrary* newLibraryWithSource:options:error:
+	// errorPtr travels as a uintptr, which keeps nothing in place: pin it so
+	// Metal writes the NSError into errorPtr, not into a moved stack
+	// (P1-VK-012).
 	var errorPtr ID
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
 	library := MsgSend(d.raw, Sel("newLibraryWithSource:options:error:"),
 		uintptr(mslString), 0, uintptr(unsafe.Pointer(&errorPtr)))
+	pinner.Unpin()
 
 	if library == 0 {
 		errMsg := unknownError
@@ -925,7 +931,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	// Create pipeline state. ICB support stays entirely private: eligible
 	// pipelines get one flagged attempt and transparently retry ordinary
 	// creation if Metal rejects the stricter descriptor.
+	// errorPtr travels as a uintptr; pin it for the creation calls below
+	// (P1-VK-012).
 	var errorPtr ID
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
+	defer pinner.Unpin()
 	icbCandidate := d.canCreateICBPipeline(desc, pipelineDesc)
 	pipelineState, icbCompatible := createRenderPipelineState(icbCandidate, func(icb bool) ID {
 		errorPtr = 0
@@ -1083,9 +1094,13 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	defer Release(computeFunc)
 
 	// Create compute pipeline state
+	// errorPtr travels as a uintptr; pin it for the call (P1-VK-012).
 	var errorPtr ID
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
 	pipelineState := MsgSend(d.raw, Sel("newComputePipelineStateWithFunction:error:"),
 		uintptr(computeFunc), uintptr(unsafe.Pointer(&errorPtr)))
+	pinner.Unpin()
 
 	if pipelineState == 0 {
 		errMsg := unknownError

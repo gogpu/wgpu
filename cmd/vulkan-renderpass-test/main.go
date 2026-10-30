@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/naga"
@@ -42,6 +43,12 @@ func run() error {
 	fmt.Println("Testing: VkRenderPass (traditional) vs VK_KHR_dynamic_rendering")
 	fmt.Println()
 
+	// The Vulkan create infos reference Go memory through uintptr fields,
+	// which keep nothing alive or in place; everything they point to is
+	// pinned until run returns (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	// Initialize Vulkan
 	fmt.Print("1. Initializing Vulkan... ")
 	if err := vk.Init(); err != nil {
@@ -59,9 +66,11 @@ func run() error {
 
 	// Create instance (no validation layers)
 	fmt.Print("3. Creating instance... ")
+	appName := []byte("RenderPassTest\x00")
+	pinner.Pin(&appName[0])
 	appInfo := vk.ApplicationInfo{
 		SType:            vk.StructureTypeApplicationInfo,
-		PApplicationName: uintptr(unsafe.Pointer(&[]byte("RenderPassTest\x00")[0])),
+		PApplicationName: uintptr(unsafe.Pointer(&appName[0])),
 		ApiVersion:       makeVersion(1, 0, 0), // Vulkan 1.0 for compatibility
 	}
 
@@ -77,6 +86,7 @@ func run() error {
 		EnabledExtensionCount: uint32(len(extensions)),
 	}
 	if len(extensionPtrs) > 0 {
+		pinner.Pin(&extensionPtrs[0])
 		createInfo.PpEnabledExtensionNames = uintptr(unsafe.Pointer(&extensionPtrs[0]))
 	}
 
@@ -142,6 +152,7 @@ func run() error {
 
 	swapchainExt := "VK_KHR_swapchain\x00"
 	deviceExtensions := []uintptr{uintptr(unsafe.Pointer(unsafe.StringData(swapchainExt)))}
+	pinner.Pin(&deviceExtensions[0])
 
 	deviceCreateInfo := vk.DeviceCreateInfo{
 		SType:                   vk.StructureTypeDeviceCreateInfo,
@@ -266,6 +277,7 @@ func run() error {
 	fmt.Printf("    sizeof(PipelineVertexInputStateCreateInfo) = %d\n", unsafe.Sizeof(vk.PipelineVertexInputStateCreateInfo{}))
 
 	mainEntry := []byte("main\x00")
+	pinner.Pin(&mainEntry[0])
 
 	stages := []vk.PipelineShaderStageCreateInfo{
 		{

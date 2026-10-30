@@ -51,8 +51,16 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 
 	// Prepare application info
+	// Go memory that the create infos reference through uintptr fields is
+	// pinned until vkCreateInstance returns: a uintptr does not keep a stack
+	// object in place when the goroutine stack moves (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	appName := []byte("gogpu\x00")
 	engineName := []byte("gogpu/wgpu\x00")
+	pinner.Pin(&appName[0])
+	pinner.Pin(&engineName[0])
 
 	appInfo := vk.ApplicationInfo{
 		SType:              vk.StructureTypeApplicationInfo,
@@ -92,11 +100,13 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	// Convert to C strings
 	extensionPtrs := make([]uintptr, len(extensions))
 	for i, ext := range extensions {
+		pinner.Pin(unsafe.StringData(ext))
 		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
 	}
 
 	layerPtrs := make([]uintptr, len(layers))
 	for i, layer := range layers {
+		pinner.Pin(unsafe.StringData(layer))
 		layerPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(layer)))
 	}
 
@@ -109,9 +119,11 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 
 	if len(extensionPtrs) > 0 {
+		pinner.Pin(&extensionPtrs[0])
 		createInfo.PpEnabledExtensionNames = uintptr(unsafe.Pointer(&extensionPtrs[0]))
 	}
 	if len(layerPtrs) > 0 {
+		pinner.Pin(&layerPtrs[0])
 		createInfo.PpEnabledLayerNames = uintptr(unsafe.Pointer(&layerPtrs[0]))
 	}
 

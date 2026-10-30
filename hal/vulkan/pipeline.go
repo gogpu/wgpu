@@ -63,6 +63,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		entryPointVertex = defaultEntryPoint
 	}
 	vertexEntryBytes := append([]byte(entryPointVertex), 0)
+	// The stage infos reference entry point names through uintptr fields,
+	// which keep nothing in place when the goroutine stack moves; pin them
+	// until the pipeline is created (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(&vertexEntryBytes[0])
 
 	// The HAL render stages carry no pipeline constants yet: the public
 	// VertexState/FragmentState have no Constants field. Overrides take their
@@ -96,6 +102,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			entryPointFragment = defaultEntryPoint
 		}
 		fragmentEntryBytes = append([]byte(entryPointFragment), 0)
+		pinner.Pin(&fragmentEntryBytes[0])
 
 		fragmentHandle, temp, err := d.compileStage(fragmentModule, ir.StageFragment, entryPointFragment, nil)
 		if err != nil {
@@ -437,6 +444,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		entryPoint = defaultEntryPoint
 	}
 	entryPointBytes := append([]byte(entryPoint), 0)
+	// PName is a uintptr: pin the name until the pipeline is created
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(&entryPointBytes[0])
 
 	computeHandle, temp, err := d.compileStage(computeModule, ir.StageCompute, entryPoint, desc.Compute.Constants)
 	if err != nil {
