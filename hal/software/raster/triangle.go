@@ -219,24 +219,34 @@ func Rasterize(tri Triangle, viewport Viewport, callback RasterCallback) {
 	}
 }
 
-// ComputeTriangleArea returns the signed area of a triangle.
-// Positive for CCW winding, negative for CW winding in screen space.
+// ComputeTriangleArea returns twice the signed area of a triangle as the cross
+// product (v1-v0) x (v2-v0) of its screen-space (framebuffer, y down)
+// coordinates. Positive means clockwise as displayed; this is the opposite
+// sign of the WebGPU spec area used for facing (see IsBackFacing).
 func ComputeTriangleArea(v0, v1, v2 ScreenVertex) float32 {
 	e01 := NewEdgeFunction(v0.X, v0.Y, v1.X, v1.Y)
 	return e01.Evaluate(v2.X, v2.Y)
 }
 
 // IsBackFacing returns true if the triangle is back-facing.
-// This depends on the front face definition and the triangle's winding.
+//
+// WebGPU spec (§ "Polygon rasterization"): with the vertices in framebuffer
+// coordinates (origin top-left, y down),
+//
+//	area = 0.5 * ((v1.x*v2.y - v2.x*v1.y) + sum(v[i+1].x*v[i].y - v[i].x*v[i+1].y))
+//
+// "ccw": area > 0 is front-facing, otherwise back-facing; "cw": area < 0 is
+// front-facing, otherwise back-facing. For a triangle this area is
+// -ComputeTriangleArea/2, so a zero-area triangle is back-facing either way.
+// (Before v0.34.6 the sign was taken the other way round — the y-up reading of
+// a y-down screen — and culled the spec's front faces; P1-SW-014.)
 func IsBackFacing(tri Triangle, frontFace FrontFace) bool {
-	area := ComputeTriangleArea(tri.V0, tri.V1, tri.V2)
+	specArea := -ComputeTriangleArea(tri.V0, tri.V1, tri.V2)
 	switch frontFace {
 	case FrontFaceCCW:
-		// CCW is front, so negative area (CW) means back-facing
-		return area < 0
+		return !(specArea > 0)
 	case FrontFaceCW:
-		// CW is front, so positive area (CCW) means back-facing
-		return area > 0
+		return !(specArea < 0)
 	}
 	return false
 }

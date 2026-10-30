@@ -503,18 +503,19 @@ func TestPipelineDepthWriteDisabled(t *testing.T) {
 func TestPipelineCulling(t *testing.T) {
 	p := NewPipeline(100, 100)
 
-	// CCW triangle (front-facing by default)
+	// Counter-clockwise as displayed (framebuffer y points down): front-facing
+	// by default. WebGPU spec area > 0.
 	triCCW := CreateScreenTriangle(
 		10, 10, 0.5,
-		50, 10, 0.5,
 		30, 50, 0.5,
+		50, 10, 0.5,
 	)
 
-	// CW triangle (back-facing by default)
+	// Clockwise as displayed: back-facing by default. Spec area < 0.
 	triCW := CreateScreenTriangle(
 		60, 10, 0.5,
-		60, 50, 0.5,
 		90, 30, 0.5,
+		60, 50, 0.5,
 	)
 
 	// With back-face culling, only CCW should be drawn
@@ -607,18 +608,19 @@ func TestPipelineResize(t *testing.T) {
 // =============================================================================
 
 func TestShouldCull(t *testing.T) {
-	// CCW triangle
+	// Counter-clockwise as displayed (y down): WebGPU spec area = +50.
+	// Before v0.34.6 these two fixtures were swapped (the y-up reading).
 	triCCW := CreateScreenTriangle(
 		0, 0, 0.5,
-		10, 0, 0.5,
 		5, 10, 0.5,
+		10, 0, 0.5,
 	)
 
-	// CW triangle
+	// Clockwise as displayed: spec area = -50.
 	triCW := CreateScreenTriangle(
 		0, 0, 0.5,
-		5, 10, 0.5,
 		10, 0, 0.5,
+		5, 10, 0.5,
 	)
 
 	tests := []struct {
