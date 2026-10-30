@@ -105,6 +105,11 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 	if desc.DepthStencil != nil {
 		return false
 	}
+	// The blit copies the quad without per-triangle facing; a culled quad
+	// must draw nothing.
+	if desc.Primitive.CullMode != gputypes.CullModeNone {
+		return false
+	}
 	if desc.Multisample.Count > 1 {
 		return false
 	}
@@ -1634,6 +1639,12 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 		return
 	}
 
+	// Face culling. Set before the DepthStencil early return below: a
+	// pipeline without depth/stencil culls too (P1-SW-014 — the raster
+	// pipeline stayed at CullNone for every draw).
+	pipe.SetCullMode(convertCullMode(r.pipeline.desc.Primitive.CullMode))
+	pipe.SetFrontFace(convertFrontFace(r.pipeline.desc.Primitive.FrontFace))
+
 	// Blend state from the first fragment target.
 	if frag := r.pipeline.desc.Fragment; frag != nil && len(frag.Targets) > 0 {
 		if blend := frag.Targets[0].Blend; blend != nil {
@@ -1691,6 +1702,27 @@ func isStencilEnabled(sf hal.StencilFaceState) bool {
 		return false
 	}
 	return true
+}
+
+// convertCullMode maps gputypes.CullMode to raster.CullMode. The values differ
+// (raster uses iota), so the mapping is explicit.
+func convertCullMode(m gputypes.CullMode) raster.CullMode {
+	switch m {
+	case gputypes.CullModeFront:
+		return raster.CullFront
+	case gputypes.CullModeBack:
+		return raster.CullBack
+	default:
+		return raster.CullNone
+	}
+}
+
+// convertFrontFace maps gputypes.FrontFace to raster.FrontFace.
+func convertFrontFace(f gputypes.FrontFace) raster.FrontFace {
+	if f == gputypes.FrontFaceCW {
+		return raster.FrontFaceCW
+	}
+	return raster.FrontFaceCCW
 }
 
 // convertCompareFunction maps gputypes.CompareFunction to raster.CompareFunc.
