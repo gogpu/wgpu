@@ -134,6 +134,28 @@ func (dt *DeviceTracker) InsertBuffer(index track.TrackerIndex, usage track.Buff
 	dt.buffers.InsertSingle(index, usage)
 }
 
+// SetSingleBuffer moves a buffer to usage outside any command buffer (a
+// queue write) and returns the barrier to record before that use.
+//
+// Reference: wgpu-core device/queue.rs write_staging_buffer_impl
+// (trackers.buffers.set_single(&buffer, COPY_DST))
+func (dt *DeviceTracker) SetSingleBuffer(index track.TrackerIndex, usage track.BufferUses) (track.PendingTransition, bool) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.buffers.SetSingle(index, usage)
+}
+
+// SetSingleTexture moves a whole texture to usage outside any command buffer
+// (a queue write) and returns the barrier to record before that use.
+//
+// Reference: wgpu-core device/queue.rs write_texture
+// (trackers.textures.set_single(&dst, selector, COPY_DST))
+func (dt *DeviceTracker) SetSingleTexture(index track.TrackerIndex, usage track.TextureUses) (track.TexturePendingTransition, bool) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.textures.SetSingle(index, usage)
+}
+
 // RemoveBuffer removes a buffer from the device tracker.
 func (dt *DeviceTracker) RemoveBuffer(index track.TrackerIndex) {
 	dt.mu.Lock()

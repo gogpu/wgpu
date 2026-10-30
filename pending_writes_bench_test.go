@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
 )
@@ -24,7 +25,7 @@ func (q *benchBatchingQueue) SupportsCommandBufferCopies() bool { return true }
 func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q, nil)
+	pw := newPendingWrites(dev, q, nil, nil)
 	defer pw.destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
@@ -33,7 +34,7 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst, 0, data)
+		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst, 0, data)
 	}
 }
 
@@ -49,7 +50,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	q := &benchBatchingQueue{Queue: noop.Queue{}}
 	pool := newEncoderPool(dev)
 	defer pool.destroy()
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, q, pool, nil)
 	defer pw.destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
@@ -57,7 +58,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	usage := gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst
 
 	// Warmup: create chunk, flush, recall — so steady-state has a free chunk.
-	_ = pw.writeBuffer(buf, usage, 0, data)
+	_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, usage, 0, data)
 	pw.mu.Lock()
 	pw.flush()
 	if pw.belt != nil {
@@ -70,7 +71,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	b.ReportAllocs()
 	subIdx := uint64(2)
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, usage, 0, data)
+		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, usage, 0, data)
 		// Simulate frame boundary: flush + maintain every 20 writes (typical frame).
 		if i%20 == 19 {
 			pw.mu.Lock()
@@ -91,7 +92,7 @@ func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
 	q := &mockBatchingQueue{Queue: noop.Queue{}}
 	pool := newEncoderPool(dev)
 	defer pool.destroy()
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, q, pool, nil)
 	defer pw.destroy()
 
 	b.ResetTimer()
@@ -107,7 +108,7 @@ func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
 func BenchmarkPendingWrites_Maintain(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q, nil)
+	pw := newPendingWrites(dev, q, nil, nil)
 	defer pw.destroy()
 
 	// Pre-populate inflight list

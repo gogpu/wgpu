@@ -210,6 +210,24 @@ func (t *BufferTracker) Merge(scope *BufferUsageScope) []PendingTransition {
 	return transitions
 }
 
+// SetSingle moves one buffer to usage and returns the barrier from its
+// current state, unless SkipBufferBarrier allows omitting it. Used by queue
+// writes, which change device state outside any command buffer. An untracked
+// index is treated as BufferUsesNone.
+//
+// Reference: wgpu-core track/buffer.rs DeviceBufferTracker::set_single
+func (t *BufferTracker) SetSingle(index TrackerIndex, usage BufferUses) (PendingTransition, bool) {
+	current := BufferUsesNone
+	if t.IsTracked(index) {
+		current = t.states[index].usage
+	}
+	t.InsertSingle(index, usage)
+	if SkipBufferBarrier(current, usage) {
+		return PendingTransition{}, false
+	}
+	return PendingTransition{Index: index, Usage: StateTransition{From: current, To: usage}}, true
+}
+
 // MergeEncoder merges a submitted command buffer's tracker into the device
 // tracker: a transition from the device's current state to the command
 // buffer's start state is returned (unless SkipBufferBarrier allows omitting

@@ -266,6 +266,26 @@ func (t *TextureTracker) Merge(scope *TextureUsageScope) []TexturePendingTransit
 	return transitions
 }
 
+// SetSingle moves one whole texture to usage and returns the barrier from its
+// current state, unless SkipBarrier allows omitting it. Used by queue writes,
+// which change device state outside any command buffer. An untracked index is
+// treated as TextureUsesUninitialized. The tracker is whole-texture, so the
+// barrier covers every subresource (TexturePendingTransition.IntoHAL leaves
+// the range at its zero value, meaning all mips and layers).
+//
+// Reference: wgpu-core track/texture.rs DeviceTextureTracker::set_single
+func (t *TextureTracker) SetSingle(index TrackerIndex, usage TextureUses) (TexturePendingTransition, bool) {
+	current := TextureUsesUninitialized
+	if t.IsTracked(index) {
+		current = t.states[index].usage
+	}
+	t.InsertSingle(index, usage)
+	if SkipBarrier(current, usage) {
+		return TexturePendingTransition{}, false
+	}
+	return TexturePendingTransition{Index: index, Usage: TextureStateTransition{From: current, To: usage}}, true
+}
+
 // MergeEncoder merges a submitted command buffer's tracker into the device
 // tracker. For every texture the command buffer uses, a transition from the
 // device's current state to the command buffer's start state is returned

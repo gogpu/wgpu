@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
 )
@@ -29,10 +30,26 @@ type mockBatchingQueue struct {
 type barrierCaptureEncoder struct {
 	noop.CommandEncoder
 	textureBarriers []hal.TextureBarrier
+	bufferBarriers  []hal.BufferBarrier
+	events          []string // "tex-barrier", "buf-barrier", "copy" in recording order
 }
 
 func (e *barrierCaptureEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	e.textureBarriers = append(e.textureBarriers, barriers...)
+	e.events = append(e.events, "tex-barrier")
+}
+
+func (e *barrierCaptureEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
+	e.bufferBarriers = append(e.bufferBarriers, barriers...)
+	e.events = append(e.events, "buf-barrier")
+}
+
+func (e *barrierCaptureEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {
+	e.events = append(e.events, "copy")
+}
+
+func (e *barrierCaptureEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
+	e.events = append(e.events, "copy")
 }
 
 type barrierCaptureDevice struct {
@@ -114,7 +131,7 @@ func createBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockBatching
 	dev := &noop.Device{}
 	q := &mockBatchingQueue{}
 	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, q, pool, nil)
 	t.Cleanup(func() { pool.destroy() })
 	return pw, dev, q
 }
@@ -124,7 +141,7 @@ func createNonBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockNonBa
 	t.Helper()
 	dev := &noop.Device{}
 	q := &mockNonBatchingQueue{}
-	pw := newPendingWrites(dev, q, nil)
+	pw := newPendingWrites(dev, q, nil, nil)
 	return pw, dev, q
 }
 
@@ -184,7 +201,7 @@ func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 	}
 
 	data := []byte{1, 2, 3, 4}
-	if err := pw.writeBuffer(buf, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 8, data); err != nil {
+	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 8, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -217,7 +234,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 
 	data := []byte{10, 20, 30, 40, 50}
 	usage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex | gputypes.BufferUsageUniform
-	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex|gputypes.BufferUsageUniform, 16, data); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, usage, 16, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -246,23 +263,20 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	pw2, _, _ := createBatchingPW(t)
 	defer pw2.destroy()
 
-	if err := pw2.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
+	if err := pw2.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// dstBuffers should track the buffer with proper usage.
+	// dstBuffers should track the buffer with the usage writeBuffer was given.
+	wantUsage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex
 	pw2.mu.Lock()
-	pw2.dstBuffers[dstBuf] = usage
-	pw2.mu.Unlock()
-
-	pw2.mu.Lock()
-	trackedUsage, ok := pw2.dstBuffers[dstBuf]
+	tracked, ok := pw2.dstBuffers[dstBuf]
 	pw2.mu.Unlock()
 	if !ok {
 		t.Error("expected destination buffer to be tracked in dstBuffers")
 	}
-	if trackedUsage != usage {
-		t.Errorf("expected tracked usage=%d, got %d", usage, trackedUsage)
+	if tracked.usage != wantUsage {
+		t.Errorf("expected tracked usage=%d, got %d", wantUsage, tracked.usage)
 	}
 }
 
@@ -272,7 +286,7 @@ func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 
 	dstBuf := &noop.Resource{}
 	// Empty data should be a no-op for batching.
-	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer empty: %v", err)
 	}
 
@@ -349,64 +363,161 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	}
 }
 
-func captureTextureWriteBarriers(t *testing.T, dimension gputypes.TextureDimension, origin hal.Origin3D, size hal.Extent3D) []hal.TextureBarrier {
+// trackedPendingWrites builds a batching pendingWrites wired to a real device
+// tracker, with an encoder that records barriers and copies in order.
+func trackedPendingWrites(t *testing.T) (*pendingWrites, *barrierCaptureDevice, *core.Device) {
 	t.Helper()
 	dev := &barrierCaptureDevice{}
-	q := &mockBatchingQueue{}
+	coreDevice := core.NewDevice(dev, &core.Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "pw-tracker")
 	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, &mockBatchingQueue{}, pool, coreDevice.Tracker())
 	t.Cleanup(func() {
 		pw.destroy()
 		pool.destroy()
 	})
+	return pw, dev, coreDevice
+}
 
+// writeTrackedTexture creates a 16x16x2 texture on coreDevice, leaves it in
+// state prior in the device tracker and writes one texel of layer 1.
+func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Device, usage gputypes.TextureUsage, prior track.TextureUses) (*Texture, track.TrackerIndex) {
+	t.Helper()
 	halTexture := &noop.Texture{}
 	coreTexture := core.NewTexture(
-		halTexture, nil, gputypes.TextureFormatRGBA8Unorm,
-		dimension, gputypes.TextureUsageCopyDst,
+		halTexture, coreDevice, gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureDimension2D, usage,
 		gputypes.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 2},
 		1, 1, "texture",
 	)
-	texture := &Texture{hal: halTexture, coreTexture: coreTexture}
-	dst := &hal.ImageCopyTexture{
-		Texture: halTexture,
-		Origin:  origin,
-		Aspect:  gputypes.TextureAspectAll,
-	}
-	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: size.Height}
-	data := make([]byte, size.Width*size.Height*size.DepthOrArrayLayers*4)
-
-	if err := pw.writeTextureFor(texture, dst, data, layout, &size); err != nil {
+	idx := coreTexture.TrackingData().Index()
+	coreDevice.Tracker().InsertTexture(idx, prior)
+	texture := &Texture{hal: halTexture, device: &Device{core: coreDevice}, coreTexture: coreTexture}
+	dst := &hal.ImageCopyTexture{Texture: halTexture, Origin: hal.Origin3D{Z: 1}, Aspect: gputypes.TextureAspectAll}
+	size := hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
+	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}
+	if err := pw.writeTextureFor(texture, dst, make([]byte, 4), layout, &size); err != nil {
 		t.Fatalf("writeTextureFor: %v", err)
 	}
-	return dev.encoder.textureBarriers
+	return texture, idx
 }
 
-func TestPendingWrites_WriteTextureTransitionsArrayLayers(t *testing.T) {
-	barriers := captureTextureWriteBarriers(t, gputypes.TextureDimension2D, hal.Origin3D{Z: 1}, hal.Extent3D{
-		Width: 1, Height: 1, DepthOrArrayLayers: 1,
-	})
-	if len(barriers) != 2 {
-		t.Fatalf("texture barriers = %d, want 2", len(barriers))
+// TestPendingWrites_WriteTextureBarrierFromTrackedState is the texture half of
+// P1-CORE-008: the pre-copy barrier starts from the texture's device-tracker
+// state (not from a guessed UNDEFINED, which discards earlier contents), covers
+// the whole texture (the tracker is whole-texture), and is recorded before the
+// copy. Rust: write_texture → trackers.textures.set_single(COPY_DST).
+func TestPendingWrites_WriteTextureBarrierFromTrackedState(t *testing.T) {
+	pw, dev, coreDevice := trackedPendingWrites(t)
+	_, idx := writeTrackedTexture(t, pw, coreDevice,
+		gputypes.TextureUsageCopyDst|gputypes.TextureUsageRenderAttachment, track.TextureUsesColorTarget)
+
+	enc := dev.encoder
+	if len(enc.textureBarriers) != 1 {
+		t.Fatalf("texture barriers = %d, want 1", len(enc.textureBarriers))
 	}
-	for i, barrier := range barriers {
-		if barrier.Range.BaseArrayLayer != 1 || barrier.Range.ArrayLayerCount != 1 {
-			t.Errorf("barrier %d array range = %d+%d, want 1+1", i, barrier.Range.BaseArrayLayer, barrier.Range.ArrayLayerCount)
-		}
+	b := enc.textureBarriers[0]
+	if b.Usage.OldUsage != gputypes.TextureUsageRenderAttachment || b.Usage.NewUsage != gputypes.TextureUsageCopyDst {
+		t.Errorf("barrier = %v → %v, want RenderAttachment → CopyDst", b.Usage.OldUsage, b.Usage.NewUsage)
+	}
+	if b.Range != (hal.TextureRange{}) {
+		t.Errorf("barrier range = %+v, want the whole texture (zero range)", b.Range)
+	}
+	if len(enc.events) != 2 || enc.events[0] != "tex-barrier" || enc.events[1] != "copy" {
+		t.Errorf("events = %v, want [tex-barrier copy]", enc.events)
+	}
+	if got := coreDevice.Tracker().TextureUsage(idx); got != track.TextureUsesCopyDst {
+		t.Errorf("device state after write = %d, want CopyDst", got)
 	}
 }
 
-func TestPendingWrites_WriteTextureTransitions3DDepth(t *testing.T) {
-	barriers := captureTextureWriteBarriers(t, gputypes.TextureDimension3D, hal.Origin3D{Z: 1}, hal.Extent3D{
-		Width: 1, Height: 1, DepthOrArrayLayers: 1,
-	})
-	if len(barriers) != 2 {
-		t.Fatalf("texture barriers = %d, want 2", len(barriers))
+// TestPendingWrites_FlushTextureReadTransitionNeedsTextureBinding: the eager
+// COPY_DST → RESOURCE transition at flush (kept while bind-group usages are
+// untracked, P1-CORE-010) happens only for a texture that can be sampled. The
+// old code transitioned every written texture to SHADER_READ_ONLY_OPTIMAL, a
+// Vulkan validation error for an image without SAMPLED usage (VUID-01211,
+// seen in P1-VK-010), and never told the tracker.
+func TestPendingWrites_FlushTextureReadTransitionNeedsTextureBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		usage     gputypes.TextureUsage
+		wantFlush int
+		wantState track.TextureUses
+	}{
+		{"copy-only", gputypes.TextureUsageCopyDst | gputypes.TextureUsageCopySrc, 0, track.TextureUsesCopyDst},
+		{"sampled", gputypes.TextureUsageCopyDst | gputypes.TextureUsageTextureBinding, 1, track.TextureUsesResource},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pw, dev, coreDevice := trackedPendingWrites(t)
+			_, idx := writeTrackedTexture(t, pw, coreDevice, tc.usage, track.TextureUsesUninitialized)
+			before := len(dev.encoder.textureBarriers)
+
+			pw.mu.Lock()
+			cmdBuf, _, _, _, err := pw.flush()
+			pw.mu.Unlock()
+			if err != nil || cmdBuf == nil {
+				t.Fatalf("flush: cmdBuf=%v err=%v", cmdBuf, err)
+			}
+			flushBarriers := dev.encoder.textureBarriers[before:]
+			if len(flushBarriers) != tc.wantFlush {
+				t.Fatalf("flush texture barriers = %d, want %d", len(flushBarriers), tc.wantFlush)
+			}
+			if tc.wantFlush == 1 && (flushBarriers[0].Usage.OldUsage != gputypes.TextureUsageCopyDst ||
+				flushBarriers[0].Usage.NewUsage != gputypes.TextureUsageTextureBinding) {
+				t.Errorf("flush barrier = %v → %v, want CopyDst → TextureBinding",
+					flushBarriers[0].Usage.OldUsage, flushBarriers[0].Usage.NewUsage)
+			}
+			if got := coreDevice.Tracker().TextureUsage(idx); got != tc.wantState {
+				t.Errorf("device state after flush = %d, want %d", got, tc.wantState)
+			}
+		})
 	}
-	for i, barrier := range barriers {
-		if barrier.Range.BaseArrayLayer != 0 || barrier.Range.ArrayLayerCount != 1 {
-			t.Errorf("barrier %d array range = %d+%d, want 0+1", i, barrier.Range.BaseArrayLayer, barrier.Range.ArrayLayerCount)
-		}
+}
+
+// TestPendingWrites_WriteBufferBarrierBeforeCopy is the #371 regression
+// (P1-CORE-008): a WriteBuffer into a storage buffer that a compute pass left
+// in STORAGE_WRITE must record STORAGE_WRITE → COPY_DST before the staging
+// copy. The old code recorded no barrier at all for storage/copy buffers.
+// Rust: write_staging_buffer_impl → set_single(COPY_DST) + transition_buffers
+// before copy_buffer_to_buffer (queue.rs:919-950).
+func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
+	pw, dev, coreDevice := trackedPendingWrites(t)
+	buf := core.NewBuffer(&noop.Resource{}, coreDevice,
+		gputypes.BufferUsageStorage|gputypes.BufferUsageCopyDst|gputypes.BufferUsageCopySrc, 48, "b")
+	idx := buf.TrackingData().Index()
+	coreDevice.Tracker().InsertBuffer(idx, track.BufferUsesStorageWrite)
+
+	if err := pw.writeBuffer(&noop.Resource{}, idx, buf.Usage(), 0, make([]byte, 48)); err != nil {
+		t.Fatalf("writeBuffer: %v", err)
+	}
+	enc := dev.encoder
+	if len(enc.events) != 2 || enc.events[0] != "buf-barrier" || enc.events[1] != "copy" {
+		t.Fatalf("events = %v, want [buf-barrier copy]", enc.events)
+	}
+	b := enc.bufferBarriers[0]
+	if b.Usage.OldUsage != gputypes.BufferUsageStorage || b.Usage.NewUsage != gputypes.BufferUsageCopyDst {
+		t.Errorf("barrier = %v → %v, want Storage → CopyDst", b.Usage.OldUsage, b.Usage.NewUsage)
+	}
+	if got := coreDevice.Tracker().BufferUsage(idx); got != track.BufferUsesCopyDst {
+		t.Errorf("device state after write = %d, want CopyDst", got)
+	}
+
+	// No read usage (VERTEX/INDEX/UNIFORM/INDIRECT): flush adds no barrier and
+	// the buffer stays COPY_DST, so the next command buffer's transit (e.g.
+	// COPY_DST → COPY_SRC for a readback) starts from the real state.
+	pw.mu.Lock()
+	cmdBuf, _, _, flushedBufs, err := pw.flush()
+	pw.mu.Unlock()
+	if err != nil || cmdBuf == nil {
+		t.Fatalf("flush: cmdBuf=%v err=%v", cmdBuf, err)
+	}
+	if len(flushedBufs) != 1 {
+		t.Errorf("flushed destination buffers = %d, want 1", len(flushedBufs))
+	}
+	if len(enc.bufferBarriers) != 1 {
+		t.Errorf("buffer barriers after flush = %d, want 1", len(enc.bufferBarriers))
+	}
+	if got := coreDevice.Tracker().BufferUsage(idx); got != track.BufferUsesCopyDst {
+		t.Errorf("device state after flush = %d, want CopyDst", got)
 	}
 }
 
@@ -463,7 +574,7 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	dstBuf := &noop.Resource{}
 	data := []byte{1, 2, 3, 4}
 	usage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex
-	if err := pw.writeBuffer(dstBuf, usage, 0, data); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, usage, 0, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -619,7 +730,7 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 
 	// Write something.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, []byte{1, 2, 3, 4}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, []byte{1, 2, 3, 4}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -657,7 +768,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 
 	// Write to create staging + encoder.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -956,7 +1067,7 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 	defer pw.destroy()
 
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer(empty): %v", err)
 	}
 	if pw.isRecording {
@@ -973,10 +1084,10 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	data := []byte{1, 2, 3, 4}
 
 	// Multiple writes should accumulate.
-	if err := pw.writeBuffer(buf1, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
+	if err := pw.writeBuffer(buf1, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 1: %v", err)
 	}
-	if err := pw.writeBuffer(buf2, gputypes.BufferUsageCopyDst|gputypes.BufferUsageUniform, 0, data); err != nil {
+	if err := pw.writeBuffer(buf2, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageUniform, 0, data); err != nil {
 		t.Fatalf("writeBuffer 2: %v", err)
 	}
 
@@ -1019,13 +1130,13 @@ func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// First write activates encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
 		t.Fatalf("write 1: %v", err)
 	}
 	firstEncoder := pw.encoder
 
 	// Second write should reuse the same encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
 
@@ -1039,7 +1150,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// Write and flush.
-	if err := pw.writeBuffer(&noop.Resource{}, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -1055,7 +1166,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	_ = flushedBufs
 
 	// Write again — should get a new encoder from pool.
-	if err := pw.writeBuffer(&noop.Resource{}, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
 		t.Fatalf("write after flush: %v", err)
 	}
 
@@ -1074,7 +1185,7 @@ func TestPendingWrites_NewWithNoopBackend(t *testing.T) {
 	dev, q, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pw := newPendingWrites(dev, q, nil)
+	pw := newPendingWrites(dev, q, nil, nil)
 	defer pw.destroy()
 
 	if pw.usesBatching {
@@ -1090,7 +1201,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	dev, q, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pw := newPendingWrites(dev, q, nil)
+	pw := newPendingWrites(dev, q, nil, nil)
 	defer pw.destroy()
 
 	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{
@@ -1104,7 +1215,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	}
 
 	data := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	if err := pw.writeBuffer(buf, gputypes.BufferUsageCopyDst, 4, data); err != nil {
+	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 4, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -1135,7 +1246,7 @@ func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
 	dev := &mockStagingSizeDevice{maxStaging: 1 << 20} // 1MB
 	q := &mockBatchingQueue{}
 	pool := newEncoderPool(&dev.Device)
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, q, pool, nil)
 	defer pw.destroy()
 	defer pool.destroy()
 
@@ -1154,7 +1265,7 @@ func TestPendingWrites_MaxStagingBufferSizerDefaultWhenNotImplemented(t *testing
 	dev := &noop.Device{} // noop.Device does NOT implement MaxStagingBufferSizer
 	q := &mockBatchingQueue{}
 	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, q, pool)
+	pw := newPendingWrites(dev, q, pool, nil)
 	defer pw.destroy()
 	defer pool.destroy()
 
