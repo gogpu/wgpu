@@ -178,7 +178,7 @@ func TestCopyCommandTextureScopeDrivesBarriers(t *testing.T) {
 			if barrierCB == nil {
 				t.Fatal("expected copy usage transition to inject a barrier command buffer")
 			}
-			if got := device.core.Tracker().Textures().GetUsage(idx); got != tt.copyUsage {
+			if got := device.core.Tracker().TextureUsage(idx); got != tt.copyUsage {
 				t.Errorf("tracked usage after injection = %v, want %v", got, tt.copyUsage)
 			}
 		})

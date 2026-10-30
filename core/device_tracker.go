@@ -3,6 +3,8 @@
 package core
 
 import (
+	"sync"
+
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
@@ -12,11 +14,21 @@ import (
 // merged into this tracker, producing the barrier list that must be
 // recorded before the command buffer executes.
 //
+// Every buffer and texture is inserted when it is created (NewBuffer,
+// NewTexture), so a tracker index reused after a resource is freed starts
+// from the new resource's initial state instead of the dead one's.
+//
+// All methods are safe for concurrent use: resources are created and freed
+// from any goroutine while Queue.Submit merges command buffers. The lock is
+// a leaf lock — no other lock is taken while it is held.
+//
 // This is the Go equivalent of Rust wgpu-core's DeviceTracker
-// (device/resource.rs). Covers both textures and buffers.
+// (device/resource.rs `trackers: Mutex<DeviceTracker>`). Covers both
+// textures and buffers.
 //
 // Reference: wgpu-core track/mod.rs DeviceTracker
 type DeviceTracker struct {
+	mu       sync.Mutex
 	textures *track.TextureTracker
 	buffers  *track.BufferTracker
 }
@@ -29,14 +41,48 @@ func NewDeviceTracker() *DeviceTracker {
 	}
 }
 
-// Textures returns the device-level texture tracker.
-func (dt *DeviceTracker) Textures() *track.TextureTracker {
-	return dt.textures
+// TextureUsage returns the device-level usage of a texture, or
+// TextureUsesNone if the index is not tracked.
+func (dt *DeviceTracker) TextureUsage(index track.TrackerIndex) track.TextureUses {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.textures.GetUsage(index)
 }
 
-// Buffers returns the device-level buffer tracker.
-func (dt *DeviceTracker) Buffers() *track.BufferTracker {
-	return dt.buffers
+// BufferUsage returns the device-level usage of a buffer, or BufferUsesNone
+// if the index is not tracked.
+func (dt *DeviceTracker) BufferUsage(index track.TrackerIndex) track.BufferUses {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.buffers.GetUsage(index)
+}
+
+// IsTextureTracked reports whether the texture index is tracked.
+func (dt *DeviceTracker) IsTextureTracked(index track.TrackerIndex) bool {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.textures.IsTracked(index)
+}
+
+// IsBufferTracked reports whether the buffer index is tracked.
+func (dt *DeviceTracker) IsBufferTracked(index track.TrackerIndex) bool {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.buffers.IsTracked(index)
+}
+
+// TextureCount returns the number of tracked textures.
+func (dt *DeviceTracker) TextureCount() int {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.textures.Size()
+}
+
+// BufferCount returns the number of tracked buffers.
+func (dt *DeviceTracker) BufferCount() int {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	return dt.buffers.Size()
 }
 
 // MergeTextureScope merges a command buffer's texture tracker (see
@@ -54,6 +100,8 @@ func (dt *DeviceTracker) MergeTextureScope(cmdTracker *track.EncoderTextureTrack
 	if cmdTracker == nil {
 		return nil
 	}
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	return dt.textures.MergeEncoder(cmdTracker)
 }
 
@@ -71,16 +119,25 @@ func (dt *DeviceTracker) MergeBufferScope(cmdTracker *track.EncoderBufferTracker
 	if cmdTracker == nil {
 		return nil
 	}
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	return dt.buffers.MergeEncoder(cmdTracker)
 }
 
-// InsertBuffer registers a buffer in the device tracker with its initial usage.
+// InsertBuffer registers a buffer in the device tracker with its initial
+// usage, overwriting whatever state the index held before.
+//
+// Reference: wgpu-core track/buffer.rs DeviceBufferTracker::insert_single
 func (dt *DeviceTracker) InsertBuffer(index track.TrackerIndex, usage track.BufferUses) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	dt.buffers.InsertSingle(index, usage)
 }
 
 // RemoveBuffer removes a buffer from the device tracker.
 func (dt *DeviceTracker) RemoveBuffer(index track.TrackerIndex) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	dt.buffers.Remove(index)
 }
 
@@ -95,7 +152,9 @@ func (dt *DeviceTracker) RemoveBuffer(index track.TrackerIndex) {
 func (dt *DeviceTracker) TrackPresentTexture(trackerIndex track.TrackerIndex) *track.TexturePendingTransition {
 	scope := track.NewTextureUsageScope()
 	_ = scope.SetUsage(trackerIndex, track.TextureUsesPresent)
+	dt.mu.Lock()
 	transitions := dt.textures.Merge(scope)
+	dt.mu.Unlock()
 	if len(transitions) == 0 {
 		return nil
 	}
@@ -103,14 +162,20 @@ func (dt *DeviceTracker) TrackPresentTexture(trackerIndex track.TrackerIndex) *t
 }
 
 // InsertTexture registers a texture in the device tracker with its initial
-// usage. Called when a texture is first used (e.g., acquired from swapchain).
+// usage, overwriting whatever state the index held before. Called when the
+// texture is created (NewTexture) with TextureUsesUninitialized.
+//
+// Reference: wgpu-core track/texture.rs DeviceTextureTracker::insert_single
 func (dt *DeviceTracker) InsertTexture(index track.TrackerIndex, usage track.TextureUses) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	dt.textures.InsertSingle(index, usage)
 }
 
 // RemoveTexture removes a texture from the device tracker.
-// Called when a texture is destroyed.
 func (dt *DeviceTracker) RemoveTexture(index track.TrackerIndex) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
 	dt.textures.Remove(index)
 }
 

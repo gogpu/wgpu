@@ -19,11 +19,8 @@ func TestDeviceTracker_New(t *testing.T) {
 	if dt == nil {
 		t.Fatal("NewDeviceTracker returned nil")
 	}
-	if dt.Textures() == nil {
-		t.Fatal("Textures() returned nil")
-	}
-	if dt.Textures().Size() != 0 {
-		t.Errorf("Initial texture tracker size = %d, want 0", dt.Textures().Size())
+	if dt.TextureCount() != 0 {
+		t.Errorf("Initial texture tracker size = %d, want 0", dt.TextureCount())
 	}
 }
 
@@ -34,15 +31,15 @@ func TestDeviceTracker_InsertRemoveTexture(t *testing.T) {
 	idx := track.TrackerIndex(0)
 
 	dt.InsertTexture(idx, track.TextureUsesColorTarget)
-	if dt.Textures().Size() != 1 {
-		t.Errorf("Size after insert = %d, want 1", dt.Textures().Size())
+	if dt.TextureCount() != 1 {
+		t.Errorf("Size after insert = %d, want 1", dt.TextureCount())
 	}
-	if !dt.Textures().IsTracked(idx) {
+	if !dt.IsTextureTracked(idx) {
 		t.Error("Texture should be tracked after insert")
 	}
 
 	dt.RemoveTexture(idx)
-	if dt.Textures().IsTracked(idx) {
+	if dt.IsTextureTracked(idx) {
 		t.Error("Texture should not be tracked after remove")
 	}
 }
@@ -123,7 +120,7 @@ func TestDeviceTracker_TrackPresentTexture(t *testing.T) {
 	}
 
 	// Device tracker should now be in Present state
-	if dt.Textures().GetUsage(idx) != track.TextureUsesPresent {
+	if dt.TextureUsage(idx) != track.TextureUsesPresent {
 		t.Error("Device tracker should be in Present state after TrackPresentTexture")
 	}
 }
@@ -283,7 +280,7 @@ func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
 	}
 
 	// Device tracker should now be in Present state
-	if dt.Textures().GetUsage(idx) != track.TextureUsesPresent {
+	if dt.TextureUsage(idx) != track.TextureUsesPresent {
 		t.Error("Device tracker should be in Present state after TrackPresentTexture")
 	}
 }
@@ -326,7 +323,7 @@ func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 	}
 
 	// Device tracker should now be in ColorTarget state.
-	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
+	if dt.TextureUsage(idx) != track.TextureUsesColorTarget {
 		t.Error("Device tracker should be in ColorTarget state")
 	}
 
@@ -373,10 +370,10 @@ func TestDeviceTracker_SubmitFlowMultipleCBs(t *testing.T) {
 	}
 
 	// Verify final states
-	if dt.Textures().GetUsage(idxA) != track.TextureUsesColorTarget {
+	if dt.TextureUsage(idxA) != track.TextureUsesColorTarget {
 		t.Error("Texture A should be in ColorTarget state")
 	}
-	if dt.Textures().GetUsage(idxB) != track.TextureUsesCopyDst {
+	if dt.TextureUsage(idxB) != track.TextureUsesCopyDst {
 		t.Error("Texture B should be in CopyDst state")
 	}
 }
@@ -401,7 +398,7 @@ func TestDeviceTracker_SubmitFlowEmptyScope(t *testing.T) {
 	}
 
 	// State should be unchanged
-	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
+	if dt.TextureUsage(idx) != track.TextureUsesColorTarget {
 		t.Error("Device tracker state should be unchanged after empty scope merge")
 	}
 }
@@ -426,11 +423,11 @@ func TestDeviceTracker_SubmitFlowNewTextureAutoInsert(t *testing.T) {
 	}
 
 	// Texture should now be tracked
-	if !dt.Textures().IsTracked(idx) {
+	if !dt.IsTextureTracked(idx) {
 		t.Error("Texture should be tracked after auto-insert")
 	}
-	if dt.Textures().GetUsage(idx) != track.TextureUsesColorTarget {
-		t.Errorf("Usage = %d, want ColorTarget", dt.Textures().GetUsage(idx))
+	if dt.TextureUsage(idx) != track.TextureUsesColorTarget {
+		t.Errorf("Usage = %d, want ColorTarget", dt.TextureUsage(idx))
 	}
 }
 
@@ -549,11 +546,8 @@ func TestDeviceTracker_NewHasBufferTracker(t *testing.T) {
 	t.Parallel()
 
 	dt := NewDeviceTracker()
-	if dt.Buffers() == nil {
-		t.Fatal("Buffers() returned nil")
-	}
-	if dt.Buffers().Size() != 0 {
-		t.Errorf("Initial buffer tracker size = %d, want 0", dt.Buffers().Size())
+	if dt.BufferCount() != 0 {
+		t.Errorf("Initial buffer tracker size = %d, want 0", dt.BufferCount())
 	}
 }
 
@@ -564,15 +558,15 @@ func TestDeviceTracker_InsertRemoveBuffer(t *testing.T) {
 	idx := track.TrackerIndex(0)
 
 	dt.InsertBuffer(idx, track.BufferUsesVertex)
-	if dt.Buffers().Size() != 1 {
-		t.Errorf("Size after insert = %d, want 1", dt.Buffers().Size())
+	if dt.BufferCount() != 1 {
+		t.Errorf("Size after insert = %d, want 1", dt.BufferCount())
 	}
-	if !dt.Buffers().IsTracked(idx) {
+	if !dt.IsBufferTracked(idx) {
 		t.Error("Buffer should be tracked after insert")
 	}
 
 	dt.RemoveBuffer(idx)
-	if dt.Buffers().IsTracked(idx) {
+	if dt.IsBufferTracked(idx) {
 		t.Error("Buffer should not be tracked after remove")
 	}
 }
@@ -642,11 +636,11 @@ func TestDeviceTracker_MergeBufferScope_NewBufferAutoInsert(t *testing.T) {
 	if len(transitions) != 0 {
 		t.Errorf("Expected 0 transitions for auto-insert, got %d", len(transitions))
 	}
-	if !dt.Buffers().IsTracked(idx) {
+	if !dt.IsBufferTracked(idx) {
 		t.Error("Buffer should be tracked after auto-insert")
 	}
-	if dt.Buffers().GetUsage(idx) != track.BufferUsesUniform {
-		t.Errorf("Usage = %d, want Uniform", dt.Buffers().GetUsage(idx))
+	if dt.BufferUsage(idx) != track.BufferUsesUniform {
+		t.Errorf("Usage = %d, want Uniform", dt.BufferUsage(idx))
 	}
 }
 
@@ -718,7 +712,7 @@ func TestSubmit_MergesBufferScope(t *testing.T) {
 	}
 
 	// After merge, device tracker should have the new state
-	if dt.Buffers().GetUsage(idx) != track.BufferUsesCopySrc {
+	if dt.BufferUsage(idx) != track.BufferUsesCopySrc {
 		t.Error("Device tracker should be in CopySrc state after merge")
 	}
 }
