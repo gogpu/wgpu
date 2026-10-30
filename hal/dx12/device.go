@@ -2410,14 +2410,11 @@ func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, 
 		// GOGPU_DX12_DXIL_VALIDATE=1 is set. Surfaces the exact
 		// HRESULT+text that dxil.dll would emit, instead of the
 		// opaque E_INVALIDARG that D3D12 CreateGraphicsPipelineState
-		// folds everything into. Also dumps the offending blob to
-		// tmp/ for post-mortem dxilval --corpus replay.
+		// folds everything into. Also dumps the offending blob to the
+		// system temp directory for post-mortem dxilval --corpus replay.
 		if d.dxilValidate {
 			if verr := dxil.Validate(dxilBytes, dxil.ValidateFull); verr != nil {
-				_ = os.WriteFile(
-					fmt.Sprintf("D:/projects/gogpu/wgpu/tmp/dbg_stage%d_%s.dxil", int(ep.Stage), ep.Name),
-					dxilBytes, 0o644,
-				)
+				dumpRejectedDXIL(ep.Stage, ep.Name, dxilBytes)
 				return fmt.Errorf("dx12: DXIL validation rejected %q (stage %d): %w", ep.Name, ep.Stage, verr)
 			}
 		}
@@ -2428,6 +2425,40 @@ func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, 
 	}
 
 	return nil
+}
+
+// dumpRejectedDXIL writes a blob that dxil.Validate rejected to a new file in
+// the system temp directory and logs its path, so whoever set
+// GOGPU_DX12_DXIL_VALIDATE=1 can replay it (P2-DX12-055: it used to go to a
+// hard-coded path of one development machine, with the write error ignored).
+func dumpRejectedDXIL(stage ir.ShaderStage, entryPoint string, blob []byte) {
+	f, err := os.CreateTemp("", dxilDumpPattern(stage, entryPoint))
+	if err != nil {
+		hal.Logger().Warn("dx12: cannot dump rejected DXIL", "entryPoint", entryPoint, "err", err)
+		return
+	}
+	_, werr := f.Write(blob)
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		hal.Logger().Warn("dx12: cannot dump rejected DXIL", "path", f.Name(), "writeErr", werr, "closeErr", cerr)
+		return
+	}
+	hal.Logger().Warn("dx12: rejected DXIL written", "entryPoint", entryPoint, "path", f.Name())
+}
+
+// dxilDumpPattern is the os.CreateTemp pattern for a rejected blob: stage and
+// entry point, with every character other than [A-Za-z0-9_-] replaced so the
+// name cannot leave the directory or be invalid on Windows.
+func dxilDumpPattern(stage ir.ShaderStage, entryPoint string) string {
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			return r
+		default:
+			return '_'
+		}
+	}, entryPoint)
+	return fmt.Sprintf("gogpu-dxil-stage%d-%s-*.dxil", int(stage), safe)
 }
 
 // dxilCacheSource creates a unique cache source string for DXIL compilation.
