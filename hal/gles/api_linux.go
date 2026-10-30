@@ -221,15 +221,21 @@ func (i *Instance) adoptContext(ctx *AdapterContext) (prev *AdapterContext) {
 func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
 	// Priority 1: surface provides the best context (has window handle)
 	if surface, ok := surfaceHint.(*Surface); ok {
-		return []hal.ExposedAdapter{surface.GetAdapterInfo()}
+		adapter, ok := surface.GetAdapterInfo()
+		if !ok {
+			return nil // below OpenGL 3.3 / ES 3.0 (logged)
+		}
+		return []hal.ExposedAdapter{adapter}
 	}
 
 	// Priority 2: instance-level AdapterContext (created in CreateInstance via
 	// pbuffer/surfaceless, or adopted from the first CreateSurface on Wayland).
 	if instCtx := i.context(); instCtx != nil && instCtx.GL() != nil {
-		return []hal.ExposedAdapter{
-			makeAdapterFromContext(instCtx),
+		adapter, ok := makeAdapterFromContext(instCtx)
+		if !ok {
+			return nil // below OpenGL 3.3 / ES 3.0 (logged)
 		}
+		return []hal.ExposedAdapter{adapter}
 	}
 
 	// Priority 3: no context available (Wayland without surface hint)
@@ -260,13 +266,23 @@ func placeholderExposedAdapter(driverInfo string) hal.ExposedAdapter {
 }
 
 // makeAdapterFromContext creates an ExposedAdapter using a live AdapterContext.
-func makeAdapterFromContext(ctx *AdapterContext) hal.ExposedAdapter {
+// ok is false when the context is below OpenGL 3.3 / ES 3.0 (no adapter).
+//
+// Unlike Surface.GetAdapterInfo it does not query capabilities (limits are the
+// defaults, caps stay zero); only the version gate is applied here — switching
+// it to queryAdapterCapabilities changes behavior on Linux and is P2-GLES-011.
+func makeAdapterFromContext(ctx *AdapterContext) (adapter hal.ExposedAdapter, ok bool) {
 	glCtx := ctx.Lock()
 	defer ctx.Unlock()
 
 	version := glCtx.GetString(gl.VERSION)
 	renderer := glCtx.GetString(gl.RENDERER)
 	vendor := glCtx.GetString(gl.VENDOR)
+
+	if _, _, _, err := checkGLVersion(version); err != nil {
+		hal.Logger().Warn("gles: no adapter", "version", version, "renderer", renderer, "reason", err)
+		return hal.ExposedAdapter{}, false
+	}
 
 	return hal.ExposedAdapter{
 		Adapter: &Adapter{
@@ -289,7 +305,7 @@ func makeAdapterFromContext(ctx *AdapterContext) hal.ExposedAdapter {
 				BufferCopyPitch:  256,
 			},
 		},
-	}
+	}, true
 }
 
 // Destroy releases the instance resources. The Instance owns its AdapterContext

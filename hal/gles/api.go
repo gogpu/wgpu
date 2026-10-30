@@ -131,17 +131,14 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 		return nil
 	}
 
-	caps := queryAdapterCapabilities(glCtx)
+	caps, err := queryAdapterCapabilities(glCtx)
+	if err != nil {
+		return nil // below OpenGL 3.3 / ES 3.0: no adapter (logged)
+	}
 
 	version := glCtx.GetString(gl.VERSION)
 	renderer := glCtx.GetString(gl.RENDERER)
-
-	driverInfo := "OpenGL 3.3+"
-	if caps.IsES {
-		driverInfo = fmt.Sprintf("OpenGL ES %d.%d", caps.GLMajor, caps.GLMinor)
-	} else if caps.GLMajor > 0 {
-		driverInfo = fmt.Sprintf("OpenGL %d.%d", caps.GLMajor, caps.GLMinor)
-	}
+	driverInfo := glDriverInfo(&caps)
 
 	return []hal.ExposedAdapter{
 		{

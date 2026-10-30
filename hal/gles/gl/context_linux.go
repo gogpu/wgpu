@@ -778,7 +778,42 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	// Indexed string query (GL 3.0+ / ES 3.0+)
 	c.glGetStringi = getProcAddr("glGetStringi")
 
-	return nil
+	return checkRequiredProcs(c.requiredProcs())
+}
+
+// requiredProcs lists the entry points called without a nil check (see
+// requiredProc).
+func (c *Context) requiredProcs() []requiredProc[unsafe.Pointer] {
+	return []requiredProc[unsafe.Pointer]{
+		{"glGetError", c.glGetError},
+		{"glGetString", c.glGetString},
+		{"glGetIntegerv", c.glGetIntegerv},
+		{"glGetStringi", c.glGetStringi},
+		{"glGenVertexArrays", c.glGenVertexArrays},
+		{"glBindVertexArray", c.glBindVertexArray},
+		{"glDeleteVertexArrays", c.glDeleteVertexArrays},
+		{"glGenBuffers", c.glGenBuffers},
+		{"glBindBuffer", c.glBindBuffer},
+		{"glBufferData", c.glBufferData},
+		{"glBufferSubData", c.glBufferSubData},
+		{"glBindBufferBase", c.glBindBufferBase},
+		{"glBindBufferRange", c.glBindBufferRange},
+		{"glCreateShader", c.glCreateShader},
+		{"glShaderSource", c.glShaderSource},
+		{"glCompileShader", c.glCompileShader},
+		{"glCreateProgram", c.glCreateProgram},
+		{"glAttachShader", c.glAttachShader},
+		{"glLinkProgram", c.glLinkProgram},
+		{"glUseProgram", c.glUseProgram},
+		{"glGenFramebuffers", c.glGenFramebuffers},
+		{"glBindFramebuffer", c.glBindFramebuffer},
+		{"glFramebufferTexture2D", c.glFramebufferTexture2D},
+		{"glDrawBuffers", c.glDrawBuffers},
+		{"glClearBufferfv", c.glClearBufferfv},
+		{"glDrawArraysInstanced", c.glDrawArraysInstanced},
+		{"glDrawElementsInstanced", c.glDrawElementsInstanced},
+		{"glVertexAttribDivisor", c.glVertexAttribDivisor},
+	}
 }
 
 // --- GL Function Wrappers ---

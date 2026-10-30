@@ -13,6 +13,7 @@ package gles
 // and shared between Windows (WGL) and Linux (EGL) adapters.
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gogpu/gputypes"
@@ -65,7 +66,11 @@ type AdapterCapabilities struct {
 // queryAdapterCapabilities queries all adapter capabilities from the GL context.
 // This is the single entry point for adapter detection; callers pass the result
 // to buildExposedAdapter to construct the ExposedAdapter.
-func queryAdapterCapabilities(glCtx *gl.Context) AdapterCapabilities {
+//
+// It returns an error, and the caller exposes no adapter, when GL_VERSION
+// cannot be parsed or is below OpenGL 3.3 / OpenGL ES 3.0 — before anything
+// else is queried from a context the backend cannot drive.
+func queryAdapterCapabilities(glCtx *gl.Context) (AdapterCapabilities, error) {
 	caps := AdapterCapabilities{
 		Extensions: make(map[string]bool),
 	}
@@ -75,7 +80,12 @@ func queryAdapterCapabilities(glCtx *gl.Context) AdapterCapabilities {
 	caps.Renderer = glCtx.GetString(gl.RENDERER)
 	caps.Version = glCtx.GetString(gl.VERSION)
 
-	caps.GLMajor, caps.GLMinor, caps.IsES = parseGLVersion(caps.Version)
+	major, minor, isES, err := checkGLVersion(caps.Version)
+	if err != nil {
+		hal.Logger().Warn("gles: no adapter", "version", caps.Version, "renderer", caps.Renderer, "reason", err)
+		return AdapterCapabilities{}, err
+	}
+	caps.GLMajor, caps.GLMinor, caps.IsES = major, minor, isES
 	caps.GLSLVersion = parseGLSLVersion(glCtx.GetString(gl.SHADING_LANGUAGE_VERSION), caps.IsES)
 
 	// --- 2. Extension set ---
@@ -111,44 +121,112 @@ func queryAdapterCapabilities(glCtx *gl.Context) AdapterCapabilities {
 		"maxMSAA", caps.MaxMSAASamples,
 	)
 
-	return caps
+	return caps, nil
 }
 
 // ---------------------------------------------------------------------------
 // GL version parsing
 // ---------------------------------------------------------------------------
 
-// parseGLVersion extracts the major and minor version from the GL_VERSION string.
-// Returns (major, minor, isES). Handles formats:
-//   - "4.6.0 NVIDIA 536.23"           -> (4, 6, false)
-//   - "OpenGL ES 3.2 V@490.0"         -> (3, 2, true)
-//   - "3.3 Mesa 23.0.0"               -> (3, 3, false)
+// glDriverInfo formats the context version for AdapterInfo.DriverInfo.
+func glDriverInfo(caps *AdapterCapabilities) string {
+	if caps.IsES {
+		return fmt.Sprintf("OpenGL ES %d.%d", caps.GLMajor, caps.GLMinor)
+	}
+	return fmt.Sprintf("OpenGL %d.%d", caps.GLMajor, caps.GLMinor)
+}
+
+// checkGLVersion parses GL_VERSION and applies the minimum-version gate:
+// OpenGL ES 3.0 or desktop OpenGL 3.3. Below that, or when the string cannot
+// be parsed, the context cannot back an adapter (no VAOs, no GLSL 330 /
+// GLSL ES 300).
 //
-// Returns (3, 3, false) as a safe fallback if parsing fails (our minimum is GL 3.3).
-// Adapted from Rust wgpu-hal adapter.rs parse_version/parse_full_version.
-func parseGLVersion(version string) (major, minor int, isES bool) {
-	if version == "" {
-		return 3, 3, false
+// Reference: Rust wgpu-hal gles/adapter.rs expose — "Unable to parse OpenGL
+// version", "Returned GLES context is X.Y, when 3.0+ was requested",
+// "Returned GL context is X.Y, when 3.3+ is needed", each returning no adapter.
+func checkGLVersion(version string) (major, minor int, isES bool, err error) {
+	major, minor, isES, ok := parseGLVersion(version)
+	switch {
+	case !ok:
+		return 0, 0, false, fmt.Errorf("unable to parse OpenGL version %q", version)
+	case isES && (major < 3):
+		return 0, 0, false, fmt.Errorf("returned GLES context is %d.%d, when 3.0+ is required", major, minor)
+	case !isES && (major < 3 || (major == 3 && minor < 3)):
+		return 0, 0, false, fmt.Errorf("returned GL context is %d.%d, when 3.3+ is required", major, minor)
 	}
+	return major, minor, isES, nil
+}
 
-	src := version
-
-	// Detect ES
-	if idx := strings.Index(src, " ES "); idx >= 0 {
-		isES = true
-		src = src[idx+4:]
+// parseGLVersion extracts the major and minor version from the GL_VERSION
+// string, as Rust wgpu-hal does: first as a desktop version ("<major>.<minor>"
+// before the first space), else as an OpenGL ES version (the text after the
+// last " ES "). ok is false when neither parses — there is no default.
+//
+//   - "4.6.0 NVIDIA 536.23"   -> (4, 6, false, true)
+//   - "OpenGL ES 3.2 V@490.0" -> (3, 2, true, true)
+//   - "3.3 Mesa 23.0.0"       -> (3, 3, false, true)
+//   - "OpenGL ES-CM 1.1"      -> (0, 0, false, false)
+//
+// Reference: Rust wgpu-hal gles/adapter.rs parse_full_version, parse_version
+// (the WebGL branch does not apply: no browser GL context reaches this code).
+func parseGLVersion(version string) (major, minor int, isES, ok bool) {
+	if major, minor, ok = parseFullGLVersion(version); ok {
+		return major, minor, false, true
 	}
-
-	// Strip leading whitespace
-	src = strings.TrimSpace(src)
-
-	// Extract "major.minor" from the beginning
-	major, minor = parseVersionNumbers(src)
-	if major == 0 {
-		// Fallback: GL 3.3 minimum
-		return 3, 3, isES
+	const esSig = " ES "
+	idx := strings.LastIndex(version, esSig)
+	if idx < 0 {
+		return 0, 0, false, false
 	}
-	return major, minor, isES
+	major, minor, ok = parseFullGLVersion(version[idx+len(esSig):])
+	if !ok {
+		return 0, 0, false, false
+	}
+	return major, minor, true, true
+}
+
+// parseFullGLVersion parses "<major>.<minor>[.<release>][ <vendor-info>]".
+// Like Rust's parse_full_version, a minor with trailing zeros is trimmed
+// ("4.10" -> 4.1) unless it starts with '0'.
+func parseFullGLVersion(src string) (major, minor int, ok bool) {
+	if i := strings.IndexByte(src, ' '); i >= 0 {
+		src = src[:i]
+	}
+	parts := strings.Split(src, ".")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	minorStr := parts[1]
+	if strings.HasPrefix(minorStr, "0") {
+		minorStr = "0"
+	} else {
+		minorStr = strings.TrimRight(minorStr, "0")
+	}
+	major, okMajor := parseSmallUint(parts[0])
+	minor, okMinor := parseSmallUint(minorStr)
+	if !okMajor || !okMinor {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// parseSmallUint parses a non-empty decimal string that fits a u8, as Rust's
+// str::parse::<u8> does.
+func parseSmallUint(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+		if n > 255 {
+			return 0, false
+		}
+	}
+	return n, true
 }
 
 // parseVersionNumbers extracts "major.minor" from the beginning of a version string.
