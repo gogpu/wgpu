@@ -425,7 +425,7 @@ gogpu (app framework) / gg (2D graphics)
 ```
 
 External dependencies:
-- `github.com/gogpu/naga` v0.20.3 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
+- `github.com/gogpu/naga` v0.20.4 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
 - `github.com/gogpu/gputypes` v0.5.2 — shared WebGPU type definitions
 - `github.com/gogpu/gpucontext` v0.28.0 — shared interfaces (DeviceProvider, PlatformProvider)
 - `github.com/go-webgpu/goffi` v0.6.7 — Pure Go FFI for Vulkan/Metal/DX12 symbol loading (Android Bionic support)

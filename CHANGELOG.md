@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Unknown pipeline-constant keys are an error** — `CreateComputePipeline` with a `Constants` key that names no override in the shader now fails with naga's `*PipelineConstantError` instead of being ignored. Per the WebGPU spec the key of `@id(N) override x` is `"N"`; the name `x` is not accepted for it.
-- **Dependencies** — naga v0.19.0 → v0.20.3 (`naga.ProcessOverrides`), goffi v0.6.3 → v0.6.7. goffi v0.6.6+ refuses calls whose argument count differs from the call interface; all 770 `ffi.CallFunction` sites in wgpu were checked and match. macOS/Metal on the new goffi has not been run on hardware yet.
+- **Dependencies** — naga v0.19.0 → v0.20.4 (`naga.ProcessOverrides` since v0.20.3; v0.20.4 fixes shader translation: `%` on negative operands, `countLeadingZeros`/`countTrailingZeros`, zero-initialization of variables without an initializer, DXIL integer division by zero; see naga's changelog), goffi v0.6.3 → v0.6.7. goffi v0.6.6+ refuses calls whose argument count differs from the call interface; all 770 `ffi.CallFunction` sites in wgpu were checked and match. macOS/Metal on the new goffi has not been run on hardware yet.
 
 ## [0.34.5] - 2026-09-07
 
