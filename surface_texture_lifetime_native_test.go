@@ -124,7 +124,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	pool := newEncoderPool(rawDevice)
 	device.cmdEncoderPool = pool
 	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool)
+	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
 
 	texture := surfaceTexture.AsTexture()
 	err := device.Queue().WriteTexture(
@@ -166,7 +166,7 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	pool := newEncoderPool(rawDevice)
 	device.cmdEncoderPool = pool
 	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool)
+	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
 
 	err := device.Queue().WriteTexture(
 		&ImageCopyTexture{Texture: surfaceTexture.AsTexture()},

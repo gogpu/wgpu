@@ -47,7 +47,7 @@ func NewDeviceFromHAL(
 	queue := &Queue{
 		hal:       halQueue,
 		halDevice: halDevice,
-		pending:   newPendingWrites(halDevice, halQueue, pool),
+		pending:   newPendingWrites(halDevice, halQueue, pool, coreDevice.Tracker()),
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
