@@ -141,7 +141,7 @@ func TestInjectTextureBarriers_WithTransition(t *testing.T) {
 	}
 
 	// Device tracker should now reflect ColorTarget state
-	if tracker.Textures().GetUsage(td.Index()) != track.TextureUsesColorTarget {
+	if tracker.TextureUsage(td.Index()) != track.TextureUsesColorTarget {
 		t.Error("device tracker should be in ColorTarget state after merge")
 	}
 }
@@ -242,10 +242,10 @@ func TestInjectTextureBarriers_MultipleTextures(t *testing.T) {
 	}
 
 	// Both textures should have updated state in device tracker
-	if tracker.Textures().GetUsage(td1.Index()) != track.TextureUsesColorTarget {
+	if tracker.TextureUsage(td1.Index()) != track.TextureUsesColorTarget {
 		t.Error("tex1 should be in ColorTarget state")
 	}
-	if tracker.Textures().GetUsage(td2.Index()) != track.TextureUsesResource {
+	if tracker.TextureUsage(td2.Index()) != track.TextureUsesResource {
 		t.Error("tex2 should remain in Resource state")
 	}
 }
@@ -316,7 +316,7 @@ func TestInjectTextureBarriers_NoEncoderPool(t *testing.T) {
 	}
 
 	// The device tracker should still have merged the state
-	if tracker.Textures().GetUsage(td.Index()) != track.TextureUsesColorTarget {
+	if tracker.TextureUsage(td.Index()) != track.TextureUsesColorTarget {
 		t.Error("device tracker should still merge even without encoder pool")
 	}
 }

@@ -489,6 +489,7 @@ func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) 
 		if err := buffer.InstallMappedAtCreation(guard, *halDevice); err != nil {
 			// HAL can't map the buffer despite MappedAtCreation — roll
 			// back and report as a CreateBuffer failure.
+			buffer.trackingData.Release()
 			(*halDevice).DestroyBuffer(halBuffer)
 			return nil, &CreateBufferError{
 				Kind:     CreateBufferErrorHAL,
@@ -649,6 +650,14 @@ func NewBuffer(
 		mapState:     BufferMapStateIdle,
 		mapDataSlot:  &mapDataSlot{},
 	}
+	// Overwrite the device-tracker slot: the index may have belonged to a
+	// destroyed buffer whose last usage is still recorded there. Rust inserts
+	// BufferUses::empty() for mapped-at-creation buffers that need no staging
+	// copy too; host writes before a submit need no barrier.
+	// Reference: wgpu-core device/resource.rs create_buffer → insert_single.
+	if device != nil && device.tracker != nil && td.Index().IsValid() {
+		device.tracker.InsertBuffer(td.Index(), track.BufferUsesNone)
+	}
 	trackResource(uintptr(unsafe.Pointer(b)), "Buffer") //nolint:gosec // debug tracking uses pointer as unique ID
 	return b
 }
@@ -746,11 +755,17 @@ func (b *Buffer) TrackingData() *track.TrackingData {
 	return b.trackingData
 }
 
-// Destroy releases the HAL buffer.
+// Destroy releases the HAL buffer and frees the tracker index.
 //
 // This method is idempotent - calling it multiple times is safe.
-// After calling Destroy(), Raw() returns nil.
+// After calling Destroy(), Raw() returns nil and the tracker index
+// is returned to the allocator for reuse (the next buffer created with it
+// overwrites the device-tracker slot, see NewBuffer).
 func (b *Buffer) Destroy() {
+	if b.trackingData != nil {
+		b.trackingData.Release()
+	}
+
 	// Transition the buffer map state machine to Destroyed and signal
 	// any waiter with ErrBufferDestroyed before actually freeing the
 	// HAL handle. This prevents a CVE-2026-5281-style UAF where Device
@@ -940,6 +955,13 @@ func NewTexture(
 		sampleCount:   sampleCount,
 		label:         label,
 		trackingData:  td,
+	}
+	// Overwrite the device-tracker slot so a reused index does not inherit a
+	// destroyed texture's last usage: the first use transitions from
+	// Uninitialized (VK_IMAGE_LAYOUT_UNDEFINED).
+	// Reference: wgpu-core device/resource.rs create_texture → insert_single(UNINITIALIZED).
+	if device != nil && device.tracker != nil && td.Index().IsValid() {
+		device.tracker.InsertTexture(td.Index(), track.TextureUsesUninitialized)
 	}
 	trackResource(uintptr(unsafe.Pointer(t)), "Texture") //nolint:gosec // debug tracking uses pointer as unique ID
 	return t

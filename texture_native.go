@@ -5,6 +5,7 @@ package wgpu
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -67,8 +68,14 @@ func (t *Texture) Release() {
 
 	// ADR-060: Release TrackerIndex to prevent monotonic growth (#307).
 	// Surface textures handle this in Surface.destroySwapchainTexture.
+	// The index is freed together with the HAL texture, after the GPU is done
+	// with it, as Rust frees it in Drop for TrackingData once the last Arc
+	// (including in-flight submissions) is gone (wgpu-core resource.rs).
+	var td *track.TrackingData
 	if t.coreTexture != nil {
-		td := t.coreTexture.TrackingData()
+		td = t.coreTexture.TrackingData()
+	}
+	releaseIndex := func() {
 		if td != nil {
 			td.Release()
 		}
@@ -76,12 +83,14 @@ func (t *Texture) Release() {
 
 	halDevice := t.device.halDevice()
 	if halDevice == nil {
+		releaseIndex()
 		return
 	}
 
 	dq := t.device.destroyQueue()
 	if dq == nil {
 		halDevice.DestroyTexture(t.hal)
+		releaseIndex()
 		return
 	}
 
@@ -89,6 +98,7 @@ func (t *Texture) Release() {
 	halTex := t.hal
 	dq.Defer(subIdx, "Texture", func() {
 		halDevice.DestroyTexture(halTex)
+		releaseIndex()
 	})
 }
 
