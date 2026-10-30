@@ -68,7 +68,11 @@ func forEachOverrideBackend(t *testing.T, required gputypes.DownlevelFlags, fn f
 
 func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags) *wgpu.Device {
 	t.Helper()
-	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: b.backends})
+	var flags gputypes.InstanceFlags
+	if b.backend == gputypes.BackendVulkan && !b.software {
+		flags = enableVulkanValidation(t)
+	}
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: b.backends, Flags: flags})
 	if err != nil {
 		t.Skipf("CreateInstance: %v", err)
 	}
