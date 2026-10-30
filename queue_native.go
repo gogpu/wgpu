@@ -102,6 +102,11 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 
 	subIdx, err := q.hal.Submit(allBuffers)
 	if err != nil {
+		// The device tracker already holds the usages these command buffers
+		// would have left, and their barriers are dropped with the transits.
+		// Rust wgpu-core does the same (queue.rs merges the trackers before
+		// raw submit and does not roll back): a HAL submit fails on out of
+		// memory or a lost device, and the device is not expected to recover.
 		q.releaseTransits()
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.mu.Lock()
