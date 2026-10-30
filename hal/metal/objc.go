@@ -179,8 +179,10 @@ func prepareObjCCallInterfaces() error {
 // GetClass returns the Class for a given name.
 func GetClass(name string) Class {
 	cname := append([]byte(name), 0)
-	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	ptr := uintptr(unsafe.Pointer(&cname[0]))
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values).
+	// ptr is an unsafe.Pointer, not a uintptr, so the GC keeps cname alive and the stack copier
+	// updates ptr if cname is on a stack that moves (P1-VK-012).
+	ptr := unsafe.Pointer(&cname[0])
 	var result Class
 	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
 	_, _ = ffi.CallFunction(&cifGetClass, symObjcGetClass, unsafe.Pointer(&result), args[:])
@@ -194,8 +196,9 @@ func RegisterSelector(name string) SEL {
 	}
 
 	cname := append([]byte(name), 0)
-	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values)
-	ptr := uintptr(unsafe.Pointer(&cname[0]))
+	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values).
+	// ptr is an unsafe.Pointer, not a uintptr (see GetClass, P1-VK-012).
+	ptr := unsafe.Pointer(&cname[0])
 	var result SEL
 	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
 	_, _ = ffi.CallFunction(&cifSelRegister, symSelRegisterName, unsafe.Pointer(&result), args[:])
@@ -533,6 +536,10 @@ func NSString(s string) ID {
 		return MsgSend(obj, Sel("init"))
 	}
 	cstr := append([]byte(s), 0)
+	// The string travels as a uintptr; pin it for the call (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&cstr[0])
+	defer pinner.Unpin()
 	obj := MsgSend(nsStringClass, Sel("alloc"))
 	return MsgSend(
 		obj,

@@ -16,6 +16,7 @@ package software
 import (
 	"image"
 	"log/slog"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -322,9 +323,16 @@ func (s *Surface) blitFramebufferToWindow(data []byte, width, height int32) {
 		s.gc = gc
 	}
 
-	// Construct XImage on stack pointing to our pixel buffer.
+	// Construct XImage pointing to our pixel buffer.
 	// Fields follow Skia RasterWindowContext_unix.cpp exactly.
+	// X11 reaches the XImage and the pixels through uintptrs, which keep
+	// nothing in place: pin both until XPutImage returns, or a stack move
+	// would leave XInitImage filling an old copy (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	var ximg ximage
+	pinner.Pin(&ximg)
+	pinner.Pin(&data[0])
 	ximg.width = width
 	ximg.height = height
 	ximg.format = zPixmap
@@ -420,9 +428,14 @@ func (s *Surface) blitDamageRectsToWindow(data []byte, width, height int32, rect
 		s.gc = gc
 	}
 
-	// Construct XImage on stack pointing to our pixel buffer.
-	// Same setup as blitFramebufferToWindow — fields follow Skia pattern.
+	// Construct XImage pointing to our pixel buffer.
+	// Same setup as blitFramebufferToWindow — fields follow Skia pattern,
+	// and both are pinned for the same reason (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	var img ximage
+	pinner.Pin(&img)
+	pinner.Pin(&data[0])
 	img.width = width
 	img.height = height
 	img.format = zPixmap

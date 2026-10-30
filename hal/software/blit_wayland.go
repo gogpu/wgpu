@@ -19,6 +19,7 @@ package software
 import (
 	"image"
 	"log/slog"
+	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -565,6 +566,11 @@ func obtainWlShm(display, shmQueue uintptr) (uintptr, uintptr) {
 	var bindOpcode uint32
 	var bindVersion uint32 = 1
 	shmNameCStr := append([]byte("wl_shm"), 0)
+	// The name travels as a uintptr; pin it until the bind call returns
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(&shmNameCStr[0])
 	shmNamePtr := uintptr(unsafe.Pointer(&shmNameCStr[0]))
 
 	bindArgs := [8]unsafe.Pointer{

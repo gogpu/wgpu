@@ -355,6 +355,10 @@ func (c *RenderPassCache) setObjectName(objectType vk.ObjectType, handle uint64,
 		return
 	}
 	nameBytes := append([]byte(name), 0)
+	// PObjectName is a uintptr: pin the bytes so a stack move cannot leave it
+	// pointing at the old stack (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&nameBytes[0])
 	nameInfo := vk.DebugUtilsObjectNameInfoEXT{
 		SType:        vk.StructureTypeDebugUtilsObjectNameInfoExt,
 		ObjectType:   objectType,
@@ -362,7 +366,7 @@ func (c *RenderPassCache) setObjectName(objectType vk.ObjectType, handle uint64,
 		PObjectName:  uintptr(unsafe.Pointer(&nameBytes[0])),
 	}
 	_ = c.cmds.SetDebugUtilsObjectNameEXT(c.device, &nameInfo)
-	runtime.KeepAlive(nameBytes)
+	pinner.Unpin()
 }
 
 // InvalidateFramebuffer removes framebuffers from cache that reference the given image view.

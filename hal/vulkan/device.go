@@ -412,9 +412,17 @@ func (d *Device) ensureMemoryMapped(block *memory.MemoryBlock) error {
 	}
 	basePtr, alreadyMapped := d.mappedMemory[block.Memory]
 	if !alreadyMapped {
+		// ppData is a uintptr, which the GC and the stack copier do not see:
+		// if mappedPtr stayed on the stack and the stack moved during the
+		// call path, the driver would write the pointer into the old stack
+		// and we would read 0 and map again (P1-VK-012). Pinning moves it to
+		// the heap and keeps it in place until Unpin.
 		var mappedPtr uintptr
+		var pinner runtime.Pinner
+		pinner.Pin(&mappedPtr)
 		result := d.cmds.MapMemory(d.handle, block.Memory, 0,
 			vk.DeviceSize(vk.WholeSize), 0, uintptr(unsafe.Pointer(&mappedPtr)))
+		pinner.Unpin()
 		if result != vk.Success {
 			return fmt.Errorf("vulkan: vkMapMemory failed: %d", result)
 		}

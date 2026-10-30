@@ -7,6 +7,7 @@ package vulkan
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
@@ -88,8 +89,15 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 	if hasIncrementalPresent {
 		extensions = append(extensions, "VK_KHR_incremental_present\x00")
 	}
+	// The device create info references these through uintptr fields, which
+	// keep nothing alive or in place; pin them until vkCreateDevice returns
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	extensionPtrs := make([]uintptr, len(extensions))
+	pinner.Pin(&extensionPtrs[0])
 	for i, ext := range extensions {
+		pinner.Pin(unsafe.StringData(ext))
 		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
 	}
 
