@@ -531,8 +531,9 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 			continue
 		}
 
-		srcAccess, srcStage, oldLayout := textureUsageToAccessStageLayout(b.Usage.OldUsage)
-		dstAccess, dstStage, newLayout := textureUsageToAccessStageLayout(b.Usage.NewUsage)
+		depthStencil := isDepthStencilFormat(tex.format)
+		srcAccess, srcStage, oldLayout := textureUsageToAccessStageLayout(b.Usage.OldUsage, depthStencil)
+		dstAccess, dstStage, newLayout := textureUsageToAccessStageLayout(b.Usage.NewUsage, depthStencil)
 
 		imageBarriers = append(imageBarriers, vk.ImageMemoryBarrier{
 			SType:               vk.StructureTypeImageMemoryBarrier,
@@ -1012,6 +1013,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			rpKey.DepthStoreOp = storeOpToVk(dsa.DepthStoreOp)
 			rpKey.StencilLoadOp = loadOpToVk(dsa.StencilLoadOp)
 			rpKey.StencilStoreOp = storeOpToVk(dsa.StencilStoreOp)
+			// Matches the tracker: only both aspects read-only make the
+			// read-only state (core depthStencilUsage).
+			rpKey.DepthReadOnly = dsa.DepthReadOnly && dsa.StencilReadOnly
 
 			fbKey.Views[fbKey.ViewCount] = dsView.handle
 			fbKey.ViewCount++
@@ -1676,8 +1680,16 @@ func bufferUsageToAccessAndStage(usage gputypes.BufferUsage) (vk.AccessFlags, vk
 	return access, stage
 }
 
+// textureUsageToAccessStageLayout maps a barrier usage to access, stage and
+// layout. depthStencil selects the depth layouts for a depth/stencil texture,
+// whose RenderAttachment is never a color attachment (see
+// depthUsageAccessStageLayout).
+//
 //nolint:unparam // stage will be used when barrier optimization is implemented
-func textureUsageToAccessStageLayout(usage gputypes.TextureUsage) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
+func textureUsageToAccessStageLayout(usage gputypes.TextureUsage, depthStencil bool) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
+	if depthStencil && usage&gputypes.TextureUsageRenderAttachment != 0 {
+		return depthUsageAccessStageLayout(usage)
+	}
 	// Usage 0 means "initial/undefined" — the image has no prior usage.
 	// Newly created Vulkan images start in VK_IMAGE_LAYOUT_UNDEFINED.
 	// Using ImageLayoutGeneral here would lie about the old layout,
@@ -1721,6 +1733,33 @@ func textureUsageToAccessStageLayout(usage gputypes.TextureUsage) (vk.AccessFlag
 	}
 
 	return access, stage, layout
+}
+
+// depthUsageAccessStageLayout maps the attachment states of a depth/stencil
+// texture. The tracker encodes them in the public bits (core/track
+// TextureUses.ToTextureUsage): RenderAttachment alone is a depth-stencil
+// write, RenderAttachment | TextureBinding a read-only attachment, which may
+// be sampled in the same pass. The render pass uses the same layouts
+// (renderpass.go), so the barrier and the attachment agree. COLOR_ATTACHMENT_
+// OPTIMAL on a depth image broke VUID-VkImageMemoryBarrier-oldLayout-01208
+// (P1-DX12-056).
+//
+// A depth texture only sampled (TextureBinding alone) keeps
+// SHADER_READ_ONLY_OPTIMAL, the layout its descriptors are written with
+// (device.go CreateBindGroup). Rust uses DEPTH_STENCIL_READ_ONLY_OPTIMAL for
+// both, with descriptor layouts derived from the view format.
+//
+// Reference: Rust wgpu-hal vulkan/conv.rs derive_image_layout and
+// map_texture_usage_to_barrier.
+func depthUsageAccessStageLayout(usage gputypes.TextureUsage) (vk.AccessFlags, vk.PipelineStageFlags, vk.ImageLayout) {
+	stage := vk.PipelineStageFlags(vk.PipelineStageEarlyFragmentTestsBit | vk.PipelineStageLateFragmentTestsBit)
+	if usage&gputypes.TextureUsageTextureBinding == 0 {
+		access := vk.AccessFlags(vk.AccessDepthStencilAttachmentReadBit | vk.AccessDepthStencilAttachmentWriteBit)
+		return access, stage, vk.ImageLayoutDepthStencilAttachmentOptimal
+	}
+	access := vk.AccessFlags(vk.AccessDepthStencilAttachmentReadBit | vk.AccessShaderReadBit)
+	stage |= vk.PipelineStageFlags(vk.PipelineStageFragmentShaderBit)
+	return access, stage, vk.ImageLayoutDepthStencilReadOnlyOptimal
 }
 
 func mipLevelCountOrRemaining(count uint32) uint32 {

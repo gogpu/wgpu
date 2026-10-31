@@ -273,8 +273,10 @@ func trackerIndexAt(i int) (TrackerIndex, bool) {
 
 // TextureUsesFromUsage converts a public texture usage, as passed to an
 // explicit barrier, into tracker states. RenderAttachment maps to the depth
-// or color target state depending on the texture format; StorageBinding maps
-// to the exclusive StorageWrite state so later uses are always fenced.
+// or color target state depending on the texture format; on a depth/stencil
+// texture RenderAttachment together with TextureBinding is the read-only
+// attachment state (see TextureUses.ToTextureUsage). StorageBinding maps to
+// the exclusive StorageWrite state so later uses are always fenced.
 //
 // Reference: wgpu-core conv.rs map_texture_usage
 func TextureUsesFromUsage(usage gputypes.TextureUsage, depthStencil bool) TextureUses {
@@ -292,9 +294,12 @@ func TextureUsesFromUsage(usage gputypes.TextureUsage, depthStencil bool) Textur
 		uses |= TextureUsesStorageWrite
 	}
 	if usage&gputypes.TextureUsageRenderAttachment != 0 {
-		if depthStencil {
+		switch {
+		case depthStencil && usage&gputypes.TextureUsageTextureBinding != 0:
+			uses |= TextureUsesDepthStencilRead
+		case depthStencil:
 			uses |= TextureUsesDepthStencilWrite
-		} else {
+		default:
 			uses |= TextureUsesColorTarget
 		}
 	}

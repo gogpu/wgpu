@@ -145,11 +145,43 @@ func TestDX12ComputeBarriers(t *testing.T) {
 	})
 
 	t.Run("textureUsageToD3D12State storage", func(t *testing.T) {
-		state := textureUsageToD3D12State(gputypes.TextureUsageStorageBinding)
+		state := textureUsageToD3D12State(gputypes.TextureUsageStorageBinding, nil)
 		if state != d3d12.D3D12_RESOURCE_STATE_UNORDERED_ACCESS {
 			t.Errorf("state = %d, want UNORDERED_ACCESS", state)
 		}
 	})
+}
+
+// TestDepthTextureUsageToD3D12State guards P1-DX12-056: a depth texture never
+// gets RENDER_TARGET, and never a state its resource flags forbid.
+func TestDepthTextureUsageToD3D12State(t *testing.T) {
+	const (
+		ra  = gputypes.TextureUsageRenderAttachment
+		tb  = gputypes.TextureUsageTextureBinding
+		srv = d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+	)
+	cases := []struct {
+		name           string
+		usage, created gputypes.TextureUsage
+		want           d3d12.D3D12_RESOURCE_STATES
+	}{
+		{"write, attachment-only texture", ra, ra, d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE},
+		{"read-only, attachment-only texture", ra | tb, ra, d3d12.D3D12_RESOURCE_STATE_DEPTH_READ},
+		{"read-only, sampleable texture", ra | tb, ra | tb, d3d12.D3D12_RESOURCE_STATE_DEPTH_READ | srv},
+		{"sampled", tb, ra | tb, srv},
+		{"copy source", gputypes.TextureUsageCopySrc, ra | gputypes.TextureUsageCopySrc, d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE},
+		{"uninitialized", 0, ra, d3d12.D3D12_RESOURCE_STATE_COMMON},
+	}
+	for _, c := range cases {
+		tex := &Texture{format: gputypes.TextureFormatDepth24Plus, usage: c.created}
+		if got := textureUsageToD3D12State(c.usage, tex); got != c.want {
+			t.Errorf("%s: state = %#x, want %#x", c.name, got, c.want)
+		}
+	}
+	color := &Texture{format: gputypes.TextureFormatRGBA8Unorm, usage: ra}
+	if got := textureUsageToD3D12State(ra, color); got != d3d12.D3D12_RESOURCE_STATE_RENDER_TARGET {
+		t.Errorf("color attachment: state = %#x, want RENDER_TARGET", got)
+	}
 }
 
 // TestDX12SetBindGroup tests the SetBindGroup implementation from CS-002.
