@@ -998,13 +998,18 @@ func (c *MSAAResolveCommand) Execute(ctx *gl.Context) {
 
 // ensureResolveFBO lazily creates the resolve FBO and binds it as draw target.
 // Returns false if the FBO creation fails.
+//
+// The FBO is created on GL_DRAW_FRAMEBUFFER only: GL_FRAMEBUFFER would also
+// replace the READ binding (the MSAA source bound by Execute), and the first
+// resolve into each new texture then blitted the texture onto itself
+// (P1-GLES-013). Rust wgpu-hal binds READ and DRAW explicitly for every blit.
 func (c *MSAAResolveCommand) ensureResolveFBO(ctx *gl.Context) bool {
 	if c.resolveTexture.fbo == 0 {
 		fbo := ctx.GenFramebuffers(1)
-		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+		ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, fbo)
+		ctx.FramebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
 			c.resolveTexture.target, c.resolveTexture.id, 0)
-		if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+		if ctx.CheckFramebufferStatus(gl.DRAW_FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
 			ctx.DeleteFramebuffers(fbo)
 			return false
 		}
