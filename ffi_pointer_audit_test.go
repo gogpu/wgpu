@@ -31,9 +31,12 @@ var ffiPointerAllowed = map[string]string{
 // the standard library's (*syscall.Proc).Call / (*syscall.LazyProc).Call keeps
 // the object alive and in place (unsafe.Pointer rule 4, //go:uintptrescapes).
 // That holds only for a direct call on the concrete type: the same Call reached
-// through an interface or a func value loses the directive, and
-// golang.org/x/sys/windows Proc.Call never had it. goffi wrappers, objc MsgSend
-// and struct fields read by C are ordinary Go code. Any other conversion of an
+// through an interface or a func value loses the directive. goffi wrappers,
+// objc MsgSend and struct fields read by C are ordinary Go code.
+// golang.org/x/sys/windows (*Proc).Call and (*LazyProc).Call carry the
+// directive too (x/sys v0.47.0 windows/dll_windows.go:156, :305); this check
+// accepts only the standard library procs, which is stricter than needed, so a
+// direct x/sys Call is reported and wgpu code uses syscall procs instead. Any other conversion of an
 // address must pin the object with runtime.Pinner in the same function, or be
 // listed in ffiPointerAllowed with a reason.
 //
