@@ -81,6 +81,54 @@ func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
 	}
 }
 
+// TestStageOptionsRenderStageReadsRuntimeArray guards P1-MTL-005. A render
+// stage of a module with an override is specialized, so it gets an explicit
+// entry point map. Since naga v0.20.5 (Rust parity) msl.Compile refuses a
+// mapped entry point that needs the `_buffer_sizes` argument when the map
+// gives it no slot; with sizesSlot -1, as the render path used to pass, this
+// test failed with `entry point "vs" has no sizes buffer`. The render path now
+// passes the slot after the layout's buffers whenever the stage has a
+// runtime-sized array, as compute does.
+func TestStageOptionsRenderStageReadsRuntimeArray(t *testing.T) {
+	t.Parallel()
+
+	source := lower(t, `
+override scale: f32 = 1.0;
+
+@group(0) @binding(0) var<storage, read> positions: array<vec4<f32>>;
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+	return positions[i] * scale;
+}
+`)
+	stage, err := naga.ProcessOverrides(source, naga.OverrideOptions{
+		EntryPoint: &naga.EntryPointSelector{Stage: ir.StageVertex, Name: "vs"},
+	})
+	if err != nil {
+		t.Fatalf("ProcessOverrides: %v", err)
+	}
+	bindings, err := mslmap.RuntimeArrayBindings(stage)
+	if err != nil {
+		t.Fatalf("RuntimeArrayBindings: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0] != (ir.ResourceBinding{Group: 0, Binding: 0}) {
+		t.Fatalf("RuntimeArrayBindings = %v, want only @group(0) @binding(0)", bindings)
+	}
+	// One buffer in the layout, so the sizes argument goes to slot 1.
+	opts, err := mslmap.StageOptions(source, stage, 1)
+	if err != nil {
+		t.Fatalf("StageOptions: %v", err)
+	}
+	out, _, err := msl.Compile(stage, opts)
+	if err != nil {
+		t.Fatalf("msl.Compile: %v", err)
+	}
+	if got := bufferSlots(out)["_buffer_sizes"]; got != "1" {
+		t.Errorf("_buffer_sizes at [[buffer(%s)]], want 1\n%s", got, out)
+	}
+}
+
 // TestOverrideSizedArrayIsNotRuntimeSized checks that an array sized by an
 // override does not get a `_buffer_sizes` field.
 func TestOverrideSizedArrayIsNotRuntimeSized(t *testing.T) {

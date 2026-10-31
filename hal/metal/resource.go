@@ -220,6 +220,14 @@ type RenderPipeline struct {
 	frontFace     MTLWinding
 	icbCompatible bool
 
+	// vertexSizes and fragmentSizes list, per stage, the bindings whose byte
+	// size naga's `_buffer_sizes` argument holds, in naga's field order. A
+	// stage without a runtime-sized array has none. sizesSlot is the buffer
+	// slot both stages were compiled with (PipelineLayout.totalBuffers).
+	vertexSizes   []ir.ResourceBinding
+	fragmentSizes []ir.ResourceBinding
+	sizesSlot     int
+
 	depthStencil    ID // id<MTLDepthStencilState>
 	depthBias       float32
 	depthSlopeScale float32
