@@ -155,6 +155,73 @@ func (c *RenderPassCache) GetOrCreateFramebuffer(key FramebufferKey) (vk.Framebu
 // the color references array. Slots without resolve use VK_ATTACHMENT_UNUSED.
 // This matches Rust wgpu-hal make_render_pass (vulkan/device.rs:76-231).
 func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, error) {
+	l := buildRenderPassLayout(key)
+
+	// Subpass
+	subpass := vk.SubpassDescription{
+		PipelineBindPoint:    vk.PipelineBindPointGraphics,
+		ColorAttachmentCount: uint32(key.ColorCount),
+	}
+	if l.hasDepth {
+		subpass.PDepthStencilAttachment = &l.depthRef
+	}
+	if key.ColorCount > 0 {
+		subpass.PColorAttachments = &l.colorRefs[0]
+		// Vulkan spec requires pResolveAttachments to be NULL or an array of
+		// the same length as pColorAttachments. When any slot has resolve, we
+		// pass the full array; slots without resolve use VK_ATTACHMENT_UNUSED.
+		if l.hasAnyResolve {
+			subpass.PResolveAttachments = &l.resolveRefs[0]
+		}
+	}
+
+	// No explicit subpass dependencies — Vulkan handles implicit ones.
+	// This matches Rust wgpu which doesn't add explicit dependencies.
+	createInfo := vk.RenderPassCreateInfo{
+		SType:           vk.StructureTypeRenderPassCreateInfo,
+		AttachmentCount: uint32(l.attachmentCount),
+		SubpassCount:    1,
+		PSubpasses:      &subpass,
+		DependencyCount: 0,
+		PDependencies:   nil,
+	}
+	if l.attachmentCount > 0 {
+		createInfo.PAttachments = &l.attachments[0]
+	}
+
+	var renderPass vk.RenderPass
+	result := c.cmds.CreateRenderPass(c.device, &createInfo, nil, &renderPass)
+	runtime.KeepAlive(&l)
+	runtime.KeepAlive(createInfo)
+	runtime.KeepAlive(subpass)
+
+	if result != vk.Success {
+		return 0, &vkError{code: result, op: "vkCreateRenderPass"}
+	}
+	if renderPass == 0 {
+		return 0, &vkError{code: -1, op: "vkCreateRenderPass returned NULL handle"}
+	}
+
+	c.setObjectName(vk.ObjectTypeRenderPass, uint64(renderPass),
+		fmt.Sprintf("RenderPass(%d)", len(c.renderPasses)))
+	return renderPass, nil
+}
+
+// renderPassLayout holds the attachment descriptions and subpass references
+// of a render pass, built from its key without any Vulkan call.
+type renderPassLayout struct {
+	attachments     [hal.MaxTotalAttachments]vk.AttachmentDescription
+	attachmentCount int
+	colorRefs       [hal.MaxColorAttachments]vk.AttachmentReference
+	resolveRefs     [hal.MaxColorAttachments]vk.AttachmentReference
+	hasAnyResolve   bool
+	depthRef        vk.AttachmentReference
+	hasDepth        bool
+}
+
+// buildRenderPassLayout derives the attachments and references of the render
+// pass described by key, in the order documented on createRenderPass.
+func buildRenderPassLayout(key RenderPassKey) renderPassLayout {
 	var attachments [hal.MaxTotalAttachments]vk.AttachmentDescription
 	attachmentCount := 0
 
@@ -179,14 +246,13 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 		hasMSAAResolve := cat.HasResolve && key.SampleCount > vk.SampleCountFlagBits(1)
 
 		colorFinalLayout := cat.FinalLayout
-		colorStoreOp := cat.StoreOp
-
 		if hasMSAAResolve {
-			// With MSAA resolve, the MSAA color attachment is intermediate:
-			// - FinalLayout = ColorAttachmentOptimal (not presented directly)
-			// - StoreOp = DontCare (resolved content goes to resolve target)
+			// With MSAA resolve, the MSAA color attachment is never presented or
+			// sampled through this key: cat.FinalLayout belongs to the resolve
+			// target, the MSAA image stays COLOR_ATTACHMENT_OPTIMAL. Its StoreOp
+			// is the caller's (P1-VK-011): Store keeps the samples for a later
+			// pass that loads this view, as WebGPU and Rust wgpu-hal do.
 			colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
-			colorStoreOp = vk.AttachmentStoreOpDontCare
 		}
 
 		// When LoadOp is Load, InitialLayout must match the actual image layout
@@ -205,7 +271,7 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 			Format:         cat.Format,
 			Samples:        key.SampleCount,
 			LoadOp:         cat.LoadOp,
-			StoreOp:        colorStoreOp,
+			StoreOp:        cat.StoreOp,
 			StencilLoadOp:  vk.AttachmentLoadOpDontCare,
 			StencilStoreOp: vk.AttachmentStoreOpDontCare,
 			InitialLayout:  colorInitialLayout,
@@ -270,56 +336,18 @@ func (c *RenderPassCache) createRenderPass(key RenderPassKey) (vk.RenderPass, er
 		attachmentCount++
 	}
 
-	// Subpass
-	subpass := vk.SubpassDescription{
-		PipelineBindPoint:       vk.PipelineBindPointGraphics,
-		ColorAttachmentCount:    uint32(key.ColorCount),
-		PDepthStencilAttachment: depthRef,
+	l := renderPassLayout{
+		attachments:     attachments,
+		attachmentCount: attachmentCount,
+		colorRefs:       colorRefs,
+		resolveRefs:     resolveRefs,
+		hasAnyResolve:   hasAnyResolve,
 	}
-	if key.ColorCount > 0 {
-		subpass.PColorAttachments = &colorRefs[0]
-		// Vulkan spec requires pResolveAttachments to be NULL or an array of
-		// the same length as pColorAttachments. When any slot has resolve, we
-		// pass the full array; slots without resolve use VK_ATTACHMENT_UNUSED.
-		if hasAnyResolve {
-			subpass.PResolveAttachments = &resolveRefs[0]
-		}
+	if depthRef != nil {
+		l.depthRef = *depthRef
+		l.hasDepth = true
 	}
-
-	// No explicit subpass dependencies — Vulkan handles implicit ones.
-	// This matches Rust wgpu which doesn't add explicit dependencies.
-	attachmentSlice := attachments[:attachmentCount]
-	createInfo := vk.RenderPassCreateInfo{
-		SType:           vk.StructureTypeRenderPassCreateInfo,
-		AttachmentCount: uint32(attachmentCount),
-		SubpassCount:    1,
-		PSubpasses:      &subpass,
-		DependencyCount: 0,
-		PDependencies:   nil,
-	}
-	if attachmentCount > 0 {
-		createInfo.PAttachments = &attachmentSlice[0]
-	}
-
-	var renderPass vk.RenderPass
-	result := c.cmds.CreateRenderPass(c.device, &createInfo, nil, &renderPass)
-	runtime.KeepAlive(attachmentSlice)
-	runtime.KeepAlive(colorRefs)
-	runtime.KeepAlive(resolveRefs)
-	runtime.KeepAlive(depthRef)
-	runtime.KeepAlive(createInfo)
-	runtime.KeepAlive(subpass)
-
-	if result != vk.Success {
-		return 0, &vkError{code: result, op: "vkCreateRenderPass"}
-	}
-	if renderPass == 0 {
-		return 0, &vkError{code: -1, op: "vkCreateRenderPass returned NULL handle"}
-	}
-
-	c.setObjectName(vk.ObjectTypeRenderPass, uint64(renderPass),
-		fmt.Sprintf("RenderPass(%d)", len(c.renderPasses)))
-	return renderPass, nil
+	return l
 }
 
 // createFramebuffer creates a new VkFramebuffer.

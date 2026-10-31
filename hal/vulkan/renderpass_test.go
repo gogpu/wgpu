@@ -43,6 +43,61 @@ func TestRenderPassKeyMRTFields(t *testing.T) {
 	}
 }
 
+// TestBuildRenderPassLayoutMSAAStoreOp is the regression test for P1-VK-011:
+// the MSAA color attachment of a slot with a resolve target used to get
+// StoreOp DontCare whatever the caller asked, so a later pass loading the
+// MSAA view read undefined contents. WebGPU and Rust wgpu-hal (vulkan
+// device.rs make_render_pass: the caller's ops on the base attachment,
+// LOAD_CLEAR|STORE on the resolve attachment) keep the caller's StoreOp.
+// Intel and NVIDIA drivers keep DontCare contents anyway, so a GPU readback
+// does not catch it; this checks the attachment descriptions directly.
+func TestBuildRenderPassLayoutMSAAStoreOp(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load vk.AttachmentLoadOp
+		op   vk.AttachmentStoreOp
+	}{
+		{"clear-store", vk.AttachmentLoadOpClear, vk.AttachmentStoreOpStore},
+		{"load-store", vk.AttachmentLoadOpLoad, vk.AttachmentStoreOpStore},
+		{"clear-discard", vk.AttachmentLoadOpClear, vk.AttachmentStoreOpDontCare},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := RenderPassKey{ColorCount: 1, SampleCount: vk.SampleCountFlagBits(4)}
+			key.Colors[0] = ColorAttachmentKeyEntry{
+				Format:      vk.FormatR8g8b8a8Unorm,
+				LoadOp:      tc.load,
+				StoreOp:     tc.op,
+				FinalLayout: vk.ImageLayoutGeneral, // the resolve target's layout
+				HasResolve:  true,
+			}
+			l := buildRenderPassLayout(key)
+			if l.attachmentCount != 2 || !l.hasAnyResolve {
+				t.Fatalf("attachments = %d, hasAnyResolve = %v; want 2, true", l.attachmentCount, l.hasAnyResolve)
+			}
+			msaa, resolve := l.attachments[0], l.attachments[1]
+			if msaa.StoreOp != tc.op {
+				t.Errorf("MSAA StoreOp = %d, want the caller's %d", msaa.StoreOp, tc.op)
+			}
+			if msaa.FinalLayout != vk.ImageLayoutColorAttachmentOptimal {
+				t.Errorf("MSAA FinalLayout = %d, want COLOR_ATTACHMENT_OPTIMAL", msaa.FinalLayout)
+			}
+			wantInitial := vk.ImageLayoutUndefined
+			if tc.load == vk.AttachmentLoadOpLoad {
+				wantInitial = vk.ImageLayoutColorAttachmentOptimal
+			}
+			if msaa.InitialLayout != wantInitial {
+				t.Errorf("MSAA InitialLayout = %d, want %d", msaa.InitialLayout, wantInitial)
+			}
+			if resolve.LoadOp != vk.AttachmentLoadOpClear || resolve.StoreOp != vk.AttachmentStoreOpStore {
+				t.Errorf("resolve ops = (%d, %d), want (CLEAR, STORE)", resolve.LoadOp, resolve.StoreOp)
+			}
+			if resolve.FinalLayout != vk.ImageLayoutGeneral {
+				t.Errorf("resolve FinalLayout = %d, want the key's GENERAL", resolve.FinalLayout)
+			}
+		})
+	}
+}
+
 // TestRenderPassKeyEquality verifies that keys with the same content are
 // considered equal (map lookup correctness).
 func TestRenderPassKeyEquality(t *testing.T) {
