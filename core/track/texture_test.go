@@ -204,7 +204,9 @@ func TestTextureUses_ToTextureUsage(t *testing.T) {
 		{"copy src", TextureUsesCopySrc, gputypes.TextureUsageCopySrc},
 		{"copy dst", TextureUsesCopyDst, gputypes.TextureUsageCopyDst},
 		{"resource (sampled)", TextureUsesResource, gputypes.TextureUsageTextureBinding},
-		{"depth stencil read (sampled)", TextureUsesDepthStencilRead, gputypes.TextureUsageTextureBinding},
+		// Read-only depth attachment: both bits, so the backends tell it from
+		// sampling (TextureBinding) and from depth writes (RenderAttachment).
+		{"depth stencil read", TextureUsesDepthStencilRead, gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageTextureBinding},
 		{"storage read", TextureUsesStorageRead, gputypes.TextureUsageStorageBinding},
 		{"storage write", TextureUsesStorageWrite, gputypes.TextureUsageStorageBinding},
 		{"color target", TextureUsesColorTarget, gputypes.TextureUsageRenderAttachment},

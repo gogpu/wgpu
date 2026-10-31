@@ -119,6 +119,20 @@ func SkipBarrier(old, next TextureUses) bool {
 }
 
 // ToTextureUsage converts internal uses to gputypes.TextureUsage for HAL.
+//
+// The HAL barrier type has no depth-stencil states, so the three states of a
+// depth/stencil attachment are encoded in the public bits, and the backends
+// read them together with the texture format (TextureUsesFromUsage is the
+// inverse):
+//
+//   - DepthStencilWrite: RenderAttachment
+//   - DepthStencilRead (read-only attachment): RenderAttachment | TextureBinding
+//   - Resource (sampled): TextureBinding
+//
+// Before this split DepthStencilRead became TextureBinding alone, so a
+// read-only depth attachment moved to the sampled state (P1-DX12-056). Rust
+// passes the exact uses (hal::TextureUses); a precise HAL barrier type is
+// planned with the HAL interface rework.
 func (u TextureUses) ToTextureUsage() gputypes.TextureUsage {
 	var result gputypes.TextureUsage
 
@@ -130,6 +144,9 @@ func (u TextureUses) ToTextureUsage() gputypes.TextureUsage {
 	}
 	if u&(TextureUsesResource|TextureUsesDepthStencilRead) != 0 {
 		result |= gputypes.TextureUsageTextureBinding
+	}
+	if u&TextureUsesDepthStencilRead != 0 {
+		result |= gputypes.TextureUsageRenderAttachment
 	}
 	if u&(TextureUsesStorageRead|TextureUsesStorageWrite) != 0 {
 		result |= gputypes.TextureUsageStorageBinding

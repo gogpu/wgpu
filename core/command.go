@@ -947,6 +947,19 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			StencilClearValue: desc.DepthStencilAttachment.StencilClearValue,
 			StencilReadOnly:   desc.DepthStencilAttachment.StencilReadOnly,
 		}
+		// A read-only aspect has no load or store op in WebGPU: the pass
+		// keeps its contents. The HAL gets Load and Store for it; without
+		// them the backends saw a zero (undefined) load op and discarded
+		// the depth (P1-DX12-056).
+		//
+		// Reference: Rust wgpu-core command/render.rs ResolvedPassChannel
+		// (ReadOnly => LoadOp::Load, StoreOp::Store).
+		if halDS.DepthReadOnly {
+			halDS.DepthLoadOp, halDS.DepthStoreOp = gputypes.LoadOpLoad, gputypes.StoreOpStore
+		}
+		if halDS.StencilReadOnly {
+			halDS.StencilLoadOp, halDS.StencilStoreOp = gputypes.LoadOpLoad, gputypes.StoreOpStore
+		}
 		if desc.DepthStencilAttachment.View != nil {
 			halDS.View = desc.DepthStencilAttachment.View.HAL
 		}

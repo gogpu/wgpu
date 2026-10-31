@@ -192,7 +192,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 			continue
 		}
 
-		afterState := textureUsageToD3D12State(b.Usage.NewUsage)
+		afterState := textureUsageToD3D12State(b.Usage.NewUsage, tex)
 		plans = append(plans, e.stateTracker.transitionTextureRange(tex, textureRangeSubresources(tex, b.Range), afterState)...)
 	}
 	e.emitStateBarrierPlans(plans)
@@ -1280,7 +1280,6 @@ func bufferUsageToD3D12State(usage gputypes.BufferUsage) d3d12.D3D12_RESOURCE_ST
 	return state
 }
 
-// textureUsageToD3D12State converts texture usage to D3D12 resource state.
 // d3d12StateToTextureUsage maps a D3D12 resource state back to gputypes.TextureUsage.
 // Used by Texture.CurrentUsage() for PendingWrites barrier computation.
 func d3d12StateToTextureUsage(state d3d12.D3D12_RESOURCE_STATES) gputypes.TextureUsage {
@@ -1304,12 +1303,22 @@ func d3d12StateToTextureUsage(state d3d12.D3D12_RESOURCE_STATES) gputypes.Textur
 	if state&(d3d12.D3D12_RESOURCE_STATE_DEPTH_READ|d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE) != 0 {
 		usage |= gputypes.TextureUsageRenderAttachment
 	}
+	if state&d3d12.D3D12_RESOURCE_STATE_DEPTH_READ != 0 {
+		// Read-only depth attachment (see depthTextureUsageToD3D12State).
+		usage |= gputypes.TextureUsageTextureBinding
+	}
 
 	// COMMON (0) maps to 0 (no specific usage)
 	return usage
 }
 
-func textureUsageToD3D12State(usage gputypes.TextureUsage) d3d12.D3D12_RESOURCE_STATES {
+// textureUsageToD3D12State converts a barrier usage of tex to a D3D12 resource
+// state. A depth/stencil texture takes the depth states: its RenderAttachment
+// is the DSV, never a render target (see depthTextureUsageToD3D12State).
+func textureUsageToD3D12State(usage gputypes.TextureUsage, tex *Texture) d3d12.D3D12_RESOURCE_STATES {
+	if tex != nil && isDepthFormat(tex.format) {
+		return depthTextureUsageToD3D12State(usage, tex.usage)
+	}
 	var state d3d12.D3D12_RESOURCE_STATES
 
 	if usage&gputypes.TextureUsageCopySrc != 0 {
@@ -1332,6 +1341,52 @@ func textureUsageToD3D12State(usage gputypes.TextureUsage) d3d12.D3D12_RESOURCE_
 		state = d3d12.D3D12_RESOURCE_STATE_COMMON
 	}
 
+	return state
+}
+
+// depthTextureUsageToD3D12State converts a barrier usage of a depth/stencil
+// texture created with the usage created. The tracker encodes its three
+// depth states in the public bits (core/track TextureUses.ToTextureUsage):
+//
+//   - RenderAttachment: depth-stencil write, DEPTH_WRITE;
+//   - RenderAttachment | TextureBinding: read-only attachment, DEPTH_READ,
+//     plus the shader-resource states when the texture may be sampled;
+//   - TextureBinding: sampled, the shader-resource states.
+//
+// A depth texture created without TextureBinding has DENY_SHADER_RESOURCE,
+// and one created without RenderAttachment has no ALLOW_DEPTH_STENCIL; a
+// state those flags forbid fails ResourceBarrier (debug layer id 524) and
+// Close returns E_INVALIDARG (P1-DX12-056: RENDER_TARGET for a
+// RenderAttachment-only depth texture).
+//
+// Reference: Rust wgpu-hal dx12/conv.rs map_texture_usage_to_state
+// (DEPTH_STENCIL_READ => DEPTH_READ, DEPTH_STENCIL_WRITE => DEPTH_WRITE,
+// RESOURCE => the shader-resource states).
+func depthTextureUsageToD3D12State(usage, created gputypes.TextureUsage) d3d12.D3D12_RESOURCE_STATES {
+	const shaderResource = d3d12.D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | d3d12.D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+	var state d3d12.D3D12_RESOURCE_STATES
+	if usage&gputypes.TextureUsageCopySrc != 0 {
+		state |= d3d12.D3D12_RESOURCE_STATE_COPY_SOURCE
+	}
+	if usage&gputypes.TextureUsageCopyDst != 0 {
+		state |= d3d12.D3D12_RESOURCE_STATE_COPY_DEST
+	}
+	attachment := usage&gputypes.TextureUsageRenderAttachment != 0
+	sampled := usage&gputypes.TextureUsageTextureBinding != 0
+	switch {
+	case attachment && !sampled:
+		state |= d3d12.D3D12_RESOURCE_STATE_DEPTH_WRITE
+	case attachment:
+		state |= d3d12.D3D12_RESOURCE_STATE_DEPTH_READ
+		if created&gputypes.TextureUsageTextureBinding != 0 {
+			state |= shaderResource
+		}
+	case sampled:
+		state |= shaderResource
+	}
+	if state == 0 {
+		state = d3d12.D3D12_RESOURCE_STATE_COMMON
+	}
 	return state
 }
 
