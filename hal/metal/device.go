@@ -760,15 +760,19 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Get shader modules
 	//
-	// The render path does not bind naga's `_buffer_sizes` argument, so this
-	// MSL does not change.
+	// Each stage that uses a runtime-sized array gets naga's `_buffer_sizes`
+	// argument at the slot after the layout's buffers, as compute does; the
+	// encoder fills it before every draw. naga v0.20.5 refuses a specialized
+	// stage that needs the argument but has no slot for it (P1-MTL-005).
+	//
+	// Reference: Rust wgpu-hal metal/device.rs:1567,1733 (sizes_slot per stage).
 	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
 	if !ok || vertexModule == nil {
 		return nil, fmt.Errorf("metal: invalid vertex shader module")
 	}
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout, false,
+	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout, true,
 		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint})
 	if err != nil {
 		return nil, err
@@ -786,7 +790,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		// module; a library specialized for the vertex stage has only the
 		// vertex entry point.
 		if fragmentModule != vertexModule || vertexLib.specialized {
-			fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout, false,
+			fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout, true,
 				librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint})
 			if err != nil {
 				return nil, err
@@ -969,19 +973,28 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		"sampleCount", sampleCount,
 	)
 
-	return &RenderPipeline{
+	pipeline := &RenderPipeline{
 		raw:           pipelineState,
 		device:        d,
 		layout:        pipeLayout,
 		cullMode:      cullModeToMTL(desc.Primitive.CullMode),
 		frontFace:     frontFaceToMTL(desc.Primitive.FrontFace),
 		icbCompatible: icbCompatible,
+		vertexSizes:   vertexLib.sizesBindings,
+		sizesSlot:     vertexLib.sizesSlot,
 
 		depthStencil:    depthStencilState,
 		depthBias:       depthBias,
 		depthSlopeScale: depthSlopeScale,
 		depthClamp:      depthClamp,
-	}, nil
+	}
+	if desc.Fragment != nil && len(fragmentLib.sizesBindings) > 0 {
+		// Both stages are compiled against the same layout, so their
+		// `_buffer_sizes` slot is the same: PipelineLayout.totalBuffers.
+		pipeline.fragmentSizes = fragmentLib.sizesBindings
+		pipeline.sizesSlot = fragmentLib.sizesSlot
+	}
+	return pipeline, nil
 }
 
 // newStencilFaceDescriptor builds an MTLStencilDescriptor for one face. The
