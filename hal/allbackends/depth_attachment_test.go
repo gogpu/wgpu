@@ -52,7 +52,6 @@ func TestDepthAttachmentStates(t *testing.T) {
 		t.Run("write-then-sampled", func(t *testing.T) {
 			skipKnownGap(t, "software", "P1-SW-015", "depth is never written back to the texture")
 			skipKnownGap(t, "vulkan", "P1-CORE-010", "bind-group textures get no barrier, so the sampled depth stays in the attachment layout")
-			skipKnownGap(t, "gles", "naga v0.20.5", "GLSL texelFetch on a depth texture needs naga #120")
 			r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
 				wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
 			for frame := 0; frame < 2; frame++ {
