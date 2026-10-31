@@ -288,6 +288,10 @@ func TestComputeSDFIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EndEncoding failed: %v", err)
 	}
+	// Returns the encoder's command pool to the device, which destroys it at
+	// device shutdown; without this the validation layer reports
+	// VUID-vkDestroyDevice-device-05137 for the leaked VkCommandBuffer.
+	defer device.FreeCommandBuffer(cmdBuffer)
 
 	// Step 10: Submit and wait for completion
 	subIdx, err := queue.Submit([]hal.CommandBuffer{cmdBuffer})
