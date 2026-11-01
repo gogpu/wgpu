@@ -17,6 +17,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // -----------------------------------------------------------------------------
@@ -31,7 +32,7 @@ import (
 // For pre-compiled SPIR-V, entryPoints is populated directly.
 type ShaderModule struct {
 	wgslSource  string            // Raw WGSL source (shader cache key of the DXIL path)
-	irModule    *ir.Module        // WGSL lowered to IR; nil for pre-compiled input
+	irModule    *shaderir.Module  // WGSL lowered to IR; nil for pre-compiled input
 	entryPoints map[string][]byte // entryName → DXBC bytecode (populated on pipeline creation or from SPIR-V)
 	device      *Device
 }

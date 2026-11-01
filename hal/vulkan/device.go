@@ -1254,18 +1254,18 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	switch {
 	case desc.Source.WGSL != "":
 		sourceType = "WGSL"
-		irModule, err := shaderir.LowerValidated(desc.Source.WGSL)
+		lowered, err := shaderir.Lower(desc.Source.WGSL)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
-		sm.irModule = irModule
-		if shaderir.PerStage(irModule, nil) {
+		sm.irModule = &lowered
+		if shaderir.PerStage(lowered.IR, nil) {
 			// Overrides: compiled per pipeline stage (compileStage).
 			hal.Logger().Debug("vulkan: shader module with overrides, compiled per pipeline stage",
-				"overrides", len(irModule.Overrides))
+				"overrides", len(lowered.IR.Overrides))
 			return sm, nil
 		}
-		words, err = shaderir.SPIRV(irModule, d.spirvOptions)
+		words, err = shaderir.SPIRV(lowered.IR, d.spirvOptions)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
@@ -1327,15 +1327,15 @@ func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint
 		}
 		return sm.handle, false, nil
 	}
-	if !shaderir.PerStage(sm.irModule, constants) {
+	if !shaderir.PerStage(sm.irModule.IR, constants) {
 		return sm.handle, false, nil
 	}
 
-	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
+	module, err := shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: %w", err)
 	}
-	words, err := shaderir.SPIRV(module, d.spirvOptions)
+	words, err := shaderir.SPIRV(module.IR, d.spirvOptions)
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}

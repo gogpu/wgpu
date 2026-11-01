@@ -532,22 +532,22 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	start := time.Now()
 
-	irModule, err := shaderir.Lower(desc.Source.WGSL)
+	lowered, err := shaderir.Lower(desc.Source.WGSL)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
 	}
 
 	// Extract workgroup sizes from entry points for compute shaders
-	workgroupSizes := extractWorkgroupSizes(irModule)
+	workgroupSizes := extractWorkgroupSizes(lowered.IR)
 
 	hal.Logger().Debug("metal: WGSL→IR lowering",
 		"elapsed", time.Since(start),
-		"entryPoints", len(irModule.EntryPoints),
+		"entryPoints", len(lowered.IR.EntryPoints),
 	)
 
 	return &ShaderModule{
 		source:         desc.Source,
-		irModule:       irModule,
+		irModule:       &lowered,
 		device:         d,
 		workgroupSizes: workgroupSizes,
 	}, nil
@@ -601,23 +601,23 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	start := time.Now()
 
 	out := &compiledLibrary{}
-	irModule := module.irModule
-	if shaderir.PerStage(irModule, spec.constants) {
+	stage := *module.irModule
+	if shaderir.PerStage(stage.IR, spec.constants) {
 		var err error
-		irModule, err = shaderir.Specialize(irModule, spec.stage, spec.entryPoint, spec.constants)
+		stage, err = shaderir.Specialize(stage, spec.stage, spec.entryPoint, spec.constants)
 		if err != nil {
 			return nil, fmt.Errorf("metal: %w", err)
 		}
 		out.specialized = true
-		out.workgroupSize = irModule.EntryPoints[0].Workgroup
+		out.workgroupSize = stage.IR.EntryPoints[0].Workgroup
 	}
 
-	options, err := libraryOptions(module.irModule, irModule, out.specialized, layout, bindSizes, out)
+	options, err := libraryOptions(module.irModule.IR, stage.IR, out.specialized, layout, bindSizes, out)
 	if err != nil {
 		return nil, err
 	}
 
-	mslSource, info, err := msl.Compile(irModule, options)
+	mslSource, info, err := msl.Compile(stage.IR, options)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to compile to MSL: %w", shaderir.BackendError(err))
 	}

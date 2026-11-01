@@ -2134,10 +2134,10 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 			return nil, fmt.Errorf("dx12: WGSL: %w", err)
 		}
 		module.wgslSource = desc.Source.WGSL
-		module.irModule = irModule
+		module.irModule = &irModule
 		hal.Logger().Debug("dx12: shader module created (deferred compilation)",
 			"source", "WGSL",
-			"overrides", len(irModule.Overrides),
+			"overrides", len(irModule.IR.Overrides),
 		)
 	case len(desc.Source.SPIRV) > 0:
 		// Legacy: pre-compiled SPIR-V stored as single entry "main"
@@ -2167,9 +2167,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 // BindingMap and SamplerBufferBindingMap matching the root signature layout.
 func (d *Device) compileWGSLModule(module *ShaderModule, nagaOpts *hlsl.Options) error {
 	if d.useDXIL {
-		return d.compileWGSLModuleDXIL(module.wgslSource, module.irModule, nagaOpts, module.entryPoints)
+		return d.compileWGSLModuleDXIL(module.wgslSource, module.irModule.IR, nagaOpts, module.entryPoints)
 	}
-	return d.compileWGSLModuleHLSL(module.irModule, nagaOpts, module.entryPoints)
+	return d.compileWGSLModuleHLSL(module.irModule.IR, nagaOpts, module.entryPoints)
 }
 
 // stageBytecode returns the bytecode of one pipeline stage.
@@ -2187,7 +2187,7 @@ func (d *Device) stageBytecode(module *ShaderModule, layout *PipelineLayout, sta
 		}
 		return module.EntryPointBytecode(entryPoint), nil
 	}
-	if !shaderir.PerStage(module.irModule, constants) {
+	if !shaderir.PerStage(module.irModule.IR, constants) {
 		if err := d.ensureShaderCompiled(module, layout); err != nil {
 			return nil, err
 		}
@@ -2197,7 +2197,7 @@ func (d *Device) stageBytecode(module *ShaderModule, layout *PipelineLayout, sta
 	if layout == nil || layout.nagaOptions == nil {
 		return nil, fmt.Errorf("dx12: deferred WGSL compilation requires PipelineLayout with naga options")
 	}
-	specialized, err := shaderir.Specialize(module.irModule, stage, entryPoint, constants)
+	specialized, err := shaderir.Specialize(*module.irModule, stage, entryPoint, constants)
 	if err != nil {
 		return nil, fmt.Errorf("dx12: %w", err)
 	}
@@ -2206,9 +2206,9 @@ func (d *Device) stageBytecode(module *ShaderModule, layout *PipelineLayout, sta
 		// The DXIL cache key is made from the WGSL source, so it must also
 		// hold the constants: other values give other DXIL.
 		cacheSource := module.wgslSource + "\x00" + pipelineConstantsKey(constants)
-		err = d.compileWGSLModuleDXIL(cacheSource, specialized, layout.nagaOptions, out)
+		err = d.compileWGSLModuleDXIL(cacheSource, specialized.IR, layout.nagaOptions, out)
 	} else {
-		err = d.compileWGSLModuleHLSL(specialized, layout.nagaOptions, out)
+		err = d.compileWGSLModuleHLSL(specialized.IR, layout.nagaOptions, out)
 	}
 	if err != nil {
 		return nil, err

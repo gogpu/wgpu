@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Buffer implements hal.Buffer for Metal.
@@ -124,7 +125,7 @@ func (s *Sampler) NativeHandle() uintptr { return uintptr(s.raw) }
 // `layout: &super::PipelineLayout`).
 type ShaderModule struct {
 	source         hal.ShaderSource
-	irModule       *ir.Module // nil unless the module was created from WGSL
+	irModule       *shaderir.Module // nil unless the module was created from WGSL
 	device         *Device
 	workgroupSizes map[string][3]uint32 // entry point name -> workgroup size; not final for a module with overrides (see compiledLibrary)
 }

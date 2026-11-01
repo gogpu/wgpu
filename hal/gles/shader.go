@@ -29,7 +29,7 @@ func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*Shad
 		if err != nil {
 			return nil, fmt.Errorf("gles: WGSL: %w", err)
 		}
-		sm.irModule = irModule
+		sm.irModule = &irModule
 	}
 	return sm, nil
 }
@@ -58,8 +58,8 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
 
-	module := sm.irModule
-	if shaderir.PerStage(module, constants) {
+	module := *sm.irModule
+	if shaderir.PerStage(module.IR, constants) {
 		var err error
 		module, err = shaderir.Specialize(module, stage, entryPoint, constants)
 		if err != nil {
@@ -71,7 +71,7 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	// On GL 4.3+ this emits layout(binding=N) qualifiers inline. On older versions
 	// (< 420 desktop / < 310 ES) naga omits them and the HAL assigns bindings at
 	// runtime after linking (see assignBindingsAfterLink).
-	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
+	glslCode, translationInfo, err := glsl.Compile(module.IR, glsl.Options{
 		LangVersion:         version,
 		EntryPoint:          &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
 		BindingMap:          bindingMap,

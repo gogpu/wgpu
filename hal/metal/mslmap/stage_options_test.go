@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
+	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
 	"github.com/gogpu/wgpu/hal/metal/mslmap"
 )
@@ -42,6 +43,24 @@ func lower(t *testing.T, source string) *ir.Module {
 	return module
 }
 
+// specialize keeps one entry point of source, as the Metal HAL does for a
+// pipeline stage: source is validated first, as naga.ProcessOverrides
+// requires.
+func specialize(t *testing.T, source *ir.Module, stage ir.ShaderStage, name string) *ir.Module {
+	t.Helper()
+	info, err := valid.Validate(source, valid.Options{Capabilities: valid.CapAll})
+	if err != nil {
+		t.Fatalf("valid.Validate: %v", err)
+	}
+	out, _, err := naga.ProcessOverrides(source, info, naga.OverrideOptions{
+		EntryPoint: &backend.EntryPointSelector{Stage: stage, Name: name},
+	})
+	if err != nil {
+		t.Fatalf("ProcessOverrides: %v", err)
+	}
+	return out
+}
+
 // TestStageOptionsKeepWholeModuleSlots checks that a module specialized for
 // entry point b keeps binding 1 at buffer slot 1, its slot in the whole
 // module, which the encoder binds. naga's own numbering of the specialized
@@ -50,12 +69,7 @@ func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
 	t.Parallel()
 
 	source := lower(t, wgslTwoStages)
-	stage, err := naga.ProcessOverrides(source, naga.OverrideOptions{
-		EntryPoint: &backend.EntryPointSelector{Stage: ir.StageCompute, Name: "b"},
-	})
-	if err != nil {
-		t.Fatalf("ProcessOverrides: %v", err)
-	}
+	stage := specialize(t, source, ir.StageCompute, "b")
 
 	own, _, err := msl.Compile(stage, msl.DefaultOptions())
 	if err != nil {
@@ -100,12 +114,7 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 	return positions[i] * scale;
 }
 `)
-	stage, err := naga.ProcessOverrides(source, naga.OverrideOptions{
-		EntryPoint: &backend.EntryPointSelector{Stage: ir.StageVertex, Name: "vs"},
-	})
-	if err != nil {
-		t.Fatalf("ProcessOverrides: %v", err)
-	}
+	stage := specialize(t, source, ir.StageVertex, "vs")
 	bindings, err := mslmap.RuntimeArrayBindings(stage)
 	if err != nil {
 		t.Fatalf("RuntimeArrayBindings: %v", err)

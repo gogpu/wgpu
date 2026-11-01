@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/shader"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // nextResourceID is a monotonic counter for assigning unique IDs to software resources.
@@ -460,9 +460,9 @@ type ComputePipeline struct {
 type ShaderModule struct {
 	Resource
 	desc     *hal.ShaderModuleDescriptor
-	irModule *ir.Module     // lowered WGSL (nil for SPIR-V input or if lowering failed)
-	spirv    []uint32       // SPIR-V bytecode (nil if unavailable)
-	parsed   *shader.Module // parsed SPIR-V module (nil until first use)
+	irModule *shaderir.Module // lowered WGSL (nil for SPIR-V input or if lowering failed)
+	spirv    []uint32         // SPIR-V bytecode (nil if unavailable)
+	parsed   *shader.Module   // parsed SPIR-V module (nil until first use)
 }
 
 // ParsedModule returns the parsed SPIR-V module, parsing on first access.

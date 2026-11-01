@@ -23,7 +23,7 @@ type ShaderModule struct {
 // extractShaderBindingSizes extracts the minimum buffer binding sizes
 // from a shader module. For each global variable with a resource binding
 // whose type is a buffer (not a sampler, texture, or other opaque type),
-// computes ir.TypeSize and returns a map from ResourceBinding to minimum
+// computes its size with ir.Layouter and returns a map from ResourceBinding to minimum
 // byte size.
 //
 // Global variables in WGSL are module-scoped and shared across all entry
@@ -38,6 +38,9 @@ func extractShaderBindingSizes(module *ir.Module) map[ir.ResourceBinding]uint64 
 	}
 
 	sizes := make(map[ir.ResourceBinding]uint64)
+
+	var layouter ir.Layouter
+	layouter.Update(module)
 
 	for i := range module.GlobalVariables {
 		gv := &module.GlobalVariables[i]
@@ -59,7 +62,7 @@ func extractShaderBindingSizes(module *ir.Module) map[ir.ResourceBinding]uint64 
 			continue
 		}
 
-		size := uint64(ir.TypeSize(module, gv.Type))
+		size := uint64(layouter.Layout(gv.Type).Size)
 		if size == 0 {
 			continue
 		}

@@ -269,8 +269,8 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	// by Interface::check_stage during pipeline creation.
 	// SPIR-V shaders skip this — they go directly to HAL without IR-level introspection.
 	if desc.WGSL != "" {
-		if irModule, err := shaderir.Lower(desc.WGSL); err == nil {
-			sm.irModule = irModule
+		if lowered, err := shaderir.Lower(desc.WGSL); err == nil {
+			sm.irModule = lowered.IR
 		}
 		// Parse failures are non-fatal here — the HAL already compiled the shader
 		// successfully. Late binding validation will be skipped if IR is unavailable.

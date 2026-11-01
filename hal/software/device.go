@@ -242,9 +242,11 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case desc.Source.WGSL != "":
 		// Compilation failure is non-fatal — existing draw paths don't need
 		// SPIR-V, so the module then has neither IR nor SPIR-V.
-		sm.irModule, _ = shaderir.LowerValidated(desc.Source.WGSL)
-		if sm.irModule != nil && !shaderir.PerStage(sm.irModule, nil) {
-			sm.spirv, _ = shaderir.SPIRV(sm.irModule, spirvOptions())
+		if lowered, err := shaderir.Lower(desc.Source.WGSL); err == nil {
+			sm.irModule = &lowered
+			if !shaderir.PerStage(lowered.IR, nil) {
+				sm.spirv, _ = shaderir.SPIRV(lowered.IR, spirvOptions())
+			}
 		}
 	}
 
@@ -260,14 +262,14 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 	if sm.irModule == nil && len(constants) > 0 {
 		return nil, fmt.Errorf("software: pipeline constants need a WGSL shader module that compiles")
 	}
-	if sm.irModule == nil || !shaderir.PerStage(sm.irModule, constants) {
+	if sm.irModule == nil || !shaderir.PerStage(sm.irModule.IR, constants) {
 		return sm.ParsedModule(), nil
 	}
-	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
+	module, err := shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
 	if err != nil {
 		return nil, fmt.Errorf("software: %w", err)
 	}
-	words, err := shaderir.SPIRV(module, spirvOptions())
+	words, err := shaderir.SPIRV(module.IR, spirvOptions())
 	if err != nil {
 		return nil, fmt.Errorf("software: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}

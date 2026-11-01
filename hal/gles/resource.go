@@ -14,6 +14,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Surface and SurfaceTexture are defined in platform-specific files (resource_windows.go, resource_linux.go)
@@ -121,7 +122,7 @@ type ShaderModule struct {
 	fragmentID uint32 // GL shader object ID for fragment
 	computeID  uint32 // GL shader object ID for compute
 	source     hal.ShaderSource
-	irModule   *ir.Module // lowered WGSL, specialized per pipeline stage; nil without WGSL
+	irModule   *shaderir.Module // lowered WGSL, specialized per pipeline stage; nil without WGSL
 	glCtx      *gl.Context
 }
 

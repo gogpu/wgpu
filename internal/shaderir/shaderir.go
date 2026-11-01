@@ -25,40 +25,45 @@ import (
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
+	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
 )
 
-// Lower parses WGSL to IR without validation, as the DX12, GLES and Metal
-// backends have always done.
+// Module is a validated IR module and the ModuleInfo of that validation,
+// which naga.ProcessOverrides takes.
+type Module struct {
+	IR   *ir.Module
+	Info valid.ModuleInfo
+}
+
+// Lower parses WGSL to IR and validates it.
+//
+// The validation allows every capability (valid.CapAll): it checks the
+// structure and yields the ModuleInfo. The capabilities of the device are
+// gated once, in core, before the HAL sees the module (Rust wgpu-core's
+// validator, built from features_to_naga_capabilities); a capability gate
+// here would refuse features the device has. P1-CORE-013 moves this single
+// validation into core and hands the HAL its result.
 //
 // A parse error keeps naga's *wgsl.ParseError (errors.As works) and is
 // prefixed with its line and column: ParseError.Error is the message only.
-func Lower(source string) (*ir.Module, error) {
+// A validation error is valid.Errors.
+func Lower(source string) (Module, error) {
 	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
 		var pe *wgsl.ParseError
 		if errors.As(err, &pe) {
 			if loc, ok := pe.Location(source); ok {
-				return nil, fmt.Errorf("%d:%d: %w", loc.Line, loc.Column, err)
+				return Module{}, fmt.Errorf("parse error: %d:%d: %w", loc.Line, loc.Column, err)
 			}
 		}
-		return nil, err
+		return Module{}, fmt.Errorf("parse error: %w", err)
 	}
-	return module, nil
-}
-
-// LowerValidated parses and validates WGSL with the capabilities of
-// naga.Compile's default options. The Vulkan and software backends used
-// naga.Compile before, so they keep its validation.
-func LowerValidated(source string) (*ir.Module, error) {
-	module, err := Lower(source)
+	info, err := valid.Validate(module, valid.Options{Capabilities: valid.CapAll})
 	if err != nil {
-		return nil, fmt.Errorf("parse error: %w", err)
+		return Module{}, fmt.Errorf("validation failed: %w", err)
 	}
-	if _, err := ir.Validate(module, ir.ValidateOptions{Capabilities: naga.DefaultOptions().Capabilities}); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
-	}
-	return module, nil
+	return Module{IR: module, Info: info}, nil
 }
 
 // PerStage reports whether module must be specialized for each pipeline
@@ -82,15 +87,15 @@ func PerStage(module *ir.Module, constants map[string]float64) bool {
 // A constant error keeps naga's error: errors.Is with naga.ErrOverrideNotFound
 // and the other sentinels, and errors.As with *naga.PipelineConstantError,
 // work on the result.
-func Specialize(module *ir.Module, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (*ir.Module, error) {
-	out, err := naga.ProcessOverrides(module, naga.OverrideOptions{
+func Specialize(module Module, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (Module, error) {
+	out, info, err := naga.ProcessOverrides(module.IR, module.Info, naga.OverrideOptions{
 		Constants:  constants,
 		EntryPoint: &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("pipeline constants of %s entry point %q: %w", StageName(stage), entryPoint, err)
+		return Module{}, fmt.Errorf("pipeline constants of %s entry point %q: %w", StageName(stage), entryPoint, err)
 	}
-	return out, nil
+	return Module{IR: out, Info: info}, nil
 }
 
 // ErrUnresolvedOverride wraps a naga backend error caused by overrides that
