@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,10 +39,12 @@ func validateWGSLShaderFeatures(source string, features gputypes.Features) error
 	}
 
 	caps := nagaCapabilitiesForFeatures(features)
-	if capErrors, err := nagair.ValidateWithCapabilities(module, caps); err != nil {
+	if _, err := nagair.Validate(module, nagair.ValidateOptions{Capabilities: caps}); err != nil {
+		var verrs nagair.ValidationErrors
+		if errors.As(err, &verrs) && len(verrs) > 0 {
+			return mapShaderCapabilityError(verrs[0], features)
+		}
 		return fmt.Errorf("shader module: capability validation failed: %w", err)
-	} else if len(capErrors) > 0 {
-		return mapShaderCapabilityError(capErrors[0], features)
 	}
 
 	return nil

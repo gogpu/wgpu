@@ -49,12 +49,8 @@ func LowerValidated(source string) (*ir.Module, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lowering error: %w", err)
 	}
-	verrs, err := ir.ValidateWithCapabilities(module, naga.DefaultOptions().Capabilities)
-	if err != nil {
-		return nil, fmt.Errorf("validation error: %w", err)
-	}
-	if len(verrs) > 0 {
-		return nil, fmt.Errorf("validation failed: %w", &verrs[0])
+	if _, err := ir.Validate(module, ir.ValidateOptions{Capabilities: naga.DefaultOptions().Capabilities}); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 	return module, nil
 }
