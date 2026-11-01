@@ -39,8 +39,13 @@ func extractShaderBindingSizes(module *ir.Module) map[ir.ResourceBinding]uint64 
 
 	sizes := make(map[ir.ResourceBinding]uint64)
 
+	// Update fails only for a type arena that refers outside itself or to
+	// itself, which validation rejects; without layouts there are no sizes
+	// to check, as for a module without IR.
 	var layouter ir.Layouter
-	layouter.Update(module)
+	if err := layouter.Update(module); err != nil {
+		return nil
+	}
 
 	for i := range module.GlobalVariables {
 		gv := &module.GlobalVariables[i]
