@@ -162,6 +162,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		supportsDrawIndirectCount:  supportsDrawIndirectCountFeature(a.properties.ApiVersion),
 		maxDrawIndirectCount:       a.properties.Limits.MaxDrawIndirectCount,
 		supportsIncrementalPresent: hasIncrementalPresent,
+		spirvOptions:               spirvOptions(a.properties.ApiVersion),
 	}
 	loadDrawIndirectCountProcs(dev)
 

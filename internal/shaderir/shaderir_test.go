@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 )
 
 const overrideShader = `
@@ -72,7 +73,7 @@ func TestSpecialize(t *testing.T) {
 	if got := out.EntryPoints[0].Workgroup; got != [3]uint32{3, 2, 1} {
 		t.Errorf("workgroup size = %v, want [3 2 1]", got)
 	}
-	if _, err := SPIRV(out); err != nil {
+	if _, err := SPIRV(out, spirv.Options{Version: spirv.Version1_3}); err != nil {
 		t.Errorf("SPIRV of the specialized module: %v", err)
 	}
 
@@ -108,7 +109,7 @@ func TestBackendError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SPIRV(module); !errors.Is(err, ErrUnresolvedOverride) {
+	if _, err := SPIRV(module, spirv.Options{Version: spirv.Version1_3}); !errors.Is(err, ErrUnresolvedOverride) {
 		t.Errorf("SPIRV of an unprocessed module: error %v, want ErrUnresolvedOverride", err)
 	}
 }

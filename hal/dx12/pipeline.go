@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/hlsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -438,13 +439,25 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	}
 
 	// Build naga HLSL options for deferred shader compilation.
-	nagaOpts := hlsl.DefaultOptions()
-	nagaOpts.BindingMap = bindingMap
-	nagaOpts.FakeMissingBindings = false
-	nagaOpts.SamplerBufferBindingMap = samplerBufferBindingMap
-	nagaOpts.SamplerHeapTargets = hlsl.SamplerHeapBindTargets{
-		StandardSamplers:   hlsl.BindTarget{Space: 0, Register: 0},
-		ComparisonSamplers: hlsl.BindTarget{Space: 0, Register: 2048},
+	// FXC compiles shader model 5.1 at most (shaderStageToTarget). Bounds
+	// checks follow Rust's restrict_indexing (true, what wgpu-hal passes):
+	// Index and Buffer Restrict; D3D12 checks image loads itself; binding
+	// arrays are Unchecked, as Rust's HLSL writer never checks them. The
+	// DXIL path takes the bindings from these options (compileWGSLModuleDXIL).
+	nagaOpts := &hlsl.Options{
+		ShaderModel:             backend.ShaderModel{Major: 5, Minor: 1},
+		BindingMap:              bindingMap,
+		SamplerBufferBindingMap: samplerBufferBindingMap,
+		SamplerHeapTargets: &hlsl.SamplerHeapBindTargets{
+			StandardSamplers:   hlsl.BindTarget{Space: 0, Register: 0},
+			ComparisonSamplers: hlsl.BindTarget{Space: 0, Register: 2048},
+		},
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckRestrict,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
 	}
 
 	return &pipelineLayoutResult{

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -71,11 +72,13 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	// (< 420 desktop / < 310 ES) naga omits them and the HAL assigns bindings at
 	// runtime after linking (see assignBindingsAfterLink).
 	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
-		LangVersion:        version,
-		EntryPoint:         entryPoint,
-		ForceHighPrecision: true,
-		BindingMap:         bindingMap,
-		// ADJUST_COORDINATE_SPACE: naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
+		LangVersion:         version,
+		EntryPoint:          &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
+		BindingMap:          bindingMap,
+		BoundsCheckPolicies: glslBoundsCheckPolicies(version),
+		ForcePointSize:      true,
+		// Coordinate space (naga's zero value, Rust's ADJUST_COORDINATE_SPACE):
+		// naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
 		// at the end of vertex shaders. This flips Y and remaps Z from [0,1] to [-1,1].
 		// The scene renders upside-down inside the Surface's swapchain offscreen FBO
 		// (hal/gles/surface.go). Queue.Present performs an explicit Y-flipping
@@ -86,7 +89,6 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 		// the flip, gl_FragCoord.y=0 is at the top (WebGPU convention), not bottom
 		// (GL convention). Without it, rrect_clip_coverage() in fragment shaders
 		// gets wrong Y values (BUG-GLES-SCROLLBAR-001).
-		WriterFlags: glsl.WriterFlagAdjustCoordinateSpace | glsl.WriterFlagForcePointSize,
 	})
 	if err != nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, shaderir.BackendError(err))
@@ -105,6 +107,25 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	}
 
 	return glslCode, translationInfo, nil
+}
+
+// glslBoundsCheckPolicies returns the bounds-check policies for a GLSL target,
+// as Rust wgpu-hal gles/device.rs:402-417 chooses them. Image loads are
+// checked (ReadZeroSkipWrite) only on desktop GL 4.3+, where textureQueryLevels
+// is core; GLSL ES has no way to query levels and samples, and naga refuses a
+// checked image load there. Index, buffer and binding-array checks are
+// Unchecked, as in Rust.
+func glslBoundsCheckPolicies(version glsl.Version) backend.BoundsCheckPolicies {
+	imageLoad := backend.BoundsCheckUnchecked
+	if !version.ES && (version.Major > 4 || version.Major == 4 && version.Minor >= 30) {
+		imageLoad = backend.BoundsCheckReadZeroSkipWrite
+	}
+	return backend.BoundsCheckPolicies{
+		Index:        backend.BoundsCheckUnchecked,
+		Buffer:       backend.BoundsCheckUnchecked,
+		ImageLoad:    imageLoad,
+		BindingArray: backend.BoundsCheckUnchecked,
+	}
 }
 
 // assignBindingsAfterLink assigns uniform block and sampler bindings at runtime

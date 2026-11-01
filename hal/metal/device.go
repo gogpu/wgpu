@@ -712,7 +712,7 @@ func libraryOptions(source, irModule *ir.Module, specialized bool, layout *Pipel
 		}
 		return options, nil
 	default:
-		return msl.DefaultOptions(), nil
+		return mslmap.BaseOptions(), nil
 	}
 }
 

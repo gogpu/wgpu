@@ -68,7 +68,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		ApplicationVersion: vkMakeVersion(1, 0, 0),
 		PEngineName:        uintptr(unsafe.Pointer(&engineName[0])),
 		EngineVersion:      vkMakeVersion(0, 1, 0),
-		ApiVersion:         vkMakeVersion(1, 2, 0), // Vulkan 1.2
+		ApiVersion:         instanceAPIVersion,
 	}
 
 	// Required extensions

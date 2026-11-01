@@ -10,7 +10,9 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/shader"
 	"github.com/gogpu/wgpu/internal/shaderir"
@@ -242,7 +244,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 		// SPIR-V, so the module then has neither IR nor SPIR-V.
 		sm.irModule, _ = shaderir.LowerValidated(desc.Source.WGSL)
 		if sm.irModule != nil && !shaderir.PerStage(sm.irModule, nil) {
-			sm.spirv, _ = shaderir.SPIRV(sm.irModule)
+			sm.spirv, _ = shaderir.SPIRV(sm.irModule, spirvOptions())
 		}
 	}
 
@@ -265,15 +267,36 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 	if err != nil {
 		return nil, fmt.Errorf("software: %w", err)
 	}
-	spirv, err := shaderir.SPIRV(module)
+	words, err := shaderir.SPIRV(module, spirvOptions())
 	if err != nil {
 		return nil, fmt.Errorf("software: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
-	parsed, err := shader.ParseModule(spirv)
+	parsed, err := shader.ParseModule(words)
 	if err != nil {
 		return nil, fmt.Errorf("software: parse SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
 	return parsed, nil
+}
+
+// spirvOptions are the naga SPIR-V options for the interpreter.
+//
+// SPIR-V 1.3 is the version the interpreter is tested on. Index and buffer
+// accesses are clamped by the shader (Restrict, OpExtInst UMin). Image loads
+// stay Unchecked until the interpreter implements OpImageQueryLevels,
+// OpImageQuerySizeLod and OpImageQuerySamples (P1-SW-017), which naga's
+// checked image loads emit; fetchTexel clamps the coordinates itself, so an
+// out-of-bounds load still reads inside the texture. Binding arrays are
+// Unchecked, as in every Rust wgpu-hal backend.
+func spirvOptions() spirv.Options {
+	return spirv.Options{
+		Version: spirv.Version1_3,
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckUnchecked,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
+	}
 }
 
 // DestroyShaderModule is a no-op.

@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/dxil"
 	"github.com/gogpu/naga/hlsl"
 	"github.com/gogpu/naga/ir"
@@ -81,6 +82,10 @@ type Device struct {
 
 	// Feature level and capabilities.
 	featureLevel d3d12.D3D_FEATURE_LEVEL
+
+	// shaderModel is the highest shader model the adapter supports
+	// (Adapter.queryShaderModel). The DXIL path compiles for it (dxilOptions).
+	shaderModel d3d12.D3D_SHADER_MODEL
 
 	// Shared empty root signature for pipelines without bind groups.
 	// DX12 requires a valid root signature for every PSO, even if the shader
@@ -241,7 +246,7 @@ func (h *DescriptorHeap) HandleToIndex(handle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE)
 
 // newDevice creates a new DX12 device from a DXGI adapter.
 // adapterPtr is the IUnknown pointer to the DXGI adapter.
-func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
+func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL, shaderModel d3d12.D3D_SHADER_MODEL) (*Device, error) {
 	// Create D3D12 device
 	rawDevice, err := instance.d3d12Lib.CreateDevice(adapterPtr, featureLevel)
 	if err != nil {
@@ -252,6 +257,7 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.
 		raw:          rawDevice,
 		instance:     instance,
 		featureLevel: featureLevel,
+		shaderModel:  shaderModel,
 	}
 
 	// Create the direct (graphics) command queue
@@ -2241,7 +2247,7 @@ func hlslToDXILBindingMap(m map[hlsl.ResourceBinding]hlsl.BindTarget) dxil.Bindi
 	out := make(dxil.BindingMap, len(m))
 	for k, v := range m {
 		out[dxil.BindingLocation{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
-			Space:    uint32(v.Space),
+			Space:    v.Space,
 			Register: v.Register,
 		}
 	}
@@ -2255,23 +2261,65 @@ func hlslToDXILSamplerBufferBindingMap(m map[uint32]hlsl.BindTarget) map[uint32]
 	out := make(map[uint32]dxil.BindTarget, len(m))
 	for group, v := range m {
 		out[group] = dxil.BindTarget{
-			Space:    uint32(v.Space),
+			Space:    v.Space,
 			Register: v.Register,
 		}
 	}
 	return out
 }
 
-func hlslToDXILSamplerHeapTargets(t hlsl.SamplerHeapBindTargets) *dxil.SamplerHeapBindTargets {
+func hlslToDXILSamplerHeapTargets(t *hlsl.SamplerHeapBindTargets) *dxil.SamplerHeapBindTargets {
+	if t == nil {
+		return nil
+	}
 	return &dxil.SamplerHeapBindTargets{
 		StandardSamplers: dxil.BindTarget{
-			Space:    uint32(t.StandardSamplers.Space),
+			Space:    t.StandardSamplers.Space,
 			Register: t.StandardSamplers.Register,
 		},
 		ComparisonSamplers: dxil.BindTarget{
-			Space:    uint32(t.ComparisonSamplers.Space),
+			Space:    t.ComparisonSamplers.Space,
 			Register: t.ComparisonSamplers.Register,
 		},
+	}
+}
+
+// dxilShaderModelMax is the newest shader model naga's DXIL backend writes.
+var dxilShaderModelMax = backend.ShaderModel{Major: 6, Minor: 9}
+
+// dxilOptions returns the naga DXIL options of this device, without the
+// bindings, which come from the pipeline layout.
+//
+// The shader model is the adapter's highest, capped at naga's, as Rust
+// wgpu-hal dx12 passes the device's shader model: naga refuses a shader that
+// needs a newer one with a typed error instead of failing in the driver.
+// Bounds checks follow Rust's restrict_indexing (true, what wgpu-hal passes):
+// Index and Buffer Restrict; image loads are checked by D3D12 itself; binding
+// arrays are Unchecked, as Rust's HLSL writer never checks them.
+func (d *Device) dxilOptions() dxil.Options {
+	return dxil.Options{
+		ShaderModel: dxilShaderModel(d.shaderModel),
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckRestrict,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
+	}
+}
+
+// dxilShaderModel maps a D3D_SHADER_MODEL (0x60 = 6.0) to naga's shader
+// model, capped at dxilShaderModelMax. Below 6.0 there is no DXIL; the DXIL
+// path is then refused by D3D12 anyway, and 6.0 is passed.
+func dxilShaderModel(sm d3d12.D3D_SHADER_MODEL) backend.ShaderModel {
+	major, minor := uint8(sm>>4), uint8(sm&0xF)
+	switch {
+	case major < 6:
+		return backend.ShaderModel{Major: 6, Minor: 0}
+	case major > dxilShaderModelMax.Major || minor > dxilShaderModelMax.Minor:
+		return dxilShaderModelMax
+	default:
+		return backend.ShaderModel{Major: major, Minor: minor}
 	}
 }
 
@@ -2282,7 +2330,7 @@ func (d *Device) compileWGSLModuleHLSL(irModule *ir.Module, nagaOpts *hlsl.Optio
 	// The options contain BindingMap (register assignments matching root signature)
 	// and SamplerBufferBindingMap (sampler index buffer locations), ensuring the
 	// shader's register usage matches the root signature exactly.
-	hlslSource, info, err := hlsl.Compile(irModule, nagaOpts)
+	hlslSource, info, err := hlsl.Compile(irModule, *nagaOpts)
 	if err != nil {
 		return fmt.Errorf("HLSL generation: %w", shaderir.BackendError(err))
 	}
@@ -2304,7 +2352,7 @@ func (d *Device) compileWGSLModuleHLSL(irModule *ir.Module, nagaOpts *hlsl.Optio
 
 		// Use the HLSL entry point name (naga may rename it)
 		hlslName := ep.Name
-		if info != nil && info.EntryPointNames != nil {
+		if info.EntryPointNames != nil {
 			if mapped, ok := info.EntryPointNames[ep.Name]; ok {
 				hlslName = mapped
 			}
@@ -2356,17 +2404,16 @@ func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, 
 		"entryPoints", len(irModule.EntryPoints),
 	)
 
-	opts := dxil.DefaultOptions()
+	opts := d.dxilOptions()
 	if nagaOpts != nil {
 		opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
 		opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
 		opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
 	}
 
-	// Compile each entry point separately by creating a single-entry-point IR module.
-	// dxil.Compile always compiles EntryPoints[0], so we isolate each entry point
-	// into its own module copy. This matches the per-entry-point granularity of the
-	// HLSL→FXC path and the shader cache.
+	// A DXIL container holds one entry point: compile each one separately,
+	// selected by opts.EntryPoint. This matches the per-entry-point
+	// granularity of the HLSL→FXC path and the shader cache.
 	for i := range irModule.EntryPoints {
 		ep := &irModule.EntryPoints[i]
 
@@ -2382,26 +2429,8 @@ func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, 
 			continue
 		}
 
-		// Create a single-entry-point module for dxil.Compile.
-		// dxil.Compile always processes EntryPoints[0], so we need to isolate
-		// the target entry point. Shared module data (types, constants, globals)
-		// is referenced, not copied — only the EntryPoints slice differs.
-		// A module specialized for one stage has only that entry point.
-		singleEPModule := irModule
-		if len(irModule.EntryPoints) > 1 {
-			singleEPModule = &ir.Module{
-				Types:             irModule.Types,
-				Constants:         irModule.Constants,
-				GlobalVariables:   irModule.GlobalVariables,
-				GlobalExpressions: irModule.GlobalExpressions,
-				Functions:         irModule.Functions,
-				EntryPoints:       []ir.EntryPoint{irModule.EntryPoints[i]},
-				Overrides:         irModule.Overrides,
-				SpecialTypes:      irModule.SpecialTypes,
-			}
-		}
-
-		dxilBytes, err := dxil.Compile(singleEPModule, opts)
+		opts.EntryPoint = &backend.EntryPointSelector{Stage: ep.Stage, Name: ep.Name}
+		dxilBytes, _, err := dxil.Compile(irModule, opts)
 		if err != nil {
 			return fmt.Errorf("dx12: DXIL compile entry point %q: %w", ep.Name, shaderir.BackendError(err))
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal/metal/mslmap"
@@ -53,7 +54,7 @@ func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
 
 	source := lower(t, wgslTwoStages)
 	stage, err := naga.ProcessOverrides(source, naga.OverrideOptions{
-		EntryPoint: &naga.EntryPointSelector{Stage: ir.StageCompute, Name: "b"},
+		EntryPoint: &backend.EntryPointSelector{Stage: ir.StageCompute, Name: "b"},
 	})
 	if err != nil {
 		t.Fatalf("ProcessOverrides: %v", err)
@@ -103,7 +104,7 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 }
 `)
 	stage, err := naga.ProcessOverrides(source, naga.OverrideOptions{
-		EntryPoint: &naga.EntryPointSelector{Stage: ir.StageVertex, Name: "vs"},
+		EntryPoint: &backend.EntryPointSelector{Stage: ir.StageVertex, Name: "vs"},
 	})
 	if err != nil {
 		t.Fatalf("ProcessOverrides: %v", err)

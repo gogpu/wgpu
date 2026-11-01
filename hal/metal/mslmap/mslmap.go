@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 )
@@ -34,6 +35,22 @@ import (
 // msl.BindTarget stores the slot in a uint8. Real Metal devices allow only 31
 // buffers, so a value above this limit means the caller made a mistake.
 const maxBufferSlot = 255
+
+// BaseOptions returns the MSL options every Metal shader starts from, before
+// any binding map. The bounds checks are Rust wgpu-hal's
+// (metal/device.rs:186-222): Restrict on indices, buffers and image loads,
+// Unchecked on binding arrays. naga's zero value would check binding arrays
+// too.
+func BaseOptions() msl.Options {
+	return msl.Options{
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckRestrict,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
+	}
+}
 
 // Options returns MSL options that put naga's `_buffer_sizes` argument at
 // buffer slot sizesSlot. It does this for every entry point in module, and it
@@ -44,7 +61,7 @@ const maxBufferSlot = 255
 // wgpu-hal picks the slot the same way, after it walks the pipeline layout.
 func Options(module *ir.Module, sizesSlot int) (msl.Options, error) {
 	if sizesSlot < 0 || sizesSlot > maxBufferSlot {
-		return msl.DefaultOptions(), fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
+		return BaseOptions(), fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
 	}
 	return StageOptions(module, module, sizesSlot)
 }
@@ -60,7 +77,7 @@ func Options(module *ir.Module, sizesSlot int) (msl.Options, error) {
 // `_buffer_sizes` argument, as msl.DefaultOptions does not; otherwise it is
 // the slot, as for Options.
 func StageOptions(source, module *ir.Module, sizesSlot int) (msl.Options, error) {
-	opts := msl.DefaultOptions()
+	opts := BaseOptions()
 	if source == nil || module == nil {
 		return opts, fmt.Errorf("mslmap: nil IR module")
 	}

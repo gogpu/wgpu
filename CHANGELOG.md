@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`hal/software/raster`**: `FragmentShaderFunc` and `MRTFragmentShaderFunc` now receive the whole `*Fragment` and return a discard flag. `DrawTrianglesWithFragmentShader` and `DrawTrianglesWithMRTShader` take a `mayDiscard` argument, and `Fragment` has a new `InvW` field. `hal/software/shader` has a new `ErrDiscarded` sentinel and `Module.MayDiscard`.
+- **naga v0.21.0 options: every backend sets them explicitly**, as each Rust wgpu-hal backend does, since naga's zero values now mean Restrict on every bounds check and SPIR-V 1.0. Vulkan compiles for the highest SPIR-V version the device accepts at the instance's Vulkan 1.2 (1.0, 1.3 or 1.5), writes `PointSize`, and checks indices, buffers and image loads (Restrict; binding arrays unchecked). GLES checks image loads only on desktop GL 4.3+ (GLSL ES has no level and sample queries). DX12 DXIL compiles for the adapter's highest shader model, and HLSL for FXC's 5.1. Metal checks indices, buffers and image loads. Software keeps SPIR-V 1.3 and leaves image loads unchecked until the interpreter has the image query instructions.
 
 ## [0.34.6] - 2026-11-02
 

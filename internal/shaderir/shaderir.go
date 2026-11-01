@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
 )
@@ -48,15 +49,12 @@ func LowerValidated(source string) (*ir.Module, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lowering error: %w", err)
 	}
-	opts := naga.DefaultOptions()
-	if opts.Validate {
-		verrs, err := ir.ValidateWithCapabilities(module, opts.Capabilities)
-		if err != nil {
-			return nil, fmt.Errorf("validation error: %w", err)
-		}
-		if len(verrs) > 0 {
-			return nil, fmt.Errorf("validation failed: %w", &verrs[0])
-		}
+	verrs, err := ir.ValidateWithCapabilities(module, naga.DefaultOptions().Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("validation error: %w", err)
+	}
+	if len(verrs) > 0 {
+		return nil, fmt.Errorf("validation failed: %w", &verrs[0])
 	}
 	return module, nil
 }
@@ -85,7 +83,7 @@ func PerStage(module *ir.Module, constants map[string]float64) bool {
 func Specialize(module *ir.Module, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (*ir.Module, error) {
 	out, err := naga.ProcessOverrides(module, naga.OverrideOptions{
 		Constants:  constants,
-		EntryPoint: &naga.EntryPointSelector{Stage: stage, Name: entryPoint},
+		EntryPoint: &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("pipeline constants of %s entry point %q: %w", StageName(stage), entryPoint, err)
@@ -108,14 +106,11 @@ func BackendError(err error) error {
 	return err
 }
 
-// SPIRV compiles module to SPIR-V words with naga.Compile's default options.
-func SPIRV(module *ir.Module) ([]uint32, error) {
-	opts := naga.DefaultOptions()
-	b, err := naga.GenerateSPIRV(module, spirv.Options{
-		Version:             opts.SPIRVVersion,
-		Debug:               opts.Debug,
-		BoundsCheckPolicies: opts.BoundsCheckPolicies,
-	})
+// SPIRV compiles module to SPIR-V words with the backend's options. Every
+// backend passes its own options, as each Rust wgpu-hal backend does: naga's
+// zero values (SPIR-V 1.0, Restrict on every bounds check) suit no device.
+func SPIRV(module *ir.Module, opts spirv.Options) ([]uint32, error) {
+	b, err := naga.GenerateSPIRV(module, opts)
 	if err != nil {
 		return nil, BackendError(err)
 	}

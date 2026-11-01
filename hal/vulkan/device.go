@@ -14,6 +14,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -73,6 +74,7 @@ type Device struct {
 	renderPassCache             *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
 	pipelineCache               vk.PipelineCache     // Driver-compiled ISA cache (#331)
 	pipelineCachePath           string               // Disk path for pipeline cache persistence
+	spirvOptions                spirv.Options        // naga SPIR-V options for this device (naga_options.go)
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain
@@ -1243,7 +1245,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	}
 
 	sm := &ShaderModule{label: desc.Label, device: d}
-	var spirv []uint32
+	var words []uint32
 	sourceType := "SPIR-V"
 
 	// Compile shader source to SPIR-V.
@@ -1263,23 +1265,23 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 				"overrides", len(irModule.Overrides))
 			return sm, nil
 		}
-		spirv, err = shaderir.SPIRV(irModule)
+		words, err = shaderir.SPIRV(irModule, d.spirvOptions)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
 	case len(desc.Source.SPIRV) > 0:
-		spirv = desc.Source.SPIRV
+		words = desc.Source.SPIRV
 	default:
 		return nil, fmt.Errorf("vulkan: shader module requires WGSL or SPIR-V source")
 	}
 
-	module, err := d.createVkShaderModule(spirv, desc.Label, "ShaderModule("+sourceType+")")
+	module, err := d.createVkShaderModule(words, desc.Label, "ShaderModule("+sourceType+")")
 	if err != nil {
 		return nil, err
 	}
 	hal.Logger().Debug("vulkan: shader module compiled",
 		"source", sourceType,
-		"spirvWords", len(spirv),
+		"spirvWords", len(words),
 	)
 	sm.handle = module
 	return sm, nil
@@ -1287,19 +1289,19 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 // createVkShaderModule creates a VkShaderModule from SPIR-V words and names it
 // label, or fallbackName if label is empty.
-func (d *Device) createVkShaderModule(spirv []uint32, label, fallbackName string) (vk.ShaderModule, error) {
-	if len(spirv) == 0 {
+func (d *Device) createVkShaderModule(words []uint32, label, fallbackName string) (vk.ShaderModule, error) {
+	if len(words) == 0 {
 		return 0, fmt.Errorf("vulkan: empty SPIR-V")
 	}
 	createInfo := vk.ShaderModuleCreateInfo{
 		SType:    vk.StructureTypeShaderModuleCreateInfo,
-		CodeSize: uintptr(len(spirv) * 4), // Size in bytes (uint32 = 4 bytes)
-		PCode:    &spirv[0],
+		CodeSize: uintptr(len(words) * 4), // Size in bytes (uint32 = 4 bytes)
+		PCode:    &words[0],
 	}
 
 	var module vk.ShaderModule
 	result := vkCreateShaderModule(d.cmds, d.handle, &createInfo, nil, &module)
-	runtime.KeepAlive(spirv)
+	runtime.KeepAlive(words)
 	if result != vk.Success {
 		return 0, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
 	}
@@ -1333,11 +1335,11 @@ func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: %w", err)
 	}
-	spirv, err := shaderir.SPIRV(module)
+	words, err := shaderir.SPIRV(module, d.spirvOptions)
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
-	handle, err = d.createVkShaderModule(spirv, sm.label, "ShaderModule(WGSL, "+entryPoint+")")
+	handle, err = d.createVkShaderModule(words, sm.label, "ShaderModule(WGSL, "+entryPoint+")")
 	if err != nil {
 		return 0, false, err
 	}
