@@ -569,6 +569,28 @@ func (m *Module) GetBuiltIn(varID uint32) int {
 	return -1
 }
 
+// MayDiscard reports whether any function of the module contains OpKill or
+// OpTerminateInvocation, so a fragment entry point may discard. The answer is
+// conservative: it does not check that the function is reachable from the
+// entry point.
+func (m *Module) MayDiscard() bool {
+	for _, fn := range m.FunctionsByID {
+		for i := range fn.Instructions {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+				return true
+			}
+		}
+	}
+	for _, fn := range m.Functions {
+		for i := range fn.Instructions {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // GetLocation returns the Location decoration value for a variable ID, or -1 if none.
 func (m *Module) GetLocation(varID uint32) int {
 	key := decorationKey{TargetID: varID, Decoration: DecorationLocation}
@@ -687,7 +709,7 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 
 	// Instructions with only operands (no result type/ID).
 	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier,
-		OpSwitch, OpKill, OpUnreachable:
+		OpSwitch, OpKill, OpTerminateInvocation, OpUnreachable:
 		if len(operands) > 0 {
 			inst.Operands = make([]uint32, len(operands))
 			copy(inst.Operands, operands)

@@ -93,9 +93,10 @@ const (
 
 	OpFunctionCall = 57
 
-	OpSwitch      = 251
-	OpKill        = 252
-	OpUnreachable = 255
+	OpSwitch              = 251
+	OpKill                = 252
+	OpUnreachable         = 255
+	OpTerminateInvocation = 4416 // SPV_KHR_terminate_invocation, core in SPIR-V 1.6
 
 	// Comparison ops (integer, unsigned).
 	OpULessThan         = 176

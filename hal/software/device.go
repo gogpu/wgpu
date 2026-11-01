@@ -301,6 +301,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 				return nil, err
 			}
 			p.fragment = fs
+			p.fragmentMayDiscard = fs != nil && fs.MayDiscard()
 		}
 	}
 	return p, nil

@@ -308,6 +308,7 @@ var opcodeNames = map[uint16]string{
 	OpReturn:                 "OpReturn",
 	OpReturnValue:            "OpReturnValue",
 	OpKill:                   "OpKill",
+	OpTerminateInvocation:    "OpTerminateInvocation",
 	OpUnreachable:            "OpUnreachable",
 	OpIEqual:                 "OpIEqual",
 	OpINotEqual:              "OpINotEqual",

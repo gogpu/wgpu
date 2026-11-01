@@ -406,6 +406,8 @@ type RenderPipeline struct {
 	// has overrides. nil if the shader module has no SPIR-V.
 	vertex   *shader.Module
 	fragment *shader.Module
+	// fragmentMayDiscard is fragment.MayDiscard(), computed once at creation.
+	fragmentMayDiscard bool
 }
 
 // SamplerResource implements hal.Sampler with actual sampler parameters.

@@ -210,6 +210,7 @@ func Rasterize(tri Triangle, viewport Viewport, callback RasterCallback) {
 				X:          x,
 				Y:          y,
 				Depth:      depth,
+				InvW:       oneOverW,
 				Bary:       [3]float32{b0, b1, b2},
 				Attributes: attrs,
 			}
@@ -369,6 +370,7 @@ func computeFragment(x, y int, tri *Triangle, incTri *IncrementalTriangle, attrC
 		X:          x,
 		Y:          y,
 		Depth:      depth,
+		InvW:       oneOverW,
 		Bary:       [3]float32{b0, b1, b2},
 		Attributes: attrs,
 	}

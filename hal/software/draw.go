@@ -4,6 +4,7 @@ package software
 
 import (
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"math"
 
@@ -403,7 +404,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	// shader to write outputs for all @location(N) targets simultaneously.
 	targets := r.getTargetTextures()
 	if r.hasMRT() && hasAttrs {
-		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
 			blendStates := r.getPerTargetBlendStates()
 			pipe.DrawTrianglesWithMRTShader(triangles, mrtFunc, func(x, y int, colors [][4]float32) {
 				// Write locations 1+ to their respective target textures.
@@ -416,7 +417,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
 					}
 				}
-			})
+			}, mayDiscard)
 			writeRasterToTarget(pipe, target)
 			return
 		}
@@ -425,8 +426,8 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	switch {
 	case hasAttrs:
 		// Try per-pixel fragment shader first; fall back to direct attribute interpolation.
-		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
-			pipe.DrawTrianglesWithFragmentShader(triangles, fragFunc)
+		if fragFunc, mayDiscard := r.buildFragmentShaderFunc(); fragFunc != nil {
+			pipe.DrawTrianglesWithFragmentShader(triangles, fragFunc, mayDiscard)
 		} else {
 			pipe.DrawTrianglesInterpolated(triangles)
 		}
@@ -1234,8 +1235,8 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 	// MRT path for SPIR-V draws with multiple color attachments.
 	targets := r.getTargetTextures()
-	if r.hasMRT() && hasLocOutputs {
-		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+	if r.hasMRT() {
+		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
 			blendStates := r.getPerTargetBlendStates()
 			pipe.DrawTrianglesWithMRTShader(allTriangles, mrtFunc, func(x, y int, colors [][4]float32) {
 				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
@@ -1247,20 +1248,24 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
 					}
 				}
-			})
+			}, mayDiscard)
 			writeRasterToTarget(pipe, target)
 			return true
 		}
 	}
 
-	if hasLocOutputs {
-		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
-			pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc)
-		} else {
-			pipe.DrawTrianglesInterpolated(allTriangles)
+	// A fragment shader that reads any per-fragment input (an interpolated
+	// @location or a builtin such as the position) runs per pixel; one that
+	// reads none gives the same result everywhere and runs once.
+	switch fragFunc, mayDiscard := r.buildFragmentShaderFunc(); {
+	case fragFunc != nil:
+		pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc, mayDiscard)
+	case hasLocOutputs && r.pipeline.fragment == nil:
+		pipe.DrawTrianglesInterpolated(allTriangles)
+	default:
+		if color, discard := r.executeSPIRVFragment(); !discard {
+			pipe.DrawTriangles(allTriangles, color)
 		}
-	} else {
-		pipe.DrawTriangles(allTriangles, r.executeSPIRVFragment())
 	}
 
 	writeRasterToTarget(pipe, target)
@@ -1269,20 +1274,23 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 // executeSPIRVFragment runs the fragment shader entry point to get a color.
 // Falls back to white if no fragment shader is available.
-func (r *RenderPassEncoder) executeSPIRVFragment() [4]float32 {
+// It is used only when the shader reads no per-fragment input (see
+// buildFragmentShaderFunc). discard reports that the invocation discarded,
+// which then holds for every fragment of the draw.
+func (r *RenderPassEncoder) executeSPIRVFragment() (color [4]float32, discard bool) {
 	if r.pipeline.desc.Fragment == nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	parsed := r.pipeline.fragment
 	if parsed == nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	fsEntry := r.pipeline.desc.Fragment.EntryPoint
 	ep, ok := parsed.EntryPoints[fsEntry]
 	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	// Find the output variable (location 0).
@@ -1302,116 +1310,149 @@ func (r *RenderPassEncoder) executeSPIRVFragment() [4]float32 {
 	}
 
 	if !hasColorOut {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
-	outputs, err := parsed.Execute(fsEntry, nil)
+	// No per-fragment input, so one invocation stands for every fragment of
+	// the draw; it still reads the bound resources (uniforms, textures).
+	outputs, err := parsed.ExecuteWithContext(fsEntry, r.buildExecutionContext())
+	if errors.Is(err, shader.ErrDiscarded) {
+		return [4]float32{}, true
+	}
 	if err != nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	colorVal, ok := outputs[colorVarID]
 	if !ok {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
-	return shader.Vec4ToFloat32(colorVal)
+	return shader.Vec4ToFloat32(colorVal), false
 }
 
-// buildFragmentShaderFunc creates a raster.FragmentShaderFunc that executes
-// the SPIR-V fragment shader per pixel. The returned closure feeds interpolated
-// @location attributes into the fragment shader's input variables and returns
-// the output color.
-//
-// Returns nil if the pipeline has no fragment shader with @location inputs.
-func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc {
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
-		return nil
-	}
+// fragmentInterface classifies the interface variables of a fragment entry
+// point: the @location inputs fed from interpolated attributes, the position
+// builtin (FragCoord) and the @location outputs.
+type fragmentInterface struct {
+	parsed         *shader.Module
+	entry          string
+	locationInputs []fragmentLocationVar
+	outputs        []fragmentLocationVar
+	fragCoordVar   uint32 // 0 when the shader does not read @builtin(position)
+	hasInputs      bool   // any Input variable, location or builtin
+}
 
+type fragmentLocationVar struct {
+	varID    uint32
+	location int
+}
+
+// fragmentInterfaceOf returns the classified interface of the pipeline's
+// fragment entry point, or false when there is no SPIR-V fragment stage.
+func (r *RenderPassEncoder) fragmentInterfaceOf() (fragmentInterface, bool) {
+	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil || r.pipeline.fragment == nil {
+		return fragmentInterface{}, false
+	}
 	parsed := r.pipeline.fragment
-	if parsed == nil {
-		return nil
-	}
-
-	fsEntry := r.pipeline.desc.Fragment.EntryPoint
-	ep, ok := parsed.EntryPoints[fsEntry]
+	fi := fragmentInterface{parsed: parsed, entry: r.pipeline.desc.Fragment.EntryPoint}
+	ep, ok := parsed.EntryPoints[fi.entry]
 	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return nil
+		return fragmentInterface{}, false
 	}
-
-	// Classify fragment shader interface variables.
-	type locationVar struct {
-		varID    uint32
-		location int
-	}
-	var locationInputs []locationVar
-	var colorOutputVarID uint32
-	hasColorOut := false
-
 	for _, varID := range ep.InterfaceIDs {
 		vi, exists := parsed.Variables[varID]
 		if !exists {
 			continue
 		}
 		loc := parsed.GetLocation(varID)
-		if vi.StorageClass == shader.StorageClassInput && loc >= 0 {
-			locationInputs = append(locationInputs, locationVar{varID: varID, location: loc})
-		}
-		if vi.StorageClass == shader.StorageClassOutput && loc == 0 {
-			colorOutputVarID = varID
-			hasColorOut = true
+		switch vi.StorageClass {
+		case shader.StorageClassInput:
+			fi.hasInputs = true
+			if loc >= 0 {
+				fi.locationInputs = append(fi.locationInputs, fragmentLocationVar{varID: varID, location: loc})
+			} else if parsed.GetBuiltIn(varID) == shader.BuiltInFragCoord {
+				fi.fragCoordVar = varID
+			}
+		case shader.StorageClassOutput:
+			if loc >= 0 {
+				fi.outputs = append(fi.outputs, fragmentLocationVar{varID: varID, location: loc})
+			}
 		}
 	}
+	return fi, true
+}
 
-	// Only build a per-pixel function when the fragment shader has @location inputs.
-	// Without @location inputs, the shader doesn't consume interpolated varyings
-	// and executeSPIRVFragment (single invocation) is sufficient.
-	if len(locationInputs) == 0 || !hasColorOut {
-		return nil
+// inputs builds the input values of one fragment invocation. Interpolated
+// attributes are the flat concatenation of the vertex @location outputs in
+// location order; they are handed back by component count. The position
+// builtin is the pixel center in framebuffer coordinates, the depth and 1/w.
+func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Value {
+	inputs := make(map[uint32]shader.Value, len(fi.locationInputs)+1)
+	attrs := frag.Attributes
+	offset := 0
+	for _, li := range fi.locationInputs {
+		if offset >= len(attrs) {
+			break
+		}
+		width := fi.parsed.GetTypeComponentCount(li.varID)
+		if width == 0 {
+			width = 4
+		}
+		end := min(offset+width, len(attrs))
+		inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
+		offset = end
+	}
+	if fi.fragCoordVar != 0 {
+		inputs[fi.fragCoordVar] = floatsToShaderValue([]float32{
+			float32(frag.X) + 0.5, float32(frag.Y) + 0.5, frag.Depth, frag.InvW,
+		})
+	}
+	return inputs
+}
+
+// buildFragmentShaderFunc creates a raster.FragmentShaderFunc that executes
+// the SPIR-V fragment shader per pixel and returns the location 0 color, and
+// whether the shader may discard (the raster then runs it before the depth
+// and stencil tests).
+//
+// Returns nil when the shader reads no per-fragment input (no @location input
+// and no builtin): every fragment then gets the same result, and the caller
+// uses executeSPIRVFragment once for the draw.
+func (r *RenderPassEncoder) buildFragmentShaderFunc() (raster.FragmentShaderFunc, bool) {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok || !fi.hasInputs {
+		return nil, false
+	}
+	var colorOutputVarID uint32
+	for _, o := range fi.outputs {
+		if o.location == 0 {
+			colorOutputVarID = o.varID
+		}
+	}
+	if colorOutputVarID == 0 {
+		return nil, false
 	}
 
 	// Build execution context with bind group resources (uniform buffers, textures, etc.).
 	ctx := r.buildExecutionContext()
 
-	return func(attrs []float32) [4]float32 {
-		inputs := make(map[uint32]shader.Value)
-
-		// Feed interpolated attributes into fragment shader @location inputs.
-		// Vertex shader outputs are collected in location order, so attrs is a
-		// flat concatenation of all @location outputs. We distribute them back
-		// to the corresponding fragment input variables based on type width.
-		offset := 0
-		for _, li := range locationInputs {
-			if offset >= len(attrs) {
-				break
-			}
-			// Determine the component count for this location from the type.
-			// Default to vec4 (most common for color varyings).
-			width := parsed.GetTypeComponentCount(li.varID)
-			if width == 0 {
-				width = 4
-			}
-			end := offset + width
-			if end > len(attrs) {
-				end = len(attrs)
-			}
-			inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
-			offset = end
+	return func(frag *raster.Fragment) ([4]float32, bool) {
+		ctx.Inputs = fi.inputs(frag)
+		outputs, err := fi.parsed.ExecuteWithContext(fi.entry, ctx)
+		if errors.Is(err, shader.ErrDiscarded) {
+			return [4]float32{}, true
 		}
-
-		ctx.Inputs = inputs
-		outputs, err := parsed.ExecuteWithContext(fsEntry, ctx)
 		if err != nil {
-			return [4]float32{1, 1, 1, 1}
+			return [4]float32{1, 1, 1, 1}, false
 		}
 
 		colorVal, ok := outputs[colorOutputVarID]
 		if !ok {
-			return [4]float32{1, 1, 1, 1}
+			return [4]float32{1, 1, 1, 1}, false
 		}
-		return shader.Vec4ToFloat32(colorVal)
-	}
+		return shader.Vec4ToFloat32(colorVal), false
+	}, r.pipeline.fragmentMayDiscard
 }
 
 // buildMRTFragmentShaderFunc creates a raster.MRTFragmentShaderFunc that executes
@@ -1419,53 +1460,18 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc 
 // outputs, supporting Multiple Render Targets. The returned slice is indexed by
 // location number (0..N).
 //
-// Returns nil if the pipeline has no fragment shader with @location inputs, or
-// if there is only a single output (in which case buildFragmentShaderFunc is used).
-func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShaderFunc {
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
-		return nil
-	}
-
-	parsed := r.pipeline.fragment
-	if parsed == nil {
-		return nil
-	}
-
-	fsEntry := r.pipeline.desc.Fragment.EntryPoint
-	ep, ok := parsed.EntryPoints[fsEntry]
-	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return nil
-	}
-
-	// Classify fragment shader interface variables.
-	type fragLocVar struct {
-		varID    uint32
-		location int
-	}
-	var locationInputs []fragLocVar
-	var locationOutputs []fragLocVar
-
-	for _, varID := range ep.InterfaceIDs {
-		vi, exists := parsed.Variables[varID]
-		if !exists {
-			continue
-		}
-		loc := parsed.GetLocation(varID)
-		if vi.StorageClass == shader.StorageClassInput && loc >= 0 {
-			locationInputs = append(locationInputs, fragLocVar{varID: varID, location: loc})
-		}
-		if vi.StorageClass == shader.StorageClassOutput && loc >= 0 {
-			locationOutputs = append(locationOutputs, fragLocVar{varID: varID, location: loc})
-		}
-	}
-
-	if len(locationInputs) == 0 || len(locationOutputs) == 0 {
-		return nil
+// Returns nil, as buildFragmentShaderFunc does, when the shader reads no
+// per-fragment input or has no @location output. The second result reports
+// whether the shader may discard.
+func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() (raster.MRTFragmentShaderFunc, bool) {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok || !fi.hasInputs || len(fi.outputs) == 0 {
+		return nil, false
 	}
 
 	// Determine the max output location to size the result slice.
 	maxLoc := 0
-	for _, lo := range locationOutputs {
+	for _, lo := range fi.outputs {
 		if lo.location > maxLoc {
 			maxLoc = lo.location
 		}
@@ -1474,41 +1480,24 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShade
 
 	ctx := r.buildExecutionContext()
 
-	return func(attrs []float32) [][4]float32 {
-		inputs := make(map[uint32]shader.Value)
-
-		// Feed interpolated attributes into fragment shader @location inputs.
-		offset := 0
-		for _, li := range locationInputs {
-			if offset >= len(attrs) {
-				break
-			}
-			width := parsed.GetTypeComponentCount(li.varID)
-			if width == 0 {
-				width = 4
-			}
-			end := offset + width
-			if end > len(attrs) {
-				end = len(attrs)
-			}
-			inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
-			offset = end
+	return func(frag *raster.Fragment) ([][4]float32, bool) {
+		ctx.Inputs = fi.inputs(frag)
+		outputs, err := fi.parsed.ExecuteWithContext(fi.entry, ctx)
+		if errors.Is(err, shader.ErrDiscarded) {
+			return nil, true
 		}
-
-		ctx.Inputs = inputs
-		outputs, err := parsed.ExecuteWithContext(fsEntry, ctx)
 		if err != nil {
 			// On error, return white for all targets.
 			result := make([][4]float32, numOutputs)
 			for i := range result {
 				result[i] = [4]float32{1, 1, 1, 1}
 			}
-			return result
+			return result, false
 		}
 
 		// Collect outputs by location.
 		result := make([][4]float32, numOutputs)
-		for _, lo := range locationOutputs {
+		for _, lo := range fi.outputs {
 			colorVal, ok := outputs[lo.varID]
 			if !ok {
 				result[lo.location] = [4]float32{0, 0, 0, 0}
@@ -1516,8 +1505,8 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShade
 			}
 			result[lo.location] = shader.Vec4ToFloat32(colorVal)
 		}
-		return result
-	}
+		return result, false
+	}, r.pipeline.fragmentMayDiscard
 }
 
 // writeColorToTarget writes a single fragment color to a render target texture

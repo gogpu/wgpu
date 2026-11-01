@@ -21,11 +21,17 @@ package shader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/gogpu/gputypes"
 )
+
+// ErrDiscarded is returned by Execute, ExecuteWithContext and ExecuteWithDebug
+// when a fragment invocation executed OpKill or OpTerminateInvocation (WGSL
+// discard). The caller must write no color, depth or stencil for the fragment.
+var ErrDiscarded = errors.New("spirv: fragment invocation discarded")
 
 // Execute runs the named entry point with the given input variable values.
 //
@@ -882,9 +888,10 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = result
 			}
 
-		case OpKill:
-			// Fragment shader discard -- stop execution with no error.
-			return nil
+		case OpKill, OpTerminateInvocation:
+			// Fragment discard ends the whole invocation, not only the current
+			// function, and the fragment must write nothing (P1-SW-016).
+			return ErrDiscarded
 
 		case OpUnreachable:
 			// Should never be reached in valid SPIR-V.

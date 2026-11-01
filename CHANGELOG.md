@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Software backend: `discard` wrote zeros, and fragment shaders without `@location` inputs ignored the fragment position and the bound resources** — the SPIR-V interpreter treated `OpKill` as a normal return of the current function. The fragment's unwritten color output (zero) was then written, and a `discard` inside a helper function did not even end the invocation. A fragment shader without `@location` inputs ran once per draw, with `@builtin(position)` left at zero and no bind groups, and that one color was used for every pixel. A shader that discards by position therefore cleared the whole covered area to transparent black. Now `OpKill` and `OpTerminateInvocation` end the invocation, and a discarded fragment writes no color, depth or stencil; a shader that may discard runs before the depth and stencil tests. A fragment shader that reads any input, a `@location` or a builtin, runs per pixel. `@builtin(position)` is the pixel center in framebuffer coordinates, the depth, and 1/w. The one-invocation path, for shaders with no input, reads the bound resources. Covered by a new cross-backend readback test of `discard` (constant and uniform conditions on `@builtin(position)`). The test passes on Vulkan, DX12 FXC, GLES and Software; DX12 DXIL needs naga's `dx.op.discard` (naga v0.21.0).
+
+### Changed
+
+- **`hal/software/raster`**: `FragmentShaderFunc` and `MRTFragmentShaderFunc` now receive the whole `*Fragment` and return a discard flag. `DrawTrianglesWithFragmentShader` and `DrawTrianglesWithMRTShader` take a `mayDiscard` argument, and `Fragment` has a new `InvW` field. `hal/software/shader` has a new `ErrDiscarded` sentinel and `Module.MayDiscard`.
+
 ## [0.34.6] - 2026-11-02
 
 ### Fixed
