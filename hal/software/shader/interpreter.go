@@ -126,6 +126,13 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 	return outputs, nil
 }
 
+// fRem is SPIR-V OpFRem (WGSL f32 %): a - b*trunc(a/b), with the sign of a.
+// math.Remainder rounds the quotient to nearest instead, which gives
+// -7.5 % 2 = 0.5 rather than -1.5.
+func fRem(a, b float32) float32 {
+	return float32(math.Mod(float64(a), float64(b)))
+}
+
 // maxIterations is the safety limit for loop iterations to prevent infinite loops.
 const maxIterations = 100000
 
@@ -1026,13 +1033,7 @@ func (interp *interpreter) run() error {
 		case OpFRem:
 			if len(inst.Operands) >= 2 {
 				interp.values[inst.ResultID] = floatBinOp(
-					interp.values[inst.Operands[0]], interp.values[inst.Operands[1]],
-					func(a, b float32) float32 {
-						if b == 0 {
-							return 0
-						}
-						return float32(math.Remainder(float64(a), float64(b)))
-					})
+					interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], fRem)
 			}
 
 		case OpSNegate:
