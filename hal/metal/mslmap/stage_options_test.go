@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
+	"github.com/gogpu/naga/wgsl"
 	"github.com/gogpu/wgpu/hal/metal/mslmap"
 )
 
@@ -34,13 +35,9 @@ fn b() {
 
 func lower(t *testing.T, source string) *ir.Module {
 	t.Helper()
-	ast, err := naga.Parse(source)
+	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
-		t.Fatalf("naga.Parse: %v", err)
-	}
-	module, err := naga.LowerWithSource(ast, source)
-	if err != nil {
-		t.Fatalf("naga.LowerWithSource: %v", err)
+		t.Fatalf("wgsl.Parse: %v", err)
 	}
 	return module
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -69,7 +70,7 @@ func TestCompileWGSLToGLSLOverrides(t *testing.T) {
 		t.Errorf("unknown constant: error %v, want naga.ErrOverrideNotFound", err)
 	}
 	_, _, err = compileWGSLToGLSL(glsl.Version430, sm, ir.StageCompute, "missing", nil, nil)
-	if !errors.Is(err, naga.ErrEntryPointNotFound) {
-		t.Errorf("unknown entry point: error %v, want naga.ErrEntryPointNotFound", err)
+	if !errors.Is(err, backend.ErrEntryPointNotFound) {
+		t.Errorf("unknown entry point: error %v, want backend.ErrEntryPointNotFound", err)
 	}
 }

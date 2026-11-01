@@ -511,6 +511,7 @@ func TestExtractShaderBindingSizes(t *testing.T) {
 			{
 				Name:    "data",
 				Space:   ir.SpaceStorage,
+				Access:  ir.StorageAccessLoad | ir.StorageAccessStore,
 				Binding: &ir.ResourceBinding{Group: 0, Binding: 1},
 				Type:    1, // array, 64 bytes
 			},

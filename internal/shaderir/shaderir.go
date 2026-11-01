@@ -25,29 +25,35 @@ import (
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
+	"github.com/gogpu/naga/wgsl"
 )
 
-// Lower parses WGSL and lowers it to IR without validation, as the DX12,
-// GLES and Metal backends have always done.
+// Lower parses WGSL to IR without validation, as the DX12, GLES and Metal
+// backends have always done.
+//
+// A parse error keeps naga's *wgsl.ParseError (errors.As works) and is
+// prefixed with its line and column: ParseError.Error is the message only.
 func Lower(source string) (*ir.Module, error) {
-	ast, err := naga.Parse(source)
+	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
+		var pe *wgsl.ParseError
+		if errors.As(err, &pe) {
+			if loc, ok := pe.Location(source); ok {
+				return nil, fmt.Errorf("%d:%d: %w", loc.Line, loc.Column, err)
+			}
+		}
 		return nil, err
 	}
-	return naga.LowerWithSource(ast, source)
+	return module, nil
 }
 
-// LowerValidated parses, lowers and validates WGSL with the capabilities of
+// LowerValidated parses and validates WGSL with the capabilities of
 // naga.Compile's default options. The Vulkan and software backends used
 // naga.Compile before, so they keep its validation.
 func LowerValidated(source string) (*ir.Module, error) {
-	ast, err := naga.Parse(source)
+	module, err := Lower(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
-	}
-	module, err := naga.LowerWithSource(ast, source)
-	if err != nil {
-		return nil, fmt.Errorf("lowering error: %w", err)
 	}
 	if _, err := ir.Validate(module, ir.ValidateOptions{Capabilities: naga.DefaultOptions().Capabilities}); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
@@ -106,7 +112,7 @@ func BackendError(err error) error {
 // backend passes its own options, as each Rust wgpu-hal backend does: naga's
 // zero values (SPIR-V 1.0, Restrict on every bounds check) suit no device.
 func SPIRV(module *ir.Module, opts spirv.Options) ([]uint32, error) {
-	b, err := naga.GenerateSPIRV(module, opts)
+	b, _, err := spirv.Compile(module, opts)
 	if err != nil {
 		return nil, BackendError(err)
 	}

@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
@@ -533,16 +532,9 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	start := time.Now()
 
-	// Parse WGSL to AST
-	ast, err := naga.Parse(desc.Source.WGSL)
+	irModule, err := shaderir.Lower(desc.Source.WGSL)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
-	}
-
-	// Lower AST to IR
-	irModule, err := naga.LowerWithSource(ast, desc.Source.WGSL)
-	if err != nil {
-		return nil, fmt.Errorf("metal: failed to lower WGSL to IR: %w", err)
 	}
 
 	// Extract workgroup sizes from entry points for compute shaders

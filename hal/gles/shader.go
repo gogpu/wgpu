@@ -53,7 +53,7 @@ func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*Shad
 // The module's IR is specialized for the stage first when it has overrides or
 // the stage gives pipeline constants (Rust wgpu-hal gles/device.rs:385 calls
 // process_overrides in create_shader).
-func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
+func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[ir.ResourceBinding]uint8) (string, glsl.TranslationInfo, error) {
 	if sm.irModule == nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
@@ -145,7 +145,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 	// Assign uniform/storage buffer block bindings by name.
 	for _, info := range translationInfos {
 		for _, u := range info.Uniforms {
-			key := glsl.BindingMapKey{Group: u.Binding.Group, Binding: u.Binding.Binding}
+			key := ir.ResourceBinding{Group: u.Binding.Group, Binding: u.Binding.Binding}
 			slot, ok := layout.bindingMap[key]
 			if !ok {
 				continue
@@ -176,7 +176,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 
 		// Assign texture/image sampler bindings by combined variable name.
 		for name, tm := range info.TextureMappings {
-			key := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+			key := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
 			slot, ok := layout.bindingMap[key]
 			if !ok {
 				continue
@@ -208,7 +208,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 // Returns:
 //   - bindingMap: maps (group, binding) to GL slot for naga GLSL writer
 //   - groupInfos: per-group BindingToSlot tables for runtime SetBindGroup
-func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8, []BindGroupLayoutInfo) {
+func computeBindingMap(layouts []*BindGroupLayout) (map[ir.ResourceBinding]uint8, []BindGroupLayoutInfo) {
 	var (
 		numSamplers       uint8
 		numTextures       uint8
@@ -217,7 +217,7 @@ func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8
 		numStorageBuffers uint8
 	)
 
-	bindingMap := make(map[glsl.BindingMapKey]uint8)
+	bindingMap := make(map[ir.ResourceBinding]uint8)
 	groupInfos := make([]BindGroupLayoutInfo, len(layouts))
 
 	for groupIdx, bgl := range layouts {
@@ -258,7 +258,7 @@ func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8
 
 			slot := *counter
 			bindingToSlot[entry.Binding] = slot
-			bindingMap[glsl.BindingMapKey{
+			bindingMap[ir.ResourceBinding{
 				Group:   uint32(groupIdx),
 				Binding: entry.Binding,
 			}] = slot

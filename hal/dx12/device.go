@@ -2240,13 +2240,13 @@ func pipelineConstantsKey(constants map[string]float64) string {
 // is the concrete struct types, since dxil does not import hlsl.
 //
 // Returns nil if the input is nil, preserving the "no remap" default.
-func hlslToDXILBindingMap(m map[hlsl.ResourceBinding]hlsl.BindTarget) dxil.BindingMap {
+func hlslToDXILBindingMap(m map[ir.ResourceBinding]hlsl.BindTarget) dxil.BindingMap {
 	if m == nil {
 		return nil
 	}
 	out := make(dxil.BindingMap, len(m))
 	for k, v := range m {
-		out[dxil.BindingLocation{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
+		out[ir.ResourceBinding{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
 			Space:    v.Space,
 			Register: v.Register,
 		}

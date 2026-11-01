@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga"
 	nagair "github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/wgsl"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -29,13 +29,9 @@ func validateWGSLShaderFeatures(source string, features gputypes.Features) error
 		return err
 	}
 
-	ast, err := naga.Parse(source)
+	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
 		return nil //nolint:nilerr // parse errors are reported by HAL shader compilation
-	}
-	module, err := naga.Lower(ast)
-	if err != nil {
-		return nil //nolint:nilerr // lowering errors are reported by HAL shader compilation
 	}
 
 	caps := nagaCapabilitiesForFeatures(features)

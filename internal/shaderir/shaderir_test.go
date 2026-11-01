@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
 )
@@ -85,8 +86,8 @@ func TestSpecialize(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), `compute entry point "main"`) {
 		t.Errorf("error %q does not name the stage and entry point", err)
 	}
-	if _, err := Specialize(module, ir.StageVertex, "main", nil); !errors.Is(err, naga.ErrEntryPointNotFound) {
-		t.Errorf("wrong stage: error %v, want naga.ErrEntryPointNotFound", err)
+	if _, err := Specialize(module, ir.StageVertex, "main", nil); !errors.Is(err, backend.ErrEntryPointNotFound) {
+		t.Errorf("wrong stage: error %v, want backend.ErrEntryPointNotFound", err)
 	}
 }
 

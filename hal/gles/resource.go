@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
@@ -175,7 +174,7 @@ type PipelineLayout struct {
 	groupInfos []BindGroupLayoutInfo
 	// bindingMap maps (group, binding) to flat GL slot index for naga GLSL writer.
 	// Computed simultaneously with groupInfos in CreatePipelineLayout.
-	bindingMap map[glsl.BindingMapKey]uint8
+	bindingMap map[ir.ResourceBinding]uint8
 }
 
 // Destroy is a no-op for pipeline layouts.

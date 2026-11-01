@@ -561,8 +561,8 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		if tm.SamplerBinding == nil {
 			continue
 		}
-		texKey := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
-		samplerKey := glsl.BindingMapKey{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
+		texKey := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+		samplerKey := ir.ResourceBinding{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
 		texUnit, texOk := layout.bindingMap[texKey]
 		samplerUnit, samplerOk := layout.bindingMap[samplerKey]
 		if texOk && samplerOk && texUnit < maxTextureSlots {
@@ -926,7 +926,7 @@ func maxInt32(a, b int32) int32 {
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
 // Caller must hold the AdapterContext lock. glCtx is passed explicitly to avoid
 // re-locking (this is called from CreateRenderPipeline which already holds the lock).
-func compileFragmentShader(glCtx *gl.Context, version glsl.Version, frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
+func compileFragmentShader(glCtx *gl.Context, version glsl.Version, frag *hal.FragmentState, bindingMap map[ir.ResourceBinding]uint8) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")

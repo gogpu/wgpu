@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal/metal/mslmap"
 )
@@ -39,15 +38,7 @@ var bufferParamRe = regexp.MustCompile(`(\w+)\s*\[\[buffer\((\d+)\)\]\]`)
 func compile(t *testing.T, source string, opts msl.Options) (string, msl.TranslationInfo) {
 	t.Helper()
 
-	ast, err := naga.Parse(source)
-	if err != nil {
-		t.Fatalf("naga.Parse: %v", err)
-	}
-	module, err := naga.LowerWithSource(ast, source)
-	if err != nil {
-		t.Fatalf("naga.LowerWithSource: %v", err)
-	}
-	out, info, err := msl.Compile(module, opts)
+	out, info, err := msl.Compile(lower(t, source), opts)
 	if err != nil {
 		t.Fatalf("msl.Compile: %v", err)
 	}
@@ -86,14 +77,7 @@ func TestDefaultOptionsLeaveSizesBufferUnbound(t *testing.T) {
 func TestOptionsBindSizesBuffer(t *testing.T) {
 	t.Parallel()
 
-	ast, err := naga.Parse(wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.Parse: %v", err)
-	}
-	module, err := naga.LowerWithSource(ast, wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.LowerWithSource: %v", err)
-	}
+	module := lower(t, wgslRuntimeArray)
 
 	const sizesSlot = 2
 
@@ -134,14 +118,7 @@ func TestOptionsBindSizesBuffer(t *testing.T) {
 func TestOptionsPreserveOrdinaryBindings(t *testing.T) {
 	t.Parallel()
 
-	ast, err := naga.Parse(wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.Parse: %v", err)
-	}
-	module, err := naga.LowerWithSource(ast, wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.LowerWithSource: %v", err)
-	}
+	module := lower(t, wgslRuntimeArray)
 
 	auto, _, err := msl.Compile(module, msl.DefaultOptions())
 	if err != nil {
@@ -185,14 +162,7 @@ func TestOptionsPreserveOrdinaryBindings(t *testing.T) {
 func TestOptionsRejectsOutOfRangeSlot(t *testing.T) {
 	t.Parallel()
 
-	ast, err := naga.Parse(wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.Parse: %v", err)
-	}
-	module, err := naga.LowerWithSource(ast, wgslRuntimeArray)
-	if err != nil {
-		t.Fatalf("naga.LowerWithSource: %v", err)
-	}
+	module := lower(t, wgslRuntimeArray)
 
 	if _, err := mslmap.Options(module, 256); err == nil {
 		t.Error("mslmap.Options(module, 256) = nil error; want an out-of-range error")

@@ -221,7 +221,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	var bindCBV, bindSRV, bindUAV uint32
 
 	// naga HLSL binding maps.
-	bindingMap := make(map[hlsl.ResourceBinding]hlsl.BindTarget)
+	bindingMap := make(map[ir.ResourceBinding]hlsl.BindTarget)
 	samplerBufferBindingMap := make(map[uint32]hlsl.BindTarget)
 
 	// Track whether any bind group has samplers.
@@ -289,7 +289,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 				reg = &bindSRV
 			}
 
-			bindingMap[hlsl.ResourceBinding{
+			bindingMap[ir.ResourceBinding{
 				Group:   uint32(groupIdx),
 				Binding: entry.Binding,
 			}] = hlsl.BindTarget{
@@ -314,7 +314,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			if entry.Type != BindingTypeSampler && entry.Type != BindingTypeComparisonSampler {
 				continue
 			}
-			bindingMap[hlsl.ResourceBinding{
+			bindingMap[ir.ResourceBinding{
 				Group:   uint32(groupIdx),
 				Binding: entry.Binding,
 			}] = hlsl.BindTarget{

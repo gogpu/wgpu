@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
-	naga "github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Device represents a logical GPU device.
@@ -269,14 +269,10 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	// by Interface::check_stage during pipeline creation.
 	// SPIR-V shaders skip this — they go directly to HAL without IR-level introspection.
 	if desc.WGSL != "" {
-		ast, parseErr := naga.Parse(desc.WGSL)
-		if parseErr == nil {
-			irModule, lowerErr := naga.Lower(ast)
-			if lowerErr == nil {
-				sm.irModule = irModule
-			}
+		if irModule, err := shaderir.Lower(desc.WGSL); err == nil {
+			sm.irModule = irModule
 		}
-		// Parse/lower failures are non-fatal here — the HAL already compiled the shader
+		// Parse failures are non-fatal here — the HAL already compiled the shader
 		// successfully. Late binding validation will be skipped if IR is unavailable.
 	}
 

@@ -603,8 +603,8 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		if tm.SamplerBinding == nil {
 			continue
 		}
-		texKey := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
-		samplerKey := glsl.BindingMapKey{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
+		texKey := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+		samplerKey := ir.ResourceBinding{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
 		texUnit, texOk := layout.bindingMap[texKey]
 		samplerUnit, samplerOk := layout.bindingMap[samplerKey]
 		if texOk && samplerOk && texUnit < maxTextureSlots {
@@ -930,7 +930,7 @@ func maxInt32(a, b int32) int32 {
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
-func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
+func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[ir.ResourceBinding]uint8) (uint32, glsl.TranslationInfo, error) {
 	glCtx := d.ctx.GL() // caller must hold AdapterContext lock
 
 	fragmentModule, ok := frag.Module.(*ShaderModule)
