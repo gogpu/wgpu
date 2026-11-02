@@ -186,6 +186,9 @@ type BindGroup struct {
 	// with MinBindingSize == 0. Listed in iteration order of the layout entries,
 	// matching Rust wgpu-core's BindGroup.late_buffer_binding_infos.
 	lateBufferBindingInfos []LateBufferBindingInfo
+	// dynamicBindings are the bindings with a dynamic offset, sorted by
+	// binding number; SetBindGroup validates its offsets against them.
+	dynamicBindings []dynamicBinding
 	// ref is the GPU-aware reference counter for this bind group (Phase 2).
 	// Clone'd when used in a render/compute pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -261,21 +262,19 @@ func (b *binder) assign(index uint32, layout *BindGroupLayout) {
 // The index is checked against the device's maxBindGroups limit, not against
 // the current pipeline: WebGPU allows setting a group the current pipeline
 // does not use, for a later pipeline (Rust wgpu-core pass.rs set_bind_group).
-func validateSetBindGroup(passName string, index uint32, group *BindGroup, offsets []uint32, maxBindGroups uint32) error {
+func validateSetBindGroup(passName string, index uint32, group *BindGroup, offsets []uint32, limits *gputypes.Limits) error {
 	if group == nil {
 		return fmt.Errorf("wgpu: %s.SetBindGroup: bind group is nil", passName)
 	}
 	if index >= MaxBindGroups {
 		return fmt.Errorf("wgpu: %s.SetBindGroup: index %d >= MaxBindGroups (%d)", passName, index, MaxBindGroups)
 	}
-	if maxBindGroups > 0 && index >= maxBindGroups {
+	if limits.MaxBindGroups > 0 && index >= limits.MaxBindGroups {
 		return fmt.Errorf("wgpu: %s.SetBindGroup: index %d >= device limit maxBindGroups (%d)",
-			passName, index, maxBindGroups)
+			passName, index, limits.MaxBindGroups)
 	}
-	for i, offset := range offsets {
-		if offset%256 != 0 {
-			return fmt.Errorf("wgpu: %s.SetBindGroup: dynamic offset[%d]=%d not aligned to 256", passName, i, offset)
-		}
+	if err := validateDynamicOffsets(index, group, offsets, limits); err != nil {
+		return fmt.Errorf("wgpu: %s.SetBindGroup: %w", passName, err)
 	}
 	return nil
 }

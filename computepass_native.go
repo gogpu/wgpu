@@ -65,8 +65,8 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 // SetPipeline, or name an index the current pipeline does not use: the group
 // is bound to the backend at the next dispatch whose pipeline layout uses it.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	maxBindGroups := p.encoder.device.core.Limits.MaxBindGroups
-	if err := validateSetBindGroup("ComputePass", index, group, offsets, maxBindGroups); err != nil {
+	limits := &p.encoder.device.core.Limits
+	if err := validateSetBindGroup("ComputePass", index, group, offsets, limits); err != nil {
 		p.encoder.setError(err)
 		return
 	}

@@ -444,6 +444,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		released:               new(atomic.Bool),
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
+		dynamicBindings:        buildDynamicBindings(desc.Layout.entries, desc.Entries),
 		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
 		boundBuffers:           boundBuffers,
 		boundTextures:          boundTextures,
