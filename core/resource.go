@@ -456,7 +456,7 @@ func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) 
 	halDesc := &hal.BufferDescriptor{
 		Label:            desc.Label,
 		Size:             alignedSize,
-		Usage:            desc.Usage,
+		Usage:            halBufferUsage(desc.Usage),
 		MappedAtCreation: desc.MappedAtCreation,
 	}
 
@@ -501,6 +501,21 @@ func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) 
 	}
 
 	return buffer, nil
+}
+
+// halBufferUsage returns the usage a buffer is created with in the HAL: the
+// user's usage plus what core itself does with the buffer. The indirect
+// validation shader reads every INDIRECT buffer as a storage buffer, so the
+// HAL buffer needs storage usage (Vulkan STORAGE_BUFFER, D3D12
+// ALLOW_UNORDERED_ACCESS). Buffer.Usage keeps reporting the user's usage.
+//
+// Matches Rust wgpu-core device/resource.rs create_buffer, which adds
+// STORAGE_READ_ONLY | STORAGE_READ_WRITE to the HAL usage of INDIRECT buffers.
+func halBufferUsage(usage gputypes.BufferUsage) gputypes.BufferUsage {
+	if usage.Contains(gputypes.BufferUsageIndirect) {
+		usage |= gputypes.BufferUsageStorage
+	}
+	return usage
 }
 
 // Queue represents a command queue for a device.
