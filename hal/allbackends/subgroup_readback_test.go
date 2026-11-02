@@ -396,6 +396,13 @@ fn main(@builtin(local_invocation_index) lid: u32,
 
 // TestFeatureSubgroupBarrier reads, after subgroupBarrier, the workgroup
 // memory word another invocation of the subgroup wrote before it.
+//
+// It skips everywhere for now: no backend offers FeatureSubgroupBarrier.
+// Vulkan holds it back, unlike Rust, because naga compiles subgroupBarrier
+// to SPIR-V the validation layer rejects
+// (VUID-StandaloneSpirv-MemorySemantics-10870; see subgroupFeatures in
+// hal/vulkan). Once naga emits a valid barrier and Vulkan offers the
+// feature, this test runs and must pass clean.
 func TestFeatureSubgroupBarrier(t *testing.T) {
 	features := gputypes.Features(gputypes.FeatureSubgroupOperations) | gputypes.Features(gputypes.FeatureSubgroupBarrier)
 	forEachFeatureDevice(t, features, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
