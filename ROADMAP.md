@@ -127,14 +127,44 @@
 
 ## Roadmap
 
-### Near-term (Q3 2026)
+### Near-term (Q4 2026)
 
-**Next minor release** (naga v0.21.0):
+Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, stricter validation of what the
+spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
+releases.
+
+**Next patch release, v0.34.7** (naga v0.21.0):
 - [ ] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
-- [ ] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
-- [ ] Subgroups, f16 and timestamp queries advertised on Vulkan, DX12 and Metal where the device supports them
+- [ ] Shader modules validated once, with the device's capabilities, and handed to the backend
+- [ ] Shader interface read per entry point
 - [ ] Metal: MSL language version from the device
+- [ ] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
+- [ ] f16 on Vulkan and Metal, and timestamp queries on Vulkan and DX12, where the device supports them
+- [ ] `RequestDevice` refuses features the adapter does not expose; workgroup storage limit checked
+- [ ] Vertex layout validation completed, and `arrayStride: 0` (broadcast) supported on every backend (#364)
+- [ ] Out-of-bounds storage access contained on Vulkan (#370)
+- [ ] Bind group resources tracked per pass, with the barriers they need
+- [x] Vulkan binding generator and loader fixes (#372–#377); descriptor writes (#356)
+
+**Next minor release, v0.35.0: backend registration, adapter selection, internal packages**
+
+Goal: one correct, predictable way for every Go program to get a GPU. The right adapter is chosen the same way
+everywhere, from code or from the environment. With no hardware adapter, the program gets an explicit answer:
+either a visible software fallback, or a refusal when it demanded hardware. All of this is settled before the v1.0
+API freeze.
+- [ ] Platform backends registered by default, with no blank import; opt-out build tags
+- [ ] The Pure Go software backend selected only explicitly, with its own `Backends` bit; `Backends` widened to 32 bits
+- [ ] One environment contract (`GOGPU_GRAPHICS_API` and related variables) shared by the whole ecosystem
+- [ ] `Instance.EnumerateAdapters` with a documented, stable order (#360); selection by index or PCI bus id; a
+  hardware-only option with typed errors; the chosen adapter logged once
+- [ ] Implementation moved to `internal/`, root package as the thin public API (#329), with a public test seam that
+  replaces HAL test doubles
 - [ ] Integrate `gogpu/galloc` into Vulkan memory pools (replace BuddyAllocator)
+
+Where this differs from Rust wgpu, and why: we have our own Pure Go software backend (Rust's CPU adapters come from
+drivers); Go has no Cargo features, so a library cannot opt a backend out for its users; several libraries share
+one device and must agree on one environment contract; GPU servers need hardware-only selection by index or PCI
+bus id, which Rust leaves to the application.
 
 **GLES Linux Enterprise Parity:**
 - [x] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003, #332). Windows parity.
