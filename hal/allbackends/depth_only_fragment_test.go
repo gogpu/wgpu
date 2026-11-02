@@ -16,8 +16,8 @@ import (
 // least one attachment, a color target or the depth-stencil state
 // (P1-VAL-016). The depth the triangle wrote (z = 0) is read back.
 func TestDepthOnlyPipelineWithFragmentStage(t *testing.T) {
-	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
-		skipKnownGap(t, "software", "P1-SW-015", "depth is never written back to the texture")
+	// sampleDepth reads the depth back with a compute pass.
+	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
 		r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
 			wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
 		shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{

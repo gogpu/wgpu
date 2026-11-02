@@ -8,7 +8,6 @@ package allbackends_test
 import (
 	"encoding/binary"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -48,29 +47,25 @@ func TestDepthAttachmentStates(t *testing.T) {
 				}
 			}
 		})
-		t.Run("write-then-sampled", func(t *testing.T) {
-			r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
-				wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
-			for frame := 0; frame < 2; frame++ {
-				if !r.draw(t, depthPass{clear: true, clearValue: 1, write: true}) {
-					t.Fatalf("frame %d: the triangle was not drawn", frame)
-				}
-				if got := r.sampleDepth(t); got != 0 {
-					t.Fatalf("frame %d: sampled depth = %v, want 0 (the triangle's z)", frame, got)
-				}
-			}
-		})
 	})
 }
 
-// skipKnownGap skips the running subtest on backend, a gap with an open card.
-// Remove the call when the card is done; the case then has to pass.
-func skipKnownGap(t *testing.T, backend, card, reason string) {
-	t.Helper()
-	// The backend is a subtest of its own, the last one or a parent.
-	if strings.Contains(t.Name()+"/", "/"+backend+"/") {
-		t.Skipf("known gap on %s (%s): %s", backend, card, reason)
-	}
+// TestDepthAttachmentWriteThenSampled: a depth texture written as an
+// attachment, then read by a compute pass (sampleDepth), two frames; the
+// compute pass needs DownlevelFlagsComputeShaders, which GL 4.1 lacks.
+func TestDepthAttachmentWriteThenSampled(t *testing.T) {
+	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
+		r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
+			wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
+		for frame := 0; frame < 2; frame++ {
+			if !r.draw(t, depthPass{clear: true, clearValue: 1, write: true}) {
+				t.Fatalf("frame %d: the triangle was not drawn", frame)
+			}
+			if got := r.sampleDepth(t); got != 0 {
+				t.Fatalf("frame %d: sampled depth = %v, want 0 (the triangle's z)", frame, got)
+			}
+		}
+	})
 }
 
 // keepStencil disables stencil testing: the rig's depth formats have no
