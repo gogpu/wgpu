@@ -7,11 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Timestamp queries on Vulkan and DX12.** Both backends implemented timestamp queries but never offered `FeatureTimestampQuery`, so every timestamp query set was refused. Vulkan now offers the feature when the queue family reports at least 36 `timestampValidBits`, and DX12 always offers it, as Rust wgpu-hal does.
+- **`ComputePassDescriptor.TimestampWrites`** (`ComputePassTimestampWrites`, WebGPU `GPUComputePassTimestampWrites`) and **`Queue.GetTimestampPeriod`** (nanoseconds per tick, Rust `Queue::get_timestamp_period`). Both are in the default build.
+- **Vulkan: `FeatureShaderF16`.** Offered when the device supports `shaderFloat16`, `storageBuffer16BitAccess` and `uniformAndStorageBuffer16BitAccess`, as in Rust wgpu-hal, and enabled only when requested. WGSL `f16` shaders now run on Vulkan.
+- **Shader capability features, offered where a readback test proves them** (gputypes v0.8.1):
+  - Vulkan, from the device feature each one comes from, as in Rust wgpu-hal:
+    - `PrimitiveIndex` (geometryShader);
+    - `ClipDistances` (shaderClipDistance);
+    - `ShaderInt64`, `ShaderInt64AtomicMinMax` and `ShaderInt64AtomicAllOps` (64-bit buffer and workgroup atomics);
+    - `ShaderFloat32Atomic` (VK_EXT_shader_atomic_float);
+    - `ShaderBarycentrics` and `ShaderPerVertex` (VK_KHR_fragment_shader_barycentric);
+    - `ShaderDrawIndex` (shaderDrawParameters);
+    - `ShaderEarlyDepthTest`.
+
+    Tested on Intel and NVIDIA under the validation layer.
+  - GLES: `PrimitiveIndex`, `ShaderEarlyDepthTest`, and `ShaderDrawIndex` (desktop GL 4.2+ with `GL_ARB_shader_draw_parameters`; shaders are then compiled with naga's `DrawParameters`).
+  - DX12 on the HLSL/FXC path: `PrimitiveIndex` and `ClipDistances`. `ClipDistances` is a deviation from Rust wgpu-hal, which does not offer it on DX12; Dawn enables it on every D3D12 device (SV_ClipDistance is shader model 4+).
+
 ### Fixed
 
 - **Software backend: `discard` wrote zeros, and fragment shaders without `@location` inputs ignored the fragment position and the bound resources** — the SPIR-V interpreter treated `OpKill` as a normal return of the current function. The fragment's unwritten color output (zero) was then written, and a `discard` inside a helper function did not even end the invocation. A fragment shader without `@location` inputs ran once per draw, with `@builtin(position)` left at zero and no bind groups, and that one color was used for every pixel. A shader that discards by position therefore cleared the whole covered area to transparent black. Now `OpKill` and `OpTerminateInvocation` end the invocation, and a discarded fragment writes no color, depth or stencil; a shader that may discard runs before the depth and stencil tests. A fragment shader that reads any input, a `@location` or a builtin, runs per pixel. `@builtin(position)` is the pixel center in framebuffer coordinates, the depth, and 1/w. The one-invocation path, for shaders with no input, reads the bound resources. Covered by a new cross-backend readback test of `discard` (constant and uniform conditions on `@builtin(position)`). The test passes on Vulkan, DX12 FXC, GLES and Software; DX12 DXIL needs naga's `dx.op.discard` (naga v0.21.0).
 - **`hal/vulkan/vk`: `FlagBits` parameters were passed as 64-bit handles** — vk-gen classified single-bit enum types such as `VkExternalMemoryHandleTypeFlagBits` as handles, so `GetMemoryHostPointerPropertiesEXT`, `GetMemoryMetalHandlePropertiesEXT`, `GetMemoryFdPropertiesKHR` and `SubmitDebugUtilsMessageEXT` read 8 bytes from a 4-byte argument. They are 32-bit now, and `GetSwapchainCounterEXT`, which the generator skipped for the same reason, is generated.
 - **Vulkan: descriptor writes could point into a replaced array** (#356, reported by @darkliquid). `updateDescriptorSet` grew the buffer and image info slices with `append`, so with several entries an earlier `VkWriteDescriptorSet` pointed into an older backing array. The GC kept that array alive and the values were the same, so no wrong binding was observed. The slices are now allocated for every entry up front, so every pointer refers to the final array, and they stay reachable until `vkUpdateDescriptorSets` returns. A unit test checks each write against the final arrays.
+- **Vulkan render passes ignored `TimestampWrites`.** Begin and end timestamps are now written around the pass, as in Rust wgpu-hal.
+- **Vulkan query sets broke two validation rules.** `CreateQuerySet` reset the pool from the CPU without the `hostQueryReset` feature; queries are now reset in the command buffer. A `QueryResolve` buffer lacked `TRANSFER_DST` usage for `vkCmdCopyQueryPoolResults`.
+- **`ResolveQuerySet` was not ordered with later uses of its destination.** The buffer is now tracked as a copy destination, so a following copy or map waits for the resolve.
+- **Metal wrote shaders for MSL 2.1 and compiled them at Metal's default version.** The MSL version now comes from the OS version, as Rust wgpu-hal picks it (macOS 15 → 3.2, macOS 26 → 4.0, ...). It is used both for naga's output and for `MTLCompileOptions.languageVersion`, and `preserveInvariance` is set from macOS 11 / iOS 13. Without this, naga v0.21.0 refused every Metal shader that needs a newer MSL, such as ray queries. Not yet run on a Mac.
+- **Metal offered `FeatureTimestampQuery` but could not create timestamp query sets.** It is no longer offered until Metal query sets are implemented.
 - **GLES (Linux): the EGL context stayed current on the thread that created it.** Instance and surface creation made the context current and never released it, so a later `Lock` from another OS thread could fail with `EGL_BAD_ACCESS`. Creation now pins the thread, loads GL and releases the context, as Rust wgpu-hal pairs every make-current with an unbind. A test reproduces the cross-thread failure on Mesa.
 - **GLES (Linux): headless adapters reported no capabilities.** The adapter of the X11, headless and surfaceless EGL context skipped the capability probe. It reported no features, no downlevel flags (so no compute, even on GL 4.5 drivers such as Mesa llvmpipe), default limits and an unset GLSL version. It now probes like the surface path and Windows do.
 - **Vulkan: storage textures were bound as sampled images.** The bind group wrote every texture view as `SAMPLED_IMAGE` in `SHADER_READ_ONLY_OPTIMAL`, while the layout declared `STORAGE_IMAGE`, which the validation layer reports (VUID-VkWriteDescriptorSet-descriptorType-00319). The descriptor type now comes from the layout entry, as Rust wgpu-hal does: a storage texture is a `STORAGE_IMAGE` in `GENERAL`, the layout its barriers use.
@@ -31,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Render and compute pass `TimestampWrites` are validated as in Rust wgpu-core.** The feature must be enabled, the query set must be a live timestamp set of the same device, the indices must be in range and different, and at least one must be given. A missing or released query set is now an error instead of being dropped silently.
+- **Vulkan enables the shader capability features only when requested.** `geometryShader`, `shaderClipDistance`, `shaderInt64` and `shaderInt16` used to be enabled whenever supported. A shader that uses primitive_index, clip distances or 64-bit integers must request the matching feature (core requires that for naga v0.21.0 anyway). Requesting one the adapter does not offer fails device creation.
+- **Metal tests run in CI.** `TestMain` no longer exits early under CI. Tests that need a device skip one by one, and fail when `WGPU_REQUIRE` lists `metal`.
 - **Shader capability features** (gputypes v0.8.1). `CreateShaderModule` grants the naga capabilities of 12 more device features, by Rust's `features_to_naga_capabilities`:
   - `FeaturePrimitiveIndex`, `FeatureClipDistances`, `FeatureShaderEarlyDepthTest`, `FeatureShaderInt64`, `FeatureShaderInt64AtomicMinMax`, `FeatureShaderInt64AtomicAllOps`, `FeatureShaderFloat32Atomic`, `FeatureShaderI16`, `FeatureShaderBarycentrics`, `FeatureShaderPerVertex`, `FeatureSubgroupVertex`, `FeatureShaderDrawIndex`.
   - `FeatureShaderInt64AtomicAllOps` also grants the min/max capability, and `FeatureSubgroupVertex` also grants subgroups, as in Rust.
