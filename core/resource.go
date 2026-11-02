@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // Core WebGPU resource types with full HAL integration.
@@ -580,6 +581,11 @@ type Buffer struct {
 	// as required by the legacy ID-based Hub API, while still letting
 	// concurrent code load the slot atomically.
 	mapDataSlot *mapDataSlot
+
+	// indirectSources holds the indirect validation bind groups that read
+	// this buffer, one per aligned offset (IndirectValidation.DispatchParams).
+	// Non-nil only for INDIRECT buffers; destroyed with the HAL buffer.
+	indirectSources *indirect.BindGroupCache
 }
 
 // BufferMapState represents the current mapping state of a buffer.
@@ -664,6 +670,9 @@ func NewBuffer(
 		trackingData: td,
 		mapState:     BufferMapStateIdle,
 		mapDataSlot:  &mapDataSlot{},
+	}
+	if usage.Contains(gputypes.BufferUsageIndirect) {
+		b.indirectSources = &indirect.BindGroupCache{}
 	}
 	// Overwrite the device-tracker slot: the index may have belonged to a
 	// destroyed buffer whose last usage is still recorded there. Rust inserts
@@ -814,6 +823,12 @@ func (b *Buffer) Destroy() {
 	if halBuffer == nil {
 		// Already destroyed
 		return
+	}
+
+	// The indirect validation bind groups reference the HAL buffer; Rust
+	// wgpu-core Buffer::destroy snatches and disposes them with it.
+	if b.indirectSources != nil {
+		b.indirectSources.Destroy(halDevice)
 	}
 
 	// Destroy the HAL buffer

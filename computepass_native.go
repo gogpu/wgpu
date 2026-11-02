@@ -3,7 +3,6 @@
 package wgpu
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -259,74 +258,31 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 // and bind group state around the validation, matching Rust wgpu-core's
 // approach in compute.rs:928-1059.
 //
+// Every input of the validation dispatch comes from bind groups built before
+// recording (core.IndirectValidation.DispatchParams): the commands of every
+// DispatchIndirect, in any pass or encoder, read their own arguments, with no
+// buffer write between recording and execution.
+//
 // Flow:
-//  1. Write params (max_workgroups, src_offset) to uniform buffer
-//  2. Set validation pipeline + bind groups
-//  3. Transition src buffer for storage read, dst buffer for storage write
-//  4. Dispatch(1,1,1) -- validation shader
-//  5. Transition dst buffer back to INDIRECT usage
-//  6. Restore user pipeline + bind groups
-//  7. DispatchIndirect from validated dst buffer at offset 0
+//  1. End the user's pass; transition the dst buffer to storage
+//  2. Validation pass: pipeline, bind groups, Dispatch(1,1,1)
+//  3. Transition the dst buffer back to INDIRECT
+//  4. New pass: restore user pipeline + bind groups,
+//     DispatchIndirect from validated dst buffer at offset 0
 func (p *ComputePassEncoder) dispatchIndirectValidated(
 	buffer *Buffer,
 	offset uint64,
 	iv *core.IndirectValidation,
 	raw hal.ComputePassEncoder,
 ) {
-	halDevice := p.encoder.device.halDevice()
-	if halDevice == nil {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-
-	// Create source bind group for the user's indirect buffer.
-	halSrcBuf := buffer.halBuffer()
-	if halSrcBuf == nil {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-
-	srcBindGroup, err := iv.CreateSrcBindGroup(halDevice, halSrcBuf, buffer.Size())
+	params, err := iv.DispatchParams(buffer.coreBuffer(), offset)
 	if err != nil {
-		// Validation resource creation failed -- fall back to unvalidated dispatch.
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-	// Schedule cleanup of the ephemeral src bind group.
-	defer halDevice.DestroyBindGroup(srcBindGroup)
-
-	// Write params to the uniform buffer. The params struct is:
-	//   max_workgroups: u32 (baked into shader, but also in uniform for flexibility)
-	//   src_offset:     u32 (byte offset / 4, since shader indexes u32 array)
-	srcOffset := uint32(offset / 4) //nolint:gosec // offset is validated to be < buffer.Size()
-	var paramsData [8]byte
-	binary.LittleEndian.PutUint32(paramsData[0:4], iv.MaxWorkgroups())
-	binary.LittleEndian.PutUint32(paramsData[4:8], srcOffset)
-
-	// Write params via the HAL queue's WriteBuffer. This is a CPU-side write
-	// that will be visible to the GPU before the next dispatch.
-	if p.encoder.device.queue != nil && p.encoder.device.queue.hal != nil {
-		if writeErr := p.encoder.device.queue.hal.WriteBuffer(iv.ParamsBuffer(), 0, paramsData[:]); writeErr != nil {
-			// Params write failed -- fall back to unvalidated dispatch.
-			p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-			return
-		}
-	} else {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: indirect validation: %w", err))
 		return
 	}
 
-	// Step 1: Set validation compute pipeline.
-	raw.SetPipeline(iv.Pipeline())
-
-	// Step 2: Bind destination group (group 0: dst buffer + params uniform).
-	raw.SetBindGroup(0, iv.DstBindGroup(), nil)
-
-	// Step 3: Bind source group (group 1: user's indirect buffer).
-	raw.SetBindGroup(1, srcBindGroup, nil)
-
-	// Step 4: Transition dst buffer from INDIRECT to STORAGE_READ_WRITE.
-	// The compute pass encoder needs the parent command encoder for barriers.
+	// The HAL compute pass records no barriers, so the validation runs in
+	// passes of its own between the barriers on the parent encoder.
 	parentEncoder := p.encoder.core.RawEncoder()
 	if parentEncoder != nil {
 		// End the current compute pass temporarily to insert barriers.
@@ -334,7 +290,7 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 
 		parentEncoder.TransitionBuffers([]hal.BufferBarrier{
 			{
-				Buffer: iv.DstBuffer(),
+				Buffer: params.DstBuffer,
 				Usage: hal.BufferUsageTransition{
 					OldUsage: gputypes.BufferUsageIndirect,
 					NewUsage: gputypes.BufferUsageStorage,
@@ -342,24 +298,18 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 			},
 		})
 
-		// Re-begin compute pass for the validation dispatch.
 		validationPass := parentEncoder.BeginComputePass(&hal.ComputePassDescriptor{
 			Label: "indirect_dispatch_validation",
 		})
-
-		// Set validation pipeline and bind groups in the new pass.
-		validationPass.SetPipeline(iv.Pipeline())
-		validationPass.SetBindGroup(0, iv.DstBindGroup(), nil)
-		validationPass.SetBindGroup(1, srcBindGroup, nil)
-
-		// Step 5: Dispatch validation shader (single workgroup).
+		validationPass.SetPipeline(params.Pipeline)
+		validationPass.SetBindGroup(0, params.DstBindGroup, nil)
+		validationPass.SetBindGroup(1, params.SrcBindGroup, nil)
 		validationPass.Dispatch(1, 1, 1)
 		validationPass.End()
 
-		// Step 6: Transition dst buffer back from STORAGE to INDIRECT.
 		parentEncoder.TransitionBuffers([]hal.BufferBarrier{
 			{
-				Buffer: iv.DstBuffer(),
+				Buffer: params.DstBuffer,
 				Usage: hal.BufferUsageTransition{
 					OldUsage: gputypes.BufferUsageStorage,
 					NewUsage: gputypes.BufferUsageIndirect,
@@ -367,16 +317,11 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 			},
 		})
 
-		// Step 7: Re-begin compute pass for the user's actual dispatch.
 		userPass := parentEncoder.BeginComputePass(&hal.ComputePassDescriptor{
 			Label: "indirect_dispatch_user",
 		})
-
-		// Restore user pipeline and bind groups.
 		p.restoreComputeState(userPass)
-
-		// Step 8: DispatchIndirect from validated buffer at offset 0.
-		userPass.DispatchIndirect(iv.DstBuffer(), 0)
+		userPass.DispatchIndirect(params.DstBuffer, 0)
 
 		// Replace the core encoder's raw pass with the new one.
 		// This is needed because End() + BeginComputePass created a new pass.
