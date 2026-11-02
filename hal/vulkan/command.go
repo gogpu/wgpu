@@ -612,24 +612,29 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	vkCmdCopyBuffer(e.device.cmds, e.active, srcBuf.handle, dstBuf.handle, uint32(len(vkRegions)), &vkRegions[0])
 }
 
+// bufferLayoutInTexels converts the byte layout of a buffer-texture copy into
+// Vulkan's bufferRowLength and bufferImageHeight, which count texels: the
+// texels of one row are blockWidth * (bytesPerRow / blockCopySize) and the rows
+// of one image are rowsPerImage * blockHeight (wgpu-hal vulkan/command.rs
+// map_buffer_copies). blockCopySize is the size of the copied aspect (1 byte
+// for stencil). An unspecified layout (0) stays 0, which is tightly packed;
+// so does a format and aspect without a copy size (core rejects those copies
+// before they get here), instead of a made-up block size.
+func bufferLayoutInTexels(format gputypes.TextureFormat, aspect gputypes.TextureAspect, layout hal.ImageDataLayout) (rowLength, imageHeight uint32) {
+	blockWidth, blockHeight := format.BlockDimensions()
+	if blockSize, ok := format.BlockCopySizeAspect(aspect); ok && layout.BytesPerRow > 0 {
+		rowLength = blockWidth * (layout.BytesPerRow / blockSize)
+	}
+	return rowLength, layout.RowsPerImage * blockHeight
+}
+
 // convertBufferImageCopyRegions converts HAL BufferTextureCopy regions to Vulkan BufferImageCopy.
-// The format parameter is the texture format, used to determine block copy size
-// for correct bytes-to-texels conversion of bufferRowLength.
+// The format parameter is the texture format, used to convert the byte layout of the buffer
+// into the texel layout Vulkan wants (bufferRowLength, bufferImageHeight).
 func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat, dimension gputypes.TextureDimension) []vk.BufferImageCopy {
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
-	blockSize := format.BlockCopySize()
-	if blockSize == 0 {
-		blockSize = 4
-	}
 	for i, r := range regions {
-		// Vulkan bufferRowLength is in TEXELS, not bytes.
-		// Convert from WebGPU's BytesPerRow (bytes) to Vulkan's bufferRowLength (texels)
-		// using the format's known block size — NOT inference from BytesPerRow/Width,
-		// which gives wrong results when BytesPerRow is padded to alignment.
-		bufferRowLength := uint32(0)
-		if r.BufferLayout.BytesPerRow > 0 {
-			bufferRowLength = r.BufferLayout.BytesPerRow / blockSize
-		}
+		bufferRowLength, bufferImageHeight := bufferLayoutInTexels(format, r.TextureBase.Aspect, r.BufferLayout)
 		baseArrayLayer := uint32(0)
 		layerCount := uint32(1)
 		imageOffsetZ := int32(r.TextureBase.Origin.Z)
@@ -647,7 +652,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 		vkRegions[i] = vk.BufferImageCopy{
 			BufferOffset:      vk.DeviceSize(r.BufferLayout.Offset),
 			BufferRowLength:   bufferRowLength,
-			BufferImageHeight: r.BufferLayout.RowsPerImage,
+			BufferImageHeight: bufferImageHeight,
 			ImageSubresource: vk.ImageSubresourceLayers{
 				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),
 				MipLevel:       r.TextureBase.MipLevel,
