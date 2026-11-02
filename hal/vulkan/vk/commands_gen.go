@@ -1123,7 +1123,19 @@ func (c *Commands) BindImageMemory(device Device, image Image, memory DeviceMemo
 	return Result(result)
 }
 
-// TODO: GetImageSparseMemoryRequirements - signature not yet supported: void(handle, handle, ptr, ptr)
+// GetImageSparseMemoryRequirements wraps vkGetImageSparseMemoryRequirements.
+func (c *Commands) GetImageSparseMemoryRequirements(device Device, image Image, pSparseMemoryRequirementCount *uint32, pSparseMemoryRequirements *SparseImageMemoryRequirements) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&image),
+		unsafe.Pointer(&pSparseMemoryRequirementCount),
+		unsafe.Pointer(&pSparseMemoryRequirements),
+	}
+	if c.getImageSparseMemoryRequirements == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtrPtr, c.getImageSparseMemoryRequirements, nil, args[:])
+}
 
 // TODO: GetPhysicalDeviceSparseImageFormatProperties - signature not yet supported: void(handle, u32, u32, u32, u32, u32, ptr, ptr)
 
@@ -1436,7 +1448,19 @@ func (c *Commands) DestroyImage(device Device, image Image, pAllocator *Allocati
 	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtr, c.destroyImage, nil, args[:])
 }
 
-// TODO: GetImageSubresourceLayout - signature not yet supported: void(handle, handle, ptr, ptr)
+// GetImageSubresourceLayout wraps vkGetImageSubresourceLayout.
+func (c *Commands) GetImageSubresourceLayout(device Device, image Image, pSubresource *ImageSubresource, pLayout *SubresourceLayout) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&image),
+		unsafe.Pointer(&pSubresource),
+		unsafe.Pointer(&pLayout),
+	}
+	if c.getImageSubresourceLayout == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtrPtr, c.getImageSubresourceLayout, nil, args[:])
+}
 
 // CreateImageView wraps vkCreateImageView.
 func (c *Commands) CreateImageView(device Device, pCreateInfo *ImageViewCreateInfo, pAllocator *AllocationCallbacks, pView *ImageView) Result {
@@ -2467,9 +2491,37 @@ func (c *Commands) CmdFillBuffer(commandBuffer CommandBuffer, dstBuffer Buffer, 
 	_, _ = ffi.CallFunction(&SigVoidCmdFillBuffer, c.cmdFillBuffer, nil, args[:])
 }
 
-// TODO: CmdClearColorImage - signature not yet supported: void(handle, handle, u32, ptr, u32, ptr)
+// CmdClearColorImage wraps vkCmdClearColorImage.
+func (c *Commands) CmdClearColorImage(commandBuffer CommandBuffer, image Image, imageLayout ImageLayout, pColor *ClearColorValue, rangeCount uint32, pRanges *ImageSubresourceRange) {
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&image),
+		unsafe.Pointer(&imageLayout),
+		unsafe.Pointer(&pColor),
+		unsafe.Pointer(&rangeCount),
+		unsafe.Pointer(&pRanges),
+	}
+	if c.cmdClearColorImage == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidCmdClearImage, c.cmdClearColorImage, nil, args[:])
+}
 
-// TODO: CmdClearDepthStencilImage - signature not yet supported: void(handle, handle, u32, ptr, u32, ptr)
+// CmdClearDepthStencilImage wraps vkCmdClearDepthStencilImage.
+func (c *Commands) CmdClearDepthStencilImage(commandBuffer CommandBuffer, image Image, imageLayout ImageLayout, pDepthStencil *ClearDepthStencilValue, rangeCount uint32, pRanges *ImageSubresourceRange) {
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&commandBuffer),
+		unsafe.Pointer(&image),
+		unsafe.Pointer(&imageLayout),
+		unsafe.Pointer(&pDepthStencil),
+		unsafe.Pointer(&rangeCount),
+		unsafe.Pointer(&pRanges),
+	}
+	if c.cmdClearDepthStencilImage == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidCmdClearImage, c.cmdClearDepthStencilImage, nil, args[:])
+}
 
 // CmdClearAttachments wraps vkCmdClearAttachments.
 func (c *Commands) CmdClearAttachments(commandBuffer CommandBuffer, attachmentCount uint32, pAttachments *ClearAttachment, rectCount uint32, pRects *ClearRect) {
@@ -3548,7 +3600,20 @@ func (c *Commands) GetMemoryFdKHR(device Device, pGetFdInfo *MemoryGetFdInfoKHR,
 	return Result(result)
 }
 
-// TODO: GetMemoryFdPropertiesKHR - signature not yet supported: Result(handle, handle, other, ptr)
+// GetMemoryFdPropertiesKHR wraps vkGetMemoryFdPropertiesKHR.
+func (c *Commands) GetMemoryFdPropertiesKHR(device Device, handleType ExternalMemoryHandleTypeFlagBits, fd int32, pMemoryFdProperties *MemoryFdPropertiesKHR) Result {
+	var result int32
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&handleType),
+		unsafe.Pointer(&fd),
+		unsafe.Pointer(&pMemoryFdProperties),
+	}
+	if _, err := ffi.CallFunction(&SigResultHandleHandleI32Ptr, c.getMemoryFdPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
+	return Result(result)
+}
 
 // GetMemoryZirconHandleFUCHSIA wraps vkGetMemoryZirconHandleFUCHSIA.
 func (c *Commands) GetMemoryZirconHandleFUCHSIA(device Device, pGetZirconHandleInfo *MemoryGetZirconHandleInfoFUCHSIA, pZirconHandle *uint32) Result {
@@ -4544,7 +4609,7 @@ func (c *Commands) GetDescriptorSetLayoutSupport(device Device, pCreateInfo *Des
 
 // TODO: GetSwapchainGrallocUsage2ANDROID - signature not yet supported: Result(handle, u32, u32, u32, ptr, ptr)
 
-// TODO: AcquireImageANDROID - signature not yet supported: Result(handle, handle, other, handle, handle)
+// TODO: AcquireImageANDROID - signature not yet supported: Result(handle, handle, i32, handle, handle)
 
 // TODO: QueueSignalReleaseImageANDROID - signature not yet supported: Result(handle, u32, ptr, handle, ptr)
 
@@ -7567,7 +7632,19 @@ func (c *Commands) GetDeviceMicromapCompatibilityEXT(device Device, pVersionInfo
 	_, _ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getDeviceMicromapCompatibilityEXT, nil, args[:])
 }
 
-// TODO: GetMicromapBuildSizesEXT - signature not yet supported: void(handle, handle, ptr, ptr)
+// GetMicromapBuildSizesEXT wraps vkGetMicromapBuildSizesEXT.
+func (c *Commands) GetMicromapBuildSizesEXT(device Device, buildType AccelerationStructureBuildTypeKHR, pBuildInfo *MicromapBuildInfoEXT, pSizeInfo *MicromapBuildSizesInfoEXT) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&buildType),
+		unsafe.Pointer(&pBuildInfo),
+		unsafe.Pointer(&pSizeInfo),
+	}
+	if c.getMicromapBuildSizesEXT == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtrPtr, c.getMicromapBuildSizesEXT, nil, args[:])
+}
 
 // GetShaderModuleIdentifierEXT wraps vkGetShaderModuleIdentifierEXT.
 func (c *Commands) GetShaderModuleIdentifierEXT(device Device, shaderModule ShaderModule, pIdentifier *ShaderModuleIdentifierEXT) {
@@ -7595,7 +7672,19 @@ func (c *Commands) GetShaderModuleCreateInfoIdentifierEXT(device Device, pCreate
 	_, _ = ffi.CallFunction(&SigVoidHandlePtrPtr, c.getShaderModuleCreateInfoIdentifierEXT, nil, args[:])
 }
 
-// TODO: GetImageSubresourceLayout2 - signature not yet supported: void(handle, handle, ptr, ptr)
+// GetImageSubresourceLayout2 wraps vkGetImageSubresourceLayout2.
+func (c *Commands) GetImageSubresourceLayout2(device Device, image Image, pSubresource *ImageSubresource2, pLayout *SubresourceLayout2) {
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&image),
+		unsafe.Pointer(&pSubresource),
+		unsafe.Pointer(&pLayout),
+	}
+	if c.getImageSubresourceLayout2 == nil {
+		return
+	}
+	_, _ = ffi.CallFunction(&SigVoidHandleHandlePtrPtr, c.getImageSubresourceLayout2, nil, args[:])
+}
 
 // GetPipelinePropertiesEXT wraps vkGetPipelinePropertiesEXT.
 func (c *Commands) GetPipelinePropertiesEXT(device Device, pPipelineInfo *PipelineInfoEXT, pPipelineProperties *BaseOutStructure) Result {

@@ -880,6 +880,7 @@ func signatureToCallInterface(sig commandSignature) (string, bool) {
 		"Result(handle, handle, u32, ptr)":                 "SigResultHandleHandleU32Ptr", // vkFreeDescriptorSets, vkFreeCommandBuffers
 		"Result(handle, handle, u32, ptr, ptr, ptr)":       "SigResultCreatePipelines",    // vkCreateGraphicsPipelines, vkCreateComputePipelines
 		"Result(handle, u32, handle, ptr)":                 "SigResultHandleU32HandlePtr", // vkGetPhysicalDeviceSurfaceSupportKHR
+		"Result(handle, handle, i32, ptr)":                 "SigResultHandleHandleI32Ptr", // vkGetMemoryFdPropertiesKHR
 
 		// Void-returning
 		"void(handle, ptr)":                      "SigVoidHandlePtr",
@@ -907,6 +908,7 @@ func signatureToCallInterface(sig commandSignature) (string, bool) {
 		"void(handle, handle, u32, ptr)":         "SigVoidHandleHandleU32Ptr",         // vkFreeCommandBuffers
 		"void(handle, f32)":                      "SigVoidHandleF32",                  // vkCmdSetBlendConstants (ptr to float array)
 		"void(handle, handle, u64, u32, u32)":    "SigVoidHandleHandleU64U32U32",      // vkCmdDrawIndirect, vkCmdDrawIndexedIndirect
+		"void(handle, handle, ptr, ptr)":         "SigVoidHandleHandlePtrPtr",         // vkGetImageSubresourceLayout
 
 		// Cmd-specific complex signatures (using custom CallInterface)
 		"void(handle, u32, u32, u32, u32, ptr, u32, ptr, u32, ptr)": "SigVoidCmdPipelineBarrier",    // vkCmdPipelineBarrier (10 params)
@@ -916,6 +918,7 @@ func signatureToCallInterface(sig commandSignature) (string, bool) {
 		"void(handle, handle, handle, u32, u32, ptr)":               "SigVoidCmdCopyBufferToImage",  // vkCmdCopyBufferToImage
 		"void(handle, handle, u32, handle, u32, ptr)":               "SigVoidCmdCopyImageToBuffer",  // vkCmdCopyImageToBuffer
 		"void(handle, handle, u32, handle, u32, u32, ptr)":          "SigVoidCmdCopyImage",          // vkCmdCopyImage
+		"void(handle, handle, u32, ptr, u32, ptr)":                  "SigVoidCmdClearImage",         // vkCmdClearColorImage, vkCmdClearDepthStencilImage
 		"void(handle, u32, handle, u32, u32, ptr, u32, ptr)":        "SigVoidCmdBindDescriptorSets", // vkCmdBindDescriptorSets
 	}
 
@@ -990,7 +993,7 @@ func classifyParamType(param Param) string {
 	switch baseType {
 	case "uint32_t":
 		return "u32"
-	case "int32_t":
+	case "int32_t", "int":
 		return "i32"
 	case "uint64_t":
 		return "u64"
