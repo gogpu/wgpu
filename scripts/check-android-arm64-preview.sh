@@ -52,7 +52,13 @@ require_checkout() {
 }
 
 goffi_module=github.com/go-webgpu/goffi
-goffi_version=v0.6.7
+# The canonical goffi release is the one go.mod requires; a hard-coded copy here
+# went stale with every goffi bump.
+goffi_version=$(cd "$root" && GOWORK=off go list -m -f '{{.Version}}' "$goffi_module")
+if [[ -z "$goffi_version" ]]; then
+	echo "cannot read the goffi version from go.mod" >&2
+	exit 1
+fi
 (
 	cd "$root"
 	GOWORK=off go mod download "$goffi_module@$goffi_version"
