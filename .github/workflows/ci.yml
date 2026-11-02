@@ -135,6 +135,9 @@ jobs:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # Each OS runs different backends (DX12, Metal, Vulkan/GLES), so one
+      # OS failing must not cancel the others' results.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go-version: ['1.25']
