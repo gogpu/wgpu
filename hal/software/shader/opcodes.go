@@ -130,6 +130,8 @@ const (
 	OpImageSampleImplicitLod = 87
 	OpImageSampleExplicitLod = 88
 	OpImageFetch             = 95
+	OpImageRead              = 98
+	OpImageWrite             = 99
 	OpImageQuerySize         = 104
 
 	// Atomic ops.

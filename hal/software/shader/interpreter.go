@@ -1234,6 +1234,21 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.fetchTexel(imgVal, coord)
 			}
 
+		case OpImageRead:
+			// OpImageRead: type resultID image coordinate [ImageOperands...]
+			// A storage texture load (textureLoad of a read-only or
+			// read-write storage texture).
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = interp.readImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
+			}
+
+		case OpImageWrite:
+			// OpImageWrite: image coordinate texel [ImageOperands...]
+			// A storage texture store (textureStore); no result.
+			if len(inst.Operands) >= 3 {
+				interp.writeImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], interp.values[inst.Operands[2]])
+			}
+
 		case OpImageQuerySize:
 			// OpImageQuerySize: type resultID image
 			if len(inst.Operands) >= 1 {
@@ -1848,17 +1863,7 @@ func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 		return ValVec4(0, 0, 0, 0)
 	}
 
-	var x, y int
-	switch coord.Tag {
-	case TagVec2:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	case TagVec3:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	case TagVec4:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	default:
-		x = int(toUint32(coord))
-	}
+	x, y := imageCoord(coord)
 
 	// Clamp to texture bounds.
 	if x < 0 {
@@ -1875,6 +1880,102 @@ func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 	}
 
 	return ValVec4From(readTexel(tex, x, y))
+}
+
+// imageCoord returns the integer texel coordinate x, y of an image
+// instruction's coordinate operand. An integer vector is either a float
+// vector (OpCompositeConstruct) or an array of integer scalars (builtins
+// such as global_invocation_id, and shuffles of them).
+func imageCoord(coord Value) (x, y int) {
+	switch coord.Tag {
+	case TagVec2, TagVec3, TagVec4:
+		return int(coord.F[0]), int(coord.F[1])
+	case TagArray:
+		arr := coord.AsArray()
+		if len(arr) >= 1 {
+			x = scalarInt(arr[0])
+		}
+		if len(arr) >= 2 {
+			y = scalarInt(arr[1])
+		}
+		return x, y
+	default:
+		return scalarInt(coord), 0
+	}
+}
+
+// scalarInt converts an integer or float scalar to int; a signed integer
+// keeps its sign.
+func scalarInt(v Value) int {
+	switch v.Tag {
+	case TagFloat32:
+		return int(v.F[0])
+	case TagUint32:
+		return int(v.U[0])
+	default:
+		return int(int32(toUint32(v)))
+	}
+}
+
+// readImage loads a storage texture texel (OpImageRead), decoded from the
+// texture format. An out-of-bounds or undecodable texel reads zero.
+func (interp *interpreter) readImage(imgVal, coord Value) Value {
+	tex := interp.resolveTexture(imgVal)
+	if tex == nil {
+		return ValVec4(0, 0, 0, 0)
+	}
+	x, y := imageCoord(coord)
+	v, ok := decodeTexel(tex, x, y)
+	if !ok {
+		return ValVec4(0, 0, 0, 0)
+	}
+	return ValVec4From(v)
+}
+
+// writeImage stores a texel into a storage texture (OpImageWrite), encoded
+// in the texture format. The texture's Data aliases its storage, so the write
+// is visible to later passes. Out-of-bounds writes are discarded.
+func (interp *interpreter) writeImage(imgVal, coord, texel Value) {
+	tex := interp.resolveTexture(imgVal)
+	if tex == nil {
+		return
+	}
+	x, y := imageCoord(coord)
+	encodeTexel(tex, x, y, texelComponents(texel))
+}
+
+// texelComponents returns the four components of a texel value (a float
+// vector, an array of scalars, or a scalar filling the first one).
+func texelComponents(v Value) Vec4 {
+	switch v.Tag {
+	case TagVec2, TagVec3, TagVec4:
+		return v.F
+	case TagArray:
+		var out Vec4
+		for i, e := range v.AsArray() {
+			if i < len(out) {
+				out[i] = scalarFloat(e)
+			}
+		}
+		return out
+	default:
+		return Vec4{scalarFloat(v), 0, 0, 0}
+	}
+}
+
+// scalarFloat converts a scalar to float32 by value; a signed integer keeps
+// its sign.
+func scalarFloat(v Value) float32 {
+	switch v.Tag {
+	case TagFloat32:
+		return v.F[0]
+	case TagUint32:
+		return float32(v.U[0])
+	case TagInt32:
+		return float32(int32(v.U[0]))
+	default:
+		return toFloat32(v)
+	}
 }
 
 // queryImageSize returns the size of a texture as a vec2 of uint32 values.

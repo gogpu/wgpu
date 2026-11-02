@@ -6,7 +6,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
+	"maps"
 	"math"
+	"slices"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -792,77 +794,84 @@ func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex) 
 }
 
 // buildExecutionContext creates a shader ExecutionContext populated with all
-// bind group resources (buffers, textures, samplers). This follows the same
-// pattern as ComputePassEncoder.Dispatch in command.go.
+// bind group resources (buffers, textures, samplers).
 func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
+	return bindGroupExecutionContext(&r.bindGroups)
+}
+
+// bindGroupExecutionContext creates a shader ExecutionContext with the
+// resources of the bound groups, for draws and dispatches alike.
+func bindGroupExecutionContext(groups *[4]*BindGroup) *shader.ExecutionContext {
 	ctx := &shader.ExecutionContext{
 		Buffers:  make(map[shader.BindingKey][]byte),
 		Textures: make(map[shader.BindingKey]*shader.Texture2D),
 		Samplers: make(map[shader.BindingKey]*shader.Sampler),
 	}
-
-	for groupIdx, bg := range r.bindGroups {
+	for groupIdx, bg := range groups {
 		if bg == nil {
 			continue
 		}
-		// Buffers (uniform/storage) — apply offset/size from BufferBinding.
-		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
-		dynIdx := 0
-		for bindingIdx, bs := range bg.bufferBindings {
-			if bs.buf == nil {
-				continue
-			}
-			bs.buf.mu.RLock()
-			data := bs.buf.data
-			off := bs.offset
-			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
-				off += uint64(bg.dynamicOffsets[dynIdx])
-				dynIdx++
-			}
-			end := uint64(len(data))
-			if bs.size > 0 && off+bs.size <= end {
-				end = off + bs.size
-			}
-			if off < uint64(len(data)) {
-				data = data[off:end]
-			}
-			ctx.Buffers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = data
-			bs.buf.mu.RUnlock()
-		}
-		// Textures.
-		for bindingIdx, tv := range bg.textureViews {
-			if tv == nil || tv.texture == nil {
-				continue
-			}
-			tv.texture.mu.RLock()
-			ctx.Textures[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = &shader.Texture2D{
-				Width:         tv.texture.width,
-				Height:        tv.texture.height,
-				Data:          tv.texture.data,
-				Format:        uint32(tv.texture.format),
-				BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
-			}
-			tv.texture.mu.RUnlock()
-		}
-		// Samplers.
-		for bindingIdx, samp := range bg.samplers {
-			if samp == nil {
-				continue
-			}
-			ctx.Samplers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = samplerResourceToShader(samp)
-		}
+		addBufferBindings(ctx, uint32(groupIdx), bg)
+		addTextureBindings(ctx, uint32(groupIdx), bg)
 	}
-
 	return ctx
+}
+
+// addBufferBindings adds the buffer bindings of bind group groupIdx to ctx,
+// each the slice of the buffer's storage its offset, dynamic offset and
+// size select, so storage buffer writes land in the buffer itself. Dynamic
+// offsets are consumed in binding order by the bindings with
+// HasDynamicOffset, as WebGPU orders them.
+func addBufferBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindGroup) {
+	dynIdx := 0
+	for _, bindingIdx := range slices.Sorted(maps.Keys(bg.bufferBindings)) {
+		bs := bg.bufferBindings[bindingIdx]
+		if bs.buf == nil {
+			continue
+		}
+		off := bs.offset
+		if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
+			off += uint64(bg.dynamicOffsets[dynIdx])
+			dynIdx++
+		}
+		bs.buf.mu.RLock()
+		data := bs.buf.data
+		end := uint64(len(data))
+		if bs.size > 0 && off+bs.size <= end {
+			end = off + bs.size
+		}
+		if off < uint64(len(data)) {
+			data = data[off:end]
+		}
+		ctx.Buffers[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = data
+		bs.buf.mu.RUnlock()
+	}
+}
+
+// addTextureBindings adds the texture views and samplers of bind group
+// groupIdx to ctx. A texture's Data aliases the texture's storage, so a
+// storage texture write (OpImageWrite) lands in the texture itself.
+func addTextureBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindGroup) {
+	for bindingIdx, tv := range bg.textureViews {
+		if tv == nil || tv.texture == nil {
+			continue
+		}
+		tv.texture.mu.RLock()
+		ctx.Textures[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = &shader.Texture2D{
+			Width:         tv.texture.width,
+			Height:        tv.texture.height,
+			Data:          tv.texture.data,
+			Format:        uint32(tv.texture.format),
+			BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
+		}
+		tv.texture.mu.RUnlock()
+	}
+	for bindingIdx, samp := range bg.samplers {
+		if samp == nil {
+			continue
+		}
+		ctx.Samplers[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = samplerResourceToShader(samp)
+	}
 }
 
 // samplerResourceToShader converts a SamplerResource to a shader.Sampler

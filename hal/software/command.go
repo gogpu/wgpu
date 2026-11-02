@@ -12,7 +12,6 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/raster"
-	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the software backend.
@@ -753,42 +752,8 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 	entryPoint := c.pipeline.entryPoint
 
-	// Build the execution context with buffer bindings from all bind groups.
-	ctx := &shader.ExecutionContext{
-		Buffers: make(map[shader.BindingKey][]byte),
-	}
-
-	for groupIdx, bg := range c.bindGroups {
-		if bg == nil {
-			continue
-		}
-		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
-		dynIdx := 0
-		for bindingIdx, bs := range bg.bufferBindings {
-			if bs.buf == nil {
-				continue
-			}
-			bs.buf.mu.Lock()
-			data := bs.buf.data
-			off := bs.offset
-			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
-				off += uint64(bg.dynamicOffsets[dynIdx])
-				dynIdx++
-			}
-			end := uint64(len(data))
-			if bs.size > 0 && off+bs.size <= end {
-				end = off + bs.size
-			}
-			if off < uint64(len(data)) {
-				data = data[off:end]
-			}
-			ctx.Buffers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = data
-			bs.buf.mu.Unlock()
-		}
-	}
+	// Build the execution context with the resources of all bind groups.
+	ctx := bindGroupExecutionContext(&c.bindGroups)
 
 	slog.Debug("software: ComputePassEncoder.Dispatch",
 		"entryPoint", entryPoint,

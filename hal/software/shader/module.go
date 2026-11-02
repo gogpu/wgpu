@@ -657,7 +657,7 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 		OpMatrixTimesMatrix, OpTranspose, OpVectorShuffle,
 		OpCopyObject,
 		OpSampledImage, OpImageSampleImplicitLod, OpImageSampleExplicitLod,
-		OpImageFetch, OpImageQuerySize,
+		OpImageFetch, OpImageRead, OpImageQuerySize,
 		OpAtomicLoad, OpAtomicExchange, OpAtomicCompareExchange,
 		OpAtomicIIncrement, OpAtomicIDecrement,
 		OpAtomicIAdd, OpAtomicISub,
@@ -708,7 +708,7 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 		}
 
 	// Instructions with only operands (no result type/ID).
-	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier,
+	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier, OpImageWrite,
 		OpSwitch, OpKill, OpTerminateInvocation, OpUnreachable:
 		if len(operands) > 0 {
 			inst.Operands = make([]uint32, len(operands))

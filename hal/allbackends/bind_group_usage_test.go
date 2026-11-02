@@ -136,7 +136,6 @@ func TestWriteTextureThenSample(t *testing.T) {
 // before the draw, inside the encoder.
 func TestStorageTextureWriteThenSample(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		skipKnownGap(t, "software", "P1-SW-018", "textureStore to a storage texture reads back zeros")
 		_, view := newUsageTexture(t, device, wgpu.TextureUsageStorageBinding|wgpu.TextureUsageTextureBinding)
 		bgl := newBindGroupLayout(t, device, gputypes.BindGroupLayoutEntry{
 			Binding:    0,

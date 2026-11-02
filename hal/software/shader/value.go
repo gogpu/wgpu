@@ -610,6 +610,13 @@ func appendComponents(dst []float32, val Value) []float32 {
 		return append(dst, float32(val.U[0]))
 	case TagInt32:
 		return append(dst, float32(int32(val.U[0])))
+	case TagArray:
+		// Integer vectors from builtins (global_invocation_id) are arrays
+		// of scalars.
+		for _, e := range val.AsArray() {
+			dst = appendComponents(dst, e)
+		}
+		return dst
 	default:
 		return append(dst, 0)
 	}
