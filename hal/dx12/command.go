@@ -533,6 +533,11 @@ type RenderPassEncoder struct {
 	// Rust wgpu-hal reference: dx12/mod.rs end_of_pass_timer_query field.
 	endOfPassTimerHeap  *d3d12.ID3D12QueryHeap
 	endOfPassTimerIndex uint32
+
+	// specialConstants holds the values last written to the pipeline's
+	// special-constants root parameter (valid when specialConstantsSet).
+	specialConstants    specialConstants
+	specialConstantsSet bool
 }
 
 // End finishes the render pass.
@@ -632,6 +637,8 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	if p.rootSignature != nil {
 		e.encoder.cmdList.SetGraphicsRootSignature(p.rootSignature)
 	}
+	// A root signature change discards the root arguments.
+	e.specialConstantsSet = false
 	e.encoder.cmdList.IASetPrimitiveTopology(p.topology)
 
 	// The pipeline owns the strides of the slots it uses.
@@ -809,7 +816,7 @@ func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 		return
 	}
 
-	e.prepareVertexBuffers()
+	e.prepareDraw(int32(args.FirstVertex), args.FirstInstance)
 	e.encoder.cmdList.DrawInstanced(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
@@ -819,7 +826,7 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 		return
 	}
 
-	e.prepareVertexBuffers()
+	e.prepareDraw(args.BaseVertex, args.FirstInstance)
 	e.encoder.cmdList.DrawIndexedInstanced(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
@@ -827,50 +834,38 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 // The buffer must contain a D3D12_DRAW_ARGUMENTS struct at the given offset
 // (vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation — 16 bytes).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || drawCount == 0 {
-		return
-	}
-	if !indirect.RangeFits(buf.size, offset, 16, drawCount) {
-		return
-	}
-	if _, ok := indirect.RecordOffset(offset, 16, drawCount-1); !ok {
-		return
-	}
-	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
-		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
-	}
-
-	e.prepareVertexBuffers()
-	e.encoder.cmdList.ExecuteIndirect(
-		e.encoder.device.cmdSignatures.draw,
-		drawCount, buf.raw, offset, nil, 0,
-	)
+	e.executeIndirectDraw(buffer, offset, drawCount, 16, e.encoder.device.cmdSignatures.draw)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 // The buffer must contain a D3D12_DRAW_INDEXED_ARGUMENTS struct at the given offset
 // (indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation — 20 bytes).
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	e.executeIndirectDraw(buffer, offset, drawCount, 20, e.encoder.device.cmdSignatures.drawIndexed)
+}
+
+// executeIndirectDraw runs drawCount indirect draws of recordSize-byte
+// argument records with the command signature.
+func (e *RenderPassEncoder) executeIndirectDraw(buffer hal.Buffer, offset uint64, drawCount uint32, recordSize uint64, signature *d3d12.ID3D12CommandSignature) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording || drawCount == 0 {
 		return
 	}
-	if !indirect.RangeFits(buf.size, offset, 20, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, recordSize, drawCount) {
 		return
 	}
-	if _, ok := indirect.RecordOffset(offset, 20, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, recordSize, drawCount-1); !ok {
 		return
 	}
 	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
-	e.prepareVertexBuffers()
-	e.encoder.cmdList.ExecuteIndirect(
-		e.encoder.device.cmdSignatures.drawIndexed,
-		drawCount, buf.raw, offset, nil, 0,
-	)
+	// The first vertex and instance live in the GPU buffer; without core
+	// rewriting the arguments into the special constants (Rust's
+	// INDIRECT_BUILTIN_UPDATE), Rust wgpu-hal passes zeros, as here.
+	e.prepareDraw(0, 0)
+	e.encoder.cmdList.ExecuteIndirect(signature, drawCount, buf.raw, offset, nil, 0)
 }
 
 // DrawIndirectCount draws using maxDrawCount when GPU count buffer is unavailable.
@@ -902,6 +897,11 @@ type ComputePassEncoder struct {
 	encoder            *CommandEncoder
 	pipeline           *ComputePipeline
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
+
+	// specialConstants holds the values last written to the pipeline's
+	// special-constants root parameter (valid when specialConstantsSet).
+	specialConstants    specialConstants
+	specialConstantsSet bool
 
 	// boundStorageBuffers tracks storage buffers from SetBindGroup calls.
 	// Dispatch records them as UNORDERED_ACCESS in the command-local tracker so
@@ -943,6 +943,8 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	if p.rootSignature != nil {
 		e.encoder.cmdList.SetComputeRootSignature(p.rootSignature)
 	}
+	// A root signature change discards the root arguments.
+	e.specialConstantsSet = false
 
 	// Bind the global sampler descriptor heap to the sampler root parameter.
 	if p.samplerRootIndex >= 0 && e.encoder.device.samplerHeap != nil {
@@ -1007,6 +1009,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		}
 	}
 	e.encoder.emitStateBarrierPlans(plans)
+	e.prepareDispatch(x, y, z)
 	e.encoder.cmdList.Dispatch(x, y, z)
 	e.insertUAVBarrier()
 
@@ -1039,6 +1042,10 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	}
 	e.encoder.emitStateBarrierPlans(plans)
 
+	// The workgroup count lives in the GPU buffer; without core rewriting
+	// it into the special constants (Rust's INDIRECT_BUILTIN_UPDATE), Rust
+	// wgpu-hal passes zeros, as here.
+	e.prepareDispatch(0, 0, 0)
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.dispatch,
 		1, buf.raw, offset, nil, 0,

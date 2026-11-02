@@ -115,13 +115,14 @@ type rootParamMapping struct {
 // It wraps an ID3D12RootSignature and stores naga HLSL options for deferred
 // shader compilation, matching Rust wgpu-hal architecture.
 type PipelineLayout struct {
-	rootSignature     *d3d12.ID3D12RootSignature
-	rootSignatureHash [32]byte // SHA-256 of serialized root signature blob (PSO cache key)
-	bindGroupLayouts  []*BindGroupLayout
-	groupMappings     []rootParamMapping // actual root param indices per bind group
-	samplerRootIndex  int                // root param index for global sampler heap table, or -1
-	nagaOptions       *hlsl.Options      // HLSL compile options with proper BindingMap
-	device            *Device
+	rootSignature             *d3d12.ID3D12RootSignature
+	rootSignatureHash         [32]byte // SHA-256 of serialized root signature blob (PSO cache key)
+	bindGroupLayouts          []*BindGroupLayout
+	groupMappings             []rootParamMapping // actual root param indices per bind group
+	samplerRootIndex          int                // root param index for global sampler heap table, or -1
+	specialConstantsRootIndex int                // root param index of the special constants (first vertex/instance, workgroup count)
+	nagaOptions               *hlsl.Options      // HLSL compile options with proper BindingMap
+	device                    *Device
 }
 
 // Destroy releases the pipeline layout resources.
@@ -203,7 +204,9 @@ type pipelineLayoutResult struct {
 	rootSignatureHash [32]byte
 	groupMappings     []rootParamMapping
 	samplerRootIndex  int
-	nagaOptions       *hlsl.Options
+	// specialConstantsRootIndex is the root parameter of the special constants.
+	specialConstantsRootIndex int
+	nagaOptions               *hlsl.Options
 }
 
 // createRootSignatureFromLayouts creates a D3D12 root signature from bind group layouts.
@@ -401,6 +404,28 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 		rootParams = append(rootParams, param)
 	}
 
+	// Special constants: three 32-bit root constants at the next CBV
+	// register, (first_vertex, first_instance, unused) for draws and
+	// (x, y, z) for dispatches. D3D12's SV_VertexID and SV_InstanceID do not
+	// include the first vertex and instance, and there is no workgroup count
+	// built-in, so naga adds and reads these (SpecialConstantsBinding). Rust
+	// wgpu-hal adds them to every layout, since wgpu-core always sets
+	// FIRST_VERTEX_INSTANCE | NUM_WORK_GROUPS (dx12/device.rs
+	// create_pipeline_layout).
+	specialConstantsRootIndex := len(rootParams)
+	specialConstantsBinding := hlsl.BindTarget{Space: 0, Register: bindCBV}
+	{
+		param := d3d12.D3D12_ROOT_PARAMETER{
+			ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+			ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
+		}
+		constants := (*d3d12.D3D12_ROOT_CONSTANTS)(unsafe.Pointer(&param.Union[0]))
+		constants.ShaderRegister = specialConstantsBinding.Register
+		constants.RegisterSpace = uint32(specialConstantsBinding.Space)
+		constants.Num32BitValues = specialConstantsCount
+		rootParams = append(rootParams, param)
+	}
+
 	// Build root signature description
 	desc := d3d12.D3D12_ROOT_SIGNATURE_DESC{
 		Flags: d3d12.D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
@@ -449,6 +474,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 		ShaderModel:             backend.ShaderModel{Major: 5, Minor: 1},
 		BindingMap:              bindingMap,
 		SamplerBufferBindingMap: samplerBufferBindingMap,
+		SpecialConstantsBinding: &specialConstantsBinding,
 		SamplerHeapTargets: &hlsl.SamplerHeapBindTargets{
 			StandardSamplers:   hlsl.BindTarget{Space: 0, Register: 0},
 			ComparisonSamplers: hlsl.BindTarget{Space: 0, Register: 2048},
@@ -462,11 +488,12 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	}
 
 	return &pipelineLayoutResult{
-		rootSignature:     rootSig,
-		rootSignatureHash: rootSigHash,
-		groupMappings:     groupMappings,
-		samplerRootIndex:  samplerRootIndex,
-		nagaOptions:       nagaOpts,
+		rootSignature:             rootSig,
+		rootSignatureHash:         rootSigHash,
+		groupMappings:             groupMappings,
+		samplerRootIndex:          samplerRootIndex,
+		specialConstantsRootIndex: specialConstantsRootIndex,
+		nagaOptions:               nagaOpts,
 	}, nil
 }
 
@@ -787,12 +814,13 @@ func boolToInt32(b bool) int32 {
 
 // RenderPipeline implements hal.RenderPipeline for DirectX 12.
 type RenderPipeline struct {
-	pso              *d3d12.ID3D12PipelineState
-	rootSignature    *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings    []rootParamMapping         // bind group → root param index mapping
-	samplerRootIndex int                        // root param index for global sampler heap, or -1
-	topology         d3d12.D3D_PRIMITIVE_TOPOLOGY
-	vertexStrides    []uint32 // Strides per vertex buffer slot
+	pso                       *d3d12.ID3D12PipelineState
+	rootSignature             *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings             []rootParamMapping         // bind group → root param index mapping
+	samplerRootIndex          int                        // root param index for global sampler heap, or -1
+	specialConstantsRootIndex int                        // root param index of the special constants, or -1 (no layout)
+	topology                  d3d12.D3D_PRIMITIVE_TOPOLOGY
+	vertexStrides             []uint32 // Strides per vertex buffer slot
 }
 
 // Destroy releases the render pipeline resources.
@@ -832,10 +860,11 @@ func (p *RenderPipeline) VertexStrides() []uint32 {
 
 // ComputePipeline implements hal.ComputePipeline for DirectX 12.
 type ComputePipeline struct {
-	pso              *d3d12.ID3D12PipelineState
-	rootSignature    *d3d12.ID3D12RootSignature // Reference, not owned
-	groupMappings    []rootParamMapping         // bind group → root param index mapping
-	samplerRootIndex int                        // root param index for global sampler heap, or -1
+	pso                       *d3d12.ID3D12PipelineState
+	rootSignature             *d3d12.ID3D12RootSignature // Reference, not owned
+	groupMappings             []rootParamMapping         // bind group → root param index mapping
+	samplerRootIndex          int                        // root param index for global sampler heap, or -1
+	specialConstantsRootIndex int                        // root param index of the special constants, or -1 (no layout)
 }
 
 // Destroy releases the compute pipeline resources.

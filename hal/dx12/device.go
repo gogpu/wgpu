@@ -2093,13 +2093,14 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	)
 
 	return &PipelineLayout{
-		rootSignature:     result.rootSignature,
-		rootSignatureHash: result.rootSignatureHash,
-		bindGroupLayouts:  bgLayouts,
-		groupMappings:     result.groupMappings,
-		samplerRootIndex:  result.samplerRootIndex,
-		nagaOptions:       result.nagaOptions,
-		device:            d,
+		rootSignature:             result.rootSignature,
+		rootSignatureHash:         result.rootSignatureHash,
+		bindGroupLayouts:          bgLayouts,
+		groupMappings:             result.groupMappings,
+		samplerRootIndex:          result.samplerRootIndex,
+		specialConstantsRootIndex: result.specialConstantsRootIndex,
+		nagaOptions:               result.nagaOptions,
+		device:                    d,
 	}, nil
 }
 
@@ -2409,6 +2410,9 @@ func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, 
 		opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
 		opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
 		opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
+		if sc := nagaOpts.SpecialConstantsBinding; sc != nil {
+			opts.SpecialConstantsBinding = &dxil.BindTarget{Space: sc.Space, Register: sc.Register}
+		}
 	}
 
 	// A DXIL container holds one entry point: compile each one separately,
@@ -2620,10 +2624,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	var rootSig *d3d12.ID3D12RootSignature
 	var groupMappings []rootParamMapping
 	samplerRootIdx := -1
+	specialConstantsIdx := -1
 	if pipelineLayout != nil {
 		rootSig = pipelineLayout.rootSignature
 		groupMappings = pipelineLayout.groupMappings
 		samplerRootIdx = pipelineLayout.samplerRootIndex
+		specialConstantsIdx = pipelineLayout.specialConstantsRootIndex
 	} else {
 		// No layout → use the same empty root signature that was used in the PSO.
 		rootSig, _ = d.getOrCreateEmptyRootSignature()
@@ -2647,12 +2653,13 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	)
 
 	return &RenderPipeline{
-		pso:              pso,
-		rootSignature:    rootSig,
-		groupMappings:    groupMappings,
-		samplerRootIndex: samplerRootIdx,
-		topology:         primitiveTopologyToD3D12(desc.Primitive.Topology),
-		vertexStrides:    vertexStrides,
+		pso:                       pso,
+		rootSignature:             rootSig,
+		groupMappings:             groupMappings,
+		samplerRootIndex:          samplerRootIdx,
+		specialConstantsRootIndex: specialConstantsIdx,
+		topology:                  primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides:             vertexStrides,
 	}, nil
 }
 
@@ -2690,6 +2697,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	var groupMappings []rootParamMapping
 	var pipelineLayout *PipelineLayout
 	samplerRootIdx := -1
+	specialConstantsIdx := -1
 	if desc.Layout != nil {
 		pl, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
@@ -2699,6 +2707,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		rootSig = pl.rootSignature
 		groupMappings = pl.groupMappings
 		samplerRootIdx = pl.samplerRootIndex
+		specialConstantsIdx = pl.specialConstantsRootIndex
 	} else {
 		emptyRS, err := d.getOrCreateEmptyRootSignature()
 		if err != nil {
@@ -2765,10 +2774,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	)
 
 	return &ComputePipeline{
-		pso:              pso,
-		rootSignature:    rootSig,
-		groupMappings:    groupMappings,
-		samplerRootIndex: samplerRootIdx,
+		pso:                       pso,
+		rootSignature:             rootSig,
+		groupMappings:             groupMappings,
+		samplerRootIndex:          samplerRootIdx,
+		specialConstantsRootIndex: specialConstantsIdx,
 	}, nil
 }
 
