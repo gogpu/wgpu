@@ -729,11 +729,68 @@ func (r *RenderPassEncoder) drawVertexIndex(firstVertex, pos uint32) uint32 {
 	return firstVertex + pos
 }
 
-// DrawIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+// Indirect record sizes in bytes: DrawIndirectArgs (vertexCount,
+// instanceCount, firstVertex, firstInstance) and DrawIndexedIndirectArgs
+// (indexCount, instanceCount, firstIndex, baseVertex, firstInstance).
+const (
+	drawIndirectRecordSize        = 16
+	drawIndexedIndirectRecordSize = 20
+)
 
-// DrawIndexedIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+// readIndirectArgs reads the first n (at most 5) little-endian u32 words at
+// offset in buf. It runs when the command executes, so it sees what earlier
+// commands (copies, compute passes, the indirect validation pass) wrote
+// there. ok is false when buf is not a software buffer or the range lies
+// outside it.
+func readIndirectArgs(buf hal.Buffer, offset uint64, n int) (args [5]uint32, ok bool) {
+	b, isBuf := buf.(*Buffer)
+	if !isBuf || n > len(args) {
+		return args, false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	end := offset + uint64(n)*4
+	if end < offset || end > uint64(len(b.data)) {
+		return args, false
+	}
+	for i := range n {
+		args[i] = binary.LittleEndian.Uint32(b.data[offset+uint64(i)*4:])
+	}
+	return args, true
+}
+
+// DrawIndirect draws drawCount consecutive DrawIndirectArgs records starting
+// at offset, each as a Draw with the arguments read from the buffer.
+func (r *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	for i := range uint64(drawCount) {
+		args, ok := readIndirectArgs(buffer, offset+i*drawIndirectRecordSize, 4)
+		if !ok {
+			slog.Warn("software: DrawIndirect record outside the buffer", "offset", offset+i*drawIndirectRecordSize)
+			return
+		}
+		r.Draw(gputypes.DrawArgs{
+			VertexCount: args[0], InstanceCount: args[1], FirstVertex: args[2], FirstInstance: args[3],
+		})
+	}
+}
+
+// DrawIndexedIndirect draws drawCount consecutive DrawIndexedIndirectArgs
+// records starting at offset, each as a DrawIndexed with the arguments read
+// from the buffer. The index buffer and its offset are those set by
+// SetIndexBuffer, as for DrawIndexed.
+func (r *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	for i := range uint64(drawCount) {
+		args, ok := readIndirectArgs(buffer, offset+i*drawIndexedIndirectRecordSize, 5)
+		if !ok {
+			slog.Warn("software: DrawIndexedIndirect record outside the buffer", "offset", offset+i*drawIndexedIndirectRecordSize)
+			return
+		}
+		r.DrawIndexed(gputypes.DrawIndexedArgs{
+			IndexCount: args[0], InstanceCount: args[1], FirstIndex: args[2],
+			BaseVertex: int32(args[3]), FirstInstance: args[4],
+		})
+	}
+}
 
 // DrawIndirectCount is a no-op (count-buffer indirect not supported in software backend).
 func (r *RenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
@@ -838,9 +895,15 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	}
 }
 
-// DispatchIndirect is not yet implemented in the software backend.
-// Indirect dispatch requires reading the dispatch parameters from a GPU buffer,
-// which is straightforward but not needed for the current use cases.
-func (c *ComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64) {
-	slog.Warn("software: DispatchIndirect not implemented")
+// DispatchIndirect reads the workgroup counts (x, y, z) from buffer at
+// offset when it executes and dispatches them. Core has already replaced
+// counts above maxComputeWorkgroupsPerDimension with zeros through its
+// indirect validation pass, as on the GPU backends.
+func (c *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
+	args, ok := readIndirectArgs(buffer, offset, 3)
+	if !ok {
+		slog.Warn("software: DispatchIndirect arguments outside the buffer", "offset", offset)
+		return
+	}
+	c.Dispatch(args[0], args[1], args[2])
 }

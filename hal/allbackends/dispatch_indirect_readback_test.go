@@ -6,16 +6,11 @@
 package allbackends_test
 
 import (
-	"context"
 	"encoding/binary"
-	"log/slog"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
 )
 
 // These tests run DispatchIndirect through the public API, where core runs
@@ -69,7 +64,6 @@ var dispatchIndirectBackends = []overrideBackend{
 // two encoders recorded before either is submitted.
 func TestDispatchIndirectReadsItsOwnArguments(t *testing.T) {
 	forEachIndirectDevice(t, func(t *testing.T, device *wgpu.Device) {
-		skipKnownGap(t, "software", "P1-SW software DispatchIndirect", "software DispatchIndirect runs no invocations")
 		r := newIndirectRig(t, device)
 
 		single := map[uint64]uint32{0: 1, 12: 4, 268: 6, 280: 0}
@@ -196,12 +190,11 @@ func (r *indirectRig) record(t *testing.T, bg *wgpu.BindGroup, offsets []uint64)
 }
 
 // forEachIndirectDevice runs fn on every backend that has an adapter with
-// compute shaders, on both power preferences.
+// compute shaders and indirect execution, on both power preferences.
 func forEachIndirectDevice(t *testing.T, fn func(t *testing.T, device *wgpu.Device)) {
 	t.Helper()
-	// Not DownlevelFlagsIndirectExecution: the software adapter does not
-	// report it, yet core accepts DispatchIndirect there, so it must work.
-	const required = gputypes.DownlevelFlagsComputeShaders
+	// Core refuses INDIRECT buffers on an adapter without indirect execution.
+	const required = gputypes.DownlevelFlagsComputeShaders | gputypes.DownlevelFlagsIndirectExecution
 	for _, b := range dispatchIndirectBackends {
 		for _, pref := range featurePowerPreferences {
 			if b.software && pref.pref != gputypes.PowerPreferenceLowPower {
@@ -256,63 +249,4 @@ func openIndirectDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPref
 	t.Cleanup(device.Release)
 	t.Logf("adapter: %s (%v)", info.Name, info.Backend)
 	return device
-}
-
-// dx12Capture is a slog.Handler that keeps the D3D12 debug layer messages of
-// severity error or corruption that the HAL drains from the InfoQueue
-// (hal/dx12/device.go DrainDebugMessages logs them as "dx12: debug message").
-type dx12Capture struct {
-	mu   sync.Mutex
-	msgs []string
-}
-
-func (c *dx12Capture) Enabled(context.Context, slog.Level) bool { return true }
-
-func (c *dx12Capture) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler takes the Record by value
-	if !strings.HasPrefix(r.Message, "dx12: debug message") {
-		return nil
-	}
-	severe := false
-	var text strings.Builder
-	r.Attrs(func(a slog.Attr) bool {
-		// The severity is a d3d12.D3D12MessageSeverity, whose String is
-		// the D3D12_MESSAGE_SEVERITY name.
-		if a.Key == "severity" {
-			switch a.Value.String() {
-			case "CORRUPTION", "ERROR":
-				severe = true
-			}
-		}
-		text.WriteString(" " + a.Key + "=" + a.Value.String())
-		return true
-	})
-	if severe {
-		c.mu.Lock()
-		c.msgs = append(c.msgs, text.String())
-		c.mu.Unlock()
-	}
-	return nil
-}
-
-func (c *dx12Capture) WithAttrs([]slog.Attr) slog.Handler { return c }
-func (c *dx12Capture) WithGroup(string) slog.Handler      { return c }
-
-// enableDX12DebugLayer returns the instance flags that turn on the D3D12
-// debug layer and fails the test for every error or corruption message it
-// reports until the test's cleanups have run. Where the Graphics Tools are
-// not installed the HAL runs without the layer and nothing is checked.
-func enableDX12DebugLayer(t *testing.T) gputypes.InstanceFlags {
-	t.Helper()
-	capture := &dx12Capture{}
-	prev := hal.Logger()
-	hal.SetLogger(slog.New(capture))
-	t.Cleanup(func() {
-		hal.SetLogger(prev)
-		capture.mu.Lock()
-		defer capture.mu.Unlock()
-		for _, m := range capture.msgs {
-			t.Errorf("D3D12 debug layer error:%s", m)
-		}
-	})
-	return gputypes.InstanceFlagsDebug
 }
