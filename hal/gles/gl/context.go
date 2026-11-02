@@ -150,6 +150,15 @@ type Context struct {
 	glDrawElementsInstanced uintptr
 	glVertexAttribDivisor   uintptr
 
+	// Draw variants (optional): base vertex GL 3.2 / ES 3.2, indirect GL 4.0 /
+	// ES 3.1, base instance GL 4.2, glUniform1ui GL 3.0 / ES 3.0.
+	glDrawElementsInstancedBaseVertex             uintptr
+	glDrawArraysIndirect                          uintptr
+	glDrawElementsIndirect                        uintptr
+	glDrawArraysInstancedBaseInstance             uintptr
+	glDrawElementsInstancedBaseVertexBaseInstance uintptr
+	glUniform1ui                                  uintptr
+
 	// Compute shaders (GL 4.3+ / ES 3.1+)
 	glDispatchCompute         uintptr
 	glDispatchComputeIndirect uintptr
@@ -319,6 +328,12 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDrawArraysInstanced = getProcAddr("glDrawArraysInstanced")
 	c.glDrawElementsInstanced = getProcAddr("glDrawElementsInstanced")
 	c.glVertexAttribDivisor = getProcAddr("glVertexAttribDivisor")
+	c.glDrawElementsInstancedBaseVertex = getProcAddr("glDrawElementsInstancedBaseVertex")
+	c.glDrawArraysIndirect = getProcAddr("glDrawArraysIndirect")
+	c.glDrawElementsIndirect = getProcAddr("glDrawElementsIndirect")
+	c.glDrawArraysInstancedBaseInstance = getProcAddr("glDrawArraysInstancedBaseInstance")
+	c.glDrawElementsInstancedBaseVertexBaseInstance = getProcAddr("glDrawElementsInstancedBaseVertexBaseInstance")
+	c.glUniform1ui = getProcAddr("glUniform1ui")
 
 	// Compute shaders (optional - may be nil on older GL versions)
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
@@ -1017,6 +1032,76 @@ func (c *Context) DrawArraysInstanced(mode uint32, first, count, instanceCount i
 func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, indices uintptr, instanceCount int32) {
 	syscall.SyscallN(c.glDrawElementsInstanced, uintptr(mode), uintptr(count),
 		uintptr(typ), indices, uintptr(instanceCount))
+}
+
+// DrawElementsInstancedBaseVertex adds baseVertex to every index (GL 3.2 /
+// ES 3.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertex(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32) {
+	if c.glDrawElementsInstancedBaseVertex == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsInstancedBaseVertex, uintptr(mode), uintptr(count),
+		uintptr(typ), indices, uintptr(instanceCount), uintptr(baseVertex))
+}
+
+// DrawArraysIndirect draws with the arguments at offset in the buffer bound
+// to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the context
+// lacks it.
+func (c *Context) DrawArraysIndirect(mode uint32, offset uintptr) {
+	if c.glDrawArraysIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawArraysIndirect, uintptr(mode), offset)
+}
+
+// DrawElementsIndirect draws indexed with the arguments at offset in the
+// buffer bound to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the
+// context lacks it.
+func (c *Context) DrawElementsIndirect(mode, typ uint32, offset uintptr) {
+	if c.glDrawElementsIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsIndirect, uintptr(mode), uintptr(typ), offset)
+}
+
+// DrawArraysInstancedBaseInstance draws with a first instance (GL 4.2). A
+// no-op when the context lacks it.
+func (c *Context) DrawArraysInstancedBaseInstance(mode uint32, first, count, instanceCount int32, baseInstance uint32) {
+	if c.glDrawArraysInstancedBaseInstance == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawArraysInstancedBaseInstance, uintptr(mode), uintptr(first),
+		uintptr(count), uintptr(instanceCount), uintptr(baseInstance))
+}
+
+// DrawElementsInstancedBaseVertexBaseInstance draws indexed with a base
+// vertex and a first instance (GL 4.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertexBaseInstance(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32, baseInstance uint32) {
+	if c.glDrawElementsInstancedBaseVertexBaseInstance == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsInstancedBaseVertexBaseInstance, uintptr(mode), uintptr(count),
+		uintptr(typ), indices, uintptr(instanceCount), uintptr(baseVertex), uintptr(baseInstance))
+}
+
+// Uniform1ui sets a uint uniform of the current program (GL 3.0 / ES 3.0). A
+// no-op when the context lacks it.
+func (c *Context) Uniform1ui(location int32, value uint32) {
+	if c.glUniform1ui == 0 {
+		return
+	}
+	syscall.SyscallN(c.glUniform1ui, uintptr(location), uintptr(value))
+}
+
+// HasDrawIndirect reports whether glDrawArraysIndirect and
+// glDrawElementsIndirect are loaded.
+func (c *Context) HasDrawIndirect() bool {
+	return c.glDrawArraysIndirect != 0 && c.glDrawElementsIndirect != 0
+}
+
+// HasBaseInstance reports whether the base-instance draws are loaded.
+func (c *Context) HasBaseInstance() bool {
+	return c.glDrawArraysInstancedBaseInstance != 0 && c.glDrawElementsInstancedBaseVertexBaseInstance != 0
 }
 
 // --- Compute Shaders ---

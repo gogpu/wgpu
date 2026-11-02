@@ -47,8 +47,8 @@ func TestShaderCapabilityFeatures(t *testing.T) {
 			if got := shaderCapabilityFeatures(exts, tt.major, tt.minor, tt.es); got != tt.want {
 				t.Errorf("shaderCapabilityFeatures() = %v, want %v", got, tt.want)
 			}
-			if got, want := drawParameters(exts, tt.major, tt.minor, tt.es), tt.want.Contains(gputypes.FeatureShaderDrawIndex); got != want {
-				t.Errorf("drawParameters() = %v, want %v", got, want)
+			if got, want := fullyFeaturedInstancing(exts, tt.major, tt.minor, tt.es), tt.want.Contains(gputypes.FeatureShaderDrawIndex); got != want {
+				t.Errorf("fullyFeaturedInstancing() = %v, want %v", got, want)
 			}
 		})
 	}

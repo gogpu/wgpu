@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // Command represents a recorded GL command.
@@ -38,6 +39,7 @@ type CommandEncoder struct {
 	label           string
 	vao             uint32 // persistent VAO from Device for Core Profile
 	maxTextureUnits int32  // Hardware limit passed from Device
+	fullInstancing  bool   // Device.fullInstancing
 }
 
 // BeginEncoding begins command recording.
@@ -483,6 +485,12 @@ type RenderPassEncoder struct {
 	vertexBuffers      []vertexBufferBinding
 	dirtyVertexBuffers uint32 // bit i: slot i needs its attributes set up
 
+	// activeFirstInstance is the emulated first instance the instance-stepped
+	// buffers are set up for (0 with fully featured instancing).
+	activeFirstInstance uint32
+	// indexOffset is the SetIndexBuffer offset, applied to every indexed draw.
+	indexOffset uint64
+
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
 	resolveTexture   *Texture // The single-sample resolve target (nil when resolveToSurface)
@@ -649,14 +657,51 @@ func (e *RenderPassEncoder) prepareVertexBuffers() {
 		if e.dirtyVertexBuffers&(1<<slot) == 0 || vb.buffer == nil || slot >= len(e.pipeline.vertexBuffers) {
 			continue
 		}
+		layout := &e.pipeline.vertexBuffers[slot]
+		offset := vb.offset
+		if layout.StepMode == gputypes.VertexStepModeInstance {
+			// The emulated first instance (Rust rebind_vertex_data).
+			offset += layout.ArrayStride * uint64(e.activeFirstInstance)
+		}
 		e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
 			slot:   uint32(slot),
 			buffer: vb.buffer,
-			offset: vb.offset,
-			layout: &e.pipeline.vertexBuffers[slot],
+			offset: offset,
+			layout: layout,
 		})
 		e.dirtyVertexBuffers &^= 1 << slot
 	}
+}
+
+// prepareDraw sets up the vertex buffers for a draw with firstInstance.
+// With fully featured instancing GL applies the first instance itself.
+// Without it, instance-stepped buffers start at the first instance's element
+// and the naga_vs_first_instance uniform adds it to instance_index, so the
+// buffers are set up again when it changes (Rust wgpu-hal src/gles/command.rs
+// prepare_draw).
+func (e *RenderPassEncoder) prepareDraw(firstInstance uint32) {
+	emulated := firstInstance
+	if e.encoder.fullInstancing {
+		emulated = 0
+	}
+	if emulated != e.activeFirstInstance && e.pipeline != nil {
+		for slot := range e.pipeline.vertexBuffers {
+			if slot < maxVertexBufferSlots && e.pipeline.vertexBuffers[slot].StepMode == gputypes.VertexStepModeInstance {
+				e.dirtyVertexBuffers |= 1 << slot
+			}
+		}
+	}
+	e.activeFirstInstance = emulated
+	e.prepareVertexBuffers()
+}
+
+// firstInstanceLocation is the current pipeline's naga_vs_first_instance
+// uniform, or -1.
+func (e *RenderPassEncoder) firstInstanceLocation() int32 {
+	if e.pipeline == nil {
+		return -1
+	}
+	return e.pipeline.firstInstanceLocation
 }
 
 // disableVertexAttribs disables the attribute arrays the current pipeline's
@@ -685,6 +730,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 		return
 	}
 	e.indexBuffer = buf
+	e.indexOffset = offset
 	e.indexFormat = format
 
 	e.encoder.commands = append(e.encoder.commands, &SetIndexBufferCommand{
@@ -733,54 +779,92 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 	})
 }
 
+// topology returns the current pipeline's primitive topology.
+func (e *RenderPassEncoder) topology() gputypes.PrimitiveTopology {
+	if e.pipeline == nil {
+		return gputypes.PrimitiveTopologyTriangleList
+	}
+	return e.pipeline.primitiveTopology
+}
+
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
-	e.prepareVertexBuffers()
-	topology := gputypes.PrimitiveTopologyTriangleList // default
-	if e.pipeline != nil {
-		topology = e.pipeline.primitiveTopology
-	}
+	e.prepareDraw(args.FirstInstance)
 	e.encoder.commands = append(e.encoder.commands, &DrawCommand{
-		vertexCount:   args.VertexCount,
-		instanceCount: args.InstanceCount,
-		firstVertex:   args.FirstVertex,
-		firstInstance: args.FirstInstance,
-		topology:      topology,
+		vertexCount:           args.VertexCount,
+		instanceCount:         args.InstanceCount,
+		firstVertex:           args.FirstVertex,
+		firstInstance:         args.FirstInstance,
+		topology:              e.topology(),
+		fullInstancing:        e.encoder.fullInstancing,
+		firstInstanceLocation: e.firstInstanceLocation(),
 	})
 }
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
-	e.prepareVertexBuffers()
-	topology := gputypes.PrimitiveTopologyTriangleList // default
-	if e.pipeline != nil {
-		topology = e.pipeline.primitiveTopology
-	}
+	e.prepareDraw(args.FirstInstance)
 	e.encoder.commands = append(e.encoder.commands, &DrawIndexedCommand{
-		indexCount:    args.IndexCount,
-		instanceCount: args.InstanceCount,
-		firstIndex:    args.FirstIndex,
-		baseVertex:    args.BaseVertex,
-		firstInstance: args.FirstInstance,
-		indexFormat:   e.indexFormat,
-		topology:      topology,
+		indexCount:            args.IndexCount,
+		instanceCount:         args.InstanceCount,
+		firstIndex:            args.FirstIndex,
+		indexOffset:           e.indexOffset,
+		baseVertex:            args.BaseVertex,
+		firstInstance:         args.FirstInstance,
+		indexFormat:           e.indexFormat,
+		topology:              e.topology(),
+		fullInstancing:        e.encoder.fullInstancing,
+		firstInstanceLocation: e.firstInstanceLocation(),
 	})
 }
 
-// DrawIndirect is not implemented by the GLES backend.
+// Indirect record sizes: DrawIndirectArgs and DrawIndexedIndirectArgs.
+const (
+	drawIndirectRecordSize        = 16
+	drawIndexedIndirectRecordSize = 20
+)
+
+// DrawIndirect draws drawCount times with the records at offset in buffer,
+// one glDrawArraysIndirect per record, as Rust wgpu-hal gles does
+// (command.rs draw_indirect, queue.rs DrawIndirect).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	_ = buffer
-	_ = offset
-	_ = drawCount
+	buf, ok := buffer.(*Buffer)
+	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndirectRecordSize, drawCount) {
+		return
+	}
+	e.prepareDraw(0)
+	for i := range drawCount {
+		e.encoder.commands = append(e.encoder.commands, &DrawIndirectCommand{
+			buffer:                buf.id,
+			offset:                offset + uint64(i)*drawIndirectRecordSize,
+			topology:              e.topology(),
+			firstInstanceLocation: e.firstInstanceLocation(),
+		})
+	}
 }
 
-// DrawIndexedIndirect is not implemented by the GLES backend.
-// OpenGL cannot apply a WebGPU index-buffer base offset to an indirect record
-// without translating that record or the bound index buffer.
+// DrawIndexedIndirect draws drawCount times with the indexed records at
+// offset in buffer, one glDrawElementsIndirect per record, as Rust wgpu-hal
+// gles does (command.rs draw_indexed_indirect, queue.rs DrawIndexedIndirect).
+//
+// glDrawElementsIndirect has no index buffer offset parameter: the record's
+// firstIndex counts from the start of the buffer, so the offset given to
+// SetIndexBuffer does not apply here. Rust has the same gap; P1-GLES-018.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	_ = buffer
-	_ = offset
-	_ = drawCount
+	buf, ok := buffer.(*Buffer)
+	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndexedIndirectRecordSize, drawCount) {
+		return
+	}
+	e.prepareDraw(0)
+	for i := range drawCount {
+		e.encoder.commands = append(e.encoder.commands, &DrawIndexedIndirectCommand{
+			buffer:                buf.id,
+			offset:                offset + uint64(i)*drawIndexedIndirectRecordSize,
+			indexFormat:           e.indexFormat,
+			topology:              e.topology(),
+			firstInstanceLocation: e.firstInstanceLocation(),
+		})
+	}
 }
 
 // DrawIndirectCount is not supported by the GLES backend.
@@ -1593,48 +1677,109 @@ func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
 		ref, c.depthStencil.StencilReadMask)
 }
 
-// DrawCommand executes a non-indexed draw.
+// setFirstInstance sets the naga_vs_first_instance uniform, through which an
+// emulated first instance reaches instance_index.
+func setFirstInstance(ctx *gl.Context, location int32, firstInstance uint32) {
+	if location >= 0 {
+		ctx.Uniform1ui(location, firstInstance)
+	}
+}
+
+// DrawCommand executes a non-indexed draw (Rust wgpu-hal gles/queue.rs
+// C::Draw). It always draws instanced: ANGLE ignores the instance divisor in
+// glDrawArrays (gfx-rs/wgpu#3578).
 type DrawCommand struct {
 	vertexCount, instanceCount uint32
 	firstVertex, firstInstance uint32
 	topology                   gputypes.PrimitiveTopology
+	fullInstancing             bool
+	firstInstanceLocation      int32
 }
 
 func (c *DrawCommand) Execute(ctx *gl.Context) {
 	mode := primitiveTopologyToGL(c.topology)
-	if c.instanceCount <= 1 {
-		ctx.DrawArrays(mode, int32(c.firstVertex), int32(c.vertexCount))
-	} else {
-		ctx.DrawArraysInstanced(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
+	if c.fullInstancing {
+		ctx.DrawArraysInstancedBaseInstance(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount), c.firstInstance)
+		return
 	}
+	setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
+	ctx.DrawArraysInstanced(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
 }
 
-// DrawIndexedCommand executes an indexed draw.
+// indexTypeAndSize returns the GL index type and its size in bytes.
+func indexTypeAndSize(format gputypes.IndexFormat) (uint32, uint64) {
+	if format == gputypes.IndexFormatUint32 {
+		return gl.UNSIGNED_INT, 4
+	}
+	return gl.UNSIGNED_SHORT, 2
+}
+
+// DrawIndexedCommand executes an indexed draw (Rust wgpu-hal gles/queue.rs
+// C::DrawIndexed): the index buffer offset plus firstIndex elements, the base
+// vertex, and the first instance as for DrawCommand.
 type DrawIndexedCommand struct {
 	indexCount, instanceCount uint32
 	firstIndex                uint32
+	indexOffset               uint64 // SetIndexBuffer offset in bytes
 	baseVertex                int32
 	firstInstance             uint32
 	indexFormat               gputypes.IndexFormat
 	topology                  gputypes.PrimitiveTopology
+	fullInstancing            bool
+	firstInstanceLocation     int32
 }
 
 func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
-	indexType := uint32(gl.UNSIGNED_SHORT)
-	indexSize := uintptr(2)
-	if c.indexFormat == gputypes.IndexFormatUint32 {
-		indexType = gl.UNSIGNED_INT
-		indexSize = 4
-	}
-
-	offset := uintptr(c.firstIndex) * indexSize
+	indexType, indexSize := indexTypeAndSize(c.indexFormat)
+	offset := uintptr(c.indexOffset + uint64(c.firstIndex)*indexSize)
 	mode := primitiveTopologyToGL(c.topology)
 
-	if c.instanceCount <= 1 {
-		ctx.DrawElements(mode, int32(c.indexCount), indexType, offset)
-	} else {
+	switch {
+	case c.fullInstancing:
+		ctx.DrawElementsInstancedBaseVertexBaseInstance(mode, int32(c.indexCount), indexType, offset,
+			int32(c.instanceCount), c.baseVertex, c.firstInstance)
+	case c.baseVertex == 0:
+		setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
 		ctx.DrawElementsInstanced(mode, int32(c.indexCount), indexType, offset, int32(c.instanceCount))
+	default:
+		// Core offers DownlevelFlagsBaseVertex only where this exists.
+		setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
+		ctx.DrawElementsInstancedBaseVertex(mode, int32(c.indexCount), indexType, offset,
+			int32(c.instanceCount), c.baseVertex)
 	}
+}
+
+// DrawIndirectCommand draws with one DrawIndirectArgs record (Rust wgpu-hal
+// gles/queue.rs C::DrawIndirect). The first instance in the record reaches GL
+// only with fully featured instancing; the uniform is 0.
+type DrawIndirectCommand struct {
+	buffer                uint32
+	offset                uint64
+	topology              gputypes.PrimitiveTopology
+	firstInstanceLocation int32
+}
+
+func (c *DrawIndirectCommand) Execute(ctx *gl.Context) {
+	setFirstInstance(ctx, c.firstInstanceLocation, 0)
+	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
+	ctx.DrawArraysIndirect(primitiveTopologyToGL(c.topology), uintptr(c.offset))
+}
+
+// DrawIndexedIndirectCommand draws with one DrawIndexedIndirectArgs record
+// (Rust wgpu-hal gles/queue.rs C::DrawIndexedIndirect).
+type DrawIndexedIndirectCommand struct {
+	buffer                uint32
+	offset                uint64
+	indexFormat           gputypes.IndexFormat
+	topology              gputypes.PrimitiveTopology
+	firstInstanceLocation int32
+}
+
+func (c *DrawIndexedIndirectCommand) Execute(ctx *gl.Context) {
+	indexType, _ := indexTypeAndSize(c.indexFormat)
+	setFirstInstance(ctx, c.firstInstanceLocation, 0)
+	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
+	ctx.DrawElementsIndirect(primitiveTopologyToGL(c.topology), indexType, uintptr(c.offset))
 }
 
 // CopyBufferCommand copies a region of one GL buffer object into another.

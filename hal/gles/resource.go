@@ -213,6 +213,11 @@ type RenderPipeline struct {
 	// SetVertexBuffer can configure attributes using the pipeline's layout.
 	vertexBuffers []gputypes.VertexBufferLayout
 
+	// firstInstanceLocation is the naga_vs_first_instance uniform, through
+	// which the first instance reaches instance_index without fully featured
+	// instancing; -1 when the program has none.
+	firstInstanceLocation int32
+
 	// samplerBindMap maps texture unit indices to sampler unit indices.
 	// Built from naga GLSL TranslationInfo.TextureMappings at pipeline creation.
 	// When binding textures, the associated sampler must be bound to the SAME

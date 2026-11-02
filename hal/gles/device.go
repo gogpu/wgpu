@@ -31,15 +31,17 @@ type Device struct {
 	// version-gated features (layout(binding=N) needs GLSL >= 420).
 	glslVersion glsl.Version
 
-	// drawParameters compiles shaders with glsl.Options.DrawParameters
-	// (AdapterCapabilities.DrawParameters).
-	drawParameters bool
-
 	// shaderBindingLayout is true when the driver supports layout(binding=N)
 	// in shaders (GLSL >= 420 desktop or >= 310 ES). When false, bindings must
 	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
 	// Mirrors Rust wgpu-hal PrivateCapabilities::SHADER_BINDING_LAYOUT.
 	shaderBindingLayout bool
+
+	// fullInstancing is AdapterCapabilities.FullyFeaturedInstancing: draws
+	// pass the first instance to GL, and every stage is compiled with naga's
+	// glsl.Options.DrawParameters (gl_BaseInstanceARB, gl_DrawIDARB), as Rust
+	// sets WriterFlags::DRAW_PARAMETERS from it (gles/device.rs).
+	fullInstancing bool
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -449,7 +451,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	// Compile WGSL → GLSL for vertex stage.
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -474,7 +476,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, d.glslVersion, d.drawParameters, desc.Fragment, layout.bindingMap)
+		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, d.glslVersion, d.fullInstancing, desc.Fragment, layout.bindingMap)
 		if err != nil {
 			glCtx.DeleteShader(vertexID)
 			return nil, err
@@ -554,6 +556,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		multisample:       desc.Multisample,
 		colorTargets:      colorTargets,
 		vertexBuffers:     desc.Vertex.Buffers,
+		// -1 when the vertex shader reads no instance_index or uses
+		// gl_BaseInstanceARB (Rust wgpu-hal gles/device.rs, FIRST_INSTANCE_BINDING).
+		firstInstanceLocation: glCtx.GetUniformLocation(programID, "naga_vs_first_instance"),
 	}
 
 	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.
@@ -617,7 +622,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -749,6 +754,7 @@ func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandE
 		glCtx:           d.ctx.GL(),
 		vao:             d.vao,
 		maxTextureUnits: d.maxTextureUnits,
+		fullInstancing:  d.fullInstancing,
 	}, nil
 }
 

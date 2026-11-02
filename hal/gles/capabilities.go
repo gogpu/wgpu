@@ -59,12 +59,25 @@ type AdapterCapabilities struct {
 	// Inferred device type.
 	DeviceType gputypes.DeviceType
 
-	// DrawParameters is desktop GL 4.2+ with GL_ARB_shader_draw_parameters:
-	// shaders are compiled with glsl.Options.DrawParameters.
-	DrawParameters bool
-
 	// Inferred vendor ID.
 	VendorID uint32
+
+	// FullyFeaturedInstancing is Rust wgpu-hal's FULLY_FEATURED_INSTANCING:
+	// desktop GL 4.2+ with GL_ARB_shader_draw_parameters and the base-instance
+	// draws loaded. Draws then pass the first instance to GL
+	// (glDraw*BaseInstance, and the baseInstance field of an indirect record),
+	// and shaders read gl_BaseInstanceARB. Without it the first instance is
+	// emulated: the naga_vs_first_instance uniform and instance-stepped
+	// vertex buffer offsets.
+	FullyFeaturedInstancing bool
+}
+
+// fullyFeaturedInstancing reports Rust wgpu-hal's FULLY_FEATURED_INSTANCING
+// condition (src/gles/adapter.rs): desktop GL 4.2+ with
+// GL_ARB_shader_draw_parameters.
+func fullyFeaturedInstancing(exts map[string]bool, glMajor, glMinor int, isES bool) bool {
+	return !isES && glVersionAtLeast(glMajor, glMinor, false, [2]int{0, 0}, [2]int{4, 2}) &&
+		hasExtension(exts, "GL_ARB_shader_draw_parameters")
 }
 
 // queryAdapterCapabilities queries all adapter capabilities from the GL context.
@@ -101,9 +114,9 @@ func queryAdapterCapabilities(glCtx *gl.Context) (AdapterCapabilities, error) {
 	caps.MaxMSAASamples = maxSamples
 
 	// --- 4. Detect features ---
-	caps.Features = queryFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES, glCtx) |
-		shaderCapabilityFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES)
-	caps.DrawParameters = drawParameters(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES)
+	caps.FullyFeaturedInstancing = fullyFeaturedInstancing(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES) &&
+		glCtx.HasBaseInstance()
+	caps.Features = queryFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES, glCtx)
 
 	// --- 5. Query limits ---
 	caps.Limits = queryLimits(glCtx, caps.GLMajor, caps.GLMinor, caps.IsES, caps.Extensions)
@@ -407,9 +420,11 @@ func queryFeatures(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx 
 		features.Insert(gputypes.FeatureRG11B10UfloatRenderable)
 	}
 
-	// IndirectFirstInstance -- desktop GL 4.2+ with ARB_shader_draw_parameters
-	if !isES && glMajor >= 4 && glMinor >= 2 &&
-		hasExtension(exts, "GL_ARB_shader_draw_parameters") {
+	features |= shaderCapabilityFeatures(exts, glMajor, glMinor, isES)
+
+	// IndirectFirstInstance: the indirect record's first instance reaches GL
+	// only with fully featured instancing (Rust wgpu-hal src/gles/adapter.rs).
+	if fullyFeaturedInstancing(exts, glMajor, glMinor, isES) && glCtx.HasBaseInstance() && glCtx.HasDrawIndirect() {
 		features.Insert(gputypes.FeatureIndirectFirstInstance)
 	}
 
