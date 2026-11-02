@@ -19,7 +19,6 @@ import (
 // ignored the first instance, the base vertex and the index buffer offset.
 func TestDrawFirstInstanceBaseVertex(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsBaseVertex, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		skipKnownGap(t, "gles", "P1-GLES-015", "first instance, base vertex and index buffer offset are ignored")
 		got := drawArgsScene(t, device, func(s *drawArgsResources, pass *wgpu.RenderPassEncoder) {
 			pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1, FirstVertex: 0, FirstInstance: 1})
 			pass.SetIndexBuffer(s.index, gputypes.IndexFormatUint32, 8)
