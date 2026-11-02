@@ -21,6 +21,11 @@ const (
 	extIncrementalPresent        = "VK_KHR_incremental_present"
 )
 
+// minTimestampValidBits is the smallest non-zero timestampValidBits Vulkan
+// allows: a queue family reports 36 to 64 valid bits, or 0 when it cannot
+// write timestamps at all.
+const minTimestampValidBits = 36
+
 // extendedFeatureSupport is what adapter enumeration reads beyond
 // VkPhysicalDeviceFeatures: the device extensions and the pNext feature
 // structs of vkGetPhysicalDeviceFeatures2. A nil struct pointer means the
@@ -68,13 +73,32 @@ func (s *extendedFeatureSupport) storageInputOutput16() bool {
 }
 
 // webGPUFeatures returns the WebGPU features that depend on the pNext feature
-// structs.
-func (s *extendedFeatureSupport) webGPUFeatures() gputypes.Features {
+// structs and on the queue family the device will create its queue in.
+func (s *extendedFeatureSupport) webGPUFeatures(family vk.QueueFamilyProperties) gputypes.Features {
 	var result gputypes.Features
 	if s.shaderF16() {
 		result |= gputypes.Features(gputypes.FeatureShaderF16)
 	}
+	// Rust wgpu-hal (vulkan/adapter.rs, PhysicalDeviceFeatures::to_wgpu)
+	// offers timestamps when the queue family writes them.
+	if family.TimestampValidBits >= minTimestampValidBits {
+		result |= gputypes.Features(gputypes.FeatureTimestampQuery)
+	}
 	return result
+}
+
+// extendedWebGPUFeatures returns the features decided by the pNext feature
+// structs and by the queue family the device will create its queue in:
+// queueFamily for a surface-qualified adapter, the first graphics family
+// otherwise (the family Open picks).
+func (a *Adapter) extendedWebGPUFeatures(queueFamily *uint32) gputypes.Features {
+	var family vk.QueueFamilyProperties
+	if families, err := a.queueFamilies(); err == nil {
+		if idx, err := selectGraphicsQueueFamily(families, queueFamily); err == nil {
+			family = families[idx]
+		}
+	}
+	return a.ext.webGPUFeatures(family)
 }
 
 // queryExtendedFeatures reads the device extensions and the pNext feature

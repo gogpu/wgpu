@@ -418,6 +418,13 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		e.setError(valErr)
 		return nil, valErr
 	}
+	if tw := desc.TimestampWrites; tw != nil {
+		if err := ValidatePassTimestampWrites(e.device, tw.QuerySet,
+			tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex, "BeginRenderPass"); err != nil {
+			e.setError(err)
+			return nil, err
+		}
+	}
 
 	// The pass is one usage scope: validate its attachments against each
 	// other before anything is recorded. Usages by earlier commands of this
@@ -521,11 +528,16 @@ func (e *CoreCommandEncoder) BeginComputePass(desc *CoreComputePassDescriptor) (
 		return nil, e.statusError("begin compute pass")
 	}
 
-	// Convert to HAL descriptor
-	halDesc := &hal.ComputePassDescriptor{}
+	var writes *CoreComputePassTimestampWrites
 	if desc != nil {
-		halDesc.Label = desc.Label
-		// TimestampWrites conversion would go here
+		writes = desc.TimestampWrites
+	}
+	if writes != nil {
+		if err := ValidatePassTimestampWrites(e.device, writes.QuerySet,
+			writes.BeginningOfPassWriteIndex, writes.EndOfPassWriteIndex, "BeginComputePass"); err != nil {
+			e.setError(err)
+			return nil, err
+		}
 	}
 
 	// Get HAL encoder
@@ -537,6 +549,25 @@ func (e *CoreCommandEncoder) BeginComputePass(desc *CoreComputePassDescriptor) (
 		err := ErrResourceDestroyed
 		e.setError(err)
 		return nil, err
+	}
+
+	// Convert to HAL descriptor
+	halDesc := &hal.ComputePassDescriptor{}
+	if desc != nil {
+		halDesc.Label = desc.Label
+	}
+	if writes != nil {
+		raw := writes.QuerySet.Raw(guard)
+		if raw == nil {
+			err := ErrResourceDestroyed
+			e.setError(err)
+			return nil, err
+		}
+		halDesc.TimestampWrites = &hal.ComputePassTimestampWrites{
+			QuerySet:                  raw,
+			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+		}
 	}
 
 	// Begin HAL compute pass
@@ -1484,6 +1515,25 @@ func (p *CoreRenderPassEncoder) End() error {
 type CoreComputePassDescriptor struct {
 	// Label is an optional debug name.
 	Label string
+
+	// TimestampWrites are the timestamp queries written at the pass
+	// boundaries (optional; needs FeatureTimestampQuery).
+	TimestampWrites *CoreComputePassTimestampWrites
+}
+
+// CoreComputePassTimestampWrites describes timestamp queries at compute pass
+// boundaries.
+type CoreComputePassTimestampWrites struct {
+	// QuerySet is the timestamp query set that receives the writes.
+	QuerySet *QuerySet
+
+	// BeginningOfPassWriteIndex is the query index to write at pass start.
+	// If nil, no timestamp is written at the beginning of the pass.
+	BeginningOfPassWriteIndex *uint32
+
+	// EndOfPassWriteIndex is the query index to write at pass end.
+	// If nil, no timestamp is written at the end of the pass.
+	EndOfPassWriteIndex *uint32
 }
 
 // CoreComputePassEncoder records compute commands within a pass.

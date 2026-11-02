@@ -397,6 +397,17 @@ func (q *Queue) LastSubmissionIndex() uint64 {
 	return q.lastSubmissionIndex.Load()
 }
 
+// GetTimestampPeriod returns the number of nanoseconds per timestamp query
+// tick, as Rust wgpu's Queue::get_timestamp_period: multiply the difference
+// of two resolved timestamps by it to get nanoseconds. It returns 1.0 when
+// the queue has no backend.
+func (q *Queue) GetTimestampPeriod() float32 {
+	if q == nil || q.hal == nil {
+		return 1.0
+	}
+	return q.hal.GetTimestampPeriod()
+}
+
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.
 func (q *Queue) destroyQueue() *core.DestroyQueue {
 	if q.device != nil && q.device.core != nil {

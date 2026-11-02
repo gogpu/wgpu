@@ -50,11 +50,35 @@ func TestExtendedFeatureSupportShaderF16(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.s.webGPUFeatures().Contains(gputypes.FeatureShaderF16)
+			got := tt.s.webGPUFeatures(vk.QueueFamilyProperties{}).Contains(gputypes.FeatureShaderF16)
 			if got != tt.want {
 				t.Errorf("ShaderF16 advertised = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestExtendedFeatureSupportTimestampQuery checks the timestamp decision of
+// Rust wgpu-hal (vulkan/adapter.rs, PhysicalDeviceFeatures::to_wgpu): the
+// queue family must write timestamps, which Vulkan reports as 36 to 64 valid
+// bits, or 0.
+func TestExtendedFeatureSupportTimestampQuery(t *testing.T) {
+	tests := []struct {
+		validBits uint32
+		want      bool
+	}{
+		{0, false},
+		{35, false},
+		{36, true},
+		{48, true},
+		{64, true},
+	}
+	for _, tt := range tests {
+		var s extendedFeatureSupport
+		got := s.webGPUFeatures(vk.QueueFamilyProperties{TimestampValidBits: tt.validBits}).Contains(gputypes.FeatureTimestampQuery)
+		if got != tt.want {
+			t.Errorf("timestampValidBits %d: TimestampQuery advertised = %v, want %v", tt.validBits, got, tt.want)
+		}
 	}
 }
 

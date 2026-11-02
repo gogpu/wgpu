@@ -313,6 +313,13 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 	var coreDesc *core.CoreComputePassDescriptor
 	if desc != nil {
 		coreDesc = &core.CoreComputePassDescriptor{Label: desc.Label}
+		if writes := desc.TimestampWrites; writes != nil {
+			coreDesc.TimestampWrites = &core.CoreComputePassTimestampWrites{
+				QuerySet:                  writes.QuerySet.liveCore(),
+				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+			}
+		}
 	}
 
 	corePass, err := e.core.BeginComputePass(coreDesc)
@@ -638,6 +645,16 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		return
 	}
 
+	// The resolve writes the buffer as a copy destination; Rust wgpu-core
+	// tracks it as COPY_DST (command/query.rs resolve_query_set), which
+	// orders it after earlier uses and before a later copy or map.
+	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{{buffer: dst, usage: track.BufferUsesCopyDst}}) {
+		return
+	}
+	e.trackRef(dst.core.Ref)
+	e.trackBuffer(dst)
+	e.trackRef(querySet.core.Ref)
+
 	raw.ResolveQuerySet(halQuerySet, firstQuery, queryCount, halDestination, dstOffset)
 }
 
@@ -798,13 +815,10 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 	}
 
 	if writes := desc.TimestampWrites; writes != nil {
-		halQuerySet := writes.QuerySet.halQuerySet()
-		if halQuerySet != nil {
-			coreDesc.TimestampWrites = &core.RenderPassTimestampWrites{
-				QuerySet:                  writes.QuerySet.core,
-				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
-				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
-			}
+		coreDesc.TimestampWrites = &core.RenderPassTimestampWrites{
+			QuerySet:                  writes.QuerySet.liveCore(),
+			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
 		}
 	}
 

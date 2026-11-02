@@ -887,6 +887,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe.renderPass = 0
 	rpe.framebuffer = 0
 	rpe.begun = false
+	rpe.endTimestamp = passEndTimestamp{}
 
 	if e.active == 0 {
 		return rpe
@@ -1055,6 +1056,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		renderPassBegin.PClearValues = &clearValues[0]
 	}
 
+	if tw := desc.TimestampWrites; tw != nil {
+		rpe.endTimestamp = e.beginPassTimestamps(tw.QuerySet, tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex)
+	}
+
 	vkCmdBeginRenderPass(e.device.cmds, e.active, &renderPassBegin, vk.SubpassContentsInline)
 	runtime.KeepAlive(clearValues)
 	rpe.begun = true
@@ -1098,28 +1103,56 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	cpe := computePassPool.Get().(*ComputePassEncoder)
 	cpe.encoder = e
 	cpe.pipeline = nil
-	cpe.timestampWrites = nil
+	cpe.endTimestamp = passEndTimestamp{}
 
-	// Write beginning-of-pass timestamp if requested.
-	// active != 0 check prevents SIGSEGV from null dispatch table
-	// dereference (VK-001, gogpu#119).
 	if desc != nil && desc.TimestampWrites != nil {
-		cpe.timestampWrites = desc.TimestampWrites
-		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.active != 0 {
-				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
-				e.device.cmds.CmdResetQueryPool(e.active, qs.pool, idx, 1)
-				e.device.cmds.CmdWriteTimestamp(
-					e.active,
-					vk.PipelineStageTopOfPipeBit,
-					qs.pool,
-					idx,
-				)
-			}
-		}
+		tw := desc.TimestampWrites
+		cpe.endTimestamp = e.beginPassTimestamps(tw.QuerySet, tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex)
 	}
 
 	return cpe
+}
+
+// passEndTimestamp is the end-of-pass timestamp write a pass owes when it
+// ends. A zero pool means none was requested.
+type passEndTimestamp struct {
+	pool  vk.QueryPool
+	index uint32
+}
+
+// beginPassTimestamps resets the pass's timestamp queries, writes the
+// beginning-of-pass timestamp and returns the end-of-pass write for End, as
+// Rust wgpu-hal does (vulkan/command.rs begin_render_pass and
+// begin_compute_pass). Both queries are reset here because a render pass
+// instance may not contain vkCmdResetQueryPool
+// (VUID-vkCmdResetQueryPool-renderpass). The active check keeps a null
+// command buffer away from the dispatch table (VK-001, gogpu#119).
+func (e *CommandEncoder) beginPassTimestamps(set hal.QuerySet, begin, end *uint32) passEndTimestamp {
+	qs, ok := set.(*QuerySet)
+	if !ok || qs == nil || qs.pool == 0 || e.active == 0 {
+		return passEndTimestamp{}
+	}
+	if begin != nil {
+		e.device.cmds.CmdResetQueryPool(e.active, qs.pool, *begin, 1)
+	}
+	if end != nil {
+		e.device.cmds.CmdResetQueryPool(e.active, qs.pool, *end, 1)
+	}
+	if begin != nil {
+		e.device.cmds.CmdWriteTimestamp(e.active, vk.PipelineStageBottomOfPipeBit, qs.pool, *begin)
+	}
+	if end == nil {
+		return passEndTimestamp{}
+	}
+	return passEndTimestamp{pool: qs.pool, index: *end}
+}
+
+// write records the end-of-pass timestamp, if one was requested.
+func (t passEndTimestamp) write(e *CommandEncoder) {
+	if t.pool == 0 || e == nil || e.active == 0 {
+		return
+	}
+	e.device.cmds.CmdWriteTimestamp(e.active, vk.PipelineStageBottomOfPipeBit, t.pool, t.index)
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Vulkan.
@@ -1134,6 +1167,8 @@ type RenderPassEncoder struct {
 	// begun records whether vkCmdBeginRenderPass actually ran, which End needs
 	// because BeginRenderPass returns an encoder either way.
 	begun bool
+	// endTimestamp is the end-of-pass timestamp written after vkCmdEndRenderPass.
+	endTimestamp passEndTimestamp
 }
 
 const (
@@ -1155,6 +1190,8 @@ func (e *RenderPassEncoder) End() {
 	// via FinalLayout in AttachmentDescription)
 	if e.begun && e.encoder.active != 0 {
 		vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.active)
+		// After the pass, so the write still measures all of it.
+		e.endTimestamp.write(e.encoder)
 	}
 
 	// Return to pool for reuse.
@@ -1164,6 +1201,7 @@ func (e *RenderPassEncoder) End() {
 	e.renderPass = 0
 	e.framebuffer = 0
 	e.begun = false
+	e.endTimestamp = passEndTimestamp{}
 	renderPassPool.Put(e)
 }
 
@@ -1449,9 +1487,9 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Vulkan.
 type ComputePassEncoder struct {
-	encoder         *CommandEncoder
-	pipeline        *ComputePipeline
-	timestampWrites *hal.ComputePassTimestampWrites
+	encoder      *CommandEncoder
+	pipeline     *ComputePipeline
+	endTimestamp passEndTimestamp
 }
 
 // End finishes the compute pass.
@@ -1468,21 +1506,7 @@ func (e *ComputePassEncoder) End() {
 		return
 	}
 
-	// Write end-of-pass timestamp if requested.
-	if e.timestampWrites != nil {
-		if qs, ok := e.timestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if e.timestampWrites.EndOfPassWriteIndex != nil {
-				idx := *e.timestampWrites.EndOfPassWriteIndex
-				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.active, qs.pool, idx, 1)
-				e.encoder.device.cmds.CmdWriteTimestamp(
-					e.encoder.active,
-					vk.PipelineStageBottomOfPipeBit,
-					qs.pool,
-					idx,
-				)
-			}
-		}
-	}
+	e.endTimestamp.write(e.encoder)
 
 	// Global memory barrier: compute writes → everything after.
 	memBarrier := vk.MemoryBarrier{
@@ -1504,7 +1528,7 @@ func (e *ComputePassEncoder) End() {
 	// Return to pool for reuse.
 	e.encoder = nil
 	e.pipeline = nil
-	e.timestampWrites = nil
+	e.endTimestamp = passEndTimestamp{}
 	computePassPool.Put(e)
 }
 

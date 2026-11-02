@@ -18,7 +18,10 @@ func bufferUsageToVk(usage gputypes.BufferUsage) vk.BufferUsageFlags {
 	if usage&gputypes.BufferUsageCopySrc != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageTransferSrcBit)
 	}
-	if usage&gputypes.BufferUsageCopyDst != 0 {
+	// ResolveQuerySet writes with vkCmdCopyQueryPoolResults, which needs a
+	// transfer destination (VUID-vkCmdCopyQueryPoolResults-dstBuffer-00825),
+	// as Dawn maps it (vulkan/BufferVk.cpp VulkanBufferUsage).
+	if usage&(gputypes.BufferUsageCopyDst|gputypes.BufferUsageQueryResolve) != 0 {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageTransferDstBit)
 	}
 	if usage&gputypes.BufferUsageIndex != 0 {

@@ -30,11 +30,17 @@ func (p *captureRenderPass) ExecuteBundle(bundle hal.RenderBundle) {
 
 type captureCommandEncoder struct {
 	*noop.CommandEncoder
-	resolved       int
-	querySet       hal.QuerySet
-	buffer         hal.Buffer
-	renderPass     *captureRenderPass
-	renderPassDesc *hal.RenderPassDescriptor
+	resolved        int
+	querySet        hal.QuerySet
+	buffer          hal.Buffer
+	renderPass      *captureRenderPass
+	renderPassDesc  *hal.RenderPassDescriptor
+	computePassDesc *hal.ComputePassDescriptor
+}
+
+func (e *captureCommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	e.computePassDesc = desc
+	return &noop.ComputePassEncoder{}
 }
 
 func (e *captureCommandEncoder) ResolveQuerySet(querySet hal.QuerySet, _, _ uint32, buffer hal.Buffer, _ uint64) {
@@ -71,7 +77,8 @@ func (d *captureDevice) DestroyRenderBundle(hal.RenderBundle) { d.destroyedRende
 
 func newCaptureDevice(h *captureDevice) *Device {
 	limits := DefaultLimits()
-	return &Device{core: core.NewDevice(h, nil, 0, limits, "query-render-bundle-test")}
+	features := gputypes.Features(gputypes.FeatureTimestampQuery)
+	return &Device{core: core.NewDevice(h, nil, features, limits, "query-render-bundle-test")}
 }
 
 func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
@@ -160,10 +167,13 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 		name    string
 		writes  *RenderPassTimestampWrites
 		wantNil bool
+		wantErr bool
 	}{
 		{name: "absent", writes: nil, wantNil: true},
-		{name: "nil query set", writes: &RenderPassTimestampWrites{}, wantNil: true},
-		{name: "released query set", writes: &RenderPassTimestampWrites{QuerySet: released}, wantNil: true},
+		// A query set that is missing or released is a validation error, as
+		// in Rust wgpu-core (validate_pass_timestamp_writes, check_is_valid).
+		{name: "nil query set", writes: &RenderPassTimestampWrites{EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "released query set", writes: &RenderPassTimestampWrites{QuerySet: released, EndOfPassWriteIndex: &end}, wantErr: true},
 		{
 			name: "active query set",
 			writes: &RenderPassTimestampWrites{
@@ -186,6 +196,13 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 				t.Fatal(err)
 			}
 			pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{TimestampWrites: tt.writes})
+			if tt.wantErr {
+				if err == nil {
+					pass.End()
+					t.Fatal("BeginRenderPass succeeded, want a timestampWrites error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,6 +223,125 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 		})
 	}
 }
+
+// TestBeginComputePassTimestampWrites checks that compute pass timestampWrites
+// reach the HAL pass unchanged and that invalid ones are rejected before the
+// HAL pass begins, as Rust wgpu-core validate_pass_timestamp_writes does.
+func TestBeginComputePassTimestampWrites(t *testing.T) {
+	begin, end, outOfRange := uint32(0), uint32(3), uint32(4)
+	resource := &testHALResource{}
+	h := &captureDevice{Device: &noop.Device{}}
+	device := newCaptureDevice(h)
+	active := newTestQuerySet(resource, device)
+	released := newTestQuerySet(resource, device)
+	released.released = true
+	occlusion := &QuerySet{
+		core:   core.NewQuerySet(resource, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
+		device: device,
+	}
+	other := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
+	foreign := newTestQuerySet(resource, other)
+
+	tests := []struct {
+		name    string
+		writes  *ComputePassTimestampWrites
+		wantErr bool
+	}{
+		{name: "absent"},
+		{name: "both indices", writes: &ComputePassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &begin, EndOfPassWriteIndex: &end}},
+		{name: "end only", writes: &ComputePassTimestampWrites{QuerySet: active, EndOfPassWriteIndex: &end}},
+		{name: "nil query set", writes: &ComputePassTimestampWrites{EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "released query set", writes: &ComputePassTimestampWrites{QuerySet: released, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "occlusion query set", writes: &ComputePassTimestampWrites{QuerySet: occlusion, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "query set of another device", writes: &ComputePassTimestampWrites{QuerySet: foreign, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "index out of range", writes: &ComputePassTimestampWrites{QuerySet: active, EndOfPassWriteIndex: &outOfRange}, wantErr: true},
+		{name: "equal indices", writes: &ComputePassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &end, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "no index", writes: &ComputePassTimestampWrites{QuerySet: active}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
+			h.commandEncoder = command
+			encoder, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pass, err := encoder.BeginComputePass(&ComputePassDescriptor{TimestampWrites: tt.writes})
+			if tt.wantErr {
+				if err == nil {
+					pass.End()
+					t.Fatal("BeginComputePass succeeded, want a timestampWrites error")
+				}
+				if command.computePassDesc != nil {
+					t.Fatal("HAL BeginComputePass was called for invalid timestampWrites")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pass.End()
+			if command.computePassDesc == nil {
+				t.Fatal("HAL BeginComputePass was not called")
+			}
+			got := command.computePassDesc.TimestampWrites
+			if tt.writes == nil {
+				if got != nil {
+					t.Fatalf("TimestampWrites = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.QuerySet != resource ||
+				got.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex ||
+				got.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
+				t.Fatalf("TimestampWrites = %+v", got)
+			}
+		})
+	}
+}
+
+// TestBeginComputePassTimestampWritesNeedsFeature checks the feature gate:
+// a device without FeatureTimestampQuery rejects timestampWrites.
+func TestBeginComputePassTimestampWritesNeedsFeature(t *testing.T) {
+	end := uint32(1)
+	resource := &testHALResource{}
+	h := &captureDevice{Device: &noop.Device{}, commandEncoder: &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}}
+	device := &Device{core: core.NewDevice(h, nil, 0, DefaultLimits(), "no-timestamp-feature")}
+	querySet := newTestQuerySet(resource, device)
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, err := encoder.BeginComputePass(&ComputePassDescriptor{
+		TimestampWrites: &ComputePassTimestampWrites{QuerySet: querySet, EndOfPassWriteIndex: &end},
+	})
+	if err == nil {
+		pass.End()
+		t.Fatal("BeginComputePass succeeded without FeatureTimestampQuery")
+	}
+	var featureErr *core.FeatureError
+	if !errors.As(err, &featureErr) {
+		t.Fatalf("error = %v, want a *core.FeatureError", err)
+	}
+}
+
+// TestQueueGetTimestampPeriod checks that the queue reports the HAL period.
+func TestQueueGetTimestampPeriod(t *testing.T) {
+	if got := (&Queue{hal: &periodQueue{period: 83.333}}).GetTimestampPeriod(); got != 83.333 {
+		t.Errorf("GetTimestampPeriod() = %v, want 83.333", got)
+	}
+	if got := (&Queue{}).GetTimestampPeriod(); got != 1 {
+		t.Errorf("GetTimestampPeriod() without a HAL queue = %v, want 1", got)
+	}
+}
+
+type periodQueue struct {
+	noop.Queue
+	period float32
+}
+
+func (q *periodQueue) GetTimestampPeriod() float32 { return q.period }
 
 func TestRenderBundleEncoderCommandsAfterFinish(t *testing.T) {
 	resource := &testHALResource{}

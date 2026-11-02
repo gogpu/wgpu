@@ -260,6 +260,10 @@ func (a *Adapter) Features() gputypes.Features {
 	// performance hint; the public MultiDraw APIs do not gate on it.
 	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
 
+	// Every D3D12 device has timestamp query heaps; Rust wgpu-hal offers
+	// timestamps unconditionally (dx12/adapter.rs).
+	features |= gputypes.Features(gputypes.FeatureTimestampQuery)
+
 	// Map D3D12 capabilities to WebGPU features
 	// Feature level 11.0+ guarantees basic compute and texture compression
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
@@ -631,6 +635,7 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 func (a *AdapterLegacy) Features() gputypes.Features {
 	var features gputypes.Features
 	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
+	features |= gputypes.Features(gputypes.FeatureTimestampQuery)
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
 		features |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}

@@ -44,3 +44,19 @@ func TestAdapterFeaturesShaderF16(t *testing.T) {
 		})
 	}
 }
+
+// TestAdapterFeaturesTimestampQuery pins TimestampQuery to Rust wgpu-hal,
+// which offers it on every D3D12 adapter (dx12/adapter.rs): every feature
+// level has timestamp query heaps, and both adapter paths open the same
+// Device, whose passes write timestamps through EndQuery.
+func TestAdapterFeaturesTimestampQuery(t *testing.T) {
+	for _, fl := range []d3d12.D3D_FEATURE_LEVEL{d3d12.D3D_FEATURE_LEVEL_11_0, d3d12.D3D_FEATURE_LEVEL_12_0} {
+		caps := AdapterCapabilities{FeatureLevel: fl}
+		if !(&Adapter{capabilities: caps}).Features().Contains(gputypes.FeatureTimestampQuery) {
+			t.Errorf("Adapter at feature level %#x does not advertise TimestampQuery", fl)
+		}
+		if !(&AdapterLegacy{capabilities: caps}).Features().Contains(gputypes.FeatureTimestampQuery) {
+			t.Errorf("AdapterLegacy at feature level %#x does not advertise TimestampQuery", fl)
+		}
+	}
+}

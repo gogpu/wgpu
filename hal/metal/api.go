@@ -72,13 +72,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			deviceType = gputypes.DeviceTypeIntegratedGPU
 		}
 
-		// Build features
-		var features gputypes.Features
-		if DeviceSupportsFamily(device, MTLGPUFamilyMetal3) {
-			features.Insert(gputypes.FeatureTimestampQuery)
-		}
-		features.Insert(gputypes.FeatureDepthClipControl)
-		features.Insert(gputypes.FeatureTextureCompressionBC)
+		features := adapterFeatures()
 
 		adapter := &Adapter{
 			instance:              i,
@@ -168,6 +162,19 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	}
 
 	return adapters
+}
+
+// adapterFeatures returns the features every Metal adapter offers.
+//
+// TimestampQuery is left out although Rust wgpu-hal offers it on GPUs with
+// counter sampling (metal/adapter.rs): CreateQuerySet has no
+// MTLCounterSampleBuffer implementation yet and returns
+// hal.ErrTimestampsNotSupported (FEAT-QUERY-METAL-001).
+func adapterFeatures() gputypes.Features {
+	var features gputypes.Features
+	features.Insert(gputypes.FeatureDepthClipControl)
+	features.Insert(gputypes.FeatureTextureCompressionBC)
+	return features
 }
 
 // Destroy releases the instance.

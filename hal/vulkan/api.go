@@ -234,6 +234,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 		}
 
 		adapterForExpose := hal.Adapter(adapter)
+		var queueFamily *uint32
 		if surfaceHint != nil {
 			qualified, err := adapter.QualifySurface(surfaceHint)
 			if err != nil {
@@ -241,6 +242,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 				continue
 			}
 			adapterForExpose = qualified
+			if q, ok := qualified.(*qualifiedAdapter); ok {
+				queueFamily = &q.queueFamily
+			}
 		}
 
 		hal.Logger().Info("vulkan: adapter found",
@@ -265,7 +269,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: gputypes.BackendVulkan,
 			},
-			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.ext.webGPUFeatures(),
+			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.extendedWebGPUFeatures(queueFamily),
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
