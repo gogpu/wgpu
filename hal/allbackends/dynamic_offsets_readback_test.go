@@ -109,10 +109,7 @@ var dynamicOffsetsCases = []dynamicOffsetsCase{
 // test/case; each is skipped with its defect until its owner fixes it.
 var dynamicOffsetsDefects = map[string]map[string]string{
 	"compute": {
-		"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (11 -> 0x41300000), and arrayLength() of a storage binding is 0",
-	},
-	"render": {
-		"software": "software backend: arrayLength() of a storage binding is 0, a render pass ignores the dynamic offset of a storage buffer, and with the layout entries in reverse binding order the second draw renders nothing",
+		"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (11 -> 0x41300000), a gap of the interpreter's typed value model",
 	},
 	"compute/bind-group-first": {
 		"vulkan": "Vulkan backend: a bind group set before the pipeline is never bound (VUID-vkCmdDispatch-None-08600); core does not set the groups again after a pipeline change, as Rust wgpu-core's binder does",
