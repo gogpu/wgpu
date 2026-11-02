@@ -207,6 +207,7 @@ struct U { tag: vec4<u32> }
 fn main() {
     out[0] = u.tag.x + s[0] + arrayLength(&s);
 }
+
 `
 	stages := gputypes.ShaderStageCompute
 	reversed := []gputypes.BindGroupLayoutEntry{
@@ -228,6 +229,28 @@ fn main() {
 		if got[name] != slot {
 			t.Errorf("%s at [[buffer(%s)]], want %s\n%s", name, got[name], slot, out)
 		}
+	}
+}
+
+func TestRuntimeArrayOutOfBoundsAccessIsRestricted(t *testing.T) {
+	const source = `
+struct A { values: array<u32> }
+@group(0) @binding(0) var<storage, read_write> a: A;
+@group(0) @binding(1) var<storage, read_write> b: array<u32, 4>;
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+	let r = a.values[66u + gid.x];
+	a.values[65u + gid.x] = 0xA1u;
+	b[2] = r;
+}`
+	stages := gputypes.ShaderStageCompute
+	layout := stageLayout(t, stages, []gputypes.BindGroupLayoutEntry{
+		bufferEntry(0, stages, gputypes.BufferBindingTypeStorage),
+		bufferEntry(1, stages, gputypes.BufferBindingTypeStorage),
+	})
+	out, _ := compile(t, source, layout.Options(ir.StageCompute, "main"))
+	if !strings.Contains(out, "metal::min(unsigned(66u + gid.x)") || !strings.Contains(out, "metal::min(unsigned(65u + gid.x)") {
+		t.Fatalf("runtime-array accesses are not clamped:\n%s", out)
 	}
 }
 
