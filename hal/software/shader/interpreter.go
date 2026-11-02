@@ -1276,6 +1276,65 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.fetchTexel(imgVal, coord)
 			}
 
+		case OpLogicalEqual, OpLogicalNotEqual:
+			if len(inst.Operands) >= 2 {
+				eq := toBool(interp.values[inst.Operands[0]]) == toBool(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(eq == (inst.Opcode == OpLogicalEqual))
+			}
+
+		case OpFOrdNotEqual, OpFUnordNotEqual:
+			if len(inst.Operands) >= 2 {
+				a := toFloat32(interp.values[inst.Operands[0]])
+				b := toFloat32(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(floatNotEqual(a, b, inst.Opcode == OpFOrdNotEqual))
+			}
+
+		case OpBitCount, OpBitReverse:
+			// OpBitCount / OpBitReverse: type resultID base
+			if len(inst.Operands) >= 1 {
+				f := bitCount
+				if inst.Opcode == OpBitReverse {
+					f = bitReverse
+				}
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID), f)
+			}
+
+		case OpBitFieldInsert:
+			// OpBitFieldInsert: type resultID base insert offset count
+			if len(inst.Operands) >= 4 {
+				insert := toUint32(interp.values[inst.Operands[1]])
+				offset := toUint32(interp.values[inst.Operands[2]])
+				count := toUint32(interp.values[inst.Operands[3]])
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
+					func(base uint32) uint32 { return bitFieldInsert(base, insert, offset, count) })
+			}
+
+		case OpBitFieldSExtract, OpBitFieldUExtract:
+			// OpBitField[SU]Extract: type resultID base offset count
+			if len(inst.Operands) >= 3 {
+				offset := toUint32(interp.values[inst.Operands[1]])
+				count := toUint32(interp.values[inst.Operands[2]])
+				signed := inst.Opcode == OpBitFieldSExtract
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
+					func(base uint32) uint32 { return bitFieldExtract(base, offset, count, signed) })
+			}
+
+		case OpDPdx, OpDPdy, OpFwidth, OpDPdxFine, OpDPdyFine, OpFwidthFine,
+			OpDPdxCoarse, OpDPdyCoarse, OpFwidthCoarse:
+			// Derivatives need the 2x2 quad a fragment runs in on a GPU;
+			// see zeroDerivative.
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = zeroDerivative(interp.values[inst.Operands[0]])
+			}
+
+		case OpArrayLength:
+			// OpArrayLength: type resultID structPointer memberIndex
+			// The element count of a storage buffer's runtime array, which
+			// naga's Restrict bounds checks clamp indices with.
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = ValUint(interp.arrayLength(interp.values[inst.Operands[0]], inst.Operands[1]))
+			}
+
 		case OpImageRead:
 			// OpImageRead: type resultID image coordinate [ImageOperands...]
 			// A storage texture load (textureLoad of a read-only or
@@ -1294,11 +1353,34 @@ func (interp *interpreter) run() error {
 		case OpImageQuerySize:
 			// OpImageQuerySize: type resultID image
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]])
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], 0, inst.TypeID)
+			}
+
+		case OpImageQuerySizeLod:
+			// OpImageQuerySizeLod: type resultID image lod
+			if len(inst.Operands) >= 2 {
+				lod := scalarInt(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], lod, inst.TypeID)
+			}
+
+		case OpImageQueryLevels:
+			// OpImageQueryLevels: type resultID image
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = interp.intResult(inst.TypeID, interp.queryImageCount(interp.values[inst.Operands[0]], false))
+			}
+
+		case OpImageQuerySamples:
+			// OpImageQuerySamples: type resultID image
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = interp.intResult(inst.TypeID, interp.queryImageCount(interp.values[inst.Operands[0]], true))
 			}
 
 		default:
-			// Unknown opcodes are skipped. The triangle shader uses a small subset.
+			// Unimplemented instructions are skipped, and their result stays
+			// undefined. Making this an error (P1-SW-017) waits for exact
+			// integer vectors (P1-SW-013): OpAll and OpAny, the most common
+			// remaining ones, guard every naga loop, and evaluated on the
+			// current float-held integer vectors they break loops at once.
 		}
 
 		// --- Debug: post-instruction hooks ---
@@ -1445,6 +1527,36 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	}
 
 	return ValPointer(interp.allocPointer(current))
+}
+
+// arrayLength returns the element count of the runtime array that is member
+// member of the struct a storage buffer pointer points at: the bytes of the
+// binding past the member's offset, divided by the element size. 0 when the
+// pointer is not a storage buffer pointer to such a struct.
+func (interp *interpreter) arrayLength(ptr Value, member uint32) uint32 {
+	if ptr.Tag != TagBufferPointer {
+		return 0
+	}
+	bp := ptr.AsBufferPointer()
+	m := interp.module
+	st := bp.Type
+	if st == nil || st.Kind != TypeStruct || int(member) >= len(st.MemberIDs) {
+		return 0
+	}
+	arr := m.Types[st.MemberIDs[member]]
+	if arr == nil || arr.Kind != TypeArray {
+		return 0
+	}
+	elem := m.Types[arr.ElemType]
+	if elem == nil {
+		return 0
+	}
+	stride := typeByteSize(m, elem)
+	start := uint64(bp.Offset) + uint64(m.GetMemberOffset(interp.findTypeID(st), member))
+	if stride == 0 || start >= uint64(len(bp.Buffer)) {
+		return 0
+	}
+	return uint32((uint64(len(bp.Buffer)) - start) / uint64(stride))
 }
 
 // bufferAccessChain computes a byte offset through a chain of indexes into
@@ -2043,12 +2155,84 @@ func scalarFloat(v Value) float32 {
 }
 
 // queryImageSize returns the size of a texture as a vec2 of uint32 values.
-func (interp *interpreter) queryImageSize(imgVal Value) Value {
+//
+// It answers OpImageQuerySize (lod 0) and OpImageQuerySizeLod: the size of
+// mip level lod, each dimension at least 1, with the array layer count as
+// the last component when the result type has one more component than the
+// image has dimensions (2D arrays; a 3D image reads its depth from Layers
+// too, not reduced per mip level, since Texture2D does not record the image
+// dimension). The shape follows the result type: a scalar for 1D, a vector
+// otherwise (integer vectors hold float components); 2D without a module. A
+// missing texture reads zeros.
+func (interp *interpreter) queryImageSize(imgVal Value, lod int, typeID uint32) Value {
+	components := 2
+	if ti := interp.typeInfo(typeID); ti != nil {
+		components = 1
+		if ti.Kind == TypeVector {
+			components = int(ti.Components)
+		}
+	}
+	tex := interp.resolveTexture(imgVal)
+	var size [3]float32
+	if tex != nil {
+		size = [3]float32{mipSize(tex.Width, lod), mipSize(tex.Height, lod), float32(max(tex.Layers, 1))}
+	}
+	switch components {
+	case 1:
+		return interp.intResult(typeID, uint32(size[0]))
+	case 3:
+		return ValVec3(size[0], size[1], size[2])
+	default:
+		return ValVec2(size[0], size[1])
+	}
+}
+
+// mipSize is the extent of mip level lod of a dimension of extent base.
+func mipSize(base uint32, lod int) float32 {
+	if lod < 0 || lod > 31 {
+		return 1
+	}
+	return float32(max(base>>uint(lod), 1))
+}
+
+// queryImageCount answers OpImageQueryLevels (the mip level count) or, with
+// samples, OpImageQuerySamples (the sample count); 0 without a texture.
+func (interp *interpreter) queryImageCount(imgVal Value, samples bool) uint32 {
 	tex := interp.resolveTexture(imgVal)
 	if tex == nil {
-		return ValVec2(0, 0)
+		return 0
 	}
-	return ValVec2(float32(tex.Width), float32(tex.Height))
+	if samples {
+		return max(tex.SampleCount, 1)
+	}
+	return max(tex.MipLevels, 1)
+}
+
+// intResult returns n as the integer scalar type typeID names: signed or
+// unsigned.
+func (interp *interpreter) intResult(typeID, n uint32) Value {
+	if ti := interp.typeInfo(typeID); ti != nil && ti.Kind == TypeInt && ti.Signed {
+		return ValInt(int32(n))
+	}
+	return ValUint(n)
+}
+
+// resultSigned reports whether the integer scalar or vector type typeID has
+// signed components.
+func (interp *interpreter) resultSigned(typeID uint32) bool {
+	ti := interp.typeInfo(typeID)
+	if ti != nil && ti.Kind == TypeVector {
+		ti = interp.typeInfo(ti.ElemType)
+	}
+	return ti != nil && ti.Kind == TypeInt && ti.Signed
+}
+
+// typeInfo returns the type typeID names, or nil.
+func (interp *interpreter) typeInfo(typeID uint32) *TypeInfo {
+	if interp.module == nil {
+		return nil
+	}
+	return interp.module.Types[typeID]
 }
 
 // applyWrapMode wraps a texture coordinate according to the specified mode.

@@ -509,7 +509,7 @@ func TestQueryImageSize(t *testing.T) {
 	bk := BindingKey{Group: 0, Binding: 0}
 	interp := &interpreter{ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
 
-	got := interp.queryImageSize(ValBindingKey(bk))
+	got := interp.queryImageSize(ValBindingKey(bk), 0, 0)
 	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("queryImageSize returned %T, want Vec2", got)
@@ -519,9 +519,53 @@ func TestQueryImageSize(t *testing.T) {
 	}
 
 	// Nil texture returns zero.
-	got = interp.queryImageSize(Value{})
+	got = interp.queryImageSize(Value{}, 0, 0)
 	gv = got.AsVec2()
 	if got.Tag != TagVec2 || gv != (Vec2{0, 0}) {
 		t.Errorf("queryImageSize(nil) = %v, want {0, 0}", got)
+	}
+}
+
+// TestImageQueries checks OpImageQuerySizeLod, OpImageQueryLevels and
+// OpImageQuerySamples (P1-SW-017): the size of a mip level (at least 1 per
+// dimension, the array layer count unreduced), the mip level count and the
+// sample count, each shaped by its result type.
+func TestImageQueries(t *testing.T) {
+	const (
+		tU32   = 1
+		tI32   = 2
+		tUVec2 = 3
+		tUVec3 = 4
+	)
+	m := &Module{Types: map[uint32]*TypeInfo{
+		tU32:   {Kind: TypeInt},
+		tI32:   {Kind: TypeInt, Signed: true},
+		tUVec2: {Kind: TypeVector, Components: 2},
+		tUVec3: {Kind: TypeVector, Components: 3},
+	}}
+	bk := BindingKey{Group: 0, Binding: 0}
+	tex := &Texture2D{Width: 64, Height: 16, MipLevels: 7, SampleCount: 4, Layers: 3}
+	interp := &interpreter{module: m, ctx: &ExecutionContext{Textures: map[BindingKey]*Texture2D{bk: tex}}}
+	img := ValBindingKey(bk)
+
+	if got := interp.queryImageSize(img, 2, tUVec2); got.Tag != TagVec2 || got.F[0] != 16 || got.F[1] != 4 {
+		t.Errorf("size lod 2 = %v %v, want (16, 4)", got.Tag, got.F)
+	}
+	if got := interp.queryImageSize(img, 5, tUVec3); got.Tag != TagVec3 || got.F[0] != 2 || got.F[1] != 1 || got.F[2] != 3 {
+		t.Errorf("size lod 5 of an array = %v %v, want (2, 1, 3)", got.Tag, got.F)
+	}
+	if got := interp.queryImageSize(img, 1, tU32); got.Tag != TagUint32 || got.U[0] != 32 {
+		t.Errorf("1D size lod 1 = %v %v, want u32 32", got.Tag, got.U)
+	}
+	if got := interp.intResult(tI32, interp.queryImageCount(img, false)); got.Tag != TagInt32 || got.U[0] != 7 {
+		t.Errorf("levels = %v %v, want i32 7", got.Tag, got.U)
+	}
+	if got := interp.intResult(tU32, interp.queryImageCount(img, true)); got.Tag != TagUint32 || got.U[0] != 4 {
+		t.Errorf("samples = %v %v, want u32 4", got.Tag, got.U)
+	}
+	plain := &Texture2D{Width: 4, Height: 4}
+	interp.ctx.Textures[bk] = plain
+	if got := interp.queryImageCount(img, false); got != 1 {
+		t.Errorf("levels of a texture without MipLevels = %d, want 1", got)
 	}
 }

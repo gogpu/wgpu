@@ -284,11 +284,12 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 //
 // SPIR-V 1.3 is the version the interpreter is tested on. Index and buffer
 // accesses are clamped by the shader (Restrict, OpExtInst UMin). Image loads
-// stay Unchecked until the interpreter implements OpImageQueryLevels,
-// OpImageQuerySizeLod and OpImageQuerySamples (P1-SW-017), which naga's
-// checked image loads emit; fetchTexel clamps the coordinates itself, so an
-// out-of-bounds load still reads inside the texture. Binding arrays are
-// Unchecked, as in every Rust wgpu-hal backend.
+// stay Unchecked: the interpreter answers the image queries naga's checked
+// loads emit (P1-SW-017), but the clamp arithmetic runs on integer vectors,
+// which the interpreter does not hold exactly yet (P1-SW-013). fetchTexel
+// clamps the coordinates itself, so an out-of-bounds load still reads inside
+// the texture. Binding arrays are Unchecked, as in every Rust wgpu-hal
+// backend.
 func spirvOptions() spirv.Options {
 	return spirv.Options{
 		Version: spirv.Version1_3,

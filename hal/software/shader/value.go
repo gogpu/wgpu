@@ -81,6 +81,12 @@ type Texture2D struct {
 	// RG8/R16, 4 for RGBA8/BGRA8). When zero, sampling assumes 4 (RGBA8) for
 	// backward compatibility. Single-channel formats unpack as (r, 0, 0, 1).
 	BytesPerPixel uint32
+	// MipLevels, SampleCount and Layers answer the image queries
+	// (OpImageQueryLevels, OpImageQuerySamples, the array size of
+	// OpImageQuerySize[Lod]); zero reads as 1.
+	MipLevels   uint32
+	SampleCount uint32
+	Layers      uint32
 }
 
 // Sampler describes texture sampling parameters.

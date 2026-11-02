@@ -863,6 +863,9 @@ func addTextureBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindG
 			Data:          tv.texture.data,
 			Format:        uint32(tv.texture.format),
 			BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
+			MipLevels:     tv.texture.mipLevelCount,
+			SampleCount:   tv.texture.sampleCount,
+			Layers:        tv.texture.depth,
 		}
 		tv.texture.mu.RUnlock()
 	}
