@@ -61,7 +61,7 @@ func TestTextureCopyValidation(t *testing.T) {
 	region := func(mip uint32, aspect gputypes.TextureAspect) []wgpu.BufferTextureCopy {
 		return []wgpu.BufferTextureCopy{{
 			TextureBase:  wgpu.ImageCopyTexture{MipLevel: mip, Aspect: aspect},
-			BufferLayout: wgpu.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 1},
+			BufferLayout: wgpu.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 2},
 			Size:         wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 		}}
 	}

@@ -1046,15 +1046,35 @@ func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySi
 	if texture.coreTexture != nil {
 		sampleCount = texture.coreTexture.SampleCount()
 	}
+	bufferSide := core.CopySideSource
+	if side == core.CopySideSource {
+		bufferSide = core.CopySideDestination
+	}
 	for i := range regions {
-		if view, ok := texture.copyView(regions[i].TextureBase.MipLevel, regions[i].TextureBase.Origin, regions[i].TextureBase.Aspect); ok {
-			if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), gputypes.Extent3D(regions[i].Size)); err != nil {
-				e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
-				return false
-			}
+		region := &regions[i]
+		view, haveView := texture.copyView(region.TextureBase.MipLevel, region.TextureBase.Origin, region.TextureBase.Aspect)
+		// The core texture is the source of truth for the format: the wrapper
+		// of SurfaceTexture.AsTexture carries none.
+		format := texture.format
+		if haveView {
+			format = view.Format
 		}
-		layout := &regions[i].BufferLayout
-		if err := core.ValidateTextureBufferCopy(texture.format, sampleCount, layout.Offset, layout.BytesPerRow); err != nil {
+		var err error
+		if haveView {
+			err = core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), gputypes.Extent3D(region.Size))
+		}
+		if err == nil {
+			err = core.ValidateTextureBufferCopy(format, sampleCount, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow)
+		}
+		if err == nil && haveView {
+			layout := core.TexelCopyBufferLayout{
+				Offset:       region.BufferLayout.Offset,
+				BytesPerRow:  region.BufferLayout.BytesPerRow,
+				RowsPerImage: region.BufferLayout.RowsPerImage,
+			}
+			err = core.ValidateLinearTextureData(layout, format, region.TextureBase.Aspect, buffer.Size(), bufferSide, gputypes.Extent3D(region.Size))
+		}
+		if err != nil {
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
 			return false
 		}
