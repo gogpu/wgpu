@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `ShaderFloat32Atomic` (VK_EXT_shader_atomic_float);
     - `ShaderBarycentrics` and `ShaderPerVertex` (VK_KHR_fragment_shader_barycentric);
     - `ShaderDrawIndex` (shaderDrawParameters);
-    - `ShaderEarlyDepthTest`.
+    - `ShaderEarlyDepthTest`;
+    - `SubgroupOperations` and `SubgroupVertex` (VkPhysicalDeviceSubgroupProperties with Rust's stage and operation conditions; `VK_EXT_subgroup_size_control` is enabled and stages may vary their subgroup size when subgroups are requested). Proven by Rust's own `subgroup_operations` GPU test, ported verbatim, plus value, fragment and vertex readbacks. Requested subgroup features used to be accepted on every backend and then ignored.
 
     Tested on Intel and NVIDIA under the validation layer.
   - GLES: `PrimitiveIndex` and `ShaderEarlyDepthTest` with Rust wgpu-hal's conditions, and `ShaderDrawIndex` (desktop GL 4.6, or `GL_ARB_shader_draw_parameters`; shaders are then compiled with naga's `DrawParameters`). `MultiDrawIndirect` on GL 4.3 or the multi-draw-indirect extensions goes through real `glMultiDraw*Indirect` calls, so `draw_index` counts the records. Rust offers neither `ShaderDrawIndex` nor multi-draw indirect on GLES.
@@ -132,7 +133,7 @@ This release fixes validation that was missing, so code that ran before may now 
 
 ### Known issues
 
-- **Not offered yet:** `FeatureShaderF16` on Metal (not yet run on a Mac), `FeatureShaderI16` on every backend (naga's WGSL has no `i16` type yet), `FeatureSubgroupVertex` (subgroups are not offered on Vulkan yet), `FeatureClipDistances` on GLES (needs a naga GLSL change), the new shader capability features on the DX12 DXIL path and on Metal, and on the software backend. A feature that is not offered is refused by `RequestDevice`; nothing runs unchecked.
+- **Not offered yet:** `FeatureShaderF16` on Metal (not yet run on a Mac), `FeatureShaderI16` on every backend (naga's WGSL has no `i16` type yet), `FeatureSubgroupBarrier` on Vulkan (naga's SPIR-V for `subgroupBarrier` fails Vulkan validation, as Rust naga's does; a deviation from Rust until naga is fixed), the subgroup features on DX12 (naga's DXIL wave operations fail the DXIL validator in three cases) and Metal, `FeatureClipDistances` on GLES (needs a naga GLSL change), the new shader capability features on the DX12 DXIL path and on Metal, and on the software backend. A feature that is not offered is refused by `RequestDevice`; nothing runs unchecked.
 - **`-tags rust`** (wgpu-native through go-webgpu/webgpu v0.5.5) still has the ABI mismatches listed for v0.34.6. The default Pure Go build is not affected.
 - **Metal:** the changes in this release compile, lint and pass their unit tests in CI, but have not been run on a Mac.
 - **DX12: `@builtin(vertex_index)`, `@builtin(instance_index)` and `@builtin(num_workgroups)` miss the first vertex, first instance and workgroup count in indirect draws and dispatches.** Direct calls are correct. The fix needs wgpu-core's rewriting of indirect arguments (P1-CORE-014), planned for v0.35.0.
