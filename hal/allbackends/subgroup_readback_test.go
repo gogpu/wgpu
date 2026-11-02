@@ -463,8 +463,13 @@ func TestFeatureSubgroupFragment(t *testing.T) {
 				if size < 4 || size&(size-1) != 0 {
 					t.Fatalf("pixel (%d,%d): subgroup_size %d, want a power of two of at least 4", x, y, size)
 				}
-				if active < 4 || active > size || active%4 != 0 {
-					t.Fatalf("pixel (%d,%d): %d active invocations (0: ballot and add disagree), want whole quads up to the size %d", x, y, active, size)
+				// Neither WGSL nor Vulkan promises that a fragment subgroup
+				// holds whole quads of active invocations: Mesa's lavapipe
+				// (8-wide) reports 5 for a fully covered target. Check only
+				// what is promised: subgroupAdd and subgroupBallot agree, and
+				// the count fits in the subgroup.
+				if active == 0 || active > size {
+					t.Fatalf("pixel (%d,%d): %d active invocations (0: ballot and add disagree), want 1 to the size %d", x, y, active, size)
 				}
 			}
 		}
