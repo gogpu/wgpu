@@ -110,7 +110,16 @@ type D3D12_DESCRIPTOR_HEAP_DESC struct {
 }
 
 // D3D12_RESOURCE_BARRIER describes a resource barrier.
+//
+// Every struct here that models a C union as a byte array, and whose union
+// holds pointers or UINT64s, starts with `_ [0]uint64`. A byte array has
+// alignment 1, so without it the Go struct is only 4-aligned while the C
+// struct is 8-aligned; a local could then sit at a 4-aligned address, and the
+// cast of &x.Union[0] to a pointer-holding struct would be misaligned
+// (checkptr reports it as a fatal error). The zero-size field changes no
+// offset. Layouts are checked against d3d12.h in layout_test.go.
 type D3D12_RESOURCE_BARRIER struct {
+	_     [0]uint64 // 8-byte alignment of the C union (see above)
 	Type  D3D12_RESOURCE_BARRIER_TYPE
 	Flags D3D12_RESOURCE_BARRIER_FLAGS
 	// This is a union in C. We use a fixed-size array and interpret based on Type.
@@ -221,6 +230,7 @@ type D3D12_CONSTANT_BUFFER_VIEW_DESC struct {
 // (alignment 1) at offset 12 → wrong layout. With _ uint32, Go adds 4 bytes
 // at offset 12, pushing Union to offset 16 → correct 40-byte struct.
 type D3D12_SHADER_RESOURCE_VIEW_DESC struct {
+	_                       [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Format                  DXGI_FORMAT
 	ViewDimension           D3D12_SRV_DIMENSION
 	Shader4ComponentMapping uint32
@@ -237,6 +247,7 @@ type D3D12_SHADER_RESOURCE_VIEW_DESC struct {
 // whole struct is 40 bytes, matching sizeof(D3D12_UNORDERED_ACCESS_VIEW_DESC)
 // in d3d12.h. A smaller Union would let the driver read past the Go value.
 type D3D12_UNORDERED_ACCESS_VIEW_DESC struct {
+	_             [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Format        DXGI_FORMAT
 	ViewDimension D3D12_UAV_DIMENSION
 	// Union of different view types
@@ -244,20 +255,30 @@ type D3D12_UNORDERED_ACCESS_VIEW_DESC struct {
 }
 
 // D3D12_RENDER_TARGET_VIEW_DESC describes a render target view.
+//
+// The C union's largest members are D3D12_BUFFER_RTV (UINT64 FirstElement,
+// UINT NumElements: 16 bytes with its 8-byte alignment) and
+// D3D12_TEX2D_ARRAY_RTV (four UINTs, 16 bytes), so the struct is 24 bytes,
+// 8-aligned. A smaller Union would let the driver read past the Go value.
 type D3D12_RENDER_TARGET_VIEW_DESC struct {
+	_             [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Format        DXGI_FORMAT
 	ViewDimension D3D12_RTV_DIMENSION
 	// Union of different view types
-	Union [12]byte
+	Union [16]byte
 }
 
 // D3D12_DEPTH_STENCIL_VIEW_DESC describes a depth stencil view.
+//
+// The C union's largest members are D3D12_TEX1D_ARRAY_DSV and
+// D3D12_TEX2D_ARRAY_DSV (three UINTs, 12 bytes), so the struct is 24 bytes,
+// 4-aligned.
 type D3D12_DEPTH_STENCIL_VIEW_DESC struct {
 	Format        DXGI_FORMAT
 	ViewDimension D3D12_DSV_DIMENSION
 	Flags         D3D12_DSV_FLAGS
 	// Union of different view types
-	Union [8]byte
+	Union [12]byte
 }
 
 // D3D12_SAMPLER_DESC describes a sampler state.
@@ -698,8 +719,14 @@ type D3D12_RENDER_PASS_BEGINNING_ACCESS struct {
 }
 
 // D3D12_RENDER_PASS_ENDING_ACCESS describes render pass ending access.
+//
+// D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_PARAMETERS holds three pointers, so
+// the C union is 8-aligned and starts at offset 8, after 4 bytes of padding;
+// the struct is 56 bytes.
 type D3D12_RENDER_PASS_ENDING_ACCESS struct {
+	_    [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Type D3D12_RENDER_PASS_ENDING_ACCESS_TYPE
+	_    uint32 // C ABI padding: aligns Union to offset 8
 	// Union for Resolve (D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_PARAMETERS)
 	Union [48]byte
 }

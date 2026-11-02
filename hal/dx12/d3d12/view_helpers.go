@@ -122,8 +122,7 @@ func (d *D3D12_RENDER_TARGET_VIEW_DESC) SetTexture2DArray(mipSlice, firstArraySl
 	binary.LittleEndian.PutUint32(d.Union[0:4], mipSlice)
 	binary.LittleEndian.PutUint32(d.Union[4:8], firstArraySlice)
 	binary.LittleEndian.PutUint32(d.Union[8:12], arraySize)
-	// planeSlice would require extended union but RTV only has 12 bytes
-	_ = planeSlice
+	binary.LittleEndian.PutUint32(d.Union[12:16], planeSlice)
 }
 
 // SetTexture3D sets up a 3D texture RTV.
@@ -155,8 +154,7 @@ func (d *D3D12_DEPTH_STENCIL_VIEW_DESC) SetTexture2DArray(mipSlice, firstArraySl
 	d.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY
 	binary.LittleEndian.PutUint32(d.Union[0:4], mipSlice)
 	binary.LittleEndian.PutUint32(d.Union[4:8], firstArraySlice)
-	// arraySize would exceed Union bounds (only 8 bytes)
-	_ = arraySize
+	binary.LittleEndian.PutUint32(d.Union[8:12], arraySize)
 }
 
 // -----------------------------------------------------------------------------

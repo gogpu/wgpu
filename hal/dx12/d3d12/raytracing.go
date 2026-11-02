@@ -118,14 +118,19 @@ type D3D12_RAYTRACING_GEOMETRY_AABBS_DESC struct {
 
 // D3D12_RAYTRACING_GEOMETRY_DESC describes one geometry entry.
 // The Union field holds either a triangles or AABBs descriptor, interpreted
-// according to Type. Its size matches the larger of the two variants
-// (D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC = 64 bytes).
+// according to Type. Its size matches the largest variant,
+// D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC (48 bytes), so the struct is 56
+// bytes as in d3d12.h. The size is the array stride the runtime uses for
+// D3D12_ELEMENTS_LAYOUT_ARRAY, so a larger Union misreads every desc after
+// the first.
 type D3D12_RAYTRACING_GEOMETRY_DESC struct {
+	_     [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Type  D3D12_RAYTRACING_GEOMETRY_TYPE
 	Flags D3D12_RAYTRACING_GEOMETRY_FLAGS
-	// Union: either D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC (64 bytes)
-	// or D3D12_RAYTRACING_GEOMETRY_AABBS_DESC (24 bytes).
-	Union [64]byte
+	// Union: D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC (48 bytes),
+	// D3D12_RAYTRACING_GEOMETRY_AABBS_DESC (24 bytes) or
+	// D3D12_RAYTRACING_GEOMETRY_OMM_TRIANGLES_DESC (16 bytes, unused).
+	Union [48]byte
 }
 
 // SetTriangles writes a triangles descriptor into the union.
@@ -142,6 +147,7 @@ func (g *D3D12_RAYTRACING_GEOMETRY_DESC) SetAABBs(desc D3D12_RAYTRACING_GEOMETRY
 // The Union field is either InstanceDescs (uint64 GPU VA for TLAS) or
 // pGeometryDescs (uintptr pointer to geometry desc array for BLAS).
 type D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS struct {
+	_           [0]uint64 // 8-byte alignment of the C union (see D3D12_RESOURCE_BARRIER)
 	Type        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE
 	Flags       D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS
 	NumDescs    uint32
