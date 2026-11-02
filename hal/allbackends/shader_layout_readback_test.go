@@ -29,7 +29,7 @@ fn main() {
 `
 
 func TestShaderModuleSharedByPipelineLayouts(t *testing.T) {
-	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		storage := func(binding uint32) gputypes.BindGroupLayoutEntry {
 			return gputypes.BindGroupLayoutEntry{
 				Binding:    binding,

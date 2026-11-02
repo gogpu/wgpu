@@ -32,7 +32,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 // buffer that a dispatch then reads through a read-only storage binding. The
 // write's COPY_DST must become STORAGE_READ before the dispatch.
 func TestWriteBufferThenDispatchReadsIt(t *testing.T) {
-	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		const n = 64
 		input := newPublicBuffer(t, device, n*4, wgpu.BufferUsageStorage|wgpu.BufferUsageCopyDst)
 		output := newPublicBuffer(t, device, n*4, wgpu.BufferUsageStorage|wgpu.BufferUsageCopySrc)
@@ -111,7 +111,7 @@ const usageTargetSize = 4
 // become RESOURCE before the draw, from the bind group's usage rather than an
 // eager barrier at the end of the pending writes.
 func TestWriteTextureThenSample(t *testing.T) {
-	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+	forEachBackendAdapter(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		tex, view := newUsageTexture(t, device, wgpu.TextureUsageTextureBinding|wgpu.TextureUsageCopyDst)
 		texels := make([]byte, usageTargetSize*usageTargetSize*4)
 		for i := 0; i < len(texels); i += 4 {
@@ -135,7 +135,7 @@ func TestWriteTextureThenSample(t *testing.T) {
 // UNDEFINED before the dispatch and move from STORAGE_WRITE to RESOURCE
 // before the draw, inside the encoder.
 func TestStorageTextureWriteThenSample(t *testing.T) {
-	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		skipKnownGap(t, "gles", "P1-GLES-017", "textureStore to a storage texture reads back zeros")
 		skipKnownGap(t, "software", "P1-SW-018", "textureStore to a storage texture reads back zeros")
 		_, view := newUsageTexture(t, device, wgpu.TextureUsageStorageBinding|wgpu.TextureUsageTextureBinding)
@@ -347,7 +347,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 // the render pass, from the pass usage scope rather than an eager barrier at
 // the end of the pending writes.
 func TestWriteBufferThenDrawReadsIt(t *testing.T) {
-	forEachOverrideBackend(t, gputypes.DownlevelFlagsIndirectExecution, func(t *testing.T, device *wgpu.Device) {
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsIndirectExecution, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		skipKnownGap(t, "gles", "P1-GLES-016", "DrawIndirect draws nothing")
 		vertices := newPublicBuffer(t, device, 6*4, wgpu.BufferUsageVertex|wgpu.BufferUsageCopyDst)
 		uniform := newPublicBuffer(t, device, 16, wgpu.BufferUsageUniform|wgpu.BufferUsageCopyDst)
