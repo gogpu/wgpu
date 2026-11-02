@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/metal/mslmap"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
@@ -137,19 +138,32 @@ func (m *ShaderModule) Destroy() {
 	}
 }
 
+// Pipeline stages a Metal pipeline layout lays its bindings out for. Each has
+// its own argument tables, numbered over the bindings visible to it.
+const (
+	stageVertex = iota
+	stageFragment
+	stageCompute
+	stageCount
+)
+
+// stageVisibility holds the visibility bit of each pipeline stage.
+var stageVisibility = [stageCount]gputypes.ShaderStages{
+	stageVertex:   gputypes.ShaderStageVertex,
+	stageFragment: gputypes.ShaderStageFragment,
+	stageCompute:  gputypes.ShaderStageCompute,
+}
+
 // BindGroupLayout implements hal.BindGroupLayout for Metal.
 type BindGroupLayout struct {
+	// entries are sorted by binding number (mslmap.SortEntries).
 	entries []gputypes.BindGroupLayoutEntry
 	device  *Device
 
-	// Per-type resource counts for this layout.
-	// Used by PipelineLayout to compute cumulative slot offsets across groups.
-	// naga MSL generates sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
-	// indices across all bind groups, so each group must know how many resources
-	// of each type it contributes.
-	bufferCount  int
-	textureCount int
-	samplerCount int
+	// stageSlots holds, per pipeline stage, the slot of each entry counted
+	// from the group's first slot in its argument table, or -1 if the entry
+	// is not visible to the stage (mslmap.GroupSlots).
+	stageSlots [stageCount][]int
 }
 
 // Destroy releases the bind group layout.
@@ -164,6 +178,35 @@ type BindGroup struct {
 	layout  *BindGroupLayout
 	entries []gputypes.BindGroupEntry
 	device  *Device
+
+	// resources holds one resource per layout entry, in binding order.
+	resources []bindGroupResource
+}
+
+// bindGroupResource is one resource of a bind group with what the encoder
+// needs to bind it.
+//
+// Reference: Rust wgpu-hal metal/mod.rs BindGroup and BufferLikeResource,
+// built by metal/device.rs create_bind_group.
+type bindGroupResource struct {
+	kind mslmap.Kind
+	// handle is the id<MTLBuffer>, id<MTLTexture> or id<MTLSamplerState>;
+	// zero if the bind group has no resource for the entry.
+	handle uintptr
+	// offset is the buffer offset of the binding, before the dynamic offset.
+	offset uint64
+	// dynamicIndex is the index of the binding's dynamic offset among the
+	// offsets SetBindGroup gets (binding order), or -1.
+	dynamicIndex int
+	// binding is the entry's binding number. size is the byte size of a
+	// storage buffer binding (sized is true only for those): naga's
+	// `_buffer_sizes` argument holds it, and the length and bounds checks of
+	// a runtime-sized array come from it.
+	binding uint32
+	size    uint64
+	sized   bool
+	// slots holds, per pipeline stage, the BindGroupLayout.stageSlots slot.
+	slots [stageCount]int
 }
 
 // Destroy releases the bind group.
@@ -173,36 +216,38 @@ func (g *BindGroup) Destroy() {
 	}
 }
 
-// GroupSlotOffsets holds the cumulative Metal slot offsets for a single bind group.
-// These offsets are the starting [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
-// indices for each group, computed from the resource counts of all preceding groups.
-//
-// Reference: Rust wgpu-hal metal/mod.rs BindGroupLayoutInfo.base_resource_indices.
-type GroupSlotOffsets struct {
-	Buffers  int
-	Textures int
-	Samplers int
-}
-
 // PipelineLayout implements hal.PipelineLayout for Metal.
 type PipelineLayout struct {
 	layouts []hal.BindGroupLayout
 	device  *Device
 
-	// groupOffsets holds the cumulative per-type slot offsets for each bind group.
-	// groupOffsets[i] contains the starting Metal indices for group i,
-	// computed by summing resource counts of groups 0..i-1.
+	// stages holds, per pipeline stage, the slots its shaders are compiled
+	// with and the first slot of each bind group.
 	//
-	// Reference: Rust wgpu-hal metal/mod.rs PipelineLayout.bind_group_infos.
-	groupOffsets []GroupSlotOffsets
+	// Reference: Rust wgpu-hal metal/mod.rs PipelineLayout.per_stage_map and
+	// bind_group_infos (base_resource_indices).
+	stages [stageCount]mslmap.StageLayout
+}
 
-	// totalBuffers is how many buffer bindings all bind group layouts declare
-	// together. It is also the first free Metal buffer slot, which is where
-	// naga's `_buffer_sizes` argument goes.
-	//
-	// Reference: Rust wgpu-hal metal/device.rs:851-856
-	// (info.sizes_buffer = Some(info.counters.buffers)).
-	totalBuffers int
+// noBindings is the stage layout of a pipeline without a pipeline layout:
+// its shaders can use no resources.
+var noBindings = mslmap.StageLayout{SizesSlot: -1}
+
+// stage returns the layout of stage s; l may be nil.
+func (l *PipelineLayout) stage(s int) *mslmap.StageLayout {
+	if l == nil {
+		return &noBindings
+	}
+	return &l.stages[s]
+}
+
+// groupBase returns the first slots of bind group index in stage s, or zero
+// slots if l is nil or has no such group.
+func (l *PipelineLayout) groupBase(s int, index uint32) mslmap.Counts {
+	if l == nil || int(index) >= len(l.stages[s].GroupBase) {
+		return mslmap.Counts{}
+	}
+	return l.stages[s].GroupBase[index]
 }
 
 // Destroy releases the pipeline layout.
@@ -223,11 +268,13 @@ type RenderPipeline struct {
 
 	// vertexSizes and fragmentSizes list, per stage, the bindings whose byte
 	// size naga's `_buffer_sizes` argument holds, in naga's field order. A
-	// stage without a runtime-sized array has none. sizesSlot is the buffer
-	// slot both stages were compiled with (PipelineLayout.totalBuffers).
-	vertexSizes   []ir.ResourceBinding
-	fragmentSizes []ir.ResourceBinding
-	sizesSlot     int
+	// stage without a runtime-sized array has none. vertexSizesSlot and
+	// fragmentSizesSlot are the buffer slots each stage was compiled with
+	// (mslmap.StageLayout.SizesSlot).
+	vertexSizes       []ir.ResourceBinding
+	fragmentSizes     []ir.ResourceBinding
+	vertexSizesSlot   int
+	fragmentSizesSlot int
 
 	depthStencil    ID // id<MTLDepthStencilState>
 	depthBias       float32
@@ -252,7 +299,7 @@ type ComputePipeline struct {
 	// sizesBindings lists the bindings whose byte size the kernel needs, in the
 	// field order that naga uses. It is empty if the kernel has no
 	// runtime-sized array. sizesSlot is the buffer slot that the MSL was
-	// compiled with, and it comes from PipelineLayout.totalBuffers.
+	// compiled with (mslmap.StageLayout.SizesSlot).
 	sizesBindings []ir.ResourceBinding
 	sizesSlot     int
 }

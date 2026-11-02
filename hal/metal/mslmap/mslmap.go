@@ -3,37 +3,37 @@
 
 // Package mslmap builds the naga MSL binding map for the Metal backend.
 //
-// naga translates WGSL arrayLength() into arithmetic on an extra entry point
-// argument named `_buffer_sizes`. naga gives that argument a [[buffer(N)]]
-// attribute only if msl.Options.PerEntryPointMap[ep].SizesBuffer is set. If it
-// is not set, Metal binds nothing to the argument and arrayLength() returns a
-// wrong value. The backend must therefore supply the map.
+// Metal binds resources by slot in three argument tables: buffers, textures
+// and samplers. The slots of a pipeline's shaders come from its pipeline
+// layout, as in Rust wgpu-hal: every stage numbers the bindings visible to it
+// in binding order, group after group (StageLayout), and the encoder binds a
+// bind group at the same slots (GroupSlots). The slots never depend on which
+// bindings a shader declares, so one shader module serves pipeline layouts
+// that place its bindings differently.
 //
-// The map must list every resource, not only the sizes buffer. When an entry
-// point is present in PerEntryPointMap, naga uses its Resources field as is and
-// does not number the other resources itself. A map with only SizesBuffer would
-// therefore lose every normal binding. This package copies naga's own numbering
-// rule, so the MSL for normal resources stays the same.
+// naga translates WGSL arrayLength() and the bounds checks of runtime-sized
+// arrays into arithmetic on an extra entry point argument named
+// `_buffer_sizes`. It goes to the buffer slot after the layout's buffers.
 //
 // The package has no build tags and does not call Objective-C, so its tests run
 // on any CI runner.
 //
-// Reference: Rust wgpu-hal metal/device.rs:851-856 (sizes_buffer =
-// counters.buffers) and metal/device.rs:138-145 (load_shader takes the layout).
+// Reference: Rust wgpu-hal metal/device.rs create_pipeline_layout
+// (per_stage_map, sizes_buffer) and load_shader (one entry point per stage
+// with the layout's map).
 package mslmap
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 )
 
-// maxBufferSlot is the largest buffer slot naga can encode, because
-// msl.BindTarget stores the slot in a uint8. Real Metal devices allow only 31
-// buffers, so a value above this limit means the caller made a mistake.
+// maxBufferSlot is the largest slot naga can encode, because msl.BindTarget
+// stores the slot in a uint8. Real Metal devices allow only 31 buffers, so a
+// value above this limit means the caller made a mistake.
 const maxBufferSlot = 255
 
 // BaseOptions returns the MSL options every Metal shader starts from, before
@@ -52,146 +52,12 @@ func BaseOptions() msl.Options {
 	}
 }
 
-// Options returns MSL options that put naga's `_buffer_sizes` argument at
-// buffer slot sizesSlot. It does this for every entry point in module, and it
-// numbers all other resources the same way naga does.
-//
-// sizesSlot is the number of buffer bindings that the pipeline layout declares.
-// That is the first free slot, directly after the last declared buffer. Rust
-// wgpu-hal picks the slot the same way, after it walks the pipeline layout.
-func Options(module *ir.Module, sizesSlot int) (msl.Options, error) {
-	if sizesSlot < 0 || sizesSlot > maxBufferSlot {
-		return BaseOptions(), fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
-	}
-	return StageOptions(module, module, sizesSlot)
-}
-
-// StageOptions returns MSL options for module, which naga.ProcessOverrides
-// made from source for one pipeline stage. The resources are numbered from
-// the globals of source, the same way naga numbers the whole module. The
-// specialized module keeps only the globals its entry point uses, so naga's
-// own numbering of it would move the other resources to other slots than the
-// ones the encoder binds.
-//
-// If sizesSlot is negative, the options give no slot to naga's
-// `_buffer_sizes` argument, as msl.DefaultOptions does not; otherwise it is
-// the slot, as for Options.
-func StageOptions(source, module *ir.Module, sizesSlot int) (msl.Options, error) {
-	opts := BaseOptions()
-	if source == nil || module == nil {
-		return opts, fmt.Errorf("mslmap: nil IR module")
-	}
-	if sizesSlot > maxBufferSlot {
-		return opts, fmt.Errorf("mslmap: buffer sizes slot %d out of range 0..%d", sizesSlot, maxBufferSlot)
-	}
-
-	resources, err := autoResourceMap(source)
-	if err != nil {
-		return opts, err
-	}
-
-	var sizes *uint8
-	if sizesSlot >= 0 {
-		slot := uint8(sizesSlot)
-		sizes = &slot
-	}
-	perEP := make(map[string]msl.EntryPointResources, len(module.EntryPoints))
-	for i := range module.EntryPoints {
-		// The key is the WGSL entry point name, which is the IR name.
-		// It is not the MSL function name, which naga can rename.
-		perEP[module.EntryPoints[i].Name] = msl.EntryPointResources{
-			Resources:   resources,
-			SizesBuffer: sizes,
-		}
-	}
-	opts.PerEntryPointMap = perEP
-
-	return opts, nil
-}
-
-// autoResourceMap copies the numbering rule of naga's computeResourceMap. It
-// takes every global variable that has a binding, sorts them by group and then
-// by binding, and gives each one an index. Samplers, textures and buffers are
-// counted apart, and each kind starts at zero.
-//
-// The encoder already binds bind group entries in this same order, so the
-// current code depends on this rule. Because the map comes from the IR, the MSL
-// for these resources does not change.
-//
-// Reference: naga v0.18.0 msl/internal/codegen/functions.go:1538-1600.
-func autoResourceMap(module *ir.Module) (map[ir.ResourceBinding]msl.BindTarget, error) {
-	type entry struct {
-		binding ir.ResourceBinding
-		kind    int // 0=buffer, 1=texture, 2=sampler
-	}
-
-	entries := make([]entry, 0, len(module.GlobalVariables))
-	for _, global := range module.GlobalVariables {
-		if global.Binding == nil {
-			continue
-		}
-		if int(global.Type) >= len(module.Types) {
-			continue
-		}
-
-		kind := 0
-		switch module.Types[global.Type].Inner.(type) {
-		case ir.SamplerType:
-			kind = 2
-		case ir.ImageType:
-			kind = 1
-		}
-
-		entries = append(entries, entry{binding: *global.Binding, kind: kind})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].binding.Group != entries[j].binding.Group {
-			return entries[i].binding.Group < entries[j].binding.Group
-		}
-		return entries[i].binding.Binding < entries[j].binding.Binding
-	})
-
-	resources := make(map[ir.ResourceBinding]msl.BindTarget, len(entries))
-	var nextBuffer, nextTexture, nextSampler uint8
-	for _, e := range entries {
-		var next *uint8
-		switch e.kind {
-		case 1:
-			next = &nextTexture
-		case 2:
-			next = &nextSampler
-		default:
-			next = &nextBuffer
-		}
-		idx := *next
-		if idx == maxBufferSlot {
-			// The index is a uint8, so the next resource of this
-			// kind would have no valid slot.
-			return nil, fmt.Errorf("mslmap: more than %d resources of one kind", maxBufferSlot)
-		}
-		*next = idx + 1
-
-		var target msl.BindTarget
-		switch e.kind {
-		case 1:
-			target.Texture = &idx
-		case 2:
-			target.Sampler = &msl.BindSamplerTarget{Slot: idx}
-		default:
-			target.Buffer = &idx
-		}
-		resources[e.binding] = target
-	}
-
-	return resources, nil
-}
-
 // RuntimeArrayBindings returns the bindings of the global variables whose type
 // holds a runtime-sized array. The order is the IR declaration order.
 //
-// naga builds one uint32 field per such global, in this same order. Each field
-// must hold the byte size of the buffer that is bound to it.
+// naga builds one uint32 field per such global of the module, in this same
+// order, whichever entry point it writes. Each field must hold the byte size
+// of the binding that is bound to it.
 //
 // Reference: naga v0.18.0 msl/internal/codegen/writer.go:786-797
 // (scanBufferSizeGlobals).

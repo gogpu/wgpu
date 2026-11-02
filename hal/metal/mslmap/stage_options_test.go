@@ -6,6 +6,7 @@ package mslmap_test
 import (
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
@@ -61,11 +62,12 @@ func specialize(t *testing.T, source *ir.Module, stage ir.ShaderStage, name stri
 	return out
 }
 
-// TestStageOptionsKeepWholeModuleSlots checks that a module specialized for
-// entry point b keeps binding 1 at buffer slot 1, its slot in the whole
-// module, which the encoder binds. naga's own numbering of the specialized
-// module, where binding 1 is the only buffer, would put it at slot 0.
-func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
+// TestStageLayoutKeepsSlotsOfSpecializedModule checks that a module
+// specialized for entry point b keeps binding 1 at buffer slot 1, its slot in
+// the pipeline layout, which the encoder binds. naga's own numbering of the
+// specialized module, where binding 1 is the only buffer, would put it at
+// slot 0.
+func TestStageLayoutKeepsSlotsOfSpecializedModule(t *testing.T) {
 	t.Parallel()
 
 	source := lower(t, wgslTwoStages)
@@ -77,14 +79,11 @@ func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
 	}
 	t.Logf("naga's own numbering of the specialized module: second at [[buffer(%s)]]", bufferSlots(own)["second"])
 
-	opts, err := mslmap.StageOptions(source, stage, -1)
-	if err != nil {
-		t.Fatalf("StageOptions: %v", err)
-	}
-	if opts.PerEntryPointMap["b"].SizesBuffer != nil {
-		t.Error("StageOptions with sizesSlot -1 set a sizes buffer slot")
-	}
-	out, _, err := msl.Compile(stage, opts)
+	layout := stageLayout(t, gputypes.ShaderStageCompute, []gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+		{Binding: 1, Visibility: gputypes.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+	})
+	out, _, err := msl.Compile(stage, layout.Options(ir.StageCompute, "b"))
 	if err != nil {
 		t.Fatalf("msl.Compile: %v", err)
 	}
@@ -93,15 +92,13 @@ func TestStageOptionsKeepWholeModuleSlots(t *testing.T) {
 	}
 }
 
-// TestStageOptionsRenderStageReadsRuntimeArray guards P1-MTL-005. A render
-// stage of a module with an override is specialized, so it gets an explicit
-// entry point map. Since naga v0.20.5 (Rust parity) msl.Compile refuses a
-// mapped entry point that needs the `_buffer_sizes` argument when the map
-// gives it no slot; with sizesSlot -1, as the render path used to pass, this
-// test failed with `entry point "vs" has no sizes buffer`. The render path now
-// passes the slot after the layout's buffers whenever the stage has a
-// runtime-sized array, as compute does.
-func TestStageOptionsRenderStageReadsRuntimeArray(t *testing.T) {
+// TestStageLayoutRenderStageReadsRuntimeArray guards P1-MTL-005. Since naga
+// v0.20.5 (Rust parity) msl.Compile refuses a mapped entry point that needs
+// the `_buffer_sizes` argument when the map gives it no slot; the render
+// path once passed none and failed with `entry point "vs" has no sizes
+// buffer`. A stage that sees a storage buffer gets the slot after its
+// buffers, as compute does.
+func TestStageLayoutRenderStageReadsRuntimeArray(t *testing.T) {
 	t.Parallel()
 
 	source := lower(t, `
@@ -123,11 +120,10 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 		t.Fatalf("RuntimeArrayBindings = %v, want only @group(0) @binding(0)", bindings)
 	}
 	// One buffer in the layout, so the sizes argument goes to slot 1.
-	opts, err := mslmap.StageOptions(source, stage, 1)
-	if err != nil {
-		t.Fatalf("StageOptions: %v", err)
-	}
-	out, _, err := msl.Compile(stage, opts)
+	layout := stageLayout(t, gputypes.ShaderStageVertex, []gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
+	})
+	out, _, err := msl.Compile(stage, layout.Options(ir.StageVertex, "vs"))
 	if err != nil {
 		t.Fatalf("msl.Compile: %v", err)
 	}
