@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -60,6 +61,10 @@ type IndirectValidation struct {
 	// validated workgroup counts. Reused across frames.
 	dstBuffer hal.Buffer
 
+	// tableMu guards the lazy creation of indexTable and dstBindGroups on
+	// the first DispatchIndirect (destinationGroups) and their release.
+	tableMu sync.Mutex
+
 	// indexTable is a constant uniform buffer: entry i, at i*indexStride,
 	// holds the u32 i, for every index a DispatchSource can have.
 	indexTable hal.Buffer
@@ -70,6 +75,10 @@ type IndirectValidation struct {
 
 	// storageAlignment is the device's minStorageBufferOffsetAlignment.
 	storageAlignment uint32
+
+	// indexStride is the device's minUniformBufferOffsetAlignment, the
+	// distance between index table entries.
+	indexStride uint64
 
 	// maxComputeWorkgroupsPerDimension is cached from device limits.
 	maxWorkgroups uint32
@@ -238,14 +247,6 @@ func buildIndirectValidation(
 		return nil, errors.New("dst buffer: HAL returned nil")
 	}
 
-	entries := storageAlign / 4
-	if err := b.createIndexTable(halDevice, entries, indexStride); err != nil {
-		return nil, err
-	}
-	if err := b.createDstBindGroups(halDevice, entries, indexStride); err != nil {
-		return nil, err
-	}
-
 	return &IndirectValidation{
 		shaderModule:       b.shaderModule,
 		pipeline:           b.pipeline,
@@ -253,12 +254,39 @@ func buildIndirectValidation(
 		srcBindGroupLayout: b.srcBindGroupLayout,
 		dstBindGroupLayout: b.dstBindGroupLayout,
 		dstBuffer:          b.dstBuffer,
-		indexTable:         b.indexTable,
-		dstBindGroups:      b.dstBindGroups,
 		storageAlignment:   storageAlign,
+		indexStride:        indexStride,
 		maxWorkgroups:      limits.MaxComputeWorkgroupsPerDimension,
 		device:             halDevice,
 	}, nil
+}
+
+// destinationGroups returns the destination bind groups, creating the index
+// table and the groups on the first call: a device that never dispatches
+// indirectly never allocates them. Dispose releases them with the device.
+func (iv *IndirectValidation) destinationGroups() ([]hal.BindGroup, error) {
+	iv.tableMu.Lock()
+	defer iv.tableMu.Unlock()
+	if iv.dstBindGroups != nil {
+		return iv.dstBindGroups, nil
+	}
+	if iv.device == nil {
+		return nil, ErrResourceDestroyed
+	}
+	// The builder holds only what this call creates, so its cleanup on
+	// failure leaves the pipeline and the destination buffer alone.
+	b := &indirectValidationBuilder{device: iv.device}
+	entries := iv.storageAlignment / 4
+	if err := b.createIndexTable(iv.device, entries, iv.indexStride); err != nil {
+		b.cleanup()
+		return nil, err
+	}
+	if err := b.createDstBindGroups(iv.device, iv.dstBindGroupLayout, iv.dstBuffer, entries, iv.indexStride); err != nil {
+		b.cleanup()
+		return nil, err
+	}
+	iv.indexTable, iv.dstBindGroups = b.indexTable, b.dstBindGroups
+	return iv.dstBindGroups, nil
 }
 
 // createPipeline creates the shader module, the bind group layouts, the
@@ -360,15 +388,21 @@ func (b *indirectValidationBuilder) createIndexTable(halDevice hal.Device, entri
 }
 
 // createDstBindGroups creates one destination bind group per source index.
-func (b *indirectValidationBuilder) createDstBindGroups(halDevice hal.Device, entries uint32, stride uint64) error {
+func (b *indirectValidationBuilder) createDstBindGroups(
+	halDevice hal.Device,
+	layout hal.BindGroupLayout,
+	dst hal.Buffer,
+	entries uint32,
+	stride uint64,
+) error {
 	b.dstBindGroups = make([]hal.BindGroup, 0, entries)
 	for i := uint32(0); i < entries; i++ {
 		g, err := halDevice.CreateBindGroup(&hal.BindGroupDescriptor{
 			Label:  "wgpu_indirect_dispatch_dst_group",
-			Layout: b.dstBindGroupLayout,
+			Layout: layout,
 			Entries: []gputypes.BindGroupEntry{
 				{Binding: 0, Resource: gputypes.BufferBinding{
-					Buffer: b.dstBuffer.NativeHandle(), Offset: 0, Size: indirect.DispatchArgsSize,
+					Buffer: dst.NativeHandle(), Offset: 0, Size: indirect.DispatchArgsSize,
 				}},
 				{Binding: 1, Resource: gputypes.BufferBinding{
 					Buffer: b.indexTable.NativeHandle(), Offset: uint64(i) * stride, Size: stride,
@@ -396,8 +430,12 @@ func (iv *IndirectValidation) DispatchParams(buffer *Buffer, offset uint64) (Ind
 	if buffer == nil || buffer.indirectSources == nil {
 		return IndirectDispatchParams{}, errors.New("indirect validation: buffer was not created with INDIRECT usage")
 	}
+	dstGroups, err := iv.destinationGroups()
+	if err != nil {
+		return IndirectDispatchParams{}, fmt.Errorf("indirect validation: %w", err)
+	}
 	src := indirect.DispatchSourceFor(offset, buffer.Size(), iv.storageAlignment)
-	if int(src.Index) >= len(iv.dstBindGroups) {
+	if int(src.Index) >= len(dstGroups) {
 		return IndirectDispatchParams{}, fmt.Errorf("indirect validation: source index %d out of range", src.Index)
 	}
 	srcGroup, err := buffer.indirectSources.Get(src.BindingOffset, func() (hal.BindGroup, error) {
@@ -408,7 +446,7 @@ func (iv *IndirectValidation) DispatchParams(buffer *Buffer, offset uint64) (Ind
 	}
 	return IndirectDispatchParams{
 		Pipeline:     iv.pipeline,
-		DstBindGroup: iv.dstBindGroups[src.Index],
+		DstBindGroup: dstGroups[src.Index],
 		SrcBindGroup: srcGroup,
 		DstBuffer:    iv.dstBuffer,
 	}, nil
@@ -462,7 +500,12 @@ func (iv *IndirectValidation) MaxWorkgroups() uint32 {
 // Dispose releases all GPU resources owned by this IndirectValidation.
 // Called during Device.Release(). Matches Rust dispatch.rs:331-351 (dispose).
 func (iv *IndirectValidation) Dispose() {
-	if iv == nil || iv.device == nil {
+	if iv == nil {
+		return
+	}
+	iv.tableMu.Lock()
+	defer iv.tableMu.Unlock()
+	if iv.device == nil {
 		return
 	}
 	b := &indirectValidationBuilder{
@@ -477,5 +520,6 @@ func (iv *IndirectValidation) Dispose() {
 		dstBindGroups:      iv.dstBindGroups,
 	}
 	b.cleanup()
+	iv.indexTable, iv.dstBindGroups = nil, nil
 	iv.device = nil
 }

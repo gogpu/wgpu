@@ -121,19 +121,31 @@ func TestIndirectDispatchParamsSelectPerDispatchInputs(t *testing.T) {
 	if iv == nil {
 		t.Fatal("IndirectValidation not created")
 	}
-	// The index table: entry i at i*64 holds i, for i < 256/4.
-	table := halDevice.memory[64*64]
-	for _, i := range []uint32{0, 3, 63} {
-		if got := binary.LittleEndian.Uint32(table[i*64:]); got != i {
-			t.Fatalf("index table entry %d = %d", i, got)
-		}
+	const tableSize = 64 * 64 // 256/4 entries at a 64-byte stride
+	if _, ok := halDevice.memory[tableSize]; ok || len(halDevice.created) != 0 {
+		t.Fatalf("index table or bind groups created with the device (%d groups); they must wait for the first DispatchIndirect",
+			len(halDevice.created))
 	}
 
 	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: "args", Size: 1024, Usage: gputypes.BufferUsageIndirect})
 	if err != nil {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
-	before := len(halDevice.created)
+	if _, err := iv.DispatchParams(buffer, 0); err != nil {
+		t.Fatalf("DispatchParams: %v", err)
+	}
+	// The index table: entry i at i*64 holds i, for i < 256/4.
+	table := halDevice.memory[tableSize]
+	if table == nil {
+		t.Fatal("index table not created by the first DispatchIndirect")
+	}
+	for _, i := range []uint32{0, 3, 63} {
+		if got := binary.LittleEndian.Uint32(table[i*64:]); got != i {
+			t.Fatalf("index table entry %d = %d", i, got)
+		}
+	}
+	const dstGroups = 64
+	before := dstGroups // the source group for aligned offset 0 is counted below
 	for _, tc := range []struct {
 		offset        uint64
 		srcOffset     uint64
@@ -175,5 +187,47 @@ func TestIndirectDispatchParamsSelectPerDispatchInputs(t *testing.T) {
 	}
 	if _, err := iv.DispatchParams(plain, 0); err == nil {
 		t.Error("DispatchParams on a buffer without INDIRECT usage: no error")
+	}
+
+	// The destination groups and the index table go with the device.
+	device.Destroy()
+	if got := len(halDevice.destroyed); got != 3+dstGroups {
+		t.Errorf("bind groups destroyed after the device: %d, want %d", got, 3+dstGroups)
+	}
+}
+
+// TestIndirectSourceGroupsOutliveSubmittedWork checks the lifetime the
+// encoders rely on: a pass that records DispatchIndirect clones the buffer's
+// ResourceRef, so the user's Release does not destroy the buffer's cached
+// source bind groups; they go when the clone is dropped at GPU completion,
+// as Rust disposes Buffer::indirect_validation_bind_groups when the last
+// Arc drops.
+func TestIndirectSourceGroupsOutliveSubmittedWork(t *testing.T) {
+	halDevice := &ivTestDevice{}
+	device := NewDevice(halDevice, &Adapter{}, 0, gputypes.DefaultLimits(), "iv")
+	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: "args", Size: 64, Usage: gputypes.BufferUsageIndirect})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	buffer.Ref = NewResourceRef("Buffer:args", buffer.Destroy) // as wgpu.Device.CreateBuffer does
+	p, err := device.IndirectValidation().DispatchParams(buffer, 0)
+	if err != nil {
+		t.Fatalf("DispatchParams: %v", err)
+	}
+
+	buffer.Ref.Clone() // the encoder's reference (ComputePassEncoder.trackRef)
+	buffer.Ref.Drop()  // the user's Release while the work is in flight
+	for _, g := range halDevice.destroyed {
+		if g == p.SrcBindGroup {
+			t.Fatal("source bind group destroyed while submitted work still uses the buffer")
+		}
+	}
+	buffer.Ref.Drop() // GPU completion (DestroyQueue triage)
+	found := false
+	for _, g := range halDevice.destroyed {
+		found = found || g == p.SrcBindGroup
+	}
+	if !found {
+		t.Error("source bind group not destroyed after the last reference dropped")
 	}
 }

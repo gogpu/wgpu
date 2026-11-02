@@ -90,6 +90,16 @@ func TestDispatchIndirectReadsItsOwnArguments(t *testing.T) {
 		if got := r.run(t, [][]uint64{{12, 268}, {0}, {268}}); got != 17 {
 			t.Errorf("offsets 12+268, 0, 268 from three encoders: %d invocations, want 17", got)
 		}
+
+		// The validation bind groups of a buffer released while its work
+		// is in flight must live until that work completes (the layers
+		// report a destroyed buffer or descriptor set in a submitted
+		// command buffer).
+		released := newIndirectRig(t, device)
+		released.releaseArgs = true
+		if got := released.run(t, [][]uint64{{268, 12}, {0}}); got != 11 {
+			t.Errorf("offsets 268+12, 0 with the buffer released after submit: %d invocations, want 11", got)
+		}
 	})
 }
 
@@ -99,6 +109,9 @@ type indirectRig struct {
 	args     *wgpu.Buffer
 	bgl      *wgpu.BindGroupLayout
 	pipeline *wgpu.ComputePipeline
+	// releaseArgs releases the arguments buffer right after the submits,
+	// while the GPU may still run the recorded commands.
+	releaseArgs bool
 }
 
 func newIndirectRig(t *testing.T, device *wgpu.Device) *indirectRig {
@@ -147,6 +160,9 @@ func (r *indirectRig) run(t *testing.T, encoders [][]uint64) uint32 {
 		if _, err := r.device.Queue().Submit(cmd); err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
+	}
+	if r.releaseArgs {
+		r.args.Release()
 	}
 	submitCopy(t, r.device, func(enc *wgpu.CommandEncoder) {
 		enc.CopyBufferToBuffer(counter, 0, staging, 0, 16)
