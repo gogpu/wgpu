@@ -168,8 +168,8 @@ func (a *Adapter) extendedWebGPUFeatures(queueFamily *uint32) gputypes.Features 
 
 // queryExtendedFeatures reads the device extensions and the pNext feature
 // structs the device can report at its API version.
-func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, deviceAPIVersion uint32, core *vk.PhysicalDeviceFeatures) extendedFeatureSupport {
-	s := extendedFeatureSupport{
+func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, deviceAPIVersion uint32, core *vk.PhysicalDeviceFeatures) *extendedFeatureSupport {
+	s := &extendedFeatureSupport{
 		apiVersion: min(deviceAPIVersion, instanceAPIVersion),
 		extensions: i.deviceExtensions(device),
 		core:       *core,

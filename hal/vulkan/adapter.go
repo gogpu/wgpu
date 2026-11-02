@@ -22,7 +22,9 @@ type Adapter struct {
 	physicalDevice vk.PhysicalDevice
 	properties     vk.PhysicalDeviceProperties
 	features       vk.PhysicalDeviceFeatures
-	ext            extendedFeatureSupport
+	// ext is a pointer: the struct holds a map, and Adapter must stay
+	// comparable (it was before; a PATCH may not change that).
+	ext *extendedFeatureSupport
 }
 
 // Open creates a logical device with the requested features and limits.
