@@ -506,6 +506,18 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 // element 0). Vulkan and DX12 take it natively; Metal, GLES and software
 // emulate it in their vertex input setup.
 func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, limits gputypes.Limits) error {
+	// RP10e: at most maxVertexBuffers buffers.
+	if len(buffers) > int(limits.MaxVertexBuffers) {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorTooManyVertexBuffers,
+			Label: label,
+			Given: len(buffers),
+			Limit: limits.MaxVertexBuffers,
+		}
+	}
+
+	// Shader locations of every buffer's attributes, for RP10h.
+	locations := make(map[uint32]struct{})
 	maxStride := uint64(limits.MaxVertexBufferArrayStride)
 	for i := range buffers {
 		vb := &buffers[i]
@@ -553,6 +565,68 @@ func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, 
 				}
 			}
 		}
+
+		// RP10f-RP10h: attribute offsets and shader locations.
+		if err := validateVertexAttributes(vb, bufferIndex, label, limits, locations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxVertexAttributeOffset bounds a vertex attribute offset: Rust wgpu-core
+// rejects an offset of 0x10000000 or more (create_render_pipeline,
+// wgpu-core/src/device/resource.rs).
+const maxVertexAttributeOffset = 0x10000000
+
+// validateVertexAttributes checks the attributes of one vertex buffer in the
+// order of Rust wgpu-core create_render_pipeline
+// (wgpu-core/src/device/resource.rs): per attribute the offset alignment
+// (RP10f) and the location limit (RP10g), then per attribute the offset bound
+// (RP10f) and location clashes with every attribute seen so far (RP10h).
+// locations collects the shader locations across the pipeline's buffers.
+//
+// Rust's later total-count check against maxVertexAttributes cannot fail
+// after these: unique locations below maxVertexAttributes bound the total.
+// Its 64-bit format check needs Float64 vertex formats, which gputypes does
+// not define.
+func validateVertexAttributes(
+	vb *gputypes.VertexBufferLayout,
+	bufferIndex uint32,
+	label string,
+	limits gputypes.Limits,
+	locations map[uint32]struct{},
+) error {
+	attrError := func(kind CreateRenderPipelineErrorKind, j uint32, attr gputypes.VertexAttribute) error {
+		return &CreateRenderPipelineError{
+			Kind:            kind,
+			Label:           label,
+			BufferIndex:     bufferIndex,
+			ArrayStride:     vb.ArrayStride,
+			AttributeIndex:  j,
+			AttributeOffset: attr.Offset,
+			AttributeFormat: attr.Format.String(),
+			ShaderLocation:  attr.ShaderLocation,
+			Limit:           limits.MaxVertexAttributes,
+		}
+	}
+	for j, attr := range vb.Attributes {
+		// An undefined format has size 0; it then needs no alignment here.
+		if alignment := min(4, attr.Format.Size()); alignment > 0 && attr.Offset%alignment != 0 {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if attr.ShaderLocation >= limits.MaxVertexAttributes {
+			return attrError(CreateRenderPipelineErrorVertexAttributeLocationTooLarge, uint32(j), attr)
+		}
+	}
+	for j, attr := range vb.Attributes {
+		if attr.Offset >= maxVertexAttributeOffset {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if _, clash := locations[attr.ShaderLocation]; clash {
+			return attrError(CreateRenderPipelineErrorShaderLocationClash, uint32(j), attr)
+		}
+		locations[attr.ShaderLocation] = struct{}{}
 	}
 	return nil
 }

@@ -590,6 +590,23 @@ const (
 	// Deprecated: arrayStride 0 (broadcast) is supported on every backend and
 	// is no longer rejected; this kind is never returned.
 	CreateRenderPipelineErrorVertexStrideZero
+	// CreateRenderPipelineErrorTooManyVertexBuffers indicates more vertex
+	// buffers than Limits.MaxVertexBuffers (Given, Limit).
+	// Rust: pipeline::CreateRenderPipelineError::TooManyVertexBuffers
+	CreateRenderPipelineErrorTooManyVertexBuffers
+	// CreateRenderPipelineErrorVertexAttributeInvalidOffset indicates a vertex
+	// attribute offset that is not a multiple of min(4, format size), or not
+	// below 2^28.
+	// Rust: pipeline::CreateRenderPipelineError::InvalidVertexAttributeOffset
+	CreateRenderPipelineErrorVertexAttributeInvalidOffset
+	// CreateRenderPipelineErrorVertexAttributeLocationTooLarge indicates a
+	// vertex attribute shaderLocation at or above Limits.MaxVertexAttributes.
+	// Rust: pipeline::CreateRenderPipelineError::VertexAttributeLocationTooLarge
+	CreateRenderPipelineErrorVertexAttributeLocationTooLarge
+	// CreateRenderPipelineErrorShaderLocationClash indicates two vertex
+	// attributes of the pipeline at one shaderLocation.
+	// Rust: pipeline::CreateRenderPipelineError::ShaderLocationClash
+	CreateRenderPipelineErrorShaderLocationClash
 )
 
 // CreateRenderPipelineError represents an error during render pipeline creation.
@@ -618,7 +635,15 @@ type CreateRenderPipelineError struct {
 	// AttributeFormat is the attribute vertex format for
 	// CreateRenderPipelineErrorVertexAttributeOutOfStride.
 	AttributeFormat string
-	HALError        error
+	// ShaderLocation is the attribute's shaderLocation for vertex attribute
+	// offset, location and clash errors.
+	ShaderLocation uint32
+	// Given and Limit are the count and the device limit for
+	// CreateRenderPipelineErrorTooManyVertexBuffers and the limit for
+	// CreateRenderPipelineErrorVertexAttributeLocationTooLarge.
+	Given    int
+	Limit    uint32
+	HALError error
 }
 
 // Error implements the error interface.
@@ -675,6 +700,30 @@ func (e *CreateRenderPipelineError) Error() string {
 	case CreateRenderPipelineErrorVertexStrideZero:
 		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] arrayStride 0 (broadcast) is not supported on native backends yet",
 			label, e.BufferIndex)
+	default:
+		return e.vertexAttributeMessage(label)
+	}
+}
+
+// vertexAttributeMessage is Error for the vertex buffer count and vertex
+// attribute kinds.
+func (e *CreateRenderPipelineError) vertexAttributeMessage(label string) string {
+	switch e.Kind {
+	case CreateRenderPipelineErrorTooManyVertexBuffers:
+		return fmt.Sprintf("render pipeline %q: %d vertex buffers exceed maxVertexBuffers %d", label, e.Given, e.Limit)
+	case CreateRenderPipelineErrorVertexAttributeInvalidOffset:
+		if e.AttributeOffset >= maxVertexAttributeOffset {
+			return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute at shaderLocation %d: offset %d is not below 2^28",
+				label, e.BufferIndex, e.ShaderLocation, e.AttributeOffset)
+		}
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute at shaderLocation %d: offset %d is not a multiple of min(4, size of %s)",
+			label, e.BufferIndex, e.ShaderLocation, e.AttributeOffset, e.AttributeFormat)
+	case CreateRenderPipelineErrorVertexAttributeLocationTooLarge:
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute shaderLocation %d is not below maxVertexAttributes %d",
+			label, e.BufferIndex, e.ShaderLocation, e.Limit)
+	case CreateRenderPipelineErrorShaderLocationClash:
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute shaderLocation %d is used by more than one attribute",
+			label, e.BufferIndex, e.ShaderLocation)
 	default:
 		return fmt.Sprintf("render pipeline %q: unknown error", label)
 	}

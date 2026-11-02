@@ -3033,22 +3033,137 @@ func TestValidateRenderPipelineDescriptor_VertexBuffers(t *testing.T) {
 	layout := func(stride uint64, attrs ...gputypes.VertexAttribute) gputypes.VertexBufferLayout {
 		return gputypes.VertexBufferLayout{ArrayStride: stride, StepMode: gputypes.VertexStepModeVertex, Attributes: attrs}
 	}
+	// at moves an attribute to a shader location.
+	at := func(attr gputypes.VertexAttribute, location uint32) gputypes.VertexAttribute {
+		attr.ShaderLocation = location
+		return attr
+	}
+	attr := func(format gputypes.VertexFormat, offset uint64, location uint32) gputypes.VertexAttribute {
+		return gputypes.VertexAttribute{Format: format, Offset: offset, ShaderLocation: location}
+	}
+	// buffersWithOneAttribute returns n buffers of one Float32 attribute each,
+	// at locations 0..n-1.
+	buffersWithOneAttribute := func(n int) []gputypes.VertexBufferLayout {
+		bufs := make([]gputypes.VertexBufferLayout, n)
+		for i := range bufs {
+			bufs[i] = layout(4, attr(gputypes.VertexFormatFloat32, 0, uint32(i)))
+		}
+		return bufs
+	}
+	// attributesInOneBuffer returns one buffer of n Float32 attributes at
+	// locations 0..n-1.
+	attributesInOneBuffer := func(n int) []gputypes.VertexBufferLayout {
+		attrs := make([]gputypes.VertexAttribute, n)
+		for i := range attrs {
+			attrs[i] = attr(gputypes.VertexFormatFloat32, uint64(4*i), uint32(i))
+		}
+		return []gputypes.VertexBufferLayout{layout(uint64(4*n), attrs...)}
+	}
 
 	tests := []struct {
 		name    string
 		buffers []gputypes.VertexBufferLayout
 		limits  func(*gputypes.Limits)
 		// wantKind is checked only when wantErr is true.
-		wantErr     bool
-		wantKind    CreateRenderPipelineErrorKind
-		wantBuffer  uint32
-		wantStride  uint64
-		wantAttrIdx uint32
+		wantErr      bool
+		wantKind     CreateRenderPipelineErrorKind
+		wantBuffer   uint32
+		wantStride   uint64
+		wantAttrIdx  uint32
+		wantLocation uint32
 	}{
+		// Rust wgpu-core validate_vertex_buffers (create_render_pipeline,
+		// wgpu-core/src/device/resource.rs) and WebGPU GPUVertexBufferLayout.
+		{name: "maxVertexBuffers buffers", buffers: buffersWithOneAttribute(8)},
+		{
+			name:     "more buffers than maxVertexBuffers",
+			buffers:  buffersWithOneAttribute(9),
+			wantErr:  true,
+			wantKind: CreateRenderPipelineErrorTooManyVertexBuffers,
+		},
+		{name: "unorm8x2 at offset 2", buffers: []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatUnorm8x2, 2, 0))}},
+		{
+			name:        "unorm8x2 at offset 1 is misaligned",
+			buffers:     []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatUnorm8x2, 1, 0))},
+			wantErr:     true,
+			wantKind:    CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:  4,
+			wantAttrIdx: 0,
+		},
+		{
+			name:         "float32 at offset 2 is misaligned",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatFloat32, 0, 0), attr(gputypes.VertexFormatFloat32, 2, 3))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   8,
+			wantAttrIdx:  1,
+			wantLocation: 3,
+		},
+		{
+			name:         "unorm16x2 at offset 1 is misaligned",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatUnorm16x2, 1, 0))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   8,
+			wantAttrIdx:  0,
+			wantLocation: 0,
+		},
+		{
+			// Reachable only on an adapter whose stride limit is above 2^28.
+			name:         "offset 2^28 is too large",
+			buffers:      []gputypes.VertexBufferLayout{layout(0x10000010, attr(gputypes.VertexFormatFloat32, 0x10000000, 1))},
+			limits:       func(l *gputypes.Limits) { l.MaxVertexBufferArrayStride = 0x20000000 },
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   0x10000010,
+			wantLocation: 1,
+		},
+		{name: "location maxVertexAttributes-1", buffers: []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatFloat32, 0, 15))}},
+		{
+			name:         "location maxVertexAttributes",
+			buffers:      []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatFloat32, 0, 16))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeLocationTooLarge,
+			wantStride:   4,
+			wantLocation: 16,
+		},
+		{
+			name:         "location used twice in one buffer",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatFloat32, 0, 2), attr(gputypes.VertexFormatFloat32, 4, 2))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorShaderLocationClash,
+			wantStride:   8,
+			wantAttrIdx:  1,
+			wantLocation: 2,
+		},
+		{
+			name: "location used twice across buffers",
+			buffers: []gputypes.VertexBufferLayout{
+				layout(4, attr(gputypes.VertexFormatFloat32, 0, 5)),
+				layout(4, attr(gputypes.VertexFormatFloat32, 0, 5)),
+			},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorShaderLocationClash,
+			wantBuffer:   1,
+			wantStride:   4,
+			wantLocation: 5,
+		},
+		{name: "maxVertexAttributes attributes", buffers: attributesInOneBuffer(16)},
+		{
+			// A 17th attribute needs a location of 16 or a repeated one:
+			// unique locations below maxVertexAttributes bound the total.
+			name:         "more attributes than maxVertexAttributes",
+			buffers:      attributesInOneBuffer(17),
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeLocationTooLarge,
+			wantStride:   68,
+			wantAttrIdx:  16,
+			wantLocation: 16,
+		},
 		{name: "no vertex buffers"},
 		{name: "stride 4", buffers: []gputypes.VertexBufferLayout{layout(4, gputypes.VertexAttribute{Format: gputypes.VertexFormatFloat32})}},
 		{name: "stride 2048 (default limit)", buffers: []gputypes.VertexBufferLayout{layout(2048, float32x4(0))}},
-		{name: "attribute exactly fills the stride", buffers: []gputypes.VertexBufferLayout{layout(32, float32x4(0), float32x4(16))}},
+		{name: "attribute exactly fills the stride", buffers: []gputypes.VertexBufferLayout{layout(32, float32x4(0), at(float32x4(16), 1))}},
 		{
 			name:    "stride above an unset limit is not checked",
 			buffers: []gputypes.VertexBufferLayout{layout(4096, float32x4(0))},
@@ -3117,6 +3232,9 @@ func TestValidateRenderPipelineDescriptor_VertexBuffers(t *testing.T) {
 			if crpe.AttributeIndex != tt.wantAttrIdx {
 				t.Errorf("AttributeIndex = %d, want %d", crpe.AttributeIndex, tt.wantAttrIdx)
 			}
+			if crpe.ShaderLocation != tt.wantLocation {
+				t.Errorf("ShaderLocation = %d, want %d", crpe.ShaderLocation, tt.wantLocation)
+			}
 			if crpe.Error() == "" {
 				t.Error("Error message should not be empty")
 			}
@@ -3154,6 +3272,31 @@ func TestCreateRenderPipelineError_VertexBufferMessages(t *testing.T) {
 			name:     "stride zero",
 			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideZero, Label: "test"},
 			contains: "broadcast) is not supported on native backends",
+		},
+		{
+			name:     "too many vertex buffers",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorTooManyVertexBuffers, Label: "test", Given: 9, Limit: 8},
+			contains: "9 vertex buffers exceed maxVertexBuffers 8",
+		},
+		{
+			name:     "misaligned attribute offset",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "test", ShaderLocation: 3, AttributeOffset: 2, AttributeFormat: "Float32"},
+			contains: "offset 2 is not a multiple of min(4, size of Float32)",
+		},
+		{
+			name:     "attribute offset too large",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "test", AttributeOffset: 0x10000000, AttributeFormat: "Float32"},
+			contains: "offset 268435456 is not below 2^28",
+		},
+		{
+			name:     "location too large",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeLocationTooLarge, Label: "test", ShaderLocation: 16, Limit: 16},
+			contains: "shaderLocation 16 is not below maxVertexAttributes 16",
+		},
+		{
+			name:     "location clash",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorShaderLocationClash, Label: "test", ShaderLocation: 5},
+			contains: "shaderLocation 5 is used by more than one attribute",
 		},
 	}
 	for _, tt := range tests {
