@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
@@ -355,6 +356,14 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 		return fmt.Errorf("wgpu: WriteTexture: size is nil")
 	}
 
+	skip, err := validateTextureWrite(dst, data, layout, size)
+	if err != nil {
+		return fmt.Errorf("wgpu: WriteTexture: %w", err)
+	}
+	if skip {
+		return nil
+	}
+
 	halDst := dst.toHAL()
 	halLayout := layout.toHAL()
 	halSize := size.toHAL()
@@ -364,6 +373,29 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
+}
+
+// validateTextureWrite checks a WriteTexture upload as Rust wgpu-core
+// device/queue.rs write_texture_inner does: core.ValidateTextureWrite (usage,
+// copy range, aspect, format, sample count, data layout against the data
+// length) and the depth/stencil downlevel flag. skip reports a valid upload of
+// size zero, which Rust drops before any side effect. A texture without a core
+// texture (test stubs) is not validated.
+func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
+	if view, ok := dst.Texture.copyView(dst.MipLevel, dst.Origin, dst.Aspect); ok {
+		texelLayout := core.TexelCopyBufferLayout{
+			Offset:       layout.Offset,
+			BytesPerRow:  layout.BytesPerRow,
+			RowsPerImage: layout.RowsPerImage,
+		}
+		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
+			return false, err
+		}
+		if err := dst.Texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+			return false, err
+		}
+	}
+	return isEmptyExtent(*size), nil
 }
 
 // SetSwapchainSuppressed temporarily disables swapchain semaphore binding
