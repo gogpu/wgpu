@@ -60,3 +60,26 @@ func TestAdapterFeaturesTimestampQuery(t *testing.T) {
 		}
 	}
 }
+
+// TestAdapterFeaturesShaderCapabilities pins the shader capability features
+// DX12 offers: primitive index and clip distances on the HLSL/FXC path (clip
+// distances a deviation from Rust after Dawn), none on the DXIL path until
+// naga's DXIL output passes the readback tests (P1-API-008).
+func TestAdapterFeaturesShaderCapabilities(t *testing.T) {
+	both := gputypes.Features(gputypes.FeaturePrimitiveIndex) | gputypes.Features(gputypes.FeatureClipDistances)
+	caps := AdapterCapabilities{FeatureLevel: d3d12.D3D_FEATURE_LEVEL_12_0, ShaderModel: d3d12.D3D_SHADER_MODEL_6_7}
+	for _, tt := range []struct {
+		dxil string
+		want gputypes.Features
+	}{{"0", both}, {"", both}, {"1", 0}} {
+		t.Setenv(envDX12DXIL, tt.dxil)
+		for name, got := range map[string]gputypes.Features{
+			"Adapter":       (&Adapter{capabilities: caps}).Features() & both,
+			"AdapterLegacy": (&AdapterLegacy{capabilities: caps}).Features() & both,
+		} {
+			if got != tt.want {
+				t.Errorf("%s with GOGPU_DX12_DXIL=%q: shader capability features %v, want %v", name, tt.dxil, got, tt.want)
+			}
+		}
+	}
+}

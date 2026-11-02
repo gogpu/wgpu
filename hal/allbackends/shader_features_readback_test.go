@@ -45,6 +45,13 @@ var featurePowerPreferences = []struct {
 // backend and adapter that offers all of them; the others are skipped.
 func forEachFeatureDevice(t *testing.T, features gputypes.Features, required gputypes.DownlevelFlags, fn func(t *testing.T, device *wgpu.Device)) {
 	t.Helper()
+	forEachFeatureDeviceWith(t, features, 0, required, fn)
+}
+
+// forEachFeatureDeviceWith is forEachFeatureDevice that also enables the
+// optional features where the adapter offers them.
+func forEachFeatureDeviceWith(t *testing.T, features, optional gputypes.Features, required gputypes.DownlevelFlags, fn func(t *testing.T, device *wgpu.Device)) {
+	t.Helper()
 	for _, b := range featureBackends {
 		for _, pref := range featurePowerPreferences {
 			t.Run(b.name+"/"+pref.name, func(t *testing.T) {
@@ -56,13 +63,13 @@ func forEachFeatureDevice(t *testing.T, features gputypes.Features, required gpu
 				if b.dxilValidate {
 					t.Setenv("GOGPU_DX12_DXIL_VALIDATE", "1")
 				}
-				fn(t, openFeatureDevice(t, b.overrideBackend, pref.pref, features, required))
+				fn(t, openFeatureDevice(t, b.overrideBackend, pref.pref, features, optional, required))
 			})
 		}
 	}
 }
 
-func openFeatureDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPreference, features gputypes.Features, required gputypes.DownlevelFlags) *wgpu.Device {
+func openFeatureDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPreference, features, optional gputypes.Features, required gputypes.DownlevelFlags) *wgpu.Device {
 	t.Helper()
 	var flags gputypes.InstanceFlags
 	if b.backend == gputypes.BackendVulkan {
@@ -88,7 +95,7 @@ func openFeatureDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPrefe
 	if missing := required &^ adapter.DownlevelCapabilities().Flags; missing != 0 {
 		t.Skipf("%s lacks downlevel flags %#x", info.Name, uint32(missing))
 	}
-	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "shader-features", RequiredFeatures: features})
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "shader-features", RequiredFeatures: features | optional&adapter.Features()})
 	if err != nil {
 		t.Fatalf("RequestDevice(%v) on %s: %v", features, info.Name, err)
 	}
@@ -97,7 +104,12 @@ func openFeatureDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPrefe
 	return device
 }
 
-const featureTargetSize = 8
+// The target is 64x8: a 64-pixel RGBA8 row is 256 bytes, the bytesPerRow
+// alignment a texture-to-buffer copy needs.
+const (
+	featureTargetWidth  = 64
+	featureTargetHeight = 8
+)
 
 // renderFeatureTarget draws with the shader's vs/fs entry points into an
 // 8x8 RGBA8 target cleared to white and returns its pixels, row-major.
@@ -105,7 +117,7 @@ func renderFeatureTarget(t *testing.T, device *wgpu.Device, wgsl string, draw fu
 	t.Helper()
 	target, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "feature-target",
-		Size:          wgpu.Extent3D{Width: featureTargetSize, Height: featureTargetSize, DepthOrArrayLayers: 1},
+		Size:          wgpu.Extent3D{Width: featureTargetWidth, Height: featureTargetHeight, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
@@ -141,12 +153,12 @@ func renderFeatureTarget(t *testing.T, device *wgpu.Device, wgsl string, draw fu
 	if err := pass.End(); err != nil {
 		t.Fatalf("End: %v", err)
 	}
-	const words = featureTargetSize * featureTargetSize
+	const words = featureTargetWidth * featureTargetHeight
 	staging := newPublicBuffer(t, device, words*4, wgpu.BufferUsageMapRead|wgpu.BufferUsageCopyDst)
 	enc.CopyTextureToBuffer(target, staging, []wgpu.BufferTextureCopy{{
-		BufferLayout: wgpu.ImageDataLayout{BytesPerRow: featureTargetSize * 4, RowsPerImage: featureTargetSize},
+		BufferLayout: wgpu.ImageDataLayout{BytesPerRow: featureTargetWidth * 4, RowsPerImage: featureTargetHeight},
 		TextureBase:  wgpu.ImageCopyTexture{Texture: target},
-		Size:         wgpu.Extent3D{Width: featureTargetSize, Height: featureTargetSize, DepthOrArrayLayers: 1},
+		Size:         wgpu.Extent3D{Width: featureTargetWidth, Height: featureTargetHeight, DepthOrArrayLayers: 1},
 	}})
 	cmd, err := enc.Finish()
 	if err != nil {
@@ -187,12 +199,12 @@ func TestFeaturePrimitiveIndex(t *testing.T) {
 		px := renderFeatureTarget(t, device, primitiveIndexShader, func(pass *wgpu.RenderPassEncoder) {
 			pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 		})
-		row := featureTargetSize / 2 * featureTargetSize
-		if got := red(px[row+1]); got != 0 {
-			t.Errorf("left triangle: primitive_index %d (pixel %#08x), want 0", got, px[row+1])
+		row := featureTargetHeight / 2 * featureTargetWidth
+		if got := red(px[row+8]); got != 0 {
+			t.Errorf("left triangle: primitive_index %d (pixel %#08x), want 0", got, px[row+8])
 		}
-		if got := red(px[row+5]); got != 1 {
-			t.Errorf("right triangle: primitive_index %d (pixel %#08x), want 1", got, px[row+5])
+		if got := red(px[row+40]); got != 1 {
+			t.Errorf("right triangle: primitive_index %d (pixel %#08x), want 1", got, px[row+40])
 		}
 	})
 }
@@ -226,13 +238,13 @@ func TestFeatureClipDistances(t *testing.T) {
 			pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 		})
 		const white, green = 0xffffffff, 0xff00ff00
-		for y := 0; y < featureTargetSize; y++ {
-			for x := 0; x < featureTargetSize; x++ {
+		for y := 0; y < featureTargetHeight; y++ {
+			for x := 0; x < featureTargetWidth; x++ {
 				want := uint32(green)
-				if x < featureTargetSize/2 {
+				if x < featureTargetWidth/2 {
 					want = white // clipped: the clear color stays
 				}
-				if got := px[y*featureTargetSize+x]; got != want {
+				if got := px[y*featureTargetWidth+x]; got != want {
 					t.Fatalf("pixel (%d,%d) = %#08x, want %#08x", x, y, got, want)
 				}
 			}
@@ -380,7 +392,7 @@ func TestFeatureShaderBarycentrics(t *testing.T) {
 			}
 			distinct[p&0xffffff] = true
 		}
-		if len(distinct) < featureTargetSize {
+		if len(distinct) < featureTargetWidth {
 			t.Fatalf("only %d distinct barycentric values across the target", len(distinct))
 		}
 	})
@@ -427,10 +439,13 @@ fn fs(in: VOut) -> @location(0) vec4f {
 `
 
 // TestFeatureShaderDrawIndex reads @builtin(draw_index) back from the two
-// draws of one MultiDrawIndirect.
+// draws of one MultiDrawIndirect, or, where the device has no
+// FeatureMultiDrawIndirect, from two separate draws, which are each draw 0.
 func TestFeatureShaderDrawIndex(t *testing.T) {
-	features := gputypes.Features(gputypes.FeatureShaderDrawIndex) | gputypes.Features(gputypes.FeatureMultiDrawIndirect)
-	forEachFeatureDevice(t, features, gputypes.DownlevelFlagsIndirectExecution, func(t *testing.T, device *wgpu.Device) {
+	features := gputypes.Features(gputypes.FeatureShaderDrawIndex)
+	optional := gputypes.Features(gputypes.FeatureMultiDrawIndirect)
+	forEachFeatureDeviceWith(t, features, optional, 0, func(t *testing.T, device *wgpu.Device) {
+		multiDraw := device.Features().Contains(gputypes.FeatureMultiDrawIndirect)
 		args := newPublicBuffer(t, device, 32, wgpu.BufferUsageIndirect|wgpu.BufferUsageCopyDst)
 		words := []uint32{3, 1, 0, 0, 3, 1, 3, 0} // vertexCount, instanceCount, firstVertex, firstInstance
 		data := make([]byte, len(words)*4)
@@ -441,14 +456,24 @@ func TestFeatureShaderDrawIndex(t *testing.T) {
 			t.Fatalf("WriteBuffer: %v", err)
 		}
 		px := renderFeatureTarget(t, device, drawIndexShader, func(pass *wgpu.RenderPassEncoder) {
-			pass.MultiDrawIndirect(args, 0, 2)
+			if multiDraw {
+				pass.MultiDrawIndirect(args, 0, 2)
+			} else {
+				// GLES has no multi-draw, and its DrawIndirect is a no-op.
+				pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
+				pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: 3})
+			}
 		})
-		row := featureTargetSize / 2 * featureTargetSize
-		if got := red(px[row+1]); got != 1 {
-			t.Errorf("first draw: draw_index+1 = %d (pixel %#08x), want 1", got, px[row+1])
+		secondWant := uint32(2)
+		if !multiDraw {
+			secondWant = 1
 		}
-		if got := red(px[row+5]); got != 2 {
-			t.Errorf("second draw: draw_index+1 = %d (pixel %#08x), want 2", got, px[row+5])
+		row := featureTargetHeight / 2 * featureTargetWidth
+		if got := red(px[row+8]); got != 1 {
+			t.Errorf("first draw: draw_index+1 = %d (pixel %#08x), want 1", got, px[row+8])
+		}
+		if got := red(px[row+40]); got != secondWant {
+			t.Errorf("second draw (multi-draw %v): draw_index+1 = %d (pixel %#08x), want %d", multiDraw, got, px[row+40], secondWant)
 		}
 	})
 }
@@ -481,7 +506,7 @@ func TestFeatureShaderEarlyDepthTest(t *testing.T) {
 		// Control: the same draw without the attribute runs the shader, so
 		// the case above can fail.
 		if got := countDepthFailingFragments(t, device, ""); got == 0 {
-			t.Errorf("without early depth test: no fragment ran, want %d", featureTargetSize*featureTargetSize)
+			t.Errorf("without early depth test: no fragment ran, want %d", featureTargetWidth*featureTargetHeight)
 		}
 	})
 }
@@ -538,7 +563,7 @@ func countDepthFailingFragments(t *testing.T, device *wgpu.Device, attribute str
 	}
 	t.Cleanup(bg.Release)
 	depth, err := device.CreateTexture(&wgpu.TextureDescriptor{
-		Label: "early-depth", Size: wgpu.Extent3D{Width: featureTargetSize, Height: featureTargetSize, DepthOrArrayLayers: 1},
+		Label: "early-depth", Size: wgpu.Extent3D{Width: featureTargetWidth, Height: featureTargetHeight, DepthOrArrayLayers: 1},
 		MipLevelCount: 1, SampleCount: 1, Dimension: gputypes.TextureDimension2D,
 		Format: gputypes.TextureFormatDepth32Float, Usage: wgpu.TextureUsageRenderAttachment,
 	})
@@ -557,7 +582,7 @@ func countDepthFailingFragments(t *testing.T, device *wgpu.Device, attribute str
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
 	color, err := device.CreateTexture(&wgpu.TextureDescriptor{
-		Label: "early-depth-color", Size: wgpu.Extent3D{Width: featureTargetSize, Height: featureTargetSize, DepthOrArrayLayers: 1},
+		Label: "early-depth-color", Size: wgpu.Extent3D{Width: featureTargetWidth, Height: featureTargetHeight, DepthOrArrayLayers: 1},
 		MipLevelCount: 1, SampleCount: 1, Dimension: gputypes.TextureDimension2D,
 		Format: gputypes.TextureFormatRGBA8Unorm, Usage: wgpu.TextureUsageRenderAttachment,
 	})

@@ -285,7 +285,7 @@ func (a *Adapter) Features() gputypes.Features {
 		features |= gputypes.Features(gputypes.FeatureShaderF16)
 	}
 
-	return features
+	return features | shaderCapabilityFeatures(dxilEnabled())
 }
 
 // envDX12DXIL selects the shader compiler: "1" compiles naga IR to DXIL for
@@ -642,7 +642,7 @@ func (a *AdapterLegacy) Features() gputypes.Features {
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_12_0 {
 		features |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	}
-	return features
+	return features | shaderCapabilityFeatures(dxilEnabled())
 }
 
 // Capabilities returns detailed adapter capabilities.
