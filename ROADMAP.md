@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.34.6
+## Current State: v0.34.7
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
@@ -134,16 +134,16 @@ spec never allowed, small features, and features that were already claimed but n
 releases.
 
 **Next patch release, v0.34.7** (naga v0.21.0):
-- [ ] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
-- [ ] Shader modules validated once, with the device's capabilities, and handed to the backend
-- [ ] Shader interface read per entry point
-- [ ] Metal: MSL language version from the device
-- [ ] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
-- [ ] f16 on Vulkan and Metal, and timestamp queries on Vulkan and DX12, where the device supports them
-- [ ] `RequestDevice` refuses features the adapter does not expose; workgroup storage limit checked
-- [ ] Vertex layout validation completed, and `arrayStride: 0` (broadcast) supported on every backend (#364)
-- [ ] Out-of-bounds storage access contained on Vulkan (#370)
-- [ ] Bind group resources tracked per pass, with the barriers they need
+- [x] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
+- [x] Shader modules validated once, with the device's capabilities, and handed to the backend
+- [x] Shader interface read per entry point
+- [x] Metal: MSL language version from the device
+- [x] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
+- [x] f16 on Vulkan, and timestamp queries on Vulkan and DX12, where the device supports them (f16 on Metal waits for a run on a Mac)
+- [x] `RequestDevice` refuses features the adapter does not expose; workgroup storage limit checked
+- [x] Vertex layout validation completed, and `arrayStride: 0` (broadcast) supported on every backend (#364)
+- [x] Out-of-bounds storage access contained on Vulkan (#370)
+- [x] Bind group resources tracked per pass, with the barriers they need
 - [x] Vulkan binding generator and loader fixes (#372–#377); descriptor writes (#356)
 
 **Next minor release, v0.35.0: backend registration, adapter selection, internal packages**
@@ -248,6 +248,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.7** | 2026-11 | naga v0.21.0 (stricter WGSL), gputypes shader capability features, shaders validated once in core, bind groups in pass usage scopes, copy and clear validation, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
 | **v0.33.0** | 2026-08 | DownlevelCapabilities — Rust-parity capability flags for graceful degradation |

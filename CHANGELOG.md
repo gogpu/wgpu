@@ -104,7 +104,7 @@ This release fixes validation that was missing, so code that ran before may now 
 
 ### Known issues
 
-- **Not offered yet:** `FeatureShaderI16` on every backend (naga's WGSL has no `i16` type yet), `FeatureSubgroupVertex` (subgroups are not offered on Vulkan yet), `FeatureClipDistances` on GLES (needs a naga GLSL change), the new shader capability features on the DX12 DXIL path and on Metal, and on the software backend. A feature that is not offered is refused by `RequestDevice`; nothing runs unchecked.
+- **Not offered yet:** `FeatureShaderF16` on Metal (not yet run on a Mac), `FeatureShaderI16` on every backend (naga's WGSL has no `i16` type yet), `FeatureSubgroupVertex` (subgroups are not offered on Vulkan yet), `FeatureClipDistances` on GLES (needs a naga GLSL change), the new shader capability features on the DX12 DXIL path and on Metal, and on the software backend. A feature that is not offered is refused by `RequestDevice`; nothing runs unchecked.
 - **`-tags rust`** (wgpu-native through go-webgpu/webgpu v0.5.5) still has the ABI mismatches listed for v0.34.6. The default Pure Go build is not affected.
 - **Metal:** the changes in this release compile, lint and pass their unit tests in CI, but have not been run on a Mac.
 - **Render bundles** do not take part in the pass usage scope yet, so a conflict between a bundle's resources and the pass is not reported.
