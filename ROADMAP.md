@@ -22,10 +22,10 @@
 ## Current State: v0.34.6
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
-✅ **All 5 Native HAL backends complete** (~127K LOC)
+✅ **All 5 Native HAL backends complete**
 ✅ **Three-layer Native stack** — wgpu API → wgpu/core → wgpu/hal
 ✅ **Complete public API** — consumers never import `wgpu/hal`
-✅ **Core validation layer** — 15/17 Rust wgpu-core checks
+✅ **Core validation layer** — Rust wgpu-core parity checks
 ✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES
 ✅ **DX12 TDR fixed** — deferred resource destruction + DRED diagnostics
 ✅ **PendingWrites batching** — Rust wgpu-core pattern for WriteBuffer/WriteTexture
@@ -48,7 +48,7 @@
 ✅ **Compute dispatch barriers** — per-dispatch memory barriers on all GPU backends (Rust parity)
 ✅ **Dispatch workgroup validation** — count + size limits checked before dispatch
 ✅ **Validation Phase A — crash prevention** — 18 P0 checks (WriteBuffer bounds, BindGroup buffer validation, draw-time state with typed sentinel errors, PipelineLayout count, format type guards, Queue.Submit resource state)
-✅ **Validation Phase B — correctness** — MinBindingSize early check, index buffer format mismatch, indirect buffer bounds overrun, depth/stencil aspect granularity, BindGroup destruction at Submit. Coverage 22% → ~45% of Rust wgpu-core.
+✅ **Validation Phase B — correctness** — MinBindingSize early check, index buffer format mismatch, indirect buffer bounds overrun, depth/stencil aspect granularity, BindGroup destruction at Submit.
 ✅ **DX12 buffer state tracking** — per-buffer D3D12_RESOURCE_STATES with automatic transition barriers (Rust BufferTracker pattern)
 ✅ **Pipeline constants passthrough** — Constants map flows from public API through HAL
 ✅ **Zero-init workgroup memory** — WebGPU spec default, plumbed through all layers
@@ -60,11 +60,11 @@
 ✅ **Automatic resource lifecycle** — `runtime.AddCleanup` for Buffer/BindGroup (ADR-018, Rust Arc+Drop pattern). GC safety net prevents per-frame resource leaks.
 ✅ **Zero-allocation WriteBuffer batching** — pre-allocated BufferCopy + stack barrier arrays. All PendingWrites hot paths 0 allocs/op.
 ✅ **Full SPIR-V interpreter** — 7 phases (~10K LOC): vertex/fragment/compute on CPU, texture sampling, GLSL.std.450 intrinsics, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. For debugging/CI, not production.
-✅ **DX12 timestamp queries** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity)
+✅ **DX12 timestamp queries (HAL)** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity); the adapter does not offer `FeatureTimestampQuery` yet
 ✅ **Queue thread safety** — Submit/WriteBuffer/WriteTexture serialized via sync.Mutex (Rust wgpu-core parity)
 ✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
-✅ **Browser WebGPU backend** — complete `syscall/js` → `navigator.gpu` implementation (~6500 LOC). Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
+✅ **Browser WebGPU backend** — `syscall/js` → `navigator.gpu` implementation; error scopes not yet implemented there. Instance, Adapter, Device, Resources, Pipelines, Command Recording, Queue Submit, Surface/Canvas, Buffer Mapping. Bypasses core/hal (Rust wgpu pattern). 97 TextureFormats, 31 VertexFormats, 29+ tests. Zero external dependencies.
 ✅ **GLES hidden window context (Windows)** — GL context owned by Instance on hidden 1×1 HWND, shared via mutex-protected `AdapterContext`. Adapter/Device/Queue survive Surface destruction. Follows Rust wgpu-hal `wgl.rs` `AdapterContext::lock()`/`lock_with_dc()` pattern. Surface lightweight — no context ownership.
 ✅ **Metal stencil state translation** — MTLDepthStencilState front/back face states, stencilAttachmentPixelFormat, ObjC descriptor leak fix (v0.30.4, @samyfodil)
 ✅ **Metal IOSurface leak fix** — retain/release balance, presentsWithTransaction, frameSemaphore, UMA StorageModeShared (v0.30.10, @lkmavi)
@@ -107,17 +107,16 @@
 ✅ **Android arm64 Vulkan (guarded preview)** — API 29+, Bionic loader via goffi v0.6.1, Rust v29 WSI parity. Callbacks rejected pending physical-device proof (@besmpl #268)
 ✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. `hal.PixelReader` optional capability. Closes #256 (@besmpl #276)
 ✅ **MRT fix** — Multiple Render Targets across all 5 backends (#322, @darkliquid)
-✅ **Ray Tracing Extensions (experimental, ADR-062)** — inline ray queries, 4 backends (Vulkan VK_KHR + DX12 DXR + Metal macOS 15+ + Software CPU BVH). `internal/raytracing/` with build orchestration, compaction state machine, 9 validation checks. 96.8% coverage. Visual verification example. ~8,000 LOC.
+✅ **Ray Tracing Extensions (experimental, ADR-062)** — inline ray queries, 4 backends (Vulkan VK_KHR + DX12 DXR + Metal macOS 15+ + Software CPU BVH). `internal/raytracing/` with build orchestration, compaction state machine, validation checks. Visual verification example.
 ✅ **Unified backend naming** — `NewBackend()` constructor on all 6 backends, `API` → `Backend` (software/noop)
 
 ### Remaining validation (planned)
 - **Phase C** (P2): Spec compliance edge cases, feature gates
-- Validation Phase C — spec compliance edge cases, feature gates
 
 | Backend | Platform | Status |
 |---------|----------|--------|
 | Vulkan | Windows, Linux, macOS | ✅ Stable — text, compute, MSAA |
-| Metal | macOS | ✅ Stable — naga MSL 91/91 |
+| Metal | macOS | ✅ Stable — community-tested on Apple Silicon; the v0.34.x changes have not been run on a Mac yet |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
 | GLES | Windows, Linux | ✅ Stable — hidden window (Win), instance-level EGL (Linux), FFI pointer fix (@lkmavi), GLSL version propagation (GL 4.1+ verified), runtime binding fallback (GL <4.2), Wayland EGL surfaceless/pbuffer, tiered config (WindowBit-only for Wayland), fence sync, compute barriers |
 | Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. Wayland: display wrapper pattern, roundtrip_queue, triple-buffer. |
@@ -130,10 +129,11 @@
 
 ### Near-term (Q3 2026)
 
-**Release v0.31.0** (after naga #82 merge):
-- [ ] Bump deps: goffi v0.6.2, webgpu v0.5.4, naga v0.17.16
-- [ ] CODEOWNERS: @besmpl for Android paths
-- [ ] CHANGELOG for 17 merged PRs
+**Next minor release** (naga v0.21.0):
+- [ ] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
+- [ ] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
+- [ ] Subgroups, f16 and timestamp queries advertised on Vulkan, DX12 and Metal where the device supports them
+- [ ] Metal: MSL language version from the device
 - [ ] Integrate `gogpu/galloc` into Vulkan memory pools (replace BuddyAllocator)
 
 **GLES Linux Enterprise Parity:**
@@ -142,7 +142,7 @@
 
 **Public API Quality (#218):**
 - [ ] Remove HAL leaks from public API (`Surface.HAL()`, `Surface.SetPrepareFrame()`)
-- [ ] Expose `Device.CreateQuerySet` — HAL ready on all 6 backends, needs public wrapper
+- [x] `Device.CreateQuerySet` public wrapper
 - [ ] Document Surface single-thread requirement
 
 **DX12:**
@@ -155,9 +155,9 @@
 **API Stabilization:**
 - [ ] Remove 31 type aliases + 46 const re-exports from `types.go` — users import `gputypes` directly
 - [ ] Move `StencilOperation` from hal alias to gputypes definition
-- [ ] `Device.CreateRenderBundleEncoder` — render bundle optimization
+- [x] `Device.CreateRenderBundleEncoder` — render bundles
 - [ ] `Device.GetTextureFormatFeatures` — per-format capability query
-- [ ] GetSurfaceCapabilities on all backends (currently Vulkan-only)
+- [x] `Adapter.GetSurfaceCapabilities` on all backends
 - [ ] Validation Phase C — spec compliance edge cases, feature gates
 
 **Platform Expansion:**
@@ -214,8 +214,15 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 
 ## Released Versions
 
+Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
+
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
+| **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
+| **v0.33.0** | 2026-08 | DownlevelCapabilities — Rust-parity capability flags for graceful degradation |
+| **v0.32.0** | 2026-08 | Ray tracing extensions (experimental): inline ray queries on Vulkan, DX12, Metal, Software |
+| **v0.31.0** | 2026-08 | Full resource tracker: TextureTracker, BufferTracker, DeviceTracker |
 | **v0.30.22** | 2026-07 | Metal: MSAA storage mode crash on Intel Mac — `MTLGPUFamilyApple1` detection (#271) |
 | **v0.30.21** | 2026-07 | Software: CopyTextureToBuffer row stride, blend state wiring, BGRA readTexel |
 | **v0.30.20** | 2026-07 | PresentPixels check-before-mutate + DX12 UMA classification (@Zeroes1 #254) |
