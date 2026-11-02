@@ -155,8 +155,12 @@ func TestCmdPushConstants(t *testing.T) {
 	c.CmdBindPipeline(cmd, PipelineBindPointCompute, pipeline)
 	c.CmdBindDescriptorSets(cmd, PipelineBindPointCompute, layout, 0, 1, &set, 0, nil)
 	const want = uint32(0xC0FFEE42)
-	value := want
-	c.CmdPushConstants(cmd, layout, ShaderStageFlags(ShaderStageComputeBit), 0, 4, (*uintptr)(unsafe.Pointer(&value)))
+	// The wrapper takes pValues as *uintptr. Hold the 4 bytes in a
+	// uintptr-sized variable, so the pointer conversion stays inside one
+	// allocation (checkptr under -race rejects *uintptr over a uint32).
+	var values uintptr
+	*(*uint32)(unsafe.Pointer(&values)) = want
+	c.CmdPushConstants(cmd, layout, ShaderStageFlags(ShaderStageComputeBit), 0, 4, &values)
 	c.CmdDispatch(cmd, 1, 1, 1)
 	toHost := MemoryBarrier{
 		SType:         StructureTypeMemoryBarrier,
