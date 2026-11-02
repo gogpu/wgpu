@@ -643,6 +643,13 @@ type D3D12_FEATURE_DATA_D3D12_OPTIONS struct {
 	ResourceHeapTier                                                           uint32 // D3D12_RESOURCE_HEAP_TIER
 }
 
+// D3D12_FEATURE_DATA_D3D12_OPTIONS4 describes D3D12 options 4 feature data.
+type D3D12_FEATURE_DATA_D3D12_OPTIONS4 struct {
+	MSAA64KBAlignedTextureSupported int32  // BOOL
+	SharedResourceCompatibilityTier uint32 // D3D12_SHARED_RESOURCE_COMPATIBILITY_TIER
+	Native16BitShaderOpsSupported   int32  // BOOL
+}
+
 // D3D12_FEATURE_DATA_FEATURE_LEVELS describes feature levels.
 type D3D12_FEATURE_DATA_FEATURE_LEVELS struct {
 	NumFeatureLevels         uint32

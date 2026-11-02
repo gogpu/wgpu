@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -54,6 +55,10 @@ type AdapterCapabilities struct {
 
 	// SupportsROVs indicates rasterizer ordered views support.
 	SupportsROVs bool
+
+	// Native16BitShaderOpsSupported is D3D12_OPTIONS4.Native16BitShaderOpsSupported:
+	// the device runs 16-bit shader types natively (shader model 6.2+).
+	Native16BitShaderOpsSupported bool
 
 	// IsUMA indicates Unified Memory Architecture (integrated GPU).
 	IsUMA bool
@@ -162,9 +167,21 @@ func (a *Adapter) queryD3D12Options(device *d3d12.ID3D12Device) {
 	a.capabilities.SupportsTypedUAVLoadAdditionalFormats = options.TypedUAVLoadAdditionalFormats != 0
 	a.capabilities.SupportsROVs = options.ROVsSupported != 0
 
+	// OPTIONS4 needs a Windows 10 1803 runtime; without it, no native
+	// 16-bit shader ops.
+	var options4 d3d12.D3D12_FEATURE_DATA_D3D12_OPTIONS4
+	if device.CheckFeatureSupport(
+		d3d12.D3D12_FEATURE_D3D12_OPTIONS4,
+		unsafe.Pointer(&options4),
+		uint32(unsafe.Sizeof(options4)),
+	) == nil {
+		a.capabilities.Native16BitShaderOpsSupported = options4.Native16BitShaderOpsSupported != 0
+	}
+
 	hal.Logger().Info("dx12: adapter capabilities",
 		"resourceBindingTier", a.capabilities.ResourceBindingTier,
 		"tiledResourcesTier", a.capabilities.TiledResourcesTier,
+		"native16BitShaderOps", a.capabilities.Native16BitShaderOpsSupported,
 	)
 }
 
@@ -254,12 +271,29 @@ func (a *Adapter) Features() gputypes.Features {
 		features |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	}
 
-	// Shader model 6.0+ enables subgroups
-	if a.capabilities.ShaderModel >= d3d12.D3D_SHADER_MODEL_6_0 {
+	// f16 needs shader model 6.2 and native 16-bit shader ops, as Rust
+	// wgpu-hal (dx12/adapter.rs) and Dawn (d3d12/D3D12Info.cpp) require. FXC
+	// compiles for shader model 5.1, which has no 16-bit types, so only the
+	// DXIL path can deliver it.
+	if dxilEnabled() &&
+		a.capabilities.ShaderModel >= d3d12.D3D_SHADER_MODEL_6_2 &&
+		a.capabilities.Native16BitShaderOpsSupported {
 		features |= gputypes.Features(gputypes.FeatureShaderF16)
 	}
 
 	return features
+}
+
+// envDX12DXIL selects the shader compiler: "1" compiles naga IR to DXIL for
+// the adapter's shader model, anything else compiles HLSL with FXC for
+// shader model 5.1.
+const envDX12DXIL = "GOGPU_DX12_DXIL"
+
+// dxilEnabled reports whether devices compile shaders to DXIL. The adapter
+// reads it too, so it never advertises a feature the device's compiler
+// cannot express.
+func dxilEnabled() bool {
+	return os.Getenv(envDX12DXIL) == "1"
 }
 
 // Capabilities returns detailed adapter capabilities.
