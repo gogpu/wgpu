@@ -332,6 +332,16 @@ func TestCreateTextureError_AllKinds(t *testing.T) {
 			wantSub: "format must not be undefined",
 		},
 		{
+			name:    "InvalidViewFormat",
+			err:     &CreateTextureError{Kind: CreateTextureErrorInvalidViewFormat, Label: "tex-view", Format: 1, ViewFormat: 2},
+			wantSub: "not compatible with texture format",
+		},
+		{
+			name:    "MissingDownlevelFlags",
+			err:     &CreateTextureError{Kind: CreateTextureErrorMissingDownlevelFlags, Label: "tex-flags", Cause: fmt.Errorf("missing flag")},
+			wantSub: "missing flag",
+		},
+		{
 			name:    "InvalidDimension",
 			err:     &CreateTextureError{Kind: CreateTextureErrorInvalidDimension, Label: "tex13"},
 			wantSub: "dimension must not be undefined",
@@ -359,6 +369,16 @@ func TestCreateTextureError_AllKinds(t *testing.T) {
 				t.Errorf("Error() = %q, want substring %q", msg, tt.wantSub)
 			}
 		})
+	}
+}
+
+func TestCreateTextureViewError(t *testing.T) {
+	e := &CreateTextureViewError{Kind: CreateTextureViewErrorFormatReinterpretation, TextureFormat: 1, ViewFormat: 2}
+	if got := e.Error(); !strings.Contains(got, "not the texture format") {
+		t.Fatalf("Error() = %q", got)
+	}
+	if got := (&CreateTextureViewError{Kind: CreateTextureViewErrorKind(99)}).Error(); !strings.Contains(got, "unknown error") {
+		t.Fatalf("unknown Error() = %q", got)
 	}
 }
 
@@ -598,6 +618,41 @@ func TestCreateRenderPipelineError_AllKinds(t *testing.T) {
 			name:    "DepthFormatNoStencilAspect",
 			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoStencilAspect, Label: "rp11", Format: "Depth16Unorm"},
 			wantSub: "does not have a stencil aspect",
+		},
+		{
+			name:    "VertexStrideMisaligned",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideMisaligned, Label: "rp-stride", ArrayStride: 3},
+			wantSub: "not a multiple of 4",
+		},
+		{
+			name:    "VertexStrideTooLarge",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideTooLarge, Label: "rp-stride-max", ArrayStride: 256, MaxArrayStride: 128},
+			wantSub: "exceeds maxVertexBufferArrayStride",
+		},
+		{
+			name:    "VertexAttributeOutOfStride",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeOutOfStride, Label: "rp-attribute", ArrayStride: 8, AttributeOffset: 6, AttributeFormat: "Float32"},
+			wantSub: "does not fit in arrayStride",
+		},
+		{
+			name:    "TooManyVertexBuffers",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorTooManyVertexBuffers, Label: "rp-buffers", Given: 9, Limit: 8},
+			wantSub: "vertex buffers exceed maxVertexBuffers",
+		},
+		{
+			name:    "VertexAttributeInvalidOffset",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "rp-offset", AttributeOffset: 2, AttributeFormat: "Float32"},
+			wantSub: "not a multiple of min(4",
+		},
+		{
+			name:    "VertexAttributeLocationTooLarge",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeLocationTooLarge, Label: "rp-location", ShaderLocation: 16, Limit: 16},
+			wantSub: "not below maxVertexAttributes",
+		},
+		{
+			name:    "ShaderLocationClash",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorShaderLocationClash, Label: "rp-clash", ShaderLocation: 2},
+			wantSub: "used by more than one attribute",
 		},
 		{
 			name:    "HAL",
