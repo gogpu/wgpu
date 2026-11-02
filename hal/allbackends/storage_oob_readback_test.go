@@ -75,13 +75,6 @@ func TestStorageBufferOutOfBoundsContained(t *testing.T) {
 }
 
 func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
-	// The MSL backend currently emits a one-element placeholder for a top-level
-	// runtime-sized array and does not generate its bounds clamp. Keep this
-	// runtime-array containment test on other backends until naga MSL supports
-	// this WGSL form (the struct-wrapped form has a separate codegen test).
-	if b.backend == gputypes.BackendMetal {
-		t.Skip("naga MSL does not yet clamp accesses to a top-level runtime-sized array")
-	}
 	skipWithoutRobustGL(t, b, device)
 	got := runStorageOOB(t, device, oobShader, oobBindWords*4)
 	t.Logf("a = %#x, b = %#x", got[:oobBindWords], got[oobB:oobB+oobBindWords])
