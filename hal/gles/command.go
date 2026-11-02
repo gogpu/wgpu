@@ -843,25 +843,28 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 
 // DrawIndexedIndirect draws drawCount indexed records from offset in buffer
 // (Rust wgpu-hal gles command.rs draw_indexed_indirect, queue.rs
-// DrawIndexedIndirect).
-//
-// glDrawElementsIndirect has no index buffer offset parameter: the record's
-// firstIndex counts from the start of the buffer, so the offset given to
-// SetIndexBuffer does not apply here. Rust has the same gap; P1-GLES-018.
+// DrawIndexedIndirect). A nonzero SetIndexBuffer offset is applied as
+// DrawIndexedIndirectCommand describes.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndexedIndirectRecordSize, drawCount) {
 		return
 	}
 	e.prepareDraw(0)
-	e.encoder.commands = append(e.encoder.commands, &DrawIndexedIndirectCommand{
+	cmd := &DrawIndexedIndirectCommand{
 		buffer:                buf.id,
 		offset:                offset,
 		count:                 drawCount,
 		indexFormat:           e.indexFormat,
 		topology:              e.topology(),
 		firstInstanceLocation: e.firstInstanceLocation(),
-	})
+	}
+	if e.indexBuffer != nil && e.indexOffset != 0 {
+		cmd.indexBuffer = e.indexBuffer.id
+		cmd.indexOffset = e.indexOffset
+		cmd.indexBufferSize = e.indexBuffer.size
+	}
+	e.encoder.commands = append(e.encoder.commands, cmd)
 }
 
 // DrawIndirectCount is not supported by the GLES backend.
@@ -1775,6 +1778,13 @@ func (c *DrawIndirectCommand) Execute(ctx *gl.Context) {
 
 // DrawIndexedIndirectCommand draws count DrawIndexedIndirectArgs records
 // (Rust wgpu-hal gles/queue.rs C::DrawIndexedIndirect), as DrawIndirectCommand.
+//
+// glDrawElementsIndirect has no index buffer offset: a record's firstIndex
+// counts from the start of the bound GL_ELEMENT_ARRAY_BUFFER, and the record
+// lives on the GPU, so it cannot be patched on the CPU. With a nonzero
+// SetIndexBuffer offset the draw therefore binds a GPU copy of the index
+// buffer from that offset (glCopyBufferSubData) and restores the original
+// binding afterwards. Rust wgpu-hal gles ignores the offset here (P1-GLES-018).
 type DrawIndexedIndirectCommand struct {
 	buffer                uint32
 	offset                uint64
@@ -1782,9 +1792,26 @@ type DrawIndexedIndirectCommand struct {
 	indexFormat           gputypes.IndexFormat
 	topology              gputypes.PrimitiveTopology
 	firstInstanceLocation int32
+
+	// indexBuffer, indexOffset and indexBufferSize describe the bound index
+	// buffer when its SetIndexBuffer offset is nonzero; zero otherwise.
+	indexBuffer     uint32
+	indexOffset     uint64
+	indexBufferSize uint64
 }
 
 func (c *DrawIndexedIndirectCommand) Execute(ctx *gl.Context) {
+	if c.indexOffset != 0 {
+		if c.indexOffset >= c.indexBufferSize {
+			return // no index lies in bounds, so every record is out of range
+		}
+		shifted := shiftedIndexBuffer(ctx, c.indexBuffer, c.indexOffset, c.indexBufferSize)
+		defer func() {
+			ctx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, c.indexBuffer)
+			// The driver keeps the copy alive until the draws that read it finish.
+			ctx.DeleteBuffers(shifted)
+		}()
+	}
 	mode := primitiveTopologyToGL(c.topology)
 	indexType, _ := indexTypeAndSize(c.indexFormat)
 	setFirstInstance(ctx, c.firstInstanceLocation, 0)
@@ -1796,6 +1823,23 @@ func (c *DrawIndexedIndirectCommand) Execute(ctx *gl.Context) {
 	for i := range uint64(c.count) {
 		ctx.DrawElementsIndirect(mode, indexType, uintptr(c.offset+i*drawIndexedIndirectRecordSize))
 	}
+}
+
+// shiftedIndexBuffer copies bytes [offset, size) of the index buffer into a
+// new GL buffer on the GPU, binds it to GL_ELEMENT_ARRAY_BUFFER and returns
+// it. The copy goes through the COPY_WRITE target, which leaves the vertex,
+// index and uniform bindings alone.
+func shiftedIndexBuffer(ctx *gl.Context, indexBuffer uint32, offset, size uint64) uint32 {
+	remaining := int(size - offset)
+	shifted := ctx.GenBuffers(1)
+	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, shifted)
+	ctx.AllocateBuffer(gl.COPY_WRITE_BUFFER, remaining, gl.STREAM_COPY)
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, indexBuffer)
+	ctx.CopyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, int(offset), 0, remaining)
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, 0)
+	ctx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, shifted)
+	return shifted
 }
 
 // CopyBufferCommand copies a region of one GL buffer object into another.

@@ -1254,6 +1254,12 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 	_, _ = ffi.CallFunction(&cifVoid4Buffer, c.glBufferData, nil, args[:])
 }
 
+// AllocateBuffer gives the buffer bound to target size bytes of undefined
+// content (glBufferData with a null pointer).
+func (c *Context) AllocateBuffer(target uint32, size int, usage uint32) {
+	c.BufferData(target, size, 0, usage)
+}
+
 func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
 	offsetPtr := uintptr(offset)
 	sizePtr := uintptr(size)
