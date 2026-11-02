@@ -265,6 +265,10 @@ func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor, features gputypes.Fe
 
 // ValidateShaderModuleDescriptor validates a shader module descriptor and features.
 // Returns nil if valid, or an error describing the first validation failure.
+//
+// A WGSL source is parsed and validated here, once, with the capabilities of
+// features; on success desc.IR and desc.Info hold the result for the HAL and
+// for pipeline introspection (Rust wgpu-core create_shader_module).
 func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor, features gputypes.Features) error {
 	label := desc.Label
 	hasWGSL := desc.Source.WGSL != ""

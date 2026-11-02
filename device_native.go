@@ -11,7 +11,6 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Device represents a logical GPU device.
@@ -262,21 +261,10 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
 	}
 
-	sm := &ShaderModule{hal: halModule, device: d}
-
-	// Parse WGSL source to naga IR for shader introspection (late binding validation).
-	// Matches Rust wgpu-core which stores the naga Module on ShaderModule for use
-	// by Interface::check_stage during pipeline creation.
-	// SPIR-V shaders skip this — they go directly to HAL without IR-level introspection.
-	if desc.WGSL != "" {
-		if lowered, err := shaderir.Lower(desc.WGSL); err == nil {
-			sm.irModule = lowered.IR
-		}
-		// Parse failures are non-fatal here — the HAL already compiled the shader
-		// successfully. Late binding validation will be skipped if IR is unavailable.
-	}
-
-	return sm, nil
+	// Keep the IR core validated for pipeline introspection, as Rust
+	// wgpu-core keeps the naga module and its info on the ShaderModule for
+	// Interface::check_stage. SPIR-V modules have none.
+	return &ShaderModule{hal: halModule, device: d, irModule: halDesc.IR, irInfo: halDesc.Info}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.

@@ -36,19 +36,24 @@ type Module struct {
 	Info valid.ModuleInfo
 }
 
-// Lower parses WGSL to IR and validates it.
+// Lower parses WGSL to IR and validates it, allowing every capability
+// (valid.CapAll).
 //
-// The validation allows every capability (valid.CapAll): it checks the
-// structure and yields the ModuleInfo. The capabilities of the device are
-// gated once, in core, before the HAL sees the module (Rust wgpu-core's
-// validator, built from features_to_naga_capabilities); a capability gate
-// here would refuse features the device has. P1-CORE-013 moves this single
-// validation into core and hands the HAL its result.
+// A backend calls it only when the HAL is used without core: core lowers
+// the module once with the device's capabilities (LowerOptions) and hands
+// the result to the HAL in hal.ShaderModuleDescriptor.IR, as Rust
+// wgpu-core hands wgpu-hal hal::ShaderInput::Naga. A capability gate here
+// would refuse features the device has.
+func Lower(source string) (Module, error) {
+	return LowerOptions(source, valid.Options{Capabilities: valid.CapAll})
+}
+
+// LowerOptions parses WGSL to IR and validates it with opts.
 //
 // A parse error keeps naga's *wgsl.ParseError (errors.As works) and is
 // prefixed with its line and column: ParseError.Error is the message only.
 // A validation error is valid.Errors.
-func Lower(source string) (Module, error) {
+func LowerOptions(source string, opts valid.Options) (Module, error) {
 	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
 		var pe *wgsl.ParseError
@@ -59,7 +64,7 @@ func Lower(source string) (Module, error) {
 		}
 		return Module{}, fmt.Errorf("parse error: %w", err)
 	}
-	info, err := valid.Validate(module, valid.Options{Capabilities: valid.CapAll})
+	info, err := valid.Validate(module, opts)
 	if err != nil {
 		return Module{}, fmt.Errorf("validation failed: %w", err)
 	}

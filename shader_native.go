@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -18,6 +19,10 @@ type ShaderModule struct {
 	// naga Module for shader introspection.
 	// nil when the shader was provided as SPIR-V (no WGSL source to parse).
 	irModule *ir.Module
+	// irInfo is the ModuleInfo of irModule's validation: the globals each
+	// entry point uses (Rust naga's ModuleInfo, kept by wgpu-core's
+	// Interface).
+	irInfo valid.ModuleInfo
 }
 
 // extractShaderBindingSizes extracts the minimum buffer binding sizes

@@ -2,7 +2,11 @@
 
 package hal
 
-import "github.com/gogpu/gputypes"
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/valid"
+)
 
 // MaxColorAttachments is the WebGPU specification limit for the number of
 // color attachments per render pass. Matches Rust wgpu MAX_COLOR_ATTACHMENTS.
@@ -313,6 +317,17 @@ type ShaderModuleDescriptor struct {
 	// Source is the shader source code.
 	// Can be WGSL source code or SPIR-V bytecode.
 	Source ShaderSource
+
+	// IR is the naga IR of a WGSL Source, parsed and validated once by core
+	// with the capabilities of the device's features. A backend compiles it
+	// and never parses or validates the source again, as Rust wgpu-hal takes
+	// hal::ShaderInput::Naga from wgpu-core. Nil for SPIR-V, and when the
+	// HAL is used without core; the backend then lowers Source.WGSL itself.
+	IR *ir.Module
+
+	// Info is the ModuleInfo of IR's validation: per entry point, the
+	// globals it uses.
+	Info valid.ModuleInfo
 }
 
 // ShaderSource represents shader source code or bytecode.

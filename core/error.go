@@ -474,6 +474,13 @@ const (
 	CreateShaderModuleErrorDualSource
 	// CreateShaderModuleErrorHAL indicates the HAL backend failed to create the shader module.
 	CreateShaderModuleErrorHAL
+	// CreateShaderModuleErrorParsing indicates the WGSL source does not parse
+	// (Rust CreateShaderModuleError::Parsing). Cause holds naga's error.
+	CreateShaderModuleErrorParsing
+	// CreateShaderModuleErrorValidation indicates naga's validator rejected
+	// the module (Rust CreateShaderModuleError::Validation). Cause holds
+	// naga's valid.Errors.
+	CreateShaderModuleErrorValidation
 )
 
 // CreateShaderModuleError represents an error during shader module creation.
@@ -481,6 +488,9 @@ type CreateShaderModuleError struct {
 	Kind     CreateShaderModuleErrorKind
 	Label    string
 	HALError error
+	// Cause is naga's error for CreateShaderModuleErrorParsing and
+	// CreateShaderModuleErrorValidation.
+	Cause error
 }
 
 // Error implements the error interface.
@@ -497,14 +507,20 @@ func (e *CreateShaderModuleError) Error() string {
 		return fmt.Sprintf("shader module %q: must not provide both WGSL and SPIRV source", label)
 	case CreateShaderModuleErrorHAL:
 		return fmt.Sprintf("shader module %q: HAL error: %v", label, e.HALError)
+	case CreateShaderModuleErrorParsing, CreateShaderModuleErrorValidation:
+		// naga's text already says "parse error" or "validation failed".
+		return fmt.Sprintf("shader module %q: %v", label, e.Cause)
 	default:
 		return fmt.Sprintf("shader module %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or naga error, if any.
 func (e *CreateShaderModuleError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateShaderModuleError returns true if the error is a CreateShaderModuleError.

@@ -4,18 +4,23 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 func validateShaderModuleFeatures(desc *hal.ShaderModuleDescriptor, features gputypes.Features) error {
 	if desc.Source.WGSL != "" {
-		return validateWGSLShaderFeatures(desc.Source.WGSL, features)
+		module, err := lowerWGSLShaderModule(desc.Label, desc.Source.WGSL, features)
+		if err != nil {
+			return err
+		}
+		desc.IR, desc.Info = module.IR, module.Info
+		return nil
 	}
 	if len(desc.Source.SPIRV) > 0 {
 		return validateSPIRVShaderFeatures(desc.Source.SPIRV, features)
@@ -23,25 +28,29 @@ func validateShaderModuleFeatures(desc *hal.ShaderModuleDescriptor, features gpu
 	return nil
 }
 
-func validateWGSLShaderFeatures(source string, features gputypes.Features) error {
-	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
-	if err != nil {
-		return nil //nolint:nilerr // parse errors are reported by HAL shader compilation
-	}
-
-	// This is the only capability gate: naga's validator rejects every
-	// optional feature outside Capabilities, and the HAL validates again only
-	// for structure (internal/shaderir.Lower, valid.CapAll).
+// lowerWGSLShaderModule parses source and validates it once, with the naga
+// capabilities of the device's features: Rust wgpu-core create_shader_module
+// (wgpu-core/src/device/resource.rs), whose validator is built from
+// features_to_naga_capabilities and whose result the HAL compiles without
+// validating again. naga's validator refuses every optional feature outside
+// Capabilities, so this is also the only capability gate.
+func lowerWGSLShaderModule(label, source string, features gputypes.Features) (shaderir.Module, error) {
 	opts := valid.Options{Capabilities: nagaCapabilitiesForFeatures(features)}
-	if _, err := valid.Validate(module, opts); err != nil {
-		var verrs valid.Errors
-		if errors.As(err, &verrs) && len(verrs) > 0 {
-			return mapShaderCapabilityError(verrs[0], features)
-		}
-		return fmt.Errorf("shader module: capability validation failed: %w", err)
+	module, err := shaderir.LowerOptions(source, opts)
+	if err == nil {
+		return module, nil
 	}
-
-	return nil
+	var pe *wgsl.ParseError
+	if errors.As(err, &pe) {
+		return shaderir.Module{}, &CreateShaderModuleError{Kind: CreateShaderModuleErrorParsing, Label: label, Cause: err}
+	}
+	var verrs valid.Errors
+	if errors.As(err, &verrs) && len(verrs) > 0 {
+		if ferr := missingCapabilityFeature(verrs[0], features); ferr != nil {
+			return shaderir.Module{}, ferr
+		}
+	}
+	return shaderir.Module{}, &CreateShaderModuleError{Kind: CreateShaderModuleErrorValidation, Label: label, Cause: err}
 }
 
 // nagaCapabilityFeature is one row of Rust's features_to_naga_capabilities
@@ -100,10 +109,11 @@ func nagaCapabilitiesForFeatures(features gputypes.Features) valid.Capabilities 
 	return caps
 }
 
-// mapShaderCapabilityError turns a missing-capability error into the
-// missing-feature error of the device feature that grants it. naga names
-// the capability by Rust's flag name ("Capabilities(SHADER_FLOAT16)").
-func mapShaderCapabilityError(ve valid.Error, features gputypes.Features) error {
+// missingCapabilityFeature turns a missing-capability error into the
+// missing-feature error of the device feature that grants it, or returns
+// nil when ve names no capability a missing feature grants. naga names the
+// capability by Rust's flag name ("Capabilities(SHADER_FLOAT16)").
+func missingCapabilityFeature(ve valid.Error, features gputypes.Features) error {
 	names := capabilityNames(ve.Message)
 	for _, row := range nagaCapabilityFeatures {
 		if _, ok := names[row.name]; !ok {
@@ -115,7 +125,7 @@ func mapShaderCapabilityError(ve valid.Error, features gputypes.Features) error 
 			return err
 		}
 	}
-	return fmt.Errorf("shader module: %s", ve.Error())
+	return nil
 }
 
 // capabilityNames returns the upper-case flag-name tokens of msg. naga

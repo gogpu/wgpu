@@ -163,3 +163,76 @@ var<private> x: i64;
 		})
 	}
 }
+
+// TestValidateShaderModuleDescriptor_LowersWGSLOnce checks that core parses
+// and validates a WGSL module once, with the device's capabilities, and hands
+// the IR and its ModuleInfo to the HAL in the descriptor, as Rust wgpu-core
+// create_shader_module hands the HAL hal::ShaderInput::Naga
+// (wgpu-core/src/device/resource.rs). A module using f64 on a device with
+// ShaderFloat64 is accepted with its IR.
+func TestValidateShaderModuleDescriptor_LowersWGSLOnce(t *testing.T) {
+	t.Parallel()
+	desc := &hal.ShaderModuleDescriptor{Source: hal.ShaderSource{WGSL: `@group(0) @binding(0) var<storage, read_write> out: array<u32>;
+var<private> x: f64;
+@compute @workgroup_size(1) fn main() { out[0] = u32(f32(x)); }`}}
+	if err := ValidateShaderModuleDescriptor(desc, gputypes.Features(gputypes.FeatureShaderFloat64)); err != nil {
+		t.Fatalf("ValidateShaderModuleDescriptor: %v", err)
+	}
+	if desc.IR == nil {
+		t.Fatal("desc.IR is nil: core did not hand the validated module to the HAL")
+	}
+	if len(desc.Info.EntryPoints) != len(desc.IR.EntryPoints) || len(desc.Info.EntryPoints) != 1 {
+		t.Fatalf("desc.Info has %d entry points, IR has %d, want 1", len(desc.Info.EntryPoints), len(desc.IR.EntryPoints))
+	}
+}
+
+// TestValidateShaderModuleDescriptor_WGSLErrors checks that a module core
+// cannot parse or validate is refused there with a typed error, as Rust's
+// CreateShaderModuleError::Parsing and ::Validation, and that a SPIR-V
+// module carries no IR.
+func TestValidateShaderModuleDescriptor_WGSLErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		source string
+		want   CreateShaderModuleErrorKind
+	}{
+		{"parse", `@compute @workgroup_size(1) fn main( {`, CreateShaderModuleErrorParsing},
+		{"validation", `@compute @workgroup_size(1) fn main() { let x: u32 = 1.5f; }`, CreateShaderModuleErrorParsing},
+		{"undeclared", `@compute @workgroup_size(1) fn main() { _ = undefined_name; }`, CreateShaderModuleErrorParsing},
+		{"binding collision", `@group(0) @binding(0) var<storage, read_write> a: array<u32>;
+@group(0) @binding(0) var<storage, read_write> b: array<u32>;
+@compute @workgroup_size(1) fn main() { a[0] = b[0]; }`, CreateShaderModuleErrorValidation},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			desc := &hal.ShaderModuleDescriptor{Label: tt.name, Source: hal.ShaderSource{WGSL: tt.source}}
+			err := ValidateShaderModuleDescriptor(desc, 0)
+			var csme *CreateShaderModuleError
+			if !errors.As(err, &csme) || csme.Kind != tt.want {
+				t.Fatalf("error %v (%T), want *CreateShaderModuleError kind %d", err, err, tt.want)
+			}
+			if csme.Unwrap() == nil {
+				t.Fatal("error does not wrap naga's error")
+			}
+			if desc.IR != nil {
+				t.Fatal("desc.IR set for a rejected module")
+			}
+		})
+	}
+
+	spirv := &hal.ShaderModuleDescriptor{Source: hal.ShaderSource{SPIRV: buildSPIRVWithCapabilities(spirvCapShader)}}
+	if err := ValidateShaderModuleDescriptor(spirv, 0); err != nil {
+		t.Fatalf("SPIR-V: %v", err)
+	}
+	if spirv.IR != nil {
+		t.Fatal("SPIR-V module got IR")
+	}
+}
+
+// validateWGSLShaderFeatures runs the core WGSL lowering for its error only.
+func validateWGSLShaderFeatures(source string, features gputypes.Features) error {
+	_, err := lowerWGSLShaderModule("", source, features)
+	return err
+}
