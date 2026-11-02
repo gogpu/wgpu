@@ -1027,9 +1027,10 @@ func (d *Device) buildVertexDescriptor(buffers []gputypes.VertexBufferLayout) (I
 
 		layoutDesc := MsgSend(layouts, Sel("objectAtIndexedSubscript:"), uintptr(bufIdx))
 		if layoutDesc != 0 {
-			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(buf.ArrayStride))
-			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(vertexStepModeToMTL(buf.StepMode)))
-			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(1))
+			l := vertexBufferLayoutToMTL(&buffers[slot])
+			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(l.stride))
+			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(l.stepFunc))
+			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(l.stepRate))
 		}
 	}
 

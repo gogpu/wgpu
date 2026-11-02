@@ -470,6 +470,38 @@ func vertexFormatToMTL(format gputypes.VertexFormat) MTLVertexFormat {
 	}
 }
 
+// mtlVertexBufferLayout is the MTLVertexBufferLayoutDescriptor setup for one
+// WebGPU vertex buffer layout.
+type mtlVertexBufferLayout struct {
+	stride   uint64
+	stepFunc MTLVertexStepFunction
+	stepRate uint64
+}
+
+// vertexBufferLayoutToMTL converts a vertex buffer layout. Metal rejects a
+// zero stride, so arrayStride 0 (WebGPU's broadcast: every vertex and instance
+// reads element 0) becomes the constant step function with step rate 0 and a
+// stride covering the attributes, rounded up to Metal's 4-byte multiple, as in
+// Rust wgpu-hal src/metal/device.rs.
+func vertexBufferLayoutToMTL(buf *gputypes.VertexBufferLayout) mtlVertexBufferLayout {
+	if buf.ArrayStride != 0 {
+		return mtlVertexBufferLayout{
+			stride:   buf.ArrayStride,
+			stepFunc: vertexStepModeToMTL(buf.StepMode),
+			stepRate: 1,
+		}
+	}
+	var stride uint64
+	for _, attr := range buf.Attributes {
+		stride = max(stride, attr.Offset+attr.Format.Size())
+	}
+	return mtlVertexBufferLayout{
+		stride:   (stride + 3) &^ 3,
+		stepFunc: MTLVertexStepFunctionConstant,
+		stepRate: 0,
+	}
+}
+
 func vertexStepModeToMTL(mode gputypes.VertexStepMode) MTLVertexStepFunction {
 	switch mode {
 	case gputypes.VertexStepModeVertex:

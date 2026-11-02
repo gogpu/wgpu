@@ -498,12 +498,9 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 //   - every attribute's offset + format size must fit in arrayStride, or in
 //     maxVertexBufferArrayStride when arrayStride is 0.
 //
-// arrayStride 0 is legal WebGPU and means every vertex reads the same element.
-// The native backends do not emulate it and disagree about what 0 means
-// (software drops the draw, GLES reads it as tightly packed, Metal sets a zero
-// stride without a constant step function), so it is rejected here until a
-// backend emulates it. The attribute check above already handles stride 0 the
-// way the spec does, so lifting this rejection needs no other change.
+// arrayStride 0 is legal WebGPU (broadcast: every vertex or instance reads
+// element 0). Vulkan and DX12 take it natively; Metal, GLES and software
+// emulate it in their vertex input setup.
 func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, limits gputypes.Limits) error {
 	maxStride := uint64(limits.MaxVertexBufferArrayStride)
 	for i := range buffers {
@@ -550,15 +547,6 @@ func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, 
 						AttributeFormat: attr.Format.String(),
 					}
 				}
-			}
-		}
-
-		// RP10d: arrayStride 0 (broadcast) is not supported on native backends yet.
-		if vb.ArrayStride == 0 {
-			return &CreateRenderPipelineError{
-				Kind:        CreateRenderPipelineErrorVertexStrideZero,
-				Label:       label,
-				BufferIndex: bufferIndex,
 			}
 		}
 	}

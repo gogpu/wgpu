@@ -3054,13 +3054,7 @@ func TestValidateRenderPipelineDescriptor_VertexBuffers(t *testing.T) {
 			buffers: []gputypes.VertexBufferLayout{layout(4096, float32x4(0))},
 			limits:  func(l *gputypes.Limits) { l.MaxVertexBufferArrayStride = 0 },
 		},
-		{
-			name:       "stride 0 is rejected",
-			buffers:    []gputypes.VertexBufferLayout{layout(0, float32x4(0))},
-			wantErr:    true,
-			wantKind:   CreateRenderPipelineErrorVertexStrideZero,
-			wantBuffer: 0,
-		},
+		{name: "stride 0 (broadcast)", buffers: []gputypes.VertexBufferLayout{layout(0, float32x4(0))}},
 		{
 			name:       "stride 30 is misaligned",
 			buffers:    []gputypes.VertexBufferLayout{layout(32, float32x4(0)), layout(30, float32x4(0))},

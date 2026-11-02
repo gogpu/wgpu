@@ -566,10 +566,11 @@ const (
 	// attribute whose offset plus format size runs past its buffer's arrayStride
 	// (or past Limits.MaxVertexBufferArrayStride when arrayStride is 0).
 	CreateRenderPipelineErrorVertexAttributeOutOfStride
-	// CreateRenderPipelineErrorVertexStrideZero indicates a vertex buffer with
-	// arrayStride 0. WebGPU allows it (every vertex reads the same element), but
-	// the native backends do not emulate it yet and disagree about what 0 means,
-	// so it is rejected until they do.
+	// CreateRenderPipelineErrorVertexStrideZero indicated a vertex buffer with
+	// arrayStride 0, which v0.34.6 rejected.
+	//
+	// Deprecated: arrayStride 0 (broadcast) is supported on every backend and
+	// is no longer rejected; this kind is never returned.
 	CreateRenderPipelineErrorVertexStrideZero
 )
 

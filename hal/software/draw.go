@@ -464,10 +464,8 @@ func (r *RenderPassEncoder) fetchTriangles(
 	bufData := vb.buffer.data
 	vb.buffer.mu.RUnlock()
 
+	// arrayStride 0 is WebGPU's broadcast: every vertex reads element 0.
 	stride := layout.ArrayStride
-	if stride == 0 {
-		return nil
-	}
 
 	// Classify attributes: find position (location 0) and others.
 	var posAttr *gputypes.VertexAttribute
@@ -663,19 +661,16 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 				if snap.data == nil {
 					continue
 				}
-				stride := ab.layout.ArrayStride
-				if stride == 0 {
-					continue
-				}
-
 				// Determine which index drives this buffer based on step mode.
+				// arrayStride 0 is WebGPU's broadcast: every vertex and
+				// instance reads element 0, so the index drops out.
 				var idx uint32
 				if ab.layout.StepMode == gputypes.VertexStepModeInstance {
 					idx = instanceID
 				} else {
 					idx = vertexID
 				}
-				base := snap.offset + uint64(idx)*stride
+				base := snap.offset + uint64(idx)*ab.layout.ArrayStride
 				vals := readVertexAttribute(snap.data, base+ab.attr.Offset, ab.attr.Format)
 				if vals == nil {
 					continue

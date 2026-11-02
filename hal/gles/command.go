@@ -1417,12 +1417,7 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 	stride := int32(c.layout.ArrayStride)
-	// Determine divisor from step mode: 0=per-vertex, 1=per-instance.
-	// Matches Rust wgpu-hal/src/gles/queue.rs vertex_attrib_divisor call.
-	var divisor uint32
-	if c.layout.StepMode == gputypes.VertexStepModeInstance {
-		divisor = 1
-	}
+	divisor := vertexAttribDivisor(c.layout)
 	for _, attr := range c.layout.Attributes {
 		loc := attr.ShaderLocation
 		size, typ, normalized := vertexFormatToGL(attr.Format)
@@ -1433,6 +1428,31 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 		// per-instance attributes get divisor=1. Without this, instanced rendering
 		// reads the same instance data for all instances.
 		ctx.VertexAttribDivisor(loc, divisor)
+	}
+}
+
+// broadcastDivisor is the instance divisor that makes every instance read
+// element 0 of a vertex attribute.
+const broadcastDivisor = 0xFFFFFFFF
+
+// vertexAttribDivisor returns the glVertexAttribDivisor value for a vertex
+// buffer layout: 0 per vertex, 1 per instance (Rust wgpu-hal
+// src/gles/queue.rs), and broadcastDivisor for arrayStride 0.
+//
+// arrayStride 0 is WebGPU's broadcast: every vertex and instance reads
+// element 0. glVertexAttribPointer reads a stride of 0 as tightly packed, so
+// the stride cannot express it. A non-zero divisor makes all vertices of an
+// instance share one element, and the largest divisor makes every instance
+// share element 0. This is Dawn's emulation (src/dawn/native/opengl/
+// RenderPipelineGL.cpp); Rust wgpu-hal passes the 0 through.
+func vertexAttribDivisor(layout *gputypes.VertexBufferLayout) uint32 {
+	switch {
+	case layout.ArrayStride == 0:
+		return broadcastDivisor
+	case layout.StepMode == gputypes.VertexStepModeInstance:
+		return 1
+	default:
+		return 0
 	}
 }
 
