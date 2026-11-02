@@ -46,7 +46,7 @@ func TestSurfaceTextureCreateView(t *testing.T) {
 
 	adapters := instance.EnumerateAdapters(surface)
 	if len(adapters) == 0 {
-		t.Skip("no Metal adapters available")
+		skipWithoutMetal(t, "no Metal adapters available")
 	}
 	adapter := adapters[0].Adapter
 	defer adapter.Destroy()

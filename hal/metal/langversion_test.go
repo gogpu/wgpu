@@ -34,7 +34,7 @@ func TestNewLibraryWithSourceAtDeviceVersion(t *testing.T) {
 	}
 	raw := CreateSystemDefaultDevice()
 	if raw == 0 {
-		t.Skip("no Metal device available")
+		skipWithoutMetal(t, "no Metal device available")
 	}
 	defer Release(raw)
 

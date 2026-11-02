@@ -198,7 +198,7 @@ func BenchmarkComputePassEncoderBindBufferSizes(b *testing.B) {
 	}
 	rawDevice := CreateSystemDefaultDevice()
 	if rawDevice == 0 {
-		b.Skip("no Metal device available")
+		skipWithoutMetal(b, "no Metal device available")
 	}
 	b.Cleanup(func() { Release(rawDevice) })
 

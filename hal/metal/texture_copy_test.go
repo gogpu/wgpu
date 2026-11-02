@@ -322,7 +322,7 @@ func TestDeviceCreateTexture2DArrayUsesMetalArrayShape(t *testing.T) {
 	}
 	rawDevice := CreateSystemDefaultDevice()
 	if rawDevice == 0 {
-		t.Skip("no Metal device available")
+		skipWithoutMetal(t, "no Metal device available")
 	}
 	defer Release(rawDevice)
 
@@ -541,7 +541,7 @@ func newMetalTextureCopyTestDevice(t *testing.T) (*Device, *Queue) {
 	}
 	rawDevice := CreateSystemDefaultDevice()
 	if rawDevice == 0 {
-		t.Skip("no Metal device available")
+		skipWithoutMetal(t, "no Metal device available")
 	}
 	t.Cleanup(func() { Release(rawDevice) })
 
