@@ -160,6 +160,9 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 	// StorageInputOutput16; naga converts them through f32 otherwise
 	// (Rust wgpu-hal vulkan/adapter.rs, use_storage_input_output_16).
 	dev.spirvOptions.UseStorageInputOutput16 = requested.Contains(gputypes.FeatureShaderF16) && a.ext.storageInputOutput16()
+	if a.ext.allowVaryingSubgroupSize(requested) {
+		dev.shaderStageFlags = vk.PipelineShaderStageCreateFlags(vk.PipelineShaderStageCreateAllowVaryingSubgroupSizeBit)
+	}
 	loadDrawIndirectCountProcs(dev)
 
 	// Initialize synchronization fence (VK-IMPL-001 / VK-IMPL-003).

@@ -39,7 +39,27 @@ const (
 	// extZeroInitWorkgroupMemory lets a shader zero workgroup memory with a
 	// null initializer (naga's Native mode). Vulkan 1.3 promoted it.
 	extZeroInitWorkgroupMemory = "VK_KHR_zero_initialize_workgroup_memory"
+
+	// extSubgroupSizeControl lets a pipeline stage run with any subgroup size
+	// the device picks (ALLOW_VARYING_SUBGROUP_SIZE), which a device with the
+	// subgroup feature sets on every stage. Vulkan 1.3 promoted it.
+	extSubgroupSizeControl = "VK_EXT_subgroup_size_control"
 )
+
+// requiredSubgroupOperations are the subgroup operation classes WGSL
+// subgroups need, as Rust wgpu-hal requires them (vulkan/adapter.rs,
+// PhysicalDeviceFeatures::to_wgpu): naga's SPIR-V backend emits each class
+// for its group of builtins.
+const requiredSubgroupOperations = vk.SubgroupFeatureFlags(vk.SubgroupFeatureBasicBit |
+	vk.SubgroupFeatureVoteBit |
+	vk.SubgroupFeatureArithmeticBit |
+	vk.SubgroupFeatureBallotBit |
+	vk.SubgroupFeatureShuffleBit |
+	vk.SubgroupFeatureShuffleRelativeBit |
+	vk.SubgroupFeatureQuadBit)
+
+// subgroupStagesComputeFragment are the stages Rust's SUBGROUP needs.
+const subgroupStagesComputeFragment = vk.ShaderStageFlags(vk.ShaderStageComputeBit | vk.ShaderStageFragmentBit)
 
 // Intel's proprietary Windows driver for integrated GPUs breaks rendering
 // with VK_EXT_robustness2 before 31.0.101.2115 (gfx-rs/wgpu#4599). Rust
@@ -76,6 +96,55 @@ type extendedFeatureSupport struct {
 	imageRobust *vk.PhysicalDeviceImageRobustnessFeatures
 	robustness2 *vk.PhysicalDeviceRobustness2FeaturesKHR
 	zeroInitWG  *vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+	sizeControl *vk.PhysicalDeviceSubgroupSizeControlFeatures
+	// subgroup is VkPhysicalDeviceSubgroupProperties, read through
+	// vkGetPhysicalDeviceProperties2 on Vulkan 1.1 and later.
+	subgroup *vk.PhysicalDeviceSubgroupProperties
+}
+
+// subgroupFeatures returns the subgroup features as Rust wgpu-hal decides
+// them (vulkan/adapter.rs, PhysicalDeviceFeatures::to_wgpu): with subgroup
+// size control (Vulkan 1.3 or VK_EXT_subgroup_size_control) and every
+// operation class WGSL needs, SUBGROUP where compute and fragment shaders
+// support subgroups and SUBGROUP_VERTEX where vertex shaders do.
+//
+// Deviation from Rust, which also offers SUBGROUP_BARRIER here: naga, like
+// Rust naga (back/spv/writer.rs, write_control_barrier), compiles
+// subgroupBarrier to OpControlBarrier with AcquireRelease|SubgroupMemory
+// semantics, which is invalid SPIR-V for Vulkan: the validation layer
+// rejects it (VUID-StandaloneSpirv-MemorySemantics-10870). The feature is
+// offered once naga emits a valid barrier and the readback test
+// (hal/allbackends TestFeatureSubgroupBarrier) passes clean.
+func (s *extendedFeatureSupport) subgroupFeatures() gputypes.Features {
+	if s.subgroup == nil || !s.hasSubgroupSizeControl() ||
+		s.subgroup.SupportedOperations&requiredSubgroupOperations != requiredSubgroupOperations {
+		return 0
+	}
+	var result gputypes.Features
+	if s.subgroup.SupportedStages&subgroupStagesComputeFragment == subgroupStagesComputeFragment {
+		result.Insert(gputypes.FeatureSubgroupOperations)
+	}
+	if s.subgroup.SupportedStages&vk.ShaderStageFlags(vk.ShaderStageVertexBit) != 0 {
+		result.Insert(gputypes.FeatureSubgroupVertex)
+	}
+	return result
+}
+
+// hasSubgroupSizeControl reports whether the device can enable subgroup
+// size control: Vulkan 1.3 core or VK_EXT_subgroup_size_control.
+func (s *extendedFeatureSupport) hasSubgroupSizeControl() bool {
+	return s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extSubgroupSizeControl]
+}
+
+// allowVaryingSubgroupSize reports whether a device created for requested
+// sets ALLOW_VARYING_SUBGROUP_SIZE on its pipeline stages, as Rust wgpu-hal
+// does on a device with SUBGROUP (vulkan/device.rs, compile_stage): the
+// subgroup_size builtin then reports the size the stage really runs with.
+// The flag needs the subgroupSizeControl feature, which enable turns on with
+// it (VUID-VkPipelineShaderStageCreateInfo-flags-02784).
+func (s *extendedFeatureSupport) allowVaryingSubgroupSize(requested gputypes.Features) bool {
+	return requested.Contains(gputypes.FeatureSubgroupOperations) &&
+		s.sizeControl != nil && s.sizeControl.SubgroupSizeControl != 0
 }
 
 // zeroInitializeWorkgroupMemory reports shaderZeroInitializeWorkgroupMemory:
@@ -200,7 +269,7 @@ func (s *extendedFeatureSupport) shaderCapabilityFeatures() gputypes.Features {
 	set(gputypes.FeatureShaderBarycentrics, s.fragmentBarycentrics())
 	set(gputypes.FeatureShaderPerVertex, s.fragmentBarycentrics())
 	set(gputypes.FeatureShaderDrawIndex, s.drawParameters())
-	return result
+	return result | s.subgroupFeatures()
 }
 
 // extendedWebGPUFeatures returns the features decided by the pNext feature
@@ -299,12 +368,36 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.Phy
 	if s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extZeroInitWorkgroupMemory] {
 		zeroInitWG.SType = vk.StructureTypePhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
 		*next = (*uintptr)(unsafe.Pointer(&zeroInitWG))
+		next = &zeroInitWG.PNext
 		s.zeroInitWG = &zeroInitWG
+	}
+	var sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
+	if s.hasSubgroupSizeControl() {
+		sizeControl.SType = vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures
+		*next = (*uintptr)(unsafe.Pointer(&sizeControl))
+		s.sizeControl = &sizeControl
 	}
 	if features2.PNext != nil {
 		i.cmds.GetPhysicalDeviceFeatures2(device, &features2)
 	}
+	s.subgroup = i.subgroupProperties(device, s)
 	return s
+}
+
+// subgroupProperties returns VkPhysicalDeviceSubgroupProperties, or nil
+// below Vulkan 1.1, where the struct does not exist (Rust wgpu-hal
+// vulkan/adapter.rs, query_capabilities).
+func (i *Instance) subgroupProperties(device vk.PhysicalDevice, s *extendedFeatureSupport) *vk.PhysicalDeviceSubgroupProperties {
+	if s.apiVersion < vkMakeVersion(1, 1, 0) {
+		return nil
+	}
+	subgroup := &vk.PhysicalDeviceSubgroupProperties{SType: vk.StructureTypePhysicalDeviceSubgroupProperties}
+	props2 := vk.PhysicalDeviceProperties2{
+		SType: vk.StructureTypePhysicalDeviceProperties2,
+		PNext: (*uintptr)(unsafe.Pointer(subgroup)),
+	}
+	i.cmds.GetPhysicalDeviceProperties2(device, &props2)
+	return subgroup
 }
 
 // driverID returns the driver of the physical device from
@@ -363,7 +456,10 @@ const enableableFeatures = gputypes.Features(gputypes.FeatureShaderF16) |
 	gputypes.Features(gputypes.FeatureShaderFloat32Atomic) |
 	gputypes.Features(gputypes.FeatureShaderBarycentrics) |
 	gputypes.Features(gputypes.FeatureShaderPerVertex) |
-	gputypes.Features(gputypes.FeatureShaderDrawIndex)
+	gputypes.Features(gputypes.FeatureShaderDrawIndex) |
+	gputypes.Features(gputypes.FeatureSubgroupOperations) |
+	gputypes.Features(gputypes.FeatureSubgroupBarrier) |
+	gputypes.Features(gputypes.FeatureSubgroupVertex)
 
 // unsupportedRequest returns the requested features Open enables that the
 // adapter does not offer.
@@ -390,6 +486,7 @@ type deviceFeatureChain struct {
 	imageRobust vk.PhysicalDeviceImageRobustnessFeatures
 	robustness2 vk.PhysicalDeviceRobustness2FeaturesKHR
 	zeroInitWG  vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+	sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
 }
 
 // enable fills c with the features to create the device with and returns
@@ -493,6 +590,21 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		}
 		c.zeroInitWG.ShaderZeroInitializeWorkgroupMemory = vk.Bool32(vk.True)
 		link(vk.StructureTypePhysicalDeviceZeroInitializeWorkgroupMemoryFeatures, &c.zeroInitWG.SType, &c.zeroInitWG.PNext, unsafe.Pointer(&c.zeroInitWG))
+	}
+	// Subgroup size control, for the ALLOW_VARYING_SUBGROUP_SIZE stages of a
+	// device with SUBGROUP (allowVaryingSubgroupSize). Rust enables the
+	// extension below Vulkan 1.3 when SUBGROUP is requested
+	// (get_required_extensions) and turns the feature on wherever the
+	// extension or 1.3 is enabled (from_extensions_and_requested_features);
+	// nothing else here uses size control, so the feature follows the
+	// SUBGROUP request on 1.3 too. The subgroup operations themselves are
+	// Vulkan 1.1 core and need no device feature.
+	if s.allowVaryingSubgroupSize(requested) {
+		if s.apiVersion < vkMakeVersion(1, 3, 0) {
+			extensions = append(extensions, extSubgroupSizeControl+"\x00")
+		}
+		c.sizeControl.SubgroupSizeControl = vk.Bool32(vk.True)
+		link(vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures, &c.sizeControl.SType, &c.sizeControl.PNext, unsafe.Pointer(&c.sizeControl))
 	}
 	return pNext, extensions
 }

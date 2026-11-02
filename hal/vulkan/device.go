@@ -83,6 +83,11 @@ type Device struct {
 	// compositor about which surface regions changed (damage rects).
 	supportsIncrementalPresent bool
 
+	// shaderStageFlags are the create flags of every pipeline stage:
+	// ALLOW_VARYING_SUBGROUP_SIZE on a device with the subgroup feature
+	// (extendedFeatureSupport.allowVaryingSubgroupSize).
+	shaderStageFlags vk.PipelineShaderStageCreateFlags
+
 	// Timeline semaphore fence (VK-IMPL-001).
 	// When available (Vulkan 1.2+), replaces both frame fences and transfer fence
 	// with a single timeline semaphore. Falls back to binary fences on older drivers.

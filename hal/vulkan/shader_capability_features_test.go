@@ -154,6 +154,96 @@ func TestEnableFeatureStructChain(t *testing.T) {
 	}
 }
 
+// TestSubgroupFeatures checks the subgroup features against
+// VkPhysicalDeviceSubgroupProperties and subgroup size control, as Rust
+// wgpu-hal decides them (vulkan/adapter.rs, PhysicalDeviceFeatures::to_wgpu),
+// without SUBGROUP_BARRIER (see subgroupFeatures).
+func TestSubgroupFeatures(t *testing.T) {
+	sizeControl := map[string]bool{extSubgroupSizeControl: true}
+	all := vk.ShaderStageFlags(vk.ShaderStageVertexBit | vk.ShaderStageFragmentBit | vk.ShaderStageComputeBit)
+	props := func(stages vk.ShaderStageFlags, ops vk.SubgroupFeatureFlags) *vk.PhysicalDeviceSubgroupProperties {
+		return &vk.PhysicalDeviceSubgroupProperties{SubgroupSize: 32, SupportedStages: stages, SupportedOperations: ops}
+	}
+	tests := []struct {
+		name string
+		s    extendedFeatureSupport
+		want gputypes.Features
+	}{
+		{"no subgroup properties", extendedFeatureSupport{extensions: sizeControl}, 0},
+		{"no subgroup size control", extendedFeatureSupport{subgroup: props(all, requiredSubgroupOperations)}, 0},
+		{
+			"size control from Vulkan 1.3",
+			extendedFeatureSupport{apiVersion: vkMakeVersion(1, 3, 0), subgroup: props(all, requiredSubgroupOperations)},
+			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex),
+		},
+		{
+			"all stages",
+			extendedFeatureSupport{extensions: sizeControl, subgroup: props(all, requiredSubgroupOperations)},
+			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex),
+		},
+		{
+			"compute and fragment only",
+			extendedFeatureSupport{extensions: sizeControl, subgroup: props(subgroupStagesComputeFragment, requiredSubgroupOperations)},
+			features(gputypes.FeatureSubgroupOperations),
+		},
+		{
+			"compute only",
+			extendedFeatureSupport{extensions: sizeControl, subgroup: props(vk.ShaderStageFlags(vk.ShaderStageComputeBit), requiredSubgroupOperations)},
+			0,
+		},
+		{
+			"vertex without fragment",
+			extendedFeatureSupport{extensions: sizeControl, subgroup: props(vk.ShaderStageFlags(vk.ShaderStageVertexBit|vk.ShaderStageComputeBit), requiredSubgroupOperations)},
+			features(gputypes.FeatureSubgroupVertex),
+		},
+		{
+			"no quad operations",
+			extendedFeatureSupport{extensions: sizeControl, subgroup: props(all, requiredSubgroupOperations&^vk.SubgroupFeatureFlags(vk.SubgroupFeatureQuadBit))},
+			0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.s.subgroupFeatures(); got != tt.want {
+				t.Errorf("subgroupFeatures() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnableSubgroupSizeControl checks that a device with the subgroup
+// feature enables subgroup size control, with its extension below Vulkan
+// 1.3, and allows varying subgroup sizes; without the request nothing is
+// enabled.
+func TestEnableSubgroupSizeControl(t *testing.T) {
+	on := vk.Bool32(vk.True)
+	s := extendedFeatureSupport{
+		apiVersion:  vkMakeVersion(1, 2, 0),
+		extensions:  map[string]bool{extSubgroupSizeControl: true},
+		sizeControl: &vk.PhysicalDeviceSubgroupSizeControlFeatures{SubgroupSizeControl: on},
+	}
+	var c deviceFeatureChain
+	pNext, exts := s.enable(&c, features(gputypes.FeatureSubgroupOperations), false)
+	if pNext != (*uintptr)(unsafe.Pointer(&c.sizeControl)) || c.sizeControl.SubgroupSizeControl == 0 ||
+		c.sizeControl.SType != vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures {
+		t.Fatalf("subgroup size control struct not chained and on: %+v", c.sizeControl)
+	}
+	if len(exts) != 1 || exts[0] != extSubgroupSizeControl+"\x00" {
+		t.Errorf("extensions %q, want %s", exts, extSubgroupSizeControl)
+	}
+	if !s.allowVaryingSubgroupSize(features(gputypes.FeatureSubgroupOperations)) {
+		t.Error("a device with the subgroup feature does not allow varying subgroup sizes")
+	}
+
+	for _, requested := range []gputypes.Features{0, features(gputypes.FeatureSubgroupVertex)} {
+		c = deviceFeatureChain{}
+		pNext, exts = s.enable(&c, requested, false)
+		if pNext != nil || len(exts) != 0 || s.allowVaryingSubgroupSize(requested) {
+			t.Errorf("request %v: pNext %v, extensions %q, varying %v; want none", requested, pNext, exts, s.allowVaryingSubgroupSize(requested))
+		}
+	}
+}
+
 // TestUnsupportedRequest checks that Open refuses enableable features the
 // adapter does not offer and leaves other features to core.
 func TestUnsupportedRequest(t *testing.T) {
