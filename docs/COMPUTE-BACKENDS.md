@@ -8,11 +8,16 @@ This document describes compute shader support across wgpu's HAL backends.
 |---------|:------:|:----:|:-----:|:----:|:--------:|:-------:|:----:|
 | Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | Yes | No |
 | Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | Yes | No |
-| Timestamp queries | Yes | Yes | Stub | Stub | No | No | No |
+| Timestamp queries | HAL only¹ | HAL only¹ | No² | Windows only | No | No | No |
 | Indirect dispatch | Yes | Yes | Yes | Yes | No | Yes | No |
 | Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | Yes | No |
 | Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
 | Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
+
+¹ The HAL implements timestamp queries, but the adapter does not offer `FeatureTimestampQuery` yet, so the public
+`Device.CreateQuerySet` refuses timestamp query sets on this backend.
+² The adapter offers `FeatureTimestampQuery` on Metal 3 GPUs, but query sets are not implemented: `CreateQuerySet`
+returns `ErrTimestampsNotSupported`.
 
 ## Vulkan
 
@@ -21,11 +26,11 @@ This document describes compute shader support across wgpu's HAL backends.
 Vulkan provides the most complete compute shader implementation:
 
 - **Shader compilation:** WGSL -> SPIR-V (via `gogpu/naga`).
-- **Timestamp queries:** Fully implemented using `vkCmdWriteTimestamp` at the beginning and end of compute passes. Results are copied to a buffer via `vkCmdCopyQueryPoolResults`.
+- **Timestamp queries (HAL):** implemented using `vkCmdWriteTimestamp` at the beginning and end of passes. Results are copied to a buffer via `vkCmdCopyQueryPoolResults`. Not reachable through the public API yet (see the note under the table).
 - **Memory barriers:** Automatic global memory barrier inserted at compute pass end (`End()`) to ensure shader writes are visible to subsequent commands.
 - **Workgroup size limits:** Depends on the physical device. Typical minimum guaranteed by Vulkan spec: 128 invocations per workgroup. Most desktop GPUs support 1024.
 - **Synchronization:** Use `Fence` + `Device.Wait()` to synchronize CPU with GPU completion.
-- **Timestamp period:** `Queue.GetTimestampPeriod()` returns the nanoseconds-per-tick value for the GPU's timestamp counter.
+- **Timestamp period:** the HAL queue's `GetTimestampPeriod()` returns nanoseconds per tick; the public `wgpu.Queue` does not expose it yet.
 
 ### Vulkan-Specific Notes
 
@@ -35,10 +40,10 @@ Vulkan provides the most complete compute shader implementation:
 
 ## DirectX 12
 
-**Status:** Compute shaders work. Timestamp queries supported.
+**Status:** Compute shaders work. Timestamp queries are implemented in the HAL but not offered through the public API yet.
 
 - **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, SM 6.0+, no external dependencies).
-- **Timestamp queries:** Fully implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
+- **Timestamp queries (HAL):** implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup (D3D12 spec).
 - **Indirect dispatch:** `DispatchIndirect` via `ExecuteIndirect` with pre-created `ID3D12CommandSignature` (dispatch args: 3 × uint32 = 12 bytes). Also supports `DrawIndirect` (16B) and `DrawIndexedIndirect` (20B).
 - **Root signature:** Compute pipelines use a separate root signature from graphics pipelines. Descriptor heaps are bound lazily on first `SetBindGroup` call.
@@ -67,7 +72,7 @@ Vulkan provides the most complete compute shader implementation:
 **Status:** Partial compute support. Requires OpenGL ES 3.1+.
 
 - **Shader compilation:** WGSL -> GLSL (via `gogpu/naga`).
-- **Timestamp queries:** `CreateQuerySet` currently returns `ErrTimestampsNotSupported`. GLES supports timer queries via `GL_EXT_disjoint_timer_query` extension (not universally available). Implementation is planned.
+- **Timestamp queries:** implemented on Windows (GL timer queries, GL 3.3+ or `GL_ARB_timer_query`). On Linux `CreateQuerySet` returns `ErrTimestampsNotSupported`; `GL_EXT_disjoint_timer_query` support is planned.
 - **Compute support flag:** Check `DownlevelFlagsComputeShaders` in adapter capabilities.
 - **GLES 3.0:** No compute shader support (only GLES 3.1+).
 - **GLES 3.1+:** Compute shaders supported via `glDispatchCompute`.
@@ -163,4 +168,4 @@ To read compute results back to the CPU:
 
 This two-step process is required because GPU-optimal memory is typically not directly accessible by the CPU.
 
-For non-blocking readback (game loops, frame-budgeted compute), use `Buffer.MapAsync` + `Device.Poll(PollPoll)` instead. See [COMPUTE-SHADERS.md](COMPUTE-SHADERS.md#step-3-map-and-read-back-data) for full examples, and [dev/research/ADR-BUFFER-MAPPING-API.md](dev/research/ADR-BUFFER-MAPPING-API.md) for design rationale.
+For non-blocking readback (game loops, frame-budgeted compute), use `Buffer.MapAsync` + `Device.Poll(PollPoll)` instead. See [COMPUTE-SHADERS.md](COMPUTE-SHADERS.md#step-3-map-and-read-back-data) for full examples.

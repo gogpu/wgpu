@@ -6,9 +6,9 @@ This document describes the architecture of `wgpu` — the unified Go WebGPU pac
 
 **If implementation CAN be hidden — it MUST be hidden.**
 
-The root package (`github.com/gogpu/wgpu`) exposes only exported types and thin delegation methods. All implementation logic lives in `internal/` sub-packages. pkg.go.dev shows one clean public API package. Contributors working within the module have full access to `internal/`. External users interact exclusively through the public API.
+The root package (`github.com/gogpu/wgpu`) is the public API. Implementation lives in `core/` (validation and state tracking), `hal/` (backends) and `internal/` sub-packages (browser backend, indirect draw helpers, pipeline cache, ray tracing, shader lowering, render-loop threading). Moving `core/` and `hal/` under `internal/` is planned before v1.0 (#329), so that pkg.go.dev shows one public package; until then they are importable but not covered by the compatibility promise.
 
-This is enforced by Go's `internal/` package mechanism and documented in ADR-070.
+New implementation code goes into `internal/` sub-packages, where Go's `internal/` mechanism keeps it out of the public API.
 
 ## Overview
 
@@ -62,8 +62,8 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Textu
 
 Validation layer between the public API and HAL. Core validates exhaustively — HAL assumes validated input.
 
-- **Spec validation** — `core/validate.go` implements 45+ WebGPU spec rules (Phase A+B): textures (dimensions, limits, multisampling, formats, depth/stencil aspects), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets, format type guards), bind groups (entry matching, buffer usage/alignment/bounds, MinBindingSize), pipeline layouts (bind group count). Draw-time validation includes pipeline/bind group/vertex buffer state, index buffer format matching, indirect buffer bounds, blend constant tracking (VAL-005), and resource usage conflict detection (BufferTracker). Queue.Submit validates buffer/texture/bind group lifecycle. **Phase C** adds usage-time feature gates (VAL-C0–C25), texture usage matrix, and the [`ValidationEnv` test fixture](VALIDATION-TESTING.md) — see [Validation Testing Guide](VALIDATION-TESTING.md).
-- **Typed errors** — `core/error.go` defines 7 typed error types (`CreateTextureError`, `CreateSamplerError`, `CreateShaderModuleError`, `CreateRenderPipelineError`, `CreateComputePipelineError`, `CreateBindGroupLayoutError`, `CreateBindGroupError`) with specific error kinds and context fields, supporting `errors.As()` for programmatic handling
+- **Spec validation** — `core/validate.go` implements WebGPU spec rules (Phase A+B): textures (dimensions, limits, multisampling, formats, depth/stencil aspects), samplers (LOD, anisotropy), shaders (source presence), pipelines (stages, targets, format type guards), bind groups (entry matching, buffer usage/alignment/bounds, MinBindingSize), pipeline layouts (bind group count). Draw-time validation includes pipeline/bind group/vertex buffer state, index buffer format matching, indirect buffer bounds, blend constant tracking (VAL-005), and resource usage conflict detection (BufferTracker). Queue.Submit validates buffer/texture/bind group lifecycle. **Phase C** adds usage-time feature gates (VAL-C0–C25), texture usage matrix, and the [`ValidationEnv` test fixture](VALIDATION-TESTING.md) — see [Validation Testing Guide](VALIDATION-TESTING.md).
+- **Typed errors** — `core/error.go` defines typed creation errors (`CreateBufferError`, `CreateTextureError`, `CreateSamplerError`, `CreateShaderModuleError`, `CreateRenderPipelineError`, `CreateComputePipelineError`, `CreateBindGroupLayoutError`, `CreateBindGroupError`, `CreatePipelineLayoutError`, `CreateCommandEncoderError`) with specific error kinds and context fields, supporting `errors.As()` for programmatic handling
 - **Deferred errors** — WebGPU pattern: encoding-phase errors are recorded via `SetError()` and surface at `End()` / `Finish()`
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)
 - **Resource tracking** — Leak detection in debug builds
@@ -73,7 +73,7 @@ Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `Rende
 
 - **Surface lifecycle** — `core.Surface` manages the Unconfigured → Configured → Acquired state machine with mutex-protected transitions. Validates state (can't acquire twice, can't present without acquire). Includes `PrepareFrameFunc` hook for platform HiDPI/DPI integration (Metal contentsScale, Windows WM_DPICHANGED, Wayland wl_output.scale).
 - **CommandEncoder lifecycle** — `core.CommandEncoder` tracks pass state (Recording → InRenderPass/InComputePass → Finished) with validated transitions.
-- **Resource types** — All 17 resource types have full struct definitions with HAL handles wrapped in `Snatchable` for safe destruction, device references, and WebGPU properties.
+- **Resource types** — All resource types have full struct definitions with HAL handles wrapped in `Snatchable` for safe destruction, device references, and WebGPU properties.
 
 ### `hal/` — Hardware Abstraction Layer
 
@@ -139,7 +139,7 @@ Pure Go DX12 implementation via COM interfaces.
 
 ### `hal/gles/` — OpenGL ES Backend
 
-Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
+Pure Go OpenGL 3.3+ / OpenGL ES 3.0+ implementation; adapters below that minimum are not exposed.
 
 **Context Architecture (Rust wgpu parity):**
 - **Windows (WGL):** GL context lives on a hidden 1×1 window owned by Instance
@@ -156,7 +156,7 @@ Pure Go OpenGL ES 3.0+ / OpenGL 4.3+ implementation.
 - `gl/` — OpenGL function bindings (Windows syscall + Linux goffi)
 - `egl/` — EGL context and display management (Linux)
 - `wgl/` — WGL context + hidden window lifecycle (Windows)
-- `shader.go` — WGSL → GLSL 4.30 via naga, with BindingMap for flat binding indices
+- `shader.go` — WGSL → GLSL via naga, for the GLSL version the adapter reports, with BindingMap for flat binding indices
 - `sampler.go` — GL sampler objects (glGenSamplers/glBindSampler, GL 3.3+)
 - `command.go` — SamplerBindMap: maps WGSL separate texture+sampler to GLSL combined sampler2D (from naga TextureMappings)
 
@@ -207,7 +207,7 @@ wgpu public API
 - Data transfer: `js.CopyBytesToGo`/`js.CopyBytesToJS` for GPU↔CPU
 - Shaders: WGSL string passthrough to browser `createShaderModule()` — no naga on browser path
 - Surface: HTML Canvas + `GPUCanvasContext`, present is no-op (browser auto-presents)
-- ~6500 LOC total (4000 internal/browser + 2500 root wrappers), zero external dependencies
+- Zero external dependencies
 
 Key files: `promise.go` (async→sync), `convert_enums.go` (97 TextureFormats, 31 VertexFormats + all WebGPU enums), `convert_resources.go` (JS descriptor builders), `surface.go` (Canvas + GPUCanvasContext).
 
@@ -223,9 +223,9 @@ Ray tracing build orchestration, compaction state machine, and validation — is
 - `errors.go` — typed ValidationError with operation constants
 - `context.go` — DeviceContext callback interface (core.Device implements without import cycle)
 
-HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. All 4 GPU backends implement real API calls (Vulkan VK_KHR, DX12 DXR, Metal MTL, Software CPU BVH). GLES/Noop return ErrUnsupported.
+HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. All 4 GPU backends implement real API calls (Vulkan VK_KHR, DX12 DXR, Metal MTL, Software CPU BVH). GLES and Noop return an error.
 
-~1,300 LOC internal, 73 tests, 96.8% coverage. Example: `examples/raytracing-headless/`.
+Example: `examples/raytracing-headless/`.
 
 ## DownlevelCapabilities (ADR-071)
 
@@ -297,13 +297,16 @@ Persists driver-compiled GPU ISA across process launches for faster cold starts.
 Surface creation uses typed targets instead of raw `uintptr` handles:
 
 ```go
-// Safe targets (recommended)
-target := wgpu.SurfaceTargetFromWindowsHWND(hwnd)
-surface, _ := instance.CreateSurfaceFromTarget(target)
+// Safe targets (recommended): a provider implementing wgpu.SurfaceTarget,
+// kept alive with the Surface (e.g. a windowing library's window type)
+surface, _ := instance.CreateSurfaceFromTarget(window)
 
-// Unsafe targets (platform-specific)
-target := wgpu.SurfaceTargetUnsafeAndroidNDK(nativeWindow)
-surface, _ := instance.CreateSurfaceUnsafe(target)
+// Headless (software backend)
+surface, _ := instance.CreateSurfaceFromTarget(wgpu.HeadlessSurfaceTarget{})
+
+// Unsafe targets: raw handles that the caller keeps valid
+surface, _ := instance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromWindowsHWND(hinstance, hwnd))
+surface, _ := instance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromAndroidNativeWindow(nativeWindow))
 
 // Legacy compatibility (preserved)
 surface, _ := instance.CreateSurface(displayHandle, windowHandle)
@@ -333,7 +336,7 @@ Platform selection (`hal/allbackends/`):
 The no-op backend is imported explicitly for tests; `hal/allbackends` does not
 register it automatically.
 
-Backend priority for auto-selection: Vulkan > Metal > DX12 > GLES > Software > Noop.
+`hal.SelectBestBackend` priority: Vulkan > Metal > DX12 > GLES > the backends that report `BackendEmpty` (Software, Noop).
 
 ## PendingWrites (Rust wgpu-core Pattern)
 
@@ -356,7 +359,7 @@ Queue.Submit(userCmds)    │
 
 ```
 Chunk lifecycle:  free → active (sub-allocating) → closed (GPU in-flight) → free (recycled)
-Steady-state:     0 allocs/op, 22ns — 15× faster than per-write staging
+Steady-state:     0 allocs/op (chunks are recycled, not reallocated)
 ```
 
 **Direct-write backends** (GLES, Software): `usesBatching=false`, delegate directly to `hal.Queue.WriteBuffer()`/`WriteTexture()`. No staging, no command encoder, no belt.
@@ -424,11 +427,12 @@ wgpu (this library)
 gogpu (app framework) / gg (2D graphics)
 ```
 
-External dependencies:
-- `github.com/gogpu/naga` v0.20.4 — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
-- `github.com/gogpu/gputypes` v0.5.2 — shared WebGPU type definitions
-- `github.com/gogpu/gpucontext` v0.28.0 — shared interfaces (DeviceProvider, PlatformProvider)
-- `github.com/go-webgpu/goffi` v0.6.7 — Pure Go FFI for Vulkan/Metal/DX12 symbol loading (Android Bionic support)
-- `github.com/go-webgpu/webgpu` v0.5.5 — Rust FFI backend (wgpu-native v29, Android surface, timestamp period)
-- `github.com/gogpu/galloc` v0.1.0 — O(1) offset allocator (planned integration for memory sub-allocation)
-- `golang.org/x/sys` v0.47.0 — platform syscall definitions
+External dependencies (versions: see `go.mod`):
+- `github.com/gogpu/naga` — shader compiler (WGSL → SPIR-V / MSL / GLSL / HLSL / DXIL), Pure Go
+- `github.com/gogpu/gputypes` — shared WebGPU type definitions
+- `github.com/gogpu/gpucontext` — shared interfaces (DeviceProvider, PlatformProvider)
+- `github.com/go-webgpu/goffi` — Pure Go FFI for Vulkan/Metal/GLES/DX12 symbol loading (Android Bionic support)
+- `github.com/go-webgpu/webgpu` — Rust FFI backend (`-tags rust`, wgpu-native v29)
+- `golang.org/x/sys` — platform syscall definitions
+
+`github.com/gogpu/galloc` (O(1) offset allocator) is planned for memory sub-allocation and is not a dependency yet.

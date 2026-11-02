@@ -1,7 +1,7 @@
 # Validation Testing Guide
 
 > How feature gates, texture usage rules, and Phase C validation are tested in `wgpu/core`.  
-> Issue: [#333](https://github.com/gogpu/wgpu/issues/333) · Implementation branch: `feat/validation-phase-c`
+> Issue: [#333](https://github.com/gogpu/wgpu/issues/333)
 
 ---
 
@@ -35,7 +35,7 @@ flowchart TB
 | Tier | Package | Backend | Use for |
 |------|---------|---------|---------|
 | **1** | `core/` + `core/testutil/` | No HAL / direct `Validate*` | Feature gates, descriptor validation, texture matrix |
-| **2** | `wgpu` (`wgpu_test`) | Real HAL (`GOGPU_GRAPHICS_API=software` in CI) | Encode → Finish error path, `CreateQuerySet`, multi-draw |
+| **2** | `wgpu` (`wgpu_test`) | Real HAL (the adapter `RequestAdapter(nil)` picks) | Encode → Finish error path, `CreateQuerySet`, multi-draw |
 
 **Rule:** bulk feature coverage lives in Tier 1. Tier 2 gets **1–2 smoke tests per feature group**, not 25 duplicate cases.
 
@@ -247,8 +247,8 @@ go test ./core/... -run TestFeatureGates -v
 # Texture matrix
 go test ./core/track/... -run IsCompatible -v
 
-# Smoke with software HAL
-GOGPU_GRAPHICS_API=software go test . -run FeatureGate -v
+# Smoke with a real HAL (the adapter RequestAdapter(nil) picks)
+go test . -run FeatureGate -v
 
 # Indirect-count validation (HAL + core + public API, no GPU)
 go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndirectCount' -count=1

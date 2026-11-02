@@ -91,11 +91,10 @@ backend trait.
 
 That wrapper method belongs in canonical
 [go-webgpu/webgpu#24](https://github.com/go-webgpu/webgpu/pull/24), not this
-repository. This branch tests its exact clean head
-`a801aed7399042e5564ef76fc9f075da5cb70081`, the canonical #24 merge. Until a
-release contains that commit, the Rust-tag Android lane injects the exact clean
-source through an ephemeral workspace. The WGPU follow-up does not vendor the
-ABI struct or add a local `replace`.
+repository; it was released in go-webgpu/webgpu v0.5.4. The Rust-tag Android CI
+lane also tests the exact #24 merge commit
+`a801aed7399042e5564ef76fc9f075da5cb70081`. WGPU does not vendor the ABI struct
+or add a local `replace`.
 
 Like Rust `wgpu`, the native implementation attempts surface creation for
 every enabled backend and succeeds when at least one backend succeeds. It keeps
@@ -208,7 +207,7 @@ func capture() ([]byte, error) {
 			View:       view,
 			LoadOp:     gputypes.LoadOpClear,
 			StoreOp:    gputypes.StoreOpStore,
-			ClearValue: wgpu.Color{R: 1, A: 1},
+			ClearValue: gputypes.Color{R: 1, A: 1},
 		}},
 	})
 	if err != nil {
