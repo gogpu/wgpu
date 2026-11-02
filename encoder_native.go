@@ -398,6 +398,9 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is released: %w", ErrReleased))
 		return
 	}
+	if !e.validateBufferTextureCopies("CopyTextureToBuffer", src, regions) {
+		return
+	}
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
@@ -531,6 +534,9 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	halSrc := src.halBuffer()
 	if halSrc == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is released: %w", ErrReleased))
+		return
+	}
+	if !e.validateBufferTextureCopies("CopyBufferToTexture", dst, regions) {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -938,4 +944,23 @@ func (cb *CommandBuffer) halBufferList() []hal.CommandBuffer {
 		return nil
 	}
 	return cb.core.HalBufferList()
+}
+
+// validateBufferTextureCopies checks the buffer layout of every region of a
+// buffer-texture copy (core.ValidateTextureBufferCopy: one sample, aligned
+// offset, bytesPerRow a multiple of 256). Returns false, with the error
+// recorded on the encoder, for the first invalid region.
+func (e *CommandEncoder) validateBufferTextureCopies(op string, texture *Texture, regions []BufferTextureCopy) bool {
+	sampleCount := uint32(1)
+	if texture.coreTexture != nil {
+		sampleCount = texture.coreTexture.SampleCount()
+	}
+	for i := range regions {
+		layout := &regions[i].BufferLayout
+		if err := core.ValidateTextureBufferCopy(texture.format, sampleCount, layout.Offset, layout.BytesPerRow); err != nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
+			return false
+		}
+	}
+	return true
 }

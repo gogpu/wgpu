@@ -325,7 +325,7 @@ func TestDrawIndexedRenders(t *testing.T) {
 	pl, _ := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{})
 	defer pl.Release()
 
-	const W, H = 16, 16
+	const W, H = 64, 16 // W*4 = 256, the copy bytesPerRow alignment
 	pipeline, err := device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Layout: pl,
 		Vertex: wgpu.VertexState{

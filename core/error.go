@@ -1318,3 +1318,46 @@ func (e *RequestDeviceError) Error() string {
 		return "request device: unknown error"
 	}
 }
+
+// =============================================================================
+// Transfer (copy command) Errors
+// =============================================================================
+
+// TransferErrorKind represents the type of copy command error.
+type TransferErrorKind int
+
+const (
+	// TransferErrorUnalignedBytesPerRow indicates a bytesPerRow that is not a
+	// multiple of CopyBytesPerRowAlignment (Rust TransferError::UnalignedBytesPerRow).
+	TransferErrorUnalignedBytesPerRow TransferErrorKind = iota
+	// TransferErrorUnalignedBufferOffset indicates a buffer offset that is not
+	// a multiple of the texel block copy size (Rust
+	// TransferError::UnalignedBufferOffset).
+	TransferErrorUnalignedBufferOffset
+	// TransferErrorInvalidSampleCount indicates a copy of a multisampled
+	// texture (Rust TransferError::InvalidSampleCount).
+	TransferErrorInvalidSampleCount
+)
+
+// TransferError represents an invalid copy command on a command encoder.
+type TransferError struct {
+	Kind        TransferErrorKind
+	BytesPerRow uint32
+	Offset      uint64
+	Alignment   uint32
+	SampleCount uint32
+}
+
+// Error implements the error interface.
+func (e *TransferError) Error() string {
+	switch e.Kind {
+	case TransferErrorUnalignedBytesPerRow:
+		return fmt.Sprintf("copy: bytesPerRow %d is not a multiple of %d", e.BytesPerRow, CopyBytesPerRowAlignment)
+	case TransferErrorUnalignedBufferOffset:
+		return fmt.Sprintf("copy: buffer offset %d is not a multiple of %d", e.Offset, e.Alignment)
+	case TransferErrorInvalidSampleCount:
+		return fmt.Sprintf("copy: texture sample count %d, a buffer-texture copy needs 1", e.SampleCount)
+	default:
+		return "copy: unknown error"
+	}
+}
