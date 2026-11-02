@@ -7,6 +7,7 @@ package gles
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/gogpu/gputypes"
@@ -64,6 +65,13 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 	}
 
 	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
+
+	// The context is current only while the GL functions load, on this
+	// pinned thread, and is released after: AdapterContext.Lock makes it
+	// current on whatever thread uses it next (Rust wgpu-hal src/gles/egl.rs
+	// pairs every make_current with an unmake_current).
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		hal.Logger().Warn("gles: instance context MakeCurrent failed", "err", err)
@@ -81,6 +89,11 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 		"version", glCtx.GetString(gl.VERSION),
 		"renderer", glCtx.GetString(gl.RENDERER))
 
+	if err := eglCtx.ReleaseCurrent(); err != nil {
+		eglCtx.Destroy()
+		hal.Logger().Warn("gles: instance context release failed", "err", err)
+		return &Instance{}, nil
+	}
 	return &Instance{ctx: NewAdapterContext(eglCtx, glCtx, true)}, nil
 }
 
@@ -166,6 +179,11 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 	}
 
 	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
+
+	// Current only while the GL functions load, on this pinned thread, as
+	// in CreateInstance (Rust unbinds at the end of create_surface).
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
@@ -181,6 +199,10 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 	renderer := glCtx.GetString(gl.RENDERER)
 	hal.Logger().Info("gles: surface created with AdapterContext",
 		"version", version, "renderer", renderer, "gles", config.GLES)
+	if err := eglCtx.ReleaseCurrent(); err != nil {
+		eglCtx.Destroy()
+		return nil, fmt.Errorf("gles: failed to release context: %w", err)
+	}
 
 	// The GL context is shared with the Adapter/Device/Queue created from this
 	// Surface, and those outlive the Surface. Adopt ownership on the Instance

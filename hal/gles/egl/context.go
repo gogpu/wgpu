@@ -332,6 +332,16 @@ func (c *Context) MakeCurrent() error {
 	return nil
 }
 
+// ReleaseCurrent makes no context current on the calling thread. A context
+// may be current on one thread only, so one left current on a thread makes
+// eglMakeCurrent on any other thread fail with EGL_BAD_ACCESS.
+func (c *Context) ReleaseCurrent() error {
+	if MakeCurrent(c.display, NoSurface, NoSurface, NoContext) == False {
+		return fmt.Errorf("eglMakeCurrent(EGL_NO_CONTEXT) failed: error 0x%x", GetError())
+	}
+	return nil
+}
+
 // MakeCurrentSurface makes this context current on a window surface (for Present).
 func (c *Context) MakeCurrentSurface(surface EGLSurface) error {
 	if MakeCurrent(c.display, surface, surface, c.context) == False {
