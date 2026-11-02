@@ -158,7 +158,7 @@ Typical flow for draw-time gates:
 Integration-only gates (not in `featureGateCases`):
 
 - `FeatureMultiDrawIndirect` — `MultiDrawIndirect` when `drawCount > 1`
-- `FeatureIndirectFirstInstance` — `Draw` with `firstInstance != 0`
+- `FeatureIndirectFirstInstance` is not a draw-time gate for direct `Draw`/`DrawIndexed`: it only governs the `firstInstance` field of indirect draw args, so direct draws accept any `firstInstance`
 - `FeatureMultiDrawIndirectCount` — count-buffer indirect APIs (`MultiDrawIndirectCount`, `MultiDrawIndexedIndirectCount`)
 
 ---

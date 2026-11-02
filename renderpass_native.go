@@ -221,17 +221,9 @@ func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !p.validateDrawState("Draw") {
 		return
 	}
-	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
-	if args.FirstInstance != 0 {
-		if err := core.RequireFeature(
-			p.encoder.device.Features(),
-			gputypes.FeatureIndirectFirstInstance,
-			"Draw",
-		); err != nil {
-			p.encoder.setError(err)
-			return
-		}
-	}
+	// firstInstance is accepted unconditionally: "indirect-first-instance" only governs
+	// the firstInstance field of INDIRECT draw args (W3C spec, drawIndirect), and
+	// Rust wgpu-core command/render.rs only runs validate_instance_limit here.
 	p.core.Draw(args)
 }
 
@@ -253,17 +245,7 @@ func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
 		return
 	}
-	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
-	if args.FirstInstance != 0 {
-		if err := core.RequireFeature(
-			p.encoder.device.Features(),
-			gputypes.FeatureIndirectFirstInstance,
-			"DrawIndexed",
-		); err != nil {
-			p.encoder.setError(err)
-			return
-		}
-	}
+	// firstInstance needs no feature gate (see Draw).
 	p.core.DrawIndexed(args)
 }
 
