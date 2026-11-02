@@ -54,6 +54,9 @@ func (p *RenderPassEncoder) checkBundle(bundle *RenderBundle) error {
 	if bundle.released.Load() {
 		return fmt.Errorf("bundle %q: %w", bundle.label, ErrReleased)
 	}
+	if bundle.bundleContents == nil {
+		return fmt.Errorf("%w: render bundle %q was not created by RenderBundleEncoder.Finish", errBundleCommand, bundle.label)
+	}
 	if bundle.device != p.encoder.device {
 		return fmt.Errorf("bundle %q: %w", bundle.label, errBundleDevice)
 	}

@@ -20,8 +20,10 @@ var rgba8Formats = []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}
 func newEmptyBundle(device *Device) *RenderBundle {
 	return &RenderBundle{
 		device: device,
-		target: renderBundleTarget{context: core.RenderPassContext{SampleCount: 1}, depthReadOnly: true, stencilReadOnly: true},
-		scope:  core.NewRenderBundleScope(),
+		bundleContents: &bundleContents{
+			target: renderBundleTarget{context: core.RenderPassContext{SampleCount: 1}, depthReadOnly: true, stencilReadOnly: true},
+			scope:  core.NewRenderBundleScope(),
+		},
 	}
 }
 

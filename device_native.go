@@ -153,7 +153,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		d.destroyTextureDeferred(halTexture, td)
 	})
 
-	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: desc.ViewFormats, coreTexture: coreTexture}, nil
+	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
 }
 
 // CreateTextureView creates a view into a texture.
@@ -178,7 +178,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if desc != nil {
 		// A texture without a known format (a bare wrapper) cannot be checked.
 		if texture.format != gputypes.TextureFormatUndefined {
-			if err := core.ValidateTextureViewFormat(texture.format, texture.viewFormats, desc.Aspect, desc.Format); err != nil {
+			if err := core.ValidateTextureViewFormat(texture.format, texture.viewFormatList(), desc.Aspect, desc.Format); err != nil {
 				return nil, fmt.Errorf("wgpu: CreateTextureView: %w", err)
 			}
 		}

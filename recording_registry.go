@@ -15,56 +15,71 @@ import "sync"
 // so it first discards what this registry still holds: their references are
 // dropped and the resources they kept alive are destroyed with the device
 // instead of being left on it (VUID-vkDestroyDevice-device-05137 on Vulkan).
+//
+// The sets live behind a pointer so that Device, which embeds the registry by
+// value, stays a comparable type, as it was before the registry existed.
 type recordingRegistry struct {
-	mu       sync.Mutex
+	mu   sync.Mutex
+	sets *recordingSets
+}
+
+// recordingSets holds the registry's contents; created on first use.
+type recordingSets struct {
 	encoders map[*CommandEncoder]struct{}
 	buffers  map[*CommandBuffer]struct{}
+}
+
+// setsLocked returns the registry's sets, creating them on first use.
+// The caller holds r.mu.
+func (r *recordingRegistry) setsLocked() *recordingSets {
+	if r.sets == nil {
+		r.sets = &recordingSets{
+			encoders: make(map[*CommandEncoder]struct{}),
+			buffers:  make(map[*CommandBuffer]struct{}),
+		}
+	}
+	return r.sets
 }
 
 func (r *recordingRegistry) addEncoder(e *CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.encoders == nil {
-		r.encoders = make(map[*CommandEncoder]struct{})
-	}
-	r.encoders[e] = struct{}{}
+	r.setsLocked().encoders[e] = struct{}{}
 }
 
 func (r *recordingRegistry) removeEncoder(e *CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.encoders, e)
+	delete(r.setsLocked().encoders, e)
 }
 
 func (r *recordingRegistry) addBuffer(cb *CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.buffers == nil {
-		r.buffers = make(map[*CommandBuffer]struct{})
-	}
-	r.buffers[cb] = struct{}{}
+	r.setsLocked().buffers[cb] = struct{}{}
 }
 
 func (r *recordingRegistry) removeBuffer(cb *CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.buffers, cb)
+	delete(r.setsLocked().buffers, cb)
 }
 
 // take empties the registry and returns what it held.
 func (r *recordingRegistry) take() ([]*CommandEncoder, []*CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	encoders := make([]*CommandEncoder, 0, len(r.encoders))
-	for e := range r.encoders {
+	sets := r.setsLocked()
+	encoders := make([]*CommandEncoder, 0, len(sets.encoders))
+	for e := range sets.encoders {
 		encoders = append(encoders, e)
 	}
-	buffers := make([]*CommandBuffer, 0, len(r.buffers))
-	for cb := range r.buffers {
+	buffers := make([]*CommandBuffer, 0, len(sets.buffers))
+	for cb := range sets.buffers {
 		buffers = append(buffers, cb)
 	}
-	clear(r.encoders)
-	clear(r.buffers)
+	clear(sets.encoders)
+	clear(sets.buffers)
 	return encoders, buffers
 }
 

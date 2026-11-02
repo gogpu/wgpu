@@ -72,11 +72,18 @@ type renderBundleTarget struct {
 //
 // NOT thread-safe.
 type RenderBundleEncoder struct {
-	device   *Device
-	label    string
+	device *Device
+	label  string
+	// The recording lives behind a pointer so RenderBundleEncoder stays a
+	// comparable type, as it was before core recorded bundles.
+	*bundleRecording
+	finished atomic.Bool
+}
+
+// bundleRecording is what a RenderBundleEncoder records until Finish.
+type bundleRecording struct {
 	target   renderBundleTarget
 	commands []bundleCommand
-	finished atomic.Bool
 }
 
 // newRenderBundleEncoder validates desc and returns an encoder for it.
@@ -86,7 +93,7 @@ func newRenderBundleEncoder(device *Device, desc *RenderBundleEncoderDescriptor)
 	if err != nil {
 		return nil, err
 	}
-	return &RenderBundleEncoder{device: device, label: desc.Label, target: target}, nil
+	return &RenderBundleEncoder{device: device, label: desc.Label, bundleRecording: &bundleRecording{target: target}}, nil
 }
 
 // renderBundleTargetOf validates the attachment formats of a render bundle
@@ -134,7 +141,7 @@ func renderBundleTargetOf(desc *RenderBundleEncoderDescriptor, limits *gputypes.
 
 // record appends a command unless the encoder is finished.
 func (e *RenderBundleEncoder) record(cmd bundleCommand) {
-	if e.finished.Load() {
+	if e.finished.Load() || e.bundleRecording == nil {
 		return
 	}
 	e.commands = append(e.commands, cmd)
@@ -179,7 +186,7 @@ func (e *RenderBundleEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 // Finish validates the recorded commands and returns the reusable render
 // bundle, or the first validation error. The encoder cannot be used again.
 func (e *RenderBundleEncoder) Finish(desc *RenderBundleDescriptor) (*RenderBundle, error) {
-	if e == nil || e.device == nil || e.finished.Swap(true) {
+	if e == nil || e.device == nil || e.bundleRecording == nil || e.finished.Swap(true) {
 		return nil, fmt.Errorf("wgpu: RenderBundleEncoder.Finish: %w", ErrReleased)
 	}
 	commands := e.commands
@@ -205,6 +212,14 @@ func (e *RenderBundleEncoder) Finish(desc *RenderBundleDescriptor) (*RenderBundl
 type RenderBundle struct {
 	device *Device
 	label  string
+	// The contents live behind a pointer so RenderBundle stays a comparable
+	// type, as it was before core recorded bundles.
+	*bundleContents
+	released atomic.Bool
+}
+
+// bundleContents is a finished bundle's validated contents.
+type bundleContents struct {
 	target renderBundleTarget
 	// commands is the resolved command list replayed by ExecuteBundles.
 	commands []bundleCommand
@@ -216,9 +231,8 @@ type RenderBundle struct {
 	refs []*core.ResourceRef
 	// groups and buffers are recorded on the command encoder of every pass
 	// that executes the bundle, for submit-time validation.
-	groups   []*BindGroup
-	buffers  []*Buffer
-	released atomic.Bool
+	groups  []*BindGroup
+	buffers []*Buffer
 }
 
 // Release drops the bundle's references to its resources. Submissions that
@@ -226,6 +240,9 @@ type RenderBundle struct {
 // them. It is safe to call Release more than once.
 func (b *RenderBundle) Release() {
 	if b == nil || b.released.Swap(true) {
+		return
+	}
+	if b.bundleContents == nil {
 		return
 	}
 	for _, ref := range b.refs {

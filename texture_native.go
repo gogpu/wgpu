@@ -3,6 +3,8 @@
 package wgpu
 
 import (
+	"slices"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
@@ -14,9 +16,10 @@ type Texture struct {
 	hal    hal.Texture
 	device *Device
 	format gputypes.TextureFormat
-	// viewFormats are the TextureDescriptor.ViewFormats the texture was created
-	// with: the formats a view may reinterpret it as (CreateTextureView).
-	viewFormats  []gputypes.TextureFormat
+	// viewFormats is a copy of the TextureDescriptor.ViewFormats the texture
+	// was created with: the formats a view may reinterpret it as
+	// (CreateTextureView). It is a pointer so Texture stays a comparable type.
+	viewFormats  *[]gputypes.TextureFormat
 	released     bool
 	surface      *core.Surface
 	surfaceLease uint64
@@ -53,6 +56,24 @@ func (t *Texture) resolveHAL() hal.Texture {
 
 // Format returns the texture format.
 func (t *Texture) Format() gputypes.TextureFormat { return t.format }
+
+// viewFormatList returns the view formats the texture was created with.
+func (t *Texture) viewFormatList() []gputypes.TextureFormat {
+	if t.viewFormats == nil {
+		return nil
+	}
+	return *t.viewFormats
+}
+
+// copyViewFormats copies TextureDescriptor.ViewFormats, so a later change to
+// the caller's slice does not change what views are allowed.
+func copyViewFormats(formats []gputypes.TextureFormat) *[]gputypes.TextureFormat {
+	if len(formats) == 0 {
+		return nil
+	}
+	c := slices.Clone(formats)
+	return &c
+}
 
 // Release drops the application's reference to the texture. The HAL texture
 // is destroyed once nothing references it any more — no bind group,

@@ -289,13 +289,15 @@ func (s *bundleState) build(label string) *RenderBundle {
 		ref.Clone()
 	}
 	return &RenderBundle{
-		device:   s.device,
-		label:    label,
-		target:   *s.target,
-		commands: s.commands,
-		scope:    s.scope,
-		refs:     s.refs,
-		groups:   s.groups,
-		buffers:  s.buffers,
+		device: s.device,
+		label:  label,
+		bundleContents: &bundleContents{
+			target:   *s.target,
+			commands: s.commands,
+			scope:    s.scope,
+			refs:     s.refs,
+			groups:   s.groups,
+			buffers:  s.buffers,
+		},
 	}
 }
