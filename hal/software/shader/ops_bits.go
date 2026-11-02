@@ -92,6 +92,31 @@ func (interp *interpreter) bitcast(v Value, srcTypeID, dstTypeID uint32) Value {
 	return out
 }
 
+// convertLanes applies the scalar conversion conv to every component of v,
+// whose result type is typeID: OpConvertFToS, OpConvertFToU, OpConvertSToF
+// and OpConvertUToF are component-wise. A float vector result is a float
+// vector; an integer one is an array of integer scalars, exact for every
+// value. A scalar, or a result type that is not a 32-bit vector, converts v
+// as a whole.
+func (interp *interpreter) convertLanes(v Value, typeID uint32, conv func(Value) Value) Value {
+	dst, n := interp.scalarLanes(typeID)
+	if dst == nil || n == 1 {
+		return conv(v)
+	}
+	lanes := make([]Value, n)
+	for i := range lanes {
+		lanes[i] = conv(indexComposite(v, uint32(i)))
+	}
+	if dst.Kind != TypeFloat {
+		return ValArray(lanes)
+	}
+	out := Value{Tag: vectorTag(n)}
+	for i, l := range lanes {
+		out.F[i] = toFloat32(l)
+	}
+	return out
+}
+
 // scalarLanes returns the 32-bit integer or float scalar type of a scalar
 // or vector type and its lane count, or nil for any other type.
 func (interp *interpreter) scalarLanes(typeID uint32) (*TypeInfo, int) {

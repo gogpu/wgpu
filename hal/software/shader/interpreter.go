@@ -791,19 +791,19 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertToFloat(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertToFloat)
 
 		case OpConvertSToF:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertSignedToFloat(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertSignedToFloat)
 
 		case OpConvertFToU:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertFloatToUint(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToUint)
 
 		case OpBitcast:
 			if len(inst.Operands) < 1 {
@@ -1181,8 +1181,7 @@ func (interp *interpreter) run() error {
 
 		case OpConvertFToS:
 			if len(inst.Operands) >= 1 {
-				f := toFloat32(interp.values[inst.Operands[0]])
-				interp.values[inst.ResultID] = ValInt(int32(f))
+				interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToSigned)
 			}
 
 		case OpSConvert, OpUConvert, OpFConvert:

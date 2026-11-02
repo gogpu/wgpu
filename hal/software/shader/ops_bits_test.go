@@ -142,3 +142,42 @@ fn main() {
 	checkWords(t, "uv", uv, []uint32{0x80000000, 0x3F800000})
 	checkWords(t, "fv", fv, []uint32{1, 0x00800000})
 }
+
+// TestConvertVectorsComponentWise checks that OpConvertFToS, OpConvertFToU,
+// OpConvertSToF and OpConvertUToF convert every component of a vector (they
+// collapsed it to one scalar 0), and that float to integer follows WGSL:
+// truncate toward zero, saturating at the nearest value float32 can hold
+// (wgsl/index.bs "Floating point conversion": 1e10 -> 0xFFFFFF00u).
+func TestConvertVectorsComponentWise(t *testing.T) {
+	const wgsl = `
+@group(0) @binding(0) var<storage, read_write> f: array<f32>;
+@group(0) @binding(1) var<storage, read_write> o: array<i32>;
+@group(0) @binding(2) var<storage, read_write> fo: array<f32>;
+@compute @workgroup_size(1)
+fn main() {
+    let iv = vec2<i32>(vec2<f32>(f[0], f[1]));
+    o[0] = iv.x;
+    o[1] = iv.y;
+    let uv = vec2<u32>(vec2<f32>(f[2], f[3]));
+    o[2] = bitcast<i32>(uv.x);
+    o[3] = bitcast<i32>(uv.y);
+    let sat = vec2<i32>(vec2<f32>(f[3], -f[3]));
+    o[4] = sat.x;
+    o[5] = sat.y;
+    let back = vec2<f32>(iv);
+    fo[0] = back.x;
+    fo[1] = back.y;
+    let ub = vec2<f32>(vec2<u32>(u32(f[4]), 9u));
+    fo[2] = ub.x;
+    fo[3] = ub.y;
+}
+`
+	f := []uint32{math.Float32bits(3.75), math.Float32bits(-2.5), math.Float32bits(7.9), math.Float32bits(1e10), math.Float32bits(5)}
+	o := make([]uint32, 6)
+	fo := make([]uint32, 4)
+	dispatchNagaBuffers(t, wgsl, f, o, fo)
+
+	neg2, minI32 := int32(-2), int32(math.MinInt32)
+	checkWords(t, "o", o, []uint32{3, uint32(neg2), 7, 0xFFFFFF00, 0x7FFFFF80, uint32(minI32)})
+	checkWords(t, "fo", fo, []uint32{math.Float32bits(3), math.Float32bits(-2), math.Float32bits(5), math.Float32bits(9)})
+}

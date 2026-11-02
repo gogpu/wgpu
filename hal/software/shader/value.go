@@ -505,11 +505,53 @@ func convertSignedToFloat(val Value) Value {
 	}
 }
 
+// The largest float32 values inside the u32 and i32 ranges. WGSL converts a
+// float to the integer closest to truncate(x) that the float type represents
+// exactly (wgsl/index.bs "Floating point conversion"), so out-of-range
+// values saturate here, not at math.MaxUint32 / math.MaxInt32.
+const (
+	maxU32InFloat32 = 4294967040 // 0xFFFFFF00
+	maxI32InFloat32 = 2147483520 // 0x7FFFFF80
+)
+
+// floatToUint32 and floatToInt32 convert as WGSL does: truncate toward zero
+// after clamping to the range of the target type. NaN, for which WGSL gives
+// no value, converts to 0.
+func floatToUint32(f float32) uint32 {
+	d := float64(f)
+	if d != d {
+		return 0
+	}
+	return uint32(max(0, min(maxU32InFloat32, d)))
+}
+
+func floatToInt32(f float32) int32 {
+	d := float64(f)
+	if d != d {
+		return 0
+	}
+	return int32(max(math.MinInt32, min(maxI32InFloat32, d)))
+}
+
+// convertFloatToSigned converts a float value to int32 (OpConvertFToS).
+func convertFloatToSigned(val Value) Value {
+	switch val.Tag {
+	case TagFloat32:
+		return ValInt(floatToInt32(val.F[0]))
+	case TagInt32:
+		return val
+	case TagUint32:
+		return ValInt(int32(val.U[0]))
+	default:
+		return ValInt(0)
+	}
+}
+
 // convertFloatToUint converts a float value to uint32.
 func convertFloatToUint(val Value) Value {
 	switch val.Tag {
 	case TagFloat32:
-		return ValUint(uint32(val.F[0]))
+		return ValUint(floatToUint32(val.F[0]))
 	case TagUint32:
 		return val
 	case TagInt32:
