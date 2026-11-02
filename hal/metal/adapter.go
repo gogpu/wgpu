@@ -15,6 +15,9 @@ type Adapter struct {
 	instance              *Instance
 	raw                   ID   // id<MTLDevice>
 	formatDepth24Stencil8 bool // true if Depth24UnormStencil8 supported (Intel-era AMD only)
+	// compileOptions drive shader compilation: the MSL version naga writes
+	// and Metal compiles, read once from the OS version (P1-MTL-006).
+	compileOptions shaderCompileOptions
 }
 
 // mapTextureFormat converts a WebGPU texture format to Metal pixel format,

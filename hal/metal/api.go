@@ -57,6 +57,12 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 	hal.Logger().Debug("metal: enumerating adapters", "count", len(devices))
 
+	compileOptions := systemShaderCompileOptions()
+	hal.Logger().Debug("metal: shader compile options",
+		"mslVersion", compileOptions.mslVersion.String(),
+		"preserveInvariance", compileOptions.preserveInvariance,
+	)
+
 	adapters := make([]hal.ExposedAdapter, 0, len(devices))
 	for _, device := range devices {
 		deviceName := DeviceName(device)
@@ -78,6 +84,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			instance:              i,
 			raw:                   device,
 			formatDepth24Stencil8: MsgSendBool(device, Sel("isDepth24Stencil8PixelFormatSupported")),
+			compileOptions:        compileOptions,
 		}
 
 		maxBuf := DeviceMaxBufferLength(device)

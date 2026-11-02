@@ -616,6 +616,9 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	if err != nil {
 		return nil, err
 	}
+	// naga writes for this version and refuses features of newer ones;
+	// newLibraryWithSource compiles at the same version.
+	options.LangVersion = d.adapter.compileOptions.mslVersion
 
 	mslSource, info, err := msl.Compile(stage.IR, options)
 	if err != nil {
@@ -632,22 +635,7 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 		"sizesBuffer", len(out.sizesBindings) > 0,
 	)
 
-	// Create NSString from MSL source
-	mslString := NSString(mslSource)
-	defer Release(mslString)
-
-	// Create MTLLibrary from source
-	// MTLLibrary* newLibraryWithSource:options:error:
-	// errorPtr travels as a uintptr, which keeps nothing in place: pin it so
-	// Metal writes the NSError into errorPtr, not into a moved stack
-	// (P1-VK-012).
-	var errorPtr ID
-	var pinner runtime.Pinner
-	pinner.Pin(&errorPtr)
-	library := MsgSend(d.raw, Sel("newLibraryWithSource:options:error:"),
-		uintptr(mslString), 0, uintptr(unsafe.Pointer(&errorPtr)))
-	pinner.Unpin()
-
+	library, errorPtr := d.newLibraryWithSource(mslSource)
 	if library == 0 {
 		errMsg := unknownError
 		if errorPtr != 0 {

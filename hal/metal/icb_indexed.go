@@ -180,15 +180,7 @@ kernel void wgpu_translate_indexed_icb(device const DrawIndexedArgs* args [[buff
 }
 `, indexType)
 
-	str := NSString(source)
-	defer Release(str)
-	// errorPtr travels as a uintptr; pin it for both creation calls
-	// (P1-VK-012).
-	var errorPtr ID
-	var pinner runtime.Pinner
-	pinner.Pin(&errorPtr)
-	defer pinner.Unpin()
-	library := MsgSend(d.raw, Sel("newLibraryWithSource:options:error:"), uintptr(str), 0, uintptr(unsafe.Pointer(&errorPtr)))
+	library, errorPtr := d.newLibraryWithSource(source)
 	if library == 0 {
 		return indexedICBTranslator{}, fmt.Errorf("metal: indexed ICB translator compilation failed: %s", formatNSError(errorPtr))
 	}
@@ -199,7 +191,12 @@ kernel void wgpu_translate_indexed_icb(device const DrawIndexedArgs* args [[buff
 		Release(library)
 		return indexedICBTranslator{}, fmt.Errorf("metal: indexed ICB translator function missing")
 	}
+	// errorPtr travels as a uintptr, which keeps nothing in place: pin it
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
 	pipeline := MsgSend(d.raw, Sel("newComputePipelineStateWithFunction:error:"), uintptr(function), uintptr(unsafe.Pointer(&errorPtr)))
+	pinner.Unpin()
 	Release(function)
 	if pipeline == 0 {
 		Release(library)
