@@ -230,7 +230,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			physicalDevice: device,
 			properties:     props,
 			features:       features,
-			ext:            i.queryExtendedFeatures(device, props.ApiVersion, &features),
+			ext:            i.queryExtendedFeatures(device, &props, &features),
 		}
 
 		adapterForExpose := hal.Adapter(adapter)

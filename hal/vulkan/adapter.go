@@ -154,7 +154,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		supportsDrawIndirectCount:  supportsDrawIndirectCountFeature(a.properties.ApiVersion),
 		maxDrawIndirectCount:       a.properties.Limits.MaxDrawIndirectCount,
 		supportsIncrementalPresent: hasIncrementalPresent,
-		spirvOptions:               spirvOptions(a.properties.ApiVersion),
+		spirvOptions:               spirvOptions(a.properties.ApiVersion, a.ext),
 	}
 	// Keep f16 stage inputs and outputs f16 only where the device enabled
 	// StorageInputOutput16; naga converts them through f32 otherwise

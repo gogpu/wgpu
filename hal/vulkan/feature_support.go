@@ -6,9 +6,11 @@
 package vulkan
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
@@ -26,6 +28,23 @@ const (
 	extShaderAtomicFloat         = "VK_EXT_shader_atomic_float"
 	extFragmentShaderBarycentric = "VK_KHR_fragment_shader_barycentric"
 	extShaderDrawParameters      = "VK_KHR_shader_draw_parameters"
+
+	// Robustness extensions, enabled wherever supported. Vulkan 1.3 promoted
+	// image_robustness; driver_properties (Vulkan 1.2) identifies the driver
+	// for the robustness2 exclusion below.
+	extImageRobustness  = "VK_EXT_image_robustness"
+	extRobustness2      = "VK_EXT_robustness2"
+	extDriverProperties = "VK_KHR_driver_properties"
+)
+
+// Intel's proprietary Windows driver for integrated GPUs breaks rendering
+// with VK_EXT_robustness2 before 31.0.101.2115 (gfx-rs/wgpu#4599). Rust
+// wgpu-hal hides the extension there (vulkan/adapter.rs,
+// is_intel_igpu_outdated_for_robustness2); so do we. The driver packs the
+// last two parts of its version as (101 << 14) | 2115.
+const (
+	intelVendorID                 = 0x8086
+	intelRobustness2DriverVersion = 101<<14 | 2115
 )
 
 // minTimestampValidBits is the smallest non-zero timestampValidBits Vulkan
@@ -50,6 +69,25 @@ type extendedFeatureSupport struct {
 	atomicFloat *vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT
 	barycentric *vk.PhysicalDeviceFragmentShaderBarycentricFeaturesKHR
 	drawParams  *vk.PhysicalDeviceShaderDrawParametersFeatures
+	imageRobust *vk.PhysicalDeviceImageRobustnessFeatures
+	robustness2 *vk.PhysicalDeviceRobustness2FeaturesKHR
+}
+
+// robustBufferAccess2 reports whether the device bounds-checks shader buffer
+// accesses itself (VK_EXT_robustness2): out-of-bounds reads return zero and
+// writes are discarded, so naga's buffer checks can be left out. It needs
+// the core robustBufferAccess, which Open enables with the other supported
+// core features (VUID-VkPhysicalDeviceRobustness2FeaturesEXT-robustBufferAccess2-04000).
+func (s *extendedFeatureSupport) robustBufferAccess2() bool {
+	return s.robustness2 != nil && s.robustness2.RobustBufferAccess2 != 0 && s.core.RobustBufferAccess != 0
+}
+
+// robustImageAccess reports whether the device bounds-checks image loads
+// itself: robustImageAccess2 or robustImageAccess, as Rust's
+// PrivateCapabilities::robust_image_access.
+func (s *extendedFeatureSupport) robustImageAccess() bool {
+	return (s.robustness2 != nil && s.robustness2.RobustImageAccess2 != 0) ||
+		(s.imageRobust != nil && s.imageRobust.RobustImageAccess != 0)
 }
 
 // int64Atomics reports 64-bit atomics on storage buffers and workgroup
@@ -168,14 +206,19 @@ func (a *Adapter) extendedWebGPUFeatures(queueFamily *uint32) gputypes.Features 
 
 // queryExtendedFeatures reads the device extensions and the pNext feature
 // structs the device can report at its API version.
-func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, deviceAPIVersion uint32, core *vk.PhysicalDeviceFeatures) *extendedFeatureSupport {
+func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.PhysicalDeviceProperties, core *vk.PhysicalDeviceFeatures) *extendedFeatureSupport {
 	s := &extendedFeatureSupport{
-		apiVersion: min(deviceAPIVersion, instanceAPIVersion),
+		apiVersion: min(props.ApiVersion, instanceAPIVersion),
 		extensions: i.deviceExtensions(device),
 		core:       *core,
 	}
 	if !i.cmds.HasPhysicalDeviceFeatures2() {
 		return s
+	}
+	if intelIGPUOutdatedForRobustness2(props, i.driverID(device, s)) {
+		hal.Logger().Debug("vulkan: VK_EXT_robustness2 disabled: outdated Intel integrated GPU driver",
+			"driverVersion", fmt.Sprintf("%#x", props.DriverVersion))
+		delete(s.extensions, extRobustness2)
 	}
 
 	// Chain only the structs the device knows, as Rust does: a struct from an
@@ -222,12 +265,53 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, deviceAPIVers
 	if s.apiVersion >= vkMakeVersion(1, 1, 0) {
 		drawParams.SType = vk.StructureTypePhysicalDeviceShaderDrawParametersFeatures
 		*next = (*uintptr)(unsafe.Pointer(&drawParams))
+		next = &drawParams.PNext
 		s.drawParams = &drawParams
+	}
+	var imageRobust vk.PhysicalDeviceImageRobustnessFeatures
+	if s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extImageRobustness] {
+		imageRobust.SType = vk.StructureTypePhysicalDeviceImageRobustnessFeatures
+		*next = (*uintptr)(unsafe.Pointer(&imageRobust))
+		next = &imageRobust.PNext
+		s.imageRobust = &imageRobust
+	}
+	var robustness2 vk.PhysicalDeviceRobustness2FeaturesKHR
+	if s.extensions[extRobustness2] {
+		robustness2.SType = vk.StructureTypePhysicalDeviceRobustness2FeaturesKhr
+		*next = (*uintptr)(unsafe.Pointer(&robustness2))
+		s.robustness2 = &robustness2
 	}
 	if features2.PNext != nil {
 		i.cmds.GetPhysicalDeviceFeatures2(device, &features2)
 	}
 	return s
+}
+
+// driverID returns the driver of the physical device from
+// VkPhysicalDeviceDriverProperties (Vulkan 1.2 or VK_KHR_driver_properties),
+// or 0 when the device cannot report it.
+func (i *Instance) driverID(device vk.PhysicalDevice, s *extendedFeatureSupport) vk.DriverId {
+	if s.apiVersion < vkMakeVersion(1, 2, 0) && !s.extensions[extDriverProperties] {
+		return 0
+	}
+	driver := vk.PhysicalDeviceDriverProperties{SType: vk.StructureTypePhysicalDeviceDriverProperties}
+	props2 := vk.PhysicalDeviceProperties2{
+		SType: vk.StructureTypePhysicalDeviceProperties2,
+		PNext: (*uintptr)(unsafe.Pointer(&driver)),
+	}
+	i.cmds.GetPhysicalDeviceProperties2(device, &props2)
+	return driver.DriverID
+}
+
+// intelIGPUOutdatedForRobustness2 reports an Intel integrated GPU on the
+// proprietary Windows driver older than 31.0.101.2115, which breaks
+// rendering with VK_EXT_robustness2 (Rust wgpu-hal vulkan/adapter.rs,
+// is_intel_igpu_outdated_for_robustness2).
+func intelIGPUOutdatedForRobustness2(props *vk.PhysicalDeviceProperties, driver vk.DriverId) bool {
+	return props.VendorID == intelVendorID &&
+		props.DeviceType == vk.PhysicalDeviceTypeIntegratedGpu &&
+		props.DriverVersion < intelRobustness2DriverVersion &&
+		driver == vk.DriverIdIntelProprietaryWindows
 }
 
 // deviceExtensions returns the names of the extensions the physical device
@@ -283,6 +367,8 @@ type deviceFeatureChain struct {
 	atomicFloat vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT
 	barycentric vk.PhysicalDeviceFragmentShaderBarycentricFeaturesKHR
 	drawParams  vk.PhysicalDeviceShaderDrawParametersFeatures
+	imageRobust vk.PhysicalDeviceImageRobustnessFeatures
+	robustness2 vk.PhysicalDeviceRobustness2FeaturesKHR
 }
 
 // enable fills c with the features to create the device with and returns
@@ -360,6 +446,21 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		} else {
 			extensions = append(extensions, extShaderDrawParameters+"\x00")
 		}
+	}
+	// Robustness is enabled wherever supported, whatever was requested, as
+	// Rust does: the SPIR-V bounds-check policies rely on it (spirvOptions).
+	if s.imageRobust != nil && s.imageRobust.RobustImageAccess != 0 {
+		if s.apiVersion < vkMakeVersion(1, 3, 0) {
+			extensions = append(extensions, extImageRobustness+"\x00")
+		}
+		c.imageRobust.RobustImageAccess = vk.Bool32(vk.True)
+		link(vk.StructureTypePhysicalDeviceImageRobustnessFeatures, &c.imageRobust.SType, &c.imageRobust.PNext, unsafe.Pointer(&c.imageRobust))
+	}
+	if s.robustness2 != nil && (s.robustBufferAccess2() || s.robustness2.RobustImageAccess2 != 0) {
+		extensions = append(extensions, extRobustness2+"\x00")
+		c.robustness2.RobustBufferAccess2 = boolToVk(s.robustBufferAccess2())
+		c.robustness2.RobustImageAccess2 = s.robustness2.RobustImageAccess2
+		link(vk.StructureTypePhysicalDeviceRobustness2FeaturesKhr, &c.robustness2.SType, &c.robustness2.PNext, unsafe.Pointer(&c.robustness2))
 	}
 	return pNext, extensions
 }

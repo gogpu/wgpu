@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/wgpu/hal"
@@ -295,6 +296,15 @@ func (d *Device) alignedMappedRange(blockOffset, blockSize uint64) (offset, size
 	alignedOffset := blockOffset & ^mask
 	alignedEnd := (blockOffset + blockSize + mask) & ^mask
 	return vk.DeviceSize(alignedOffset), vk.DeviceSize(alignedEnd - alignedOffset)
+}
+
+// RobustBufferAccess2 reports whether the device was created with
+// robustBufferAccess2, so the driver bounds-checks shader buffer accesses
+// (out-of-bounds reads return zero, writes are discarded) and shaders are
+// compiled without naga's buffer checks. Otherwise naga's Restrict policy
+// clamps every buffer index to the binding.
+func (d *Device) RobustBufferAccess2() bool {
+	return d.spirvOptions.BoundsCheckPolicies.Buffer == backend.BoundsCheckUnchecked
 }
 
 // MaxStagingBufferSize returns the maximum safe staging buffer allocation size.

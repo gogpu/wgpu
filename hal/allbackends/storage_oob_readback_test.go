@@ -53,10 +53,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // inside the binding, and the read return zero or a value from inside it.
 //
 // How each backend contains it differs:
-//   - Vulkan: naga's Restrict policy clamps the index to the last element
-//     in the shader (we enable no robustBufferAccess), so the write must land
-//     in a[3] and the read must return a[3]'s old value. This is checked
-//     exactly.
+//   - Vulkan: with robustBufferAccess2 (enabled wherever supported, as in
+//     Rust) the driver discards the write and the read returns 0. Without
+//     it naga's Restrict policy clamps the index to the last element in the
+//     shader, so the write must land in a[3] and the read must return a[3]'s
+//     old value. Both are checked exactly.
 //   - DX12: a runtime-sized array is bounded by the descriptor's raw buffer
 //     view, which D3D12 itself contains: the write is discarded and the read
 //     returns 0 (as in Rust wgpu-hal, whose naga HLSL restrict_indexing
@@ -134,7 +135,29 @@ func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
 	t.Logf("a = %#x, b = %#x", got[:oobBindWords], got[oobB:oobB+oobBindWords])
 	checkOOBContained(t, got)
 	if b.backend == gputypes.BackendVulkan && !b.software {
-		checkOOBRestricted(t, got)
+		robust, ok := device.HalDevice().(interface{ RobustBufferAccess2() bool })
+		if !ok {
+			t.Fatalf("Vulkan device %T does not report RobustBufferAccess2", device.HalDevice())
+		}
+		if robust.RobustBufferAccess2() {
+			checkOOBDiscarded(t, got)
+		} else {
+			checkOOBRestricted(t, got)
+		}
+	}
+}
+
+// checkOOBDiscarded checks robustBufferAccess2 for a storage buffer, whose
+// robustStorageBufferAccessSizeAlignment is at most 4: the write is
+// discarded and the read returns zero.
+func checkOOBDiscarded(t *testing.T, got []uint32) {
+	for i := range oobBindWords {
+		if got[i] == oobWritten {
+			t.Errorf("a[%d] = %#x: robustBufferAccess2 must discard the write", i, got[i])
+		}
+	}
+	if got[oobStore] != 0 {
+		t.Errorf("the read of a[%d] returned %#x, want 0 under robustBufferAccess2", oobRead, got[oobStore])
 	}
 }
 
