@@ -59,6 +59,8 @@ var (
 	cifVoid3UUF          types.CallInterface // void fn(uint32, uint32, float32) - SamplerParameterf
 	cifVoid1Float        types.CallInterface // void fn(float32) - ClearDepthf
 	cifVoid2Float        types.CallInterface // void fn(float32, float32) - DepthRangef
+	cifVoid1Double       types.CallInterface // void fn(float64) - glClearDepth
+	cifVoid2Double       types.CallInterface // void fn(float64, float64) - glDepthRange
 	cifInitialized       bool
 )
 
@@ -140,6 +142,25 @@ func initCommonCallInterfaces() error {
 		[]*types.TypeDescriptor{
 			types.FloatTypeDescriptor,
 			types.FloatTypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(float64) - glClearDepth (desktop GL without glClearDepthf)
+	err = ffi.PrepareCallInterface(&cifVoid1Double, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{types.DoubleTypeDescriptor})
+	if err != nil {
+		return err
+	}
+
+	// void fn(float64, float64) - glDepthRange (desktop GL without glDepthRangef)
+	err = ffi.PrepareCallInterface(&cifVoid2Double, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
 		})
 	if err != nil {
 		return err
@@ -503,6 +524,11 @@ func initCommonCallInterfaces() error {
 // Functions are loaded via eglGetProcAddress for all OpenGL functions.
 type Context struct {
 	isGLES bool
+	// clearDepthDouble and depthRangeDouble are set when glClearDepth and
+	// glDepthRange take doubles: desktop GL without the float entry points
+	// (GL 4.1 / ARB_ES2_compatibility).
+	clearDepthDouble bool
+	depthRangeDouble bool
 
 	// Core GL 1.1
 	glGetError     unsafe.Pointer
@@ -705,10 +731,13 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDisable = getProcAddr("glDisable")
 	c.glClear = getProcAddr("glClear")
 	c.glClearColor = getProcAddr("glClearColor")
-	if gles {
-		c.glClearDepth = getProcAddr("glClearDepthf")
-	} else {
+	// The float entry point, as Rust's glow calls (clear_depth_f32): GLES,
+	// and desktop GL 4.1 / ARB_ES2_compatibility. Older desktop GL has only
+	// glClearDepth, which takes a double.
+	c.glClearDepth = getProcAddr("glClearDepthf")
+	if c.glClearDepth == nil && !gles {
 		c.glClearDepth = getProcAddr("glClearDepth")
+		c.clearDepthDouble = true
 	}
 	c.glViewport = getProcAddr("glViewport")
 	c.glScissor = getProcAddr("glScissor")
@@ -821,10 +850,12 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	// Depth/Stencil
 	c.glDepthFunc = getProcAddr("glDepthFunc")
 	c.glDepthMask = getProcAddr("glDepthMask")
-	if gles {
-		c.glDepthRange = getProcAddr("glDepthRangef")
-	} else {
+	// As glClearDepth: glDepthRangef (glow's depth_range_f32), the double
+	// glDepthRange only where the float one is missing.
+	c.glDepthRange = getProcAddr("glDepthRangef")
+	if c.glDepthRange == nil && !gles {
 		c.glDepthRange = getProcAddr("glDepthRange")
+		c.depthRangeDouble = true
 	}
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
@@ -1001,19 +1032,30 @@ func (c *Context) ClearColor(r, g, b, a float32) {
 	_, _ = ffi.CallFunction(&cifVoid4Float, c.glClearColor, nil, args[:])
 }
 
-// ClearDepth sets the depth value used by glClear(GL_DEPTH_BUFFER_BIT).
-// On GLES the loaded function is glClearDepthf (float32).
-// On desktop GL it is glClearDepth (double) — but Linux GLES contexts always
-// load glClearDepthf, so we pass float32 unconditionally.
+// ClearDepth sets the depth value used by glClear(GL_DEPTH_BUFFER_BIT),
+// through glClearDepthf, or glClearDepth with a double where only that exists.
+// The call interface must match the loaded function: a float passed to the
+// double glClearDepth reaches the driver as a near-zero double, so the depth
+// cleared to ~0 and every depth-tested draw failed on desktop GL contexts.
 func (c *Context) ClearDepth(depth float64) {
+	if c.clearDepthDouble {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&depth)}
+		_, _ = ffi.CallFunction(&cifVoid1Double, c.glClearDepth, nil, args[:])
+		return
+	}
 	d := float32(depth)
 	args := [1]unsafe.Pointer{unsafe.Pointer(&d)}
 	_, _ = ffi.CallFunction(&cifVoid1Float, c.glClearDepth, nil, args[:])
 }
 
-// DepthRange sets the mapping of NDC depth to window depth.
-// On GLES the loaded function is glDepthRangef (float32).
+// DepthRange sets the mapping of NDC depth to window depth, through
+// glDepthRangef, or glDepthRange with doubles where only that exists.
 func (c *Context) DepthRange(near, far float64) {
+	if c.depthRangeDouble {
+		args := [2]unsafe.Pointer{unsafe.Pointer(&near), unsafe.Pointer(&far)}
+		_, _ = ffi.CallFunction(&cifVoid2Double, c.glDepthRange, nil, args[:])
+		return
+	}
 	n, f := float32(near), float32(far)
 	args := [2]unsafe.Pointer{unsafe.Pointer(&n), unsafe.Pointer(&f)}
 	_, _ = ffi.CallFunction(&cifVoid2Float, c.glDepthRange, nil, args[:])
