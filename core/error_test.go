@@ -1129,3 +1129,33 @@ func TestSentinelErrorsDistinct(t *testing.T) {
 		})
 	}
 }
+
+func TestNewErrorFormattingHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"request unsupported feature", (&RequestDeviceError{Kind: RequestDeviceErrorUnsupportedFeature, MissingFeatures: 1}).Error(), "required features"},
+		{"request limits", (&RequestDeviceError{Kind: RequestDeviceErrorLimitsExceeded, Limit: "MaxBufferSize", Requested: 8, Allowed: 4}).Error(), "MaxBufferSize = 8"},
+		{"request unknown", (&RequestDeviceError{Kind: RequestDeviceErrorKind(99)}).Error(), "unknown error"},
+		{"dimension x", TextureErrorDimensionX.String(), "X"},
+		{"dimension y", TextureErrorDimensionY.String(), "Y"},
+		{"dimension z", TextureErrorDimensionZ.String(), "Z"},
+		{"dimension unknown", TextureErrorDimension(99).String(), "X"},
+		{"copy source", CopySideSource.String(), "source"},
+		{"copy destination", CopySideDestination.String(), "destination"},
+		{"clear missing usage", (&ClearError{Kind: ClearErrorMissingBufferUsage}).Error(), "missing usage"},
+		{"clear offset alignment", (&ClearError{Kind: ClearErrorUnalignedBufferOffset, Offset: 3}).Error(), "offset 3"},
+		{"clear size alignment", (&ClearError{Kind: ClearErrorUnalignedFillSize, Size: 3}).Error(), "size 3"},
+		{"clear overflow", (&ClearError{Kind: ClearErrorOffsetPlusSizeExceeds64BitBounds, Offset: 1, Size: 2}).Error(), "exceeds the 64-bit range"},
+		{"clear overrun", (&ClearError{Kind: ClearErrorBufferOverrun, Offset: 4, Size: 8, BufferSize: 8}).Error(), "overruns the 8-byte buffer"},
+		{"clear unknown", (&ClearError{Kind: ClearErrorKind(99)}).Error(), "unknown error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tc.got, tc.want) {
+				t.Errorf("got %q, want substring %q", tc.got, tc.want)
+			}
+		})
+	}
+}
