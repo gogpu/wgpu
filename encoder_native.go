@@ -1066,8 +1066,6 @@ func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *B
 	if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), size); err != nil {
 		return err
 	}
-	// The core texture is the source of truth for the format: the wrapper of
-	// SurfaceTexture.AsTexture carries none.
 	if err := core.ValidateTextureBufferCopy(view.Format, view.SampleCount, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow); err != nil {
 		return err
 	}
