@@ -5,7 +5,6 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
@@ -34,7 +33,7 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst, 0, data)
+		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
 	}
 }
 
@@ -55,10 +54,9 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
 	data := make([]byte, 256)
-	usage := gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst
 
 	// Warmup: create chunk, flush, recall — so steady-state has a free chunk.
-	_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, usage, 0, data)
+	_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
 	pw.mu.Lock()
 	pw.flush()
 	if pw.belt != nil {
@@ -71,7 +69,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	b.ReportAllocs()
 	subIdx := uint64(2)
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, usage, 0, data)
+		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
 		// Simulate frame boundary: flush + maintain every 20 writes (typical frame).
 		if i%20 == 19 {
 			pw.mu.Lock()
@@ -131,16 +129,6 @@ func BenchmarkAlignUp(b *testing.B) {
 	var sum uint32
 	for i := 0; i < b.N; i++ {
 		sum += alignUp(uint32(i), 256)
-	}
-	_ = sum
-}
-
-// BenchmarkBufferReadUsage measures the read-usage extraction.
-func BenchmarkBufferReadUsage(b *testing.B) {
-	b.ReportAllocs()
-	var sum gputypes.BufferUsage
-	for i := 0; i < b.N; i++ {
-		sum |= bufferReadUsage(gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst | gputypes.BufferUsageUniform)
 	}
 	_ = sum
 }

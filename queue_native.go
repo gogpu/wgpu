@@ -324,7 +324,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 		if td := buffer.core.TrackingData(); td != nil {
 			index = td.Index()
 		}
-		return q.pending.writeBuffer(halBuffer, index, buffer.Usage(), offset, data)
+		return q.pending.writeBuffer(halBuffer, index, offset, data)
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)

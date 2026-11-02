@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
@@ -68,11 +67,10 @@ type pendingWrites struct {
 	// destinations without a valid tracker index are not tracked either.
 	tracker *core.DeviceTracker
 
-	// dstBuffers tracks buffers that have pending writes, keyed by HAL buffer.
-	// The value holds the creation usage (from the public API level, as Rust
-	// keeps usage on core::Buffer) and the tracker index. Used by flush() to
-	// compute COPY_DST → read-state barriers.
-	dstBuffers map[hal.Buffer]pendingBufferWrite
+	// dstBuffers tracks buffers that have pending writes, keyed by HAL buffer,
+	// so flush() hands them to the submission that keeps them alive until the
+	// GPU completes it (BUG-DX12-006).
+	dstBuffers map[hal.Buffer]struct{}
 
 	// dstTextures tracks textures that have pending writes. The wrapper list
 	// preserves every public lifetime that contributed commands for the raw
@@ -95,12 +93,6 @@ type pendingWrites struct {
 	// stride is not a multiple of pendingWritesRowPitchAlignment.
 	// Access is safe because writeTexture always holds pw.mu.
 	alignBuf []byte
-}
-
-// pendingBufferWrite is what flush() needs to know about a written buffer.
-type pendingBufferWrite struct {
-	usage gputypes.BufferUsage
-	index track.TrackerIndex
 }
 
 // inflightSubmission tracks resources from a single submission that must
@@ -137,7 +129,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 		halDevice:    halDevice,
 		halQueue:     halQueue,
 		tracker:      tracker,
-		dstBuffers:   make(map[hal.Buffer]pendingBufferWrite),
+		dstBuffers:   make(map[hal.Buffer]struct{}),
 		dstTextures:  make(map[hal.Texture][]*Texture),
 		usesBatching: halQueue.SupportsCommandBufferCopies(),
 	}
@@ -163,11 +155,9 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 // index is the buffer's device-tracker index: the buffer moves to COPY_DST in
 // the device tracker and the barrier from its previous state is recorded
 // before the copy, so the copy is ordered after earlier GPU work on the buffer
-// (#371). usage is the buffer's WebGPU creation usage flags, passed from the
-// wgpu public API level (wgpu.Buffer → Queue.WriteBuffer → here). This matches
-// Rust wgpu-core where usage lives on core::Buffer, not hal::Buffer. Used by
-// flush() to compute COPY_DST → read-state transition barriers (BUG-DX12-010).
-func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, index track.TrackerIndex, usage gputypes.BufferUsage, offset uint64, data []byte) error {
+// (#371). The buffer stays in COPY_DST after the flush; the next command
+// buffer's submit-time transit moves it into its first pass usage.
+func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, index track.TrackerIndex, offset uint64, data []byte) error {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
@@ -227,8 +217,8 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, index track.TrackerIndex
 		enc.CopyBufferToBuffer(alloc.buffer, buffer, pw.copyRegion[:])
 	}
 
-	// Track destination buffer for barrier computation at flush time.
-	pw.dstBuffers[buffer] = pendingBufferWrite{usage: usage, index: index}
+	// Keep the destination alive until the submission completes.
+	pw.dstBuffers[buffer] = struct{}{}
 
 	return nil
 }
@@ -441,19 +431,6 @@ func alignUp(n, alignment uint32) uint32 {
 	return (n + alignment - 1) / alignment * alignment
 }
 
-// bufferReadUsage extracts the read-state usage from a buffer's creation flags.
-// Strips write/transfer usages (CopyDst, CopySrc, MapWrite, MapRead, Storage)
-// to get the usage the buffer will be in during render (VERTEX, INDEX, UNIFORM).
-// Returns 0 if no read usage is set (buffer only used for copies/storage).
-func bufferReadUsage(usage gputypes.BufferUsage) gputypes.BufferUsage {
-	// Keep only read-state flags relevant for DX12 transition barriers.
-	// These map to DX12 read states: VERTEX_AND_CONSTANT_BUFFER, INDEX_BUFFER,
-	// INDIRECT_ARGUMENT. Combined read states are valid in DX12.
-	readMask := gputypes.BufferUsageVertex | gputypes.BufferUsageIndex |
-		gputypes.BufferUsageUniform | gputypes.BufferUsageIndirect
-	return usage & readMask
-}
-
 // activate lazily begins encoding on the shared command encoder.
 // Acquires an encoder from the pool if none exists. Must be called with pw.mu held.
 func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
@@ -500,9 +477,11 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 		}
 	}
 
-	pw.transitionWrittenBuffersToRead()
-	pw.transitionWrittenTexturesToRead()
-
+	// Written resources stay in COPY_DST, as Rust wgpu-core leaves them: the
+	// device tracker records that state, and the submit-time transit of the
+	// next command buffer moves each one into the usage its first pass gives
+	// it (vertex/index/indirect buffers and bind group resources are in the
+	// pass usage scopes, P1-CORE-010).
 	cmdBuf, err := pw.encoder.EndEncoding()
 	if err != nil {
 		pw.discardRecording()
@@ -538,97 +517,6 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	clear(pw.dstTextures)
 
 	return cmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, nil
-}
-
-// transitionWrittenBuffersToRead moves written buffers from COPY_DST to their
-// read usages (VERTEX|INDEX|UNIFORM|INDIRECT from the creation usage) before
-// the pending-writes encoder is closed. Without it, buffers stay in COPY_DEST
-// when a render pass reads them — undefined behavior on DX12 (BUG-DX12-010;
-// Microsoft: "if promoted from COMMON to COPY_DEST, a barrier is still
-// required to transition from COPY_DEST to RENDER_TARGET").
-//
-// Rust wgpu-core has no such eager barrier: it tracks bind-group and vertex
-// buffer usages per pass and the submit-time transit transitions from
-// COPY_DST. Our passes do not record bind-group usages yet (P1-CORE-010), so
-// this barrier stays. The new state is written to the device tracker, so
-// the next command buffer's transit starts from the state the buffer is
-// really in. Must be called with pw.mu held.
-func (pw *pendingWrites) transitionWrittenBuffersToRead() {
-	if len(pw.dstBuffers) == 0 {
-		return
-	}
-	var stackBarriers [8]hal.BufferBarrier
-	barriers := stackBarriers[:0]
-	for buf, w := range pw.dstBuffers {
-		readUsage := bufferReadUsage(w.usage)
-		if readUsage == 0 {
-			continue
-		}
-		if pw.tracker == nil || !w.index.IsValid() {
-			barriers = append(barriers, hal.BufferBarrier{
-				Buffer: buf,
-				Usage: hal.BufferUsageTransition{
-					OldUsage: gputypes.BufferUsageCopyDst,
-					NewUsage: readUsage,
-				},
-			})
-			continue
-		}
-		if transition, ok := pw.tracker.SetSingleBuffer(w.index, bufferUsesFromReadUsage(readUsage)); ok {
-			barriers = append(barriers, transition.IntoHAL(buf))
-		}
-	}
-	if len(barriers) > 0 {
-		pw.encoder.TransitionBuffers(barriers)
-	}
-}
-
-// transitionWrittenTexturesToRead moves written textures that can be sampled
-// (TEXTURE_BINDING usage) from COPY_DST to RESOURCE, for the same reason as
-// transitionWrittenBuffersToRead: bind-group texture usages are not tracked
-// per pass yet (P1-CORE-010). A texture without TEXTURE_BINDING stays in
-// COPY_DST: transitioning it to SHADER_READ_ONLY_OPTIMAL is invalid on Vulkan
-// (VUID-VkImageMemoryBarrier-oldLayout-01211), and the next command buffer's
-// transit starts from COPY_DST instead. Must be called with pw.mu held.
-func (pw *pendingWrites) transitionWrittenTexturesToRead() {
-	if pw.tracker == nil {
-		return
-	}
-	for raw, owners := range pw.dstTextures {
-		for _, owner := range owners {
-			idx := textureTrackerIndex(owner)
-			if !idx.IsValid() {
-				continue
-			}
-			if owner.coreTexture.Usage()&gputypes.TextureUsageTextureBinding == 0 {
-				break
-			}
-			if transition, ok := pw.tracker.SetSingleTexture(idx, track.TextureUsesResource); ok {
-				barrier := [1]hal.TextureBarrier{transition.IntoHAL(raw)}
-				pw.encoder.TransitionTextures(barrier[:])
-			}
-			break
-		}
-	}
-}
-
-// bufferUsesFromReadUsage converts the read usages kept by bufferReadUsage to
-// tracker uses.
-func bufferUsesFromReadUsage(usage gputypes.BufferUsage) track.BufferUses {
-	var uses track.BufferUses
-	if usage&gputypes.BufferUsageVertex != 0 {
-		uses |= track.BufferUsesVertex
-	}
-	if usage&gputypes.BufferUsageIndex != 0 {
-		uses |= track.BufferUsesIndex
-	}
-	if usage&gputypes.BufferUsageUniform != 0 {
-		uses |= track.BufferUsesUniform
-	}
-	if usage&gputypes.BufferUsageIndirect != 0 {
-		uses |= track.BufferUsesIndirect
-	}
-	return uses
 }
 
 // discardRecording abandons the current batch and restores every resource to

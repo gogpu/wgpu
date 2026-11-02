@@ -201,7 +201,7 @@ func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 	}
 
 	data := []byte{1, 2, 3, 4}
-	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 8, data); err != nil {
+	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, 8, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -233,8 +233,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	dstBuf := &noop.Resource{}
 
 	data := []byte{10, 20, 30, 40, 50}
-	usage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex | gputypes.BufferUsageUniform
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, usage, 16, data); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 16, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -258,25 +257,12 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 		t.Error("expected encoder to be non-nil")
 	}
 
-	// Now write with usage tracking.
-	pw.destroy()
-	pw2, _, _ := createBatchingPW(t)
-	defer pw2.destroy()
-
-	if err := pw2.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
-		t.Fatalf("writeBuffer: %v", err)
-	}
-
-	// dstBuffers should track the buffer with the usage writeBuffer was given.
-	wantUsage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex
-	pw2.mu.Lock()
-	tracked, ok := pw2.dstBuffers[dstBuf]
-	pw2.mu.Unlock()
+	// dstBuffers keeps the destination alive until the submission completes.
+	pw.mu.Lock()
+	_, ok := pw.dstBuffers[dstBuf]
+	pw.mu.Unlock()
 	if !ok {
 		t.Error("expected destination buffer to be tracked in dstBuffers")
-	}
-	if tracked.usage != wantUsage {
-		t.Errorf("expected tracked usage=%d, got %d", wantUsage, tracked.usage)
 	}
 }
 
@@ -286,7 +272,7 @@ func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 
 	dstBuf := &noop.Resource{}
 	// Empty data should be a no-op for batching.
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer empty: %v", err)
 	}
 
@@ -430,21 +416,20 @@ func TestPendingWrites_WriteTextureBarrierFromTrackedState(t *testing.T) {
 	}
 }
 
-// TestPendingWrites_FlushTextureReadTransitionNeedsTextureBinding: the eager
-// COPY_DST → RESOURCE transition at flush (kept while bind-group usages are
-// untracked, P1-CORE-010) happens only for a texture that can be sampled. The
-// old code transitioned every written texture to SHADER_READ_ONLY_OPTIMAL, a
-// Vulkan validation error for an image without SAMPLED usage (VUID-01211,
-// seen in P1-VK-010), and never told the tracker.
-func TestPendingWrites_FlushTextureReadTransitionNeedsTextureBinding(t *testing.T) {
+// TestPendingWrites_FlushLeavesWrittenTexturesInCopyDst: flush records no
+// barrier after the writes, as Rust wgpu-core: a written texture stays in
+// COPY_DST in the device tracker, and the next command buffer's submit-time
+// transit moves it into the usage its first pass gives it (bind group usages
+// are in the pass usage scopes, P1-CORE-010). The eager COPY_DST → RESOURCE
+// barrier that used to stand in for that is gone.
+func TestPendingWrites_FlushLeavesWrittenTexturesInCopyDst(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		usage     gputypes.TextureUsage
-		wantFlush int
 		wantState track.TextureUses
 	}{
-		{"copy-only", gputypes.TextureUsageCopyDst | gputypes.TextureUsageCopySrc, 0, track.TextureUsesCopyDst},
-		{"sampled", gputypes.TextureUsageCopyDst | gputypes.TextureUsageTextureBinding, 1, track.TextureUsesResource},
+		{"copy-only", gputypes.TextureUsageCopyDst | gputypes.TextureUsageCopySrc, track.TextureUsesCopyDst},
+		{"sampled", gputypes.TextureUsageCopyDst | gputypes.TextureUsageTextureBinding, track.TextureUsesCopyDst},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pw, dev, coreDevice := trackedPendingWrites(t)
@@ -457,14 +442,8 @@ func TestPendingWrites_FlushTextureReadTransitionNeedsTextureBinding(t *testing.
 			if err != nil || cmdBuf == nil {
 				t.Fatalf("flush: cmdBuf=%v err=%v", cmdBuf, err)
 			}
-			flushBarriers := dev.encoder.textureBarriers[before:]
-			if len(flushBarriers) != tc.wantFlush {
-				t.Fatalf("flush texture barriers = %d, want %d", len(flushBarriers), tc.wantFlush)
-			}
-			if tc.wantFlush == 1 && (flushBarriers[0].Usage.OldUsage != gputypes.TextureUsageCopyDst ||
-				flushBarriers[0].Usage.NewUsage != gputypes.TextureUsageTextureBinding) {
-				t.Errorf("flush barrier = %v → %v, want CopyDst → TextureBinding",
-					flushBarriers[0].Usage.OldUsage, flushBarriers[0].Usage.NewUsage)
+			if flushBarriers := dev.encoder.textureBarriers[before:]; len(flushBarriers) != 0 {
+				t.Fatalf("flush texture barriers = %v, want none", flushBarriers)
 			}
 			if got := coreDevice.Tracker().TextureUsage(idx); got != tc.wantState {
 				t.Errorf("device state after flush = %d, want %d", got, tc.wantState)
@@ -486,7 +465,7 @@ func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
 	idx := buf.TrackingData().Index()
 	coreDevice.Tracker().InsertBuffer(idx, track.BufferUsesStorageWrite)
 
-	if err := pw.writeBuffer(&noop.Resource{}, idx, buf.Usage(), 0, make([]byte, 48)); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, idx, 0, make([]byte, 48)); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 	enc := dev.encoder
@@ -573,8 +552,7 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 
 	dstBuf := &noop.Resource{}
 	data := []byte{1, 2, 3, 4}
-	usage := gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, usage, 0, data); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -730,7 +708,7 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 
 	// Write something.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, []byte{1, 2, 3, 4}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -768,7 +746,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 
 	// Write to create staging + encoder.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -804,86 +782,6 @@ func TestPendingWrites_DestroyNonBatching(t *testing.T) {
 	pw, _, _ := createNonBatchingPW(t)
 	// Should not panic even with no pool.
 	pw.destroy()
-}
-
-func TestPendingWrites_BufferReadUsage(t *testing.T) {
-	tests := []struct {
-		name  string
-		usage gputypes.BufferUsage
-		want  gputypes.BufferUsage
-	}{
-		{
-			name:  "vertex only",
-			usage: gputypes.BufferUsageVertex,
-			want:  gputypes.BufferUsageVertex,
-		},
-		{
-			name:  "index only",
-			usage: gputypes.BufferUsageIndex,
-			want:  gputypes.BufferUsageIndex,
-		},
-		{
-			name:  "uniform only",
-			usage: gputypes.BufferUsageUniform,
-			want:  gputypes.BufferUsageUniform,
-		},
-		{
-			name:  "indirect only",
-			usage: gputypes.BufferUsageIndirect,
-			want:  gputypes.BufferUsageIndirect,
-		},
-		{
-			name:  "vertex + copyDst",
-			usage: gputypes.BufferUsageCopyDst | gputypes.BufferUsageVertex,
-			want:  gputypes.BufferUsageVertex,
-		},
-		{
-			name:  "uniform + copySrc + copyDst",
-			usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst | gputypes.BufferUsageUniform,
-			want:  gputypes.BufferUsageUniform,
-		},
-		{
-			name:  "vertex + index + uniform",
-			usage: gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform,
-			want:  gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform,
-		},
-		{
-			name:  "storage only (no read flags)",
-			usage: gputypes.BufferUsageStorage,
-			want:  0,
-		},
-		{
-			name:  "copySrc + copyDst only",
-			usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst,
-			want:  0,
-		},
-		{
-			name:  "mapWrite only",
-			usage: gputypes.BufferUsageMapWrite,
-			want:  0,
-		},
-		{
-			name: "all flags combined",
-			usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst | gputypes.BufferUsageMapWrite |
-				gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform |
-				gputypes.BufferUsageStorage | gputypes.BufferUsageIndirect,
-			want: gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageUniform | gputypes.BufferUsageIndirect,
-		},
-		{
-			name:  "zero usage",
-			usage: 0,
-			want:  0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := bufferReadUsage(tt.usage)
-			if got != tt.want {
-				t.Errorf("bufferReadUsage(0x%x) = 0x%x, want 0x%x", tt.usage, got, tt.want)
-			}
-		})
-	}
 }
 
 func TestPendingWrites_AlignUp(t *testing.T) {
@@ -1067,7 +965,7 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 	defer pw.destroy()
 
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{}); err != nil {
+	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer(empty): %v", err)
 	}
 	if pw.isRecording {
@@ -1084,10 +982,10 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	data := []byte{1, 2, 3, 4}
 
 	// Multiple writes should accumulate.
-	if err := pw.writeBuffer(buf1, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageVertex, 0, data); err != nil {
+	if err := pw.writeBuffer(buf1, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 1: %v", err)
 	}
-	if err := pw.writeBuffer(buf2, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst|gputypes.BufferUsageUniform, 0, data); err != nil {
+	if err := pw.writeBuffer(buf2, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 2: %v", err)
 	}
 
@@ -1130,13 +1028,13 @@ func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// First write activates encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write 1: %v", err)
 	}
 	firstEncoder := pw.encoder
 
 	// Second write should reuse the same encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
 
@@ -1150,7 +1048,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// Write and flush.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{1}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -1166,7 +1064,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	_ = flushedBufs
 
 	// Write again — should get a new encoder from pool.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 0, []byte{2}); err != nil {
+	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write after flush: %v", err)
 	}
 
@@ -1215,7 +1113,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	}
 
 	data := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, gputypes.BufferUsageCopyDst, 4, data); err != nil {
+	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, 4, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
