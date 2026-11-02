@@ -88,10 +88,7 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 	interp.callDepth = 0
 	interp.returnValue = Value{}
 
-	// Seed constants into the value slice.
-	for id, val := range m.Constants {
-		interp.values[id] = val
-	}
+	interp.seedConstants()
 
 	// Initialize interface variables (inputs/outputs) and resource bindings.
 	inputs := ctx.Inputs
@@ -249,10 +246,18 @@ func (interp *interpreter) initVariables(inputs map[uint32]Value) {
 // invocation starts from that value. An entry point's interface lists
 // Private variables only from SPIR-V 1.4, so all of them are set up.
 func (interp *interpreter) initPrivateVariables() {
-	for varID, vi := range interp.module.Variables {
-		if vi.StorageClass == StorageClassPrivate {
-			interp.values[varID] = ValPointer(interp.allocPointer(interp.initialValue(vi.TypeID, vi.Initializer)))
-		}
+	m := interp.module
+	for _, varID := range m.prepared().private {
+		vi := m.Variables[varID]
+		interp.values[varID] = ValPointer(interp.allocPointer(interp.initialValue(vi.TypeID, vi.Initializer)))
+	}
+}
+
+// seedConstants puts the module's constants into the value slice.
+func (interp *interpreter) seedConstants() {
+	prep := interp.module.prepared()
+	for i, id := range prep.constIDs {
+		interp.values[id] = prep.constVals[i]
 	}
 }
 
@@ -281,54 +286,24 @@ func cloneValue(v Value) Value {
 	return ValArray(dst)
 }
 
-// initResourceVariables sets up Uniform/StorageBuffer/UniformConstant variables
-// by reading data from bound buffers in the execution context.
+// initResourceVariables sets up Uniform/StorageBuffer/PushConstant and
+// UniformConstant variables from the context's bindings. Their values are
+// resolved once per context and module (resourceValues); each invocation
+// only points its variables at them.
 func (interp *interpreter) initResourceVariables() {
-	m := interp.module
-	ctx := interp.ctx
-	if ctx == nil {
+	if interp.ctx == nil {
 		return
 	}
-
-	for varID, vi := range m.Variables {
-		switch vi.StorageClass {
-		case StorageClassUniform, StorageClassStorageBuffer, StorageClassPushConstant:
-			bk, hasBind := m.GetBinding(varID)
-			if !hasBind {
-				continue
-			}
-			var bufData []byte
-			if ctx.Buffers != nil {
-				bufData = ctx.Buffers[bk]
-			}
-			if bufData == nil {
-				// No buffer bound -- initialize as zero.
-				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
-				continue
-			}
-			pointeeType := m.PointeeType(vi.TypeID)
-			if pointeeType == nil {
-				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
-				continue
-			}
-			if vi.StorageClass == StorageClassStorageBuffer {
-				// Storage buffers use BufferPointer for direct read/write to raw bytes.
-				// This ensures OpStore writes are immediately reflected in the buffer.
-				interp.values[varID] = ValBufferPointer(&BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType})
-			} else {
-				// Uniform and push constant buffers are read-only -- deserialize once.
-				val := interp.readValueFromBuffer(bufData, 0, pointeeType, 0)
-				interp.values[varID] = ValPointer(interp.allocPointer(val))
-			}
-
-		case StorageClassUniformConstant:
-			// UniformConstant is used for textures/samplers -- handled separately.
-			bk, hasBind := m.GetBinding(varID)
-			if !hasBind {
-				continue
-			}
-			// Store the binding key as the value so OpLoad can resolve texture/sampler.
-			interp.values[varID] = ValPointer(interp.allocPointer(ValBindingKey(bk)))
+	prep := interp.module.prepared()
+	vals := interp.resourceValues(prep)
+	for i, varID := range prep.resources {
+		switch v := vals[i]; v.Tag {
+		case TagNone:
+			// No binding: the variable keeps its zero value.
+		case TagBufferPointer:
+			interp.values[varID] = v
+		default:
+			interp.values[varID] = ValPointer(interp.allocPointer(v))
 		}
 	}
 }
@@ -428,7 +403,7 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 	case TypeStruct:
 		members := make([]Value, len(ti.MemberIDs))
 		// For each struct member, look up its type and use MemberDecorate Offset.
-		structTypeID := interp.findTypeID(ti)
+		structTypeID := m.typeID(ti)
 		for i, memberTypeID := range ti.MemberIDs {
 			memberType := m.Types[memberTypeID]
 			if memberType == nil {
@@ -505,7 +480,7 @@ func (interp *interpreter) writeCompositeToBuffer(data []byte, offset uint32, el
 		}
 
 	case TypeStruct:
-		structTypeID := interp.findTypeID(ti)
+		structTypeID := m.typeID(ti)
 		for i, memberTypeID := range ti.MemberIDs {
 			if i >= len(elems) {
 				break
@@ -515,17 +490,6 @@ func (interp *interpreter) writeCompositeToBuffer(data []byte, offset uint32, el
 				m.Types[memberTypeID], m.memberMatrixStride(structTypeID, member))
 		}
 	}
-}
-
-// findTypeID returns the type ID for a given TypeInfo by scanning the type map.
-// This is needed for MemberDecorate lookups which key on the type ID.
-func (interp *interpreter) findTypeID(target *TypeInfo) uint32 {
-	for id, ti := range interp.module.Types {
-		if ti == target {
-			return id
-		}
-	}
-	return 0
 }
 
 // arrayStride returns the byte distance between the elements of the array
@@ -586,13 +550,7 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 	case TypeStruct:
 		// Compute struct size from the highest (offset + size) across all members.
 		// Look up the struct type ID for MemberDecorate offset decorations.
-		structTypeID := uint32(0)
-		for id, t := range m.Types {
-			if t == ti {
-				structTypeID = id
-				break
-			}
-		}
+		structTypeID := m.typeID(ti)
 
 		var maxEnd uint32
 		for i, memberTypeID := range ti.MemberIDs {
@@ -1643,7 +1601,7 @@ func (interp *interpreter) arrayLength(ptr Value, member uint32) uint32 {
 		return 0
 	}
 	stride := arrayStride(m, arr)
-	start := uint64(bp.Offset) + uint64(m.GetMemberOffset(interp.findTypeID(st), member))
+	start := uint64(bp.Offset) + uint64(m.GetMemberOffset(m.typeID(st), member))
 	if stride == 0 || start >= uint64(len(bp.Buffer)) {
 		return 0
 	}
@@ -1670,7 +1628,7 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 		switch currentType.Kind {
 		case TypeStruct:
 			// For struct members, use the MemberDecorate Offset if available.
-			structTypeID := interp.findTypeID(currentType)
+			structTypeID := m.typeID(currentType)
 			memberOffset := m.GetMemberOffset(structTypeID, idx)
 			offset += memberOffset
 			matStride = m.memberMatrixStride(structTypeID, idx)

@@ -64,6 +64,9 @@ type Module struct {
 	// interpPool recycles interpreter structs across Execute calls to avoid
 	// allocating the values slice (sized to Bound) on every invocation.
 	interpPool sync.Pool
+
+	// prepState is the per-invocation setup built once (see prepared).
+	prepState modulePrepState
 }
 
 // memberDecorationKey uniquely identifies a member decoration.

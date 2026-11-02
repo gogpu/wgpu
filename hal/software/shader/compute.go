@@ -49,10 +49,7 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 	interp.callDepth = 0
 	interp.returnValue = Value{}
 
-	// Seed constants.
-	for id, val := range m.Constants {
-		interp.values[id] = val
-	}
+	interp.seedConstants()
 
 	// Initialize compute built-in inputs.
 	interp.initComputeBuiltins()
@@ -147,11 +144,8 @@ func (interp *interpreter) initWorkgroupVariables() {
 		return
 	}
 
-	for varID, vi := range m.Variables {
-		if vi.StorageClass != StorageClassWorkgroup {
-			continue
-		}
-
+	for _, varID := range m.prepared().workgroup {
+		vi := m.Variables[varID]
 		if ctx.WorkgroupSharedMemory != nil {
 			if sharedBuf, ok := ctx.WorkgroupSharedMemory[varID]; ok {
 				// Read the shared memory into a structured value.
@@ -189,6 +183,11 @@ func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 
 	ctx.NumWorkgroups = [3]uint32{groupCountX, groupCountY, groupCountZ}
 	ctx.WorkgroupSize = wgSize
+	// Every invocation copies ctx; created here, the resource cache is shared
+	// by all of them instead of being rebuilt per copy.
+	if ctx.resolved == nil {
+		ctx.resolved = &resolvedResources{}
+	}
 
 	for wgZ := uint32(0); wgZ < groupCountZ; wgZ++ {
 		for wgY := uint32(0); wgY < groupCountY; wgY++ {
@@ -229,10 +228,8 @@ func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 // for all Workgroup storage class variables.
 func (m *Module) allocateWorkgroupMemory() map[uint32][]byte {
 	shared := make(map[uint32][]byte)
-	for varID, vi := range m.Variables {
-		if vi.StorageClass != StorageClassWorkgroup {
-			continue
-		}
+	for _, varID := range m.prepared().workgroup {
+		vi := m.Variables[varID]
 		pointeeType := m.PointeeType(vi.TypeID)
 		if pointeeType == nil {
 			continue
@@ -383,7 +380,8 @@ func (interp *interpreter) writeStorageBufferBack() {
 		return
 	}
 
-	for varID, vi := range m.Variables {
+	for _, varID := range m.prepared().resources {
+		vi := m.Variables[varID]
 		if vi.StorageClass != StorageClassStorageBuffer {
 			continue
 		}

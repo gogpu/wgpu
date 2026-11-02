@@ -174,6 +174,13 @@ type ExecutionContext struct {
 	NumWorkgroups        [3]uint32
 	WorkgroupSize        [3]uint32
 	LocalInvocationIndex uint32
+
+	// resolved caches the resource variable values of the context's
+	// bindings, per module, for every invocation that shares the context. A
+	// context is read once: build a new one when its bindings or a uniform
+	// buffer's contents change, as every draw and dispatch does. Like Inputs,
+	// it makes a context unsafe for concurrent invocations.
+	resolved *resolvedResources
 }
 
 // =============================================================================
