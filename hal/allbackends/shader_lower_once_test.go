@@ -1,6 +1,8 @@
 // Copyright 2026 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
+//go:build !android && !(js && wasm) && !rust
+
 package allbackends_test
 
 import (
