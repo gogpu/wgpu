@@ -80,8 +80,11 @@ func (e *CommandEncoder) trackBuffer(buf *Buffer) {
 	e.usedBuffers[buf] = struct{}{}
 }
 
-// trackTexture records a texture reference for submit-time validation (VAL-A6).
-// The map is lazily initialized to avoid allocation when no textures are used.
+// trackTexture records a texture reference for submit-time validation (VAL-A6)
+// and, the first time, clones the texture's reference so it stays alive until
+// the command buffer is discarded or its submission completes, as Rust
+// wgpu-core's command buffer trackers hold an Arc<Texture>. The map is lazily
+// initialized to avoid allocation when no textures are used.
 func (e *CommandEncoder) trackTexture(tex *Texture) {
 	if tex == nil {
 		return
@@ -89,7 +92,10 @@ func (e *CommandEncoder) trackTexture(tex *Texture) {
 	if e.usedTextures == nil {
 		e.usedTextures = make(map[*Texture]struct{})
 	}
-	e.usedTextures[tex] = struct{}{}
+	if _, seen := e.usedTextures[tex]; !seen {
+		e.usedTextures[tex] = struct{}{}
+		e.trackRef(tex.ref())
+	}
 }
 
 // trackBindGroup records a bind group reference for submit-time validation (VAL-B5).
@@ -630,16 +636,23 @@ func trackRenderPassTextureViews(e *CommandEncoder, desc *RenderPassDescriptor) 
 		return
 	}
 	for _, attachment := range desc.ColorAttachments {
-		if attachment.View != nil {
-			e.trackTexture(attachment.View.texture)
-		}
-		if attachment.ResolveTarget != nil {
-			e.trackTexture(attachment.ResolveTarget.texture)
-		}
+		e.trackTextureView(attachment.View)
+		e.trackTextureView(attachment.ResolveTarget)
 	}
-	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil {
-		e.trackTexture(attachment.View.texture)
+	if attachment := desc.DepthStencilAttachment; attachment != nil {
+		e.trackTextureView(attachment.View)
 	}
+}
+
+// trackTextureView keeps a render pass attachment view alive like
+// trackTexture does its texture: the pass records the view itself (a Vulkan
+// framebuffer, a D3D12 RTV/DSV), not only the texture.
+func (e *CommandEncoder) trackTextureView(view *TextureView) {
+	if view == nil {
+		return
+	}
+	e.trackTexture(view.texture)
+	e.trackRef(view.ref)
 }
 
 // ClearBuffer clears a buffer region to zero.
@@ -740,14 +753,23 @@ func (e *CommandEncoder) DiscardEncoding() {
 	if e.device != nil {
 		e.device.recordings.removeEncoder(e)
 	}
-	// Drop all tracked refs since no submission will happen.
+	e.discard()
+}
+
+// discard ends the backend encoding of an encoder that will not be
+// submitted, returns the HAL encoder to the pool, and only then drops the
+// references its commands took. The last reference may destroy a resource,
+// and an open D3D12 command list must not outlive a resource it records
+// ("ID3D12CommandList::Close: An ID3D12Resource ... was deleted prior to
+// closing the command list"). Rust wgpu-core gets the same order from
+// InnerCommandEncoder::drop (discard_encoding, reset_all, release_encoder),
+// which runs before the trackers holding the resources drop.
+func (e *CommandEncoder) discard() {
+	e.returnEncoderToPool(e.core.DiscardHAL())
 	for _, ref := range e.trackedRefs {
 		ref.Drop()
 	}
 	e.trackedRefs = nil
-	closed := e.core.DiscardHAL()
-	// Return pooled encoder immediately — no GPU work was submitted.
-	e.returnEncoderToPool(closed)
 }
 
 // returnEncoderToPool resets and returns the HAL encoder to the device's pool.
@@ -786,13 +808,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 
 	coreCmdBuffer, err := e.core.Finish()
 	if err != nil {
-		// On error, drop all tracked refs since no submission will happen.
-		for _, ref := range e.trackedRefs {
-			ref.Drop()
-		}
-		e.trackedRefs = nil
-		// Return the pooled encoder on error — it won't be submitted.
-		e.returnEncoderToPool(e.core.DiscardHAL())
+		e.discard()
 		return nil, err
 	}
 

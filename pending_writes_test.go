@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -31,7 +32,18 @@ type barrierCaptureEncoder struct {
 	noop.CommandEncoder
 	textureBarriers []hal.TextureBarrier
 	bufferBarriers  []hal.BufferBarrier
-	events          []string // "tex-barrier", "buf-barrier", "copy" in recording order
+	// events are "tex-barrier", "buf-barrier", "copy", "discard" and "reset"
+	// in recording order.
+	events []string
+}
+
+func (e *barrierCaptureEncoder) DiscardEncoding() {
+	e.events = append(e.events, "discard")
+}
+
+func (e *barrierCaptureEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
+	e.CommandEncoder.ResetAll(commandBuffers)
+	e.events = append(e.events, "reset")
 }
 
 func (e *barrierCaptureEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
@@ -201,7 +213,7 @@ func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 	}
 
 	data := []byte{1, 2, 3, 4}
-	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, 8, data); err != nil {
+	if err := pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 8, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -233,7 +245,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	dstBuf := &noop.Resource{}
 
 	data := []byte{10, 20, 30, 40, 50}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 16, data); err != nil {
+	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 16, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -272,7 +284,7 @@ func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 
 	dstBuf := &noop.Resource{}
 	// Empty data should be a no-op for batching.
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
+	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer empty: %v", err)
 	}
 
@@ -465,7 +477,8 @@ func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
 	idx := buf.TrackingData().Index()
 	coreDevice.Tracker().InsertBuffer(idx, track.BufferUsesStorageWrite)
 
-	if err := pw.writeBuffer(&noop.Resource{}, idx, 0, make([]byte, 48)); err != nil {
+	ref := core.NewResourceRef("b", nil)
+	if err := pw.writeBufferFor(ref, &noop.Resource{}, idx, 0, make([]byte, 48)); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 	enc := dev.encoder
@@ -484,14 +497,15 @@ func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
 	// the buffer stays COPY_DST, so the next command buffer's transit (e.g.
 	// COPY_DST → COPY_SRC for a readback) starts from the real state.
 	pw.mu.Lock()
-	cmdBuf, _, _, flushedBufs, err := pw.flush()
+	cmdBuf, _, _, flushedRefs, err := pw.flush()
 	pw.mu.Unlock()
 	if err != nil || cmdBuf == nil {
 		t.Fatalf("flush: cmdBuf=%v err=%v", cmdBuf, err)
 	}
-	if len(flushedBufs) != 1 {
-		t.Errorf("flushed destination buffers = %d, want 1", len(flushedBufs))
+	if len(flushedRefs) != 1 || flushedRefs[0] != ref {
+		t.Errorf("flushed destination refs = %v, want the buffer's", flushedRefs)
 	}
+	dropRefs(flushedRefs)
 	if len(enc.bufferBarriers) != 1 {
 		t.Errorf("buffer barriers after flush = %d, want 1", len(enc.bufferBarriers))
 	}
@@ -552,12 +566,19 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 
 	dstBuf := &noop.Resource{}
 	data := []byte{1, 2, 3, 4}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, data); err != nil {
-		t.Fatalf("writeBuffer: %v", err)
+	ref := core.NewResourceRef("dst", nil)
+	// Two writes to one buffer hold one reference.
+	for range 2 {
+		if err := pw.writeBufferFor(ref, dstBuf, track.InvalidTrackerIndex, 0, data); err != nil {
+			t.Fatalf("writeBuffer: %v", err)
+		}
+	}
+	if got := ref.RefCount(); got != 2 {
+		t.Errorf("buffer refcount while recorded = %d, want 2", got)
 	}
 
 	pw.mu.Lock()
-	cmdBuf, enc, _, flushedDstBufs, err := pw.flush()
+	cmdBuf, enc, _, flushedRefs, err := pw.flush()
 	pw.mu.Unlock()
 
 	if err != nil {
@@ -571,8 +592,14 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 	// staging from flush contains only oversized one-off buffers;
 	// normal belt-managed writes produce no oversized buffers.
-	if len(flushedDstBufs) == 0 {
-		t.Error("expected non-empty flushedDstBuffers")
+	if len(flushedRefs) != 1 || flushedRefs[0] != ref {
+		t.Errorf("flushed destination refs = %v, want the buffer's", flushedRefs)
+	}
+	if got := ref.RefCount(); got != 2 {
+		t.Errorf("buffer refcount after flush = %d, want 2 (held for the submission)", got)
+	}
+	if len(pw.dstRefs) != 0 {
+		t.Errorf("expected dstRefs moved out by flush, got %d", len(pw.dstRefs))
 	}
 
 	// Belt chunks should have moved to closedSubmissions.
@@ -591,6 +618,56 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 	if len(pw.dstBuffers) != 0 {
 		t.Errorf("expected dstBuffers cleared, got %d", len(pw.dstBuffers))
+	}
+}
+
+// TestPendingWrites_DestinationRefsOutliveEncoding: a queue write keeps its
+// destination buffer and texture alive while the batch is recorded, and a
+// discarded batch drops them only after its encoding is discarded and the
+// encoder reset. Dropping the last reference destroys the resource, and an
+// open D3D12 command list must not outlive a resource it records (Rust
+// wgpu-core: Drop for PendingWrites discards the encoding before its
+// dst_buffers and dst_textures drop).
+func TestPendingWrites_DestinationRefsOutliveEncoding(t *testing.T) {
+	pw, dev, coreDevice := trackedPendingWrites(t)
+	var events *[]string
+	dropped := func(name string) func() {
+		return func() { *events = append(*events, name) }
+	}
+
+	bufferRef := core.NewResourceRef("buffer", dropped("buffer-drop"))
+	if err := pw.writeBufferFor(bufferRef, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
+		t.Fatalf("writeBufferFor: %v", err)
+	}
+	halTexture := &noop.Texture{}
+	coreTexture := core.NewTexture(halTexture, coreDevice, gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureDimension2D, gputypes.TextureUsageCopyDst,
+		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}, 1, 1, "texture")
+	coreTexture.Ref = core.NewResourceRef("texture", dropped("texture-drop"))
+	texture := &Texture{hal: halTexture, device: &Device{core: coreDevice}, coreTexture: coreTexture}
+	if err := pw.writeTextureFor(texture, &hal.ImageCopyTexture{Texture: halTexture, Aspect: gputypes.TextureAspectAll},
+		make([]byte, 4), &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1},
+		&hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}); err != nil {
+		t.Fatalf("writeTextureFor: %v", err)
+	}
+	events = &dev.encoder.events
+
+	// The application releases both while the write is still recorded.
+	bufferRef.Drop()
+	coreTexture.Ref.Drop()
+	if got := bufferRef.RefCount(); got != 1 {
+		t.Errorf("buffer refcount after application release = %d, want 1 (held by the write)", got)
+	}
+	if got := coreTexture.Ref.RefCount(); got != 1 {
+		t.Errorf("texture refcount after application release = %d, want 1 (held by the write)", got)
+	}
+
+	pw.mu.Lock()
+	pw.discardRecording()
+	pw.mu.Unlock()
+	got := strings.Join(*events, " ")
+	if !strings.HasSuffix(got, "discard reset buffer-drop texture-drop") {
+		t.Errorf("events = %q, want the encoding discarded and reset before the destinations drop", got)
 	}
 }
 
@@ -708,7 +785,7 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 
 	// Write something.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
+	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -746,7 +823,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 
 	// Write to create staging + encoder.
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -965,7 +1042,7 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 	defer pw.destroy()
 
 	dstBuf := &noop.Resource{}
-	if err := pw.writeBuffer(dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
+	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer(empty): %v", err)
 	}
 	if pw.isRecording {
@@ -982,10 +1059,10 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	data := []byte{1, 2, 3, 4}
 
 	// Multiple writes should accumulate.
-	if err := pw.writeBuffer(buf1, track.InvalidTrackerIndex, 0, data); err != nil {
+	if err := pw.writeBufferFor(nil, buf1, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 1: %v", err)
 	}
-	if err := pw.writeBuffer(buf2, track.InvalidTrackerIndex, 0, data); err != nil {
+	if err := pw.writeBufferFor(nil, buf2, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 2: %v", err)
 	}
 
@@ -1028,13 +1105,13 @@ func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// First write activates encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write 1: %v", err)
 	}
 	firstEncoder := pw.encoder
 
 	// Second write should reuse the same encoder.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
+	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
 
@@ -1048,7 +1125,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	defer pw.destroy()
 
 	// Write and flush.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -1064,7 +1141,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	_ = flushedBufs
 
 	// Write again — should get a new encoder from pool.
-	if err := pw.writeBuffer(&noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
+	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write after flush: %v", err)
 	}
 
@@ -1113,7 +1190,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	}
 
 	data := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	if err := pw.writeBuffer(buf, track.InvalidTrackerIndex, 4, data); err != nil {
+	if err := pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 4, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 

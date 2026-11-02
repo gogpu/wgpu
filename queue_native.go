@@ -79,12 +79,12 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	var pendingCmdBuf hal.CommandBuffer
 	var flushedEncoder hal.CommandEncoder
 	var flushedDstTextures []hal.Texture
-	var flushedDstBuffers []hal.Buffer
+	var flushedDstRefs []*core.ResourceRef
 
 	if q.pending != nil {
 		q.pending.mu.Lock()
 		var err error
-		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, err = q.pending.flush()
+		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs, err = q.pending.flush()
 		q.pending.mu.Unlock()
 		if err != nil {
 			return 0, fmt.Errorf("wgpu: flush pending writes: %w", err)
@@ -95,7 +95,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	if err != nil {
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures)
+			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 			q.pending.mu.Unlock()
 		}
 		return 0, err
@@ -111,7 +111,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		q.releaseTransits()
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures)
+			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 			q.pending.mu.Unlock()
 		}
 		return 0, fmt.Errorf("wgpu: submit failed: %w", err)
@@ -132,7 +132,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 				cmdBuf:          pendingCmdBuf,
 				encoder:         flushedEncoder,
 				dstTextures:     flushedDstTextures,
-				dstBuffers:      flushedDstBuffers,
+				dstRefs:         flushedDstRefs,
 			})
 		}
 		// Update the staging belt with the actual submission index
@@ -328,7 +328,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 		if td := buffer.core.TrackingData(); td != nil {
 			index = td.Index()
 		}
-		return q.pending.writeBuffer(halBuffer, index, offset, data)
+		return q.pending.writeBufferFor(buffer.core.Ref, halBuffer, index, offset, data)
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)

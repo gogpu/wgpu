@@ -33,7 +33,7 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
+		_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
 	}
 }
 
@@ -56,7 +56,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	data := make([]byte, 256)
 
 	// Warmup: create chunk, flush, recall — so steady-state has a free chunk.
-	_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
+	_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
 	pw.mu.Lock()
 	pw.flush()
 	if pw.belt != nil {
@@ -69,7 +69,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	b.ReportAllocs()
 	subIdx := uint64(2)
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBuffer(buf, track.InvalidTrackerIndex, 0, data)
+		_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
 		// Simulate frame boundary: flush + maintain every 20 writes (typical frame).
 		if i%20 == 19 {
 			pw.mu.Lock()

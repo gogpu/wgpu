@@ -56,7 +56,7 @@ type pendingWrites struct {
 	staging []hal.Buffer
 
 	// copyRegion is a pre-allocated single-element BufferCopy slice used by
-	// writeBuffer to avoid heap escape when calling CopyBufferToBuffer through
+	// writeBufferFor to avoid heap escape when calling CopyBufferToBuffer through
 	// the hal.CommandEncoder interface. Reused across writes within a frame.
 	copyRegion [1]hal.BufferCopy
 
@@ -67,10 +67,17 @@ type pendingWrites struct {
 	// destinations without a valid tracker index are not tracked either.
 	tracker *core.DeviceTracker
 
-	// dstBuffers tracks buffers that have pending writes, keyed by HAL buffer,
-	// so flush() hands them to the submission that keeps them alive until the
-	// GPU completes it (BUG-DX12-006).
+	// dstBuffers tracks buffers that have pending writes, keyed by HAL buffer.
 	dstBuffers map[hal.Buffer]struct{}
+
+	// dstRefs are the references this batch holds on its destination buffers
+	// and textures, one per resource: they keep each destination alive while
+	// the batch is recorded and, after flush(), until the GPU completes the
+	// submission (BUG-DX12-006). Rust wgpu-core PendingWrites holds an Arc of
+	// each destination the same way (device/queue.rs insert_buffer,
+	// insert_texture). Writes without a reference (HAL-level tests, the
+	// ownerless writeTexture) record none.
+	dstRefs []*core.ResourceRef
 
 	// dstTextures tracks textures that have pending writes. The wrapper list
 	// preserves every public lifetime that contributed commands for the raw
@@ -106,8 +113,9 @@ type inflightSubmission struct {
 	// CopyBufferToTexture/CopyBufferToBuffer in this submission. This prevents
 	// premature Release() from destroying D3D12 resources while the GPU is still
 	// executing commands that reference them. Root cause of DX12 TDR (BUG-DX12-006).
+	// dstRefs (pendingWrites.dstRefs) are dropped once the encoder is reset.
 	dstTextures []hal.Texture
-	dstBuffers  []hal.Buffer
+	dstRefs     []*core.ResourceRef
 }
 
 // newPendingWrites creates a pendingWrites for the given HAL device and queue.
@@ -148,7 +156,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 	return pw
 }
 
-// writeBuffer records a buffer write. For batching backends, creates a staging
+// writeBufferFor records a buffer write. For batching backends, creates a staging
 // buffer, copies data via CPU, and records CopyBufferToBuffer into the shared
 // encoder. For direct-write backends, delegates to halQueue.WriteBuffer.
 //
@@ -157,7 +165,12 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 // before the copy, so the copy is ordered after earlier GPU work on the buffer
 // (#371). The buffer stays in COPY_DST after the flush; the next command
 // buffer's submit-time transit moves it into its first pass usage.
-func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, index track.TrackerIndex, offset uint64, data []byte) error {
+//
+// The first time the buffer is written in the current batch, ref, the
+// buffer's reference, is cloned: the recorded copy keeps the buffer alive
+// until the batch is discarded, or until the GPU completes the submission
+// that carries it. ref is nil only in HAL-level tests.
+func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer, index track.TrackerIndex, offset uint64, data []byte) error {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
@@ -218,7 +231,10 @@ func (pw *pendingWrites) writeBuffer(buffer hal.Buffer, index track.TrackerIndex
 	}
 
 	// Keep the destination alive until the submission completes.
-	pw.dstBuffers[buffer] = struct{}{}
+	if _, already := pw.dstBuffers[buffer]; !already {
+		pw.dstBuffers[buffer] = struct{}{}
+		pw.holdRef(ref)
+	}
 
 	return nil
 }
@@ -362,6 +378,7 @@ func (pw *pendingWrites) writeTextureFor(
 	}
 	if owner != nil && !containsTextureOwner(owners, owner) {
 		owners = append(owners, owner)
+		pw.holdRef(owner.ref())
 	}
 	pw.dstTextures[dst.Texture] = owners
 
@@ -459,7 +476,7 @@ func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
 // The encoder is detached for inflight tracking — after GPU completion,
 // maintain() calls ResetAll and returns it to the pool.
 // Must be called with pw.mu held.
-func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []hal.Buffer, error) {
+func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
 	if !pw.isRecording {
 		return nil, nil, nil, nil, nil
 	}
@@ -503,10 +520,8 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	for tex := range pw.dstTextures {
 		flushedDstTextures = append(flushedDstTextures, tex)
 	}
-	var flushedDstBuffers []hal.Buffer
-	for buf := range pw.dstBuffers {
-		flushedDstBuffers = append(flushedDstBuffers, buf)
-	}
+	flushedRefs := pw.dstRefs
+	pw.dstRefs = nil
 	pw.isRecording = false
 	pw.encoder = nil
 
@@ -516,11 +531,15 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	clear(pw.dstBuffers)
 	clear(pw.dstTextures)
 
-	return cmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, nil
+	return cmdBuf, flushedEncoder, flushedDstTextures, flushedRefs, nil
 }
 
 // discardRecording abandons the current batch and restores every resource to
-// its pre-batch ownership state. Must be called with pw.mu held.
+// its pre-batch ownership state. The encoding is discarded and the encoder
+// reset before the destination references drop, as Rust wgpu-core's Drop for
+// PendingWrites discards the encoding before its dst_buffers drop: dropping
+// the last reference destroys the buffer, which an open D3D12 command list
+// must not outlive. Must be called with pw.mu held.
 func (pw *pendingWrites) discardRecording() {
 	if pw.encoder != nil {
 		if pw.isRecording {
@@ -537,6 +556,8 @@ func (pw *pendingWrites) discardRecording() {
 	for raw := range pw.dstTextures {
 		raw.DecPendingRef()
 	}
+	dropRefs(pw.dstRefs)
+	pw.dstRefs = nil
 	if pw.belt != nil {
 		pw.belt.discardActive()
 	}
@@ -548,8 +569,9 @@ func (pw *pendingWrites) discardRecording() {
 }
 
 // cancelFlush releases a batch that was closed but rejected by HAL Submit.
-// Must be called with pw.mu held.
-func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture) {
+// The destination references drop after the encoder is reset. Must be called
+// with pw.mu held.
+func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
 	if pw.belt != nil {
 		pw.belt.discardLastClosed()
 	}
@@ -565,6 +587,23 @@ func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.Comma
 		}
 	} else if cmdBuf != nil {
 		pw.halDevice.FreeCommandBuffer(cmdBuf)
+	}
+	dropRefs(dstRefs)
+}
+
+// holdRef clones ref, a destination's reference, for the current batch.
+// Must be called with pw.mu held.
+func (pw *pendingWrites) holdRef(ref *core.ResourceRef) {
+	if ref != nil {
+		ref.Clone()
+		pw.dstRefs = append(pw.dstRefs, ref)
+	}
+}
+
+// dropRefs drops the destination references a batch held.
+func dropRefs(refs []*core.ResourceRef) {
+	for _, ref := range refs {
+		ref.Drop()
 	}
 }
 
@@ -600,6 +639,8 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 		} else if sub.cmdBuf != nil {
 			pw.halDevice.FreeCommandBuffer(sub.cmdBuf)
 		}
+		dropRefs(sub.dstRefs)
+		sub.dstRefs = nil
 	}
 
 	if cutoff > 0 {
@@ -647,6 +688,7 @@ func (pw *pendingWrites) destroy() {
 		for _, tex := range sub.dstTextures {
 			tex.DecPendingRef()
 		}
+		dropRefs(sub.dstRefs)
 	}
 	pw.inflight = nil
 

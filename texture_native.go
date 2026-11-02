@@ -54,9 +54,12 @@ func (t *Texture) resolveHAL() hal.Texture {
 // Format returns the texture format.
 func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
-// Release destroys the texture. The underlying HAL texture is not freed
-// immediately — destruction is deferred until the GPU completes any submission
-// that may reference it. This prevents use-after-free on DX12/Vulkan.
+// Release drops the application's reference to the texture. The HAL texture
+// is destroyed once nothing references it any more — no bind group,
+// unfinished command encoder, unsubmitted command buffer or pending queue
+// write — and the GPU has completed every submission that may use it.
+// This prevents use-after-free on DX12/Vulkan, as Rust wgpu-core's
+// Arc<Texture> does.
 func (t *Texture) Release() {
 	if t.released {
 		return
@@ -69,37 +72,57 @@ func (t *Texture) Release() {
 	}
 	t.released = true
 
-	// ADR-060: Release TrackerIndex to prevent monotonic growth (#307).
-	// Surface textures handle this in Surface.destroySwapchainTexture.
-	// The index is freed together with the HAL texture, after the GPU is done
-	// with it, as Rust frees it in Drop for TrackingData once the last Arc
-	// (including in-flight submissions) is gone (wgpu-core resource.rs).
+	if ref := t.ref(); ref != nil {
+		ref.Drop()
+		return
+	}
+	// No reference count (a wrapped HAL texture): destroy it after the last
+	// submission.
 	var td *track.TrackingData
 	if t.coreTexture != nil {
 		td = t.coreTexture.TrackingData()
 	}
+	t.device.destroyTextureDeferred(t.hal, td)
+}
+
+// ref returns the texture's reference count, or nil for a texture that has
+// none: a borrowed surface texture or a wrapped HAL texture.
+func (t *Texture) ref() *core.ResourceRef {
+	if t == nil || t.coreTexture == nil {
+		return nil
+	}
+	return t.coreTexture.Ref
+}
+
+// destroyTextureDeferred destroys a HAL texture once the GPU has completed
+// the last submission so far, and frees its tracker index with it.
+//
+// ADR-060: releasing the TrackerIndex prevents monotonic growth (#307);
+// surface textures handle this in Surface.destroySwapchainTexture. The index
+// is freed together with the HAL texture, after the GPU is done with it, as
+// Rust frees it in Drop for TrackingData once the last Arc (including
+// in-flight submissions) is gone (wgpu-core resource.rs).
+func (d *Device) destroyTextureDeferred(halTex hal.Texture, td *track.TrackingData) {
 	releaseIndex := func() {
 		if td != nil {
 			td.Release()
 		}
 	}
 
-	halDevice := t.device.halDevice()
+	halDevice := d.halDevice()
 	if halDevice == nil {
 		releaseIndex()
 		return
 	}
 
-	dq := t.device.destroyQueue()
+	dq := d.destroyQueue()
 	if dq == nil {
-		halDevice.DestroyTexture(t.hal)
+		halDevice.DestroyTexture(halTex)
 		releaseIndex()
 		return
 	}
 
-	subIdx := t.device.lastSubmissionIndex()
-	halTex := t.hal
-	dq.Defer(subIdx, "Texture", func() {
+	dq.Defer(d.lastSubmissionIndex(), "Texture", func() {
 		halDevice.DestroyTexture(halTex)
 		releaseIndex()
 	})
@@ -113,6 +136,10 @@ type TextureView struct {
 	released     bool
 	surface      *core.Surface
 	surfaceLease uint64
+	// ref counts the view's owners: the application, bind groups and command
+	// encoders. nil for a view without one (surface views from
+	// SurfaceTexture.CreateView, wrapped HAL views).
+	ref *core.ResourceRef
 }
 
 // resolveHAL is the single boundary from a public texture-view wrapper to HAL.
@@ -140,10 +167,11 @@ func (v *TextureView) Texture() *Texture {
 	return v.texture
 }
 
-// Release marks the texture view for destruction. The underlying HAL TextureView
-// (and its descriptor heap slots) is not freed immediately — it is deferred via
-// DestroyQueue until the GPU completes any submission that may reference it.
-// This prevents descriptor use-after-free on DX12 with maxFramesInFlight=2
+// Release drops the application's reference to the texture view. The HAL
+// TextureView (and its descriptor heap slots) is destroyed once no bind
+// group, unfinished command encoder or unsubmitted command buffer references
+// it, and the GPU has completed every submission that may use it. This
+// prevents descriptor use-after-free on DX12 with maxFramesInFlight=2
 // (BUG-DX12-007).
 func (v *TextureView) Release() {
 	if v.released {
@@ -151,24 +179,30 @@ func (v *TextureView) Release() {
 	}
 	v.released = true
 
-	if v.device == nil {
+	if v.ref != nil {
+		v.ref.Drop()
 		return
 	}
+	if v.device != nil {
+		v.device.destroyTextureViewDeferred(v.hal)
+	}
+}
 
-	halDevice := v.device.halDevice()
+// destroyTextureViewDeferred destroys a HAL texture view once the GPU has
+// completed the last submission so far.
+func (d *Device) destroyTextureViewDeferred(halView hal.TextureView) {
+	halDevice := d.halDevice()
 	if halDevice == nil {
 		return
 	}
 
-	dq := v.device.destroyQueue()
+	dq := d.destroyQueue()
 	if dq == nil {
-		halDevice.DestroyTextureView(v.hal)
+		halDevice.DestroyTextureView(halView)
 		return
 	}
 
-	subIdx := v.device.lastSubmissionIndex()
-	halTV := v.hal
-	dq.Defer(subIdx, "TextureView", func() {
-		halDevice.DestroyTextureView(halTV)
+	dq.Defer(d.lastSubmissionIndex(), "TextureView", func() {
+		halDevice.DestroyTextureView(halView)
 	})
 }

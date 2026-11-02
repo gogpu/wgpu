@@ -111,12 +111,21 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 }
 
 // DiscardEncoding discards the encoder without creating a command buffer.
+// The list is closed and returned to the free pool for the next
+// BeginEncoding, which resets it; a list that fails to close is released.
+// Matches Rust wgpu-hal CommandEncoder::discard_encoding (dx12/command.rs).
 func (e *CommandEncoder) DiscardEncoding() {
-	if e.isRecording {
-		// Close the command list even though we're discarding it
-		_ = e.cmdList.Close()
-		e.isRecording = false
+	if !e.isRecording {
+		return
 	}
+	e.isRecording = false
+	list := e.cmdList
+	e.cmdList = nil
+	if err := list.Close(); err != nil {
+		list.Release()
+		return
+	}
+	e.freeLists = append(e.freeLists, list)
 }
 
 // ResetAll resets the encoder's allocator and returns command lists to the free pool.

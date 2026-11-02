@@ -145,6 +145,13 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		},
 		halDesc.MipLevelCount, halDesc.SampleCount, desc.Label,
 	)
+	// The application holds the first reference; bind groups, command
+	// encoders and queue writes clone it. The texture is destroyed when the
+	// last one drops, as Rust wgpu-core's Arc<Texture>.
+	td := coreTexture.TrackingData()
+	coreTexture.Ref = core.NewResourceRef("Texture:"+desc.Label, func() {
+		d.destroyTextureDeferred(halTexture, td)
+	})
 
 	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: desc.ViewFormats, coreTexture: coreTexture}, nil
 }
@@ -190,12 +197,21 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
 	}
 
+	// The view is destroyed when its last reference drops: the application's,
+	// a bind group's or a command encoder's. Unlike Rust wgpu-core, whose
+	// TextureView holds an Arc of its parent, the view does not keep its
+	// texture alive by itself: Go has no drop, and a view the application
+	// never releases would pin the texture's memory. Every GPU use of a view
+	// (a bind group, a render pass) holds the texture's reference as well.
 	return &TextureView{
 		hal:          halView,
 		device:       d,
 		texture:      texture,
 		surface:      texture.surface,
 		surfaceLease: texture.surfaceLease,
+		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
+			d.destroyTextureViewDeferred(halView)
+		}),
 	}, nil
 }
 
@@ -429,16 +445,26 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// When the last reference drops (either from explicit Release or Phase 2
 	// Triage after GPU completion), onZero fires and defers HAL destruction via
 	// DestroyQueue. This matches Rust wgpu's Arc<BindGroup> Drop behavior. ADR-056.
+	//
+	// The bind group keeps its texture views and their textures alive until
+	// its HAL bind group is destroyed, as Rust wgpu-core's BindGroup holds an
+	// Arc of each view: a Vulkan descriptor set must not outlive the image
+	// views it names.
 	halBG := halGroup
+	viewRefs := cloneBindGroupViewRefs(desc.Entries)
+	destroy := func() {
+		halDevice.DestroyBindGroup(halBG)
+		for _, ref := range viewRefs {
+			ref.Drop()
+		}
+	}
 	bgOnZero := func() {
 		dq := d.destroyQueue()
 		if dq != nil {
 			subIdx := d.lastSubmissionIndex()
-			dq.Defer(subIdx, "BindGroup", func() {
-				halDevice.DestroyBindGroup(halBG)
-			})
+			dq.Defer(subIdx, "BindGroup", destroy)
 		} else {
-			halDevice.DestroyBindGroup(halBG)
+			destroy()
 		}
 	}
 
@@ -529,6 +555,26 @@ func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, 
 // group entries for submit-time validation (VAL-A6). Matches Rust wgpu-core
 // where bind group creation stores resource references that are later checked
 // via trackers.buffers/textures.used_resources() in validate_command_buffer.
+// cloneBindGroupViewRefs clones the references of every texture view a bind
+// group binds and of its texture, and returns them, for the bind group to
+// drop when it is destroyed.
+func cloneBindGroupViewRefs(entries []BindGroupEntry) []*core.ResourceRef {
+	var refs []*core.ResourceRef
+	for i := range entries {
+		view := entries[i].TextureView
+		if view == nil {
+			continue
+		}
+		for _, ref := range [2]*core.ResourceRef{view.ref, view.texture.ref()} {
+			if ref != nil {
+				ref.Clone()
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return refs
+}
+
 func collectBindGroupResources(entries []BindGroupEntry) ([]*Buffer, []*Texture) {
 	var buffers []*Buffer
 	var textures []*Texture
