@@ -116,6 +116,11 @@ type BufferPointer struct {
 	Buffer []byte    // raw buffer data
 	Offset uint32    // byte offset within the buffer
 	Type   *TypeInfo // type of the pointed-to element
+	// MatrixStride is the column stride of the matrices in Type, from the
+	// MatrixStride decoration of the struct member the access chain went
+	// through (SPIR-V decorates the member, not the matrix type). 0 when
+	// Type holds no matrix or the member is not decorated.
+	MatrixStride uint32
 }
 
 // SubPointer provides write-through access to a member of a composite value

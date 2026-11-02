@@ -582,13 +582,13 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	buf[7] = byte(bits >> 24)
 
 	// Test float read.
-	val := interp.readValueFromBuffer(buf, 0, m.Types[1])
+	val := interp.readValueFromBuffer(buf, 0, m.Types[1], 0)
 	if val.Tag != TagFloat32 || math.Abs(float64(val.AsFloat32()-3.14)) > 0.01 {
 		t.Errorf("float read = %v, want ~3.14", val)
 	}
 
 	// Test signed int read.
-	val = interp.readValueFromBuffer(buf, 4, m.Types[2])
+	val = interp.readValueFromBuffer(buf, 4, m.Types[2], 0)
 	if val.Tag != TagInt32 || val.AsInt32() != -7 {
 		t.Errorf("signed int read = %v, want -7", val)
 	}
@@ -596,14 +596,14 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	// Test unsigned int read.
 	putFloat32LE(buf[8:], 0)
 	buf[8] = 42
-	val = interp.readValueFromBuffer(buf, 8, m.Types[3])
+	val = interp.readValueFromBuffer(buf, 8, m.Types[3], 0)
 	if val.Tag != TagUint32 || val.AsUint32() != 42 {
 		t.Errorf("unsigned int read = %v, want 42", val)
 	}
 
 	// Test bool read.
 	buf[12] = 1
-	val = interp.readValueFromBuffer(buf, 12, m.Types[4])
+	val = interp.readValueFromBuffer(buf, 12, m.Types[4], 0)
 	if val.Tag != TagBool || !val.AsBool() {
 		t.Errorf("bool read = %v, want true", val)
 	}
@@ -611,7 +611,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	// Test vec2 read.
 	putFloat32LE(buf[0:], 1.0)
 	putFloat32LE(buf[4:], 2.0)
-	val = interp.readValueFromBuffer(buf, 0, m.Types[5])
+	val = interp.readValueFromBuffer(buf, 0, m.Types[5], 0)
 	if val.Tag != TagVec2 || val.F[0] != 1.0 || val.F[1] != 2.0 {
 		t.Errorf("vec2 read = %v, want {1, 2}", val)
 	}
@@ -620,7 +620,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	putFloat32LE(buf[0:], 1.0)
 	putFloat32LE(buf[4:], 2.0)
 	putFloat32LE(buf[8:], 3.0)
-	val = interp.readValueFromBuffer(buf, 0, m.Types[6])
+	val = interp.readValueFromBuffer(buf, 0, m.Types[6], 0)
 	if val.Tag != TagVec3 || val.AsVec3() != (Vec3{1, 2, 3}) {
 		t.Errorf("vec3 read = %v, want {1, 2, 3}", val)
 	}
@@ -631,7 +631,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	buf[5] = 0
 	buf[6] = 0
 	buf[7] = 0
-	val = interp.readValueFromBuffer(buf, 0, m.Types[9])
+	val = interp.readValueFromBuffer(buf, 0, m.Types[9], 0)
 	arr, ok := testIsArray(val)
 	if !ok || len(arr) != 2 {
 		t.Fatalf("struct read returned unexpected type or length")
@@ -644,7 +644,7 @@ func TestReadValueFromBufferAllTypes(t *testing.T) {
 	}
 
 	// Test short buffer (should return zeros).
-	val = interp.readValueFromBuffer(buf[:2], 0, m.Types[1])
+	val = interp.readValueFromBuffer(buf[:2], 0, m.Types[1], 0)
 	if val.Tag != TagFloat32 || val.AsFloat32() != 0 {
 		t.Errorf("short buffer read = %v, want 0", val)
 	}

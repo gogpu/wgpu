@@ -1279,19 +1279,19 @@ func TestReadValueFromBufferShortBuffers(t *testing.T) {
 	short := []byte{0, 0} // Only 2 bytes, need 4
 
 	// Signed int on short buffer returns zero.
-	got := interp.readValueFromBuffer(short, 0, m.Types[1])
+	got := interp.readValueFromBuffer(short, 0, m.Types[1], 0)
 	if got.Tag != TagInt32 || got.AsInt32() != 0 {
 		t.Errorf("short signed int = %v, want ValInt(0)", got)
 	}
 
 	// Unsigned int on short buffer returns zero.
-	got = interp.readValueFromBuffer(short, 0, m.Types[2])
+	got = interp.readValueFromBuffer(short, 0, m.Types[2], 0)
 	if got.Tag != TagUint32 || got.AsUint32() != 0 {
 		t.Errorf("short unsigned int = %v, want ValUint(0)", got)
 	}
 
 	// Bool on short buffer returns false.
-	got = interp.readValueFromBuffer(short, 0, m.Types[3])
+	got = interp.readValueFromBuffer(short, 0, m.Types[3], 0)
 	if v, ok := testIsBool(got); !ok || v != false {
 		t.Errorf("short bool = %v, want false", got)
 	}

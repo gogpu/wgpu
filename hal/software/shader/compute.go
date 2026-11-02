@@ -157,7 +157,7 @@ func (interp *interpreter) initWorkgroupVariables() {
 				// Read the shared memory into a structured value.
 				pointeeType := m.PointeeType(vi.TypeID)
 				if pointeeType != nil {
-					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType)
+					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType, 0)
 					interp.values[varID] = ValPointer(interp.allocPointer(val))
 					continue
 				}
@@ -397,7 +397,7 @@ func (interp *interpreter) writeStorageBufferBack() {
 		}
 		v := interp.values[varID]
 		if v.Tag == TagPointer {
-			writeValueToBuffer(bufData, 0, v.AsPointer().Val)
+			interp.writeValueToBufferTyped(bufData, 0, v.AsPointer().Val, m.PointeeType(vi.TypeID), 0)
 		}
 	}
 }

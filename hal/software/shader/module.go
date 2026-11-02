@@ -106,6 +106,17 @@ func (m *Module) GetMemberOffset(structTypeID, memberIndex uint32) uint32 {
 	return 0
 }
 
+// memberMatrixStride returns the MatrixStride decoration of a struct member
+// (the column stride of the matrices it holds, directly or in an array), or
+// 0 if the member is not decorated.
+func (m *Module) memberMatrixStride(structTypeID, memberIndex uint32) uint32 {
+	return m.MemberDecorations[memberDecorationKey{
+		StructTypeID: structTypeID,
+		MemberIndex:  memberIndex,
+		Decoration:   DecorationMatrixStride,
+	}]
+}
+
 // TypeInfo describes a SPIR-V type.
 type TypeInfo struct {
 	Kind       TypeKind
@@ -118,6 +129,11 @@ type TypeInfo struct {
 	ParamIDs   []uint32 // for OpTypeFunction (parameter type IDs)
 	ReturnType uint32   // for OpTypeFunction
 	MemberIDs  []uint32 // for OpTypeStruct
+
+	// ArrayStride is the ArrayStride decoration of an array type: the byte
+	// distance between its elements in an explicitly laid-out buffer. 0 when
+	// the array is not decorated (Function, Private and Workgroup arrays).
+	ArrayStride uint32
 }
 
 // TypeKind classifies SPIR-V types.
@@ -294,8 +310,8 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeRuntimeArray:
 			// OpTypeRuntimeArray: result elementType
 			// Runtime arrays are unsized (length determined by buffer size at runtime).
-			// Represented as TypeArray with Length=0, which the buffer access chain
-			// handles by computing byte offsets from element type size.
+			// Represented as TypeArray with Length=0; the buffer access chain
+			// steps through it by its ArrayStride.
 			if len(operands) < 2 {
 				break
 			}
@@ -549,6 +565,14 @@ func ParseModule(words []uint32) (*Module, error) {
 
 	// Store all functions by ID for OpFunctionCall dispatch.
 	m.FunctionsByID = funcsByID
+
+	// Attach each array type's ArrayStride decoration, so buffer addressing
+	// needs no decoration lookup by type ID.
+	for id, ti := range m.Types {
+		if ti.Kind == TypeArray {
+			ti.ArrayStride = m.Decorations[decorationKey{TargetID: id, Decoration: DecorationArrayStride}]
+		}
+	}
 
 	// Pre-build label indexes for all functions. This avoids rebuilding
 	// the label map on every Execute call (saves one map alloc per call).

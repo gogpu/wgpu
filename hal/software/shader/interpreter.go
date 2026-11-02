@@ -317,7 +317,7 @@ func (interp *interpreter) initResourceVariables() {
 				interp.values[varID] = ValBufferPointer(&BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType})
 			} else {
 				// Uniform and push constant buffers are read-only -- deserialize once.
-				val := interp.readValueFromBuffer(bufData, 0, pointeeType)
+				val := interp.readValueFromBuffer(bufData, 0, pointeeType, 0)
 				interp.values[varID] = ValPointer(interp.allocPointer(val))
 			}
 
@@ -334,8 +334,9 @@ func (interp *interpreter) initResourceVariables() {
 }
 
 // readValueFromBuffer deserializes a SPIR-V typed value from raw buffer bytes.
-// offset is the starting byte offset into data.
-func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *TypeInfo) Value {
+// offset is the starting byte offset into data. matStride is the column
+// stride of the matrices in ti (BufferPointer.MatrixStride), 0 if unknown.
+func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *TypeInfo, matStride uint32) Value {
 	m := interp.module
 	switch ti.Kind {
 	case TypeFloat:
@@ -378,21 +379,21 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		case 2:
 			var v [2]float32
 			for i := uint32(0); i < 2; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec2(v[0], v[1])
 		case 3:
 			var v [3]float32
 			for i := uint32(0); i < 3; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec3(v[0], v[1], v[2])
 		case 4:
 			var v [4]float32
 			for i := uint32(0); i < 4; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec4(v[0], v[1], v[2], v[3])
@@ -400,24 +401,15 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		return ValUint(0)
 
 	case TypeMatrix:
-		// Matrix is stored as an array of column vectors in the buffer.
-		// mat4x4<f32> = 4 columns of vec4<f32>, each 16 bytes.
+		// Matrix is stored as an array of column vectors, matStride apart.
 		colType := m.Types[ti.ElemType]
 		if colType == nil || ti.Components == 0 {
 			return ValArray(nil)
 		}
-		colSize := typeByteSize(m, colType)
-		// Check for MatrixStride decoration which overrides computed stride.
-		matrixTypeID := interp.findTypeID(ti)
-		if matrixTypeID != 0 {
-			strideKey := decorationKey{TargetID: matrixTypeID, Decoration: DecorationMatrixStride}
-			if stride, ok := m.Decorations[strideKey]; ok && stride > 0 {
-				colSize = stride
-			}
-		}
+		colStride := matrixColumnStride(m, ti, matStride)
 		cols := make([]Value, ti.Components)
 		for i := uint32(0); i < ti.Components; i++ {
-			cols[i] = interp.readValueFromBuffer(data, offset+i*colSize, colType)
+			cols[i] = interp.readValueFromBuffer(data, offset+i*colStride, colType, 0)
 		}
 		return ValArray(cols)
 
@@ -426,11 +418,10 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		if elemType == nil || ti.Length == 0 {
 			return ValArray(nil)
 		}
-		// Use ArrayStride decoration if available, otherwise compute.
-		elemSize := typeByteSize(m, elemType)
+		stride := arrayStride(m, ti)
 		arr := make([]Value, ti.Length)
 		for i := uint32(0); i < ti.Length; i++ {
-			arr[i] = interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+			arr[i] = interp.readValueFromBuffer(data, offset+i*stride, elemType, matStride)
 		}
 		return ValArray(arr)
 
@@ -445,12 +436,84 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 				continue
 			}
 			memberOffset := m.GetMemberOffset(structTypeID, uint32(i))
-			members[i] = interp.readValueFromBuffer(data, offset+memberOffset, memberType)
+			members[i] = interp.readValueFromBuffer(data, offset+memberOffset, memberType,
+				m.memberMatrixStride(structTypeID, uint32(i)))
 		}
 		return ValArray(members)
 
 	default:
 		return ValUint(0)
+	}
+}
+
+// writeValueToBufferTyped serializes val as a value of SPIR-V type ti at
+// offset, the inverse of readValueFromBuffer: vector components packed,
+// matrix columns matStride apart, array elements ArrayStride apart, struct
+// members at their Offset. A store never touches the padding between them.
+// Without a type, or with a value that does not match it, it falls back to
+// the untyped writeValueToBuffer.
+func (interp *interpreter) writeValueToBufferTyped(data []byte, offset uint32, val Value, ti *TypeInfo, matStride uint32) {
+	m := interp.module
+	if ti == nil {
+		writeValueToBuffer(data, offset, val)
+		return
+	}
+	switch ti.Kind {
+	case TypeVector:
+		elemType := m.Types[ti.ElemType]
+		if elemType == nil {
+			writeValueToBuffer(data, offset, val)
+			return
+		}
+		elemSize := typeByteSize(m, elemType)
+		for i := uint32(0); i < ti.Components; i++ {
+			interp.writeValueToBufferTyped(data, offset+i*elemSize, indexComposite(val, i), elemType, 0)
+		}
+
+	case TypeMatrix, TypeArray, TypeStruct:
+		if val.Tag != TagArray {
+			writeValueToBuffer(data, offset, val)
+			return
+		}
+		interp.writeCompositeToBuffer(data, offset, val.AsArray(), ti, matStride)
+
+	default:
+		writeValueToBuffer(data, offset, val)
+	}
+}
+
+// writeCompositeToBuffer writes the elements of a matrix, array or struct
+// value of type ti (see writeValueToBufferTyped).
+func (interp *interpreter) writeCompositeToBuffer(data []byte, offset uint32, elems []Value, ti *TypeInfo, matStride uint32) {
+	m := interp.module
+	switch ti.Kind {
+	case TypeMatrix:
+		colType := m.Types[ti.ElemType]
+		stride := matrixColumnStride(m, ti, matStride)
+		for i := uint32(0); i < ti.Components && int(i) < len(elems); i++ {
+			interp.writeValueToBufferTyped(data, offset+i*stride, elems[i], colType, 0)
+		}
+
+	case TypeArray:
+		elemType := m.Types[ti.ElemType]
+		stride := arrayStride(m, ti)
+		for i, elem := range elems {
+			if ti.Length != 0 && uint32(i) >= ti.Length {
+				break
+			}
+			interp.writeValueToBufferTyped(data, offset+uint32(i)*stride, elem, elemType, matStride)
+		}
+
+	case TypeStruct:
+		structTypeID := interp.findTypeID(ti)
+		for i, memberTypeID := range ti.MemberIDs {
+			if i >= len(elems) {
+				break
+			}
+			member := uint32(i)
+			interp.writeValueToBufferTyped(data, offset+m.GetMemberOffset(structTypeID, member), elems[i],
+				m.Types[memberTypeID], m.memberMatrixStride(structTypeID, member))
+		}
 	}
 }
 
@@ -463,6 +526,37 @@ func (interp *interpreter) findTypeID(target *TypeInfo) uint32 {
 		}
 	}
 	return 0
+}
+
+// arrayStride returns the byte distance between the elements of the array
+// type ti: its ArrayStride decoration, which SPIR-V requires on every array
+// in Uniform, StorageBuffer and PushConstant memory and which can exceed the
+// element size (array<vec3<f32>>: 16, not 12). An undecorated array (one in
+// Workgroup memory) is packed at the element size.
+func arrayStride(m *Module, ti *TypeInfo) uint32 {
+	if ti.ArrayStride != 0 {
+		return ti.ArrayStride
+	}
+	elemType := m.Types[ti.ElemType]
+	if elemType == nil {
+		return 0
+	}
+	return typeByteSize(m, elemType)
+}
+
+// matrixColumnStride returns the byte distance between the columns of the
+// matrix type ti: matStride, the MatrixStride decoration of the struct
+// member holding it, when known (mat3x3<f32>: 16, not 12); otherwise the
+// column size.
+func matrixColumnStride(m *Module, ti *TypeInfo, matStride uint32) uint32 {
+	if matStride != 0 {
+		return matStride
+	}
+	colType := m.Types[ti.ElemType]
+	if colType == nil {
+		return 0
+	}
+	return typeByteSize(m, colType)
 }
 
 // typeByteSize returns the byte size of a SPIR-V type for buffer reads.
@@ -488,11 +582,7 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 		}
 		return typeByteSize(m, colType) * ti.Components
 	case TypeArray:
-		elemType := m.Types[ti.ElemType]
-		if elemType == nil {
-			return 0
-		}
-		return typeByteSize(m, elemType) * ti.Length
+		return arrayStride(m, ti) * ti.Length
 	case TypeStruct:
 		// Compute struct size from the highest (offset + size) across all members.
 		// Look up the struct type ID for MemberDecorate offset decorations.
@@ -645,7 +735,7 @@ func (interp *interpreter) run() error {
 				// Read directly from the raw buffer.
 				bp := pv.AsBufferPointer()
 				if bp.Type != nil {
-					interp.values[inst.ResultID] = interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type)
+					interp.values[inst.ResultID] = interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type, bp.MatrixStride)
 				} else {
 					interp.values[inst.ResultID] = ValUint(0)
 				}
@@ -669,8 +759,9 @@ func (interp *interpreter) run() error {
 				// Write through parent pointer, updating the composite at each level.
 				subPointerStore(pv.AsSubPointer(), interp.values[valID])
 			case TagBufferPointer:
-				// Write directly to the raw buffer.
-				writeValueToBuffer(pv.AsBufferPointer().Buffer, pv.AsBufferPointer().Offset, interp.values[valID])
+				// Write directly to the raw buffer, laid out by the pointee type.
+				bp := pv.AsBufferPointer()
+				interp.writeValueToBufferTyped(bp.Buffer, bp.Offset, interp.values[valID], bp.Type, bp.MatrixStride)
 			}
 
 		case OpAccessChain:
@@ -1531,8 +1622,9 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 
 // arrayLength returns the element count of the runtime array that is member
 // member of the struct a storage buffer pointer points at: the bytes of the
-// binding past the member's offset, divided by the element size. 0 when the
-// pointer is not a storage buffer pointer to such a struct.
+// binding past the member's offset, divided by the array stride and
+// truncated (WGSL NRuntime). 0 when the pointer is not a storage buffer
+// pointer to such a struct.
 func (interp *interpreter) arrayLength(ptr Value, member uint32) uint32 {
 	if ptr.Tag != TagBufferPointer {
 		return 0
@@ -1547,11 +1639,7 @@ func (interp *interpreter) arrayLength(ptr Value, member uint32) uint32 {
 	if arr == nil || arr.Kind != TypeArray {
 		return 0
 	}
-	elem := m.Types[arr.ElemType]
-	if elem == nil {
-		return 0
-	}
-	stride := typeByteSize(m, elem)
+	stride := arrayStride(m, arr)
 	start := uint64(bp.Offset) + uint64(m.GetMemberOffset(interp.findTypeID(st), member))
 	if stride == 0 || start >= uint64(len(bp.Buffer)) {
 		return 0
@@ -1565,6 +1653,9 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 	m := interp.module
 	offset := bp.Offset
 	currentType := bp.Type
+	// The MatrixStride of a struct member applies to the matrices it holds,
+	// through any arrays, until a matrix is indexed.
+	matStride := bp.MatrixStride
 
 	for _, idxID := range indexes {
 		idx := toUint32(interp.values[idxID])
@@ -1579,6 +1670,7 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 			structTypeID := interp.findTypeID(currentType)
 			memberOffset := m.GetMemberOffset(structTypeID, idx)
 			offset += memberOffset
+			matStride = m.memberMatrixStride(structTypeID, idx)
 			if int(idx) < len(currentType.MemberIDs) {
 				currentType = m.Types[currentType.MemberIDs[idx]]
 			} else {
@@ -1586,21 +1678,13 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 			}
 
 		case TypeArray:
-			elemType := m.Types[currentType.ElemType]
-			if elemType != nil {
-				elemSize := typeByteSize(m, elemType)
-				offset += idx * elemSize
-			}
+			offset += idx * arrayStride(m, currentType)
 			currentType = m.Types[currentType.ElemType]
 
 		case TypeMatrix:
 			// Indexing into a matrix selects a column vector.
-			// Each column is ElemType (e.g. vec4<f32> = 16 bytes).
-			colType := m.Types[currentType.ElemType]
-			if colType != nil {
-				colSize := typeByteSize(m, colType)
-				offset += idx * colSize
-			}
+			offset += idx * matrixColumnStride(m, currentType, matStride)
+			matStride = 0
 			currentType = m.Types[currentType.ElemType]
 
 		case TypeVector:
@@ -1620,7 +1704,7 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 		}
 	}
 
-	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType}
+	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType, MatrixStride: matStride}
 }
 
 // subPointerLoad reads the current value of a sub-element through the parent
