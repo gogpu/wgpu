@@ -37,7 +37,7 @@ Core holds pointers and calls directly.
 - **errors.go** — typed ValidationError with operation constants
 - **context.go** — DeviceContext callback interface (core.Device implements without import cycle)
 
-~1,300 LOC, 73 tests, 96.8% coverage.
+
 
 ### 2. `hal/raytracing.go` — HAL Interface
 
@@ -57,7 +57,7 @@ All 4 GPU backends implement real API calls:
 - **DX12** — DXR Tier 1.1, COM bindings for ID3D12Device5/CommandList4
 - **Metal** — MTLAccelerationStructure (macOS 15.0+)
 - **Software** — CPU BVH build + Moller-Trumbore ray-triangle intersection (for CI/testing without GPU)
-- **GLES/Noop** — return ErrUnsupported
+- **GLES/Noop** — return an error (no ray tracing)
 
 ## Example
 

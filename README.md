@@ -209,7 +209,7 @@ Design follows Rust wgpu's buffer mapping model with Go-idiomatic error handling
 
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)
 
-Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (render-pass timestamp writes where the adapter offers `FeatureTimestampQuery`: Metal and Windows GLES; Vulkan and DX12 implement them in the HAL but do not offer the feature yet), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
+Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (render-pass timestamp writes on Windows GLES; Vulkan and DX12 implement them in the HAL but do not offer `FeatureTimestampQuery` yet), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
 
 ---
 

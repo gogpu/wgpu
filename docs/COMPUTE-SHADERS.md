@@ -75,7 +75,7 @@ Define the resource binding structure:
 ```go
 bindGroupLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
     Label: "Compute Bind Group Layout",
-    Entries: []wgpu.BindGroupLayoutEntry{
+    Entries: []gputypes.BindGroupLayoutEntry{
         {
             Binding:    0,
             Visibility: wgpu.ShaderStageCompute,
@@ -286,9 +286,7 @@ if err != nil {
 ### Step 3: Map and Read Back Data
 
 Use the WebGPU-spec-compliant mapping API. `Buffer.Map` blocks until the
-GPU finishes writing the buffer (or `ctx` is cancelled). See
-[ADR-BUFFER-MAPPING-API](dev/research/ADR-BUFFER-MAPPING-API.md) for the
-full design rationale.
+GPU finishes writing the buffer (or `ctx` is cancelled).
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -335,9 +333,11 @@ if ready, _ := pending.Status(); ready {
 
 ## Timestamp Queries for Profiling
 
-> **Note:** Timestamp queries use the `hal/` package directly — they are not yet exposed
-> in the high-level `wgpu` root package. Import `"github.com/gogpu/wgpu/hal"` for this functionality.
-> Access HAL device/queue from wgpu types via `device.HalDevice()` and `device.HalQueue()`.
+> **Note:** The root package has `Device.CreateQuerySet` and render-pass `TimestampWrites`, but compute-pass
+> timestamp writes and the timestamp period are HAL-only for now, and only adapters that offer
+> `FeatureTimestampQuery` accept timestamp query sets (see [Backend Differences](COMPUTE-BACKENDS.md)). The example
+> below uses the `hal/` package directly: `device.HalDevice()` returns the HAL device; the HAL queue is available
+> when you create the device from HAL objects with `wgpu.NewDeviceFromHAL`.
 
 You can measure GPU execution time of compute passes using timestamp queries.
 
