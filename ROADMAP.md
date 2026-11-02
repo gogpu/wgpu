@@ -145,6 +145,11 @@ releases.
 - [x] Out-of-bounds storage access contained on Vulkan (#370)
 - [x] Bind group resources tracked per pass, with the barriers they need
 - [x] Vulkan binding generator and loader fixes (#372–#377); descriptor writes (#356)
+- [x] Copy, clear and `WriteTexture` validation as in Rust wgpu-core; texture view formats validated
+- [x] Render bundles on every backend, recorded and replayed in core as Rust does
+- [x] Bind groups kept across pipeline changes (core binder); dynamic offsets on DX12; `DispatchIndirect` correct on every backend
+- [x] Textures and texture views reference counted; resources kept alive by unsubmitted encoders and queue writes
+- [x] Indirect draws and dispatches, storage textures and depth on GLES and the software backend
 
 **Next minor release, v0.35.0: backend registration, adapter selection, internal packages**
 
@@ -248,7 +253,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.34.7** | 2026-11 | naga v0.21.0 (stricter WGSL), gputypes shader capability features, shaders validated once in core, bind groups in pass usage scopes, copy and clear validation, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants |
+| **v0.34.7** | 2026-11 | naga v0.21.0 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
 | **v0.33.0** | 2026-08 | DownlevelCapabilities — Rust-parity capability flags for graceful degradation |
