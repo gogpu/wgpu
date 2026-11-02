@@ -112,7 +112,6 @@ var dynamicOffsetsDefects = map[string]map[string]string{
 		"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (11 -> 0x41300000), and arrayLength() of a storage binding is 0",
 	},
 	"render": {
-		"gles":     "GLES backend: a render pass ignores the dynamic offset of a storage buffer (reads slot 0 for offset 512), and the second draw of the pass renders nothing",
 		"software": "software backend: arrayLength() of a storage binding is 0, a render pass ignores the dynamic offset of a storage buffer, and with the layout entries in reverse binding order the second draw renders nothing",
 	},
 	"compute/bind-group-first": {
@@ -121,6 +120,7 @@ var dynamicOffsetsDefects = map[string]map[string]string{
 	},
 	"render/bind-group-first": {
 		"vulkan": "Vulkan backend: RenderPassEncoder.SetBindGroup before SetPipeline dereferences the nil pipeline",
+		"gles":   "GLES backend: a bind group set before the pipeline is lost; the first draw renders nothing",
 	},
 }
 

@@ -162,6 +162,22 @@ func (l *BindGroupLayout) storageTexture(binding uint32) *gputypes.StorageTextur
 	return nil
 }
 
+// dynamicOffsetIndex returns the index of binding's offset in the dynamic
+// offsets of SetBindGroup. WebGPU orders the offsets by binding number,
+// whatever the order of the layout or bind group entries (Rust wgpu-hal
+// consumes them over the layout entries, which wgpu-core sorts by binding),
+// so the index is the number of dynamic-offset buffer bindings below binding.
+func (l *BindGroupLayout) dynamicOffsetIndex(binding uint32) int {
+	n := 0
+	for i := range l.entries {
+		e := &l.entries[i]
+		if e.Binding < binding && e.Buffer != nil && e.Buffer.HasDynamicOffset {
+			n++
+		}
+	}
+	return n
+}
+
 // BindGroup implements hal.BindGroup for OpenGL.
 type BindGroup struct {
 	layout  *BindGroupLayout

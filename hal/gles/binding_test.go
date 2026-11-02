@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // =============================================================================
@@ -569,5 +570,43 @@ func TestBindGroupLayoutInfo_UnusedSlot(t *testing.T) {
 	}
 	if bts[2] != 0 {
 		t.Errorf("slot 2 = %d, want 0 (first uniform)", bts[2])
+	}
+}
+
+// TestSetBindGroupDynamicOffsetsFollowBindingOrder checks that each dynamic
+// offset goes to the buffer binding of its rank by binding number, as WebGPU
+// orders them, when the layout lists its entries in another order and has a
+// buffer without a dynamic offset and a texture between them.
+func TestSetBindGroupDynamicOffsetsFollowBindingOrder(t *testing.T) {
+	buffer := func(binding uint32, ty gputypes.BufferBindingType, dynamic bool) gputypes.BindGroupLayoutEntry {
+		return gputypes.BindGroupLayoutEntry{
+			Binding: binding,
+			Buffer:  &gputypes.BufferBindingLayout{Type: ty, HasDynamicOffset: dynamic},
+		}
+	}
+	layout := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{
+		buffer(5, gputypes.BufferBindingTypeStorage, true),
+		{Binding: 3, Texture: &gputypes.TextureBindingLayout{}},
+		buffer(2, gputypes.BufferBindingTypeUniform, false),
+		buffer(1, gputypes.BufferBindingTypeReadOnlyStorage, true),
+		buffer(0, gputypes.BufferBindingTypeUniform, true),
+	}}
+	cmd := &SetBindGroupCommand{group: &BindGroup{layout: layout}, dynamicOffsets: []uint32{256, 512, 768}}
+	tests := []struct {
+		binding    uint32
+		wantTarget uint32
+		wantOffset int
+	}{
+		{0, gl.UNIFORM_BUFFER, 256},
+		{1, gl.SHADER_STORAGE_BUFFER, 512},
+		{2, gl.UNIFORM_BUFFER, 0},
+		{5, gl.SHADER_STORAGE_BUFFER, 768},
+	}
+	for _, tt := range tests {
+		target, offset := cmd.resolveBufferTarget(tt.binding)
+		if target != tt.wantTarget || offset != tt.wantOffset {
+			t.Errorf("binding %d: target %#x offset %d, want target %#x offset %d",
+				tt.binding, target, offset, tt.wantTarget, tt.wantOffset)
+		}
 	}
 }

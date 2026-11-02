@@ -1408,7 +1408,6 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 		return
 	}
 
-	dynamicIdx := 0
 	for i, entry := range c.group.entries {
 		// Look up the GL slot index from the pre-computed per-type sequential
 		// binding table (computed in CreatePipelineLayout). This replaces the old
@@ -1431,7 +1430,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			// Determine GL buffer target and apply dynamic offset from layout entry.
 			// Storage buffers use GL_SHADER_STORAGE_BUFFER, uniform buffers use GL_UNIFORM_BUFFER.
 			// Matches Rust wgpu-hal/src/gles/command.rs:731-746 (set_bind_group).
-			target, dynOff := c.resolveBufferTarget(entry.Binding, &dynamicIdx)
+			target, dynOff := c.resolveBufferTarget(entry.Binding)
 			offset += dynOff
 
 			if size > 0 {
@@ -1547,8 +1546,9 @@ func (c *SetBindGroupCommand) resolveSamplerUnit(glBinding uint32) uint32 {
 // resolveBufferTarget determines the GL buffer target (UNIFORM_BUFFER or SHADER_STORAGE_BUFFER)
 // and dynamic offset for a binding number by looking up the bind group layout entry.
 // Returns the GL target and the dynamic offset to apply (0 if none).
-// Matches Rust wgpu-hal/src/gles/command.rs:731-746 buffer target selection.
-func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32, dynamicIdx *int) (uint32, int) {
+// Matches Rust wgpu-hal/src/gles/command.rs set_bind_group buffer target
+// selection.
+func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32) (uint32, int) {
 	target := uint32(gl.UNIFORM_BUFFER)
 	dynOffset := 0
 	if c.group.layout == nil {
@@ -1562,9 +1562,10 @@ func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32, dynamicIdx *in
 			le.Buffer.Type == gputypes.BufferBindingTypeReadOnlyStorage {
 			target = gl.SHADER_STORAGE_BUFFER
 		}
-		if le.Buffer.HasDynamicOffset && c.dynamicOffsets != nil && *dynamicIdx < len(c.dynamicOffsets) {
-			dynOffset = int(c.dynamicOffsets[*dynamicIdx])
-			*dynamicIdx++
+		if le.Buffer.HasDynamicOffset {
+			if i := c.group.layout.dynamicOffsetIndex(binding); i < len(c.dynamicOffsets) {
+				dynOffset = int(c.dynamicOffsets[i])
+			}
 		}
 		break
 	}
