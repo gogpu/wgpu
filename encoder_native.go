@@ -732,6 +732,9 @@ func (e *CommandEncoder) DiscardEncoding() {
 		return
 	}
 	e.released = true
+	if e.device != nil {
+		e.device.recordings.removeEncoder(e)
+	}
 	// Drop all tracked refs since no submission will happen.
 	for _, ref := range e.trackedRefs {
 		ref.Drop()
@@ -772,6 +775,9 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 		return nil, ErrReleased
 	}
 	e.released = true
+	if e.device != nil {
+		e.device.recordings.removeEncoder(e)
+	}
 
 	coreCmdBuffer, err := e.core.Finish()
 	if err != nil {
@@ -807,6 +813,9 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	e.usedBuffers = nil    // ownership transferred
 	e.usedTextures = nil   // ownership transferred
 	e.usedBindGroups = nil // ownership transferred
+	if e.device != nil {
+		e.device.recordings.addBuffer(cb)
+	}
 	return cb, nil
 }
 
@@ -965,6 +974,9 @@ type CommandBuffer struct {
 func (cb *CommandBuffer) Release() {
 	if cb == nil {
 		return
+	}
+	if cb.device != nil {
+		cb.device.recordings.removeBuffer(cb)
 	}
 	// Return encoder to pool (reset native allocator).
 	// For multi-CB encoders, pass all HAL command buffers to ResetAll

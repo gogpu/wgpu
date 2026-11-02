@@ -173,6 +173,9 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		if cb != nil {
 			cb.submitted = true
 			cb.dropUsedSets()
+			if cb.device != nil {
+				cb.device.recordings.removeBuffer(cb)
+			}
 		}
 	}
 

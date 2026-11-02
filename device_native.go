@@ -24,6 +24,10 @@ type Device struct {
 	instance *Instance
 	released atomic.Bool
 
+	// recordings holds the command encoders and command buffers that still
+	// carry resource references; Release discards them.
+	recordings recordingRegistry
+
 	// cmdEncoderPool is the single shared encoder pool for the device.
 	// Used by both CreateCommandEncoder (user command encoders) and
 	// PendingWrites (internal staging encoders). Matches Rust wgpu-core's
@@ -855,12 +859,14 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 			return nil, err
 		}
 
-		return &CommandEncoder{
+		enc := &CommandEncoder{
 			core:        coreEncoder,
 			device:      d,
 			halEncoder:  halEnc,
 			trackedRefs: make([]*core.ResourceRef, 0, 64),
-		}, nil
+		}
+		d.recordings.addEncoder(enc)
+		return enc, nil
 	}
 
 	// Fallback: no pool available (e.g., non-HAL device). Use core's built-in
@@ -870,7 +876,9 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		return nil, err
 	}
 
-	return &CommandEncoder{core: coreEncoder, device: d}, nil
+	enc := &CommandEncoder{core: coreEncoder, device: d}
+	d.recordings.addEncoder(enc)
+	return enc, nil
 }
 
 // CreateFence creates a GPU synchronization fence.
@@ -1069,6 +1077,12 @@ func (d *Device) Release() {
 	// entry points. This ensures PollCompleted() returns the final submission
 	// index before pending encoders or resources are destroyed.
 	_ = d.waitIdle()
+
+	// Step 1b: Command encoders never finished or discarded, and command
+	// buffers never submitted or released, still hold the references they
+	// took while encoding. Drop them now, so the resources they kept alive
+	// are destroyed below with the device.
+	d.discardRecordings()
 
 	// Step 2: Pending writes that were never submitted can now be discarded;
 	// completed inflight batches were recycled by maintainAfterIdle above.

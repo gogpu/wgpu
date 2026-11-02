@@ -64,6 +64,18 @@ func TestErroredEncoderReleasesCommandBuffers(t *testing.T) {
 			enc := newEncoder(t, device)
 			enc.CopyBufferToBuffer(buf, 0, buf, 32, 3)
 		}},
+		{"pass error with resources, finished", func(t *testing.T, device *wgpu.Device) {
+			enc := recordErroredPassWithResources(t, device)
+			if _, err := enc.Finish(); err == nil {
+				t.Fatal("Finish accepted a dispatch over the workgroup limit")
+			}
+		}},
+		{"pass error with resources, abandoned", func(t *testing.T, device *wgpu.Device) {
+			// The pass took references to the pipeline, the bind group and
+			// its buffers; the encoder is then left unfinished. The device
+			// must still destroy them when it is released.
+			recordErroredPassWithResources(t, device)
+		}},
 		{"finished, never submitted", func(t *testing.T, device *wgpu.Device) {
 			enc := newEncoder(t, device)
 			if _, err := enc.Finish(); err != nil {
@@ -82,4 +94,38 @@ func TestErroredEncoderReleasesCommandBuffers(t *testing.T) {
 			})
 		}
 	}
+}
+
+// recordErroredPassWithResources records a compute pass that sets a pipeline
+// and a bind group over two storage buffers, then fails a dispatch, and
+// returns the encoder in its error state. The pipeline, layouts, group and
+// buffers are released by the test's cleanups before the device.
+func recordErroredPassWithResources(t *testing.T, device *wgpu.Device) *wgpu.CommandEncoder {
+	t.Helper()
+	storage := wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst
+	input := newPublicBuffer(t, device, 256, storage)
+	output := newPublicBuffer(t, device, 256, storage)
+	bgl := newBindGroupLayout(t, device,
+		gputypes.BindGroupLayoutEntry{Binding: 0, Visibility: wgpu.ShaderStageCompute,
+			Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
+		gputypes.BindGroupLayoutEntry{Binding: 1, Visibility: wgpu.ShaderStageCompute,
+			Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+	)
+	pipeline := newComputePipeline(t, device, doubleWGSL, bgl)
+	group := newBindGroup(t, device, bgl,
+		wgpu.BindGroupEntry{Binding: 0, Buffer: input, Size: 256},
+		wgpu.BindGroupEntry{Binding: 1, Buffer: output, Size: 256},
+	)
+	enc := newEncoder(t, device)
+	pass, err := enc.BeginComputePass(nil)
+	if err != nil {
+		t.Fatalf("BeginComputePass: %v", err)
+	}
+	pass.SetPipeline(pipeline)
+	pass.SetBindGroup(0, group, nil)
+	pass.Dispatch(1<<30, 1, 1) // over maxComputeWorkgroupsPerDimension
+	if err := pass.End(); err == nil {
+		t.Fatal("End accepted a dispatch over the workgroup limit")
+	}
+	return enc
 }
