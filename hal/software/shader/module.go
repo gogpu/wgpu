@@ -164,6 +164,7 @@ type Function struct {
 type VariableInfo struct {
 	TypeID       uint32 // pointer type ID
 	StorageClass uint32
+	Initializer  uint32 // constant ID of the initializer; 0 for none
 }
 
 // decorationKey uniquely identifies a decoration on a target ID.
@@ -486,6 +487,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			m.Variables[resultID] = &VariableInfo{
 				TypeID:       typeID,
 				StorageClass: storageClass,
+			}
+			if len(operands) > 3 {
+				m.Variables[resultID].Initializer = operands[3]
 			}
 			// If inside a function, record as an instruction too.
 			if currentFunc != nil {

@@ -788,6 +788,14 @@ func zeroValue(types map[uint32]*TypeInfo, typeID uint32) Value {
 			}
 			return ValArray(arr)
 		}
+	case TypeStruct:
+		// A struct zero (OpConstantNull, or a struct element of an array)
+		// was a scalar 0 before, so stores to its members went nowhere.
+		members := make([]Value, len(ti.MemberIDs))
+		for i, memberTypeID := range ti.MemberIDs {
+			members[i] = zeroValue(types, memberTypeID)
+		}
+		return ValArray(members)
 	case TypeBool:
 		return ValBool(false)
 	}

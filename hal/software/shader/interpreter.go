@@ -241,6 +241,44 @@ func (interp *interpreter) initVariables(inputs map[uint32]Value) {
 			interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 		}
 	}
+	interp.initPrivateVariables()
+}
+
+// initPrivateVariables sets up every Private global from its initializer or
+// zero (WGSL zero-initializes a var<private> without one), so each
+// invocation starts from that value. An entry point's interface lists
+// Private variables only from SPIR-V 1.4, so all of them are set up.
+func (interp *interpreter) initPrivateVariables() {
+	for varID, vi := range interp.module.Variables {
+		if vi.StorageClass == StorageClassPrivate {
+			interp.values[varID] = ValPointer(interp.allocPointer(interp.initialValue(vi.TypeID, vi.Initializer)))
+		}
+	}
+}
+
+// initialValue returns the starting value of a variable of pointer type
+// ptrTypeID: a copy of its initializer constant, or zero without one.
+func (interp *interpreter) initialValue(ptrTypeID, initializer uint32) Value {
+	if initializer != 0 {
+		if c, ok := interp.module.Constants[initializer]; ok {
+			return cloneValue(c)
+		}
+	}
+	return zeroValueForVar(interp.module, ptrTypeID)
+}
+
+// cloneValue copies v deeply enough that stores through a pointer to the
+// copy never reach the original (array elements are copied).
+func cloneValue(v Value) Value {
+	if v.Tag != TagArray {
+		return v
+	}
+	src := v.AsArray()
+	dst := make([]Value, len(src))
+	for i, e := range src {
+		dst[i] = cloneValue(e)
+	}
+	return ValArray(dst)
 }
 
 // initResourceVariables sets up Uniform/StorageBuffer/UniformConstant variables
@@ -582,7 +620,11 @@ func (interp *interpreter) run() error {
 			}
 			storageClass := inst.Operands[0]
 			if storageClass == StorageClassFunction {
-				val := zeroValueForVar(interp.module, inst.TypeID)
+				var initializer uint32
+				if len(inst.Operands) > 1 {
+					initializer = inst.Operands[1]
+				}
+				val := interp.initialValue(inst.TypeID, initializer)
 				interp.values[inst.ResultID] = ValPointer(interp.allocPointer(val))
 			}
 
@@ -1627,34 +1669,56 @@ func (interp *interpreter) compositeExtract(composite Value, indexes []uint32) V
 
 // matrixTimesVector multiplies a matrix (Array of column vectors) by a vector.
 // SPIR-V stores matrices in column-major order as arrays of column vectors.
+//
+// The matrix has C columns of R components and the vector C components; the
+// result has R components (matCxR * vecC = vecR). Every size from 2 to 4 is
+// handled: only 4-component vectors were multiplied before, so a mat2x2 or
+// mat3x2 product returned the vector unchanged.
 func matrixTimesVector(mat, vec Value) Value {
 	if mat.Tag != TagArray {
 		return vec
 	}
 	cols := mat.AsArray()
-	if vec.Tag != TagVec4 {
-		return vec
-	}
-	v := vec.F
 	numCols := len(cols)
-	if numCols < 2 {
+	if numCols < 2 || numCols > 4 || vectorSize(vec.Tag) < numCols {
 		return vec
 	}
-
-	// Extract columns as Vec4 (padding with zeros if needed).
-	colVecs := make([][4]float32, numCols)
-	for i, c := range cols {
-		colVecs[i] = Vec4ToFloat32(c)
+	rows := vectorSize(cols[0].Tag)
+	if rows < 2 {
+		return vec
 	}
 
 	// result = col[0]*v[0] + col[1]*v[1] + ...
 	var result [4]float32
-	for i := 0; i < numCols && i < 4; i++ {
-		for j := 0; j < 4; j++ {
-			result[j] += colVecs[i][j] * v[i]
+	for i, c := range cols {
+		col := Vec4ToFloat32(c)
+		for j := range rows {
+			result[j] += col[j] * vec.F[i]
 		}
 	}
-	return ValVec4(result[0], result[1], result[2], result[3])
+	switch rows {
+	case 2:
+		return ValVec2(result[0], result[1])
+	case 3:
+		return ValVec3(result[0], result[1], result[2])
+	default:
+		return ValVec4From(result)
+	}
+}
+
+// vectorSize returns the component count of a float vector tag, 0 for
+// anything else.
+func vectorSize(tag ValueTag) int {
+	switch tag {
+	case TagVec2:
+		return 2
+	case TagVec3:
+		return 3
+	case TagVec4:
+		return 4
+	default:
+		return 0
+	}
 }
 
 // matrixTimesScalar multiplies every element of a matrix by a scalar.

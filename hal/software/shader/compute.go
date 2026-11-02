@@ -63,6 +63,9 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 	// Initialize workgroup shared memory variables.
 	interp.initWorkgroupVariables()
 
+	// Private globals start from their initializer or zero.
+	interp.initPrivateVariables()
+
 	// Execute.
 	if err := interp.run(); err != nil {
 		m.putInterpreter(interp)
