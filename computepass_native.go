@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -148,7 +149,36 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		return
 	}
 
+	if !p.flushDispatch("Dispatch", nil, track.BufferUsesNone) {
+		return
+	}
 	p.core.Dispatch(x, y, z)
+}
+
+// flushDispatch builds the usage scope of the next dispatch from the bind
+// groups the current pipeline uses and the indirect buffer (if any), and
+// records the barriers into it. Returns false, with the error recorded on the
+// encoder, if two usages in the dispatch conflict.
+//
+// Matches Rust wgpu-core compute.rs State::flush_bindings, which merges only
+// the bind groups the pipeline uses (binder.list_active).
+func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indirectUsage track.BufferUses) bool {
+	var groups [MaxBindGroups]*core.BindGroupUsages
+	active := groups[:0]
+	for i := uint32(0); i < p.currentPipelineBindGroupCount && i < MaxBindGroups; i++ {
+		if bg := p.assignedBindGroups[i]; bg != nil {
+			active = append(active, bg.usages)
+		}
+	}
+	var indirectCore *core.Buffer
+	if indirect != nil {
+		indirectCore = indirect.core
+	}
+	if err := p.core.FlushDispatch(active, indirectCore, indirectUsage); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
+		return false
+	}
+	return true
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -203,7 +233,19 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	// Matches Rust wgpu-core compute.rs:921-1059.
 	iv := p.encoder.device.core.IndirectValidation()
 	raw := p.core.RawPass()
-	if iv != nil && raw != nil {
+	validated := iv != nil && raw != nil
+
+	// With validation, a validation shader reads the arguments as storage
+	// before the dispatch reads them from its own buffer.
+	indirectUsage := track.BufferUsesIndirect
+	if validated {
+		indirectUsage = track.BufferUsesStorageRead
+	}
+	if !p.flushDispatch("DispatchIndirect", buffer, indirectUsage) {
+		return
+	}
+
+	if validated {
 		p.dispatchIndirectValidated(buffer, offset, iv, raw)
 		return
 	}

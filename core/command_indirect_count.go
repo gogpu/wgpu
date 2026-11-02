@@ -20,6 +20,7 @@ func (p *CoreRenderPassEncoder) forwardIndirectCount(
 	if p.indirectCountInactive(maxDrawCount) || p.raw == nil || indirectBuffer == nil || countBuffer == nil {
 		return
 	}
+	p.recordIndirectUsage("DrawIndirectCount", indirectBuffer, countBuffer)
 	guard := p.device.snatchLock.Read()
 	defer guard.Release()
 	halIndirect := indirectBuffer.Raw(guard)

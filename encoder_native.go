@@ -671,12 +671,9 @@ func (e *CommandEncoder) DiscardEncoding() {
 		ref.Drop()
 	}
 	e.trackedRefs = nil
-	raw := e.core.RawEncoder()
-	if raw != nil {
-		raw.DiscardEncoding()
-	}
+	closed := e.core.DiscardHAL()
 	// Return pooled encoder immediately — no GPU work was submitted.
-	e.returnEncoderToPool()
+	e.returnEncoderToPool(closed)
 }
 
 // returnEncoderToPool resets and returns the HAL encoder to the device's pool.
@@ -686,11 +683,14 @@ func (e *CommandEncoder) DiscardEncoding() {
 // BeginEncoding will fail with VUID-vkBeginCommandBuffer-commandBuffer-00049
 // because CBs from an unreset pool may still be in executable/recording state.
 // Matches Rust wgpu-core InnerCommandEncoder::drop (command/mod.rs:726-738).
-func (e *CommandEncoder) returnEncoderToPool() {
+//
+// closed are the command buffers the encoder already ended (render pass
+// splits); ResetAll reclaims them.
+func (e *CommandEncoder) returnEncoderToPool(closed []hal.CommandBuffer) {
 	if e.halEncoder == nil || e.device == nil || e.device.cmdEncoderPool == nil {
 		return
 	}
-	e.halEncoder.ResetAll(nil)
+	e.halEncoder.ResetAll(closed)
 	e.device.cmdEncoderPool.release(e.halEncoder)
 	e.halEncoder = nil
 }
@@ -715,7 +715,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 		}
 		e.trackedRefs = nil
 		// Return the pooled encoder on error — it won't be submitted.
-		e.returnEncoderToPool()
+		e.returnEncoderToPool(e.core.DiscardHAL())
 		return nil, err
 	}
 

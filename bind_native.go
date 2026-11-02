@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -196,6 +197,12 @@ type BindGroup struct {
 	// boundTextures holds references to textures bound in this bind group (VAL-A6).
 	// Used at Submit time to verify that referenced textures are still alive.
 	boundTextures []*Texture
+	// usages are the buffer and texture usages of the bound resources.
+	// Setting the bind group merges them into the render pass's usage scope,
+	// or into the usage scope of each dispatch whose pipeline uses the group,
+	// so the resources are transitioned into these usages (Rust
+	// BindGroup.used).
+	usages *core.BindGroupUsages
 }
 
 // Release marks the bind group for destruction. Drops the application's
@@ -237,4 +244,66 @@ func registerBindGroupCleanup(bg *BindGroup, _ *Device, label string) runtime.Cl
 		released: bg.released,
 		ref:      bg.ref,
 	})
+}
+
+// buildBindGroupUsages derives the usage of every buffer and texture binding
+// from its layout entry: uniform, read-only storage, or storage for buffers;
+// sampled, or storage with the layout's access mode, for textures.
+//
+// Reference: wgpu-core device/resource.rs create_buffer_binding /
+// create_texture_binding (the usages recorded in BindGroup.used)
+func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) *core.BindGroupUsages {
+	entryMap := buildBindGroupEntryMap(entries)
+	usages := &core.BindGroupUsages{}
+	for i := range layoutEntries {
+		layoutEntry := &layoutEntries[i]
+		entry, ok := entryMap[layoutEntry.Binding]
+		if !ok {
+			continue
+		}
+		switch {
+		case layoutEntry.Buffer != nil && entry.Buffer != nil && entry.Buffer.core != nil:
+			usages.Buffers = append(usages.Buffers, core.BindGroupBufferUse{
+				Buffer: entry.Buffer.core,
+				Usage:  bufferBindingUses(layoutEntry.Buffer.Type),
+			})
+		case layoutEntry.Texture != nil || layoutEntry.StorageTexture != nil:
+			if entry.TextureView == nil || entry.TextureView.texture == nil || entry.TextureView.texture.coreTexture == nil {
+				continue
+			}
+			texture := entry.TextureView.texture
+			usage := track.TextureUsesResource
+			if layoutEntry.StorageTexture != nil {
+				usage = storageTextureUses(layoutEntry.StorageTexture.Access)
+			}
+			usages.Textures = append(usages.Textures, core.BindGroupTextureUse{
+				Texture: texture.coreTexture,
+				Usage:   usage,
+				Resolve: texture.resolveHAL,
+			})
+		}
+	}
+	return usages
+}
+
+// bufferBindingUses maps a buffer binding type to its tracker usage.
+func bufferBindingUses(bindingType gputypes.BufferBindingType) track.BufferUses {
+	switch bindingType {
+	case gputypes.BufferBindingTypeStorage:
+		return track.BufferUsesStorageWrite
+	case gputypes.BufferBindingTypeReadOnlyStorage:
+		return track.BufferUsesStorageRead
+	default:
+		return track.BufferUsesUniform
+	}
+}
+
+// storageTextureUses maps a storage texture access mode to its tracker usage.
+// Read-write access uses the exclusive write state, like Rust's single
+// STORAGE_READ_WRITE flag.
+func storageTextureUses(access gputypes.StorageTextureAccess) track.TextureUses {
+	if access == gputypes.StorageTextureAccessReadOnly {
+		return track.TextureUsesStorageRead
+	}
+	return track.TextureUsesStorageWrite
 }

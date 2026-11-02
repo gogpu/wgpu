@@ -108,6 +108,11 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
+	// A render pass is one usage scope: every bind group set in it counts.
+	if err := p.core.MergeBindGroup(group.usages); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
+		return
+	}
 	raw := p.core.RawPass()
 	if raw != nil && group.hal != nil {
 		raw.SetBindGroup(index, group.hal, offsets)

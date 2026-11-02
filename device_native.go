@@ -438,6 +438,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
 		boundBuffers:           boundBuffers,
 		boundTextures:          boundTextures,
+		usages:                 buildBindGroupUsages(desc.Layout.entries, desc.Entries),
 	}
 
 	// Safety net: if the bind group is garbage collected without Release(),

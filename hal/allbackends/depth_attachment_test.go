@@ -51,7 +51,6 @@ func TestDepthAttachmentStates(t *testing.T) {
 		})
 		t.Run("write-then-sampled", func(t *testing.T) {
 			skipKnownGap(t, "software", "P1-SW-015", "depth is never written back to the texture")
-			skipKnownGap(t, "vulkan", "P1-CORE-010", "bind-group textures get no barrier, so the sampled depth stays in the attachment layout")
 			r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
 				wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
 			for frame := 0; frame < 2; frame++ {
@@ -70,7 +69,8 @@ func TestDepthAttachmentStates(t *testing.T) {
 // Remove the call when the card is done; the case then has to pass.
 func skipKnownGap(t *testing.T, backend, card, reason string) {
 	t.Helper()
-	if strings.Contains(t.Name(), "/"+backend+"/") {
+	// The backend is a subtest of its own, the last one or a parent.
+	if strings.Contains(t.Name()+"/", "/"+backend+"/") {
 		t.Skipf("known gap on %s (%s): %s", backend, card, reason)
 	}
 }
