@@ -4,6 +4,7 @@ package core
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 	"unsafe"
 
@@ -42,7 +43,7 @@ func TestCreateBufferIndirectAddsInternalStorageUsage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			halDevice := &usageCaptureDevice{}
-			device := NewDevice(halDevice, &Adapter{}, 0, gputypes.DefaultLimits(), "usage")
+			device := NewDevice(halDevice, indirectAdapter(), 0, gputypes.DefaultLimits(), "usage")
 			halDevice.usages = nil // drop internal buffers created by NewDevice
 			buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: tc.name, Size: 64, Usage: tc.usage})
 			if err != nil {
@@ -116,7 +117,7 @@ func TestIndirectDispatchParamsSelectPerDispatchInputs(t *testing.T) {
 	limits := gputypes.DefaultLimits()
 	limits.MinStorageBufferOffsetAlignment = 256
 	limits.MinUniformBufferOffsetAlignment = 64
-	device := NewDevice(halDevice, &Adapter{}, 0, limits, "iv")
+	device := NewDevice(halDevice, indirectAdapter(), 0, limits, "iv")
 	iv := device.IndirectValidation()
 	if iv == nil {
 		t.Fatal("IndirectValidation not created")
@@ -204,7 +205,7 @@ func TestIndirectDispatchParamsSelectPerDispatchInputs(t *testing.T) {
 // Arc drops.
 func TestIndirectSourceGroupsOutliveSubmittedWork(t *testing.T) {
 	halDevice := &ivTestDevice{}
-	device := NewDevice(halDevice, &Adapter{}, 0, gputypes.DefaultLimits(), "iv")
+	device := NewDevice(halDevice, indirectAdapter(), 0, gputypes.DefaultLimits(), "iv")
 	buffer, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: "args", Size: 64, Usage: gputypes.BufferUsageIndirect})
 	if err != nil {
 		t.Fatalf("CreateBuffer: %v", err)
@@ -229,5 +230,33 @@ func TestIndirectSourceGroupsOutliveSubmittedWork(t *testing.T) {
 	}
 	if !found {
 		t.Error("source bind group not destroyed after the last reference dropped")
+	}
+}
+
+// indirectAdapter is an adapter with every downlevel capability, so the
+// device accepts INDIRECT buffers.
+func indirectAdapter() *Adapter {
+	return &Adapter{DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities()}
+}
+
+// TestCreateBufferIndirectRequiresIndirectExecution checks that an adapter
+// without DownlevelFlagsIndirectExecution refuses INDIRECT buffers with a
+// typed error and still creates other buffers. Matches Rust wgpu-core
+// device/resource.rs create_buffer (require_downlevel_flags(INDIRECT_EXECUTION)).
+func TestCreateBufferIndirectRequiresIndirectExecution(t *testing.T) {
+	caps := gputypes.DefaultDownlevelCapabilities()
+	caps.Flags &^= gputypes.DownlevelFlagsIndirectExecution
+	device := NewDevice(&usageCaptureDevice{}, &Adapter{DownlevelCapabilities: caps}, 0, gputypes.DefaultLimits(), "no-indirect")
+
+	_, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: "args", Size: 64, Usage: gputypes.BufferUsageIndirect | gputypes.BufferUsageCopyDst})
+	var cbe *CreateBufferError
+	if !errors.As(err, &cbe) || cbe.Kind != CreateBufferErrorMissingDownlevelFlags {
+		t.Fatalf("CreateBuffer(INDIRECT) = %v, want CreateBufferErrorMissingDownlevelFlags", err)
+	}
+	if cbe.MissingFlags != gputypes.DownlevelFlagsIndirectExecution {
+		t.Errorf("MissingFlags = %v, want IndirectExecution", cbe.MissingFlags)
+	}
+	if _, err := device.CreateBuffer(&gputypes.BufferDescriptor{Label: "vertex", Size: 64, Usage: gputypes.BufferUsageVertex}); err != nil {
+		t.Errorf("CreateBuffer(VERTEX) without indirect execution: %v", err)
 	}
 }

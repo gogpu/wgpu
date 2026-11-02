@@ -449,6 +449,19 @@ func (d *Device) CreateBuffer(desc *gputypes.BufferDescriptor) (*Buffer, error) 
 		}
 	}
 
+	// 5a. INDIRECT needs indirect execution; the indirect validation also
+	// reads the buffer as storage. Matches Rust wgpu-core
+	// device/resource.rs create_buffer (require_downlevel_flags).
+	if desc.Usage.Contains(gputypes.BufferUsageIndirect) {
+		if missing := gputypes.DownlevelFlagsIndirectExecution &^ d.downlevel.Flags; missing != 0 {
+			return nil, &CreateBufferError{
+				Kind:         CreateBufferErrorMissingDownlevelFlags,
+				Label:        desc.Label,
+				MissingFlags: missing,
+			}
+		}
+	}
+
 	// 6. Calculate aligned size (align to COPY_BUFFER_ALIGNMENT = 4)
 	const copyBufferAlignment uint64 = 4
 	alignedSize := (desc.Size + copyBufferAlignment - 1) &^ (copyBufferAlignment - 1)

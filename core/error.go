@@ -192,6 +192,9 @@ const (
 	CreateBufferErrorMapReadWriteExclusive
 	// CreateBufferErrorHAL indicates the HAL backend failed to create the buffer.
 	CreateBufferErrorHAL
+	// CreateBufferErrorMissingDownlevelFlags indicates the usage needs
+	// downlevel capabilities the adapter lacks (MissingFlags).
+	CreateBufferErrorMissingDownlevelFlags
 )
 
 // CreateBufferError represents an error during buffer creation.
@@ -201,6 +204,9 @@ type CreateBufferError struct {
 	RequestedSize uint64
 	MaxSize       uint64
 	HALError      error
+	// MissingFlags are the downlevel flags the usage needs and the adapter
+	// lacks (CreateBufferErrorMissingDownlevelFlags).
+	MissingFlags gputypes.DownlevelFlags
 }
 
 // Error implements the error interface.
@@ -224,6 +230,8 @@ func (e *CreateBufferError) Error() string {
 		return fmt.Sprintf("buffer %q: MAP_READ and MAP_WRITE are mutually exclusive", label)
 	case CreateBufferErrorHAL:
 		return fmt.Sprintf("buffer %q: HAL error: %v", label, e.HALError)
+	case CreateBufferErrorMissingDownlevelFlags:
+		return fmt.Sprintf("buffer %q: usage needs downlevel flags the adapter lacks: %s", label, e.MissingFlags)
 	default:
 		return fmt.Sprintf("buffer %q: unknown error", label)
 	}
