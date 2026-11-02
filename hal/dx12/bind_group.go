@@ -30,42 +30,62 @@ type viewBinding struct {
 // bind group's table must be the resource of the i-th non-sampler layout entry.
 // Rust wgpu-core sorts both entry lists by binding before calling the HAL; the
 // DX12 HAL here does not rely on the caller's entry order.
-func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroupEntry) ([]viewBinding, []uint32, error) {
-	views := make([]viewBinding, 0, len(layout.entries))
-	var samplerPoolIndices []uint32
+//
+// A uniform buffer with a dynamic offset gets no descriptor: it is bound as a
+// root CBV (dynamicBuffer). Buffers with a dynamic offset are returned in
+// layout order, which CreateBindGroupLayout makes binding order.
+func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (orderedBindGroupEntries, error) {
+	out := orderedBindGroupEntries{views: make([]viewBinding, 0, len(layout.entries))}
 
 	for _, le := range layout.entries {
 		entry, ok := findBindGroupEntry(entries, le.Binding)
 		if !ok {
-			return nil, nil, fmt.Errorf("dx12: bind group has no entry for layout binding %d", le.Binding)
+			return out, fmt.Errorf("dx12: bind group has no entry for layout binding %d", le.Binding)
 		}
 
 		switch le.Type {
 		case BindingTypeSampler, BindingTypeComparisonSampler:
 			res, ok := entry.Resource.(gputypes.SamplerBinding)
 			if !ok || res.Sampler == 0 {
-				return nil, nil, fmt.Errorf("dx12: binding %d: layout expects a sampler, got %T", le.Binding, entry.Resource)
+				return out, fmt.Errorf("dx12: binding %d: layout expects a sampler, got %T", le.Binding, entry.Resource)
 			}
 			sampler := (*Sampler)(unsafe.Pointer(res.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
-			samplerPoolIndices = append(samplerPoolIndices, sampler.samplerPoolSlot)
+			out.samplerPoolIndices = append(out.samplerPoolIndices, sampler.samplerPoolSlot)
 
 		case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
 			res, ok := entry.Resource.(gputypes.BufferBinding)
 			if !ok || res.Buffer == 0 {
-				return nil, nil, fmt.Errorf("dx12: binding %d: layout expects a buffer, got %T", le.Binding, entry.Resource)
+				return out, fmt.Errorf("dx12: binding %d: layout expects a buffer, got %T", le.Binding, entry.Resource)
 			}
-			views = append(views, viewBinding{layout: le, entry: entry})
+			buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
+			switch {
+			case le.isDynamicUniform():
+				out.dynamicBuffers = append(out.dynamicBuffers, dynamicBuffer{uniform: true, gpuVA: buf.gpuVA + res.Offset})
+				continue
+			case le.isDynamicStorage():
+				out.dynamicBuffers = append(out.dynamicBuffers, dynamicBuffer{size: uint32(bufferBindingSize(buf.size, res))})
+			}
+			out.views = append(out.views, viewBinding{layout: le, entry: entry})
 
 		default: // BindingTypeSampledTexture, BindingTypeStorageTexture
 			res, ok := entry.Resource.(gputypes.TextureViewBinding)
 			if !ok || res.TextureView == 0 {
-				return nil, nil, fmt.Errorf("dx12: binding %d: layout expects a texture view, got %T", le.Binding, entry.Resource)
+				return out, fmt.Errorf("dx12: binding %d: layout expects a texture view, got %T", le.Binding, entry.Resource)
 			}
-			views = append(views, viewBinding{layout: le, entry: entry})
+			out.views = append(out.views, viewBinding{layout: le, entry: entry})
 		}
 	}
 
-	return views, samplerPoolIndices, nil
+	return out, nil
+}
+
+// orderedBindGroupEntries is a bind group's entries in layout order: the
+// CBV/SRV/UAV descriptors of its table, the global sampler pool slots of its
+// samplers and its buffers with a dynamic offset.
+type orderedBindGroupEntries struct {
+	views              []viewBinding
+	samplerPoolIndices []uint32
+	dynamicBuffers     []dynamicBuffer
 }
 
 func findBindGroupEntry(entries []gputypes.BindGroupEntry, binding uint32) (gputypes.BindGroupEntry, bool) {
@@ -106,8 +126,16 @@ func rawBufferViewRange(offset, size uint64) (firstElement uint64, numElements u
 
 // writeBufferViewDescriptor writes the descriptor for one buffer binding at
 // dest, with the view kind taken from the layout entry type.
+//
+// A storage buffer with a dynamic offset is viewed from its binding offset to
+// the end of the buffer: the shader adds the dynamic offset to every access,
+// so the view must reach past the binding (Rust wgpu-hal create_bind_group
+// does the same; arrayLength() reads the binding size from root constants).
 func (d *Device) writeBufferViewDescriptor(le BindGroupLayoutEntry, buf *Buffer, res gputypes.BufferBinding, dest d3d12.D3D12_CPU_DESCRIPTOR_HANDLE) error {
 	size := bufferBindingSize(buf.size, res)
+	if le.isDynamicStorage() {
+		size = bufferBindingSize(buf.size, gputypes.BufferBinding{Offset: res.Offset})
+	}
 
 	switch le.Type {
 	case BindingTypeUniformBuffer:

@@ -62,6 +62,23 @@ type BindGroupLayoutEntry struct {
 	Type       BindingType
 	Visibility gputypes.ShaderStages
 	Count      uint32 // For arrays
+	// HasDynamicOffset marks a buffer binding whose offset SetBindGroup
+	// adds to: a uniform buffer becomes a root CBV, a storage buffer reads
+	// its offset from root constants (dynamicBuffer).
+	HasDynamicOffset bool
+}
+
+// isDynamicUniform reports whether the entry is a uniform buffer with a
+// dynamic offset, which is bound as a root CBV instead of a descriptor in
+// the group's table.
+func (e *BindGroupLayoutEntry) isDynamicUniform() bool {
+	return e.HasDynamicOffset && e.Type == BindingTypeUniformBuffer
+}
+
+// isDynamicStorage reports whether the entry is a storage buffer with a
+// dynamic offset, whose offset the shader reads from root constants.
+func (e *BindGroupLayoutEntry) isDynamicStorage() bool {
+	return e.HasDynamicOffset && (e.Type == BindingTypeStorageBuffer || e.Type == BindingTypeReadOnlyStorageBuffer)
 }
 
 // BindingType describes the type of resource binding.
@@ -100,8 +117,22 @@ func (l *BindGroupLayout) Entries() []BindGroupLayoutEntry {
 
 // rootParamMapping stores actual root parameter indices for a single bind group.
 // Values are -1 when the group has no descriptors of that type.
+//
+// A group's dynamic buffers follow its table, as in Rust wgpu-hal
+// (dx12/device.rs create_pipeline_layout): one root CBV per dynamic uniform
+// buffer, in binding order, then one root constants parameter holding the
+// offsets of the dynamic storage buffers and, after them, their binding sizes
+// (naga's DynamicStorageBufferSizeIndex, which arrayLength() reads).
 type rootParamMapping struct {
 	cbvSrvUavIndex int // root param index for CBV/SRV/UAV table, or -1
+
+	dynamicUniformIndex int // root param index of the first dynamic uniform root CBV, or -1
+	dynamicStorageIndex int // root param index of the dynamic storage root constants, or -1
+	dynamicStorageCount int // number of dynamic storage buffers in the group
+}
+
+func newRootParamMapping() rootParamMapping {
+	return rootParamMapping{cbvSrvUavIndex: -1, dynamicUniformIndex: -1, dynamicStorageIndex: -1}
 }
 
 // PipelineLayout implements hal.PipelineLayout for DirectX 12.
@@ -165,6 +196,21 @@ type BindGroup struct {
 	uniformBuffers         []*Buffer
 	sampledTextures        []*TextureView
 	storageTextures        []*TextureView
+
+	// dynamicBuffers are the buffers with a dynamic offset, in binding
+	// order: the order of SetBindGroup's offsets.
+	dynamicBuffers []dynamicBuffer
+}
+
+// dynamicBuffer is a buffer binding with a dynamic offset, as Rust wgpu-hal's
+// DynamicBuffer (dx12/mod.rs). A uniform buffer is bound as a root CBV at
+// gpuVA plus the offset. A storage buffer keeps its descriptor in the table,
+// viewed to the end of the buffer, and the shader adds the offset from root
+// constants; size is its binding size, which arrayLength() counts.
+type dynamicBuffer struct {
+	uniform bool
+	gpuVA   uint64 // uniform: GPU address of the binding at offset 0
+	size    uint32 // storage: binding size in bytes
 }
 
 // Destroy releases the bind group resources and recycles descriptor heap slots.
@@ -220,6 +266,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	// naga HLSL binding maps.
 	bindingMap := make(map[ir.ResourceBinding]hlsl.BindTarget)
 	samplerBufferBindingMap := make(map[uint32]hlsl.BindTarget)
+	var dynamicStorageTargets map[uint32]hlsl.OffsetsBindTarget
 
 	// Track whether any bind group has samplers.
 	samplerInAnyGroup := false
@@ -232,10 +279,13 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			continue
 		}
 		samplerInGroup := false
-		for _, entry := range bgLayout.entries {
-			switch entry.Type {
-			case BindingTypeSampler, BindingTypeComparisonSampler:
+		for i := range bgLayout.entries {
+			entry := &bgLayout.entries[i]
+			switch {
+			case entry.Type == BindingTypeSampler, entry.Type == BindingTypeComparisonSampler:
 				samplerInGroup = true
+			case entry.isDynamicUniform():
+				// A root CBV, not a descriptor range.
 			default:
 				totalRanges++
 			}
@@ -256,7 +306,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			return nil, fmt.Errorf("dx12: invalid bind group layout type at index %d", groupIdx)
 		}
 
-		mapping := rootParamMapping{cbvSrvUavIndex: -1}
+		mapping := newRootParamMapping()
 
 		// Skip empty layouts
 		if len(bgLayout.entries) == 0 {
@@ -264,13 +314,22 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			continue
 		}
 
+		// The dynamic storage buffers' root constants hold their offsets
+		// first and their binding sizes after them.
+		for i := range bgLayout.entries {
+			if bgLayout.entries[i].isDynamicStorage() {
+				mapping.dynamicStorageCount++
+			}
+		}
+		var dynamicStorageIdx uint32
+
 		// Build CBV/SRV/UAV descriptor ranges for this group.
 		rangeBase := len(allRanges)
 
 		for _, entry := range bgLayout.entries {
 			rangeType, isSampler := bindingTypeToD3D12DescriptorRangeType(entry.Type)
-			if isSampler {
-				continue // Samplers handled separately below
+			if isSampler || entry.isDynamicUniform() {
+				continue // Samplers handled separately below, dynamic uniform buffers after the table
 			}
 
 			// Assign register using per-type monotonic counter.
@@ -286,13 +345,21 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 				reg = &bindSRV
 			}
 
-			bindingMap[ir.ResourceBinding{
-				Group:   uint32(groupIdx),
-				Binding: entry.Binding,
-			}] = hlsl.BindTarget{
+			target := hlsl.BindTarget{
 				Space:    0,
 				Register: *reg,
 			}
+			if entry.isDynamicStorage() {
+				offsetIdx := dynamicStorageIdx
+				sizeIdx := uint32(mapping.dynamicStorageCount) + dynamicStorageIdx
+				target.DynamicStorageBufferOffsetsIndex = &offsetIdx
+				target.DynamicStorageBufferSizeIndex = &sizeIdx
+				dynamicStorageIdx++
+			}
+			bindingMap[ir.ResourceBinding{
+				Group:   uint32(groupIdx),
+				Binding: entry.Binding,
+			}] = target
 
 			allRanges = append(allRanges, d3d12.D3D12_DESCRIPTOR_RANGE{
 				RangeType:                         rangeType,
@@ -354,6 +421,54 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 			table.DescriptorRanges = &rangeSlice[0]
 
 			rootParams = append(rootParams, param)
+		}
+
+		// Root CBVs for the dynamic uniform buffers, so SetBindGroup can move
+		// their GPU address by the offset (Rust: "easier than trying to
+		// patch up the offset on the shader side"). D3D12 does not bounds
+		// check root descriptors, so naga clamps the indices into them
+		// (RestrictIndexing).
+		for _, entry := range bgLayout.entries {
+			if !entry.isDynamicUniform() {
+				continue
+			}
+			if mapping.dynamicUniformIndex < 0 {
+				mapping.dynamicUniformIndex = len(rootParams)
+			}
+			bindingMap[ir.ResourceBinding{
+				Group:   uint32(groupIdx),
+				Binding: entry.Binding,
+			}] = hlsl.BindTarget{Space: 0, Register: bindCBV, RestrictIndexing: true}
+			param := d3d12.D3D12_ROOT_PARAMETER{
+				ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_CBV,
+				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
+			}
+			descriptor := (*d3d12.D3D12_ROOT_DESCRIPTOR)(unsafe.Pointer(&param.Union[0]))
+			descriptor.ShaderRegister = bindCBV
+			descriptor.RegisterSpace = 0
+			rootParams = append(rootParams, param)
+			bindCBV++
+		}
+
+		// Root constants for the dynamic storage buffers: their offsets,
+		// which the shader adds to every access, then their binding sizes.
+		if mapping.dynamicStorageCount > 0 {
+			mapping.dynamicStorageIndex = len(rootParams)
+			values := uint32(2 * mapping.dynamicStorageCount)
+			if dynamicStorageTargets == nil {
+				dynamicStorageTargets = make(map[uint32]hlsl.OffsetsBindTarget)
+			}
+			dynamicStorageTargets[uint32(groupIdx)] = hlsl.OffsetsBindTarget{Space: 0, Register: bindCBV, Size: values}
+			param := d3d12.D3D12_ROOT_PARAMETER{
+				ParameterType:    d3d12.D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				ShaderVisibility: d3d12.D3D12_SHADER_VISIBILITY_ALL,
+			}
+			constants := (*d3d12.D3D12_ROOT_CONSTANTS)(unsafe.Pointer(&param.Union[0]))
+			constants.ShaderRegister = bindCBV
+			constants.RegisterSpace = 0
+			constants.Num32BitValues = values
+			rootParams = append(rootParams, param)
+			bindCBV++
 		}
 
 		groupMappings = append(groupMappings, mapping)
@@ -464,10 +579,11 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	// arrays are Unchecked, as Rust's HLSL writer never checks them. The
 	// DXIL path takes the bindings from these options (compileStageDXIL).
 	nagaOpts := &hlsl.Options{
-		ShaderModel:             backend.ShaderModel{Major: 5, Minor: 1},
-		BindingMap:              bindingMap,
-		SamplerBufferBindingMap: samplerBufferBindingMap,
-		SpecialConstantsBinding: &specialConstantsBinding,
+		ShaderModel:                        backend.ShaderModel{Major: 5, Minor: 1},
+		BindingMap:                         bindingMap,
+		SamplerBufferBindingMap:            samplerBufferBindingMap,
+		DynamicStorageBufferOffsetsTargets: dynamicStorageTargets,
+		SpecialConstantsBinding:            &specialConstantsBinding,
 		SamplerHeapTargets: &hlsl.SamplerHeapBindTargets{
 			StandardSamplers:   hlsl.BindTarget{Space: 0, Register: 0},
 			ComparisonSamplers: hlsl.BindTarget{Space: 0, Register: 2048},

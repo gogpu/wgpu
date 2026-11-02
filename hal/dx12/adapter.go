@@ -321,7 +321,7 @@ func (a *Adapter) limits() gputypes.Limits {
 	limits.MaxTextureDimension3D = a.capabilities.MaxTexture3D
 
 	// D3D12 specific limits
-	limits.MaxBindGroups = 4 // D3D12 has 4 root signature slots for descriptor tables
+	limits.MaxBindGroups = maxBindGroups
 	limits.MaxSampledTexturesPerShaderStage = 128
 	limits.MaxSamplersPerShaderStage = 16
 	limits.MaxStorageBuffersPerShaderStage = 64

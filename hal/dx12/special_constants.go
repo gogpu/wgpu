@@ -20,12 +20,16 @@ func drawSpecialConstants(firstVertex int32, firstInstance uint32) specialConsta
 	return specialConstants{uint32(firstVertex), firstInstance, 0} // the int32's bits
 }
 
-// prepareDraw binds the dirty vertex buffers and writes the draw's special
-// constants when they changed, as Rust wgpu-hal's prepare_draw
+// prepareDraw binds the dirty vertex buffers and bind groups and writes the
+// draw's special constants when they changed, as Rust wgpu-hal's prepare_draw
 // (dx12/command.rs).
 func (e *RenderPassEncoder) prepareDraw(firstVertex int32, firstInstance uint32) {
 	e.prepareVertexBuffers()
-	if e.pipeline == nil || e.pipeline.specialConstantsRootIndex < 0 {
+	if e.pipeline == nil {
+		return
+	}
+	e.bindGroups.flush(e.encoder, false, e.pipeline.groupMappings)
+	if e.pipeline.specialConstantsRootIndex < 0 {
 		return
 	}
 	sc := drawSpecialConstants(firstVertex, firstInstance)
@@ -39,10 +43,15 @@ func (e *RenderPassEncoder) prepareDraw(firstVertex int32, firstInstance uint32)
 	e.specialConstants, e.specialConstantsSet = sc, true
 }
 
-// prepareDispatch writes the dispatch's workgroup count into the special
-// constants when it changed, as Rust wgpu-hal's prepare_dispatch.
+// prepareDispatch binds the dirty bind groups and writes the dispatch's
+// workgroup count into the special constants when it changed, as Rust
+// wgpu-hal's prepare_dispatch.
 func (e *ComputePassEncoder) prepareDispatch(x, y, z uint32) {
-	if e.pipeline == nil || e.pipeline.specialConstantsRootIndex < 0 {
+	if e.pipeline == nil {
+		return
+	}
+	e.bindGroups.flush(e.encoder, true, e.pipeline.groupMappings)
+	if e.pipeline.specialConstantsRootIndex < 0 {
 		return
 	}
 	sc := specialConstants{x, y, z}

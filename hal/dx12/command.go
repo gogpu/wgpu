@@ -538,6 +538,10 @@ type RenderPassEncoder struct {
 	// special-constants root parameter (valid when specialConstantsSet).
 	specialConstants    specialConstants
 	specialConstantsSet bool
+
+	// bindGroups holds the bind groups set on the pass until a draw binds
+	// them to the pipeline's root parameters.
+	bindGroups passBindGroups
 }
 
 // End finishes the render pass.
@@ -639,6 +643,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	}
 	// A root signature change discards the root arguments.
 	e.specialConstantsSet = false
+	e.bindGroups.invalidate()
 	e.encoder.cmdList.IASetPrimitiveTopology(p.topology)
 
 	// The pipeline owns the strides of the slots it uses.
@@ -664,7 +669,9 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 // SetBindGroup sets a bind group for graphics operations.
 // index is the bind group slot (0-3 typically).
 // group contains the GPU descriptor handles for resources.
-// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
+// offsets are the dynamic offsets of the group's buffers with
+// HasDynamicOffset, in binding order. The group is bound to the pipeline's
+// root parameters at the next draw (passBindGroups).
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
@@ -677,23 +684,8 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		e.descriptorHeapsSet = true
 	}
 
-	// Get group mappings from the current pipeline.
-	var mappings []rootParamMapping
-	if e.pipeline != nil {
-		mappings = e.pipeline.groupMappings
-	}
-
-	// Bind the group using graphics root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
+	e.bindGroups.set(index, bg, offsets)
 	e.encoder.trackBindGroupState(bg)
-
-	// TODO(#343): DX12 dynamic uniform buffer offsets require root CBV descriptors
-	// (not descriptor tables) so the GPU virtual address can be adjusted per-draw.
-	// Rust wgpu-hal uses DynamicBuffer::Uniform(gpu_base) with root descriptor slots
-	// and DynamicBuffer::Storage with root constants for storage buffer offsets.
-	// This requires restructuring CreatePipelineLayout to allocate root parameter
-	// slots for each dynamic buffer binding. See Rust wgpu-hal dx12/command.rs:1175-1236.
-	_ = offsets
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -903,6 +895,10 @@ type ComputePassEncoder struct {
 	specialConstants    specialConstants
 	specialConstantsSet bool
 
+	// bindGroups holds the bind groups set on the pass until a dispatch
+	// binds them to the pipeline's root parameters.
+	bindGroups passBindGroups
+
 	// boundStorageBuffers tracks storage buffers from SetBindGroup calls.
 	// Dispatch records them as UNORDERED_ACCESS in the command-local tracker so
 	// a later copy in the same command list can transition from the UAV state.
@@ -945,6 +941,7 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	}
 	// A root signature change discards the root arguments.
 	e.specialConstantsSet = false
+	e.bindGroups.invalidate()
 
 	// Bind the global sampler descriptor heap to the sampler root parameter.
 	if p.samplerRootIndex >= 0 && e.encoder.device.samplerHeap != nil {
@@ -960,7 +957,9 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 // SetBindGroup sets a bind group for compute operations.
 // index is the bind group slot (0-3 typically).
 // group contains the GPU descriptor handles for resources.
-// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
+// offsets are the dynamic offsets of the group's buffers with
+// HasDynamicOffset, in binding order. The group is bound to the pipeline's
+// root parameters at the next dispatch (passBindGroups).
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
@@ -973,14 +972,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		e.descriptorHeapsSet = true
 	}
 
-	// Get group mappings from the current pipeline.
-	var mappings []rootParamMapping
-	if e.pipeline != nil {
-		mappings = e.pipeline.groupMappings
-	}
-
-	// Bind the group using compute root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
+	e.bindGroups.set(index, bg, offsets)
 	e.encoder.trackBindGroupState(bg)
 
 	// Track storage buffers from this bind group for state tracking.
@@ -989,11 +981,6 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	// storageBuffers is populated at CreateBindGroup time by matching layout
 	// entry types (BindingTypeStorageBuffer) with buffer binding handles.
 	e.boundStorageBuffers = append(e.boundStorageBuffers, bg.storageBuffers...)
-
-	// TODO(#343): DX12 dynamic buffer offsets — same as RenderPassEncoder.SetBindGroup.
-	// Requires root CBV slots for dynamic uniform buffers and root constants for
-	// dynamic storage buffer offsets. See Rust wgpu-hal dx12/command.rs:1175-1236.
-	_ = offsets
 }
 
 // Dispatch dispatches compute work.
@@ -1126,27 +1113,6 @@ func (e *CommandEncoder) ensureDescriptorHeapsBound() {
 
 	if e.descriptorHeapCount > 0 {
 		e.cmdList.SetDescriptorHeaps(uint32(e.descriptorHeapCount), &e.descriptorHeaps[0])
-	}
-}
-
-// bindGroupToRootTables binds a BindGroup's CBV/SRV/UAV descriptor table to root parameters.
-// Samplers are handled separately via the global sampler heap (bound in SetPipeline).
-// isCompute determines whether to use compute or graphics root descriptor tables.
-// groupMappings provides the actual root parameter indices.
-func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool, groupMappings []rootParamMapping) {
-	// Use mapping if available; fall back to bindGroupIndex for backwards compatibility.
-	cbvIdx := int(bindGroupIndex)
-	if int(bindGroupIndex) < len(groupMappings) {
-		cbvIdx = groupMappings[bindGroupIndex].cbvSrvUavIndex
-	}
-
-	// Set CBV/SRV/UAV descriptor table (includes sampler index buffer SRV).
-	if bg.gpuDescHandle.Ptr != 0 && cbvIdx >= 0 {
-		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
-		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
-		}
 	}
 }
 

@@ -91,6 +91,8 @@ func TestDXILShaderModelRefusal(t *testing.T) {
 // module compiled for one pipeline layout must never hit an entry made for
 // another (BUG-DX12-SHADER-LAYOUT-001).
 func TestDXILCacheSourceHoldsBindings(t *testing.T) {
+	// Fresh pointers on every call: the key must encode them by value.
+	index := func(i uint32) *uint32 { return &i }
 	base := func() dxil.Options {
 		return dxil.Options{
 			ShaderModel: backend.ShaderModel{Major: 6, Minor: 0},
@@ -98,10 +100,13 @@ func TestDXILCacheSourceHoldsBindings(t *testing.T) {
 				{Group: 0, Binding: 0}: {Register: 0},
 				{Group: 1, Binding: 0}: {Register: 1},
 				{Group: 1, Binding: 3}: {Register: 2},
+				{Group: 2, Binding: 0}: {Register: 0, DynamicStorageBufferOffsetsIndex: index(0), DynamicStorageBufferSizeIndex: index(1)},
+				{Group: 2, Binding: 1}: {Register: 6, RestrictIndexing: true},
 			},
-			SamplerBufferBindingMap: map[uint32]dxil.BindTarget{0: {Register: 4}, 1: {Register: 5}},
-			SamplerHeapTargets:      &dxil.SamplerHeapBindTargets{ComparisonSamplers: dxil.BindTarget{Register: 2048}},
-			SpecialConstantsBinding: &dxil.BindTarget{Register: 3},
+			SamplerBufferBindingMap:            map[uint32]dxil.BindTarget{0: {Register: 4}, 1: {Register: 5}},
+			SamplerHeapTargets:                 &dxil.SamplerHeapBindTargets{ComparisonSamplers: dxil.BindTarget{Register: 2048}},
+			SpecialConstantsBinding:            &dxil.BindTarget{Register: 3},
+			DynamicStorageBufferOffsetsTargets: map[uint32]dxil.OffsetsBindTarget{2: {Register: 7, Size: 2}},
 		}
 	}
 	want := base()
@@ -120,6 +125,18 @@ func TestDXILCacheSourceHoldsBindings(t *testing.T) {
 		},
 		"space": func(o *dxil.Options) {
 			o.BindingMap[ir.ResourceBinding{Group: 1, Binding: 0}] = dxil.BindTarget{Space: 1, Register: 1}
+		},
+		"restrict": func(o *dxil.Options) {
+			o.BindingMap[ir.ResourceBinding{Group: 2, Binding: 1}] = dxil.BindTarget{Register: 6}
+		},
+		"dynamic offset index": func(o *dxil.Options) {
+			o.BindingMap[ir.ResourceBinding{Group: 2, Binding: 0}] = dxil.BindTarget{DynamicStorageBufferOffsetsIndex: index(1), DynamicStorageBufferSizeIndex: index(1)}
+		},
+		"dynamic size index": func(o *dxil.Options) {
+			o.BindingMap[ir.ResourceBinding{Group: 2, Binding: 0}] = dxil.BindTarget{DynamicStorageBufferOffsetsIndex: index(0)}
+		},
+		"offsets target": func(o *dxil.Options) {
+			o.DynamicStorageBufferOffsetsTargets[2] = dxil.OffsetsBindTarget{Register: 8, Size: 2}
 		},
 		"sampler buffer":   func(o *dxil.Options) { o.SamplerBufferBindingMap[1] = dxil.BindTarget{Register: 6} },
 		"sampler heaps":    func(o *dxil.Options) { o.SamplerHeapTargets.ComparisonSamplers.Register = 1024 },

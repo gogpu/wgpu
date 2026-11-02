@@ -1796,6 +1796,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			case gputypes.BufferBindingTypeReadOnlyStorage:
 				entries[i].Type = BindingTypeReadOnlyStorageBuffer
 			}
+			entries[i].HasDynamicOffset = entry.Buffer.HasDynamicOffset
 		case entry.Sampler != nil:
 			if entry.Sampler.Type == gputypes.SamplerBindingTypeComparison {
 				entries[i].Type = BindingTypeComparisonSampler
@@ -1808,6 +1809,12 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			entries[i].Type = BindingTypeStorageTexture
 		}
 	}
+
+	// Binding order: SetBindGroup's dynamic offsets come in binding order
+	// (WebGPU), and the root parameters of the dynamic buffers and the
+	// descriptor table follow the entries. Rust wgpu-core hands the HAL its
+	// entries sorted; this HAL does not rely on the caller's order.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Binding < entries[j].Binding })
 
 	return &BindGroupLayout{
 		entries: entries,
@@ -1844,10 +1851,12 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 
 	// Classify entries into CBV/SRV/UAV vs Sampler, in layout order so the
 	// descriptor table matches the root signature ranges.
-	viewEntries, samplerPoolIndices, err := orderBindGroupEntries(layout, desc.Entries)
+	ordered, err := orderBindGroupEntries(layout, desc.Entries)
 	if err != nil {
 		return nil, err
 	}
+	viewEntries, samplerPoolIndices := ordered.views, ordered.samplerPoolIndices
+	bg.dynamicBuffers = ordered.dynamicBuffers
 
 	// Collect resource references for DX12 command-local state tracking. The
 	// descriptor table itself does not carry enough information to emit state
@@ -2232,9 +2241,24 @@ func hlslToDXILBindingMap(m map[ir.ResourceBinding]hlsl.BindTarget) dxil.Binding
 	out := make(dxil.BindingMap, len(m))
 	for k, v := range m {
 		out[ir.ResourceBinding{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
-			Space:    v.Space,
-			Register: v.Register,
+			Space:                            v.Space,
+			Register:                         v.Register,
+			BindingArraySize:                 v.BindingArraySize,
+			RestrictIndexing:                 v.RestrictIndexing,
+			DynamicStorageBufferOffsetsIndex: v.DynamicStorageBufferOffsetsIndex,
+			DynamicStorageBufferSizeIndex:    v.DynamicStorageBufferSizeIndex,
 		}
+	}
+	return out
+}
+
+func hlslToDXILOffsetsTargets(m map[uint32]hlsl.OffsetsBindTarget) map[uint32]dxil.OffsetsBindTarget {
+	if m == nil {
+		return nil
+	}
+	out := make(map[uint32]dxil.OffsetsBindTarget, len(m))
+	for group, v := range m {
+		out[group] = dxil.OffsetsBindTarget{Space: v.Space, Register: v.Register, Size: v.Size}
 	}
 	return out
 }
@@ -2363,6 +2387,7 @@ func (d *Device) compileStageDXIL(cacheSource string, irModule *ir.Module, nagaO
 	opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
 	opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
 	opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
+	opts.DynamicStorageBufferOffsetsTargets = hlslToDXILOffsetsTargets(nagaOpts.DynamicStorageBufferOffsetsTargets)
 	if sc := nagaOpts.SpecialConstantsBinding; sc != nil {
 		opts.SpecialConstantsBinding = &dxil.BindTarget{Space: sc.Space, Register: sc.Register}
 	}
@@ -2434,16 +2459,34 @@ func dxilDumpPattern(stage ir.ShaderStage, entryPoint string) string {
 // take the place of the HLSL text that keys the FXC path, so a module
 // compiled for one pipeline layout never hits an entry made for another
 // (BUG-DX12-SHADER-LAYOUT-001). Every option the HAL sets must be encoded
-// here. fmt prints maps in key order, so the encoding is deterministic.
+// here. fmt prints maps in key order, so the encoding is deterministic; the
+// bind targets hold pointers, which bindTargetKey encodes by value.
 func dxilCacheSource(source string, opts *dxil.Options) string {
 	var b strings.Builder
 	b.WriteString(source)
 	fmt.Fprintf(&b, "\x00sm=%v;bounds=%v;zero=%v;bindings=%v;samplerBuffers=%v;samplerHeaps=%s;special=%s;immediates=%s;dynamicOffsets=%v;fake=%v",
 		opts.ShaderModel, opts.BoundsCheckPolicies, opts.ZeroInitializeWorkgroupMemory,
-		opts.BindingMap, opts.SamplerBufferBindingMap,
+		bindTargetKeys(opts.BindingMap), bindTargetKeys(opts.SamplerBufferBindingMap),
 		optionalKey(opts.SamplerHeapTargets), optionalKey(opts.SpecialConstantsBinding), optionalKey(opts.ImmediatesTarget),
 		opts.DynamicStorageBufferOffsetsTargets, opts.FakeMissingBindings)
 	return b.String()
+}
+
+// bindTargetKeys returns m with each bind target encoded by bindTargetKey,
+// for fmt to print in key order.
+func bindTargetKeys[K comparable](m map[K]dxil.BindTarget) map[K]string {
+	out := make(map[K]string, len(m))
+	for k, v := range m {
+		out[k] = bindTargetKey(&v)
+	}
+	return out
+}
+
+// bindTargetKey encodes a bind target by value, its optional fields
+// included: fmt would print their pointers.
+func bindTargetKey(t *dxil.BindTarget) string {
+	return fmt.Sprintf("%d/%d/%s/%t/%s/%s", t.Space, t.Register, optionalKey(t.BindingArraySize), t.RestrictIndexing,
+		optionalKey(t.DynamicStorageBufferOffsetsIndex), optionalKey(t.DynamicStorageBufferSizeIndex))
 }
 
 // optionalKey encodes an optional option by value: "-" when it is unset.
