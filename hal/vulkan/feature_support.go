@@ -106,21 +106,20 @@ type extendedFeatureSupport struct {
 // them (vulkan/adapter.rs, PhysicalDeviceFeatures::to_wgpu): with subgroup
 // size control (Vulkan 1.3 or VK_EXT_subgroup_size_control) and every
 // operation class WGSL needs, SUBGROUP where compute and fragment shaders
-// support subgroups and SUBGROUP_VERTEX where vertex shaders do.
+// support subgroups and SUBGROUP_VERTEX where vertex shaders do, and
+// SUBGROUP_BARRIER whenever the operations are supported.
 //
-// Deviation from Rust, which also offers SUBGROUP_BARRIER here: naga, like
-// Rust naga (back/spv/writer.rs, write_control_barrier), compiles
-// subgroupBarrier to OpControlBarrier with AcquireRelease|SubgroupMemory
-// semantics, which is invalid SPIR-V for Vulkan: the validation layer
-// rejects it (VUID-StandaloneSpirv-MemorySemantics-10870). The feature is
-// offered once naga emits a valid barrier and the readback test
-// (hal/allbackends TestFeatureSubgroupBarrier) passes clean.
+// SUBGROUP_BARRIER needs naga v0.21.1 or later: earlier naga (and Rust naga at
+// the time of writing) compiled subgroupBarrier to OpControlBarrier with
+// AcquireRelease|SubgroupMemory semantics, which the Vulkan validation layer
+// rejects (VUID-StandaloneSpirv-MemorySemantics-10870).
 func (s *extendedFeatureSupport) subgroupFeatures() gputypes.Features {
 	if s.subgroup == nil || !s.hasSubgroupSizeControl() ||
 		s.subgroup.SupportedOperations&requiredSubgroupOperations != requiredSubgroupOperations {
 		return 0
 	}
 	var result gputypes.Features
+	result.Insert(gputypes.FeatureSubgroupBarrier)
 	if s.subgroup.SupportedStages&subgroupStagesComputeFragment == subgroupStagesComputeFragment {
 		result.Insert(gputypes.FeatureSubgroupOperations)
 	}

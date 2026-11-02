@@ -174,27 +174,27 @@ func TestSubgroupFeatures(t *testing.T) {
 		{
 			"size control from Vulkan 1.3",
 			extendedFeatureSupport{apiVersion: vkMakeVersion(1, 3, 0), subgroup: props(all, requiredSubgroupOperations)},
-			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex),
+			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex, gputypes.FeatureSubgroupBarrier),
 		},
 		{
 			"all stages",
 			extendedFeatureSupport{extensions: sizeControl, subgroup: props(all, requiredSubgroupOperations)},
-			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex),
+			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupVertex, gputypes.FeatureSubgroupBarrier),
 		},
 		{
 			"compute and fragment only",
 			extendedFeatureSupport{extensions: sizeControl, subgroup: props(subgroupStagesComputeFragment, requiredSubgroupOperations)},
-			features(gputypes.FeatureSubgroupOperations),
+			features(gputypes.FeatureSubgroupOperations, gputypes.FeatureSubgroupBarrier),
 		},
 		{
 			"compute only",
 			extendedFeatureSupport{extensions: sizeControl, subgroup: props(vk.ShaderStageFlags(vk.ShaderStageComputeBit), requiredSubgroupOperations)},
-			0,
+			features(gputypes.FeatureSubgroupBarrier), // Rust: SUBGROUP_BARRIER whenever the operations are supported
 		},
 		{
 			"vertex without fragment",
 			extendedFeatureSupport{extensions: sizeControl, subgroup: props(vk.ShaderStageFlags(vk.ShaderStageVertexBit|vk.ShaderStageComputeBit), requiredSubgroupOperations)},
-			features(gputypes.FeatureSubgroupVertex),
+			features(gputypes.FeatureSubgroupVertex, gputypes.FeatureSubgroupBarrier),
 		},
 		{
 			"no quad operations",
