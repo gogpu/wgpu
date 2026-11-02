@@ -1223,7 +1223,9 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 // SetBindGroup sets a bind group.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || e.encoder.active == 0 {
+	// vkCmdBindDescriptorSets needs the pipeline layout. Core binds groups
+	// only after SetPipeline; a direct HAL caller without one gets no bind.
+	if !ok || e.encoder.active == 0 || e.pipeline == nil {
 		return
 	}
 
