@@ -36,3 +36,85 @@ func ValidateTextureBufferCopy(format gputypes.TextureFormat, sampleCount uint32
 	}
 	return nil
 }
+
+// CopyBufferAlignment is the alignment of the size and both offsets of a
+// buffer-to-buffer copy (WebGPU copyBufferToBuffer; Rust
+// wgt::COPY_BUFFER_ALIGNMENT).
+const CopyBufferAlignment = 4
+
+// BufferCopyEndpoint describes one side of a buffer-to-buffer copy.
+type BufferCopyEndpoint struct {
+	// Usage is the usage the buffer was created with.
+	Usage gputypes.BufferUsage
+	// Size is the buffer size in bytes.
+	Size uint64
+	// Offset is the byte offset the copy starts at.
+	Offset uint64
+}
+
+// ValidateBufferToBufferCopy checks a copyBufferToBuffer command recorded on a
+// command encoder, in the order of Rust wgpu-core
+// command/transfer.rs copy_buffer_to_buffer, which covers the W3C spec's valid
+// usage list: the buffers differ, the source has COPY_SRC and the destination
+// COPY_DST, the source offset is inside its buffer, size and both offsets are
+// multiples of CopyBufferAlignment, and both ranges fit their buffers. The
+// range checks compare against the remaining bytes rather than adding offset
+// and size, so a huge size cannot wrap around. sameBuffer reports that src and
+// dst are one buffer.
+func ValidateBufferToBufferCopy(sameBuffer bool, src, dst BufferCopyEndpoint, size uint64) error {
+	if sameBuffer {
+		return &TransferError{Kind: TransferErrorSameSourceDestinationBuffer}
+	}
+	if !src.Usage.Contains(gputypes.BufferUsageCopySrc) {
+		return &TransferError{Kind: TransferErrorMissingBufferUsage, Side: CopySideSource, Usage: gputypes.BufferUsageCopySrc}
+	}
+	if !dst.Usage.Contains(gputypes.BufferUsageCopyDst) {
+		return &TransferError{Kind: TransferErrorMissingBufferUsage, Side: CopySideDestination, Usage: gputypes.BufferUsageCopyDst}
+	}
+	if err := validateBufferCopyStart(CopySideSource, src); err != nil {
+		return err
+	}
+	if err := validateBufferCopyAlignment(src.Offset, dst.Offset, size); err != nil {
+		return err
+	}
+	if err := validateBufferCopyEnd(CopySideSource, src, size); err != nil {
+		return err
+	}
+	if err := validateBufferCopyStart(CopySideDestination, dst); err != nil {
+		return err
+	}
+	return validateBufferCopyEnd(CopySideDestination, dst, size)
+}
+
+// validateBufferCopyAlignment checks size, source offset and destination
+// offset, in that order (Rust: UnalignedCopySize, then UnalignedBufferOffset).
+func validateBufferCopyAlignment(srcOffset, dstOffset, size uint64) error {
+	if size%CopyBufferAlignment != 0 {
+		return &TransferError{Kind: TransferErrorUnalignedCopySize, Size: size}
+	}
+	if srcOffset%CopyBufferAlignment != 0 {
+		return &TransferError{Kind: TransferErrorUnalignedBufferOffset, Offset: srcOffset, Alignment: CopyBufferAlignment}
+	}
+	if dstOffset%CopyBufferAlignment != 0 {
+		return &TransferError{Kind: TransferErrorUnalignedBufferOffset, Offset: dstOffset, Alignment: CopyBufferAlignment}
+	}
+	return nil
+}
+
+// validateBufferCopyStart checks that the copy offset is inside the buffer.
+func validateBufferCopyStart(side CopySide, e BufferCopyEndpoint) error {
+	if e.Offset > e.Size {
+		return &TransferError{Kind: TransferErrorBufferStartOffsetOverrun, Side: side, Offset: e.Offset, BufferSize: e.Size}
+	}
+	return nil
+}
+
+// validateBufferCopyEnd checks that size bytes fit after the copy offset. The
+// offset is already known to be inside the buffer, so the subtraction cannot
+// underflow.
+func validateBufferCopyEnd(side CopySide, e BufferCopyEndpoint, size uint64) error {
+	if size > e.Size-e.Offset {
+		return &TransferError{Kind: TransferErrorBufferEndOffsetOverrun, Side: side, Offset: e.Offset, Size: size, BufferSize: e.Size}
+	}
+	return nil
+}

@@ -353,6 +353,15 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source or destination buffer is released: %w", ErrReleased))
 		return
 	}
+	// WebGPU copyBufferToBuffer valid usage; Rust wgpu-core transfer.rs
+	// copy_buffer_to_buffer. An invalid copy must not reach the backend.
+	if err := core.ValidateBufferToBufferCopy(src.core == dst.core,
+		core.BufferCopyEndpoint{Usage: src.Usage(), Size: src.Size(), Offset: srcOffset},
+		core.BufferCopyEndpoint{Usage: dst.Usage(), Size: dst.Size(), Offset: dstOffset},
+		size); err != nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: %w", err))
+		return
+	}
 	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{
 		{buffer: src, usage: track.BufferUsesCopySrc},
 		{buffer: dst, usage: track.BufferUsesCopyDst},

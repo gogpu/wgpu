@@ -78,3 +78,88 @@ func TestBufferTextureCopyBytesPerRowAlignment(t *testing.T) {
 		}
 	}
 }
+
+// TestCopyBufferToBufferValidation: CopyBufferToBuffer enforces the WebGPU
+// copyBufferToBuffer valid usage list (Rust wgpu-core transfer.rs
+// copy_buffer_to_buffer); Finish reports a *core.TransferError of the kind of
+// the first failed check (P1-VAL-014).
+func TestCopyBufferToBufferValidation(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	newBuffer := func(size uint64, usage gputypes.BufferUsage) *wgpu.Buffer {
+		t.Helper()
+		buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{Size: size, Usage: usage})
+		if err != nil {
+			t.Fatalf("CreateBuffer: %v", err)
+		}
+		t.Cleanup(buf.Release)
+		return buf
+	}
+	const copyBoth = wgpu.BufferUsageCopySrc | wgpu.BufferUsageCopyDst
+	src := newBuffer(64, copyBoth)
+	dst := newBuffer(64, copyBoth)
+	storageOnly := newBuffer(64, wgpu.BufferUsageStorage|wgpu.BufferUsageCopyDst)
+	srcOnly := newBuffer(64, wgpu.BufferUsageCopySrc)
+
+	const maxU64 = ^uint64(0)
+	tests := []struct {
+		name       string
+		src, dst   *wgpu.Buffer
+		srcOffset  uint64
+		dstOffset  uint64
+		size       uint64
+		wantKind   core.TransferErrorKind
+		wantSide   core.CopySide
+		wantFailed bool
+	}{
+		{name: "valid", src: src, dst: dst, size: 64},
+		{name: "valid with offsets", src: src, dst: dst, srcOffset: 8, dstOffset: 16, size: 32},
+		{name: "same buffer", src: src, dst: src, size: 16,
+			wantKind: core.TransferErrorSameSourceDestinationBuffer, wantFailed: true},
+		{name: "source without COPY_SRC", src: storageOnly, dst: dst, size: 16,
+			wantKind: core.TransferErrorMissingBufferUsage, wantSide: core.CopySideSource, wantFailed: true},
+		{name: "destination without COPY_DST", src: src, dst: srcOnly, size: 16,
+			wantKind: core.TransferErrorMissingBufferUsage, wantSide: core.CopySideDestination, wantFailed: true},
+		{name: "size not a multiple of 4", src: src, dst: dst, size: 6,
+			wantKind: core.TransferErrorUnalignedCopySize, wantFailed: true},
+		{name: "source offset not a multiple of 4", src: src, dst: dst, srcOffset: 2, size: 8,
+			wantKind: core.TransferErrorUnalignedBufferOffset, wantFailed: true},
+		{name: "destination offset not a multiple of 4", src: src, dst: dst, dstOffset: 6, size: 8,
+			wantKind: core.TransferErrorUnalignedBufferOffset, wantFailed: true},
+		{name: "source range past the end", src: src, dst: dst, srcOffset: 48, size: 20,
+			wantKind: core.TransferErrorBufferEndOffsetOverrun, wantSide: core.CopySideSource, wantFailed: true},
+		{name: "destination range past the end", src: src, dst: dst, dstOffset: 48, size: 20,
+			wantKind: core.TransferErrorBufferEndOffsetOverrun, wantSide: core.CopySideDestination, wantFailed: true},
+		{name: "source offset past the end", src: src, dst: dst, srcOffset: 68, size: 0,
+			wantKind: core.TransferErrorBufferStartOffsetOverrun, wantSide: core.CopySideSource, wantFailed: true},
+		{name: "size overflows the offset", src: src, dst: dst, srcOffset: 8, size: maxU64 - 3,
+			wantKind: core.TransferErrorBufferEndOffsetOverrun, wantSide: core.CopySideSource, wantFailed: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			enc, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatalf("CreateCommandEncoder: %v", err)
+			}
+			enc.CopyBufferToBuffer(tc.src, tc.srcOffset, tc.dst, tc.dstOffset, tc.size)
+			cmd, err := enc.Finish()
+			if !tc.wantFailed {
+				if err != nil {
+					t.Fatalf("Finish: %v", err)
+				}
+				cmd.Release()
+				return
+			}
+			var te *core.TransferError
+			if !errors.As(err, &te) {
+				t.Fatalf("Finish error = %v (%T), want *core.TransferError", err, err)
+			}
+			if te.Kind != tc.wantKind || te.Side != tc.wantSide {
+				t.Fatalf("TransferError kind %d side %v, want kind %d side %v (%v)",
+					te.Kind, te.Side, tc.wantKind, tc.wantSide, err)
+			}
+		})
+	}
+}

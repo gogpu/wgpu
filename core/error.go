@@ -1337,15 +1337,60 @@ const (
 	// TransferErrorInvalidSampleCount indicates a copy of a multisampled
 	// texture (Rust TransferError::InvalidSampleCount).
 	TransferErrorInvalidSampleCount
+	// TransferErrorSameSourceDestinationBuffer indicates a buffer-to-buffer
+	// copy whose source and destination are the same buffer (Rust
+	// TransferError::SameSourceDestinationBuffer).
+	TransferErrorSameSourceDestinationBuffer
+	// TransferErrorMissingBufferUsage indicates a copy endpoint buffer that
+	// was created without the usage the copy needs (Rust
+	// TransferError::MissingBufferUsage).
+	TransferErrorMissingBufferUsage
+	// TransferErrorUnalignedCopySize indicates a buffer-to-buffer copy size
+	// that is not a multiple of CopyBufferAlignment (Rust
+	// TransferError::UnalignedCopySize).
+	TransferErrorUnalignedCopySize
+	// TransferErrorBufferStartOffsetOverrun indicates a copy offset past the
+	// end of its buffer (Rust TransferError::BufferStartOffsetOverrun).
+	TransferErrorBufferStartOffsetOverrun
+	// TransferErrorBufferEndOffsetOverrun indicates a copy range that ends
+	// past the end of its buffer (Rust TransferError::BufferEndOffsetOverrun).
+	TransferErrorBufferEndOffsetOverrun
 )
 
+// CopySide names the endpoint of a copy an error is about (Rust CopySide).
+type CopySide int
+
+const (
+	// CopySideSource is the buffer or texture a copy reads from.
+	CopySideSource CopySide = iota
+	// CopySideDestination is the buffer or texture a copy writes to.
+	CopySideDestination
+)
+
+// String returns the lowercase name of the side.
+func (s CopySide) String() string {
+	if s == CopySideDestination {
+		return "destination"
+	}
+	return "source"
+}
+
 // TransferError represents an invalid copy command on a command encoder.
+// Which fields are set depends on Kind.
 type TransferError struct {
 	Kind        TransferErrorKind
 	BytesPerRow uint32
 	Offset      uint64
 	Alignment   uint32
 	SampleCount uint32
+	// Side is the endpoint the error is about (usage, offset and overrun kinds).
+	Side CopySide
+	// Size is the copy size in bytes (size and end-overrun kinds).
+	Size uint64
+	// BufferSize is the size of the endpoint buffer (overrun kinds).
+	BufferSize uint64
+	// Usage is the usage the endpoint buffer lacks (TransferErrorMissingBufferUsage).
+	Usage gputypes.BufferUsage
 }
 
 // Error implements the error interface.
@@ -1357,6 +1402,17 @@ func (e *TransferError) Error() string {
 		return fmt.Sprintf("copy: buffer offset %d is not a multiple of %d", e.Offset, e.Alignment)
 	case TransferErrorInvalidSampleCount:
 		return fmt.Sprintf("copy: texture sample count %d, a buffer-texture copy needs 1", e.SampleCount)
+	case TransferErrorSameSourceDestinationBuffer:
+		return "copy: source and destination are the same buffer"
+	case TransferErrorMissingBufferUsage:
+		return fmt.Sprintf("copy: %s buffer is missing usage %#x", e.Side, e.Usage)
+	case TransferErrorUnalignedCopySize:
+		return fmt.Sprintf("copy: size %d is not a multiple of %d", e.Size, CopyBufferAlignment)
+	case TransferErrorBufferStartOffsetOverrun:
+		return fmt.Sprintf("copy: %s offset %d is past the end of the %d-byte buffer", e.Side, e.Offset, e.BufferSize)
+	case TransferErrorBufferEndOffsetOverrun:
+		return fmt.Sprintf("copy: %s range of %d bytes at offset %d overruns the %d-byte buffer",
+			e.Side, e.Size, e.Offset, e.BufferSize)
 	default:
 		return "copy: unknown error"
 	}
