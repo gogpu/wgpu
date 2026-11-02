@@ -996,6 +996,10 @@ func (cb *CommandBuffer) halBufferList() []hal.CommandBuffer {
 func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regions []TextureCopy) bool {
 	for i := range regions {
 		r := &regions[i]
+		if r.Source.Texture == nil || r.Destination.Texture == nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region %d: source or destination texture is nil", i))
+			return false
+		}
 		srcView, srcOK := src.copyView(r.Source.MipLevel, r.Source.Origin.Z, r.Source.Aspect)
 		dstView, dstOK := dst.copyView(r.Destination.MipLevel, r.Destination.Origin.Z, r.Destination.Aspect)
 		if !srcOK || !dstOK {
