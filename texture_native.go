@@ -11,9 +11,12 @@ import (
 
 // Texture represents a GPU texture.
 type Texture struct {
-	hal          hal.Texture
-	device       *Device
-	format       gputypes.TextureFormat
+	hal    hal.Texture
+	device *Device
+	format gputypes.TextureFormat
+	// viewFormats are the TextureDescriptor.ViewFormats the texture was created
+	// with: the formats a view may reinterpret it as (CreateTextureView).
+	viewFormats  []gputypes.TextureFormat
 	released     bool
 	surface      *core.Surface
 	surfaceLease uint64

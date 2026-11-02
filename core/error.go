@@ -321,6 +321,13 @@ const (
 	CreateTextureErrorInvalidDimension
 	// CreateTextureErrorHAL indicates the HAL backend failed to create the texture.
 	CreateTextureErrorHAL
+	// CreateTextureErrorInvalidViewFormat indicates a view format that differs
+	// from the texture format by more than the sRGB suffix (Rust
+	// CreateTextureError::InvalidViewFormat).
+	CreateTextureErrorInvalidViewFormat
+	// CreateTextureErrorMissingDownlevelFlags indicates a descriptor that needs
+	// a downlevel flag the device lacks (Rust CreateTextureError::MissingDownlevelFlags).
+	CreateTextureErrorMissingDownlevelFlags
 )
 
 // CreateTextureError represents an error during texture creation.
@@ -335,6 +342,12 @@ type CreateTextureError struct {
 	MaxMips          uint32
 	RequestedSamples uint32
 	HALError         error
+	// Format is the texture format and ViewFormat the offending view format
+	// (CreateTextureErrorInvalidViewFormat).
+	Format     gputypes.TextureFormat
+	ViewFormat gputypes.TextureFormat
+	// Cause is the downlevel error (CreateTextureErrorMissingDownlevelFlags).
+	Cause error
 }
 
 // Error implements the error interface.
@@ -381,19 +394,64 @@ func (e *CreateTextureError) Error() string {
 	case CreateTextureErrorHAL:
 		return fmt.Sprintf("texture %q: HAL error: %v", label, e.HALError)
 	default:
+		return e.viewFormatText(label)
+	}
+}
+
+// viewFormatText describes the view format kinds of CreateTextureError.
+func (e *CreateTextureError) viewFormatText(label string) string {
+	switch e.Kind {
+	case CreateTextureErrorInvalidViewFormat:
+		return fmt.Sprintf("texture %q: view format %v is not compatible with texture format %v (they may differ only by the sRGB suffix)",
+			label, e.ViewFormat, e.Format)
+	case CreateTextureErrorMissingDownlevelFlags:
+		return fmt.Sprintf("texture %q: %v", label, e.Cause)
+	default:
 		return fmt.Sprintf("texture %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or downlevel error, if any.
 func (e *CreateTextureError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateTextureError returns true if the error is a CreateTextureError.
 func IsCreateTextureError(err error) bool {
 	var cte *CreateTextureError
 	return errors.As(err, &cte)
+}
+
+// CreateTextureViewErrorKind represents the type of texture view creation error.
+type CreateTextureViewErrorKind int
+
+const (
+	// CreateTextureViewErrorFormatReinterpretation indicates a view format that is
+	// neither the texture format nor one of its view formats (Rust
+	// CreateTextureViewError::FormatReinterpretation).
+	CreateTextureViewErrorFormatReinterpretation CreateTextureViewErrorKind = iota
+)
+
+// CreateTextureViewError represents an error during texture view creation.
+type CreateTextureViewError struct {
+	Kind CreateTextureViewErrorKind
+	// TextureFormat is the texture's format and ViewFormat the requested one.
+	TextureFormat gputypes.TextureFormat
+	ViewFormat    gputypes.TextureFormat
+}
+
+// Error implements the error interface.
+func (e *CreateTextureViewError) Error() string {
+	switch e.Kind {
+	case CreateTextureViewErrorFormatReinterpretation:
+		return fmt.Sprintf("texture view: format %v is not the texture format %v and was not listed in the texture's view formats",
+			e.ViewFormat, e.TextureFormat)
+	default:
+		return "texture view: unknown error"
+	}
 }
 
 // =============================================================================

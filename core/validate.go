@@ -107,6 +107,11 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 		return err
 	}
 
+	// View formats (Rust validate_texture_descriptor_inner).
+	if err := validateTextureViewFormats(label, desc.Format, desc.ViewFormats, features); err != nil {
+		return err
+	}
+
 	// VAL-C14..C18: Usage flag compatibility at creation.
 	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Format); err != nil {
 		var cte *CreateTextureError
