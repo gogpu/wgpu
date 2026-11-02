@@ -876,7 +876,8 @@ func (d *Device) logAllocationNodes(node *d3d12.D3D12DREDAllocationNode1, maxNod
 }
 
 // DrainDebugMessages reads and logs all pending messages from the D3D12 InfoQueue.
-// Returns the number of messages drained. No-op if debug layer is off.
+// Returns the number of messages logged; ignored ones (isIgnoredDebugMessage)
+// are dropped. No-op if debug layer is off.
 func (d *Device) DrainDebugMessages() int {
 	if d.infoQueue == nil {
 		return 0
@@ -887,16 +888,29 @@ func (d *Device) DrainDebugMessages() int {
 		return 0
 	}
 
+	logged := 0
 	for i := uint64(0); i < count; i++ {
 		msg := d.infoQueue.GetMessage(i)
-		if msg == nil {
+		if msg == nil || isIgnoredDebugMessage(msg.Severity, msg.ID) {
 			continue
 		}
 		hal.Logger().Warn("dx12: debug message", "severity", msg.Severity, "id", msg.ID, "msg", msg.Description())
+		logged++
 	}
 	d.infoQueue.ClearStoredMessages()
 
-	return int(count)
+	return logged
+}
+
+// isIgnoredDebugMessage reports the debug-layer messages that carry no
+// information for WebGPU, as Rust wgpu-hal drops them
+// (wgpu-hal/src/auxil/dxgi/exception.rs): the warnings that a clear value
+// differs from the optimized clear value given at resource creation (#820,
+// #821). WebGPU has no optimized clear values, so every clear would warn.
+func isIgnoredDebugMessage(severity d3d12.D3D12MessageSeverity, id int32) bool {
+	return severity == d3d12.D3D12MessageSeverityWarning &&
+		(id == d3d12.D3D12MessageIDClearRenderTargetViewMismatchingClearValue ||
+			id == d3d12.D3D12MessageIDClearDepthStencilViewMismatchingClearValue)
 }
 
 // cleanup releases all device resources without clearing the finalizer.

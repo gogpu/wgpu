@@ -1660,6 +1660,12 @@ func (s D3D12MessageSeverity) String() string {
 	}
 }
 
+// D3D12_MESSAGE_ID values the backend handles by number (d3d12sdklayers.h).
+const (
+	D3D12MessageIDClearRenderTargetViewMismatchingClearValue int32 = 820
+	D3D12MessageIDClearDepthStencilViewMismatchingClearValue int32 = 821
+)
+
 // D3D12Message represents a debug message from the D3D12 runtime.
 // Layout must match the native D3D12_MESSAGE struct.
 type D3D12Message struct {
