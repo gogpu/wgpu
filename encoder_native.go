@@ -5,6 +5,7 @@ package wgpu
 import (
 	"fmt"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
@@ -407,7 +408,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is released: %w", ErrReleased))
 		return
 	}
-	if !e.validateBufferTextureCopies("CopyTextureToBuffer", src, regions) {
+	if !e.validateBufferTextureCopies("CopyTextureToBuffer", core.CopySideSource, src, dst, regions) {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -459,6 +460,9 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region texture is released: %w", ErrReleased))
 			return
 		}
+	}
+	if !e.validateTextureToTextureCopies(src, dst, regions) {
+		return
 	}
 	raw := e.core.RawEncoder()
 	if raw == nil {
@@ -545,7 +549,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is released: %w", ErrReleased))
 		return
 	}
-	if !e.validateBufferTextureCopies("CopyBufferToTexture", dst, regions) {
+	if !e.validateBufferTextureCopies("CopyBufferToTexture", core.CopySideDestination, dst, src, regions) {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -984,16 +988,66 @@ func (cb *CommandBuffer) halBufferList() []hal.CommandBuffer {
 	return cb.core.HalBufferList()
 }
 
-// validateBufferTextureCopies checks the buffer layout of every region of a
-// buffer-texture copy (core.ValidateTextureBufferCopy: one sample, aligned
-// offset, bytesPerRow a multiple of 256). Returns false, with the error
-// recorded on the encoder, for the first invalid region.
-func (e *CommandEncoder) validateBufferTextureCopies(op string, texture *Texture, regions []BufferTextureCopy) bool {
+// validateTextureToTextureCopies checks every region of a texture-to-texture
+// copy with core.ValidateTextureToTextureCopy: mip levels, aspects, overlap
+// inside one texture, sample counts and the COPY_SRC / COPY_DST usages.
+// Textures without a core texture (test stubs) are not validated. Returns
+// false, with the error recorded on the encoder, for the first invalid region.
+func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regions []TextureCopy) bool {
+	for i := range regions {
+		r := &regions[i]
+		srcView, srcOK := src.copyView(r.Source.MipLevel, r.Source.Origin.Z, r.Source.Aspect)
+		dstView, dstOK := dst.copyView(r.Destination.MipLevel, r.Destination.Origin.Z, r.Destination.Aspect)
+		if !srcOK || !dstOK {
+			continue
+		}
+		sameTexture := src.coreTexture == dst.coreTexture
+		if err := core.ValidateTextureToTextureCopy(sameTexture, srcView, dstView, r.Size.DepthOrArrayLayers); err != nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region %d: %w", i, err))
+			return false
+		}
+	}
+	return true
+}
+
+// copyView describes the part of the texture a copy touches, for the core copy
+// validation. The texture properties come from its core texture; ok is false
+// for a texture without one (test stubs), which has nothing to validate
+// against.
+func (t *Texture) copyView(mipLevel, originZ uint32, aspect gputypes.TextureAspect) (view core.TextureCopyView, ok bool) {
+	if t.coreTexture == nil {
+		return core.TextureCopyView{}, false
+	}
+	return core.TextureCopyView{
+		Format:        t.coreTexture.Format(),
+		Usage:         t.coreTexture.Usage(),
+		SampleCount:   t.coreTexture.SampleCount(),
+		MipLevelCount: t.coreTexture.MipLevelCount(),
+		Dimension:     t.coreTexture.Dimension(),
+		MipLevel:      mipLevel,
+		OriginZ:       originZ,
+		Aspect:        aspect,
+	}, true
+}
+
+// validateBufferTextureCopies checks every region of a buffer-texture copy:
+// the usages, mip level, aspect and format of the texture and the buffer
+// (core.ValidateBufferTextureCopyTexture), then the buffer layout
+// (core.ValidateTextureBufferCopy: one sample, aligned offset, bytesPerRow a
+// multiple of 256). side is the texture's side of the copy. Returns false,
+// with the error recorded on the encoder, for the first invalid region.
+func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySide, texture *Texture, buffer *Buffer, regions []BufferTextureCopy) bool {
 	sampleCount := uint32(1)
 	if texture.coreTexture != nil {
 		sampleCount = texture.coreTexture.SampleCount()
 	}
 	for i := range regions {
+		if view, ok := texture.copyView(regions[i].TextureBase.MipLevel, regions[i].TextureBase.Origin.Z, regions[i].TextureBase.Aspect); ok {
+			if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage()); err != nil {
+				e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
+				return false
+			}
+		}
 		layout := &regions[i].BufferLayout
 		if err := core.ValidateTextureBufferCopy(texture.format, sampleCount, layout.Offset, layout.BytesPerRow); err != nil {
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))

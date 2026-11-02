@@ -1355,6 +1355,48 @@ const (
 	// TransferErrorBufferEndOffsetOverrun indicates a copy range that ends
 	// past the end of its buffer (Rust TransferError::BufferEndOffsetOverrun).
 	TransferErrorBufferEndOffsetOverrun
+	// TransferErrorMissingTextureUsage indicates a copy endpoint texture that
+	// was created without COPY_SRC or COPY_DST (Rust
+	// TransferError::MissingTextureUsage).
+	TransferErrorMissingTextureUsage
+	// TransferErrorInvalidTextureMipLevel indicates a mip level the texture
+	// does not have (Rust TransferError::InvalidTextureMipLevel).
+	TransferErrorInvalidTextureMipLevel
+	// TransferErrorInvalidTextureAspect indicates an aspect the texture's
+	// format does not have (Rust TransferError::InvalidTextureAspect).
+	TransferErrorInvalidTextureAspect
+	// TransferErrorCopyAspectNotOne indicates a buffer-texture copy that does
+	// not name a single aspect (Rust TransferError::CopyAspectNotOne).
+	TransferErrorCopyAspectNotOne
+	// TransferErrorCopySrcMissingAspects indicates a texture-to-texture copy
+	// source that does not name every aspect of its format (Rust
+	// TransferError::CopySrcMissingAspects).
+	TransferErrorCopySrcMissingAspects
+	// TransferErrorCopyDstMissingAspects is TransferErrorCopySrcMissingAspects
+	// for the destination (Rust TransferError::CopyDstMissingAspects).
+	TransferErrorCopyDstMissingAspects
+	// TransferErrorCopyFromForbiddenTextureFormat indicates a format that can
+	// not be copied from (Rust TransferError::CopyFromForbiddenTextureFormat).
+	TransferErrorCopyFromForbiddenTextureFormat
+	// TransferErrorCopyFromForbiddenTextureFormatAspect indicates a format and
+	// aspect that can not be copied from (Rust
+	// TransferError::CopyFromForbiddenTextureFormatAspect).
+	TransferErrorCopyFromForbiddenTextureFormatAspect
+	// TransferErrorCopyToForbiddenTextureFormat indicates a format that can
+	// not be copied to (Rust TransferError::CopyToForbiddenTextureFormat).
+	TransferErrorCopyToForbiddenTextureFormat
+	// TransferErrorCopyToForbiddenTextureFormatAspect indicates a format and
+	// aspect that can not be copied to (Rust
+	// TransferError::CopyToForbiddenTextureFormatAspect).
+	TransferErrorCopyToForbiddenTextureFormatAspect
+	// TransferErrorSampleCountNotEqual indicates a texture-to-texture copy
+	// between textures of different sample counts (Rust
+	// TransferError::SampleCountNotEqual).
+	TransferErrorSampleCountNotEqual
+	// TransferErrorInvalidCopyWithinSameTexture indicates a copy whose source
+	// and destination subresources overlap in one texture (Rust
+	// TransferError::InvalidCopyWithinSameTexture).
+	TransferErrorInvalidCopyWithinSameTexture
 )
 
 // CopySide names the endpoint of a copy an error is about (Rust CopySide).
@@ -1382,7 +1424,11 @@ type TransferError struct {
 	BytesPerRow uint32
 	Offset      uint64
 	Alignment   uint32
+	// SampleCount is the texture sample count (the source's for
+	// TransferErrorSampleCountNotEqual).
 	SampleCount uint32
+	// DstSampleCount is the destination sample count (TransferErrorSampleCountNotEqual).
+	DstSampleCount uint32
 	// Side is the endpoint the error is about (usage, offset and overrun kinds).
 	Side CopySide
 	// Size is the copy size in bytes (size and end-overrun kinds).
@@ -1391,6 +1437,16 @@ type TransferError struct {
 	BufferSize uint64
 	// Usage is the usage the endpoint buffer lacks (TransferErrorMissingBufferUsage).
 	Usage gputypes.BufferUsage
+	// TextureUsage is the usage the endpoint texture lacks (TransferErrorMissingTextureUsage).
+	TextureUsage gputypes.TextureUsage
+	// MipLevel and MipLevelCount describe TransferErrorInvalidTextureMipLevel.
+	MipLevel, MipLevelCount uint32
+	// Format and Aspect describe the invalid aspect and forbidden format kinds;
+	// Aspect is also the source aspect of TransferErrorInvalidCopyWithinSameTexture.
+	Format gputypes.TextureFormat
+	Aspect gputypes.TextureAspect
+	// OriginZ, DstOriginZ and Layers describe TransferErrorInvalidCopyWithinSameTexture.
+	OriginZ, DstOriginZ, Layers uint32
 }
 
 // Error implements the error interface.
@@ -1413,6 +1469,40 @@ func (e *TransferError) Error() string {
 	case TransferErrorBufferEndOffsetOverrun:
 		return fmt.Sprintf("copy: %s range of %d bytes at offset %d overruns the %d-byte buffer",
 			e.Side, e.Size, e.Offset, e.BufferSize)
+	default:
+		return e.textureErrorText()
+	}
+}
+
+// textureErrorText is Error for the texture copy kinds.
+func (e *TransferError) textureErrorText() string {
+	switch e.Kind {
+	case TransferErrorMissingTextureUsage:
+		return fmt.Sprintf("copy: %s texture is missing usage %#x", e.Side, e.TextureUsage)
+	case TransferErrorInvalidTextureMipLevel:
+		return fmt.Sprintf("copy: mip level %d does not exist, the texture has %d", e.MipLevel, e.MipLevelCount)
+	case TransferErrorInvalidTextureAspect:
+		return fmt.Sprintf("copy: format %v has no aspect %v", e.Format, e.Aspect)
+	case TransferErrorCopyAspectNotOne:
+		return "copy: a buffer-texture copy must name a single aspect of the texture format"
+	case TransferErrorCopySrcMissingAspects:
+		return "copy: the source must name all aspects of its texture format"
+	case TransferErrorCopyDstMissingAspects:
+		return "copy: the destination must name all aspects of its texture format"
+	case TransferErrorCopyFromForbiddenTextureFormat:
+		return fmt.Sprintf("copy: copying from textures of format %v is forbidden", e.Format)
+	case TransferErrorCopyFromForbiddenTextureFormatAspect:
+		return fmt.Sprintf("copy: copying from format %v with aspect %v is forbidden", e.Format, e.Aspect)
+	case TransferErrorCopyToForbiddenTextureFormat:
+		return fmt.Sprintf("copy: copying to textures of format %v is forbidden", e.Format)
+	case TransferErrorCopyToForbiddenTextureFormatAspect:
+		return fmt.Sprintf("copy: copying to format %v with aspect %v is forbidden", e.Format, e.Aspect)
+	case TransferErrorSampleCountNotEqual:
+		return fmt.Sprintf("copy: source sample count %d differs from destination sample count %d",
+			e.SampleCount, e.DstSampleCount)
+	case TransferErrorInvalidCopyWithinSameTexture:
+		return fmt.Sprintf("copy: source and destination overlap in one texture (aspect %v, origin z %d and %d, %d layers)",
+			e.Aspect, e.OriginZ, e.DstOriginZ, e.Layers)
 	default:
 		return "copy: unknown error"
 	}
