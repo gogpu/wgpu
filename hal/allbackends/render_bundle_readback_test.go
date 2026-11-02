@@ -286,11 +286,6 @@ func TestRenderBundleAcrossPasses(t *testing.T) {
 // State::reset_bundle): a draw after it must set them again.
 func TestRenderBundleResetsPassState(t *testing.T) {
 	forEachDynamicOffsetDevice(t, 0, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		if !b.software && b.backend == gputypes.BackendDX12 {
-			t.Skip("known defect, not the bundle reset: DX12: an errored encoder releases resources before its " +
-				"command list is closed (debug layer: resource deleted prior to closing the command list); " +
-				"the reset itself is covered by TestExecuteBundlesResetsPassState in the root package")
-		}
 		rig := newBundleRig(t, device)
 		group := rig.group(t, [4]uint32{10, 0, 0, 10})
 		bundle := rig.bundle(t, rig.left, group)
