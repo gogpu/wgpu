@@ -267,30 +267,34 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 	// scope and semantics are inst.Operands[1] and [2] -- ignored in single-threaded.
 
 	pv := interp.values[ptrID]
-	if pv.Tag != TagPointer {
-		return ValUint(0)
-	}
-	ptr := pv.AsPointer()
 
 	atomicMu.Lock()
 	defer atomicMu.Unlock()
 
-	oldVal := toUint32(ptr.Val)
+	// The pointer is a storage buffer word (BufferPointer), a workgroup or
+	// function variable (Pointer) or a member of one (SubPointer); the result
+	// is written back through the same pointer so storage buffer atomics land
+	// in the buffer.
+	oldVal, ok := atomicLoad(pv)
+	if !ok {
+		return ValUint(0)
+	}
+	store := func(v Value) { interp.storeThrough(pv, v) }
 
 	switch inst.Opcode {
 	case OpAtomicIAdd:
 		if len(inst.Operands) >= 4 {
 			addVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Val = ValUint(oldVal + addVal)
+			store(ValUint(oldVal + addVal))
 		}
 	case OpAtomicISub:
 		if len(inst.Operands) >= 4 {
 			subVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Val = ValUint(oldVal - subVal)
+			store(ValUint(oldVal - subVal))
 		}
 	case OpAtomicExchange:
 		if len(inst.Operands) >= 4 {
-			ptr.Val = interp.values[inst.Operands[3]]
+			store(interp.values[inst.Operands[3]])
 		}
 	case OpAtomicCompareExchange:
 		// Operands: pointer, scope, equal_sem, unequal_sem, value, comparator
@@ -298,7 +302,7 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			newVal := toUint32(interp.values[inst.Operands[4]])
 			comparator := toUint32(interp.values[inst.Operands[5]])
 			if oldVal == comparator {
-				ptr.Val = ValUint(newVal)
+				store(ValUint(newVal))
 			}
 		}
 	case OpAtomicSMin:
@@ -306,14 +310,14 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v < old {
-				ptr.Val = ValUint(uint32(v))
+				store(ValUint(uint32(v)))
 			}
 		}
 	case OpAtomicUMin:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v < oldVal {
-				ptr.Val = ValUint(v)
+				store(ValUint(v))
 			}
 		}
 	case OpAtomicSMax:
@@ -321,31 +325,52 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v > old {
-				ptr.Val = ValUint(uint32(v))
+				store(ValUint(uint32(v)))
 			}
 		}
 	case OpAtomicUMax:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v > oldVal {
-				ptr.Val = ValUint(v)
+				store(ValUint(v))
 			}
 		}
 	case OpAtomicIIncrement:
-		ptr.Val = ValUint(oldVal + 1)
+		store(ValUint(oldVal + 1))
 	case OpAtomicIDecrement:
-		ptr.Val = ValUint(oldVal - 1)
+		store(ValUint(oldVal - 1))
 	case OpAtomicLoad:
 		// Load is just a read -- no modification.
 	case OpAtomicStore:
 		// Store is special: no return value.
 		if len(inst.Operands) >= 4 {
-			ptr.Val = interp.values[inst.Operands[3]]
+			store(interp.values[inst.Operands[3]])
 		}
 		return Value{}
 	}
 
 	return ValUint(oldVal)
+}
+
+// atomicLoad reads the 32-bit integer an atomic op's pointer points at. An
+// atomic is always a 4-byte i32 or u32, so a storage buffer word is read
+// directly. ok is false for a value that is not a pointer.
+func atomicLoad(pv Value) (uint32, bool) {
+	switch pv.Tag {
+	case TagPointer:
+		if p := pv.AsPointer(); p != nil {
+			return toUint32(p.Val), true
+		}
+	case TagSubPointer:
+		if sp := pv.AsSubPointer(); sp != nil {
+			return toUint32(subPointerLoad(sp)), true
+		}
+	case TagBufferPointer:
+		if bp := pv.AsBufferPointer(); bp != nil && uint64(bp.Offset)+4 <= uint64(len(bp.Buffer)) {
+			return binary.LittleEndian.Uint32(bp.Buffer[bp.Offset:]), true
+		}
+	}
+	return 0, false
 }
 
 // writeStorageBufferBack writes modified storage buffer values back to the
