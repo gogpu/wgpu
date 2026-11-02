@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/handletable"
 )
 
 // Device implements hal.Device for OpenGL on Linux.
@@ -45,6 +46,10 @@ type Device struct {
 	// glsl.Options.DrawParameters (gl_BaseInstanceARB, gl_DrawIDARB), as Rust
 	// sets WriterFlags::DRAW_PARAMETERS from it (gles/device.rs).
 	fullInstancing bool
+
+	// views maps TextureView.NativeHandle values back to the views, for
+	// CreateBindGroup (newBindGroup).
+	views handletable.Table[TextureView]
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -339,10 +344,13 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescriptor) (hal.TextureView, error) {
 	// Surface texture (default framebuffer) — return a view with no GL texture.
 	if st, ok := texture.(*SurfaceTexture); ok {
-		return &TextureView{
+		view := &TextureView{
 			isSurface:  true,
 			surfaceTex: st,
-		}, nil
+			device:     d,
+		}
+		view.nativeHandle = d.views.Add(view)
+		return view, nil
 	}
 
 	t, ok := texture.(*Texture)
@@ -352,6 +360,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescrip
 
 	view := &TextureView{
 		texture: t,
+		device:  d,
 	}
 	if desc != nil {
 		view.aspect = desc.Aspect
@@ -360,12 +369,16 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescrip
 		view.baseLayer = desc.BaseArrayLayer
 		view.layerCount = desc.ArrayLayerCount
 	}
+	view.nativeHandle = d.views.Add(view)
 	return view, nil
 }
 
-// DestroyTextureView destroys a texture view.
+// DestroyTextureView destroys a texture view. It holds no GL object; this
+// only drops its handle.
 func (d *Device) DestroyTextureView(view hal.TextureView) {
-	// TextureViews don't hold GL resources in OpenGL
+	if v, ok := view.(*TextureView); ok && v != nil {
+		v.Destroy()
+	}
 }
 
 // CreateSampler creates a texture sampler using GL sampler objects (GL 3.3+).
@@ -411,7 +424,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (hal.BindGroup, erro
 		return nil, fmt.Errorf("gles: invalid bind group layout type")
 	}
 
-	return newBindGroup(layout, desc.Entries), nil
+	return newBindGroup(&d.views, layout, desc.Entries)
 }
 
 // DestroyBindGroup destroys a bind group.

@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/handletable"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
@@ -87,17 +87,28 @@ type TextureView struct {
 	layerCount uint32
 	isSurface  bool            // true for default framebuffer (surface texture)
 	surfaceTex *SurfaceTexture // non-nil only when isSurface is true
+
+	device       *Device
+	nativeHandle uintptr // key in device.views; 0 once destroyed
 }
 
-// Destroy is a no-op for texture views in OpenGL.
-func (v *TextureView) Destroy() {}
+// Destroy drops the view's handle; a GL texture view holds no GL object.
+// It may be called more than once.
+func (v *TextureView) Destroy() {
+	if v.device != nil {
+		v.device.views.Remove(v.nativeHandle)
+	}
+	v.nativeHandle = 0
+}
 
-// NativeHandle returns a pointer to the view, as the DX12 backend does: a GL
-// texture object has no view object, so a bind group needs the view itself
-// (its mip level and layer, which a storage texture binds through
-// glBindImageTexture). CreateBindGroup resolves it back (newBindGroup).
+// NativeHandle returns the view's opaque per-device handle. A GL texture
+// object has no view object, so a bind group needs the view itself (its mip
+// level and layer, which a storage texture binds through glBindImageTexture);
+// CreateBindGroup resolves the handle back through the device's table
+// (newBindGroup). The handle is not the view's address: see package
+// handletable.
 func (v *TextureView) NativeHandle() uintptr {
-	return uintptr(unsafe.Pointer(v))
+	return v.nativeHandle
 }
 
 // Sampler implements hal.Sampler for OpenGL using GL sampler objects (GL 3.3+).
@@ -188,21 +199,24 @@ type BindGroup struct {
 }
 
 // newBindGroup resolves the texture views of entries from their handles
-// (TextureView.NativeHandle). The views are alive here: the caller holds
-// them, and the bind group keeps them reachable from now on.
-func newBindGroup(layout *BindGroupLayout, entries []gputypes.BindGroupEntry) *BindGroup {
-	views := make([]*TextureView, len(entries))
+// (TextureView.NativeHandle) through the device's view table. An unknown or
+// destroyed handle is an error.
+func newBindGroup(views *handletable.Table[TextureView], layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (*BindGroup, error) {
+	resolved := make([]*TextureView, len(entries))
 	for i, entry := range entries {
 		res, ok := entry.Resource.(gputypes.TextureViewBinding)
 		if !ok || res.TextureView == 0 {
 			continue
 		}
-		view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle -> concrete type
+		view, ok := views.Get(res.TextureView)
+		if !ok {
+			return nil, fmt.Errorf("gles: binding %d: unknown texture view handle %#x", entry.Binding, res.TextureView)
+		}
 		if view.texture != nil {
-			views[i] = view
+			resolved[i] = view
 		}
 	}
-	return &BindGroup{layout: layout, entries: entries, views: views}
+	return &BindGroup{layout: layout, entries: entries, views: resolved}, nil
 }
 
 // Destroy is a no-op for bind groups.

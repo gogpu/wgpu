@@ -74,6 +74,10 @@ type Device struct {
 	stagingViewHeap    *DescriptorHeap // CBV/SRV/UAV staging
 	stagingSamplerHeap *DescriptorHeap // Sampler staging
 
+	// NativeHandle values of buffers, texture views and samplers, resolved
+	// when a bind group is created (see resourceHandles).
+	handles resourceHandles
+
 	// GPU synchronization.
 	fence      *d3d12.ID3D12Fence
 	fenceValue uint64
@@ -1184,6 +1188,7 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		buffer.mappedPointer = ptr
 	}
 
+	buffer.nativeHandle = d.handles.buffers.Add(buffer)
 	return buffer, nil
 }
 
@@ -1453,7 +1458,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			owner.stateOwner.setTextureStates([]d3d12.D3D12_RESOURCE_STATES{d3d12.D3D12_RESOURCE_STATE_PRESENT})
 			st.stateOwner = owner
 		}
-		return &TextureView{
+		view := &TextureView{
 			texture:    owner,
 			format:     st.format,
 			dimension:  gputypes.TextureViewDimension2D,
@@ -1465,7 +1470,9 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			device:     d,
 			rtvHandle:  st.rtvHandle,
 			hasRTV:     true,
-		}, nil
+		}
+		view.nativeHandle = d.handles.views.Add(view)
+		return view, nil
 	}
 
 	tex, ok := texture.(*Texture)
@@ -1683,6 +1690,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		view.hasSRV = true
 	}
 
+	view.nativeHandle = d.handles.views.Add(view)
 	return view, nil
 }
 
@@ -1770,12 +1778,14 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
 	)
 
-	return &Sampler{
+	sampler := &Sampler{
 		handle:          handle,
 		heapIndex:       heapIndex,
 		samplerPoolSlot: poolSlot,
 		device:          d,
-	}, nil
+	}
+	sampler.nativeHandle = d.handles.samplers.Add(sampler)
+	return sampler, nil
 }
 
 // DestroySampler destroys a sampler.
@@ -1865,7 +1875,7 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 
 	// Classify entries into CBV/SRV/UAV vs Sampler, in layout order so the
 	// descriptor table matches the root signature ranges.
-	ordered, err := orderBindGroupEntries(layout, desc.Entries)
+	ordered, err := orderBindGroupEntries(&d.handles, layout, desc.Entries)
 	if err != nil {
 		return nil, err
 	}
@@ -1883,7 +1893,10 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			switch layoutEntry.Type {
 			case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
 				if bufBinding, ok := bgEntry.Resource.(gputypes.BufferBinding); ok && bufBinding.Buffer != 0 {
-					buf := bufferFromHandle(bufBinding.Buffer)
+					buf, err := d.handles.buffer(bgEntry.Binding, bufBinding.Buffer)
+					if err != nil {
+						return nil, err
+					}
 					switch layoutEntry.Type {
 					case BindingTypeUniformBuffer:
 						bg.uniformBuffers = append(bg.uniformBuffers, buf)
@@ -1895,7 +1908,10 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 				}
 			case BindingTypeSampledTexture, BindingTypeStorageTexture:
 				if textureBinding, ok := bgEntry.Resource.(gputypes.TextureViewBinding); ok && textureBinding.TextureView != 0 {
-					view := textureViewFromHandle(textureBinding.TextureView)
+					view, err := d.handles.textureView(bgEntry.Binding, textureBinding.TextureView)
+					if err != nil {
+						return nil, err
+					}
 					if layoutEntry.Type == BindingTypeSampledTexture {
 						bg.sampledTextures = append(bg.sampledTextures, view)
 					} else {
@@ -2038,15 +2054,20 @@ func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR
 
 		switch res := vb.entry.Resource.(type) {
 		case gputypes.BufferBinding:
-			buf := bufferFromHandle(res.Buffer)
-			if err := d.writeBufferViewDescriptor(vb.layout, buf, res, dest); err != nil {
+			if vb.buffer == nil {
+				return fmt.Errorf("dx12: binding %d: buffer handle not resolved", vb.entry.Binding)
+			}
+			if err := d.writeBufferViewDescriptor(vb.layout, vb.buffer, res, dest); err != nil {
 				return err
 			}
 
 		case gputypes.TextureViewBinding:
 			// Storage textures need a UAV, which TextureView does not create yet;
 			// they keep the sampled SRV here (pre-existing behavior).
-			view := textureViewFromHandle(res.TextureView)
+			view := vb.view
+			if view == nil {
+				return fmt.Errorf("dx12: binding %d: texture view handle not resolved", vb.entry.Binding)
+			}
 			if !view.hasSRV {
 				return fmt.Errorf("dx12: texture view has no SRV for binding %d", vb.entry.Binding)
 			}

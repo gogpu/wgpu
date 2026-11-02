@@ -6,19 +6,42 @@
 package dx12
 
 import (
-	"runtime"
 	"strings"
 	"testing"
-	"unsafe"
 
 	"github.com/gogpu/gputypes"
 )
 
+// register adds fake resources to h the way the device's Create* methods
+// do, so their NativeHandle resolves.
+func register(h *resourceHandles, resources ...any) {
+	for _, r := range resources {
+		switch r := r.(type) {
+		case *Buffer:
+			r.nativeHandle = h.buffers.Add(r)
+		case *TextureView:
+			r.nativeHandle = h.views.Add(r)
+		case *Sampler:
+			r.nativeHandle = h.samplers.Add(r)
+		default:
+			panic("register: unsupported resource type")
+		}
+	}
+}
+
 func bufferEntry(binding uint32, buf *Buffer) gputypes.BindGroupEntry {
 	return gputypes.BindGroupEntry{
 		Binding:  binding,
-		Resource: gputypes.BufferBinding{Buffer: uintptr(unsafe.Pointer(buf)), Size: buf.size},
+		Resource: gputypes.BufferBinding{Buffer: buf.NativeHandle(), Size: buf.size},
 	}
+}
+
+func textureEntry(binding uint32, view *TextureView) gputypes.BindGroupEntry {
+	return gputypes.BindGroupEntry{Binding: binding, Resource: gputypes.TextureViewBinding{TextureView: view.NativeHandle()}}
+}
+
+func samplerEntry(binding uint32, s *Sampler) gputypes.BindGroupEntry {
+	return gputypes.BindGroupEntry{Binding: binding, Resource: gputypes.SamplerBinding{Sampler: s.NativeHandle()}}
 }
 
 // TestOrderBindGroupEntries_LayoutOrder checks that descriptor-table entries
@@ -28,6 +51,8 @@ func TestOrderBindGroupEntries_LayoutOrder(t *testing.T) {
 	ro, rw, ub := &Buffer{size: 1024}, &Buffer{size: 512}, &Buffer{size: 4}
 	s0, s1 := &Sampler{samplerPoolSlot: 7}, &Sampler{samplerPoolSlot: 3}
 	tex := &TextureView{}
+	var handles resourceHandles
+	register(&handles, ro, rw, ub, s0, s1, tex)
 
 	layout := &BindGroupLayout{entries: []BindGroupLayoutEntry{
 		{Binding: 0, Type: BindingTypeReadOnlyStorageBuffer},
@@ -39,16 +64,15 @@ func TestOrderBindGroupEntries_LayoutOrder(t *testing.T) {
 	}}
 	// Deliberately shuffled.
 	entries := []gputypes.BindGroupEntry{
-		{Binding: 5, Resource: gputypes.SamplerBinding{Sampler: uintptr(unsafe.Pointer(s1))}},
+		samplerEntry(5, s1),
 		bufferEntry(2, ub),
-		{Binding: 4, Resource: gputypes.TextureViewBinding{TextureView: uintptr(unsafe.Pointer(tex))}},
+		textureEntry(4, tex),
 		bufferEntry(1, rw),
-		{Binding: 3, Resource: gputypes.SamplerBinding{Sampler: uintptr(unsafe.Pointer(s0))}},
+		samplerEntry(3, s0),
 		bufferEntry(0, ro),
 	}
 
-	ordered, err := orderBindGroupEntries(layout, entries)
-	runtime.KeepAlive([]any{ro, rw, ub, s0, s1, tex})
+	ordered, err := orderBindGroupEntries(&handles, layout, entries)
 	if err != nil {
 		t.Fatalf("orderBindGroupEntries: %v", err)
 	}
@@ -75,6 +99,17 @@ func TestOrderBindGroupEntries_LayoutOrder(t *testing.T) {
 				i, views[i].entry.Binding, views[i].layout.Binding, views[i].layout.Type, w.binding, w.typ)
 		}
 	}
+	// Each view entry carries its resolved resource.
+	wantResources := []any{ro, rw, ub, tex}
+	for i, want := range wantResources {
+		var got any = views[i].buffer
+		if views[i].view != nil {
+			got = views[i].view
+		}
+		if got != want {
+			t.Errorf("view %d resolved to %p, want %p", i, got, want)
+		}
+	}
 
 	// Sampler slots in layout order: binding 3 (slot 7), then binding 5 (slot 3).
 	if len(samplers) != 2 || samplers[0] != 7 || samplers[1] != 3 {
@@ -91,7 +126,8 @@ func TestOrderBindGroupEntries_DynamicBuffers(t *testing.T) {
 	ub := &Buffer{size: 512, gpuVA: 0x10000}
 	sb := &Buffer{size: 1024, gpuVA: 0x20000}
 	plain := &Buffer{size: 64, gpuVA: 0x30000}
-	defer runtime.KeepAlive([]any{ub, sb, plain})
+	var handles resourceHandles
+	register(&handles, ub, sb, plain)
 
 	layout := &BindGroupLayout{entries: []BindGroupLayoutEntry{
 		{Binding: 0, Type: BindingTypeReadOnlyStorageBuffer, HasDynamicOffset: true},
@@ -99,11 +135,11 @@ func TestOrderBindGroupEntries_DynamicBuffers(t *testing.T) {
 		{Binding: 2, Type: BindingTypeUniformBuffer, HasDynamicOffset: true},
 	}}
 	entries := []gputypes.BindGroupEntry{
-		{Binding: 2, Resource: gputypes.BufferBinding{Buffer: uintptr(unsafe.Pointer(ub)), Offset: 256, Size: 32}},
-		{Binding: 0, Resource: gputypes.BufferBinding{Buffer: uintptr(unsafe.Pointer(sb)), Offset: 256, Size: 16}},
+		{Binding: 2, Resource: gputypes.BufferBinding{Buffer: ub.NativeHandle(), Offset: 256, Size: 32}},
+		{Binding: 0, Resource: gputypes.BufferBinding{Buffer: sb.NativeHandle(), Offset: 256, Size: 16}},
 		bufferEntry(1, plain),
 	}
-	ordered, err := orderBindGroupEntries(layout, entries)
+	ordered, err := orderBindGroupEntries(&handles, layout, entries)
 	if err != nil {
 		t.Fatalf("orderBindGroupEntries: %v", err)
 	}
@@ -122,9 +158,22 @@ func TestOrderBindGroupEntries_DynamicBuffers(t *testing.T) {
 }
 
 func TestOrderBindGroupEntries_Errors(t *testing.T) {
+	dev := &Device{}
 	buf := &Buffer{size: 64}
 	tex := &TextureView{}
-	defer runtime.KeepAlive([]any{buf, tex})
+	smp := &Sampler{}
+	register(&dev.handles, buf, tex, smp)
+
+	// A destroyed buffer drops its handle from the device's table; the stale
+	// value a caller may still hold must then fail to resolve.
+	destroyed := &Buffer{size: 64, device: dev}
+	register(&dev.handles, destroyed)
+	staleHandle := destroyed.NativeHandle()
+	destroyed.Destroy()
+	destroyed.Destroy() // idempotent
+	if destroyed.NativeHandle() != 0 {
+		t.Fatalf("NativeHandle after Destroy = %d, want 0", destroyed.NativeHandle())
+	}
 
 	tests := []struct {
 		name    string
@@ -139,12 +188,10 @@ func TestOrderBindGroupEntries_Errors(t *testing.T) {
 			want:    "no entry for layout binding 1",
 		},
 		{
-			name:   "texture for buffer slot",
-			layout: []BindGroupLayoutEntry{{Binding: 0, Type: BindingTypeStorageBuffer}},
-			entries: []gputypes.BindGroupEntry{
-				{Binding: 0, Resource: gputypes.TextureViewBinding{TextureView: uintptr(unsafe.Pointer(tex))}},
-			},
-			want: "expects a buffer",
+			name:    "texture for buffer slot",
+			layout:  []BindGroupLayoutEntry{{Binding: 0, Type: BindingTypeStorageBuffer}},
+			entries: []gputypes.BindGroupEntry{textureEntry(0, tex)},
+			want:    "expects a buffer",
 		},
 		{
 			name:    "buffer for sampler slot",
@@ -158,10 +205,53 @@ func TestOrderBindGroupEntries_Errors(t *testing.T) {
 			entries: []gputypes.BindGroupEntry{bufferEntry(0, buf)},
 			want:    "expects a texture view",
 		},
+		{
+			name:   "unknown buffer handle",
+			layout: []BindGroupLayoutEntry{{Binding: 2, Type: BindingTypeUniformBuffer}},
+			entries: []gputypes.BindGroupEntry{
+				{Binding: 2, Resource: gputypes.BufferBinding{Buffer: 0xdead}},
+			},
+			want: "dx12: binding 2: unknown buffer handle",
+		},
+		{
+			name:   "destroyed buffer handle",
+			layout: []BindGroupLayoutEntry{{Binding: 0, Type: BindingTypeStorageBuffer}},
+			entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{Buffer: staleHandle}},
+			},
+			want: "dx12: binding 0: unknown buffer handle",
+		},
+		{
+			name:   "unknown texture view handle",
+			layout: []BindGroupLayoutEntry{{Binding: 1, Type: BindingTypeSampledTexture}},
+			entries: []gputypes.BindGroupEntry{
+				{Binding: 1, Resource: gputypes.TextureViewBinding{TextureView: 0xdead}},
+			},
+			want: "dx12: binding 1: unknown texture view handle",
+		},
+		{
+			name:   "unknown sampler handle",
+			layout: []BindGroupLayoutEntry{{Binding: 3, Type: BindingTypeSampler}},
+			entries: []gputypes.BindGroupEntry{
+				{Binding: 3, Resource: gputypes.SamplerBinding{Sampler: 0xdead}},
+			},
+			want: "dx12: binding 3: unknown sampler handle",
+		},
+		{
+			name:    "registered sampler resolves",
+			layout:  []BindGroupLayoutEntry{{Binding: 0, Type: BindingTypeSampler}},
+			entries: []gputypes.BindGroupEntry{samplerEntry(0, smp)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := orderBindGroupEntries(&BindGroupLayout{entries: tt.layout}, tt.entries)
+			_, err := orderBindGroupEntries(&dev.handles, &BindGroupLayout{entries: tt.layout}, tt.entries)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}

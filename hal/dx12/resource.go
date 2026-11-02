@@ -27,6 +27,7 @@ type Buffer struct {
 	cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY // for CUSTOM heap type
 	gpuVA           uint64                        // GPU virtual address for binding
 	device          *Device
+	nativeHandle    uintptr        // key in device.handles.buffers; 0 once destroyed
 	mappedPointer   unsafe.Pointer // Non-nil if buffer is currently mapped
 
 	// currentState mirrors the queue-scheduled state for legacy diagnostics.
@@ -63,6 +64,10 @@ func (b *Buffer) isReadback() bool {
 
 // Destroy releases the buffer resources.
 func (b *Buffer) Destroy() {
+	if b.device != nil {
+		b.device.handles.buffers.Remove(b.nativeHandle)
+	}
+	b.nativeHandle = 0
 	if b.raw != nil {
 		// Unmap if still mapped
 		if b.mappedPointer != nil {
@@ -132,10 +137,11 @@ func (b *Buffer) Raw() *d3d12.ID3D12Resource {
 	return b.raw
 }
 
-// NativeHandle returns an opaque handle to this Buffer struct.
-// DX12 bind groups need the full Go struct to access GPU virtual address and size.
+// NativeHandle returns this buffer's opaque per-device handle.
+// DX12 bind groups need the full Go struct (GPU virtual address, size), so the
+// handle is a key into the device's handle table, not a D3D12 object.
 func (b *Buffer) NativeHandle() uintptr {
-	return uintptr(unsafe.Pointer(b))
+	return b.nativeHandle
 }
 
 // GPUVirtualAddress returns the GPU virtual address for this buffer.
@@ -361,12 +367,17 @@ type TextureView struct {
 	srvHeapIndex   uint32
 	rtvHeapIndex   uint32
 	dsvHeapIndex   [4]uint32
+	nativeHandle   uintptr // key in device.handles.views; 0 once destroyed
 }
 
 // Destroy releases the texture view resources and recycles descriptor heap slots.
 // For external (surface) texture views, descriptor slots are NOT freed because
 // the Surface owns them and manages their lifecycle via releaseBackBuffers().
 func (v *TextureView) Destroy() {
+	if v.device != nil {
+		v.device.handles.views.Remove(v.nativeHandle)
+	}
+	v.nativeHandle = 0
 	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
 		if v.hasSRV && v.device.stagingViewHeap != nil {
 			v.device.stagingViewHeap.Free(v.srvHeapIndex, 1)
@@ -393,10 +404,11 @@ func (v *TextureView) Texture() *Texture {
 	return v.texture
 }
 
-// NativeHandle returns an opaque handle to this TextureView struct.
-// DX12 bind groups need the full Go struct to access SRV descriptor handles.
+// NativeHandle returns this view's opaque per-device handle.
+// DX12 bind groups need the full Go struct (SRV descriptor handle), so the
+// handle is a key into the device's handle table, not a D3D12 object.
 func (v *TextureView) NativeHandle() uintptr {
-	return uintptr(unsafe.Pointer(v))
+	return v.nativeHandle
 }
 
 // RTVHandle returns the render target view descriptor handle.
@@ -450,14 +462,17 @@ type Sampler struct {
 	heapIndex       uint32                            // staging heap index
 	samplerPoolSlot uint32                            // index in shader-visible sampler heap (global pool)
 	device          *Device
+	nativeHandle    uintptr // key in device.handles.samplers; 0 once destroyed
 }
 
 // Destroy releases the sampler resources and recycles descriptor heap slots.
 func (s *Sampler) Destroy() {
 	if s.device != nil {
+		s.device.handles.samplers.Remove(s.nativeHandle)
 		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
 		s.device.samplerHeap.Free(s.samplerPoolSlot, 1)
 	}
+	s.nativeHandle = 0
 }
 
 // Handle returns the sampler descriptor handle.
@@ -465,9 +480,10 @@ func (s *Sampler) Handle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return s.handle
 }
 
-// NativeHandle returns an opaque handle to this Sampler struct.
-// DX12 bind groups need the full Go struct to access the sampler descriptor handle.
-func (s *Sampler) NativeHandle() uintptr { return uintptr(unsafe.Pointer(s)) }
+// NativeHandle returns this sampler's opaque per-device handle.
+// DX12 bind groups need the full Go struct (sampler pool slot), so the handle
+// is a key into the device's handle table, not a D3D12 object.
+func (s *Sampler) NativeHandle() uintptr { return s.nativeHandle }
 
 // -----------------------------------------------------------------------------
 // Compile-time interface assertions

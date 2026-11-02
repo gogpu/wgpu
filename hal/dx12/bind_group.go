@@ -7,7 +7,6 @@ package dx12
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
@@ -15,14 +14,19 @@ import (
 
 // viewBinding pairs a CBV/SRV/UAV bind group entry with the layout entry that
 // describes it. The layout entry type decides which descriptor kind is written.
+// Exactly one of buffer and view is set: the entry's resource, resolved from
+// its handle.
 type viewBinding struct {
 	layout BindGroupLayoutEntry
 	entry  gputypes.BindGroupEntry
+	buffer *Buffer
+	view   *TextureView
 }
 
 // orderBindGroupEntries matches bind group entries to their layout entries and
 // returns them in layout order, split into CBV/SRV/UAV entries and global
-// sampler pool slots.
+// sampler pool slots. Resource handles are resolved through handles; an
+// unknown or destroyed handle is an error.
 //
 // Layout order is required: createRootSignatureFromLayouts emits one descriptor
 // range per non-sampler layout entry (D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND) and
@@ -34,7 +38,7 @@ type viewBinding struct {
 // A uniform buffer with a dynamic offset gets no descriptor: it is bound as a
 // root CBV (dynamicBuffer). Buffers with a dynamic offset are returned in
 // layout order, which CreateBindGroupLayout makes binding order.
-func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (orderedBindGroupEntries, error) {
+func orderBindGroupEntries(handles *resourceHandles, layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (orderedBindGroupEntries, error) {
 	out := orderedBindGroupEntries{views: make([]viewBinding, 0, len(layout.entries))}
 
 	for _, le := range layout.entries {
@@ -49,7 +53,10 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 			if !ok || res.Sampler == 0 {
 				return out, fmt.Errorf("dx12: binding %d: layout expects a sampler, got %T", le.Binding, entry.Resource)
 			}
-			sampler := samplerFromHandle(res.Sampler)
+			sampler, err := handles.sampler(le.Binding, res.Sampler)
+			if err != nil {
+				return out, err
+			}
 			out.samplerPoolIndices = append(out.samplerPoolIndices, sampler.samplerPoolSlot)
 
 		case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
@@ -57,7 +64,10 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 			if !ok || res.Buffer == 0 {
 				return out, fmt.Errorf("dx12: binding %d: layout expects a buffer, got %T", le.Binding, entry.Resource)
 			}
-			buf := bufferFromHandle(res.Buffer)
+			buf, err := handles.buffer(le.Binding, res.Buffer)
+			if err != nil {
+				return out, err
+			}
 			switch {
 			case le.isDynamicUniform():
 				out.dynamicBuffers = append(out.dynamicBuffers, dynamicBuffer{uniform: true, gpuVA: buf.gpuVA + res.Offset})
@@ -65,38 +75,22 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 			case le.isDynamicStorage():
 				out.dynamicBuffers = append(out.dynamicBuffers, dynamicBuffer{size: uint32(bufferBindingSize(buf.size, res))})
 			}
-			out.views = append(out.views, viewBinding{layout: le, entry: entry})
+			out.views = append(out.views, viewBinding{layout: le, entry: entry, buffer: buf})
 
 		default: // BindingTypeSampledTexture, BindingTypeStorageTexture
 			res, ok := entry.Resource.(gputypes.TextureViewBinding)
 			if !ok || res.TextureView == 0 {
 				return out, fmt.Errorf("dx12: binding %d: layout expects a texture view, got %T", le.Binding, entry.Resource)
 			}
-			out.views = append(out.views, viewBinding{layout: le, entry: entry})
+			view, err := handles.textureView(le.Binding, res.TextureView)
+			if err != nil {
+				return out, err
+			}
+			out.views = append(out.views, viewBinding{layout: le, entry: entry, view: view})
 		}
 	}
 
 	return out, nil
-}
-
-// bufferFromHandle restores the Go object behind the opaque HAL handle. The
-// handle is intentionally stored as uintptr across the HAL boundary; checkptr
-// cannot track that round trip, so keep the conversion in this narrowly scoped
-// helper.
-//
-//go:nocheckptr
-func bufferFromHandle(handle uintptr) *Buffer {
-	return (*Buffer)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
-}
-
-//go:nocheckptr
-func samplerFromHandle(handle uintptr) *Sampler {
-	return (*Sampler)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
-}
-
-//go:nocheckptr
-func textureViewFromHandle(handle uintptr) *TextureView {
-	return (*TextureView)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
 }
 
 // orderedBindGroupEntries is a bind group's entries in layout order: the
