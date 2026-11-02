@@ -478,7 +478,7 @@ func (interp *interpreter) writeValueToBufferTyped(data []byte, offset uint32, v
 		interp.writeCompositeToBuffer(data, offset, val.AsArray(), ti, matStride)
 
 	default:
-		writeValueToBuffer(data, offset, val)
+		writeScalarToBuffer(data, offset, val, ti)
 	}
 }
 
@@ -809,8 +809,12 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) < 1 {
 				break
 			}
-			// For now, bitcast just copies the value (works for same-width types).
-			interp.values[inst.ResultID] = interp.values[inst.Operands[0]]
+			src := inst.Operands[0]
+			var srcType uint32
+			if interp.module != nil {
+				srcType = interp.module.ResultTypes[src]
+			}
+			interp.values[inst.ResultID] = interp.bitcast(interp.values[src], srcType, inst.TypeID)
 
 		case OpFAdd:
 			if len(inst.Operands) >= 2 {

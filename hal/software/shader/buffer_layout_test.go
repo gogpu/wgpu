@@ -158,6 +158,66 @@ fn main() {
 	checkWords(t, "lanes", lanes, []uint32{f32w(23), f32w(11)})
 }
 
+// TestBufferLayoutVec3IntArray stores integer vectors and their components
+// as integers at 16-byte steps: a vec3<u32> or vec3<i32> store must not
+// write the components as f32 bits.
+func TestBufferLayoutVec3IntArray(t *testing.T) {
+	const wgsl = `
+@group(0) @binding(0) var<storage, read_write> src: array<vec3<u32>>;
+@group(0) @binding(1) var<storage, read_write> dst: array<vec3<u32>>;
+@group(0) @binding(2) var<storage, read_write> lanes: array<u32>;
+@group(0) @binding(3) var<storage, read_write> idst: array<vec3<i32>>;
+@group(0) @binding(4) var<storage, read_write> ilanes: array<i32>;
+@compute @workgroup_size(1)
+fn main() {
+    dst[0] = src[1];
+    dst[1] = vec3<u32>(0xA1u, 0xA2u, 0xA3u);
+    dst[2] = src[2];
+    dst[2].x = 0xBEEFu;
+    lanes[0] = src[2].y;
+    lanes[1] = src[0].z;
+    let s = idst[0];
+    idst[1] = vec3<i32>(-5, 6, -7);
+    idst[2] = s;
+    ilanes[0] = s.y;
+}
+`
+	// Element i, component c holds 0x1000 + 16*i + c; word 4*i + 3 is padding.
+	src := sentinelWords(12)
+	for i := range 3 {
+		for c := range 3 {
+			src[4*i+c] = 0x1000 + uint32(16*i+c)
+		}
+	}
+	dst := sentinelWords(12)
+	lanes := sentinelWords(2)
+	idst := sentinelWords(12)
+	neg := []int32{-100, -200, 300}
+	for c, v := range neg {
+		idst[c] = uint32(v)
+	}
+	ilanes := sentinelWords(1)
+	dispatchNagaBuffers(t, wgsl, src, dst, lanes, idst, ilanes)
+
+	want := sentinelWords(12)
+	want[0], want[1], want[2] = 0x1010, 0x1011, 0x1012
+	want[4], want[5], want[6] = 0xA1, 0xA2, 0xA3
+	want[8], want[9], want[10] = 0xBEEF, 0x1021, 0x1022
+	checkWords(t, "dst", dst, want)
+	checkWords(t, "lanes", lanes, []uint32{0x1021, 0x1002})
+
+	wantI := sentinelWords(12)
+	for c, v := range neg {
+		wantI[c] = uint32(v)
+		wantI[8+c] = uint32(v)
+	}
+	for c, v := range []int32{-5, 6, -7} {
+		wantI[4+c] = uint32(v)
+	}
+	checkWords(t, "idst", idst, wantI)
+	checkWords(t, "ilanes", ilanes, []uint32{uint32(neg[1])})
+}
+
 // TestBufferLayoutMat3x3Member reads and writes a mat3x3<f32> struct member
 // and an array of them, in a uniform and a storage buffer: columns at
 // 16-byte steps (MatrixStride 16), array elements 48 bytes apart.
@@ -201,4 +261,34 @@ fn main() {
 	want[40] = u[40]                                            // s.t
 	checkWords(t, "s", s, want)
 	checkWords(t, "lanes", lanes, []uint32{u[14], u[32], u[9]})
+}
+
+// TestBufferLayoutUniformIntVector reads integer vector members of a
+// uniform buffer and stores their components to a u32 storage buffer: the
+// interpreter holds the loaded components as float32, and the store must
+// write the integers, not their f32 bits (41 came out as 0x42240000).
+func TestBufferLayoutUniformIntVector(t *testing.T) {
+	const wgsl = `
+struct U { rect: vec4<f32>, tag: vec4<u32>, itag: vec4<i32> }
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var<storage, read_write> out: array<u32>;
+@group(0) @binding(2) var<storage, read_write> iout: array<i32>;
+@compute @workgroup_size(1)
+fn main() {
+    out[0] = u.tag.x;
+    out[1] = u.tag.w;
+    let t = u.tag;
+    out[2] = t.y;
+    iout[0] = u.itag.z;
+}
+`
+	u := make([]uint32, 12)
+	copy(u[4:8], []uint32{41, 0xFFFFFF, 7, 0x123456})
+	minus9 := int32(-9)
+	u[10] = uint32(minus9)
+	out := sentinelWords(3)
+	iout := sentinelWords(1)
+	dispatchNagaBuffers(t, wgsl, u, out, iout)
+	checkWords(t, "out", out, []uint32{41, 0x123456, 0xFFFFFF})
+	checkWords(t, "iout", iout, []uint32{uint32(minus9)})
 }

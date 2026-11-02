@@ -51,6 +51,13 @@ type Module struct {
 	// Used for LocalSize in compute shaders.
 	ExecutionModes map[executionModeKey][]uint32
 
+	// ResultTypes maps the result ID of a constant or a typed function
+	// instruction to its result type ID. Runtime values do not carry their
+	// SPIR-V type (an integer vector component is held as a float32), so an
+	// instruction whose meaning depends on its operand's type, such as
+	// OpBitcast, looks the type up here.
+	ResultTypes map[uint32]uint32
+
 	// Bound is the upper bound of all IDs in the module.
 	Bound uint32
 
@@ -213,6 +220,7 @@ func ParseModule(words []uint32) (*Module, error) {
 		FunctionsByID:     make(map[uint32]*Function),
 		ExtInstImports:    make(map[uint32]string),
 		ExecutionModes:    make(map[executionModeKey][]uint32),
+		ResultTypes:       make(map[uint32]uint32),
 		Bound:             words[3],
 	}
 
@@ -382,6 +390,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			typeID := operands[0]
 			resultID := operands[1]
 			m.Constants[resultID] = resolveConstant(m.Types, typeID, operands[2:])
+			m.ResultTypes[resultID] = typeID
 
 		case OpConstantComposite:
 			// OpConstantComposite: resultType resultID constituents...
@@ -397,6 +406,7 @@ func ParseModule(words []uint32) (*Module, error) {
 				}
 			}
 			m.Constants[resultID] = ValArray(elems)
+			m.ResultTypes[resultID] = operands[0]
 
 		case OpConstantTrue:
 			if len(operands) >= 2 {
@@ -415,6 +425,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			typeID := operands[0]
 			resultID := operands[1]
 			m.Constants[resultID] = zeroValue(m.Types, typeID)
+			m.ResultTypes[resultID] = typeID
 
 		case OpEntryPoint:
 			// OpEntryPoint: executionModel functionID "name" interfaceIDs...
@@ -576,11 +587,15 @@ func ParseModule(words []uint32) (*Module, error) {
 
 	// Pre-build label indexes for all functions. This avoids rebuilding
 	// the label map on every Execute call (saves one map alloc per call).
+	// Record the result type of every typed instruction alongside.
 	for _, fn := range funcsByID {
 		fn.Labels = make(map[uint32]int, len(fn.Instructions)/4)
 		for i, inst := range fn.Instructions {
 			if inst.Opcode == OpLabel {
 				fn.Labels[inst.ResultID] = i
+			}
+			if inst.TypeID != 0 && inst.ResultID != 0 {
+				m.ResultTypes[inst.ResultID] = inst.TypeID
 			}
 		}
 	}

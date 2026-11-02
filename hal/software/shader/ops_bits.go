@@ -47,12 +47,107 @@ func mapIntLanes(v Value, signed bool, f func(uint32) uint32) Value {
 	}
 }
 
-// laneBits returns the 32-bit pattern of an integer held as a float lane.
+// laneBits returns the 32-bit pattern of an integer held as a float lane,
+// saturated to the range of the type: float32 rounds the largest u32 and
+// i32 values past it (0xFFFFFFFF to 2^32), and a plain conversion would wrap
+// them or leave them implementation-defined. No float-held integer is NaN;
+// NaN gives 0.
 func laneBits(f float32, signed bool) uint32 {
-	if signed {
-		return uint32(int32(f))
+	d := float64(f)
+	if d != d {
+		return 0
 	}
-	return uint32(int64(f))
+	if signed {
+		return uint32(int32(max(math.MinInt32, min(math.MaxInt32, d))))
+	}
+	return uint32(max(0, min(math.MaxUint32, d)))
+}
+
+// bitcast implements OpBitcast between 32-bit integer and float scalars and
+// vectors: the source's bits under the result type, tagged by it, so later
+// stores and arithmetic see an integer as an integer and a float as a
+// float. An integer vector result is an array of integer scalars, exact for
+// every bit pattern. Any other bitcast (pointers, other widths, a source
+// whose type is unknown) copies the value, as all of them did before.
+func (interp *interpreter) bitcast(v Value, srcTypeID, dstTypeID uint32) Value {
+	src, n := interp.scalarLanes(srcTypeID)
+	dst, dstN := interp.scalarLanes(dstTypeID)
+	if src == nil || dst == nil || n != dstN {
+		return v
+	}
+	if n == 1 {
+		return bitsAs(valueBits(v, src), dst)
+	}
+	lanes := make([]Value, n)
+	for i := range lanes {
+		lanes[i] = bitsAs(valueBits(indexComposite(v, uint32(i)), src), dst)
+	}
+	if dst.Kind != TypeFloat {
+		return ValArray(lanes)
+	}
+	out := Value{Tag: vectorTag(n)}
+	for i, l := range lanes {
+		out.F[i] = l.F[0]
+	}
+	return out
+}
+
+// scalarLanes returns the 32-bit integer or float scalar type of a scalar
+// or vector type and its lane count, or nil for any other type.
+func (interp *interpreter) scalarLanes(typeID uint32) (*TypeInfo, int) {
+	ti := interp.typeInfo(typeID)
+	n := 1
+	if ti != nil && ti.Kind == TypeVector {
+		n = int(ti.Components)
+		ti = interp.typeInfo(ti.ElemType)
+	}
+	if ti == nil || ti.Width != 32 || (ti.Kind != TypeInt && ti.Kind != TypeFloat) || n < 1 || n > 4 {
+		return nil, 0
+	}
+	return ti, n
+}
+
+// valueBits returns the 32-bit pattern of a scalar value of type ti; a
+// float32 standing for an integer (a component of an integer vector) gives
+// the integer's bits.
+func valueBits(v Value, ti *TypeInfo) uint32 {
+	switch v.Tag {
+	case TagUint32, TagInt32:
+		return v.U[0]
+	case TagFloat32:
+		if ti.Kind == TypeInt {
+			return laneBits(v.F[0], ti.Signed)
+		}
+		return math.Float32bits(v.F[0])
+	default:
+		return 0
+	}
+}
+
+// bitsAs returns a 32-bit pattern as a scalar of type ti.
+func bitsAs(pattern uint32, ti *TypeInfo) Value {
+	switch {
+	case ti.Kind == TypeFloat:
+		return ValFloat(math.Float32frombits(pattern))
+	case ti.Signed:
+		return ValInt(int32(pattern))
+	default:
+		return ValUint(pattern)
+	}
+}
+
+// vectorTag returns the tag of an n-component float vector.
+func vectorTag(n int) ValueTag {
+	switch n {
+	case 2:
+		return TagVec2
+	case 3:
+		return TagVec3
+	case 4:
+		return TagVec4
+	default:
+		return TagFloat32
+	}
 }
 
 // bitFieldMask returns count one bits from bit offset; WebGPU leaves offset +

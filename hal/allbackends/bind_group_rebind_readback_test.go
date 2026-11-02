@@ -58,21 +58,11 @@ type rebindLayouts struct {
 	lb, lc         *wgpu.BindGroupLayout // group 1: B (dynamic), C (fixed)
 }
 
-// rebindComputeDefects are the backends whose compute pass fails this test
-// for a defect outside the bind group rebinding; each is skipped with it
-// until its owner fixes it.
-var rebindComputeDefects = map[string]string{
-	"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (41 -> 0x42240000); the groups and offsets it reads are the right ones",
-}
-
 // TestBindGroupRebindCompute runs the sequence above in a compute pass. P1
 // and P2 write (a.tag, b.tag, marker) at words 0..2 of their output binding,
 // P3 at words 4..6, so step 4 does not overwrite step 3.
 func TestBindGroupRebindCompute(t *testing.T) {
-	forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		if defect, ok := rebindComputeDefects[b.name]; ok {
-			t.Skipf("known defect, not the bind group rebinding: %s", defect)
-		}
+	forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		checkBindGroupRebindCompute(t, device)
 	})
 }

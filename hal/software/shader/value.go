@@ -686,6 +686,23 @@ func writeValueToBuffer(data []byte, offset uint32, val Value) {
 	}
 }
 
+// writeScalarToBuffer writes a scalar of SPIR-V type ti. The interpreter
+// holds the components of integer vectors as float32 (OpCompositeConstruct,
+// buffer loads), so a component stored on its own, or through a vector
+// store, arrives as a TagFloat32 holding the integer's value. For a 32-bit
+// integer pointee that value is converted back to the integer, the inverse
+// of the load, instead of being written as f32 bits. It is exact up to 2^24;
+// lifting that needs the typed value model (P1-SW-019). Every other scalar
+// is written as its own value; OpBitcast tags its result by its type, so a
+// bit pattern never reaches here as a float-held integer.
+func writeScalarToBuffer(data []byte, offset uint32, val Value, ti *TypeInfo) {
+	if ti.Kind == TypeInt && ti.Width == 32 && val.Tag == TagFloat32 {
+		writeValueToBuffer(data, offset, ValUint(laneBits(val.F[0], ti.Signed)))
+		return
+	}
+	writeValueToBuffer(data, offset, val)
+}
+
 // valueByteSize returns the byte size of a runtime Value.
 func valueByteSize(val Value) uint32 {
 	switch val.Tag {

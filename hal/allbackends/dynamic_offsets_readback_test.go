@@ -104,32 +104,13 @@ var dynamicOffsetsCases = []dynamicOffsetsCase{
 	{name: "bind-group-first", bindFirst: true},
 }
 
-// dynamicOffsetsDefects are the backends that fail these tests for defects
-// outside the dynamic offsets path of the DX12 backend, by test or by
-// test/case; each is skipped with its defect until its owner fixes it.
-var dynamicOffsetsDefects = map[string]map[string]string{
-	"compute": {
-		"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (11 -> 0x41300000), a gap of the interpreter's typed value model",
-	},
-}
-
-func skipDynamicOffsetsDefect(t *testing.T, test string, c dynamicOffsetsCase, b overrideBackend) {
-	t.Helper()
-	for _, key := range []string{test, test + "/" + c.name} {
-		if defect, ok := dynamicOffsetsDefects[key][b.name]; ok {
-			t.Skipf("known defect, not the DX12 dynamic offsets path: %s", defect)
-		}
-	}
-}
-
 // TestDynamicOffsetsCompute dispatches twice with the same bind group:
 // first with offsets (uniform slot 1, storage slot 2, output slot 1), then
 // with (uniform slot 0, storage slot 1, output slot 0).
 func TestDynamicOffsetsCompute(t *testing.T) {
 	for _, c := range dynamicOffsetsCases {
 		t.Run(c.name, func(t *testing.T) {
-			forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-				skipDynamicOffsetsDefect(t, "compute", c, b)
+			forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 				checkDynamicOffsetsCompute(t, device, c)
 			})
 		})
@@ -144,8 +125,7 @@ func TestDynamicOffsetsRender(t *testing.T) {
 	for _, c := range dynamicOffsetsCases {
 		t.Run(c.name, func(t *testing.T) {
 			required := gputypes.DownlevelFlagsVertexStorage | gputypes.DownlevelFlagsFragmentStorage
-			forEachDynamicOffsetDevice(t, required, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-				skipDynamicOffsetsDefect(t, "render", c, b)
+			forEachDynamicOffsetDevice(t, required, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 				checkDynamicOffsetsRender(t, device, c)
 			})
 		})
