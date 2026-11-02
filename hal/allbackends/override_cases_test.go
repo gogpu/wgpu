@@ -103,6 +103,10 @@ type overrideCase struct {
 	literals map[string]string
 	inputs   [][]uint32
 	check    func(out [][]uint32) string // "" if out is right
+	// sharesWorkgroupMemory marks a case whose workgroup invocations exchange
+	// data through workgroup memory across a barrier: the software backend
+	// refuses its pipeline (software.ErrWorkgroupBarrierUnsupported, P1-SW-025).
+	sharesWorkgroupMemory bool
 }
 
 // overrideCases returns the compute cases.
@@ -143,7 +147,7 @@ func overrideCases() []overrideCase {
 		{
 			name: "anonymous-constants", wgsl: anonymousOverrideShader, inputs: anonInputs(),
 			constants: map[string]float64{"n": 5, "m": 64}, literals: map[string]string{"n": "5u", "m": "64u"},
-			check: wantAnonymous(10, 64),
+			check: wantAnonymous(10, 64), sharesWorkgroupMemory: true,
 		},
 	}
 }

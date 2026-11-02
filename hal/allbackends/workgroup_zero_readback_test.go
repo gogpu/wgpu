@@ -6,10 +6,12 @@
 package allbackends_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal/software"
 )
 
 // WebGPU zero-initializes workgroup memory unless a compute stage opts out.
@@ -26,11 +28,8 @@ const (
 	wgZeroDirtyEntry = "dirty"
 	wgZeroReadEntry  = "read"
 	// Many workgroups make a GPU likely to reuse a previous group's shared
-	// memory. The software backend allocates fresh memory per workgroup, so
-	// two are enough there; its interpreter is slow on workgroup arrays
-	// (P1-SW-019), which matters under CI's race instrumentation.
-	wgZeroGroupsGPU      = 16
-	wgZeroGroupsSoftware = 2
+	// memory.
+	wgZeroGroups = 16
 )
 
 const workgroupZeroWGSL = `
@@ -52,12 +51,20 @@ fn read(@builtin(local_invocation_index) i: u32, @builtin(workgroup_id) w: vec3<
 `
 
 func TestWorkgroupMemoryZeroInitialized(t *testing.T) {
-	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		groups := uint32(wgZeroGroupsGPU)
-		if b.software {
-			groups = wgZeroGroupsSoftware
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+		// Keyed on the HAL, not on the requested CPU fallback: that adapter can be
+		// a Vulkan CPU device (llvmpipe/lavapipe on Linux), which computes it.
+		if _, sw := device.HalDevice().(*software.Device); sw {
+			// The dirty pass exchanges data through workgroup memory across a
+			// barrier: refused rather than computed wrong (P1-SW-025).
+			_, layout, shader := newWorkgroupZeroResources(t, device)
+			_, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+				Layout: layout, Module: shader, EntryPoint: wgZeroDirtyEntry,
+			})
+			requireWorkgroupBarrierRefused(t, err)
+			return
 		}
-		got := runWorkgroupZero(t, device, groups, nil)
+		got := runWorkgroupZero(t, device, wgZeroGroups, nil)
 		for i, w := range got {
 			if w != 0 {
 				t.Fatalf("workgroup %d word %d = %#x: workgroup memory not zero-initialized", i/wgZeroWords, i%wgZeroWords, w)
@@ -69,7 +76,7 @@ func TestWorkgroupMemoryZeroInitialized(t *testing.T) {
 		// reported: it shows whether this device can tell the two apart.
 		off := false
 		stale := 0
-		words := runWorkgroupZero(t, device, groups, &off)
+		words := runWorkgroupZero(t, device, wgZeroGroups, &off)
 		for _, w := range words {
 			if w&0xffff0000 == wgZeroDirtyFill {
 				stale++
@@ -79,13 +86,10 @@ func TestWorkgroupMemoryZeroInitialized(t *testing.T) {
 	})
 }
 
-// runWorkgroupZero runs the dirty pass then the read pass over groups
-// workgroups, both with ZeroInitializeWorkgroupMemory zeroInit, and returns
-// what the read pass saw.
-func runWorkgroupZero(t *testing.T, device *wgpu.Device, groups uint32, zeroInit *bool) []uint32 {
+// newWorkgroupZeroResources creates the bind group layout (one storage
+// buffer), the pipeline layout and the shader module of workgroupZeroWGSL.
+func newWorkgroupZeroResources(t *testing.T, device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.PipelineLayout, *wgpu.ShaderModule) {
 	t.Helper()
-	outWords := wgZeroWords * int(groups)
-	outBytes := uint64(outWords * 4)
 	bgl := newBindGroupLayout(t, device, gputypes.BindGroupLayoutEntry{
 		Binding:    0,
 		Visibility: gputypes.ShaderStageCompute,
@@ -101,6 +105,28 @@ func runWorkgroupZero(t *testing.T, device *wgpu.Device, groups uint32, zeroInit
 		t.Fatalf("CreatePipelineLayout: %v", err)
 	}
 	t.Cleanup(layout.Release)
+	return bgl, layout, shader
+}
+
+// requireWorkgroupBarrierRefused checks that the software backend refused a
+// compute pipeline whose workgroup invocations exchange data through
+// workgroup memory across a barrier (P1-SW-025): its interpreter would
+// compute wrong results.
+func requireWorkgroupBarrierRefused(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, software.ErrWorkgroupBarrierUnsupported) {
+		t.Fatalf("CreateComputePipeline error = %v, want software.ErrWorkgroupBarrierUnsupported", err)
+	}
+}
+
+// runWorkgroupZero runs the dirty pass then the read pass over groups
+// workgroups, both with ZeroInitializeWorkgroupMemory zeroInit, and returns
+// what the read pass saw.
+func runWorkgroupZero(t *testing.T, device *wgpu.Device, groups uint32, zeroInit *bool) []uint32 {
+	t.Helper()
+	outWords := wgZeroWords * int(groups)
+	outBytes := uint64(outWords * 4)
+	bgl, layout, shader := newWorkgroupZeroResources(t, device)
 	pipeline := func(entry string) *wgpu.ComputePipeline {
 		p, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
 			Layout: layout, Module: shader, EntryPoint: entry, ZeroInitializeWorkgroupMemory: zeroInit,

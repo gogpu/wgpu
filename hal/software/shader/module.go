@@ -637,6 +637,46 @@ func (m *Module) MayDiscard() bool {
 	return false
 }
 
+// SharesWorkgroupMemoryAcrossBarrier reports whether the invocations of a
+// workgroup of entryPoint may exchange data through workgroup memory: the
+// workgroup has more than one invocation and the module has both a Workgroup
+// variable and an OpControlBarrier. The interpreter does not share workgroup
+// memory between invocations and cannot honor a barrier (it runs each
+// invocation to completion), so such a shader computes wrong results. A
+// one-invocation workgroup shares nothing, whatever its barriers (naga emits
+// one after zero-initializing workgroup memory). Conservative like
+// MayDiscard: no reachability or per-access analysis.
+func (m *Module) SharesWorkgroupMemoryAcrossBarrier(entryPoint string) bool {
+	if size := m.GetWorkgroupSize(entryPoint); size[0]*size[1]*size[2] <= 1 {
+		return false
+	}
+	hasWorkgroup := false
+	for _, vi := range m.Variables {
+		if vi.StorageClass == StorageClassWorkgroup {
+			hasWorkgroup = true
+			break
+		}
+	}
+	if !hasWorkgroup {
+		return false
+	}
+	for _, fn := range m.FunctionsByID {
+		for i := range fn.Instructions {
+			if fn.Instructions[i].Opcode == OpControlBarrier {
+				return true
+			}
+		}
+	}
+	for _, fn := range m.Functions {
+		for i := range fn.Instructions {
+			if fn.Instructions[i].Opcode == OpControlBarrier {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // GetLocation returns the Location decoration value for a variable ID, or -1 if none.
 func (m *Module) GetLocation(varID uint32) int {
 	key := decorationKey{TargetID: varID, Decoration: DecorationLocation}

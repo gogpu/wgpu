@@ -6,6 +6,7 @@ package shader
 import (
 	"encoding/binary"
 	"math"
+	"slices"
 	"testing"
 
 	naga "github.com/gogpu/naga"
@@ -291,4 +292,41 @@ fn main() {
 	dispatchNagaBuffers(t, wgsl, u, out, iout)
 	checkWords(t, "out", out, []uint32{41, 0x123456, 0xFFFFFF})
 	checkWords(t, "iout", iout, []uint32{uint32(minus9)})
+}
+
+// TestSharesWorkgroupMemoryAcrossBarrierNeedsBarrier: the same module with
+// its OpControlBarrier instructions removed no longer shares workgroup
+// memory across a barrier (naga always emits one after zero-initializing
+// workgroup memory, so this variant cannot come from WGSL).
+func TestSharesWorkgroupMemoryAcrossBarrierNeedsBarrier(t *testing.T) {
+	spirvBytes, err := naga.Compile(`
+var<workgroup> wg: array<u32, 64>;
+@group(0) @binding(0) var<storage, read_write> out: array<u32>;
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_index) i: u32) {
+    wg[i] = i;
+    workgroupBarrier();
+    out[i] = wg[(i + 1u) % 64u];
+}
+`)
+	if err != nil {
+		t.Fatalf("naga.Compile: %v", err)
+	}
+	words := make([]uint32, len(spirvBytes)/4)
+	for i := range words {
+		words[i] = binary.LittleEndian.Uint32(spirvBytes[i*4:])
+	}
+	m, err := ParseModule(words)
+	if err != nil {
+		t.Fatalf("ParseModule: %v", err)
+	}
+	if !m.SharesWorkgroupMemoryAcrossBarrier("main") {
+		t.Fatal("with its barriers: SharesWorkgroupMemoryAcrossBarrier = false, want true")
+	}
+	for _, fn := range m.FunctionsByID {
+		fn.Instructions = slices.DeleteFunc(fn.Instructions, func(inst Instruction) bool { return inst.Opcode == OpControlBarrier })
+	}
+	if m.SharesWorkgroupMemoryAcrossBarrier("main") {
+		t.Error("without barriers: SharesWorkgroupMemoryAcrossBarrier = true, want false")
+	}
 }
