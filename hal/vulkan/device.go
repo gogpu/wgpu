@@ -1267,7 +1267,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	switch {
 	case desc.Source.WGSL != "":
 		sourceType = "WGSL"
-		lowered, err := shaderir.Lower(desc.Source.WGSL)
+		lowered, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}

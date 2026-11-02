@@ -2129,7 +2129,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case desc.Source.WGSL != "":
 		// Lower WGSL to IR now; HLSL/DXIL is written during pipeline creation,
 		// when the pipeline layout (bindings) and the override values are known.
-		irModule, err := shaderir.Lower(desc.Source.WGSL)
+		irModule, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("dx12: WGSL: %w", err)
 		}

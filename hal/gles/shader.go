@@ -25,7 +25,7 @@ import (
 func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*ShaderModule, error) {
 	sm := &ShaderModule{source: desc.Source, glCtx: glCtx}
 	if desc.Source.WGSL != "" {
-		irModule, err := shaderir.Lower(desc.Source.WGSL)
+		irModule, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("gles: WGSL: %w", err)
 		}

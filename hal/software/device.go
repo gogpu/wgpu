@@ -242,7 +242,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case desc.Source.WGSL != "":
 		// Compilation failure is non-fatal — existing draw paths don't need
 		// SPIR-V, so the module then has neither IR nor SPIR-V.
-		if lowered, err := shaderir.Lower(desc.Source.WGSL); err == nil {
+		if lowered, err := shaderir.LowerDescriptor(desc); err == nil {
 			sm.irModule = &lowered
 			if !shaderir.PerStage(lowered.IR, nil) {
 				sm.spirv, _ = shaderir.SPIRV(lowered.IR, spirvOptions())

@@ -532,7 +532,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	start := time.Now()
 
-	lowered, err := shaderir.Lower(desc.Source.WGSL)
+	lowered, err := shaderir.LowerDescriptor(desc)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
 	}

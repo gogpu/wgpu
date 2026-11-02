@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/backend"
@@ -27,6 +28,7 @@ import (
 	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Module is a validated IR module and the ModuleInfo of that validation,
@@ -48,12 +50,33 @@ func Lower(source string) (Module, error) {
 	return LowerOptions(source, valid.Options{Capabilities: valid.CapAll})
 }
 
+// LowerDescriptor returns the module of a WGSL shader module descriptor: the
+// IR and ModuleInfo core validated (desc.IR, desc.Info), or, when desc.IR is
+// nil because the HAL is used without core, Lower(desc.Source.WGSL).
+func LowerDescriptor(desc *hal.ShaderModuleDescriptor) (Module, error) {
+	if desc.IR != nil {
+		return Module{IR: desc.IR, Info: desc.Info}, nil
+	}
+	return Lower(desc.Source.WGSL)
+}
+
+// lowerings counts LowerOptions calls, for Lowerings.
+var lowerings atomic.Uint64
+
+// Lowerings returns how many times WGSL has been parsed and validated in
+// this process. Tests use it to prove that a shader module is lowered once
+// (P1-CORE-013).
+func Lowerings() uint64 {
+	return lowerings.Load()
+}
+
 // LowerOptions parses WGSL to IR and validates it with opts.
 //
 // A parse error keeps naga's *wgsl.ParseError (errors.As works) and is
 // prefixed with its line and column: ParseError.Error is the message only.
 // A validation error is valid.Errors.
 func LowerOptions(source string, opts valid.Options) (Module, error) {
+	lowerings.Add(1)
 	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
 		var pe *wgsl.ParseError
