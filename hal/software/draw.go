@@ -20,11 +20,10 @@ import (
 // It selects between fullscreen texture blit and vertex-buffer-based rasterization.
 // instanceCount > 1 enables instanced rendering; firstInstance offsets the instance ID.
 func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	if r.pipeline == nil {
+	// Zero instances draw nothing, as on the GPU backends; an indirect record
+	// a culling pass zeroed relies on it.
+	if r.pipeline == nil || instanceCount == 0 {
 		return
-	}
-	if instanceCount == 0 {
-		instanceCount = 1
 	}
 
 	target := r.getTargetTexture()
