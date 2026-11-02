@@ -35,6 +35,10 @@ const (
 	extImageRobustness  = "VK_EXT_image_robustness"
 	extRobustness2      = "VK_EXT_robustness2"
 	extDriverProperties = "VK_KHR_driver_properties"
+
+	// extZeroInitWorkgroupMemory lets a shader zero workgroup memory with a
+	// null initializer (naga's Native mode). Vulkan 1.3 promoted it.
+	extZeroInitWorkgroupMemory = "VK_KHR_zero_initialize_workgroup_memory"
 )
 
 // Intel's proprietary Windows driver for integrated GPUs breaks rendering
@@ -71,6 +75,15 @@ type extendedFeatureSupport struct {
 	drawParams  *vk.PhysicalDeviceShaderDrawParametersFeatures
 	imageRobust *vk.PhysicalDeviceImageRobustnessFeatures
 	robustness2 *vk.PhysicalDeviceRobustness2FeaturesKHR
+	zeroInitWG  *vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+}
+
+// zeroInitializeWorkgroupMemory reports shaderZeroInitializeWorkgroupMemory:
+// the driver zeroes workgroup variables declared with a null initializer, so
+// naga can use its Native mode instead of zero stores in the shader (Rust
+// PrivateCapabilities::zero_initialize_workgroup_memory).
+func (s *extendedFeatureSupport) zeroInitializeWorkgroupMemory() bool {
+	return s.zeroInitWG != nil && s.zeroInitWG.ShaderZeroInitializeWorkgroupMemory != 0
 }
 
 // robustBufferAccess2 reports whether the device bounds-checks shader buffer
@@ -279,7 +292,14 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.Phy
 	if s.extensions[extRobustness2] {
 		robustness2.SType = vk.StructureTypePhysicalDeviceRobustness2FeaturesKhr
 		*next = (*uintptr)(unsafe.Pointer(&robustness2))
+		next = &robustness2.PNext
 		s.robustness2 = &robustness2
+	}
+	var zeroInitWG vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+	if s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extZeroInitWorkgroupMemory] {
+		zeroInitWG.SType = vk.StructureTypePhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+		*next = (*uintptr)(unsafe.Pointer(&zeroInitWG))
+		s.zeroInitWG = &zeroInitWG
 	}
 	if features2.PNext != nil {
 		i.cmds.GetPhysicalDeviceFeatures2(device, &features2)
@@ -369,6 +389,7 @@ type deviceFeatureChain struct {
 	drawParams  vk.PhysicalDeviceShaderDrawParametersFeatures
 	imageRobust vk.PhysicalDeviceImageRobustnessFeatures
 	robustness2 vk.PhysicalDeviceRobustness2FeaturesKHR
+	zeroInitWG  vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
 }
 
 // enable fills c with the features to create the device with and returns
@@ -461,6 +482,17 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		c.robustness2.RobustBufferAccess2 = boolToVk(s.robustBufferAccess2())
 		c.robustness2.RobustImageAccess2 = s.robustness2.RobustImageAccess2
 		link(vk.StructureTypePhysicalDeviceRobustness2FeaturesKhr, &c.robustness2.SType, &c.robustness2.PNext, unsafe.Pointer(&c.robustness2))
+	}
+	// Workgroup zeroing by the driver, behind naga's Native mode
+	// (spirvOptions). Rust never enables the extension: it relies on the
+	// Vulkan 1.3 core feature. Our instance is Vulkan 1.2, so the device
+	// enables the extension, without which the feature struct is invalid.
+	if s.zeroInitializeWorkgroupMemory() {
+		if s.apiVersion < vkMakeVersion(1, 3, 0) {
+			extensions = append(extensions, extZeroInitWorkgroupMemory+"\x00")
+		}
+		c.zeroInitWG.ShaderZeroInitializeWorkgroupMemory = vk.Bool32(vk.True)
+		link(vk.StructureTypePhysicalDeviceZeroInitializeWorkgroupMemoryFeatures, &c.zeroInitWG.SType, &c.zeroInitWG.PNext, unsafe.Pointer(&c.zeroInitWG))
 	}
 	return pNext, extensions
 }

@@ -125,6 +125,48 @@ func TestRobustnessEnabledWhereSupported(t *testing.T) {
 	}
 }
 
+// TestWorkgroupZeroInitMode pins naga's workgroup zeroing to Rust wgpu-hal's
+// choice (vulkan/adapter.rs, Adapter::open; vulkan/device.rs, compile_stage):
+// Native with shaderZeroInitializeWorkgroupMemory, Polyfill without, None
+// for a stage that turns zeroing off (P1-VK-013).
+func TestWorkgroupZeroInitMode(t *testing.T) {
+	on, off := vk.Bool32(vk.True), vk.Bool32(vk.False)
+	for _, c := range []struct {
+		name string
+		ext  extendedFeatureSupport
+		want backend.ZeroInitializeWorkgroupMemoryMode
+	}{
+		{"not reportable", extendedFeatureSupport{}, backend.ZeroInitWorkgroupPolyfill},
+		{"feature off", extendedFeatureSupport{zeroInitWG: &vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures{ShaderZeroInitializeWorkgroupMemory: off}}, backend.ZeroInitWorkgroupPolyfill},
+		{"feature on", extendedFeatureSupport{zeroInitWG: &vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures{ShaderZeroInitializeWorkgroupMemory: on}}, backend.ZeroInitWorkgroupNative},
+	} {
+		opts := spirvOptions(vkMakeVersion(1, 2, 0), &c.ext)
+		if opts.ZeroInitializeWorkgroupMemory != c.want {
+			t.Errorf("%s: %v, want %v", c.name, opts.ZeroInitializeWorkgroupMemory, c.want)
+		}
+		if got := stageSPIRVOptions(opts, true).ZeroInitializeWorkgroupMemory; got != c.want {
+			t.Errorf("%s, stage zeroing on: %v, want %v", c.name, got, c.want)
+		}
+		if got := stageSPIRVOptions(opts, false).ZeroInitializeWorkgroupMemory; got != backend.ZeroInitWorkgroupNone {
+			t.Errorf("%s, stage zeroing off: %v, want None", c.name, got)
+		}
+	}
+
+	// The feature is enabled with its extension below Vulkan 1.3.
+	s := extendedFeatureSupport{
+		apiVersion: vkMakeVersion(1, 2, 0),
+		zeroInitWG: &vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures{ShaderZeroInitializeWorkgroupMemory: on},
+	}
+	var c deviceFeatureChain
+	pNext, extensions := s.enable(&c, 0, false)
+	if pNext == nil || c.zeroInitWG.ShaderZeroInitializeWorkgroupMemory != on {
+		t.Error("shaderZeroInitializeWorkgroupMemory not enabled")
+	}
+	if len(extensions) != 1 || extensions[0] != extZeroInitWorkgroupMemory+"\x00" {
+		t.Errorf("extensions %q, want %q", extensions, extZeroInitWorkgroupMemory)
+	}
+}
+
 // TestIntelRobustness2Exclusion pins Rust wgpu-hal's
 // is_intel_igpu_outdated_for_robustness2 (gfx-rs/wgpu#4599).
 func TestIntelRobustness2Exclusion(t *testing.T) {

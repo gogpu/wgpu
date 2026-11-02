@@ -29,9 +29,17 @@ var instanceAPIVersion = vkMakeVersion(1, 2, 0)
 //     loads are Restrict unless the device checks them itself: Unchecked
 //     with robustBufferAccess2 and with robust image access, which Open
 //     enables wherever supported. Binding arrays are Unchecked, as in Rust.
-//   - Loop bounding, workgroup zeroing and ray-query init tracking keep
-//     naga's defaults, which are what wgpu-hal passes.
+//   - Workgroup zeroing: Native (null initializers the driver honors) where
+//     the device enabled shaderZeroInitializeWorkgroupMemory, Polyfill (zero
+//     stores in the shader) otherwise. A compute stage that turns zeroing
+//     off gets None (stageSPIRVOptions).
+//   - Loop bounding and ray-query init tracking keep naga's defaults, which
+//     are what wgpu-hal passes.
 func spirvOptions(deviceAPIVersion uint32, ext *extendedFeatureSupport) spirv.Options {
+	zeroInit := backend.ZeroInitWorkgroupPolyfill
+	if ext.zeroInitializeWorkgroupMemory() {
+		zeroInit = backend.ZeroInitWorkgroupNative
+	}
 	return spirv.Options{
 		Version:        spirvVersion(min(deviceAPIVersion, instanceAPIVersion)),
 		ForcePointSize: true,
@@ -41,7 +49,19 @@ func spirvOptions(deviceAPIVersion uint32, ext *extendedFeatureSupport) spirv.Op
 			ImageLoad:    checkedUnless(ext.robustImageAccess()),
 			BindingArray: backend.BoundsCheckUnchecked,
 		},
+		ZeroInitializeWorkgroupMemory: zeroInit,
 	}
+}
+
+// stageSPIRVOptions returns device's SPIR-V options for one pipeline stage:
+// a stage with zeroInitializeWorkgroupMemory false compiles with naga's None
+// mode, as Rust wgpu-hal's compile_stage does for
+// ProgrammableStage::zero_initialize_workgroup_memory (vulkan/device.rs).
+func stageSPIRVOptions(device spirv.Options, zeroInitializeWorkgroupMemory bool) spirv.Options {
+	if !zeroInitializeWorkgroupMemory {
+		device.ZeroInitializeWorkgroupMemory = backend.ZeroInitWorkgroupNone
+	}
+	return device
 }
 
 // checkedUnless returns Unchecked when the device performs the bounds check

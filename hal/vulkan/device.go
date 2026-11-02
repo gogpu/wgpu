@@ -1345,29 +1345,34 @@ func (d *Device) createVkShaderModule(words []uint32, label, fallbackName string
 }
 
 // compileStage returns the VkShaderModule for one pipeline stage. For a
-// module with overrides, or when the stage gives pipeline constants, it
-// specializes the module's IR for the stage and creates a temporary
-// VkShaderModule, which the caller destroys after the pipeline is created
-// (temp is true). Otherwise it returns the module's own handle.
+// module with overrides, when the stage gives pipeline constants, or when it
+// turns workgroup zeroing off (zeroInit false), it compiles the module's IR
+// for the stage and creates a temporary VkShaderModule, which the caller
+// destroys after the pipeline is created (temp is true). Otherwise it
+// returns the module's own handle.
 //
-// Reference: Rust wgpu-hal vulkan/device.rs:735-845 (compile_stage,
-// process_overrides at :804, temp_raw_module).
-func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (handle vk.ShaderModule, temp bool, err error) {
+// Reference: Rust wgpu-hal vulkan/device.rs, compile_stage (temp options for
+// zero_initialize_workgroup_memory, process_overrides, temp_raw_module).
+func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, zeroInit bool) (handle vk.ShaderModule, temp bool, err error) {
 	if sm.irModule == nil {
 		if len(constants) > 0 {
 			return 0, false, fmt.Errorf("vulkan: pipeline constants need a WGSL shader module (SPIR-V input cannot be specialized)")
 		}
 		return sm.handle, false, nil
 	}
-	if !shaderir.PerStage(sm.irModule.IR, constants) {
+	perStage := shaderir.PerStage(sm.irModule.IR, constants)
+	if !perStage && zeroInit {
 		return sm.handle, false, nil
 	}
 
-	module, err := shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
-	if err != nil {
-		return 0, false, fmt.Errorf("vulkan: %w", err)
+	module := *sm.irModule
+	if perStage {
+		module, err = shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
+		if err != nil {
+			return 0, false, fmt.Errorf("vulkan: %w", err)
+		}
 	}
-	words, err := shaderir.SPIRV(module.IR, d.spirvOptions)
+	words, err := shaderir.SPIRV(module.IR, stageSPIRVOptions(d.spirvOptions, zeroInit))
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
