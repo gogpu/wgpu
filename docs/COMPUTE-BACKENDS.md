@@ -8,16 +8,17 @@ This document describes compute shader support across wgpu's HAL backends.
 |---------|:------:|:----:|:-----:|:----:|:--------:|:-------:|:----:|
 | Compute shaders | Yes | Yes | Yes | Partial | Yes (interpreted) | Yes | No |
 | Storage buffers | Yes | Yes | Yes | Yes | Yes (interpreted) | Yes | No |
-| Timestamp queries | HAL only¹ | HAL only¹ | No² | Windows only | No | No | No |
+| Timestamp queries | Yes¹ | Yes | No² | Windows only | No | No | No |
 | Indirect dispatch | Yes | Yes | Yes | Yes | No | Yes | No |
 | Buffer mapping (GPU->CPU) | Yes | Yes | Yes | Yes | Yes | Yes | No |
 | Max workgroup size X | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
 | Max workgroup invocations | 1024+ | 1024 | 1024 | 1024 | 1024 | Browser | N/A |
 
-¹ The HAL implements timestamp queries, but the adapter does not offer `FeatureTimestampQuery` yet, so the public
-`Device.CreateQuerySet` refuses timestamp query sets on this backend.
-² The adapter offers `FeatureTimestampQuery` on Metal 3 GPUs, but query sets are not implemented: `CreateQuerySet`
-returns `ErrTimestampsNotSupported`.
+¹ Offered when the graphics queue family has at least 36 valid timestamp bits, as Rust wgpu-hal decides it.
+² Not offered: Metal query sets are not implemented yet (`CreateQuerySet` returns `ErrTimestampsNotSupported`).
+
+Timestamp queries need `FeatureTimestampQuery` on the device. Render and compute passes take `TimestampWrites`, and
+`Queue.GetTimestampPeriod` converts ticks to nanoseconds.
 
 ## Vulkan
 
@@ -26,24 +27,25 @@ returns `ErrTimestampsNotSupported`.
 Vulkan provides the most complete compute shader implementation:
 
 - **Shader compilation:** WGSL -> SPIR-V (via `gogpu/naga`).
-- **Timestamp queries (HAL):** implemented using `vkCmdWriteTimestamp` at the beginning and end of passes. Results are copied to a buffer via `vkCmdCopyQueryPoolResults`. Not reachable through the public API yet (see the note under the table).
+- **Timestamp queries:** `vkCmdWriteTimestamp` at the beginning and end of render and compute passes. Results are copied to a buffer via `vkCmdCopyQueryPoolResults`.
 - **Memory barriers:** Automatic global memory barrier inserted at compute pass end (`End()`) to ensure shader writes are visible to subsequent commands.
 - **Workgroup size limits:** Depends on the physical device. Typical minimum guaranteed by Vulkan spec: 128 invocations per workgroup. Most desktop GPUs support 1024.
 - **Synchronization:** Use `Fence` + `Device.Wait()` to synchronize CPU with GPU completion.
-- **Timestamp period:** the HAL queue's `GetTimestampPeriod()` returns nanoseconds per tick; the public `wgpu.Queue` does not expose it yet.
+- **Timestamp period:** `Queue.GetTimestampPeriod()` returns nanoseconds per tick (`timestampPeriod` of the device).
 
 ### Vulkan-Specific Notes
 
-- Query pools are reset automatically before each timestamp write.
+- Query pools are reset in the command buffer (`vkCmdResetQueryPool`) before their timestamps are written, so no
+  host query reset feature is needed.
 - The `ResolveQuerySet` method inserts a pipeline barrier before copying results to ensure timestamps are finalized.
 - `VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT` flags ensure results are complete 64-bit values.
 
 ## DirectX 12
 
-**Status:** Compute shaders work. Timestamp queries are implemented in the HAL but not offered through the public API yet.
+**Status:** Compute shaders work. Timestamp queries are offered on every adapter, as in Rust wgpu-hal.
 
 - **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, SM 6.0+, no external dependencies).
-- **Timestamp queries (HAL):** implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
+- **Timestamp queries:** implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup (D3D12 spec).
 - **Indirect dispatch:** `DispatchIndirect` via `ExecuteIndirect` with pre-created `ID3D12CommandSignature` (dispatch args: 3 × uint32 = 12 bytes). Also supports `DrawIndirect` (16B) and `DrawIndexedIndirect` (20B).
 - **Root signature:** Compute pipelines use a separate root signature from graphics pipelines. Descriptor heaps are bound lazily on first `SetBindGroup` call.
@@ -55,10 +57,11 @@ Vulkan provides the most complete compute shader implementation:
 
 ## Metal
 
-**Status:** Compute shaders work. Timestamp queries are stubbed.
+**Status:** Compute shaders work. Timestamp queries are not implemented, and `FeatureTimestampQuery` is not offered.
 
-- **Shader compilation:** WGSL -> MSL (via `gogpu/naga`).
-- **Timestamp queries:** `CreateQuerySet` currently returns `ErrTimestampsNotSupported`. Metal supports counter sample buffers (`MTLCounterSampleBuffer`) for GPU timestamps on Apple Silicon. Implementation is planned.
+- **Shader compilation:** WGSL -> MSL (via `gogpu/naga`), at the MSL version the device supports (the OS version picks
+  it, as in Rust wgpu-hal), so shaders that need a newer MSL than 2.1 compile.
+- **Timestamp queries:** `CreateQuerySet` returns `ErrTimestampsNotSupported`. Metal supports counter sample buffers (`MTLCounterSampleBuffer`) for GPU timestamps on Apple Silicon. Implementation is planned.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup on Apple Silicon. Older Intel Macs may have lower limits.
 - **Compute encoder:** Metal uses `MTLComputeCommandEncoder` (created from `MTLCommandBuffer`). The encoder is `Retain`-ed to survive autorelease pool drains.
 

@@ -333,29 +333,31 @@ if ready, _ := pending.Status(); ready {
 
 ## Timestamp Queries for Profiling
 
-> **Note:** The root package has `Device.CreateQuerySet` and render-pass `TimestampWrites`, but compute-pass
-> timestamp writes and the timestamp period are HAL-only for now, and only adapters that offer
-> `FeatureTimestampQuery` accept timestamp query sets (see [Backend Differences](COMPUTE-BACKENDS.md)). The example
-> below uses the `hal/` package directly: `device.HalDevice()` returns the HAL device; the HAL queue is available
-> when you create the device from HAL objects with `wgpu.NewDeviceFromHAL`.
+You can measure GPU execution time of compute and render passes with timestamp queries. They need
+`FeatureTimestampQuery`, which Vulkan, DX12 and Windows GLES offer when the device supports it (see
+[Backend Differences](COMPUTE-BACKENDS.md)). Request it when you create the device:
 
-You can measure GPU execution time of compute passes using timestamp queries.
+```go
+if !adapter.Features().Contains(gputypes.FeatureTimestampQuery) {
+    log.Fatal("timestamp queries are not available on this adapter")
+}
+device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{
+    RequiredFeatures: gputypes.Features(gputypes.FeatureTimestampQuery),
+})
+```
 
 ### Creating a Query Set
 
 ```go
-import "github.com/gogpu/wgpu/hal"
-
-querySet, err := halDevice.CreateQuerySet(&hal.QuerySetDescriptor{
+querySet, err := device.CreateQuerySet(&wgpu.QuerySetDescriptor{
     Label: "Timestamp Queries",
-    Type:  hal.QueryTypeTimestamp,
+    Type:  wgpu.QueryTypeTimestamp,
     Count: 2, // begin + end
 })
 if err != nil {
-    // Backend may not support timestamps
-    log.Println("timestamps not supported:", err)
+    log.Fatal("failed to create query set:", err)
 }
-defer halDevice.DestroyQuerySet(querySet)
+defer querySet.Release()
 ```
 
 ### Using Timestamps in a Compute Pass
@@ -364,50 +366,60 @@ defer halDevice.DestroyQuerySet(querySet)
 beginIdx := uint32(0)
 endIdx := uint32(1)
 
-computePass := halEncoder.BeginComputePass(&hal.ComputePassDescriptor{
+computePass, err := encoder.BeginComputePass(&wgpu.ComputePassDescriptor{
     Label: "Timed Compute Pass",
-    TimestampWrites: &hal.ComputePassTimestampWrites{
+    TimestampWrites: &wgpu.ComputePassTimestampWrites{
         QuerySet:                  querySet,
         BeginningOfPassWriteIndex: &beginIdx,
         EndOfPassWriteIndex:       &endIdx,
     },
 })
+if err != nil {
+    log.Fatal("failed to begin compute pass:", err)
+}
 
 // ... dispatch work ...
 computePass.End()
 ```
 
+Render passes take the same fields through `RenderPassDescriptor.TimestampWrites`.
+
 ### Reading Timestamp Results
 
 ```go
-// Create a buffer for timestamp results (2 * uint64 = 16 bytes)
-timestampBuffer, _ := halDevice.CreateBuffer(&hal.BufferDescriptor{
-    Label: "Timestamp Buffer",
+A query set resolves into a buffer with `QueryResolve` usage. As in WebGPU, that buffer cannot be mapped,
+so copy the results into a `MapRead` buffer:
+
+```go
+// 2 timestamps * 8 bytes
+resolveBuffer, _ := device.CreateBuffer(&wgpu.BufferDescriptor{
+    Label: "Timestamp Resolve",
     Size:  16,
-    Usage: gputypes.BufferUsageCopyDst | gputypes.BufferUsageMapRead,
+    Usage: wgpu.BufferUsageQueryResolve | wgpu.BufferUsageCopySrc,
+})
+readBuffer, _ := device.CreateBuffer(&wgpu.BufferDescriptor{
+    Label: "Timestamp Readback",
+    Size:  16,
+    Usage: wgpu.BufferUsageCopyDst | wgpu.BufferUsageMapRead,
 })
 
-// Resolve timestamps into the buffer
-halEncoder.ResolveQuerySet(querySet, 0, 2, timestampBuffer, 0)
+// After the timed pass, in the same encoder:
+encoder.ResolveQuerySet(querySet, 0, 2, resolveBuffer, 0)
+encoder.CopyBufferToBuffer(resolveBuffer, 0, readBuffer, 0, 16)
+// ... Finish and Submit ...
 
-// After submit, map the timestamp buffer. At the HAL layer this is a
-// direct call to Device.MapBuffer (the high-level Buffer.Map wraps this
-// with state-machine tracking and context support).
-mapping, err := halDevice.MapBuffer(timestampBuffer, 0, 16)
-if err != nil {
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+if err := readBuffer.Map(ctx, wgpu.MapModeRead, 0, 16); err != nil {
     log.Fatal("failed to map timestamp buffer:", err)
 }
-defer halDevice.UnmapBuffer(timestampBuffer)
+defer readBuffer.Unmap()
 
-timestampBytes := unsafe.Slice((*byte)(mapping.Ptr), 16)
+rng, _ := readBuffer.MappedRange(0, 16)
+timestamps := unsafe.Slice((*uint64)(unsafe.Pointer(&rng.Bytes()[0])), 2)
 
-timestamps := unsafe.Slice((*uint64)(unsafe.Pointer(&timestampBytes[0])), 2)
-begin := timestamps[0]
-end := timestamps[1]
-
-// Convert to nanoseconds using the timestamp period
-period := halQueue.GetTimestampPeriod()
-elapsedNs := float64(end-begin) * float64(period)
+// Ticks to nanoseconds with the queue's timestamp period.
+elapsedNs := float64(timestamps[1]-timestamps[0]) * float64(device.Queue().GetTimestampPeriod())
 fmt.Printf("Compute pass took %.3f ms\n", elapsedNs/1e6)
 ```
 

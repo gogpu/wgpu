@@ -60,7 +60,7 @@
 ✅ **Automatic resource lifecycle** — `runtime.AddCleanup` for Buffer/BindGroup (ADR-018, Rust Arc+Drop pattern). GC safety net prevents per-frame resource leaks.
 ✅ **Zero-allocation WriteBuffer batching** — pre-allocated BufferCopy + stack barrier arrays. All PendingWrites hot paths 0 allocs/op.
 ✅ **Full SPIR-V interpreter** — 7 phases (~10K LOC): vertex/fragment/compute on CPU, texture sampling, GLSL.std.450 intrinsics, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. For debugging/CI, not production.
-✅ **DX12 timestamp queries (HAL)** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity); the adapter does not offer `FeatureTimestampQuery` yet
+✅ **DX12 timestamp queries** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity); `FeatureTimestampQuery` offered since v0.34.7
 ✅ **Queue thread safety** — Submit/WriteBuffer/WriteTexture serialized via sync.Mutex (Rust wgpu-core parity)
 ✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
