@@ -671,12 +671,8 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, err
 	}
 
-	// VAL-010: Validate workgroup_size against device limits.
-	// Matches Rust wgpu-core validation.rs:1243-1264.
-	if desc.Module != nil && desc.Module.irModule != nil {
-		if err := d.validateComputeWorkgroupSize(desc.Label, desc.EntryPoint, desc.Module); err != nil {
-			return nil, err
-		}
+	if err := d.validateComputeShader(desc); err != nil {
+		return nil, err
 	}
 
 	halPipeline, err := halDevice.CreateComputePipeline(halDesc)
@@ -721,66 +717,83 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}, nil
 }
 
-// validateComputeWorkgroupSize checks shader workgroup_size against device limits.
-// VAL-010: Matches Rust wgpu-core validation.rs:1243-1264.
-func (d *Device) validateComputeWorkgroupSize(label, entryPoint string, module *ShaderModule) error {
-	irMod := module.irModule
-	if irMod == nil {
+// validateComputeShader checks the compute entry point against the device
+// limits, after the pipeline constants are applied: workgroup size
+// (VAL-010, Rust wgpu-core validation.rs check_stage) and workgroup storage
+// (WebGPU createComputePipeline, workgroupStorageUsed ≤
+// maxComputeWorkgroupStorageSize; Dawn ShaderModule.cpp, after the
+// workgroup-size checks). A module without IR (SPIR-V) is not checked.
+func (d *Device) validateComputeShader(desc *ComputePipelineDescriptor) error {
+	irMod, info, index, err := desc.Module.specializedEntryPoint(ir.StageCompute, desc.EntryPoint, desc.Constants)
+	if err != nil {
+		return &core.CreateComputePipelineError{
+			Kind:  core.CreateComputePipelineErrorPipelineConstants,
+			Label: desc.Label,
+			Cause: err,
+		}
+	}
+	if index < 0 {
 		return nil
 	}
-
-	// Find the entry point matching the requested name.
-	for i := range irMod.EntryPoints {
-		ep := &irMod.EntryPoints[i]
-		if ep.Name != entryPoint || ep.Stage != ir.StageCompute {
-			continue
+	if err := d.validateComputeWorkgroupSize(desc.Label, irMod.EntryPoints[index].Workgroup); err != nil {
+		return err
+	}
+	storage := core.WorkgroupStorageSize(irMod, info.EntryPoints[index].GlobalUses)
+	if limit := d.core.Limits.MaxComputeWorkgroupStorageSize; storage > uint64(limit) {
+		return &core.CreateComputePipelineError{
+			Kind:             core.CreateComputePipelineErrorWorkgroupStorageExceeded,
+			Label:            desc.Label,
+			WorkgroupStorage: storage,
+			Limit:            limit,
 		}
+	}
+	return nil
+}
 
-		wg := ep.Workgroup
-		limits := d.core.Limits
+// validateComputeWorkgroupSize checks shader workgroup_size against device limits.
+// VAL-010: Matches Rust wgpu-core validation.rs:1243-1264.
+func (d *Device) validateComputeWorkgroupSize(label string, wg [3]uint32) error {
+	limits := d.core.Limits
 
-		// Check each dimension for zero.
-		dimNames := [3]string{"X", "Y", "Z"}
-		for dim := 0; dim < 3; dim++ {
-			if wg[dim] == 0 {
-				return &core.CreateComputePipelineError{
-					Kind:      core.CreateComputePipelineErrorWorkgroupSizeZero,
-					Label:     label,
-					Dimension: dimNames[dim],
-				}
-			}
-		}
-
-		// Check each dimension against device limits.
-		dimLimits := [3]uint32{
-			limits.MaxComputeWorkgroupSizeX,
-			limits.MaxComputeWorkgroupSizeY,
-			limits.MaxComputeWorkgroupSizeZ,
-		}
-		for dim := 0; dim < 3; dim++ {
-			if wg[dim] > dimLimits[dim] {
-				return &core.CreateComputePipelineError{
-					Kind:      core.CreateComputePipelineErrorWorkgroupSizeExceeded,
-					Label:     label,
-					Dimension: dimNames[dim],
-					Size:      wg[dim],
-					Limit:     dimLimits[dim],
-				}
-			}
-		}
-
-		// Check total invocations (x*y*z) against MaxComputeInvocationsPerWorkgroup.
-		total := uint64(wg[0]) * uint64(wg[1]) * uint64(wg[2])
-		if total > uint64(limits.MaxComputeInvocationsPerWorkgroup) {
+	// Check each dimension for zero.
+	dimNames := [3]string{"X", "Y", "Z"}
+	for dim := 0; dim < 3; dim++ {
+		if wg[dim] == 0 {
 			return &core.CreateComputePipelineError{
-				Kind:             core.CreateComputePipelineErrorTooManyInvocations,
-				Label:            label,
-				TotalInvocations: total,
-				Limit:            limits.MaxComputeInvocationsPerWorkgroup,
+				Kind:      core.CreateComputePipelineErrorWorkgroupSizeZero,
+				Label:     label,
+				Dimension: dimNames[dim],
 			}
 		}
+	}
 
-		break
+	// Check each dimension against device limits.
+	dimLimits := [3]uint32{
+		limits.MaxComputeWorkgroupSizeX,
+		limits.MaxComputeWorkgroupSizeY,
+		limits.MaxComputeWorkgroupSizeZ,
+	}
+	for dim := 0; dim < 3; dim++ {
+		if wg[dim] > dimLimits[dim] {
+			return &core.CreateComputePipelineError{
+				Kind:      core.CreateComputePipelineErrorWorkgroupSizeExceeded,
+				Label:     label,
+				Dimension: dimNames[dim],
+				Size:      wg[dim],
+				Limit:     dimLimits[dim],
+			}
+		}
+	}
+
+	// Check total invocations (x*y*z) against MaxComputeInvocationsPerWorkgroup.
+	total := uint64(wg[0]) * uint64(wg[1]) * uint64(wg[2])
+	if total > uint64(limits.MaxComputeInvocationsPerWorkgroup) {
+		return &core.CreateComputePipelineError{
+			Kind:             core.CreateComputePipelineErrorTooManyInvocations,
+			Label:            label,
+			TotalInvocations: total,
+			Limit:            limits.MaxComputeInvocationsPerWorkgroup,
+		}
 	}
 
 	return nil

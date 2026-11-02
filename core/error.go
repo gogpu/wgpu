@@ -711,6 +711,14 @@ const (
 	CreateComputePipelineErrorWorkgroupSizeZero
 	// CreateComputePipelineErrorTooManyInvocations indicates total invocations exceed device limit.
 	CreateComputePipelineErrorTooManyInvocations
+	// CreateComputePipelineErrorWorkgroupStorageExceeded indicates the
+	// workgroup storage the entry point uses exceeds
+	// maxComputeWorkgroupStorageSize (WebGPU createComputePipeline).
+	CreateComputePipelineErrorWorkgroupStorageExceeded
+	// CreateComputePipelineErrorPipelineConstants indicates the pipeline
+	// constants do not apply to the module's overrides. Cause holds naga's
+	// error.
+	CreateComputePipelineErrorPipelineConstants
 )
 
 // CreateComputePipelineError represents an error during compute pipeline creation.
@@ -726,6 +734,11 @@ type CreateComputePipelineError struct {
 	Limit uint32
 	// TotalInvocations is the product x*y*z for TooManyInvocations errors.
 	TotalInvocations uint64
+	// WorkgroupStorage is the workgroup storage in bytes the entry point
+	// uses, for WorkgroupStorageExceeded errors.
+	WorkgroupStorage uint64
+	// Cause is naga's error for PipelineConstants errors.
+	Cause error
 }
 
 // Error implements the error interface.
@@ -750,14 +763,22 @@ func (e *CreateComputePipelineError) Error() string {
 	case CreateComputePipelineErrorTooManyInvocations:
 		return fmt.Sprintf("compute pipeline %q: total workgroup invocations %d exceeds device limit %d",
 			label, e.TotalInvocations, e.Limit)
+	case CreateComputePipelineErrorWorkgroupStorageExceeded:
+		return fmt.Sprintf("compute pipeline %q: workgroup storage %d bytes exceeds maxComputeWorkgroupStorageSize %d",
+			label, e.WorkgroupStorage, e.Limit)
+	case CreateComputePipelineErrorPipelineConstants:
+		return fmt.Sprintf("compute pipeline %q: %v", label, e.Cause)
 	default:
 		return fmt.Sprintf("compute pipeline %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or naga error, if any.
 func (e *CreateComputePipelineError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateComputePipelineError returns true if the error is a CreateComputePipelineError.

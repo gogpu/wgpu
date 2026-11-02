@@ -6,6 +6,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // ShaderModule represents a compiled shader module.
@@ -45,6 +46,27 @@ func (m *ShaderModule) entryPointIndex(stage ir.ShaderStage, name string) int {
 		found = i
 	}
 	return found
+}
+
+// specializedEntryPoint returns the IR, its ModuleInfo and the index of the
+// entry point a pipeline stage names, with the pipeline constants applied:
+// a module with overrides, or a pipeline giving constants, is specialized
+// for the stage (naga.ProcessOverrides), so override-sized workgroup sizes
+// and arrays have their values. The index is -1 without IR or without that
+// entry point. An error is a constant that does not apply to the module.
+func (m *ShaderModule) specializedEntryPoint(stage ir.ShaderStage, name string, constants map[string]float64) (*ir.Module, valid.ModuleInfo, int, error) {
+	i := m.entryPointIndex(stage, name)
+	if i < 0 || i >= len(m.irInfo.EntryPoints) {
+		return nil, valid.ModuleInfo{}, -1, nil
+	}
+	if !shaderir.PerStage(m.irModule, constants) {
+		return m.irModule, m.irInfo, i, nil
+	}
+	specialized, err := shaderir.Specialize(shaderir.Module{IR: m.irModule, Info: m.irInfo}, stage, m.irModule.EntryPoints[i].Name, constants)
+	if err != nil {
+		return nil, valid.ModuleInfo{}, -1, err
+	}
+	return specialized.IR, specialized.Info, 0, nil // Specialize keeps only this entry point
 }
 
 // bindingSizes returns the minimum buffer binding sizes of the globals the
