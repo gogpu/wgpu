@@ -31,20 +31,15 @@ func TestValidateShaderModuleFeatures_SPIRVPath(t *testing.T) {
 	}
 }
 
-func TestValidateShaderSubgroupFeatures_Barrier_NoFeature(t *testing.T) {
+// TestValidateWGSLShaderFeatures_SubgroupWordNotGated checks that only
+// subgroup operations need the subgroup features: the word in a comment or
+// an identifier is not a use.
+func TestValidateWGSLShaderFeatures_SubgroupWordNotGated(t *testing.T) {
 	t.Parallel()
-	source := `@compute @workgroup_size(1) fn main() { subgroupBarrier(); }`
-	err := validateShaderSubgroupFeatures(source, nil, gputypes.Features(0))
-	if !IsFeatureError(err) {
-		t.Fatalf("expected feature error, got %T: %v", err, err)
-	}
-}
-
-func TestValidateShaderSubgroupFeatures_Operations_WithFeature(t *testing.T) {
-	t.Parallel()
-	source := `@compute @workgroup_size(1) fn main() { let x = subgroupAdd(1u); }`
-	features := gputypes.Features(gputypes.FeatureSubgroupOperations)
-	if err := validateShaderSubgroupFeatures(source, nil, features); err != nil {
+	source := `// no subgroupBarrier or subgroup operations here
+@group(0) @binding(0) var<storage, read_write> subgroup_sums: array<u32>;
+@compute @workgroup_size(1) fn main() { subgroup_sums[0] = 1u; }`
+	if err := validateWGSLShaderFeatures(source, 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -98,16 +93,24 @@ func TestValidateWGSLShaderCapabilityGates(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
+		base    gputypes.Features // granted in both runs
 		feature gputypes.Feature
 		source  string
 	}{
-		{"f16 type", gputypes.FeatureShaderF16, `enable f16;
+		// The WGSL spec requires `enable subgroups;` for subgroup built-ins
+		// (Rust naga does not implement the directive yet).
+		{"subgroup operation", 0, gputypes.FeatureSubgroupOperations, `enable subgroups;
+@compute @workgroup_size(1) fn main() { let x = subgroupAdd(1u); }`},
+		// A subgroup barrier needs SUBGROUP | SUBGROUP_BARRIER, as Rust.
+		{"subgroup barrier", gputypes.Features(gputypes.FeatureSubgroupOperations), gputypes.FeatureSubgroupBarrier, `enable subgroups;
+@compute @workgroup_size(1) fn main() { subgroupBarrier(); }`},
+		{"f16 type", 0, gputypes.FeatureShaderF16, `enable f16;
 @group(0) @binding(0) var<storage, read_write> out: array<f16>;
 @compute @workgroup_size(1) fn main() { out[0] = 1.0h; }`},
-		{"f64 type", gputypes.FeatureShaderFloat64, `@group(0) @binding(0) var<storage, read_write> out: array<u32>;
+		{"f64 type", 0, gputypes.FeatureShaderFloat64, `@group(0) @binding(0) var<storage, read_write> out: array<u32>;
 var<private> x: f64;
 @compute @workgroup_size(1) fn main() { out[0] = u32(f32(x)); }`},
-		{"ray query", gputypes.FeatureRayQuery, `enable wgpu_ray_query;
+		{"ray query", 0, gputypes.FeatureRayQuery, `enable wgpu_ray_query;
 @group(0) @binding(0) var acc: acceleration_structure;
 @group(0) @binding(1) var<storage, read_write> out: array<u32>;
 @compute @workgroup_size(1) fn main() {
@@ -120,12 +123,12 @@ var<private> x: f64;
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateWGSLShaderFeatures(tt.source, 0)
+			err := validateWGSLShaderFeatures(tt.source, tt.base)
 			var fe *FeatureError
 			if !errors.As(err, &fe) || fe.Feature != tt.feature.String() {
 				t.Fatalf("without %v: error %v (%T), want *FeatureError for it", tt.feature, err, err)
 			}
-			if err := validateWGSLShaderFeatures(tt.source, gputypes.Features(tt.feature)); err != nil {
+			if err := validateWGSLShaderFeatures(tt.source, tt.base|gputypes.Features(tt.feature)); err != nil {
 				t.Fatalf("with %v: %v", tt.feature, err)
 			}
 		})

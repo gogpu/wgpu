@@ -110,7 +110,8 @@ func TestValidateShaderModuleDescriptor_F16_NoFeature(t *testing.T) {
 	desc := &hal.ShaderModuleDescriptor{
 		Label: "f16",
 		Source: hal.ShaderSource{
-			WGSL: `@vertex fn main() -> @builtin(position) vec4<f32> {
+			WGSL: `enable f16;
+			@vertex fn main() -> @builtin(position) vec4<f32> {
 			 var x: f16 = 1.0;
 			 return vec4<f32>(f32(x));
 			}`,

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/gogpu/gputypes"
-	nagair "github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
 	"github.com/gogpu/wgpu/hal"
@@ -25,11 +24,6 @@ func validateShaderModuleFeatures(desc *hal.ShaderModuleDescriptor, features gpu
 }
 
 func validateWGSLShaderFeatures(source string, features gputypes.Features) error {
-	// Subgroup gates scan raw source and run even when naga parse fails.
-	if err := validateShaderSubgroupFeatures(source, nil, features); err != nil {
-		return err
-	}
-
 	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
 		return nil //nolint:nilerr // parse errors are reported by HAL shader compilation
@@ -115,21 +109,4 @@ func capabilityNames(msg string) map[string]struct{} {
 		names[token] = struct{}{}
 	}
 	return names
-}
-
-func validateShaderSubgroupFeatures(source string, _ *nagair.Module, features gputypes.Features) error {
-	usesBarrier := strings.Contains(source, "subgroupBarrier")
-	usesSubgroup := strings.Contains(source, "subgroup")
-
-	if usesBarrier {
-		if err := RequireFeature(features, gputypes.FeatureSubgroupBarrier, "CreateShaderModule"); err != nil {
-			return err
-		}
-	}
-	if usesSubgroup {
-		if err := RequireFeature(features, gputypes.FeatureSubgroupOperations, "CreateShaderModule"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
