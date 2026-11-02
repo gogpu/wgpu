@@ -1,4 +1,4 @@
-//go:build !rust && !(js && wasm)
+//go:build !android && !(js && wasm) && !rust
 
 package allbackends_test
 
