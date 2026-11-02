@@ -567,7 +567,7 @@ func TestCreateRenderPipelineError_AllKinds(t *testing.T) {
 		{
 			name:    "NoFragmentTargets",
 			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorNoFragmentTargets, Label: "rp5"},
-			wantSub: "must have at least one color target",
+			wantSub: "a color target or a depth-stencil state",
 		},
 		{
 			name:    "TooManyColorTargets",

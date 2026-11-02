@@ -681,6 +681,31 @@ func TestValidateRenderPipelineDescriptor_NoFragmentTargets(t *testing.T) {
 	}
 }
 
+// TestValidateRenderPipelineDescriptor_DepthOnlyFragment: a fragment stage
+// with no color targets is valid when the pipeline has a depth-stencil state,
+// for example a shadow map with alpha-tested discard. WebGPU requires at
+// least one attachment, a color target or the depth-stencil state
+// (GPURenderPipelineDescriptor validation), as Rust wgpu-core does.
+func TestValidateRenderPipelineDescriptor_DepthOnlyFragment(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label:  "shadow",
+		Vertex: hal.VertexState{Module: mockShaderModule{}, EntryPoint: "vs_main"},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth32Float,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionLess,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	if err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0)); err != nil {
+		t.Fatalf("depth-only pipeline with a fragment stage: %v", err)
+	}
+}
+
 func TestValidateRenderPipelineDescriptor_TooManyColorTargets(t *testing.T) {
 	limits := gputypes.DefaultLimits()
 	targets := make([]gputypes.ColorTargetState, limits.MaxColorAttachments+1)
