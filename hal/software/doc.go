@@ -40,7 +40,7 @@
 //
 //	// Software backend is registered automatically
 //	// Adapter name: "Software Renderer"
-//	// Device type: types.DeviceTypeCPU
+//	// Device type: gputypes.DeviceTypeCPU
 //
-// Backend identifier: types.BackendEmpty
+// Backend identifier: gputypes.BackendEmpty
 package software

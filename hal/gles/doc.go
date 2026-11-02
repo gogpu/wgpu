@@ -5,17 +5,15 @@
 
 // Package gles implements the HAL backend for OpenGL ES 3.0 / OpenGL 3.3+.
 //
-// This backend provides a Pure Go implementation using syscall directly,
-// without any CGO or external dependencies.
+// This backend is Pure Go, without CGO: syscall on Windows, goffi on Linux.
 //
 // # Platform Support
 //
-// Currently supported:
+// Supported:
 //   - Windows (WGL) - via hal/gles/wgl package
+//   - Linux (EGL: X11, Wayland, surfaceless) - via hal/gles/egl package
 //
 // Planned:
-//   - Linux (GLX/EGL)
-//   - macOS (CGL/EGL)
 //   - Android (EGL)
 //   - WebGL (via wasm)
 //
@@ -26,9 +24,7 @@
 //	hal/gles/
 //	├── gl/       - OpenGL function bindings
 //	├── wgl/      - Windows GL context management
-//	├── glx/      - Linux X11 GL context (planned)
-//	├── egl/      - EGL context for mobile/modern Linux (planned)
-//	└── cgl/      - macOS CGL context (planned)
+//	└── egl/      - EGL display and context management (Linux)
 //
 // # Usage
 //
@@ -36,7 +32,7 @@
 //
 //	import _ "github.com/gogpu/wgpu/hal/gles"
 //
-// The backend is then available via hal.GetBackend(types.BackendGL).
+// The backend is then available via hal.GetBackend(gputypes.BackendGL).
 //
 // # OpenGL Version Requirements
 //

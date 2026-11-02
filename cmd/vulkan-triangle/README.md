@@ -30,7 +30,7 @@ This integration test validates:
 ## Test Output
 
 The test should:
-- Create an 800x600 window titled "Vulkan Triangle - Pure Go"
+- Create an 800x600 window titled "Vulkan Triangle - Pure Go (Multi-Thread)"
 - Display a **red triangle** on a **blue background**
 - Print initialization steps with OK/FAILED status
 - Show FPS counter in console
@@ -74,7 +74,7 @@ Window (Win32) → Surface (VK_KHR_win32_surface)
 
 ### No CGO Required
 
-All Vulkan calls use `syscall.SyscallN` via `hal/vulkan/vk` package.
+All Vulkan calls go through goffi (Pure Go FFI) via the `hal/vulkan/vk` package.
 No C compiler needed.
 
 ## Building
@@ -82,7 +82,7 @@ No C compiler needed.
 ```bash
 # Windows only (for now)
 cd cmd/vulkan-triangle
-GOROOT="/c/Program Files/Go" go build
+go build -o vulkan-triangle.exe .
 ```
 
 ## Running
@@ -99,7 +99,7 @@ GOROOT="/c/Program Files/Go" go build
 ## Expected Output
 
 ```
-=== Vulkan Triangle Integration Test ===
+=== Vulkan Triangle Integration Test (Multi-Thread) ===
 
 1. Creating window... OK
 2. Creating Vulkan backend... OK
@@ -141,7 +141,7 @@ Average FPS: 60.0
 
 **Error**: `vkCreateInstance failed`
 - GPU driver may not support Vulkan 1.2+
-- Try removing `types.InstanceFlagsDebug` from instance descriptor
+- Try removing `gputypes.InstanceFlagsDebug` from the instance descriptor
 
 **Error**: `no adapters found`
 - GPU driver doesn't support the surface type

@@ -3,7 +3,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-// Package gl provides low-level OpenGL function bindings using syscall.
+// Package gl provides low-level OpenGL function bindings: syscall on Windows, goffi on Linux.
 //
 // This package is used internally by the GLES HAL backend.
 // It loads OpenGL functions at runtime via wglGetProcAddress (Windows)

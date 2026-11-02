@@ -10,5 +10,5 @@
 //   - Fallback when no real backend is available
 //
 // All operations succeed immediately and return placeholder resources.
-// The backend is identified as types.BackendEmpty.
+// The backend is identified as gputypes.BackendEmpty.
 package noop

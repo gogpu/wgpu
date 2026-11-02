@@ -42,7 +42,7 @@
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	fmt.Printf("Adapter: %s\n", desc.Description())
+//	fmt.Printf("Adapter: %s\n", desc.DescriptionString())
 //
 // # Error Handling
 //

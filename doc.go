@@ -18,7 +18,8 @@
 // # Resource Lifecycle
 //
 // All GPU resources must be explicitly released with Release().
-// Resources are reference-counted internally. Using a released resource panics.
+// Resources are reference-counted internally. Release is idempotent; methods
+// on a released resource that return an error report ErrReleased.
 //
 // # Backend Registration
 //
