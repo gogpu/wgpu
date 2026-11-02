@@ -139,6 +139,11 @@ func TestCreateBufferError_AllKinds(t *testing.T) {
 			wantSub: "invalid usage flags",
 		},
 		{
+			name:    "MissingDownlevelFlags",
+			err:     &CreateBufferError{Kind: CreateBufferErrorMissingDownlevelFlags, Label: "buf-flags", MissingFlags: 1},
+			wantSub: "usage needs downlevel flags",
+		},
+		{
 			name:    "MapReadWriteExclusive",
 			err:     &CreateBufferError{Kind: CreateBufferErrorMapReadWriteExclusive, Label: "buf5"},
 			wantSub: "mutually exclusive",
@@ -512,6 +517,16 @@ func TestCreateShaderModuleError_AllKinds(t *testing.T) {
 			wantSub: "HAL error",
 		},
 		{
+			name:    "Parsing",
+			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorParsing, Label: "shader-parse", Cause: errors.New("parse failed")},
+			wantSub: "parse failed",
+		},
+		{
+			name:    "Validation",
+			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorValidation, Label: "shader-validation", Cause: errors.New("validation failed")},
+			wantSub: "validation failed",
+		},
+		{
 			name:    "Unknown",
 			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorKind(99), Label: "shader4"},
 			wantSub: "unknown error",
@@ -743,6 +758,16 @@ func TestCreateComputePipelineError_AllKinds(t *testing.T) {
 			wantSub: "total workgroup invocations",
 		},
 		{
+			name:    "WorkgroupStorageExceeded",
+			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorWorkgroupStorageExceeded, Label: "cp-storage", WorkgroupStorage: 32768, Limit: 16384},
+			wantSub: "workgroup storage 32768 bytes",
+		},
+		{
+			name:    "PipelineConstants",
+			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorPipelineConstants, Label: "cp-constants", Cause: errors.New("unknown override")},
+			wantSub: "unknown override",
+		},
+		{
 			name:    "Unknown",
 			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorKind(99), Label: "cp7"},
 			wantSub: "unknown error",
@@ -768,6 +793,12 @@ func TestCreateComputePipelineError_Unwrap(t *testing.T) {
 	e := &CreateComputePipelineError{Kind: CreateComputePipelineErrorHAL, HALError: halErr}
 	if !errors.Is(e.Unwrap(), halErr) {
 		t.Error("Unwrap() did not return HALError")
+	}
+
+	cause := errors.New("pipeline constants")
+	e = &CreateComputePipelineError{Kind: CreateComputePipelineErrorPipelineConstants, Cause: cause}
+	if !errors.Is(e.Unwrap(), cause) {
+		t.Error("Unwrap() did not return pipeline constants cause")
 	}
 }
 
