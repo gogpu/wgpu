@@ -466,11 +466,15 @@ type Sampler struct {
 }
 
 // Destroy releases the sampler resources and recycles descriptor heap slots.
+// It may be called more than once: the slots go back to the heaps only on the
+// first call (a slot freed twice would later be handed to two samplers), and
+// clearing device marks the sampler destroyed, as BindGroup.Destroy does.
 func (s *Sampler) Destroy() {
 	if s.device != nil {
 		s.device.handles.samplers.Remove(s.nativeHandle)
 		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
 		s.device.samplerHeap.Free(s.samplerPoolSlot, 1)
+		s.device = nil
 	}
 	s.nativeHandle = 0
 }
