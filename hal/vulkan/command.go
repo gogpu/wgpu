@@ -950,20 +950,16 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		}
 		hasMSAAResolve := resolveView != nil && sampleCount > vk.SampleCountFlagBits(1)
 
-		// Determine the final layout for the "output" attachment.
-		// BUG-WGPU-VK-007: offscreen textures with TextureBinding must end in
-		// ImageLayoutGeneral to prevent Intel CCS stale-pixel artifacts.
+		// Every color attachment, its resolve target and a swapchain image
+		// begin (on Load) and end the pass in COLOR_ATTACHMENT_OPTIMAL, the
+		// layout the texture tracker records for RenderAttachment. Later
+		// usages (sampling, copies, present) get their layouts from barriers.
+		// Rust wgpu-hal uses derive_image_layout(COLOR_TARGET) as both the
+		// initial and the final layout (vulkan/device.rs make_render_pass).
+		// A sampled render target used to end in GENERAL here
+		// (BUG-WGPU-VK-007) while the tracker recorded COLOR_ATTACHMENT_OPTIMAL,
+		// so the next barrier named the wrong old layout.
 		colorFinalLayout := vk.ImageLayoutColorAttachmentOptimal
-		if !view.isSwapchain {
-			colorFinalLayout = offscreenFinalLayout(view)
-		}
-		if hasMSAAResolve {
-			if resolveView.isSwapchain {
-				colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
-			} else {
-				colorFinalLayout = offscreenFinalLayout(resolveView)
-			}
-		}
 
 		// ADR-060: Inline present barrier for swapchain targets.
 		// Only the FIRST swapchain attachment drives the barrier; additional
@@ -1622,24 +1618,6 @@ func (e *ComputePassEncoder) insertComputeBarrier() {
 // CopyAccelerationStructure, ReadAccelerationStructureCompactSize) are in raytracing.go.
 
 // --- Helper functions ---
-
-// offscreenFinalLayout returns the Vulkan image layout that an offscreen
-// (non-swapchain) texture view should be left in at the end of a render pass.
-//
-// If the underlying texture also has TextureBinding usage (i.e., it will be
-// sampled by fragment shaders in a later render pass), the layout must be
-// ImageLayoutGeneral so that reads see coherent data. Without this, Intel
-// CCS-compressed color-attachment data would not be decompressed on the read
-// path, producing stale "trail" artifacts (BUG-WGPU-VK-007).
-//
-// Textures without TextureBinding usage (pure render targets) can stay in
-// ColorAttachmentOptimal, which enables maximal CCS compression.
-func offscreenFinalLayout(view *TextureView) vk.ImageLayout {
-	if view.texture != nil && view.texture.usage&gputypes.TextureUsageTextureBinding != 0 {
-		return vk.ImageLayoutGeneral
-	}
-	return vk.ImageLayoutColorAttachmentOptimal
-}
 
 // updateSwapchainLayout updates swapchain image layout tracking for
 // BUG-WGPU-VK-006. When a render pass targets a swapchain image (directly
