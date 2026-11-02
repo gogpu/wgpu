@@ -158,12 +158,14 @@ jobs:
       run: |
         go vet $(go list ./... | grep -v '/hal/vulkan/vk$' | grep -v '/hal/gles')
 
-    - name: Install pure-Go race detector
-      run: go install github.com/kolkov/racedetector/cmd/racedetector@v0.7.0
-
-    - name: Run tests with race detector
+    - name: Run tests with the race detector
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      # The standard race detector needs cgo at test time only; the library
+      # itself stays cgo-free (goffi supports CGO_ENABLED=1 too). A data race
+      # fails the job.
+      env:
+        CGO_ENABLED: 1
+      run: go test -race -v -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Verify coverage file
       if: matrix.os == 'ubuntu-latest'
