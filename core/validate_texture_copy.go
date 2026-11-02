@@ -159,14 +159,17 @@ func validateTextureCopyDstFormat(format gputypes.TextureFormat, aspect gputypes
 
 // ValidateTextureToTextureCopy checks a copyTextureToTexture command recorded
 // on a command encoder, in the order of Rust wgpu-core command/transfer.rs
-// copy_texture_to_texture: both copy ranges are valid
-// (ValidateTextureCopyRange) and both aspects exist,
+// copy_texture_to_texture: the formats are copy-compatible (equal except for
+// the sRGB suffix; https://gpuweb.github.io/gpuweb/#copy-compatible), both
+// copy ranges are valid (ValidateTextureCopyRange) and both aspects exist,
 // copies inside one texture do not overlap, both sides name every aspect of
 // their format, the sample counts match, the source has COPY_SRC and the
 // destination COPY_DST. copySize is the size of the copy region;
-// sameTexture reports that src and dst are one texture. Format copy
-// compatibility is not checked here.
+// sameTexture reports that src and dst are one texture.
 func ValidateTextureToTextureCopy(sameTexture bool, src, dst TextureCopyView, copySize gputypes.Extent3D) error {
+	if src.Format.RemoveSrgbSuffix() != dst.Format.RemoveSrgbSuffix() {
+		return &TransferError{Kind: TransferErrorTextureFormatsNotCopyCompatible, Format: src.Format, DstFormat: dst.Format}
+	}
 	if err := ValidateTextureCopyRange(CopySideSource, src, copySize); err != nil {
 		return err
 	}

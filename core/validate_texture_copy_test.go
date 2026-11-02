@@ -170,6 +170,22 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 		wantErr  bool
 	}{
 		{name: "valid", src: srcView(), dst: dstView(), layers: 1},
+		{name: "formats differ only in srgb-ness", layers: 1, src: srcView(),
+			dst: with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatRGBA8UnormSrgb })},
+		{name: "srgb source to linear destination", layers: 1,
+			src: with(srcView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatRGBA8UnormSrgb }),
+			dst: with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatRGBA8Unorm })},
+		{name: "formats not copy compatible", layers: 1, src: srcView(),
+			dst:  with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatBGRA8Unorm }),
+			want: TransferErrorTextureFormatsNotCopyCompatible, wantErr: true},
+		{name: "formats of different size are not copy compatible", layers: 1, src: srcView(),
+			dst:  with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatR32Uint }),
+			want: TransferErrorTextureFormatsNotCopyCompatible, wantErr: true},
+		// Rust order: the format check is the first one, before the copy range.
+		{name: "format compatibility before range", layers: 1,
+			src:  with(srcView(), func(v *TextureCopyView) { v.MipLevel = 9 }),
+			dst:  with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatBGRA8Unorm }),
+			want: TransferErrorTextureFormatsNotCopyCompatible, wantErr: true},
 		{name: "valid within one texture, other layers", same: true, layers: 2,
 			src: with(both(), func(v *TextureCopyView) { v.Origin.Z = 0 }),
 			dst: with(both(), func(v *TextureCopyView) { v.Origin.Z = 2 })},
@@ -200,8 +216,10 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 		{name: "source names one aspect of a combined format", layers: 1,
 			src: with(srcView(), func(v *TextureCopyView) {
 				v.Format, v.Aspect = gputypes.TextureFormatDepth32FloatStencil8, gputypes.TextureAspectDepthOnly
-			}), dst: dstView(), want: TransferErrorCopySrcMissingAspects, wantErr: true},
-		{name: "destination names one aspect of a combined format", layers: 1, src: srcView(),
+			}), dst: with(dstView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatDepth32FloatStencil8 }),
+			want: TransferErrorCopySrcMissingAspects, wantErr: true},
+		{name: "destination names one aspect of a combined format", layers: 1,
+			src: with(srcView(), func(v *TextureCopyView) { v.Format = gputypes.TextureFormatDepth32FloatStencil8 }),
 			dst: with(dstView(), func(v *TextureCopyView) {
 				v.Format, v.Aspect = gputypes.TextureFormatDepth32FloatStencil8, gputypes.TextureAspectStencilOnly
 			}), want: TransferErrorCopyDstMissingAspects, wantErr: true},
@@ -226,6 +244,12 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 				return
 			}
 			checkTransferKind(t, err, tt.want, tt.side)
+			if tt.want == TransferErrorTextureFormatsNotCopyCompatible {
+				var te *TransferError
+				if errors.As(err, &te) && (te.Format != tt.src.Format || te.DstFormat != tt.dst.Format) {
+					t.Errorf("formats in the error = %v, %v; want %v, %v", te.Format, te.DstFormat, tt.src.Format, tt.dst.Format)
+				}
+			}
 		})
 	}
 }

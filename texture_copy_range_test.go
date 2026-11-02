@@ -17,8 +17,8 @@ type copyRig struct {
 	// color is an 8x8x4 RGBA8 texture with 2 mip levels, srgb the same size as
 	// RGBA8UnormSrgb, bgra the same size as BGRA8Unorm, wide a 128x2 RGBA8
 	// texture whose row needs more than 256 bytes, depth an 8x8 Depth32Float.
-	color, srgb, bgra, wide, depth *wgpu.Texture
-	buf                            *wgpu.Buffer
+	color, color2, srgb, bgra, wide, depth *wgpu.Texture
+	buf                                    *wgpu.Buffer
 }
 
 func newCopyRig(t *testing.T) *copyRig {
@@ -44,6 +44,7 @@ func newCopyRig(t *testing.T) *copyRig {
 		return tex
 	}
 	rig.color = newTexture(gputypes.TextureFormatRGBA8Unorm, 8, 8, 4, 2)
+	rig.color2 = newTexture(gputypes.TextureFormatRGBA8Unorm, 8, 8, 4, 2)
 	rig.srgb = newTexture(gputypes.TextureFormatRGBA8UnormSrgb, 8, 8, 4, 2)
 	rig.bgra = newTexture(gputypes.TextureFormatBGRA8Unorm, 8, 8, 4, 2)
 	rig.wide = newTexture(gputypes.TextureFormatRGBA8Unorm, 128, 2, 1, 1)
@@ -175,4 +176,38 @@ func TestTextureCopyRangeValidation(t *testing.T) {
 			t.Fatalf("error kind = %d, want %d", got, core.TransferErrorUnsupportedPartialTransfer)
 		}
 	})
+}
+
+// TestTextureToTextureFormatCompatibility: the formats of a texture-to-texture
+// copy must be equal except for the sRGB suffix (Rust wgpu-core
+// copy_texture_to_texture, W3C "copy-compatible").
+func TestTextureToTextureFormatCompatibility(t *testing.T) {
+	rig := newCopyRig(t)
+	copyOne := func(src, dst *wgpu.Texture) func(enc *wgpu.CommandEncoder) {
+		return func(enc *wgpu.CommandEncoder) {
+			enc.CopyTextureToTexture(src, dst, []wgpu.TextureCopy{{
+				Source:      wgpu.ImageCopyTexture{Texture: src},
+				Destination: wgpu.ImageCopyTexture{Texture: dst},
+				Size:        extent(8, 8, 1),
+			}})
+		}
+	}
+	tests := []struct {
+		name     string
+		src, dst *wgpu.Texture
+		want     core.TransferErrorKind
+	}{
+		{"same format", rig.color, rig.color2, -1},
+		{"srgb destination", rig.color, rig.srgb, -1},
+		{"srgb source", rig.srgb, rig.color, -1},
+		{"different channel order", rig.color, rig.bgra, core.TransferErrorTextureFormatsNotCopyCompatible},
+		{"different format size", rig.color, rig.depth, core.TransferErrorTextureFormatsNotCopyCompatible},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rig.finishKind(t, copyOne(tc.src, tc.dst)); got != tc.want {
+				t.Fatalf("error kind = %d, want %d", got, tc.want)
+			}
+		})
+	}
 }
