@@ -14,7 +14,7 @@ import (
 
 const pushConstantShaderWGSL = `
 struct Push { value: u32 }
-var<push_constant> push: Push;
+var<immediate> push: Push;
 @group(0) @binding(0) var<storage, read_write> out: array<u32>;
 
 @compute @workgroup_size(1)
