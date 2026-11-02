@@ -153,22 +153,13 @@ func NewTransitionBarrier(resource *ID3D12Resource, stateBefore, stateAfter D3D1
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
 	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
 
-	transition := transitionBarrierFromUnion(&barrier.Union[0])
+	transition := (*D3D12_RESOURCE_TRANSITION_BARRIER)(unsafe.Pointer(&barrier.Union[0]))
 	transition.Resource = resource
 	transition.Subresource = subresource
 	transition.StateBefore = stateBefore
 	transition.StateAfter = stateAfter
 
 	return barrier
-}
-
-// transitionBarrierFromUnion interprets the aligned native union storage as a
-// transition barrier. The conversion is required by the D3D12 ABI and is not
-// visible to checkptr as a Go allocation relationship.
-//
-//go:nocheckptr
-func transitionBarrierFromUnion(union *byte) *D3D12_RESOURCE_TRANSITION_BARRIER {
-	return (*D3D12_RESOURCE_TRANSITION_BARRIER)(unsafe.Pointer(union))
 }
 
 // NewUAVBarrier creates a UAV barrier.
