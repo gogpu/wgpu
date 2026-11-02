@@ -235,6 +235,9 @@ func openIndirectDevice(t *testing.T, b overrideBackend, pref gputypes.PowerPref
 	}
 	t.Cleanup(adapter.Release)
 	info := adapter.Info()
+	if isDX12SoftwareAdapter(info.Name) && b.backend == gputypes.BackendDX12 {
+		t.Skipf("DX12 WARP adapter %q is not a hardware adapter", info.Name)
+	}
 	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
 	if b.software != isCPU || (!b.software && info.Backend != b.backend) {
 		t.Skipf("no %s adapter (got %s, backend %v)", b.name, info.Name, info.Backend)
