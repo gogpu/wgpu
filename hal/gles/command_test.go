@@ -333,24 +333,16 @@ func TestRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	if len(rpe.vertexBuffers) != 1 {
 		t.Errorf("vertexBuffers length = %d, want 1", len(rpe.vertexBuffers))
 	}
-	if rpe.vertexBuffers[0] != buf {
-		t.Error("vertexBuffers[0] mismatch")
+	if got := rpe.vertexBuffers[0]; got.buffer != buf || got.offset != 64 {
+		t.Errorf("vertexBuffers[0] = %+v, want buffer 10 at offset 64", got)
 	}
-
-	if len(enc.commands) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	if rpe.dirtyVertexBuffers != 1 {
+		t.Errorf("dirtyVertexBuffers = %#b, want 1", rpe.dirtyVertexBuffers)
 	}
-
-	cmd, ok := enc.commands[0].(*SetVertexBufferCommand)
-	if !ok {
-		t.Fatalf("expected SetVertexBufferCommand, got %T", enc.commands[0])
-	}
-
-	if cmd.slot != 0 {
-		t.Errorf("slot = %d, want 0", cmd.slot)
-	}
-	if cmd.offset != 64 {
-		t.Errorf("offset = %d, want 64", cmd.offset)
+	// The attributes are set up at the draw, with the pipeline's layout
+	// (TestVertexBufferBindingOrder).
+	if len(enc.commands) != 0 {
+		t.Errorf("expected no command before the draw, got %d", len(enc.commands))
 	}
 }
 

@@ -45,7 +45,20 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
 // vertex 1 and 2 or for instance 1, and one that drops the draw leaves the
 // black clear color.
 func TestVertexBufferStrideZero(t *testing.T) {
-	forEachBackendAdapter(t, 0, checkVertexBroadcast)
+	forEachBackendAdapter(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+		checkVertexBroadcast(t, device, false)
+	})
+}
+
+// TestVertexBufferBeforePipeline draws the same scene as
+// TestVertexBufferStrideZero with the vertex buffers bound before the
+// pipeline, which WebGPU allows. DX12 took the stride and GLES the attribute
+// layout from the pipeline current at SetVertexBuffer time, so this order drew
+// nothing on either until they kept the bindings and set them up at the draw.
+func TestVertexBufferBeforePipeline(t *testing.T) {
+	forEachBackendAdapter(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+		checkVertexBroadcast(t, device, true)
+	})
 }
 
 // forEachBackendAdapter runs fn with a device of every backend on each
@@ -142,7 +155,9 @@ func newBroadcastPipeline(t *testing.T, device *wgpu.Device) *wgpu.RenderPipelin
 	return pipeline
 }
 
-func checkVertexBroadcast(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+// checkVertexBroadcast draws and checks the broadcast scene; buffersFirst binds
+// the vertex buffers before the pipeline.
+func checkVertexBroadcast(t *testing.T, device *wgpu.Device, buffersFirst bool) {
 	const width, height = 64, 4 // 256 bytes per row, the copy alignment
 	target, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "broadcast-target",
@@ -186,10 +201,15 @@ func checkVertexBroadcast(t *testing.T, _ overrideBackend, device *wgpu.Device) 
 	if err != nil {
 		t.Fatalf("BeginRenderPass: %v", err)
 	}
-	pass.SetPipeline(pipeline)
+	if !buffersFirst {
+		pass.SetPipeline(pipeline)
+	}
 	pass.SetVertexBuffer(0, positions, 0)
 	pass.SetVertexBuffer(1, perVertex, 0)
 	pass.SetVertexBuffer(2, perInstance, 0)
+	if buffersFirst {
+		pass.SetPipeline(pipeline)
+	}
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 2})
 	if err := pass.End(); err != nil {
 		t.Fatalf("End: %v", err)

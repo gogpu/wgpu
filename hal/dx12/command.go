@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"math/bits"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -505,6 +506,11 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	return cpe
 }
 
+// maxVertexBuffers is the number of vertex buffer slots a render pass tracks,
+// Rust wgpu-hal's MAX_VERTEX_BUFFERS (src/lib.rs); the device reports at most
+// the WebGPU default of 8.
+const maxVertexBuffers = 16
+
 // RenderPassEncoder implements hal.RenderPassEncoder for DirectX 12.
 type RenderPassEncoder struct {
 	encoder            *CommandEncoder
@@ -512,6 +518,15 @@ type RenderPassEncoder struct {
 	pipeline           *RenderPipeline
 	indexFormat        gputypes.IndexFormat
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
+
+	// vertexBuffers holds the view of each bound vertex buffer slot. The
+	// stride belongs to the pipeline and the address to SetVertexBuffer, and
+	// WebGPU allows either call first, so the views are kept here, each call
+	// fills in its half and marks the slot dirty, and prepareVertexBuffers
+	// binds the dirty slots before a draw (Rust wgpu-hal src/dx12/command.rs
+	// set_vertex_buffer, set_render_pipeline, prepare_vertex_buffers).
+	vertexBuffers      [maxVertexBuffers]d3d12.D3D12_VERTEX_BUFFER_VIEW
+	dirtyVertexBuffers uint32 // bit i: slot i changed since it was last bound
 
 	// endOfPassTimerQuery stores the query heap and index for the end-of-pass
 	// timestamp write. Set during BeginRenderPass, consumed in End().
@@ -619,6 +634,14 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	}
 	e.encoder.cmdList.IASetPrimitiveTopology(p.topology)
 
+	// The pipeline owns the strides of the slots it uses.
+	for slot, stride := range p.vertexStrides {
+		if slot < maxVertexBuffers && e.vertexBuffers[slot].StrideInBytes != stride {
+			e.vertexBuffers[slot].StrideInBytes = stride
+			e.dirtyVertexBuffers |= 1 << slot
+		}
+	}
+
 	// Bind the global sampler descriptor heap to the sampler root parameter.
 	// This is the ONE root parameter that covers all 2048+2048 sampler slots.
 	if p.samplerRootIndex >= 0 && e.encoder.device.samplerHeap != nil {
@@ -676,19 +699,24 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
-	// Get stride from pipeline if available
-	var stride uint32
-	if e.pipeline != nil && slot < uint32(len(e.pipeline.vertexStrides)) {
-		stride = e.pipeline.vertexStrides[slot]
+	if slot >= maxVertexBuffers {
+		return
 	}
+	// The stride comes from the pipeline, set before or after this call.
+	vb := &e.vertexBuffers[slot]
+	vb.BufferLocation = buf.gpuVA + offset
+	vb.SizeInBytes = uint32(buf.size - offset)
+	e.dirtyVertexBuffers |= 1 << slot
+}
 
-	vbv := d3d12.D3D12_VERTEX_BUFFER_VIEW{
-		BufferLocation: buf.gpuVA + offset,
-		SizeInBytes:    uint32(buf.size - offset),
-		StrideInBytes:  stride,
+// prepareVertexBuffers binds every vertex buffer slot that changed since it
+// was last bound. Called before each draw.
+func (e *RenderPassEncoder) prepareVertexBuffers() {
+	for e.dirtyVertexBuffers != 0 {
+		slot := bits.TrailingZeros32(e.dirtyVertexBuffers)
+		e.dirtyVertexBuffers &^= 1 << slot
+		e.encoder.cmdList.IASetVertexBuffers(uint32(slot), 1, &e.vertexBuffers[slot])
 	}
-
-	e.encoder.cmdList.IASetVertexBuffers(slot, 1, &vbv)
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -781,6 +809,7 @@ func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 		return
 	}
 
+	e.prepareVertexBuffers()
 	e.encoder.cmdList.DrawInstanced(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
@@ -790,6 +819,7 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 		return
 	}
 
+	e.prepareVertexBuffers()
 	e.encoder.cmdList.DrawIndexedInstanced(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
@@ -811,6 +841,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
+	e.prepareVertexBuffers()
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.draw,
 		drawCount, buf.raw, offset, nil, 0,
@@ -835,6 +866,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
+	e.prepareVertexBuffers()
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.drawIndexed,
 		drawCount, buf.raw, offset, nil, 0,

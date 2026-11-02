@@ -465,14 +465,23 @@ func (e *CommandEncoder) emitTimestamp(querySet hal.QuerySet, index *uint32) {
 
 // RenderPassEncoder implements hal.RenderPassEncoder for OpenGL.
 type RenderPassEncoder struct {
-	encoder       *CommandEncoder
-	desc          *hal.RenderPassDescriptor
-	pipeline      *RenderPipeline
-	vertexBuffers []*Buffer
-	indexBuffer   *Buffer
-	indexFormat   gputypes.IndexFormat
-	stencilRef    uint32
-	fbHeight      uint32 // Framebuffer height for MSAA resolve blit Y-flip
+	encoder     *CommandEncoder
+	desc        *hal.RenderPassDescriptor
+	pipeline    *RenderPipeline
+	indexBuffer *Buffer
+	indexFormat gputypes.IndexFormat
+	stencilRef  uint32
+	fbHeight    uint32 // Framebuffer height for MSAA resolve blit Y-flip
+
+	// vertexBuffers holds the buffer bound to each vertex buffer slot. GL
+	// sets the buffer and its layout in one glVertexAttribPointer call, but
+	// the layout belongs to the pipeline and WebGPU allows SetVertexBuffer
+	// before SetPipeline. So SetVertexBuffer and SetPipeline only mark slots
+	// dirty, and prepareVertexBuffers configures the dirty slots before a
+	// draw (Rust wgpu-hal src/gles/command.rs set_vertex_buffer,
+	// set_render_pipeline, rebind_vertex_data).
+	vertexBuffers      []vertexBufferBinding
+	dirtyVertexBuffers uint32 // bit i: slot i needs its attributes set up
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
@@ -530,6 +539,8 @@ func (e *RenderPassEncoder) emitMSAAResolve() {
 // If the pass was rendering to an offscreen FBO, rebinds the default framebuffer
 // so subsequent operations do not accidentally target the offscreen texture.
 func (e *RenderPassEncoder) End() {
+	e.disableVertexAttribs()
+
 	if e.msaaTexture != nil {
 		e.emitMSAAResolve()
 	}
@@ -555,7 +566,15 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	if !ok {
 		return
 	}
+	// The new pipeline may read the bound buffers with another layout, and
+	// attributes the old one enabled must not stay enabled.
+	e.disableVertexAttribs()
 	e.pipeline = p
+	for slot := range p.vertexBuffers {
+		if slot < maxVertexBufferSlots {
+			e.dirtyVertexBuffers |= 1 << slot
+		}
+	}
 	e.encoder.commands = append(e.encoder.commands,
 		&UseProgramCommand{programID: p.programID},
 		&SetPipelineStateCommand{
@@ -593,34 +612,70 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	})
 }
 
-// SetVertexBuffer sets a vertex buffer and configures vertex attributes.
-// In OpenGL, vertex attribute configuration (glVertexAttribPointer +
-// glEnableVertexAttribArray) must be done explicitly. The layout is taken
-// from the currently bound render pipeline's vertex buffer descriptors.
+// maxVertexBufferSlots bounds the vertex buffer slots a render pass tracks,
+// the width of dirtyVertexBuffers. GL_MAX_VERTEX_ATTRIB_BINDINGS, which the
+// adapter reports as maxVertexBuffers, is 16 on the drivers we know.
+const maxVertexBufferSlots = 32
+
+// vertexBufferBinding is the buffer and offset bound to a vertex buffer slot.
+type vertexBufferBinding struct {
+	buffer *Buffer
+	offset uint64
+}
+
+// SetVertexBuffer binds a vertex buffer to a slot. Its attributes are set up
+// before the next draw, with the layout of the pipeline current then.
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok {
+	if !ok || slot >= maxVertexBufferSlots {
 		return
 	}
-
-	// Grow slice if needed
 	for len(e.vertexBuffers) <= int(slot) {
-		e.vertexBuffers = append(e.vertexBuffers, nil)
+		e.vertexBuffers = append(e.vertexBuffers, vertexBufferBinding{})
 	}
-	e.vertexBuffers[slot] = buf
+	e.vertexBuffers[slot] = vertexBufferBinding{buffer: buf, offset: offset}
+	e.dirtyVertexBuffers |= 1 << slot
+}
 
-	// Get vertex layout from the current pipeline for this slot.
-	var layout *gputypes.VertexBufferLayout
-	if e.pipeline != nil && int(slot) < len(e.pipeline.vertexBuffers) {
-		layout = &e.pipeline.vertexBuffers[slot]
+// prepareVertexBuffers sets up the attributes of every dirty slot that has
+// both a buffer and a layout in the current pipeline. A slot missing either
+// stays dirty, as in Rust, and is set up once both are there.
+func (e *RenderPassEncoder) prepareVertexBuffers() {
+	if e.pipeline == nil {
+		return
 	}
+	for slot := range e.vertexBuffers {
+		vb := e.vertexBuffers[slot]
+		if e.dirtyVertexBuffers&(1<<slot) == 0 || vb.buffer == nil || slot >= len(e.pipeline.vertexBuffers) {
+			continue
+		}
+		e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
+			slot:   uint32(slot),
+			buffer: vb.buffer,
+			offset: vb.offset,
+			layout: &e.pipeline.vertexBuffers[slot],
+		})
+		e.dirtyVertexBuffers &^= 1 << slot
+	}
+}
 
-	e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
-		slot:   slot,
-		buffer: buf,
-		offset: offset,
-		layout: layout,
-	})
+// disableVertexAttribs disables the attribute arrays the current pipeline's
+// layout enables, when the pipeline changes or the pass ends, so none stays
+// enabled for a later pipeline that does not use it (Rust wgpu-hal
+// UnsetVertexAttribute).
+func (e *RenderPassEncoder) disableVertexAttribs() {
+	if e.pipeline == nil {
+		return
+	}
+	var locations []uint32
+	for i := range e.pipeline.vertexBuffers {
+		for _, attr := range e.pipeline.vertexBuffers[i].Attributes {
+			locations = append(locations, attr.ShaderLocation)
+		}
+	}
+	if len(locations) > 0 {
+		e.encoder.commands = append(e.encoder.commands, &DisableVertexAttribsCommand{locations: locations})
+	}
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -680,6 +735,7 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
+	e.prepareVertexBuffers()
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
@@ -695,6 +751,7 @@ func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
+	e.prepareVertexBuffers()
 	topology := gputypes.PrimitiveTopologyTriangleList // default
 	if e.pipeline != nil {
 		topology = e.pipeline.primitiveTopology
@@ -1453,6 +1510,17 @@ func vertexAttribDivisor(layout *gputypes.VertexBufferLayout) uint32 {
 		return 1
 	default:
 		return 0
+	}
+}
+
+// DisableVertexAttribsCommand disables vertex attribute arrays.
+type DisableVertexAttribsCommand struct {
+	locations []uint32
+}
+
+func (c *DisableVertexAttribsCommand) Execute(ctx *gl.Context) {
+	for _, loc := range c.locations {
+		ctx.DisableVertexAttribArray(loc)
 	}
 }
 
