@@ -363,6 +363,11 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: %w", err))
 		return
 	}
+	// Rust drops an empty copy after validation and before any side effect
+	// (transfer.rs copy_buffer_to_buffer); Vulkan rejects a zero size.
+	if size == 0 {
+		return
+	}
 	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{
 		{buffer: src, usage: track.BufferUsesCopySrc},
 		{buffer: dst, usage: track.BufferUsesCopyDst},
@@ -409,6 +414,10 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		return
 	}
 	if !e.validateBufferTextureCopies("CopyTextureToBuffer", core.CopySideSource, src, dst, regions) {
+		return
+	}
+	regions, skip := nonEmptyBufferTextureRegions(regions)
+	if skip {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -462,6 +471,10 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 		}
 	}
 	if !e.validateTextureToTextureCopies(src, dst, regions) {
+		return
+	}
+	regions, skip := nonEmptyTextureCopyRegions(regions)
+	if skip {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -550,6 +563,10 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 		return
 	}
 	if !e.validateBufferTextureCopies("CopyBufferToTexture", core.CopySideDestination, dst, src, regions) {
+		return
+	}
+	regions, skip := nonEmptyBufferTextureRegions(regions)
+	if skip {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -1033,6 +1050,39 @@ func (t *Texture) copyView(mipLevel uint32, origin Origin3D, aspect gputypes.Tex
 		Origin:        gputypes.Origin3D(origin),
 		Aspect:        aspect,
 	}, true
+}
+
+// isEmptyExtent reports a copy extent with a zero dimension.
+func isEmptyExtent(size Extent3D) bool {
+	return size.Width == 0 || size.Height == 0 || size.DepthOrArrayLayers == 0
+}
+
+// nonEmptyBufferTextureRegions drops the regions of zero size. Rust ignores
+// such a copy after its validation and before touching the tracker
+// (transfer.rs "Ignoring copy_* of size 0"); Vulkan rejects a zero extent.
+// skip is true when regions held copies and every one was empty: the whole
+// command is dropped. An empty region list is not a zero-size copy and is left
+// as it is (it still records its usages, so its resource conflicts surface).
+func nonEmptyBufferTextureRegions(regions []BufferTextureCopy) (kept []BufferTextureCopy, skip bool) {
+	kept = make([]BufferTextureCopy, 0, len(regions))
+	for i := range regions {
+		if !isEmptyExtent(regions[i].Size) {
+			kept = append(kept, regions[i])
+		}
+	}
+	return kept, len(regions) > 0 && len(kept) == 0
+}
+
+// nonEmptyTextureCopyRegions is nonEmptyBufferTextureRegions for
+// texture-to-texture regions.
+func nonEmptyTextureCopyRegions(regions []TextureCopy) (kept []TextureCopy, skip bool) {
+	kept = make([]TextureCopy, 0, len(regions))
+	for i := range regions {
+		if !isEmptyExtent(regions[i].Size) {
+			kept = append(kept, regions[i])
+		}
+	}
+	return kept, len(regions) > 0 && len(kept) == 0
 }
 
 // validateBufferTextureCopies checks every region of a buffer-texture copy
