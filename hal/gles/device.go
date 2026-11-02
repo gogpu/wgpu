@@ -558,23 +558,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		firstInstanceLocation: glCtx.GetUniformLocation(programID, "naga_vs_first_instance"),
 	}
 
-	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.
-	// For each combined sampler2D, map texture's GL slot to sampler's GL slot.
-	for i := range pipeline.samplerBindMap {
-		pipeline.samplerBindMap[i] = -1 // no sampler
-	}
-	for _, tm := range fragmentTranslationInfo.TextureMappings {
-		if tm.SamplerBinding == nil {
-			continue
-		}
-		texKey := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
-		samplerKey := ir.ResourceBinding{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
-		texUnit, texOk := layout.bindingMap[texKey]
-		samplerUnit, samplerOk := layout.bindingMap[samplerKey]
-		if texOk && samplerOk && texUnit < maxTextureSlots {
-			pipeline.samplerBindMap[texUnit] = int8(samplerUnit)
-		}
-	}
+	// Pair each combined sampler's texture unit with its sampler slot, over
+	// every stage (Rust wgpu-hal gles create_pipeline).
+	pipeline.samplerBindMap = buildSamplerBindMap(layout.bindingMap, vertexTranslationInfo, fragmentTranslationInfo)
 
 	return pipeline, nil
 }
@@ -673,9 +659,10 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	)
 
 	return &ComputePipeline{
-		programID: programID,
-		layout:    layout,
-		glCtx:     glCtx,
+		programID:      programID,
+		layout:         layout,
+		glCtx:          glCtx,
+		samplerBindMap: buildSamplerBindMap(layout.bindingMap, computeTranslationInfo),
 	}, nil
 }
 

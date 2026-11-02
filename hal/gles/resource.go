@@ -276,7 +276,7 @@ type RenderPipeline struct {
 	// texture unit (not the sampler's own WGSL binding). This is because naga
 	// GLSL generates combined sampler2D on the texture's binding.
 	// Matches Rust wgpu-hal GLES SamplerBindMap pattern.
-	samplerBindMap [maxTextureSlots]int8 // -1 = no sampler, otherwise = sampler glBinding
+	samplerBindMap samplerBindMap
 }
 
 const maxTextureSlots = 32
@@ -294,6 +294,10 @@ type ComputePipeline struct {
 	programID uint32
 	layout    *PipelineLayout
 	glCtx     *gl.Context
+
+	// samplerBindMap maps texture units to sampler slots, as on
+	// RenderPipeline: a compute shader samples through combined samplers too.
+	samplerBindMap samplerBindMap
 }
 
 // Destroy releases the compute pipeline.

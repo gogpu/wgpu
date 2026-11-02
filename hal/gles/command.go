@@ -6,7 +6,6 @@
 package gles
 
 import (
-	"context"
 	"log/slog"
 	"unsafe"
 
@@ -40,12 +39,14 @@ type CommandEncoder struct {
 	vao             uint32 // persistent VAO from Device for Core Profile
 	maxTextureUnits int32  // Hardware limit passed from Device
 	fullInstancing  bool   // Device.fullInstancing
+	samplers        samplerState
 }
 
 // BeginEncoding begins command recording.
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 	e.commands = nil
+	e.samplers = samplerState{}
 	return nil
 }
 
@@ -594,6 +595,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 			stencilRef:   e.stencilRef,
 		},
 	)
+	e.encoder.setPipelineSamplers(&p.samplerBindMap)
 }
 
 // SetBindGroup sets a bind group.
@@ -602,22 +604,36 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	if !ok {
 		return
 	}
-	var samplerMap *[maxTextureSlots]int8
 	var groupInfos []BindGroupLayoutInfo
-	if e.pipeline != nil {
-		samplerMap = &e.pipeline.samplerBindMap
-		if e.pipeline.layout != nil {
-			groupInfos = e.pipeline.layout.groupInfos
-		}
+	if e.pipeline != nil && e.pipeline.layout != nil {
+		groupInfos = e.pipeline.layout.groupInfos
 	}
-	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
+	e.encoder.setBindGroup(index, bg, offsets, groupInfos)
+}
+
+// setBindGroup records a bind group for a render or compute pass: its
+// buffers, textures and images, then the samplers of the texture units it
+// changed (Rust wgpu-hal gles set_bind_group).
+func (e *CommandEncoder) setBindGroup(index uint32, bg *BindGroup, offsets []uint32, groupInfos []BindGroupLayoutInfo) {
+	e.commands = append(e.commands, &SetBindGroupCommand{
 		index:           index,
 		group:           bg,
 		dynamicOffsets:  offsets,
-		maxTextureUnits: e.encoder.maxTextureUnits,
+		maxTextureUnits: e.maxTextureUnits,
 		groupInfos:      groupInfos,
-		samplerBindMap:  samplerMap,
 	})
+	dirtyTextures, dirtySamplers := e.samplers.bindGroupSamplers(index, bg, groupInfos)
+	e.commands = append(e.commands, e.samplers.rebind(dirtyTextures, dirtySamplers)...)
+}
+
+// setPipelineSamplers installs a pipeline's sampler map and rebinds the
+// samplers of the texture units whose pairing changed (Rust wgpu-hal gles
+// set_pipeline_inner): a bind group kept across the pipeline change must
+// reach the new shader's combined samplers.
+func (e *CommandEncoder) setPipelineSamplers(m *samplerBindMap) {
+	if dirty := e.samplers.setPipelineMap(m); dirty != 0 {
+		e.commands = append(e.commands, e.samplers.rebind(dirty, 0)...)
+	}
 }
 
 // maxVertexBufferSlots bounds the vertex buffer slots a render pass tracks,
@@ -911,6 +927,7 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	e.encoder.commands = append(e.encoder.commands, &UseProgramCommand{
 		programID: p.programID,
 	})
+	e.encoder.setPipelineSamplers(&p.samplerBindMap)
 }
 
 // SetBindGroup sets a bind group.
@@ -923,13 +940,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	if e.pipeline != nil && e.pipeline.layout != nil {
 		groupInfos = e.pipeline.layout.groupInfos
 	}
-	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
-		index:           index,
-		group:           bg,
-		dynamicOffsets:  offsets,
-		maxTextureUnits: e.encoder.maxTextureUnits,
-		groupInfos:      groupInfos,
-	})
+	e.encoder.setBindGroup(index, bg, offsets, groupInfos)
 }
 
 // Dispatch dispatches compute work.
@@ -1397,10 +1408,6 @@ type SetBindGroupCommand struct {
 	// groupInfos stores per-group binding-to-slot tables from PipelineLayout.
 	// Used to look up the GL slot for each binding instead of the old group*16+binding formula.
 	groupInfos []BindGroupLayoutInfo
-	// samplerBindMap maps texture unit → sampler unit for combined sampler2D.
-	// Built from naga GLSL TextureMappings at pipeline creation (Rust SamplerBindMap pattern).
-	// When non-nil, sampler is bound to the texture's unit instead of its own WGSL binding.
-	samplerBindMap *[maxTextureSlots]int8
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
@@ -1467,28 +1474,9 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)
 			// A GL texture binds only to the target it was created with.
 			ctx.BindTexture(view.texture.target, view.texture.id)
-
-		case gputypes.SamplerBinding:
-			// Sampler handle is the GL sampler object ID (from NativeHandle()).
-			samplerID := uint32(res.Sampler)
-			if samplerID == 0 {
-				continue
-			}
-			// Determine the correct texture unit for this sampler.
-			// Naga GLSL generates combined sampler2D on the texture's binding,
-			// so the sampler must be bound to the texture's unit — NOT the
-			// sampler's own WGSL binding. SamplerBindMap provides this mapping.
-			// Matches Rust wgpu-hal GLES SamplerBindMap (command.rs:247).
-			bindUnit := c.resolveSamplerUnit(glBinding)
-			if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
-				hal.Logger().Debug("gles: binding sampler",
-					"samplerBinding", glBinding,
-					"textureUnit", bindUnit,
-					"samplerID", samplerID,
-				)
-			}
-			ctx.BindSampler(bindUnit, samplerID)
 		}
+		// Samplers are bound by BindSamplerCommand to the texture units the
+		// pipeline combines them with (CommandEncoder.setBindGroup).
 	}
 }
 
@@ -1528,19 +1516,6 @@ func (c *SetBindGroupCommand) lookupSlot(binding uint32) uint32 {
 		}
 	}
 	return 0xFF
-}
-
-// resolveSamplerUnit finds the texture unit for a sampler via SamplerBindMap.
-func (c *SetBindGroupCommand) resolveSamplerUnit(glBinding uint32) uint32 {
-	if c.samplerBindMap == nil {
-		return glBinding
-	}
-	for texUnit := range c.samplerBindMap {
-		if c.samplerBindMap[texUnit] == int8(glBinding) {
-			return uint32(texUnit)
-		}
-	}
-	return glBinding
 }
 
 // resolveBufferTarget determines the GL buffer target (UNIFORM_BUFFER or SHADER_STORAGE_BUFFER)

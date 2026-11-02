@@ -105,47 +105,6 @@ func TestMapCompareFunction(t *testing.T) {
 	}
 }
 
-// TestSamplerBindMap verifies the SamplerBindMap lookup logic used in SetBindGroupCommand.
-// Given samplerBindMap[texUnit] = samplerGLBinding, searching for glBinding should return texUnit.
-func TestSamplerBindMap(t *testing.T) {
-	var bindMap [maxTextureSlots]int8
-	for i := range bindMap {
-		bindMap[i] = -1 // no sampler (default)
-	}
-	// Texture unit 1 paired with sampler glBinding 2.
-	bindMap[1] = 2
-	// Texture unit 5 paired with sampler glBinding 3.
-	bindMap[5] = 3
-
-	tests := []struct {
-		name        string
-		glBinding   int8
-		wantTexUnit int // -1 if not found
-	}{
-		{"sampler 2 maps to texUnit 1", 2, 1},
-		{"sampler 3 maps to texUnit 5", 3, 5},
-		{"sampler 0 not mapped", 0, -1},
-		{"sampler 7 not mapped", 7, -1},
-		{"sampler 1 not mapped (only 2 and 3 are)", 1, -1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the lookup from SetBindGroupCommand.Execute (command.go:952).
-			found := -1
-			for texUnit := range bindMap {
-				if bindMap[texUnit] == tt.glBinding {
-					found = texUnit
-					break
-				}
-			}
-			if found != tt.wantTexUnit {
-				t.Errorf("lookup glBinding=%d: got texUnit=%d, want %d", tt.glBinding, found, tt.wantTexUnit)
-			}
-		})
-	}
-}
-
 func TestIsNonFilterableFormat(t *testing.T) {
 	tests := []struct {
 		name string
