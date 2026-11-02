@@ -646,6 +646,14 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	if size == 0 {
 		return
 	}
+	// The clear writes the buffer as a copy destination; Rust wgpu-core tracks
+	// it as COPY_DST (command/clear.rs clear_buffer), which orders it after
+	// earlier uses, and keeps the buffer alive until the submission completes.
+	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{{buffer: buffer, usage: track.BufferUsesCopyDst}}) {
+		return
+	}
+	e.trackRef(buffer.core.Ref)
+	e.trackBuffer(buffer)
 	raw.ClearBuffer(halBuffer, offset, size)
 }
 

@@ -267,3 +267,36 @@ func TestTransitionTexturesUpdatesEncoderTracker(t *testing.T) {
 	}
 	commandBuffer.Release()
 }
+
+// TestClearBufferTracksCopyDstUsage: ClearBuffer writes the buffer as a copy
+// destination, so the encoder tracker moves it to COPY_DST (ordering it after
+// the earlier vertex use) and the encoder keeps the buffer alive until the
+// submission completes (Rust wgpu-core clear.rs clear_buffer).
+func TestClearBufferTracksCopyDstUsage(t *testing.T) {
+	t.Parallel()
+
+	_, _, device := newTestDeviceWithTracker(t)
+	defer device.Release()
+	buffer := createCopyScopeBuffer(t, device, "clear-tracked")
+	defer buffer.Release()
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	defer encoder.DiscardEncoding()
+
+	index := buffer.core.TrackingData().Index()
+	encoder.core.Mutable().BufferScope().SetSingle(index, track.BufferUsesVertex)
+
+	encoder.ClearBuffer(buffer, 0, 16)
+
+	if got := encoder.core.Mutable().BufferScope().EndUsage(index); got != track.BufferUsesCopyDst {
+		t.Errorf("buffer usage after ClearBuffer = %v, want CopyDst", got)
+	}
+	if len(encoder.trackedRefs) != 1 {
+		t.Errorf("tracked refs = %d, want 1", len(encoder.trackedRefs))
+	}
+	if _, ok := encoder.usedBuffers[buffer]; !ok {
+		t.Error("buffer is not recorded as used by the encoder")
+	}
+}
