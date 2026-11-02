@@ -36,9 +36,8 @@ func (a *Adapter) Open(features gputypes.Features, _ gputypes.Limits) (hal.OpenD
 // Features gated by pNext feature structs are enabled only when requested,
 // as Rust wgpu-hal does (vulkan/adapter.rs, PhysicalDeviceFeatures::from_extensions_and_requested_features).
 func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features) (hal.OpenDevice, error) {
-	enableF16 := requested.Contains(gputypes.FeatureShaderF16)
-	if enableF16 && !a.ext.shaderF16() {
-		return hal.OpenDevice{}, fmt.Errorf("vulkan: adapter does not support requested feature ShaderF16")
+	if missing := a.ext.unsupportedRequest(requested); missing != 0 {
+		return hal.OpenDevice{}, fmt.Errorf("vulkan: adapter does not support requested features %v", missing)
 	}
 
 	// Find queue families
@@ -80,20 +79,6 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 	if hasIncrementalPresent {
 		extensions = append(extensions, extIncrementalPresent+"\x00")
 	}
-	if enableF16 {
-		extensions = append(extensions, a.ext.shaderF16Extensions()...)
-	}
-	// The device create info references these through uintptr fields, which
-	// keep nothing alive or in place; pin them until vkCreateDevice returns
-	// (P1-VK-012).
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	extensionPtrs := make([]uintptr, len(extensions))
-	pinner.Pin(&extensionPtrs[0])
-	for i, ext := range extensions {
-		pinner.Pin(unsafe.StringData(ext))
-		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
-	}
 
 	// Detect timeline semaphore support (VK-IMPL-001).
 	// Query via PhysicalDeviceVulkan12Features with PNext chain on GetPhysicalDeviceFeatures2.
@@ -110,50 +95,38 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		hasTimelineSemaphore = vulkan12Features.TimelineSemaphore != 0
 	}
 
+	// Features enabled through the create info: the timeline semaphore and
+	// what the request needs.
+	var chain deviceFeatureChain
+	featuresPNext, featureExtensions := a.ext.enable(&chain, requested, hasTimelineSemaphore)
+	extensions = append(extensions, featureExtensions...)
+
+	// The device create info references these through uintptr fields, which
+	// keep nothing alive or in place; pin them until vkCreateDevice returns
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	extensionPtrs := make([]uintptr, len(extensions))
+	pinner.Pin(&extensionPtrs[0])
+	for i, ext := range extensions {
+		pinner.Pin(unsafe.StringData(ext))
+		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
+	}
+
 	// Device create info
 	deviceCreateInfo := vk.DeviceCreateInfo{
 		SType:                   vk.StructureTypeDeviceCreateInfo,
+		PNext:                   featuresPNext,
 		QueueCreateInfoCount:    1,
 		PQueueCreateInfos:       &queueCreateInfo,
 		EnabledExtensionCount:   uint32(len(extensions)),
 		PpEnabledExtensionNames: uintptr(unsafe.Pointer(&extensionPtrs[0])),
-		PEnabledFeatures:        &a.features,
-	}
-
-	// Enable timeline semaphore and f16 features via the PNext chain.
-	// A chain holding PhysicalDeviceVulkan12Features must not also hold
-	// PhysicalDeviceShaderFloat16Int8Features (VUID-VkDeviceCreateInfo-pNext-02830),
-	// so on Vulkan 1.2 shaderFloat16 goes into the Vulkan 1.2 struct.
-	var (
-		vulkan12Enable  vk.PhysicalDeviceVulkan12Features
-		float16Enable   vk.PhysicalDeviceShaderFloat16Int8Features
-		storage16Enable vk.PhysicalDevice16BitStorageFeatures
-	)
-	tail := &deviceCreateInfo.PNext
-	f16InVulkan12 := enableF16 && a.ext.apiVersion >= vkMakeVersion(1, 2, 0)
-	if hasTimelineSemaphore || f16InVulkan12 {
-		vulkan12Enable.SType = vk.StructureTypePhysicalDeviceVulkan12Features
-		vulkan12Enable.TimelineSemaphore = boolToVk(hasTimelineSemaphore)
-		vulkan12Enable.ShaderFloat16 = boolToVk(f16InVulkan12)
-		*tail = (*uintptr)(unsafe.Pointer(&vulkan12Enable))
-		tail = &vulkan12Enable.PNext
-	}
-	if enableF16 {
-		if !f16InVulkan12 {
-			float16Enable.SType = vk.StructureTypePhysicalDeviceShaderFloat16Int8Features
-			float16Enable.ShaderFloat16 = vk.Bool32(vk.True)
-			*tail = (*uintptr)(unsafe.Pointer(&float16Enable))
-			tail = &float16Enable.PNext
-		}
-		storage16Enable.SType = vk.StructureTypePhysicalDevice16bitStorageFeatures
-		storage16Enable.StorageBuffer16BitAccess = vk.Bool32(vk.True)
-		storage16Enable.UniformAndStorageBuffer16BitAccess = vk.Bool32(vk.True)
-		storage16Enable.StorageInputOutput16 = boolToVk(a.ext.storageInputOutput16())
-		*tail = (*uintptr)(unsafe.Pointer(&storage16Enable))
+		PEnabledFeatures:        &chain.core,
 	}
 
 	var device vk.Device
 	result := vkCreateDevice(a.instance, a.physicalDevice, &deviceCreateInfo, nil, &device)
+	runtime.KeepAlive(&chain)
 	if result != vk.Success {
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: vkCreateDevice failed: %d", result)
 	}
@@ -184,7 +157,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 	// Keep f16 stage inputs and outputs f16 only where the device enabled
 	// StorageInputOutput16; naga converts them through f32 otherwise
 	// (Rust wgpu-hal vulkan/adapter.rs, use_storage_input_output_16).
-	dev.spirvOptions.UseStorageInputOutput16 = enableF16 && a.ext.storageInputOutput16()
+	dev.spirvOptions.UseStorageInputOutput16 = requested.Contains(gputypes.FeatureShaderF16) && a.ext.storageInputOutput16()
 	loadDrawIndirectCountProcs(dev)
 
 	// Initialize synchronization fence (VK-IMPL-001 / VK-IMPL-003).
