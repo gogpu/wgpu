@@ -34,6 +34,10 @@ type Device struct {
 	// version-gated features (layout(binding=N) needs GLSL >= 420).
 	glslVersion glsl.Version
 
+	// drawParameters compiles shaders with glsl.Options.DrawParameters
+	// (AdapterCapabilities.DrawParameters).
+	drawParameters bool
+
 	// shaderBindingLayout is true when the driver supports layout(binding=N)
 	// in shaders (GLSL >= 420 desktop or >= 310 ES). When false, bindings must
 	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
@@ -487,7 +491,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	// Compile WGSL → GLSL for vertex stage.
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -650,7 +654,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -938,7 +942,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[i
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

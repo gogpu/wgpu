@@ -59,6 +59,10 @@ type AdapterCapabilities struct {
 	// Inferred device type.
 	DeviceType gputypes.DeviceType
 
+	// DrawParameters is desktop GL 4.2+ with GL_ARB_shader_draw_parameters:
+	// shaders are compiled with glsl.Options.DrawParameters.
+	DrawParameters bool
+
 	// Inferred vendor ID.
 	VendorID uint32
 }
@@ -97,7 +101,9 @@ func queryAdapterCapabilities(glCtx *gl.Context) (AdapterCapabilities, error) {
 	caps.MaxMSAASamples = maxSamples
 
 	// --- 4. Detect features ---
-	caps.Features = queryFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES, glCtx)
+	caps.Features = queryFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES, glCtx) |
+		shaderCapabilityFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES)
+	caps.DrawParameters = drawParameters(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES)
 
 	// --- 5. Query limits ---
 	caps.Limits = queryLimits(glCtx, caps.GLMajor, caps.GLMinor, caps.IsES, caps.Extensions)

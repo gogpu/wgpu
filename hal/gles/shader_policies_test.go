@@ -57,7 +57,7 @@ fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
 		t.Fatal(err)
 	}
 	for _, v := range []glsl.Version{glsl.VersionES300, glsl.VersionES310, glsl.VersionES320, glsl.Version330, glsl.Version430} {
-		if _, _, err := compileWGSLToGLSL(v, sm, ir.StageFragment, "fs", nil, nil); err != nil {
+		if _, _, err := compileWGSLToGLSL(v, false, sm, ir.StageFragment, "fs", nil, nil); err != nil {
 			t.Errorf("%+v: %v", v, err)
 		}
 	}

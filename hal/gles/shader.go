@@ -53,7 +53,7 @@ func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*Shad
 // The module's IR is specialized for the stage first when it has overrides or
 // the stage gives pipeline constants (Rust wgpu-hal gles/device.rs:385 calls
 // process_overrides in create_shader).
-func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[ir.ResourceBinding]uint8) (string, glsl.TranslationInfo, error) {
+func compileWGSLToGLSL(version glsl.Version, drawParameters bool, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[ir.ResourceBinding]uint8) (string, glsl.TranslationInfo, error) {
 	if sm.irModule == nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
@@ -73,6 +73,7 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	// runtime after linking (see assignBindingsAfterLink).
 	glslCode, translationInfo, err := glsl.Compile(module.IR, glsl.Options{
 		LangVersion:         version,
+		DrawParameters:      drawParameters,
 		EntryPoint:          &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
 		BindingMap:          bindingMap,
 		BoundsCheckPolicies: glslBoundsCheckPolicies(version),

@@ -31,6 +31,10 @@ type Device struct {
 	// version-gated features (layout(binding=N) needs GLSL >= 420).
 	glslVersion glsl.Version
 
+	// drawParameters compiles shaders with glsl.Options.DrawParameters
+	// (AdapterCapabilities.DrawParameters).
+	drawParameters bool
+
 	// shaderBindingLayout is true when the driver supports layout(binding=N)
 	// in shaders (GLSL >= 420 desktop or >= 310 ES). When false, bindings must
 	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
@@ -445,7 +449,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	// Compile WGSL → GLSL for vertex stage.
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -470,7 +474,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	var fragmentTranslationInfo glsl.TranslationInfo
 	if desc.Fragment != nil {
 		var err error
-		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, d.glslVersion, desc.Fragment, layout.bindingMap)
+		fragmentID, fragmentTranslationInfo, err = compileFragmentShader(glCtx, d.glslVersion, d.drawParameters, desc.Fragment, layout.bindingMap)
 		if err != nil {
 			glCtx.DeleteShader(vertexID)
 			return nil, err
@@ -613,7 +617,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.drawParameters, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -926,13 +930,13 @@ func maxInt32(a, b int32) int32 {
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
 // Caller must hold the AdapterContext lock. glCtx is passed explicitly to avoid
 // re-locking (this is called from CreateRenderPipeline which already holds the lock).
-func compileFragmentShader(glCtx *gl.Context, version glsl.Version, frag *hal.FragmentState, bindingMap map[ir.ResourceBinding]uint8) (uint32, glsl.TranslationInfo, error) {
+func compileFragmentShader(glCtx *gl.Context, version glsl.Version, drawParameters bool, frag *hal.FragmentState, bindingMap map[ir.ResourceBinding]uint8) (uint32, glsl.TranslationInfo, error) {
 	fragmentModule, ok := frag.Module.(*ShaderModule)
 	if !ok {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(version, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(version, drawParameters, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}
