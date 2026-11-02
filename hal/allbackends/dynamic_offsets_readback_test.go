@@ -111,14 +111,6 @@ var dynamicOffsetsDefects = map[string]map[string]string{
 	"compute": {
 		"software": "software backend: a uniform vec4<u32> member reads back as the bits of the f32 (11 -> 0x41300000), a gap of the interpreter's typed value model",
 	},
-	"compute/bind-group-first": {
-		"vulkan": "Vulkan backend: a bind group set before the pipeline is never bound (VUID-vkCmdDispatch-None-08600); core does not set the groups again after a pipeline change, as Rust wgpu-core's binder does",
-		"gles":   "GLES backend: a bind group set before the pipeline is lost; the first dispatch reads nothing",
-	},
-	"render/bind-group-first": {
-		"vulkan": "Vulkan backend: RenderPassEncoder.SetBindGroup before SetPipeline dereferences the nil pipeline",
-		"gles":   "GLES backend: a bind group set before the pipeline is lost; the first draw renders nothing",
-	},
 }
 
 func skipDynamicOffsetsDefect(t *testing.T, test string, c dynamicOffsetsCase, b overrideBackend) {

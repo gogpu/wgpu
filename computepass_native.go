@@ -21,25 +21,15 @@ import (
 type ComputePassEncoder struct {
 	core    *core.CoreComputePassEncoder
 	encoder *CommandEncoder
-	// currentPipelineBindGroupCount tracks the bind group count of the
-	// currently set pipeline. Used by SetBindGroup to validate that the
-	// group index is within the pipeline layout bounds. Zero means no
-	// pipeline has been set yet.
-	currentPipelineBindGroupCount uint32
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Dispatch commands require a pipeline to be set first.
 	pipelineSet bool
 	// currentPipeline tracks the currently set pipeline for state restoration
 	// after indirect dispatch validation. Set by SetPipeline.
 	currentPipeline *ComputePipeline
-	// assignedBindGroups tracks the bind groups set at each slot for state
-	// restoration after indirect dispatch validation.
-	assignedBindGroups [MaxBindGroups]*BindGroup
-	// assignedDynOffsets tracks the dynamic offsets for each bind group slot
-	// for state restoration after indirect dispatch validation.
-	assignedDynOffsets [MaxBindGroups][]uint32
-	// binder tracks bind group assignments and validates compatibility
-	// at dispatch time, matching Rust wgpu-core's Binder pattern.
+	// binder holds the bind groups set on the pass with their dynamic
+	// offsets, validates them at dispatch time and binds them to the backend
+	// before each dispatch, matching Rust wgpu-core's Binder.
 	binder binder
 }
 
@@ -60,7 +50,6 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetPipeline: pipeline is nil"))
 		return
 	}
-	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.currentPipeline = pipeline
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
@@ -72,16 +61,16 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	}
 }
 
-// SetBindGroup sets a bind group for the given index.
+// SetBindGroup sets a bind group for the given index. It may come before
+// SetPipeline, or name an index the current pipeline does not use: the group
+// is bound to the backend at the next dispatch whose pipeline layout uses it.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if err := validateSetBindGroup("ComputePass", index, group, offsets, p.currentPipelineBindGroupCount); err != nil {
+	maxBindGroups := p.encoder.device.core.Limits.MaxBindGroups
+	if err := validateSetBindGroup("ComputePass", index, group, offsets, maxBindGroups); err != nil {
 		p.encoder.setError(err)
 		return
 	}
-	p.binder.assign(index, group.layout)
-	p.binder.assignBindGroup(index, group)
-	p.assignedBindGroups[index] = group
-	p.assignedDynOffsets[index] = offsets
+	p.binder.setGroup(index, group, offsets)
 	p.trackRef(group.ref)
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
@@ -94,9 +83,14 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
-	raw := p.core.RawPass()
-	if raw != nil && group.hal != nil {
-		raw.SetBindGroup(index, group.hal, offsets)
+}
+
+// flushBindGroups binds the bind groups whose backend binding is stale, right
+// before a dispatch that passed validation (Rust wgpu-core compute.rs
+// State::flush_bindings).
+func (p *ComputePassEncoder) flushBindGroups() {
+	if raw := p.core.RawPass(); raw != nil {
+		p.binder.flush(raw)
 	}
 }
 
@@ -151,6 +145,7 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	if !p.flushDispatch("Dispatch", nil, track.BufferUsesNone) {
 		return
 	}
+	p.flushBindGroups()
 	p.core.Dispatch(x, y, z)
 }
 
@@ -164,8 +159,8 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indirectUsage track.BufferUses) bool {
 	var groups [MaxBindGroups]*core.BindGroupUsages
 	active := groups[:0]
-	for i := uint32(0); i < p.currentPipelineBindGroupCount && i < MaxBindGroups; i++ {
-		if bg := p.assignedBindGroups[i]; bg != nil {
+	for i := uint32(0); i < MaxBindGroups; i++ {
+		if bg := p.binder.activeGroup(i); bg != nil {
 			active = append(active, bg.usages)
 		}
 	}
@@ -243,6 +238,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	if !p.flushDispatch("DispatchIndirect", buffer, indirectUsage) {
 		return
 	}
+	p.flushBindGroups()
 
 	if validated {
 		p.dispatchIndirectValidated(buffer, offset, iv, raw)
@@ -342,13 +338,8 @@ func (p *ComputePassEncoder) restoreComputeState(raw hal.ComputePassEncoder) {
 		raw.SetPipeline(p.currentPipeline.hal)
 	}
 
-	// Restore user's bind groups.
-	for i := uint32(0); i < p.currentPipelineBindGroupCount; i++ {
-		bg := p.assignedBindGroups[i]
-		if bg != nil && bg.hal != nil {
-			raw.SetBindGroup(i, bg.hal, p.assignedDynOffsets[i])
-		}
-	}
+	// Restore user's bind groups: the new backend pass has none.
+	p.binder.bindValid(raw, 0)
 }
 
 // End ends the compute pass.

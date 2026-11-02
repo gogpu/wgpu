@@ -151,7 +151,6 @@ func TestRenderPassAttachmentSampledConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginRenderPass: %v", err)
 	}
-	pass.currentPipelineBindGroupCount = 1 // SetBindGroup's index check; no draw follows
 	pass.SetBindGroup(0, group, nil)
 	_ = pass.End()
 	_, err = enc.Finish()
