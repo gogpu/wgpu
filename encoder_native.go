@@ -1035,49 +1035,53 @@ func (t *Texture) copyView(mipLevel uint32, origin Origin3D, aspect gputypes.Tex
 	}, true
 }
 
-// validateBufferTextureCopies checks every region of a buffer-texture copy:
-// the usages, mip level, aspect and format of the texture and the buffer
-// (core.ValidateBufferTextureCopyTexture), then the buffer layout
-// (core.ValidateTextureBufferCopy: one sample, aligned offset, bytesPerRow a
-// multiple of 256). side is the texture's side of the copy. Returns false,
-// with the error recorded on the encoder, for the first invalid region.
+// validateBufferTextureCopies checks every region of a buffer-texture copy
+// (validateBufferTextureRegion). side is the texture's side of the copy.
+// Returns false, with the error recorded on the encoder, for the first
+// invalid region.
 func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySide, texture *Texture, buffer *Buffer, regions []BufferTextureCopy) bool {
-	sampleCount := uint32(1)
-	if texture.coreTexture != nil {
-		sampleCount = texture.coreTexture.SampleCount()
-	}
-	bufferSide := core.CopySideSource
-	if side == core.CopySideSource {
-		bufferSide = core.CopySideDestination
-	}
 	for i := range regions {
-		region := &regions[i]
-		view, haveView := texture.copyView(region.TextureBase.MipLevel, region.TextureBase.Origin, region.TextureBase.Aspect)
-		// The core texture is the source of truth for the format: the wrapper
-		// of SurfaceTexture.AsTexture carries none.
-		format := texture.format
-		if haveView {
-			format = view.Format
-		}
-		var err error
-		if haveView {
-			err = core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), gputypes.Extent3D(region.Size))
-		}
-		if err == nil {
-			err = core.ValidateTextureBufferCopy(format, sampleCount, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow)
-		}
-		if err == nil && haveView {
-			layout := core.TexelCopyBufferLayout{
-				Offset:       region.BufferLayout.Offset,
-				BytesPerRow:  region.BufferLayout.BytesPerRow,
-				RowsPerImage: region.BufferLayout.RowsPerImage,
-			}
-			err = core.ValidateLinearTextureData(layout, format, region.TextureBase.Aspect, buffer.Size(), bufferSide, gputypes.Extent3D(region.Size))
-		}
-		if err != nil {
+		if err := validateBufferTextureRegion(side, texture, buffer, &regions[i]); err != nil {
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
 			return false
 		}
 	}
 	return true
+}
+
+// validateBufferTextureRegion checks one region of a buffer-texture copy in
+// the order of Rust wgpu-core copy_buffer_to_texture and copy_texture_to_buffer:
+// the copy range, usages, aspect and format of the texture and the buffer
+// (core.ValidateBufferTextureCopyTexture), the sample count, aligned offset and
+// bytesPerRow (core.ValidateTextureBufferCopy), the buffer layout
+// (core.ValidateLinearTextureData) and the downlevel flag for depth/stencil
+// copies (core.Device.RequireDepthTextureAndBufferCopies). A texture without a
+// core texture (test stubs) only gets the layout alignment checks.
+func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *Buffer, region *BufferTextureCopy) error {
+	size := gputypes.Extent3D(region.Size)
+	view, haveView := texture.copyView(region.TextureBase.MipLevel, region.TextureBase.Origin, region.TextureBase.Aspect)
+	if !haveView {
+		return core.ValidateTextureBufferCopy(texture.format, 1, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow)
+	}
+	if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), size); err != nil {
+		return err
+	}
+	// The core texture is the source of truth for the format: the wrapper of
+	// SurfaceTexture.AsTexture carries none.
+	if err := core.ValidateTextureBufferCopy(view.Format, view.SampleCount, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow); err != nil {
+		return err
+	}
+	bufferSide := core.CopySideSource
+	if side == core.CopySideSource {
+		bufferSide = core.CopySideDestination
+	}
+	layout := core.TexelCopyBufferLayout{
+		Offset:       region.BufferLayout.Offset,
+		BytesPerRow:  region.BufferLayout.BytesPerRow,
+		RowsPerImage: region.BufferLayout.RowsPerImage,
+	}
+	if err := core.ValidateLinearTextureData(layout, view.Format, region.TextureBase.Aspect, buffer.Size(), bufferSide, size); err != nil {
+		return err
+	}
+	return texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format)
 }

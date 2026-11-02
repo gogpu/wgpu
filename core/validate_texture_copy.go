@@ -231,3 +231,18 @@ func validateCopyWithinSameTexture(src, dst TextureCopyView, depthOrArrayLayers 
 		OriginZ: src.Origin.Z, DstOriginZ: dst.Origin.Z, Layers: layers,
 	}
 }
+
+// RequireDepthTextureAndBufferCopies checks that the device can copy between
+// buffers and depth/stencil textures: such a copy needs the
+// DEPTH_TEXTURE_AND_BUFFER_COPIES downlevel flag (Rust wgpu-core
+// copy_buffer_to_texture and copy_texture_to_buffer). Other formats need
+// nothing. The check is one device query, so a nil device accepts the copy.
+func (d *Device) RequireDepthTextureAndBufferCopies(format gputypes.TextureFormat) error {
+	if d == nil || !format.IsDepthStencil() {
+		return nil
+	}
+	if err := d.RequireDownlevelFlags(gputypes.DownlevelFlagsDepthTextureAndBufferCopies); err != nil {
+		return &TransferError{Kind: TransferErrorMissingDownlevelFlags, Format: format, Cause: err}
+	}
+	return nil
+}
