@@ -40,6 +40,14 @@ func NewAdapterContext(eglCtx *egl.Context, glCtx *gl.Context, owns bool) *Adapt
 	}
 }
 
+// RobustAccess reports whether the EGL context was created with robust buffer
+// access.
+func (c *AdapterContext) RobustAccess() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.eglCtx != nil && c.eglCtx.RobustAccess()
+}
+
 // Lock acquires the mutex, pins the goroutine to the current OS thread, and
 // makes the GL context current on the pbuffer / surfaceless draw surface.
 //

@@ -61,16 +61,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 //     view, which D3D12 itself contains: the write is discarded and the read
 //     returns 0 (as in Rust wgpu-hal, whose naga HLSL restrict_indexing
 //     covers fixed-size arrays, vectors and matrices only).
-//   - GLES: the GLSL policies are Unchecked, as in Rust. On EGL (Linux) the
-//     context is created with robust buffer access, as Rust's is, which
-//     makes the driver contain the access. On WGL (Windows) Rust requests no
-//     robustness and neither do we, so containment there is the driver's.
+//   - GLES: the GLSL policies are Unchecked, as in Rust; the context's
+//     robust buffer access (EGL as in Rust, WGL beyond Rust) makes the
+//     driver contain the access. Without a robust context nothing guarantees
+//     containment, so the test skips there instead of passing by luck.
 //   - Software: the interpreter discards the write and reads 0.
 func TestStorageBufferOutOfBoundsContained(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, checkStorageOOB)
 }
 
 func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
+	if b.backend == gputypes.BackendGL {
+		robust, ok := device.HalDevice().(interface{ RobustAccess() bool })
+		if !ok {
+			t.Fatalf("GLES device %T does not report RobustAccess", device.HalDevice())
+		}
+		if !robust.RobustAccess() {
+			t.Skip("GL context without robust buffer access: containment is not guaranteed")
+		}
+	}
 	bgl, pipeline, err := newPublicComputePipeline(t, device, oobShader, nil, 2)
 	if err != nil {
 		t.Fatal(err)
