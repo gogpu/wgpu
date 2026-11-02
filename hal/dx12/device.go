@@ -284,7 +284,7 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.
 
 	// Enable DXIL direct compilation if requested via environment variable.
 	// DXIL path uses naga dxil backend (SM 6.0, BYPASS hash) instead of HLSL->FXC.
-	dev.useDXIL = os.Getenv("GOGPU_DX12_DXIL") == "1"
+	dev.useDXIL = dxilEnabled()
 	dev.dxilValidate = os.Getenv("GOGPU_DX12_DXIL_VALIDATE") == "1"
 
 	// Create pre-built command signatures for indirect draw/dispatch.
