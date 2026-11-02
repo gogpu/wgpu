@@ -420,12 +420,23 @@ func queryFeatures(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx 
 		features.Insert(gputypes.FeatureRG11B10UfloatRenderable)
 	}
 
-	features |= shaderCapabilityFeatures(exts, glMajor, glMinor, isES)
+	fullInstancing := fullyFeaturedInstancing(exts, glMajor, glMinor, isES) && glCtx.HasBaseInstance()
+	features |= shaderCapabilityFeatures(exts, glMajor, glMinor, isES, fullInstancing)
 
 	// IndirectFirstInstance: the indirect record's first instance reaches GL
 	// only with fully featured instancing (Rust wgpu-hal src/gles/adapter.rs).
-	if fullyFeaturedInstancing(exts, glMajor, glMinor, isES) && glCtx.HasBaseInstance() && glCtx.HasDrawIndirect() {
+	if fullInstancing && glCtx.HasDrawIndirect() {
 		features.Insert(gputypes.FeatureIndirectFirstInstance)
+	}
+
+	// MultiDrawIndirect: glMultiDraw*Indirect (GL 4.3,
+	// GL_ARB_multi_draw_indirect or GL_EXT_multi_draw_indirect). Rust offers
+	// none on GLES and issues one draw per record; we use the multi-draw so
+	// draw_index counts the records.
+	if glCtx.HasDrawIndirect() && glCtx.HasMultiDrawIndirect() &&
+		(glVersionAtLeast(glMajor, glMinor, isES, [2]int{99, 0}, [2]int{4, 3}) ||
+			hasExtension(exts, "GL_ARB_multi_draw_indirect", "GL_EXT_multi_draw_indirect")) {
+		features.Insert(gputypes.FeatureMultiDrawIndirect)
 	}
 
 	return features

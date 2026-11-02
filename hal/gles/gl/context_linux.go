@@ -48,6 +48,8 @@ var (
 	cifVoid6DrawElemBV   types.CallInterface // void fn(uint32, int32, uint32, void*, int32, int32) - DrawElementsInstancedBaseVertex
 	cifVoid5DrawArrBI    types.CallInterface // void fn(uint32, int32, int32, int32, uint32) - DrawArraysInstancedBaseInstance
 	cifVoid7DrawElemBVBI types.CallInterface // void fn(uint32, int32, uint32, void*, int32, int32, uint32) - DrawElementsInstancedBaseVertexBaseInstance
+	cifVoid4MultiArr     types.CallInterface // void fn(uint32, void*, int32, int32) - MultiDrawArraysIndirect
+	cifVoid5MultiElem    types.CallInterface // void fn(uint32, uint32, void*, int32, int32) - MultiDrawElementsIndirect
 	cifPtr1              types.CallInterface // void* fn(uint32)
 	cifPtr2UU            types.CallInterface // void* fn(uint32, uint32)
 	cifVoid7ReadPx       types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
@@ -388,6 +390,33 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	// void fn(uint32, void*, int32, int32) - MultiDrawArraysIndirect
+	err = ffi.PrepareCallInterface(&cifVoid4MultiArr, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, uint32, void*, int32, int32) - MultiDrawElementsIndirect
+	err = ffi.PrepareCallInterface(&cifVoid5MultiElem, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
 	// void fn(int32, int32, int32, int32, uint32, uint32, void*) - ReadPixels
 	err = ffi.PrepareCallInterface(&cifVoid7ReadPx, types.DefaultCall,
 		types.VoidTypeDescriptor,
@@ -603,6 +632,8 @@ type Context struct {
 	glDrawArraysInstancedBaseInstance             unsafe.Pointer
 	glDrawElementsInstancedBaseVertexBaseInstance unsafe.Pointer
 	glUniform1ui                                  unsafe.Pointer
+	glMultiDrawArraysIndirect                     unsafe.Pointer
+	glMultiDrawElementsIndirect                   unsafe.Pointer
 
 	// Compute shaders (GL 4.3+ / ES 3.1+)
 	glDispatchCompute         unsafe.Pointer
@@ -812,6 +843,8 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDrawArraysInstancedBaseInstance = getProcAddr("glDrawArraysInstancedBaseInstance")
 	c.glDrawElementsInstancedBaseVertexBaseInstance = getProcAddr("glDrawElementsInstancedBaseVertexBaseInstance")
 	c.glUniform1ui = getProcAddr("glUniform1ui")
+	c.glMultiDrawArraysIndirect = getProcAddr("glMultiDrawArraysIndirect")
+	c.glMultiDrawElementsIndirect = getProcAddr("glMultiDrawElementsIndirect")
 
 	// Compute shaders (optional - may be nil on older GL versions)
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
@@ -1999,6 +2032,44 @@ func (c *Context) Uniform1ui(location int32, value uint32) {
 	}
 	args := [2]unsafe.Pointer{unsafe.Pointer(&location), unsafe.Pointer(&value)}
 	_, _ = ffi.CallFunction(&cifVoid2UU, c.glUniform1ui, nil, args[:])
+}
+
+// MultiDrawArraysIndirect draws drawCount records of stride bytes from offset
+// in the buffer bound to GL_DRAW_INDIRECT_BUFFER, with gl_DrawID counting
+// them (GL 4.3 / GL_EXT_multi_draw_indirect). A no-op when the context lacks
+// it.
+func (c *Context) MultiDrawArraysIndirect(mode uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawArraysIndirect == nil {
+		return
+	}
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&drawCount),
+		unsafe.Pointer(&stride),
+	}
+	_, _ = ffi.CallFunction(&cifVoid4MultiArr, c.glMultiDrawArraysIndirect, nil, args[:])
+}
+
+// MultiDrawElementsIndirect is the indexed MultiDrawArraysIndirect.
+func (c *Context) MultiDrawElementsIndirect(mode, typ uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawElementsIndirect == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&drawCount),
+		unsafe.Pointer(&stride),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5MultiElem, c.glMultiDrawElementsIndirect, nil, args[:])
+}
+
+// HasMultiDrawIndirect reports whether the multi-draw indirect calls are
+// loaded.
+func (c *Context) HasMultiDrawIndirect() bool {
+	return c.glMultiDrawArraysIndirect != nil && c.glMultiDrawElementsIndirect != nil
 }
 
 // HasDrawIndirect reports whether glDrawArraysIndirect and

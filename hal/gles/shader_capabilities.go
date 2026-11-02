@@ -13,13 +13,18 @@ import "github.com/gogpu/gputypes"
 //   - PrimitiveIndex (gl_PrimitiveID in the fragment stage): GL 3.2 / ES 3.2,
 //     OES_geometry_shader or GL_ARB_geometry_shader4;
 //   - ShaderEarlyDepthTest (layout(early_fragment_tests)): GL 4.2 / ES 3.1 or
-//     GL_ARB_shader_image_load_store.
+//     GL_ARB_shader_image_load_store;
+//   - ShaderDrawIndex, which Rust does not offer on GLES: desktop GL 4.6
+//     (GLSL 4.60 gl_DrawID), or fullInstancing, whose shaders are compiled
+//     with naga's DrawParameters (gl_DrawIDARB). GLSL ES has no draw index.
+//     A multi-draw counts its records only because MultiDrawIndirect is
+//     offered just where glMultiDraw*Indirect issues them as one call.
 //
 // ClipDistances is not offered: GL clips only with GL_CLIP_DISTANCEi enabled
 // per pipeline, which Rust drives from naga's reflected clip distance count;
 // naga's GLSL backend does not report it yet (requested from naga,
 // P1-API-008).
-func shaderCapabilityFeatures(exts map[string]bool, glMajor, glMinor int, isES bool) gputypes.Features {
+func shaderCapabilityFeatures(exts map[string]bool, glMajor, glMinor int, isES, fullInstancing bool) gputypes.Features {
 	var result gputypes.Features
 	set := func(f gputypes.Feature, on bool) {
 		if on {
@@ -33,8 +38,7 @@ func shaderCapabilityFeatures(exts map[string]bool, glMajor, glMinor int, isES b
 	set(gputypes.FeatureShaderEarlyDepthTest,
 		glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 1}, [2]int{4, 2}) ||
 			hasExtension(exts, "GL_ARB_shader_image_load_store"))
-	// naga writes GLSL 4.50 at most, so draw_index needs gl_DrawIDARB from
-	// GL_ARB_shader_draw_parameters even on GL 4.6; GLSL ES has none.
-	set(gputypes.FeatureShaderDrawIndex, fullyFeaturedInstancing(exts, glMajor, glMinor, isES))
+	set(gputypes.FeatureShaderDrawIndex, !isES &&
+		(glVersionAtLeast(glMajor, glMinor, false, [2]int{99, 0}, [2]int{4, 6}) || fullInstancing))
 	return result
 }

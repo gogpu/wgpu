@@ -824,28 +824,26 @@ const (
 	drawIndexedIndirectRecordSize = 20
 )
 
-// DrawIndirect draws drawCount times with the records at offset in buffer,
-// one glDrawArraysIndirect per record, as Rust wgpu-hal gles does
-// (command.rs draw_indirect, queue.rs DrawIndirect).
+// DrawIndirect draws drawCount records from offset in buffer (Rust wgpu-hal
+// gles command.rs draw_indirect, queue.rs DrawIndirect).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndirectRecordSize, drawCount) {
 		return
 	}
 	e.prepareDraw(0)
-	for i := range drawCount {
-		e.encoder.commands = append(e.encoder.commands, &DrawIndirectCommand{
-			buffer:                buf.id,
-			offset:                offset + uint64(i)*drawIndirectRecordSize,
-			topology:              e.topology(),
-			firstInstanceLocation: e.firstInstanceLocation(),
-		})
-	}
+	e.encoder.commands = append(e.encoder.commands, &DrawIndirectCommand{
+		buffer:                buf.id,
+		offset:                offset,
+		count:                 drawCount,
+		topology:              e.topology(),
+		firstInstanceLocation: e.firstInstanceLocation(),
+	})
 }
 
-// DrawIndexedIndirect draws drawCount times with the indexed records at
-// offset in buffer, one glDrawElementsIndirect per record, as Rust wgpu-hal
-// gles does (command.rs draw_indexed_indirect, queue.rs DrawIndexedIndirect).
+// DrawIndexedIndirect draws drawCount indexed records from offset in buffer
+// (Rust wgpu-hal gles command.rs draw_indexed_indirect, queue.rs
+// DrawIndexedIndirect).
 //
 // glDrawElementsIndirect has no index buffer offset parameter: the record's
 // firstIndex counts from the start of the buffer, so the offset given to
@@ -856,15 +854,14 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 		return
 	}
 	e.prepareDraw(0)
-	for i := range drawCount {
-		e.encoder.commands = append(e.encoder.commands, &DrawIndexedIndirectCommand{
-			buffer:                buf.id,
-			offset:                offset + uint64(i)*drawIndexedIndirectRecordSize,
-			indexFormat:           e.indexFormat,
-			topology:              e.topology(),
-			firstInstanceLocation: e.firstInstanceLocation(),
-		})
-	}
+	e.encoder.commands = append(e.encoder.commands, &DrawIndexedIndirectCommand{
+		buffer:                buf.id,
+		offset:                offset,
+		count:                 drawCount,
+		indexFormat:           e.indexFormat,
+		topology:              e.topology(),
+		firstInstanceLocation: e.firstInstanceLocation(),
+	})
 }
 
 // DrawIndirectCount is not supported by the GLES backend.
@@ -1749,37 +1746,56 @@ func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
 	}
 }
 
-// DrawIndirectCommand draws with one DrawIndirectArgs record (Rust wgpu-hal
-// gles/queue.rs C::DrawIndirect). The first instance in the record reaches GL
-// only with fully featured instancing; the uniform is 0.
+// DrawIndirectCommand draws count DrawIndirectArgs records (Rust wgpu-hal
+// gles/queue.rs C::DrawIndirect). The first instance in a record reaches GL
+// only with fully featured instancing; the uniform is 0. Several records go
+// to one glMultiDrawArraysIndirect where the context has it, so gl_DrawID
+// (draw_index) counts them; Rust issues one draw per record, and offers no
+// MultiDrawIndirect on GLES.
 type DrawIndirectCommand struct {
 	buffer                uint32
 	offset                uint64
+	count                 uint32
 	topology              gputypes.PrimitiveTopology
 	firstInstanceLocation int32
 }
 
 func (c *DrawIndirectCommand) Execute(ctx *gl.Context) {
+	mode := primitiveTopologyToGL(c.topology)
 	setFirstInstance(ctx, c.firstInstanceLocation, 0)
 	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
-	ctx.DrawArraysIndirect(primitiveTopologyToGL(c.topology), uintptr(c.offset))
+	if c.count > 1 && ctx.HasMultiDrawIndirect() {
+		ctx.MultiDrawArraysIndirect(mode, uintptr(c.offset), int32(c.count), drawIndirectRecordSize)
+		return
+	}
+	for i := range uint64(c.count) {
+		ctx.DrawArraysIndirect(mode, uintptr(c.offset+i*drawIndirectRecordSize))
+	}
 }
 
-// DrawIndexedIndirectCommand draws with one DrawIndexedIndirectArgs record
-// (Rust wgpu-hal gles/queue.rs C::DrawIndexedIndirect).
+// DrawIndexedIndirectCommand draws count DrawIndexedIndirectArgs records
+// (Rust wgpu-hal gles/queue.rs C::DrawIndexedIndirect), as DrawIndirectCommand.
 type DrawIndexedIndirectCommand struct {
 	buffer                uint32
 	offset                uint64
+	count                 uint32
 	indexFormat           gputypes.IndexFormat
 	topology              gputypes.PrimitiveTopology
 	firstInstanceLocation int32
 }
 
 func (c *DrawIndexedIndirectCommand) Execute(ctx *gl.Context) {
+	mode := primitiveTopologyToGL(c.topology)
 	indexType, _ := indexTypeAndSize(c.indexFormat)
 	setFirstInstance(ctx, c.firstInstanceLocation, 0)
 	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
-	ctx.DrawElementsIndirect(primitiveTopologyToGL(c.topology), indexType, uintptr(c.offset))
+	if c.count > 1 && ctx.HasMultiDrawIndirect() {
+		ctx.MultiDrawElementsIndirect(mode, indexType, uintptr(c.offset), int32(c.count), drawIndexedIndirectRecordSize)
+		return
+	}
+	for i := range uint64(c.count) {
+		ctx.DrawElementsIndirect(mode, indexType, uintptr(c.offset+i*drawIndexedIndirectRecordSize))
+	}
 }
 
 // CopyBufferCommand copies a region of one GL buffer object into another.

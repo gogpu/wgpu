@@ -158,6 +158,8 @@ type Context struct {
 	glDrawArraysInstancedBaseInstance             uintptr
 	glDrawElementsInstancedBaseVertexBaseInstance uintptr
 	glUniform1ui                                  uintptr
+	glMultiDrawArraysIndirect                     uintptr
+	glMultiDrawElementsIndirect                   uintptr
 
 	// Compute shaders (GL 4.3+ / ES 3.1+)
 	glDispatchCompute         uintptr
@@ -334,6 +336,8 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDrawArraysInstancedBaseInstance = getProcAddr("glDrawArraysInstancedBaseInstance")
 	c.glDrawElementsInstancedBaseVertexBaseInstance = getProcAddr("glDrawElementsInstancedBaseVertexBaseInstance")
 	c.glUniform1ui = getProcAddr("glUniform1ui")
+	c.glMultiDrawArraysIndirect = getProcAddr("glMultiDrawArraysIndirect")
+	c.glMultiDrawElementsIndirect = getProcAddr("glMultiDrawElementsIndirect")
 
 	// Compute shaders (optional - may be nil on older GL versions)
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
@@ -1091,6 +1095,31 @@ func (c *Context) Uniform1ui(location int32, value uint32) {
 		return
 	}
 	syscall.SyscallN(c.glUniform1ui, uintptr(location), uintptr(value))
+}
+
+// MultiDrawArraysIndirect draws drawCount records of stride bytes from offset
+// in the buffer bound to GL_DRAW_INDIRECT_BUFFER, with gl_DrawID counting
+// them (GL 4.3 / GL_EXT_multi_draw_indirect). A no-op when the context lacks
+// it.
+func (c *Context) MultiDrawArraysIndirect(mode uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawArraysIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glMultiDrawArraysIndirect, uintptr(mode), offset, uintptr(drawCount), uintptr(stride))
+}
+
+// MultiDrawElementsIndirect is the indexed MultiDrawArraysIndirect.
+func (c *Context) MultiDrawElementsIndirect(mode, typ uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawElementsIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glMultiDrawElementsIndirect, uintptr(mode), uintptr(typ), offset, uintptr(drawCount), uintptr(stride))
+}
+
+// HasMultiDrawIndirect reports whether the multi-draw indirect calls are
+// loaded.
+func (c *Context) HasMultiDrawIndirect() bool {
+	return c.glMultiDrawArraysIndirect != 0 && c.glMultiDrawElementsIndirect != 0
 }
 
 // HasDrawIndirect reports whether glDrawArraysIndirect and
