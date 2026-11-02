@@ -300,7 +300,12 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 		return nil, err
 	}
 
-	return &RenderPassEncoder{core: corePass, encoder: e}, nil
+	pass := &RenderPassEncoder{core: corePass, encoder: e}
+	if desc != nil && desc.DepthStencilAttachment != nil {
+		ds := desc.DepthStencilAttachment
+		pass.depthReadOnly, pass.stencilReadOnly = ds.DepthReadOnly, ds.StencilReadOnly
+	}
+	return pass, nil
 }
 
 // BeginComputePass begins a compute pass.

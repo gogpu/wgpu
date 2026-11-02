@@ -157,9 +157,7 @@ func (b *binder) isValid(i uint32) bool {
 // or dispatch, after the draw-time validation passed.
 // Matches Rust wgpu-core's flush_bindings_helper (command/pass.rs).
 func (b *binder) flush(raw bindGroupSetter) {
-	start := b.rebindStart
-	b.rebindStart = MaxBindGroups
-	b.bindValid(raw, start)
+	b.bindValid(raw, b.takeRebindStart())
 }
 
 // bindValid binds every valid slot from start up. With start 0 it restores
@@ -168,13 +166,28 @@ func (b *binder) bindValid(raw bindGroupSetter, start uint32) {
 	if raw == nil {
 		return
 	}
-	for i := start; i < MaxBindGroups; i++ {
-		if !b.isValid(i) {
-			continue
+	b.listValid(start, func(i uint32, group *BindGroup, offsets []uint32) {
+		if group.hal != nil {
+			raw.SetBindGroup(i, group.hal, offsets)
 		}
-		payload := &b.payloads[i]
-		if payload.group.hal != nil {
-			raw.SetBindGroup(i, payload.group.hal, payload.dynamicOffsets)
+	})
+}
+
+// takeRebindStart returns the first slot whose backend binding may be stale
+// and marks all bindings current (Rust Binder::take_rebind_start_index).
+func (b *binder) takeRebindStart() uint32 {
+	start := b.rebindStart
+	b.rebindStart = MaxBindGroups
+	return start
+}
+
+// listValid calls fn with every valid slot from start up, its group and its
+// dynamic offsets (Rust Binder::list_valid_with_start). A render bundle
+// records these as its SetBindGroup commands; a pass binds them.
+func (b *binder) listValid(start uint32, fn func(i uint32, group *BindGroup, offsets []uint32)) {
+	for i := start; i < MaxBindGroups; i++ {
+		if b.isValid(i) {
+			fn(i, b.payloads[i].group, b.payloads[i].dynamicOffsets)
 		}
 	}
 }

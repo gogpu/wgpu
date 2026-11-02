@@ -189,7 +189,7 @@ func TestExecuteBundlesResetsPassState(t *testing.T) {
 	renderPass.binder.updateExpectations([]*BindGroupLayout{l})
 	renderPass.binder.setGroup(0, rebindGroup(l), nil)
 
-	renderPass.ExecuteBundles(&RenderBundle{hal: &testHALResource{}})
+	renderPass.ExecuteBundles(newEmptyBundle(device))
 	if renderPass.pipelineSet || renderPass.binder.activeGroup(0) != nil || renderPass.binder.assigned[0] != nil {
 		t.Fatal("ExecuteBundles kept the pipeline or the bind groups")
 	}

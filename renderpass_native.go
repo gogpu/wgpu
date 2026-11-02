@@ -49,6 +49,11 @@ type RenderPassEncoder struct {
 	// blendConstantSet tracks whether SetBlendConstant has been called.
 	// Matches Rust wgpu-core OptionalState for blend_constant.
 	blendConstantSet bool
+	// depthReadOnly and stencilReadOnly are the read-only flags of the
+	// depth/stencil attachment; a bundle executed in the pass must be
+	// read-only where the pass is (Rust RenderPassInfo.is_depth_read_only).
+	depthReadOnly   bool
+	stencilReadOnly bool
 }
 
 // trackRef Clone()'s a ResourceRef and appends directly to the parent
@@ -91,6 +96,17 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 		return
 	}
 	p.binder.setGroup(index, group, offsets)
+	p.trackBindGroup(group)
+	// A render pass is one usage scope: every bind group set in it counts.
+	if err := p.core.MergeBindGroup(group.usages); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
+	}
+}
+
+// trackBindGroup keeps a bind group used in the pass and its buffers alive
+// until the GPU completes the submission, and records the group for
+// submit-time validation.
+func (p *RenderPassEncoder) trackBindGroup(group *BindGroup) {
 	p.trackRef(group.ref)
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
@@ -105,10 +121,6 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
-	// A render pass is one usage scope: every bind group set in it counts.
-	if err := p.core.MergeBindGroup(group.usages); err != nil {
-		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
-	}
 }
 
 // flushBindGroups binds the bind groups whose backend binding is stale, right
@@ -385,18 +397,15 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 }
 
 // ExecuteBundles executes reusable render command bundles in this render pass.
+// Each bundle's commands are replayed into the pass, its resources join the
+// pass's usage scope, and the pass is left without a pipeline, bind groups,
+// vertex buffers or index buffer: draws after it must set them again.
 func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
-	raw := p.core.RawPass()
-	if raw == nil {
-		return
-	}
-
 	for _, bundle := range bundles {
-		if bundle == nil || bundle.released.Load() || bundle.hal == nil {
-			continue
+		if err := p.executeBundle(bundle); err != nil {
+			p.encoder.setError(fmt.Errorf("wgpu: RenderPass.ExecuteBundles: %w", err))
+			break
 		}
-
-		raw.ExecuteBundle(bundle.hal)
 	}
 	if len(bundles) > 0 {
 		p.resetBundleState()

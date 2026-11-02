@@ -625,6 +625,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		}
 	}
 
+	passContext, writesDepth, writesStencil := renderPipelineTargets(desc)
 	return &RenderPipeline{
 		hal:                   halPipeline,
 		device:                d,
@@ -634,6 +635,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		blendConstantRequired: needsBlendConstant,
 		stripIndexFormat:      desc.Primitive.StripIndexFormat,
 		lateSizedBufferGroups: lateGroups,
+		passContext:           passContext,
+		writesDepth:           writesDepth,
+		writesStencil:         writesStencil,
 		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
 	}, nil
 }
@@ -1183,24 +1187,20 @@ func (d *Device) halDevice() hal.Device {
 }
 
 // CreateRenderBundleEncoder creates an encoder for reusable render commands.
+// The bundle can run in any render pass with the descriptor's attachment
+// formats and sample count, on every backend: core records and replays it.
 func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
 	}
 
-	if d.released.Load() {
+	if d.released.Load() || d.halDevice() == nil {
 		return nil, ErrReleased
 	}
 
-	halDevice := d.halDevice()
-	if halDevice == nil {
-		return nil, ErrReleased
-	}
-
-	halEncoder, err := halDevice.CreateRenderBundleEncoder(desc.toHAL())
+	encoder, err := newRenderBundleEncoder(d, desc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create render bundle encoder: %w", err)
+		return nil, fmt.Errorf("wgpu: CreateRenderBundleEncoder: %w", err)
 	}
-
-	return &RenderBundleEncoder{hal: halEncoder, device: d}, nil
+	return encoder, nil
 }

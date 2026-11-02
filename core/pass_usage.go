@@ -198,6 +198,66 @@ func (p *CoreRenderPassEncoder) MergeBindGroup(usages *BindGroupUsages) error {
 	return p.scope.mergeBindGroup(usages)
 }
 
+// RenderBundleScope is the usage scope of a render bundle: the usages of its
+// bind groups and its vertex and index buffers. Conflicts inside the bundle
+// are found when the bundle is finished; executing the bundle merges every
+// usage into the render pass's scope.
+//
+// Reference: wgpu-core track/mod.rs RenderBundleScope (RenderBundle.used)
+type RenderBundleScope struct {
+	scope *passUsageScope
+	used  BindGroupUsages
+}
+
+// NewRenderBundleScope returns an empty render bundle usage scope.
+func NewRenderBundleScope() *RenderBundleScope {
+	return &RenderBundleScope{scope: newPassUsageScope()}
+}
+
+// MergeBindGroup merges the usages of a bind group set in the bundle.
+// Returns an error if a usage conflicts with another usage in the bundle.
+//
+// Reference: wgpu-core command/bundle.rs set_bind_group
+// (state.trackers.merge_bind_group)
+func (s *RenderBundleScope) MergeBindGroup(usages *BindGroupUsages) error {
+	if usages == nil {
+		return nil
+	}
+	if err := s.scope.mergeBindGroup(usages); err != nil {
+		return err
+	}
+	s.used.Buffers = append(s.used.Buffers, usages.Buffers...)
+	s.used.Textures = append(s.used.Textures, usages.Textures...)
+	return nil
+}
+
+// MergeBuffer merges one buffer usage of the bundle (a vertex or index
+// buffer). Returns an error if it conflicts with another usage in the bundle.
+//
+// Reference: wgpu-core command/bundle.rs set_vertex_buffer, set_index_buffer
+// (state.trackers.buffers.merge_single)
+func (s *RenderBundleScope) MergeBuffer(buffer *Buffer, usage track.BufferUses) error {
+	if err := s.scope.addBuffer(buffer, usage); err != nil {
+		return err
+	}
+	s.used.Buffers = append(s.used.Buffers, BindGroupBufferUse{Buffer: buffer, Usage: usage})
+	return nil
+}
+
+// MergeRenderBundle merges the usages of an executed render bundle into the
+// pass's usage scope. Returns an error if a usage conflicts with another usage
+// in the pass (for example a texture the bundle samples that is also a color
+// attachment of the pass).
+//
+// Reference: wgpu-core command/render.rs execute_bundle
+// (state.pass.scope.merge_render_bundle)
+func (p *CoreRenderPassEncoder) MergeRenderBundle(bundle *RenderBundleScope) error {
+	if p.ended || p.scope == nil || bundle == nil {
+		return nil
+	}
+	return p.scope.mergeBindGroup(&bundle.used)
+}
+
 // transitionRenderPassScopeLocked applies a finished render pass's usage
 // scope to the command buffer trackers. Barriers cannot be recorded inside a
 // render pass, and the pass is already recorded, so any barriers go into a

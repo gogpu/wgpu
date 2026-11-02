@@ -206,17 +206,6 @@ type RenderBundleDescriptor struct {
 	Label string
 }
 
-func (d *RenderBundleEncoderDescriptor) toHAL() *hal.RenderBundleEncoderDescriptor {
-	if d == nil {
-		return nil
-	}
-	return &hal.RenderBundleEncoderDescriptor{
-		Label: d.Label, ColorFormats: d.ColorFormats,
-		DepthStencilFormat: d.DepthStencilFormat, SampleCount: d.SampleCount,
-		DepthReadOnly: d.DepthReadOnly, StencilReadOnly: d.StencilReadOnly,
-	}
-}
-
 // toHAL converts a CommandEncoderDescriptor to a hal.CommandEncoderDescriptor.
 func (d *CommandEncoderDescriptor) toHAL() *hal.CommandEncoderDescriptor {
 	return &hal.CommandEncoderDescriptor{

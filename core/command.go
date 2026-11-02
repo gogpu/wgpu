@@ -1393,6 +1393,13 @@ func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
 	return p.raw
 }
 
+// PassContext returns the attachment formats and sample count of this render
+// pass, or nil if they are unknown. A render bundle executed in the pass must
+// match them (Rust wgpu-core command/render.rs execute_bundle).
+func (p *CoreRenderPassEncoder) PassContext() *RenderPassContext {
+	return p.passContext
+}
+
 // recordBufferUsage records a buffer usage in this render pass's usage scope.
 // Buffers without valid tracking data are skipped. Returns an error if the
 // buffer already has an incompatible usage in this pass.

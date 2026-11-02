@@ -86,9 +86,62 @@ type RenderPipeline struct {
 	// whose layout has MinBindingSize == 0. Validated at draw time.
 	// Matches Rust wgpu-core RenderPipeline.late_sized_buffer_groups.
 	lateSizedBufferGroups [MaxBindGroups]LateSizedBufferGroup
+	// passContext holds the color target formats, the depth/stencil format
+	// and the sample count the pipeline renders to. A render bundle checks
+	// it against its own formats at SetPipeline.
+	// Matches Rust wgpu-core RenderPipeline.pass_context.
+	passContext core.RenderPassContext
+	// writesDepth and writesStencil report whether the pipeline writes the
+	// depth or the stencil aspect, which a read-only bundle forbids.
+	// Matches Rust wgpu-core PipelineFlags::WRITES_DEPTH and WRITES_STENCIL.
+	writesDepth   bool
+	writesStencil bool
 	// ref is the GPU-aware reference counter for this pipeline (Phase 2).
 	// Clone'd when used in a render pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef
+}
+
+// renderPipelineTargets returns the attachment configuration a render
+// pipeline renders to and whether it writes depth or stencil.
+// Matches Rust wgpu-core Device::create_render_pipeline (pass_context and
+// the WRITES_DEPTH / WRITES_STENCIL flags).
+func renderPipelineTargets(desc *RenderPipelineDescriptor) (ctx core.RenderPassContext, writesDepth, writesStencil bool) {
+	ctx.SampleCount = max(desc.Multisample.Count, 1)
+	if desc.Fragment != nil {
+		ctx.ColorFormats = make([]gputypes.TextureFormat, len(desc.Fragment.Targets))
+		for i := range desc.Fragment.Targets {
+			ctx.ColorFormats[i] = desc.Fragment.Targets[i].Format
+		}
+	}
+	ds := desc.DepthStencil
+	if ds == nil {
+		return ctx, false, false
+	}
+	ctx.DepthStencilFormat = ds.Format
+	return ctx, ds.DepthWriteEnabled, !stencilReadOnly(ds, desc.Primitive.CullMode)
+}
+
+// stencilReadOnly reports whether a depth/stencil state never writes the
+// stencil aspect: no write mask, or every face that is not culled keeps the
+// stencil value on every outcome.
+// Matches Rust wgpu-types StencilState::is_read_only.
+func stencilReadOnly(ds *DepthStencilState, cull gputypes.CullMode) bool {
+	if ds.StencilWriteMask == 0 {
+		return true
+	}
+	front := cull == gputypes.CullModeFront || ds.StencilFront.keepsStencil()
+	back := cull == gputypes.CullModeBack || ds.StencilBack.keepsStencil()
+	return front && back
+}
+
+// keepsStencil reports whether the face keeps the stencil value whether the
+// stencil or the depth test passes or fails. The zero operation is WebGPU's
+// default, keep. Matches Rust wgpu-types StencilFaceState::is_read_only.
+func (s StencilFaceState) keepsStencil() bool {
+	keep := func(op gputypes.StencilOperation) bool {
+		return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
+	}
+	return keep(s.FailOp) && keep(s.DepthFailOp) && keep(s.PassOp)
 }
 
 // Release drops the application's ownership reference to the render pipeline.
