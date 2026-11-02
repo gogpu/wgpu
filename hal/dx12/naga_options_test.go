@@ -85,3 +85,58 @@ func TestDXILShaderModelRefusal(t *testing.T) {
 		}
 	}
 }
+
+// TestDXILCacheSourceHoldsBindings checks that the DXIL shader cache key
+// changes with every binding option and does not depend on map order: a
+// module compiled for one pipeline layout must never hit an entry made for
+// another (BUG-DX12-SHADER-LAYOUT-001).
+func TestDXILCacheSourceHoldsBindings(t *testing.T) {
+	base := func() dxil.Options {
+		return dxil.Options{
+			ShaderModel: backend.ShaderModel{Major: 6, Minor: 0},
+			BindingMap: dxil.BindingMap{
+				{Group: 0, Binding: 0}: {Register: 0},
+				{Group: 1, Binding: 0}: {Register: 1},
+				{Group: 1, Binding: 3}: {Register: 2},
+			},
+			SamplerBufferBindingMap: map[uint32]dxil.BindTarget{0: {Register: 4}, 1: {Register: 5}},
+			SamplerHeapTargets:      &dxil.SamplerHeapBindTargets{ComparisonSamplers: dxil.BindTarget{Register: 2048}},
+			SpecialConstantsBinding: &dxil.BindTarget{Register: 3},
+		}
+	}
+	want := base()
+	key := dxilCacheSource("src", &want)
+	for i := range 20 {
+		again := base()
+		if got := dxilCacheSource("src", &again); got != key {
+			t.Fatalf("run %d: key changed for equal options:\n%q\n%q", i, got, key)
+		}
+	}
+
+	changes := map[string]func(o *dxil.Options){
+		"source": nil,
+		"register": func(o *dxil.Options) {
+			o.BindingMap[ir.ResourceBinding{Group: 1, Binding: 0}] = dxil.BindTarget{Register: 2}
+		},
+		"space": func(o *dxil.Options) {
+			o.BindingMap[ir.ResourceBinding{Group: 1, Binding: 0}] = dxil.BindTarget{Space: 1, Register: 1}
+		},
+		"sampler buffer":   func(o *dxil.Options) { o.SamplerBufferBindingMap[1] = dxil.BindTarget{Register: 6} },
+		"sampler heaps":    func(o *dxil.Options) { o.SamplerHeapTargets.ComparisonSamplers.Register = 1024 },
+		"special constant": func(o *dxil.Options) { o.SpecialConstantsBinding.Register = 7 },
+		"no special":       func(o *dxil.Options) { o.SpecialConstantsBinding = nil },
+		"shader model":     func(o *dxil.Options) { o.ShaderModel.Minor = 6 },
+		"bounds":           func(o *dxil.Options) { o.BoundsCheckPolicies.Buffer = backend.BoundsCheckUnchecked },
+	}
+	for name, change := range changes {
+		o, source := base(), "src"
+		if change == nil {
+			source = "other"
+		} else {
+			change(&o)
+		}
+		if dxilCacheSource(source, &o) == key {
+			t.Errorf("%s: cache key did not change", name)
+		}
+	}
+}

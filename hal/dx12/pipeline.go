@@ -25,15 +25,14 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShaderModule implements hal.ShaderModule for DirectX 12.
-// Stores the WGSL lowered to IR for deferred compilation. Compilation happens
-// during pipeline creation when the PipelineLayout (with naga options) is
-// available. A module with overrides is compiled per pipeline stage and never
-// fills entryPoints (Device.stageBytecode).
+// Stores the WGSL lowered to IR. Each pipeline stage is compiled when its
+// pipeline is created, with that pipeline's layout (Device.stageBytecode), so
+// a WGSL module never holds bytecode itself.
 // For pre-compiled SPIR-V, entryPoints is populated directly.
 type ShaderModule struct {
 	wgslSource  string            // Raw WGSL source (shader cache key of the DXIL path)
 	irModule    *shaderir.Module  // WGSL lowered to IR; nil for pre-compiled input
-	entryPoints map[string][]byte // entryName → DXBC bytecode (populated on pipeline creation or from SPIR-V)
+	entryPoints map[string][]byte // entryName → bytecode of pre-compiled input
 	device      *Device
 }
 
@@ -51,12 +50,6 @@ func (m *ShaderModule) EntryPointBytecode(name string) []byte {
 		return nil
 	}
 	return m.entryPoints[name]
-}
-
-// IsDeferred returns true if this module contains raw WGSL that needs
-// compilation with pipeline-specific naga options.
-func (m *ShaderModule) IsDeferred() bool {
-	return m.wgslSource != "" && len(m.entryPoints) == 0
 }
 
 // -----------------------------------------------------------------------------
@@ -469,7 +462,7 @@ func (d *Device) createRootSignatureFromLayouts(layouts []hal.BindGroupLayout) (
 	// checks follow Rust's restrict_indexing (true, what wgpu-hal passes):
 	// Index and Buffer Restrict; D3D12 checks image loads itself; binding
 	// arrays are Unchecked, as Rust's HLSL writer never checks them. The
-	// DXIL path takes the bindings from these options (compileWGSLModuleDXIL).
+	// DXIL path takes the bindings from these options (compileStageDXIL).
 	nagaOpts := &hlsl.Options{
 		ShaderModel:             backend.ShaderModel{Major: 5, Minor: 1},
 		BindingMap:              bindingMap,
