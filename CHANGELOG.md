@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.7] - 2026-11-02
+
 ### Added
 
 - **Timestamp queries on Vulkan and DX12.** Both backends implemented timestamp queries but never offered `FeatureTimestampQuery`, so every timestamp query set was refused. Vulkan now offers the feature when the queue family reports at least 36 `timestampValidBits`, and DX12 always offers it, as Rust wgpu-hal does.
