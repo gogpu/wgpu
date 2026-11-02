@@ -582,8 +582,8 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	// Matches Rust wgpu-core's check_stage calls that accumulate shader_binding_sizes
 	// with max across stages for the same binding (validation.rs:1126-1139).
 	shaderBindingSizes := mergeShaderBindingSizes(
-		desc.Vertex.Module,
-		fragmentShaderModule(desc.Fragment),
+		desc.Vertex.Module.bindingSizes(ir.StageVertex, desc.Vertex.EntryPoint),
+		fragmentBindingSizes(desc.Fragment),
 	)
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
@@ -618,37 +618,30 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}, nil
 }
 
-// fragmentShaderModule extracts the ShaderModule from a FragmentState, or nil if absent.
-func fragmentShaderModule(fs *FragmentState) *ShaderModule {
+// fragmentBindingSizes returns the binding sizes of the fragment entry
+// point, or nil without a fragment stage.
+func fragmentBindingSizes(fs *FragmentState) map[ir.ResourceBinding]uint64 {
 	if fs == nil {
 		return nil
 	}
-	return fs.Module
+	return fs.Module.bindingSizes(ir.StageFragment, fs.EntryPoint)
 }
 
-// mergeShaderBindingSizes merges binding sizes from vertex and fragment shader stages,
-// taking the max size when both stages reference the same binding. Matches Rust
-// wgpu-core's pattern of calling check_stage for each stage with the same
-// shader_binding_sizes map, where Entry::Occupied takes max (validation.rs:1131-1133).
-func mergeShaderBindingSizes(
-	vertexModule *ShaderModule,
-	fragModule *ShaderModule,
-) map[ir.ResourceBinding]uint64 {
-	result := make(map[ir.ResourceBinding]uint64)
-
-	if vertexModule != nil && vertexModule.irModule != nil {
-		for rb, size := range extractShaderBindingSizes(vertexModule.irModule) {
+// mergeShaderBindingSizes merges the binding sizes of the vertex and fragment
+// entry points, taking the max size when both stages use the same binding.
+// Matches Rust wgpu-core's pattern of calling check_stage for each stage with
+// the same shader_binding_sizes map, where Entry::Occupied takes the max
+// (wgpu-core/src/validation.rs).
+func mergeShaderBindingSizes(vertex, fragment map[ir.ResourceBinding]uint64) map[ir.ResourceBinding]uint64 {
+	result := make(map[ir.ResourceBinding]uint64, len(vertex)+len(fragment))
+	for rb, size := range vertex {
+		result[rb] = size
+	}
+	for rb, size := range fragment {
+		if existing, ok := result[rb]; !ok || size > existing {
 			result[rb] = size
 		}
 	}
-	if fragModule != nil && fragModule.irModule != nil {
-		for rb, size := range extractShaderBindingSizes(fragModule.irModule) {
-			if existing, ok := result[rb]; !ok || size > existing {
-				result[rb] = size
-			}
-		}
-	}
-
 	return result
 }
 
@@ -698,11 +691,8 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
 
-	// Build shader binding sizes for the compute stage.
-	var shaderBindingSizes map[ir.ResourceBinding]uint64
-	if desc.Module != nil && desc.Module.irModule != nil {
-		shaderBindingSizes = extractShaderBindingSizes(desc.Module.irModule)
-	}
+	// Shader binding sizes of the compute entry point.
+	shaderBindingSizes := desc.Module.bindingSizes(ir.StageCompute, desc.EntryPoint)
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
 

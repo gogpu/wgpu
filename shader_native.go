@@ -25,19 +25,54 @@ type ShaderModule struct {
 	irInfo valid.ModuleInfo
 }
 
-// extractShaderBindingSizes extracts the minimum buffer binding sizes
-// from a shader module. For each global variable with a resource binding
-// whose type is a buffer (not a sampler, texture, or other opaque type),
-// computes its size with ir.Layouter and returns a map from ResourceBinding to minimum
-// byte size.
+// entryPointIndex returns the index in the IR of the entry point a pipeline
+// stage names, or -1 if there is none. An empty name selects the only entry
+// point of the stage (WebGPU "get the entry point": omitted only when the
+// module has exactly one for the stage).
+func (m *ShaderModule) entryPointIndex(stage ir.ShaderStage, name string) int {
+	if m == nil || m.irModule == nil {
+		return -1
+	}
+	found := -1
+	for i := range m.irModule.EntryPoints {
+		ep := &m.irModule.EntryPoints[i]
+		if ep.Stage != stage || (name != "" && ep.Name != name) {
+			continue
+		}
+		if found >= 0 {
+			return -1 // an omitted name is ambiguous; a named one is unique
+		}
+		found = i
+	}
+	return found
+}
+
+// bindingSizes returns the minimum buffer binding sizes of the globals the
+// entry point uses, callees included, or nil without IR or without that
+// entry point. Rust wgpu-core Interface::check_stage reads the resources of
+// one entry point, those its ModuleInfo marks as used
+// (wgpu-core/src/validation.rs): two globals of a module may share a binding
+// when no entry point uses both, and only the one this entry point uses
+// sets the size.
+func (m *ShaderModule) bindingSizes(stage ir.ShaderStage, entryPoint string) map[ir.ResourceBinding]uint64 {
+	i := m.entryPointIndex(stage, entryPoint)
+	if i < 0 || i >= len(m.irInfo.EntryPoints) {
+		return nil
+	}
+	return extractShaderBindingSizes(m.irModule, m.irInfo.EntryPoints[i].GlobalUses)
+}
+
+// extractShaderBindingSizes extracts the minimum buffer binding sizes of
+// the globals of module that uses marks as used (valid.FunctionInfo
+// GlobalUses of one entry point). For each such global with a resource
+// binding whose type is a buffer (not a sampler, texture, or other opaque
+// type), it computes the size with ir.Layouter and returns a map from
+// ResourceBinding to minimum byte size.
 //
-// Global variables in WGSL are module-scoped and shared across all entry
-// points, so no entry-point filtering is needed here (unlike Rust's
-// check_stage which filters by per-entry-point resource references).
-//
-// Equivalent to Rust wgpu-core's Interface::new (validation.rs:985-1017)
-// which iterates global_variables and calls TypeInner::size() for buffer types.
-func extractShaderBindingSizes(module *ir.Module) map[ir.ResourceBinding]uint64 {
+// Equivalent to Rust wgpu-core's Interface::new (validation.rs), which
+// calls TypeInner::size() for buffer types, filtered to one entry point's
+// resources as check_stage does.
+func extractShaderBindingSizes(module *ir.Module, uses []valid.GlobalUse) map[ir.ResourceBinding]uint64 {
 	if module == nil {
 		return nil
 	}
@@ -54,7 +89,7 @@ func extractShaderBindingSizes(module *ir.Module) map[ir.ResourceBinding]uint64 
 
 	for i := range module.GlobalVariables {
 		gv := &module.GlobalVariables[i]
-		if gv.Binding == nil {
+		if gv.Binding == nil || i >= len(uses) || uses[i] == 0 {
 			continue
 		}
 
