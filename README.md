@@ -31,13 +31,13 @@
 | Category | Capabilities |
 |----------|--------------|
 | **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU**, **Rust FFI** |
-| **Platforms** | Windows, Linux, macOS, iOS, **Browser (WASM)**, **Android/arm64 (preview)** |
+| **Platforms** | Windows, Linux, macOS, **Browser (WASM)**, **Android/arm64 (preview)**; iOS untested |
 | **API** | WebGPU-compliant (W3C specification) |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |
 | **Present** | Damage-aware presentation — compositor dirty rects (first WebGPU implementation) |
 | **Ray Tracing** | Inline ray queries (experimental) — Vulkan (VK_KHR), DX12 (DXR), Metal (macOS 15+), Software (CPU BVH). Feature-gated by `FeatureRayQuery` |
-| **Debug** | Leak detection, error scopes, validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
+| **Debug** | Leak detection, error scopes (native backends; not yet in the browser backend), validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
 
 ---
@@ -57,10 +57,8 @@ CGO_ENABLED=0 go build
 
 > **Note:** wgpu uses Pure Go FFI via [goffi](https://github.com/go-webgpu/goffi). Both `CGO_ENABLED=0` (default, zero C compiler dependency) and `CGO_ENABLED=1` (for race detector or coexistence with CGO libraries) are supported.
 
-The unreleased Android/arm64 Vulkan implementation is documented separately in
-[Android Vulkan preview](docs/ANDROID.md). It consumes canonical goffi v0.6.7
-and is not yet a released support claim; the optional Rust path temporarily
-pins the exact merged WebGPU Android source until that dependency is released.
+Android/arm64 Vulkan is a guarded preview, documented separately in
+[Android Vulkan preview](docs/ANDROID.md). It is not yet a full support claim.
 
 New surface integrations should use the explicit safe or unsafe target API
 described in [Surface targets](docs/SURFACE-TARGETS.md). The original
@@ -211,7 +209,7 @@ Design follows Rust wgpu's buffer mapping model with Go-idiomatic error handling
 
 **Guides:** [Getting Started](docs/COMPUTE-SHADERS.md) | [Backend Differences](docs/COMPUTE-BACKENDS.md)
 
-Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (Vulkan, DX12), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
+Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU timestamp queries (render-pass timestamp writes where the adapter offers `FeatureTimestampQuery`: Metal and Windows GLES; Vulkan and DX12 implement them in the HAL but do not offer the feature yet), WebGPU-compliant `Buffer.Map` / `MapAsync` GPU→CPU readback with `context.Context` integration.
 
 ---
 
@@ -224,11 +222,11 @@ wgpu/
 ├── hal/                # Hardware Abstraction Layer
 │   ├── allbackends/    # Platform-specific backend auto-registration
 │   ├── noop/           # No-op backend (testing)
-│   ├── software/       # CPU software rasterizer (~14K LOC)
-│   ├── gles/           # OpenGL ES 3.0+ (~12K LOC)
-│   ├── vulkan/         # Pure Go Vulkan backend (~42K LOC)
-│   ├── metal/          # Metal (~7K LOC)
-│   └── dx12/           # DirectX 12 (~17K LOC)
+│   ├── software/       # CPU software rasterizer
+│   ├── gles/           # OpenGL 3.3+ / OpenGL ES 3.0+
+│   ├── vulkan/         # Pure Go Vulkan backend
+│   ├── metal/          # Metal
+│   └── dx12/           # DirectX 12
 ├── examples/
 │   ├── compute-copy/          # GPU buffer copy with compute shader
 │   ├── compute-sum/           # Parallel reduction on GPU
@@ -275,10 +273,10 @@ import _ "github.com/gogpu/wgpu/hal/allbackends"
 | Backend | Windows | Linux | macOS | iOS | Android/arm64 | Notes |
 |---------|:-------:|:-----:|:-----:|:---:|:-------------:|-------|
 | **Vulkan** | Yes | Yes | Yes | - | Preview | MoltenVK on macOS; [Android contract](docs/ANDROID.md) |
-| **Metal** | - | - | Yes | Yes | - | Native Apple GPU |
+| **Metal** | - | - | Yes | Untested | - | Native Apple GPU; never run on iOS |
 | **DX12** | Yes | - | - | - | - | Windows 10+ |
-| **GLES** | Yes | Yes | - | - | - | OpenGL ES 3.0+ |
-| **Software** | Yes | Yes | Yes | Yes | - | CPU fallback |
+| **GLES** | Yes | Yes | - | - | - | OpenGL 3.3+ / OpenGL ES 3.0+ |
+| **Software** | Yes | Yes | Yes | Untested | - | CPU fallback |
 
 **Architectures:** amd64, arm64 (including Windows ARM64 / Snapdragon X)
 
@@ -359,7 +357,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - Blending (13 factors, 5 operations)
 - 6-plane frustum clipping (Sutherland-Hodgman)
 - 8x8 tile-based parallel rendering
-- **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, ~100× slower than JIT software renderers like SwiftShader).
+- **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
@@ -385,6 +383,8 @@ recipe and the explicit non-WebGPU support contract.
 | `GOGPU_DX12_DXIL` | `1` | Enable DXIL direct compilation on DX12 (experimental). Bypasses HLSL→FXC, generates DXIL bytecode directly from naga IR. SM 6.0+, zero external dependencies. Default: off (uses HLSL→FXC). |
 | `GOGPU_DX12_DXIL_OVERRIDE_VS` | file path | Replace vertex shader DXIL with contents of the given file. For debugging only. |
 | `GOGPU_DX12_DXIL_OVERRIDE_PS` | file path | Replace pixel shader DXIL with contents of the given file. For debugging only. |
+| `GOGPU_DX12_DXIL_VALIDATE` | `1` | With `GOGPU_DX12_DXIL=1`, validate each DXIL blob with `dxil.dll` before pipeline creation and log the validator's message; a rejected blob is written to a file in the system temp directory. For debugging only. |
+| `GOGPU_DX12_FORCE_HWND` | `1` | Create DX12 swap chains for the window handle even when the surface asks for premultiplied alpha, which otherwise uses DirectComposition. For tools such as RenderDoc that cannot capture through DirectComposition. |
 
 > **Note:** Backend selection (`GOGPU_GRAPHICS_API`) is handled by `gogpu` (the app framework), not by `wgpu` directly. See [gogpu documentation](https://github.com/gogpu/gogpu) for `GOGPU_GRAPHICS_API=vulkan|dx12|metal|gles|software`.
 
@@ -401,7 +401,7 @@ recipe and the explicit non-WebGPU support contract.
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Rust FFI backend (wgpu-native v29) |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library with GPU SDF acceleration |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit: 22+ widgets, 4 themes |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit |
 | [gogpu/galloc](https://github.com/gogpu/galloc) | O(1) offset allocator for GPU memory sub-allocation |
 | [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU type definitions |
 | [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |

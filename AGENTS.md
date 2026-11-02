@@ -78,7 +78,7 @@ Example: `examples/raytracing-headless/` — visual RT verification on software 
 
 ## Current Version
 
-v0.34.6 | Go 1.25+ | Dependencies: naga v0.20.4, gpucontext v0.31.3, gputypes v0.8.0, goffi v0.6.7, webgpu v0.5.5
+v0.34.6 | Go 1.25+ | Dependencies: naga v0.20.5, gpucontext v0.31.3, gputypes v0.8.0, goffi v0.6.8, webgpu v0.5.5
 
 ## Build & Test
 
@@ -89,11 +89,11 @@ GOOS=js GOARCH=wasm go build .    # Browser WASM (root package only, hal exclude
 
 go test ./...
 golangci-lint run --timeout=5m
-
-# Select backend at runtime
-GOGPU_GRAPHICS_API=vulkan ./myapp
-GOGPU_GRAPHICS_API=software ./myapp
 ```
+
+Backend selection: `wgpu.CreateInstance` with `InstanceDescriptor.Backends` picks which backends are tried;
+`RequestAdapter` returns the best available adapter. The `GOGPU_GRAPHICS_API` variable is read by the gogpu framework,
+not by wgpu.
 
 ## gpucontext Handle Helpers
 

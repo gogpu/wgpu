@@ -2,17 +2,16 @@
 
 Thank you for your interest in contributing to the Pure Go WebGPU implementation!
 
-wgpu is part of the [GoGPU](https://github.com/gogpu) ecosystem — 1.25M+ lines of Pure Go GPU code powering 2D graphics, 3D rendering, GUI toolkit, ML frameworks, and game engines.
+wgpu is part of the [GoGPU](https://github.com/gogpu) ecosystem of Pure Go GPU libraries: 2D graphics, 3D rendering, a GUI toolkit, and machine learning frameworks that build on it.
 
 ## Current Priorities
 
 See [tracking issues](https://github.com/gogpu/wgpu/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) for what we need help with. Key areas:
 
-- **#329** — Move all implementation to `internal/` (architecture cleanup, P0)
-- **#330** — Expose CreateQuerySet + CreateRenderBundleEncoder (good first issue)
-- **#331** — Pipeline cache for Vulkan + DX12 (performance)
-- **#333** — Validation Phase C (~45%→~70% coverage)
-- **#334** — SPIR-V interpreter missing opcodes
+- **#329** — Move all implementation to `internal/` (architecture cleanup)
+- **#364** — Remaining vertex layout checks and `arrayStride` 0 (broadcast)
+- **#360** — `EnumerateAdapters` on the public `wgpu.Instance`
+- **#218** — Public API cleanup before v1.0
 
 ## AI-Assisted Contributions: Smart Coding Welcome
 
@@ -80,25 +79,25 @@ Platform-specific files (`_darwin.go`, `_linux.go`, `_windows.go`) are invisible
 
 **If implementation CAN be hidden — it MUST be hidden.**
 
-New code goes into `internal/` packages. The root package contains only exported types and thin delegation methods. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) and ADR-070.
+New code goes into `internal/` packages. The root package contains only exported types and thin delegation methods. See [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Project Structure
 
 ```
 wgpu/
 ├── *.go                # Public API (exported types + thin wrappers)
+├── core/               # Validation, resource management, state tracking
+├── hal/                # Hardware abstraction layer
+│   ├── vulkan/         # Vulkan backend (Windows, Linux, macOS, Android preview)
+│   ├── metal/          # Metal backend (macOS)
+│   ├── dx12/           # DirectX 12 backend (Windows)
+│   ├── gles/           # OpenGL / OpenGL ES backend (Windows, Linux)
+│   ├── software/       # Full CPU rasterizer + SPIR-V interpreter + RT BVH
+│   └── noop/           # No-op backend (testing)
 ├── internal/
-│   ├── core/           # Validation, resource management, state tracking
-│   ├── hal/            # Hardware abstraction layer
-│   │   ├── vulkan/     # Vulkan backend (Windows, Linux, macOS, Android)
-│   │   ├── metal/      # Metal backend (macOS, iOS)
-│   │   ├── dx12/       # DirectX 12 backend (Windows)
-│   │   ├── gles/       # OpenGL ES backend (Windows, Linux)
-│   │   ├── software/   # Full CPU rasterizer + SPIR-V interpreter + RT BVH
-│   │   └── noop/       # No-op backend (testing)
 │   ├── browser/        # Browser WebGPU via syscall/js
 │   ├── raytracing/     # RT build orchestration, compaction, validation
-│   └── ...
+│   └── ...             # indirect, pipelinecache, shaderir, thread
 ├── cmd/                # CLI tools and test apps
 ├── examples/           # Example applications
 │   ├── raytracing-headless/  # RT verification on software backend
@@ -107,7 +106,7 @@ wgpu/
 └── docs/               # Public documentation
 ```
 
-> **Note:** Migration from `core/` and `hal/` to `internal/` is in progress (#329). New code should go directly into `internal/` sub-packages.
+> **Note:** `core/` and `hal/` are planned to move under `internal/` (#329). New implementation code should go into `internal/` sub-packages.
 
 ## Commit Messages
 
@@ -129,7 +128,7 @@ Components: `core`, `hal`, `vulkan`, `metal`, `dx12`, `gles`, `software`, `noop`
 - Reference the Rust wgpu equivalent for non-trivial HAL/core changes
 - Add tests for new functionality
 - Update documentation if needed (CHANGELOG, docs/, README)
-- Ensure all CI checks pass (14 checks: build×3, test×3, lint, format, deps, GLES integration, browser, Android, Rust cross-compile)
+- Ensure all CI checks pass (build, cross-compile, tests with the race detector, GLES integration, lint, formatting, deps, Android preview)
 - Reference related issues
 
 ## Testing
@@ -137,16 +136,15 @@ Components: `core`, `hal`, `vulkan`, `metal`, `dx12`, `gles`, `software`, `noop`
 ```bash
 go test ./...              # Unit tests
 go test -cover ./...       # With coverage
-go test -race ./...        # Race detector (requires CGO_ENABLED=1)
+go test -race ./...        # Race detector (needs CGO_ENABLED=1 and a C compiler; CI uses the pure-Go github.com/kolkov/racedetector)
 ```
 
 Backend-specific verification:
 
 ```bash
-GOGPU_GRAPHICS_API=vulkan   go run ./examples/compute-sum/
-GOGPU_GRAPHICS_API=dx12     go run ./examples/compute-sum/
-GOGPU_GRAPHICS_API=software go run ./examples/compute-sum/
+go run ./examples/compute-sum/           # runs on the best available backend
 go run ./examples/raytracing-headless/   # RT verification (no GPU needed)
+go test ./hal/allbackends/               # cross-backend readback tests on every adapter found
 ```
 
 ## Reporting Issues
@@ -154,7 +152,7 @@ go run ./examples/raytracing-headless/   # RT verification (no GPU needed)
 - Use [GitHub Issues](https://github.com/gogpu/wgpu/issues)
 - Include Go version, OS, and GPU (if relevant)
 - Provide minimal reproduction
-- Include error messages and backend used (`GOGPU_GRAPHICS_API=?`)
+- Include error messages and the backend used (Vulkan, DX12, Metal, GLES, Software)
 
 ## Questions?
 
