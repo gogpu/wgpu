@@ -49,3 +49,32 @@ func TestDescriptorWritesPointIntoFinalInfoArrays(t *testing.T) {
 		t.Errorf("size 0 buffer binding = %+v, want offset 256 and VK_WHOLE_SIZE", bufferInfos[1])
 	}
 }
+
+// TestDescriptorWritesTextureTypeFromLayout checks that a texture view takes
+// its descriptor type and image layout from the layout entry: a storage
+// texture is STORAGE_IMAGE in GENERAL, a sampled one SAMPLED_IMAGE in
+// SHADER_READ_ONLY_OPTIMAL (VUID-VkWriteDescriptorSet-descriptorType-00319).
+func TestDescriptorWritesTextureTypeFromLayout(t *testing.T) {
+	entries := []gputypes.BindGroupEntry{
+		{Binding: 0, Resource: gputypes.TextureViewBinding{TextureView: 1}},
+		{Binding: 1, Resource: gputypes.TextureViewBinding{TextureView: 2}},
+	}
+	types := map[uint32]vk.DescriptorType{0: vk.DescriptorTypeSampledImage, 1: vk.DescriptorTypeStorageImage}
+	writes, _, imageInfos, err := descriptorWrites(0, entries, types)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		dt     vk.DescriptorType
+		layout vk.ImageLayout
+	}{
+		{vk.DescriptorTypeSampledImage, vk.ImageLayoutShaderReadOnlyOptimal},
+		{vk.DescriptorTypeStorageImage, vk.ImageLayoutGeneral},
+	}
+	for i, w := range want {
+		if writes[i].DescriptorType != w.dt || imageInfos[i].ImageLayout != w.layout {
+			t.Errorf("binding %d: type %d layout %d, want type %d layout %d",
+				i, writes[i].DescriptorType, imageInfos[i].ImageLayout, w.dt, w.layout)
+		}
+	}
+}

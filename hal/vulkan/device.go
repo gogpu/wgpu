@@ -1145,12 +1145,21 @@ func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, b
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
 		case gputypes.TextureViewBinding:
+			// The descriptor type comes from the layout entry, as Rust
+			// wgpu-hal create_bind_group does: a storage texture is a
+			// STORAGE_IMAGE in GENERAL, the layout the barriers give storage
+			// usage (textureUsageToAccessStageLayout; Rust
+			// conv::derive_image_layout).
 			imageInfo := vk.DescriptorImageInfo{
 				ImageView:   vk.ImageView(res.TextureView),
 				ImageLayout: vk.ImageLayoutShaderReadOnlyOptimal,
 			}
-			imageInfos = append(imageInfos, imageInfo)
 			write.DescriptorType = vk.DescriptorTypeSampledImage
+			if bindingTypes[entry.Binding] == vk.DescriptorTypeStorageImage {
+				imageInfo.ImageLayout = vk.ImageLayoutGeneral
+				write.DescriptorType = vk.DescriptorTypeStorageImage
+			}
+			imageInfos = append(imageInfos, imageInfo)
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
 		default:
