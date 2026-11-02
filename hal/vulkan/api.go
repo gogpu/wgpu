@@ -230,6 +230,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			physicalDevice: device,
 			properties:     props,
 			features:       features,
+			ext:            i.queryExtendedFeatures(device, props.ApiVersion),
 		}
 
 		adapterForExpose := hal.Adapter(adapter)
@@ -264,7 +265,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: gputypes.BackendVulkan,
 			},
-			Features: featuresFromPhysicalDevice(&features, props.ApiVersion),
+			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.ext.webGPUFeatures(),
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
