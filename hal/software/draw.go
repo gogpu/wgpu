@@ -1651,6 +1651,12 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	}
 	ds := r.pipeline.desc.DepthStencil
 
+	// Every draw of the pass tests against and writes into the pass's depth
+	// buffer, the depth attachment's contents.
+	if d := r.passDepthBuffer; d != nil && d.Width() == pipe.Width() && d.Height() == pipe.Height() {
+		pipe.SetDepthBuffer(d)
+	}
+
 	// Depth testing.
 	depthCompare := convertCompareFunction(ds.DepthCompare)
 	depthEnabled := ds.DepthCompare != gputypes.CompareFunctionUndefined &&

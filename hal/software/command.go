@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"math"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -375,11 +376,93 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 				if desc.DepthStencilAttachment.StencilLoadOp == gputypes.LoadOpClear {
 					r.passStencilBuffer.Clear(uint8(desc.DepthStencilAttachment.StencilClearValue))
 				}
+				r.passDepthBuffer = loadDepthAttachment(desc.DepthStencilAttachment, dsView.texture)
 			}
 		}
 	}
 
 	return r
+}
+
+// loadDepthAttachment returns the depth buffer every draw of a pass shares:
+// cleared to the clear value with LoadOpClear, otherwise loaded from the
+// attachment texture (a read-only depth aspect always loads). nil when the
+// format has no depth aspect.
+func loadDepthAttachment(ds *hal.RenderPassDepthStencilAttachment, tex *Texture) *raster.DepthBuffer {
+	if !tex.format.HasDepth() {
+		return nil
+	}
+	buf := raster.NewDepthBuffer(int(tex.width), int(tex.height))
+	if ds.DepthLoadOp == gputypes.LoadOpClear && !ds.DepthReadOnly {
+		buf.Clear(ds.DepthClearValue)
+		return buf
+	}
+	tex.mu.RLock()
+	defer tex.mu.RUnlock()
+	for y := range int(tex.height) {
+		for x := range int(tex.width) {
+			if v, ok := readDepthTexel(tex, x, y); ok {
+				buf.Set(x, y, v)
+			}
+		}
+	}
+	return buf
+}
+
+// storeDepthAttachment writes the pass's depth buffer back to the attachment
+// texture with StoreOpStore, unless the depth aspect is read-only.
+func storeDepthAttachment(ds *hal.RenderPassDepthStencilAttachment, buf *raster.DepthBuffer) {
+	if ds == nil || buf == nil || ds.DepthReadOnly || ds.DepthStoreOp != gputypes.StoreOpStore {
+		return
+	}
+	view, ok := ds.View.(*TextureView)
+	if !ok || view.texture == nil {
+		return
+	}
+	tex := view.texture
+	tex.mu.Lock()
+	defer tex.mu.Unlock()
+	for y := range min(int(tex.height), buf.Height()) {
+		for x := range min(int(tex.width), buf.Width()) {
+			writeDepthTexel(tex, x, y, buf.Get(x, y))
+		}
+	}
+}
+
+// readDepthTexel decodes the depth of texel (x, y) of mip 0, layer 0: 16-bit
+// unorm for Depth16Unorm, otherwise a float32 in the texel's first four
+// bytes (Depth24Plus is opaque in WebGPU, so a float32 is a valid encoding).
+// The caller holds the texture lock.
+func readDepthTexel(tex *Texture, x, y int) (float32, bool) {
+	bpp := int(formatBytesPerPixel(tex.format))
+	off := (y*int(tex.width) + x) * bpp
+	if tex.format == gputypes.TextureFormatDepth16Unorm {
+		if off+2 > len(tex.data) {
+			return 0, false
+		}
+		return float32(binary.LittleEndian.Uint16(tex.data[off:])) / 65535, true
+	}
+	if bpp < 4 || off+4 > len(tex.data) {
+		return 0, false
+	}
+	return math.Float32frombits(binary.LittleEndian.Uint32(tex.data[off:])), true
+}
+
+// writeDepthTexel encodes depth into texel (x, y) as readDepthTexel decodes
+// it. The caller holds the texture lock.
+func writeDepthTexel(tex *Texture, x, y int, depth float32) {
+	bpp := int(formatBytesPerPixel(tex.format))
+	off := (y*int(tex.width) + x) * bpp
+	if tex.format == gputypes.TextureFormatDepth16Unorm {
+		if off+2 <= len(tex.data) {
+			v := min(max(depth, 0), 1)
+			binary.LittleEndian.PutUint16(tex.data[off:], uint16(v*65535+0.5))
+		}
+		return
+	}
+	if bpp >= 4 && off+4 <= len(tex.data) {
+		binary.LittleEndian.PutUint32(tex.data[off:], math.Float32bits(depth))
+	}
 }
 
 // BeginComputePass begins a compute pass and returns an encoder.
@@ -435,6 +518,11 @@ type RenderPassEncoder struct {
 	// (clip shape) would be lost before pass 2 (content draw).
 	passStencilBuffer *raster.StencilBuffer
 
+	// passDepthBuffer is the depth attachment's contents for the pass: loaded
+	// or cleared at BeginRenderPass, shared by every draw, written back at End
+	// (P1-SW-015). nil without a depth aspect.
+	passDepthBuffer *raster.DepthBuffer
+
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
 	cleared bool
@@ -485,8 +573,7 @@ func (r *RenderPassEncoder) End() {
 		src.mu.RUnlock()
 	}
 
-	// Depth/stencil attachment handling (simplified - just clear if needed)
-	r.clearDepthStencilAttachment()
+	storeDepthAttachment(r.desc.DepthStencilAttachment, r.passDepthBuffer)
 }
 
 // applyClear clears color attachments that have LoadOp=Clear.
@@ -501,20 +588,6 @@ func (r *RenderPassEncoder) applyClear() {
 			}
 		}
 	}
-}
-
-// clearDepthStencilAttachment clears the depth/stencil attachment if present and LoadOp is Clear.
-func (r *RenderPassEncoder) clearDepthStencilAttachment() {
-	ds := r.desc.DepthStencilAttachment
-	if ds == nil || ds.DepthLoadOp != gputypes.LoadOpClear {
-		return
-	}
-	view, ok := ds.View.(*TextureView)
-	if !ok || view.texture == nil {
-		return
-	}
-	val := ds.DepthClearValue
-	view.texture.Clear(gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0})
 }
 
 // SetPipeline stores the render pipeline for subsequent draw calls.

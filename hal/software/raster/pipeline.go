@@ -188,6 +188,15 @@ func (p *Pipeline) GetBlendState() BlendState {
 	return p.blendState
 }
 
+// SetDepthBuffer replaces the pipeline's own depth buffer with buf, so draws
+// test against and write into a depth buffer that outlives the pipeline (a
+// render pass's depth attachment). buf must have the pipeline's dimensions.
+func (p *Pipeline) SetDepthBuffer(buf *DepthBuffer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.depthBuffer = buf
+}
+
 // SetStencilBuffer sets the stencil buffer to use for stencil testing.
 // Pass nil to disable stencil testing.
 func (p *Pipeline) SetStencilBuffer(buf *StencilBuffer) {

@@ -39,7 +39,6 @@ func TestDepthAttachmentStates(t *testing.T) {
 			}
 		})
 		t.Run("read-only-after-write", func(t *testing.T) {
-			skipKnownGap(t, "software", "P1-SW-015", "draws test against a fresh depth buffer, not the attachment")
 			r := newDepthRig(t, device, gputypes.TextureFormatDepth24Plus, wgpu.TextureUsageRenderAttachment)
 			for frame := 0; frame < 2; frame++ {
 				// Depth cleared to 0: the triangle at z = 0 fails Less.
@@ -50,7 +49,6 @@ func TestDepthAttachmentStates(t *testing.T) {
 			}
 		})
 		t.Run("write-then-sampled", func(t *testing.T) {
-			skipKnownGap(t, "software", "P1-SW-015", "depth is never written back to the texture")
 			r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
 				wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
 			for frame := 0; frame < 2; frame++ {
