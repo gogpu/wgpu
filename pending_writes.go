@@ -636,7 +636,11 @@ func (pw *pendingWrites) destroy() {
 		}
 		if sub.encoder != nil {
 			// Encoder owns the command buffer's resources. Destroy releases both.
-			sub.encoder.Destroy()
+			if pw.pool != nil {
+				pw.pool.retire(sub.encoder)
+			} else {
+				sub.encoder.Destroy()
+			}
 		} else if sub.cmdBuf != nil {
 			pw.halDevice.FreeCommandBuffer(sub.cmdBuf)
 		}

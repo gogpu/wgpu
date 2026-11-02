@@ -121,6 +121,80 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 	}
 }
 
+// TestEncoderPool_TracksOutstanding checks that the pool knows every encoder
+// it handed out until it comes back, so destroy can release an encoder whose
+// holder abandoned it (VUID-vkDestroyDevice-device-05137 on Vulkan).
+func TestEncoderPool_TracksOutstanding(t *testing.T) {
+	noopDev, _, cleanup := createNoopDeviceForTest(t)
+	defer cleanup()
+
+	dev := &countingDevice{Device: noopDev}
+	pool := newEncoderPool(dev)
+	outstanding := func() int {
+		pool.mu.Lock()
+		defer pool.mu.Unlock()
+		return len(pool.outstanding)
+	}
+	released, retired, abandoned := mustAcquire(t, pool), mustAcquire(t, pool), mustAcquire(t, pool)
+	if n := outstanding(); n != 3 {
+		t.Fatalf("%d outstanding after 3 acquires, want 3", n)
+	}
+	pool.release(released)
+	pool.retire(retired)
+	if n := outstanding(); n != 1 {
+		t.Fatalf("%d outstanding after release and retire, want 1", n)
+	}
+	if again := mustAcquire(t, pool); again != released || outstanding() != 2 {
+		t.Fatalf("reacquire: got %p (want %p), %d outstanding (want 2)", again, released, outstanding())
+	}
+	_ = abandoned
+	if dev.destroyed != 1 {
+		t.Fatalf("%d encoders destroyed before destroy, want 1 (the retired one)", dev.destroyed)
+	}
+	pool.destroy()
+	if n := outstanding(); n != 0 {
+		t.Errorf("%d outstanding after destroy, want 0", n)
+	}
+	// The reacquired encoder and the abandoned one.
+	if dev.destroyed != 3 {
+		t.Errorf("%d encoders destroyed, want 3", dev.destroyed)
+	}
+}
+
+// countingDevice hands out distinct encoders (noop's are zero-size, so their
+// pointers may compare equal) and counts how many are destroyed.
+type countingDevice struct {
+	hal.Device
+	next      int
+	destroyed int
+}
+
+func (d *countingDevice) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	enc, err := d.Device.CreateCommandEncoder(desc)
+	if err != nil {
+		return nil, err
+	}
+	d.next++
+	return &countingEncoder{CommandEncoder: enc, id: d.next, device: d}, nil
+}
+
+type countingEncoder struct {
+	hal.CommandEncoder
+	id     int
+	device *countingDevice
+}
+
+func (e *countingEncoder) Destroy() { e.device.destroyed++ }
+
+func mustAcquire(t *testing.T, pool *encoderPool) hal.CommandEncoder {
+	t.Helper()
+	enc, err := pool.acquire()
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	return enc
+}
+
 // createNoopDeviceForTest creates a noop HAL device for testing.
 func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 	t.Helper()
