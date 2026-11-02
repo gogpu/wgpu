@@ -82,7 +82,17 @@ func TestBindGroupRebindCompute(t *testing.T) {
 // bottom half, and each quad is colored (a.tag, b.tag, marker, 255).
 func TestBindGroupRebindRender(t *testing.T) {
 	forEachDynamicOffsetDevice(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		checkBindGroupRebindRender(t, device)
+		checkBindGroupRebindRender(t, device, false)
+	})
+}
+
+// TestBindGroupRebindRenderBundle records the render sequence into a render
+// bundle and executes it: the bundle encoder binds groups through the same
+// binder as a pass (Rust wgpu-core command/bundle.rs), so a group set before
+// SetPipeline is bound at the draw.
+func TestBindGroupRebindRenderBundle(t *testing.T) {
+	forEachDynamicOffsetDevice(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+		checkBindGroupRebindRender(t, device, true)
 	})
 }
 
@@ -154,7 +164,7 @@ func checkBindGroupRebindCompute(t *testing.T, device *wgpu.Device) {
 	checkRebindWords(t, "step 4 (P3: gD, gB kept with its offsets)", slot(2, 4), []uint32{rebindTagD, rebindTagB2, 3})
 }
 
-func checkBindGroupRebindRender(t *testing.T, device *wgpu.Device) {
+func checkBindGroupRebindRender(t *testing.T, device *wgpu.Device, viaBundle bool) {
 	t.Helper()
 	stages := wgpu.ShaderStageVertex | wgpu.ShaderStageFragment
 	ls := newRebindLayouts(t, device, stages, []rebindEntry{
@@ -175,22 +185,33 @@ func checkBindGroupRebindRender(t *testing.T, device *wgpu.Device) {
 	gC := newRebindBindGroup(t, device, ls.lc, rebindBinding{0, bBuf, dynamicSlot})
 
 	draw := gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1}
+	sequence := func(enc rebindRenderEncoder) {
+		enc.SetBindGroup(0, gA, []uint32{dynamicSlot})
+		enc.SetPipeline(p0)
+		enc.SetBindGroup(1, gB, []uint32{0})
+		enc.Draw(draw)
+		enc.SetPipeline(p1)
+		enc.Draw(draw)
+		enc.SetPipeline(p2)
+		enc.SetBindGroup(1, gC, nil)
+		enc.Draw(draw)
+		enc.SetPipeline(p1)
+		enc.SetBindGroup(1, gB, []uint32{2 * dynamicSlot})
+		enc.Draw(draw)
+		enc.SetPipeline(p3)
+		enc.SetBindGroup(0, gD, nil)
+		enc.Draw(draw)
+	}
+	var bundle *wgpu.RenderBundle
+	if viaBundle {
+		bundle = recordRebindBundle(t, device, sequence)
+	}
 	px := renderDynamicTarget(t, device, func(pass *wgpu.RenderPassEncoder) {
-		pass.SetBindGroup(0, gA, []uint32{dynamicSlot})
-		pass.SetPipeline(p0)
-		pass.SetBindGroup(1, gB, []uint32{0})
-		pass.Draw(draw)
-		pass.SetPipeline(p1)
-		pass.Draw(draw)
-		pass.SetPipeline(p2)
-		pass.SetBindGroup(1, gC, nil)
-		pass.Draw(draw)
-		pass.SetPipeline(p1)
-		pass.SetBindGroup(1, gB, []uint32{2 * dynamicSlot})
-		pass.Draw(draw)
-		pass.SetPipeline(p3)
-		pass.SetBindGroup(0, gD, nil)
-		pass.Draw(draw)
+		if bundle != nil {
+			pass.ExecuteBundles(bundle)
+			return
+		}
+		sequence(pass)
 	})
 
 	const quarter = featureTargetWidth / 4
@@ -201,6 +222,35 @@ func checkBindGroupRebindRender(t *testing.T, device *wgpu.Device) {
 	checkPixel(t, "step 3 (P1: gA kept, gB set again)", at(top, 2), [4]uint32{rebindTagA, rebindTagB2, 1, 255})
 	checkPixel(t, "step 4 (P3: gD, gB kept with its offsets)", at(bottom, 2), [4]uint32{rebindTagD, rebindTagB2, 3, 255})
 	checkPixel(t, "untouched quarter (P0 draws nothing)", at(top, 3), [4]uint32{255, 255, 255, 255})
+}
+
+// rebindRenderEncoder is what the render sequence records through: a render
+// pass or a render bundle encoder.
+type rebindRenderEncoder interface {
+	SetPipeline(pipeline *wgpu.RenderPipeline)
+	SetBindGroup(index uint32, group *wgpu.BindGroup, offsets []uint32)
+	Draw(args gputypes.DrawArgs)
+}
+
+// recordRebindBundle records sequence into a render bundle for the RGBA8
+// target of renderDynamicTarget.
+func recordRebindBundle(t *testing.T, device *wgpu.Device, sequence func(rebindRenderEncoder)) *wgpu.RenderBundle {
+	t.Helper()
+	enc, err := device.CreateRenderBundleEncoder(&wgpu.RenderBundleEncoderDescriptor{
+		Label:        "rebind",
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
+		SampleCount:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreateRenderBundleEncoder: %v", err)
+	}
+	sequence(enc)
+	bundle, err := enc.Finish(nil)
+	if err != nil {
+		t.Fatalf("RenderBundleEncoder.Finish: %v", err)
+	}
+	t.Cleanup(bundle.Release)
+	return bundle
 }
 
 func checkRebindWords(t *testing.T, what string, got, want []uint32) {
