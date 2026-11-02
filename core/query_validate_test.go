@@ -59,3 +59,50 @@ func TestValidateQuerySetDescriptor_UnknownType(t *testing.T) {
 		t.Fatal("expected error for unknown query type")
 	}
 }
+
+func TestValidatePassTimestampWrites(t *testing.T) {
+	features := gputypes.Features(gputypes.FeatureTimestampQuery)
+	device := NewDevice(&mockHALDevice{}, &Adapter{}, features, gputypes.DefaultLimits(), "timestamps")
+	otherDevice := NewDevice(&mockHALDevice{}, &Adapter{}, features, gputypes.DefaultLimits(), "other")
+	active := NewQuerySet(mockQuerySet{}, device, hal.QueryTypeTimestamp, 4, "active")
+	wrongType := NewQuerySet(mockQuerySet{}, device, hal.QueryTypeOcclusion, 4, "occlusion")
+	destroyed := NewQuerySet(mockQuerySet{}, device, hal.QueryTypeTimestamp, 4, "destroyed")
+	destroyed.Destroy()
+	defer active.Destroy()
+	defer wrongType.Destroy()
+
+	zero, one, four := uint32(0), uint32(1), uint32(4)
+	tests := []struct {
+		name     string
+		features gputypes.Features
+		device   *Device
+		set      *QuerySet
+		begin    *uint32
+		end      *uint32
+		wantErr  bool
+	}{
+		{name: "valid begin and end", features: features, device: device, set: active, begin: &zero, end: &one},
+		{name: "valid one boundary", features: features, device: device, set: active, end: &one},
+		{name: "feature required", device: device, set: active, end: &one, wantErr: true},
+		{name: "missing set", features: features, device: device, end: &one, wantErr: true},
+		{name: "destroyed set", features: features, device: device, set: destroyed, end: &one, wantErr: true},
+		{name: "wrong device", features: features, device: otherDevice, set: active, end: &one, wantErr: true},
+		{name: "wrong query type", features: features, device: device, set: wrongType, end: &one, wantErr: true},
+		{name: "index out of range", features: features, device: device, set: active, begin: &four, wantErr: true},
+		{name: "duplicate indices", features: features, device: device, set: active, begin: &one, end: &one, wantErr: true},
+		{name: "no indices", features: features, device: device, set: active, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := tt.device
+			if d == nil {
+				d = device
+			}
+			d.Features = tt.features
+			err := ValidatePassTimestampWrites(d, tt.set, tt.begin, tt.end, "pass")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidatePassTimestampWrites() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

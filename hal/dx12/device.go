@@ -2308,7 +2308,10 @@ func hlslToDXILSamplerHeapTargets(t *hlsl.SamplerHeapBindTargets) *dxil.SamplerH
 }
 
 // dxilShaderModelMax is the newest shader model naga's DXIL backend writes.
-var dxilShaderModelMax = backend.ShaderModel{Major: 6, Minor: 9}
+// DXC versions on Windows runners emit CreateHandle for naga's 6.6+ DXIL
+// target, but the D3D12 validator accepts that opcode only through SM 6.5.
+// Keep the DXIL path at the highest model this backend validates reliably.
+var dxilShaderModelMax = backend.ShaderModel{Major: 6, Minor: 5}
 
 // dxilOptions returns the naga DXIL options of this device, without the
 // bindings, which come from the pipeline layout.

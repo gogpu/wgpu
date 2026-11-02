@@ -27,7 +27,8 @@ func TestDXILShaderModel(t *testing.T) {
 		{d3d12.D3D_SHADER_MODEL_5_1, backend.ShaderModel{Major: 6, Minor: 0}},
 		{d3d12.D3D_SHADER_MODEL_6_0, backend.ShaderModel{Major: 6, Minor: 0}},
 		{d3d12.D3D_SHADER_MODEL_6_5, backend.ShaderModel{Major: 6, Minor: 5}},
-		{d3d12.D3D_SHADER_MODEL_6_7, backend.ShaderModel{Major: 6, Minor: 7}},
+		{d3d12.D3D_SHADER_MODEL_6_6, backend.ShaderModel{Major: 6, Minor: 5}},
+		{d3d12.D3D_SHADER_MODEL_6_7, backend.ShaderModel{Major: 6, Minor: 5}},
 		{d3d12.D3D_SHADER_MODEL(0x6A), dxilShaderModelMax},
 		{d3d12.D3D_SHADER_MODEL(0x70), dxilShaderModelMax},
 	} {
@@ -43,7 +44,7 @@ func TestDXILShaderModel(t *testing.T) {
 		ImageLoad:    backend.BoundsCheckRestrict,
 		BindingArray: backend.BoundsCheckUnchecked,
 	}
-	if opts.ShaderModel != (backend.ShaderModel{Major: 6, Minor: 6}) || opts.BoundsCheckPolicies != want {
+	if opts.ShaderModel != (backend.ShaderModel{Major: 6, Minor: 5}) || opts.BoundsCheckPolicies != want {
 		t.Errorf("dxilOptions() = SM %v, bounds %+v", opts.ShaderModel, opts.BoundsCheckPolicies)
 	}
 }
