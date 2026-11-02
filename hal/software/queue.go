@@ -62,6 +62,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if size == nil || len(data) == 0 {
 		return nil
 	}
+	if skipOtherMip("WriteTexture", dst.MipLevel) {
+		return nil // writing it at level 0 overwrote the visible level
+	}
 
 	// bytesPerPixel must match the texture's format, not a hardcoded 4. With a
 	// fixed 4 an R8 texture was written with a 4x row stride, spreading each

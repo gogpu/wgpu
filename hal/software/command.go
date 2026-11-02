@@ -9,6 +9,7 @@ import (
 	"image"
 	"log/slog"
 	"math"
+	"sync"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -88,13 +89,15 @@ func (c *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
 	srcBuf, srcOK := src.(*Buffer)
-	dstTex, dstOK := dst.(*Texture)
-
-	if !srcOK || !dstOK {
+	dstTex := resolveTexture(dst)
+	if !srcOK || dstTex == nil {
 		return
 	}
 
 	for _, region := range regions {
+		if skipOtherMip("CopyBufferToTexture", region.TextureBase.MipLevel) {
+			continue
+		}
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
 
@@ -132,38 +135,45 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	}
 }
 
-// CopyTextureToBuffer copies data from a texture to a buffer.
+// CopyTextureToBuffer copies data from a texture to a buffer: layer by layer
+// and row by row from the texture origin, into rows bytesPerRow apart and
+// images rowsPerImage rows apart. Mirrors CopyBufferToTexture above.
 func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	srcTex, srcOK := src.(*Texture)
+	srcTex := resolveTexture(src)
 	dstBuf, dstOK := dst.(*Buffer)
-
-	if !srcOK || !dstOK {
+	if srcTex == nil || !dstOK {
 		return
 	}
 
 	for _, region := range regions {
+		if skipOtherMip("CopyTextureToBuffer", region.TextureBase.MipLevel) {
+			continue
+		}
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
 
 		bpp := formatBytesPerPixel(srcTex.format)
-		srcBytesPerRow := uint64(region.Size.Width) * bpp
-		dstBytesPerRow := uint64(region.BufferLayout.BytesPerRow)
-		if dstBytesPerRow == 0 {
-			dstBytesPerRow = srcBytesPerRow
+		rowBytes := uint64(region.Size.Width) * bpp
+		dstStride := uint64(region.BufferLayout.BytesPerRow)
+		if dstStride == 0 {
+			dstStride = rowBytes
 		}
-
-		dstOffset := region.BufferLayout.Offset
-		srcOffset := (uint64(region.TextureBase.Origin.Y)*uint64(srcTex.width) + uint64(region.TextureBase.Origin.X)) * bpp
+		dstRows := uint64(region.BufferLayout.RowsPerImage)
+		if dstRows == 0 {
+			dstRows = uint64(region.Size.Height)
+		}
 		srcStride := uint64(srcTex.width) * bpp
+		srcImage := srcStride * uint64(srcTex.height)
+		origin := region.TextureBase.Origin
+		layers := max(region.Size.DepthOrArrayLayers, 1)
 
-		for row := uint32(0); row < region.Size.Height; row++ {
-			srcStart := srcOffset + uint64(row)*srcStride
-			srcEnd := srcStart + srcBytesPerRow
-			dstStart := dstOffset + uint64(row)*dstBytesPerRow
-			dstEnd := dstStart + srcBytesPerRow
-
-			if srcEnd <= uint64(len(srcTex.data)) && dstEnd <= uint64(len(dstBuf.data)) {
-				copy(dstBuf.data[dstStart:dstEnd], srcTex.data[srcStart:srcEnd])
+		for z := uint32(0); z < layers; z++ {
+			for row := uint32(0); row < region.Size.Height; row++ {
+				srcStart := uint64(origin.Z+z)*srcImage + uint64(origin.Y+row)*srcStride + uint64(origin.X)*bpp
+				dstStart := region.BufferLayout.Offset + uint64(z)*dstRows*dstStride + uint64(row)*dstStride
+				if srcStart+rowBytes <= uint64(len(srcTex.data)) && dstStart+rowBytes <= uint64(len(dstBuf.data)) {
+					copy(dstBuf.data[dstStart:dstStart+rowBytes], srcTex.data[srcStart:srcStart+rowBytes])
+				}
 			}
 		}
 
@@ -172,29 +182,83 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	}
 }
 
-// CopyTextureToTexture copies data between textures.
+// CopyTextureToTexture copies data between textures, including a surface's
+// acquired texture on either side.
 func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	srcTex, srcOK := src.(*Texture)
-	dstTex, dstOK := dst.(*Texture)
-
-	if !srcOK || !dstOK {
+	srcTex, dstTex := resolveTexture(src), resolveTexture(dst)
+	if srcTex == nil || dstTex == nil {
 		return
 	}
-
 	for _, region := range regions {
-		srcTex.mu.RLock()
-		dstTex.mu.Lock()
-
-		bpp := formatBytesPerPixel(srcTex.format)
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
-
-		if size <= uint64(len(srcTex.data)) && size <= uint64(len(dstTex.data)) {
-			copy(dstTex.data[:size], srcTex.data[:size])
-		}
-
-		dstTex.mu.Unlock()
-		srcTex.mu.RUnlock()
+		copyTextureRegion(srcTex, dstTex, region)
 	}
+}
+
+// copyTextureRegion copies one region as WebGPU copyTextureToTexture does:
+// for each array layer (Origin.Z) and each row, Size.Width texels from the
+// source origin to the destination origin, the source rows at the source
+// texture's pitch and the destination rows at the destination's. A
+// block-compressed format is stored and addressed per block at its block
+// copy size, as WriteTexture does, so its rows copy the same way.
+//
+// The software backend stores mip level 0 only (CreateTexture), so a region
+// of another mip level copies nothing rather than overwriting level 0 (see
+// skipOtherMip).
+func copyTextureRegion(src, dst *Texture, region hal.TextureCopy) {
+	if skipOtherMip("CopyTextureToTexture", region.SrcBase.MipLevel, region.DstBase.MipLevel) {
+		return
+	}
+	if src == dst {
+		dst.mu.Lock()
+		defer dst.mu.Unlock()
+	} else {
+		src.mu.RLock()
+		defer src.mu.RUnlock()
+		dst.mu.Lock()
+		defer dst.mu.Unlock()
+	}
+
+	bpp := formatBytesPerPixel(dst.format)
+	rowBytes := uint64(region.Size.Width) * bpp
+	srcStride := uint64(src.width) * bpp
+	srcImage := srcStride * uint64(src.height)
+	dstStride := uint64(dst.width) * bpp
+	dstImage := dstStride * uint64(dst.height)
+	so, do := region.SrcBase.Origin, region.DstBase.Origin
+	layers := max(region.Size.DepthOrArrayLayers, 1)
+
+	for z := uint32(0); z < layers; z++ {
+		for row := uint32(0); row < region.Size.Height; row++ {
+			srcStart := uint64(so.Z+z)*srcImage + uint64(so.Y+row)*srcStride + uint64(so.X)*bpp
+			dstStart := uint64(do.Z+z)*dstImage + uint64(do.Y+row)*dstStride + uint64(do.X)*bpp
+			if srcStart+rowBytes <= uint64(len(src.data)) && dstStart+rowBytes <= uint64(len(dst.data)) {
+				copy(dst.data[dstStart:dstStart+rowBytes], src.data[srcStart:srcStart+rowBytes])
+			}
+		}
+	}
+}
+
+// otherMipLogged makes the Debug log of a skipped transfer appear once per
+// process instead of once per command.
+var otherMipLogged sync.Once
+
+// skipOtherMip reports whether a texture transfer touches a mip level other
+// than 0 on either side. The software backend stores level 0 only
+// (CreateTexture allocates width x height x layers), so such a transfer
+// writes nothing: a destination level above 0 has no storage, and reading
+// level 0 for a missing source level would copy the wrong data. op names the
+// transfer in the log. Mip-chain storage is P1-SW-026.
+func skipOtherMip(op string, mipLevels ...uint32) bool {
+	for _, level := range mipLevels {
+		if level != 0 {
+			otherMipLogged.Do(func() {
+				hal.Logger().Debug("software: transfer of a mip level above 0 skipped: only mip level 0 is stored (P1-SW-026)",
+					"op", op, "mipLevel", level)
+			})
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveQuerySet is a no-op (query sets not supported in software backend).
