@@ -9,7 +9,6 @@ wgpu is part of the [GoGPU](https://github.com/gogpu) ecosystem of Pure Go GPU l
 See [tracking issues](https://github.com/gogpu/wgpu/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) for what we need help with. Key areas:
 
 - **#329** — Move all implementation to `internal/` (architecture cleanup)
-- **#364** — Remaining vertex layout checks and `arrayStride` 0 (broadcast)
 - **#360** — `EnumerateAdapters` on the public `wgpu.Instance`
 - **#218** — Public API cleanup before v1.0
 
