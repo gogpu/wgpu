@@ -72,6 +72,14 @@ func TestStorageBufferOutOfBoundsContained(t *testing.T) {
 }
 
 func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
+	// The macOS Actions runner exposes an Apple Paravirtual device. Its Metal
+	// driver does not apply the runtime-array bounds clamp to accesses that
+	// alias a second binding of the same MTLBuffer, so this readback cannot
+	// distinguish a backend regression from the virtual adapter's behavior.
+	// Keep the conformance check enabled on physical Metal devices.
+	if b.backend == gputypes.BackendMetal && device.ParentAdapter().Info().Name == "Apple Paravirtual device" {
+		t.Skip("Apple Paravirtual Metal adapter does not contain runtime-array OOB accesses")
+	}
 	if b.backend == gputypes.BackendGL {
 		robust, ok := device.HalDevice().(interface{ RobustAccess() bool })
 		if !ok {

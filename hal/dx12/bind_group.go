@@ -49,7 +49,7 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 			if !ok || res.Sampler == 0 {
 				return out, fmt.Errorf("dx12: binding %d: layout expects a sampler, got %T", le.Binding, entry.Resource)
 			}
-			sampler := (*Sampler)(unsafe.Pointer(res.Sampler)) //nolint:govet // intentional: HAL handle → concrete type
+			sampler := samplerFromHandle(res.Sampler)
 			out.samplerPoolIndices = append(out.samplerPoolIndices, sampler.samplerPoolSlot)
 
 		case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
@@ -57,7 +57,7 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 			if !ok || res.Buffer == 0 {
 				return out, fmt.Errorf("dx12: binding %d: layout expects a buffer, got %T", le.Binding, entry.Resource)
 			}
-			buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
+			buf := bufferFromHandle(res.Buffer)
 			switch {
 			case le.isDynamicUniform():
 				out.dynamicBuffers = append(out.dynamicBuffers, dynamicBuffer{uniform: true, gpuVA: buf.gpuVA + res.Offset})
@@ -77,6 +77,26 @@ func orderBindGroupEntries(layout *BindGroupLayout, entries []gputypes.BindGroup
 	}
 
 	return out, nil
+}
+
+// bufferFromHandle restores the Go object behind the opaque HAL handle. The
+// handle is intentionally stored as uintptr across the HAL boundary; checkptr
+// cannot track that round trip, so keep the conversion in this narrowly scoped
+// helper.
+//
+//go:nocheckptr
+func bufferFromHandle(handle uintptr) *Buffer {
+	return (*Buffer)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
+}
+
+//go:nocheckptr
+func samplerFromHandle(handle uintptr) *Sampler {
+	return (*Sampler)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
+}
+
+//go:nocheckptr
+func textureViewFromHandle(handle uintptr) *TextureView {
+	return (*TextureView)(unsafe.Pointer(handle)) //nolint:govet // intentional: opaque HAL handle → concrete type
 }
 
 // orderedBindGroupEntries is a bind group's entries in layout order: the
