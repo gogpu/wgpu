@@ -58,6 +58,12 @@ type CommandEncoder struct {
 	descriptorHeapCount int
 
 	stateTracker commandStateTracker
+
+	// tempRTVs are the rtvHeap slots of the per-pass render target views of
+	// 3D color attachments (see texture3DRTVDesc). They are freed in ResetAll,
+	// once the GPU is done with every command buffer of this encoder, or in
+	// Destroy; Rust wgpu-hal keeps them in temp_rtv_handles.
+	tempRTVs []uint32
 }
 
 // BeginEncoding begins command recording.
@@ -146,6 +152,17 @@ func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
 			hal.Logger().Error("dx12: ID3D12CommandAllocator::Reset failed", "err", err)
 		}
 	}
+	e.freeTempRTVs()
+}
+
+// freeTempRTVs returns the per-pass 3D render target views to the RTV heap.
+func (e *CommandEncoder) freeTempRTVs() {
+	if e.device != nil && e.device.rtvHeap != nil {
+		for _, index := range e.tempRTVs {
+			e.device.rtvHeap.Free(index, 1)
+		}
+	}
+	e.tempRTVs = e.tempRTVs[:0]
 }
 
 // Destroy releases the allocator and all pooled command lists.
@@ -163,6 +180,7 @@ func (e *CommandEncoder) Destroy() {
 		e.allocator.Release()
 		e.allocator = nil
 	}
+	e.freeTempRTVs()
 }
 
 // TransitionBuffers transitions buffer states for synchronization.
@@ -397,6 +415,46 @@ func (e *CommandEncoder) writeBeginTimestamp(halQS hal.QuerySet, tw timestampWri
 	return nil, 0
 }
 
+// colorAttachmentRTV returns the render target view of a color attachment.
+// A 3D view has no view-time RTV: a one-slice RTV is created here for the
+// attachment's depth slice and freed with the encoder's other per-pass views
+// (tempRTVs). Rust wgpu-hal dx12/command.rs begin_render_pass does the same.
+func (e *CommandEncoder) colorAttachmentRTV(ca hal.RenderPassColorAttachment) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, bool) {
+	view, ok := ca.View.(*TextureView)
+	if !ok {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	if view.dimension != gputypes.TextureViewDimension3D {
+		return view.rtvHandle, view.hasRTV
+	}
+	if view.texture == nil || view.texture.raw == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	handle, index, err := e.device.allocateRTVDescriptor()
+	if err != nil {
+		hal.Logger().Error("dx12: 3D color attachment skipped", "err", err)
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	e.tempRTVs = append(e.tempRTVs, index)
+	desc := texture3DRTVDesc(view, ca.DepthSlice)
+	e.device.raw.CreateRenderTargetView(view.texture.raw, &desc, handle)
+	return handle, true
+}
+
+// texture3DRTVDesc describes the render target view of one depth slice of a
+// 3D view: D3D12_TEX3D_RTV{MipSlice: the view's base mip, FirstWSlice: the
+// attachment's depth slice (0 when nil), WSize: 1}, as Rust wgpu-hal builds it.
+// FirstWSlice counts slices of that mip level.
+func texture3DRTVDesc(view *TextureView, depthSlice *uint32) d3d12.D3D12_RENDER_TARGET_VIEW_DESC {
+	desc := d3d12.D3D12_RENDER_TARGET_VIEW_DESC{Format: textureFormatToD3D12(view.format)}
+	slice := uint32(0)
+	if depthSlice != nil {
+		slice = *depthSlice
+	}
+	desc.SetTexture3D(view.baseMip, slice, 1)
+	return desc
+}
+
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{
@@ -430,11 +488,11 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Set render targets
 	rtvHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, 0, len(desc.ColorAttachments))
 	for _, ca := range desc.ColorAttachments {
-		view, ok := ca.View.(*TextureView)
-		if !ok || !view.hasRTV {
+		rtv, ok := e.colorAttachmentRTV(ca)
+		if !ok {
 			continue
 		}
-		rtvHandles = append(rtvHandles, view.rtvHandle)
+		rtvHandles = append(rtvHandles, rtv)
 
 		// Clear if needed
 		if ca.LoadOp == gputypes.LoadOpClear {
@@ -444,7 +502,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 				float32(ca.ClearValue.B),
 				float32(ca.ClearValue.A),
 			}
-			e.cmdList.ClearRenderTargetView(view.rtvHandle, &clearColor, 0, nil)
+			e.cmdList.ClearRenderTargetView(rtv, &clearColor, 0, nil)
 		}
 	}
 

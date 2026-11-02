@@ -499,6 +499,11 @@ type RenderPassColorAttachment struct {
 	// ResolveTarget is the MSAA resolve target (optional).
 	ResolveTarget TextureView
 
+	// DepthSlice is WebGPU GPURenderPassColorAttachment.depthSlice: the slice
+	// of a 3D view to render to; nil for non-3D views. The core validates it
+	// (wgpu-core command/render.rs:1508-1530).
+	DepthSlice *uint32
+
 	// LoadOp specifies what to do at pass start.
 	LoadOp gputypes.LoadOp
 

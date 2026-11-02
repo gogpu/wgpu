@@ -1545,8 +1545,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	isMultisampled := tex.samples > 1
 
-	// Create RTV if texture supports render attachment and is not depth
-	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
+	// Create RTV if texture supports render attachment and is not depth.
+	// A 3D view gets none: which depth slice it renders to is chosen per
+	// render pass (RenderPassColorAttachment.DepthSlice), so BeginRenderPass
+	// creates a one-slice RTV then, as Rust wgpu-hal does (dx12/device.rs
+	// create_texture_view, dx12/command.rs begin_render_pass).
+	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) &&
+		viewDim != gputypes.TextureViewDimension3D {
 		// Allocate RTV descriptor
 		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
 		if err != nil {
@@ -1575,8 +1580,6 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 				rtvDesc.SetTexture2D(baseMip, 0)
 			case gputypes.TextureViewDimension2DArray:
 				rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
-			case gputypes.TextureViewDimension3D:
-				rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
 			}
 		}
 
