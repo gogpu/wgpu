@@ -196,6 +196,7 @@ func unpinnedFFIAddresses(fset *token.FileSet, file *ast.File, rel string, procs
 			continue
 		}
 		pinned := pinnedExpressions(fset, fn.Body)
+		raceAlias := raceImportName(file)
 		var stack []ast.Node
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			if n == nil {
@@ -207,7 +208,8 @@ func unpinnedFFIAddresses(fset *token.FileSet, file *ast.File, rel string, procs
 			if !ok {
 				return true
 			}
-			if call, ok := stack[len(stack)-2].(*ast.CallExpr); ok && keepsUintptrReferent(call, procs) {
+			if call, ok := stack[len(stack)-2].(*ast.CallExpr); ok &&
+				(keepsUintptrReferent(call, procs) || isRaceInstrumentation(call, raceAlias)) {
 				return true
 			}
 			text := exprString(fset, addr)
@@ -273,6 +275,40 @@ func keepsUintptrReferent(call *ast.CallExpr, procs map[string]bool) bool {
 		return procs[recv.Sel.Name]
 	}
 	return false
+}
+
+// racePackagePath is the package CI's racedetector imports into every file it
+// instruments (racedetector cmd/racedetector/instrument, RacePackageImportPath).
+const racePackagePath = "github.com/kolkov/racedetector/race"
+
+// raceImportName returns the local name file uses for racePackagePath, or ""
+// when file does not import it.
+func raceImportName(file *ast.File) string {
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != racePackagePath {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		return "race"
+	}
+	return ""
+}
+
+// isRaceInstrumentation reports whether call is one the race detector inserted
+// to record an access. It reads the address as a number and never hands it to
+// foreign code, so the referent needs no pin.
+func isRaceInstrumentation(call *ast.CallExpr, raceAlias string) bool {
+	if raceAlias == "" {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == raceAlias
 }
 
 // pinnedExpressions collects the arguments of every X.Pin(arg) call in body.
@@ -341,5 +377,44 @@ func viaXSys(x int) { procXSys.Call(uintptr(unsafe.Pointer(&x))) }
 	sort.Strings(funcs)
 	if got, want := strings.Join(funcs, ","), "viaInterface,viaXSys"; got != want {
 		t.Fatalf("flagged functions = %q, want %q (direct stdlib Call must pass)", got, want)
+	}
+}
+
+// TestFFIPointerGuardIgnoresRaceInstrumentation checks the guard on source as
+// CI's racedetector rewrites it: every memory access gains a
+// race.RaceRead/RaceWrite(uintptr(unsafe.Pointer(&x))) call. Those calls only
+// record the address, so they are not FFI; an unpinned FFI address next to
+// them is still reported.
+func TestFFIPointerGuardIgnoresRaceInstrumentation(t *testing.T) {
+	const src = `package p
+
+import (
+	"unsafe"
+
+	race "github.com/kolkov/racedetector/race"
+)
+
+func ffi(a uintptr) {}
+
+func instrumented(x int) {
+	race.RaceRead(uintptr(unsafe.Pointer(&x)))
+	race.RaceWrite(uintptr(unsafe.Pointer(&x)))
+}
+
+func unpinned(x int) {
+	race.RaceRead(uintptr(unsafe.Pointer(&x)))
+	ffi(uintptr(unsafe.Pointer(&x)))
+}
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	found, err := unpinnedFFIAddressesInDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || !strings.HasSuffix(found[0], "p.go:unpinned:&x") {
+		t.Fatalf("found = %q, want only the ffi call in unpinned", found)
 	}
 }
