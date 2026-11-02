@@ -62,6 +62,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 //     view, which D3D12 itself contains: the write is discarded and the read
 //     returns 0 (as in Rust wgpu-hal, whose naga HLSL restrict_indexing
 //     covers fixed-size arrays, vectors and matrices only).
+//   - Metal: naga's Restrict policy clamps the index in the MSL, bounded by
+//     the buffer sizes the HAL passes, so it is checked exactly as on Vulkan
+//     without robustBufferAccess2.
 //   - GLES: the GLSL policies are Unchecked, as in Rust; the context's
 //     robust buffer access (EGL as in Rust, WGL beyond Rust) makes the
 //     driver contain the access. Without a robust context nothing guarantees
@@ -79,21 +82,54 @@ func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
 	if b.backend == gputypes.BackendMetal {
 		t.Skip("naga MSL does not yet clamp accesses to a top-level runtime-sized array")
 	}
-	if b.backend == gputypes.BackendGL {
-		robust, ok := device.HalDevice().(interface{ RobustAccess() bool })
+	skipWithoutRobustGL(t, b, device)
+	got := runStorageOOB(t, device, oobShader, oobBindWords*4)
+	t.Logf("a = %#x, b = %#x", got[:oobBindWords], got[oobB:oobB+oobBindWords])
+	checkOOBContained(t, got)
+	if b.backend == gputypes.BackendMetal {
+		checkOOBRestricted(t, got)
+	}
+	if b.backend == gputypes.BackendVulkan && !b.software {
+		robust, ok := device.HalDevice().(interface{ RobustBufferAccess2() bool })
 		if !ok {
-			t.Fatalf("GLES device %T does not report RobustAccess", device.HalDevice())
+			t.Fatalf("Vulkan device %T does not report RobustBufferAccess2", device.HalDevice())
 		}
-		if !robust.RobustAccess() {
-			t.Skip("GL context without robust buffer access: containment is not guaranteed")
+		if robust.RobustBufferAccess2() {
+			checkOOBDiscarded(t, got)
+		} else {
+			checkOOBRestricted(t, got)
 		}
 	}
-	bgl, pipeline, err := newPublicComputePipeline(t, device, oobShader, nil, 2)
+}
+
+// skipWithoutRobustGL skips a GLES device whose context has no robust buffer
+// access: nothing then guarantees containment, so the test would pass or
+// fail by luck.
+func skipWithoutRobustGL(t *testing.T, b overrideBackend, device *wgpu.Device) {
+	t.Helper()
+	if b.backend != gputypes.BackendGL {
+		return
+	}
+	robust, ok := device.HalDevice().(interface{ RobustAccess() bool })
+	if !ok {
+		t.Fatalf("GLES device %T does not report RobustAccess", device.HalDevice())
+	}
+	if !robust.RobustAccess() {
+		t.Skip("GL context without robust buffer access: containment is not guaranteed")
+	}
+}
+
+// runStorageOOB fills one storage buffer with oobFill + i per word, binds
+// bytes [0, bindSizeA) as binding a and words oobB..oobB+3 as binding b,
+// dispatches shader once and returns the whole buffer.
+func runStorageOOB(t *testing.T, device *wgpu.Device, shader string, bindSizeA uint64) []uint32 {
+	t.Helper()
+	bgl, pipeline, err := newPublicComputePipeline(t, device, shader, nil, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	const size, bindSize = oobWords * 4, oobBindWords * 4
+	const size = oobWords * 4
 	storage := newPublicBuffer(t, device, size, wgpu.BufferUsageStorage|wgpu.BufferUsageCopySrc|wgpu.BufferUsageCopyDst)
 	staging := newPublicBuffer(t, device, size, wgpu.BufferUsageCopyDst|wgpu.BufferUsageMapRead)
 	initial := make([]byte, size)
@@ -106,8 +142,8 @@ func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
 	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label: "oob", Layout: bgl,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: storage, Offset: 0, Size: bindSize},
-			{Binding: 1, Buffer: storage, Offset: oobB * 4, Size: bindSize},
+			{Binding: 0, Buffer: storage, Offset: 0, Size: bindSizeA},
+			{Binding: 1, Buffer: storage, Offset: oobB * 4, Size: oobBindWords * 4},
 		},
 	})
 	if err != nil {
@@ -138,20 +174,64 @@ func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	got := readPublicBuffer(t, staging, oobWords)
-	t.Logf("a = %#x, b = %#x", got[:oobBindWords], got[oobB:oobB+oobBindWords])
-	checkOOBContained(t, got)
-	if b.backend == gputypes.BackendVulkan && !b.software {
-		robust, ok := device.HalDevice().(interface{ RobustBufferAccess2() bool })
-		if !ok {
-			t.Fatalf("Vulkan device %T does not report RobustBufferAccess2", device.HalDevice())
+	return readPublicBuffer(t, staging, oobWords)
+}
+
+// The vec3 case: a is array<vec3<u32>>, stride 16 and element size 12, bound
+// with 28 bytes (7 words). WGSL defines its length as
+// truncate(28 / stride) = 1 (wgsl/index.bs, NRuntime), so only a[0] is in
+// bounds. The 12 bytes after it still lie inside the binding, which is where
+// a bound by element size instead of stride would clamp to: the test accepts
+// either clamp and requires arrayLength to follow the spec.
+const (
+	oobVec3BindWords = 7
+	oobVec3Length    = 1        // truncate(28 / 16)
+	oobVec3LenWord   = oobB     // b[0] = arrayLength(&a)
+	oobVec3ReadWord  = oobB + 2 // b[2] = the x of the out-of-bounds read
+)
+
+// a[16] is b[0..2] and a[17] is words 68..70, past b, when unchecked.
+var oobVec3Shader = fmt.Sprintf(`
+@group(0) @binding(0) var<storage, read_write> a: array<vec3<u32>>;
+@group(0) @binding(1) var<storage, read_write> b: array<u32, 4>;
+
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let r = a[16u + gid.x];
+    a[17u + gid.x] = vec3<u32>(%du, %du, %du);
+    b[0] = arrayLength(&a);
+    b[2] = r.x;
+}
+`, oobWritten, oobWritten+1, oobWritten+2)
+
+// TestStorageBufferOutOfBoundsContainedVec3 checks containment and the WGSL
+// array length for a runtime-sized array whose element is smaller than its
+// stride, with a binding that ends inside the last element's padding.
+func TestStorageBufferOutOfBoundsContainedVec3(t *testing.T) {
+	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
+		skipWithoutRobustGL(t, b, device)
+		got := runStorageOOB(t, device, oobVec3Shader, oobVec3BindWords*4)
+		t.Logf("a = %#x, b = %#x", got[:oobVec3BindWords], got[oobB:oobB+oobBindWords])
+		if got[oobVec3LenWord] != oobVec3Length {
+			t.Errorf("arrayLength = %d, want %d: truncate(binding size / stride)", got[oobVec3LenWord], oobVec3Length)
 		}
-		if robust.RobustBufferAccess2() {
-			checkOOBDiscarded(t, got)
-		} else {
-			checkOOBRestricted(t, got)
+		for i, w := range got {
+			old := oobFill + uint32(i)
+			switch {
+			case i == oobVec3LenWord:
+			case i == oobVec3ReadWord:
+				if w != 0 && (w < oobFill || w >= oobFill+oobVec3BindWords) {
+					t.Errorf("the out-of-bounds read returned %#x: neither zero nor a value of a", w)
+				}
+			case i < oobVec3BindWords:
+				if w != old && (w < oobWritten || w > oobWritten+2) {
+					t.Errorf("a word %d = %#x: neither unchanged nor a written value", i, w)
+				}
+			case w != old:
+				t.Errorf("word %d = %#x, want %#x (unchanged): the out-of-bounds access escaped a", i, w, old)
+			}
 		}
-	}
+	})
 }
 
 // checkOOBDiscarded checks robustBufferAccess2 for a storage buffer, whose
