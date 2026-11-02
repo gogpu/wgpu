@@ -1000,13 +1000,13 @@ func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regio
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region %d: source or destination texture is nil", i))
 			return false
 		}
-		srcView, srcOK := src.copyView(r.Source.MipLevel, r.Source.Origin.Z, r.Source.Aspect)
-		dstView, dstOK := dst.copyView(r.Destination.MipLevel, r.Destination.Origin.Z, r.Destination.Aspect)
+		srcView, srcOK := src.copyView(r.Source.MipLevel, r.Source.Origin, r.Source.Aspect)
+		dstView, dstOK := dst.copyView(r.Destination.MipLevel, r.Destination.Origin, r.Destination.Aspect)
 		if !srcOK || !dstOK {
 			continue
 		}
 		sameTexture := src.coreTexture == dst.coreTexture
-		if err := core.ValidateTextureToTextureCopy(sameTexture, srcView, dstView, r.Size.DepthOrArrayLayers); err != nil {
+		if err := core.ValidateTextureToTextureCopy(sameTexture, srcView, dstView, gputypes.Extent3D(r.Size)); err != nil {
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region %d: %w", i, err))
 			return false
 		}
@@ -1018,7 +1018,7 @@ func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regio
 // validation. The texture properties come from its core texture; ok is false
 // for a texture without one (test stubs), which has nothing to validate
 // against.
-func (t *Texture) copyView(mipLevel, originZ uint32, aspect gputypes.TextureAspect) (view core.TextureCopyView, ok bool) {
+func (t *Texture) copyView(mipLevel uint32, origin Origin3D, aspect gputypes.TextureAspect) (view core.TextureCopyView, ok bool) {
 	if t.coreTexture == nil {
 		return core.TextureCopyView{}, false
 	}
@@ -1029,7 +1029,8 @@ func (t *Texture) copyView(mipLevel, originZ uint32, aspect gputypes.TextureAspe
 		MipLevelCount: t.coreTexture.MipLevelCount(),
 		Dimension:     t.coreTexture.Dimension(),
 		MipLevel:      mipLevel,
-		OriginZ:       originZ,
+		Size:          t.coreTexture.Size(),
+		Origin:        gputypes.Origin3D(origin),
 		Aspect:        aspect,
 	}, true
 }
@@ -1046,8 +1047,8 @@ func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySi
 		sampleCount = texture.coreTexture.SampleCount()
 	}
 	for i := range regions {
-		if view, ok := texture.copyView(regions[i].TextureBase.MipLevel, regions[i].TextureBase.Origin.Z, regions[i].TextureBase.Aspect); ok {
-			if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage()); err != nil {
+		if view, ok := texture.copyView(regions[i].TextureBase.MipLevel, regions[i].TextureBase.Origin, regions[i].TextureBase.Aspect); ok {
+			if err := core.ValidateBufferTextureCopyTexture(side, view, buffer.Usage(), gputypes.Extent3D(regions[i].Size)); err != nil {
 				e.setError(fmt.Errorf("wgpu: CommandEncoder.%s: region %d: %w", op, i, err))
 				return false
 			}

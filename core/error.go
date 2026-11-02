@@ -1397,7 +1397,74 @@ const (
 	// and destination subresources overlap in one texture (Rust
 	// TransferError::InvalidCopyWithinSameTexture).
 	TransferErrorInvalidCopyWithinSameTexture
+	// TransferErrorTextureOverrun indicates a copy region that ends past the
+	// end of its texture's mip level (Rust TransferError::TextureOverrun).
+	TransferErrorTextureOverrun
+	// TransferErrorUnsupportedPartialTransfer indicates a partial copy of a
+	// depth/stencil or multisampled texture, which must copy the whole mip
+	// level in x and y (Rust TransferError::UnsupportedPartialTransfer).
+	TransferErrorUnsupportedPartialTransfer
+	// TransferErrorUnalignedCopyOriginX indicates an origin x that is not a
+	// multiple of the block width (Rust TransferError::UnalignedCopyOriginX).
+	TransferErrorUnalignedCopyOriginX
+	// TransferErrorUnalignedCopyOriginY indicates an origin y that is not a
+	// multiple of the block height (Rust TransferError::UnalignedCopyOriginY).
+	TransferErrorUnalignedCopyOriginY
+	// TransferErrorUnalignedCopyWidth indicates a copy width that is not a
+	// multiple of the block width (Rust TransferError::UnalignedCopyWidth).
+	TransferErrorUnalignedCopyWidth
+	// TransferErrorUnalignedCopyHeight indicates a copy height that is not a
+	// multiple of the block height (Rust TransferError::UnalignedCopyHeight).
+	TransferErrorUnalignedCopyHeight
+	// TransferErrorUnspecifiedBytesPerRow indicates a copy of more than one
+	// row without bytesPerRow (Rust TransferError::UnspecifiedBytesPerRow).
+	TransferErrorUnspecifiedBytesPerRow
+	// TransferErrorUnspecifiedRowsPerImage indicates a copy of more than one
+	// image without rowsPerImage (Rust TransferError::UnspecifiedRowsPerImage).
+	TransferErrorUnspecifiedRowsPerImage
+	// TransferErrorInvalidBytesPerRow indicates a bytesPerRow smaller than one
+	// row of the copy (Rust TransferError::InvalidBytesPerRow).
+	TransferErrorInvalidBytesPerRow
+	// TransferErrorInvalidRowsPerImage indicates a rowsPerImage smaller than
+	// the rows of one image of the copy (Rust TransferError::InvalidRowsPerImage).
+	TransferErrorInvalidRowsPerImage
+	// TransferErrorSizeOverflow indicates a copy whose byte size does not fit
+	// in 64 bits (Rust TransferError::SizeOverflow).
+	TransferErrorSizeOverflow
+	// TransferErrorTextureFormatsNotCopyCompatible indicates a
+	// texture-to-texture copy between formats that differ by more than the
+	// sRGB suffix (Rust TransferError::TextureFormatsNotCopyCompatible).
+	TransferErrorTextureFormatsNotCopyCompatible
+	// TransferErrorMissingDownlevelFlags indicates a copy the device does not
+	// support (Rust TransferError::MissingDownlevelFlags); Cause says which
+	// flags are missing.
+	TransferErrorMissingDownlevelFlags
 )
+
+// TextureErrorDimension names the texture dimension a copy error is about
+// (Rust TextureErrorDimension).
+type TextureErrorDimension int
+
+const (
+	// TextureErrorDimensionX is the width.
+	TextureErrorDimensionX TextureErrorDimension = iota
+	// TextureErrorDimensionY is the height.
+	TextureErrorDimensionY
+	// TextureErrorDimensionZ is the depth or array layer count.
+	TextureErrorDimensionZ
+)
+
+// String returns the name of the dimension.
+func (d TextureErrorDimension) String() string {
+	switch d {
+	case TextureErrorDimensionY:
+		return "Y"
+	case TextureErrorDimensionZ:
+		return "Z"
+	default:
+		return "X"
+	}
+}
 
 // CopySide names the endpoint of a copy an error is about (Rust CopySide).
 type CopySide int
@@ -1447,7 +1514,21 @@ type TransferError struct {
 	Aspect gputypes.TextureAspect
 	// OriginZ, DstOriginZ and Layers describe TransferErrorInvalidCopyWithinSameTexture.
 	OriginZ, DstOriginZ, Layers uint32
+	// Dimension, StartOffset, EndOffset and TextureSize describe
+	// TransferErrorTextureOverrun and TransferErrorUnsupportedPartialTransfer:
+	// the copy covers [StartOffset, EndOffset) of a Dimension that is
+	// TextureSize texels long. Format, SampleCount and Side are set as well.
+	Dimension                           TextureErrorDimension
+	StartOffset, EndOffset, TextureSize uint32
+	// DstFormat is the destination format of
+	// TransferErrorTextureFormatsNotCopyCompatible (Format is the source's).
+	DstFormat gputypes.TextureFormat
+	// Cause is the underlying error of TransferErrorMissingDownlevelFlags.
+	Cause error
 }
+
+// Unwrap returns the underlying error, if any.
+func (e *TransferError) Unwrap() error { return e.Cause }
 
 // Error implements the error interface.
 func (e *TransferError) Error() string {
@@ -1503,6 +1584,44 @@ func (e *TransferError) textureErrorText() string {
 	case TransferErrorInvalidCopyWithinSameTexture:
 		return fmt.Sprintf("copy: source and destination overlap in one texture (aspect %v, origin z %d and %d, %d layers)",
 			e.Aspect, e.OriginZ, e.DstOriginZ, e.Layers)
+	default:
+		return e.rangeErrorText()
+	}
+}
+
+// rangeErrorText is Error for the texture copy range, buffer layout and
+// compatibility kinds.
+func (e *TransferError) rangeErrorText() string {
+	switch e.Kind {
+	case TransferErrorTextureOverrun:
+		return fmt.Sprintf("copy: %s %d..%d overruns the %s texture, whose %s size is %d",
+			e.Dimension, e.StartOffset, e.EndOffset, e.Side, e.Dimension, e.TextureSize)
+	case TransferErrorUnsupportedPartialTransfer:
+		return fmt.Sprintf("copy: partial copy of %s %d..%d (size %d) is not supported for the %s texture format %v with %d samples",
+			e.Dimension, e.StartOffset, e.EndOffset, e.TextureSize, e.Side, e.Format, e.SampleCount)
+	case TransferErrorUnalignedCopyOriginX:
+		return "copy: origin x is not a multiple of the block width"
+	case TransferErrorUnalignedCopyOriginY:
+		return "copy: origin y is not a multiple of the block height"
+	case TransferErrorUnalignedCopyWidth:
+		return "copy: width is not a multiple of the block width"
+	case TransferErrorUnalignedCopyHeight:
+		return "copy: height is not a multiple of the block height"
+	case TransferErrorUnspecifiedBytesPerRow:
+		return "copy: bytesPerRow must be specified because more than one row is copied"
+	case TransferErrorUnspecifiedRowsPerImage:
+		return "copy: rowsPerImage must be specified because more than one image is copied"
+	case TransferErrorInvalidBytesPerRow:
+		return fmt.Sprintf("copy: bytesPerRow %d is less than the bytes of one complete row", e.BytesPerRow)
+	case TransferErrorInvalidRowsPerImage:
+		return "copy: rowsPerImage is less than the rows of one image"
+	case TransferErrorSizeOverflow:
+		return "copy: overflow while computing the size of the copy"
+	case TransferErrorTextureFormatsNotCopyCompatible:
+		return fmt.Sprintf("copy: source format %v and destination format %v are not copy-compatible (they may only differ in sRGB-ness)",
+			e.Format, e.DstFormat)
+	case TransferErrorMissingDownlevelFlags:
+		return fmt.Sprintf("copy: the device does not support this copy: %v", e.Cause)
 	default:
 		return "copy: unknown error"
 	}

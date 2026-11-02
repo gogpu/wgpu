@@ -7,16 +7,18 @@ import "github.com/gogpu/gputypes"
 // TextureCopyView describes one texture endpoint of a copy command recorded on
 // a command encoder: the texture and the part of its image the copy touches.
 type TextureCopyView struct {
-	// Format, Usage, SampleCount, MipLevelCount and Dimension are the texture's.
+	// Format, Usage, SampleCount, MipLevelCount, Dimension and Size are the
+	// texture's. Size is the size of mip level 0.
 	Format        gputypes.TextureFormat
 	Usage         gputypes.TextureUsage
 	SampleCount   uint32
 	MipLevelCount uint32
 	Dimension     gputypes.TextureDimension
-	// MipLevel, OriginZ and Aspect come from the copy's texel copy texture
+	Size          gputypes.Extent3D
+	// MipLevel, Origin and Aspect come from the copy's texel copy texture
 	// info. TextureAspectUndefined means TextureAspectAll, as in WebGPU.
 	MipLevel uint32
-	OriginZ  uint32
+	Origin   gputypes.Origin3D
 	Aspect   gputypes.TextureAspect
 }
 
@@ -63,13 +65,10 @@ func copyAspects(format gputypes.TextureFormat, aspect gputypes.TextureAspect) f
 	}
 }
 
-// validateTextureCopyView checks the endpoint-local rules shared by every
-// texture copy: the mip level exists and the aspect exists in the format
-// (Rust validate_texture_copy_range / extract_texture_selector).
+// validateTextureCopyView checks that the copy's aspect exists in the texture
+// format (Rust extract_texture_selector). The mip level is checked by
+// ValidateTextureCopyRange, which every texture copy runs first, as Rust does.
 func validateTextureCopyView(v TextureCopyView) error {
-	if v.MipLevel >= v.MipLevelCount {
-		return &TransferError{Kind: TransferErrorInvalidTextureMipLevel, MipLevel: v.MipLevel, MipLevelCount: v.MipLevelCount}
-	}
 	if copyAspects(v.Format, v.Aspect) == 0 {
 		return &TransferError{Kind: TransferErrorInvalidTextureAspect, Format: v.Format, Aspect: v.Aspect}
 	}
@@ -93,14 +92,18 @@ func validateTextureCopyUsage(side CopySide, v TextureCopyView) error {
 // buffer-texture copy recorded on a command encoder, in the order of Rust
 // wgpu-core command/transfer.rs copy_texture_to_buffer and
 // copy_buffer_to_texture and the W3C validating texture buffer copy
-// algorithm: mip level and aspect exist, the buffer has COPY_DST (side
-// Source: texture to buffer) or COPY_SRC (side Destination: buffer to
-// texture), the texture has COPY_SRC (side Source) or COPY_DST (side
-// Destination), the format is copyable on that side, and the copy names a
-// single aspect. side is the texture's side; bufferUsage is the buffer's
-// usage. The sample count, offset and bytesPerRow rules are in
-// ValidateTextureBufferCopy.
-func ValidateBufferTextureCopyTexture(side CopySide, v TextureCopyView, bufferUsage gputypes.BufferUsage) error {
+// algorithm: the copy range is valid (ValidateTextureCopyRange), the aspect
+// exists, the buffer has COPY_DST (side Source: texture to buffer) or
+// COPY_SRC (side Destination: buffer to texture), the texture has COPY_SRC
+// (side Source) or COPY_DST (side Destination), the format is copyable on
+// that side, and the copy names a single aspect. side is the texture's side;
+// bufferUsage is the buffer's usage; copySize is the copy's size. The sample
+// count, offset and bytesPerRow rules are in ValidateTextureBufferCopy, the
+// buffer layout in ValidateLinearTextureData.
+func ValidateBufferTextureCopyTexture(side CopySide, v TextureCopyView, bufferUsage gputypes.BufferUsage, copySize gputypes.Extent3D) error {
+	if err := ValidateTextureCopyRange(side, v, copySize); err != nil {
+		return err
+	}
 	if err := validateTextureCopyView(v); err != nil {
 		return err
 	}
@@ -156,13 +159,20 @@ func validateTextureCopyDstFormat(format gputypes.TextureFormat, aspect gputypes
 
 // ValidateTextureToTextureCopy checks a copyTextureToTexture command recorded
 // on a command encoder, in the order of Rust wgpu-core command/transfer.rs
-// copy_texture_to_texture: both mip levels exist and both aspects exist,
+// copy_texture_to_texture: both copy ranges are valid
+// (ValidateTextureCopyRange) and both aspects exist,
 // copies inside one texture do not overlap, both sides name every aspect of
 // their format, the sample counts match, the source has COPY_SRC and the
-// destination COPY_DST. depthOrArrayLayers is the copy size's third
-// dimension; sameTexture reports that src and dst are one texture. Format
-// copy compatibility and the copy range are not checked here.
-func ValidateTextureToTextureCopy(sameTexture bool, src, dst TextureCopyView, depthOrArrayLayers uint32) error {
+// destination COPY_DST. copySize is the size of the copy region;
+// sameTexture reports that src and dst are one texture. Format copy
+// compatibility is not checked here.
+func ValidateTextureToTextureCopy(sameTexture bool, src, dst TextureCopyView, copySize gputypes.Extent3D) error {
+	if err := ValidateTextureCopyRange(CopySideSource, src, copySize); err != nil {
+		return err
+	}
+	if err := ValidateTextureCopyRange(CopySideDestination, dst, copySize); err != nil {
+		return err
+	}
 	if err := validateTextureCopyView(src); err != nil {
 		return err
 	}
@@ -170,7 +180,7 @@ func ValidateTextureToTextureCopy(sameTexture bool, src, dst TextureCopyView, de
 		return err
 	}
 	if sameTexture {
-		if err := validateCopyWithinSameTexture(src, dst, depthOrArrayLayers); err != nil {
+		if err := validateCopyWithinSameTexture(src, dst, copySize.DepthOrArrayLayers); err != nil {
 			return err
 		}
 	}
@@ -203,10 +213,10 @@ func validateCopyWithinSameTexture(src, dst TextureCopyView, depthOrArrayLayers 
 		layers = 1
 	}
 	// Written as differences, not sums, so a huge origin cannot wrap around.
-	if src.OriginZ >= dst.OriginZ && src.OriginZ-dst.OriginZ >= layers {
+	if src.Origin.Z >= dst.Origin.Z && src.Origin.Z-dst.Origin.Z >= layers {
 		return nil
 	}
-	if dst.OriginZ >= src.OriginZ && dst.OriginZ-src.OriginZ >= layers {
+	if dst.Origin.Z >= src.Origin.Z && dst.Origin.Z-src.Origin.Z >= layers {
 		return nil
 	}
 	if src.MipLevel != dst.MipLevel {
@@ -215,6 +225,6 @@ func validateCopyWithinSameTexture(src, dst TextureCopyView, depthOrArrayLayers 
 	return &TransferError{
 		Kind:    TransferErrorInvalidCopyWithinSameTexture,
 		Aspect:  src.Aspect,
-		OriginZ: src.OriginZ, DstOriginZ: dst.OriginZ, Layers: layers,
+		OriginZ: src.Origin.Z, DstOriginZ: dst.Origin.Z, Layers: layers,
 	}
 }

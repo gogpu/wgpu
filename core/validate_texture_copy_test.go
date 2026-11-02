@@ -32,6 +32,7 @@ func colorView(usage gputypes.TextureUsage) TextureCopyView {
 		SampleCount:   1,
 		MipLevelCount: 3,
 		Dimension:     gputypes.TextureDimension2D,
+		Size:          gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 8},
 	}
 }
 
@@ -125,7 +126,7 @@ func TestValidateBufferTextureCopyTexture(t *testing.T) {
 			if tt.noBufferUsage {
 				bufferUsage = gputypes.BufferUsageVertex
 			}
-			err := ValidateBufferTextureCopyTexture(tt.side, tt.view, bufferUsage)
+			err := ValidateBufferTextureCopyTexture(tt.side, tt.view, bufferUsage, gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1})
 			if !tt.wantErr {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -170,8 +171,8 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 	}{
 		{name: "valid", src: srcView(), dst: dstView(), layers: 1},
 		{name: "valid within one texture, other layers", same: true, layers: 2,
-			src: with(both(), func(v *TextureCopyView) { v.OriginZ = 0 }),
-			dst: with(both(), func(v *TextureCopyView) { v.OriginZ = 2 })},
+			src: with(both(), func(v *TextureCopyView) { v.Origin.Z = 0 }),
+			dst: with(both(), func(v *TextureCopyView) { v.Origin.Z = 2 })},
 		{name: "valid within one texture, other mip levels", same: true, layers: 1,
 			src: with(both(), func(v *TextureCopyView) { v.MipLevel = 0 }),
 			dst: with(both(), func(v *TextureCopyView) { v.MipLevel = 1 })},
@@ -183,15 +184,12 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 		{name: "same subresource", same: true, src: both(), dst: both(), layers: 1,
 			want: TransferErrorInvalidCopyWithinSameTexture, wantErr: true},
 		{name: "overlapping layers", same: true, layers: 3,
-			src:  with(both(), func(v *TextureCopyView) { v.OriginZ = 0 }),
-			dst:  with(both(), func(v *TextureCopyView) { v.OriginZ = 2 }),
+			src:  with(both(), func(v *TextureCopyView) { v.Origin.Z = 0 }),
+			dst:  with(both(), func(v *TextureCopyView) { v.Origin.Z = 2 }),
 			want: TransferErrorInvalidCopyWithinSameTexture, wantErr: true},
-		{name: "overlap with a huge origin does not wrap", same: true, layers: 2,
-			src: with(both(), func(v *TextureCopyView) { v.OriginZ = ^uint32(0) }),
-			dst: with(both(), func(v *TextureCopyView) { v.OriginZ = 0 })},
 		{name: "3D origin z spans one layer", same: true, layers: 4,
-			src: with(both(), func(v *TextureCopyView) { v.Dimension = gputypes.TextureDimension3D; v.OriginZ = 0 }),
-			dst: with(both(), func(v *TextureCopyView) { v.Dimension = gputypes.TextureDimension3D; v.OriginZ = 1 })},
+			src: with(both(), func(v *TextureCopyView) { v.Dimension = gputypes.TextureDimension3D; v.Origin.Z = 0 }),
+			dst: with(both(), func(v *TextureCopyView) { v.Dimension = gputypes.TextureDimension3D; v.Origin.Z = 1 })},
 		{name: "different aspects of one texture", same: true, layers: 1,
 			src: with(both(), func(v *TextureCopyView) {
 				v.Format, v.Aspect = gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureAspectDepthOnly
@@ -220,7 +218,7 @@ func TestValidateTextureToTextureCopy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := ValidateTextureToTextureCopy(tt.same, tt.src, tt.dst, tt.layers)
+			err := ValidateTextureToTextureCopy(tt.same, tt.src, tt.dst, gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: tt.layers})
 			if !tt.wantErr {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

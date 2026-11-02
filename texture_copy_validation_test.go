@@ -25,7 +25,7 @@ func TestTextureCopyValidation(t *testing.T) {
 	newTexture := func(format gputypes.TextureFormat, usage gputypes.TextureUsage, mips uint32) *wgpu.Texture {
 		t.Helper()
 		tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
-			Size:          wgpu.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 4},
+			Size:          wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 4},
 			MipLevelCount: mips,
 			SampleCount:   1,
 			Dimension:     wgpu.TextureDimension2D,
@@ -62,14 +62,14 @@ func TestTextureCopyValidation(t *testing.T) {
 		return []wgpu.BufferTextureCopy{{
 			TextureBase:  wgpu.ImageCopyTexture{MipLevel: mip, Aspect: aspect},
 			BufferLayout: wgpu.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 1},
-			Size:         wgpu.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
+			Size:         wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 		}}
 	}
 	texRegion := func(src, dst *wgpu.Texture, srcMip, dstMip, srcZ, dstZ uint32, aspect gputypes.TextureAspect) []wgpu.TextureCopy {
 		return []wgpu.TextureCopy{{
 			Source:      wgpu.ImageCopyTexture{Texture: src, MipLevel: srcMip, Origin: wgpu.Origin3D{Z: srcZ}, Aspect: aspect},
 			Destination: wgpu.ImageCopyTexture{Texture: dst, MipLevel: dstMip, Origin: wgpu.Origin3D{Z: dstZ}, Aspect: aspect},
-			Size:        wgpu.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 2},
+			Size:        wgpu.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 2},
 		}}
 	}
 	all := gputypes.TextureAspectAll
