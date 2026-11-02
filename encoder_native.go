@@ -594,6 +594,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 				Texture:  halDst,
 				MipLevel: r.TextureBase.MipLevel,
 				Origin:   hal.Origin3D(r.TextureBase.Origin),
+				Aspect:   r.TextureBase.Aspect,
 			},
 			Size: hal.Extent3D(r.Size),
 		}

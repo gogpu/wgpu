@@ -28,6 +28,7 @@ type copyRecordingEncoder struct {
 	bufferToBuffer, bufferToTexture, textureToBuffer, textureToTexture int
 	bufferToBufferRegions, bufferToTextureRegions                      int
 	textureToBufferRegions, textureToTextureRegions                    int
+	lastBufferToTexture, lastTextureToBuffer                           []hal.BufferTextureCopy
 }
 
 func (e *copyRecordingEncoder) CopyBufferToBuffer(_, _ hal.Buffer, regions []hal.BufferCopy) {
@@ -38,11 +39,13 @@ func (e *copyRecordingEncoder) CopyBufferToBuffer(_, _ hal.Buffer, regions []hal
 func (e *copyRecordingEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, regions []hal.BufferTextureCopy) {
 	e.bufferToTexture++
 	e.bufferToTextureRegions += len(regions)
+	e.lastBufferToTexture = regions
 }
 
 func (e *copyRecordingEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, regions []hal.BufferTextureCopy) {
 	e.textureToBuffer++
 	e.textureToBufferRegions += len(regions)
+	e.lastTextureToBuffer = regions
 }
 
 func (e *copyRecordingEncoder) CopyTextureToTexture(_, _ hal.Texture, regions []hal.TextureCopy) {
@@ -53,7 +56,8 @@ func (e *copyRecordingEncoder) CopyTextureToTexture(_, _ hal.Texture, regions []
 func newCopyRecordingDevice(t *testing.T) (*Device, *copyRecordingDevice) {
 	t.Helper()
 	raw := &copyRecordingDevice{}
-	coreDevice := core.NewDevice(raw, nil, 0, gputypes.DefaultLimits(), "copy-zero-size-test")
+	adapter := &core.Adapter{DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities()}
+	coreDevice := core.NewDevice(raw, adapter, 0, gputypes.DefaultLimits(), "copy-recording-test")
 	queue := &Queue{hal: &noop.Queue{}, halDevice: raw}
 	device := &Device{core: coreDevice, queue: queue}
 	queue.device = device
