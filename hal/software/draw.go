@@ -89,9 +89,9 @@ func (r *RenderPassEncoder) hasMRT() bool {
 }
 
 // executeFullscreenBlit blits the first bound texture to the target.
-// This is the fast path for gogpu's renderTexturedQuad (6 vertices, no vertex buffer,
-// texture in bind group). Returns true if blit was performed, false if no source
-// texture was found (caller should apply clear instead).
+// This is the fast path for a pipeline without shader stages (no vertex
+// buffer, texture in bind group). Returns true if blit was performed, false if
+// no source texture was found (caller should apply clear instead).
 //
 // When scissor is active, only pixels within the scissor rect are written.
 // The blit loop bounds are clamped to the scissor rect to maintain the
@@ -99,11 +99,19 @@ func (r *RenderPassEncoder) hasMRT() bool {
 // blitStateValid checks whether the current pipeline render state allows a
 // direct memcpy blit (Skia SkSpriteBlitter_Memcpy::Supports pattern). Returns
 // false if any active state would produce different results than a raw copy.
+//
+// A pipeline with a vertex or fragment shader always runs it: nothing proves
+// that a shader is an identity copy of the first bound texture, and one that
+// positions the quad, samples another coordinate or changes the color drew
+// the wrong image when a blit stood in for it.
 func (r *RenderPassEncoder) blitStateValid() bool {
 	if r.pipeline == nil || r.pipeline.desc == nil {
 		return false
 	}
 	desc := r.pipeline.desc
+	if desc.Vertex.Module != nil || (desc.Fragment != nil && desc.Fragment.Module != nil) {
+		return false
+	}
 	if desc.DepthStencil != nil {
 		return false
 	}
@@ -130,8 +138,9 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 }
 
 // tryFullscreenBlit attempts Tier 1 fast-path: if 2 triangles form a fullscreen
-// quad, the bound texture matches target dimensions, and render state is safe,
-// bypass SPIR-V fragment shader with direct memcpy/swizzle.
+// quad, the bound texture matches target dimensions, and render state is safe
+// (which includes a pipeline without shader stages), copy the texture with a
+// direct memcpy/swizzle.
 func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, target *Texture, w, h int) bool {
 	if len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
 		return false

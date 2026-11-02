@@ -49,11 +49,7 @@ fn fs() -> @location(0) vec4<f32> {
 // when the pipeline changes (Rust wgpu-hal gles set_pipeline_inner and
 // rebind_sampler_states). It used to keep the first pipeline's pairing.
 func TestSamplerAcrossPipelineSwitch(t *testing.T) {
-	forEachDynamicOffsetDevice(t, 0, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		if b.software {
-			t.Skip("known defect, not the sampler rebinding: the software backend samples u = 1.125 the other way round " +
-				"(the clamp-to-edge sampler reads column 0, the repeat sampler column 3), with the bind group set before each draw too")
-		}
+	forEachDynamicOffsetDevice(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 		tex, view := newUsageTexture(t, device, wgpu.TextureUsageTextureBinding|wgpu.TextureUsageCopyDst)
 		// Columns 0-1 hold 10, columns 2-3 hold 200 in the red channel.
 		texels := make([]byte, usageTargetSize*usageTargetSize*4)
