@@ -89,6 +89,10 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 		limits = a.limits
 	}
 
+	if err := core.ValidateDeviceRequest(features, limits, a.features, a.limits); err != nil {
+		return nil, err
+	}
+
 	openDevice, err := a.core.HALAdapter().Open(features, limits)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to open device: %w", err)

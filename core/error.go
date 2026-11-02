@@ -5,6 +5,8 @@ package core
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/gputypes"
 )
 
 // unnamedLabel is the default label for resources without a name.
@@ -1203,4 +1205,45 @@ func (e *RenderPassCompatibilityError) Error() string {
 func IsRenderPassCompatibilityError(err error) bool {
 	var rpce *RenderPassCompatibilityError
 	return errors.As(err, &rpce)
+}
+
+// =============================================================================
+// Device Request Errors
+// =============================================================================
+
+// RequestDeviceErrorKind represents the type of device request error.
+type RequestDeviceErrorKind int
+
+const (
+	// RequestDeviceErrorUnsupportedFeature indicates the request requires
+	// features the adapter does not expose (Rust
+	// RequestDeviceError::UnsupportedFeature).
+	RequestDeviceErrorUnsupportedFeature RequestDeviceErrorKind = iota
+	// RequestDeviceErrorLimitsExceeded indicates a required limit is better
+	// than the adapter's (Rust RequestDeviceError::LimitsExceeded).
+	RequestDeviceErrorLimitsExceeded
+)
+
+// RequestDeviceError represents an error during a device request.
+type RequestDeviceError struct {
+	Kind RequestDeviceErrorKind
+	// MissingFeatures are the required features the adapter does not expose.
+	MissingFeatures gputypes.Features
+	// Limit is the gputypes.Limits field name of the exceeded limit, with the
+	// requested value and the adapter's.
+	Limit     string
+	Requested uint64
+	Allowed   uint64
+}
+
+// Error implements the error interface.
+func (e *RequestDeviceError) Error() string {
+	switch e.Kind {
+	case RequestDeviceErrorUnsupportedFeature:
+		return fmt.Sprintf("request device: the adapter does not support the required features %v", e.MissingFeatures)
+	case RequestDeviceErrorLimitsExceeded:
+		return fmt.Sprintf("request device: limit %s = %d is better than the adapter's %d", e.Limit, e.Requested, e.Allowed)
+	default:
+		return "request device: unknown error"
+	}
 }
