@@ -163,3 +163,98 @@ func TestCopyBufferToBufferValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestClearBufferValidation: CommandEncoder.ClearBuffer enforces the WebGPU
+// clearBuffer valid usage list (Rust wgpu-core clear.rs clear_buffer); Finish
+// reports a *core.ClearError of the kind of the first failed check
+// (P1-VAL-014). A released or nil buffer is an error, never a nil HAL buffer
+// handed to the backend.
+func TestClearBufferValidation(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	newBuffer := func(usage gputypes.BufferUsage) *wgpu.Buffer {
+		t.Helper()
+		buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{Size: 64, Usage: usage})
+		if err != nil {
+			t.Fatalf("CreateBuffer: %v", err)
+		}
+		t.Cleanup(buf.Release)
+		return buf
+	}
+	dst := newBuffer(wgpu.BufferUsageCopyDst)
+	srcOnly := newBuffer(wgpu.BufferUsageCopySrc)
+
+	const maxU64 = ^uint64(0)
+	tests := []struct {
+		name       string
+		buffer     *wgpu.Buffer
+		offset     uint64
+		size       uint64
+		wantKind   core.ClearErrorKind
+		wantFailed bool
+	}{
+		{name: "valid whole buffer", buffer: dst, size: 64},
+		{name: "valid range", buffer: dst, offset: 8, size: 16},
+		{name: "valid zero size", buffer: dst, offset: 64},
+		{name: "without COPY_DST", buffer: srcOnly, size: 16,
+			wantKind: core.ClearErrorMissingBufferUsage, wantFailed: true},
+		{name: "offset not a multiple of 4", buffer: dst, offset: 2, size: 8,
+			wantKind: core.ClearErrorUnalignedBufferOffset, wantFailed: true},
+		{name: "size not a multiple of 4", buffer: dst, size: 6,
+			wantKind: core.ClearErrorUnalignedFillSize, wantFailed: true},
+		{name: "offset plus size wraps", buffer: dst, offset: 8, size: maxU64 - 3,
+			wantKind: core.ClearErrorOffsetPlusSizeExceeds64BitBounds, wantFailed: true},
+		{name: "range past the end", buffer: dst, offset: 48, size: 20,
+			wantKind: core.ClearErrorBufferOverrun, wantFailed: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			enc, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatalf("CreateCommandEncoder: %v", err)
+			}
+			enc.ClearBuffer(tc.buffer, tc.offset, tc.size)
+			cmd, err := enc.Finish()
+			if !tc.wantFailed {
+				if err != nil {
+					t.Fatalf("Finish: %v", err)
+				}
+				cmd.Release()
+				return
+			}
+			var ce *core.ClearError
+			if !errors.As(err, &ce) || ce.Kind != tc.wantKind {
+				t.Fatalf("Finish error = %v (%T), want *core.ClearError kind %d", err, err, tc.wantKind)
+			}
+		})
+	}
+
+	t.Run("nil buffer", func(t *testing.T) {
+		enc, err := device.CreateCommandEncoder(nil)
+		if err != nil {
+			t.Fatalf("CreateCommandEncoder: %v", err)
+		}
+		enc.ClearBuffer(nil, 0, 4)
+		if _, err := enc.Finish(); err == nil {
+			t.Fatal("Finish should fail for a nil buffer")
+		}
+	})
+
+	t.Run("released buffer", func(t *testing.T) {
+		released, err := device.CreateBuffer(&wgpu.BufferDescriptor{Size: 64, Usage: wgpu.BufferUsageCopyDst})
+		if err != nil {
+			t.Fatalf("CreateBuffer: %v", err)
+		}
+		released.Release()
+		enc, err := device.CreateCommandEncoder(nil)
+		if err != nil {
+			t.Fatalf("CreateCommandEncoder: %v", err)
+		}
+		enc.ClearBuffer(released, 0, 4)
+		if _, err := enc.Finish(); !errors.Is(err, wgpu.ErrReleased) {
+			t.Fatalf("Finish error = %v, want ErrReleased", err)
+		}
+	})
+}

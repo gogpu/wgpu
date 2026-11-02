@@ -1417,3 +1417,61 @@ func (e *TransferError) Error() string {
 		return "copy: unknown error"
 	}
 }
+
+// =============================================================================
+// Clear command Errors
+// =============================================================================
+
+// ClearErrorKind represents the type of clear command error. Rust wgpu-core
+// keeps these in ClearError, apart from TransferError.
+type ClearErrorKind int
+
+const (
+	// ClearErrorMissingBufferUsage indicates a cleared buffer created without
+	// COPY_DST (Rust ClearError::MissingBufferUsage).
+	ClearErrorMissingBufferUsage ClearErrorKind = iota
+	// ClearErrorUnalignedBufferOffset indicates an offset that is not a
+	// multiple of CopyBufferAlignment (Rust ClearError::UnalignedBufferOffset).
+	ClearErrorUnalignedBufferOffset
+	// ClearErrorUnalignedFillSize indicates a size that is not a multiple of
+	// CopyBufferAlignment (Rust ClearError::UnalignedFillSize).
+	ClearErrorUnalignedFillSize
+	// ClearErrorOffsetPlusSizeExceeds64BitBounds indicates offset plus size
+	// above the largest uint64 (Rust ClearError::OffsetPlusSizeExceeds64BitBounds).
+	ClearErrorOffsetPlusSizeExceeds64BitBounds
+	// ClearErrorBufferOverrun indicates a cleared range that ends past the end
+	// of the buffer (Rust ClearError::BufferOverrun).
+	ClearErrorBufferOverrun
+)
+
+// ClearError represents an invalid clearBuffer command on a command encoder.
+// Which fields are set depends on Kind.
+type ClearError struct {
+	Kind ClearErrorKind
+	// Offset is the byte offset the clear starts at.
+	Offset uint64
+	// Size is the number of bytes to clear.
+	Size uint64
+	// BufferSize is the size of the buffer (overrun kind).
+	BufferSize uint64
+	// Usage is the usage the buffer lacks (ClearErrorMissingBufferUsage).
+	Usage gputypes.BufferUsage
+}
+
+// Error implements the error interface.
+func (e *ClearError) Error() string {
+	switch e.Kind {
+	case ClearErrorMissingBufferUsage:
+		return fmt.Sprintf("clear: buffer is missing usage %#x", e.Usage)
+	case ClearErrorUnalignedBufferOffset:
+		return fmt.Sprintf("clear: buffer offset %d is not a multiple of %d", e.Offset, CopyBufferAlignment)
+	case ClearErrorUnalignedFillSize:
+		return fmt.Sprintf("clear: size %d is not a multiple of %d", e.Size, CopyBufferAlignment)
+	case ClearErrorOffsetPlusSizeExceeds64BitBounds:
+		return fmt.Sprintf("clear: offset %d plus size %d exceeds the 64-bit range", e.Offset, e.Size)
+	case ClearErrorBufferOverrun:
+		return fmt.Sprintf("clear: range of %d bytes at offset %d overruns the %d-byte buffer", e.Size, e.Offset, e.BufferSize)
+	default:
+		return "clear: unknown error"
+	}
+}

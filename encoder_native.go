@@ -617,15 +617,36 @@ func trackRenderPassTextureViews(e *CommandEncoder, desc *RenderPassDescriptor) 
 
 // ClearBuffer clears a buffer region to zero.
 // WebGPU spec: GPUCommandEncoder.clearBuffer.
+//
+// The size is explicit: a zero size clears nothing (WebGPU's default of "the
+// rest of the buffer" has no Go spelling; pass buffer.Size() - offset).
+// Validation follows Rust wgpu-core command/clear.rs clear_buffer and the
+// W3C clearBuffer valid usage list; failures are *core.ClearError from Finish.
 func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
-	if e.released || buffer == nil {
+	if e.released {
+		return
+	}
+	if buffer == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: buffer is nil"))
 		return
 	}
 	raw := e.core.RawEncoder()
 	if raw == nil {
 		return
 	}
-	raw.ClearBuffer(buffer.halBuffer(), offset, size)
+	halBuffer := buffer.halBuffer()
+	if halBuffer == nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: buffer is released: %w", ErrReleased))
+		return
+	}
+	if err := core.ValidateBufferClear(buffer.Usage(), buffer.Size(), offset, size); err != nil {
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: %w", err))
+		return
+	}
+	if size == 0 {
+		return
+	}
+	raw.ClearBuffer(halBuffer, offset, size)
 }
 
 // ResolveQuerySet copies query results into a buffer.

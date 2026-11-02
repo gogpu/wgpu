@@ -118,3 +118,29 @@ func validateBufferCopyEnd(side CopySide, e BufferCopyEndpoint, size uint64) err
 	}
 	return nil
 }
+
+// ValidateBufferClear checks a clearBuffer command recorded on a command
+// encoder, in the order of Rust wgpu-core command/clear.rs clear_buffer: the
+// buffer has COPY_DST, offset and size are multiples of CopyBufferAlignment,
+// and offset plus size fits the buffer without wrapping around. size is the
+// resolved size: callers without an explicit size pass the buffer size minus
+// the offset, saturating at zero. A valid zero-size clear is a no-op the
+// caller must not send to the backend.
+func ValidateBufferClear(usage gputypes.BufferUsage, bufferSize, offset, size uint64) error {
+	if !usage.Contains(gputypes.BufferUsageCopyDst) {
+		return &ClearError{Kind: ClearErrorMissingBufferUsage, Usage: gputypes.BufferUsageCopyDst}
+	}
+	if offset%CopyBufferAlignment != 0 {
+		return &ClearError{Kind: ClearErrorUnalignedBufferOffset, Offset: offset}
+	}
+	if size%CopyBufferAlignment != 0 {
+		return &ClearError{Kind: ClearErrorUnalignedFillSize, Size: size}
+	}
+	if size > ^uint64(0)-offset {
+		return &ClearError{Kind: ClearErrorOffsetPlusSizeExceeds64BitBounds, Offset: offset, Size: size}
+	}
+	if offset+size > bufferSize {
+		return &ClearError{Kind: ClearErrorBufferOverrun, Offset: offset, Size: size, BufferSize: bufferSize}
+	}
+	return nil
+}

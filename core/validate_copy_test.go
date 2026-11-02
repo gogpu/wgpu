@@ -165,3 +165,83 @@ func TestTransferErrorBufferCopyText(t *testing.T) {
 		seen[text] = kind
 	}
 }
+
+// TestValidateBufferClear pins Rust wgpu-core clear_buffer
+// (wgpu-core/src/command/clear.rs) and the W3C clearBuffer valid usage list:
+// COPY_DST, 4-byte offset and size, and a range inside the buffer, checked in
+// Rust's order and without wraparound.
+func TestValidateBufferClear(t *testing.T) {
+	t.Parallel()
+	const maxU64 = ^uint64(0)
+	tests := []struct {
+		name       string
+		usage      gputypes.BufferUsage
+		bufferSize uint64
+		offset     uint64
+		size       uint64
+		want       ClearErrorKind
+		wantErr    bool
+	}{
+		{name: "whole buffer", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, size: 64},
+		{name: "inner range", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 8, size: 16},
+		{name: "zero size at the end", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 64},
+		{name: "without COPY_DST", usage: gputypes.BufferUsageCopySrc, bufferSize: 64, size: 16,
+			want: ClearErrorMissingBufferUsage, wantErr: true},
+		{name: "offset not a multiple of 4", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 2, size: 8,
+			want: ClearErrorUnalignedBufferOffset, wantErr: true},
+		{name: "size not a multiple of 4", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, size: 6,
+			want: ClearErrorUnalignedFillSize, wantErr: true},
+		{name: "offset plus size wraps", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 8, size: maxU64 - 3,
+			want: ClearErrorOffsetPlusSizeExceeds64BitBounds, wantErr: true},
+		{name: "range past the end", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 48, size: 20,
+			want: ClearErrorBufferOverrun, wantErr: true},
+		{name: "offset past the end", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 68, size: 4,
+			want: ClearErrorBufferOverrun, wantErr: true},
+		// Rust order: usage first, then offset alignment, then size alignment.
+		{name: "usage before alignment", usage: 0, bufferSize: 64, offset: 2, size: 6,
+			want: ClearErrorMissingBufferUsage, wantErr: true},
+		{name: "offset alignment before size alignment", usage: gputypes.BufferUsageCopyDst, bufferSize: 64, offset: 2, size: 6,
+			want: ClearErrorUnalignedBufferOffset, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateBufferClear(tt.usage, tt.bufferSize, tt.offset, tt.size)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			var ce *ClearError
+			if !errors.As(err, &ce) || ce.Kind != tt.want {
+				t.Fatalf("error %v (%T), want *ClearError kind %d", err, err, tt.want)
+			}
+			if ce.Error() == "" {
+				t.Fatal("empty error text")
+			}
+		})
+	}
+}
+
+// TestClearErrorText: every clear kind has its own message.
+func TestClearErrorText(t *testing.T) {
+	t.Parallel()
+	seen := map[string]ClearErrorKind{}
+	for _, kind := range []ClearErrorKind{
+		ClearErrorMissingBufferUsage,
+		ClearErrorUnalignedBufferOffset,
+		ClearErrorUnalignedFillSize,
+		ClearErrorOffsetPlusSizeExceeds64BitBounds,
+		ClearErrorBufferOverrun,
+	} {
+		text := (&ClearError{Kind: kind}).Error()
+		if text == "clear: unknown error" {
+			t.Errorf("kind %d has no message", kind)
+		}
+		if other, dup := seen[text]; dup {
+			t.Errorf("kinds %d and %d share the message %q", other, kind, text)
+		}
+		seen[text] = kind
+	}
+}
