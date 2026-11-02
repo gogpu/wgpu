@@ -165,6 +165,7 @@ type Context struct {
 	glDispatchCompute         uintptr
 	glDispatchComputeIndirect uintptr
 	glMemoryBarrier           uintptr
+	glBindImageTexture        uintptr
 
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample uintptr
@@ -343,6 +344,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+	c.glBindImageTexture = getProcAddr("glBindImageTexture")
 
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
@@ -1171,6 +1173,22 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 		return
 	}
 	syscall.SyscallN(c.glMemoryBarrier, uintptr(barriers))
+}
+
+// BindImageTexture binds a level of a texture to an image unit for shader
+// image load/store (storage textures). layered binds every layer of an
+// array, cube or 3D texture; otherwise layer selects one. Requires OpenGL
+// 4.2+ or OpenGL ES 3.1+. No-op if image load/store is not supported.
+func (c *Context) BindImageTexture(unit, texture uint32, level int32, layered bool, layer int32, access, format uint32) {
+	if c.glBindImageTexture == 0 {
+		return
+	}
+	var layeredArg uintptr
+	if layered {
+		layeredArg = 1
+	}
+	syscall.SyscallN(c.glBindImageTexture, uintptr(unit), uintptr(texture), uintptr(level),
+		layeredArg, uintptr(layer), uintptr(access), uintptr(format))
 }
 
 // SupportsCompute returns true if compute shaders are supported.

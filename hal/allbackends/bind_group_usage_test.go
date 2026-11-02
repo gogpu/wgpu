@@ -136,7 +136,6 @@ func TestWriteTextureThenSample(t *testing.T) {
 // before the draw, inside the encoder.
 func TestStorageTextureWriteThenSample(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		skipKnownGap(t, "gles", "P1-GLES-017", "textureStore to a storage texture reads back zeros")
 		skipKnownGap(t, "software", "P1-SW-018", "textureStore to a storage texture reads back zeros")
 		_, view := newUsageTexture(t, device, wgpu.TextureUsageStorageBinding|wgpu.TextureUsageTextureBinding)
 		bgl := newBindGroupLayout(t, device, gputypes.BindGroupLayoutEntry{
@@ -348,7 +347,6 @@ fn fs_main() -> @location(0) vec4<f32> {
 // the end of the pending writes.
 func TestWriteBufferThenDrawReadsIt(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsIndirectExecution, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		skipKnownGap(t, "gles", "P1-GLES-016", "DrawIndirect draws nothing")
 		vertices := newPublicBuffer(t, device, 6*4, wgpu.BufferUsageVertex|wgpu.BufferUsageCopyDst)
 		uniform := newPublicBuffer(t, device, 16, wgpu.BufferUsageUniform|wgpu.BufferUsageCopyDst)
 		indirect := newPublicBuffer(t, device, 16, wgpu.BufferUsageIndirect|wgpu.BufferUsageCopyDst)

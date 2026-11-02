@@ -1409,7 +1409,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 	}
 
 	dynamicIdx := 0
-	for _, entry := range c.group.entries {
+	for i, entry := range c.group.entries {
 		// Look up the GL slot index from the pre-computed per-type sequential
 		// binding table (computed in CreatePipelineLayout). This replaces the old
 		// group*16+binding formula and matches Rust wgpu-hal command.rs:720-783.
@@ -1441,9 +1441,14 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			}
 
 		case gputypes.TextureViewBinding:
-			// TextureView handle is the GL texture object ID (from NativeHandle()).
-			texID := uint32(res.TextureView)
-			if texID == 0 {
+			// The view was resolved from its handle at CreateBindGroup.
+			view := c.group.views[i]
+			if view == nil {
+				continue
+			}
+			if st := c.group.layout.storageTexture(entry.Binding); st != nil {
+				// glBinding is the image unit (the layout's image counter).
+				bindStorageTexture(ctx, glBinding, view, st)
 				continue
 			}
 			// Validate texture unit index against hardware limit.
@@ -1461,7 +1466,8 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 				continue
 			}
 			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)
-			ctx.BindTexture(gl.TEXTURE_2D, texID)
+			// A GL texture binds only to the target it was created with.
+			ctx.BindTexture(view.texture.target, view.texture.id)
 
 		case gputypes.SamplerBinding:
 			// Sampler handle is the GL sampler object ID (from NativeHandle()).
@@ -1484,6 +1490,32 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			}
 			ctx.BindSampler(bindUnit, samplerID)
 		}
+	}
+}
+
+// bindStorageTexture binds a storage texture view to an image unit, as Rust
+// wgpu-hal gles does (device.rs create_bind_group builds the ImageBinding,
+// queue.rs C::BindImage calls glBindImageTexture): the view's first mip
+// level, all layers for 2D-array and cube-array views, otherwise the view's
+// first layer, the layout's access, and the layout format's internal format.
+func bindStorageTexture(ctx *gl.Context, unit uint32, view *TextureView, st *gputypes.StorageTextureBindingLayout) {
+	layered := st.ViewDimension == gputypes.TextureViewDimension2DArray ||
+		st.ViewDimension == gputypes.TextureViewDimensionCubeArray
+	internalFormat, _, _ := textureFormatToGL(st.Format)
+	ctx.BindImageTexture(unit, view.texture.id, int32(view.baseMip), layered, int32(view.baseLayer),
+		storageAccessToGL(st.Access), internalFormat)
+}
+
+// storageAccessToGL maps a storage texture access to the glBindImageTexture
+// access (Rust wgpu-hal gles/conv.rs map_storage_access).
+func storageAccessToGL(access gputypes.StorageTextureAccess) uint32 {
+	switch access {
+	case gputypes.StorageTextureAccessReadOnly:
+		return gl.READ_ONLY
+	case gputypes.StorageTextureAccessWriteOnly:
+		return gl.WRITE_ONLY
+	default: // ReadWrite
+		return gl.READ_WRITE
 	}
 }
 

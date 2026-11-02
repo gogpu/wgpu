@@ -54,6 +54,7 @@ var (
 	cifPtr2UU            types.CallInterface // void* fn(uint32, uint32)
 	cifVoid7ReadPx       types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
 	cifVoid6TexMS        types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
+	cifVoid7BindImage    types.CallInterface // void fn(uint32, uint32, int32, uint8, int32, uint32, uint32) - BindImageTexture
 	cifVoid10Blit        types.CallInterface // void fn(int32*8, uint32, uint32) - BlitFramebuffer
 	cifVoid3UUF          types.CallInterface // void fn(uint32, uint32, float32) - SamplerParameterf
 	cifVoid1Float        types.CallInterface // void fn(float32) - ClearDepthf
@@ -448,6 +449,21 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	err = ffi.PrepareCallInterface(&cifVoid7BindImage, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // unit
+			types.UInt32TypeDescriptor, // texture
+			types.SInt32TypeDescriptor, // level
+			types.UInt8TypeDescriptor,  // layered
+			types.SInt32TypeDescriptor, // layer
+			types.UInt32TypeDescriptor, // access
+			types.UInt32TypeDescriptor, // format
+		})
+	if err != nil {
+		return err
+	}
+
 	// void fn(int32, int32, int32, int32, int32, int32, int32, int32, uint32, uint32) - BlitFramebuffer
 	err = ffi.PrepareCallInterface(&cifVoid10Blit, types.DefaultCall,
 		types.VoidTypeDescriptor,
@@ -639,6 +655,7 @@ type Context struct {
 	glDispatchCompute         unsafe.Pointer
 	glDispatchComputeIndirect unsafe.Pointer
 	glMemoryBarrier           unsafe.Pointer
+	glBindImageTexture        unsafe.Pointer
 
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample unsafe.Pointer
@@ -850,6 +867,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+	c.glBindImageTexture = getProcAddr("glBindImageTexture")
 
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
@@ -2132,6 +2150,30 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 		unsafe.Pointer(&barriers),
 	}
 	_, _ = ffi.CallFunction(&cifVoid1, c.glMemoryBarrier, nil, args[:])
+}
+
+// BindImageTexture binds a level of a texture to an image unit for shader
+// image load/store (storage textures). layered binds every layer of an
+// array, cube or 3D texture; otherwise layer selects one. Requires OpenGL
+// 4.2+ or OpenGL ES 3.1+. No-op if image load/store is not supported.
+func (c *Context) BindImageTexture(unit, texture uint32, level int32, layered bool, layer int32, access, format uint32) {
+	if c.glBindImageTexture == nil {
+		return
+	}
+	var layeredArg uint8
+	if layered {
+		layeredArg = 1
+	}
+	args := [7]unsafe.Pointer{
+		unsafe.Pointer(&unit),
+		unsafe.Pointer(&texture),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&layeredArg),
+		unsafe.Pointer(&layer),
+		unsafe.Pointer(&access),
+		unsafe.Pointer(&format),
+	}
+	_, _ = ffi.CallFunction(&cifVoid7BindImage, c.glBindImageTexture, nil, args[:])
 }
 
 // SupportsCompute returns true if compute shaders are supported.

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
@@ -91,12 +92,12 @@ type TextureView struct {
 // Destroy is a no-op for texture views in OpenGL.
 func (v *TextureView) Destroy() {}
 
-// NativeHandle returns the underlying texture's GL object ID.
+// NativeHandle returns a pointer to the view, as the DX12 backend does: a GL
+// texture object has no view object, so a bind group needs the view itself
+// (its mip level and layer, which a storage texture binds through
+// glBindImageTexture). CreateBindGroup resolves it back (newBindGroup).
 func (v *TextureView) NativeHandle() uintptr {
-	if v.texture != nil {
-		return uintptr(v.texture.id)
-	}
-	return 0
+	return uintptr(unsafe.Pointer(v))
 }
 
 // Sampler implements hal.Sampler for OpenGL using GL sampler objects (GL 3.3+).
@@ -147,10 +148,45 @@ type BindGroupLayout struct {
 // Destroy is a no-op for bind group layouts.
 func (l *BindGroupLayout) Destroy() {}
 
+// storageTexture returns the storage texture layout of binding, or nil when
+// the binding is not a storage texture.
+func (l *BindGroupLayout) storageTexture(binding uint32) *gputypes.StorageTextureBindingLayout {
+	if l == nil {
+		return nil
+	}
+	for i := range l.entries {
+		if l.entries[i].Binding == binding {
+			return l.entries[i].StorageTexture
+		}
+	}
+	return nil
+}
+
 // BindGroup implements hal.BindGroup for OpenGL.
 type BindGroup struct {
 	layout  *BindGroupLayout
 	entries []gputypes.BindGroupEntry
+	// views holds, index for index with entries, the texture view of each
+	// TextureViewBinding entry (nil for other entries and surface views).
+	views []*TextureView
+}
+
+// newBindGroup resolves the texture views of entries from their handles
+// (TextureView.NativeHandle). The views are alive here: the caller holds
+// them, and the bind group keeps them reachable from now on.
+func newBindGroup(layout *BindGroupLayout, entries []gputypes.BindGroupEntry) *BindGroup {
+	views := make([]*TextureView, len(entries))
+	for i, entry := range entries {
+		res, ok := entry.Resource.(gputypes.TextureViewBinding)
+		if !ok || res.TextureView == 0 {
+			continue
+		}
+		view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle -> concrete type
+		if view.texture != nil {
+			views[i] = view
+		}
+	}
+	return &BindGroup{layout: layout, entries: entries, views: views}
 }
 
 // Destroy is a no-op for bind groups.

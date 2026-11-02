@@ -411,10 +411,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (hal.BindGroup, erro
 		return nil, fmt.Errorf("gles: invalid bind group layout type")
 	}
 
-	return &BindGroup{
-		layout:  layout,
-		entries: desc.Entries,
-	}, nil
+	return newBindGroup(layout, desc.Entries), nil
 }
 
 // DestroyBindGroup destroys a bind group.
