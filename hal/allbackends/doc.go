@@ -13,7 +13,7 @@
 //
 // This will register:
 //   - Vulkan backend (Windows, Linux, macOS; Android/arm64 preview)
-//   - Metal backend (macOS, iOS)
+//   - Metal backend (macOS; iOS untested)
 //   - DX12 backend (Windows)
 //   - OpenGL ES backend (Windows, Linux)
 //   - Software backend (all supported native platforms)

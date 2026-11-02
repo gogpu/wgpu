@@ -26,7 +26,7 @@
 // # Platform Support
 //
 //   - Windows: vulkan-1.dll + VK_KHR_win32_surface
-//   - Linux: libvulkan.so.1 + VK_KHR_xlib_surface/VK_KHR_xcb_surface (planned)
-//   - macOS: MoltenVK + VK_EXT_metal_surface (planned)
+//   - Linux: libvulkan.so.1 + VK_KHR_xlib_surface/VK_KHR_wayland_surface
+//   - macOS: MoltenVK + VK_EXT_metal_surface
 //   - Android/arm64 preview: libvulkan.so + VK_KHR_android_surface (API 29+)
 package vulkan

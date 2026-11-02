@@ -3,7 +3,7 @@
 
 //go:build linux && !(js && wasm)
 
-// Package egl provides EGL (EGL) context management for OpenGL ES on Linux.
+// Package egl provides EGL context management for OpenGL ES on Linux.
 //
 // EGL is the native interface for OpenGL ES on Linux, supporting:
 //   - X11 displays (via EGL_PLATFORM_X11_KHR)

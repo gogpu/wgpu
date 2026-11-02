@@ -1,12 +1,12 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-//go:build windows && !(js && wasm)
+//go:build !(js && wasm)
 
 // Package vk provides Pure Go Vulkan bindings generated from vk.xml.
 //
 // This package contains low-level Vulkan types, constants, and function
-// pointers for use with syscall.SyscallN. It does not use CGO.
+// pointers, called through goffi (Pure Go FFI). It does not use CGO.
 //
 // # Generation
 //
@@ -32,6 +32,7 @@
 // # Platform Support
 //
 // - Windows: vulkan-1.dll
-// - Linux: libvulkan.so.1 (planned)
-// - macOS: libMoltenVK.dylib via MoltenVK (planned)
+// - Linux: libvulkan.so.1
+// - macOS: libvulkan.dylib (MoltenVK)
+// - Android: libvulkan.so (preview)
 package vk

@@ -5,7 +5,7 @@
 
 // Package dx12 provides a DirectX 12 backend for the HAL.
 //
-// # Status: WIP
+// # Status: Stable
 //
 // High-performance Windows backend using Pure Go COM vtable calls.
 // Implements hal.Device, hal.Queue, hal.CommandBuffer, hal.Surface,

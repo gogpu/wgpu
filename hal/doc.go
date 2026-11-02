@@ -50,7 +50,7 @@
 // Backends register themselves using RegisterBackend. The core layer can then
 // query available backends and create instances dynamically:
 //
-//	backend, ok := hal.GetBackend(types.BackendVulkan)
+//	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
 //	if !ok {
 //		return fmt.Errorf("vulkan backend not available")
 //	}

@@ -12,7 +12,7 @@
 //
 // Architecture:
 //
-//	types/  → Data structures (no logic)
+//	gputypes → Data structures (github.com/gogpu/gputypes, no logic)
 //	core/   → Validation + State tracking (this package)
 //	hal/    → Hardware abstraction layer
 //
@@ -35,7 +35,7 @@
 // Resources are stored in typed registries that manage their lifecycle:
 //
 //	registry := NewRegistry[Device, deviceMarker]()
-//	id, err := registry.Register(device)
+//	id := registry.Register(device)
 //	device, err := registry.Get(id)
 //	registry.Unregister(id)
 //

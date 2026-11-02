@@ -19,15 +19,14 @@
 //   - objc.go: Objective-C runtime bindings for message passing
 //   - metal.go: Metal framework loader and initialization
 //   - types.go: Metal types, enums, and constants
-//   - device.go: MTLDevice wrapper
+//   - adapter.go, device.go: MTLDevice wrapper, resource and pipeline creation
 //   - queue.go: MTLCommandQueue wrapper
-//   - buffer.go: MTLBuffer management with storage modes
-//   - texture.go: MTLTexture management
-//   - sampler.go: MTLSamplerState
-//   - surface.go: CAMetalLayer integration for windowed rendering
-//   - encoder.go: MTLCommandBuffer and MTLRenderCommandEncoder
-//   - pipeline.go: MTLRenderPipelineState and MTLComputePipelineState
-//   - bindgroup.go: Resource binding via argument buffers
+//   - resource.go: buffers, textures, samplers, bind groups and pipeline state objects
+//   - texture_copy.go: texture copy planning (array layers, 3D slices)
+//   - surface.go, frame_pool.go: CAMetalLayer integration for windowed rendering
+//   - encoder.go: MTLCommandBuffer, render, compute and blit encoders
+//   - icb_indexed.go, icb_pipeline.go: indirect command buffers for large multi-draws
+//   - raytracing.go: MTLAccelerationStructure (macOS 15+)
 //   - conv.go: WebGPU to Metal type conversions
 //   - api.go: HAL Backend interface implementation
 //
