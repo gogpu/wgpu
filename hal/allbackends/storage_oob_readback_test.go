@@ -61,8 +61,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 //     view, which D3D12 itself contains: the write is discarded and the read
 //     returns 0 (as in Rust wgpu-hal, whose naga HLSL restrict_indexing
 //     covers fixed-size arrays, vectors and matrices only).
-//   - GLES: the GLSL policies are Unchecked, as in Rust; containment comes
-//     from the driver.
+//   - GLES: the GLSL policies are Unchecked, as in Rust. On EGL (Linux) the
+//     context is created with robust buffer access, as Rust's is, which
+//     makes the driver contain the access. On WGL (Windows) Rust requests no
+//     robustness and neither do we, so containment there is the driver's.
 //   - Software: the interpreter discards the write and reads 0.
 func TestStorageBufferOutOfBoundsContained(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, checkStorageOOB)

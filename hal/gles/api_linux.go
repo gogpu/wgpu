@@ -63,6 +63,7 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 		return &Instance{}, nil
 	}
 
+	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		hal.Logger().Warn("gles: instance context MakeCurrent failed", "err", err)
@@ -164,6 +165,7 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 		return nil, fmt.Errorf("gles: failed to create EGL context (tried desktop GL and GLES 3.0): %w", err)
 	}
 
+	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
