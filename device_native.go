@@ -264,7 +264,12 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	// Keep the IR core validated for pipeline introspection, as Rust
 	// wgpu-core keeps the naga module and its info on the ShaderModule for
 	// Interface::check_stage. SPIR-V modules have none.
-	return &ShaderModule{hal: halModule, device: d, irModule: halDesc.IR, irInfo: halDesc.Info}, nil
+	module := &ShaderModule{hal: halModule, device: d, irModule: halDesc.IR}
+	if halDesc.IR != nil {
+		info := halDesc.Info
+		module.irInfo = &info
+	}
+	return module, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.

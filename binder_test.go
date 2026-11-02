@@ -518,7 +518,7 @@ func TestExtractShaderBindingSizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lower: %v", err)
 	}
-	module := &ShaderModule{irModule: lowered.IR, irInfo: lowered.Info}
+	module := &ShaderModule{irModule: lowered.IR, irInfo: &lowered.Info}
 	rb00 := ir.ResourceBinding{Group: 0, Binding: 0}
 	rb01 := ir.ResourceBinding{Group: 0, Binding: 1}
 

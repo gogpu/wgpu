@@ -22,8 +22,9 @@ type ShaderModule struct {
 	irModule *ir.Module
 	// irInfo is the ModuleInfo of irModule's validation: the globals each
 	// entry point uses (Rust naga's ModuleInfo, kept by wgpu-core's
-	// Interface).
-	irInfo valid.ModuleInfo
+	// Interface). It is a pointer so ShaderModule stays a comparable struct;
+	// it is nil exactly when irModule is.
+	irInfo *valid.ModuleInfo
 }
 
 // entryPointIndex returns the index in the IR of the entry point a pipeline
@@ -60,9 +61,9 @@ func (m *ShaderModule) specializedEntryPoint(stage ir.ShaderStage, name string, 
 		return nil, valid.ModuleInfo{}, -1, nil
 	}
 	if !shaderir.PerStage(m.irModule, constants) {
-		return m.irModule, m.irInfo, i, nil
+		return m.irModule, *m.irInfo, i, nil
 	}
-	specialized, err := shaderir.Specialize(shaderir.Module{IR: m.irModule, Info: m.irInfo}, stage, m.irModule.EntryPoints[i].Name, constants)
+	specialized, err := shaderir.Specialize(shaderir.Module{IR: m.irModule, Info: *m.irInfo}, stage, m.irModule.EntryPoints[i].Name, constants)
 	if err != nil {
 		return nil, valid.ModuleInfo{}, -1, err
 	}
