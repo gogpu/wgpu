@@ -1083,12 +1083,30 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 	if len(entries) == 0 {
 		return nil
 	}
+	writes, bufferInfos, imageInfos, err := descriptorWrites(set, entries, bindingTypes)
+	if err != nil {
+		return err
+	}
+	if len(writes) > 0 {
+		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(writes)), &writes[0], 0, nil)
+	}
+	// The writes point into bufferInfos and imageInfos; keep them reachable until
+	// vkUpdateDescriptorSets has returned.
+	runtime.KeepAlive(bufferInfos)
+	runtime.KeepAlive(imageInfos)
+	return nil
+}
 
-	// Build write descriptor sets
-	// Note: We need to keep the info structs alive until vkUpdateDescriptorSets returns
+// descriptorWrites builds one VkWriteDescriptorSet per entry. Each write points
+// at its info struct inside the returned bufferInfos or imageInfos. Both slices
+// are allocated with room for every entry up front, so append never moves them
+// and every pointer refers to the final array (#356).
+func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, bindingTypes map[uint32]vk.DescriptorType) (
+	[]vk.WriteDescriptorSet, []vk.DescriptorBufferInfo, []vk.DescriptorImageInfo, error,
+) {
 	writes := make([]vk.WriteDescriptorSet, 0, len(entries))
-	bufferInfos := make([]vk.DescriptorBufferInfo, 0)
-	imageInfos := make([]vk.DescriptorImageInfo, 0)
+	bufferInfos := make([]vk.DescriptorBufferInfo, 0, len(entries))
+	imageInfos := make([]vk.DescriptorImageInfo, 0, len(entries))
 
 	for _, entry := range entries {
 		write := vk.WriteDescriptorSet{
@@ -1136,17 +1154,12 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
 		default:
-			return fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
+			return nil, nil, nil, fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
 		}
 
 		writes = append(writes, write)
 	}
-
-	if len(writes) > 0 {
-		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(writes)), &writes[0], 0, nil)
-	}
-
-	return nil
+	return writes, bufferInfos, imageInfos, nil
 }
 
 // DestroyBindGroup destroys a bind group.
