@@ -14,10 +14,14 @@ import "github.com/gogpu/gputypes"
 // Only the HLSL/FXC path offers them for now: on the DXIL path the readback
 // tests (hal/allbackends TestFeature*) fail, so the rows Rust wgpu-hal ties
 // to shader model 6.x (SHADER_INT64, the 64-bit atomics, barycentrics,
-// per-vertex inputs) are not offered either (P1-API-008):
-//   - clip distances and i64 code are refused by the DXIL validator
-//     (IDxcValidator: invalid record);
-//   - primitive_index reads 0 for the second triangle on Intel Iris Xe.
+// per-vertex inputs) are not offered either (P1-API-008). naga cards:
+//   - i64 shifts and negation refused by the DXIL validator (invalid
+//     record): naga P1-DXIL-080;
+//   - a component of a run-time-indexed local array (the clip distance
+//     test's vertex positions): naga P1-DXIL-081;
+//   - clip_distances with N >= 2 stores only element 0: naga P1-DXIL-082;
+//   - primitive_index interpolation mode (reads 0 for the second triangle
+//     on Intel Iris Xe): naga P1-DXIL-083.
 func shaderCapabilityFeatures(dxil bool) gputypes.Features {
 	var result gputypes.Features
 	if dxil {

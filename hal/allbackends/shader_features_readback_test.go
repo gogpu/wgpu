@@ -252,6 +252,48 @@ func TestFeatureClipDistances(t *testing.T) {
 	})
 }
 
+const clipDistances2Shader = `enable clip_distances;
+
+struct VOut {
+    @builtin(position) pos: vec4f,
+    @builtin(clip_distances) clip: array<f32, 2>,
+}
+
+// Two clip distances: x clips the left half, y the bottom half.
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> VOut {
+    var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+    return VOut(vec4f(p[i], 0.0, 1.0), array<f32, 2>(p[i].x, p[i].y));
+}
+
+@fragment
+fn fs() -> @location(0) vec4f {
+    return vec4f(0.0, 1.0, 0.0, 1.0);
+}
+`
+
+// TestFeatureClipDistancesTwo clips with two distances, each a different
+// region: only the top-right quarter is drawn.
+func TestFeatureClipDistancesTwo(t *testing.T) {
+	forEachFeatureDevice(t, gputypes.Features(gputypes.FeatureClipDistances), 0, func(t *testing.T, device *wgpu.Device) {
+		px := renderFeatureTarget(t, device, clipDistances2Shader, func(pass *wgpu.RenderPassEncoder) {
+			pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		})
+		const white, green = 0xffffffff, 0xff00ff00
+		for y := 0; y < featureTargetHeight; y++ {
+			for x := 0; x < featureTargetWidth; x++ {
+				want := uint32(white) // clipped by x < 0 or by y < 0 (the bottom rows)
+				if x >= featureTargetWidth/2 && y < featureTargetHeight/2 {
+					want = green
+				}
+				if got := px[y*featureTargetWidth+x]; got != want {
+					t.Fatalf("pixel (%d,%d) = %#08x, want %#08x", x, y, got, want)
+				}
+			}
+		}
+	})
+}
+
 const int64Shader = `@group(0) @binding(0) var<storage, read_write> data: array<u32, 4>;
 
 @compute @workgroup_size(1)
