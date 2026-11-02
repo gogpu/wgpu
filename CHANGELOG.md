@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Shader capability features** (gputypes v0.8.1). `CreateShaderModule` grants the naga capabilities of 12 more device features, by Rust's `features_to_naga_capabilities`:
+  - `FeaturePrimitiveIndex`, `FeatureClipDistances`, `FeatureShaderEarlyDepthTest`, `FeatureShaderInt64`, `FeatureShaderInt64AtomicMinMax`, `FeatureShaderInt64AtomicAllOps`, `FeatureShaderFloat32Atomic`, `FeatureShaderI16`, `FeatureShaderBarycentrics`, `FeatureShaderPerVertex`, `FeatureSubgroupVertex`, `FeatureShaderDrawIndex`.
+  - `FeatureShaderInt64AtomicAllOps` also grants the min/max capability, and `FeatureSubgroupVertex` also grants subgroups, as in Rust.
+  - Shaders that use these capabilities compiled unchecked with naga v0.20, and naga v0.21.0 refuses them without the feature. Request the feature where the adapter offers it.
+  - naga v0.21.0 has no WGSL `i16`/`u16` type names yet, so `FeatureShaderI16` reaches only SPIR-V input.
 - **`hal/software/raster`**: `FragmentShaderFunc` and `MRTFragmentShaderFunc` now receive the whole `*Fragment` and return a discard flag. `DrawTrianglesWithFragmentShader` and `DrawTrianglesWithMRTShader` take a `mayDiscard` argument, and `Fragment` has a new `InvW` field. `hal/software/shader` has a new `ErrDiscarded` sentinel and `Module.MayDiscard`.
 - **naga v0.21.0** (from v0.20.5). WGSL is now checked by the WGSL spec and Rust naga, so shaders that compiled before may be refused:
   - An optional feature needs its `enable` directive: `enable f16;`, `enable subgroups;` (subgroup and quad built-ins), `enable clip_distances;`, `enable primitive_index;`, `enable dual_source_blending;`, `enable wgpu_ray_query;` and the other Rust extensions. An unknown directive is an error. `subgroupBarrier` needs no directive.

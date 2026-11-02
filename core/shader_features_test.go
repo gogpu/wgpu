@@ -57,10 +57,24 @@ func TestNagaCapabilitiesForFeatures(t *testing.T) {
 	}{
 		{gputypes.FeatureShaderFloat64, valid.CapFloat64},                            // lib.rs:18
 		{gputypes.FeatureShaderF16, valid.CapShaderFloat16},                          // lib.rs:19-22
+		{gputypes.FeatureShaderI16, valid.CapShaderInt16},                            // lib.rs:27-30
+		{gputypes.FeaturePrimitiveIndex, valid.CapPrimitiveIndex},                    // lib.rs:31-34
 		{gputypes.FeatureASBindingArray, valid.CapAccelerationStructureBindingArray}, // lib.rs:71-74
-		{gputypes.FeatureSubgroupOperations, valid.CapSubgroup},                      // lib.rs:126-129
-		{gputypes.FeatureSubgroupBarrier, valid.CapSubgroupBarrier},                  // lib.rs:130-133
-		{gputypes.FeatureRayQuery, valid.CapRayQuery},                                // lib.rs:134-137
+		{gputypes.FeatureShaderEarlyDepthTest, valid.CapEarlyDepthTest},              // lib.rs:80-83
+		{gputypes.FeatureShaderInt64, valid.CapShaderInt64},                          // lib.rs:84-87
+		{gputypes.FeatureShaderInt64AtomicMinMax, valid.CapShaderInt64AtomicMinMax},  // lib.rs:88-93
+		// ALL_OPS grants MIN_MAX too (lib.rs:88-97).
+		{gputypes.FeatureShaderInt64AtomicAllOps, valid.CapShaderInt64AtomicMinMax | valid.CapShaderInt64AtomicAllOps},
+		{gputypes.FeatureShaderFloat32Atomic, valid.CapShaderFloat32Atomic}, // lib.rs:106-109
+		{gputypes.FeatureClipDistances, valid.CapClipDistances},             // lib.rs:118-121
+		{gputypes.FeatureSubgroupOperations, valid.CapSubgroup},             // lib.rs:126-129
+		{gputypes.FeatureSubgroupBarrier, valid.CapSubgroupBarrier},         // lib.rs:130-133
+		{gputypes.FeatureRayQuery, valid.CapRayQuery},                       // lib.rs:134-137
+		// SUBGROUP_VERTEX grants SUBGROUP too (lib.rs:126-129, 138-141).
+		{gputypes.FeatureSubgroupVertex, valid.CapSubgroup | valid.CapSubgroupVertexStage},
+		{gputypes.FeatureShaderBarycentrics, valid.CapShaderBarycentrics}, // lib.rs:150-153
+		{gputypes.FeatureShaderPerVertex, valid.CapPerVertex},             // lib.rs:166-169
+		{gputypes.FeatureShaderDrawIndex, valid.CapDrawIndex},             // lib.rs:170-173
 		// Features with no naga capability.
 		{gputypes.FeatureDepthClipControl, 0},
 		{gputypes.FeatureTimestampQuery, 0},
@@ -119,6 +133,21 @@ var<private> x: f64;
 	rayQueryProceed(&rq);
 	out[0] = rayQueryGetCommittedIntersection(&rq).kind;
 }`},
+		{"primitive index", 0, gputypes.FeaturePrimitiveIndex, `enable primitive_index;
+@fragment fn main(@builtin(primitive_index) p: u32) -> @location(0) vec4f { return vec4f(f32(p)); }`},
+		{"clip distances", 0, gputypes.FeatureClipDistances, `enable clip_distances;
+struct VOut { @builtin(position) pos: vec4f, @builtin(clip_distances) clip: array<f32, 1> }
+@vertex fn main() -> VOut { return VOut(vec4f(0.0), array<f32, 1>(1.0)); }`},
+		{"draw index", 0, gputypes.FeatureShaderDrawIndex, `enable draw_index;
+@vertex fn main(@builtin(draw_index) d: u32) -> @builtin(position) vec4f { return vec4f(f32(d)); }`},
+		{"i64 type", 0, gputypes.FeatureShaderInt64, `@group(0) @binding(0) var<storage, read_write> out: array<u32>;
+var<private> x: i64;
+@compute @workgroup_size(1) fn main() { out[0] = u32(x); }`},
+		// No WGSL row for FeatureShaderI16: naga v0.21.0's WGSL front end has
+		// no i16/u16 type names yet, so only SPIR-V input reaches the gate
+		// (the mapping is covered by TestNagaCapabilitiesForFeatures).
+		{"early depth test", 0, gputypes.FeatureShaderEarlyDepthTest, `@fragment @early_depth_test(force) fn main() -> @location(0) vec4f { return vec4f(1.0); }`},
+		{"barycentrics", 0, gputypes.FeatureShaderBarycentrics, `@fragment fn main(@builtin(barycentric) b: vec3f) -> @location(0) vec4f { return vec4f(b, 1.0); }`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
