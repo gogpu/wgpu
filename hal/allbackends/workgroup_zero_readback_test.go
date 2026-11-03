@@ -114,8 +114,8 @@ func newWorkgroupZeroResources(t *testing.T, device *wgpu.Device) (*wgpu.BindGro
 // compute wrong results.
 func requireWorkgroupBarrierRefused(t *testing.T, err error) {
 	t.Helper()
-	if !errors.Is(err, software.ErrWorkgroupBarrierUnsupported) {
-		t.Fatalf("CreateComputePipeline error = %v, want software.ErrWorkgroupBarrierUnsupported", err)
+	if !errors.Is(err, wgpu.ErrWorkgroupBarrierUnsupported) {
+		t.Fatalf("CreateComputePipeline error = %v, want wgpu.ErrWorkgroupBarrierUnsupported", err)
 	}
 }
 

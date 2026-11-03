@@ -59,6 +59,12 @@ var (
 	// GL_EXT_disjoint_timer_query).
 	ErrTimestampsNotSupported = errors.New("hal: timestamp queries not supported by this backend")
 
+	// ErrWorkgroupBarrierUnsupported is returned by CreateComputePipeline on a
+	// backend that cannot run a compute shader sharing workgroup memory across
+	// a control barrier. The software backend returns it until its interpreter
+	// runs a workgroup's invocations together (P1-SW-025).
+	ErrWorkgroupBarrierUnsupported = errors.New("software backend: compute shaders that share workgroup memory across a control barrier are not supported yet (P1-SW-025)")
+
 	// ErrDriverBug indicates the GPU driver returned an invalid or unexpected result
 	// that violates the graphics API specification. This typically indicates a
 	// driver bug rather than an application error.

@@ -16,6 +16,14 @@ var (
 	ErrSurfaceLost     = hal.ErrSurfaceLost
 	ErrSurfaceOutdated = hal.ErrSurfaceOutdated
 	ErrTimeout         = hal.ErrTimeout
+
+	// ErrWorkgroupBarrierUnsupported is returned by Device.CreateComputePipeline
+	// on the software backend for a compute shader that shares workgroup
+	// memory across a control barrier (a tree reduction, a shared tile). The
+	// software backend cannot run such a shader correctly yet, so it refuses it
+	// rather than compute wrong values (P1-SW-025). Check it with errors.Is
+	// and fall back where the code can run on the software adapter.
+	ErrWorkgroupBarrierUnsupported = hal.ErrWorkgroupBarrierUnsupported
 )
 
 // Public API sentinel errors.

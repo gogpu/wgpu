@@ -28,8 +28,9 @@ var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SP
 // interpreter runs the invocations of a workgroup one after another and does
 // not share workgroup memory between them, so such a shader (a tree
 // reduction, a shared tile) would compute wrong results; it is refused
-// instead until the backend implements workgroup memory (P1-SW-025).
-var ErrWorkgroupBarrierUnsupported = errors.New("software backend: compute shaders that share workgroup memory across a control barrier are not supported yet (P1-SW-025)")
+// instead until the backend implements workgroup memory (P1-SW-025). It is
+// hal.ErrWorkgroupBarrierUnsupported, which the wgpu package re-exports.
+var ErrWorkgroupBarrierUnsupported = hal.ErrWorkgroupBarrierUnsupported
 
 // Device implements hal.Device for the software backend.
 // It maintains a resource registry for resolving handle-based bind group entries
