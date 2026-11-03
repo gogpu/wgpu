@@ -133,7 +133,13 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.7** (naga v0.21.2):
+**Next patch release, v0.34.8:**
+- [ ] Software backend: workgroup memory shared across barriers, replacing v0.34.7's refusal (P1-SW-025)
+- [ ] `RenderPassColorAttachment.DepthSlice` with core validation on every backend (P1-API-019), if ready together;
+  otherwise v0.34.9
+- [ ] Then: WARP listed as a CPU-type DX12 adapter, as in Rust (P2-DX12-060)
+
+**Patch release v0.34.7** (2026-11-03, naga v0.21.2):
 - [x] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
 - [x] Shader modules validated once, with the device's capabilities, and handed to the backend
 - [x] Shader interface read per entry point
