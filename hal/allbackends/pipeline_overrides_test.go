@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -101,9 +100,6 @@ func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.Downle
 	t.Cleanup(adapter.Release)
 
 	info := adapter.Info()
-	if b.backend == gputypes.BackendDX12 && isDX12SoftwareAdapter(info.Name) {
-		t.Skipf("DX12 WARP adapter %q is not a hardware adapter", info.Name)
-	}
 	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
 	if b.software != isCPU || (!b.software && info.Backend != b.backend) {
 		t.Skipf("no %s adapter (got %s, backend %v)", b.name, info.Name, info.Backend)
@@ -119,14 +115,6 @@ func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.Downle
 	t.Cleanup(device.Release)
 	t.Logf("adapter: %s (%v)", info.Name, info.Backend)
 	return device, info.Name
-}
-
-// isDX12SoftwareAdapter recognizes the software adapter exposed by Windows
-// CI as if it were a hardware DX12 adapter. Runtime readback tests exercise
-// hardware adapter behavior; the CPU software backend has its own test path.
-func isDX12SoftwareAdapter(name string) bool {
-	name = strings.ToLower(name)
-	return strings.Contains(name, "microsoft basic render driver") || strings.Contains(name, "warp")
 }
 
 // TestOverrideCompute runs every override case through the public API: the
