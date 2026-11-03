@@ -545,6 +545,26 @@ func (d *ID3D12Device) GetResourceAllocationInfo(visibleMask uint32, numResource
 	return info
 }
 
+// GetCustomHeapProperties returns the CUSTOM heap properties equivalent to
+// heapType (UPLOAD, READBACK, DEFAULT) on this adapter: the CPU page property
+// and memory pool depend on whether the adapter is UMA and cache coherent.
+// Note: Same calling convention issue as GetCPUDescriptorHandleForHeapStart.
+func (d *ID3D12Device) GetCustomHeapProperties(nodeMask uint32, heapType D3D12_HEAP_TYPE) D3D12_HEAP_PROPERTIES {
+	var props D3D12_HEAP_PROPERTIES
+
+	_, _, _ = syscall.Syscall6(
+		d.vtbl.GetCustomHeapProperties,
+		4,
+		uintptr(unsafe.Pointer(d)),      // this pointer first
+		uintptr(unsafe.Pointer(&props)), // output pointer second
+		uintptr(nodeMask),
+		uintptr(heapType),
+		0, 0,
+	)
+
+	return props
+}
+
 // -----------------------------------------------------------------------------
 // ID3D12CommandQueue methods
 // -----------------------------------------------------------------------------
@@ -1280,6 +1300,25 @@ func (r *ID3D12Resource) GetDesc() D3D12_RESOURCE_DESC {
 	)
 
 	return desc
+}
+
+// GetHeapProperties returns the properties of the heap the resource was
+// created in, and its heap flags.
+func (r *ID3D12Resource) GetHeapProperties() (D3D12_HEAP_PROPERTIES, D3D12_HEAP_FLAGS, error) {
+	var props D3D12_HEAP_PROPERTIES
+	var flags D3D12_HEAP_FLAGS
+
+	ret, _, _ := syscall.Syscall(
+		r.vtbl.GetHeapProperties,
+		3,
+		uintptr(unsafe.Pointer(r)),
+		uintptr(unsafe.Pointer(&props)),
+		uintptr(unsafe.Pointer(&flags)),
+	)
+	if ret != 0 {
+		return D3D12_HEAP_PROPERTIES{}, 0, HRESULTError(ret)
+	}
+	return props, flags, nil
 }
 
 // -----------------------------------------------------------------------------

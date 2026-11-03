@@ -36,28 +36,34 @@ func forEachDX12TestDevice(t *testing.T, fn func(t *testing.T, d dx12TestDevice)
 	for _, path := range []struct{ name, dxil string }{{"FXC", ""}, {"DXIL", "1"}} {
 		t.Run(path.name, func(t *testing.T) {
 			t.Setenv("GOGPU_DX12_DXIL", path.dxil)
+			forEachDX12Adapter(t, fn)
+		})
+	}
+}
 
-			raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
+// forEachDX12Adapter runs fn on a device of every enumerated DX12 adapter and
+// on WARP, for tests that do not compile shaders.
+func forEachDX12Adapter(t *testing.T, fn func(t *testing.T, d dx12TestDevice)) {
+	t.Helper()
+	raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(raw.Destroy)
+	instance := raw.(*Instance)
+
+	adapters := instance.EnumerateAdapters(nil)
+	adapters = append(adapters, openWARPAdapter(t, instance))
+	for i := range adapters {
+		a := &adapters[i]
+		t.Run(a.Info.Name, func(t *testing.T) {
+			open, err := a.Adapter.Open(0, a.Capabilities.Limits)
 			if err != nil {
-				t.Skipf("DX12 unavailable: %v", err)
+				t.Fatalf("Open(%s): %v", a.Info.Name, err)
 			}
-			t.Cleanup(raw.Destroy)
-			instance := raw.(*Instance)
-
-			adapters := instance.EnumerateAdapters(nil)
-			adapters = append(adapters, openWARPAdapter(t, instance))
-			for i := range adapters {
-				a := &adapters[i]
-				t.Run(a.Info.Name, func(t *testing.T) {
-					open, err := a.Adapter.Open(0, a.Capabilities.Limits)
-					if err != nil {
-						t.Fatalf("Open(%s): %v", a.Info.Name, err)
-					}
-					// Registered first so it runs after the resource cleanups.
-					t.Cleanup(open.Device.Destroy)
-					fn(t, dx12TestDevice{name: a.Info.Name, device: open.Device, queue: open.Queue})
-				})
-			}
+			// Registered first so it runs after the resource cleanups.
+			t.Cleanup(open.Device.Destroy)
+			fn(t, dx12TestDevice{name: a.Info.Name, device: open.Device, queue: open.Queue})
 		})
 	}
 }

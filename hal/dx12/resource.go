@@ -18,11 +18,24 @@ import (
 // Buffer Implementation
 // -----------------------------------------------------------------------------
 
+// bufferMemory is where a buffer lives and how the CPU sees it.
+type bufferMemory uint8
+
+const (
+	// bufferMemoryDevice is GPU-only memory (DEFAULT heap).
+	bufferMemoryDevice bufferMemory = iota
+	// bufferMemoryUpload is CPU-written, GPU-read memory (MAP_WRITE, mappedAtCreation).
+	bufferMemoryUpload
+	// bufferMemoryReadback is GPU-written, CPU-read memory (MAP_READ).
+	bufferMemoryReadback
+)
+
 // Buffer implements hal.Buffer for DirectX 12.
 type Buffer struct {
 	raw             *d3d12.ID3D12Resource
 	size            uint64
 	usage           gputypes.BufferUsage
+	memory          bufferMemory
 	heapType        d3d12.D3D12_HEAP_TYPE
 	cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY // for CUSTOM heap type
 	gpuVA           uint64                        // GPU virtual address for binding
@@ -43,23 +56,15 @@ type Buffer struct {
 }
 
 // isMappable returns true if the buffer can be mapped for CPU access.
-// UPLOAD, READBACK, and CUSTOM heaps with CPU page properties are mappable.
 func (b *Buffer) isMappable() bool {
-	switch b.heapType {
-	case d3d12.D3D12_HEAP_TYPE_UPLOAD, d3d12.D3D12_HEAP_TYPE_READBACK:
-		return true
-	case d3d12.D3D12_HEAP_TYPE_CUSTOM:
-		return b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE ||
-			b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
-	default:
-		return false
-	}
+	return b.memory != bufferMemoryDevice
 }
 
-// isReadback returns true if the buffer is for GPU→CPU reads.
+// isReadback returns true if the buffer is for GPU→CPU reads. The page
+// property cannot tell: on a cache-coherent UMA adapter upload buffers are
+// WRITE_BACK too.
 func (b *Buffer) isReadback() bool {
-	return b.heapType == d3d12.D3D12_HEAP_TYPE_READBACK ||
-		(b.heapType == d3d12.D3D12_HEAP_TYPE_CUSTOM && b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK)
+	return b.memory == bufferMemoryReadback
 }
 
 // Destroy releases the buffer resources.

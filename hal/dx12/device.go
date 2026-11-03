@@ -100,6 +100,11 @@ type Device struct {
 	// Debug info queue for validation messages (nil when debug layer is off).
 	infoQueue *d3d12.ID3D12InfoQueue
 
+	// CUSTOM heap properties equivalent to the adapter's UPLOAD and READBACK
+	// heaps (ID3D12Device::GetCustomHeapProperties), for CPU-visible buffers.
+	uploadHeap   d3d12.D3D12_HEAP_PROPERTIES
+	readbackHeap d3d12.D3D12_HEAP_PROPERTIES
+
 	// Debug: operation step counter for tracking which call kills the device.
 	debugStep int
 
@@ -262,6 +267,11 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.
 		instance:     instance,
 		featureLevel: featureLevel,
 		shaderModel:  shaderModel,
+		// The adapter's UPLOAD and READBACK heaps as CUSTOM heap properties:
+		// CPU-visible buffers use CUSTOM heaps so they can start in COMMON
+		// and change state, which UPLOAD and READBACK heaps forbid.
+		uploadHeap:   rawDevice.GetCustomHeapProperties(0, d3d12.D3D12_HEAP_TYPE_UPLOAD),
+		readbackHeap: rawDevice.GetCustomHeapProperties(0, d3d12.D3D12_HEAP_TYPE_READBACK),
 	}
 
 	// Create the direct (graphics) command queue
@@ -1083,34 +1093,8 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in DX12.CreateBuffer — core validation gap")
 	}
 
-	// Determine heap type based on usage.
-	// Matches Rust wgpu-hal suballocation.rs:437-464 which uses HEAP_TYPE_CUSTOM
-	// with WRITE_COMBINE + L0 for CpuToGpu (MapWrite) buffers, and COMMON state
-	// that allows implicit promotion to COPY_DST. This enables staging belt
-	// CopyBufferRegion into MapWrite buffers (prevents data race on Metal/DX12).
-	var heapType d3d12.D3D12_HEAP_TYPE
-	var cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY
-	var memoryPool d3d12.D3D12_MEMORY_POOL
-
-	switch {
-	case desc.Usage&gputypes.BufferUsageMapRead != 0:
-		// Readback buffer — GPU writes, CPU reads
-		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
-		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-	case desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
-		// CPU-to-GPU buffer — CPU writes, GPU reads. CUSTOM heap with WRITE_COMBINE
-		// allows COMMON state which permits implicit promotion to COPY_DST.
-		// This is required for staging belt CopyBufferRegion to work.
-		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE
-		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-	default:
-		// Default (GPU-only) buffer
-		heapType = d3d12.D3D12_HEAP_TYPE_DEFAULT
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN
-		memoryPool = d3d12.D3D12_MEMORY_POOL_UNKNOWN
-	}
+	memory := bufferMemoryFor(desc.Usage, desc.MappedAtCreation)
+	heapProps := d.bufferHeapProperties(memory)
 
 	// D3D12 creates every buffer in COMMON whatever initial state is passed
 	// (the debug layer warns that it ignores any other), and a buffer leaves
@@ -1128,15 +1112,6 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
 	if desc.Usage&gputypes.BufferUsageStorage != 0 {
 		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	}
-
-	// Create heap properties
-	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
-		Type:                 heapType,
-		CPUPageProperty:      cpuPageProperty,
-		MemoryPoolPreference: memoryPool,
-		CreationNodeMask:     0,
-		VisibleNodeMask:      0,
 	}
 
 	// Create resource description for buffer
@@ -1169,8 +1144,9 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		raw:             resource,
 		size:            desc.Size, // Return original size, not aligned size
 		usage:           desc.Usage,
-		heapType:        heapType,
-		cpuPageProperty: cpuPageProperty,
+		memory:          memory,
+		heapType:        heapProps.Type,
+		cpuPageProperty: heapProps.CPUPageProperty,
 		gpuVA:           resource.GetGPUVirtualAddress(),
 		device:          d,
 		currentState:    initialState,
@@ -1192,6 +1168,40 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 
 	buffer.nativeHandle = d.handles.buffers.Add(buffer)
 	return buffer, nil
+}
+
+// bufferMemoryFor returns where a buffer with the given usage lives: mapped
+// for reading, mapped for writing (also for mappedAtCreation, whatever the
+// usage), or GPU only.
+func bufferMemoryFor(usage gputypes.BufferUsage, mappedAtCreation bool) bufferMemory {
+	switch {
+	case usage&gputypes.BufferUsageMapRead != 0:
+		return bufferMemoryReadback
+	case usage&gputypes.BufferUsageMapWrite != 0 || mappedAtCreation:
+		return bufferMemoryUpload
+	default:
+		return bufferMemoryDevice
+	}
+}
+
+// bufferHeapProperties returns the heap a buffer of the given memory kind is
+// created in. CPU-visible buffers use a CUSTOM heap with the page property
+// and memory pool of the adapter's UPLOAD or READBACK heap, as Rust wgpu-hal
+// dx12/suballocation.rs does, so that they can start in COMMON and be copied
+// into and out of (the staging belt copies into MAP_WRITE buffers); a real
+// UPLOAD or READBACK heap pins its resources to one state. The page property
+// comes from the adapter (GetCustomHeapProperties): WRITE_COMBINE for uploads
+// on discrete and non-coherent UMA adapters, WRITE_BACK on cache-coherent UMA
+// adapters (Intel integrated, WARP), where write-combined pages only cost.
+func (d *Device) bufferHeapProperties(memory bufferMemory) d3d12.D3D12_HEAP_PROPERTIES {
+	switch memory {
+	case bufferMemoryUpload:
+		return d.uploadHeap
+	case bufferMemoryReadback:
+		return d.readbackHeap
+	default:
+		return d3d12.D3D12_HEAP_PROPERTIES{Type: d3d12.D3D12_HEAP_TYPE_DEFAULT}
+	}
 }
 
 // DestroyBuffer destroys a GPU buffer.
