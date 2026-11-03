@@ -1,14 +1,33 @@
-# wgpu — GoGPU Ecosystem
+# wgpu
 
-> Part of the GoGPU Pure Go GPU Computing Ecosystem.
+> Pure Go implementation of the W3C WebGPU API, with zero CGO. One Go API over three build-tag-selected stacks:
+> the default Pure Go stack (Vulkan, Metal, DirectX 12, OpenGL ES and a CPU software backend), `-tags rust`
+> (wgpu-native through go-webgpu/webgpu), and `js,wasm` (the browser's WebGPU). Shaders are WGSL, compiled by
+> gogpu/naga to SPIR-V, MSL, HLSL, DXIL or GLSL. Validation and resource state tracking follow Rust wgpu-core.
+> Render and compute pipelines, GPU-to-CPU readback, render bundles, queries and damage-aware presentation are
+> included. Inline ray queries are experimental and exist only in the HAL, not yet in the public API.
+> Runs on Windows, Linux, macOS and in browsers (WASM); Android/arm64 Vulkan is a preview. Go 1.25+.
+> Pre-1.0: the API may change before v1.0.
 
 ## Docs
 
 - [API Reference](https://pkg.go.dev/github.com/gogpu/wgpu)
-- [AGENTS.md](https://github.com/gogpu/wgpu/blob/main/AGENTS.md): AI agent instructions
-- [README](https://github.com/gogpu/wgpu/blob/main/README.md): Human-readable overview
+- [README](https://github.com/gogpu/wgpu/blob/main/README.md): overview, backends, installation
+- [AGENTS.md](https://github.com/gogpu/wgpu/blob/main/AGENTS.md): instructions for AI agents using wgpu
+- [ARCHITECTURE](https://github.com/gogpu/wgpu/blob/main/docs/ARCHITECTURE.md): core, HAL and backends
+- [Compute shaders](https://github.com/gogpu/wgpu/blob/main/docs/COMPUTE-SHADERS.md): compute pipelines and readback
+- [Surface targets](https://github.com/gogpu/wgpu/blob/main/docs/SURFACE-TARGETS.md): presenting to windows
+- [CHANGELOG](https://github.com/gogpu/wgpu/blob/main/CHANGELOG.md): changes and known issues per release
+- [ROADMAP](https://github.com/gogpu/wgpu/blob/main/ROADMAP.md): plan to v1.0
+- [CONTRIBUTING](https://github.com/gogpu/wgpu/blob/main/CONTRIBUTING.md): how to contribute
+
+## Examples
+
+- [examples](https://github.com/gogpu/wgpu/tree/main/examples): all examples
+- [triangle-headless](https://github.com/gogpu/wgpu/tree/main/examples/triangle-headless): render without a window
+- [compute-sum](https://github.com/gogpu/wgpu/tree/main/examples/compute-sum): compute shader with readback
 
 ## Ecosystem
 
-- [GoGPU Ecosystem](https://github.com/gogpu/gogpu/blob/main/AGENTS.md): Full ecosystem map
-- [Open Collective](https://opencollective.com/gogpu): Support development
+- [GoGPU](https://github.com/gogpu): all modules of the GoGPU ecosystem
+- [Open Collective](https://opencollective.com/gogpu): support development
