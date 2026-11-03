@@ -9,42 +9,42 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/dx12/d3d12"
 )
 
-// TestBufferInitialState verifies that buffers start in the correct D3D12 resource state
-// based on their heap type, matching the initial state set in CreateBuffer.
+// TestBufferInitialState creates a buffer of every memory kind and checks
+// that it is created and tracked in COMMON. D3D12 creates every buffer in
+// COMMON whatever initial state is passed (the debug layer warns "Ignoring
+// InitialState D3D12_RESOURCE_STATE_COPY_DEST. Buffers are effectively
+// created in state D3D12_RESOURCE_STATE_COMMON"), so tracking any other
+// state starts the tracker from a state the buffer is not in. Rust wgpu-hal
+// creates every buffer in COMMON (dx12/suballocation.rs).
 func TestBufferInitialState(t *testing.T) {
+	dev, _ := openWARPDevice(t)
 	tests := []struct {
-		name          string
-		heapType      d3d12.D3D12_HEAP_TYPE
-		expectedState d3d12.D3D12_RESOURCE_STATES
+		name             string
+		usage            gputypes.BufferUsage
+		mappedAtCreation bool
 	}{
-		{
-			name:          "default buffer starts in COMMON",
-			heapType:      d3d12.D3D12_HEAP_TYPE_DEFAULT,
-			expectedState: d3d12.D3D12_RESOURCE_STATE_COMMON,
-		},
-		{
-			name:          "readback buffer starts in COPY_DEST",
-			heapType:      d3d12.D3D12_HEAP_TYPE_READBACK,
-			expectedState: d3d12.D3D12_RESOURCE_STATE_COPY_DEST,
-		},
-		{
-			name:          "upload buffer starts in COMMON",
-			heapType:      d3d12.D3D12_HEAP_TYPE_CUSTOM,
-			expectedState: d3d12.D3D12_RESOURCE_STATE_COMMON,
-		},
+		{"device", gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst, false},
+		{"readback", gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst, false},
+		{"upload", gputypes.BufferUsageMapWrite | gputypes.BufferUsageCopySrc, false},
+		{"mapped at creation", gputypes.BufferUsageUniform, true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			buf := &Buffer{
-				heapType:     tt.heapType,
-				currentState: tt.expectedState,
+			raw, err := dev.CreateBuffer(&hal.BufferDescriptor{Label: tt.name, Size: 256, Usage: tt.usage, MappedAtCreation: tt.mappedAtCreation})
+			if err != nil {
+				t.Fatalf("CreateBuffer: %v", err)
 			}
-			if buf.currentState != tt.expectedState {
-				t.Errorf("currentState = %d, want %d", buf.currentState, tt.expectedState)
+			t.Cleanup(func() { dev.DestroyBuffer(raw) })
+			buf := raw.(*Buffer)
+			if buf.currentState != d3d12.D3D12_RESOURCE_STATE_COMMON {
+				t.Errorf("currentState = %#x, want COMMON", buf.currentState)
+			}
+			if got := buf.scheduledStateSnapshot(); got != d3d12.D3D12_RESOURCE_STATE_COMMON {
+				t.Errorf("scheduled state = %#x, want COMMON", got)
 			}
 		})
 	}

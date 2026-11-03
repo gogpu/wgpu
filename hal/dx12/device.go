@@ -1091,7 +1091,6 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var heapType d3d12.D3D12_HEAP_TYPE
 	var cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY
 	var memoryPool d3d12.D3D12_MEMORY_POOL
-	var initialState d3d12.D3D12_RESOURCE_STATES
 
 	switch {
 	case desc.Usage&gputypes.BufferUsageMapRead != 0:
@@ -1099,7 +1098,6 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
 		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
 		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
 	case desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
 		// CPU-to-GPU buffer — CPU writes, GPU reads. CUSTOM heap with WRITE_COMBINE
 		// allows COMMON state which permits implicit promotion to COPY_DST.
@@ -1107,14 +1105,18 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
 		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE
 		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 	default:
 		// Default (GPU-only) buffer
 		heapType = d3d12.D3D12_HEAP_TYPE_DEFAULT
 		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN
 		memoryPool = d3d12.D3D12_MEMORY_POOL_UNKNOWN
-		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 	}
+
+	// D3D12 creates every buffer in COMMON whatever initial state is passed
+	// (the debug layer warns that it ignores any other), and a buffer leaves
+	// it by implicit promotion or an explicit barrier. Tracking starts there,
+	// as in Rust wgpu-hal dx12/suballocation.rs.
+	const initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 
 	// Align size for constant buffers (256-byte alignment required)
 	bufferSize := desc.Size

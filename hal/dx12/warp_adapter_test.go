@@ -62,6 +62,24 @@ func forEachDX12TestDevice(t *testing.T, fn func(t *testing.T, d dx12TestDevice)
 	}
 }
 
+// openWARPDevice opens a device on WARP, for tests whose result does not
+// depend on the adapter.
+func openWARPDevice(t *testing.T) (hal.Device, hal.Queue) {
+	t.Helper()
+	raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(raw.Destroy)
+	a := openWARPAdapter(t, raw.(*Instance))
+	open, err := a.Adapter.Open(0, a.Capabilities.Limits)
+	if err != nil {
+		t.Fatalf("Open(WARP): %v", err)
+	}
+	t.Cleanup(open.Device.Destroy)
+	return open.Device, open.Queue
+}
+
 // openWARPAdapter returns the WARP adapter of the instance, which
 // EnumerateAdapters leaves out. It fails the test when WARP is missing:
 // Windows 10 and later always ship it.
