@@ -1693,6 +1693,12 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		view.hasSRV = true
 	}
 
+	if tex.usage&gputypes.TextureUsageStorageBinding != 0 {
+		if err := d.createTextureViewUAV(tex, view, viewFormat, viewDim); err != nil {
+			return failTextureViewCreation(view, err)
+		}
+	}
+
 	view.nativeHandle = d.handles.views.Add(view)
 	return view, nil
 }
@@ -1711,6 +1717,46 @@ func dsvReadOnlyVariantMasks(format gputypes.TextureFormat) []uint32 {
 	default:
 		return []uint32{uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH)}
 	}
+}
+
+// createTextureViewUAV creates the unordered access view that a storage
+// texture binding of the view reads and writes (HLSL RWTexture*, u register).
+// Mirrors Rust wgpu-hal dx12 create_texture_view (handle_uav) and
+// view.rs to_uav: one mip level, a 2D view with a non-zero base layer becomes
+// a 2D array UAV, and a 3D UAV covers every depth slice. Cube views cannot be
+// UAVs and get none; WebGPU never binds a cube view as a storage texture.
+func (d *Device) createTextureViewUAV(tex *Texture, view *TextureView, viewFormat gputypes.TextureFormat, viewDim gputypes.TextureViewDimension) error {
+	uavFormat, plane := textureFormatToSRV(viewFormat, view.aspect)
+	if uavFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+		return nil
+	}
+	uavDesc := d3d12.D3D12_UNORDERED_ACCESS_VIEW_DESC{Format: uavFormat}
+	switch viewDim {
+	case gputypes.TextureViewDimension1D:
+		uavDesc.SetTexture1D(view.baseMip)
+	case gputypes.TextureViewDimension2D:
+		if view.baseLayer == 0 {
+			uavDesc.SetTexture2D(view.baseMip, plane)
+		} else {
+			uavDesc.SetTexture2DArray(view.baseMip, view.baseLayer, view.layerCount, plane)
+		}
+	case gputypes.TextureViewDimension2DArray:
+		uavDesc.SetTexture2DArray(view.baseMip, view.baseLayer, view.layerCount, plane)
+	case gputypes.TextureViewDimension3D:
+		uavDesc.SetTexture3D(view.baseMip, 0, ^uint32(0))
+	default:
+		return nil
+	}
+
+	handle, index, err := d.allocateSRVDescriptor()
+	if err != nil {
+		return fmt.Errorf("dx12: failed to allocate UAV descriptor: %w", err)
+	}
+	d.raw.CreateUnorderedAccessView(tex.raw, nil, &uavDesc, handle)
+	view.uavHandle = handle
+	view.uavHeapIndex = index
+	view.hasUAV = true
+	return nil
 }
 
 func failTextureViewCreation(view *TextureView, err error) (hal.TextureView, error) {
@@ -2041,11 +2087,13 @@ func (d *Device) createBufferSRV(resource *d3d12.ID3D12Resource, numElements, st
 //   - uniform buffer           → CBV                 (cbuffer, b#)
 //   - read-only storage buffer → raw buffer SRV      (ByteAddressBuffer, t#)
 //   - storage buffer           → raw buffer UAV      (RWByteAddressBuffer, u#)
-//   - texture                  → copy of the view SRV
+//   - texture                  → copy of the view SRV (Texture*, t#)
+//   - storage texture          → copy of the view UAV (RWTexture*, u#)
 //
-// Mirrors Rust wgpu-hal dx12/device.rs create_bind_group (BindingType::Buffer arm).
-// CBV/SRV/UAV buffer views are created inline; texture SRV copies from scattered
-// staging handles are batched into a single CopyDescriptors call.
+// Mirrors Rust wgpu-hal dx12/device.rs create_bind_group (BindingType::Buffer,
+// Texture and StorageTexture arms). CBV/SRV/UAV buffer views are created
+// inline; texture view copies from scattered staging handles are batched into
+// a single CopyDescriptors call.
 func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entries []viewBinding) error {
 	// Collect SRV copy sources for batching.
 	// destHandles[i] = destination in GPU-visible heap, srcHandles[i] = source from staging heap.
@@ -2065,17 +2113,16 @@ func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR
 			}
 
 		case gputypes.TextureViewBinding:
-			// Storage textures need a UAV, which TextureView does not create yet;
-			// they keep the sampled SRV here (pre-existing behavior).
 			view := vb.view
 			if view == nil {
 				return fmt.Errorf("dx12: binding %d: texture view handle not resolved", vb.entry.Binding)
 			}
-			if !view.hasSRV {
-				return fmt.Errorf("dx12: texture view has no SRV for binding %d", vb.entry.Binding)
+			src, err := textureViewDescriptor(view, vb.layout.Type, vb.entry.Binding)
+			if err != nil {
+				return err
 			}
 			srvDestHandles = append(srvDestHandles, dest)
-			srvSrcHandles = append(srvSrcHandles, view.srvHandle)
+			srvSrcHandles = append(srvSrcHandles, src)
 
 		default:
 			return fmt.Errorf("dx12: unsupported binding resource type: %T", vb.entry.Resource)
@@ -2096,6 +2143,23 @@ func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR
 	}
 
 	return nil
+}
+
+// textureViewDescriptor returns the staging descriptor of view that a binding
+// of the given type copies into the bind group: the UAV for a storage
+// texture, the SRV otherwise. A descriptor of the other kind in that slot is
+// undefined behavior; WARP reads it as no resource.
+func textureViewDescriptor(view *TextureView, bindingType BindingType, binding uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, error) {
+	if bindingType == BindingTypeStorageTexture {
+		if !view.hasUAV {
+			return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: texture view has no UAV for storage texture binding %d", binding)
+		}
+		return view.uavHandle, nil
+	}
+	if !view.hasSRV {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: texture view has no SRV for binding %d", binding)
+	}
+	return view.srvHandle, nil
 }
 
 // DestroyBindGroup destroys a bind group.
