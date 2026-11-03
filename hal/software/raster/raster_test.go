@@ -364,9 +364,10 @@ func TestPipelineClear(t *testing.T) {
 	// Clear to 50% gray with 50% alpha
 	p.Clear(0.5, 0.5, 0.5, 0.5)
 
+	// 0.5 * 255 = 127.5 rounds half up: 128.
 	r, g, b, a = p.GetPixel(5, 5)
-	if r != 127 || g != 127 || b != 127 || a != 127 {
-		t.Errorf("After Clear(gray), GetPixel(5, 5) = (%d, %d, %d, %d), want (127, 127, 127, 127)", r, g, b, a)
+	if r != 128 || g != 128 || b != 128 || a != 128 {
+		t.Errorf("After Clear(gray), GetPixel(5, 5) = (%d, %d, %d, %d), want (128, 128, 128, 128)", r, g, b, a)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/raster"
 	"github.com/gogpu/wgpu/hal/software/shader"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
@@ -118,10 +119,10 @@ func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	r := uint8(color.R * 255)
-	g := uint8(color.G * 255)
-	b := uint8(color.B * 255)
-	a := uint8(color.A * 255)
+	r := raster.FloatToUnorm8(float32(color.R))
+	g := raster.FloatToUnorm8(float32(color.G))
+	b := raster.FloatToUnorm8(float32(color.B))
+	a := raster.FloatToUnorm8(float32(color.A))
 
 	bpp := int(formatBytesPerPixel(t.format))
 

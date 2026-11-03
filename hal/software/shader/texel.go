@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal/software/raster"
 )
 
 // texelKind is how a channel of a texel is stored.
@@ -131,11 +132,9 @@ func putChannel(b []byte, layout texelLayout, f float32) {
 	var bits uint32
 	switch layout.kind {
 	case texelUnorm:
-		maxVal := float64(uint32(1)<<(8*layout.bytes) - 1)
-		bits = uint32(math.Round(float64(clampFloat(f, 0, 1)) * maxVal))
+		bits = raster.FloatToUnorm(f, uint32(1)<<(8*layout.bytes)-1)
 	case texelSnorm:
-		maxVal := float64(uint32(1)<<(8*layout.bytes-1) - 1)
-		bits = uint32(int32(math.Round(float64(clampFloat(f, -1, 1)) * maxVal)))
+		bits = uint32(raster.FloatToSnorm(f, int32(1)<<(8*layout.bytes-1)-1))
 	case texelUint:
 		bits = uint32(int64(f))
 	case texelSint:

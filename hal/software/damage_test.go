@@ -609,8 +609,9 @@ func TestDamage_Integration_MultipleRectsInSinglePresent(t *testing.T) {
 	// Verify framebuffer has rendered content (gray).
 	fb := surf.GetFramebuffer()
 	r, g, b, a := pixelAt(fb, 5, 5, W)
-	if r != 127 || g != 127 || b != 127 || a != 255 {
-		t.Errorf("pixel(5,5) = (%d,%d,%d,%d), want gray (~127,~127,~127,255)",
+	// 0.5 * 255 = 127.5 rounds half up: 128.
+	if r != 128 || g != 128 || b != 128 || a != 255 {
+		t.Errorf("pixel(5,5) = (%d,%d,%d,%d), want gray (128,128,128,255)",
 			r, g, b, a)
 	}
 }
@@ -773,7 +774,8 @@ func TestDamage_TextureClear_BGRAByteOrder(t *testing.T) {
 			name:   "BGRA_mixed",
 			format: gputypes.TextureFormatBGRA8Unorm,
 			color:  gputypes.Color{R: 1.0, G: 0.5, B: 0.25, A: 0.75},
-			want:   [4]byte{63, 127, 255, 191}, // [B=63,G=127,R=255,A=191]
+			// Rounded to nearest: 63.75 -> 64, 127.5 -> 128 (half up), 191.25 -> 191.
+			want: [4]byte{64, 128, 255, 191}, // [B=64,G=128,R=255,A=191]
 		},
 	}
 

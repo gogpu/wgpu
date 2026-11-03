@@ -519,8 +519,7 @@ func writeDepthTexel(tex *Texture, x, y int, depth float32) {
 	off := (y*int(tex.width) + x) * bpp
 	if tex.format == gputypes.TextureFormatDepth16Unorm {
 		if off+2 <= len(tex.data) {
-			v := min(max(depth, 0), 1)
-			binary.LittleEndian.PutUint16(tex.data[off:], uint16(v*65535+0.5))
+			binary.LittleEndian.PutUint16(tex.data[off:], raster.FloatToUnorm16(depth))
 		}
 		return
 	}

@@ -5,6 +5,7 @@ package shader
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -91,5 +92,28 @@ func TestEncodeTexelOutOfBounds(t *testing.T) {
 	packed := &Texture2D{Width: 1, Height: 1, Format: uint32(gputypes.TextureFormatRGB10A2Unorm), Data: make([]byte, 4)}
 	if encodeTexel(packed, 0, 0, Vec4{1, 1, 1, 1}) {
 		t.Error("encodeTexel wrote a packed format it has no layout for")
+	}
+}
+
+// TestEncodeTexelNaN checks that a NaN stored to a normalized format becomes
+// 0 (D3D11 §3.2.3.6/§3.2.3.7), not the low end of the range: for snorm that
+// was -1 (0x81).
+func TestEncodeTexelNaN(t *testing.T) {
+	nan := float32(math.NaN())
+	for _, tt := range []struct {
+		format gputypes.TextureFormat
+		size   int
+	}{
+		{gputypes.TextureFormatRGBA8Unorm, 4},
+		{gputypes.TextureFormatRGBA8Snorm, 4},
+		{gputypes.TextureFormatRGBA16Unorm, 8},
+	} {
+		tex := &Texture2D{Width: 1, Height: 1, Format: uint32(tt.format), Data: bytes.Repeat([]byte{0x5A}, tt.size)}
+		if !encodeTexel(tex, 0, 0, Vec4{nan, nan, nan, nan}) {
+			t.Fatalf("%v: encodeTexel refused an in-bounds texel", tt.format)
+		}
+		if !bytes.Equal(tex.Data, make([]byte, tt.size)) {
+			t.Errorf("%v: NaN stored as %v, want zeros", tt.format, tex.Data)
+		}
 	}
 }

@@ -215,7 +215,8 @@ func newConfiguredWrappedSurface(t *testing.T, raw hal.Surface) *Surface {
 
 func TestHeadlessSurfaceClearReadback(t *testing.T) {
 	const width, height = uint32(7), uint32(5)
-	wantPixel := []byte{0xff, 0x00, 0x7f, 0xff}
+	// Clear (1, 0, 0.5, 1): 0.5 * 255 = 127.5 rounds half up, 128.
+	wantPixel := []byte{0xff, 0x00, 0x80, 0xff}
 
 	// Sequential — kolkov/racedetector may run t.Run subtests concurrently,
 	// racing concurrent CreateInstance HAL probing on Windows CI.

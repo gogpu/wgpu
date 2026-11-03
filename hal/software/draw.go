@@ -1554,10 +1554,10 @@ func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *rast
 			target.data[idx+3] = a
 		}
 	} else {
-		cr := clampBytef(color[0] * 255)
-		cg := clampBytef(color[1] * 255)
-		cb := clampBytef(color[2] * 255)
-		ca := clampBytef(color[3] * 255)
+		cr := raster.FloatToUnorm8(color[0])
+		cg := raster.FloatToUnorm8(color[1])
+		cb := raster.FloatToUnorm8(color[2])
+		ca := raster.FloatToUnorm8(color[3])
 		if bgra {
 			target.data[idx+0] = cb
 			target.data[idx+1] = cg
@@ -1571,17 +1571,6 @@ func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *rast
 		}
 	}
 	target.mu.Unlock()
-}
-
-// clampBytef clamps a float32 to [0,255] and returns as byte.
-func clampBytef(v float32) byte {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return byte(v)
 }
 
 // getPerTargetBlendStates returns blend states for all color attachment targets.

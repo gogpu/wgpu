@@ -112,10 +112,10 @@ func (p *Pipeline) Clear(r, g, b, a float32) {
 	defer p.mu.Unlock()
 
 	// Convert to bytes
-	rb := clampByte(r * 255)
-	gb := clampByte(g * 255)
-	bb := clampByte(b * 255)
-	ab := clampByte(a * 255)
+	rb := FloatToUnorm8(r)
+	gb := FloatToUnorm8(g)
+	bb := FloatToUnorm8(b)
+	ab := FloatToUnorm8(a)
 
 	for i := 0; i < len(p.colorBuffer); i += 4 {
 		p.colorBuffer[i+0] = rb
@@ -447,10 +447,10 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(color[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(color[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(color[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
 			}
 			p.mu.Unlock()
 		})
@@ -536,10 +536,10 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 			}
 			p.mu.Unlock()
 		})
@@ -637,10 +637,10 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 			}
 			p.mu.Unlock()
 		})
@@ -742,10 +742,10 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 					p.colorBuffer[idx+2] = b
 					p.colorBuffer[idx+3] = a
 				} else {
-					p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-					p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-					p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-					p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+					p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+					p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+					p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+					p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 				}
 				p.mu.Unlock()
 			}
@@ -851,10 +851,10 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 					p.colorBuffer[idx+2] = b
 					p.colorBuffer[idx+3] = a
 				} else {
-					p.colorBuffer[idx+0] = clampByte(color[0] * 255)
-					p.colorBuffer[idx+1] = clampByte(color[1] * 255)
-					p.colorBuffer[idx+2] = clampByte(color[2] * 255)
-					p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+					p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
+					p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
+					p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
+					p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
 				}
 				p.mu.Unlock()
 			})
@@ -942,17 +942,6 @@ func (p *Pipeline) Close() {
 		p.parallelRasterizer.Close()
 		p.parallelRasterizer = nil
 	}
-}
-
-// clampByte converts a float to a byte, clamping to [0, 255].
-func clampByte(v float32) byte {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return byte(v)
 }
 
 // CreateScreenTriangle creates a Triangle from screen coordinates.
