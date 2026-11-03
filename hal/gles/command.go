@@ -6,13 +6,13 @@
 package gles
 
 import (
-	"context"
 	"log/slog"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/indirect"
 )
 
 // Command represents a recorded GL command.
@@ -38,12 +38,15 @@ type CommandEncoder struct {
 	label           string
 	vao             uint32 // persistent VAO from Device for Core Profile
 	maxTextureUnits int32  // Hardware limit passed from Device
+	fullInstancing  bool   // Device.fullInstancing
+	samplers        samplerState
 }
 
 // BeginEncoding begins command recording.
 func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 	e.commands = nil
+	e.samplers = samplerState{}
 	return nil
 }
 
@@ -465,14 +468,29 @@ func (e *CommandEncoder) emitTimestamp(querySet hal.QuerySet, index *uint32) {
 
 // RenderPassEncoder implements hal.RenderPassEncoder for OpenGL.
 type RenderPassEncoder struct {
-	encoder       *CommandEncoder
-	desc          *hal.RenderPassDescriptor
-	pipeline      *RenderPipeline
-	vertexBuffers []*Buffer
-	indexBuffer   *Buffer
-	indexFormat   gputypes.IndexFormat
-	stencilRef    uint32
-	fbHeight      uint32 // Framebuffer height for MSAA resolve blit Y-flip
+	encoder     *CommandEncoder
+	desc        *hal.RenderPassDescriptor
+	pipeline    *RenderPipeline
+	indexBuffer *Buffer
+	indexFormat gputypes.IndexFormat
+	stencilRef  uint32
+	fbHeight    uint32 // Framebuffer height for MSAA resolve blit Y-flip
+
+	// vertexBuffers holds the buffer bound to each vertex buffer slot. GL
+	// sets the buffer and its layout in one glVertexAttribPointer call, but
+	// the layout belongs to the pipeline and WebGPU allows SetVertexBuffer
+	// before SetPipeline. So SetVertexBuffer and SetPipeline only mark slots
+	// dirty, and prepareVertexBuffers configures the dirty slots before a
+	// draw (Rust wgpu-hal src/gles/command.rs set_vertex_buffer,
+	// set_render_pipeline, rebind_vertex_data).
+	vertexBuffers      []vertexBufferBinding
+	dirtyVertexBuffers uint32 // bit i: slot i needs its attributes set up
+
+	// activeFirstInstance is the emulated first instance the instance-stepped
+	// buffers are set up for (0 with fully featured instancing).
+	activeFirstInstance uint32
+	// indexOffset is the SetIndexBuffer offset, applied to every indexed draw.
+	indexOffset uint64
 
 	// MSAA resolve state: set during BeginRenderPass when ResolveTarget is present.
 	msaaTexture      *Texture // The MSAA color texture (source for resolve)
@@ -530,6 +548,8 @@ func (e *RenderPassEncoder) emitMSAAResolve() {
 // If the pass was rendering to an offscreen FBO, rebinds the default framebuffer
 // so subsequent operations do not accidentally target the offscreen texture.
 func (e *RenderPassEncoder) End() {
+	e.disableVertexAttribs()
+
 	if e.msaaTexture != nil {
 		e.emitMSAAResolve()
 	}
@@ -555,7 +575,15 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	if !ok {
 		return
 	}
+	// The new pipeline may read the bound buffers with another layout, and
+	// attributes the old one enabled must not stay enabled.
+	e.disableVertexAttribs()
 	e.pipeline = p
+	for slot := range p.vertexBuffers {
+		if slot < maxVertexBufferSlots {
+			e.dirtyVertexBuffers |= 1 << slot
+		}
+	}
 	e.encoder.commands = append(e.encoder.commands,
 		&UseProgramCommand{programID: p.programID},
 		&SetPipelineStateCommand{
@@ -567,6 +595,7 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 			stencilRef:   e.stencilRef,
 		},
 	)
+	e.encoder.setPipelineSamplers(&p.samplerBindMap)
 }
 
 // SetBindGroup sets a bind group.
@@ -575,52 +604,139 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	if !ok {
 		return
 	}
-	var samplerMap *[maxTextureSlots]int8
 	var groupInfos []BindGroupLayoutInfo
-	if e.pipeline != nil {
-		samplerMap = &e.pipeline.samplerBindMap
-		if e.pipeline.layout != nil {
-			groupInfos = e.pipeline.layout.groupInfos
-		}
+	if e.pipeline != nil && e.pipeline.layout != nil {
+		groupInfos = e.pipeline.layout.groupInfos
 	}
-	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
+	e.encoder.setBindGroup(index, bg, offsets, groupInfos)
+}
+
+// setBindGroup records a bind group for a render or compute pass: its
+// buffers, textures and images, then the samplers of the texture units it
+// changed (Rust wgpu-hal gles set_bind_group).
+func (e *CommandEncoder) setBindGroup(index uint32, bg *BindGroup, offsets []uint32, groupInfos []BindGroupLayoutInfo) {
+	e.commands = append(e.commands, &SetBindGroupCommand{
 		index:           index,
 		group:           bg,
 		dynamicOffsets:  offsets,
-		maxTextureUnits: e.encoder.maxTextureUnits,
+		maxTextureUnits: e.maxTextureUnits,
 		groupInfos:      groupInfos,
-		samplerBindMap:  samplerMap,
 	})
+	dirtyTextures, dirtySamplers := e.samplers.bindGroupSamplers(index, bg, groupInfos)
+	e.commands = append(e.commands, e.samplers.rebind(dirtyTextures, dirtySamplers)...)
 }
 
-// SetVertexBuffer sets a vertex buffer and configures vertex attributes.
-// In OpenGL, vertex attribute configuration (glVertexAttribPointer +
-// glEnableVertexAttribArray) must be done explicitly. The layout is taken
-// from the currently bound render pipeline's vertex buffer descriptors.
+// setPipelineSamplers installs a pipeline's sampler map and rebinds the
+// samplers of the texture units whose pairing changed (Rust wgpu-hal gles
+// set_pipeline_inner): a bind group kept across the pipeline change must
+// reach the new shader's combined samplers.
+func (e *CommandEncoder) setPipelineSamplers(m *samplerBindMap) {
+	if dirty := e.samplers.setPipelineMap(m); dirty != 0 {
+		e.commands = append(e.commands, e.samplers.rebind(dirty, 0)...)
+	}
+}
+
+// maxVertexBufferSlots bounds the vertex buffer slots a render pass tracks,
+// the width of dirtyVertexBuffers. GL_MAX_VERTEX_ATTRIB_BINDINGS, which the
+// adapter reports as maxVertexBuffers, is 16 on the drivers we know.
+const maxVertexBufferSlots = 32
+
+// vertexBufferBinding is the buffer and offset bound to a vertex buffer slot.
+type vertexBufferBinding struct {
+	buffer *Buffer
+	offset uint64
+}
+
+// SetVertexBuffer binds a vertex buffer to a slot. Its attributes are set up
+// before the next draw, with the layout of the pipeline current then.
 func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	buf, ok := buffer.(*Buffer)
-	if !ok {
+	if !ok || slot >= maxVertexBufferSlots {
 		return
 	}
-
-	// Grow slice if needed
 	for len(e.vertexBuffers) <= int(slot) {
-		e.vertexBuffers = append(e.vertexBuffers, nil)
+		e.vertexBuffers = append(e.vertexBuffers, vertexBufferBinding{})
 	}
-	e.vertexBuffers[slot] = buf
+	e.vertexBuffers[slot] = vertexBufferBinding{buffer: buf, offset: offset}
+	e.dirtyVertexBuffers |= 1 << slot
+}
 
-	// Get vertex layout from the current pipeline for this slot.
-	var layout *gputypes.VertexBufferLayout
-	if e.pipeline != nil && int(slot) < len(e.pipeline.vertexBuffers) {
-		layout = &e.pipeline.vertexBuffers[slot]
+// prepareVertexBuffers sets up the attributes of every dirty slot that has
+// both a buffer and a layout in the current pipeline. A slot missing either
+// stays dirty, as in Rust, and is set up once both are there.
+func (e *RenderPassEncoder) prepareVertexBuffers() {
+	if e.pipeline == nil {
+		return
 	}
+	for slot := range e.vertexBuffers {
+		vb := e.vertexBuffers[slot]
+		if e.dirtyVertexBuffers&(1<<slot) == 0 || vb.buffer == nil || slot >= len(e.pipeline.vertexBuffers) {
+			continue
+		}
+		layout := &e.pipeline.vertexBuffers[slot]
+		offset := vb.offset
+		if layout.StepMode == gputypes.VertexStepModeInstance {
+			// The emulated first instance (Rust rebind_vertex_data).
+			offset += layout.ArrayStride * uint64(e.activeFirstInstance)
+		}
+		e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
+			slot:   uint32(slot),
+			buffer: vb.buffer,
+			offset: offset,
+			layout: layout,
+		})
+		e.dirtyVertexBuffers &^= 1 << slot
+	}
+}
 
-	e.encoder.commands = append(e.encoder.commands, &SetVertexBufferCommand{
-		slot:   slot,
-		buffer: buf,
-		offset: offset,
-		layout: layout,
-	})
+// prepareDraw sets up the vertex buffers for a draw with firstInstance.
+// With fully featured instancing GL applies the first instance itself.
+// Without it, instance-stepped buffers start at the first instance's element
+// and the naga_vs_first_instance uniform adds it to instance_index, so the
+// buffers are set up again when it changes (Rust wgpu-hal src/gles/command.rs
+// prepare_draw).
+func (e *RenderPassEncoder) prepareDraw(firstInstance uint32) {
+	emulated := firstInstance
+	if e.encoder.fullInstancing {
+		emulated = 0
+	}
+	if emulated != e.activeFirstInstance && e.pipeline != nil {
+		for slot := range e.pipeline.vertexBuffers {
+			if slot < maxVertexBufferSlots && e.pipeline.vertexBuffers[slot].StepMode == gputypes.VertexStepModeInstance {
+				e.dirtyVertexBuffers |= 1 << slot
+			}
+		}
+	}
+	e.activeFirstInstance = emulated
+	e.prepareVertexBuffers()
+}
+
+// firstInstanceLocation is the current pipeline's naga_vs_first_instance
+// uniform, or -1.
+func (e *RenderPassEncoder) firstInstanceLocation() int32 {
+	if e.pipeline == nil {
+		return -1
+	}
+	return e.pipeline.firstInstanceLocation
+}
+
+// disableVertexAttribs disables the attribute arrays the current pipeline's
+// layout enables, when the pipeline changes or the pass ends, so none stays
+// enabled for a later pipeline that does not use it (Rust wgpu-hal
+// UnsetVertexAttribute).
+func (e *RenderPassEncoder) disableVertexAttribs() {
+	if e.pipeline == nil {
+		return
+	}
+	var locations []uint32
+	for i := range e.pipeline.vertexBuffers {
+		for _, attr := range e.pipeline.vertexBuffers[i].Attributes {
+			locations = append(locations, attr.ShaderLocation)
+		}
+	}
+	if len(locations) > 0 {
+		e.encoder.commands = append(e.encoder.commands, &DisableVertexAttribsCommand{locations: locations})
+	}
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -630,6 +746,7 @@ func (e *RenderPassEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.In
 		return
 	}
 	e.indexBuffer = buf
+	e.indexOffset = offset
 	e.indexFormat = format
 
 	e.encoder.commands = append(e.encoder.commands, &SetIndexBufferCommand{
@@ -678,52 +795,92 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 	})
 }
 
+// topology returns the current pipeline's primitive topology.
+func (e *RenderPassEncoder) topology() gputypes.PrimitiveTopology {
+	if e.pipeline == nil {
+		return gputypes.PrimitiveTopologyTriangleList
+	}
+	return e.pipeline.primitiveTopology
+}
+
 // Draw draws primitives.
 func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
-	topology := gputypes.PrimitiveTopologyTriangleList // default
-	if e.pipeline != nil {
-		topology = e.pipeline.primitiveTopology
-	}
+	e.prepareDraw(args.FirstInstance)
 	e.encoder.commands = append(e.encoder.commands, &DrawCommand{
-		vertexCount:   args.VertexCount,
-		instanceCount: args.InstanceCount,
-		firstVertex:   args.FirstVertex,
-		firstInstance: args.FirstInstance,
-		topology:      topology,
+		vertexCount:           args.VertexCount,
+		instanceCount:         args.InstanceCount,
+		firstVertex:           args.FirstVertex,
+		firstInstance:         args.FirstInstance,
+		topology:              e.topology(),
+		fullInstancing:        e.encoder.fullInstancing,
+		firstInstanceLocation: e.firstInstanceLocation(),
 	})
 }
 
 // DrawIndexed draws indexed primitives.
 func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
-	topology := gputypes.PrimitiveTopologyTriangleList // default
-	if e.pipeline != nil {
-		topology = e.pipeline.primitiveTopology
-	}
+	e.prepareDraw(args.FirstInstance)
 	e.encoder.commands = append(e.encoder.commands, &DrawIndexedCommand{
-		indexCount:    args.IndexCount,
-		instanceCount: args.InstanceCount,
-		firstIndex:    args.FirstIndex,
-		baseVertex:    args.BaseVertex,
-		firstInstance: args.FirstInstance,
-		indexFormat:   e.indexFormat,
-		topology:      topology,
+		indexCount:            args.IndexCount,
+		instanceCount:         args.InstanceCount,
+		firstIndex:            args.FirstIndex,
+		indexOffset:           e.indexOffset,
+		baseVertex:            args.BaseVertex,
+		firstInstance:         args.FirstInstance,
+		indexFormat:           e.indexFormat,
+		topology:              e.topology(),
+		fullInstancing:        e.encoder.fullInstancing,
+		firstInstanceLocation: e.firstInstanceLocation(),
 	})
 }
 
-// DrawIndirect is not implemented by the GLES backend.
+// Indirect record sizes: DrawIndirectArgs and DrawIndexedIndirectArgs.
+const (
+	drawIndirectRecordSize        = 16
+	drawIndexedIndirectRecordSize = 20
+)
+
+// DrawIndirect draws drawCount records from offset in buffer (Rust wgpu-hal
+// gles command.rs draw_indirect, queue.rs DrawIndirect).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	_ = buffer
-	_ = offset
-	_ = drawCount
+	buf, ok := buffer.(*Buffer)
+	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndirectRecordSize, drawCount) {
+		return
+	}
+	e.prepareDraw(0)
+	e.encoder.commands = append(e.encoder.commands, &DrawIndirectCommand{
+		buffer:                buf.id,
+		offset:                offset,
+		count:                 drawCount,
+		topology:              e.topology(),
+		firstInstanceLocation: e.firstInstanceLocation(),
+	})
 }
 
-// DrawIndexedIndirect is not implemented by the GLES backend.
-// OpenGL cannot apply a WebGPU index-buffer base offset to an indirect record
-// without translating that record or the bound index buffer.
+// DrawIndexedIndirect draws drawCount indexed records from offset in buffer
+// (Rust wgpu-hal gles command.rs draw_indexed_indirect, queue.rs
+// DrawIndexedIndirect). A nonzero SetIndexBuffer offset is applied as
+// DrawIndexedIndirectCommand describes.
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	_ = buffer
-	_ = offset
-	_ = drawCount
+	buf, ok := buffer.(*Buffer)
+	if !ok || drawCount == 0 || !indirect.RangeFits(buf.size, offset, drawIndexedIndirectRecordSize, drawCount) {
+		return
+	}
+	e.prepareDraw(0)
+	cmd := &DrawIndexedIndirectCommand{
+		buffer:                buf.id,
+		offset:                offset,
+		count:                 drawCount,
+		indexFormat:           e.indexFormat,
+		topology:              e.topology(),
+		firstInstanceLocation: e.firstInstanceLocation(),
+	}
+	if e.indexBuffer != nil && e.indexOffset != 0 {
+		cmd.indexBuffer = e.indexBuffer.id
+		cmd.indexOffset = e.indexOffset
+		cmd.indexBufferSize = e.indexBuffer.size
+	}
+	e.encoder.commands = append(e.encoder.commands, cmd)
 }
 
 // DrawIndirectCount is not supported by the GLES backend.
@@ -770,6 +927,7 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	e.encoder.commands = append(e.encoder.commands, &UseProgramCommand{
 		programID: p.programID,
 	})
+	e.encoder.setPipelineSamplers(&p.samplerBindMap)
 }
 
 // SetBindGroup sets a bind group.
@@ -782,13 +940,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	if e.pipeline != nil && e.pipeline.layout != nil {
 		groupInfos = e.pipeline.layout.groupInfos
 	}
-	e.encoder.commands = append(e.encoder.commands, &SetBindGroupCommand{
-		index:           index,
-		group:           bg,
-		dynamicOffsets:  offsets,
-		maxTextureUnits: e.encoder.maxTextureUnits,
-		groupInfos:      groupInfos,
-	})
+	e.encoder.setBindGroup(index, bg, offsets, groupInfos)
 }
 
 // Dispatch dispatches compute work.
@@ -1256,10 +1408,6 @@ type SetBindGroupCommand struct {
 	// groupInfos stores per-group binding-to-slot tables from PipelineLayout.
 	// Used to look up the GL slot for each binding instead of the old group*16+binding formula.
 	groupInfos []BindGroupLayoutInfo
-	// samplerBindMap maps texture unit → sampler unit for combined sampler2D.
-	// Built from naga GLSL TextureMappings at pipeline creation (Rust SamplerBindMap pattern).
-	// When non-nil, sampler is bound to the texture's unit instead of its own WGSL binding.
-	samplerBindMap *[maxTextureSlots]int8
 }
 
 func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
@@ -1267,8 +1415,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 		return
 	}
 
-	dynamicIdx := 0
-	for _, entry := range c.group.entries {
+	for i, entry := range c.group.entries {
 		// Look up the GL slot index from the pre-computed per-type sequential
 		// binding table (computed in CreatePipelineLayout). This replaces the old
 		// group*16+binding formula and matches Rust wgpu-hal command.rs:720-783.
@@ -1290,7 +1437,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			// Determine GL buffer target and apply dynamic offset from layout entry.
 			// Storage buffers use GL_SHADER_STORAGE_BUFFER, uniform buffers use GL_UNIFORM_BUFFER.
 			// Matches Rust wgpu-hal/src/gles/command.rs:731-746 (set_bind_group).
-			target, dynOff := c.resolveBufferTarget(entry.Binding, &dynamicIdx)
+			target, dynOff := c.resolveBufferTarget(entry.Binding)
 			offset += dynOff
 
 			if size > 0 {
@@ -1300,9 +1447,14 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 			}
 
 		case gputypes.TextureViewBinding:
-			// TextureView handle is the GL texture object ID (from NativeHandle()).
-			texID := uint32(res.TextureView)
-			if texID == 0 {
+			// The view was resolved from its handle at CreateBindGroup.
+			view := c.group.views[i]
+			if view == nil {
+				continue
+			}
+			if st := c.group.layout.storageTexture(entry.Binding); st != nil {
+				// glBinding is the image unit (the layout's image counter).
+				bindStorageTexture(ctx, glBinding, view, st)
 				continue
 			}
 			// Validate texture unit index against hardware limit.
@@ -1320,29 +1472,37 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 				continue
 			}
 			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)
-			ctx.BindTexture(gl.TEXTURE_2D, texID)
-
-		case gputypes.SamplerBinding:
-			// Sampler handle is the GL sampler object ID (from NativeHandle()).
-			samplerID := uint32(res.Sampler)
-			if samplerID == 0 {
-				continue
-			}
-			// Determine the correct texture unit for this sampler.
-			// Naga GLSL generates combined sampler2D on the texture's binding,
-			// so the sampler must be bound to the texture's unit — NOT the
-			// sampler's own WGSL binding. SamplerBindMap provides this mapping.
-			// Matches Rust wgpu-hal GLES SamplerBindMap (command.rs:247).
-			bindUnit := c.resolveSamplerUnit(glBinding)
-			if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
-				hal.Logger().Debug("gles: binding sampler",
-					"samplerBinding", glBinding,
-					"textureUnit", bindUnit,
-					"samplerID", samplerID,
-				)
-			}
-			ctx.BindSampler(bindUnit, samplerID)
+			// A GL texture binds only to the target it was created with.
+			ctx.BindTexture(view.texture.target, view.texture.id)
 		}
+		// Samplers are bound by BindSamplerCommand to the texture units the
+		// pipeline combines them with (CommandEncoder.setBindGroup).
+	}
+}
+
+// bindStorageTexture binds a storage texture view to an image unit, as Rust
+// wgpu-hal gles does (device.rs create_bind_group builds the ImageBinding,
+// queue.rs C::BindImage calls glBindImageTexture): the view's first mip
+// level, all layers for 2D-array and cube-array views, otherwise the view's
+// first layer, the layout's access, and the layout format's internal format.
+func bindStorageTexture(ctx *gl.Context, unit uint32, view *TextureView, st *gputypes.StorageTextureBindingLayout) {
+	layered := st.ViewDimension == gputypes.TextureViewDimension2DArray ||
+		st.ViewDimension == gputypes.TextureViewDimensionCubeArray
+	internalFormat, _, _ := textureFormatToGL(st.Format)
+	ctx.BindImageTexture(unit, view.texture.id, int32(view.baseMip), layered, int32(view.baseLayer),
+		storageAccessToGL(st.Access), internalFormat)
+}
+
+// storageAccessToGL maps a storage texture access to the glBindImageTexture
+// access (Rust wgpu-hal gles/conv.rs map_storage_access).
+func storageAccessToGL(access gputypes.StorageTextureAccess) uint32 {
+	switch access {
+	case gputypes.StorageTextureAccessReadOnly:
+		return gl.READ_ONLY
+	case gputypes.StorageTextureAccessWriteOnly:
+		return gl.WRITE_ONLY
+	default: // ReadWrite
+		return gl.READ_WRITE
 	}
 }
 
@@ -1358,24 +1518,12 @@ func (c *SetBindGroupCommand) lookupSlot(binding uint32) uint32 {
 	return 0xFF
 }
 
-// resolveSamplerUnit finds the texture unit for a sampler via SamplerBindMap.
-func (c *SetBindGroupCommand) resolveSamplerUnit(glBinding uint32) uint32 {
-	if c.samplerBindMap == nil {
-		return glBinding
-	}
-	for texUnit := range c.samplerBindMap {
-		if c.samplerBindMap[texUnit] == int8(glBinding) {
-			return uint32(texUnit)
-		}
-	}
-	return glBinding
-}
-
 // resolveBufferTarget determines the GL buffer target (UNIFORM_BUFFER or SHADER_STORAGE_BUFFER)
 // and dynamic offset for a binding number by looking up the bind group layout entry.
 // Returns the GL target and the dynamic offset to apply (0 if none).
-// Matches Rust wgpu-hal/src/gles/command.rs:731-746 buffer target selection.
-func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32, dynamicIdx *int) (uint32, int) {
+// Matches Rust wgpu-hal/src/gles/command.rs set_bind_group buffer target
+// selection.
+func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32) (uint32, int) {
 	target := uint32(gl.UNIFORM_BUFFER)
 	dynOffset := 0
 	if c.group.layout == nil {
@@ -1389,9 +1537,10 @@ func (c *SetBindGroupCommand) resolveBufferTarget(binding uint32, dynamicIdx *in
 			le.Buffer.Type == gputypes.BufferBindingTypeReadOnlyStorage {
 			target = gl.SHADER_STORAGE_BUFFER
 		}
-		if le.Buffer.HasDynamicOffset && c.dynamicOffsets != nil && *dynamicIdx < len(c.dynamicOffsets) {
-			dynOffset = int(c.dynamicOffsets[*dynamicIdx])
-			*dynamicIdx++
+		if le.Buffer.HasDynamicOffset {
+			if i := c.group.layout.dynamicOffsetIndex(binding); i < len(c.dynamicOffsets) {
+				dynOffset = int(c.dynamicOffsets[i])
+			}
 		}
 		break
 	}
@@ -1417,12 +1566,7 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 	stride := int32(c.layout.ArrayStride)
-	// Determine divisor from step mode: 0=per-vertex, 1=per-instance.
-	// Matches Rust wgpu-hal/src/gles/queue.rs vertex_attrib_divisor call.
-	var divisor uint32
-	if c.layout.StepMode == gputypes.VertexStepModeInstance {
-		divisor = 1
-	}
+	divisor := vertexAttribDivisor(c.layout)
 	for _, attr := range c.layout.Attributes {
 		loc := attr.ShaderLocation
 		size, typ, normalized := vertexFormatToGL(attr.Format)
@@ -1433,6 +1577,42 @@ func (c *SetVertexBufferCommand) Execute(ctx *gl.Context) {
 		// per-instance attributes get divisor=1. Without this, instanced rendering
 		// reads the same instance data for all instances.
 		ctx.VertexAttribDivisor(loc, divisor)
+	}
+}
+
+// broadcastDivisor is the instance divisor that makes every instance read
+// element 0 of a vertex attribute.
+const broadcastDivisor = 0xFFFFFFFF
+
+// vertexAttribDivisor returns the glVertexAttribDivisor value for a vertex
+// buffer layout: 0 per vertex, 1 per instance (Rust wgpu-hal
+// src/gles/queue.rs), and broadcastDivisor for arrayStride 0.
+//
+// arrayStride 0 is WebGPU's broadcast: every vertex and instance reads
+// element 0. glVertexAttribPointer reads a stride of 0 as tightly packed, so
+// the stride cannot express it. A non-zero divisor makes all vertices of an
+// instance share one element, and the largest divisor makes every instance
+// share element 0. This is Dawn's emulation (src/dawn/native/opengl/
+// RenderPipelineGL.cpp); Rust wgpu-hal passes the 0 through.
+func vertexAttribDivisor(layout *gputypes.VertexBufferLayout) uint32 {
+	switch {
+	case layout.ArrayStride == 0:
+		return broadcastDivisor
+	case layout.StepMode == gputypes.VertexStepModeInstance:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// DisableVertexAttribsCommand disables vertex attribute arrays.
+type DisableVertexAttribsCommand struct {
+	locations []uint32
+}
+
+func (c *DisableVertexAttribsCommand) Execute(ctx *gl.Context) {
+	for _, loc := range c.locations {
+		ctx.DisableVertexAttribArray(loc)
 	}
 }
 
@@ -1505,48 +1685,169 @@ func (c *SetStencilRefCommand) Execute(ctx *gl.Context) {
 		ref, c.depthStencil.StencilReadMask)
 }
 
-// DrawCommand executes a non-indexed draw.
+// setFirstInstance sets the naga_vs_first_instance uniform, through which an
+// emulated first instance reaches instance_index.
+func setFirstInstance(ctx *gl.Context, location int32, firstInstance uint32) {
+	if location >= 0 {
+		ctx.Uniform1ui(location, firstInstance)
+	}
+}
+
+// DrawCommand executes a non-indexed draw (Rust wgpu-hal gles/queue.rs
+// C::Draw). It always draws instanced: ANGLE ignores the instance divisor in
+// glDrawArrays (gfx-rs/wgpu#3578).
 type DrawCommand struct {
 	vertexCount, instanceCount uint32
 	firstVertex, firstInstance uint32
 	topology                   gputypes.PrimitiveTopology
+	fullInstancing             bool
+	firstInstanceLocation      int32
 }
 
 func (c *DrawCommand) Execute(ctx *gl.Context) {
 	mode := primitiveTopologyToGL(c.topology)
-	if c.instanceCount <= 1 {
-		ctx.DrawArrays(mode, int32(c.firstVertex), int32(c.vertexCount))
-	} else {
-		ctx.DrawArraysInstanced(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
+	if c.fullInstancing {
+		ctx.DrawArraysInstancedBaseInstance(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount), c.firstInstance)
+		return
 	}
+	setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
+	ctx.DrawArraysInstanced(mode, int32(c.firstVertex), int32(c.vertexCount), int32(c.instanceCount))
 }
 
-// DrawIndexedCommand executes an indexed draw.
+// indexTypeAndSize returns the GL index type and its size in bytes.
+func indexTypeAndSize(format gputypes.IndexFormat) (uint32, uint64) {
+	if format == gputypes.IndexFormatUint32 {
+		return gl.UNSIGNED_INT, 4
+	}
+	return gl.UNSIGNED_SHORT, 2
+}
+
+// DrawIndexedCommand executes an indexed draw (Rust wgpu-hal gles/queue.rs
+// C::DrawIndexed): the index buffer offset plus firstIndex elements, the base
+// vertex, and the first instance as for DrawCommand.
 type DrawIndexedCommand struct {
 	indexCount, instanceCount uint32
 	firstIndex                uint32
+	indexOffset               uint64 // SetIndexBuffer offset in bytes
 	baseVertex                int32
 	firstInstance             uint32
 	indexFormat               gputypes.IndexFormat
 	topology                  gputypes.PrimitiveTopology
+	fullInstancing            bool
+	firstInstanceLocation     int32
 }
 
 func (c *DrawIndexedCommand) Execute(ctx *gl.Context) {
-	indexType := uint32(gl.UNSIGNED_SHORT)
-	indexSize := uintptr(2)
-	if c.indexFormat == gputypes.IndexFormatUint32 {
-		indexType = gl.UNSIGNED_INT
-		indexSize = 4
-	}
-
-	offset := uintptr(c.firstIndex) * indexSize
+	indexType, indexSize := indexTypeAndSize(c.indexFormat)
+	offset := uintptr(c.indexOffset + uint64(c.firstIndex)*indexSize)
 	mode := primitiveTopologyToGL(c.topology)
 
-	if c.instanceCount <= 1 {
-		ctx.DrawElements(mode, int32(c.indexCount), indexType, offset)
-	} else {
+	switch {
+	case c.fullInstancing:
+		ctx.DrawElementsInstancedBaseVertexBaseInstance(mode, int32(c.indexCount), indexType, offset,
+			int32(c.instanceCount), c.baseVertex, c.firstInstance)
+	case c.baseVertex == 0:
+		setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
 		ctx.DrawElementsInstanced(mode, int32(c.indexCount), indexType, offset, int32(c.instanceCount))
+	default:
+		// Core offers DownlevelFlagsBaseVertex only where this exists.
+		setFirstInstance(ctx, c.firstInstanceLocation, c.firstInstance)
+		ctx.DrawElementsInstancedBaseVertex(mode, int32(c.indexCount), indexType, offset,
+			int32(c.instanceCount), c.baseVertex)
 	}
+}
+
+// DrawIndirectCommand draws count DrawIndirectArgs records (Rust wgpu-hal
+// gles/queue.rs C::DrawIndirect). The first instance in a record reaches GL
+// only with fully featured instancing; the uniform is 0. Several records go
+// to one glMultiDrawArraysIndirect where the context has it, so gl_DrawID
+// (draw_index) counts them; Rust issues one draw per record, and offers no
+// MultiDrawIndirect on GLES.
+type DrawIndirectCommand struct {
+	buffer                uint32
+	offset                uint64
+	count                 uint32
+	topology              gputypes.PrimitiveTopology
+	firstInstanceLocation int32
+}
+
+func (c *DrawIndirectCommand) Execute(ctx *gl.Context) {
+	mode := primitiveTopologyToGL(c.topology)
+	setFirstInstance(ctx, c.firstInstanceLocation, 0)
+	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
+	if c.count > 1 && ctx.HasMultiDrawIndirect() {
+		ctx.MultiDrawArraysIndirect(mode, uintptr(c.offset), int32(c.count), drawIndirectRecordSize)
+		return
+	}
+	for i := range uint64(c.count) {
+		ctx.DrawArraysIndirect(mode, uintptr(c.offset+i*drawIndirectRecordSize))
+	}
+}
+
+// DrawIndexedIndirectCommand draws count DrawIndexedIndirectArgs records
+// (Rust wgpu-hal gles/queue.rs C::DrawIndexedIndirect), as DrawIndirectCommand.
+//
+// glDrawElementsIndirect has no index buffer offset: a record's firstIndex
+// counts from the start of the bound GL_ELEMENT_ARRAY_BUFFER, and the record
+// lives on the GPU, so it cannot be patched on the CPU. With a nonzero
+// SetIndexBuffer offset the draw therefore binds a GPU copy of the index
+// buffer from that offset (glCopyBufferSubData) and restores the original
+// binding afterwards. Rust wgpu-hal gles ignores the offset here (P1-GLES-018).
+type DrawIndexedIndirectCommand struct {
+	buffer                uint32
+	offset                uint64
+	count                 uint32
+	indexFormat           gputypes.IndexFormat
+	topology              gputypes.PrimitiveTopology
+	firstInstanceLocation int32
+
+	// indexBuffer, indexOffset and indexBufferSize describe the bound index
+	// buffer when its SetIndexBuffer offset is nonzero; zero otherwise.
+	indexBuffer     uint32
+	indexOffset     uint64
+	indexBufferSize uint64
+}
+
+func (c *DrawIndexedIndirectCommand) Execute(ctx *gl.Context) {
+	if c.indexOffset != 0 {
+		if c.indexOffset >= c.indexBufferSize {
+			return // no index lies in bounds, so every record is out of range
+		}
+		shifted := shiftedIndexBuffer(ctx, c.indexBuffer, c.indexOffset, c.indexBufferSize)
+		defer func() {
+			ctx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, c.indexBuffer)
+			// The driver keeps the copy alive until the draws that read it finish.
+			ctx.DeleteBuffers(shifted)
+		}()
+	}
+	mode := primitiveTopologyToGL(c.topology)
+	indexType, _ := indexTypeAndSize(c.indexFormat)
+	setFirstInstance(ctx, c.firstInstanceLocation, 0)
+	ctx.BindBuffer(gl.DRAW_INDIRECT_BUFFER, c.buffer)
+	if c.count > 1 && ctx.HasMultiDrawIndirect() {
+		ctx.MultiDrawElementsIndirect(mode, indexType, uintptr(c.offset), int32(c.count), drawIndexedIndirectRecordSize)
+		return
+	}
+	for i := range uint64(c.count) {
+		ctx.DrawElementsIndirect(mode, indexType, uintptr(c.offset+i*drawIndexedIndirectRecordSize))
+	}
+}
+
+// shiftedIndexBuffer copies bytes [offset, size) of the index buffer into a
+// new GL buffer on the GPU, binds it to GL_ELEMENT_ARRAY_BUFFER and returns
+// it. The copy goes through the COPY_WRITE target, which leaves the vertex,
+// index and uniform bindings alone.
+func shiftedIndexBuffer(ctx *gl.Context, indexBuffer uint32, offset, size uint64) uint32 {
+	remaining := int(size - offset)
+	shifted := ctx.GenBuffers(1)
+	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, shifted)
+	ctx.AllocateBuffer(gl.COPY_WRITE_BUFFER, remaining, gl.STREAM_COPY)
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, indexBuffer)
+	ctx.CopyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, int(offset), 0, remaining)
+	ctx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+	ctx.BindBuffer(gl.COPY_WRITE_BUFFER, 0)
+	ctx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, shifted)
+	return shifted
 }
 
 // CopyBufferCommand copies a region of one GL buffer object into another.

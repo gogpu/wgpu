@@ -81,6 +81,12 @@ type Texture2D struct {
 	// RG8/R16, 4 for RGBA8/BGRA8). When zero, sampling assumes 4 (RGBA8) for
 	// backward compatibility. Single-channel formats unpack as (r, 0, 0, 1).
 	BytesPerPixel uint32
+	// MipLevels, SampleCount and Layers answer the image queries
+	// (OpImageQueryLevels, OpImageQuerySamples, the array size of
+	// OpImageQuerySize[Lod]); zero reads as 1.
+	MipLevels   uint32
+	SampleCount uint32
+	Layers      uint32
 }
 
 // Sampler describes texture sampling parameters.
@@ -110,6 +116,11 @@ type BufferPointer struct {
 	Buffer []byte    // raw buffer data
 	Offset uint32    // byte offset within the buffer
 	Type   *TypeInfo // type of the pointed-to element
+	// MatrixStride is the column stride of the matrices in Type, from the
+	// MatrixStride decoration of the struct member the access chain went
+	// through (SPIR-V decorates the member, not the matrix type). 0 when
+	// Type holds no matrix or the member is not decorated.
+	MatrixStride uint32
 }
 
 // SubPointer provides write-through access to a member of a composite value
@@ -163,6 +174,13 @@ type ExecutionContext struct {
 	NumWorkgroups        [3]uint32
 	WorkgroupSize        [3]uint32
 	LocalInvocationIndex uint32
+
+	// resolved caches the resource variable values of the context's
+	// bindings, per module, for every invocation that shares the context. A
+	// context is read once: build a new one when its bindings or a uniform
+	// buffer's contents change, as every draw and dispatch does. Like Inputs,
+	// it makes a context unsafe for concurrent invocations.
+	resolved *resolvedResources
 }
 
 // =============================================================================
@@ -494,11 +512,53 @@ func convertSignedToFloat(val Value) Value {
 	}
 }
 
+// The largest float32 values inside the u32 and i32 ranges. WGSL converts a
+// float to the integer closest to truncate(x) that the float type represents
+// exactly (wgsl/index.bs "Floating point conversion"), so out-of-range
+// values saturate here, not at math.MaxUint32 / math.MaxInt32.
+const (
+	maxU32InFloat32 = 4294967040 // 0xFFFFFF00
+	maxI32InFloat32 = 2147483520 // 0x7FFFFF80
+)
+
+// floatToUint32 and floatToInt32 convert as WGSL does: truncate toward zero
+// after clamping to the range of the target type. NaN, for which WGSL gives
+// no value, converts to 0.
+func floatToUint32(f float32) uint32 {
+	d := float64(f)
+	if d != d {
+		return 0
+	}
+	return uint32(max(0, min(maxU32InFloat32, d)))
+}
+
+func floatToInt32(f float32) int32 {
+	d := float64(f)
+	if d != d {
+		return 0
+	}
+	return int32(max(math.MinInt32, min(maxI32InFloat32, d)))
+}
+
+// convertFloatToSigned converts a float value to int32 (OpConvertFToS).
+func convertFloatToSigned(val Value) Value {
+	switch val.Tag {
+	case TagFloat32:
+		return ValInt(floatToInt32(val.F[0]))
+	case TagInt32:
+		return val
+	case TagUint32:
+		return ValInt(int32(val.U[0]))
+	default:
+		return ValInt(0)
+	}
+}
+
 // convertFloatToUint converts a float value to uint32.
 func convertFloatToUint(val Value) Value {
 	switch val.Tag {
 	case TagFloat32:
-		return ValUint(uint32(val.F[0]))
+		return ValUint(floatToUint32(val.F[0]))
 	case TagUint32:
 		return val
 	case TagInt32:
@@ -610,6 +670,13 @@ func appendComponents(dst []float32, val Value) []float32 {
 		return append(dst, float32(val.U[0]))
 	case TagInt32:
 		return append(dst, float32(int32(val.U[0])))
+	case TagArray:
+		// Integer vectors from builtins (global_invocation_id) are arrays
+		// of scalars.
+		for _, e := range val.AsArray() {
+			dst = appendComponents(dst, e)
+		}
+		return dst
 	default:
 		return append(dst, 0)
 	}
@@ -666,6 +733,23 @@ func writeValueToBuffer(data []byte, offset uint32, val Value) {
 			off += valueByteSize(elem)
 		}
 	}
+}
+
+// writeScalarToBuffer writes a scalar of SPIR-V type ti. The interpreter
+// holds the components of integer vectors as float32 (OpCompositeConstruct,
+// buffer loads), so a component stored on its own, or through a vector
+// store, arrives as a TagFloat32 holding the integer's value. For a 32-bit
+// integer pointee that value is converted back to the integer, the inverse
+// of the load, instead of being written as f32 bits. It is exact up to 2^24;
+// lifting that needs the typed value model (P1-SW-019). Every other scalar
+// is written as its own value; OpBitcast tags its result by its type, so a
+// bit pattern never reaches here as a float-held integer.
+func writeScalarToBuffer(data []byte, offset uint32, val Value, ti *TypeInfo) {
+	if ti.Kind == TypeInt && ti.Width == 32 && val.Tag == TagFloat32 {
+		writeValueToBuffer(data, offset, ValUint(laneBits(val.F[0], ti.Signed)))
+		return
+	}
+	writeValueToBuffer(data, offset, val)
 }
 
 // valueByteSize returns the byte size of a runtime Value.
@@ -781,6 +865,14 @@ func zeroValue(types map[uint32]*TypeInfo, typeID uint32) Value {
 			}
 			return ValArray(arr)
 		}
+	case TypeStruct:
+		// A struct zero (OpConstantNull, or a struct element of an array)
+		// was a scalar 0 before, so stores to its members went nowhere.
+		members := make([]Value, len(ti.MemberIDs))
+		for i, memberTypeID := range ti.MemberIDs {
+			members[i] = zeroValue(types, memberTypeID)
+		}
+		return ValArray(members)
 	case TypeBool:
 		return ValBool(false)
 	}

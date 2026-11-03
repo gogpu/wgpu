@@ -406,6 +406,7 @@ func TestAdapterDownlevelCapabilities(t *testing.T) {
 		{gputypes.DownlevelFlagsFullDrawIndexUint32, "FullDrawIndexUint32"},
 		{gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies, "UnrestrictedExternalTextureCopies"},
 		{gputypes.DownlevelFlagsLinearInterpolation, "LinearInterpolation"},
+		{gputypes.DownlevelFlagsIndirectExecution, "IndirectExecution"},
 	}
 	for _, rf := range requiredFlags {
 		if !dc.Flags.Contains(rf.flag) {
@@ -417,7 +418,6 @@ func TestAdapterDownlevelCapabilities(t *testing.T) {
 		flag gputypes.DownlevelFlags
 		name string
 	}{
-		{gputypes.DownlevelFlagsIndirectExecution, "IndirectExecution"},
 		{gputypes.DownlevelFlagsAnisotropicFiltering, "AnisotropicFiltering"},
 		{gputypes.DownlevelFlagsMultisampledShading, "MultisampledShading"},
 	}
@@ -931,9 +931,9 @@ func TestCommandEncoderCopyTextureToTexture(t *testing.T) {
 
 	dstTex := tex2.(*Texture)
 	data := dstTex.GetData()
-	// 0.5 * 255 = 127
-	if data[0] != 127 {
-		t.Errorf("first byte = %d, want ~127", data[0])
+	// 0.5 * 255 = 127.5 rounds half up: 128
+	if data[0] != 128 {
+		t.Errorf("first byte = %d, want 128", data[0])
 	}
 }
 

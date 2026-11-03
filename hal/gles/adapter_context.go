@@ -34,8 +34,17 @@ type AdapterContext struct {
 	hglrc    wgl.HGLRC
 	hiddenDC wgl.HDC
 
-	initOnce sync.Once
-	initErr  error
+	initOnce     sync.Once
+	initErr      error
+	robustAccess bool // the context has robust buffer access (wgl.CreateRobustContext)
+}
+
+// RobustAccess reports whether the GL context was created with robust buffer
+// access. False until the context exists (the first Lock).
+func (c *AdapterContext) RobustAccess() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.robustAccess
 }
 
 // NewAdapterContext creates an AdapterContext with a hidden window DC.
@@ -51,11 +60,13 @@ func NewAdapterContext(hiddenDC wgl.HDC) *AdapterContext {
 // Must be called with the mutex held and LockOSThread active.
 func (c *AdapterContext) ensureInit() error {
 	c.initOnce.Do(func() {
-		hglrc, err := wgl.CreateContext(c.hiddenDC)
+		hglrc, robust, err := wgl.CreateRobustContext(c.hiddenDC)
 		if err != nil {
 			c.initErr = fmt.Errorf("wglCreateContext: %w", err)
 			return
 		}
+		c.robustAccess = robust
+		slog.Debug("gles: WGL context", "robustAccess", robust)
 		if err := wgl.MakeCurrent(c.hiddenDC, hglrc); err != nil {
 			_ = wgl.DeleteContext(hglrc)
 			c.initErr = fmt.Errorf("wglMakeCurrent: %w", err)

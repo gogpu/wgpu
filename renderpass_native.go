@@ -19,16 +19,12 @@ import (
 type RenderPassEncoder struct {
 	core    *core.CoreRenderPassEncoder
 	encoder *CommandEncoder
-	// currentPipelineBindGroupCount tracks the bind group count of the
-	// currently set pipeline. Used by SetBindGroup to validate that the
-	// group index is within the pipeline layout bounds. Zero means no
-	// pipeline has been set yet.
-	currentPipelineBindGroupCount uint32
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Draw commands require a pipeline to be set first.
 	pipelineSet bool
-	// binder tracks bind group assignments and validates compatibility
-	// at draw time, matching Rust wgpu-core's Binder pattern.
+	// binder holds the bind groups set on the pass, validates them at draw
+	// time and binds them to the backend before each draw, matching Rust
+	// wgpu-core's Binder.
 	binder binder
 	// vertexBufferCount tracks the highest vertex buffer slot set + 1.
 	// Updated by SetVertexBuffer; validated against pipeline requirements at draw time.
@@ -53,6 +49,11 @@ type RenderPassEncoder struct {
 	// blendConstantSet tracks whether SetBlendConstant has been called.
 	// Matches Rust wgpu-core OptionalState for blend_constant.
 	blendConstantSet bool
+	// depthReadOnly and stencilReadOnly are the read-only flags of the
+	// depth/stencil attachment; a bundle executed in the pass must be
+	// read-only where the pass is (Rust RenderPassInfo.is_depth_read_only).
+	depthReadOnly   bool
+	stencilReadOnly bool
 }
 
 // trackRef Clone()'s a ResourceRef and appends directly to the parent
@@ -70,7 +71,6 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetPipeline: pipeline is nil"))
 		return
 	}
-	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.requiredVertexBuffers = pipeline.requiredVertexBuffers
 	p.currentStripIndexFormat = pipeline.stripIndexFormat
@@ -86,14 +86,27 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 	}
 }
 
-// SetBindGroup sets a bind group for the given index.
+// SetBindGroup sets a bind group for the given index. It may come before
+// SetPipeline, or name an index the current pipeline does not use: the group
+// is bound to the backend at the next draw whose pipeline layout uses it.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if err := validateSetBindGroup("RenderPass", index, group, offsets, p.currentPipelineBindGroupCount); err != nil {
+	limits := &p.encoder.device.core.Limits
+	if err := validateSetBindGroup("RenderPass", index, group, offsets, limits); err != nil {
 		p.encoder.setError(err)
 		return
 	}
-	p.binder.assign(index, group.layout)
-	p.binder.assignBindGroup(index, group)
+	p.binder.setGroup(index, group, offsets)
+	p.trackBindGroup(group)
+	// A render pass is one usage scope: every bind group set in it counts.
+	if err := p.core.MergeBindGroup(group.usages); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
+	}
+}
+
+// trackBindGroup keeps a bind group used in the pass and its buffers alive
+// until the GPU completes the submission, and records the group for
+// submit-time validation.
+func (p *RenderPassEncoder) trackBindGroup(group *BindGroup) {
 	p.trackRef(group.ref)
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
@@ -108,9 +121,13 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
-	raw := p.core.RawPass()
-	if raw != nil && group.hal != nil {
-		raw.SetBindGroup(index, group.hal, offsets)
+}
+
+// flushBindGroups binds the bind groups whose backend binding is stale, right
+// before a draw that passed validation (Rust wgpu-core State::flush_bindings).
+func (p *RenderPassEncoder) flushBindGroups() {
+	if raw := p.core.RawPass(); raw != nil {
+		p.binder.flush(raw)
 	}
 }
 
@@ -216,17 +233,10 @@ func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	if !p.validateDrawState("Draw") {
 		return
 	}
-	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
-	if args.FirstInstance != 0 {
-		if err := core.RequireFeature(
-			p.encoder.device.Features(),
-			gputypes.FeatureIndirectFirstInstance,
-			"Draw",
-		); err != nil {
-			p.encoder.setError(err)
-			return
-		}
-	}
+	// firstInstance is accepted unconditionally: "indirect-first-instance" only governs
+	// the firstInstance field of INDIRECT draw args (W3C spec, drawIndirect), and
+	// Rust wgpu-core command/render.rs only runs validate_instance_limit here.
+	p.flushBindGroups()
 	p.core.Draw(args)
 }
 
@@ -248,17 +258,8 @@ func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 			p.indexBufferFormat, *p.currentStripIndexFormat, ErrDrawIndexFormatMismatch))
 		return
 	}
-	// VAL-C3: firstInstance != 0 requires FeatureIndirectFirstInstance.
-	if args.FirstInstance != 0 {
-		if err := core.RequireFeature(
-			p.encoder.device.Features(),
-			gputypes.FeatureIndirectFirstInstance,
-			"DrawIndexed",
-		); err != nil {
-			p.encoder.setError(err)
-			return
-		}
-	}
+	// firstInstance needs no feature gate (see Draw).
+	p.flushBindGroups()
 	p.core.DrawIndexed(args)
 }
 
@@ -318,6 +319,7 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 	}
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
+	p.flushBindGroups()
 	p.core.MultiDrawIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
@@ -390,23 +392,38 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	}
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
+	p.flushBindGroups()
 	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
 }
 
 // ExecuteBundles executes reusable render command bundles in this render pass.
+// Each bundle's commands are replayed into the pass, its resources join the
+// pass's usage scope, and the pass is left without a pipeline, bind groups,
+// vertex buffers or index buffer: draws after it must set them again.
 func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
-	raw := p.core.RawPass()
-	if raw == nil {
-		return
-	}
-
 	for _, bundle := range bundles {
-		if bundle == nil || bundle.released.Load() || bundle.hal == nil {
-			continue
+		if err := p.executeBundle(bundle); err != nil {
+			p.encoder.setError(fmt.Errorf("wgpu: RenderPass.ExecuteBundles: %w", err))
+			break
 		}
-
-		raw.ExecuteBundle(bundle.hal)
 	}
+	if len(bundles) > 0 {
+		p.resetBundleState()
+	}
+}
+
+// resetBundleState clears the pipeline, bind groups, vertex buffers and
+// index buffer after ExecuteBundles: a bundle leaves the backend with its own
+// state, and WebGPU requires them to be set again (executeBundles; Rust
+// wgpu-core State::reset_bundle). Without it the binder would take the
+// backend's bindings for current.
+func (p *RenderPassEncoder) resetBundleState() {
+	p.binder.reset()
+	p.pipelineSet = false
+	p.requiredVertexBuffers = 0
+	p.currentStripIndexFormat = nil
+	p.vertexBufferCount = 0
+	p.indexBufferSet = false
 }
 
 // MultiDrawIndirectCount draws primitives with a GPU-provided draw count.
@@ -425,6 +442,7 @@ func (p *RenderPassEncoder) MultiDrawIndirectCount(
 		maxDrawCount:    maxDrawCount,
 		recordStride:    drawIndirectRecordSize,
 		record: func() {
+			p.flushBindGroups()
 			p.core.DrawIndirectCount(
 				indirectBuffer.coreBuffer(), indirectOffset,
 				countBuffer.coreBuffer(), countOffset, maxDrawCount,
@@ -449,6 +467,7 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirectCount(
 		recordStride:    drawIndexedIndirectRecordSize,
 		preValidate:     p.validateIndexedIndirectCountPreconditions,
 		record: func() {
+			p.flushBindGroups()
 			p.core.DrawIndexedIndirectCount(
 				indirectBuffer.coreBuffer(), indirectOffset,
 				countBuffer.coreBuffer(), countOffset, maxDrawCount,

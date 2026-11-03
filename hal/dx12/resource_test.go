@@ -148,3 +148,82 @@ func TestFailTextureViewCreationRecyclesAllocatedDescriptors(t *testing.T) {
 		t.Fatalf("SRV free list = %v, want [4]", device.stagingViewHeap.freeList)
 	}
 }
+
+// TestDestroyTwiceFreesSlotsOnce destroys each descriptor-owning resource
+// twice. Its heap slots must go back to the free list once: a slot freed
+// twice sits in the LIFO free list twice, and two later allocations would
+// then share one descriptor.
+func TestDestroyTwiceFreesSlotsOnce(t *testing.T) {
+	newDevice := func() *Device {
+		return &Device{
+			viewHeap:           &DescriptorHeap{},
+			samplerHeap:        &DescriptorHeap{},
+			rtvHeap:            &DescriptorHeap{},
+			dsvHeap:            &DescriptorHeap{},
+			stagingViewHeap:    &DescriptorHeap{},
+			stagingSamplerHeap: &DescriptorHeap{},
+		}
+	}
+	freeLists := func(d *Device) map[string]int {
+		return map[string]int{
+			"view":           len(d.viewHeap.freeList),
+			"sampler":        len(d.samplerHeap.freeList),
+			"rtv":            len(d.rtvHeap.freeList),
+			"dsv":            len(d.dsvHeap.freeList),
+			"stagingView":    len(d.stagingViewHeap.freeList),
+			"stagingSampler": len(d.stagingSamplerHeap.freeList),
+		}
+	}
+
+	tests := []struct {
+		name    string
+		destroy func(d *Device) func()
+		want    map[string]int
+	}{
+		{
+			name: "sampler",
+			destroy: func(d *Device) func() {
+				s := &Sampler{heapIndex: 5, samplerPoolSlot: 9, device: d}
+				s.nativeHandle = d.handles.samplers.Add(s)
+				return s.Destroy
+			},
+			want: map[string]int{"sampler": 1, "stagingSampler": 1},
+		},
+		{
+			name: "texture view",
+			destroy: func(d *Device) func() {
+				v := &TextureView{
+					texture: &Texture{}, device: d,
+					hasRTV: true, rtvHeapIndex: 1,
+					hasDSV: true, hasDSVVariants: [4]bool{true, true}, dsvHeapIndex: [4]uint32{2, 3},
+					hasSRV: true, srvHeapIndex: 4,
+				}
+				v.nativeHandle = d.handles.views.Add(v)
+				return v.Destroy
+			},
+			want: map[string]int{"rtv": 1, "dsv": 2, "stagingView": 1},
+		},
+		{
+			name: "bind group",
+			destroy: func(d *Device) func() {
+				g := &BindGroup{device: d, viewHeapIndex: 10, viewCount: 3}
+				return g.Destroy
+			},
+			want: map[string]int{"view": 3},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newDevice()
+			destroy := tt.destroy(d)
+			destroy()
+			destroy()
+			got := freeLists(d)
+			for heap, n := range got {
+				if n != tt.want[heap] {
+					t.Errorf("%s heap free list has %d entries after two Destroy calls, want %d", heap, n, tt.want[heap])
+				}
+			}
+		})
+	}
+}

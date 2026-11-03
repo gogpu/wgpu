@@ -252,16 +252,14 @@ func BinTrianglesToTilesWithTest(triangles []Triangle, grid *TileGrid) map[int][
 	for i := range triangles {
 		tri := &triangles[i]
 
-		// Compute edge functions once per triangle
-		e01 := NewEdgeFunction(tri.V0.X, tri.V0.Y, tri.V1.X, tri.V1.Y)
-		e12 := NewEdgeFunction(tri.V1.X, tri.V1.Y, tri.V2.X, tri.V2.Y)
-		e20 := NewEdgeFunction(tri.V2.X, tri.V2.Y, tri.V0.X, tri.V0.Y)
+		// Set up the fixed-point edge functions once per triangle
+		it := NewIncrementalTriangle(*tri)
 
 		tiles := grid.GetTilesForTriangle(*tri)
 
 		for _, tile := range tiles {
 			// Use hierarchical test to skip tiles outside triangle
-			if TileTriangleTest(tile, e01, e12, e20) != -1 {
+			if tileTriangleTest(tile, &it) != -1 {
 				idx := grid.TileIndex(tile.X, tile.Y)
 				result[idx] = append(result[idx], *tri)
 			}

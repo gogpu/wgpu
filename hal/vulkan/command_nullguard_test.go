@@ -345,3 +345,18 @@ func TestAllocationGranularity(t *testing.T) {
 		t.Errorf("allocationGranularity = %d, want 16 (Rust wgpu-hal parity)", allocationGranularity)
 	}
 }
+
+// TestSetBindGroupWithoutPipeline verifies that SetBindGroup on a recording
+// pass with no pipeline set returns instead of dereferencing the nil
+// pipeline for its layout. Core binds groups only after a pipeline, but a
+// direct HAL user may not (Rust wgpu-hal takes the layout as an argument).
+func TestSetBindGroupWithoutPipeline(t *testing.T) {
+	enc := &CommandEncoder{device: &Device{}, active: vk.CommandBuffer(1)}
+	group := &BindGroup{}
+
+	render := &RenderPassEncoder{encoder: enc}
+	render.SetBindGroup(0, group, []uint32{256})
+
+	compute := &ComputePassEncoder{encoder: enc}
+	compute.SetBindGroup(0, group, nil)
+}

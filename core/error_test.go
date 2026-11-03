@@ -139,6 +139,11 @@ func TestCreateBufferError_AllKinds(t *testing.T) {
 			wantSub: "invalid usage flags",
 		},
 		{
+			name:    "MissingDownlevelFlags",
+			err:     &CreateBufferError{Kind: CreateBufferErrorMissingDownlevelFlags, Label: "buf-flags", MissingFlags: 1},
+			wantSub: "usage needs downlevel flags",
+		},
+		{
 			name:    "MapReadWriteExclusive",
 			err:     &CreateBufferError{Kind: CreateBufferErrorMapReadWriteExclusive, Label: "buf5"},
 			wantSub: "mutually exclusive",
@@ -332,6 +337,16 @@ func TestCreateTextureError_AllKinds(t *testing.T) {
 			wantSub: "format must not be undefined",
 		},
 		{
+			name:    "InvalidViewFormat",
+			err:     &CreateTextureError{Kind: CreateTextureErrorInvalidViewFormat, Label: "tex-view", Format: 1, ViewFormat: 2},
+			wantSub: "not compatible with texture format",
+		},
+		{
+			name:    "MissingDownlevelFlags",
+			err:     &CreateTextureError{Kind: CreateTextureErrorMissingDownlevelFlags, Label: "tex-flags", Cause: fmt.Errorf("missing flag")},
+			wantSub: "missing flag",
+		},
+		{
 			name:    "InvalidDimension",
 			err:     &CreateTextureError{Kind: CreateTextureErrorInvalidDimension, Label: "tex13"},
 			wantSub: "dimension must not be undefined",
@@ -359,6 +374,16 @@ func TestCreateTextureError_AllKinds(t *testing.T) {
 				t.Errorf("Error() = %q, want substring %q", msg, tt.wantSub)
 			}
 		})
+	}
+}
+
+func TestCreateTextureViewError(t *testing.T) {
+	e := &CreateTextureViewError{Kind: CreateTextureViewErrorFormatReinterpretation, TextureFormat: 1, ViewFormat: 2}
+	if got := e.Error(); !strings.Contains(got, "not the texture format") {
+		t.Fatalf("Error() = %q", got)
+	}
+	if got := (&CreateTextureViewError{Kind: CreateTextureViewErrorKind(99)}).Error(); !strings.Contains(got, "unknown error") {
+		t.Fatalf("unknown Error() = %q", got)
 	}
 }
 
@@ -492,6 +517,16 @@ func TestCreateShaderModuleError_AllKinds(t *testing.T) {
 			wantSub: "HAL error",
 		},
 		{
+			name:    "Parsing",
+			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorParsing, Label: "shader-parse", Cause: errors.New("parse failed")},
+			wantSub: "parse failed",
+		},
+		{
+			name:    "Validation",
+			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorValidation, Label: "shader-validation", Cause: errors.New("validation failed")},
+			wantSub: "validation failed",
+		},
+		{
 			name:    "Unknown",
 			err:     &CreateShaderModuleError{Kind: CreateShaderModuleErrorKind(99), Label: "shader4"},
 			wantSub: "unknown error",
@@ -567,7 +602,7 @@ func TestCreateRenderPipelineError_AllKinds(t *testing.T) {
 		{
 			name:    "NoFragmentTargets",
 			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorNoFragmentTargets, Label: "rp5"},
-			wantSub: "must have at least one color target",
+			wantSub: "a color target or a depth-stencil state",
 		},
 		{
 			name:    "TooManyColorTargets",
@@ -598,6 +633,41 @@ func TestCreateRenderPipelineError_AllKinds(t *testing.T) {
 			name:    "DepthFormatNoStencilAspect",
 			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoStencilAspect, Label: "rp11", Format: "Depth16Unorm"},
 			wantSub: "does not have a stencil aspect",
+		},
+		{
+			name:    "VertexStrideMisaligned",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideMisaligned, Label: "rp-stride", ArrayStride: 3},
+			wantSub: "not a multiple of 4",
+		},
+		{
+			name:    "VertexStrideTooLarge",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideTooLarge, Label: "rp-stride-max", ArrayStride: 256, MaxArrayStride: 128},
+			wantSub: "exceeds maxVertexBufferArrayStride",
+		},
+		{
+			name:    "VertexAttributeOutOfStride",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeOutOfStride, Label: "rp-attribute", ArrayStride: 8, AttributeOffset: 6, AttributeFormat: "Float32"},
+			wantSub: "does not fit in arrayStride",
+		},
+		{
+			name:    "TooManyVertexBuffers",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorTooManyVertexBuffers, Label: "rp-buffers", Given: 9, Limit: 8},
+			wantSub: "vertex buffers exceed maxVertexBuffers",
+		},
+		{
+			name:    "VertexAttributeInvalidOffset",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "rp-offset", AttributeOffset: 2, AttributeFormat: "Float32"},
+			wantSub: "not a multiple of min(4",
+		},
+		{
+			name:    "VertexAttributeLocationTooLarge",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeLocationTooLarge, Label: "rp-location", ShaderLocation: 16, Limit: 16},
+			wantSub: "not below maxVertexAttributes",
+		},
+		{
+			name:    "ShaderLocationClash",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorShaderLocationClash, Label: "rp-clash", ShaderLocation: 2},
+			wantSub: "used by more than one attribute",
 		},
 		{
 			name:    "HAL",
@@ -688,6 +758,16 @@ func TestCreateComputePipelineError_AllKinds(t *testing.T) {
 			wantSub: "total workgroup invocations",
 		},
 		{
+			name:    "WorkgroupStorageExceeded",
+			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorWorkgroupStorageExceeded, Label: "cp-storage", WorkgroupStorage: 32768, Limit: 16384},
+			wantSub: "workgroup storage 32768 bytes",
+		},
+		{
+			name:    "PipelineConstants",
+			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorPipelineConstants, Label: "cp-constants", Cause: errors.New("unknown override")},
+			wantSub: "unknown override",
+		},
+		{
 			name:    "Unknown",
 			err:     &CreateComputePipelineError{Kind: CreateComputePipelineErrorKind(99), Label: "cp7"},
 			wantSub: "unknown error",
@@ -713,6 +793,12 @@ func TestCreateComputePipelineError_Unwrap(t *testing.T) {
 	e := &CreateComputePipelineError{Kind: CreateComputePipelineErrorHAL, HALError: halErr}
 	if !errors.Is(e.Unwrap(), halErr) {
 		t.Error("Unwrap() did not return HALError")
+	}
+
+	cause := errors.New("pipeline constants")
+	e = &CreateComputePipelineError{Kind: CreateComputePipelineErrorPipelineConstants, Cause: cause}
+	if !errors.Is(e.Unwrap(), cause) {
+		t.Error("Unwrap() did not return pipeline constants cause")
 	}
 }
 
@@ -1070,6 +1156,36 @@ func TestSentinelErrorsDistinct(t *testing.T) {
 				if i != j && errors.Is(s.err, other.err) {
 					t.Errorf("%s should not match %s", s.name, other.name)
 				}
+			}
+		})
+	}
+}
+
+func TestNewErrorFormattingHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"request unsupported feature", (&RequestDeviceError{Kind: RequestDeviceErrorUnsupportedFeature, MissingFeatures: 1}).Error(), "required features"},
+		{"request limits", (&RequestDeviceError{Kind: RequestDeviceErrorLimitsExceeded, Limit: "MaxBufferSize", Requested: 8, Allowed: 4}).Error(), "MaxBufferSize = 8"},
+		{"request unknown", (&RequestDeviceError{Kind: RequestDeviceErrorKind(99)}).Error(), "unknown error"},
+		{"dimension x", TextureErrorDimensionX.String(), "X"},
+		{"dimension y", TextureErrorDimensionY.String(), "Y"},
+		{"dimension z", TextureErrorDimensionZ.String(), "Z"},
+		{"dimension unknown", TextureErrorDimension(99).String(), "X"},
+		{"copy source", CopySideSource.String(), "source"},
+		{"copy destination", CopySideDestination.String(), "destination"},
+		{"clear missing usage", (&ClearError{Kind: ClearErrorMissingBufferUsage}).Error(), "missing usage"},
+		{"clear offset alignment", (&ClearError{Kind: ClearErrorUnalignedBufferOffset, Offset: 3}).Error(), "offset 3"},
+		{"clear size alignment", (&ClearError{Kind: ClearErrorUnalignedFillSize, Size: 3}).Error(), "size 3"},
+		{"clear overflow", (&ClearError{Kind: ClearErrorOffsetPlusSizeExceeds64BitBounds, Offset: 1, Size: 2}).Error(), "exceeds the 64-bit range"},
+		{"clear overrun", (&ClearError{Kind: ClearErrorBufferOverrun, Offset: 4, Size: 8, BufferSize: 8}).Error(), "overruns the 8-byte buffer"},
+		{"clear unknown", (&ClearError{Kind: ClearErrorKind(99)}).Error(), "unknown error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tc.got, tc.want) {
+				t.Errorf("got %q, want substring %q", tc.got, tc.want)
 			}
 		})
 	}

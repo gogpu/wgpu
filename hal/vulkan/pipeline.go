@@ -73,7 +73,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	// The HAL render stages carry no pipeline constants yet: the public
 	// VertexState/FragmentState have no Constants field. Overrides take their
 	// defaults.
-	vertexHandle, temp, err := d.compileStage(vertexModule, ir.StageVertex, entryPointVertex, nil)
+	vertexHandle, temp, err := d.compileStage(vertexModule, ir.StageVertex, entryPointVertex, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +84,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	stages = append(stages, vk.PipelineShaderStageCreateInfo{
 		SType:  vk.StructureTypePipelineShaderStageCreateInfo,
+		Flags:  d.shaderStageFlags,
 		Stage:  vk.ShaderStageVertexBit,
 		Module: vertexHandle,
 		PName:  uintptr(unsafe.Pointer(&vertexEntryBytes[0])),
@@ -104,7 +105,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		fragmentEntryBytes = append([]byte(entryPointFragment), 0)
 		pinner.Pin(&fragmentEntryBytes[0])
 
-		fragmentHandle, temp, err := d.compileStage(fragmentModule, ir.StageFragment, entryPointFragment, nil)
+		fragmentHandle, temp, err := d.compileStage(fragmentModule, ir.StageFragment, entryPointFragment, nil, true)
 		if err != nil {
 			return nil, err
 		}
@@ -115,6 +116,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 		stages = append(stages, vk.PipelineShaderStageCreateInfo{
 			SType:  vk.StructureTypePipelineShaderStageCreateInfo,
+			Flags:  d.shaderStageFlags,
 			Stage:  vk.ShaderStageFragmentBit,
 			Module: fragmentHandle,
 			PName:  uintptr(unsafe.Pointer(&fragmentEntryBytes[0])),
@@ -405,13 +407,9 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 // CreateComputePipeline creates a compute pipeline.
 //
 // desc.Compute.Constants are applied by compileStage (naga.ProcessOverrides
-// before SPIR-V emission, Rust vulkan/device.rs:804).
-//
-// TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
-// to naga SPIR-V options. When the VK_KHR_zero_initialize_workgroup_memory
-// device feature is available (Vulkan 1.3), use Native mode; otherwise naga
-// inserts explicit zero-stores. Rust wgpu-hal checks private_caps and sets
-// spv::ZeroInitializeWorkgroupMemoryMode accordingly (vulkan/device.rs:773).
+// before SPIR-V emission, Rust vulkan/device.rs, compile_stage). Workgroup
+// memory is zeroed natively or by naga's polyfill (spirvOptions), or not at
+// all when desc.Compute.ZeroInitializeWorkgroupMemory is false.
 func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: compute pipeline descriptor is nil in Vulkan.CreateComputePipeline — core validation gap")
@@ -450,7 +448,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	defer pinner.Unpin()
 	pinner.Pin(&entryPointBytes[0])
 
-	computeHandle, temp, err := d.compileStage(computeModule, ir.StageCompute, entryPoint, desc.Compute.Constants)
+	computeHandle, temp, err := d.compileStage(computeModule, ir.StageCompute, entryPoint, desc.Compute.Constants, desc.Compute.ZeroInitializeWorkgroupMemory)
 	if err != nil {
 		return nil, err
 	}
@@ -460,6 +458,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 
 	stage := vk.PipelineShaderStageCreateInfo{
 		SType:  vk.StructureTypePipelineShaderStageCreateInfo,
+		Flags:  d.shaderStageFlags,
 		Stage:  vk.ShaderStageComputeBit,
 		Module: computeHandle,
 		PName:  uintptr(unsafe.Pointer(&entryPointBytes[0])),

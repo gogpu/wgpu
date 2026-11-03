@@ -330,10 +330,10 @@ func BlendBytes(srcR, srcG, srcB, srcA, dstR, dstG, dstB, dstA byte, state Blend
 	result := Blend(src, dst, state)
 
 	// Convert back to bytes
-	return clampByte(result[0] * 255),
-		clampByte(result[1] * 255),
-		clampByte(result[2] * 255),
-		clampByte(result[3] * 255)
+	return FloatToUnorm8(result[0]),
+		FloatToUnorm8(result[1]),
+		FloatToUnorm8(result[2]),
+		FloatToUnorm8(result[3])
 }
 
 // BlendFloatToByte blends a float source color with a byte destination color.
@@ -349,8 +349,8 @@ func BlendFloatToByte(src [4]float32, dstR, dstG, dstB, dstA byte, state BlendSt
 
 	result := Blend(src, dst, state)
 
-	return clampByte(result[0] * 255),
-		clampByte(result[1] * 255),
-		clampByte(result[2] * 255),
-		clampByte(result[3] * 255)
+	return FloatToUnorm8(result[0]),
+		FloatToUnorm8(result[1]),
+		FloatToUnorm8(result[2]),
+		FloatToUnorm8(result[3])
 }

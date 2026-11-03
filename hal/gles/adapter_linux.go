@@ -72,6 +72,7 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 		maxMSAA:             a.caps.MaxMSAASamples,
 		glslVersion:         glslVer,
 		shaderBindingLayout: glslVer.SupportsExplicitLocations(),
+		fullInstancing:      a.caps.FullyFeaturedInstancing,
 	}
 
 	queue := &Queue{

@@ -150,10 +150,22 @@ type Context struct {
 	glDrawElementsInstanced uintptr
 	glVertexAttribDivisor   uintptr
 
+	// Draw variants (optional): base vertex GL 3.2 / ES 3.2, indirect GL 4.0 /
+	// ES 3.1, base instance GL 4.2, glUniform1ui GL 3.0 / ES 3.0.
+	glDrawElementsInstancedBaseVertex             uintptr
+	glDrawArraysIndirect                          uintptr
+	glDrawElementsIndirect                        uintptr
+	glDrawArraysInstancedBaseInstance             uintptr
+	glDrawElementsInstancedBaseVertexBaseInstance uintptr
+	glUniform1ui                                  uintptr
+	glMultiDrawArraysIndirect                     uintptr
+	glMultiDrawElementsIndirect                   uintptr
+
 	// Compute shaders (GL 4.3+ / ES 3.1+)
 	glDispatchCompute         uintptr
 	glDispatchComputeIndirect uintptr
 	glMemoryBarrier           uintptr
+	glBindImageTexture        uintptr
 
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample uintptr
@@ -319,11 +331,20 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDrawArraysInstanced = getProcAddr("glDrawArraysInstanced")
 	c.glDrawElementsInstanced = getProcAddr("glDrawElementsInstanced")
 	c.glVertexAttribDivisor = getProcAddr("glVertexAttribDivisor")
+	c.glDrawElementsInstancedBaseVertex = getProcAddr("glDrawElementsInstancedBaseVertex")
+	c.glDrawArraysIndirect = getProcAddr("glDrawArraysIndirect")
+	c.glDrawElementsIndirect = getProcAddr("glDrawElementsIndirect")
+	c.glDrawArraysInstancedBaseInstance = getProcAddr("glDrawArraysInstancedBaseInstance")
+	c.glDrawElementsInstancedBaseVertexBaseInstance = getProcAddr("glDrawElementsInstancedBaseVertexBaseInstance")
+	c.glUniform1ui = getProcAddr("glUniform1ui")
+	c.glMultiDrawArraysIndirect = getProcAddr("glMultiDrawArraysIndirect")
+	c.glMultiDrawElementsIndirect = getProcAddr("glMultiDrawElementsIndirect")
 
 	// Compute shaders (optional - may be nil on older GL versions)
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+	c.glBindImageTexture = getProcAddr("glBindImageTexture")
 
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
@@ -591,6 +612,12 @@ func (c *Context) BindBuffer(target, buffer uint32) {
 func (c *Context) BufferData(target uint32, size int, data unsafe.Pointer, usage uint32) {
 	syscall.SyscallN(c.glBufferData, uintptr(target), uintptr(size),
 		uintptr(data), uintptr(usage))
+}
+
+// AllocateBuffer gives the buffer bound to target size bytes of undefined
+// content (glBufferData with a null pointer).
+func (c *Context) AllocateBuffer(target uint32, size int, usage uint32) {
+	c.BufferData(target, size, nil, usage)
 }
 
 func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
@@ -1019,6 +1046,101 @@ func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, in
 		uintptr(typ), indices, uintptr(instanceCount))
 }
 
+// DrawElementsInstancedBaseVertex adds baseVertex to every index (GL 3.2 /
+// ES 3.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertex(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32) {
+	if c.glDrawElementsInstancedBaseVertex == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsInstancedBaseVertex, uintptr(mode), uintptr(count),
+		uintptr(typ), indices, uintptr(instanceCount), uintptr(baseVertex))
+}
+
+// DrawArraysIndirect draws with the arguments at offset in the buffer bound
+// to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the context
+// lacks it.
+func (c *Context) DrawArraysIndirect(mode uint32, offset uintptr) {
+	if c.glDrawArraysIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawArraysIndirect, uintptr(mode), offset)
+}
+
+// DrawElementsIndirect draws indexed with the arguments at offset in the
+// buffer bound to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the
+// context lacks it.
+func (c *Context) DrawElementsIndirect(mode, typ uint32, offset uintptr) {
+	if c.glDrawElementsIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsIndirect, uintptr(mode), uintptr(typ), offset)
+}
+
+// DrawArraysInstancedBaseInstance draws with a first instance (GL 4.2). A
+// no-op when the context lacks it.
+func (c *Context) DrawArraysInstancedBaseInstance(mode uint32, first, count, instanceCount int32, baseInstance uint32) {
+	if c.glDrawArraysInstancedBaseInstance == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawArraysInstancedBaseInstance, uintptr(mode), uintptr(first),
+		uintptr(count), uintptr(instanceCount), uintptr(baseInstance))
+}
+
+// DrawElementsInstancedBaseVertexBaseInstance draws indexed with a base
+// vertex and a first instance (GL 4.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertexBaseInstance(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32, baseInstance uint32) {
+	if c.glDrawElementsInstancedBaseVertexBaseInstance == 0 {
+		return
+	}
+	syscall.SyscallN(c.glDrawElementsInstancedBaseVertexBaseInstance, uintptr(mode), uintptr(count),
+		uintptr(typ), indices, uintptr(instanceCount), uintptr(baseVertex), uintptr(baseInstance))
+}
+
+// Uniform1ui sets a uint uniform of the current program (GL 3.0 / ES 3.0). A
+// no-op when the context lacks it.
+func (c *Context) Uniform1ui(location int32, value uint32) {
+	if c.glUniform1ui == 0 {
+		return
+	}
+	syscall.SyscallN(c.glUniform1ui, uintptr(location), uintptr(value))
+}
+
+// MultiDrawArraysIndirect draws drawCount records of stride bytes from offset
+// in the buffer bound to GL_DRAW_INDIRECT_BUFFER, with gl_DrawID counting
+// them (GL 4.3 / GL_EXT_multi_draw_indirect). A no-op when the context lacks
+// it.
+func (c *Context) MultiDrawArraysIndirect(mode uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawArraysIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glMultiDrawArraysIndirect, uintptr(mode), offset, uintptr(drawCount), uintptr(stride))
+}
+
+// MultiDrawElementsIndirect is the indexed MultiDrawArraysIndirect.
+func (c *Context) MultiDrawElementsIndirect(mode, typ uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawElementsIndirect == 0 {
+		return
+	}
+	syscall.SyscallN(c.glMultiDrawElementsIndirect, uintptr(mode), uintptr(typ), offset, uintptr(drawCount), uintptr(stride))
+}
+
+// HasMultiDrawIndirect reports whether the multi-draw indirect calls are
+// loaded.
+func (c *Context) HasMultiDrawIndirect() bool {
+	return c.glMultiDrawArraysIndirect != 0 && c.glMultiDrawElementsIndirect != 0
+}
+
+// HasDrawIndirect reports whether glDrawArraysIndirect and
+// glDrawElementsIndirect are loaded.
+func (c *Context) HasDrawIndirect() bool {
+	return c.glDrawArraysIndirect != 0 && c.glDrawElementsIndirect != 0
+}
+
+// HasBaseInstance reports whether the base-instance draws are loaded.
+func (c *Context) HasBaseInstance() bool {
+	return c.glDrawArraysInstancedBaseInstance != 0 && c.glDrawElementsInstancedBaseVertexBaseInstance != 0
+}
+
 // --- Compute Shaders ---
 
 // DispatchCompute launches compute shader workgroups.
@@ -1051,6 +1173,22 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 		return
 	}
 	syscall.SyscallN(c.glMemoryBarrier, uintptr(barriers))
+}
+
+// BindImageTexture binds a level of a texture to an image unit for shader
+// image load/store (storage textures). layered binds every layer of an
+// array, cube or 3D texture; otherwise layer selects one. Requires OpenGL
+// 4.2+ or OpenGL ES 3.1+. No-op if image load/store is not supported.
+func (c *Context) BindImageTexture(unit, texture uint32, level int32, layered bool, layer int32, access, format uint32) {
+	if c.glBindImageTexture == 0 {
+		return
+	}
+	var layeredArg uintptr
+	if layered {
+		layeredArg = 1
+	}
+	syscall.SyscallN(c.glBindImageTexture, uintptr(unit), uintptr(texture), uintptr(level),
+		layeredArg, uintptr(layer), uintptr(access), uintptr(format))
 }
 
 // SupportsCompute returns true if compute shaders are supported.

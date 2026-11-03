@@ -44,7 +44,7 @@ func TestMRTTwoTargetRenderPass(t *testing.T) {
 		t.Fatal("device.Queue() returned nil")
 	}
 
-	const width, height uint32 = 4, 4
+	const width, height uint32 = 64, 4 // width*4 = 256, the copy bytesPerRow alignment
 
 	// --- Create two render target textures ---
 

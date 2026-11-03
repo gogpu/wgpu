@@ -7,77 +7,7 @@ package wgpu
 
 import (
 	"testing"
-
-	"github.com/gogpu/gputypes"
 )
-
-func TestBufferReadUsage(t *testing.T) {
-	tests := []struct {
-		name  string
-		usage gputypes.BufferUsage
-		want  gputypes.BufferUsage
-	}{
-		{
-			"Vertex|CopyDst extracts Vertex",
-			gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
-			gputypes.BufferUsageVertex,
-		},
-		{
-			"Index|CopyDst extracts Index",
-			gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
-			gputypes.BufferUsageIndex,
-		},
-		{
-			"Uniform|CopyDst extracts Uniform",
-			gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-			gputypes.BufferUsageUniform,
-		},
-		{
-			"Indirect|CopyDst extracts Indirect",
-			gputypes.BufferUsageIndirect | gputypes.BufferUsageCopyDst,
-			gputypes.BufferUsageIndirect,
-		},
-		{
-			"Storage only returns 0",
-			gputypes.BufferUsageStorage,
-			0,
-		},
-		{
-			"CopyDst only returns 0",
-			gputypes.BufferUsageCopyDst,
-			0,
-		},
-		{
-			"CopySrc only returns 0",
-			gputypes.BufferUsageCopySrc,
-			0,
-		},
-		{
-			"Vertex|Index|CopyDst extracts both",
-			gputypes.BufferUsageVertex | gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
-			gputypes.BufferUsageVertex | gputypes.BufferUsageIndex,
-		},
-		{
-			"MapRead|MapWrite returns 0",
-			gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
-			0,
-		},
-		{
-			"None returns 0",
-			gputypes.BufferUsageNone,
-			0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := bufferReadUsage(tt.usage)
-			if got != tt.want {
-				t.Errorf("bufferReadUsage(%#x) = %#x, want %#x", tt.usage, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestAlignUp(t *testing.T) {
 	tests := []struct {

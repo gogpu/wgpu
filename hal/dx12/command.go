@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"fmt"
+	"math/bits"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -57,6 +58,12 @@ type CommandEncoder struct {
 	descriptorHeapCount int
 
 	stateTracker commandStateTracker
+
+	// tempRTVs are the rtvHeap slots of the per-pass render target views of
+	// 3D color attachments (see texture3DRTVDesc). They are freed in ResetAll,
+	// once the GPU is done with every command buffer of this encoder, or in
+	// Destroy; Rust wgpu-hal keeps them in temp_rtv_handles.
+	tempRTVs []uint32
 }
 
 // BeginEncoding begins command recording.
@@ -110,12 +117,21 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 }
 
 // DiscardEncoding discards the encoder without creating a command buffer.
+// The list is closed and returned to the free pool for the next
+// BeginEncoding, which resets it; a list that fails to close is released.
+// Matches Rust wgpu-hal CommandEncoder::discard_encoding (dx12/command.rs).
 func (e *CommandEncoder) DiscardEncoding() {
-	if e.isRecording {
-		// Close the command list even though we're discarding it
-		_ = e.cmdList.Close()
-		e.isRecording = false
+	if !e.isRecording {
+		return
 	}
+	e.isRecording = false
+	list := e.cmdList
+	e.cmdList = nil
+	if err := list.Close(); err != nil {
+		list.Release()
+		return
+	}
+	e.freeLists = append(e.freeLists, list)
 }
 
 // ResetAll resets the encoder's allocator and returns command lists to the free pool.
@@ -136,6 +152,17 @@ func (e *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
 			hal.Logger().Error("dx12: ID3D12CommandAllocator::Reset failed", "err", err)
 		}
 	}
+	e.freeTempRTVs()
+}
+
+// freeTempRTVs returns the per-pass 3D render target views to the RTV heap.
+func (e *CommandEncoder) freeTempRTVs() {
+	if e.device != nil && e.device.rtvHeap != nil {
+		for _, index := range e.tempRTVs {
+			e.device.rtvHeap.Free(index, 1)
+		}
+	}
+	e.tempRTVs = e.tempRTVs[:0]
 }
 
 // Destroy releases the allocator and all pooled command lists.
@@ -153,6 +180,7 @@ func (e *CommandEncoder) Destroy() {
 		e.allocator.Release()
 		e.allocator = nil
 	}
+	e.freeTempRTVs()
 }
 
 // TransitionBuffers transitions buffer states for synchronization.
@@ -387,6 +415,46 @@ func (e *CommandEncoder) writeBeginTimestamp(halQS hal.QuerySet, tw timestampWri
 	return nil, 0
 }
 
+// colorAttachmentRTV returns the render target view of a color attachment.
+// A 3D view has no view-time RTV: a one-slice RTV is created here for the
+// attachment's depth slice and freed with the encoder's other per-pass views
+// (tempRTVs). Rust wgpu-hal dx12/command.rs begin_render_pass does the same.
+func (e *CommandEncoder) colorAttachmentRTV(ca hal.RenderPassColorAttachment) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, bool) {
+	view, ok := ca.View.(*TextureView)
+	if !ok {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	if view.dimension != gputypes.TextureViewDimension3D {
+		return view.rtvHandle, view.hasRTV
+	}
+	if view.texture == nil || view.texture.raw == nil {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	handle, index, err := e.device.allocateRTVDescriptor()
+	if err != nil {
+		hal.Logger().Error("dx12: 3D color attachment skipped", "err", err)
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, false
+	}
+	e.tempRTVs = append(e.tempRTVs, index)
+	desc := texture3DRTVDesc(view, ca.DepthSlice)
+	e.device.raw.CreateRenderTargetView(view.texture.raw, &desc, handle)
+	return handle, true
+}
+
+// texture3DRTVDesc describes the render target view of one depth slice of a
+// 3D view: D3D12_TEX3D_RTV{MipSlice: the view's base mip, FirstWSlice: the
+// attachment's depth slice (0 when nil), WSize: 1}, as Rust wgpu-hal builds it.
+// FirstWSlice counts slices of that mip level.
+func texture3DRTVDesc(view *TextureView, depthSlice *uint32) d3d12.D3D12_RENDER_TARGET_VIEW_DESC {
+	desc := d3d12.D3D12_RENDER_TARGET_VIEW_DESC{Format: textureFormatToD3D12(view.format)}
+	slice := uint32(0)
+	if depthSlice != nil {
+		slice = *depthSlice
+	}
+	desc.SetTexture3D(view.baseMip, slice, 1)
+	return desc
+}
+
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	rpe := &RenderPassEncoder{
@@ -420,11 +488,11 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Set render targets
 	rtvHandles := make([]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, 0, len(desc.ColorAttachments))
 	for _, ca := range desc.ColorAttachments {
-		view, ok := ca.View.(*TextureView)
-		if !ok || !view.hasRTV {
+		rtv, ok := e.colorAttachmentRTV(ca)
+		if !ok {
 			continue
 		}
-		rtvHandles = append(rtvHandles, view.rtvHandle)
+		rtvHandles = append(rtvHandles, rtv)
 
 		// Clear if needed
 		if ca.LoadOp == gputypes.LoadOpClear {
@@ -434,7 +502,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 				float32(ca.ClearValue.B),
 				float32(ca.ClearValue.A),
 			}
-			e.cmdList.ClearRenderTargetView(view.rtvHandle, &clearColor, 0, nil)
+			e.cmdList.ClearRenderTargetView(rtv, &clearColor, 0, nil)
 		}
 	}
 
@@ -505,6 +573,11 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	return cpe
 }
 
+// maxVertexBuffers is the number of vertex buffer slots a render pass tracks,
+// Rust wgpu-hal's MAX_VERTEX_BUFFERS (src/lib.rs); the device reports at most
+// the WebGPU default of 8.
+const maxVertexBuffers = 16
+
 // RenderPassEncoder implements hal.RenderPassEncoder for DirectX 12.
 type RenderPassEncoder struct {
 	encoder            *CommandEncoder
@@ -513,11 +586,29 @@ type RenderPassEncoder struct {
 	indexFormat        gputypes.IndexFormat
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
 
+	// vertexBuffers holds the view of each bound vertex buffer slot. The
+	// stride belongs to the pipeline and the address to SetVertexBuffer, and
+	// WebGPU allows either call first, so the views are kept here, each call
+	// fills in its half and marks the slot dirty, and prepareVertexBuffers
+	// binds the dirty slots before a draw (Rust wgpu-hal src/dx12/command.rs
+	// set_vertex_buffer, set_render_pipeline, prepare_vertex_buffers).
+	vertexBuffers      [maxVertexBuffers]d3d12.D3D12_VERTEX_BUFFER_VIEW
+	dirtyVertexBuffers uint32 // bit i: slot i changed since it was last bound
+
 	// endOfPassTimerQuery stores the query heap and index for the end-of-pass
 	// timestamp write. Set during BeginRenderPass, consumed in End().
 	// Rust wgpu-hal reference: dx12/mod.rs end_of_pass_timer_query field.
 	endOfPassTimerHeap  *d3d12.ID3D12QueryHeap
 	endOfPassTimerIndex uint32
+
+	// specialConstants holds the values last written to the pipeline's
+	// special-constants root parameter (valid when specialConstantsSet).
+	specialConstants    specialConstants
+	specialConstantsSet bool
+
+	// bindGroups holds the bind groups set on the pass until a draw binds
+	// them to the pipeline's root parameters.
+	bindGroups passBindGroups
 }
 
 // End finishes the render pass.
@@ -617,7 +708,18 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 	if p.rootSignature != nil {
 		e.encoder.cmdList.SetGraphicsRootSignature(p.rootSignature)
 	}
+	// A root signature change discards the root arguments.
+	e.specialConstantsSet = false
+	e.bindGroups.invalidate()
 	e.encoder.cmdList.IASetPrimitiveTopology(p.topology)
+
+	// The pipeline owns the strides of the slots it uses.
+	for slot, stride := range p.vertexStrides {
+		if slot < maxVertexBuffers && e.vertexBuffers[slot].StrideInBytes != stride {
+			e.vertexBuffers[slot].StrideInBytes = stride
+			e.dirtyVertexBuffers |= 1 << slot
+		}
+	}
 
 	// Bind the global sampler descriptor heap to the sampler root parameter.
 	// This is the ONE root parameter that covers all 2048+2048 sampler slots.
@@ -634,7 +736,9 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 // SetBindGroup sets a bind group for graphics operations.
 // index is the bind group slot (0-3 typically).
 // group contains the GPU descriptor handles for resources.
-// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
+// offsets are the dynamic offsets of the group's buffers with
+// HasDynamicOffset, in binding order. The group is bound to the pipeline's
+// root parameters at the next draw (passBindGroups).
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
@@ -647,23 +751,8 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 		e.descriptorHeapsSet = true
 	}
 
-	// Get group mappings from the current pipeline.
-	var mappings []rootParamMapping
-	if e.pipeline != nil {
-		mappings = e.pipeline.groupMappings
-	}
-
-	// Bind the group using graphics root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, false, mappings)
+	e.bindGroups.set(index, bg, offsets)
 	e.encoder.trackBindGroupState(bg)
-
-	// TODO(#343): DX12 dynamic uniform buffer offsets require root CBV descriptors
-	// (not descriptor tables) so the GPU virtual address can be adjusted per-draw.
-	// Rust wgpu-hal uses DynamicBuffer::Uniform(gpu_base) with root descriptor slots
-	// and DynamicBuffer::Storage with root constants for storage buffer offsets.
-	// This requires restructuring CreatePipelineLayout to allocate root parameter
-	// slots for each dynamic buffer binding. See Rust wgpu-hal dx12/command.rs:1175-1236.
-	_ = offsets
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -676,19 +765,24 @@ func (e *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offs
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
-	// Get stride from pipeline if available
-	var stride uint32
-	if e.pipeline != nil && slot < uint32(len(e.pipeline.vertexStrides)) {
-		stride = e.pipeline.vertexStrides[slot]
+	if slot >= maxVertexBuffers {
+		return
 	}
+	// The stride comes from the pipeline, set before or after this call.
+	vb := &e.vertexBuffers[slot]
+	vb.BufferLocation = buf.gpuVA + offset
+	vb.SizeInBytes = uint32(buf.size - offset)
+	e.dirtyVertexBuffers |= 1 << slot
+}
 
-	vbv := d3d12.D3D12_VERTEX_BUFFER_VIEW{
-		BufferLocation: buf.gpuVA + offset,
-		SizeInBytes:    uint32(buf.size - offset),
-		StrideInBytes:  stride,
+// prepareVertexBuffers binds every vertex buffer slot that changed since it
+// was last bound. Called before each draw.
+func (e *RenderPassEncoder) prepareVertexBuffers() {
+	for e.dirtyVertexBuffers != 0 {
+		slot := bits.TrailingZeros32(e.dirtyVertexBuffers)
+		e.dirtyVertexBuffers &^= 1 << slot
+		e.encoder.cmdList.IASetVertexBuffers(uint32(slot), 1, &e.vertexBuffers[slot])
 	}
-
-	e.encoder.cmdList.IASetVertexBuffers(slot, 1, &vbv)
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -781,6 +875,7 @@ func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 		return
 	}
 
+	e.prepareDraw(int32(args.FirstVertex), args.FirstInstance)
 	e.encoder.cmdList.DrawInstanced(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
@@ -790,6 +885,7 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 		return
 	}
 
+	e.prepareDraw(args.BaseVertex, args.FirstInstance)
 	e.encoder.cmdList.DrawIndexedInstanced(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
 }
 
@@ -797,48 +893,38 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 // The buffer must contain a D3D12_DRAW_ARGUMENTS struct at the given offset
 // (vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation — 16 bytes).
 func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
-	buf, ok := buffer.(*Buffer)
-	if !ok || !e.encoder.isRecording || drawCount == 0 {
-		return
-	}
-	if !indirect.RangeFits(buf.size, offset, 16, drawCount) {
-		return
-	}
-	if _, ok := indirect.RecordOffset(offset, 16, drawCount-1); !ok {
-		return
-	}
-	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
-		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
-	}
-
-	e.encoder.cmdList.ExecuteIndirect(
-		e.encoder.device.cmdSignatures.draw,
-		drawCount, buf.raw, offset, nil, 0,
-	)
+	e.executeIndirectDraw(buffer, offset, drawCount, 16, e.encoder.device.cmdSignatures.draw)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 // The buffer must contain a D3D12_DRAW_INDEXED_ARGUMENTS struct at the given offset
 // (indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation — 20 bytes).
 func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	e.executeIndirectDraw(buffer, offset, drawCount, 20, e.encoder.device.cmdSignatures.drawIndexed)
+}
+
+// executeIndirectDraw runs drawCount indirect draws of recordSize-byte
+// argument records with the command signature.
+func (e *RenderPassEncoder) executeIndirectDraw(buffer hal.Buffer, offset uint64, drawCount uint32, recordSize uint64, signature *d3d12.ID3D12CommandSignature) {
 	buf, ok := buffer.(*Buffer)
 	if !ok || !e.encoder.isRecording || drawCount == 0 {
 		return
 	}
-	if !indirect.RangeFits(buf.size, offset, 20, drawCount) {
+	if !indirect.RangeFits(buf.size, offset, recordSize, drawCount) {
 		return
 	}
-	if _, ok := indirect.RecordOffset(offset, 20, drawCount-1); !ok {
+	if _, ok := indirect.RecordOffset(offset, recordSize, drawCount-1); !ok {
 		return
 	}
 	if before, target, needsBarrier := e.encoder.stateTracker.transitionBufferRead(buf, d3d12.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT); needsBarrier {
 		e.encoder.emitStateBarrierPlans([]stateBarrierPlan{{resource: buf, subresource: d3d12.D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before: before, after: target}})
 	}
 
-	e.encoder.cmdList.ExecuteIndirect(
-		e.encoder.device.cmdSignatures.drawIndexed,
-		drawCount, buf.raw, offset, nil, 0,
-	)
+	// The first vertex and instance live in the GPU buffer; without core
+	// rewriting the arguments into the special constants (Rust's
+	// INDIRECT_BUILTIN_UPDATE), Rust wgpu-hal passes zeros, as here.
+	e.prepareDraw(0, 0)
+	e.encoder.cmdList.ExecuteIndirect(signature, drawCount, buf.raw, offset, nil, 0)
 }
 
 // DrawIndirectCount draws using maxDrawCount when GPU count buffer is unavailable.
@@ -870,6 +956,15 @@ type ComputePassEncoder struct {
 	encoder            *CommandEncoder
 	pipeline           *ComputePipeline
 	descriptorHeapsSet bool // Tracks whether descriptor heaps have been bound
+
+	// specialConstants holds the values last written to the pipeline's
+	// special-constants root parameter (valid when specialConstantsSet).
+	specialConstants    specialConstants
+	specialConstantsSet bool
+
+	// bindGroups holds the bind groups set on the pass until a dispatch
+	// binds them to the pipeline's root parameters.
+	bindGroups passBindGroups
 
 	// boundStorageBuffers tracks storage buffers from SetBindGroup calls.
 	// Dispatch records them as UNORDERED_ACCESS in the command-local tracker so
@@ -911,6 +1006,9 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 	if p.rootSignature != nil {
 		e.encoder.cmdList.SetComputeRootSignature(p.rootSignature)
 	}
+	// A root signature change discards the root arguments.
+	e.specialConstantsSet = false
+	e.bindGroups.invalidate()
 
 	// Bind the global sampler descriptor heap to the sampler root parameter.
 	if p.samplerRootIndex >= 0 && e.encoder.device.samplerHeap != nil {
@@ -926,7 +1024,9 @@ func (e *ComputePassEncoder) SetPipeline(pipeline hal.ComputePipeline) {
 // SetBindGroup sets a bind group for compute operations.
 // index is the bind group slot (0-3 typically).
 // group contains the GPU descriptor handles for resources.
-// offsets are dynamic buffer offsets (used for dynamic uniform/storage buffers).
+// offsets are the dynamic offsets of the group's buffers with
+// HasDynamicOffset, in binding order. The group is bound to the pipeline's
+// root parameters at the next dispatch (passBindGroups).
 func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || !e.encoder.isRecording {
@@ -939,14 +1039,7 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		e.descriptorHeapsSet = true
 	}
 
-	// Get group mappings from the current pipeline.
-	var mappings []rootParamMapping
-	if e.pipeline != nil {
-		mappings = e.pipeline.groupMappings
-	}
-
-	// Bind the group using compute root descriptor tables.
-	e.encoder.bindGroupToRootTables(index, bg, true, mappings)
+	e.bindGroups.set(index, bg, offsets)
 	e.encoder.trackBindGroupState(bg)
 
 	// Track storage buffers from this bind group for state tracking.
@@ -955,11 +1048,6 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 	// storageBuffers is populated at CreateBindGroup time by matching layout
 	// entry types (BindingTypeStorageBuffer) with buffer binding handles.
 	e.boundStorageBuffers = append(e.boundStorageBuffers, bg.storageBuffers...)
-
-	// TODO(#343): DX12 dynamic buffer offsets — same as RenderPassEncoder.SetBindGroup.
-	// Requires root CBV slots for dynamic uniform buffers and root constants for
-	// dynamic storage buffer offsets. See Rust wgpu-hal dx12/command.rs:1175-1236.
-	_ = offsets
 }
 
 // Dispatch dispatches compute work.
@@ -975,6 +1063,7 @@ func (e *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		}
 	}
 	e.encoder.emitStateBarrierPlans(plans)
+	e.prepareDispatch(x, y, z)
 	e.encoder.cmdList.Dispatch(x, y, z)
 	e.insertUAVBarrier()
 
@@ -1007,6 +1096,10 @@ func (e *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) 
 	}
 	e.encoder.emitStateBarrierPlans(plans)
 
+	// The workgroup count lives in the GPU buffer; without core rewriting
+	// it into the special constants (Rust's INDIRECT_BUILTIN_UPDATE), Rust
+	// wgpu-hal passes zeros, as here.
+	e.prepareDispatch(0, 0, 0)
 	e.encoder.cmdList.ExecuteIndirect(
 		e.encoder.device.cmdSignatures.dispatch,
 		1, buf.raw, offset, nil, 0,
@@ -1087,27 +1180,6 @@ func (e *CommandEncoder) ensureDescriptorHeapsBound() {
 
 	if e.descriptorHeapCount > 0 {
 		e.cmdList.SetDescriptorHeaps(uint32(e.descriptorHeapCount), &e.descriptorHeaps[0])
-	}
-}
-
-// bindGroupToRootTables binds a BindGroup's CBV/SRV/UAV descriptor table to root parameters.
-// Samplers are handled separately via the global sampler heap (bound in SetPipeline).
-// isCompute determines whether to use compute or graphics root descriptor tables.
-// groupMappings provides the actual root parameter indices.
-func (e *CommandEncoder) bindGroupToRootTables(bindGroupIndex uint32, bg *BindGroup, isCompute bool, groupMappings []rootParamMapping) {
-	// Use mapping if available; fall back to bindGroupIndex for backwards compatibility.
-	cbvIdx := int(bindGroupIndex)
-	if int(bindGroupIndex) < len(groupMappings) {
-		cbvIdx = groupMappings[bindGroupIndex].cbvSrvUavIndex
-	}
-
-	// Set CBV/SRV/UAV descriptor table (includes sampler index buffer SRV).
-	if bg.gpuDescHandle.Ptr != 0 && cbvIdx >= 0 {
-		if isCompute {
-			e.cmdList.SetComputeRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
-		} else {
-			e.cmdList.SetGraphicsRootDescriptorTable(uint32(cbvIdx), bg.gpuDescHandle)
-		}
 	}
 }
 

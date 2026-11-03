@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"math"
+	"sync"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/raster"
-	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the software backend.
@@ -88,13 +89,15 @@ func (c *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
 	srcBuf, srcOK := src.(*Buffer)
-	dstTex, dstOK := dst.(*Texture)
-
-	if !srcOK || !dstOK {
+	dstTex := resolveTexture(dst)
+	if !srcOK || dstTex == nil {
 		return
 	}
 
 	for _, region := range regions {
+		if skipOtherMip("CopyBufferToTexture", region.TextureBase.MipLevel) {
+			continue
+		}
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
 
@@ -132,38 +135,45 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	}
 }
 
-// CopyTextureToBuffer copies data from a texture to a buffer.
+// CopyTextureToBuffer copies data from a texture to a buffer: layer by layer
+// and row by row from the texture origin, into rows bytesPerRow apart and
+// images rowsPerImage rows apart. Mirrors CopyBufferToTexture above.
 func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
-	srcTex, srcOK := src.(*Texture)
+	srcTex := resolveTexture(src)
 	dstBuf, dstOK := dst.(*Buffer)
-
-	if !srcOK || !dstOK {
+	if srcTex == nil || !dstOK {
 		return
 	}
 
 	for _, region := range regions {
+		if skipOtherMip("CopyTextureToBuffer", region.TextureBase.MipLevel) {
+			continue
+		}
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
 
 		bpp := formatBytesPerPixel(srcTex.format)
-		srcBytesPerRow := uint64(region.Size.Width) * bpp
-		dstBytesPerRow := uint64(region.BufferLayout.BytesPerRow)
-		if dstBytesPerRow == 0 {
-			dstBytesPerRow = srcBytesPerRow
+		rowBytes := uint64(region.Size.Width) * bpp
+		dstStride := uint64(region.BufferLayout.BytesPerRow)
+		if dstStride == 0 {
+			dstStride = rowBytes
 		}
-
-		dstOffset := region.BufferLayout.Offset
-		srcOffset := (uint64(region.TextureBase.Origin.Y)*uint64(srcTex.width) + uint64(region.TextureBase.Origin.X)) * bpp
+		dstRows := uint64(region.BufferLayout.RowsPerImage)
+		if dstRows == 0 {
+			dstRows = uint64(region.Size.Height)
+		}
 		srcStride := uint64(srcTex.width) * bpp
+		srcImage := srcStride * uint64(srcTex.height)
+		origin := region.TextureBase.Origin
+		layers := max(region.Size.DepthOrArrayLayers, 1)
 
-		for row := uint32(0); row < region.Size.Height; row++ {
-			srcStart := srcOffset + uint64(row)*srcStride
-			srcEnd := srcStart + srcBytesPerRow
-			dstStart := dstOffset + uint64(row)*dstBytesPerRow
-			dstEnd := dstStart + srcBytesPerRow
-
-			if srcEnd <= uint64(len(srcTex.data)) && dstEnd <= uint64(len(dstBuf.data)) {
-				copy(dstBuf.data[dstStart:dstEnd], srcTex.data[srcStart:srcEnd])
+		for z := uint32(0); z < layers; z++ {
+			for row := uint32(0); row < region.Size.Height; row++ {
+				srcStart := uint64(origin.Z+z)*srcImage + uint64(origin.Y+row)*srcStride + uint64(origin.X)*bpp
+				dstStart := region.BufferLayout.Offset + uint64(z)*dstRows*dstStride + uint64(row)*dstStride
+				if srcStart+rowBytes <= uint64(len(srcTex.data)) && dstStart+rowBytes <= uint64(len(dstBuf.data)) {
+					copy(dstBuf.data[dstStart:dstStart+rowBytes], srcTex.data[srcStart:srcStart+rowBytes])
+				}
 			}
 		}
 
@@ -172,29 +182,83 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	}
 }
 
-// CopyTextureToTexture copies data between textures.
+// CopyTextureToTexture copies data between textures, including a surface's
+// acquired texture on either side.
 func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
-	srcTex, srcOK := src.(*Texture)
-	dstTex, dstOK := dst.(*Texture)
-
-	if !srcOK || !dstOK {
+	srcTex, dstTex := resolveTexture(src), resolveTexture(dst)
+	if srcTex == nil || dstTex == nil {
 		return
 	}
-
 	for _, region := range regions {
-		srcTex.mu.RLock()
-		dstTex.mu.Lock()
-
-		bpp := formatBytesPerPixel(srcTex.format)
-		size := uint64(region.Size.Width) * uint64(region.Size.Height) * uint64(region.Size.DepthOrArrayLayers) * bpp
-
-		if size <= uint64(len(srcTex.data)) && size <= uint64(len(dstTex.data)) {
-			copy(dstTex.data[:size], srcTex.data[:size])
-		}
-
-		dstTex.mu.Unlock()
-		srcTex.mu.RUnlock()
+		copyTextureRegion(srcTex, dstTex, region)
 	}
+}
+
+// copyTextureRegion copies one region as WebGPU copyTextureToTexture does:
+// for each array layer (Origin.Z) and each row, Size.Width texels from the
+// source origin to the destination origin, the source rows at the source
+// texture's pitch and the destination rows at the destination's. A
+// block-compressed format is stored and addressed per block at its block
+// copy size, as WriteTexture does, so its rows copy the same way.
+//
+// The software backend stores mip level 0 only (CreateTexture), so a region
+// of another mip level copies nothing rather than overwriting level 0 (see
+// skipOtherMip).
+func copyTextureRegion(src, dst *Texture, region hal.TextureCopy) {
+	if skipOtherMip("CopyTextureToTexture", region.SrcBase.MipLevel, region.DstBase.MipLevel) {
+		return
+	}
+	if src == dst {
+		dst.mu.Lock()
+		defer dst.mu.Unlock()
+	} else {
+		src.mu.RLock()
+		defer src.mu.RUnlock()
+		dst.mu.Lock()
+		defer dst.mu.Unlock()
+	}
+
+	bpp := formatBytesPerPixel(dst.format)
+	rowBytes := uint64(region.Size.Width) * bpp
+	srcStride := uint64(src.width) * bpp
+	srcImage := srcStride * uint64(src.height)
+	dstStride := uint64(dst.width) * bpp
+	dstImage := dstStride * uint64(dst.height)
+	so, do := region.SrcBase.Origin, region.DstBase.Origin
+	layers := max(region.Size.DepthOrArrayLayers, 1)
+
+	for z := uint32(0); z < layers; z++ {
+		for row := uint32(0); row < region.Size.Height; row++ {
+			srcStart := uint64(so.Z+z)*srcImage + uint64(so.Y+row)*srcStride + uint64(so.X)*bpp
+			dstStart := uint64(do.Z+z)*dstImage + uint64(do.Y+row)*dstStride + uint64(do.X)*bpp
+			if srcStart+rowBytes <= uint64(len(src.data)) && dstStart+rowBytes <= uint64(len(dst.data)) {
+				copy(dst.data[dstStart:dstStart+rowBytes], src.data[srcStart:srcStart+rowBytes])
+			}
+		}
+	}
+}
+
+// otherMipLogged makes the Debug log of a skipped transfer appear once per
+// process instead of once per command.
+var otherMipLogged sync.Once
+
+// skipOtherMip reports whether a texture transfer touches a mip level other
+// than 0 on either side. The software backend stores level 0 only
+// (CreateTexture allocates width x height x layers), so such a transfer
+// writes nothing: a destination level above 0 has no storage, and reading
+// level 0 for a missing source level would copy the wrong data. op names the
+// transfer in the log. Mip-chain storage is P1-SW-026.
+func skipOtherMip(op string, mipLevels ...uint32) bool {
+	for _, level := range mipLevels {
+		if level != 0 {
+			otherMipLogged.Do(func() {
+				hal.Logger().Debug("software: transfer of a mip level above 0 skipped: only mip level 0 is stored (P1-SW-026)",
+					"op", op, "mipLevel", level)
+			})
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveQuerySet is a no-op (query sets not supported in software backend).
@@ -376,11 +440,92 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 				if desc.DepthStencilAttachment.StencilLoadOp == gputypes.LoadOpClear {
 					r.passStencilBuffer.Clear(uint8(desc.DepthStencilAttachment.StencilClearValue))
 				}
+				r.passDepthBuffer = loadDepthAttachment(desc.DepthStencilAttachment, dsView.texture)
 			}
 		}
 	}
 
 	return r
+}
+
+// loadDepthAttachment returns the depth buffer every draw of a pass shares:
+// cleared to the clear value with LoadOpClear, otherwise loaded from the
+// attachment texture (a read-only depth aspect always loads). nil when the
+// format has no depth aspect.
+func loadDepthAttachment(ds *hal.RenderPassDepthStencilAttachment, tex *Texture) *raster.DepthBuffer {
+	if !tex.format.HasDepth() {
+		return nil
+	}
+	buf := raster.NewDepthBuffer(int(tex.width), int(tex.height))
+	if ds.DepthLoadOp == gputypes.LoadOpClear && !ds.DepthReadOnly {
+		buf.Clear(ds.DepthClearValue)
+		return buf
+	}
+	tex.mu.RLock()
+	defer tex.mu.RUnlock()
+	for y := range int(tex.height) {
+		for x := range int(tex.width) {
+			if v, ok := readDepthTexel(tex, x, y); ok {
+				buf.Set(x, y, v)
+			}
+		}
+	}
+	return buf
+}
+
+// storeDepthAttachment writes the pass's depth buffer back to the attachment
+// texture with StoreOpStore, unless the depth aspect is read-only.
+func storeDepthAttachment(ds *hal.RenderPassDepthStencilAttachment, buf *raster.DepthBuffer) {
+	if ds == nil || buf == nil || ds.DepthReadOnly || ds.DepthStoreOp != gputypes.StoreOpStore {
+		return
+	}
+	view, ok := ds.View.(*TextureView)
+	if !ok || view.texture == nil {
+		return
+	}
+	tex := view.texture
+	tex.mu.Lock()
+	defer tex.mu.Unlock()
+	for y := range min(int(tex.height), buf.Height()) {
+		for x := range min(int(tex.width), buf.Width()) {
+			writeDepthTexel(tex, x, y, buf.Get(x, y))
+		}
+	}
+}
+
+// readDepthTexel decodes the depth of texel (x, y) of mip 0, layer 0: 16-bit
+// unorm for Depth16Unorm, otherwise a float32 in the texel's first four
+// bytes (Depth24Plus is opaque in WebGPU, so a float32 is a valid encoding).
+// The caller holds the texture lock.
+func readDepthTexel(tex *Texture, x, y int) (float32, bool) {
+	bpp := int(formatBytesPerPixel(tex.format))
+	off := (y*int(tex.width) + x) * bpp
+	if tex.format == gputypes.TextureFormatDepth16Unorm {
+		if off+2 > len(tex.data) {
+			return 0, false
+		}
+		return float32(binary.LittleEndian.Uint16(tex.data[off:])) / 65535, true
+	}
+	if bpp < 4 || off+4 > len(tex.data) {
+		return 0, false
+	}
+	return math.Float32frombits(binary.LittleEndian.Uint32(tex.data[off:])), true
+}
+
+// writeDepthTexel encodes depth into texel (x, y) as readDepthTexel decodes
+// it. The caller holds the texture lock.
+func writeDepthTexel(tex *Texture, x, y int, depth float32) {
+	bpp := int(formatBytesPerPixel(tex.format))
+	off := (y*int(tex.width) + x) * bpp
+	if tex.format == gputypes.TextureFormatDepth16Unorm {
+		if off+2 <= len(tex.data) {
+			binary.LittleEndian.PutUint16(tex.data[off:], raster.FloatToUnorm16(depth))
+		}
+		return
+	}
+	if bpp >= 4 && off+4 <= len(tex.data) {
+		binary.LittleEndian.PutUint32(tex.data[off:], math.Float32bits(depth))
+	}
 }
 
 // BeginComputePass begins a compute pass and returns an encoder.
@@ -436,6 +581,11 @@ type RenderPassEncoder struct {
 	// (clip shape) would be lost before pass 2 (content draw).
 	passStencilBuffer *raster.StencilBuffer
 
+	// passDepthBuffer is the depth attachment's contents for the pass: loaded
+	// or cleared at BeginRenderPass, shared by every draw, written back at End
+	// (P1-SW-015). nil without a depth aspect.
+	passDepthBuffer *raster.DepthBuffer
+
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
 	cleared bool
@@ -486,8 +636,7 @@ func (r *RenderPassEncoder) End() {
 		src.mu.RUnlock()
 	}
 
-	// Depth/stencil attachment handling (simplified - just clear if needed)
-	r.clearDepthStencilAttachment()
+	storeDepthAttachment(r.desc.DepthStencilAttachment, r.passDepthBuffer)
 }
 
 // applyClear clears color attachments that have LoadOp=Clear.
@@ -502,20 +651,6 @@ func (r *RenderPassEncoder) applyClear() {
 			}
 		}
 	}
-}
-
-// clearDepthStencilAttachment clears the depth/stencil attachment if present and LoadOp is Clear.
-func (r *RenderPassEncoder) clearDepthStencilAttachment() {
-	ds := r.desc.DepthStencilAttachment
-	if ds == nil || ds.DepthLoadOp != gputypes.LoadOpClear {
-		return
-	}
-	view, ok := ds.View.(*TextureView)
-	if !ok || view.texture == nil {
-		return
-	}
-	val := ds.DepthClearValue
-	view.texture.Clear(gputypes.Color{R: float64(val), G: float64(val), B: float64(val), A: 1.0})
 }
 
 // SetPipeline stores the render pipeline for subsequent draw calls.
@@ -657,11 +792,68 @@ func (r *RenderPassEncoder) drawVertexIndex(firstVertex, pos uint32) uint32 {
 	return firstVertex + pos
 }
 
-// DrawIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+// Indirect record sizes in bytes: DrawIndirectArgs (vertexCount,
+// instanceCount, firstVertex, firstInstance) and DrawIndexedIndirectArgs
+// (indexCount, instanceCount, firstIndex, baseVertex, firstInstance).
+const (
+	drawIndirectRecordSize        = 16
+	drawIndexedIndirectRecordSize = 20
+)
 
-// DrawIndexedIndirect is a no-op.
-func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+// readIndirectArgs reads the first n (at most 5) little-endian u32 words at
+// offset in buf. It runs when the command executes, so it sees what earlier
+// commands (copies, compute passes, the indirect validation pass) wrote
+// there. ok is false when buf is not a software buffer or the range lies
+// outside it.
+func readIndirectArgs(buf hal.Buffer, offset uint64, n int) (args [5]uint32, ok bool) {
+	b, isBuf := buf.(*Buffer)
+	if !isBuf || n > len(args) {
+		return args, false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	end := offset + uint64(n)*4
+	if end < offset || end > uint64(len(b.data)) {
+		return args, false
+	}
+	for i := range n {
+		args[i] = binary.LittleEndian.Uint32(b.data[offset+uint64(i)*4:])
+	}
+	return args, true
+}
+
+// DrawIndirect draws drawCount consecutive DrawIndirectArgs records starting
+// at offset, each as a Draw with the arguments read from the buffer.
+func (r *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	for i := range uint64(drawCount) {
+		args, ok := readIndirectArgs(buffer, offset+i*drawIndirectRecordSize, 4)
+		if !ok {
+			slog.Warn("software: DrawIndirect record outside the buffer", "offset", offset+i*drawIndirectRecordSize)
+			return
+		}
+		r.Draw(gputypes.DrawArgs{
+			VertexCount: args[0], InstanceCount: args[1], FirstVertex: args[2], FirstInstance: args[3],
+		})
+	}
+}
+
+// DrawIndexedIndirect draws drawCount consecutive DrawIndexedIndirectArgs
+// records starting at offset, each as a DrawIndexed with the arguments read
+// from the buffer. The index buffer and its offset are those set by
+// SetIndexBuffer, as for DrawIndexed.
+func (r *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	for i := range uint64(drawCount) {
+		args, ok := readIndirectArgs(buffer, offset+i*drawIndexedIndirectRecordSize, 5)
+		if !ok {
+			slog.Warn("software: DrawIndexedIndirect record outside the buffer", "offset", offset+i*drawIndexedIndirectRecordSize)
+			return
+		}
+		r.DrawIndexed(gputypes.DrawIndexedArgs{
+			IndexCount: args[0], InstanceCount: args[1], FirstIndex: args[2],
+			BaseVertex: int32(args[3]), FirstInstance: args[4],
+		})
+	}
+}
 
 // DrawIndirectCount is a no-op (count-buffer indirect not supported in software backend).
 func (r *RenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
@@ -753,42 +945,8 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 	entryPoint := c.pipeline.entryPoint
 
-	// Build the execution context with buffer bindings from all bind groups.
-	ctx := &shader.ExecutionContext{
-		Buffers: make(map[shader.BindingKey][]byte),
-	}
-
-	for groupIdx, bg := range c.bindGroups {
-		if bg == nil {
-			continue
-		}
-		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
-		dynIdx := 0
-		for bindingIdx, bs := range bg.bufferBindings {
-			if bs.buf == nil {
-				continue
-			}
-			bs.buf.mu.Lock()
-			data := bs.buf.data
-			off := bs.offset
-			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
-				off += uint64(bg.dynamicOffsets[dynIdx])
-				dynIdx++
-			}
-			end := uint64(len(data))
-			if bs.size > 0 && off+bs.size <= end {
-				end = off + bs.size
-			}
-			if off < uint64(len(data)) {
-				data = data[off:end]
-			}
-			ctx.Buffers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = data
-			bs.buf.mu.Unlock()
-		}
-	}
+	// Build the execution context with the resources of all bind groups.
+	ctx := bindGroupExecutionContext(&c.bindGroups)
 
 	slog.Debug("software: ComputePassEncoder.Dispatch",
 		"entryPoint", entryPoint,
@@ -800,9 +958,15 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	}
 }
 
-// DispatchIndirect is not yet implemented in the software backend.
-// Indirect dispatch requires reading the dispatch parameters from a GPU buffer,
-// which is straightforward but not needed for the current use cases.
-func (c *ComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64) {
-	slog.Warn("software: DispatchIndirect not implemented")
+// DispatchIndirect reads the workgroup counts (x, y, z) from buffer at
+// offset when it executes and dispatches them. Core has already replaced
+// counts above maxComputeWorkgroupsPerDimension with zeros through its
+// indirect validation pass, as on the GPU backends.
+func (c *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
+	args, ok := readIndirectArgs(buffer, offset, 3)
+	if !ok {
+		slog.Warn("software: DispatchIndirect arguments outside the buffer", "offset", offset)
+		return
+	}
+	c.Dispatch(args[0], args[1], args[2])
 }

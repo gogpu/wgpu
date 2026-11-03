@@ -4,6 +4,7 @@ package shader
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"testing"
 )
@@ -198,9 +199,9 @@ func TestOpSConvertUConvertFConvert(t *testing.T) {
 	t.Fatal("output not found")
 }
 
-// TestOpKill verifies OpKill terminates fragment execution without error.
-// Regression: if OpKill returned an error, all discarded fragments would
-// cause render pipeline failures.
+// TestOpKill verifies OpKill ends the invocation with ErrDiscarded, so the
+// caller writes nothing for the fragment. It used to return nil, and the
+// caller then wrote the unwritten (zero) output color (P1-SW-016).
 func TestOpKill(t *testing.T) {
 	inst := spirvInst
 	str := spirvString
@@ -248,10 +249,8 @@ func TestOpKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseModule failed: %v", err)
 	}
-	// OpKill should return nil error (not crash or error out).
-	_, err = m.Execute("fs_main", nil)
-	if err != nil {
-		t.Errorf("OpKill should not produce error, got: %v", err)
+	if _, err = m.Execute("fs_main", nil); !errors.Is(err, ErrDiscarded) {
+		t.Errorf("OpKill: err = %v, want ErrDiscarded", err)
 	}
 }
 
@@ -1280,19 +1279,19 @@ func TestReadValueFromBufferShortBuffers(t *testing.T) {
 	short := []byte{0, 0} // Only 2 bytes, need 4
 
 	// Signed int on short buffer returns zero.
-	got := interp.readValueFromBuffer(short, 0, m.Types[1])
+	got := interp.readValueFromBuffer(short, 0, m.Types[1], 0)
 	if got.Tag != TagInt32 || got.AsInt32() != 0 {
 		t.Errorf("short signed int = %v, want ValInt(0)", got)
 	}
 
 	// Unsigned int on short buffer returns zero.
-	got = interp.readValueFromBuffer(short, 0, m.Types[2])
+	got = interp.readValueFromBuffer(short, 0, m.Types[2], 0)
 	if got.Tag != TagUint32 || got.AsUint32() != 0 {
 		t.Errorf("short unsigned int = %v, want ValUint(0)", got)
 	}
 
 	// Bool on short buffer returns false.
-	got = interp.readValueFromBuffer(short, 0, m.Types[3])
+	got = interp.readValueFromBuffer(short, 0, m.Types[3], 0)
 	if v, ok := testIsBool(got); !ok || v != false {
 		t.Errorf("short bool = %v, want false", got)
 	}

@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -19,22 +20,49 @@ func (*testHALResource) Destroy() {}
 
 func (*testHALResource) NativeHandle() uintptr { return 0 }
 
+// captureRenderPass records the commands core sends to the backend pass.
 type captureRenderPass struct {
 	*noop.RenderPassEncoder
-	executed []hal.RenderBundle
+	calls []string
 }
 
-func (p *captureRenderPass) ExecuteBundle(bundle hal.RenderBundle) {
-	p.executed = append(p.executed, bundle)
+func (p *captureRenderPass) SetPipeline(hal.RenderPipeline) {
+	p.calls = append(p.calls, "SetPipeline")
+}
+
+func (p *captureRenderPass) SetBindGroup(index uint32, _ hal.BindGroup, offsets []uint32) {
+	p.calls = append(p.calls, fmt.Sprintf("SetBindGroup(%d, %v)", index, offsets))
+}
+
+func (p *captureRenderPass) SetVertexBuffer(slot uint32, _ hal.Buffer, offset uint64) {
+	p.calls = append(p.calls, fmt.Sprintf("SetVertexBuffer(%d, %d)", slot, offset))
+}
+
+func (p *captureRenderPass) SetIndexBuffer(_ hal.Buffer, format gputypes.IndexFormat, offset uint64) {
+	p.calls = append(p.calls, fmt.Sprintf("SetIndexBuffer(%v, %d)", format, offset))
+}
+
+func (p *captureRenderPass) Draw(args gputypes.DrawArgs) {
+	p.calls = append(p.calls, fmt.Sprintf("Draw(%d)", args.VertexCount))
+}
+
+func (p *captureRenderPass) DrawIndexed(args gputypes.DrawIndexedArgs) {
+	p.calls = append(p.calls, fmt.Sprintf("DrawIndexed(%d)", args.IndexCount))
 }
 
 type captureCommandEncoder struct {
 	*noop.CommandEncoder
-	resolved       int
-	querySet       hal.QuerySet
-	buffer         hal.Buffer
-	renderPass     *captureRenderPass
-	renderPassDesc *hal.RenderPassDescriptor
+	resolved        int
+	querySet        hal.QuerySet
+	buffer          hal.Buffer
+	renderPass      *captureRenderPass
+	renderPassDesc  *hal.RenderPassDescriptor
+	computePassDesc *hal.ComputePassDescriptor
+}
+
+func (e *captureCommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	e.computePassDesc = desc
+	return &noop.ComputePassEncoder{}
 }
 
 func (e *captureCommandEncoder) ResolveQuerySet(querySet hal.QuerySet, _, _ uint32, buffer hal.Buffer, _ uint64) {
@@ -53,97 +81,23 @@ func (e *captureCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) 
 
 type captureDevice struct {
 	hal.Device
-	commandEncoder         hal.CommandEncoder
-	renderBundleEncoder    hal.RenderBundleEncoder
-	renderBundleEncoderErr error
-	destroyedRenderBundles int
+	commandEncoder hal.CommandEncoder
 }
 
 func (d *captureDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	return d.commandEncoder, nil
 }
 
-func (d *captureDevice) CreateRenderBundleEncoder(*hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
-	return d.renderBundleEncoder, d.renderBundleEncoderErr
-}
-
-func (d *captureDevice) DestroyRenderBundle(hal.RenderBundle) { d.destroyedRenderBundles++ }
-
 func newCaptureDevice(h *captureDevice) *Device {
 	limits := DefaultLimits()
-	return &Device{core: core.NewDevice(h, nil, 0, limits, "query-render-bundle-test")}
+	features := gputypes.Features(gputypes.FeatureTimestampQuery)
+	return &Device{core: core.NewDevice(h, nil, features, limits, "query-render-bundle-test")}
 }
 
 func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
 	return &QuerySet{
 		core:   core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
 		device: device,
-	}
-}
-
-type testRenderBundleEncoder struct {
-	setPipelineCalls     int
-	setBindGroupCalls    int
-	setVertexBufferCalls int
-	setIndexBufferCalls  int
-	drawCalls            int
-	drawIndexedCalls     int
-	finishCalls          int
-	bundle               hal.RenderBundle
-}
-
-func (e *testRenderBundleEncoder) SetPipeline(hal.RenderPipeline) { e.setPipelineCalls++ }
-func (e *testRenderBundleEncoder) SetBindGroup(uint32, hal.BindGroup, []uint32) {
-	e.setBindGroupCalls++
-}
-func (e *testRenderBundleEncoder) SetVertexBuffer(uint32, hal.Buffer, uint64) {
-	e.setVertexBufferCalls++
-}
-func (e *testRenderBundleEncoder) SetIndexBuffer(hal.Buffer, gputypes.IndexFormat, uint64) {
-	e.setIndexBufferCalls++
-}
-func (e *testRenderBundleEncoder) Draw(gputypes.DrawArgs) { e.drawCalls++ }
-func (e *testRenderBundleEncoder) DrawIndexed(gputypes.DrawIndexedArgs) {
-	e.drawIndexedCalls++
-}
-func (e *testRenderBundleEncoder) Finish() hal.RenderBundle {
-	e.finishCalls++
-	return e.bundle
-}
-
-func (e *testRenderBundleEncoder) commandCalls() int {
-	return e.setPipelineCalls + e.setBindGroupCalls + e.setVertexBufferCalls +
-		e.setIndexBufferCalls + e.drawCalls + e.drawIndexedCalls
-}
-
-func TestRenderBundleEncoderDescriptorToHAL(t *testing.T) {
-	tests := []struct {
-		name string
-		desc *RenderBundleEncoderDescriptor
-	}{
-		{name: "nil"},
-		{name: "populated", desc: &RenderBundleEncoderDescriptor{
-			Label: "encoder", ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
-			DepthStencilFormat: gputypes.TextureFormatDepth24Plus, SampleCount: 4,
-			DepthReadOnly: true, StencilReadOnly: true,
-		}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.desc.toHAL()
-			if tt.desc == nil {
-				if got != nil {
-					t.Fatalf("toHAL() = %+v, want nil", got)
-				}
-				return
-			}
-			if got.Label != tt.desc.Label || got.SampleCount != tt.desc.SampleCount ||
-				got.DepthReadOnly != tt.desc.DepthReadOnly || got.StencilReadOnly != tt.desc.StencilReadOnly ||
-				got.DepthStencilFormat != tt.desc.DepthStencilFormat || len(got.ColorFormats) != 1 {
-				t.Fatalf("toHAL() = %+v", got)
-			}
-		})
 	}
 }
 
@@ -160,10 +114,13 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 		name    string
 		writes  *RenderPassTimestampWrites
 		wantNil bool
+		wantErr bool
 	}{
 		{name: "absent", writes: nil, wantNil: true},
-		{name: "nil query set", writes: &RenderPassTimestampWrites{}, wantNil: true},
-		{name: "released query set", writes: &RenderPassTimestampWrites{QuerySet: released}, wantNil: true},
+		// A query set that is missing or released is a validation error, as
+		// in Rust wgpu-core (validate_pass_timestamp_writes, check_is_valid).
+		{name: "nil query set", writes: &RenderPassTimestampWrites{EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "released query set", writes: &RenderPassTimestampWrites{QuerySet: released, EndOfPassWriteIndex: &end}, wantErr: true},
 		{
 			name: "active query set",
 			writes: &RenderPassTimestampWrites{
@@ -186,6 +143,13 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 				t.Fatal(err)
 			}
 			pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{TimestampWrites: tt.writes})
+			if tt.wantErr {
+				if err == nil {
+					pass.End()
+					t.Fatal("BeginRenderPass succeeded, want a timestampWrites error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,134 +171,128 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 	}
 }
 
-func TestRenderBundleEncoderCommandsAfterFinish(t *testing.T) {
-	resource := &testHALResource{}
-	tests := []struct {
-		name string
-		call func(*RenderBundleEncoder)
-	}{
-		{name: "SetPipeline", call: func(e *RenderBundleEncoder) { e.SetPipeline(&RenderPipeline{hal: resource}) }},
-		{name: "SetBindGroup", call: func(e *RenderBundleEncoder) { e.SetBindGroup(0, &BindGroup{hal: resource}, nil) }},
-		{name: "SetVertexBuffer", call: func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, &Buffer{}, 0) }},
-		{name: "SetIndexBuffer", call: func(e *RenderBundleEncoder) { e.SetIndexBuffer(&Buffer{}, gputypes.IndexFormatUint16, 0) }},
-		{name: "Draw", call: func(e *RenderBundleEncoder) { e.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) }},
-		{name: "DrawIndexed", call: func(e *RenderBundleEncoder) { e.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) }},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &testRenderBundleEncoder{bundle: resource}
-			encoder := &RenderBundleEncoder{hal: h}
-			tt.call(encoder)
-			if got := h.commandCalls(); got != 1 {
-				t.Fatalf("HAL command calls before Finish = %d, want 1", got)
-			}
-			if _, err := encoder.Finish(nil); err != nil {
-				t.Fatalf("Finish() error = %v", err)
-			}
-			tt.call(encoder)
-			if got := h.commandCalls(); got != 1 {
-				t.Fatalf("HAL command calls after Finish = %d, want 1", got)
-			}
-		})
-	}
-}
-
-func TestRenderBundleEncoderFinish(t *testing.T) {
-	resource := &testHALResource{}
-	tests := []struct {
-		name      string
-		desc      *RenderBundleDescriptor
-		wantLabel string
-	}{
-		{name: "nil descriptor", desc: nil},
-		{name: "label", desc: &RenderBundleDescriptor{Label: "test bundle"}, wantLabel: "test bundle"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &testRenderBundleEncoder{bundle: resource}
-			encoder := &RenderBundleEncoder{hal: h}
-			bundle, err := encoder.Finish(tt.desc)
-			if err != nil {
-				t.Fatalf("Finish() error = %v", err)
-			}
-			if bundle == nil || bundle.hal != resource || bundle.label != tt.wantLabel {
-				t.Fatalf("Finish() bundle = %+v", bundle)
-			}
-			if h.finishCalls != 1 {
-				t.Fatalf("HAL Finish calls = %d, want 1", h.finishCalls)
-			}
-			if second, secondErr := encoder.Finish(nil); second != nil || !errors.Is(secondErr, ErrReleased) {
-				t.Fatalf("second Finish() = (%v, %v), want (nil, ErrReleased)", second, secondErr)
-			}
-		})
-	}
-}
-
-func TestDeviceCreateRenderBundleEncoder(t *testing.T) {
-	resource := &testHALResource{}
-	tests := []struct {
-		name       string
-		desc       *RenderBundleEncoderDescriptor
-		released   bool
-		halErr     error
-		wantErr    bool
-		wantResult bool
-	}{
-		{name: "nil descriptor", wantErr: true},
-		{name: "released device", desc: &RenderBundleEncoderDescriptor{}, released: true, wantErr: true},
-		{name: "HAL error", desc: &RenderBundleEncoderDescriptor{}, halErr: errors.New("create failed"), wantErr: true},
-		{name: "success", desc: &RenderBundleEncoderDescriptor{}, wantResult: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &testRenderBundleEncoder{bundle: resource}
-			deviceHAL := &captureDevice{Device: &noop.Device{}, renderBundleEncoder: h, renderBundleEncoderErr: tt.halErr}
-			device := newCaptureDevice(deviceHAL)
-			if tt.released {
-				device.released.Store(true)
-			}
-			got, err := device.CreateRenderBundleEncoder(tt.desc)
-			if (err != nil) != tt.wantErr || (got != nil) != tt.wantResult {
-				t.Fatalf("CreateRenderBundleEncoder() = (%v, %v)", got, err)
-			}
-		})
-	}
-}
-
-func TestRenderBundleRelease(t *testing.T) {
+// TestBeginComputePassTimestampWrites checks that compute pass timestampWrites
+// reach the HAL pass unchanged and that invalid ones are rejected before the
+// HAL pass begins, as Rust wgpu-core validate_pass_timestamp_writes does.
+func TestBeginComputePassTimestampWrites(t *testing.T) {
+	begin, end, outOfRange := uint32(0), uint32(3), uint32(4)
 	resource := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}}
 	device := newCaptureDevice(h)
-	device.queue = &Queue{}
-	device.queue.lastSubmissionIndex.Store(7)
-	bundle := &RenderBundle{hal: resource, device: device}
-	bundle.Release()
-	bundle.Release()
-	if got := h.destroyedRenderBundles; got != 0 {
-		t.Fatalf("early HAL destroy calls = %d", got)
+	active := newTestQuerySet(resource, device)
+	released := newTestQuerySet(resource, device)
+	released.released = true
+	occlusion := &QuerySet{
+		core:   core.NewQuerySet(resource, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
+		device: device,
 	}
-	device.destroyQueue().Triage(6)
-	if got := h.destroyedRenderBundles; got != 0 {
-		t.Fatalf("in-flight HAL destroy calls = %d", got)
+	other := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
+	foreign := newTestQuerySet(resource, other)
+
+	tests := []struct {
+		name    string
+		writes  *ComputePassTimestampWrites
+		wantErr bool
+	}{
+		{name: "absent"},
+		{name: "both indices", writes: &ComputePassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &begin, EndOfPassWriteIndex: &end}},
+		{name: "end only", writes: &ComputePassTimestampWrites{QuerySet: active, EndOfPassWriteIndex: &end}},
+		{name: "nil query set", writes: &ComputePassTimestampWrites{EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "released query set", writes: &ComputePassTimestampWrites{QuerySet: released, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "occlusion query set", writes: &ComputePassTimestampWrites{QuerySet: occlusion, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "query set of another device", writes: &ComputePassTimestampWrites{QuerySet: foreign, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "index out of range", writes: &ComputePassTimestampWrites{QuerySet: active, EndOfPassWriteIndex: &outOfRange}, wantErr: true},
+		{name: "equal indices", writes: &ComputePassTimestampWrites{QuerySet: active, BeginningOfPassWriteIndex: &end, EndOfPassWriteIndex: &end}, wantErr: true},
+		{name: "no index", writes: &ComputePassTimestampWrites{QuerySet: active}, wantErr: true},
 	}
-	device.destroyQueue().Triage(7)
-	device.destroyQueue().Triage(7)
-	(&RenderBundle{}).Release()
-	(&RenderBundle{hal: resource}).Release()
-	if got := h.destroyedRenderBundles; got != 1 {
-		t.Fatalf("HAL destroy calls = %d, want 1", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
+			h.commandEncoder = command
+			encoder, err := device.CreateCommandEncoder(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pass, err := encoder.BeginComputePass(&ComputePassDescriptor{TimestampWrites: tt.writes})
+			if tt.wantErr {
+				if err == nil {
+					pass.End()
+					t.Fatal("BeginComputePass succeeded, want a timestampWrites error")
+				}
+				if command.computePassDesc != nil {
+					t.Fatal("HAL BeginComputePass was called for invalid timestampWrites")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pass.End()
+			if command.computePassDesc == nil {
+				t.Fatal("HAL BeginComputePass was not called")
+			}
+			got := command.computePassDesc.TimestampWrites
+			if tt.writes == nil {
+				if got != nil {
+					t.Fatalf("TimestampWrites = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.QuerySet != resource ||
+				got.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex ||
+				got.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
+				t.Fatalf("TimestampWrites = %+v", got)
+			}
+		})
 	}
-	var nilRenderBundle *RenderBundle
-	nilRenderBundle.Release()
 }
 
-func TestResolveQuerySetAndExecuteBundles(t *testing.T) {
+// TestBeginComputePassTimestampWritesNeedsFeature checks the feature gate:
+// a device without FeatureTimestampQuery rejects timestampWrites.
+func TestBeginComputePassTimestampWritesNeedsFeature(t *testing.T) {
+	end := uint32(1)
 	resource := &testHALResource{}
-	pass := &captureRenderPass{RenderPassEncoder: &noop.RenderPassEncoder{}}
-	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}, renderPass: pass}
+	h := &captureDevice{Device: &noop.Device{}, commandEncoder: &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}}
+	device := &Device{core: core.NewDevice(h, nil, 0, DefaultLimits(), "no-timestamp-feature")}
+	querySet := newTestQuerySet(resource, device)
+	encoder, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, err := encoder.BeginComputePass(&ComputePassDescriptor{
+		TimestampWrites: &ComputePassTimestampWrites{QuerySet: querySet, EndOfPassWriteIndex: &end},
+	})
+	if err == nil {
+		pass.End()
+		t.Fatal("BeginComputePass succeeded without FeatureTimestampQuery")
+	}
+	var featureErr *core.FeatureError
+	if !errors.As(err, &featureErr) {
+		t.Fatalf("error = %v, want a *core.FeatureError", err)
+	}
+}
+
+// TestQueueGetTimestampPeriod checks that the queue reports the HAL period.
+func TestQueueGetTimestampPeriod(t *testing.T) {
+	if got := (&Queue{hal: &periodQueue{period: 83.333}}).GetTimestampPeriod(); got != 83.333 {
+		t.Errorf("GetTimestampPeriod() = %v, want 83.333", got)
+	}
+	if got := (&Queue{}).GetTimestampPeriod(); got != 1 {
+		t.Errorf("GetTimestampPeriod() without a HAL queue = %v, want 1", got)
+	}
+}
+
+type periodQueue struct {
+	noop.Queue
+	period float32
+}
+
+func (q *periodQueue) GetTimestampPeriod() float32 { return q.period }
+
+func TestResolveQuerySetDelegates(t *testing.T) {
+	resource := &testHALResource{}
+	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
 	h := &captureDevice{Device: &noop.Device{}, commandEncoder: command}
 	device := newCaptureDevice(h)
 
@@ -350,17 +308,6 @@ func TestResolveQuerySetAndExecuteBundles(t *testing.T) {
 	encoder.ResolveQuerySet(querySet, 0, 1, buffer, 0)
 	if command.resolved != 1 || command.querySet != resource || command.buffer == nil {
 		t.Fatalf("ResolveQuerySet delegation = (%d, %v, %v)", command.resolved, command.querySet, command.buffer)
-	}
-
-	renderPass, err := encoder.BeginRenderPass(&RenderPassDescriptor{})
-	if err != nil {
-		t.Fatalf("BeginRenderPass() error = %v", err)
-	}
-	released := &RenderBundle{hal: resource}
-	released.released.Store(true)
-	renderPass.ExecuteBundles(nil, released, &RenderBundle{}, &RenderBundle{hal: resource})
-	if len(pass.executed) != 1 || pass.executed[0] != resource {
-		t.Fatalf("executed bundles = %v, want one active bundle", pass.executed)
 	}
 }
 
@@ -462,20 +409,6 @@ func TestResolveQuerySetRecordsErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestExecuteBundlesWithoutRawPass(t *testing.T) {
-	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
-	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}, commandEncoder: command})
-	encoder, err := device.CreateCommandEncoder(nil)
-	if err != nil {
-		t.Fatalf("CreateCommandEncoder() error = %v", err)
-	}
-	renderPass, err := encoder.BeginRenderPass(&RenderPassDescriptor{})
-	if err != nil {
-		t.Fatalf("BeginRenderPass() error = %v", err)
-	}
-	renderPass.ExecuteBundles(&RenderBundle{hal: &testHALResource{}})
 }
 
 func TestCreationWithoutHALDevice(t *testing.T) {

@@ -13,7 +13,9 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan/memory"
 	"github.com/gogpu/wgpu/hal/vulkan/vk"
@@ -73,12 +75,18 @@ type Device struct {
 	renderPassCache             *RenderPassCache     // Cache for VkRenderPass and VkFramebuffer objects
 	pipelineCache               vk.PipelineCache     // Driver-compiled ISA cache (#331)
 	pipelineCachePath           string               // Disk path for pipeline cache persistence
+	spirvOptions                spirv.Options        // naga SPIR-V options for this device (naga_options.go)
 
 	// supportsIncrementalPresent is true when VK_KHR_incremental_present
 	// is enabled on this device. When true, Present can chain
 	// VkPresentRegionsKHR into VkPresentInfoKHR.PNext to hint the
 	// compositor about which surface regions changed (damage rects).
 	supportsIncrementalPresent bool
+
+	// shaderStageFlags are the create flags of every pipeline stage:
+	// ALLOW_VARYING_SUBGROUP_SIZE on a device with the subgroup feature
+	// (extendedFeatureSupport.allowVaryingSubgroupSize).
+	shaderStageFlags vk.PipelineShaderStageCreateFlags
 
 	// Timeline semaphore fence (VK-IMPL-001).
 	// When available (Vulkan 1.2+), replaces both frame fences and transfer fence
@@ -293,6 +301,15 @@ func (d *Device) alignedMappedRange(blockOffset, blockSize uint64) (offset, size
 	alignedOffset := blockOffset & ^mask
 	alignedEnd := (blockOffset + blockSize + mask) & ^mask
 	return vk.DeviceSize(alignedOffset), vk.DeviceSize(alignedEnd - alignedOffset)
+}
+
+// RobustBufferAccess2 reports whether the device was created with
+// robustBufferAccess2, so the driver bounds-checks shader buffer accesses
+// (out-of-bounds reads return zero, writes are discarded) and shaders are
+// compiled without naga's buffer checks. Otherwise naga's Restrict policy
+// clamps every buffer index to the binding.
+func (d *Device) RobustBufferAccess2() bool {
+	return d.spirvOptions.BoundsCheckPolicies.Buffer == backend.BoundsCheckUnchecked
 }
 
 // MaxStagingBufferSize returns the maximum safe staging buffer allocation size.
@@ -1081,12 +1098,30 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 	if len(entries) == 0 {
 		return nil
 	}
+	writes, bufferInfos, imageInfos, err := descriptorWrites(set, entries, bindingTypes)
+	if err != nil {
+		return err
+	}
+	if len(writes) > 0 {
+		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(writes)), &writes[0], 0, nil)
+	}
+	// The writes point into bufferInfos and imageInfos; keep them reachable until
+	// vkUpdateDescriptorSets has returned.
+	runtime.KeepAlive(bufferInfos)
+	runtime.KeepAlive(imageInfos)
+	return nil
+}
 
-	// Build write descriptor sets
-	// Note: We need to keep the info structs alive until vkUpdateDescriptorSets returns
+// descriptorWrites builds one VkWriteDescriptorSet per entry. Each write points
+// at its info struct inside the returned bufferInfos or imageInfos. Both slices
+// are allocated with room for every entry up front, so append never moves them
+// and every pointer refers to the final array (#356).
+func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, bindingTypes map[uint32]vk.DescriptorType) (
+	[]vk.WriteDescriptorSet, []vk.DescriptorBufferInfo, []vk.DescriptorImageInfo, error,
+) {
 	writes := make([]vk.WriteDescriptorSet, 0, len(entries))
-	bufferInfos := make([]vk.DescriptorBufferInfo, 0)
-	imageInfos := make([]vk.DescriptorImageInfo, 0)
+	bufferInfos := make([]vk.DescriptorBufferInfo, 0, len(entries))
+	imageInfos := make([]vk.DescriptorImageInfo, 0, len(entries))
 
 	for _, entry := range entries {
 		write := vk.WriteDescriptorSet{
@@ -1125,26 +1160,30 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
 		case gputypes.TextureViewBinding:
+			// The descriptor type comes from the layout entry, as Rust
+			// wgpu-hal create_bind_group does: a storage texture is a
+			// STORAGE_IMAGE in GENERAL, the layout the barriers give storage
+			// usage (textureUsageToAccessStageLayout; Rust
+			// conv::derive_image_layout).
 			imageInfo := vk.DescriptorImageInfo{
 				ImageView:   vk.ImageView(res.TextureView),
 				ImageLayout: vk.ImageLayoutShaderReadOnlyOptimal,
 			}
-			imageInfos = append(imageInfos, imageInfo)
 			write.DescriptorType = vk.DescriptorTypeSampledImage
+			if bindingTypes[entry.Binding] == vk.DescriptorTypeStorageImage {
+				imageInfo.ImageLayout = vk.ImageLayoutGeneral
+				write.DescriptorType = vk.DescriptorTypeStorageImage
+			}
+			imageInfos = append(imageInfos, imageInfo)
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
 		default:
-			return fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
+			return nil, nil, nil, fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
 		}
 
 		writes = append(writes, write)
 	}
-
-	if len(writes) > 0 {
-		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(writes)), &writes[0], 0, nil)
-	}
-
-	return nil
+	return writes, bufferInfos, imageInfos, nil
 }
 
 // DestroyBindGroup destroys a bind group.
@@ -1243,7 +1282,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	}
 
 	sm := &ShaderModule{label: desc.Label, device: d}
-	var spirv []uint32
+	var words []uint32
 	sourceType := "SPIR-V"
 
 	// Compile shader source to SPIR-V.
@@ -1252,34 +1291,34 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	switch {
 	case desc.Source.WGSL != "":
 		sourceType = "WGSL"
-		irModule, err := shaderir.LowerValidated(desc.Source.WGSL)
+		lowered, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
-		sm.irModule = irModule
-		if shaderir.PerStage(irModule, nil) {
+		sm.irModule = &lowered
+		if shaderir.PerStage(lowered.IR, nil) {
 			// Overrides: compiled per pipeline stage (compileStage).
 			hal.Logger().Debug("vulkan: shader module with overrides, compiled per pipeline stage",
-				"overrides", len(irModule.Overrides))
+				"overrides", len(lowered.IR.Overrides))
 			return sm, nil
 		}
-		spirv, err = shaderir.SPIRV(irModule)
+		words, err = shaderir.SPIRV(lowered.IR, d.spirvOptions)
 		if err != nil {
 			return nil, fmt.Errorf("vulkan: naga WGSL compilation failed: %w", err)
 		}
 	case len(desc.Source.SPIRV) > 0:
-		spirv = desc.Source.SPIRV
+		words = desc.Source.SPIRV
 	default:
 		return nil, fmt.Errorf("vulkan: shader module requires WGSL or SPIR-V source")
 	}
 
-	module, err := d.createVkShaderModule(spirv, desc.Label, "ShaderModule("+sourceType+")")
+	module, err := d.createVkShaderModule(words, desc.Label, "ShaderModule("+sourceType+")")
 	if err != nil {
 		return nil, err
 	}
 	hal.Logger().Debug("vulkan: shader module compiled",
 		"source", sourceType,
-		"spirvWords", len(spirv),
+		"spirvWords", len(words),
 	)
 	sm.handle = module
 	return sm, nil
@@ -1287,19 +1326,19 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 // createVkShaderModule creates a VkShaderModule from SPIR-V words and names it
 // label, or fallbackName if label is empty.
-func (d *Device) createVkShaderModule(spirv []uint32, label, fallbackName string) (vk.ShaderModule, error) {
-	if len(spirv) == 0 {
+func (d *Device) createVkShaderModule(words []uint32, label, fallbackName string) (vk.ShaderModule, error) {
+	if len(words) == 0 {
 		return 0, fmt.Errorf("vulkan: empty SPIR-V")
 	}
 	createInfo := vk.ShaderModuleCreateInfo{
 		SType:    vk.StructureTypeShaderModuleCreateInfo,
-		CodeSize: uintptr(len(spirv) * 4), // Size in bytes (uint32 = 4 bytes)
-		PCode:    &spirv[0],
+		CodeSize: uintptr(len(words) * 4), // Size in bytes (uint32 = 4 bytes)
+		PCode:    &words[0],
 	}
 
 	var module vk.ShaderModule
 	result := vkCreateShaderModule(d.cmds, d.handle, &createInfo, nil, &module)
-	runtime.KeepAlive(spirv)
+	runtime.KeepAlive(words)
 	if result != vk.Success {
 		return 0, fmt.Errorf("vulkan: vkCreateShaderModule failed: %d", result)
 	}
@@ -1311,33 +1350,38 @@ func (d *Device) createVkShaderModule(spirv []uint32, label, fallbackName string
 }
 
 // compileStage returns the VkShaderModule for one pipeline stage. For a
-// module with overrides, or when the stage gives pipeline constants, it
-// specializes the module's IR for the stage and creates a temporary
-// VkShaderModule, which the caller destroys after the pipeline is created
-// (temp is true). Otherwise it returns the module's own handle.
+// module with overrides, when the stage gives pipeline constants, or when it
+// turns workgroup zeroing off (zeroInit false), it compiles the module's IR
+// for the stage and creates a temporary VkShaderModule, which the caller
+// destroys after the pipeline is created (temp is true). Otherwise it
+// returns the module's own handle.
 //
-// Reference: Rust wgpu-hal vulkan/device.rs:735-845 (compile_stage,
-// process_overrides at :804, temp_raw_module).
-func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (handle vk.ShaderModule, temp bool, err error) {
+// Reference: Rust wgpu-hal vulkan/device.rs, compile_stage (temp options for
+// zero_initialize_workgroup_memory, process_overrides, temp_raw_module).
+func (d *Device) compileStage(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, zeroInit bool) (handle vk.ShaderModule, temp bool, err error) {
 	if sm.irModule == nil {
 		if len(constants) > 0 {
 			return 0, false, fmt.Errorf("vulkan: pipeline constants need a WGSL shader module (SPIR-V input cannot be specialized)")
 		}
 		return sm.handle, false, nil
 	}
-	if !shaderir.PerStage(sm.irModule, constants) {
+	perStage := shaderir.PerStage(sm.irModule.IR, constants)
+	if !perStage && zeroInit {
 		return sm.handle, false, nil
 	}
 
-	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
-	if err != nil {
-		return 0, false, fmt.Errorf("vulkan: %w", err)
+	module := *sm.irModule
+	if perStage {
+		module, err = shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
+		if err != nil {
+			return 0, false, fmt.Errorf("vulkan: %w", err)
+		}
 	}
-	spirv, err := shaderir.SPIRV(module)
+	words, err := shaderir.SPIRV(module.IR, stageSPIRVOptions(d.spirvOptions, zeroInit))
 	if err != nil {
 		return 0, false, fmt.Errorf("vulkan: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
-	handle, err = d.createVkShaderModule(spirv, sm.label, "ShaderModule(WGSL, "+entryPoint+")")
+	handle, err = d.createVkShaderModule(words, sm.label, "ShaderModule(WGSL, "+entryPoint+")")
 	if err != nil {
 		return 0, false, err
 	}

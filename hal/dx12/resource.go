@@ -18,15 +18,29 @@ import (
 // Buffer Implementation
 // -----------------------------------------------------------------------------
 
+// bufferMemory is where a buffer lives and how the CPU sees it.
+type bufferMemory uint8
+
+const (
+	// bufferMemoryDevice is GPU-only memory (DEFAULT heap).
+	bufferMemoryDevice bufferMemory = iota
+	// bufferMemoryUpload is CPU-written, GPU-read memory (MAP_WRITE, mappedAtCreation).
+	bufferMemoryUpload
+	// bufferMemoryReadback is GPU-written, CPU-read memory (MAP_READ).
+	bufferMemoryReadback
+)
+
 // Buffer implements hal.Buffer for DirectX 12.
 type Buffer struct {
 	raw             *d3d12.ID3D12Resource
 	size            uint64
 	usage           gputypes.BufferUsage
+	memory          bufferMemory
 	heapType        d3d12.D3D12_HEAP_TYPE
 	cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY // for CUSTOM heap type
 	gpuVA           uint64                        // GPU virtual address for binding
 	device          *Device
+	nativeHandle    uintptr        // key in device.handles.buffers; 0 once destroyed
 	mappedPointer   unsafe.Pointer // Non-nil if buffer is currently mapped
 
 	// currentState mirrors the queue-scheduled state for legacy diagnostics.
@@ -42,27 +56,23 @@ type Buffer struct {
 }
 
 // isMappable returns true if the buffer can be mapped for CPU access.
-// UPLOAD, READBACK, and CUSTOM heaps with CPU page properties are mappable.
 func (b *Buffer) isMappable() bool {
-	switch b.heapType {
-	case d3d12.D3D12_HEAP_TYPE_UPLOAD, d3d12.D3D12_HEAP_TYPE_READBACK:
-		return true
-	case d3d12.D3D12_HEAP_TYPE_CUSTOM:
-		return b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE ||
-			b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
-	default:
-		return false
-	}
+	return b.memory != bufferMemoryDevice
 }
 
-// isReadback returns true if the buffer is for GPU→CPU reads.
+// isReadback returns true if the buffer is for GPU→CPU reads. The page
+// property cannot tell: on a cache-coherent UMA adapter upload buffers are
+// WRITE_BACK too.
 func (b *Buffer) isReadback() bool {
-	return b.heapType == d3d12.D3D12_HEAP_TYPE_READBACK ||
-		(b.heapType == d3d12.D3D12_HEAP_TYPE_CUSTOM && b.cpuPageProperty == d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK)
+	return b.memory == bufferMemoryReadback
 }
 
 // Destroy releases the buffer resources.
 func (b *Buffer) Destroy() {
+	if b.device != nil {
+		b.device.handles.buffers.Remove(b.nativeHandle)
+	}
+	b.nativeHandle = 0
 	if b.raw != nil {
 		// Unmap if still mapped
 		if b.mappedPointer != nil {
@@ -132,10 +142,11 @@ func (b *Buffer) Raw() *d3d12.ID3D12Resource {
 	return b.raw
 }
 
-// NativeHandle returns an opaque handle to this Buffer struct.
-// DX12 bind groups need the full Go struct to access GPU virtual address and size.
+// NativeHandle returns this buffer's opaque per-device handle.
+// DX12 bind groups need the full Go struct (GPU virtual address, size), so the
+// handle is a key into the device's handle table, not a D3D12 object.
 func (b *Buffer) NativeHandle() uintptr {
-	return uintptr(unsafe.Pointer(b))
+	return b.nativeHandle
 }
 
 // GPUVirtualAddress returns the GPU virtual address for this buffer.
@@ -351,25 +362,36 @@ type TextureView struct {
 	layerCount     uint32
 	device         *Device
 	srvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Shader resource view (for sampling)
+	uavHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Unordered access view (for storage binding)
 	rtvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Render target view
 	dsvHandle      d3d12.D3D12_CPU_DESCRIPTOR_HANDLE    // Depth stencil view
 	dsvHandles     [4]d3d12.D3D12_CPU_DESCRIPTOR_HANDLE // DSV variants keyed by D3D12_DSV_FLAGS
 	hasSRV         bool
+	hasUAV         bool
 	hasRTV         bool
 	hasDSV         bool
 	hasDSVVariants [4]bool
 	srvHeapIndex   uint32
+	uavHeapIndex   uint32
 	rtvHeapIndex   uint32
 	dsvHeapIndex   [4]uint32
+	nativeHandle   uintptr // key in device.handles.views; 0 once destroyed
 }
 
 // Destroy releases the texture view resources and recycles descriptor heap slots.
 // For external (surface) texture views, descriptor slots are NOT freed because
 // the Surface owns them and manages their lifecycle via releaseBackBuffers().
 func (v *TextureView) Destroy() {
+	if v.device != nil {
+		v.device.handles.views.Remove(v.nativeHandle)
+	}
+	v.nativeHandle = 0
 	if v.device != nil && (v.texture == nil || !v.texture.isExternal) {
 		if v.hasSRV && v.device.stagingViewHeap != nil {
 			v.device.stagingViewHeap.Free(v.srvHeapIndex, 1)
+		}
+		if v.hasUAV && v.device.stagingViewHeap != nil {
+			v.device.stagingViewHeap.Free(v.uavHeapIndex, 1)
 		}
 		if v.hasRTV && v.device.rtvHeap != nil {
 			v.device.rtvHeap.Free(v.rtvHeapIndex, 1)
@@ -383,6 +405,7 @@ func (v *TextureView) Destroy() {
 		}
 	}
 	v.hasSRV = false
+	v.hasUAV = false
 	v.hasRTV = false
 	v.hasDSV = false
 	v.hasDSVVariants = [4]bool{}
@@ -393,10 +416,11 @@ func (v *TextureView) Texture() *Texture {
 	return v.texture
 }
 
-// NativeHandle returns an opaque handle to this TextureView struct.
-// DX12 bind groups need the full Go struct to access SRV descriptor handles.
+// NativeHandle returns this view's opaque per-device handle.
+// DX12 bind groups need the full Go struct (SRV descriptor handle), so the
+// handle is a key into the device's handle table, not a D3D12 object.
 func (v *TextureView) NativeHandle() uintptr {
-	return uintptr(unsafe.Pointer(v))
+	return v.nativeHandle
 }
 
 // RTVHandle returns the render target view descriptor handle.
@@ -450,14 +474,21 @@ type Sampler struct {
 	heapIndex       uint32                            // staging heap index
 	samplerPoolSlot uint32                            // index in shader-visible sampler heap (global pool)
 	device          *Device
+	nativeHandle    uintptr // key in device.handles.samplers; 0 once destroyed
 }
 
 // Destroy releases the sampler resources and recycles descriptor heap slots.
+// It may be called more than once: the slots go back to the heaps only on the
+// first call (a slot freed twice would later be handed to two samplers), and
+// clearing device marks the sampler destroyed, as BindGroup.Destroy does.
 func (s *Sampler) Destroy() {
 	if s.device != nil {
+		s.device.handles.samplers.Remove(s.nativeHandle)
 		s.device.stagingSamplerHeap.Free(s.heapIndex, 1)
 		s.device.samplerHeap.Free(s.samplerPoolSlot, 1)
+		s.device = nil
 	}
+	s.nativeHandle = 0
 }
 
 // Handle returns the sampler descriptor handle.
@@ -465,9 +496,10 @@ func (s *Sampler) Handle() d3d12.D3D12_CPU_DESCRIPTOR_HANDLE {
 	return s.handle
 }
 
-// NativeHandle returns an opaque handle to this Sampler struct.
-// DX12 bind groups need the full Go struct to access the sampler descriptor handle.
-func (s *Sampler) NativeHandle() uintptr { return uintptr(unsafe.Pointer(s)) }
+// NativeHandle returns this sampler's opaque per-device handle.
+// DX12 bind groups need the full Go struct (sampler pool slot), so the handle
+// is a key into the device's handle table, not a D3D12 object.
+func (s *Sampler) NativeHandle() uintptr { return s.nativeHandle }
 
 // -----------------------------------------------------------------------------
 // Compile-time interface assertions

@@ -733,9 +733,23 @@ func (st *SurfaceTexture) AsTexture() *Texture {
 	if !st.isUsable() {
 		return nil
 	}
+	return st.borrowedTexture()
+}
+
+// borrowedTexture builds the Texture wrapper that borrows this surface texture.
+// The format is the surface format: copy and upload validation reads it from
+// the wrapper.
+func (st *SurfaceTexture) borrowedTexture() *Texture {
+	var format gputypes.TextureFormat
+	if st.coreTexture != nil {
+		format = st.coreTexture.Format()
+	} else if cfg := st.surface.core.Config(); cfg != nil {
+		format = cfg.Format
+	}
 	return &Texture{
 		hal:          st.hal,
 		device:       st.device,
+		format:       format,
 		surface:      st.surface.core,
 		surfaceLease: st.lease,
 		coreTexture:  st.coreTexture,
@@ -771,6 +785,5 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	texture := &Texture{hal: st.hal, device: st.device, surface: st.surface.core, surfaceLease: st.lease, coreTexture: st.coreTexture}
-	return &TextureView{hal: halView, device: st.device, texture: texture, surface: st.surface.core, surfaceLease: st.lease}, nil
+	return &TextureView{hal: halView, device: st.device, texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease}, nil
 }

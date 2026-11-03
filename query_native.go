@@ -45,6 +45,16 @@ func (qs *QuerySet) halQuerySet() hal.QuerySet {
 	return qs.core.Raw(guard)
 }
 
+// liveCore returns the core query set, or nil when the query set is nil or
+// released, so core validation rejects it. Release defers the core
+// destruction, so the core object alone does not show a released set.
+func (qs *QuerySet) liveCore() *core.QuerySet {
+	if qs == nil || qs.released {
+		return nil
+	}
+	return qs.core
+}
+
 // Release destroys the query set. Destruction is deferred until the GPU
 // completes any submission that may reference this query set.
 func (qs *QuerySet) Release() {

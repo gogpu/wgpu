@@ -3,12 +3,12 @@
 package wgpu
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -21,25 +21,15 @@ import (
 type ComputePassEncoder struct {
 	core    *core.CoreComputePassEncoder
 	encoder *CommandEncoder
-	// currentPipelineBindGroupCount tracks the bind group count of the
-	// currently set pipeline. Used by SetBindGroup to validate that the
-	// group index is within the pipeline layout bounds. Zero means no
-	// pipeline has been set yet.
-	currentPipelineBindGroupCount uint32
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Dispatch commands require a pipeline to be set first.
 	pipelineSet bool
 	// currentPipeline tracks the currently set pipeline for state restoration
 	// after indirect dispatch validation. Set by SetPipeline.
 	currentPipeline *ComputePipeline
-	// assignedBindGroups tracks the bind groups set at each slot for state
-	// restoration after indirect dispatch validation.
-	assignedBindGroups [MaxBindGroups]*BindGroup
-	// assignedDynOffsets tracks the dynamic offsets for each bind group slot
-	// for state restoration after indirect dispatch validation.
-	assignedDynOffsets [MaxBindGroups][]uint32
-	// binder tracks bind group assignments and validates compatibility
-	// at dispatch time, matching Rust wgpu-core's Binder pattern.
+	// binder holds the bind groups set on the pass with their dynamic
+	// offsets, validates them at dispatch time and binds them to the backend
+	// before each dispatch, matching Rust wgpu-core's Binder.
 	binder binder
 }
 
@@ -60,7 +50,6 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetPipeline: pipeline is nil"))
 		return
 	}
-	p.currentPipelineBindGroupCount = pipeline.bindGroupCount
 	p.pipelineSet = true
 	p.currentPipeline = pipeline
 	p.binder.updateExpectations(pipeline.bindGroupLayouts)
@@ -72,16 +61,16 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 	}
 }
 
-// SetBindGroup sets a bind group for the given index.
+// SetBindGroup sets a bind group for the given index. It may come before
+// SetPipeline, or name an index the current pipeline does not use: the group
+// is bound to the backend at the next dispatch whose pipeline layout uses it.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if err := validateSetBindGroup("ComputePass", index, group, offsets, p.currentPipelineBindGroupCount); err != nil {
+	limits := &p.encoder.device.core.Limits
+	if err := validateSetBindGroup("ComputePass", index, group, offsets, limits); err != nil {
 		p.encoder.setError(err)
 		return
 	}
-	p.binder.assign(index, group.layout)
-	p.binder.assignBindGroup(index, group)
-	p.assignedBindGroups[index] = group
-	p.assignedDynOffsets[index] = offsets
+	p.binder.setGroup(index, group, offsets)
 	p.trackRef(group.ref)
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
@@ -94,9 +83,14 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
-	raw := p.core.RawPass()
-	if raw != nil && group.hal != nil {
-		raw.SetBindGroup(index, group.hal, offsets)
+}
+
+// flushBindGroups binds the bind groups whose backend binding is stale, right
+// before a dispatch that passed validation (Rust wgpu-core compute.rs
+// State::flush_bindings).
+func (p *ComputePassEncoder) flushBindGroups() {
+	if raw := p.core.RawPass(); raw != nil {
+		p.binder.flush(raw)
 	}
 }
 
@@ -148,7 +142,37 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 		return
 	}
 
+	if !p.flushDispatch("Dispatch", nil, track.BufferUsesNone) {
+		return
+	}
+	p.flushBindGroups()
 	p.core.Dispatch(x, y, z)
+}
+
+// flushDispatch builds the usage scope of the next dispatch from the bind
+// groups the current pipeline uses and the indirect buffer (if any), and
+// records the barriers into it. Returns false, with the error recorded on the
+// encoder, if two usages in the dispatch conflict.
+//
+// Matches Rust wgpu-core compute.rs State::flush_bindings, which merges only
+// the bind groups the pipeline uses (binder.list_active).
+func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indirectUsage track.BufferUses) bool {
+	var groups [MaxBindGroups]*core.BindGroupUsages
+	active := groups[:0]
+	for i := uint32(0); i < MaxBindGroups; i++ {
+		if bg := p.binder.activeGroup(i); bg != nil {
+			active = append(active, bg.usages)
+		}
+	}
+	var indirectCore *core.Buffer
+	if indirect != nil {
+		indirectCore = indirect.core
+	}
+	if err := p.core.FlushDispatch(active, indirectCore, indirectUsage); err != nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
+		return false
+	}
+	return true
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
@@ -203,7 +227,20 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	// Matches Rust wgpu-core compute.rs:921-1059.
 	iv := p.encoder.device.core.IndirectValidation()
 	raw := p.core.RawPass()
-	if iv != nil && raw != nil {
+	validated := iv != nil && raw != nil
+
+	// With validation, a validation shader reads the arguments as storage
+	// before the dispatch reads them from its own buffer.
+	indirectUsage := track.BufferUsesIndirect
+	if validated {
+		indirectUsage = track.BufferUsesStorageRead
+	}
+	if !p.flushDispatch("DispatchIndirect", buffer, indirectUsage) {
+		return
+	}
+	p.flushBindGroups()
+
+	if validated {
 		p.dispatchIndirectValidated(buffer, offset, iv, raw)
 		return
 	}
@@ -217,74 +254,31 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 // and bind group state around the validation, matching Rust wgpu-core's
 // approach in compute.rs:928-1059.
 //
+// Every input of the validation dispatch comes from bind groups built before
+// recording (core.IndirectValidation.DispatchParams): the commands of every
+// DispatchIndirect, in any pass or encoder, read their own arguments, with no
+// buffer write between recording and execution.
+//
 // Flow:
-//  1. Write params (max_workgroups, src_offset) to uniform buffer
-//  2. Set validation pipeline + bind groups
-//  3. Transition src buffer for storage read, dst buffer for storage write
-//  4. Dispatch(1,1,1) -- validation shader
-//  5. Transition dst buffer back to INDIRECT usage
-//  6. Restore user pipeline + bind groups
-//  7. DispatchIndirect from validated dst buffer at offset 0
+//  1. End the user's pass; transition the dst buffer to storage
+//  2. Validation pass: pipeline, bind groups, Dispatch(1,1,1)
+//  3. Transition the dst buffer back to INDIRECT
+//  4. New pass: restore user pipeline + bind groups,
+//     DispatchIndirect from validated dst buffer at offset 0
 func (p *ComputePassEncoder) dispatchIndirectValidated(
 	buffer *Buffer,
 	offset uint64,
 	iv *core.IndirectValidation,
 	raw hal.ComputePassEncoder,
 ) {
-	halDevice := p.encoder.device.halDevice()
-	if halDevice == nil {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-
-	// Create source bind group for the user's indirect buffer.
-	halSrcBuf := buffer.halBuffer()
-	if halSrcBuf == nil {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-
-	srcBindGroup, err := iv.CreateSrcBindGroup(halDevice, halSrcBuf, buffer.Size())
+	params, err := iv.DispatchParams(buffer.coreBuffer(), offset)
 	if err != nil {
-		// Validation resource creation failed -- fall back to unvalidated dispatch.
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-		return
-	}
-	// Schedule cleanup of the ephemeral src bind group.
-	defer halDevice.DestroyBindGroup(srcBindGroup)
-
-	// Write params to the uniform buffer. The params struct is:
-	//   max_workgroups: u32 (baked into shader, but also in uniform for flexibility)
-	//   src_offset:     u32 (byte offset / 4, since shader indexes u32 array)
-	srcOffset := uint32(offset / 4) //nolint:gosec // offset is validated to be < buffer.Size()
-	var paramsData [8]byte
-	binary.LittleEndian.PutUint32(paramsData[0:4], iv.MaxWorkgroups())
-	binary.LittleEndian.PutUint32(paramsData[4:8], srcOffset)
-
-	// Write params via the HAL queue's WriteBuffer. This is a CPU-side write
-	// that will be visible to the GPU before the next dispatch.
-	if p.encoder.device.queue != nil && p.encoder.device.queue.hal != nil {
-		if writeErr := p.encoder.device.queue.hal.WriteBuffer(iv.ParamsBuffer(), 0, paramsData[:]); writeErr != nil {
-			// Params write failed -- fall back to unvalidated dispatch.
-			p.core.DispatchIndirect(buffer.coreBuffer(), offset)
-			return
-		}
-	} else {
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: indirect validation: %w", err))
 		return
 	}
 
-	// Step 1: Set validation compute pipeline.
-	raw.SetPipeline(iv.Pipeline())
-
-	// Step 2: Bind destination group (group 0: dst buffer + params uniform).
-	raw.SetBindGroup(0, iv.DstBindGroup(), nil)
-
-	// Step 3: Bind source group (group 1: user's indirect buffer).
-	raw.SetBindGroup(1, srcBindGroup, nil)
-
-	// Step 4: Transition dst buffer from INDIRECT to STORAGE_READ_WRITE.
-	// The compute pass encoder needs the parent command encoder for barriers.
+	// The HAL compute pass records no barriers, so the validation runs in
+	// passes of its own between the barriers on the parent encoder.
 	parentEncoder := p.encoder.core.RawEncoder()
 	if parentEncoder != nil {
 		// End the current compute pass temporarily to insert barriers.
@@ -292,7 +286,7 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 
 		parentEncoder.TransitionBuffers([]hal.BufferBarrier{
 			{
-				Buffer: iv.DstBuffer(),
+				Buffer: params.DstBuffer,
 				Usage: hal.BufferUsageTransition{
 					OldUsage: gputypes.BufferUsageIndirect,
 					NewUsage: gputypes.BufferUsageStorage,
@@ -300,24 +294,18 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 			},
 		})
 
-		// Re-begin compute pass for the validation dispatch.
 		validationPass := parentEncoder.BeginComputePass(&hal.ComputePassDescriptor{
 			Label: "indirect_dispatch_validation",
 		})
-
-		// Set validation pipeline and bind groups in the new pass.
-		validationPass.SetPipeline(iv.Pipeline())
-		validationPass.SetBindGroup(0, iv.DstBindGroup(), nil)
-		validationPass.SetBindGroup(1, srcBindGroup, nil)
-
-		// Step 5: Dispatch validation shader (single workgroup).
+		validationPass.SetPipeline(params.Pipeline)
+		validationPass.SetBindGroup(0, params.DstBindGroup, nil)
+		validationPass.SetBindGroup(1, params.SrcBindGroup, nil)
 		validationPass.Dispatch(1, 1, 1)
 		validationPass.End()
 
-		// Step 6: Transition dst buffer back from STORAGE to INDIRECT.
 		parentEncoder.TransitionBuffers([]hal.BufferBarrier{
 			{
-				Buffer: iv.DstBuffer(),
+				Buffer: params.DstBuffer,
 				Usage: hal.BufferUsageTransition{
 					OldUsage: gputypes.BufferUsageStorage,
 					NewUsage: gputypes.BufferUsageIndirect,
@@ -325,16 +313,11 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 			},
 		})
 
-		// Step 7: Re-begin compute pass for the user's actual dispatch.
 		userPass := parentEncoder.BeginComputePass(&hal.ComputePassDescriptor{
 			Label: "indirect_dispatch_user",
 		})
-
-		// Restore user pipeline and bind groups.
 		p.restoreComputeState(userPass)
-
-		// Step 8: DispatchIndirect from validated buffer at offset 0.
-		userPass.DispatchIndirect(iv.DstBuffer(), 0)
+		userPass.DispatchIndirect(params.DstBuffer, 0)
 
 		// Replace the core encoder's raw pass with the new one.
 		// This is needed because End() + BeginComputePass created a new pass.
@@ -355,13 +338,8 @@ func (p *ComputePassEncoder) restoreComputeState(raw hal.ComputePassEncoder) {
 		raw.SetPipeline(p.currentPipeline.hal)
 	}
 
-	// Restore user's bind groups.
-	for i := uint32(0); i < p.currentPipelineBindGroupCount; i++ {
-		bg := p.assignedBindGroups[i]
-		if bg != nil && bg.hal != nil {
-			raw.SetBindGroup(i, bg.hal, p.assignedDynOffsets[i])
-		}
-	}
+	// Restore user's bind groups: the new backend pass has none.
+	p.binder.bindValid(raw, 0)
 }
 
 // End ends the compute pass.

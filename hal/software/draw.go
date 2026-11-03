@@ -4,8 +4,11 @@ package software
 
 import (
 	"encoding/binary"
+	"errors"
 	"log/slog"
+	"maps"
 	"math"
+	"slices"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -17,11 +20,10 @@ import (
 // It selects between fullscreen texture blit and vertex-buffer-based rasterization.
 // instanceCount > 1 enables instanced rendering; firstInstance offsets the instance ID.
 func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	if r.pipeline == nil {
+	// Zero instances draw nothing, as on the GPU backends; an indirect record
+	// a culling pass zeroed relies on it.
+	if r.pipeline == nil || instanceCount == 0 {
 		return
-	}
-	if instanceCount == 0 {
-		instanceCount = 1
 	}
 
 	target := r.getTargetTexture()
@@ -87,9 +89,9 @@ func (r *RenderPassEncoder) hasMRT() bool {
 }
 
 // executeFullscreenBlit blits the first bound texture to the target.
-// This is the fast path for gogpu's renderTexturedQuad (6 vertices, no vertex buffer,
-// texture in bind group). Returns true if blit was performed, false if no source
-// texture was found (caller should apply clear instead).
+// This is the fast path for a pipeline without shader stages (no vertex
+// buffer, texture in bind group). Returns true if blit was performed, false if
+// no source texture was found (caller should apply clear instead).
 //
 // When scissor is active, only pixels within the scissor rect are written.
 // The blit loop bounds are clamped to the scissor rect to maintain the
@@ -97,11 +99,19 @@ func (r *RenderPassEncoder) hasMRT() bool {
 // blitStateValid checks whether the current pipeline render state allows a
 // direct memcpy blit (Skia SkSpriteBlitter_Memcpy::Supports pattern). Returns
 // false if any active state would produce different results than a raw copy.
+//
+// A pipeline with a vertex or fragment shader always runs it: nothing proves
+// that a shader is an identity copy of the first bound texture, and one that
+// positions the quad, samples another coordinate or changes the color drew
+// the wrong image when a blit stood in for it.
 func (r *RenderPassEncoder) blitStateValid() bool {
 	if r.pipeline == nil || r.pipeline.desc == nil {
 		return false
 	}
 	desc := r.pipeline.desc
+	if desc.Vertex.Module != nil || (desc.Fragment != nil && desc.Fragment.Module != nil) {
+		return false
+	}
 	if desc.DepthStencil != nil {
 		return false
 	}
@@ -128,8 +138,9 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 }
 
 // tryFullscreenBlit attempts Tier 1 fast-path: if 2 triangles form a fullscreen
-// quad, the bound texture matches target dimensions, and render state is safe,
-// bypass SPIR-V fragment shader with direct memcpy/swizzle.
+// quad, the bound texture matches target dimensions, and render state is safe
+// (which includes a pipeline without shader stages), copy the texture with a
+// direct memcpy/swizzle.
 func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, target *Texture, w, h int) bool {
 	if len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
 		return false
@@ -403,7 +414,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	// shader to write outputs for all @location(N) targets simultaneously.
 	targets := r.getTargetTextures()
 	if r.hasMRT() && hasAttrs {
-		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
 			blendStates := r.getPerTargetBlendStates()
 			pipe.DrawTrianglesWithMRTShader(triangles, mrtFunc, func(x, y int, colors [][4]float32) {
 				// Write locations 1+ to their respective target textures.
@@ -416,7 +427,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
 					}
 				}
-			})
+			}, mayDiscard)
 			writeRasterToTarget(pipe, target)
 			return
 		}
@@ -425,8 +436,8 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 	switch {
 	case hasAttrs:
 		// Try per-pixel fragment shader first; fall back to direct attribute interpolation.
-		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
-			pipe.DrawTrianglesWithFragmentShader(triangles, fragFunc)
+		if fragFunc, mayDiscard := r.buildFragmentShaderFunc(); fragFunc != nil {
+			pipe.DrawTrianglesWithFragmentShader(triangles, fragFunc, mayDiscard)
 		} else {
 			pipe.DrawTrianglesInterpolated(triangles)
 		}
@@ -463,10 +474,8 @@ func (r *RenderPassEncoder) fetchTriangles(
 	bufData := vb.buffer.data
 	vb.buffer.mu.RUnlock()
 
+	// arrayStride 0 is WebGPU's broadcast: every vertex reads element 0.
 	stride := layout.ArrayStride
-	if stride == 0 {
-		return nil
-	}
 
 	// Classify attributes: find position (location 0) and others.
 	var posAttr *gputypes.VertexAttribute
@@ -662,19 +671,16 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 				if snap.data == nil {
 					continue
 				}
-				stride := ab.layout.ArrayStride
-				if stride == 0 {
-					continue
-				}
-
 				// Determine which index drives this buffer based on step mode.
+				// arrayStride 0 is WebGPU's broadcast: every vertex and
+				// instance reads element 0, so the index drops out.
 				var idx uint32
 				if ab.layout.StepMode == gputypes.VertexStepModeInstance {
 					idx = instanceID
 				} else {
 					idx = vertexID
 				}
-				base := snap.offset + uint64(idx)*stride
+				base := snap.offset + uint64(idx)*ab.layout.ArrayStride
 				vals := readVertexAttribute(snap.data, base+ab.attr.Offset, ab.attr.Format)
 				if vals == nil {
 					continue
@@ -796,77 +802,87 @@ func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex) 
 }
 
 // buildExecutionContext creates a shader ExecutionContext populated with all
-// bind group resources (buffers, textures, samplers). This follows the same
-// pattern as ComputePassEncoder.Dispatch in command.go.
+// bind group resources (buffers, textures, samplers).
 func (r *RenderPassEncoder) buildExecutionContext() *shader.ExecutionContext {
+	return bindGroupExecutionContext(&r.bindGroups)
+}
+
+// bindGroupExecutionContext creates a shader ExecutionContext with the
+// resources of the bound groups, for draws and dispatches alike.
+func bindGroupExecutionContext(groups *[4]*BindGroup) *shader.ExecutionContext {
 	ctx := &shader.ExecutionContext{
 		Buffers:  make(map[shader.BindingKey][]byte),
 		Textures: make(map[shader.BindingKey]*shader.Texture2D),
 		Samplers: make(map[shader.BindingKey]*shader.Sampler),
 	}
-
-	for groupIdx, bg := range r.bindGroups {
+	for groupIdx, bg := range groups {
 		if bg == nil {
 			continue
 		}
-		// Buffers (uniform/storage) — apply offset/size from BufferBinding.
-		// Dynamic offsets are only consumed for bindings with HasDynamicOffset.
-		dynIdx := 0
-		for bindingIdx, bs := range bg.bufferBindings {
-			if bs.buf == nil {
-				continue
-			}
-			bs.buf.mu.RLock()
-			data := bs.buf.data
-			off := bs.offset
-			if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
-				off += uint64(bg.dynamicOffsets[dynIdx])
-				dynIdx++
-			}
-			end := uint64(len(data))
-			if bs.size > 0 && off+bs.size <= end {
-				end = off + bs.size
-			}
-			if off < uint64(len(data)) {
-				data = data[off:end]
-			}
-			ctx.Buffers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = data
-			bs.buf.mu.RUnlock()
-		}
-		// Textures.
-		for bindingIdx, tv := range bg.textureViews {
-			if tv == nil || tv.texture == nil {
-				continue
-			}
-			tv.texture.mu.RLock()
-			ctx.Textures[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = &shader.Texture2D{
-				Width:         tv.texture.width,
-				Height:        tv.texture.height,
-				Data:          tv.texture.data,
-				Format:        uint32(tv.texture.format),
-				BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
-			}
-			tv.texture.mu.RUnlock()
-		}
-		// Samplers.
-		for bindingIdx, samp := range bg.samplers {
-			if samp == nil {
-				continue
-			}
-			ctx.Samplers[shader.BindingKey{
-				Group:   uint32(groupIdx),
-				Binding: bindingIdx,
-			}] = samplerResourceToShader(samp)
-		}
+		addBufferBindings(ctx, uint32(groupIdx), bg)
+		addTextureBindings(ctx, uint32(groupIdx), bg)
 	}
-
 	return ctx
+}
+
+// addBufferBindings adds the buffer bindings of bind group groupIdx to ctx,
+// each the slice of the buffer's storage its offset, dynamic offset and
+// size select, so storage buffer writes land in the buffer itself. Dynamic
+// offsets are consumed in binding order by the bindings with
+// HasDynamicOffset, as WebGPU orders them.
+func addBufferBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindGroup) {
+	dynIdx := 0
+	for _, bindingIdx := range slices.Sorted(maps.Keys(bg.bufferBindings)) {
+		bs := bg.bufferBindings[bindingIdx]
+		if bs.buf == nil {
+			continue
+		}
+		off := bs.offset
+		if bg.hasDynamicOffset[bindingIdx] && dynIdx < len(bg.dynamicOffsets) {
+			off += uint64(bg.dynamicOffsets[dynIdx])
+			dynIdx++
+		}
+		bs.buf.mu.RLock()
+		data := bs.buf.data
+		end := uint64(len(data))
+		if bs.size > 0 && off+bs.size <= end {
+			end = off + bs.size
+		}
+		if off < uint64(len(data)) {
+			data = data[off:end]
+		}
+		ctx.Buffers[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = data
+		bs.buf.mu.RUnlock()
+	}
+}
+
+// addTextureBindings adds the texture views and samplers of bind group
+// groupIdx to ctx. A texture's Data aliases the texture's storage, so a
+// storage texture write (OpImageWrite) lands in the texture itself.
+func addTextureBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindGroup) {
+	for bindingIdx, tv := range bg.textureViews {
+		if tv == nil || tv.texture == nil {
+			continue
+		}
+		tv.texture.mu.RLock()
+		ctx.Textures[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = &shader.Texture2D{
+			Width:         tv.texture.width,
+			Height:        tv.texture.height,
+			Data:          tv.texture.data,
+			Format:        uint32(tv.texture.format),
+			BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
+			MipLevels:     tv.texture.mipLevelCount,
+			SampleCount:   tv.texture.sampleCount,
+			Layers:        tv.texture.depth,
+		}
+		tv.texture.mu.RUnlock()
+	}
+	for bindingIdx, samp := range bg.samplers {
+		if samp == nil {
+			continue
+		}
+		ctx.Samplers[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = samplerResourceToShader(samp)
+	}
 }
 
 // samplerResourceToShader converts a SamplerResource to a shader.Sampler
@@ -1234,8 +1250,8 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 	// MRT path for SPIR-V draws with multiple color attachments.
 	targets := r.getTargetTextures()
-	if r.hasMRT() && hasLocOutputs {
-		if mrtFunc := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
+	if r.hasMRT() {
+		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
 			blendStates := r.getPerTargetBlendStates()
 			pipe.DrawTrianglesWithMRTShader(allTriangles, mrtFunc, func(x, y int, colors [][4]float32) {
 				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
@@ -1247,20 +1263,24 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
 					}
 				}
-			})
+			}, mayDiscard)
 			writeRasterToTarget(pipe, target)
 			return true
 		}
 	}
 
-	if hasLocOutputs {
-		if fragFunc := r.buildFragmentShaderFunc(); fragFunc != nil {
-			pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc)
-		} else {
-			pipe.DrawTrianglesInterpolated(allTriangles)
+	// A fragment shader that reads any per-fragment input (an interpolated
+	// @location or a builtin such as the position) runs per pixel; one that
+	// reads none gives the same result everywhere and runs once.
+	switch fragFunc, mayDiscard := r.buildFragmentShaderFunc(); {
+	case fragFunc != nil:
+		pipe.DrawTrianglesWithFragmentShader(allTriangles, fragFunc, mayDiscard)
+	case hasLocOutputs && r.pipeline.fragment == nil:
+		pipe.DrawTrianglesInterpolated(allTriangles)
+	default:
+		if color, discard := r.executeSPIRVFragment(); !discard {
+			pipe.DrawTriangles(allTriangles, color)
 		}
-	} else {
-		pipe.DrawTriangles(allTriangles, r.executeSPIRVFragment())
 	}
 
 	writeRasterToTarget(pipe, target)
@@ -1269,20 +1289,23 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 // executeSPIRVFragment runs the fragment shader entry point to get a color.
 // Falls back to white if no fragment shader is available.
-func (r *RenderPassEncoder) executeSPIRVFragment() [4]float32 {
+// It is used only when the shader reads no per-fragment input (see
+// buildFragmentShaderFunc). discard reports that the invocation discarded,
+// which then holds for every fragment of the draw.
+func (r *RenderPassEncoder) executeSPIRVFragment() (color [4]float32, discard bool) {
 	if r.pipeline.desc.Fragment == nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	parsed := r.pipeline.fragment
 	if parsed == nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	fsEntry := r.pipeline.desc.Fragment.EntryPoint
 	ep, ok := parsed.EntryPoints[fsEntry]
 	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	// Find the output variable (location 0).
@@ -1302,116 +1325,149 @@ func (r *RenderPassEncoder) executeSPIRVFragment() [4]float32 {
 	}
 
 	if !hasColorOut {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
-	outputs, err := parsed.Execute(fsEntry, nil)
+	// No per-fragment input, so one invocation stands for every fragment of
+	// the draw; it still reads the bound resources (uniforms, textures).
+	outputs, err := parsed.ExecuteWithContext(fsEntry, r.buildExecutionContext())
+	if errors.Is(err, shader.ErrDiscarded) {
+		return [4]float32{}, true
+	}
 	if err != nil {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
 	colorVal, ok := outputs[colorVarID]
 	if !ok {
-		return [4]float32{1, 1, 1, 1}
+		return [4]float32{1, 1, 1, 1}, false
 	}
 
-	return shader.Vec4ToFloat32(colorVal)
+	return shader.Vec4ToFloat32(colorVal), false
 }
 
-// buildFragmentShaderFunc creates a raster.FragmentShaderFunc that executes
-// the SPIR-V fragment shader per pixel. The returned closure feeds interpolated
-// @location attributes into the fragment shader's input variables and returns
-// the output color.
-//
-// Returns nil if the pipeline has no fragment shader with @location inputs.
-func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc {
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
-		return nil
-	}
+// fragmentInterface classifies the interface variables of a fragment entry
+// point: the @location inputs fed from interpolated attributes, the position
+// builtin (FragCoord) and the @location outputs.
+type fragmentInterface struct {
+	parsed         *shader.Module
+	entry          string
+	locationInputs []fragmentLocationVar
+	outputs        []fragmentLocationVar
+	fragCoordVar   uint32 // 0 when the shader does not read @builtin(position)
+	hasInputs      bool   // any Input variable, location or builtin
+}
 
+type fragmentLocationVar struct {
+	varID    uint32
+	location int
+}
+
+// fragmentInterfaceOf returns the classified interface of the pipeline's
+// fragment entry point, or false when there is no SPIR-V fragment stage.
+func (r *RenderPassEncoder) fragmentInterfaceOf() (fragmentInterface, bool) {
+	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil || r.pipeline.fragment == nil {
+		return fragmentInterface{}, false
+	}
 	parsed := r.pipeline.fragment
-	if parsed == nil {
-		return nil
-	}
-
-	fsEntry := r.pipeline.desc.Fragment.EntryPoint
-	ep, ok := parsed.EntryPoints[fsEntry]
+	fi := fragmentInterface{parsed: parsed, entry: r.pipeline.desc.Fragment.EntryPoint}
+	ep, ok := parsed.EntryPoints[fi.entry]
 	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return nil
+		return fragmentInterface{}, false
 	}
-
-	// Classify fragment shader interface variables.
-	type locationVar struct {
-		varID    uint32
-		location int
-	}
-	var locationInputs []locationVar
-	var colorOutputVarID uint32
-	hasColorOut := false
-
 	for _, varID := range ep.InterfaceIDs {
 		vi, exists := parsed.Variables[varID]
 		if !exists {
 			continue
 		}
 		loc := parsed.GetLocation(varID)
-		if vi.StorageClass == shader.StorageClassInput && loc >= 0 {
-			locationInputs = append(locationInputs, locationVar{varID: varID, location: loc})
-		}
-		if vi.StorageClass == shader.StorageClassOutput && loc == 0 {
-			colorOutputVarID = varID
-			hasColorOut = true
+		switch vi.StorageClass {
+		case shader.StorageClassInput:
+			fi.hasInputs = true
+			if loc >= 0 {
+				fi.locationInputs = append(fi.locationInputs, fragmentLocationVar{varID: varID, location: loc})
+			} else if parsed.GetBuiltIn(varID) == shader.BuiltInFragCoord {
+				fi.fragCoordVar = varID
+			}
+		case shader.StorageClassOutput:
+			if loc >= 0 {
+				fi.outputs = append(fi.outputs, fragmentLocationVar{varID: varID, location: loc})
+			}
 		}
 	}
+	return fi, true
+}
 
-	// Only build a per-pixel function when the fragment shader has @location inputs.
-	// Without @location inputs, the shader doesn't consume interpolated varyings
-	// and executeSPIRVFragment (single invocation) is sufficient.
-	if len(locationInputs) == 0 || !hasColorOut {
-		return nil
+// inputs builds the input values of one fragment invocation. Interpolated
+// attributes are the flat concatenation of the vertex @location outputs in
+// location order; they are handed back by component count. The position
+// builtin is the pixel center in framebuffer coordinates, the depth and 1/w.
+func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Value {
+	inputs := make(map[uint32]shader.Value, len(fi.locationInputs)+1)
+	attrs := frag.Attributes
+	offset := 0
+	for _, li := range fi.locationInputs {
+		if offset >= len(attrs) {
+			break
+		}
+		width := fi.parsed.GetTypeComponentCount(li.varID)
+		if width == 0 {
+			width = 4
+		}
+		end := min(offset+width, len(attrs))
+		inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
+		offset = end
+	}
+	if fi.fragCoordVar != 0 {
+		inputs[fi.fragCoordVar] = floatsToShaderValue([]float32{
+			float32(frag.X) + 0.5, float32(frag.Y) + 0.5, frag.Depth, frag.InvW,
+		})
+	}
+	return inputs
+}
+
+// buildFragmentShaderFunc creates a raster.FragmentShaderFunc that executes
+// the SPIR-V fragment shader per pixel and returns the location 0 color, and
+// whether the shader may discard (the raster then runs it before the depth
+// and stencil tests).
+//
+// Returns nil when the shader reads no per-fragment input (no @location input
+// and no builtin): every fragment then gets the same result, and the caller
+// uses executeSPIRVFragment once for the draw.
+func (r *RenderPassEncoder) buildFragmentShaderFunc() (raster.FragmentShaderFunc, bool) {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok || !fi.hasInputs {
+		return nil, false
+	}
+	var colorOutputVarID uint32
+	for _, o := range fi.outputs {
+		if o.location == 0 {
+			colorOutputVarID = o.varID
+		}
+	}
+	if colorOutputVarID == 0 {
+		return nil, false
 	}
 
 	// Build execution context with bind group resources (uniform buffers, textures, etc.).
 	ctx := r.buildExecutionContext()
 
-	return func(attrs []float32) [4]float32 {
-		inputs := make(map[uint32]shader.Value)
-
-		// Feed interpolated attributes into fragment shader @location inputs.
-		// Vertex shader outputs are collected in location order, so attrs is a
-		// flat concatenation of all @location outputs. We distribute them back
-		// to the corresponding fragment input variables based on type width.
-		offset := 0
-		for _, li := range locationInputs {
-			if offset >= len(attrs) {
-				break
-			}
-			// Determine the component count for this location from the type.
-			// Default to vec4 (most common for color varyings).
-			width := parsed.GetTypeComponentCount(li.varID)
-			if width == 0 {
-				width = 4
-			}
-			end := offset + width
-			if end > len(attrs) {
-				end = len(attrs)
-			}
-			inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
-			offset = end
+	return func(frag *raster.Fragment) ([4]float32, bool) {
+		ctx.Inputs = fi.inputs(frag)
+		outputs, err := fi.parsed.ExecuteWithContext(fi.entry, ctx)
+		if errors.Is(err, shader.ErrDiscarded) {
+			return [4]float32{}, true
 		}
-
-		ctx.Inputs = inputs
-		outputs, err := parsed.ExecuteWithContext(fsEntry, ctx)
 		if err != nil {
-			return [4]float32{1, 1, 1, 1}
+			return [4]float32{1, 1, 1, 1}, false
 		}
 
 		colorVal, ok := outputs[colorOutputVarID]
 		if !ok {
-			return [4]float32{1, 1, 1, 1}
+			return [4]float32{1, 1, 1, 1}, false
 		}
-		return shader.Vec4ToFloat32(colorVal)
-	}
+		return shader.Vec4ToFloat32(colorVal), false
+	}, r.pipeline.fragmentMayDiscard
 }
 
 // buildMRTFragmentShaderFunc creates a raster.MRTFragmentShaderFunc that executes
@@ -1419,53 +1475,18 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() raster.FragmentShaderFunc 
 // outputs, supporting Multiple Render Targets. The returned slice is indexed by
 // location number (0..N).
 //
-// Returns nil if the pipeline has no fragment shader with @location inputs, or
-// if there is only a single output (in which case buildFragmentShaderFunc is used).
-func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShaderFunc {
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
-		return nil
-	}
-
-	parsed := r.pipeline.fragment
-	if parsed == nil {
-		return nil
-	}
-
-	fsEntry := r.pipeline.desc.Fragment.EntryPoint
-	ep, ok := parsed.EntryPoints[fsEntry]
-	if !ok || ep.ExecutionModel != shader.ExecutionModelFragment {
-		return nil
-	}
-
-	// Classify fragment shader interface variables.
-	type fragLocVar struct {
-		varID    uint32
-		location int
-	}
-	var locationInputs []fragLocVar
-	var locationOutputs []fragLocVar
-
-	for _, varID := range ep.InterfaceIDs {
-		vi, exists := parsed.Variables[varID]
-		if !exists {
-			continue
-		}
-		loc := parsed.GetLocation(varID)
-		if vi.StorageClass == shader.StorageClassInput && loc >= 0 {
-			locationInputs = append(locationInputs, fragLocVar{varID: varID, location: loc})
-		}
-		if vi.StorageClass == shader.StorageClassOutput && loc >= 0 {
-			locationOutputs = append(locationOutputs, fragLocVar{varID: varID, location: loc})
-		}
-	}
-
-	if len(locationInputs) == 0 || len(locationOutputs) == 0 {
-		return nil
+// Returns nil, as buildFragmentShaderFunc does, when the shader reads no
+// per-fragment input or has no @location output. The second result reports
+// whether the shader may discard.
+func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() (raster.MRTFragmentShaderFunc, bool) {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok || !fi.hasInputs || len(fi.outputs) == 0 {
+		return nil, false
 	}
 
 	// Determine the max output location to size the result slice.
 	maxLoc := 0
-	for _, lo := range locationOutputs {
+	for _, lo := range fi.outputs {
 		if lo.location > maxLoc {
 			maxLoc = lo.location
 		}
@@ -1474,41 +1495,24 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShade
 
 	ctx := r.buildExecutionContext()
 
-	return func(attrs []float32) [][4]float32 {
-		inputs := make(map[uint32]shader.Value)
-
-		// Feed interpolated attributes into fragment shader @location inputs.
-		offset := 0
-		for _, li := range locationInputs {
-			if offset >= len(attrs) {
-				break
-			}
-			width := parsed.GetTypeComponentCount(li.varID)
-			if width == 0 {
-				width = 4
-			}
-			end := offset + width
-			if end > len(attrs) {
-				end = len(attrs)
-			}
-			inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
-			offset = end
+	return func(frag *raster.Fragment) ([][4]float32, bool) {
+		ctx.Inputs = fi.inputs(frag)
+		outputs, err := fi.parsed.ExecuteWithContext(fi.entry, ctx)
+		if errors.Is(err, shader.ErrDiscarded) {
+			return nil, true
 		}
-
-		ctx.Inputs = inputs
-		outputs, err := parsed.ExecuteWithContext(fsEntry, ctx)
 		if err != nil {
 			// On error, return white for all targets.
 			result := make([][4]float32, numOutputs)
 			for i := range result {
 				result[i] = [4]float32{1, 1, 1, 1}
 			}
-			return result
+			return result, false
 		}
 
 		// Collect outputs by location.
 		result := make([][4]float32, numOutputs)
-		for _, lo := range locationOutputs {
+		for _, lo := range fi.outputs {
 			colorVal, ok := outputs[lo.varID]
 			if !ok {
 				result[lo.location] = [4]float32{0, 0, 0, 0}
@@ -1516,8 +1520,8 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() raster.MRTFragmentShade
 			}
 			result[lo.location] = shader.Vec4ToFloat32(colorVal)
 		}
-		return result
-	}
+		return result, false
+	}, r.pipeline.fragmentMayDiscard
 }
 
 // writeColorToTarget writes a single fragment color to a render target texture
@@ -1550,10 +1554,10 @@ func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *rast
 			target.data[idx+3] = a
 		}
 	} else {
-		cr := clampBytef(color[0] * 255)
-		cg := clampBytef(color[1] * 255)
-		cb := clampBytef(color[2] * 255)
-		ca := clampBytef(color[3] * 255)
+		cr := raster.FloatToUnorm8(color[0])
+		cg := raster.FloatToUnorm8(color[1])
+		cb := raster.FloatToUnorm8(color[2])
+		ca := raster.FloatToUnorm8(color[3])
 		if bgra {
 			target.data[idx+0] = cb
 			target.data[idx+1] = cg
@@ -1567,17 +1571,6 @@ func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *rast
 		}
 	}
 	target.mu.Unlock()
-}
-
-// clampBytef clamps a float32 to [0,255] and returns as byte.
-func clampBytef(v float32) byte {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return byte(v)
 }
 
 // getPerTargetBlendStates returns blend states for all color attachment targets.
@@ -1657,6 +1650,12 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 		return
 	}
 	ds := r.pipeline.desc.DepthStencil
+
+	// Every draw of the pass tests against and writes into the pass's depth
+	// buffer, the depth attachment's contents.
+	if d := r.passDepthBuffer; d != nil && d.Width() == pipe.Width() && d.Height() == pipe.Height() {
+		pipe.SetDepthBuffer(d)
+	}
 
 	// Depth testing.
 	depthCompare := convertCompareFunction(ds.DepthCompare)

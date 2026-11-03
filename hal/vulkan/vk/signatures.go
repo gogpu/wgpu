@@ -251,8 +251,8 @@ var (
 	// void(handle, handle, u32, ptr, u32, ptr) - vkCmdClearColorImage, vkCmdClearDepthStencilImage
 	SigVoidCmdClearImage types.CallInterface
 
-	// VkResult(handle, handle, i32, ptr) - vkGetMemoryFdPropertiesKHR
-	SigResultHandleHandleI32Ptr types.CallInterface
+	// VkResult(handle, u32, i32, ptr) - vkGetMemoryFdPropertiesKHR
+	SigResultHandleU32I32Ptr types.CallInterface
 )
 
 // InitSignatures prepares all CallInterface templates.
@@ -797,9 +797,9 @@ func InitSignatures() error {
 		return err
 	}
 
-	// VkResult(handle, handle, i32, ptr) - vkGetMemoryFdPropertiesKHR
-	err = ffi.PrepareCallInterface(&SigResultHandleHandleI32Ptr, types.DefaultCall, resultRet,
-		[]*types.TypeDescriptor{u64, u64, i32, ptr})
+	// VkResult(handle, u32, i32, ptr) - vkGetMemoryFdPropertiesKHR
+	err = ffi.PrepareCallInterface(&SigResultHandleU32I32Ptr, types.DefaultCall, resultRet,
+		[]*types.TypeDescriptor{u64, u32, i32, ptr})
 	if err != nil {
 		return err
 	}

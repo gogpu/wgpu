@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.34.6
+## Current State: v0.34.7
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
@@ -60,7 +60,7 @@
 ✅ **Automatic resource lifecycle** — `runtime.AddCleanup` for Buffer/BindGroup (ADR-018, Rust Arc+Drop pattern). GC safety net prevents per-frame resource leaks.
 ✅ **Zero-allocation WriteBuffer batching** — pre-allocated BufferCopy + stack barrier arrays. All PendingWrites hot paths 0 allocs/op.
 ✅ **Full SPIR-V interpreter** — 7 phases (~10K LOC): vertex/fragment/compute on CPU, texture sampling, GLSL.std.450 intrinsics, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. For debugging/CI, not production.
-✅ **DX12 timestamp queries (HAL)** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity); the adapter does not offer `FeatureTimestampQuery` yet
+✅ **DX12 timestamp queries** — CreateQuerySet, EndQuery, ResolveQueryData (Rust wgpu-hal parity); `FeatureTimestampQuery` offered since v0.34.7
 ✅ **Queue thread safety** — Submit/WriteBuffer/WriteTexture serialized via sync.Mutex (Rust wgpu-core parity)
 ✅ **GLES compute memory barriers** — glMemoryBarrier for storage→draw/dispatch transitions (Rust parity)
 ✅ **Software render pass instrumentation** — slog debug events + RenderPassStats for CI e2e assertions
@@ -127,14 +127,55 @@
 
 ## Roadmap
 
-### Near-term (Q3 2026)
+### Near-term (Q4 2026)
 
-**Next minor release** (naga v0.21.0):
-- [ ] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
-- [ ] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
-- [ ] Subgroups, f16 and timestamp queries advertised on Vulkan, DX12 and Metal where the device supports them
-- [ ] Metal: MSL language version from the device
+Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, stricter validation of what the
+spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
+releases.
+
+**Next patch release, v0.34.8:**
+- [ ] Software backend: workgroup memory shared across barriers, replacing v0.34.7's refusal (P1-SW-025)
+- [ ] `RenderPassColorAttachment.DepthSlice` with core validation on every backend (P1-API-019), if ready together;
+  otherwise v0.34.9
+- [ ] Then: WARP listed as a CPU-type DX12 adapter, as in Rust (P2-DX12-060)
+
+**Patch release v0.34.7** (2026-11-03, naga v0.21.2):
+- [x] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
+- [x] Shader modules validated once, with the device's capabilities, and handed to the backend
+- [x] Shader interface read per entry point
+- [x] Metal: MSL language version from the device
+- [x] Shader features in gputypes for every naga capability Rust gates, advertised per backend as Rust wgpu-hal does
+- [x] f16 on Vulkan, and timestamp queries on Vulkan and DX12, where the device supports them (f16 on Metal waits for a run on a Mac)
+- [x] `RequestDevice` refuses features the adapter does not expose; workgroup storage limit checked
+- [x] Vertex layout validation completed, and `arrayStride: 0` (broadcast) supported on every backend (#364)
+- [x] Out-of-bounds storage access contained on Vulkan (#370)
+- [x] Bind group resources tracked per pass, with the barriers they need
+- [x] Vulkan binding generator and loader fixes (#372–#377); descriptor writes (#356)
+- [x] Copy, clear and `WriteTexture` validation as in Rust wgpu-core; texture view formats validated
+- [x] Render bundles on every backend, recorded and replayed in core as Rust does
+- [x] Bind groups kept across pipeline changes (core binder); dynamic offsets on DX12; `DispatchIndirect` correct on every backend
+- [x] Textures and texture views reference counted; resources kept alive by unsubmitted encoders and queue writes
+- [x] Indirect draws and dispatches, storage textures and depth on GLES and the software backend
+
+**Next minor release, v0.35.0: backend registration, adapter selection, internal packages**
+
+Goal: one correct, predictable way for every Go program to get a GPU. The right adapter is chosen the same way
+everywhere, from code or from the environment. With no hardware adapter, the program gets an explicit answer:
+either a visible software fallback, or a refusal when it demanded hardware. All of this is settled before the v1.0
+API freeze.
+- [ ] Platform backends registered by default, with no blank import; opt-out build tags
+- [ ] The Pure Go software backend selected only explicitly, with its own `Backends` bit; `Backends` widened to 32 bits
+- [ ] One environment contract (`GOGPU_GRAPHICS_API` and related variables) shared by the whole ecosystem
+- [ ] `Instance.EnumerateAdapters` with a documented, stable order (#360); selection by index or PCI bus id; a
+  hardware-only option with typed errors; the chosen adapter logged once
+- [ ] Implementation moved to `internal/`, root package as the thin public API (#329), with a public test seam that
+  replaces HAL test doubles
 - [ ] Integrate `gogpu/galloc` into Vulkan memory pools (replace BuddyAllocator)
+
+Where this differs from Rust wgpu, and why: we have our own Pure Go software backend (Rust's CPU adapters come from
+drivers); Go has no Cargo features, so a library cannot opt a backend out for its users; several libraries share
+one device and must agree on one environment contract; GPU servers need hardware-only selection by index or PCI
+bus id, which Rust leaves to the application.
 
 **GLES Linux Enterprise Parity:**
 - [x] Shared AdapterContext for Linux — mutex + LockOSThread (FEAT-GLES-003, #332). Windows parity.
@@ -218,6 +259,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.7** | 2026-11 | naga v0.21.2 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
 | **v0.33.0** | 2026-08 | DownlevelCapabilities — Rust-parity capability flags for graceful degradation |

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/core/track"
 	"github.com/gogpu/wgpu/hal"
@@ -78,12 +79,12 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	var pendingCmdBuf hal.CommandBuffer
 	var flushedEncoder hal.CommandEncoder
 	var flushedDstTextures []hal.Texture
-	var flushedDstBuffers []hal.Buffer
+	var flushedDstRefs []*core.ResourceRef
 
 	if q.pending != nil {
 		q.pending.mu.Lock()
 		var err error
-		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstBuffers, err = q.pending.flush()
+		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs, err = q.pending.flush()
 		q.pending.mu.Unlock()
 		if err != nil {
 			return 0, fmt.Errorf("wgpu: flush pending writes: %w", err)
@@ -94,7 +95,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	if err != nil {
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures)
+			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 			q.pending.mu.Unlock()
 		}
 		return 0, err
@@ -110,7 +111,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		q.releaseTransits()
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures)
+			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 			q.pending.mu.Unlock()
 		}
 		return 0, fmt.Errorf("wgpu: submit failed: %w", err)
@@ -131,7 +132,7 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 				cmdBuf:          pendingCmdBuf,
 				encoder:         flushedEncoder,
 				dstTextures:     flushedDstTextures,
-				dstBuffers:      flushedDstBuffers,
+				dstRefs:         flushedDstRefs,
 			})
 		}
 		// Update the staging belt with the actual submission index
@@ -172,6 +173,9 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		if cb != nil {
 			cb.submitted = true
 			cb.dropUsedSets()
+			if cb.device != nil {
+				cb.device.recordings.removeBuffer(cb)
+			}
 		}
 	}
 
@@ -324,7 +328,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 		if td := buffer.core.TrackingData(); td != nil {
 			index = td.Index()
 		}
-		return q.pending.writeBuffer(halBuffer, index, buffer.Usage(), offset, data)
+		return q.pending.writeBufferFor(buffer.core.Ref, halBuffer, index, offset, data)
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)
@@ -355,6 +359,14 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 		return fmt.Errorf("wgpu: WriteTexture: size is nil")
 	}
 
+	skip, err := validateTextureWrite(dst, data, layout, size)
+	if err != nil {
+		return fmt.Errorf("wgpu: WriteTexture: %w", err)
+	}
+	if skip {
+		return nil
+	}
+
 	halDst := dst.toHAL()
 	halLayout := layout.toHAL()
 	halSize := size.toHAL()
@@ -364,6 +376,29 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
+}
+
+// validateTextureWrite checks a WriteTexture upload as Rust wgpu-core
+// device/queue.rs write_texture_inner does: core.ValidateTextureWrite (usage,
+// copy range, aspect, format, sample count, data layout against the data
+// length) and the depth/stencil downlevel flag. skip reports a valid upload of
+// size zero, which Rust drops before any side effect. A texture without a core
+// texture (test stubs) is not validated.
+func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
+	if view, ok := dst.Texture.copyView(dst.MipLevel, dst.Origin, dst.Aspect); ok {
+		texelLayout := core.TexelCopyBufferLayout{
+			Offset:       layout.Offset,
+			BytesPerRow:  layout.BytesPerRow,
+			RowsPerImage: layout.RowsPerImage,
+		}
+		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
+			return false, err
+		}
+		if err := dst.Texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+			return false, err
+		}
+	}
+	return isEmptyExtent(*size), nil
 }
 
 // SetSwapchainSuppressed temporarily disables swapchain semaphore binding
@@ -395,6 +430,17 @@ func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
 // while Queue.mu is held by Submit. ADR-056 deadlock fix.
 func (q *Queue) LastSubmissionIndex() uint64 {
 	return q.lastSubmissionIndex.Load()
+}
+
+// GetTimestampPeriod returns the number of nanoseconds per timestamp query
+// tick, as Rust wgpu's Queue::get_timestamp_period: multiply the difference
+// of two resolved timestamps by it to get nanoseconds. It returns 1.0 when
+// the queue has no backend.
+func (q *Queue) GetTimestampPeriod() float32 {
+	if q == nil || q.hal == nil {
+		return 1.0
+	}
+	return q.hal.GetTimestampPeriod()
 }
 
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.

@@ -3584,7 +3584,7 @@ func (c *Commands) GetMemoryWin32HandleKHR(device Device, pGetWin32HandleInfo *M
 	return Result(result)
 }
 
-// TODO: GetMemoryWin32HandlePropertiesKHR - signature not yet supported: Result(handle, handle, other, ptr)
+// TODO: GetMemoryWin32HandlePropertiesKHR - signature not yet supported: Result(handle, u32, other, ptr)
 
 // GetMemoryFdKHR wraps vkGetMemoryFdKHR.
 func (c *Commands) GetMemoryFdKHR(device Device, pGetFdInfo *MemoryGetFdInfoKHR, pFd *int32) Result {
@@ -3609,7 +3609,7 @@ func (c *Commands) GetMemoryFdPropertiesKHR(device Device, handleType ExternalMe
 		unsafe.Pointer(&fd),
 		unsafe.Pointer(&pMemoryFdProperties),
 	}
-	if _, err := ffi.CallFunction(&SigResultHandleHandleI32Ptr, c.getMemoryFdPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
+	if _, err := ffi.CallFunction(&SigResultHandleU32I32Ptr, c.getMemoryFdPropertiesKHR, unsafe.Pointer(&result), args[:]); err != nil {
 		return ErrorInitializationFailed
 	}
 	return Result(result)
@@ -3629,7 +3629,7 @@ func (c *Commands) GetMemoryZirconHandleFUCHSIA(device Device, pGetZirconHandleI
 	return Result(result)
 }
 
-// TODO: GetMemoryZirconHandlePropertiesFUCHSIA - signature not yet supported: Result(handle, handle, other, ptr)
+// TODO: GetMemoryZirconHandlePropertiesFUCHSIA - signature not yet supported: Result(handle, u32, other, ptr)
 
 // GetMemoryRemoteAddressNV wraps vkGetMemoryRemoteAddressNV.
 func (c *Commands) GetMemoryRemoteAddressNV(device Device, pMemoryGetRemoteAddressInfo *MemoryGetRemoteAddressInfoNV, pAddress *RemoteAddressNV) Result {
@@ -3659,7 +3659,7 @@ func (c *Commands) GetMemorySciBufNV(device Device, pGetSciBufInfo *MemoryGetSci
 	return Result(result)
 }
 
-// TODO: GetPhysicalDeviceExternalMemorySciBufPropertiesNV - signature not yet supported: Result(handle, handle, other, ptr)
+// TODO: GetPhysicalDeviceExternalMemorySciBufPropertiesNV - signature not yet supported: Result(handle, u32, other, ptr)
 
 // TODO: GetPhysicalDeviceSciBufAttributesNV - signature not yet supported: Result(handle, other)
 
@@ -4010,7 +4010,20 @@ func (c *Commands) RegisterDeviceEventEXT(device Device, pDeviceEventInfo *Devic
 
 // TODO: RegisterDisplayEventEXT - signature not yet supported: Result(handle, handle, ptr, ptr, ptr)
 
-// TODO: GetSwapchainCounterEXT - signature not yet supported: Result(handle, handle, handle, ptr)
+// GetSwapchainCounterEXT wraps vkGetSwapchainCounterEXT.
+func (c *Commands) GetSwapchainCounterEXT(device Device, swapchain SwapchainKHR, counter SurfaceCounterFlagBitsEXT, pCounterValue *uint64) Result {
+	var result int32
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&device),
+		unsafe.Pointer(&swapchain),
+		unsafe.Pointer(&counter),
+		unsafe.Pointer(&pCounterValue),
+	}
+	if _, err := ffi.CallFunction(&SigResultHandleHandleU32Ptr, c.getSwapchainCounterEXT, unsafe.Pointer(&result), args[:]); err != nil {
+		return ErrorInitializationFailed
+	}
+	return Result(result)
+}
 
 // GetPhysicalDeviceSurfaceCapabilities2EXT wraps vkGetPhysicalDeviceSurfaceCapabilities2EXT.
 func (c *Commands) GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice PhysicalDevice, surface SurfaceKHR, pSurfaceCapabilities *SurfaceCapabilities2EXT) Result {
@@ -4793,7 +4806,7 @@ func (c *Commands) SubmitDebugUtilsMessageEXT(instance Instance, messageSeverity
 	if c.submitDebugUtilsMessageEXT == nil {
 		return
 	}
-	_, _ = ffi.CallFunction(&SigVoidHandleHandleU32Ptr, c.submitDebugUtilsMessageEXT, nil, args[:])
+	_, _ = ffi.CallFunction(&SigVoidHandleU32U32Ptr, c.submitDebugUtilsMessageEXT, nil, args[:])
 }
 
 // GetMemoryHostPointerPropertiesEXT wraps vkGetMemoryHostPointerPropertiesEXT.
@@ -4805,7 +4818,7 @@ func (c *Commands) GetMemoryHostPointerPropertiesEXT(device Device, handleType E
 		unsafe.Pointer(&pHostPointer),
 		unsafe.Pointer(&pMemoryHostPointerProperties),
 	}
-	if _, err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryHostPointerPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+	if _, err := ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getMemoryHostPointerPropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
 		return ErrorInitializationFailed
 	}
 	return Result(result)
@@ -8288,7 +8301,7 @@ func (c *Commands) GetMemoryMetalHandlePropertiesEXT(device Device, handleType E
 		unsafe.Pointer(&pHandle),
 		unsafe.Pointer(&pMemoryMetalHandleProperties),
 	}
-	if _, err := ffi.CallFunction(&SigResultHandleHandlePtrPtr, c.getMemoryMetalHandlePropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
+	if _, err := ffi.CallFunction(&SigResultHandleU32PtrPtr, c.getMemoryMetalHandlePropertiesEXT, unsafe.Pointer(&result), args[:]); err != nil {
 		return ErrorInitializationFailed
 	}
 	return Result(result)

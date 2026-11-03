@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/metal/mslmap"
 	"github.com/gogpu/wgpu/internal/indirect"
 )
 
@@ -680,45 +681,34 @@ func (e *RenderPassEncoder) applyPipeline(p *RenderPipeline) {
 	}
 }
 
-// bindSlotAssignment holds the computed per-type Metal slot index for a bind group entry.
-type bindSlotAssignment struct {
-	entryIndex int
-	slot       uintptr
+// resourceSlot returns the slot of a bind group resource in stage s: the
+// group's first slot of the resource's kind plus the resource's slot in the
+// group. ok is false if the stage does not see the resource or the bind group
+// holds none for it.
+func resourceSlot(res *bindGroupResource, s int, base mslmap.Counts) (slot uintptr, ok bool) {
+	rel := res.slots[s]
+	if rel < 0 || res.handle == 0 {
+		return 0, false
+	}
+	return uintptr(base.Of(res.kind) + rel), true
 }
 
-// computeBindSlots calculates per-type sequential Metal slot indices for bind group entries.
-//
-// Metal uses separate index spaces: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
-// The naga MSL compiler auto-generates these indices sequentially per type,
-// so we must count each resource type independently instead of using the
-// WGSL @binding(N) number (which is unique across all types in a group).
-func computeBindSlots(entries []gputypes.BindGroupEntry) (bufferSlots, textureSlots, samplerSlots []bindSlotAssignment) {
-	var bufferIdx, textureIdx, samplerIdx uintptr
-	for i, entry := range entries {
-		switch entry.Resource.(type) {
-		case gputypes.BufferBinding:
-			bufferSlots = append(bufferSlots, bindSlotAssignment{entryIndex: i, slot: bufferIdx})
-			bufferIdx++
-		case gputypes.TextureViewBinding:
-			textureSlots = append(textureSlots, bindSlotAssignment{entryIndex: i, slot: textureIdx})
-			textureIdx++
-		case gputypes.SamplerBinding:
-			samplerSlots = append(samplerSlots, bindSlotAssignment{entryIndex: i, slot: samplerIdx})
-			samplerIdx++
-		}
+// resourceOffset returns the buffer offset of a bind group resource with its
+// dynamic offset, if it has one.
+func resourceOffset(res *bindGroupResource, offsets []uint32) uintptr {
+	offset := res.offset
+	if res.dynamicIndex >= 0 && res.dynamicIndex < len(offsets) {
+		offset += uint64(offsets[res.dynamicIndex])
 	}
-	return
+	return uintptr(offset)
 }
 
 // SetBindGroup sets a bind group by binding each resource directly on the encoder.
 //
 // Metal does not use argument buffers for basic resource binding. Instead, resources
 // are set individually via setVertexBuffer/setFragmentBuffer, setVertexTexture/
-// setFragmentTexture, and setVertexSamplerState/setFragmentSamplerState.
-//
-// The Metal binding index uses per-type sequential indices because naga MSL
-// auto-generates [[buffer(N)]], [[texture(M)]], [[sampler(K)]] attributes
-// sequentially per type.
+// setFragmentTexture, and setVertexSamplerState/setFragmentSamplerState, at the
+// slots the pipeline layout gives each stage (mslmap.StageLayout).
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
 	if !ok || bg == nil {
@@ -738,58 +728,59 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 	e.applyBindGroup(index, bg, offsets)
 }
 
+// renderStageSelectors holds the per-kind encoder selectors of the vertex and
+// fragment stages.
+var renderStageSelectors = [2]struct {
+	stage                    int
+	buffer, texture, sampler string
+}{
+	{stageVertex, "setVertexBuffer:offset:atIndex:", "setVertexTexture:atIndex:", "setVertexSamplerState:atIndex:"},
+	{stageFragment, "setFragmentBuffer:offset:atIndex:", "setFragmentTexture:atIndex:", "setFragmentSamplerState:atIndex:"},
+}
+
+// applyBindGroup binds each resource of bg for the vertex and fragment
+// stages that see it, at the slots the current pipeline layout gives each
+// stage, with the dynamic offsets in binding order.
+//
+// Reference: Rust wgpu-hal metal/command.rs set_bind_group and
+// update_bind_group_state.
 func (e *RenderPassEncoder) applyBindGroup(index uint32, bg *BindGroup, offsets []uint32) {
-	// Metal uses per-type sequential indices: [[buffer(N)]], [[texture(M)]], [[sampler(K)]].
-	// naga MSL generates these indices sequentially across ALL bind groups in the
-	// pipeline layout. Group 0 starts at 0; group 1 starts where group 0 ended, etc.
-	// We use the cumulative offsets from the pipeline layout to compute the correct
-	// starting slot for this group.
-	//
-	// Reference: Rust wgpu-hal metal/command.rs:182 (resource_indices.buffers + index).
-	var bufferSlot, textureSlot, samplerSlot uintptr
-	if e.currentLayout != nil && int(index) < len(e.currentLayout.groupOffsets) {
-		off := e.currentLayout.groupOffsets[index]
-		bufferSlot = uintptr(off.Buffers)
-		textureSlot = uintptr(off.Textures)
-		samplerSlot = uintptr(off.Samplers)
-	}
-
-	var dynamicIdx int
-	for _, entry := range bg.entries {
-		switch res := entry.Resource.(type) {
-		case gputypes.BufferBinding:
-			offset := uintptr(res.Offset)
-			// Apply dynamic offset if the layout entry has HasDynamicOffset.
-			if dynamicIdx < len(offsets) && bg.layout != nil {
-				for _, le := range bg.layout.entries {
-					if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
-						offset += uintptr(offsets[dynamicIdx])
-						dynamicIdx++
-						break
-					}
-				}
+	for _, sel := range renderStageSelectors {
+		base := e.currentLayout.groupBase(sel.stage, index)
+		for i := range bg.resources {
+			res := &bg.resources[i]
+			slot, ok := resourceSlot(res, sel.stage, base)
+			if !ok {
+				continue
 			}
-			_ = MsgSend(e.raw, Sel("setVertexBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
-			_ = MsgSend(e.raw, Sel("setFragmentBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
-			bufferSlot++
-
-			// Save the usable byte size for `_buffer_sizes`.
-			if e.bindingSizes == nil {
-				e.bindingSizes = make(map[[2]uint32]uint64)
+			switch res.kind {
+			case mslmap.KindBuffer:
+				_ = MsgSend(e.raw, Sel(sel.buffer), res.handle, resourceOffset(res, offsets), slot)
+			case mslmap.KindTexture:
+				_ = MsgSend(e.raw, Sel(sel.texture), res.handle, slot)
+			case mslmap.KindSampler:
+				_ = MsgSend(e.raw, Sel(sel.sampler), res.handle, slot)
 			}
-			e.bindingSizes[[2]uint32{index, entry.Binding}] = boundBufferSize(res)
-
-		case gputypes.TextureViewBinding:
-			_ = MsgSend(e.raw, Sel("setVertexTexture:atIndex:"), res.TextureView, textureSlot)
-			_ = MsgSend(e.raw, Sel("setFragmentTexture:atIndex:"), res.TextureView, textureSlot)
-			textureSlot++
-
-		case gputypes.SamplerBinding:
-			_ = MsgSend(e.raw, Sel("setVertexSamplerState:atIndex:"), res.Sampler, samplerSlot)
-			_ = MsgSend(e.raw, Sel("setFragmentSamplerState:atIndex:"), res.Sampler, samplerSlot)
-			samplerSlot++
 		}
 	}
+	e.bindingSizes = recordBindingSizes(e.bindingSizes, index, bg)
+}
+
+// recordBindingSizes saves the binding size of each storage buffer of bg, at
+// group index, for naga's `_buffer_sizes` argument; it returns sizes, made
+// if it was nil.
+func recordBindingSizes(sizes map[[2]uint32]uint64, index uint32, bg *BindGroup) map[[2]uint32]uint64 {
+	for i := range bg.resources {
+		res := &bg.resources[i]
+		if !res.sized {
+			continue
+		}
+		if sizes == nil {
+			sizes = make(map[[2]uint32]uint64)
+		}
+		sizes[[2]uint32{index, res.binding}] = res.size
+	}
+	return sizes
 }
 
 // SetVertexBuffer sets a vertex buffer.
@@ -914,13 +905,13 @@ func (e *RenderPassEncoder) bindBufferSizes() {
 	if len(p.vertexSizes) > 0 {
 		sizes := bufferSizeWords(p.vertexSizes, e.bindingSizes)
 		_ = msgSendSetBytes(e.raw, Sel("setVertexBytes:length:atIndex:"),
-			unsafe.Pointer(&sizes[0]), NSUInteger(4*len(sizes)), NSUInteger(p.sizesSlot))
+			unsafe.Pointer(&sizes[0]), NSUInteger(4*len(sizes)), NSUInteger(p.vertexSizesSlot))
 		runtime.KeepAlive(sizes)
 	}
 	if len(p.fragmentSizes) > 0 {
 		sizes := bufferSizeWords(p.fragmentSizes, e.bindingSizes)
 		_ = msgSendSetBytes(e.raw, Sel("setFragmentBytes:length:atIndex:"),
-			unsafe.Pointer(&sizes[0]), NSUInteger(4*len(sizes)), NSUInteger(p.sizesSlot))
+			unsafe.Pointer(&sizes[0]), NSUInteger(4*len(sizes)), NSUInteger(p.fragmentSizesSlot))
 		runtime.KeepAlive(sizes)
 	}
 }
@@ -1081,48 +1072,23 @@ func (e *ComputePassEncoder) SetBindGroup(index uint32, group hal.BindGroup, off
 		return
 	}
 
-	// Metal uses per-type sequential indices across all bind groups.
-	// See RenderPassEncoder.SetBindGroup for detailed explanation.
-	var bufferSlot, textureSlot, samplerSlot uintptr
-	if e.currentLayout != nil && int(index) < len(e.currentLayout.groupOffsets) {
-		off := e.currentLayout.groupOffsets[index]
-		bufferSlot = uintptr(off.Buffers)
-		textureSlot = uintptr(off.Textures)
-		samplerSlot = uintptr(off.Samplers)
-	}
-
-	var dynamicIdx int
-	for _, entry := range bg.entries {
-		switch res := entry.Resource.(type) {
-		case gputypes.BufferBinding:
-			offset := uintptr(res.Offset)
-			if dynamicIdx < len(offsets) && bg.layout != nil {
-				for _, le := range bg.layout.entries {
-					if le.Binding == entry.Binding && le.Buffer != nil && le.Buffer.HasDynamicOffset {
-						offset += uintptr(offsets[dynamicIdx])
-						dynamicIdx++
-						break
-					}
-				}
-			}
-			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.Buffer, offset, bufferSlot)
-			bufferSlot++
-
-			// Save the usable byte size for `_buffer_sizes`.
-			if e.bindingSizes == nil {
-				e.bindingSizes = make(map[[2]uint32]uint64)
-			}
-			e.bindingSizes[[2]uint32{index, entry.Binding}] = boundBufferSize(res)
-
-		case gputypes.TextureViewBinding:
-			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.TextureView, textureSlot)
-			textureSlot++
-
-		case gputypes.SamplerBinding:
-			_ = MsgSend(e.raw, Sel("setSamplerState:atIndex:"), res.Sampler, samplerSlot)
-			samplerSlot++
+	base := e.currentLayout.groupBase(stageCompute, index)
+	for i := range bg.resources {
+		res := &bg.resources[i]
+		slot, ok := resourceSlot(res, stageCompute, base)
+		if !ok {
+			continue
+		}
+		switch res.kind {
+		case mslmap.KindBuffer:
+			_ = MsgSend(e.raw, Sel("setBuffer:offset:atIndex:"), res.handle, resourceOffset(res, offsets), slot)
+		case mslmap.KindTexture:
+			_ = MsgSend(e.raw, Sel("setTexture:atIndex:"), res.handle, slot)
+		case mslmap.KindSampler:
+			_ = MsgSend(e.raw, Sel("setSamplerState:atIndex:"), res.handle, slot)
 		}
 	}
+	e.bindingSizes = recordBindingSizes(e.bindingSizes, index, bg)
 }
 
 // bindBufferSizes binds naga's `_buffer_sizes` argument. Kernels need it when

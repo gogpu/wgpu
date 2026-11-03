@@ -25,35 +25,43 @@ import (
 
 // Common CallInterface signatures (reused across multiple GL functions)
 var (
-	cifVoid          types.CallInterface // void fn(void)
-	cifUInt32        types.CallInterface // uint32 fn(void)
-	cifUInt321       types.CallInterface // uint32 fn(uint32)
-	cifInt322        types.CallInterface // int32 fn(uint32, void*)
-	cifVoid1         types.CallInterface // void fn(uint32)
-	cifVoid2         types.CallInterface // void fn(uint32, void*)
-	cifVoid2UU       types.CallInterface // void fn(uint32, uint32)
-	cifVoid3         types.CallInterface // void fn(uint32, uint32, uint32)
-	cifVoid4         types.CallInterface // void fn(uint32, uint32, uint32, uint32)
-	cifVoid4Float    types.CallInterface // void fn(float, float, float, float)
-	cifVoid4Shader   types.CallInterface // void fn(uint32, int32, void*, void*)
-	cifVoid3Shader   types.CallInterface // void fn(uint32, uint32, void*)
-	cifVoid4Log      types.CallInterface // void fn(uint32, uint32, void*, void*)
-	cifVoid4Buffer   types.CallInterface // void fn(uint32, uintptr, void*, uint32)
-	cifVoid4SubBuf   types.CallInterface // void fn(uint32, uintptr, uintptr, void*)
-	cifVoid6Attrib   types.CallInterface // void fn(uint32, int32, uint32, uint8, int32, uintptr)
-	cifVoid5FBO      types.CallInterface // void fn(uint32, uint32, uint32, uint32, int32)
-	cifVoid9TexImg   types.CallInterface // void fn(uint32, int32, int32, int32, int32, int32, uint32, uint32, void*)
-	cifVoid4Draw     types.CallInterface // void fn(uint32, int32, int32, int32)
-	cifVoid5DrawElem types.CallInterface // void fn(uint32, int32, uint32, void*, int32)
-	cifPtr1          types.CallInterface // void* fn(uint32)
-	cifPtr2UU        types.CallInterface // void* fn(uint32, uint32)
-	cifVoid7ReadPx   types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
-	cifVoid6TexMS    types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
-	cifVoid10Blit    types.CallInterface // void fn(int32*8, uint32, uint32) - BlitFramebuffer
-	cifVoid3UUF      types.CallInterface // void fn(uint32, uint32, float32) - SamplerParameterf
-	cifVoid1Float    types.CallInterface // void fn(float32) - ClearDepthf
-	cifVoid2Float    types.CallInterface // void fn(float32, float32) - DepthRangef
-	cifInitialized   bool
+	cifVoid              types.CallInterface // void fn(void)
+	cifUInt32            types.CallInterface // uint32 fn(void)
+	cifUInt321           types.CallInterface // uint32 fn(uint32)
+	cifInt322            types.CallInterface // int32 fn(uint32, void*)
+	cifVoid1             types.CallInterface // void fn(uint32)
+	cifVoid2             types.CallInterface // void fn(uint32, void*)
+	cifVoid2UU           types.CallInterface // void fn(uint32, uint32)
+	cifVoid3             types.CallInterface // void fn(uint32, uint32, uint32)
+	cifVoid4             types.CallInterface // void fn(uint32, uint32, uint32, uint32)
+	cifVoid4Float        types.CallInterface // void fn(float, float, float, float)
+	cifVoid4Shader       types.CallInterface // void fn(uint32, int32, void*, void*)
+	cifVoid3Shader       types.CallInterface // void fn(uint32, uint32, void*)
+	cifVoid4Log          types.CallInterface // void fn(uint32, uint32, void*, void*)
+	cifVoid4Buffer       types.CallInterface // void fn(uint32, uintptr, void*, uint32)
+	cifVoid4SubBuf       types.CallInterface // void fn(uint32, uintptr, uintptr, void*)
+	cifVoid6Attrib       types.CallInterface // void fn(uint32, int32, uint32, uint8, int32, uintptr)
+	cifVoid5FBO          types.CallInterface // void fn(uint32, uint32, uint32, uint32, int32)
+	cifVoid9TexImg       types.CallInterface // void fn(uint32, int32, int32, int32, int32, int32, uint32, uint32, void*)
+	cifVoid4Draw         types.CallInterface // void fn(uint32, int32, int32, int32)
+	cifVoid5DrawElem     types.CallInterface // void fn(uint32, int32, uint32, void*, int32)
+	cifVoid6DrawElemBV   types.CallInterface // void fn(uint32, int32, uint32, void*, int32, int32) - DrawElementsInstancedBaseVertex
+	cifVoid5DrawArrBI    types.CallInterface // void fn(uint32, int32, int32, int32, uint32) - DrawArraysInstancedBaseInstance
+	cifVoid7DrawElemBVBI types.CallInterface // void fn(uint32, int32, uint32, void*, int32, int32, uint32) - DrawElementsInstancedBaseVertexBaseInstance
+	cifVoid4MultiArr     types.CallInterface // void fn(uint32, void*, int32, int32) - MultiDrawArraysIndirect
+	cifVoid5MultiElem    types.CallInterface // void fn(uint32, uint32, void*, int32, int32) - MultiDrawElementsIndirect
+	cifPtr1              types.CallInterface // void* fn(uint32)
+	cifPtr2UU            types.CallInterface // void* fn(uint32, uint32)
+	cifVoid7ReadPx       types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
+	cifVoid6TexMS        types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
+	cifVoid7BindImage    types.CallInterface // void fn(uint32, uint32, int32, uint8, int32, uint32, uint32) - BindImageTexture
+	cifVoid10Blit        types.CallInterface // void fn(int32*8, uint32, uint32) - BlitFramebuffer
+	cifVoid3UUF          types.CallInterface // void fn(uint32, uint32, float32) - SamplerParameterf
+	cifVoid1Float        types.CallInterface // void fn(float32) - ClearDepthf
+	cifVoid2Float        types.CallInterface // void fn(float32, float32) - DepthRangef
+	cifVoid1Double       types.CallInterface // void fn(float64) - glClearDepth
+	cifVoid2Double       types.CallInterface // void fn(float64, float64) - glDepthRange
+	cifInitialized       bool
 )
 
 // initCommonCallInterfaces prepares reusable CallInterface signatures.
@@ -134,6 +142,25 @@ func initCommonCallInterfaces() error {
 		[]*types.TypeDescriptor{
 			types.FloatTypeDescriptor,
 			types.FloatTypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(float64) - glClearDepth (desktop GL without glClearDepthf)
+	err = ffi.PrepareCallInterface(&cifVoid1Double, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{types.DoubleTypeDescriptor})
+	if err != nil {
+		return err
+	}
+
+	// void fn(float64, float64) - glDepthRange (desktop GL without glDepthRangef)
+	err = ffi.PrepareCallInterface(&cifVoid2Double, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
 		})
 	if err != nil {
 		return err
@@ -340,6 +367,78 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	// void fn(uint32, int32, uint32, void*, int32, int32) - DrawElementsInstancedBaseVertex
+	err = ffi.PrepareCallInterface(&cifVoid6DrawElemBV, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, int32, int32, int32, uint32) - DrawArraysInstancedBaseInstance
+	err = ffi.PrepareCallInterface(&cifVoid5DrawArrBI, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, int32, uint32, void*, int32, int32, uint32) - DrawElementsInstancedBaseVertexBaseInstance
+	err = ffi.PrepareCallInterface(&cifVoid7DrawElemBVBI, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, void*, int32, int32) - MultiDrawArraysIndirect
+	err = ffi.PrepareCallInterface(&cifVoid4MultiArr, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, uint32, void*, int32, int32) - MultiDrawElementsIndirect
+	err = ffi.PrepareCallInterface(&cifVoid5MultiElem, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,
+			types.UInt32TypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.SInt32TypeDescriptor,
+			types.SInt32TypeDescriptor,
+		})
+	if err != nil {
+		return err
+	}
+
 	// void fn(int32, int32, int32, int32, uint32, uint32, void*) - ReadPixels
 	err = ffi.PrepareCallInterface(&cifVoid7ReadPx, types.DefaultCall,
 		types.VoidTypeDescriptor,
@@ -366,6 +465,21 @@ func initCommonCallInterfaces() error {
 			types.SInt32TypeDescriptor, // width
 			types.SInt32TypeDescriptor, // height
 			types.UInt8TypeDescriptor,  // fixedsamplelocations
+		})
+	if err != nil {
+		return err
+	}
+
+	err = ffi.PrepareCallInterface(&cifVoid7BindImage, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // unit
+			types.UInt32TypeDescriptor, // texture
+			types.SInt32TypeDescriptor, // level
+			types.UInt8TypeDescriptor,  // layered
+			types.SInt32TypeDescriptor, // layer
+			types.UInt32TypeDescriptor, // access
+			types.UInt32TypeDescriptor, // format
 		})
 	if err != nil {
 		return err
@@ -410,6 +524,11 @@ func initCommonCallInterfaces() error {
 // Functions are loaded via eglGetProcAddress for all OpenGL functions.
 type Context struct {
 	isGLES bool
+	// clearDepthDouble and depthRangeDouble are set when glClearDepth and
+	// glDepthRange take doubles: desktop GL without the float entry points
+	// (GL 4.1 / ARB_ES2_compatibility).
+	clearDepthDouble bool
+	depthRangeDouble bool
 
 	// Core GL 1.1
 	glGetError     unsafe.Pointer
@@ -547,10 +666,22 @@ type Context struct {
 	glDrawElementsInstanced unsafe.Pointer
 	glVertexAttribDivisor   unsafe.Pointer
 
+	// Draw variants (optional): base vertex GL 3.2 / ES 3.2, indirect GL 4.0 /
+	// ES 3.1, base instance GL 4.2, glUniform1ui GL 3.0 / ES 3.0.
+	glDrawElementsInstancedBaseVertex             unsafe.Pointer
+	glDrawArraysIndirect                          unsafe.Pointer
+	glDrawElementsIndirect                        unsafe.Pointer
+	glDrawArraysInstancedBaseInstance             unsafe.Pointer
+	glDrawElementsInstancedBaseVertexBaseInstance unsafe.Pointer
+	glUniform1ui                                  unsafe.Pointer
+	glMultiDrawArraysIndirect                     unsafe.Pointer
+	glMultiDrawElementsIndirect                   unsafe.Pointer
+
 	// Compute shaders (GL 4.3+ / ES 3.1+)
 	glDispatchCompute         unsafe.Pointer
 	glDispatchComputeIndirect unsafe.Pointer
 	glMemoryBarrier           unsafe.Pointer
+	glBindImageTexture        unsafe.Pointer
 
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample unsafe.Pointer
@@ -600,10 +731,13 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDisable = getProcAddr("glDisable")
 	c.glClear = getProcAddr("glClear")
 	c.glClearColor = getProcAddr("glClearColor")
-	if gles {
-		c.glClearDepth = getProcAddr("glClearDepthf")
-	} else {
+	// The float entry point, as Rust's glow calls (clear_depth_f32): GLES,
+	// and desktop GL 4.1 / ARB_ES2_compatibility. Older desktop GL has only
+	// glClearDepth, which takes a double.
+	c.glClearDepth = getProcAddr("glClearDepthf")
+	if c.glClearDepth == nil && !gles {
 		c.glClearDepth = getProcAddr("glClearDepth")
+		c.clearDepthDouble = true
 	}
 	c.glViewport = getProcAddr("glViewport")
 	c.glScissor = getProcAddr("glScissor")
@@ -716,10 +850,12 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	// Depth/Stencil
 	c.glDepthFunc = getProcAddr("glDepthFunc")
 	c.glDepthMask = getProcAddr("glDepthMask")
-	if gles {
-		c.glDepthRange = getProcAddr("glDepthRangef")
-	} else {
+	// As glClearDepth: glDepthRangef (glow's depth_range_f32), the double
+	// glDepthRange only where the float one is missing.
+	c.glDepthRange = getProcAddr("glDepthRangef")
+	if c.glDepthRange == nil && !gles {
 		c.glDepthRange = getProcAddr("glDepthRange")
+		c.depthRangeDouble = true
 	}
 	c.glStencilFunc = getProcAddr("glStencilFunc")
 	c.glStencilOp = getProcAddr("glStencilOp")
@@ -749,11 +885,20 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDrawArraysInstanced = getProcAddr("glDrawArraysInstanced")
 	c.glDrawElementsInstanced = getProcAddr("glDrawElementsInstanced")
 	c.glVertexAttribDivisor = getProcAddr("glVertexAttribDivisor")
+	c.glDrawElementsInstancedBaseVertex = getProcAddr("glDrawElementsInstancedBaseVertex")
+	c.glDrawArraysIndirect = getProcAddr("glDrawArraysIndirect")
+	c.glDrawElementsIndirect = getProcAddr("glDrawElementsIndirect")
+	c.glDrawArraysInstancedBaseInstance = getProcAddr("glDrawArraysInstancedBaseInstance")
+	c.glDrawElementsInstancedBaseVertexBaseInstance = getProcAddr("glDrawElementsInstancedBaseVertexBaseInstance")
+	c.glUniform1ui = getProcAddr("glUniform1ui")
+	c.glMultiDrawArraysIndirect = getProcAddr("glMultiDrawArraysIndirect")
+	c.glMultiDrawElementsIndirect = getProcAddr("glMultiDrawElementsIndirect")
 
 	// Compute shaders (optional - may be nil on older GL versions)
 	c.glDispatchCompute = getProcAddr("glDispatchCompute")
 	c.glDispatchComputeIndirect = getProcAddr("glDispatchComputeIndirect")
 	c.glMemoryBarrier = getProcAddr("glMemoryBarrier")
+	c.glBindImageTexture = getProcAddr("glBindImageTexture")
 
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
@@ -887,19 +1032,30 @@ func (c *Context) ClearColor(r, g, b, a float32) {
 	_, _ = ffi.CallFunction(&cifVoid4Float, c.glClearColor, nil, args[:])
 }
 
-// ClearDepth sets the depth value used by glClear(GL_DEPTH_BUFFER_BIT).
-// On GLES the loaded function is glClearDepthf (float32).
-// On desktop GL it is glClearDepth (double) — but Linux GLES contexts always
-// load glClearDepthf, so we pass float32 unconditionally.
+// ClearDepth sets the depth value used by glClear(GL_DEPTH_BUFFER_BIT),
+// through glClearDepthf, or glClearDepth with a double where only that exists.
+// The call interface must match the loaded function: a float passed to the
+// double glClearDepth reaches the driver as a near-zero double, so the depth
+// cleared to ~0 and every depth-tested draw failed on desktop GL contexts.
 func (c *Context) ClearDepth(depth float64) {
+	if c.clearDepthDouble {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&depth)}
+		_, _ = ffi.CallFunction(&cifVoid1Double, c.glClearDepth, nil, args[:])
+		return
+	}
 	d := float32(depth)
 	args := [1]unsafe.Pointer{unsafe.Pointer(&d)}
 	_, _ = ffi.CallFunction(&cifVoid1Float, c.glClearDepth, nil, args[:])
 }
 
-// DepthRange sets the mapping of NDC depth to window depth.
-// On GLES the loaded function is glDepthRangef (float32).
+// DepthRange sets the mapping of NDC depth to window depth, through
+// glDepthRangef, or glDepthRange with doubles where only that exists.
 func (c *Context) DepthRange(near, far float64) {
+	if c.depthRangeDouble {
+		args := [2]unsafe.Pointer{unsafe.Pointer(&near), unsafe.Pointer(&far)}
+		_, _ = ffi.CallFunction(&cifVoid2Double, c.glDepthRange, nil, args[:])
+		return
+	}
 	n, f := float32(near), float32(far)
 	args := [2]unsafe.Pointer{unsafe.Pointer(&n), unsafe.Pointer(&f)}
 	_, _ = ffi.CallFunction(&cifVoid2Float, c.glDepthRange, nil, args[:])
@@ -1156,6 +1312,12 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 		unsafe.Pointer(&usage),
 	}
 	_, _ = ffi.CallFunction(&cifVoid4Buffer, c.glBufferData, nil, args[:])
+}
+
+// AllocateBuffer gives the buffer bound to target size bytes of undefined
+// content (glBufferData with a null pointer).
+func (c *Context) AllocateBuffer(target uint32, size int, usage uint32) {
+	c.BufferData(target, size, 0, usage)
 }
 
 func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
@@ -1855,6 +2017,138 @@ func (c *Context) DrawElementsInstanced(mode uint32, count int32, typ uint32, in
 	_, _ = ffi.CallFunction(&cifVoid5DrawElem, c.glDrawElementsInstanced, nil, args[:])
 }
 
+// DrawElementsInstancedBaseVertex adds baseVertex to every index (GL 3.2 /
+// ES 3.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertex(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32) {
+	if c.glDrawElementsInstancedBaseVertex == nil {
+		return
+	}
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&count),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&indices),
+		unsafe.Pointer(&instanceCount),
+		unsafe.Pointer(&baseVertex),
+	}
+	_, _ = ffi.CallFunction(&cifVoid6DrawElemBV, c.glDrawElementsInstancedBaseVertex, nil, args[:])
+}
+
+// DrawArraysIndirect draws with the arguments at offset in the buffer bound
+// to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the context
+// lacks it.
+func (c *Context) DrawArraysIndirect(mode uint32, offset uintptr) {
+	if c.glDrawArraysIndirect == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{unsafe.Pointer(&mode), unsafe.Pointer(&offset)}
+	_, _ = ffi.CallFunction(&cifVoid2, c.glDrawArraysIndirect, nil, args[:])
+}
+
+// DrawElementsIndirect draws indexed with the arguments at offset in the
+// buffer bound to GL_DRAW_INDIRECT_BUFFER (GL 4.0 / ES 3.1). A no-op when the
+// context lacks it.
+func (c *Context) DrawElementsIndirect(mode, typ uint32, offset uintptr) {
+	if c.glDrawElementsIndirect == nil {
+		return
+	}
+	args := [3]unsafe.Pointer{unsafe.Pointer(&mode), unsafe.Pointer(&typ), unsafe.Pointer(&offset)}
+	_, _ = ffi.CallFunction(&cifVoid3Shader, c.glDrawElementsIndirect, nil, args[:])
+}
+
+// DrawArraysInstancedBaseInstance draws with a first instance (GL 4.2). A
+// no-op when the context lacks it.
+func (c *Context) DrawArraysInstancedBaseInstance(mode uint32, first, count, instanceCount int32, baseInstance uint32) {
+	if c.glDrawArraysInstancedBaseInstance == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&first),
+		unsafe.Pointer(&count),
+		unsafe.Pointer(&instanceCount),
+		unsafe.Pointer(&baseInstance),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5DrawArrBI, c.glDrawArraysInstancedBaseInstance, nil, args[:])
+}
+
+// DrawElementsInstancedBaseVertexBaseInstance draws indexed with a base
+// vertex and a first instance (GL 4.2). A no-op when the context lacks it.
+func (c *Context) DrawElementsInstancedBaseVertexBaseInstance(mode uint32, count int32, typ uint32, indices uintptr, instanceCount, baseVertex int32, baseInstance uint32) {
+	if c.glDrawElementsInstancedBaseVertexBaseInstance == nil {
+		return
+	}
+	args := [7]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&count),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&indices),
+		unsafe.Pointer(&instanceCount),
+		unsafe.Pointer(&baseVertex),
+		unsafe.Pointer(&baseInstance),
+	}
+	_, _ = ffi.CallFunction(&cifVoid7DrawElemBVBI, c.glDrawElementsInstancedBaseVertexBaseInstance, nil, args[:])
+}
+
+// Uniform1ui sets a uint uniform of the current program (GL 3.0 / ES 3.0). A
+// no-op when the context lacks it.
+func (c *Context) Uniform1ui(location int32, value uint32) {
+	if c.glUniform1ui == nil {
+		return
+	}
+	args := [2]unsafe.Pointer{unsafe.Pointer(&location), unsafe.Pointer(&value)}
+	_, _ = ffi.CallFunction(&cifVoid2UU, c.glUniform1ui, nil, args[:])
+}
+
+// MultiDrawArraysIndirect draws drawCount records of stride bytes from offset
+// in the buffer bound to GL_DRAW_INDIRECT_BUFFER, with gl_DrawID counting
+// them (GL 4.3 / GL_EXT_multi_draw_indirect). A no-op when the context lacks
+// it.
+func (c *Context) MultiDrawArraysIndirect(mode uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawArraysIndirect == nil {
+		return
+	}
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&drawCount),
+		unsafe.Pointer(&stride),
+	}
+	_, _ = ffi.CallFunction(&cifVoid4MultiArr, c.glMultiDrawArraysIndirect, nil, args[:])
+}
+
+// MultiDrawElementsIndirect is the indexed MultiDrawArraysIndirect.
+func (c *Context) MultiDrawElementsIndirect(mode, typ uint32, offset uintptr, drawCount, stride int32) {
+	if c.glMultiDrawElementsIndirect == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&mode),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&drawCount),
+		unsafe.Pointer(&stride),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5MultiElem, c.glMultiDrawElementsIndirect, nil, args[:])
+}
+
+// HasMultiDrawIndirect reports whether the multi-draw indirect calls are
+// loaded.
+func (c *Context) HasMultiDrawIndirect() bool {
+	return c.glMultiDrawArraysIndirect != nil && c.glMultiDrawElementsIndirect != nil
+}
+
+// HasDrawIndirect reports whether glDrawArraysIndirect and
+// glDrawElementsIndirect are loaded.
+func (c *Context) HasDrawIndirect() bool {
+	return c.glDrawArraysIndirect != nil && c.glDrawElementsIndirect != nil
+}
+
+// HasBaseInstance reports whether the base-instance draws are loaded.
+func (c *Context) HasBaseInstance() bool {
+	return c.glDrawArraysInstancedBaseInstance != nil && c.glDrawElementsInstancedBaseVertexBaseInstance != nil
+}
+
 // --- Compute Shaders ---
 
 // DispatchCompute launches compute shader workgroups.
@@ -1898,6 +2192,30 @@ func (c *Context) MemoryBarrier(barriers uint32) {
 		unsafe.Pointer(&barriers),
 	}
 	_, _ = ffi.CallFunction(&cifVoid1, c.glMemoryBarrier, nil, args[:])
+}
+
+// BindImageTexture binds a level of a texture to an image unit for shader
+// image load/store (storage textures). layered binds every layer of an
+// array, cube or 3D texture; otherwise layer selects one. Requires OpenGL
+// 4.2+ or OpenGL ES 3.1+. No-op if image load/store is not supported.
+func (c *Context) BindImageTexture(unit, texture uint32, level int32, layered bool, layer int32, access, format uint32) {
+	if c.glBindImageTexture == nil {
+		return
+	}
+	var layeredArg uint8
+	if layered {
+		layeredArg = 1
+	}
+	args := [7]unsafe.Pointer{
+		unsafe.Pointer(&unit),
+		unsafe.Pointer(&texture),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&layeredArg),
+		unsafe.Pointer(&layer),
+		unsafe.Pointer(&access),
+		unsafe.Pointer(&format),
+	}
+	_, _ = ffi.CallFunction(&cifVoid7BindImage, c.glBindImageTexture, nil, args[:])
 }
 
 // SupportsCompute returns true if compute shaders are supported.

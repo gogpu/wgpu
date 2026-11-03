@@ -612,24 +612,29 @@ func (e *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	vkCmdCopyBuffer(e.device.cmds, e.active, srcBuf.handle, dstBuf.handle, uint32(len(vkRegions)), &vkRegions[0])
 }
 
+// bufferLayoutInTexels converts the byte layout of a buffer-texture copy into
+// Vulkan's bufferRowLength and bufferImageHeight, which count texels: the
+// texels of one row are blockWidth * (bytesPerRow / blockCopySize) and the rows
+// of one image are rowsPerImage * blockHeight (wgpu-hal vulkan/command.rs
+// map_buffer_copies). blockCopySize is the size of the copied aspect (1 byte
+// for stencil). An unspecified layout (0) stays 0, which is tightly packed;
+// so does a format and aspect without a copy size (core rejects those copies
+// before they get here), instead of a made-up block size.
+func bufferLayoutInTexels(format gputypes.TextureFormat, aspect gputypes.TextureAspect, layout hal.ImageDataLayout) (rowLength, imageHeight uint32) {
+	blockWidth, blockHeight := format.BlockDimensions()
+	if blockSize, ok := format.BlockCopySizeAspect(aspect); ok && layout.BytesPerRow > 0 {
+		rowLength = blockWidth * (layout.BytesPerRow / blockSize)
+	}
+	return rowLength, layout.RowsPerImage * blockHeight
+}
+
 // convertBufferImageCopyRegions converts HAL BufferTextureCopy regions to Vulkan BufferImageCopy.
-// The format parameter is the texture format, used to determine block copy size
-// for correct bytes-to-texels conversion of bufferRowLength.
+// The format parameter is the texture format, used to convert the byte layout of the buffer
+// into the texel layout Vulkan wants (bufferRowLength, bufferImageHeight).
 func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat, dimension gputypes.TextureDimension) []vk.BufferImageCopy {
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
-	blockSize := format.BlockCopySize()
-	if blockSize == 0 {
-		blockSize = 4
-	}
 	for i, r := range regions {
-		// Vulkan bufferRowLength is in TEXELS, not bytes.
-		// Convert from WebGPU's BytesPerRow (bytes) to Vulkan's bufferRowLength (texels)
-		// using the format's known block size — NOT inference from BytesPerRow/Width,
-		// which gives wrong results when BytesPerRow is padded to alignment.
-		bufferRowLength := uint32(0)
-		if r.BufferLayout.BytesPerRow > 0 {
-			bufferRowLength = r.BufferLayout.BytesPerRow / blockSize
-		}
+		bufferRowLength, bufferImageHeight := bufferLayoutInTexels(format, r.TextureBase.Aspect, r.BufferLayout)
 		baseArrayLayer := uint32(0)
 		layerCount := uint32(1)
 		imageOffsetZ := int32(r.TextureBase.Origin.Z)
@@ -647,7 +652,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 		vkRegions[i] = vk.BufferImageCopy{
 			BufferOffset:      vk.DeviceSize(r.BufferLayout.Offset),
 			BufferRowLength:   bufferRowLength,
-			BufferImageHeight: r.BufferLayout.RowsPerImage,
+			BufferImageHeight: bufferImageHeight,
 			ImageSubresource: vk.ImageSubresourceLayers{
 				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),
 				MipLevel:       r.TextureBase.MipLevel,
@@ -887,6 +892,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	rpe.renderPass = 0
 	rpe.framebuffer = 0
 	rpe.begun = false
+	rpe.endTimestamp = passEndTimestamp{}
 
 	if e.active == 0 {
 		return rpe
@@ -944,20 +950,16 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		}
 		hasMSAAResolve := resolveView != nil && sampleCount > vk.SampleCountFlagBits(1)
 
-		// Determine the final layout for the "output" attachment.
-		// BUG-WGPU-VK-007: offscreen textures with TextureBinding must end in
-		// ImageLayoutGeneral to prevent Intel CCS stale-pixel artifacts.
+		// Every color attachment, its resolve target and a swapchain image
+		// begin (on Load) and end the pass in COLOR_ATTACHMENT_OPTIMAL, the
+		// layout the texture tracker records for RenderAttachment. Later
+		// usages (sampling, copies, present) get their layouts from barriers.
+		// Rust wgpu-hal uses derive_image_layout(COLOR_TARGET) as both the
+		// initial and the final layout (vulkan/device.rs make_render_pass).
+		// A sampled render target used to end in GENERAL here
+		// (BUG-WGPU-VK-007) while the tracker recorded COLOR_ATTACHMENT_OPTIMAL,
+		// so the next barrier named the wrong old layout.
 		colorFinalLayout := vk.ImageLayoutColorAttachmentOptimal
-		if !view.isSwapchain {
-			colorFinalLayout = offscreenFinalLayout(view)
-		}
-		if hasMSAAResolve {
-			if resolveView.isSwapchain {
-				colorFinalLayout = vk.ImageLayoutColorAttachmentOptimal
-			} else {
-				colorFinalLayout = offscreenFinalLayout(resolveView)
-			}
-		}
 
 		// ADR-060: Inline present barrier for swapchain targets.
 		// Only the FIRST swapchain attachment drives the barrier; additional
@@ -1055,6 +1057,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		renderPassBegin.PClearValues = &clearValues[0]
 	}
 
+	if tw := desc.TimestampWrites; tw != nil {
+		rpe.endTimestamp = e.beginPassTimestamps(tw.QuerySet, tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex)
+	}
+
 	vkCmdBeginRenderPass(e.device.cmds, e.active, &renderPassBegin, vk.SubpassContentsInline)
 	runtime.KeepAlive(clearValues)
 	rpe.begun = true
@@ -1098,28 +1104,56 @@ func (e *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.C
 	cpe := computePassPool.Get().(*ComputePassEncoder)
 	cpe.encoder = e
 	cpe.pipeline = nil
-	cpe.timestampWrites = nil
+	cpe.endTimestamp = passEndTimestamp{}
 
-	// Write beginning-of-pass timestamp if requested.
-	// active != 0 check prevents SIGSEGV from null dispatch table
-	// dereference (VK-001, gogpu#119).
 	if desc != nil && desc.TimestampWrites != nil {
-		cpe.timestampWrites = desc.TimestampWrites
-		if qs, ok := desc.TimestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if desc.TimestampWrites.BeginningOfPassWriteIndex != nil && e.active != 0 {
-				idx := *desc.TimestampWrites.BeginningOfPassWriteIndex
-				e.device.cmds.CmdResetQueryPool(e.active, qs.pool, idx, 1)
-				e.device.cmds.CmdWriteTimestamp(
-					e.active,
-					vk.PipelineStageTopOfPipeBit,
-					qs.pool,
-					idx,
-				)
-			}
-		}
+		tw := desc.TimestampWrites
+		cpe.endTimestamp = e.beginPassTimestamps(tw.QuerySet, tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex)
 	}
 
 	return cpe
+}
+
+// passEndTimestamp is the end-of-pass timestamp write a pass owes when it
+// ends. A zero pool means none was requested.
+type passEndTimestamp struct {
+	pool  vk.QueryPool
+	index uint32
+}
+
+// beginPassTimestamps resets the pass's timestamp queries, writes the
+// beginning-of-pass timestamp and returns the end-of-pass write for End, as
+// Rust wgpu-hal does (vulkan/command.rs begin_render_pass and
+// begin_compute_pass). Both queries are reset here because a render pass
+// instance may not contain vkCmdResetQueryPool
+// (VUID-vkCmdResetQueryPool-renderpass). The active check keeps a null
+// command buffer away from the dispatch table (VK-001, gogpu#119).
+func (e *CommandEncoder) beginPassTimestamps(set hal.QuerySet, begin, end *uint32) passEndTimestamp {
+	qs, ok := set.(*QuerySet)
+	if !ok || qs == nil || qs.pool == 0 || e.active == 0 {
+		return passEndTimestamp{}
+	}
+	if begin != nil {
+		e.device.cmds.CmdResetQueryPool(e.active, qs.pool, *begin, 1)
+	}
+	if end != nil {
+		e.device.cmds.CmdResetQueryPool(e.active, qs.pool, *end, 1)
+	}
+	if begin != nil {
+		e.device.cmds.CmdWriteTimestamp(e.active, vk.PipelineStageBottomOfPipeBit, qs.pool, *begin)
+	}
+	if end == nil {
+		return passEndTimestamp{}
+	}
+	return passEndTimestamp{pool: qs.pool, index: *end}
+}
+
+// write records the end-of-pass timestamp, if one was requested.
+func (t passEndTimestamp) write(e *CommandEncoder) {
+	if t.pool == 0 || e == nil || e.active == 0 {
+		return
+	}
+	e.device.cmds.CmdWriteTimestamp(e.active, vk.PipelineStageBottomOfPipeBit, t.pool, t.index)
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for Vulkan.
@@ -1134,6 +1168,8 @@ type RenderPassEncoder struct {
 	// begun records whether vkCmdBeginRenderPass actually ran, which End needs
 	// because BeginRenderPass returns an encoder either way.
 	begun bool
+	// endTimestamp is the end-of-pass timestamp written after vkCmdEndRenderPass.
+	endTimestamp passEndTimestamp
 }
 
 const (
@@ -1155,6 +1191,8 @@ func (e *RenderPassEncoder) End() {
 	// via FinalLayout in AttachmentDescription)
 	if e.begun && e.encoder.active != 0 {
 		vkCmdEndRenderPass(e.encoder.device.cmds, e.encoder.active)
+		// After the pass, so the write still measures all of it.
+		e.endTimestamp.write(e.encoder)
 	}
 
 	// Return to pool for reuse.
@@ -1164,6 +1202,7 @@ func (e *RenderPassEncoder) End() {
 	e.renderPass = 0
 	e.framebuffer = 0
 	e.begun = false
+	e.endTimestamp = passEndTimestamp{}
 	renderPassPool.Put(e)
 }
 
@@ -1180,7 +1219,9 @@ func (e *RenderPassEncoder) SetPipeline(pipeline hal.RenderPipeline) {
 // SetBindGroup sets a bind group.
 func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
 	bg, ok := group.(*BindGroup)
-	if !ok || e.encoder.active == 0 {
+	// vkCmdBindDescriptorSets needs the pipeline layout. Core binds groups
+	// only after SetPipeline; a direct HAL caller without one gets no bind.
+	if !ok || e.encoder.active == 0 || e.pipeline == nil {
 		return
 	}
 
@@ -1449,9 +1490,9 @@ func (e *RenderPassEncoder) ExecuteBundle(bundle hal.RenderBundle) {
 
 // ComputePassEncoder implements hal.ComputePassEncoder for Vulkan.
 type ComputePassEncoder struct {
-	encoder         *CommandEncoder
-	pipeline        *ComputePipeline
-	timestampWrites *hal.ComputePassTimestampWrites
+	encoder      *CommandEncoder
+	pipeline     *ComputePipeline
+	endTimestamp passEndTimestamp
 }
 
 // End finishes the compute pass.
@@ -1468,21 +1509,7 @@ func (e *ComputePassEncoder) End() {
 		return
 	}
 
-	// Write end-of-pass timestamp if requested.
-	if e.timestampWrites != nil {
-		if qs, ok := e.timestampWrites.QuerySet.(*QuerySet); ok && qs.pool != 0 {
-			if e.timestampWrites.EndOfPassWriteIndex != nil {
-				idx := *e.timestampWrites.EndOfPassWriteIndex
-				e.encoder.device.cmds.CmdResetQueryPool(e.encoder.active, qs.pool, idx, 1)
-				e.encoder.device.cmds.CmdWriteTimestamp(
-					e.encoder.active,
-					vk.PipelineStageBottomOfPipeBit,
-					qs.pool,
-					idx,
-				)
-			}
-		}
-	}
+	e.endTimestamp.write(e.encoder)
 
 	// Global memory barrier: compute writes → everything after.
 	memBarrier := vk.MemoryBarrier{
@@ -1504,7 +1531,7 @@ func (e *ComputePassEncoder) End() {
 	// Return to pool for reuse.
 	e.encoder = nil
 	e.pipeline = nil
-	e.timestampWrites = nil
+	e.endTimestamp = passEndTimestamp{}
 	computePassPool.Put(e)
 }
 
@@ -1591,24 +1618,6 @@ func (e *ComputePassEncoder) insertComputeBarrier() {
 // CopyAccelerationStructure, ReadAccelerationStructureCompactSize) are in raytracing.go.
 
 // --- Helper functions ---
-
-// offscreenFinalLayout returns the Vulkan image layout that an offscreen
-// (non-swapchain) texture view should be left in at the end of a render pass.
-//
-// If the underlying texture also has TextureBinding usage (i.e., it will be
-// sampled by fragment shaders in a later render pass), the layout must be
-// ImageLayoutGeneral so that reads see coherent data. Without this, Intel
-// CCS-compressed color-attachment data would not be decompressed on the read
-// path, producing stale "trail" artifacts (BUG-WGPU-VK-007).
-//
-// Textures without TextureBinding usage (pure render targets) can stay in
-// ColorAttachmentOptimal, which enables maximal CCS compression.
-func offscreenFinalLayout(view *TextureView) vk.ImageLayout {
-	if view.texture != nil && view.texture.usage&gputypes.TextureUsageTextureBinding != 0 {
-		return vk.ImageLayoutGeneral
-	}
-	return vk.ImageLayoutColorAttachmentOptimal
-}
 
 // updateSwapchainLayout updates swapchain image layout tracking for
 // BUG-WGPU-VK-006. When a render pass targets a swapchain image (directly

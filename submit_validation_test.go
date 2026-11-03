@@ -140,7 +140,7 @@ func TestSubmitWithDestroyedTexture(t *testing.T) {
 
 	dstBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "val-a6-dst-buf",
-		Size:  256,
+		Size:  1024,
 		Usage: wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -162,7 +162,7 @@ func TestSubmitWithDestroyedTexture(t *testing.T) {
 			Size: wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
 			BufferLayout: wgpu.ImageDataLayout{
 				Offset:       0,
-				BytesPerRow:  16,
+				BytesPerRow:  256,
 				RowsPerImage: 4,
 			},
 		},

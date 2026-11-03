@@ -20,45 +20,78 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
+	"github.com/gogpu/naga/valid"
+	"github.com/gogpu/naga/wgsl"
+	"github.com/gogpu/wgpu/hal"
 )
 
-// Lower parses WGSL and lowers it to IR without validation, as the DX12,
-// GLES and Metal backends have always done.
-func Lower(source string) (*ir.Module, error) {
-	ast, err := naga.Parse(source)
-	if err != nil {
-		return nil, err
-	}
-	return naga.LowerWithSource(ast, source)
+// Module is a validated IR module and the ModuleInfo of that validation,
+// which naga.ProcessOverrides takes.
+type Module struct {
+	IR   *ir.Module
+	Info valid.ModuleInfo
 }
 
-// LowerValidated parses, lowers and validates WGSL with the capabilities of
-// naga.Compile's default options. The Vulkan and software backends used
-// naga.Compile before, so they keep its validation.
-func LowerValidated(source string) (*ir.Module, error) {
-	ast, err := naga.Parse(source)
+// Lower parses WGSL to IR and validates it, allowing every capability
+// (valid.CapAll).
+//
+// A backend calls it only when the HAL is used without core: core lowers
+// the module once with the device's capabilities (LowerOptions) and hands
+// the result to the HAL in hal.ShaderModuleDescriptor.IR, as Rust
+// wgpu-core hands wgpu-hal hal::ShaderInput::Naga. A capability gate here
+// would refuse features the device has.
+func Lower(source string) (Module, error) {
+	return LowerOptions(source, valid.Options{Capabilities: valid.CapAll})
+}
+
+// LowerDescriptor returns the module of a WGSL shader module descriptor: the
+// IR and ModuleInfo core validated (desc.IR, desc.Info), or, when desc.IR is
+// nil because the HAL is used without core, Lower(desc.Source.WGSL).
+func LowerDescriptor(desc *hal.ShaderModuleDescriptor) (Module, error) {
+	if desc.IR != nil {
+		return Module{IR: desc.IR, Info: desc.Info}, nil
+	}
+	return Lower(desc.Source.WGSL)
+}
+
+// lowerings counts LowerOptions calls, for Lowerings.
+var lowerings atomic.Uint64
+
+// Lowerings returns how many times WGSL has been parsed and validated in
+// this process. Tests use it to prove that a shader module is lowered once
+// (P1-CORE-013).
+func Lowerings() uint64 {
+	return lowerings.Load()
+}
+
+// LowerOptions parses WGSL to IR and validates it with opts.
+//
+// A parse error keeps naga's *wgsl.ParseError (errors.As works) and is
+// prefixed with its line and column: ParseError.Error is the message only.
+// A validation error is valid.Errors.
+func LowerOptions(source string, opts valid.Options) (Module, error) {
+	lowerings.Add(1)
+	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("parse error: %w", err)
+		var pe *wgsl.ParseError
+		if errors.As(err, &pe) {
+			if loc, ok := pe.Location(source); ok {
+				return Module{}, fmt.Errorf("parse error: %d:%d: %w", loc.Line, loc.Column, err)
+			}
+		}
+		return Module{}, fmt.Errorf("parse error: %w", err)
 	}
-	module, err := naga.LowerWithSource(ast, source)
+	info, err := valid.Validate(module, opts)
 	if err != nil {
-		return nil, fmt.Errorf("lowering error: %w", err)
+		return Module{}, fmt.Errorf("validation failed: %w", err)
 	}
-	opts := naga.DefaultOptions()
-	if opts.Validate {
-		verrs, err := ir.ValidateWithCapabilities(module, opts.Capabilities)
-		if err != nil {
-			return nil, fmt.Errorf("validation error: %w", err)
-		}
-		if len(verrs) > 0 {
-			return nil, fmt.Errorf("validation failed: %w", &verrs[0])
-		}
-	}
-	return module, nil
+	return Module{IR: module, Info: info}, nil
 }
 
 // PerStage reports whether module must be specialized for each pipeline
@@ -82,15 +115,15 @@ func PerStage(module *ir.Module, constants map[string]float64) bool {
 // A constant error keeps naga's error: errors.Is with naga.ErrOverrideNotFound
 // and the other sentinels, and errors.As with *naga.PipelineConstantError,
 // work on the result.
-func Specialize(module *ir.Module, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (*ir.Module, error) {
-	out, err := naga.ProcessOverrides(module, naga.OverrideOptions{
+func Specialize(module Module, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (Module, error) {
+	out, info, err := naga.ProcessOverrides(module.IR, module.Info, naga.OverrideOptions{
 		Constants:  constants,
-		EntryPoint: &naga.EntryPointSelector{Stage: stage, Name: entryPoint},
+		EntryPoint: &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("pipeline constants of %s entry point %q: %w", StageName(stage), entryPoint, err)
+		return Module{}, fmt.Errorf("pipeline constants of %s entry point %q: %w", StageName(stage), entryPoint, err)
 	}
-	return out, nil
+	return Module{IR: out, Info: info}, nil
 }
 
 // ErrUnresolvedOverride wraps a naga backend error caused by overrides that
@@ -108,14 +141,11 @@ func BackendError(err error) error {
 	return err
 }
 
-// SPIRV compiles module to SPIR-V words with naga.Compile's default options.
-func SPIRV(module *ir.Module) ([]uint32, error) {
-	opts := naga.DefaultOptions()
-	b, err := naga.GenerateSPIRV(module, spirv.Options{
-		Version:             opts.SPIRVVersion,
-		Debug:               opts.Debug,
-		BoundsCheckPolicies: opts.BoundsCheckPolicies,
-	})
+// SPIRV compiles module to SPIR-V words with the backend's options. Every
+// backend passes its own options, as each Rust wgpu-hal backend does: naga's
+// zero values (SPIR-V 1.0, Restrict on every bounds check) suit no device.
+func SPIRV(module *ir.Module, opts spirv.Options) ([]uint32, error) {
+	b, _, err := spirv.Compile(module, opts)
 	if err != nil {
 		return nil, BackendError(err)
 	}

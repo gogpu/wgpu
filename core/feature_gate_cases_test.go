@@ -82,7 +82,8 @@ var featureGateCases = []featureGateCase{
 		feature:  gputypes.FeatureShaderF16,
 		resource: "CreateShaderModule",
 		act: func(env *testutil.ValidationEnv) error {
-			return env.CreateShaderModuleWithWGSL(`@vertex fn main() -> @builtin(position) vec4<f32> {
+			return env.CreateShaderModuleWithWGSL(`enable f16;
+			@vertex fn main() -> @builtin(position) vec4<f32> {
 			 var x: f16 = 1.0;
 			 return vec4<f32>(f32(x));
 			}`)
@@ -93,7 +94,8 @@ var featureGateCases = []featureGateCase{
 		feature:  gputypes.FeatureSubgroupOperations,
 		resource: "CreateShaderModule",
 		act: func(env *testutil.ValidationEnv) error {
-			return env.CreateShaderModuleWithWGSL(`@compute @workgroup_size(1) fn main() {
+			return env.CreateShaderModuleWithWGSL(`enable subgroups;
+			@compute @workgroup_size(1) fn main() {
 			 let _ = subgroupAdd(1u);
 			}`)
 		},

@@ -68,7 +68,7 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 		ApplicationVersion: vkMakeVersion(1, 0, 0),
 		PEngineName:        uintptr(unsafe.Pointer(&engineName[0])),
 		EngineVersion:      vkMakeVersion(0, 1, 0),
-		ApiVersion:         vkMakeVersion(1, 2, 0), // Vulkan 1.2
+		ApiVersion:         instanceAPIVersion,
 	}
 
 	// Required extensions
@@ -230,9 +230,11 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			physicalDevice: device,
 			properties:     props,
 			features:       features,
+			ext:            i.queryExtendedFeatures(device, &props, &features),
 		}
 
 		adapterForExpose := hal.Adapter(adapter)
+		var queueFamily *uint32
 		if surfaceHint != nil {
 			qualified, err := adapter.QualifySurface(surfaceHint)
 			if err != nil {
@@ -240,6 +242,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 				continue
 			}
 			adapterForExpose = qualified
+			if q, ok := qualified.(*qualifiedAdapter); ok {
+				queueFamily = &q.queueFamily
+			}
 		}
 
 		hal.Logger().Info("vulkan: adapter found",
@@ -264,7 +269,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: gputypes.BackendVulkan,
 			},
-			Features: featuresFromPhysicalDevice(&features, props.ApiVersion),
+			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.extendedWebGPUFeatures(queueFamily),
 			Capabilities: hal.Capabilities{
 				Limits: limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{

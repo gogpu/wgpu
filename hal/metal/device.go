@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/msl"
 	"github.com/gogpu/wgpu/hal"
@@ -432,25 +431,15 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 }
 
 // CreateBindGroupLayout creates a bind group layout.
+//
+// The entries are kept sorted by binding number: the slots of a group and the
+// order of its dynamic offsets follow the binding numbers, not the order the
+// caller listed the entries in (Rust wgpu-core hands wgpu-hal sorted entries).
 func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	layout := &BindGroupLayout{entries: desc.Entries, device: d}
-
-	// Count resources by type so PipelineLayout can compute cumulative slot offsets.
-	// naga MSL generates sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]]
-	// indices across all bind groups in a pipeline layout.
-	for _, entry := range desc.Entries {
-		switch {
-		case entry.Buffer != nil:
-			layout.bufferCount++
-		case entry.Texture != nil:
-			layout.textureCount++
-		case entry.Sampler != nil:
-			layout.samplerCount++
-		case entry.StorageTexture != nil:
-			layout.textureCount++
-		}
+	layout := &BindGroupLayout{entries: mslmap.SortEntries(desc.Entries), device: d}
+	for s := range layout.stageSlots {
+		layout.stageSlots[s], _ = mslmap.GroupSlots(layout.entries, stageVisibility[s])
 	}
-
 	return layout, nil
 }
 
@@ -464,8 +453,64 @@ func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
 }
 
 // CreateBindGroup creates a bind group.
+//
+// It resolves each entry of the layout, in binding order, to the resource the
+// encoder binds: its slot in each stage, the index of its dynamic offset, and
+// the binding size of a storage buffer for naga's `_buffer_sizes` argument.
+//
+// Reference: Rust wgpu-hal metal/device.rs create_bind_group.
 func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	return &BindGroup{layout: desc.Layout.(*BindGroupLayout), entries: desc.Entries, device: d}, nil
+	layout, ok := desc.Layout.(*BindGroupLayout)
+	if !ok || layout == nil {
+		return nil, fmt.Errorf("metal: invalid bind group layout")
+	}
+	group := &BindGroup{layout: layout, entries: desc.Entries, device: d}
+	group.resources = make([]bindGroupResource, len(layout.entries))
+	dynamicCount := 0
+	for i := range layout.entries {
+		le := &layout.entries[i]
+		res := &group.resources[i]
+		res.kind = mslmap.EntryKind(le)
+		res.binding = le.Binding
+		res.dynamicIndex = -1
+		for s := range res.slots {
+			res.slots[s] = layout.stageSlots[s][i]
+		}
+		if le.Buffer != nil && le.Buffer.HasDynamicOffset {
+			// Dynamic offsets come in binding order, whichever stages
+			// see the binding.
+			res.dynamicIndex = dynamicCount
+			dynamicCount++
+		}
+		entry, found := findBindGroupEntry(desc.Entries, le.Binding)
+		if !found {
+			continue
+		}
+		switch r := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			res.handle = r.Buffer
+			res.offset = r.Offset
+			if mslmap.IsStorageBuffer(le) {
+				res.size = boundBufferSize(r)
+				res.sized = true
+			}
+		case gputypes.TextureViewBinding:
+			res.handle = r.TextureView
+		case gputypes.SamplerBinding:
+			res.handle = r.Sampler
+		}
+	}
+	return group, nil
+}
+
+// findBindGroupEntry returns the entry of entries for binding.
+func findBindGroupEntry(entries []gputypes.BindGroupEntry, binding uint32) (gputypes.BindGroupEntry, bool) {
+	for _, entry := range entries {
+		if entry.Binding == binding {
+			return entry, true
+		}
+	}
+	return gputypes.BindGroupEntry{}, false
 }
 
 // DestroyBindGroup destroys a bind group.
@@ -479,32 +524,29 @@ func (d *Device) DestroyBindGroup(group hal.BindGroup) {
 
 // CreatePipelineLayout creates a pipeline layout.
 //
-// Computes cumulative per-type slot offsets for each bind group. naga MSL generates
-// sequential [[buffer(N)]], [[texture(M)]], [[sampler(K)]] indices across all groups,
-// so group i's starting slot = sum of resource counts from groups 0..i-1.
+// Each pipeline stage numbers the bindings visible to it, group after group,
+// in binding order, separately for buffers, textures and samplers. The
+// shaders of a pipeline are compiled with these slots and the encoder binds
+// each bind group at them, so the slots never depend on which bindings a
+// shader declares.
 //
-// Reference: Rust wgpu-hal metal/device.rs:718-801 (base_resource_indices).
+// Reference: Rust wgpu-hal metal/device.rs create_pipeline_layout.
 func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	offsets := make([]GroupSlotOffsets, len(desc.BindGroupLayouts))
-	var bufAccum, texAccum, samAccum int
+	groups := make([][]gputypes.BindGroupLayoutEntry, len(desc.BindGroupLayouts))
 	for i, bglIface := range desc.BindGroupLayouts {
-		offsets[i] = GroupSlotOffsets{
-			Buffers:  bufAccum,
-			Textures: texAccum,
-			Samplers: samAccum,
-		}
 		if bgl, ok := bglIface.(*BindGroupLayout); ok && bgl != nil {
-			bufAccum += bgl.bufferCount
-			texAccum += bgl.textureCount
-			samAccum += bgl.samplerCount
+			groups[i] = bgl.entries
 		}
 	}
-	return &PipelineLayout{
-		layouts:      desc.BindGroupLayouts,
-		device:       d,
-		groupOffsets: offsets,
-		totalBuffers: bufAccum,
-	}, nil
+	layout := &PipelineLayout{layouts: desc.BindGroupLayouts, device: d}
+	for s := range layout.stages {
+		stage, err := mslmap.NewStageLayout(groups, stageVisibility[s])
+		if err != nil {
+			return nil, fmt.Errorf("metal: %w", err)
+		}
+		layout.stages[s] = stage
+	}
+	return layout, nil
 }
 
 // DestroyPipelineLayout destroys a pipeline layout.
@@ -533,29 +575,22 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 
 	start := time.Now()
 
-	// Parse WGSL to AST
-	ast, err := naga.Parse(desc.Source.WGSL)
+	lowered, err := shaderir.LowerDescriptor(desc)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
 	}
 
-	// Lower AST to IR
-	irModule, err := naga.LowerWithSource(ast, desc.Source.WGSL)
-	if err != nil {
-		return nil, fmt.Errorf("metal: failed to lower WGSL to IR: %w", err)
-	}
-
 	// Extract workgroup sizes from entry points for compute shaders
-	workgroupSizes := extractWorkgroupSizes(irModule)
+	workgroupSizes := extractWorkgroupSizes(lowered.IR)
 
 	hal.Logger().Debug("metal: WGSL→IR lowering",
 		"elapsed", time.Since(start),
-		"entryPoints", len(irModule.EntryPoints),
+		"entryPoints", len(lowered.IR.EntryPoints),
 	)
 
 	return &ShaderModule{
 		source:         desc.Source,
-		irModule:       irModule,
+		irModule:       &lowered,
 		device:         d,
 		workgroupSizes: workgroupSizes,
 	}, nil
@@ -573,35 +608,34 @@ type compiledLibrary struct {
 	// sizesSlot is the buffer slot that the `_buffer_sizes` argument was
 	// compiled with. It has a meaning only if sizesBindings is not empty.
 	sizesSlot int
-	// specialized is true when the library holds only one entry point, the
-	// shader module specialized for one pipeline stage (librarySpec).
+	// specialized is true when the library was written from the shader
+	// module specialized for its pipeline stage (librarySpec).
 	specialized bool
 	// workgroupSize is the workgroup size of that entry point when
 	// specialized; otherwise the shader module's sizes apply.
 	workgroupSize [3]uint32
 }
 
-// librarySpec selects what compileLibrary writes: the whole module, or, when
-// the module has overrides or the stage gives pipeline constants, the module
-// specialized for one stage with naga.ProcessOverrides (Rust wgpu-hal
-// metal/device.rs:174, load_shader). The MSL backend no longer resolves
-// override defaults itself, so a module with overrides must be specialized
-// even without constants.
+// librarySpec selects the entry point compileLibrary writes, the only one in
+// the library. When the module has overrides or the stage gives pipeline
+// constants, it is written from the module specialized for the stage with
+// naga.ProcessOverrides (Rust wgpu-hal metal/device.rs:174, load_shader). The
+// MSL backend no longer resolves override defaults itself, so a module with
+// overrides must be specialized even without constants.
 type librarySpec struct {
 	stage      ir.ShaderStage
 	entryPoint string
 	constants  map[string]float64
 }
 
-// compileLibrary writes MSL for the shader module and builds an MTLLibrary
-// from it.
+// compileLibrary writes MSL for one pipeline stage, the entry point of spec,
+// with the slots of the pipeline layout for that stage, and builds an
+// MTLLibrary from it. naga's `_buffer_sizes` argument goes to the stage's
+// sizes slot.
 //
-// If bindSizes is true, the MSL binds naga's `_buffer_sizes` argument to the
-// first free buffer slot from the pipeline layout. If it is false, naga assigns
-// the bindings on its own, and the MSL is the same as in earlier releases.
-//
-// Reference: Rust wgpu-hal metal/device.rs:138-145.
-func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bindSizes bool, spec librarySpec) (*compiledLibrary, error) {
+// Reference: Rust wgpu-hal metal/device.rs load_shader (per_entry_point_map
+// from layout.per_stage_map, one entry point per library).
+func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, spec librarySpec) (*compiledLibrary, error) {
 	if module == nil || module.irModule == nil {
 		return nil, fmt.Errorf("metal: shader module has no WGSL source")
 	}
@@ -609,27 +643,36 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	start := time.Now()
 
 	out := &compiledLibrary{}
-	irModule := module.irModule
-	if shaderir.PerStage(irModule, spec.constants) {
+	stage := *module.irModule
+	if shaderir.PerStage(stage.IR, spec.constants) {
 		var err error
-		irModule, err = shaderir.Specialize(irModule, spec.stage, spec.entryPoint, spec.constants)
+		stage, err = shaderir.Specialize(stage, spec.stage, spec.entryPoint, spec.constants)
 		if err != nil {
 			return nil, fmt.Errorf("metal: %w", err)
 		}
 		out.specialized = true
-		out.workgroupSize = irModule.EntryPoints[0].Workgroup
+		out.workgroupSize = stage.IR.EntryPoints[0].Workgroup
 	}
 
-	options, err := libraryOptions(module.irModule, irModule, out.specialized, layout, bindSizes, out)
-	if err != nil {
-		return nil, err
+	stageLayout := layout.stage(pipelineStage(spec.stage))
+	if stageLayout.SizesSlot >= 0 {
+		bindings, err := mslmap.RuntimeArrayBindings(stage.IR)
+		if err != nil {
+			return nil, fmt.Errorf("metal: %w", err)
+		}
+		out.sizesBindings = bindings
+		out.sizesSlot = stageLayout.SizesSlot
 	}
+	options := stageLayout.Options(spec.stage, spec.entryPoint)
+	// naga writes for this version and refuses features of newer ones;
+	// newLibraryWithSource compiles at the same version.
+	options.LangVersion = d.adapter.compileOptions.mslVersion
 
-	mslSource, info, err := msl.Compile(irModule, options)
+	mslSource, info, err := msl.Compile(stage.IR, options)
 	if err != nil {
 		return nil, fmt.Errorf("metal: failed to compile to MSL: %w", shaderir.BackendError(err))
 	}
-	if info.RequiresSizesBuffer && len(out.sizesBindings) == 0 && bindSizes {
+	if info.RequiresSizesBuffer && len(out.sizesBindings) == 0 {
 		return nil, fmt.Errorf("metal: shader requires a buffer sizes argument but no runtime-sized array binding was found")
 	}
 	out.entrypointNames = info.EntryPointNames
@@ -640,22 +683,7 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 		"sizesBuffer", len(out.sizesBindings) > 0,
 	)
 
-	// Create NSString from MSL source
-	mslString := NSString(mslSource)
-	defer Release(mslString)
-
-	// Create MTLLibrary from source
-	// MTLLibrary* newLibraryWithSource:options:error:
-	// errorPtr travels as a uintptr, which keeps nothing in place: pin it so
-	// Metal writes the NSError into errorPtr, not into a moved stack
-	// (P1-VK-012).
-	var errorPtr ID
-	var pinner runtime.Pinner
-	pinner.Pin(&errorPtr)
-	library := MsgSend(d.raw, Sel("newLibraryWithSource:options:error:"),
-		uintptr(mslString), 0, uintptr(unsafe.Pointer(&errorPtr)))
-	pinner.Unpin()
-
+	library, errorPtr := d.newLibraryWithSource(mslSource)
 	if library == 0 {
 		errMsg := unknownError
 		if errorPtr != 0 {
@@ -671,48 +699,15 @@ func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, bi
 	return out, nil
 }
 
-// libraryOptions returns the MSL options for irModule, which is source or,
-// if specialized, source specialized for one stage. It sets the sizes
-// bindings of out when the `_buffer_sizes` argument is bound.
-//
-// A specialized module keeps only the globals its entry point uses, so its
-// resources are numbered from source (mslmap.StageOptions): the slots then
-// equal the ones of the whole module, which the encoder binds.
-func libraryOptions(source, irModule *ir.Module, specialized bool, layout *PipelineLayout, bindSizes bool, out *compiledLibrary) (msl.Options, error) {
-	sizesSlot := -1
-	if bindSizes {
-		bindings, err := mslmap.RuntimeArrayBindings(irModule)
-		if err != nil {
-			return msl.Options{}, fmt.Errorf("metal: %w", err)
-		}
-		if len(bindings) > 0 {
-			if layout == nil {
-				// Without a slot, the `_buffer_sizes` argument
-				// stays unbound and arrayLength() reads
-				// whatever the slot happens to hold.
-				return msl.Options{}, fmt.Errorf("metal: shader uses runtime-sized arrays but has no pipeline layout")
-			}
-			sizesSlot = layout.totalBuffers
-			out.sizesBindings = bindings
-			out.sizesSlot = layout.totalBuffers
-		}
-	}
-
-	switch {
-	case specialized:
-		options, err := mslmap.StageOptions(source, irModule, sizesSlot)
-		if err != nil {
-			return msl.Options{}, fmt.Errorf("metal: %w", err)
-		}
-		return options, nil
-	case sizesSlot >= 0:
-		options, err := mslmap.Options(irModule, sizesSlot)
-		if err != nil {
-			return msl.Options{}, fmt.Errorf("metal: %w", err)
-		}
-		return options, nil
+// pipelineStage returns the pipeline stage index of a naga shader stage.
+func pipelineStage(stage ir.ShaderStage) int {
+	switch stage {
+	case ir.StageVertex:
+		return stageVertex
+	case ir.StageFragment:
+		return stageFragment
 	default:
-		return msl.DefaultOptions(), nil
+		return stageCompute
 	}
 }
 
@@ -760,19 +755,22 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 
 	// Get shader modules
 	//
-	// Each stage that uses a runtime-sized array gets naga's `_buffer_sizes`
-	// argument at the slot after the layout's buffers, as compute does; the
-	// encoder fills it before every draw. naga v0.20.5 refuses a specialized
-	// stage that needs the argument but has no slot for it (P1-MTL-005).
+	// Each stage is compiled on its own, with the slots the pipeline layout
+	// gives that stage: the vertex and fragment stages number only the
+	// bindings visible to them, so they need separate libraries even for one
+	// shader module. A stage that sees a storage buffer gets naga's
+	// `_buffer_sizes` argument at its slot after its buffers; the encoder
+	// fills it before every draw (P1-MTL-005).
 	//
-	// Reference: Rust wgpu-hal metal/device.rs:1567,1733 (sizes_slot per stage).
+	// Reference: Rust wgpu-hal metal/device.rs create_render_pipeline
+	// (load_shader per stage, sizes_slot per stage).
 	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
 	if !ok || vertexModule == nil {
 		return nil, fmt.Errorf("metal: invalid vertex shader module")
 	}
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout, true,
+	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout,
 		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint})
 	if err != nil {
 		return nil, err
@@ -780,23 +778,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	defer Release(vertexLib.library)
 
 	var fragmentModule *ShaderModule
-	fragmentLib := vertexLib
+	var fragmentLib *compiledLibrary
 	if desc.Fragment != nil {
 		fragmentModule, ok = desc.Fragment.Module.(*ShaderModule)
 		if !ok || fragmentModule == nil {
 			return nil, fmt.Errorf("metal: invalid fragment shader module")
 		}
-		// One library serves both stages only when it holds the whole
-		// module; a library specialized for the vertex stage has only the
-		// vertex entry point.
-		if fragmentModule != vertexModule || vertexLib.specialized {
-			fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout, true,
-				librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint})
-			if err != nil {
-				return nil, err
-			}
-			defer Release(fragmentLib.library)
+		fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout,
+			librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint})
+		if err != nil {
+			return nil, err
 		}
+		defer Release(fragmentLib.library)
 	}
 
 	// Create pipeline descriptor
@@ -974,25 +967,23 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	)
 
 	pipeline := &RenderPipeline{
-		raw:           pipelineState,
-		device:        d,
-		layout:        pipeLayout,
-		cullMode:      cullModeToMTL(desc.Primitive.CullMode),
-		frontFace:     frontFaceToMTL(desc.Primitive.FrontFace),
-		icbCompatible: icbCompatible,
-		vertexSizes:   vertexLib.sizesBindings,
-		sizesSlot:     vertexLib.sizesSlot,
+		raw:             pipelineState,
+		device:          d,
+		layout:          pipeLayout,
+		cullMode:        cullModeToMTL(desc.Primitive.CullMode),
+		frontFace:       frontFaceToMTL(desc.Primitive.FrontFace),
+		icbCompatible:   icbCompatible,
+		vertexSizes:     vertexLib.sizesBindings,
+		vertexSizesSlot: vertexLib.sizesSlot,
 
 		depthStencil:    depthStencilState,
 		depthBias:       depthBias,
 		depthSlopeScale: depthSlopeScale,
 		depthClamp:      depthClamp,
 	}
-	if desc.Fragment != nil && len(fragmentLib.sizesBindings) > 0 {
-		// Both stages are compiled against the same layout, so their
-		// `_buffer_sizes` slot is the same: PipelineLayout.totalBuffers.
+	if fragmentLib != nil {
 		pipeline.fragmentSizes = fragmentLib.sizesBindings
-		pipeline.sizesSlot = fragmentLib.sizesSlot
+		pipeline.fragmentSizesSlot = fragmentLib.sizesSlot
 	}
 	return pipeline, nil
 }
@@ -1035,9 +1026,10 @@ func (d *Device) buildVertexDescriptor(buffers []gputypes.VertexBufferLayout) (I
 
 		layoutDesc := MsgSend(layouts, Sel("objectAtIndexedSubscript:"), uintptr(bufIdx))
 		if layoutDesc != 0 {
-			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(buf.ArrayStride))
-			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(vertexStepModeToMTL(buf.StepMode)))
-			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(1))
+			l := vertexBufferLayoutToMTL(&buffers[slot])
+			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(l.stride))
+			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(l.stepFunc))
+			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(l.stepRate))
 		}
 	}
 
@@ -1081,7 +1073,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 
 	// Write the MSL now, because the pipeline layout gives the sizes slot.
-	lib, err := d.compileLibrary(computeModule, pipeLayout, true, librarySpec{
+	lib, err := d.compileLibrary(computeModule, pipeLayout, librarySpec{
 		stage:      ir.StageCompute,
 		entryPoint: desc.Compute.EntryPoint,
 		constants:  desc.Compute.Constants,

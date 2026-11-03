@@ -91,7 +91,7 @@ func (interp *interpreter) storeThrough(ptr, val Value) {
 		}
 	case TagBufferPointer:
 		if bp := ptr.AsBufferPointer(); bp != nil {
-			writeValueToBuffer(bp.Buffer, bp.Offset, val)
+			interp.writeValueToBufferTyped(bp.Buffer, bp.Offset, val, bp.Type, bp.MatrixStride)
 		}
 	}
 }

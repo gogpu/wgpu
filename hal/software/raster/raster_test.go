@@ -64,46 +64,6 @@ func TestEdgeFunctionSign(t *testing.T) {
 	}
 }
 
-func TestEdgeFunctionIsTopLeft(t *testing.T) {
-	// IsTopLeft determines if an edge should include pixels exactly on it.
-	// For CCW triangle (0,0)-(10,0)-(5,10):
-	// - Edge 0->1: (0,0)->(10,0) is horizontal going right, A=0, B=10 > 0 (NOT top-left)
-	// - Edge 1->2: (10,0)->(5,10) going down-left, A=-10 < 0 (NOT top-left)
-	// - Edge 2->0: (5,10)->(0,0) going up-left, A=10 > 0 (IS top-left)
-	//
-	// Top-left rule: A > 0 OR (A == 0 AND B < 0)
-	// - A > 0 means edge goes "up" in screen space (decreasing Y)
-	// - A == 0 && B < 0 means horizontal edge going left (decreasing X)
-	tests := []struct {
-		name           string
-		x0, y0, x1, y1 float32
-		wantTopLeft    bool
-	}{
-		// Horizontal edge going right: A=0, B=10 > 0, NOT top-left
-		{"horizontal_right", 0, 0, 10, 0, false},
-		// Horizontal edge going left: A=0, B=-10 < 0, IS top-left
-		{"horizontal_left", 10, 0, 0, 0, true},
-		// Edge going up (Y decreasing): A > 0, IS top-left
-		{"edge_up", 0, 10, 0, 0, true},
-		// Edge going down (Y increasing): A < 0, NOT top-left
-		{"edge_down", 0, 0, 0, 10, false},
-		// Diagonal up-right: A=10 > 0, IS top-left
-		{"diagonal_up_right", 0, 10, 10, 0, true},
-		// Diagonal down-right: A=-10 < 0, NOT top-left
-		{"diagonal_down_right", 0, 0, 10, 10, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e := NewEdgeFunction(tt.x0, tt.y0, tt.x1, tt.y1)
-			got := e.IsTopLeft()
-			if got != tt.wantTopLeft {
-				t.Errorf("IsTopLeft() = %v, want %v (A=%v, B=%v)", got, tt.wantTopLeft, e.A, e.B)
-			}
-		})
-	}
-}
-
 // =============================================================================
 // Rasterization Tests
 // =============================================================================
@@ -404,9 +364,10 @@ func TestPipelineClear(t *testing.T) {
 	// Clear to 50% gray with 50% alpha
 	p.Clear(0.5, 0.5, 0.5, 0.5)
 
+	// 0.5 * 255 = 127.5 rounds half up: 128.
 	r, g, b, a = p.GetPixel(5, 5)
-	if r != 127 || g != 127 || b != 127 || a != 127 {
-		t.Errorf("After Clear(gray), GetPixel(5, 5) = (%d, %d, %d, %d), want (127, 127, 127, 127)", r, g, b, a)
+	if r != 128 || g != 128 || b != 128 || a != 128 {
+		t.Errorf("After Clear(gray), GetPixel(5, 5) = (%d, %d, %d, %d), want (128, 128, 128, 128)", r, g, b, a)
 	}
 }
 

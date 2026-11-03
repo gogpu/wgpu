@@ -169,9 +169,10 @@ linters:
           - govet
         text: "possible misuse of unsafe.Pointer"
 
-      # GLES command encoder - uintptr handles from gputypes.BindingResource
-      # are actually Go pointers (set in CreateBindGroup), converted back via unsafe.Pointer.
-      # Same pattern used in DX12 backend (hal/dx12/device.go).
+      # GLES command encoder - GL takes a buffer byte offset in a pointer
+      # argument (glTexSubImage2D pixels with a pixel unpack buffer bound),
+      # so the offset is passed as unsafe.Pointer(uintptr(offset)). It is never
+      # dereferenced on the Go side.
       - path: hal/gles/command\.go
         linters:
           - govet

@@ -659,9 +659,9 @@ func TestDrawMultipleBindGroups(t *testing.T) {
 
 	// Should find texture from bind group 1 and blit.
 	data := dstTex.(*Texture).GetData()
-	// 0.5 * 255 = 127
-	if data[0] != 127 {
-		t.Errorf("pixel R = %d, want ~127 (gray blit)", data[0])
+	// 0.5 * 255 = 127.5 rounds half up: 128
+	if data[0] != 128 {
+		t.Errorf("pixel R = %d, want 128 (gray blit)", data[0])
 	}
 }
 

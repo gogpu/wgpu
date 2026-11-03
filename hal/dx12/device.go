@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/dxil"
 	"github.com/gogpu/naga/hlsl"
 	"github.com/gogpu/naga/ir"
@@ -73,6 +74,10 @@ type Device struct {
 	stagingViewHeap    *DescriptorHeap // CBV/SRV/UAV staging
 	stagingSamplerHeap *DescriptorHeap // Sampler staging
 
+	// NativeHandle values of buffers, texture views and samplers, resolved
+	// when a bind group is created (see resourceHandles).
+	handles resourceHandles
+
 	// GPU synchronization.
 	fence      *d3d12.ID3D12Fence
 	fenceValue uint64
@@ -82,6 +87,10 @@ type Device struct {
 	// Feature level and capabilities.
 	featureLevel d3d12.D3D_FEATURE_LEVEL
 
+	// shaderModel is the highest shader model the adapter supports
+	// (Adapter.queryShaderModel). The DXIL path compiles for it (dxilOptions).
+	shaderModel d3d12.D3D_SHADER_MODEL
+
 	// Shared empty root signature for pipelines without bind groups.
 	// DX12 requires a valid root signature for every PSO, even if the shader
 	// has no resource bindings. This is lazily created on first use and shared
@@ -90,6 +99,11 @@ type Device struct {
 
 	// Debug info queue for validation messages (nil when debug layer is off).
 	infoQueue *d3d12.ID3D12InfoQueue
+
+	// CUSTOM heap properties equivalent to the adapter's UPLOAD and READBACK
+	// heaps (ID3D12Device::GetCustomHeapProperties), for CPU-visible buffers.
+	uploadHeap   d3d12.D3D12_HEAP_PROPERTIES
+	readbackHeap d3d12.D3D12_HEAP_PROPERTIES
 
 	// Debug: operation step counter for tracking which call kills the device.
 	debugStep int
@@ -241,7 +255,7 @@ func (h *DescriptorHeap) HandleToIndex(handle d3d12.D3D12_CPU_DESCRIPTOR_HANDLE)
 
 // newDevice creates a new DX12 device from a DXGI adapter.
 // adapterPtr is the IUnknown pointer to the DXGI adapter.
-func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL) (*Device, error) {
+func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.DXGI_ADAPTER_DESC1, featureLevel d3d12.D3D_FEATURE_LEVEL, shaderModel d3d12.D3D_SHADER_MODEL) (*Device, error) {
 	// Create D3D12 device
 	rawDevice, err := instance.d3d12Lib.CreateDevice(adapterPtr, featureLevel)
 	if err != nil {
@@ -252,6 +266,12 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.
 		raw:          rawDevice,
 		instance:     instance,
 		featureLevel: featureLevel,
+		shaderModel:  shaderModel,
+		// The adapter's UPLOAD and READBACK heaps as CUSTOM heap properties:
+		// CPU-visible buffers use CUSTOM heaps so they can start in COMMON
+		// and change state, which UPLOAD and READBACK heaps forbid.
+		uploadHeap:   rawDevice.GetCustomHeapProperties(0, d3d12.D3D12_HEAP_TYPE_UPLOAD),
+		readbackHeap: rawDevice.GetCustomHeapProperties(0, d3d12.D3D12_HEAP_TYPE_READBACK),
 	}
 
 	// Create the direct (graphics) command queue
@@ -870,7 +890,8 @@ func (d *Device) logAllocationNodes(node *d3d12.D3D12DREDAllocationNode1, maxNod
 }
 
 // DrainDebugMessages reads and logs all pending messages from the D3D12 InfoQueue.
-// Returns the number of messages drained. No-op if debug layer is off.
+// Returns the number of messages logged; ignored ones (isIgnoredDebugMessage)
+// are dropped. No-op if debug layer is off.
 func (d *Device) DrainDebugMessages() int {
 	if d.infoQueue == nil {
 		return 0
@@ -881,16 +902,29 @@ func (d *Device) DrainDebugMessages() int {
 		return 0
 	}
 
+	logged := 0
 	for i := uint64(0); i < count; i++ {
 		msg := d.infoQueue.GetMessage(i)
-		if msg == nil {
+		if msg == nil || isIgnoredDebugMessage(msg.Severity, msg.ID) {
 			continue
 		}
 		hal.Logger().Warn("dx12: debug message", "severity", msg.Severity, "id", msg.ID, "msg", msg.Description())
+		logged++
 	}
 	d.infoQueue.ClearStoredMessages()
 
-	return int(count)
+	return logged
+}
+
+// isIgnoredDebugMessage reports the debug-layer messages that carry no
+// information for WebGPU, as Rust wgpu-hal drops them
+// (wgpu-hal/src/auxil/dxgi/exception.rs): the warnings that a clear value
+// differs from the optimized clear value given at resource creation (#820,
+// #821). WebGPU has no optimized clear values, so every clear would warn.
+func isIgnoredDebugMessage(severity d3d12.D3D12MessageSeverity, id int32) bool {
+	return severity == d3d12.D3D12MessageSeverityWarning &&
+		(id == d3d12.D3D12MessageIDClearRenderTargetViewMismatchingClearValue ||
+			id == d3d12.D3D12MessageIDClearDepthStencilViewMismatchingClearValue)
 }
 
 // cleanup releases all device resources without clearing the finalizer.
@@ -1059,38 +1093,14 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in DX12.CreateBuffer — core validation gap")
 	}
 
-	// Determine heap type based on usage.
-	// Matches Rust wgpu-hal suballocation.rs:437-464 which uses HEAP_TYPE_CUSTOM
-	// with WRITE_COMBINE + L0 for CpuToGpu (MapWrite) buffers, and COMMON state
-	// that allows implicit promotion to COPY_DST. This enables staging belt
-	// CopyBufferRegion into MapWrite buffers (prevents data race on Metal/DX12).
-	var heapType d3d12.D3D12_HEAP_TYPE
-	var cpuPageProperty d3d12.D3D12_CPU_PAGE_PROPERTY
-	var memoryPool d3d12.D3D12_MEMORY_POOL
-	var initialState d3d12.D3D12_RESOURCE_STATES
+	memory := bufferMemoryFor(desc.Usage, desc.MappedAtCreation)
+	heapProps := d.bufferHeapProperties(memory)
 
-	switch {
-	case desc.Usage&gputypes.BufferUsageMapRead != 0:
-		// Readback buffer — GPU writes, CPU reads
-		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_BACK
-		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-		initialState = d3d12.D3D12_RESOURCE_STATE_COPY_DEST
-	case desc.Usage&gputypes.BufferUsageMapWrite != 0 || desc.MappedAtCreation:
-		// CPU-to-GPU buffer — CPU writes, GPU reads. CUSTOM heap with WRITE_COMBINE
-		// allows COMMON state which permits implicit promotion to COPY_DST.
-		// This is required for staging belt CopyBufferRegion to work.
-		heapType = d3d12.D3D12_HEAP_TYPE_CUSTOM
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE
-		memoryPool = d3d12.D3D12_MEMORY_POOL_L0
-		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
-	default:
-		// Default (GPU-only) buffer
-		heapType = d3d12.D3D12_HEAP_TYPE_DEFAULT
-		cpuPageProperty = d3d12.D3D12_CPU_PAGE_PROPERTY_UNKNOWN
-		memoryPool = d3d12.D3D12_MEMORY_POOL_UNKNOWN
-		initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
-	}
+	// D3D12 creates every buffer in COMMON whatever initial state is passed
+	// (the debug layer warns that it ignores any other), and a buffer leaves
+	// it by implicit promotion or an explicit barrier. Tracking starts there,
+	// as in Rust wgpu-hal dx12/suballocation.rs.
+	const initialState = d3d12.D3D12_RESOURCE_STATE_COMMON
 
 	// Align size for constant buffers (256-byte alignment required)
 	bufferSize := desc.Size
@@ -1102,15 +1112,6 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 	var resourceFlags d3d12.D3D12_RESOURCE_FLAGS
 	if desc.Usage&gputypes.BufferUsageStorage != 0 {
 		resourceFlags |= d3d12.D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	}
-
-	// Create heap properties
-	heapProps := d3d12.D3D12_HEAP_PROPERTIES{
-		Type:                 heapType,
-		CPUPageProperty:      cpuPageProperty,
-		MemoryPoolPreference: memoryPool,
-		CreationNodeMask:     0,
-		VisibleNodeMask:      0,
 	}
 
 	// Create resource description for buffer
@@ -1143,8 +1144,9 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		raw:             resource,
 		size:            desc.Size, // Return original size, not aligned size
 		usage:           desc.Usage,
-		heapType:        heapType,
-		cpuPageProperty: cpuPageProperty,
+		memory:          memory,
+		heapType:        heapProps.Type,
+		cpuPageProperty: heapProps.CPUPageProperty,
 		gpuVA:           resource.GetGPUVirtualAddress(),
 		device:          d,
 		currentState:    initialState,
@@ -1164,7 +1166,42 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		buffer.mappedPointer = ptr
 	}
 
+	buffer.nativeHandle = d.handles.buffers.Add(buffer)
 	return buffer, nil
+}
+
+// bufferMemoryFor returns where a buffer with the given usage lives: mapped
+// for reading, mapped for writing (also for mappedAtCreation, whatever the
+// usage), or GPU only.
+func bufferMemoryFor(usage gputypes.BufferUsage, mappedAtCreation bool) bufferMemory {
+	switch {
+	case usage&gputypes.BufferUsageMapRead != 0:
+		return bufferMemoryReadback
+	case usage&gputypes.BufferUsageMapWrite != 0 || mappedAtCreation:
+		return bufferMemoryUpload
+	default:
+		return bufferMemoryDevice
+	}
+}
+
+// bufferHeapProperties returns the heap a buffer of the given memory kind is
+// created in. CPU-visible buffers use a CUSTOM heap with the page property
+// and memory pool of the adapter's UPLOAD or READBACK heap, as Rust wgpu-hal
+// dx12/suballocation.rs does, so that they can start in COMMON and be copied
+// into and out of (the staging belt copies into MAP_WRITE buffers); a real
+// UPLOAD or READBACK heap pins its resources to one state. The page property
+// comes from the adapter (GetCustomHeapProperties): WRITE_COMBINE for uploads
+// on discrete and non-coherent UMA adapters, WRITE_BACK on cache-coherent UMA
+// adapters (Intel integrated, WARP), where write-combined pages only cost.
+func (d *Device) bufferHeapProperties(memory bufferMemory) d3d12.D3D12_HEAP_PROPERTIES {
+	switch memory {
+	case bufferMemoryUpload:
+		return d.uploadHeap
+	case bufferMemoryReadback:
+		return d.readbackHeap
+	default:
+		return d3d12.D3D12_HEAP_PROPERTIES{Type: d3d12.D3D12_HEAP_TYPE_DEFAULT}
+	}
 }
 
 // DestroyBuffer destroys a GPU buffer.
@@ -1433,7 +1470,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			owner.stateOwner.setTextureStates([]d3d12.D3D12_RESOURCE_STATES{d3d12.D3D12_RESOURCE_STATE_PRESENT})
 			st.stateOwner = owner
 		}
-		return &TextureView{
+		view := &TextureView{
 			texture:    owner,
 			format:     st.format,
 			dimension:  gputypes.TextureViewDimension2D,
@@ -1445,7 +1482,9 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 			device:     d,
 			rtvHandle:  st.rtvHandle,
 			hasRTV:     true,
-		}, nil
+		}
+		view.nativeHandle = d.handles.views.Add(view)
+		return view, nil
 	}
 
 	tex, ok := texture.(*Texture)
@@ -1518,8 +1557,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 
 	isMultisampled := tex.samples > 1
 
-	// Create RTV if texture supports render attachment and is not depth
-	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) {
+	// Create RTV if texture supports render attachment and is not depth.
+	// A 3D view gets none: which depth slice it renders to is chosen per
+	// render pass (RenderPassColorAttachment.DepthSlice), so BeginRenderPass
+	// creates a one-slice RTV then, as Rust wgpu-hal does (dx12/device.rs
+	// create_texture_view, dx12/command.rs begin_render_pass).
+	if tex.usage&gputypes.TextureUsageRenderAttachment != 0 && !isDepthFormat(viewFormat) &&
+		viewDim != gputypes.TextureViewDimension3D {
 		// Allocate RTV descriptor
 		rtvHandle, rtvIndex, err := d.allocateRTVDescriptor()
 		if err != nil {
@@ -1548,8 +1592,6 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 				rtvDesc.SetTexture2D(baseMip, 0)
 			case gputypes.TextureViewDimension2DArray:
 				rtvDesc.SetTexture2DArray(baseMip, baseLayer, layerCount, 0)
-			case gputypes.TextureViewDimension3D:
-				rtvDesc.SetTexture3D(baseMip, baseLayer, layerCount)
 			}
 		}
 
@@ -1663,6 +1705,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		view.hasSRV = true
 	}
 
+	if tex.usage&gputypes.TextureUsageStorageBinding != 0 {
+		if err := d.createTextureViewUAV(tex, view, viewFormat, viewDim); err != nil {
+			return failTextureViewCreation(view, err)
+		}
+	}
+
+	view.nativeHandle = d.handles.views.Add(view)
 	return view, nil
 }
 
@@ -1680,6 +1729,46 @@ func dsvReadOnlyVariantMasks(format gputypes.TextureFormat) []uint32 {
 	default:
 		return []uint32{uint32(d3d12.D3D12_DSV_FLAG_READ_ONLY_DEPTH)}
 	}
+}
+
+// createTextureViewUAV creates the unordered access view that a storage
+// texture binding of the view reads and writes (HLSL RWTexture*, u register).
+// Mirrors Rust wgpu-hal dx12 create_texture_view (handle_uav) and
+// view.rs to_uav: one mip level, a 2D view with a non-zero base layer becomes
+// a 2D array UAV, and a 3D UAV covers every depth slice. Cube views cannot be
+// UAVs and get none; WebGPU never binds a cube view as a storage texture.
+func (d *Device) createTextureViewUAV(tex *Texture, view *TextureView, viewFormat gputypes.TextureFormat, viewDim gputypes.TextureViewDimension) error {
+	uavFormat, plane := textureFormatToSRV(viewFormat, view.aspect)
+	if uavFormat == d3d12.DXGI_FORMAT_UNKNOWN {
+		return nil
+	}
+	uavDesc := d3d12.D3D12_UNORDERED_ACCESS_VIEW_DESC{Format: uavFormat}
+	switch viewDim {
+	case gputypes.TextureViewDimension1D:
+		uavDesc.SetTexture1D(view.baseMip)
+	case gputypes.TextureViewDimension2D:
+		if view.baseLayer == 0 {
+			uavDesc.SetTexture2D(view.baseMip, plane)
+		} else {
+			uavDesc.SetTexture2DArray(view.baseMip, view.baseLayer, view.layerCount, plane)
+		}
+	case gputypes.TextureViewDimension2DArray:
+		uavDesc.SetTexture2DArray(view.baseMip, view.baseLayer, view.layerCount, plane)
+	case gputypes.TextureViewDimension3D:
+		uavDesc.SetTexture3D(view.baseMip, 0, ^uint32(0))
+	default:
+		return nil
+	}
+
+	handle, index, err := d.allocateSRVDescriptor()
+	if err != nil {
+		return fmt.Errorf("dx12: failed to allocate UAV descriptor: %w", err)
+	}
+	d.raw.CreateUnorderedAccessView(tex.raw, nil, &uavDesc, handle)
+	view.uavHandle = handle
+	view.uavHeapIndex = index
+	view.hasUAV = true
+	return nil
 }
 
 func failTextureViewCreation(view *TextureView, err error) (hal.TextureView, error) {
@@ -1750,12 +1839,14 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		d3d12.D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
 	)
 
-	return &Sampler{
+	sampler := &Sampler{
 		handle:          handle,
 		heapIndex:       heapIndex,
 		samplerPoolSlot: poolSlot,
 		device:          d,
-	}, nil
+	}
+	sampler.nativeHandle = d.handles.samplers.Add(sampler)
+	return sampler, nil
 }
 
 // DestroySampler destroys a sampler.
@@ -1790,6 +1881,7 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			case gputypes.BufferBindingTypeReadOnlyStorage:
 				entries[i].Type = BindingTypeReadOnlyStorageBuffer
 			}
+			entries[i].HasDynamicOffset = entry.Buffer.HasDynamicOffset
 		case entry.Sampler != nil:
 			if entry.Sampler.Type == gputypes.SamplerBindingTypeComparison {
 				entries[i].Type = BindingTypeComparisonSampler
@@ -1802,6 +1894,12 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 			entries[i].Type = BindingTypeStorageTexture
 		}
 	}
+
+	// Binding order: SetBindGroup's dynamic offsets come in binding order
+	// (WebGPU), and the root parameters of the dynamic buffers and the
+	// descriptor table follow the entries. Rust wgpu-core hands the HAL its
+	// entries sorted; this HAL does not rely on the caller's order.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Binding < entries[j].Binding })
 
 	return &BindGroupLayout{
 		entries: entries,
@@ -1838,10 +1936,12 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 
 	// Classify entries into CBV/SRV/UAV vs Sampler, in layout order so the
 	// descriptor table matches the root signature ranges.
-	viewEntries, samplerPoolIndices, err := orderBindGroupEntries(layout, desc.Entries)
+	ordered, err := orderBindGroupEntries(&d.handles, layout, desc.Entries)
 	if err != nil {
 		return nil, err
 	}
+	viewEntries, samplerPoolIndices := ordered.views, ordered.samplerPoolIndices
+	bg.dynamicBuffers = ordered.dynamicBuffers
 
 	// Collect resource references for DX12 command-local state tracking. The
 	// descriptor table itself does not carry enough information to emit state
@@ -1854,7 +1954,10 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			switch layoutEntry.Type {
 			case BindingTypeUniformBuffer, BindingTypeStorageBuffer, BindingTypeReadOnlyStorageBuffer:
 				if bufBinding, ok := bgEntry.Resource.(gputypes.BufferBinding); ok && bufBinding.Buffer != 0 {
-					buf := (*Buffer)(unsafe.Pointer(bufBinding.Buffer)) //nolint:govet // intentional: HAL handle -> concrete type
+					buf, err := d.handles.buffer(bgEntry.Binding, bufBinding.Buffer)
+					if err != nil {
+						return nil, err
+					}
 					switch layoutEntry.Type {
 					case BindingTypeUniformBuffer:
 						bg.uniformBuffers = append(bg.uniformBuffers, buf)
@@ -1866,7 +1969,10 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 				}
 			case BindingTypeSampledTexture, BindingTypeStorageTexture:
 				if textureBinding, ok := bgEntry.Resource.(gputypes.TextureViewBinding); ok && textureBinding.TextureView != 0 {
-					view := (*TextureView)(unsafe.Pointer(textureBinding.TextureView)) //nolint:govet // intentional: HAL handle -> concrete type
+					view, err := d.handles.textureView(bgEntry.Binding, textureBinding.TextureView)
+					if err != nil {
+						return nil, err
+					}
 					if layoutEntry.Type == BindingTypeSampledTexture {
 						bg.sampledTextures = append(bg.sampledTextures, view)
 					} else {
@@ -1993,11 +2099,13 @@ func (d *Device) createBufferSRV(resource *d3d12.ID3D12Resource, numElements, st
 //   - uniform buffer           → CBV                 (cbuffer, b#)
 //   - read-only storage buffer → raw buffer SRV      (ByteAddressBuffer, t#)
 //   - storage buffer           → raw buffer UAV      (RWByteAddressBuffer, u#)
-//   - texture                  → copy of the view SRV
+//   - texture                  → copy of the view SRV (Texture*, t#)
+//   - storage texture          → copy of the view UAV (RWTexture*, u#)
 //
-// Mirrors Rust wgpu-hal dx12/device.rs create_bind_group (BindingType::Buffer arm).
-// CBV/SRV/UAV buffer views are created inline; texture SRV copies from scattered
-// staging handles are batched into a single CopyDescriptors call.
+// Mirrors Rust wgpu-hal dx12/device.rs create_bind_group (BindingType::Buffer,
+// Texture and StorageTexture arms). CBV/SRV/UAV buffer views are created
+// inline; texture view copies from scattered staging handles are batched into
+// a single CopyDescriptors call.
 func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, entries []viewBinding) error {
 	// Collect SRV copy sources for batching.
 	// destHandles[i] = destination in GPU-visible heap, srcHandles[i] = source from staging heap.
@@ -2009,20 +2117,24 @@ func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR
 
 		switch res := vb.entry.Resource.(type) {
 		case gputypes.BufferBinding:
-			buf := (*Buffer)(unsafe.Pointer(res.Buffer)) //nolint:govet // intentional: HAL handle → concrete type
-			if err := d.writeBufferViewDescriptor(vb.layout, buf, res, dest); err != nil {
+			if vb.buffer == nil {
+				return fmt.Errorf("dx12: binding %d: buffer handle not resolved", vb.entry.Binding)
+			}
+			if err := d.writeBufferViewDescriptor(vb.layout, vb.buffer, res, dest); err != nil {
 				return err
 			}
 
 		case gputypes.TextureViewBinding:
-			// Storage textures need a UAV, which TextureView does not create yet;
-			// they keep the sampled SRV here (pre-existing behavior).
-			view := (*TextureView)(unsafe.Pointer(res.TextureView)) //nolint:govet // intentional: HAL handle → concrete type
-			if !view.hasSRV {
-				return fmt.Errorf("dx12: texture view has no SRV for binding %d", vb.entry.Binding)
+			view := vb.view
+			if view == nil {
+				return fmt.Errorf("dx12: binding %d: texture view handle not resolved", vb.entry.Binding)
+			}
+			src, err := textureViewDescriptor(view, vb.layout.Type, vb.entry.Binding)
+			if err != nil {
+				return err
 			}
 			srvDestHandles = append(srvDestHandles, dest)
-			srvSrcHandles = append(srvSrcHandles, view.srvHandle)
+			srvSrcHandles = append(srvSrcHandles, src)
 
 		default:
 			return fmt.Errorf("dx12: unsupported binding resource type: %T", vb.entry.Resource)
@@ -2043,6 +2155,23 @@ func (d *Device) writeViewDescriptorsBatched(cpuStart d3d12.D3D12_CPU_DESCRIPTOR
 	}
 
 	return nil
+}
+
+// textureViewDescriptor returns the staging descriptor of view that a binding
+// of the given type copies into the bind group: the UAV for a storage
+// texture, the SRV otherwise. A descriptor of the other kind in that slot is
+// undefined behavior; WARP reads it as no resource.
+func textureViewDescriptor(view *TextureView, bindingType BindingType, binding uint32) (d3d12.D3D12_CPU_DESCRIPTOR_HANDLE, error) {
+	if bindingType == BindingTypeStorageTexture {
+		if !view.hasUAV {
+			return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: texture view has no UAV for storage texture binding %d", binding)
+		}
+		return view.uavHandle, nil
+	}
+	if !view.hasSRV {
+		return d3d12.D3D12_CPU_DESCRIPTOR_HANDLE{}, fmt.Errorf("dx12: texture view has no SRV for binding %d", binding)
+	}
+	return view.srvHandle, nil
 }
 
 // DestroyBindGroup destroys a bind group.
@@ -2087,13 +2216,14 @@ func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.P
 	)
 
 	return &PipelineLayout{
-		rootSignature:     result.rootSignature,
-		rootSignatureHash: result.rootSignatureHash,
-		bindGroupLayouts:  bgLayouts,
-		groupMappings:     result.groupMappings,
-		samplerRootIndex:  result.samplerRootIndex,
-		nagaOptions:       result.nagaOptions,
-		device:            d,
+		rootSignature:             result.rootSignature,
+		rootSignatureHash:         result.rootSignatureHash,
+		bindGroupLayouts:          bgLayouts,
+		groupMappings:             result.groupMappings,
+		samplerRootIndex:          result.samplerRootIndex,
+		specialConstantsRootIndex: result.specialConstantsRootIndex,
+		nagaOptions:               result.nagaOptions,
+		device:                    d,
 	}, nil
 }
 
@@ -2123,15 +2253,15 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case desc.Source.WGSL != "":
 		// Lower WGSL to IR now; HLSL/DXIL is written during pipeline creation,
 		// when the pipeline layout (bindings) and the override values are known.
-		irModule, err := shaderir.Lower(desc.Source.WGSL)
+		irModule, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("dx12: WGSL: %w", err)
 		}
 		module.wgslSource = desc.Source.WGSL
-		module.irModule = irModule
+		module.irModule = &irModule
 		hal.Logger().Debug("dx12: shader module created (deferred compilation)",
 			"source", "WGSL",
-			"overrides", len(irModule.Overrides),
+			"overrides", len(irModule.IR.Overrides),
 		)
 	case len(desc.Source.SPIRV) > 0:
 		// Legacy: pre-compiled SPIR-V stored as single entry "main"
@@ -2153,27 +2283,18 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	return module, nil
 }
 
-// compileWGSLModule compiles the shader module's IR to per-entry-point
-// bytecode in module.entryPoints. It is the path of a module without
-// overrides, compiled once for all its pipelines (see stageBytecode).
-// Routes to either DXIL direct compilation or HLSL→FXC based on Device.useDXIL.
-// The naga options must come from the PipelineLayout, which contains the proper
-// BindingMap and SamplerBufferBindingMap matching the root signature layout.
-func (d *Device) compileWGSLModule(module *ShaderModule, nagaOpts *hlsl.Options) error {
-	if d.useDXIL {
-		return d.compileWGSLModuleDXIL(module.wgslSource, module.irModule, nagaOpts, module.entryPoints)
-	}
-	return d.compileWGSLModuleHLSL(module.irModule, nagaOpts, module.entryPoints)
-}
-
-// stageBytecode returns the bytecode of one pipeline stage.
+// stageBytecode returns the bytecode of one pipeline stage, compiled with
+// this pipeline's layout, as Rust wgpu-hal compiles every stage
+// (wgpu-hal/src/dx12/device.rs, load_shader). The layout numbers the
+// registers of its bindings across all its groups, so bytecode compiled for
+// one layout reads the wrong resources under another
+// (BUG-DX12-SHADER-LAYOUT-001).
 //
-// A module without overrides, used without pipeline constants, is compiled
-// once for all its entry points with the first pipeline's layout
-// (ensureShaderCompiled). Otherwise the module's IR is specialized for this
-// stage with naga.ProcessOverrides and compiled for this pipeline only, as
-// Rust wgpu-hal does for every stage (dx12/device.rs:349). The shader cache
-// still deduplicates identical results.
+// A module with overrides, or used with pipeline constants, is first
+// specialized for this stage with naga.ProcessOverrides. The shader cache
+// deduplicates identical results: its key holds the generated HLSL on the
+// FXC path, and the WGSL, the constants and the binding options on the DXIL
+// path.
 func (d *Device) stageBytecode(module *ShaderModule, layout *PipelineLayout, stage ir.ShaderStage, entryPoint string, constants map[string]float64) ([]byte, error) {
 	if module.irModule == nil {
 		if len(constants) > 0 {
@@ -2181,33 +2302,26 @@ func (d *Device) stageBytecode(module *ShaderModule, layout *PipelineLayout, sta
 		}
 		return module.EntryPointBytecode(entryPoint), nil
 	}
-	if !shaderir.PerStage(module.irModule, constants) {
-		if err := d.ensureShaderCompiled(module, layout); err != nil {
-			return nil, err
-		}
-		return module.EntryPointBytecode(entryPoint), nil
+	if layout == nil || layout.nagaOptions == nil {
+		return nil, fmt.Errorf("dx12: WGSL compilation requires a PipelineLayout with naga options")
 	}
 
-	if layout == nil || layout.nagaOptions == nil {
-		return nil, fmt.Errorf("dx12: deferred WGSL compilation requires PipelineLayout with naga options")
+	irModule := module.irModule.IR
+	cacheSource := module.wgslSource
+	if shaderir.PerStage(irModule, constants) {
+		specialized, err := shaderir.Specialize(*module.irModule, stage, entryPoint, constants)
+		if err != nil {
+			return nil, fmt.Errorf("dx12: %w", err)
+		}
+		irModule = specialized.IR
+		// Other constant values give other DXIL.
+		cacheSource += "\x00" + pipelineConstantsKey(constants)
 	}
-	specialized, err := shaderir.Specialize(module.irModule, stage, entryPoint, constants)
-	if err != nil {
-		return nil, fmt.Errorf("dx12: %w", err)
-	}
-	out := make(map[string][]byte, 1)
+	ep := &backend.EntryPointSelector{Stage: stage, Name: entryPoint}
 	if d.useDXIL {
-		// The DXIL cache key is made from the WGSL source, so it must also
-		// hold the constants: other values give other DXIL.
-		cacheSource := module.wgslSource + "\x00" + pipelineConstantsKey(constants)
-		err = d.compileWGSLModuleDXIL(cacheSource, specialized, layout.nagaOptions, out)
-	} else {
-		err = d.compileWGSLModuleHLSL(specialized, layout.nagaOptions, out)
+		return d.compileStageDXIL(cacheSource, irModule, layout.nagaOptions, ep)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return out[entryPoint], nil
+	return d.compileStageHLSL(irModule, layout.nagaOptions, ep)
 }
 
 // pipelineConstantsKey encodes pipeline constants in key order, for cache keys.
@@ -2234,16 +2348,31 @@ func pipelineConstantsKey(constants map[string]float64) string {
 // is the concrete struct types, since dxil does not import hlsl.
 //
 // Returns nil if the input is nil, preserving the "no remap" default.
-func hlslToDXILBindingMap(m map[hlsl.ResourceBinding]hlsl.BindTarget) dxil.BindingMap {
+func hlslToDXILBindingMap(m map[ir.ResourceBinding]hlsl.BindTarget) dxil.BindingMap {
 	if m == nil {
 		return nil
 	}
 	out := make(dxil.BindingMap, len(m))
 	for k, v := range m {
-		out[dxil.BindingLocation{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
-			Space:    uint32(v.Space),
-			Register: v.Register,
+		out[ir.ResourceBinding{Group: k.Group, Binding: k.Binding}] = dxil.BindTarget{
+			Space:                            v.Space,
+			Register:                         v.Register,
+			BindingArraySize:                 v.BindingArraySize,
+			RestrictIndexing:                 v.RestrictIndexing,
+			DynamicStorageBufferOffsetsIndex: v.DynamicStorageBufferOffsetsIndex,
+			DynamicStorageBufferSizeIndex:    v.DynamicStorageBufferSizeIndex,
 		}
+	}
+	return out
+}
+
+func hlslToDXILOffsetsTargets(m map[uint32]hlsl.OffsetsBindTarget) map[uint32]dxil.OffsetsBindTarget {
+	if m == nil {
+		return nil
+	}
+	out := make(map[uint32]dxil.OffsetsBindTarget, len(m))
+	for group, v := range m {
+		out[group] = dxil.OffsetsBindTarget{Space: v.Space, Register: v.Register, Size: v.Size}
 	}
 	return out
 }
@@ -2255,176 +2384,158 @@ func hlslToDXILSamplerBufferBindingMap(m map[uint32]hlsl.BindTarget) map[uint32]
 	out := make(map[uint32]dxil.BindTarget, len(m))
 	for group, v := range m {
 		out[group] = dxil.BindTarget{
-			Space:    uint32(v.Space),
+			Space:    v.Space,
 			Register: v.Register,
 		}
 	}
 	return out
 }
 
-func hlslToDXILSamplerHeapTargets(t hlsl.SamplerHeapBindTargets) *dxil.SamplerHeapBindTargets {
+func hlslToDXILSamplerHeapTargets(t *hlsl.SamplerHeapBindTargets) *dxil.SamplerHeapBindTargets {
+	if t == nil {
+		return nil
+	}
 	return &dxil.SamplerHeapBindTargets{
 		StandardSamplers: dxil.BindTarget{
-			Space:    uint32(t.StandardSamplers.Space),
+			Space:    t.StandardSamplers.Space,
 			Register: t.StandardSamplers.Register,
 		},
 		ComparisonSamplers: dxil.BindTarget{
-			Space:    uint32(t.ComparisonSamplers.Space),
+			Space:    t.ComparisonSamplers.Space,
 			Register: t.ComparisonSamplers.Register,
 		},
 	}
 }
 
-// compileWGSLModuleHLSL compiles IR to per-entry-point DXBC via HLSL→FXC.
-// Pipeline: IR → HLSL → D3DCompile (d3dcompiler_47.dll) → DXBC
-func (d *Device) compileWGSLModuleHLSL(irModule *ir.Module, nagaOpts *hlsl.Options, entryPoints map[string][]byte) error {
-	// Generate HLSL using pipeline-specific naga options.
-	// The options contain BindingMap (register assignments matching root signature)
-	// and SamplerBufferBindingMap (sampler index buffer locations), ensuring the
-	// shader's register usage matches the root signature exactly.
-	hlslSource, info, err := hlsl.Compile(irModule, nagaOpts)
-	if err != nil {
-		return fmt.Errorf("HLSL generation: %w", shaderir.BackendError(err))
+// dxilShaderModelMax is the newest shader model naga's DXIL output passes the
+// DXIL validator at. naga writes dx.op.createHandle for every shader model, and
+// the validator accepts that opcode only through SM 6.5; from 6.6 it requires
+// createHandleFromBinding plus annotateHandle (naga P1-DXIL-090). Raise the cap
+// when naga writes the 6.6 handles, with a DXIL readback at 6.6.
+var dxilShaderModelMax = backend.ShaderModel{Major: 6, Minor: 5}
+
+// dxilOptions returns the naga DXIL options of this device, without the
+// bindings, which come from the pipeline layout.
+//
+// The shader model is the adapter's highest, capped at naga's, as Rust
+// wgpu-hal dx12 passes the device's shader model: naga refuses a shader that
+// needs a newer one with a typed error instead of failing in the driver.
+// Bounds checks follow Rust's restrict_indexing (true, what wgpu-hal passes):
+// Index and Buffer Restrict; image loads are checked by D3D12 itself; binding
+// arrays are Unchecked, as Rust's HLSL writer never checks them.
+func (d *Device) dxilOptions() dxil.Options {
+	return dxil.Options{
+		ShaderModel: dxilShaderModel(d.shaderModel),
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckRestrict,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
 	}
-
-	hal.Logger().Debug("dx12: compiling HLSL",
-		"sourceLen", len(hlslSource),
-		"entryPoints", len(irModule.EntryPoints),
-	)
-
-	// Load d3dcompiler_47.dll (deferred until cache miss)
-	var compiler *d3dcompile.Lib
-
-	// Compile each entry point separately, using shader cache.
-	// Cache key = SHA-256(HLSL source) + entry point + stage + target.
-	// This matches Rust wgpu's ShaderCache pattern (device.rs:390-428).
-	for i := range irModule.EntryPoints {
-		ep := &irModule.EntryPoints[i]
-		target := shaderStageToTarget(ep.Stage)
-
-		// Use the HLSL entry point name (naga may rename it)
-		hlslName := ep.Name
-		if info != nil && info.EntryPointNames != nil {
-			if mapped, ok := info.EntryPointNames[ep.Name]; ok {
-				hlslName = mapped
-			}
-		}
-
-		// Check shader cache before calling FXC.
-		cacheKey := NewShaderCacheKey(hlslSource, hlslName, ep.Stage, target)
-		if cached, ok := d.shaderCache.Get(cacheKey); ok {
-			entryPoints[ep.Name] = cached
-			continue
-		}
-
-		// Cache miss — load compiler if not yet loaded and compile via FXC.
-		if compiler == nil {
-			compiler, err = d3dcompile.Load()
-			if err != nil {
-				return fmt.Errorf("load d3dcompiler: %w", err)
-			}
-		}
-
-		bytecode, err := compiler.Compile(hlslSource, hlslName, target)
-		if err != nil {
-			return fmt.Errorf("D3DCompile entry point %q (hlsl: %q, target: %s): %w",
-				ep.Name, hlslName, target, err)
-		}
-
-		// Store in cache for future pipelines using the same shader.
-		d.shaderCache.Put(cacheKey, bytecode)
-		entryPoints[ep.Name] = bytecode
-	}
-
-	return nil
 }
 
-// compileWGSLModuleDXIL compiles IR to per-entry-point DXIL bytecode directly.
-// Pipeline: IR → naga dxil.Compile → DXBC container (with DXIL bitcode + BYPASS hash)
-// Eliminates the HLSL→FXC dependency — no d3dcompiler_47.dll needed.
-//
-// The binding map from nagaOpts (built by PipelineLayout to match the D3D12
-// root signature) is converted to dxil.BindingMap and passed to the DXIL
-// backend so it emits (space, register) pairs matching the root signature.
-// Without this, DXIL would use raw WGSL @group/@binding numbers and D3D12
-// would reject the PSO with E_INVALIDARG (see FEAT-DXIL-002, BUG-DX12-011).
-//
-// cacheSource identifies the shader for the shader cache: the WGSL source, plus
-// the pipeline constants for a module specialized by stageBytecode.
-func (d *Device) compileWGSLModuleDXIL(cacheSource string, irModule *ir.Module, nagaOpts *hlsl.Options, entryPoints map[string][]byte) error {
-	hal.Logger().Debug("dx12: compiling DXIL direct",
-		"entryPoints", len(irModule.EntryPoints),
-	)
+// dxilShaderModel maps a D3D_SHADER_MODEL (0x60 = 6.0) to naga's shader
+// model, capped at dxilShaderModelMax. Below 6.0 there is no DXIL; the DXIL
+// path is then refused by D3D12 anyway, and 6.0 is passed.
+func dxilShaderModel(sm d3d12.D3D_SHADER_MODEL) backend.ShaderModel {
+	major, minor := uint8(sm>>4), uint8(sm&0xF)
+	switch {
+	case major < 6:
+		return backend.ShaderModel{Major: 6, Minor: 0}
+	case major > dxilShaderModelMax.Major || minor > dxilShaderModelMax.Minor:
+		return dxilShaderModelMax
+	default:
+		return backend.ShaderModel{Major: major, Minor: minor}
+	}
+}
 
-	opts := dxil.DefaultOptions()
-	if nagaOpts != nil {
-		opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
-		opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
-		opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
+// compileStageHLSL compiles one entry point of irModule to DXBC via HLSL and
+// FXC (d3dcompiler_47.dll), with the pipeline layout's naga options.
+//
+// The HLSL holds only the selected entry point and the layout's register
+// assignments, so the shader cache key made from it (with the entry point,
+// stage and target) is Rust's ShaderCacheKey (wgpu-hal/src/dx12/mod.rs).
+func (d *Device) compileStageHLSL(irModule *ir.Module, nagaOpts *hlsl.Options, ep *backend.EntryPointSelector) ([]byte, error) {
+	opts := *nagaOpts
+	opts.EntryPoint = ep
+	hlslSource, info, err := hlsl.Compile(irModule, opts)
+	if err != nil {
+		return nil, fmt.Errorf("HLSL generation: %w", shaderir.BackendError(err))
 	}
 
-	// Compile each entry point separately by creating a single-entry-point IR module.
-	// dxil.Compile always compiles EntryPoints[0], so we isolate each entry point
-	// into its own module copy. This matches the per-entry-point granularity of the
-	// HLSL→FXC path and the shader cache.
-	for i := range irModule.EntryPoints {
-		ep := &irModule.EntryPoints[i]
-
-		// Check shader cache before compiling.
-		// DXIL cache key: SHA-256(WGSL source + entry point name) + "dxil" target.
-		// Using WGSL source (not HLSL) because the DXIL path bypasses HLSL generation.
-		cacheKey := NewShaderCacheKey(
-			dxilCacheSource(cacheSource, ep.Name),
-			ep.Name, ep.Stage, "dxil",
-		)
-		if cached, ok := d.shaderCache.Get(cacheKey); ok {
-			entryPoints[ep.Name] = cached
-			continue
-		}
-
-		// Create a single-entry-point module for dxil.Compile.
-		// dxil.Compile always processes EntryPoints[0], so we need to isolate
-		// the target entry point. Shared module data (types, constants, globals)
-		// is referenced, not copied — only the EntryPoints slice differs.
-		// A module specialized for one stage has only that entry point.
-		singleEPModule := irModule
-		if len(irModule.EntryPoints) > 1 {
-			singleEPModule = &ir.Module{
-				Types:             irModule.Types,
-				Constants:         irModule.Constants,
-				GlobalVariables:   irModule.GlobalVariables,
-				GlobalExpressions: irModule.GlobalExpressions,
-				Functions:         irModule.Functions,
-				EntryPoints:       []ir.EntryPoint{irModule.EntryPoints[i]},
-				Overrides:         irModule.Overrides,
-				SpecialTypes:      irModule.SpecialTypes,
-			}
-		}
-
-		dxilBytes, err := dxil.Compile(singleEPModule, opts)
-		if err != nil {
-			return fmt.Errorf("dx12: DXIL compile entry point %q: %w", ep.Name, shaderir.BackendError(err))
-		}
-
-		// Pre-validate via naga's IDxcValidator wrapper when
-		// GOGPU_DX12_DXIL_VALIDATE=1 is set. Surfaces the exact
-		// HRESULT+text that dxil.dll would emit, instead of the
-		// opaque E_INVALIDARG that D3D12 CreateGraphicsPipelineState
-		// folds everything into. Also dumps the offending blob to the
-		// system temp directory for post-mortem dxilval --corpus replay.
-		if d.dxilValidate {
-			if verr := dxil.Validate(dxilBytes, dxil.ValidateFull); verr != nil {
-				dumpRejectedDXIL(ep.Stage, ep.Name, dxilBytes)
-				return fmt.Errorf("dx12: DXIL validation rejected %q (stage %d): %w", ep.Name, ep.Stage, verr)
-			}
-		}
-
-		// Store in cache for future pipelines using the same shader.
-		d.shaderCache.Put(cacheKey, dxilBytes)
-		entryPoints[ep.Name] = dxilBytes
+	// naga may rename the entry point in HLSL.
+	hlslName := ep.Name
+	if mapped, ok := info.EntryPointNames[ep.Name]; ok {
+		hlslName = mapped
+	}
+	target := shaderStageToTarget(ep.Stage)
+	cacheKey := NewShaderCacheKey(hlslSource, hlslName, ep.Stage, target)
+	if cached, ok := d.shaderCache.Get(cacheKey); ok {
+		return cached, nil
 	}
 
-	return nil
+	hal.Logger().Debug("dx12: compiling HLSL", "entryPoint", ep.Name, "sourceLen", len(hlslSource))
+	compiler, err := d3dcompile.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load d3dcompiler: %w", err)
+	}
+	bytecode, err := compiler.Compile(hlslSource, hlslName, target)
+	if err != nil {
+		return nil, fmt.Errorf("D3DCompile entry point %q (hlsl: %q, target: %s): %w",
+			ep.Name, hlslName, target, err)
+	}
+	d.shaderCache.Put(cacheKey, bytecode)
+	return bytecode, nil
+}
+
+// compileStageDXIL compiles one entry point of irModule to DXIL with naga's
+// DXIL backend: no HLSL, no d3dcompiler_47.dll.
+//
+// The bindings come from the pipeline layout's naga options (the registers
+// of its root signature); without them DXIL would use the raw WGSL
+// @group/@binding numbers and D3D12 would reject the PSO with E_INVALIDARG
+// (FEAT-DXIL-002, BUG-DX12-011).
+//
+// cacheSource identifies the shader: the WGSL source, plus the pipeline
+// constants for a specialized module. The shader cache key adds the DXIL
+// options (dxilCacheSource), which stand in for the HLSL text of the FXC path.
+func (d *Device) compileStageDXIL(cacheSource string, irModule *ir.Module, nagaOpts *hlsl.Options, ep *backend.EntryPointSelector) ([]byte, error) {
+	opts := d.dxilOptions()
+	opts.BindingMap = hlslToDXILBindingMap(nagaOpts.BindingMap)
+	opts.SamplerBufferBindingMap = hlslToDXILSamplerBufferBindingMap(nagaOpts.SamplerBufferBindingMap)
+	opts.SamplerHeapTargets = hlslToDXILSamplerHeapTargets(nagaOpts.SamplerHeapTargets)
+	opts.DynamicStorageBufferOffsetsTargets = hlslToDXILOffsetsTargets(nagaOpts.DynamicStorageBufferOffsetsTargets)
+	if sc := nagaOpts.SpecialConstantsBinding; sc != nil {
+		opts.SpecialConstantsBinding = &dxil.BindTarget{Space: sc.Space, Register: sc.Register}
+	}
+	// A DXIL container holds one entry point.
+	opts.EntryPoint = ep
+
+	cacheKey := NewShaderCacheKey(dxilCacheSource(cacheSource, &opts), ep.Name, ep.Stage, "dxil")
+	if cached, ok := d.shaderCache.Get(cacheKey); ok {
+		return cached, nil
+	}
+
+	hal.Logger().Debug("dx12: compiling DXIL direct", "entryPoint", ep.Name)
+	dxilBytes, _, err := dxil.Compile(irModule, opts)
+	if err != nil {
+		return nil, fmt.Errorf("dx12: DXIL compile entry point %q: %w", ep.Name, shaderir.BackendError(err))
+	}
+
+	// GOGPU_DX12_DXIL_VALIDATE=1 runs naga's IDxcValidator wrapper first. It
+	// reports the HRESULT and text that dxil.dll gives, instead of the opaque
+	// E_INVALIDARG that D3D12 CreateGraphicsPipelineState folds everything
+	// into, and dumps the blob for a dxilval --corpus replay.
+	if d.dxilValidate {
+		if verr := dxil.Validate(dxilBytes, dxil.ValidateFull); verr != nil {
+			dumpRejectedDXIL(ep.Stage, ep.Name, dxilBytes)
+			return nil, fmt.Errorf("dx12: DXIL validation rejected %q (stage %d): %w", ep.Name, ep.Stage, verr)
+		}
+	}
+
+	d.shaderCache.Put(cacheKey, dxilBytes)
+	return dxilBytes, nil
 }
 
 // dumpRejectedDXIL writes a blob that dxil.Validate rejected to a new file in
@@ -2461,15 +2572,47 @@ func dxilDumpPattern(stage ir.ShaderStage, entryPoint string) string {
 	return fmt.Sprintf("gogpu-dxil-stage%d-%s-*.dxil", int(stage), safe)
 }
 
-// dxilCacheSource creates a unique cache source string for DXIL compilation.
-// Combines WGSL source with entry point name to ensure different entry points
-// from the same WGSL source get distinct cache keys.
-func dxilCacheSource(wgslSource, entryPoint string) string {
-	// Use SHA-256 of combined source to keep the key compact while unique.
-	// NewShaderCacheKey will hash this again, but the intermediate string
-	// needs to be deterministic and unique per (source, entry) pair.
-	h := sha256.Sum256([]byte(wgslSource + "\x00" + entryPoint))
-	return string(h[:])
+// dxilCacheSource returns the shader cache source of a DXIL compile: the
+// shader source with every DXIL option that changes the output. The options
+// take the place of the HLSL text that keys the FXC path, so a module
+// compiled for one pipeline layout never hits an entry made for another
+// (BUG-DX12-SHADER-LAYOUT-001). Every option the HAL sets must be encoded
+// here. fmt prints maps in key order, so the encoding is deterministic; the
+// bind targets hold pointers, which bindTargetKey encodes by value.
+func dxilCacheSource(source string, opts *dxil.Options) string {
+	var b strings.Builder
+	b.WriteString(source)
+	fmt.Fprintf(&b, "\x00sm=%v;bounds=%v;zero=%v;bindings=%v;samplerBuffers=%v;samplerHeaps=%s;special=%s;immediates=%s;dynamicOffsets=%v;fake=%v",
+		opts.ShaderModel, opts.BoundsCheckPolicies, opts.ZeroInitializeWorkgroupMemory,
+		bindTargetKeys(opts.BindingMap), bindTargetKeys(opts.SamplerBufferBindingMap),
+		optionalKey(opts.SamplerHeapTargets), optionalKey(opts.SpecialConstantsBinding), optionalKey(opts.ImmediatesTarget),
+		opts.DynamicStorageBufferOffsetsTargets, opts.FakeMissingBindings)
+	return b.String()
+}
+
+// bindTargetKeys returns m with each bind target encoded by bindTargetKey,
+// for fmt to print in key order.
+func bindTargetKeys[K comparable](m map[K]dxil.BindTarget) map[K]string {
+	out := make(map[K]string, len(m))
+	for k, v := range m {
+		out[k] = bindTargetKey(&v)
+	}
+	return out
+}
+
+// bindTargetKey encodes a bind target by value, its optional fields
+// included: fmt would print their pointers.
+func bindTargetKey(t *dxil.BindTarget) string {
+	return fmt.Sprintf("%d/%d/%s/%t/%s/%s", t.Space, t.Register, optionalKey(t.BindingArraySize), t.RestrictIndexing,
+		optionalKey(t.DynamicStorageBufferOffsetsIndex), optionalKey(t.DynamicStorageBufferSizeIndex))
+}
+
+// optionalKey encodes an optional option by value: "-" when it is unset.
+func optionalKey[T any](p *T) string {
+	if p == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%+v", *p)
 }
 
 // shaderStageToTarget maps naga IR shader stage to D3DCompile target profile.
@@ -2491,18 +2634,6 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 	if m, ok := module.(*ShaderModule); ok && m != nil {
 		m.Destroy()
 	}
-}
-
-// ensureShaderCompiled performs deferred WGSL compilation if needed.
-// Must be called during pipeline creation when the PipelineLayout is available.
-func (d *Device) ensureShaderCompiled(module *ShaderModule, layout *PipelineLayout) error {
-	if !module.IsDeferred() {
-		return nil // Already compiled (SPIR-V or previously compiled WGSL)
-	}
-	if layout == nil || layout.nagaOptions == nil {
-		return fmt.Errorf("dx12: deferred WGSL compilation requires PipelineLayout with naga options")
-	}
-	return d.compileWGSLModule(module, layout.nagaOptions)
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -2591,10 +2722,12 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	var rootSig *d3d12.ID3D12RootSignature
 	var groupMappings []rootParamMapping
 	samplerRootIdx := -1
+	specialConstantsIdx := -1
 	if pipelineLayout != nil {
 		rootSig = pipelineLayout.rootSignature
 		groupMappings = pipelineLayout.groupMappings
 		samplerRootIdx = pipelineLayout.samplerRootIndex
+		specialConstantsIdx = pipelineLayout.specialConstantsRootIndex
 	} else {
 		// No layout → use the same empty root signature that was used in the PSO.
 		rootSig, _ = d.getOrCreateEmptyRootSignature()
@@ -2618,12 +2751,13 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	)
 
 	return &RenderPipeline{
-		pso:              pso,
-		rootSignature:    rootSig,
-		groupMappings:    groupMappings,
-		samplerRootIndex: samplerRootIdx,
-		topology:         primitiveTopologyToD3D12(desc.Primitive.Topology),
-		vertexStrides:    vertexStrides,
+		pso:                       pso,
+		rootSignature:             rootSig,
+		groupMappings:             groupMappings,
+		samplerRootIndex:          samplerRootIdx,
+		specialConstantsRootIndex: specialConstantsIdx,
+		topology:                  primitiveTopologyToD3D12(desc.Primitive.Topology),
+		vertexStrides:             vertexStrides,
 	}, nil
 }
 
@@ -2661,6 +2795,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	var groupMappings []rootParamMapping
 	var pipelineLayout *PipelineLayout
 	samplerRootIdx := -1
+	specialConstantsIdx := -1
 	if desc.Layout != nil {
 		pl, ok := desc.Layout.(*PipelineLayout)
 		if !ok {
@@ -2670,6 +2805,7 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		rootSig = pl.rootSignature
 		groupMappings = pl.groupMappings
 		samplerRootIdx = pl.samplerRootIndex
+		specialConstantsIdx = pl.specialConstantsRootIndex
 	} else {
 		emptyRS, err := d.getOrCreateEmptyRootSignature()
 		if err != nil {
@@ -2736,10 +2872,11 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	)
 
 	return &ComputePipeline{
-		pso:              pso,
-		rootSignature:    rootSig,
-		groupMappings:    groupMappings,
-		samplerRootIndex: samplerRootIdx,
+		pso:                       pso,
+		rootSignature:             rootSig,
+		groupMappings:             groupMappings,
+		samplerRootIndex:          samplerRootIdx,
+		specialConstantsRootIndex: specialConstantsIdx,
 	}, nil
 }
 

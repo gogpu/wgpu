@@ -439,7 +439,7 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 	defer surface.Release()
 
 	buffer, err := device.CreateBuffer(&BufferDescriptor{
-		Size:  4,
+		Size:  256,
 		Usage: gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -448,7 +448,7 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 	defer buffer.Release()
 	texture := surfaceTexture.AsTexture()
 	region := []BufferTextureCopy{{
-		BufferLayout: ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1},
+		BufferLayout: ImageDataLayout{BytesPerRow: 256, RowsPerImage: 1},
 		TextureBase:  ImageCopyTexture{Texture: texture},
 		Size:         Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
 	}}

@@ -16,6 +16,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal/software"
 
 	_ "github.com/gogpu/wgpu/hal/allbackends"
 )
@@ -68,6 +69,17 @@ func forEachOverrideBackend(t *testing.T, required gputypes.DownlevelFlags, fn f
 
 func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags) *wgpu.Device {
 	t.Helper()
+	// Low power picks the integrated GPU on a hybrid machine.
+	// TestOverridesAllAdapters covers the other adapters.
+	device, _ := openBackendDevice(t, b, required, gputypes.PowerPreferenceLowPower)
+	return device
+}
+
+// openBackendDevice opens a device of backend b on the adapter the power
+// preference selects and returns it with the adapter name; it skips the test
+// when the backend has no such adapter.
+func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags, pref gputypes.PowerPreference) (*wgpu.Device, string) {
+	t.Helper()
 	var flags gputypes.InstanceFlags
 	if b.backend == gputypes.BackendVulkan && !b.software {
 		flags = enableVulkanValidation(t)
@@ -78,10 +90,8 @@ func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.Downl
 	}
 	t.Cleanup(instance.Release)
 
-	// Low power picks the integrated GPU on a hybrid machine.
-	// TestOverridesAllAdapters covers the other adapters.
 	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		PowerPreference:      gputypes.PowerPreferenceLowPower,
+		PowerPreference:      pref,
 		ForceFallbackAdapter: b.software,
 	})
 	if err != nil {
@@ -104,7 +114,7 @@ func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.Downl
 	}
 	t.Cleanup(device.Release)
 	t.Logf("adapter: %s (%v)", info.Name, info.Backend)
-	return device
+	return device, info.Name
 }
 
 // TestOverrideCompute runs every override case through the public API: the
@@ -116,6 +126,10 @@ func TestOverrideCompute(t *testing.T) {
 		for _, c := range overrideCases() {
 			t.Run(c.name, func(t *testing.T) {
 				out, err := runPublicCompute(t, device, c.wgsl, c.constants, c.inputs)
+				if _, sw := device.HalDevice().(*software.Device); sw && c.sharesWorkgroupMemory {
+					requireWorkgroupBarrierRefused(t, err)
+					return
+				}
 				if err != nil {
 					t.Fatal(err)
 				}

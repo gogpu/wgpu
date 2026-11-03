@@ -51,12 +51,22 @@ type Module struct {
 	// Used for LocalSize in compute shaders.
 	ExecutionModes map[executionModeKey][]uint32
 
+	// ResultTypes maps the result ID of a constant or a typed function
+	// instruction to its result type ID. Runtime values do not carry their
+	// SPIR-V type (an integer vector component is held as a float32), so an
+	// instruction whose meaning depends on its operand's type, such as
+	// OpBitcast, looks the type up here.
+	ResultTypes map[uint32]uint32
+
 	// Bound is the upper bound of all IDs in the module.
 	Bound uint32
 
 	// interpPool recycles interpreter structs across Execute calls to avoid
 	// allocating the values slice (sized to Bound) on every invocation.
 	interpPool sync.Pool
+
+	// prepState is the per-invocation setup built once (see prepared).
+	prepState modulePrepState
 }
 
 // memberDecorationKey uniquely identifies a member decoration.
@@ -106,6 +116,17 @@ func (m *Module) GetMemberOffset(structTypeID, memberIndex uint32) uint32 {
 	return 0
 }
 
+// memberMatrixStride returns the MatrixStride decoration of a struct member
+// (the column stride of the matrices it holds, directly or in an array), or
+// 0 if the member is not decorated.
+func (m *Module) memberMatrixStride(structTypeID, memberIndex uint32) uint32 {
+	return m.MemberDecorations[memberDecorationKey{
+		StructTypeID: structTypeID,
+		MemberIndex:  memberIndex,
+		Decoration:   DecorationMatrixStride,
+	}]
+}
+
 // TypeInfo describes a SPIR-V type.
 type TypeInfo struct {
 	Kind       TypeKind
@@ -118,6 +139,11 @@ type TypeInfo struct {
 	ParamIDs   []uint32 // for OpTypeFunction (parameter type IDs)
 	ReturnType uint32   // for OpTypeFunction
 	MemberIDs  []uint32 // for OpTypeStruct
+
+	// ArrayStride is the ArrayStride decoration of an array type: the byte
+	// distance between its elements in an explicitly laid-out buffer. 0 when
+	// the array is not decorated (Function, Private and Workgroup arrays).
+	ArrayStride uint32
 }
 
 // TypeKind classifies SPIR-V types.
@@ -164,6 +190,7 @@ type Function struct {
 type VariableInfo struct {
 	TypeID       uint32 // pointer type ID
 	StorageClass uint32
+	Initializer  uint32 // constant ID of the initializer; 0 for none
 }
 
 // decorationKey uniquely identifies a decoration on a target ID.
@@ -196,6 +223,7 @@ func ParseModule(words []uint32) (*Module, error) {
 		FunctionsByID:     make(map[uint32]*Function),
 		ExtInstImports:    make(map[uint32]string),
 		ExecutionModes:    make(map[executionModeKey][]uint32),
+		ResultTypes:       make(map[uint32]uint32),
 		Bound:             words[3],
 	}
 
@@ -293,8 +321,8 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeRuntimeArray:
 			// OpTypeRuntimeArray: result elementType
 			// Runtime arrays are unsized (length determined by buffer size at runtime).
-			// Represented as TypeArray with Length=0, which the buffer access chain
-			// handles by computing byte offsets from element type size.
+			// Represented as TypeArray with Length=0; the buffer access chain
+			// steps through it by its ArrayStride.
 			if len(operands) < 2 {
 				break
 			}
@@ -365,6 +393,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			typeID := operands[0]
 			resultID := operands[1]
 			m.Constants[resultID] = resolveConstant(m.Types, typeID, operands[2:])
+			m.ResultTypes[resultID] = typeID
 
 		case OpConstantComposite:
 			// OpConstantComposite: resultType resultID constituents...
@@ -380,6 +409,7 @@ func ParseModule(words []uint32) (*Module, error) {
 				}
 			}
 			m.Constants[resultID] = ValArray(elems)
+			m.ResultTypes[resultID] = operands[0]
 
 		case OpConstantTrue:
 			if len(operands) >= 2 {
@@ -398,6 +428,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			typeID := operands[0]
 			resultID := operands[1]
 			m.Constants[resultID] = zeroValue(m.Types, typeID)
+			m.ResultTypes[resultID] = typeID
 
 		case OpEntryPoint:
 			// OpEntryPoint: executionModel functionID "name" interfaceIDs...
@@ -487,6 +518,9 @@ func ParseModule(words []uint32) (*Module, error) {
 				TypeID:       typeID,
 				StorageClass: storageClass,
 			}
+			if len(operands) > 3 {
+				m.Variables[resultID].Initializer = operands[3]
+			}
 			// If inside a function, record as an instruction too.
 			if currentFunc != nil {
 				inst := Instruction{
@@ -546,13 +580,25 @@ func ParseModule(words []uint32) (*Module, error) {
 	// Store all functions by ID for OpFunctionCall dispatch.
 	m.FunctionsByID = funcsByID
 
+	// Attach each array type's ArrayStride decoration, so buffer addressing
+	// needs no decoration lookup by type ID.
+	for id, ti := range m.Types {
+		if ti.Kind == TypeArray {
+			ti.ArrayStride = m.Decorations[decorationKey{TargetID: id, Decoration: DecorationArrayStride}]
+		}
+	}
+
 	// Pre-build label indexes for all functions. This avoids rebuilding
 	// the label map on every Execute call (saves one map alloc per call).
+	// Record the result type of every typed instruction alongside.
 	for _, fn := range funcsByID {
 		fn.Labels = make(map[uint32]int, len(fn.Instructions)/4)
 		for i, inst := range fn.Instructions {
 			if inst.Opcode == OpLabel {
 				fn.Labels[inst.ResultID] = i
+			}
+			if inst.TypeID != 0 && inst.ResultID != 0 {
+				m.ResultTypes[inst.ResultID] = inst.TypeID
 			}
 		}
 	}
@@ -567,6 +613,68 @@ func (m *Module) GetBuiltIn(varID uint32) int {
 		return int(val)
 	}
 	return -1
+}
+
+// MayDiscard reports whether any function of the module contains OpKill or
+// OpTerminateInvocation, so a fragment entry point may discard. The answer is
+// conservative: it does not check that the function is reachable from the
+// entry point.
+func (m *Module) MayDiscard() bool {
+	for _, fn := range m.FunctionsByID {
+		for i := range fn.Instructions {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+				return true
+			}
+		}
+	}
+	for _, fn := range m.Functions {
+		for i := range fn.Instructions {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SharesWorkgroupMemoryAcrossBarrier reports whether the invocations of a
+// workgroup of entryPoint may exchange data through workgroup memory: the
+// workgroup has more than one invocation and the module has both a Workgroup
+// variable and an OpControlBarrier. The interpreter does not share workgroup
+// memory between invocations and cannot honor a barrier (it runs each
+// invocation to completion), so such a shader computes wrong results. A
+// one-invocation workgroup shares nothing, whatever its barriers (naga emits
+// one after zero-initializing workgroup memory). Conservative like
+// MayDiscard: no reachability or per-access analysis.
+func (m *Module) SharesWorkgroupMemoryAcrossBarrier(entryPoint string) bool {
+	if size := m.GetWorkgroupSize(entryPoint); size[0]*size[1]*size[2] <= 1 {
+		return false
+	}
+	hasWorkgroup := false
+	for _, vi := range m.Variables {
+		if vi.StorageClass == StorageClassWorkgroup {
+			hasWorkgroup = true
+			break
+		}
+	}
+	if !hasWorkgroup {
+		return false
+	}
+	for _, fn := range m.FunctionsByID {
+		for i := range fn.Instructions {
+			if fn.Instructions[i].Opcode == OpControlBarrier {
+				return true
+			}
+		}
+	}
+	for _, fn := range m.Functions {
+		for i := range fn.Instructions {
+			if fn.Instructions[i].Opcode == OpControlBarrier {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetLocation returns the Location decoration value for a variable ID, or -1 if none.
@@ -617,7 +725,7 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 
 	switch opcode {
 	// Instructions with result type AND result ID (type resultID operands...).
-	case OpLoad, OpAccessChain, OpCompositeConstruct, OpCompositeExtract,
+	case OpLoad, OpAccessChain, OpArrayLength, OpCompositeConstruct, OpCompositeExtract,
 		OpConvertUToF, OpConvertFToU, OpConvertSToF, OpConvertFToS, OpBitcast,
 		OpSConvert, OpUConvert, OpFConvert,
 		OpFAdd, OpFSub, OpFMul, OpFDiv, OpFNegate, OpFMod, OpFRem,
@@ -629,13 +737,19 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 		OpULessThan, OpUGreaterThan, OpULessThanEqual, OpUGreaterThanEqual,
 		OpSLessThan, OpSGreaterThan, OpSLessThanEqual, OpSGreaterThanEqual,
 		OpLogicalAnd, OpLogicalOr, OpLogicalNot,
+		OpLogicalEqual, OpLogicalNotEqual,
+		OpFOrdNotEqual, OpFUnordNotEqual,
+		OpBitFieldInsert, OpBitFieldSExtract, OpBitFieldUExtract, OpBitReverse, OpBitCount,
+		OpDPdx, OpDPdy, OpFwidth, OpDPdxFine, OpDPdyFine, OpFwidthFine,
+		OpDPdxCoarse, OpDPdyCoarse, OpFwidthCoarse,
 		OpBitwiseAnd, OpBitwiseOr, OpBitwiseXor, OpNot,
 		OpShiftLeftLogical, OpShiftRightLogical, OpShiftRightArithmetic,
 		OpDot, OpVectorTimesScalar, OpMatrixTimesVector, OpMatrixTimesScalar,
 		OpMatrixTimesMatrix, OpTranspose, OpVectorShuffle,
 		OpCopyObject,
 		OpSampledImage, OpImageSampleImplicitLod, OpImageSampleExplicitLod,
-		OpImageFetch, OpImageQuerySize,
+		OpImageFetch, OpImageRead, OpImageQuerySize, OpImageQuerySizeLod,
+		OpImageQueryLevels, OpImageQuerySamples,
 		OpAtomicLoad, OpAtomicExchange, OpAtomicCompareExchange,
 		OpAtomicIIncrement, OpAtomicIDecrement,
 		OpAtomicIAdd, OpAtomicISub,
@@ -686,8 +800,8 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 		}
 
 	// Instructions with only operands (no result type/ID).
-	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier,
-		OpSwitch, OpKill, OpUnreachable:
+	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier, OpImageWrite,
+		OpSwitch, OpKill, OpTerminateInvocation, OpUnreachable:
 		if len(operands) > 0 {
 			inst.Operands = make([]uint32, len(operands))
 			copy(inst.Operands, operands)

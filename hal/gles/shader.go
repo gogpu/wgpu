@@ -11,6 +11,7 @@ import (
 	"log/slog"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -24,11 +25,11 @@ import (
 func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*ShaderModule, error) {
 	sm := &ShaderModule{source: desc.Source, glCtx: glCtx}
 	if desc.Source.WGSL != "" {
-		irModule, err := shaderir.Lower(desc.Source.WGSL)
+		irModule, err := shaderir.LowerDescriptor(desc)
 		if err != nil {
 			return nil, fmt.Errorf("gles: WGSL: %w", err)
 		}
-		sm.irModule = irModule
+		sm.irModule = &irModule
 	}
 	return sm, nil
 }
@@ -52,13 +53,13 @@ func newShaderModule(desc *hal.ShaderModuleDescriptor, glCtx *gl.Context) (*Shad
 // The module's IR is specialized for the stage first when it has overrides or
 // the stage gives pipeline constants (Rust wgpu-hal gles/device.rs:385 calls
 // process_overrides in create_shader).
-func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[glsl.BindingMapKey]uint8) (string, glsl.TranslationInfo, error) {
+func compileWGSLToGLSL(version glsl.Version, drawParameters bool, sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64, bindingMap map[ir.ResourceBinding]uint8) (string, glsl.TranslationInfo, error) {
 	if sm.irModule == nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: shader source has no WGSL code")
 	}
 
-	module := sm.irModule
-	if shaderir.PerStage(module, constants) {
+	module := *sm.irModule
+	if shaderir.PerStage(module.IR, constants) {
 		var err error
 		module, err = shaderir.Specialize(module, stage, entryPoint, constants)
 		if err != nil {
@@ -70,12 +71,15 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	// On GL 4.3+ this emits layout(binding=N) qualifiers inline. On older versions
 	// (< 420 desktop / < 310 ES) naga omits them and the HAL assigns bindings at
 	// runtime after linking (see assignBindingsAfterLink).
-	glslCode, translationInfo, err := glsl.Compile(module, glsl.Options{
-		LangVersion:        version,
-		EntryPoint:         entryPoint,
-		ForceHighPrecision: true,
-		BindingMap:         bindingMap,
-		// ADJUST_COORDINATE_SPACE: naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
+	glslCode, translationInfo, err := glsl.Compile(module.IR, glsl.Options{
+		LangVersion:         version,
+		DrawParameters:      drawParameters,
+		EntryPoint:          &backend.EntryPointSelector{Stage: stage, Name: entryPoint},
+		BindingMap:          bindingMap,
+		BoundsCheckPolicies: glslBoundsCheckPolicies(version),
+		ForcePointSize:      true,
+		// Coordinate space (naga's zero value, Rust's ADJUST_COORDINATE_SPACE):
+		// naga appends gl_Position.yz = vec2(-gl_Position.y, gl_Position.z * 2.0 - gl_Position.w)
 		// at the end of vertex shaders. This flips Y and remaps Z from [0,1] to [-1,1].
 		// The scene renders upside-down inside the Surface's swapchain offscreen FBO
 		// (hal/gles/surface.go). Queue.Present performs an explicit Y-flipping
@@ -86,7 +90,6 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 		// the flip, gl_FragCoord.y=0 is at the top (WebGPU convention), not bottom
 		// (GL convention). Without it, rrect_clip_coverage() in fragment shaders
 		// gets wrong Y values (BUG-GLES-SCROLLBAR-001).
-		WriterFlags: glsl.WriterFlagAdjustCoordinateSpace | glsl.WriterFlagForcePointSize,
 	})
 	if err != nil {
 		return "", glsl.TranslationInfo{}, fmt.Errorf("gles: GLSL compile error for entry point %q: %w", entryPoint, shaderir.BackendError(err))
@@ -107,6 +110,25 @@ func compileWGSLToGLSL(version glsl.Version, sm *ShaderModule, stage ir.ShaderSt
 	return glslCode, translationInfo, nil
 }
 
+// glslBoundsCheckPolicies returns the bounds-check policies for a GLSL target,
+// as Rust wgpu-hal gles/device.rs:402-417 chooses them. Image loads are
+// checked (ReadZeroSkipWrite) only on desktop GL 4.3+, where textureQueryLevels
+// is core; GLSL ES has no way to query levels and samples, and naga refuses a
+// checked image load there. Index, buffer and binding-array checks are
+// Unchecked, as in Rust.
+func glslBoundsCheckPolicies(version glsl.Version) backend.BoundsCheckPolicies {
+	imageLoad := backend.BoundsCheckUnchecked
+	if !version.ES && (version.Major > 4 || version.Major == 4 && version.Minor >= 30) {
+		imageLoad = backend.BoundsCheckReadZeroSkipWrite
+	}
+	return backend.BoundsCheckPolicies{
+		Index:        backend.BoundsCheckUnchecked,
+		Buffer:       backend.BoundsCheckUnchecked,
+		ImageLoad:    imageLoad,
+		BindingArray: backend.BoundsCheckUnchecked,
+	}
+}
+
 // assignBindingsAfterLink assigns uniform block and sampler bindings at runtime
 // after glLinkProgram on GL < 4.2 where layout(binding=N) is unavailable.
 //
@@ -124,7 +146,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 	// Assign uniform/storage buffer block bindings by name.
 	for _, info := range translationInfos {
 		for _, u := range info.Uniforms {
-			key := glsl.BindingMapKey{Group: u.Binding.Group, Binding: u.Binding.Binding}
+			key := ir.ResourceBinding{Group: u.Binding.Group, Binding: u.Binding.Binding}
 			slot, ok := layout.bindingMap[key]
 			if !ok {
 				continue
@@ -155,7 +177,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 
 		// Assign texture/image sampler bindings by combined variable name.
 		for name, tm := range info.TextureMappings {
-			key := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+			key := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
 			slot, ok := layout.bindingMap[key]
 			if !ok {
 				continue
@@ -187,7 +209,7 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 // Returns:
 //   - bindingMap: maps (group, binding) to GL slot for naga GLSL writer
 //   - groupInfos: per-group BindingToSlot tables for runtime SetBindGroup
-func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8, []BindGroupLayoutInfo) {
+func computeBindingMap(layouts []*BindGroupLayout) (map[ir.ResourceBinding]uint8, []BindGroupLayoutInfo) {
 	var (
 		numSamplers       uint8
 		numTextures       uint8
@@ -196,7 +218,7 @@ func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8
 		numStorageBuffers uint8
 	)
 
-	bindingMap := make(map[glsl.BindingMapKey]uint8)
+	bindingMap := make(map[ir.ResourceBinding]uint8)
 	groupInfos := make([]BindGroupLayoutInfo, len(layouts))
 
 	for groupIdx, bgl := range layouts {
@@ -237,7 +259,7 @@ func computeBindingMap(layouts []*BindGroupLayout) (map[glsl.BindingMapKey]uint8
 
 			slot := *counter
 			bindingToSlot[entry.Binding] = slot
-			bindingMap[glsl.BindingMapKey{
+			bindingMap[ir.ResourceBinding{
 				Group:   uint32(groupIdx),
 				Binding: entry.Binding,
 			}] = slot

@@ -57,8 +57,10 @@ func (d *Device) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, err
 		return nil, fmt.Errorf("vulkan: vkCreateQueryPool failed: %d", result)
 	}
 
-	// Reset the query pool so it can be used immediately.
-	d.cmds.ResetQueryPool(d.handle, pool, 0, desc.Count)
+	// No host reset here: vkResetQueryPool needs the hostQueryReset feature
+	// (VUID-vkResetQueryPool-None-02665). Queries are reset in the command
+	// buffer before they are written, as Rust wgpu-hal does
+	// (CommandEncoder.beginPassTimestamps).
 
 	qs := &QuerySet{
 		pool:      pool,

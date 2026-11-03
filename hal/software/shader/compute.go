@@ -49,10 +49,7 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 	interp.callDepth = 0
 	interp.returnValue = Value{}
 
-	// Seed constants.
-	for id, val := range m.Constants {
-		interp.values[id] = val
-	}
+	interp.seedConstants()
 
 	// Initialize compute built-in inputs.
 	interp.initComputeBuiltins()
@@ -62,6 +59,9 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 
 	// Initialize workgroup shared memory variables.
 	interp.initWorkgroupVariables()
+
+	// Private globals start from their initializer or zero.
+	interp.initPrivateVariables()
 
 	// Execute.
 	if err := interp.run(); err != nil {
@@ -144,17 +144,14 @@ func (interp *interpreter) initWorkgroupVariables() {
 		return
 	}
 
-	for varID, vi := range m.Variables {
-		if vi.StorageClass != StorageClassWorkgroup {
-			continue
-		}
-
+	for _, varID := range m.prepared().workgroup {
+		vi := m.Variables[varID]
 		if ctx.WorkgroupSharedMemory != nil {
 			if sharedBuf, ok := ctx.WorkgroupSharedMemory[varID]; ok {
 				// Read the shared memory into a structured value.
 				pointeeType := m.PointeeType(vi.TypeID)
 				if pointeeType != nil {
-					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType)
+					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType, 0)
 					interp.values[varID] = ValPointer(interp.allocPointer(val))
 					continue
 				}
@@ -186,6 +183,11 @@ func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 
 	ctx.NumWorkgroups = [3]uint32{groupCountX, groupCountY, groupCountZ}
 	ctx.WorkgroupSize = wgSize
+	// Every invocation copies ctx; created here, the resource cache is shared
+	// by all of them instead of being rebuilt per copy.
+	if ctx.resolved == nil {
+		ctx.resolved = &resolvedResources{}
+	}
 
 	for wgZ := uint32(0); wgZ < groupCountZ; wgZ++ {
 		for wgY := uint32(0); wgY < groupCountY; wgY++ {
@@ -226,10 +228,8 @@ func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 // for all Workgroup storage class variables.
 func (m *Module) allocateWorkgroupMemory() map[uint32][]byte {
 	shared := make(map[uint32][]byte)
-	for varID, vi := range m.Variables {
-		if vi.StorageClass != StorageClassWorkgroup {
-			continue
-		}
+	for _, varID := range m.prepared().workgroup {
+		vi := m.Variables[varID]
 		pointeeType := m.PointeeType(vi.TypeID)
 		if pointeeType == nil {
 			continue
@@ -264,30 +264,34 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 	// scope and semantics are inst.Operands[1] and [2] -- ignored in single-threaded.
 
 	pv := interp.values[ptrID]
-	if pv.Tag != TagPointer {
-		return ValUint(0)
-	}
-	ptr := pv.AsPointer()
 
 	atomicMu.Lock()
 	defer atomicMu.Unlock()
 
-	oldVal := toUint32(ptr.Val)
+	// The pointer is a storage buffer word (BufferPointer), a workgroup or
+	// function variable (Pointer) or a member of one (SubPointer); the result
+	// is written back through the same pointer so storage buffer atomics land
+	// in the buffer.
+	oldVal, ok := atomicLoad(pv)
+	if !ok {
+		return ValUint(0)
+	}
+	store := func(v Value) { interp.storeThrough(pv, v) }
 
 	switch inst.Opcode {
 	case OpAtomicIAdd:
 		if len(inst.Operands) >= 4 {
 			addVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Val = ValUint(oldVal + addVal)
+			store(ValUint(oldVal + addVal))
 		}
 	case OpAtomicISub:
 		if len(inst.Operands) >= 4 {
 			subVal := toUint32(interp.values[inst.Operands[3]])
-			ptr.Val = ValUint(oldVal - subVal)
+			store(ValUint(oldVal - subVal))
 		}
 	case OpAtomicExchange:
 		if len(inst.Operands) >= 4 {
-			ptr.Val = interp.values[inst.Operands[3]]
+			store(interp.values[inst.Operands[3]])
 		}
 	case OpAtomicCompareExchange:
 		// Operands: pointer, scope, equal_sem, unequal_sem, value, comparator
@@ -295,7 +299,7 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			newVal := toUint32(interp.values[inst.Operands[4]])
 			comparator := toUint32(interp.values[inst.Operands[5]])
 			if oldVal == comparator {
-				ptr.Val = ValUint(newVal)
+				store(ValUint(newVal))
 			}
 		}
 	case OpAtomicSMin:
@@ -303,14 +307,14 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v < old {
-				ptr.Val = ValUint(uint32(v))
+				store(ValUint(uint32(v)))
 			}
 		}
 	case OpAtomicUMin:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v < oldVal {
-				ptr.Val = ValUint(v)
+				store(ValUint(v))
 			}
 		}
 	case OpAtomicSMax:
@@ -318,31 +322,52 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v > old {
-				ptr.Val = ValUint(uint32(v))
+				store(ValUint(uint32(v)))
 			}
 		}
 	case OpAtomicUMax:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v > oldVal {
-				ptr.Val = ValUint(v)
+				store(ValUint(v))
 			}
 		}
 	case OpAtomicIIncrement:
-		ptr.Val = ValUint(oldVal + 1)
+		store(ValUint(oldVal + 1))
 	case OpAtomicIDecrement:
-		ptr.Val = ValUint(oldVal - 1)
+		store(ValUint(oldVal - 1))
 	case OpAtomicLoad:
 		// Load is just a read -- no modification.
 	case OpAtomicStore:
 		// Store is special: no return value.
 		if len(inst.Operands) >= 4 {
-			ptr.Val = interp.values[inst.Operands[3]]
+			store(interp.values[inst.Operands[3]])
 		}
 		return Value{}
 	}
 
 	return ValUint(oldVal)
+}
+
+// atomicLoad reads the 32-bit integer an atomic op's pointer points at. An
+// atomic is always a 4-byte i32 or u32, so a storage buffer word is read
+// directly. ok is false for a value that is not a pointer.
+func atomicLoad(pv Value) (uint32, bool) {
+	switch pv.Tag {
+	case TagPointer:
+		if p := pv.AsPointer(); p != nil {
+			return toUint32(p.Val), true
+		}
+	case TagSubPointer:
+		if sp := pv.AsSubPointer(); sp != nil {
+			return toUint32(subPointerLoad(sp)), true
+		}
+	case TagBufferPointer:
+		if bp := pv.AsBufferPointer(); bp != nil && uint64(bp.Offset)+4 <= uint64(len(bp.Buffer)) {
+			return binary.LittleEndian.Uint32(bp.Buffer[bp.Offset:]), true
+		}
+	}
+	return 0, false
 }
 
 // writeStorageBufferBack writes modified storage buffer values back to the
@@ -355,7 +380,8 @@ func (interp *interpreter) writeStorageBufferBack() {
 		return
 	}
 
-	for varID, vi := range m.Variables {
+	for _, varID := range m.prepared().resources {
+		vi := m.Variables[varID]
 		if vi.StorageClass != StorageClassStorageBuffer {
 			continue
 		}
@@ -369,7 +395,7 @@ func (interp *interpreter) writeStorageBufferBack() {
 		}
 		v := interp.values[varID]
 		if v.Tag == TagPointer {
-			writeValueToBuffer(bufData, 0, v.AsPointer().Val)
+			interp.writeValueToBufferTyped(bufData, 0, v.AsPointer().Val, m.PointeeType(vi.TypeID), 0)
 		}
 	}
 }

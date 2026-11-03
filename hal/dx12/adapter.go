@@ -260,6 +260,10 @@ func (a *Adapter) Features() gputypes.Features {
 	// performance hint; the public MultiDraw APIs do not gate on it.
 	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
 
+	// Every D3D12 device has timestamp query heaps; Rust wgpu-hal offers
+	// timestamps unconditionally (dx12/adapter.rs).
+	features |= gputypes.Features(gputypes.FeatureTimestampQuery)
+
 	// Map D3D12 capabilities to WebGPU features
 	// Feature level 11.0+ guarantees basic compute and texture compression
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
@@ -281,7 +285,7 @@ func (a *Adapter) Features() gputypes.Features {
 		features |= gputypes.Features(gputypes.FeatureShaderF16)
 	}
 
-	return features
+	return features | shaderCapabilityFeatures(dxilEnabled())
 }
 
 // envDX12DXIL selects the shader compiler: "1" compiles naga IR to DXIL for
@@ -317,7 +321,7 @@ func (a *Adapter) limits() gputypes.Limits {
 	limits.MaxTextureDimension3D = a.capabilities.MaxTexture3D
 
 	// D3D12 specific limits
-	limits.MaxBindGroups = 4 // D3D12 has 4 root signature slots for descriptor tables
+	limits.MaxBindGroups = maxBindGroups
 	limits.MaxSampledTexturesPerShaderStage = 128
 	limits.MaxSamplersPerShaderStage = 16
 	limits.MaxStorageBuffersPerShaderStage = 64
@@ -363,7 +367,7 @@ func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.
 	}
 
 	// Create device using the adapter
-	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel)
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel, a.capabilities.ShaderModel)
 	if err != nil {
 		return hal.OpenDevice{}, err
 	}
@@ -631,13 +635,14 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 func (a *AdapterLegacy) Features() gputypes.Features {
 	var features gputypes.Features
 	features |= gputypes.Features(gputypes.FeatureMultiDrawIndirect)
+	features |= gputypes.Features(gputypes.FeatureTimestampQuery)
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_11_0 {
 		features |= gputypes.Features(gputypes.FeatureTextureCompressionBC)
 	}
 	if a.capabilities.FeatureLevel >= d3d12.D3D_FEATURE_LEVEL_12_0 {
 		features |= gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	}
-	return features
+	return features | shaderCapabilityFeatures(dxilEnabled())
 }
 
 // Capabilities returns detailed adapter capabilities.
@@ -676,7 +681,7 @@ func (a *AdapterLegacy) Open(features gputypes.Features, limits gputypes.Limits)
 	}
 
 	// Create device using the legacy adapter
-	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel)
+	device, err := newDevice(a.instance, unsafe.Pointer(a.raw), &a.desc, a.capabilities.FeatureLevel, a.capabilities.ShaderModel)
 	if err != nil {
 		return hal.OpenDevice{}, err
 	}

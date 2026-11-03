@@ -21,11 +21,17 @@ package shader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/gogpu/gputypes"
 )
+
+// ErrDiscarded is returned by Execute, ExecuteWithContext and ExecuteWithDebug
+// when a fragment invocation executed OpKill or OpTerminateInvocation (WGSL
+// discard). The caller must write no color, depth or stencil for the fragment.
+var ErrDiscarded = errors.New("spirv: fragment invocation discarded")
 
 // Execute runs the named entry point with the given input variable values.
 //
@@ -82,10 +88,7 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 	interp.callDepth = 0
 	interp.returnValue = Value{}
 
-	// Seed constants into the value slice.
-	for id, val := range m.Constants {
-		interp.values[id] = val
-	}
+	interp.seedConstants()
 
 	// Initialize interface variables (inputs/outputs) and resource bindings.
 	inputs := ctx.Inputs
@@ -118,6 +121,13 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 	m.putInterpreter(interp)
 
 	return outputs, nil
+}
+
+// fRem is SPIR-V OpFRem (WGSL f32 %): a - b*trunc(a/b), with the sign of a.
+// math.Remainder rounds the quotient to nearest instead, which gives
+// -7.5 % 2 = 0.5 rather than -1.5.
+func fRem(a, b float32) float32 {
+	return float32(math.Mod(float64(a), float64(b)))
 }
 
 // maxIterations is the safety limit for loop iterations to prevent infinite loops.
@@ -228,63 +238,80 @@ func (interp *interpreter) initVariables(inputs map[uint32]Value) {
 			interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
 		}
 	}
+	interp.initPrivateVariables()
 }
 
-// initResourceVariables sets up Uniform/StorageBuffer/UniformConstant variables
-// by reading data from bound buffers in the execution context.
-func (interp *interpreter) initResourceVariables() {
+// initPrivateVariables sets up every Private global from its initializer or
+// zero (WGSL zero-initializes a var<private> without one), so each
+// invocation starts from that value. An entry point's interface lists
+// Private variables only from SPIR-V 1.4, so all of them are set up.
+func (interp *interpreter) initPrivateVariables() {
 	m := interp.module
-	ctx := interp.ctx
-	if ctx == nil {
+	for _, varID := range m.prepared().private {
+		vi := m.Variables[varID]
+		interp.values[varID] = ValPointer(interp.allocPointer(interp.initialValue(vi.TypeID, vi.Initializer)))
+	}
+}
+
+// seedConstants puts the module's constants into the value slice.
+func (interp *interpreter) seedConstants() {
+	prep := interp.module.prepared()
+	for i, id := range prep.constIDs {
+		interp.values[id] = prep.constVals[i]
+	}
+}
+
+// initialValue returns the starting value of a variable of pointer type
+// ptrTypeID: a copy of its initializer constant, or zero without one.
+func (interp *interpreter) initialValue(ptrTypeID, initializer uint32) Value {
+	if initializer != 0 {
+		if c, ok := interp.module.Constants[initializer]; ok {
+			return cloneValue(c)
+		}
+	}
+	return zeroValueForVar(interp.module, ptrTypeID)
+}
+
+// cloneValue copies v deeply enough that stores through a pointer to the
+// copy never reach the original (array elements are copied).
+func cloneValue(v Value) Value {
+	if v.Tag != TagArray {
+		return v
+	}
+	src := v.AsArray()
+	dst := make([]Value, len(src))
+	for i, e := range src {
+		dst[i] = cloneValue(e)
+	}
+	return ValArray(dst)
+}
+
+// initResourceVariables sets up Uniform/StorageBuffer/PushConstant and
+// UniformConstant variables from the context's bindings. Their values are
+// resolved once per context and module (resourceValues); each invocation
+// only points its variables at them.
+func (interp *interpreter) initResourceVariables() {
+	if interp.ctx == nil {
 		return
 	}
-
-	for varID, vi := range m.Variables {
-		switch vi.StorageClass {
-		case StorageClassUniform, StorageClassStorageBuffer, StorageClassPushConstant:
-			bk, hasBind := m.GetBinding(varID)
-			if !hasBind {
-				continue
-			}
-			var bufData []byte
-			if ctx.Buffers != nil {
-				bufData = ctx.Buffers[bk]
-			}
-			if bufData == nil {
-				// No buffer bound -- initialize as zero.
-				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
-				continue
-			}
-			pointeeType := m.PointeeType(vi.TypeID)
-			if pointeeType == nil {
-				interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
-				continue
-			}
-			if vi.StorageClass == StorageClassStorageBuffer {
-				// Storage buffers use BufferPointer for direct read/write to raw bytes.
-				// This ensures OpStore writes are immediately reflected in the buffer.
-				interp.values[varID] = ValBufferPointer(&BufferPointer{Buffer: bufData, Offset: 0, Type: pointeeType})
-			} else {
-				// Uniform and push constant buffers are read-only -- deserialize once.
-				val := interp.readValueFromBuffer(bufData, 0, pointeeType)
-				interp.values[varID] = ValPointer(interp.allocPointer(val))
-			}
-
-		case StorageClassUniformConstant:
-			// UniformConstant is used for textures/samplers -- handled separately.
-			bk, hasBind := m.GetBinding(varID)
-			if !hasBind {
-				continue
-			}
-			// Store the binding key as the value so OpLoad can resolve texture/sampler.
-			interp.values[varID] = ValPointer(interp.allocPointer(ValBindingKey(bk)))
+	prep := interp.module.prepared()
+	vals := interp.resourceValues(prep)
+	for i, varID := range prep.resources {
+		switch v := vals[i]; v.Tag {
+		case TagNone:
+			// No binding: the variable keeps its zero value.
+		case TagBufferPointer:
+			interp.values[varID] = v
+		default:
+			interp.values[varID] = ValPointer(interp.allocPointer(v))
 		}
 	}
 }
 
 // readValueFromBuffer deserializes a SPIR-V typed value from raw buffer bytes.
-// offset is the starting byte offset into data.
-func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *TypeInfo) Value {
+// offset is the starting byte offset into data. matStride is the column
+// stride of the matrices in ti (BufferPointer.MatrixStride), 0 if unknown.
+func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *TypeInfo, matStride uint32) Value {
 	m := interp.module
 	switch ti.Kind {
 	case TypeFloat:
@@ -327,21 +354,21 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		case 2:
 			var v [2]float32
 			for i := uint32(0); i < 2; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec2(v[0], v[1])
 		case 3:
 			var v [3]float32
 			for i := uint32(0); i < 3; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec3(v[0], v[1], v[2])
 		case 4:
 			var v [4]float32
 			for i := uint32(0); i < 4; i++ {
-				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+				f := interp.readValueFromBuffer(data, offset+i*elemSize, elemType, 0)
 				v[i] = toFloat32(f)
 			}
 			return ValVec4(v[0], v[1], v[2], v[3])
@@ -349,24 +376,15 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		return ValUint(0)
 
 	case TypeMatrix:
-		// Matrix is stored as an array of column vectors in the buffer.
-		// mat4x4<f32> = 4 columns of vec4<f32>, each 16 bytes.
+		// Matrix is stored as an array of column vectors, matStride apart.
 		colType := m.Types[ti.ElemType]
 		if colType == nil || ti.Components == 0 {
 			return ValArray(nil)
 		}
-		colSize := typeByteSize(m, colType)
-		// Check for MatrixStride decoration which overrides computed stride.
-		matrixTypeID := interp.findTypeID(ti)
-		if matrixTypeID != 0 {
-			strideKey := decorationKey{TargetID: matrixTypeID, Decoration: DecorationMatrixStride}
-			if stride, ok := m.Decorations[strideKey]; ok && stride > 0 {
-				colSize = stride
-			}
-		}
+		colStride := matrixColumnStride(m, ti, matStride)
 		cols := make([]Value, ti.Components)
 		for i := uint32(0); i < ti.Components; i++ {
-			cols[i] = interp.readValueFromBuffer(data, offset+i*colSize, colType)
+			cols[i] = interp.readValueFromBuffer(data, offset+i*colStride, colType, 0)
 		}
 		return ValArray(cols)
 
@@ -375,18 +393,17 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 		if elemType == nil || ti.Length == 0 {
 			return ValArray(nil)
 		}
-		// Use ArrayStride decoration if available, otherwise compute.
-		elemSize := typeByteSize(m, elemType)
+		stride := arrayStride(m, ti)
 		arr := make([]Value, ti.Length)
 		for i := uint32(0); i < ti.Length; i++ {
-			arr[i] = interp.readValueFromBuffer(data, offset+i*elemSize, elemType)
+			arr[i] = interp.readValueFromBuffer(data, offset+i*stride, elemType, matStride)
 		}
 		return ValArray(arr)
 
 	case TypeStruct:
 		members := make([]Value, len(ti.MemberIDs))
 		// For each struct member, look up its type and use MemberDecorate Offset.
-		structTypeID := interp.findTypeID(ti)
+		structTypeID := m.typeID(ti)
 		for i, memberTypeID := range ti.MemberIDs {
 			memberType := m.Types[memberTypeID]
 			if memberType == nil {
@@ -394,7 +411,8 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 				continue
 			}
 			memberOffset := m.GetMemberOffset(structTypeID, uint32(i))
-			members[i] = interp.readValueFromBuffer(data, offset+memberOffset, memberType)
+			members[i] = interp.readValueFromBuffer(data, offset+memberOffset, memberType,
+				m.memberMatrixStride(structTypeID, uint32(i)))
 		}
 		return ValArray(members)
 
@@ -403,15 +421,106 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 	}
 }
 
-// findTypeID returns the type ID for a given TypeInfo by scanning the type map.
-// This is needed for MemberDecorate lookups which key on the type ID.
-func (interp *interpreter) findTypeID(target *TypeInfo) uint32 {
-	for id, ti := range interp.module.Types {
-		if ti == target {
-			return id
+// writeValueToBufferTyped serializes val as a value of SPIR-V type ti at
+// offset, the inverse of readValueFromBuffer: vector components packed,
+// matrix columns matStride apart, array elements ArrayStride apart, struct
+// members at their Offset. A store never touches the padding between them.
+// Without a type, or with a value that does not match it, it falls back to
+// the untyped writeValueToBuffer.
+func (interp *interpreter) writeValueToBufferTyped(data []byte, offset uint32, val Value, ti *TypeInfo, matStride uint32) {
+	m := interp.module
+	if ti == nil {
+		writeValueToBuffer(data, offset, val)
+		return
+	}
+	switch ti.Kind {
+	case TypeVector:
+		elemType := m.Types[ti.ElemType]
+		if elemType == nil {
+			writeValueToBuffer(data, offset, val)
+			return
+		}
+		elemSize := typeByteSize(m, elemType)
+		for i := uint32(0); i < ti.Components; i++ {
+			interp.writeValueToBufferTyped(data, offset+i*elemSize, indexComposite(val, i), elemType, 0)
+		}
+
+	case TypeMatrix, TypeArray, TypeStruct:
+		if val.Tag != TagArray {
+			writeValueToBuffer(data, offset, val)
+			return
+		}
+		interp.writeCompositeToBuffer(data, offset, val.AsArray(), ti, matStride)
+
+	default:
+		writeScalarToBuffer(data, offset, val, ti)
+	}
+}
+
+// writeCompositeToBuffer writes the elements of a matrix, array or struct
+// value of type ti (see writeValueToBufferTyped).
+func (interp *interpreter) writeCompositeToBuffer(data []byte, offset uint32, elems []Value, ti *TypeInfo, matStride uint32) {
+	m := interp.module
+	switch ti.Kind {
+	case TypeMatrix:
+		colType := m.Types[ti.ElemType]
+		stride := matrixColumnStride(m, ti, matStride)
+		for i := uint32(0); i < ti.Components && int(i) < len(elems); i++ {
+			interp.writeValueToBufferTyped(data, offset+i*stride, elems[i], colType, 0)
+		}
+
+	case TypeArray:
+		elemType := m.Types[ti.ElemType]
+		stride := arrayStride(m, ti)
+		for i, elem := range elems {
+			if ti.Length != 0 && uint32(i) >= ti.Length {
+				break
+			}
+			interp.writeValueToBufferTyped(data, offset+uint32(i)*stride, elem, elemType, matStride)
+		}
+
+	case TypeStruct:
+		structTypeID := m.typeID(ti)
+		for i, memberTypeID := range ti.MemberIDs {
+			if i >= len(elems) {
+				break
+			}
+			member := uint32(i)
+			interp.writeValueToBufferTyped(data, offset+m.GetMemberOffset(structTypeID, member), elems[i],
+				m.Types[memberTypeID], m.memberMatrixStride(structTypeID, member))
 		}
 	}
-	return 0
+}
+
+// arrayStride returns the byte distance between the elements of the array
+// type ti: its ArrayStride decoration, which SPIR-V requires on every array
+// in Uniform, StorageBuffer and PushConstant memory and which can exceed the
+// element size (array<vec3<f32>>: 16, not 12). An undecorated array (one in
+// Workgroup memory) is packed at the element size.
+func arrayStride(m *Module, ti *TypeInfo) uint32 {
+	if ti.ArrayStride != 0 {
+		return ti.ArrayStride
+	}
+	elemType := m.Types[ti.ElemType]
+	if elemType == nil {
+		return 0
+	}
+	return typeByteSize(m, elemType)
+}
+
+// matrixColumnStride returns the byte distance between the columns of the
+// matrix type ti: matStride, the MatrixStride decoration of the struct
+// member holding it, when known (mat3x3<f32>: 16, not 12); otherwise the
+// column size.
+func matrixColumnStride(m *Module, ti *TypeInfo, matStride uint32) uint32 {
+	if matStride != 0 {
+		return matStride
+	}
+	colType := m.Types[ti.ElemType]
+	if colType == nil {
+		return 0
+	}
+	return typeByteSize(m, colType)
 }
 
 // typeByteSize returns the byte size of a SPIR-V type for buffer reads.
@@ -437,21 +546,11 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 		}
 		return typeByteSize(m, colType) * ti.Components
 	case TypeArray:
-		elemType := m.Types[ti.ElemType]
-		if elemType == nil {
-			return 0
-		}
-		return typeByteSize(m, elemType) * ti.Length
+		return arrayStride(m, ti) * ti.Length
 	case TypeStruct:
 		// Compute struct size from the highest (offset + size) across all members.
 		// Look up the struct type ID for MemberDecorate offset decorations.
-		structTypeID := uint32(0)
-		for id, t := range m.Types {
-			if t == ti {
-				structTypeID = id
-				break
-			}
-		}
+		structTypeID := m.typeID(ti)
 
 		var maxEnd uint32
 		for i, memberTypeID := range ti.MemberIDs {
@@ -569,7 +668,11 @@ func (interp *interpreter) run() error {
 			}
 			storageClass := inst.Operands[0]
 			if storageClass == StorageClassFunction {
-				val := zeroValueForVar(interp.module, inst.TypeID)
+				var initializer uint32
+				if len(inst.Operands) > 1 {
+					initializer = inst.Operands[1]
+				}
+				val := interp.initialValue(inst.TypeID, initializer)
 				interp.values[inst.ResultID] = ValPointer(interp.allocPointer(val))
 			}
 
@@ -590,7 +693,7 @@ func (interp *interpreter) run() error {
 				// Read directly from the raw buffer.
 				bp := pv.AsBufferPointer()
 				if bp.Type != nil {
-					interp.values[inst.ResultID] = interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type)
+					interp.values[inst.ResultID] = interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type, bp.MatrixStride)
 				} else {
 					interp.values[inst.ResultID] = ValUint(0)
 				}
@@ -614,8 +717,9 @@ func (interp *interpreter) run() error {
 				// Write through parent pointer, updating the composite at each level.
 				subPointerStore(pv.AsSubPointer(), interp.values[valID])
 			case TagBufferPointer:
-				// Write directly to the raw buffer.
-				writeValueToBuffer(pv.AsBufferPointer().Buffer, pv.AsBufferPointer().Offset, interp.values[valID])
+				// Write directly to the raw buffer, laid out by the pointee type.
+				bp := pv.AsBufferPointer()
+				interp.writeValueToBufferTyped(bp.Buffer, bp.Offset, interp.values[valID], bp.Type, bp.MatrixStride)
 			}
 
 		case OpAccessChain:
@@ -645,26 +749,30 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertToFloat(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertToFloat)
 
 		case OpConvertSToF:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertSignedToFloat(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertSignedToFloat)
 
 		case OpConvertFToU:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = convertFloatToUint(interp.values[inst.Operands[0]])
+			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToUint)
 
 		case OpBitcast:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			// For now, bitcast just copies the value (works for same-width types).
-			interp.values[inst.ResultID] = interp.values[inst.Operands[0]]
+			src := inst.Operands[0]
+			var srcType uint32
+			if interp.module != nil {
+				srcType = interp.module.ResultTypes[src]
+			}
+			interp.values[inst.ResultID] = interp.bitcast(interp.values[src], srcType, inst.TypeID)
 
 		case OpFAdd:
 			if len(inst.Operands) >= 2 {
@@ -882,9 +990,10 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = result
 			}
 
-		case OpKill:
-			// Fragment shader discard -- stop execution with no error.
-			return nil
+		case OpKill, OpTerminateInvocation:
+			// Fragment discard ends the whole invocation, not only the current
+			// function, and the fragment must write nothing (P1-SW-016).
+			return ErrDiscarded
 
 		case OpUnreachable:
 			// Should never be reached in valid SPIR-V.
@@ -1019,13 +1128,7 @@ func (interp *interpreter) run() error {
 		case OpFRem:
 			if len(inst.Operands) >= 2 {
 				interp.values[inst.ResultID] = floatBinOp(
-					interp.values[inst.Operands[0]], interp.values[inst.Operands[1]],
-					func(a, b float32) float32 {
-						if b == 0 {
-							return 0
-						}
-						return float32(math.Remainder(float64(a), float64(b)))
-					})
+					interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], fRem)
 			}
 
 		case OpSNegate:
@@ -1036,8 +1139,7 @@ func (interp *interpreter) run() error {
 
 		case OpConvertFToS:
 			if len(inst.Operands) >= 1 {
-				f := toFloat32(interp.values[inst.Operands[0]])
-				interp.values[inst.ResultID] = ValInt(int32(f))
+				interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToSigned)
 			}
 
 		case OpSConvert, OpUConvert, OpFConvert:
@@ -1226,14 +1328,111 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.fetchTexel(imgVal, coord)
 			}
 
+		case OpLogicalEqual, OpLogicalNotEqual:
+			if len(inst.Operands) >= 2 {
+				eq := toBool(interp.values[inst.Operands[0]]) == toBool(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(eq == (inst.Opcode == OpLogicalEqual))
+			}
+
+		case OpFOrdNotEqual, OpFUnordNotEqual:
+			if len(inst.Operands) >= 2 {
+				a := toFloat32(interp.values[inst.Operands[0]])
+				b := toFloat32(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = ValBool(floatNotEqual(a, b, inst.Opcode == OpFOrdNotEqual))
+			}
+
+		case OpBitCount, OpBitReverse:
+			// OpBitCount / OpBitReverse: type resultID base
+			if len(inst.Operands) >= 1 {
+				f := bitCount
+				if inst.Opcode == OpBitReverse {
+					f = bitReverse
+				}
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID), f)
+			}
+
+		case OpBitFieldInsert:
+			// OpBitFieldInsert: type resultID base insert offset count
+			if len(inst.Operands) >= 4 {
+				insert := toUint32(interp.values[inst.Operands[1]])
+				offset := toUint32(interp.values[inst.Operands[2]])
+				count := toUint32(interp.values[inst.Operands[3]])
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
+					func(base uint32) uint32 { return bitFieldInsert(base, insert, offset, count) })
+			}
+
+		case OpBitFieldSExtract, OpBitFieldUExtract:
+			// OpBitField[SU]Extract: type resultID base offset count
+			if len(inst.Operands) >= 3 {
+				offset := toUint32(interp.values[inst.Operands[1]])
+				count := toUint32(interp.values[inst.Operands[2]])
+				signed := inst.Opcode == OpBitFieldSExtract
+				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
+					func(base uint32) uint32 { return bitFieldExtract(base, offset, count, signed) })
+			}
+
+		case OpDPdx, OpDPdy, OpFwidth, OpDPdxFine, OpDPdyFine, OpFwidthFine,
+			OpDPdxCoarse, OpDPdyCoarse, OpFwidthCoarse:
+			// Derivatives need the 2x2 quad a fragment runs in on a GPU;
+			// see zeroDerivative.
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = zeroDerivative(interp.values[inst.Operands[0]])
+			}
+
+		case OpArrayLength:
+			// OpArrayLength: type resultID structPointer memberIndex
+			// The element count of a storage buffer's runtime array, which
+			// naga's Restrict bounds checks clamp indices with.
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = ValUint(interp.arrayLength(interp.values[inst.Operands[0]], inst.Operands[1]))
+			}
+
+		case OpImageRead:
+			// OpImageRead: type resultID image coordinate [ImageOperands...]
+			// A storage texture load (textureLoad of a read-only or
+			// read-write storage texture).
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = interp.readImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
+			}
+
+		case OpImageWrite:
+			// OpImageWrite: image coordinate texel [ImageOperands...]
+			// A storage texture store (textureStore); no result.
+			if len(inst.Operands) >= 3 {
+				interp.writeImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], interp.values[inst.Operands[2]])
+			}
+
 		case OpImageQuerySize:
 			// OpImageQuerySize: type resultID image
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]])
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], 0, inst.TypeID)
+			}
+
+		case OpImageQuerySizeLod:
+			// OpImageQuerySizeLod: type resultID image lod
+			if len(inst.Operands) >= 2 {
+				lod := scalarInt(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], lod, inst.TypeID)
+			}
+
+		case OpImageQueryLevels:
+			// OpImageQueryLevels: type resultID image
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = interp.intResult(inst.TypeID, interp.queryImageCount(interp.values[inst.Operands[0]], false))
+			}
+
+		case OpImageQuerySamples:
+			// OpImageQuerySamples: type resultID image
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = interp.intResult(inst.TypeID, interp.queryImageCount(interp.values[inst.Operands[0]], true))
 			}
 
 		default:
-			// Unknown opcodes are skipped. The triangle shader uses a small subset.
+			// Unimplemented instructions are skipped, and their result stays
+			// undefined. Making this an error (P1-SW-017) waits for exact
+			// integer vectors (P1-SW-013): OpAll and OpAny, the most common
+			// remaining ones, guard every naga loop, and evaluated on the
+			// current float-held integer vectors they break loops at once.
 		}
 
 		// --- Debug: post-instruction hooks ---
@@ -1382,12 +1581,42 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	return ValPointer(interp.allocPointer(current))
 }
 
+// arrayLength returns the element count of the runtime array that is member
+// member of the struct a storage buffer pointer points at: the bytes of the
+// binding past the member's offset, divided by the array stride and
+// truncated (WGSL NRuntime). 0 when the pointer is not a storage buffer
+// pointer to such a struct.
+func (interp *interpreter) arrayLength(ptr Value, member uint32) uint32 {
+	if ptr.Tag != TagBufferPointer {
+		return 0
+	}
+	bp := ptr.AsBufferPointer()
+	m := interp.module
+	st := bp.Type
+	if st == nil || st.Kind != TypeStruct || int(member) >= len(st.MemberIDs) {
+		return 0
+	}
+	arr := m.Types[st.MemberIDs[member]]
+	if arr == nil || arr.Kind != TypeArray {
+		return 0
+	}
+	stride := arrayStride(m, arr)
+	start := uint64(bp.Offset) + uint64(m.GetMemberOffset(m.typeID(st), member))
+	if stride == 0 || start >= uint64(len(bp.Buffer)) {
+		return 0
+	}
+	return uint32((uint64(len(bp.Buffer)) - start) / uint64(stride))
+}
+
 // bufferAccessChain computes a byte offset through a chain of indexes into
 // a raw buffer, returning a BufferPointer at the final element position.
 func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32) *BufferPointer {
 	m := interp.module
 	offset := bp.Offset
 	currentType := bp.Type
+	// The MatrixStride of a struct member applies to the matrices it holds,
+	// through any arrays, until a matrix is indexed.
+	matStride := bp.MatrixStride
 
 	for _, idxID := range indexes {
 		idx := toUint32(interp.values[idxID])
@@ -1399,9 +1628,10 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 		switch currentType.Kind {
 		case TypeStruct:
 			// For struct members, use the MemberDecorate Offset if available.
-			structTypeID := interp.findTypeID(currentType)
+			structTypeID := m.typeID(currentType)
 			memberOffset := m.GetMemberOffset(structTypeID, idx)
 			offset += memberOffset
+			matStride = m.memberMatrixStride(structTypeID, idx)
 			if int(idx) < len(currentType.MemberIDs) {
 				currentType = m.Types[currentType.MemberIDs[idx]]
 			} else {
@@ -1409,21 +1639,13 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 			}
 
 		case TypeArray:
-			elemType := m.Types[currentType.ElemType]
-			if elemType != nil {
-				elemSize := typeByteSize(m, elemType)
-				offset += idx * elemSize
-			}
+			offset += idx * arrayStride(m, currentType)
 			currentType = m.Types[currentType.ElemType]
 
 		case TypeMatrix:
 			// Indexing into a matrix selects a column vector.
-			// Each column is ElemType (e.g. vec4<f32> = 16 bytes).
-			colType := m.Types[currentType.ElemType]
-			if colType != nil {
-				colSize := typeByteSize(m, colType)
-				offset += idx * colSize
-			}
+			offset += idx * matrixColumnStride(m, currentType, matStride)
+			matStride = 0
 			currentType = m.Types[currentType.ElemType]
 
 		case TypeVector:
@@ -1443,7 +1665,7 @@ func (interp *interpreter) bufferAccessChain(bp *BufferPointer, indexes []uint32
 		}
 	}
 
-	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType}
+	return &BufferPointer{Buffer: bp.Buffer, Offset: offset, Type: currentType, MatrixStride: matStride}
 }
 
 // subPointerLoad reads the current value of a sub-element through the parent
@@ -1604,34 +1826,56 @@ func (interp *interpreter) compositeExtract(composite Value, indexes []uint32) V
 
 // matrixTimesVector multiplies a matrix (Array of column vectors) by a vector.
 // SPIR-V stores matrices in column-major order as arrays of column vectors.
+//
+// The matrix has C columns of R components and the vector C components; the
+// result has R components (matCxR * vecC = vecR). Every size from 2 to 4 is
+// handled: only 4-component vectors were multiplied before, so a mat2x2 or
+// mat3x2 product returned the vector unchanged.
 func matrixTimesVector(mat, vec Value) Value {
 	if mat.Tag != TagArray {
 		return vec
 	}
 	cols := mat.AsArray()
-	if vec.Tag != TagVec4 {
-		return vec
-	}
-	v := vec.F
 	numCols := len(cols)
-	if numCols < 2 {
+	if numCols < 2 || numCols > 4 || vectorSize(vec.Tag) < numCols {
 		return vec
 	}
-
-	// Extract columns as Vec4 (padding with zeros if needed).
-	colVecs := make([][4]float32, numCols)
-	for i, c := range cols {
-		colVecs[i] = Vec4ToFloat32(c)
+	rows := vectorSize(cols[0].Tag)
+	if rows < 2 {
+		return vec
 	}
 
 	// result = col[0]*v[0] + col[1]*v[1] + ...
 	var result [4]float32
-	for i := 0; i < numCols && i < 4; i++ {
-		for j := 0; j < 4; j++ {
-			result[j] += colVecs[i][j] * v[i]
+	for i, c := range cols {
+		col := Vec4ToFloat32(c)
+		for j := range rows {
+			result[j] += col[j] * vec.F[i]
 		}
 	}
-	return ValVec4(result[0], result[1], result[2], result[3])
+	switch rows {
+	case 2:
+		return ValVec2(result[0], result[1])
+	case 3:
+		return ValVec3(result[0], result[1], result[2])
+	default:
+		return ValVec4From(result)
+	}
+}
+
+// vectorSize returns the component count of a float vector tag, 0 for
+// anything else.
+func vectorSize(tag ValueTag) int {
+	switch tag {
+	case TagVec2:
+		return 2
+	case TagVec3:
+		return 3
+	case TagVec4:
+		return 4
+	default:
+		return 0
+	}
 }
 
 // matrixTimesScalar multiplies every element of a matrix by a scalar.
@@ -1840,17 +2084,7 @@ func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 		return ValVec4(0, 0, 0, 0)
 	}
 
-	var x, y int
-	switch coord.Tag {
-	case TagVec2:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	case TagVec3:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	case TagVec4:
-		x, y = int(coord.F[0]), int(coord.F[1])
-	default:
-		x = int(toUint32(coord))
-	}
+	x, y := imageCoord(coord)
 
 	// Clamp to texture bounds.
 	if x < 0 {
@@ -1869,13 +2103,181 @@ func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
 	return ValVec4From(readTexel(tex, x, y))
 }
 
-// queryImageSize returns the size of a texture as a vec2 of uint32 values.
-func (interp *interpreter) queryImageSize(imgVal Value) Value {
+// imageCoord returns the integer texel coordinate x, y of an image
+// instruction's coordinate operand. An integer vector is either a float
+// vector (OpCompositeConstruct) or an array of integer scalars (builtins
+// such as global_invocation_id, and shuffles of them).
+func imageCoord(coord Value) (x, y int) {
+	switch coord.Tag {
+	case TagVec2, TagVec3, TagVec4:
+		return int(coord.F[0]), int(coord.F[1])
+	case TagArray:
+		arr := coord.AsArray()
+		if len(arr) >= 1 {
+			x = scalarInt(arr[0])
+		}
+		if len(arr) >= 2 {
+			y = scalarInt(arr[1])
+		}
+		return x, y
+	default:
+		return scalarInt(coord), 0
+	}
+}
+
+// scalarInt converts an integer or float scalar to int; a signed integer
+// keeps its sign.
+func scalarInt(v Value) int {
+	switch v.Tag {
+	case TagFloat32:
+		return int(v.F[0])
+	case TagUint32:
+		return int(v.U[0])
+	default:
+		return int(int32(toUint32(v)))
+	}
+}
+
+// readImage loads a storage texture texel (OpImageRead), decoded from the
+// texture format. An out-of-bounds or undecodable texel reads zero.
+func (interp *interpreter) readImage(imgVal, coord Value) Value {
 	tex := interp.resolveTexture(imgVal)
 	if tex == nil {
-		return ValVec2(0, 0)
+		return ValVec4(0, 0, 0, 0)
 	}
-	return ValVec2(float32(tex.Width), float32(tex.Height))
+	x, y := imageCoord(coord)
+	v, ok := decodeTexel(tex, x, y)
+	if !ok {
+		return ValVec4(0, 0, 0, 0)
+	}
+	return ValVec4From(v)
+}
+
+// writeImage stores a texel into a storage texture (OpImageWrite), encoded
+// in the texture format. The texture's Data aliases its storage, so the write
+// is visible to later passes. Out-of-bounds writes are discarded.
+func (interp *interpreter) writeImage(imgVal, coord, texel Value) {
+	tex := interp.resolveTexture(imgVal)
+	if tex == nil {
+		return
+	}
+	x, y := imageCoord(coord)
+	encodeTexel(tex, x, y, texelComponents(texel))
+}
+
+// texelComponents returns the four components of a texel value (a float
+// vector, an array of scalars, or a scalar filling the first one).
+func texelComponents(v Value) Vec4 {
+	switch v.Tag {
+	case TagVec2, TagVec3, TagVec4:
+		return v.F
+	case TagArray:
+		var out Vec4
+		for i, e := range v.AsArray() {
+			if i < len(out) {
+				out[i] = scalarFloat(e)
+			}
+		}
+		return out
+	default:
+		return Vec4{scalarFloat(v), 0, 0, 0}
+	}
+}
+
+// scalarFloat converts a scalar to float32 by value; a signed integer keeps
+// its sign.
+func scalarFloat(v Value) float32 {
+	switch v.Tag {
+	case TagFloat32:
+		return v.F[0]
+	case TagUint32:
+		return float32(v.U[0])
+	case TagInt32:
+		return float32(int32(v.U[0]))
+	default:
+		return toFloat32(v)
+	}
+}
+
+// queryImageSize returns the size of a texture as a vec2 of uint32 values.
+//
+// It answers OpImageQuerySize (lod 0) and OpImageQuerySizeLod: the size of
+// mip level lod, each dimension at least 1, with the array layer count as
+// the last component when the result type has one more component than the
+// image has dimensions (2D arrays; a 3D image reads its depth from Layers
+// too, not reduced per mip level, since Texture2D does not record the image
+// dimension). The shape follows the result type: a scalar for 1D, a vector
+// otherwise (integer vectors hold float components); 2D without a module. A
+// missing texture reads zeros.
+func (interp *interpreter) queryImageSize(imgVal Value, lod int, typeID uint32) Value {
+	components := 2
+	if ti := interp.typeInfo(typeID); ti != nil {
+		components = 1
+		if ti.Kind == TypeVector {
+			components = int(ti.Components)
+		}
+	}
+	tex := interp.resolveTexture(imgVal)
+	var size [3]float32
+	if tex != nil {
+		size = [3]float32{mipSize(tex.Width, lod), mipSize(tex.Height, lod), float32(max(tex.Layers, 1))}
+	}
+	switch components {
+	case 1:
+		return interp.intResult(typeID, uint32(size[0]))
+	case 3:
+		return ValVec3(size[0], size[1], size[2])
+	default:
+		return ValVec2(size[0], size[1])
+	}
+}
+
+// mipSize is the extent of mip level lod of a dimension of extent base.
+func mipSize(base uint32, lod int) float32 {
+	if lod < 0 || lod > 31 {
+		return 1
+	}
+	return float32(max(base>>uint(lod), 1))
+}
+
+// queryImageCount answers OpImageQueryLevels (the mip level count) or, with
+// samples, OpImageQuerySamples (the sample count); 0 without a texture.
+func (interp *interpreter) queryImageCount(imgVal Value, samples bool) uint32 {
+	tex := interp.resolveTexture(imgVal)
+	if tex == nil {
+		return 0
+	}
+	if samples {
+		return max(tex.SampleCount, 1)
+	}
+	return max(tex.MipLevels, 1)
+}
+
+// intResult returns n as the integer scalar type typeID names: signed or
+// unsigned.
+func (interp *interpreter) intResult(typeID, n uint32) Value {
+	if ti := interp.typeInfo(typeID); ti != nil && ti.Kind == TypeInt && ti.Signed {
+		return ValInt(int32(n))
+	}
+	return ValUint(n)
+}
+
+// resultSigned reports whether the integer scalar or vector type typeID has
+// signed components.
+func (interp *interpreter) resultSigned(typeID uint32) bool {
+	ti := interp.typeInfo(typeID)
+	if ti != nil && ti.Kind == TypeVector {
+		ti = interp.typeInfo(ti.ElemType)
+	}
+	return ti != nil && ti.Kind == TypeInt && ti.Signed
+}
+
+// typeInfo returns the type typeID names, or nil.
+func (interp *interpreter) typeInfo(typeID uint32) *TypeInfo {
+	if interp.module == nil {
+		return nil
+	}
+	return interp.module.Types[typeID]
 }
 
 // applyWrapMode wraps a texture coordinate according to the specified mode.

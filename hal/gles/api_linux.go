@@ -7,6 +7,7 @@ package gles
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/gogpu/gputypes"
@@ -63,6 +64,14 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 		return &Instance{}, nil
 	}
 
+	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
+
+	// The context is current only while the GL functions load, on this
+	// pinned thread, and is released after: AdapterContext.Lock makes it
+	// current on whatever thread uses it next (Rust wgpu-hal src/gles/egl.rs
+	// pairs every make_current with an unmake_current).
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		hal.Logger().Warn("gles: instance context MakeCurrent failed", "err", err)
@@ -80,6 +89,11 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 		"version", glCtx.GetString(gl.VERSION),
 		"renderer", glCtx.GetString(gl.RENDERER))
 
+	if err := eglCtx.ReleaseCurrent(); err != nil {
+		eglCtx.Destroy()
+		hal.Logger().Warn("gles: instance context release failed", "err", err)
+		return &Instance{}, nil
+	}
 	return &Instance{ctx: NewAdapterContext(eglCtx, glCtx, true)}, nil
 }
 
@@ -164,6 +178,12 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 		return nil, fmt.Errorf("gles: failed to create EGL context (tried desktop GL and GLES 3.0): %w", err)
 	}
 
+	hal.Logger().Debug("gles: EGL context", "robustAccess", eglCtx.RobustAccess())
+
+	// Current only while the GL functions load, on this pinned thread, as
+	// in CreateInstance (Rust unbinds at the end of create_surface).
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := eglCtx.MakeCurrent(); err != nil {
 		eglCtx.Destroy()
 		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
@@ -179,6 +199,10 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 	renderer := glCtx.GetString(gl.RENDERER)
 	hal.Logger().Info("gles: surface created with AdapterContext",
 		"version", version, "renderer", renderer, "gles", config.GLES)
+	if err := eglCtx.ReleaseCurrent(); err != nil {
+		eglCtx.Destroy()
+		return nil, fmt.Errorf("gles: failed to release context: %w", err)
+	}
 
 	// The GL context is shared with the Adapter/Device/Queue created from this
 	// Surface, and those outlive the Surface. Adopt ownership on the Instance
@@ -265,47 +289,53 @@ func placeholderExposedAdapter(driverInfo string) hal.ExposedAdapter {
 	}
 }
 
-// makeAdapterFromContext creates an ExposedAdapter using a live AdapterContext.
-// ok is false when the context is below OpenGL 3.3 / ES 3.0 (no adapter).
-//
-// Unlike Surface.GetAdapterInfo it does not query capabilities (limits are the
-// defaults, caps stay zero); only the version gate is applied here — switching
-// it to queryAdapterCapabilities changes behavior on Linux and is P2-GLES-011.
+// makeAdapterFromContext creates an ExposedAdapter using a live AdapterContext
+// (the X11, headless and surfaceless instance context). ok is false when the
+// context is below OpenGL 3.3 / ES 3.0 (no adapter).
 func makeAdapterFromContext(ctx *AdapterContext) (adapter hal.ExposedAdapter, ok bool) {
 	glCtx := ctx.Lock()
 	defer ctx.Unlock()
 
-	version := glCtx.GetString(gl.VERSION)
-	renderer := glCtx.GetString(gl.RENDERER)
-	vendor := glCtx.GetString(gl.VENDOR)
-
-	if _, _, _, err := checkGLVersion(version); err != nil {
-		hal.Logger().Warn("gles: no adapter", "version", version, "renderer", renderer, "reason", err)
-		return hal.ExposedAdapter{}, false
+	caps, err := queryAdapterCapabilities(glCtx)
+	if err != nil {
+		return hal.ExposedAdapter{}, false // below OpenGL 3.3 / ES 3.0 (logged)
 	}
+	return exposeAdapter(&Adapter{ctx: ctx, version: caps.Version, renderer: caps.Renderer}, &caps), true
+}
 
+// exposeAdapter fills in the probed capabilities of an adapter and returns it
+// exposed. Every Linux context, instance or surface, goes through it, as every
+// context goes through one expose in Rust wgpu-hal (src/gles/adapter.rs).
+// Before this, the instance-context adapter skipped the probe and reported no
+// features, no downlevel flags (so no compute) and default limits.
+func exposeAdapter(a *Adapter, caps *AdapterCapabilities) hal.ExposedAdapter {
+	a.caps = *caps
 	return hal.ExposedAdapter{
-		Adapter: &Adapter{
-			ctx:      ctx,
-			version:  version,
-			renderer: renderer,
-		},
+		Adapter: a,
 		Info: gputypes.AdapterInfo{
-			Name:       renderer,
-			Vendor:     vendor,
-			DeviceType: gputypes.DeviceTypeIntegratedGPU,
-			Driver:     driverOpenGL,
-			DriverInfo: version,
+			Name:       caps.Renderer,
+			Vendor:     caps.Vendor,
+			VendorID:   caps.VendorID,
+			DeviceID:   0,
+			DeviceType: caps.DeviceType,
+			Driver:     caps.Version,
+			DriverInfo: glDriverInfo(caps),
 			Backend:    gputypes.BackendGL,
 		},
+		Features: caps.Features,
 		Capabilities: hal.Capabilities{
-			Limits: gputypes.DefaultLimits(),
+			Limits: caps.Limits,
 			AlignmentsMask: hal.Alignments{
 				BufferCopyOffset: 4,
-				BufferCopyPitch:  256,
+				BufferCopyPitch:  4,
+			},
+			DownlevelCapabilities: gputypes.DownlevelCapabilities{
+				ShaderModel: gputypes.ShaderModelSm5,
+				Limits:      gputypes.DownlevelLimits{},
+				Flags:       caps.DownlevelFlags,
 			},
 		},
-	}, true
+	}
 }
 
 // Destroy releases the instance resources. The Instance owns its AdapterContext

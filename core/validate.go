@@ -107,6 +107,11 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 		return err
 	}
 
+	// View formats (Rust validate_texture_descriptor_inner).
+	if err := validateTextureViewFormats(label, desc.Format, desc.ViewFormats, features); err != nil {
+		return err
+	}
+
 	// VAL-C14..C18: Usage flag compatibility at creation.
 	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Format); err != nil {
 		var cte *CreateTextureError
@@ -265,6 +270,10 @@ func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor, features gputypes.Fe
 
 // ValidateShaderModuleDescriptor validates a shader module descriptor and features.
 // Returns nil if valid, or an error describing the first validation failure.
+//
+// A WGSL source is parsed and validated here, once, with the capabilities of
+// features; on success desc.IR and desc.Info hold the result for the HAL and
+// for pipeline introspection (Rust wgpu-core create_shader_module).
 func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor, features gputypes.Features) error {
 	label := desc.Label
 	hasWGSL := desc.Source.WGSL != ""
@@ -425,7 +434,7 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 
 	// RP3-RP6: Fragment stage validation (if present).
 	if desc.Fragment != nil {
-		if err := validateFragmentStage(desc.Fragment, label, limits); err != nil {
+		if err := validateFragmentStage(desc.Fragment, desc.DepthStencil != nil, label, limits); err != nil {
 			return err
 		}
 	}
@@ -498,13 +507,22 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 //   - every attribute's offset + format size must fit in arrayStride, or in
 //     maxVertexBufferArrayStride when arrayStride is 0.
 //
-// arrayStride 0 is legal WebGPU and means every vertex reads the same element.
-// The native backends do not emulate it and disagree about what 0 means
-// (software drops the draw, GLES reads it as tightly packed, Metal sets a zero
-// stride without a constant step function), so it is rejected here until a
-// backend emulates it. The attribute check above already handles stride 0 the
-// way the spec does, so lifting this rejection needs no other change.
+// arrayStride 0 is legal WebGPU (broadcast: every vertex or instance reads
+// element 0). Vulkan and DX12 take it natively; Metal, GLES and software
+// emulate it in their vertex input setup.
 func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, limits gputypes.Limits) error {
+	// RP10e: at most maxVertexBuffers buffers.
+	if len(buffers) > int(limits.MaxVertexBuffers) {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorTooManyVertexBuffers,
+			Label: label,
+			Given: len(buffers),
+			Limit: limits.MaxVertexBuffers,
+		}
+	}
+
+	// Shader locations of every buffer's attributes, for RP10h.
+	locations := make(map[uint32]struct{})
 	maxStride := uint64(limits.MaxVertexBufferArrayStride)
 	for i := range buffers {
 		vb := &buffers[i]
@@ -553,20 +571,73 @@ func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, 
 			}
 		}
 
-		// RP10d: arrayStride 0 (broadcast) is not supported on native backends yet.
-		if vb.ArrayStride == 0 {
-			return &CreateRenderPipelineError{
-				Kind:        CreateRenderPipelineErrorVertexStrideZero,
-				Label:       label,
-				BufferIndex: bufferIndex,
-			}
+		// RP10f-RP10h: attribute offsets and shader locations.
+		if err := validateVertexAttributes(vb, bufferIndex, label, limits, locations); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// maxVertexAttributeOffset bounds a vertex attribute offset: Rust wgpu-core
+// rejects an offset of 0x10000000 or more (create_render_pipeline,
+// wgpu-core/src/device/resource.rs).
+const maxVertexAttributeOffset = 0x10000000
+
+// validateVertexAttributes checks the attributes of one vertex buffer in the
+// order of Rust wgpu-core create_render_pipeline
+// (wgpu-core/src/device/resource.rs): per attribute the offset alignment
+// (RP10f) and the location limit (RP10g), then per attribute the offset bound
+// (RP10f) and location clashes with every attribute seen so far (RP10h).
+// locations collects the shader locations across the pipeline's buffers.
+//
+// Rust's later total-count check against maxVertexAttributes cannot fail
+// after these: unique locations below maxVertexAttributes bound the total.
+// Its 64-bit format check needs Float64 vertex formats, which gputypes does
+// not define.
+func validateVertexAttributes(
+	vb *gputypes.VertexBufferLayout,
+	bufferIndex uint32,
+	label string,
+	limits gputypes.Limits,
+	locations map[uint32]struct{},
+) error {
+	attrError := func(kind CreateRenderPipelineErrorKind, j uint32, attr gputypes.VertexAttribute) error {
+		return &CreateRenderPipelineError{
+			Kind:            kind,
+			Label:           label,
+			BufferIndex:     bufferIndex,
+			ArrayStride:     vb.ArrayStride,
+			AttributeIndex:  j,
+			AttributeOffset: attr.Offset,
+			AttributeFormat: attr.Format.String(),
+			ShaderLocation:  attr.ShaderLocation,
+			Limit:           limits.MaxVertexAttributes,
+		}
+	}
+	for j, attr := range vb.Attributes {
+		// An undefined format has size 0; it then needs no alignment here.
+		if alignment := min(4, attr.Format.Size()); alignment > 0 && attr.Offset%alignment != 0 {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if attr.ShaderLocation >= limits.MaxVertexAttributes {
+			return attrError(CreateRenderPipelineErrorVertexAttributeLocationTooLarge, uint32(j), attr)
+		}
+	}
+	for j, attr := range vb.Attributes {
+		if attr.Offset >= maxVertexAttributeOffset {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if _, clash := locations[attr.ShaderLocation]; clash {
+			return attrError(CreateRenderPipelineErrorShaderLocationClash, uint32(j), attr)
+		}
+		locations[attr.ShaderLocation] = struct{}{}
+	}
+	return nil
+}
+
 // validateFragmentStage checks RP3-RP6 fragment stage constraints.
-func validateFragmentStage(frag *hal.FragmentState, label string, limits gputypes.Limits) error {
+func validateFragmentStage(frag *hal.FragmentState, hasDepthStencil bool, label string, limits gputypes.Limits) error {
 	// RP3: Fragment module must not be nil.
 	if frag.Module == nil {
 		return &CreateRenderPipelineError{
@@ -581,8 +652,11 @@ func validateFragmentStage(frag *hal.FragmentState, label string, limits gputype
 			Label: label,
 		}
 	}
-	// RP5: Must have at least 1 target.
-	if len(frag.Targets) == 0 {
+	// RP5: The pipeline needs at least one attachment: a color target, or the
+	// depth-stencil state (a depth-only pass with a fragment stage, e.g. a
+	// shadow map with alpha-tested discard). WebGPU GPURenderPipelineDescriptor
+	// validation, as Rust wgpu-core.
+	if len(frag.Targets) == 0 && !hasDepthStencil {
 		return &CreateRenderPipelineError{
 			Kind:  CreateRenderPipelineErrorNoFragmentTargets,
 			Label: label,

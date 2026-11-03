@@ -34,10 +34,10 @@ func TestCopyTextureToBufferValid(t *testing.T) {
 	}
 	defer tex.Release()
 
-	// RGBA8Unorm = 4 bytes per pixel, 4x4 = 64 bytes
+	// 4 rows of the required 256-byte bytesPerRow
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "t2b-dst-buf",
-		Size:  256,
+		Size:  1024,
 		Usage: wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestCopyTextureToBufferValid(t *testing.T) {
 			TextureBase: wgpu.ImageCopyTexture{Texture: tex},
 			BufferLayout: wgpu.ImageDataLayout{
 				Offset:       0,
-				BytesPerRow:  16,
+				BytesPerRow:  256,
 				RowsPerImage: 4,
 			},
 			Size: wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},

@@ -206,17 +206,6 @@ type RenderBundleDescriptor struct {
 	Label string
 }
 
-func (d *RenderBundleEncoderDescriptor) toHAL() *hal.RenderBundleEncoderDescriptor {
-	if d == nil {
-		return nil
-	}
-	return &hal.RenderBundleEncoderDescriptor{
-		Label: d.Label, ColorFormats: d.ColorFormats,
-		DepthStencilFormat: d.DepthStencilFormat, SampleCount: d.SampleCount,
-		DepthReadOnly: d.DepthReadOnly, StencilReadOnly: d.StencilReadOnly,
-	}
-}
-
 // toHAL converts a CommandEncoderDescriptor to a hal.CommandEncoderDescriptor.
 func (d *CommandEncoderDescriptor) toHAL() *hal.CommandEncoderDescriptor {
 	return &hal.CommandEncoderDescriptor{
@@ -557,13 +546,35 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 // ComputePassDescriptor describes a compute pass.
 type ComputePassDescriptor struct {
 	Label string
+	// TimestampWrites, when set, writes timestamps at the pass boundaries.
+	// It needs FeatureTimestampQuery.
+	TimestampWrites *ComputePassTimestampWrites
+}
+
+// ComputePassTimestampWrites describes timestamp query writes at compute pass
+// boundaries (WebGPU GPUComputePassTimestampWrites). At least one index must
+// be set, and the two must differ.
+type ComputePassTimestampWrites struct {
+	QuerySet                  *QuerySet
+	BeginningOfPassWriteIndex *uint32
+	EndOfPassWriteIndex       *uint32
 }
 
 // toHAL converts a ComputePassDescriptor to a hal.ComputePassDescriptor.
 func (d *ComputePassDescriptor) toHAL() *hal.ComputePassDescriptor {
-	return &hal.ComputePassDescriptor{
+	halDesc := &hal.ComputePassDescriptor{
 		Label: d.Label,
 	}
+	if writes := d.TimestampWrites; writes != nil {
+		if halQuerySet := writes.QuerySet.halQuerySet(); halQuerySet != nil {
+			halDesc.TimestampWrites = &hal.ComputePassTimestampWrites{
+				QuerySet:                  halQuerySet,
+				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+				EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+			}
+		}
+	}
+	return halDesc
 }
 
 // SurfaceConfiguration describes surface settings.

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
@@ -52,7 +53,7 @@ func TestCompileWGSLToGLSLOverrides(t *testing.T) {
 		{name: "constants", constants: map[string]float64{"wg": 3, "7": 5}, want: []string{"local_size_x = 3, local_size_y = 2", "15u"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			src, _, err := compileWGSLToGLSL(glsl.Version430, sm, ir.StageCompute, "main", tc.constants, nil)
+			src, _, err := compileWGSLToGLSL(glsl.Version430, false, sm, ir.StageCompute, "main", tc.constants, nil)
 			if err != nil {
 				t.Fatalf("compileWGSLToGLSL: %v", err)
 			}
@@ -64,12 +65,12 @@ func TestCompileWGSLToGLSLOverrides(t *testing.T) {
 		})
 	}
 
-	_, _, err = compileWGSLToGLSL(glsl.Version430, sm, ir.StageCompute, "main", map[string]float64{"nope": 1}, nil)
+	_, _, err = compileWGSLToGLSL(glsl.Version430, false, sm, ir.StageCompute, "main", map[string]float64{"nope": 1}, nil)
 	if !errors.Is(err, naga.ErrOverrideNotFound) {
 		t.Errorf("unknown constant: error %v, want naga.ErrOverrideNotFound", err)
 	}
-	_, _, err = compileWGSLToGLSL(glsl.Version430, sm, ir.StageCompute, "missing", nil, nil)
-	if !errors.Is(err, naga.ErrEntryPointNotFound) {
-		t.Errorf("unknown entry point: error %v, want naga.ErrEntryPointNotFound", err)
+	_, _, err = compileWGSLToGLSL(glsl.Version430, false, sm, ir.StageCompute, "missing", nil, nil)
+	if !errors.Is(err, backend.ErrEntryPointNotFound) {
+		t.Errorf("unknown entry point: error %v, want backend.ErrEntryPointNotFound", err)
 	}
 }

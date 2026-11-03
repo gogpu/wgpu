@@ -215,6 +215,26 @@ type CoreCommandEncoder struct {
 	//
 	// Reference: Rust wgpu-core InnerCommandEncoder.is_open (command/mod.rs:561)
 	cbListOpen bool
+
+	// halOpen is true while the HAL encoder has an open recording. The
+	// creator begins the first recording; a render pass that needs barriers
+	// ahead of it closes the recording, and the next command opens one
+	// lazily (recordingLocked).
+	halOpen bool
+
+	// cbDirty is true once a command has been recorded into the open
+	// recording. A render pass starts a new recording when the current one
+	// is dirty, so the pass's command buffer holds only the pass and a
+	// transit command buffer can be inserted before it.
+	cbDirty bool
+
+	// multiRecording is true when the HAL encoder may begin several
+	// recordings before ResetAll: pool-managed encoders
+	// (CreateCommandEncoderWithHAL), whose command buffers ResetAll
+	// reclaims. For a standalone encoder render passes never split the
+	// recording, so barriers for resources first bound inside a render pass
+	// are left to the submit-time barrier.
+	multiRecording bool
 }
 
 // CreateCommandEncoder creates a new command encoder on this device.
@@ -272,7 +292,8 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 			usedBuffers:    make(map[*Buffer]BufferUses),
 			usedTextures:   make(map[*Texture]TextureUses),
 		},
-		label: label,
+		label:   label,
+		halOpen: true,
 	}
 	enc.status.Store(int32(CommandEncoderStatusRecording))
 
@@ -301,7 +322,9 @@ func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, labe
 			usedBuffers:    make(map[*Buffer]BufferUses),
 			usedTextures:   make(map[*Texture]TextureUses),
 		},
-		label: label,
+		label:          label,
+		halOpen:        true,
+		multiRecording: true,
 	}
 	enc.status.Store(int32(CommandEncoderStatusRecording))
 
@@ -327,17 +350,83 @@ func (e *CoreCommandEncoder) TakeHALEncoder() hal.CommandEncoder {
 	return *ptr
 }
 
-// RawEncoder returns the underlying HAL command encoder for direct HAL access.
-// Requires the device's snatch lock to be held. Returns nil if the encoder
-// has been snatched or the device is destroyed.
+// RawEncoder returns the underlying HAL command encoder for recording
+// commands directly. If a render pass closed the previous recording, a new
+// one is begun first, and the recording is marked as holding commands.
+// Returns nil if the encoder has been snatched, the device is destroyed, or a
+// new recording cannot be begun (the encoder is then in the Error state).
 func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	guard := e.device.snatchLock.Read()
 	defer guard.Release()
-	halEncoder := e.raw.Get(guard)
-	if halEncoder == nil {
+	halEncoder, err := e.recordingLocked(guard)
+	if err != nil {
 		return nil
 	}
-	return *halEncoder
+	e.cbDirty = true
+	return halEncoder
+}
+
+// recordingLocked returns the HAL encoder with an open recording, beginning
+// one if a render pass closed the previous recording (Rust
+// InnerCommandEncoder::open). Caller must hold e.mu.
+func (e *CoreCommandEncoder) recordingLocked(guard SnatchGuard) (hal.CommandEncoder, error) {
+	halEncoder := e.raw.Get(guard)
+	if halEncoder == nil {
+		return nil, ErrResourceDestroyed
+	}
+	if e.halOpen {
+		return *halEncoder, nil
+	}
+	if status := e.Status(); status != CommandEncoderStatusRecording && status != CommandEncoderStatusLocked {
+		return nil, e.statusError("record")
+	}
+	if err := (*halEncoder).BeginEncoding(e.label); err != nil {
+		e.setError(err)
+		return nil, err
+	}
+	e.halOpen = true
+	e.cbListOpen = true
+	e.cbDirty = false
+	return *halEncoder, nil
+}
+
+// closeRecordingLocked ends the open recording, if any, and appends it to the
+// command buffer list. Caller must hold e.mu.
+func (e *CoreCommandEncoder) closeRecordingLocked(halEncoder hal.CommandEncoder) error {
+	if !e.halOpen {
+		return nil
+	}
+	cmdBuffer, err := halEncoder.EndEncoding()
+	if err != nil {
+		return err
+	}
+	e.cbList = append(e.cbList, cmdBuffer)
+	e.halOpen = false
+	e.cbListOpen = false
+	e.cbDirty = false
+	return nil
+}
+
+// DiscardHAL discards the open recording, if any, and returns the command
+// buffers already closed by render pass splits, for an encoder that will not
+// be submitted (DiscardEncoding, or after Finish failed). The caller passes
+// them to the HAL encoder's ResetAll so the encoder reclaims them. The encoder
+// must not be used afterwards.
+func (e *CoreCommandEncoder) DiscardHAL() []hal.CommandBuffer {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	guard := e.device.snatchLock.Read()
+	defer guard.Release()
+	if halEncoder := e.raw.Get(guard); halEncoder != nil && e.halOpen {
+		(*halEncoder).DiscardEncoding()
+	}
+	e.halOpen = false
+	e.cbListOpen = false
+	list := e.cbList
+	e.cbList = nil
+	return list
 }
 
 // Status returns the current encoder status.
@@ -418,6 +507,13 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		e.setError(valErr)
 		return nil, valErr
 	}
+	if tw := desc.TimestampWrites; tw != nil {
+		if err := ValidatePassTimestampWrites(e.device, tw.QuerySet,
+			tw.BeginningOfPassWriteIndex, tw.EndOfPassWriteIndex, "BeginRenderPass"); err != nil {
+			e.setError(err)
+			return nil, err
+		}
+	}
 
 	// The pass is one usage scope: validate its attachments against each
 	// other before anything is recorded. Usages by earlier commands of this
@@ -442,13 +538,31 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		return nil, err
 	}
 
+	// Give the pass a recording of its own when earlier commands share the
+	// current one, so the barriers for resources bound inside the pass can
+	// go into a transit command buffer placed before it (see EndRenderPass).
+	//
+	// Reference: wgpu-core command/render.rs (encoder.close_if_open +
+	// encoder.open_pass before the pass is recorded)
+	if e.multiRecording && e.cbDirty {
+		if err := e.closeRecordingLocked(*halEncoder); err != nil {
+			e.setError(err)
+			return nil, err
+		}
+	}
+	raw, err := e.recordingLocked(guard)
+	if err != nil {
+		return nil, err
+	}
+
 	// Transition attachments from their state after earlier commands of this
 	// encoder (e.g. CopyDst after an upload) into their pass state. Must be
 	// recorded before the HAL pass begins.
-	e.transitionRenderPassAttachments(*halEncoder, desc, attachments, guard)
+	e.transitionRenderPassAttachments(raw, desc, attachments, guard)
 
 	// Begin HAL render pass
-	halPass := (*halEncoder).BeginRenderPass(halDesc)
+	halPass := raw.BeginRenderPass(halDesc)
+	e.cbDirty = true
 
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
@@ -458,7 +572,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		encoder:     e,
 		device:      e.device,
 		passContext: passCtx,
-		bufferScope: track.NewBufferUsageScope(),
+		scope:       newPassUsageScopeWithTextures(attachments.scope),
 	}
 	e.mutable.activePass = pass
 
@@ -484,19 +598,12 @@ func (e *CoreCommandEncoder) EndRenderPass(pass *CoreRenderPassEncoder) error {
 
 	// End HAL render pass (already called by CoreRenderPassEncoder.End())
 
-	// Apply the pass's buffer usage scope (vertex/index buffers) to the
-	// command buffer tracker so later commands and the submit-time merge see
-	// the correct current state.
-	//
-	// Known gap: Rust wgpu-core records the transitions returned here into a
-	// separate "transit" command buffer inserted BEFORE the pass (barriers
-	// cannot be recorded inside a pass). That requires routing render passes
-	// through the multi-CB path (OpenPass/CloseAndPushFront), which the public
-	// render pass does not use yet, so intra-encoder transitions of buffers
-	// first bound inside a pass are not recorded. The first use of a buffer in
-	// the command buffer is still covered by the submit-time barrier.
-	if e.mutable.bufferTracker != nil {
-		_ = e.mutable.bufferTracker.SetFromScope(pass.bufferScope)
+	// Apply the pass's usage scope (attachments, vertex/index buffers, bind
+	// group resources) to the command buffer trackers and record the
+	// resulting barriers ahead of the pass.
+	if err := e.transitionRenderPassScopeLocked(pass); err != nil {
+		e.setError(err)
+		return err
 	}
 
 	// Return to recording state
@@ -521,34 +628,59 @@ func (e *CoreCommandEncoder) BeginComputePass(desc *CoreComputePassDescriptor) (
 		return nil, e.statusError("begin compute pass")
 	}
 
-	// Convert to HAL descriptor
-	halDesc := &hal.ComputePassDescriptor{}
+	var writes *CoreComputePassTimestampWrites
 	if desc != nil {
-		halDesc.Label = desc.Label
-		// TimestampWrites conversion would go here
+		writes = desc.TimestampWrites
+	}
+	if writes != nil {
+		if err := ValidatePassTimestampWrites(e.device, writes.QuerySet,
+			writes.BeginningOfPassWriteIndex, writes.EndOfPassWriteIndex, "BeginComputePass"); err != nil {
+			e.setError(err)
+			return nil, err
+		}
 	}
 
 	// Get HAL encoder
 	guard := e.device.snatchLock.Read()
 	defer guard.Release()
 
-	halEncoder := e.raw.Get(guard)
-	if halEncoder == nil {
-		err := ErrResourceDestroyed
+	halEncoder, err := e.recordingLocked(guard)
+	if err != nil {
 		e.setError(err)
 		return nil, err
 	}
 
+	// Convert to HAL descriptor
+	halDesc := &hal.ComputePassDescriptor{}
+	if desc != nil {
+		halDesc.Label = desc.Label
+	}
+	if writes != nil {
+		raw := writes.QuerySet.Raw(guard)
+		if raw == nil {
+			err := ErrResourceDestroyed
+			e.setError(err)
+			return nil, err
+		}
+		halDesc.TimestampWrites = &hal.ComputePassTimestampWrites{
+			QuerySet:                  raw,
+			BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
+			EndOfPassWriteIndex:       writes.EndOfPassWriteIndex,
+		}
+	}
+
 	// Begin HAL compute pass
-	halPass := (*halEncoder).BeginComputePass(halDesc)
+	halPass := halEncoder.BeginComputePass(halDesc)
+	e.cbDirty = true
 
 	// Transition to locked state
 	e.status.Store(int32(CommandEncoderStatusLocked))
 
 	pass := &CoreComputePassEncoder{
-		raw:     halPass,
-		encoder: e,
-		device:  e.device,
+		raw:           halPass,
+		encoder:       e,
+		device:        e.device,
+		dispatchScope: newPassUsageScope(),
 	}
 	e.mutable.activePass = pass
 
@@ -637,6 +769,9 @@ func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 	}
 
 	// Single-CB path (backward compatible): end the one recording.
+	if !e.halOpen {
+		return nil, fmt.Errorf("core: finish: the encoder has no open recording")
+	}
 	halCmdBuffer, err := (*halEncoder).EndEncoding()
 	if err != nil {
 		e.setError(err)
@@ -694,8 +829,10 @@ func (e *CoreCommandEncoder) OpenPass(label string) error {
 
 	// Begin recording a new command buffer.
 	e.cbListOpen = true
+	e.halOpen = true
 	if err := (*halEncoder).BeginEncoding(label); err != nil {
 		e.cbListOpen = false
+		e.halOpen = false
 		e.setError(err)
 		return err
 	}
@@ -733,6 +870,7 @@ func (e *CoreCommandEncoder) CloseCB() error {
 
 	e.cbList = append(e.cbList, halCmdBuffer)
 	e.cbListOpen = false
+	e.halOpen = false
 	return nil
 }
 
@@ -777,6 +915,7 @@ func (e *CoreCommandEncoder) CloseAndSwap() error {
 	e.cbList[insertPos] = halCmdBuffer
 
 	e.cbListOpen = false
+	e.halOpen = false
 	return nil
 }
 
@@ -814,6 +953,7 @@ func (e *CoreCommandEncoder) CloseAndPushFront() error {
 	e.cbList = append([]hal.CommandBuffer{halCmdBuffer}, e.cbList...)
 
 	e.cbListOpen = false
+	e.halOpen = false
 	return nil
 }
 
@@ -856,6 +996,7 @@ func (e *CoreCommandEncoder) closeIfOpenLocked(halEncoder hal.CommandEncoder) er
 
 	e.cbList = append(e.cbList, halCmdBuffer)
 	e.cbListOpen = false
+	e.halOpen = false
 	return nil
 }
 
@@ -1238,17 +1379,25 @@ type CoreRenderPassEncoder struct {
 	// Matches Rust wgpu-core command/render.rs RenderPassInfo.context.
 	passContext *RenderPassContext
 
-	// bufferScope is this render pass's buffer usage scope (vertex and index
-	// buffers). Conflicts are validated inside the pass only; on End the
-	// scope is applied to the command buffer's tracker.
+	// scope is this render pass's usage scope: the attachments (merged at
+	// BeginRenderPass), vertex and index buffers, and the resources of every
+	// bind group set in the pass. Conflicts are validated inside the pass
+	// only; on End the scope is applied to the command buffer's trackers.
 	//
 	// Reference: wgpu-core command/render.rs State.scope (UsageScope per pass)
-	bufferScope *track.BufferUsageScope
+	scope *passUsageScope
 }
 
 // RawPass returns the underlying HAL render pass encoder for direct HAL access.
 func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
 	return p.raw
+}
+
+// PassContext returns the attachment formats and sample count of this render
+// pass, or nil if they are unknown. A render bundle executed in the pass must
+// match them (Rust wgpu-core command/render.rs execute_bundle).
+func (p *CoreRenderPassEncoder) PassContext() *RenderPassContext {
+	return p.passContext
 }
 
 // recordBufferUsage records a buffer usage in this render pass's usage scope.
@@ -1257,14 +1406,26 @@ func (p *CoreRenderPassEncoder) RawPass() hal.RenderPassEncoder {
 //
 // Reference: wgpu-core command/render.rs (scope.buffers.merge_single)
 func (p *CoreRenderPassEncoder) recordBufferUsage(buffer *Buffer, usage track.BufferUses) error {
-	if p.bufferScope == nil || buffer == nil {
+	if p.scope == nil {
 		return nil
 	}
-	td := buffer.TrackingData()
-	if td == nil || !td.Index().IsValid() {
-		return nil
+	return p.scope.addBuffer(buffer, usage)
+}
+
+// recordIndirectUsage records the INDIRECT usage of the argument (and count)
+// buffers of an indirect draw in this pass's usage scope, so a buffer written
+// earlier (for example by Queue.WriteBuffer) is transitioned before the pass.
+// A conflict is recorded on the encoder.
+//
+// Reference: wgpu-core command/render.rs multi_draw_indirect
+// (state.scope.buffers.merge_single(indirect_buffer, BufferUses::INDIRECT))
+func (p *CoreRenderPassEncoder) recordIndirectUsage(op string, buffers ...*Buffer) {
+	for _, buffer := range buffers {
+		if err := p.recordBufferUsage(buffer, track.BufferUsesIndirect); err != nil {
+			p.encoder.SetError(fmt.Errorf("%s: %w", op, err))
+			return
+		}
 	}
-	return p.bufferScope.SetUsage(td.Index(), usage)
 }
 
 // SetPipeline sets the render pipeline.
@@ -1409,6 +1570,7 @@ func (p *CoreRenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64,
 	if p.ended || drawCount == 0 {
 		return
 	}
+	p.recordIndirectUsage("DrawIndirect", buffer)
 	if p.raw != nil && buffer != nil {
 		guard := p.device.snatchLock.Read()
 		defer guard.Release()
@@ -1430,6 +1592,7 @@ func (p *CoreRenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset 
 	if p.ended || drawCount == 0 {
 		return
 	}
+	p.recordIndirectUsage("DrawIndexedIndirect", buffer)
 	if p.raw != nil && buffer != nil {
 		guard := p.device.snatchLock.Read()
 		defer guard.Release()
@@ -1484,6 +1647,25 @@ func (p *CoreRenderPassEncoder) End() error {
 type CoreComputePassDescriptor struct {
 	// Label is an optional debug name.
 	Label string
+
+	// TimestampWrites are the timestamp queries written at the pass
+	// boundaries (optional; needs FeatureTimestampQuery).
+	TimestampWrites *CoreComputePassTimestampWrites
+}
+
+// CoreComputePassTimestampWrites describes timestamp queries at compute pass
+// boundaries.
+type CoreComputePassTimestampWrites struct {
+	// QuerySet is the timestamp query set that receives the writes.
+	QuerySet *QuerySet
+
+	// BeginningOfPassWriteIndex is the query index to write at pass start.
+	// If nil, no timestamp is written at the beginning of the pass.
+	BeginningOfPassWriteIndex *uint32
+
+	// EndOfPassWriteIndex is the query index to write at pass end.
+	// If nil, no timestamp is written at the end of the pass.
+	EndOfPassWriteIndex *uint32
 }
 
 // CoreComputePassEncoder records compute commands within a pass.
@@ -1505,6 +1687,12 @@ type CoreComputePassEncoder struct {
 
 	// ended indicates whether End() has been called.
 	ended bool
+
+	// dispatchScope is the usage scope of the next dispatch, reused (cleared)
+	// for every dispatch.
+	//
+	// Reference: wgpu-core command/compute.rs State.pass.scope
+	dispatchScope *passUsageScope
 }
 
 // RawPass returns the underlying HAL compute pass encoder for direct HAL access.

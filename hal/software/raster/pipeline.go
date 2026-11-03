@@ -112,10 +112,10 @@ func (p *Pipeline) Clear(r, g, b, a float32) {
 	defer p.mu.Unlock()
 
 	// Convert to bytes
-	rb := clampByte(r * 255)
-	gb := clampByte(g * 255)
-	bb := clampByte(b * 255)
-	ab := clampByte(a * 255)
+	rb := FloatToUnorm8(r)
+	gb := FloatToUnorm8(g)
+	bb := FloatToUnorm8(b)
+	ab := FloatToUnorm8(a)
 
 	for i := 0; i < len(p.colorBuffer); i += 4 {
 		p.colorBuffer[i+0] = rb
@@ -186,6 +186,15 @@ func (p *Pipeline) GetBlendState() BlendState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.blendState
+}
+
+// SetDepthBuffer replaces the pipeline's own depth buffer with buf, so draws
+// test against and write into a depth buffer that outlives the pipeline (a
+// render pass's depth attachment). buf must have the pipeline's dimensions.
+func (p *Pipeline) SetDepthBuffer(buf *DepthBuffer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.depthBuffer = buf
 }
 
 // SetStencilBuffer sets the stencil buffer to use for stencil testing.
@@ -438,10 +447,10 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(color[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(color[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(color[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
 			}
 			p.mu.Unlock()
 		})
@@ -527,28 +536,28 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 			}
 			p.mu.Unlock()
 		})
 	}
 }
 
-// FragmentShaderFunc computes the output RGBA color for a single fragment
-// given its interpolated per-vertex attributes. This is the raster-level
-// callback — it receives the raw interpolated float32 attribute slice and
-// returns [R, G, B, A] in [0,1]. Used by DrawTrianglesWithFragmentShader
-// to execute a SPIR-V fragment shader per pixel.
-type FragmentShaderFunc func(attrs []float32) [4]float32
+// FragmentShaderFunc computes the output RGBA color, in [0,1], of one
+// fragment: its pixel position, depth, 1/w and interpolated attributes. It
+// reports discard = true when the shader discarded the fragment. Used by
+// DrawTrianglesWithFragmentShader to execute a SPIR-V fragment shader per pixel.
+type FragmentShaderFunc func(frag *Fragment) (color [4]float32, discard bool)
 
 // DrawTrianglesWithFragmentShader rasterizes triangles and invokes fragFunc
-// per pixel with the interpolated vertex attributes. This is identical to
-// DrawTrianglesInterpolated except the per-pixel color comes from fragFunc
-// instead of treating the first 4 attributes as direct RGBA.
-func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFunc FragmentShaderFunc) {
+// per pixel. A discarded fragment writes no color, depth or stencil. When
+// mayDiscard is set the shader runs before the depth and stencil tests, whose
+// writes would otherwise happen first (late tests); without discard the tests
+// run first so occluded fragments are never shaded.
+func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFunc FragmentShaderFunc, mayDiscard bool) {
 	p.mu.Lock()
 	viewport := p.viewport
 	depthTest := p.depthTest
@@ -590,6 +599,14 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				return
 			}
 
+			var srcColor [4]float32
+			if mayDiscard {
+				var discard bool
+				if srcColor, discard = fragFunc(&frag); discard {
+					return
+				}
+			}
+
 			// Depth and stencil tests
 			result := p.performDepthStencilTest(
 				frag.X, frag.Y, frag.Depth,
@@ -603,8 +620,9 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
-			// Execute fragment shader with interpolated attributes.
-			srcColor := fragFunc(frag.Attributes)
+			if !mayDiscard {
+				srcColor, _ = fragFunc(&frag)
+			}
 
 			// Apply blending if enabled
 			idx := (frag.Y*p.width + frag.X) * 4
@@ -619,10 +637,10 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				p.colorBuffer[idx+2] = b
 				p.colorBuffer[idx+3] = a
 			} else {
-				p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-				p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-				p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-				p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 			}
 			p.mu.Unlock()
 		})
@@ -630,11 +648,11 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 }
 
 // MRTFragmentShaderFunc computes output colors for multiple render targets.
-// It receives interpolated per-vertex attributes and returns a slice of RGBA
-// colors, one per render target (indexed by @location). The primary target
+// It receives the fragment and returns a slice of RGBA colors, one per render
+// target (indexed by @location), or discard = true. The primary target
 // (location 0) is written to the pipeline's color buffer; additional targets
 // are written by the caller via the MRTOutput callback.
-type MRTFragmentShaderFunc func(attrs []float32) [][4]float32
+type MRTFragmentShaderFunc func(frag *Fragment) (colors [][4]float32, discard bool)
 
 // MRTOutput is called by DrawTrianglesWithMRTShader for each fragment that
 // passes depth/stencil/scissor tests. It receives the pixel coordinates and
@@ -646,7 +664,8 @@ type MRTOutput func(x, y int, colors [][4]float32)
 // pixel for Multiple Render Targets. Location 0 is written to the pipeline's
 // color buffer (with blending). The mrtOut callback receives all per-location
 // colors so the caller can write locations 1+ to their respective textures.
-func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRTFragmentShaderFunc, mrtOut MRTOutput) {
+// Discard and mayDiscard behave as in DrawTrianglesWithFragmentShader.
+func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRTFragmentShaderFunc, mrtOut MRTOutput, mayDiscard bool) {
 	p.mu.Lock()
 	viewport := p.viewport
 	depthTest := p.depthTest
@@ -684,6 +703,14 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 				return
 			}
 
+			var colors [][4]float32
+			if mayDiscard {
+				var discard bool
+				if colors, discard = fragFunc(&frag); discard {
+					return
+				}
+			}
+
 			result := p.performDepthStencilTest(
 				frag.X, frag.Y, frag.Depth,
 				depthTest, depthWrite, depthCompare,
@@ -696,7 +723,9 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
-			colors := fragFunc(frag.Attributes)
+			if !mayDiscard {
+				colors, _ = fragFunc(&frag)
+			}
 
 			// Write location 0 to the pipeline's color buffer.
 			if len(colors) > 0 {
@@ -713,10 +742,10 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 					p.colorBuffer[idx+2] = b
 					p.colorBuffer[idx+3] = a
 				} else {
-					p.colorBuffer[idx+0] = clampByte(srcColor[0] * 255)
-					p.colorBuffer[idx+1] = clampByte(srcColor[1] * 255)
-					p.colorBuffer[idx+2] = clampByte(srcColor[2] * 255)
-					p.colorBuffer[idx+3] = clampByte(srcColor[3] * 255)
+					p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
+					p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
+					p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
+					p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
 				}
 				p.mu.Unlock()
 			}
@@ -822,10 +851,10 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 					p.colorBuffer[idx+2] = b
 					p.colorBuffer[idx+3] = a
 				} else {
-					p.colorBuffer[idx+0] = clampByte(color[0] * 255)
-					p.colorBuffer[idx+1] = clampByte(color[1] * 255)
-					p.colorBuffer[idx+2] = clampByte(color[2] * 255)
-					p.colorBuffer[idx+3] = clampByte(color[3] * 255)
+					p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
+					p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
+					p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
+					p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
 				}
 				p.mu.Unlock()
 			})
@@ -913,17 +942,6 @@ func (p *Pipeline) Close() {
 		p.parallelRasterizer.Close()
 		p.parallelRasterizer = nil
 	}
-}
-
-// clampByte converts a float to a byte, clamping to [0, 255].
-func clampByte(v float32) byte {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return byte(v)
 }
 
 // CreateScreenTriangle creates a Triangle from screen coordinates.

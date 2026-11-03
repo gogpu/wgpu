@@ -64,41 +64,13 @@ func (s *Surface) GetAdapterInfo() (adapter hal.ExposedAdapter, ok bool) {
 	if err != nil {
 		return hal.ExposedAdapter{}, false
 	}
-	driverInfo := glDriverInfo(&caps)
-
-	return hal.ExposedAdapter{
-		Adapter: &Adapter{
-			ctx:           s.ctx,
-			displayHandle: s.displayHandle,
-			windowHandle:  s.windowHandle,
-			version:       s.version,
-			renderer:      s.renderer,
-			caps:          caps,
-		},
-		Info: gputypes.AdapterInfo{
-			Name:       caps.Renderer,
-			Vendor:     caps.Vendor,
-			VendorID:   caps.VendorID,
-			DeviceID:   0,
-			DeviceType: caps.DeviceType,
-			Driver:     caps.Version,
-			DriverInfo: driverInfo,
-			Backend:    gputypes.BackendGL,
-		},
-		Features: caps.Features,
-		Capabilities: hal.Capabilities{
-			Limits: caps.Limits,
-			AlignmentsMask: hal.Alignments{
-				BufferCopyOffset: 4,
-				BufferCopyPitch:  4,
-			},
-			DownlevelCapabilities: gputypes.DownlevelCapabilities{
-				ShaderModel: gputypes.ShaderModelSm5,
-				Limits:      gputypes.DownlevelLimits{},
-				Flags:       caps.DownlevelFlags,
-			},
-		},
-	}, true
+	return exposeAdapter(&Adapter{
+		ctx:           s.ctx,
+		displayHandle: s.displayHandle,
+		windowHandle:  s.windowHandle,
+		version:       s.version,
+		renderer:      s.renderer,
+	}, &caps), true
 }
 
 // Configure configures the surface for presentation.

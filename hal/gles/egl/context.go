@@ -19,6 +19,7 @@ type Context struct {
 	pbuffer      EGLSurface
 	windowKind   WindowKind
 	displayOwner *DisplayOwner // owns native display connection (X11); closed after eglTerminate
+	robustAccess bool          // created with robust buffer access
 }
 
 // ContextConfig holds configuration options for creating an EGL context.
@@ -104,11 +105,12 @@ func NewContext(config ContextConfig) (*Context, error) {
 	}
 
 	// Create EGL context
-	eglContext := createEGLContext(display, eglConfig, config)
+	displayExts := QueryString(display, Extensions)
+	eglContext, robust, ctxErr := createEGLContext(display, eglConfig, config, initialRobustness(major, minor, displayExts), displayExts)
 	if eglContext == NoContext {
 		Terminate(display)
 		closeOwner()
-		return nil, fmt.Errorf("eglCreateContext failed: error 0x%x", GetError())
+		return nil, fmt.Errorf("eglCreateContext failed: error 0x%x", ctxErr)
 	}
 
 	// Surfaceless context: EGL 1.5+ or EGL_KHR_surfaceless_context allows
@@ -117,7 +119,6 @@ func NewContext(config ContextConfig) (*Context, error) {
 	// Matches Rust wgpu-hal egl.rs:735-758.
 	hasSurfaceless := (major > 1 || (major == 1 && minor >= 5))
 	if !hasSurfaceless {
-		displayExts := QueryString(display, Extensions)
 		hasSurfaceless = strings.Contains(displayExts, "EGL_KHR_surfaceless_context")
 	}
 
@@ -141,6 +142,7 @@ func NewContext(config ContextConfig) (*Context, error) {
 		pbuffer:      pbuffer,
 		windowKind:   windowKind,
 		displayOwner: displayOwner,
+		robustAccess: robust != robustnessNone,
 	}, nil
 }
 
@@ -207,8 +209,73 @@ func chooseEGLConfig(display EGLDisplay, config ContextConfig) (EGLConfig, error
 	return 0, fmt.Errorf("no suitable EGL configs found (tried window+pbuffer and pbuffer-only)")
 }
 
-// createEGLContext creates an EGL rendering context.
-func createEGLContext(display EGLDisplay, config EGLConfig, cfg ContextConfig) EGLContext {
+// robustness is the robust buffer access request in a context's attributes.
+type robustness int
+
+const (
+	robustnessNone robustness = iota // no request
+	robustnessCore                   // EGL 1.5 EGL_CONTEXT_OPENGL_ROBUST_ACCESS
+	robustnessExt                    // EGL_EXT_create_context_robustness
+)
+
+// extCreateContextRobustness is the display extension of robustnessExt.
+const extCreateContextRobustness = "EGL_EXT_create_context_robustness"
+
+// initialRobustness picks the robust access request to try first: the core
+// attribute on EGL 1.5+, else the extension's when the display has it (Rust
+// wgpu-hal src/gles/egl.rs, context creation).
+func initialRobustness(major, minor EGLInt, displayExts string) robustness {
+	switch {
+	case major > 1 || major == 1 && minor >= 5:
+		return robustnessCore
+	case strings.Contains(displayExts, extCreateContextRobustness):
+		return robustnessExt
+	default:
+		return robustnessNone
+	}
+}
+
+// nextRobustness is the request to retry with after r was refused: the
+// extension's attribute when the display has it, else none. Robust context
+// creation fails with different errors on different EGL paths, so this runs
+// only after EGL_BAD_ATTRIBUTE, EGL_BAD_MATCH or EGL_BAD_CONFIG, as in Rust.
+func nextRobustness(r robustness, displayExts string) robustness {
+	if r == robustnessCore && strings.Contains(displayExts, extCreateContextRobustness) {
+		return robustnessExt
+	}
+	return robustnessNone
+}
+
+// isRobustnessRefusal reports whether an eglCreateContext error may come from
+// the robust access request.
+func isRobustnessRefusal(code EGLInt) bool {
+	return code == BadAttribute || code == BadMatch || code == BadConfig
+}
+
+// createEGLContext creates an EGL rendering context with robust buffer access
+// where the driver grants it, lowering the request on refusal, and returns the
+// request the context was created with, or the EGL error of the last attempt.
+// WebGPU requires out-of-bounds buffer accesses to be contained, and naga's
+// GLSL output leaves buffer accesses unchecked (as Rust's does), so robust
+// access is what contains them.
+func createEGLContext(display EGLDisplay, config EGLConfig, cfg ContextConfig, r robustness, displayExts string) (EGLContext, robustness, EGLInt) {
+	for {
+		attribs := contextAttribs(cfg, r)
+		ctx := CreateContext(display, config, NoContext, &attribs[0])
+		if ctx != NoContext {
+			return ctx, r, Success
+		}
+		code := GetError()
+		if r == robustnessNone || !isRobustnessRefusal(code) {
+			return NoContext, r, code
+		}
+		r = nextRobustness(r, displayExts)
+	}
+}
+
+// contextAttribs returns the eglCreateContext attribute list for cfg with
+// robust access request r, terminated by EGL_NONE.
+func contextAttribs(cfg ContextConfig, r robustness) []EGLInt {
 	var attribs []EGLInt
 
 	// Set OpenGL version
@@ -232,11 +299,20 @@ func createEGLContext(display EGLDisplay, config EGLConfig, cfg ContextConfig) E
 		)
 	}
 
-	// Terminate attribute list
-	attribs = append(attribs, None)
+	switch r {
+	case robustnessCore:
+		attribs = append(attribs, ContextOpenGLRobustAccess, EGLInt(True))
+	case robustnessExt:
+		attribs = append(attribs, ContextOpenGLRobustAccessExt, EGLInt(True))
+	}
 
-	return CreateContext(display, config, NoContext, &attribs[0])
+	// Terminate attribute list
+	return append(attribs, None)
 }
+
+// RobustAccess reports whether the context was created with robust buffer
+// access.
+func (c *Context) RobustAccess() bool { return c.robustAccess }
 
 // createPbufferSurface creates a minimal pbuffer surface for the context.
 func createPbufferSurface(display EGLDisplay, config EGLConfig) EGLSurface {
@@ -252,6 +328,16 @@ func createPbufferSurface(display EGLDisplay, config EGLConfig) EGLSurface {
 func (c *Context) MakeCurrent() error {
 	if MakeCurrent(c.display, c.pbuffer, c.pbuffer, c.context) == False {
 		return fmt.Errorf("eglMakeCurrent failed: error 0x%x", GetError())
+	}
+	return nil
+}
+
+// ReleaseCurrent makes no context current on the calling thread. A context
+// may be current on one thread only, so one left current on a thread makes
+// eglMakeCurrent on any other thread fail with EGL_BAD_ACCESS.
+func (c *Context) ReleaseCurrent() error {
+	if MakeCurrent(c.display, NoSurface, NoSurface, NoContext) == False {
+		return fmt.Errorf("eglMakeCurrent(EGL_NO_CONTEXT) failed: error 0x%x", GetError())
 	}
 	return nil
 }

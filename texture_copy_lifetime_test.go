@@ -3,9 +3,11 @@
 package wgpu
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
 )
 
@@ -51,7 +53,62 @@ func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 
 func (q *delayedCompletionQueue) PollCompleted() uint64 { return q.completed }
 
-func TestTextureCopyBufferRefHeldUntilQueueRetirement(t *testing.T) {
+// TestBindGroupHoldsTextureViewRefs checks that a bind group keeps the
+// texture view it binds, and the view's texture, alive after the application
+// releases them, until the bind group itself is destroyed (Rust wgpu-core's
+// BindGroup holds an Arc of each view).
+func TestBindGroupHoldsTextureViewRefs(t *testing.T) {
+	t.Parallel()
+
+	_, _, device := newTestDeviceWithTracker(t)
+	defer device.Release()
+	texture := createCopyScopeTexture(t, device, "bind-group-view", TextureUsageCopySrc)
+	view, err := device.CreateTextureView(texture, nil)
+	if err != nil {
+		t.Fatalf("CreateTextureView: %v", err)
+	}
+	layout, err := device.CreateBindGroupLayout(&BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+		Binding:    0,
+		Visibility: ShaderStageFragment,
+		Texture: &gputypes.TextureBindingLayout{
+			SampleType:    gputypes.TextureSampleTypeFloat,
+			ViewDimension: gputypes.TextureViewDimension2D,
+		},
+	}}})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	defer layout.Release()
+	group, err := device.CreateBindGroup(&BindGroupDescriptor{
+		Layout:  layout,
+		Entries: []BindGroupEntry{{Binding: 0, TextureView: view}},
+	})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+
+	refs := map[string]*core.ResourceRef{"view": view.ref, "texture": texture.ref()}
+	checkRefCounts := func(when string, want int32) {
+		t.Helper()
+		for name, ref := range refs {
+			if got := ref.RefCount(); got != want {
+				t.Fatalf("%s refcount %s = %d, want %d", name, when, got, want)
+			}
+		}
+	}
+	checkRefCounts("with the bind group", 2)
+	view.Release()
+	texture.Release()
+	checkRefCounts("after user Release", 1)
+	group.Release()
+	device.destroyQueue().FlushAll()
+	checkRefCounts("after the bind group is destroyed", 0)
+}
+
+// TestTextureCopyRefsHeldUntilQueueRetirement checks that a buffer-texture
+// copy keeps both the buffer and the texture alive until its submission is
+// retired, even after the application releases them.
+func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -106,50 +163,49 @@ func TestTextureCopyBufferRefHeldUntilQueueRetirement(t *testing.T) {
 			texture := createCopyScopeTexture(t, device, "texture-copy-lifetime", tt.textureUse)
 			defer texture.Release()
 
-			ref := buffer.core.Ref
-			if got := ref.RefCount(); got != 1 {
-				t.Fatalf("initial buffer refcount = %d, want 1", got)
+			refs := map[string]*core.ResourceRef{"buffer": buffer.core.Ref, "texture": texture.ref()}
+			checkRefCounts := func(when string, want int32) {
+				t.Helper()
+				for name, ref := range refs {
+					if got := ref.RefCount(); got != want {
+						t.Fatalf("%s refcount %s = %d, want %d", name, when, got, want)
+					}
+				}
 			}
+			checkTracked := func(what string, tracked []*core.ResourceRef) {
+				t.Helper()
+				if len(tracked) != 2 || !slices.Contains(tracked, refs["buffer"]) || !slices.Contains(tracked, refs["texture"]) {
+					t.Fatalf("%s tracked refs = %v, want exactly the buffer and texture refs", what, tracked)
+				}
+			}
+			checkRefCounts("initially", 1)
 			enc, err := device.CreateCommandEncoder(nil)
 			if err != nil {
 				t.Fatalf("CreateCommandEncoder: %v", err)
 			}
 			tt.record(enc, buffer, texture)
-			if got := ref.RefCount(); got != 2 {
-				t.Fatalf("buffer refcount after encoding = %d, want 2", got)
-			}
-			if got := len(enc.trackedRefs); got != 1 || enc.trackedRefs[0] != ref {
-				t.Fatalf("encoder tracked refs = %v, want exactly the copy buffer ref", enc.trackedRefs)
-			}
+			checkRefCounts("after encoding", 2)
+			checkTracked("encoder", enc.trackedRefs)
 
 			cb, err := enc.Finish()
 			if err != nil {
 				t.Fatalf("Finish: %v", err)
 			}
-			if got := len(cb.trackedRefs); got != 1 || cb.trackedRefs[0] != ref {
-				t.Fatalf("command buffer tracked refs = %v, want exactly the copy buffer ref", cb.trackedRefs)
-			}
+			checkTracked("command buffer", cb.trackedRefs)
 			submission, err := queue.Submit(cb)
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if got := ref.RefCount(); got != 2 {
-				t.Fatalf("buffer refcount after incomplete submit = %d, want 2", got)
-			}
+			checkRefCounts("after incomplete submit", 2)
 
 			buffer.Release()
-			if got := ref.RefCount(); got != 1 {
-				t.Fatalf("buffer refcount after user Release = %d, want in-flight ref 1", got)
-			}
+			texture.Release()
+			checkRefCounts("after user Release", 1)
 			device.destroyQueue().Triage(submission - 1)
-			if got := ref.RefCount(); got != 1 {
-				t.Fatalf("buffer refcount before retirement = %d, want 1", got)
-			}
+			checkRefCounts("before retirement", 1)
 			delayed.completed = submission
 			device.destroyQueue().Triage(delayed.PollCompleted())
-			if got := ref.RefCount(); got != 0 {
-				t.Fatalf("buffer refcount after retirement = %d, want 0", got)
-			}
+			checkRefCounts("after retirement", 0)
 		})
 	}
 }

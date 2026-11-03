@@ -22,17 +22,26 @@ type Adapter struct {
 	physicalDevice vk.PhysicalDevice
 	properties     vk.PhysicalDeviceProperties
 	features       vk.PhysicalDeviceFeatures
+	// ext is a pointer: the struct holds a map, and Adapter must stay
+	// comparable (it was before; a PATCH may not change that).
+	ext *extendedFeatureSupport
 }
 
 // Open creates a logical device with the requested features and limits.
-func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
-	return a.open(nil)
+func (a *Adapter) Open(features gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.open(nil, features)
 }
 
 // open creates a logical device, optionally constraining it to one queue
 // family. Surface-qualified adapters use the constrained path so the queue
 // selected during the surface query is the same queue passed into Open.
-func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
+// Features gated by pNext feature structs are enabled only when requested,
+// as Rust wgpu-hal does (vulkan/adapter.rs, PhysicalDeviceFeatures::from_extensions_and_requested_features).
+func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features) (hal.OpenDevice, error) {
+	if missing := a.ext.unsupportedRequest(requested); missing != 0 {
+		return hal.OpenDevice{}, fmt.Errorf("vulkan: adapter does not support requested features %v", missing)
+	}
+
 	// Find queue families
 	var queueFamilyCount uint32
 	vkGetPhysicalDeviceQueueFamilyProperties(a.instance, a.physicalDevice, &queueFamilyCount, nil)
@@ -61,24 +70,6 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		PQueuePriorities: &queuePriority,
 	}
 
-	// Query supported device extensions to enable optional features.
-	hasIncrementalPresent := false
-	{
-		var extCount uint32
-		a.instance.cmds.EnumerateDeviceExtensionProperties(a.physicalDevice, 0, &extCount, nil)
-		if extCount > 0 {
-			extProps := make([]vk.ExtensionProperties, extCount)
-			a.instance.cmds.EnumerateDeviceExtensionProperties(a.physicalDevice, 0, &extCount, &extProps[0])
-			for i := range extProps {
-				name := cStringToGo(extProps[i].ExtensionName[:])
-				if name == "VK_KHR_incremental_present" {
-					hasIncrementalPresent = true
-					break
-				}
-			}
-		}
-	}
-
 	// Required extensions
 	extensions := []string{
 		"VK_KHR_swapchain\x00",
@@ -86,19 +77,9 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 	// Optional: VK_KHR_incremental_present for damage-aware presentation.
 	// Allows chaining VkPresentRegionsKHR into VkPresentInfoKHR.PNext
 	// so the compositor can skip recompositing unchanged pixels.
+	hasIncrementalPresent := a.ext.extensions[extIncrementalPresent]
 	if hasIncrementalPresent {
-		extensions = append(extensions, "VK_KHR_incremental_present\x00")
-	}
-	// The device create info references these through uintptr fields, which
-	// keep nothing alive or in place; pin them until vkCreateDevice returns
-	// (P1-VK-012).
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	extensionPtrs := make([]uintptr, len(extensions))
-	pinner.Pin(&extensionPtrs[0])
-	for i, ext := range extensions {
-		pinner.Pin(unsafe.StringData(ext))
-		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
+		extensions = append(extensions, extIncrementalPresent+"\x00")
 	}
 
 	// Detect timeline semaphore support (VK-IMPL-001).
@@ -116,27 +97,38 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		hasTimelineSemaphore = vulkan12Features.TimelineSemaphore != 0
 	}
 
+	// Features enabled through the create info: the timeline semaphore and
+	// what the request needs.
+	var chain deviceFeatureChain
+	featuresPNext, featureExtensions := a.ext.enable(&chain, requested, hasTimelineSemaphore)
+	extensions = append(extensions, featureExtensions...)
+
+	// The device create info references these through uintptr fields, which
+	// keep nothing alive or in place; pin them until vkCreateDevice returns
+	// (P1-VK-012).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	extensionPtrs := make([]uintptr, len(extensions))
+	pinner.Pin(&extensionPtrs[0])
+	for i, ext := range extensions {
+		pinner.Pin(unsafe.StringData(ext))
+		extensionPtrs[i] = uintptr(unsafe.Pointer(unsafe.StringData(ext)))
+	}
+
 	// Device create info
 	deviceCreateInfo := vk.DeviceCreateInfo{
 		SType:                   vk.StructureTypeDeviceCreateInfo,
+		PNext:                   featuresPNext,
 		QueueCreateInfoCount:    1,
 		PQueueCreateInfos:       &queueCreateInfo,
 		EnabledExtensionCount:   uint32(len(extensions)),
 		PpEnabledExtensionNames: uintptr(unsafe.Pointer(&extensionPtrs[0])),
-		PEnabledFeatures:        &a.features,
-	}
-
-	// Enable timeline semaphore feature if supported.
-	// Vulkan 1.2 requires explicitly enabling features via PNext chain.
-	var vulkan12Enable vk.PhysicalDeviceVulkan12Features
-	if hasTimelineSemaphore {
-		vulkan12Enable.SType = vk.StructureTypePhysicalDeviceVulkan12Features
-		vulkan12Enable.TimelineSemaphore = vk.Bool32(vk.True)
-		deviceCreateInfo.PNext = (*uintptr)(unsafe.Pointer(&vulkan12Enable))
+		PEnabledFeatures:        &chain.core,
 	}
 
 	var device vk.Device
 	result := vkCreateDevice(a.instance, a.physicalDevice, &deviceCreateInfo, nil, &device)
+	runtime.KeepAlive(&chain)
 	if result != vk.Success {
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: vkCreateDevice failed: %d", result)
 	}
@@ -162,6 +154,14 @@ func (a *Adapter) open(requestedQueueFamily *uint32) (hal.OpenDevice, error) {
 		supportsDrawIndirectCount:  supportsDrawIndirectCountFeature(a.properties.ApiVersion),
 		maxDrawIndirectCount:       a.properties.Limits.MaxDrawIndirectCount,
 		supportsIncrementalPresent: hasIncrementalPresent,
+		spirvOptions:               spirvOptions(a.properties.ApiVersion, a.ext),
+	}
+	// Keep f16 stage inputs and outputs f16 only where the device enabled
+	// StorageInputOutput16; naga converts them through f32 otherwise
+	// (Rust wgpu-hal vulkan/adapter.rs, use_storage_input_output_16).
+	dev.spirvOptions.UseStorageInputOutput16 = requested.Contains(gputypes.FeatureShaderF16) && a.ext.storageInputOutput16()
+	if a.ext.allowVaryingSubgroupSize(requested) {
+		dev.shaderStageFlags = vk.PipelineShaderStageCreateFlags(vk.PipelineShaderStageCreateAllowVaryingSubgroupSizeBit)
 	}
 	loadDrawIndirectCountProcs(dev)
 
@@ -315,8 +315,8 @@ type qualifiedAdapter struct {
 	snapshot    surfaceSnapshot
 }
 
-func (a *qualifiedAdapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
-	return a.base.open(&a.queueFamily)
+func (a *qualifiedAdapter) Open(features gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, error) {
+	return a.base.open(&a.queueFamily, features)
 }
 
 func (a *qualifiedAdapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {

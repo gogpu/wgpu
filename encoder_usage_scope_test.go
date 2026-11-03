@@ -46,7 +46,7 @@ func newUsageScopeTexture(t *testing.T, device *Device, label string, usage gput
 
 func newUsageScopeBuffer(t *testing.T, device *Device, label string, usage gputypes.BufferUsage) *Buffer {
 	t.Helper()
-	buf, err := device.CreateBuffer(&BufferDescriptor{Label: label, Size: 256, Usage: usage})
+	buf, err := device.CreateBuffer(&BufferDescriptor{Label: label, Size: 4096, Usage: usage})
 	if err != nil {
 		t.Fatalf("CreateBuffer(%s): %v", label, err)
 	}

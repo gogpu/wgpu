@@ -37,6 +37,7 @@ const (
 	OpLoad                 = 61
 	OpStore                = 62
 	OpAccessChain          = 65
+	OpArrayLength          = 68
 	OpDecorate             = 71
 	OpMemberDecorate       = 72
 	OpCompositeExtract     = 81
@@ -93,9 +94,10 @@ const (
 
 	OpFunctionCall = 57
 
-	OpSwitch      = 251
-	OpKill        = 252
-	OpUnreachable = 255
+	OpSwitch              = 251
+	OpKill                = 252
+	OpUnreachable         = 255
+	OpTerminateInvocation = 4416 // SPV_KHR_terminate_invocation, core in SPIR-V 1.6
 
 	// Comparison ops (integer, unsigned).
 	OpULessThan         = 176
@@ -108,9 +110,33 @@ const (
 	OpSGreaterThanEqual = 175
 
 	// Logical ops.
-	OpLogicalAnd = 167
-	OpLogicalOr  = 166
-	OpLogicalNot = 168
+	OpLogicalAnd      = 167
+	OpLogicalOr       = 166
+	OpLogicalNot      = 168
+	OpLogicalEqual    = 164
+	OpLogicalNotEqual = 165
+
+	// Float inequality, ordered (false with a NaN) and unordered (true).
+	OpFOrdNotEqual   = 182
+	OpFUnordNotEqual = 183
+
+	// Bit field ops.
+	OpBitFieldInsert   = 201
+	OpBitFieldSExtract = 202
+	OpBitFieldUExtract = 203
+	OpBitReverse       = 204
+	OpBitCount         = 205
+
+	// Derivatives (fragment stage).
+	OpDPdx         = 207
+	OpDPdy         = 208
+	OpFwidth       = 209
+	OpDPdxFine     = 210
+	OpDPdyFine     = 211
+	OpFwidthFine   = 212
+	OpDPdxCoarse   = 213
+	OpDPdyCoarse   = 214
+	OpFwidthCoarse = 215
 
 	// Bitwise ops.
 	OpBitwiseAnd           = 199
@@ -129,7 +155,12 @@ const (
 	OpImageSampleImplicitLod = 87
 	OpImageSampleExplicitLod = 88
 	OpImageFetch             = 95
+	OpImageRead              = 98
+	OpImageWrite             = 99
+	OpImageQuerySizeLod      = 103
 	OpImageQuerySize         = 104
+	OpImageQueryLevels       = 106
+	OpImageQuerySamples      = 107
 
 	// Atomic ops.
 	OpAtomicLoad            = 227

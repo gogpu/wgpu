@@ -5,6 +5,8 @@ package core
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/gputypes"
 )
 
 // unnamedLabel is the default label for resources without a name.
@@ -190,6 +192,9 @@ const (
 	CreateBufferErrorMapReadWriteExclusive
 	// CreateBufferErrorHAL indicates the HAL backend failed to create the buffer.
 	CreateBufferErrorHAL
+	// CreateBufferErrorMissingDownlevelFlags indicates the usage needs
+	// downlevel capabilities the adapter lacks (MissingFlags).
+	CreateBufferErrorMissingDownlevelFlags
 )
 
 // CreateBufferError represents an error during buffer creation.
@@ -199,6 +204,9 @@ type CreateBufferError struct {
 	RequestedSize uint64
 	MaxSize       uint64
 	HALError      error
+	// MissingFlags are the downlevel flags the usage needs and the adapter
+	// lacks (CreateBufferErrorMissingDownlevelFlags).
+	MissingFlags gputypes.DownlevelFlags
 }
 
 // Error implements the error interface.
@@ -222,6 +230,8 @@ func (e *CreateBufferError) Error() string {
 		return fmt.Sprintf("buffer %q: MAP_READ and MAP_WRITE are mutually exclusive", label)
 	case CreateBufferErrorHAL:
 		return fmt.Sprintf("buffer %q: HAL error: %v", label, e.HALError)
+	case CreateBufferErrorMissingDownlevelFlags:
+		return fmt.Sprintf("buffer %q: usage needs downlevel flags the adapter lacks: %s", label, e.MissingFlags)
 	default:
 		return fmt.Sprintf("buffer %q: unknown error", label)
 	}
@@ -319,6 +329,13 @@ const (
 	CreateTextureErrorInvalidDimension
 	// CreateTextureErrorHAL indicates the HAL backend failed to create the texture.
 	CreateTextureErrorHAL
+	// CreateTextureErrorInvalidViewFormat indicates a view format that differs
+	// from the texture format by more than the sRGB suffix (Rust
+	// CreateTextureError::InvalidViewFormat).
+	CreateTextureErrorInvalidViewFormat
+	// CreateTextureErrorMissingDownlevelFlags indicates a descriptor that needs
+	// a downlevel flag the device lacks (Rust CreateTextureError::MissingDownlevelFlags).
+	CreateTextureErrorMissingDownlevelFlags
 )
 
 // CreateTextureError represents an error during texture creation.
@@ -333,6 +350,12 @@ type CreateTextureError struct {
 	MaxMips          uint32
 	RequestedSamples uint32
 	HALError         error
+	// Format is the texture format and ViewFormat the offending view format
+	// (CreateTextureErrorInvalidViewFormat).
+	Format     gputypes.TextureFormat
+	ViewFormat gputypes.TextureFormat
+	// Cause is the downlevel error (CreateTextureErrorMissingDownlevelFlags).
+	Cause error
 }
 
 // Error implements the error interface.
@@ -379,19 +402,64 @@ func (e *CreateTextureError) Error() string {
 	case CreateTextureErrorHAL:
 		return fmt.Sprintf("texture %q: HAL error: %v", label, e.HALError)
 	default:
+		return e.viewFormatText(label)
+	}
+}
+
+// viewFormatText describes the view format kinds of CreateTextureError.
+func (e *CreateTextureError) viewFormatText(label string) string {
+	switch e.Kind {
+	case CreateTextureErrorInvalidViewFormat:
+		return fmt.Sprintf("texture %q: view format %v is not compatible with texture format %v (they may differ only by the sRGB suffix)",
+			label, e.ViewFormat, e.Format)
+	case CreateTextureErrorMissingDownlevelFlags:
+		return fmt.Sprintf("texture %q: %v", label, e.Cause)
+	default:
 		return fmt.Sprintf("texture %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or downlevel error, if any.
 func (e *CreateTextureError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateTextureError returns true if the error is a CreateTextureError.
 func IsCreateTextureError(err error) bool {
 	var cte *CreateTextureError
 	return errors.As(err, &cte)
+}
+
+// CreateTextureViewErrorKind represents the type of texture view creation error.
+type CreateTextureViewErrorKind int
+
+const (
+	// CreateTextureViewErrorFormatReinterpretation indicates a view format that is
+	// neither the texture format nor one of its view formats (Rust
+	// CreateTextureViewError::FormatReinterpretation).
+	CreateTextureViewErrorFormatReinterpretation CreateTextureViewErrorKind = iota
+)
+
+// CreateTextureViewError represents an error during texture view creation.
+type CreateTextureViewError struct {
+	Kind CreateTextureViewErrorKind
+	// TextureFormat is the texture's format and ViewFormat the requested one.
+	TextureFormat gputypes.TextureFormat
+	ViewFormat    gputypes.TextureFormat
+}
+
+// Error implements the error interface.
+func (e *CreateTextureViewError) Error() string {
+	switch e.Kind {
+	case CreateTextureViewErrorFormatReinterpretation:
+		return fmt.Sprintf("texture view: format %v is not the texture format %v and was not listed in the texture's view formats",
+			e.ViewFormat, e.TextureFormat)
+	default:
+		return "texture view: unknown error"
+	}
 }
 
 // =============================================================================
@@ -474,6 +542,13 @@ const (
 	CreateShaderModuleErrorDualSource
 	// CreateShaderModuleErrorHAL indicates the HAL backend failed to create the shader module.
 	CreateShaderModuleErrorHAL
+	// CreateShaderModuleErrorParsing indicates the WGSL source does not parse
+	// (Rust CreateShaderModuleError::Parsing). Cause holds naga's error.
+	CreateShaderModuleErrorParsing
+	// CreateShaderModuleErrorValidation indicates naga's validator rejected
+	// the module (Rust CreateShaderModuleError::Validation). Cause holds
+	// naga's valid.Errors.
+	CreateShaderModuleErrorValidation
 )
 
 // CreateShaderModuleError represents an error during shader module creation.
@@ -481,6 +556,9 @@ type CreateShaderModuleError struct {
 	Kind     CreateShaderModuleErrorKind
 	Label    string
 	HALError error
+	// Cause is naga's error for CreateShaderModuleErrorParsing and
+	// CreateShaderModuleErrorValidation.
+	Cause error
 }
 
 // Error implements the error interface.
@@ -497,14 +575,20 @@ func (e *CreateShaderModuleError) Error() string {
 		return fmt.Sprintf("shader module %q: must not provide both WGSL and SPIRV source", label)
 	case CreateShaderModuleErrorHAL:
 		return fmt.Sprintf("shader module %q: HAL error: %v", label, e.HALError)
+	case CreateShaderModuleErrorParsing, CreateShaderModuleErrorValidation:
+		// naga's text already says "parse error" or "validation failed".
+		return fmt.Sprintf("shader module %q: %v", label, e.Cause)
 	default:
 		return fmt.Sprintf("shader module %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or naga error, if any.
 func (e *CreateShaderModuleError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateShaderModuleError returns true if the error is a CreateShaderModuleError.
@@ -529,7 +613,8 @@ const (
 	CreateRenderPipelineErrorMissingFragmentModule
 	// CreateRenderPipelineErrorMissingFragmentEntryPoint indicates the fragment entry point was empty.
 	CreateRenderPipelineErrorMissingFragmentEntryPoint
-	// CreateRenderPipelineErrorNoFragmentTargets indicates the fragment stage had no color targets.
+	// CreateRenderPipelineErrorNoFragmentTargets indicates the fragment stage had no color
+	// targets and the pipeline has no depth-stencil state: no attachment at all.
 	CreateRenderPipelineErrorNoFragmentTargets
 	// CreateRenderPipelineErrorTooManyColorTargets indicates too many color targets.
 	CreateRenderPipelineErrorTooManyColorTargets
@@ -566,11 +651,29 @@ const (
 	// attribute whose offset plus format size runs past its buffer's arrayStride
 	// (or past Limits.MaxVertexBufferArrayStride when arrayStride is 0).
 	CreateRenderPipelineErrorVertexAttributeOutOfStride
-	// CreateRenderPipelineErrorVertexStrideZero indicates a vertex buffer with
-	// arrayStride 0. WebGPU allows it (every vertex reads the same element), but
-	// the native backends do not emulate it yet and disagree about what 0 means,
-	// so it is rejected until they do.
+	// CreateRenderPipelineErrorVertexStrideZero indicated a vertex buffer with
+	// arrayStride 0, which v0.34.6 rejected.
+	//
+	// Deprecated: arrayStride 0 (broadcast) is supported on every backend and
+	// is no longer rejected; this kind is never returned.
 	CreateRenderPipelineErrorVertexStrideZero
+	// CreateRenderPipelineErrorTooManyVertexBuffers indicates more vertex
+	// buffers than Limits.MaxVertexBuffers (Given, Limit).
+	// Rust: pipeline::CreateRenderPipelineError::TooManyVertexBuffers
+	CreateRenderPipelineErrorTooManyVertexBuffers
+	// CreateRenderPipelineErrorVertexAttributeInvalidOffset indicates a vertex
+	// attribute offset that is not a multiple of min(4, format size), or not
+	// below 2^28.
+	// Rust: pipeline::CreateRenderPipelineError::InvalidVertexAttributeOffset
+	CreateRenderPipelineErrorVertexAttributeInvalidOffset
+	// CreateRenderPipelineErrorVertexAttributeLocationTooLarge indicates a
+	// vertex attribute shaderLocation at or above Limits.MaxVertexAttributes.
+	// Rust: pipeline::CreateRenderPipelineError::VertexAttributeLocationTooLarge
+	CreateRenderPipelineErrorVertexAttributeLocationTooLarge
+	// CreateRenderPipelineErrorShaderLocationClash indicates two vertex
+	// attributes of the pipeline at one shaderLocation.
+	// Rust: pipeline::CreateRenderPipelineError::ShaderLocationClash
+	CreateRenderPipelineErrorShaderLocationClash
 )
 
 // CreateRenderPipelineError represents an error during render pipeline creation.
@@ -599,7 +702,15 @@ type CreateRenderPipelineError struct {
 	// AttributeFormat is the attribute vertex format for
 	// CreateRenderPipelineErrorVertexAttributeOutOfStride.
 	AttributeFormat string
-	HALError        error
+	// ShaderLocation is the attribute's shaderLocation for vertex attribute
+	// offset, location and clash errors.
+	ShaderLocation uint32
+	// Given and Limit are the count and the device limit for
+	// CreateRenderPipelineErrorTooManyVertexBuffers and the limit for
+	// CreateRenderPipelineErrorVertexAttributeLocationTooLarge.
+	Given    int
+	Limit    uint32
+	HALError error
 }
 
 // Error implements the error interface.
@@ -619,7 +730,7 @@ func (e *CreateRenderPipelineError) Error() string {
 	case CreateRenderPipelineErrorMissingFragmentEntryPoint:
 		return fmt.Sprintf("render pipeline %q: fragment entry point must not be empty", label)
 	case CreateRenderPipelineErrorNoFragmentTargets:
-		return fmt.Sprintf("render pipeline %q: fragment stage must have at least one color target", label)
+		return fmt.Sprintf("render pipeline %q: needs at least one attachment: a color target or a depth-stencil state", label)
 	case CreateRenderPipelineErrorTooManyColorTargets:
 		return fmt.Sprintf("render pipeline %q: color target count %d exceeds maximum %d",
 			label, e.TargetCount, e.MaxTargets)
@@ -657,6 +768,30 @@ func (e *CreateRenderPipelineError) Error() string {
 		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] arrayStride 0 (broadcast) is not supported on native backends yet",
 			label, e.BufferIndex)
 	default:
+		return e.vertexAttributeMessage(label)
+	}
+}
+
+// vertexAttributeMessage is Error for the vertex buffer count and vertex
+// attribute kinds.
+func (e *CreateRenderPipelineError) vertexAttributeMessage(label string) string {
+	switch e.Kind {
+	case CreateRenderPipelineErrorTooManyVertexBuffers:
+		return fmt.Sprintf("render pipeline %q: %d vertex buffers exceed maxVertexBuffers %d", label, e.Given, e.Limit)
+	case CreateRenderPipelineErrorVertexAttributeInvalidOffset:
+		if e.AttributeOffset >= maxVertexAttributeOffset {
+			return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute at shaderLocation %d: offset %d is not below 2^28",
+				label, e.BufferIndex, e.ShaderLocation, e.AttributeOffset)
+		}
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute at shaderLocation %d: offset %d is not a multiple of min(4, size of %s)",
+			label, e.BufferIndex, e.ShaderLocation, e.AttributeOffset, e.AttributeFormat)
+	case CreateRenderPipelineErrorVertexAttributeLocationTooLarge:
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute shaderLocation %d is not below maxVertexAttributes %d",
+			label, e.BufferIndex, e.ShaderLocation, e.Limit)
+	case CreateRenderPipelineErrorShaderLocationClash:
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute shaderLocation %d is used by more than one attribute",
+			label, e.BufferIndex, e.ShaderLocation)
+	default:
 		return fmt.Sprintf("render pipeline %q: unknown error", label)
 	}
 }
@@ -692,6 +827,14 @@ const (
 	CreateComputePipelineErrorWorkgroupSizeZero
 	// CreateComputePipelineErrorTooManyInvocations indicates total invocations exceed device limit.
 	CreateComputePipelineErrorTooManyInvocations
+	// CreateComputePipelineErrorWorkgroupStorageExceeded indicates the
+	// workgroup storage the entry point uses exceeds
+	// maxComputeWorkgroupStorageSize (WebGPU createComputePipeline).
+	CreateComputePipelineErrorWorkgroupStorageExceeded
+	// CreateComputePipelineErrorPipelineConstants indicates the pipeline
+	// constants do not apply to the module's overrides. Cause holds naga's
+	// error.
+	CreateComputePipelineErrorPipelineConstants
 )
 
 // CreateComputePipelineError represents an error during compute pipeline creation.
@@ -707,6 +850,11 @@ type CreateComputePipelineError struct {
 	Limit uint32
 	// TotalInvocations is the product x*y*z for TooManyInvocations errors.
 	TotalInvocations uint64
+	// WorkgroupStorage is the workgroup storage in bytes the entry point
+	// uses, for WorkgroupStorageExceeded errors.
+	WorkgroupStorage uint64
+	// Cause is naga's error for PipelineConstants errors.
+	Cause error
 }
 
 // Error implements the error interface.
@@ -731,14 +879,22 @@ func (e *CreateComputePipelineError) Error() string {
 	case CreateComputePipelineErrorTooManyInvocations:
 		return fmt.Sprintf("compute pipeline %q: total workgroup invocations %d exceeds device limit %d",
 			label, e.TotalInvocations, e.Limit)
+	case CreateComputePipelineErrorWorkgroupStorageExceeded:
+		return fmt.Sprintf("compute pipeline %q: workgroup storage %d bytes exceeds maxComputeWorkgroupStorageSize %d",
+			label, e.WorkgroupStorage, e.Limit)
+	case CreateComputePipelineErrorPipelineConstants:
+		return fmt.Sprintf("compute pipeline %q: %v", label, e.Cause)
 	default:
 		return fmt.Sprintf("compute pipeline %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL or naga error, if any.
 func (e *CreateComputePipelineError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateComputePipelineError returns true if the error is a CreateComputePipelineError.
@@ -1186,4 +1342,411 @@ func (e *RenderPassCompatibilityError) Error() string {
 func IsRenderPassCompatibilityError(err error) bool {
 	var rpce *RenderPassCompatibilityError
 	return errors.As(err, &rpce)
+}
+
+// =============================================================================
+// Device Request Errors
+// =============================================================================
+
+// RequestDeviceErrorKind represents the type of device request error.
+type RequestDeviceErrorKind int
+
+const (
+	// RequestDeviceErrorUnsupportedFeature indicates the request requires
+	// features the adapter does not expose (Rust
+	// RequestDeviceError::UnsupportedFeature).
+	RequestDeviceErrorUnsupportedFeature RequestDeviceErrorKind = iota
+	// RequestDeviceErrorLimitsExceeded indicates a required limit is better
+	// than the adapter's (Rust RequestDeviceError::LimitsExceeded).
+	RequestDeviceErrorLimitsExceeded
+)
+
+// RequestDeviceError represents an error during a device request.
+type RequestDeviceError struct {
+	Kind RequestDeviceErrorKind
+	// MissingFeatures are the required features the adapter does not expose.
+	MissingFeatures gputypes.Features
+	// Limit is the gputypes.Limits field name of the exceeded limit, with the
+	// requested value and the adapter's.
+	Limit     string
+	Requested uint64
+	Allowed   uint64
+}
+
+// Error implements the error interface.
+func (e *RequestDeviceError) Error() string {
+	switch e.Kind {
+	case RequestDeviceErrorUnsupportedFeature:
+		return fmt.Sprintf("request device: the adapter does not support the required features %v", e.MissingFeatures)
+	case RequestDeviceErrorLimitsExceeded:
+		return fmt.Sprintf("request device: limit %s = %d is better than the adapter's %d", e.Limit, e.Requested, e.Allowed)
+	default:
+		return "request device: unknown error"
+	}
+}
+
+// =============================================================================
+// Transfer (copy command) Errors
+// =============================================================================
+
+// TransferErrorKind represents the type of copy command error.
+type TransferErrorKind int
+
+const (
+	// TransferErrorUnalignedBytesPerRow indicates a bytesPerRow that is not a
+	// multiple of CopyBytesPerRowAlignment (Rust TransferError::UnalignedBytesPerRow).
+	TransferErrorUnalignedBytesPerRow TransferErrorKind = iota
+	// TransferErrorUnalignedBufferOffset indicates a buffer offset that is not
+	// a multiple of the texel block copy size (Rust
+	// TransferError::UnalignedBufferOffset).
+	TransferErrorUnalignedBufferOffset
+	// TransferErrorInvalidSampleCount indicates a copy of a multisampled
+	// texture (Rust TransferError::InvalidSampleCount).
+	TransferErrorInvalidSampleCount
+	// TransferErrorSameSourceDestinationBuffer indicates a buffer-to-buffer
+	// copy whose source and destination are the same buffer (Rust
+	// TransferError::SameSourceDestinationBuffer).
+	TransferErrorSameSourceDestinationBuffer
+	// TransferErrorMissingBufferUsage indicates a copy endpoint buffer that
+	// was created without the usage the copy needs (Rust
+	// TransferError::MissingBufferUsage).
+	TransferErrorMissingBufferUsage
+	// TransferErrorUnalignedCopySize indicates a buffer-to-buffer copy size
+	// that is not a multiple of CopyBufferAlignment (Rust
+	// TransferError::UnalignedCopySize).
+	TransferErrorUnalignedCopySize
+	// TransferErrorBufferStartOffsetOverrun indicates a copy offset past the
+	// end of its buffer (Rust TransferError::BufferStartOffsetOverrun).
+	TransferErrorBufferStartOffsetOverrun
+	// TransferErrorBufferEndOffsetOverrun indicates a copy range that ends
+	// past the end of its buffer (Rust TransferError::BufferEndOffsetOverrun).
+	TransferErrorBufferEndOffsetOverrun
+	// TransferErrorMissingTextureUsage indicates a copy endpoint texture that
+	// was created without COPY_SRC or COPY_DST (Rust
+	// TransferError::MissingTextureUsage).
+	TransferErrorMissingTextureUsage
+	// TransferErrorInvalidTextureMipLevel indicates a mip level the texture
+	// does not have (Rust TransferError::InvalidTextureMipLevel).
+	TransferErrorInvalidTextureMipLevel
+	// TransferErrorInvalidTextureAspect indicates an aspect the texture's
+	// format does not have (Rust TransferError::InvalidTextureAspect).
+	TransferErrorInvalidTextureAspect
+	// TransferErrorCopyAspectNotOne indicates a buffer-texture copy that does
+	// not name a single aspect (Rust TransferError::CopyAspectNotOne).
+	TransferErrorCopyAspectNotOne
+	// TransferErrorCopySrcMissingAspects indicates a texture-to-texture copy
+	// source that does not name every aspect of its format (Rust
+	// TransferError::CopySrcMissingAspects).
+	TransferErrorCopySrcMissingAspects
+	// TransferErrorCopyDstMissingAspects is TransferErrorCopySrcMissingAspects
+	// for the destination (Rust TransferError::CopyDstMissingAspects).
+	TransferErrorCopyDstMissingAspects
+	// TransferErrorCopyFromForbiddenTextureFormat indicates a format that can
+	// not be copied from (Rust TransferError::CopyFromForbiddenTextureFormat).
+	TransferErrorCopyFromForbiddenTextureFormat
+	// TransferErrorCopyFromForbiddenTextureFormatAspect indicates a format and
+	// aspect that can not be copied from (Rust
+	// TransferError::CopyFromForbiddenTextureFormatAspect).
+	TransferErrorCopyFromForbiddenTextureFormatAspect
+	// TransferErrorCopyToForbiddenTextureFormat indicates a format that can
+	// not be copied to (Rust TransferError::CopyToForbiddenTextureFormat).
+	TransferErrorCopyToForbiddenTextureFormat
+	// TransferErrorCopyToForbiddenTextureFormatAspect indicates a format and
+	// aspect that can not be copied to (Rust
+	// TransferError::CopyToForbiddenTextureFormatAspect).
+	TransferErrorCopyToForbiddenTextureFormatAspect
+	// TransferErrorSampleCountNotEqual indicates a texture-to-texture copy
+	// between textures of different sample counts (Rust
+	// TransferError::SampleCountNotEqual).
+	TransferErrorSampleCountNotEqual
+	// TransferErrorInvalidCopyWithinSameTexture indicates a copy whose source
+	// and destination subresources overlap in one texture (Rust
+	// TransferError::InvalidCopyWithinSameTexture).
+	TransferErrorInvalidCopyWithinSameTexture
+	// TransferErrorTextureOverrun indicates a copy region that ends past the
+	// end of its texture's mip level (Rust TransferError::TextureOverrun).
+	TransferErrorTextureOverrun
+	// TransferErrorUnsupportedPartialTransfer indicates a partial copy of a
+	// depth/stencil or multisampled texture, which must copy the whole mip
+	// level in x and y (Rust TransferError::UnsupportedPartialTransfer).
+	TransferErrorUnsupportedPartialTransfer
+	// TransferErrorUnalignedCopyOriginX indicates an origin x that is not a
+	// multiple of the block width (Rust TransferError::UnalignedCopyOriginX).
+	TransferErrorUnalignedCopyOriginX
+	// TransferErrorUnalignedCopyOriginY indicates an origin y that is not a
+	// multiple of the block height (Rust TransferError::UnalignedCopyOriginY).
+	TransferErrorUnalignedCopyOriginY
+	// TransferErrorUnalignedCopyWidth indicates a copy width that is not a
+	// multiple of the block width (Rust TransferError::UnalignedCopyWidth).
+	TransferErrorUnalignedCopyWidth
+	// TransferErrorUnalignedCopyHeight indicates a copy height that is not a
+	// multiple of the block height (Rust TransferError::UnalignedCopyHeight).
+	TransferErrorUnalignedCopyHeight
+	// TransferErrorUnspecifiedBytesPerRow indicates a copy of more than one
+	// row without bytesPerRow (Rust TransferError::UnspecifiedBytesPerRow).
+	TransferErrorUnspecifiedBytesPerRow
+	// TransferErrorUnspecifiedRowsPerImage indicates a copy of more than one
+	// image without rowsPerImage (Rust TransferError::UnspecifiedRowsPerImage).
+	TransferErrorUnspecifiedRowsPerImage
+	// TransferErrorInvalidBytesPerRow indicates a bytesPerRow smaller than one
+	// row of the copy (Rust TransferError::InvalidBytesPerRow).
+	TransferErrorInvalidBytesPerRow
+	// TransferErrorInvalidRowsPerImage indicates a rowsPerImage smaller than
+	// the rows of one image of the copy (Rust TransferError::InvalidRowsPerImage).
+	TransferErrorInvalidRowsPerImage
+	// TransferErrorSizeOverflow indicates a copy whose byte size does not fit
+	// in 64 bits (Rust TransferError::SizeOverflow).
+	TransferErrorSizeOverflow
+	// TransferErrorTextureFormatsNotCopyCompatible indicates a
+	// texture-to-texture copy between formats that differ by more than the
+	// sRGB suffix (Rust TransferError::TextureFormatsNotCopyCompatible).
+	TransferErrorTextureFormatsNotCopyCompatible
+	// TransferErrorMissingDownlevelFlags indicates a copy the device does not
+	// support (Rust TransferError::MissingDownlevelFlags); Cause says which
+	// flags are missing.
+	TransferErrorMissingDownlevelFlags
+)
+
+// TextureErrorDimension names the texture dimension a copy error is about
+// (Rust TextureErrorDimension).
+type TextureErrorDimension int
+
+const (
+	// TextureErrorDimensionX is the width.
+	TextureErrorDimensionX TextureErrorDimension = iota
+	// TextureErrorDimensionY is the height.
+	TextureErrorDimensionY
+	// TextureErrorDimensionZ is the depth or array layer count.
+	TextureErrorDimensionZ
+)
+
+// String returns the name of the dimension.
+func (d TextureErrorDimension) String() string {
+	switch d {
+	case TextureErrorDimensionY:
+		return "Y"
+	case TextureErrorDimensionZ:
+		return "Z"
+	default:
+		return "X"
+	}
+}
+
+// CopySide names the endpoint of a copy an error is about (Rust CopySide).
+type CopySide int
+
+const (
+	// CopySideSource is the buffer or texture a copy reads from.
+	CopySideSource CopySide = iota
+	// CopySideDestination is the buffer or texture a copy writes to.
+	CopySideDestination
+)
+
+// String returns the lowercase name of the side.
+func (s CopySide) String() string {
+	if s == CopySideDestination {
+		return "destination"
+	}
+	return "source"
+}
+
+// TransferError represents an invalid copy command on a command encoder.
+// Which fields are set depends on Kind.
+type TransferError struct {
+	Kind        TransferErrorKind
+	BytesPerRow uint32
+	Offset      uint64
+	Alignment   uint32
+	// SampleCount is the texture sample count (the source's for
+	// TransferErrorSampleCountNotEqual).
+	SampleCount uint32
+	// DstSampleCount is the destination sample count (TransferErrorSampleCountNotEqual).
+	DstSampleCount uint32
+	// Side is the endpoint the error is about (usage, offset and overrun kinds).
+	Side CopySide
+	// Size is the copy size in bytes (size and end-overrun kinds).
+	Size uint64
+	// BufferSize is the size of the endpoint buffer (overrun kinds).
+	BufferSize uint64
+	// Usage is the usage the endpoint buffer lacks (TransferErrorMissingBufferUsage).
+	Usage gputypes.BufferUsage
+	// TextureUsage is the usage the endpoint texture lacks (TransferErrorMissingTextureUsage).
+	TextureUsage gputypes.TextureUsage
+	// MipLevel and MipLevelCount describe TransferErrorInvalidTextureMipLevel.
+	MipLevel, MipLevelCount uint32
+	// Format and Aspect describe the invalid aspect and forbidden format kinds;
+	// Aspect is also the source aspect of TransferErrorInvalidCopyWithinSameTexture.
+	Format gputypes.TextureFormat
+	Aspect gputypes.TextureAspect
+	// OriginZ, DstOriginZ and Layers describe TransferErrorInvalidCopyWithinSameTexture.
+	OriginZ, DstOriginZ, Layers uint32
+	// Dimension, StartOffset, EndOffset and TextureSize describe
+	// TransferErrorTextureOverrun and TransferErrorUnsupportedPartialTransfer:
+	// the copy covers [StartOffset, EndOffset) of a Dimension that is
+	// TextureSize texels long. Format, SampleCount and Side are set as well.
+	Dimension                           TextureErrorDimension
+	StartOffset, EndOffset, TextureSize uint32
+	// DstFormat is the destination format of
+	// TransferErrorTextureFormatsNotCopyCompatible (Format is the source's).
+	DstFormat gputypes.TextureFormat
+	// Cause is the underlying error of TransferErrorMissingDownlevelFlags.
+	Cause error
+}
+
+// Unwrap returns the underlying error, if any.
+func (e *TransferError) Unwrap() error { return e.Cause }
+
+// Error implements the error interface.
+func (e *TransferError) Error() string {
+	switch e.Kind {
+	case TransferErrorUnalignedBytesPerRow:
+		return fmt.Sprintf("copy: bytesPerRow %d is not a multiple of %d", e.BytesPerRow, CopyBytesPerRowAlignment)
+	case TransferErrorUnalignedBufferOffset:
+		return fmt.Sprintf("copy: buffer offset %d is not a multiple of %d", e.Offset, e.Alignment)
+	case TransferErrorInvalidSampleCount:
+		return fmt.Sprintf("copy: texture sample count %d, a buffer-texture copy needs 1", e.SampleCount)
+	case TransferErrorSameSourceDestinationBuffer:
+		return "copy: source and destination are the same buffer"
+	case TransferErrorMissingBufferUsage:
+		return fmt.Sprintf("copy: %s buffer is missing usage %#x", e.Side, e.Usage)
+	case TransferErrorUnalignedCopySize:
+		return fmt.Sprintf("copy: size %d is not a multiple of %d", e.Size, CopyBufferAlignment)
+	case TransferErrorBufferStartOffsetOverrun:
+		return fmt.Sprintf("copy: %s offset %d is past the end of the %d-byte buffer", e.Side, e.Offset, e.BufferSize)
+	case TransferErrorBufferEndOffsetOverrun:
+		return fmt.Sprintf("copy: %s range of %d bytes at offset %d overruns the %d-byte buffer",
+			e.Side, e.Size, e.Offset, e.BufferSize)
+	default:
+		return e.textureErrorText()
+	}
+}
+
+// textureErrorText is Error for the texture copy kinds.
+func (e *TransferError) textureErrorText() string {
+	switch e.Kind {
+	case TransferErrorMissingTextureUsage:
+		return fmt.Sprintf("copy: %s texture is missing usage %#x", e.Side, e.TextureUsage)
+	case TransferErrorInvalidTextureMipLevel:
+		return fmt.Sprintf("copy: mip level %d does not exist, the texture has %d", e.MipLevel, e.MipLevelCount)
+	case TransferErrorInvalidTextureAspect:
+		return fmt.Sprintf("copy: format %v has no aspect %v", e.Format, e.Aspect)
+	case TransferErrorCopyAspectNotOne:
+		return "copy: a buffer-texture copy must name a single aspect of the texture format"
+	case TransferErrorCopySrcMissingAspects:
+		return "copy: the source must name all aspects of its texture format"
+	case TransferErrorCopyDstMissingAspects:
+		return "copy: the destination must name all aspects of its texture format"
+	case TransferErrorCopyFromForbiddenTextureFormat:
+		return fmt.Sprintf("copy: copying from textures of format %v is forbidden", e.Format)
+	case TransferErrorCopyFromForbiddenTextureFormatAspect:
+		return fmt.Sprintf("copy: copying from format %v with aspect %v is forbidden", e.Format, e.Aspect)
+	case TransferErrorCopyToForbiddenTextureFormat:
+		return fmt.Sprintf("copy: copying to textures of format %v is forbidden", e.Format)
+	case TransferErrorCopyToForbiddenTextureFormatAspect:
+		return fmt.Sprintf("copy: copying to format %v with aspect %v is forbidden", e.Format, e.Aspect)
+	case TransferErrorSampleCountNotEqual:
+		return fmt.Sprintf("copy: source sample count %d differs from destination sample count %d",
+			e.SampleCount, e.DstSampleCount)
+	case TransferErrorInvalidCopyWithinSameTexture:
+		return fmt.Sprintf("copy: source and destination overlap in one texture (aspect %v, origin z %d and %d, %d layers)",
+			e.Aspect, e.OriginZ, e.DstOriginZ, e.Layers)
+	default:
+		return e.rangeErrorText()
+	}
+}
+
+// rangeErrorText is Error for the texture copy range, buffer layout and
+// compatibility kinds.
+func (e *TransferError) rangeErrorText() string {
+	switch e.Kind {
+	case TransferErrorTextureOverrun:
+		return fmt.Sprintf("copy: %s %d..%d overruns the %s texture, whose %s size is %d",
+			e.Dimension, e.StartOffset, e.EndOffset, e.Side, e.Dimension, e.TextureSize)
+	case TransferErrorUnsupportedPartialTransfer:
+		return fmt.Sprintf("copy: partial copy of %s %d..%d (size %d) is not supported for the %s texture format %v with %d samples",
+			e.Dimension, e.StartOffset, e.EndOffset, e.TextureSize, e.Side, e.Format, e.SampleCount)
+	case TransferErrorUnalignedCopyOriginX:
+		return "copy: origin x is not a multiple of the block width"
+	case TransferErrorUnalignedCopyOriginY:
+		return "copy: origin y is not a multiple of the block height"
+	case TransferErrorUnalignedCopyWidth:
+		return "copy: width is not a multiple of the block width"
+	case TransferErrorUnalignedCopyHeight:
+		return "copy: height is not a multiple of the block height"
+	case TransferErrorUnspecifiedBytesPerRow:
+		return "copy: bytesPerRow must be specified because more than one row is copied"
+	case TransferErrorUnspecifiedRowsPerImage:
+		return "copy: rowsPerImage must be specified because more than one image is copied"
+	case TransferErrorInvalidBytesPerRow:
+		return fmt.Sprintf("copy: bytesPerRow %d is less than the bytes of one complete row", e.BytesPerRow)
+	case TransferErrorInvalidRowsPerImage:
+		return "copy: rowsPerImage is less than the rows of one image"
+	case TransferErrorSizeOverflow:
+		return "copy: overflow while computing the size of the copy"
+	case TransferErrorTextureFormatsNotCopyCompatible:
+		return fmt.Sprintf("copy: source format %v and destination format %v are not copy-compatible (they may only differ in sRGB-ness)",
+			e.Format, e.DstFormat)
+	case TransferErrorMissingDownlevelFlags:
+		return fmt.Sprintf("copy: the device does not support this copy: %v", e.Cause)
+	default:
+		return "copy: unknown error"
+	}
+}
+
+// =============================================================================
+// Clear command Errors
+// =============================================================================
+
+// ClearErrorKind represents the type of clear command error. Rust wgpu-core
+// keeps these in ClearError, apart from TransferError.
+type ClearErrorKind int
+
+const (
+	// ClearErrorMissingBufferUsage indicates a cleared buffer created without
+	// COPY_DST (Rust ClearError::MissingBufferUsage).
+	ClearErrorMissingBufferUsage ClearErrorKind = iota
+	// ClearErrorUnalignedBufferOffset indicates an offset that is not a
+	// multiple of CopyBufferAlignment (Rust ClearError::UnalignedBufferOffset).
+	ClearErrorUnalignedBufferOffset
+	// ClearErrorUnalignedFillSize indicates a size that is not a multiple of
+	// CopyBufferAlignment (Rust ClearError::UnalignedFillSize).
+	ClearErrorUnalignedFillSize
+	// ClearErrorOffsetPlusSizeExceeds64BitBounds indicates offset plus size
+	// above the largest uint64 (Rust ClearError::OffsetPlusSizeExceeds64BitBounds).
+	ClearErrorOffsetPlusSizeExceeds64BitBounds
+	// ClearErrorBufferOverrun indicates a cleared range that ends past the end
+	// of the buffer (Rust ClearError::BufferOverrun).
+	ClearErrorBufferOverrun
+)
+
+// ClearError represents an invalid clearBuffer command on a command encoder.
+// Which fields are set depends on Kind.
+type ClearError struct {
+	Kind ClearErrorKind
+	// Offset is the byte offset the clear starts at.
+	Offset uint64
+	// Size is the number of bytes to clear.
+	Size uint64
+	// BufferSize is the size of the buffer (overrun kind).
+	BufferSize uint64
+	// Usage is the usage the buffer lacks (ClearErrorMissingBufferUsage).
+	Usage gputypes.BufferUsage
+}
+
+// Error implements the error interface.
+func (e *ClearError) Error() string {
+	switch e.Kind {
+	case ClearErrorMissingBufferUsage:
+		return fmt.Sprintf("clear: buffer is missing usage %#x", e.Usage)
+	case ClearErrorUnalignedBufferOffset:
+		return fmt.Sprintf("clear: buffer offset %d is not a multiple of %d", e.Offset, CopyBufferAlignment)
+	case ClearErrorUnalignedFillSize:
+		return fmt.Sprintf("clear: size %d is not a multiple of %d", e.Size, CopyBufferAlignment)
+	case ClearErrorOffsetPlusSizeExceeds64BitBounds:
+		return fmt.Sprintf("clear: offset %d plus size %d exceeds the 64-bit range", e.Offset, e.Size)
+	case ClearErrorBufferOverrun:
+		return fmt.Sprintf("clear: range of %d bytes at offset %d overruns the %d-byte buffer", e.Size, e.Offset, e.BufferSize)
+	default:
+		return "clear: unknown error"
+	}
 }

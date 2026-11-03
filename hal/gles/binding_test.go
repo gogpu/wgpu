@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // =============================================================================
@@ -43,7 +44,7 @@ func TestComputeBindingMap_SingleUniform(t *testing.T) {
 	bindingMap, groupInfos := computeBindingMap(layouts)
 
 	// Should have one entry: (group=0, binding=0) -> slot 0
-	key := glsl.BindingMapKey{Group: 0, Binding: 0}
+	key := ir.ResourceBinding{Group: 0, Binding: 0}
 	slot, ok := bindingMap[key]
 	if !ok {
 		t.Fatal("expected binding map entry for (0, 0)")
@@ -102,7 +103,7 @@ func TestComputeBindingMap_MixedResources(t *testing.T) {
 	// Textures:  group0/binding1 -> slot 0
 	// Uniforms:  group0/binding2 -> slot 0
 	// Storage:   group1/binding0 -> slot 0
-	wantBindings := map[glsl.BindingMapKey]uint8{
+	wantBindings := map[ir.ResourceBinding]uint8{
 		{Group: 0, Binding: 0}: 0, // sampler
 		{Group: 0, Binding: 1}: 0, // texture
 		{Group: 0, Binding: 2}: 0, // uniform buffer
@@ -149,11 +150,11 @@ func TestComputeBindingMap_MultipleOfSameType(t *testing.T) {
 	bindingMap, _ := computeBindingMap(layouts)
 
 	// Both are uniform buffers -> sequential slots 0, 1
-	slot0, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 0}]
+	slot0, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 0}]
 	if !ok || slot0 != 0 {
 		t.Errorf("first uniform slot = %d, want 0", slot0)
 	}
-	slot1, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 1}]
+	slot1, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 1}]
 	if !ok || slot1 != 1 {
 		t.Errorf("second uniform slot = %d, want 1", slot1)
 	}
@@ -184,11 +185,11 @@ func TestComputeBindingMap_CrossGroupCounters(t *testing.T) {
 
 	// Group 0/binding 0 -> slot 0
 	// Group 1/binding 0 -> slot 1 (counter continues)
-	slot0, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 0}]
+	slot0, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 0}]
 	if !ok || slot0 != 0 {
 		t.Errorf("group0 uniform slot = %d, want 0", slot0)
 	}
-	slot1, ok := bindingMap[glsl.BindingMapKey{Group: 1, Binding: 0}]
+	slot1, ok := bindingMap[ir.ResourceBinding{Group: 1, Binding: 0}]
 	if !ok || slot1 != 1 {
 		t.Errorf("group1 uniform slot = %d, want 1", slot1)
 	}
@@ -235,15 +236,15 @@ func TestComputeBindingMap_StorageTexture(t *testing.T) {
 
 	// Textures: binding 0 -> slot 0, binding 2 -> slot 1
 	// Images:   binding 1 -> slot 0
-	slot0, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 0}]
+	slot0, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 0}]
 	if !ok || slot0 != 0 {
 		t.Errorf("texture slot = %d, want 0", slot0)
 	}
-	slot1, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 1}]
+	slot1, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 1}]
 	if !ok || slot1 != 0 {
 		t.Errorf("image slot = %d, want 0", slot1)
 	}
-	slot2, ok := bindingMap[glsl.BindingMapKey{Group: 0, Binding: 2}]
+	slot2, ok := bindingMap[ir.ResourceBinding{Group: 0, Binding: 2}]
 	if !ok || slot2 != 1 {
 		t.Errorf("second texture slot = %d, want 1", slot2)
 	}
@@ -328,7 +329,7 @@ func TestClassifyBindGroupEntry(t *testing.T) {
 // buffers cannot be remapped at runtime (Rust wgpu-hal returns DeviceError::Lost).
 func TestAssignBindingsAfterLink_StorageBufferReturnsError(t *testing.T) {
 	layout := &PipelineLayout{
-		bindingMap: map[glsl.BindingMapKey]uint8{
+		bindingMap: map[ir.ResourceBinding]uint8{
 			{Group: 0, Binding: 0}: 0,
 		},
 	}
@@ -352,7 +353,7 @@ func TestAssignBindingsAfterLink_StorageBufferReturnsError(t *testing.T) {
 	}
 
 	// Verify the layout has the expected binding.
-	_, ok := layout.bindingMap[glsl.BindingMapKey{Group: 0, Binding: 0}]
+	_, ok := layout.bindingMap[ir.ResourceBinding{Group: 0, Binding: 0}]
 	if !ok {
 		t.Fatal("expected binding map to contain (0, 0)")
 	}
@@ -368,7 +369,7 @@ func TestAssignBindingsAfterLink_StorageBufferReturnsError(t *testing.T) {
 // resolution from TranslationInfo + PipelineLayout.
 func TestAssignBindingsAfterLink_BindingMapLookup(t *testing.T) {
 	layout := &PipelineLayout{
-		bindingMap: map[glsl.BindingMapKey]uint8{
+		bindingMap: map[ir.ResourceBinding]uint8{
 			{Group: 0, Binding: 0}: 3, // uniform buffer → slot 3
 			{Group: 0, Binding: 1}: 0, // texture → slot 0
 			{Group: 0, Binding: 2}: 0, // sampler → slot 0
@@ -396,7 +397,7 @@ func TestAssignBindingsAfterLink_BindingMapLookup(t *testing.T) {
 
 	// Verify vertex uniform resolves to slot 3.
 	for _, u := range vertexInfo.Uniforms {
-		key := glsl.BindingMapKey{Group: u.Binding.Group, Binding: u.Binding.Binding}
+		key := ir.ResourceBinding{Group: u.Binding.Group, Binding: u.Binding.Binding}
 		slot, ok := layout.bindingMap[key]
 		if !ok {
 			t.Errorf("uniform block %q not found in binding map", u.BlockName)
@@ -409,7 +410,7 @@ func TestAssignBindingsAfterLink_BindingMapLookup(t *testing.T) {
 
 	// Verify fragment texture resolves to slot 0.
 	for name, tm := range fragmentInfo.TextureMappings {
-		key := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
+		key := ir.ResourceBinding{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
 		slot, ok := layout.bindingMap[key]
 		if !ok {
 			t.Errorf("texture %q not found in binding map", name)
@@ -425,7 +426,7 @@ func TestAssignBindingsAfterLink_BindingMapLookup(t *testing.T) {
 // with no matching binding map entry are gracefully skipped (not an error).
 func TestAssignBindingsAfterLink_MissingBindingSkipped(t *testing.T) {
 	layout := &PipelineLayout{
-		bindingMap: map[glsl.BindingMapKey]uint8{
+		bindingMap: map[ir.ResourceBinding]uint8{
 			// Only group 0, binding 0 is mapped.
 			{Group: 0, Binding: 0}: 0,
 		},
@@ -448,12 +449,12 @@ func TestAssignBindingsAfterLink_MissingBindingSkipped(t *testing.T) {
 	}
 
 	// Verify first is found, second is not.
-	key0 := glsl.BindingMapKey{Group: 0, Binding: 0}
+	key0 := ir.ResourceBinding{Group: 0, Binding: 0}
 	if _, ok := layout.bindingMap[key0]; !ok {
 		t.Error("expected binding map to contain (0, 0)")
 	}
 
-	key9 := glsl.BindingMapKey{Group: 9, Binding: 9}
+	key9 := ir.ResourceBinding{Group: 9, Binding: 9}
 	if _, ok := layout.bindingMap[key9]; ok {
 		t.Error("expected binding map NOT to contain (9, 9)")
 	}
@@ -569,5 +570,43 @@ func TestBindGroupLayoutInfo_UnusedSlot(t *testing.T) {
 	}
 	if bts[2] != 0 {
 		t.Errorf("slot 2 = %d, want 0 (first uniform)", bts[2])
+	}
+}
+
+// TestSetBindGroupDynamicOffsetsFollowBindingOrder checks that each dynamic
+// offset goes to the buffer binding of its rank by binding number, as WebGPU
+// orders them, when the layout lists its entries in another order and has a
+// buffer without a dynamic offset and a texture between them.
+func TestSetBindGroupDynamicOffsetsFollowBindingOrder(t *testing.T) {
+	buffer := func(binding uint32, ty gputypes.BufferBindingType, dynamic bool) gputypes.BindGroupLayoutEntry {
+		return gputypes.BindGroupLayoutEntry{
+			Binding: binding,
+			Buffer:  &gputypes.BufferBindingLayout{Type: ty, HasDynamicOffset: dynamic},
+		}
+	}
+	layout := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{
+		buffer(5, gputypes.BufferBindingTypeStorage, true),
+		{Binding: 3, Texture: &gputypes.TextureBindingLayout{}},
+		buffer(2, gputypes.BufferBindingTypeUniform, false),
+		buffer(1, gputypes.BufferBindingTypeReadOnlyStorage, true),
+		buffer(0, gputypes.BufferBindingTypeUniform, true),
+	}}
+	cmd := &SetBindGroupCommand{group: &BindGroup{layout: layout}, dynamicOffsets: []uint32{256, 512, 768}}
+	tests := []struct {
+		binding    uint32
+		wantTarget uint32
+		wantOffset int
+	}{
+		{0, gl.UNIFORM_BUFFER, 256},
+		{1, gl.SHADER_STORAGE_BUFFER, 512},
+		{2, gl.UNIFORM_BUFFER, 0},
+		{5, gl.SHADER_STORAGE_BUFFER, 768},
+	}
+	for _, tt := range tests {
+		target, offset := cmd.resolveBufferTarget(tt.binding)
+		if target != tt.wantTarget || offset != tt.wantOffset {
+			t.Errorf("binding %d: target %#x offset %d, want target %#x offset %d",
+				tt.binding, target, offset, tt.wantTarget, tt.wantOffset)
+		}
 	}
 }

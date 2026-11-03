@@ -12,6 +12,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/metal/mslmap"
 )
 
 func TestCommandEncoderRecordingErrorKeepsFirstFailure(t *testing.T) {
@@ -198,7 +200,7 @@ func BenchmarkComputePassEncoderBindBufferSizes(b *testing.B) {
 	}
 	rawDevice := CreateSystemDefaultDevice()
 	if rawDevice == 0 {
-		b.Skip("no Metal device available")
+		skipWithoutMetal(b, "no Metal device available")
 	}
 	b.Cleanup(func() { Release(rawDevice) })
 
@@ -260,7 +262,7 @@ func BenchmarkComputePassEncoderBindBufferSizes(b *testing.B) {
 	}
 }
 
-// TestComputeBindSlots_PerTypeSequentialIndexing is a regression test for the
+// TestBindGroupSlots_PerTypeSequentialIndexing is a regression test for the
 // SetBindGroup slot indexing bug.
 //
 // Bug: Previously used entry.Binding (WGSL @binding(N)) as the Metal slot
@@ -273,7 +275,7 @@ func BenchmarkComputePassEncoderBindBufferSizes(b *testing.B) {
 //
 //	Bug:     buffer→0, texture→1, buffer→2, sampler→3
 //	Correct: buffer→0, texture→0, buffer→1, sampler→0
-func TestComputeBindSlots_PerTypeSequentialIndexing(t *testing.T) {
+func TestBindGroupSlots_PerTypeSequentialIndexing(t *testing.T) {
 	tests := []struct {
 		name         string
 		entries      []gputypes.BindGroupEntry
@@ -367,24 +369,154 @@ func TestComputeBindSlots_PerTypeSequentialIndexing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bufSlots, texSlots, sampSlots := computeBindSlots(tt.entries)
+			group := newTestBindGroup(t, layoutEntriesFor(tt.entries, gputypes.ShaderStageCompute), tt.entries)
+			got := map[mslmap.Kind][]uintptr{}
+			for i := range group.resources {
+				res := &group.resources[i]
+				if slot, ok := resourceSlot(res, stageCompute, mslmap.Counts{}); ok {
+					got[res.kind] = append(got[res.kind], slot)
+				}
+			}
 
-			checkSlots := func(name string, got []bindSlotAssignment, want []uintptr) {
+			checkSlots := func(name string, got, want []uintptr) {
 				if len(got) != len(want) {
 					t.Errorf("%s: got %d assignments, want %d", name, len(got), len(want))
 					return
 				}
-				for i, a := range got {
-					if a.slot != want[i] {
-						t.Errorf("%s[%d]: got slot %d, want %d (entryIndex=%d)",
-							name, i, a.slot, want[i], a.entryIndex)
+				for i := range got {
+					if got[i] != want[i] {
+						t.Errorf("%s[%d]: got slot %d, want %d", name, i, got[i], want[i])
 					}
 				}
 			}
 
-			checkSlots("buffer", bufSlots, tt.wantBuffers)
-			checkSlots("texture", texSlots, tt.wantTextures)
-			checkSlots("sampler", sampSlots, tt.wantSamplers)
+			checkSlots("buffer", got[mslmap.KindBuffer], tt.wantBuffers)
+			checkSlots("texture", got[mslmap.KindTexture], tt.wantTextures)
+			checkSlots("sampler", got[mslmap.KindSampler], tt.wantSamplers)
 		})
 	}
+}
+
+// layoutEntriesFor returns layout entries matching the resource types of
+// entries, visible to stages.
+func layoutEntriesFor(entries []gputypes.BindGroupEntry, stages gputypes.ShaderStages) []gputypes.BindGroupLayoutEntry {
+	out := make([]gputypes.BindGroupLayoutEntry, 0, len(entries))
+	for _, e := range entries {
+		le := gputypes.BindGroupLayoutEntry{Binding: e.Binding, Visibility: stages}
+		switch e.Resource.(type) {
+		case gputypes.BufferBinding:
+			le.Buffer = &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}
+		case gputypes.TextureViewBinding:
+			le.Texture = &gputypes.TextureBindingLayout{}
+		case gputypes.SamplerBinding:
+			le.Sampler = &gputypes.SamplerBindingLayout{}
+		}
+		out = append(out, le)
+	}
+	return out
+}
+
+// newTestBindGroup creates a bind group layout and a bind group without a
+// Metal device: neither calls Metal while every buffer entry has a size.
+func newTestBindGroup(t *testing.T, layoutEntries []gputypes.BindGroupLayoutEntry, entries []gputypes.BindGroupEntry) *BindGroup {
+	t.Helper()
+	d := &Device{}
+	rawLayout, err := d.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{Entries: layoutEntries})
+	if err != nil {
+		t.Fatalf("CreateBindGroupLayout: %v", err)
+	}
+	rawGroup, err := d.CreateBindGroup(&hal.BindGroupDescriptor{Layout: rawLayout, Entries: entries})
+	if err != nil {
+		t.Fatalf("CreateBindGroup: %v", err)
+	}
+	return rawGroup.(*BindGroup)
+}
+
+// TestBindGroupFollowsBindingOrder guards the dynamic offsets defect: the
+// layout and the bind group list their entries from the highest binding
+// down. The slots and the dynamic offsets must follow the binding numbers,
+// which the shader's slots follow too (mslmap.StageLayout), and each storage
+// binding must report its own binding size for `_buffer_sizes`.
+func TestBindGroupFollowsBindingOrder(t *testing.T) {
+	stages := gputypes.ShaderStageCompute
+	dynamic := func(binding uint32, ty gputypes.BufferBindingType) gputypes.BindGroupLayoutEntry {
+		return gputypes.BindGroupLayoutEntry{Binding: binding, Visibility: stages,
+			Buffer: &gputypes.BufferBindingLayout{Type: ty, HasDynamicOffset: true}}
+	}
+	group := newTestBindGroup(t,
+		[]gputypes.BindGroupLayoutEntry{
+			dynamic(2, gputypes.BufferBindingTypeStorage),
+			dynamic(1, gputypes.BufferBindingTypeReadOnlyStorage),
+			dynamic(0, gputypes.BufferBindingTypeUniform),
+		},
+		[]gputypes.BindGroupEntry{
+			{Binding: 2, Resource: gputypes.BufferBinding{Buffer: 0x300, Offset: 8, Size: 16}},
+			{Binding: 1, Resource: gputypes.BufferBinding{Buffer: 0x200, Size: 24}},
+			{Binding: 0, Resource: gputypes.BufferBinding{Buffer: 0x100, Size: 32}},
+		})
+
+	offsets := []uint32{256, 512, 768} // binding 0, 1, 2
+	want := []struct {
+		handle uintptr
+		slot   uintptr
+		offset uintptr
+		sized  bool
+		size   uint64
+	}{
+		{0x100, 0, 256, false, 0},
+		{0x200, 1, 512, true, 24},
+		{0x300, 2, 8 + 768, true, 16},
+	}
+	if len(group.resources) != len(want) {
+		t.Fatalf("bind group has %d resources, want %d", len(group.resources), len(want))
+	}
+	for i, w := range want {
+		res := &group.resources[i]
+		slot, ok := resourceSlot(res, stageCompute, mslmap.Counts{})
+		if !ok || res.handle != w.handle || slot != w.slot {
+			t.Errorf("resource %d: handle %#x slot %d (ok %v), want handle %#x slot %d", i, res.handle, slot, ok, w.handle, w.slot)
+		}
+		if got := resourceOffset(res, offsets); got != w.offset {
+			t.Errorf("resource %d: offset %d, want %d", i, got, w.offset)
+		}
+		if res.sized != w.sized || res.size != w.size {
+			t.Errorf("resource %d: size %d (sized %v), want %d (sized %v)", i, res.size, res.sized, w.size, w.sized)
+		}
+	}
+
+	sizes := recordBindingSizes(nil, 3, group)
+	if len(sizes) != 2 || sizes[[2]uint32{3, 1}] != 24 || sizes[[2]uint32{3, 2}] != 16 {
+		t.Errorf("binding sizes = %v, want {3,1}: 24 and {3,2}: 16", sizes)
+	}
+}
+
+// TestBindGroupSlotsPerStage checks that each render stage numbers only the
+// resources visible to it, from the group's first slot in that stage.
+func TestBindGroupSlotsPerStage(t *testing.T) {
+	vs, fs := gputypes.ShaderStageVertex, gputypes.ShaderStageFragment
+	group := newTestBindGroup(t,
+		[]gputypes.BindGroupLayoutEntry{
+			{Binding: 0, Visibility: fs, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+			{Binding: 1, Visibility: vs | fs, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+			{Binding: 2, Visibility: vs, Texture: &gputypes.TextureBindingLayout{}},
+		},
+		[]gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{Buffer: 0x100, Size: 16}},
+			{Binding: 1, Resource: gputypes.BufferBinding{Buffer: 0x200, Size: 16}},
+			{Binding: 2, Resource: gputypes.TextureViewBinding{TextureView: 0x300}},
+		})
+	base := mslmap.Counts{Buffers: 3, Textures: 1}
+	check := func(i, stage int, wantOK bool, want uintptr) {
+		t.Helper()
+		slot, ok := resourceSlot(&group.resources[i], stage, base)
+		if ok != wantOK || (ok && slot != want) {
+			t.Errorf("resource %d stage %d: slot %d (ok %v), want %d (ok %v)", i, stage, slot, ok, want, wantOK)
+		}
+	}
+	check(0, stageVertex, false, 0)
+	check(1, stageVertex, true, 3)
+	check(2, stageVertex, true, 1)
+	check(0, stageFragment, true, 3)
+	check(1, stageFragment, true, 4)
+	check(2, stageFragment, false, 0)
 }

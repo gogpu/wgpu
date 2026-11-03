@@ -366,6 +366,63 @@ func TestAtomicOps(t *testing.T) {
 	}
 }
 
+// TestAtomicOpsStorageBuffer runs the atomic ops on a storage buffer word
+// (a BufferPointer, as OpAccessChain into a storage buffer yields): the
+// result must land in the buffer bytes, where the host reads it back.
+func TestAtomicOpsStorageBuffer(t *testing.T) {
+	m := &Module{
+		Types:     map[uint32]*TypeInfo{},
+		Constants: map[uint32]Value{},
+	}
+	tests := []struct {
+		name    string
+		opcode  uint16
+		initial uint32
+		operand uint32
+		wantNew uint32
+	}{
+		{"iadd", OpAtomicIAdd, 10, 5, 15},
+		{"isub", OpAtomicISub, 10, 3, 7},
+		{"iinc", OpAtomicIIncrement, 10, 0, 11},
+		{"idec", OpAtomicIDecrement, 10, 0, 9},
+		{"exchange", OpAtomicExchange, 10, 99, 99},
+		{"umax", OpAtomicUMax, 10, 12, 12},
+		{"umin", OpAtomicUMin, 10, 4, 4},
+		{"store", OpAtomicStore, 10, 7, 7},
+		{"load", OpAtomicLoad, 10, 0, 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := make([]byte, 8)
+			binary.LittleEndian.PutUint32(buf[4:], tt.initial)
+			interp := &interpreter{
+				module: m,
+				values: testMakeValues(map[uint32]any{
+					1: ValBufferPointer(&BufferPointer{Buffer: buf, Offset: 4}),
+					2: tt.operand,
+				}),
+			}
+			inst := Instruction{Opcode: tt.opcode, ResultID: 100, Operands: []uint32{1, 0, 0, 2}}
+			switch tt.opcode {
+			case OpAtomicIIncrement, OpAtomicIDecrement, OpAtomicLoad:
+				inst.Operands = inst.Operands[:3]
+			}
+			old := interp.executeAtomicOp(inst)
+			if tt.opcode != OpAtomicStore {
+				if got := toUint32(old); got != tt.initial {
+					t.Errorf("old value = %d, want %d", got, tt.initial)
+				}
+			}
+			if got := binary.LittleEndian.Uint32(buf[4:]); got != tt.wantNew {
+				t.Errorf("buffer word = %d, want %d", got, tt.wantNew)
+			}
+			if got := binary.LittleEndian.Uint32(buf[:4]); got != 0 {
+				t.Errorf("neighboring word = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestAtomicCompareExchange(t *testing.T) {
 	m := &Module{
 		Types:     map[uint32]*TypeInfo{},

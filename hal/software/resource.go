@@ -10,9 +10,10 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/raster"
 	"github.com/gogpu/wgpu/hal/software/shader"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // nextResourceID is a monotonic counter for assigning unique IDs to software resources.
@@ -118,10 +119,10 @@ func (t *Texture) Clear(color gputypes.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	r := uint8(color.R * 255)
-	g := uint8(color.G * 255)
-	b := uint8(color.B * 255)
-	a := uint8(color.A * 255)
+	r := raster.FloatToUnorm8(float32(color.R))
+	g := raster.FloatToUnorm8(float32(color.G))
+	b := raster.FloatToUnorm8(float32(color.B))
+	a := raster.FloatToUnorm8(float32(color.A))
 
 	bpp := int(formatBytesPerPixel(t.format))
 
@@ -406,6 +407,8 @@ type RenderPipeline struct {
 	// has overrides. nil if the shader module has no SPIR-V.
 	vertex   *shader.Module
 	fragment *shader.Module
+	// fragmentMayDiscard is fragment.MayDiscard(), computed once at creation.
+	fragmentMayDiscard bool
 }
 
 // SamplerResource implements hal.Sampler with actual sampler parameters.
@@ -458,9 +461,9 @@ type ComputePipeline struct {
 type ShaderModule struct {
 	Resource
 	desc     *hal.ShaderModuleDescriptor
-	irModule *ir.Module     // lowered WGSL (nil for SPIR-V input or if lowering failed)
-	spirv    []uint32       // SPIR-V bytecode (nil if unavailable)
-	parsed   *shader.Module // parsed SPIR-V module (nil until first use)
+	irModule *shaderir.Module // lowered WGSL (nil for SPIR-V input or if lowering failed)
+	spirv    []uint32         // SPIR-V bytecode (nil if unavailable)
+	parsed   *shader.Module   // parsed SPIR-V module (nil until first use)
 }
 
 // ParsedModule returns the parsed SPIR-V module, parsing on first access.

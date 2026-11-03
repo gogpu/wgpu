@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga/glsl"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/handletable"
+	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
 // Surface and SurfaceTexture are defined in platform-specific files (resource_windows.go, resource_linux.go)
@@ -86,17 +87,28 @@ type TextureView struct {
 	layerCount uint32
 	isSurface  bool            // true for default framebuffer (surface texture)
 	surfaceTex *SurfaceTexture // non-nil only when isSurface is true
+
+	device       *Device
+	nativeHandle uintptr // key in device.views; 0 once destroyed
 }
 
-// Destroy is a no-op for texture views in OpenGL.
-func (v *TextureView) Destroy() {}
-
-// NativeHandle returns the underlying texture's GL object ID.
-func (v *TextureView) NativeHandle() uintptr {
-	if v.texture != nil {
-		return uintptr(v.texture.id)
+// Destroy drops the view's handle; a GL texture view holds no GL object.
+// It may be called more than once.
+func (v *TextureView) Destroy() {
+	if v.device != nil {
+		v.device.views.Remove(v.nativeHandle)
 	}
-	return 0
+	v.nativeHandle = 0
+}
+
+// NativeHandle returns the view's opaque per-device handle. A GL texture
+// object has no view object, so a bind group needs the view itself (its mip
+// level and layer, which a storage texture binds through glBindImageTexture);
+// CreateBindGroup resolves the handle back through the device's table
+// (newBindGroup). The handle is not the view's address: see package
+// handletable.
+func (v *TextureView) NativeHandle() uintptr {
+	return v.nativeHandle
 }
 
 // Sampler implements hal.Sampler for OpenGL using GL sampler objects (GL 3.3+).
@@ -122,7 +134,7 @@ type ShaderModule struct {
 	fragmentID uint32 // GL shader object ID for fragment
 	computeID  uint32 // GL shader object ID for compute
 	source     hal.ShaderSource
-	irModule   *ir.Module // lowered WGSL, specialized per pipeline stage; nil without WGSL
+	irModule   *shaderir.Module // lowered WGSL, specialized per pipeline stage; nil without WGSL
 	glCtx      *gl.Context
 }
 
@@ -147,10 +159,64 @@ type BindGroupLayout struct {
 // Destroy is a no-op for bind group layouts.
 func (l *BindGroupLayout) Destroy() {}
 
+// storageTexture returns the storage texture layout of binding, or nil when
+// the binding is not a storage texture.
+func (l *BindGroupLayout) storageTexture(binding uint32) *gputypes.StorageTextureBindingLayout {
+	if l == nil {
+		return nil
+	}
+	for i := range l.entries {
+		if l.entries[i].Binding == binding {
+			return l.entries[i].StorageTexture
+		}
+	}
+	return nil
+}
+
+// dynamicOffsetIndex returns the index of binding's offset in the dynamic
+// offsets of SetBindGroup. WebGPU orders the offsets by binding number,
+// whatever the order of the layout or bind group entries (Rust wgpu-hal
+// consumes them over the layout entries, which wgpu-core sorts by binding),
+// so the index is the number of dynamic-offset buffer bindings below binding.
+func (l *BindGroupLayout) dynamicOffsetIndex(binding uint32) int {
+	n := 0
+	for i := range l.entries {
+		e := &l.entries[i]
+		if e.Binding < binding && e.Buffer != nil && e.Buffer.HasDynamicOffset {
+			n++
+		}
+	}
+	return n
+}
+
 // BindGroup implements hal.BindGroup for OpenGL.
 type BindGroup struct {
 	layout  *BindGroupLayout
 	entries []gputypes.BindGroupEntry
+	// views holds, index for index with entries, the texture view of each
+	// TextureViewBinding entry (nil for other entries and surface views).
+	views []*TextureView
+}
+
+// newBindGroup resolves the texture views of entries from their handles
+// (TextureView.NativeHandle) through the device's view table. An unknown or
+// destroyed handle is an error.
+func newBindGroup(views *handletable.Table[TextureView], layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (*BindGroup, error) {
+	resolved := make([]*TextureView, len(entries))
+	for i, entry := range entries {
+		res, ok := entry.Resource.(gputypes.TextureViewBinding)
+		if !ok || res.TextureView == 0 {
+			continue
+		}
+		view, ok := views.Get(res.TextureView)
+		if !ok {
+			return nil, fmt.Errorf("gles: binding %d: unknown texture view handle %#x", entry.Binding, res.TextureView)
+		}
+		if view.texture != nil {
+			resolved[i] = view
+		}
+	}
+	return &BindGroup{layout: layout, entries: entries, views: resolved}, nil
 }
 
 // Destroy is a no-op for bind groups.
@@ -175,7 +241,7 @@ type PipelineLayout struct {
 	groupInfos []BindGroupLayoutInfo
 	// bindingMap maps (group, binding) to flat GL slot index for naga GLSL writer.
 	// Computed simultaneously with groupInfos in CreatePipelineLayout.
-	bindingMap map[glsl.BindingMapKey]uint8
+	bindingMap map[ir.ResourceBinding]uint8
 }
 
 // Destroy is a no-op for pipeline layouts.
@@ -213,13 +279,18 @@ type RenderPipeline struct {
 	// SetVertexBuffer can configure attributes using the pipeline's layout.
 	vertexBuffers []gputypes.VertexBufferLayout
 
+	// firstInstanceLocation is the naga_vs_first_instance uniform, through
+	// which the first instance reaches instance_index without fully featured
+	// instancing; -1 when the program has none.
+	firstInstanceLocation int32
+
 	// samplerBindMap maps texture unit indices to sampler unit indices.
 	// Built from naga GLSL TranslationInfo.TextureMappings at pipeline creation.
 	// When binding textures, the associated sampler must be bound to the SAME
 	// texture unit (not the sampler's own WGSL binding). This is because naga
 	// GLSL generates combined sampler2D on the texture's binding.
 	// Matches Rust wgpu-hal GLES SamplerBindMap pattern.
-	samplerBindMap [maxTextureSlots]int8 // -1 = no sampler, otherwise = sampler glBinding
+	samplerBindMap samplerBindMap
 }
 
 const maxTextureSlots = 32
@@ -237,6 +308,10 @@ type ComputePipeline struct {
 	programID uint32
 	layout    *PipelineLayout
 	glCtx     *gl.Context
+
+	// samplerBindMap maps texture units to sampler slots, as on
+	// RenderPipeline: a compute shader samples through combined samplers too.
+	samplerBindMap samplerBindMap
 }
 
 // Destroy releases the compute pipeline.

@@ -46,6 +46,10 @@ type Fragment struct {
 	// Depth is the interpolated depth value in [0, 1].
 	Depth float32
 
+	// InvW is 1/w of the clip-space position, interpolated linearly in screen
+	// space: the w component of the fragment position builtin (FragCoord).
+	InvW float32
+
 	// Bary holds barycentric coordinates [w0, w1, w2].
 	// These sum to 1.0 and indicate the fragment's position within the triangle.
 	Bary [3]float32

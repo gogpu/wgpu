@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
+	"github.com/gogpu/wgpu/internal/handletable"
 )
 
 // Device implements hal.Device for OpenGL on Linux.
@@ -39,6 +40,16 @@ type Device struct {
 	// be assigned at runtime after linking via glGetUniformBlockIndex etc.
 	// Mirrors Rust wgpu-hal PrivateCapabilities::SHADER_BINDING_LAYOUT.
 	shaderBindingLayout bool
+
+	// fullInstancing is AdapterCapabilities.FullyFeaturedInstancing: draws
+	// pass the first instance to GL, and every stage is compiled with naga's
+	// glsl.Options.DrawParameters (gl_BaseInstanceARB, gl_DrawIDARB), as Rust
+	// sets WriterFlags::DRAW_PARAMETERS from it (gles/device.rs).
+	fullInstancing bool
+
+	// views maps TextureView.NativeHandle values back to the views, for
+	// CreateBindGroup (newBindGroup).
+	views handletable.Table[TextureView]
 }
 
 // CreateBuffer creates a GPU buffer.
@@ -333,10 +344,13 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescriptor) (hal.TextureView, error) {
 	// Surface texture (default framebuffer) — return a view with no GL texture.
 	if st, ok := texture.(*SurfaceTexture); ok {
-		return &TextureView{
+		view := &TextureView{
 			isSurface:  true,
 			surfaceTex: st,
-		}, nil
+			device:     d,
+		}
+		view.nativeHandle = d.views.Add(view)
+		return view, nil
 	}
 
 	t, ok := texture.(*Texture)
@@ -346,6 +360,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescrip
 
 	view := &TextureView{
 		texture: t,
+		device:  d,
 	}
 	if desc != nil {
 		view.aspect = desc.Aspect
@@ -354,12 +369,16 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *TextureViewDescrip
 		view.baseLayer = desc.BaseArrayLayer
 		view.layerCount = desc.ArrayLayerCount
 	}
+	view.nativeHandle = d.views.Add(view)
 	return view, nil
 }
 
-// DestroyTextureView destroys a texture view.
+// DestroyTextureView destroys a texture view. It holds no GL object; this
+// only drops its handle.
 func (d *Device) DestroyTextureView(view hal.TextureView) {
-	// TextureViews don't hold GL resources in OpenGL
+	if v, ok := view.(*TextureView); ok && v != nil {
+		v.Destroy()
+	}
 }
 
 // CreateSampler creates a texture sampler using GL sampler objects (GL 3.3+).
@@ -405,10 +424,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (hal.BindGroup, erro
 		return nil, fmt.Errorf("gles: invalid bind group layout type")
 	}
 
-	return &BindGroup{
-		layout:  layout,
-		entries: desc.Entries,
-	}, nil
+	return newBindGroup(&d.views, layout, desc.Entries)
 }
 
 // DestroyBindGroup destroys a bind group.
@@ -487,7 +503,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	// Compile WGSL → GLSL for vertex stage.
 	// The HAL render stages carry no pipeline constants yet: overrides take
 	// their defaults.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -592,25 +608,14 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 		multisample:       desc.Multisample,
 		colorTargets:      colorTargets,
 		vertexBuffers:     desc.Vertex.Buffers,
+		// -1 when the vertex shader reads no instance_index or uses
+		// gl_BaseInstanceARB (Rust wgpu-hal gles/device.rs, FIRST_INSTANCE_BINDING).
+		firstInstanceLocation: glCtx.GetUniformLocation(programID, "naga_vs_first_instance"),
 	}
 
-	// Build SamplerBindMap from TextureMappings using pre-computed BindingMap.
-	// For each combined sampler2D, map texture's GL slot to sampler's GL slot.
-	for i := range pipeline.samplerBindMap {
-		pipeline.samplerBindMap[i] = -1 // no sampler
-	}
-	for _, tm := range fragmentTranslationInfo.TextureMappings {
-		if tm.SamplerBinding == nil {
-			continue
-		}
-		texKey := glsl.BindingMapKey{Group: tm.TextureBinding.Group, Binding: tm.TextureBinding.Binding}
-		samplerKey := glsl.BindingMapKey{Group: tm.SamplerBinding.Group, Binding: tm.SamplerBinding.Binding}
-		texUnit, texOk := layout.bindingMap[texKey]
-		samplerUnit, samplerOk := layout.bindingMap[samplerKey]
-		if texOk && samplerOk && texUnit < maxTextureSlots {
-			pipeline.samplerBindMap[texUnit] = int8(samplerUnit)
-		}
-	}
+	// Pair each combined sampler's texture unit with its sampler slot, over
+	// every stage (Rust wgpu-hal gles create_pipeline).
+	pipeline.samplerBindMap = buildSamplerBindMap(layout.bindingMap, vertexTranslationInfo, fragmentTranslationInfo)
 
 	return pipeline, nil
 }
@@ -650,7 +655,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	}
 
 	// Compile WGSL → GLSL for compute stage.
-	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
+	computeGLSL, computeTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, computeModule, ir.StageCompute, desc.Compute.EntryPoint, desc.Compute.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: compute shader: %w", err)
 	}
@@ -704,9 +709,10 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.Com
 	)
 
 	return &ComputePipeline{
-		programID: programID,
-		layout:    layout,
-		glCtx:     glCtx,
+		programID:      programID,
+		layout:         layout,
+		glCtx:          glCtx,
+		samplerBindMap: buildSamplerBindMap(layout.bindingMap, computeTranslationInfo),
 	}, nil
 }
 
@@ -749,6 +755,7 @@ func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandE
 		glCtx:           glCtx,
 		vao:             d.vao,
 		maxTextureUnits: d.maxTextureUnits,
+		fullInstancing:  d.fullInstancing,
 	}, nil
 }
 
@@ -930,7 +937,7 @@ func maxInt32(a, b int32) int32 {
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.
-func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[glsl.BindingMapKey]uint8) (uint32, glsl.TranslationInfo, error) {
+func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[ir.ResourceBinding]uint8) (uint32, glsl.TranslationInfo, error) {
 	glCtx := d.ctx.GL() // caller must hold AdapterContext lock
 
 	fragmentModule, ok := frag.Module.(*ShaderModule)
@@ -938,7 +945,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[g
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

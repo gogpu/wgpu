@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
-	naga "github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/core"
 	"github.com/gogpu/wgpu/hal"
@@ -24,6 +23,10 @@ type Device struct {
 	queue    *Queue
 	instance *Instance
 	released atomic.Bool
+
+	// recordings holds the command encoders and command buffers that still
+	// carry resource references; Release discards them.
+	recordings recordingRegistry
 
 	// cmdEncoderPool is the single shared encoder pool for the device.
 	// Used by both CreateCommandEncoder (user command encoders) and
@@ -120,6 +123,9 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if err := core.ValidateTextureDescriptor(halDesc, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
+	if err := d.core.RequireViewFormats(desc.Label, desc.Format, desc.ViewFormats); err != nil {
+		return nil, err
+	}
 
 	halTexture, err := halDevice.CreateTexture(halDesc)
 	if err != nil {
@@ -139,8 +145,15 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		},
 		halDesc.MipLevelCount, halDesc.SampleCount, desc.Label,
 	)
+	// The application holds the first reference; bind groups, command
+	// encoders and queue writes clone it. The texture is destroyed when the
+	// last one drops, as Rust wgpu-core's Arc<Texture>.
+	td := coreTexture.TrackingData()
+	coreTexture.Ref = core.NewResourceRef("Texture:"+desc.Label, func() {
+		d.destroyTextureDeferred(halTexture, td)
+	})
 
-	return &Texture{hal: halTexture, device: d, format: desc.Format, coreTexture: coreTexture}, nil
+	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
 }
 
 // CreateTextureView creates a view into a texture.
@@ -163,6 +176,12 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 
 	halDesc := &hal.TextureViewDescriptor{}
 	if desc != nil {
+		// A texture without a known format (a bare wrapper) cannot be checked.
+		if texture.format != gputypes.TextureFormatUndefined {
+			if err := core.ValidateTextureViewFormat(texture.format, texture.viewFormatList(), desc.Aspect, desc.Format); err != nil {
+				return nil, fmt.Errorf("wgpu: CreateTextureView: %w", err)
+			}
+		}
 		halDesc.Label = desc.Label
 		halDesc.Format = desc.Format
 		halDesc.Dimension = desc.Dimension
@@ -178,12 +197,21 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
 	}
 
+	// The view is destroyed when its last reference drops: the application's,
+	// a bind group's or a command encoder's. Unlike Rust wgpu-core, whose
+	// TextureView holds an Arc of its parent, the view does not keep its
+	// texture alive by itself: Go has no drop, and a view the application
+	// never releases would pin the texture's memory. Every GPU use of a view
+	// (a bind group, a render pass) holds the texture's reference as well.
 	return &TextureView{
 		hal:          halView,
 		device:       d,
 		texture:      texture,
 		surface:      texture.surface,
 		surfaceLease: texture.surfaceLease,
+		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
+			d.destroyTextureViewDeferred(halView)
+		}),
 	}, nil
 }
 
@@ -262,25 +290,15 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
 	}
 
-	sm := &ShaderModule{hal: halModule, device: d}
-
-	// Parse WGSL source to naga IR for shader introspection (late binding validation).
-	// Matches Rust wgpu-core which stores the naga Module on ShaderModule for use
-	// by Interface::check_stage during pipeline creation.
-	// SPIR-V shaders skip this — they go directly to HAL without IR-level introspection.
-	if desc.WGSL != "" {
-		ast, parseErr := naga.Parse(desc.WGSL)
-		if parseErr == nil {
-			irModule, lowerErr := naga.Lower(ast)
-			if lowerErr == nil {
-				sm.irModule = irModule
-			}
-		}
-		// Parse/lower failures are non-fatal here — the HAL already compiled the shader
-		// successfully. Late binding validation will be skipped if IR is unavailable.
+	// Keep the IR core validated for pipeline introspection, as Rust
+	// wgpu-core keeps the naga module and its info on the ShaderModule for
+	// Interface::check_stage. SPIR-V modules have none.
+	module := &ShaderModule{hal: halModule, device: d, irModule: halDesc.IR}
+	if halDesc.IR != nil {
+		info := halDesc.Info
+		module.irInfo = &info
 	}
-
-	return sm, nil
+	return module, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -427,16 +445,26 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// When the last reference drops (either from explicit Release or Phase 2
 	// Triage after GPU completion), onZero fires and defers HAL destruction via
 	// DestroyQueue. This matches Rust wgpu's Arc<BindGroup> Drop behavior. ADR-056.
+	//
+	// The bind group keeps its texture views and their textures alive until
+	// its HAL bind group is destroyed, as Rust wgpu-core's BindGroup holds an
+	// Arc of each view: a Vulkan descriptor set must not outlive the image
+	// views it names.
 	halBG := halGroup
+	viewRefs := cloneBindGroupViewRefs(desc.Entries)
+	destroy := func() {
+		halDevice.DestroyBindGroup(halBG)
+		for _, ref := range viewRefs {
+			ref.Drop()
+		}
+	}
 	bgOnZero := func() {
 		dq := d.destroyQueue()
 		if dq != nil {
 			subIdx := d.lastSubmissionIndex()
-			dq.Defer(subIdx, "BindGroup", func() {
-				halDevice.DestroyBindGroup(halBG)
-			})
+			dq.Defer(subIdx, "BindGroup", destroy)
 		} else {
-			halDevice.DestroyBindGroup(halBG)
+			destroy()
 		}
 	}
 
@@ -446,9 +474,11 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		released:               new(atomic.Bool),
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
+		dynamicBindings:        buildDynamicBindings(desc.Layout.entries, desc.Entries),
 		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
 		boundBuffers:           boundBuffers,
 		boundTextures:          boundTextures,
+		usages:                 buildBindGroupUsages(desc.Layout.entries, desc.Entries),
 	}
 
 	// Safety net: if the bind group is garbage collected without Release(),
@@ -525,6 +555,26 @@ func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, 
 // group entries for submit-time validation (VAL-A6). Matches Rust wgpu-core
 // where bind group creation stores resource references that are later checked
 // via trackers.buffers/textures.used_resources() in validate_command_buffer.
+// cloneBindGroupViewRefs clones the references of every texture view a bind
+// group binds and of its texture, and returns them, for the bind group to
+// drop when it is destroyed.
+func cloneBindGroupViewRefs(entries []BindGroupEntry) []*core.ResourceRef {
+	var refs []*core.ResourceRef
+	for i := range entries {
+		view := entries[i].TextureView
+		if view == nil {
+			continue
+		}
+		for _, ref := range [2]*core.ResourceRef{view.ref, view.texture.ref()} {
+			if ref != nil {
+				ref.Clone()
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return refs
+}
+
 func collectBindGroupResources(entries []BindGroupEntry) ([]*Buffer, []*Texture) {
 	var buffers []*Buffer
 	var textures []*Texture
@@ -598,8 +648,8 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	// Matches Rust wgpu-core's check_stage calls that accumulate shader_binding_sizes
 	// with max across stages for the same binding (validation.rs:1126-1139).
 	shaderBindingSizes := mergeShaderBindingSizes(
-		desc.Vertex.Module,
-		fragmentShaderModule(desc.Fragment),
+		desc.Vertex.Module.bindingSizes(ir.StageVertex, desc.Vertex.EntryPoint),
+		fragmentBindingSizes(desc.Fragment),
 	)
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
@@ -621,6 +671,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		}
 	}
 
+	passContext, writesDepth, writesStencil := renderPipelineTargets(desc)
 	return &RenderPipeline{
 		hal:                   halPipeline,
 		device:                d,
@@ -630,41 +681,37 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		blendConstantRequired: needsBlendConstant,
 		stripIndexFormat:      desc.Primitive.StripIndexFormat,
 		lateSizedBufferGroups: lateGroups,
+		passContext:           passContext,
+		writesDepth:           writesDepth,
+		writesStencil:         writesStencil,
 		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
 	}, nil
 }
 
-// fragmentShaderModule extracts the ShaderModule from a FragmentState, or nil if absent.
-func fragmentShaderModule(fs *FragmentState) *ShaderModule {
+// fragmentBindingSizes returns the binding sizes of the fragment entry
+// point, or nil without a fragment stage.
+func fragmentBindingSizes(fs *FragmentState) map[ir.ResourceBinding]uint64 {
 	if fs == nil {
 		return nil
 	}
-	return fs.Module
+	return fs.Module.bindingSizes(ir.StageFragment, fs.EntryPoint)
 }
 
-// mergeShaderBindingSizes merges binding sizes from vertex and fragment shader stages,
-// taking the max size when both stages reference the same binding. Matches Rust
-// wgpu-core's pattern of calling check_stage for each stage with the same
-// shader_binding_sizes map, where Entry::Occupied takes max (validation.rs:1131-1133).
-func mergeShaderBindingSizes(
-	vertexModule *ShaderModule,
-	fragModule *ShaderModule,
-) map[ir.ResourceBinding]uint64 {
-	result := make(map[ir.ResourceBinding]uint64)
-
-	if vertexModule != nil && vertexModule.irModule != nil {
-		for rb, size := range extractShaderBindingSizes(vertexModule.irModule) {
+// mergeShaderBindingSizes merges the binding sizes of the vertex and fragment
+// entry points, taking the max size when both stages use the same binding.
+// Matches Rust wgpu-core's pattern of calling check_stage for each stage with
+// the same shader_binding_sizes map, where Entry::Occupied takes the max
+// (wgpu-core/src/validation.rs).
+func mergeShaderBindingSizes(vertex, fragment map[ir.ResourceBinding]uint64) map[ir.ResourceBinding]uint64 {
+	result := make(map[ir.ResourceBinding]uint64, len(vertex)+len(fragment))
+	for rb, size := range vertex {
+		result[rb] = size
+	}
+	for rb, size := range fragment {
+		if existing, ok := result[rb]; !ok || size > existing {
 			result[rb] = size
 		}
 	}
-	if fragModule != nil && fragModule.irModule != nil {
-		for rb, size := range extractShaderBindingSizes(fragModule.irModule) {
-			if existing, ok := result[rb]; !ok || size > existing {
-				result[rb] = size
-			}
-		}
-	}
-
 	return result
 }
 
@@ -694,12 +741,8 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, err
 	}
 
-	// VAL-010: Validate workgroup_size against device limits.
-	// Matches Rust wgpu-core validation.rs:1243-1264.
-	if desc.Module != nil && desc.Module.irModule != nil {
-		if err := d.validateComputeWorkgroupSize(desc.Label, desc.EntryPoint, desc.Module); err != nil {
-			return nil, err
-		}
+	if err := d.validateComputeShader(desc); err != nil {
+		return nil, err
 	}
 
 	halPipeline, err := halDevice.CreateComputePipeline(halDesc)
@@ -714,11 +757,8 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
 
-	// Build shader binding sizes for the compute stage.
-	var shaderBindingSizes map[ir.ResourceBinding]uint64
-	if desc.Module != nil && desc.Module.irModule != nil {
-		shaderBindingSizes = extractShaderBindingSizes(desc.Module.irModule)
-	}
+	// Shader binding sizes of the compute entry point.
+	shaderBindingSizes := desc.Module.bindingSizes(ir.StageCompute, desc.EntryPoint)
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
 
@@ -747,66 +787,83 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}, nil
 }
 
-// validateComputeWorkgroupSize checks shader workgroup_size against device limits.
-// VAL-010: Matches Rust wgpu-core validation.rs:1243-1264.
-func (d *Device) validateComputeWorkgroupSize(label, entryPoint string, module *ShaderModule) error {
-	irMod := module.irModule
-	if irMod == nil {
+// validateComputeShader checks the compute entry point against the device
+// limits, after the pipeline constants are applied: workgroup size
+// (VAL-010, Rust wgpu-core validation.rs check_stage) and workgroup storage
+// (WebGPU createComputePipeline, workgroupStorageUsed ≤
+// maxComputeWorkgroupStorageSize; Dawn ShaderModule.cpp, after the
+// workgroup-size checks). A module without IR (SPIR-V) is not checked.
+func (d *Device) validateComputeShader(desc *ComputePipelineDescriptor) error {
+	irMod, info, index, err := desc.Module.specializedEntryPoint(ir.StageCompute, desc.EntryPoint, desc.Constants)
+	if err != nil {
+		return &core.CreateComputePipelineError{
+			Kind:  core.CreateComputePipelineErrorPipelineConstants,
+			Label: desc.Label,
+			Cause: err,
+		}
+	}
+	if index < 0 {
 		return nil
 	}
-
-	// Find the entry point matching the requested name.
-	for i := range irMod.EntryPoints {
-		ep := &irMod.EntryPoints[i]
-		if ep.Name != entryPoint || ep.Stage != ir.StageCompute {
-			continue
+	if err := d.validateComputeWorkgroupSize(desc.Label, irMod.EntryPoints[index].Workgroup); err != nil {
+		return err
+	}
+	storage := core.WorkgroupStorageSize(irMod, info.EntryPoints[index].GlobalUses)
+	if limit := d.core.Limits.MaxComputeWorkgroupStorageSize; storage > uint64(limit) {
+		return &core.CreateComputePipelineError{
+			Kind:             core.CreateComputePipelineErrorWorkgroupStorageExceeded,
+			Label:            desc.Label,
+			WorkgroupStorage: storage,
+			Limit:            limit,
 		}
+	}
+	return nil
+}
 
-		wg := ep.Workgroup
-		limits := d.core.Limits
+// validateComputeWorkgroupSize checks shader workgroup_size against device limits.
+// VAL-010: Matches Rust wgpu-core validation.rs:1243-1264.
+func (d *Device) validateComputeWorkgroupSize(label string, wg [3]uint32) error {
+	limits := d.core.Limits
 
-		// Check each dimension for zero.
-		dimNames := [3]string{"X", "Y", "Z"}
-		for dim := 0; dim < 3; dim++ {
-			if wg[dim] == 0 {
-				return &core.CreateComputePipelineError{
-					Kind:      core.CreateComputePipelineErrorWorkgroupSizeZero,
-					Label:     label,
-					Dimension: dimNames[dim],
-				}
-			}
-		}
-
-		// Check each dimension against device limits.
-		dimLimits := [3]uint32{
-			limits.MaxComputeWorkgroupSizeX,
-			limits.MaxComputeWorkgroupSizeY,
-			limits.MaxComputeWorkgroupSizeZ,
-		}
-		for dim := 0; dim < 3; dim++ {
-			if wg[dim] > dimLimits[dim] {
-				return &core.CreateComputePipelineError{
-					Kind:      core.CreateComputePipelineErrorWorkgroupSizeExceeded,
-					Label:     label,
-					Dimension: dimNames[dim],
-					Size:      wg[dim],
-					Limit:     dimLimits[dim],
-				}
-			}
-		}
-
-		// Check total invocations (x*y*z) against MaxComputeInvocationsPerWorkgroup.
-		total := uint64(wg[0]) * uint64(wg[1]) * uint64(wg[2])
-		if total > uint64(limits.MaxComputeInvocationsPerWorkgroup) {
+	// Check each dimension for zero.
+	dimNames := [3]string{"X", "Y", "Z"}
+	for dim := 0; dim < 3; dim++ {
+		if wg[dim] == 0 {
 			return &core.CreateComputePipelineError{
-				Kind:             core.CreateComputePipelineErrorTooManyInvocations,
-				Label:            label,
-				TotalInvocations: total,
-				Limit:            limits.MaxComputeInvocationsPerWorkgroup,
+				Kind:      core.CreateComputePipelineErrorWorkgroupSizeZero,
+				Label:     label,
+				Dimension: dimNames[dim],
 			}
 		}
+	}
 
-		break
+	// Check each dimension against device limits.
+	dimLimits := [3]uint32{
+		limits.MaxComputeWorkgroupSizeX,
+		limits.MaxComputeWorkgroupSizeY,
+		limits.MaxComputeWorkgroupSizeZ,
+	}
+	for dim := 0; dim < 3; dim++ {
+		if wg[dim] > dimLimits[dim] {
+			return &core.CreateComputePipelineError{
+				Kind:      core.CreateComputePipelineErrorWorkgroupSizeExceeded,
+				Label:     label,
+				Dimension: dimNames[dim],
+				Size:      wg[dim],
+				Limit:     dimLimits[dim],
+			}
+		}
+	}
+
+	// Check total invocations (x*y*z) against MaxComputeInvocationsPerWorkgroup.
+	total := uint64(wg[0]) * uint64(wg[1]) * uint64(wg[2])
+	if total > uint64(limits.MaxComputeInvocationsPerWorkgroup) {
+		return &core.CreateComputePipelineError{
+			Kind:             core.CreateComputePipelineErrorTooManyInvocations,
+			Label:            label,
+			TotalInvocations: total,
+			Limit:            limits.MaxComputeInvocationsPerWorkgroup,
+		}
 	}
 
 	return nil
@@ -852,12 +909,14 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 			return nil, err
 		}
 
-		return &CommandEncoder{
+		enc := &CommandEncoder{
 			core:        coreEncoder,
 			device:      d,
 			halEncoder:  halEnc,
 			trackedRefs: make([]*core.ResourceRef, 0, 64),
-		}, nil
+		}
+		d.recordings.addEncoder(enc)
+		return enc, nil
 	}
 
 	// Fallback: no pool available (e.g., non-HAL device). Use core's built-in
@@ -867,7 +926,9 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		return nil, err
 	}
 
-	return &CommandEncoder{core: coreEncoder, device: d}, nil
+	enc := &CommandEncoder{core: coreEncoder, device: d}
+	d.recordings.addEncoder(enc)
+	return enc, nil
 }
 
 // CreateFence creates a GPU synchronization fence.
@@ -1067,6 +1128,12 @@ func (d *Device) Release() {
 	// index before pending encoders or resources are destroyed.
 	_ = d.waitIdle()
 
+	// Step 1b: Command encoders never finished or discarded, and command
+	// buffers never submitted or released, still hold the references they
+	// took while encoding. Drop them now, so the resources they kept alive
+	// are destroyed below with the device.
+	d.discardRecordings()
+
 	// Step 2: Pending writes that were never submitted can now be discarded;
 	// completed inflight batches were recycled by maintainAfterIdle above.
 	if d.queue != nil {
@@ -1166,24 +1233,20 @@ func (d *Device) halDevice() hal.Device {
 }
 
 // CreateRenderBundleEncoder creates an encoder for reusable render commands.
+// The bundle can run in any render pass with the descriptor's attachment
+// formats and sample count, on every backend: core records and replays it.
 func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
 	}
 
-	if d.released.Load() {
+	if d.released.Load() || d.halDevice() == nil {
 		return nil, ErrReleased
 	}
 
-	halDevice := d.halDevice()
-	if halDevice == nil {
-		return nil, ErrReleased
-	}
-
-	halEncoder, err := halDevice.CreateRenderBundleEncoder(desc.toHAL())
+	encoder, err := newRenderBundleEncoder(d, desc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create render bundle encoder: %w", err)
+		return nil, fmt.Errorf("wgpu: CreateRenderBundleEncoder: %w", err)
 	}
-
-	return &RenderBundleEncoder{hal: halEncoder, device: d}, nil
+	return encoder, nil
 }

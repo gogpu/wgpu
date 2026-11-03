@@ -185,6 +185,93 @@ func CreateContext(hdc HDC) (HGLRC, error) {
 	return HGLRC(r), nil
 }
 
+// WGL_ARB_create_context and WGL_ARB_create_context_robustness tokens
+// (https://registry.khronos.org/OpenGL/extensions/ARB/WGL_ARB_create_context_robustness.txt).
+const (
+	wglContextFlagsARB                     = 0x2094
+	wglContextRobustAccessBitARB           = 0x00000004
+	wglContextResetNotificationStrategyARB = 0x8256
+	wglNoResetNotificationARB              = 0x8261
+)
+
+// robustContextAttribs is the wglCreateContextAttribsARB attribute list of a
+// robust buffer access context: no version or profile attributes, so the
+// driver returns the same kind of context wglCreateContext does (the highest
+// compatibility-profile version, per WGL_ARB_create_context), plus robust
+// access without reset notification.
+func robustContextAttribs() []int32 {
+	return []int32{
+		wglContextFlagsARB, wglContextRobustAccessBitARB,
+		wglContextResetNotificationStrategyARB, wglNoResetNotificationARB,
+		0,
+	}
+}
+
+// hasExtension reports whether the space-separated extension string lists
+// name as a whole token: "WGL_ARB_create_context" must not match
+// "WGL_ARB_create_context_robustness".
+func hasExtension(extensions, name string) bool {
+	for _, e := range strings.Fields(extensions) {
+		if e == name {
+			return true
+		}
+	}
+	return false
+}
+
+// validProcAddress reports whether a wglGetProcAddress result is a function:
+// drivers return 0, 1, 2, 3 or -1 for a missing one.
+func validProcAddress(addr uintptr) bool {
+	return addr > 3 && addr != ^uintptr(0)
+}
+
+// CreateRobustContext creates an OpenGL rendering context for hdc with robust
+// buffer access when the driver offers WGL_ARB_create_context_robustness, and
+// reports whether it did. Without the extension, or if the robust context
+// cannot be created, it returns the plain wglCreateContext context.
+//
+// Robust access makes the driver contain out-of-bounds buffer accesses, which
+// WebGPU requires and naga's GLSL output leaves unchecked. Rust wgpu-hal
+// requests it on EGL (src/gles/egl.rs) but not on WGL (src/gles/wgl.rs); we
+// request it on WGL too, deliberately, so containment on Windows is a
+// property of our context rather than of the driver.
+//
+// wglCreateContextAttribsARB can only be looked up with a context current,
+// so a plain context is made current first; it is deleted when the robust one
+// replaces it. No context is current on return.
+func CreateRobustContext(hdc HDC) (HGLRC, bool, error) {
+	plain, err := CreateContext(hdc)
+	if err != nil {
+		return 0, false, err
+	}
+	if robust, ok := createRobustContext(hdc, plain); ok {
+		_ = DeleteContext(plain)
+		return robust, true, nil
+	}
+	return plain, false, nil
+}
+
+// createRobustContext creates the robust context with plain current, and
+// reports whether it could. Any failure leaves plain as the context to use.
+func createRobustContext(hdc HDC, plain HGLRC) (HGLRC, bool) {
+	if MakeCurrent(hdc, plain) != nil {
+		return 0, false
+	}
+	LoadExtensions(hdc)
+	createAttribs := GetProcAddress("wglCreateContextAttribsARB")
+	exts := getExtensionsString(hdc)
+	_ = MakeCurrent(0, 0)
+
+	if !validProcAddress(createAttribs) ||
+		!hasExtension(exts, "WGL_ARB_create_context") ||
+		!hasExtension(exts, "WGL_ARB_create_context_robustness") {
+		return 0, false
+	}
+	attribs := robustContextAttribs()
+	r, _, _ := syscall.SyscallN(createAttribs, uintptr(hdc), 0, uintptr(unsafe.Pointer(&attribs[0])))
+	return HGLRC(r), r != 0
+}
+
 // DeleteContext deletes an OpenGL rendering context.
 func DeleteContext(hglrc HGLRC) error {
 	r, _, err := procWglDeleteContext.Call(uintptr(hglrc))

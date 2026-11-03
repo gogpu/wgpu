@@ -10,7 +10,9 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/shader"
 	"github.com/gogpu/wgpu/internal/shaderir"
@@ -20,6 +22,15 @@ import (
 // module with SPIR-V bytecode. WGSL shaders must be compilable to SPIR-V via
 // naga for the SPIR-V interpreter to execute them.
 var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SPIR-V shader (WGSL compilation may have failed)")
+
+// ErrWorkgroupBarrierUnsupported is returned by CreateComputePipeline for a
+// compute shader that has both workgroup memory and a control barrier. The
+// interpreter runs the invocations of a workgroup one after another and does
+// not share workgroup memory between them, so such a shader (a tree
+// reduction, a shared tile) would compute wrong results; it is refused
+// instead until the backend implements workgroup memory (P1-SW-025). It is
+// hal.ErrWorkgroupBarrierUnsupported, which the wgpu package re-exports.
+var ErrWorkgroupBarrierUnsupported = hal.ErrWorkgroupBarrierUnsupported
 
 // Device implements hal.Device for the software backend.
 // It maintains a resource registry for resolving handle-based bind group entries
@@ -240,9 +251,11 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case desc.Source.WGSL != "":
 		// Compilation failure is non-fatal — existing draw paths don't need
 		// SPIR-V, so the module then has neither IR nor SPIR-V.
-		sm.irModule, _ = shaderir.LowerValidated(desc.Source.WGSL)
-		if sm.irModule != nil && !shaderir.PerStage(sm.irModule, nil) {
-			sm.spirv, _ = shaderir.SPIRV(sm.irModule)
+		if lowered, err := shaderir.LowerDescriptor(desc); err == nil {
+			sm.irModule = &lowered
+			if !shaderir.PerStage(lowered.IR, nil) {
+				sm.spirv, _ = shaderir.SPIRV(lowered.IR, spirvOptions())
+			}
 		}
 	}
 
@@ -258,22 +271,44 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 	if sm.irModule == nil && len(constants) > 0 {
 		return nil, fmt.Errorf("software: pipeline constants need a WGSL shader module that compiles")
 	}
-	if sm.irModule == nil || !shaderir.PerStage(sm.irModule, constants) {
+	if sm.irModule == nil || !shaderir.PerStage(sm.irModule.IR, constants) {
 		return sm.ParsedModule(), nil
 	}
-	module, err := shaderir.Specialize(sm.irModule, stage, entryPoint, constants)
+	module, err := shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
 	if err != nil {
 		return nil, fmt.Errorf("software: %w", err)
 	}
-	spirv, err := shaderir.SPIRV(module)
+	words, err := shaderir.SPIRV(module.IR, spirvOptions())
 	if err != nil {
 		return nil, fmt.Errorf("software: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
-	parsed, err := shader.ParseModule(spirv)
+	parsed, err := shader.ParseModule(words)
 	if err != nil {
 		return nil, fmt.Errorf("software: parse SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
 	return parsed, nil
+}
+
+// spirvOptions are the naga SPIR-V options for the interpreter.
+//
+// SPIR-V 1.3 is the version the interpreter is tested on. Index and buffer
+// accesses are clamped by the shader (Restrict, OpExtInst UMin). Image loads
+// stay Unchecked: the interpreter answers the image queries naga's checked
+// loads emit (P1-SW-017), but the clamp arithmetic runs on integer vectors,
+// which the interpreter does not hold exactly yet (P1-SW-013). fetchTexel
+// clamps the coordinates itself, so an out-of-bounds load still reads inside
+// the texture. Binding arrays are Unchecked, as in every Rust wgpu-hal
+// backend.
+func spirvOptions() spirv.Options {
+	return spirv.Options{
+		Version: spirv.Version1_3,
+		BoundsCheckPolicies: backend.BoundsCheckPolicies{
+			Index:        backend.BoundsCheckRestrict,
+			Buffer:       backend.BoundsCheckRestrict,
+			ImageLoad:    backend.BoundsCheckUnchecked,
+			BindingArray: backend.BoundsCheckUnchecked,
+		},
+	}
 }
 
 // DestroyShaderModule is a no-op.
@@ -301,6 +336,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 				return nil, err
 			}
 			p.fragment = fs
+			p.fragmentMayDiscard = fs != nil && fs.MayDiscard()
 		}
 	}
 	return p, nil
@@ -326,6 +362,9 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 	if module == nil {
 		return nil, ErrComputeRequiresSPIRV
+	}
+	if module.SharesWorkgroupMemoryAcrossBarrier(desc.Compute.EntryPoint) {
+		return nil, ErrWorkgroupBarrierUnsupported
 	}
 	return &ComputePipeline{
 		desc:       desc,

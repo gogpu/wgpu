@@ -324,7 +324,7 @@ func TestAutoreleasePoolMetalResourceStress(t *testing.T) {
 
 	device := CreateSystemDefaultDevice()
 	if device == 0 {
-		t.Skip("no Metal device available")
+		skipWithoutMetal(t, "no Metal device available")
 	}
 	defer Release(device)
 
@@ -360,7 +360,7 @@ func TestMetalDeviceQueries(t *testing.T) {
 
 	devices := CopyAllDevices()
 	if len(devices) == 0 {
-		t.Skip("no Metal devices available")
+		skipWithoutMetal(t, "no Metal devices available")
 	}
 	defer func() {
 		for _, device := range devices {
@@ -396,7 +396,7 @@ func TestCAMetalLayerDrawableSize(t *testing.T) {
 
 	device := CreateSystemDefaultDevice()
 	if device == 0 {
-		t.Skip("no Metal device available")
+		skipWithoutMetal(t, "no Metal device available")
 	}
 	defer Release(device)
 

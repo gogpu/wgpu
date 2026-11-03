@@ -880,7 +880,7 @@ func signatureToCallInterface(sig commandSignature) (string, bool) {
 		"Result(handle, handle, u32, ptr)":                 "SigResultHandleHandleU32Ptr", // vkFreeDescriptorSets, vkFreeCommandBuffers
 		"Result(handle, handle, u32, ptr, ptr, ptr)":       "SigResultCreatePipelines",    // vkCreateGraphicsPipelines, vkCreateComputePipelines
 		"Result(handle, u32, handle, ptr)":                 "SigResultHandleU32HandlePtr", // vkGetPhysicalDeviceSurfaceSupportKHR
-		"Result(handle, handle, i32, ptr)":                 "SigResultHandleHandleI32Ptr", // vkGetMemoryFdPropertiesKHR
+		"Result(handle, u32, i32, ptr)":                    "SigResultHandleU32I32Ptr",    // vkGetMemoryFdPropertiesKHR
 
 		// Void-returning
 		"void(handle, ptr)":                      "SigVoidHandlePtr",
@@ -1007,8 +1007,9 @@ func classifyParamType(param Param) string {
 		return "u64" // size_t is 64-bit on 64-bit systems
 	}
 
-	// VkFlags types are 32-bit
-	if strings.Contains(baseType, "Flags") {
+	// VkFlags types and single FlagBits enum values are 32-bit (the 64-bit
+	// VkFlags64 types are handled above as uint64_t typedefs only when named so).
+	if strings.Contains(baseType, "Flags") || strings.Contains(baseType, "FlagBits") {
 		return "u32"
 	}
 

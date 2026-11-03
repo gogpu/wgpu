@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/gogpu/naga"
+	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/spirv"
 )
 
 const overrideShader = `
@@ -38,27 +40,27 @@ fn main() {
 `
 
 func TestPerStage(t *testing.T) {
-	withOverrides, err := LowerValidated(overrideShader)
+	withOverrides, err := Lower(overrideShader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := LowerValidated(plainShader)
+	plain, err := Lower(plainShader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !PerStage(withOverrides, nil) {
+	if !PerStage(withOverrides.IR, nil) {
 		t.Error("PerStage(module with overrides, nil) = false")
 	}
-	if PerStage(plain, nil) {
+	if PerStage(plain.IR, nil) {
 		t.Error("PerStage(module without overrides, nil) = true")
 	}
-	if !PerStage(plain, map[string]float64{"x": 1}) {
+	if !PerStage(plain.IR, map[string]float64{"x": 1}) {
 		t.Error("PerStage(module without overrides, constants) = false: unknown keys must be rejected")
 	}
 }
 
 func TestSpecialize(t *testing.T) {
-	module, err := LowerValidated(overrideShader)
+	module, err := Lower(overrideShader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +68,13 @@ func TestSpecialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Specialize: %v", err)
 	}
-	if len(out.EntryPoints) != 1 || out.EntryPoints[0].Name != "main" {
-		t.Fatalf("entry points = %v, want only main", out.EntryPoints)
+	if len(out.IR.EntryPoints) != 1 || out.IR.EntryPoints[0].Name != "main" {
+		t.Fatalf("entry points = %v, want only main", out.IR.EntryPoints)
 	}
-	if got := out.EntryPoints[0].Workgroup; got != [3]uint32{3, 2, 1} {
+	if got := out.IR.EntryPoints[0].Workgroup; got != [3]uint32{3, 2, 1} {
 		t.Errorf("workgroup size = %v, want [3 2 1]", got)
 	}
-	if _, err := SPIRV(out); err != nil {
+	if _, err := SPIRV(out.IR, spirv.Options{Version: spirv.Version1_3}); err != nil {
 		t.Errorf("SPIRV of the specialized module: %v", err)
 	}
 
@@ -84,8 +86,8 @@ func TestSpecialize(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), `compute entry point "main"`) {
 		t.Errorf("error %q does not name the stage and entry point", err)
 	}
-	if _, err := Specialize(module, ir.StageVertex, "main", nil); !errors.Is(err, naga.ErrEntryPointNotFound) {
-		t.Errorf("wrong stage: error %v, want naga.ErrEntryPointNotFound", err)
+	if _, err := Specialize(module, ir.StageVertex, "main", nil); !errors.Is(err, backend.ErrEntryPointNotFound) {
+		t.Errorf("wrong stage: error %v, want backend.ErrEntryPointNotFound", err)
 	}
 }
 
@@ -104,11 +106,11 @@ func TestBackendError(t *testing.T) {
 	}
 
 	// A backend given a module with overrides that was not specialized.
-	module, err := LowerValidated(overrideShader)
+	module, err := Lower(overrideShader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SPIRV(module); !errors.Is(err, ErrUnresolvedOverride) {
+	if _, err := SPIRV(module.IR, spirv.Options{Version: spirv.Version1_3}); !errors.Is(err, ErrUnresolvedOverride) {
 		t.Errorf("SPIRV of an unprocessed module: error %v, want ErrUnresolvedOverride", err)
 	}
 }
