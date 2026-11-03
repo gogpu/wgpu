@@ -44,7 +44,7 @@ Vulkan provides the most complete compute shader implementation:
 
 **Status:** Compute shaders work. Timestamp queries are offered on every adapter, as in Rust wgpu-hal.
 
-- **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, SM 6.0+, no external dependencies).
+- **Shader compilation:** WGSL -> HLSL -> DXBC via FXC (default), or WGSL -> DXIL direct via `gogpu/naga/dxil` (`GOGPU_DX12_DXIL=1`, shader model 6.0 to 6.5, no external dependencies; 6.6+ waits for naga to write the 6.6 resource handles).
 - **Timestamp queries:** implemented using `ID3D12Device::CreateQueryHeap` with `D3D12_QUERY_TYPE_TIMESTAMP` and `ID3D12GraphicsCommandList::EndQuery` + `ResolveQueryData`. Begin/end-of-pass timestamps written automatically.
 - **Workgroup size limits:** Maximum 1024 invocations per workgroup (D3D12 spec).
 - **Indirect dispatch:** `DispatchIndirect` via `ExecuteIndirect` with pre-created `ID3D12CommandSignature` (dispatch args: 3 × uint32 = 12 bytes). Also supports `DrawIndirect` (16B) and `DrawIndexedIndirect` (20B).
@@ -95,12 +95,12 @@ The software backend executes compute shaders on CPU through a built-in SPIR-V i
 - **Shader compilation:** WGSL → SPIR-V (via `gogpu/naga`), then interpreted instruction-by-instruction.
 - **Storage buffers:** Full read/write support. Buffer writes from compute shader are immediately visible.
 - **Atomics:** OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange, OpAtomicSMin/SMax/UMin/UMax.
-- **Workgroup shared memory:** Per-workgroup allocation, zeroed at dispatch start.
-- **Barriers:** OpControlBarrier accepted (sequential execution, no-op for synchronization).
+- **Workgroup shared memory:** zeroed at dispatch start, but each invocation works on its own copy, and the invocations of a workgroup run one after another. A shader that shares workgroup memory across a barrier (a reduction, a shared tile) is therefore refused by `CreateComputePipeline` with `wgpu.ErrWorkgroupBarrierUnsupported` rather than computed wrong; workgroups of one invocation run. The fix is planned for v0.34.8.
+- **Barriers:** see workgroup shared memory above.
 - **Shader debugger:** DebugContext with breakpoints, JSON trace, watch variables. Zero overhead when disabled.
 - **Workgroup size:** Read from OpExecutionMode LocalSize in SPIR-V.
 - `CreateQuerySet` returns an error (timestamps not supported).
-- `DispatchIndirect` logs a warning (not yet implemented).
+- `DispatchIndirect` reads its arguments from the buffer, after core's indirect validation.
 
 ### Verified
 
