@@ -11,33 +11,50 @@ import (
 // IncrementalEdge Tests
 // =============================================================================
 
-func TestIncrementalEdgeCreation(t *testing.T) {
-	// Create edge from (0, 0) to (10, 0)
-	e := NewEdgeFunction(0, 0, 10, 0)
-	ie := NewIncrementalEdge(e)
-
-	if ie.A != e.A || ie.B != e.B || ie.C != e.C {
-		t.Errorf("IncrementalEdge coefficients don't match EdgeFunction")
-	}
-}
+// fixedSquared is the scale between a fixed-point edge value and the same
+// edge function evaluated in pixels: positions carry 2^SubPixelBits.
+const fixedSquared = subPixelOne * subPixelOne
 
 func TestIncrementalEdgeFromPoints(t *testing.T) {
 	ie := NewIncrementalEdgeFromPoints(0, 0, 10, 0)
 	e := NewEdgeFunction(0, 0, 10, 0)
 
-	if ie.A != e.A || ie.B != e.B || ie.C != e.C {
-		t.Errorf("NewIncrementalEdgeFromPoints: A=%v, B=%v, C=%v, want A=%v, B=%v, C=%v",
-			ie.A, ie.B, ie.C, e.A, e.B, e.C)
+	// A and B step one whole pixel, so they are the pixel coefficients
+	// scaled by 2^(2*SubPixelBits).
+	if ie.A != int64(e.A)*fixedSquared || ie.B != int64(e.B)*fixedSquared {
+		t.Errorf("NewIncrementalEdgeFromPoints: A=%v, B=%v, want A=%v, B=%v",
+			ie.A, ie.B, int64(e.A)*fixedSquared, int64(e.B)*fixedSquared)
 	}
 }
 
 func TestIncrementalEdgeSetRow(t *testing.T) {
-	ie := NewIncrementalEdgeFromPoints(0, 0, 10, 0)
+	ie := NewIncrementalEdgeFromPoints(0, 0, 10, 3)
 	ie.SetRow(5, 5)
 
-	expected := ie.A*5 + ie.B*5 + ie.C
+	expected := int64(NewEdgeFunction(0, 0, 10, 3).Evaluate(5, 5)) * fixedSquared
 	if ie.Value() != expected {
 		t.Errorf("After SetRow(5, 5): Value() = %v, want %v", ie.Value(), expected)
+	}
+}
+
+// TestIncrementalEdgeNegated checks the property the fill rule rests on: the
+// same edge taken in the opposite direction has exactly the negated value at
+// every pixel center, so a center on a shared edge is 0 for both triangles.
+func TestIncrementalEdgeNegated(t *testing.T) {
+	for _, p := range [][4]float32{{1.3, 2.7, 17.9, 11.1}, {0.5, 0.5, 9.5, 9.5}, {3, 20, 3, 1}} {
+		fwd := NewIncrementalEdgeFromPoints(p[0], p[1], p[2], p[3])
+		rev := NewIncrementalEdgeFromPoints(p[2], p[3], p[0], p[1])
+		for y := 0; y < 24; y++ {
+			fwd.SetRow(0.5, float32(y)+0.5)
+			rev.SetRow(0.5, float32(y)+0.5)
+			for x := 0; x < 24; x++ {
+				if fwd.Value() != -rev.Value() {
+					t.Fatalf("edge %v at pixel (%d,%d): %d forward, %d reversed", p, x, y, fwd.Value(), rev.Value())
+				}
+				fwd.StepX()
+				rev.StepX()
+			}
+		}
 	}
 }
 
@@ -77,7 +94,7 @@ func TestIncrementalEdgeNextRow(t *testing.T) {
 func TestIncrementalEdgeMatchesStandard(t *testing.T) {
 	// Create edge and incremental version
 	e := NewEdgeFunction(0, 0, 10, 10)
-	ie := NewIncrementalEdge(e)
+	ie := NewIncrementalEdgeFromPoints(0, 0, 10, 10)
 
 	// Test at various points
 	testPoints := [][2]float32{
@@ -93,23 +110,40 @@ func TestIncrementalEdgeMatchesStandard(t *testing.T) {
 		ie.SetRow(pt[0], pt[1])
 		incremental := ie.Value()
 
-		if math.Abs(float64(standard-incremental)) > 1e-6 {
+		// Exact: these points are representable in fixed point.
+		if float64(standard)*fixedSquared != float64(incremental) {
 			t.Errorf("At (%v, %v): standard=%v, incremental=%v",
 				pt[0], pt[1], standard, incremental)
 		}
 	}
 }
 
+// TestIncrementalEdgeIsTopLeft classifies edges by the D3D11 rules, for an
+// edge whose triangle interior lies where the edge value is positive (left of
+// the edge direction in a y-up frame; NewIncrementalTriangle orients every
+// edge that way). On a y-down screen that interior is below a rightward edge
+// and to the right of an upward edge.
+//
+// The horizontal expectations were inverted before v0.34.7: "horizontal
+// right" was not a top edge and "horizontal left" was, while "edge up" was a
+// left edge. For the triangle (0,0),(10,0),(0,10), whose E01(V2) is positive,
+// (0,0)->(10,0) is its top edge (the third vertex is below it) and
+// (0,10)->(0,0) its left edge, so the old table classified one edge of the
+// same triangle by each of two opposite conventions.
 func TestIncrementalEdgeIsTopLeft(t *testing.T) {
 	tests := []struct {
 		name           string
 		x0, y0, x1, y1 float32
 		want           bool
 	}{
-		{"horizontal_right", 0, 0, 10, 0, false},
-		{"horizontal_left", 10, 0, 0, 0, true},
-		{"edge_up", 0, 10, 0, 0, true},
-		{"edge_down", 0, 0, 0, 10, false},
+		{"horizontal_right_is_top", 0, 0, 10, 0, true},
+		{"horizontal_left_is_bottom", 10, 0, 0, 0, false},
+		{"edge_up_is_left", 0, 10, 0, 0, true},
+		{"edge_down_is_right", 0, 0, 0, 10, false},
+		{"diagonal_up_right_is_left", 0, 10, 10, 0, true},
+		{"diagonal_down_right_is_right", 0, 0, 10, 10, false},
+		{"diagonal_up_left_is_left", 10, 10, 0, 0, true},
+		{"diagonal_down_left_is_right", 10, 0, 0, 10, false},
 	}
 
 	for _, tt := range tests {

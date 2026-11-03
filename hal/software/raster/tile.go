@@ -202,46 +202,49 @@ func (g *TileGrid) GetTilesForTriangle(tri Triangle) []Tile {
 }
 
 // TileTriangleTest tests if a tile potentially overlaps with a triangle.
-// It uses the edge functions evaluated at tile corners for a hierarchical test.
+// It evaluates the triangle's fixed-point edge functions at the centers of the
+// tile's corner pixels, with the same top-left fill rule as the rasterizer.
 //
 // Returns:
-//   - -1: tile is completely outside the triangle (reject)
+//   - -1: no pixel of the tile is covered (reject)
 //   - 0: tile partially overlaps the triangle (needs per-pixel testing)
-//   - 1: tile is completely inside the triangle (can skip edge tests for all pixels)
-func TileTriangleTest(tile Tile, e01, e12, e20 EdgeFunction) int {
-	corners := tile.Corners()
+//   - 1: every pixel of the tile is covered (can skip edge tests for all pixels)
+func TileTriangleTest(tile Tile, tri Triangle) int {
+	it := NewIncrementalTriangle(tri)
+	return tileTriangleTest(tile, &it)
+}
 
-	// Evaluate all three edge functions at all four corners
-	e01TL := e01.Evaluate(corners.TL[0], corners.TL[1])
-	e01TR := e01.Evaluate(corners.TR[0], corners.TR[1])
-	e01BL := e01.Evaluate(corners.BL[0], corners.BL[1])
-	e01BR := e01.Evaluate(corners.BR[0], corners.BR[1])
-
-	e12TL := e12.Evaluate(corners.TL[0], corners.TL[1])
-	e12TR := e12.Evaluate(corners.TR[0], corners.TR[1])
-	e12BL := e12.Evaluate(corners.BL[0], corners.BL[1])
-	e12BR := e12.Evaluate(corners.BR[0], corners.BR[1])
-
-	e20TL := e20.Evaluate(corners.TL[0], corners.TL[1])
-	e20TR := e20.Evaluate(corners.TR[0], corners.TR[1])
-	e20BL := e20.Evaluate(corners.BL[0], corners.BL[1])
-	e20BR := e20.Evaluate(corners.BR[0], corners.BR[1])
-
-	// Check if all corners are outside any single edge (trivial reject)
-	if (e01TL < 0 && e01TR < 0 && e01BL < 0 && e01BR < 0) ||
-		(e12TL < 0 && e12TR < 0 && e12BL < 0 && e12BR < 0) ||
-		(e20TL < 0 && e20TR < 0 && e20BL < 0 && e20BR < 0) {
-		return -1 // Completely outside
+// tileTriangleTest is TileTriangleTest for an already set up triangle.
+//
+// An edge value is linear and the corner centers span every pixel center of
+// the tile, so if all four corners fail one edge's test, every pixel fails it
+// (all values < 0, or all <= 0 on an edge that does not own its points), and
+// if all four pass every edge's test, every pixel passes.
+func tileTriangleTest(tile Tile, it *IncrementalTriangle) int {
+	if it.IsDegenerate() || tile.MinX >= tile.MaxX || tile.MinY >= tile.MaxY {
+		return -1
 	}
+	xs := [2]int64{pixelCenter(tile.MinX), pixelCenter(tile.MaxX - 1)}
+	ys := [2]int64{pixelCenter(tile.MinY), pixelCenter(tile.MaxY - 1)}
 
-	// Check if all corners are inside all edges (trivial accept)
-	if (e01TL >= 0 && e01TR >= 0 && e01BL >= 0 && e01BR >= 0) &&
-		(e12TL >= 0 && e12TR >= 0 && e12BL >= 0 && e12BR >= 0) &&
-		(e20TL >= 0 && e20TR >= 0 && e20BL >= 0 && e20BR >= 0) {
-		return 1 // Completely inside
+	result := 1
+	for _, e := range [3]*IncrementalEdge{&it.E12, &it.E20, &it.E01} {
+		passed := 0
+		for _, y := range ys {
+			for _, x := range xs {
+				if e.covers(e.evaluate(x, y)) {
+					passed++
+				}
+			}
+		}
+		if passed == 0 {
+			return -1 // Completely outside this edge
+		}
+		if passed < 4 {
+			result = 0 // Partial overlap
+		}
 	}
-
-	return 0 // Partial overlap
+	return result
 }
 
 // TileIndex returns the linear index of a tile in the grid.

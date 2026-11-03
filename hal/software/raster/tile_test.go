@@ -217,20 +217,16 @@ func TestTileTriangleTest(t *testing.T) {
 		20, 30, 0.5,
 	)
 
-	e01 := NewEdgeFunction(tri.V0.X, tri.V0.Y, tri.V1.X, tri.V1.Y)
-	e12 := NewEdgeFunction(tri.V1.X, tri.V1.Y, tri.V2.X, tri.V2.Y)
-	e20 := NewEdgeFunction(tri.V2.X, tri.V2.Y, tri.V0.X, tri.V0.Y)
-
 	// Tile completely outside (to the left)
 	outsideTile := Tile{X: 0, Y: 0, MinX: 0, MinY: 0, MaxX: 8, MaxY: 8}
-	result := TileTriangleTest(outsideTile, e01, e12, e20)
+	result := TileTriangleTest(outsideTile, tri)
 	if result != -1 {
 		t.Errorf("Outside tile: got %d, want -1 (reject)", result)
 	}
 
 	// Tile partially inside
 	partialTile := Tile{X: 1, Y: 1, MinX: 8, MinY: 8, MaxX: 16, MaxY: 16}
-	result = TileTriangleTest(partialTile, e01, e12, e20)
+	result = TileTriangleTest(partialTile, tri)
 	if result != 0 {
 		t.Errorf("Partial tile: got %d, want 0 (partial)", result)
 	}
@@ -242,14 +238,41 @@ func TestTileTriangleTest(t *testing.T) {
 		100, 0, 0.5,
 		50, 100, 0.5,
 	)
-	e01Big := NewEdgeFunction(bigTri.V0.X, bigTri.V0.Y, bigTri.V1.X, bigTri.V1.Y)
-	e12Big := NewEdgeFunction(bigTri.V1.X, bigTri.V1.Y, bigTri.V2.X, bigTri.V2.Y)
-	e20Big := NewEdgeFunction(bigTri.V2.X, bigTri.V2.Y, bigTri.V0.X, bigTri.V0.Y)
-
 	insideTile := Tile{X: 5, Y: 5, MinX: 40, MinY: 40, MaxX: 48, MaxY: 48}
-	result = TileTriangleTest(insideTile, e01Big, e12Big, e20Big)
+	result = TileTriangleTest(insideTile, bigTri)
 	if result != 1 {
 		t.Errorf("Inside tile: got %d, want 1 (accept)", result)
+	}
+}
+
+// TestTileTriangleTestFillRule checks the tile test against the per-pixel
+// fill rule: a rejected tile holds no covered pixel, an accepted one holds
+// only covered pixels. The triangles put tile corner centers exactly on
+// edges, where the old >= 0 corner test accepted tiles whose corner pixel the
+// rasterizer does not draw (bottom and right edges).
+func TestTileTriangleTestFillRule(t *testing.T) {
+	tris := append(meshTris(t, -7.5, 4, 12, 0, 1), meshTris(t, -8, 5.3, 9, 1.3, 2)...)
+	tris = append(tris,
+		// The bottom edge y = 7.5 and right edge x = 7.5 run through the
+		// corner centers of tile (0,0); its right/bottom corner pixel is not
+		// covered.
+		fillTri(-20, 7.5, 7.5, -20, 7.5, 7.5),
+		// Top edge y = 8.5 through the top corners of tile (0,1): covered.
+		fillTri(-20, 8.5, 40, 8.5, 10, 60),
+	)
+	tiles := NewTileGrid(fillW, fillH).GetAllTiles()
+	for ti, tri := range tris {
+		for _, tile := range tiles {
+			covered := 0
+			RasterizeTile(tri, tile, func(Fragment) { covered++ })
+			all := tile.Width() * tile.Height()
+			switch got := TileTriangleTest(tile, tri); {
+			case got == -1 && covered != 0:
+				t.Errorf("triangle %d, tile (%d,%d): rejected, but %d pixels are covered", ti, tile.X, tile.Y, covered)
+			case got == 1 && covered != all:
+				t.Errorf("triangle %d, tile (%d,%d): accepted, but %d of %d pixels are covered", ti, tile.X, tile.Y, covered, all)
+			}
+		}
 	}
 }
 
@@ -358,12 +381,10 @@ func BenchmarkTileTriangleTest(b *testing.B) {
 		100, 0, 0.5,
 		50, 100, 0.5,
 	)
-	e01 := NewEdgeFunction(tri.V0.X, tri.V0.Y, tri.V1.X, tri.V1.Y)
-	e12 := NewEdgeFunction(tri.V1.X, tri.V1.Y, tri.V2.X, tri.V2.Y)
-	e20 := NewEdgeFunction(tri.V2.X, tri.V2.Y, tri.V0.X, tri.V0.Y)
+	it := NewIncrementalTriangle(tri)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = TileTriangleTest(tile, e01, e12, e20)
+		_ = tileTriangleTest(tile, &it)
 	}
 }
