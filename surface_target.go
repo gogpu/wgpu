@@ -14,6 +14,13 @@ var ErrInvalidSurfaceTarget = errors.New("wgpu: invalid surface target")
 // cannot create a surface for the supplied platform target kind.
 var ErrUnsupportedSurfaceTarget = errors.New("wgpu: unsupported surface target")
 
+// ErrSurfaceDeviceMismatch is returned by Surface.Configure when the Device
+// cannot present to the surface. On GLES a Device opened through a surface's
+// adapter is bound to that surface's native display: a surface of another
+// display needs a Device opened through its own adapter. The backend's
+// detail is wrapped in the error.
+var ErrSurfaceDeviceMismatch = errors.New("wgpu: device cannot present to this surface")
+
 // SurfaceTarget provides the raw platform target used to create a Surface.
 //
 // CreateSurfaceFromTarget samples SurfaceTarget once and retains the provider
@@ -45,6 +52,14 @@ const (
 // No ownership source is retained for an unsafe target. The caller must keep
 // every referenced native object valid until the returned Surface is released.
 // This is the Go equivalent of Rust wgpu's SurfaceTargetUnsafe::RawHandle.
+//
+// On GLES a Device opened through the surface's adapter is bound to the
+// surface's native display (Xlib Display* or wl_display*), which must outlive
+// that Device too. Release surfaces and devices, then close the display, then
+// release the Instance; or release the Instance before closing the display.
+// Adapters are not part of this rule. When the Instance has a Display
+// (InstanceDescriptor.Display), an Xlib or Wayland target must use it, or
+// surface creation fails with ErrMismatchingDisplayHandle.
 type SurfaceTargetUnsafe struct {
 	kind          surfaceTargetKind
 	displayHandle uintptr

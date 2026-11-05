@@ -16,18 +16,39 @@ import (
 type InstanceDescriptor struct {
 	Backends gputypes.Backends
 	Flags    gputypes.InstanceFlags
+	// Display is the native display connection to build the instance on, or
+	// zero (Rust wgpu InstanceDescriptor.display).
+	//
+	// On Linux GLES (EGL) the context is built on it at instance creation.
+	// The caller keeps the display open until Instance.Release returns: wgpu
+	// cannot keep it alive. With it set, every Xlib or Wayland surface must
+	// use the same display, or surface creation fails with
+	// ErrMismatchingDisplayHandle. A handle of a nil pointer makes
+	// CreateInstance fail with ErrInvalidDisplayHandle.
+	//
+	// With -tags rust it is not passed to wgpu-native until go-webgpu maps
+	// it (WGPUInstanceExtras.displayHandle); the surface check above applies.
+	Display DisplayHandle
 }
 
 // Instance is the entry point for GPU operations.
 // On Rust backend, this wraps go-webgpu/webgpu Instance.
 type Instance struct {
 	r        *rwgpu.Instance
+	display  DisplayHandle // InstanceDescriptor.Display, immutable
 	released bool
 }
 
 // CreateInstance creates a new GPU instance.
 // If desc is nil, all available backends are used.
 func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
+	var display DisplayHandle
+	if desc != nil {
+		if err := desc.Display.validate(); err != nil {
+			return nil, err
+		}
+		display = desc.Display
+	}
 	if err := rwgpu.Init(); err != nil {
 		return nil, fmt.Errorf("wgpu: failed to init wgpu-native: %w", err)
 	}
@@ -37,7 +58,7 @@ func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 		return nil, fmt.Errorf("wgpu: failed to create instance: %w", err)
 	}
 
-	return &Instance{r: ri}, nil
+	return &Instance{r: ri, display: display}, nil
 }
 
 // RequestAdapter requests a GPU adapter matching the options.

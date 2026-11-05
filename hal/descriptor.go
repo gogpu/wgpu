@@ -30,6 +30,36 @@ type InstanceDescriptor struct {
 
 	// GLBackend specifies the OpenGL backend flavor (GL or GLES).
 	GLBackend gputypes.GLBackend
+
+	// Display is the native display connection the caller passed to the
+	// public InstanceDescriptor, or zero. The GLES backend on Linux builds its
+	// EGL context on it at instance creation; the other backends ignore it.
+	// The caller keeps it open until Instance.Destroy returns.
+	Display DisplayHandle
+}
+
+// DisplayKind identifies the window system of a DisplayHandle.
+type DisplayKind uint8
+
+const (
+	// DisplayKindNone is the zero DisplayHandle: no display.
+	DisplayKindNone DisplayKind = iota
+	// DisplayKindXlib is an Xlib Display*.
+	DisplayKindXlib
+	// DisplayKindWayland is a wl_display*.
+	DisplayKindWayland
+)
+
+// DisplayHandle is a caller-owned native display connection, the HAL mirror
+// of wgpu.DisplayHandle (converted at the root package boundary).
+type DisplayHandle struct {
+	Kind    DisplayKind
+	Display uintptr
+}
+
+// IsZero reports whether h names no display.
+func (h DisplayHandle) IsZero() bool {
+	return h.Kind == DisplayKindNone
 }
 
 // Capabilities contains detailed adapter capabilities.

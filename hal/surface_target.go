@@ -29,6 +29,8 @@ const (
 // DisplayHandle is unused for Android and Metal. WindowHandle is HWND, Xlib
 // Window, wl_surface*, ANativeWindow*, or CAMetalLayer* according to Kind.
 // HAL never owns these raw handles; they must outlive the created Surface.
+// On GLES the native display must also outlive every Device opened through
+// the surface's adapter (Instance.CreateSurface).
 // Headless is a Go software/noop extension and carries no handles.
 type SurfaceTarget struct {
 	Kind          SurfaceTargetKind

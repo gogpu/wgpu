@@ -15,6 +15,12 @@ import (
 type InstanceDescriptor struct {
 	Backends gputypes.Backends
 	Flags    gputypes.InstanceFlags
+	// Display is the native display connection to build the instance on, or
+	// zero (Rust wgpu InstanceDescriptor.display). On Linux GLES (EGL) the
+	// context is built on it at instance creation, and Xlib or Wayland
+	// surfaces must use the same display. The browser has no native display:
+	// it is ignored here.
+	Display DisplayHandle
 }
 
 // Instance is the entry point for GPU operations.

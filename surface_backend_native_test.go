@@ -262,6 +262,7 @@ func TestSurfaceTargetFromLegacyHandlesForPlatform(t *testing.T) {
 			got := surfaceTargetFromLegacyHandlesForPlatform(
 				test.goos,
 				test.waylandDisplay,
+				DisplayHandle{},
 				test.display,
 				test.window,
 			)

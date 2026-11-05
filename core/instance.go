@@ -93,6 +93,13 @@ type surfaceAdapterQualifier interface {
 // instance remains empty and RequestAdapter reports the failure. Tests that
 // need a deterministic adapter must opt in through NewInstanceWithMock.
 func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
+	return NewInstanceWithDisplay(desc, hal.DisplayHandle{})
+}
+
+// NewInstanceWithDisplay is NewInstance with the native display connection
+// the caller passed at instance creation (wgpu.InstanceDescriptor.Display),
+// handed to every backend's CreateInstance. A zero display is NewInstance.
+func NewInstanceWithDisplay(desc *gputypes.InstanceDescriptor, display hal.DisplayHandle) *Instance {
 	if desc == nil {
 		defaultDesc := gputypes.DefaultInstanceDescriptor()
 		desc = &defaultDesc
@@ -108,10 +115,20 @@ func NewInstance(desc *gputypes.InstanceDescriptor) *Instance {
 	}
 
 	// Try to enumerate real adapters via HAL backends
-	i.enumerateRealAdapters(desc)
+	i.enumerateRealAdapters(halInstanceDescriptor(desc, display))
 
 	trackResource(uintptr(unsafe.Pointer(i)), "Instance") //nolint:gosec // debug tracking uses pointer as unique ID
 	return i
+}
+
+// halInstanceDescriptor builds the descriptor every backend's CreateInstance
+// receives.
+func halInstanceDescriptor(desc *gputypes.InstanceDescriptor, display hal.DisplayHandle) *hal.InstanceDescriptor {
+	return &hal.InstanceDescriptor{
+		Backends: desc.Backends,
+		Flags:    desc.Flags,
+		Display:  display,
+	}
 }
 
 // NewInstanceWithMock creates a new WebGPU instance with mock adapters.
@@ -138,7 +155,7 @@ func NewInstanceWithMock(desc *gputypes.InstanceDescriptor) *Instance {
 
 // enumerateRealAdapters attempts to enumerate real GPU adapters via HAL
 // backends. If none are available, the instance remains empty.
-func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
+func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 	instanceEnumerateMu.Lock()
 	defer instanceEnumerateMu.Unlock()
 
@@ -146,15 +163,9 @@ func (i *Instance) enumerateRealAdapters(desc *gputypes.InstanceDescriptor) {
 	RegisterHALBackends()
 
 	// Get backend providers filtered by the enabled backends mask
-	providers := FilterBackendsByMask(desc.Backends)
+	providers := FilterBackendsByMask(halDesc.Backends)
 
 	hub := GetGlobal().Hub()
-
-	// Create HAL descriptor
-	halDesc := &hal.InstanceDescriptor{
-		Backends: desc.Backends,
-		Flags:    desc.Flags,
-	}
 
 	// Try each backend provider
 	for _, provider := range providers {
