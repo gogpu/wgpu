@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Ray tracing status corrected.** The README, `docs/RAY-TRACING.md`, AGENTS.md and the roadmap described inline ray queries as working on Vulkan, DX12, Metal and the software backend since v0.32.0. They aren't. The code exists only in the HAL. The public API has no acceleration structures. No GPU adapter offers `FeatureRayQuery`, so the Vulkan, DX12 and Metal paths have never run. The software backend offers the feature, but its SPIR-V interpreter does not execute ray queries. The docs now say so. The public API is planned, Vulkan first (#369).
+
 ## [0.34.7] - 2026-11-03
 
 ### Added

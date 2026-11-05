@@ -64,17 +64,15 @@ wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
 | `wgpu/hal/software` | CPU software renderer |
 | `wgpu/internal/raytracing` | RT build orchestration, compaction, validation (ADR-062) |
 
-### Ray Tracing (experimental, v0.32.0)
+### Ray Tracing (experimental, HAL only)
 
-Inline ray queries matching Rust wgpu's `EXPERIMENTAL_RAY_QUERY`. Feature-gated by `FeatureRayQuery`.
+Not usable through the public API yet: the root package has no `Blas`, `Tlas` or acceleration structure binding.
+The HAL has acceleration structure code for Vulkan, DX12, Metal and software, but no GPU adapter advertises
+`FeatureRayQuery` and none of it has run on a GPU. The software backend advertises the feature, but its SPIR-V
+interpreter does not execute ray queries. Do not suggest ray queries to users yet. The plan (public API following
+Rust wgpu's `EXPERIMENTAL_RAY_QUERY`, Vulkan first) is in #369 and `docs/RAY-TRACING.md`.
 
-- **Vulkan**: VK_KHR_acceleration_structure + VK_KHR_ray_query
-- **DX12**: DXR Tier 1.1, SM 6.5
-- **Metal**: MTLAccelerationStructure (macOS 15.0+, iOS 18.0+)
-- **Software**: CPU BVH (Moller-Trumbore) for CI/testing without GPU
-- **GLES**: Not supported
-
-Example: `examples/raytracing-headless/` — visual RT verification on software backend.
+Example: `examples/raytracing-headless/` builds a BLAS through the software HAL and traces rays in Go on the CPU.
 
 ## Current Version
 

@@ -107,7 +107,7 @@
 ✅ **Android arm64 Vulkan (guarded preview)** — API 29+, Bionic loader via goffi v0.6.1, Rust v29 WSI parity. Callbacks rejected pending physical-device proof (@besmpl #268)
 ✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. `hal.PixelReader` optional capability. Closes #256 (@besmpl #276)
 ✅ **MRT fix** — Multiple Render Targets across all 5 backends (#322, @darkliquid)
-✅ **Ray Tracing Extensions (experimental, ADR-062)** — inline ray queries, 4 backends (Vulkan VK_KHR + DX12 DXR + Metal macOS 15+ + Software CPU BVH). `internal/raytracing/` with build orchestration, compaction state machine, validation checks. Visual verification example.
+✅ **Ray Tracing HAL code (experimental, ADR-062)** — acceleration structure code in the HAL for Vulkan, DX12, Metal and software (CPU BVH), and `internal/raytracing/` with build orchestration, compaction and validation. Not reachable through the public API and never run on a GPU (see [RAY-TRACING.md](docs/RAY-TRACING.md)).
 ✅ **Unified backend naming** — `NewBackend()` constructor on all 6 backends, `API` → `Backend` (software/noop)
 
 ### Remaining validation (planned)
@@ -224,7 +224,7 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 - [ ] **Embedded Linux** — headless compute (Mesa surfaceless, Raspberry Pi)
 
 **Advanced GPU Features:**
-- [x] ~~Ray tracing extensions~~ → v0.32.0 (ADR-062: Vulkan + DX12 + Metal + Software, inline ray queries)
+- [ ] Inline ray queries in the public API (Rust `EXPERIMENTAL_RAY_QUERY` shape), Vulkan first, then the other backends verified on hardware (#369; HAL code since v0.32.0)
 - [ ] Ray tracing pipelines (VK_KHR_ray_tracing_pipeline) — future, after ray query stabilization
 - [ ] Bindless resources (descriptor indexing)
 - [ ] Mesh shaders (VK_EXT_mesh_shader)
@@ -263,7 +263,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
 | **v0.33.0** | 2026-08 | DownlevelCapabilities — Rust-parity capability flags for graceful degradation |
-| **v0.32.0** | 2026-08 | Ray tracing extensions (experimental): inline ray queries on Vulkan, DX12, Metal, Software |
+| **v0.32.0** | 2026-08 | Ray tracing HAL code (experimental) for Vulkan, DX12, Metal and software; no public API yet, not run on a GPU |
 | **v0.31.0** | 2026-08 | Full resource tracker: TextureTracker, BufferTracker, DeviceTracker |
 | **v0.30.22** | 2026-07 | Metal: MSAA storage mode crash on Intel Mac — `MTLGPUFamilyApple1` detection (#271) |
 | **v0.30.21** | 2026-07 | Software: CopyTextureToBuffer row stride, blend state wiring, BGRA readTexel |

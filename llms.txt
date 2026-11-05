@@ -5,7 +5,7 @@
 > (wgpu-native through go-webgpu/webgpu), and `js,wasm` (the browser's WebGPU). Shaders are WGSL, compiled by
 > gogpu/naga to SPIR-V, MSL, HLSL, DXIL or GLSL. Validation and resource state tracking follow Rust wgpu-core.
 > Render and compute pipelines, GPU-to-CPU readback, render bundles, queries and damage-aware presentation are
-> included. Inline ray queries are experimental and exist only in the HAL, not yet in the public API.
+> included. Ray queries are not usable yet: HAL code only, no public API, not run on a GPU.
 > Runs on Windows, Linux, macOS and in browsers (WASM); Android/arm64 Vulkan is a preview. Go 1.25+.
 > Pre-1.0: the API may change before v1.0.
 
@@ -29,5 +29,6 @@
 
 ## Ecosystem
 
-- [GoGPU](https://github.com/gogpu): all modules of the GoGPU ecosystem
+- [GoGPU ecosystem](https://gogpu.dev/llms.txt): map of all modules
+- [GoGPU on GitHub](https://github.com/gogpu): all repositories
 - [Open Collective](https://opencollective.com/gogpu): support development

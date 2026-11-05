@@ -1,77 +1,39 @@
-# Ray Tracing Extensions (Experimental)
+# Ray Tracing (Experimental, HAL only)
 
-> **Status:** Experimental (not in W3C WebGPU spec, Milestone 4+)
-> **Since:** v0.32.0
-> **Feature gate:** `FeatureRayQuery`
+> **Status:** experimental, not in the W3C WebGPU spec. Not usable through the public `wgpu` API yet.
+> **Plan:** public API following Rust wgpu's `EXPERIMENTAL_RAY_QUERY`, starting with Vulkan
+> ([#369](https://github.com/gogpu/wgpu/issues/369)).
 
-## Overview
+## What exists today
 
-wgpu supports inline ray queries matching Rust wgpu's `EXPERIMENTAL_RAY_QUERY`.
-Ray tracing enables acceleration structure-based ray-scene intersection testing
-in compute and fragment shaders.
+The HAL (`hal/raytracing.go`) has acceleration structure resources and build commands, and each backend has code for
+them. Nothing above the HAL uses it yet: the root `wgpu` package has no `Blas`, `Tlas` or acceleration structure
+binding, so ray tracing is reachable only by driving `hal` directly, as `examples/raytracing-headless/` does.
 
-## Backend Support
+| Backend | HAL code | Advertises `FeatureRayQuery` | Has run |
+|---------|----------|------------------------------|---------|
+| Vulkan | VK_KHR_acceleration_structure + VK_KHR_ray_query calls | No: the extensions and device features are never enabled | No |
+| DX12 | DXR Tier 1.1 (ID3D12Device5 / ID3D12GraphicsCommandList4) | No | No |
+| Metal | MTLAccelerationStructure (macOS 15+, iOS 18+) | No | No |
+| Software | CPU BVH build and ray-triangle intersection | Yes, but see below | BVH build and intersection: unit tests |
+| GLES, Noop | none (returns an error) | No | — |
 
-| Backend | Platform | API | Min Hardware |
-|---------|----------|-----|-------------|
-| Vulkan | Windows, Linux | VK_KHR_acceleration_structure + VK_KHR_ray_query | RTX 20+, RDNA 2+, Arc |
-| DX12 | Windows | DXR Tier 1.1, SM 6.5 | Same GPUs |
-| Metal | macOS 15.0+, iOS 18.0+ | MTLAccelerationStructure | A13+, Apple Silicon |
-| Software | All platforms | CPU BVH (Moller-Trumbore) | Any CPU |
-| GLES | — | Not supported | — |
-
-## Architecture
-
-Ray tracing is implemented as a three-layer architecture (ADR-062):
-
-### 1. `internal/raytracing/` — Build Orchestration & Validation
-
-Isolated in `internal/` per ADR-069 (struct ownership + callback interface pattern).
-Core holds pointers and calls directly.
-
-- **types.go** — CompactionState (Idle -> Waiting -> Ready -> Compacted), BlasAction enums
-- **blas.go, tlas.go** — BLAS/TLAS resource structs with helpers (IsBuilt, AllowsCompaction)
-- **build.go** — BuildContext: scratch buffer alignment, BLAS -> TLAS dependency tracking (built_index)
-- **compaction.go** — per-state handler functions
-- **validate.go** — 9 validation checks: feature gate, geometry/instance counts, build ordering, alignment, compact state
-- **errors.go** — typed ValidationError with operation constants
-- **context.go** — DeviceContext callback interface (core.Device implements without import cycle)
-
-
-
-### 2. `hal/raytracing.go` — HAL Interface
-
-Defines the backend-agnostic RT interface:
-
-- `AccelerationStructure` resource type
-- 12 descriptor types for BLAS/TLAS geometry, instances, and build parameters
-- `TlasInstance` for positioning geometry in the scene
-- 5 Device methods (create, build, compact acceleration structures)
-- 4 CommandEncoder methods (build BLAS/TLAS, write instances, compact)
-
-### 3. Per-Backend Implementations
-
-All 4 GPU backends implement real API calls:
-
-- **Vulkan** — VK_KHR_acceleration_structure + VK_KHR_ray_query (FFI calls via goffi)
-- **DX12** — DXR Tier 1.1, COM bindings for ID3D12Device5/CommandList4
-- **Metal** — MTLAccelerationStructure (macOS 15.0+)
-- **Software** — CPU BVH build + Moller-Trumbore ray-triangle intersection (for CI/testing without GPU)
-- **GLES/Noop** — return an error (no ray tracing)
+- On Vulkan, DX12 and Metal no adapter advertises `FeatureRayQuery`, so a device never has it, and the code has
+  never run on a GPU. Vulkan never enables the ray tracing extensions either. Work on #369 found that the Vulkan path
+  also needed missing function loading and a struct layout fix before it could run.
+- The software backend builds BVHs on the CPU and advertises `FeatureRayQuery`, but its SPIR-V interpreter does
+  not execute ray query instructions, so a shader that uses `ray_query` does not run there.
+- `internal/raytracing/` holds build ordering, compaction and validation logic for the planned public API.
 
 ## Example
 
-See `examples/raytracing-headless/` for a complete working example that:
-1. Creates triangle geometry
-2. Builds a BLAS (bottom-level acceleration structure)
-3. Traces rays against the BVH
-4. Renders result to PNG
-
-No GPU required — runs on the software backend.
+`examples/raytracing-headless/` creates a software HAL device, builds a BLAS from one triangle, and traces rays
+against the resulting BVH in Go on the CPU to render a PNG. It shows the HAL build path. It does not run a shader
+ray query.
 
 ## Limitations
 
-- Inline ray queries only (no ray tracing pipelines yet)
-- Experimental — API may change before v1.0
-- Not in W3C WebGPU spec (Milestone 4+, blocked on bindless in spec)
-- Software backend uses simple midpoint-split BVH (not SAH) — for CI correctness, not production performance
+- No public API yet; the HAL types may change before they are exposed.
+- Inline ray queries only are planned; ray tracing pipelines are not.
+- Not in the W3C WebGPU spec.
+- The software BVH uses a simple midpoint split (not SAH): meant for tests, not performance.

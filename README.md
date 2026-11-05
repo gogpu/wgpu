@@ -36,7 +36,7 @@
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
 | **Compute** | Full compute shader support, GPU→CPU readback |
 | **Present** | Damage-aware presentation — compositor dirty rects (first WebGPU implementation) |
-| **Ray Tracing** | Inline ray queries (experimental) — Vulkan (VK_KHR), DX12 (DXR), Metal (macOS 15+), Software (CPU BVH). Feature-gated by `FeatureRayQuery` |
+| **Ray Tracing** | Not usable yet: HAL code only, no public API, not run on a GPU. Public inline ray queries are planned, Vulkan first ([status](docs/RAY-TRACING.md), [#369](https://github.com/gogpu/wgpu/issues/369)) |
 | **Debug** | Leak detection, error scopes (native backends; not yet in the browser backend), validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
 
@@ -230,7 +230,7 @@ wgpu/
 ├── examples/
 │   ├── compute-copy/          # GPU buffer copy with compute shader
 │   ├── compute-sum/           # Parallel reduction on GPU
-│   └── raytracing-headless/   # Ray tracing on software backend (no GPU required)
+│   └── raytracing-headless/   # HAL acceleration structure build, rays traced on the CPU
 └── cmd/
     ├── vk-gen/         # Vulkan bindings generator
     └── ...             # Backend integration tests
@@ -412,7 +412,7 @@ recipe and the explicit non-WebGPU support contract.
 
 - **[Compute Shaders Guide](docs/COMPUTE-SHADERS.md)** — Getting started with compute
 - **[Compute Backend Differences](docs/COMPUTE-BACKENDS.md)** — Per-backend capabilities
-- **[Ray Tracing Extensions](docs/RAY-TRACING.md)** — Experimental inline ray queries (v0.32.0)
+- **[Ray Tracing](docs/RAY-TRACING.md)** — Current status (HAL only) and the plan for public inline ray queries
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
