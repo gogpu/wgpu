@@ -53,6 +53,14 @@ var (
 	//   - Invalid dimensions passed to Configure
 	ErrZeroArea = errors.New("hal: surface width and height must be non-zero")
 
+	// ErrSurfaceDeviceMismatch is returned by Surface.Configure when the
+	// Device cannot present to the surface. On GLES a Device belongs to the
+	// EGL context it was opened on, which is bound to one native display:
+	// GL objects are not shared between contexts, and a Wayland surface of
+	// one wl_display cannot use a context of another. The public package maps
+	// it to wgpu.ErrSurfaceDeviceMismatch.
+	ErrSurfaceDeviceMismatch = errors.New("hal: device cannot present to this surface")
+
 	// ErrTimestampsNotSupported indicates the backend does not support timestamp queries.
 	// This is returned by CreateQuerySet when QueryTypeTimestamp is requested
 	// on backends that lack GPU timestamp support (e.g., Software, Noop, GLES without

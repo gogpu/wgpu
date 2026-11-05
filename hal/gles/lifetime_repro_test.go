@@ -3,15 +3,19 @@
 package gles
 
 import (
+	"errors"
 	"runtime"
 	"testing"
 
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // newTestAdapterContext creates a real EGL/GL context wrapped in an
-// AdapterContext, or skips when no EGL display is available.
+// AdapterContext, or skips when no EGL display is available. The caller holds
+// its first reference.
 func newTestAdapterContext(t *testing.T) *AdapterContext {
 	t.Helper()
 	runtime.LockOSThread()
@@ -36,46 +40,116 @@ func newTestAdapterContext(t *testing.T) *AdapterContext {
 		t.Fatalf("GL load failed: %v", err)
 	}
 	_ = egl.MakeCurrent(eglCtx.Display(), egl.NoSurface, egl.NoSurface, egl.NoContext)
-	return NewAdapterContext(eglCtx, glCtx, true)
+	return NewAdapterContext(eglCtx, glCtx)
 }
 
-// TestSurfaceDoesNotDestroyAdoptedContext is the regression test for the
-// shutdown panic: when a Surface had to create its own EGL context (Wayland /
-// window-kind mismatch), the context is now adopted by the Instance, so
-// Surface.Destroy must NOT free it while the Device still uses it.
-//
-// Before the fix, Surface.Destroy called AdapterContext.Destroy (ownsContext
-// was true), deleting the context that the Device held. A later Device.Destroy
-// locked a nil EGL context and dereferenced nil *gl.Context -> SIGSEGV.
-func TestSurfaceDoesNotDestroyAdoptedContext(t *testing.T) {
-	adapterCtx := newTestAdapterContext(t)
-
-	inst := &Instance{}
-	if prev := inst.adoptContext(adapterCtx); prev != nil {
-		t.Fatalf("adoptContext returned unexpected previous context %p", prev)
+// TestSurfaceDestroyKeepsDeviceContext is the #362 order: the window closes
+// (Surface first), then the Device, then the Instance. Surface.Destroy must
+// not free the context the Device still uses (before #362 a later
+// Device.Destroy locked a nil EGL context and panicked), and since ADR-077
+// the context dies with the Device, not with the Instance.
+func TestSurfaceDestroyKeepsDeviceContext(t *testing.T) {
+	ctx := newTestAdapterContext(t) // the Surface's reference
+	surf := &Surface{ctx: ctx}
+	adapters := (&Instance{}).EnumerateAdapters(surf)
+	if len(adapters) == 0 {
+		t.Skip("context below OpenGL 3.3 / ES 3.0: no adapter")
 	}
-
-	// Surface returned by CreateSurface Path B: shares the adopted context.
-	surf := &Surface{ctx: adapterCtx, ownsContext: false}
-	device := &Device{ctx: adapterCtx, vao: 1}
+	open, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	device := open.Device.(*Device)
 
 	// Window close destroys the Surface first.
 	surf.Destroy()
-
-	// The shared context must still be alive for the Device.
-	if adapterCtx.eglCtx == nil || adapterCtx.gl == nil {
+	if !ctx.Alive() {
 		t.Fatal("Surface.Destroy freed the context the Device still uses")
 	}
 
-	// Shutdown destroys the Device next — must not nil-deref.
+	// The Device still works on the context.
+	buf, err := device.CreateBuffer(&hal.BufferDescriptor{Size: 16, Usage: gputypes.BufferUsageCopyDst})
+	if err != nil {
+		t.Fatalf("CreateBuffer after Surface.Destroy: %v", err)
+	}
+	device.DestroyBuffer(buf)
+
+	// Shutdown destroys the Device next — must not nil-deref, and it is the
+	// last holder of the context.
 	device.Destroy()
-	if device.vao != 0 {
-		t.Fatalf("Device.Destroy left vao set: %d", device.vao)
+	if ctx.Alive() {
+		t.Fatal("the context outlived its last Surface and Device")
+	}
+}
+
+// TestCachedAdapterRequalifiedOnRealContext is the window-closed-and-reopened
+// case on real EGL: the adapter enumerated with the first surface fails Open
+// with a typed error once that surface is gone, and QualifySurface gives a
+// working adapter for the next surface.
+func TestCachedAdapterRequalifiedOnRealContext(t *testing.T) {
+	first := &Surface{ctx: newTestAdapterContext(t)}
+	adapters := (&Instance{}).EnumerateAdapters(first)
+	if len(adapters) == 0 {
+		t.Skip("context below OpenGL 3.3 / ES 3.0: no adapter")
+	}
+	cached := adapters[0].Adapter.(*Adapter)
+	first.Destroy()
+
+	if _, err := cached.Open(0, gputypes.DefaultLimits()); !errors.Is(err, ErrContextReleased) {
+		t.Fatalf("Open on the closed window's adapter = %v, want ErrContextReleased", err)
 	}
 
-	// Instance is released last and frees the context.
-	inst.Destroy()
-	if adapterCtx.eglCtx != nil || adapterCtx.gl != nil {
-		t.Fatal("Instance.Destroy did not release the adopted context")
+	second := &Surface{ctx: newTestAdapterContext(t)}
+	qualified, err := cached.QualifySurface(second)
+	if err != nil {
+		t.Fatalf("QualifySurface: %v", err)
 	}
+	open, err := qualified.Open(0, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("Open on the requalified adapter: %v", err)
+	}
+	buf, err := open.Device.CreateBuffer(&hal.BufferDescriptor{Size: 16, Usage: gputypes.BufferUsageCopyDst})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	open.Device.DestroyBuffer(buf)
+	open.Device.Destroy()
+	second.Destroy()
+	if second.ctx != nil {
+		t.Fatal("Surface.Destroy kept its context pointer")
+	}
+}
+
+// TestInstanceSurvivesContextOfReleasedDevice checks the instance context's
+// own reference: a Device opened on it and released does not take it down.
+func TestInstanceSurvivesContextOfReleasedDevice(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	raw, err := Backend{}.CreateInstance(nil)
+	if err != nil {
+		t.Skipf("CreateInstance: %v", err)
+	}
+	inst := raw.(*Instance)
+	defer inst.Destroy()
+	ctx := inst.context()
+	if ctx == nil {
+		t.Skip("no EGL instance context (no display or driver)")
+	}
+	adapters := inst.EnumerateAdapters(nil)
+	if len(adapters) == 0 || adapters[0].Adapter.(*Adapter).ctx == nil {
+		t.Skip("no adapter on the instance context")
+	}
+	open, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	open.Device.Destroy()
+	if !ctx.Alive() {
+		t.Fatal("releasing a Device destroyed the Instance's own context")
+	}
+	if _, err := ctx.Lock(); err != nil {
+		t.Fatalf("Lock on the instance context: %v", err)
+	}
+	ctx.Unlock()
 }

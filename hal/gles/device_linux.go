@@ -19,10 +19,12 @@ import (
 )
 
 // Device implements hal.Device for OpenGL on Linux.
-// Holds a shared *AdapterContext (owned by Instance or Surface). All GL
-// operations acquire the context lock, do MakeCurrent, execute, and unlock.
+// Holds a reference to its *AdapterContext from Adapter.Open to Destroy; the
+// Queue borrows it. All GL operations acquire the context lock, do
+// MakeCurrent, execute, and unlock.
 type Device struct {
 	ctx             *AdapterContext
+	destroyed       bool // Destroy released the context reference
 	displayHandle   uintptr
 	windowHandle    uintptr
 	vao             uint32 // persistent VAO (Core Profile requires one bound)
@@ -58,7 +60,10 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 		return nil, fmt.Errorf("BUG: buffer descriptor is nil in GLES.CreateBuffer — core validation gap")
 	}
 
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	id := glCtx.GenBuffers(1)
@@ -112,7 +117,9 @@ func (d *Device) DestroyBuffer(buffer hal.Buffer) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	b.Destroy()
 }
@@ -128,7 +135,10 @@ func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMa
 		return hal.BufferMapping{}, hal.ErrInvalidMapRange
 	}
 
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return hal.BufferMapping{}, err
+	}
 	defer d.ctx.Unlock()
 
 	if buf.mapped == nil {
@@ -168,7 +178,10 @@ func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 		return nil
 	}
 
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return err
+	}
 	defer d.ctx.Unlock()
 
 	// Flush the CPU-side shadow buffer to the GL buffer. This must happen for
@@ -189,7 +202,10 @@ func (d *Device) UnmapBuffer(buffer hal.Buffer) error {
 
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	id := glCtx.GenTextures(1)
@@ -334,7 +350,9 @@ func (d *Device) DestroyTexture(texture hal.Texture) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	t.Destroy()
 }
@@ -383,7 +401,10 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 
 // CreateSampler creates a texture sampler using GL sampler objects (GL 3.3+).
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (hal.Sampler, error) {
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	if desc == nil {
@@ -402,7 +423,9 @@ func (d *Device) DestroySampler(sampler hal.Sampler) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	s.Destroy()
 }
@@ -472,14 +495,19 @@ func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	m.Destroy()
 }
 
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	start := time.Now()
@@ -626,7 +654,9 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	p.Destroy()
 }
@@ -640,7 +670,10 @@ func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
 // to naga GLSL options. Rust wgpu-hal sets naga_options.zero_initialize_workgroup_memory
 // per-stage (gles/device.rs:268).
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	start := time.Now()
@@ -722,7 +755,9 @@ func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	p.Destroy()
 }
@@ -743,7 +778,10 @@ func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
 // surface (after Configure), not on the pbuffer (during Open). Mesa d3d12
 // gallium invalidates GL objects when switching from pbuffer to window surface.
 func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	glCtx := d.ctx.Lock()
+	glCtx, err := d.ctx.Lock()
+	if err != nil {
+		return nil, err
+	}
 	defer d.ctx.Unlock()
 
 	if d.vao == 0 {
@@ -770,7 +808,9 @@ func (d *Device) DestroyFence(fence hal.Fence) {
 	if !ok || d.ctx == nil {
 		return
 	}
-	_ = d.ctx.Lock()
+	if _, err := d.ctx.Lock(); err != nil {
+		return // the context, and every GL object in it, is gone
+	}
 	defer d.ctx.Unlock()
 	f.Destroy()
 }
@@ -784,7 +824,9 @@ func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (boo
 	// glClientWaitSync needs the context current on this OS thread (Rust
 	// wgpu-hal locks it in Device::wait, gles/device.rs).
 	if d.ctx != nil {
-		_ = d.ctx.Lock()
+		if _, err := d.ctx.Lock(); err != nil {
+			return false, err
+		}
 		defer d.ctx.Unlock()
 	}
 	return f.Wait(value, timeout), nil
@@ -808,7 +850,9 @@ func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
 	}
 	// GetValue polls with glGetSynciv, which needs the context current.
 	if d.ctx != nil {
-		_ = d.ctx.Lock()
+		if _, err := d.ctx.Lock(); err != nil {
+			return false, err
+		}
 		defer d.ctx.Unlock()
 	}
 	return f.GetValue() > 0, nil
@@ -853,21 +897,32 @@ func (d *Device) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
 	if d.ctx != nil && d.ctx.GL() != nil {
-		glCtx := d.ctx.Lock()
+		glCtx, err := d.ctx.Lock()
+		if err != nil {
+			return err
+		}
 		defer d.ctx.Unlock()
 		glCtx.Finish()
 	}
 	return nil
 }
 
-// Destroy releases the device.
+// Destroy releases the device: its VAO, then the Device's reference to its
+// context (taken by Adapter.Open), the last of which destroys the context.
+// The root Device releases the HAL device last, after every resource of it.
 func (d *Device) Destroy() {
-	if d.vao != 0 && d.ctx != nil {
-		glCtx := d.ctx.Lock()
-		glCtx.DeleteVertexArrays(d.vao)
-		d.ctx.Unlock()
+	if d.destroyed || d.ctx == nil {
+		return
+	}
+	d.destroyed = true
+	if d.vao != 0 {
+		if glCtx, err := d.ctx.Lock(); err == nil {
+			glCtx.DeleteVertexArrays(d.vao)
+			d.ctx.Unlock()
+		}
 		d.vao = 0
 	}
+	d.ctx.Release()
 }
 
 // Type aliases for hal descriptors
