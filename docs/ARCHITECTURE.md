@@ -223,9 +223,9 @@ Ray tracing build orchestration, compaction state machine, and validation — is
 - `errors.go` — typed ValidationError with operation constants
 - `context.go` — DeviceContext callback interface (core.Device implements without import cycle)
 
-HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. All 4 GPU backends implement real API calls (Vulkan VK_KHR, DX12 DXR, Metal MTL, Software CPU BVH). GLES and Noop return an error.
+HAL RT interface in `hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. Vulkan (VK_KHR), DX12 (DXR) and Metal have code for it, but no GPU adapter advertises `FeatureRayQuery` and none of it has run on a GPU. Software builds a CPU BVH; its SPIR-V interpreter does not execute ray queries. GLES and Noop return an error. Nothing in `core/` or the root package uses this yet: the public API is planned (#369). Status: [RAY-TRACING.md](RAY-TRACING.md).
 
-Example: `examples/raytracing-headless/`.
+Example: `examples/raytracing-headless/` (software HAL build, rays traced on the CPU).
 
 ## DownlevelCapabilities (ADR-071)
 
