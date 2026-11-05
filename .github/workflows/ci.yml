@@ -378,3 +378,22 @@ jobs:
 
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated"
         exit 0
+
+  # The one check the main-protection ruleset requires. Jobs and the matrix can
+  # change without touching the ruleset; a new required job goes into `needs`.
+  # `if: always()` and the explicit result check matter: a job skipped because a
+  # job it needs failed counts as passed for a required check.
+  gate:
+    name: Test
+    if: always()
+    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, lint, formatting, deps]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Every required job succeeded
+      env:
+        RESULTS: ${{ join(needs.*.result, ' ') }}
+      run: |
+        echo "results: $RESULTS"
+        for r in $RESULTS; do
+          if [ "$r" != success ]; then echo "a required job ended with: $r"; exit 1; fi
+        done
