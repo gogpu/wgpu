@@ -17,6 +17,19 @@ type InstanceDescriptor struct {
 	// Flags controls instance features like debug layers and validation.
 	// Use gputypes.InstanceFlagsDebug to enable GPU debug layer.
 	Flags gputypes.InstanceFlags
+	// Display is the native display connection to build the instance on, or
+	// zero (Rust wgpu InstanceDescriptor.display).
+	//
+	// On Linux GLES (EGL) the context is built on it at instance creation.
+	// The caller keeps the display open until Instance.Release returns: wgpu
+	// cannot keep it alive. With it set, every Xlib or Wayland surface must
+	// use the same display, or surface creation fails with
+	// ErrMismatchingDisplayHandle. A handle of a nil pointer makes
+	// CreateInstance fail with ErrInvalidDisplayHandle.
+	//
+	// Ignored by Vulkan, DX12, Metal, the software backend, WGL, the browser,
+	// and -tags rust until go-webgpu maps it.
+	Display DisplayHandle
 }
 
 // Instance is the entry point for GPU operations.
@@ -25,6 +38,7 @@ type InstanceDescriptor struct {
 // must not be called concurrently with other methods.
 type Instance struct {
 	core     *core.Instance
+	display  DisplayHandle // InstanceDescriptor.Display, immutable
 	mu       sync.Mutex
 	released bool
 	devices  map[*Device]struct{}
@@ -35,16 +49,34 @@ type Instance struct {
 // If desc is nil, all available backends are used.
 func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 	var gpuDesc *gputypes.InstanceDescriptor
+	var display DisplayHandle
 	if desc != nil {
+		if err := desc.Display.validate(); err != nil {
+			return nil, err
+		}
+		display = desc.Display
 		d := gputypes.DefaultInstanceDescriptor()
 		d.Backends = desc.Backends
 		d.Flags = desc.Flags
 		gpuDesc = &d
 	}
 
-	coreInstance := core.NewInstance(gpuDesc)
+	coreInstance := core.NewInstanceWithDisplay(gpuDesc, display.halDisplay())
 
-	return &Instance{core: coreInstance}, nil
+	return &Instance{core: coreInstance, display: display}, nil
+}
+
+// halDisplay converts the public handle to its HAL mirror at the root
+// boundary; no HAL type appears in the public API.
+func (h DisplayHandle) halDisplay() hal.DisplayHandle {
+	switch h.kind {
+	case displayKindXlib:
+		return hal.DisplayHandle{Kind: hal.DisplayKindXlib, Display: h.ptr}
+	case displayKindWayland:
+		return hal.DisplayHandle{Kind: hal.DisplayKindWayland, Display: h.ptr}
+	default:
+		return hal.DisplayHandle{}
+	}
 }
 
 // RequestAdapter requests a GPU adapter matching the options.

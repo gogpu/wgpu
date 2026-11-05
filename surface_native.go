@@ -83,7 +83,10 @@ type Surface struct {
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
 //   - Android: displayHandle ignored, windowHandle=ANativeWindow*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
-	return i.createSurface(surfaceTargetFromLegacyHandles(displayHandle, windowHandle), nil)
+	if i.isReleased() {
+		return nil, ErrReleased
+	}
+	return i.createSurface(surfaceTargetFromLegacyHandles(i.display, displayHandle, windowHandle), nil)
 }
 
 // CreateSurfaceFromTarget samples a provider once and retains it until the
@@ -116,6 +119,9 @@ func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, er
 func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource SurfaceTarget) (*Surface, error) {
 	if i.isReleased() {
 		return nil, ErrReleased
+	}
+	if err := checkSurfaceDisplay(i.display, target); err != nil {
+		return nil, err
 	}
 
 	entries := i.core.HALInstanceEntries()
@@ -194,22 +200,29 @@ func createHALSurfaces(entries []core.HALInstanceEntry, target hal.SurfaceTarget
 	return nil, 0, fmt.Errorf("wgpu: failed to create surface for every enabled backend: %w", joined)
 }
 
-func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+func surfaceTargetFromLegacyHandles(display DisplayHandle, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
 	return surfaceTargetFromLegacyHandlesForPlatform(
 		runtime.GOOS,
 		os.Getenv("WAYLAND_DISPLAY"),
+		display,
 		displayHandle,
 		windowHandle,
 	)
 }
 
-func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+// surfaceTargetFromLegacyHandlesForPlatform maps legacy handles to a typed
+// target. On Linux an instance Display decides between Xlib and Wayland;
+// without one, the WAYLAND_DISPLAY environment does.
+func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, display DisplayHandle, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
 	switch goos {
 	case platformWindows:
 		return SurfaceTargetFromWindowsHWND(displayHandle, windowHandle)
 	case platformDarwin:
 		return SurfaceTargetFromMetalLayer(windowHandle)
 	case platformLinux:
+		if target, ok := display.legacySurfaceTarget(displayHandle, windowHandle); ok {
+			return target
+		}
 		if waylandDisplay != "" {
 			return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
 		}
@@ -307,7 +320,16 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	s.destroySwapchainTexture()
 
 	s.device = device
-	return s.core.Configure(device.core, halConfig)
+	return mapSurfaceConfigureError(s.core.Configure(device.core, halConfig))
+}
+
+// mapSurfaceConfigureError gives the backend's device-mismatch error its
+// public sentinel, keeping the backend detail: errors.Is matches both.
+func mapSurfaceConfigureError(err error) error {
+	if errors.Is(err, hal.ErrSurfaceDeviceMismatch) {
+		return fmt.Errorf("%w: %w", ErrSurfaceDeviceMismatch, err)
+	}
+	return err
 }
 
 // Unconfigure removes the surface configuration.

@@ -54,7 +54,10 @@ type Surface struct {
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
 //   - Android: displayHandle ignored, windowHandle=ANativeWindow*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
-	return i.createSurface(surfaceTargetFromLegacyHandles(displayHandle, windowHandle), nil)
+	if i == nil || i.released {
+		return nil, ErrReleased
+	}
+	return i.createSurface(surfaceTargetFromLegacyHandles(i.display, displayHandle, windowHandle), nil)
 }
 
 // CreateSurfaceFromTarget samples a provider once and retains it until the
@@ -85,6 +88,9 @@ func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, er
 func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource SurfaceTarget) (*Surface, error) {
 	if i.released {
 		return nil, ErrReleased
+	}
+	if err := checkSurfaceDisplay(i.display, target); err != nil {
+		return nil, err
 	}
 
 	rs, err := createPlatformSurfaceTarget(i.r, target)

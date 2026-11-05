@@ -9,7 +9,13 @@ import (
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
 
-func surfaceTargetFromLegacyHandles(displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+// surfaceTargetFromLegacyHandles maps legacy handles to a typed target. An
+// instance Display decides between Xlib and Wayland; without one, the
+// WAYLAND_DISPLAY environment does.
+func surfaceTargetFromLegacyHandles(display DisplayHandle, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
+	if target, ok := display.legacySurfaceTarget(displayHandle, windowHandle); ok {
+		return target
+	}
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
 	}

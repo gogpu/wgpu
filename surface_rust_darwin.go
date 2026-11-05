@@ -8,7 +8,7 @@ import (
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
 
-func surfaceTargetFromLegacyHandles(_, windowHandle uintptr) SurfaceTargetUnsafe {
+func surfaceTargetFromLegacyHandles(_ DisplayHandle, _, windowHandle uintptr) SurfaceTargetUnsafe {
 	return SurfaceTargetFromMetalLayer(windowHandle)
 }
 

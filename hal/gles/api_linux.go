@@ -41,9 +41,23 @@ func (Backend) Variant() gputypes.Backend {
 //
 // On Wayland, this may fail (EGL needs wl_display*) — that's OK, CreateSurface
 // provides the proper context later. On X11/headless, this succeeds.
-func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
+//
+// With desc.Display set, the context is built on that display at init,
+// Wayland included (Rust wgpu-hal egl.rs Instance::init with
+// InstanceDescriptor.display). If that fails, the backend is absent for this
+// Instance, as in Rust: the error is returned and logged.
+func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error) {
 	if err := egl.Init(); err != nil {
 		return nil, fmt.Errorf("gles: failed to initialize EGL: %w", err)
+	}
+
+	if desc != nil && !desc.Display.IsZero() {
+		inst, err := newDisplayInstance(desc.Display)
+		if err != nil {
+			hal.Logger().Warn("gles: no context on the instance display, GLES backend absent", "err", err)
+			return nil, err
+		}
+		return inst, nil
 	}
 
 	// Try to create instance-level EGL context (Rust wgpu-hal parity).
@@ -72,6 +86,30 @@ func (Backend) CreateInstance(_ *hal.InstanceDescriptor) (hal.Instance, error) {
 		return &Instance{}, nil
 	}
 	return &Instance{ctx: NewAdapterContext(eglCtx, glCtx), ctxKind: eglCtx.WindowKind()}, nil
+}
+
+// newDisplayInstance builds the instance context on the caller's display.
+// The context is bound to that display: only surfaces of it share the
+// context (Path B never runs for it), and the caller keeps it open until
+// Instance.Destroy returns.
+func newDisplayInstance(display hal.DisplayHandle) (*Instance, error) {
+	var kind egl.WindowKind
+	switch display.Kind {
+	case hal.DisplayKindXlib:
+		kind = egl.WindowKindX11
+	case hal.DisplayKindWayland:
+		kind = egl.WindowKindWayland
+	default:
+		return nil, fmt.Errorf("gles: unsupported instance display kind %d", display.Kind)
+	}
+	if display.Display == 0 {
+		return nil, fmt.Errorf("gles: instance display is nil")
+	}
+	ctx, err := newDisplayContext(display.Display, kind)
+	if err != nil {
+		return nil, err
+	}
+	return &Instance{ctx: ctx, ctxKind: kind, ctxDisplay: display.Display}, nil
 }
 
 // loadContextGL loads the GL functions of a new EGL context. The context is
@@ -112,8 +150,9 @@ type displayKey struct {
 
 // Instance implements hal.Instance for the OpenGL backend on Linux.
 //
-// ctx is the instance context, created at init on our own X connection or
-// the surfaceless platform, and held strongly until Destroy. Contexts built
+// ctx is the instance context, created at init on our own X connection, the
+// surfaceless platform or the caller's instance display, and held strongly
+// until Destroy. Contexts built
 // in CreateSurface on a caller's display (Path B: Wayland, or a window kind
 // the instance context does not serve) belong to their surfaces and devices
 // (ADR-077 B). The Instance keeps only weak pointers to them, keyed by native

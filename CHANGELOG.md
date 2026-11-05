@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`InstanceDescriptor.Display`** (`DisplayHandle`, `DisplayHandleFromXlib`, `DisplayHandleFromWayland`), the native display connection to build the instance on, as Rust wgpu's `InstanceDescriptor.display`. On Linux GLES the EGL context is built on it at instance creation, Wayland included. The caller keeps the display open until `Instance.Release` returns. With it set, every Xlib or Wayland surface must use that display, or surface creation fails with `ErrMismatchingDisplayHandle`; a handle of a nil pointer fails `CreateInstance` with `ErrInvalidDisplayHandle`. The other backends ignore it, and so does `-tags rust` until go-webgpu maps it. The legacy `CreateSurface(display, window)` picks Xlib or Wayland by the set Display instead of `WAYLAND_DISPLAY`.
+- **`ErrSurfaceDeviceMismatch`**, returned by `Surface.Configure` for a Device that cannot present to the surface. On GLES, a Device opened through one window's adapter configuring a window of another `wl_display` now gets this error instead of libwayland aborting with "proxy and queue point to different wl_displays".
+
+### Fixed
+
+- **GLES on Linux: segfault on exit on Wayland** (#379, reported by @kjkrol). Since v0.34.6 the EGL context a surface builds on the app's `wl_display` belonged to the Instance, so `eglTerminate` ran in `Instance.Release`, after the app had closed its display, and crashed inside Mesa. Every gogpu app on Wayland hit it when its window closed, whether GLES or Vulkan was selected. The context now belongs to the surfaces and devices built on it and dies with the last of them, while the display is still open, as the documented order (native objects outlive the Surface and, on GLES, the Devices opened through it) guarantees. The same applied to an Xlib window while `WAYLAND_DISPLAY` is set.
+- **GLES on Linux: destroying one Instance broke the others.** Mesa hands every user of one native display the same EGLDisplay, and each EGL context terminated it on destroy, so the remaining contexts failed with `EGL_BAD_DISPLAY`. wgpu now counts its users of each EGLDisplay and terminates it with the last one, as Rust wgpu-hal does.
+- **GLES on Linux: a window closed and reopened in the same Instance got an adapter on the closed window's context.** The adapter is now requalified for the new surface, and an adapter whose context is gone makes `RequestDevice` return an error wrapping `gles.ErrContextReleased`.
+
+### Changed
+
+- **GLES on Linux: on a context a surface built on the app's display (Wayland), releasing the Surface before `RequestDevice` now makes `RequestDevice` fail** with an error wrapping `gles.ErrContextReleased`; v0.34.7 succeeded. Request the device while the surface exists. A surface on the instance context (X11, headless, or `InstanceDescriptor.Display`) is not affected.
+- **GLES on Linux: `Surface.Configure` with a Device opened on another EGL context now returns `ErrSurfaceDeviceMismatch`** instead of configuring. On Wayland that is a window of another `wl_display`; GL objects are not shared between contexts, and libwayland used to abort on it. Open the Device through the adapter of a surface on the same display.
+
 ### Documentation
 
 - **Ray tracing status corrected.** The README, `docs/RAY-TRACING.md`, AGENTS.md and the roadmap described inline ray queries as working on Vulkan, DX12, Metal and the software backend since v0.32.0. They aren't. The code exists only in the HAL. The public API has no acceleration structures. No GPU adapter offers `FeatureRayQuery`, so the Vulkan, DX12 and Metal paths have never run. The software backend offers the feature, but its SPIR-V interpreter does not execute ray queries. The docs now say so. The public API is planned, Vulkan first (#369).

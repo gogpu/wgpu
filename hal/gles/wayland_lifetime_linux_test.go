@@ -89,6 +89,8 @@ type waylandCase struct {
 var waylandLifetimeCases = []waylandCase{
 	{"surface then disconnect then instance", waylandSurfaceDisconnectInstance},
 	{"device then surface then disconnect", waylandDeviceSurfaceDisconnect},
+	{"instance display", waylandInstanceDisplay},
+	{"instance display rejects a foreign surface", waylandInstanceDisplayForeignSurface},
 	{"reopen window", waylandReopenWindow},
 	{"adapter never released", waylandAdapterNeverReleased},
 	{"foreign device rejected", waylandForeignDeviceRejected},
@@ -217,6 +219,52 @@ func waylandDeviceSurfaceDisconnect(t *testing.T, c *waylandClient) {
 	surf.Destroy()
 	c.disconnectDisplay(display)
 	inst.Destroy()
+}
+
+// waylandInstanceDisplay builds the context at instance creation on the
+// display the caller passes, which then outlives the Instance (D).
+func waylandInstanceDisplay(t *testing.T, c *waylandClient) {
+	display := mustConnect(t, c)
+	inst := mustInstance(t, &hal.InstanceDescriptor{
+		Display: hal.DisplayHandle{Kind: hal.DisplayKindWayland, Display: display},
+	})
+	ctx := inst.context()
+	if ctx == nil {
+		t.Fatal("no instance context on the instance display")
+	}
+	surf := mustWaylandSurface(t, inst, display)
+	if surf.ctx != ctx {
+		t.Fatal("the surface did not share the context built on the instance display")
+	}
+	open := mustOpen(t, mustAdapter(t, inst, surf))
+	open.Device.Destroy()
+	surf.Destroy()
+	if !ctx.Alive() {
+		t.Fatal("the instance context died with a surface and device of it")
+	}
+	inst.Destroy()
+	if ctx.Alive() {
+		t.Fatal("the instance context outlived its Instance, surfaces and devices")
+	}
+	c.disconnectDisplay(display)
+}
+
+// waylandInstanceDisplayForeignSurface gives a surface of another
+// connection its own context: the instance context serves its own display
+// only (the root package rejects such a target before HAL sees it).
+func waylandInstanceDisplayForeignSurface(t *testing.T, c *waylandClient) {
+	display, other := mustConnect(t, c), mustConnect(t, c)
+	inst := mustInstance(t, &hal.InstanceDescriptor{
+		Display: hal.DisplayHandle{Kind: hal.DisplayKindWayland, Display: display},
+	})
+	surf := mustWaylandSurface(t, inst, other)
+	if surf.ctx == inst.context() {
+		t.Fatal("a surface of another wl_display shared the instance display's context")
+	}
+	surf.Destroy()
+	inst.Destroy()
+	c.disconnectDisplay(other)
+	c.disconnectDisplay(display)
 }
 
 // waylandReopenWindow closes a window and opens a new one in the same
