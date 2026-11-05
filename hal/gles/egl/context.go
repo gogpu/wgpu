@@ -7,6 +7,7 @@ package egl
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"unsafe"
 )
@@ -78,11 +79,17 @@ func NewContext(config ContextConfig) (*Context, error) {
 		}
 	}
 
-	// Initialize EGL
-	var major, minor EGLInt
-	if Initialize(display, &major, &minor) == False {
+	// Initialize EGL. The display registry counts this context as one more
+	// user of the EGLDisplay, which other contexts may share; every error
+	// path below releases that count instead of terminating the display.
+	major, minor, err := acquireDisplay(display)
+	if err != nil {
 		closeOwner()
-		return nil, fmt.Errorf("eglInitialize failed: error 0x%x", GetError())
+		return nil, err
+	}
+	release := func() {
+		releaseDisplay(display)
+		closeOwner()
 	}
 
 	// Bind OpenGL or OpenGL ES API
@@ -91,16 +98,15 @@ func NewContext(config ContextConfig) (*Context, error) {
 		api = OpenGLESAPI
 	}
 	if BindAPI(api) == False {
-		Terminate(display)
-		closeOwner()
-		return nil, fmt.Errorf("eglBindAPI failed: error 0x%x", GetError())
+		code := GetError()
+		release()
+		return nil, fmt.Errorf("eglBindAPI failed: error 0x%x", code)
 	}
 
 	// Choose EGL frame buffer configuration
 	eglConfig, err := chooseEGLConfig(display, config)
 	if err != nil {
-		Terminate(display)
-		closeOwner()
+		release()
 		return nil, fmt.Errorf("failed to choose EGL config: %w", err)
 	}
 
@@ -108,8 +114,7 @@ func NewContext(config ContextConfig) (*Context, error) {
 	displayExts := QueryString(display, Extensions)
 	eglContext, robust, ctxErr := createEGLContext(display, eglConfig, config, initialRobustness(major, minor, displayExts), displayExts)
 	if eglContext == NoContext {
-		Terminate(display)
-		closeOwner()
+		release()
 		return nil, fmt.Errorf("eglCreateContext failed: error 0x%x", ctxErr)
 	}
 
@@ -128,10 +133,10 @@ func NewContext(config ContextConfig) (*Context, error) {
 	} else {
 		pbuffer = createPbufferSurface(display, eglConfig)
 		if pbuffer == NoSurface {
+			code := GetError()
 			DestroyContext(display, eglContext)
-			Terminate(display)
-			closeOwner()
-			return nil, fmt.Errorf("eglCreatePbufferSurface failed and no surfaceless support: error 0x%x", GetError())
+			release()
+			return nil, fmt.Errorf("eglCreatePbufferSurface failed and no surfaceless support: error 0x%x", code)
 		}
 	}
 
@@ -368,10 +373,17 @@ func (c *Context) Display() EGLDisplay { return c.display }
 func (c *Context) Config() EGLConfig { return c.config }
 
 // Destroy releases the context and its associated resources.
-// Order matters: EGL resources first, then the native display connection.
-// Closing the native display (e.g. XCloseDisplay) before eglTerminate
-// would cause EGL to access a freed connection.
+// Order matters: the EGL context and pbuffer first, then this context's use of
+// the EGLDisplay (terminated with its last user, ADR-077), then the native
+// display connection. Closing the native display (e.g. XCloseDisplay) before
+// eglTerminate would cause EGL to access a freed connection.
+//
+// It runs pinned to one OS thread: the unbind and the destroy are calls about
+// the calling thread's current context.
 func (c *Context) Destroy() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	if c.context != NoContext {
 		// Unbind context first
 		_ = MakeCurrent(c.display, NoSurface, NoSurface, NoContext)
@@ -383,7 +395,7 @@ func (c *Context) Destroy() {
 		c.pbuffer = NoSurface
 	}
 	if c.display != NoDisplay {
-		Terminate(c.display)
+		releaseDisplay(c.display)
 		c.display = NoDisplay
 	}
 	// Close native display connection AFTER eglTerminate.
