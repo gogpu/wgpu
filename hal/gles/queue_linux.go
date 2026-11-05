@@ -28,7 +28,10 @@ type Queue struct {
 // Acquires the AdapterContext lock, makes context current on pbuffer/surfaceless,
 // executes all GL commands, signals the fence, and flushes.
 func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
-	glCtx := q.ctx.Lock()
+	glCtx, err := q.ctx.Lock()
+	if err != nil {
+		return 0, err
+	}
 	defer q.ctx.Unlock()
 
 	for _, cb := range commandBuffers {
@@ -81,7 +84,11 @@ func (q *Queue) PollCompleted() uint64 {
 	// also orders the read of the pending fences against Submit. Rust
 	// wgpu-hal locks the context here too (gles/device.rs get_fence_value).
 	if q.ctx != nil {
-		_ = q.ctx.Lock()
+		if _, err := q.ctx.Lock(); err != nil {
+			// A released context runs nothing more: everything submitted
+			// is done, so the resources waiting on it can be freed.
+			return q.submissionIndex
+		}
 		defer q.ctx.Unlock()
 	}
 	return q.fence.GetLatest()
@@ -97,7 +104,10 @@ func (q *Queue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error
 		return nil
 	}
 
-	glCtx := q.ctx.Lock()
+	glCtx, err := q.ctx.Lock()
+	if err != nil {
+		return err
+	}
 	defer q.ctx.Unlock()
 
 	glCtx.BindBuffer(buf.target, buf.id)
@@ -113,7 +123,10 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return fmt.Errorf("gles: invalid texture type for WriteTexture")
 	}
 
-	glCtx := q.ctx.Lock()
+	glCtx, err := q.ctx.Lock()
+	if err != nil {
+		return err
+	}
 	defer q.ctx.Unlock()
 
 	_, format, dataType := textureFormatToGL(tex.format)
@@ -167,7 +180,10 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 		return fmt.Errorf("gles: invalid surface type")
 	}
 
-	glCtx := q.ctx.LockForSurface(surf.eglSurface)
+	glCtx, err := q.ctx.LockForSurface(surf.eglSurface)
+	if err != nil {
+		return err
+	}
 	defer q.ctx.Unlock()
 
 	surf.blitSwapchainToDefaultWith(glCtx)

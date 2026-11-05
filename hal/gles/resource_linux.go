@@ -14,18 +14,17 @@ import (
 )
 
 // Surface implements hal.Surface for OpenGL on Linux.
-// Surface never owns the AdapterContext: either it shares an instance context
-// (X11/headless), or the context it creates for Wayland / window-kind mismatch
-// is adopted by the Instance at creation time. This keeps the shared EGL
-// context alive for the Adapter/Device/Queue, which outlive the Surface.
-// ownsContext is kept for backwards compatibility and is always false here.
+// The Surface holds one reference to its AdapterContext, from CreateSurface to
+// Destroy (ADR-077 B): the instance context it shares, or the context built on
+// the caller's display. A Device opened on the same context holds its own, so
+// the context lives until the last of them is released, while the native
+// display the caller keeps open for them is still alive.
 type Surface struct {
 	displayHandle uintptr
 	windowHandle  uintptr
 	ctx           *AdapterContext
 	eglDisplay    egl.EGLDisplay
 	eglSurface    egl.EGLSurface
-	ownsContext   bool // true = Surface owns AdapterContext, false = shared from Instance
 	version       string
 	renderer      string
 	configured    bool
@@ -57,7 +56,10 @@ func (s *Surface) GetAdapterInfo() (adapter hal.ExposedAdapter, ok bool) {
 		return placeholderExposedAdapter("OpenGL 3.3+ / ES 3.0+ (no AdapterContext)"), true
 	}
 
-	glCtx := s.ctx.Lock()
+	glCtx, err := s.ctx.Lock()
+	if err != nil {
+		return hal.ExposedAdapter{}, false
+	}
 	defer s.ctx.Unlock()
 
 	caps, err := queryAdapterCapabilities(glCtx)
@@ -82,14 +84,26 @@ func (s *Surface) GetAdapterInfo() (adapter hal.ExposedAdapter, ok bool) {
 // Returns hal.ErrZeroArea if width or height is zero.
 // This commonly happens when the window is minimized or not yet fully visible.
 // Wait until the window has valid dimensions before calling Configure again.
-func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) error {
+//
+// Returns hal.ErrSurfaceDeviceMismatch for a Device opened on another context
+// than the surface's: GL objects are not shared between EGL contexts, and on
+// Wayland the contexts may sit on different wl_displays, which libwayland
+// would abort on ("proxy and queue point to different wl_displays").
+func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration) error {
 	// Validate dimensions first (before any side effects).
 	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
 	if config.Width == 0 || config.Height == 0 {
 		return hal.ErrZeroArea
 	}
 
-	if s.ctx == nil || s.ctx.EGL() == nil {
+	if s.ctx == nil {
+		return fmt.Errorf("gles: surface has no AdapterContext")
+	}
+	if d, ok := device.(*Device); ok && d != nil && d.ctx != s.ctx {
+		return fmt.Errorf("gles: %w: the device was opened on another EGL context than the surface's (a surface of another native display)",
+			hal.ErrSurfaceDeviceMismatch)
+	}
+	if s.ctx.EGL() == nil {
 		return fmt.Errorf("gles: surface has no AdapterContext")
 	}
 
@@ -113,7 +127,10 @@ func (s *Surface) Configure(_ hal.Device, config *hal.SurfaceConfiguration) erro
 	// Windows Configure which uses Lock(hiddenDC) for FBO — not LockForDC.
 	// Present uses LockForSurface for blit+swap. Avoids Mesa pbuffer↔window
 	// invalidation when Submit (Lock) and Present (LockForSurface) alternate.
-	glCtx := s.ctx.Lock()
+	glCtx, err := s.ctx.Lock()
+	if err != nil {
+		return err
+	}
 	defer s.ctx.Unlock()
 
 	if err := s.reconfigureSwapchainFBOWith(glCtx, config.Format, config.Width, config.Height); err != nil {
@@ -196,11 +213,7 @@ func (s *Surface) createX11EGLSurface() error {
 // Unconfigure marks the surface as unconfigured and releases the EGL window
 // surface and wl_egl_window (on Wayland).
 func (s *Surface) Unconfigure(_ hal.Device) {
-	if s.ctx != nil {
-		glCtx := s.ctx.Lock()
-		destroySwapchainFBO(glCtx, s.swapchainFBO, s.colorRenderbuffer)
-		s.ctx.Unlock()
-	}
+	s.deleteSwapchainFBO()
 	s.swapchainFBO = 0
 	s.colorRenderbuffer = 0
 	s.fboWidth = 0
@@ -243,15 +256,26 @@ func (s *Surface) ActualExtent() (width, height uint32) {
 	return s.config.Width, s.config.Height
 }
 
+// deleteSwapchainFBO deletes the swapchain framebuffer in the surface's
+// context. A released context took its GL objects with it.
+func (s *Surface) deleteSwapchainFBO() {
+	if s.ctx == nil {
+		return
+	}
+	glCtx, err := s.ctx.Lock()
+	if err != nil {
+		return
+	}
+	defer s.ctx.Unlock()
+	destroySwapchainFBO(glCtx, s.swapchainFBO, s.colorRenderbuffer)
+}
+
 // Destroy releases the surface resources.
-// Order: GL resources → EGL surface → wl_egl_window → AdapterContext (if owned).
+// Order: GL resources → EGL surface → wl_egl_window → the Surface's reference
+// to its AdapterContext, the last of which destroys the context.
 func (s *Surface) Destroy() {
 	// Release swapchain FBO before tearing down the GL context.
-	if s.ctx != nil {
-		glCtx := s.ctx.Lock()
-		destroySwapchainFBO(glCtx, s.swapchainFBO, s.colorRenderbuffer)
-		s.ctx.Unlock()
-	}
+	s.deleteSwapchainFBO()
 	s.swapchainFBO = 0
 	s.colorRenderbuffer = 0
 
@@ -265,12 +289,11 @@ func (s *Surface) Destroy() {
 		s.eglWindow = 0
 	}
 
-	// Only destroy AdapterContext if Surface owns it (Wayland path).
-	// When shared from Instance (X11/headless), Instance.Destroy handles cleanup.
-	if s.ownsContext && s.ctx != nil {
-		s.ctx.Destroy()
+	// Give up the Surface's reference once: Destroy may be called again.
+	if s.ctx != nil {
+		s.ctx.Release()
+		s.ctx = nil
 	}
-	s.ctx = nil
 }
 
 // SurfaceTexture implements hal.SurfaceTexture for OpenGL.

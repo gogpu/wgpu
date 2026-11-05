@@ -310,10 +310,13 @@ func TestAdapterContext_LockUnlockRoundTrip(t *testing.T) {
 	// Unmake so AdapterContext.Lock must re-bind.
 	_ = egl.MakeCurrent(eglCtx.Display(), egl.NoSurface, egl.NoSurface, egl.NoContext)
 
-	ctx := NewAdapterContext(eglCtx, glCtx, true)
-	defer ctx.Destroy()
+	ctx := NewAdapterContext(eglCtx, glCtx)
+	defer ctx.Release()
 
-	got := ctx.Lock()
+	got, err := ctx.Lock()
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
 	if got != glCtx {
 		ctx.Unlock()
 		t.Fatalf("Lock() returned %p, want %p", got, glCtx)
@@ -366,8 +369,8 @@ func TestAdapterContext_LockForSurface_PbufferAsSurface(t *testing.T) {
 	}
 	_ = egl.MakeCurrent(eglCtx.Display(), egl.NoSurface, egl.NoSurface, egl.NoContext)
 
-	ctx := NewAdapterContext(eglCtx, glCtx, true)
-	defer ctx.Destroy()
+	ctx := NewAdapterContext(eglCtx, glCtx)
+	defer ctx.Release()
 
 	surf := eglCtx.Pbuffer()
 	if surf == egl.NoSurface {
@@ -375,7 +378,10 @@ func TestAdapterContext_LockForSurface_PbufferAsSurface(t *testing.T) {
 		t.Log("surfaceless context: LockForSurface(NoSurface)")
 	}
 
-	got := ctx.LockForSurface(surf)
+	got, err := ctx.LockForSurface(surf)
+	if err != nil {
+		t.Fatalf("LockForSurface: %v", err)
+	}
 	defer ctx.Unlock()
 
 	if egl.GetCurrentContext() == egl.NoContext {
@@ -416,7 +422,10 @@ func TestInstance_CreateInstance_WrapsAdapterContext(t *testing.T) {
 		t.Skip("instance AdapterContext unavailable (no EGL display in environment)")
 	}
 
-	glCtx := inst.ctx.Lock()
+	glCtx, err := inst.ctx.Lock()
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
 	defer inst.ctx.Unlock()
 	if glCtx == nil {
 		t.Fatal("AdapterContext.GL is nil after CreateInstance")

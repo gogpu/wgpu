@@ -54,7 +54,11 @@ func TestInstanceContextNotLeftCurrent(t *testing.T) {
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		ctx.Lock()
+		if _, err := ctx.Lock(); err != nil {
+			t.Errorf("Lock: %v", err)
+			current <- false
+			return
+		}
 		ok := egl.GetCurrentContext() == ctx.EGL().EGLContext()
 		ctx.Unlock()
 		current <- ok
