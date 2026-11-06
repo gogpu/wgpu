@@ -197,6 +197,7 @@ func TestTransferErrorRangeText(t *testing.T) {
 		TransferErrorSizeOverflow,
 		TransferErrorTextureFormatsNotCopyCompatible,
 		TransferErrorMissingDownlevelFlags,
+		TransferErrorStencilCopyNeedsBlit,
 	} {
 		text := (&TransferError{Kind: kind}).Error()
 		if text == "copy: unknown error" {

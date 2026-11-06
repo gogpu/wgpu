@@ -376,7 +376,9 @@ func placeholderExposedAdapter(driverInfo string) hal.ExposedAdapter {
 			Backend:    gputypes.BackendGL,
 		},
 		Capabilities: hal.Capabilities{
-			Limits: gputypes.DefaultLimits(),
+			// GL has no stencil-only upload into a DEPTH_STENCIL texture.
+			StencilCopyNeedsBlit: true,
+			Limits:               gputypes.DefaultLimits(),
 			AlignmentsMask: hal.Alignments{
 				BufferCopyOffset: 4,
 				BufferCopyPitch:  256,
@@ -423,7 +425,9 @@ func exposeAdapter(a *Adapter, caps *AdapterCapabilities) hal.ExposedAdapter {
 		},
 		Features: caps.Features,
 		Capabilities: hal.Capabilities{
-			Limits: caps.Limits,
+			// GL has no stencil-only upload into a DEPTH_STENCIL texture.
+			StencilCopyNeedsBlit: true,
+			Limits:               caps.Limits,
 			AlignmentsMask: hal.Alignments{
 				BufferCopyOffset: 4,
 				BufferCopyPitch:  4,

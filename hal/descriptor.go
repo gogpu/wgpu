@@ -72,6 +72,15 @@ type Capabilities struct {
 
 	// DownlevelCapabilities for GL/GLES backends.
 	DownlevelCapabilities gputypes.DownlevelCapabilities
+
+	// StencilCopyNeedsBlit reports that CommandEncoder.CopyBufferToTexture and
+	// Queue.WriteTexture cannot write the stencil aspect of a combined
+	// depth-stencil format (Depth24PlusStencil8, Depth32FloatStencil8): GL
+	// uploads depth and stencil only together. Stencil8, depth aspects and
+	// reading the stencil aspect back are unaffected. The frontend must not
+	// pass such a copy to the backend; Dawn lowers it to a stencil-writing
+	// draw (BlitBufferToDepthStencil.cpp). Only GLES sets it.
+	StencilCopyNeedsBlit bool
 }
 
 // Alignments specifies buffer alignment requirements.
