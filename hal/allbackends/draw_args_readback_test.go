@@ -54,21 +54,33 @@ fn fs(in: VOut) -> @location(0) vec4f {
 func TestDrawIndirect(t *testing.T) {
 	required := gputypes.DownlevelFlagsIndirectExecution | gputypes.DownlevelFlagsBaseVertex
 	forEachBackendAdapter(t, required, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+		indirect := newDrawArgsBuffer(t, device, wgpu.BufferUsageIndirect, []uint32{
+			// DrawIndirectArgs from byte 0: vertexCount, instanceCount, firstVertex, firstInstance.
+			6, 1, 0, 0, // byte 0: would draw band 0
+			6, 1, 12, 0, // byte 16: band 2
+			6, 1, 18, 0, // byte 32: band 3
+			// DrawIndexedIndirectArgs from byte 48: indexCount, instanceCount, firstIndex, baseVertex, firstInstance.
+			6, 1, 2, 0, 0, // byte 48: would draw band 0
+			6, 1, 2, 24, 0, // byte 68: band 4
+			6, 1, 2, 30, 0, // byte 88: band 5
+		})
 		got := drawArgsScene(t, device, func(s *drawArgsResources, pass *wgpu.RenderPassEncoder) {
-			pass.DrawIndirect(s.indirect, 16)
-			pass.DrawIndirect(s.indirect, 32)
+			pass.DrawIndirect(indirect, 16)
+			pass.DrawIndirect(indirect, 32)
 			pass.SetIndexBuffer(s.index, gputypes.IndexFormatUint32, 0)
-			pass.DrawIndexedIndirect(s.indirect, 68)
-			pass.DrawIndexedIndirect(s.indirect, 88)
+			pass.DrawIndexedIndirect(indirect, 68)
+			pass.DrawIndexedIndirect(indirect, 88)
 		})
 		checkDrawArgsBands(t, got, [drawArgsBands]uint32{drawArgsClear, drawArgsClear,
 			drawArgsRed, drawArgsRed, drawArgsRed, drawArgsRed, drawArgsClear, drawArgsClear})
 	})
 }
 
+// drawArgsResources holds what every draw-args scene binds. An indirect
+// buffer is not part of it: INDIRECT usage needs IndirectExecution (Rust
+// create_buffer), which the direct-draw tests must not require.
 type drawArgsResources struct {
-	index    *wgpu.Buffer
-	indirect *wgpu.Buffer
+	index *wgpu.Buffer
 }
 
 func newDrawArgsBuffer(t *testing.T, device *wgpu.Device, usage gputypes.BufferUsage, words []uint32) *wgpu.Buffer {
@@ -168,16 +180,6 @@ func drawArgsScene(t *testing.T, device *wgpu.Device, draw func(s *drawArgsResou
 	s := &drawArgsResources{
 		index: newDrawArgsBuffer(t, device, wgpu.BufferUsageIndex,
 			[]uint32{drawArgsGarb, drawArgsGarb, 0, 1, 2, 3, 4, 5}),
-		indirect: newDrawArgsBuffer(t, device, wgpu.BufferUsageIndirect, []uint32{
-			// DrawIndirectArgs from byte 0: vertexCount, instanceCount, firstVertex, firstInstance.
-			6, 1, 0, 0, // byte 0: would draw band 0
-			6, 1, 12, 0, // byte 16: band 2
-			6, 1, 18, 0, // byte 32: band 3
-			// DrawIndexedIndirectArgs from byte 48: indexCount, instanceCount, firstIndex, baseVertex, firstInstance.
-			6, 1, 2, 0, 0, // byte 48: would draw band 0
-			6, 1, 2, 24, 0, // byte 68: band 4
-			6, 1, 2, 30, 0, // byte 88: band 5
-		}),
 	}
 
 	staging := newPublicBuffer(t, device, drawArgsWidth*drawArgsHeight*4, wgpu.BufferUsageMapRead|wgpu.BufferUsageCopyDst)

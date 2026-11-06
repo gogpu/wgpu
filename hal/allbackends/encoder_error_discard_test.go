@@ -45,7 +45,9 @@ func TestErroredEncoderDiscardsBeforeReleasingResources(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			forEachDynamicOffsetDevice(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
+			// The pass binds a storage buffer visible to the vertex stage, which
+			// Rust wgpu-core's create_bind_group_layout gates on VERTEX_STORAGE.
+			forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsVertexStorage, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
 				c.finish(t, recordErroredRenderPass(t, device))
 			})
 		})
