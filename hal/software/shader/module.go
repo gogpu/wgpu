@@ -787,6 +787,7 @@ func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 	switch opcode {
 	// Instructions with result type AND result ID (type resultID operands...).
 	case OpLoad, OpAccessChain, OpArrayLength, OpCompositeConstruct, OpCompositeExtract,
+		OpCompositeInsert, OpVectorExtractDynamic, OpVectorInsertDynamic,
 		OpConvertUToF, OpConvertFToU, OpConvertSToF, OpConvertFToS, OpBitcast,
 		OpSConvert, OpUConvert, OpFConvert,
 		OpFAdd, OpFSub, OpFMul, OpFDiv, OpFNegate, OpFMod, OpFRem,

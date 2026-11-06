@@ -782,6 +782,32 @@ func (interp *interpreter) run() error {
 			indexes := inst.Operands[1:]
 			interp.values[inst.ResultID] = interp.compositeExtract(interp.values[compositeID], indexes)
 
+		case OpCompositeInsert:
+			// OpCompositeInsert: type resultID object composite indexes...
+			// The result is a copy of composite with object at indexes.
+			if len(inst.Operands) >= 3 {
+				obj := interp.values[inst.Operands[0]]
+				interp.values[inst.ResultID] = setCompositeElement(interp.values[inst.Operands[1]], inst.Operands[2:], obj)
+			}
+
+		case OpVectorExtractDynamic:
+			// OpVectorExtractDynamic: type resultID vector index. The index is
+			// a run-time value (WGSL v[i] on a vector value); naga clamps it, and
+			// an index past the end reads zero (SPIR-V leaves it undefined).
+			if len(inst.Operands) >= 2 {
+				idx := toUint32(interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = indexComposite(interp.values[inst.Operands[0]], idx)
+			}
+
+		case OpVectorInsertDynamic:
+			// OpVectorInsertDynamic: type resultID vector component index. An
+			// index past the end leaves the vector unchanged.
+			if len(inst.Operands) >= 3 {
+				idx := [1]uint32{toUint32(interp.values[inst.Operands[2]])}
+				comp := interp.values[inst.Operands[1]]
+				interp.values[inst.ResultID] = setCompositeElement(interp.values[inst.Operands[0]], idx[:], comp)
+			}
+
 		case OpConvertUToF:
 			// OpConvertUToF: type resultID value
 			if len(inst.Operands) < 1 {
