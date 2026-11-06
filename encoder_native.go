@@ -927,7 +927,8 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 // The Parent reference lets core record the attachment in the render pass
 // usage scope and the command buffer tracker.
 func coreTextureViewFrom(v *TextureView) *core.TextureView {
-	cv := &core.TextureView{HAL: v.resolveHAL(), Dimension: v.dimension, BaseMipLevel: v.baseMipLevel}
+	cv := &core.TextureView{HAL: v.resolveHAL(), Dimension: v.dimension, BaseMipLevel: v.baseMipLevel,
+		BaseArrayLayer: v.baseArrayLayer, ArrayLayerCount: v.arrayLayerCount}
 	if v.texture != nil && v.texture.coreTexture != nil {
 		cv.Parent = v.texture.coreTexture
 	}

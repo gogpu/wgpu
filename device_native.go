@@ -203,6 +203,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	// texture alive by itself: Go has no drop, and a view the application
 	// never releases would pin the texture's memory. Every GPU use of a view
 	// (a bind group, a render pass) holds the texture's reference as well.
+	dimension := resolveViewDimension(texture, halDesc.Dimension)
 	return &TextureView{
 		hal:          halView,
 		device:       d,
@@ -212,8 +213,11 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
 			d.destroyTextureViewDeferred(halView)
 		}),
-		dimension:    resolveViewDimension(texture, halDesc.Dimension),
-		baseMipLevel: halDesc.BaseMipLevel,
+		dimension:      dimension,
+		baseMipLevel:   halDesc.BaseMipLevel,
+		baseArrayLayer: halDesc.BaseArrayLayer,
+		arrayLayerCount: resolveViewLayerCount(texture, dimension,
+			halDesc.BaseArrayLayer, halDesc.ArrayLayerCount),
 	}, nil
 }
 

@@ -167,6 +167,35 @@ type TextureView struct {
 	// whose descriptor is not known.
 	dimension    gputypes.TextureViewDimension
 	baseMipLevel uint32
+	// baseArrayLayer and arrayLayerCount are the view's resolved array layer
+	// range, copied into core.TextureView for the render pass attachment
+	// overlap check. arrayLayerCount is 0 when the range is not known.
+	baseArrayLayer  uint32
+	arrayLayerCount uint32
+}
+
+// resolveViewLayerCount returns the number of array layers a texture view
+// covers: the requested count, or the default WebGPU derives ("resolving
+// GPUTextureViewDescriptor defaults"): 1 for a 1d, 2d or 3d view, 6 for a
+// cube, and the layers from baseArrayLayer to the end of the texture for a
+// 2d-array or cube-array view. 0 when the texture is not known.
+func resolveViewLayerCount(texture *Texture, dim gputypes.TextureViewDimension, base, requested uint32) uint32 {
+	if requested != 0 {
+		return requested
+	}
+	switch dim {
+	case gputypes.TextureViewDimension1D, gputypes.TextureViewDimension2D, gputypes.TextureViewDimension3D:
+		return 1
+	case gputypes.TextureViewDimensionCube:
+		return 6
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return 0
+	}
+	if layers := texture.coreTexture.Size().DepthOrArrayLayers; layers > base {
+		return layers - base
+	}
+	return 0
 }
 
 // resolveViewDimension returns the dimension a texture view has: the

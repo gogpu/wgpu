@@ -1221,6 +1221,15 @@ const (
 	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
 	// Rust wgpu-core: ColorAttachmentError::UnneededDepthSlice.
 	RenderPassErrorUnneededDepthSlice
+
+	// RenderPassErrorSubresourceOverlap indicates two attachment regions of
+	// the pass (a color attachment's view with its depthSlice, or a resolve
+	// target) name the same subresource: the same texture, mip level and
+	// array layer or depth slice.
+	// WebGPU spec: GPURenderPassDescriptor Valid Usage (attachmentRegions
+	// must be pairwise disjoint).
+	// Rust wgpu-core: ColorAttachmentError::SubresourceOverlap.
+	RenderPassErrorSubresourceOverlap
 )
 
 // RenderPassValidationError represents a validation error during render pass creation.
@@ -1244,6 +1253,12 @@ type RenderPassValidationError struct {
 	ExpectedHeight uint32
 	ActualWidth    uint32
 	ActualHeight   uint32
+
+	// For SubresourceOverlap: the subresource attached twice, and whether
+	// the second use is attachment AttachmentIndex's resolve target.
+	MipLevel      uint32
+	Layer         uint32
+	ResolveTarget bool
 }
 
 // Error implements the error interface.
@@ -1278,6 +1293,14 @@ func (e *RenderPassValidationError) Error() string {
 		return fmt.Sprintf(
 			"render pass %q: color attachment [%d]: depth slice was provided but the color attachment's view is not 3D (WebGPU spec: GPURenderPassColorAttachment Valid Usage)",
 			label, e.AttachmentIndex)
+	case RenderPassErrorSubresourceOverlap:
+		what := "color attachment's view"
+		if e.ResolveTarget {
+			what = "resolve target"
+		}
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d]: %s's subresource at mip %d and depth/array layer %d is already attached to this render pass (WebGPU spec: GPURenderPassDescriptor Valid Usage)",
+			label, e.AttachmentIndex, what, e.MipLevel, e.Layer)
 	default:
 		return fmt.Sprintf("render pass %q: unknown validation error", label)
 	}
