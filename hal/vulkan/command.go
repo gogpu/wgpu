@@ -628,10 +628,82 @@ func bufferLayoutInTexels(format gputypes.TextureFormat, aspect gputypes.Texture
 	return rowLength, layout.RowsPerImage * blockHeight
 }
 
+// splitDepthStencilLayerCopies works around a driver bug: it turns a
+// buffer-texture copy of a depth/stencil array texture that spans several
+// layers into one region per layer, each starting one image further into the
+// buffer.
+//
+// The Intel Iris Xe Vulkan driver on Windows (driver 101.7092, Vulkan 1.4.323)
+// writes the stencil aspect into the wrong layers when vkCmdCopyBufferToImage
+// has mipLevel > 0, baseArrayLayer > 0 and layerCount > 1: a copy of three
+// images to layers 1..3 of mip level 1 lands as layers (0, 3, 1, 2), and two
+// images to layers 1..2 as (0, 2, 1). The validation layer reports nothing,
+// and the same region list produces the right layers on NVIDIA (616.56),
+// lavapipe, and as one region per layer on Intel itself.
+//
+// The split is spec-equivalent (the Vulkan spec addresses each layer of a
+// region at bufferOffset + layer * image size), so it changes no result on a
+// correct driver; it costs only extra regions in the same vkCmdCopy* call.
+// It is therefore unconditional, for both copy directions and every
+// depth/stencil format, rather than a per-adapter workaround as Rust wgpu-hal
+// (Workarounds) or a toggle as Dawn would gate it: one path that every test
+// run exercises, on every driver, instead of a branch that runs only on the
+// adapter that needs it; and other drivers may share the defect.
+func splitDepthStencilLayerCopies(regions []hal.BufferTextureCopy, format gputypes.TextureFormat,
+	dimension gputypes.TextureDimension) []hal.BufferTextureCopy {
+	if !format.IsDepthStencil() || dimension == gputypes.TextureDimension3D {
+		return regions
+	}
+	var split []hal.BufferTextureCopy
+	for i, r := range regions {
+		imageSize, ok := depthStencilImageSize(format, r)
+		if r.Size.DepthOrArrayLayers <= 1 || !ok {
+			if split != nil {
+				split = append(split, r)
+			}
+			continue
+		}
+		if split == nil {
+			split = append(make([]hal.BufferTextureCopy, 0, len(regions)+int(r.Size.DepthOrArrayLayers)), regions[:i]...)
+		}
+		for layer := uint32(0); layer < r.Size.DepthOrArrayLayers; layer++ {
+			one := r
+			one.BufferLayout.Offset += uint64(layer) * imageSize
+			one.TextureBase.Origin.Z += layer
+			one.Size.DepthOrArrayLayers = 1
+			split = append(split, one)
+		}
+	}
+	if split == nil {
+		return regions
+	}
+	return split
+}
+
+// depthStencilImageSize is the byte distance between two layers of r in the
+// buffer: bytesPerRow * rowsPerImage, with an unspecified (0) value meaning
+// tightly packed, as Vulkan reads it. Depth/stencil formats have 1x1 blocks.
+func depthStencilImageSize(format gputypes.TextureFormat, r hal.BufferTextureCopy) (uint64, bool) {
+	bytesPerRow := uint64(r.BufferLayout.BytesPerRow)
+	if bytesPerRow == 0 {
+		blockSize, ok := format.BlockCopySizeAspect(r.TextureBase.Aspect)
+		if !ok {
+			return 0, false
+		}
+		bytesPerRow = uint64(r.Size.Width) * uint64(blockSize)
+	}
+	rows := uint64(r.BufferLayout.RowsPerImage)
+	if rows == 0 {
+		rows = uint64(r.Size.Height)
+	}
+	return bytesPerRow * rows, true
+}
+
 // convertBufferImageCopyRegions converts HAL BufferTextureCopy regions to Vulkan BufferImageCopy.
 // The format parameter is the texture format, used to convert the byte layout of the buffer
 // into the texel layout Vulkan wants (bufferRowLength, bufferImageHeight).
 func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputypes.TextureFormat, dimension gputypes.TextureDimension) []vk.BufferImageCopy {
+	regions = splitDepthStencilLayerCopies(regions, format, dimension)
 	vkRegions := make([]vk.BufferImageCopy, len(regions))
 	for i, r := range regions {
 		bufferRowLength, bufferImageHeight := bufferLayoutInTexels(format, r.TextureBase.Aspect, r.BufferLayout)
