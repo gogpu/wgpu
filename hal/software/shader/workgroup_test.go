@@ -329,3 +329,30 @@ func BenchmarkWorkgroupGlobalSum(b *testing.B) {
 		dispatchWords(b, m, [3]uint32{uint32(len(partials)), 1, 1}, input, partials, params)
 	}
 }
+
+// TestWorkgroupVectorTileWholeLoad: a workgroup array of vectors stored per
+// element, loaded whole by another invocation after the barrier and read at a
+// run-time component index (naga readback corpus vars/workgroup-tile-dynamic-rt).
+func TestWorkgroupVectorTileWholeLoad(t *testing.T) {
+	m := compileNaga(t, `
+@group(0) @binding(0) var<storage, read> src: array<u32, 4>;
+@group(0) @binding(1) var<storage, read_write> dst: array<u32>;
+var<workgroup> tile: array<vec4<u32>, 4>;
+@compute @workgroup_size(4)
+fn main(@builtin(local_invocation_index) i: u32) {
+    tile[i] = vec4<u32>(4u * i, 4u * i + 1u, 4u * i + 2u, 4u * i + 3u);
+    workgroupBarrier();
+    let t = tile[3u - i];
+    dst[i] = t[src[i]];
+}
+`)
+	src := []uint32{1, 2, 3, 0}
+	dst := []uint32{0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF}
+	dispatchWords(t, m, [3]uint32{1, 1, 1}, src, dst)
+	want := []uint32{13, 10, 7, 0, 0xDEADBEEF}
+	for i := range want {
+		if dst[i] != want[i] {
+			t.Errorf("dst[%d] = %#x, want %#x", i, dst[i], want[i])
+		}
+	}
+}

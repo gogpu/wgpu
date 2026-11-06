@@ -42,6 +42,9 @@ const (
 	OpMemberDecorate       = 72
 	OpCompositeExtract     = 81
 	OpCompositeConstruct   = 80
+	OpCompositeInsert      = 82
+	OpVectorExtractDynamic = 77
+	OpVectorInsertDynamic  = 78
 	OpReturn               = 253
 	OpReturnValue          = 254
 	OpLabel                = 248
