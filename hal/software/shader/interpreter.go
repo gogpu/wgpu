@@ -2282,6 +2282,12 @@ func texelComponents(v Value) Vec4 {
 	switch v.Tag {
 	case TagVec2, TagVec3, TagVec4:
 		return v.F
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		var out Vec4
+		for i := range vectorLanes(v.Tag) {
+			out[i] = scalarFloat(indexComposite(v, uint32(i)))
+		}
+		return out
 	case TagArray:
 		var out Vec4
 		for i, e := range v.AsArray() {

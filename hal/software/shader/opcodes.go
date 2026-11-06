@@ -284,7 +284,11 @@ const spirvMagic = 0x07230203
 
 // Instruction represents a decoded SPIR-V instruction.
 type Instruction struct {
-	Opcode   uint16
+	Opcode uint16
+	// resShape is the shape of the result type (TypeID), precomputed by
+	// ParseModule; zero when the result is not a 32-bit scalar or vector. It
+	// sits in the padding after Opcode, so Instruction stays 40 bytes.
+	resShape shape
 	ResultID uint32   // 0 if instruction produces no result
 	TypeID   uint32   // 0 if instruction has no result type
 	Operands []uint32 // remaining operands after result/type

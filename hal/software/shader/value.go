@@ -33,13 +33,28 @@ const (
 	TagSampledImage           // *SampledImageValue stored via Ref
 	TagBindingKey             // BindingKey stored in U[0..1]
 	TagFloat64                // IEEE-754 binary64 bits in U[0]=lo, U[1]=hi
+
+	// Integer and boolean vectors hold their lanes as raw 32-bit words in U,
+	// so every u32 and i32 value is exact. They follow TagFloat64 so the
+	// numbers of the older tags do not change.
+	TagUVec2 // [2]uint32 in U[0..1]
+	TagUVec3 // [3]uint32 in U[0..2]
+	TagUVec4 // [4]uint32 in U[0..3]
+	TagIVec2 // [2]int32 bits in U[0..1]
+	TagIVec3 // [3]int32 bits in U[0..2]
+	TagIVec4 // [4]int32 bits in U[0..3]
+	TagBVec2 // [2]bool in U[0..1], each 0 or 1
+	TagBVec3 // [3]bool in U[0..2], each 0 or 1
+	TagBVec4 // [4]bool in U[0..3], each 0 or 1
+
+	tagCount // number of tags, not a tag
 )
 
 // Value is a tagged union representing a runtime value in the SPIR-V interpreter.
 // Scalars and vectors (up to vec4) are stored inline with zero heap allocation.
 // Composite types (arrays, pointers) use the Ref field.
 //
-// Size: 40 bytes (1 tag + 3 pad + 16 F + 16 U + 8 Ref = 44, but compiler may align to 48).
+// Size: 48 bytes (1 tag + 3 pad + 16 F + 16 U + 4 pad + 8 Ref on 64-bit).
 // This is intentionally larger than an interface (16 bytes) because it eliminates
 // the heap allocation that every interface boxing requires.
 type Value struct {
@@ -321,6 +336,135 @@ func ValFloat64(f float64) Value {
 	return Value{Tag: TagFloat64, U: [4]uint32{uint32(bits), uint32(bits >> 32)}}
 }
 
+// ValUVec returns an n-component u32 vector of the first n lanes of u; n is
+// 2, 3 or 4 (1 gives a u32 scalar). Lanes past n are zero.
+func ValUVec(n int, u [4]uint32) Value { return laneValue(kindUint, n, u) }
+
+// ValIVec returns an n-component i32 vector of the first n lanes of i; n is
+// 2, 3 or 4 (1 gives an i32 scalar). Lanes past n are zero.
+func ValIVec(n int, i [4]int32) Value {
+	return laneValue(kindSint, n, [4]uint32{uint32(i[0]), uint32(i[1]), uint32(i[2]), uint32(i[3])})
+}
+
+// ValBVec returns an n-component bool vector of the first n lanes of b; n is
+// 2, 3 or 4 (1 gives a bool scalar). Lanes past n are false.
+func ValBVec(n int, b [4]bool) Value {
+	var u [4]uint32
+	for i, l := range b {
+		if l {
+			u[i] = 1
+		}
+	}
+	return laneValue(kindBool, n, u)
+}
+
+// laneValue returns the scalar or vector of n lanes of kind k holding the raw
+// words u. Lanes past n are cleared, so two equal vectors compare equal as
+// Go values. It returns ValNone for a lane count outside 1..4.
+func laneValue(k laneKind, n int, u [4]uint32) Value {
+	tag := laneTag(k, n)
+	if tag == TagNone {
+		return Value{}
+	}
+	v := Value{Tag: tag}
+	copy(v.U[:n], u[:n])
+	return v
+}
+
+// =============================================================================
+// Lane kinds, lane counts and result shapes
+// =============================================================================
+
+// laneKind is the scalar kind of the lanes of a 32-bit scalar or vector
+// value, the kind naga's ScalarKind gives a WGSL type.
+type laneKind uint8
+
+const (
+	kindNone  laneKind = iota // not a 32-bit scalar or vector
+	kindFloat                 // f32, lanes in F
+	kindUint                  // u32, raw words in U
+	kindSint                  // i32, raw words in U
+	kindBool                  // bool, 0 or 1 in U
+	kindCount
+)
+
+// tagLanes and tagKinds give the lane count and lane kind of each tag: 1 for
+// a scalar, 2 to 4 for a vector, 0 and kindNone for everything else
+// (arrays, matrices, structs, pointers, images, f64).
+var (
+	tagLanes = [tagCount]uint8{
+		TagFloat32: 1, TagUint32: 1, TagInt32: 1, TagBool: 1,
+		TagVec2: 2, TagVec3: 3, TagVec4: 4,
+		TagUVec2: 2, TagUVec3: 3, TagUVec4: 4,
+		TagIVec2: 2, TagIVec3: 3, TagIVec4: 4,
+		TagBVec2: 2, TagBVec3: 3, TagBVec4: 4,
+	}
+	tagKinds = [tagCount]laneKind{
+		TagFloat32: kindFloat, TagVec2: kindFloat, TagVec3: kindFloat, TagVec4: kindFloat,
+		TagUint32: kindUint, TagUVec2: kindUint, TagUVec3: kindUint, TagUVec4: kindUint,
+		TagInt32: kindSint, TagIVec2: kindSint, TagIVec3: kindSint, TagIVec4: kindSint,
+		TagBool: kindBool, TagBVec2: kindBool, TagBVec3: kindBool, TagBVec4: kindBool,
+	}
+	// laneTags[k][n] is the tag of a value of n lanes of kind k.
+	laneTags = [kindCount][5]ValueTag{
+		kindFloat: {1: TagFloat32, 2: TagVec2, 3: TagVec3, 4: TagVec4},
+		kindUint:  {1: TagUint32, 2: TagUVec2, 3: TagUVec3, 4: TagUVec4},
+		kindSint:  {1: TagInt32, 2: TagIVec2, 3: TagIVec3, 4: TagIVec4},
+		kindBool:  {1: TagBool, 2: TagBVec2, 3: TagBVec3, 4: TagBVec4},
+	}
+)
+
+// vectorLanes returns the lane count of a value tag: 1 for a scalar, 2 to 4
+// for a vector of any kind, 0 for anything else.
+func vectorLanes(t ValueTag) int {
+	if t >= tagCount {
+		return 0
+	}
+	return int(tagLanes[t])
+}
+
+// vectorKind returns the lane kind of a value tag, kindNone for anything that
+// is not a 32-bit scalar or vector.
+func vectorKind(t ValueTag) laneKind {
+	if t >= tagCount {
+		return kindNone
+	}
+	return tagKinds[t]
+}
+
+// laneTag returns the tag of a value of n lanes of kind k, TagNone when
+// there is none.
+func laneTag(k laneKind, n int) ValueTag {
+	if k >= kindCount || n < 1 || n > 4 {
+		return TagNone
+	}
+	return laneTags[k][n]
+}
+
+// shape is the result type of an instruction as a lane kind and a lane count,
+// kind<<3 | lanes: a 32-bit scalar (1 lane) or vector (2 to 4). Zero is no
+// shape: no result type, or a matrix, array, struct, pointer, image or f64.
+// ParseModule precomputes it into Instruction.resShape, so the lane-wise ops
+// read it without a type lookup.
+type shape uint8
+
+// shapeOf returns the shape of n lanes of kind k.
+func shapeOf(k laneKind, n int) shape {
+	if laneTag(k, n) == TagNone {
+		return 0
+	}
+	return shape(k)<<3 | shape(n)
+}
+
+// lanes returns the lane count of the shape, 0 for no shape.
+func (s shape) lanes() int { return int(s & 7) }
+
+// kind returns the lane kind of the shape.
+func (s shape) kind() laneKind { return laneKind(s >> 3) }
+
+// tag returns the value tag of the shape, TagNone for no shape.
+func (s shape) tag() ValueTag { return laneTag(s.kind(), s.lanes()) }
+
 // =============================================================================
 // Value Accessors
 // =============================================================================
@@ -403,6 +547,26 @@ func (v Value) AsFloat64() float64 {
 	return math.Float64frombits(bits)
 }
 
+// AsUVec extracts the lanes of a u32 vector (or of any integer or bool value)
+// as raw words; lanes past the vector's size are zero.
+func (v Value) AsUVec() [4]uint32 { return v.U }
+
+// AsIVec extracts the lanes of an i32 vector; lanes past the vector's size
+// are zero.
+func (v Value) AsIVec() [4]int32 {
+	return [4]int32{int32(v.U[0]), int32(v.U[1]), int32(v.U[2]), int32(v.U[3])}
+}
+
+// AsBVec extracts the lanes of a bool vector; lanes past the vector's size
+// are false.
+func (v Value) AsBVec() [4]bool {
+	return [4]bool{v.U[0] != 0, v.U[1] != 0, v.U[2] != 0, v.U[3] != 0}
+}
+
+// Lanes returns the lane count of a scalar (1) or vector (2 to 4) of any
+// kind, 0 for any other value.
+func (v Value) Lanes() int { return vectorLanes(v.Tag) }
+
 // =============================================================================
 // Conversion helpers -- used throughout the interpreter
 // =============================================================================
@@ -421,34 +585,71 @@ func toFloat32(v Value) float32 {
 	}
 }
 
-// toUint32 extracts a uint32 from a Value, converting if needed.
+// toUint32 extracts a uint32 from a Value, converting if needed. An integer
+// or bool vector gives the raw word of its first lane.
 func toUint32(v Value) uint32 {
 	switch v.Tag {
-	case TagUint32:
+	case TagUint32, TagInt32, TagBool, // same bits
+		TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
 		return v.U[0]
-	case TagInt32:
-		return v.U[0] // same bits
 	case TagFloat32:
 		return uint32(v.F[0])
-	case TagBool:
-		return v.U[0]
 	default:
 		return 0
 	}
 }
 
-// toBool converts a Value to boolean.
+// toBool converts a Value to boolean. A bool or integer vector gives its
+// first lane.
 func toBool(v Value) bool {
 	switch v.Tag {
-	case TagBool:
-		return v.U[0] != 0
-	case TagUint32, TagInt32:
+	case TagBool, TagUint32, TagInt32,
+		TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
 		return v.U[0] != 0
 	case TagFloat32:
 		return v.F[0] != 0
 	default:
 		return false
 	}
+}
+
+// isWordVector reports whether t is an integer or bool vector tag, a vector
+// whose lanes are raw words in U.
+func isWordVector(t ValueTag) bool { return t >= TagUVec2 && t <= TagBVec4 }
+
+// scalarOfKind returns the scalar of kind k holding the raw word w: a u32,
+// an i32 or a bool (w != 0), or an f32 of the bits w.
+func scalarOfKind(k laneKind, w uint32) Value {
+	switch k {
+	case kindUint:
+		return ValUint(w)
+	case kindSint:
+		return ValInt(int32(w))
+	case kindBool:
+		return ValBool(w != 0)
+	default:
+		return ValFloat(math.Float32frombits(w))
+	}
+}
+
+// laneWord returns the raw word a scalar stores into a lane of kind k: the
+// bits of a u32 or i32, 0 or 1 for a bool. A float scalar converts by value
+// (an f32 lane takes its bits), the representation integer components had
+// before the typed value model.
+func laneWord(k laneKind, v Value) uint32 {
+	switch k {
+	case kindBool:
+		if toBool(v) {
+			return 1
+		}
+		return 0
+	case kindFloat:
+		return math.Float32bits(toFloat32(v))
+	}
+	if v.Tag == TagFloat32 {
+		return laneBits(v.F[0], k == kindSint)
+	}
+	return toUint32(v)
 }
 
 // =============================================================================
@@ -522,6 +723,8 @@ func dotProduct(a, b Value) Value {
 }
 
 // Vec4ToFloat32 extracts a Vec4 from a Value, returning zeros if type doesn't match.
+// An integer or bool vector converts lane by lane by value (true is 1);
+// missing lanes are zero.
 func Vec4ToFloat32(val Value) [4]float32 {
 	switch val.Tag {
 	case TagVec4:
@@ -532,6 +735,18 @@ func Vec4ToFloat32(val Value) [4]float32 {
 		return [4]float32{val.F[0], val.F[1], 0, 0}
 	case TagFloat32:
 		return [4]float32{val.F[0], 0, 0, 0}
+	case TagUVec2, TagUVec3, TagUVec4, TagBVec2, TagBVec3, TagBVec4:
+		var f [4]float32
+		for i, w := range val.U[:vectorLanes(val.Tag)] {
+			f[i] = float32(w)
+		}
+		return f
+	case TagIVec2, TagIVec3, TagIVec4:
+		var f [4]float32
+		for i, w := range val.U[:vectorLanes(val.Tag)] {
+			f[i] = float32(int32(w))
+		}
+		return f
 	default:
 		return [4]float32{}
 	}
@@ -651,6 +866,10 @@ func indexComposite(composite Value, index uint32) Value {
 		if index < 4 {
 			return ValFloat(composite.F[index])
 		}
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		if int(index) < vectorLanes(composite.Tag) {
+			return scalarOfKind(vectorKind(composite.Tag), composite.U[index])
+		}
 	}
 	return ValFloat(0)
 }
@@ -709,6 +928,16 @@ func setCompositeElement(composite Value, indexes []uint32, val Value) Value {
 		}
 		return v
 
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		if int(idx) >= vectorLanes(composite.Tag) {
+			return composite
+		}
+		v := composite
+		if len(rest) == 0 {
+			v.U[idx] = laneWord(vectorKind(composite.Tag), val)
+		}
+		return v
+
 	default:
 		return composite
 	}
@@ -729,6 +958,18 @@ func appendComponents(dst []float32, val Value) []float32 {
 		return append(dst, float32(val.U[0]))
 	case TagInt32:
 		return append(dst, float32(int32(val.U[0])))
+	case TagBool:
+		return append(dst, float32(val.U[0]))
+	case TagUVec2, TagUVec3, TagUVec4, TagBVec2, TagBVec3, TagBVec4:
+		for _, w := range val.U[:vectorLanes(val.Tag)] {
+			dst = append(dst, float32(w))
+		}
+		return dst
+	case TagIVec2, TagIVec3, TagIVec4:
+		for _, w := range val.U[:vectorLanes(val.Tag)] {
+			dst = append(dst, float32(int32(w)))
+		}
+		return dst
 	case TagArray:
 		// Integer vectors from builtins (global_invocation_id) are arrays
 		// of scalars.
@@ -763,7 +1004,10 @@ func writeValueToBuffer(data []byte, offset uint32, val Value) {
 		data[offset+1] = byte(v >> 8)
 		data[offset+2] = byte(v >> 16)
 		data[offset+3] = byte(v >> 24)
-	case TagInt32:
+	case TagInt32, TagBool:
+		// A bool is not host-shareable, but a var<workgroup> bool lives in
+		// shared memory bytes: it is one word, 0 or 1, as readValueFromBuffer
+		// reads it back.
 		if offset+4 > uint32(len(data)) {
 			return
 		}
@@ -784,6 +1028,11 @@ func writeValueToBuffer(data []byte, offset uint32, val Value) {
 		writeValueToBuffer(data, offset+4, ValFloat(val.F[1]))
 		writeValueToBuffer(data, offset+8, ValFloat(val.F[2]))
 		writeValueToBuffer(data, offset+12, ValFloat(val.F[3]))
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		// Raw lane words, 4 bytes each, as the bits they hold.
+		for i, w := range val.U[:vectorLanes(val.Tag)] {
+			writeValueToBuffer(data, offset+uint32(i)*4, ValUint(w))
+		}
 	case TagArray:
 		arr := val.AsArray()
 		off := offset
@@ -814,14 +1063,10 @@ func writeScalarToBuffer(data []byte, offset uint32, val Value, ti *TypeInfo) {
 // valueByteSize returns the byte size of a runtime Value.
 func valueByteSize(val Value) uint32 {
 	switch val.Tag {
-	case TagFloat32, TagUint32, TagInt32, TagBool:
-		return 4
-	case TagVec2:
-		return 8
-	case TagVec3:
-		return 12
-	case TagVec4:
-		return 16
+	case TagFloat32, TagUint32, TagInt32, TagBool,
+		TagVec2, TagVec3, TagVec4,
+		TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		return 4 * uint32(vectorLanes(val.Tag))
 	case TagArray:
 		arr := val.AsArray()
 		var total uint32
@@ -836,53 +1081,11 @@ func valueByteSize(val Value) uint32 {
 
 // zeroValueForVar creates a zero value matching the pointee type of a pointer type.
 func zeroValueForVar(m *Module, ptrTypeID uint32) Value {
-	ti := m.PointeeType(ptrTypeID)
-	if ti == nil {
+	ptrType, ok := m.Types[ptrTypeID]
+	if !ok || ptrType.Kind != TypePointer {
 		return ValUint(0)
 	}
-	switch ti.Kind {
-	case TypeFloat:
-		return ValFloat(0)
-	case TypeInt:
-		if ti.Signed {
-			return ValInt(0)
-		}
-		return ValUint(0)
-	case TypeVector:
-		switch ti.Components {
-		case 2:
-			return ValVec2(0, 0)
-		case 3:
-			return ValVec3(0, 0, 0)
-		case 4:
-			return ValVec4(0, 0, 0, 0)
-		}
-	case TypeMatrix:
-		if ti.Components > 0 {
-			cols := make([]Value, ti.Components)
-			for i := range cols {
-				cols[i] = zeroValue(m.Types, ti.ElemType)
-			}
-			return ValArray(cols)
-		}
-	case TypeArray:
-		if ti.Length > 0 {
-			arr := make([]Value, ti.Length)
-			for i := range arr {
-				arr[i] = zeroValue(m.Types, ti.ElemType)
-			}
-			return ValArray(arr)
-		}
-	case TypeStruct:
-		members := make([]Value, len(ti.MemberIDs))
-		for i, memberTypeID := range ti.MemberIDs {
-			members[i] = zeroValue(m.Types, memberTypeID)
-		}
-		return ValArray(members)
-	case TypeBool:
-		return ValBool(false)
-	}
-	return ValUint(0)
+	return zeroValue(m.Types, ptrType.ElemType)
 }
 
 // zeroValue returns the zero/default value for a given type.
