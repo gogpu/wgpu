@@ -154,6 +154,38 @@ func (c ColorCodec) Integer() bool {
 	return false
 }
 
+// Signed reports whether the format stores signed integers.
+func (c ColorCodec) Signed() bool { return c.layout.kind == texelSint }
+
+// EncodeIntMasked writes the integer channels v, each the 32 bits of the
+// shader's u32 or i32 output, into the texel at b[0] of an integer format,
+// the channels mask selects only. A narrower channel keeps the low bits, as
+// the float path (encodeAt) truncates; a 32-bit channel stores v exactly,
+// which a float32 cannot carry above 2^24.
+func (c ColorCodec) EncodeIntMasked(b []byte, v [4]uint32, mask gputypes.ColorWriteMask) {
+	l := c.layout
+	if l.kind == texelRGB10A2Uint {
+		w := v[0]&0x3FF | v[1]&0x3FF<<10 | v[2]&0x3FF<<20 | v[3]&3<<30
+		keep := ^packedChannelBits(l.kind, mask)
+		binary.LittleEndian.PutUint32(b, binary.LittleEndian.Uint32(b)&keep|w&^keep)
+		return
+	}
+	for ch := range l.channels {
+		if mask&(1<<ch) == 0 {
+			continue
+		}
+		dst := b[ch*l.bytes:]
+		switch l.bytes {
+		case 1:
+			dst[0] = byte(v[ch])
+		case 2:
+			binary.LittleEndian.PutUint16(dst, uint16(v[ch]))
+		default:
+			binary.LittleEndian.PutUint32(dst, v[ch])
+		}
+	}
+}
+
 // Range returns the range a normalized format clamps blend inputs and
 // results to: [0, 1] for unorm (sRGB included), [-1, 1] for snorm. ok is
 // false for float and integer formats, which WebGPU does not clamp.

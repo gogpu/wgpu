@@ -3,12 +3,15 @@
 package software
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/raster"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // =============================================================================
@@ -2007,7 +2010,7 @@ func TestMRTHelpers(t *testing.T) {
 		pass.End()
 	})
 
-	t.Run("getPerTargetBlendStates", func(t *testing.T) {
+	t.Run("drawColorTargets", func(t *testing.T) {
 		tex0, _ := dev.CreateTexture(&hal.TextureDescriptor{
 			Size:   hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 			Format: gputypes.TextureFormatRGBA8Unorm,
@@ -2074,22 +2077,86 @@ func TestMRTHelpers(t *testing.T) {
 		rpe := pass.(*RenderPassEncoder)
 		rpe.SetPipeline(pipeline)
 
-		blendStates := rpe.getPerTargetBlendStates()
-		if len(blendStates) != 2 {
-			t.Fatalf("getPerTargetBlendStates() returned %d states, want 2", len(blendStates))
+		targets := rpe.drawColorTargets()
+		if len(targets) != 2 {
+			t.Fatalf("drawColorTargets() returned %d targets, want 2", len(targets))
 		}
-		if blendStates[0] == nil {
-			t.Error("blend state 0 should not be nil")
+		for i, target := range targets {
+			if target == nil {
+				t.Fatalf("color target %d is nil", i)
+			}
+			if !target.blend.Enabled {
+				t.Errorf("color target %d: blend not enabled", i)
+			}
 		}
-		if blendStates[1] == nil {
-			t.Error("blend state 1 should not be nil")
+		if targets[1].blend.SrcColor != raster.BlendFactorSrcAlpha {
+			t.Errorf("color target 1: src factor %v, want SrcAlpha", targets[1].blend.SrcColor)
 		}
 		pass.End()
 	})
 }
 
+// writeTestColor stores one fragment colour into target through its colour
+// target, unblended with every channel written.
+func writeTestColor(t *testing.T, target *Texture, x, y int, c [4]float32) {
+	t.Helper()
+	ct := newColorTarget(target, target.format, nil, [4]float32{})
+	if ct == nil {
+		t.Fatalf("no color target for format %v", target.format)
+	}
+	ct.write(x, y, c)
+}
+
+// TestIntegerColorTarget: a fragment output reaches an integer target as
+// its 32 bits, so a u32 above 2^24 stores exactly, an i32 keeps its sign,
+// and a blend state on an integer target is ignored.
+func TestIntegerColorTarget(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+	blend := &gputypes.ColorTargetState{
+		WriteMask: gputypes.ColorWriteMaskAll,
+		Blend: &gputypes.BlendState{
+			Color: gputypes.BlendComponent{SrcFactor: gputypes.BlendFactorZero, DstFactor: gputypes.BlendFactorOne, Operation: gputypes.BlendOperationAdd},
+			Alpha: gputypes.BlendComponent{SrcFactor: gputypes.BlendFactorZero, DstFactor: gputypes.BlendFactorOne, Operation: gputypes.BlendOperationAdd},
+		},
+	}
+	tests := []struct {
+		format gputypes.TextureFormat
+		out    shader.Value
+		want   []byte
+	}{
+		{gputypes.TextureFormatR32Uint, shader.Value{Tag: shader.TagUint32, U: [4]uint32{0xDEADBEEF}}, []byte{0xEF, 0xBE, 0xAD, 0xDE}},
+		{gputypes.TextureFormatR32Sint, shader.Value{Tag: shader.TagInt32, U: [4]uint32{0xF8A432EB}}, []byte{0xEB, 0x32, 0xA4, 0xF8}},
+		{gputypes.TextureFormatRG16Sint, shader.Value{Tag: shader.TagVec2, F: [4]float32{-2, 300}}, []byte{0xFE, 0xFF, 0x2C, 0x01}},
+		{gputypes.TextureFormatRGBA8Uint, shader.Value{Tag: shader.TagVec4, F: [4]float32{1, 2, 3, 250}}, []byte{1, 2, 3, 250}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format.String(), func(t *testing.T) {
+			tex, err := dev.CreateTexture(&hal.TextureDescriptor{
+				Size:   hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
+				Format: tt.format,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer dev.DestroyTexture(tex)
+			target := tex.(*Texture)
+			state := *blend
+			state.Format = tt.format
+			ct := newColorTarget(target, tt.format, &state, [4]float32{})
+			if ct == nil || ct.blend.Enabled {
+				t.Fatalf("color target %v: nil or blending", ct)
+			}
+			ct.write(0, 0, fragmentColor(tt.out, colorKindOf(tt.format)))
+			if got := target.GetData()[:len(tt.want)]; !bytes.Equal(got, tt.want) {
+				t.Errorf("stored %x, want %x", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestMRTWriteColorToTarget verifies per-pixel writing to individual render
-// targets with BGRA format support and blending.
+// targets with BGRA format support.
 func TestMRTWriteColorToTarget(t *testing.T) {
 	dev, _, cleanup := createSoftwareDevice(t)
 	defer cleanup()
@@ -2106,7 +2173,7 @@ func TestMRTWriteColorToTarget(t *testing.T) {
 		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
 
 		// Write red to pixel (0,0).
-		writeColorToTarget(target, 0, 0, [4]float32{1, 0, 0, 1}, nil)
+		writeTestColor(t, target, 0, 0, [4]float32{1, 0, 0, 1})
 
 		data := target.GetData()
 		if data[0] != 255 || data[1] != 0 || data[2] != 0 || data[3] != 255 {
@@ -2126,7 +2193,7 @@ func TestMRTWriteColorToTarget(t *testing.T) {
 		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
 
 		// Write red (RGBA) to pixel (0,0). For BGRA target, bytes should be B,G,R,A.
-		writeColorToTarget(target, 0, 0, [4]float32{1, 0, 0, 1}, nil)
+		writeTestColor(t, target, 0, 0, [4]float32{1, 0, 0, 1})
 
 		data := target.GetData()
 		// BGRA layout: B=0, G=0, R=255, A=255
@@ -2147,10 +2214,10 @@ func TestMRTWriteColorToTarget(t *testing.T) {
 		target.Clear(gputypes.Color{R: 0, G: 0, B: 0, A: 1})
 
 		// Out-of-bounds writes should not panic.
-		writeColorToTarget(target, -1, 0, [4]float32{1, 0, 0, 1}, nil)
-		writeColorToTarget(target, 0, -1, [4]float32{1, 0, 0, 1}, nil)
-		writeColorToTarget(target, 5, 0, [4]float32{1, 0, 0, 1}, nil)
-		writeColorToTarget(target, 0, 5, [4]float32{1, 0, 0, 1}, nil)
+		writeTestColor(t, target, -1, 0, [4]float32{1, 0, 0, 1})
+		writeTestColor(t, target, 0, -1, [4]float32{1, 0, 0, 1})
+		writeTestColor(t, target, 5, 0, [4]float32{1, 0, 0, 1})
+		writeTestColor(t, target, 0, 5, [4]float32{1, 0, 0, 1})
 
 		// All pixels should still be black.
 		data := target.GetData()

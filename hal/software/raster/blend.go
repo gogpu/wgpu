@@ -168,6 +168,23 @@ func Blend(src, dst [4]float32, state BlendState) [4]float32 {
 	if !state.Enabled {
 		return src
 	}
+	out := BlendUnclamped(src, dst, state)
+	return [4]float32{
+		clampFloat(out[0], 0, 1),
+		clampFloat(out[1], 0, 1),
+		clampFloat(out[2], 0, 1),
+		clampFloat(out[3], 0, 1),
+	}
+}
+
+// BlendUnclamped is Blend without the final clamp to [0, 1]: the blend
+// equation of a float colour target, whose result WebGPU does not clamp.
+// The caller clamps the inputs and the result to the range of a unorm or
+// snorm target. A disabled state returns src.
+func BlendUnclamped(src, dst [4]float32, state BlendState) [4]float32 {
+	if !state.Enabled {
+		return src
+	}
 
 	// Get blend factors
 	srcColorFactor := applyBlendFactor(state.SrcColor, src, dst, state.Constant)
@@ -192,13 +209,7 @@ func Blend(src, dst [4]float32, state BlendState) [4]float32 {
 	outB := applyBlendOp(state.ColorOp, srcB, dstB)
 	outA := applyBlendOp(state.AlphaOp, srcA, dstA)
 
-	// Clamp results
-	return [4]float32{
-		clampFloat(outR, 0, 1),
-		clampFloat(outG, 0, 1),
-		clampFloat(outB, 0, 1),
-		clampFloat(outA, 0, 1),
-	}
+	return [4]float32{outR, outG, outB, outA}
 }
 
 // applyBlendFactor returns the RGB factor multiplier based on the blend factor type.

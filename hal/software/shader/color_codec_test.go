@@ -165,6 +165,43 @@ func TestColorCodecEncodeMasked(t *testing.T) {
 	}
 }
 
+// TestColorCodecEncodeIntMasked: integer colour writes store the shader's
+// 32 bits exactly in a 32-bit channel, keep the low bits in a narrower one,
+// and leave the masked-out channels untouched.
+func TestColorCodecEncodeIntMasked(t *testing.T) {
+	tests := []struct {
+		format gputypes.TextureFormat
+		old    []byte
+		v      [4]uint32
+		mask   gputypes.ColorWriteMask
+		want   []byte
+	}{
+		{gputypes.TextureFormatR32Uint, le32(0), [4]uint32{0xDEADBEEF}, gputypes.ColorWriteMaskAll, le32(0xDEADBEEF)},
+		{gputypes.TextureFormatRG32Sint, make([]byte, 8), [4]uint32{0xF8A432EB, 16777217}, gputypes.ColorWriteMaskAll, append(le32(0xF8A432EB), le32(16777217)...)},
+		{gputypes.TextureFormatRG32Uint, append(le32(7), le32(9)...), [4]uint32{1, 2}, gputypes.ColorWriteMaskGreen, append(le32(7), le32(2)...)},
+		{gputypes.TextureFormatRGBA8Uint, []byte{1, 2, 3, 4}, [4]uint32{0x1FF, 5, 6, 7}, gputypes.ColorWriteMaskRed | gputypes.ColorWriteMaskBlue, []byte{0xFF, 2, 6, 4}},
+		{gputypes.TextureFormatRG16Sint, []byte{0, 0, 0, 0}, [4]uint32{0xFFFFFFFE, 300}, gputypes.ColorWriteMaskAll, []byte{0xFE, 0xFF, 0x2C, 0x01}},
+		{gputypes.TextureFormatRGB10A2Uint, le32(5 | 6<<10 | 7<<20 | 1<<30), [4]uint32{1023, 1023, 1023, 3}, gputypes.ColorWriteMaskGreen, le32(5 | 1023<<10 | 7<<20 | 1<<30)},
+	}
+	for _, tt := range tests {
+		c, ok := NewColorCodec(tt.format)
+		if !ok || !c.Integer() {
+			t.Fatalf("%v: no integer codec", tt.format)
+		}
+		b := append([]byte(nil), tt.old...)
+		c.EncodeIntMasked(b, tt.v, tt.mask)
+		if !bytes.Equal(b, tt.want) {
+			t.Errorf("%v mask %#x: %x, want %x", tt.format, tt.mask, b, tt.want)
+		}
+	}
+	if c, _ := NewColorCodec(gputypes.TextureFormatR32Sint); !c.Signed() {
+		t.Error("r32sint is not Signed")
+	}
+	if c, _ := NewColorCodec(gputypes.TextureFormatRGB10A2Uint); c.Signed() {
+		t.Error("rgb10a2uint is Signed")
+	}
+}
+
 // TestColorCodecEncodeClear: a clear of a 32-bit integer format is exact
 // beyond float32's 24-bit mantissa.
 func TestColorCodecEncodeClear(t *testing.T) {

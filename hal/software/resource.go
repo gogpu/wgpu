@@ -11,7 +11,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/software/raster"
 	"github.com/gogpu/wgpu/hal/software/shader"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
@@ -117,41 +116,13 @@ func (t *Texture) CurrentUsage() gputypes.TextureUsage { return 0 }
 // NativeHandle returns the texture's unique ID for handle resolution.
 func (t *Texture) NativeHandle() uintptr { return uintptr(t.id) }
 
-// Clear fills the texture with a color value in the texture's native format.
-// BGRA textures store [B,G,R,A] per pixel; RGBA textures store [R,G,B,A].
+// Clear fills the texture with a color value encoded in the texture's
+// format, as a render pass clear of a view in that format stores it: BGRA
+// textures store [B,G,R,A] per pixel, sRGB ones the encoded red, green and
+// blue, float and integer ones their own channel types. A depth/stencil
+// texture is left as it is.
 func (t *Texture) Clear(color gputypes.Color) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	r := raster.FloatToUnorm8(float32(color.R))
-	g := raster.FloatToUnorm8(float32(color.G))
-	b := raster.FloatToUnorm8(float32(color.B))
-	a := raster.FloatToUnorm8(float32(color.A))
-
-	bpp := int(formatBytesPerPixel(t.format))
-
-	switch bpp {
-	case 1:
-		for i := 0; i < len(t.data); i++ {
-			t.data[i] = r
-		}
-	case 2:
-		for i := 0; i+1 < len(t.data); i += 2 {
-			t.data[i] = r
-			t.data[i+1] = g
-		}
-	default:
-		c0, c1, c2, c3 := r, g, b, a
-		if t.format == gputypes.TextureFormatBGRA8Unorm || t.format == gputypes.TextureFormatBGRA8UnormSrgb {
-			c0, c2 = b, r
-		}
-		for i := 0; i+3 < len(t.data); i += bpp {
-			t.data[i+0] = c0
-			t.data[i+1] = c1
-			t.data[i+2] = c2
-			t.data[i+3] = c3
-		}
-	}
+	t.clearAs(t.format, color)
 }
 
 // TextureView implements hal.TextureView: a range of a texture's mip levels

@@ -207,9 +207,13 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	src := srcView.texture
 	src.mu.RLock()
 	img, ok := srcView.baseImage()
-	srcFmt := src.format
 	src.mu.RUnlock()
-	if !ok {
+	// The blit copies bytes, which equals a sampled draw only between 8-bit
+	// RGBA or BGRA views of the same encoding: an sRGB view decodes on fetch
+	// and encodes on write, a unorm one does neither.
+	srcFmt := srcView.viewFormat()
+	dstFmt := r.colorFormat(0)
+	if !ok || !isBlitFormat(srcFmt) || !isBlitFormat(dstFmt) || srcFmt.IsSrgb() != dstFmt.IsSrgb() {
 		return false
 	}
 	srcData := img.data
@@ -218,7 +222,6 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 
 	dstW := int(target.width)
 	dstH := int(target.height)
-	dstFmt := target.format
 
 	target.mu.Lock()
 	defer target.mu.Unlock()
@@ -303,6 +306,17 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 	return true
 }
 
+// isBlitFormat reports whether the fullscreen blit can copy texels of format:
+// the 8-bit RGBA and BGRA formats, unorm or sRGB.
+func isBlitFormat(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatBGRA8Unorm, gputypes.TextureFormatBGRA8UnormSrgb:
+		return true
+	}
+	return false
+}
+
 // needsSwizzle returns true when source and destination formats require R/B channel swap.
 func needsSwizzle(src, dst gputypes.TextureFormat) bool {
 	srcBGRA := src == gputypes.TextureFormatBGRA8Unorm || src == gputypes.TextureFormatBGRA8UnormSrgb
@@ -315,35 +329,6 @@ func needsSwizzle(src, dst gputypes.TextureFormat) bool {
 // before writing to the target texture.
 func isBGRA(fmt gputypes.TextureFormat) bool {
 	return fmt == gputypes.TextureFormatBGRA8Unorm || fmt == gputypes.TextureFormatBGRA8UnormSrgb
-}
-
-// writeRasterToTarget copies raster pipeline output (RGBA) into the target texture,
-// swapping R and B channels when the target format is BGRA. This is the single
-// point where all draw paths convert from the raster pipeline's RGBA color buffer
-// to the framebuffer's native byte order.
-func writeRasterToTarget(pipe *raster.Pipeline, target *Texture) {
-	w := pipe.Width()
-	h := pipe.Height()
-	bgra := isBGRA(target.format)
-	target.mu.Lock()
-	for py := 0; py < h; py++ {
-		for px := 0; px < w; px++ {
-			cr, cg, cb, ca := pipe.GetPixel(px, py)
-			idx := (py*w + px) * 4
-			if bgra {
-				target.data[idx+0] = cb // B
-				target.data[idx+1] = cg // G
-				target.data[idx+2] = cr // R
-				target.data[idx+3] = ca // A
-			} else {
-				target.data[idx+0] = cr
-				target.data[idx+1] = cg
-				target.data[idx+2] = cb
-				target.data[idx+3] = ca
-			}
-		}
-	}
-	target.mu.Unlock()
 }
 
 // findBoundTexture searches all bind groups for the first texture view binding.
@@ -384,7 +369,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
-	loadFramebufferIntoPipeline(pipe, target)
+	targets := r.routeColorOutput(pipe)
 
 	// Attempt SPIR-V vertex shader path (handles @builtin + @location inputs
 	// and per-vertex output attributes for interpolation).
@@ -410,23 +395,9 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 
 	// MRT path: when multiple color attachments exist, use the MRT fragment
 	// shader to write outputs for all @location(N) targets simultaneously.
-	targets := r.getTargetTextures()
 	if r.hasMRT() && hasAttrs {
 		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
-			blendStates := r.getPerTargetBlendStates()
-			pipe.DrawTrianglesWithMRTShader(triangles, mrtFunc, func(x, y int, colors [][4]float32) {
-				// Write locations 1+ to their respective target textures.
-				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
-					if targets[loc] != nil {
-						var bs *raster.BlendState
-						if loc < len(blendStates) {
-							bs = blendStates[loc]
-						}
-						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
-					}
-				}
-			}, mayDiscard)
-			writeRasterToTarget(pipe, target)
+			pipe.DrawTrianglesWithMRTShader(triangles, mrtFunc, writeMRTLocations(targets), mayDiscard)
 			return
 		}
 	}
@@ -445,9 +416,6 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 		color := r.resolveFragmentColor()
 		pipe.DrawTriangles(triangles, color)
 	}
-
-	// Write raster result back to texture.
-	writeRasterToTarget(pipe, target)
 }
 
 // fetchTriangles reads vertex data from bound buffers, applies viewport transform,
@@ -1213,29 +1181,6 @@ func (r *RenderPassEncoder) prepareSPIRVDraw() *spirvDrawSetup {
 	return s
 }
 
-// loadFramebufferIntoPipeline copies existing target pixels into the raster pipeline
-// for correct alpha compositing, applying BGRA swizzle when needed.
-func loadFramebufferIntoPipeline(pipe *raster.Pipeline, target *Texture) {
-	w := int(target.width)
-	h := int(target.height)
-	target.mu.RLock()
-	existingData := make([]byte, len(target.data))
-	copy(existingData, target.data)
-	target.mu.RUnlock()
-	bgra := isBGRA(target.format)
-	pipe.Clear(0, 0, 0, 0)
-	for py := 0; py < h; py++ {
-		for px := 0; px < w; px++ {
-			idx := (py*w + px) * 4
-			if bgra {
-				pipe.SetPixel(px, py, existingData[idx+2], existingData[idx+1], existingData[idx], existingData[idx+3])
-			} else {
-				pipe.SetPixel(px, py, existingData[idx], existingData[idx+1], existingData[idx+2], existingData[idx+3])
-			}
-		}
-	}
-}
-
 func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, instanceCount, firstVertex, firstInstance uint32) bool {
 	s := r.prepareSPIRVDraw()
 	if s == nil {
@@ -1253,7 +1198,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
-	loadFramebufferIntoPipeline(pipe, target)
+	targets := r.routeColorOutput(pipe)
 
 	var allTriangles []raster.Triangle
 	hasLocOutputs := len(s.locationOutputs) > 0
@@ -1313,22 +1258,9 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 	}
 
 	// MRT path for SPIR-V draws with multiple color attachments.
-	targets := r.getTargetTextures()
 	if r.hasMRT() {
 		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
-			blendStates := r.getPerTargetBlendStates()
-			pipe.DrawTrianglesWithMRTShader(allTriangles, mrtFunc, func(x, y int, colors [][4]float32) {
-				for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
-					if targets[loc] != nil {
-						var bs *raster.BlendState
-						if loc < len(blendStates) {
-							bs = blendStates[loc]
-						}
-						writeColorToTarget(targets[loc], x, y, colors[loc], bs)
-					}
-				}
-			}, mayDiscard)
-			writeRasterToTarget(pipe, target)
+			pipe.DrawTrianglesWithMRTShader(allTriangles, mrtFunc, writeMRTLocations(targets), mayDiscard)
 			return true
 		}
 	}
@@ -1346,8 +1278,6 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 			pipe.DrawTriangles(allTriangles, color)
 		}
 	}
-
-	writeRasterToTarget(pipe, target)
 	return true
 }
 
@@ -1407,7 +1337,38 @@ func (r *RenderPassEncoder) executeSPIRVFragment() (color [4]float32, discard bo
 		return [4]float32{1, 1, 1, 1}, false
 	}
 
-	return shader.Vec4ToFloat32(colorVal), false
+	return fragmentColor(colorVal, colorKindOf(r.colorFormat(0))), false
+}
+
+// fragmentColor returns a fragment shader colour output as the four channels
+// the colour target of kind stores (colorTarget): float values, or for an
+// integer target the bits of the 32-bit integers. A scalar u32 or i32 output
+// holds its value in Value.U and stays exact. The interpreter holds integer
+// vectors as float32 (TagVec*, P1-SW-019), so their channels are exact only
+// up to 2^24.
+func fragmentColor(v shader.Value, kind colorKind) [4]float32 {
+	if kind == colorKindFloat {
+		switch v.Tag {
+		case shader.TagUint32:
+			return [4]float32{float32(v.U[0]), 0, 0, 1}
+		case shader.TagInt32:
+			return [4]float32{float32(int32(v.U[0])), 0, 0, 1}
+		}
+		return shader.Vec4ToFloat32(v)
+	}
+	if v.Tag == shader.TagUint32 || v.Tag == shader.TagInt32 {
+		return intBitsColor([4]uint32{v.U[0], 0, 0, 1})
+	}
+	f := shader.Vec4ToFloat32(v)
+	var bits [4]uint32
+	for i, c := range f {
+		if kind == colorKindSint {
+			bits[i] = uint32(int32(c))
+		} else {
+			bits[i] = uint32(int64(c))
+		}
+	}
+	return intBitsColor(bits)
 }
 
 // fragmentInterface classifies the interface variables of a fragment entry
@@ -1515,6 +1476,7 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() (raster.FragmentShaderFunc
 
 	// Build execution context with bind group resources (uniform buffers, textures, etc.).
 	ctx := r.buildExecutionContext()
+	kind := colorKindOf(r.colorFormat(0))
 
 	return func(frag *raster.Fragment) ([4]float32, bool) {
 		ctx.Inputs = fi.inputs(frag)
@@ -1530,7 +1492,7 @@ func (r *RenderPassEncoder) buildFragmentShaderFunc() (raster.FragmentShaderFunc
 		if !ok {
 			return [4]float32{1, 1, 1, 1}, false
 		}
-		return shader.Vec4ToFloat32(colorVal), false
+		return fragmentColor(colorVal, kind), false
 	}, r.pipeline.fragmentMayDiscard
 }
 
@@ -1558,6 +1520,7 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() (raster.MRTFragmentShad
 	numOutputs := maxLoc + 1
 
 	ctx := r.buildExecutionContext()
+	kinds := r.colorKinds()
 
 	return func(frag *raster.Fragment) ([][4]float32, bool) {
 		ctx.Inputs = fi.inputs(frag)
@@ -1582,77 +1545,10 @@ func (r *RenderPassEncoder) buildMRTFragmentShaderFunc() (raster.MRTFragmentShad
 				result[lo.location] = [4]float32{0, 0, 0, 0}
 				continue
 			}
-			result[lo.location] = shader.Vec4ToFloat32(colorVal)
+			result[lo.location] = fragmentColor(colorVal, kindAt(kinds, lo.location))
 		}
 		return result, false
 	}, r.pipeline.fragmentMayDiscard
-}
-
-// writeColorToTarget writes a single fragment color to a render target texture
-// at pixel coordinates (x, y), applying per-attachment blend state. This is
-// used for MRT outputs beyond location 0 (which is handled by the raster pipeline).
-func writeColorToTarget(target *Texture, x, y int, color [4]float32, blend *raster.BlendState) {
-	w := int(target.width)
-	h := int(target.height)
-	if x < 0 || x >= w || y < 0 || y >= h {
-		return
-	}
-	idx := (y*w + x) * 4
-	bgra := isBGRA(target.format)
-
-	target.mu.Lock()
-	if blend != nil && blend.Enabled {
-		r, g, b, a := raster.BlendFloatToByte(color,
-			target.data[idx+0], target.data[idx+1],
-			target.data[idx+2], target.data[idx+3],
-			*blend)
-		if bgra {
-			target.data[idx+0] = b
-			target.data[idx+1] = g
-			target.data[idx+2] = r
-			target.data[idx+3] = a
-		} else {
-			target.data[idx+0] = r
-			target.data[idx+1] = g
-			target.data[idx+2] = b
-			target.data[idx+3] = a
-		}
-	} else {
-		cr := raster.FloatToUnorm8(color[0])
-		cg := raster.FloatToUnorm8(color[1])
-		cb := raster.FloatToUnorm8(color[2])
-		ca := raster.FloatToUnorm8(color[3])
-		if bgra {
-			target.data[idx+0] = cb
-			target.data[idx+1] = cg
-			target.data[idx+2] = cr
-			target.data[idx+3] = ca
-		} else {
-			target.data[idx+0] = cr
-			target.data[idx+1] = cg
-			target.data[idx+2] = cb
-			target.data[idx+3] = ca
-		}
-	}
-	target.mu.Unlock()
-}
-
-// getPerTargetBlendStates returns blend states for all color attachment targets.
-// Index i corresponds to Fragment.Targets[i]. Returns nil entries for targets
-// without blend state.
-func (r *RenderPassEncoder) getPerTargetBlendStates() []*raster.BlendState {
-	if r.pipeline == nil || r.pipeline.desc == nil || r.pipeline.desc.Fragment == nil {
-		return nil
-	}
-	frag := r.pipeline.desc.Fragment
-	result := make([]*raster.BlendState, len(r.desc.ColorAttachments))
-	for i := range result {
-		if i < len(frag.Targets) && frag.Targets[i].Blend != nil {
-			bs := convertBlendState(frag.Targets[i].Blend)
-			result[i] = &bs
-		}
-	}
-	return result
 }
 
 // clampBlitBounds narrows blit iteration bounds to the scissor rectangle.
@@ -1702,12 +1598,8 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	pipe.SetCullMode(convertCullMode(r.pipeline.desc.Primitive.CullMode))
 	pipe.SetFrontFace(convertFrontFace(r.pipeline.desc.Primitive.FrontFace))
 
-	// Blend state from the first fragment target.
-	if frag := r.pipeline.desc.Fragment; frag != nil && len(frag.Targets) > 0 {
-		if blend := frag.Targets[0].Blend; blend != nil {
-			pipe.SetBlendState(convertBlendState(blend))
-		}
-	}
+	// Blending happens in the colour targets (routeColorOutput), in each
+	// attachment's format.
 
 	// Depth and stencil state from the render pipeline descriptor.
 	if r.pipeline.desc.DepthStencil == nil {
