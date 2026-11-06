@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"unsafe"
@@ -1032,6 +1033,92 @@ func TestPendingWrites_AlignTextureRowsIntoTruncated(t *testing.T) {
 	// Row 1 must be zeroed (break fired, no copy happened).
 	if aligned[4] != 0 || aligned[5] != 0 || aligned[6] != 0 {
 		t.Errorf("row 1 should be zero after break, got %v", aligned[4:7])
+	}
+}
+
+// TestPendingWrites_AlignTextureRowsShortLastRow pins the staging copy of data
+// sized by WebGPU's rule: the data ends at the last byte of the last row of
+// the last image, so that row is shorter than bytesPerRow and the padding
+// rows of the last image are absent. Every row must still reach staging, and
+// inner images keep their full rowsPerImage pitch.
+func TestPendingWrites_AlignTextureRowsShortLastRow(t *testing.T) {
+	const bytesPerRow, aligned, bytesInLastRow = 6, 8, 4
+	// rowOf returns a row whose bytes are 10*row+1, 10*row+2, ...
+	rowOf := func(row, n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(10*row + i + 1)
+		}
+		return b
+	}
+	tests := []struct {
+		name         string
+		offset       int
+		rows         int // rows written per image
+		rowsPerImage int
+		layers       int
+	}{
+		{name: "one image", offset: 0, rows: 2, rowsPerImage: 2, layers: 1},
+		{name: "one image with offset", offset: 3, rows: 3, rowsPerImage: 3, layers: 1},
+		{name: "three images with padding rows", offset: 5, rows: 2, rowsPerImage: 3, layers: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The data holds offset bytes, then every row of the inner images
+			// and the copied rows of the last one, the last of them short.
+			data := bytes.Repeat([]byte{0xEE}, tt.offset)
+			total := (tt.layers-1)*tt.rowsPerImage + tt.rows
+			for row := 0; row < total; row++ {
+				n := bytesPerRow
+				if row == total-1 {
+					n = bytesInLastRow
+				}
+				data = append(data, rowOf(row, n)...)
+			}
+			if want := tt.offset + bytesPerRow*tt.rowsPerImage*(tt.layers-1) + bytesPerRow*(tt.rows-1) + bytesInLastRow; len(data) != want {
+				t.Fatalf("data is %d bytes, want the WebGPU minimum %d", len(data), want)
+			}
+			stagingSize := uint64(aligned * tt.rowsPerImage * tt.layers)
+			var buf []byte
+			got := alignTextureDataInto(&buf, data, uint64(tt.offset), bytesPerRow, aligned,
+				uint32(tt.rowsPerImage), uint32(tt.layers), stagingSize)
+			for layer := 0; layer < tt.layers; layer++ {
+				for r := 0; r < tt.rows; r++ {
+					row := layer*tt.rowsPerImage + r
+					n := bytesPerRow
+					if row == total-1 {
+						n = bytesInLastRow
+					}
+					if g, w := got[row*aligned:row*aligned+n], rowOf(row, n); !bytes.Equal(g, w) {
+						t.Errorf("layer %d row %d = %v, want %v", layer, r, g, w)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestPendingWrites_StagingSourceKeepsLayout pins the copy that needs no
+// padding: staging must start at the layout offset and take no more than its
+// own size, however long the data is.
+func TestPendingWrites_StagingSourceKeepsLayout(t *testing.T) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	var buf []byte
+	got := alignTextureDataInto(&buf, data, 12, 256, 256, 2, 1, 512)
+	if len(got) != 512 {
+		t.Fatalf("staging data is %d bytes, want 512", len(got))
+	}
+	if !bytes.Equal(got, data[12:12+512]) {
+		t.Errorf("staging data is not the 512 bytes from the layout offset 12")
+	}
+	if got := copyTextureDataAligned(data, 12, 256, 256, 2, 1, 512); !bytes.Equal(got, data[12:12+512]) {
+		t.Errorf("copyTextureDataAligned: staging data is not the 512 bytes from the layout offset 12")
+	}
+	if got := alignTextureDataInto(&buf, data[:300], 12, 256, 256, 2, 1, 512); len(got) != 288 {
+		t.Errorf("short data: staging data is %d bytes, want the 288 the data holds", len(got))
 	}
 }
 
