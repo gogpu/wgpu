@@ -272,9 +272,28 @@ func ParseModule(words []uint32) (*Module, error) {
 				Signed: operands[2] != 0,
 			}
 
+		case OpCapability:
+			// f16 and ray query are not executed (ADR-078 rule 6): reject
+			// them here, before any of their values is computed as f32 or
+			// skipped.
+			if len(operands) >= 1 {
+				if name, ok := rejectedCapabilities[operands[0]]; ok {
+					return nil, unsupportedf("SPIR-V capability %d (%s)", operands[0], name)
+				}
+			}
+
+		case opTypeRayQueryKHR, opTypeAccelerationStructureKHR:
+			return nil, unsupportedf("SPIR-V type %s", opcodeName(opcode))
+
+		case OpNop, OpLine, OpNoLine:
+			// No semantics; dropped wherever they appear.
+
 		case OpTypeFloat:
 			if len(operands) < 2 {
 				break
+			}
+			if operands[1] == 16 {
+				return nil, unsupportedf("SPIR-V type OpTypeFloat 16 (f16)")
 			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:  TypeFloat,
@@ -571,8 +590,13 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 
 		default:
-			// All other instructions inside a function body are recorded for interpretation.
+			// Every other instruction in a function body is recorded for
+			// run(), which must have a case for it: an opcode outside
+			// supportedOps fails the parse instead of being skipped.
 			if currentFunc != nil {
+				if _, ok := supportedOps[opcode]; !ok {
+					return nil, unsupportedOpcode(opcode)
+				}
 				inst := decodeInstruction(opcode, operands)
 				// Types precede function bodies in SPIR-V, so the result
 				// type is known here.
@@ -834,115 +858,23 @@ func scalarKind(ti *TypeInfo) laneKind {
 }
 
 // decodeInstruction builds an Instruction from an opcode and its operands.
-// Instructions with result type and result ID follow the pattern:
-// resultType resultID operands... for most typed instructions.
+// A typed opcode of supportedOps starts with its result type and result ID
+// (type resultID operands...); every other instruction keeps all its
+// operands. run() checks each opcode's operand count itself.
 func decodeInstruction(opcode uint16, operands []uint32) Instruction {
 	inst := Instruction{Opcode: opcode}
-
-	switch opcode {
-	// Instructions with result type AND result ID (type resultID operands...).
-	case OpLoad, OpAccessChain, OpArrayLength, OpCompositeConstruct, OpCompositeExtract,
-		OpCompositeInsert, OpVectorExtractDynamic, OpVectorInsertDynamic,
-		OpConvertUToF, OpConvertFToU, OpConvertSToF, OpConvertFToS, OpBitcast,
-		OpSConvert, OpUConvert, OpFConvert,
-		OpFAdd, OpFSub, OpFMul, OpFDiv, OpFNegate, OpFMod, OpFRem,
-		OpIAdd, OpISub, OpIMul, OpSDiv, OpUDiv, OpSMod, OpUMod, OpSRem, OpSNegate,
-		OpSelect, OpPhi,
-		OpIEqual, OpINotEqual,
-		OpFOrdEqual, OpFOrdLessThan, OpFOrdGreaterThan,
-		OpFOrdLessThanEqual, OpFOrdGreaterThanEqual,
-		OpULessThan, OpUGreaterThan, OpULessThanEqual, OpUGreaterThanEqual,
-		OpSLessThan, OpSGreaterThan, OpSLessThanEqual, OpSGreaterThanEqual,
-		OpLogicalAnd, OpLogicalOr, OpLogicalNot,
-		OpLogicalEqual, OpLogicalNotEqual,
-		OpFOrdNotEqual, OpFUnordNotEqual,
-		OpBitFieldInsert, OpBitFieldSExtract, OpBitFieldUExtract, OpBitReverse, OpBitCount,
-		OpDPdx, OpDPdy, OpFwidth, OpDPdxFine, OpDPdyFine, OpFwidthFine,
-		OpDPdxCoarse, OpDPdyCoarse, OpFwidthCoarse,
-		OpBitwiseAnd, OpBitwiseOr, OpBitwiseXor, OpNot,
-		OpShiftLeftLogical, OpShiftRightLogical, OpShiftRightArithmetic,
-		OpDot, OpVectorTimesScalar, OpMatrixTimesVector, OpVectorTimesMatrix, OpMatrixTimesScalar,
-		OpMatrixTimesMatrix, OpTranspose, OpVectorShuffle,
-		OpIsNan, OpIsInf, OpQuantizeToF16, OpSDotKHR, OpUDotKHR,
-		OpCopyObject,
-		OpSampledImage, OpImageSampleImplicitLod, OpImageSampleExplicitLod,
-		OpImageSampleDrefImplicitLod, OpImageSampleDrefExplicitLod,
-		OpImageGather, OpImageDrefGather,
-		OpImageFetch, OpImageRead, OpImageQuerySize, OpImageQuerySizeLod,
-		OpImageQueryLevels, OpImageQuerySamples,
-		OpAtomicLoad, OpAtomicExchange, OpAtomicCompareExchange,
-		OpAtomicIIncrement, OpAtomicIDecrement,
-		OpAtomicIAdd, OpAtomicISub,
-		OpAtomicSMin, OpAtomicUMin, OpAtomicSMax, OpAtomicUMax,
-		OpAtomicAnd, OpAtomicOr, OpAtomicXor,
-		OpFunctionCall,
-		OpUndef, OpExtInst:
-		if len(operands) >= 2 {
-			inst.TypeID = operands[0]
-			inst.ResultID = operands[1]
-			if len(operands) > 2 {
-				inst.Operands = make([]uint32, len(operands)-2)
-				copy(inst.Operands, operands[2:])
-			}
+	if supportedOps[opcode].typed {
+		if len(operands) < 2 {
+			return inst
 		}
-
-	// OpStore: pointer value [memory access]
-	case OpStore:
-		if len(operands) >= 2 {
-			inst.Operands = make([]uint32, len(operands))
-			copy(inst.Operands, operands)
-		}
-
-	// OpReturn / OpReturnValue
-	case OpReturn:
-		// no operands
-
-	case OpReturnValue:
-		if len(operands) >= 1 {
-			inst.Operands = []uint32{operands[0]}
-		}
-
-	// OpBranch: target label
-	case OpBranch:
-		if len(operands) >= 1 {
-			inst.Operands = []uint32{operands[0]}
-		}
-
-	case OpBranchConditional:
-		if len(operands) >= 3 {
-			inst.Operands = make([]uint32, len(operands))
-			copy(inst.Operands, operands)
-		}
-
-	case OpSelectionMerge, OpLoopMerge:
-		if len(operands) >= 1 {
-			inst.Operands = make([]uint32, len(operands))
-			copy(inst.Operands, operands)
-		}
-
-	// Instructions with only operands (no result type/ID).
-	case OpAtomicStore, OpControlBarrier, OpMemoryBarrier, OpImageWrite,
-		OpSwitch, OpKill, OpTerminateInvocation, OpUnreachable:
-		if len(operands) > 0 {
-			inst.Operands = make([]uint32, len(operands))
-			copy(inst.Operands, operands)
-		}
-
-	// OpFunctionParameter: resultType resultID
-	case OpFunctionParameter:
-		if len(operands) >= 2 {
-			inst.TypeID = operands[0]
-			inst.ResultID = operands[1]
-		}
-
-	default:
-		// Unknown instruction — store all operands for forward compatibility.
-		if len(operands) > 0 {
-			inst.Operands = make([]uint32, len(operands))
-			copy(inst.Operands, operands)
-		}
+		inst.TypeID = operands[0]
+		inst.ResultID = operands[1]
+		operands = operands[2:]
 	}
-
+	if len(operands) > 0 {
+		inst.Operands = make([]uint32, len(operands))
+		copy(inst.Operands, operands)
+	}
 	return inst
 }
 

@@ -1,13 +1,17 @@
 //go:build !(js && wasm)
 
-// SPIR-V opcode constants and instruction representation.
-//
-// Only opcodes needed for the triangle shader are defined here.
+// SPIR-V opcode constants, the table of opcodes the interpreter executes,
+// and the instruction representation.
 // See SPIR-V specification section 3.32 for the full opcode list.
 
 package shader
 
-// SPIR-V opcodes relevant to the triangle shader.
+import (
+	"errors"
+	"fmt"
+)
+
+// SPIR-V opcodes the parser and the interpreter use.
 // Reference: SPIR-V Specification v1.6, section 3.32 (Instructions).
 const (
 	OpNop                  = 0
@@ -218,6 +222,11 @@ const (
 	OpSDotKHR = 4450
 	OpUDotKHR = 4451
 
+	// Reductions of a bool vector: naga's loop guard, its workgroup
+	// zero-init prologue, and WGSL all() and any().
+	OpAny = 154
+	OpAll = 155
+
 	// Constant ops.
 	OpConstantTrue      = 41
 	OpConstantFalse     = 42
@@ -302,6 +311,255 @@ const (
 
 // spirvMagic is the SPIR-V binary magic number.
 const spirvMagic = 0x07230203
+
+// SPIR-V operands ParseModule rejects at module level: f16 and ray query are
+// not executed by the interpreter, and the software adapter advertises
+// neither (ADR-078 rule 6).
+const (
+	opTypeRayQueryKHR              = 4472
+	opTypeAccelerationStructureKHR = 5341
+)
+
+// rejectedCapabilities names the SPIR-V capabilities ParseModule rejects.
+var rejectedCapabilities = map[uint32]string{
+	9:    "Float16",
+	4471: "RayQueryProvisionalKHR",
+	4472: "RayQueryKHR",
+}
+
+// ErrUnsupported is wrapped by every error the interpreter returns for valid
+// SPIR-V it does not execute: an opcode in a function body that run() has no
+// case for, an f16 type or capability, or ray query. A malformed binary
+// gives a plain parse error instead. Callers match it with errors.Is.
+var ErrUnsupported = errors.New("not supported")
+
+// unsupportedf returns an error that wraps ErrUnsupported:
+// "software: <what> is not supported".
+func unsupportedf(format string, args ...any) error {
+	return fmt.Errorf("software: "+format+" is %w", append(args, ErrUnsupported)...)
+}
+
+// unsupportedOpcode is the error for an opcode that is not in supportedOps.
+func unsupportedOpcode(op uint16) error {
+	return unsupportedf("SPIR-V opcode %d (%s)", op, opcodeName(op))
+}
+
+// opInfo is one entry of supportedOps.
+type opInfo struct {
+	name string
+	// typed is set when the instruction's first two words are its result
+	// type and result ID, which decodeInstruction splits off.
+	typed bool
+}
+
+// supportedOps lists every opcode a function body may hold: exactly the
+// opcodes run() has a case for. ParseModule rejects any other opcode in a
+// function body (SwiftShader's analysis-time check, SpirvShader.cpp:812-813),
+// and decodeInstruction takes its typed layout from here. TestSupportedOps
+// checks the table against run()'s case labels.
+var supportedOps = map[uint16]opInfo{
+	// Blocks, variables, control flow.
+	OpLabel:               {"OpLabel", false},
+	OpVariable:            {"OpVariable", true},
+	OpFunctionParameter:   {"OpFunctionParameter", true},
+	OpFunctionCall:        {"OpFunctionCall", true},
+	OpBranch:              {"OpBranch", false},
+	OpBranchConditional:   {"OpBranchConditional", false},
+	OpSelectionMerge:      {"OpSelectionMerge", false},
+	OpLoopMerge:           {"OpLoopMerge", false},
+	OpSwitch:              {"OpSwitch", false},
+	OpPhi:                 {"OpPhi", true},
+	OpReturn:              {"OpReturn", false},
+	OpReturnValue:         {"OpReturnValue", false},
+	OpKill:                {"OpKill", false},
+	OpTerminateInvocation: {"OpTerminateInvocation", false},
+	OpUnreachable:         {"OpUnreachable", false},
+
+	// Memory and composites.
+	OpLoad:                 {opNameLoad, true},
+	OpStore:                {"OpStore", false},
+	OpAccessChain:          {"OpAccessChain", true},
+	OpArrayLength:          {"OpArrayLength", true},
+	OpCompositeConstruct:   {opNameCompositeConstruct, true},
+	OpCompositeExtract:     {"OpCompositeExtract", true},
+	OpCompositeInsert:      {"OpCompositeInsert", true},
+	OpVectorExtractDynamic: {"OpVectorExtractDynamic", true},
+	OpVectorInsertDynamic:  {"OpVectorInsertDynamic", true},
+	OpVectorShuffle:        {"OpVectorShuffle", true},
+	OpCopyObject:           {"OpCopyObject", true},
+	OpUndef:                {"OpUndef", true},
+
+	// Conversions.
+	OpConvertUToF: {"OpConvertUToF", true},
+	OpConvertSToF: {"OpConvertSToF", true},
+	OpConvertFToU: {"OpConvertFToU", true},
+	OpConvertFToS: {"OpConvertFToS", true},
+	OpBitcast:     {"OpBitcast", true},
+	OpSConvert:    {"OpSConvert", true},
+	OpUConvert:    {"OpUConvert", true},
+	OpFConvert:    {"OpFConvert", true},
+
+	// Float arithmetic, matrices and classification.
+	OpFAdd:              {"OpFAdd", true},
+	OpFSub:              {"OpFSub", true},
+	OpFMul:              {"OpFMul", true},
+	OpFDiv:              {"OpFDiv", true},
+	OpFNegate:           {"OpFNegate", true},
+	OpFMod:              {"OpFMod", true},
+	OpFRem:              {"OpFRem", true},
+	OpDot:               {"OpDot", true},
+	OpVectorTimesScalar: {"OpVectorTimesScalar", true},
+	OpMatrixTimesVector: {"OpMatrixTimesVector", true},
+	OpVectorTimesMatrix: {"OpVectorTimesMatrix", true},
+	OpMatrixTimesScalar: {"OpMatrixTimesScalar", true},
+	OpMatrixTimesMatrix: {"OpMatrixTimesMatrix", true},
+	OpTranspose:         {"OpTranspose", true},
+	OpIsNan:             {"OpIsNan", true},
+	OpIsInf:             {"OpIsInf", true},
+	OpQuantizeToF16:     {"OpQuantizeToF16", true},
+
+	// Integer arithmetic and bits.
+	OpIAdd:                 {"OpIAdd", true},
+	OpISub:                 {"OpISub", true},
+	OpIMul:                 {"OpIMul", true},
+	OpSDiv:                 {"OpSDiv", true},
+	OpUDiv:                 {"OpUDiv", true},
+	OpSMod:                 {"OpSMod", true},
+	OpUMod:                 {"OpUMod", true},
+	OpSRem:                 {"OpSRem", true},
+	OpSNegate:              {"OpSNegate", true},
+	OpSDotKHR:              {"OpSDotKHR", true},
+	OpUDotKHR:              {"OpUDotKHR", true},
+	OpBitwiseAnd:           {"OpBitwiseAnd", true},
+	OpBitwiseOr:            {"OpBitwiseOr", true},
+	OpBitwiseXor:           {"OpBitwiseXor", true},
+	OpNot:                  {"OpNot", true},
+	OpShiftLeftLogical:     {"OpShiftLeftLogical", true},
+	OpShiftRightLogical:    {"OpShiftRightLogical", true},
+	OpShiftRightArithmetic: {"OpShiftRightArithmetic", true},
+	OpBitFieldInsert:       {"OpBitFieldInsert", true},
+	OpBitFieldSExtract:     {"OpBitFieldSExtract", true},
+	OpBitFieldUExtract:     {"OpBitFieldUExtract", true},
+	OpBitReverse:           {"OpBitReverse", true},
+	OpBitCount:             {"OpBitCount", true},
+
+	// Comparison, selection and logic.
+	OpSelect:               {"OpSelect", true},
+	OpIEqual:               {"OpIEqual", true},
+	OpINotEqual:            {"OpINotEqual", true},
+	OpULessThan:            {"OpULessThan", true},
+	OpUGreaterThan:         {"OpUGreaterThan", true},
+	OpULessThanEqual:       {"OpULessThanEqual", true},
+	OpUGreaterThanEqual:    {"OpUGreaterThanEqual", true},
+	OpSLessThan:            {"OpSLessThan", true},
+	OpSGreaterThan:         {"OpSGreaterThan", true},
+	OpSLessThanEqual:       {"OpSLessThanEqual", true},
+	OpSGreaterThanEqual:    {"OpSGreaterThanEqual", true},
+	OpFOrdEqual:            {"OpFOrdEqual", true},
+	OpFOrdLessThan:         {"OpFOrdLessThan", true},
+	OpFOrdGreaterThan:      {"OpFOrdGreaterThan", true},
+	OpFOrdLessThanEqual:    {"OpFOrdLessThanEqual", true},
+	OpFOrdGreaterThanEqual: {"OpFOrdGreaterThanEqual", true},
+	OpFOrdNotEqual:         {"OpFOrdNotEqual", true},
+	OpFUnordNotEqual:       {"OpFUnordNotEqual", true},
+	OpLogicalAnd:           {"OpLogicalAnd", true},
+	OpLogicalOr:            {"OpLogicalOr", true},
+	OpLogicalEqual:         {"OpLogicalEqual", true},
+	OpLogicalNotEqual:      {"OpLogicalNotEqual", true},
+	OpLogicalNot:           {"OpLogicalNot", true},
+	OpAny:                  {"OpAny", true},
+	OpAll:                  {"OpAll", true},
+
+	// Fragment derivatives.
+	OpDPdx:         {"OpDPdx", true},
+	OpDPdy:         {"OpDPdy", true},
+	OpFwidth:       {"OpFwidth", true},
+	OpDPdxFine:     {"OpDPdxFine", true},
+	OpDPdyFine:     {"OpDPdyFine", true},
+	OpFwidthFine:   {"OpFwidthFine", true},
+	OpDPdxCoarse:   {"OpDPdxCoarse", true},
+	OpDPdyCoarse:   {"OpDPdyCoarse", true},
+	OpFwidthCoarse: {"OpFwidthCoarse", true},
+
+	// Images.
+	OpSampledImage:               {"OpSampledImage", true},
+	OpImageSampleImplicitLod:     {"OpImageSampleImplicitLod", true},
+	OpImageSampleExplicitLod:     {"OpImageSampleExplicitLod", true},
+	OpImageSampleDrefImplicitLod: {"OpImageSampleDrefImplicitLod", true},
+	OpImageSampleDrefExplicitLod: {"OpImageSampleDrefExplicitLod", true},
+	OpImageGather:                {"OpImageGather", true},
+	OpImageDrefGather:            {"OpImageDrefGather", true},
+	OpImageFetch:                 {"OpImageFetch", true},
+	OpImageRead:                  {"OpImageRead", true},
+	OpImageWrite:                 {"OpImageWrite", false},
+	OpImageQuerySize:             {"OpImageQuerySize", true},
+	OpImageQuerySizeLod:          {"OpImageQuerySizeLod", true},
+	OpImageQueryLevels:           {"OpImageQueryLevels", true},
+	OpImageQuerySamples:          {"OpImageQuerySamples", true},
+
+	// Atomics and barriers.
+	OpAtomicLoad:            {"OpAtomicLoad", true},
+	OpAtomicStore:           {"OpAtomicStore", false},
+	OpAtomicExchange:        {"OpAtomicExchange", true},
+	OpAtomicCompareExchange: {"OpAtomicCompareExchange", true},
+	OpAtomicIIncrement:      {"OpAtomicIIncrement", true},
+	OpAtomicIDecrement:      {"OpAtomicIDecrement", true},
+	OpAtomicIAdd:            {"OpAtomicIAdd", true},
+	OpAtomicISub:            {"OpAtomicISub", true},
+	OpAtomicSMin:            {"OpAtomicSMin", true},
+	OpAtomicUMin:            {"OpAtomicUMin", true},
+	OpAtomicSMax:            {"OpAtomicSMax", true},
+	OpAtomicUMax:            {"OpAtomicUMax", true},
+	OpAtomicAnd:             {"OpAtomicAnd", true},
+	OpAtomicOr:              {"OpAtomicOr", true},
+	OpAtomicXor:             {"OpAtomicXor", true},
+	OpControlBarrier:        {"OpControlBarrier", false},
+	OpMemoryBarrier:         {"OpMemoryBarrier", false},
+
+	// GLSL.std.450 builtins.
+	OpExtInst: {"OpExtInst", true},
+}
+
+// otherOpNames names opcodes that are not in supportedOps, so that traces
+// and the unsupported-opcode error name them: the no-op and debug-line
+// instructions ParseModule drops, and opcodes the interpreter refuses. naga
+// defines the projective samples and OpImageQueryLod but never emits them
+// (WGSL has neither); the others need features the software adapter does
+// not advertise (f32 and texture atomics, SPIR-V 1.4, ray query).
+var otherOpNames = map[uint16]string{
+	OpNop:                          "OpNop",
+	OpLine:                         "OpLine",
+	OpNoLine:                       "OpNoLine",
+	OpFunctionEnd:                  "OpFunctionEnd",
+	60:                             "OpImageTexelPointer",
+	91:                             "OpImageSampleProjImplicitLod",
+	92:                             "OpImageSampleProjExplicitLod",
+	93:                             "OpImageSampleProjDrefImplicitLod",
+	94:                             "OpImageSampleProjDrefExplicitLod",
+	105:                            "OpImageQueryLod",
+	400:                            "OpCopyLogical",
+	4473:                           "OpRayQueryInitializeKHR",
+	4474:                           "OpRayQueryTerminateKHR",
+	4475:                           "OpRayQueryGenerateIntersectionKHR",
+	4476:                           "OpRayQueryConfirmIntersectionKHR",
+	4477:                           "OpRayQueryProceedKHR",
+	4479:                           "OpRayQueryGetIntersectionTypeKHR",
+	6035:                           "OpAtomicFAddEXT",
+	opTypeRayQueryKHR:              "OpTypeRayQueryKHR",
+	opTypeAccelerationStructureKHR: "OpTypeAccelerationStructureKHR",
+}
+
+// opcodeName returns the name of a SPIR-V opcode, "OpUnknown" for one the
+// interpreter has no name for.
+func opcodeName(op uint16) string {
+	if info, ok := supportedOps[op]; ok {
+		return info.name
+	}
+	if name, ok := otherOpNames[op]; ok {
+		return name
+	}
+	return opNameUnknown
+}
 
 // Instruction represents a decoded SPIR-V instruction.
 type Instruction struct {

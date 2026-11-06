@@ -917,8 +917,8 @@ func (interp *interpreter) run() error {
 				pc = idx + 1 // +1 to skip the label instruction itself
 			}
 
-		case OpFunctionParameter, OpFunctionEnd:
-			// No-op during execution.
+		case OpFunctionParameter:
+			// Bound by the caller (callFunction); no-op during execution.
 
 		case OpSelectionMerge:
 			// Selection merge hint -- no-op for the interpreter.
@@ -1378,12 +1378,15 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.intResult(inst.TypeID, interp.queryImageCount(interp.values[inst.Operands[0]], true))
 			}
 
+		case OpAny, OpAll:
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = allAny(inst.Opcode == OpAll, interp.values[inst.Operands[0]])
+			}
+
 		default:
-			// Unimplemented instructions are skipped, and their result stays
-			// undefined. Making this an error (P1-SW-017) waits for exact
-			// integer vectors (P1-SW-013): OpAll and OpAny, the most common
-			// remaining ones, guard every naga loop, and evaluated on the
-			// current float-held integer vectors they break loops at once.
+			// ParseModule rejects every opcode outside supportedOps, so this
+			// is reached only by an instruction built without it.
+			return unsupportedOpcode(inst.Opcode)
 		}
 
 		// --- Debug: post-instruction hooks ---
