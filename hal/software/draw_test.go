@@ -1874,6 +1874,88 @@ func TestDepthStencilStateWiring(t *testing.T) {
 	}
 }
 
+// TestDepthOnlyPass renders a shadow-map style pass: a depth attachment, no
+// colour attachment, and a pipeline whose fragment stage writes no colour
+// (or that has no fragment stage). The draws still rasterize and depth-test:
+// fullscreen triangles at z 0.75, then 0.25, then 0.5 with CompareLess leave
+// 0.25 everywhere. The pass drew nothing before, so the clear value 1 stayed.
+func TestDepthOnlyPass(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+	const wgsl = `
+@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+	var xy = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+	var z = array<f32, 3>(0.75, 0.25, 0.5);
+	return vec4<f32>(xy[vi % 3u], z[vi / 3u], 1.0);
+}
+@fragment fn fs() {}
+`
+	sm, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: "depth-only", Source: hal.ShaderSource{WGSL: wgsl}})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer dev.DestroyShaderModule(sm)
+
+	const size = 4
+	for _, format := range []gputypes.TextureFormat{gputypes.TextureFormatDepth16Unorm, gputypes.TextureFormatDepth32Float} {
+		for _, withFragment := range []bool{true, false} {
+			name := format.String() + "/no-fragment"
+			if withFragment {
+				name = format.String() + "/empty-fragment"
+			}
+			t.Run(name, func(t *testing.T) {
+				desc := &hal.RenderPipelineDescriptor{
+					Label:  "depth-only",
+					Vertex: hal.VertexState{Module: sm, EntryPoint: "vs"},
+					DepthStencil: &hal.DepthStencilState{
+						Format: format, DepthWriteEnabled: true, DepthCompare: gputypes.CompareFunctionLess,
+					},
+				}
+				if withFragment {
+					desc.Fragment = &hal.FragmentState{Module: sm, EntryPoint: "fs"}
+				}
+				pipe, err := dev.CreateRenderPipeline(desc)
+				if err != nil {
+					t.Fatalf("CreateRenderPipeline: %v", err)
+				}
+				defer dev.DestroyRenderPipeline(pipe)
+				tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+					Size:   hal.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
+					Format: format, Usage: gputypes.TextureUsageRenderAttachment,
+				})
+				defer dev.DestroyTexture(tex)
+				view, _ := dev.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+				defer dev.DestroyTextureView(view)
+
+				enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+				pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+					DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+						View: view, DepthLoadOp: gputypes.LoadOpClear, DepthStoreOp: gputypes.StoreOpStore, DepthClearValue: 1,
+					},
+				})
+				pass.SetPipeline(pipe)
+				for first := uint32(0); first < 9; first += 3 {
+					pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: first})
+				}
+				pass.End()
+
+				data := tex.(*Texture).GetData()
+				for i := range size * size {
+					var got float64
+					if format == gputypes.TextureFormatDepth16Unorm {
+						got = float64(binary.LittleEndian.Uint16(data[2*i:])) / 65535
+					} else {
+						got = float64(math.Float32frombits(binary.LittleEndian.Uint32(data[4*i:])))
+					}
+					if math.Abs(got-0.25) > 1.0/65535 {
+						t.Fatalf("texel %d depth = %v, want 0.25", i, got)
+					}
+				}
+			})
+		}
+	}
+}
+
 // =============================================================================
 // Multiple Render Targets (MRT) Tests
 // =============================================================================
