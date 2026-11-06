@@ -160,6 +160,21 @@ func (r *targetRig) newView(t *testing.T, mip uint32) *wgpu.TextureView {
 	return view
 }
 
+// newLayerView creates a view of one array layer of one mip level of a 2D
+// texture, with dimension dim (2d or 2d-array).
+func (r *targetRig) newLayerView(t *testing.T, dim gputypes.TextureViewDimension, mip, layer uint32) *wgpu.TextureView {
+	t.Helper()
+	view, err := r.device.CreateTextureView(r.texture, &wgpu.TextureViewDescriptor{
+		Label: "layer-view", Dimension: dim, BaseMipLevel: mip, MipLevelCount: 1,
+		BaseArrayLayer: layer, ArrayLayerCount: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateTextureView: %v", err)
+	}
+	t.Cleanup(view.Release)
+	return view
+}
+
 // renderView clears view (one depth slice of it, for a 3D view) to clearColor,
 // draws the green left half and submits the pass.
 func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint32, clearColor gputypes.Color) {
@@ -194,8 +209,8 @@ func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint
 	}
 }
 
-// check reads back one mip level and verifies that depth slice z (0 for a
-// 2D texture) holds a green left half and clearColor on the right.
+// check reads back one mip level and verifies that depth slice z (the array
+// layer of a 2D texture) holds a green left half and clearColor on the right.
 func (r *targetRig) check(t *testing.T, mip, z uint32, clearColor gputypes.Color) {
 	t.Helper()
 	r.verify(t, mip, z, clearColor, true)
@@ -211,7 +226,8 @@ func (r *targetRig) verify(t *testing.T, mip, z uint32, clearColor gputypes.Colo
 	t.Helper()
 	w := max(uint32(sliceRigWidth)>>mip, 1)
 	h := max(uint32(sliceRigHeight)>>mip, 1)
-	d := uint32(1)
+	// Every depth slice of a 3D level, every array layer of a 2D one.
+	d := r.depth
 	if r.dimension == gputypes.TextureDimension3D {
 		d = max(r.depth>>mip, 1)
 	}

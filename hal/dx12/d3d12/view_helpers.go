@@ -57,6 +57,20 @@ func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture2DArray(mostDetailedMip, mip
 	binary.LittleEndian.PutUint32(d.Union[20:24], floatBits(resourceMinLODClamp))
 }
 
+// SetTexture2DMS sets up a multisampled 2D texture SRV (D3D12_TEX2DMS_SRV
+// has no fields).
+func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture2DMS() {
+	d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS
+}
+
+// SetTexture2DMSArray sets up a multisampled 2D texture array SRV
+// (D3D12_TEX2DMS_ARRAY_SRV: FirstArraySlice, ArraySize).
+func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture2DMSArray(firstArraySlice, arraySize uint32) {
+	d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY
+	binary.LittleEndian.PutUint32(d.Union[0:4], firstArraySlice)
+	binary.LittleEndian.PutUint32(d.Union[4:8], arraySize)
+}
+
 // SetTexture3D sets up a 3D texture SRV.
 func (d *D3D12_SHADER_RESOURCE_VIEW_DESC) SetTexture3D(mostDetailedMip, mipLevels uint32, resourceMinLODClamp float32) {
 	d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D
@@ -159,6 +173,20 @@ func (d *D3D12_RENDER_TARGET_VIEW_DESC) SetTexture2DArray(mipSlice, firstArraySl
 	binary.LittleEndian.PutUint32(d.Union[12:16], planeSlice)
 }
 
+// SetTexture2DMS sets up a multisampled 2D texture RTV (D3D12_TEX2DMS_RTV
+// has no fields).
+func (d *D3D12_RENDER_TARGET_VIEW_DESC) SetTexture2DMS() {
+	d.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS
+}
+
+// SetTexture2DMSArray sets up a multisampled 2D texture array RTV
+// (D3D12_TEX2DMS_ARRAY_RTV: FirstArraySlice, ArraySize).
+func (d *D3D12_RENDER_TARGET_VIEW_DESC) SetTexture2DMSArray(firstArraySlice, arraySize uint32) {
+	d.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY
+	binary.LittleEndian.PutUint32(d.Union[0:4], firstArraySlice)
+	binary.LittleEndian.PutUint32(d.Union[4:8], arraySize)
+}
+
 // SetTexture3D sets up a 3D texture RTV.
 func (d *D3D12_RENDER_TARGET_VIEW_DESC) SetTexture3D(mipSlice, firstWSlice, wSize uint32) {
 	d.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D
@@ -181,6 +209,20 @@ func (d *D3D12_DEPTH_STENCIL_VIEW_DESC) SetTexture1D(mipSlice uint32) {
 func (d *D3D12_DEPTH_STENCIL_VIEW_DESC) SetTexture2D(mipSlice uint32) {
 	d.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D
 	binary.LittleEndian.PutUint32(d.Union[0:4], mipSlice)
+}
+
+// SetTexture2DMS sets up a multisampled 2D texture DSV (D3D12_TEX2DMS_DSV
+// has no fields).
+func (d *D3D12_DEPTH_STENCIL_VIEW_DESC) SetTexture2DMS() {
+	d.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS
+}
+
+// SetTexture2DMSArray sets up a multisampled 2D texture array DSV
+// (D3D12_TEX2DMS_ARRAY_DSV: FirstArraySlice, ArraySize).
+func (d *D3D12_DEPTH_STENCIL_VIEW_DESC) SetTexture2DMSArray(firstArraySlice, arraySize uint32) {
+	d.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMSARRAY
+	binary.LittleEndian.PutUint32(d.Union[0:4], firstArraySlice)
+	binary.LittleEndian.PutUint32(d.Union[4:8], arraySize)
 }
 
 // SetTexture2DArray sets up a 2D texture array DSV.

@@ -161,56 +161,6 @@ func textureDimensionToD3D12(dim gputypes.TextureDimension) d3d12.D3D12_RESOURCE
 	}
 }
 
-// textureViewDimensionToSRV converts a WebGPU texture view dimension to D3D12 SRV dimension.
-func textureViewDimensionToSRV(dim gputypes.TextureViewDimension) d3d12.D3D12_SRV_DIMENSION {
-	switch dim {
-	case gputypes.TextureViewDimension1D:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURE1D
-	case gputypes.TextureViewDimension2D:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURE2D
-	case gputypes.TextureViewDimension2DArray:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURE2DARRAY
-	case gputypes.TextureViewDimensionCube:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURECUBE
-	case gputypes.TextureViewDimensionCubeArray:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
-	case gputypes.TextureViewDimension3D:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURE3D
-	default:
-		return d3d12.D3D12_SRV_DIMENSION_TEXTURE2D
-	}
-}
-
-// textureViewDimensionToRTV converts a WebGPU texture view dimension to D3D12 RTV dimension.
-func textureViewDimensionToRTV(dim gputypes.TextureViewDimension) d3d12.D3D12_RTV_DIMENSION {
-	switch dim {
-	case gputypes.TextureViewDimension1D:
-		return d3d12.D3D12_RTV_DIMENSION_TEXTURE1D
-	case gputypes.TextureViewDimension2D:
-		return d3d12.D3D12_RTV_DIMENSION_TEXTURE2D
-	case gputypes.TextureViewDimension2DArray:
-		return d3d12.D3D12_RTV_DIMENSION_TEXTURE2DARRAY
-	case gputypes.TextureViewDimension3D:
-		return d3d12.D3D12_RTV_DIMENSION_TEXTURE3D
-	default:
-		return d3d12.D3D12_RTV_DIMENSION_TEXTURE2D
-	}
-}
-
-// textureViewDimensionToDSV converts a WebGPU texture view dimension to D3D12 DSV dimension.
-func textureViewDimensionToDSV(dim gputypes.TextureViewDimension) d3d12.D3D12_DSV_DIMENSION {
-	switch dim {
-	case gputypes.TextureViewDimension1D:
-		return d3d12.D3D12_DSV_DIMENSION_TEXTURE1D
-	case gputypes.TextureViewDimension2D:
-		return d3d12.D3D12_DSV_DIMENSION_TEXTURE2D
-	case gputypes.TextureViewDimension2DArray:
-		return d3d12.D3D12_DSV_DIMENSION_TEXTURE2DARRAY
-	default:
-		return d3d12.D3D12_DSV_DIMENSION_TEXTURE2D
-	}
-}
-
 // isDepthFormat returns true if the format is a depth/stencil format.
 func isDepthFormat(format gputypes.TextureFormat) bool {
 	switch format {
