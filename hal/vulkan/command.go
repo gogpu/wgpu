@@ -545,7 +545,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 			DstQueueFamilyIndex: vk.QueueFamilyIgnored,
 			Image:               tex.handle,
 			SubresourceRange: vk.ImageSubresourceRange{
-				AspectMask:     textureAspectToVk(b.Range.Aspect, tex.format),
+				AspectMask:     e.device.depthStencil.barrierAspects(b.Range.Aspect, tex.format),
 				BaseMipLevel:   b.Range.BaseMipLevel,
 				LevelCount:     mipLevelCountOrRemaining(b.Range.MipLevelCount),
 				BaseArrayLayer: b.Range.BaseArrayLayer,
@@ -1030,7 +1030,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
 		if dsView, ok := dsa.View.(*TextureView); ok && dsView.texture != nil {
-			rpKey.DepthFormat = textureFormatToVk(dsView.texture.format)
+			rpKey.DepthFormat = e.device.depthStencil.textureFormatToVk(dsView.texture.format)
 			rpKey.DepthLoadOp = loadOpToVk(dsa.DepthLoadOp)
 			rpKey.DepthStoreOp = storeOpToVk(dsa.DepthStoreOp)
 			rpKey.StencilLoadOp = loadOpToVk(dsa.StencilLoadOp)

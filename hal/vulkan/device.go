@@ -89,6 +89,11 @@ type Device struct {
 	// depth slice (TextureView.depthSliceView).
 	supports2DViewsOf3D bool
 
+	// depthStencil picks the image format of Depth24Plus,
+	// Depth24PlusStencil8 and Stencil8 textures among the formats the
+	// device supports (depth_stencil_formats.go).
+	depthStencil depthStencilFormats
+
 	// shaderStageFlags are the create flags of every pipeline stage:
 	// ALLOW_VARYING_SUBGROUP_SIZE on a device with the subgroup feature
 	// (extendedFeatureSupport.allowVaryingSubgroupSize).
@@ -581,7 +586,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	}
 
 	// Convert parameters
-	vkFormat := textureFormatToVk(desc.Format)
+	vkFormat := d.depthStencil.textureFormatToVk(desc.Format)
 	vkUsage := textureUsageToVk(desc.Usage)
 	imageType := textureDimensionToVkImageType(desc.Dimension)
 
@@ -821,7 +826,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		SType:    vk.StructureTypeImageViewCreateInfo,
 		Image:    imageHandle,
 		ViewType: viewType,
-		Format:   textureFormatToVk(format),
+		Format:   d.depthStencil.textureFormatToVk(format),
 		Components: vk.ComponentMapping{
 			R: vk.ComponentSwizzleIdentity,
 			G: vk.ComponentSwizzleIdentity,

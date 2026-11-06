@@ -140,11 +140,10 @@ var textureFormatMap = map[gputypes.TextureFormat]vk.Format{
 	gputypes.TextureFormatRGBA32Sint:  vk.FormatR32g32b32a32Sint,
 	gputypes.TextureFormatRGBA32Float: vk.FormatR32g32b32a32Sfloat,
 
-	// Depth/stencil formats
-	gputypes.TextureFormatStencil8:             vk.FormatS8Uint,
+	// Depth/stencil formats. Stencil8, Depth24Plus and Depth24PlusStencil8
+	// are missing on purpose: their image format depends on what the device
+	// supports, so only depthStencilFormats.textureFormatToVk maps them.
 	gputypes.TextureFormatDepth16Unorm:         vk.FormatD16Unorm,
-	gputypes.TextureFormatDepth24Plus:          vk.FormatX8D24UnormPack32,
-	gputypes.TextureFormatDepth24PlusStencil8:  vk.FormatD24UnormS8Uint,
 	gputypes.TextureFormatDepth32Float:         vk.FormatD32Sfloat,
 	gputypes.TextureFormatDepth32FloatStencil8: vk.FormatD32SfloatS8Uint,
 
@@ -611,18 +610,6 @@ func isDepthStencilFormat(format gputypes.TextureFormat) bool {
 		gputypes.TextureFormatDepth24Plus,
 		gputypes.TextureFormatDepth24PlusStencil8,
 		gputypes.TextureFormatDepth32Float,
-		gputypes.TextureFormatDepth32FloatStencil8,
-		gputypes.TextureFormatStencil8:
-		return true
-	default:
-		return false
-	}
-}
-
-// hasStencilAspect returns true if the format has a stencil aspect.
-func hasStencilAspect(format gputypes.TextureFormat) bool {
-	switch format {
-	case gputypes.TextureFormatDepth24PlusStencil8,
 		gputypes.TextureFormatDepth32FloatStencil8,
 		gputypes.TextureFormatStencil8:
 		return true
