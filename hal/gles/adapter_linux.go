@@ -61,6 +61,8 @@ func (a *Adapter) open() (hal.OpenDevice, error) {
 	}
 	defer a.ctx.Unlock()
 
+	framebufferSRGB := enableFramebufferSRGB(glCtx, a.caps.IsES)
+
 	// VAO is created lazily in CreateCommandEncoder — ensures it's allocated
 	// on the window surface (after Configure), not on the pbuffer (during Open).
 	vao := uint32(0)
@@ -100,8 +102,9 @@ func (a *Adapter) open() (hal.OpenDevice, error) {
 	}
 
 	queue := &Queue{
-		ctx:   a.ctx,
-		fence: NewFence(glCtx),
+		ctx:             a.ctx,
+		fence:           NewFence(glCtx),
+		framebufferSRGB: framebufferSRGB,
 	}
 
 	return hal.OpenDevice{
