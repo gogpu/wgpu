@@ -231,6 +231,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			properties:     props,
 			features:       features,
 			ext:            i.queryExtendedFeatures(device, &props, &features),
+			depthStencil:   queryDepthStencilFormats(&i.cmds, device),
 		}
 		if !adapter.ext.has2DViewsOf3D() {
 			// Every pass flips Y with a negative viewport height, and

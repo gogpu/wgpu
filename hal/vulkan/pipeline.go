@@ -326,7 +326,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		}
 	}
 	if desc.DepthStencil != nil {
-		depthFormat := textureFormatToVk(desc.DepthStencil.Format)
+		depthFormat := d.depthStencil.textureFormatToVk(desc.DepthStencil.Format)
 		if depthFormat != vk.FormatUndefined {
 			rpKey.DepthFormat = depthFormat
 			rpKey.DepthLoadOp = vk.AttachmentLoadOpClear

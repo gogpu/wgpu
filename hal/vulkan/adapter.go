@@ -25,6 +25,10 @@ type Adapter struct {
 	// ext is a pointer: the struct holds a map, and Adapter must stay
 	// comparable (it was before; a PATCH may not change that).
 	ext *extendedFeatureSupport
+	// depthStencil holds the optional depth/stencil formats the device
+	// supports; it picks the image format of Depth24Plus,
+	// Depth24PlusStencil8 and Stencil8 textures.
+	depthStencil depthStencilFormats
 }
 
 // Open creates a logical device with the requested features and limits.
@@ -157,6 +161,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		supportsIncrementalPresent: hasIncrementalPresent,
 		supports2DViewsOf3D:        a.ext.has2DViewsOf3D(),
 		spirvOptions:               spirvOptions(a.properties.ApiVersion, a.ext),
+		depthStencil:               a.depthStencil,
 	}
 	// Keep f16 stage inputs and outputs f16 only where the device enabled
 	// StorageInputOutput16; naga converts them through f32 otherwise
@@ -259,7 +264,7 @@ func selectGraphicsQueueFamily(families []vk.QueueFamilyProperties, requested *u
 
 // TextureFormatCapabilities returns capabilities for a texture format.
 func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
-	vkFormat := textureFormatToVk(format)
+	vkFormat := a.depthStencil.textureFormatToVk(format)
 	if vkFormat == vk.FormatUndefined {
 		return hal.TextureFormatCapabilities{}
 	}

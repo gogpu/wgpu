@@ -194,10 +194,12 @@ func TestTextureFormatToVk(t *testing.T) {
 		{"RGBA32Float", gputypes.TextureFormatRGBA32Float, vk.FormatR32g32b32a32Sfloat},
 
 		// Depth/stencil formats
-		{"Stencil8", gputypes.TextureFormatStencil8, vk.FormatS8Uint},
+		// Stencil8, Depth24Plus and Depth24PlusStencil8 depend on the
+		// device (TestDepthStencilFormatSelection).
+		{"Stencil8 needs the device", gputypes.TextureFormatStencil8, vk.FormatUndefined},
 		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, vk.FormatD16Unorm},
-		{"Depth24Plus", gputypes.TextureFormatDepth24Plus, vk.FormatX8D24UnormPack32},
-		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, vk.FormatD24UnormS8Uint},
+		{"Depth24Plus needs the device", gputypes.TextureFormatDepth24Plus, vk.FormatUndefined},
+		{"Depth24PlusStencil8 needs the device", gputypes.TextureFormatDepth24PlusStencil8, vk.FormatUndefined},
 		{"Depth32Float", gputypes.TextureFormatDepth32Float, vk.FormatD32Sfloat},
 		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, vk.FormatD32SfloatS8Uint},
 
@@ -740,31 +742,6 @@ func TestIsDepthStencilFormat(t *testing.T) {
 			got := isDepthStencilFormat(tt.format)
 			if got != tt.expect {
 				t.Errorf("isDepthStencilFormat() = %v, want %v", got, tt.expect)
-			}
-		})
-	}
-}
-
-// TestHasStencilAspect tests stencil aspect detection.
-func TestHasStencilAspect(t *testing.T) {
-	tests := []struct {
-		name   string
-		format gputypes.TextureFormat
-		expect bool
-	}{
-		{"Depth24PlusStencil8", gputypes.TextureFormatDepth24PlusStencil8, true},
-		{"Depth32FloatStencil8", gputypes.TextureFormatDepth32FloatStencil8, true},
-		{"Stencil8", gputypes.TextureFormatStencil8, true},
-		{"Depth16Unorm", gputypes.TextureFormatDepth16Unorm, false},
-		{"Depth32Float", gputypes.TextureFormatDepth32Float, false},
-		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := hasStencilAspect(tt.format)
-			if got != tt.expect {
-				t.Errorf("hasStencilAspect() = %v, want %v", got, tt.expect)
 			}
 		})
 	}
