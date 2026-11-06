@@ -567,12 +567,10 @@ func (d *DepthStencilStateJS) ToJS() js.Value {
 	if d.StencilBack != nil {
 		obj.Set("stencilBack", d.StencilBack.ToJS())
 	}
-	if d.StencilReadMask != 0 {
-		obj.Set("stencilReadMask", d.StencilReadMask)
-	}
-	if d.StencilWriteMask != 0 {
-		obj.Set("stencilWriteMask", d.StencilWriteMask)
-	}
+	// The masks are always sent: 0 is a mask, not "absent" (whose default
+	// is 0xFFFFFFFF), so omitting it would compare and write every bit.
+	obj.Set("stencilReadMask", d.StencilReadMask)
+	obj.Set("stencilWriteMask", d.StencilWriteMask)
 	if d.DepthBias != 0 {
 		obj.Set("depthBias", d.DepthBias)
 	}

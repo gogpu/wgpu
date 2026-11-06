@@ -229,8 +229,18 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			rasterizationState.DepthBiasClamp = desc.DepthStencil.DepthBiasClamp
 		}
 
-		// Stencil operations
-		if desc.DepthStencil.StencilReadMask != 0 || desc.DepthStencil.StencilWriteMask != 0 {
+		// Stencil operations. The test is enabled by the faces alone and the
+		// masks are taken literally: a zero read mask still runs the test,
+		// comparing 0 with 0, which "never", "less", "greater" and
+		// "not-equal" fail (index.bs "stencil test"; Dawn
+		// RenderPipeline.cpp UsesStencil). This deviates from Rust:
+		// wgpu-types StencilState::is_enabled also requires a non-zero mask
+		// and so draws fragments the spec discards.
+		ignored := func(f hal.StencilFaceState) bool {
+			return f.Compare == gputypes.CompareFunctionAlways && f.FailOp == hal.StencilOperationKeep &&
+				f.DepthFailOp == hal.StencilOperationKeep && f.PassOp == hal.StencilOperationKeep
+		}
+		if !ignored(desc.DepthStencil.StencilFront) || !ignored(desc.DepthStencil.StencilBack) {
 			depthStencilState.StencilTestEnable = vk.Bool32(vk.True)
 			depthStencilState.Front = stencilFaceStateToVk(desc.DepthStencil.StencilFront)
 			depthStencilState.Front.CompareMask = desc.DepthStencil.StencilReadMask
