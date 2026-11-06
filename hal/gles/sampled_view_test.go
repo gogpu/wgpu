@@ -27,6 +27,7 @@ func TestNewBindGroupRefusesUnsampleableViews(t *testing.T) {
 	cube := &Texture{id: 4, target: gl.TEXTURE_CUBE_MAP, size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 6}}
 	tex3D := &Texture{id: 5, target: gl.TEXTURE_3D, size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 4}}
 	msaa := &Texture{id: 6, target: gl.TEXTURE_2D_MULTISAMPLE, size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}}
+	cubeArray := &Texture{id: 7, target: gl.TEXTURE_CUBE_MAP_ARRAY, size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 12}}
 
 	d2 := gputypes.TextureViewDimension2D
 	for _, tc := range []struct {
@@ -49,7 +50,11 @@ func TestNewBindGroupRefusesUnsampleableViews(t *testing.T) {
 		{"2d-array of layers 2..4", array4, gputypes.TextureViewDimension2DArray, false, 2, 2, false},
 		{"2d-array of layers 0..2", array4, gputypes.TextureViewDimension2DArray, false, 0, 2, false},
 		{"cube of a 12-layer array", array12, gputypes.TextureViewDimensionCube, false, 6, 6, false},
-		{"cube-array: GLES creates no cube-array target", array12, gputypes.TextureViewDimensionCubeArray, false, 0, 12, false},
+		{"cube-array of a 2d array (no cube-array support)", array12, gputypes.TextureViewDimensionCubeArray, false, 0, 12, false},
+		{"cube-array of every layer of a cube array", cubeArray, gputypes.TextureViewDimensionCubeArray, false, 0, 12, true},
+		{"cube-array of layers 6..12 of a cube array", cubeArray, gputypes.TextureViewDimensionCubeArray, false, 6, 6, false},
+		{"cube of a cube array", cubeArray, gputypes.TextureViewDimensionCube, false, 0, 6, false},
+		{"2d-array of a cube array", cubeArray, gputypes.TextureViewDimension2DArray, false, 0, 12, false},
 		{"non-multisampled view of a multisampled texture", msaa, d2, false, 0, 1, false},
 		{"2d-array of a 2d texture", tex2D, gputypes.TextureViewDimension2DArray, false, 0, 1, false},
 	} {

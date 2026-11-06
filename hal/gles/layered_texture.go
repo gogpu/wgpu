@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
@@ -20,9 +21,42 @@ var errNoLayeredTextures = errors.New("gles: 3D and 2D array textures need glTex
 
 // isLayeredTarget reports whether a texture target holds layers that are
 // attached, written and read one at a time (Rust wgpu-hal
-// gles/conv.rs is_layered_target, without the cube map array).
+// gles/conv.rs is_layered_target). A cube map array addresses its layer-faces
+// as layers.
 func isLayeredTarget(target uint32) bool {
-	return target == gl.TEXTURE_3D || target == gl.TEXTURE_2D_ARRAY
+	return target == gl.TEXTURE_3D || target == gl.TEXTURE_2D_ARRAY || target == gl.TEXTURE_CUBE_MAP_ARRAY
+}
+
+// textureTarget returns the target a texture is created with. GL binds a
+// texture only through that target, so it decides which view dimensions can
+// be sampled (checkSampledView). As in Rust wgpu-hal gles/mod.rs
+// get_info_from_desc, a cube-compatible 2D texture (square, single-sampled, a
+// multiple of 6 layers) becomes a cube map at 6 layers and a cube map array
+// at any other multiple of 6; a cube map array needs cubeArrays
+// (DownlevelFlagsCubeArrayTextures), and without it the texture stays a 2D
+// array. A cube-compatible texture therefore cannot be sampled through a 2d
+// or 2d-array view on GLES: WebGPU compatibility mode lets the application
+// choose with textureBindingViewDimension, which is not implemented.
+func textureTarget(dim gputypes.TextureDimension, size hal.Extent3D, sampleCount uint32, cubeArrays bool) uint32 {
+	switch dim {
+	case gputypes.TextureDimension3D:
+		return gl.TEXTURE_3D
+	case gputypes.TextureDimension2D:
+		layers := size.DepthOrArrayLayers
+		cubeCompatible := sampleCount <= 1 && layers%6 == 0 && size.Width == size.Height
+		switch {
+		case sampleCount > 1:
+			return gl.TEXTURE_2D_MULTISAMPLE
+		case cubeCompatible && layers == 6:
+			return gl.TEXTURE_CUBE_MAP
+		case cubeCompatible && cubeArrays:
+			return gl.TEXTURE_CUBE_MAP_ARRAY
+		case layers > 1:
+			return gl.TEXTURE_2D_ARRAY
+		}
+	}
+	// GL ES has no 1D textures: a 1D texture is a 2D texture one texel high.
+	return gl.TEXTURE_2D
 }
 
 // get2DTarget returns the target that addresses array layer layer of a

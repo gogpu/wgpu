@@ -101,6 +101,16 @@ func (v *TextureView) Destroy() {
 	v.nativeHandle = 0
 }
 
+// mipRange returns the view's first mip level and its level count; a count
+// of 0 means every level from the first one on.
+func (v *TextureView) mipRange() (base, count uint32) {
+	base, count = v.baseMip, v.mipCount
+	if count == 0 && v.texture != nil && base < v.texture.mipLevels {
+		count = v.texture.mipLevels - base
+	}
+	return base, max(count, 1)
+}
+
 // NativeHandle returns the view's opaque per-device handle. A GL texture
 // object has no view object, so a bind group needs the view itself (its mip
 // level and layer, which a storage texture binds through glBindImageTexture);
@@ -226,7 +236,7 @@ func checkSampledView(binding uint32, view *TextureView, layout *gputypes.Textur
 		return fmt.Errorf("%w: binding %d: a %v view of a texture of GL target %#x (the %v view needs %#x)",
 			hal.ErrTextureViewNotSampleable, binding, layout.ViewDimension, tex.target, layout.ViewDimension, want)
 	}
-	if tex.target != gl.TEXTURE_2D_ARRAY && tex.target != gl.TEXTURE_CUBE_MAP {
+	if tex.target != gl.TEXTURE_2D_ARRAY && tex.target != gl.TEXTURE_CUBE_MAP && tex.target != gl.TEXTURE_CUBE_MAP_ARRAY {
 		return nil
 	}
 	layers := tex.size.DepthOrArrayLayers

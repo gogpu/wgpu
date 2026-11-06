@@ -44,7 +44,9 @@ type CommandEncoder struct {
 	vao             uint32 // persistent VAO from Device for Core Profile
 	maxTextureUnits int32  // Hardware limit passed from Device
 	fullInstancing  bool   // Device.fullInstancing
-	samplers        samplerState
+	// depthStencilTextureMode is Device.depthStencilTextureMode.
+	depthStencilTextureMode bool
+	samplers                samplerState
 }
 
 // BeginEncoding begins command recording.
@@ -658,11 +660,12 @@ func (e *RenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offs
 // changed (Rust wgpu-hal gles set_bind_group).
 func (e *CommandEncoder) setBindGroup(index uint32, bg *BindGroup, offsets []uint32, groupInfos []BindGroupLayoutInfo) {
 	e.commands = append(e.commands, &SetBindGroupCommand{
-		index:           index,
-		group:           bg,
-		dynamicOffsets:  offsets,
-		maxTextureUnits: e.maxTextureUnits,
-		groupInfos:      groupInfos,
+		index:                   index,
+		group:                   bg,
+		dynamicOffsets:          offsets,
+		maxTextureUnits:         e.maxTextureUnits,
+		depthStencilTextureMode: e.depthStencilTextureMode,
+		groupInfos:              groupInfos,
 	})
 	dirtyTextures, dirtySamplers := e.samplers.bindGroupSamplers(index, bg, groupInfos)
 	e.commands = append(e.commands, e.samplers.rebind(dirtyTextures, dirtySamplers)...)
@@ -1531,6 +1534,9 @@ type SetBindGroupCommand struct {
 	group           *BindGroup
 	dynamicOffsets  []uint32
 	maxTextureUnits int32 // Hardware limit for validation
+	// depthStencilTextureMode: sampled depth or stencil views select their
+	// aspect with DEPTH_STENCIL_TEXTURE_MODE (Device.depthStencilTextureMode).
+	depthStencilTextureMode bool
 	// groupInfos stores per-group binding-to-slot tables from PipelineLayout.
 	// Used to look up the GL slot for each binding instead of the old group*16+binding formula.
 	groupInfos []BindGroupLayoutInfo
@@ -1597,9 +1603,7 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 				}
 				continue
 			}
-			ctx.ActiveTexture(gl.TEXTURE0 + glBinding)
-			// A GL texture binds only to the target it was created with.
-			ctx.BindTexture(view.texture.target, view.texture.id)
+			bindSampledTexture(ctx, glBinding, view, c.depthStencilTextureMode)
 		}
 		// Samplers are bound by BindSamplerCommand to the texture units the
 		// pipeline combines them with (CommandEncoder.setBindGroup).
@@ -1623,6 +1627,41 @@ func bindStorageTexture(ctx *gl.Context, unit uint32, view *TextureView, st *gpu
 	}
 	ctx.BindImageTexture(unit, view.texture.id, int32(view.baseMip), layered, int32(view.baseLayer),
 		storageAccessToGL(st.Access), desc.internal)
+}
+
+// bindSampledTexture binds a sampled texture view to a texture unit, as Rust
+// wgpu-hal gles queue.rs C::BindTexture does. GL has no texture views: a
+// texture binds only through the target it was created with
+// (checkSampledView refuses views that need another target), and the view's
+// mip range is set on the texture itself as TEXTURE_BASE_LEVEL and
+// TEXTURE_MAX_LEVEL at every bind, so a view of mip N samples level N. The
+// texture parameters are per texture, not per view: two views of one texture
+// with different mip ranges bound to one draw sample the range bound last,
+// as in Rust. A depth-only or stencil-only view of a combined depth-stencil
+// texture selects its aspect with DEPTH_STENCIL_TEXTURE_MODE where the
+// context has it (ES 3.1, GL 4.3); before that GL samples the depth.
+func bindSampledTexture(ctx *gl.Context, unit uint32, view *TextureView, depthStencilTextureMode bool) {
+	tex := view.texture
+	ctx.ActiveTexture(gl.TEXTURE0 + unit)
+	ctx.BindTexture(tex.target, tex.id)
+	if tex.target == gl.TEXTURE_2D_MULTISAMPLE {
+		// A multisampled texture has one level and no level parameters.
+		return
+	}
+	base, count := view.mipRange()
+	ctx.TexParameteri(tex.target, gl.TEXTURE_BASE_LEVEL, int32(base))
+	ctx.TexParameteri(tex.target, gl.TEXTURE_MAX_LEVEL, int32(base+count-1))
+	if !depthStencilTextureMode || !tex.format.HasDepth() || !tex.format.HasStencil() {
+		return
+	}
+	// Set at every bind, depth unless the view is stencil-only: Rust sets
+	// nothing for a view of both aspects, which leaves the mode an earlier
+	// stencil-only bind set.
+	mode := int32(gl.DEPTH_COMPONENT)
+	if view.aspect == gputypes.TextureAspectStencilOnly {
+		mode = gl.STENCIL_INDEX
+	}
+	ctx.TexParameteri(tex.target, gl.DEPTH_STENCIL_TEXTURE_MODE, mode)
 }
 
 // storageAccessToGL maps a storage texture access to the glBindImageTexture
