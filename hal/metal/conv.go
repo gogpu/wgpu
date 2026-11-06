@@ -228,8 +228,15 @@ func astcTextureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
 }
 
 // textureUsageToMTL converts WebGPU texture usage to Metal texture usage.
-func textureUsageToMTL(usage gputypes.TextureUsage) MTLTextureUsage {
+// A combined depth/stencil format also gets PixelFormatView, as Rust wgpu-hal
+// src/metal/conv.rs map_texture_usage sets it: a stencil-only view of such a
+// texture reinterprets it as X32_Stencil8 or X24_Stencil8, and Metal allows a
+// view in another pixel format only on a texture created with that usage.
+func textureUsageToMTL(format gputypes.TextureFormat, usage gputypes.TextureUsage) MTLTextureUsage {
 	var mtlUsage MTLTextureUsage
+	if isCombinedDepthStencilFormat(format) {
+		mtlUsage |= MTLTextureUsagePixelFormatView
+	}
 	if usage&gputypes.TextureUsageCopySrc != 0 || usage&gputypes.TextureUsageCopyDst != 0 {
 		mtlUsage |= MTLTextureUsageShaderRead
 	}
