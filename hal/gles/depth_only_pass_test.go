@@ -1,6 +1,8 @@
 // Copyright 2026 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
+//go:build (windows || linux) && !(js && wasm)
+
 package gles
 
 import (
@@ -54,4 +56,41 @@ func TestBeginRenderPassDepthOnly(t *testing.T) {
 	if viewport.width != 4 || viewport.height != 4 {
 		t.Errorf("viewport = %vx%v, want 4x4 (mip 1 of 8x8)", viewport.width, viewport.height)
 	}
+}
+
+// TestBeginRenderPassDepthAttachmentSubresource checks that the depth
+// attachment of a pass with a color attachment records the view's mip level
+// and layer; GLES attached level 0 of the texture.
+func TestBeginRenderPassDepthAttachmentSubresource(t *testing.T) {
+	depthTex := &Texture{
+		target: gl.TEXTURE_2D_ARRAY,
+		format: gputypes.TextureFormatDepth32Float,
+		size:   hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 2},
+	}
+	colorTex := &Texture{
+		target: gl.TEXTURE_2D,
+		format: gputypes.TextureFormatRGBA8Unorm,
+		size:   hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+	}
+	enc := &CommandEncoder{}
+	if err := enc.BeginEncoding("depth-subresource"); err != nil {
+		t.Fatalf("BeginEncoding: %v", err)
+	}
+	enc.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{{
+			View: &TextureView{texture: colorTex, mipCount: 1, layerCount: 1}, LoadOp: gputypes.LoadOpClear,
+		}},
+		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+			View: &TextureView{texture: depthTex, baseMip: 1, mipCount: 1, baseLayer: 1, layerCount: 1},
+		},
+	})
+	for _, c := range enc.commands {
+		if a, ok := c.(*AttachDepthStencilCommand); ok {
+			if a.depthTexture != depthTex || a.mipLevel != 1 || a.layer != 1 {
+				t.Errorf("attach = texture %p mip %d layer %d, want %p mip 1 layer 1", a.depthTexture, a.mipLevel, a.layer, depthTex)
+			}
+			return
+		}
+	}
+	t.Fatal("no AttachDepthStencilCommand recorded")
 }

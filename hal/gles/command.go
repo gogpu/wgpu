@@ -374,6 +374,8 @@ func (e *CommandEncoder) setupSurfaceTarget(desc *hal.RenderPassDescriptor, tv *
 			if dsView, ok := desc.DepthStencilAttachment.View.(*TextureView); ok && dsView.texture != nil {
 				e.commands = append(e.commands, &AttachDepthStencilToFBOCommand{
 					depthTexture: dsView.texture,
+					mipLevel:     dsView.baseMip,
+					layer:        dsView.baseLayer,
 				})
 			}
 		}
@@ -422,6 +424,8 @@ func (e *CommandEncoder) setupOffscreenTarget(
 			e.commands = append(e.commands, &AttachDepthStencilCommand{
 				colorTexture: tv.texture,
 				depthTexture: dsView.texture,
+				mipLevel:     dsView.baseMip,
+				layer:        dsView.baseLayer,
 			})
 		}
 	}
@@ -1103,9 +1107,16 @@ func (c *EnsureOffscreenFBOCommand) attach(ctx *gl.Context) {
 // AttachDepthStencilCommand attaches a depth/stencil texture to the currently
 // bound FBO (the one associated with the color texture). This must be recorded
 // after EnsureOffscreenFBOCommand so the FBO is already bound.
+//
+// The view's mip level and layer are attached (Rust wgpu-hal gles/queue.rs
+// set_attachment). Attaching level 0 through glFramebufferTexture2D, which
+// has no layer and rejects a 2D array target, left a depth view of another
+// level or of an array layer unattached.
 type AttachDepthStencilCommand struct {
 	colorTexture *Texture // used to verify the FBO exists
 	depthTexture *Texture
+	mipLevel     uint32
+	layer        uint32 // array layer or cube face of a layered texture
 }
 
 func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
@@ -1113,7 +1124,7 @@ func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 		return
 	}
 	attachment := depthStencilAttachmentPoint(c.depthTexture.format)
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, c.depthTexture.target, c.depthTexture.id, 0)
+	attachColorLayer(ctx, attachment, c.depthTexture, c.mipLevel, c.layer)
 }
 
 // BindDepthStencilFBOCommand binds the framebuffer of a pass without color
@@ -1168,13 +1179,17 @@ func depthStencilAttachmentPoint(format gputypes.TextureFormat) uint32 {
 //   - depth-only → GL_DEPTH_ATTACHMENT
 //   - stencil-only → GL_STENCIL_ATTACHMENT
 //   - depth+stencil → GL_DEPTH_STENCIL_ATTACHMENT
+//
+// Like AttachDepthStencilCommand it attaches the view's mip level and layer.
 type AttachDepthStencilToFBOCommand struct {
 	depthTexture *Texture
+	mipLevel     uint32
+	layer        uint32
 }
 
 func (c *AttachDepthStencilToFBOCommand) Execute(ctx *gl.Context) {
 	attachment := depthStencilAttachmentPoint(c.depthTexture.format)
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, c.depthTexture.target, c.depthTexture.id, 0)
+	attachColorLayer(ctx, attachment, c.depthTexture, c.mipLevel, c.layer)
 }
 
 // MSAAResolveCommand resolves an MSAA framebuffer to a single-sample framebuffer
