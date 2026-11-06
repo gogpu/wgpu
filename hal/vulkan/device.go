@@ -840,7 +840,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		handle:      imageView,
 		texture:     texRef,
 		device:      d,
-		size:        textureSize,
+		size:        mipLevelExtent(textureSize, desc.BaseMipLevel),
 		image:       imageHandle,
 		isSwapchain: isSwapchain,
 	}
@@ -850,6 +850,18 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		d.setObjectName(vk.ObjectTypeImageView, uint64(imageView), "TextureView")
 	}
 	return tv, nil
+}
+
+// mipLevelExtent returns the extent of mip level mip of a texture of the
+// given mip-0 size: each dimension halves per level, down to 1. A view's
+// framebuffer and render area use the extent of its base mip level
+// (VUID-VkFramebufferCreateInfo-flags-04533/04534).
+func mipLevelExtent(size Extent3D, mip uint32) Extent3D {
+	return Extent3D{
+		Width:  max(size.Width>>mip, 1),
+		Height: max(size.Height>>mip, 1),
+		Depth:  max(size.Depth>>mip, 1),
+	}
 }
 
 // DestroyTextureView destroys a texture view.
