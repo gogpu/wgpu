@@ -127,10 +127,23 @@ func TestCopyTextureToTextureArrayLayer(t *testing.T) {
 	}
 }
 
-// TestCopyTextureToTextureOtherMipCopiesNothing copies into mip level 1.
-// The software backend stores mip level 0 only, so the copy must leave the
-// texture alone; the old copy wrote the start of mip 0 instead.
-func TestCopyTextureToTextureOtherMipCopiesNothing(t *testing.T) {
+// checkLevel0Sentinel checks that every texel of mip level 0 of a w x h
+// newCopyTexture made with sentinel set is still copySentinel.
+func checkLevel0Sentinel(t *testing.T, dev *Device, tex *Texture, w, h uint32) {
+	t.Helper()
+	data := readImage(t, dev, tex, 0, 0, w, h, 4)
+	for y := range h {
+		for x := range w {
+			checkCopiedTexel(t, data, w, h, x, y, 0, copySentinel)
+		}
+	}
+}
+
+// TestCopyTextureToTextureOtherMipKeepsLevel0 copies into mip level 1: the
+// texels must land in level 1 and level 0 must stay unchanged. Before mip
+// chains were stored the copy wrote the start of level 0, and then it was
+// skipped.
+func TestCopyTextureToTextureOtherMipKeepsLevel0(t *testing.T) {
 	dev, _, cleanup := createSoftwareDevice(t)
 	defer cleanup()
 	src := newCopyTexture(t, dev, 4, 4, 1, false)
@@ -141,10 +154,11 @@ func TestCopyTextureToTextureOtherMipCopiesNothing(t *testing.T) {
 		Size:    hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 	})
 
-	data := dst.GetData()
-	for y := range uint32(4) {
-		for x := range uint32(4) {
-			checkCopiedTexel(t, data, 4, 4, x, y, 0, copySentinel)
+	checkLevel0Sentinel(t, dev, dst, 4, 4)
+	level1 := readImage(t, dev, dst, 1, 0, 2, 2, 4)
+	for y := range uint32(2) {
+		for x := range uint32(2) {
+			checkCopiedTexel(t, level1, 2, 2, x, y, 0, copyTexel(x, y, 0))
 		}
 	}
 }
@@ -234,10 +248,13 @@ func TestCopyTextureToBufferLayerAndOrigin(t *testing.T) {
 	}
 }
 
-// TestCopyBufferToTextureOtherMipCopiesNothing uploads into mip level 1,
-// which has no storage: the texture must stay unchanged (the old copy
-// wrote the data into mip level 0).
-func TestCopyBufferToTextureOtherMipCopiesNothing(t *testing.T) {
+// copyFill is the byte of the data the other-mip transfer tests write.
+const copyFill = 0x5A
+
+// TestCopyBufferToTextureOtherMipKeepsLevel0 uploads one row into mip level
+// 1: it must land in level 1 row 0 and leave level 0 unchanged (the copy
+// once wrote the data into level 0).
+func TestCopyBufferToTextureOtherMipKeepsLevel0(t *testing.T) {
 	dev, _, cleanup := createSoftwareDevice(t)
 	defer cleanup()
 	dst := newCopyTexture(t, dev, 4, 4, 1, true)
@@ -245,7 +262,11 @@ func TestCopyBufferToTextureOtherMipCopiesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
-	bufHal.(*Buffer).WriteData(0, make([]byte, 256))
+	fill := make([]byte, 256)
+	for i := range fill {
+		fill[i] = copyFill
+	}
+	bufHal.(*Buffer).WriteData(0, fill)
 
 	enc, err := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
 	if err != nil {
@@ -257,52 +278,69 @@ func TestCopyBufferToTextureOtherMipCopiesNothing(t *testing.T) {
 		Size:         hal.Extent3D{Width: 2, Height: 1, DepthOrArrayLayers: 1},
 	}})
 
-	data := dst.GetData()
-	for x := range uint32(4) {
-		checkCopiedTexel(t, data, 4, 4, x, 0, 0, copySentinel)
-	}
-}
-
-// TestWriteTextureOtherMipWritesNothing writes into mip level 1, which has
-// no storage: the texture must stay unchanged (the old write landed in mip
-// level 0).
-func TestWriteTextureOtherMipWritesNothing(t *testing.T) {
-	dev, q, cleanup := createSoftwareDevice(t)
-	defer cleanup()
-	dst := newCopyTexture(t, dev, 4, 4, 1, true)
-
-	err := q.WriteTexture(&hal.ImageCopyTexture{Texture: dst, MipLevel: 1}, make([]byte, 2*2*4),
-		&hal.ImageDataLayout{BytesPerRow: 8, RowsPerImage: 2}, &hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1})
-	if err != nil {
-		t.Fatalf("WriteTexture: %v", err)
-	}
-	data := dst.GetData()
-	for y := range uint32(4) {
-		for x := range uint32(4) {
-			checkCopiedTexel(t, data, 4, 4, x, y, 0, copySentinel)
+	checkLevel0Sentinel(t, dev, dst, 4, 4)
+	level1 := readImage(t, dev, dst, 1, 0, 2, 2, 4)
+	for y := range uint32(2) {
+		for x := range uint32(2) {
+			want := [4]byte{} // row 1 was never written
+			if y == 0 {
+				want = [4]byte{copyFill, copyFill, copyFill, copyFill}
+			}
+			checkCopiedTexel(t, level1, 2, 2, x, y, 0, want)
 		}
 	}
 }
 
-// TestCopyFromOtherMipWritesNothing copies from mip level 1 of a texture,
-// into a texture and into a buffer: there is no level 1 data to read, and
-// copying level 0 in its place would be the wrong data, so neither
-// destination may change.
-func TestCopyFromOtherMipWritesNothing(t *testing.T) {
-	dev, _, cleanup := createSoftwareDevice(t)
+// TestWriteTextureOtherMipKeepsLevel0 writes all of mip level 1: it must
+// land there and leave level 0 unchanged (the write once landed in level 0).
+func TestWriteTextureOtherMipKeepsLevel0(t *testing.T) {
+	dev, q, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+	dst := newCopyTexture(t, dev, 4, 4, 1, true)
+
+	fill := make([]byte, 2*2*4)
+	for i := range fill {
+		fill[i] = copyFill
+	}
+	err := q.WriteTexture(&hal.ImageCopyTexture{Texture: dst, MipLevel: 1}, fill,
+		&hal.ImageDataLayout{BytesPerRow: 8, RowsPerImage: 2}, &hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1})
+	if err != nil {
+		t.Fatalf("WriteTexture: %v", err)
+	}
+	checkLevel0Sentinel(t, dev, dst, 4, 4)
+	level1 := readImage(t, dev, dst, 1, 0, 2, 2, 4)
+	for y := range uint32(2) {
+		for x := range uint32(2) {
+			checkCopiedTexel(t, level1, 2, 2, x, y, 0, [4]byte{copyFill, copyFill, copyFill, copyFill})
+		}
+	}
+}
+
+// TestCopyFromOtherMipReadsThatLevel copies from mip level 1 of a texture,
+// into a texture and into a buffer: both must get level 1's texels, not
+// level 0's (the copy once read level 0, and then it was skipped).
+func TestCopyFromOtherMipReadsThatLevel(t *testing.T) {
+	dev, q, cleanup := createSoftwareDevice(t)
 	defer cleanup()
 	src := newCopyTexture(t, dev, 4, 4, 1, false)
 	dst := newCopyTexture(t, dev, 4, 4, 1, true)
-	bufHal, err := dev.CreateBuffer(&hal.BufferDescriptor{Size: 64, Usage: gputypes.BufferUsageCopyDst})
+	level1 := make([]byte, 0, 2*2*4)
+	for y := range uint32(2) {
+		for x := range uint32(2) {
+			px := copyTexel(x, y, 9)
+			level1 = append(level1, px[:]...)
+		}
+	}
+	err := q.WriteTexture(&hal.ImageCopyTexture{Texture: src, MipLevel: 1}, level1,
+		&hal.ImageDataLayout{BytesPerRow: 8, RowsPerImage: 2}, &hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1})
+	if err != nil {
+		t.Fatalf("WriteTexture: %v", err)
+	}
+	bufHal, err := dev.CreateBuffer(&hal.BufferDescriptor{Size: 16, Usage: gputypes.BufferUsageCopyDst})
 	if err != nil {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
 	buf := bufHal.(*Buffer)
-	marker := make([]byte, 64)
-	for i := range marker {
-		marker[i] = 0xEE
-	}
-	buf.WriteData(0, marker)
 
 	copyTextures(t, dev, src, dst, hal.TextureCopy{
 		SrcBase: hal.ImageCopyTexture{MipLevel: 1},
@@ -318,15 +356,20 @@ func TestCopyFromOtherMipWritesNothing(t *testing.T) {
 		Size:         hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 	}})
 
-	data := dst.GetData()
+	data := readImage(t, dev, dst, 0, 0, 4, 4, 4)
 	for y := range uint32(4) {
 		for x := range uint32(4) {
-			checkCopiedTexel(t, data, 4, 4, x, y, 0, copySentinel)
+			want := copySentinel
+			if x < 2 && y < 2 {
+				want = copyTexel(x, y, 9)
+			}
+			checkCopiedTexel(t, data, 4, 4, x, y, 0, want)
 		}
 	}
-	for i, b := range buf.GetData() {
-		if b != 0xEE {
-			t.Fatalf("buffer byte %d = %#x, want 0xee: the copy read mip level 0", i, b)
+	got := buf.GetData()
+	for y := range uint32(2) {
+		for x := range uint32(2) {
+			checkCopiedTexel(t, got, 2, 2, x, y, 0, copyTexel(x, y, 9))
 		}
 	}
 }

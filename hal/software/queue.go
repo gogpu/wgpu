@@ -51,13 +51,13 @@ func resolveTexture(t hal.Texture) *Texture {
 	}
 }
 
-// WriteTexture performs immediate texture writes with real data storage.
-// Respects dst.Origin (destination position; Z is the depth slice or array
-// layer), layout.BytesPerRow (source row stride), layout.RowsPerImage (source
-// layer stride in rows), layout.Offset (source data offset), and size (region
-// dimensions, every layer of size.DepthOrArrayLayers). The layout matches
-// CopyBufferToTexture; writing only layer 0 left the other layers of a 3D or
-// 2D array texture empty.
+// WriteTexture performs immediate texture writes with real data storage: the
+// region of size at dst.Origin of mip level dst.MipLevel (Origin.Z is the
+// first array layer or depth slice; every layer of size.DepthOrArrayLayers
+// is written), read from data laid out by layout (Offset, BytesPerRow,
+// RowsPerImage), as CopyBufferToTexture reads a buffer. Each level is
+// written at its own pitch (subresource.go). Rows are counted in texel
+// blocks, so a block-compressed format uploads block row by block row.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	tex := resolveTexture(dst.Texture)
 	if tex == nil {
@@ -66,44 +66,19 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if size == nil || len(data) == 0 {
 		return nil
 	}
-	if skipOtherMip("WriteTexture", dst.MipLevel) {
-		return nil // writing it at level 0 overwrote the visible level
+	var l hal.ImageDataLayout
+	if layout != nil {
+		l = *layout
 	}
-
-	// bytesPerPixel must match the texture's format, not a hardcoded 4. With a
-	// fixed 4 an R8 texture was written with a 4x row stride, spreading each
-	// source row across 4x the destination columns and corrupting sampling.
-	bytesPerPixel := formatBytesPerPixel(tex.format)
-
-	srcBytesPerRow := uint64(layout.BytesPerRow)
-	if srcBytesPerRow == 0 {
-		srcBytesPerRow = uint64(size.Width) * bytesPerPixel
+	r, ok := tex.regionOf(dst.MipLevel, dst.Origin, *size)
+	if !ok {
+		logRegionOutside("WriteTexture", tex, dst.MipLevel, dst.Origin, *size)
+		return nil
 	}
-
-	srcRowsPerImage := uint64(layout.RowsPerImage)
-	if srcRowsPerImage == 0 {
-		srcRowsPerImage = uint64(size.Height)
-	}
-
-	dstBytesPerRow := uint64(tex.width) * bytesPerPixel
-	dstBytesPerImage := dstBytesPerRow * uint64(tex.height)
-	rowCopyBytes := uint64(size.Width) * bytesPerPixel
-	layers := max(size.DepthOrArrayLayers, 1)
 
 	tex.mu.Lock()
 	defer tex.mu.Unlock()
-
-	for z := uint32(0); z < layers; z++ {
-		for row := uint32(0); row < size.Height; row++ {
-			srcStart := layout.Offset + (uint64(z)*srcRowsPerImage+uint64(row))*srcBytesPerRow
-			dstStart := uint64(dst.Origin.Z+z)*dstBytesPerImage + uint64(dst.Origin.Y+row)*dstBytesPerRow + uint64(dst.Origin.X)*bytesPerPixel
-			if srcStart+rowCopyBytes > uint64(len(data)) || dstStart+rowCopyBytes > uint64(len(tex.data)) {
-				return nil
-			}
-			copy(tex.data[dstStart:dstStart+rowCopyBytes], data[srcStart:srcStart+rowCopyBytes])
-		}
-	}
-
+	tex.copyLinear(r, data, l, true)
 	return nil
 }
 
