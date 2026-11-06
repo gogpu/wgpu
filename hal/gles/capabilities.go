@@ -718,7 +718,11 @@ func queryDownlevelFlags(glCtx *gl.Context, exts map[string]bool, glMajor, glMin
 		flags |= gputypes.DownlevelFlagsReadOnlyDepthStencil
 		flags |= gputypes.DownlevelFlagsNonblockingQueryResolve
 		flags |= gputypes.DownlevelFlagsLinearInterpolation
-		flags |= gputypes.DownlevelFlagsViewFormats
+		// Not DownlevelFlagsViewFormats: a view in another format of the
+		// same texture (an sRGB view of a unorm texture) needs glTextureView
+		// (GL 4.3 / ARB_texture_view, immutable storage), which this backend
+		// does not create, so such views rendered and sampled the texture's
+		// own format. Rust wgpu-hal offers VIEW_FORMATS on Vulkan only.
 	}
 
 	// GL 4.3+ / ARB_polygon_offset_clamp
