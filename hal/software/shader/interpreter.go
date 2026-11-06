@@ -1388,29 +1388,35 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				sampledImg := interp.values[inst.Operands[0]]
 				coord := interp.values[inst.Operands[1]]
-				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, 0)
+				// The implicit level of detail comes from the screen-space
+				// derivatives of the coordinate across the 2x2 quad a
+				// fragment runs in on a GPU. The interpreter runs fragments
+				// one at a time and has no quad (P2-SW-020, see
+				// zeroDerivative), so it takes λ_base = 0: the view's base
+				// level, plus the Bias operand. Inventing derivatives would
+				// pick levels no GPU picks.
+				ops := interp.parseImageOperands(inst.Operands[2:])
+				ops.lod = 0
+				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, ops)
 			}
 
 		case OpImageSampleExplicitLod:
-			// OpImageSampleExplicitLod: type resultID sampledImage coordinate ImageOperands lod
+			// OpImageSampleExplicitLod: type resultID sampledImage coordinate ImageOperands (Lod | Grad) ...
 			if len(inst.Operands) >= 2 {
 				sampledImg := interp.values[inst.Operands[0]]
 				coord := interp.values[inst.Operands[1]]
-				// For the software backend we only support LOD 0.
-				var lod float32
-				if len(inst.Operands) >= 4 && (inst.Operands[2]&ImageOperandLodMask) != 0 {
-					lod = toFloat32(interp.values[inst.Operands[3]])
-				}
-				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, lod)
+				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, interp.parseImageOperands(inst.Operands[2:]))
 			}
 
 		case OpImageFetch:
 			// OpImageFetch: type resultID image coordinate [ImageOperands...]
-			// Direct texel fetch by integer coordinates (no filtering).
+			// Direct texel fetch by integer coordinates (no filtering), at
+			// the level the Lod operand names.
 			if len(inst.Operands) >= 2 {
 				imgVal := interp.values[inst.Operands[0]]
 				coord := interp.values[inst.Operands[1]]
-				interp.values[inst.ResultID] = interp.fetchTexel(imgVal, coord)
+				ops := interp.parseImageOperands(inst.Operands[2:])
+				interp.values[inst.ResultID] = interp.fetchTexelLevel(imgVal, coord, int(ops.lod))
 			}
 
 		case OpLogicalEqual, OpLogicalNotEqual:
@@ -2164,10 +2170,10 @@ func (interp *interpreter) resolveSampler(val Value) *Sampler {
 	return nil
 }
 
-// sampleTexture samples a texture using the given sampled image and UV coordinates.
-func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, lod float32) Value {
-	_ = lod // LOD levels not implemented; always sample base level.
-
+// sampleTexture samples a sampled image at coordinate coord with image
+// operands ops: the level of detail is ops.lod (or the one ops' derivatives
+// give) plus ops.bias.
+func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, ops imageOperands) Value {
 	if sampledImg.Tag != TagSampledImage {
 		return ValVec4(1, 0, 1, 1) // Magenta for error.
 	}
@@ -2183,77 +2189,38 @@ func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, lod floa
 		samp = &Sampler{} // Default: nearest, repeat.
 	}
 
-	// Extract UV coordinates.
-	var u, v float32
-	switch coord.Tag {
-	case TagVec2:
-		u, v = coord.F[0], coord.F[1]
-	case TagVec3:
-		u, v = coord.F[0], coord.F[1]
-	case TagVec4:
-		u, v = coord.F[0], coord.F[1]
-	default:
-		u = toFloat32(coord)
+	c := texelComponents(coord)
+	lambda := ops.lod
+	if ops.hasGrad {
+		lambda = gradLod(tex, c, ops.dx, ops.dy)
 	}
-
-	// Apply wrap mode.
-	u = applyWrapMode(u, samp.WrapU)
-	v = applyWrapMode(v, samp.WrapV)
-
-	// Determine filter from the magnification filter.
-	filter := samp.MagFilter
-	if filter == FilterLinear {
-		return ValVec4From(sampleBilinear(tex, u, v))
-	}
-	return ValVec4From(sampleNearest(tex, u, v))
+	return ValVec4From(sampleView(tex, samp, c, lambda+ops.bias, ops.offset))
 }
 
-// fetchTexel fetches a single texel by integer coordinates (no filtering).
+// fetchTexel fetches a single texel of the view's base level by integer
+// coordinates (no filtering).
 func (interp *interpreter) fetchTexel(imgVal Value, coord Value) Value {
+	return interp.fetchTexelLevel(imgVal, coord, 0)
+}
+
+// fetchTexelLevel fetches a single texel of mip level level of the view by
+// integer coordinates: x for 1D, x, y for 2D, then the array layer or the
+// depth slice. Each coordinate and the level are clamped to the view, as
+// naga's Restrict bounds checks would clamp them.
+func (interp *interpreter) fetchTexelLevel(imgVal Value, coord Value, level int) Value {
 	tex := interp.resolveTexture(imgVal)
 	if tex == nil || tex.Width == 0 || tex.Height == 0 || len(tex.Data) == 0 {
 		return ValVec4(0, 0, 0, 0)
 	}
-
-	x, y := imageCoord(coord)
-
-	// Clamp to texture bounds.
-	if x < 0 {
-		x = 0
+	lv := tex.level(level)
+	xyz := imageCoord3(coord)
+	img, _ := tex.imageAt(lv, clampInt(tex.imageIndex(xyz), int(max(lv.Images, 1))-1))
+	if img.Width == 0 || img.Height == 0 {
+		return ValVec4(0, 0, 0, 0)
 	}
-	if y < 0 {
-		y = 0
-	}
-	if x >= int(tex.Width) {
-		x = int(tex.Width) - 1
-	}
-	if y >= int(tex.Height) {
-		y = int(tex.Height) - 1
-	}
-
-	return ValVec4From(readTexel(tex, x, y))
-}
-
-// imageCoord returns the integer texel coordinate x, y of an image
-// instruction's coordinate operand. An integer vector is either a float
-// vector (OpCompositeConstruct) or an array of integer scalars (builtins
-// such as global_invocation_id, and shuffles of them).
-func imageCoord(coord Value) (x, y int) {
-	switch coord.Tag {
-	case TagVec2, TagVec3, TagVec4:
-		return int(coord.F[0]), int(coord.F[1])
-	case TagArray:
-		arr := coord.AsArray()
-		if len(arr) >= 1 {
-			x = scalarInt(arr[0])
-		}
-		if len(arr) >= 2 {
-			y = scalarInt(arr[1])
-		}
-		return x, y
-	default:
-		return scalarInt(coord), 0
-	}
+	x := clampInt(xyz[0], int(img.Width)-1)
+	y := clampInt(xyz[1], int(img.Height)-1)
+	return ValVec4From(readTexel(&img, x, y))
 }
 
 // scalarInt converts an integer or float scalar to int; a signed integer
@@ -2272,12 +2239,11 @@ func scalarInt(v Value) int {
 // readImage loads a storage texture texel (OpImageRead), decoded from the
 // texture format. An out-of-bounds or undecodable texel reads zero.
 func (interp *interpreter) readImage(imgVal, coord Value) Value {
-	tex := interp.resolveTexture(imgVal)
-	if tex == nil {
+	img, x, y, ok := interp.storageImage(imgVal, coord)
+	if !ok {
 		return ValVec4(0, 0, 0, 0)
 	}
-	x, y := imageCoord(coord)
-	v, ok := decodeTexel(tex, x, y)
+	v, ok := decodeTexel(&img, x, y)
 	if !ok {
 		return ValVec4(0, 0, 0, 0)
 	}
@@ -2288,12 +2254,25 @@ func (interp *interpreter) readImage(imgVal, coord Value) Value {
 // in the texture format. The texture's Data aliases its storage, so the write
 // is visible to later passes. Out-of-bounds writes are discarded.
 func (interp *interpreter) writeImage(imgVal, coord, texel Value) {
-	tex := interp.resolveTexture(imgVal)
-	if tex == nil {
+	img, x, y, ok := interp.storageImage(imgVal, coord)
+	if !ok {
 		return
 	}
-	x, y := imageCoord(coord)
-	encodeTexel(tex, x, y, texelComponents(texel))
+	encodeTexel(&img, x, y, texelComponents(texel))
+}
+
+// storageImage returns the image of a storage texture view that coordinate
+// coord addresses (the array layer of a 2D-array view, the depth slice of a
+// 3D view; a storage view has one mip level) and the texel's x, y in it, or
+// false when the layer or slice is out of bounds.
+func (interp *interpreter) storageImage(imgVal, coord Value) (img Texture2D, x, y int, ok bool) {
+	tex := interp.resolveTexture(imgVal)
+	if tex == nil {
+		return Texture2D{}, 0, 0, false
+	}
+	xyz := imageCoord3(coord)
+	img, ok = tex.imageAt(tex.level(0), tex.imageIndex(xyz))
+	return img, xyz[0], xyz[1], ok
 }
 
 // texelComponents returns the four components of a texel value (a float
@@ -2330,14 +2309,14 @@ func scalarFloat(v Value) float32 {
 	}
 }
 
-// queryImageSize returns the size of a texture as a vec2 of uint32 values.
+// queryImageSize returns the size of a texture view as a vec2 of uint32
+// values.
 //
 // It answers OpImageQuerySize (lod 0) and OpImageQuerySizeLod: the size of
-// mip level lod, each dimension at least 1, with the array layer count as
-// the last component when the result type has one more component than the
-// image has dimensions (2D arrays; a 3D image reads its depth from Layers
-// too, not reduced per mip level, since Texture2D does not record the image
-// dimension). The shape follows the result type: a scalar for 1D, a vector
+// mip level lod of the view, each dimension at least 1. The third component,
+// when the result type has one, is the depth of that level for a 3D view,
+// the number of cubes of a cube-array view, and the array layer count
+// otherwise. The shape follows the result type: a scalar for 1D, a vector
 // otherwise (integer vectors hold float components); 2D without a module. A
 // missing texture reads zeros.
 func (interp *interpreter) queryImageSize(imgVal Value, lod int, typeID uint32) Value {
@@ -2352,6 +2331,12 @@ func (interp *interpreter) queryImageSize(imgVal Value, lod int, typeID uint32) 
 	var size [3]float32
 	if tex != nil {
 		size = [3]float32{mipSize(tex.Width, lod), mipSize(tex.Height, lod), float32(max(tex.Layers, 1))}
+		switch tex.Dimension {
+		case TexDim3D:
+			size[2] = mipSize(tex.Depth, lod)
+		case TexDimCubeArray:
+			size[2] = float32(max(tex.Layers/6, 1))
+		}
 	}
 	switch components {
 	case 1:

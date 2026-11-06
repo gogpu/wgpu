@@ -209,6 +209,10 @@ const (
 	ImageOperandBiasMask = 0x1
 	ImageOperandLodMask  = 0x2
 	ImageOperandGradMask = 0x4
+	// ImageOperandConstOffsetMask and ImageOperandOffsetMask add a texel
+	// offset to the coordinate; ConstOffsets, Sample and MinLod follow them.
+	ImageOperandConstOffsetMask = 0x8
+	ImageOperandOffsetMask      = 0x10
 )
 
 // SPIR-V storage classes.

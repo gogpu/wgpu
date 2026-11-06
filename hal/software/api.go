@@ -101,6 +101,7 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 						gputypes.DownlevelFlagsFragmentWritableStorage |
 						gputypes.DownlevelFlagsBaseVertex |
 						gputypes.DownlevelFlagsNonPowerOfTwoMipmappedTextures |
+						gputypes.DownlevelFlagsCubeArrayTextures |
 						gputypes.DownlevelFlagsIndependentBlend |
 						gputypes.DownlevelFlagsVertexStorage |
 						gputypes.DownlevelFlagsFragmentStorage |

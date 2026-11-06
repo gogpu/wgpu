@@ -863,16 +863,7 @@ func addTextureBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindG
 			continue
 		}
 		tv.texture.mu.RLock()
-		ctx.Textures[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = &shader.Texture2D{
-			Width:         tv.texture.width,
-			Height:        tv.texture.height,
-			Data:          tv.texture.data,
-			Format:        uint32(tv.texture.format),
-			BytesPerPixel: uint32(formatBytesPerPixel(tv.texture.format)),
-			MipLevels:     tv.texture.mipLevelCount,
-			SampleCount:   tv.texture.sampleCount,
-			Layers:        tv.texture.depth,
-		}
+		ctx.Textures[shader.BindingKey{Group: groupIdx, Binding: bindingIdx}] = viewToShader(tv)
 		tv.texture.mu.RUnlock()
 	}
 	for bindingIdx, samp := range bg.samplers {
@@ -883,17 +874,88 @@ func addTextureBindings(ctx *shader.ExecutionContext, groupIdx uint32, bg *BindG
 	}
 }
 
+// viewToShader describes texture view tv to the interpreter: the view's mip
+// levels and array layers (or the depth slices of a 3D view), each level's
+// data aliasing the texture's storage. Levels is filled only for a view of
+// more than one level, so the common single-level binding allocates nothing
+// beyond the Texture2D itself. The caller holds the texture's lock.
+func viewToShader(tv *TextureView) *shader.Texture2D {
+	t := tv.texture
+	base, mips := tv.baseMipLevel, tv.mipLevels()
+	is3D := t.is3D()
+	first, layers := tv.baseArrayLayer, tv.arrayLayers()
+	if is3D {
+		first = 0
+	}
+	images := func(level uint32) uint32 {
+		if !is3D {
+			return layers
+		}
+		_, _, depth := t.levelExtent(level)
+		return depth
+	}
+	w, h, _ := t.levelExtent(base)
+	st := &shader.Texture2D{
+		Width:         w,
+		Height:        h,
+		Data:          t.levelData(base, first, images(base)),
+		Format:        uint32(t.format),
+		BytesPerPixel: uint32(formatBytesPerPixel(t.format)),
+		MipLevels:     mips,
+		SampleCount:   t.sampleCount,
+		Layers:        layers,
+		Dimension:     viewDimensionToShader(tv.viewDimension()),
+	}
+	if is3D {
+		st.Layers, st.Depth = 1, images(base)
+	}
+	if mips > 1 {
+		st.Levels = make([]shader.TextureLevel, mips)
+		for i := range mips {
+			lw, lh, _ := t.levelExtent(base + i)
+			n := images(base + i)
+			st.Levels[i] = shader.TextureLevel{Width: lw, Height: lh, Images: n, Data: t.levelData(base+i, first, n)}
+		}
+	}
+	return st
+}
+
+// viewDimensionToShader converts a view dimension to the interpreter's
+// TexDim constant.
+func viewDimensionToShader(d gputypes.TextureViewDimension) uint32 {
+	switch d {
+	case gputypes.TextureViewDimension1D:
+		return shader.TexDim1D
+	case gputypes.TextureViewDimension2DArray:
+		return shader.TexDim2DArray
+	case gputypes.TextureViewDimensionCube:
+		return shader.TexDimCube
+	case gputypes.TextureViewDimensionCubeArray:
+		return shader.TexDimCubeArray
+	case gputypes.TextureViewDimension3D:
+		return shader.TexDim3D
+	default:
+		return shader.TexDim2D
+	}
+}
+
 // samplerResourceToShader converts a SamplerResource to a shader.Sampler
-// using the addressing and filtering modes from the HAL descriptor.
+// using the addressing, filtering and LOD clamps from the HAL descriptor.
+// A zero LodMaxClamp means no clamp (shader.Sampler documents it), as in
+// the Vulkan backend.
 func samplerResourceToShader(s *SamplerResource) *shader.Sampler {
 	if s == nil || s.Desc == nil {
 		return &shader.Sampler{} // Default: nearest, repeat.
 	}
 	return &shader.Sampler{
-		MinFilter: filterModeToShader(s.Desc.MinFilter),
-		MagFilter: filterModeToShader(s.Desc.MagFilter),
-		WrapU:     wrapModeToShader(s.Desc.AddressModeU),
-		WrapV:     wrapModeToShader(s.Desc.AddressModeV),
+		MinFilter:    filterModeToShader(s.Desc.MinFilter),
+		MagFilter:    filterModeToShader(s.Desc.MagFilter),
+		MipmapFilter: filterModeToShader(s.Desc.MipmapFilter),
+		WrapU:        wrapModeToShader(s.Desc.AddressModeU),
+		WrapV:        wrapModeToShader(s.Desc.AddressModeV),
+		WrapW:        wrapModeToShader(s.Desc.AddressModeW),
+		LodMinClamp:  s.Desc.LodMinClamp,
+		LodMaxClamp:  s.Desc.LodMaxClamp,
 	}
 }
 
