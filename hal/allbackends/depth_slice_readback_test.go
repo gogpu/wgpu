@@ -21,7 +21,6 @@ func TestRenderToDepthSlice(t *testing.T) {
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
 		for _, mip := range []uint32{0, 1} {
 			t.Run(fmt.Sprintf("mip%d", mip), func(t *testing.T) {
-				skipSoftwareMip(t, device, mip)
 				r := newTargetRig(t, device, gputypes.TextureDimension3D, sliceRigDepth)
 				last := max(uint32(sliceRigDepth)>>mip, 1) - 1
 				zero := uint32(0)

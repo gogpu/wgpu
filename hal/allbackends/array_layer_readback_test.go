@@ -11,7 +11,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
 )
 
 // TestRenderToArrayLayer renders into array layer k of a 2D texture with 4
@@ -29,10 +28,6 @@ func TestRenderToArrayLayer(t *testing.T) {
 			for _, mip := range []uint32{0, 1} {
 				for _, k := range []uint32{0, 2, layers - 1} {
 					t.Run(fmt.Sprintf("%s/mip%d/layer%d", dim, mip, k), func(t *testing.T) {
-						if _, sw := device.HalDevice().(*software.Device); sw {
-							// Software renders every view into layer 0 of mip 0.
-							t.Skip("software: rendering into an array layer is P1-SW-026")
-						}
 						r := newTargetRig(t, device, gputypes.TextureDimension2D, layers)
 						for j := uint32(0); j < layers; j++ {
 							r.renderView(t, r.newLayerView(t, dim, mip, j), nil, sliceBlue)

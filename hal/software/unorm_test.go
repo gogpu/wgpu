@@ -52,14 +52,18 @@ func TestDepth16UnormWrite(t *testing.T) {
 		{1000.25 / 65535, 1000},
 		{1000.75 / 65535, 1001},
 	}
+	img, ok := tex.image(0, 0)
+	if !ok {
+		t.Fatal("no image (0, 0)")
+	}
 	for _, tt := range tests {
-		writeDepthTexel(tex, 0, 0, tt.depth)
+		writeDepthTexel(img, tex.format, 0, 0, tt.depth)
 		if got := binary.LittleEndian.Uint16(tex.data); got != tt.want {
 			t.Errorf("writeDepthTexel(%v) stored %d, want %d", tt.depth, got, tt.want)
 		}
 	}
 	for k := 0; k <= 65535; k++ {
-		writeDepthTexel(tex, 0, 0, float32(k)/65535)
+		writeDepthTexel(img, tex.format, 0, 0, float32(k)/65535)
 		if got := binary.LittleEndian.Uint16(tex.data); int(got) != k {
 			t.Fatalf("writeDepthTexel(%d/65535) stored %d", k, got)
 		}
