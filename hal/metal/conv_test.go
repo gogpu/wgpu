@@ -84,6 +84,7 @@ func TestTextureFormatToMTL(t *testing.T) {
 
 		// Packed formats
 		{"RGB10A2Unorm", gputypes.TextureFormatRGB10A2Unorm, MTLPixelFormatRGB10A2Unorm},
+		{"RGB10A2Uint", gputypes.TextureFormatRGB10A2Uint, MTLPixelFormatRGB10A2Uint},
 		{"RG11B10Ufloat", gputypes.TextureFormatRG11B10Ufloat, MTLPixelFormatRG11B10Float},
 		{"RGB9E5Ufloat", gputypes.TextureFormatRGB9E5Ufloat, MTLPixelFormatRGB9E5Float},
 

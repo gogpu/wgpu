@@ -204,6 +204,12 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	_ = MsgSend(texDesc, Sel("setTextureType:"), uintptr(texType))
 
 	pixelFormat := d.adapter.mapTextureFormat(desc.Format)
+	if pixelFormat == MTLPixelFormatInvalid {
+		// newTextureWithDescriptor aborts the process (SIGABRT) on an
+		// invalid pixel format, so a format without a Metal mapping is an
+		// error here, never a call.
+		return nil, fmt.Errorf("metal: texture format %v has no Metal pixel format", desc.Format)
+	}
 	_ = MsgSend(texDesc, Sel("setPixelFormat:"), uintptr(pixelFormat))
 
 	_ = MsgSend(texDesc, Sel("setWidth:"), uintptr(desc.Size.Width))
