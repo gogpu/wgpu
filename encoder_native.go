@@ -58,6 +58,13 @@ func (e *CommandEncoder) setError(err error) {
 	}
 }
 
+// locked reports whether a pass of the encoder is open. A command recorded on
+// the encoder itself then invalidates it and records nothing
+// (core.CoreCommandEncoder.RequireUnlocked).
+func (e *CommandEncoder) locked(op string) bool {
+	return e.core != nil && !e.core.RequireUnlocked("CommandEncoder."+op)
+}
+
 // trackRef Clone()'s a ResourceRef and accumulates it for transfer to the
 // CommandBuffer on Finish(). This keeps the resource alive until the GPU
 // completes the submission. Used for encoder-level operations (copy commands).
@@ -344,7 +351,7 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *Buffer, dstOffset uint64, size uint64) {
-	if e.released {
+	if e.released || e.locked("CopyBufferToBuffer") {
 		return
 	}
 	if src == nil {
@@ -397,7 +404,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 // CopyTextureToBuffer copies data from a texture to a buffer.
 // This is used for GPU-to-CPU readback of rendered content.
 func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions []BufferTextureCopy) {
-	if e.released {
+	if e.released || e.locked("CopyTextureToBuffer") {
 		return
 	}
 	if src == nil {
@@ -457,7 +464,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 // CopyTextureToTexture copies data between textures using DMA hardware copy.
 // WebGPU spec: GPUCommandEncoder.copyTextureToTexture()
 func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []TextureCopy) {
-	if e.released {
+	if e.released || e.locked("CopyTextureToTexture") {
 		return
 	}
 	if src == nil {
@@ -520,7 +527,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 // transition from the barrier's NewUsage instead of repeating it.
 // On Metal, GLES, and software backends the barrier itself is a no-op.
 func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
-	if e.released {
+	if e.released || e.locked("TransitionTextures") {
 		return
 	}
 	raw := e.core.RawEncoder()
@@ -552,7 +559,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 // CopyBufferToTexture copies data from a buffer to a texture.
 // WebGPU spec: GPUCommandEncoder.copyBufferToTexture.
 func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions []BufferTextureCopy) {
-	if e.released {
+	if e.released || e.locked("CopyBufferToTexture") {
 		return
 	}
 	if src == nil {
@@ -663,7 +670,7 @@ func (e *CommandEncoder) trackTextureView(view *TextureView) {
 // Validation follows Rust wgpu-core command/clear.rs clear_buffer and the
 // W3C clearBuffer valid usage list; failures are *core.ClearError from Finish.
 func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
-	if e.released {
+	if e.released || e.locked("ClearBuffer") {
 		return
 	}
 	if buffer == nil {
@@ -699,7 +706,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 
 // ResolveQuerySet copies query results into a buffer.
 func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCount uint32, dst *Buffer, dstOffset uint64) {
-	if e.released {
+	if e.released || e.locked("ResolveQuerySet") {
 		return
 	}
 
