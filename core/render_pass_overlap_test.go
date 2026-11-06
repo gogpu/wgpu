@@ -52,8 +52,6 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 
 	view3D := &TextureView{HAL: &mockTextureView{}, Parent: volume,
 		Dimension: gputypes.TextureViewDimension3D, ArrayLayerCount: 1}
-	view3DMip1 := &TextureView{HAL: &mockTextureView{}, Parent: volume,
-		Dimension: gputypes.TextureViewDimension3D, BaseMipLevel: 1, ArrayLayerCount: 1}
 	flatView := &TextureView{HAL: &mockTextureView{}, Parent: flat,
 		Dimension: gputypes.TextureViewDimension2D, ArrayLayerCount: 1}
 	otherView := &TextureView{HAL: &mockTextureView{}, Parent: other,
@@ -67,8 +65,6 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 		return &TextureView{HAL: &mockTextureView{}, Parent: layers, Dimension: dim,
 			BaseArrayLayer: base, ArrayLayerCount: count}
 	}
-	layerMip1 := &TextureView{HAL: &mockTextureView{}, Parent: layers,
-		Dimension: gputypes.TextureViewDimension2D, BaseMipLevel: 1, BaseArrayLayer: 1, ArrayLayerCount: 1}
 	s := depthSlicePtr
 
 	tests := []struct {
@@ -84,8 +80,6 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 		{name: "3D same slice of the same view", desc: overlapPass(
 			overlapAttachment{view: view3D, slice: s(3)}, overlapAttachment{view: view3D, slice: s(3)}),
 			wantErr: true, index: 1, msg: "color attachment's view's subresource at mip 0 and depth/array layer 3"},
-		{name: "3D same slice number at another mip", desc: overlapPass(
-			overlapAttachment{view: view3D, slice: s(1)}, overlapAttachment{view: view3DMip1, slice: s(1)})},
 		{name: "2D two textures", desc: overlapPass(
 			overlapAttachment{view: flatView}, overlapAttachment{view: otherView})},
 		{name: "2D same view twice", desc: overlapPass(
@@ -105,8 +99,6 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 			wantErr: true, index: 1, msg: "at mip 0 and depth/array layer 2"},
 		{name: "array disjoint layer ranges", desc: overlapPass(
 			overlapAttachment{view: layer(0, 2)}, overlapAttachment{view: layer(2, 2)})},
-		{name: "array same layer at another mip", desc: overlapPass(
-			overlapAttachment{view: layer(1, 1)}, overlapAttachment{view: layerMip1})},
 		{name: "resolve target is another attachment's view", desc: overlapPass(
 			overlapAttachment{view: flatView}, overlapAttachment{view: otherView, resolve: flatView}),
 			wantErr: true, index: 1, resolve: true, msg: "resolve target's subresource at mip 0 and depth/array layer 0"},
@@ -142,5 +134,34 @@ func checkOverlapErr(t *testing.T, err error, wantErr bool, index int, resolve b
 	}
 	if !strings.Contains(err.Error(), msg) || !strings.Contains(err.Error(), "is already attached to this render pass") {
 		t.Fatalf("error text %q does not contain %q", err.Error(), msg)
+	}
+}
+
+// TestAttachmentRegions_MipLevelsAreDistinct checks the overlap key directly:
+// the same layer or depth slice at another mip level is another subresource.
+// A render pass cannot show it, since two mips of one texture have different
+// render extents and fail the size rule first.
+func TestAttachmentRegions_MipLevelsAreDistinct(t *testing.T) {
+	volume := depthSliceTexture3D()
+	layers := overlapArrayTexture()
+	at := func(tex *Texture, dim gputypes.TextureViewDimension, mip, layer uint32) *TextureView {
+		return &TextureView{Parent: tex, Dimension: dim, BaseMipLevel: mip, BaseArrayLayer: layer, ArrayLayerCount: 1}
+	}
+	regions := attachmentRegions{}
+	for _, c := range []struct {
+		view  *TextureView
+		slice *uint32
+	}{
+		{at(volume, gputypes.TextureViewDimension3D, 0, 0), depthSlicePtr(1)},
+		{at(volume, gputypes.TextureViewDimension3D, 1, 0), depthSlicePtr(1)},
+		{at(layers, gputypes.TextureViewDimension2D, 0, 1), nil},
+		{at(layers, gputypes.TextureViewDimension2D, 1, 1), nil},
+	} {
+		if mip, layer, ok := regions.add(c.view, c.slice); !ok {
+			t.Fatalf("mip %d layer %d reported as already attached", mip, layer)
+		}
+	}
+	if mip, layer, ok := regions.add(at(layers, gputypes.TextureViewDimension2D, 1, 1), nil); ok || mip != 1 || layer != 1 {
+		t.Fatalf("second claim of mip 1 layer 1: ok = %v, mip %d, layer %d", ok, mip, layer)
 	}
 }

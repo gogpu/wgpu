@@ -1132,7 +1132,9 @@ func (ctx *RenderPassContext) CheckCompatible(pipeline *RenderPassContext, pipel
 //
 //  1. len(ColorAttachments) <= device.limits.MaxColorAttachments
 //  2. All color attachments must have the same sample count
-//  3. All color attachments must have the same width/height
+//  3. All color attachments and the depth/stencil attachment must have the
+//     same render extent (width/height of each view's base mip level)
+//  4. Color views and resolve targets must not attach a subresource twice
 //
 // Returns the resolved RenderPassContext for later pipeline compatibility
 // checks, or an error if validation fails.
@@ -1187,7 +1189,7 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 			return nil, err
 		}
 		ctx.ColorFormats[i] = tex.Format()
-		texSize := tex.Size()
+		texSize := renderExtent(ca.View)
 		texSamples := tex.SampleCount()
 
 		// MRT-2: All color attachments must have the same sample count.
@@ -1281,6 +1283,15 @@ func validateColorAttachmentDepthSlice(label string, i int, ca *RenderPassColorA
 	}
 }
 
+// renderExtent returns the size of view's base mip level that a render pass
+// renders to: max(1, size >> mip) in width and height (WebGPU spec "compute
+// render extent"; Rust wgpu-core TextureView render_extent). Only Width and
+// Height are meaningful for the attachment size rule.
+func renderExtent(view *TextureView) gputypes.Extent3D {
+	tex := view.Parent
+	return mipLevelSize(tex.Size(), view.BaseMipLevel, tex.Dimension())
+}
+
 // attachmentSubresource is one entry of a render pass's attachmentRegions:
 // a texture, a mip level and an array layer, or a depth slice for a 3D view.
 type attachmentSubresource struct {
@@ -1361,7 +1372,7 @@ func validateDepthStencilAttachment(
 
 	dsTex := desc.DepthStencilAttachment.View.Parent
 	ctx.DepthStencilFormat = dsTex.Format()
-	dsSize := dsTex.Size()
+	dsSize := renderExtent(desc.DepthStencilAttachment.View)
 	dsSamples := dsTex.SampleCount()
 
 	if !*hasSampleCount {
