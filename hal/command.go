@@ -267,19 +267,26 @@ type TextureCopy struct {
 	Size    Extent3D
 }
 
-// ImageDataLayout describes the layout of image data in a buffer.
+// ImageDataLayout describes the layout of image data in a buffer, in the
+// units of the WebGPU spec (GPUTexelCopyBufferLayout) and Rust wgpu-types
+// TexelCopyBufferLayout: rows are rows of texel blocks. For an uncompressed
+// format a block row is one texel row; a block-compressed format's block row
+// covers its block height in texels (4 for BC and ETC2, 4 to 12 for ASTC).
+// Core validates layouts in these units (core/validate_copy_layout.go), and
+// every backend reads them so: compute block rows with
+// gputypes.TextureFormat.BlockDimensions, never from the texel height.
 type ImageDataLayout struct {
 	// Offset is the offset in bytes from the start of the buffer.
 	Offset uint64
 
-	// BytesPerRow is the stride in bytes between rows of the image.
-	// Must be a multiple of 256 for texture copies.
-	// Can be 0 for single-row images.
+	// BytesPerRow is the stride in bytes between block rows of the image.
+	// Must be a multiple of 256 for buffer-texture copies (not for
+	// Queue.WriteTexture). Can be 0 when the copy is one block row high.
 	BytesPerRow uint32
 
-	// RowsPerImage is the number of rows per image slice.
-	// Only needed for 3D textures.
-	// Can be 0 to use the image height.
+	// RowsPerImage is the number of block rows between the starts of two
+	// images (array layers or depth slices) of the copy. Can be 0 to use the
+	// copy's own block rows, ceil(height / block height).
 	RowsPerImage uint32
 }
 

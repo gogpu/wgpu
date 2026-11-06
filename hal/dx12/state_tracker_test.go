@@ -338,6 +338,9 @@ func TestPlanBufferTextureCopiesAlignsPlacedFootprintsByWholeRows(t *testing.T) 
 	}
 }
 
+// RowsPerImage counts block rows (hal.ImageDataLayout, WebGPU): one BC1 block
+// row holds four texel rows, so a 4x4 layer is one block row and RowsPerImage
+// 1 is a tight layout. Reading it as texel rows dropped this copy (1 < 4).
 func TestPlanBufferTextureCopiesUsesBlockRowsForCompressedLayers(t *testing.T) {
 	texture := &Texture{
 		format:    gputypes.TextureFormatBC1RGBAUnorm,
@@ -350,7 +353,7 @@ func TestPlanBufferTextureCopiesUsesBlockRowsForCompressedLayers(t *testing.T) {
 	}, hal.ImageDataLayout{
 		Offset:       512,
 		BytesPerRow:  256,
-		RowsPerImage: 4,
+		RowsPerImage: 1,
 	}, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 2})
 
 	want := []bufferTextureCopyPlan{
@@ -359,6 +362,30 @@ func TestPlanBufferTextureCopiesUsesBlockRowsForCompressedLayers(t *testing.T) {
 	}
 	if !equalBufferTextureCopyPlans(plans, want) {
 		t.Fatalf("compressed array copy plans = %#v, want %#v", plans, want)
+	}
+}
+
+// A BC1 8x8 copy is two block rows per layer; RowsPerImage 4 block rows puts
+// the second layer 4*256 bytes after the first, not 4/4 rows after it.
+func TestPlanBufferTextureCopiesCompressedLayerStrideIsBlockRows(t *testing.T) {
+	texture := &Texture{
+		format:    gputypes.TextureFormatBC1RGBAUnorm,
+		dimension: gputypes.TextureDimension2D,
+		mipLevels: 1,
+		size:      hal.Extent3D{DepthOrArrayLayers: 2},
+	}
+	region := hal.ImageCopyTexture{Aspect: gputypes.TextureAspectAll}
+	size := hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 2}
+	plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: 512, BytesPerRow: 256, RowsPerImage: 4}, size)
+	want := []bufferTextureCopyPlan{
+		{subresource: 0, bufferOffset: 512, footprintWidth: 8, footprintHeight: 8, footprintDepth: 1, rowPitch: 256, copyWidth: 8, copyHeight: 8},
+		{subresource: 1, bufferOffset: 1536, footprintWidth: 8, footprintHeight: 8, footprintDepth: 1, rowPitch: 256, copyWidth: 8, copyHeight: 8},
+	}
+	if !equalBufferTextureCopyPlans(plans, want) {
+		t.Fatalf("compressed layer-stride plans = %#v, want %#v", plans, want)
+	}
+	if plans := planBufferTextureCopies(texture, region, hal.ImageDataLayout{Offset: 512, BytesPerRow: 256, RowsPerImage: 1}, size); plans != nil {
+		t.Fatalf("RowsPerImage 1 is less than the copy's 2 block rows; plans = %#v, want none", plans)
 	}
 }
 
@@ -420,7 +447,7 @@ func TestPlanBufferTextureCopiesKeepsMinimum3DBufferBounds(t *testing.T) {
 		wantEnd      uint64
 	}{
 		{name: "rgba8", format: gputypes.TextureFormatRGBA8Unorm, width: 1, height: 1, rowsPerImage: 2, rowBytes: 4, wantEnd: 1028},
-		{name: "bc1", format: gputypes.TextureFormatBC1RGBAUnorm, width: 4, height: 4, rowsPerImage: 8, rowBytes: 8, wantEnd: 1032},
+		{name: "bc1", format: gputypes.TextureFormatBC1RGBAUnorm, width: 4, height: 4, rowsPerImage: 2, rowBytes: 8, wantEnd: 1032},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -435,7 +462,8 @@ func TestPlanBufferTextureCopiesKeepsMinimum3DBufferBounds(t *testing.T) {
 			if last.footprintDepth != 1 {
 				t.Fatalf("last footprint depth = %d, want 1", last.footprintDepth)
 			}
-			logicalStart := last.bufferOffset + uint64(last.bufferOriginY/textureFormatBlockHeight(test.format))*256
+			_, blockHeight := test.format.BlockDimensions()
+			logicalStart := last.bufferOffset + uint64(last.bufferOriginY/blockHeight)*256
 			if got := logicalStart + test.rowBytes; got != test.wantEnd {
 				t.Fatalf("last copied byte end = %d, want minimum buffer end %d", got, test.wantEnd)
 			}

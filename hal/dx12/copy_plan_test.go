@@ -102,7 +102,7 @@ func TestPlanBufferTextureCopiesZeroPitchUsesNativeAlignment(t *testing.T) {
 
 func TestTextureWriteSourceOffsetUsesBlockRows(t *testing.T) {
 	// BC1's four texel rows occupy one source block row. A two-layer upload
-	// with RowsPerImage=4 must therefore advance by one row pitch per layer.
+	// with RowsPerImage=1 (block rows) advances by one row pitch per layer.
 	if got := textureWriteSourceOffset(16, 256, 1, 1, 0); got != 272 {
 		t.Fatalf("BC layer offset = %d, want 272", got)
 	}
@@ -119,11 +119,22 @@ func TestWriteTextureNativeLayoutRepacksUnalignedSourcePitch(t *testing.T) {
 	}
 }
 
+// RowsPerImage counts block rows on both sides: the source keeps its padding
+// rows (2 block rows per layer), the staging copy packs one block row (a 4-row
+// BC1 copy) per layer.
 func TestWriteTextureNativeLayoutKeepsSourcePaddingOutOfStaging(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, 8, 8, 2, 1)
-	_, native, _, sourceBlockRows, ok := writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 8}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
-	if !ok || sourceBlockRows != 2 || native.RowsPerImage != 4 {
+	_, native, _, sourceBlockRows, ok := writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 2}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
+	if !ok || sourceBlockRows != 2 || native.RowsPerImage != 1 {
 		t.Fatalf("native layout = %#v, source block rows = %d, ok=%v", native, sourceBlockRows, ok)
+	}
+	full := hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 2}
+	_, native, _, sourceBlockRows, ok = writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 16, RowsPerImage: 2}, full)
+	if !ok || sourceBlockRows != 2 || native.RowsPerImage != 2 {
+		t.Fatalf("tight 8x8 BC1 layout = %#v, source block rows = %d, ok=%v; want 2 and 2", native, sourceBlockRows, ok)
+	}
+	if _, _, _, _, ok := writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 16, RowsPerImage: 1}, full); ok {
+		t.Fatal("RowsPerImage 1 is less than the copy's 2 block rows, want rejected")
 	}
 }
 

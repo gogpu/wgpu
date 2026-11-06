@@ -665,18 +665,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if !ok || dstTex.raw == nil {
 		return fmt.Errorf("dx12: WriteTexture: invalid texture type")
 	}
-	info, nativeLayout, sourceBPR, _, valid := writeTextureNativeLayout(dstTex, dst.Aspect, *layout, *size)
+	info, nativeLayout, sourceBPR, sourceBlockRows, valid := writeTextureNativeLayout(dstTex, dst.Aspect, *layout, *size)
 	if !valid {
 		return fmt.Errorf("dx12: WriteTexture: layout cannot be represented")
 	}
-	copyBlockRows := (size.Height + info.height - 1) / info.height
-	sourceRows := layout.RowsPerImage
-	if sourceRows == 0 {
-		sourceRows = size.Height
-	}
-	sourceBlockRows := (sourceRows + info.height - 1) / info.height
+	copyBlockRows := nativeLayout.RowsPerImage
 	nativeLayout.Offset = 0
-	nativeLayout.RowsPerImage = copyBlockRows * info.height
 	rowPitch := nativeLayout.BytesPerRow
 	depth := size.DepthOrArrayLayers
 	if depth == 0 {
