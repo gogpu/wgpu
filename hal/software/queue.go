@@ -78,7 +78,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	tex.mu.Lock()
 	defer tex.mu.Unlock()
-	tex.copyLinear(r, data, l, true)
+	tex.copyLinear(r, data, l, true, dst.Aspect)
 	return nil
 }
 

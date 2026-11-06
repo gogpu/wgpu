@@ -5,6 +5,7 @@ package software
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // Texture storage layout (P1-SW-026).
@@ -231,23 +232,64 @@ func (t *Texture) bufferRowOffset(r copyRegion, layout hal.ImageDataLayout, z, r
 
 // copyLinear copies region r between the texture's storage and linear
 // memory mem laid out by layout: into the texture when toTexture is set,
-// out of it otherwise. A row that lies past the end of mem is skipped. The
-// caller holds the texture lock (a write lock when toTexture).
-func (t *Texture) copyLinear(r copyRegion, mem []byte, layout hal.ImageDataLayout, toTexture bool) {
+// out of it otherwise. aspect is the copy's texture aspect: the depth or
+// stencil aspect of a combined depth-stencil format copies only that plane
+// of each texel, packed in mem as WebGPU lays it out (a float32 depth, a
+// stencil byte); every other copy moves whole texels. A row that lies past
+// the end of mem is skipped. The caller holds the texture lock (a write
+// lock when toTexture).
+func (t *Texture) copyLinear(r copyRegion, mem []byte, layout hal.ImageDataLayout, toTexture bool, aspect gputypes.TextureAspect) {
+	planeOff, planeSize, plane := aspectPlane(t.format, aspect)
+	texRow := r.rowBytes
+	memRegion := r
+	stride := formatBytesPerPixel(t.format)
+	if plane {
+		memRegion.rowBytes = texRow / stride * planeSize
+	}
 	for z := range r.images {
 		for row := range r.rows {
-			memStart := t.bufferRowOffset(r, layout, z, row)
+			memStart := t.bufferRowOffset(memRegion, layout, z, row)
 			texStart := t.rowOffset(r, z, row)
-			if memStart+r.rowBytes > uint64(len(mem)) || texStart+r.rowBytes > uint64(len(t.data)) {
+			if memStart+memRegion.rowBytes > uint64(len(mem)) || texStart+texRow > uint64(len(t.data)) {
 				continue
 			}
-			if toTexture {
-				copy(t.data[texStart:texStart+r.rowBytes], mem[memStart:memStart+r.rowBytes])
-			} else {
-				copy(mem[memStart:memStart+r.rowBytes], t.data[texStart:texStart+r.rowBytes])
+			texBytes := t.data[texStart : texStart+texRow]
+			memBytes := mem[memStart : memStart+memRegion.rowBytes]
+			switch {
+			case !plane && toTexture:
+				copy(texBytes, memBytes)
+			case !plane:
+				copy(memBytes, texBytes)
+			default:
+				for i := uint64(0); i < texRow/stride; i++ {
+					texel := texBytes[i*stride+planeOff : i*stride+planeOff+planeSize]
+					packed := memBytes[i*planeSize : (i+1)*planeSize]
+					if toTexture {
+						copy(texel, packed)
+					} else {
+						copy(packed, texel)
+					}
+				}
 			}
 		}
 	}
+}
+
+// aspectPlane returns the byte offset and size, in a stored texel of
+// format, of the plane a copy of aspect moves. ok is false when the copy
+// moves whole texels: every format but the combined depth-stencil ones, and
+// those with TextureAspectAll.
+func aspectPlane(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (off, size uint64, ok bool) {
+	if format != gputypes.TextureFormatDepth24PlusStencil8 && format != gputypes.TextureFormatDepth32FloatStencil8 {
+		return 0, 0, false
+	}
+	switch aspect {
+	case gputypes.TextureAspectDepthOnly:
+		return 0, 4, true
+	case gputypes.TextureAspectStencilOnly:
+		return shader.StencilPlaneOffset, 1, true
+	}
+	return 0, 0, false
 }
 
 // logRegionOutside logs a transfer whose region lies outside the texture's

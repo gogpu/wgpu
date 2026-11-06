@@ -66,9 +66,14 @@ func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
 // formatBytesPerPixel returns the bytes per stored texel (per texel block of
 // a compressed format) for texture allocation and sampling: the format's
-// BlockCopySize where WebGPU defines one, otherwise 4 (Depth24Plus and the
-// combined depth-stencil formats store a float32 depth).
+// BlockCopySize where WebGPU defines one. Depth24Plus stores a float32
+// depth; the combined depth-stencil formats store a float32 depth and the
+// stencil byte in an 8-byte texel (shader.DepthStencilTexelSize).
 func formatBytesPerPixel(f gputypes.TextureFormat) uint64 {
+	switch f {
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		return shader.DepthStencilTexelSize
+	}
 	if s := f.BlockCopySize(); s > 0 {
 		return uint64(s)
 	}
