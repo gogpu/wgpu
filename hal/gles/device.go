@@ -498,6 +498,12 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 			glCtx.DeleteShader(vertexID)
 			return nil, err
 		}
+	} else {
+		fragmentID, err = compileEmptyFragmentShader(glCtx, d.glslVersion)
+		if err != nil {
+			glCtx.DeleteShader(vertexID)
+			return nil, err
+		}
 	}
 
 	// Link program
