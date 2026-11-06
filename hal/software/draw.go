@@ -896,10 +896,14 @@ func viewToShader(tv *TextureView) *shader.Texture2D {
 	}
 	w, h, _ := t.levelExtent(base)
 	st := &shader.Texture2D{
-		Width:         w,
-		Height:        h,
-		Data:          t.levelData(base, first, images(base)),
-		Format:        uint32(t.format),
+		Width:  w,
+		Height: h,
+		Data:   t.levelData(base, first, images(base)),
+		// The view's format: an sRGB view of a unorm texture decodes on
+		// fetch, a unorm view of an sRGB texture reads the raw bytes. The
+		// stride is the texture's storage.
+		Format:        uint32(tv.viewFormat()),
+		Aspect:        uint32(tv.viewAspect()),
 		BytesPerPixel: uint32(formatBytesPerPixel(t.format)),
 		MipLevels:     mips,
 		SampleCount:   t.sampleCount,

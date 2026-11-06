@@ -63,6 +63,9 @@ func TestEncodeDecodeTexel(t *testing.T) {
 	}
 }
 
+// srgb51 is sRGB code 51 (0.2) decoded to linear by the IEC 61966-2-1 curve.
+var srgb51 = float32(math.Pow((0.2+0.055)/1.055, 2.4))
+
 // le32 is v in little-endian byte order, a packed texel as stored.
 func le32(v uint32) []byte { return binary.LittleEndian.AppendUint32(nil, v) }
 
@@ -86,10 +89,10 @@ func TestReadTexelByFormat(t *testing.T) {
 		{gputypes.TextureFormatRGBA8Snorm, []byte{0x81, 0x7F, 0, 0x7F}, Vec4{-1, 1, 0, 1}},
 		{gputypes.TextureFormatRGBA8Uint, []byte{1, 2, 3, 4}, Vec4{1, 2, 3, 4}},
 		{gputypes.TextureFormatBGRA8Unorm, []byte{51, 0, 255, 255}, Vec4{1, 0, 0.2, 1}},
-		// The sRGB formats read their stored bytes, without the sRGB-to-linear
-		// decode: P1-SW-021 adds it with the encode on writes.
-		{gputypes.TextureFormatRGBA8UnormSrgb, []byte{255, 0, 51, 255}, Vec4{1, 0, 0.2, 1}},
-		{gputypes.TextureFormatBGRA8UnormSrgb, []byte{51, 0, 255, 255}, Vec4{1, 0, 0.2, 1}},
+		// The sRGB formats decode red, green and blue to linear; alpha is
+		// linear. They read the raw bytes before P1-SW-021: 0.2 for code 51.
+		{gputypes.TextureFormatRGBA8UnormSrgb, []byte{255, 0, 51, 51}, Vec4{1, 0, srgb51, 0.2}},
+		{gputypes.TextureFormatBGRA8UnormSrgb, []byte{51, 0, 255, 51}, Vec4{1, 0, srgb51, 0.2}},
 		{gputypes.TextureFormatR16Unorm, []byte{0xFF, 0xFF}, Vec4{1, 0, 0, 1}},
 		{gputypes.TextureFormatR16Uint, []byte{0xFF, 0xFF}, Vec4{65535, 0, 0, 1}},
 		{gputypes.TextureFormatR16Sint, []byte{0xFE, 0xFF}, Vec4{-2, 0, 0, 1}},
