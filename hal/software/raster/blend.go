@@ -178,7 +178,7 @@ func Blend(src, dst [4]float32, state BlendState) [4]float32 {
 }
 
 // BlendUnclamped is Blend without the final clamp to [0, 1]: the blend
-// equation of a float colour target, whose result WebGPU does not clamp.
+// equation of a float color target, whose result WebGPU does not clamp.
 // The caller clamps the inputs and the result to the range of a unorm or
 // snorm target. A disabled state returns src.
 func BlendUnclamped(src, dst [4]float32, state BlendState) [4]float32 {

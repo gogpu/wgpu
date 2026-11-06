@@ -54,7 +54,7 @@ type Pipeline struct {
 	useParallel        bool
 	parallelConfig     ParallelConfig
 
-	// colorOutput, when set, receives every fragment colour that passes the
+	// colorOutput, when set, receives every fragment color that passes the
 	// tests instead of the color buffer (SetColorOutput).
 	colorOutput ColorOutput
 
@@ -192,12 +192,12 @@ func (p *Pipeline) GetBlendState() BlendState {
 	return p.blendState
 }
 
-// ColorOutput receives the colour of one fragment at pixel (x, y) that passed
+// ColorOutput receives the color of one fragment at pixel (x, y) that passed
 // the scissor, depth and stencil tests, as the shader produced it: not
 // blended, clamped or converted.
 type ColorOutput func(x, y int, color [4]float32)
 
-// SetColorOutput routes the fragment colours of later draws to out instead of
+// SetColorOutput routes the fragment colors of later draws to out instead of
 // the RGBA8 color buffer, whose blend state then does not apply: the caller
 // blends and stores in the format of its own target. nil restores the color
 // buffer.
@@ -207,7 +207,7 @@ func (p *Pipeline) SetColorOutput(out ColorOutput) {
 	p.colorOutput = out
 }
 
-// writeColor stores the colour of the fragment at (x, y): through out when
+// writeColor stores the color of the fragment at (x, y): through out when
 // set, otherwise blended into the color buffer.
 func (p *Pipeline) writeColor(x, y int, color [4]float32, blendState BlendState, out ColorOutput) {
 	if out != nil {
@@ -657,7 +657,7 @@ type MRTOutput func(x, y int, colors [][4]float32)
 
 // DrawTrianglesWithMRTShader rasterizes triangles and invokes fragFunc per
 // pixel for Multiple Render Targets. Location 0 is written to the pipeline's
-// color buffer (with blending), or to the colour output when one is set
+// color buffer (with blending), or to the color output when one is set
 // (SetColorOutput). The mrtOut callback receives all per-location
 // colors so the caller can write locations 1+ to their respective textures.
 // Discard and mayDiscard behave as in DrawTrianglesWithFragmentShader.
@@ -724,7 +724,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 				colors, _ = fragFunc(&frag)
 			}
 
-			// Write location 0 to the color buffer or the colour output.
+			// Write location 0 to the color buffer or the color output.
 			if len(colors) > 0 {
 				p.writeColor(frag.X, frag.Y, colors[0], blendState, out)
 			}

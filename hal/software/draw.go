@@ -26,7 +26,7 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 		return
 	}
 
-	// A pass may have no colour attachment at all (a depth-only shadow pass):
+	// A pass may have no color attachment at all (a depth-only shadow pass):
 	// it still rasterizes into its depth/stencil attachment.
 	w, h, ok := r.renderExtent()
 	if !ok {
@@ -63,9 +63,9 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 }
 
 // renderExtent returns the size of the pass's render area: the size of its
-// attachments, which WebGPU requires to match. It takes the first colour
+// attachments, which WebGPU requires to match. It takes the first color
 // target, or the depth/stencil attachment's mip level when the pass has no
-// colour target. ok is false when the pass has neither.
+// color target. ok is false when the pass has neither.
 func (r *RenderPassEncoder) renderExtent() (w, h int, ok bool) {
 	for _, t := range r.colorTargets {
 		if t != nil {
@@ -1355,8 +1355,8 @@ func (r *RenderPassEncoder) executeSPIRVFragment() (color [4]float32, discard bo
 	return fragmentColor(colorVal, colorKindOf(r.colorFormat(0))), false
 }
 
-// fragmentColor returns a fragment shader colour output as the four channels
-// the colour target of kind stores (colorTarget): float values, or for an
+// fragmentColor returns a fragment shader color output as the four channels
+// the color target of kind stores (colorTarget): float values, or for an
 // integer target the bits of the 32-bit integers. A scalar u32 or i32 output
 // holds its value in Value.U and stays exact. The interpreter holds integer
 // vectors as float32 (TagVec*, P1-SW-019), so their channels are exact only
@@ -1613,7 +1613,7 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	pipe.SetCullMode(convertCullMode(r.pipeline.desc.Primitive.CullMode))
 	pipe.SetFrontFace(convertFrontFace(r.pipeline.desc.Primitive.FrontFace))
 
-	// Blending happens in the colour targets (routeColorOutput), in each
+	// Blending happens in the color targets (routeColorOutput), in each
 	// attachment's format.
 
 	// Depth and stencil state from the render pipeline descriptor.

@@ -139,7 +139,7 @@ func (t *Texture) Clear(color gputypes.Color) {
 // the sRGB suffix (core validates the texture's ViewFormats): the same bytes
 // are then read and written through the view's format, so an RGBA8Unorm
 // texture seen through an RGBA8UnormSrgb view decodes sRGB on every fetch and
-// encodes it on every colour write. The aspect selects the depth or stencil
+// encodes it on every color write. The aspect selects the depth or stencil
 // plane of a combined depth-stencil format.
 type TextureView struct {
 	Resource
