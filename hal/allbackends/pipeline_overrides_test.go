@@ -100,8 +100,7 @@ func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.Downle
 	t.Cleanup(adapter.Release)
 
 	info := adapter.Info()
-	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
-	if b.software != isCPU || (!b.software && info.Backend != b.backend) {
+	if !isOverrideTarget(b, info) {
 		t.Skipf("no %s adapter (got %s, backend %v)", b.name, info.Name, info.Backend)
 	}
 	if missing := required &^ adapter.DownlevelCapabilities().Flags; missing != 0 {
@@ -115,6 +114,53 @@ func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.Downle
 	t.Cleanup(device.Release)
 	t.Logf("adapter: %s (%v)", info.Name, info.Backend)
 	return device, info.Name
+}
+
+// isOverrideTarget reports whether the adapter RequestAdapter returned is one
+// that backend entry b tests. The software entry wants the software backend's
+// adapter. A DX12 entry takes any DX12 adapter, WARP (DeviceTypeCPU)
+// included: it is the only DX12 adapter of a GPU-less CI runner. Other GPU
+// API entries keep skipping CPU adapters (lavapipe, llvmpipe).
+func isOverrideTarget(b overrideBackend, info gputypes.AdapterInfo) bool {
+	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
+	if b.software {
+		return isCPU && info.Backend == gputypes.BackendEmpty
+	}
+	if info.Backend != b.backend {
+		return false
+	}
+	return !isCPU || b.backend == gputypes.BackendDX12
+}
+
+func TestOverrideTargetAdapter(t *testing.T) {
+	warp := gputypes.AdapterInfo{Name: "Microsoft Basic Render Driver", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendDX12}
+	iris := gputypes.AdapterInfo{Name: "Intel(R) Iris(R) Xe Graphics", DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendDX12}
+	soft := gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendEmpty}
+	lavapipe := gputypes.AdapterInfo{Name: "llvmpipe", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendVulkan}
+	byName := map[string]overrideBackend{}
+	for _, b := range overrideBackends {
+		byName[b.name] = b
+	}
+	for _, tc := range []struct {
+		entry string
+		info  gputypes.AdapterInfo
+		want  bool
+	}{
+		{"dx12-fxc", warp, true},
+		{"dx12-dxil", warp, true},
+		{"dx12-fxc", iris, true},
+		{"dx12-fxc", soft, false},
+		{"software", soft, true},
+		{"software", warp, false},
+		{"software", lavapipe, false},
+		{"vulkan", lavapipe, false},
+		{"vulkan", warp, false},
+	} {
+		if got := isOverrideTarget(byName[tc.entry], tc.info); got != tc.want {
+			t.Errorf("isOverrideTarget(%s, %q %v %v) = %v, want %v",
+				tc.entry, tc.info.Name, tc.info.DeviceType, tc.info.Backend, got, tc.want)
+		}
+	}
 }
 
 // TestOverrideCompute runs every override case through the public API: the
