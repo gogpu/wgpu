@@ -21,17 +21,17 @@ var (
 	// backend's native context is gone. On GLES on Linux that happens when a
 	// Wayland window's Surface is released before RequestDevice: the EGL
 	// context built on the app's display dies with its last Surface and
-	// Device. It wraps ErrDeviceLost, as WebGPU's
-	// requestDevice on an expired adapter yields a lost device; request a new
-	// adapter, with a live surface, and a new device.
+	// Device. It wraps ErrDeviceLost, as WebGPU's requestDevice on an expired
+	// adapter yields a lost device; request a new adapter, with a live
+	// surface, and a new device.
 	ErrContextReleased = hal.ErrContextReleased
 
-	// ErrWorkgroupBarrierUnsupported is returned by Device.CreateComputePipeline
-	// on the software backend for a compute shader that shares workgroup
-	// memory across a control barrier (a tree reduction, a shared tile). The
-	// software backend cannot run such a shader correctly yet, so it refuses it
-	// rather than compute wrong values (P1-SW-025). Check it with errors.Is
-	// and fall back where the code can run on the software adapter.
+	// ErrWorkgroupBarrierUnsupported is no longer returned since v0.34.8 and
+	// is kept for compatibility, so code that checks it with errors.Is still
+	// builds. In v0.34.7 Device.CreateComputePipeline returned it on the
+	// software backend for a compute shader sharing workgroup memory across a
+	// control barrier (a tree reduction, a shared tile); since v0.34.8 the
+	// software backend runs such shaders (P1-SW-025).
 	ErrWorkgroupBarrierUnsupported = hal.ErrWorkgroupBarrierUnsupported
 )
 

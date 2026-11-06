@@ -38,10 +38,11 @@ var (
 	// ErrTimeout is returned when an operation times out.
 	ErrTimeout = errors.New("wgpu: timeout")
 
-	// ErrWorkgroupBarrierUnsupported is the software backend's refusal of a
-	// compute shader that shares workgroup memory across a control barrier
-	// (P1-SW-025). The browser backend never returns it; it exists so that code
-	// checking it builds on every target.
+	// ErrWorkgroupBarrierUnsupported is no longer returned since v0.34.8 and
+	// is kept for compatibility. It was the software backend's refusal of a
+	// compute shader that shares workgroup memory across a control barrier in
+	// v0.34.7 (P1-SW-025). The browser backend never returns it; it exists so
+	// that code checking it builds on every target.
 	ErrWorkgroupBarrierUnsupported = errors.New("software backend: compute shaders that share workgroup memory across a control barrier are not supported yet (P1-SW-025)")
 )
 

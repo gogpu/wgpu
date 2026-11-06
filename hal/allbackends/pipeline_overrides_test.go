@@ -16,7 +16,6 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
 
 	_ "github.com/gogpu/wgpu/hal/allbackends"
 )
@@ -172,10 +171,6 @@ func TestOverrideCompute(t *testing.T) {
 		for _, c := range overrideCases() {
 			t.Run(c.name, func(t *testing.T) {
 				out, err := runPublicCompute(t, device, c.wgsl, c.constants, c.inputs)
-				if _, sw := device.HalDevice().(*software.Device); sw && c.sharesWorkgroupMemory {
-					requireWorkgroupBarrierRefused(t, err)
-					return
-				}
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -164,8 +164,16 @@ type ExecutionContext struct {
 	Samplers map[BindingKey]*Sampler
 
 	// WorkgroupSharedMemory is shared memory for compute shader workgroups.
-	// Maps variable ID to a byte slice shared across all invocations.
+	// Maps variable ID to a byte slice shared across all invocations: a
+	// workgroup variable's loads and stores read and write it directly.
+	// DispatchCompute sets it for each workgroup.
 	WorkgroupSharedMemory map[uint32][]byte
+
+	// workgroupPtrs are the pointers of the Workgroup variables, in the
+	// order of modulePrep.workgroup, shared by the invocations of a
+	// workgroup (DispatchCompute). Without them each invocation makes its
+	// pointers from WorkgroupSharedMemory.
+	workgroupPtrs []Value
 
 	// ComputeBuiltins provides compute shader built-in values.
 	GlobalInvocationID   [3]uint32

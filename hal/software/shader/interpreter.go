@@ -157,6 +157,18 @@ type interpreter struct {
 	// returnValue holds the value from OpReturnValue for function calls.
 	returnValue Value
 
+	// Workgroup barrier suspension (P1-SW-025). With syncBarriers set, run
+	// returns at a workgroup-scope OpControlBarrier with suspended set and
+	// resumePC at the instruction after it; the next run continues there.
+	// A barrier reached inside a called function suspends the whole call
+	// chain: each caller keeps its suspended callee in pendingCall and its
+	// own resumePC after the OpFunctionCall, whose result ID is pendingResult.
+	syncBarriers  bool
+	suspended     bool
+	resumePC      int
+	pendingCall   *interpreter
+	pendingResult uint32
+
 	// debug holds the debug context for breakpoints, tracing, and watch variables.
 	// When nil, all debug logic is skipped (zero overhead on the hot path).
 	debug *DebugContext
@@ -211,7 +223,22 @@ func (m *Module) putInterpreter(interp *interpreter) {
 	interp.ctx = nil
 	interp.debug = nil
 	interp.returnValue = Value{}
+	interp.syncBarriers = false
+	interp.suspended = false
+	interp.resumePC = 0
+	interp.pendingCall = nil
+	interp.pendingResult = 0
 	m.interpPool.Put(interp)
+}
+
+// release returns interp and the chain of callees it is suspended in to the
+// pool. An invocation abandoned at a barrier (another one failed) owns them.
+func (m *Module) release(interp *interpreter) {
+	for interp != nil {
+		next := interp.pendingCall
+		m.putInterpreter(interp)
+		interp = next
+	}
 }
 
 // initVariables sets up input, output, and function-local variables.
@@ -588,9 +615,20 @@ func typeByteSize(m *Module, ti *TypeInfo) uint32 {
 var errDebugAbort = fmt.Errorf("spirv: execution aborted by debug callback")
 
 // run executes instructions sequentially, handling OpBranch for jumps.
+//
+// With syncBarriers set it may stop early at a workgroup barrier (suspended
+// set, see interpreter); calling run again resumes the invocation there.
 func (interp *interpreter) run() error {
 	instructions := interp.fn.Instructions
-	pc := 0
+	pc := interp.resumePC
+	interp.resumePC = 0
+	interp.suspended = false
+	if interp.pendingCall != nil {
+		if err := interp.resumeCall(); err != nil || interp.suspended {
+			interp.resumePC = pc
+			return err
+		}
+	}
 	debug := interp.debug
 
 	// Debug state -- only initialized when debug is non-nil.
@@ -983,9 +1021,18 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 1 {
 				funcID := inst.Operands[0]
 				args := inst.Operands[1:]
-				result, err := interp.callFunction(funcID, args)
+				result, callee, err := interp.callFunction(funcID, args)
 				if err != nil {
 					return err
+				}
+				if callee != nil {
+					// The callee stopped at a barrier: suspend with it and
+					// take its result when it returns (resumeCall).
+					interp.pendingCall = callee
+					interp.pendingResult = inst.ResultID
+					interp.resumePC = pc
+					interp.suspended = true
+					return nil
 				}
 				interp.values[inst.ResultID] = result
 			}
@@ -1265,10 +1312,22 @@ func (interp *interpreter) run() error {
 		case OpAtomicStore:
 			interp.executeAtomicOp(inst)
 
-		case OpControlBarrier, OpMemoryBarrier:
-			// In a single-threaded interpreter, barriers are no-ops.
-			// All invocations within a workgroup run sequentially,
-			// so there is no need for synchronization.
+		case OpControlBarrier:
+			// OpControlBarrier: execution scope, memory scope, semantics.
+			// A workgroup-wide barrier stops the invocation here until every
+			// invocation of the workgroup has reached it (DispatchCompute
+			// runs them round-robin from barrier to barrier). Memory needs
+			// no fence: the invocations run one at a time, so every write
+			// before the barrier is visible after it.
+			if interp.syncBarriers && len(inst.Operands) >= 1 && syncsWorkgroup(toUint32(interp.values[inst.Operands[0]])) {
+				interp.resumePC = pc
+				interp.suspended = true
+				return nil
+			}
+
+		case OpMemoryBarrier:
+			// The invocations run one at a time and switch only at control
+			// barriers, so memory is always coherent: nothing to do.
 
 		case OpUndef:
 			// OpUndef produces an undefined value -- use zero.
@@ -1476,18 +1535,24 @@ const maxCallDepth = 64
 // Each call creates a fresh value scope (local variables) while sharing the
 // module-level constants and context. Uses the interpreter pool to avoid
 // allocating a new values slice per call.
-func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, error) {
+//
+// If the callee stops at a workgroup barrier (syncBarriers), it is returned
+// as callee, still holding its state: the caller suspends with it and
+// resumeCall continues it. Otherwise callee is nil and the callee is back in
+// the pool.
+func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (result Value, callee *interpreter, err error) {
 	if interp.callDepth >= maxCallDepth {
-		return Value{}, fmt.Errorf("spirv: exceeded maximum call depth (%d)", maxCallDepth)
+		return Value{}, nil, fmt.Errorf("spirv: exceeded maximum call depth (%d)", maxCallDepth)
 	}
 
-	fn, ok := interp.module.FunctionsByID[funcID]
+	m := interp.module
+	fn, ok := m.FunctionsByID[funcID]
 	if !ok {
-		return Value{}, fmt.Errorf("spirv: function %d not found", funcID)
+		return Value{}, nil, fmt.Errorf("spirv: function %d not found", funcID)
 	}
 
 	// Acquire a pooled child interpreter to avoid allocating per call.
-	child := interp.module.getInterpreter()
+	child := m.getInterpreter()
 	child.ep = interp.ep
 	child.fn = fn
 	child.ctx = interp.ctx
@@ -1495,11 +1560,9 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 	child.prevBlock = 0
 	child.iterationCount = 0
 	child.returnValue = Value{}
+	child.syncBarriers = interp.syncBarriers
 
-	// Seed constants into the child value slice.
-	for id, val := range interp.module.Constants {
-		child.values[id] = val
-	}
+	child.seedConstants()
 
 	// Bind parameters: find OpFunctionParameter instructions and assign argument values.
 	paramIdx := 0
@@ -1512,26 +1575,68 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (Value, 
 		}
 	}
 
-	// Copy resource variable bindings from parent so the callee can access buffers.
-	for varID, vi := range interp.module.Variables {
-		if vi.StorageClass == StorageClassUniform || vi.StorageClass == StorageClassStorageBuffer ||
-			vi.StorageClass == StorageClassPushConstant || vi.StorageClass == StorageClassUniformConstant {
-			v := interp.values[varID]
-			if !v.IsNone() {
+	// The callee sees the invocation's module-scope variables: the resource
+	// bindings, and the Private and Workgroup variables, whose pointers are
+	// shared so its stores reach the caller (and, for Workgroup memory, the
+	// other invocations).
+	prep := m.prepared()
+	for _, ids := range [...][]uint32{prep.resources, prep.private, prep.workgroup} {
+		for _, varID := range ids {
+			if v := interp.values[varID]; !v.IsNone() {
 				child.values[varID] = v
 			}
 		}
 	}
 
-	// Execute the callee.
-	if err := child.run(); err != nil {
-		interp.module.putInterpreter(child)
-		return Value{}, err
-	}
+	return child.finishCall()
+}
 
-	retVal := child.returnValue
-	interp.module.putInterpreter(child)
-	return retVal, nil
+// finishCall runs interp, a callee, (or resumes it) and returns its result,
+// or interp itself if it stopped at a barrier (see callFunction).
+func (interp *interpreter) finishCall() (Value, *interpreter, error) {
+	if err := interp.run(); err != nil {
+		interp.module.release(interp)
+		return Value{}, nil, err
+	}
+	if interp.suspended {
+		return Value{}, interp, nil
+	}
+	retVal := interp.returnValue
+	interp.module.putInterpreter(interp)
+	return retVal, nil, nil
+}
+
+// resumeCall continues the callee interp is suspended in. When the callee
+// returns, its result becomes the value of the OpFunctionCall; when it
+// stops at the next barrier, interp stays suspended in it.
+func (interp *interpreter) resumeCall() error {
+	child := interp.pendingCall
+	interp.pendingCall = nil
+	result, callee, err := child.finishCall()
+	if err != nil {
+		return err
+	}
+	if callee != nil {
+		interp.pendingCall = callee
+		interp.suspended = true
+		return nil
+	}
+	interp.values[interp.pendingResult] = result
+	return nil
+}
+
+// syncsWorkgroup reports whether an OpControlBarrier with execution scope
+// scope makes the invocations of a workgroup wait for each other: a
+// Workgroup scope or a wider one (CrossDevice 0, Device 1, Workgroup 2,
+// QueueFamily 5). A Subgroup (3) or Invocation (4) barrier does not: the
+// interpreter has no subgroup operations, and suspending there could let an
+// invocation pass a later workgroup barrier before the others reach it.
+func syncsWorkgroup(scope uint32) bool {
+	const (
+		scopeSubgroup   = 3
+		scopeInvocation = 4
+	)
+	return scope != scopeSubgroup && scope != scopeInvocation
 }
 
 // accessChain navigates into a composite value through a chain of indexes,

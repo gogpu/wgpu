@@ -14,7 +14,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/software"
 )
 
 // TestOverridesAllAdapters runs the override cases of this package on every
@@ -100,10 +99,6 @@ func runOverrideCasesOnAdapter(t *testing.T, a *hal.ExposedAdapter) {
 	for _, c := range overrideCases() {
 		t.Run(c.name, func(t *testing.T) {
 			out, err := r.run(c.wgsl, c.constants, c.inputs)
-			if _, sw := r.device.(*software.Device); sw && c.sharesWorkgroupMemory {
-				requireWorkgroupBarrierRefused(t, err)
-				return
-			}
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
