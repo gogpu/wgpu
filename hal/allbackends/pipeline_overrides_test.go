@@ -129,18 +129,16 @@ func openBackendDeviceFeatures(t *testing.T, b overrideBackend, required gputype
 
 // isOverrideTarget reports whether the adapter RequestAdapter returned is one
 // that backend entry b tests. The software entry wants the software backend's
-// adapter. A DX12 entry takes any DX12 adapter, WARP (DeviceTypeCPU)
-// included: it is the only DX12 adapter of a GPU-less CI runner. Other GPU
-// API entries keep skipping CPU adapters (lavapipe, llvmpipe).
+// adapter. A GPU API entry takes any adapter of its backend, CPU
+// implementations of the API included: WARP for DX12, lavapipe for Vulkan and
+// llvmpipe for GL. They are the only adapters of a GPU-less machine (a CI
+// runner, WSL without GPU passthrough), and they run the same backend code as
+// a GPU does, so skipping them left that code untested there.
 func isOverrideTarget(b overrideBackend, info gputypes.AdapterInfo) bool {
-	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
 	if b.software {
-		return isCPU && info.Backend == gputypes.BackendEmpty
+		return info.DeviceType == gputypes.DeviceTypeCPU && info.Backend == gputypes.BackendEmpty
 	}
-	if info.Backend != b.backend {
-		return false
-	}
-	return !isCPU || b.backend == gputypes.BackendDX12
+	return info.Backend == b.backend
 }
 
 func TestOverrideTargetAdapter(t *testing.T) {
@@ -148,6 +146,7 @@ func TestOverrideTargetAdapter(t *testing.T) {
 	iris := gputypes.AdapterInfo{Name: "Intel(R) Iris(R) Xe Graphics", DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendDX12}
 	soft := gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendEmpty}
 	lavapipe := gputypes.AdapterInfo{Name: "llvmpipe", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendVulkan}
+	llvmpipeGL := gputypes.AdapterInfo{Name: "llvmpipe (LLVM 17.0.6, 256 bits)", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendGL}
 	byName := map[string]overrideBackend{}
 	for _, b := range overrideBackends {
 		byName[b.name] = b
@@ -164,8 +163,13 @@ func TestOverrideTargetAdapter(t *testing.T) {
 		{"software", soft, true},
 		{"software", warp, false},
 		{"software", lavapipe, false},
-		{"vulkan", lavapipe, false},
+		{"software", llvmpipeGL, false},
+		{"vulkan", lavapipe, true},
 		{"vulkan", warp, false},
+		{"vulkan", soft, false},
+		{"gles", llvmpipeGL, true},
+		{"gles", lavapipe, false},
+		{"gles", soft, false},
 	} {
 		if got := isOverrideTarget(byName[tc.entry], tc.info); got != tc.want {
 			t.Errorf("isOverrideTarget(%s, %q %v %v) = %v, want %v",
