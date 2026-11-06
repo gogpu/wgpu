@@ -104,7 +104,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (hal.Buffer, error) {
 	}
 
 	glCtx.BindBuffer(target, id)
-	glCtx.BufferData(target, int(desc.Size), 0, usage)
+	glCtx.BufferData(target, int(desc.Size), nil, usage)
 	glCtx.BindBuffer(target, 0)
 
 	buf := &Buffer{
@@ -289,7 +289,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
 			glCtx.TexImage2D(target, int32(level), int32(internalFormat),
-				width, height, 0, format, dataType, 0)
+				width, height, 0, format, dataType, nil)
 			if glErr := glCtx.GetError(); glErr != 0 {
 				glCtx.DeleteTextures(id)
 				return nil, fmt.Errorf("gles: TexImage2D failed: GL error 0x%x (format=0x%x, level=%d, %dx%d)",
@@ -304,7 +304,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 				width := maxInt32(1, int32(desc.Size.Width>>level))
 				height := maxInt32(1, int32(desc.Size.Height>>level))
 				glCtx.TexImage2D(faceTarget, int32(level), int32(internalFormat),
-					width, height, 0, format, dataType, 0)
+					width, height, 0, format, dataType, nil)
 			}
 		}
 
@@ -967,7 +967,7 @@ func allocateLayeredStorage(glCtx *gl.Context, target uint32, desc *TextureDescr
 	}
 	for level := uint32(0); level < desc.MipLevelCount; level++ {
 		w, h, depth := layeredLevelSize(target, desc.Size, level)
-		glCtx.TexImage3D(target, int32(level), int32(internalFormat), w, h, depth, 0, format, dataType, 0)
+		glCtx.TexImage3D(target, int32(level), int32(internalFormat), w, h, depth, 0, format, dataType, nil)
 		if glErr := glCtx.GetError(); glErr != 0 {
 			return fmt.Errorf("gles: TexImage3D failed: GL error 0x%x (format=0x%x, level=%d, %dx%dx%d)",
 				glErr, internalFormat, level, w, h, depth)

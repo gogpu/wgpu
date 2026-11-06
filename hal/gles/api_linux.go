@@ -128,7 +128,7 @@ func loadContextGL(eglCtx *egl.Context, gles bool) (*gl.Context, error) {
 		return nil, fmt.Errorf("gles: failed to make context current: %w", err)
 	}
 	glCtx := &gl.Context{}
-	if err := glCtx.Load(egl.GetGLProcAddress, gles); err != nil {
+	if err := glCtx.Load(egl.GetGLProcAddress); err != nil {
 		eglCtx.Destroy()
 		return nil, fmt.Errorf("gles: failed to load GL functions: %w", err)
 	}

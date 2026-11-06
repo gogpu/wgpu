@@ -69,7 +69,13 @@ var (
 	cifVoid6TexStorage3D  types.CallInterface // void fn(uint32, int32, uint32, int32, int32, int32) - TexStorage3D
 	cifVoid9CompSubImg2D  types.CallInterface // void fn(uint32, int32*5, uint32, int32, void*) - CompressedTexSubImage2D
 	cifVoid11CompSubImg3D types.CallInterface // void fn(uint32, int32*7, uint32, int32, void*) - CompressedTexSubImage3D
-	cifInitialized        bool
+
+	cifUInt32Wait   types.CallInterface // uint32 fn(void*, uint32, uint64) - ClientWaitSync
+	cifVoid5Synciv  types.CallInterface // void fn(void*, uint32, int32, void*, void*) - GetSynciv
+	cifVoid5CopyBuf types.CallInterface // void fn(uint32, uint32, uintptr, uintptr, uintptr) - CopyBufferSubData
+	cifVoid8CopyTex types.CallInterface // void fn(uint32, int32 x7) - CopyTexSubImage2D
+
+	cifInitialized bool
 )
 
 // initCommonCallInterfaces prepares reusable CallInterface signatures.
@@ -530,9 +536,68 @@ func initCommonCallInterfaces() error {
 	if err := initCompressedTextureCallInterfaces(); err != nil {
 		return err
 	}
+	if err := initSyncCopyCallInterfaces(); err != nil {
+		return err
+	}
 
 	cifInitialized = true
 	return nil
+}
+
+// initSyncCopyCallInterfaces prepares the signatures of ClientWaitSync,
+// GetSyncStatus, CopyBufferSubData and CopyTexSubImage2D. They used to be
+// prepared on every call, including the fence-poll hot path (ClientWaitSync,
+// GetSyncStatus).
+func initSyncCopyCallInterfaces() error {
+	err := ffi.PrepareCallInterface(&cifUInt32Wait, types.DefaultCall,
+		types.UInt32TypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // sync
+			types.UInt32TypeDescriptor,  // flags
+			types.UInt64TypeDescriptor,  // timeout
+		})
+	if err != nil {
+		return err
+	}
+
+	err = ffi.PrepareCallInterface(&cifVoid5Synciv, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // sync
+			types.UInt32TypeDescriptor,  // pname
+			types.SInt32TypeDescriptor,  // count
+			types.PointerTypeDescriptor, // length
+			types.PointerTypeDescriptor, // values
+		})
+	if err != nil {
+		return err
+	}
+
+	err = ffi.PrepareCallInterface(&cifVoid5CopyBuf, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,  // readTarget
+			types.UInt32TypeDescriptor,  // writeTarget
+			types.PointerTypeDescriptor, // readOffset (GLintptr)
+			types.PointerTypeDescriptor, // writeOffset (GLintptr)
+			types.PointerTypeDescriptor, // size (GLsizeiptr)
+		})
+	if err != nil {
+		return err
+	}
+
+	return ffi.PrepareCallInterface(&cifVoid8CopyTex, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // target
+			types.SInt32TypeDescriptor, // level
+			types.SInt32TypeDescriptor, // xoffset
+			types.SInt32TypeDescriptor, // yoffset
+			types.SInt32TypeDescriptor, // x
+			types.SInt32TypeDescriptor, // y
+			types.SInt32TypeDescriptor, // width
+			types.SInt32TypeDescriptor, // height
+		})
 }
 
 // Context holds OpenGL function pointers loaded at runtime via goffi.
@@ -740,21 +805,25 @@ type Context struct {
 type ProcAddressFunc func(name string) unsafe.Pointer
 
 // Load loads all OpenGL function pointers using the provided loader.
-// isGLES indicates the context is OpenGL ES — some functions have different
-// names (glClearDepthf vs glClearDepth, glMapBufferRange vs glMapBuffer).
-// Mesa d3d12 gallium returns dispatch stubs for desktop GL names on GLES
-// contexts that generate GL_INVALID_ENUM at call time.
-func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
-	gles := len(isGLES) > 0 && isGLES[0]
-	c.isGLES = gles
-	// Initialize common CallInterfaces
+// The context must be current. Whether it is OpenGL ES is read from
+// GL_VERSION ("OpenGL ES N.M ..."), as Rust wgpu-hal does (gles/adapter.rs
+// parse_version), because some entry points differ by name (glClearDepthf vs
+// glClearDepth, glMapBufferRange vs glMapBuffer) and Mesa d3d12 gallium
+// returns dispatch stubs for desktop GL names on ES contexts that raise
+// GL_INVALID_ENUM at call time.
+func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	if err := initCommonCallInterfaces(); err != nil {
 		return err
 	}
 
+	// Without glGetString the version stays unknown (desktop) and the
+	// required-procs check at the end of Load reports it with the others.
+	c.glGetString = getProcAddr("glGetString")
+	gles := c.glGetString != nil && isESVersionString(c.GetString(VERSION))
+	c.isGLES = gles
+
 	// Core GL 1.1
 	c.glGetError = getProcAddr("glGetError")
-	c.glGetString = getProcAddr("glGetString")
 	c.glGetIntegerv = getProcAddr("glGetIntegerv")
 	c.glEnable = getProcAddr("glEnable")
 	c.glDisable = getProcAddr("glDisable")
@@ -1142,16 +1211,7 @@ func (c *Context) DrawArrays(mode uint32, first, count int32) {
 		unsafe.Pointer(&ufirst),
 		unsafe.Pointer(&ucount),
 	}
-	// Need a 3-arg void signature
-	var cif3 types.CallInterface
-	_ = ffi.PrepareCallInterface(&cif3, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.UInt32TypeDescriptor,
-			types.UInt32TypeDescriptor,
-			types.UInt32TypeDescriptor,
-		})
-	_, _ = ffi.CallFunction(&cif3, c.glDrawArrays, nil, args[:])
+	_, _ = ffi.CallFunction(&cifVoid3, c.glDrawArrays, nil, args[:])
 }
 
 func (c *Context) DrawElements(mode uint32, count int32, typ uint32, indices uintptr) {
@@ -1353,12 +1413,12 @@ func (c *Context) BindBuffer(target, buffer uint32) {
 	_, _ = ffi.CallFunction(&cifVoid2UU, c.glBindBuffer, nil, args[:])
 }
 
-func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32) {
+func (c *Context) BufferData(target uint32, size int, data unsafe.Pointer, usage uint32) {
 	sizePtr := uintptr(size)
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&sizePtr),
-		unsafe.Pointer(&data), // FFI reads data (address of buffer) → OpenGL gets void*
+		unsafe.Pointer(&data), // unsafe.Pointer keeps the source alive for the call; FFI reads data → OpenGL gets void*
 		unsafe.Pointer(&usage),
 	}
 	_, _ = ffi.CallFunction(&cifVoid4Buffer, c.glBufferData, nil, args[:])
@@ -1367,7 +1427,7 @@ func (c *Context) BufferData(target uint32, size int, data uintptr, usage uint32
 // AllocateBuffer gives the buffer bound to target size bytes of undefined
 // content (glBufferData with a null pointer).
 func (c *Context) AllocateBuffer(target uint32, size int, usage uint32) {
-	c.BufferData(target, size, 0, usage)
+	c.BufferData(target, size, nil, usage)
 }
 
 func (c *Context) BufferSubData(target uint32, offset, size int, data unsafe.Pointer) {
@@ -1528,7 +1588,7 @@ func (c *Context) TexParameteri(target, pname uint32, param int32) {
 	_, _ = ffi.CallFunction(&cifVoid3, c.glTexParameteri, nil, args[:])
 }
 
-func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, width, height int32, border int32, format, typ uint32, pixels uintptr) {
+func (c *Context) TexImage2D(target uint32, level int32, internalformat int32, width, height int32, border int32, format, typ uint32, pixels unsafe.Pointer) {
 	args := [9]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&level),
@@ -1587,9 +1647,9 @@ func (c *Context) HasLayeredTextures() bool {
 	return c.glTexImage3D != nil && c.glTexSubImage3D != nil && c.glFramebufferTextureLayer != nil
 }
 
-// TexImage3D allocates (pixels 0) or fills one mip level of a 3D or 2D
+// TexImage3D allocates (pixels nil) or fills one mip level of a 3D or 2D
 // array texture. No-op if not supported (HasLayeredTextures).
-func (c *Context) TexImage3D(target uint32, level, internalformat, width, height, depth, border int32, format, typ uint32, pixels uintptr) {
+func (c *Context) TexImage3D(target uint32, level, internalformat, width, height, depth, border int32, format, typ uint32, pixels unsafe.Pointer) {
 	if c.glTexImage3D == nil {
 		return
 	}
@@ -2588,22 +2648,13 @@ func (c *Context) ClientWaitSync(sync uintptr, flags uint32, timeout uint64) uin
 		return WAIT_FAILED
 	}
 	// glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout)
-	// goffi needs a custom CIF for (pointer, uint32, uint64) -> uint32
-	var cifCWS types.CallInterface
-	_ = ffi.PrepareCallInterface(&cifCWS, types.DefaultCall,
-		types.UInt32TypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor,
-			types.UInt32TypeDescriptor,
-			types.UInt64TypeDescriptor,
-		})
 	var result uint32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&sync),
 		unsafe.Pointer(&flags),
 		unsafe.Pointer(&timeout),
 	}
-	_, _ = ffi.CallFunction(&cifCWS, c.glClientWaitSync, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cifUInt32Wait, c.glClientWaitSync, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -2613,16 +2664,6 @@ func (c *Context) GetSyncStatus(sync uintptr) uint32 {
 		return SIGNALED // assume signaled if not supported
 	}
 	// glGetSynciv(GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values)
-	var cifGSI types.CallInterface
-	_ = ffi.PrepareCallInterface(&cifGSI, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // sync
-			types.UInt32TypeDescriptor,  // pname
-			types.SInt32TypeDescriptor,  // count
-			types.PointerTypeDescriptor, // length
-			types.PointerTypeDescriptor, // values
-		})
 	pname := uint32(SYNC_STATUS)
 	count := int32(1)
 	var length int32
@@ -2636,7 +2677,7 @@ func (c *Context) GetSyncStatus(sync uintptr) uint32 {
 		unsafe.Pointer(&pLength), // FFI reads pLength (= &length) → OpenGL writes to length
 		unsafe.Pointer(&pValue),  // FFI reads pValue (= &value) → OpenGL writes to value
 	}
-	_, _ = ffi.CallFunction(&cifGSI, c.glGetSynciv, nil, args[:])
+	_, _ = ffi.CallFunction(&cifVoid5Synciv, c.glGetSynciv, nil, args[:])
 	return uint32(value)
 }
 
@@ -2656,16 +2697,6 @@ func (c *Context) CopyBufferSubData(readTarget, writeTarget uint32, readOffset, 
 	ro := uintptr(readOffset)
 	wo := uintptr(writeOffset)
 	sz := uintptr(size)
-	var cifCBS types.CallInterface
-	_ = ffi.PrepareCallInterface(&cifCBS, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.UInt32TypeDescriptor,
-			types.UInt32TypeDescriptor,
-			types.PointerTypeDescriptor,
-			types.PointerTypeDescriptor,
-			types.PointerTypeDescriptor,
-		})
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&readTarget),
 		unsafe.Pointer(&writeTarget),
@@ -2673,7 +2704,7 @@ func (c *Context) CopyBufferSubData(readTarget, writeTarget uint32, readOffset, 
 		unsafe.Pointer(&wo),
 		unsafe.Pointer(&sz),
 	}
-	_, _ = ffi.CallFunction(&cifCBS, c.glCopyBufferSubData, nil, args[:])
+	_, _ = ffi.CallFunction(&cifVoid5CopyBuf, c.glCopyBufferSubData, nil, args[:])
 }
 
 // CopyTexSubImage2D copies pixels from the read framebuffer into a 2D texture.
@@ -2682,20 +2713,6 @@ func (c *Context) CopyTexSubImage2D(target uint32, level, xoffset, yoffset, x, y
 	if c.glCopyTexSubImage2D == nil {
 		return
 	}
-	// 8 arguments: uint32, int32, int32, int32, int32, int32, int32, int32
-	var cifCTSI types.CallInterface
-	_ = ffi.PrepareCallInterface(&cifCTSI, types.DefaultCall,
-		types.VoidTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.UInt32TypeDescriptor, // target
-			types.SInt32TypeDescriptor, // level
-			types.SInt32TypeDescriptor, // xoffset
-			types.SInt32TypeDescriptor, // yoffset
-			types.SInt32TypeDescriptor, // x
-			types.SInt32TypeDescriptor, // y
-			types.SInt32TypeDescriptor, // width
-			types.SInt32TypeDescriptor, // height
-		})
 	args := [8]unsafe.Pointer{
 		unsafe.Pointer(&target),
 		unsafe.Pointer(&level),
@@ -2706,7 +2723,7 @@ func (c *Context) CopyTexSubImage2D(target uint32, level, xoffset, yoffset, x, y
 		unsafe.Pointer(&width),
 		unsafe.Pointer(&height),
 	}
-	_, _ = ffi.CallFunction(&cifCTSI, c.glCopyTexSubImage2D, nil, args[:])
+	_, _ = ffi.CallFunction(&cifVoid8CopyTex, c.glCopyTexSubImage2D, nil, args[:])
 }
 
 // --- Helpers ---
