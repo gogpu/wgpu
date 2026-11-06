@@ -168,6 +168,13 @@ Pure Go OpenGL 3.3+ / OpenGL ES 3.0+ implementation; adapters below that minimum
 - Scissor Y-flip: WebGPU top-left → OpenGL bottom-left origin conversion
 - MSAA resolve via `glBlitFramebuffer`
 - Texture unit validation: warns when binding exceeds GL_MAX_TEXTURE_IMAGE_UNITS
+- Texture formats from Rust wgpu-hal's `describe_texture_format` table; a format without a row is an error, never a silent RGBA8
+- Compressed textures (BC, ETC2, ASTC): immutable storage (`glTexStorage`) and `glCompressedTexSubImage` uploads in block rows
+- GL target chosen at creation by shape, as Rust: a square 2D texture with a multiple of 6 layers is a cube (or cube-array) texture; a sampled view GL cannot bind with that target is refused at bind group creation (`CreateBindGroupErrorTextureViewNotSampleable`). No GL texture views, so no `DownlevelFlagsViewFormats`
+- Sampled views bind their mip range (`TEXTURE_BASE_LEVEL`/`MAX_LEVEL`) and depth/stencil aspect (`DEPTH_STENCIL_TEXTURE_MODE`) per bind
+- `GL_FRAMEBUFFER_SRGB` on for every desktop context (off around the present blit), so sRGB targets encode and blend in linear space
+- Integer targets clear with `glClearBufferuiv` / `glClearBufferiv`; each pass detaches the earlier pass's attachments of a reused framebuffer
+- Stencil uploads into combined depth-stencil formats: the backend sets `hal.Capabilities.StencilCopyNeedsBlit`, and the frontend lowers them to a draw blit (`internal/stencilblit`, below)
 
 ### `hal/software/` — Software Backend
 
@@ -214,6 +221,22 @@ wgpu public API
 - Zero external dependencies
 
 Key files: `promise.go` (async→sync), `convert_enums.go` (97 TextureFormats, 31 VertexFormats + all WebGPU enums), `convert_resources.go` (JS descriptor builders), `surface.go` (Canvas + GPUCanvasContext).
+
+### `internal/stencilblit/` — Stencil-Aspect Upload by Draw
+
+GL cannot upload the stencil of a packed depth-stencil texture from a buffer. For a backend that sets
+`hal.Capabilities.StencilCopyNeedsBlit` (GLES), the root package lowers a stencil-aspect `CopyBufferToTexture` or
+`WriteTexture` into `Depth24PlusStencil8` / `Depth32FloatStencil8`, after the full copy validation, to an upload
+into an R8Uint texture and per-bit stencil draw passes into the destination, as Dawn's GL backend does. The package
+owns the WGSL (one module per bit), the per-device pipeline cache and the pass recording; the root owns the
+orchestration (the user's encoder for a copy; an internal encoder and submit, after flushing pending writes, for
+`WriteTexture`). Temporaries are tracked resources released on GPU completion.
+
+### `internal/pipeconst/` — Pipeline Constants Checks
+
+The one check of pipeline-overridable constants every build shares (native, `-tags rust`, js/wasm): an empty key,
+or a NaN or infinite value, is an error on every stage. Matching the keys to a stage's overrides is done before the
+HAL by specializing the stage's entry point with naga.
 
 ### `internal/raytracing/` — Ray Tracing Resources & Validation (ADR-062)
 
