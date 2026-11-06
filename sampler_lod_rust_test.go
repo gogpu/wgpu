@@ -2,7 +2,12 @@
 
 package wgpu
 
-import "testing"
+import (
+	"testing"
+
+	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
+)
 
 // TestSamplerDescriptorToRustLodMaxClamp checks the -tags rust conversion:
 // wgpu-native takes LodMaxClamp literally, so the zero value must arrive as
@@ -25,6 +30,20 @@ func TestSamplerDescriptorToRustLodMaxClamp(t *testing.T) {
 		if r.LodMinClamp != c.wantMin || r.LodMaxClamp != c.wantM {
 			t.Errorf("%s: wgpu-native clamps [%v, %v], want [%v, %v]", c.name, r.LodMinClamp, r.LodMaxClamp, c.wantMin, c.wantM)
 		}
+	}
+}
+
+// TestSamplerDescriptorToRustZeroEnums: wgpu-native gets nearest filters and
+// clamp-to-edge address modes for a zero-value descriptor.
+func TestSamplerDescriptorToRustZeroEnums(t *testing.T) {
+	r := samplerDescriptorToRust(nil)
+	if r.MinFilter != gputypes.FilterModeNearest || r.MagFilter != gputypes.FilterModeNearest ||
+		r.MipmapFilter != rwgpu.MipmapFilterMode(gputypes.FilterModeNearest) {
+		t.Errorf("zero filters reach wgpu-native as %v/%v/%v, want nearest", r.MinFilter, r.MagFilter, r.MipmapFilter)
+	}
+	if r.AddressModeU != gputypes.AddressModeClampToEdge || r.AddressModeV != gputypes.AddressModeClampToEdge ||
+		r.AddressModeW != gputypes.AddressModeClampToEdge {
+		t.Errorf("zero address modes reach wgpu-native as %v/%v/%v, want clamp-to-edge", r.AddressModeU, r.AddressModeV, r.AddressModeW)
 	}
 }
 

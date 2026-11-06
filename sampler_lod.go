@@ -1,5 +1,31 @@
 package wgpu
 
+import "github.com/gogpu/gputypes"
+
+// normalizeFilterMode maps FilterModeUndefined, the Go zero value, to the
+// WebGPU default "nearest" (GPUSamplerDescriptor magFilter, minFilter and
+// mipmapFilter, index.bs). GPUFilterMode and GPUMipmapFilterMode have no
+// undefined member, so the zero can only mean "not set" (ADR-080 Rule 1);
+// every explicit value is kept. Metal mapped an undefined mipmap filter to
+// "not mipmapped", so a zero-value sampler read only the base level there.
+func normalizeFilterMode(m gputypes.FilterMode) gputypes.FilterMode {
+	if m == gputypes.FilterModeUndefined {
+		return gputypes.FilterModeNearest
+	}
+	return m
+}
+
+// normalizeAddressMode maps AddressModeUndefined, the Go zero value, to the
+// WebGPU default "clamp-to-edge" (GPUSamplerDescriptor addressModeU/V/W).
+// The software backend repeated for an undefined mode while every GPU backend
+// clamped.
+func normalizeAddressMode(m gputypes.AddressMode) gputypes.AddressMode {
+	if m == gputypes.AddressModeUndefined {
+		return gputypes.AddressModeClampToEdge
+	}
+	return m
+}
+
 // lodMaxClampDefault is the WebGPU default of GPUSamplerDescriptor.lodMaxClamp.
 // It exceeds the mip level count of any texture a backend can create, so it
 // clamps nothing.

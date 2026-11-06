@@ -152,12 +152,12 @@ func samplerDescriptorToRust(desc *SamplerDescriptor) *rwgpu.SamplerDescriptor {
 	}
 	return &rwgpu.SamplerDescriptor{
 		Label:        desc.Label,
-		AddressModeU: desc.AddressModeU,
-		AddressModeV: desc.AddressModeV,
-		AddressModeW: desc.AddressModeW,
-		MagFilter:    desc.MagFilter,
-		MinFilter:    desc.MinFilter,
-		MipmapFilter: rwgpu.MipmapFilterMode(desc.MipmapFilter),
+		AddressModeU: normalizeAddressMode(desc.AddressModeU),
+		AddressModeV: normalizeAddressMode(desc.AddressModeV),
+		AddressModeW: normalizeAddressMode(desc.AddressModeW),
+		MagFilter:    normalizeFilterMode(desc.MagFilter),
+		MinFilter:    normalizeFilterMode(desc.MinFilter),
+		MipmapFilter: rwgpu.MipmapFilterMode(normalizeFilterMode(desc.MipmapFilter)),
 		LodMinClamp:  desc.LodMinClamp,
 		LodMaxClamp:  normalizeLodMaxClamp(desc.LodMaxClamp),
 		Compare:      desc.Compare,
