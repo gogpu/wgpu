@@ -5,6 +5,7 @@ package shader
 
 import (
 	"bytes"
+	"encoding/binary"
 	"math"
 	"testing"
 
@@ -60,6 +61,88 @@ func TestEncodeDecodeTexel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// le32 is v in little-endian byte order, a packed texel as stored.
+func le32(v uint32) []byte { return binary.LittleEndian.AppendUint32(nil, v) }
+
+// TestReadTexelByFormat: a sampled read (readTexel, which textureLoad and
+// textureSample use) decodes the texel by its format, as storage reads do.
+// It decoded by byte count alone: 2 bytes as two 8-bit unorm channels, so a
+// Depth16Unorm 0x3000 read 0 and an R16Float 1.5 read (0, 62/255); 4 bytes as
+// RGBA8, so a Depth32Float or R32Float read its float's bytes.
+func TestReadTexelByFormat(t *testing.T) {
+	f32 := func(f float32) []byte { return le32(math.Float32bits(f)) }
+	tests := []struct {
+		format gputypes.TextureFormat
+		texel  []byte
+		want   Vec4
+	}{
+		{gputypes.TextureFormatR8Unorm, []byte{51}, Vec4{0.2, 0, 0, 1}},
+		{gputypes.TextureFormatR8Uint, []byte{200}, Vec4{200, 0, 0, 1}},
+		{gputypes.TextureFormatR8Sint, []byte{0xFF}, Vec4{-1, 0, 0, 1}},
+		{gputypes.TextureFormatRG8Unorm, []byte{0, 255}, Vec4{0, 1, 0, 1}},
+		{gputypes.TextureFormatRGBA8Unorm, []byte{255, 0, 51, 255}, Vec4{1, 0, 0.2, 1}},
+		{gputypes.TextureFormatRGBA8Snorm, []byte{0x81, 0x7F, 0, 0x7F}, Vec4{-1, 1, 0, 1}},
+		{gputypes.TextureFormatRGBA8Uint, []byte{1, 2, 3, 4}, Vec4{1, 2, 3, 4}},
+		{gputypes.TextureFormatBGRA8Unorm, []byte{51, 0, 255, 255}, Vec4{1, 0, 0.2, 1}},
+		// The sRGB formats read their stored bytes, without the sRGB-to-linear
+		// decode: P1-SW-021 adds it with the encode on writes.
+		{gputypes.TextureFormatRGBA8UnormSrgb, []byte{255, 0, 51, 255}, Vec4{1, 0, 0.2, 1}},
+		{gputypes.TextureFormatBGRA8UnormSrgb, []byte{51, 0, 255, 255}, Vec4{1, 0, 0.2, 1}},
+		{gputypes.TextureFormatR16Unorm, []byte{0xFF, 0xFF}, Vec4{1, 0, 0, 1}},
+		{gputypes.TextureFormatR16Uint, []byte{0xFF, 0xFF}, Vec4{65535, 0, 0, 1}},
+		{gputypes.TextureFormatR16Sint, []byte{0xFE, 0xFF}, Vec4{-2, 0, 0, 1}},
+		{gputypes.TextureFormatR16Float, []byte{0x00, 0x3E}, Vec4{1.5, 0, 0, 1}},
+		{gputypes.TextureFormatRG16Unorm, []byte{0, 0, 0xFF, 0xFF}, Vec4{0, 1, 0, 1}},
+		{gputypes.TextureFormatRGBA16Unorm, []byte{0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF}, Vec4{1, 0, 0, 1}},
+		{gputypes.TextureFormatRGBA16Float, []byte{0x00, 0x3C, 0x00, 0xB8, 0x00, 0x40, 0x00, 0x3C}, Vec4{1, -0.5, 2, 1}},
+		{gputypes.TextureFormatRGBA16Sint, []byte{0xFF, 0xFF, 2, 0, 0, 0x80, 0xFF, 0x7F}, Vec4{-1, 2, -32768, 32767}},
+		{gputypes.TextureFormatR32Float, f32(1.5), Vec4{1.5, 0, 0, 1}},
+		{gputypes.TextureFormatR32Uint, le32(70000), Vec4{70000, 0, 0, 1}},
+		{gputypes.TextureFormatR32Sint, le32(0xFFFFFFFE), Vec4{-2, 0, 0, 1}},
+		{gputypes.TextureFormatRG32Float, append(f32(0.5), f32(-3)...), Vec4{0.5, -3, 0, 1}},
+		{gputypes.TextureFormatRGBA32Float, append(append(f32(1), f32(2)...), append(f32(3), f32(4)...)...), Vec4{1, 2, 3, 4}},
+		{gputypes.TextureFormatRGBA32Uint, append(append(le32(1), le32(2)...), append(le32(3), le32(4)...)...), Vec4{1, 2, 3, 4}},
+		// Packed: r in the low bits.
+		{gputypes.TextureFormatRGB10A2Unorm, le32(1023 | 0<<10 | 341<<20 | 3<<30), Vec4{1, 0, 341.0 / 1023, 1}},
+		{gputypes.TextureFormatRGB10A2Uint, le32(1023 | 7<<10 | 512<<20 | 2<<30), Vec4{1023, 7, 512, 2}},
+		// 11-bit floats 1.0 (exponent 15) and 2.0, 10-bit float 0.5.
+		{gputypes.TextureFormatRG11B10Ufloat, le32(15<<6 | (16<<6)<<11 | (14<<5)<<22), Vec4{1, 2, 0.5, 1}},
+		// Shared exponent 16: mantissas scale by 2^(16-15-9).
+		{gputypes.TextureFormatRGB9E5Ufloat, le32(256 | 128<<9 | 0<<18 | 16<<27), Vec4{1, 0.5, 0, 1}},
+		// Depth reads as (d, 0, 0, 1). The software backend stores Depth24Plus
+		// and the depth of the combined formats as float32, 4 bytes a texel.
+		{gputypes.TextureFormatDepth16Unorm, []byte{0x00, 0x30}, Vec4{float32(0x3000) / 65535, 0, 0, 1}},
+		{gputypes.TextureFormatDepth32Float, f32(0.75), Vec4{0.75, 0, 0, 1}},
+		{gputypes.TextureFormatDepth24Plus, f32(0.25), Vec4{0.25, 0, 0, 1}},
+		{gputypes.TextureFormatDepth24PlusStencil8, f32(0.5), Vec4{0.5, 0, 0, 1}},
+		{gputypes.TextureFormatDepth32FloatStencil8, f32(0.125), Vec4{0.125, 0, 0, 1}},
+		{gputypes.TextureFormatStencil8, []byte{7}, Vec4{7, 0, 0, 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format.String(), func(t *testing.T) {
+			// Texel 0 is zero and texel 1 holds the value, so a decode of the
+			// wrong texel size reads across the two.
+			n := len(tt.texel)
+			tex := &Texture2D{Width: 2, Height: 1, Format: uint32(tt.format), BytesPerPixel: uint32(n),
+				Data: append(make([]byte, n), tt.texel...)}
+			if got := readTexel(tex, 1, 0); !vec4Near(got, tt.want) {
+				t.Errorf("readTexel = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// vec4Near reports whether a and b agree to within float32 rounding of the
+// decodes.
+func vec4Near(a, b Vec4) bool {
+	for i := range a {
+		if d := a[i] - b[i]; d > 1e-6 || d < -1e-6 {
+			return false
+		}
+	}
+	return true
 }
 
 // TestVectorShuffleOfIntegerArray checks that a shuffle reads the components

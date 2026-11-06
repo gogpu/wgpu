@@ -24,8 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-
-	"github.com/gogpu/gputypes"
 )
 
 // ErrDiscarded is returned by Execute, ExecuteWithContext and ExecuteWithDebug
@@ -2481,47 +2479,12 @@ func sampleBilinear(tex *Texture2D, u, v float32) Vec4 {
 	return result
 }
 
-// readTexel reads a single texel from the texture at pixel coordinates (x, y),
-// unpacking it to RGBA according to the texture's bytes-per-pixel and format.
-// BGRA formats swap R and B channels to return normalized RGBA. Single- and
-// two-channel formats follow the WebGPU convention of filling missing color
-// channels with 0 and alpha with 1. A zero BytesPerPixel means "unspecified"
-// and is treated as 4 (RGBA8) for backward compatibility.
+// readTexel reads texel (x, y) of the texture decoded by its format
+// (decodeTexel): missing channels read (0, 0, 0, 1), and a texel out of
+// bounds or of a format without a layout reads zero.
 func readTexel(tex *Texture2D, x, y int) Vec4 {
-	bpp := int(tex.BytesPerPixel)
-	if bpp == 0 {
-		bpp = 4
-	}
-	idx := (y*int(tex.Width) + x) * bpp
-	if idx+bpp > len(tex.Data) {
-		return Vec4{0, 0, 0, 0}
-	}
-	switch bpp {
-	case 1:
-		return Vec4{float32(tex.Data[idx]) / 255.0, 0, 0, 1}
-	case 2:
-		return Vec4{float32(tex.Data[idx]) / 255.0, float32(tex.Data[idx+1]) / 255.0, 0, 1}
-	default:
-		if isBGRAFormat(tex.Format) {
-			return Vec4{
-				float32(tex.Data[idx+2]) / 255.0,
-				float32(tex.Data[idx+1]) / 255.0,
-				float32(tex.Data[idx+0]) / 255.0,
-				float32(tex.Data[idx+3]) / 255.0,
-			}
-		}
-		return Vec4{
-			float32(tex.Data[idx+0]) / 255.0,
-			float32(tex.Data[idx+1]) / 255.0,
-			float32(tex.Data[idx+2]) / 255.0,
-			float32(tex.Data[idx+3]) / 255.0,
-		}
-	}
-}
-
-// isBGRAFormat returns true if the format stores bytes in BGRA order.
-func isBGRAFormat(format uint32) bool {
-	return format == uint32(gputypes.TextureFormatBGRA8Unorm) || format == uint32(gputypes.TextureFormatBGRA8UnormSrgb)
+	v, _ := decodeTexel(tex, x, y)
+	return v
 }
 
 // clampInt clamps an integer to [0, hi].

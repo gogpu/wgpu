@@ -1,10 +1,6 @@
 package shader
 
-import (
-	"math"
-
-	"github.com/gogpu/gputypes"
-)
+import "math"
 
 // This file selects the mip level, array layer, cube face or depth slice a
 // texture instruction reads, following the Vulkan specification's "Texel
@@ -108,7 +104,7 @@ func (tex *Texture2D) texelSize() int {
 	if tex.BytesPerPixel != 0 {
 		return int(tex.BytesPerPixel)
 	}
-	if layout, ok := texelLayouts[gputypes.TextureFormat(tex.Format)]; ok {
+	if layout, ok := sampledLayout(tex); ok {
 		return layout.channels * layout.bytes
 	}
 	return 4
