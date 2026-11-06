@@ -216,10 +216,8 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if !ok || dstTex == nil {
 		return
 	}
-	for _, region := range regions {
-		if _, _, ok := validateMetalBufferTextureCopyPlan(dstTex.format, dstTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size); !ok {
-			return
-		}
+	if !e.validateBufferTextureCopies("CopyBufferToTexture", srcBuf, dstTex, regions) {
+		return
 	}
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
@@ -227,26 +225,44 @@ func (e *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	if blitEncoder == 0 {
 		return
 	}
-	for _, region := range regions {
-		plan, bytesPerImage, _ := validateMetalBufferTextureCopyPlan(dstTex.format, dstTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size)
-		strides := metalBlitStrides(dstTex.dimension, uint64(region.BufferLayout.BytesPerRow), bytesPerImage)
-		for operation := uint32(0); operation < plan.operationCount; operation++ {
-			destination, _ := plan.textureRegion(dstTex.dimension, region.TextureBase.Origin, region.Size, operation)
-			sourceOffset, _ := plan.bufferOffset(region.BufferLayout.Offset, bytesPerImage, operation)
-			msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+	for i := range regions {
+		region := &regions[i]
+		blit, _, _ := validateMetalBufferTextureCopy(srcBuf.size, dstTex.format, dstTex.dimension, region)
+		for operation := uint32(0); operation < blit.plan.operationCount; operation++ {
+			destination, _ := blit.plan.textureRegion(dstTex.dimension, region.TextureBase.Origin, region.Size, operation)
+			sourceOffset, _ := blit.bufferOffset(region, operation)
+			msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options:"),
 				argPointer(uintptr(srcBuf.raw)),
 				argUint64(sourceOffset),
-				argUint64(strides.bytesPerRow),
-				argUint64(strides.bytesPerImage),
+				argUint64(blit.strides.bytesPerRow),
+				argUint64(blit.strides.bytesPerImage),
 				argStruct(destination.size, mtlSizeType),
 				argPointer(uintptr(dstTex.raw)),
 				argUint64(uint64(destination.slice)),
 				argUint64(uint64(region.TextureBase.MipLevel)),
 				argStruct(destination.origin, mtlOriginType),
+				argUint64(uint64(blit.option)),
 			)
 		}
 	}
 	_ = MsgSend(blitEncoder, Sel("endEncoding"))
+}
+
+// validateBufferTextureCopies checks every region of a buffer<->texture blit
+// before the first Metal call, so an invalid region records an error and
+// leaves the command buffer without a partial copy. It reports whether there
+// is anything to encode.
+func (e *CommandEncoder) validateBufferTextureCopies(op string, buf *Buffer, tex *Texture, regions []hal.BufferTextureCopy) bool {
+	encode := false
+	for i := range regions {
+		_, skip, err := validateMetalBufferTextureCopy(buf.size, tex.format, tex.dimension, &regions[i])
+		if err != nil {
+			e.failRecording(fmt.Errorf("metal: %s: region %d: %w", op, i, err))
+			return false
+		}
+		encode = encode || !skip
+	}
+	return encode
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -262,10 +278,8 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if !ok || dstBuf == nil {
 		return
 	}
-	for _, region := range regions {
-		if _, _, ok := validateMetalBufferTextureCopyPlan(srcTex.format, srcTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size); !ok {
-			return
-		}
+	if !e.validateBufferTextureCopies("CopyTextureToBuffer", dstBuf, srcTex, regions) {
+		return
 	}
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
@@ -273,13 +287,13 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if blitEncoder == 0 {
 		return
 	}
-	for _, region := range regions {
-		plan, bytesPerImage, _ := validateMetalBufferTextureCopyPlan(srcTex.format, srcTex.dimension, region.BufferLayout, region.TextureBase.Origin, region.Size)
-		strides := metalBlitStrides(srcTex.dimension, uint64(region.BufferLayout.BytesPerRow), bytesPerImage)
-		for operation := uint32(0); operation < plan.operationCount; operation++ {
-			source, _ := plan.textureRegion(srcTex.dimension, region.TextureBase.Origin, region.Size, operation)
-			destinationOffset, _ := plan.bufferOffset(region.BufferLayout.Offset, bytesPerImage, operation)
-			msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
+	for i := range regions {
+		region := &regions[i]
+		blit, _, _ := validateMetalBufferTextureCopy(dstBuf.size, srcTex.format, srcTex.dimension, region)
+		for operation := uint32(0); operation < blit.plan.operationCount; operation++ {
+			source, _ := blit.plan.textureRegion(srcTex.dimension, region.TextureBase.Origin, region.Size, operation)
+			destinationOffset, _ := blit.bufferOffset(region, operation)
+			msgSendVoid(blitEncoder, Sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:options:"),
 				argPointer(uintptr(srcTex.raw)),
 				argUint64(uint64(source.slice)),
 				argUint64(uint64(region.TextureBase.MipLevel)),
@@ -287,8 +301,9 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 				argStruct(source.size, mtlSizeType),
 				argPointer(uintptr(dstBuf.raw)),
 				argUint64(destinationOffset),
-				argUint64(strides.bytesPerRow),
-				argUint64(strides.bytesPerImage),
+				argUint64(blit.strides.bytesPerRow),
+				argUint64(blit.strides.bytesPerImage),
+				argUint64(uint64(blit.option)),
 			)
 		}
 	}

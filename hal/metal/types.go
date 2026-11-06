@@ -277,6 +277,17 @@ const (
 	MTLTextureUsageShaderAtomic    MTLTextureUsage = 1 << 5
 )
 
+// MTLBlitOption selects the plane of a combined depth/stencil texture that a
+// buffer<->texture blit reads or writes. Values from metal-rs v0.33.0
+// src/encoder.rs.
+type MTLBlitOption NSUInteger
+
+const (
+	MTLBlitOptionNone                    MTLBlitOption = 0
+	MTLBlitOptionDepthFromDepthStencil   MTLBlitOption = 1 << 0
+	MTLBlitOptionStencilFromDepthStencil MTLBlitOption = 1 << 1
+)
+
 // MTLSamplerMinMagFilter represents sampler filter modes.
 type MTLSamplerMinMagFilter NSUInteger
 
