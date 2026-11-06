@@ -74,6 +74,20 @@ func writeLayeredTexture(ctx *gl.Context, tex *Texture, dst *hal.ImageCopyTextur
 	return nil
 }
 
+// colorAttachmentLayer returns the layer a color attachment renders into: the
+// pass's depthSlice for a 3D texture, the view's base array layer for a 2D
+// array texture (Rust wgpu-hal gles/command.rs begin_render_pass and
+// queue.rs set_attachment).
+func colorAttachmentLayer(view *TextureView, depthSlice *uint32) uint32 {
+	if view.texture.target == gl.TEXTURE_3D {
+		if depthSlice != nil {
+			return *depthSlice
+		}
+		return 0
+	}
+	return view.baseLayer
+}
+
 // attachColorLayer attaches color attachment index of the bound framebuffer
 // to one mip level of tex and, for a layered texture, to one layer of it: the
 // depth slice of a 3D texture or an array layer. Rust wgpu-hal gles/queue.rs

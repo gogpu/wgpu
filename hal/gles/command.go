@@ -390,7 +390,11 @@ func (e *CommandEncoder) setupOffscreenTarget(
 	tv *TextureView,
 	rpe *RenderPassEncoder,
 ) {
-	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{texture: tv.texture, mipLevel: tv.baseMip})
+	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{
+		texture:  tv.texture,
+		mipLevel: tv.baseMip,
+		layer:    colorAttachmentLayer(tv, desc.ColorAttachments[0].DepthSlice),
+	})
 
 	// Attach additional color textures (attachments 1..N) to the FBO.
 	// Attachment 0 is already bound by EnsureOffscreenFBOCommand.
@@ -405,6 +409,7 @@ func (e *CommandEncoder) setupOffscreenTarget(
 			attachmentIndex: uint32(i),
 			texture:         atv.texture,
 			mipLevel:        atv.baseMip,
+			layer:           colorAttachmentLayer(atv, ca.DepthSlice),
 		})
 	}
 
@@ -1033,6 +1038,7 @@ func (c *BindSurfaceFramebufferCommand) Execute(ctx *gl.Context) {
 type EnsureOffscreenFBOCommand struct {
 	texture  *Texture
 	mipLevel uint32 // the view's base mip level
+	layer    uint32 // the depth slice or array layer of a layered texture
 }
 
 func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
@@ -1059,10 +1065,10 @@ func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
 	c.texture.fbo = fbo
 }
 
-// attach attaches the color texture as COLOR_ATTACHMENT0 of the bound FBO.
-// It uses the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
+// attach attaches the color texture as COLOR_ATTACHMENT0 of the bound FBO:
+// its mip level and, for a 3D or 2D array texture, its layer.
 func (c *EnsureOffscreenFBOCommand) attach(ctx *gl.Context) {
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture.target, c.texture.id, int32(c.mipLevel))
+	attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture, c.mipLevel, c.layer)
 }
 
 // AttachDepthStencilCommand attaches a depth/stencil texture to the currently
@@ -1196,12 +1202,11 @@ type AttachColorCommand struct {
 	attachmentIndex uint32 // 0-based index (attachment point = GL_COLOR_ATTACHMENT0 + index)
 	texture         *Texture
 	mipLevel        uint32 // the view's base mip level
+	layer           uint32 // the depth slice or array layer of a layered texture
 }
 
 func (c *AttachColorCommand) Execute(ctx *gl.Context) {
-	ctx.FramebufferTexture2D(gl.FRAMEBUFFER,
-		gl.COLOR_ATTACHMENT0+c.attachmentIndex,
-		c.texture.target, c.texture.id, int32(c.mipLevel))
+	attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0+c.attachmentIndex, c.texture, c.mipLevel, c.layer)
 }
 
 // SetDrawColorBuffersCommand configures the list of draw buffers for MRT output.
