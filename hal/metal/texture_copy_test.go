@@ -26,7 +26,7 @@ func TestMetalTextureDataCopyLayoutValidatesCompleteSourceRange(t *testing.T) {
 	layout := hal.ImageDataLayout{Offset: 17, BytesPerRow: bytesPerRow, RowsPerImage: rowsPerImage}
 	size := hal.Extent3D{Width: width, Height: height, DepthOrArrayLayers: depth}
 
-	got, err := validateMetalTextureDataCopyLayout(requiredBytes, gputypes.TextureFormatRGBA8Unorm, layout, size)
+	got, err := validateMetalTextureDataCopyLayout(requiredBytes, gputypes.TextureFormatRGBA8Unorm, gputypes.TextureAspectAll, layout, size)
 	if err != nil {
 		t.Fatalf("exact source range rejected: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestMetalTextureDataCopyLayoutValidatesCompleteSourceRange(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := validateMetalTextureDataCopyLayout(test.dataLength, gputypes.TextureFormatRGBA8Unorm, test.layout, test.size); err == nil {
+			if _, err := validateMetalTextureDataCopyLayout(test.dataLength, gputypes.TextureFormatRGBA8Unorm, gputypes.TextureAspectAll, test.layout, test.size); err == nil {
 				t.Fatal("invalid source range accepted")
 			}
 		})
@@ -70,7 +70,7 @@ func TestMetalTextureDataCopyLayoutValidatesCompleteSourceRange(t *testing.T) {
 
 func TestMetalTextureFormatBlockInfoCoversCompressedFormats(t *testing.T) {
 	for format := gputypes.TextureFormatBC1RGBAUnorm; format <= gputypes.TextureFormatASTC12x12UnormSrgb; format++ {
-		width, height, size, ok := metalTextureFormatBlockInfo(format)
+		width, height, size, ok := metalTextureFormatBlockInfo(format, gputypes.TextureAspectAll)
 		if !ok || width == 0 || height == 0 || size == 0 {
 			t.Fatalf("compressed format %s (%d) has incomplete block info: %dx%d, %d bytes, ok=%t", format, format, width, height, size, ok)
 		}
@@ -98,7 +98,7 @@ func TestMetalTextureFormatBlockInfoCoversCompressedFormats(t *testing.T) {
 		{gputypes.TextureFormatASTC12x12Unorm, 12, 12},
 	}
 	for _, test := range tests {
-		width, height, _, ok := metalTextureFormatBlockInfo(test.format)
+		width, height, _, ok := metalTextureFormatBlockInfo(test.format, gputypes.TextureAspectAll)
 		if !ok || width != test.width || height != test.height {
 			t.Errorf("%s block dimensions = %dx%d, ok=%t; want %dx%d", test.format, width, height, ok, test.width, test.height)
 		}
@@ -109,6 +109,7 @@ func TestMetalTextureDataCopyLayoutUsesCompressedBlockRows(t *testing.T) {
 	layout, err := validateMetalTextureDataCopyLayout(
 		64,
 		gputypes.TextureFormatASTC5x4Unorm,
+		gputypes.TextureAspectAll,
 		hal.ImageDataLayout{},
 		hal.Extent3D{Width: 6, Height: 5, DepthOrArrayLayers: 1},
 	)
@@ -121,12 +122,12 @@ func TestMetalTextureDataCopyLayoutUsesCompressedBlockRows(t *testing.T) {
 }
 
 func TestMetalCopyBytesPerImageUsesCompressedBlockRows(t *testing.T) {
-	got, ok := metalCopyBytesPerImage(gputypes.TextureFormatASTC5x4Unorm, 32, 0, 5)
+	got, ok := metalCopyBytesPerImage(gputypes.TextureFormatASTC5x4Unorm, gputypes.TextureAspectAll, 32, 0, 5)
 	if !ok || got != 64 {
 		t.Fatalf("compressed bytes per image = %d, ok=%t; want 64, true", got, ok)
 	}
 
-	got, ok = metalCopyBytesPerImage(gputypes.TextureFormatRGBA8Unorm, 32, 0, 5)
+	got, ok = metalCopyBytesPerImage(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureAspectAll, 32, 0, 5)
 	if !ok || got != 160 {
 		t.Fatalf("plain bytes per image = %d, ok=%t; want 160, true", got, ok)
 	}

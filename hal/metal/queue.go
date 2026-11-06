@@ -266,13 +266,17 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if !ok || tex == nil || len(data) == 0 || size == nil {
 		return fmt.Errorf("metal: WriteTexture: invalid arguments")
 	}
-	copyLayout, err := validateMetalTextureDataCopyLayout(uint64(len(data)), tex.format, *layout, *size)
+	option, ok := metalBlitOption(tex.format, dst.Aspect)
+	if !ok {
+		return fmt.Errorf("metal: WriteTexture: a write to texture format %s needs aspect DepthOnly or StencilOnly, got %s", tex.format, dst.Aspect)
+	}
+	copyLayout, err := validateMetalTextureDataCopyLayout(uint64(len(data)), tex.format, dst.Aspect, *layout, *size)
 	if err != nil {
 		return fmt.Errorf("metal: WriteTexture: %w", err)
 	}
 	normalizedLayout := *layout
 	normalizedLayout.BytesPerRow = copyLayout.bytesPerRow
-	plan, bytesPerImage, ok := validateMetalBufferTextureCopyPlan(tex.format, tex.dimension, normalizedLayout, dst.Origin, *size)
+	plan, bytesPerImage, ok := validateMetalBufferTextureCopyPlan(tex.format, dst.Aspect, tex.dimension, normalizedLayout, dst.Origin, *size)
 	if !ok || bytesPerImage != copyLayout.bytesPerImage {
 		return fmt.Errorf("metal: WriteTexture: copy address arithmetic overflows")
 	}
@@ -280,7 +284,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Apple Silicon UMA fast path: Shared textures accept synchronous CPU writes
 	// via replaceRegion:. This avoids per-upload staging buffers and one-shot
 	// blit command buffers — the main source of resize-induced memory growth.
-	if tex.isShared {
+	// replaceRegion has no plane selector, so a combined depth/stencil format
+	// always takes the staging blit, whose blit option writes only the plane of
+	// dst.Aspect and leaves the other plane intact. Rust wgpu-core writes every
+	// texture this way: a staging buffer and copy_buffer_to_texture, which
+	// wgpu-hal's Metal backend encodes with get_blit_option.
+	if tex.isShared && !isCombinedDepthStencilFormat(tex.format) {
 		return q.writeTextureShared(tex, dst, data, layout, copyLayout, size, plan)
 	}
 
@@ -321,7 +330,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	for operation := uint32(0); operation < plan.operationCount; operation++ {
 		destination, _ := plan.textureRegion(tex.dimension, dst.Origin, *size, operation)
 		sourceOffset, _ := plan.bufferOffset(layout.Offset, copyLayout.bytesPerImage, operation)
-		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+		msgSendVoid(blitEncoder, Sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options:"),
 			argPointer(uintptr(stagingBuffer)),
 			argUint64(sourceOffset),
 			argUint64(strides.bytesPerRow),
@@ -331,6 +340,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 			argUint64(uint64(destination.slice)),
 			argUint64(uint64(dst.MipLevel)),
 			argStruct(destination.origin, mtlOriginType),
+			argUint64(uint64(option)),
 		)
 	}
 

@@ -108,9 +108,9 @@ func (p metalCopyPlan) bufferOffset(base, bytesPerImage uint64, operation uint32
 	return checkedMetalTextureDataAdd(base, imageOffset)
 }
 
-func metalCopyBytesPerImage(format gputypes.TextureFormat, bytesPerRow, rowsPerImage, imageHeight uint32) (uint64, bool) {
+func metalCopyBytesPerImage(format gputypes.TextureFormat, aspect gputypes.TextureAspect, bytesPerRow, rowsPerImage, imageHeight uint32) (uint64, bool) {
 	if rowsPerImage == 0 {
-		_, blockHeight, _, ok := metalTextureFormatBlockInfo(format)
+		_, blockHeight, _, ok := metalTextureFormatBlockInfo(format, aspect)
 		if !ok {
 			return 0, false
 		}
@@ -152,14 +152,98 @@ func metalBlitStrides(dimension gputypes.TextureDimension, bytesPerRow, bytesPer
 	return strides
 }
 
+// isCombinedDepthStencilFormat reports a format with both a depth and a
+// stencil plane (Rust wgpu-types is_combined_depth_stencil_format).
+func isCombinedDepthStencilFormat(format gputypes.TextureFormat) bool {
+	return format.HasDepth() && format.HasStencil()
+}
+
+// metalBlitOption returns the MTLBlitOption of a buffer<->texture blit, as Rust
+// wgpu-hal src/metal/conv.rs get_blit_option does. A blit of a combined
+// depth/stencil format copies one plane: DepthOnly takes DepthFromDepthStencil
+// and StencilOnly takes StencilFromDepthStencil. Without the option Metal
+// copies the depth plane whatever the aspect, so a stencil readback returns
+// depth bytes and a stencil upload overwrites depth. Every other format takes
+// None. ok is false for any other aspect of a combined format, where Rust
+// reaches unreachable!(): such a copy is an error, never a call.
+func metalBlitOption(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (MTLBlitOption, bool) {
+	if !isCombinedDepthStencilFormat(format) {
+		return MTLBlitOptionNone, true
+	}
+	switch aspect {
+	case gputypes.TextureAspectDepthOnly:
+		return MTLBlitOptionDepthFromDepthStencil, true
+	case gputypes.TextureAspectStencilOnly:
+		return MTLBlitOptionStencilFromDepthStencil, true
+	default:
+		return MTLBlitOptionNone, false
+	}
+}
+
+// metalBufferTextureCopy is one buffer<->texture blit region, checked against
+// its buffer: the per-slice plan, the strides Metal gets and the blit option
+// of the copied plane. bytesPerImage is the buffer distance between two
+// slices; strides.bytesPerImage is what Metal gets, zero unless the texture is
+// 3D.
+type metalBufferTextureCopy struct {
+	plan          metalCopyPlan
+	bytesPerImage uint64
+	strides       metalCopyStrides
+	option        MTLBlitOption
+}
+
+// bufferOffset returns the buffer offset of the operation-th slice.
+func (b metalBufferTextureCopy) bufferOffset(region *hal.BufferTextureCopy, operation uint32) (uint64, bool) {
+	return b.plan.bufferOffset(region.BufferLayout.Offset, b.bytesPerImage, operation)
+}
+
+// validateMetalBufferTextureCopy checks one region of a buffer<->texture blit
+// before any Metal call. The aspect must select a copyable plane, every buffer
+// byte the blit reads or writes must lie inside bufferSize, sized by that
+// plane, and the per-slice texture and buffer addresses must not overflow.
+// skip is true for a region with a zero extent, a no-op in WebGPU.
+func validateMetalBufferTextureCopy(
+	bufferSize uint64,
+	format gputypes.TextureFormat,
+	dimension gputypes.TextureDimension,
+	region *hal.BufferTextureCopy,
+) (blit metalBufferTextureCopy, skip bool, err error) {
+	size := region.Size
+	if size.Width == 0 || size.Height == 0 || size.DepthOrArrayLayers == 0 {
+		return metalBufferTextureCopy{}, true, nil
+	}
+	aspect := region.TextureBase.Aspect
+	option, ok := metalBlitOption(format, aspect)
+	if !ok {
+		return metalBufferTextureCopy{}, false, fmt.Errorf("a buffer copy of texture format %s needs aspect DepthOnly or StencilOnly, got %s", format, aspect)
+	}
+	layout, err := validateMetalTextureDataCopyLayout(bufferSize, format, aspect, region.BufferLayout, size)
+	if err != nil {
+		return metalBufferTextureCopy{}, false, err
+	}
+	normalized := region.BufferLayout
+	normalized.BytesPerRow = layout.bytesPerRow
+	plan, bytesPerImage, ok := validateMetalBufferTextureCopyPlan(format, aspect, dimension, normalized, region.TextureBase.Origin, size)
+	if !ok || bytesPerImage != layout.bytesPerImage {
+		return metalBufferTextureCopy{}, false, fmt.Errorf("copy address arithmetic overflows")
+	}
+	return metalBufferTextureCopy{
+		plan:          plan,
+		bytesPerImage: layout.bytesPerImage,
+		strides:       metalBlitStrides(dimension, uint64(layout.bytesPerRow), layout.bytesPerImage),
+		option:        option,
+	}, false, nil
+}
+
 func validateMetalBufferTextureCopyPlan(
 	format gputypes.TextureFormat,
+	aspect gputypes.TextureAspect,
 	dimension gputypes.TextureDimension,
 	layout hal.ImageDataLayout,
 	origin hal.Origin3D,
 	size hal.Extent3D,
 ) (metalCopyPlan, uint64, bool) {
-	bytesPerImage, ok := metalCopyBytesPerImage(format, layout.BytesPerRow, layout.RowsPerImage, size.Height)
+	bytesPerImage, ok := metalCopyBytesPerImage(format, aspect, layout.BytesPerRow, layout.RowsPerImage, size.Height)
 	if !ok {
 		return metalCopyPlan{}, 0, false
 	}
@@ -196,16 +280,25 @@ func validateMetalTextureCopyPlan(
 	return plan, true
 }
 
-// validateMetalTextureDataCopyLayout proves that every byte Metal may read is
-// present before either the Shared direct-write or Private staging path starts.
-func validateMetalTextureDataCopyLayout(dataLength uint64, format gputypes.TextureFormat, layout hal.ImageDataLayout, size hal.Extent3D) (metalTextureDataCopyLayout, error) {
+// validateMetalTextureDataCopyLayout proves that every byte Metal may read or
+// write is inside dataLength before any Metal call: the bytes of a WriteTexture
+// source, or the buffer of a buffer<->texture blit. Rows are sized by the plane
+// that aspect selects, so a stencil copy of a combined depth/stencil format
+// moves one byte per texel and its depth copy the depth plane's bytes.
+func validateMetalTextureDataCopyLayout(
+	dataLength uint64,
+	format gputypes.TextureFormat,
+	aspect gputypes.TextureAspect,
+	layout hal.ImageDataLayout,
+	size hal.Extent3D,
+) (metalTextureDataCopyLayout, error) {
 	if size.Width == 0 || size.Height == 0 || size.DepthOrArrayLayers == 0 {
 		return metalTextureDataCopyLayout{}, fmt.Errorf("copy extent must be non-zero")
 	}
 
-	rowBytes, blockRows, ok := metalTextureCopyGeometry(format, size.Width, size.Height)
+	rowBytes, blockRows, ok := metalTextureCopyGeometry(format, aspect, size.Width, size.Height)
 	if !ok {
-		return metalTextureDataCopyLayout{}, fmt.Errorf("texture format %s has no defined copy block size", format)
+		return metalTextureDataCopyLayout{}, fmt.Errorf("texture format %s has no defined copy block size for aspect %s", format, aspect)
 	}
 	if rowBytes > math.MaxUint32 {
 		return metalTextureDataCopyLayout{}, fmt.Errorf("texture row size overflows BytesPerRow")
@@ -256,8 +349,8 @@ func validateMetalTextureDataCopyLayout(dataLength uint64, format gputypes.Textu
 	return metalTextureDataCopyLayout{bytesPerRow: bytesPerRow, bytesPerImage: bytesPerImage}, nil
 }
 
-func metalTextureCopyGeometry(format gputypes.TextureFormat, width, height uint32) (rowBytes, blockRows uint64, ok bool) {
-	blockWidth, blockHeight, blockSize, ok := metalTextureFormatBlockInfo(format)
+func metalTextureCopyGeometry(format gputypes.TextureFormat, aspect gputypes.TextureAspect, width, height uint32) (rowBytes, blockRows uint64, ok bool) {
+	blockWidth, blockHeight, blockSize, ok := metalTextureFormatBlockInfo(format, aspect)
 	if !ok {
 		return 0, 0, false
 	}
@@ -267,9 +360,14 @@ func metalTextureCopyGeometry(format gputypes.TextureFormat, width, height uint3
 	return rowBytes, blockRows, ok
 }
 
-func metalTextureFormatBlockInfo(format gputypes.TextureFormat) (width, height, size uint32, ok bool) {
-	blockSize := format.BlockCopySize()
-	if blockSize == 0 {
+// metalTextureFormatBlockInfo returns the block dimensions of format and the
+// byte size of one block of the plane that aspect selects. ok is false where
+// that plane has no copy size: a combined depth/stencil format with an aspect
+// other than one of its planes, and the depth of Depth24Plus formats (Rust
+// wgpu-types TextureFormat::block_copy_size(Some(aspect))).
+func metalTextureFormatBlockInfo(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (width, height, size uint32, ok bool) {
+	blockSize, ok := format.BlockCopySizeAspect(aspect)
+	if !ok {
 		return 0, 0, 0, false
 	}
 
