@@ -2,7 +2,11 @@
 
 package wgpu
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gogpu/gputypes"
+)
 
 // TestSamplerDescriptorToHALLodMaxClamp checks that the HAL descriptor, which
 // every native backend takes literally, carries 32 for a zero LodMaxClamp and
@@ -21,6 +25,22 @@ func TestSamplerDescriptorToHALLodMaxClamp(t *testing.T) {
 		if h.LodMinClamp != c.wantMin || h.LodMaxClamp != c.wantM {
 			t.Errorf("%s: HAL clamps [%v, %v], want [%v, %v]", c.name, h.LodMinClamp, h.LodMaxClamp, c.wantMin, c.wantM)
 		}
+	}
+}
+
+// TestSamplerDescriptorToHALZeroEnums: a zero-value descriptor reaches the HAL
+// with nearest filters and clamp-to-edge address modes, explicit ones as given.
+func TestSamplerDescriptorToHALZeroEnums(t *testing.T) {
+	h := (&SamplerDescriptor{}).toHAL()
+	if h.MinFilter != gputypes.FilterModeNearest || h.MagFilter != gputypes.FilterModeNearest || h.MipmapFilter != gputypes.FilterModeNearest {
+		t.Errorf("zero filters reach the HAL as %v/%v/%v, want nearest", h.MinFilter, h.MagFilter, h.MipmapFilter)
+	}
+	if h.AddressModeU != gputypes.AddressModeClampToEdge || h.AddressModeV != gputypes.AddressModeClampToEdge || h.AddressModeW != gputypes.AddressModeClampToEdge {
+		t.Errorf("zero address modes reach the HAL as %v/%v/%v, want clamp-to-edge", h.AddressModeU, h.AddressModeV, h.AddressModeW)
+	}
+	e := (&SamplerDescriptor{MipmapFilter: gputypes.FilterModeLinear, AddressModeU: gputypes.AddressModeRepeat}).toHAL()
+	if e.MipmapFilter != gputypes.FilterModeLinear || e.AddressModeU != gputypes.AddressModeRepeat {
+		t.Errorf("explicit values changed: mipmap %v, U %v", e.MipmapFilter, e.AddressModeU)
 	}
 }
 
