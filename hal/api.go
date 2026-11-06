@@ -51,10 +51,11 @@ type Instance interface {
 	// CreateSurface creates a rendering surface from a typed raw platform target.
 	// The target's native objects remain caller-owned and must outlive the Surface.
 	// On GLES a Device opened through the surface's adapter is bound to the
-	// surface's native display, which must outlive that Device too: release
-	// surfaces and devices, then close the display, then destroy the
-	// instance, or destroy the instance before closing the display. Adapters
-	// are not part of this rule.
+	// surface's native display, which must outlive that Device too: destroy
+	// every Surface and Device of the display before closing it. Instance
+	// Destroy does not destroy them, so destroying the instance first is not
+	// enough at this level (the wgpu package's Instance.Release does release
+	// them first). Adapters are not part of this rule.
 	CreateSurface(target SurfaceTarget) (Surface, error)
 
 	// EnumerateAdapters enumerates available physical GPUs.

@@ -336,3 +336,33 @@ func TestInstanceLookupRacesFinalRelease(t *testing.T) {
 		}
 	}
 }
+
+// TestRememberDisplayContextSweepsDeadEntries checks that recording a Path B
+// context drops the dead contexts of other display addresses. Before the
+// sweep only a lookup of the same address dropped a dead entry, so displays
+// opened and closed at changing addresses kept one dead context each.
+func TestRememberDisplayContextSweepsDeadEntries(t *testing.T) {
+	inst := &Instance{}
+	live := NewAdapterContext(nil, &gl.Context{})
+	defer live.Release()
+	liveKey := displayKey{kind: egl.WindowKindWayland, display: 0x1000}
+	inst.rememberDisplayContextLocked(liveKey, live)
+
+	for addr := uintptr(0x2000); addr < 0x2000+8*0x100; addr += 0x100 {
+		dead := NewAdapterContext(nil, &gl.Context{})
+		inst.rememberDisplayContextLocked(displayKey{kind: egl.WindowKindWayland, display: addr}, dead)
+		dead.Release() // the last surface and device of that display are gone
+	}
+
+	next := NewAdapterContext(nil, &gl.Context{})
+	defer next.Release()
+	nextKey := displayKey{kind: egl.WindowKindWayland, display: 0x9000}
+	inst.rememberDisplayContextLocked(nextKey, next)
+
+	if got := len(inst.displayContexts); got != 2 {
+		t.Fatalf("displayContexts has %d entries after the sweep, want 2 (the live one and the new one)", got)
+	}
+	if inst.displayContexts[liveKey] != live || inst.displayContexts[nextKey] != next {
+		t.Fatal("the sweep dropped a live context")
+	}
+}

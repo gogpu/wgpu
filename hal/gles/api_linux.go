@@ -163,8 +163,9 @@ type Instance struct {
 	ctxKind    egl.WindowKind // window system of ctx
 	ctxDisplay uintptr        // caller-owned native display of ctx, 0 for our own or surfaceless
 
-	// displayContexts holds the Path B contexts weakly: no reference is taken,
-	// and a dead entry is dropped when a lookup finds it.
+	// displayContexts holds the Path B contexts weakly: no reference is taken.
+	// A dead entry is dropped when a lookup of its key finds it, and every
+	// dead entry when a new context is recorded.
 	displayContexts map[displayKey]*AdapterContext
 }
 
@@ -210,10 +211,7 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 		if err != nil {
 			return nil, err
 		}
-		if i.displayContexts == nil {
-			i.displayContexts = make(map[displayKey]*AdapterContext)
-		}
-		i.displayContexts[displayKey{kind: targetWindowKind, display: target.DisplayHandle}] = ctx
+		i.rememberDisplayContextLocked(displayKey{kind: targetWindowKind, display: target.DisplayHandle}, ctx)
 	}
 
 	surf, err := newSurface(target, ctx)
@@ -274,6 +272,24 @@ func (i *Instance) lookupContextLocked(kind egl.WindowKind, display uintptr) *Ad
 		delete(i.displayContexts, key)
 	}
 	return nil
+}
+
+// rememberDisplayContextLocked records a new Path B context for key and drops
+// every dead entry. A lookup drops a dead entry only for its own key, so
+// without this sweep an app that opens and closes displays at changing
+// addresses would keep one dead context (and its GL function table) per
+// address until Instance.Destroy. The map then holds at most one entry per
+// live context plus the new one.
+func (i *Instance) rememberDisplayContextLocked(key displayKey, ctx *AdapterContext) {
+	if i.displayContexts == nil {
+		i.displayContexts = make(map[displayKey]*AdapterContext)
+	}
+	for k, c := range i.displayContexts {
+		if !c.Alive() {
+			delete(i.displayContexts, k)
+		}
+	}
+	i.displayContexts[key] = ctx
 }
 
 // newDisplayContext builds an EGL context on the caller's native display.
