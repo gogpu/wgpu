@@ -108,10 +108,13 @@ func checkGroupSlots(t *testing.T, groups [][]gputypes.BindGroupLayoutEntry, sta
 	}
 }
 
-// TestDefaultOptionsLeaveSizesBufferUnbound records why the backend passes a
-// map: with msl.DefaultOptions, naga reports that the sizes buffer is
-// required, but it writes the argument without a [[buffer(N)]] attribute.
-func TestDefaultOptionsLeaveSizesBufferUnbound(t *testing.T) {
+// TestDefaultOptionsNumberSizesBufferAfterBuffers pins naga's numbering without
+// a PerEntryPointMap (naga v0.21.3, P0-MSL-096, as Rust wgpu-hal's Metal
+// device): resources by (group, binding), then the sizes buffer after the last
+// buffer. Before v0.21.3 the sizes argument had no [[buffer(N)]] at all. The
+// backend still passes a map, because its slots come from the pipeline layout
+// (per-group bases and stage visibility), not from what one module declares.
+func TestDefaultOptionsNumberSizesBufferAfterBuffers(t *testing.T) {
 	t.Parallel()
 
 	source, info := compile(t, wgslRuntimeArray, msl.DefaultOptions())
@@ -119,11 +122,12 @@ func TestDefaultOptionsLeaveSizesBufferUnbound(t *testing.T) {
 	if !info.RequiresSizesBuffer {
 		t.Fatal("RequiresSizesBuffer = false; want true for a runtime-sized array")
 	}
-	if !strings.Contains(source, "_buffer_sizes") {
-		t.Fatal("generated MSL has no _buffer_sizes argument")
-	}
-	if slot, ok := bufferSlots(source)["_buffer_sizes"]; ok {
-		t.Fatalf("_buffer_sizes has [[buffer(%s)]] under DefaultOptions; want no attribute", slot)
+	slots := bufferSlots(source)
+	want := map[string]string{"out": "0", "params": "1", "_buffer_sizes": "2"}
+	for name, slot := range want {
+		if got, ok := slots[name]; !ok || got != slot {
+			t.Errorf("%s: [[buffer(%s)]] (present %v) under DefaultOptions, want [[buffer(%s)]]", name, got, ok, slot)
+		}
 	}
 }
 
