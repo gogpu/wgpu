@@ -1027,13 +1027,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			return rpe
 		}
 
-		// Determine color format from the view.
-		var colorFormat vk.Format
-		if view.texture != nil {
-			colorFormat = textureFormatToVk(view.texture.format)
-		} else if view.isSwapchain {
-			colorFormat = view.vkFormat
-		}
+		// The view's format, not its texture's: a view may reinterpret the
+		// texture (sRGB pair), and the pipeline targets the view's format.
+		colorFormat := view.vkFormat
 
 		// Check for MSAA resolve target.
 		var resolveView *TextureView
@@ -1093,7 +1089,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	if desc.DepthStencilAttachment != nil {
 		dsa := desc.DepthStencilAttachment
 		if dsView, ok := dsa.View.(*TextureView); ok && dsView.texture != nil {
-			rpKey.DepthFormat = e.device.depthStencil.textureFormatToVk(dsView.texture.format)
+			// The view's format, already resolved by the device's depth/stencil
+			// format support at CreateTextureView (device.go createInfo.Format).
+			rpKey.DepthFormat = dsView.vkFormat
 			rpKey.DepthLoadOp = loadOpToVk(dsa.DepthLoadOp)
 			rpKey.DepthStoreOp = storeOpToVk(dsa.DepthStoreOp)
 			rpKey.StencilLoadOp = loadOpToVk(dsa.StencilLoadOp)

@@ -875,6 +875,7 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		size:        mipLevelExtent(textureSize, desc.BaseMipLevel),
 		image:       imageHandle,
 		isSwapchain: isSwapchain,
+		vkFormat:    createInfo.Format,
 	}
 	if viewType == vk.ImageViewType3d {
 		tv.depthSlices = &depthSliceViews{
