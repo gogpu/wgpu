@@ -71,9 +71,9 @@ func TestBeginRenderPassRenderExtent(t *testing.T) {
 		{"mip1-of-16-with-8", pass(nil, newView(big, 1), newView(small, 0)), ""},
 		{"depth-mip1-with-8", pass(newView(depth, 1), newView(small, 0)), ""},
 		{"mip0-with-mip1", pass(nil, newView(big, 0), newView(big, 1)),
-			"color attachment [1] has dimensions 8x8, but attachment [0] has dimensions 16x16"},
+			"the color attachment at index 0's texture view has extent 16x16 but is followed by the color attachment at index 1's texture view which has 8x8"},
 		{"depth-mip0-with-8", pass(newView(depth, 0), newView(small, 0)),
-			"has dimensions 16x16, but attachment [0] has dimensions 8x8"},
+			"the color attachment at index 0's texture view has extent 8x8 but is followed by the depth attachment's texture view which has 16x16"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

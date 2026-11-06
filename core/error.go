@@ -1341,6 +1341,12 @@ func (e *RenderPassValidationError) attachmentLocation() string {
 	}
 }
 
+// referenceLocation names the attachment that set the expected sample count
+// or render extent: always a color attachment's view, ReferenceIndex.
+func (e *RenderPassValidationError) referenceLocation() string {
+	return fmt.Sprintf("color attachment at index %d's texture view", e.ReferenceIndex)
+}
+
 // notRenderableReason words e.Reason as Rust wgpu-core's
 // TextureViewNotRenderableReason does.
 func (e *RenderPassValidationError) notRenderableReason() string {
@@ -1405,12 +1411,12 @@ func (e *RenderPassValidationError) Error() string {
 			label, e.Given, e.Limit)
 	case RenderPassErrorSampleCountMismatch:
 		return fmt.Sprintf(
-			"render pass %q: color attachment [%d] has sample count %d, but attachment [%d] has sample count %d; all attachments must have the same sample count (WebGPU spec §10.1)",
-			label, e.AttachmentIndex, e.ActualSamples, e.ReferenceIndex, e.ExpectedSamples)
+			"render pass %q: attachments have differing sample counts: the %s has count %d but is followed by the %s which has count %d (WebGPU spec: GPURenderPassDescriptor Valid Usage)",
+			label, e.referenceLocation(), e.ExpectedSamples, e.attachmentLocation(), e.ActualSamples)
 	case RenderPassErrorDimensionMismatch:
 		return fmt.Sprintf(
-			"render pass %q: color attachment [%d] has dimensions %dx%d, but attachment [%d] has dimensions %dx%d; all attachments must have the same dimensions (WebGPU spec §10.1)",
-			label, e.AttachmentIndex, e.ActualWidth, e.ActualHeight, e.ReferenceIndex, e.ExpectedWidth, e.ExpectedHeight)
+			"render pass %q: attachments have differing sizes: the %s has extent %dx%d but is followed by the %s which has %dx%d (WebGPU spec: GPURenderPassDescriptor Valid Usage)",
+			label, e.referenceLocation(), e.ExpectedWidth, e.ExpectedHeight, e.attachmentLocation(), e.ActualWidth, e.ActualHeight)
 	case RenderPassErrorMissingDepthSlice:
 		return fmt.Sprintf(
 			"render pass %q: color attachment [%d]: color attachment's view is 3D and requires depth slice to be provided (WebGPU spec: GPURenderPassColorAttachment Valid Usage)",
