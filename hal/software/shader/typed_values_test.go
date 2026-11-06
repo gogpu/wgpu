@@ -24,8 +24,8 @@ import (
 // right through every step.
 
 // compileSoftwareSPIRV compiles wgsl with the SPIR-V options the software
-// backend uses (hal/software spirvOptions: SPIR-V 1.3, Restrict index and
-// buffer checks, Unchecked image loads and binding arrays) and parses it.
+// backend uses (hal/software spirvOptions: SPIR-V 1.3, Restrict index,
+// buffer and image load checks, Unchecked binding arrays) and parses it.
 // The options are repeated here because this package cannot import
 // hal/software.
 func compileSoftwareSPIRV(t testing.TB, wgsl string) *Module {
@@ -36,7 +36,7 @@ func compileSoftwareSPIRV(t testing.TB, wgsl string) *Module {
 			BoundsCheckPolicies: backend.BoundsCheckPolicies{
 				Index:        backend.BoundsCheckRestrict,
 				Buffer:       backend.BoundsCheckRestrict,
-				ImageLoad:    backend.BoundsCheckUnchecked,
+				ImageLoad:    backend.BoundsCheckRestrict,
 				BindingArray: backend.BoundsCheckUnchecked,
 			},
 		},
