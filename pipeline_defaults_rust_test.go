@@ -46,3 +46,17 @@ func TestConvertRenderPipelineDescSpecDefaults(t *testing.T) {
 		t.Error("the conversion changed the caller's descriptor")
 	}
 }
+
+// TestConvertRenderPipelineDescSampleMask: wgpu-native takes the sample mask
+// literally, so a zero mask must arrive as every sample.
+func TestConvertRenderPipelineDescSampleMask(t *testing.T) {
+	for _, c := range []struct {
+		in   uint64
+		want uint32
+	}{{0, 0xFFFFFFFF}, {0x1, 0x1}, {0xFFFFFFFF, 0xFFFFFFFF}} {
+		r := convertRenderPipelineDesc(&RenderPipelineDescriptor{Multisample: gputypes.MultisampleState{Count: 1, Mask: c.in}})
+		if r.Multisample.Mask != c.want {
+			t.Errorf("Mask %#x: wgpu-native %#x, want %#x", c.in, r.Multisample.Mask, c.want)
+		}
+	}
+}

@@ -375,8 +375,11 @@ type RenderPipelineDescriptor struct {
 	Vertex       VertexState
 	Primitive    gputypes.PrimitiveState
 	DepthStencil *DepthStencilState
-	Multisample  gputypes.MultisampleState
-	Fragment     *FragmentState
+	// Multisample: a zero Mask means every sample (0xFFFFFFFF), the WebGPU
+	// default, since a mask of 0 would discard every fragment. Only the low
+	// 32 bits are used.
+	Multisample gputypes.MultisampleState
+	Fragment    *FragmentState
 }
 
 // VertexState describes the vertex shader stage.
@@ -399,13 +402,14 @@ type FragmentState struct {
 }
 
 // toHAL converts a RenderPipelineDescriptor to a hal.RenderPipelineDescriptor,
-// with the WebGPU defaults applied to zero stencil faces and blend components
-// (pipeline_defaults.go). The caller's descriptor is not modified.
+// with the WebGPU defaults applied to zero stencil faces, blend components and
+// a zero sample mask (pipeline_defaults.go). The caller's descriptor is not
+// modified.
 func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 	halDesc := &hal.RenderPipelineDescriptor{
 		Label:        d.Label,
 		Primitive:    d.Primitive,
-		Multisample:  d.Multisample,
+		Multisample:  normalizeMultisample(d.Multisample),
 		DepthStencil: normalizeDepthStencilState(d.DepthStencil).toHAL(),
 	}
 

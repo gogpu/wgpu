@@ -167,8 +167,11 @@ type RenderPipelineDescriptor struct {
 	Vertex       VertexState
 	Primitive    gputypes.PrimitiveState
 	DepthStencil *DepthStencilState
-	Multisample  gputypes.MultisampleState
-	Fragment     *FragmentState
+	// Multisample: a zero Mask means every sample (0xFFFFFFFF), the WebGPU
+	// default, since a mask of 0 would discard every fragment. Only the low
+	// 32 bits are used.
+	Multisample gputypes.MultisampleState
+	Fragment    *FragmentState
 }
 
 // VertexState describes the vertex shader stage.
