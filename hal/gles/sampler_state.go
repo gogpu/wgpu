@@ -120,7 +120,8 @@ func (c *BindSamplerCommand) Execute(ctx *gl.Context) {
 // the same map over every stage (device.rs create_pipeline).
 func buildSamplerBindMap(bindingMap map[ir.ResourceBinding]uint8, infos ...glsl.TranslationInfo) samplerBindMap {
 	var m samplerBindMap
-	for _, info := range infos {
+	for i := range infos {
+		info := &infos[i]
 		for _, tm := range info.TextureMappings {
 			if tm.SamplerBinding == nil {
 				continue
