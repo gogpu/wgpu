@@ -112,6 +112,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
+	desc = normalizeTextureDescriptor(desc)
 
 	halDevice := d.halDevice()
 	if halDevice == nil {

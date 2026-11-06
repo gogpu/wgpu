@@ -78,19 +78,26 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
-	jsDesc := browser.BuildTextureDescriptor(
+	bt := d.browser.CreateTextureFromDesc(convertTextureDescriptor(desc))
+	return &Texture{
+		browser:  bt,
+		format:   desc.Format,
+		released: false,
+	}, nil
+}
+
+// convertTextureDescriptor converts a texture descriptor to a
+// GPUTextureDescriptor, with the zero members that have a WebGPU default set
+// to it (texture_defaults.go).
+func convertTextureDescriptor(desc *TextureDescriptor) js.Value {
+	desc = normalizeTextureDescriptor(desc)
+	return browser.BuildTextureDescriptor(
 		desc.Label,
 		desc.Size.Width, desc.Size.Height, desc.Size.DepthOrArrayLayers,
 		desc.MipLevelCount, desc.SampleCount,
 		desc.Dimension, desc.Format, desc.Usage,
 		desc.ViewFormats,
 	)
-	bt := d.browser.CreateTextureFromDesc(jsDesc)
-	return &Texture{
-		browser:  bt,
-		format:   desc.Format,
-		released: false,
-	}, nil
 }
 
 // CreateTextureView creates a view into a texture.

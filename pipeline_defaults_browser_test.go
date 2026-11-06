@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"syscall/js"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -49,6 +50,41 @@ func TestConvertRenderPipelineDescriptorSpecDefaults(t *testing.T) {
 	}
 	if *blend != (gputypes.BlendState{}) {
 		t.Error("the conversion changed the caller's blend state")
+	}
+}
+
+// TestConvertTextureDescriptorZeroDefaults: a texture descriptor that leaves
+// MipLevelCount, SampleCount, Dimension, Size.Height and
+// Size.DepthOrArrayLayers at zero reaches the browser as the WebGPU defaults
+// (1, 1, "2d", 1, 1). A member left out of the JS object is the browser's
+// default, so a missing one counts as its default; an explicit 0 would be a
+// validation error there.
+func TestConvertTextureDescriptorZeroDefaults(t *testing.T) {
+	obj := convertTextureDescriptor(&TextureDescriptor{
+		Size:   Extent3D{Width: 16},
+		Format: gputypes.TextureFormatRGBA8Unorm,
+		Usage:  gputypes.TextureUsageTextureBinding,
+	})
+	effective := func(v js.Value) float64 {
+		if v.IsUndefined() {
+			return 1
+		}
+		return v.Float()
+	}
+	size := obj.Get("size")
+	for name, v := range map[string]js.Value{
+		"size.height": size.Get("height"), "size.depthOrArrayLayers": size.Get("depthOrArrayLayers"),
+		"mipLevelCount": obj.Get("mipLevelCount"), "sampleCount": obj.Get("sampleCount"),
+	} {
+		if got := effective(v); got != 1 {
+			t.Errorf("%s = %v, want 1", name, got)
+		}
+	}
+	if got := size.Get("width").Float(); got != 16 {
+		t.Errorf("size.width = %v, want 16", got)
+	}
+	if dim := obj.Get("dimension"); !dim.IsUndefined() && dim.String() != "2d" {
+		t.Errorf("dimension = %q, want \"2d\"", dim.String())
 	}
 }
 
