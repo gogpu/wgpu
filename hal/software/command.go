@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software/raster"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // CommandEncoder implements hal.CommandEncoder for the software backend.
@@ -105,7 +106,7 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 		// sheared padded uploads and ignored the origin.
 		srcBuf.mu.RLock()
 		dstTex.mu.Lock()
-		dstTex.copyLinear(r, srcBuf.data, region.BufferLayout, true)
+		dstTex.copyLinear(r, srcBuf.data, region.BufferLayout, true, region.TextureBase.Aspect)
 		dstTex.mu.Unlock()
 		srcBuf.mu.RUnlock()
 	}
@@ -130,7 +131,7 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 		}
 		srcTex.mu.RLock()
 		dstBuf.mu.Lock()
-		srcTex.copyLinear(r, dstBuf.data, region.BufferLayout, false)
+		srcTex.copyLinear(r, dstBuf.data, region.BufferLayout, false, region.TextureBase.Aspect)
 		dstBuf.mu.Unlock()
 		srcTex.mu.RUnlock()
 	}
@@ -357,20 +358,93 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		)
 	}
 
-	// Create the persistent stencil and depth buffers of the depth/stencil
-	// attachment, sized to the view's mip level.
+	// Load the depth and stencil planes of the depth/stencil attachment's
+	// mip level and array layer for the pass.
 	if tex, level, layer, ok := depthAttachmentImage(desc.DepthStencilAttachment); ok {
 		w, h, _ := tex.levelExtent(level)
 		if w > 0 && h > 0 {
-			r.passStencilBuffer = raster.NewStencilBuffer(int(w), int(h))
-			if desc.DepthStencilAttachment.StencilLoadOp == gputypes.LoadOpClear {
-				r.passStencilBuffer.Clear(uint8(desc.DepthStencilAttachment.StencilClearValue))
-			}
+			r.passStencilBuffer = loadStencilAttachment(desc.DepthStencilAttachment, tex, level, layer)
 			r.passDepthBuffer = loadDepthAttachment(desc.DepthStencilAttachment, tex, level, layer)
 		}
 	}
 
 	return r
+}
+
+// stencilPlane returns where a texel of format stores its stencil: the
+// byte offset in the texel and the texel size (shader/texel.go has the
+// layout). ok is false for a format without a stencil aspect.
+func stencilPlane(format gputypes.TextureFormat) (offset, stride int, ok bool) {
+	switch format {
+	case gputypes.TextureFormatStencil8:
+		return 0, 1, true
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		return shader.StencilPlaneOffset, shader.DepthStencilTexelSize, true
+	}
+	return 0, 0, false
+}
+
+// loadStencilAttachment returns the stencil buffer every draw of a pass
+// shares: cleared to the clear value with LoadOpClear, otherwise loaded from
+// the stencil plane of array layer layer of mip level level of the
+// attachment texture (a read-only stencil aspect always loads). nil when the
+// format has no stencil aspect.
+func loadStencilAttachment(ds *hal.RenderPassDepthStencilAttachment, tex *Texture, level, layer uint32) *raster.StencilBuffer {
+	off, stride, ok := stencilPlane(tex.format)
+	if !ok {
+		return nil
+	}
+	w, h, _ := tex.levelExtent(level)
+	buf := raster.NewStencilBuffer(int(w), int(h))
+	if ds.StencilLoadOp == gputypes.LoadOpClear && !ds.StencilReadOnly {
+		buf.Clear(uint8(ds.StencilClearValue))
+		return buf
+	}
+	tex.mu.RLock()
+	defer tex.mu.RUnlock()
+	img, ok := tex.image(level, layer)
+	if !ok {
+		return buf
+	}
+	for y := range int(img.height) {
+		for x := range int(img.width) {
+			if i := y*int(img.rowPitch) + x*stride + off; i < len(img.data) {
+				buf.Set(x, y, img.data[i])
+			}
+		}
+	}
+	return buf
+}
+
+// storeStencilAttachment writes the pass's stencil buffer back into the
+// stencil plane of the attachment view's mip level and array layer with
+// StoreOpStore, unless the stencil aspect is read-only. The depth plane of
+// a combined format is left to storeDepthAttachment.
+func storeStencilAttachment(ds *hal.RenderPassDepthStencilAttachment, buf *raster.StencilBuffer) {
+	if ds == nil || buf == nil || ds.StencilReadOnly || ds.StencilStoreOp != gputypes.StoreOpStore {
+		return
+	}
+	tex, level, layer, ok := depthAttachmentImage(ds)
+	if !ok {
+		return
+	}
+	off, stride, ok := stencilPlane(tex.format)
+	if !ok {
+		return
+	}
+	tex.mu.Lock()
+	defer tex.mu.Unlock()
+	img, ok := tex.image(level, layer)
+	if !ok {
+		return
+	}
+	for y := range min(int(img.height), buf.Height()) {
+		for x := range min(int(img.width), buf.Width()) {
+			if i := y*int(img.rowPitch) + x*stride + off; i < len(img.data) {
+				img.data[i] = buf.Get(x, y)
+			}
+		}
+	}
 }
 
 // loadDepthAttachment returns the depth buffer every draw of a pass shares:
@@ -507,12 +581,10 @@ type RenderPassEncoder struct {
 	// Stencil reference value set by SetStencilReference.
 	stencilRef uint32
 
-	// Persistent stencil buffer for the render pass — created once at
-	// BeginRenderPass, reused across all Draw() calls. On GPU backends
-	// the stencil buffer is the depth/stencil attachment texture; here
-	// we emulate that by keeping a single raster.StencilBuffer alive
-	// for the entire pass. Without this, stencil writes from pass 1
-	// (clip shape) would be lost before pass 2 (content draw).
+	// passStencilBuffer is the stencil attachment's contents for the pass:
+	// loaded or cleared at BeginRenderPass, shared by every draw, written
+	// back into the attachment's stencil plane at End. nil without a stencil
+	// aspect.
 	passStencilBuffer *raster.StencilBuffer
 
 	// passDepthBuffer is the depth attachment's contents for the pass: loaded
@@ -573,6 +645,7 @@ func (r *RenderPassEncoder) End() {
 
 	r.storeSubresourceTargets()
 	storeDepthAttachment(r.desc.DepthStencilAttachment, r.passDepthBuffer)
+	storeStencilAttachment(r.desc.DepthStencilAttachment, r.passStencilBuffer)
 }
 
 // applyClear clears color attachments that have LoadOp=Clear.

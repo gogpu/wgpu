@@ -1956,6 +1956,237 @@ func TestDepthOnlyPass(t *testing.T) {
 	}
 }
 
+// stencilTestSize is the edge of the stencil attachment the stencil tests
+// render into.
+const stencilTestSize = 4
+
+// stencilCovered reports whether texel (x, y) of a stencilTestSize square
+// lies under the partial triangle of stencilWGSL (vertices 0-2): its
+// hypotenuse is xNDC + yNDC = 0.25, which at texel centres reduces to x <= y
+// and passes through no centre.
+func stencilCovered(x, y int) bool { return x <= y }
+
+// stencilWGSL draws the partial triangle with vertices 0-2 and a fullscreen
+// triangle with vertices 3-5, both at depth 0.5.
+const stencilWGSL = `
+@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+	var xy = array<vec2<f32>, 6>(
+		vec2<f32>(-1.0, -1.0), vec2<f32>(1.25, -1.0), vec2<f32>(-1.0, 1.25),
+		vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+	return vec4<f32>(xy[vi], 0.5, 1.0);
+}
+@fragment fn fs() {}
+`
+
+// stencilPipeline creates a depth/stencil-only pipeline over stencilWGSL
+// whose front-face stencil compares with compare and applies passOp.
+func stencilPipeline(t *testing.T, dev *Device, sm hal.ShaderModule, format gputypes.TextureFormat,
+	compare gputypes.CompareFunction, passOp gputypes.StencilOperation,
+) hal.RenderPipeline {
+	t.Helper()
+	ds := &hal.DepthStencilState{
+		Format:           format,
+		StencilReadMask:  0xFF,
+		StencilWriteMask: 0xFF,
+		StencilFront: hal.StencilFaceState{
+			Compare: compare, FailOp: hal.StencilOperationKeep, DepthFailOp: hal.StencilOperationKeep, PassOp: passOp,
+		},
+	}
+	if format.HasDepth() {
+		ds.DepthCompare = gputypes.CompareFunctionAlways
+	}
+	pipe, err := dev.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label:        "stencil",
+		Vertex:       hal.VertexState{Module: sm, EntryPoint: "vs"},
+		Fragment:     &hal.FragmentState{Module: sm, EntryPoint: "fs"},
+		DepthStencil: ds,
+	})
+	if err != nil {
+		t.Fatalf("CreateRenderPipeline: %v", err)
+	}
+	return pipe
+}
+
+// stencilPass runs one render pass over the depth/stencil view: stencil
+// cleared to 1 (and depth to 0.5) with clear, loaded otherwise; it draws
+// vertices first..first+2 with the stencil reference ref.
+func stencilPass(dev *Device, view hal.TextureView, format gputypes.TextureFormat, clear bool,
+	pipe hal.RenderPipeline, ref, first uint32,
+) {
+	ds := &hal.RenderPassDepthStencilAttachment{
+		View: view, StencilLoadOp: gputypes.LoadOpLoad, StencilStoreOp: gputypes.StoreOpStore, StencilClearValue: 1,
+	}
+	if clear {
+		ds.StencilLoadOp = gputypes.LoadOpClear
+	}
+	if format.HasDepth() {
+		ds.DepthLoadOp, ds.DepthStoreOp, ds.DepthClearValue = ds.StencilLoadOp, gputypes.StoreOpStore, 0.5
+	}
+	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{DepthStencilAttachment: ds})
+	pass.SetPipeline(pipe)
+	pass.SetStencilReference(ref)
+	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: first})
+	pass.End()
+}
+
+// copyAspect reads aspect of tex back through CopyTextureToBuffer, packed
+// at bytesPerTexel per texel with a 256-byte row pitch, and returns the rows
+// without their padding.
+func copyAspect(t *testing.T, dev *Device, tex hal.Texture, aspect gputypes.TextureAspect, bytesPerTexel int) []byte {
+	t.Helper()
+	const pitch = 256
+	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{Size: pitch * stencilTestSize, Usage: gputypes.BufferUsageCopyDst})
+	if err != nil {
+		t.Fatalf("CreateBuffer: %v", err)
+	}
+	defer dev.DestroyBuffer(buf)
+	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
+	enc.CopyTextureToBuffer(tex, buf, []hal.BufferTextureCopy{{
+		BufferLayout: hal.ImageDataLayout{BytesPerRow: pitch, RowsPerImage: stencilTestSize},
+		TextureBase:  hal.ImageCopyTexture{Texture: tex, Aspect: aspect},
+		Size:         hal.Extent3D{Width: stencilTestSize, Height: stencilTestSize, DepthOrArrayLayers: 1},
+	}})
+	data := buf.(*Buffer).GetData()
+	out := make([]byte, 0, stencilTestSize*stencilTestSize*bytesPerTexel)
+	for y := range stencilTestSize {
+		out = append(out, data[y*pitch:y*pitch+stencilTestSize*bytesPerTexel]...)
+	}
+	return out
+}
+
+// stencilAspect is the copy aspect that selects the stencil of format.
+func stencilAspect(format gputypes.TextureFormat) gputypes.TextureAspect {
+	if format == gputypes.TextureFormatStencil8 {
+		return gputypes.TextureAspectAll
+	}
+	return gputypes.TextureAspectStencilOnly
+}
+
+// TestStencilAttachment checks that the stencil aspect of Stencil8,
+// Depth24PlusStencil8 and Depth32FloatStencil8 is stored and survives the
+// pass: pass 1 clears the stencil to 1 and writes 5 under the partial
+// triangle with Replace; pass 2 loads it and increments where it equals 5.
+// The result is read back through a stencil-aspect copy at one byte per
+// texel. Before P1-SW-021 the stencil plane was never loaded or stored (and
+// the combined formats had no storage for it), so the readback was 0.
+func TestStencilAttachment(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+	sm, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: "stencil", Source: hal.ShaderSource{WGSL: stencilWGSL}})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer dev.DestroyShaderModule(sm)
+
+	for _, format := range []gputypes.TextureFormat{
+		gputypes.TextureFormatStencil8, gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8,
+	} {
+		t.Run(format.String(), func(t *testing.T) {
+			tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+				Size:   hal.Extent3D{Width: stencilTestSize, Height: stencilTestSize, DepthOrArrayLayers: 1},
+				Format: format, Usage: gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc,
+			})
+			defer dev.DestroyTexture(tex)
+			view, _ := dev.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+			defer dev.DestroyTextureView(view)
+
+			replace := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionAlways, hal.StencilOperationReplace)
+			defer dev.DestroyRenderPipeline(replace)
+			incr := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionEqual, hal.StencilOperationIncrementClamp)
+			defer dev.DestroyRenderPipeline(incr)
+			stencilPass(dev, view, format, true, replace, 5, 0)
+			stencilPass(dev, view, format, false, incr, 5, 3)
+
+			got := copyAspect(t, dev, tex, stencilAspect(format), 1)
+			for i, v := range got {
+				want := byte(1)
+				if stencilCovered(i%stencilTestSize, i/stencilTestSize) {
+					want = 6
+				}
+				if v != want {
+					t.Fatalf("stencil texel (%d,%d) = %d, want %d (all: %v)", i%stencilTestSize, i/stencilTestSize, v, want, got)
+				}
+			}
+			if format == gputypes.TextureFormatDepth32FloatStencil8 {
+				depth := copyAspect(t, dev, tex, gputypes.TextureAspectDepthOnly, 4)
+				for i := 0; i < len(depth); i += 4 {
+					if d := math.Float32frombits(binary.LittleEndian.Uint32(depth[i:])); d != 0.5 {
+						t.Fatalf("depth texel %d = %v, want 0.5", i/4, d)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestStencilUpload writes the stencil aspect with Queue.WriteTexture (one
+// byte per texel), reads it back through a stencil-aspect copy, and checks
+// that a stencil test in a pass that loads it sees the uploaded values. For
+// Depth32FloatStencil8 the upload must leave the depth plane alone.
+func TestStencilUpload(t *testing.T) {
+	dev, queue, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+	sm, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: "stencil", Source: hal.ShaderSource{WGSL: stencilWGSL}})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v", err)
+	}
+	defer dev.DestroyShaderModule(sm)
+
+	upload := make([]byte, stencilTestSize*stencilTestSize)
+	for i := range upload {
+		upload[i] = byte(10 + i)
+	}
+	for _, format := range []gputypes.TextureFormat{
+		gputypes.TextureFormatStencil8, gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8,
+	} {
+		t.Run(format.String(), func(t *testing.T) {
+			tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
+				Size:   hal.Extent3D{Width: stencilTestSize, Height: stencilTestSize, DepthOrArrayLayers: 1},
+				Format: format, Usage: gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageCopyDst,
+			})
+			defer dev.DestroyTexture(tex)
+			view, _ := dev.CreateTextureView(tex, &hal.TextureViewDescriptor{})
+			defer dev.DestroyTextureView(view)
+			if format.HasDepth() {
+				// Clear the depth to 0.5 and the stencil to 1 before the upload.
+				keep := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionNever, hal.StencilOperationKeep)
+				stencilPass(dev, view, format, true, keep, 0, 0)
+				dev.DestroyRenderPipeline(keep)
+			}
+
+			err := queue.WriteTexture(&hal.ImageCopyTexture{Texture: tex, Aspect: stencilAspect(format)}, upload,
+				&hal.ImageDataLayout{BytesPerRow: stencilTestSize, RowsPerImage: stencilTestSize},
+				&hal.Extent3D{Width: stencilTestSize, Height: stencilTestSize, DepthOrArrayLayers: 1})
+			if err != nil {
+				t.Fatalf("WriteTexture: %v", err)
+			}
+			if got := copyAspect(t, dev, tex, stencilAspect(format), 1); !bytes.Equal(got, upload) {
+				t.Fatalf("stencil readback = %v, want %v", got, upload)
+			}
+
+			// Texel (0, 3) holds 10+12 = 22: a fullscreen draw that inverts
+			// where the stencil equals 22 changes only that texel, to ^22.
+			mark := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionEqual, hal.StencilOperationInvert)
+			defer dev.DestroyRenderPipeline(mark)
+			stencilPass(dev, view, format, false, mark, 22, 3)
+			want := bytes.Clone(upload)
+			want[12] = ^byte(22)
+			if got := copyAspect(t, dev, tex, stencilAspect(format), 1); !bytes.Equal(got, want) {
+				t.Fatalf("stencil after the Equal/Invert pass = %v, want only texel 12 inverted to %d", got, want[12])
+			}
+			if format == gputypes.TextureFormatDepth32FloatStencil8 {
+				depth := copyAspect(t, dev, tex, gputypes.TextureAspectDepthOnly, 4)
+				for i := 0; i < len(depth); i += 4 {
+					if d := math.Float32frombits(binary.LittleEndian.Uint32(depth[i:])); d != 0.5 {
+						t.Fatalf("depth texel %d = %v after the stencil upload, want 0.5", i/4, d)
+					}
+				}
+			}
+		})
+	}
+}
+
 // =============================================================================
 // Multiple Render Targets (MRT) Tests
 // =============================================================================
