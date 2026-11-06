@@ -11,6 +11,40 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
+// TestColorWriteMaskToMTL checks the channel mapping for every one of the 16
+// masks against MTLColorWriteMask's own values (Red=8, Green=4, Blue=2,
+// Alpha=1, Apple MTLRenderPipelineColorAttachmentDescriptor.writeMask): a
+// raw cast of the gputypes bits swaps red with alpha and green with blue.
+func TestColorWriteMaskToMTL(t *testing.T) {
+	single := []struct {
+		in   gputypes.ColorWriteMask
+		want MTLColorWriteMask
+	}{
+		{gputypes.ColorWriteMaskNone, 0},
+		{gputypes.ColorWriteMaskRed, 8},
+		{gputypes.ColorWriteMaskGreen, 4},
+		{gputypes.ColorWriteMaskBlue, 2},
+		{gputypes.ColorWriteMaskAlpha, 1},
+		{gputypes.ColorWriteMaskAll, 0xF},
+	}
+	for _, c := range single {
+		if got := colorWriteMaskToMTL(c.in); got != c.want {
+			t.Errorf("colorWriteMaskToMTL(%#x) = %#x, want %#x", uint32(c.in), uint32(got), uint32(c.want))
+		}
+	}
+	for m := gputypes.ColorWriteMask(0); m <= gputypes.ColorWriteMaskAll; m++ {
+		var want MTLColorWriteMask
+		for _, ch := range single[1:5] {
+			if m&ch.in != 0 {
+				want |= ch.want
+			}
+		}
+		if got := colorWriteMaskToMTL(m); got != want {
+			t.Errorf("colorWriteMaskToMTL(%#x) = %#x, want %#x", uint32(m), uint32(got), uint32(want))
+		}
+	}
+}
+
 // TestTextureFormatToMTL tests texture format conversions to Metal pixel formats.
 func TestTextureFormatToMTL(t *testing.T) {
 	tests := []struct {
