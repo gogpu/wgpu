@@ -1167,6 +1167,7 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 		refDimIdx      int // index of attachment that set width/height
 		hasDimensions  bool
 		hasSampleCount bool
+		regions        = make(attachmentRegions, len(desc.ColorAttachments))
 	)
 
 	for i := range desc.ColorAttachments {
@@ -1180,6 +1181,9 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 
 		tex := ca.View.Parent
 		if err := validateColorAttachmentDepthSlice(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
+		if err := regions.addColorAttachment(desc.Label, i, ca); err != nil {
 			return nil, err
 		}
 		ctx.ColorFormats[i] = tex.Format()
@@ -1275,6 +1279,69 @@ func validateColorAttachmentDepthSlice(label string, i int, ca *RenderPassColorA
 		}
 		return nil
 	}
+}
+
+// attachmentSubresource is one entry of a render pass's attachmentRegions:
+// a texture, a mip level and an array layer, or a depth slice for a 3D view.
+type attachmentSubresource struct {
+	texture *Texture
+	mip     uint32
+	layer   uint32
+}
+
+// attachmentRegions is the set of subresources the color attachments and
+// resolve targets of one render pass have claimed so far.
+//
+// Reference: WebGPU spec GPURenderPassDescriptor Valid Usage ("the
+// attachmentRegions must be pairwise disjoint"); Rust wgpu-core
+// command/render.rs check_attachment_overlap.
+type attachmentRegions map[attachmentSubresource]struct{}
+
+// addColorAttachment claims the regions of color attachment i: its view
+// with its depthSlice, then its resolve target. The resolve target is
+// checked against the set too, its own attachment's view included. The
+// depth/stencil attachment is not part of attachmentRegions.
+func (r attachmentRegions) addColorAttachment(label string, i int, ca *RenderPassColorAttachment) error {
+	if mip, layer, ok := r.add(ca.View, ca.DepthSlice); !ok {
+		return &RenderPassValidationError{
+			Kind: RenderPassErrorSubresourceOverlap, Label: label, AttachmentIndex: i,
+			MipLevel: mip, Layer: layer,
+		}
+	}
+	if ca.ResolveTarget == nil || ca.ResolveTarget.Parent == nil {
+		return nil
+	}
+	if mip, layer, ok := r.add(ca.ResolveTarget, nil); !ok {
+		return &RenderPassValidationError{
+			Kind: RenderPassErrorSubresourceOverlap, Label: label, AttachmentIndex: i,
+			MipLevel: mip, Layer: layer, ResolveTarget: true,
+		}
+	}
+	return nil
+}
+
+// add claims the subresources of view at its base mip level: depthSlice of
+// a 3D view, else every array layer of the view's range (Rust iterates the
+// layers of a 2d-array view, which multiview renders to). A view whose
+// layer count is not known claims BaseArrayLayer alone. The count is capped
+// at the texture's layer count, so a view range nothing validated cannot
+// make the loop run past the texture. It returns the first subresource
+// already claimed, with ok false.
+func (r attachmentRegions) add(view *TextureView, depthSlice *uint32) (mip, layer uint32, ok bool) {
+	mip = view.BaseMipLevel
+	first := view.BaseArrayLayer
+	count := min(max(view.ArrayLayerCount, 1), max(view.Parent.Size().DepthOrArrayLayers, 1))
+	if view.Dimension == gputypes.TextureViewDimension3D && depthSlice != nil {
+		first, count = *depthSlice, 1
+	}
+	for layer = first; layer-first < count; layer++ {
+		key := attachmentSubresource{texture: view.Parent, mip: mip, layer: layer}
+		if _, taken := r[key]; taken {
+			return mip, layer, false
+		}
+		r[key] = struct{}{}
+	}
+	return 0, 0, true
 }
 
 // validateDepthStencilAttachment checks that the depth/stencil attachment

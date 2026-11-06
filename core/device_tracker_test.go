@@ -986,8 +986,13 @@ func TestBeginRenderPass_NoConflict_SameUsage(t *testing.T) {
 		raw:          NewSnatchable[hal.Texture](nil),
 		device:       device,
 		trackingData: td,
+		size:         gputypes.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 2},
 	}
-	view := &TextureView{Parent: tex}
+	// Two layers of one texture: attaching the same subresource twice is a
+	// validation error (attachmentRegions must be disjoint), the same texture
+	// through different layers is not.
+	layer0 := &TextureView{Parent: tex, BaseArrayLayer: 0, ArrayLayerCount: 1}
+	layer1 := &TextureView{Parent: tex, BaseArrayLayer: 1, ArrayLayerCount: 1}
 
 	enc, err := device.CreateCommandEncoder("test")
 	if err != nil {
@@ -998,8 +1003,8 @@ func TestBeginRenderPass_NoConflict_SameUsage(t *testing.T) {
 	// This should NOT produce a conflict.
 	desc := &RenderPassDescriptor{
 		ColorAttachments: []RenderPassColorAttachment{
-			{View: view, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
-			{View: view, LoadOp: gputypes.LoadOpLoad, StoreOp: gputypes.StoreOpStore},
+			{View: layer0, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: layer1, LoadOp: gputypes.LoadOpLoad, StoreOp: gputypes.StoreOpStore},
 		},
 	}
 	_, passErr := enc.BeginRenderPass(desc)

@@ -1065,6 +1065,16 @@ type TextureView struct {
 	// BaseMipLevel is the view descriptor's baseMipLevel. Read-only: set when
 	// the view is built and never written after.
 	BaseMipLevel uint32
+
+	// BaseArrayLayer and ArrayLayerCount are the view's array layer range,
+	// resolved from the texture when the descriptor left the count at 0
+	// (WebGPU "resolving GPUTextureViewDescriptor defaults"). A count of 0
+	// means the range is not known (a view wrapped from a HAL handle) and is
+	// treated as the single layer BaseArrayLayer. The render pass overlap
+	// check reads them. Read-only: set when the view is built and never
+	// written after.
+	BaseArrayLayer  uint32
+	ArrayLayerCount uint32
 }
 
 // Sampler represents a texture sampler with HAL integration.
