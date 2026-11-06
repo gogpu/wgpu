@@ -143,7 +143,7 @@ Pure Go OpenGL 3.3+ / OpenGL ES 3.0+ implementation; adapters below that minimum
 
 **Context Architecture (Rust wgpu parity):**
 - **Windows (WGL):** GL context lives on a hidden 1×1 window owned by Instance
-- **Linux (EGL):** GL context lives on Instance pbuffer/surfaceless (X11/headless) or Surface-owned context (Wayland — intentional divergence; no `wl_display*` at Instance init)
+- **Linux (EGL):** GL context lives on the Instance (pbuffer/surfaceless for X11 and headless, or the app's display when `InstanceDescriptor.Display` is set, as Rust's `InstanceDescriptor.display`). Without that display on Wayland, the first surface builds the context on its `wl_display`; that context belongs to the surfaces and devices built on it and is destroyed with the last of them, while the display is still open. EGLDisplays are reference-counted per native display and terminated with their last user, as in Rust wgpu-hal
 - `AdapterContext` — `sync.Mutex` + `runtime.LockOSThread`-protected wrapper shared by Adapter → Device → Queue
 - `Lock()` → MakeCurrent to hidden DC (Windows) / pbuffer-surfaceless (Linux) for resource creation and command execution
 - `LockForDC(userDC)` / `LockForSurface(eglSurface)` → MakeCurrent for presentation (blit + SwapBuffers)
