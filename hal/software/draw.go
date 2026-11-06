@@ -26,21 +26,24 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 		return
 	}
 
-	target := r.getTargetTexture()
-	if target == nil {
+	// A pass may have no colour attachment at all (a depth-only shadow pass):
+	// it still rasterizes into its depth/stencil attachment.
+	w, h, ok := r.renderExtent()
+	if !ok {
 		return
 	}
+	target := r.getTargetTexture()
 
 	// No vertex buffer bound — try fullscreen blit or SPIR-V shader path.
 	if r.vertexBufs[0].buffer == nil {
-		if r.executeFullscreenBlit(target) {
+		if target != nil && r.executeFullscreenBlit(target) {
 			hal.Logger().Debug("software: executeDraw → Tier 0 blit (fast memcpy)",
 				"width", target.width, "height", target.height)
 			r.cleared = true
 			return
 		}
 
-		if r.executeSPIRVDraw(target, vertexCount, instanceCount, firstVertex, firstInstance) {
+		if r.executeSPIRVDraw(w, h, vertexCount, instanceCount, firstVertex, firstInstance) {
 			hal.Logger().Debug("software: executeDraw → SPIR-V path (no VB)",
 				"vertices", vertexCount)
 			return
@@ -56,7 +59,25 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 	if !r.cleared {
 		r.applyClear()
 	}
-	r.executeVertexDraw(target, vertexCount, instanceCount, firstVertex, firstInstance)
+	r.executeVertexDraw(target, w, h, vertexCount, instanceCount, firstVertex, firstInstance)
+}
+
+// renderExtent returns the size of the pass's render area: the size of its
+// attachments, which WebGPU requires to match. It takes the first colour
+// target, or the depth/stencil attachment's mip level when the pass has no
+// colour target. ok is false when the pass has neither.
+func (r *RenderPassEncoder) renderExtent() (w, h int, ok bool) {
+	for _, t := range r.colorTargets {
+		if t != nil {
+			return int(t.width), int(t.height), true
+		}
+	}
+	tex, level, _, ok := depthAttachmentImage(r.desc.DepthStencilAttachment)
+	if !ok {
+		return 0, 0, false
+	}
+	dw, dh, _ := tex.levelExtent(level)
+	return int(dw), int(dh), dw > 0 && dh > 0
 }
 
 // getTargetTexture returns the texture the first color attachment renders
@@ -135,7 +156,7 @@ func (r *RenderPassEncoder) blitStateValid() bool {
 // (which includes a pipeline without shader stages), copy the texture with a
 // direct memcpy/swizzle.
 func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, target *Texture, w, h int) bool {
-	if len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
+	if target == nil || len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
 		return false
 	}
 	srcView := r.findBoundTexture()
@@ -352,7 +373,7 @@ func (r *RenderPassEncoder) findBoundTexture() *TextureView {
 // When the pipeline has a SPIR-V vertex shader, the shader is executed per-vertex
 // with both @builtin and @location inputs, and the output @location attributes
 // are used for per-vertex color interpolation.
-func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (r *RenderPassEncoder) executeVertexDraw(target *Texture, w, h int, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
 	if r.pipeline.desc == nil {
 		return
 	}
@@ -363,9 +384,6 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, vertexCount, inst
 		// executeSPIRVDraw in executeDraw. Nothing more to do.
 		return
 	}
-
-	w := int(target.width)
-	h := int(target.height)
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
@@ -1181,7 +1199,7 @@ func (r *RenderPassEncoder) prepareSPIRVDraw() *spirvDrawSetup {
 	return s
 }
 
-func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, instanceCount, firstVertex, firstInstance uint32) bool {
+func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCount, firstVertex, firstInstance uint32) bool {
 	s := r.prepareSPIRVDraw()
 	if s == nil {
 		return false
@@ -1192,9 +1210,6 @@ func (r *RenderPassEncoder) executeSPIRVDraw(target *Texture, vertexCount, insta
 	if !r.cleared {
 		r.applyClear()
 	}
-
-	w := int(target.width)
-	h := int(target.height)
 
 	pipe := raster.NewPipeline(w, h)
 	r.configureRasterPipeline(pipe)
