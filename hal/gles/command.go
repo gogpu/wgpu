@@ -267,6 +267,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Reference wgpu sets viewport at render pass start — required for correct rendering.
 	if len(desc.ColorAttachments) > 0 {
 		e.setupColorAttachment(desc, rpe)
+	} else if desc.DepthStencilAttachment != nil {
+		e.setupDepthOnlyTarget(desc.DepthStencilAttachment, rpe)
 	}
 
 	// Set draw buffers for MRT. Matches Rust wgpu-hal GLES
@@ -445,6 +447,32 @@ func (e *CommandEncoder) setupOffscreenTarget(
 			rpe.resolveToSurface = true
 		}
 	}
+}
+
+// setupDepthOnlyTarget binds the framebuffer of a pass without color
+// attachments, a shadow-map pass: the depth/stencil texture's own FBO with the
+// view's mip level and layer attached, and the viewport of that mip level.
+// Rust wgpu-hal begin_render_pass binds its draw FBO and attaches the
+// depth/stencil view whether or not the pass has color attachments
+// (gles/command.rs), and sets the viewport to the pass's extent.
+func (e *CommandEncoder) setupDepthOnlyTarget(dsa *hal.RenderPassDepthStencilAttachment, rpe *RenderPassEncoder) {
+	view, ok := dsa.View.(*TextureView)
+	if !ok || view.texture == nil {
+		return
+	}
+	e.commands = append(e.commands, &BindDepthStencilFBOCommand{
+		texture:  view.texture,
+		mipLevel: view.baseMip,
+		layer:    view.baseLayer,
+	})
+	width := max(view.texture.size.Width>>view.baseMip, 1)
+	height := max(view.texture.size.Height>>view.baseMip, 1)
+	rpe.fbHeight = height
+	e.commands = append(e.commands, &SetViewportCommand{
+		width:    float32(width),
+		height:   float32(height),
+		maxDepth: 1,
+	})
 }
 
 // BeginComputePass begins a compute pass.
@@ -1086,6 +1114,36 @@ func (c *AttachDepthStencilCommand) Execute(ctx *gl.Context) {
 	}
 	attachment := depthStencilAttachmentPoint(c.depthTexture.format)
 	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, c.depthTexture.target, c.depthTexture.id, 0)
+}
+
+// BindDepthStencilFBOCommand binds the framebuffer of a pass without color
+// attachments: the depth/stencil texture's FBO, created lazily, with one mip
+// level and layer of the texture at its depth/stencil attachment point. The
+// FBO is shared with the texture's readbacks (CopyTextureToBufferCommand
+// bindSourceFBO), so the level and layer are attached for every pass.
+type BindDepthStencilFBOCommand struct {
+	texture  *Texture
+	mipLevel uint32
+	layer    uint32 // array layer or cube face of a layered texture
+}
+
+func (c *BindDepthStencilFBOCommand) Execute(ctx *gl.Context) {
+	attachment := depthStencilAttachmentPoint(c.texture.format)
+	if c.texture.fbo != 0 {
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.texture.fbo)
+		attachColorLayer(ctx, attachment, c.texture, c.mipLevel, c.layer)
+		return
+	}
+	fbo := ctx.GenFramebuffers(1)
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	attachColorLayer(ctx, attachment, c.texture, c.mipLevel, c.layer)
+	if status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER); status != gl.FRAMEBUFFER_COMPLETE {
+		hal.Logger().Warn("gles: depth/stencil framebuffer incomplete", "status", status, "format", c.texture.format)
+		ctx.DeleteFramebuffers(fbo)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		return
+	}
+	c.texture.fbo = fbo
 }
 
 // depthStencilAttachmentPoint returns the GL attachment point for a depth/stencil
