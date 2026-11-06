@@ -81,6 +81,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 	if hasIncrementalPresent {
 		extensions = append(extensions, extIncrementalPresent+"\x00")
 	}
+	extensions = append(extensions, a.ext.maintenance1Extensions()...)
 
 	// Detect timeline semaphore support (VK-IMPL-001).
 	// Query via PhysicalDeviceVulkan12Features with PNext chain on GetPhysicalDeviceFeatures2.
@@ -154,6 +155,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		supportsDrawIndirectCount:  supportsDrawIndirectCountFeature(a.properties.ApiVersion),
 		maxDrawIndirectCount:       a.properties.Limits.MaxDrawIndirectCount,
 		supportsIncrementalPresent: hasIncrementalPresent,
+		supports2DViewsOf3D:        a.ext.has2DViewsOf3D(),
 		spirvOptions:               spirvOptions(a.properties.ApiVersion, a.ext),
 	}
 	// Keep f16 stage inputs and outputs f16 only where the device enabled

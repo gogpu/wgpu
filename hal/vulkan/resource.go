@@ -97,6 +97,9 @@ type TextureView struct {
 	isSwapchain bool       // True if this view is for a swapchain image
 	swapchain   *Swapchain // Back-pointer to owning swapchain (VK-006: layout tracking)
 	vkFormat    vk.Format  // Vulkan format (for swapchain views where texture is nil)
+	// depthSlices holds the 2D views of single depth slices that render
+	// passes on a 3D view use; nil for every other view (depth_slice_view.go).
+	depthSlices *depthSliceViews
 }
 
 // Destroy releases the texture view.
