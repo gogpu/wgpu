@@ -47,6 +47,8 @@ func writeTexture(ctx *gl.Context, tex *Texture, dst *hal.ImageCopyTexture, data
 	}
 	format, dataType := desc.external, desc.dataType
 	switch {
+	case tex.format.IsCompressed():
+		return writeCompressedTexture(ctx, tex, desc.internal, dst, data, layout, size)
 	case isLayeredTarget(tex.target):
 		return writeLayeredTexture(ctx, tex, dst, data, layout, size, format, dataType)
 	case tex.target == gl.TEXTURE_2D || tex.target == gl.TEXTURE_CUBE_MAP:

@@ -232,12 +232,19 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	internalFormat, format, dataType := glFormat.internal, glFormat.external, glFormat.dataType
 
 	// Allocate texture storage
-	switch target {
-	case gl.TEXTURE_2D_MULTISAMPLE:
+	switch {
+	case desc.Format.IsCompressed():
+		if err := allocateCompressedStorage(glCtx, target, internalFormat, desc.Size, desc.MipLevelCount); err != nil {
+			glCtx.BindTexture(target, 0)
+			glCtx.DeleteTextures(id)
+			return nil, err
+		}
+
+	case target == gl.TEXTURE_2D_MULTISAMPLE:
 		glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
 			int32(desc.Size.Width), int32(desc.Size.Height), true)
 
-	case gl.TEXTURE_2D:
+	case target == gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
@@ -245,7 +252,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 				width, height, 0, format, dataType, nil)
 		}
 
-	case gl.TEXTURE_CUBE_MAP:
+	case target == gl.TEXTURE_CUBE_MAP:
 		for face := uint32(0); face < 6; face++ {
 			faceTarget := gl.TEXTURE_CUBE_MAP_POSITIVE_X + face
 			for level := uint32(0); level < desc.MipLevelCount; level++ {
@@ -256,7 +263,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			}
 		}
 
-	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY:
+	case isLayeredTarget(target):
 		// Every level, as Rust wgpu-hal does with tex_image_3d on a context
 		// without immutable storage (gles/device.rs create_texture); the 2D
 		// path above uses mutable TexImage2D storage as well.

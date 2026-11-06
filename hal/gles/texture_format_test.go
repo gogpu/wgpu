@@ -68,7 +68,73 @@ var rustTextureFormats = map[gputypes.TextureFormat][3]uint32{
 	gputypes.TextureFormatDepth24PlusStencil8:  {0x88F0, 0x84F9, 0x84FA}, // DEPTH24_STENCIL8, UNSIGNED_INT_24_8
 }
 
+// rustCompressedFormats are the compressed rows of Rust's
+// describe_texture_format: the GL compressed internal format, the base format
+// and no transfer type. ASTC HDR shares the LDR enums in Rust; gputypes has
+// no HDR channel.
+var rustCompressedFormats = map[gputypes.TextureFormat][3]uint32{
+	gputypes.TextureFormatBC1RGBAUnorm:        {0x83F1, 0x1908, 0}, // COMPRESSED_RGBA_S3TC_DXT1_EXT, RGBA
+	gputypes.TextureFormatBC1RGBAUnormSrgb:    {0x8C4D, 0x1908, 0}, // COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+	gputypes.TextureFormatBC2RGBAUnorm:        {0x83F2, 0x1908, 0},
+	gputypes.TextureFormatBC2RGBAUnormSrgb:    {0x8C4E, 0x1908, 0},
+	gputypes.TextureFormatBC3RGBAUnorm:        {0x83F3, 0x1908, 0},
+	gputypes.TextureFormatBC3RGBAUnormSrgb:    {0x8C4F, 0x1908, 0},
+	gputypes.TextureFormatBC4RUnorm:           {0x8DBB, 0x1903, 0}, // COMPRESSED_RED_RGTC1, RED
+	gputypes.TextureFormatBC4RSnorm:           {0x8DBC, 0x1903, 0},
+	gputypes.TextureFormatBC5RGUnorm:          {0x8DBD, 0x8227, 0}, // COMPRESSED_RG_RGTC2, RG
+	gputypes.TextureFormatBC5RGSnorm:          {0x8DBE, 0x8227, 0},
+	gputypes.TextureFormatBC6HRGBUfloat:       {0x8E8F, 0x1907, 0}, // COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT, RGB
+	gputypes.TextureFormatBC6HRGBFloat:        {0x8E8E, 0x1907, 0},
+	gputypes.TextureFormatBC7RGBAUnorm:        {0x8E8C, 0x1908, 0},
+	gputypes.TextureFormatBC7RGBAUnormSrgb:    {0x8E8D, 0x1908, 0},
+	gputypes.TextureFormatETC2RGB8Unorm:       {0x9274, 0x1907, 0},
+	gputypes.TextureFormatETC2RGB8UnormSrgb:   {0x9275, 0x1907, 0},
+	gputypes.TextureFormatETC2RGB8A1Unorm:     {0x9276, 0x1908, 0},
+	gputypes.TextureFormatETC2RGB8A1UnormSrgb: {0x9277, 0x1908, 0},
+	gputypes.TextureFormatETC2RGBA8Unorm:      {0x9278, 0x1908, 0},
+	gputypes.TextureFormatETC2RGBA8UnormSrgb:  {0x9279, 0x1908, 0},
+	gputypes.TextureFormatEACR11Unorm:         {0x9270, 0x1903, 0},
+	gputypes.TextureFormatEACR11Snorm:         {0x9271, 0x1903, 0},
+	gputypes.TextureFormatEACRG11Unorm:        {0x9272, 0x8227, 0},
+	gputypes.TextureFormatEACRG11Snorm:        {0x9273, 0x8227, 0},
+	gputypes.TextureFormatASTC4x4Unorm:        {0x93B0, 0x1908, 0},
+	gputypes.TextureFormatASTC4x4UnormSrgb:    {0x93D0, 0x1908, 0},
+	gputypes.TextureFormatASTC5x4Unorm:        {0x93B1, 0x1908, 0},
+	gputypes.TextureFormatASTC5x4UnormSrgb:    {0x93D1, 0x1908, 0},
+	gputypes.TextureFormatASTC5x5Unorm:        {0x93B2, 0x1908, 0},
+	gputypes.TextureFormatASTC5x5UnormSrgb:    {0x93D2, 0x1908, 0},
+	gputypes.TextureFormatASTC6x5Unorm:        {0x93B3, 0x1908, 0},
+	gputypes.TextureFormatASTC6x5UnormSrgb:    {0x93D3, 0x1908, 0},
+	gputypes.TextureFormatASTC6x6Unorm:        {0x93B4, 0x1908, 0},
+	gputypes.TextureFormatASTC6x6UnormSrgb:    {0x93D4, 0x1908, 0},
+	gputypes.TextureFormatASTC8x5Unorm:        {0x93B5, 0x1908, 0},
+	gputypes.TextureFormatASTC8x5UnormSrgb:    {0x93D5, 0x1908, 0},
+	gputypes.TextureFormatASTC8x6Unorm:        {0x93B6, 0x1908, 0},
+	gputypes.TextureFormatASTC8x6UnormSrgb:    {0x93D6, 0x1908, 0},
+	gputypes.TextureFormatASTC8x8Unorm:        {0x93B7, 0x1908, 0},
+	gputypes.TextureFormatASTC8x8UnormSrgb:    {0x93D7, 0x1908, 0},
+	gputypes.TextureFormatASTC10x5Unorm:       {0x93B8, 0x1908, 0},
+	gputypes.TextureFormatASTC10x5UnormSrgb:   {0x93D8, 0x1908, 0},
+	gputypes.TextureFormatASTC10x6Unorm:       {0x93B9, 0x1908, 0},
+	gputypes.TextureFormatASTC10x6UnormSrgb:   {0x93D9, 0x1908, 0},
+	gputypes.TextureFormatASTC10x8Unorm:       {0x93BA, 0x1908, 0},
+	gputypes.TextureFormatASTC10x8UnormSrgb:   {0x93DA, 0x1908, 0},
+	gputypes.TextureFormatASTC10x10Unorm:      {0x93BB, 0x1908, 0},
+	gputypes.TextureFormatASTC10x10UnormSrgb:  {0x93DB, 0x1908, 0},
+	gputypes.TextureFormatASTC12x10Unorm:      {0x93BC, 0x1908, 0},
+	gputypes.TextureFormatASTC12x10UnormSrgb:  {0x93DC, 0x1908, 0},
+	gputypes.TextureFormatASTC12x12Unorm:      {0x93BD, 0x1908, 0},
+	gputypes.TextureFormatASTC12x12UnormSrgb:  {0x93DD, 0x1908, 0},
+}
+
 func TestDescribeTextureFormatMatchesRust(t *testing.T) {
+	for format, want := range rustCompressedFormats {
+		if got, err := describeTextureFormat(format); err != nil {
+			t.Errorf("%v: %v", format, err)
+		} else if g := [3]uint32{got.internal, got.external, got.dataType}; g != want {
+			t.Errorf("%v = %#x, want %#x (Rust describe_texture_format)", format, g, want)
+		}
+	}
 	for format, want := range rustTextureFormats {
 		got, err := describeTextureFormat(format)
 		if err != nil {
@@ -79,20 +145,16 @@ func TestDescribeTextureFormatMatchesRust(t *testing.T) {
 			t.Errorf("%v = %#x, want %#x (Rust describe_texture_format)", format, g, want)
 		}
 	}
-	if len(glTextureFormats) != len(rustTextureFormats) {
-		t.Errorf("table has %d formats, Rust's uncompressed rows %d", len(glTextureFormats), len(rustTextureFormats))
+	if want := len(rustTextureFormats) + len(rustCompressedFormats); len(glTextureFormats) != want {
+		t.Errorf("table has %d formats, Rust's rows %d", len(glTextureFormats), want)
 	}
 }
 
 // TestDescribeTextureFormatRefusesUnknown: a format without a row is an
-// error, never another format's storage. Undefined, the block-compressed
-// formats (no compressed path yet) and values past the enum.
+// error, never another format's storage: Undefined and values past the enum.
 func TestDescribeTextureFormatRefusesUnknown(t *testing.T) {
 	for _, format := range []gputypes.TextureFormat{
 		gputypes.TextureFormatUndefined,
-		gputypes.TextureFormatBC1RGBAUnorm,
-		gputypes.TextureFormatETC2RGB8Unorm,
-		gputypes.TextureFormatASTC4x4Unorm,
 		gputypes.TextureFormat(9999),
 	} {
 		_, err := describeTextureFormat(format)
@@ -105,7 +167,8 @@ func TestDescribeTextureFormatRefusesUnknown(t *testing.T) {
 
 // TestUploadTexelBytesOfEveryFormat: every format with a row has a texel size
 // GL reads (UNPACK_ROW_LENGTH is derived from it), except the combined
-// depth/stencil formats, whose copies move one aspect.
+// depth/stencil formats, whose copies move one aspect, and the compressed
+// formats, which are written in blocks (compressedUpload).
 func TestUploadTexelBytesOfEveryFormat(t *testing.T) {
 	want := map[gputypes.TextureFormat]uint64{
 		gputypes.TextureFormatR8Uint:               1,
@@ -120,6 +183,9 @@ func TestUploadTexelBytesOfEveryFormat(t *testing.T) {
 		gputypes.TextureFormatDepth32FloatStencil8: 0,
 	}
 	for format, desc := range glTextureFormats {
+		if format.IsCompressed() {
+			continue
+		}
 		got := uploadTexelBytes(desc.external, desc.dataType)
 		if w, ok := want[format]; ok {
 			if got != w {

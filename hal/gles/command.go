@@ -2302,6 +2302,13 @@ type CopyBufferToTextureCommand struct {
 	rowsPerImage uint32
 }
 
+// unpackBufferOffset returns a byte offset into the bound PIXEL_UNPACK_BUFFER
+// in the pointer argument GL reads it from. The value is never dereferenced
+// by Go (the govet unsafeptr exclusion for this file in .golangci.yml).
+func unpackBufferOffset(offset uint64) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(offset))
+}
+
 func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 	width := int32(c.copySize[0])
 	height := int32(c.copySize[1])
@@ -2322,6 +2329,19 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 
 	// Bind destination texture.
 	ctx.BindTexture(c.dstTex.target, c.dstTex.id)
+
+	if c.dstTex.format.IsCompressed() {
+		cc := compressedCopy{
+			tex: c.dstTex, mipLevel: c.mipLevel, origin: c.origin, size: c.copySize,
+			bytesPerRow: c.bytesPerRow, rowsPerImage: c.rowsPerImage,
+		}
+		cc.upload(ctx, desc.internal, func(offset uint64) unsafe.Pointer {
+			return unpackBufferOffset(c.bufOffset + offset)
+		})
+		ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, 0)
+		ctx.BindTexture(c.dstTex.target, 0)
+		return
+	}
 
 	// Set pixel alignment to 1 for formats whose rows may not be 4-byte aligned.
 	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
@@ -2346,7 +2366,7 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 		ctx.TexSubImage3D(c.dstTex.target, int32(c.mipLevel),
 			int32(c.origin[0]), int32(c.origin[1]), int32(c.origin[2]),
 			width, height, int32(max(c.copySize[2], 1)),
-			format, dataType, unsafe.Pointer(uintptr(c.bufOffset)))
+			format, dataType, unpackBufferOffset(c.bufOffset))
 		ctx.PixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0)
 	} else {
 		c.uploadLayers(ctx, format, dataType)
@@ -2372,7 +2392,7 @@ func (c *CopyBufferToTextureCommand) uploadLayers(ctx *gl.Context, format, dataT
 		ctx.TexSubImage2D(get2DTarget(c.dstTex.target, c.origin[2]+z), int32(c.mipLevel),
 			int32(c.origin[0]), int32(c.origin[1]),
 			int32(c.copySize[0]), int32(c.copySize[1]),
-			format, dataType, unsafe.Pointer(uintptr(offset)))
+			format, dataType, unpackBufferOffset(offset))
 	}
 }
 

@@ -179,6 +179,12 @@ type Context struct {
 	glTexSubImage3D           uintptr
 	glFramebufferTextureLayer uintptr
 
+	// Immutable storage and compressed uploads (GL 4.2 / ES 3.0)
+	glTexStorage2D            uintptr
+	glTexStorage3D            uintptr
+	glCompressedTexSubImage2D uintptr
+	glCompressedTexSubImage3D uintptr
+
 	// Sampler objects (GL 3.3+ / ES 3.0+)
 	glGenSamplers       uintptr
 	glDeleteSamplers    uintptr
@@ -365,6 +371,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glTexImage3D = getProcAddr("glTexImage3D")
 	c.glTexSubImage3D = getProcAddr("glTexSubImage3D")
 	c.glFramebufferTextureLayer = getProcAddr("glFramebufferTextureLayer")
+	// Immutable storage and compressed uploads (optional - checked with HasCompressedTextures)
+	c.glTexStorage2D = getProcAddr("glTexStorage2D")
+	c.glTexStorage3D = getProcAddr("glTexStorage3D")
+	c.glCompressedTexSubImage2D = getProcAddr("glCompressedTexSubImage2D")
+	c.glCompressedTexSubImage3D = getProcAddr("glCompressedTexSubImage3D")
 
 	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
 	c.glGenSamplers = getProcAddr("glGenSamplers")
@@ -798,6 +809,61 @@ func (c *Context) TexSubImage3D(target uint32, level, xoffset, yoffset, zoffset,
 		uintptr(xoffset), uintptr(yoffset), uintptr(zoffset),
 		uintptr(width), uintptr(height), uintptr(depth),
 		uintptr(format), uintptr(typ), uintptr(pixels))
+}
+
+// HasCompressedTextures reports whether the context resolved the functions
+// compressed textures need: glTexStorage2D, glTexStorage3D,
+// glCompressedTexSubImage2D and glCompressedTexSubImage3D (GL 4.2, ES 3.0).
+func (c *Context) HasCompressedTextures() bool {
+	return c.glTexStorage2D != 0 && c.glTexStorage3D != 0 &&
+		c.glCompressedTexSubImage2D != 0 && c.glCompressedTexSubImage3D != 0
+}
+
+// TexStorage2D allocates immutable storage for every level of a 2D texture
+// or a cube map. No-op if not supported (HasCompressedTextures).
+func (c *Context) TexStorage2D(target uint32, levels int32, internalformat uint32, width, height int32) {
+	if c.glTexStorage2D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glTexStorage2D, uintptr(target), uintptr(levels), uintptr(internalformat),
+		uintptr(width), uintptr(height))
+}
+
+// TexStorage3D allocates immutable storage for every level of a 3D or 2D
+// array texture. No-op if not supported (HasCompressedTextures).
+func (c *Context) TexStorage3D(target uint32, levels int32, internalformat uint32, width, height, depth int32) {
+	if c.glTexStorage3D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glTexStorage3D, uintptr(target), uintptr(levels), uintptr(internalformat),
+		uintptr(width), uintptr(height), uintptr(depth))
+}
+
+// CompressedTexSubImage2D writes imageSize bytes of blocks into a rectangle
+// of one level of a 2D image (TEXTURE_2D or a cube face). data is client
+// memory, or a byte offset when a PIXEL_UNPACK_BUFFER is bound. No-op if not
+// supported (HasCompressedTextures).
+func (c *Context) CompressedTexSubImage2D(target uint32, level, xoffset, yoffset, width, height int32, format uint32, imageSize int32, data unsafe.Pointer) {
+	if c.glCompressedTexSubImage2D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glCompressedTexSubImage2D, uintptr(target), uintptr(level),
+		uintptr(xoffset), uintptr(yoffset), uintptr(width), uintptr(height),
+		uintptr(format), uintptr(imageSize), uintptr(data))
+}
+
+// CompressedTexSubImage3D writes imageSize bytes of blocks into a box of one
+// level of a 3D or 2D array texture. data is client memory, or a byte offset
+// when a PIXEL_UNPACK_BUFFER is bound. No-op if not supported
+// (HasCompressedTextures).
+func (c *Context) CompressedTexSubImage3D(target uint32, level, xoffset, yoffset, zoffset, width, height, depth int32, format uint32, imageSize int32, data unsafe.Pointer) {
+	if c.glCompressedTexSubImage3D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glCompressedTexSubImage3D, uintptr(target), uintptr(level),
+		uintptr(xoffset), uintptr(yoffset), uintptr(zoffset),
+		uintptr(width), uintptr(height), uintptr(depth),
+		uintptr(format), uintptr(imageSize), uintptr(data))
 }
 
 // FramebufferTextureLayer attaches one layer (a depth slice of a 3D texture
