@@ -111,6 +111,29 @@ func TestDepthStencilUploadRoundTrip(t *testing.T) {
 	})
 }
 
+// TestCopyOnlyTextureView creates a view of textures whose only usages are
+// copies. Vulkan created their images with transfer usages alone and made a
+// VkImageView anyway, which fails VUID-VkImageViewCreateInfo-image-04441
+// under the validation layer.
+func TestCopyOnlyTextureView(t *testing.T) {
+	formats := []gputypes.TextureFormat{
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatR32Float,
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatStencil8,
+	}
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		for _, format := range formats {
+			t.Run(format.String(), func(t *testing.T) {
+				newReadbackTexture(t, device, "copy-only", format, wgpu.TextureUsageCopySrc|wgpu.TextureUsageCopyDst)
+			})
+		}
+	})
+}
+
 func aspectName(aspect gputypes.TextureAspect) string {
 	switch aspect {
 	case gputypes.TextureAspectDepthOnly:
@@ -220,10 +243,6 @@ func newReadbackTexture(t *testing.T, device *wgpu.Device, label string, format 
 		t.Fatalf("CreateTexture %s: %v", label, err)
 	}
 	t.Cleanup(tex.Release)
-	if usage&wgpu.TextureUsageRenderAttachment == 0 {
-		// A copy-only texture has no view-capable usage (VUID-VkImageViewCreateInfo-image-04441).
-		return tex, nil
-	}
 	view, err := device.CreateTextureView(tex, nil)
 	if err != nil {
 		t.Fatalf("CreateTextureView %s: %v", label, err)

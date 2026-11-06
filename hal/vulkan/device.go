@@ -842,6 +842,16 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		},
 	}
 
+	// An image whose usages are only transfers cannot have a VkImageView
+	// (VUID-VkImageViewCreateInfo-image-04441). WebGPU still lets such a
+	// texture have a view, and every use of one is rejected before it reaches
+	// the HAL: a binding needs TextureBinding or StorageBinding, an attachment
+	// RenderAttachment. The view keeps its metadata and a null handle, which
+	// DestroyTextureView skips.
+	if t, ok := texture.(*Texture); ok && t.usage&viewCapableUsages == 0 {
+		return &TextureView{texture: t, device: d, size: mipLevelExtent(textureSize, desc.BaseMipLevel), image: imageHandle}, nil
+	}
+
 	var imageView vk.ImageView
 	result := vkCreateImageView(d.cmds, d.handle, &createInfo, nil, &imageView)
 	if result != vk.Success {
@@ -880,6 +890,11 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	}
 	return tv, nil
 }
+
+// viewCapableUsages are the texture usages a VkImageView can serve: every
+// other usage is a transfer.
+const viewCapableUsages = gputypes.TextureUsageTextureBinding | gputypes.TextureUsageStorageBinding |
+	gputypes.TextureUsageRenderAttachment
 
 // mipLevelExtent returns the extent of mip level mip of a texture of the
 // given mip-0 size: each dimension halves per level, down to 1. A view's

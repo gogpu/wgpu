@@ -127,6 +127,15 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if err := d.core.RequireViewFormats(desc.Label, desc.Format, desc.ViewFormats); err != nil {
 		return nil, err
 	}
+	// A depth/stencil texture is always created render-attachable, as Rust
+	// wgpu-core's conv.rs map_texture_usage_for_texture adds DEPTH_WRITE and
+	// STENCIL_WRITE: internal passes can render into it, and a backend can
+	// make a view of it (a VkImage with only transfer usages cannot have one,
+	// VUID-VkImageViewCreateInfo-image-04441). core.Texture keeps desc.Usage,
+	// so validation sees only what the application asked for.
+	if halDesc.Format.IsDepthStencil() {
+		halDesc.Usage |= gputypes.TextureUsageRenderAttachment
+	}
 
 	halTexture, err := halDevice.CreateTexture(halDesc)
 	if err != nil {
