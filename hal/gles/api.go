@@ -160,7 +160,9 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 			},
 			Features: caps.Features,
 			Capabilities: hal.Capabilities{
-				Limits: caps.Limits,
+				// GL has no stencil-only upload into a DEPTH_STENCIL texture.
+				StencilCopyNeedsBlit: true,
+				Limits:               caps.Limits,
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  4,

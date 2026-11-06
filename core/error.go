@@ -1702,6 +1702,12 @@ const (
 	// support (Rust TransferError::MissingDownlevelFlags); Cause says which
 	// flags are missing.
 	TransferErrorMissingDownlevelFlags
+	// TransferErrorStencilCopyNeedsBlit indicates a buffer or queue upload
+	// into the stencil aspect of a combined depth-stencil format on a backend
+	// that cannot write that aspect alone (hal.Capabilities.StencilCopyNeedsBlit,
+	// GLES). Rust has no such kind: it refuses every depth/stencil buffer copy on
+	// GL with MissingDownlevelFlags.
+	TransferErrorStencilCopyNeedsBlit
 )
 
 // TextureErrorDimension names the texture dimension a copy error is about
@@ -1885,6 +1891,8 @@ func (e *TransferError) rangeErrorText() string {
 			e.Format, e.DstFormat)
 	case TransferErrorMissingDownlevelFlags:
 		return fmt.Sprintf("copy: the device does not support this copy: %v", e.Cause)
+	case TransferErrorStencilCopyNeedsBlit:
+		return fmt.Sprintf("copy: the backend cannot write the stencil aspect of %v from a buffer or queue data", e.Format)
 	default:
 		return "copy: unknown error"
 	}

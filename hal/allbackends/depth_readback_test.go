@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/core"
 )
 
 const (
@@ -73,7 +75,9 @@ func TestDepthReadback(t *testing.T) {
 // WriteTexture with tightly packed rows (the backends' staging repack) and
 // through CopyBufferToTexture at 256-byte rows, and reads it back. DX12 put
 // the resource format (D24_UNORM_S8_UINT, D32_FLOAT_S8X24_UINT) in the placed
-// footprint of a stencil plane, so the copy failed or moved nothing.
+// footprint of a stencil plane, so the copy failed or moved nothing. GLES
+// reports StencilCopyNeedsBlit, so the stencil aspect of its combined formats
+// must be refused with TransferErrorStencilCopyNeedsBlit instead.
 func TestDepthStencilUploadRoundTrip(t *testing.T) {
 	cases := []struct {
 		format gputypes.TextureFormat
@@ -100,10 +104,11 @@ func TestDepthStencilUploadRoundTrip(t *testing.T) {
 						c.format != gputypes.TextureFormatDepth32FloatStencil8 {
 						t.Skip("software: stencil aspect is not stored, P1-SW-021")
 					}
-					if gles && c.aspect == gputypes.TextureAspectStencilOnly && c.format != gputypes.TextureFormatStencil8 {
-						// GL has no stencil-only upload into a DEPTH_STENCIL texture; the
-						// draw-based stencil blit removes this skip.
-						t.Skip("gles: stencil upload into a combined format needs the stencil blit")
+					if gles && c.format.HasDepth() && c.aspect == gputypes.TextureAspectStencilOnly {
+						// GL uploads depth and stencil only together: the copy must be
+						// refused with a typed error, never written as garbage depth.
+						uploadRejected(t, device, c.format, path == "write-texture")
+						return
 					}
 					uploadAndCheck(t, device, c.format, c.aspect, path == "write-texture")
 				})
@@ -192,6 +197,37 @@ func uploadAndCheck(t *testing.T, device *wgpu.Device, format gputypes.TextureFo
 		if !bytes.Equal(row, want) {
 			t.Fatalf("row %d = %x, want %x", y, row, want)
 		}
+	}
+}
+
+// uploadRejected checks that a stencil-aspect upload into a combined
+// depth-stencil format fails with TransferErrorStencilCopyNeedsBlit: from
+// WriteTexture directly, and from Finish for CopyBufferToTexture.
+func uploadRejected(t *testing.T, device *wgpu.Device, format gputypes.TextureFormat, viaWriteTexture bool) {
+	t.Helper()
+	tex, _ := newReadbackTexture(t, device, "upload-rejected", format, wgpu.TextureUsageCopySrc|wgpu.TextureUsageCopyDst)
+	dst := wgpu.ImageCopyTexture{Texture: tex, Aspect: gputypes.TextureAspectStencilOnly}
+	var err error
+	if viaWriteTexture {
+		data := make([]byte, depthReadbackSize*depthReadbackSize)
+		layout := wgpu.ImageDataLayout{BytesPerRow: depthReadbackSize, RowsPerImage: depthReadbackSize}
+		err = device.Queue().WriteTexture(&dst, data, &layout, &depthReadbackExtent)
+	} else {
+		src := newPublicBuffer(t, device, depthReadbackBytesPerRow*depthReadbackSize, wgpu.BufferUsageCopySrc|wgpu.BufferUsageCopyDst)
+		enc, encErr := device.CreateCommandEncoder(nil)
+		if encErr != nil {
+			t.Fatalf("CreateCommandEncoder: %v", encErr)
+		}
+		enc.CopyBufferToTexture(src, tex, []wgpu.BufferTextureCopy{{
+			BufferLayout: wgpu.ImageDataLayout{BytesPerRow: depthReadbackBytesPerRow, RowsPerImage: depthReadbackSize},
+			TextureBase:  dst,
+			Size:         depthReadbackExtent,
+		}})
+		_, err = enc.Finish()
+	}
+	var te *core.TransferError
+	if !errors.As(err, &te) || te.Kind != core.TransferErrorStencilCopyNeedsBlit {
+		t.Fatalf("error %v, want TransferErrorStencilCopyNeedsBlit", err)
 	}
 }
 

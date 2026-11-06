@@ -381,7 +381,9 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 // validateTextureWrite checks a WriteTexture upload as Rust wgpu-core
 // device/queue.rs write_texture_inner does: core.ValidateTextureWrite (usage,
 // copy range, aspect, format, sample count, data layout against the data
-// length) and the depth/stencil downlevel flag. skip reports a valid upload of
+// length), the depth/stencil downlevel flag and, for the stencil aspect of a
+// combined format, the backend's ability to write it
+// (core.Device.RequireStencilAspectUpload). skip reports a valid upload of
 // size zero, which Rust drops before any side effect. A texture without a core
 // texture (test stubs) is not validated.
 func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
@@ -394,7 +396,11 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
 			return false, err
 		}
-		if err := dst.Texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+		device := dst.Texture.coreTexture.Device()
+		if err := device.RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+			return false, err
+		}
+		if err := device.RequireStencilAspectUpload(view.Format, dst.Aspect); err != nil {
 			return false, err
 		}
 	}

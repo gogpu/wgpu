@@ -30,6 +30,10 @@ type Adapter struct {
 	// DownlevelCapabilities contains backend capability flags for downlevel adapters.
 	// Matches Rust wgpu-types DownlevelCapabilities.
 	DownlevelCapabilities gputypes.DownlevelCapabilities
+	// StencilCopyNeedsBlit is hal.Capabilities.StencilCopyNeedsBlit: the
+	// backend cannot write the stencil aspect of a combined depth-stencil
+	// format from a buffer (Device.RequireStencilAspectUpload).
+	StencilCopyNeedsBlit bool
 
 	// === HAL integration fields ===
 

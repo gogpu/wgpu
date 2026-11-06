@@ -53,3 +53,49 @@ func TestRequireDepthTextureAndBufferCopies(t *testing.T) {
 		t.Errorf("nil device: unexpected error %v", err)
 	}
 }
+
+// TestRequireStencilAspectUpload: on a backend with StencilCopyNeedsBlit only
+// the stencil aspect of a combined depth-stencil format is refused; every
+// other format and aspect, and every backend without the capability, accepts
+// the upload.
+func TestRequireStencilAspectUpload(t *testing.T) {
+	t.Parallel()
+	device := func(needsBlit bool) *Device {
+		return &Device{adapter: &Adapter{StencilCopyNeedsBlit: needsBlit}}
+	}
+	stencil := gputypes.TextureAspectStencilOnly
+	for _, format := range []gputypes.TextureFormat{
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8,
+	} {
+		err := device(true).RequireStencilAspectUpload(format, stencil)
+		var te *TransferError
+		if !errors.As(err, &te) || te.Kind != TransferErrorStencilCopyNeedsBlit || te.Format != format {
+			t.Errorf("%v stencil with the capability: error %v, want TransferErrorStencilCopyNeedsBlit", format, err)
+		}
+		if err := device(false).RequireStencilAspectUpload(format, stencil); err != nil {
+			t.Errorf("%v stencil without the capability: unexpected error %v", format, err)
+		}
+		if err := device(true).RequireStencilAspectUpload(format, gputypes.TextureAspectDepthOnly); err != nil {
+			t.Errorf("%v depth with the capability: unexpected error %v", format, err)
+		}
+	}
+	for _, format := range []gputypes.TextureFormat{
+		gputypes.TextureFormatStencil8,
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatRGBA8Unorm,
+	} {
+		for _, aspect := range []gputypes.TextureAspect{gputypes.TextureAspectAll, stencil} {
+			if err := device(true).RequireStencilAspectUpload(format, aspect); err != nil {
+				t.Errorf("%v aspect %v with the capability: unexpected error %v", format, aspect, err)
+			}
+		}
+	}
+	var none *Device
+	if err := none.RequireStencilAspectUpload(gputypes.TextureFormatDepth24PlusStencil8, stencil); err != nil {
+		t.Errorf("nil device: unexpected error %v", err)
+	}
+	if err := (&Device{}).RequireStencilAspectUpload(gputypes.TextureFormatDepth24PlusStencil8, stencil); err != nil {
+		t.Errorf("device without adapter: unexpected error %v", err)
+	}
+}

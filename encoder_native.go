@@ -1149,7 +1149,9 @@ func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySi
 // (core.ValidateBufferTextureCopyTexture), the sample count, aligned offset and
 // bytesPerRow (core.ValidateTextureBufferCopy), the buffer layout
 // (core.ValidateLinearTextureData) and the downlevel flag for depth/stencil
-// copies (core.Device.RequireDepthTextureAndBufferCopies). A texture without a
+// copies (core.Device.RequireDepthTextureAndBufferCopies), and for an upload
+// the backend's ability to write a combined format's stencil aspect
+// (core.Device.RequireStencilAspectUpload). A texture without a
 // core texture (test stubs) only gets the layout alignment checks.
 func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *Buffer, region *BufferTextureCopy) error {
 	size := gputypes.Extent3D(region.Size)
@@ -1175,5 +1177,12 @@ func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *B
 	if err := core.ValidateLinearTextureData(layout, view.Format, region.TextureBase.Aspect, buffer.Size(), bufferSide, size); err != nil {
 		return err
 	}
-	return texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format)
+	device := texture.coreTexture.Device()
+	if err := device.RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+		return err
+	}
+	if side == core.CopySideDestination {
+		return device.RequireStencilAspectUpload(view.Format, region.TextureBase.Aspect)
+	}
+	return nil
 }

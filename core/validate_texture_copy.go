@@ -246,3 +246,23 @@ func (d *Device) RequireDepthTextureAndBufferCopies(format gputypes.TextureForma
 	}
 	return nil
 }
+
+// RequireStencilAspectUpload checks that the device can write the stencil
+// aspect of format from a buffer or from queue data, the destination side of
+// CopyBufferToTexture and WriteTexture. A backend that sets
+// hal.Capabilities.StencilCopyNeedsBlit (GLES) cannot for the combined
+// depth-stencil formats, and the copy is refused with
+// TransferErrorStencilCopyNeedsBlit instead of writing wrong texels. Rust
+// wgpu-core refuses every depth/stencil buffer copy on GL (its GL backend
+// never reports DEPTH_TEXTURE_AND_BUFFER_COPIES); Dawn lowers the copy to a
+// draw, which is the planned replacement for this error. Stencil8, depth
+// aspects and other backends are unaffected; a nil device accepts the copy.
+func (d *Device) RequireStencilAspectUpload(format gputypes.TextureFormat, aspect gputypes.TextureAspect) error {
+	if d == nil || d.adapter == nil || !d.adapter.StencilCopyNeedsBlit {
+		return nil
+	}
+	if aspect != gputypes.TextureAspectStencilOnly || !format.HasDepth() || !format.HasStencil() {
+		return nil
+	}
+	return &TransferError{Kind: TransferErrorStencilCopyNeedsBlit, Format: format, Aspect: aspect}
+}
