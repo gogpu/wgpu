@@ -87,7 +87,11 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				DriverInfo: "CPU-based software rendering backend",
 				Backend:    gputypes.BackendEmpty,
 			},
-			Features: gputypes.Features(gputypes.FeatureRayQuery),
+			// No features: the SPIR-V interpreter does not execute
+			// OpRayQuery* (ray_query), so FeatureRayQuery would promise
+			// shaders that cannot run here (ADR-078 rule 10). The CPU BVH
+			// build stays reachable through the HAL.
+			Features: 0,
 			Capabilities: hal.Capabilities{
 				Limits: softwareLimits(),
 				AlignmentsMask: hal.Alignments{

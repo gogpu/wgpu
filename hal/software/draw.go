@@ -183,7 +183,8 @@ func isFullscreenQuad(triangles []raster.Triangle, w, h int) bool {
 	fw, fh := float32(w), float32(h)
 	minX, minY := float32(fw), float32(fh)
 	maxX, maxY := float32(0), float32(0)
-	for _, tri := range triangles {
+	for i := range triangles {
+		tri := &triangles[i]
 		for _, v := range [3]raster.ScreenVertex{tri.V0, tri.V1, tri.V2} {
 			if v.X < minX {
 				minX = v.X
@@ -979,6 +980,7 @@ func samplerResourceToShader(s *SamplerResource) *shader.Sampler {
 		WrapW:        wrapModeToShader(s.Desc.AddressModeW),
 		LodMinClamp:  s.Desc.LodMinClamp,
 		LodMaxClamp:  s.Desc.LodMaxClamp,
+		Compare:      s.Desc.Compare,
 	}
 }
 

@@ -1,6 +1,10 @@
 package shader
 
-import "math"
+import (
+	"math"
+
+	"github.com/gogpu/gputypes"
+)
 
 // This file selects the mip level, array layer, cube face or depth slice a
 // texture instruction reads, following the Vulkan specification's "Texel
@@ -65,6 +69,45 @@ func (interp *interpreter) parseImageOperands(ops []uint32) imageOperands {
 		}
 	}
 	return io
+}
+
+// lambda is the unclamped level of detail of a sample at coordinate c of
+// tex: the Lod operand, or the one the Grad operands give, plus the Bias.
+func (io *imageOperands) lambda(tex *Texture2D, c Vec4) float32 {
+	l := io.lod
+	if io.hasGrad {
+		l = gradLod(tex, c, io.dx, io.dy)
+	}
+	return l + io.bias
+}
+
+// sampleCompare is OpImageSampleDrefImplicitLod and
+// OpImageSampleDrefExplicitLod: the depth-compare sample of a sampled image
+// with reference ref, an f32. A missing texture compares as 0.
+func (interp *interpreter) sampleCompare(sampledImg, coord Value, ref float32, ops imageOperands) Value {
+	tex, samp, ok := interp.sampledResources(sampledImg)
+	if !ok {
+		return ValFloat(0)
+	}
+	c := texelComponents(coord)
+	cmp := depthCompare{ref: ref, fn: samp.Compare}
+	return ValFloat(sampleCompareView(tex, samp, c, ops.lambda(tex, c), ops.offset, &cmp))
+}
+
+// gather is OpImageGather (operand is the component to gather) and
+// OpImageDrefGather (operand is the reference depth): a vec4 of the four
+// texels of the footprint. A missing texture gathers zeros.
+func (interp *interpreter) gather(opcode uint16, sampledImg, coord, operand Value, ops imageOperands) Value {
+	tex, samp, ok := interp.sampledResources(sampledImg)
+	if !ok {
+		return ValVec4(0, 0, 0, 0)
+	}
+	c := texelComponents(coord)
+	if opcode == OpImageDrefGather {
+		cmp := depthCompare{ref: toFloat32(operand), fn: samp.Compare}
+		return ValVec4From(gatherView(tex, samp, c, ops.offset, 0, &cmp))
+	}
+	return ValVec4From(gatherView(tex, samp, c, ops.offset, toUint32(operand), nil))
 }
 
 // levelCount is the number of mip levels the view holds data for.
@@ -136,31 +179,37 @@ func (tex *Texture2D) imageAt(lv TextureLevel, z int) (Texture2D, bool) {
 // mipmap filter: nearest takes ceil(d+0.5)-1, linear blends the two levels
 // around d.
 func sampleView(tex *Texture2D, samp *Sampler, c Vec4, lambda float32, offset [3]int) Vec4 {
+	filter, l, frac := selectLevel(tex, samp, lambda)
+	a := sampleLevel(tex, samp, filter, l, c, offset)
+	if frac == 0 {
+		return a
+	}
+	b := sampleLevel(tex, samp, filter, l+1, c, offset)
+	for i := range a {
+		a[i] += (b[i] - a[i]) * frac
+	}
+	return a
+}
+
+// selectLevel applies the level-of-detail steps sampleView describes to
+// lambda: it returns the filter, the mip level l to sample and the weight
+// frac of level l+1 to blend in (0 unless the mipmap filter is linear).
+func selectLevel(tex *Texture2D, samp *Sampler, lambda float32) (filter uint32, l int, frac float32) {
 	if lambda != lambda { // NaN
 		lambda = 0
 	}
 	lambda = min(max(lambda, samp.LodMinClamp), samp.LodMaxClamp)
-	filter := samp.MagFilter
+	filter = samp.MagFilter
 	if lambda > 0 {
 		filter = samp.MinFilter
 	}
 	q := float32(tex.levelCount() - 1)
 	d := min(max(lambda, 0), q)
 	if samp.MipmapFilter != FilterLinear {
-		level := int(math.Ceil(float64(d)+0.5)) - 1
-		return sampleLevel(tex, samp, filter, level, c, offset)
+		return filter, int(math.Ceil(float64(d)+0.5)) - 1, 0
 	}
 	lo := float32(math.Floor(float64(d)))
-	a := sampleLevel(tex, samp, filter, int(lo), c, offset)
-	frac := d - lo
-	if frac == 0 {
-		return a
-	}
-	b := sampleLevel(tex, samp, filter, int(lo)+1, c, offset)
-	for i := range a {
-		a[i] += (b[i] - a[i]) * frac
-	}
-	return a
+	return filter, int(lo), d - lo
 }
 
 // sampleLevel samples mip level l of the view with filter.
@@ -169,8 +218,29 @@ func sampleLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, of
 	if lv.Width == 0 || lv.Height == 0 {
 		return Vec4{}
 	}
-	ou := float32(offset[0]) / float32(lv.Width)
-	ov := float32(offset[1]) / float32(lv.Height)
+	if tex.Dimension == TexDim3D {
+		return sample3D(tex, lv, samp, filter, c, offset)
+	}
+	lc := levelImage(tex, samp, lv, c, offset)
+	ou := float32(lc.offset[0]) / float32(lv.Width)
+	ov := float32(lc.offset[1]) / float32(lv.Height)
+	return filter2D(&lc.img, filter, applyWrapMode(lc.u+ou, lc.wrapU), applyWrapMode(lc.v+ov, lc.wrapV))
+}
+
+// levelCoord is the image of a mip level a coordinate addresses and the
+// coordinate in it.
+type levelCoord struct {
+	img          Texture2D // the one image: array layer or cube face
+	u, v         float32   // the coordinate in the image, not yet wrapped
+	offset       [2]int    // the texel offset to add to u and v
+	wrapU, wrapV uint32    // the address modes of u and v
+}
+
+// levelImage returns the levelCoord of coordinate c in level lv of a 1D, 2D,
+// 2D-array, cube or cube-array view: the array layer or cube face c selects,
+// and the coordinate in it. A cube face is addressed on its own, clamped at
+// its edges; a 1D view is one row, read at its center.
+func levelImage(tex *Texture2D, samp *Sampler, lv TextureLevel, c Vec4, offset [3]int) levelCoord {
 	switch tex.Dimension {
 	case TexDimCube, TexDimCubeArray:
 		face, s, t := cubeFace(c)
@@ -178,19 +248,179 @@ func sampleLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, of
 			face += 6 * arrayIndex(c[3], max(lv.Images, 1)/6)
 		}
 		img, _ := tex.imageAt(lv, face)
-		return filter2D(&img, filter, applyWrapMode(s, WrapClampToEdge), applyWrapMode(t, WrapClampToEdge))
-	case TexDim3D:
-		return sample3D(tex, lv, samp, filter, c, offset)
+		return levelCoord{img: img, u: s, v: t, wrapU: WrapClampToEdge, wrapV: WrapClampToEdge}
 	case TexDim1D:
 		img, _ := tex.imageAt(lv, 0)
-		return filter2D(&img, filter, applyWrapMode(c[0]+ou, samp.WrapU), 0.5)
+		return levelCoord{img: img, u: c[0], v: 0.5, offset: [2]int{offset[0], 0}, wrapU: samp.WrapU, wrapV: WrapClampToEdge}
 	}
 	z := 0
 	if tex.Dimension == TexDim2DArray {
 		z = arrayIndex(c[2], lv.Images)
 	}
 	img, _ := tex.imageAt(lv, z)
-	return filter2D(&img, filter, applyWrapMode(c[0]+ou, samp.WrapU), applyWrapMode(c[1]+ov, samp.WrapV))
+	return levelCoord{img: img, u: c[0], v: c[1], offset: [2]int{offset[0], offset[1]}, wrapU: samp.WrapU, wrapV: samp.WrapV}
+}
+
+// footprint is the 2x2 texel footprint of a linear filter (Vulkan "Texel
+// Filtering"): columns x0 and x1 and rows y0 and y1, each wrapped by its
+// address mode, and the weights fx of x1 and fy of y1.
+type footprint struct {
+	x0, x1, y0, y1 int
+	fx, fy         float32
+}
+
+// linearFootprint returns the footprint of lc's coordinate. The texel offset
+// is added to the integer texel coordinates, and every texel index is
+// wrapped on its own: a repeating footprint at the edge of the image reads
+// the texel of the opposite edge.
+func linearFootprint(lc *levelCoord) footprint {
+	w, h := int(lc.img.Width), int(lc.img.Height)
+	su := lc.u*float32(w) - 0.5
+	sv := lc.v*float32(h) - 0.5
+	i0 := int(math.Floor(float64(su)))
+	j0 := int(math.Floor(float64(sv)))
+	f := footprint{fx: su - float32(i0), fy: sv - float32(j0)}
+	i0 += lc.offset[0]
+	j0 += lc.offset[1]
+	f.x0, f.x1 = wrapTexel(i0, w, lc.wrapU), wrapTexel(i0+1, w, lc.wrapU)
+	f.y0, f.y1 = wrapTexel(j0, h, lc.wrapV), wrapTexel(j0+1, h, lc.wrapV)
+	return f
+}
+
+// nearestTexel returns the texel lc's coordinate falls in, wrapped.
+func nearestTexel(lc *levelCoord) (x, y int) {
+	w, h := int(lc.img.Width), int(lc.img.Height)
+	i := int(math.Floor(float64(lc.u*float32(w)))) + lc.offset[0]
+	j := int(math.Floor(float64(lc.v*float32(h)))) + lc.offset[1]
+	return wrapTexel(i, w, lc.wrapU), wrapTexel(j, h, lc.wrapV)
+}
+
+// wrapTexel applies address mode wrap to texel index i of an axis of n
+// texels (Vulkan "Wrapping Operation"): repeat takes i modulo n, mirrored
+// repeat reflects every other period, and clamp-to-edge clamps to [0, n).
+func wrapTexel(i, n int, wrap uint32) int {
+	if n <= 0 { // an image missing from a short view: its reads are zero
+		return 0
+	}
+	switch wrap {
+	case WrapRepeat:
+		i %= n
+		if i < 0 {
+			i += n
+		}
+		return i
+	case WrapMirroredRepeat:
+		t := i % (2 * n)
+		if t < 0 {
+			t += 2 * n
+		}
+		if t >= n {
+			t = 2*n - 1 - t
+		}
+		return t
+	}
+	return clampInt(i, n-1)
+}
+
+// gatherView is OpImageGather (cmp nil: component comp of each texel) and
+// OpImageDrefGather (cmp set: the comparison result of each texel's depth)
+// over the linear footprint of coordinate c in the view's base level. The
+// lanes are the texels (x0, y1), (x1, y1), (x1, y0) and (x0, y0), the order
+// of Vulkan and of WGSL textureGather. The sampler's filters and level of
+// detail play no part; its address modes do.
+func gatherView(tex *Texture2D, samp *Sampler, c Vec4, offset [3]int, comp uint32, cmp *depthCompare) Vec4 {
+	lv := tex.level(0)
+	if lv.Width == 0 || lv.Height == 0 || tex.Dimension == TexDim3D {
+		return Vec4{}
+	}
+	lc := levelImage(tex, samp, lv, c, offset)
+	f := linearFootprint(&lc)
+	texels := [4][2]int{{f.x0, f.y1}, {f.x1, f.y1}, {f.x1, f.y0}, {f.x0, f.y0}}
+	var r Vec4
+	for i, xy := range texels {
+		t := readTexel(&lc.img, xy[0], xy[1])
+		if cmp != nil {
+			r[i] = cmp.test(tex.Format, t[0])
+		} else {
+			r[i] = t[comp&3]
+		}
+	}
+	return r
+}
+
+// depthCompare is the comparison of a depth-compare instruction: the
+// reference value and the sampler's compare function.
+type depthCompare struct {
+	ref float32
+	fn  gputypes.CompareFunction
+}
+
+// test compares the reference with a texel's depth d and returns 1 when the
+// comparison passes and 0 when it fails: ref < d for Less, and so on (WebGPU
+// "compare function": the provided value is compared with the sampled one).
+// The reference is clamped to [0, 1] for a unorm depth format, as Vulkan and
+// D3D12 do for fixed-point depth.
+func (dc *depthCompare) test(format uint32, d float32) float32 {
+	ref := dc.ref
+	if format == uint32(gputypes.TextureFormatDepth16Unorm) {
+		ref = min(max(ref, 0), 1)
+	}
+	var pass bool
+	switch dc.fn {
+	case gputypes.CompareFunctionLess:
+		pass = ref < d
+	case gputypes.CompareFunctionEqual:
+		pass = ref == d
+	case gputypes.CompareFunctionLessEqual:
+		pass = ref <= d
+	case gputypes.CompareFunctionGreater:
+		pass = ref > d
+	case gputypes.CompareFunctionNotEqual:
+		pass = ref != d
+	case gputypes.CompareFunctionGreaterEqual:
+		pass = ref >= d
+	case gputypes.CompareFunctionAlways:
+		pass = true
+	}
+	if pass {
+		return 1
+	}
+	return 0
+}
+
+// sampleCompareView is the depth-compare sample of the view at coordinate c
+// (OpImageSampleDref*): every texel the filter reads is compared with the
+// reference first, and the 0 or 1 results are filtered as sampleView filters
+// texels, so a linear filter gives the fraction of the footprint that passes.
+func sampleCompareView(tex *Texture2D, samp *Sampler, c Vec4, lambda float32, offset [3]int, cmp *depthCompare) float32 {
+	filter, l, frac := selectLevel(tex, samp, lambda)
+	a := compareLevel(tex, samp, filter, l, c, offset, cmp)
+	if frac == 0 {
+		return a
+	}
+	b := compareLevel(tex, samp, filter, l+1, c, offset, cmp)
+	return a + (b-a)*frac
+}
+
+// compareLevel is the depth-compare sample of mip level l with filter.
+func compareLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, offset [3]int, cmp *depthCompare) float32 {
+	lv := tex.level(l)
+	if lv.Width == 0 || lv.Height == 0 || tex.Dimension == TexDim3D {
+		return 0
+	}
+	lc := levelImage(tex, samp, lv, c, offset)
+	if filter != FilterLinear {
+		x, y := nearestTexel(&lc)
+		return cmp.test(tex.Format, readTexel(&lc.img, x, y)[0])
+	}
+	f := linearFootprint(&lc)
+	t00 := cmp.test(tex.Format, readTexel(&lc.img, f.x0, f.y0)[0])
+	t10 := cmp.test(tex.Format, readTexel(&lc.img, f.x1, f.y0)[0])
+	t01 := cmp.test(tex.Format, readTexel(&lc.img, f.x0, f.y1)[0])
+	t11 := cmp.test(tex.Format, readTexel(&lc.img, f.x1, f.y1)[0])
+	top := t00 + (t10-t00)*f.fx
+	bot := t01 + (t11-t01)*f.fx
+	return top + (bot-top)*f.fy
 }
 
 // filter2D samples one image at the wrapped coordinate (u, v).

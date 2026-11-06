@@ -41,24 +41,24 @@ func fillPaths() []fillPath {
 	return []fillPath{
 		{"Rasterize", func(tris []Triangle) []int {
 			counts := make([]int, fillW*fillH)
-			for _, tri := range tris {
-				Rasterize(tri, fillViewport(), countInto(counts))
+			for i := range tris {
+				Rasterize(tris[i], fillViewport(), countInto(counts))
 			}
 			return counts
 		}},
 		{"RasterizeIncremental", func(tris []Triangle) []int {
 			counts := make([]int, fillW*fillH)
-			for _, tri := range tris {
-				RasterizeIncremental(tri, fillViewport(), countInto(counts))
+			for i := range tris {
+				RasterizeIncremental(tris[i], fillViewport(), countInto(counts))
 			}
 			return counts
 		}},
 		{"RasterizeTile", func(tris []Triangle) []int {
 			counts := make([]int, fillW*fillH)
 			tiles := NewTileGrid(fillW, fillH).GetAllTiles()
-			for _, tri := range tris {
+			for i := range tris {
 				for _, tile := range tiles {
-					RasterizeTile(tri, tile, countInto(counts))
+					RasterizeTile(tris[i], tile, countInto(counts))
 				}
 			}
 			return counts
@@ -70,8 +70,8 @@ func fillPaths() []fillPath {
 			grid := NewTileGrid(fillW, fillH)
 			tiles := grid.GetAllTiles()
 			for idx, binned := range BinTrianglesToTilesWithTest(tris, grid) {
-				for _, tri := range binned {
-					RasterizeTile(tri, tiles[idx], countInto(counts))
+				for i := range binned {
+					RasterizeTile(binned[i], tiles[idx], countInto(counts))
 				}
 			}
 			return counts
@@ -152,7 +152,8 @@ func meshTris(t testing.TB, origin, step float32, n int, jitter float32, seed in
 			}
 		}
 	}
-	for i, tri := range tris {
+	for i := range tris {
+		tri := &tris[i]
 		if ComputeTriangleArea(tri.V0, tri.V1, tri.V2) <= 0 {
 			t.Fatalf("meshTris: triangle %d is inverted, the mesh is not a tiling", i)
 		}
@@ -165,10 +166,11 @@ func meshTris(t testing.TB, origin, step float32, n int, jitter float32, seed in
 func windings(tris []Triangle) map[string][]Triangle {
 	reversed := make([]Triangle, len(tris))
 	mixed := make([]Triangle, len(tris))
-	for i, tri := range tris {
+	for i := range tris {
+		tri := &tris[i]
 		r := Triangle{V0: tri.V0, V1: tri.V2, V2: tri.V1}
 		reversed[i] = r
-		mixed[i] = tri
+		mixed[i] = *tri
 		if i%2 == 1 {
 			mixed[i] = r
 		}

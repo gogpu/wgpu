@@ -68,7 +68,7 @@ wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
 
 Not usable through the public API yet: the root package has no `Blas`, `Tlas` or acceleration structure binding.
 The HAL has acceleration structure code for Vulkan, DX12, Metal and software, but no GPU adapter advertises
-`FeatureRayQuery` and none of it has run on a GPU. The software backend advertises the feature, but its SPIR-V
+`FeatureRayQuery` and none of it has run on a GPU. The software backend does not advertise it either: its SPIR-V
 interpreter does not execute ray queries. Do not suggest ray queries to users yet. The plan (public API following
 Rust wgpu's `EXPERIMENTAL_RAY_QUERY`, Vulkan first) is in #369 and `docs/RAY-TRACING.md`.
 
