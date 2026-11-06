@@ -434,33 +434,40 @@ func validateDepthStencilState(ds *hal.DepthStencilState, label string) error {
 	}
 
 	// RP9c: if stencil operations are enabled, the format must have a
-	// stencil aspect. Rust: ds.stencil.is_enabled() && !aspect.contains(STENCIL).
+	// stencil aspect (faces only, see isStencilEnabled).
 	if isStencilEnabled(ds) && !hasStencilAspect(ds.Format) {
 		return dsErr(CreateRenderPipelineErrorDepthFormatNoStencilAspect)
 	}
 	return nil
 }
 
-// stencilFaceIgnored returns true if the stencil face state is the "ignore" state
-// (compare=Always, all ops=Keep). Matches Rust StencilFaceState::IGNORE.
+// stencilFaceIgnored returns true if the stencil face state is the default,
+// "ignore" state (compare always, all ops keep; Rust StencilFaceState::IGNORE).
+// An Undefined member counts as its default: it is an absent member, which
+// the spec gives the default value. The root sends normalized faces; a
+// caller of this package that builds the HAL descriptor itself may leave
+// them zero.
 func stencilFaceIgnored(face hal.StencilFaceState) bool {
-	return face.Compare == gputypes.CompareFunctionAlways &&
-		face.FailOp == hal.StencilOperationKeep &&
-		face.DepthFailOp == hal.StencilOperationKeep &&
-		face.PassOp == hal.StencilOperationKeep
+	return (face.Compare == gputypes.CompareFunctionAlways || face.Compare == gputypes.CompareFunctionUndefined) &&
+		stencilOpIsKeep(face.FailOp) && stencilOpIsKeep(face.DepthFailOp) && stencilOpIsKeep(face.PassOp)
 }
 
-// isStencilEnabled returns true if stencil testing is enabled on the depth/stencil state.
-// Matches Rust wgpu-types StencilState::is_enabled():
+func stencilOpIsKeep(op gputypes.StencilOperation) bool {
+	return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
+}
+
+// isStencilEnabled returns true if stencil testing is enabled on the
+// depth/stencil state: either face is not the default (compare always, all
+// ops keep). The WebGPU spec requires a stencil aspect from the faces alone
+// (index.bs, GPUDepthStencilState validation: "stencilFront or stencilBack
+// are not the default values"), and Dawn decides the same way
+// (RenderPipeline.cpp UsesStencil). The masks are literal: zero masks compare
+// 0 with 0 and still run the test, as hal/vulkan/pipeline.go enables it.
 //
-//	(front != IGNORE || back != IGNORE) && (read_mask != 0 || write_mask != 0)
+// This deviates from Rust wgpu-types StencilState::is_enabled, which also
+// requires a non-zero read or write mask; that is not in the spec.
 func isStencilEnabled(ds *hal.DepthStencilState) bool {
-	frontIgnored := stencilFaceIgnored(ds.StencilFront)
-	backIgnored := stencilFaceIgnored(ds.StencilBack)
-	if frontIgnored && backIgnored {
-		return false
-	}
-	return ds.StencilReadMask != 0 || ds.StencilWriteMask != 0
+	return !stencilFaceIgnored(ds.StencilFront) || !stencilFaceIgnored(ds.StencilBack)
 }
 
 // ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits and features.
