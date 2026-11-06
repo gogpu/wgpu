@@ -63,6 +63,12 @@ type Triangle struct {
 	V0 ScreenVertex
 	V1 ScreenVertex
 	V2 ScreenVertex
+
+	// Flat marks the attributes every fragment copies from V0, the provoking
+	// vertex, instead of interpolating them: bit i is Attributes[i]. These are
+	// flat varyings, and every integer varying, whose lanes are the bit
+	// patterns of 32-bit words and must not go through arithmetic.
+	Flat uint64
 }
 
 // Viewport defines the rectangular area of the framebuffer to render into.

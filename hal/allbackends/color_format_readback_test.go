@@ -285,10 +285,6 @@ var colorWideIntCases = []colorFormatCase{
 		le32(0xF8A432EB, 16777217, 0x7FFFFFFF, 0x80000000), 0},
 }
 
-// swWideIntSkip: the software interpreter holds integer vectors as float32
-// (shader.Value TagVec*), exact only up to 2^24.
-const swWideIntSkip = "software: integer vectors above 2^24 are float-held in the interpreter, P1-SW-019"
-
 // TestRenderTargetFormats draws a constant into a target of every color
 // format and checks the stored texels. The software backend stored every
 // target as 8-bit RGBA, so other formats received bytes of the wrong layout,
@@ -302,9 +298,6 @@ func TestRenderTargetFormats(t *testing.T) {
 		}
 		for _, c := range colorWideIntCases {
 			t.Run(c.format.String()+"-wide", func(t *testing.T) {
-				if b.software {
-					t.Skip(swWideIntSkip)
-				}
 				checkColorFormat(t, b, device, c)
 			})
 		}

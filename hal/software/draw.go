@@ -517,7 +517,7 @@ func (r *RenderPassEncoder) fetchTriangles(
 		vertices = append(vertices, sv)
 	}
 
-	return r.verticesToTriangles(vertices)
+	return r.verticesToTriangles(vertices, 0)
 }
 
 // fetchTrianglesSPIRV executes the SPIR-V vertex shader per-vertex with both
@@ -630,6 +630,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 
 	// Execute vertex shader for each (instance, vertex) pair.
 	var allTriangles []raster.Triangle
+	flat := r.flatVaryingMask()
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
@@ -672,8 +673,9 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 					continue
 				}
 
-				// Convert to the appropriate shader value type.
-				inputs[li.varID] = floatsToShaderValue(vals)
+				// Convert by the input variable's type: an integer
+				// attribute's lanes are its words' bits.
+				inputs[li.varID] = parsed.InterfaceValue(li.varID, vals)
 			}
 
 			// Execute vertex shader.
@@ -719,7 +721,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 					if !outOK {
 						continue
 					}
-					sv.Attributes = append(sv.Attributes, shaderValueToFloats(outVal)...)
+					sv.Attributes = shader.AppendInterfaceLanes(sv.Attributes, outVal)
 				}
 				// Pad to at least 4 components (RGBA) for DrawTrianglesInterpolated.
 				for len(sv.Attributes) < 4 {
@@ -731,7 +733,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 		}
 
 		// Convert this instance's vertices to triangles and append.
-		instanceTris := r.verticesToTriangles(vertices)
+		instanceTris := r.verticesToTriangles(vertices, flat)
 		allTriangles = append(allTriangles, instanceTris...)
 	}
 
@@ -739,8 +741,11 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 }
 
 // verticesToTriangles converts a list of vertices into triangles based on the
-// pipeline's primitive topology (TriangleList or TriangleStrip).
-func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex) []raster.Triangle {
+// pipeline's primitive topology (TriangleList or TriangleStrip). V0 of every
+// triangle is its provoking vertex, the first vertex of the primitive (WebGPU
+// "flat" interpolation), and flat (flatVaryingMask) marks the attributes the
+// rasterizer copies from it.
+func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex, flat uint64) []raster.Triangle {
 	if len(vertices) < 3 {
 		return nil
 	}
@@ -752,22 +757,26 @@ func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex) 
 
 	switch topology {
 	case gputypes.PrimitiveTopologyTriangleStrip:
-		// TriangleStrip: N vertices produce N-2 triangles.
-		// Even triangles: (i, i+1, i+2), odd triangles: (i+1, i, i+2) for correct winding.
+		// TriangleStrip: N vertices produce N-2 triangles. Triangle i is
+		// (i, i+1, i+2) for even i and (i+1, i, i+2) for odd i, to keep the
+		// winding; the odd one is stored rotated as (i, i+2, i+1), the same
+		// winding with vertex i, its provoking vertex, first.
 		triCount := len(vertices) - 2
 		triangles := make([]raster.Triangle, 0, triCount)
 		for i := 0; i < triCount; i++ {
 			if i%2 == 0 {
 				triangles = append(triangles, raster.Triangle{
-					V0: vertices[i],
-					V1: vertices[i+1],
-					V2: vertices[i+2],
+					V0:   vertices[i],
+					V1:   vertices[i+1],
+					V2:   vertices[i+2],
+					Flat: flat,
 				})
 			} else {
 				triangles = append(triangles, raster.Triangle{
-					V0: vertices[i+1],
-					V1: vertices[i],
-					V2: vertices[i+2],
+					V0:   vertices[i],
+					V1:   vertices[i+2],
+					V2:   vertices[i+1],
+					Flat: flat,
 				})
 			}
 		}
@@ -778,13 +787,35 @@ func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex) 
 		triangles := make([]raster.Triangle, 0, triCount)
 		for i := 0; i < triCount; i++ {
 			triangles = append(triangles, raster.Triangle{
-				V0: vertices[i*3+0],
-				V1: vertices[i*3+1],
-				V2: vertices[i*3+2],
+				V0:   vertices[i*3+0],
+				V1:   vertices[i*3+1],
+				V2:   vertices[i*3+2],
+				Flat: flat,
 			})
 		}
 		return triangles
 	}
+}
+
+// flatVaryingMask returns the attribute lanes the rasterizer must not
+// interpolate (raster.Triangle.Flat): the lanes of every fragment @location
+// input that InterpolatesFlat reports, in the order fragmentInterface.inputs
+// takes them from the interpolated attributes.
+func (r *RenderPassEncoder) flatVaryingMask() uint64 {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok {
+		return 0
+	}
+	var mask uint64
+	offset := 0
+	for _, li := range fi.locationInputs {
+		width := fi.inputWidth(li.varID)
+		if fi.parsed.InterpolatesFlat(li.varID) && offset < 64 {
+			mask |= (1<<width - 1) << offset
+		}
+		offset += width
+	}
+	return mask
 }
 
 // buildExecutionContext creates a shader ExecutionContext populated with all
@@ -992,37 +1023,70 @@ func floatsToShaderValue(vals []float32) shader.Value {
 	}
 }
 
-// shaderValueToFloats converts a shader Value into a float32 slice.
-func shaderValueToFloats(val shader.Value) []float32 {
-	switch val.Tag {
-	case shader.TagFloat32:
-		return []float32{val.F[0]}
-	case shader.TagVec2:
-		v := val.AsVec2()
-		return v[:]
-	case shader.TagVec3:
-		v := val.AsVec3()
-		return v[:]
-	case shader.TagVec4:
-		v := val.AsVec4()
-		return v[:]
-	case shader.TagUVec2, shader.TagUVec3, shader.TagUVec4,
-		shader.TagIVec2, shader.TagIVec3, shader.TagIVec4:
-		// Integer lanes by value, as integer outputs were carried before
-		// the interpreter held them as integers.
-		f := shader.Vec4ToFloat32(val)
-		return f[:val.Lanes()]
-	default:
-		return []float32{0}
-	}
+// intVertexFormat is the layout of an integer vertex format.
+type intVertexFormat struct {
+	lanes, bytes int
+	signed       bool
 }
 
-// readVertexAttribute reads float values from buffer data at the given offset.
+// intVertexFormats are the integer vertex formats.
+var intVertexFormats = map[gputypes.VertexFormat]intVertexFormat{
+	gputypes.VertexFormatUint8x2:  {2, 1, false},
+	gputypes.VertexFormatUint8x4:  {4, 1, false},
+	gputypes.VertexFormatSint8x2:  {2, 1, true},
+	gputypes.VertexFormatSint8x4:  {4, 1, true},
+	gputypes.VertexFormatUint16x2: {2, 2, false},
+	gputypes.VertexFormatUint16x4: {4, 2, false},
+	gputypes.VertexFormatSint16x2: {2, 2, true},
+	gputypes.VertexFormatSint16x4: {4, 2, true},
+	gputypes.VertexFormatUint32:   {1, 4, false},
+	gputypes.VertexFormatUint32x2: {2, 4, false},
+	gputypes.VertexFormatUint32x3: {3, 4, false},
+	gputypes.VertexFormatUint32x4: {4, 4, false},
+	gputypes.VertexFormatSint32:   {1, 4, true},
+	gputypes.VertexFormatSint32x2: {2, 4, true},
+	gputypes.VertexFormatSint32x3: {3, 4, true},
+	gputypes.VertexFormatSint32x4: {4, 4, true},
+}
+
+// readIntVertexAttribute reads an integer attribute of layout f as interface
+// lanes (shader.InterfaceValue): each component widened to its 32-bit word,
+// zero- or sign-extended, and carried as the word's bits.
+func readIntVertexAttribute(d []byte, f intVertexFormat) []float32 {
+	if len(d) < f.lanes*f.bytes {
+		return nil
+	}
+	lanes := make([]float32, f.lanes)
+	for i := range lanes {
+		var w uint32
+		switch b := d[i*f.bytes:]; {
+		case f.bytes == 1 && f.signed:
+			w = uint32(int32(int8(b[0])))
+		case f.bytes == 1:
+			w = uint32(b[0])
+		case f.bytes == 2 && f.signed:
+			w = uint32(int32(int16(binary.LittleEndian.Uint16(b))))
+		case f.bytes == 2:
+			w = uint32(binary.LittleEndian.Uint16(b))
+		default:
+			w = binary.LittleEndian.Uint32(b)
+		}
+		lanes[i] = math.Float32frombits(w)
+	}
+	return lanes
+}
+
+// readVertexAttribute reads the attribute at offset as interface lanes
+// (shader.InterfaceValue): float values for a float format, the bits of the
+// 32-bit words for an integer format.
 func readVertexAttribute(data []byte, offset uint64, format gputypes.VertexFormat) []float32 {
 	if int(offset) >= len(data) {
 		return nil
 	}
 	d := data[offset:]
+	if f, ok := intVertexFormats[format]; ok {
+		return readIntVertexAttribute(d, f)
+	}
 
 	switch format {
 	case gputypes.VertexFormatFloat32:
@@ -1227,6 +1291,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 
 	var allTriangles []raster.Triangle
 	hasLocOutputs := len(s.locationOutputs) > 0
+	flat := r.flatVaryingMask()
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
@@ -1268,7 +1333,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 			if hasLocOutputs {
 				for _, lo := range s.locationOutputs {
 					if outVal, outOK := outputs[lo.varID]; outOK {
-						sv.Attributes = append(sv.Attributes, shaderValueToFloats(outVal)...)
+						sv.Attributes = shader.AppendInterfaceLanes(sv.Attributes, outVal)
 					}
 				}
 				for len(sv.Attributes) < 4 {
@@ -1279,7 +1344,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 			vertices = append(vertices, sv)
 		}
 
-		allTriangles = append(allTriangles, r.verticesToTriangles(vertices)...)
+		allTriangles = append(allTriangles, r.verticesToTriangles(vertices, flat)...)
 	}
 
 	// MRT path for SPIR-V draws with multiple color attachments.
@@ -1367,10 +1432,8 @@ func (r *RenderPassEncoder) executeSPIRVFragment() (color [4]float32, discard bo
 
 // fragmentColor returns a fragment shader color output as the four channels
 // the color target of kind stores (colorTarget): float values, or for an
-// integer target the bits of the 32-bit integers. A scalar u32 or i32 output
-// holds its value in Value.U and stays exact. The interpreter holds integer
-// vectors as float32 (TagVec*, P1-SW-019), so their channels are exact only
-// up to 2^24.
+// integer target the bits of the 32-bit integers. Integer scalars and vectors
+// hold their lanes as words in Value.U, so every channel is exact.
 func fragmentColor(v shader.Value, kind colorKind) [4]float32 {
 	if kind == colorKindFloat {
 		switch v.Tag {
@@ -1455,10 +1518,20 @@ func (r *RenderPassEncoder) fragmentInterfaceOf() (fragmentInterface, bool) {
 	return fi, true
 }
 
+// inputWidth returns the number of attribute lanes @location input varID
+// takes: its component count, 4 for a type without one.
+func (fi *fragmentInterface) inputWidth(varID uint32) int {
+	if width := fi.parsed.GetTypeComponentCount(varID); width != 0 {
+		return width
+	}
+	return 4
+}
+
 // inputs builds the input values of one fragment invocation. Interpolated
 // attributes are the flat concatenation of the vertex @location outputs in
-// location order; they are handed back by component count. The position
-// builtin is the pixel center in framebuffer coordinates, the depth and 1/w.
+// location order; they are handed back by component count and converted by
+// each input's type (shader.Module.InterfaceValue). The position builtin is
+// the pixel center in framebuffer coordinates, the depth and 1/w.
 func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Value {
 	inputs := make(map[uint32]shader.Value, len(fi.locationInputs)+1)
 	attrs := frag.Attributes
@@ -1467,12 +1540,8 @@ func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Val
 		if offset >= len(attrs) {
 			break
 		}
-		width := fi.parsed.GetTypeComponentCount(li.varID)
-		if width == 0 {
-			width = 4
-		}
-		end := min(offset+width, len(attrs))
-		inputs[li.varID] = floatsToShaderValue(attrs[offset:end])
+		end := min(offset+fi.inputWidth(li.varID), len(attrs))
+		inputs[li.varID] = fi.parsed.InterfaceValue(li.varID, attrs[offset:end])
 		offset = end
 	}
 	if fi.fragCoordVar != 0 {
