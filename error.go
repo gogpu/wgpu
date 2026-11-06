@@ -17,6 +17,15 @@ var (
 	ErrSurfaceOutdated = hal.ErrSurfaceOutdated
 	ErrTimeout         = hal.ErrTimeout
 
+	// ErrContextReleased is returned by Adapter.RequestDevice when the
+	// backend's native context is gone. On GLES on Linux that happens when a
+	// Wayland window's Surface is released before RequestDevice: the EGL
+	// context built on the app's display dies with its last Surface and
+	// Device. It wraps ErrDeviceLost, as WebGPU's
+	// requestDevice on an expired adapter yields a lost device; request a new
+	// adapter, with a live surface, and a new device.
+	ErrContextReleased = hal.ErrContextReleased
+
 	// ErrWorkgroupBarrierUnsupported is returned by Device.CreateComputePipeline
 	// on the software backend for a compute shader that shares workgroup
 	// memory across a control barrier (a tree reduction, a shared tile). The
