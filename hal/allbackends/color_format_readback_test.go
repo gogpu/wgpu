@@ -220,7 +220,8 @@ type colorFormatCase struct {
 	value   string
 	want    []byte
 	// tolerance is the allowed difference per byte: the sRGB conversion is
-	// approximate on GPUs.
+	// approximate on GPUs. For RGB10A2Unorm it is per 10-bit channel (see
+	// colorTexelNear).
 	tolerance int
 }
 
@@ -245,7 +246,10 @@ var colorFormatCases = []colorFormatCase{
 	{gputypes.TextureFormatBGRA8Unorm, "vec4<f32>", unormValue, []byte{153, 102, 51, 255}, 0},
 	{gputypes.TextureFormatRGBA8UnormSrgb, "vec4<f32>", unormValue, []byte{124, 170, 203, 255}, 1},
 	{gputypes.TextureFormatBGRA8UnormSrgb, "vec4<f32>", unormValue, []byte{203, 170, 124, 255}, 1},
-	{gputypes.TextureFormatRGB10A2Unorm, "vec4<f32>", unormValue, pack1010102(205, 409, 614, 3), 0},
+	// Tolerance 1 per channel: 0.2*1023 = 204.6, and a float-to-unorm
+	// conversion may be off by up to 0.6 ULP (the D3D rule GPUs follow), so
+	// Mesa llvmpipe's 204 is as right as Intel's 205.
+	{gputypes.TextureFormatRGB10A2Unorm, "vec4<f32>", unormValue, pack1010102(205, 409, 614, 3), 1},
 	{gputypes.TextureFormatR16Float, "vec4<f32>", floatValue, le16(0x3400), 0},
 	{gputypes.TextureFormatRG16Float, "vec4<f32>", floatValue, le16(0x3400, 0x3800), 0},
 	{gputypes.TextureFormatRGBA16Float, "vec4<f32>", floatValue, le16(0x3400, 0x3800, 0x3A00, 0x3C00), 0},
@@ -316,10 +320,29 @@ func checkColorFormat(t *testing.T, b overrideBackend, device *wgpu.Device, c co
 		state: gputypes.ColorTargetState{Format: c.format, WriteMask: gputypes.ColorWriteMaskAll},
 	}.run(t, device)
 	for i, got := range readColorTexels(t, device, tex, len(c.want)) {
-		if !bytesNear(got, c.want, c.tolerance) {
+		if !colorTexelNear(c.format, got, c.want, c.tolerance) {
 			t.Fatalf("texel %d = %x, want %x", i, got, c.want)
 		}
 	}
+}
+
+// colorTexelNear compares a texel per byte, or per channel for the packed
+// RGB10A2Unorm, whose 10-bit channels straddle bytes.
+func colorTexelNear(format gputypes.TextureFormat, got, want []byte, tolerance int) bool {
+	if format != gputypes.TextureFormatRGB10A2Unorm {
+		return bytesNear(got, want, tolerance)
+	}
+	if len(got) != 4 || len(want) != 4 {
+		return false
+	}
+	g, w := binary.LittleEndian.Uint32(got), binary.LittleEndian.Uint32(want)
+	for _, ch := range [...]struct{ shift, mask uint32 }{{0, 0x3ff}, {10, 0x3ff}, {20, 0x3ff}, {30, 0x3}} {
+		d := int(g>>ch.shift&ch.mask) - int(w>>ch.shift&ch.mask)
+		if d > tolerance || d < -tolerance {
+			return false
+		}
+	}
+	return true
 }
 
 func bytesNear(got, want []byte, tolerance int) bool {
