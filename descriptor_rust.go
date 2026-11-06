@@ -147,9 +147,14 @@ type RenderPassDescriptor struct {
 type RenderPassColorAttachment struct {
 	View          *TextureView
 	ResolveTarget *TextureView
-	LoadOp        gputypes.LoadOp
-	StoreOp       gputypes.StoreOp
-	ClearValue    gputypes.Color
+	// DepthSlice is the slice of a 3D View to render to (WebGPU
+	// GPURenderPassColorAttachment.depthSlice); nil means undefined. Under
+	// -tags rust, BeginRenderPass returns an error for a non-nil DepthSlice
+	// until go-webgpu maps the field.
+	DepthSlice *uint32
+	LoadOp     gputypes.LoadOp
+	StoreOp    gputypes.StoreOp
+	ClearValue gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.

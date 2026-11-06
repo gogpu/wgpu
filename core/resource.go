@@ -1053,6 +1053,18 @@ type TextureView struct {
 	// May be nil for texture views created without a parent (e.g., swapchain
 	// views where the parent texture lifecycle is managed externally).
 	Parent *Texture
+
+	// Dimension is the view's dimension, resolved from the texture when the
+	// view descriptor left it undefined (WebGPU "resolving
+	// GPUTextureViewDescriptor defaults"). Undefined only for a view whose
+	// descriptor is not known (a view wrapped from a HAL handle), which the
+	// depth-slice validation then skips like a view without a Parent.
+	// Read-only: set when the view is built and never written after.
+	Dimension gputypes.TextureViewDimension
+
+	// BaseMipLevel is the view descriptor's baseMipLevel. Read-only: set when
+	// the view is built and never written after.
+	BaseMipLevel uint32
 }
 
 // Sampler represents a texture sampler with HAL integration.

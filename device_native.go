@@ -212,6 +212,8 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
 			d.destroyTextureViewDeferred(halView)
 		}),
+		dimension:    resolveViewDimension(texture, halDesc.Dimension),
+		baseMipLevel: halDesc.BaseMipLevel,
 	}, nil
 }
 

@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
@@ -22,7 +23,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 		return nil, ErrReleased
 	}
 
-	rDesc := convertRenderPassDescriptorRust(desc)
+	rDesc, err := convertRenderPassDescriptorRust(desc)
+	if err != nil {
+		return nil, err
+	}
 	rp, err := e.r.BeginRenderPass(rDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to begin render pass: %w", err)
@@ -193,9 +197,15 @@ func (cb *CommandBuffer) Release() {
 
 // --- Render pass descriptor conversion ---
 
-func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) *rwgpu.RenderPassDescriptor {
+// errRustDepthSliceUnmapped is returned for a color attachment with a
+// DepthSlice under -tags rust: go-webgpu's RenderPassColorAttachment has no
+// depthSlice field and always sends WGPU_DEPTH_SLICE_UNDEFINED, so the slice
+// would be dropped silently.
+var errRustDepthSliceUnmapped = errors.New("wgpu: RenderPassColorAttachment.DepthSlice is not supported with -tags rust: go-webgpu does not map depthSlice yet")
+
+func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) (*rwgpu.RenderPassDescriptor, error) {
 	if desc == nil {
-		return &rwgpu.RenderPassDescriptor{}
+		return &rwgpu.RenderPassDescriptor{}, nil
 	}
 
 	rDesc := &rwgpu.RenderPassDescriptor{
@@ -204,6 +214,9 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) *rwgpu.RenderPa
 
 	rDesc.ColorAttachments = make([]rwgpu.RenderPassColorAttachment, len(desc.ColorAttachments))
 	for i, ca := range desc.ColorAttachments {
+		if ca.DepthSlice != nil {
+			return nil, fmt.Errorf("color attachment %d: %w", i, errRustDepthSliceUnmapped)
+		}
 		att := rwgpu.RenderPassColorAttachment{
 			LoadOp:  ca.LoadOp,
 			StoreOp: ca.StoreOp,
@@ -241,5 +254,5 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) *rwgpu.RenderPa
 		rDesc.DepthStencilAttachment = rDSA
 	}
 
-	return rDesc
+	return rDesc, nil
 }

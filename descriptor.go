@@ -471,9 +471,16 @@ type RenderPassTimestampWrites struct {
 type RenderPassColorAttachment struct {
 	View          *TextureView
 	ResolveTarget *TextureView
-	LoadOp        gputypes.LoadOp
-	StoreOp       gputypes.StoreOp
-	ClearValue    gputypes.Color
+	// DepthSlice is the slice of a 3D View to render to (WebGPU
+	// GPURenderPassColorAttachment.depthSlice). It is required when View is a
+	// 3D view and must then be less than the depth of the view's base mip
+	// level; it must be nil for any other view. nil means undefined: every
+	// non-nil value is validated, 0xFFFFFFFF (webgpu.h
+	// WGPU_DEPTH_SLICE_UNDEFINED) included.
+	DepthSlice *uint32
+	LoadOp     gputypes.LoadOp
+	StoreOp    gputypes.StoreOp
+	ClearValue gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.
@@ -500,6 +507,10 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			LoadOp:     ca.LoadOp,
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
+		}
+		if ca.DepthSlice != nil {
+			slice := *ca.DepthSlice
+			halCA.DepthSlice = &slice
 		}
 		if ca.View != nil {
 			halCA.View = ca.View.resolveHAL()

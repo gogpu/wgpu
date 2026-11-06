@@ -161,6 +161,37 @@ type TextureView struct {
 	// encoders. nil for a view without one (surface views from
 	// SurfaceTexture.CreateView, wrapped HAL views).
 	ref *core.ResourceRef
+	// dimension and baseMipLevel are the view descriptor's resolved dimension
+	// and base mip level, copied into core.TextureView for the render pass
+	// depth-slice validation. dimension is undefined for a wrapped HAL view,
+	// whose descriptor is not known.
+	dimension    gputypes.TextureViewDimension
+	baseMipLevel uint32
+}
+
+// resolveViewDimension returns the dimension a texture view has: the
+// requested one, or the default WebGPU derives from the texture ("resolving
+// GPUTextureViewDescriptor defaults"): 1d, 2d for a single-layer 2D texture,
+// 2d-array for a layered one, 3d. Undefined when the texture's own dimension
+// is not known (a texture wrapped from a HAL handle).
+func resolveViewDimension(texture *Texture, requested gputypes.TextureViewDimension) gputypes.TextureViewDimension {
+	if requested != gputypes.TextureViewDimensionUndefined {
+		return requested
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return gputypes.TextureViewDimensionUndefined
+	}
+	switch texture.coreTexture.Dimension() {
+	case gputypes.TextureDimension1D:
+		return gputypes.TextureViewDimension1D
+	case gputypes.TextureDimension3D:
+		return gputypes.TextureViewDimension3D
+	default:
+		if texture.coreTexture.Size().DepthOrArrayLayers > 1 {
+			return gputypes.TextureViewDimension2DArray
+		}
+		return gputypes.TextureViewDimension2D
+	}
 }
 
 // resolveHAL is the single boundary from a public texture-view wrapper to HAL.

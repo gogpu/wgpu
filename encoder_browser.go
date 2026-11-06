@@ -199,6 +199,10 @@ func buildRenderPassDescriptorJS(desc *RenderPassDescriptor) js.Value {
 		} else {
 			att.ResolveTarget = js.Undefined()
 		}
+		if ca.DepthSlice != nil {
+			slice := *ca.DepthSlice
+			att.DepthSlice = &slice
+		}
 		colorAttachments[i] = att
 	}
 

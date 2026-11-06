@@ -1179,6 +1179,9 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 		}
 
 		tex := ca.View.Parent
+		if err := validateColorAttachmentDepthSlice(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
 		ctx.ColorFormats[i] = tex.Format()
 		texSize := tex.Size()
 		texSamples := tex.SampleCount()
@@ -1233,6 +1236,45 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 	}
 
 	return ctx, nil
+}
+
+// validateColorAttachmentDepthSlice checks the depthSlice of color attachment
+// i against its view: required for a 3D view and less than the depth of the
+// view's base mip level, absent for any other view. Every non-nil value is
+// checked, 0xFFFFFFFF (webgpu.h WGPU_DEPTH_SLICE_UNDEFINED) included. A view
+// whose dimension is not known (Dimension undefined) is not checked.
+//
+// Reference: WebGPU spec "GPURenderPassColorAttachment Valid Usage";
+// Rust wgpu-core command/render.rs (ColorAttachmentError::MissingDepthSlice,
+// DepthSliceLimit, UnneededDepthSlice).
+func validateColorAttachmentDepthSlice(label string, i int, ca *RenderPassColorAttachment) error {
+	view := ca.View
+	switch view.Dimension {
+	case gputypes.TextureViewDimensionUndefined:
+		return nil
+	case gputypes.TextureViewDimension3D:
+		if ca.DepthSlice == nil {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorMissingDepthSlice, Label: label, AttachmentIndex: i,
+			}
+		}
+		tex := view.Parent
+		limit := mipLevelSize(tex.Size(), view.BaseMipLevel, tex.Dimension()).DepthOrArrayLayers
+		if *ca.DepthSlice >= limit {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorDepthSliceLimit, Label: label, AttachmentIndex: i,
+				Given: *ca.DepthSlice, Limit: limit,
+			}
+		}
+		return nil
+	default:
+		if ca.DepthSlice != nil {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorUnneededDepthSlice, Label: label, AttachmentIndex: i,
+			}
+		}
+		return nil
+	}
 }
 
 // validateDepthStencilAttachment checks that the depth/stencil attachment

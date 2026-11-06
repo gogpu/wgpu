@@ -1203,6 +1203,24 @@ const (
 	// different width/height. All attachment textures must match dimensions.
 	// WebGPU spec: https://www.w3.org/TR/webgpu/#render-pass-encoder-creation
 	RenderPassErrorDimensionMismatch
+
+	// RenderPassErrorMissingDepthSlice indicates a color attachment whose view
+	// is 3D has no depthSlice.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: ColorAttachmentError::MissingDepthSlice.
+	RenderPassErrorMissingDepthSlice
+
+	// RenderPassErrorDepthSliceLimit indicates a color attachment's depthSlice
+	// is not less than the depth of its 3D view's base mip level.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: ColorAttachmentError::DepthSliceLimit.
+	RenderPassErrorDepthSliceLimit
+
+	// RenderPassErrorUnneededDepthSlice indicates a color attachment has a
+	// depthSlice although its view is not 3D.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: ColorAttachmentError::UnneededDepthSlice.
+	RenderPassErrorUnneededDepthSlice
 )
 
 // RenderPassValidationError represents a validation error during render pass creation.
@@ -1210,7 +1228,8 @@ type RenderPassValidationError struct {
 	Kind  RenderPassValidationErrorKind
 	Label string
 
-	// For TooManyColorAttachments:
+	// For TooManyColorAttachments and DepthSliceLimit (Given is the depth
+	// slice, Limit the depth of the view's base mip level):
 	Given uint32
 	Limit uint32
 
@@ -1247,6 +1266,18 @@ func (e *RenderPassValidationError) Error() string {
 		return fmt.Sprintf(
 			"render pass %q: color attachment [%d] has dimensions %dx%d, but attachment [%d] has dimensions %dx%d; all attachments must have the same dimensions (WebGPU spec §10.1)",
 			label, e.AttachmentIndex, e.ActualWidth, e.ActualHeight, e.ReferenceIndex, e.ExpectedWidth, e.ExpectedHeight)
+	case RenderPassErrorMissingDepthSlice:
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d]: color attachment's view is 3D and requires depth slice to be provided (WebGPU spec: GPURenderPassColorAttachment Valid Usage)",
+			label, e.AttachmentIndex)
+	case RenderPassErrorDepthSliceLimit:
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d]: depth slice must be less than %d but is %d (WebGPU spec: GPURenderPassColorAttachment Valid Usage)",
+			label, e.AttachmentIndex, e.Limit, e.Given)
+	case RenderPassErrorUnneededDepthSlice:
+		return fmt.Sprintf(
+			"render pass %q: color attachment [%d]: depth slice was provided but the color attachment's view is not 3D (WebGPU spec: GPURenderPassColorAttachment Valid Usage)",
+			label, e.AttachmentIndex)
 	default:
 		return fmt.Sprintf("render pass %q: unknown validation error", label)
 	}
