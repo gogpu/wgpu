@@ -5,6 +5,7 @@ package software
 import (
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -370,6 +371,42 @@ func TestComputePipelineNoSPIRV(t *testing.T) {
 	}
 	if !errors.Is(err, ErrComputeRequiresSPIRV) {
 		t.Errorf("expected ErrComputeRequiresSPIRV, got: %v", err)
+	}
+}
+
+// TestShaderCompileErrorReachesPipelines checks that a module whose WGSL
+// does not lower keeps naga's error, and that both pipeline creators return
+// it with the stage. Core rejects such WGSL before the HAL sees it, so the
+// HAL is called directly: it is the backend's own guarantee.
+func TestShaderCompileErrorReachesPipelines(t *testing.T) {
+	dev, _, cleanup := createSoftwareDevice(t)
+	defer cleanup()
+
+	sm, err := dev.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label:  "does-not-lower",
+		Source: hal.ShaderSource{WGSL: "@compute @workgroup_size(1) fn main() { let x: u32 = undefined_name; }"},
+	})
+	if err != nil {
+		t.Fatalf("CreateShaderModule: %v (the error belongs to pipeline creation)", err)
+	}
+
+	_, err = dev.CreateComputePipeline(&hal.ComputePipelineDescriptor{
+		Label:   "cp",
+		Compute: hal.ComputeState{Module: sm, EntryPoint: "main"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "lower WGSL") || !strings.Contains(err.Error(), "compute") {
+		t.Fatalf("CreateComputePipeline error %v, want the lowering error with the stage", err)
+	}
+	if errors.Is(err, ErrComputeRequiresSPIRV) {
+		t.Fatalf("CreateComputePipeline error %v hides the cause behind ErrComputeRequiresSPIRV", err)
+	}
+
+	_, err = dev.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label:  "rp",
+		Vertex: hal.VertexState{Module: sm, EntryPoint: "vs_main"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "lower WGSL") || !strings.Contains(err.Error(), "vertex") {
+		t.Fatalf("CreateRenderPipeline error %v, want the lowering error with the stage", err)
 	}
 }
 

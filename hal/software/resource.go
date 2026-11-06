@@ -495,22 +495,17 @@ type ShaderModule struct {
 	desc     *hal.ShaderModuleDescriptor
 	irModule *shaderir.Module // lowered WGSL (nil for SPIR-V input or if lowering failed)
 	spirv    []uint32         // SPIR-V bytecode (nil if unavailable)
-	parsed   *shader.Module   // parsed SPIR-V module (nil until first use)
+	parsed   *shader.Module   // parsed SPIR-V module (nil without SPIR-V)
+	// err is why the module has no usable SPIR-V: naga's lowering or SPIR-V
+	// error, or the interpreter's parse error. CreateShaderModule keeps it
+	// and every pipeline built from the module returns it, as Rust wgpu
+	// reports a backend translation failure at pipeline creation.
+	err error
 }
 
-// ParsedModule returns the parsed SPIR-V module, parsing on first access.
-// Returns nil if no SPIR-V bytecode is available.
-func (sm *ShaderModule) ParsedModule() *shader.Module {
-	if sm.parsed != nil {
-		return sm.parsed
-	}
-	if len(sm.spirv) == 0 {
-		return nil
-	}
-	m, err := shader.ParseModule(sm.spirv)
-	if err != nil {
-		return nil
-	}
-	sm.parsed = m
-	return sm.parsed
+// ParsedModule returns the module's parsed SPIR-V, or the error that left
+// it without one. A module with no source at all (the callback-shader
+// paths) has neither and returns (nil, nil).
+func (sm *ShaderModule) ParsedModule() (*shader.Module, error) {
+	return sm.parsed, sm.err
 }

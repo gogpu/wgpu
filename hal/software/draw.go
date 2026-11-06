@@ -534,7 +534,9 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 		return nil
 	}
 
-	// Get the vertex shader module.
+	// Get the vertex shader module. It is nil only when the module has no
+	// source (the callback paths): a module that fails to compile or parse
+	// fails CreateRenderPipeline. The check stays as a defence.
 	parsed := r.pipeline.vertex
 	if parsed == nil {
 		return nil
@@ -1158,6 +1160,8 @@ func (r *RenderPassEncoder) prepareSPIRVDraw() *spirvDrawSetup {
 	if r.pipeline == nil || r.pipeline.desc == nil {
 		return nil
 	}
+	// nil only for a module with no source; a failed compile or parse fails
+	// CreateRenderPipeline (stageModule). The check stays as a defence.
 	parsed := r.pipeline.vertex
 	if parsed == nil {
 		return nil
