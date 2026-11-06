@@ -10,7 +10,6 @@ import (
 	"image"
 	"unsafe"
 
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/hal/gles/wgl"
@@ -121,14 +120,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return err
 	}
 	if tex.target == gl.TEXTURE_2D {
-		if tex.format == gputypes.TextureFormatR8Unorm {
-			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-		}
-		glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
-			0, 0, int32(size.Width), int32(size.Height), format, dataType,
-			unsafe.Pointer(&data[0]))
-		if tex.format == gputypes.TextureFormatR8Unorm {
-			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+		if err := writeTexture2D(glCtx, tex, dst, data, layout, size, format, dataType); err != nil {
+			glCtx.BindTexture(tex.target, 0)
+			return err
 		}
 	}
 

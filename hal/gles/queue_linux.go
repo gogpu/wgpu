@@ -10,7 +10,6 @@ import (
 	"image"
 	"unsafe"
 
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
@@ -139,19 +138,9 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		return err
 	}
 	if tex.target == gl.TEXTURE_2D {
-		// Set alignment to 1 for single-channel formats (R8) whose row stride
-		// may not be a multiple of the default 4-byte GL_UNPACK_ALIGNMENT.
-		if tex.format == gputypes.TextureFormatR8Unorm {
-			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-		}
-		// Use TexSubImage2D to update existing texture data (Rust wgpu-hal pattern).
-		// TexImage2D reallocates storage on every call; TexSubImage2D updates in-place.
-		glCtx.TexSubImage2D(tex.target, int32(dst.MipLevel),
-			0, 0, int32(size.Width), int32(size.Height), format, dataType,
-			unsafe.Pointer(&data[0]))
-		// Restore default alignment after upload.
-		if tex.format == gputypes.TextureFormatR8Unorm {
-			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+		if err := writeTexture2D(glCtx, tex, dst, data, layout, size, format, dataType); err != nil {
+			glCtx.BindTexture(tex.target, 0)
+			return err
 		}
 	}
 
