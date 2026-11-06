@@ -261,6 +261,13 @@ func readAspect(t *testing.T, device *wgpu.Device, tex *wgpu.Texture, aspect gpu
 			Size:         depthReadbackExtent,
 		}})
 	})
+	return mapStaging(t, staging, bufSize)
+}
+
+// mapStaging maps the first bufSize bytes of staging for reading and returns
+// a copy of them.
+func mapStaging(t *testing.T, staging *wgpu.Buffer, bufSize uint64) []byte {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := staging.Map(ctx, wgpu.MapModeRead, 0, bufSize); err != nil {
