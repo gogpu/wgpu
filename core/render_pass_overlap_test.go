@@ -57,13 +57,13 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 	otherView := &TextureView{HAL: &mockTextureView{}, Parent: other,
 		Dimension: gputypes.TextureViewDimension2D, ArrayLayerCount: 1}
 	unknownView := &TextureView{HAL: &mockTextureView{}, Parent: flat}
-	layer := func(base, count uint32) *TextureView {
-		dim := gputypes.TextureViewDimension2DArray
-		if count == 1 {
-			dim = gputypes.TextureViewDimension2D
-		}
-		return &TextureView{HAL: &mockTextureView{}, Parent: layers, Dimension: dim,
-			BaseArrayLayer: base, ArrayLayerCount: count}
+	msaaView := &TextureView{HAL: &mockTextureView{}, Parent: testTexture(gputypes.TextureFormatRGBA8Unorm, 16, 16, 4),
+		Dimension: gputypes.TextureViewDimension2D, ArrayLayerCount: 1}
+	// One layer per view: a 2d-array view of several layers is not a
+	// renderable texture view (TestValidateRenderPassDescriptor_RenderableView).
+	layer := func(base uint32) *TextureView {
+		return &TextureView{HAL: &mockTextureView{}, Parent: layers, Dimension: gputypes.TextureViewDimension2D,
+			BaseArrayLayer: base, ArrayLayerCount: 1}
 	}
 	s := depthSlicePtr
 
@@ -89,16 +89,11 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 			overlapAttachment{view: flatView}, overlapAttachment{view: unknownView}),
 			wantErr: true, index: 1, msg: "at mip 0 and depth/array layer 0"},
 		{name: "array different single layers", desc: overlapPass(
-			overlapAttachment{view: layer(0, 1)}, overlapAttachment{view: layer(1, 1)},
-			overlapAttachment{view: layer(3, 1)})},
+			overlapAttachment{view: layer(0)}, overlapAttachment{view: layer(1)},
+			overlapAttachment{view: layer(3)})},
 		{name: "array same layer from two views", desc: overlapPass(
-			overlapAttachment{view: layer(2, 1)}, overlapAttachment{view: layer(2, 1)}),
+			overlapAttachment{view: layer(2)}, overlapAttachment{view: layer(2)}),
 			wantErr: true, index: 1, msg: "at mip 0 and depth/array layer 2"},
-		{name: "array layer range overlaps a single layer", desc: overlapPass(
-			overlapAttachment{view: layer(0, 3)}, overlapAttachment{view: layer(2, 1)}),
-			wantErr: true, index: 1, msg: "at mip 0 and depth/array layer 2"},
-		{name: "array disjoint layer ranges", desc: overlapPass(
-			overlapAttachment{view: layer(0, 2)}, overlapAttachment{view: layer(2, 2)})},
 		{name: "resolve target is another attachment's view", desc: overlapPass(
 			overlapAttachment{view: flatView}, overlapAttachment{view: otherView, resolve: flatView}),
 			wantErr: true, index: 1, resolve: true, msg: "resolve target's subresource at mip 0 and depth/array layer 0"},
@@ -106,7 +101,7 @@ func TestValidateRenderPassDescriptor_SubresourceOverlap(t *testing.T) {
 			overlapAttachment{view: flatView, resolve: flatView}),
 			wantErr: true, index: 0, resolve: true, msg: "resolve target's subresource at mip 0 and depth/array layer 0"},
 		{name: "resolve target on a free layer", desc: overlapPass(
-			overlapAttachment{view: otherView, resolve: layer(1, 1)}, overlapAttachment{view: layer(0, 1)})},
+			overlapAttachment{view: msaaView, resolve: layer(1)})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

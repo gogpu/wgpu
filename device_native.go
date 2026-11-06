@@ -192,7 +192,6 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		halDesc.BaseArrayLayer = desc.BaseArrayLayer
 		halDesc.ArrayLayerCount = desc.ArrayLayerCount
 	}
-
 	halView, err := halDevice.CreateTextureView(halTexture, halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
@@ -219,6 +218,9 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		baseArrayLayer: halDesc.BaseArrayLayer,
 		arrayLayerCount: resolveViewLayerCount(texture, dimension,
 			halDesc.BaseArrayLayer, halDesc.ArrayLayerCount),
+		mipLevelCount: resolveViewMipCount(texture, halDesc.BaseMipLevel, halDesc.MipLevelCount),
+		format:        halDesc.Format,
+		aspect:        halDesc.Aspect,
 	}, nil
 }
 

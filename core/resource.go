@@ -1075,6 +1075,17 @@ type TextureView struct {
 	// written after.
 	BaseArrayLayer  uint32
 	ArrayLayerCount uint32
+
+	// MipLevelCount is the view's mip level count, resolved from the texture
+	// when the descriptor left it at 0. 0 means the count is not known, and
+	// the renderable-view check then skips it. Format is the view's format,
+	// Undefined meaning the texture's format; Aspect is the view's aspect,
+	// Undefined meaning all. The render pass renderable-view and format
+	// checks read them. Read-only: set when the view is built and never
+	// written after.
+	MipLevelCount uint32
+	Format        gputypes.TextureFormat
+	Aspect        gputypes.TextureAspect
 }
 
 // Sampler represents a texture sampler with HAL integration.

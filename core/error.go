@@ -1240,6 +1240,43 @@ const (
 	// must be pairwise disjoint).
 	// Rust wgpu-core: ColorAttachmentError::SubresourceOverlap.
 	RenderPassErrorSubresourceOverlap
+
+	// RenderPassErrorTextureViewNotRenderable indicates an attachment's view
+	// is not a renderable texture view; Reason says which requirement fails.
+	// WebGPU spec: "renderable texture view".
+	// Rust wgpu-core: RenderPassErrorInner::TextureViewIsNotRenderable.
+	RenderPassErrorTextureViewNotRenderable
+
+	// RenderPassErrorInvalidColorAttachmentFormat indicates a color
+	// attachment's view format is not a color renderable format.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: ColorAttachmentError::InvalidFormat.
+	RenderPassErrorInvalidColorAttachmentFormat
+
+	// RenderPassErrorInvalidDepthStencilAttachmentFormat indicates the
+	// depth/stencil attachment's view format is not a depth-or-stencil format.
+	// WebGPU spec: GPURenderPassDepthStencilAttachment Valid Usage.
+	// Rust wgpu-core: AttachmentError::InvalidDepthStencilAttachmentFormat.
+	RenderPassErrorInvalidDepthStencilAttachmentFormat
+
+	// RenderPassErrorInvalidResolveSampleCounts indicates a resolve whose
+	// source is not multisampled or whose target is.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: RenderPassErrorInner::InvalidResolveSampleCounts.
+	RenderPassErrorInvalidResolveSampleCounts
+
+	// RenderPassErrorMismatchedResolveFormat indicates a resolve target whose
+	// view format (or, with TextureFormats, texture format) differs from its
+	// attachment's.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: RenderPassErrorInner::MismatchedResolveTextureFormat.
+	RenderPassErrorMismatchedResolveFormat
+
+	// RenderPassErrorUnsupportedResolveFormat indicates a resolve target whose
+	// format does not support resolve.
+	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
+	// Rust wgpu-core: RenderPassErrorInner::UnsupportedResolveTargetFormat.
+	RenderPassErrorUnsupportedResolveFormat
 )
 
 // RenderPassValidationError represents a validation error during render pass creation.
@@ -1269,6 +1306,89 @@ type RenderPassValidationError struct {
 	MipLevel      uint32
 	Layer         uint32
 	ResolveTarget bool
+
+	// For TextureViewNotRenderable: the failed requirement and the view's
+	// value for it (Given holds a mip or layer count).
+	Reason        TextureViewNotRenderableReason
+	Usage         gputypes.TextureUsage
+	ViewDimension gputypes.TextureViewDimension
+	Aspect        gputypes.TextureAspect
+
+	// For the format kinds: the attachment's format, and for
+	// MismatchedResolveFormat the resolve target's, comparing texture formats
+	// when TextureFormats is set and view formats otherwise.
+	Format         gputypes.TextureFormat
+	ResolveFormat  gputypes.TextureFormat
+	TextureFormats bool
+
+	// For InvalidResolveSampleCounts: ActualSamples is the resolve source's
+	// sample count, ResolveSamples the resolve target's.
+	ResolveSamples uint32
+}
+
+// attachmentLocation names the attachment of e the way Rust wgpu-core's
+// AttachmentErrorLocation does: "color attachment at index N's texture
+// view", "... resolve texture view", or "depth attachment's texture view"
+// for AttachmentIndex -1.
+func (e *RenderPassValidationError) attachmentLocation() string {
+	switch {
+	case e.AttachmentIndex < 0:
+		return "depth attachment's texture view"
+	case e.ResolveTarget:
+		return fmt.Sprintf("color attachment at index %d's resolve texture view", e.AttachmentIndex)
+	default:
+		return fmt.Sprintf("color attachment at index %d's texture view", e.AttachmentIndex)
+	}
+}
+
+// notRenderableReason words e.Reason as Rust wgpu-core's
+// TextureViewNotRenderableReason does.
+func (e *RenderPassValidationError) notRenderableReason() string {
+	switch e.Reason {
+	case TextureViewNotRenderableUsage:
+		return fmt.Sprintf("the texture this view references doesn't include the RENDER_ATTACHMENT usage; provided usages: %v", e.Usage)
+	case TextureViewNotRenderableDimension:
+		if e.ResolveTarget {
+			return fmt.Sprintf("the dimension of this resolve target view is not 2D or 2D array; view dimension: %v", e.ViewDimension)
+		}
+		return fmt.Sprintf("the dimension of this texture view is not 2D, 2D array or 3D; view dimension: %v", e.ViewDimension)
+	case TextureViewNotRenderableMipLevelCount:
+		return fmt.Sprintf("this texture view has more than one mipmap level; view mipmap levels: %d", e.Given)
+	case TextureViewNotRenderableArrayLayerCount:
+		return fmt.Sprintf("this texture view has more than one array layer; view array layers: %d", e.Given)
+	case TextureViewNotRenderableAspects:
+		return fmt.Sprintf("the aspects of this texture view are a subset of the aspects in the original texture; aspect: %v", e.Aspect)
+	default:
+		return "unknown reason"
+	}
+}
+
+// formatError returns the message of the format and resolve kinds of e.
+func (e *RenderPassValidationError) formatError(label string) string {
+	const spec = "(WebGPU spec: GPURenderPassColorAttachment Valid Usage)"
+	switch e.Kind {
+	case RenderPassErrorInvalidColorAttachmentFormat:
+		return fmt.Sprintf("render pass %q: the format of the %s (%v) is not a color renderable format %s",
+			label, e.attachmentLocation(), e.Format, spec)
+	case RenderPassErrorInvalidDepthStencilAttachmentFormat:
+		return fmt.Sprintf("render pass %q: the format of the depth-stencil attachment (%v) is not a depth-or-stencil format (WebGPU spec: GPURenderPassDepthStencilAttachment Valid Usage)",
+			label, e.Format)
+	case RenderPassErrorInvalidResolveSampleCounts:
+		return fmt.Sprintf("render pass %q: the resolve source, %s, must be multi-sampled (has %d samples) while the resolve destination must not be multisampled (has %d samples) %s",
+			label, e.attachmentLocation(), e.ActualSamples, e.ResolveSamples, spec)
+	case RenderPassErrorMismatchedResolveFormat:
+		what := "view format"
+		if e.TextureFormats {
+			what = "texture format"
+		}
+		return fmt.Sprintf("render pass %q: resolve source, %s, %s (%v) must match the resolve destination %s (%v) %s",
+			label, e.attachmentLocation(), what, e.Format, what, e.ResolveFormat, spec)
+	case RenderPassErrorUnsupportedResolveFormat:
+		return fmt.Sprintf("render pass %q: the format of the %s (%v) is not resolvable %s",
+			label, e.attachmentLocation(), e.Format, spec)
+	default:
+		return fmt.Sprintf("render pass %q: unknown validation error", label)
+	}
 }
 
 // Error implements the error interface.
@@ -1311,6 +1431,13 @@ func (e *RenderPassValidationError) Error() string {
 		return fmt.Sprintf(
 			"render pass %q: color attachment [%d]: %s's subresource at mip %d and depth/array layer %d is already attached to this render pass (WebGPU spec: GPURenderPassDescriptor Valid Usage)",
 			label, e.AttachmentIndex, what, e.MipLevel, e.Layer)
+	case RenderPassErrorTextureViewNotRenderable:
+		return fmt.Sprintf("render pass %q: the %s is not renderable: %s (WebGPU spec: renderable texture view)",
+			label, e.attachmentLocation(), e.notRenderableReason())
+	case RenderPassErrorInvalidColorAttachmentFormat, RenderPassErrorInvalidDepthStencilAttachmentFormat,
+		RenderPassErrorInvalidResolveSampleCounts, RenderPassErrorMismatchedResolveFormat,
+		RenderPassErrorUnsupportedResolveFormat:
+		return e.formatError(label)
 	default:
 		return fmt.Sprintf("render pass %q: unknown validation error", label)
 	}

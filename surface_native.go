@@ -816,6 +816,9 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 			view.dimension = gputypes.TextureViewDimension2D
 		}
 		view.baseMipLevel = halDesc.BaseMipLevel
+		view.mipLevelCount = halDesc.MipLevelCount
+		view.format = halDesc.Format
+		view.aspect = halDesc.Aspect
 	}
 	return view, nil
 }
