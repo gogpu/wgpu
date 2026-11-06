@@ -173,6 +173,74 @@ func (l *BindGroupLayout) storageTexture(binding uint32) *gputypes.StorageTextur
 	return nil
 }
 
+// sampledTexture returns the sampled texture layout of binding, or nil when
+// the binding is not a sampled texture.
+func (l *BindGroupLayout) sampledTexture(binding uint32) *gputypes.TextureBindingLayout {
+	if l == nil {
+		return nil
+	}
+	for i := range l.entries {
+		if l.entries[i].Binding == binding {
+			return l.entries[i].Texture
+		}
+	}
+	return nil
+}
+
+// sampledViewTarget is the GL target a sampler of a view dimension reads
+// through (Rust wgpu-hal gles Texture::target_for_view_dimension, plus the
+// multisampled 2D target): 1D collapses to TEXTURE_2D, GLES has no 1D
+// textures.
+func sampledViewTarget(layout *gputypes.TextureBindingLayout) uint32 {
+	switch layout.ViewDimension {
+	case gputypes.TextureViewDimension2DArray:
+		return gl.TEXTURE_2D_ARRAY
+	case gputypes.TextureViewDimensionCube:
+		return gl.TEXTURE_CUBE_MAP
+	case gputypes.TextureViewDimensionCubeArray:
+		return gl.TEXTURE_CUBE_MAP_ARRAY
+	case gputypes.TextureViewDimension3D:
+		return gl.TEXTURE_3D
+	}
+	if layout.Multisampled {
+		return gl.TEXTURE_2D_MULTISAMPLE
+	}
+	return gl.TEXTURE_2D
+}
+
+// checkSampledView refuses a sampled binding GL cannot express. GL has no
+// texture views (glTextureView is GL 4.3 only, never ES): a texture binds
+// only through the target it was created with (CreateTexture picks it from
+// the size), and a sampler reads all of its layers from layer 0. So the
+// view's dimension must need that target, and an array or cube view must
+// cover every layer. Rust wgpu-hal gles only logs the target mismatch
+// (log_failing_target_heuristics, gfx-rs/wgpu#1574) and samples the wrong
+// layers; WebGPU compatibility mode makes both rules validation errors
+// (textureBindingViewDimension, compatibility-mode.md item 6). This is a
+// deliberate deviation from Rust: a typed refusal at CreateBindGroup is
+// better than a bind group that silently samples the wrong texels.
+func checkSampledView(binding uint32, view *TextureView, layout *gputypes.TextureBindingLayout) error {
+	tex := view.texture
+	want := sampledViewTarget(layout)
+	if tex.target != want {
+		return fmt.Errorf("%w: binding %d: a %v view of a texture of GL target %#x (the %v view needs %#x)",
+			hal.ErrTextureViewNotSampleable, binding, layout.ViewDimension, tex.target, layout.ViewDimension, want)
+	}
+	if tex.target != gl.TEXTURE_2D_ARRAY && tex.target != gl.TEXTURE_CUBE_MAP {
+		return nil
+	}
+	layers := tex.size.DepthOrArrayLayers
+	count := view.layerCount
+	if count == 0 && view.baseLayer < layers {
+		count = layers - view.baseLayer
+	}
+	if view.baseLayer != 0 || count != layers {
+		return fmt.Errorf("%w: binding %d: layers %d..%d of a %d-layer texture (a sampled view must cover every layer)",
+			hal.ErrTextureViewNotSampleable, binding, view.baseLayer, view.baseLayer+count, layers)
+	}
+	return nil
+}
+
 // dynamicOffsetIndex returns the index of binding's offset in the dynamic
 // offsets of SetBindGroup. WebGPU orders the offsets by binding number,
 // whatever the order of the layout or bind group entries (Rust wgpu-hal
@@ -200,7 +268,8 @@ type BindGroup struct {
 
 // newBindGroup resolves the texture views of entries from their handles
 // (TextureView.NativeHandle) through the device's view table. An unknown or
-// destroyed handle is an error.
+// destroyed handle is an error, and so is a sampled view GL cannot bind
+// (checkSampledView).
 func newBindGroup(views *handletable.Table[TextureView], layout *BindGroupLayout, entries []gputypes.BindGroupEntry) (*BindGroup, error) {
 	resolved := make([]*TextureView, len(entries))
 	for i, entry := range entries {
@@ -212,9 +281,15 @@ func newBindGroup(views *handletable.Table[TextureView], layout *BindGroupLayout
 		if !ok {
 			return nil, fmt.Errorf("gles: binding %d: unknown texture view handle %#x", entry.Binding, res.TextureView)
 		}
-		if view.texture != nil {
-			resolved[i] = view
+		if view.texture == nil {
+			continue
 		}
+		if sampled := layout.sampledTexture(entry.Binding); sampled != nil {
+			if err := checkSampledView(entry.Binding, view, sampled); err != nil {
+				return nil, err
+			}
+		}
+		resolved[i] = view
 	}
 	return &BindGroup{layout: layout, entries: entries, views: resolved}, nil
 }

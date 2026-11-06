@@ -955,6 +955,11 @@ func TestCreateBindGroupError_AllKinds(t *testing.T) {
 			wantSub: "HAL error",
 		},
 		{
+			name:    "TextureViewNotSampleable",
+			err:     &CreateBindGroupError{Kind: CreateBindGroupErrorTextureViewNotSampleable, Label: "bg14", HALError: halErr},
+			wantSub: "cannot be sampled on this backend",
+		},
+		{
 			name:    "Unknown",
 			err:     &CreateBindGroupError{Kind: CreateBindGroupErrorKind(99), Label: "bg13"},
 			wantSub: "unknown error",

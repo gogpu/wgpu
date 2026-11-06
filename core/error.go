@@ -1027,6 +1027,13 @@ const (
 	CreateBindGroupErrorMinBindingSizeMismatch
 	// CreateBindGroupErrorHAL indicates the HAL backend failed.
 	CreateBindGroupErrorHAL
+	// CreateBindGroupErrorTextureViewNotSampleable indicates the backend
+	// cannot sample a bound texture view (hal.ErrTextureViewNotSampleable,
+	// in HALError with the binding): on GLES, a view whose dimension needs
+	// another GL target than the texture was created with, or a view of a
+	// subset of its layers. WebGPU compatibility mode has the same rules
+	// (textureBindingViewDimension; whole-array views only).
+	CreateBindGroupErrorTextureViewNotSampleable
 )
 
 // CreateBindGroupError represents an error during bind group creation.
@@ -1089,6 +1096,8 @@ func (e *CreateBindGroupError) Error() string {
 			label, e.Binding, e.Size, e.MinBindingSize)
 	case CreateBindGroupErrorHAL:
 		return fmt.Sprintf("bind group %q: HAL error: %v", label, e.HALError)
+	case CreateBindGroupErrorTextureViewNotSampleable:
+		return fmt.Sprintf("bind group %q: texture view cannot be sampled on this backend: %v", label, e.HALError)
 	default:
 		return fmt.Sprintf("bind group %q: unknown error", label)
 	}

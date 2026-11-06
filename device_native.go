@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -446,6 +447,11 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	}
 
 	halGroup, err := halDevice.CreateBindGroup(halDesc)
+	if errors.Is(err, hal.ErrTextureViewNotSampleable) {
+		return nil, &core.CreateBindGroupError{
+			Kind: core.CreateBindGroupErrorTextureViewNotSampleable, Label: desc.Label, HALError: err,
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
