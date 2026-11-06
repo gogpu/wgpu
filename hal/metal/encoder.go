@@ -418,6 +418,12 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		if tv, ok := ca.View.(*TextureView); ok && tv != nil {
 			_ = MsgSend(attachment, Sel("setTexture:"), uintptr(tv.raw))
 		}
+		// The depth slice of a 3D attachment (Rust wgpu-hal metal/command.rs
+		// begin_render_pass: setDepthPlane). The view's level 0 is its base
+		// mip level, so the plane indexes that level's depth.
+		if ca.DepthSlice != nil {
+			_ = MsgSend(attachment, Sel("setDepthPlane:"), uintptr(*ca.DepthSlice))
+		}
 		_ = MsgSend(attachment, Sel("setLoadAction:"), uintptr(loadOpToMTL(ca.LoadOp)))
 		if ca.LoadOp == gputypes.LoadOpClear {
 			clearColor := MTLClearColor{Red: ca.ClearValue.R, Green: ca.ClearValue.G, Blue: ca.ClearValue.B, Alpha: ca.ClearValue.A}
