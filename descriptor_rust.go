@@ -233,13 +233,21 @@ type RenderPipelineDescriptor struct {
 type VertexState struct {
 	Module     *ShaderModule
 	EntryPoint string
-	Buffers    []gputypes.VertexBufferLayout
+	// Constants are the pipeline-overridable constants of the vertex stage
+	// (WebGPU GPUProgrammableStage.constants). Not supported with -tags rust
+	// yet: a non-empty map fails CreateRenderPipeline.
+	Constants map[string]float64
+	Buffers   []gputypes.VertexBufferLayout
 }
 
 // FragmentState describes the fragment shader stage.
 type FragmentState struct {
 	Module     *ShaderModule
 	EntryPoint string
+	// Constants are the pipeline-overridable constants of the fragment stage
+	// (WebGPU GPUProgrammableStage.constants). Not supported with -tags rust
+	// yet: a non-empty map fails CreateRenderPipeline.
+	Constants map[string]float64
 	// Targets describe the color attachments. A target's WriteMask is
 	// taken literally: zero (gputypes.ColorWriteMaskNone) writes nothing,
 	// so set gputypes.ColorWriteMaskAll to write every channel. A nil Blend
@@ -254,6 +262,10 @@ type ComputePipelineDescriptor struct {
 	Layout     *PipelineLayout
 	Module     *ShaderModule
 	EntryPoint string
+	// Constants are the pipeline-overridable constants of the compute stage
+	// (WebGPU GPUProgrammableStage.constants). Not supported with -tags rust
+	// yet: a non-empty map fails CreateComputePipeline.
+	Constants map[string]float64
 }
 
 // ImageCopyTexture specifies a texture subresource for copy operations.
