@@ -52,6 +52,16 @@ func TestRustErrorFilterToNative(t *testing.T) {
 	}
 }
 
+// TestRustMapModeValues pins the -tags rust MapMode constants, which have no
+// gputypes counterpart and are cast to go-webgpu's type in MapAsync, to the
+// go-webgpu (webgpu.h) values.
+func TestRustMapModeValues(t *testing.T) {
+	if rwgpu.MapMode(MapModeRead) != rwgpu.MapModeRead || rwgpu.MapMode(MapModeWrite) != rwgpu.MapModeWrite {
+		t.Errorf("MapMode read/write = %d/%d, want the wgpu-native values %d/%d",
+			MapModeRead, MapModeWrite, rwgpu.MapModeRead, rwgpu.MapModeWrite)
+	}
+}
+
 // TestRustDepthStencilStencilOps checks that every stencil operation reaches
 // wgpu-native as the same gputypes value. Before the fix the -tags rust
 // build had its own StencilOperation numbering (Keep = 0) cast straight to
