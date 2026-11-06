@@ -12,6 +12,8 @@ package shader
 import (
 	"math"
 	"unsafe"
+
+	"github.com/gogpu/gputypes"
 )
 
 // ValueTag identifies the concrete type stored in a Value.
@@ -161,6 +163,11 @@ type Sampler struct {
 	// LodClampNone for no upper clamp.
 	LodMinClamp float32
 	LodMaxClamp float32
+	// Compare is the comparison function of a comparison sampler, used by the
+	// depth-compare instructions (textureSampleCompare, textureGatherCompare).
+	// Undefined, a sampler WebGPU does not allow to be bound to a comparison
+	// binding, compares as Never.
+	Compare gputypes.CompareFunction
 }
 
 // Wrap mode constants.

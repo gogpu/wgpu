@@ -90,6 +90,7 @@ const (
 	OpDot               = 148
 	OpVectorTimesScalar = 142
 	OpMatrixTimesVector = 145
+	OpVectorTimesMatrix = 144
 	OpMatrixTimesScalar = 143
 	OpMatrixTimesMatrix = 146
 	OpTranspose         = 84
@@ -157,13 +158,19 @@ const (
 	OpSampledImage           = 86
 	OpImageSampleImplicitLod = 87
 	OpImageSampleExplicitLod = 88
-	OpImageFetch             = 95
-	OpImageRead              = 98
-	OpImageWrite             = 99
-	OpImageQuerySizeLod      = 103
-	OpImageQuerySize         = 104
-	OpImageQueryLevels       = 106
-	OpImageQuerySamples      = 107
+	// The Dref forms compare a reference depth with each texel before
+	// filtering (WGSL textureSampleCompare and textureSampleCompareLevel).
+	OpImageSampleDrefImplicitLod = 89
+	OpImageSampleDrefExplicitLod = 90
+	OpImageFetch                 = 95
+	OpImageGather                = 96
+	OpImageDrefGather            = 97
+	OpImageRead                  = 98
+	OpImageWrite                 = 99
+	OpImageQuerySizeLod          = 103
+	OpImageQuerySize             = 104
+	OpImageQueryLevels           = 106
+	OpImageQuerySamples          = 107
 
 	// Atomic ops.
 	OpAtomicLoad            = 227
@@ -178,6 +185,9 @@ const (
 	OpAtomicUMin            = 237
 	OpAtomicSMax            = 238
 	OpAtomicUMax            = 239
+	OpAtomicAnd             = 240
+	OpAtomicOr              = 241
+	OpAtomicXor             = 242
 
 	// Barrier ops.
 	OpControlBarrier = 224
@@ -197,6 +207,16 @@ const (
 	OpSRem       = 138
 	OpFRem       = 140
 	OpSNegate    = 126
+
+	// Float classification and rounding.
+	OpIsNan         = 156
+	OpIsInf         = 157
+	OpQuantizeToF16 = 116
+
+	// Packed 4x8-bit integer dot products (SPV_KHR_integer_dot_product,
+	// core in SPIR-V 1.6): WGSL dot4I8Packed and dot4U8Packed.
+	OpSDotKHR = 4450
+	OpUDotKHR = 4451
 
 	// Constant ops.
 	OpConstantTrue      = 41

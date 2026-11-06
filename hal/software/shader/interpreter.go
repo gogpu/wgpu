@@ -1058,6 +1058,33 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = matrixTimesVector(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
+		case OpVectorTimesMatrix:
+			// OpVectorTimesMatrix: type resultID vector matrix
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = vectorTimesMatrix(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
+			}
+
+		case OpIsNan, OpIsInf:
+			// OpIsNan / OpIsInf: type resultID x
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = floatClass(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]])
+			}
+
+		case OpQuantizeToF16:
+			// OpQuantizeToF16: type resultID value
+			if len(inst.Operands) >= 1 {
+				interp.values[inst.ResultID] = floatUnaryOp(interp.values[inst.Operands[0]], quantizeToF16)
+			}
+
+		case OpSDotKHR, OpUDotKHR:
+			// OpSDotKHR / OpUDotKHR: type resultID vector1 vector2
+			// [PackedVectorFormat]. naga emits them only for dot4I8Packed and
+			// dot4U8Packed: two u32 operands and the 4x8-bit packed format.
+			// The vector forms (no format operand) take integer vectors.
+			if len(inst.Operands) >= 2 {
+				interp.values[inst.ResultID] = interp.integerDot(inst)
+			}
+
 		case OpMatrixTimesScalar:
 			// OpMatrixTimesScalar: type resultID matrix scalar
 			if len(inst.Operands) >= 2 {
@@ -1147,6 +1174,7 @@ func (interp *interpreter) run() error {
 
 		case OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange,
 			OpAtomicSMin, OpAtomicUMin, OpAtomicSMax, OpAtomicUMax,
+			OpAtomicAnd, OpAtomicOr, OpAtomicXor,
 			OpAtomicIIncrement, OpAtomicIDecrement, OpAtomicLoad:
 			interp.values[inst.ResultID] = interp.executeAtomicOp(inst)
 
@@ -1222,6 +1250,29 @@ func (interp *interpreter) run() error {
 				sampledImg := interp.values[inst.Operands[0]]
 				coord := interp.values[inst.Operands[1]]
 				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, interp.parseImageOperands(inst.Operands[2:]))
+			}
+
+		case OpImageSampleDrefImplicitLod, OpImageSampleDrefExplicitLod:
+			// OpImageSampleDref*Lod: type resultID sampledImage coordinate Dref [ImageOperands...]
+			// The implicit form takes λ_base = 0 plus the Bias operand, as
+			// OpImageSampleImplicitLod does.
+			if len(inst.Operands) >= 3 {
+				ops := interp.parseImageOperands(inst.Operands[3:])
+				if inst.Opcode == OpImageSampleDrefImplicitLod {
+					ops.lod, ops.hasGrad = 0, false
+				}
+				ref := toFloat32(interp.values[inst.Operands[2]])
+				interp.values[inst.ResultID] = interp.sampleCompare(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], ref, ops)
+			}
+
+		case OpImageGather, OpImageDrefGather:
+			// OpImageGather: type resultID sampledImage coordinate component [ImageOperands...]
+			// OpImageDrefGather: type resultID sampledImage coordinate Dref [ImageOperands...]
+			// A gather of an integer texture gives an integer vector.
+			if len(inst.Operands) >= 3 {
+				ops := interp.parseImageOperands(inst.Operands[3:])
+				g := interp.gather(inst.Opcode, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], interp.values[inst.Operands[2]], ops)
+				interp.values[inst.ResultID] = texelResult(inst.resShape, g)
 			}
 
 		case OpImageFetch:
@@ -1889,27 +1940,32 @@ func (interp *interpreter) resolveSampler(val Value) *Sampler {
 // operands ops: the level of detail is ops.lod (or the one ops' derivatives
 // give) plus ops.bias.
 func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, ops imageOperands) Value {
+	tex, samp, ok := interp.sampledResources(sampledImg)
+	if !ok {
+		return ValVec4(1, 0, 1, 1) // Magenta for a missing texture.
+	}
+	c := texelComponents(coord)
+	return ValVec4From(sampleView(tex, samp, c, ops.lambda(tex, c), ops.offset))
+}
+
+// sampledResources resolves the texture and sampler of a sampled image; ok
+// is false when the value is not a sampled image or its texture is missing.
+// An unbound sampler reads as the default one: nearest, repeat, no LOD
+// clamp.
+func (interp *interpreter) sampledResources(sampledImg Value) (*Texture2D, *Sampler, bool) {
 	if sampledImg.Tag != TagSampledImage {
-		return ValVec4(1, 0, 1, 1) // Magenta for error.
+		return nil, nil, false
 	}
 	si := sampledImg.AsSampledImage()
-
 	tex := interp.resolveTexture(si.Image)
 	if tex == nil || tex.Width == 0 || tex.Height == 0 || len(tex.Data) == 0 {
-		return ValVec4(1, 0, 1, 1) // Magenta for missing texture.
+		return nil, nil, false
 	}
-
 	samp := interp.resolveSampler(si.Sampler)
 	if samp == nil {
-		samp = &Sampler{LodMaxClamp: LodClampNone} // Default: nearest, repeat, no LOD clamp.
+		samp = &Sampler{LodMaxClamp: LodClampNone}
 	}
-
-	c := texelComponents(coord)
-	lambda := ops.lod
-	if ops.hasGrad {
-		lambda = gradLod(tex, c, ops.dx, ops.dy)
-	}
-	return ValVec4From(sampleView(tex, samp, c, lambda+ops.bias, ops.offset))
+	return tex, samp, true
 }
 
 // fetchTexel fetches a single texel of the view's base level by integer

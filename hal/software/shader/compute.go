@@ -420,16 +420,6 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 	storeWord := func(w uint32) { interp.storeThrough(pv, scalarOfKind(k, w)) }
 
 	switch inst.Opcode {
-	case OpAtomicIAdd:
-		if len(inst.Operands) >= 4 {
-			addVal := toUint32(interp.values[inst.Operands[3]])
-			storeWord(oldVal + addVal)
-		}
-	case OpAtomicISub:
-		if len(inst.Operands) >= 4 {
-			subVal := toUint32(interp.values[inst.Operands[3]])
-			storeWord(oldVal - subVal)
-		}
 	case OpAtomicExchange:
 		if len(inst.Operands) >= 4 {
 			store(interp.values[inst.Operands[3]])
@@ -441,36 +431,6 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			comparator := toUint32(interp.values[inst.Operands[5]])
 			if oldVal == comparator {
 				storeWord(newVal)
-			}
-		}
-	case OpAtomicSMin:
-		if len(inst.Operands) >= 4 {
-			v := int32(toUint32(interp.values[inst.Operands[3]]))
-			old := int32(oldVal)
-			if v < old {
-				storeWord(uint32(v))
-			}
-		}
-	case OpAtomicUMin:
-		if len(inst.Operands) >= 4 {
-			v := toUint32(interp.values[inst.Operands[3]])
-			if v < oldVal {
-				storeWord(v)
-			}
-		}
-	case OpAtomicSMax:
-		if len(inst.Operands) >= 4 {
-			v := int32(toUint32(interp.values[inst.Operands[3]]))
-			old := int32(oldVal)
-			if v > old {
-				storeWord(uint32(v))
-			}
-		}
-	case OpAtomicUMax:
-		if len(inst.Operands) >= 4 {
-			v := toUint32(interp.values[inst.Operands[3]])
-			if v > oldVal {
-				storeWord(v)
 			}
 		}
 	case OpAtomicIIncrement:
@@ -485,9 +445,44 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			store(interp.values[inst.Operands[3]])
 		}
 		return Value{}
+	default:
+		// Operands: pointer, scope, semantics, value.
+		if len(inst.Operands) >= 4 {
+			if w, ok := atomicCombine(inst.Opcode, oldVal, toUint32(interp.values[inst.Operands[3]])); ok {
+				storeWord(w)
+			}
+		}
 	}
 
 	return scalarOfKind(k, oldVal)
+}
+
+// atomicCombine returns the word an atomic read-modify-write op of two
+// operands stores, from the original word old and the operand v; ok is false
+// for any other opcode. The min and max ops store the original word again
+// when it already is the minimum or maximum, which changes nothing.
+func atomicCombine(opcode uint16, old, v uint32) (uint32, bool) {
+	switch opcode {
+	case OpAtomicIAdd:
+		return old + v, true
+	case OpAtomicISub:
+		return old - v, true
+	case OpAtomicSMin:
+		return uint32(min(int32(old), int32(v))), true
+	case OpAtomicUMin:
+		return min(old, v), true
+	case OpAtomicSMax:
+		return uint32(max(int32(old), int32(v))), true
+	case OpAtomicUMax:
+		return max(old, v), true
+	case OpAtomicAnd:
+		return old & v, true
+	case OpAtomicOr:
+		return old | v, true
+	case OpAtomicXor:
+		return old ^ v, true
+	}
+	return old, false
 }
 
 // atomicLoad reads the 32-bit integer an atomic op's pointer points at. An

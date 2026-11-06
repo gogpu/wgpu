@@ -247,7 +247,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = u32(r.x); dst[1] = u32(r.y);
 }`,
 			src: []uint32{1, 0, 0, 1, 2, 3}, dstLen: 2, want: []uint32{2, 3}, step: 6,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "uvec2_swizzle_add",
@@ -332,7 +331,7 @@ func TestTypedValuesWrongToday(t *testing.T) {
 }
 
 // TestTypedValuesAtomics covers the atomic read-modify-write builtins
-// (OpAtomicAnd, OpAtomicOr, OpAtomicXor are not executed today).
+// (OpAtomicAnd, OpAtomicOr, OpAtomicXor since step 6).
 func TestTypedValuesAtomics(t *testing.T) {
 	checkTypedCases(t, []typedCase{{
 		name: "atomic_and_or_xor",
@@ -349,7 +348,6 @@ func TestTypedValuesAtomics(t *testing.T) {
 }`,
 		src: []uint32{1, 6, 0x80000001}, dstLen: 4,
 		want: []uint32{7, 0, 7, 0x80000001}, step: 6,
-		wrongToday: []uint32{1, 1, 1, 0x80000001},
 	}})
 }
 
