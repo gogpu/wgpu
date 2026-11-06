@@ -146,6 +146,63 @@ const (
 	MTLPixelFormatDepth32FloatStencil8 MTLPixelFormat = 260
 	MTLPixelFormatX32Stencil8          MTLPixelFormat = 261
 	MTLPixelFormatX24Stencil8          MTLPixelFormat = 262
+
+	// Block-compressed formats. Values from metal-rs v0.33.0
+	// src/constants.rs (MTLPixelFormat), which mirrors Apple's
+	// MTLPixelFormat.h. The ASTC HDR formats are left out: gputypes has no
+	// ASTC HDR texture format to map onto them.
+	MTLPixelFormatBC1RGBA          MTLPixelFormat = 130
+	MTLPixelFormatBC1RGBASRGB      MTLPixelFormat = 131
+	MTLPixelFormatBC2RGBA          MTLPixelFormat = 132
+	MTLPixelFormatBC2RGBASRGB      MTLPixelFormat = 133
+	MTLPixelFormatBC3RGBA          MTLPixelFormat = 134
+	MTLPixelFormatBC3RGBASRGB      MTLPixelFormat = 135
+	MTLPixelFormatBC4RUnorm        MTLPixelFormat = 140
+	MTLPixelFormatBC4RSnorm        MTLPixelFormat = 141
+	MTLPixelFormatBC5RGUnorm       MTLPixelFormat = 142
+	MTLPixelFormatBC5RGSnorm       MTLPixelFormat = 143
+	MTLPixelFormatBC6HRGBFloat     MTLPixelFormat = 150
+	MTLPixelFormatBC6HRGBUfloat    MTLPixelFormat = 151
+	MTLPixelFormatBC7RGBAUnorm     MTLPixelFormat = 152
+	MTLPixelFormatBC7RGBAUnormSRGB MTLPixelFormat = 153
+	MTLPixelFormatEACR11Unorm      MTLPixelFormat = 170
+	MTLPixelFormatEACR11Snorm      MTLPixelFormat = 172
+	MTLPixelFormatEACRG11Unorm     MTLPixelFormat = 174
+	MTLPixelFormatEACRG11Snorm     MTLPixelFormat = 176
+	MTLPixelFormatEACRGBA8         MTLPixelFormat = 178
+	MTLPixelFormatEACRGBA8SRGB     MTLPixelFormat = 179
+	MTLPixelFormatETC2RGB8         MTLPixelFormat = 180
+	MTLPixelFormatETC2RGB8SRGB     MTLPixelFormat = 181
+	MTLPixelFormatETC2RGB8A1       MTLPixelFormat = 182
+	MTLPixelFormatETC2RGB8A1SRGB   MTLPixelFormat = 183
+	MTLPixelFormatASTC4x4SRGB      MTLPixelFormat = 186
+	MTLPixelFormatASTC5x4SRGB      MTLPixelFormat = 187
+	MTLPixelFormatASTC5x5SRGB      MTLPixelFormat = 188
+	MTLPixelFormatASTC6x5SRGB      MTLPixelFormat = 189
+	MTLPixelFormatASTC6x6SRGB      MTLPixelFormat = 190
+	MTLPixelFormatASTC8x5SRGB      MTLPixelFormat = 192
+	MTLPixelFormatASTC8x6SRGB      MTLPixelFormat = 193
+	MTLPixelFormatASTC8x8SRGB      MTLPixelFormat = 194
+	MTLPixelFormatASTC10x5SRGB     MTLPixelFormat = 195
+	MTLPixelFormatASTC10x6SRGB     MTLPixelFormat = 196
+	MTLPixelFormatASTC10x8SRGB     MTLPixelFormat = 197
+	MTLPixelFormatASTC10x10SRGB    MTLPixelFormat = 198
+	MTLPixelFormatASTC12x10SRGB    MTLPixelFormat = 199
+	MTLPixelFormatASTC12x12SRGB    MTLPixelFormat = 200
+	MTLPixelFormatASTC4x4LDR       MTLPixelFormat = 204
+	MTLPixelFormatASTC5x4LDR       MTLPixelFormat = 205
+	MTLPixelFormatASTC5x5LDR       MTLPixelFormat = 206
+	MTLPixelFormatASTC6x5LDR       MTLPixelFormat = 207
+	MTLPixelFormatASTC6x6LDR       MTLPixelFormat = 208
+	MTLPixelFormatASTC8x5LDR       MTLPixelFormat = 210
+	MTLPixelFormatASTC8x6LDR       MTLPixelFormat = 211
+	MTLPixelFormatASTC8x8LDR       MTLPixelFormat = 212
+	MTLPixelFormatASTC10x5LDR      MTLPixelFormat = 213
+	MTLPixelFormatASTC10x6LDR      MTLPixelFormat = 214
+	MTLPixelFormatASTC10x8LDR      MTLPixelFormat = 215
+	MTLPixelFormatASTC10x10LDR     MTLPixelFormat = 216
+	MTLPixelFormatASTC12x10LDR     MTLPixelFormat = 217
+	MTLPixelFormatASTC12x12LDR     MTLPixelFormat = 218
 )
 
 // MTLResourceOptions represents resource storage and cache options.
