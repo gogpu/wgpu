@@ -123,6 +123,114 @@ func TestTextureFormatToMTL(t *testing.T) {
 	}
 }
 
+// TestCompressedTextureFormatToMTL checks every block-compressed row against
+// the raw MTLPixelFormat value, typed here from metal-rs v0.33.0
+// src/constants.rs rather than through the package constants, so a wrong
+// constant fails the test as well as a wrong row. The pairing follows Rust
+// wgpu-hal src/metal/adapter.rs map_format (ETC2 RGBA8 is Metal's EAC_RGBA8).
+func TestCompressedTextureFormatToMTL(t *testing.T) {
+	tests := []struct {
+		format gputypes.TextureFormat
+		want   MTLPixelFormat
+	}{
+		{gputypes.TextureFormatBC1RGBAUnorm, 130},
+		{gputypes.TextureFormatBC1RGBAUnormSrgb, 131},
+		{gputypes.TextureFormatBC2RGBAUnorm, 132},
+		{gputypes.TextureFormatBC2RGBAUnormSrgb, 133},
+		{gputypes.TextureFormatBC3RGBAUnorm, 134},
+		{gputypes.TextureFormatBC3RGBAUnormSrgb, 135},
+		{gputypes.TextureFormatBC4RUnorm, 140},
+		{gputypes.TextureFormatBC4RSnorm, 141},
+		{gputypes.TextureFormatBC5RGUnorm, 142},
+		{gputypes.TextureFormatBC5RGSnorm, 143},
+		{gputypes.TextureFormatBC6HRGBFloat, 150},
+		{gputypes.TextureFormatBC6HRGBUfloat, 151},
+		{gputypes.TextureFormatBC7RGBAUnorm, 152},
+		{gputypes.TextureFormatBC7RGBAUnormSrgb, 153},
+		{gputypes.TextureFormatEACR11Unorm, 170},
+		{gputypes.TextureFormatEACR11Snorm, 172},
+		{gputypes.TextureFormatEACRG11Unorm, 174},
+		{gputypes.TextureFormatEACRG11Snorm, 176},
+		{gputypes.TextureFormatETC2RGBA8Unorm, 178},
+		{gputypes.TextureFormatETC2RGBA8UnormSrgb, 179},
+		{gputypes.TextureFormatETC2RGB8Unorm, 180},
+		{gputypes.TextureFormatETC2RGB8UnormSrgb, 181},
+		{gputypes.TextureFormatETC2RGB8A1Unorm, 182},
+		{gputypes.TextureFormatETC2RGB8A1UnormSrgb, 183},
+		{gputypes.TextureFormatASTC4x4UnormSrgb, 186},
+		{gputypes.TextureFormatASTC5x4UnormSrgb, 187},
+		{gputypes.TextureFormatASTC5x5UnormSrgb, 188},
+		{gputypes.TextureFormatASTC6x5UnormSrgb, 189},
+		{gputypes.TextureFormatASTC6x6UnormSrgb, 190},
+		{gputypes.TextureFormatASTC8x5UnormSrgb, 192},
+		{gputypes.TextureFormatASTC8x6UnormSrgb, 193},
+		{gputypes.TextureFormatASTC8x8UnormSrgb, 194},
+		{gputypes.TextureFormatASTC10x5UnormSrgb, 195},
+		{gputypes.TextureFormatASTC10x6UnormSrgb, 196},
+		{gputypes.TextureFormatASTC10x8UnormSrgb, 197},
+		{gputypes.TextureFormatASTC10x10UnormSrgb, 198},
+		{gputypes.TextureFormatASTC12x10UnormSrgb, 199},
+		{gputypes.TextureFormatASTC12x12UnormSrgb, 200},
+		{gputypes.TextureFormatASTC4x4Unorm, 204},
+		{gputypes.TextureFormatASTC5x4Unorm, 205},
+		{gputypes.TextureFormatASTC5x5Unorm, 206},
+		{gputypes.TextureFormatASTC6x5Unorm, 207},
+		{gputypes.TextureFormatASTC6x6Unorm, 208},
+		{gputypes.TextureFormatASTC8x5Unorm, 210},
+		{gputypes.TextureFormatASTC8x6Unorm, 211},
+		{gputypes.TextureFormatASTC8x8Unorm, 212},
+		{gputypes.TextureFormatASTC10x5Unorm, 213},
+		{gputypes.TextureFormatASTC10x6Unorm, 214},
+		{gputypes.TextureFormatASTC10x8Unorm, 215},
+		{gputypes.TextureFormatASTC10x10Unorm, 216},
+		{gputypes.TextureFormatASTC12x10Unorm, 217},
+		{gputypes.TextureFormatASTC12x12Unorm, 218},
+	}
+	for _, tt := range tests {
+		if got := textureFormatToMTL(tt.format); got != tt.want {
+			t.Errorf("textureFormatToMTL(%s) = %d, want %d", tt.format, got, tt.want)
+		}
+	}
+	// Every compressed format gputypes knows must have a row: the table above
+	// and gputypes' own list must not drift apart. gputypes numbers the BC,
+	// ETC2/EAC and ASTC formats as one contiguous run.
+	seen := make(map[gputypes.TextureFormat]bool, len(tests))
+	for _, tt := range tests {
+		seen[tt.format] = true
+	}
+	for format := gputypes.TextureFormatBC1RGBAUnorm; format <= gputypes.TextureFormatASTC12x12UnormSrgb; format++ {
+		if format.IsCompressed() && !seen[format] {
+			t.Errorf("compressed format %s has no row in this table", format)
+		}
+	}
+}
+
+// TestAdapterFeatureFormatsMap checks that every format of a compression
+// feature the adapter offers has a Metal pixel format: an offered feature
+// whose format maps to Invalid fails CreateTexture on every device.
+func TestAdapterFeatureFormatsMap(t *testing.T) {
+	features := adapterFeatures()
+	families := []struct {
+		feature gputypes.Feature
+		first   gputypes.TextureFormat
+		last    gputypes.TextureFormat
+	}{
+		{gputypes.FeatureTextureCompressionBC, gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureFormatBC7RGBAUnormSrgb},
+		{gputypes.FeatureTextureCompressionETC2, gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureFormatEACRG11Snorm},
+		{gputypes.FeatureTextureCompressionASTC, gputypes.TextureFormatASTC4x4Unorm, gputypes.TextureFormatASTC12x12UnormSrgb},
+	}
+	for _, family := range families {
+		if !features.Contains(family.feature) {
+			continue
+		}
+		for format := family.first; format <= family.last; format++ {
+			if textureFormatToMTL(format) == MTLPixelFormatInvalid {
+				t.Errorf("adapter offers %v but %s has no Metal pixel format", family.feature, format)
+			}
+		}
+	}
+}
+
 // TestTextureUsageToMTL tests texture usage flag conversions.
 func TestTextureUsageToMTL(t *testing.T) {
 	tests := []struct {

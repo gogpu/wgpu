@@ -97,6 +97,132 @@ func textureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
 	case gputypes.TextureFormatStencil8:
 		return MTLPixelFormatStencil8
 	default:
+		return compressedTextureFormatToMTL(format)
+	}
+}
+
+// compressedTextureFormatToMTL maps the block-compressed formats, as Rust
+// wgpu-hal src/metal/adapter.rs map_format does. Whether the device can sample
+// a format is the adapter's feature list, not this table: a format whose
+// feature the adapter does not offer is refused by core before it reaches the
+// HAL.
+func compressedTextureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
+	switch format {
+	case gputypes.TextureFormatBC1RGBAUnorm:
+		return MTLPixelFormatBC1RGBA
+	case gputypes.TextureFormatBC1RGBAUnormSrgb:
+		return MTLPixelFormatBC1RGBASRGB
+	case gputypes.TextureFormatBC2RGBAUnorm:
+		return MTLPixelFormatBC2RGBA
+	case gputypes.TextureFormatBC2RGBAUnormSrgb:
+		return MTLPixelFormatBC2RGBASRGB
+	case gputypes.TextureFormatBC3RGBAUnorm:
+		return MTLPixelFormatBC3RGBA
+	case gputypes.TextureFormatBC3RGBAUnormSrgb:
+		return MTLPixelFormatBC3RGBASRGB
+	case gputypes.TextureFormatBC4RUnorm:
+		return MTLPixelFormatBC4RUnorm
+	case gputypes.TextureFormatBC4RSnorm:
+		return MTLPixelFormatBC4RSnorm
+	case gputypes.TextureFormatBC5RGUnorm:
+		return MTLPixelFormatBC5RGUnorm
+	case gputypes.TextureFormatBC5RGSnorm:
+		return MTLPixelFormatBC5RGSnorm
+	case gputypes.TextureFormatBC6HRGBUfloat:
+		return MTLPixelFormatBC6HRGBUfloat
+	case gputypes.TextureFormatBC6HRGBFloat:
+		return MTLPixelFormatBC6HRGBFloat
+	case gputypes.TextureFormatBC7RGBAUnorm:
+		return MTLPixelFormatBC7RGBAUnorm
+	case gputypes.TextureFormatBC7RGBAUnormSrgb:
+		return MTLPixelFormatBC7RGBAUnormSRGB
+	case gputypes.TextureFormatETC2RGB8Unorm:
+		return MTLPixelFormatETC2RGB8
+	case gputypes.TextureFormatETC2RGB8UnormSrgb:
+		return MTLPixelFormatETC2RGB8SRGB
+	case gputypes.TextureFormatETC2RGB8A1Unorm:
+		return MTLPixelFormatETC2RGB8A1
+	case gputypes.TextureFormatETC2RGB8A1UnormSrgb:
+		return MTLPixelFormatETC2RGB8A1SRGB
+	case gputypes.TextureFormatETC2RGBA8Unorm:
+		return MTLPixelFormatEACRGBA8
+	case gputypes.TextureFormatETC2RGBA8UnormSrgb:
+		return MTLPixelFormatEACRGBA8SRGB
+	case gputypes.TextureFormatEACR11Unorm:
+		return MTLPixelFormatEACR11Unorm
+	case gputypes.TextureFormatEACR11Snorm:
+		return MTLPixelFormatEACR11Snorm
+	case gputypes.TextureFormatEACRG11Unorm:
+		return MTLPixelFormatEACRG11Unorm
+	case gputypes.TextureFormatEACRG11Snorm:
+		return MTLPixelFormatEACRG11Snorm
+	default:
+		return astcTextureFormatToMTL(format)
+	}
+}
+
+// astcTextureFormatToMTL maps the ASTC LDR formats: gputypes Unorm is Metal's
+// LDR variant and UnormSrgb its sRGB one (Rust wgpu-hal map_format,
+// AstcChannel::Unorm and AstcChannel::UnormSrgb).
+func astcTextureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
+	switch format {
+	case gputypes.TextureFormatASTC4x4Unorm:
+		return MTLPixelFormatASTC4x4LDR
+	case gputypes.TextureFormatASTC4x4UnormSrgb:
+		return MTLPixelFormatASTC4x4SRGB
+	case gputypes.TextureFormatASTC5x4Unorm:
+		return MTLPixelFormatASTC5x4LDR
+	case gputypes.TextureFormatASTC5x4UnormSrgb:
+		return MTLPixelFormatASTC5x4SRGB
+	case gputypes.TextureFormatASTC5x5Unorm:
+		return MTLPixelFormatASTC5x5LDR
+	case gputypes.TextureFormatASTC5x5UnormSrgb:
+		return MTLPixelFormatASTC5x5SRGB
+	case gputypes.TextureFormatASTC6x5Unorm:
+		return MTLPixelFormatASTC6x5LDR
+	case gputypes.TextureFormatASTC6x5UnormSrgb:
+		return MTLPixelFormatASTC6x5SRGB
+	case gputypes.TextureFormatASTC6x6Unorm:
+		return MTLPixelFormatASTC6x6LDR
+	case gputypes.TextureFormatASTC6x6UnormSrgb:
+		return MTLPixelFormatASTC6x6SRGB
+	case gputypes.TextureFormatASTC8x5Unorm:
+		return MTLPixelFormatASTC8x5LDR
+	case gputypes.TextureFormatASTC8x5UnormSrgb:
+		return MTLPixelFormatASTC8x5SRGB
+	case gputypes.TextureFormatASTC8x6Unorm:
+		return MTLPixelFormatASTC8x6LDR
+	case gputypes.TextureFormatASTC8x6UnormSrgb:
+		return MTLPixelFormatASTC8x6SRGB
+	case gputypes.TextureFormatASTC8x8Unorm:
+		return MTLPixelFormatASTC8x8LDR
+	case gputypes.TextureFormatASTC8x8UnormSrgb:
+		return MTLPixelFormatASTC8x8SRGB
+	case gputypes.TextureFormatASTC10x5Unorm:
+		return MTLPixelFormatASTC10x5LDR
+	case gputypes.TextureFormatASTC10x5UnormSrgb:
+		return MTLPixelFormatASTC10x5SRGB
+	case gputypes.TextureFormatASTC10x6Unorm:
+		return MTLPixelFormatASTC10x6LDR
+	case gputypes.TextureFormatASTC10x6UnormSrgb:
+		return MTLPixelFormatASTC10x6SRGB
+	case gputypes.TextureFormatASTC10x8Unorm:
+		return MTLPixelFormatASTC10x8LDR
+	case gputypes.TextureFormatASTC10x8UnormSrgb:
+		return MTLPixelFormatASTC10x8SRGB
+	case gputypes.TextureFormatASTC10x10Unorm:
+		return MTLPixelFormatASTC10x10LDR
+	case gputypes.TextureFormatASTC10x10UnormSrgb:
+		return MTLPixelFormatASTC10x10SRGB
+	case gputypes.TextureFormatASTC12x10Unorm:
+		return MTLPixelFormatASTC12x10LDR
+	case gputypes.TextureFormatASTC12x10UnormSrgb:
+		return MTLPixelFormatASTC12x10SRGB
+	case gputypes.TextureFormatASTC12x12Unorm:
+		return MTLPixelFormatASTC12x12LDR
+	case gputypes.TextureFormatASTC12x12UnormSrgb:
+		return MTLPixelFormatASTC12x12SRGB
+	default:
 		return MTLPixelFormatInvalid
 	}
 }
