@@ -183,6 +183,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 			srcOrigin:    [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
 			copySize:     [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
 			mipLevel:     region.TextureBase.MipLevel,
+			aspect:       region.TextureBase.Aspect,
 			dstOffset:    region.BufferLayout.Offset,
 			bytesPerRow:  region.BufferLayout.BytesPerRow,
 			rowsPerImage: region.BufferLayout.RowsPerImage,
@@ -1275,6 +1276,9 @@ func (c *ClearStencilCommand) Execute(ctx *gl.Context) {
 	ctx.Disable(gl.SCISSOR_TEST)
 	// Ensure stencil write mask allows the clear to take effect.
 	ctx.StencilMaskSeparate(gl.FRONT_AND_BACK, 0xFF)
+	// Without glClearStencil every stencil clear wrote the context's
+	// default clear value 0, whatever StencilClearValue the pass gave.
+	ctx.ClearStencil(c.stencil)
 	ctx.Clear(gl.STENCIL_BUFFER_BIT)
 }
 
@@ -1933,16 +1937,69 @@ func (c *DispatchIndirectCommand) Execute(ctx *gl.Context) {
 // CPU-side data slice. This is the standard GLES readback path since GLES lacks
 // glGetTexImage. The approach: bind texture FBO -> glReadPixels -> copy to buffer.
 type CopyTextureToBufferCommand struct {
-	glCtx       *gl.Context
-	srcTexture  *Texture
-	dstBuffer   *Buffer
-	srcOrigin   [3]uint32 // x, y, z
-	copySize    [3]uint32 // width, height, depthOrArrayLayers
-	mipLevel    uint32
+	glCtx      *gl.Context
+	srcTexture *Texture
+	dstBuffer  *Buffer
+	srcOrigin  [3]uint32 // x, y, z
+	copySize   [3]uint32 // width, height, depthOrArrayLayers
+	mipLevel   uint32
+	// aspect of the copy: the depth or the stencil of a combined format.
+	aspect      gputypes.TextureAspect
 	dstOffset   uint64
 	bytesPerRow uint32
 	// rowsPerImage of the destination layout; 0 means the copy's height.
 	rowsPerImage uint32
+}
+
+// readback is how glReadPixels reads one aspect of a texture: the
+// framebuffer attachment the texture goes to, the pixel transfer format and
+// type, and the bytes of one texel in the buffer.
+type readback struct {
+	attachment, dataFormat, dataType, bpp uint32
+}
+
+// readbackOf returns how to read aspect of a texture of format, or false for
+// a format and aspect no buffer copy may read (core rejects them:
+// depth24plus and the depth of depth24plus-stencil8, whose layout WebGPU
+// leaves undefined).
+//
+// Color is read in the texture's own transfer format and type, as Rust
+// wgpu-hal does (gles/queue.rs CopyTextureToBuffer: format_desc.external,
+// data_type); a hard-coded GL_BGRA swapped R and B for RGBA8 textures.
+//
+// Depth and stencil are attached at their own attachment point and read as
+// DEPTH_COMPONENT or STENCIL_INDEX, in the buffer layout WebGPU gives the
+// aspect: depth16unorm as 16-bit unorm, depth32float as float, stencil as
+// stencil8. This deviates from Rust wgpu-hal, which attaches every format
+// to COLOR_ATTACHMENT0 (gles/queue.rs CopyTextureToBuffer), so a depth
+// texture leaves the framebuffer incomplete and its readback fails; Rust
+// never reports DEPTH_TEXTURE_AND_BUFFER_COPIES on GLES, so the path is not
+// reached there. We report the flag on desktop GL, where glReadPixels reads
+// depth and stencil, and leave it off on ES, so core refuses these copies.
+func readbackOf(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (readback, bool) {
+	stencil := readback{gl.STENCIL_ATTACHMENT, gl.STENCIL_INDEX, gl.UNSIGNED_BYTE, 1}
+	switch format {
+	case gputypes.TextureFormatStencil8:
+		return stencil, true
+	case gputypes.TextureFormatDepth16Unorm:
+		return readback{gl.DEPTH_ATTACHMENT, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, 2}, true
+	case gputypes.TextureFormatDepth32Float:
+		return readback{gl.DEPTH_ATTACHMENT, gl.DEPTH_COMPONENT, gl.FLOAT, 4}, true
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		stencil.attachment = gl.DEPTH_STENCIL_ATTACHMENT
+		switch {
+		case aspect == gputypes.TextureAspectStencilOnly:
+			return stencil, true
+		case aspect == gputypes.TextureAspectDepthOnly && format == gputypes.TextureFormatDepth32FloatStencil8:
+			return readback{gl.DEPTH_STENCIL_ATTACHMENT, gl.DEPTH_COMPONENT, gl.FLOAT, 4}, true
+		}
+		return readback{}, false
+	case gputypes.TextureFormatDepth24Plus:
+		return readback{}, false
+	}
+	_, dataFormat, dataType := textureFormatToGL(format)
+	bpp := glPixelBytes(dataFormat, dataType)
+	return readback{gl.COLOR_ATTACHMENT0, dataFormat, dataType, bpp}, bpp != 0
 }
 
 // Execute reads pixels from the source texture's FBO into the destination buffer.
@@ -1953,15 +2010,13 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 
-	// Read in the texture's own pixel transfer format and type, as Rust
-	// wgpu-hal does (gles/queue.rs CopyTextureToBuffer: format_desc.external,
-	// data_type). A hard-coded GL_BGRA swapped R and B for RGBA8 textures.
-	_, dataFormat, dataType := textureFormatToGL(c.srcTexture.format)
-	bpp := glPixelBytes(dataFormat, dataType)
-	if bpp == 0 {
-		return // depth/stencil: no color read path (DepthTextureAndBufferCopies is not reported)
+	rb, ok := readbackOf(c.srcTexture.format, c.aspect)
+	if !ok {
+		hal.Logger().Error("gles: CopyTextureToBuffer of a format and aspect no copy may read",
+			"format", c.srcTexture.format, "aspect", c.aspect)
+		return
 	}
-	rowBytes := uint32(width) * bpp
+	rowBytes := uint32(width) * rb.bpp
 
 	// Rows land at the caller's bytesPerRow (WebGPU requires a multiple of 256
 	// for multi-row copies); writing them tightly packed sheared the image.
@@ -1998,7 +2053,7 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	var prevFBO int32
 	ctx.GetIntegerv(gl.FRAMEBUFFER_BINDING, &prevFBO)
 
-	if !c.bindSourceFBO(ctx, c.srcOrigin[2]) {
+	if !c.bindSourceFBO(ctx, rb.attachment, c.srcOrigin[2]) {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, uint32(prevFBO))
 		return
 	}
@@ -2009,12 +2064,12 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	tmpBuf := make([]byte, uint64(rowBytes)*uint64(height))
 	for i := uint32(0); i < layers; i++ {
 		if i > 0 {
-			attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, c.srcOrigin[2]+i)
+			attachColorLayer(ctx, rb.attachment, c.srcTexture, c.mipLevel, c.srcOrigin[2]+i)
 		}
 		ctx.ReadPixels(
 			int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
 			width, height,
-			dataFormat, dataType,
+			rb.dataFormat, rb.dataType,
 			unsafe.Pointer(&tmpBuf[0]),
 		)
 		// Copy the rows in memory order. Shaders are compiled with naga's
@@ -2034,21 +2089,22 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 }
 
 // bindSourceFBO binds the source texture's FBO, created lazily, with the
-// copy's mip level (and, for a 3D or 2D array texture, layer) attached as
-// COLOR_ATTACHMENT0. The FBO serves every view and copy of the texture, so the
-// level and layer are attached every time, as Rust wgpu-hal attaches them for
-// each copy (gles/queue.rs CopyTextureToBuffer). Reading level 0 and layer 0
-// for every copy returned their texels for a copy of another level or layer.
-// It returns false when a new FBO is incomplete.
-func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, layer uint32) bool {
+// copy's mip level (and, for a 3D or 2D array texture, layer) attached at
+// attachment: COLOR_ATTACHMENT0, or the depth/stencil point of a depth or
+// stencil texture (readbackOf). The FBO serves every view and copy of the
+// texture, so the level and layer are attached every time, as Rust wgpu-hal
+// attaches them for each copy (gles/queue.rs CopyTextureToBuffer). Reading
+// level 0 and layer 0 for every copy returned their texels for a copy of
+// another level or layer. It returns false when a new FBO is incomplete.
+func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, attachment, layer uint32) bool {
 	if c.srcTexture.fbo != 0 {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.srcTexture.fbo)
-		attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
+		attachColorLayer(ctx, attachment, c.srcTexture, c.mipLevel, layer)
 		return true
 	}
 	fbo := ctx.GenFramebuffers(1)
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-	attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
+	attachColorLayer(ctx, attachment, c.srcTexture, c.mipLevel, layer)
 	if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
 		ctx.DeleteFramebuffers(fbo)
 		return false

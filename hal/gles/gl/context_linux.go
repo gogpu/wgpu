@@ -546,6 +546,7 @@ type Context struct {
 	glClear        unsafe.Pointer
 	glClearColor   unsafe.Pointer
 	glClearDepth   unsafe.Pointer
+	glClearStencil unsafe.Pointer
 	glViewport     unsafe.Pointer
 	glScissor      unsafe.Pointer
 	glDrawArrays   unsafe.Pointer
@@ -743,6 +744,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glDisable = getProcAddr("glDisable")
 	c.glClear = getProcAddr("glClear")
 	c.glClearColor = getProcAddr("glClearColor")
+	c.glClearStencil = getProcAddr("glClearStencil")
 	// The float entry point, as Rust's glow calls (clear_depth_f32): GLES,
 	// and desktop GL 4.1 / ARB_ES2_compatibility. Older desktop GL has only
 	// glClearDepth, which takes a double.
@@ -1063,6 +1065,12 @@ func (c *Context) ClearDepth(depth float64) {
 	d := float32(depth)
 	args := [1]unsafe.Pointer{unsafe.Pointer(&d)}
 	_, _ = ffi.CallFunction(&cifVoid1Float, c.glClearDepth, nil, args[:])
+}
+
+// ClearStencil sets the stencil value used by glClear(GL_STENCIL_BUFFER_BIT).
+func (c *Context) ClearStencil(s int32) {
+	args := [1]unsafe.Pointer{unsafe.Pointer(&s)}
+	_, _ = ffi.CallFunction(&cifVoid1, c.glClearStencil, nil, args[:])
 }
 
 // DepthRange sets the mapping of NDC depth to window depth, through

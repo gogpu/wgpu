@@ -53,7 +53,7 @@ func TestMappableBufferCreationAtEveryStackDepth(t *testing.T) {
 		t.Fatalf("overrideBackends[0] = %q, want vulkan", vulkan.name)
 	}
 	t.Run(vulkan.name, func(t *testing.T) {
-		device := openOverrideDevice(t, vulkan, 0)
+		device, _ := openBackendDevice(t, vulkan, 0, gputypes.PowerPreferenceLowPower)
 		const size = 33 << 20
 		for depth := 0; depth < ffiPointerDepths; depth++ {
 			var (
