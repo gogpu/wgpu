@@ -13,8 +13,8 @@ import (
 )
 
 // The tests in this package that read results back run on every enumerated
-// DX12 adapter and on WARP, the software D3D12 device that ships with every
-// Windows (d3d10warp.dll). WARP executes command lists on many CPU threads
+// DX12 adapter, WARP included: the software D3D12 device that ships with every
+// Windows (d3d10warp.dll), listed as an adapter of DeviceTypeCPU. WARP executes command lists on many CPU threads
 // and checks descriptor types strictly, so it shows missing barriers and
 // wrong descriptor kinds that a hardware driver tolerates; it is also the
 // only DX12 adapter of a machine without a GPU, such as a CI runner.
@@ -27,7 +27,7 @@ type dx12TestDevice struct {
 }
 
 // forEachDX12TestDevice runs fn on a device of every enumerated DX12 adapter
-// and on WARP, once per shader path (HLSL through FXC, and naga DXIL).
+// (WARP included), once per shader path (HLSL through FXC, and naga DXIL).
 func forEachDX12TestDevice(t *testing.T, fn func(t *testing.T, d dx12TestDevice)) {
 	t.Helper()
 	if testing.Short() {
@@ -41,19 +41,12 @@ func forEachDX12TestDevice(t *testing.T, fn func(t *testing.T, d dx12TestDevice)
 	}
 }
 
-// forEachDX12Adapter runs fn on a device of every enumerated DX12 adapter and
-// on WARP, for tests that do not compile shaders.
+// forEachDX12Adapter runs fn on a device of every enumerated DX12 adapter,
+// WARP included, for tests that do not compile shaders.
 func forEachDX12Adapter(t *testing.T, fn func(t *testing.T, d dx12TestDevice)) {
 	t.Helper()
-	raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
-	if err != nil {
-		t.Fatalf("CreateInstance: %v", err)
-	}
-	t.Cleanup(raw.Destroy)
-	instance := raw.(*Instance)
-
-	adapters := instance.EnumerateAdapters(nil)
-	adapters = append(adapters, openWARPAdapter(t, instance))
+	adapters := enumerateDX12TestAdapters(t)
+	requireWARP(t, adapters)
 	for i := range adapters {
 		a := &adapters[i]
 		t.Run(a.Info.Name, func(t *testing.T) {
@@ -72,12 +65,8 @@ func forEachDX12Adapter(t *testing.T, fn func(t *testing.T, d dx12TestDevice)) {
 // depend on the adapter.
 func openWARPDevice(t *testing.T) (hal.Device, hal.Queue) {
 	t.Helper()
-	raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
-	if err != nil {
-		t.Fatalf("CreateInstance: %v", err)
-	}
-	t.Cleanup(raw.Destroy)
-	a := openWARPAdapter(t, raw.(*Instance))
+	adapters := enumerateDX12TestAdapters(t)
+	a := &adapters[requireWARP(t, adapters)]
 	open, err := a.Adapter.Open(0, a.Capabilities.Limits)
 	if err != nil {
 		t.Fatalf("Open(WARP): %v", err)
@@ -86,25 +75,34 @@ func openWARPDevice(t *testing.T) (hal.Device, hal.Queue) {
 	return open.Device, open.Queue
 }
 
-// openWARPAdapter returns the WARP adapter of the instance, which
-// EnumerateAdapters leaves out. It fails the test when WARP is missing:
-// Windows 10 and later always ship it.
-func openWARPAdapter(t *testing.T, instance *Instance) hal.ExposedAdapter {
+// enumerateDX12TestAdapters returns the adapters of a new DX12 instance; the
+// instance and the adapters are released when the test ends.
+func enumerateDX12TestAdapters(t *testing.T) []hal.ExposedAdapter {
 	t.Helper()
-	raw, err := instance.factory.EnumWarpAdapter()
+	raw, err := Backend{}.CreateInstance(&hal.InstanceDescriptor{Backends: gputypes.BackendsDX12})
 	if err != nil {
-		t.Fatalf("EnumWarpAdapter: %v", err)
+		t.Fatalf("CreateInstance: %v", err)
 	}
-	desc, err := raw.GetDesc1()
-	if err != nil {
-		raw.Release()
-		t.Fatalf("WARP GetDesc1: %v", err)
+	t.Cleanup(raw.Destroy)
+	adapters := raw.(*Instance).EnumerateAdapters(nil)
+	t.Cleanup(func() {
+		for i := range adapters {
+			adapters[i].Adapter.Destroy()
+		}
+	})
+	return adapters
+}
+
+// requireWARP returns the index of WARP, the adapter of DeviceTypeCPU, in
+// adapters. It fails the test when WARP is missing: Windows 10 and later
+// always ship it, and EnumerateAdapters lists it.
+func requireWARP(t *testing.T, adapters []hal.ExposedAdapter) int {
+	t.Helper()
+	for i := range adapters {
+		if adapters[i].Info.DeviceType == gputypes.DeviceTypeCPU {
+			return i
+		}
 	}
-	adapter := &Adapter{raw: raw, desc: desc, instance: instance}
-	if err := adapter.probeCapabilities(); err != nil {
-		raw.Release()
-		t.Fatalf("WARP probeCapabilities: %v", err)
-	}
-	t.Cleanup(adapter.Destroy)
-	return adapter.toExposedAdapter()
+	t.Fatal("EnumerateAdapters did not list WARP")
+	return -1
 }

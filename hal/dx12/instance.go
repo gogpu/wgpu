@@ -188,9 +188,9 @@ func (i *Instance) CreateSurface(target hal.SurfaceTarget) (hal.Surface, error) 
 	}, nil
 }
 
-// EnumerateAdapters enumerates available physical GPUs.
-// Adapters are sorted by preference: discrete GPUs first, then integrated,
-// then others. Software adapters (WARP) are excluded unless explicitly requested.
+// EnumerateAdapters enumerates the DXGI adapters in GPU preference order
+// (high performance first). WARP is listed as an adapter of DeviceTypeCPU,
+// as in Rust wgpu-hal; shouldKeepAdapter has the filter.
 func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
 	var adapters []hal.ExposedAdapter
 
@@ -214,8 +214,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			continue
 		}
 
-		// Skip software adapters unless debugging
-		if desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
+		if !shouldKeepAdapter(&desc) {
 			raw.Release()
 			continue
 		}
@@ -268,8 +267,7 @@ func (i *Instance) enumerateAdaptersLegacy(surfaceHint hal.Surface) []hal.Expose
 			continue
 		}
 
-		// Skip software adapters
-		if desc.Flags&dxgi.DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
+		if !shouldKeepAdapter(&desc) {
 			raw.Release()
 			continue
 		}
