@@ -350,6 +350,19 @@ func (d *DepthStencilState) toHAL() *hal.DepthStencilState {
 	}
 }
 
+// resolveDepthCompare gives the HAL CompareFunctionAlways for a depthCompare
+// the descriptor left undefined. GPUDepthStencilState.depthCompare has no
+// default: core validation, which runs first, rejects its absence where the
+// spec requires it, and elsewhere the spec's "compare fragment" algorithm
+// passes every fragment for an undefined compare, which is "always"
+// (index.bs). The backends take the value literally: DX12 mapped Undefined to
+// NEVER and drew nothing. Rust wgpu-hal does ds.depth_compare.unwrap_or_default().
+func resolveDepthCompare(ds *hal.DepthStencilState) {
+	if ds != nil && ds.DepthCompare == gputypes.CompareFunctionUndefined {
+		ds.DepthCompare = gputypes.CompareFunctionAlways
+	}
+}
+
 // RenderPipelineDescriptor describes a render pipeline.
 type RenderPipelineDescriptor struct {
 	Label        string
@@ -375,13 +388,15 @@ type FragmentState struct {
 	Targets    []gputypes.ColorTargetState
 }
 
-// toHAL converts a RenderPipelineDescriptor to a hal.RenderPipelineDescriptor.
+// toHAL converts a RenderPipelineDescriptor to a hal.RenderPipelineDescriptor,
+// with the WebGPU defaults applied to zero stencil faces and blend components
+// (pipeline_defaults.go). The caller's descriptor is not modified.
 func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 	halDesc := &hal.RenderPipelineDescriptor{
 		Label:        d.Label,
 		Primitive:    d.Primitive,
 		Multisample:  d.Multisample,
-		DepthStencil: d.DepthStencil.toHAL(),
+		DepthStencil: normalizeDepthStencilState(d.DepthStencil).toHAL(),
 	}
 
 	if d.Layout != nil {
@@ -400,7 +415,7 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		halDesc.Fragment = &hal.FragmentState{
 			Module:     d.Fragment.Module.hal,
 			EntryPoint: d.Fragment.EntryPoint,
-			Targets:    d.Fragment.Targets,
+			Targets:    normalizeColorTargets(d.Fragment.Targets),
 		}
 	}
 

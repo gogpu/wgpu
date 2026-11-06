@@ -379,9 +379,66 @@ func hasStencilAspect(f gputypes.TextureFormat) bool {
 // isDepthEnabled returns true if depth testing is enabled on the depth/stencil state.
 // Matches Rust wgpu-types DepthStencilState::is_depth_enabled():
 //
-//	depth_compare != Always || depth_write_enabled
+//	depth_compare.unwrap_or_default() != Always || depth_write_enabled
+//
+// An absent depthCompare (CompareFunctionUndefined) counts as Always: the spec
+// "compare fragment" algorithm passes every fragment when it is undefined.
 func isDepthEnabled(ds *hal.DepthStencilState) bool {
-	return ds.DepthCompare != gputypes.CompareFunctionAlways || ds.DepthWriteEnabled
+	compare := ds.DepthCompare
+	if compare == gputypes.CompareFunctionUndefined {
+		compare = gputypes.CompareFunctionAlways
+	}
+	return compare != gputypes.CompareFunctionAlways || ds.DepthWriteEnabled
+}
+
+// depthCompareRequired reports whether a depth/stencil state on a format with
+// a depth aspect must provide depthCompare (WebGPU spec, validating
+// GPUDepthStencilState; Rust wgpu-core depth_compare_required): depth writes
+// are enabled or a face's depthFailOp is not keep. An undefined depthFailOp
+// is the spec default keep.
+func depthCompareRequired(ds *hal.DepthStencilState) bool {
+	changesOnDepthFail := func(op gputypes.StencilOperation) bool {
+		return op != gputypes.StencilOperationUndefined && op != hal.StencilOperationKeep
+	}
+	return ds.DepthWriteEnabled ||
+		changesOnDepthFail(ds.StencilFront.DepthFailOp) ||
+		changesOnDepthFail(ds.StencilBack.DepthFailOp)
+}
+
+// validateDepthStencilState checks a pipeline's depth/stencil state in the
+// order of Rust wgpu-core (device/resource.rs, create_render_pipeline):
+// format kind, depth aspect, depthCompare presence, stencil aspect.
+func validateDepthStencilState(ds *hal.DepthStencilState, label string) error {
+	dsErr := func(kind CreateRenderPipelineErrorKind) error {
+		return &CreateRenderPipelineError{Kind: kind, Label: label, Format: ds.Format.String()}
+	}
+
+	// RP9: the format must be a depth/stencil format (not color).
+	// Rust: FormatNotDepthOrStencil.
+	if ds.Format != gputypes.TextureFormatUndefined && !isDepthStencilFormat(ds.Format) {
+		return dsErr(CreateRenderPipelineErrorDepthStencilColorFormat)
+	}
+
+	// RP9b: if depth operations are enabled, the format must have a depth
+	// aspect. Rust: ds.is_depth_enabled() && !aspect.contains(DEPTH).
+	hasDepth := hasDepthAspect(ds.Format)
+	if !hasDepth && isDepthEnabled(ds) {
+		return dsErr(CreateRenderPipelineErrorDepthFormatNoDepthAspect)
+	}
+
+	// RP9d: with a depth aspect, depthCompare must be provided when it is
+	// used. Rust: MissingDepthCompare. depthWriteEnabled is a bool here, so
+	// the spec's "must be provided" for it cannot be checked.
+	if hasDepth && ds.DepthCompare == gputypes.CompareFunctionUndefined && depthCompareRequired(ds) {
+		return dsErr(CreateRenderPipelineErrorMissingDepthCompare)
+	}
+
+	// RP9c: if stencil operations are enabled, the format must have a
+	// stencil aspect. Rust: ds.stencil.is_enabled() && !aspect.contains(STENCIL).
+	if isStencilEnabled(ds) && !hasStencilAspect(ds.Format) {
+		return dsErr(CreateRenderPipelineErrorDepthFormatNoStencilAspect)
+	}
+	return nil
 }
 
 // stencilFaceIgnored returns true if the stencil face state is the "ignore" state
@@ -454,36 +511,10 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 		}
 	}
 
-	// RP9: Depth/stencil format must be a depth/stencil format (not color).
-	// Rust: resource.rs:4144-4165 — FormatNotDepth / FormatNotStencil
+	// RP9: depth/stencil state (format kind, aspects, depthCompare).
 	if desc.DepthStencil != nil {
-		if desc.DepthStencil.Format != gputypes.TextureFormatUndefined && !isDepthStencilFormat(desc.DepthStencil.Format) {
-			return &CreateRenderPipelineError{
-				Kind:   CreateRenderPipelineErrorDepthStencilColorFormat,
-				Label:  label,
-				Format: desc.DepthStencil.Format.String(),
-			}
-		}
-
-		// RP9b: If depth operations are enabled, format must have a depth aspect.
-		// Rust: resource.rs:4158 — ds.is_depth_enabled() && !aspect.contains(DEPTH)
-		// is_depth_enabled: depth_compare != Always || depth_write_enabled
-		if isDepthEnabled(desc.DepthStencil) && !hasDepthAspect(desc.DepthStencil.Format) {
-			return &CreateRenderPipelineError{
-				Kind:   CreateRenderPipelineErrorDepthFormatNoDepthAspect,
-				Label:  label,
-				Format: desc.DepthStencil.Format.String(),
-			}
-		}
-
-		// RP9c: If stencil operations are enabled, format must have a stencil aspect.
-		// Rust: resource.rs:4161 — ds.stencil.is_enabled() && !aspect.contains(STENCIL)
-		if isStencilEnabled(desc.DepthStencil) && !hasStencilAspect(desc.DepthStencil.Format) {
-			return &CreateRenderPipelineError{
-				Kind:   CreateRenderPipelineErrorDepthFormatNoStencilAspect,
-				Label:  label,
-				Format: desc.DepthStencil.Format.String(),
-			}
+		if err := validateDepthStencilState(desc.DepthStencil, label); err != nil {
+			return err
 		}
 	}
 
