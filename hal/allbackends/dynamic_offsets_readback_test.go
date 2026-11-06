@@ -503,8 +503,7 @@ func openDebugBackendDevice(t *testing.T, b overrideBackend, required gputypes.D
 	}
 	t.Cleanup(adapter.Release)
 	info := adapter.Info()
-	isCPU := info.DeviceType == gputypes.DeviceTypeCPU
-	if b.software != isCPU || (!b.software && info.Backend != b.backend) {
+	if !isOverrideTarget(b, info) {
 		t.Skipf("no %s adapter (got %s, backend %v)", b.name, info.Name, info.Backend)
 	}
 	if missing := required &^ adapter.DownlevelCapabilities().Flags; missing != 0 {
