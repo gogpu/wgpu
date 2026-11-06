@@ -2,8 +2,9 @@
 
 // Compute shader execution for the SPIR-V interpreter.
 //
-// Executes a compute entry point for a single invocation within a workgroup.
-// The caller is responsible for iterating over all invocations in the dispatch.
+// DispatchCompute runs a whole dispatch: the invocations of each workgroup
+// share its workgroup memory and synchronize at workgroup barriers.
+// ExecuteCompute runs one invocation on its own.
 
 package shader
 
@@ -19,27 +20,50 @@ import (
 // WorkgroupID, NumWorkgroups, WorkgroupSize, LocalInvocationIndex) populated
 // by the caller for each invocation.
 //
-// Storage buffer writes are reflected in the context's Buffers map.
+// Storage buffer writes are reflected in the context's Buffers map. A
+// workgroup variable lives in its WorkgroupSharedMemory buffer when the
+// context has one of the variable's size, and in zeroed memory of its own
+// otherwise. The invocation runs alone, so it does not wait at a barrier:
+// use DispatchCompute to run the invocations of a workgroup together.
 func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error {
 	if ctx == nil {
 		ctx = &ExecutionContext{}
 	}
+	ep, fn, err := m.computeEntryPoint(entryPoint)
+	if err != nil {
+		return err
+	}
+	interp := m.startCompute(ep, fn, ctx)
+	if err := interp.run(); err != nil {
+		m.release(interp)
+		return err
+	}
+	interp.writeStorageBufferBack()
+	m.putInterpreter(interp)
+	return nil
+}
 
+// computeEntryPoint returns the compute entry point named entryPoint and its
+// function.
+func (m *Module) computeEntryPoint(entryPoint string) (*EntryPoint, *Function, error) {
 	ep, ok := m.EntryPoints[entryPoint]
 	if !ok {
-		return fmt.Errorf("spirv: entry point %q not found", entryPoint)
+		return nil, nil, fmt.Errorf("spirv: entry point %q not found", entryPoint)
 	}
 	if ep.ExecutionModel != ExecutionModelGLCompute {
-		return fmt.Errorf("spirv: entry point %q is not a compute shader (model=%d)",
+		return nil, nil, fmt.Errorf("spirv: entry point %q is not a compute shader (model=%d)",
 			entryPoint, ep.ExecutionModel)
 	}
-
 	fn, ok := m.Functions[entryPoint]
 	if !ok {
-		return fmt.Errorf("spirv: function body for %q not found", entryPoint)
+		return nil, nil, fmt.Errorf("spirv: function body for %q not found", entryPoint)
 	}
+	return ep, fn, nil
+}
 
-	// Acquire a pooled interpreter to avoid allocating per call.
+// startCompute returns a pooled interpreter set up to run one invocation of
+// the compute entry point ep (function fn) in ctx, not yet started.
+func (m *Module) startCompute(ep *EntryPoint, fn *Function, ctx *ExecutionContext) *interpreter {
 	interp := m.getInterpreter()
 	interp.ep = ep
 	interp.fn = fn
@@ -50,30 +74,12 @@ func (m *Module) ExecuteCompute(entryPoint string, ctx *ExecutionContext) error 
 	interp.returnValue = Value{}
 
 	interp.seedConstants()
-
-	// Initialize compute built-in inputs.
 	interp.initComputeBuiltins()
-
-	// Initialize resource bindings (uniform, storage buffers).
 	interp.initResourceVariables()
-
-	// Initialize workgroup shared memory variables.
 	interp.initWorkgroupVariables()
-
 	// Private globals start from their initializer or zero.
 	interp.initPrivateVariables()
-
-	// Execute.
-	if err := interp.run(); err != nil {
-		m.putInterpreter(interp)
-		return err
-	}
-
-	// Write storage buffer changes back to the context's raw buffer data.
-	interp.writeStorageBufferBack()
-
-	m.putInterpreter(interp)
-	return nil
+	return interp
 }
 
 // GetWorkgroupSize returns the workgroup size declared via OpExecutionMode LocalSize.
@@ -135,31 +141,39 @@ func (interp *interpreter) initComputeBuiltins() {
 	}
 }
 
-// initWorkgroupVariables sets up Workgroup storage class variables using
-// shared memory from the execution context.
+// initWorkgroupVariables points the Workgroup storage class variables at
+// workgroup memory. Every invocation of a workgroup gets the same
+// BufferPointers into the same bytes, so a store by one is seen by the
+// others (WGSL: the workgroup address space is shared among the invocations
+// of a workgroup). The memory is the context's WorkgroupSharedMemory buffer
+// of the variable, or zeroed memory of the invocation's own if the context
+// has none of the variable's size.
 func (interp *interpreter) initWorkgroupVariables() {
 	m := interp.module
 	ctx := interp.ctx
-	if ctx == nil {
+	prep := m.prepared()
+	if ctx != nil && len(ctx.workgroupPtrs) == len(prep.workgroup) {
+		for i, varID := range prep.workgroup {
+			interp.values[varID] = ctx.workgroupPtrs[i]
+		}
 		return
 	}
-
-	for _, varID := range m.prepared().workgroup {
+	for _, varID := range prep.workgroup {
 		vi := m.Variables[varID]
-		if ctx.WorkgroupSharedMemory != nil {
-			if sharedBuf, ok := ctx.WorkgroupSharedMemory[varID]; ok {
-				// Read the shared memory into a structured value.
-				pointeeType := m.PointeeType(vi.TypeID)
-				if pointeeType != nil {
-					val := interp.readValueFromBuffer(sharedBuf, 0, pointeeType, 0)
-					interp.values[varID] = ValPointer(interp.allocPointer(val))
-					continue
-				}
-			}
+		pointee := m.PointeeType(vi.TypeID)
+		if pointee == nil {
+			interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
+			continue
 		}
-
-		// Default: zero-initialized.
-		interp.values[varID] = ValPointer(interp.allocPointer(zeroValueForVar(m, vi.TypeID)))
+		size := typeByteSize(m, pointee)
+		var buf []byte
+		if ctx != nil {
+			buf = ctx.WorkgroupSharedMemory[varID]
+		}
+		if uint32(len(buf)) < size {
+			buf = make([]byte, size)
+		}
+		interp.values[varID] = ValBufferPointer(&BufferPointer{Buffer: buf, Type: pointee})
 	}
 }
 
@@ -175,10 +189,18 @@ func uvec3ToValue(v [3]uint32) Value {
 // groupCountX/Y/Z specify the number of workgroups to dispatch.
 // The entry point's LocalSize execution mode determines the workgroup dimensions.
 //
-// This is a single-threaded execution: invocations run sequentially within each
-// workgroup. OpControlBarrier is a no-op since there is no true parallelism.
+// The workgroups run one after another, each with its own zero-initialized
+// workgroup memory, which all its invocations share. The invocations of a
+// workgroup run on one goroutine, round-robin from barrier to barrier: each
+// runs until it reaches a workgroup barrier (OpControlBarrier with Workgroup
+// execution scope) or returns, and the invocations at the barrier go on
+// past it only once all of them have run (see workgroupRun).
 func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 	groupCountX, groupCountY, groupCountZ uint32) error {
+	ep, fn, err := m.computeEntryPoint(entryPoint)
+	if err != nil {
+		return err
+	}
 	wgSize := m.GetWorkgroupSize(entryPoint)
 
 	ctx.NumWorkgroups = [3]uint32{groupCountX, groupCountY, groupCountZ}
@@ -188,58 +210,173 @@ func (m *Module) DispatchCompute(entryPoint string, ctx *ExecutionContext,
 	if ctx.resolved == nil {
 		ctx.resolved = &resolvedResources{}
 	}
+	if uint64(wgSize[0])*uint64(wgSize[1])*uint64(wgSize[2]) == 0 ||
+		uint64(groupCountX)*uint64(groupCountY)*uint64(groupCountZ) == 0 {
+		return nil
+	}
 
+	wg := m.newWorkgroupRun(ep, fn, ctx, wgSize)
 	for wgZ := uint32(0); wgZ < groupCountZ; wgZ++ {
 		for wgY := uint32(0); wgY < groupCountY; wgY++ {
 			for wgX := uint32(0); wgX < groupCountX; wgX++ {
-				// Allocate shared memory for this workgroup.
-				sharedMem := m.allocateWorkgroupMemory()
-
-				// Execute all invocations in the workgroup sequentially.
-				for lz := uint32(0); lz < wgSize[2]; lz++ {
-					for ly := uint32(0); ly < wgSize[1]; ly++ {
-						for lx := uint32(0); lx < wgSize[0]; lx++ {
-							invCtx := *ctx // Copy context for this invocation.
-							invCtx.WorkgroupID = [3]uint32{wgX, wgY, wgZ}
-							invCtx.LocalInvocationID = [3]uint32{lx, ly, lz}
-							invCtx.GlobalInvocationID = [3]uint32{
-								wgX*wgSize[0] + lx,
-								wgY*wgSize[1] + ly,
-								wgZ*wgSize[2] + lz,
-							}
-							invCtx.LocalInvocationIndex = lz*wgSize[0]*wgSize[1] + ly*wgSize[0] + lx
-							invCtx.WorkgroupSharedMemory = sharedMem
-
-							if err := m.ExecuteCompute(entryPoint, &invCtx); err != nil {
-								return fmt.Errorf("spirv: compute invocation (%d,%d,%d) in workgroup (%d,%d,%d): %w",
-									lx, ly, lz, wgX, wgY, wgZ, err)
-							}
-						}
-					}
+				if err := wg.run([3]uint32{wgX, wgY, wgZ}); err != nil {
+					return err
 				}
 			}
 		}
 	}
-
 	return nil
 }
 
-// allocateWorkgroupMemory creates zero-initialized shared memory buffers
-// for all Workgroup storage class variables.
-func (m *Module) allocateWorkgroupMemory() map[uint32][]byte {
-	shared := make(map[uint32][]byte)
-	for _, varID := range m.prepared().workgroup {
-		vi := m.Variables[varID]
-		pointeeType := m.PointeeType(vi.TypeID)
-		if pointeeType == nil {
-			continue
+// workgroupRun runs the workgroups of one dispatch, one at a time. What it
+// holds is reused by every workgroup: the workgroup memory (cleared before
+// each), the invocations' contexts and the list of running invocations.
+type workgroupRun struct {
+	module *Module
+	ep     *EntryPoint
+	fn     *Function
+	base   *ExecutionContext
+	size   [3]uint32
+	mem    *workgroupMemory
+	ctxs   []ExecutionContext // ctxs[i] is the context of invocation i
+	live   []*interpreter     // the invocations not finished yet
+}
+
+// newWorkgroupRun prepares to run workgroups of size invocations of the
+// entry point ep (function fn) in the dispatch context base.
+func (m *Module) newWorkgroupRun(ep *EntryPoint, fn *Function, base *ExecutionContext, size [3]uint32) *workgroupRun {
+	n := size[0] * size[1] * size[2]
+	return &workgroupRun{
+		module: m,
+		ep:     ep,
+		fn:     fn,
+		base:   base,
+		size:   size,
+		mem:    m.newWorkgroupMemory(),
+		ctxs:   make([]ExecutionContext, n),
+		live:   make([]*interpreter, 0, n),
+	}
+}
+
+// run runs workgroup id to completion. Each pass of the loop runs every
+// unfinished invocation up to its next barrier (or its end), so when a pass
+// is over, every invocation has made the workgroup memory writes it makes
+// before that barrier, and the next pass releases them all past it.
+//
+// WGSL requires a workgroupBarrier in uniform control flow, so all of a
+// workgroup's invocations reach the same barriers. If they do not (SPIR-V
+// that breaks the rule), an invocation waits only for those still running,
+// as no GPU defines either.
+func (wg *workgroupRun) run(id [3]uint32) error {
+	m := wg.module
+	clear(wg.mem.bytes)
+	sx, sy := wg.size[0], wg.size[1]
+	syncBarriers := len(wg.ctxs) > 1
+	for i := range wg.ctxs {
+		local := [3]uint32{uint32(i) % sx, uint32(i) / sx % sy, uint32(i) / (sx * sy)}
+		c := &wg.ctxs[i]
+		*c = *wg.base
+		c.WorkgroupID = id
+		c.LocalInvocationID = local
+		c.GlobalInvocationID = [3]uint32{id[0]*sx + local[0], id[1]*sy + local[1], id[2]*wg.size[2] + local[2]}
+		c.LocalInvocationIndex = uint32(i)
+		c.WorkgroupSharedMemory = wg.mem.byVar
+		c.workgroupPtrs = wg.mem.ptrs
+		interp := m.startCompute(wg.ep, wg.fn, c)
+		interp.syncBarriers = syncBarriers
+		wg.live = append(wg.live, interp)
+	}
+
+	for len(wg.live) > 0 {
+		next := wg.live[:0]
+		for j, interp := range wg.live {
+			if err := interp.run(); err != nil {
+				c := interp.ctx
+				m.release(interp)
+				wg.abandon(next, wg.live[j+1:])
+				return fmt.Errorf("spirv: compute invocation (%d,%d,%d) in workgroup (%d,%d,%d): %w",
+					c.LocalInvocationID[0], c.LocalInvocationID[1], c.LocalInvocationID[2],
+					id[0], id[1], id[2], err)
+			}
+			if interp.suspended {
+				next = append(next, interp)
+				continue
+			}
+			interp.writeStorageBufferBack()
+			m.putInterpreter(interp)
 		}
-		size := typeByteSize(m, pointeeType)
-		if size > 0 {
-			shared[varID] = make([]byte, size)
+		clear(wg.live[len(next):])
+		wg.live = next
+	}
+	return nil
+}
+
+// abandon returns the invocations still waiting at a barrier to the pool
+// after another one failed, and empties the list of running invocations.
+func (wg *workgroupRun) abandon(lists ...[]*interpreter) {
+	for _, list := range lists {
+		for _, interp := range list {
+			wg.module.release(interp)
 		}
 	}
-	return shared
+	clear(wg.live[:cap(wg.live)])
+	wg.live = wg.live[:0]
+}
+
+// workgroupMemory is the memory of the Workgroup variables of one workgroup:
+// one zeroed byte buffer holding them all, each variable's part of it, and a
+// BufferPointer to each part, in the order of modulePrep.workgroup, that
+// every invocation of the workgroup uses as the variable's pointer.
+type workgroupMemory struct {
+	bytes []byte
+	byVar map[uint32][]byte
+	ptrs  []Value
+}
+
+// workgroupVarAlign is the alignment of each variable in workgroupMemory.
+const workgroupVarAlign = 16
+
+// newWorkgroupMemory allocates zeroed memory for the module's Workgroup
+// variables.
+func (m *Module) newWorkgroupMemory() *workgroupMemory {
+	vars := m.prepared().workgroup
+	offsets := make([]uint32, len(vars))
+	sizes := make([]uint32, len(vars))
+	var total uint32
+	for i, varID := range vars {
+		pointee := m.PointeeType(m.Variables[varID].TypeID)
+		if pointee == nil {
+			continue
+		}
+		total = (total + workgroupVarAlign - 1) / workgroupVarAlign * workgroupVarAlign
+		offsets[i] = total
+		sizes[i] = typeByteSize(m, pointee)
+		total += sizes[i]
+	}
+	wm := &workgroupMemory{
+		bytes: make([]byte, total),
+		byVar: make(map[uint32][]byte, len(vars)),
+		ptrs:  make([]Value, len(vars)),
+	}
+	for i, varID := range vars {
+		vi := m.Variables[varID]
+		pointee := m.PointeeType(vi.TypeID)
+		if pointee == nil {
+			// Not a pointer type: nothing to lay out. Shared like the rest.
+			wm.ptrs[i] = ValPointer(&Pointer{Val: zeroValueForVar(m, vi.TypeID)})
+			continue
+		}
+		part := wm.bytes[offsets[i] : offsets[i]+sizes[i] : offsets[i]+sizes[i]]
+		wm.byVar[varID] = part
+		wm.ptrs[i] = ValBufferPointer(&BufferPointer{Buffer: part, Type: pointee})
+	}
+	return wm
+}
+
+// allocateWorkgroupMemory creates zero-initialized shared memory buffers
+// for all Workgroup storage class variables, by variable ID.
+func (m *Module) allocateWorkgroupMemory() map[uint32][]byte {
+	return m.newWorkgroupMemory().byVar
 }
 
 // =============================================================================

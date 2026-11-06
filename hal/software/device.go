@@ -23,13 +23,13 @@ import (
 // naga for the SPIR-V interpreter to execute them.
 var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SPIR-V shader (WGSL compilation may have failed)")
 
-// ErrWorkgroupBarrierUnsupported is returned by CreateComputePipeline for a
-// compute shader that has both workgroup memory and a control barrier. The
-// interpreter runs the invocations of a workgroup one after another and does
-// not share workgroup memory between them, so such a shader (a tree
-// reduction, a shared tile) would compute wrong results; it is refused
-// instead until the backend implements workgroup memory (P1-SW-025). It is
-// hal.ErrWorkgroupBarrierUnsupported, which the wgpu package re-exports.
+// ErrWorkgroupBarrierUnsupported is no longer returned since v0.34.8 and is
+// kept for compatibility. v0.34.7 returned it from CreateComputePipeline for
+// a compute shader sharing workgroup memory across a control barrier; since
+// v0.34.8 the interpreter shares workgroup memory among the invocations of
+// a workgroup and synchronizes them at barriers, so such shaders run
+// (P1-SW-025). It is hal.ErrWorkgroupBarrierUnsupported, which the wgpu
+// package re-exports.
 var ErrWorkgroupBarrierUnsupported = hal.ErrWorkgroupBarrierUnsupported
 
 // Device implements hal.Device for the software backend.
@@ -362,9 +362,6 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 	}
 	if module == nil {
 		return nil, ErrComputeRequiresSPIRV
-	}
-	if module.SharesWorkgroupMemoryAcrossBarrier(desc.Compute.EntryPoint) {
-		return nil, ErrWorkgroupBarrierUnsupported
 	}
 	return &ComputePipeline{
 		desc:       desc,

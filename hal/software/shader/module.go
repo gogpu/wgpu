@@ -12,6 +12,7 @@ package shader
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 )
 
@@ -587,6 +588,7 @@ func ParseModule(words []uint32) (*Module, error) {
 			ti.ArrayStride = m.Decorations[decorationKey{TargetID: id, Decoration: DecorationArrayStride}]
 		}
 	}
+	m.layOutUndecoratedStructs()
 
 	// Pre-build label indexes for all functions. This avoids rebuilding
 	// the label map on every Execute call (saves one map alloc per call).
@@ -637,44 +639,103 @@ func (m *Module) MayDiscard() bool {
 	return false
 }
 
-// SharesWorkgroupMemoryAcrossBarrier reports whether the invocations of a
-// workgroup of entryPoint may exchange data through workgroup memory: the
-// workgroup has more than one invocation and the module has both a Workgroup
-// variable and an OpControlBarrier. The interpreter does not share workgroup
-// memory between invocations and cannot honor a barrier (it runs each
-// invocation to completion), so such a shader computes wrong results. A
-// one-invocation workgroup shares nothing, whatever its barriers (naga emits
-// one after zero-initializing workgroup memory). Conservative like
-// MayDiscard: no reachability or per-access analysis.
-func (m *Module) SharesWorkgroupMemoryAcrossBarrier(entryPoint string) bool {
-	if size := m.GetWorkgroupSize(entryPoint); size[0]*size[1]*size[2] <= 1 {
-		return false
-	}
-	hasWorkgroup := false
-	for _, vi := range m.Variables {
-		if vi.StorageClass == StorageClassWorkgroup {
-			hasWorkgroup = true
-			break
+// layOutUndecoratedStructs gives the members of every struct type without
+// Offset decorations an Offset, so the struct can live in a byte buffer.
+// Such a struct is a Workgroup type: SPIR-V forbids explicit layout there,
+// and naga emits a separate layout-free type for it. Its byte layout is the
+// interpreter's own business (no host ever sees workgroup memory), so the
+// members are packed in order at their natural alignment; what matters is
+// that they do not overlap and that typeByteSize, readValueFromBuffer,
+// writeValueToBufferTyped and bufferAccessChain agree, which they do by all
+// reading the same Offset decorations. Arrays need nothing: arrayStride
+// already packs an undecorated array at its element size.
+func (m *Module) layOutUndecoratedStructs() {
+	ids := make([]uint32, 0, len(m.Types))
+	for id, ti := range m.Types {
+		if ti.Kind == TypeStruct {
+			ids = append(ids, id)
 		}
 	}
-	if !hasWorkgroup {
-		return false
+	slices.Sort(ids)
+	done := make(map[uint32]bool, len(ids))
+	for _, id := range ids {
+		m.layOutStruct(id, done)
 	}
-	for _, fn := range m.FunctionsByID {
-		for i := range fn.Instructions {
-			if fn.Instructions[i].Opcode == OpControlBarrier {
-				return true
+}
+
+// layOutStruct lays out struct id after the structs it contains (see
+// layOutUndecoratedStructs). done marks the structs already handled.
+func (m *Module) layOutStruct(id uint32, done map[uint32]bool) {
+	if done[id] {
+		return
+	}
+	done[id] = true
+	ti := m.Types[id]
+	for _, memberID := range ti.MemberIDs {
+		if nested := innermostStruct(m, memberID); nested != 0 {
+			m.layOutStruct(nested, done)
+		}
+	}
+	for i := range ti.MemberIDs {
+		if _, ok := m.MemberDecorations[memberDecorationKey{StructTypeID: id, MemberIndex: uint32(i), Decoration: DecorationOffset}]; ok {
+			return // explicitly laid out
+		}
+	}
+	var offset uint32
+	for i, memberID := range ti.MemberIDs {
+		member := m.Types[memberID]
+		if member == nil {
+			return
+		}
+		align := typeAlignment(m, member)
+		offset = (offset + align - 1) / align * align
+		m.MemberDecorations[memberDecorationKey{StructTypeID: id, MemberIndex: uint32(i), Decoration: DecorationOffset}] = offset
+		offset += typeByteSize(m, member)
+	}
+}
+
+// innermostStruct returns the ID of the struct type typeID is or holds
+// through arrays, matrices and vectors, or 0 if there is none.
+func innermostStruct(m *Module, typeID uint32) uint32 {
+	for depth := 0; depth < 16; depth++ {
+		ti := m.Types[typeID]
+		if ti == nil {
+			return 0
+		}
+		switch ti.Kind {
+		case TypeStruct:
+			return typeID
+		case TypeArray, TypeMatrix, TypeVector:
+			typeID = ti.ElemType
+		default:
+			return 0
+		}
+	}
+	return 0
+}
+
+// typeAlignment is the natural alignment of ti for layOutStruct: the size
+// of its scalars, at least one byte.
+func typeAlignment(m *Module, ti *TypeInfo) uint32 {
+	for depth := 0; depth < 16 && ti != nil; depth++ {
+		switch ti.Kind {
+		case TypeFloat, TypeInt:
+			return max(ti.Width/8, 1)
+		case TypeArray, TypeMatrix, TypeVector:
+			ti = m.Types[ti.ElemType]
+		case TypeStruct:
+			var align uint32 = 1
+			for _, memberID := range ti.MemberIDs {
+				if member := m.Types[memberID]; member != nil {
+					align = max(align, typeAlignment(m, member))
+				}
 			}
+			return align
+		default:
+			return 4 // bool and the rest are 32-bit words
 		}
 	}
-	for _, fn := range m.Functions {
-		for i := range fn.Instructions {
-			if fn.Instructions[i].Opcode == OpControlBarrier {
-				return true
-			}
-		}
-	}
-	return false
+	return 4
 }
 
 // GetLocation returns the Location decoration value for a variable ID, or -1 if none.

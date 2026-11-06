@@ -6,12 +6,10 @@
 package allbackends_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
 )
 
 // WebGPU zero-initializes workgroup memory unless a compute stage opts out.
@@ -52,18 +50,6 @@ fn read(@builtin(local_invocation_index) i: u32, @builtin(workgroup_id) w: vec3<
 
 func TestWorkgroupMemoryZeroInitialized(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		// Keyed on the HAL, not on the requested CPU fallback: that adapter can be
-		// a Vulkan CPU device (llvmpipe/lavapipe on Linux), which computes it.
-		if _, sw := device.HalDevice().(*software.Device); sw {
-			// The dirty pass exchanges data through workgroup memory across a
-			// barrier: refused rather than computed wrong (P1-SW-025).
-			_, layout, shader := newWorkgroupZeroResources(t, device)
-			_, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
-				Layout: layout, Module: shader, EntryPoint: wgZeroDirtyEntry,
-			})
-			requireWorkgroupBarrierRefused(t, err)
-			return
-		}
 		got := runWorkgroupZero(t, device, wgZeroGroups, nil)
 		for i, w := range got {
 			if w != 0 {
@@ -106,17 +92,6 @@ func newWorkgroupZeroResources(t *testing.T, device *wgpu.Device) (*wgpu.BindGro
 	}
 	t.Cleanup(layout.Release)
 	return bgl, layout, shader
-}
-
-// requireWorkgroupBarrierRefused checks that the software backend refused a
-// compute pipeline whose workgroup invocations exchange data through
-// workgroup memory across a barrier (P1-SW-025): its interpreter would
-// compute wrong results.
-func requireWorkgroupBarrierRefused(t *testing.T, err error) {
-	t.Helper()
-	if !errors.Is(err, wgpu.ErrWorkgroupBarrierUnsupported) {
-		t.Fatalf("CreateComputePipeline error = %v, want wgpu.ErrWorkgroupBarrierUnsupported", err)
-	}
 }
 
 // runWorkgroupZero runs the dirty pass then the read pass over groups

@@ -829,14 +829,19 @@ func TestInitWorkgroupVariablesFromSharedMemory(t *testing.T) {
 	}
 	interp.initWorkgroupVariables()
 
-	ptr := interp.values[idVarID].AsPointer()
-	ok := ptr != nil
-	if !ok {
-		t.Fatalf("workgroup variable is %T, want *Pointer", interp.values[idVarID])
+	bp := interp.values[idVarID].AsBufferPointer()
+	if bp == nil {
+		t.Fatalf("workgroup variable is not a buffer pointer: %+v", interp.values[idVarID])
 	}
-	f := toFloat32(ptr.Val)
+	f := toFloat32(interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type, bp.MatrixStride))
 	if math.Abs(float64(f-42.0)) > 1e-5 {
 		t.Errorf("workgroup variable value = %v, want 42.0", f)
+	}
+	// The pointer aliases the shared bytes: a store by one invocation is what
+	// the other invocations of the workgroup read.
+	putFloat32LE(sharedBuf, 7.0)
+	if f := toFloat32(interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type, bp.MatrixStride)); f != 7.0 {
+		t.Errorf("after a write to the shared bytes the variable reads %v, want 7", f)
 	}
 }
 
@@ -871,12 +876,14 @@ func TestInitWorkgroupVariablesDefault(t *testing.T) {
 	}
 	interp.initWorkgroupVariables()
 
-	ptr := interp.values[idVarID].AsPointer()
-	ok := ptr != nil
-	if !ok {
-		t.Fatalf("workgroup variable is %T, want *Pointer", interp.values[idVarID])
+	bp := interp.values[idVarID].AsBufferPointer()
+	if bp == nil {
+		t.Fatalf("workgroup variable is not a buffer pointer: %+v", interp.values[idVarID])
 	}
-	f := toFloat32(ptr.Val)
+	if len(bp.Buffer) != 4 {
+		t.Errorf("default workgroup buffer is %d bytes, want 4", len(bp.Buffer))
+	}
+	f := toFloat32(interp.readValueFromBuffer(bp.Buffer, bp.Offset, bp.Type, bp.MatrixStride))
 	if f != 0 {
 		t.Errorf("default workgroup variable = %v, want 0", f)
 	}
