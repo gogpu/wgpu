@@ -594,10 +594,14 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 		vkUsage |= vk.ImageUsageFlags(vk.ImageUsageDepthStencilAttachmentBit)
 	}
 
-	// Determine depth/array layers
-	depth := desc.Size.DepthOrArrayLayers
-	if depth == 0 {
-		depth = 1
+	// DepthOrArrayLayers is the depth of a 3D image and the layer count of a
+	// 1D or 2D one, whose extent.depth must be 1 (VUID-VkImageCreateInfo-
+	// imageType-00957; Rust wgpu-hal vulkan/device.rs create_texture). Using
+	// it as both the depth and the layer count failed every 2D array and cube
+	// texture.
+	depth := uint32(1)
+	if desc.Dimension == gputypes.TextureDimension3D && desc.Size.DepthOrArrayLayers != 0 {
+		depth = desc.Size.DepthOrArrayLayers
 	}
 	mipLevels := desc.MipLevelCount
 	if mipLevels == 0 {
