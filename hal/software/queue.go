@@ -52,8 +52,12 @@ func resolveTexture(t hal.Texture) *Texture {
 }
 
 // WriteTexture performs immediate texture writes with real data storage.
-// Respects dst.Origin (destination position), layout.BytesPerRow (source stride),
-// layout.Offset (source data offset), and size (region dimensions).
+// Respects dst.Origin (destination position; Z is the depth slice or array
+// layer), layout.BytesPerRow (source row stride), layout.RowsPerImage (source
+// layer stride in rows), layout.Offset (source data offset), and size (region
+// dimensions, every layer of size.DepthOrArrayLayers). The layout matches
+// CopyBufferToTexture; writing only layer 0 left the other layers of a 3D or
+// 2D array texture empty.
 func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	tex := resolveTexture(dst.Texture)
 	if tex == nil {
@@ -76,26 +80,28 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 		srcBytesPerRow = uint64(size.Width) * bytesPerPixel
 	}
 
+	srcRowsPerImage := uint64(layout.RowsPerImage)
+	if srcRowsPerImage == 0 {
+		srcRowsPerImage = uint64(size.Height)
+	}
+
 	dstBytesPerRow := uint64(tex.width) * bytesPerPixel
+	dstBytesPerImage := dstBytesPerRow * uint64(tex.height)
 	rowCopyBytes := uint64(size.Width) * bytesPerPixel
+	layers := max(size.DepthOrArrayLayers, 1)
 
 	tex.mu.Lock()
 	defer tex.mu.Unlock()
 
-	for row := uint32(0); row < size.Height; row++ {
-		srcStart := layout.Offset + uint64(row)*srcBytesPerRow
-		srcEnd := srcStart + rowCopyBytes
-		if srcEnd > uint64(len(data)) {
-			break
+	for z := uint32(0); z < layers; z++ {
+		for row := uint32(0); row < size.Height; row++ {
+			srcStart := layout.Offset + (uint64(z)*srcRowsPerImage+uint64(row))*srcBytesPerRow
+			dstStart := uint64(dst.Origin.Z+z)*dstBytesPerImage + uint64(dst.Origin.Y+row)*dstBytesPerRow + uint64(dst.Origin.X)*bytesPerPixel
+			if srcStart+rowCopyBytes > uint64(len(data)) || dstStart+rowCopyBytes > uint64(len(tex.data)) {
+				return nil
+			}
+			copy(tex.data[dstStart:dstStart+rowCopyBytes], data[srcStart:srcStart+rowCopyBytes])
 		}
-
-		dstStart := uint64(dst.Origin.Y+row)*dstBytesPerRow + uint64(dst.Origin.X)*bytesPerPixel
-		dstEnd := dstStart + rowCopyBytes
-		if dstEnd > uint64(len(tex.data)) {
-			break
-		}
-
-		copy(tex.data[dstStart:dstEnd], data[srcStart:srcEnd])
 	}
 
 	return nil
