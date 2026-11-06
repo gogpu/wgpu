@@ -132,10 +132,12 @@ func (s *extendedFeatureSupport) subgroupFeatures() gputypes.Features {
 	return result
 }
 
-// has2DViewsOf3D reports whether a 2D view of one depth slice of a 3D image
-// can be created (VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT), which rendering
-// into a depth slice needs: Vulkan 1.1 core or VK_KHR_maintenance1. Rust
-// wgpu-hal requires maintenance1 of every adapter (vulkan/adapter.rs).
+// has2DViewsOf3D reports whether the device has Vulkan 1.1 core or
+// VK_KHR_maintenance1. That gives 2D views of one depth slice of a 3D image
+// (VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT), which rendering into a depth
+// slice needs, and negative viewport heights, with which every pass flips Y.
+// EnumerateAdapters hides an adapter without it, as Rust wgpu-hal does
+// (vulkan/adapter.rs).
 func (s *extendedFeatureSupport) has2DViewsOf3D() bool {
 	return s.apiVersion >= vkMakeVersion(1, 1, 0) || s.extensions[extMaintenance1]
 }

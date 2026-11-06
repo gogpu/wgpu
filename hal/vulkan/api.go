@@ -232,6 +232,16 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			features:       features,
 			ext:            i.queryExtendedFeatures(device, &props, &features),
 		}
+		if !adapter.ext.has2DViewsOf3D() {
+			// Every pass flips Y with a negative viewport height, and
+			// rendering into a depth slice needs a 2D view of a 3D image:
+			// both are valid only with Vulkan 1.1 or VK_KHR_maintenance1.
+			// Rust wgpu-hal hides such adapters too (vulkan/adapter.rs).
+			hal.Logger().Info("vulkan: hiding adapter without Vulkan 1.1 or VK_KHR_maintenance1",
+				"name", deviceName,
+				"apiVersion", fmt.Sprintf("%d.%d.%d", vkVersionMajor(props.ApiVersion), vkVersionMinor(props.ApiVersion), vkVersionPatch(props.ApiVersion)))
+			continue
+		}
 
 		adapterForExpose := hal.Adapter(adapter)
 		var queueFamily *uint32

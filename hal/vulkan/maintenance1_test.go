@@ -10,9 +10,12 @@ import (
 	"testing"
 )
 
-// TestMaintenance1Support checks when a device can render into a depth slice
-// of a 3D image and which extension that needs: Vulkan 1.1 has 2D views of
-// 3D images in core, Vulkan 1.0 needs VK_KHR_maintenance1 enabled.
+// TestMaintenance1Support checks when a device has what maintenance1 gives
+// (2D views of a 3D image's depth slices, negative viewport heights) and
+// which extension that needs: Vulkan 1.1 has it in core, Vulkan 1.0 needs
+// VK_KHR_maintenance1 enabled. EnumerateAdapters hides an adapter for which
+// has2DViewsOf3D is false, so the vulkan-1.0 case is an adapter we never
+// expose.
 func TestMaintenance1Support(t *testing.T) {
 	tests := []struct {
 		name     string
