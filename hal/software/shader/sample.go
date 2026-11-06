@@ -573,14 +573,6 @@ func imageCoord3(coord Value) [3]int {
 		return [3]int{int(int32(coord.U[0])), int(int32(coord.U[1])), int(int32(coord.U[2]))}
 	case TagUVec2, TagUVec3, TagUVec4:
 		return [3]int{int(coord.U[0]), int(coord.U[1]), int(coord.U[2])}
-	case TagArray:
-		var xyz [3]int
-		for i, e := range coord.AsArray() {
-			if i < len(xyz) {
-				xyz[i] = scalarInt(e)
-			}
-		}
-		return xyz
 	default:
 		return [3]int{scalarInt(coord), 0, 0}
 	}

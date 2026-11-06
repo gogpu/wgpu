@@ -91,26 +91,11 @@ func packDouble2x32(v Value) Value {
 	return ValFloat64(math.Float64frombits(uint64(lo) | uint64(hi)<<32))
 }
 
-// uint32Pair extracts two 32-bit integer components from a uvec2-like Value:
-// a uvec2 gives its words; an array of two uints or a float vector (the
-// forms integer vectors took before the typed value model) convert by value.
+// uint32Pair returns the first two lanes of the uvec2 operand of
+// PackDouble2x32 as raw words.
 func uint32Pair(v Value) (lo, hi uint32) {
-	switch v.Tag {
-	case TagArray:
-		arr := v.AsArray()
-		if len(arr) >= 1 {
-			lo = toUint32(arr[0])
-		}
-		if len(arr) >= 2 {
-			hi = toUint32(arr[1])
-		}
-	case TagVec2, TagVec3, TagVec4:
-		lo = uint32(v.F[0])
-		hi = uint32(v.F[1])
-	default:
-		lo, hi = v.U[0], v.U[1]
-	}
-	return lo, hi
+	w := laneWords(v, kindUint)
+	return w[0], w[1]
 }
 
 func unpackSnorm2x16(p uint32) Value {

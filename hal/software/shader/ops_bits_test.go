@@ -32,19 +32,16 @@ func TestBitFieldOps(t *testing.T) {
 }
 
 // TestIntLaneOps checks that the bit ops apply per lane of an integer vector,
-// give the result shape's kind, and keep signed scalars signed. The legacy
-// forms (a float vector, an array of scalars) still read by value.
+// give the result shape's kind, and keep signed scalars signed. A float
+// operand reads as its bits: the raw-word model has no float-held integers.
 func TestIntLaneOps(t *testing.T) {
 	uvec2 := shapeOf(kindUint, 2)
 	if got := mapIntLanes(uvec2, ValUVec(2, [4]uint32{7, 0xFFFFFFFF}), bitCount); got.Tag != TagUVec2 || got.U[0] != 3 || got.U[1] != 32 {
 		t.Errorf("countOneBits(uvec2(7, 0xFFFFFFFF)) = %+v, want (3, 32)", got)
 	}
-	if got := mapIntLanes(uvec2, ValVec2(7, 255), bitCount); got.Tag != TagUVec2 || got.U[0] != 3 || got.U[1] != 8 {
-		t.Errorf("countOneBits(vec2(7, 255)) = %+v, want uvec2(3, 8)", got)
-	}
-	arr := ValArray([]Value{ValUint(1), ValUint(0x80000000)})
-	if got := mapIntLanes(uvec2, arr, bitCount); got.Tag != TagUVec2 || got.U[0] != 1 || got.U[1] != 1 {
-		t.Errorf("countOneBits(array) = %+v, want uvec2(1, 1)", got)
+	// 1.0 is 0x3F800000 (7 bits set); -0.0 is 0x80000000 (1 bit set).
+	if got := mapIntLanes(uvec2, ValVec2(1, float32(math.Copysign(0, -1))), bitCount); got.Tag != TagUVec2 || got.U[0] != 7 || got.U[1] != 1 {
+		t.Errorf("countOneBits(vec2(1, -0)) = %+v, want uvec2(7, 1) from the bits", got)
 	}
 	if got := mapIntLanes(0, ValInt(-1), bitCount); got.Tag != TagInt32 || got.U[0] != 32 {
 		t.Errorf("countOneBits(-1) = %v %v, want i32 32", got.Tag, got.U)
@@ -88,30 +85,6 @@ fn main() {
 	got := runNagaCompute(t, wgsl, make([]uint32, 4+6), 1)
 	if got[0] != 6 {
 		t.Errorf("arrayLength = %d, want 6", got[0])
-	}
-}
-
-// TestLaneBitsSaturates checks the conversion of a float-held integer lane
-// back to its bits, saturated where float32 rounds past the type's range.
-func TestLaneBitsSaturates(t *testing.T) {
-	tests := []struct {
-		f      float32
-		signed bool
-		want   uint32
-	}{
-		{0xA1, false, 0xA1},
-		{1 << 24, false, 1 << 24},
-		{math.MaxUint32, false, math.MaxUint32}, // float32 rounds it to 2^32
-		{-3, false, 0},
-		{-5, true, 0xFFFFFFFB},
-		{math.MaxInt32, true, math.MaxInt32}, // float32 rounds it to 2^31
-		{math.MinInt32, true, 0x80000000},
-		{float32(math.NaN()), false, 0},
-	}
-	for _, tc := range tests {
-		if got := laneBits(tc.f, tc.signed); got != tc.want {
-			t.Errorf("laneBits(%v, signed=%v) = %#x, want %#x", tc.f, tc.signed, got, tc.want)
-		}
 	}
 }
 

@@ -2050,7 +2050,7 @@ func (interp *interpreter) storageImage(imgVal, coord Value) (img Texture2D, x, 
 }
 
 // texelComponents returns the four components of a texel value (a float
-// vector, an array of scalars, or a scalar filling the first one).
+// vector, an integer vector by value, or a scalar filling the first one).
 func texelComponents(v Value) Vec4 {
 	switch v.Tag {
 	case TagVec2, TagVec3, TagVec4:
@@ -2059,14 +2059,6 @@ func texelComponents(v Value) Vec4 {
 		var out Vec4
 		for i := range vectorLanes(v.Tag) {
 			out[i] = scalarFloat(indexComposite(v, uint32(i)))
-		}
-		return out
-	case TagArray:
-		var out Vec4
-		for i, e := range v.AsArray() {
-			if i < len(out) {
-				out[i] = scalarFloat(e)
-			}
 		}
 		return out
 	default:

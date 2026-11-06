@@ -12,7 +12,7 @@ func TestParseImageOperands(t *testing.T) {
 		1: ValFloat(0.5),
 		2: ValVec2(0.25, 0),
 		3: ValVec2(0, 0.125),
-		4: ValArray([]Value{ValInt(-1), ValInt(2)}),
+		4: ValIVec(2, [4]int32{-1, 2}),
 		5: ValFloat(3),
 	}}
 	ops := interp.parseImageOperands([]uint32{
