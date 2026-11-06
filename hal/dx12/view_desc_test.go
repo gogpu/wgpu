@@ -138,3 +138,26 @@ func TestSRVDescLayer(t *testing.T) {
 		})
 	}
 }
+
+// TestSRVDescStencilSwizzle: the stencil SRV formats hold the stencil value in
+// green, and WebGPU reads it from red, so their view maps (G, 0, 0, 1) as Rust
+// wgpu-hal dx12/view.rs to_srv does. Every other format keeps the identity
+// mapping.
+func TestSRVDescStencilSwizzle(t *testing.T) {
+	r := view2D(gputypes.TextureViewDimension2D, 0, 0, false)
+	for _, tt := range []struct {
+		name   string
+		format d3d12.DXGI_FORMAT
+		want   uint32
+	}{
+		{"D24S8 stencil plane", d3d12.DXGI_FORMAT_X24_TYPELESS_G8_UINT, 0x1B21},
+		{"D32S8 stencil plane", d3d12.DXGI_FORMAT_X32_TYPELESS_G8X24_UINT, 0x1B21},
+		{"color", viewDescTestFormat, d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := srvDesc(tt.format, 1, r).Shader4ComponentMapping; got != tt.want {
+				t.Errorf("Shader4ComponentMapping = %#x, want %#x", got, tt.want)
+			}
+		})
+	}
+}

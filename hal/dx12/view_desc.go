@@ -76,7 +76,7 @@ func dsvDesc(format d3d12.DXGI_FORMAT, r viewRange) d3d12.D3D12_DEPTH_STENCIL_VI
 func srvDesc(format d3d12.DXGI_FORMAT, plane uint32, r viewRange) d3d12.D3D12_SHADER_RESOURCE_VIEW_DESC {
 	desc := d3d12.D3D12_SHADER_RESOURCE_VIEW_DESC{
 		Format:                  format,
-		Shader4ComponentMapping: d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+		Shader4ComponentMapping: srvComponentMapping(format),
 	}
 	switch r.dim {
 	case gputypes.TextureViewDimension1D:
@@ -95,6 +95,27 @@ func srvDesc(format d3d12.DXGI_FORMAT, plane uint32, r viewRange) d3d12.D3D12_SH
 		srv2D(&desc, plane, r)
 	}
 	return desc
+}
+
+// stencilSRVComponentMapping maps (G, 0, 0, 1): red reads memory component 1,
+// green and blue are forced to 0, alpha to 1, plus the always-set bit
+// (D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(1, 4, 4, 5)).
+const stencilSRVComponentMapping = 1 | 4<<3 | 4<<6 | 5<<9 | 1<<12
+
+// srvComponentMapping returns the SRV component mapping of format. The stencil
+// SRV formats X24_TYPELESS_G8_UINT and X32_TYPELESS_G8X24_UINT hold the
+// stencil value in green, while WebGPU reads it from red with (0, 0, 1) in the
+// other channels, so their views swizzle (G, 0, 0, 1). Without it a
+// stencil-only view samples 0.
+//
+// Reference: Rust wgpu-hal dx12/view.rs ViewDescriptor::to_srv, which swizzles
+// the same way for the STENCIL aspect.
+func srvComponentMapping(format d3d12.DXGI_FORMAT) uint32 {
+	switch format {
+	case d3d12.DXGI_FORMAT_X24_TYPELESS_G8_UINT, d3d12.DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+		return stencilSRVComponentMapping
+	}
+	return d3d12.D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
 }
 
 // srv2D fills desc for a 2D or 2D-array view (see srvDesc).
