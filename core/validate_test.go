@@ -2351,6 +2351,31 @@ func TestValidateRenderPipelineDescriptor_Depth32Float_StencilOpsEnabled(t *test
 	}
 }
 
+// TestValidateRenderPipelineDescriptor_DepthOnly_StencilFacesZeroMasks: the
+// spec requires a stencil aspect when a stencil face is not the default,
+// whatever the masks (index.bs, GPUDepthStencilState validation). Zero masks
+// are literal and do not turn the stencil test off, so a depth-only format
+// with real stencil faces is an error.
+func TestValidateRenderPipelineDescriptor_DepthOnly_StencilFacesZeroMasks(t *testing.T) {
+	keep := hal.StencilOperationKeep
+	desc := &hal.RenderPipelineDescriptor{
+		Label:  "test",
+		Vertex: hal.VertexState{Module: mockShaderModule{}, EntryPoint: "vs_main"},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatDepth32Float,
+			DepthCompare: gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{Compare: gputypes.CompareFunctionNotEqual, FailOp: keep, DepthFailOp: keep, PassOp: keep},
+			StencilBack:  hal.StencilFaceState{Compare: gputypes.CompareFunctionAlways, FailOp: keep, DepthFailOp: keep, PassOp: keep},
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) || crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Fatalf("Depth32Float with a stencil face and zero masks: got %v, want DepthFormatNoStencilAspect", err)
+	}
+}
+
 func TestValidateRenderPipelineDescriptor_DepthOnly_NoStencilOps(t *testing.T) {
 	// Depth-only format with stencil ops all set to IGNORE (default) -> should pass.
 	depthOnlyFormats := []gputypes.TextureFormat{
