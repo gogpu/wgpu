@@ -60,6 +60,8 @@ func textureFormatToMTL(format gputypes.TextureFormat) MTLPixelFormat {
 		return MTLPixelFormatBGRA8UnormSRGB
 	case gputypes.TextureFormatRGB10A2Unorm:
 		return MTLPixelFormatRGB10A2Unorm
+	case gputypes.TextureFormatRGB10A2Uint:
+		return MTLPixelFormatRGB10A2Uint
 	case gputypes.TextureFormatRG11B10Ufloat:
 		return MTLPixelFormatRG11B10Float
 	case gputypes.TextureFormatRGB9E5Ufloat:
