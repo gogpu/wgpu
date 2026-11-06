@@ -21,23 +21,7 @@ import (
 // was incompatible with the sRGB pipeline (VUID-vkCmdDraw-renderPass-02684,
 // VUID-VkFramebufferCreateInfo-pAttachments-00880; P1-VK-015).
 func TestRenderThroughSrgbView(t *testing.T) {
-	for _, b := range overrideBackends {
-		t.Run(b.name, func(t *testing.T) {
-			switch b.name {
-			case "gles":
-				t.Skip("gles: sRGB view target stores the linear value (no encode), P1-GLES-022")
-			case "software":
-				t.Skip("software: no sRGB encode on colour writes, P1-SW-021")
-			}
-			if b.dxil {
-				t.Setenv("GOGPU_DX12_DXIL", "1")
-			} else {
-				t.Setenv("GOGPU_DX12_DXIL", "0")
-			}
-			device := openOverrideDevice(t, b, gputypes.DownlevelFlagsViewFormats)
-			renderThroughSrgbView(t, device)
-		})
-	}
+	forEachOverrideBackend(t, gputypes.DownlevelFlagsViewFormats, renderThroughSrgbView)
 }
 
 func renderThroughSrgbView(t *testing.T, device *wgpu.Device) {
@@ -127,19 +111,9 @@ func renderThroughSrgbView(t *testing.T, device *wgpu.Device) {
 			if x < sliceRigWidth/2 {
 				want = sliceGreen
 			}
-			if !bytesNear(px, want, 1) {
+			if !bytesNear(px[:], want[:], 1) {
 				t.Errorf("texel (%d, %d) = %v, want %v (sRGB-encoded)", x, y, px, want)
 			}
 		}
 	}
-}
-
-func bytesNear(got, want [4]byte, tol int) bool {
-	for i := range got {
-		d := int(got[i]) - int(want[i])
-		if d < -tol || d > tol {
-			return false
-		}
-	}
-	return true
 }

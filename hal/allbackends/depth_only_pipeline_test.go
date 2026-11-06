@@ -7,7 +7,6 @@ package allbackends_test
 
 import (
 	"encoding/binary"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -70,9 +69,6 @@ func TestDepthOnlyPipeline(t *testing.T) {
 			{name: "control without a depth pass", mode: noDepthPass, want: [4]byte{0, 255, 0, 255}},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				if tt.mode != noDepthPass && strings.Contains(t.Name(), "/software/") {
-					t.Skip("software: a depth-only pass writes no depth, P1-SW-021")
-				}
 				if px := drawBehindDepthOnly(t, device, tt.mode); px != tt.want {
 					t.Errorf("pixel (0,0) = %v, want %v", px, tt.want)
 				}

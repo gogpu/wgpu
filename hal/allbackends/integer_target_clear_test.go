@@ -8,7 +8,6 @@ package allbackends_test
 import (
 	"bytes"
 	"encoding/binary"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -40,9 +39,6 @@ func TestIntegerTargetClearReadback(t *testing.T) {
 	}
 	const width, height, rowStride = 4, 2, 256
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
-		if strings.HasSuffix(t.Name(), "/software") {
-			t.Skip("software: an integer target is cleared to the float bits, P1-SW-021")
-		}
 		for _, f := range formats {
 			t.Run(f.format.String(), func(t *testing.T) {
 				texel := integerTexel(f.format, f.color)

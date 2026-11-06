@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -31,16 +30,12 @@ func forEachStencilUpload(t *testing.T, formats []gputypes.TextureFormat,
 	t.Helper()
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
-		software := strings.HasSuffix(t.Name(), "/software")
 		for _, format := range formats {
 			for _, path := range []string{"write-texture", "copy-buffer"} {
 				t.Run(format.String()+"/"+path, func(t *testing.T) {
 					if format == gputypes.TextureFormatDepth32FloatStencil8 &&
 						!device.Features().Contains(gputypes.FeatureDepth32FloatStencil8) {
 						t.Skip("the adapter has no depth32float-stencil8")
-					}
-					if software && format != gputypes.TextureFormatDepth32FloatStencil8 {
-						t.Skip("software: stencil aspect is not stored, P1-SW-021")
 					}
 					fn(t, device, format, path == "write-texture")
 				})
