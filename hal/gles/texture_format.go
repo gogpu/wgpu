@@ -6,59 +6,107 @@
 package gles
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
-// textureFormatToGL converts a WebGPU texture format to its GL internal
-// format and its pixel transfer format and type (Rust wgpu-hal
-// gles/conv.rs describe_texture_format).
-func textureFormatToGL(format gputypes.TextureFormat) (internalFormat, dataFormat, dataType uint32) {
-	switch format {
-	case gputypes.TextureFormatR8Unorm:
-		return gl.R8, gl.RED, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRG8Unorm:
-		return gl.RG8, gl.RG, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRGBA8Unorm:
-		return gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRGBA8UnormSrgb:
-		return gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatBGRA8Unorm:
-		return gl.RGBA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatBGRA8UnormSrgb:
-		return gl.SRGB8_ALPHA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatR16Float:
-		return gl.R16F, gl.RED, gl.HALF_FLOAT
-	case gputypes.TextureFormatRG16Float:
-		return gl.RG16F, gl.RG, gl.HALF_FLOAT
-	case gputypes.TextureFormatRGBA16Float:
-		return gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT
-	case gputypes.TextureFormatR32Float:
-		return gl.R32F, gl.RED, gl.FLOAT
-	case gputypes.TextureFormatRG32Float:
-		return gl.RG32F, gl.RG, gl.FLOAT
-	case gputypes.TextureFormatRGBA32Float:
-		return gl.RGBA32F, gl.RGBA, gl.FLOAT
-	case gputypes.TextureFormatStencil8:
-		return gl.STENCIL_INDEX8, gl.STENCIL_INDEX, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatDepth16Unorm:
-		return gl.DEPTH_COMPONENT16, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT
-	case gputypes.TextureFormatDepth24Plus:
-		return gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT
-	case gputypes.TextureFormatDepth24PlusStencil8:
-		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8
-	case gputypes.TextureFormatDepth32Float:
-		// DEPTH_COMPONENT32 is a 32-bit normalized format of desktop GL that
-		// ES lacks; depth32float is a float format.
-		return gl.DEPTH_COMPONENT32F, gl.DEPTH_COMPONENT, gl.FLOAT
-	case gputypes.TextureFormatDepth32FloatStencil8:
-		// DEPTH_STENCIL takes UNSIGNED_INT_24_8 or
-		// FLOAT_32_UNSIGNED_INT_24_8_REV; FLOAT is an invalid operation.
-		return gl.DEPTH32F_STENCIL8, gl.DEPTH_STENCIL, gl.FLOAT_32_UNSIGNED_INT_24_8_REV
-	default:
-		// Default to RGBA8
-		return gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE
+// glTextureFormat is how GL stores one WebGPU texture format and how pixels
+// of it are transferred (Rust wgpu-hal gles TextureFormatDesc).
+type glTextureFormat struct {
+	// internal is the sized internal format of glTexImage, glTexStorage,
+	// glRenderbufferStorage and glBindImageTexture.
+	internal uint32
+	// external is the pixel transfer format of glTexSubImage and glReadPixels.
+	external uint32
+	// dataType is the pixel transfer type.
+	dataType uint32
+}
+
+// glTextureFormats is Rust wgpu-hal gles/conv.rs describe_texture_format,
+// row by row. A format missing here has no GL texture: describeTextureFormat
+// reports it, so nothing is created or uploaded as a different format.
+var glTextureFormats = map[gputypes.TextureFormat]glTextureFormat{
+	gputypes.TextureFormatR8Unorm:  {gl.R8, gl.RED, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatR8Snorm:  {gl.R8_SNORM, gl.RED, gl.BYTE},
+	gputypes.TextureFormatR8Uint:   {gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatR8Sint:   {gl.R8I, gl.RED_INTEGER, gl.BYTE},
+	gputypes.TextureFormatR16Uint:  {gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatR16Sint:  {gl.R16I, gl.RED_INTEGER, gl.SHORT},
+	gputypes.TextureFormatR16Unorm: {gl.R16, gl.RED, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatR16Snorm: {gl.R16_SNORM, gl.RED, gl.SHORT},
+	gputypes.TextureFormatR16Float: {gl.R16F, gl.RED, gl.HALF_FLOAT},
+
+	gputypes.TextureFormatRG8Unorm: {gl.RG8, gl.RG, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRG8Snorm: {gl.RG8_SNORM, gl.RG, gl.BYTE},
+	gputypes.TextureFormatRG8Uint:  {gl.RG8UI, gl.RG_INTEGER, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRG8Sint:  {gl.RG8I, gl.RG_INTEGER, gl.BYTE},
+
+	gputypes.TextureFormatR32Uint:   {gl.R32UI, gl.RED_INTEGER, gl.UNSIGNED_INT},
+	gputypes.TextureFormatR32Sint:   {gl.R32I, gl.RED_INTEGER, gl.INT},
+	gputypes.TextureFormatR32Float:  {gl.R32F, gl.RED, gl.FLOAT},
+	gputypes.TextureFormatRG16Uint:  {gl.RG16UI, gl.RG_INTEGER, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatRG16Sint:  {gl.RG16I, gl.RG_INTEGER, gl.SHORT},
+	gputypes.TextureFormatRG16Unorm: {gl.RG16, gl.RG, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatRG16Snorm: {gl.RG16_SNORM, gl.RG, gl.SHORT},
+	gputypes.TextureFormatRG16Float: {gl.RG16F, gl.RG, gl.HALF_FLOAT},
+
+	gputypes.TextureFormatRGBA8Unorm:     {gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRGBA8UnormSrgb: {gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatBGRA8UnormSrgb: {gl.SRGB8_ALPHA8, gl.BGRA, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRGBA8Snorm:     {gl.RGBA8_SNORM, gl.RGBA, gl.BYTE},
+	gputypes.TextureFormatBGRA8Unorm:     {gl.RGBA8, gl.BGRA, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRGBA8Uint:      {gl.RGBA8UI, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatRGBA8Sint:      {gl.RGBA8I, gl.RGBA_INTEGER, gl.BYTE},
+
+	gputypes.TextureFormatRGB10A2Uint:   {gl.RGB10_A2UI, gl.RGBA_INTEGER, gl.UNSIGNED_INT_2_10_10_10_REV},
+	gputypes.TextureFormatRGB10A2Unorm:  {gl.RGB10_A2, gl.RGBA, gl.UNSIGNED_INT_2_10_10_10_REV},
+	gputypes.TextureFormatRG11B10Ufloat: {gl.R11F_G11F_B10F, gl.RGB, gl.UNSIGNED_INT_10F_11F_11F_REV},
+	gputypes.TextureFormatRGB9E5Ufloat:  {gl.RGB9_E5, gl.RGB, gl.UNSIGNED_INT_5_9_9_9_REV},
+	gputypes.TextureFormatRG32Uint:      {gl.RG32UI, gl.RG_INTEGER, gl.UNSIGNED_INT},
+	gputypes.TextureFormatRG32Sint:      {gl.RG32I, gl.RG_INTEGER, gl.INT},
+	gputypes.TextureFormatRG32Float:     {gl.RG32F, gl.RG, gl.FLOAT},
+	gputypes.TextureFormatRGBA16Uint:    {gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatRGBA16Sint:    {gl.RGBA16I, gl.RGBA_INTEGER, gl.SHORT},
+	gputypes.TextureFormatRGBA16Unorm:   {gl.RGBA16, gl.RGBA, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatRGBA16Snorm:   {gl.RGBA16_SNORM, gl.RGBA, gl.SHORT},
+	gputypes.TextureFormatRGBA16Float:   {gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT},
+	gputypes.TextureFormatRGBA32Uint:    {gl.RGBA32UI, gl.RGBA_INTEGER, gl.UNSIGNED_INT},
+	gputypes.TextureFormatRGBA32Sint:    {gl.RGBA32I, gl.RGBA_INTEGER, gl.INT},
+	gputypes.TextureFormatRGBA32Float:   {gl.RGBA32F, gl.RGBA, gl.FLOAT},
+	gputypes.TextureFormatStencil8:      {gl.STENCIL_INDEX8, gl.STENCIL_INDEX, gl.UNSIGNED_BYTE},
+	gputypes.TextureFormatDepth16Unorm:  {gl.DEPTH_COMPONENT16, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT},
+	gputypes.TextureFormatDepth24Plus:   {gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT},
+	gputypes.TextureFormatDepth32Float:  {gl.DEPTH_COMPONENT32F, gl.DEPTH_COMPONENT, gl.FLOAT},
+	gputypes.TextureFormatDepth24PlusStencil8: {
+		gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8,
+	},
+	gputypes.TextureFormatDepth32FloatStencil8: {
+		gl.DEPTH32F_STENCIL8, gl.DEPTH_STENCIL, gl.FLOAT_32_UNSIGNED_INT_24_8_REV,
+	},
+}
+
+// UnsupportedTextureFormatError reports a texture format the GLES backend has
+// no GL storage for.
+type UnsupportedTextureFormatError struct {
+	Format gputypes.TextureFormat
+}
+
+func (e *UnsupportedTextureFormatError) Error() string {
+	return fmt.Sprintf("gles: texture format %v has no GL storage in this backend", e.Format)
+}
+
+// describeTextureFormat returns how GL stores and transfers format, or an
+// *UnsupportedTextureFormatError. It never substitutes another format: a
+// texture created as RGBA8 in place of an integer or packed format read back
+// as zeros or as the wrong bytes.
+func describeTextureFormat(format gputypes.TextureFormat) (glTextureFormat, error) {
+	desc, ok := glTextureFormats[format]
+	if !ok {
+		return glTextureFormat{}, &UnsupportedTextureFormatError{Format: format}
 	}
+	return desc, nil
 }
 
 // uploadTexelBytes returns the size of one texel that glTexSubImage reads

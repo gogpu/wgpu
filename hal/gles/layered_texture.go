@@ -41,7 +41,11 @@ func get2DTarget(target, layer uint32) uint32 {
 // of a 3D or 2D array texture, or one rectangle per layer of a 2D texture or
 // a cube map's faces, layers layout.RowsPerImage rows apart.
 func writeTexture(ctx *gl.Context, tex *Texture, dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	_, format, dataType := textureFormatToGL(tex.format)
+	desc, err := describeTextureFormat(tex.format)
+	if err != nil {
+		return fmt.Errorf("gles: WriteTexture: %w", err)
+	}
+	format, dataType := desc.external, desc.dataType
 	switch {
 	case isLayeredTarget(tex.target):
 		return writeLayeredTexture(ctx, tex, dst, data, layout, size, format, dataType)

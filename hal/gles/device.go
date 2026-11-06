@@ -181,6 +181,10 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: texture descriptor is nil in GLES.CreateTexture — core validation gap")
 	}
+	glFormat, err := describeTextureFormat(desc.Format)
+	if err != nil {
+		return nil, err
+	}
 
 	glCtx := d.ctx.Lock()
 	defer d.ctx.Unlock()
@@ -225,8 +229,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	glCtx.BindTexture(target, id)
 
-	// Get GL format info
-	internalFormat, format, dataType := textureFormatToGL(desc.Format)
+	internalFormat, format, dataType := glFormat.internal, glFormat.external, glFormat.dataType
 
 	// Allocate texture storage
 	switch target {
