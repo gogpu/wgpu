@@ -6,12 +6,12 @@
 package gles
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
 	"sync"
 
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/internal/eglrefs"
@@ -20,8 +20,10 @@ import (
 // ErrContextReleased is returned when an EGL context is used after the last
 // Surface and Device built on it were released: the context, and every GL
 // object in it, is gone. A cached Adapter of a closed window returns it from
-// Open; request an adapter with the new surface instead.
-var ErrContextReleased = errors.New("gles: the EGL context was released with the last surface and device that used it")
+// Open; request an adapter with the new surface instead. It is
+// hal.ErrContextReleased (wgpu.ErrContextReleased in the public package),
+// which wraps hal.ErrDeviceLost.
+var ErrContextReleased = hal.ErrContextReleased
 
 // AdapterContext wraps an EGL/GL context with mutex-protected MakeCurrent
 // switching, and counts the objects that keep the context alive (ADR-077 B).

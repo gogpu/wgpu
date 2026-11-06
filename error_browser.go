@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Public API sentinel errors.
 var (
@@ -17,6 +20,11 @@ var (
 
 	// ErrDeviceLost is returned when the GPU device is lost.
 	ErrDeviceLost = errors.New("wgpu: device lost")
+
+	// ErrContextReleased is declared for source compatibility with the native
+	// build, where GLES returns it when a native context is gone. This build
+	// never returns it. It wraps ErrDeviceLost there and here.
+	ErrContextReleased = fmt.Errorf("wgpu: the native context was released with the last surface and device that used it: %w", ErrDeviceLost)
 
 	// ErrOutOfMemory is returned when the GPU is out of memory.
 	ErrOutOfMemory = errors.New("wgpu: out of memory")

@@ -2,7 +2,10 @@
 
 package hal
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Common HAL errors representing unrecoverable GPU states.
 var (
@@ -60,6 +63,17 @@ var (
 	// one wl_display cannot use a context of another. The public package maps
 	// it to wgpu.ErrSurfaceDeviceMismatch.
 	ErrSurfaceDeviceMismatch = errors.New("hal: device cannot present to this surface")
+
+	// ErrContextReleased is returned when a backend's native context is used
+	// after the last Surface and Device built on it were released. On GLES
+	// that is an EGL context built on an app's Wayland display: releasing the
+	// window's Surface before RequestDevice ends the context, and opening a
+	// Device on the cached Adapter then returns this error. It wraps
+	// ErrDeviceLost, as WebGPU's requestDevice on an expired adapter returns a
+	// device that is already lost (spec: "requestDevice", lose the device with
+	// reason "unknown"); request a new adapter. The public package re-exports
+	// it as wgpu.ErrContextReleased.
+	ErrContextReleased = fmt.Errorf("hal: the native context was released with the last surface and device that used it: %w", ErrDeviceLost)
 
 	// ErrTimestampsNotSupported indicates the backend does not support timestamp queries.
 	// This is returned by CreateQuerySet when QueryTypeTimestamp is requested
