@@ -415,6 +415,12 @@ type VertexState struct {
 	// EntryPoint is the shader entry point function name.
 	EntryPoint string
 
+	// Constants are the pipeline-overridable constants of the vertex stage
+	// (WebGPU GPUProgrammableStage.constants), as in ComputeState.Constants.
+	// Each backend specializes the vertex entry point with them
+	// (naga.ProcessOverrides) before it compiles the stage.
+	Constants map[string]float64
+
 	// Buffers describe the vertex buffer layouts.
 	Buffers []gputypes.VertexBufferLayout
 }
@@ -426,6 +432,12 @@ type FragmentState struct {
 
 	// EntryPoint is the shader entry point function name.
 	EntryPoint string
+
+	// Constants are the pipeline-overridable constants of the fragment stage
+	// (WebGPU GPUProgrammableStage.constants), as in ComputeState.Constants.
+	// Each backend specializes the fragment entry point with them
+	// (naga.ProcessOverrides) before it compiles the stage.
+	Constants map[string]float64
 
 	// Targets describe the render target formats and blend state.
 	Targets []gputypes.ColorTargetState
@@ -460,14 +472,8 @@ type ComputeState struct {
 	// Rust wgpu-hal passes these as &naga::back::PipelineConstants and calls
 	// naga::back::pipeline_constants::process_overrides() in each backend before
 	// shader compilation (Vulkan device.rs:783, DX12 device.rs:328, Metal device.rs:134,
-	// GLES device.rs:226).
-	//
-	// TODO(compute-constants): Each backend must apply these constants during shader
-	// compilation via naga's override processing. Currently plumbed but not consumed.
-	// - Vulkan: map to VkSpecializationInfo or naga override processing
-	// - DX12: apply via naga pipeline_constants::process_overrides before HLSL/DXIL emit
-	// - Metal: apply via MTLFunctionConstantValues or naga override processing
-	// - GLES: apply via naga override processing before GLSL emit
+	// GLES device.rs:226). Every backend here does the same, and so does the
+	// software backend.
 	Constants map[string]float64
 
 	// ZeroInitializeWorkgroupMemory controls whether workgroup-scoped shared memory
