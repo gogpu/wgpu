@@ -31,8 +31,8 @@ func openVulkanCopyDevice(t *testing.T, features gputypes.Features) *wgpu.Device
 		t.Skipf("no adapter: %v", err)
 	}
 	t.Cleanup(adapter.Release)
-	if info := adapter.Info(); info.Backend != gputypes.BackendVulkan || info.DeviceType == gputypes.DeviceTypeCPU {
-		t.Skipf("no Vulkan GPU adapter (got %s, backend %v)", info.Name, info.Backend)
+	if info := adapter.Info(); info.Backend != gputypes.BackendVulkan {
+		t.Skipf("no Vulkan adapter (got %s, backend %v)", info.Name, info.Backend)
 	}
 	if missing := features &^ adapter.Features(); missing != 0 {
 		t.Skipf("%s lacks features %#x", adapter.Info().Name, uint64(missing))
