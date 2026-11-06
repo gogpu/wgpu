@@ -59,6 +59,10 @@ func (d *BufferDescriptor) toHAL() *hal.BufferDescriptor {
 }
 
 // TextureDescriptor describes texture creation parameters.
+//
+// A zero MipLevelCount, SampleCount, Dimension, Size.Height or
+// Size.DepthOrArrayLayers means the WebGPU default: 1, 1,
+// gputypes.TextureDimension2D, 1 and 1. Size.Width is required.
 type TextureDescriptor struct {
 	Label         string
 	Size          Extent3D

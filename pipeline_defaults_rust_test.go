@@ -47,6 +47,24 @@ func TestConvertRenderPipelineDescSpecDefaults(t *testing.T) {
 	}
 }
 
+// TestConvertTextureDescZeroDefaults: wgpu-native takes the texture
+// descriptor literally, so zero MipLevelCount, SampleCount, Dimension,
+// Size.Height and Size.DepthOrArrayLayers must arrive as the WebGPU defaults
+// (1, 1, 2d, 1, 1); explicit values pass unchanged.
+func TestConvertTextureDescZeroDefaults(t *testing.T) {
+	r := convertTextureDesc(&TextureDescriptor{Size: Extent3D{Width: 16}, Format: gputypes.TextureFormatRGBA8Unorm})
+	if want := (rwgpu.Extent3D{Width: 16, Height: 1, DepthOrArrayLayers: 1}); r.Size != want {
+		t.Errorf("wgpu-native size %+v, want %+v", r.Size, want)
+	}
+	if r.MipLevelCount != 1 || r.SampleCount != 1 || r.Dimension != gputypes.TextureDimension2D {
+		t.Errorf("wgpu-native mips %d, samples %d, dimension %v, want 1, 1, 2d", r.MipLevelCount, r.SampleCount, r.Dimension)
+	}
+	r = convertTextureDesc(&TextureDescriptor{Size: Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 2}, MipLevelCount: 3, SampleCount: 4, Dimension: gputypes.TextureDimension3D})
+	if r.Size.DepthOrArrayLayers != 2 || r.MipLevelCount != 3 || r.SampleCount != 4 || r.Dimension != gputypes.TextureDimension3D {
+		t.Errorf("explicit values changed: %+v", r)
+	}
+}
+
 // TestConvertRenderPipelineDescSampleMask: wgpu-native takes the sample mask
 // literally, so a zero mask must arrive as every sample.
 func TestConvertRenderPipelineDescSampleMask(t *testing.T) {

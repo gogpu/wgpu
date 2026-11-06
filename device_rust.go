@@ -69,7 +69,19 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
 
-	rt, err := d.r.CreateTexture(&rwgpu.TextureDescriptor{
+	rt, err := d.r.CreateTexture(convertTextureDesc(desc))
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
+	}
+
+	return &Texture{r: rt, device: d, format: desc.Format}, nil
+}
+
+// convertTextureDesc converts a texture descriptor for wgpu-native, with the
+// zero members that have a WebGPU default set to it (texture_defaults.go).
+func convertTextureDesc(desc *TextureDescriptor) *rwgpu.TextureDescriptor {
+	desc = normalizeTextureDescriptor(desc)
+	return &rwgpu.TextureDescriptor{
 		Label:         desc.Label,
 		Usage:         desc.Usage,
 		Dimension:     desc.Dimension,
@@ -78,12 +90,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		MipLevelCount: desc.MipLevelCount,
 		SampleCount:   desc.SampleCount,
 		ViewFormats:   desc.ViewFormats,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
 	}
-
-	return &Texture{r: rt, device: d, format: desc.Format}, nil
 }
 
 // CreateTextureView creates a view into a texture.
