@@ -248,6 +248,18 @@ jobs:
         echo ""
         go test -v -tags integration ./hal/gles/...
 
+    - name: Run GLES integration test on an OpenGL ES context (surfaceless)
+      # Mesa offers desktop GL, so the backend never takes its ES paths here
+      # unless the wgpu_gles_force_es test tag makes every context ES.
+      # WGPU_REQUIRE turns a missing EGL context into a failure, not a skip.
+      env:
+        DISPLAY: ""
+        WAYLAND_DISPLAY: ""
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
+        WGPU_REQUIRE: "gles"
+      run: go test -v -tags "integration wgpu_gles_force_es" ./hal/gles/...
+
     - name: Test EGL library loading
       run: |
         # Verify that EGL can be loaded at runtime

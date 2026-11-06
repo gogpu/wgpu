@@ -71,7 +71,9 @@ func (Backend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error
 	}
 
 	config := egl.DefaultContextConfig()
-	config.GLES = false
+	if forceGLES {
+		config = gles30Config(config)
+	}
 	eglCtx, err := egl.NewContext(config)
 	if err != nil {
 		hal.Logger().Info("gles: instance context unavailable (expected on Wayland)", "err", err)
@@ -300,12 +302,13 @@ func newDisplayContext(display uintptr, kind egl.WindowKind) (*AdapterContext, e
 	config := egl.DefaultContextConfig()
 	config.NativeDisplay = display
 	config.WindowKind = &kind
-	eglCtx, err := egl.NewContext(config)
-	if err != nil {
-		config.GLES = true
-		config.GLVersionMajor = 3
-		config.GLVersionMinor = 0
-		config.CoreProfile = false
+	var eglCtx *egl.Context
+	var err error
+	if !forceGLES {
+		eglCtx, err = egl.NewContext(config)
+	}
+	if forceGLES || err != nil {
+		config = gles30Config(config)
 		eglCtx, err = egl.NewContext(config)
 	}
 	if err != nil {
@@ -319,6 +322,16 @@ func newDisplayContext(display uintptr, kind egl.WindowKind) (*AdapterContext, e
 		return nil, err
 	}
 	return NewAdapterContext(eglCtx, glCtx), nil
+}
+
+// gles30Config is config asking for an OpenGL ES 3.0 context, Rust wgpu-hal
+// egl.rs's fallback when desktop GL fails (gles_context_attributes).
+func gles30Config(config egl.ContextConfig) egl.ContextConfig {
+	config.GLES = true
+	config.GLVersionMajor = 3
+	config.GLVersionMinor = 0
+	config.CoreProfile = false
+	return config
 }
 
 // EnumerateAdapters returns available OpenGL adapters.
