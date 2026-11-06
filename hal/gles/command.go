@@ -180,6 +180,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 			dstBuffer:   dstBuf,
 			srcOrigin:   [3]uint32{region.TextureBase.Origin.X, region.TextureBase.Origin.Y, region.TextureBase.Origin.Z},
 			copySize:    [3]uint32{region.Size.Width, region.Size.Height, region.Size.DepthOrArrayLayers},
+			mipLevel:    region.TextureBase.MipLevel,
 			dstOffset:   region.BufferLayout.Offset,
 			bytesPerRow: region.BufferLayout.BytesPerRow,
 		})
@@ -386,7 +387,7 @@ func (e *CommandEncoder) setupOffscreenTarget(
 	tv *TextureView,
 	rpe *RenderPassEncoder,
 ) {
-	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{texture: tv.texture})
+	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{texture: tv.texture, mipLevel: tv.baseMip})
 
 	// Attach additional color textures (attachments 1..N) to the FBO.
 	// Attachment 0 is already bound by EnsureOffscreenFBOCommand.
@@ -400,6 +401,7 @@ func (e *CommandEncoder) setupOffscreenTarget(
 		e.commands = append(e.commands, &AttachColorCommand{
 			attachmentIndex: uint32(i),
 			texture:         atv.texture,
+			mipLevel:        atv.baseMip,
 		})
 	}
 
@@ -413,10 +415,13 @@ func (e *CommandEncoder) setupOffscreenTarget(
 		}
 	}
 
-	rpe.fbHeight = tv.texture.size.Height
+	// The render area is the view's mip level, not the texture's level 0.
+	width := max(tv.texture.size.Width>>tv.baseMip, 1)
+	height := max(tv.texture.size.Height>>tv.baseMip, 1)
+	rpe.fbHeight = height
 	e.commands = append(e.commands, &SetViewportCommand{
-		width:    float32(tv.texture.size.Width),
-		height:   float32(tv.texture.size.Height),
+		width:    float32(width),
+		height:   float32(height),
 		maxDepth: 1,
 	})
 
@@ -1021,31 +1026,40 @@ func (c *BindSurfaceFramebufferCommand) Execute(ctx *gl.Context) {
 }
 
 // EnsureOffscreenFBOCommand lazily creates a framebuffer object for an offscreen
-// texture and binds it. If the texture already has an FBO, it simply binds it.
+// texture, binds it and attaches the pass's mip level as COLOR_ATTACHMENT0.
 type EnsureOffscreenFBOCommand struct {
-	texture *Texture
+	texture  *Texture
+	mipLevel uint32 // the view's base mip level
 }
 
 func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
-	if c.texture.fbo == 0 {
-		// Create FBO.
-		fbo := ctx.GenFramebuffers(1)
-		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-		// Attach the color texture as COLOR_ATTACHMENT0.
-		// Use the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
-		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture.target, c.texture.id, 0)
-		// Verify completeness.
-		status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
-		if status != gl.FRAMEBUFFER_COMPLETE {
-			// FBO incomplete — delete and fall back to default framebuffer.
-			ctx.DeleteFramebuffers(fbo)
-			ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
-			return
-		}
-		c.texture.fbo = fbo
-	} else {
+	if c.texture.fbo != 0 {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.texture.fbo)
+		// The FBO belongs to the texture and serves every view of it, so each
+		// pass attaches its own mip level, as Rust wgpu-hal attaches each
+		// pass's views to its draw FBO (gles/queue.rs set_attachment).
+		c.attach(ctx)
+		return
 	}
+	// Create FBO.
+	fbo := ctx.GenFramebuffers(1)
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	c.attach(ctx)
+	// Verify completeness.
+	status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
+	if status != gl.FRAMEBUFFER_COMPLETE {
+		// FBO incomplete — delete and fall back to default framebuffer.
+		ctx.DeleteFramebuffers(fbo)
+		ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		return
+	}
+	c.texture.fbo = fbo
+}
+
+// attach attaches the color texture as COLOR_ATTACHMENT0 of the bound FBO.
+// It uses the texture's actual target (GL_TEXTURE_2D or GL_TEXTURE_2D_MULTISAMPLE).
+func (c *EnsureOffscreenFBOCommand) attach(ctx *gl.Context) {
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture.target, c.texture.id, int32(c.mipLevel))
 }
 
 // AttachDepthStencilCommand attaches a depth/stencil texture to the currently
@@ -1178,12 +1192,13 @@ func (c *MSAAResolveCommand) ensureResolveFBO(ctx *gl.Context) bool {
 type AttachColorCommand struct {
 	attachmentIndex uint32 // 0-based index (attachment point = GL_COLOR_ATTACHMENT0 + index)
 	texture         *Texture
+	mipLevel        uint32 // the view's base mip level
 }
 
 func (c *AttachColorCommand) Execute(ctx *gl.Context) {
 	ctx.FramebufferTexture2D(gl.FRAMEBUFFER,
 		gl.COLOR_ATTACHMENT0+c.attachmentIndex,
-		c.texture.target, c.texture.id, 0)
+		c.texture.target, c.texture.id, int32(c.mipLevel))
 }
 
 // SetDrawColorBuffersCommand configures the list of draw buffers for MRT output.
@@ -1915,6 +1930,7 @@ type CopyTextureToBufferCommand struct {
 	dstBuffer   *Buffer
 	srcOrigin   [3]uint32 // x, y, z
 	copySize    [3]uint32 // width, height, depthOrArrayLayers
+	mipLevel    uint32
 	dstOffset   uint64
 	bytesPerRow uint32
 }
@@ -1963,10 +1979,14 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	ctx.GetIntegerv(gl.FRAMEBUFFER_BINDING, &prevFBO)
 
 	// Ensure the source texture has an FBO. Create one lazily if needed.
+	// The FBO serves every view and copy of the texture: attach the copy's
+	// mip level each time, as Rust wgpu-hal does (gles/queue.rs
+	// CopyTextureToBuffer). Reading level 0 for every copy returned level 0's
+	// texels for a copy of another level.
 	if c.srcTexture.fbo == 0 {
 		fbo := ctx.GenFramebuffers(1)
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture.target, c.srcTexture.id, 0)
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture.target, c.srcTexture.id, int32(c.mipLevel))
 		status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER)
 		if status != gl.FRAMEBUFFER_COMPLETE {
 			ctx.DeleteFramebuffers(fbo)
@@ -1976,6 +1996,7 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 		c.srcTexture.fbo = fbo
 	} else {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.srcTexture.fbo)
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture.target, c.srcTexture.id, int32(c.mipLevel))
 	}
 
 	// Set tight pixel packing (no row alignment padding).
