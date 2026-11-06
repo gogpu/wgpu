@@ -134,9 +134,9 @@ type Sampler struct {
 	WrapU        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
 	WrapV        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
 	WrapW        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
-	// LodMinClamp and LodMaxClamp clamp the level of detail. A zero
-	// LodMaxClamp reads as 32, the WebGPU default, so a zero Sampler does
-	// not pin sampling to the base level.
+	// LodMinClamp and LodMaxClamp clamp the level of detail, taken
+	// literally: a zero LodMaxClamp pins sampling to the base level. Use
+	// LodClampNone for no upper clamp.
 	LodMinClamp float32
 	LodMaxClamp float32
 }

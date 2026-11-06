@@ -130,7 +130,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		desc.Label,
 		desc.AddressModeU, desc.AddressModeV, desc.AddressModeW,
 		desc.MagFilter, desc.MinFilter, desc.MipmapFilter,
-		desc.LodMinClamp, desc.LodMaxClamp,
+		desc.LodMinClamp, normalizeLodMaxClamp(desc.LodMaxClamp),
 		desc.Compare, desc.Anisotropy,
 	)
 	bs := d.browser.CreateSamplerFromDesc(jsDesc)

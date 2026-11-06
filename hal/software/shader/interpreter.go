@@ -2186,7 +2186,7 @@ func (interp *interpreter) sampleTexture(sampledImg Value, coord Value, ops imag
 
 	samp := interp.resolveSampler(si.Sampler)
 	if samp == nil {
-		samp = &Sampler{} // Default: nearest, repeat.
+		samp = &Sampler{LodMaxClamp: LodClampNone} // Default: nearest, repeat, no LOD clamp.
 	}
 
 	c := texelComponents(coord)

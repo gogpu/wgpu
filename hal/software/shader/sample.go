@@ -12,9 +12,10 @@ import (
 // array layer and mipmap selection). Every helper works on values; nothing
 // here allocates per texel.
 
-// lodClampNone is the level-of-detail ceiling a zero LodMaxClamp stands for,
-// as in the Vulkan backend (VK_LOD_CLAMP_NONE) and the WebGPU default of 32.
-const lodClampNone = 32
+// LodClampNone is the WebGPU default LodMaxClamp (32): no upper clamp. The
+// fallback samplers used when no sampler is bound set it; a Sampler's
+// LodMaxClamp is otherwise taken literally, as the HAL descriptor's is.
+const LodClampNone = 32
 
 // imageOperands are the image operands of a sample instruction the
 // interpreter honors.
@@ -142,11 +143,7 @@ func sampleView(tex *Texture2D, samp *Sampler, c Vec4, lambda float32, offset [3
 	if lambda != lambda { // NaN
 		lambda = 0
 	}
-	lodMax := samp.LodMaxClamp
-	if lodMax == 0 {
-		lodMax = lodClampNone
-	}
-	lambda = min(max(lambda, samp.LodMinClamp), lodMax)
+	lambda = min(max(lambda, samp.LodMinClamp), samp.LodMaxClamp)
 	filter := samp.MagFilter
 	if lambda > 0 {
 		filter = samp.MinFilter

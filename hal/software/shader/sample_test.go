@@ -88,7 +88,7 @@ func TestSampleViewOffsetAndFilters(t *testing.T) {
 
 	// Magnified (λ ≤ 0) the nearest MagFilter applies; with lodMinClamp 1
 	// the linear MinFilter blends both texels at the center.
-	mixed := &Sampler{MinFilter: FilterLinear, WrapU: WrapClampToEdge, WrapV: WrapClampToEdge}
+	mixed := &Sampler{MinFilter: FilterLinear, WrapU: WrapClampToEdge, WrapV: WrapClampToEdge, LodMaxClamp: LodClampNone}
 	if got := sampleView(row, mixed, Vec4{0.5, 0.5}, -1, [3]int{}); got != (Vec4{0, 1, 0, 1}) {
 		t.Errorf("magnified = %v, want the nearest texel (green)", got)
 	}

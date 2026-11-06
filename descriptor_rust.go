@@ -66,10 +66,19 @@ type SamplerDescriptor struct {
 	MagFilter    gputypes.FilterMode
 	MinFilter    gputypes.FilterMode
 	MipmapFilter gputypes.FilterMode
-	LodMinClamp  float32
-	LodMaxClamp  float32
-	Compare      gputypes.CompareFunction
-	Anisotropy   uint16
+	// LodMinClamp is the lowest mip level of detail the sampler reads. Its
+	// zero value is the WebGPU default 0: sampling may start at the base level.
+	LodMinClamp float32
+	// LodMaxClamp is the highest mip level of detail the sampler reads. The
+	// zero value means the WebGPU default 32, which clamps nothing, so a
+	// zero-value descriptor samples the whole mip chain on every backend.
+	//
+	// This deviates from the WebGPU spec and from Rust wgpu, which honor an
+	// explicit 0 and sample only the base level. To sample only the base level
+	// here, bind a texture view with MipLevelCount 1.
+	LodMaxClamp float32
+	Compare     gputypes.CompareFunction
+	Anisotropy  uint16
 }
 
 // ShaderModuleDescriptor describes shader module creation parameters.
