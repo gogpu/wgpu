@@ -34,7 +34,7 @@ func allocateCompressedStorage(ctx *gl.Context, target, internalFormat uint32, s
 	switch target {
 	case gl.TEXTURE_2D, gl.TEXTURE_CUBE_MAP:
 		ctx.TexStorage2D(target, levelCount, internalFormat, w, h)
-	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY:
+	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY, gl.TEXTURE_CUBE_MAP_ARRAY:
 		ctx.TexStorage3D(target, levelCount, internalFormat, w, h, int32(size.DepthOrArrayLayers))
 	default:
 		return fmt.Errorf("gles: a compressed texture cannot have target %#x", target)

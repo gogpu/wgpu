@@ -93,6 +93,9 @@ func (a *Adapter) open() (hal.OpenDevice, error) {
 		glslVersion:         glslVer,
 		shaderBindingLayout: glslVer.SupportsExplicitLocations(),
 		fullInstancing:      a.caps.FullyFeaturedInstancing,
+		cubeArrays:          a.caps.DownlevelFlags.Contains(gputypes.DownlevelFlagsCubeArrayTextures),
+		depthStencilTextureMode: glVersionAtLeast(a.caps.GLMajor, a.caps.GLMinor, a.caps.IsES,
+			[2]int{3, 1}, [2]int{4, 3}),
 	}
 
 	queue := &Queue{

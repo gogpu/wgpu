@@ -49,6 +49,15 @@ type Device struct {
 	// sets WriterFlags::DRAW_PARAMETERS from it (gles/device.rs).
 	fullInstancing bool
 
+	// cubeArrays is DownlevelFlagsCubeArrayTextures of the adapter: the
+	// context can create TEXTURE_CUBE_MAP_ARRAY textures (textureTarget).
+	cubeArrays bool
+
+	// depthStencilTextureMode: the context has DEPTH_STENCIL_TEXTURE_MODE (ES
+	// 3.1, GL 4.3), which selects the aspect a combined depth-stencil texture
+	// samples (bindSampledTexture).
+	depthStencilTextureMode bool
+
 	// views maps TextureView.NativeHandle values back to the views, for
 	// CreateBindGroup (newBindGroup).
 	views handletable.Table[TextureView]
@@ -227,36 +236,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		sampleCount = uint32(d.maxMSAA)
 	}
 
-	// Map dimension to GL target
-	target := uint32(gl.TEXTURE_2D)
-	switch desc.Dimension {
-	case gputypes.TextureDimension1D:
-		// GL doesn't have 1D textures in ES, use 2D with height=1
-		target = gl.TEXTURE_2D
-	case gputypes.TextureDimension2D:
-		switch {
-		case sampleCount > 1:
-			target = gl.TEXTURE_2D_MULTISAMPLE
-		case desc.Size.DepthOrArrayLayers > 1:
-			target = gl.TEXTURE_2D_ARRAY
-		default:
-			target = gl.TEXTURE_2D
-		}
-	case gputypes.TextureDimension3D:
-		target = gl.TEXTURE_3D
-	}
-
-	// Handle cube maps (only for single-sample textures)
-	if sampleCount <= 1 && desc.ViewFormats != nil {
-		for _, vf := range desc.ViewFormats {
-			if vf == desc.Format {
-				// Check if this should be a cube map
-				if desc.Size.DepthOrArrayLayers == 6 {
-					target = gl.TEXTURE_CUBE_MAP
-				}
-			}
-		}
-	}
+	target := textureTarget(desc.Dimension, desc.Size, sampleCount, d.cubeArrays)
 
 	glCtx.BindTexture(target, id)
 
@@ -812,10 +792,11 @@ func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandE
 		hal.Logger().Debug("gles: lazy VAO created", "vao", d.vao)
 	}
 	return &CommandEncoder{
-		glCtx:           glCtx,
-		vao:             d.vao,
-		maxTextureUnits: d.maxTextureUnits,
-		fullInstancing:  d.fullInstancing,
+		glCtx:                   glCtx,
+		vao:                     d.vao,
+		maxTextureUnits:         d.maxTextureUnits,
+		fullInstancing:          d.fullInstancing,
+		depthStencilTextureMode: d.depthStencilTextureMode,
 	}, nil
 }
 

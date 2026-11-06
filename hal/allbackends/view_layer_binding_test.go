@@ -133,7 +133,7 @@ func TestSampleCubeLayer(t *testing.T) {
 						return
 					}
 					enc := newEncoder(t, device)
-					target, staging := sampleCubeIntoTarget(t, device, enc, view, tc.dim)
+					target, staging := sampleCubeIntoTarget(t, device, enc, view, tc.dim, 0)
 					submit(t, device, enc)
 					checkTargetPixel(t, device, target, staging, layerColor(base))
 				})
@@ -143,8 +143,9 @@ func TestSampleCubeLayer(t *testing.T) {
 }
 
 // sampleCubeIntoTarget is sampleIntoTarget for a cube or cube-array view:
-// the fragment shader samples face 0 (of cube 0) with a nearest sampler.
-func sampleCubeIntoTarget(t *testing.T, device *wgpu.Device, enc *wgpu.CommandEncoder, view *wgpu.TextureView, dim gputypes.TextureViewDimension) (*wgpu.Texture, *wgpu.Buffer) {
+// the fragment shader samples face 0 (of cube `cube` of a cube-array view)
+// with a nearest sampler.
+func sampleCubeIntoTarget(t *testing.T, device *wgpu.Device, enc *wgpu.CommandEncoder, view *wgpu.TextureView, dim gputypes.TextureViewDimension, cube uint32) (*wgpu.Texture, *wgpu.Buffer) {
 	t.Helper()
 	target, targetView := newUsageTexture(t, device, wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageCopySrc)
 	staging := newPublicBuffer(t, device, 256*usageTargetSize, wgpu.BufferUsageCopyDst|wgpu.BufferUsageMapRead)
@@ -176,7 +177,7 @@ func sampleCubeIntoTarget(t *testing.T, device *wgpu.Device, enc *wgpu.CommandEn
 
 	texType, arrayIndex := "texture_cube<f32>", ""
 	if dim == gputypes.TextureViewDimensionCubeArray {
-		texType, arrayIndex = "texture_cube_array<f32>", "0, "
+		texType, arrayIndex = "texture_cube_array<f32>", fmt.Sprintf("%d, ", cube)
 	}
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
 		Label: "sample-cube", WGSL: fmt.Sprintf(sampleCubeWGSL, texType, arrayIndex),

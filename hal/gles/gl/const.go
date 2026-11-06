@@ -102,6 +102,9 @@ const (
 	TEXTURE_BASE_LEVEL     = 0x813C
 	TEXTURE_MAX_LEVEL      = 0x813D
 	TEXTURE_MAX_ANISOTROPY = 0x84FE
+	// DEPTH_STENCIL_TEXTURE_MODE selects the aspect a depth-stencil texture
+	// samples: DEPTH_COMPONENT or STENCIL_INDEX (ES 3.1, GL 4.3).
+	DEPTH_STENCIL_TEXTURE_MODE = 0x90EA
 
 	// Texture filter modes
 	NEAREST                = 0x2600
