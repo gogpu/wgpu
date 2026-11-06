@@ -665,7 +665,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	if !ok || dstTex.raw == nil {
 		return fmt.Errorf("dx12: WriteTexture: invalid texture type")
 	}
-	info, nativeLayout, sourceBPR, _, valid := writeTextureNativeLayout(dstTex, *layout, *size)
+	info, nativeLayout, sourceBPR, _, valid := writeTextureNativeLayout(dstTex, dst.Aspect, *layout, *size)
 	if !valid {
 		return fmt.Errorf("dx12: WriteTexture: layout cannot be represented")
 	}

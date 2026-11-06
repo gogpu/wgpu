@@ -48,9 +48,13 @@ type textureBlockInfo struct {
 	bytes  uint32
 }
 
-func textureBlockInfoForFormat(format gputypes.TextureFormat) (textureBlockInfo, bool) {
-	bytes := format.BlockCopySize()
-	if bytes == 0 {
+// textureBlockInfoForCopy is the texel block of a copy of aspect of format.
+// A depth/stencil copy moves one aspect, in that aspect's buffer layout
+// (WebGPU texel block copy footprint): the combined formats have no block
+// size of their own.
+func textureBlockInfoForCopy(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (textureBlockInfo, bool) {
+	bytes, ok := format.BlockCopySizeAspect(aspect)
+	if !ok || bytes == 0 {
 		return textureBlockInfo{}, false
 	}
 	if textureFormatIsBC(format) {
@@ -82,7 +86,7 @@ func textureFormatIsBC(format gputypes.TextureFormat) bool {
 }
 
 func textureFormatBlockHeight(format gputypes.TextureFormat) uint32 {
-	if info, ok := textureBlockInfoForFormat(format); ok {
+	if info, ok := textureBlockInfoForCopy(format, gputypes.TextureAspectAll); ok {
 		return info.height
 	}
 	return 1
@@ -175,11 +179,11 @@ func planPlacedBufferSlice(logicalOffset uint64, rowPitch, blockWidth, blockHeig
 	}, true
 }
 
-func normalizedCopyLayout(texture *Texture, layout hal.ImageDataLayout, size hal.Extent3D) (textureBlockInfo, uint32, uint32, bool) {
+func normalizedCopyLayout(texture *Texture, aspect gputypes.TextureAspect, layout hal.ImageDataLayout, size hal.Extent3D) (textureBlockInfo, uint32, uint32, bool) {
 	if texture == nil {
 		return textureBlockInfo{}, 0, 0, false
 	}
-	info, ok := textureBlockInfoForFormat(texture.format)
+	info, ok := textureBlockInfoForCopy(texture.format, aspect)
 	if !ok {
 		return textureBlockInfo{}, 0, 0, false
 	}
@@ -216,11 +220,11 @@ func textureWriteSourceOffset(base uint64, sourceBytesPerRow, blockRows, slice, 
 	return base + uint64(slice)*uint64(sourceBytesPerRow)*uint64(blockRows) + uint64(row)*uint64(sourceBytesPerRow)
 }
 
-func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size hal.Extent3D) (textureBlockInfo, hal.ImageDataLayout, uint32, uint32, bool) {
+func writeTextureNativeLayout(texture *Texture, aspect gputypes.TextureAspect, layout hal.ImageDataLayout, size hal.Extent3D) (textureBlockInfo, hal.ImageDataLayout, uint32, uint32, bool) {
 	if texture == nil || size.Width == 0 {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
-	info, ok := textureBlockInfoForFormat(texture.format)
+	info, ok := textureBlockInfoForCopy(texture.format, aspect)
 	if !ok {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
@@ -250,7 +254,7 @@ func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size
 	}
 	sourceBlockRows := (sourceRowsPerImage + info.height - 1) / info.height
 	nativeLayout.RowsPerImage = size.Height
-	if _, _, _, valid := normalizedCopyLayout(texture, nativeLayout, size); !valid {
+	if _, _, _, valid := normalizedCopyLayout(texture, aspect, nativeLayout, size); !valid {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
 	return info, nativeLayout, sourceBytesPerRow, sourceBlockRows, true
@@ -260,7 +264,7 @@ func writeTextureNativeLayout(texture *Texture, layout hal.ImageDataLayout, size
 // per D3D12 subresource or 3D depth slice. It returns nil when the layout
 // cannot be represented without changing logical byte addresses.
 func planBufferTextureCopies(texture *Texture, region hal.ImageCopyTexture, layout hal.ImageDataLayout, size hal.Extent3D) []bufferTextureCopyPlan {
-	info, rowPitch, blockRows, ok := normalizedCopyLayout(texture, layout, size)
+	info, rowPitch, blockRows, ok := normalizedCopyLayout(texture, region.Aspect, layout, size)
 	if !ok || texture == nil {
 		return nil
 	}

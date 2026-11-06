@@ -113,7 +113,7 @@ func TestTextureWriteSourceOffsetUsesBlockRows(t *testing.T) {
 
 func TestWriteTextureNativeLayoutRepacksUnalignedSourcePitch(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatRGBA8Unorm, gputypes.TextureDimension2D, 64, 8, 1, 1)
-	_, native, sourceBPR, _, ok := writeTextureNativeLayout(texture, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 2}, hal.Extent3D{Width: 64, Height: 2, DepthOrArrayLayers: 1})
+	_, native, sourceBPR, _, ok := writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 2}, hal.Extent3D{Width: 64, Height: 2, DepthOrArrayLayers: 1})
 	if !ok || native.BytesPerRow != 256 || sourceBPR != 300 {
 		t.Fatalf("native layout = %#v, source BPR = %d, ok=%v", native, sourceBPR, ok)
 	}
@@ -121,7 +121,7 @@ func TestWriteTextureNativeLayoutRepacksUnalignedSourcePitch(t *testing.T) {
 
 func TestWriteTextureNativeLayoutKeepsSourcePaddingOutOfStaging(t *testing.T) {
 	texture := testTexture(gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, 8, 8, 2, 1)
-	_, native, _, sourceBlockRows, ok := writeTextureNativeLayout(texture, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 8}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
+	_, native, _, sourceBlockRows, ok := writeTextureNativeLayout(texture, gputypes.TextureAspectAll, hal.ImageDataLayout{BytesPerRow: 300, RowsPerImage: 8}, hal.Extent3D{Width: 8, Height: 4, DepthOrArrayLayers: 2})
 	if !ok || sourceBlockRows != 2 || native.RowsPerImage != 4 {
 		t.Fatalf("native layout = %#v, source block rows = %d, ok=%v", native, sourceBlockRows, ok)
 	}
