@@ -474,11 +474,14 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 		rpd.DepthStencil = convertDepthStencilState(normalizeDepthStencilState(desc.DepthStencil))
 	}
 
-	// Multisample state
+	// Multisample state; a zero mask means every sample (pipeline_defaults.go).
+	// GPUSampleMask is an [EnforceRange] unsigned long, so the high bits
+	// are dropped here as the native and -tags rust builds drop them.
+	ms := normalizeMultisample(desc.Multisample)
 	rpd.Multisample = &browser.MultisampleStateJS{
-		Count:                  desc.Multisample.Count,
-		Mask:                   desc.Multisample.Mask,
-		AlphaToCoverageEnabled: desc.Multisample.AlphaToCoverageEnabled,
+		Count:                  ms.Count,
+		Mask:                   ms.Mask & sampleMaskDefault,
+		AlphaToCoverageEnabled: ms.AlphaToCoverageEnabled,
 	}
 
 	// Fragment state, with the WebGPU defaults for zero blend components

@@ -564,11 +564,12 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 		rDesc.DepthStencil = convertDepthStencilState(normalizeDepthStencilState(desc.DepthStencil))
 	}
 
-	// Multisample state.
+	// Multisample state; a zero mask means every sample (pipeline_defaults.go).
+	ms := normalizeMultisample(desc.Multisample)
 	rDesc.Multisample = rwgpu.MultisampleState{
-		Count:                  desc.Multisample.Count,
-		Mask:                   uint32(desc.Multisample.Mask), //nolint:gosec // mask truncation is intentional (WebGPU spec: 32-bit)
-		AlphaToCoverageEnabled: desc.Multisample.AlphaToCoverageEnabled,
+		Count:                  ms.Count,
+		Mask:                   uint32(ms.Mask), //nolint:gosec // mask truncation is intentional (WebGPU spec: 32-bit)
+		AlphaToCoverageEnabled: ms.AlphaToCoverageEnabled,
 	}
 
 	// Fragment state, with the WebGPU defaults for zero blend components; a

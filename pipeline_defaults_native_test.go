@@ -49,3 +49,14 @@ func TestRenderPipelineToHALSpecDefaults(t *testing.T) {
 		t.Error("toHAL changed the caller's blend state")
 	}
 }
+
+// TestRenderPipelineToHALSampleMask: a zero sample mask reaches the HAL as
+// every sample; any other mask unchanged.
+func TestRenderPipelineToHALSampleMask(t *testing.T) {
+	for _, c := range []struct{ in, want uint64 }{{0, 0xFFFFFFFF}, {0x1, 0x1}, {0xFFFFFFFF, 0xFFFFFFFF}} {
+		desc := &RenderPipelineDescriptor{Multisample: gputypes.MultisampleState{Count: 1, Mask: c.in}}
+		if got := desc.toHAL().Multisample.Mask; got != c.want {
+			t.Errorf("Mask %#x: HAL %#x, want %#x", c.in, got, c.want)
+		}
+	}
+}

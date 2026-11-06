@@ -78,6 +78,22 @@ func normalizeBlendComponent(c gputypes.BlendComponent) gputypes.BlendComponent 
 	return c
 }
 
+// sampleMaskDefault is GPUMultisampleState.mask's default, every sample
+// (index.bs, dictionary GPUMultisampleState).
+const sampleMaskDefault = 0xFFFFFFFF
+
+// normalizeMultisample maps a zero sample mask to every sample. A mask of 0 is
+// a value the spec allows, but it discards every fragment, so the zero value
+// of MultisampleState means "not set" (an exception to ADR-080 Rule 2,
+// LEAD-017). wgpu-native takes the mask literally and drew nothing for it.
+// Any other mask passes unchanged.
+func normalizeMultisample(m gputypes.MultisampleState) gputypes.MultisampleState {
+	if m.Mask == 0 {
+		m.Mask = sampleMaskDefault
+	}
+	return m
+}
+
 // normalizeColorTargets returns a copy of targets whose blend states are
 // normalized; a nil Blend (no blending) stays nil. The caller's slice and
 // blend states are not modified.

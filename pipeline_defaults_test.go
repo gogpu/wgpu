@@ -107,6 +107,16 @@ func TestNormalizeBlendOperation(t *testing.T) {
 // TestNormalizeDoesNotMutate checks that normalizing copies: the caller's
 // descriptor, target slice and blend state keep their zero values, so a
 // descriptor reused for another pipeline is unchanged.
+func TestNormalizeMultisample(t *testing.T) {
+	for _, c := range []struct{ in, want uint64 }{{0, 0xFFFFFFFF}, {0x1, 0x1}, {0xF0, 0xF0}, {0xFFFFFFFF, 0xFFFFFFFF}} {
+		in := gputypes.MultisampleState{Count: 4, Mask: c.in, AlphaToCoverageEnabled: true}
+		got := normalizeMultisample(in)
+		if got.Mask != c.want || got.Count != 4 || !got.AlphaToCoverageEnabled {
+			t.Errorf("Mask %#x: got %+v, want mask %#x and the other fields unchanged", c.in, got, c.want)
+		}
+	}
+}
+
 func TestNormalizeDoesNotMutate(t *testing.T) {
 	ds := &DepthStencilState{Format: gputypes.TextureFormatDepth24PlusStencil8}
 	blend := &gputypes.BlendState{}

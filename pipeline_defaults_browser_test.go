@@ -51,3 +51,19 @@ func TestConvertRenderPipelineDescriptorSpecDefaults(t *testing.T) {
 		t.Error("the conversion changed the caller's blend state")
 	}
 }
+
+// TestConvertRenderPipelineDescriptorSampleMask: a zero sample mask reaches
+// the browser as an explicit every-sample mask, any other mask unchanged.
+func TestConvertRenderPipelineDescriptorSampleMask(t *testing.T) {
+	for _, c := range []struct{ in, want uint64 }{{0, 0xFFFFFFFF}, {0x1, 0x1}, {0x1_0000_0003, 0x3}} {
+		obj := convertRenderPipelineDescriptor(&RenderPipelineDescriptor{Multisample: gputypes.MultisampleState{Count: 1, Mask: c.in}})
+		v := obj.Get("multisample").Get("mask")
+		if v.IsUndefined() {
+			t.Errorf("Mask %#x: mask left out", c.in)
+			continue
+		}
+		if got := uint64(v.Float()); got != c.want {
+			t.Errorf("Mask %#x: browser %#x, want %#x", c.in, got, c.want)
+		}
+	}
+}
