@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/vulkan/vk"
 )
 
 func TestConvertBufferImageCopyRegionsUsesArrayLayersFor2DTextures(t *testing.T) {
@@ -45,6 +46,40 @@ func TestConvertBufferImageCopyRegionsUsesDepthFor3DTextures(t *testing.T) {
 	}
 	if got.ImageOffset.Z != 1 || got.ImageExtent.Depth != 2 {
 		t.Fatalf("depth offset+extent = %d+%d, want 1+2", got.ImageOffset.Z, got.ImageExtent.Depth)
+	}
+}
+
+// TestConvertBufferImageCopyRegionsAspect: a buffer-texture copy names the
+// aspect of the texture format it copies, DEPTH for a depth format and STENCIL
+// for Stencil8, never COLOR (VUID-vkCmdCopyBufferToImage-imageSubresource-09105;
+// wgpu-hal vulkan/conv.rs map_subresource_layers with FormatAspects::new).
+func TestConvertBufferImageCopyRegionsAspect(t *testing.T) {
+	depth := vk.ImageAspectFlags(vk.ImageAspectDepthBit)
+	stencil := vk.ImageAspectFlags(vk.ImageAspectStencilBit)
+	tests := []struct {
+		name   string
+		format gputypes.TextureFormat
+		aspect gputypes.TextureAspect
+		want   vk.ImageAspectFlags
+	}{
+		{"color", gputypes.TextureFormatRGBA8Unorm, gputypes.TextureAspectAll, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
+		{"depth16 all", gputypes.TextureFormatDepth16Unorm, gputypes.TextureAspectAll, depth},
+		{"depth32float all", gputypes.TextureFormatDepth32Float, gputypes.TextureAspectAll, depth},
+		{"stencil8 all", gputypes.TextureFormatStencil8, gputypes.TextureAspectAll, stencil},
+		{"depth24plus-stencil8 stencil", gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureAspectStencilOnly, stencil},
+		{"depth32float-stencil8 depth", gputypes.TextureFormatDepth32FloatStencil8, gputypes.TextureAspectDepthOnly, depth},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			regions := []hal.BufferTextureCopy{{
+				TextureBase: hal.ImageCopyTexture{Aspect: tt.aspect},
+				Size:        hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+			}}
+			got := convertBufferImageCopyRegions(regions, tt.format, gputypes.TextureDimension2D)[0].ImageSubresource.AspectMask
+			if got != tt.want {
+				t.Fatalf("aspectMask = %#x, want %#x", got, tt.want)
+			}
+		})
 	}
 }
 
