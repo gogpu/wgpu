@@ -95,8 +95,8 @@ The software backend executes compute shaders on CPU through a built-in SPIR-V i
 - **Shader compilation:** WGSL → SPIR-V (via `gogpu/naga`), then interpreted instruction-by-instruction.
 - **Storage buffers:** Full read/write support. Buffer writes from compute shader are immediately visible.
 - **Atomics:** OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange, OpAtomicSMin/SMax/UMin/UMax.
-- **Workgroup shared memory:** zeroed at dispatch start, but each invocation works on its own copy, and the invocations of a workgroup run one after another. A shader that shares workgroup memory across a barrier (a reduction, a shared tile) is therefore refused by `CreateComputePipeline` with `wgpu.ErrWorkgroupBarrierUnsupported` rather than computed wrong; workgroups of one invocation run. The fix is planned for v0.34.8.
-- **Barriers:** see workgroup shared memory above.
+- **Workgroup shared memory:** one zero-initialized buffer per workgroup, shared by all its invocations; the workgroups run one after another. Reductions, shared tiles and workgroup atomics compute what the WGSL spec says (since v0.34.8; v0.34.7 refused such shaders with `wgpu.ErrWorkgroupBarrierUnsupported`, which stays declared but is no longer returned).
+- **Barriers:** a workgroup-scope barrier (`workgroupBarrier`, `storageBarrier`, `textureBarrier`) suspends each invocation until every invocation of its workgroup has reached it. The invocations of a workgroup run on one goroutine, round-robin from barrier to barrier, so memory is always coherent between them.
 - **Shader debugger:** DebugContext with breakpoints, JSON trace, watch variables. Zero overhead when disabled.
 - **Workgroup size:** Read from OpExecutionMode LocalSize in SPIR-V.
 - `CreateQuerySet` returns an error (timestamps not supported).
