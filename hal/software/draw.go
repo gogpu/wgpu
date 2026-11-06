@@ -1006,6 +1006,12 @@ func shaderValueToFloats(val shader.Value) []float32 {
 	case shader.TagVec4:
 		v := val.AsVec4()
 		return v[:]
+	case shader.TagUVec2, shader.TagUVec3, shader.TagUVec4,
+		shader.TagIVec2, shader.TagIVec3, shader.TagIVec4:
+		// Integer lanes by value, as integer outputs were carried before
+		// the interpreter held them as integers.
+		f := shader.Vec4ToFloat32(val)
+		return f[:val.Lanes()]
 	default:
 		return []float32{0}
 	}
@@ -1375,8 +1381,15 @@ func fragmentColor(v shader.Value, kind colorKind) [4]float32 {
 		}
 		return shader.Vec4ToFloat32(v)
 	}
-	if v.Tag == shader.TagUint32 || v.Tag == shader.TagInt32 {
+	switch v.Tag {
+	case shader.TagUint32, shader.TagInt32:
 		return intBitsColor([4]uint32{v.U[0], 0, 0, 1})
+	case shader.TagUVec2, shader.TagUVec3, shader.TagUVec4,
+		shader.TagIVec2, shader.TagIVec3, shader.TagIVec4:
+		// Integer vectors hold their lanes as words: exact.
+		bits := [4]uint32{0, 0, 0, 1}
+		copy(bits[:v.Lanes()], v.U[:v.Lanes()])
+		return intBitsColor(bits)
 	}
 	f := shader.Vec4ToFloat32(v)
 	var bits [4]uint32

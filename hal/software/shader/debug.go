@@ -25,6 +25,7 @@ package shader
 import (
 	"encoding/json"
 	"io"
+	"slices"
 )
 
 // Type name constants for trace output.
@@ -184,6 +185,14 @@ func formatTraceValue(val Value) any {
 		return [3]float32{val.F[0], val.F[1], val.F[2]}
 	case TagVec4:
 		return [4]float32{val.F[0], val.F[1], val.F[2], val.F[3]}
+	case TagUVec2, TagUVec3, TagUVec4:
+		return slices.Clone(val.U[:vectorLanes(val.Tag)])
+	case TagIVec2, TagIVec3, TagIVec4:
+		lanes := val.AsIVec()
+		return lanes[:vectorLanes(val.Tag)]
+	case TagBVec2, TagBVec3, TagBVec4:
+		lanes := val.AsBVec()
+		return lanes[:vectorLanes(val.Tag)]
 	case TagPointer:
 		ptr := val.AsPointer()
 		if ptr != nil {
@@ -193,6 +202,14 @@ func formatTraceValue(val Value) any {
 	default:
 		return nil
 	}
+}
+
+// wordVectorTypeNames are the trace type names of the integer and bool
+// vector tags, by tag.
+var wordVectorTypeNames = [...]string{
+	TagUVec2 - TagUVec2: "uvec2", TagUVec3 - TagUVec2: "uvec3", TagUVec4 - TagUVec2: "uvec4",
+	TagIVec2 - TagUVec2: "ivec2", TagIVec3 - TagUVec2: "ivec3", TagIVec4 - TagUVec2: "ivec4",
+	TagBVec2 - TagUVec2: "bvec2", TagBVec3 - TagUVec2: "bvec3", TagBVec4 - TagUVec2: "bvec4",
 }
 
 // valueTypeName returns a human-readable type name for trace output.
@@ -216,6 +233,8 @@ func valueTypeName(val Value) string {
 		return typeNamePtr
 	case TagArray:
 		return typeNameArray
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		return wordVectorTypeNames[val.Tag-TagUVec2]
 	default:
 		return ""
 	}
@@ -240,6 +259,9 @@ func valuesEqual(a, b Value) bool {
 		return a.F[0] == b.F[0] && a.F[1] == b.F[1] && a.F[2] == b.F[2]
 	case TagVec4:
 		return a.F == b.F
+	case TagUVec2, TagUVec3, TagUVec4, TagIVec2, TagIVec3, TagIVec4, TagBVec2, TagBVec3, TagBVec4:
+		n := vectorLanes(a.Tag)
+		return slices.Equal(a.U[:n], b.U[:n])
 	default:
 		// For complex types (Array, Pointer), fall back to pointer equality.
 		return a.Ref == b.Ref

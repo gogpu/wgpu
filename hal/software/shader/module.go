@@ -564,6 +564,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			// All other instructions inside a function body are recorded for interpretation.
 			if currentFunc != nil {
 				inst := decodeInstruction(opcode, operands)
+				// Types precede function bodies in SPIR-V, so the result
+				// type is known here.
+				inst.resShape = m.typeShape(inst.TypeID)
 				currentFunc.Instructions = append(currentFunc.Instructions, inst)
 			}
 		}
@@ -776,6 +779,40 @@ func (m *Module) PointeeType(ptrTypeID uint32) *TypeInfo {
 		return nil
 	}
 	return m.Types[ptrType.ElemType]
+}
+
+// typeShape returns the shape of type typeID: a 32-bit float, integer or
+// bool scalar, or a vector of 2 to 4 of them. Anything else (no type, f16,
+// f64, a matrix, array, struct, pointer or image) has no shape.
+func (m *Module) typeShape(typeID uint32) shape {
+	ti := m.Types[typeID]
+	if ti == nil {
+		return 0
+	}
+	if ti.Kind == TypeVector {
+		elem := m.Types[ti.ElemType]
+		if elem == nil {
+			return 0
+		}
+		return shapeOf(scalarKind(elem), int(ti.Components))
+	}
+	return shapeOf(scalarKind(ti), 1)
+}
+
+// scalarKind returns the lane kind of a 32-bit scalar type, kindNone for any
+// other type.
+func scalarKind(ti *TypeInfo) laneKind {
+	switch {
+	case ti.Kind == TypeBool:
+		return kindBool
+	case ti.Kind == TypeFloat && ti.Width == 32:
+		return kindFloat
+	case ti.Kind == TypeInt && ti.Width == 32 && ti.Signed:
+		return kindSint
+	case ti.Kind == TypeInt && ti.Width == 32:
+		return kindUint
+	}
+	return kindNone
 }
 
 // decodeInstruction builds an Instruction from an opcode and its operands.

@@ -339,6 +339,10 @@ func imageCoord3(coord Value) [3]int {
 	switch coord.Tag {
 	case TagVec2, TagVec3, TagVec4:
 		return [3]int{int(coord.F[0]), int(coord.F[1]), int(coord.F[2])}
+	case TagIVec2, TagIVec3, TagIVec4:
+		return [3]int{int(int32(coord.U[0])), int(int32(coord.U[1])), int(int32(coord.U[2]))}
+	case TagUVec2, TagUVec3, TagUVec4:
+		return [3]int{int(coord.U[0]), int(coord.U[1]), int(coord.U[2])}
 	case TagArray:
 		var xyz [3]int
 		for i, e := range coord.AsArray() {
