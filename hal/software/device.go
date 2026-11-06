@@ -362,21 +362,21 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 
 // spirvOptions are the naga SPIR-V options for the interpreter.
 //
-// SPIR-V 1.3 is the version the interpreter is tested on. Index and buffer
-// accesses are clamped by the shader (Restrict, OpExtInst UMin). Image loads
-// stay Unchecked: the interpreter answers the image queries naga's checked
-// loads emit (P1-SW-017), but the clamp arithmetic runs on integer vectors,
-// which the interpreter does not hold exactly yet (P1-SW-013). fetchTexel
-// clamps the coordinates itself, so an out-of-bounds load still reads inside
-// the texture. Binding arrays are Unchecked, as in every Rust wgpu-hal
-// backend.
+// SPIR-V 1.3 is the version the interpreter is tested on. Index, buffer and
+// image load accesses are clamped by the shader (Restrict: OpExtInst UMin
+// against the length, or the queried size, level count or sample count
+// minus one), as Rust wgpu-hal does on Vulkan without robust image access
+// (ADR-078 rule 8). An unsigned min sends a negative coordinate to the last
+// texel, which the WebGPU spec allows. fetchTexelLevel's own clamp stays as
+// a second line of defense. Binding arrays are Unchecked, as in every Rust
+// wgpu-hal backend.
 func spirvOptions() spirv.Options {
 	return spirv.Options{
 		Version: spirv.Version1_3,
 		BoundsCheckPolicies: backend.BoundsCheckPolicies{
 			Index:        backend.BoundsCheckRestrict,
 			Buffer:       backend.BoundsCheckRestrict,
-			ImageLoad:    backend.BoundsCheckUnchecked,
+			ImageLoad:    backend.BoundsCheckRestrict,
 			BindingArray: backend.BoundsCheckUnchecked,
 		},
 	}
