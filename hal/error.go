@@ -104,6 +104,16 @@ var (
 	// See: https://github.com/gogpu/wgpu/issues/24
 	ErrDriverBug = errors.New("hal: driver bug detected (API spec violation)")
 
+	// ErrTextureViewNotSampleable is returned by Device.CreateBindGroup when
+	// the backend cannot sample a texture view it was given. GLES has no
+	// texture views: a texture binds only through the GL target picked at its
+	// creation, and a sampler reads its layers from layer 0, so a view of
+	// another dimension (a 2d view of a layered texture, a cube view of a
+	// 12-layer one) or of a subset of the layers would read the wrong texels.
+	// The public package reports it as core.CreateBindGroupError of kind
+	// CreateBindGroupErrorTextureViewNotSampleable.
+	ErrTextureViewNotSampleable = errors.New("hal: the backend cannot sample this texture view")
+
 	// ErrInvalidMapRange indicates MapBuffer was called with an offset+size
 	// range that exceeds the buffer, or the buffer has no host-visible memory
 	// so it cannot be mapped on the CPU.

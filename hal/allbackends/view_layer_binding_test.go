@@ -7,11 +7,14 @@ package allbackends_test
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // layerColor is the texel every texel of array layer j is filled with: a
@@ -72,11 +75,14 @@ func newViewOf(t *testing.T, device *wgpu.Device, tex *wgpu.Texture, dim gputype
 func TestSampleArrayLayer(t *testing.T) {
 	const layers = 4
 	forEachBackendAdapter(t, 0, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		skipGLESViewDimension(t, b)
 		tex := newLayeredTexture(t, device, layers, wgpu.TextureUsageTextureBinding)
 		for _, k := range []uint32{0, 2, layers - 1} {
 			t.Run(fmt.Sprintf("layer%d", k), func(t *testing.T) {
 				view := newViewOf(t, device, tex, gputypes.TextureViewDimension2D, k, 1)
+				if b.name == "gles" {
+					checkNotSampleable(t, device, view, gputypes.TextureViewDimension2D)
+					return
+				}
 				enc := newEncoder(t, device)
 				target, staging := sampleIntoTarget(t, device, enc, view)
 				submit(t, device, enc)
@@ -111,7 +117,6 @@ fn fs_main() -> @location(0) vec4<f32> {
 func TestSampleCubeLayer(t *testing.T) {
 	const layers = 12
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsCubeArrayTextures, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		skipGLESViewDimension(t, b)
 		tex := newLayeredTexture(t, device, layers, wgpu.TextureUsageTextureBinding)
 		for _, tc := range []struct {
 			dim   gputypes.TextureViewDimension
@@ -123,6 +128,10 @@ func TestSampleCubeLayer(t *testing.T) {
 			for _, base := range []uint32{0, 6} {
 				t.Run(fmt.Sprintf("%s/base%d", tc.dim, base), func(t *testing.T) {
 					view := newViewOf(t, device, tex, tc.dim, base, tc.count)
+					if b.name == "gles" {
+						checkNotSampleable(t, device, view, tc.dim)
+						return
+					}
 					enc := newEncoder(t, device)
 					target, staging := sampleCubeIntoTarget(t, device, enc, view, tc.dim)
 					submit(t, device, enc)
@@ -284,14 +293,28 @@ func checkLayerTexel(t *testing.T, device *wgpu.Device, tex *wgpu.Texture, j uin
 	}
 }
 
-// skipGLESViewDimension skips GLES, which has no texture views: a texture's
-// GL target is fixed at creation from its size (a 2D texture with several
-// layers is TEXTURE_2D_ARRAY), and a view whose dimension needs another
-// target (a 2d view of one layer, a cube view of a 12-layer texture) cannot
-// be sampled. Rust wgpu-hal gles has the same limit (gfx-rs/wgpu#1574).
-func skipGLESViewDimension(t *testing.T, b overrideBackend) {
+// checkNotSampleable checks that a bind group sampling view fails with
+// CreateBindGroupErrorTextureViewNotSampleable. GLES has no texture views: a
+// texture's GL target is fixed at creation from its size (a 2D texture with
+// several layers is TEXTURE_2D_ARRAY), so a view whose dimension needs
+// another target (a 2d view of one layer, a cube view of a 12-layer texture)
+// must be refused instead of sampling the wrong texels. Rust wgpu-hal gles
+// has the same limit and only logs it (gfx-rs/wgpu#1574).
+func checkNotSampleable(t *testing.T, device *wgpu.Device, view *wgpu.TextureView, dim gputypes.TextureViewDimension) {
 	t.Helper()
-	if b.name == "gles" {
-		t.Skip("gles: no texture views, a view dimension other than the texture's GL target cannot be sampled")
+	bgl := newBindGroupLayout(t, device, gputypes.BindGroupLayoutEntry{
+		Binding: 0, Visibility: wgpu.ShaderStageFragment,
+		Texture: &gputypes.TextureBindingLayout{SampleType: gputypes.TextureSampleTypeFloat, ViewDimension: dim},
+	})
+	group, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Layout: bgl, Entries: []wgpu.BindGroupEntry{{Binding: 0, TextureView: view}},
+	})
+	if err == nil {
+		group.Release()
+	}
+	var bgErr *core.CreateBindGroupError
+	if !errors.As(err, &bgErr) || bgErr.Kind != core.CreateBindGroupErrorTextureViewNotSampleable ||
+		!errors.Is(err, hal.ErrTextureViewNotSampleable) {
+		t.Fatalf("CreateBindGroup: error %v, want CreateBindGroupErrorTextureViewNotSampleable", err)
 	}
 }
