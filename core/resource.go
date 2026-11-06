@@ -32,7 +32,8 @@ type Adapter struct {
 	DownlevelCapabilities gputypes.DownlevelCapabilities
 	// StencilCopyNeedsBlit is hal.Capabilities.StencilCopyNeedsBlit: the
 	// backend cannot write the stencil aspect of a combined depth-stencil
-	// format from a buffer (Device.RequireStencilAspectUpload).
+	// format from a buffer, and the frontend blits instead
+	// (Device.StencilUploadNeedsBlit).
 	StencilCopyNeedsBlit bool
 
 	// === HAL integration fields ===
@@ -150,6 +151,11 @@ type Device struct {
 	//
 	// Reference: wgpu-core device/resource.rs Device.tracker (DeviceTracker)
 	tracker *DeviceTracker
+
+	// stencilBlit holds the frontend's stencil upload blit resources, built
+	// on the first stencil upload that needs them (StencilBlitResources).
+	// A pointer, so Device stays copyable for the ID-based API.
+	stencilBlit *stencilBlitSlot
 }
 
 // Backend returns the backend type of the device's adapter.
@@ -193,6 +199,7 @@ func NewDevice(
 		trackerIndices: NewTrackerIndexAllocators(),
 		destroyQueue:   NewDestroyQueue(),
 		tracker:        NewDeviceTracker(),
+		stencilBlit:    &stencilBlitSlot{},
 		Label:          label,
 		Features:       features,
 		Limits:         limits,
@@ -266,6 +273,11 @@ func (d *Device) Destroy() {
 	}
 
 	untrackResource(uintptr(unsafe.Pointer(d))) //nolint:gosec // debug tracking uses pointer as unique ID
+
+	// Release the stencil blit resources first: their pipelines and layouts
+	// defer their destruction into the destroy queue, which FlushAll below
+	// runs while the HAL device is still alive.
+	d.disposeStencilBlit()
 
 	// Flush all deferred resource destructions before destroying the device.
 	// At this point the GPU should be idle (caller should have called WaitIdle
@@ -1090,6 +1102,14 @@ type TextureView struct {
 	MipLevelCount uint32
 	Format        gputypes.TextureFormat
 	Aspect        gputypes.TextureAspect
+
+	// InternalUsage are usages the frontend's own commands may use the view
+	// with although the application did not create the texture with them:
+	// the stencil upload blit renders into a texture created only COPY_DST
+	// (Dawn's internal usages, MakeInternalUsageScope). The renderable-view
+	// check accepts them. Zero for every view the application creates.
+	// Read-only: set when the view is built and never written after.
+	InternalUsage gputypes.TextureUsage
 }
 
 // Sampler represents a texture sampler with HAL integration.

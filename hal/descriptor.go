@@ -77,9 +77,12 @@ type Capabilities struct {
 	// Queue.WriteTexture cannot write the stencil aspect of a combined
 	// depth-stencil format (Depth24PlusStencil8, Depth32FloatStencil8): GL
 	// uploads depth and stencil only together. Stencil8, depth aspects and
-	// reading the stencil aspect back are unaffected. The frontend must not
-	// pass such a copy to the backend; Dawn lowers it to a stencil-writing
-	// draw (BlitBufferToDepthStencil.cpp). Only GLES sets it.
+	// reading the stencil aspect back are unaffected. The frontend never
+	// passes such a copy to the backend: it uploads the stencil bytes into an
+	// R8Uint texture and writes the stencil with draws, as Dawn does
+	// (src/dawn/native/BlitBufferToDepthStencil.cpp). The backend must allow
+	// a render pass on the destination (the frontend creates every
+	// depth/stencil texture render-attachable). Only GLES sets it.
 	StencilCopyNeedsBlit bool
 }
 
