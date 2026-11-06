@@ -258,11 +258,36 @@ func TestTextureUsageToMTL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := textureUsageToMTL(tt.usage)
+			got := textureUsageToMTL(gputypes.TextureFormatRGBA8Unorm, tt.usage)
 			if got != tt.expect {
 				t.Errorf("textureUsageToMTL(%v) = %v, want %v", tt.usage, got, tt.expect)
 			}
 		})
+	}
+}
+
+// TestTextureUsagePixelFormatView checks that only the combined depth/stencil
+// formats get PixelFormatView (Rust wgpu-hal src/metal/conv.rs
+// map_texture_usage), whatever the WebGPU usage.
+func TestTextureUsagePixelFormatView(t *testing.T) {
+	tests := []struct {
+		format gputypes.TextureFormat
+		want   bool
+	}{
+		{gputypes.TextureFormatDepth24PlusStencil8, true},
+		{gputypes.TextureFormatDepth32FloatStencil8, true},
+		{gputypes.TextureFormatDepth24Plus, false},
+		{gputypes.TextureFormatDepth32Float, false},
+		{gputypes.TextureFormatStencil8, false},
+		{gputypes.TextureFormatRGBA8Unorm, false},
+	}
+	for _, tt := range tests {
+		for _, usage := range []gputypes.TextureUsage{0, gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageTextureBinding} {
+			got := textureUsageToMTL(tt.format, usage)&MTLTextureUsagePixelFormatView != 0
+			if got != tt.want {
+				t.Errorf("textureUsageToMTL(%s, %v) PixelFormatView = %t, want %t", tt.format, usage, got, tt.want)
+			}
+		}
 	}
 }
 

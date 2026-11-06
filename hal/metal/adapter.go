@@ -39,6 +39,55 @@ func (a *Adapter) mapTextureFormat(format gputypes.TextureFormat) MTLPixelFormat
 	}
 }
 
+// mapViewFormat returns the Metal pixel format of a view of a texture in
+// textureFormat, as Rust wgpu-hal src/metal/adapter.rs map_view_format does.
+// Metal samples the depth plane through a view in the combined pixel format,
+// so a view of the stencil plane of a combined depth/stencil texture needs
+// X24_Stencil8 (over Depth24UnormStencil8 storage) or X32_Stencil8. Any other
+// view of a combined texture, its depth plane included, takes the texture's
+// own pixel format.
+//
+// Rust wgpu-core hands the HAL the combined format for a view of a depth or
+// stencil component (src/resource.rs create_texture_view). Our core passes the
+// view format as given, so a view format that is the combined format or one
+// of its components (Depth24Plus, Depth32Float, Stencil8) is resolved here,
+// and Stencil8 selects the stencil plane as the StencilOnly aspect does.
+func (a *Adapter) mapViewFormat(textureFormat, viewFormat gputypes.TextureFormat, aspect gputypes.TextureAspect) MTLPixelFormat {
+	if viewFormat == gputypes.TextureFormatUndefined {
+		viewFormat = textureFormat
+	}
+	if !isCombinedDepthStencilFormat(textureFormat) || !isDepthStencilComponent(viewFormat, textureFormat) {
+		return a.mapTextureFormat(viewFormat)
+	}
+	stencil := aspect == gputypes.TextureAspectStencilOnly ||
+		(viewFormat == gputypes.TextureFormatStencil8 && aspect != gputypes.TextureAspectDepthOnly)
+	if !stencil {
+		return a.mapTextureFormat(textureFormat)
+	}
+	if textureFormat == gputypes.TextureFormatDepth24PlusStencil8 && a.formatDepth24Stencil8 {
+		return MTLPixelFormatX24Stencil8
+	}
+	return MTLPixelFormatX32Stencil8
+}
+
+// isDepthStencilComponent reports whether viewFormat is combinedFormat itself
+// or one of its depth and stencil components. The component cases are Rust
+// wgpu-types TextureFormat::is_depth_stencil_component.
+func isDepthStencilComponent(viewFormat, combinedFormat gputypes.TextureFormat) bool {
+	switch combinedFormat {
+	case gputypes.TextureFormatDepth24PlusStencil8:
+		return viewFormat == combinedFormat ||
+			viewFormat == gputypes.TextureFormatDepth24Plus ||
+			viewFormat == gputypes.TextureFormatStencil8
+	case gputypes.TextureFormatDepth32FloatStencil8:
+		return viewFormat == combinedFormat ||
+			viewFormat == gputypes.TextureFormatDepth32Float ||
+			viewFormat == gputypes.TextureFormatStencil8
+	default:
+		return false
+	}
+}
+
 // Open opens a logical device with the requested features and limits.
 func (a *Adapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
 	device, err := newDevice(a)

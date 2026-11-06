@@ -233,7 +233,7 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	}
 	_ = MsgSend(texDesc, Sel("setSampleCount:"), uintptr(sampleCount))
 
-	usage := textureUsageToMTL(desc.Usage)
+	usage := textureUsageToMTL(desc.Format, desc.Usage)
 	_ = MsgSend(texDesc, Sel("setUsage:"), uintptr(usage))
 
 	// Select storage mode based on GPU family and sample count.
@@ -312,11 +312,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
-	format := desc.Format
-	if format == gputypes.TextureFormatUndefined {
-		format = mtlTexture.format
+	pixelFormat := d.adapter.mapViewFormat(mtlTexture.format, desc.Format, desc.Aspect)
+	if pixelFormat == MTLPixelFormatInvalid {
+		// As in CreateTexture: Metal aborts on an invalid pixel format, so
+		// a view format without a Metal mapping is an error, never a call.
+		return nil, fmt.Errorf("metal: texture view format %v (texture %v, aspect %v) has no Metal pixel format",
+			desc.Format, mtlTexture.format, desc.Aspect)
 	}
-	pixelFormat := d.adapter.mapTextureFormat(format)
 
 	baseMip := desc.BaseMipLevel
 	mipCount := desc.MipLevelCount
