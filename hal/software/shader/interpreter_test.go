@@ -886,12 +886,14 @@ func BenchmarkSPIRVVertexShaderExecution(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	start := ExecutedInstructions()
 	for i := 0; i < b.N; i++ {
 		inputs := map[uint32]Value{
 			idxVarID: ValUint(uint32(i % 3)),
 		}
 		_, _ = m.Execute("vs_main", inputs)
 	}
+	reportInstrs(b, start)
 }
 
 func BenchmarkSPIRVFragmentShaderExecution(b *testing.B) {
@@ -902,9 +904,11 @@ func BenchmarkSPIRVFragmentShaderExecution(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	start := ExecutedInstructions()
 	for i := 0; i < b.N; i++ {
 		_, _ = m.Execute("fs_main", nil)
 	}
+	reportInstrs(b, start)
 }
 
 // testMakeValues is defined in testhelpers_test.go

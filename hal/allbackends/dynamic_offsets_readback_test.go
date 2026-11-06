@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"testing"
 
@@ -132,14 +133,75 @@ func TestDynamicOffsetsRender(t *testing.T) {
 	}
 }
 
+// dynamicComputeShaderWholeTag is dynamicComputeShader reading the uniform
+// tag as a whole vec4<u32> and extracting its x afterwards (OpLoad of the
+// vector, then OpCompositeExtract), where dynamicComputeShader loads x
+// through an access chain.
+const dynamicComputeShaderWholeTag = `
+struct U { tag: vec4<u32>, pad: vec4<u32> }
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var<storage, read> s: array<u32>;
+@group(0) @binding(2) var<storage, read_write> out: array<u32>;
+
+@compute @workgroup_size(1)
+fn main() {
+    let tag = u.tag;
+    out[0] = tag.x;
+    out[1] = s[0];
+    out[2] = s[1];
+    out[3] = arrayLength(&s) * 100u + arrayLength(&out);
+}
+`
+
+// dynamicWideTags do not fit the 24-bit mantissa of a float32.
+var dynamicWideTags = [2]uint32{0xDEADBEEF, 0xCAFEF00D}
+
+// TestDynamicOffsetsComputeWideTag is TestDynamicOffsetsCompute with uniform
+// tags above 2^24, loaded as a whole vector. The software interpreter holds
+// integer vector lanes as float32 until ADR-078 step 5 and rounds them: an
+// expected failure there.
+func TestDynamicOffsetsComputeWideTag(t *testing.T) {
+	forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
+		got := runDynamicOffsetsCompute(t, device, dynamicOffsetsCase{name: "wide-tag"}, dynamicComputeShaderWholeTag, dynamicWideTags)
+		const lengths = 4*100 + 4
+		slotWords := dynamicSlot / 4
+		got = append(got[:4:4], got[slotWords:slotWords+4]...)
+		want := []uint32{dynamicWideTags[0], 7, 8, lengths, dynamicWideTags[1], 9, 10, lengths}
+		if !b.software {
+			checkWords(t, "dispatches 2 and 1", got, want)
+			return
+		}
+		// The float32 roundings of 0xDEADBEEF and 0xCAFEF00D.
+		wrongToday := []uint32{0xDEADBF00, 7, 8, lengths, 0xCAFEF000, 9, 10, lengths}
+		switch {
+		case slices.Equal(got, wrongToday):
+		case slices.Equal(got, want):
+			t.Errorf("fixed early: flip to a plain check of %#x (ADR-078 step 5)", want)
+		default:
+			t.Errorf("got %#x, neither today's wrong output %#x nor want %#x (ADR-078 step 5)", got, wrongToday, want)
+		}
+	})
+}
+
 func checkDynamicOffsetsCompute(t *testing.T, device *wgpu.Device, c dynamicOffsetsCase) {
+	t.Helper()
+	got := runDynamicOffsetsCompute(t, device, c, dynamicComputeShader, dynamicUniformTags)
+	const lengths = 4*100 + 4
+	slotWords := dynamicSlot / 4
+	checkWords(t, "dispatch 2 (offsets 0, 256, 0)", got[:4], []uint32{dynamicUniformTags[0], 7, 8, lengths})
+	checkWords(t, "dispatch 1 (offsets 256, 512, 256)", got[slotWords:slotWords+4], []uint32{dynamicUniformTags[1], 9, 10, lengths})
+}
+
+// runDynamicOffsetsCompute dispatches wgsl twice with the same bind group,
+// the uniform slots holding tags, and returns the output buffer's words.
+func runDynamicOffsetsCompute(t *testing.T, device *wgpu.Device, c dynamicOffsetsCase, wgsl string, tags [2]uint32) []uint32 {
 	t.Helper()
 	stages := wgpu.ShaderStageCompute
 	bgl := newDynamicLayout(t, device, stages, c.reverse, gputypes.BufferBindingTypeStorage)
-	pipeline := newDynamicComputePipeline(t, device, bgl)
+	pipeline := newDynamicComputePipeline(t, device, bgl, wgsl)
 
 	uniform := newDynamicUniformBuffer(t, device, func(slot int) []uint32 {
-		return []uint32{dynamicUniformTags[slot], 0, 0, 0}
+		return []uint32{tags[slot], 0, 0, 0}
 	})
 	storage := newDynamicStorageBuffer(t, device)
 	const outSize = 2 * dynamicSlot
@@ -179,12 +241,7 @@ func checkDynamicOffsetsCompute(t *testing.T, device *wgpu.Device, c dynamicOffs
 	if _, err := device.Queue().Submit(cmd); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	got := readPublicBuffer(t, staging, outSize/4)
-
-	const lengths = 4*100 + 4
-	slotWords := dynamicSlot / 4
-	checkWords(t, "dispatch 2 (offsets 0, 256, 0)", got[:4], []uint32{11, 7, 8, lengths})
-	checkWords(t, "dispatch 1 (offsets 256, 512, 256)", got[slotWords:slotWords+4], []uint32{22, 9, 10, lengths})
+	return readPublicBuffer(t, staging, outSize/4)
 }
 
 func checkDynamicOffsetsRender(t *testing.T, device *wgpu.Device, c dynamicOffsetsCase) {
@@ -294,12 +351,12 @@ func newDynamicShader(t *testing.T, device *wgpu.Device, wgsl string) *wgpu.Shad
 	return shader
 }
 
-func newDynamicComputePipeline(t *testing.T, device *wgpu.Device, bgl *wgpu.BindGroupLayout) *wgpu.ComputePipeline {
+func newDynamicComputePipeline(t *testing.T, device *wgpu.Device, bgl *wgpu.BindGroupLayout, wgsl string) *wgpu.ComputePipeline {
 	t.Helper()
 	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
 		Label:      "dynamic-offsets",
 		Layout:     newDynamicPipelineLayout(t, device, bgl),
-		Module:     newDynamicShader(t, device, dynamicComputeShader),
+		Module:     newDynamicShader(t, device, wgsl),
 		EntryPoint: "main",
 	})
 	if err != nil {

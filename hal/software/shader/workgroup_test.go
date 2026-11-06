@@ -325,9 +325,11 @@ func BenchmarkWorkgroupGlobalSum(b *testing.B) {
 	partials := make([]uint32, (n+255)/256)
 	params := []uint32{n}
 	b.ReportAllocs()
+	start := ExecutedInstructions()
 	for b.Loop() {
 		dispatchWords(b, m, [3]uint32{uint32(len(partials)), 1, 1}, input, partials, params)
 	}
+	reportInstrs(b, start)
 }
 
 // TestWorkgroupVectorTileWholeLoad: a workgroup array of vectors stored per

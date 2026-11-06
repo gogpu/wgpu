@@ -692,6 +692,9 @@ func (interp *interpreter) run() error {
 		}
 
 		pc++
+		if countInstr {
+			countExecuted()
+		}
 
 		switch inst.Opcode {
 		case OpLabel:
