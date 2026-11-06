@@ -31,18 +31,22 @@ func TestBitFieldOps(t *testing.T) {
 	}
 }
 
-// TestIntLaneOps checks that the bit ops apply per lane of an integer vector
-// in either form, keeping signed scalars signed.
+// TestIntLaneOps checks that the bit ops apply per lane of an integer vector,
+// give the result shape's kind, and keep signed scalars signed. The legacy
+// forms (a float vector, an array of scalars) still read by value.
 func TestIntLaneOps(t *testing.T) {
-	if got := mapIntLanes(ValVec2(7, 255), false, bitCount); got.Tag != TagVec2 || got.F[0] != 3 || got.F[1] != 8 {
-		t.Errorf("countOneBits(vec2(7, 255)) = %v %v, want (3, 8)", got.Tag, got.F)
+	uvec2 := shapeOf(kindUint, 2)
+	if got := mapIntLanes(uvec2, ValUVec(2, [4]uint32{7, 0xFFFFFFFF}), bitCount); got.Tag != TagUVec2 || got.U[0] != 3 || got.U[1] != 32 {
+		t.Errorf("countOneBits(uvec2(7, 0xFFFFFFFF)) = %+v, want (3, 32)", got)
+	}
+	if got := mapIntLanes(uvec2, ValVec2(7, 255), bitCount); got.Tag != TagUVec2 || got.U[0] != 3 || got.U[1] != 8 {
+		t.Errorf("countOneBits(vec2(7, 255)) = %+v, want uvec2(3, 8)", got)
 	}
 	arr := ValArray([]Value{ValUint(1), ValUint(0x80000000)})
-	got := mapIntLanes(arr, false, bitCount)
-	if a := got.AsArray(); len(a) != 2 || a[0].U[0] != 1 || a[1].U[0] != 1 {
-		t.Errorf("countOneBits(array) = %v", got)
+	if got := mapIntLanes(uvec2, arr, bitCount); got.Tag != TagUVec2 || got.U[0] != 1 || got.U[1] != 1 {
+		t.Errorf("countOneBits(array) = %+v, want uvec2(1, 1)", got)
 	}
-	if got := mapIntLanes(ValInt(-1), true, bitCount); got.Tag != TagInt32 || got.U[0] != 32 {
+	if got := mapIntLanes(0, ValInt(-1), bitCount); got.Tag != TagInt32 || got.U[0] != 32 {
 		t.Errorf("countOneBits(-1) = %v %v, want i32 32", got.Tag, got.U)
 	}
 }

@@ -1096,7 +1096,7 @@ func TestMatrixCompositeConstruct(t *testing.T) {
 	interp.values[13] = ValVec4(0, 0, 0, 1)
 
 	// Construct mat4x4 from 4 column vectors.
-	result := interp.compositeConstruct(3, []uint32{10, 11, 12, 13})
+	result := interp.compositeConstruct(0, 3, []uint32{10, 11, 12, 13})
 
 	if result.Tag != TagArray {
 		t.Fatalf("result tag = %d, want TagArray", result.Tag)

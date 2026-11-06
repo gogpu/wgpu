@@ -185,7 +185,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = c.x; dst[1] = c.y;
 }`,
 			src: []uint32{5, 9, 10, 18}, dstLen: 2, want: []uint32{15, 27}, step: 3,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "uvec2_times_const",
@@ -196,7 +195,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = c.x; dst[1] = c.y;
 }`,
 			src: []uint32{5, 7}, dstLen: 2, want: []uint32{15, 28}, step: 3,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "ivec2_div",
@@ -207,7 +205,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = bitcast<u32>(c.x); dst[1] = bitcast<u32>(c.y);
 }`,
 			src: []uint32{10, 21, 2, 3}, dstLen: 2, want: []uint32{5, 7}, step: 4,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "uvec2_equal_bvec2",
@@ -218,7 +215,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = select(0u, 1u, e.x); dst[1] = select(0u, 1u, e.y);
 }`,
 			src: []uint32{1, 2, 1, 3}, dstLen: 2, want: []uint32{1, 0}, step: 4,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "fvec2_less_bvec2",
@@ -229,7 +225,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = select(0u, 1u, l.x); dst[1] = select(0u, 1u, l.y);
 }`,
 			src: []uint32{1, 5, 2, 3}, dstLen: 2, want: []uint32{1, 0}, step: 4,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "const_vec4_times_vec4",
@@ -242,7 +237,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[4] = u32(q.x); dst[5] = u32(q.y); dst[6] = u32(q.z); dst[7] = u32(q.w);
 }`,
 			src: []uint32{2, 3, 4, 5}, dstLen: 8, want: []uint32{2, 6, 12, 20, 2, 6, 12, 20}, step: 3,
-			wrongToday: make([]uint32, 8),
 		},
 		{
 			name: "vec_times_matrix",
@@ -263,7 +257,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = s.x; dst[1] = s.y;
 }`,
 			src: []uint32{5, 7}, dstLen: 2, want: []uint32{12, 12}, step: 3,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "u32_above_2p24_through_vector",
@@ -272,7 +265,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = v.x; dst[1] = v.y;
 }`,
 			src: []uint32{1<<24 + 1}, dstLen: 2, want: []uint32{1<<24 + 1, 1}, step: 3,
-			wrongToday: []uint32{1 << 24, 1},
 		},
 		{
 			name: "bitcast_vec2_into_construct",
@@ -282,7 +274,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = v.x; dst[1] = v.y; dst[2] = v.z; dst[3] = v.w;
 }`,
 			src: []uint32{1, 2}, dstLen: 4, want: []uint32{f32bits(1), f32bits(2), 5, 7}, step: 3,
-			wrongToday: []uint32{0, 5, 7, 0},
 		},
 		{
 			name: "all",
@@ -312,7 +303,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = d.x; dst[1] = d.y;
 }`,
 			dstLen: 2, want: []uint32{6, 8}, step: 3, tex: gridTexture(7, 9),
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "module_const_array_of_vec4_dynamic_index",
@@ -336,8 +326,7 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[0] = v.x; dst[1] = v.y; dst[2] = v.z; dst[3] = v.w;
 }`,
 			src:    []uint32{1<<24 + 1, 0xFFFFFFFF, 0x80000001, 3},
-			dstLen: 4, want: []uint32{1<<24 + 1, 0xFFFFFFFF, 0x80000001, 3}, step: 5,
-			wrongToday: []uint32{1 << 24, 0xFFFFFFFF, 0x80000000, 3},
+			dstLen: 4, want: []uint32{1<<24 + 1, 0xFFFFFFFF, 0x80000001, 3}, step: 3,
 		},
 	})
 }
@@ -451,7 +440,7 @@ func TestTypedValuesExact(t *testing.T) {
 	dst[0] = m.x; dst[1] = m.y;
 }`,
 			src: []uint32{0xFFFFFFFF, 1, 2, 0xFFFFFFFE}, dstLen: 2, want: []uint32{0xFFFFFFFF, 0xFFFFFFFE},
-			wrongToday: []uint32{0, 0}, step: 4,
+			step: 4,
 		},
 		{
 			name: "uvec2_sub_mul_shift",
@@ -465,10 +454,10 @@ func TestTypedValuesExact(t *testing.T) {
 	dst[0] = d.x; dst[1] = d.y; dst[2] = m.x; dst[3] = m.y;
 	dst[4] = l.x; dst[5] = l.y; dst[6] = r.x; dst[7] = r.y;
 }`,
-			src:        []uint32{0x80000001, 3, 2, 1},
-			dstLen:     8,
-			want:       []uint32{0x7FFFFFFF, 2, 2, 3, 4, 6, 0x20000000, 1},
-			wrongToday: make([]uint32, 8), step: 4,
+			src:    []uint32{0x80000001, 3, 2, 1},
+			dstLen: 8,
+			want:   []uint32{0x7FFFFFFF, 2, 2, 3, 4, 6, 0x20000000, 1},
+			step:   4,
 		},
 		{
 			name: "bvec2_construct",
@@ -476,8 +465,7 @@ func TestTypedValuesExact(t *testing.T) {
 	let b = vec2<bool>(src[0] > 1u, src[1] > 1u);
 	dst[0] = select(0u, 1u, b.x); dst[1] = select(0u, 1u, b.y);
 }`,
-			src: []uint32{2, 0}, dstLen: 2, want: []uint32{1, 0},
-			wrongToday: []uint32{0, 0}, step: 3,
+			src: []uint32{2, 0}, dstLen: 2, want: []uint32{1, 0}, step: 3,
 		},
 		{
 			name: "select_bvec3",
@@ -487,8 +475,7 @@ func TestTypedValuesExact(t *testing.T) {
 	dst[0] = r.x; dst[1] = r.y; dst[2] = r.z;
 }`,
 			src:    []uint32{1, 1<<24 + 1, 3, 0xFFFFFFFF, 5, 0x80000001, 1, 0, 1},
-			dstLen: 3, want: []uint32{0xFFFFFFFF, 1<<24 + 1, 0x80000001},
-			wrongToday: []uint32{1, 1 << 24, 3}, step: 3,
+			dstLen: 3, want: []uint32{0xFFFFFFFF, 1<<24 + 1, 0x80000001}, step: 3,
 		},
 		{
 			name: "fvec4_comparisons",
@@ -516,13 +503,6 @@ func TestTypedValuesExact(t *testing.T) {
 				0, 1, 1, 1,
 				0, 1, 0, 0,
 				1, 0, 1, 1,
-			},
-			wrongToday: []uint32{
-				1, 1, 1, 1,
-				0, 0, 0, 0,
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-				0, 0, 0, 0,
 			},
 			step: 4,
 		},
@@ -553,10 +533,10 @@ func TestTypedValuesExact(t *testing.T) {
 	dst[0] = q.x; dst[1] = q.y; dst[2] = q.z; dst[3] = q.w;
 	dst[4] = r.x; dst[5] = r.y; dst[6] = r.z; dst[7] = r.w;
 }`,
-			src:        []uint32{7, 0x80000000, 0xFFFFFFF9, 9, 0, 0xFFFFFFFF, 2, 4},
-			dstLen:     8,
-			want:       []uint32{7, 0x80000000, 0xFFFFFFFD, 2, 0, 0, 0xFFFFFFFF, 1},
-			wrongToday: make([]uint32, 8), step: 4,
+			src:    []uint32{7, 0x80000000, 0xFFFFFFF9, 9, 0, 0xFFFFFFFF, 2, 4},
+			dstLen: 8,
+			want:   []uint32{7, 0x80000000, 0xFFFFFFFD, 2, 0, 0, 0xFFFFFFFF, 1},
+			step:   4,
 		},
 		{
 			name: "u32_div_rem_by_zero",
@@ -568,10 +548,10 @@ func TestTypedValuesExact(t *testing.T) {
 	dst[0] = q.x; dst[1] = q.y; dst[2] = r.x; dst[3] = r.y;
 	dst[4] = src[0] / src[2]; dst[5] = src[0] % src[2];
 }`,
-			src:        []uint32{0xFFFFFFFF, 10, 0, 3},
-			dstLen:     6,
-			want:       []uint32{0xFFFFFFFF, 3, 0, 1, 0xFFFFFFFF, 0},
-			wrongToday: []uint32{0, 0, 0, 0, 0xFFFFFFFF, 0}, step: 4,
+			src:    []uint32{0xFFFFFFFF, 10, 0, 3},
+			dstLen: 6,
+			want:   []uint32{0xFFFFFFFF, 3, 0, 1, 0xFFFFFFFF, 0},
+			step:   4,
 		},
 	})
 }
@@ -693,9 +673,9 @@ func TestTypedValuesTextureStoreRuntimeCoord(t *testing.T) {
 	const texel = 0xFF0080FF
 	want := make([]uint32, 16)
 	want[3*4+3] = texel // (2, 1) + (1, 2)
-	wrongToday := make([]uint32, 16)
-	wrongToday[0] = texel // the integer vector add gives (0, 0)
-	expectCurrent(t, bytesToWords(img.Data), wrongToday, want, 3)
+	if got := bytesToWords(img.Data); !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }
 
 // TestTypedValuesWorkgroupPrologue runs naga's workgroup zero-initializing

@@ -177,12 +177,9 @@ func (interp *interpreter) initWorkgroupVariables() {
 	}
 }
 
-// uvec3ToValue converts a [3]uint32 to an Array of 3 Uint32 values.
-// SPIR-V represents compute built-ins as uvec3 (vector of 3 uint32).
+// uvec3ToValue returns a compute built-in (a vec3<u32>) as a uvec3 value.
 func uvec3ToValue(v [3]uint32) Value {
-	// Store as an Array of 3 Uint32 values for proper integer handling.
-	arr := []Value{ValUint(v[0]), ValUint(v[1]), ValUint(v[2])}
-	return ValArray(arr)
+	return ValUVec(3, [4]uint32{v[0], v[1], v[2]})
 }
 
 // DispatchCompute executes a compute shader for all invocations in the dispatch.
@@ -413,18 +410,25 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 	if !ok {
 		return ValUint(0)
 	}
+	// The result and the stored word have the instruction's integer kind, so
+	// an atomic<i32> reads back as i32.
+	k := kindUint
+	if inst.resShape.kind() == kindSint {
+		k = kindSint
+	}
 	store := func(v Value) { interp.storeThrough(pv, v) }
+	storeWord := func(w uint32) { interp.storeThrough(pv, scalarOfKind(k, w)) }
 
 	switch inst.Opcode {
 	case OpAtomicIAdd:
 		if len(inst.Operands) >= 4 {
 			addVal := toUint32(interp.values[inst.Operands[3]])
-			store(ValUint(oldVal + addVal))
+			storeWord(oldVal + addVal)
 		}
 	case OpAtomicISub:
 		if len(inst.Operands) >= 4 {
 			subVal := toUint32(interp.values[inst.Operands[3]])
-			store(ValUint(oldVal - subVal))
+			storeWord(oldVal - subVal)
 		}
 	case OpAtomicExchange:
 		if len(inst.Operands) >= 4 {
@@ -436,7 +440,7 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			newVal := toUint32(interp.values[inst.Operands[4]])
 			comparator := toUint32(interp.values[inst.Operands[5]])
 			if oldVal == comparator {
-				store(ValUint(newVal))
+				storeWord(newVal)
 			}
 		}
 	case OpAtomicSMin:
@@ -444,14 +448,14 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v < old {
-				store(ValUint(uint32(v)))
+				storeWord(uint32(v))
 			}
 		}
 	case OpAtomicUMin:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v < oldVal {
-				store(ValUint(v))
+				storeWord(v)
 			}
 		}
 	case OpAtomicSMax:
@@ -459,20 +463,20 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 			v := int32(toUint32(interp.values[inst.Operands[3]]))
 			old := int32(oldVal)
 			if v > old {
-				store(ValUint(uint32(v)))
+				storeWord(uint32(v))
 			}
 		}
 	case OpAtomicUMax:
 		if len(inst.Operands) >= 4 {
 			v := toUint32(interp.values[inst.Operands[3]])
 			if v > oldVal {
-				store(ValUint(v))
+				storeWord(v)
 			}
 		}
 	case OpAtomicIIncrement:
-		store(ValUint(oldVal + 1))
+		storeWord(oldVal + 1)
 	case OpAtomicIDecrement:
-		store(ValUint(oldVal - 1))
+		storeWord(oldVal - 1)
 	case OpAtomicLoad:
 		// Load is just a read -- no modification.
 	case OpAtomicStore:
@@ -483,7 +487,7 @@ func (interp *interpreter) executeAtomicOp(inst Instruction) Value {
 		return Value{}
 	}
 
-	return ValUint(oldVal)
+	return scalarOfKind(k, oldVal)
 }
 
 // atomicLoad reads the 32-bit integer an atomic op's pointer points at. An

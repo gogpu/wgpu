@@ -17,34 +17,16 @@ func floatNotEqual(a, b float32, ordered bool) bool {
 	return a != b
 }
 
-// mapIntLanes applies f to every integer lane of v: a scalar keeps its tag,
-// an integer vector held as a float vector or an array of scalars keeps its
-// form. signed says how a float lane converts to and from its bits.
-func mapIntLanes(v Value, signed bool, f func(uint32) uint32) Value {
-	switch v.Tag {
-	case TagVec2, TagVec3, TagVec4:
-		out := v
-		for i := range vectorSize(v.Tag) {
-			r := f(laneBits(v.F[i], signed))
-			if signed {
-				out.F[i] = float32(int32(r))
-			} else {
-				out.F[i] = float32(r)
-			}
-		}
-		return out
-	case TagArray:
-		src := v.AsArray()
-		dst := make([]Value, len(src))
-		for i, e := range src {
-			dst[i] = mapIntLanes(e, signed, f)
-		}
-		return ValArray(dst)
-	case TagInt32:
-		return ValInt(int32(f(v.U[0])))
-	default:
-		return ValUint(f(toUint32(v)))
+// mapIntLanes applies f to every lane of the integer value v; the result has
+// shape s (or, when s is zero, the shape of v).
+func mapIntLanes(s shape, v Value, f func(uint32) uint32) Value {
+	s = shapeOr(s, v, kindUint)
+	k, n := s.kind(), s.lanes()
+	w := laneWords(v, k)
+	for i := range n {
+		w[i] = f(w[i])
 	}
+	return laneValue(k, n, w)
 }
 
 // laneBits returns the 32-bit pattern of an integer held as a float lane,
@@ -64,101 +46,46 @@ func laneBits(f float32, signed bool) uint32 {
 }
 
 // bitcast implements OpBitcast between 32-bit integer and float scalars and
-// vectors: the source's bits under the result type, tagged by it, so later
-// stores and arithmetic see an integer as an integer and a float as a
-// float. An integer vector result is an array of integer scalars, exact for
-// every bit pattern. Any other bitcast (pointers, other widths, a source
-// whose type is unknown) copies the value, as all of them did before.
-func (interp *interpreter) bitcast(v Value, srcTypeID, dstTypeID uint32) Value {
-	src, n := interp.scalarLanes(srcTypeID)
-	dst, dstN := interp.scalarLanes(dstTypeID)
-	if src == nil || dst == nil || n != dstN {
+// vectors: the source's bits under the result shape s (or, when s is zero,
+// the shape of dstTypeID), so later stores and arithmetic see an integer as
+// an integer and a float as a float, exact for every bit pattern. Any other
+// bitcast (pointers, bools, other widths, a source whose type is unknown, a
+// lane count change) copies the value.
+func (interp *interpreter) bitcast(v Value, srcTypeID uint32, s shape, dstTypeID uint32) Value {
+	if s == 0 {
+		s = interp.module.typeShape(dstTypeID)
+	}
+	src := interp.module.typeShape(srcTypeID)
+	if src == 0 || s == 0 || src.kind() == kindBool || s.kind() == kindBool || src.lanes() != s.lanes() {
 		return v
 	}
-	if n == 1 {
-		return bitsAs(valueBits(v, src), dst)
+	var w [4]uint32
+	if src.kind() == kindFloat {
+		f := floatLanes(v)
+		for i := range src.lanes() {
+			w[i] = math.Float32bits(f[i])
+		}
+	} else {
+		w = laneWords(v, src.kind())
 	}
-	lanes := make([]Value, n)
-	for i := range lanes {
-		lanes[i] = bitsAs(valueBits(indexComposite(v, uint32(i)), src), dst)
-	}
-	if dst.Kind != TypeFloat {
-		return ValArray(lanes)
-	}
-	out := Value{Tag: vectorTag(n)}
-	for i, l := range lanes {
-		out.F[i] = l.F[0]
-	}
-	return out
+	return wordsValue(s, w)
 }
 
-// convertLanes applies the scalar conversion conv to every component of v,
-// whose result type is typeID: OpConvertFToS, OpConvertFToU, OpConvertSToF
-// and OpConvertUToF are component-wise. A float vector result is a float
-// vector; an integer one is an array of integer scalars, exact for every
-// value. A scalar, or a result type that is not a 32-bit vector, converts v
-// as a whole.
-func (interp *interpreter) convertLanes(v Value, typeID uint32, conv func(Value) Value) Value {
-	dst, n := interp.scalarLanes(typeID)
-	if dst == nil || n == 1 {
+// convertLanes applies the scalar conversion conv to every lane of v, with
+// result shape s: OpConvertFToS, OpConvertFToU, OpConvertSToF and
+// OpConvertUToF are lane-wise. A scalar, or a result without a shape (f16,
+// f64), converts v as a whole.
+func convertLanes(v Value, s shape, conv func(Value) Value) Value {
+	n := s.lanes()
+	if n <= 1 {
 		return conv(v)
 	}
-	lanes := make([]Value, n)
-	for i := range lanes {
-		lanes[i] = conv(indexComposite(v, uint32(i)))
+	k := s.kind()
+	var w [4]uint32
+	for i := range n {
+		w[i] = laneWord(k, conv(indexLane(v, i)))
 	}
-	if dst.Kind != TypeFloat {
-		return ValArray(lanes)
-	}
-	out := Value{Tag: vectorTag(n)}
-	for i, l := range lanes {
-		out.F[i] = toFloat32(l)
-	}
-	return out
-}
-
-// scalarLanes returns the 32-bit integer or float scalar type of a scalar
-// or vector type and its lane count, or nil for any other type.
-func (interp *interpreter) scalarLanes(typeID uint32) (*TypeInfo, int) {
-	ti := interp.typeInfo(typeID)
-	n := 1
-	if ti != nil && ti.Kind == TypeVector {
-		n = int(ti.Components)
-		ti = interp.typeInfo(ti.ElemType)
-	}
-	if ti == nil || ti.Width != 32 || (ti.Kind != TypeInt && ti.Kind != TypeFloat) || n < 1 || n > 4 {
-		return nil, 0
-	}
-	return ti, n
-}
-
-// valueBits returns the 32-bit pattern of a scalar value of type ti; a
-// float32 standing for an integer (a component of an integer vector) gives
-// the integer's bits.
-func valueBits(v Value, ti *TypeInfo) uint32 {
-	switch v.Tag {
-	case TagUint32, TagInt32:
-		return v.U[0]
-	case TagFloat32:
-		if ti.Kind == TypeInt {
-			return laneBits(v.F[0], ti.Signed)
-		}
-		return math.Float32bits(v.F[0])
-	default:
-		return 0
-	}
-}
-
-// bitsAs returns a 32-bit pattern as a scalar of type ti.
-func bitsAs(pattern uint32, ti *TypeInfo) Value {
-	switch {
-	case ti.Kind == TypeFloat:
-		return ValFloat(math.Float32frombits(pattern))
-	case ti.Signed:
-		return ValInt(int32(pattern))
-	default:
-		return ValUint(pattern)
-	}
+	return wordsValue(s, w)
 }
 
 // vectorTag returns the tag of an n-component float vector.

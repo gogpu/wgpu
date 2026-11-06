@@ -403,6 +403,17 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 			resultID := operands[1]
 			constituents := operands[2:]
+			m.ResultTypes[resultID] = operands[0]
+			if s := m.typeShape(operands[0]); s.lanes() >= 2 {
+				// A vector constant is a vector of its type's kind, not an
+				// array of scalars (ADR-078 rule 1).
+				var p lanePool
+				for _, cid := range constituents {
+					p.add(m.Constants[cid], s.kind())
+				}
+				m.Constants[resultID] = wordsValue(s, [4]uint32(p.w[:4]))
+				break
+			}
 			elems := make([]Value, len(constituents))
 			for i, cid := range constituents {
 				if v, ok := m.Constants[cid]; ok {
@@ -410,7 +421,6 @@ func ParseModule(words []uint32) (*Module, error) {
 				}
 			}
 			m.Constants[resultID] = ValArray(elems)
-			m.ResultTypes[resultID] = operands[0]
 
 		case OpConstantTrue:
 			if len(operands) >= 2 {
@@ -785,12 +795,20 @@ func (m *Module) PointeeType(ptrTypeID uint32) *TypeInfo {
 // bool scalar, or a vector of 2 to 4 of them. Anything else (no type, f16,
 // f64, a matrix, array, struct, pointer or image) has no shape.
 func (m *Module) typeShape(typeID uint32) shape {
-	ti := m.Types[typeID]
+	if m == nil {
+		return 0
+	}
+	return typesShape(m.Types, typeID)
+}
+
+// typesShape is typeShape over a type table.
+func typesShape(types map[uint32]*TypeInfo, typeID uint32) shape {
+	ti := types[typeID]
 	if ti == nil {
 		return 0
 	}
 	if ti.Kind == TypeVector {
-		elem := m.Types[ti.ElemType]
+		elem := types[ti.ElemType]
 		if elem == nil {
 			return 0
 		}

@@ -114,7 +114,15 @@ const (
 // executeGLSLExtInst dispatches a GLSL.std.450 extended instruction.
 // instNum is the instruction number from the GLSL set.
 // operands are the remaining SPIR-V operands after the set ID and instruction number.
+// An integer result takes the shape of its first operand; glslExtInst takes
+// the instruction's precomputed result shape.
 func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32) Value {
+	return interp.glslExtInst(instNum, operands, 0)
+}
+
+// glslExtInst is executeGLSLExtInst with the instruction's result shape s,
+// which gives the kind and lane count of an integer result.
+func (interp *interpreter) glslExtInst(instNum uint32, operands []uint32, s shape) Value {
 	switch instNum {
 	// --- Scalar/vector unary float ops ---
 	case GLSLRound:
@@ -289,72 +297,43 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 			return float32(math.Min(math.Max(float64(x), float64(minVal)), float64(maxVal)))
 		})
 	case GLSLUClamp:
-		return interp.glslTernaryUint(operands, func(x, minVal, maxVal uint32) uint32 {
-			if x < minVal {
-				x = minVal
-			}
-			if x > maxVal {
-				x = maxVal
-			}
-			return x
+		return interp.glslIntLanes(operands, 3, s, kindUint, func(x, lo, hi uint32) uint32 {
+			return min(max(x, lo), hi)
 		})
 	case GLSLSClamp:
-		return interp.glslTernaryInt(operands, func(x, minVal, maxVal int32) int32 {
-			if x < minVal {
-				x = minVal
-			}
-			if x > maxVal {
-				x = maxVal
+		return interp.glslIntLanes(operands, 3, s, kindSint, func(x, lo, hi uint32) uint32 {
+			return uint32(min(max(int32(x), int32(lo)), int32(hi)))
+		})
+	case GLSLUMin:
+		return interp.glslIntLanes(operands, 2, s, kindUint, func(a, b, _ uint32) uint32 { return min(a, b) })
+	case GLSLUMax:
+		return interp.glslIntLanes(operands, 2, s, kindUint, func(a, b, _ uint32) uint32 { return max(a, b) })
+	case GLSLSMin:
+		return interp.glslIntLanes(operands, 2, s, kindSint, func(a, b, _ uint32) uint32 {
+			return uint32(min(int32(a), int32(b)))
+		})
+	case GLSLSMax:
+		return interp.glslIntLanes(operands, 2, s, kindSint, func(a, b, _ uint32) uint32 {
+			return uint32(max(int32(a), int32(b)))
+		})
+	case GLSLSAbs:
+		// abs(INT_MIN) wraps to INT_MIN, as WGSL defines it.
+		return interp.glslIntLanes(operands, 1, s, kindSint, func(x, _, _ uint32) uint32 {
+			if int32(x) < 0 {
+				return -x
 			}
 			return x
 		})
-	case GLSLUMin:
-		return interp.glslBinaryUint(operands, func(a, b uint32) uint32 {
-			if a < b {
-				return a
-			}
-			return b
-		})
-	case GLSLUMax:
-		return interp.glslBinaryUint(operands, func(a, b uint32) uint32 {
-			if a > b {
-				return a
-			}
-			return b
-		})
-	case GLSLSMin:
-		return interp.glslBinaryInt(operands, func(a, b int32) int32 {
-			if a < b {
-				return a
-			}
-			return b
-		})
-	case GLSLSMax:
-		return interp.glslBinaryInt(operands, func(a, b int32) int32 {
-			if a > b {
-				return a
-			}
-			return b
-		})
-	case GLSLSAbs:
-		if len(operands) >= 1 {
-			v := int32(toUint32(interp.values[operands[0]]))
-			if v < 0 {
-				return ValInt(-v)
-			}
-			return ValInt(v)
-		}
 	case GLSLSSign:
-		if len(operands) >= 1 {
-			v := int32(toUint32(interp.values[operands[0]]))
-			if v > 0 {
-				return ValInt(1)
+		return interp.glslIntLanes(operands, 1, s, kindSint, func(x, _, _ uint32) uint32 {
+			switch v := int32(x); {
+			case v > 0:
+				return 1
+			case v < 0:
+				return math.MaxUint32 // -1
 			}
-			if v < 0 {
-				return ValInt(-1)
-			}
-			return ValInt(0)
-		}
+			return 0
+		})
 
 	// --- Interpolation / mix ---
 	case GLSLFMix, GLSLIMix:
@@ -474,17 +453,11 @@ func (interp *interpreter) executeGLSLExtInst(instNum uint32, operands []uint32)
 
 	// --- Bit find ---
 	case GLSLFindILsb:
-		if len(operands) >= 1 {
-			return ValInt(findILsb(toUint32(interp.values[operands[0]])))
-		}
+		return interp.glslIntLanes(operands, 1, s, kindSint, func(x, _, _ uint32) uint32 { return uint32(findILsb(x)) })
 	case GLSLFindSMsb:
-		if len(operands) >= 1 {
-			return ValInt(findSMsb(int32(toUint32(interp.values[operands[0]]))))
-		}
+		return interp.glslIntLanes(operands, 1, s, kindSint, func(x, _, _ uint32) uint32 { return uint32(findSMsb(int32(x))) })
 	case GLSLFindUMsb:
-		if len(operands) >= 1 {
-			return ValInt(findUMsb(toUint32(interp.values[operands[0]])))
-		}
+		return interp.glslIntLanes(operands, 1, s, kindSint, func(x, _, _ uint32) uint32 { return uint32(findUMsb(x)) })
 
 	// --- Fragment interpolation (software: identity after rasterization) ---
 	case GLSLInterpolateAtCentroid, GLSLInterpolateAtSample, GLSLInterpolateAtOffset:
@@ -556,46 +529,30 @@ func (interp *interpreter) glslTernaryFloat(operands []uint32, fn func(float32, 
 	return ValFloat(fn(toFloat32(a), toFloat32(b), toFloat32(c)))
 }
 
-// glslBinaryUint applies a binary uint function.
-func (interp *interpreter) glslBinaryUint(operands []uint32, fn func(uint32, uint32) uint32) Value {
-	if len(operands) < 2 {
-		return ValUint(0)
+// glslIntLanes applies fn lane-wise to the first n (1 to 3) integer operands,
+// as raw words; fn gives the op its signed or unsigned meaning. The result
+// has shape s, or when s is zero the shape of the first operand with lanes
+// of kind k (an integer operand keeps its own signedness).
+func (interp *interpreter) glslIntLanes(operands []uint32, n int, s shape, k laneKind, fn func(x, y, z uint32) uint32) Value {
+	if len(operands) < n {
+		return scalarOfKind(k, 0)
 	}
-	a := toUint32(interp.values[operands[0]])
-	b := toUint32(interp.values[operands[1]])
-	return ValUint(fn(a, b))
-}
-
-// glslBinaryInt applies a binary signed int function.
-func (interp *interpreter) glslBinaryInt(operands []uint32, fn func(int32, int32) int32) Value {
-	if len(operands) < 2 {
-		return ValInt(0)
+	a := interp.values[operands[0]]
+	s = shapeOr(s, a, k)
+	k, lanes := s.kind(), s.lanes()
+	x := laneWords(a, k)
+	var y, z [4]uint32
+	if n > 1 {
+		y = laneWords(interp.values[operands[1]], k)
 	}
-	a := int32(toUint32(interp.values[operands[0]]))
-	b := int32(toUint32(interp.values[operands[1]]))
-	return ValInt(fn(a, b))
-}
-
-// glslTernaryUint applies a ternary uint function.
-func (interp *interpreter) glslTernaryUint(operands []uint32, fn func(uint32, uint32, uint32) uint32) Value {
-	if len(operands) < 3 {
-		return ValUint(0)
+	if n > 2 {
+		z = laneWords(interp.values[operands[2]], k)
 	}
-	a := toUint32(interp.values[operands[0]])
-	b := toUint32(interp.values[operands[1]])
-	c := toUint32(interp.values[operands[2]])
-	return ValUint(fn(a, b, c))
-}
-
-// glslTernaryInt applies a ternary signed int function.
-func (interp *interpreter) glslTernaryInt(operands []uint32, fn func(int32, int32, int32) int32) Value {
-	if len(operands) < 3 {
-		return ValInt(0)
+	var r [4]uint32
+	for i := range lanes {
+		r[i] = fn(x[i], y[i], z[i])
 	}
-	a := int32(toUint32(interp.values[operands[0]]))
-	b := int32(toUint32(interp.values[operands[1]]))
-	c := int32(toUint32(interp.values[operands[2]]))
-	return ValInt(fn(a, b, c))
+	return laneValue(k, lanes, r)
 }
 
 // =============================================================================

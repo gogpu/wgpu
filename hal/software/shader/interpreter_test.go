@@ -547,12 +547,20 @@ func TestFloatBinOp(t *testing.T) {
 	}
 }
 
-func TestIntBinOp(t *testing.T) {
-	add := func(a, b uint32) uint32 { return a + b }
-
-	result := intBinOp(ValUint(3), ValUint(4), add)
+func TestIntBinary(t *testing.T) {
+	result := intBinary(OpIAdd, 0, ValUint(3), ValUint(4))
 	if u, ok := testIsUint32(result); !ok || u != 7 {
-		t.Errorf("intBinOp = %v, want 7", result)
+		t.Errorf("intBinary(IAdd) = %v, want 7", result)
+	}
+	// Lane-wise, wrapping, exact above 2^24, with the result shape's kind.
+	result = intBinary(OpIAdd, shapeOf(kindUint, 2), ValUVec(2, [4]uint32{0xFFFFFFFF, 1 << 24}), ValUVec(2, [4]uint32{2, 1}))
+	if result.Tag != TagUVec2 || result.U[0] != 1 || result.U[1] != 1<<24+1 {
+		t.Errorf("intBinary(IAdd, uvec2) = %+v, want {1, 2^24+1}", result)
+	}
+	// Arithmetic shift keeps the sign; the amount is taken modulo 32.
+	result = intBinary(OpShiftRightArithmetic, shapeOf(kindSint, 1), ValInt(-8), ValUint(33))
+	if result.Tag != TagInt32 || result.AsInt32() != -4 {
+		t.Errorf("intBinary(-8 >> 33) = %+v, want -4", result)
 	}
 }
 
@@ -664,7 +672,7 @@ func TestVectorShuffle(t *testing.T) {
 	// Shuffle from two Vec4: select components (3, 4) -> (w from first, x from second)
 	v1 := Vec4{10, 20, 30, 40}
 	v2 := Vec4{50, 60, 70, 80}
-	got := vectorShuffle(m, 3, ValVec4From(v1), ValVec4From(v2), []uint32{3, 4})
+	got := vectorShuffle(m, 0, 3, ValVec4From(v1), ValVec4From(v2), []uint32{3, 4})
 	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("vectorShuffle returned %T, want Vec2", got)
@@ -675,60 +683,56 @@ func TestVectorShuffle(t *testing.T) {
 	}
 }
 
+// TestIntDivisionOps checks the WGSL results of integer division and
+// remainder (wgsl/index.bs "Arithmetic Expressions"): x / 0 = x, x % 0 = 0,
+// INT_MIN / -1 = INT_MIN, INT_MIN % -1 = 0; OpSMod takes the divisor's sign
+// and OpSRem the dividend's.
 func TestIntDivisionOps(t *testing.T) {
+	sint, unsigned := shapeOf(kindSint, 1), shapeOf(kindUint, 1)
 	tests := []struct {
-		name string
-		op   func(a, b uint32) Value
-		a, b uint32
-		want Value
+		name   string
+		opcode uint16
+		s      shape
+		a, b   Value
+		want   uint32
 	}{
-		{"udiv", func(a, b uint32) Value {
-			if b == 0 {
-				return ValUint(0)
-			}
-			return ValUint(a / b)
-		}, 10, 3, ValUint(3)},
-		{"udiv_zero", func(a, b uint32) Value {
-			if b == 0 {
-				return ValUint(0)
-			}
-			return ValUint(a / b)
-		}, 10, 0, ValUint(0)},
-		{"umod", func(a, b uint32) Value {
-			if b == 0 {
-				return ValUint(0)
-			}
-			return ValUint(a % b)
-		}, 10, 3, ValUint(1)},
+		{"udiv", OpUDiv, unsigned, ValUint(10), ValUint(3), 3},
+		{"udiv_zero", OpUDiv, unsigned, ValUint(10), ValUint(0), 10},
+		{"udiv_big", OpUDiv, unsigned, ValUint(0xFFFFFFFF), ValUint(1), 0xFFFFFFFF},
+		{"umod", OpUMod, unsigned, ValUint(10), ValUint(3), 1},
+		{"umod_zero", OpUMod, unsigned, ValUint(10), ValUint(0), 0},
+		{"sdiv", OpSDiv, sint, ValInt(-7), ValInt(2), uint32(0xFFFFFFFD)},
+		{"sdiv_zero", OpSDiv, sint, ValInt(-7), ValInt(0), uint32(0xFFFFFFF9)},
+		{"sdiv_min", OpSDiv, sint, ValInt(math.MinInt32), ValInt(-1), 0x80000000},
+		{"srem", OpSRem, sint, ValInt(-7), ValInt(3), uint32(0xFFFFFFFF)},
+		{"srem_min", OpSRem, sint, ValInt(math.MinInt32), ValInt(-1), 0},
+		{"smod", OpSMod, sint, ValInt(-7), ValInt(3), 2},
+		{"smod_neg_divisor", OpSMod, sint, ValInt(7), ValInt(-3), uint32(0xFFFFFFFE)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.op(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("%s(%d, %d) = %v, want %v", tt.name, tt.a, tt.b, got, tt.want)
+			got := intDivRem(tt.opcode, tt.s, tt.a, tt.b)
+			if got.Tag != tt.s.tag() || got.U[0] != tt.want {
+				t.Errorf("%s = %+v, want word %#x", tt.name, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestBitwiseOps(t *testing.T) {
-	and := func(a, b uint32) uint32 { return a & b }
-	or := func(a, b uint32) uint32 { return a | b }
-	xor := func(a, b uint32) uint32 { return a ^ b }
-
 	tests := []struct {
 		name string
-		op   func(uint32, uint32) uint32
+		op   uint16
 		a, b uint32
 		want uint32
 	}{
-		{"and", and, 0xFF00, 0x0FF0, 0x0F00},
-		{"or", or, 0xFF00, 0x00FF, 0xFFFF},
-		{"xor", xor, 0xFF00, 0xFF00, 0x0000},
+		{"and", OpBitwiseAnd, 0xFF00, 0x0FF0, 0x0F00},
+		{"or", OpBitwiseOr, 0xFF00, 0x00FF, 0xFFFF},
+		{"xor", OpBitwiseXor, 0xFF00, 0xFF00, 0x0000},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := intBinOp(ValUint(tt.a), ValUint(tt.b), tt.op)
+			got := intBinary(tt.op, 0, ValUint(tt.a), ValUint(tt.b))
 			u := got.AsUint32()
 			ok := got.Tag == TagUint32
 			if !ok || u != tt.want {

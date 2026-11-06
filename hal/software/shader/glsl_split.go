@@ -106,25 +106,19 @@ func splitModf(x Value) (fract, whole Value) {
 		})
 }
 
+// splitFrexp returns the significands of the lanes of x, in [0.5, 1), and
+// their exponents as an i32 scalar or vector of the same lane count.
 func splitFrexp(x Value) (significand, exponent Value) {
 	switch x.Tag {
-	case TagVec2:
-		s0, e0 := math.Frexp(float64(x.F[0]))
-		s1, e1 := math.Frexp(float64(x.F[1]))
-		return ValVec2(float32(s0), float32(s1)), ValArray([]Value{ValInt(int32(e0)), ValInt(int32(e1))})
-	case TagVec3:
-		s0, e0 := math.Frexp(float64(x.F[0]))
-		s1, e1 := math.Frexp(float64(x.F[1]))
-		s2, e2 := math.Frexp(float64(x.F[2]))
-		return ValVec3(float32(s0), float32(s1), float32(s2)),
-			ValArray([]Value{ValInt(int32(e0)), ValInt(int32(e1)), ValInt(int32(e2))})
-	case TagVec4:
-		s0, e0 := math.Frexp(float64(x.F[0]))
-		s1, e1 := math.Frexp(float64(x.F[1]))
-		s2, e2 := math.Frexp(float64(x.F[2]))
-		s3, e3 := math.Frexp(float64(x.F[3]))
-		return ValVec4(float32(s0), float32(s1), float32(s2), float32(s3)),
-			ValArray([]Value{ValInt(int32(e0)), ValInt(int32(e1)), ValInt(int32(e2)), ValInt(int32(e3))})
+	case TagVec2, TagVec3, TagVec4:
+		n := vectorLanes(x.Tag)
+		sig := Value{Tag: x.Tag}
+		var e [4]int32
+		for i := range n {
+			s, ei := math.Frexp(float64(x.F[i]))
+			sig.F[i], e[i] = float32(s), int32(ei)
+		}
+		return sig, ValIVec(n, e)
 	default:
 		s, e := math.Frexp(float64(toFloat32(x)))
 		return ValFloat(float32(s)), ValInt(int32(e))
@@ -148,6 +142,11 @@ func expComponent(exp Value, i int) int {
 			return int(exp.F[i])
 		}
 		return int(exp.F[0])
+	case TagIVec2, TagIVec3, TagIVec4, TagUVec2, TagUVec3, TagUVec4:
+		if i >= 0 && i < vectorLanes(exp.Tag) {
+			return int(int32(exp.U[i]))
+		}
+		return int(int32(exp.U[0]))
 	case TagInt32:
 		return int(exp.AsInt32())
 	case TagUint32:

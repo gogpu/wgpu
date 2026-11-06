@@ -467,13 +467,9 @@ func TestAtomicCompareExchange(t *testing.T) {
 }
 
 func TestUvec3ToValue(t *testing.T) {
-	v := uvec3ToValue([3]uint32{10, 20, 30})
-	arr, ok := testIsArray(v)
-	if !ok || len(arr) != 3 {
-		t.Fatalf("uvec3ToValue returned %T, want Array of 3", v)
-	}
-	if toUint32(arr[0]) != 10 || toUint32(arr[1]) != 20 || toUint32(arr[2]) != 30 {
-		t.Errorf("uvec3ToValue = %v, want [10, 20, 30]", arr)
+	v := uvec3ToValue([3]uint32{10, 1<<24 + 1, 0xFFFFFFFF})
+	if v.Tag != TagUVec3 || v.U != [4]uint32{10, 1<<24 + 1, 0xFFFFFFFF} {
+		t.Errorf("uvec3ToValue = %+v, want uvec3(10, 2^24+1, 0xFFFFFFFF)", v)
 	}
 }
 

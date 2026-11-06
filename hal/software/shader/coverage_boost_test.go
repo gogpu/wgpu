@@ -974,7 +974,7 @@ func TestVectorShuffleVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := vectorShuffle(m, tt.typeID, tt.v1, tt.v2, tt.components)
+			got := vectorShuffle(m, 0, tt.typeID, tt.v1, tt.v2, tt.components)
 			if !valueApproxEqual(got, tt.want, 1e-6) {
 				t.Errorf("vectorShuffle = %v, want %v", got, tt.want)
 			}
@@ -987,21 +987,21 @@ func TestVectorShuffleNoTypeInfo(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}} // No type info for result
 
 	// Should fall back to inferring from component count.
-	got := vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2, 3})
+	got := vectorShuffle(m, 0, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2, 3})
 	_, ok := testIsVec4(got)
 	if !ok {
 		t.Errorf("vectorShuffle fallback returned %T, want Vec4", got)
 	}
 
 	// 3-component fallback
-	got = vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2})
+	got = vectorShuffle(m, 0, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1, 2})
 	_, ok = testIsVec3(got)
 	if !ok {
 		t.Errorf("vectorShuffle 3-component fallback returned %T, want Vec3", got)
 	}
 
 	// 2-component fallback
-	got = vectorShuffle(m, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1})
+	got = vectorShuffle(m, 0, 999, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 1})
 	_, ok = testIsVec2(got)
 	if !ok {
 		t.Errorf("vectorShuffle 2-component fallback returned %T, want Vec2", got)
@@ -1009,7 +1009,7 @@ func TestVectorShuffleNoTypeInfo(t *testing.T) {
 
 	// 1-component fallback (degenerate case: vectorShuffle returns ValFloat(0)
 	// because it only handles 2/3/4 component counts)
-	got = vectorShuffle(m, 999, ValVec4From(Vec4{42, 0, 0, 0}), ValVec4From(Vec4{0, 0, 0, 0}), []uint32{0})
+	got = vectorShuffle(m, 0, 999, ValVec4From(Vec4{42, 0, 0, 0}), ValVec4From(Vec4{0, 0, 0, 0}), []uint32{0})
 	_, ok = testIsFloat32(got)
 	if !ok {
 		t.Fatalf("vectorShuffle 1-component returned %T, want Float32", got)
@@ -1489,15 +1489,17 @@ func TestValueByteSizeDefault(t *testing.T) {
 func TestDivisionByZeroOpcodes(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 
+	// WGSL: x / 0 = x and x % 0 = 0 (wgsl/index.bs "Arithmetic Expressions").
 	tests := []struct {
 		name   string
 		opcode uint16
+		want   uint32
 	}{
-		{"sdiv_by_zero", OpSDiv},
-		{"udiv_by_zero", OpUDiv},
-		{"smod_by_zero", OpSMod},
-		{"umod_by_zero", OpUMod},
-		{"srem_by_zero", OpSRem},
+		{"sdiv_by_zero", OpSDiv, 42},
+		{"udiv_by_zero", OpUDiv, 42},
+		{"smod_by_zero", OpSMod, 0},
+		{"umod_by_zero", OpUMod, 0},
+		{"srem_by_zero", OpSRem, 0},
 	}
 
 	for _, tt := range tests {
@@ -1522,10 +1524,9 @@ func TestDivisionByZeroOpcodes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run() failed: %v", err)
 			}
-			// Result should be zero on division by zero.
 			got := toUint32(interp.values[10])
-			if got != 0 {
-				t.Errorf("%s result = %d, want 0", tt.name, got)
+			if got != tt.want {
+				t.Errorf("%s result = %d, want %d", tt.name, got, tt.want)
 			}
 		})
 	}

@@ -205,11 +205,12 @@ func formatTraceValue(val Value) any {
 }
 
 // wordVectorTypeNames are the trace type names of the integer and bool
-// vector tags, by tag.
+// vector tags, indexed by tag - TagUVec2 (the tags are consecutive in this
+// order; TestValueTagTable checks every tag is printed and named).
 var wordVectorTypeNames = [...]string{
-	TagUVec2 - TagUVec2: "uvec2", TagUVec3 - TagUVec2: "uvec3", TagUVec4 - TagUVec2: "uvec4",
-	TagIVec2 - TagUVec2: "ivec2", TagIVec3 - TagUVec2: "ivec3", TagIVec4 - TagUVec2: "ivec4",
-	TagBVec2 - TagUVec2: "bvec2", TagBVec3 - TagUVec2: "bvec3", TagBVec4 - TagUVec2: "bvec4",
+	"uvec2", "uvec3", "uvec4",
+	"ivec2", "ivec3", "ivec4",
+	"bvec2", "bvec3", "bvec4",
 }
 
 // valueTypeName returns a human-readable type name for trace output.

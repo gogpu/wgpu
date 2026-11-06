@@ -176,25 +176,10 @@ func checkBufferRoundTrip(t *testing.T, interp *interpreter, m *Module, c tagCas
 	buf := make([]byte, 16)
 	writeValueToBuffer(buf, 0, c.val)
 	got := interp.readValueFromBuffer(buf, 0, m.Types[c.typeID], 0)
-	want := c.val
-	if isWordVector(tag) {
-		// Buffer loads still build integer and bool vectors as float
-		// vectors: they become word vectors with the producers (ADR-078
-		// step 3). Until then a load is exact only up to 2^24, and a bool
-		// lane (workgroup memory) reads as 0.
-		want = Value{Tag: vectorTagOf(vectorLanes(tag))}
-		if vectorKind(tag) != kindBool {
-			want.F = Vec4ToFloat32(c.val)
-		}
-	}
-	if got.Tag != want.Tag || got.F != want.F || got.U != want.U {
-		t.Errorf("tag %d: read back %+v, want %+v", tag, got, want)
+	if got.Tag != c.val.Tag || got.F != c.val.F || got.U != c.val.U {
+		t.Errorf("tag %d: read back %+v, want %+v", tag, got, c.val)
 	}
 }
-
-// vectorTagOf is vectorTag for the float form of a word vector in
-// checkBufferRoundTrip.
-func vectorTagOf(n int) ValueTag { return vectorTag(n) }
 
 // checkPrinted checks that the debugger prints the value and names its type.
 func checkPrinted(t *testing.T, c tagCase) {

@@ -66,9 +66,13 @@ func TestPackUnpackDouble2x32(t *testing.T) {
 	if packed.Tag != TagFloat64 || math.Abs(packed.AsFloat64()-f) > 1e-12 {
 		t.Fatalf("PackDouble2x32 = %v", packed.AsFloat64())
 	}
-	unpacked := unpackDouble2x32(packed).AsArray()
-	if toUint32(unpacked[0]) != lo || toUint32(unpacked[1]) != hi {
-		t.Errorf("UnpackDouble2x32 = (%#x,%#x)", toUint32(unpacked[0]), toUint32(unpacked[1]))
+	unpacked := unpackDouble2x32(packed)
+	if unpacked.Tag != TagUVec2 || unpacked.U[0] != lo || unpacked.U[1] != hi {
+		t.Errorf("UnpackDouble2x32 = %+v, want uvec2(%#x,%#x)", unpacked, lo, hi)
+	}
+	// The uvec2 form packs back to the same double.
+	if back := packDouble2x32(unpacked); back.AsFloat64() != f {
+		t.Errorf("PackDouble2x32(uvec2) = %v, want %v", back.AsFloat64(), f)
 	}
 }
 
