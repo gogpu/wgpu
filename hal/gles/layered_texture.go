@@ -92,10 +92,10 @@ func colorAttachmentLayer(view *TextureView, depthSlice *uint32) uint32 {
 // to one mip level of tex and, for a layered texture, to one layer of it: the
 // depth slice of a 3D texture or an array layer. Rust wgpu-hal gles/queue.rs
 // set_attachment does the same.
-func attachColorLayer(ctx *gl.Context, fboTarget, attachment uint32, tex *Texture, mip, layer uint32) {
+func attachColorLayer(ctx *gl.Context, attachment uint32, tex *Texture, mip, layer uint32) {
 	if isLayeredTarget(tex.target) {
-		ctx.FramebufferTextureLayer(fboTarget, attachment, tex.id, int32(mip), int32(layer))
+		ctx.FramebufferTextureLayer(gl.FRAMEBUFFER, attachment, tex.id, int32(mip), int32(layer))
 		return
 	}
-	ctx.FramebufferTexture2D(fboTarget, attachment, tex.target, tex.id, int32(mip))
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, attachment, tex.target, tex.id, int32(mip))
 }

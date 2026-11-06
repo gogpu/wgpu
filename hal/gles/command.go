@@ -1068,7 +1068,7 @@ func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
 // attach attaches the color texture as COLOR_ATTACHMENT0 of the bound FBO:
 // its mip level and, for a 3D or 2D array texture, its layer.
 func (c *EnsureOffscreenFBOCommand) attach(ctx *gl.Context) {
-	attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.texture, c.mipLevel, c.layer)
+	attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.texture, c.mipLevel, c.layer)
 }
 
 // AttachDepthStencilCommand attaches a depth/stencil texture to the currently
@@ -1206,7 +1206,7 @@ type AttachColorCommand struct {
 }
 
 func (c *AttachColorCommand) Execute(ctx *gl.Context) {
-	attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0+c.attachmentIndex, c.texture, c.mipLevel, c.layer)
+	attachColorLayer(ctx, gl.COLOR_ATTACHMENT0+c.attachmentIndex, c.texture, c.mipLevel, c.layer)
 }
 
 // SetDrawColorBuffersCommand configures the list of draw buffers for MRT output.
@@ -2009,7 +2009,7 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	tmpBuf := make([]byte, uint64(rowBytes)*uint64(height))
 	for i := uint32(0); i < layers; i++ {
 		if i > 0 {
-			attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, c.srcOrigin[2]+i)
+			attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, c.srcOrigin[2]+i)
 		}
 		ctx.ReadPixels(
 			int32(c.srcOrigin[0]), int32(c.srcOrigin[1]),
@@ -2043,12 +2043,12 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, layer uint32) bool {
 	if c.srcTexture.fbo != 0 {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.srcTexture.fbo)
-		attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
+		attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
 		return true
 	}
 	fbo := ctx.GenFramebuffers(1)
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
-	attachColorLayer(ctx, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
+	attachColorLayer(ctx, gl.COLOR_ATTACHMENT0, c.srcTexture, c.mipLevel, layer)
 	if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
 		ctx.DeleteFramebuffers(fbo)
 		return false
