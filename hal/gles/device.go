@@ -53,6 +53,11 @@ type Device struct {
 	// samples (bindSampledTexture).
 	depthStencilTextureMode bool
 
+	// maxColorAttachments is Limits.MaxColorAttachments of the adapter: the
+	// color attachment points a render pass detaches before it attaches its
+	// own (resetFramebufferAttachments).
+	maxColorAttachments uint32
+
 	// views maps TextureView.NativeHandle values back to the views, for
 	// CreateBindGroup (newBindGroup).
 	views handletable.Table[TextureView]
@@ -757,6 +762,7 @@ func (d *Device) CreateCommandEncoder(_ *CommandEncoderDescriptor) (hal.CommandE
 		maxTextureUnits:         d.maxTextureUnits,
 		fullInstancing:          d.fullInstancing,
 		depthStencilTextureMode: d.depthStencilTextureMode,
+		maxColorAttachments:     d.maxColorAttachments,
 	}, nil
 }
 

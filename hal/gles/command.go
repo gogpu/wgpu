@@ -46,7 +46,9 @@ type CommandEncoder struct {
 	fullInstancing  bool   // Device.fullInstancing
 	// depthStencilTextureMode is Device.depthStencilTextureMode.
 	depthStencilTextureMode bool
-	samplers                samplerState
+	// maxColorAttachments is Device.maxColorAttachments.
+	maxColorAttachments uint32
+	samplers            samplerState
 }
 
 // BeginEncoding begins command recording.
@@ -354,7 +356,9 @@ func (e *CommandEncoder) setupColorAttachment(desc *hal.RenderPassDescriptor, rp
 func (e *CommandEncoder) setupSurfaceTarget(desc *hal.RenderPassDescriptor, tv *TextureView, rpe *RenderPassEncoder) {
 	if tv.surfaceTex != nil && tv.surfaceTex.surface != nil {
 		surf := tv.surfaceTex.surface
-		e.commands = append(e.commands, &BindSurfaceFramebufferCommand{surface: surf})
+		e.commands = append(e.commands, &BindSurfaceFramebufferCommand{
+			surface: surf, maxColorAttachments: e.maxColorAttachments,
+		})
 		if surf.config != nil {
 			cfg := surf.config
 			rpe.fbHeight = cfg.Height
@@ -394,9 +398,10 @@ func (e *CommandEncoder) setupOffscreenTarget(
 	rpe *RenderPassEncoder,
 ) {
 	e.commands = append(e.commands, &EnsureOffscreenFBOCommand{
-		texture:  tv.texture,
-		mipLevel: tv.baseMip,
-		layer:    colorAttachmentLayer(tv, desc.ColorAttachments[0].DepthSlice),
+		texture:             tv.texture,
+		mipLevel:            tv.baseMip,
+		layer:               colorAttachmentLayer(tv, desc.ColorAttachments[0].DepthSlice),
+		maxColorAttachments: e.maxColorAttachments,
 	})
 
 	// Attach additional color textures (attachments 1..N) to the FBO.
@@ -1054,7 +1059,8 @@ func (c *BindFramebufferCommand) Execute(ctx *gl.Context) {
 // (e.g. window resize) between encode and submit is handled correctly.
 // Mirrors Rust wgpu-hal/src/gles/egl.rs Surface::configure swapchain FBO.
 type BindSurfaceFramebufferCommand struct {
-	surface *Surface
+	surface             *Surface
+	maxColorAttachments uint32
 }
 
 func (c *BindSurfaceFramebufferCommand) Execute(ctx *gl.Context) {
@@ -1063,14 +1069,39 @@ func (c *BindSurfaceFramebufferCommand) Execute(ctx *gl.Context) {
 		return
 	}
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, c.surface.swapchainFBO)
+	if c.surface.swapchainFBO != 0 {
+		// COLOR_ATTACHMENT0 is the surface's own renderbuffer and stays.
+		resetFramebufferAttachments(ctx, c.maxColorAttachments)
+	}
+}
+
+// resetFramebufferAttachments detaches the depth/stencil attachment and color
+// attachments 1 to maxColor-1 of the bound framebuffer, before a render pass
+// attaches its own. A framebuffer here is reused by every pass on the same
+// color texture or surface, so without it an attachment of an earlier pass
+// stays in place: a pass without depth would keep the old depth texture, and
+// GL limits rendering to the area every attachment covers, so a smaller stale
+// attachment clips the draw (Mesa does; some Windows drivers do not).
+// COLOR_ATTACHMENT0 is left to the caller, which attaches it next.
+//
+// Reference: Rust wgpu-hal gles/queue.rs C::ResetFramebuffer, which detaches
+// DEPTH_STENCIL_ATTACHMENT and every color attachment up to
+// max_color_attachments at the start of each pass. Detaching
+// DEPTH_STENCIL_ATTACHMENT detaches both the depth and the stencil point.
+func resetFramebufferAttachments(ctx *gl.Context, maxColor uint32) {
+	ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.TEXTURE_2D, 0, 0)
+	for i := uint32(1); i < maxColor; i++ {
+		ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0+i, gl.TEXTURE_2D, 0, 0)
+	}
 }
 
 // EnsureOffscreenFBOCommand lazily creates a framebuffer object for an offscreen
 // texture, binds it and attaches the pass's mip level as COLOR_ATTACHMENT0.
 type EnsureOffscreenFBOCommand struct {
-	texture  *Texture
-	mipLevel uint32 // the view's base mip level
-	layer    uint32 // the depth slice or array layer of a layered texture
+	texture             *Texture
+	mipLevel            uint32 // the view's base mip level
+	layer               uint32 // the depth slice or array layer of a layered texture
+	maxColorAttachments uint32 // Limits.MaxColorAttachments (resetFramebufferAttachments)
 }
 
 func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
@@ -1078,7 +1109,9 @@ func (c *EnsureOffscreenFBOCommand) Execute(ctx *gl.Context) {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.texture.fbo)
 		// The FBO belongs to the texture and serves every view of it, so each
 		// pass attaches its own mip level, as Rust wgpu-hal attaches each
-		// pass's views to its draw FBO (gles/queue.rs set_attachment).
+		// pass's views to its draw FBO (gles/queue.rs set_attachment), after
+		// dropping what an earlier pass attached.
+		resetFramebufferAttachments(ctx, c.maxColorAttachments)
 		c.attach(ctx)
 		return
 	}
