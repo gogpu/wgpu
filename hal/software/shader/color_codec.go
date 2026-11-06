@@ -119,16 +119,16 @@ func encodeUnsignedSmallFloat(f float32, mantBits int) uint32 {
 	return uint32(e+15)<<mantBits | m
 }
 
-// ColorCodec reads and writes the texels of one colour attachment format
-// in linear values: the colour writes and clears of the software
+// ColorCodec reads and writes the texels of one color attachment format
+// in linear values: the color writes and clears of the software
 // rasterizer go through it. An sRGB format decodes and encodes the sRGB
 // transfer function on red, green and blue; alpha is linear.
 type ColorCodec struct {
 	layout sampledFormat
 }
 
-// NewColorCodec returns the codec of colour format f, or false for a format
-// that is not an uncompressed colour format the backend stores
+// NewColorCodec returns the codec of color format f, or false for a format
+// that is not an uncompressed color format the backend stores
 // (depth-stencil, compressed, rgb9e5ufloat, Undefined).
 func NewColorCodec(f gputypes.TextureFormat) (ColorCodec, bool) {
 	if f.IsDepthStencil() || f == gputypes.TextureFormatRGB9E5Ufloat || uint64(f) >= uint64(len(sampledLayouts)) {

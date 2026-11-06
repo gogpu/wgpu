@@ -163,7 +163,7 @@ func stencilLayout(format gputypes.TextureFormat) (sampledFormat, bool) {
 }
 
 // sampledLayout returns the layout tex is read with: the plane its Aspect
-// selects (the stencil of a stencil-only view, the depth or colour
+// selects (the stencil of a stencil-only view, the depth or color
 // otherwise). A texture without a format (0, a Texture2D built by hand)
 // reads as 8-bit unorm channels by BytesPerPixel: R8, RG8, otherwise RGBA8.
 func sampledLayout(tex *Texture2D) (sampledFormat, bool) {

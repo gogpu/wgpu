@@ -14,12 +14,12 @@ import (
 	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
-// colorTarget stores the fragment colours of one colour attachment in the
+// colorTarget stores the fragment colors of one color attachment in the
 // texture the pass renders into, in the attachment view's format: the
-// colour output of every draw (raster.Pipeline.SetColorOutput) and the
+// color output of every draw (raster.Pipeline.SetColorOutput) and the
 // target of MRT locations 1 and up.
 //
-// It follows the WebGPU colour output rules ("Output Merging", "Blend State")
+// It follows the WebGPU color output rules ("Output Merging", "Blend State")
 // as Vulkan and D3D12 implement them:
 //   - a blended format decodes the stored texel to linear (an sRGB view
 //     decodes the transfer function), blends, and encodes back;
@@ -29,7 +29,7 @@ import (
 //   - an integer format never blends, and is written as the shader's value;
 //   - the write mask keeps the stored bits of the masked-out channels.
 //
-// The rasterizer carries every fragment colour as [4]float32 and never
+// The rasterizer carries every fragment color as [4]float32 and never
 // computes on it. For an integer target the four values are the bit patterns
 // of the shader's 32-bit integers (math.Float32frombits, see fragmentColor),
 // not their float values: a float32 holds an integer exactly only up to
@@ -46,7 +46,7 @@ type colorTarget struct {
 	lo, hi        float32
 }
 
-// colorKind is how a colour target takes its channels from a fragment shader
+// colorKind is how a color target takes its channels from a fragment shader
 // output.
 type colorKind uint8
 
@@ -56,7 +56,7 @@ const (
 	colorKindSint                   // i32 bits
 )
 
-// colorKindOf returns the colour kind of format.
+// colorKindOf returns the color kind of format.
 func colorKindOf(format gputypes.TextureFormat) colorKind {
 	codec, ok := shader.NewColorCodec(format)
 	switch {
@@ -68,7 +68,7 @@ func colorKindOf(format gputypes.TextureFormat) colorKind {
 	return colorKindUint
 }
 
-// colorKinds returns the colour kind of every colour attachment of the pass,
+// colorKinds returns the color kind of every color attachment of the pass,
 // by @location.
 func (r *RenderPassEncoder) colorKinds() []colorKind {
 	kinds := make([]colorKind, len(r.colorTargets))
@@ -87,7 +87,7 @@ func kindAt(kinds []colorKind, loc int) colorKind {
 }
 
 // intBitsColor carries the integer channels v as the [4]float32 the
-// rasterizer passes to an integer colour target.
+// rasterizer passes to an integer color target.
 func intBitsColor(v [4]uint32) [4]float32 {
 	return [4]float32{
 		math.Float32frombits(v[0]), math.Float32frombits(v[1]),
@@ -95,10 +95,10 @@ func intBitsColor(v [4]uint32) [4]float32 {
 	}
 }
 
-// newColorTarget returns the colour target of texture tex seen in format,
+// newColorTarget returns the color target of texture tex seen in format,
 // with the pipeline's state for the attachment (nil: no blend, every channel
 // written) and the pass's blend constant. It returns nil when the format has
-// no colour codec or the texture's storage is smaller than the format needs;
+// no color codec or the texture's storage is smaller than the format needs;
 // the attachment then receives no writes.
 func newColorTarget(tex *Texture, format gputypes.TextureFormat, state *gputypes.ColorTargetState, constant [4]float32) *colorTarget {
 	if tex == nil {
@@ -138,7 +138,7 @@ func newColorTarget(tex *Texture, format gputypes.TextureFormat, state *gputypes
 	return c
 }
 
-// write stores the fragment colour src at pixel (x, y). It is safe for
+// write stores the fragment color src at pixel (x, y). It is safe for
 // concurrent use (the parallel rasterizer).
 func (c *colorTarget) write(x, y int, src [4]float32) {
 	if x < 0 || y < 0 || x >= c.width || y >= c.height {
@@ -166,8 +166,8 @@ func (c *colorTarget) write(x, y int, src [4]float32) {
 	c.tex.mu.Unlock()
 }
 
-// discardColor is the colour output of a draw whose location 0 has no
-// colour target.
+// discardColor is the color output of a draw whose location 0 has no
+// color target.
 func discardColor(int, int, [4]float32) {}
 
 func clampColor(v [4]float32, lo, hi float32) [4]float32 {
@@ -177,7 +177,7 @@ func clampColor(v [4]float32, lo, hi float32) [4]float32 {
 	return v
 }
 
-// drawColorTargets returns the colour target of every colour attachment of
+// drawColorTargets returns the color target of every color attachment of
 // the pass for the current pipeline, by attachment index; an entry is nil
 // when the pass writes nothing for that attachment.
 func (r *RenderPassEncoder) drawColorTargets() []*colorTarget {
@@ -196,7 +196,7 @@ func (r *RenderPassEncoder) drawColorTargets() []*colorTarget {
 	return targets
 }
 
-// colorFormat returns the view format of colour attachment i.
+// colorFormat returns the view format of color attachment i.
 func (r *RenderPassEncoder) colorFormat(i int) gputypes.TextureFormat {
 	if i < len(r.colorFormats) && r.colorFormats[i] != gputypes.TextureFormatUndefined {
 		return r.colorFormats[i]
@@ -207,8 +207,8 @@ func (r *RenderPassEncoder) colorFormat(i int) gputypes.TextureFormat {
 	return gputypes.TextureFormatUndefined
 }
 
-// routeColorOutput sends the location 0 colours of pipe's draws to the first
-// colour target, and returns the targets for the MRT locations.
+// routeColorOutput sends the location 0 colors of pipe's draws to the first
+// color target, and returns the targets for the MRT locations.
 func (r *RenderPassEncoder) routeColorOutput(pipe *raster.Pipeline) []*colorTarget {
 	targets := r.drawColorTargets()
 	if len(targets) > 0 && targets[0] != nil {
@@ -220,7 +220,7 @@ func (r *RenderPassEncoder) routeColorOutput(pipe *raster.Pipeline) []*colorTarg
 }
 
 // writeMRTLocations is the raster.MRTOutput of a draw: it stores locations 1
-// and up into their colour targets (location 0 goes through the colour
+// and up into their color targets (location 0 goes through the color
 // output).
 func writeMRTLocations(targets []*colorTarget) raster.MRTOutput {
 	return func(x, y int, colors [][4]float32) {
@@ -233,8 +233,8 @@ func writeMRTLocations(targets []*colorTarget) raster.MRTOutput {
 }
 
 // clearAs fills the texture with color in format's encoding, as a render
-// pass clears a colour attachment viewed in that format. A format without a
-// colour codec is left as it is.
+// pass clears a color attachment viewed in that format. A format without a
+// color codec is left as it is.
 func (t *Texture) clearAs(format gputypes.TextureFormat, color gputypes.Color) {
 	codec, ok := shader.NewColorCodec(format)
 	if !ok {

@@ -54,7 +54,7 @@ func TestLinearToSrgb8(t *testing.T) {
 	}
 }
 
-// TestColorCodecEncode checks the colour-target encode of every renderable
+// TestColorCodecEncode checks the color-target encode of every renderable
 // layout against the stored bytes, and that Decode reads them back.
 func TestColorCodecEncode(t *testing.T) {
 	f16 := func(f float32) []byte { return binary.LittleEndian.AppendUint16(nil, float32ToFloat16bits(f)) }
@@ -165,7 +165,7 @@ func TestColorCodecEncodeMasked(t *testing.T) {
 	}
 }
 
-// TestColorCodecEncodeIntMasked: integer colour writes store the shader's
+// TestColorCodecEncodeIntMasked: integer color writes store the shader's
 // 32 bits exactly in a 32-bit channel, keep the low bits in a narrower one,
 // and leave the masked-out channels untouched.
 func TestColorCodecEncodeIntMasked(t *testing.T) {

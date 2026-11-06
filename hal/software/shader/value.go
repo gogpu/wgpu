@@ -90,7 +90,7 @@ type Texture2D struct {
 	Format uint32
 	// Aspect is the view's gputypes.TextureAspect: StencilOnly reads the
 	// stencil plane of a depth-stencil format; any other value reads the
-	// depth plane or the colour.
+	// depth plane or the color.
 	Aspect uint32
 	// BytesPerPixel is the storage size of a single texel (1 for R8, 2 for
 	// RG8/R16, 4 for RGBA8/BGRA8). When zero, sampling assumes 4 (RGBA8) for

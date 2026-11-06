@@ -1259,12 +1259,12 @@ func TestCreateShaderModuleReturnsTyped(t *testing.T) {
 		t.Fatalf("CreateShaderModule failed: %v", err)
 	}
 
-	shader, ok := sm.(*ShaderModule)
+	module, ok := sm.(*ShaderModule)
 	if !ok {
 		t.Fatal("expected *ShaderModule type")
 	}
-	if shader.desc.Label != "typed-sm" {
-		t.Errorf("shader label = %q, want %q", shader.desc.Label, "typed-sm")
+	if module.desc.Label != "typed-sm" {
+		t.Errorf("shader label = %q, want %q", module.desc.Label, "typed-sm")
 	}
 }
 
@@ -1875,7 +1875,7 @@ func TestDepthStencilStateWiring(t *testing.T) {
 }
 
 // TestDepthOnlyPass renders a shadow-map style pass: a depth attachment, no
-// colour attachment, and a pipeline whose fragment stage writes no colour
+// color attachment, and a pipeline whose fragment stage writes no color
 // (or that has no fragment stage). The draws still rasterize and depth-test:
 // fullscreen triangles at z 0.75, then 0.25, then 0.5 with CompareLess leave
 // 0.25 everywhere. The pass drew nothing before, so the clear value 1 stayed.
@@ -1962,8 +1962,8 @@ const stencilTestSize = 4
 
 // stencilCovered reports whether texel (x, y) of a stencilTestSize square
 // lies under the partial triangle of stencilWGSL (vertices 0-2): its
-// hypotenuse is xNDC + yNDC = 0.25, which at texel centres reduces to x <= y
-// and passes through no centre.
+// hypotenuse is xNDC + yNDC = 0.25, which at texel centers reduces to x <= y
+// and passes through no center.
 func stencilCovered(x, y int) bool { return x <= y }
 
 // stencilWGSL draws the partial triangle with vertices 0-2 and a fullscreen
@@ -2008,15 +2008,15 @@ func stencilPipeline(t *testing.T, dev *Device, sm hal.ShaderModule, format gput
 }
 
 // stencilPass runs one render pass over the depth/stencil view: stencil
-// cleared to 1 (and depth to 0.5) with clear, loaded otherwise; it draws
-// vertices first..first+2 with the stencil reference ref.
-func stencilPass(dev *Device, view hal.TextureView, format gputypes.TextureFormat, clear bool,
+// cleared to 1 (and depth to 0.5) with clearFirst, loaded otherwise; it
+// draws vertices first..first+2 with the stencil reference ref.
+func stencilPass(dev *Device, view hal.TextureView, format gputypes.TextureFormat, clearFirst bool,
 	pipe hal.RenderPipeline, ref, first uint32,
 ) {
 	ds := &hal.RenderPassDepthStencilAttachment{
 		View: view, StencilLoadOp: gputypes.LoadOpLoad, StencilStoreOp: gputypes.StoreOpStore, StencilClearValue: 1,
 	}
-	if clear {
+	if clearFirst {
 		ds.StencilLoadOp = gputypes.LoadOpClear
 	}
 	if format.HasDepth() {
@@ -2409,7 +2409,7 @@ func TestMRTHelpers(t *testing.T) {
 	})
 }
 
-// writeTestColor stores one fragment colour into target through its colour
+// writeTestColor stores one fragment color into target through its color
 // target, unblended with every channel written.
 func writeTestColor(t *testing.T, target *Texture, x, y int, c [4]float32) {
 	t.Helper()
