@@ -30,6 +30,25 @@ func TestBuildExtent3DExplicitZero(t *testing.T) {
 	}
 }
 
+// TestDepthStencilMasksZeroSent: zero stencil masks must reach the browser,
+// which otherwise applies the default 0xFFFFFFFF.
+func TestDepthStencilMasksZeroSent(t *testing.T) {
+	for _, m := range []struct{ read, write uint32 }{{0, 0}, {0, 0xFF}, {0x0F, 0}} {
+		d := DepthStencilStateJS{Format: "depth24plus-stencil8", StencilReadMask: m.read, StencilWriteMask: m.write}
+		obj := d.ToJS()
+		for key, want := range map[string]uint32{"stencilReadMask": m.read, "stencilWriteMask": m.write} {
+			v := obj.Get(key)
+			if v.IsUndefined() {
+				t.Errorf("%v: %s left out", m, key)
+				continue
+			}
+			if got := uint32(v.Int()); got != want {
+				t.Errorf("%v: %s = %#x, want %#x", m, key, got, want)
+			}
+		}
+	}
+}
+
 // TestColorTargetWriteMaskZeroSent: writeMask 0 (GPUColorWrite none) must
 // reach the browser, which otherwise applies the default ALL.
 func TestColorTargetWriteMaskZeroSent(t *testing.T) {

@@ -321,11 +321,15 @@ func (s StencilFaceState) toHAL() hal.StencilFaceState {
 
 // DepthStencilState describes depth and stencil testing configuration.
 type DepthStencilState struct {
-	Format              gputypes.TextureFormat
-	DepthWriteEnabled   bool
-	DepthCompare        gputypes.CompareFunction
-	StencilFront        StencilFaceState
-	StencilBack         StencilFaceState
+	Format            gputypes.TextureFormat
+	DepthWriteEnabled bool
+	DepthCompare      gputypes.CompareFunction
+	StencilFront      StencilFaceState
+	StencilBack       StencilFaceState
+	// StencilReadMask and StencilWriteMask are taken literally: zero
+	// compares and writes no stencil bit (the test still runs, comparing 0
+	// with 0). Set 0xFFFFFFFF to use the whole stencil value; the WebGPU
+	// default for an absent mask is that value, Rust wgpu's default is 0.
 	StencilReadMask     uint32
 	StencilWriteMask    uint32
 	DepthBias           int32
