@@ -75,6 +75,8 @@ func textureFormatToD3D12(format gputypes.TextureFormat) d3d12.DXGI_FORMAT {
 		return d3d12.DXGI_FORMAT_R10G10B10A2_UNORM
 	case gputypes.TextureFormatRG11B10Ufloat:
 		return d3d12.DXGI_FORMAT_R11G11B10_FLOAT
+	case gputypes.TextureFormatRGB9E5Ufloat:
+		return d3d12.DXGI_FORMAT_R9G9B9E5_SHAREDEXP
 
 	// 64-bit formats
 	case gputypes.TextureFormatRG32Uint:

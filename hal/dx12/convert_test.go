@@ -85,6 +85,7 @@ func TestTextureFormatToD3D12(t *testing.T) {
 		{"RGB10A2Uint", gputypes.TextureFormatRGB10A2Uint, d3d12.DXGI_FORMAT_R10G10B10A2_UINT},
 		{"RGB10A2Unorm", gputypes.TextureFormatRGB10A2Unorm, d3d12.DXGI_FORMAT_R10G10B10A2_UNORM},
 		{"RG11B10Ufloat", gputypes.TextureFormatRG11B10Ufloat, d3d12.DXGI_FORMAT_R11G11B10_FLOAT},
+		{"RGB9E5Ufloat", gputypes.TextureFormatRGB9E5Ufloat, d3d12.DXGI_FORMAT_R9G9B9E5_SHAREDEXP},
 
 		// 64-bit formats
 		{"RG32Uint", gputypes.TextureFormatRG32Uint, d3d12.DXGI_FORMAT_R32G32_UINT},
