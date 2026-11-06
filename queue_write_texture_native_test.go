@@ -96,6 +96,14 @@ func TestQueueWriteTextureValidation(t *testing.T) {
 			layout: rows(16, 4), size: extent(4, 4, 1), wantKind: core.TransferErrorInvalidSampleCount, wantErr: true},
 		{name: "data shorter than the layout", dst: &ImageCopyTexture{Texture: color}, dataLen: 63,
 			layout: rows(16, 4), size: extent(4, 4, 1), wantKind: core.TransferErrorBufferEndOffsetOverrun, wantErr: true},
+		// The WebGPU minimum: offset + bytesPerRow*rowsPerImage*(layers-1) +
+		// bytesPerRow*(rows-1) + bytesInLastRow, with no padding after the
+		// last row and no padding rows after the last image.
+		{name: "valid two layers, data ends at the last row", dst: &ImageCopyTexture{Texture: color}, dataLen: 4 + 20*5 + 20*3 + 12,
+			layout: &ImageDataLayout{Offset: 4, BytesPerRow: 20, RowsPerImage: 5}, size: extent(3, 4, 2), wantWrites: 1},
+		{name: "two layers, data one byte short of the last row", dst: &ImageCopyTexture{Texture: color}, dataLen: 4 + 20*5 + 20*3 + 11,
+			layout: &ImageDataLayout{Offset: 4, BytesPerRow: 20, RowsPerImage: 5}, size: extent(3, 4, 2),
+			wantKind: core.TransferErrorBufferEndOffsetOverrun, wantErr: true},
 		{name: "offset past the data", dst: &ImageCopyTexture{Texture: color}, dataLen: 8,
 			layout: &ImageDataLayout{Offset: 16, BytesPerRow: 16, RowsPerImage: 4}, size: extent(4, 1, 1),
 			wantKind: core.TransferErrorBufferStartOffsetOverrun, wantErr: true},

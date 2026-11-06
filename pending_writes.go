@@ -395,12 +395,13 @@ func containsTextureOwner(owners []*Texture, target *Texture) bool {
 }
 
 // copyTextureDataAligned copies texture data with row pitch alignment padding.
-// If no padding is needed (alignedBytesPerRow == bytesPerRow), returns data directly.
+// If no padding is needed (alignedBytesPerRow == bytesPerRow), it returns the
+// data from srcOffset on, at most stagingSize bytes, without a copy.
 // Callers that can supply a reusable scratch buffer should use alignTextureDataInto
 // to avoid per-call heap allocation.
 func copyTextureDataAligned(data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32, stagingSize uint64) []byte {
 	if alignedBytesPerRow == bytesPerRow {
-		return data
+		return stagingSource(data, srcOffset, stagingSize)
 	}
 	aligned := make([]byte, stagingSize)
 	alignTextureRowsInto(aligned, data, srcOffset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers)
@@ -408,11 +409,12 @@ func copyTextureDataAligned(data []byte, srcOffset uint64, bytesPerRow, alignedB
 }
 
 // alignTextureDataInto is the zero-allocation variant of copyTextureDataAligned.
-// If no padding is needed it returns data directly (no copy). Otherwise it grows
-// *buf to stagingSize (never shrinks) and copies rows with padding into it.
+// If no padding is needed it returns the data from srcOffset on, at most
+// stagingSize bytes (no copy). Otherwise it grows *buf to stagingSize (never
+// shrinks) and copies rows with padding into it.
 func alignTextureDataInto(buf *[]byte, data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32, stagingSize uint64) []byte {
 	if alignedBytesPerRow == bytesPerRow {
-		return data
+		return stagingSource(data, srcOffset, stagingSize)
 	}
 	if uint64(cap(*buf)) < stagingSize {
 		*buf = make([]byte, stagingSize)
@@ -423,20 +425,44 @@ func alignTextureDataInto(buf *[]byte, data []byte, srcOffset uint64, bytesPerRo
 	return *buf
 }
 
-// alignTextureRowsInto does the inner row-copy loop shared by both aligned functions.
+// stagingSource returns the bytes of data that a staging region of
+// stagingSize bytes holds when its rows keep the data's pitch: those from
+// srcOffset on, at most stagingSize of them. The staging belt writes the
+// whole slice into the region, so a longer slice would spill into the next
+// allocation, and the copy reads the region from its start, so the bytes
+// before the layout offset must not be in it (Rust wgpu-core
+// queue.rs write_texture, "copy aligned": data[offset..][..stage_size]).
+func stagingSource(data []byte, srcOffset, stagingSize uint64) []byte {
+	if srcOffset >= uint64(len(data)) {
+		return nil
+	}
+	src := data[srcOffset:]
+	if uint64(len(src)) > stagingSize {
+		src = src[:stagingSize]
+	}
+	return src
+}
+
+// alignTextureRowsInto copies the rows of data, from srcOffset on and
+// bytesPerRow apart, into aligned at alignedBytesPerRow apart, rowsPerImage
+// rows per image. WebGPU sizes the data of a copy to end at the last byte of
+// the last row of the last image (offset + bytesPerRow * rowsPerImage *
+// (layers-1) + bytesPerRow * (rows-1) + bytesInLastRow), so that row may be
+// shorter than bytesPerRow and the padding rows after it may be absent: the
+// copy takes what the data holds and stops at its end, never reading past it.
+// The rows of every earlier image are complete, since the next image follows
+// them.
 func alignTextureRowsInto(aligned, data []byte, srcOffset uint64, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers uint32) {
-	for layer := uint32(0); layer < depthOrLayers; layer++ {
-		for row := uint32(0); row < rowsPerImage; row++ {
-			dstRowStart := uint64(layer)*uint64(rowsPerImage)*uint64(alignedBytesPerRow) +
-				uint64(row)*uint64(alignedBytesPerRow)
-			srcRowStart := srcOffset + uint64(layer)*uint64(rowsPerImage)*uint64(bytesPerRow) +
-				uint64(row)*uint64(bytesPerRow)
-			if srcRowStart+uint64(bytesPerRow) > uint64(len(data)) {
-				break
-			}
-			copy(aligned[dstRowStart:dstRowStart+uint64(bytesPerRow)],
-				data[srcRowStart:srcRowStart+uint64(bytesPerRow)])
+	src := stagingSource(data, srcOffset, uint64(len(data)))
+	rows := uint64(rowsPerImage) * uint64(depthOrLayers)
+	for row := uint64(0); row < rows; row++ {
+		srcRowStart := row * uint64(bytesPerRow)
+		if srcRowStart >= uint64(len(src)) {
+			return
 		}
+		n := min(uint64(bytesPerRow), uint64(len(src))-srcRowStart)
+		dstRowStart := row * uint64(alignedBytesPerRow)
+		copy(aligned[dstRowStart:dstRowStart+n], src[srcRowStart:srcRowStart+n])
 	}
 }
 

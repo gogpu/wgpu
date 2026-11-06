@@ -118,6 +118,12 @@ func TestValidateLinearTextureData(t *testing.T) {
 		{name: "offset at the end of the buffer, empty copy", layout: layout(64, 0, 0), format: rgba, bufferSize: 64, size: ext(0, 0, 0)},
 		{name: "range one byte too long", layout: layout(0, 48, 12), format: rgba, bufferSize: 48*11 + 27, size: ext(7, 12, 1),
 			want: TransferErrorBufferEndOffsetOverrun, wantErr: true},
+		// Several images: every image but the last spans rowsPerImage rows,
+		// and the last ends at bytesInLastRow (offset + bytesPerRow *
+		// rowsPerImage * (layers-1) + bytesPerRow * (rows-1) + bytesInLastRow).
+		{name: "several layers fit exactly", layout: layout(8, 48, 14), format: rgba, bufferSize: 8 + 2*48*14 + 48*11 + 28, size: ext(7, 12, 3)},
+		{name: "several layers, one byte too short", layout: layout(8, 48, 14), format: rgba, bufferSize: 8 + 2*48*14 + 48*11 + 27, size: ext(7, 12, 3),
+			want: TransferErrorBufferEndOffsetOverrun, wantErr: true},
 		{name: "offset plus size does not wrap", layout: layout(^uint64(0)-3, 0, 0), format: rgba, bufferSize: ^uint64(0), size: ext(2, 1, 1),
 			want: TransferErrorBufferEndOffsetOverrun, wantErr: true},
 		// The aspect picks the block size of a combined depth/stencil format.
