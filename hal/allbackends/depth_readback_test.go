@@ -6,6 +6,7 @@
 package allbackends_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"math"
@@ -188,7 +189,7 @@ func uploadAndCheck(t *testing.T, device *wgpu.Device, format gputypes.TextureFo
 	got := readAspect(t, device, tex, aspect)
 	for y := 0; y < depthReadbackSize; y++ {
 		row, want := got[y*depthReadbackBytesPerRow:][:rowBytes], tight[y*rowBytes:(y+1)*rowBytes]
-		if string(row) != string(want) {
+		if !bytes.Equal(row, want) {
 			t.Fatalf("row %d = %x, want %x", y, row, want)
 		}
 	}
@@ -203,11 +204,7 @@ func clearAndReadBack(t *testing.T, device *wgpu.Device, format gputypes.Texture
 
 	ds := &wgpu.RenderPassDepthStencilAttachment{View: depthView}
 	if format != gputypes.TextureFormatStencil8 {
-		clear := float32(depthReadbackDepth32)
-		if format == gputypes.TextureFormatDepth16Unorm {
-			clear = depthReadbackDepth16
-		}
-		ds.DepthLoadOp, ds.DepthStoreOp, ds.DepthClearValue = gputypes.LoadOpClear, gputypes.StoreOpStore, clear
+		ds.DepthLoadOp, ds.DepthStoreOp, ds.DepthClearValue = gputypes.LoadOpClear, gputypes.StoreOpStore, depthPassValue(format)
 	}
 	if format != gputypes.TextureFormatDepth16Unorm && format != gputypes.TextureFormatDepth32Float {
 		ds.StencilLoadOp, ds.StencilStoreOp, ds.StencilClearValue = gputypes.LoadOpClear, gputypes.StoreOpStore, depthReadbackStencil
