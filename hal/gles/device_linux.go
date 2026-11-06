@@ -307,6 +307,13 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 					width, height, 0, format, dataType, 0)
 			}
 		}
+
+	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY:
+		if err := allocateLayeredStorage(glCtx, target, desc, internalFormat, format, dataType); err != nil {
+			glCtx.BindTexture(target, 0)
+			glCtx.DeleteTextures(id)
+			return nil, err
+		}
 	}
 
 	// Set default texture parameters (multisample textures don't support these).
@@ -989,6 +996,25 @@ func maxInt32(a, b int32) int32 {
 		return a
 	}
 	return b
+}
+
+// allocateLayeredStorage allocates every mip level of the 3D or 2D array
+// texture bound to target, as Rust wgpu-hal does with tex_image_3d on a
+// context without immutable storage (gles/device.rs create_texture); the 2D
+// path uses mutable TexImage2D storage as well.
+func allocateLayeredStorage(glCtx *gl.Context, target uint32, desc *TextureDescriptor, internalFormat, format, dataType uint32) error {
+	if !glCtx.HasLayeredTextures() {
+		return errNoLayeredTextures
+	}
+	for level := uint32(0); level < desc.MipLevelCount; level++ {
+		w, h, depth := layeredLevelSize(target, desc.Size, level)
+		glCtx.TexImage3D(target, int32(level), int32(internalFormat), w, h, depth, 0, format, dataType, 0)
+		if glErr := glCtx.GetError(); glErr != 0 {
+			return fmt.Errorf("gles: TexImage3D failed: GL error 0x%x (format=0x%x, level=%d, %dx%dx%d)",
+				glErr, internalFormat, level, w, h, depth)
+		}
+	}
+	return nil
 }
 
 // compileFragmentShader compiles a fragment shader from WGSL source via GLSL.

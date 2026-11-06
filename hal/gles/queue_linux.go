@@ -133,6 +133,11 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	glCtx.BindTexture(tex.target, tex.id)
 
+	if isLayeredTarget(tex.target) {
+		err := writeLayeredTexture(glCtx, tex, dst, data, layout, size, format, dataType)
+		glCtx.BindTexture(tex.target, 0)
+		return err
+	}
 	if tex.target == gl.TEXTURE_2D {
 		// Set alignment to 1 for single-channel formats (R8) whose row stride
 		// may not be a multiple of the default 4-byte GL_UNPACK_ALIGNMENT.
