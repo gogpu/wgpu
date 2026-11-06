@@ -83,6 +83,12 @@ type Device struct {
 	// compositor about which surface regions changed (damage rects).
 	supportsIncrementalPresent bool
 
+	// supports2DViewsOf3D is true when 3D images can get 2D views of their
+	// depth slices (Vulkan 1.1 or VK_KHR_maintenance1): 3D render targets
+	// are then created 2D_ARRAY_COMPATIBLE so a pass can render into one
+	// depth slice (TextureView.depthSliceView).
+	supports2DViewsOf3D bool
+
 	// shaderStageFlags are the create flags of every pipeline stage:
 	// ALLOW_VARYING_SUBGROUP_SIZE on a device with the subgroup feature
 	// (extendedFeatureSupport.allowVaryingSubgroupSize).
@@ -618,6 +624,13 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc.Dimension == gputypes.TextureDimension2D && arrayLayers >= 6 {
 		imageFlags |= vk.ImageCreateFlags(vk.ImageCreateCubeCompatibleBit)
 	}
+	// A 3D render target gets 2D views of its depth slices for render passes
+	// (GPURenderPassColorAttachment.depthSlice), as in Rust wgpu-hal
+	// (vulkan/device.rs create_texture).
+	if desc.Dimension == gputypes.TextureDimension3D && d.supports2DViewsOf3D &&
+		desc.Usage&gputypes.TextureUsageRenderAttachment != 0 {
+		imageFlags |= vk.ImageCreateFlags(vk.ImageCreate2dArrayCompatibleBit)
+	}
 	// Enable mutable format if view formats are specified
 	if len(desc.ViewFormats) > 0 {
 		imageFlags |= vk.ImageCreateFlags(vk.ImageCreateMutableFormatBit)
@@ -844,6 +857,13 @@ func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDes
 		image:       imageHandle,
 		isSwapchain: isSwapchain,
 	}
+	if viewType == vk.ImageViewType3d {
+		tv.depthSlices = &depthSliceViews{
+			format:  createInfo.Format,
+			aspect:  createInfo.SubresourceRange.AspectMask,
+			baseMip: desc.BaseMipLevel,
+		}
+	}
 	if desc.Label != "" {
 		d.setObjectName(vk.ObjectTypeImageView, uint64(imageView), desc.Label)
 	} else {
@@ -877,6 +897,7 @@ func (d *Device) DestroyTextureView(view hal.TextureView) {
 		return
 	}
 
+	d.destroyDepthSliceViews(vkView)
 	if vkView.handle != 0 {
 		// Invalidate cached framebuffers that reference this view before
 		// destroying it, otherwise Vulkan validation reports the image view

@@ -114,18 +114,31 @@ func newTargetRig(t *testing.T, device *wgpu.Device, dim gputypes.TextureDimensi
 // clear and draws the green left half into it.
 func (r *targetRig) render(t *testing.T, mip uint32, slice *uint32, clear gputypes.Color) {
 	t.Helper()
+	view := r.newView(t, mip)
+	t.Cleanup(view.Release)
+	r.renderView(t, view, slice, clear)
+}
+
+// newView creates a view of one mip level, 3D for a 3D texture.
+func (r *targetRig) newView(t *testing.T, mip uint32) *wgpu.TextureView {
+	t.Helper()
 	viewDim := gputypes.TextureViewDimension2D
 	if r.dimension == gputypes.TextureDimension3D {
 		viewDim = gputypes.TextureViewDimension3D
 	}
 	view, err := r.device.CreateTextureView(r.texture, &wgpu.TextureViewDescriptor{
-		Label: "slice-view", Dimension: viewDim, BaseMipLevel: mip, MipLevelCount: 1, ArrayLayerCount: 1,
+		Label: "target-view", Dimension: viewDim, BaseMipLevel: mip, MipLevelCount: 1, ArrayLayerCount: 1,
 	})
 	if err != nil {
 		t.Fatalf("CreateTextureView: %v", err)
 	}
-	t.Cleanup(view.Release)
+	return view
+}
 
+// renderView clears view (one depth slice of it, for a 3D view) to clear,
+// draws the green left half and submits the pass.
+func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint32, clear gputypes.Color) {
+	t.Helper()
 	enc, err := r.device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)

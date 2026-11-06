@@ -21,6 +21,9 @@ const (
 	ext16BitStorage              = "VK_KHR_16bit_storage"
 	extShaderFloat16Int8         = "VK_KHR_shader_float16_int8"
 	extIncrementalPresent        = "VK_KHR_incremental_present"
+	// extMaintenance1 allows 2D views of a 3D image's depth slices, for
+	// render passes on a depth slice. Vulkan 1.1 promoted it.
+	extMaintenance1 = "VK_KHR_maintenance1"
 
 	// Extensions behind shader capability features. Vulkan 1.2 promoted
 	// shader_atomic_int64 and Vulkan 1.1 shader_draw_parameters.
@@ -127,6 +130,24 @@ func (s *extendedFeatureSupport) subgroupFeatures() gputypes.Features {
 		result.Insert(gputypes.FeatureSubgroupVertex)
 	}
 	return result
+}
+
+// has2DViewsOf3D reports whether a 2D view of one depth slice of a 3D image
+// can be created (VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT), which rendering
+// into a depth slice needs: Vulkan 1.1 core or VK_KHR_maintenance1. Rust
+// wgpu-hal requires maintenance1 of every adapter (vulkan/adapter.rs).
+func (s *extendedFeatureSupport) has2DViewsOf3D() bool {
+	return s.apiVersion >= vkMakeVersion(1, 1, 0) || s.extensions[extMaintenance1]
+}
+
+// maintenance1Extensions returns the NUL-terminated extension that gives a
+// Vulkan 1.0 device 2D views of 3D images: none from Vulkan 1.1, where
+// maintenance1 is core, or when the device does not have it.
+func (s *extendedFeatureSupport) maintenance1Extensions() []string {
+	if s.apiVersion >= vkMakeVersion(1, 1, 0) || !s.extensions[extMaintenance1] {
+		return nil
+	}
+	return []string{extMaintenance1 + "\x00"}
 }
 
 // hasSubgroupSizeControl reports whether the device can enable subgroup

@@ -858,6 +858,22 @@ func renderAreaView(desc *hal.RenderPassDescriptor) *TextureView {
 	return nil
 }
 
+// colorAttachmentImageView returns the image view a color attachment puts in
+// the framebuffer: the view itself, or for a depth slice of a 3D view the 2D
+// view of that slice. It logs and reports false when the slice view cannot be
+// made; the pass is then not begun, as on any other early return.
+func colorAttachmentImageView(view *TextureView, depthSlice *uint32) (vk.ImageView, bool) {
+	if depthSlice == nil {
+		return view.handle, true
+	}
+	h, err := view.depthSliceView(*depthSlice)
+	if err != nil {
+		hal.Logger().Error("vulkan: render pass color attachment", "err", err)
+		return 0, false
+	}
+	return h, true
+}
+
 // asTextureView narrows a HAL view to this backend's, treating an absent view,
 // a typed-nil pointer and a view belonging to another backend alike: each comes
 // back as nil. The comma-ok assertion is what makes that true -- a failed
@@ -934,6 +950,10 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			// Absent slot — leave the key entry zero-valued (FormatUndefined).
 			continue
 		}
+		attachment, ok := colorAttachmentImageView(view, ca.DepthSlice)
+		if !ok {
+			return rpe
+		}
 
 		// Determine color format from the view.
 		var colorFormat vk.Format
@@ -979,8 +999,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			HasResolve:  hasMSAAResolve,
 		}
 
-		// Framebuffer: color view
-		fbKey.Views[fbKey.ViewCount] = view.handle
+		// Framebuffer: color view, or the 2D view of its depth slice
+		fbKey.Views[fbKey.ViewCount] = attachment
 		fbKey.ViewCount++
 
 		// Clear value for color attachment
