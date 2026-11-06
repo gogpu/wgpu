@@ -467,9 +467,11 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 		rpd.Primitive.UnclippedDepth = true
 	}
 
-	// Depth-stencil state
+	// Depth-stencil state, with the WebGPU defaults for zero stencil faces
+	// (pipeline_defaults.go). An undefined DepthCompare is left out of the JS
+	// object: it is the spec's "not provided", for the browser to validate.
 	if desc.DepthStencil != nil {
-		rpd.DepthStencil = convertDepthStencilState(desc.DepthStencil)
+		rpd.DepthStencil = convertDepthStencilState(normalizeDepthStencilState(desc.DepthStencil))
 	}
 
 	// Multisample state
@@ -479,9 +481,13 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 		AlphaToCoverageEnabled: desc.Multisample.AlphaToCoverageEnabled,
 	}
 
-	// Fragment state
+	// Fragment state, with the WebGPU defaults for zero blend components
+	// (BlendFactorToJS sent "one" for an undefined dstFactor, whose default is
+	// "zero"); a copy, so the caller's targets are unchanged.
 	if desc.Fragment != nil {
-		rpd.Fragment = convertFragmentState(desc.Fragment)
+		fs := *desc.Fragment
+		fs.Targets = normalizeColorTargets(fs.Targets)
+		rpd.Fragment = convertFragmentState(&fs)
 	}
 
 	return browser.BuildRenderPipelineDescriptor(rpd)

@@ -674,6 +674,13 @@ const (
 	// attributes of the pipeline at one shaderLocation.
 	// Rust: pipeline::CreateRenderPipelineError::ShaderLocationClash
 	CreateRenderPipelineErrorShaderLocationClash
+	// CreateRenderPipelineErrorMissingDepthCompare indicates a depth/stencil
+	// state without a depthCompare (CompareFunctionUndefined) where one is
+	// required: the format has a depth aspect and depth writes are enabled or
+	// a stencil face's DepthFailOp is not Keep.
+	// WebGPU spec: validating GPUDepthStencilState.
+	// Rust: pipeline::DepthStencilStateError::MissingDepthCompare
+	CreateRenderPipelineErrorMissingDepthCompare
 )
 
 // CreateRenderPipelineError represents an error during render pipeline creation.
@@ -791,6 +798,9 @@ func (e *CreateRenderPipelineError) vertexAttributeMessage(label string) string 
 	case CreateRenderPipelineErrorShaderLocationClash:
 		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute shaderLocation %d is used by more than one attribute",
 			label, e.BufferIndex, e.ShaderLocation)
+	case CreateRenderPipelineErrorMissingDepthCompare:
+		return fmt.Sprintf("render pipeline %q: depth/stencil format %s needs a depthCompare when depth writes are enabled or a depthFailOp is not keep",
+			label, e.Format)
 	default:
 		return fmt.Sprintf("render pipeline %q: unknown error", label)
 	}

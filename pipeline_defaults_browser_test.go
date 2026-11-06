@@ -1,0 +1,53 @@
+//go:build js && wasm
+
+package wgpu
+
+import (
+	"testing"
+
+	"github.com/gogpu/gputypes"
+)
+
+// TestConvertRenderPipelineDescriptorSpecDefaults checks the js/wasm
+// conversion: zero blend components reach the browser as the WebGPU defaults
+// (dstFactor "zero", not "one"), zero stencil faces as "always"/"keep", and
+// an undefined depthCompare is left out for the browser to validate.
+//
+// It needs Node.js: GOOS=js GOARCH=wasm go test -c -o x.wasm, then
+// node "$(go env GOROOT)/lib/wasm/wasm_exec_node.js" x.wasm -test.run SpecDefaults
+// (or go test -exec go_js_wasm_exec where a POSIX shell runs that script).
+func TestConvertRenderPipelineDescriptorSpecDefaults(t *testing.T) {
+	blend := &gputypes.BlendState{}
+	desc := &RenderPipelineDescriptor{
+		DepthStencil: &DepthStencilState{Format: gputypes.TextureFormatDepth24PlusStencil8},
+		Fragment: &FragmentState{
+			Targets: []gputypes.ColorTargetState{{Format: gputypes.TextureFormatRGBA8Unorm, Blend: blend, WriteMask: gputypes.ColorWriteMaskAll}},
+		},
+	}
+
+	obj := convertRenderPipelineDescriptor(desc)
+
+	for _, comp := range []string{"color", "alpha"} {
+		c := obj.Get("fragment").Get("targets").Index(0).Get("blend").Get(comp)
+		for key, want := range map[string]string{"srcFactor": "one", "dstFactor": "zero", "operation": "add"} {
+			if got := c.Get(key).String(); got != want {
+				t.Errorf("blend %s.%s = %q, want %q", comp, key, got, want)
+			}
+		}
+	}
+	ds := obj.Get("depthStencil")
+	for _, face := range []string{"stencilFront", "stencilBack"} {
+		f := ds.Get(face)
+		for key, want := range map[string]string{"compare": "always", "failOp": "keep", "depthFailOp": "keep", "passOp": "keep"} {
+			if got := f.Get(key).String(); got != want {
+				t.Errorf("%s.%s = %q, want %q", face, key, got, want)
+			}
+		}
+	}
+	if !ds.Get("depthCompare").IsUndefined() {
+		t.Errorf("depthCompare = %v, want it left out", ds.Get("depthCompare"))
+	}
+	if *blend != (gputypes.BlendState{}) {
+		t.Error("the conversion changed the caller's blend state")
+	}
+}

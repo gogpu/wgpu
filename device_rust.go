@@ -557,9 +557,11 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 		rDesc.Primitive.StripIndexFormat = *desc.Primitive.StripIndexFormat
 	}
 
-	// Depth-stencil state.
+	// Depth-stencil state, with the WebGPU defaults for zero stencil faces
+	// (pipeline_defaults.go). An undefined DepthCompare is sent as is: it is
+	// the spec's "not provided", for wgpu-native to resolve.
 	if desc.DepthStencil != nil {
-		rDesc.DepthStencil = convertDepthStencilState(desc.DepthStencil)
+		rDesc.DepthStencil = convertDepthStencilState(normalizeDepthStencilState(desc.DepthStencil))
 	}
 
 	// Multisample state.
@@ -569,9 +571,12 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 		AlphaToCoverageEnabled: desc.Multisample.AlphaToCoverageEnabled,
 	}
 
-	// Fragment state.
+	// Fragment state, with the WebGPU defaults for zero blend components; a
+	// copy, so the caller's targets are unchanged.
 	if desc.Fragment != nil {
-		rDesc.Fragment = convertFragmentState(desc.Fragment)
+		fs := *desc.Fragment
+		fs.Targets = normalizeColorTargets(fs.Targets)
+		rDesc.Fragment = convertFragmentState(&fs)
 	}
 
 	return rDesc

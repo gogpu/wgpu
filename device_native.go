@@ -616,6 +616,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	if err := core.ValidateRenderPipelineDescriptor(halDesc, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
+	resolveDepthCompare(halDesc.DepthStencil) // after validation: its absence is checked there
 
 	halPipeline, err := halDevice.CreateRenderPipeline(halDesc)
 	if err != nil {
