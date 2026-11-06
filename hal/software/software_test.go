@@ -913,10 +913,12 @@ func TestCommandEncoderCopyTextureToTexture(t *testing.T) {
 	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
 
 	tex1, _ := dev.CreateTexture(&hal.TextureDescriptor{
-		Size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		Size:   hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
 	})
 	tex2, _ := dev.CreateTexture(&hal.TextureDescriptor{
-		Size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		Size:   hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
 	})
 	defer dev.DestroyTexture(tex1)
 	defer dev.DestroyTexture(tex2)
@@ -972,8 +974,9 @@ func TestRenderPassEncoderEnd(t *testing.T) {
 	defer cleanup()
 
 	tex, _ := dev.CreateTexture(&hal.TextureDescriptor{
-		Size:  hal.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 1},
-		Usage: gputypes.TextureUsageRenderAttachment,
+		Size:   hal.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: 1},
+		Format: gputypes.TextureFormatRGBA8Unorm,
+		Usage:  gputypes.TextureUsageRenderAttachment,
 	})
 	defer dev.DestroyTexture(tex)
 

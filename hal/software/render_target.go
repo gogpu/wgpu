@@ -102,10 +102,14 @@ func (s *subresourceTarget) storeBack() {
 func (r *RenderPassEncoder) resolveColorTargets() {
 	attachments := r.desc.ColorAttachments
 	r.colorTargets = make([]*Texture, len(attachments))
+	r.colorFormats = make([]gputypes.TextureFormat, len(attachments))
 	for i, ca := range attachments {
 		tex, level, z, ok := attachmentSubresource(ca.View, ca.DepthSlice)
 		if !ok {
 			continue
+		}
+		if view, isView := ca.View.(*TextureView); isView {
+			r.colorFormats[i] = view.viewFormat()
 		}
 		if tex.isSingleSubresource() && level == 0 && z == 0 {
 			r.colorTargets[i] = tex

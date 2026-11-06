@@ -54,6 +54,10 @@ type Pipeline struct {
 	useParallel        bool
 	parallelConfig     ParallelConfig
 
+	// colorOutput, when set, receives every fragment colour that passes the
+	// tests instead of the color buffer (SetColorOutput).
+	colorOutput ColorOutput
+
 	// Buffers
 	colorBuffer []byte // RGBA8 format (4 bytes per pixel)
 	depthBuffer *DepthBuffer
@@ -186,6 +190,48 @@ func (p *Pipeline) GetBlendState() BlendState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.blendState
+}
+
+// ColorOutput receives the colour of one fragment at pixel (x, y) that passed
+// the scissor, depth and stencil tests, as the shader produced it: not
+// blended, clamped or converted.
+type ColorOutput func(x, y int, color [4]float32)
+
+// SetColorOutput routes the fragment colours of later draws to out instead of
+// the RGBA8 color buffer, whose blend state then does not apply: the caller
+// blends and stores in the format of its own target. nil restores the color
+// buffer.
+func (p *Pipeline) SetColorOutput(out ColorOutput) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.colorOutput = out
+}
+
+// writeColor stores the colour of the fragment at (x, y): through out when
+// set, otherwise blended into the color buffer.
+func (p *Pipeline) writeColor(x, y int, color [4]float32, blendState BlendState, out ColorOutput) {
+	if out != nil {
+		out(x, y, color)
+		return
+	}
+	idx := (y*p.width + x) * 4
+	p.mu.Lock()
+	if blendState.Enabled {
+		r, g, b, a := BlendFloatToByte(color,
+			p.colorBuffer[idx+0], p.colorBuffer[idx+1],
+			p.colorBuffer[idx+2], p.colorBuffer[idx+3],
+			blendState)
+		p.colorBuffer[idx+0] = r
+		p.colorBuffer[idx+1] = g
+		p.colorBuffer[idx+2] = b
+		p.colorBuffer[idx+3] = a
+	} else {
+		p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
+		p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
+		p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
+		p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
+	}
+	p.mu.Unlock()
 }
 
 // SetDepthBuffer replaces the pipeline's own depth buffer with buf, so draws
@@ -388,6 +434,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilState := p.stencilState
 	var scissor *Rect
@@ -434,25 +481,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
-			// Apply blending if enabled
-			idx := (frag.Y*p.width + frag.X) * 4
-			p.mu.Lock()
-			if blendState.Enabled {
-				r, g, b, a := BlendFloatToByte(color,
-					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
-					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
-					blendState)
-				p.colorBuffer[idx+0] = r
-				p.colorBuffer[idx+1] = g
-				p.colorBuffer[idx+2] = b
-				p.colorBuffer[idx+3] = a
-			} else {
-				p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
-				p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
-				p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
-				p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
-			}
-			p.mu.Unlock()
+			p.writeColor(frag.X, frag.Y, color, blendState, out)
 		})
 	}
 }
@@ -468,6 +497,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilState := p.stencilState
 	var scissor *Rect
@@ -523,25 +553,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 				srcColor[3] = frag.Attributes[3]
 			}
 
-			// Apply blending if enabled
-			idx := (frag.Y*p.width + frag.X) * 4
-			p.mu.Lock()
-			if blendState.Enabled {
-				r, g, b, a := BlendFloatToByte(srcColor,
-					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
-					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
-					blendState)
-				p.colorBuffer[idx+0] = r
-				p.colorBuffer[idx+1] = g
-				p.colorBuffer[idx+2] = b
-				p.colorBuffer[idx+3] = a
-			} else {
-				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
-				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
-				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
-				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
-			}
-			p.mu.Unlock()
+			p.writeColor(frag.X, frag.Y, srcColor, blendState, out)
 		})
 	}
 }
@@ -566,6 +578,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilState := p.stencilState
 	var scissor *Rect
@@ -624,25 +637,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				srcColor, _ = fragFunc(&frag)
 			}
 
-			// Apply blending if enabled
-			idx := (frag.Y*p.width + frag.X) * 4
-			p.mu.Lock()
-			if blendState.Enabled {
-				r, g, b, a := BlendFloatToByte(srcColor,
-					p.colorBuffer[idx+0], p.colorBuffer[idx+1],
-					p.colorBuffer[idx+2], p.colorBuffer[idx+3],
-					blendState)
-				p.colorBuffer[idx+0] = r
-				p.colorBuffer[idx+1] = g
-				p.colorBuffer[idx+2] = b
-				p.colorBuffer[idx+3] = a
-			} else {
-				p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
-				p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
-				p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
-				p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
-			}
-			p.mu.Unlock()
+			p.writeColor(frag.X, frag.Y, srcColor, blendState, out)
 		})
 	}
 }
@@ -662,7 +657,8 @@ type MRTOutput func(x, y int, colors [][4]float32)
 
 // DrawTrianglesWithMRTShader rasterizes triangles and invokes fragFunc per
 // pixel for Multiple Render Targets. Location 0 is written to the pipeline's
-// color buffer (with blending). The mrtOut callback receives all per-location
+// color buffer (with blending), or to the colour output when one is set
+// (SetColorOutput). The mrtOut callback receives all per-location
 // colors so the caller can write locations 1+ to their respective textures.
 // Discard and mayDiscard behave as in DrawTrianglesWithFragmentShader.
 func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRTFragmentShaderFunc, mrtOut MRTOutput, mayDiscard bool) {
@@ -674,6 +670,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilState := p.stencilState
 	var scissor *Rect
@@ -727,27 +724,9 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 				colors, _ = fragFunc(&frag)
 			}
 
-			// Write location 0 to the pipeline's color buffer.
+			// Write location 0 to the color buffer or the colour output.
 			if len(colors) > 0 {
-				srcColor := colors[0]
-				idx := (frag.Y*p.width + frag.X) * 4
-				p.mu.Lock()
-				if blendState.Enabled {
-					r, g, b, a := BlendFloatToByte(srcColor,
-						p.colorBuffer[idx+0], p.colorBuffer[idx+1],
-						p.colorBuffer[idx+2], p.colorBuffer[idx+3],
-						blendState)
-					p.colorBuffer[idx+0] = r
-					p.colorBuffer[idx+1] = g
-					p.colorBuffer[idx+2] = b
-					p.colorBuffer[idx+3] = a
-				} else {
-					p.colorBuffer[idx+0] = FloatToUnorm8(srcColor[0])
-					p.colorBuffer[idx+1] = FloatToUnorm8(srcColor[1])
-					p.colorBuffer[idx+2] = FloatToUnorm8(srcColor[2])
-					p.colorBuffer[idx+3] = FloatToUnorm8(srcColor[3])
-				}
-				p.mu.Unlock()
+				p.writeColor(frag.X, frag.Y, colors[0], blendState, out)
 			}
 
 			// Notify caller about all per-location outputs for targets 1+.
@@ -775,6 +754,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 	cullMode := p.cullMode
 	frontFace := p.frontFace
 	blendState := p.blendState
+	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilState := p.stencilState
 	var scissor *Rect
@@ -838,25 +818,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 					p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 				}
 
-				// Apply blending if enabled
-				idx := (frag.Y*p.width + frag.X) * 4
-				p.mu.Lock()
-				if blendState.Enabled {
-					r, g, b, a := BlendFloatToByte(color,
-						p.colorBuffer[idx+0], p.colorBuffer[idx+1],
-						p.colorBuffer[idx+2], p.colorBuffer[idx+3],
-						blendState)
-					p.colorBuffer[idx+0] = r
-					p.colorBuffer[idx+1] = g
-					p.colorBuffer[idx+2] = b
-					p.colorBuffer[idx+3] = a
-				} else {
-					p.colorBuffer[idx+0] = FloatToUnorm8(color[0])
-					p.colorBuffer[idx+1] = FloatToUnorm8(color[1])
-					p.colorBuffer[idx+2] = FloatToUnorm8(color[2])
-					p.colorBuffer[idx+3] = FloatToUnorm8(color[3])
-				}
-				p.mu.Unlock()
+				p.writeColor(frag.X, frag.Y, color, blendState, out)
 			})
 		}
 	})

@@ -528,6 +528,15 @@ type RenderPassEncoder struct {
 	colorTargets []*Texture
 	subTargets   []*subresourceTarget
 
+	// colorFormats holds each color attachment's view format, by attachment
+	// index: the format draws and clears write in, which may be the sRGB or
+	// non-sRGB counterpart of the texture's format.
+	colorFormats []gputypes.TextureFormat
+
+	// blendConstant is the blend constant set by SetBlendConstant (WebGPU
+	// default: transparent black).
+	blendConstant [4]float32
+
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
 	cleared bool
@@ -571,7 +580,7 @@ func (r *RenderPassEncoder) applyClear() {
 	r.cleared = true
 	for i, attachment := range r.desc.ColorAttachments {
 		if attachment.LoadOp == gputypes.LoadOpClear && r.colorTargets[i] != nil {
-			r.colorTargets[i].Clear(attachment.ClearValue)
+			r.colorTargets[i].clearAs(r.colorFormat(i), attachment.ClearValue)
 		}
 	}
 }
@@ -624,8 +633,14 @@ func (r *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 	hal.Logger().Debug("software: SetScissorRect", "x", rect.X, "y", rect.Y, "w", rect.Width, "h", rect.Height)
 }
 
-// SetBlendConstant is a no-op (blend constants not yet wired to raster pipeline).
-func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
+// SetBlendConstant sets the constant the "constant" and "one-minus-constant"
+// blend factors of later draws use.
+func (r *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
+	if color == nil {
+		return
+	}
+	r.blendConstant = [4]float32{float32(color.R), float32(color.G), float32(color.B), float32(color.A)}
+}
 
 // SetStencilReference stores the stencil reference value for subsequent draw calls.
 // The reference value is used by stencil comparison and StencilOpReplace.
