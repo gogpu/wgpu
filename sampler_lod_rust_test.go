@@ -27,3 +27,13 @@ func TestSamplerDescriptorToRustLodMaxClamp(t *testing.T) {
 		}
 	}
 }
+
+// TestSamplerDescriptorToRustAnisotropy: the root, not go-webgpu, decides the
+// WebGPU default maxAnisotropy 1 for a zero Anisotropy.
+func TestSamplerDescriptorToRustAnisotropy(t *testing.T) {
+	for _, c := range []struct{ in, want uint16 }{{0, 1}, {1, 1}, {8, 8}} {
+		if got := samplerDescriptorToRust(&SamplerDescriptor{Anisotropy: c.in}).Anisotropy; got != c.want {
+			t.Errorf("Anisotropy %d: wgpu-native %d, want %d", c.in, got, c.want)
+		}
+	}
+}

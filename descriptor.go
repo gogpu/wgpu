@@ -135,7 +135,8 @@ type SamplerDescriptor struct {
 }
 
 // toHAL converts a SamplerDescriptor to a hal.SamplerDescriptor. The HAL takes
-// LodMaxClamp literally, so the zero value is resolved to 32 here.
+// LodMaxClamp and Anisotropy literally, so their zero values are resolved to
+// the WebGPU defaults 32 and 1 here.
 func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 	return &hal.SamplerDescriptor{
 		Label:        d.Label,
@@ -148,7 +149,7 @@ func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 		LodMinClamp:  d.LodMinClamp,
 		LodMaxClamp:  normalizeLodMaxClamp(d.LodMaxClamp),
 		Compare:      d.Compare,
-		Anisotropy:   d.Anisotropy,
+		Anisotropy:   normalizeAnisotropy(d.Anisotropy),
 	}
 }
 
