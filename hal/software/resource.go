@@ -79,11 +79,15 @@ func formatBytesPerPixel(f gputypes.TextureFormat) uint64 {
 // Texture implements hal.Texture with real pixel storage.
 type Texture struct {
 	Resource
-	id            uint64 // unique ID for handle resolution
-	data          []byte
-	width         uint32
-	height        uint32
-	depth         uint32
+	id     uint64 // unique ID for handle resolution
+	data   []byte
+	width  uint32
+	height uint32
+	depth  uint32 // array layers, or depth slices of a 3D texture
+	// dimension tells array layers from depth slices: the depth of a 3D
+	// texture shrinks per mip level. Undefined (a texture built without
+	// CreateTexture) behaves as 2D. Storage layout: subresource.go.
+	dimension     gputypes.TextureDimension
 	format        gputypes.TextureFormat
 	usage         gputypes.TextureUsage
 	mipLevelCount uint32
@@ -150,16 +154,37 @@ func (t *Texture) Clear(color gputypes.Color) {
 	}
 }
 
-// TextureView implements hal.TextureView.
-// In software backend, views just reference the original texture.
+// TextureView implements hal.TextureView: a range of a texture's mip levels
+// and array layers seen with one view dimension. CreateTextureView resolves
+// the descriptor's defaults, so the counts are explicit; a zero count (a view
+// built without it) means 1. The view's format is the texture's: the
+// backend reinterprets no texel data.
 type TextureView struct {
 	Resource
-	id      uint64 // unique ID for handle resolution
-	texture *Texture
-	// baseMipLevel is the view's first mip level. Only level 0 is stored
-	// (P1-SW-026), so a render pass on a view above it writes nothing
-	// (attachmentTarget) instead of writing level 0.
-	baseMipLevel uint32
+	id             uint64 // unique ID for handle resolution
+	texture        *Texture
+	baseMipLevel   uint32
+	mipLevelCount  uint32
+	baseArrayLayer uint32
+	// arrayLayerCount is the number of array layers in the view: 1 for a 3D
+	// view, whose depth slices are not layers.
+	arrayLayerCount uint32
+	dimension       gputypes.TextureViewDimension
+}
+
+// mipLevels returns the number of mip levels in the view, at least 1.
+func (v *TextureView) mipLevels() uint32 { return max(v.mipLevelCount, 1) }
+
+// arrayLayers returns the number of array layers in the view, at least 1.
+func (v *TextureView) arrayLayers() uint32 { return max(v.arrayLayerCount, 1) }
+
+// viewDimension returns the view's dimension; Undefined (a view built
+// without CreateTextureView) behaves as 2D.
+func (v *TextureView) viewDimension() gputypes.TextureViewDimension {
+	if v.dimension == gputypes.TextureViewDimensionUndefined {
+		return gputypes.TextureViewDimension2D
+	}
+	return v.dimension
 }
 
 // NativeHandle returns the view's unique ID for handle resolution.

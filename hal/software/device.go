@@ -90,24 +90,23 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc.SampleCount > 1 {
 		return nil, fmt.Errorf("software backend does not support MSAA (SampleCount=%d)", desc.SampleCount)
 	}
-	// Calculate total size needed for texture data: width * height * depth *
-	// bytesPerPixel, where bytesPerPixel is derived from the format (R8=1,
-	// RG8/R16=2, RGBA8/BGRA8=4). Hardcoding 4 here corrupted single-channel
-	// formats such as the R8 glyph atlas.
-	bytesPerPixel := formatBytesPerPixel(desc.Format)
-	totalSize := uint64(desc.Size.Width) * uint64(desc.Size.Height) * uint64(desc.Size.DepthOrArrayLayers) * bytesPerPixel
-
-	return &Texture{
+	// Storage holds every mip level and layer (subresource.go), sized from
+	// the format's texel block: R8 = 1 byte, RGBA8 = 4, a BC1 4x4 block = 8.
+	// Hardcoding 4 bytes per texel corrupted single-channel formats such as
+	// the R8 glyph atlas.
+	tex := &Texture{
 		id:            nextResourceID.Add(1),
-		data:          make([]byte, totalSize),
 		width:         desc.Size.Width,
 		height:        desc.Size.Height,
 		depth:         desc.Size.DepthOrArrayLayers,
+		dimension:     desc.Dimension,
 		format:        desc.Format,
 		usage:         desc.Usage,
 		mipLevelCount: desc.MipLevelCount,
 		sampleCount:   desc.SampleCount,
-	}, nil
+	}
+	tex.data = make([]byte, tex.storageSize())
+	return tex, nil
 }
 
 // DestroyTexture is a no-op (Go GC handles cleanup).
@@ -115,31 +114,69 @@ func (d *Device) DestroyTexture(_ hal.Texture) {}
 
 // CreateTextureView creates a software texture view.
 func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	var baseMip uint32
+	var tex *Texture
+	switch t := texture.(type) {
+	case *Texture:
+		tex = t
+	case *SurfaceTexture: // embeds Texture
+		tex = &t.Texture
+	default:
+		return &Resource{}, nil
+	}
+	view := newTextureView(tex, desc)
+	d.registerTextureView(view)
+	return view, nil
+}
+
+// newTextureView returns a view of tex with the defaults of desc resolved
+// as WebGPU resolves GPUTextureViewDescriptor defaults: the dimension
+// follows the texture's (a 2D texture with several layers gives 2d-array),
+// the mip levels run to the last level, and the layers are 1 for a 1D, 2D
+// or 3D view, 6 for a cube, and the rest of the texture for an array.
+func newTextureView(tex *Texture, desc *hal.TextureViewDescriptor) *TextureView {
+	var d hal.TextureViewDescriptor
 	if desc != nil {
-		baseMip = desc.BaseMipLevel
+		d = *desc
 	}
-	// Views in software backend just reference the original texture
-	if tex, ok := texture.(*Texture); ok {
-		view := &TextureView{
-			id:           nextResourceID.Add(1),
-			texture:      tex,
-			baseMipLevel: baseMip,
+	dim := d.Dimension
+	if dim == gputypes.TextureViewDimensionUndefined {
+		switch {
+		case tex.dimension == gputypes.TextureDimension1D:
+			dim = gputypes.TextureViewDimension1D
+		case tex.is3D():
+			dim = gputypes.TextureViewDimension3D
+		case tex.arrayLayers() > 1:
+			dim = gputypes.TextureViewDimension2DArray
+		default:
+			dim = gputypes.TextureViewDimension2D
 		}
-		d.registerTextureView(view)
-		return view, nil
 	}
-	// Also handle SurfaceTexture (embeds Texture)
-	if st, ok := texture.(*SurfaceTexture); ok {
-		view := &TextureView{
-			id:           nextResourceID.Add(1),
-			texture:      &st.Texture,
-			baseMipLevel: baseMip,
+	mips := d.MipLevelCount
+	if mips == 0 && tex.mipLevels() > d.BaseMipLevel {
+		mips = tex.mipLevels() - d.BaseMipLevel
+	}
+	layers := d.ArrayLayerCount
+	if layers == 0 {
+		switch dim {
+		case gputypes.TextureViewDimensionCube:
+			layers = 6
+		case gputypes.TextureViewDimension2DArray, gputypes.TextureViewDimensionCubeArray:
+			if tex.arrayLayers() > d.BaseArrayLayer {
+				layers = tex.arrayLayers() - d.BaseArrayLayer
+			}
+		default:
+			layers = 1
 		}
-		d.registerTextureView(view)
-		return view, nil
 	}
-	return &Resource{}, nil
+	return &TextureView{
+		id:              nextResourceID.Add(1),
+		texture:         tex,
+		baseMipLevel:    d.BaseMipLevel,
+		mipLevelCount:   mips,
+		baseArrayLayer:  d.BaseArrayLayer,
+		arrayLayerCount: layers,
+		dimension:       dim,
+	}
 }
 
 // DestroyTextureView is a no-op.
