@@ -304,6 +304,20 @@ func logicalOp(opcode uint16, s shape, a, b Value) Value {
 	return laneValue(kindBool, n, r)
 }
 
+// allAny implements OpAll (all set) and OpAny: the AND or the OR of the lanes
+// of a bool vector. SPIR-V requires a vector operand; a bool scalar counts as
+// one lane.
+func allAny(all bool, v Value) Value {
+	lanes := laneWords(v, kindBool)
+	for i := range valueLanes(v) {
+		if (lanes[i] != 0) != all {
+			// A false lane decides OpAll, a true lane decides OpAny.
+			return ValBool(!all)
+		}
+	}
+	return ValBool(all)
+}
+
 // selectLanes implements OpSelect. A bool scalar condition picks a whole
 // object (any type); a bool vector condition picks each lane of two vectors
 // (SPIR-V: the condition then has the result's lane count).

@@ -283,7 +283,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[1] = select(0u, 1u, all(a == a.yx));
 }`,
 			src: []uint32{1, 2, 1, 2}, dstLen: 2, want: []uint32{1, 0}, step: 7,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "any",
@@ -293,7 +292,6 @@ func TestTypedValuesWrongToday(t *testing.T) {
 	dst[1] = select(0u, 1u, any(a == vec2<u32>(src[2], src[2])));
 }`,
 			src: []uint32{1, 2, 3}, dstLen: 2, want: []uint32{1, 0}, step: 7,
-			wrongToday: []uint32{0, 0},
 		},
 		{
 			name: "texture_dimensions_minus_one",
