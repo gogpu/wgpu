@@ -398,7 +398,23 @@ func (d *Device) WaitForFence(f *Fence, _ uint64, _ time.Duration) (bool, error)
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
 func (d *Device) PushErrorScope(filter ErrorFilter) {
 	if d.r != nil {
-		d.r.PushErrorScope(rwgpu.ErrorFilter(filter)) //nolint:gosec // G115: ErrorFilter values are small enum constants that fit uint32
+		d.r.PushErrorScope(errorFilterToRust(filter))
+	}
+}
+
+// errorFilterToRust maps an ErrorFilter (core's numbering, Validation = 0, as
+// on the native build) to the webgpu.h member of the same name, which counts
+// from 1. wgpu-native panics on a filter it does not know, and a panic across
+// the FFI boundary aborts the process, so a value outside the three constants
+// is sent as Validation rather than as an invalid member.
+func errorFilterToRust(filter ErrorFilter) rwgpu.ErrorFilter {
+	switch filter {
+	case ErrorFilterOutOfMemory:
+		return rwgpu.ErrorFilterOutOfMemory
+	case ErrorFilterInternal:
+		return rwgpu.ErrorFilterInternal
+	default:
+		return rwgpu.ErrorFilterValidation
 	}
 }
 
@@ -602,15 +618,15 @@ func convertDepthStencilState(ds *DepthStencilState) *rwgpu.DepthStencilState {
 		DepthBiasClamp:      ds.DepthBiasClamp,
 		StencilFront: rwgpu.StencilFaceState{
 			Compare:     ds.StencilFront.Compare,
-			FailOp:      rwgpu.StencilOperation(ds.StencilFront.FailOp),
-			DepthFailOp: rwgpu.StencilOperation(ds.StencilFront.DepthFailOp),
-			PassOp:      rwgpu.StencilOperation(ds.StencilFront.PassOp),
+			FailOp:      ds.StencilFront.FailOp,
+			DepthFailOp: ds.StencilFront.DepthFailOp,
+			PassOp:      ds.StencilFront.PassOp,
 		},
 		StencilBack: rwgpu.StencilFaceState{
 			Compare:     ds.StencilBack.Compare,
-			FailOp:      rwgpu.StencilOperation(ds.StencilBack.FailOp),
-			DepthFailOp: rwgpu.StencilOperation(ds.StencilBack.DepthFailOp),
-			PassOp:      rwgpu.StencilOperation(ds.StencilBack.PassOp),
+			FailOp:      ds.StencilBack.FailOp,
+			DepthFailOp: ds.StencilBack.DepthFailOp,
+			PassOp:      ds.StencilBack.PassOp,
 		},
 	}
 }

@@ -108,27 +108,24 @@ type SurfaceConfiguration struct {
 	AlphaMode   gputypes.CompositeAlphaMode
 }
 
-// StencilOperation describes a stencil operation.
-type StencilOperation uint32
-
-// Stencil operation constants.
+// Stencil operation constants, the gputypes values as on every other build.
 const (
-	StencilOperationKeep           StencilOperation = 0
-	StencilOperationZero           StencilOperation = 1
-	StencilOperationReplace        StencilOperation = 2
-	StencilOperationInvert         StencilOperation = 3
-	StencilOperationIncrementClamp StencilOperation = 4
-	StencilOperationDecrementClamp StencilOperation = 5
-	StencilOperationIncrementWrap  StencilOperation = 6
-	StencilOperationDecrementWrap  StencilOperation = 7
+	StencilOperationKeep           = gputypes.StencilOperationKeep
+	StencilOperationZero           = gputypes.StencilOperationZero
+	StencilOperationReplace        = gputypes.StencilOperationReplace
+	StencilOperationInvert         = gputypes.StencilOperationInvert
+	StencilOperationIncrementClamp = gputypes.StencilOperationIncrementClamp
+	StencilOperationDecrementClamp = gputypes.StencilOperationDecrementClamp
+	StencilOperationIncrementWrap  = gputypes.StencilOperationIncrementWrap
+	StencilOperationDecrementWrap  = gputypes.StencilOperationDecrementWrap
 )
 
 // StencilFaceState describes stencil operations for a face.
 type StencilFaceState struct {
 	Compare     gputypes.CompareFunction
-	FailOp      StencilOperation
-	DepthFailOp StencilOperation
-	PassOp      StencilOperation
+	FailOp      gputypes.StencilOperation
+	DepthFailOp gputypes.StencilOperation
+	PassOp      gputypes.StencilOperation
 }
 
 // DepthStencilState describes depth and stencil testing configuration.
