@@ -20,3 +20,13 @@ func TestNormalizeLodMaxClamp(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizeAnisotropy: the zero value is the WebGPU default maxAnisotropy
+// 1; every other value is kept for validation to judge.
+func TestNormalizeAnisotropy(t *testing.T) {
+	for _, c := range []struct{ in, want uint16 }{{0, 1}, {1, 1}, {2, 2}, {16, 16}, {17, 17}} {
+		if got := normalizeAnisotropy(c.in); got != c.want {
+			t.Errorf("normalizeAnisotropy(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

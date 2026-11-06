@@ -18,3 +18,20 @@ func normalizeLodMaxClamp(v float32) float32 {
 	}
 	return v
 }
+
+// anisotropyDefault is the WebGPU default of GPUSamplerDescriptor.maxAnisotropy
+// (index.bs): anisotropic filtering off.
+const anisotropyDefault uint16 = 1
+
+// normalizeAnisotropy maps the zero value of SamplerDescriptor.Anisotropy to
+// the WebGPU default 1. The spec has no maxAnisotropy 0 (validation requires
+// at least 1), so the Go zero can only mean "not set". Every CreateSampler
+// path calls it, so the backends, wgpu-native and the browser get the same
+// value; it was already the behavior of each path (core validation treated 0
+// as 1, go-webgpu sends 1 to wgpu-native, the browser omits it).
+func normalizeAnisotropy(v uint16) uint16 {
+	if v == 0 {
+		return anisotropyDefault
+	}
+	return v
+}

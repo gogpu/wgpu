@@ -134,8 +134,8 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 
 // samplerDescriptorToRust converts a SamplerDescriptor for wgpu-native. A nil
 // descriptor means the defaults, as on the native and browser paths (go-webgpu
-// rejects a nil one). wgpu-native takes LodMaxClamp literally, so the zero
-// value is resolved to 32 here.
+// rejects a nil one). wgpu-native takes LodMaxClamp and maxAnisotropy
+// literally, so their zero values are resolved to 32 and 1 here.
 func samplerDescriptorToRust(desc *SamplerDescriptor) *rwgpu.SamplerDescriptor {
 	if desc == nil {
 		desc = &SamplerDescriptor{}
@@ -151,7 +151,7 @@ func samplerDescriptorToRust(desc *SamplerDescriptor) *rwgpu.SamplerDescriptor {
 		LodMinClamp:  desc.LodMinClamp,
 		LodMaxClamp:  normalizeLodMaxClamp(desc.LodMaxClamp),
 		Compare:      desc.Compare,
-		Anisotropy:   desc.Anisotropy,
+		Anisotropy:   normalizeAnisotropy(desc.Anisotropy),
 	}
 }
 

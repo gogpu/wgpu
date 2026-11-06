@@ -23,3 +23,14 @@ func TestSamplerDescriptorToHALLodMaxClamp(t *testing.T) {
 		}
 	}
 }
+
+// TestSamplerDescriptorToHALAnisotropy checks that the HAL gets the WebGPU
+// default maxAnisotropy 1 for a zero Anisotropy, decided in the root, and the
+// given value otherwise.
+func TestSamplerDescriptorToHALAnisotropy(t *testing.T) {
+	for _, c := range []struct{ in, want uint16 }{{0, 1}, {1, 1}, {4, 4}, {16, 16}} {
+		if got := (&SamplerDescriptor{Anisotropy: c.in}).toHAL().Anisotropy; got != c.want {
+			t.Errorf("Anisotropy %d: HAL %d, want %d", c.in, got, c.want)
+		}
+	}
+}
