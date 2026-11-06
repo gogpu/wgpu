@@ -53,11 +53,18 @@ func TestDepthAttachmentStates(t *testing.T) {
 // TestDepthAttachmentWriteThenSampled: a depth texture written as an
 // attachment, then read by a compute pass (sampleDepth), two frames; the
 // compute pass needs DownlevelFlagsComputeShaders, which GL 4.1 lacks.
+// Each frame also samples a depth cleared to 0.75: the software backend
+// decoded sampled depth as RGBA8 bytes, which only a depth of 0 survives.
 func TestDepthAttachmentWriteThenSampled(t *testing.T) {
 	forEachOverrideBackend(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, device *wgpu.Device) {
 		r := newDepthRig(t, device, gputypes.TextureFormatDepth32Float,
 			wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageTextureBinding)
 		for frame := 0; frame < 2; frame++ {
+			r.draw(t, depthPass{clear: true, clearValue: 0.75, write: true, noDraw: true})
+			// GLES reads 0.75000006 back from its depth store.
+			if got := r.sampleDepth(t); got < 0.75-1e-6 || got > 0.75+1e-6 {
+				t.Fatalf("frame %d: sampled depth = %v, want the cleared 0.75", frame, got)
+			}
 			if !r.draw(t, depthPass{clear: true, clearValue: 1, write: true}) {
 				t.Fatalf("frame %d: the triangle was not drawn", frame)
 			}
