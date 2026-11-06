@@ -947,49 +947,6 @@ type (
 	CommandEncoderDescriptor  = hal.CommandEncoderDescriptor
 )
 
-// textureFormatToGL converts a WebGPU texture format to GL format info.
-func textureFormatToGL(format gputypes.TextureFormat) (internalFormat, dataFormat, dataType uint32) {
-	switch format {
-	case gputypes.TextureFormatR8Unorm:
-		return gl.R8, gl.RED, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRG8Unorm:
-		return gl.RG8, gl.RG, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRGBA8Unorm:
-		return gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatRGBA8UnormSrgb:
-		return gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatBGRA8Unorm:
-		return gl.RGBA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatBGRA8UnormSrgb:
-		return gl.SRGB8_ALPHA8, gl.BGRA, gl.UNSIGNED_BYTE
-	case gputypes.TextureFormatR16Float:
-		return gl.R16F, gl.RED, gl.HALF_FLOAT
-	case gputypes.TextureFormatRG16Float:
-		return gl.RG16F, gl.RG, gl.HALF_FLOAT
-	case gputypes.TextureFormatRGBA16Float:
-		return gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT
-	case gputypes.TextureFormatR32Float:
-		return gl.R32F, gl.RED, gl.FLOAT
-	case gputypes.TextureFormatRG32Float:
-		return gl.RG32F, gl.RG, gl.FLOAT
-	case gputypes.TextureFormatRGBA32Float:
-		return gl.RGBA32F, gl.RGBA, gl.FLOAT
-	case gputypes.TextureFormatDepth16Unorm:
-		return gl.DEPTH_COMPONENT16, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT
-	case gputypes.TextureFormatDepth24Plus:
-		return gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT
-	case gputypes.TextureFormatDepth24PlusStencil8:
-		return gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8
-	case gputypes.TextureFormatDepth32Float:
-		return gl.DEPTH_COMPONENT32, gl.DEPTH_COMPONENT, gl.FLOAT
-	case gputypes.TextureFormatDepth32FloatStencil8:
-		return gl.DEPTH32F_STENCIL8, gl.DEPTH_STENCIL, gl.FLOAT
-	default:
-		// Default to RGBA8
-		return gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE
-	}
-}
-
 // maxInt32 returns the larger of a or b.
 func maxInt32(a, b int32) int32 {
 	if a > b {

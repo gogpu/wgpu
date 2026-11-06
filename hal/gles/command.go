@@ -1969,10 +1969,10 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 	if stride < uint64(rowBytes) {
 		stride = uint64(rowBytes) // bytesPerRow may be omitted for a single row
 	}
-	// A 3D or 2D array texture is read one layer at a time, each layer
-	// rowsPerImage rows after the previous one.
+	// A 3D or 2D array texture or a cube map is read one layer at a time,
+	// each layer rowsPerImage rows after the previous one.
 	layers := uint32(1)
-	if isLayeredTarget(c.srcTexture.target) {
+	if hasLayers(c.srcTexture.target) {
 		layers = max(c.copySize[2], 1)
 	}
 	rowsPerImage := uint64(c.rowsPerImage)
@@ -2137,32 +2137,28 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 	// Source rows are bytesPerRow apart (a multiple of 256 for multi-row
 	// copies), so tell GL the row length in texels, as Rust wgpu-hal does
 	// (gles/queue.rs CopyBufferToTexture: row_texels = bytes_per_row / block
-	// size). Leaving it at 0 read padded rows as tightly packed.
+	// size). Leaving it at 0 read padded rows as tightly packed; the texel
+	// size covers depth and stencil transfers as well as color.
 	var rowTexels int32
-	if bpp := glPixelBytes(format, dataType); bpp != 0 && c.bytesPerRow != 0 {
-		rowTexels = int32(c.bytesPerRow / bpp)
+	if bpp := uploadTexelBytes(format, dataType); bpp != 0 && c.bytesPerRow != 0 {
+		rowTexels = int32(uint64(c.bytesPerRow) / bpp)
 	}
 	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, rowTexels)
 
-	// Upload from PBO. When a PBO is bound, the pixels pointer is interpreted
-	// as a byte offset into the bound buffer.
-	offset := unsafe.Pointer(uintptr(c.bufOffset))
 	if isLayeredTarget(c.dstTex.target) {
 		// Layers are rowsPerImage rows apart in the buffer; the z offset is
 		// the depth slice of a 3D texture or the array layer (Rust
 		// gles/queue.rs: UNPACK_IMAGE_HEIGHT = rows_per_image,
-		// tex_sub_image_3d at get_z_offset).
+		// tex_sub_image_3d at get_z_offset). When a PBO is bound, the pixels
+		// pointer is a byte offset into it.
 		ctx.PixelStorei(gl.UNPACK_IMAGE_HEIGHT, int32(c.rowsPerImage))
 		ctx.TexSubImage3D(c.dstTex.target, int32(c.mipLevel),
 			int32(c.origin[0]), int32(c.origin[1]), int32(c.origin[2]),
 			width, height, int32(max(c.copySize[2], 1)),
-			format, dataType, offset)
+			format, dataType, unsafe.Pointer(uintptr(c.bufOffset)))
 		ctx.PixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0)
 	} else {
-		ctx.TexSubImage2D(c.dstTex.target, int32(c.mipLevel),
-			int32(c.origin[0]), int32(c.origin[1]),
-			width, height,
-			format, dataType, offset)
+		c.uploadLayers(ctx, format, dataType)
 	}
 
 	// Restore defaults.
@@ -2170,6 +2166,23 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, 0)
 	ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, 0)
 	ctx.BindTexture(c.dstTex.target, 0)
+}
+
+// uploadLayers uploads each layer of the copy into a 2D texture or a cube
+// map face, layer z starting z*bytesPerRow*rowsPerImage bytes after the
+// copy's offset in the bound unpack buffer (Rust gles/queue.rs
+// CopyBufferToTexture: tex_sub_image_2d at get_2d_target(array_layer), one
+// layer per region). TexSubImage2D at TEXTURE_CUBE_MAP itself is an invalid
+// enum: no face was written.
+func (c *CopyBufferToTextureCommand) uploadLayers(ctx *gl.Context, format, dataType uint32) {
+	imageBytes := uint64(c.bytesPerRow) * uint64(max(c.rowsPerImage, c.copySize[1]))
+	for z := uint32(0); z < max(c.copySize[2], 1); z++ {
+		offset := c.bufOffset + uint64(z)*imageBytes
+		ctx.TexSubImage2D(get2DTarget(c.dstTex.target, c.origin[2]+z), int32(c.mipLevel),
+			int32(c.origin[0]), int32(c.origin[1]),
+			int32(c.copySize[0]), int32(c.copySize[1]),
+			format, dataType, unsafe.Pointer(uintptr(offset)))
+	}
 }
 
 // CopyTextureToTextureCommand copies pixels between textures using an FBO.
