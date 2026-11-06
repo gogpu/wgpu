@@ -96,7 +96,12 @@ type TextureView struct {
 	image       vk.Image   // The underlying VkImage handle (for barriers)
 	isSwapchain bool       // True if this view is for a swapchain image
 	swapchain   *Swapchain // Back-pointer to owning swapchain (VK-006: layout tracking)
-	vkFormat    vk.Format  // Vulkan format (for swapchain views where texture is nil)
+	// vkFormat is the view's own Vulkan format, which can differ from its
+	// texture's (an RGBA8UnormSrgb view of an RGBA8Unorm texture listed in
+	// ViewFormats). Render passes and framebuffers are keyed on it, as the
+	// pipeline's attachment formats are; keying on the texture's format makes
+	// the pass incompatible with the pipeline (VUID-vkCmdDraw-renderPass-02684).
+	vkFormat vk.Format
 	// depthSlices holds the 2D views of single depth slices that render
 	// passes on a 3D view use; nil for every other view (depth_slice_view.go).
 	depthSlices *depthSliceViews
