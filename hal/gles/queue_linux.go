@@ -12,7 +12,6 @@ import (
 
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/gles/egl"
-	"github.com/gogpu/wgpu/hal/gles/gl"
 )
 
 // Queue implements hal.Queue for OpenGL on Linux.
@@ -128,23 +127,12 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	}
 	defer q.ctx.Unlock()
 
-	_, format, dataType := textureFormatToGL(tex.format)
-
 	glCtx.BindTexture(tex.target, tex.id)
-
-	if isLayeredTarget(tex.target) {
-		err := writeLayeredTexture(glCtx, tex, dst, data, layout, size, format, dataType)
-		glCtx.BindTexture(tex.target, 0)
+	err = writeTexture(glCtx, tex, dst, data, layout, size)
+	glCtx.BindTexture(tex.target, 0)
+	if err != nil {
 		return err
 	}
-	if tex.target == gl.TEXTURE_2D {
-		if err := writeTexture2D(glCtx, tex, dst, data, layout, size, format, dataType); err != nil {
-			glCtx.BindTexture(tex.target, 0)
-			return err
-		}
-	}
-
-	glCtx.BindTexture(tex.target, 0)
 
 	hal.Logger().Debug("gles: texture written",
 		"format", tex.format,

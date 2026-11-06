@@ -108,7 +108,7 @@ func TestTextureFormatToGL(t *testing.T) {
 		{
 			name:           "Depth32Float",
 			format:         gputypes.TextureFormatDepth32Float,
-			wantInternal:   gl.DEPTH_COMPONENT32,
+			wantInternal:   gl.DEPTH_COMPONENT32F,
 			wantDataFormat: gl.DEPTH_COMPONENT,
 			wantDataType:   gl.FLOAT,
 		},
@@ -117,7 +117,14 @@ func TestTextureFormatToGL(t *testing.T) {
 			format:         gputypes.TextureFormatDepth32FloatStencil8,
 			wantInternal:   gl.DEPTH32F_STENCIL8,
 			wantDataFormat: gl.DEPTH_STENCIL,
-			wantDataType:   gl.FLOAT,
+			wantDataType:   gl.FLOAT_32_UNSIGNED_INT_24_8_REV,
+		},
+		{
+			name:           "Stencil8",
+			format:         gputypes.TextureFormatStencil8,
+			wantInternal:   gl.STENCIL_INDEX8,
+			wantDataFormat: gl.STENCIL_INDEX,
+			wantDataType:   gl.UNSIGNED_BYTE,
 		},
 		{
 			name:           "BGRA8UnormSrgb",

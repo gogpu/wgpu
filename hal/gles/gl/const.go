@@ -27,6 +27,8 @@ const (
 	HALF_FLOAT        = 0x140B
 	UNSIGNED_INT_24_8 = 0x84FA
 
+	FLOAT_32_UNSIGNED_INT_24_8_REV = 0x8DAD
+
 	// Errors
 	NO_ERROR                      = 0
 	INVALID_ENUM                  = 0x0500
@@ -114,6 +116,7 @@ const (
 	MIRRORED_REPEAT = 0x8370
 
 	// Pixel formats
+	STENCIL_INDEX     = 0x1901
 	DEPTH_COMPONENT   = 0x1902
 	RED               = 0x1903
 	RG                = 0x8227
@@ -129,6 +132,9 @@ const (
 	DEPTH_COMPONENT24 = 0x81A6
 	DEPTH_COMPONENT32 = 0x81A7
 	DEPTH24_STENCIL8  = 0x88F0
+
+	DEPTH_COMPONENT32F = 0x8CAC
+	STENCIL_INDEX8     = 0x8D48
 
 	// Internal formats
 	R8                = 0x8229
