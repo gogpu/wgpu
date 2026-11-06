@@ -176,6 +176,10 @@ func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, 
 	}
 
 	attrs := make([]float32, attrCount)
+	if tri.Flat != 0 {
+		interpolateMixed(attrs, b0, b1, b2, tri, oneOverW)
+		return attrs
+	}
 	if oneOverW != 0 {
 		for i := 0; i < attrCount; i++ {
 			attrs[i] = (b0*tri.V0.Attributes[i]*tri.V0.W +
@@ -188,4 +192,22 @@ func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, 
 		}
 	}
 	return attrs
+}
+
+// interpolateMixed fills attrs for a triangle with flat attributes: a flat
+// attribute is the provoking vertex's lane, copied without arithmetic, and
+// every other one is interpolated as interpolateAttributes does.
+func interpolateMixed(attrs []float32, b0, b1, b2 float32, tri *Triangle, oneOverW float32) {
+	for i := range attrs {
+		switch {
+		case i < 64 && tri.Flat&(1<<i) != 0:
+			attrs[i] = tri.V0.Attributes[i]
+		case oneOverW != 0:
+			attrs[i] = (b0*tri.V0.Attributes[i]*tri.V0.W +
+				b1*tri.V1.Attributes[i]*tri.V1.W +
+				b2*tri.V2.Attributes[i]*tri.V2.W) / oneOverW
+		default:
+			attrs[i] = b0*tri.V0.Attributes[i] + b1*tri.V1.Attributes[i] + b2*tri.V2.Attributes[i]
+		}
+	}
 }
