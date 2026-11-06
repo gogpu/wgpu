@@ -2977,7 +2977,34 @@ func TestRenderPassValidationError_ErrorStrings(t *testing.T) {
 				ActualHeight:    768,
 				ReferenceIndex:  0,
 			},
-			contains: "dimensions",
+			contains: "the color attachment at index 0's texture view has extent 800x600 but is followed by the color attachment at index 2's texture view which has 1024x768",
+		},
+		{
+			// The depth/stencil attachment (index -1) is named as Rust
+			// wgpu-core's AttachmentErrorLocation::Depth, not "[-1]".
+			name: "SampleCountMismatch depth",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorSampleCountMismatch, Label: "MyPass",
+				AttachmentIndex: -1, ExpectedSamples: 4, ActualSamples: 1,
+			},
+			contains: "attachments have differing sample counts: the color attachment at index 0's texture view has count 4 but is followed by the depth attachment's texture view which has count 1",
+		},
+		{
+			name: "DimensionMismatch depth",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorDimensionMismatch, Label: "MyPass", AttachmentIndex: -1,
+				ExpectedWidth: 16, ExpectedHeight: 16, ActualWidth: 8, ActualHeight: 8,
+			},
+			contains: "attachments have differing sizes: the color attachment at index 0's texture view has extent 16x16 but is followed by the depth attachment's texture view which has 8x8",
+		},
+		{
+			name: "DimensionMismatch resolve target",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorDimensionMismatch, Label: "MyPass", AttachmentIndex: 1,
+				ResolveTarget: true, ReferenceIndex: 1,
+				ExpectedWidth: 16, ExpectedHeight: 16, ActualWidth: 8, ActualHeight: 8,
+			},
+			contains: "the color attachment at index 1's texture view has extent 16x16 but is followed by the color attachment at index 1's resolve texture view which has 8x8",
 		},
 	}
 
@@ -2986,6 +3013,9 @@ func TestRenderPassValidationError_ErrorStrings(t *testing.T) {
 			msg := tt.err.Error()
 			if !strings.Contains(msg, tt.contains) {
 				t.Errorf("error message %q does not contain %q", msg, tt.contains)
+			}
+			if strings.Contains(msg, "[-1]") {
+				t.Errorf("error message %q names the depth attachment [-1]", msg)
 			}
 		})
 	}
