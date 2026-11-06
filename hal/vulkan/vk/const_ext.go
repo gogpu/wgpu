@@ -26,6 +26,22 @@ func ClearValueColor(r, g, b, a float32) ClearValue {
 	return cv
 }
 
+// ClearValueColorInt32 creates a ClearValue from RGBA signed integer values,
+// the int32 member of VkClearColorValue (a clear of a SINT image).
+func ClearValueColorInt32(r, g, b, a int32) ClearValue {
+	var cv ClearValue
+	*(*[4]int32)(unsafe.Pointer(&cv)) = [4]int32{r, g, b, a}
+	return cv
+}
+
+// ClearValueColorUint32 creates a ClearValue from RGBA unsigned integer
+// values, the uint32 member of VkClearColorValue (a clear of a UINT image).
+func ClearValueColorUint32(r, g, b, a uint32) ClearValue {
+	var cv ClearValue
+	*(*[4]uint32)(unsafe.Pointer(&cv)) = [4]uint32{r, g, b, a}
+	return cv
+}
+
 // ClearValueDepthStencil creates a ClearValue from depth and stencil values.
 func ClearValueDepthStencil(depth float32, stencil uint32) ClearValue {
 	var cv ClearValue
