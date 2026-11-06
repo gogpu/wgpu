@@ -192,6 +192,17 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		halDesc.BaseArrayLayer = desc.BaseArrayLayer
 		halDesc.ArrayLayerCount = desc.ArrayLayerCount
 	}
+	// The HAL gets the resolved dimension and counts, as Rust wgpu-core
+	// create_texture_view passes resolved_dimension and resolved_range: a
+	// backend's own fallback sees only the texture's dimension and would make
+	// a default view of a layered 2D texture a 2d view, and a 2d view with no
+	// layer count a view of every remaining layer. Undefined and 0 stay for a
+	// texture whose descriptor is not known (wrapped from a HAL handle).
+	halDesc.Dimension = resolveViewDimension(texture, halDesc.Dimension)
+	halDesc.ArrayLayerCount = resolveViewLayerCount(texture, halDesc.Dimension,
+		halDesc.BaseArrayLayer, halDesc.ArrayLayerCount)
+	halDesc.MipLevelCount = resolveViewMipCount(texture, halDesc.BaseMipLevel, halDesc.MipLevelCount)
+
 	halView, err := halDevice.CreateTextureView(halTexture, halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
@@ -203,7 +214,6 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	// texture alive by itself: Go has no drop, and a view the application
 	// never releases would pin the texture's memory. Every GPU use of a view
 	// (a bind group, a render pass) holds the texture's reference as well.
-	dimension := resolveViewDimension(texture, halDesc.Dimension)
 	return &TextureView{
 		hal:          halView,
 		device:       d,
@@ -213,14 +223,13 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
 			d.destroyTextureViewDeferred(halView)
 		}),
-		dimension:      dimension,
-		baseMipLevel:   halDesc.BaseMipLevel,
-		baseArrayLayer: halDesc.BaseArrayLayer,
-		arrayLayerCount: resolveViewLayerCount(texture, dimension,
-			halDesc.BaseArrayLayer, halDesc.ArrayLayerCount),
-		mipLevelCount: resolveViewMipCount(texture, halDesc.BaseMipLevel, halDesc.MipLevelCount),
-		format:        halDesc.Format,
-		aspect:        halDesc.Aspect,
+		dimension:       halDesc.Dimension,
+		baseMipLevel:    halDesc.BaseMipLevel,
+		baseArrayLayer:  halDesc.BaseArrayLayer,
+		arrayLayerCount: halDesc.ArrayLayerCount,
+		mipLevelCount:   halDesc.MipLevelCount,
+		format:          halDesc.Format,
+		aspect:          halDesc.Aspect,
 	}, nil
 }
 
