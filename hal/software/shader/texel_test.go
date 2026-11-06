@@ -148,18 +148,27 @@ func vec4Near(a, b Vec4) bool {
 	return true
 }
 
-// TestVectorShuffleOfIntegerArray checks that a shuffle reads the components
-// of an integer vector held as an array of scalars, as global_invocation_id
-// is: id.xy read (0, 0) before, so every invocation stored to texel (0, 0).
-func TestVectorShuffleOfIntegerArray(t *testing.T) {
-	m := &Module{Types: map[uint32]*TypeInfo{1: {Kind: TypeVector, Components: 2}}}
-	id := ValArray([]Value{ValUint(3), ValUint(5), ValUint(7)})
-	got := vectorShuffle(m, 1, id, id, []uint32{0, 1})
-	if got.Tag != TagVec2 || got.F[0] != 3 || got.F[1] != 5 {
-		t.Errorf("shuffle = %v %v, want vec2(3, 5)", got.Tag, got.F)
+// TestVectorShuffleOfIntegerVector checks that a shuffle reads the lanes of
+// an integer vector, as global_invocation_id is (id.xy once read (0, 0), so
+// every invocation stored to texel (0, 0)), and that the result is an integer
+// vector, exact above 2^24.
+func TestVectorShuffleOfIntegerVector(t *testing.T) {
+	m := &Module{Types: map[uint32]*TypeInfo{
+		1: {Kind: TypeInt, Width: 32},
+		2: {Kind: TypeVector, ElemType: 1, Components: 2},
+	}}
+	id := uvec3ToValue([3]uint32{3, 1<<24 + 1, 7})
+	got := vectorShuffle(m, 0, 2, id, id, []uint32{0, 1})
+	if got.Tag != TagUVec2 || got.U[0] != 3 || got.U[1] != 1<<24+1 {
+		t.Errorf("shuffle = %+v, want uvec2(3, 2^24+1)", got)
 	}
-	if xyz := imageCoord3(id); xyz != [3]int{3, 5, 7} {
-		t.Errorf("imageCoord3 = %v, want [3 5 7]", xyz)
+	if xyz := imageCoord3(id); xyz != [3]int{3, 1<<24 + 1, 7} {
+		t.Errorf("imageCoord3 = %v, want [3 2^24+1 7]", xyz)
+	}
+	// The array form integer vectors took before still reads.
+	arr := ValArray([]Value{ValUint(3), ValUint(5), ValUint(7)})
+	if xyz := imageCoord3(arr); xyz != [3]int{3, 5, 7} {
+		t.Errorf("imageCoord3(array) = %v, want [3 5 7]", xyz)
 	}
 }
 

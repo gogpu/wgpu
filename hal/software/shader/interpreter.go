@@ -20,6 +20,7 @@
 package shader
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -375,6 +376,22 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 			return zeroValue(m.Types, ti.ElemType)
 		}
 		elemSize := typeByteSize(m, elemType)
+		if k := scalarKind(elemType); k != kindNone && ti.Components >= 2 && ti.Components <= 4 {
+			// A 32-bit vector loads its words as they are: exact for every
+			// integer and float bit pattern; a bool lane is any nonzero word.
+			var w [4]uint32
+			for i := range ti.Components {
+				o := offset + i*elemSize
+				if o+4 > uint32(len(data)) {
+					continue
+				}
+				w[i] = binary.LittleEndian.Uint32(data[o:])
+				if k == kindBool {
+					w[i] = b2u(w[i] != 0)
+				}
+			}
+			return wordsValue(shapeOf(k, int(ti.Components)), w)
+		}
 		switch ti.Components {
 		case 2:
 			var v [2]float32
@@ -772,7 +789,7 @@ func (interp *interpreter) run() error {
 
 		case OpCompositeConstruct:
 			// OpCompositeConstruct: type resultID constituents...
-			interp.values[inst.ResultID] = interp.compositeConstruct(inst.TypeID, inst.Operands)
+			interp.values[inst.ResultID] = interp.compositeConstruct(inst.resShape, inst.TypeID, inst.Operands)
 
 		case OpCompositeExtract:
 			// OpCompositeExtract: type resultID composite indexes...
@@ -814,19 +831,19 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertToFloat)
+			interp.values[inst.ResultID] = convertLanes(interp.values[inst.Operands[0]], inst.resShape, convertToFloat)
 
 		case OpConvertSToF:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertSignedToFloat)
+			interp.values[inst.ResultID] = convertLanes(interp.values[inst.Operands[0]], inst.resShape, convertSignedToFloat)
 
 		case OpConvertFToU:
 			if len(inst.Operands) < 1 {
 				break
 			}
-			interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToUint)
+			interp.values[inst.ResultID] = convertLanes(interp.values[inst.Operands[0]], inst.resShape, convertFloatToUint)
 
 		case OpBitcast:
 			if len(inst.Operands) < 1 {
@@ -837,7 +854,7 @@ func (interp *interpreter) run() error {
 			if interp.module != nil {
 				srcType = interp.module.ResultTypes[src]
 			}
-			interp.values[inst.ResultID] = interp.bitcast(interp.values[src], srcType, inst.TypeID)
+			interp.values[inst.ResultID] = interp.bitcast(interp.values[src], srcType, inst.resShape, inst.TypeID)
 
 		case OpFAdd:
 			if len(inst.Operands) >= 2 {
@@ -864,19 +881,10 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = floatUnaryOp(interp.values[inst.Operands[0]], func(a float32) float32 { return -a })
 			}
 
-		case OpIAdd:
+		case OpIAdd, OpISub, OpIMul, OpBitwiseAnd, OpBitwiseOr, OpBitwiseXor,
+			OpShiftLeftLogical, OpShiftRightLogical, OpShiftRightArithmetic:
 			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a + b })
-			}
-
-		case OpISub:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a - b })
-			}
-
-		case OpIMul:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a * b })
+				interp.values[inst.ResultID] = intBinary(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
 		case OpReturn:
@@ -942,63 +950,20 @@ func (interp *interpreter) run() error {
 
 		case OpSelect:
 			if len(inst.Operands) >= 3 {
-				cond := interp.values[inst.Operands[0]]
-				trueVal := interp.values[inst.Operands[1]]
-				falseVal := interp.values[inst.Operands[2]]
-				if toBool(cond) {
-					interp.values[inst.ResultID] = trueVal
-				} else {
-					interp.values[inst.ResultID] = falseVal
-				}
+				interp.values[inst.ResultID] = selectLanes(interp.values[inst.Operands[0]],
+					interp.values[inst.Operands[1]], interp.values[inst.Operands[2]])
 			}
 
-		case OpIEqual:
+		case OpIEqual, OpINotEqual, OpULessThan, OpUGreaterThan, OpULessThanEqual, OpUGreaterThanEqual,
+			OpSLessThan, OpSGreaterThan, OpSLessThanEqual, OpSGreaterThanEqual:
 			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a == b)
+				interp.values[inst.ResultID] = intCompare(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
-		case OpINotEqual:
+		case OpFOrdEqual, OpFOrdLessThan, OpFOrdGreaterThan, OpFOrdLessThanEqual, OpFOrdGreaterThanEqual,
+			OpFOrdNotEqual, OpFUnordNotEqual:
 			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a != b)
-			}
-
-		case OpFOrdEqual:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a == b)
-			}
-
-		case OpFOrdLessThan:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a < b)
-			}
-
-		case OpFOrdGreaterThan:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a > b)
-			}
-
-		case OpFOrdLessThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a <= b)
-			}
-
-		case OpFOrdGreaterThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a >= b)
+				interp.values[inst.ResultID] = floatCompare(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
 		case OpPhi:
@@ -1117,7 +1082,7 @@ func (interp *interpreter) run() error {
 				vec1 := interp.values[inst.Operands[0]]
 				vec2 := interp.values[inst.Operands[1]]
 				components := inst.Operands[2:]
-				interp.values[inst.ResultID] = vectorShuffle(interp.module, inst.TypeID, vec1, vec2, components)
+				interp.values[inst.ResultID] = vectorShuffle(interp.module, inst.resShape, inst.TypeID, vec1, vec2, components)
 			}
 
 		case OpCopyObject:
@@ -1126,60 +1091,9 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.values[inst.Operands[0]]
 			}
 
-		case OpSDiv:
+		case OpSDiv, OpUDiv, OpSMod, OpUMod, OpSRem:
 			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				if b != 0 {
-					interp.values[inst.ResultID] = ValInt(a / b)
-				} else {
-					interp.values[inst.ResultID] = ValInt(0)
-				}
-			}
-
-		case OpUDiv:
-			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				if b != 0 {
-					interp.values[inst.ResultID] = ValUint(a / b)
-				} else {
-					interp.values[inst.ResultID] = ValUint(0)
-				}
-			}
-
-		case OpSMod:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				if b != 0 {
-					interp.values[inst.ResultID] = ValInt(a % b)
-				} else {
-					interp.values[inst.ResultID] = ValInt(0)
-				}
-			}
-
-		case OpUMod:
-			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				if b != 0 {
-					interp.values[inst.ResultID] = ValUint(a % b)
-				} else {
-					interp.values[inst.ResultID] = ValUint(0)
-				}
-			}
-
-		case OpSRem:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				if b != 0 {
-					// SPIR-V SRem: remainder has same sign as dividend.
-					interp.values[inst.ResultID] = ValInt(a % b)
-				} else {
-					interp.values[inst.ResultID] = ValInt(0)
-				}
+				interp.values[inst.ResultID] = intDivRem(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
 		case OpFMod:
@@ -1205,15 +1119,14 @@ func (interp *interpreter) run() error {
 					interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], fRem)
 			}
 
-		case OpSNegate:
+		case OpSNegate, OpNot:
 			if len(inst.Operands) >= 1 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				interp.values[inst.ResultID] = ValInt(-a)
+				interp.values[inst.ResultID] = intUnary(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]])
 			}
 
 		case OpConvertFToS:
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = interp.convertLanes(interp.values[inst.Operands[0]], inst.TypeID, convertFloatToSigned)
+				interp.values[inst.ResultID] = convertLanes(interp.values[inst.Operands[0]], inst.resShape, convertFloatToSigned)
 			}
 
 		case OpSConvert, OpUConvert, OpFConvert:
@@ -1222,113 +1135,14 @@ func (interp *interpreter) run() error {
 				interp.values[inst.ResultID] = interp.values[inst.Operands[0]]
 			}
 
-		case OpULessThan:
+		case OpLogicalAnd, OpLogicalOr, OpLogicalEqual, OpLogicalNotEqual:
 			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a < b)
-			}
-
-		case OpUGreaterThan:
-			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a > b)
-			}
-
-		case OpULessThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a <= b)
-			}
-
-		case OpUGreaterThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				b := toUint32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(a >= b)
-			}
-
-		case OpSLessThan:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = ValBool(a < b)
-			}
-
-		case OpSGreaterThan:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = ValBool(a > b)
-			}
-
-		case OpSLessThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = ValBool(a <= b)
-			}
-
-		case OpSGreaterThanEqual:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := int32(toUint32(interp.values[inst.Operands[1]]))
-				interp.values[inst.ResultID] = ValBool(a >= b)
-			}
-
-		case OpLogicalAnd:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = ValBool(toBool(interp.values[inst.Operands[0]]) && toBool(interp.values[inst.Operands[1]]))
-			}
-
-		case OpLogicalOr:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = ValBool(toBool(interp.values[inst.Operands[0]]) || toBool(interp.values[inst.Operands[1]]))
+				interp.values[inst.ResultID] = logicalOp(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
 			}
 
 		case OpLogicalNot:
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = ValBool(!toBool(interp.values[inst.Operands[0]]))
-			}
-
-		case OpBitwiseAnd:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a & b })
-			}
-
-		case OpBitwiseOr:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a | b })
-			}
-
-		case OpBitwiseXor:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a ^ b })
-			}
-
-		case OpNot:
-			if len(inst.Operands) >= 1 {
-				a := toUint32(interp.values[inst.Operands[0]])
-				interp.values[inst.ResultID] = ValUint(^a)
-			}
-
-		case OpShiftLeftLogical:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a << (b & 31) })
-			}
-
-		case OpShiftRightLogical:
-			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = intBinOp(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], func(a, b uint32) uint32 { return a >> (b & 31) })
-			}
-
-		case OpShiftRightArithmetic:
-			if len(inst.Operands) >= 2 {
-				a := int32(toUint32(interp.values[inst.Operands[0]]))
-				b := toUint32(interp.values[inst.Operands[1]]) & 31
-				interp.values[inst.ResultID] = ValInt(a >> b)
+				interp.values[inst.ResultID] = logicalOp(inst.Opcode, inst.resShape, interp.values[inst.Operands[0]], Value{})
 			}
 
 		case OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange,
@@ -1357,8 +1171,9 @@ func (interp *interpreter) run() error {
 			// barriers, so memory is always coherent: nothing to do.
 
 		case OpUndef:
-			// OpUndef produces an undefined value -- use zero.
-			interp.values[inst.ResultID] = ValUint(0)
+			// An undefined value may be anything; it is the zero of its type,
+			// so it has the type's shape.
+			interp.values[inst.ResultID] = zeroValue(interp.module.Types, inst.TypeID)
 
 		case OpExtInst:
 			// OpExtInst: type resultID setID instructionNumber operands...
@@ -1371,7 +1186,7 @@ func (interp *interpreter) run() error {
 				extOps := inst.Operands[2:]
 				setName := interp.module.ExtInstImports[setID]
 				if setName == glslExtSetName {
-					interp.values[inst.ResultID] = interp.executeGLSLExtInst(instNum, extOps)
+					interp.values[inst.ResultID] = interp.glslExtInst(instNum, extOps, inst.resShape)
 				}
 			}
 
@@ -1417,20 +1232,7 @@ func (interp *interpreter) run() error {
 				imgVal := interp.values[inst.Operands[0]]
 				coord := interp.values[inst.Operands[1]]
 				ops := interp.parseImageOperands(inst.Operands[2:])
-				interp.values[inst.ResultID] = interp.fetchTexelLevel(imgVal, coord, int(ops.lod))
-			}
-
-		case OpLogicalEqual, OpLogicalNotEqual:
-			if len(inst.Operands) >= 2 {
-				eq := toBool(interp.values[inst.Operands[0]]) == toBool(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(eq == (inst.Opcode == OpLogicalEqual))
-			}
-
-		case OpFOrdNotEqual, OpFUnordNotEqual:
-			if len(inst.Operands) >= 2 {
-				a := toFloat32(interp.values[inst.Operands[0]])
-				b := toFloat32(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = ValBool(floatNotEqual(a, b, inst.Opcode == OpFOrdNotEqual))
+				interp.values[inst.ResultID] = texelResult(inst.resShape, interp.fetchTexelLevel(imgVal, coord, int(ops.lod)))
 			}
 
 		case OpBitCount, OpBitReverse:
@@ -1440,17 +1242,23 @@ func (interp *interpreter) run() error {
 				if inst.Opcode == OpBitReverse {
 					f = bitReverse
 				}
-				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID), f)
+				interp.values[inst.ResultID] = mapIntLanes(inst.resShape, interp.values[inst.Operands[0]], f)
 			}
 
 		case OpBitFieldInsert:
-			// OpBitFieldInsert: type resultID base insert offset count
+			// OpBitFieldInsert: type resultID base insert offset count. Base
+			// and insert have the result type; offset and count are scalars.
 			if len(inst.Operands) >= 4 {
-				insert := toUint32(interp.values[inst.Operands[1]])
+				base := interp.values[inst.Operands[0]]
+				s := shapeOr(inst.resShape, base, kindUint)
+				k, n := s.kind(), s.lanes()
+				b, ins := laneWords(base, k), laneWords(interp.values[inst.Operands[1]], k)
 				offset := toUint32(interp.values[inst.Operands[2]])
 				count := toUint32(interp.values[inst.Operands[3]])
-				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
-					func(base uint32) uint32 { return bitFieldInsert(base, insert, offset, count) })
+				for i := range n {
+					b[i] = bitFieldInsert(b[i], ins[i], offset, count)
+				}
+				interp.values[inst.ResultID] = laneValue(k, n, b)
 			}
 
 		case OpBitFieldSExtract, OpBitFieldUExtract:
@@ -1459,7 +1267,7 @@ func (interp *interpreter) run() error {
 				offset := toUint32(interp.values[inst.Operands[1]])
 				count := toUint32(interp.values[inst.Operands[2]])
 				signed := inst.Opcode == OpBitFieldSExtract
-				interp.values[inst.ResultID] = mapIntLanes(interp.values[inst.Operands[0]], interp.resultSigned(inst.TypeID),
+				interp.values[inst.ResultID] = mapIntLanes(inst.resShape, interp.values[inst.Operands[0]],
 					func(base uint32) uint32 { return bitFieldExtract(base, offset, count, signed) })
 			}
 
@@ -1484,7 +1292,7 @@ func (interp *interpreter) run() error {
 			// A storage texture load (textureLoad of a read-only or
 			// read-write storage texture).
 			if len(inst.Operands) >= 2 {
-				interp.values[inst.ResultID] = interp.readImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]])
+				interp.values[inst.ResultID] = texelResult(inst.resShape, interp.readImage(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]]))
 			}
 
 		case OpImageWrite:
@@ -1497,14 +1305,14 @@ func (interp *interpreter) run() error {
 		case OpImageQuerySize:
 			// OpImageQuerySize: type resultID image
 			if len(inst.Operands) >= 1 {
-				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], 0, inst.TypeID)
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], 0, inst.resShape)
 			}
 
 		case OpImageQuerySizeLod:
 			// OpImageQuerySizeLod: type resultID image lod
 			if len(inst.Operands) >= 2 {
 				lod := scalarInt(interp.values[inst.Operands[1]])
-				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], lod, inst.TypeID)
+				interp.values[inst.ResultID] = interp.queryImageSize(interp.values[inst.Operands[0]], lod, inst.resShape)
 			}
 
 		case OpImageQueryLevels:
@@ -1826,8 +1634,22 @@ func subPointerStore(sp *SubPointer, val Value) {
 	sp.Parent.Val = setCompositeElement(sp.Parent.Val, sp.Indexes, val)
 }
 
-// compositeConstruct builds a composite value from constituent IDs.
-func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []uint32) Value {
+// compositeConstruct builds a composite value of result type typeID, shape
+// s, from constituent IDs. A vector takes the lanes of its constituents in
+// order, each scalar one lane and each vector all of its lanes (SPIR-V
+// OpCompositeConstruct), as a value of its own kind: a u32, i32 or bool
+// vector keeps raw words, never floats.
+func (interp *interpreter) compositeConstruct(s shape, typeID uint32, constituentIDs []uint32) Value {
+	if s == 0 && interp.module != nil {
+		s = interp.module.typeShape(typeID)
+	}
+	if s.lanes() >= 2 {
+		var p lanePool
+		for _, id := range constituentIDs {
+			p.add(interp.values[id], s.kind())
+		}
+		return wordsValue(s, [4]uint32(p.w[:4]))
+	}
 	ti, ok := interp.module.Types[typeID]
 	if !ok {
 		return ValVec4(0, 0, 0, 0)
@@ -1835,93 +1657,12 @@ func (interp *interpreter) compositeConstruct(typeID uint32, constituentIDs []ui
 
 	switch ti.Kind {
 	case TypeVector:
-		// Fast path: if constituent count matches component count and all are
-		// scalars, build the vector directly without allocating a temporary slice.
-		if uint32(len(constituentIDs)) == ti.Components {
-			allScalar := true
-			for _, id := range constituentIDs {
-				tag := interp.values[id].Tag
-				if tag != TagFloat32 && tag != TagUint32 && tag != TagInt32 {
-					allScalar = false
-					break
-				}
-			}
-			if allScalar {
-				switch ti.Components {
-				case 2:
-					return ValVec2(
-						toFloat32(interp.values[constituentIDs[0]]),
-						toFloat32(interp.values[constituentIDs[1]]),
-					)
-				case 3:
-					return ValVec3(
-						toFloat32(interp.values[constituentIDs[0]]),
-						toFloat32(interp.values[constituentIDs[1]]),
-						toFloat32(interp.values[constituentIDs[2]]),
-					)
-				case 4:
-					return ValVec4(
-						toFloat32(interp.values[constituentIDs[0]]),
-						toFloat32(interp.values[constituentIDs[1]]),
-						toFloat32(interp.values[constituentIDs[2]]),
-						toFloat32(interp.values[constituentIDs[3]]),
-					)
-				}
-			}
-		}
-
-		// General path: flatten constituents (may include sub-vectors) using
-		// a stack-allocated array to avoid heap allocation for small vectors.
-		var buf [4]float32
-		n := 0
+		// A vector of no 32-bit lane kind (f16, f64): float lanes.
+		var p lanePool
 		for _, id := range constituentIDs {
-			val := interp.values[id]
-			switch val.Tag {
-			case TagFloat32:
-				if n < len(buf) {
-					buf[n] = val.F[0]
-					n++
-				}
-			case TagUint32:
-				if n < len(buf) {
-					buf[n] = float32(val.U[0])
-					n++
-				}
-			case TagInt32:
-				if n < len(buf) {
-					buf[n] = float32(int32(val.U[0]))
-					n++
-				}
-			case TagVec2:
-				for j := 0; j < 2 && n < len(buf); j++ {
-					buf[n] = val.F[j]
-					n++
-				}
-			case TagVec3:
-				for j := 0; j < 3 && n < len(buf); j++ {
-					buf[n] = val.F[j]
-					n++
-				}
-			case TagVec4:
-				for j := 0; j < 4 && n < len(buf); j++ {
-					buf[n] = val.F[j]
-					n++
-				}
-			default:
-				if n < len(buf) {
-					buf[n] = 0
-					n++
-				}
-			}
+			p.add(interp.values[id], kindFloat)
 		}
-		switch ti.Components {
-		case 2:
-			return ValVec2(buf[0], buf[1])
-		case 3:
-			return ValVec3(buf[0], buf[1], buf[2])
-		case 4:
-			return ValVec4(buf[0], buf[1], buf[2], buf[3])
-		}
+		return wordsValue(shapeOf(kindFloat, int(ti.Components)), [4]uint32(p.w[:4]))
 
 	case TypeMatrix:
 		// Matrix is constructed from column vectors.
@@ -2088,60 +1829,33 @@ func transposeMatrix(mat Value) Value {
 	return ValArray(result)
 }
 
-// vectorShuffle creates a new vector by selecting components from two input vectors.
-func vectorShuffle(m *Module, typeID uint32, vec1, vec2 Value, components []uint32) Value {
-	// Flatten both vectors into a combined component array.
-	var pool []float32
-	pool = appendComponents(pool, vec1)
-	pool = appendComponents(pool, vec2)
-	total := uint32(len(pool))
-
-	var out []float32
-	for _, idx := range components {
-		switch {
-		case idx == 0xFFFFFFFF || idx >= total:
-			out = append(out, 0) // Undefined component.
-		default:
-			out = append(out, pool[idx])
+// vectorShuffle creates a new vector of shape s (result type typeID) by
+// selecting lanes from two input vectors of its lane kind. A component
+// index of 0xFFFFFFFF (undefined) or past the inputs reads zero.
+func vectorShuffle(m *Module, s shape, typeID uint32, vec1, vec2 Value, components []uint32) Value {
+	if s == 0 && m != nil {
+		s = m.typeShape(typeID)
+	}
+	if s.lanes() < 2 {
+		k := vectorKind(vec1.Tag)
+		if k == kindNone {
+			k = kindFloat
+		}
+		s = shapeOf(k, len(components))
+	}
+	var p lanePool
+	p.add(vec1, s.kind())
+	p.add(vec2, s.kind())
+	var w [4]uint32
+	for i, idx := range components {
+		if i == len(w) {
+			break
+		}
+		if idx < uint32(p.n) {
+			w[i] = p.w[idx]
 		}
 	}
-
-	// Determine result type from the module type info.
-	ti := m.Types[typeID]
-	if ti != nil && ti.Kind == TypeVector {
-		switch ti.Components {
-		case 2:
-			var v [2]float32
-			for i := 0; i < 2 && i < len(out); i++ {
-				v[i] = out[i]
-			}
-			return ValVec2(v[0], v[1])
-		case 3:
-			var v [3]float32
-			for i := 0; i < 3 && i < len(out); i++ {
-				v[i] = out[i]
-			}
-			return ValVec3(v[0], v[1], v[2])
-		case 4:
-			var v [4]float32
-			for i := 0; i < 4 && i < len(out); i++ {
-				v[i] = out[i]
-			}
-			return ValVec4(v[0], v[1], v[2], v[3])
-		}
-	}
-
-	// Fallback: infer from component count.
-	switch len(out) {
-	case 2:
-		return ValVec2(out[0], out[1])
-	case 3:
-		return ValVec3(out[0], out[1], out[2])
-	case 4:
-		return ValVec4(out[0], out[1], out[2], out[3])
-	default:
-		return ValFloat(0)
-	}
+	return wordsValue(s, w)
 }
 
 // =============================================================================
@@ -2323,44 +2037,37 @@ func scalarFloat(v Value) float32 {
 // mip level lod of the view, each dimension at least 1. The third component,
 // when the result type has one, is the depth of that level for a 3D view,
 // the number of cubes of a cube-array view, and the array layer count
-// otherwise. The shape follows the result type: a scalar for 1D, a vector
-// otherwise (integer vectors hold float components); 2D without a module. A
-// missing texture reads zeros.
-func (interp *interpreter) queryImageSize(imgVal Value, lod int, typeID uint32) Value {
-	components := 2
-	if ti := interp.typeInfo(typeID); ti != nil {
-		components = 1
-		if ti.Kind == TypeVector {
-			components = int(ti.Components)
-		}
+// otherwise. The result has shape s, the instruction's: a u32 or i32 scalar
+// for 1D, a vector otherwise; a uvec2 when s is zero (no module). A missing
+// texture reads zeros.
+func (interp *interpreter) queryImageSize(imgVal Value, lod int, s shape) Value {
+	if s == 0 {
+		s = shapeOf(kindUint, 2)
 	}
 	tex := interp.resolveTexture(imgVal)
-	var size [3]float32
+	var size [4]uint32
 	if tex != nil {
-		size = [3]float32{mipSize(tex.Width, lod), mipSize(tex.Height, lod), float32(max(tex.Layers, 1))}
+		size = [4]uint32{mipSize(tex.Width, lod), mipSize(tex.Height, lod), max(tex.Layers, 1)}
 		switch tex.Dimension {
 		case TexDim3D:
 			size[2] = mipSize(tex.Depth, lod)
 		case TexDimCubeArray:
-			size[2] = float32(max(tex.Layers/6, 1))
+			size[2] = max(tex.Layers/6, 1)
 		}
 	}
-	switch components {
-	case 1:
-		return interp.intResult(typeID, uint32(size[0]))
-	case 3:
-		return ValVec3(size[0], size[1], size[2])
-	default:
-		return ValVec2(size[0], size[1])
+	k := s.kind()
+	if k != kindSint {
+		k = kindUint
 	}
+	return laneValue(k, s.lanes(), size)
 }
 
 // mipSize is the extent of mip level lod of a dimension of extent base.
-func mipSize(base uint32, lod int) float32 {
+func mipSize(base uint32, lod int) uint32 {
 	if lod < 0 || lod > 31 {
 		return 1
 	}
-	return float32(max(base>>uint(lod), 1))
+	return max(base>>uint(lod), 1)
 }
 
 // queryImageCount answers OpImageQueryLevels (the mip level count) or, with
@@ -2383,16 +2090,6 @@ func (interp *interpreter) intResult(typeID, n uint32) Value {
 		return ValInt(int32(n))
 	}
 	return ValUint(n)
-}
-
-// resultSigned reports whether the integer scalar or vector type typeID has
-// signed components.
-func (interp *interpreter) resultSigned(typeID uint32) bool {
-	ti := interp.typeInfo(typeID)
-	if ti != nil && ti.Kind == TypeVector {
-		ti = interp.typeInfo(ti.ElemType)
-	}
-	return ti != nil && ti.Kind == TypeInt && ti.Signed
 }
 
 // typeInfo returns the type typeID names, or nil.

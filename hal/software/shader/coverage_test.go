@@ -131,23 +131,35 @@ func TestToUint32Types(t *testing.T) {
 	}
 }
 
-func TestAppendComponentsAllTypes(t *testing.T) {
-	var out []float32
-	out = appendComponents(out, ValFloat(1))
-	out = appendComponents(out, ValVec2(2, 3))
-	out = appendComponents(out, ValVec3(4, 5, 6))
-	out = appendComponents(out, ValVec4(7, 8, 9, 10))
-	out = appendComponents(out, ValUint(11))
-	out = appendComponents(out, ValInt(12))
-	out = appendComponents(out, Value{}) // default
-
-	want := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0}
-	if len(out) != len(want) {
-		t.Fatalf("len = %d, want %d", len(out), len(want))
+// TestLanePoolAllForms checks that the lanes of every operand form a
+// composite constructor or shuffle takes collect as the right words.
+func TestLanePoolAllForms(t *testing.T) {
+	var p lanePool
+	p.add(ValFloat(1), kindFloat)
+	p.add(ValVec2(2, 3), kindFloat)
+	p.add(ValInt(-1), kindFloat) // converts by value
+	p.add(Value{}, kindFloat)    // default: one zero lane
+	want := []uint32{math.Float32bits(1), math.Float32bits(2), math.Float32bits(3), math.Float32bits(-1), 0}
+	if p.n != len(want) {
+		t.Fatalf("float pool has %d lanes, want %d", p.n, len(want))
 	}
 	for i, w := range want {
-		if out[i] != w {
-			t.Errorf("[%d] = %f, want %f", i, out[i], w)
+		if p.w[i] != w {
+			t.Errorf("float lane %d = %#x, want %#x", i, p.w[i], w)
+		}
+	}
+
+	var q lanePool
+	q.add(ValUVec(2, [4]uint32{0xFFFFFFFF, 1<<24 + 1}), kindUint)
+	q.add(ValArray([]Value{ValUint(7), ValUint(8)}), kindUint)
+	q.add(ValVec2(9, 10), kindUint) // the old float-held form
+	want = []uint32{0xFFFFFFFF, 1<<24 + 1, 7, 8, 9, 10}
+	if q.n != len(want) {
+		t.Fatalf("uint pool has %d lanes, want %d", q.n, len(want))
+	}
+	for i, w := range want {
+		if q.w[i] != w {
+			t.Errorf("uint lane %d = %#x, want %#x", i, q.w[i], w)
 		}
 	}
 }
@@ -414,7 +426,7 @@ func TestCompositeConstructStruct(t *testing.T) {
 		values: testMakeValues(map[uint32]any{10: ValFloat(1), 11: ValFloat(2)}),
 	}
 
-	got := interp.compositeConstruct(1, []uint32{10, 11})
+	got := interp.compositeConstruct(0, 1, []uint32{10, 11})
 	arr, ok := testIsArray(got)
 	if !ok || len(arr) != 2 {
 		t.Fatalf("compositeConstruct struct returned %T", got)
@@ -521,16 +533,19 @@ func TestGlslBinaryUint(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]any{1: ValUint(5), 2: ValUint(3)}),
+		values: testMakeValues(map[uint32]any{
+			1: ValUint(5), 2: ValUint(3),
+			3: ValUVec(2, [4]uint32{0xFFFFFFFF, 1}), 4: ValUVec(2, [4]uint32{0xFFFFFFFE, 7}),
+		}),
 	}
-	got := interp.glslBinaryUint([]uint32{1, 2}, func(a, b uint32) uint32 {
-		if a < b {
-			return a
-		}
-		return b
-	})
+	got := interp.glslExtInst(GLSLUMin, []uint32{1, 2}, 0)
 	if got.Tag != TagUint32 || got.AsUint32() != 3 {
 		t.Errorf("umin(5,3) = %v, want 3", got)
+	}
+	// Lane-wise and exact above 2^24.
+	got = interp.glslExtInst(GLSLUMin, []uint32{3, 4}, 0)
+	if got.Tag != TagUVec2 || got.U[0] != 0xFFFFFFFE || got.U[1] != 1 {
+		t.Errorf("umin(uvec2) = %+v, want {0xFFFFFFFE, 1}", got)
 	}
 }
 
@@ -538,16 +553,19 @@ func TestGlslBinaryInt(t *testing.T) {
 	m := &Module{Types: map[uint32]*TypeInfo{}, Constants: map[uint32]Value{}}
 	interp := &interpreter{
 		module: m,
-		values: testMakeValues(map[uint32]any{1: ValInt(-5), 2: ValInt(3)}),
+		values: testMakeValues(map[uint32]any{
+			1: ValInt(-5), 2: ValInt(3),
+			3: ValIVec(3, [4]int32{-7, 4, math.MinInt32}),
+		}),
 	}
-	got := interp.glslBinaryInt([]uint32{1, 2}, func(a, b int32) int32 {
-		if a < b {
-			return a
-		}
-		return b
-	})
+	got := interp.glslExtInst(GLSLSMin, []uint32{1, 2}, 0)
 	if got.Tag != TagInt32 || got.AsInt32() != -5 {
 		t.Errorf("smin(-5,3) = %v, want -5", got)
+	}
+	// abs is lane-wise; abs(INT_MIN) wraps to INT_MIN.
+	got = interp.glslExtInst(GLSLSAbs, []uint32{3}, 0)
+	if got.Tag != TagIVec3 || got.U[0] != 7 || got.U[1] != 4 || got.U[2] != 0x80000000 {
+		t.Errorf("abs(ivec3) = %+v, want {7, 4, INT_MIN}", got)
 	}
 }
 
@@ -708,7 +726,7 @@ func TestCompositeConstructArray(t *testing.T) {
 		}),
 	}
 
-	got := interp.compositeConstruct(2, []uint32{10, 11, 12})
+	got := interp.compositeConstruct(0, 2, []uint32{10, 11, 12})
 	arr, ok := testIsArray(got)
 	if !ok || len(arr) != 3 {
 		t.Fatalf("compositeConstruct array returned %T", got)
@@ -721,7 +739,7 @@ func TestVectorShuffleUndefined(t *testing.T) {
 		2: {Kind: TypeVector, ElemType: 1, Components: 2},
 	}}
 	// 0xFFFFFFFF = undefined component
-	got := vectorShuffle(m, 2, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 0xFFFFFFFF})
+	got := vectorShuffle(m, 0, 2, ValVec4From(Vec4{1, 2, 3, 4}), ValVec4From(Vec4{5, 6, 7, 8}), []uint32{0, 0xFFFFFFFF})
 	gv, ok := testIsVec2(got)
 	if !ok {
 		t.Fatalf("returned %T, want Vec2", got)

@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"math"
-	"slices"
 	"sync"
 	"testing"
 
@@ -157,9 +156,8 @@ fn main() {
 var dynamicWideTags = [2]uint32{0xDEADBEEF, 0xCAFEF00D}
 
 // TestDynamicOffsetsComputeWideTag is TestDynamicOffsetsCompute with uniform
-// tags above 2^24, loaded as a whole vector. The software interpreter holds
-// integer vector lanes as float32 until ADR-078 step 5 and rounds them: an
-// expected failure there.
+// tags above 2^24, loaded as a whole vector: every lane must come back
+// exact (the software interpreter rounded them to float32 before ADR-078).
 func TestDynamicOffsetsComputeWideTag(t *testing.T) {
 	forEachDynamicOffsetDevice(t, gputypes.DownlevelFlagsComputeShaders, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
 		got := runDynamicOffsetsCompute(t, device, dynamicOffsetsCase{name: "wide-tag"}, dynamicComputeShaderWholeTag, dynamicWideTags)
@@ -167,19 +165,7 @@ func TestDynamicOffsetsComputeWideTag(t *testing.T) {
 		slotWords := dynamicSlot / 4
 		got = append(got[:4:4], got[slotWords:slotWords+4]...)
 		want := []uint32{dynamicWideTags[0], 7, 8, lengths, dynamicWideTags[1], 9, 10, lengths}
-		if !b.software {
-			checkWords(t, "dispatches 2 and 1", got, want)
-			return
-		}
-		// The float32 roundings of 0xDEADBEEF and 0xCAFEF00D.
-		wrongToday := []uint32{0xDEADBF00, 7, 8, lengths, 0xCAFEF000, 9, 10, lengths}
-		switch {
-		case slices.Equal(got, wrongToday):
-		case slices.Equal(got, want):
-			t.Errorf("fixed early: flip to a plain check of %#x (ADR-078 step 5)", want)
-		default:
-			t.Errorf("got %#x, neither today's wrong output %#x nor want %#x (ADR-078 step 5)", got, wrongToday, want)
-		}
+		checkWords(t, "dispatches 2 and 1", got, want)
 	})
 }
 

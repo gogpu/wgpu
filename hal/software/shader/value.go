@@ -689,11 +689,6 @@ func floatUnaryOp(a Value, op func(float32) float32) Value {
 	}
 }
 
-// intBinOp applies a binary operation to two integer values.
-func intBinOp(a, b Value, op func(uint32, uint32) uint32) Value {
-	return ValUint(op(toUint32(a), toUint32(b)))
-}
-
 // vectorTimesScalar multiplies each component of a vector by a scalar.
 func vectorTimesScalar(vec Value, s float32) Value {
 	switch vec.Tag {
@@ -943,45 +938,6 @@ func setCompositeElement(composite Value, indexes []uint32, val Value) Value {
 	}
 }
 
-// appendComponents flattens a value into float32 components.
-func appendComponents(dst []float32, val Value) []float32 {
-	switch val.Tag {
-	case TagFloat32:
-		return append(dst, val.F[0])
-	case TagVec2:
-		return append(dst, val.F[0], val.F[1])
-	case TagVec3:
-		return append(dst, val.F[0], val.F[1], val.F[2])
-	case TagVec4:
-		return append(dst, val.F[0], val.F[1], val.F[2], val.F[3])
-	case TagUint32:
-		return append(dst, float32(val.U[0]))
-	case TagInt32:
-		return append(dst, float32(int32(val.U[0])))
-	case TagBool:
-		return append(dst, float32(val.U[0]))
-	case TagUVec2, TagUVec3, TagUVec4, TagBVec2, TagBVec3, TagBVec4:
-		for _, w := range val.U[:vectorLanes(val.Tag)] {
-			dst = append(dst, float32(w))
-		}
-		return dst
-	case TagIVec2, TagIVec3, TagIVec4:
-		for _, w := range val.U[:vectorLanes(val.Tag)] {
-			dst = append(dst, float32(int32(w)))
-		}
-		return dst
-	case TagArray:
-		// Integer vectors from builtins (global_invocation_id) are arrays
-		// of scalars.
-		for _, e := range val.AsArray() {
-			dst = appendComponents(dst, e)
-		}
-		return dst
-	default:
-		return append(dst, 0)
-	}
-}
-
 // writeValueToBuffer serializes a SPIR-V typed value into raw buffer bytes.
 // Used for storage buffer writes via OpStore.
 func writeValueToBuffer(data []byte, offset uint32, val Value) {
@@ -1103,13 +1059,13 @@ func zeroValue(types map[uint32]*TypeInfo, typeID uint32) Value {
 		}
 		return ValUint(0)
 	case TypeVector:
-		switch ti.Components {
-		case 2:
-			return ValVec2(0, 0)
-		case 3:
-			return ValVec3(0, 0, 0)
-		case 4:
-			return ValVec4(0, 0, 0, 0)
+		// A 32-bit vector zero has its type's tag; an f16 or f64 vector
+		// (no shape) is a float vector of its lane count.
+		if s := typesShape(types, typeID); s != 0 {
+			return Value{Tag: s.tag()}
+		}
+		if ti.Components >= 2 && ti.Components <= 4 {
+			return Value{Tag: vectorTag(int(ti.Components))}
 		}
 	case TypeMatrix:
 		if ti.Components > 0 {

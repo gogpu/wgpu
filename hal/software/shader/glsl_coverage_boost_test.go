@@ -53,8 +53,8 @@ func TestGLSLCoverageBoostEdges(t *testing.T) {
 
 	t.Run("unpack_double_fallback", func(t *testing.T) {
 		got := unpackDouble2x32(ValFloat(1))
-		if got.Tag != TagArray {
-			t.Fatal(got.Tag)
+		if got.Tag != TagUVec2 || got.U[1] != 0x3FF00000 || got.U[0] != 0 {
+			t.Fatalf("%+v", got)
 		}
 	})
 
@@ -129,16 +129,16 @@ func TestGLSLCoverageBoostEdges(t *testing.T) {
 		if s.AsVec2()[0] != 0.5 {
 			t.Fatal(s)
 		}
-		if e.AsArray()[1].AsInt32() != 3 {
+		if e.Tag != TagIVec2 || int32(e.U[1]) != 3 {
 			t.Fatal(e)
 		}
 		_, e = splitFrexp(ValVec3(2, 4, 8))
-		if len(e.AsArray()) != 3 {
-			t.Fatal()
+		if e.Tag != TagIVec3 || int32(e.U[2]) != 4 {
+			t.Fatal(e)
 		}
-		_, e = splitFrexp(ValVec4(2, 4, 8, 16))
-		if len(e.AsArray()) != 4 {
-			t.Fatal()
+		_, e = splitFrexp(ValVec4(2, 4, 8, 0.25))
+		if e.Tag != TagIVec4 || int32(e.U[3]) != -1 {
+			t.Fatal(e)
 		}
 	})
 

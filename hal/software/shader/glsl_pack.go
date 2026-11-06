@@ -91,9 +91,9 @@ func packDouble2x32(v Value) Value {
 	return ValFloat64(math.Float64frombits(uint64(lo) | uint64(hi)<<32))
 }
 
-// uint32Pair extracts two 32-bit integer components from a uvec2-like Value.
-// Prefer TagArray of two uints; TagVec2 falls back to truncated float components
-// (how the interpreter currently materializes integer vectors).
+// uint32Pair extracts two 32-bit integer components from a uvec2-like Value:
+// a uvec2 gives its words; an array of two uints or a float vector (the
+// forms integer vectors took before the typed value model) convert by value.
 func uint32Pair(v Value) (lo, hi uint32) {
 	switch v.Tag {
 	case TagArray:
@@ -160,7 +160,7 @@ func unpackDouble2x32(v Value) Value {
 	}
 	lo := uint32(bits64)
 	hi := uint32(bits64 >> 32)
-	return ValArray([]Value{ValUint(lo), ValUint(hi)})
+	return ValUVec(2, [4]uint32{lo, hi})
 }
 
 func snorm8(v int8) float32 {
