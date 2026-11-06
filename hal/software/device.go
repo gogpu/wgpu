@@ -114,12 +114,17 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 func (d *Device) DestroyTexture(_ hal.Texture) {}
 
 // CreateTextureView creates a software texture view.
-func (d *Device) CreateTextureView(texture hal.Texture, _ *hal.TextureViewDescriptor) (hal.TextureView, error) {
+func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
+	var baseMip uint32
+	if desc != nil {
+		baseMip = desc.BaseMipLevel
+	}
 	// Views in software backend just reference the original texture
 	if tex, ok := texture.(*Texture); ok {
 		view := &TextureView{
-			id:      nextResourceID.Add(1),
-			texture: tex,
+			id:           nextResourceID.Add(1),
+			texture:      tex,
+			baseMipLevel: baseMip,
 		}
 		d.registerTextureView(view)
 		return view, nil
@@ -127,8 +132,9 @@ func (d *Device) CreateTextureView(texture hal.Texture, _ *hal.TextureViewDescri
 	// Also handle SurfaceTexture (embeds Texture)
 	if st, ok := texture.(*SurfaceTexture); ok {
 		view := &TextureView{
-			id:      nextResourceID.Add(1),
-			texture: &st.Texture,
+			id:           nextResourceID.Add(1),
+			texture:      &st.Texture,
+			baseMipLevel: baseMip,
 		}
 		d.registerTextureView(view)
 		return view, nil

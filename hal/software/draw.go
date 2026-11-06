@@ -59,28 +59,21 @@ func (r *RenderPassEncoder) executeDraw(vertexCount, instanceCount, firstVertex,
 	r.executeVertexDraw(target, vertexCount, instanceCount, firstVertex, firstInstance)
 }
 
-// getTargetTexture returns the texture backing the first color attachment.
+// getTargetTexture returns the texture the first color attachment renders
+// into (resolveColorTargets), or nil.
 func (r *RenderPassEncoder) getTargetTexture() *Texture {
-	if len(r.desc.ColorAttachments) == 0 {
+	if len(r.colorTargets) == 0 {
 		return nil
 	}
-	view, ok := r.desc.ColorAttachments[0].View.(*TextureView)
-	if !ok || view.texture == nil {
-		return nil
-	}
-	return view.texture
+	return r.colorTargets[0]
 }
 
-// getTargetTextures returns textures for all color attachments.
-// Index i corresponds to @location(i) in the fragment shader.
+// getTargetTextures returns the textures all color attachments render into;
+// an entry is nil when the pass writes nothing for that attachment.
+// Index i corresponds to @location(i) in the fragment shader. Callers must
+// not modify the slice.
 func (r *RenderPassEncoder) getTargetTextures() []*Texture {
-	targets := make([]*Texture, len(r.desc.ColorAttachments))
-	for i, att := range r.desc.ColorAttachments {
-		if view, ok := att.View.(*TextureView); ok && view.texture != nil {
-			targets[i] = view.texture
-		}
-	}
-	return targets
+	return r.colorTargets
 }
 
 // hasMRT returns true if the render pass has more than one color attachment.

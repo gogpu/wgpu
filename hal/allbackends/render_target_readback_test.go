@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal/software"
 )
 
 // leftHalfShader fills the left half of the target with green. The quad is
@@ -49,10 +50,34 @@ var (
 // and the render area covered texels the level does not have.
 func TestRenderToMipLevel(t *testing.T) {
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		skipSoftwareMip(t, device, 1)
 		r := newTargetRig(t, device, gputypes.TextureDimension2D, 1)
 		r.render(t, 1, nil, sliceRed)
 		r.check(t, 1, 0, sliceRed)
 	})
+}
+
+// TestRenderToMipLevelLeavesMip0 renders mip level 0, then a pass on a view
+// of mip level 1: level 0 must keep its own contents. Regression test for
+// the software backend, which rendered every view into the only level it
+// stores (mip 0), and for GLES, whose offscreen framebuffer attached mip 0
+// for every view.
+func TestRenderToMipLevelLeavesMip0(t *testing.T) {
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		r := newTargetRig(t, device, gputypes.TextureDimension2D, 1)
+		r.render(t, 0, nil, sliceRed)
+		r.render(t, 1, nil, sliceBlue)
+		r.check(t, 0, 0, sliceRed)
+	})
+}
+
+// skipSoftwareMip skips a test of a mip level above 0 on the software
+// backend, which stores only mip level 0.
+func skipSoftwareMip(t *testing.T, device *wgpu.Device, mip uint32) {
+	t.Helper()
+	if _, sw := device.HalDevice().(*software.Device); sw && mip > 0 {
+		t.Skip("software: mip > 0 storage is P1-SW-026")
+	}
 }
 
 type targetRig struct {
@@ -111,12 +136,12 @@ func newTargetRig(t *testing.T, device *wgpu.Device, dim gputypes.TextureDimensi
 }
 
 // render clears one mip level (and, for a 3D texture, one depth slice) to
-// clear and draws the green left half into it.
-func (r *targetRig) render(t *testing.T, mip uint32, slice *uint32, clear gputypes.Color) {
+// clearColor and draws the green left half into it.
+func (r *targetRig) render(t *testing.T, mip uint32, slice *uint32, clearColor gputypes.Color) {
 	t.Helper()
 	view := r.newView(t, mip)
 	t.Cleanup(view.Release)
-	r.renderView(t, view, slice, clear)
+	r.renderView(t, view, slice, clearColor)
 }
 
 // newView creates a view of one mip level, 3D for a 3D texture.
@@ -135,9 +160,9 @@ func (r *targetRig) newView(t *testing.T, mip uint32) *wgpu.TextureView {
 	return view
 }
 
-// renderView clears view (one depth slice of it, for a 3D view) to clear,
+// renderView clears view (one depth slice of it, for a 3D view) to clearColor,
 // draws the green left half and submits the pass.
-func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint32, clear gputypes.Color) {
+func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint32, clearColor gputypes.Color) {
 	t.Helper()
 	enc, err := r.device.CreateCommandEncoder(nil)
 	if err != nil {
@@ -149,7 +174,7 @@ func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint
 			DepthSlice: slice,
 			LoadOp:     gputypes.LoadOpClear,
 			StoreOp:    gputypes.StoreOpStore,
-			ClearValue: clear,
+			ClearValue: clearColor,
 		}},
 	})
 	if err != nil {
@@ -170,8 +195,19 @@ func (r *targetRig) renderView(t *testing.T, view *wgpu.TextureView, slice *uint
 }
 
 // check reads back one mip level and verifies that depth slice z (0 for a
-// 2D texture) holds a green left half and clear on the right.
-func (r *targetRig) check(t *testing.T, mip, z uint32, clear gputypes.Color) {
+// 2D texture) holds a green left half and clearColor on the right.
+func (r *targetRig) check(t *testing.T, mip, z uint32, clearColor gputypes.Color) {
+	t.Helper()
+	r.verify(t, mip, z, clearColor, true)
+}
+
+// checkSolid verifies that depth slice z of one mip level holds clearColor only.
+func (r *targetRig) checkSolid(t *testing.T, mip, z uint32, clearColor gputypes.Color) {
+	t.Helper()
+	r.verify(t, mip, z, clearColor, false)
+}
+
+func (r *targetRig) verify(t *testing.T, mip, z uint32, clearColor gputypes.Color, greenLeft bool) {
 	t.Helper()
 	w := max(uint32(sliceRigWidth)>>mip, 1)
 	h := max(uint32(sliceRigHeight)>>mip, 1)
@@ -198,13 +234,13 @@ func (r *targetRig) check(t *testing.T, mip, z uint32, clear gputypes.Color) {
 	}
 
 	words := readPublicBuffer(t, staging, int(sliceRigRowPitch/4*h*d))
-	want := [4]byte{byte(clear.R * 255), byte(clear.G * 255), byte(clear.B * 255), byte(clear.A * 255)}
+	want := [4]byte{byte(clearColor.R * 255), byte(clearColor.G * 255), byte(clearColor.B * 255), byte(clearColor.A * 255)}
 	for y := uint32(0); y < h; y++ {
 		for _, x := range []uint32{0, w/2 - 1, w / 2, w - 1} {
 			var px [4]byte
 			binary.LittleEndian.PutUint32(px[:], words[(z*h+y)*sliceRigRowPitch/4+x])
 			exp := want
-			if x < w/2 {
+			if greenLeft && x < w/2 {
 				exp = sliceGreen
 			}
 			if px != exp {

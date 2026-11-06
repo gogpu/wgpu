@@ -156,6 +156,10 @@ type TextureView struct {
 	Resource
 	id      uint64 // unique ID for handle resolution
 	texture *Texture
+	// baseMipLevel is the view's first mip level. Only level 0 is stored
+	// (P1-SW-026), so a render pass on a view above it writes nothing
+	// (attachmentTarget) instead of writing level 0.
+	baseMipLevel uint32
 }
 
 // NativeHandle returns the view's unique ID for handle resolution.

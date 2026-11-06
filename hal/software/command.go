@@ -413,6 +413,7 @@ func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	r := &RenderPassEncoder{
 		desc: desc,
 	}
+	r.resolveColorTargets()
 
 	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
 		var w, h uint32
@@ -586,6 +587,14 @@ type RenderPassEncoder struct {
 	// (P1-SW-015). nil without a depth aspect.
 	passDepthBuffer *raster.DepthBuffer
 
+	// colorTargets holds the texture each color attachment renders into, by
+	// attachment index (resolveColorTargets): the view's texture, the
+	// pass-local target of a depth slice, or nil when the pass writes nothing
+	// for it (a mip level above 0, P1-SW-026). sliceTargets are stored back
+	// into their 3D textures at End.
+	colorTargets []*Texture
+	sliceTargets []*colorSliceTarget
+
 	// Whether the framebuffer has been cleared this pass.
 	// WebGPU spec: LoadOp=Clear happens before the first draw, not at End().
 	cleared bool
@@ -613,20 +622,15 @@ func (r *RenderPassEncoder) End() {
 	// In WebGPU, if a color attachment has a ResolveTarget, the GPU resolves
 	// MSAA samples to the single-sample target at end of render pass.
 	// Software backend has no real MSAA — this is a direct pixel copy.
-	for _, attachment := range r.desc.ColorAttachments {
+	for i, attachment := range r.desc.ColorAttachments {
 		if attachment.ResolveTarget == nil {
 			continue
 		}
-		srcView, ok := attachment.View.(*TextureView)
-		if !ok || srcView.texture == nil {
+		src := r.colorTargets[i]
+		dst := attachmentTarget(attachment.ResolveTarget)
+		if src == nil || dst == nil {
 			continue
 		}
-		dstView, ok := attachment.ResolveTarget.(*TextureView)
-		if !ok || dstView.texture == nil {
-			continue
-		}
-		src := srcView.texture
-		dst := dstView.texture
 		src.mu.RLock()
 		dst.mu.Lock()
 		if len(src.data) == len(dst.data) {
@@ -636,19 +640,16 @@ func (r *RenderPassEncoder) End() {
 		src.mu.RUnlock()
 	}
 
+	r.storeColorSliceTargets()
 	storeDepthAttachment(r.desc.DepthStencilAttachment, r.passDepthBuffer)
 }
 
 // applyClear clears color attachments that have LoadOp=Clear.
 func (r *RenderPassEncoder) applyClear() {
 	r.cleared = true
-	for _, attachment := range r.desc.ColorAttachments {
-		if attachment.LoadOp == gputypes.LoadOpClear {
-			if view, ok := attachment.View.(*TextureView); ok {
-				if view.texture != nil {
-					view.texture.Clear(attachment.ClearValue)
-				}
-			}
+	for i, attachment := range r.desc.ColorAttachments {
+		if attachment.LoadOp == gputypes.LoadOpClear && r.colorTargets[i] != nil {
+			r.colorTargets[i].Clear(attachment.ClearValue)
 		}
 	}
 }
@@ -881,9 +882,9 @@ func (r *RenderPassEncoder) Stats() RenderPassStats {
 	}
 	if r.desc != nil && len(r.desc.ColorAttachments) > 0 {
 		s.ColorLoadOp = r.desc.ColorAttachments[0].LoadOp
-		if tv, ok := r.desc.ColorAttachments[0].View.(*TextureView); ok && tv.texture != nil {
-			s.Width = tv.texture.width
-			s.Height = tv.texture.height
+		if tex := r.getTargetTexture(); tex != nil {
+			s.Width = tex.width
+			s.Height = tex.height
 		}
 	}
 	return s

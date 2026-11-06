@@ -21,6 +21,7 @@ func TestRenderToDepthSlice(t *testing.T) {
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
 		for _, mip := range []uint32{0, 1} {
 			t.Run(fmt.Sprintf("mip%d", mip), func(t *testing.T) {
+				skipSoftwareMip(t, device, mip)
 				r := newTargetRig(t, device, gputypes.TextureDimension3D, sliceRigDepth)
 				last := max(uint32(sliceRigDepth)>>mip, 1) - 1
 				zero := uint32(0)
@@ -30,6 +31,45 @@ func TestRenderToDepthSlice(t *testing.T) {
 				r.check(t, mip, last, sliceBlue)
 			})
 		}
+	})
+}
+
+// TestClearDepthSlice renders slice 1 of a 3D texture, then runs a pass on
+// slice 2 that only clears it, with no draw: the clear must reach slice 2 and
+// no other slice. Regression test for the software backend, whose clear wrote
+// the whole texture.
+func TestClearDepthSlice(t *testing.T) {
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		r := newTargetRig(t, device, gputypes.TextureDimension3D, sliceRigDepth)
+		one, two := uint32(1), uint32(2)
+		r.render(t, 0, &one, sliceRed)
+		view := r.newView(t, 0)
+		t.Cleanup(view.Release)
+		enc, err := device.CreateCommandEncoder(nil)
+		if err != nil {
+			t.Fatalf("CreateCommandEncoder: %v", err)
+		}
+		pass, err := enc.BeginRenderPass(&wgpu.RenderPassDescriptor{
+			ColorAttachments: []wgpu.RenderPassColorAttachment{{
+				View: view, DepthSlice: &two,
+				LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore, ClearValue: sliceBlue,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("BeginRenderPass: %v", err)
+		}
+		if err := pass.End(); err != nil {
+			t.Fatalf("End: %v", err)
+		}
+		cmd, err := enc.Finish()
+		if err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+		if _, err := device.Queue().Submit(cmd); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		r.check(t, 0, 1, sliceRed)
+		r.checkSolid(t, 0, 2, sliceBlue)
 	})
 }
 
