@@ -7,7 +7,6 @@ package allbackends_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -181,9 +180,6 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 func TestSampleDepthStencilAspectView(t *testing.T) {
 	const stencil = 90
 	forEachBackendAdapter(t, 0, func(t *testing.T, _ overrideBackend, device *wgpu.Device) {
-		if strings.Contains(t.Name(), "/software/") {
-			t.Skip("software: stencil aspect is not stored, P1-SW-021")
-		}
 		ds, err := device.CreateTexture(&wgpu.TextureDescriptor{
 			Label:         "depth-stencil",
 			Size:          wgpu.Extent3D{Width: usageTargetSize, Height: usageTargetSize, DepthOrArrayLayers: 1},

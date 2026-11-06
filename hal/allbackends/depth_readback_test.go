@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +45,6 @@ func TestDepthReadback(t *testing.T) {
 	}
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
-		software := strings.HasSuffix(t.Name(), "/software")
 		for _, c := range cases {
 			name := c.format.String() + "/depth"
 			if c.aspect == gputypes.TextureAspectStencilOnly {
@@ -56,10 +54,6 @@ func TestDepthReadback(t *testing.T) {
 				if c.format == gputypes.TextureFormatDepth32FloatStencil8 &&
 					!device.Features().Contains(gputypes.FeatureDepth32FloatStencil8) {
 					t.Skip("the adapter has no depth32float-stencil8")
-				}
-				if software && c.aspect == gputypes.TextureAspectStencilOnly &&
-					c.format != gputypes.TextureFormatDepth32FloatStencil8 {
-					t.Skip("software: stencil aspect is not stored, P1-SW-021")
 				}
 				data := clearAndReadBack(t, device, c.format, c.aspect)
 				checkDepthReadback(t, c.format, c.aspect, data)
@@ -90,17 +84,12 @@ func TestDepthStencilUploadRoundTrip(t *testing.T) {
 	}
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
-		software := strings.HasSuffix(t.Name(), "/software")
 		for _, c := range cases {
 			for _, path := range []string{"write-texture", "copy-buffer"} {
 				t.Run(c.format.String()+"/"+aspectName(c.aspect)+"/"+path, func(t *testing.T) {
 					if c.format == gputypes.TextureFormatDepth32FloatStencil8 &&
 						!device.Features().Contains(gputypes.FeatureDepth32FloatStencil8) {
 						t.Skip("the adapter has no depth32float-stencil8")
-					}
-					if software && c.format != gputypes.TextureFormatDepth16Unorm &&
-						c.format != gputypes.TextureFormatDepth32FloatStencil8 {
-						t.Skip("software: stencil aspect is not stored, P1-SW-021")
 					}
 					uploadAndCheck(t, device, c.format, c.aspect, path == "write-texture")
 				})

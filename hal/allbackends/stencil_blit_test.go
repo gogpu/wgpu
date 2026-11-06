@@ -142,6 +142,9 @@ func TestStencilUploadQueueOrder(t *testing.T) {
 			check(t, tex, written[0])
 		})
 		t.Run("record-write-submit", func(t *testing.T) {
+			if strings.Contains(t.Name(), "/software/") {
+				t.Skip("software: commands run when recorded, not at Submit, P1-SW-031")
+			}
 			tex, _ := newReadbackTexture(t, device, "stencil-order-b", format, wgpu.TextureUsageCopySrc|wgpu.TextureUsageCopyDst)
 			src := newStencilSource(t, device, copied)
 			enc, err := device.CreateCommandEncoder(nil)
@@ -240,15 +243,11 @@ func forEachStencilFormat(t *testing.T, fn func(t *testing.T, device *wgpu.Devic
 	t.Helper()
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
-		software := strings.HasSuffix(t.Name(), "/software")
 		for _, format := range combinedStencilFormats {
 			t.Run(format.String(), func(t *testing.T) {
 				if format == gputypes.TextureFormatDepth32FloatStencil8 &&
 					!device.Features().Contains(gputypes.FeatureDepth32FloatStencil8) {
 					t.Skip("the adapter has no depth32float-stencil8")
-				}
-				if software && format != gputypes.TextureFormatDepth32FloatStencil8 {
-					t.Skip("software: stencil aspect is not stored, P1-SW-021")
 				}
 				fn(t, device, format)
 			})

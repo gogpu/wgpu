@@ -309,11 +309,6 @@ func TestRenderTargetFormats(t *testing.T) {
 
 func checkColorFormat(t *testing.T, b overrideBackend, device *wgpu.Device, c colorFormatCase) {
 	t.Helper()
-	if b.backend == gputypes.BackendGL {
-		if skip := glesColorFormatSkip(c.format); skip != "" {
-			t.Skip(skip)
-		}
-	}
 	tex, view := newColorTexture(t, device, c.format, nil, wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageCopySrc)
 	colorPass{
 		view:  view,
@@ -325,22 +320,6 @@ func checkColorFormat(t *testing.T, b overrideBackend, device *wgpu.Device, c co
 			t.Fatalf("texel %d = %x, want %x", i, got, c.want)
 		}
 	}
-}
-
-// glesColorFormatSkip returns why GLES fails format today, or "" when it
-// passes: an sRGB target stores the linear value, RGB10A2Unorm stores the
-// RGBA8 bytes, and integer targets read back 0.
-func glesColorFormatSkip(f gputypes.TextureFormat) string {
-	switch f {
-	case gputypes.TextureFormatRGBA8UnormSrgb, gputypes.TextureFormatBGRA8UnormSrgb:
-		return "gles: sRGB target stores the linear value (no encode), P1-GLES-022"
-	case gputypes.TextureFormatRGB10A2Unorm:
-		return "gles: RGB10A2Unorm target stores RGBA8 bytes, P1-GLES-022"
-	}
-	if st, _ := f.SampleType(gputypes.TextureAspectAll, 0); st == gputypes.TextureSampleTypeUint || st == gputypes.TextureSampleTypeSint {
-		return "gles: integer target reads back 0, P1-GLES-022"
-	}
-	return ""
 }
 
 func bytesNear(got, want []byte, tolerance int) bool {
@@ -360,9 +339,6 @@ func bytesNear(got, want []byte, tolerance int) bool {
 // and encoded again. The software backend blended the encoded bytes.
 func TestSrgbBlend(t *testing.T) {
 	forEachBackendAdapter(t, 0, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		if b.backend == gputypes.BackendGL {
-			t.Skip("gles: sRGB target blends in sRGB space and stores unencoded, P1-GLES-022")
-		}
 		format := gputypes.TextureFormatRGBA8UnormSrgb
 		tex, view := newColorTexture(t, device, format, nil, wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageCopySrc)
 		over := gputypes.BlendComponent{

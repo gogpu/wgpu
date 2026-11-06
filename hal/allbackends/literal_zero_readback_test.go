@@ -6,7 +6,6 @@
 package allbackends_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -20,9 +19,6 @@ import (
 func TestColorWriteMaskZeroWritesNothing(t *testing.T) {
 	none := gputypes.ColorWriteMaskNone
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
-		if strings.HasSuffix(t.Name(), "/software") {
-			t.Skip("P1-SW-021: the software backend ignores the color write mask until its per-format write path lands")
-		}
 		drawZeroDefaults(t, device, zeroDefaultsCase{writeMask: &none, wantCleared: true})
 	})
 }

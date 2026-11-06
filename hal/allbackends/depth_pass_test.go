@@ -7,7 +7,6 @@ package allbackends_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -27,15 +26,11 @@ func TestDepthOnlyRenderPass(t *testing.T) {
 	}
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
-		software := strings.HasSuffix(t.Name(), "/software")
 		for _, format := range formats {
 			t.Run(format.String(), func(t *testing.T) {
 				if format == gputypes.TextureFormatDepth32FloatStencil8 &&
 					!device.Features().Contains(gputypes.FeatureDepth32FloatStencil8) {
 					t.Skip("the adapter has no depth32float-stencil8")
-				}
-				if software {
-					t.Skip("software: a depth-only pass writes no depth, P1-SW-021")
 				}
 				depth, view := newReadbackTexture(t, device, "depth-only", format,
 					wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageCopySrc)
@@ -59,9 +54,6 @@ func TestDepthOnlyRenderPass(t *testing.T) {
 func TestDepthAttachmentSubresource(t *testing.T) {
 	const format = gputypes.TextureFormatDepth32Float
 	forEachOverrideBackend(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, func(t *testing.T, device *wgpu.Device) {
-		if strings.HasSuffix(t.Name(), "/software") {
-			t.Skip("software: a depth-only pass writes no depth, P1-SW-021")
-		}
 		for _, withColor := range []bool{true, false} {
 			name := "depth-only"
 			if withColor {

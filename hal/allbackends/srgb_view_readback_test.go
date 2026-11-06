@@ -25,12 +25,6 @@ import (
 // was lost.
 func TestSrgbViewRender(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsViewFormats, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		switch b.backend {
-		case gputypes.BackendGL:
-			t.Skip("gles: sRGB view target stores the linear value (no encode), P1-GLES-022")
-		case gputypes.BackendVulkan:
-			t.Skip("vulkan: render pass keyed on the texture format, not the view's, P1-VK-015")
-		}
 		srgb := gputypes.TextureFormatRGBA8UnormSrgb
 		tex, _ := newColorTexture(t, device, gputypes.TextureFormatRGBA8Unorm, []gputypes.TextureFormat{srgb},
 			wgpu.TextureUsageRenderAttachment|wgpu.TextureUsageCopySrc)
@@ -63,9 +57,6 @@ const srgbSampleWGSL = `
 // codes' mean.
 func TestSrgbViewSample(t *testing.T) {
 	forEachBackendAdapter(t, gputypes.DownlevelFlagsViewFormats, func(t *testing.T, b overrideBackend, device *wgpu.Device) {
-		if b.backend == gputypes.BackendGL {
-			t.Skip("gles: sampling through an sRGB view of a unorm texture returns the undecoded codes, P1-GLES-022")
-		}
 		srgb := gputypes.TextureFormatRGBA8UnormSrgb
 		src, err := device.CreateTexture(&wgpu.TextureDescriptor{
 			Label:         "srgb-view-source",
