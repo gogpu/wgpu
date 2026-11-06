@@ -252,6 +252,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 					width, height, 0, format, dataType, nil)
 			}
 		}
+
+	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY:
+		// Every level, as Rust wgpu-hal does with tex_image_3d on a context
+		// without immutable storage (gles/device.rs create_texture); the 2D
+		// path above uses mutable TexImage2D storage as well.
+		if !glCtx.HasLayeredTextures() {
+			glCtx.BindTexture(target, 0)
+			glCtx.DeleteTextures(id)
+			return nil, errNoLayeredTextures
+		}
+		for level := uint32(0); level < desc.MipLevelCount; level++ {
+			w, h, depth := layeredLevelSize(target, desc.Size, level)
+			glCtx.TexImage3D(target, int32(level), int32(internalFormat), w, h, depth, 0, format, dataType, nil)
+		}
 	}
 
 	if target != gl.TEXTURE_2D_MULTISAMPLE {

@@ -61,6 +61,9 @@ var (
 	cifVoid2Float        types.CallInterface // void fn(float32, float32) - DepthRangef
 	cifVoid1Double       types.CallInterface // void fn(float64) - glClearDepth
 	cifVoid2Double       types.CallInterface // void fn(float64, float64) - glDepthRange
+	cifVoid10TexImg3D    types.CallInterface // void fn(uint32, int32*6, uint32, uint32, void*) - TexImage3D
+	cifVoid11TexSubImg3D types.CallInterface // void fn(uint32, int32*7, uint32, uint32, void*) - TexSubImage3D
+	cifVoid5FBOLayer     types.CallInterface // void fn(uint32, uint32, uint32, int32, int32) - FramebufferTextureLayer
 	cifInitialized       bool
 )
 
@@ -516,6 +519,10 @@ func initCommonCallInterfaces() error {
 		return err
 	}
 
+	if err := initLayeredTextureCallInterfaces(); err != nil {
+		return err
+	}
+
 	cifInitialized = true
 	return nil
 }
@@ -686,6 +693,11 @@ type Context struct {
 	// MSAA (GL 3.2+ / ES 3.1+)
 	glTexImage2DMultisample unsafe.Pointer
 	glBlitFramebuffer       unsafe.Pointer
+
+	// 3D and 2D array textures (GL 1.2 / 3.0+, ES 3.0+)
+	glTexImage3D              unsafe.Pointer
+	glTexSubImage3D           unsafe.Pointer
+	glFramebufferTextureLayer unsafe.Pointer
 
 	// Sampler objects (GL 3.3+ / ES 3.0+)
 	glGenSamplers       unsafe.Pointer
@@ -903,6 +915,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
 	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
+
+	// 3D and 2D array textures (optional - checked with HasLayeredTextures)
+	c.glTexImage3D = getProcAddr("glTexImage3D")
+	c.glTexSubImage3D = getProcAddr("glTexSubImage3D")
+	c.glFramebufferTextureLayer = getProcAddr("glFramebufferTextureLayer")
 
 	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
 	c.glGenSamplers = getProcAddr("glGenSamplers")
@@ -1512,6 +1529,90 @@ func (c *Context) TexSubImage2D(target uint32, level int32, xoffset, yoffset, wi
 func (c *Context) GenerateMipmap(target uint32) {
 	args := [1]unsafe.Pointer{unsafe.Pointer(&target)}
 	_, _ = ffi.CallFunction(&cifVoid1, c.glGenerateMipmap, nil, args[:])
+}
+
+// initLayeredTextureCallInterfaces prepares the signatures of the 3D and 2D
+// array texture functions.
+func initLayeredTextureCallInterfaces() error {
+	u32, s32, ptr := types.UInt32TypeDescriptor, types.SInt32TypeDescriptor, types.PointerTypeDescriptor
+	if err := ffi.PrepareCallInterface(&cifVoid10TexImg3D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, s32, s32, s32, s32, s32, u32, u32, ptr}); err != nil {
+		return err
+	}
+	if err := ffi.PrepareCallInterface(&cifVoid11TexSubImg3D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, s32, s32, s32, s32, s32, s32, u32, u32, ptr}); err != nil {
+		return err
+	}
+	return ffi.PrepareCallInterface(&cifVoid5FBOLayer, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, u32, u32, s32, s32})
+}
+
+// HasLayeredTextures reports whether the context has the functions 3D and
+// 2D array textures need: glTexImage3D, glTexSubImage3D and
+// glFramebufferTextureLayer (GL 3.0+, ES 3.0+).
+func (c *Context) HasLayeredTextures() bool {
+	return c.glTexImage3D != nil && c.glTexSubImage3D != nil && c.glFramebufferTextureLayer != nil
+}
+
+// TexImage3D allocates (pixels 0) or fills one mip level of a 3D or 2D
+// array texture. No-op if not supported (HasLayeredTextures).
+func (c *Context) TexImage3D(target uint32, level, internalformat, width, height, depth, border int32, format, typ uint32, pixels uintptr) {
+	if c.glTexImage3D == nil {
+		return
+	}
+	args := [10]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&internalformat),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&depth),
+		unsafe.Pointer(&border),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&pixels),
+	}
+	_, _ = ffi.CallFunction(&cifVoid10TexImg3D, c.glTexImage3D, nil, args[:])
+}
+
+// TexSubImage3D writes a box of one mip level of a 3D or 2D array texture.
+// No-op if not supported (HasLayeredTextures).
+func (c *Context) TexSubImage3D(target uint32, level, xoffset, yoffset, zoffset, width, height, depth int32, format, typ uint32, pixels unsafe.Pointer) {
+	if c.glTexSubImage3D == nil {
+		return
+	}
+	pixelsPtr := pixels
+	args := [11]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&xoffset),
+		unsafe.Pointer(&yoffset),
+		unsafe.Pointer(&zoffset),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&depth),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&pixelsPtr),
+	}
+	_, _ = ffi.CallFunction(&cifVoid11TexSubImg3D, c.glTexSubImage3D, nil, args[:])
+}
+
+// FramebufferTextureLayer attaches one layer (a depth slice of a 3D texture
+// or a layer of an array) of one mip level to the bound framebuffer.
+// No-op if not supported (HasLayeredTextures).
+func (c *Context) FramebufferTextureLayer(target, attachment, texture uint32, level, layer int32) {
+	if c.glFramebufferTextureLayer == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&attachment),
+		unsafe.Pointer(&texture),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&layer),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5FBOLayer, c.glFramebufferTextureLayer, nil, args[:])
 }
 
 // TexImage2DMultisample creates a multisample 2D texture image.

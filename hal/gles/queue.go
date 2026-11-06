@@ -115,6 +115,11 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	glCtx.BindTexture(tex.target, tex.id)
 
+	if isLayeredTarget(tex.target) {
+		err := writeLayeredTexture(glCtx, tex, dst, data, layout, size, format, dataType)
+		glCtx.BindTexture(tex.target, 0)
+		return err
+	}
 	if tex.target == gl.TEXTURE_2D {
 		if tex.format == gputypes.TextureFormatR8Unorm {
 			glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)

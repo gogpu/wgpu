@@ -171,6 +171,11 @@ type Context struct {
 	glTexImage2DMultisample uintptr
 	glBlitFramebuffer       uintptr
 
+	// 3D and 2D array textures (GL 1.2 / 3.0+, ES 3.0+)
+	glTexImage3D              uintptr
+	glTexSubImage3D           uintptr
+	glFramebufferTextureLayer uintptr
+
 	// Sampler objects (GL 3.3+ / ES 3.0+)
 	glGenSamplers       uintptr
 	glDeleteSamplers    uintptr
@@ -349,6 +354,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	// MSAA (optional - may be nil on older GL versions)
 	c.glTexImage2DMultisample = getProcAddr("glTexImage2DMultisample")
 	c.glBlitFramebuffer = getProcAddr("glBlitFramebuffer")
+
+	// 3D and 2D array textures (optional - checked with HasLayeredTextures)
+	c.glTexImage3D = getProcAddr("glTexImage3D")
+	c.glTexSubImage3D = getProcAddr("glTexSubImage3D")
+	c.glFramebufferTextureLayer = getProcAddr("glFramebufferTextureLayer")
 
 	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
 	c.glGenSamplers = getProcAddr("glGenSamplers")
@@ -745,6 +755,47 @@ func (c *Context) TexImage2DMultisample(target uint32, samples int32, internalfo
 	}
 	syscall.SyscallN(c.glTexImage2DMultisample, uintptr(target), uintptr(samples),
 		uintptr(internalformat), uintptr(width), uintptr(height), fixed)
+}
+
+// HasLayeredTextures reports whether the context has the functions 3D and
+// 2D array textures need: glTexImage3D, glTexSubImage3D and
+// glFramebufferTextureLayer (GL 3.0+, ES 3.0+).
+func (c *Context) HasLayeredTextures() bool {
+	return c.glTexImage3D != 0 && c.glTexSubImage3D != 0 && c.glFramebufferTextureLayer != 0
+}
+
+// TexImage3D allocates (pixels nil) or fills one mip level of a 3D or 2D
+// array texture. No-op if not supported (HasLayeredTextures).
+func (c *Context) TexImage3D(target uint32, level, internalformat, width, height, depth, border int32, format, typ uint32, pixels unsafe.Pointer) {
+	if c.glTexImage3D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glTexImage3D, uintptr(target), uintptr(level), uintptr(internalformat),
+		uintptr(width), uintptr(height), uintptr(depth), uintptr(border),
+		uintptr(format), uintptr(typ), uintptr(pixels))
+}
+
+// TexSubImage3D writes a box of one mip level of a 3D or 2D array texture.
+// No-op if not supported (HasLayeredTextures).
+func (c *Context) TexSubImage3D(target uint32, level, xoffset, yoffset, zoffset, width, height, depth int32, format, typ uint32, pixels unsafe.Pointer) {
+	if c.glTexSubImage3D == 0 {
+		return
+	}
+	syscall.SyscallN(c.glTexSubImage3D, uintptr(target), uintptr(level),
+		uintptr(xoffset), uintptr(yoffset), uintptr(zoffset),
+		uintptr(width), uintptr(height), uintptr(depth),
+		uintptr(format), uintptr(typ), uintptr(pixels))
+}
+
+// FramebufferTextureLayer attaches one layer (a depth slice of a 3D texture
+// or a layer of an array) of one mip level to the bound framebuffer.
+// No-op if not supported (HasLayeredTextures).
+func (c *Context) FramebufferTextureLayer(target, attachment, texture uint32, level, layer int32) {
+	if c.glFramebufferTextureLayer == 0 {
+		return
+	}
+	syscall.SyscallN(c.glFramebufferTextureLayer, uintptr(target), uintptr(attachment),
+		uintptr(texture), uintptr(level), uintptr(layer))
 }
 
 // BlitFramebuffer copies a block of pixels between framebuffers.
