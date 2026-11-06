@@ -144,7 +144,8 @@ func assignBindingsAfterLink(glCtx *gl.Context, program uint32, layout *Pipeline
 	glCtx.UseProgram(program)
 
 	// Assign uniform/storage buffer block bindings by name.
-	for _, info := range translationInfos {
+	for i := range translationInfos {
+		info := &translationInfos[i]
 		for _, u := range info.Uniforms {
 			key := ir.ResourceBinding{Group: u.Binding.Group, Binding: u.Binding.Binding}
 			slot, ok := layout.bindingMap[key]
