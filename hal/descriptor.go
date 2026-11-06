@@ -278,10 +278,12 @@ type SamplerDescriptor struct {
 	// MipmapFilter is the mipmap filter.
 	MipmapFilter gputypes.FilterMode
 
-	// LodMinClamp is the minimum LOD clamp.
+	// LodMinClamp is the minimum LOD clamp, taken literally.
 	LodMinClamp float32
 
-	// LodMaxClamp is the maximum LOD clamp.
+	// LodMaxClamp is the maximum LOD clamp, taken literally: 0 restricts
+	// sampling to the base level, as in Rust wgpu-hal. The root package
+	// resolves the public descriptor's zero value to 32 before it gets here.
 	LodMaxClamp float32
 
 	// Compare is the comparison function for depth textures.

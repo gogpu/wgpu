@@ -34,14 +34,10 @@ func configureSampler(glCtx *gl.Context, desc *hal.SamplerDescriptor) uint32 {
 	glCtx.SamplerParameteri(id, gl.TEXTURE_WRAP_T, mapAddressMode(desc.AddressModeV))
 	glCtx.SamplerParameteri(id, gl.TEXTURE_WRAP_R, mapAddressMode(desc.AddressModeW))
 
-	// LOD clamps.
+	// LOD clamps, literal as in Rust wgpu-hal: the root resolves a zero
+	// LodMaxClamp to 32.
 	glCtx.SamplerParameterf(id, gl.TEXTURE_MIN_LOD, desc.LodMinClamp)
-	lodMax := desc.LodMaxClamp
-	if lodMax == 0 {
-		// WebGPU default: 32 (effectively no upper clamp).
-		lodMax = 32.0
-	}
-	glCtx.SamplerParameterf(id, gl.TEXTURE_MAX_LOD, lodMax)
+	glCtx.SamplerParameterf(id, gl.TEXTURE_MAX_LOD, desc.LodMaxClamp)
 
 	// Anisotropic filtering (if requested and > 1).
 	if desc.Anisotropy > 1 {

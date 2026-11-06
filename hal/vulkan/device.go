@@ -938,13 +938,6 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		maxAnisotropy = float32(desc.Anisotropy)
 	}
 
-	// LOD clamp values
-	lodMinClamp := desc.LodMinClamp
-	lodMaxClamp := desc.LodMaxClamp
-	if lodMaxClamp == 0 {
-		lodMaxClamp = vk.LodClampNone
-	}
-
 	createInfo := vk.SamplerCreateInfo{
 		SType:                   vk.StructureTypeSamplerCreateInfo,
 		MagFilter:               filterModeToVk(desc.MagFilter),
@@ -958,8 +951,8 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 		MaxAnisotropy:           maxAnisotropy,
 		CompareEnable:           compareEnable,
 		CompareOp:               compareOp,
-		MinLod:                  lodMinClamp,
-		MaxLod:                  lodMaxClamp,
+		MinLod:                  desc.LodMinClamp, // Literal, as in Rust wgpu-hal: the
+		MaxLod:                  desc.LodMaxClamp, // root resolves a zero LodMaxClamp to 32.
 		BorderColor:             vk.BorderColorFloatTransparentBlack,
 		UnnormalizedCoordinates: vk.Bool32(vk.False),
 	}

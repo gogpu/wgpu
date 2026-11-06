@@ -941,11 +941,11 @@ func viewDimensionToShader(d gputypes.TextureViewDimension) uint32 {
 
 // samplerResourceToShader converts a SamplerResource to a shader.Sampler
 // using the addressing, filtering and LOD clamps from the HAL descriptor.
-// A zero LodMaxClamp means no clamp (shader.Sampler documents it), as in
-// the Vulkan backend.
+// The clamps are taken literally, like every backend's: the root package
+// resolves the public descriptor's zero LodMaxClamp to 32.
 func samplerResourceToShader(s *SamplerResource) *shader.Sampler {
 	if s == nil || s.Desc == nil {
-		return &shader.Sampler{} // Default: nearest, repeat.
+		return &shader.Sampler{LodMaxClamp: shader.LodClampNone} // Default: nearest, repeat, no LOD clamp.
 	}
 	return &shader.Sampler{
 		MinFilter:    filterModeToShader(s.Desc.MinFilter),

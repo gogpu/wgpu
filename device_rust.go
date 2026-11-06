@@ -124,29 +124,35 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, ErrReleased
 	}
 
-	var rDesc *rwgpu.SamplerDescriptor
-	if desc != nil {
-		rDesc = &rwgpu.SamplerDescriptor{
-			Label:        desc.Label,
-			AddressModeU: desc.AddressModeU,
-			AddressModeV: desc.AddressModeV,
-			AddressModeW: desc.AddressModeW,
-			MagFilter:    desc.MagFilter,
-			MinFilter:    desc.MinFilter,
-			MipmapFilter: rwgpu.MipmapFilterMode(desc.MipmapFilter),
-			LodMinClamp:  desc.LodMinClamp,
-			LodMaxClamp:  desc.LodMaxClamp,
-			Compare:      desc.Compare,
-			Anisotropy:   desc.Anisotropy,
-		}
-	}
-
-	rs, err := d.r.CreateSampler(rDesc)
+	rs, err := d.r.CreateSampler(samplerDescriptorToRust(desc))
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
 	}
 
 	return &Sampler{r: rs, device: d}, nil
+}
+
+// samplerDescriptorToRust converts a SamplerDescriptor for wgpu-native. A nil
+// descriptor means the defaults, as on the native and browser paths (go-webgpu
+// rejects a nil one). wgpu-native takes LodMaxClamp literally, so the zero
+// value is resolved to 32 here.
+func samplerDescriptorToRust(desc *SamplerDescriptor) *rwgpu.SamplerDescriptor {
+	if desc == nil {
+		desc = &SamplerDescriptor{}
+	}
+	return &rwgpu.SamplerDescriptor{
+		Label:        desc.Label,
+		AddressModeU: desc.AddressModeU,
+		AddressModeV: desc.AddressModeV,
+		AddressModeW: desc.AddressModeW,
+		MagFilter:    desc.MagFilter,
+		MinFilter:    desc.MinFilter,
+		MipmapFilter: rwgpu.MipmapFilterMode(desc.MipmapFilter),
+		LodMinClamp:  desc.LodMinClamp,
+		LodMaxClamp:  normalizeLodMaxClamp(desc.LodMaxClamp),
+		Compare:      desc.Compare,
+		Anisotropy:   desc.Anisotropy,
+	}
 }
 
 // CreateShaderModule creates a shader module.

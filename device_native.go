@@ -232,20 +232,12 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, ErrReleased
 	}
 
-	halDesc := &hal.SamplerDescriptor{}
-	if desc != nil {
-		halDesc.Label = desc.Label
-		halDesc.AddressModeU = desc.AddressModeU
-		halDesc.AddressModeV = desc.AddressModeV
-		halDesc.AddressModeW = desc.AddressModeW
-		halDesc.MagFilter = desc.MagFilter
-		halDesc.MinFilter = desc.MinFilter
-		halDesc.MipmapFilter = desc.MipmapFilter
-		halDesc.LodMinClamp = desc.LodMinClamp
-		halDesc.LodMaxClamp = desc.LodMaxClamp
-		halDesc.Compare = desc.Compare
-		halDesc.Anisotropy = desc.Anisotropy
+	if desc == nil {
+		desc = &SamplerDescriptor{}
 	}
+	// toHAL resolves LodMaxClamp's zero value to 32 first, so validation checks
+	// LodMaxClamp >= LodMinClamp on the value the backend receives.
+	halDesc := desc.toHAL()
 
 	if err := core.ValidateSamplerDescriptor(halDesc, d.core.Features); err != nil {
 		return nil, err
