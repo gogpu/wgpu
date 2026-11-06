@@ -52,9 +52,9 @@ func TestCopyBufferCommand_ExecutesCopy(t *testing.T) {
 	defer glCtx.DeleteBuffers(src, dst)
 
 	glCtx.BindBuffer(gl.COPY_READ_BUFFER, src)
-	glCtx.BufferData(gl.COPY_READ_BUFFER, size, uintptr(unsafe.Pointer(&data[0])), gl.DYNAMIC_DRAW)
+	glCtx.BufferData(gl.COPY_READ_BUFFER, size, unsafe.Pointer(&data[0]), gl.DYNAMIC_DRAW)
 	glCtx.BindBuffer(gl.COPY_READ_BUFFER, dst)
-	glCtx.BufferData(gl.COPY_READ_BUFFER, size, 0, gl.DYNAMIC_READ)
+	glCtx.BufferData(gl.COPY_READ_BUFFER, size, nil, gl.DYNAMIC_READ)
 	glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
 	runtime.KeepAlive(data)
 
