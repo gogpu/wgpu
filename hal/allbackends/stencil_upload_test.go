@@ -32,7 +32,6 @@ func forEachStencilUpload(t *testing.T, formats []gputypes.TextureFormat,
 	d32s8 := gputypes.Features(gputypes.FeatureDepth32FloatStencil8)
 	forEachOverrideBackendFeatures(t, gputypes.DownlevelFlagsDepthTextureAndBufferCopies, d32s8, func(t *testing.T, device *wgpu.Device) {
 		software := strings.HasSuffix(t.Name(), "/software")
-		gles := strings.HasSuffix(t.Name(), "/gles")
 		for _, format := range formats {
 			for _, path := range []string{"write-texture", "copy-buffer"} {
 				t.Run(format.String()+"/"+path, func(t *testing.T) {
@@ -42,9 +41,6 @@ func forEachStencilUpload(t *testing.T, formats []gputypes.TextureFormat,
 					}
 					if software && format != gputypes.TextureFormatDepth32FloatStencil8 {
 						t.Skip("software: stencil aspect is not stored, P1-SW-021")
-					}
-					if gles && format != gputypes.TextureFormatStencil8 {
-						t.Skip("gles: no stencil upload into a combined depth/stencil format yet")
 					}
 					fn(t, device, format, path == "write-texture")
 				})

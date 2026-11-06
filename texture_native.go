@@ -179,6 +179,9 @@ type TextureView struct {
 	mipLevelCount uint32
 	format        gputypes.TextureFormat
 	aspect        gputypes.TextureAspect
+	// internalUsage is core.TextureView.InternalUsage: usages only the
+	// frontend's own commands use the view with (the stencil upload blit).
+	internalUsage gputypes.TextureUsage
 }
 
 // resolveViewMipCount returns the number of mip levels a texture view

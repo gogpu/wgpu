@@ -1714,8 +1714,10 @@ const (
 	// TransferErrorStencilCopyNeedsBlit indicates a buffer or queue upload
 	// into the stencil aspect of a combined depth-stencil format on a backend
 	// that cannot write that aspect alone (hal.Capabilities.StencilCopyNeedsBlit,
-	// GLES). Rust has no such kind: it refuses every depth/stencil buffer copy on
-	// GL with MissingDownlevelFlags.
+	// GLES), when the frontend could not set up the blit it lowers such an
+	// upload to (Device.StencilUploadNeedsBlit); Cause says why. Rust has no
+	// such kind: it refuses every depth/stencil buffer copy on GL with
+	// MissingDownlevelFlags.
 	TransferErrorStencilCopyNeedsBlit
 )
 
@@ -1801,7 +1803,9 @@ type TransferError struct {
 	// DstFormat is the destination format of
 	// TransferErrorTextureFormatsNotCopyCompatible (Format is the source's).
 	DstFormat gputypes.TextureFormat
-	// Cause is the underlying error of TransferErrorMissingDownlevelFlags.
+	// Cause is the underlying error of TransferErrorMissingDownlevelFlags,
+	// and of TransferErrorStencilCopyNeedsBlit when the frontend's stencil
+	// blit itself failed.
 	Cause error
 }
 
@@ -1901,7 +1905,7 @@ func (e *TransferError) rangeErrorText() string {
 	case TransferErrorMissingDownlevelFlags:
 		return fmt.Sprintf("copy: the device does not support this copy: %v", e.Cause)
 	case TransferErrorStencilCopyNeedsBlit:
-		return fmt.Sprintf("copy: the backend cannot write the stencil aspect of %v from a buffer or queue data", e.Format)
+		return fmt.Sprintf("copy: the backend cannot write the stencil aspect of %v from a buffer or queue data, and the stencil blit failed: %v", e.Format, e.Cause)
 	default:
 		return "copy: unknown error"
 	}

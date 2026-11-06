@@ -63,6 +63,7 @@ func TestValidateRenderPassDescriptor_RenderableView(t *testing.T) {
 	volume := depthSliceTexture3D()
 	depthStencil := rpTexture(gputypes.TextureFormatDepth24PlusStencil8, ra, flatSize, 1, 1)
 	depthOnly := rpTexture(gputypes.TextureFormatDepth32Float, ra, flatSize, 1, 1)
+	copyDstDepthStencil := rpTexture(gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureUsageCopyDst, flatSize, 1, 1)
 
 	with := func(v *TextureView, f func(*TextureView)) *TextureView { f(v); return v }
 	twoMips := with(rpView(color, gputypes.TextureViewDimension2D), func(v *TextureView) { v.MipLevelCount = 2 })
@@ -80,6 +81,10 @@ func TestValidateRenderPassDescriptor_RenderableView(t *testing.T) {
 		{name: "texture without RENDER_ATTACHMENT", desc: rpColorPass(rpView(sampledOnly, gputypes.TextureViewDimension2D), nil, nil),
 			kind: RenderPassErrorTextureViewNotRenderable, reason: TextureViewNotRenderableUsage,
 			msg: "color attachment at index 0's texture view is not renderable: the texture this view references doesn't include the RENDER_ATTACHMENT usage"},
+		{name: "internal RENDER_ATTACHMENT usage of the frontend's own view", desc: rpColorPass(nil, nil,
+			with(rpView(copyDstDepthStencil, gputypes.TextureViewDimension2D), func(v *TextureView) { v.InternalUsage = ra })), valid: true},
+		{name: "depth-stencil texture without RENDER_ATTACHMENT", desc: rpColorPass(nil, nil, rpView(copyDstDepthStencil, gputypes.TextureViewDimension2D)),
+			kind: RenderPassErrorTextureViewNotRenderable, reason: TextureViewNotRenderableUsage, index: -1},
 		{name: "cube view", desc: rpColorPass(rpView(array, gputypes.TextureViewDimensionCube), nil, nil),
 			kind: RenderPassErrorTextureViewNotRenderable, reason: TextureViewNotRenderableDimension,
 			msg: "the dimension of this texture view is not 2D, 2D array or 3D"},

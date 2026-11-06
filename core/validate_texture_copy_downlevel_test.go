@@ -54,11 +54,11 @@ func TestRequireDepthTextureAndBufferCopies(t *testing.T) {
 	}
 }
 
-// TestRequireStencilAspectUpload: on a backend with StencilCopyNeedsBlit only
-// the stencil aspect of a combined depth-stencil format is refused; every
-// other format and aspect, and every backend without the capability, accepts
-// the upload.
-func TestRequireStencilAspectUpload(t *testing.T) {
+// TestStencilUploadNeedsBlit: on a backend with StencilCopyNeedsBlit only the
+// stencil aspect of a combined depth-stencil format is lowered to the blit;
+// every other format and aspect, and every backend without the capability,
+// copies directly.
+func TestStencilUploadNeedsBlit(t *testing.T) {
 	t.Parallel()
 	device := func(needsBlit bool) *Device {
 		return &Device{adapter: &Adapter{StencilCopyNeedsBlit: needsBlit}}
@@ -68,16 +68,16 @@ func TestRequireStencilAspectUpload(t *testing.T) {
 		gputypes.TextureFormatDepth24PlusStencil8,
 		gputypes.TextureFormatDepth32FloatStencil8,
 	} {
-		err := device(true).RequireStencilAspectUpload(format, stencil)
-		var te *TransferError
-		if !errors.As(err, &te) || te.Kind != TransferErrorStencilCopyNeedsBlit || te.Format != format {
-			t.Errorf("%v stencil with the capability: error %v, want TransferErrorStencilCopyNeedsBlit", format, err)
+		if !device(true).StencilUploadNeedsBlit(format, stencil) {
+			t.Errorf("%v stencil with the capability: no blit", format)
 		}
-		if err := device(false).RequireStencilAspectUpload(format, stencil); err != nil {
-			t.Errorf("%v stencil without the capability: unexpected error %v", format, err)
+		if device(false).StencilUploadNeedsBlit(format, stencil) {
+			t.Errorf("%v stencil without the capability: blit", format)
 		}
-		if err := device(true).RequireStencilAspectUpload(format, gputypes.TextureAspectDepthOnly); err != nil {
-			t.Errorf("%v depth with the capability: unexpected error %v", format, err)
+		for _, aspect := range []gputypes.TextureAspect{gputypes.TextureAspectDepthOnly, gputypes.TextureAspectAll, gputypes.TextureAspectUndefined} {
+			if device(true).StencilUploadNeedsBlit(format, aspect) {
+				t.Errorf("%v aspect %v with the capability: blit", format, aspect)
+			}
 		}
 	}
 	for _, format := range []gputypes.TextureFormat{
@@ -86,16 +86,47 @@ func TestRequireStencilAspectUpload(t *testing.T) {
 		gputypes.TextureFormatRGBA8Unorm,
 	} {
 		for _, aspect := range []gputypes.TextureAspect{gputypes.TextureAspectAll, stencil} {
-			if err := device(true).RequireStencilAspectUpload(format, aspect); err != nil {
-				t.Errorf("%v aspect %v with the capability: unexpected error %v", format, aspect, err)
+			if device(true).StencilUploadNeedsBlit(format, aspect) {
+				t.Errorf("%v aspect %v with the capability: blit", format, aspect)
 			}
 		}
 	}
 	var none *Device
-	if err := none.RequireStencilAspectUpload(gputypes.TextureFormatDepth24PlusStencil8, stencil); err != nil {
-		t.Errorf("nil device: unexpected error %v", err)
+	if none.StencilUploadNeedsBlit(gputypes.TextureFormatDepth24PlusStencil8, stencil) {
+		t.Errorf("nil device: blit")
 	}
-	if err := (&Device{}).RequireStencilAspectUpload(gputypes.TextureFormatDepth24PlusStencil8, stencil); err != nil {
-		t.Errorf("device without adapter: unexpected error %v", err)
+	if (&Device{}).StencilUploadNeedsBlit(gputypes.TextureFormatDepth24PlusStencil8, stencil) {
+		t.Errorf("device without adapter: blit")
 	}
 }
+
+// TestStencilBlitResources: the resources are created once, disposed once by
+// Destroy, and not created again after it.
+func TestStencilBlitResources(t *testing.T) {
+	t.Parallel()
+	d := &Device{stencilBlit: &stencilBlitSlot{}}
+	created := 0
+	res := &countingDisposer{}
+	create := func() StencilBlitResources { created++; return res }
+	if got := d.StencilBlitResources(create); got != res {
+		t.Fatalf("first call: %v", got)
+	}
+	if got := d.StencilBlitResources(create); got != res || created != 1 {
+		t.Fatalf("second call: %v, created %d times", got, created)
+	}
+	d.Destroy()
+	d.Destroy()
+	if res.disposed != 1 {
+		t.Errorf("disposed %d times, want 1", res.disposed)
+	}
+	if got := d.StencilBlitResources(create); got != nil || created != 1 {
+		t.Errorf("after Destroy: %v, created %d times", got, created)
+	}
+	if got := (&Device{}).StencilBlitResources(create); got != nil {
+		t.Errorf("device without HAL integration: %v", got)
+	}
+}
+
+type countingDisposer struct{ disposed int }
+
+func (c *countingDisposer) Dispose() { c.disposed++ }

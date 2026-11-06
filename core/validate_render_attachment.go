@@ -48,7 +48,7 @@ func renderableViewError(label string, index int, resolve bool, view *TextureVie
 		AttachmentIndex: index, ResolveTarget: resolve,
 	}
 	switch {
-	case !tex.Usage().Contains(gputypes.TextureUsageRenderAttachment):
+	case !(tex.Usage() | view.InternalUsage).Contains(gputypes.TextureUsageRenderAttachment):
 		err.Reason, err.Usage = TextureViewNotRenderableUsage, tex.Usage()
 	case !renderableViewDimension(view.Dimension, resolve):
 		err.Reason, err.ViewDimension = TextureViewNotRenderableDimension, view.Dimension

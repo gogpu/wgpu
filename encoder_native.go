@@ -47,6 +47,31 @@ type CommandEncoder struct {
 	// for destroyed state. Matches Rust wgpu-core's cmd_buf_data.trackers.bind_groups
 	// (device/queue.rs:1815-1817).
 	usedBindGroups map[*BindGroup]struct{}
+
+	// internal holds the resources the frontend created for the encoder's own
+	// commands (the stencil upload blit's staging texture, views, uniform
+	// buffer and bind groups). They have no application owner, so the command
+	// buffer releases them once it is spent: submitted or released. They stay
+	// unreleased until then because Submit refuses a command buffer that
+	// references a released resource (VAL-A6); the commands' own references
+	// keep them alive until the GPU is done.
+	internal []internalResource
+}
+
+// internalResource is a resource the frontend created for its own commands.
+type internalResource interface{ Release() }
+
+// own hands r to the encoder, which releases it with its command buffer.
+func (e *CommandEncoder) own(r internalResource) {
+	e.internal = append(e.internal, r)
+}
+
+// releaseInternal releases the frontend's own resources of a spent encoder or
+// command buffer.
+func releaseInternal(resources []internalResource) {
+	for _, r := range resources {
+		r.Release()
+	}
 }
 
 // setError records a deferred error on the underlying command encoder.
@@ -587,15 +612,59 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	if skip {
 		return
 	}
+	// Uploads the backend cannot write (the stencil of a combined format on
+	// GLES) are lowered to the stencil blit, in region order; the regions
+	// between them are copied as they are.
+	start := 0
+	for i := range regions {
+		if !dst.needsStencilBlit(regions[i].TextureBase.Aspect) {
+			continue
+		}
+		if i > start && !e.recordBufferToTexture(src, halSrc, dst, halDst, regions[start:i]) {
+			return
+		}
+		if err := e.lowerStencilCopy(src, dst, regions[i]); err != nil {
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: %w", stencilBlitError(dst.format, err)))
+			return
+		}
+		start = i + 1
+	}
+	if start == 0 || start < len(regions) {
+		e.recordBufferToTexture(src, halSrc, dst, halDst, regions[start:])
+	}
+}
+
+// lowerStencilCopy records the copy of region from src into the stencil of
+// dst as the stencil blit: a copy into a staging R8Uint texture, then the
+// blit's render passes (stencilUpload).
+func (e *CommandEncoder) lowerStencilCopy(src *Buffer, dst *Texture, region BufferTextureCopy) error {
+	u, err := e.device.newStencilUpload(dst, region.TextureBase.MipLevel, region.TextureBase.Origin, region.Size)
+	if err != nil {
+		return err
+	}
+	e.own(u.temp)
+	e.CopyBufferToTexture(src, u.temp, []BufferTextureCopy{{
+		BufferLayout: region.BufferLayout,
+		TextureBase:  u.tempCopy(),
+		Size:         region.Size,
+	}})
+	e.trackTexture(dst)
+	return u.record(e)
+}
+
+// recordBufferToTexture records a validated buffer-to-texture copy of regions
+// the backend writes itself. It returns false when the copy was rejected (the
+// error recorded on the encoder).
+func (e *CommandEncoder) recordBufferToTexture(src *Buffer, halSrc hal.Buffer, dst *Texture, halDst hal.Texture, regions []BufferTextureCopy) bool {
 	raw := e.core.RawEncoder()
 	if raw == nil {
-		return
+		return false
 	}
 	if !e.recordCopyUsages(raw,
 		[]copyTextureUsage{{texture: dst, usage: track.TextureUsesCopyDst}},
 		[]copyBufferUsage{{buffer: src, usage: track.BufferUsesCopySrc}},
 	) {
-		return
+		return false
 	}
 	e.trackTexture(dst)
 	e.trackBuffer(src)
@@ -618,6 +687,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 		}
 	}
 	raw.CopyBufferToTexture(halSrc, halDst, halRegions)
+	return true
 }
 
 func validateRenderPassTextureViews(desc *RenderPassDescriptor) error {
@@ -777,6 +847,8 @@ func (e *CommandEncoder) discard() {
 		ref.Drop()
 	}
 	e.trackedRefs = nil
+	releaseInternal(e.internal)
+	e.internal = nil
 }
 
 // returnEncoderToPool resets and returns the HAL encoder to the device's pool.
@@ -835,8 +907,10 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 		usedBuffers:    e.usedBuffers,
 		usedTextures:   e.usedTextures,
 		usedBindGroups: e.usedBindGroups,
+		internal:       e.internal,
 	}
 	e.trackedRefs = nil
+	e.internal = nil
 	e.halEncoder = nil     // ownership transferred
 	e.usedBuffers = nil    // ownership transferred
 	e.usedTextures = nil   // ownership transferred
@@ -936,7 +1010,7 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 func coreTextureViewFrom(v *TextureView) *core.TextureView {
 	cv := &core.TextureView{HAL: v.resolveHAL(), Dimension: v.dimension, BaseMipLevel: v.baseMipLevel,
 		BaseArrayLayer: v.baseArrayLayer, ArrayLayerCount: v.arrayLayerCount,
-		MipLevelCount: v.mipLevelCount, Format: v.format, Aspect: v.aspect}
+		MipLevelCount: v.mipLevelCount, Format: v.format, Aspect: v.aspect, InternalUsage: v.internalUsage}
 	if v.texture != nil && v.texture.coreTexture != nil {
 		cv.Parent = v.texture.coreTexture
 	}
@@ -982,6 +1056,10 @@ type CommandBuffer struct {
 	// (device/queue.rs:1815-1817).
 	usedBindGroups map[*BindGroup]struct{}
 
+	// internal is CommandEncoder.internal, released once the command buffer
+	// is spent.
+	internal []internalResource
+
 	// submitted is set to true after this command buffer has been submitted
 	// to a queue. A command buffer cannot be submitted twice.
 	// Matches Rust wgpu-core's CommandBuffer::take_finished() which consumes
@@ -1023,6 +1101,25 @@ func (cb *CommandBuffer) Release() {
 	}
 	cb.trackedRefs = nil
 	cb.dropUsedSets()
+	cb.releaseInternal()
+}
+
+// releaseInternal releases the frontend's own resources the command buffer's
+// commands use. After a submit the submission's references keep them alive
+// until the GPU completes it.
+func (cb *CommandBuffer) releaseInternal() {
+	releaseInternal(cb.internal)
+	cb.internal = nil
+}
+
+// releaseSubmittedInternal releases the frontend's own resources of every
+// submitted command buffer, once the submission holds their references.
+func releaseSubmittedInternal(commandBuffers []*CommandBuffer) {
+	for _, cb := range commandBuffers {
+		if cb != nil {
+			cb.releaseInternal()
+		}
+	}
 }
 
 // dropUsedSets releases the encode-time validation sets. usedBuffers,
@@ -1149,10 +1246,11 @@ func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySi
 // (core.ValidateBufferTextureCopyTexture), the sample count, aligned offset and
 // bytesPerRow (core.ValidateTextureBufferCopy), the buffer layout
 // (core.ValidateLinearTextureData) and the downlevel flag for depth/stencil
-// copies (core.Device.RequireDepthTextureAndBufferCopies), and for an upload
-// the backend's ability to write a combined format's stencil aspect
-// (core.Device.RequireStencilAspectUpload). A texture without a
-// core texture (test stubs) only gets the layout alignment checks.
+// copies (core.Device.RequireDepthTextureAndBufferCopies). An upload into a
+// combined format's stencil aspect that the backend cannot write is valid
+// here and lowered after validation (core.Device.StencilUploadNeedsBlit). A
+// texture without a core texture (test stubs) only gets the layout alignment
+// checks.
 func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *Buffer, region *BufferTextureCopy) error {
 	size := gputypes.Extent3D(region.Size)
 	view, haveView := texture.copyView(region.TextureBase.MipLevel, region.TextureBase.Origin, region.TextureBase.Aspect)
@@ -1177,12 +1275,5 @@ func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *B
 	if err := core.ValidateLinearTextureData(layout, view.Format, region.TextureBase.Aspect, buffer.Size(), bufferSide, size); err != nil {
 		return err
 	}
-	device := texture.coreTexture.Device()
-	if err := device.RequireDepthTextureAndBufferCopies(view.Format); err != nil {
-		return err
-	}
-	if side == core.CopySideDestination {
-		return device.RequireStencilAspectUpload(view.Format, region.TextureBase.Aspect)
-	}
-	return nil
+	return texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format)
 }

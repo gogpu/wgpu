@@ -58,7 +58,12 @@ type transitRecording struct {
 func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.submitLocked(commandBuffers)
+}
 
+// submitLocked is Submit with q.mu held. Queue.WriteTexture calls it for the
+// command buffer of a stencil upload blit.
+func (q *Queue) submitLocked(commandBuffers []*CommandBuffer) (uint64, error) {
 	if q.hal == nil {
 		return 0, fmt.Errorf("wgpu: queue not available")
 	}
@@ -146,6 +151,9 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 
 	// Post-submit bookkeeping: track refs, recycle encoders, triage destroys.
 	q.postSubmit(subIdx, commandBuffers)
+	// The submission now holds the commands' references: drop the frontend's
+	// own ones.
+	releaseSubmittedInternal(commandBuffers)
 
 	// Auto-poll pending buffer map requests after each Submit. Mirrors
 	// Rust wgpu-core queue.rs:1429 which calls maintain() at the tail
@@ -366,7 +374,18 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if skip {
 		return nil
 	}
+	if dst.Texture.needsStencilBlit(dst.Aspect) {
+		if err := q.writeStencilLocked(dst, data, layout, size); err != nil {
+			return fmt.Errorf("wgpu: WriteTexture: %w", stencilBlitError(dst.Texture.format, err))
+		}
+		return nil
+	}
+	return q.writeTextureLocked(dst, data, layout, size)
+}
 
+// writeTextureLocked writes a validated upload with q.mu held: into the
+// pending writes (DX12/Vulkan/Metal) or at once through the HAL.
+func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
 	halDst := dst.toHAL()
 	halLayout := layout.toHAL()
 	halSize := size.toHAL()
@@ -378,14 +397,58 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
 }
 
+// writeStencilLocked writes a validated upload into the stencil of a
+// combined depth-stencil format the backend cannot write, with q.mu held: the
+// data goes into a staging R8Uint texture like any upload, and the blit that
+// draws it into the stencil (stencilUpload) is submitted at once, after the
+// writes before it, as Dawn's OpenGL queue does
+// (src/dawn/native/opengl/QueueGL.cpp WriteTextureImpl: WriteTextureImpl into
+// an R8Uint texture, BlitR8ToStencil into a new encoder, APISubmit).
+func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	d := q.device
+	if d == nil {
+		return ErrReleased
+	}
+	u, err := d.newStencilUpload(dst.Texture, dst.MipLevel, dst.Origin, *size)
+	if err != nil {
+		return err
+	}
+	encoder, err := d.CreateCommandEncoder(&CommandEncoderDescriptor{Label: stencilUploadLabel})
+	if err != nil {
+		u.temp.Release()
+		return err
+	}
+	// The encoder owns the staging texture from here on: every exit below
+	// discards, releases or submits it.
+	encoder.own(u.temp)
+	temp := u.tempCopy()
+	if err := q.writeTextureLocked(&temp, data, layout, size); err != nil {
+		encoder.DiscardEncoding()
+		return fmt.Errorf("staging upload: %w", err)
+	}
+	if err := u.record(encoder); err != nil {
+		encoder.DiscardEncoding()
+		return err
+	}
+	cb, err := encoder.Finish()
+	if err != nil {
+		return err
+	}
+	if _, err := q.submitLocked([]*CommandBuffer{cb}); err != nil {
+		cb.Release()
+		return err
+	}
+	return nil
+}
+
 // validateTextureWrite checks a WriteTexture upload as Rust wgpu-core
 // device/queue.rs write_texture_inner does: core.ValidateTextureWrite (usage,
 // copy range, aspect, format, sample count, data layout against the data
-// length), the depth/stencil downlevel flag and, for the stencil aspect of a
-// combined format, the backend's ability to write it
-// (core.Device.RequireStencilAspectUpload). skip reports a valid upload of
-// size zero, which Rust drops before any side effect. A texture without a core
-// texture (test stubs) is not validated.
+// length) and the depth/stencil downlevel flag. An upload into a combined
+// format's stencil aspect that the backend cannot write is valid here and
+// lowered after validation (core.Device.StencilUploadNeedsBlit). skip reports
+// a valid upload of size zero, which Rust drops before any side effect. A
+// texture without a core texture (test stubs) is not validated.
 func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
 	if view, ok := dst.Texture.copyView(dst.MipLevel, dst.Origin, dst.Aspect); ok {
 		texelLayout := core.TexelCopyBufferLayout{
@@ -396,11 +459,7 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
 			return false, err
 		}
-		device := dst.Texture.coreTexture.Device()
-		if err := device.RequireDepthTextureAndBufferCopies(view.Format); err != nil {
-			return false, err
-		}
-		if err := device.RequireStencilAspectUpload(view.Format, dst.Aspect); err != nil {
+		if err := dst.Texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
 			return false, err
 		}
 	}
