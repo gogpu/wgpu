@@ -149,13 +149,22 @@ func writeLayeredTexture(ctx *gl.Context, tex *Texture, dst *hal.ImageCopyTextur
 		return fmt.Errorf("gles: WriteTexture: layout needs %d bytes, data has %d", required, len(data))
 	}
 
+	// GL takes the row length in whole texels, so rows whose pitch is not a
+	// whole number of texels (allowed for writeTexture) are packed tightly
+	// first, as writeTexture2D does; the images are then height rows apart.
+	pixels := data[layout.Offset:]
+	if stride%bpp != 0 {
+		pixels = packImages(pixels, stride, rowBytes, uint64(size.Height), rows, depth)
+		stride, rows = rowBytes, uint64(size.Height)
+	}
+
 	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
 	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, int32(stride/bpp))
 	ctx.PixelStorei(gl.UNPACK_IMAGE_HEIGHT, int32(rows))
 	ctx.TexSubImage3D(tex.target, int32(dst.MipLevel),
 		int32(dst.Origin.X), int32(dst.Origin.Y), int32(dst.Origin.Z),
 		int32(size.Width), int32(size.Height), int32(depth),
-		format, dataType, unsafe.Pointer(&data[layout.Offset]))
+		format, dataType, unsafe.Pointer(&pixels[0]))
 	ctx.PixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0)
 	ctx.PixelStorei(gl.UNPACK_ROW_LENGTH, 0)
 	ctx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
@@ -207,9 +216,20 @@ func writeTexture2D(ctx *gl.Context, target uint32, dst *hal.ImageCopyTexture, d
 // packRows copies rows rowBytes long and stride apart into a new tightly
 // packed slice.
 func packRows(src []byte, stride, rowBytes, rows uint64) []byte {
-	packed := make([]byte, rowBytes*rows)
-	for y := uint64(0); y < rows; y++ {
-		copy(packed[y*rowBytes:(y+1)*rowBytes], src[y*stride:y*stride+rowBytes])
+	return packImages(src, stride, rowBytes, rows, rows, 1)
+}
+
+// packImages copies depth images of height rows, each row rowBytes long, rows
+// stride apart and images imageRows rows apart, into a new tightly packed
+// slice: rows rowBytes apart and images height rows apart.
+func packImages(src []byte, stride, rowBytes, height, imageRows, depth uint64) []byte {
+	packed := make([]byte, rowBytes*height*depth)
+	for z := uint64(0); z < depth; z++ {
+		for y := uint64(0); y < height; y++ {
+			from := z*imageRows*stride + y*stride
+			to := (z*height + y) * rowBytes
+			copy(packed[to:to+rowBytes], src[from:from+rowBytes])
+		}
 	}
 	return packed
 }
