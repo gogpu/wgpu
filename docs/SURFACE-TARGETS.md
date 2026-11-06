@@ -287,8 +287,11 @@ surface, err := instance.CreateSurfaceUnsafe(
 ```
 
 No ownership source is retained. Every referenced display, window, surface, or
-layer must remain valid until `Surface.Release` returns. A zero required handle
-is rejected before any backend call.
+layer must remain valid until `Surface.Release` returns. On GLES a Device opened
+through the surface's adapter is bound to the surface's native display too, so
+that display must also outlive the Device: release surfaces and devices, then
+close the display, then release the instance, or release the instance before
+closing the display. A zero required handle is rejected before any backend call.
 
 Available constructors are:
 

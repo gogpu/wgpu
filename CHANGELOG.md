@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.8] - 2026-11-06
+
 ### Added
 
 - **`InstanceDescriptor.Display`** (`DisplayHandle`, `DisplayHandleFromXlib`, `DisplayHandleFromWayland`), the native display connection to build the instance on, as Rust wgpu's `InstanceDescriptor.display`. On Linux GLES the EGL context is built on it at instance creation, Wayland included. The caller keeps the display open until `Instance.Release` returns. With it set, every Xlib or Wayland surface must use that display, or surface creation fails with `ErrMismatchingDisplayHandle`; a handle of a nil pointer fails `CreateInstance` with `ErrInvalidDisplayHandle`. The other backends ignore it, and so does `-tags rust` until go-webgpu maps it. The legacy `CreateSurface(display, window)` picks Xlib or Wayland by the set Display instead of `WAYLAND_DISPLAY`.
@@ -22,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **GLES on Linux: on a context a surface built on the app's display (Wayland), releasing the Surface before `RequestDevice` now makes `RequestDevice` fail** with an error wrapping `gles.ErrContextReleased`; v0.34.7 succeeded. Request the device while the surface exists. A surface on the instance context (X11, headless, or `InstanceDescriptor.Display`) is not affected.
 - **GLES on Linux: `Surface.Configure` with a Device opened on another EGL context now returns `ErrSurfaceDeviceMismatch`** instead of configuring. On Wayland that is a window of another `wl_display`; GL objects are not shared between contexts, and libwayland used to abort on it. Open the Device through the adapter of a surface on the same display.
+- **naga v0.21.3** (from v0.21.2), which includes security fixes for untrusted shader input; see the [naga v0.21.3 release](https://github.com/gogpu/naga/releases/tag/v0.21.3). Applications that compile WGSL they did not write should update. For wgpu it also means:
+  - DX12 with DXIL (`GOGPU_DX12_DXIL=1`): `exp`/`log`, packed `dot4I8Packed`/`dot4U8Packed`, shifts with `abs`, and initialized local arrays, vectors and structs (nested, indexed, zero-valued, inlined from a helper) gave wrong results or failed to compile. They now read back correctly on Intel and NVIDIA, and on WARP, where v0.21.2 also crashed the driver on one of these shaders.
+  - A shader that needs a capability its backend cannot write (f32 atomics on GLES and DX12 FXC, early depth test on DX12 and Metal, binding arrays on GLES) is now refused at shader module or pipeline creation with an error naming the capability. wgpu does not offer the matching features on those backends, so a valid request is not affected.
 
 ### Documentation
 

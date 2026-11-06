@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.34.7
+## Current State: v0.34.8
 
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
@@ -133,11 +133,15 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.8:**
+**Next patch release, v0.34.9:**
 - [ ] Software backend: workgroup memory shared across barriers, replacing v0.34.7's refusal (P1-SW-025)
-- [ ] `RenderPassColorAttachment.DepthSlice` with core validation on every backend (P1-API-019), if ready together;
-  otherwise v0.34.9
-- [ ] Then: WARP listed as a CPU-type DX12 adapter, as in Rust (P2-DX12-060)
+- [ ] `RenderPassColorAttachment.DepthSlice` with core validation on every backend (P1-API-019)
+- [ ] WARP listed as a CPU-type DX12 adapter, as in Rust (P2-DX12-060)
+
+**Patch release v0.34.8** (2026-11-06, naga v0.21.3):
+- [x] GLES on Linux: no segfault on exit on Wayland (#379); EGL displays counted and terminated with their last user
+- [x] `InstanceDescriptor.Display`: the instance's EGL context built on the app's native display
+- [x] naga v0.21.3: security fixes for untrusted shader input, DXIL correctness fixes
 
 **Patch release v0.34.7** (2026-11-03, naga v0.21.2):
 - [x] naga v0.21.0: WGSL checked by the WGSL spec and Rust naga (`enable` directives, stage rules, operand types)
@@ -259,6 +263,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`; naga v0.21.3 (security and DXIL fixes) |
 | **v0.34.7** | 2026-11 | naga v0.21.2 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |
