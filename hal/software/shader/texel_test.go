@@ -72,8 +72,8 @@ func TestVectorShuffleOfIntegerArray(t *testing.T) {
 	if got.Tag != TagVec2 || got.F[0] != 3 || got.F[1] != 5 {
 		t.Errorf("shuffle = %v %v, want vec2(3, 5)", got.Tag, got.F)
 	}
-	if x, y := imageCoord(id); x != 3 || y != 5 {
-		t.Errorf("imageCoord = (%d, %d), want (3, 5)", x, y)
+	if xyz := imageCoord3(id); xyz != [3]int{3, 5, 7} {
+		t.Errorf("imageCoord3 = %v, want [3 5 7]", xyz)
 	}
 }
 

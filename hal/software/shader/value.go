@@ -71,7 +71,15 @@ type Pointer struct {
 // SPIR-V represents matrices as arrays of column vectors.
 type Mat4 = [4]Vec4
 
-// Texture2D represents a 2D texture for sampling in the SPIR-V interpreter.
+// Texture2D is a texture view bound to a shader in the SPIR-V interpreter:
+// one or more mip levels of a 1D, 2D, 2D-array, cube, cube-array or 3D
+// view. The name predates the other dimensions.
+//
+// Width, Height and Data describe the view's base mip level: Data holds its
+// images back to back (the view's array layers, or the depth slices of a 3D
+// view), each Height rows of Width texels, BytesPerPixel bytes per texel.
+// Levels, when set, holds every mip level of the view from the base level
+// on, and Levels[0] is the base level again.
 type Texture2D struct {
 	Width  uint32
 	Height uint32
@@ -83,18 +91,54 @@ type Texture2D struct {
 	BytesPerPixel uint32
 	// MipLevels, SampleCount and Layers answer the image queries
 	// (OpImageQueryLevels, OpImageQuerySamples, the array size of
-	// OpImageQuerySize[Lod]); zero reads as 1.
+	// OpImageQuerySize[Lod]); zero reads as 1. MipLevels and Layers are the
+	// view's: Layers counts the six faces of each cube.
 	MipLevels   uint32
 	SampleCount uint32
 	Layers      uint32
+	// Dimension is the view dimension, one of the TexDim constants; zero is
+	// 2D.
+	Dimension uint32
+	// Depth is the depth of the base level of a 3D view; zero reads as 1.
+	Depth uint32
+	// Levels holds the view's mip levels, base level first. When nil the
+	// view has the one level Width, Height and Data describe.
+	Levels []TextureLevel
 }
+
+// TextureLevel is one mip level of a texture view: Images images of Height
+// rows of Width texels back to back in Data (array layers, or depth slices
+// of a 3D view).
+type TextureLevel struct {
+	Width  uint32
+	Height uint32
+	Images uint32
+	Data   []byte
+}
+
+// Texture view dimensions (Texture2D.Dimension).
+const (
+	TexDim2D        = 0
+	TexDim1D        = 1
+	TexDim2DArray   = 2
+	TexDimCube      = 3
+	TexDimCubeArray = 4
+	TexDim3D        = 5
+)
 
 // Sampler describes texture sampling parameters.
 type Sampler struct {
-	MinFilter uint32 // 0 = Nearest, 1 = Linear.
-	MagFilter uint32 // 0 = Nearest, 1 = Linear.
-	WrapU     uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
-	WrapV     uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
+	MinFilter    uint32 // 0 = Nearest, 1 = Linear.
+	MagFilter    uint32 // 0 = Nearest, 1 = Linear.
+	MipmapFilter uint32 // 0 = Nearest, 1 = Linear.
+	WrapU        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
+	WrapV        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
+	WrapW        uint32 // 0 = Repeat, 1 = ClampToEdge, 2 = MirroredRepeat.
+	// LodMinClamp and LodMaxClamp clamp the level of detail. A zero
+	// LodMaxClamp reads as 32, the WebGPU default, so a zero Sampler does
+	// not pin sampling to the base level.
+	LodMinClamp float32
+	LodMaxClamp float32
 }
 
 // Wrap mode constants.

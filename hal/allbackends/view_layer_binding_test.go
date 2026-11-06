@@ -76,7 +76,6 @@ func TestSampleArrayLayer(t *testing.T) {
 		tex := newLayeredTexture(t, device, layers, wgpu.TextureUsageTextureBinding)
 		for _, k := range []uint32{0, 2, layers - 1} {
 			t.Run(fmt.Sprintf("layer%d", k), func(t *testing.T) {
-				skipSoftwareLayer(t, b, k)
 				view := newViewOf(t, device, tex, gputypes.TextureViewDimension2D, k, 1)
 				enc := newEncoder(t, device)
 				target, staging := sampleIntoTarget(t, device, enc, view)
@@ -239,7 +238,6 @@ func TestStorageWriteArrayLayer(t *testing.T) {
 		pipeline := newComputePipeline(t, device, storageWriteWGSL, bgl)
 		for _, k := range []uint32{0, 2, layers - 1} {
 			t.Run(fmt.Sprintf("layer%d", k), func(t *testing.T) {
-				skipSoftwareLayer(t, b, k)
 				tex := newLayeredTexture(t, device, layers, wgpu.TextureUsageStorageBinding|wgpu.TextureUsageCopySrc)
 				view := newViewOf(t, device, tex, gputypes.TextureViewDimension2D, k, 1)
 				group := newBindGroup(t, device, bgl, wgpu.BindGroupEntry{Binding: 0, TextureView: view})
@@ -283,15 +281,6 @@ func checkLayerTexel(t *testing.T, device *wgpu.Device, tex *wgpu.Texture, j uin
 	binary.LittleEndian.PutUint32(got[:], words[(256+4)/4])
 	if got != want {
 		t.Errorf("layer %d texel (1, 1) = %v, want %v", j, got, want)
-	}
-}
-
-// skipSoftwareLayer skips a binding of array layer k > 0 on the software
-// backend, which reads and writes layer 0 for every view.
-func skipSoftwareLayer(t *testing.T, b overrideBackend, k uint32) {
-	t.Helper()
-	if b.software && k > 0 {
-		t.Skip("software: binding an array layer above 0 is P1-SW-026")
 	}
 }
 

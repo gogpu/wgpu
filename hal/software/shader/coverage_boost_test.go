@@ -1254,14 +1254,14 @@ func TestSampleTextureCoordTypes(t *testing.T) {
 	}
 
 	// Vec3 coord: should use first 2 components as UV.
-	got := interp.sampleTexture(ValSampledImage(si), ValVec3(0, 0, 999), 0)
+	got := interp.sampleTexture(ValSampledImage(si), ValVec3(0, 0, 999), imageOperands{})
 	gv := Vec4ToFloat32(got)
 	if math.Abs(float64(gv[0]-1)) > 0.05 { // Red at (0,0)
 		t.Errorf("sampleTexture(Vec3) = %v, want red", gv)
 	}
 
 	// Scalar coord: should use as U, V=0.
-	got = interp.sampleTexture(ValSampledImage(si), ValFloat(0), 0)
+	got = interp.sampleTexture(ValSampledImage(si), ValFloat(0), imageOperands{})
 	gv = Vec4ToFloat32(got)
 	// u=0, v=0 -> (0,0) = Red
 	if math.Abs(float64(gv[0]-1)) > 0.05 {
