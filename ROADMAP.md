@@ -263,7 +263,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`; naga v0.21.3 (security and DXIL fixes) |
+| **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`, `ErrContextReleased`; `RenderPassColorAttachment.DepthSlice` on every backend; render-stage pipeline constants; software: shared workgroup memory and barriers, every mip level, array layer, cube face and 3D slice, color formats and sRGB views; GLES format table from Rust, compressed textures, stencil uploads by draw blit, integer clears and sRGB targets; spec defaults for zero-value descriptor fields; WARP as a CPU adapter, adapters ranked hardware → CPU → software; `LodMaxClamp` zero = 32 everywhere; naga v0.21.3 (security and DXIL fixes) |
 | **v0.34.7** | 2026-11 | naga v0.21.2 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
 | **v0.34.0** | 2026-08 | **BREAKING:** struct parameters for `SetViewport`, `SetScissorRect`, `Draw`, `DrawIndexed` |

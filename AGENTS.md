@@ -90,8 +90,11 @@ golangci-lint run --timeout=5m
 ```
 
 Backend selection: `wgpu.CreateInstance` with `InstanceDescriptor.Backends` picks which backends are tried;
-`RequestAdapter` returns the best available adapter. The `GOGPU_GRAPHICS_API` variable is read by the gogpu framework,
-not by wgpu.
+`RequestAdapter` returns the best available adapter: hardware adapters first (an exact `PowerPreference` match ahead
+of the others), then CPU adapters of a GPU API (DX12 WARP, Vulkan lavapipe, GL llvmpipe), then the software backend.
+`ForceFallbackAdapter` returns the software backend when it is a candidate. Every Windows machine lists WARP
+("Microsoft Basic Render Driver", DX12, `DeviceType` CPU) after its GPUs. The `GOGPU_GRAPHICS_API` variable is read by
+the gogpu framework, not by wgpu.
 
 ## gpucontext Handle Helpers
 

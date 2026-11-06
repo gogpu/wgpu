@@ -68,6 +68,7 @@ Validation layer between the public API and HAL. Core validates exhaustively —
 - **Error scopes** — WebGPU error handling model (`PushErrorScope` / `PopErrorScope`)
 - **Resource tracking** — Leak detection in debug builds
 - **Structured logging** — `log/slog` integration, silent by default
+- **Adapter selection** — `core/instance.go` ranks hardware adapters first (an exact `PowerPreference` match ahead of the others), then CPU adapters of a GPU API (DX12 WARP, Vulkan lavapipe, GL llvmpipe), which JIT-compile shaders, then the software backend, which interprets them; ties keep the candidate order. `ForceFallbackAdapter` returns the software backend when it is a candidate, otherwise the first other CPU adapter.
 
 Key types: `Instance`, `Adapter`, `Device`, `Queue`, `Buffer`, `Texture`, `RenderPipeline`, `ComputePipeline`, `CommandEncoder`, `CommandBuffer`, `Surface`.
 
@@ -122,7 +123,7 @@ Pure Go Metal implementation via Objective-C runtime message sending.
 Pure Go DX12 implementation via COM interfaces.
 
 - `d3d12/` — D3D12 COM interfaces, GUID definitions, DRED diagnostics, loader
-- `dxgi/` — DXGI factory, adapter enumeration
+- `dxgi/` — DXGI factory, adapter enumeration. WARP ("Microsoft Basic Render Driver") is listed as an adapter of `DeviceType` CPU, as in Rust wgpu-hal; the unflagged copy Windows adds on GPU-less machines is dropped, and Intel Haswell iGPUs are skipped (Intel withdrew their D3D12 support)
 - `device.go` — Device, resource creation, descriptor heaps (SRV/sampler), dual shader compilation (HLSL→FXC or DXIL direct)
 - `state_tracker.go` — Submission-ordered resource state reconciliation: command-local tracking, preamble barriers at submit time, per-plane depth/stencil. Replaces recording-time `currentState`.
 - `copy_plan.go` + `copy_commands.go` — 2D-array vs 3D volume copy decomposition, 512-byte placement alignment, block-compressed row counting
@@ -174,6 +175,9 @@ CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags req
 
 - `raster/` — Triangle rasterization, blending, depth/stencil, tiling, per-pixel fragment shader callback
 - `shader/` — Full SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders. GLSL.std.450 math intrinsics (30+), texture sampling, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. **Not for production rendering** — interpreted execution is ~100× slower than JIT (SwiftShader/llvmpipe). Designed for shader debugging, CI/CD testing, and GPU-less fallback.
+- Textures store every mip level, array layer, cube face and 3D slice. `WriteTexture`, copies, render attachments (colour, depth-stencil, resolve, a 3D view's `DepthSlice`) and storage textures address the subresource they name; sampling picks the mip level from the sampler and the layer, face or slice from the view. Implicit-LOD `textureSample` uses the view's base level: fragments are shaded one at a time, with no derivatives
+- Colour attachments are written and textures sampled through the view's own format (`ColorCodec`): sRGB encodes on write and decodes before filtering, unorm/snorm clamp, integer formats never blend, the write mask keeps masked-out channels. Depth-stencil formats keep a stencil plane; depth-only passes rasterize
+- Compute workgroups share one workgroup-memory buffer; workgroup barriers suspend each invocation until the whole workgroup reaches them
 - `compute_test.go` — Naga WGSL→SPIR-V integration tests for compute shaders
 - `blit_windows.go` — Windows presentation: CreateDIBSection + BitBlt (SDL3/Qt6 pattern)
 - `blit_linux.go` — Linux X11 presentation: XPutImage via goffi (Skia pattern)

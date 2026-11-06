@@ -17,10 +17,21 @@
 //   - Real data storage for buffers and textures
 //   - SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders on CPU
 //   - Compute shaders: CreateComputePipeline + Dispatch via SPIR-V interpreter
-//   - Texture sampling (nearest, bilinear, 3 wrap modes)
+//   - Textures with every mip level, array layer, cube face and 3D slice;
+//     copies, WriteTexture, render attachments and storage textures address
+//     the subresource they name
+//   - Color attachments written in their view's format (sRGB encode, blend
+//     in linear, write masks); depth-only passes; a stencil plane in the
+//     depth-stencil formats
+//   - Texture sampling (nearest, bilinear, 3 wrap modes) through the view's
+//     format, with sRGB decoded before filtering, and mip selection
+//     from the sampler's mipmap filter, LOD clamps and bias; array, cube and
+//     3D views sample their layer, face or slice
 //   - GLSL.std.450 math intrinsics (30+ functions)
 //   - Control flow (loops, phi, function calls, switch)
-//   - Atomics and workgroup shared memory
+//   - Atomics, and workgroup memory shared by a workgroup's invocations, with
+//     workgroup barriers that suspend each invocation until all reach them
+//   - Indirect draws and dispatches
 //   - Shader debugger (DebugContext, breakpoints, JSON trace, zero overhead when disabled)
 //   - Buffer/texture copy operations
 //   - Clear operations
@@ -30,7 +41,10 @@
 // Limitations:
 //   - Much slower than GPU backends (CPU-bound, interpreter, not JIT)
 //   - No hardware acceleration
-//   - DispatchIndirect not implemented
+//   - Implicit-LOD textureSample uses the view's base level: fragments are
+//     shaded one at a time, so there are no derivatives
+//   - Cube sampling is not seamless across faces
+//   - No multisampling (CreateTexture rejects SampleCount > 1)
 //
 // Always compiled (no build tags required).
 //
