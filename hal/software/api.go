@@ -111,7 +111,8 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 						gputypes.DownlevelFlagsFullDrawIndexUint32 |
 						gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies |
 						gputypes.DownlevelFlagsLinearInterpolation |
-						gputypes.DownlevelFlagsIndirectExecution,
+						gputypes.DownlevelFlagsIndirectExecution |
+						gputypes.DownlevelFlagsViewFormats,
 				},
 			},
 		},

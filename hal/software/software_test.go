@@ -407,6 +407,7 @@ func TestAdapterDownlevelCapabilities(t *testing.T) {
 		{gputypes.DownlevelFlagsUnrestrictedExternalTextureCopies, "UnrestrictedExternalTextureCopies"},
 		{gputypes.DownlevelFlagsLinearInterpolation, "LinearInterpolation"},
 		{gputypes.DownlevelFlagsIndirectExecution, "IndirectExecution"},
+		{gputypes.DownlevelFlagsViewFormats, "ViewFormats"},
 	}
 	for _, rf := range requiredFlags {
 		if !dc.Flags.Contains(rf.flag) {
