@@ -45,6 +45,11 @@ const (
 	SCISSOR_TEST = 0x0C11
 	STENCIL_TEST = 0x0B90
 
+	// FRAMEBUFFER_SRGB enables the sRGB encode of writes and blends to sRGB
+	// attachments on desktop GL (3.0 core). OpenGL ES always encodes and has
+	// no such capability.
+	FRAMEBUFFER_SRGB = 0x8DB9
+
 	// Buffer targets
 	ARRAY_BUFFER              = 0x8892
 	ELEMENT_ARRAY_BUFFER      = 0x8893

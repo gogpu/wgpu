@@ -80,12 +80,33 @@ func destroySwapchainFBO(glCtx *gl.Context, fbo, colorRbo uint32) {
 	}
 }
 
+// enableFramebufferSRGB turns on GL_FRAMEBUFFER_SRGB on a desktop GL context
+// and reports whether it did. Desktop GL encodes writes and blends to sRGB
+// attachments only with it enabled; OpenGL ES always encodes and has no such
+// capability. Rust wgpu-hal enables it once per context and turns it off only
+// around the present blit (wgl.rs, egl.rs), but only when the window system
+// offers sRGB surfaces (WGL_EXT_framebuffer_sRGB, EGL 1.5 or
+// EGL_KHR_gl_colorspace). Framebuffer-object sRGB is core since GL 3.0, so we
+// enable it on every desktop context: without it an offscreen sRGB target
+// stores the linear value and blends in sRGB space.
+func enableFramebufferSRGB(glCtx *gl.Context, isES bool) bool {
+	if isES {
+		return false
+	}
+	glCtx.Enable(gl.FRAMEBUFFER_SRGB)
+	return true
+}
+
 // blitSwapchainToDefaultWith performs the present-time Y-flipping blit from
 // the Surface's swapchain FBO to the default framebuffer (FBO 0).
 // Must be called with GL context current on the user window DC.
 //
+// framebufferSRGB says the context has GL_FRAMEBUFFER_SRGB enabled: it is
+// turned off for the blit, so the stored bytes reach the window unconverted
+// whatever the formats, and on again after.
+//
 // Mirrors Rust wgpu-hal/src/gles/egl.rs Surface::present (1280-1308).
-func (s *Surface) blitSwapchainToDefaultWith(glCtx *gl.Context) {
+func (s *Surface) blitSwapchainToDefaultWith(glCtx *gl.Context, framebufferSRGB bool) {
 	if glCtx == nil || s.swapchainFBO == 0 {
 		return
 	}
@@ -94,6 +115,10 @@ func (s *Surface) blitSwapchainToDefaultWith(glCtx *gl.Context) {
 	}
 
 	glCtx.Disable(gl.SCISSOR_TEST)
+	if framebufferSRGB {
+		glCtx.Disable(gl.FRAMEBUFFER_SRGB)
+		defer glCtx.Enable(gl.FRAMEBUFFER_SRGB)
+	}
 
 	glCtx.BindFramebuffer(gl.READ_FRAMEBUFFER, s.swapchainFBO)
 	glCtx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)

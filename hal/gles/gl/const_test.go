@@ -98,6 +98,7 @@ func TestGLConstants(t *testing.T) {
 		{"DEPTH_TEST", DEPTH_TEST, 0x0B71},
 		{"BLEND", BLEND, 0x0BE2},
 		{"SCISSOR_TEST", SCISSOR_TEST, 0x0C11},
+		{"FRAMEBUFFER_SRGB", FRAMEBUFFER_SRGB, 0x8DB9},
 	}
 
 	for _, tt := range tests {

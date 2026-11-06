@@ -20,6 +20,9 @@ type Queue struct {
 	ctx             *AdapterContext
 	submissionIndex uint64
 	fence           *Fence // signaled at each submit for GPU completion tracking
+	// framebufferSRGB: the context has GL_FRAMEBUFFER_SRGB enabled, so the
+	// present blit turns it off around the copy.
+	framebufferSRGB bool
 }
 
 // Submit submits command buffers to the GPU.
@@ -151,7 +154,7 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, _ []image.Rec
 	glCtx := q.ctx.LockForDC(hdc)
 	defer q.ctx.Unlock()
 
-	surf.blitSwapchainToDefaultWith(glCtx)
+	surf.blitSwapchainToDefaultWith(glCtx, q.framebufferSRGB)
 
 	return wgl.SwapBuffers(hdc)
 }
