@@ -870,7 +870,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			_ = MsgSend(attachment, Sel("setPixelFormat:"), uintptr(pixelFormat))
 
 			// Set write mask
-			_ = MsgSend(attachment, Sel("setWriteMask:"), uintptr(target.WriteMask))
+			_ = MsgSend(attachment, Sel("setWriteMask:"), uintptr(colorWriteMaskToMTL(target.WriteMask)))
 
 			// Configure blending if present
 			if target.Blend != nil {

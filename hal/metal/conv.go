@@ -321,6 +321,28 @@ func blendFactorToMTL(factor gputypes.BlendFactor) MTLBlendFactor {
 	}
 }
 
+// colorWriteMaskToMTL maps a WebGPU color write mask to Metal channel by
+// channel. The bit orders differ: gputypes has Red=1, Green=2, Blue=4,
+// Alpha=8, MTLColorWriteMask has Red=8, Green=4, Blue=2, Alpha=1, so a raw
+// cast swaps red with alpha and green with blue. As Rust wgpu-hal
+// src/metal/conv.rs map_color_write.
+func colorWriteMaskToMTL(mask gputypes.ColorWriteMask) MTLColorWriteMask {
+	out := MTLColorWriteMaskNone
+	if mask&gputypes.ColorWriteMaskRed != 0 {
+		out |= MTLColorWriteMaskRed
+	}
+	if mask&gputypes.ColorWriteMaskGreen != 0 {
+		out |= MTLColorWriteMaskGreen
+	}
+	if mask&gputypes.ColorWriteMaskBlue != 0 {
+		out |= MTLColorWriteMaskBlue
+	}
+	if mask&gputypes.ColorWriteMaskAlpha != 0 {
+		out |= MTLColorWriteMaskAlpha
+	}
+	return out
+}
+
 // blendOperationToMTL converts WebGPU blend operation to Metal blend operation.
 func blendOperationToMTL(op gputypes.BlendOperation) MTLBlendOperation {
 	switch op {
