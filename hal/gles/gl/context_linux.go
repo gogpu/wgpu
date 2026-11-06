@@ -64,7 +64,12 @@ var (
 	cifVoid10TexImg3D    types.CallInterface // void fn(uint32, int32*6, uint32, uint32, void*) - TexImage3D
 	cifVoid11TexSubImg3D types.CallInterface // void fn(uint32, int32*7, uint32, uint32, void*) - TexSubImage3D
 	cifVoid5FBOLayer     types.CallInterface // void fn(uint32, uint32, uint32, int32, int32) - FramebufferTextureLayer
-	cifInitialized       bool
+
+	cifVoid5TexStorage2D  types.CallInterface // void fn(uint32, int32, uint32, int32, int32) - TexStorage2D
+	cifVoid6TexStorage3D  types.CallInterface // void fn(uint32, int32, uint32, int32, int32, int32) - TexStorage3D
+	cifVoid9CompSubImg2D  types.CallInterface // void fn(uint32, int32*5, uint32, int32, void*) - CompressedTexSubImage2D
+	cifVoid11CompSubImg3D types.CallInterface // void fn(uint32, int32*7, uint32, int32, void*) - CompressedTexSubImage3D
+	cifInitialized        bool
 )
 
 // initCommonCallInterfaces prepares reusable CallInterface signatures.
@@ -522,6 +527,9 @@ func initCommonCallInterfaces() error {
 	if err := initLayeredTextureCallInterfaces(); err != nil {
 		return err
 	}
+	if err := initCompressedTextureCallInterfaces(); err != nil {
+		return err
+	}
 
 	cifInitialized = true
 	return nil
@@ -701,6 +709,12 @@ type Context struct {
 	glTexImage3D              unsafe.Pointer
 	glTexSubImage3D           unsafe.Pointer
 	glFramebufferTextureLayer unsafe.Pointer
+
+	// Immutable storage and compressed uploads (GL 4.2 / ES 3.0)
+	glTexStorage2D            unsafe.Pointer
+	glTexStorage3D            unsafe.Pointer
+	glCompressedTexSubImage2D unsafe.Pointer
+	glCompressedTexSubImage3D unsafe.Pointer
 
 	// Sampler objects (GL 3.3+ / ES 3.0+)
 	glGenSamplers       unsafe.Pointer
@@ -926,6 +940,11 @@ func (c *Context) Load(getProcAddr ProcAddressFunc, isGLES ...bool) error {
 	c.glTexImage3D = getProcAddr("glTexImage3D")
 	c.glTexSubImage3D = getProcAddr("glTexSubImage3D")
 	c.glFramebufferTextureLayer = getProcAddr("glFramebufferTextureLayer")
+	// Immutable storage and compressed uploads (optional - checked with HasCompressedTextures)
+	c.glTexStorage2D = getProcAddr("glTexStorage2D")
+	c.glTexStorage3D = getProcAddr("glTexStorage3D")
+	c.glCompressedTexSubImage2D = getProcAddr("glCompressedTexSubImage2D")
+	c.glCompressedTexSubImage3D = getProcAddr("glCompressedTexSubImage3D")
 
 	// Sampler objects (optional - GL 3.3+ / ES 3.0+)
 	c.glGenSamplers = getProcAddr("glGenSamplers")
@@ -1610,6 +1629,116 @@ func (c *Context) TexSubImage3D(target uint32, level, xoffset, yoffset, zoffset,
 		unsafe.Pointer(&pixelsPtr),
 	}
 	_, _ = ffi.CallFunction(&cifVoid11TexSubImg3D, c.glTexSubImage3D, nil, args[:])
+}
+
+// initCompressedTextureCallInterfaces prepares the signatures of the
+// immutable storage and compressed upload functions.
+func initCompressedTextureCallInterfaces() error {
+	u32, s32, ptr := types.UInt32TypeDescriptor, types.SInt32TypeDescriptor, types.PointerTypeDescriptor
+	if err := ffi.PrepareCallInterface(&cifVoid5TexStorage2D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, u32, s32, s32}); err != nil {
+		return err
+	}
+	if err := ffi.PrepareCallInterface(&cifVoid6TexStorage3D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, u32, s32, s32, s32}); err != nil {
+		return err
+	}
+	if err := ffi.PrepareCallInterface(&cifVoid9CompSubImg2D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, s32, s32, s32, s32, u32, s32, ptr}); err != nil {
+		return err
+	}
+	return ffi.PrepareCallInterface(&cifVoid11CompSubImg3D, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{u32, s32, s32, s32, s32, s32, s32, s32, u32, s32, ptr})
+}
+
+// HasCompressedTextures reports whether the context resolved the functions
+// compressed textures need: glTexStorage2D, glTexStorage3D,
+// glCompressedTexSubImage2D and glCompressedTexSubImage3D (GL 4.2, ES 3.0).
+// A resolved pointer is not proof of support on EGL: check the version too.
+func (c *Context) HasCompressedTextures() bool {
+	return c.glTexStorage2D != nil && c.glTexStorage3D != nil &&
+		c.glCompressedTexSubImage2D != nil && c.glCompressedTexSubImage3D != nil
+}
+
+// TexStorage2D allocates immutable storage for every level of a 2D texture
+// or a cube map. No-op if not supported (HasCompressedTextures).
+func (c *Context) TexStorage2D(target uint32, levels int32, internalformat uint32, width, height int32) {
+	if c.glTexStorage2D == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&levels),
+		unsafe.Pointer(&internalformat),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5TexStorage2D, c.glTexStorage2D, nil, args[:])
+}
+
+// TexStorage3D allocates immutable storage for every level of a 3D or 2D
+// array texture. No-op if not supported (HasCompressedTextures).
+func (c *Context) TexStorage3D(target uint32, levels int32, internalformat uint32, width, height, depth int32) {
+	if c.glTexStorage3D == nil {
+		return
+	}
+	args := [6]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&levels),
+		unsafe.Pointer(&internalformat),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&depth),
+	}
+	_, _ = ffi.CallFunction(&cifVoid6TexStorage3D, c.glTexStorage3D, nil, args[:])
+}
+
+// CompressedTexSubImage2D writes imageSize bytes of blocks into a rectangle
+// of one level of a 2D image (TEXTURE_2D or a cube face). data is client
+// memory, or a byte offset when a PIXEL_UNPACK_BUFFER is bound. No-op if not
+// supported (HasCompressedTextures).
+func (c *Context) CompressedTexSubImage2D(target uint32, level, xoffset, yoffset, width, height int32, format uint32, imageSize int32, data unsafe.Pointer) {
+	if c.glCompressedTexSubImage2D == nil {
+		return
+	}
+	dataPtr := data
+	args := [9]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&xoffset),
+		unsafe.Pointer(&yoffset),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&imageSize),
+		unsafe.Pointer(&dataPtr),
+	}
+	_, _ = ffi.CallFunction(&cifVoid9CompSubImg2D, c.glCompressedTexSubImage2D, nil, args[:])
+}
+
+// CompressedTexSubImage3D writes imageSize bytes of blocks into a box of one
+// level of a 3D or 2D array texture. data is client memory, or a byte offset
+// when a PIXEL_UNPACK_BUFFER is bound. No-op if not supported
+// (HasCompressedTextures).
+func (c *Context) CompressedTexSubImage3D(target uint32, level, xoffset, yoffset, zoffset, width, height, depth int32, format uint32, imageSize int32, data unsafe.Pointer) {
+	if c.glCompressedTexSubImage3D == nil {
+		return
+	}
+	dataPtr := data
+	args := [11]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&level),
+		unsafe.Pointer(&xoffset),
+		unsafe.Pointer(&yoffset),
+		unsafe.Pointer(&zoffset),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+		unsafe.Pointer(&depth),
+		unsafe.Pointer(&format),
+		unsafe.Pointer(&imageSize),
+		unsafe.Pointer(&dataPtr),
+	}
+	_, _ = ffi.CallFunction(&cifVoid11CompSubImg3D, c.glCompressedTexSubImage3D, nil, args[:])
 }
 
 // FramebufferTextureLayer attaches one layer (a depth slice of a 3D texture

@@ -375,32 +375,10 @@ func queryFeatures(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx 
 		features.Insert(gputypes.FeatureDepthClipControl)
 	}
 
-	// BC texture compression -- requires S3TC + RGTC + BPTC
-	if isES {
-		// GLES needs srgb variant too
-		if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
-			hasExtension(exts, "GL_EXT_texture_compression_s3tc_srgb") &&
-			hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
-			hasExtension(exts, "GL_EXT_texture_compression_bptc") {
-			features.Insert(gputypes.FeatureTextureCompressionBC)
-		}
-	} else {
-		if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
-			hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
-			hasExtension(exts, "GL_ARB_texture_compression_bptc") {
-			features.Insert(gputypes.FeatureTextureCompressionBC)
-		}
-	}
-
-	// ETC2 -- built into ES 3.0+, needs GL_ARB_ES3_compatibility on desktop
-	if isES || hasExtension(exts, "GL_ARB_ES3_compatibility") {
-		features.Insert(gputypes.FeatureTextureCompressionETC2)
-	}
-
-	// ASTC
-	if hasExtension(exts, "GL_OES_texture_compression_astc",
-		"GL_KHR_texture_compression_astc_ldr") {
-		features.Insert(gputypes.FeatureTextureCompressionASTC)
+	// Compressed textures are allocated with glTexStorage and written with
+	// glCompressedTexSubImage; without them no compression feature is offered.
+	if hasCompressedTexturePath(exts, glMajor, glMinor, isES, glCtx) {
+		insertCompressionFeatures(&features, exts, isES)
 	}
 
 	// Float32 filterable (linear filtering for float textures)
@@ -440,6 +418,52 @@ func queryFeatures(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx 
 	}
 
 	return features
+}
+
+// hasCompressedTexturePath reports whether compressed textures can be
+// created and written: immutable storage (Rust PrivateCapabilities
+// TEXTURE_STORAGE, ES 3.0 / GL 4.2, or GL_ARB_texture_storage) and the
+// compressed sub-image uploads, with every entry point resolved. eglGetProcAddress
+// may return a pointer for a function the context does not have, so the
+// version or extension decides and the pointers are only a second check.
+// Rust allocates compressed textures with glTexImage when TEXTURE_STORAGE is
+// missing, which GL rejects for a compressed format; we offer no compression
+// feature there instead.
+func hasCompressedTexturePath(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx *gl.Context) bool {
+	storage := glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 0}, [2]int{4, 2}) ||
+		hasExtension(exts, "GL_ARB_texture_storage")
+	return storage && glCtx.HasCompressedTextures()
+}
+
+// insertCompressionFeatures adds the texture compression features whose
+// formats the context has, as Rust wgpu-hal gles/adapter.rs detects them.
+func insertCompressionFeatures(features *gputypes.Features, exts map[string]bool, isES bool) {
+	// BC: S3TC + RGTC + BPTC. On GLES the sRGB S3TC formats come from their
+	// own extension; Rust asks only for that one, we also ask for the linear
+	// S3TC extension that defines the unorm formats.
+	if isES {
+		if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
+			hasExtension(exts, "GL_EXT_texture_compression_s3tc_srgb") &&
+			hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
+			hasExtension(exts, "GL_EXT_texture_compression_bptc") {
+			features.Insert(gputypes.FeatureTextureCompressionBC)
+		}
+	} else if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
+		hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
+		hasExtension(exts, "GL_ARB_texture_compression_bptc") {
+		features.Insert(gputypes.FeatureTextureCompressionBC)
+	}
+
+	// ETC2 -- built into ES 3.0+, needs GL_ARB_ES3_compatibility on desktop
+	if isES || hasExtension(exts, "GL_ARB_ES3_compatibility") {
+		features.Insert(gputypes.FeatureTextureCompressionETC2)
+	}
+
+	// ASTC
+	if hasExtension(exts, "GL_OES_texture_compression_astc",
+		"GL_KHR_texture_compression_astc_ldr") {
+		features.Insert(gputypes.FeatureTextureCompressionASTC)
+	}
 }
 
 // ---------------------------------------------------------------------------

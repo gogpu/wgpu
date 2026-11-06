@@ -277,8 +277,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	}
 
 	// Allocate texture storage
-	switch target {
-	case gl.TEXTURE_2D_MULTISAMPLE:
+	switch {
+	case desc.Format.IsCompressed():
+		err := allocateCompressedStorage(glCtx, target, internalFormat, desc.Size, desc.MipLevelCount)
+		if glErr := glCtx.GetError(); err == nil && glErr != 0 {
+			err = fmt.Errorf("gles: TexStorage failed: GL error 0x%x (format=0x%x, %dx%dx%d, %d levels)",
+				glErr, internalFormat, desc.Size.Width, desc.Size.Height, desc.Size.DepthOrArrayLayers, desc.MipLevelCount)
+		}
+		if err != nil {
+			glCtx.BindTexture(target, 0)
+			glCtx.DeleteTextures(id)
+			return nil, err
+		}
+
+	case target == gl.TEXTURE_2D_MULTISAMPLE:
 		glCtx.TexImage2DMultisample(target, int32(sampleCount), internalFormat,
 			int32(desc.Size.Width), int32(desc.Size.Height), true)
 		if glErr := glCtx.GetError(); glErr != 0 {
@@ -287,7 +299,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 				glErr, internalFormat, sampleCount, desc.Size.Width, desc.Size.Height)
 		}
 
-	case gl.TEXTURE_2D:
+	case target == gl.TEXTURE_2D:
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
@@ -300,7 +312,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			}
 		}
 
-	case gl.TEXTURE_CUBE_MAP:
+	case target == gl.TEXTURE_CUBE_MAP:
 		for face := uint32(0); face < 6; face++ {
 			faceTarget := gl.TEXTURE_CUBE_MAP_POSITIVE_X + face
 			for level := uint32(0); level < desc.MipLevelCount; level++ {
@@ -311,7 +323,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			}
 		}
 
-	case gl.TEXTURE_3D, gl.TEXTURE_2D_ARRAY:
+	case isLayeredTarget(target):
 		if err := allocateLayeredStorage(glCtx, target, desc, internalFormat, format, dataType); err != nil {
 			glCtx.BindTexture(target, 0)
 			glCtx.DeleteTextures(id)
