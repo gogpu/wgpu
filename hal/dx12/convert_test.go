@@ -14,6 +14,37 @@ import (
 	"github.com/gogpu/wgpu/hal/dx12/dxgi"
 )
 
+// TestTextureFormatForCopy checks the placed-footprint format of every
+// depth/stencil aspect a buffer copy may address (Rust wgpu-hal
+// auxil/dxgi/conv.rs map_texture_format_for_copy). Depth24Plus is not
+// copyable, so it has no footprint format.
+func TestTextureFormatForCopy(t *testing.T) {
+	all, depth, stencil := gputypes.TextureAspectAll, gputypes.TextureAspectDepthOnly, gputypes.TextureAspectStencilOnly
+	tests := []struct {
+		format gputypes.TextureFormat
+		aspect gputypes.TextureAspect
+		want   d3d12.DXGI_FORMAT
+	}{
+		{gputypes.TextureFormatDepth16Unorm, all, d3d12.DXGI_FORMAT_R16_UNORM},
+		{gputypes.TextureFormatDepth16Unorm, depth, d3d12.DXGI_FORMAT_R16_UNORM},
+		{gputypes.TextureFormatDepth32Float, all, d3d12.DXGI_FORMAT_R32_FLOAT},
+		{gputypes.TextureFormatDepth32Float, depth, d3d12.DXGI_FORMAT_R32_FLOAT},
+		{gputypes.TextureFormatStencil8, all, d3d12.DXGI_FORMAT_R8_UINT},
+		{gputypes.TextureFormatStencil8, stencil, d3d12.DXGI_FORMAT_R8_UINT},
+		{gputypes.TextureFormatDepth24PlusStencil8, stencil, d3d12.DXGI_FORMAT_R8_UINT},
+		{gputypes.TextureFormatDepth24PlusStencil8, depth, d3d12.DXGI_FORMAT_UNKNOWN},
+		{gputypes.TextureFormatDepth32FloatStencil8, stencil, d3d12.DXGI_FORMAT_R8_UINT},
+		{gputypes.TextureFormatDepth32FloatStencil8, depth, d3d12.DXGI_FORMAT_R32_FLOAT},
+		{gputypes.TextureFormatDepth24Plus, all, d3d12.DXGI_FORMAT_UNKNOWN},
+		{gputypes.TextureFormatRGBA8Unorm, all, d3d12.DXGI_FORMAT_R8G8B8A8_UNORM},
+	}
+	for _, tt := range tests {
+		if got := textureFormatForCopy(tt.format, tt.aspect); got != tt.want {
+			t.Errorf("textureFormatForCopy(%v, %v) = %d, want %d", tt.format, tt.aspect, got, tt.want)
+		}
+	}
+}
+
 func TestTextureFormatToD3D12(t *testing.T) {
 	tests := []struct {
 		name   string

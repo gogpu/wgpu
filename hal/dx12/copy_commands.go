@@ -26,9 +26,9 @@ func (e *CommandEncoder) copyBufferToTexture(src *Buffer, texture *Texture, regi
 		}
 	}
 	e.emitStateBarrierPlans(barriers)
-	for _, plans := range regionPlans {
+	for i, plans := range regionPlans {
 		for _, plan := range plans {
-			srcLoc := placedFootprintLocation(src, texture.format, plan)
+			srcLoc := placedFootprintLocation(src, texture.format, regions[i].TextureBase.Aspect, plan)
 			dstLoc := subresourceLocation(texture, plan.subresource)
 			box := d3d12.D3D12_BOX{
 				Left:   plan.bufferOriginX,
@@ -58,10 +58,10 @@ func (e *CommandEncoder) copyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		}
 	}
 	e.emitStateBarrierPlans(barriers)
-	for _, plans := range regionPlans {
+	for i, plans := range regionPlans {
 		for _, plan := range plans {
 			srcLoc := subresourceLocation(src, plan.subresource)
-			dstLoc := placedFootprintLocation(dst, src.format, plan)
+			dstLoc := placedFootprintLocation(dst, src.format, regions[i].TextureBase.Aspect, plan)
 			box := d3d12.D3D12_BOX{
 				Left:   plan.textureOriginX,
 				Top:    plan.textureOriginY,
@@ -105,12 +105,12 @@ func (e *CommandEncoder) copyTextureToTexture(src, dst *Texture, regions []hal.T
 	}
 }
 
-func placedFootprintLocation(buffer *Buffer, format gputypes.TextureFormat, plan bufferTextureCopyPlan) d3d12.D3D12_TEXTURE_COPY_LOCATION {
+func placedFootprintLocation(buffer *Buffer, format gputypes.TextureFormat, aspect gputypes.TextureAspect, plan bufferTextureCopyPlan) d3d12.D3D12_TEXTURE_COPY_LOCATION {
 	location := d3d12.D3D12_TEXTURE_COPY_LOCATION{Resource: buffer.raw, Type: d3d12.D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}
 	location.SetPlacedFootprint(d3d12.D3D12_PLACED_SUBRESOURCE_FOOTPRINT{
 		Offset: plan.bufferOffset,
 		Footprint: d3d12.D3D12_SUBRESOURCE_FOOTPRINT{
-			Format:   textureFormatToD3D12(format),
+			Format:   textureFormatForCopy(format, aspect),
 			Width:    plan.footprintWidth,
 			Height:   plan.footprintHeight,
 			Depth:    plan.footprintDepth,

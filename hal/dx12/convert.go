@@ -231,6 +231,37 @@ func textureFormatToSRV(format gputypes.TextureFormat, aspect gputypes.TextureAs
 	return textureFormatToD3D12(format), 0
 }
 
+// textureFormatForCopy is the placed-footprint format of a buffer copy of one
+// aspect of format, as Rust wgpu-hal maps it (auxil/dxgi/conv.rs
+// map_texture_format_for_copy): a depth/stencil plane is copied in the
+// single-plane format of that aspect. The resource format (D24_UNORM_S8_UINT,
+// D32_FLOAT_S8X24_UINT, D16_UNORM, D32_FLOAT) in the footprint made
+// CopyTextureRegion fail with E_INVALIDARG at Close (Stencil8) or copy
+// nothing (the stencil of D24S8, either aspect of D32FS8). It returns
+// DXGI_FORMAT_UNKNOWN for an aspect no buffer copy may address (depth24plus,
+// the depth of depth24plus-stencil8; core rejects these copies).
+func textureFormatForCopy(format gputypes.TextureFormat, aspect gputypes.TextureAspect) d3d12.DXGI_FORMAT {
+	switch format {
+	case gputypes.TextureFormatDepth16Unorm:
+		return d3d12.DXGI_FORMAT_R16_UNORM
+	case gputypes.TextureFormatDepth32Float:
+		return d3d12.DXGI_FORMAT_R32_FLOAT
+	case gputypes.TextureFormatStencil8:
+		return d3d12.DXGI_FORMAT_R8_UINT
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		switch {
+		case aspect == gputypes.TextureAspectStencilOnly:
+			return d3d12.DXGI_FORMAT_R8_UINT
+		case aspect == gputypes.TextureAspectDepthOnly && format == gputypes.TextureFormatDepth32FloatStencil8:
+			return d3d12.DXGI_FORMAT_R32_FLOAT
+		}
+		return d3d12.DXGI_FORMAT_UNKNOWN
+	case gputypes.TextureFormatDepth24Plus:
+		return d3d12.DXGI_FORMAT_UNKNOWN
+	}
+	return textureFormatToD3D12(format)
+}
+
 // addressModeToD3D12 converts a WebGPU address mode to D3D12.
 func addressModeToD3D12(mode gputypes.AddressMode) d3d12.D3D12_TEXTURE_ADDRESS_MODE {
 	switch mode {
