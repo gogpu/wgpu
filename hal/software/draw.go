@@ -143,9 +143,9 @@ func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, targe
 		return false
 	}
 	srcView.texture.mu.RLock()
-	sameSize := int(srcView.texture.width) == w && int(srcView.texture.height) == h
+	img, ok := srcView.baseImage()
 	srcView.texture.mu.RUnlock()
-	if !sameSize {
+	if !ok || int(img.width) != w || int(img.height) != h {
 		return false
 	}
 	return r.executeFullscreenBlit(target)
@@ -203,13 +203,18 @@ func (r *RenderPassEncoder) executeFullscreenBlit(target *Texture) bool {
 		return false
 	}
 
+	// The view's base mip level and layer, not the whole texture storage.
 	src := srcView.texture
 	src.mu.RLock()
-	srcData := src.data
-	srcW := int(src.width)
-	srcH := int(src.height)
+	img, ok := srcView.baseImage()
 	srcFmt := src.format
 	src.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	srcData := img.data
+	srcW := int(img.width)
+	srcH := int(img.height)
 
 	dstW := int(target.width)
 	dstH := int(target.height)

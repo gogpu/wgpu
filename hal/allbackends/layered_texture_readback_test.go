@@ -35,7 +35,6 @@ func TestLayeredTextureCopyRoundTrip(t *testing.T) {
 			for mip := uint32(0); mip < 2; mip++ {
 				for _, upload := range uploads {
 					t.Run(fmt.Sprintf("%s/mip%d/%s", d.name, mip, upload), func(t *testing.T) {
-						skipSoftwareMip(t, device, mip)
 						layeredRoundTrip(t, device, d.dim, mip, upload)
 					})
 				}

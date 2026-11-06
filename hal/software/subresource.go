@@ -130,6 +130,20 @@ func (t *Texture) image(level, z uint32) (textureImage, bool) {
 	return textureImage{data: t.data[off : off+imageSize : off+imageSize], width: w, height: h, rowPitch: rowPitch}, true
 }
 
+// baseImage returns the view's first image: its base mip level and base
+// array layer, or depth slice 0 of a 3D view. The caller holds the texture
+// lock while it uses data.
+func (v *TextureView) baseImage() (textureImage, bool) {
+	if v.texture == nil {
+		return textureImage{}, false
+	}
+	z := v.baseArrayLayer
+	if v.texture.is3D() {
+		z = 0
+	}
+	return v.texture.image(v.baseMipLevel, z)
+}
+
 // levelData returns the storage of images [z, z+n) of mip level level, or
 // nil when they are out of range. The caller holds the texture lock while it
 // uses the slice.

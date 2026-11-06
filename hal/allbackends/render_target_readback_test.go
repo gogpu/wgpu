@@ -11,7 +11,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
 )
 
 // leftHalfShader fills the left half of the target with green. The quad is
@@ -50,7 +49,6 @@ var (
 // and the render area covered texels the level does not have.
 func TestRenderToMipLevel(t *testing.T) {
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
-		skipSoftwareMip(t, device, 1)
 		r := newTargetRig(t, device, gputypes.TextureDimension2D, 1)
 		r.render(t, 1, nil, sliceRed)
 		r.check(t, 1, 0, sliceRed)
@@ -69,15 +67,6 @@ func TestRenderToMipLevelLeavesMip0(t *testing.T) {
 		r.render(t, 1, nil, sliceBlue)
 		r.check(t, 0, 0, sliceRed)
 	})
-}
-
-// skipSoftwareMip skips a test of a mip level above 0 on the software
-// backend, which stores only mip level 0.
-func skipSoftwareMip(t *testing.T, device *wgpu.Device, mip uint32) {
-	t.Helper()
-	if _, sw := device.HalDevice().(*software.Device); sw && mip > 0 {
-		t.Skip("software: mip > 0 storage is P1-SW-026")
-	}
 }
 
 type targetRig struct {
