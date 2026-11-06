@@ -43,9 +43,6 @@ func TestIntegerTargetClearReadback(t *testing.T) {
 		if strings.HasSuffix(t.Name(), "/software") {
 			t.Skip("software: an integer target is cleared to the float bits, P1-SW-021")
 		}
-		if strings.HasSuffix(t.Name(), "/gles") {
-			t.Skip("gles: an integer target is cleared to the float bits, P1-GLES-022")
-		}
 		for _, f := range formats {
 			t.Run(f.format.String(), func(t *testing.T) {
 				texel := integerTexel(f.format, f.color)

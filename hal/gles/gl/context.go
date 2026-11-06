@@ -99,6 +99,8 @@ type Context struct {
 	glCheckFramebufferStatus uintptr
 	glDrawBuffers            uintptr
 	glClearBufferfv          uintptr // GL 3.0+ — per-buffer float clear
+	glClearBufferiv          uintptr // GL 3.0+ — per-buffer signed integer clear
+	glClearBufferuiv         uintptr // GL 3.0+ — per-buffer unsigned integer clear
 
 	// Pixel read/store (GL 1.0+)
 	glReadPixels  uintptr
@@ -287,6 +289,8 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glCheckFramebufferStatus = getProcAddr("glCheckFramebufferStatus")
 	c.glDrawBuffers = getProcAddr("glDrawBuffers")
 	c.glClearBufferfv = getProcAddr("glClearBufferfv")
+	c.glClearBufferiv = getProcAddr("glClearBufferiv")
+	c.glClearBufferuiv = getProcAddr("glClearBufferuiv")
 
 	// Pixel read/store
 	c.glReadPixels = getProcAddr("glReadPixels")
@@ -413,6 +417,8 @@ func (c *Context) requiredProcs() []requiredProc[uintptr] {
 		{"glFramebufferTexture2D", c.glFramebufferTexture2D},
 		{"glDrawBuffers", c.glDrawBuffers},
 		{"glClearBufferfv", c.glClearBufferfv},
+		{"glClearBufferiv", c.glClearBufferiv},
+		{"glClearBufferuiv", c.glClearBufferuiv},
 		{"glDrawArraysInstanced", c.glDrawArraysInstanced},
 		{"glDrawElementsInstanced", c.glDrawElementsInstanced},
 		{"glVertexAttribDivisor", c.glVertexAttribDivisor},
@@ -919,6 +925,21 @@ func (c *Context) DrawBuffers(bufs []uint32) {
 // Matches Rust wgpu-hal GLES ClearColorF (queue.rs:1222).
 func (c *Context) ClearBufferfv(buffer uint32, drawBuffer int32, value *[4]float32) {
 	syscall.SyscallN(c.glClearBufferfv, uintptr(buffer), uintptr(drawBuffer),
+		uintptr(unsafe.Pointer(value)))
+}
+
+// ClearBufferiv clears a specific draw buffer of a signed integer format
+// with integer values. glClearBufferfv on an integer buffer leaves its
+// contents undefined (OpenGL ES 3.0 §4.2.3, Clearing the Buffers).
+func (c *Context) ClearBufferiv(buffer uint32, drawBuffer int32, value *[4]int32) {
+	syscall.SyscallN(c.glClearBufferiv, uintptr(buffer), uintptr(drawBuffer),
+		uintptr(unsafe.Pointer(value)))
+}
+
+// ClearBufferuiv clears a specific draw buffer of an unsigned integer format
+// with integer values.
+func (c *Context) ClearBufferuiv(buffer uint32, drawBuffer int32, value *[4]uint32) {
+	syscall.SyscallN(c.glClearBufferuiv, uintptr(buffer), uintptr(drawBuffer),
 		uintptr(unsafe.Pointer(value)))
 }
 
