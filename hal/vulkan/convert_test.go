@@ -699,6 +699,12 @@ func TestTextureAspectToVk(t *testing.T) {
 			vk.ImageAspectFlags(vk.ImageAspectDepthBit) | vk.ImageAspectFlags(vk.ImageAspectStencilBit),
 		},
 		{"All depth only", gputypes.TextureAspectAll, gputypes.TextureFormatDepth32Float, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"All depth16", gputypes.TextureAspectAll, gputypes.TextureFormatDepth16Unorm, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"All stencil8 has no depth aspect", gputypes.TextureAspectAll, gputypes.TextureFormatStencil8, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
+		{"Undefined stencil8", gputypes.TextureAspectUndefined, gputypes.TextureFormatStencil8, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
+		{"StencilOnly of combined", gputypes.TextureAspectStencilOnly, gputypes.TextureFormatDepth32FloatStencil8, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
+		{"DepthOnly of combined", gputypes.TextureAspectDepthOnly, gputypes.TextureFormatDepth24PlusStencil8, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
+		{"DepthOnly of a color format selects nothing", gputypes.TextureAspectDepthOnly, gputypes.TextureFormatRGBA8Unorm, 0},
 		{"Unknown defaults to Color", gputypes.TextureAspect(99), gputypes.TextureFormatRGBA8Unorm, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
 	}
 
@@ -707,28 +713,6 @@ func TestTextureAspectToVk(t *testing.T) {
 			got := textureAspectToVk(tt.aspect, tt.format)
 			if got != tt.expect {
 				t.Errorf("textureAspectToVk() = %v, want %v", got, tt.expect)
-			}
-		})
-	}
-}
-
-// TestTextureAspectToVkSimple tests texture aspect conversions without format context.
-func TestTextureAspectToVkSimple(t *testing.T) {
-	tests := []struct {
-		name   string
-		aspect gputypes.TextureAspect
-		expect vk.ImageAspectFlags
-	}{
-		{"DepthOnly", gputypes.TextureAspectDepthOnly, vk.ImageAspectFlags(vk.ImageAspectDepthBit)},
-		{"StencilOnly", gputypes.TextureAspectStencilOnly, vk.ImageAspectFlags(vk.ImageAspectStencilBit)},
-		{"All defaults to Color", gputypes.TextureAspectAll, vk.ImageAspectFlags(vk.ImageAspectColorBit)},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := textureAspectToVkSimple(tt.aspect)
-			if got != tt.expect {
-				t.Errorf("textureAspectToVkSimple() = %v, want %v", got, tt.expect)
 			}
 		})
 	}

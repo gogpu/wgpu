@@ -565,37 +565,42 @@ func textureViewDimensionToVk(dim gputypes.TextureViewDimension) vk.ImageViewTyp
 	}
 }
 
-// textureAspectToVk converts WebGPU texture aspect to Vulkan image aspect flags.
-func textureAspectToVk(aspect gputypes.TextureAspect, format gputypes.TextureFormat) vk.ImageAspectFlags {
-	switch aspect {
-	case gputypes.TextureAspectDepthOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
-	case gputypes.TextureAspectStencilOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
+// formatAspectsToVk returns the aspects a texture format has: color, depth,
+// stencil, or depth and stencil (Rust wgpu-hal FormatAspects::from, mapped by
+// vulkan/conv.rs map_aspects). Stencil8 has only a stencil aspect.
+func formatAspectsToVk(format gputypes.TextureFormat) vk.ImageAspectFlags {
+	depth := vk.ImageAspectFlags(vk.ImageAspectDepthBit)
+	stencil := vk.ImageAspectFlags(vk.ImageAspectStencilBit)
+	switch format {
+	case gputypes.TextureFormatStencil8:
+		return stencil
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth32Float:
+		return depth
+	case gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return depth | stencil
 	default:
-		// TextureAspectAll and TextureAspectUndefined both derive
-		// the correct aspect mask from the texture format.
-		if isDepthStencilFormat(format) {
-			flags := vk.ImageAspectFlags(vk.ImageAspectDepthBit)
-			if hasStencilAspect(format) {
-				flags |= vk.ImageAspectFlags(vk.ImageAspectStencilBit)
-			}
-			return flags
-		}
 		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
 	}
 }
 
-// textureAspectToVkSimple converts texture aspect without format context.
-// Used when texture format is not available (e.g., in buffer-texture copy regions).
-func textureAspectToVkSimple(aspect gputypes.TextureAspect) vk.ImageAspectFlags {
+// textureAspectToVk converts a WebGPU texture aspect of a texture of format
+// into Vulkan image aspect flags: the format's aspects that the requested
+// aspect selects (Rust wgpu-hal FormatAspects::new(format, aspect)). All, and
+// Undefined, select every aspect of the format, so a buffer-texture copy of a
+// depth format gets DEPTH and of Stencil8 STENCIL, never COLOR; core makes
+// such copies name a single aspect (TransferErrorCopyAspectNotOne).
+func textureAspectToVk(aspect gputypes.TextureAspect, format gputypes.TextureFormat) vk.ImageAspectFlags {
+	aspects := formatAspectsToVk(format)
 	switch aspect {
 	case gputypes.TextureAspectDepthOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectDepthBit)
+		return aspects & vk.ImageAspectFlags(vk.ImageAspectDepthBit)
 	case gputypes.TextureAspectStencilOnly:
-		return vk.ImageAspectFlags(vk.ImageAspectStencilBit)
+		return aspects & vk.ImageAspectFlags(vk.ImageAspectStencilBit)
 	default:
-		return vk.ImageAspectFlags(vk.ImageAspectColorBit)
+		return aspects
 	}
 }
 

@@ -654,7 +654,7 @@ func convertBufferImageCopyRegions(regions []hal.BufferTextureCopy, format gputy
 			BufferRowLength:   bufferRowLength,
 			BufferImageHeight: bufferImageHeight,
 			ImageSubresource: vk.ImageSubresourceLayers{
-				AspectMask:     textureAspectToVkSimple(r.TextureBase.Aspect),
+				AspectMask:     textureAspectToVk(r.TextureBase.Aspect, format),
 				MipLevel:       r.TextureBase.MipLevel,
 				BaseArrayLayer: baseArrayLayer,
 				LayerCount:     layerCount,
