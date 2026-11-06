@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 // positionedQuadWGSL is gogpu's positionedQuadShaderSource (gogpu shader.go),
@@ -271,7 +272,12 @@ func BenchmarkFullscreenTexturedDraw(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	start := shader.ExecutedInstructions()
 	for range b.N {
 		s.draw(b)
+	}
+	// The executed SPIR-V instructions, counted only with -tags swinstrcount.
+	if n := shader.ExecutedInstructions() - start; n > 0 {
+		b.ReportMetric(float64(n)/float64(b.N), "instrs/op")
 	}
 }

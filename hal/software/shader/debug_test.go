@@ -869,10 +869,12 @@ func BenchmarkExecuteBaseline(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
+	start := ExecutedInstructions()
 	for i := 0; i < b.N; i++ {
 		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		_, _ = m.Execute("vs_main", inputs)
 	}
+	reportInstrs(b, start)
 }
 
 // BenchmarkDebugNilOverhead benchmarks ExecuteWithDebug with debug=nil.
@@ -894,11 +896,13 @@ func BenchmarkDebugNilOverhead(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
+	start := ExecutedInstructions()
 	for i := 0; i < b.N; i++ {
 		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		ctx := &ExecutionContext{Inputs: inputs}
 		_, _ = m.ExecuteWithDebug("vs_main", ctx, nil)
 	}
+	reportInstrs(b, start)
 }
 
 // BenchmarkDebugWithTrace benchmarks ExecuteWithDebug with tracing enabled.
@@ -923,6 +927,7 @@ func BenchmarkDebugWithTrace(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
+	start := ExecutedInstructions()
 	for i := 0; i < b.N; i++ {
 		inputs := map[uint32]Value{idxVarID: ValUint(uint32(i % 3))}
 		ctx := &ExecutionContext{Inputs: inputs}
@@ -932,6 +937,7 @@ func BenchmarkDebugWithTrace(b *testing.B) {
 		}
 		_, _ = m.ExecuteWithDebug("vs_main", ctx, debug)
 	}
+	reportInstrs(b, start)
 }
 
 // countWriter is an io.Writer that counts bytes written without buffering.
