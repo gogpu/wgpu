@@ -289,16 +289,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 	// Matches Rust wgpu-hal GLES ClearColorF (command.rs:648-676, queue.rs:1222).
 	for i, ca := range desc.ColorAttachments {
 		if ca.LoadOp == gputypes.LoadOpClear {
-			clearColor := ca.ClearValue
-			e.commands = append(e.commands, &ClearColorBufferCommand{
-				drawBuffer: int32(i),
-				color: [4]float32{
-					float32(clearColor.R),
-					float32(clearColor.G),
-					float32(clearColor.B),
-					float32(clearColor.A),
-				},
-			})
+			e.commands = append(e.commands, newClearColorBufferCommand(int32(i), ca))
 		}
 	}
 
@@ -1302,13 +1293,36 @@ func (c *SetDrawColorBuffersCommand) Execute(ctx *gl.Context) {
 	ctx.DrawBuffers(bufs)
 }
 
-// ClearColorBufferCommand clears a specific color draw buffer using glClearBufferfv.
-// This replaces the old global glClearColor+glClear approach for MRT correctness:
-// each color attachment can have a different clear value.
-// Matches Rust wgpu-hal GLES ClearColorF (command.rs:657-663, queue.rs:1222).
+// ClearColorBufferCommand clears a specific color draw buffer with
+// glClearBufferfv, glClearBufferuiv or glClearBufferiv, by the sample type of
+// the attachment's format: Rust wgpu-hal GLES ClearColorF, ClearColorU and
+// ClearColorI (command.rs:656-671). glClearBufferfv on an integer buffer
+// leaves it undefined, and no integer target held its clear value.
+// Per-buffer clears replace the old global glClearColor+glClear so
+// each attachment of an MRT pass gets its own clear value.
 type ClearColorBufferCommand struct {
-	drawBuffer int32      // 0-based draw buffer index
-	color      [4]float32 // RGBA clear value
+	drawBuffer int32                      // 0-based draw buffer index
+	sampleType gputypes.TextureSampleType // Uint, Sint, or a float type
+	color      [4]float32                 // RGBA clear value of a float target
+	ints       [4]int32                   // of a Sint target
+	uints      [4]uint32                  // of a Uint target
+}
+
+// newClearColorBufferCommand records the clear of color attachment ca at
+// draw buffer i. A surface view, which has no texture, is a float target.
+func newClearColorBufferCommand(i int32, ca hal.RenderPassColorAttachment) *ClearColorBufferCommand {
+	format := gputypes.TextureFormatUndefined
+	if view, ok := ca.View.(*TextureView); ok && view.texture != nil {
+		format = view.texture.format
+	}
+	c := ca.ClearValue
+	return &ClearColorBufferCommand{
+		drawBuffer: i,
+		sampleType: hal.ClearColorSampleType(format),
+		color:      [4]float32{float32(c.R), float32(c.G), float32(c.B), float32(c.A)},
+		ints:       hal.ClearColorInt32(c),
+		uints:      hal.ClearColorUint32(c),
+	}
 }
 
 func (c *ClearColorBufferCommand) Execute(ctx *gl.Context) {
@@ -1317,7 +1331,14 @@ func (c *ClearColorBufferCommand) Execute(ctx *gl.Context) {
 	// previous pipeline masked some channels. Matches Rust behavior which
 	// sets color_mask(true,true,true,true) before clear (queue.rs:1134).
 	ctx.ColorMask(true, true, true, true)
-	ctx.ClearBufferfv(gl.COLOR, c.drawBuffer, &c.color)
+	switch c.sampleType {
+	case gputypes.TextureSampleTypeUint:
+		ctx.ClearBufferuiv(gl.COLOR, c.drawBuffer, &c.uints)
+	case gputypes.TextureSampleTypeSint:
+		ctx.ClearBufferiv(gl.COLOR, c.drawBuffer, &c.ints)
+	default:
+		ctx.ClearBufferfv(gl.COLOR, c.drawBuffer, &c.color)
+	}
 }
 
 // ClearColorCommand clears a color attachment using the legacy global clear path.
