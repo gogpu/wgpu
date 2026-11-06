@@ -123,6 +123,59 @@ func layeredRoundTrip(t *testing.T, device *wgpu.Device, dim gputypes.TextureDim
 	compareLayered(t, got, w, h, 1, k, mip)
 }
 
+// TestLayeredWriteTextureOddPitch writes a 3D and a 2D array texture with
+// WriteTexture rows one byte longer than a whole number of texels and layers
+// one row taller than the copy, both allowed for writeTexture (the spec's
+// "validating linear texture data" needs only bytesPerRow >= the row's bytes),
+// and reads every layer back. GLES gave GL a row length in whole texels
+// (bytesPerRow / 4), so from the second row on it read from the wrong bytes.
+func TestLayeredWriteTextureOddPitch(t *testing.T) {
+	dims := []struct {
+		name string
+		dim  gputypes.TextureDimension
+	}{
+		{"3d", gputypes.TextureDimension3D},
+		{"array", gputypes.TextureDimension2D},
+	}
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		for _, d := range dims {
+			t.Run(d.name, func(t *testing.T) {
+				tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+					Label:         "layered-odd-pitch",
+					Size:          wgpu.Extent3D{Width: layeredBaseSize, Height: layeredBaseSize, DepthOrArrayLayers: layeredBaseLayers},
+					MipLevelCount: 1,
+					SampleCount:   1,
+					Dimension:     d.dim,
+					Format:        gputypes.TextureFormatRGBA8Unorm,
+					Usage:         wgpu.TextureUsageCopyDst | wgpu.TextureUsageCopySrc,
+				})
+				if err != nil {
+					t.Fatalf("CreateTexture: %v", err)
+				}
+				t.Cleanup(tex.Release)
+
+				const w, h, layers = layeredBaseSize, layeredBaseSize, layeredBaseLayers
+				const pitch, imageRows = w*4 + 1, h + 1
+				img := make([]byte, pitch*imageRows*layers)
+				for z := uint32(0); z < layers; z++ {
+					for y := uint32(0); y < h; y++ {
+						for x := uint32(0); x < w; x++ {
+							copy(img[(z*imageRows+y)*pitch+x*4:], layeredTexel(x, y, z, 0))
+						}
+					}
+				}
+				size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: layers}
+				layout := wgpu.ImageDataLayout{BytesPerRow: pitch, RowsPerImage: imageRows}
+				dst := wgpu.ImageCopyTexture{Texture: tex}
+				if err := device.Queue().WriteTexture(&dst, img, &layout, &size); err != nil {
+					t.Fatalf("WriteTexture: %v", err)
+				}
+				compareLayered(t, readLayered(t, device, tex, 0, 0, size), w, h, layers, 0, 0)
+			})
+		}
+	})
+}
+
 // readLayered reads layers [z, z+size.DepthOrArrayLayers) of mip level mip,
 // rows layeredRowStride bytes apart and layers size.Height rows apart.
 func readLayered(t *testing.T, device *wgpu.Device, tex *wgpu.Texture, mip, z uint32, size wgpu.Extent3D) []byte {
