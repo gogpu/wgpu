@@ -2459,9 +2459,12 @@ func TestValidateRenderPipelineDescriptor_Stencil8_NoDepthOps(t *testing.T) {
 // needed for render pass validation.
 func testTexture(format gputypes.TextureFormat, width, height, sampleCount uint32) *Texture {
 	return &Texture{
-		format:      format,
-		size:        gputypes.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
-		sampleCount: sampleCount,
+		format:        format,
+		dimension:     gputypes.TextureDimension2D,
+		usage:         gputypes.TextureUsageRenderAttachment,
+		size:          gputypes.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
+		mipLevelCount: 1,
+		sampleCount:   sampleCount,
 	}
 }
 

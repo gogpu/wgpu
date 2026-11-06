@@ -928,7 +928,8 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 // usage scope and the command buffer tracker.
 func coreTextureViewFrom(v *TextureView) *core.TextureView {
 	cv := &core.TextureView{HAL: v.resolveHAL(), Dimension: v.dimension, BaseMipLevel: v.baseMipLevel,
-		BaseArrayLayer: v.baseArrayLayer, ArrayLayerCount: v.arrayLayerCount}
+		BaseArrayLayer: v.baseArrayLayer, ArrayLayerCount: v.arrayLayerCount,
+		MipLevelCount: v.mipLevelCount, Format: v.format, Aspect: v.aspect}
 	if v.texture != nil && v.texture.coreTexture != nil {
 		cv.Parent = v.texture.coreTexture
 	}

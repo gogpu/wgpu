@@ -1173,6 +1173,13 @@ func (ctx *RenderPassContext) CheckCompatible(pipeline *RenderPassContext, pipel
 //  3. All color attachments and the depth/stencil attachment must have the
 //     same render extent (width/height of each view's base mip level)
 //  4. Color views and resolve targets must not attach a subresource twice
+//  5. Every attachment view is a renderable texture view (RENDER_ATTACHMENT
+//     usage; 2d, 2d-array or 3d; one mip level; one array layer; all
+//     aspects), a color view has a color renderable format and the
+//     depth/stencil view a depth-or-stencil format
+//  6. A resolve target is resolved from a multisampled view into a
+//     single-sampled, non-3d renderable view of the same render extent, with
+//     equal view and texture formats that support resolve
 //
 // Returns the resolved RenderPassContext for later pipeline compatibility
 // checks, or an error if validation fails.
@@ -1220,10 +1227,13 @@ func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Li
 		}
 
 		tex := ca.View.Parent
-		if err := validateColorAttachmentDepthSlice(desc.Label, i, ca); err != nil {
+		if err := validateColorAttachmentView(desc.Label, i, ca); err != nil {
 			return nil, err
 		}
 		if err := regions.addColorAttachment(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
+		if err := validateResolveTarget(desc.Label, i, ca); err != nil {
 			return nil, err
 		}
 		ctx.ColorFormats[i] = tex.Format()
@@ -1408,6 +1418,9 @@ func validateDepthStencilAttachment(
 		return nil
 	}
 
+	if err := validateDepthStencilView(desc.Label, desc.DepthStencilAttachment.View); err != nil {
+		return err
+	}
 	dsTex := desc.DepthStencilAttachment.View.Parent
 	ctx.DepthStencilFormat = dsTex.Format()
 	dsSize := renderExtent(desc.DepthStencilAttachment.View)

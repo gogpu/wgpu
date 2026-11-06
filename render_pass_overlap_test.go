@@ -15,18 +15,20 @@ import (
 // its depthSlice, each resolve target) must be pairwise disjoint (WebGPU
 // spec, GPURenderPassDescriptor Valid Usage): different layers of one
 // texture or different slices of one 3D view are valid, the same layer or
-// slice twice is not. The 2d-array view with the default layer count checks
-// that CreateTextureView resolves the count to the rest of the texture.
+// slice twice is not. The 2d-array view with the default layer count, and
+// the view with the default mip count, check that CreateTextureView resolves
+// each count to the rest of the texture: a view of 4 layers or 2 mips is not
+// a renderable texture view.
 func TestBeginRenderPassAttachmentOverlap(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
 
-	newTex := func(dim gputypes.TextureDimension, depth uint32) *wgpu.Texture {
+	newTex := func(dim gputypes.TextureDimension, depth, mips uint32) *wgpu.Texture {
 		tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 			Label:         "overlap",
 			Size:          wgpu.Extent3D{Width: 16, Height: 16, DepthOrArrayLayers: depth},
-			MipLevelCount: 1,
+			MipLevelCount: mips,
 			SampleCount:   1,
 			Dimension:     dim,
 			Format:        gputypes.TextureFormatRGBA8Unorm,
@@ -38,9 +40,9 @@ func TestBeginRenderPassAttachmentOverlap(t *testing.T) {
 		t.Cleanup(tex.Release)
 		return tex
 	}
-	newView := func(tex *wgpu.Texture, dim gputypes.TextureViewDimension, base, count uint32) *wgpu.TextureView {
+	newView := func(tex *wgpu.Texture, dim gputypes.TextureViewDimension, mips, base, count uint32) *wgpu.TextureView {
 		view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
-			Dimension: dim, MipLevelCount: 1, BaseArrayLayer: base, ArrayLayerCount: count,
+			Dimension: dim, MipLevelCount: mips, BaseArrayLayer: base, ArrayLayerCount: count,
 		})
 		if err != nil {
 			t.Fatalf("CreateTextureView: %v", err)
@@ -48,13 +50,14 @@ func TestBeginRenderPassAttachmentOverlap(t *testing.T) {
 		t.Cleanup(view.Release)
 		return view
 	}
-	layers := newTex(gputypes.TextureDimension2D, 4)
-	volume := newTex(gputypes.TextureDimension3D, 4)
+	layers := newTex(gputypes.TextureDimension2D, 4, 1)
+	volume := newTex(gputypes.TextureDimension3D, 4, 1)
 	layer := func(i uint32) *wgpu.TextureView {
-		return newView(layers, gputypes.TextureViewDimension2D, i, 1)
+		return newView(layers, gputypes.TextureViewDimension2D, 1, i, 1)
 	}
-	allLayers := newView(layers, gputypes.TextureViewDimension2DArray, 0, 0)
-	vol := newView(volume, gputypes.TextureViewDimension3D, 0, 1)
+	allLayers := newView(layers, gputypes.TextureViewDimension2DArray, 1, 0, 0)
+	allMips := newView(newTex(gputypes.TextureDimension2D, 1, 2), gputypes.TextureViewDimension2D, 0, 0, 1)
+	vol := newView(volume, gputypes.TextureViewDimension3D, 1, 0, 1)
 	slice := func(v uint32) *uint32 { return &v }
 
 	type att struct {
@@ -69,8 +72,10 @@ func TestBeginRenderPassAttachmentOverlap(t *testing.T) {
 		{"array-layers-0-and-1", []att{{view: layer(0)}, {view: layer(1)}}, ""},
 		{"array-layer-2-twice", []att{{view: layer(2)}, {view: layer(2)}},
 			"color attachment [1]: color attachment's view's subresource at mip 0 and depth/array layer 2 is already attached to this render pass"},
-		{"array-default-count-covers-layer-3", []att{{view: allLayers}, {view: layer(3)}},
-			"color attachment [1]: color attachment's view's subresource at mip 0 and depth/array layer 3 is already attached"},
+		{"array-default-layer-count-is-4", []att{{view: allLayers}},
+			"this texture view has more than one array layer; view array layers: 4"},
+		{"default-mip-count-is-2", []att{{view: allMips}},
+			"this texture view has more than one mipmap level; view mipmap levels: 2"},
 		{"3d-slices-1-and-2", []att{{view: vol, slice: slice(1)}, {view: vol, slice: slice(2)}}, ""},
 		{"3d-slice-2-twice", []att{{view: vol, slice: slice(2)}, {view: vol, slice: slice(2)}},
 			"color attachment [1]: color attachment's view's subresource at mip 0 and depth/array layer 2 is already attached"},

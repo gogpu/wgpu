@@ -172,6 +172,30 @@ type TextureView struct {
 	// overlap check. arrayLayerCount is 0 when the range is not known.
 	baseArrayLayer  uint32
 	arrayLayerCount uint32
+	// mipLevelCount, format and aspect are the view's resolved mip count
+	// (0 when not known), its descriptor format (Undefined: the texture's)
+	// and aspect, copied into core.TextureView for the render pass
+	// renderable-view and attachment format checks.
+	mipLevelCount uint32
+	format        gputypes.TextureFormat
+	aspect        gputypes.TextureAspect
+}
+
+// resolveViewMipCount returns the number of mip levels a texture view
+// covers: the requested count, or the levels from baseMipLevel to the end
+// of the texture ("resolving GPUTextureViewDescriptor defaults"). 0 when
+// the texture is not known.
+func resolveViewMipCount(texture *Texture, base, requested uint32) uint32 {
+	if requested != 0 {
+		return requested
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return 0
+	}
+	if mips := texture.coreTexture.MipLevelCount(); mips > base {
+		return mips - base
+	}
+	return 0
 }
 
 // resolveViewLayerCount returns the number of array layers a texture view
