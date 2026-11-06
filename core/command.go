@@ -368,6 +368,23 @@ func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
 	return halEncoder
 }
 
+// RequireUnlocked is the encoder state check of a command recorded on the
+// encoder itself (a copy, a clear, a query resolve). While a render or compute
+// pass is open the encoder is locked, and such a command invalidates it and
+// records nothing; Finish then reports the EncoderStateError. It returns false
+// when the command must not be recorded. Rust wgpu-core's
+// CommandEncoderStatus::record_with does the same (EncoderStateError::Locked).
+// WebGPU spec: "validate the encoder state".
+func (e *CoreCommandEncoder) RequireUnlocked(operation string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Status() != CommandEncoderStatusLocked {
+		return true
+	}
+	e.setError(e.statusError(operation))
+	return false
+}
+
 // recordingLocked returns the HAL encoder with an open recording, beginning
 // one if a render pass closed the previous recording (Rust
 // InnerCommandEncoder::open). Caller must hold e.mu.
