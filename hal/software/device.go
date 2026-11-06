@@ -18,10 +18,10 @@ import (
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
 
-// ErrComputeRequiresSPIRV indicates that a compute pipeline requires a shader
-// module with SPIR-V bytecode. WGSL shaders must be compilable to SPIR-V via
-// naga for the SPIR-V interpreter to execute them.
-var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires SPIR-V shader (WGSL compilation may have failed)")
+// ErrComputeRequiresSPIRV indicates that a compute pipeline was given a
+// shader module with no source: the interpreter needs WGSL or SPIR-V. A
+// module whose source fails to compile or parse gives that failure instead.
+var ErrComputeRequiresSPIRV = errors.New("software: compute pipeline requires a shader module with WGSL or SPIR-V source")
 
 // ErrWorkgroupBarrierUnsupported is no longer returned since v0.34.8 and is
 // kept for compatibility. v0.34.7 returned it from CreateComputePipeline for
@@ -285,9 +285,13 @@ func (d *Device) DestroyPipelineLayout(_ hal.PipelineLayout) {}
 
 // CreateShaderModule creates a software shader module.
 // If the source is WGSL, it compiles to SPIR-V via naga for interpretation.
-// If SPIR-V is provided directly, it is stored as-is.
-// Compilation failure is non-fatal: the module falls back to the existing
-// callback-based shader path (fullscreen blit, vertex buffer draw).
+// If SPIR-V is provided directly, it is stored as-is. Either way the SPIR-V
+// is parsed here, once.
+//
+// A failure to lower, translate or parse the module does not fail this
+// call: the module keeps the error, and every pipeline built from it returns
+// that error (stageModule). Rust wgpu reports backend translation failures
+// the same way, at pipeline creation.
 //
 // A WGSL module with overrides keeps only its IR; every pipeline stage
 // specializes it (specializeStage).
@@ -298,16 +302,29 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	case len(desc.Source.SPIRV) > 0:
 		sm.spirv = desc.Source.SPIRV
 	case desc.Source.WGSL != "":
-		// Compilation failure is non-fatal — existing draw paths don't need
-		// SPIR-V, so the module then has neither IR nor SPIR-V.
-		if lowered, err := shaderir.LowerDescriptor(desc); err == nil {
-			sm.irModule = &lowered
-			if !shaderir.PerStage(lowered.IR, nil) {
-				sm.spirv, _ = shaderir.SPIRV(lowered.IR, spirvOptions())
+		lowered, err := shaderir.LowerDescriptor(desc)
+		if err != nil {
+			sm.err = fmt.Errorf("software: lower WGSL: %w", err)
+			return sm, nil
+		}
+		sm.irModule = &lowered
+		if !shaderir.PerStage(lowered.IR, nil) {
+			sm.spirv, err = shaderir.SPIRV(lowered.IR, spirvOptions())
+			if err != nil {
+				sm.err = fmt.Errorf("software: SPIR-V for the interpreter: %w", err)
+				return sm, nil
 			}
 		}
 	}
 
+	if len(sm.spirv) > 0 {
+		parsed, err := shader.ParseModule(sm.spirv)
+		if err != nil {
+			sm.err = fmt.Errorf("software: parse SPIR-V: %w", err)
+			return sm, nil
+		}
+		sm.parsed = parsed
+	}
 	return sm, nil
 }
 
@@ -315,13 +332,18 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 // module has overrides or the stage gives pipeline constants, the module's IR
 // is specialized for this stage (Rust wgpu-hal calls process_overrides for
 // every pipeline stage, vulkan/device.rs:804). Otherwise it is the module's
-// own SPIR-V, which is nil if the module has none.
+// own SPIR-V, which is nil only for a module with no source at all (the
+// callback-shader paths). A module that failed to lower, translate or parse
+// returns its error, wrapped with the stage.
 func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, constants map[string]float64) (*shader.Module, error) {
+	if sm.err != nil {
+		return nil, fmt.Errorf("software: %s entry point %q: %w", shaderir.StageName(stage), entryPoint, sm.err)
+	}
 	if sm.irModule == nil && len(constants) > 0 {
 		return nil, fmt.Errorf("software: pipeline constants need a WGSL shader module that compiles")
 	}
 	if sm.irModule == nil || !shaderir.PerStage(sm.irModule.IR, constants) {
-		return sm.ParsedModule(), nil
+		return sm.ParsedModule()
 	}
 	module, err := shaderir.Specialize(*sm.irModule, stage, entryPoint, constants)
 	if err != nil {
@@ -408,6 +430,8 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		return nil, err
 	}
 	if module == nil {
+		// Only a module with no source gets here: a failed compile returned
+		// its own error from stageModule.
 		return nil, ErrComputeRequiresSPIRV
 	}
 	return &ComputePipeline{

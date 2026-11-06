@@ -307,7 +307,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 
 	halModule, err := halDevice.CreateShaderModule(halDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
+		return nil, &core.CreateShaderModuleError{Kind: core.CreateShaderModuleErrorHAL, Label: desc.Label, HALError: err}
 	}
 
 	// Keep the IR core validated for pipeline introspection, as Rust
@@ -651,7 +651,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 
 	halPipeline, err := halDevice.CreateRenderPipeline(halDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
+		return nil, &core.CreateRenderPipelineError{Kind: core.CreateRenderPipelineErrorHAL, Label: desc.Label, HALError: err}
 	}
 
 	var bgCount uint32
@@ -807,7 +807,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 
 	halPipeline, err := halDevice.CreateComputePipeline(halDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
+		return nil, &core.CreateComputePipelineError{Kind: core.CreateComputePipelineErrorHAL, Label: desc.Label, HALError: err}
 	}
 
 	var bgCount uint32
