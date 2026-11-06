@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/pipeconst"
 )
 
 // Device represents a logical GPU device.
@@ -237,6 +238,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
 	}
+	if err := checkBrowserRenderConstants(desc); err != nil {
+		return nil, err
+	}
 	jsDesc := convertRenderPipelineDescriptor(desc)
 	bp := d.browser.CreateRenderPipelineFromDesc(jsDesc)
 	return &RenderPipeline{
@@ -253,6 +257,9 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
 	}
+	if err := checkBrowserStageConstants("compute", desc.Constants); err != nil {
+		return nil, err
+	}
 	var layoutRef js.Value
 	if desc.Layout != nil && desc.Layout.browser != nil {
 		layoutRef = desc.Layout.browser.Ref()
@@ -266,7 +273,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		moduleRef = js.Undefined()
 	}
 	jsDesc := browser.BuildComputePipelineDescriptor(
-		desc.Label, layoutRef, moduleRef, desc.EntryPoint,
+		desc.Label, layoutRef, moduleRef, desc.EntryPoint, desc.Constants,
 	)
 	bp := d.browser.CreateComputePipelineFromDesc(jsDesc)
 	return &ComputePipeline{
@@ -436,6 +443,28 @@ func convertBindGroupEntries(entries []BindGroupEntry) []browser.BindGroupEntryJ
 	return result
 }
 
+// checkBrowserStageConstants checks a stage's constants as every build does
+// (pipeconst.Validate) before they reach JS, where a NaN or Infinity value
+// would throw a TypeError instead of returning an error.
+func checkBrowserStageConstants(stage string, constants map[string]float64) error {
+	if err := pipeconst.Validate(constants); err != nil {
+		return fmt.Errorf("wgpu: %s stage: %w", stage, err)
+	}
+	return nil
+}
+
+// checkBrowserRenderConstants applies checkBrowserStageConstants to the
+// vertex and the fragment stage.
+func checkBrowserRenderConstants(desc *RenderPipelineDescriptor) error {
+	if err := checkBrowserStageConstants("vertex", desc.Vertex.Constants); err != nil {
+		return err
+	}
+	if desc.Fragment != nil {
+		return checkBrowserStageConstants("fragment", desc.Fragment.Constants)
+	}
+	return nil
+}
+
 // convertRenderPipelineDescriptor converts a Go RenderPipelineDescriptor to
 // a JS descriptor object via browser.BuildRenderPipelineDescriptor.
 func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
@@ -453,6 +482,7 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 	// Vertex state
 	rpd.Vertex = browser.VertexStateJS{
 		EntryPoint: desc.Vertex.EntryPoint,
+		Constants:  desc.Vertex.Constants,
 	}
 	if desc.Vertex.Module != nil && desc.Vertex.Module.browser != nil {
 		rpd.Vertex.ModuleRef = desc.Vertex.Module.browser.Ref()
@@ -579,6 +609,7 @@ func stencilOpToJS(op gputypes.StencilOperation) string {
 func convertFragmentState(fs *FragmentState) *browser.FragmentStateJS {
 	result := &browser.FragmentStateJS{
 		EntryPoint: fs.EntryPoint,
+		Constants:  fs.Constants,
 	}
 	if fs.Module != nil && fs.Module.browser != nil {
 		result.ModuleRef = fs.Module.browser.Ref()

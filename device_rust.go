@@ -3,6 +3,7 @@
 package wgpu
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -10,6 +11,8 @@ import (
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
+
+	"github.com/gogpu/wgpu/internal/pipeconst"
 )
 
 // Device represents a logical GPU device.
@@ -282,6 +285,9 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
 	}
 
+	if err := checkRustRenderConstants(desc); err != nil {
+		return nil, err
+	}
 	rDesc := convertRenderPipelineDesc(desc)
 
 	rp, err := d.r.CreateRenderPipeline(rDesc)
@@ -292,6 +298,38 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	return &RenderPipeline{r: rp, device: d}, nil
 }
 
+// errRustConstantsUnmapped is returned for a programmable stage with pipeline
+// constants under -tags rust: go-webgpu's ComputePipelineDescriptor has no
+// constants and its render stages always send constantCount 0, so the
+// constants would be dropped silently and the shader would run with its
+// override defaults.
+var errRustConstantsUnmapped = errors.New("wgpu: pipeline constants are not supported with -tags rust: go-webgpu does not map constants yet")
+
+// checkRustStageConstants checks a stage's constants as every build does
+// (pipeconst.Validate), then refuses any constant, since go-webgpu cannot
+// pass them on.
+func checkRustStageConstants(stage string, constants map[string]float64) error {
+	if err := pipeconst.Validate(constants); err != nil {
+		return fmt.Errorf("wgpu: %s stage: %w", stage, err)
+	}
+	if len(constants) != 0 {
+		return fmt.Errorf("%s stage: %w", stage, errRustConstantsUnmapped)
+	}
+	return nil
+}
+
+// checkRustRenderConstants applies checkRustStageConstants to the vertex and
+// the fragment stage.
+func checkRustRenderConstants(desc *RenderPipelineDescriptor) error {
+	if err := checkRustStageConstants("vertex", desc.Vertex.Constants); err != nil {
+		return err
+	}
+	if desc.Fragment != nil {
+		return checkRustStageConstants("fragment", desc.Fragment.Constants)
+	}
+	return nil
+}
+
 // CreateComputePipeline creates a compute pipeline.
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
 	if d.released {
@@ -299,6 +337,9 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
+	}
+	if err := checkRustStageConstants("compute", desc.Constants); err != nil {
+		return nil, err
 	}
 
 	var rLayout *rwgpu.PipelineLayout

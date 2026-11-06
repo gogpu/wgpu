@@ -454,6 +454,7 @@ type RenderPipelineDescriptorJS struct {
 type VertexStateJS struct {
 	ModuleRef  js.Value // GPUShaderModule
 	EntryPoint string
+	Constants  map[string]float64 // GPUProgrammableStage.constants
 	Buffers    []VertexBufferLayoutJS
 }
 
@@ -464,6 +465,7 @@ func (v *VertexStateJS) ToJS() js.Value {
 	if v.EntryPoint != "" {
 		obj.Set("entryPoint", v.EntryPoint)
 	}
+	setConstants(obj, v.Constants)
 
 	if len(v.Buffers) > 0 {
 		arr := newJSArray()
@@ -635,6 +637,7 @@ func (m *MultisampleStateJS) ToJS() js.Value {
 type FragmentStateJS struct {
 	ModuleRef  js.Value // GPUShaderModule
 	EntryPoint string
+	Constants  map[string]float64 // GPUProgrammableStage.constants
 	Targets    []ColorTargetStateJS
 }
 
@@ -645,6 +648,7 @@ func (f *FragmentStateJS) ToJS() js.Value {
 	if f.EntryPoint != "" {
 		obj.Set("entryPoint", f.EntryPoint)
 	}
+	setConstants(obj, f.Constants)
 
 	targets := newJSArray()
 	for _, t := range f.Targets {
@@ -911,12 +915,28 @@ func BuildTexelCopyBufferLayout(offset uint64, bytesPerRow, rowsPerImage uint32)
 
 // --- Compute pipeline descriptor ---
 
+// setConstants sets a GPUProgrammableStage's "constants" record, a JS object
+// from override key to value, when there are any. The values must already be
+// finite (pipeconst.Validate): the browser throws a TypeError for NaN or
+// Infinity in a WebIDL double.
+func setConstants(stage js.Value, constants map[string]float64) {
+	if len(constants) == 0 {
+		return
+	}
+	record := newJSObject()
+	for key, value := range constants {
+		record.Set(key, value)
+	}
+	stage.Set("constants", record)
+}
+
 // BuildComputePipelineDescriptor constructs a JS GPUComputePipelineDescriptor.
 func BuildComputePipelineDescriptor(
 	label string,
 	layoutRef js.Value,
 	moduleRef js.Value,
 	entryPoint string,
+	constants map[string]float64,
 ) js.Value {
 	desc := newJSObject()
 	if label != "" {
@@ -934,6 +954,7 @@ func BuildComputePipelineDescriptor(
 	if entryPoint != "" {
 		compute.Set("entryPoint", entryPoint)
 	}
+	setConstants(compute, constants)
 	desc.Set("compute", compute)
 
 	return desc
