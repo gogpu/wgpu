@@ -386,7 +386,12 @@ type VertexState struct {
 type FragmentState struct {
 	Module     *ShaderModule
 	EntryPoint string
-	Targets    []gputypes.ColorTargetState
+	// Targets describe the color attachments. A target's WriteMask is
+	// taken literally: zero (gputypes.ColorWriteMaskNone) writes nothing,
+	// so set gputypes.ColorWriteMaskAll to write every channel. A nil Blend
+	// replaces; a zero BlendComponent is the WebGPU default (srcFactor one,
+	// dstFactor zero, operation add).
+	Targets []gputypes.ColorTargetState
 }
 
 // toHAL converts a RenderPipelineDescriptor to a hal.RenderPipelineDescriptor,

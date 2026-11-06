@@ -670,9 +670,9 @@ func (c *ColorTargetStateJS) ToJS() js.Value {
 	if c.Blend != nil {
 		obj.Set("blend", c.Blend.ToJS())
 	}
-	if c.WriteMask > 0 {
-		obj.Set("writeMask", c.WriteMask)
-	}
+	// Always sent: 0 is GPUColorWrite none, not "absent" (whose default is
+	// ALL), so omitting it would write every channel.
+	obj.Set("writeMask", c.WriteMask)
 	return obj
 }
 

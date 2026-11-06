@@ -29,3 +29,19 @@ func TestBuildExtent3DExplicitZero(t *testing.T) {
 		}
 	}
 }
+
+// TestColorTargetWriteMaskZeroSent: writeMask 0 (GPUColorWrite none) must
+// reach the browser, which otherwise applies the default ALL.
+func TestColorTargetWriteMaskZeroSent(t *testing.T) {
+	for _, mask := range []uint32{0, 0x2, 0xF} {
+		c := ColorTargetStateJS{Format: "rgba8unorm", WriteMask: mask}
+		v := c.ToJS().Get("writeMask")
+		if v.IsUndefined() {
+			t.Errorf("writeMask %#x left out", mask)
+			continue
+		}
+		if got := uint32(v.Int()); got != mask {
+			t.Errorf("writeMask = %#x, want %#x", got, mask)
+		}
+	}
+}

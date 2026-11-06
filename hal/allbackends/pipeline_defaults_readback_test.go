@@ -66,6 +66,11 @@ type zeroDefaultsCase struct {
 	depthStencil *wgpu.DepthStencilState
 	depthClear   float32
 	blend        *gputypes.BlendState
+	writeMask    *gputypes.ColorWriteMask // nil: ColorWriteMaskAll
+	stencilRef   uint32
+	// wantCleared expects the cleared red at the probe: the draw must not
+	// reach the target.
+	wantCleared bool
 }
 
 func drawZeroDefaults(t *testing.T, device *wgpu.Device, c zeroDefaultsCase) {
@@ -100,6 +105,9 @@ func drawZeroDefaults(t *testing.T, device *wgpu.Device, c zeroDefaultsCase) {
 		t.Fatalf("BeginRenderPass: %v", err)
 	}
 	pass.SetPipeline(pipeline)
+	if c.stencilRef != 0 {
+		pass.SetStencilReference(c.stencilRef)
+	}
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	if err := pass.End(); err != nil {
 		t.Fatalf("End: %v", err)
@@ -121,6 +129,12 @@ func drawZeroDefaults(t *testing.T, device *wgpu.Device, c zeroDefaultsCase) {
 	words := readPublicBuffer(t, staging, depthRigWidth*depthRigHeight)
 	var px [4]byte
 	binary.LittleEndian.PutUint32(px[:], words[2*depthRigWidth+8])
+	if c.wantCleared {
+		if px[0] < 128 || px[1] > 127 || px[2] > 127 {
+			t.Fatalf("pixel (8, 2) = %v, want the cleared red: the draw reached the target", px)
+		}
+		return
+	}
 	if px[0] > 127 || px[1] < 128 || px[2] > 127 {
 		t.Fatalf("pixel (8, 2) = %v, want green: the triangle was not drawn as the spec defaults say", px)
 	}
@@ -156,6 +170,10 @@ func newZeroDefaultsPipeline(t *testing.T, device *wgpu.Device, c zeroDefaultsCa
 		t.Fatalf("CreatePipelineLayout: %v", err)
 	}
 	t.Cleanup(layout.Release)
+	mask := gputypes.ColorWriteMaskAll
+	if c.writeMask != nil {
+		mask = *c.writeMask
+	}
 	p, err := device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "zero-defaults",
 		Layout: layout,
@@ -163,7 +181,7 @@ func newZeroDefaultsPipeline(t *testing.T, device *wgpu.Device, c zeroDefaultsCa
 		Fragment: &wgpu.FragmentState{
 			Module: shader, EntryPoint: "fs",
 			Targets: []gputypes.ColorTargetState{
-				{Format: gputypes.TextureFormatRGBA8Unorm, Blend: c.blend, WriteMask: gputypes.ColorWriteMaskAll},
+				{Format: gputypes.TextureFormatRGBA8Unorm, Blend: c.blend, WriteMask: mask},
 			},
 		},
 		Primitive:    gputypes.PrimitiveState{Topology: gputypes.PrimitiveTopologyTriangleList},
