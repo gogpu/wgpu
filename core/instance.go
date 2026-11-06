@@ -312,93 +312,93 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 // candidate list. Keeping the policy independent from Instance state lets a
 // surface request select request-local adapters without exposing unqualified
 // cached adapters to the selection pass.
-func selectAdapterIDs(options *gputypes.RequestAdapterOptions, adapterIDs []AdapterID) (AdapterID, error) { //nolint:gocognit // adapter selection with GPU preference logic
+//
+// Without ForceFallbackAdapter the order is: hardware adapters (an exact
+// powerPreference match first), then CPU adapters of a GPU API such as DX12
+// WARP or Vulkan lavapipe, which JIT-compile shaders, then the software
+// backend, which interprets them. powerPreference is a hint, never a filter
+// (W3C WebGPU spec: it "must not cause requestAdapter() to fail if there is at
+// least one available adapter"), as in Rust wgpu, which ranks Cpu last.
+//
+// ForceFallbackAdapter considers CPU adapters only and prefers the software
+// backend; another CPU adapter (WARP) is chosen only when the software
+// backend is not a candidate.
+//
+// Ties keep the candidate order.
+func selectAdapterIDs(options *gputypes.RequestAdapterOptions, adapterIDs []AdapterID) (AdapterID, error) {
 	if len(adapterIDs) == 0 {
 		return AdapterID{}, fmt.Errorf("no adapters available")
 	}
 
+	rank := func(info *gputypes.AdapterInfo) int { return autoAdapterRank(info, gputypes.PowerPreferenceNone) }
+	if options != nil {
+		if options.ForceFallbackAdapter {
+			rank = fallbackAdapterRank
+		} else {
+			preference := options.PowerPreference
+			rank = func(info *gputypes.AdapterInfo) int { return autoAdapterRank(info, preference) }
+		}
+	}
+
 	hub := GetGlobal().Hub()
-
-	// If no options specified, prefer non-CPU adapters (GPU > Software fallback).
-	if options == nil {
-		for _, adapterID := range adapterIDs {
-			adapter, err := hub.GetAdapter(adapterID)
-			if err != nil {
-				continue
-			}
-			if adapter.Info.DeviceType != gputypes.DeviceTypeCPU {
-				return adapterID, nil
-			}
-		}
-		return adapterIDs[0], nil // fallback to first (Software)
-	}
-
-	// ForceFallbackAdapter: return first CPU adapter directly.
-	if options.ForceFallbackAdapter {
-		for _, adapterID := range adapterIDs {
-			adapter, err := hub.GetAdapter(adapterID)
-			if err != nil {
-				continue
-			}
-			if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
-				return adapterID, nil
-			}
-		}
-		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
-	}
-
-	// Two-pass adapter selection matching WebGPU spec:
-	// powerPreference is a HINT, not a filter. "must not cause requestAdapter()
-	// to fail if there is at least one available adapter." (W3C WebGPU spec)
-	// Matches Rust wgpu which sorts by preference, never filters.
-	var cpuFallback AdapterID
-	hasCPUFallback := false
-	var gpuFallback AdapterID
-	hasGPUFallback := false
-
-	// Pass 1: find preferred adapter + track fallbacks.
+	var best AdapterID
+	bestRank := rankExcluded
 	for _, adapterID := range adapterIDs {
 		adapter, err := hub.GetAdapter(adapterID)
 		if err != nil {
 			continue
 		}
-
-		if adapter.Info.DeviceType == gputypes.DeviceTypeCPU {
-			if !hasCPUFallback {
-				cpuFallback = adapterID
-				hasCPUFallback = true
-			}
-			continue
-		}
-
-		// Track first non-CPU adapter as GPU fallback.
-		if !hasGPUFallback {
-			gpuFallback = adapterID
-			hasGPUFallback = true
-		}
-
-		// Check power preference — return immediately on exact match.
-		if options.PowerPreference != gputypes.PowerPreferenceNone {
-			if matchesPowerPreference(adapter.Info.DeviceType, options.PowerPreference) {
-				return adapterID, nil
-			}
-		} else {
-			return adapterID, nil
+		if r := rank(&adapter.Info); r < bestRank {
+			best, bestRank = adapterID, r
 		}
 	}
-
-	// Pass 2: no exact preference match — return any GPU (fallback).
-	// E.g., HighPerformance requested but only IntegratedGPU available.
-	if hasGPUFallback {
-		return gpuFallback, nil
+	if bestRank != rankExcluded {
+		return best, nil
 	}
-
-	// Pass 3: CPU fallback (software rasterizer).
-	if hasCPUFallback {
-		return cpuFallback, nil
+	if options != nil && options.ForceFallbackAdapter {
+		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
 	}
-
 	return AdapterID{}, fmt.Errorf("no adapter matches the requested options")
+}
+
+// Adapter ranks for selectAdapterIDs; a lower rank wins.
+const (
+	rankPreferred = iota // hardware adapter matching powerPreference; the software backend under ForceFallbackAdapter
+	rankHardware         // hardware adapter of another type
+	rankCPU              // CPU adapter of a GPU API (DX12 WARP, Vulkan lavapipe, GL llvmpipe)
+	rankSoftware         // the software backend
+	rankExcluded         // never selected
+)
+
+// isSoftwareBackendAdapter reports whether info is our software backend's
+// adapter. Other CPU adapters belong to a GPU API backend (Backend DX12 for
+// WARP), which keeps them distinguishable.
+func isSoftwareBackendAdapter(info *gputypes.AdapterInfo) bool {
+	return info.Backend == gputypes.BackendEmpty && info.DeviceType == gputypes.DeviceTypeCPU
+}
+
+func autoAdapterRank(info *gputypes.AdapterInfo, preference gputypes.PowerPreference) int {
+	switch {
+	case isSoftwareBackendAdapter(info):
+		return rankSoftware
+	case info.DeviceType == gputypes.DeviceTypeCPU:
+		return rankCPU
+	case matchesPowerPreference(info.DeviceType, preference):
+		return rankPreferred
+	default:
+		return rankHardware
+	}
+}
+
+func fallbackAdapterRank(info *gputypes.AdapterInfo) int {
+	switch {
+	case isSoftwareBackendAdapter(info):
+		return rankPreferred
+	case info.DeviceType == gputypes.DeviceTypeCPU:
+		return rankCPU
+	default:
+		return rankExcluded
+	}
 }
 
 // RequestAdapterWithSurface requests an adapter matching the given options,
