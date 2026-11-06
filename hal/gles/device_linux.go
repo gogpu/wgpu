@@ -208,6 +208,10 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	}
 	defer d.ctx.Unlock()
 
+	glFormat, err := describeTextureFormat(desc.Format)
+	if err != nil {
+		return nil, err
+	}
 	id := glCtx.GenTextures(1)
 
 	sampleCount := desc.SampleCount
@@ -256,8 +260,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	glCtx.BindTexture(target, id)
 
-	// Get GL format info
-	internalFormat, format, dataType := textureFormatToGL(desc.Format)
+	internalFormat, format, dataType := glFormat.internal, glFormat.external, glFormat.dataType
 
 	// glGetError is sticky: an error left by an earlier call was reported as
 	// this allocation's failure (seen on Mesa's d3d12 driver in WSL, where the

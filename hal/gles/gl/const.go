@@ -170,6 +170,24 @@ const (
 	RGBA32I           = 0x8D82
 	RGBA32UI          = 0x8D70
 	DEPTH32F_STENCIL8 = 0x8CAD
+	R8_SNORM          = 0x8F94
+	RG8_SNORM         = 0x8F95
+	RGBA8_SNORM       = 0x8F97
+	R16               = 0x822A
+	RG16              = 0x822C
+	RGBA16            = 0x805B
+	R16_SNORM         = 0x8F98
+	RG16_SNORM        = 0x8F99
+	RGBA16_SNORM      = 0x8F9B
+	RGB10_A2          = 0x8059
+	RGB10_A2UI        = 0x906F
+	R11F_G11F_B10F    = 0x8C3A
+	RGB9_E5           = 0x8C3D
+
+	// Packed pixel types
+	UNSIGNED_INT_2_10_10_10_REV  = 0x8368
+	UNSIGNED_INT_10F_11F_11F_REV = 0x8C3B
+	UNSIGNED_INT_5_9_9_9_REV     = 0x8C3E
 
 	// Shader types
 	FRAGMENT_SHADER = 0x8B30

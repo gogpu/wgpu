@@ -6,6 +6,7 @@
 package gles
 
 import (
+	"fmt"
 	"log/slog"
 	"unsafe"
 
@@ -14,6 +15,10 @@ import (
 	"github.com/gogpu/wgpu/hal/gles/gl"
 	"github.com/gogpu/wgpu/internal/indirect"
 )
+
+// copySourceIncompleteMsg is logged when a texture-to-buffer copy is dropped
+// because its source cannot be attached to a complete read framebuffer.
+const copySourceIncompleteMsg = "gles: copy source framebuffer is incomplete, the copy is dropped"
 
 // Command represents a recorded GL command.
 type Command interface {
@@ -1588,9 +1593,15 @@ func (c *SetBindGroupCommand) Execute(ctx *gl.Context) {
 func bindStorageTexture(ctx *gl.Context, unit uint32, view *TextureView, st *gputypes.StorageTextureBindingLayout) {
 	layered := st.ViewDimension == gputypes.TextureViewDimension2DArray ||
 		st.ViewDimension == gputypes.TextureViewDimensionCubeArray
-	internalFormat, _, _ := textureFormatToGL(st.Format)
+	desc, err := describeTextureFormat(st.Format)
+	if err != nil {
+		// Unreachable through core: the bound view's format is the layout's
+		// format, and CreateTexture refuses formats without GL storage.
+		hal.Logger().Error("gles: storage texture binding of an unsupported format", "err", err)
+		return
+	}
 	ctx.BindImageTexture(unit, view.texture.id, int32(view.baseMip), layered, int32(view.baseLayer),
-		storageAccessToGL(st.Access), internalFormat)
+		storageAccessToGL(st.Access), desc.internal)
 }
 
 // storageAccessToGL maps a storage texture access to the glBindImageTexture
@@ -2070,9 +2081,12 @@ func readbackOf(format gputypes.TextureFormat, aspect gputypes.TextureAspect) (r
 	case gputypes.TextureFormatDepth24Plus:
 		return readback{}, false
 	}
-	_, dataFormat, dataType := textureFormatToGL(format)
-	bpp := glPixelBytes(dataFormat, dataType)
-	return readback{gl.COLOR_ATTACHMENT0, dataFormat, dataType, bpp}, bpp != 0
+	desc, err := describeTextureFormat(format)
+	if err != nil {
+		return readback{}, false
+	}
+	bpp := glPixelBytes(desc.external, desc.dataType)
+	return readback{gl.COLOR_ATTACHMENT0, desc.external, desc.dataType, bpp}, bpp != 0
 }
 
 // Execute reads pixels from the source texture's FBO into the destination buffer.
@@ -2168,7 +2182,16 @@ func (c *CopyTextureToBufferCommand) Execute(ctx *gl.Context) {
 // texture, so the level and layer are attached every time, as Rust wgpu-hal
 // attaches them for each copy (gles/queue.rs CopyTextureToBuffer). Reading
 // level 0 and layer 0 for every copy returned their texels for a copy of
-// another level or layer. It returns false when a new FBO is incomplete.
+// another level or layer.
+//
+// It returns false, and logs the copy as dropped, when a new FBO is
+// incomplete: glReadPixels is the only way out of a GL texture, and it needs
+// a framebuffer the format can be attached to. RGB9E5Ufloat is not
+// color-renderable on Mesa or on ES, so its copies stop here. Rust wgpu-hal
+// reads through the same FBO and has the same gap; Dawn copies such formats
+// out with a compute blit (UseBlitForRGB9E5UfloatTextureCopy), which is card
+// P2-GLES-023. Command.Execute has no error return, so the log is the only
+// report the HAL can give.
 func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, attachment, layer uint32) bool {
 	if c.srcTexture.fbo != 0 {
 		ctx.BindFramebuffer(gl.FRAMEBUFFER, c.srcTexture.fbo)
@@ -2178,8 +2201,10 @@ func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, attachment, 
 	fbo := ctx.GenFramebuffers(1)
 	ctx.BindFramebuffer(gl.FRAMEBUFFER, fbo)
 	attachColorLayer(ctx, attachment, c.srcTexture, c.mipLevel, layer)
-	if ctx.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+	if status := ctx.CheckFramebufferStatus(gl.FRAMEBUFFER); status != gl.FRAMEBUFFER_COMPLETE {
 		ctx.DeleteFramebuffers(fbo)
+		hal.Logger().Error(copySourceIncompleteMsg,
+			"format", c.srcTexture.format.String(), "status", fmt.Sprintf("0x%04X", status))
 		return false
 	}
 	c.srcTexture.fbo = fbo
@@ -2206,12 +2231,22 @@ func readGLBuffer(ctx *gl.Context, buf *Buffer) []byte {
 // glPixelBytes returns the size of one pixel that glReadPixels writes for a
 // color transfer format and type, or 0 for formats it cannot read here.
 func glPixelBytes(dataFormat, dataType uint32) uint32 {
+	switch dataType {
+	case gl.UNSIGNED_INT_2_10_10_10_REV, gl.UNSIGNED_INT_10F_11F_11F_REV, gl.UNSIGNED_INT_5_9_9_9_REV:
+		// Packed types hold the whole pixel in one 32-bit word.
+		if dataFormat == gl.RGB || dataFormat == gl.RGBA || dataFormat == gl.RGBA_INTEGER {
+			return 4
+		}
+		return 0
+	}
 	var components uint32
 	switch dataFormat {
 	case gl.RED, gl.RED_INTEGER:
 		components = 1
 	case gl.RG, gl.RG_INTEGER:
 		components = 2
+	case gl.RGB, gl.RGB_INTEGER:
+		components = 3
 	case gl.RGBA, gl.BGRA, gl.RGBA_INTEGER:
 		components = 4
 	default:
@@ -2253,7 +2288,13 @@ func (c *CopyBufferToTextureCommand) Execute(ctx *gl.Context) {
 		return
 	}
 
-	_, format, dataType := textureFormatToGL(c.dstTex.format)
+	desc, err := describeTextureFormat(c.dstTex.format)
+	if err != nil {
+		// Unreachable for a texture CreateTexture made: it refuses the format.
+		hal.Logger().Error("gles: CopyBufferToTexture into a texture of an unsupported format", "err", err)
+		return
+	}
+	format, dataType := desc.external, desc.dataType
 
 	// Bind source buffer as pixel unpack buffer (PBO).
 	ctx.BindBuffer(gl.PIXEL_UNPACK_BUFFER, c.srcBuffer.id)
