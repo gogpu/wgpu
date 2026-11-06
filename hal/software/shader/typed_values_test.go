@@ -16,12 +16,11 @@ import (
 
 // Tests for ADR-078: integer and boolean vectors hold their exact lanes.
 //
-// Rows with a wrongToday output document a defect of the float-lane value
-// model and the ADR-078 migration step that fixes it. expectCurrent passes
-// while the interpreter still gives that wrong output and fails the moment
-// it gives the right one, so the step that fixes a row must flip it to a
-// plain assertion. Rows without wrongToday are right today and must stay
-// right through every step.
+// Rows with a step were wrong under the float-lane value model: each held
+// that wrong output as an expected failure until the ADR-078 migration step
+// named there fixed it and flipped the row to a plain assertion. Rows
+// without a step were right before the migration and stayed right through
+// it.
 
 // compileSoftwareSPIRV compiles wgsl with the SPIR-V options the software
 // backend uses (hal/software spirvOptions: SPIR-V 1.3, Restrict index,
@@ -55,32 +54,17 @@ func compileSoftwareSPIRV(t testing.TB, wgsl string) *Module {
 	return m
 }
 
-// expectCurrent checks a row that is wrong today: it passes while got equals
-// the measured wrong output and fails once got equals want ("fixed early")
-// or anything else.
-func expectCurrent(t *testing.T, got, wrongToday, want []uint32, step int) {
-	t.Helper()
-	switch {
-	case slices.Equal(got, wrongToday):
-	case slices.Equal(got, want):
-		t.Errorf("fixed early: flip to want %v (step %d)", want, step)
-	default:
-		t.Errorf("got %v, neither today's wrong output %v nor want %v (step %d)", got, wrongToday, want, step)
-	}
-}
-
 // typedCase is one compute shader: src at @binding(0), dst at @binding(1),
 // an optional texture at @binding(2) and sampler at @binding(3).
 type typedCase struct {
-	name       string
-	wgsl       string
-	src        []uint32
-	dstLen     int
-	want       []uint32
-	wrongToday []uint32 // the output today; nil when today is already right
-	step       int      // the ADR-078 migration step that fixes the row
-	tex        *Texture2D
-	smp        *Sampler
+	name   string
+	wgsl   string
+	src    []uint32
+	dstLen int
+	want   []uint32
+	step   int // the ADR-078 migration step that fixed the row; 0 if it was right before
+	tex    *Texture2D
+	smp    *Sampler
 }
 
 func wordsToBytes(words []uint32) []byte {
@@ -135,10 +119,6 @@ func checkTypedCases(t *testing.T, cases []typedCase) {
 		c := &cases[i]
 		t.Run(c.name, func(t *testing.T) {
 			got := runTypedCase(t, c)
-			if c.wrongToday != nil {
-				expectCurrent(t, got, c.wrongToday, c.want, c.step)
-				return
-			}
 			if !slices.Equal(got, c.want) {
 				t.Errorf("got %v, want %v", got, c.want)
 			}

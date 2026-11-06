@@ -87,6 +87,18 @@ func tagTable() map[ValueTag]tagCase {
 	}
 }
 
+// TestValueSize pins the size of Value that its doc comment states. Every
+// SSA result, variable and lane pool holds Values, so growing the struct is a
+// cost the interpreter's benchmarks pay on every instruction.
+func TestValueSize(t *testing.T) {
+	if unsafe.Sizeof(uintptr(0)) != 8 {
+		t.Skip("the documented size is for 64-bit targets")
+	}
+	if got := unsafe.Sizeof(Value{}); got != 48 {
+		t.Errorf("unsafe.Sizeof(Value{}) = %d, want 48 (update the Value doc comment and the ADR-078 cost notes)", got)
+	}
+}
+
 // TestValueTagTable runs a value of every tag through each boundary
 // function: a tag one of them drops (writes nothing, sizes wrong, prints
 // nothing, loses a lane) fails here. A new tag without a table entry fails

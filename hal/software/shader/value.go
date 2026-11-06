@@ -640,9 +640,11 @@ func scalarOfKind(k laneKind, w uint32) Value {
 }
 
 // laneWord returns the raw word a scalar stores into a lane of kind k: the
-// bits of a u32 or i32, 0 or 1 for a bool. A float scalar converts by value
-// (an f32 lane takes its bits), the representation integer components had
-// before the typed value model.
+// bits of a u32, i32 or f32, 0 or 1 for a bool. An f32 lane given an integer
+// scalar takes the integer's value as a float. An integer lane given an f32
+// takes its bits: the raw-word model never converts a float to an integer by
+// value outside OpConvertFToU and OpConvertFToS (ADR-078), and valid SPIR-V
+// never puts a float scalar into an integer lane.
 func laneWord(k laneKind, v Value) uint32 {
 	switch k {
 	case kindBool:
@@ -654,7 +656,7 @@ func laneWord(k laneKind, v Value) uint32 {
 		return math.Float32bits(toFloat32(v))
 	}
 	if v.Tag == TagFloat32 {
-		return laneBits(v.F[0], k == kindSint)
+		return math.Float32bits(v.F[0])
 	}
 	return toUint32(v)
 }

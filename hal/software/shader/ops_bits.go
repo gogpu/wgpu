@@ -29,22 +29,6 @@ func mapIntLanes(s shape, v Value, f func(uint32) uint32) Value {
 	return laneValue(k, n, w)
 }
 
-// laneBits returns the 32-bit pattern of an integer held as a float lane,
-// saturated to the range of the type: float32 rounds the largest u32 and
-// i32 values past it (0xFFFFFFFF to 2^32), and a plain conversion would wrap
-// them or leave them implementation-defined. No float-held integer is NaN;
-// NaN gives 0.
-func laneBits(f float32, signed bool) uint32 {
-	d := float64(f)
-	if d != d {
-		return 0
-	}
-	if signed {
-		return uint32(int32(max(math.MinInt32, min(math.MaxInt32, d))))
-	}
-	return uint32(max(0, min(math.MaxUint32, d)))
-}
-
 // bitcast implements OpBitcast between 32-bit integer and float scalars and
 // vectors: the source's bits under the result shape s (or, when s is zero,
 // the shape of dstTypeID), so later stores and arithmetic see an integer as

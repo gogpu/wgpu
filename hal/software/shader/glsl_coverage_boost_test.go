@@ -40,14 +40,14 @@ func TestGLSLCoverageBoostEdges(t *testing.T) {
 	})
 
 	t.Run("uint32_pair_paths", func(t *testing.T) {
-		lo, hi := uint32Pair(ValVec2(1, 2))
-		if lo != 1 || hi != 2 {
-			t.Fatalf("%d %d", lo, hi)
+		lo, hi := uint32Pair(ValUVec(2, [4]uint32{0xFFFFFFFF, 1<<24 + 1}))
+		if lo != 0xFFFFFFFF || hi != 1<<24+1 {
+			t.Fatalf("uvec2: %#x %#x", lo, hi)
 		}
-		v := Value{Tag: TagUint32, U: [4]uint32{9, 8}}
-		lo, hi = uint32Pair(v)
-		if lo != 9 || hi != 8 {
-			t.Fatalf("%d %d", lo, hi)
+		// A float vector reads as its bits, never by value.
+		lo, hi = uint32Pair(ValVec2(1, 2))
+		if lo != math.Float32bits(1) || hi != math.Float32bits(2) {
+			t.Fatalf("vec2: %#x %#x", lo, hi)
 		}
 	})
 
@@ -143,14 +143,12 @@ func TestGLSLCoverageBoostEdges(t *testing.T) {
 	})
 
 	t.Run("exp_component", func(t *testing.T) {
-		if expComponent(ValArray(nil), 0) != 0 {
-			t.Fatal()
+		exp := ValIVec(2, [4]int32{1, -2})
+		if expComponent(exp, 1) != -2 {
+			t.Fatal("ivec2 lane 1")
 		}
-		if expComponent(ValArray([]Value{ValInt(3)}), 5) != 3 {
-			t.Fatal("broadcast")
-		}
-		if expComponent(ValArray([]Value{ValInt(1), ValInt(2)}), 1) != 2 {
-			t.Fatal()
+		if expComponent(exp, 5) != 1 {
+			t.Fatal("past the lanes: lane 0")
 		}
 		if expComponent(ValVec2(4, 5), 1) != 5 {
 			t.Fatal()
@@ -168,7 +166,7 @@ func TestGLSLCoverageBoostEdges(t *testing.T) {
 			10: ValVec3(0.5, 0.5, 0.5),
 			11: ValInt(2),
 			12: ValVec4(0.5, 0.5, 0.5, 0.5),
-			13: ValArray([]Value{ValInt(1), ValInt(2), ValInt(3), ValInt(4)}),
+			13: ValIVec(4, [4]int32{1, 2, 3, 4}),
 		})
 		got := interp.executeGLSLExtInst(GLSLLdexp, []uint32{10, 11})
 		if got.AsVec3()[0] != 2 {

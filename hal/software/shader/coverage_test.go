@@ -151,9 +151,10 @@ func TestLanePoolAllForms(t *testing.T) {
 
 	var q lanePool
 	q.add(ValUVec(2, [4]uint32{0xFFFFFFFF, 1<<24 + 1}), kindUint)
-	q.add(ValArray([]Value{ValUint(7), ValUint(8)}), kindUint)
-	q.add(ValVec2(9, 10), kindUint) // the old float-held form
-	want = []uint32{0xFFFFFFFF, 1<<24 + 1, 7, 8, 9, 10}
+	q.add(ValInt(-2), kindUint)
+	q.add(ValVec2(9, 10), kindUint)                // a float lane gives its bits, never its value
+	q.add(ValArray([]Value{ValUint(7)}), kindUint) // an aggregate has no lanes: one zero
+	want = []uint32{0xFFFFFFFF, 1<<24 + 1, 0xFFFFFFFE, math.Float32bits(9), math.Float32bits(10), 0}
 	if q.n != len(want) {
 		t.Fatalf("uint pool has %d lanes, want %d", q.n, len(want))
 	}

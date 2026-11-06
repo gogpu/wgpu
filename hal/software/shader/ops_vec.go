@@ -12,31 +12,23 @@ import "math"
 // the result, the same code for a scalar (one lane) and a vector.
 
 // laneWords returns the lanes of v as raw words of kind k. An integer or
-// bool scalar or vector gives its words as they are. A float scalar or
-// vector, and an array of scalars, are the forms integer vectors took before
-// the typed value model: their lanes convert by value (laneWord).
+// bool scalar or vector gives its words as they are; a float scalar or
+// vector gives the words laneWord stores for each lane (its bits, or 0 or 1
+// for a bool lane). Any other value has no lanes and gives zeros.
 func laneWords(v Value, k laneKind) [4]uint32 {
 	switch vectorKind(v.Tag) {
 	case kindUint, kindSint, kindBool:
 		return v.U
 	}
-	return convertedWords(v, k)
+	return floatWords(v, k)
 }
 
-// convertedWords is laneWords for a float scalar or vector or an array.
-func convertedWords(v Value, k laneKind) [4]uint32 {
+// floatWords is laneWords for a float scalar or vector.
+func floatWords(v Value, k laneKind) [4]uint32 {
 	var w [4]uint32
-	switch v.Tag {
-	case TagFloat32, TagVec2, TagVec3, TagVec4:
+	if vectorKind(v.Tag) == kindFloat {
 		for i := range vectorLanes(v.Tag) {
 			w[i] = laneWord(k, ValFloat(v.F[i]))
-		}
-	case TagArray:
-		for i, e := range v.AsArray() {
-			if i == len(w) {
-				break
-			}
-			w[i] = laneWord(k, e)
 		}
 	}
 	return w
@@ -372,7 +364,7 @@ type lanePool struct {
 }
 
 // add appends the lanes of v: a scalar gives one, a vector each of its
-// lanes, an array of scalars (the old integer vector form) each element.
+// lanes. A value with no lanes (an aggregate) gives one zero word.
 func (p *lanePool) add(v Value, k laneKind) {
 	vk := vectorKind(v.Tag)
 	switch {
@@ -387,10 +379,6 @@ func (p *lanePool) add(v Value, k laneKind) {
 	case vk != kindNone:
 		for i := range vectorLanes(v.Tag) {
 			p.put(laneWord(k, indexLane(v, i)))
-		}
-	case v.Tag == TagArray:
-		for _, e := range v.AsArray() {
-			p.put(laneWord(k, e))
 		}
 	default:
 		p.put(0)

@@ -165,10 +165,9 @@ func TestVectorShuffleOfIntegerVector(t *testing.T) {
 	if xyz := imageCoord3(id); xyz != [3]int{3, 1<<24 + 1, 7} {
 		t.Errorf("imageCoord3 = %v, want [3 2^24+1 7]", xyz)
 	}
-	// The array form integer vectors took before still reads.
-	arr := ValArray([]Value{ValUint(3), ValUint(5), ValUint(7)})
-	if xyz := imageCoord3(arr); xyz != [3]int{3, 5, 7} {
-		t.Errorf("imageCoord3(array) = %v, want [3 5 7]", xyz)
+	// A signed coordinate keeps its sign.
+	if xyz := imageCoord3(ValIVec(3, [4]int32{-1, 5, -7})); xyz != [3]int{-1, 5, -7} {
+		t.Errorf("imageCoord3(ivec3(-1, 5, -7)) = %v, want [-1 5 -7]", xyz)
 	}
 }
 

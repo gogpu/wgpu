@@ -62,7 +62,7 @@ func TestPackUnpackDouble2x32(t *testing.T) {
 	bits := math.Float64bits(f)
 	lo := uint32(bits)
 	hi := uint32(bits >> 32)
-	packed := packDouble2x32(ValArray([]Value{ValUint(lo), ValUint(hi)}))
+	packed := packDouble2x32(ValUVec(2, [4]uint32{lo, hi}))
 	if packed.Tag != TagFloat64 || math.Abs(packed.AsFloat64()-f) > 1e-12 {
 		t.Fatalf("PackDouble2x32 = %v", packed.AsFloat64())
 	}

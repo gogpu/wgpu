@@ -128,15 +128,6 @@ func splitFrexp(x Value) (significand, exponent Value) {
 // expComponent returns the integer exponent at component i, broadcasting scalars.
 func expComponent(exp Value, i int) int {
 	switch exp.Tag {
-	case TagArray:
-		arr := exp.AsArray()
-		if len(arr) == 0 {
-			return 0
-		}
-		if i < len(arr) {
-			return int(int32(toUint32(arr[i])))
-		}
-		return int(int32(toUint32(arr[0])))
 	case TagVec2, TagVec3, TagVec4:
 		if i >= 0 && i < 4 {
 			return int(exp.F[i])
