@@ -729,6 +729,7 @@ func BuildCommandEncoderDescriptor(label string) js.Value {
 type RenderPassColorAttachmentJS struct {
 	View          js.Value // GPUTextureView
 	ResolveTarget js.Value // GPUTextureView or js.Undefined()
+	DepthSlice    *uint32  // depthSlice; nil leaves the member absent (undefined)
 	LoadOp        string   // "load" or "clear"
 	StoreOp       string   // "store" or "discard"
 	ClearR        float64
@@ -780,6 +781,12 @@ func BuildRenderPassDescriptor(
 
 		if !ca.ResolveTarget.IsUndefined() && !ca.ResolveTarget.IsNull() {
 			att.Set("resolveTarget", ca.ResolveTarget)
+		}
+
+		// Any value is passed as given, 0xFFFFFFFF included: the browser
+		// validates it, and only an absent member means undefined.
+		if ca.DepthSlice != nil {
+			att.Set("depthSlice", *ca.DepthSlice)
 		}
 
 		arr.Call("push", att)

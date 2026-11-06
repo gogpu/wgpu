@@ -807,5 +807,15 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	return &TextureView{hal: halView, device: st.device, texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease}, nil
+	// A surface texture is a single-layer 2D texture with one mip level.
+	view := &TextureView{hal: halView, device: st.device, texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease,
+		dimension: gputypes.TextureViewDimension2D}
+	if halDesc != nil {
+		view.dimension = resolveViewDimension(nil, halDesc.Dimension)
+		if view.dimension == gputypes.TextureViewDimensionUndefined {
+			view.dimension = gputypes.TextureViewDimension2D
+		}
+		view.baseMipLevel = halDesc.BaseMipLevel
+	}
+	return view, nil
 }

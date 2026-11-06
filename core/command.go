@@ -1054,6 +1054,18 @@ func (e *CoreCommandEncoder) statusError(operation string) error {
 	return ese
 }
 
+// copyDepthSlice returns a copy of a color attachment's depth slice, so the
+// HAL descriptor does not alias memory the caller may reuse after
+// BeginRenderPass returns. nil stays nil; every other value, 0xFFFFFFFF
+// included, is kept as given.
+func copyDepthSlice(slice *uint32) *uint32 {
+	if slice == nil {
+		return nil
+	}
+	v := *slice
+	return &v
+}
+
 // convertRenderPassDescriptor converts a core descriptor to HAL descriptor.
 func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescriptor) *hal.RenderPassDescriptor {
 	halDesc := &hal.RenderPassDescriptor{
@@ -1066,6 +1078,7 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 			LoadOp:     ca.LoadOp,
 			StoreOp:    ca.StoreOp,
 			ClearValue: ca.ClearValue,
+			DepthSlice: copyDepthSlice(ca.DepthSlice),
 		}
 		if ca.View != nil {
 			halCA.View = ca.View.HAL
@@ -1296,6 +1309,14 @@ type RenderPassColorAttachment struct {
 
 	// ResolveTarget is the MSAA resolve target (optional).
 	ResolveTarget *TextureView
+
+	// DepthSlice is the slice of a 3D view to render to (WebGPU
+	// GPURenderPassColorAttachment.depthSlice). Required for a 3D view, where
+	// it must be less than the depth of the view's base mip level; must be nil
+	// for any other view. Every non-nil value is validated, including
+	// 0xFFFFFFFF (webgpu.h WGPU_DEPTH_SLICE_UNDEFINED): only nil means
+	// undefined.
+	DepthSlice *uint32
 
 	// LoadOp specifies what to do at pass start.
 	LoadOp gputypes.LoadOp
