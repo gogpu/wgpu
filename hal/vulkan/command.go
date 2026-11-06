@@ -1076,12 +1076,8 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 		fbKey.ViewCount++
 
 		// Clear value for color attachment
-		clearValues = append(clearValues, vk.ClearValueColor(
-			float32(ca.ClearValue.R),
-			float32(ca.ClearValue.G),
-			float32(ca.ClearValue.B),
-			float32(ca.ClearValue.A),
-		))
+		colorClear := makeVkClearColor(view, ca.ClearValue)
+		clearValues = append(clearValues, colorClear)
 
 		if hasMSAAResolve {
 			// Framebuffer: resolve view (immediately after color)
@@ -1089,12 +1085,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.Ren
 			fbKey.ViewCount++
 
 			// Clear value for resolve attachment.
-			clearValues = append(clearValues, vk.ClearValueColor(
-				float32(ca.ClearValue.R),
-				float32(ca.ClearValue.G),
-				float32(ca.ClearValue.B),
-				float32(ca.ClearValue.A),
-			))
+			clearValues = append(clearValues, colorClear)
 		}
 	}
 
@@ -1875,6 +1866,28 @@ func arrayLayerCountOrRemaining(count uint32) uint32 {
 		return vk.RemainingArrayLayers
 	}
 	return count
+}
+
+// makeVkClearColor is the VkClearColorValue of a color attachment: the
+// float32, int32 or uint32 member by the sample type of the view's format
+// (Rust wgpu-hal vulkan/conv.rs make_vk_clear_color). Writing the float
+// member for an integer target cleared it to the float's bit pattern: an
+// RG32Sint clear to 5 read back 0x40a00000.
+func makeVkClearColor(view *TextureView, c gputypes.Color) vk.ClearValue {
+	format := gputypes.TextureFormatUndefined
+	if view.texture != nil {
+		format = view.texture.format
+	}
+	switch hal.ClearColorSampleType(format) {
+	case gputypes.TextureSampleTypeSint:
+		v := hal.ClearColorInt32(c)
+		return vk.ClearValueColorInt32(v[0], v[1], v[2], v[3])
+	case gputypes.TextureSampleTypeUint:
+		v := hal.ClearColorUint32(c)
+		return vk.ClearValueColorUint32(v[0], v[1], v[2], v[3])
+	default:
+		return vk.ClearValueColor(float32(c.R), float32(c.G), float32(c.B), float32(c.A))
+	}
 }
 
 func loadOpToVk(op gputypes.LoadOp) vk.AttachmentLoadOp {
