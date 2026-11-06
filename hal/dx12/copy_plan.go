@@ -57,39 +57,25 @@ func textureBlockInfoForCopy(format gputypes.TextureFormat, aspect gputypes.Text
 	if !ok || bytes == 0 {
 		return textureBlockInfo{}, false
 	}
-	if textureFormatIsBC(format) {
-		return textureBlockInfo{width: 4, height: 4, bytes: bytes}, true
-	}
-	return textureBlockInfo{width: 1, height: 1, bytes: bytes}, true
+	width, height := format.BlockDimensions()
+	return textureBlockInfo{width: width, height: height, bytes: bytes}, true
 }
 
-func textureFormatIsBC(format gputypes.TextureFormat) bool {
-	switch format {
-	case gputypes.TextureFormatBC1RGBAUnorm,
-		gputypes.TextureFormatBC1RGBAUnormSrgb,
-		gputypes.TextureFormatBC2RGBAUnorm,
-		gputypes.TextureFormatBC2RGBAUnormSrgb,
-		gputypes.TextureFormatBC3RGBAUnorm,
-		gputypes.TextureFormatBC3RGBAUnormSrgb,
-		gputypes.TextureFormatBC4RUnorm,
-		gputypes.TextureFormatBC4RSnorm,
-		gputypes.TextureFormatBC5RGUnorm,
-		gputypes.TextureFormatBC5RGSnorm,
-		gputypes.TextureFormatBC6HRGBUfloat,
-		gputypes.TextureFormatBC6HRGBFloat,
-		gputypes.TextureFormatBC7RGBAUnorm,
-		gputypes.TextureFormatBC7RGBAUnormSrgb:
-		return true
-	default:
-		return false
-	}
+// blockRowsOf is the number of block rows that texelRows texel rows span.
+func (info textureBlockInfo) blockRowsOf(texelRows uint32) uint32 {
+	return uint32((uint64(texelRows) + uint64(info.height) - 1) / uint64(info.height))
 }
 
-func textureFormatBlockHeight(format gputypes.TextureFormat) uint32 {
-	if info, ok := textureBlockInfoForCopy(format, gputypes.TextureAspectAll); ok {
-		return info.height
+// imageBlockRows is the block rows between images of a buffer layout: its
+// RowsPerImage, which counts block rows (hal.ImageDataLayout), or the copy's
+// own block rows when it is 0. ok is false when RowsPerImage is smaller than
+// the copy, as WebGPU's linear texture data validation rejects.
+func (info textureBlockInfo) imageBlockRows(rowsPerImage, copyHeight uint32) (uint32, bool) {
+	copyRows := info.blockRowsOf(copyHeight)
+	if rowsPerImage == 0 {
+		return copyRows, true
 	}
-	return 1
+	return rowsPerImage, rowsPerImage >= copyRows
 }
 
 func alignUint32(value, alignment uint32) (uint32, bool) {
@@ -205,14 +191,10 @@ func normalizedCopyLayout(texture *Texture, aspect gputypes.TextureAspect, layou
 	} else if uint64(rowPitch) < minRowBytes64 || rowPitch%d3d12TexturePitchAlignment != 0 {
 		return textureBlockInfo{}, 0, 0, false
 	}
-	rowsPerImage := layout.RowsPerImage
-	if rowsPerImage == 0 {
-		rowsPerImage = size.Height
-	}
-	if rowsPerImage < size.Height {
+	blockRows, ok := info.imageBlockRows(layout.RowsPerImage, size.Height)
+	if !ok {
 		return textureBlockInfo{}, 0, 0, false
 	}
-	blockRows := (rowsPerImage + info.height - 1) / info.height
 	return info, rowPitch, blockRows, true
 }
 
@@ -245,15 +227,12 @@ func writeTextureNativeLayout(texture *Texture, aspect gputypes.TextureAspect, l
 	}
 	nativeLayout := layout
 	nativeLayout.BytesPerRow = nativeRowPitch
-	sourceRowsPerImage := layout.RowsPerImage
-	if sourceRowsPerImage == 0 {
-		sourceRowsPerImage = size.Height
-	}
-	if sourceRowsPerImage < size.Height {
+	sourceBlockRows, ok := info.imageBlockRows(layout.RowsPerImage, size.Height)
+	if !ok {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
-	sourceBlockRows := (sourceRowsPerImage + info.height - 1) / info.height
-	nativeLayout.RowsPerImage = size.Height
+	// The staging copy packs the images tightly: no source padding rows.
+	nativeLayout.RowsPerImage = info.blockRowsOf(size.Height)
 	if _, _, _, valid := normalizedCopyLayout(texture, aspect, nativeLayout, size); !valid {
 		return textureBlockInfo{}, hal.ImageDataLayout{}, 0, 0, false
 	}
