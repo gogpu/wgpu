@@ -53,6 +53,15 @@ var overrideBackends = []overrideBackend{
 // TestParameters::downlevel_flags (e.g. Mesa d3d12 GL in WSL has no compute).
 func forEachOverrideBackend(t *testing.T, required gputypes.DownlevelFlags, fn func(t *testing.T, device *wgpu.Device)) {
 	t.Helper()
+	forEachOverrideBackendFeatures(t, required, 0, fn)
+}
+
+// forEachOverrideBackendFeatures is forEachOverrideBackend with the device
+// also enabling those of the optional features its adapter supports; fn
+// checks device.Features() for the ones it needs.
+func forEachOverrideBackendFeatures(t *testing.T, required gputypes.DownlevelFlags, optional gputypes.Features,
+	fn func(t *testing.T, device *wgpu.Device)) {
+	t.Helper()
 	for _, b := range overrideBackends {
 		t.Run(b.name, func(t *testing.T) {
 			// DX12 reads the variable when the device is created.
@@ -61,23 +70,26 @@ func forEachOverrideBackend(t *testing.T, required gputypes.DownlevelFlags, fn f
 			} else {
 				t.Setenv("GOGPU_DX12_DXIL", "0")
 			}
-			fn(t, openOverrideDevice(t, b, required))
+			// Low power picks the integrated GPU on a hybrid machine.
+			// TestOverridesAllAdapters covers the other adapters.
+			device, _ := openBackendDeviceFeatures(t, b, required, optional, gputypes.PowerPreferenceLowPower)
+			fn(t, device)
 		})
 	}
-}
-
-func openOverrideDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags) *wgpu.Device {
-	t.Helper()
-	// Low power picks the integrated GPU on a hybrid machine.
-	// TestOverridesAllAdapters covers the other adapters.
-	device, _ := openBackendDevice(t, b, required, gputypes.PowerPreferenceLowPower)
-	return device
 }
 
 // openBackendDevice opens a device of backend b on the adapter the power
 // preference selects and returns it with the adapter name; it skips the test
 // when the backend has no such adapter.
 func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags, pref gputypes.PowerPreference) (*wgpu.Device, string) {
+	t.Helper()
+	return openBackendDeviceFeatures(t, b, required, 0, pref)
+}
+
+// openBackendDeviceFeatures is openBackendDevice with the device also
+// enabling those of the optional features the adapter supports.
+func openBackendDeviceFeatures(t *testing.T, b overrideBackend, required gputypes.DownlevelFlags, optional gputypes.Features,
+	pref gputypes.PowerPreference) (*wgpu.Device, string) {
 	t.Helper()
 	var flags gputypes.InstanceFlags
 	if b.backend == gputypes.BackendVulkan && !b.software {
@@ -106,7 +118,7 @@ func openBackendDevice(t *testing.T, b overrideBackend, required gputypes.Downle
 		t.Skipf("%s lacks required downlevel flags %#x", info.Name, uint32(missing))
 	}
 
-	device, err := adapter.RequestDevice(nil)
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{RequiredFeatures: optional & adapter.Features()})
 	if err != nil {
 		t.Skipf("RequestDevice: %v", err)
 	}

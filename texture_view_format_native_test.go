@@ -189,6 +189,31 @@ func TestDepthStencilBufferCopiesNeedDownlevelFlag(t *testing.T) {
 			err := device.Queue().WriteTexture(&ImageCopyTexture{Texture: tex}, make([]byte, 1024), &layout, &size)
 			requireMissingDownlevelFlags(t, err, tt.want)
 		})
+		// The readbacks: GLES ES does not report the flag, so its
+		// CopyTextureToBuffer of depth or stencil must fail here, never
+		// reach the backend.
+		for _, format := range []gputypes.TextureFormat{gputypes.TextureFormatStencil8, gputypes.TextureFormatDepth32Float} {
+			t.Run(format.String()+" texture to buffer, "+tt.name, func(t *testing.T) {
+				device := newDownlevelDevice(t, tt.flag)
+				tex, err := device.CreateTexture(&TextureDescriptor{
+					Size: size, MipLevelCount: 1, SampleCount: 1, Dimension: TextureDimension2D,
+					Format: format, Usage: TextureUsageCopySrc,
+				})
+				if err != nil {
+					t.Fatalf("CreateTexture: %v", err)
+				}
+				t.Cleanup(tex.Release)
+				enc, err := device.CreateCommandEncoder(nil)
+				if err != nil {
+					t.Fatalf("CreateCommandEncoder: %v", err)
+				}
+				defer enc.DiscardEncoding()
+				enc.CopyTextureToBuffer(tex, copyBuffer(device),
+					[]BufferTextureCopy{{BufferLayout: layout, Size: size}})
+				_, err = enc.Finish()
+				requireMissingDownlevelFlags(t, err, tt.want)
+			})
+		}
 	}
 }
 
