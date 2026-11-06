@@ -70,10 +70,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	defer pinner.Unpin()
 	pinner.Pin(&vertexEntryBytes[0])
 
-	// The HAL render stages carry no pipeline constants yet: the public
-	// VertexState/FragmentState have no Constants field. Overrides take their
-	// defaults.
-	vertexHandle, temp, err := d.compileStage(vertexModule, ir.StageVertex, entryPointVertex, nil, true)
+	vertexHandle, temp, err := d.compileStage(vertexModule, ir.StageVertex, entryPointVertex, desc.Vertex.Constants, true)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +102,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		fragmentEntryBytes = append([]byte(entryPointFragment), 0)
 		pinner.Pin(&fragmentEntryBytes[0])
 
-		fragmentHandle, temp, err := d.compileStage(fragmentModule, ir.StageFragment, entryPointFragment, nil, true)
+		fragmentHandle, temp, err := d.compileStage(fragmentModule, ir.StageFragment, entryPointFragment, desc.Fragment.Constants, true)
 		if err != nil {
 			return nil, err
 		}

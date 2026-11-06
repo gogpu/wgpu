@@ -645,6 +645,10 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}
 	resolveDepthCompare(halDesc.DepthStencil) // after validation: its absence is checked there
 
+	if err := validateRenderStageOverrides(desc); err != nil {
+		return nil, err
+	}
+
 	halPipeline, err := halDevice.CreateRenderPipeline(halDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
@@ -712,6 +716,36 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		writesStencil:         writesStencil,
 		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
 	}, nil
+}
+
+// validateRenderStageOverrides applies the pipeline constants of the vertex
+// and the fragment stage to the overrides of each stage's entry point, as
+// validateComputeShader does for compute: an unknown key, a value out of the
+// override's range or an override the entry point uses with no value and no
+// default is a *core.CreateRenderPipelineError whose Cause is naga's error.
+// A module without IR (SPIR-V) is not checked.
+func validateRenderStageOverrides(desc *RenderPipelineDescriptor) error {
+	if _, _, _, err := desc.Vertex.Module.specializedEntryPoint(ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants); err != nil {
+		return &core.CreateRenderPipelineError{
+			Kind:  core.CreateRenderPipelineErrorPipelineConstants,
+			Label: desc.Label,
+			Stage: "vertex",
+			Cause: err,
+		}
+	}
+	fs := desc.Fragment
+	if fs == nil {
+		return nil
+	}
+	if _, _, _, err := fs.Module.specializedEntryPoint(ir.StageFragment, fs.EntryPoint, fs.Constants); err != nil {
+		return &core.CreateRenderPipelineError{
+			Kind:  core.CreateRenderPipelineErrorPipelineConstants,
+			Label: desc.Label,
+			Stage: "fragment",
+			Cause: err,
+		}
+	}
+	return nil
 }
 
 // fragmentBindingSizes returns the binding sizes of the fragment entry

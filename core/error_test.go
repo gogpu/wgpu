@@ -670,6 +670,11 @@ func TestCreateRenderPipelineError_AllKinds(t *testing.T) {
 			wantSub: "used by more than one attribute",
 		},
 		{
+			name:    "PipelineConstants",
+			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorPipelineConstants, Label: "rp-constants", Stage: "fragment", Cause: errors.New("bad constant")},
+			wantSub: `render pipeline "rp-constants": fragment stage: bad constant`,
+		},
+		{
 			name:    "HAL",
 			err:     &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorHAL, Label: "rp12", HALError: halErr},
 			wantSub: "HAL error",
@@ -700,6 +705,11 @@ func TestCreateRenderPipelineError_Unwrap(t *testing.T) {
 	e := &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorHAL, HALError: halErr}
 	if !errors.Is(e.Unwrap(), halErr) {
 		t.Error("Unwrap() did not return HALError")
+	}
+	cause := errors.New("bad constant")
+	e = &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorPipelineConstants, Stage: "vertex", Cause: cause}
+	if !errors.Is(e, cause) {
+		t.Error("errors.Is did not reach Cause")
 	}
 }
 

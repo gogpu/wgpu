@@ -2587,12 +2587,10 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			pipelineLayout = pl
 		}
 	}
-	// The HAL render stages carry no pipeline constants yet: overrides take
-	// their defaults.
 	var vsBytecode, psBytecode []byte
 	if desc.Vertex.Module != nil {
 		if sm, ok := desc.Vertex.Module.(*ShaderModule); ok {
-			bc, err := d.stageBytecode(sm, pipelineLayout, ir.StageVertex, desc.Vertex.EntryPoint, nil)
+			bc, err := d.stageBytecode(sm, pipelineLayout, ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants)
 			if err != nil {
 				return nil, fmt.Errorf("dx12: vertex shader compilation failed: %w", err)
 			}
@@ -2601,7 +2599,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 	if desc.Fragment != nil && desc.Fragment.Module != nil {
 		if sm, ok := desc.Fragment.Module.(*ShaderModule); ok {
-			bc, err := d.stageBytecode(sm, pipelineLayout, ir.StageFragment, desc.Fragment.EntryPoint, nil)
+			bc, err := d.stageBytecode(sm, pipelineLayout, ir.StageFragment, desc.Fragment.EntryPoint, desc.Fragment.Constants)
 			if err != nil {
 				return nil, fmt.Errorf("dx12: fragment shader compilation failed: %w", err)
 			}

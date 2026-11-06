@@ -404,8 +404,8 @@ const (
 )
 
 // TestOverrideRenderStages renders with overrides in the vertex and the
-// fragment stage of one shader module, with their defaults (the public render
-// stages have no pipeline constants), and checks a pixel.
+// fragment stage of one shader module, with their defaults, and checks a
+// pixel. TestRenderStageConstants sets them through pipeline constants.
 func TestOverrideRenderStages(t *testing.T) {
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
 		want := [4]byte{0, 255, 0, 255}
@@ -425,6 +425,13 @@ func TestOverrideRenderStages(t *testing.T) {
 // pixel (0,0). The copy is a second submission.
 func renderAndRead(t *testing.T, device *wgpu.Device, wgsl string) [4]byte {
 	t.Helper()
+	return renderAndReadConstants(t, device, wgsl, nil, nil)
+}
+
+// renderAndReadConstants is renderAndRead with pipeline constants for the
+// vertex and the fragment stage.
+func renderAndReadConstants(t *testing.T, device *wgpu.Device, wgsl string, vertex, fragment map[string]float64) [4]byte {
+	t.Helper()
 	target, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "overrides-target",
 		Size:          wgpu.Extent3D{Width: overrideTargetWidth, Height: overrideTargetHeight, DepthOrArrayLayers: 1},
@@ -438,7 +445,7 @@ func renderAndRead(t *testing.T, device *wgpu.Device, wgsl string) [4]byte {
 		t.Fatalf("CreateTexture: %v", err)
 	}
 	t.Cleanup(target.Release)
-	pipeline := newOverrideRenderPipeline(t, device, wgsl)
+	pipeline := newConstantsRenderPipeline(t, device, wgsl, vertex, fragment)
 	view, err := device.CreateTextureView(target, nil)
 	if err != nil {
 		t.Fatalf("CreateTextureView: %v", err)
@@ -498,6 +505,11 @@ func renderAndRead(t *testing.T, device *wgpu.Device, wgsl string) [4]byte {
 
 func newOverrideRenderPipeline(t *testing.T, device *wgpu.Device, wgsl string) *wgpu.RenderPipeline {
 	t.Helper()
+	return newConstantsRenderPipeline(t, device, wgsl, nil, nil)
+}
+
+func newConstantsRenderPipeline(t *testing.T, device *wgpu.Device, wgsl string, vertex, fragment map[string]float64) *wgpu.RenderPipeline {
+	t.Helper()
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: "overrides-render", WGSL: wgsl})
 	if err != nil {
 		t.Fatalf("CreateShaderModule: %v", err)
@@ -511,10 +523,11 @@ func newOverrideRenderPipeline(t *testing.T, device *wgpu.Device, wgsl string) *
 	pipeline, err := device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "overrides-render",
 		Layout: layout,
-		Vertex: wgpu.VertexState{Module: shader, EntryPoint: "vs"},
+		Vertex: wgpu.VertexState{Module: shader, EntryPoint: "vs", Constants: vertex},
 		Fragment: &wgpu.FragmentState{
 			Module:     shader,
 			EntryPoint: "fs",
+			Constants:  fragment,
 			Targets: []gputypes.ColorTargetState{
 				{Format: gputypes.TextureFormatRGBA8Unorm, WriteMask: gputypes.ColorWriteMaskAll},
 			},

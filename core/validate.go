@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/pipeconst"
 )
 
 // ValidateTextureDescriptor validates a texture descriptor against device limits and features.
@@ -496,6 +497,11 @@ func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits
 		return err
 	}
 
+	// RP11: Pipeline constants of both stages (the check compute shares).
+	if err := validateRenderStageConstants(desc, label); err != nil {
+		return err
+	}
+
 	// RP3-RP6: Fragment stage validation (if present).
 	if desc.Fragment != nil {
 		if err := validateFragmentStage(desc.Fragment, desc.DepthStencil != nil, label, limits); err != nil {
@@ -734,6 +740,43 @@ func ValidateComputePipelineDescriptor(desc *hal.ComputePipelineDescriptor) erro
 		}
 	}
 
+	// CP3: Pipeline constants: no empty key, no NaN or infinity.
+	if err := pipeconst.Validate(desc.Compute.Constants); err != nil {
+		return &CreateComputePipelineError{
+			Kind:  CreateComputePipelineErrorPipelineConstants,
+			Label: label,
+			Cause: err,
+		}
+	}
+
+	return nil
+}
+
+// validateRenderStageConstants checks the pipeline constants of the vertex
+// and the fragment stage with the check every stage and build path shares
+// (internal/pipeconst). Whether they name the stage's overrides, fit their
+// types and leave none without a value needs the shader; the public API
+// checks that per entry point (naga.ProcessOverrides) after this.
+func validateRenderStageConstants(desc *hal.RenderPipelineDescriptor, label string) error {
+	if err := pipeconst.Validate(desc.Vertex.Constants); err != nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorPipelineConstants,
+			Label: label,
+			Stage: "vertex",
+			Cause: err,
+		}
+	}
+	if desc.Fragment == nil {
+		return nil
+	}
+	if err := pipeconst.Validate(desc.Fragment.Constants); err != nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorPipelineConstants,
+			Label: label,
+			Stage: "fragment",
+			Cause: err,
+		}
+	}
 	return nil
 }
 

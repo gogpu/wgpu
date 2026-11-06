@@ -681,6 +681,10 @@ const (
 	// WebGPU spec: validating GPUDepthStencilState.
 	// Rust: pipeline::DepthStencilStateError::MissingDepthCompare
 	CreateRenderPipelineErrorMissingDepthCompare
+	// CreateRenderPipelineErrorPipelineConstants indicates the pipeline
+	// constants of the stage named by Stage are invalid, or do not apply to
+	// the overrides of that stage's entry point. Cause holds the reason.
+	CreateRenderPipelineErrorPipelineConstants
 )
 
 // CreateRenderPipelineError represents an error during render pipeline creation.
@@ -718,6 +722,13 @@ type CreateRenderPipelineError struct {
 	Given    int
 	Limit    uint32
 	HALError error
+	// Stage is "vertex" or "fragment" for
+	// CreateRenderPipelineErrorPipelineConstants.
+	Stage string
+	// Cause is the reason for CreateRenderPipelineErrorPipelineConstants:
+	// naga's error (errors.Is with naga.ErrOverrideNotFound and the other
+	// sentinels) or the shared constant check's.
+	Cause error
 }
 
 // Error implements the error interface.
@@ -801,14 +812,20 @@ func (e *CreateRenderPipelineError) vertexAttributeMessage(label string) string 
 	case CreateRenderPipelineErrorMissingDepthCompare:
 		return fmt.Sprintf("render pipeline %q: depth/stencil format %s needs a depthCompare when depth writes are enabled or a depthFailOp is not keep",
 			label, e.Format)
+	case CreateRenderPipelineErrorPipelineConstants:
+		return fmt.Sprintf("render pipeline %q: %s stage: %v", label, e.Stage, e.Cause)
 	default:
 		return fmt.Sprintf("render pipeline %q: unknown error", label)
 	}
 }
 
-// Unwrap returns the underlying HAL error, if any.
+// Unwrap returns the underlying HAL error or the pipeline constants' cause,
+// if any.
 func (e *CreateRenderPipelineError) Unwrap() error {
-	return e.HALError
+	if e.HALError != nil {
+		return e.HALError
+	}
+	return e.Cause
 }
 
 // IsCreateRenderPipelineError returns true if the error is a CreateRenderPipelineError.
@@ -842,8 +859,8 @@ const (
 	// maxComputeWorkgroupStorageSize (WebGPU createComputePipeline).
 	CreateComputePipelineErrorWorkgroupStorageExceeded
 	// CreateComputePipelineErrorPipelineConstants indicates the pipeline
-	// constants do not apply to the module's overrides. Cause holds naga's
-	// error.
+	// constants are invalid (an empty key, NaN or an infinity) or do not
+	// apply to the module's overrides. Cause holds the reason.
 	CreateComputePipelineErrorPipelineConstants
 )
 
@@ -863,7 +880,9 @@ type CreateComputePipelineError struct {
 	// WorkgroupStorage is the workgroup storage in bytes the entry point
 	// uses, for WorkgroupStorageExceeded errors.
 	WorkgroupStorage uint64
-	// Cause is naga's error for PipelineConstants errors.
+	// Cause is the reason for PipelineConstants errors: naga's error
+	// (errors.Is with naga.ErrOverrideNotFound and the other sentinels) or
+	// the shared constant check's.
 	Cause error
 }
 

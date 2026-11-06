@@ -536,9 +536,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (hal.Rende
 	}
 
 	// Compile WGSL → GLSL for vertex stage.
-	// The HAL render stages carry no pipeline constants yet: overrides take
-	// their defaults.
-	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, nil, layout.bindingMap)
+	vertexGLSL, vertexTranslationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, vertexModule, ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants, layout.bindingMap)
 	if err != nil {
 		return nil, fmt.Errorf("gles: vertex shader: %w", err)
 	}
@@ -985,7 +983,7 @@ func (d *Device) compileFragmentShader(frag *hal.FragmentState, bindingMap map[i
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: invalid fragment shader module type")
 	}
 
-	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, fragmentModule, ir.StageFragment, frag.EntryPoint, nil, bindingMap)
+	fragmentGLSL, translationInfo, err := compileWGSLToGLSL(d.glslVersion, d.fullInstancing, fragmentModule, ir.StageFragment, frag.EntryPoint, frag.Constants, bindingMap)
 	if err != nil {
 		return 0, glsl.TranslationInfo{}, fmt.Errorf("gles: fragment shader: %w", err)
 	}

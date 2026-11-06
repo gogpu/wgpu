@@ -390,13 +390,26 @@ type RenderPipelineDescriptor struct {
 type VertexState struct {
 	Module     *ShaderModule
 	EntryPoint string
-	Buffers    []gputypes.VertexBufferLayout
+
+	// Constants are the pipeline-overridable constants of the vertex stage
+	// (WebGPU GPUProgrammableStage.constants): keys are the identifiers or
+	// @id numbers of the shader's overrides, values are converted to each
+	// override's type. Nil or empty means every override takes its default.
+	// Validated and applied as ComputePipelineDescriptor.Constants are.
+	Constants map[string]float64
+
+	Buffers []gputypes.VertexBufferLayout
 }
 
 // FragmentState describes the fragment shader stage.
 type FragmentState struct {
 	Module     *ShaderModule
 	EntryPoint string
+
+	// Constants are the pipeline-overridable constants of the fragment stage
+	// (WebGPU GPUProgrammableStage.constants), as in VertexState.Constants.
+	Constants map[string]float64
+
 	// Targets describe the color attachments. A target's WriteMask is
 	// taken literally: zero (gputypes.ColorWriteMaskNone) writes nothing,
 	// so set gputypes.ColorWriteMaskAll to write every channel. A nil Blend
@@ -425,6 +438,7 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		halDesc.Vertex = hal.VertexState{
 			Module:     d.Vertex.Module.hal,
 			EntryPoint: d.Vertex.EntryPoint,
+			Constants:  d.Vertex.Constants,
 			Buffers:    d.Vertex.Buffers,
 		}
 	}
@@ -433,6 +447,7 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		halDesc.Fragment = &hal.FragmentState{
 			Module:     d.Fragment.Module.hal,
 			EntryPoint: d.Fragment.EntryPoint,
+			Constants:  d.Fragment.Constants,
 			Targets:    normalizeColorTargets(d.Fragment.Targets),
 		}
 	}

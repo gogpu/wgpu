@@ -369,10 +369,8 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if desc == nil {
 		return p, nil
 	}
-	// The HAL render stages carry no pipeline constants yet: overrides take
-	// their defaults.
 	if sm, ok := desc.Vertex.Module.(*ShaderModule); ok && sm != nil {
-		vs, err := stageModule(sm, ir.StageVertex, desc.Vertex.EntryPoint, nil)
+		vs, err := stageModule(sm, ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants)
 		if err != nil {
 			return nil, err
 		}
@@ -380,7 +378,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	}
 	if desc.Fragment != nil {
 		if sm, ok := desc.Fragment.Module.(*ShaderModule); ok && sm != nil {
-			fs, err := stageModule(sm, ir.StageFragment, desc.Fragment.EntryPoint, nil)
+			fs, err := stageModule(sm, ir.StageFragment, desc.Fragment.EntryPoint, desc.Fragment.Constants)
 			if err != nil {
 				return nil, err
 			}

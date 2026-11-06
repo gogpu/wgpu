@@ -774,10 +774,8 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	if !ok || vertexModule == nil {
 		return nil, fmt.Errorf("metal: invalid vertex shader module")
 	}
-	// The HAL render stages carry no pipeline constants yet: overrides take
-	// their defaults.
 	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout,
-		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint})
+		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint, constants: desc.Vertex.Constants})
 	if err != nil {
 		return nil, err
 	}
@@ -791,7 +789,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 			return nil, fmt.Errorf("metal: invalid fragment shader module")
 		}
 		fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout,
-			librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint})
+			librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint, constants: desc.Fragment.Constants})
 		if err != nil {
 			return nil, err
 		}
