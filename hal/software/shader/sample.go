@@ -105,7 +105,7 @@ func (tex *Texture2D) texelSize() int {
 		return int(tex.BytesPerPixel)
 	}
 	if layout, ok := sampledLayout(tex); ok {
-		return layout.channels * layout.bytes
+		return layout.texelStride()
 	}
 	return 4
 }
@@ -122,7 +122,7 @@ func (tex *Texture2D) imageAt(lv TextureLevel, z int) (Texture2D, bool) {
 	end := min(off+size, len(lv.Data))
 	return Texture2D{
 		Width: lv.Width, Height: lv.Height, Data: lv.Data[off:end:end],
-		Format: tex.Format, BytesPerPixel: tex.BytesPerPixel,
+		Format: tex.Format, BytesPerPixel: tex.BytesPerPixel, Aspect: tex.Aspect,
 	}, true
 }
 

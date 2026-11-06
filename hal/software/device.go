@@ -168,6 +168,10 @@ func newTextureView(tex *Texture, desc *hal.TextureViewDescriptor) *TextureView 
 			layers = 1
 		}
 	}
+	format := d.Format
+	if format == gputypes.TextureFormatUndefined {
+		format = tex.format
+	}
 	return &TextureView{
 		id:              nextResourceID.Add(1),
 		texture:         tex,
@@ -176,6 +180,8 @@ func newTextureView(tex *Texture, desc *hal.TextureViewDescriptor) *TextureView 
 		baseArrayLayer:  d.BaseArrayLayer,
 		arrayLayerCount: layers,
 		dimension:       dim,
+		format:          format,
+		aspect:          d.Aspect,
 	}
 }
 

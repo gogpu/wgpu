@@ -81,70 +81,120 @@ var texelLayouts = map[gputypes.TextureFormat]texelLayout{
 	gputypes.TextureFormatRGBA32Float: {4, 4, texelFloat, false},
 }
 
+// sampledFormat is how the interpreter reads one plane of a format: the
+// texel layout of the plane, whether its red, green and blue channels are
+// sRGB-encoded, the byte offset of the plane inside the stored texel, and
+// the stored texel's size (0: the plane's own size).
+type sampledFormat struct {
+	texelLayout
+	srgb   bool
+	offset int
+	stride int
+}
+
+// size is the bytes of the plane's channels.
+func (f sampledFormat) size() int { return f.channels * f.bytes }
+
+// texelStride is the bytes of one stored texel.
+func (f sampledFormat) texelStride() int {
+	if f.stride != 0 {
+		return f.stride
+	}
+	return f.size()
+}
+
+// Combined depth-stencil storage (the software backend's own layout): a
+// texel of Depth24PlusStencil8 or Depth32FloatStencil8 is 8 bytes, the depth
+// as a float32 at offset 0 and the stencil as a uint8 at offset 4. Depth24Plus
+// stores the float32 depth alone; Stencil8 the stencil byte alone.
+const (
+	// DepthStencilTexelSize is the stored texel size of a combined format.
+	DepthStencilTexelSize = 8
+	// StencilPlaneOffset is the byte offset of the stencil in such a texel.
+	StencilPlaneOffset = 4
+)
+
 // sampledLayouts, indexed by format, lists every uncompressed format the
 // interpreter reads (sampling, textureLoad and OpImageRead): the storage
 // formats of texelLayouts plus the formats only sampled. A zero entry has no
 // layout. The compressed formats have none: the software adapter does not
-// report a texture compression feature, so core refuses them.
+// report a texture compression feature, so core refuses them. A combined
+// depth-stencil format reads its depth plane here; stencilLayout gives the
+// stencil plane.
 var sampledLayouts = buildSampledLayouts()
 
-func buildSampledLayouts() [gputypes.TextureFormatDepth32FloatStencil8 + 1]texelLayout {
-	var l [gputypes.TextureFormatDepth32FloatStencil8 + 1]texelLayout
+func buildSampledLayouts() [gputypes.TextureFormatDepth32FloatStencil8 + 1]sampledFormat {
+	var l [gputypes.TextureFormatDepth32FloatStencil8 + 1]sampledFormat
 	for f, layout := range texelLayouts {
-		l[f] = layout
+		l[f] = sampledFormat{texelLayout: layout}
 	}
-	// The sRGB formats read their stored bytes without the sRGB-to-linear
-	// decode the spec requires: software writes them without the encode
-	// either, and both directions land together in P1-SW-021.
-	l[gputypes.TextureFormatRGBA8UnormSrgb] = texelLayout{4, 1, texelUnorm, false}
-	l[gputypes.TextureFormatBGRA8UnormSrgb] = texelLayout{4, 1, texelUnorm, true}
-	l[gputypes.TextureFormatRGB10A2Unorm] = texelLayout{1, 4, texelRGB10A2Unorm, false}
-	l[gputypes.TextureFormatRGB10A2Uint] = texelLayout{1, 4, texelRGB10A2Uint, false}
-	l[gputypes.TextureFormatRG11B10Ufloat] = texelLayout{1, 4, texelRG11B10Ufloat, false}
-	l[gputypes.TextureFormatRGB9E5Ufloat] = texelLayout{1, 4, texelRGB9E5Ufloat, false}
-	// Depth reads as (d, 0, 0, 1), stencil as (s, 0, 0, 1). The software
-	// backend stores Depth24Plus and the depth of both combined formats as a
-	// float32 per texel (formatBytesPerPixel 4, writeDepthTexel).
-	l[gputypes.TextureFormatStencil8] = texelLayout{1, 1, texelUint, false}
-	l[gputypes.TextureFormatDepth16Unorm] = texelLayout{1, 2, texelUnorm, false}
-	for _, f := range []gputypes.TextureFormat{
-		gputypes.TextureFormatDepth24Plus, gputypes.TextureFormatDepth24PlusStencil8,
-		gputypes.TextureFormatDepth32Float, gputypes.TextureFormatDepth32FloatStencil8,
+	l[gputypes.TextureFormatRGBA8UnormSrgb] = sampledFormat{texelLayout: texelLayout{4, 1, texelUnorm, false}, srgb: true}
+	l[gputypes.TextureFormatBGRA8UnormSrgb] = sampledFormat{texelLayout: texelLayout{4, 1, texelUnorm, true}, srgb: true}
+	for f, kind := range map[gputypes.TextureFormat]texelKind{
+		gputypes.TextureFormatRGB10A2Unorm:  texelRGB10A2Unorm,
+		gputypes.TextureFormatRGB10A2Uint:   texelRGB10A2Uint,
+		gputypes.TextureFormatRG11B10Ufloat: texelRG11B10Ufloat,
+		gputypes.TextureFormatRGB9E5Ufloat:  texelRGB9E5Ufloat,
 	} {
-		l[f] = texelLayout{1, 4, texelFloat, false}
+		l[f] = sampledFormat{texelLayout: texelLayout{1, 4, kind, false}}
 	}
+	// Depth reads as (d, 0, 0, 1), stencil as (s, 0, 0, 1).
+	l[gputypes.TextureFormatStencil8] = sampledFormat{texelLayout: texelLayout{1, 1, texelUint, false}}
+	l[gputypes.TextureFormatDepth16Unorm] = sampledFormat{texelLayout: texelLayout{1, 2, texelUnorm, false}}
+	depth := texelLayout{1, 4, texelFloat, false}
+	l[gputypes.TextureFormatDepth24Plus] = sampledFormat{texelLayout: depth}
+	l[gputypes.TextureFormatDepth32Float] = sampledFormat{texelLayout: depth}
+	l[gputypes.TextureFormatDepth24PlusStencil8] = sampledFormat{texelLayout: depth, stride: DepthStencilTexelSize}
+	l[gputypes.TextureFormatDepth32FloatStencil8] = sampledFormat{texelLayout: depth, stride: DepthStencilTexelSize}
 	return l
 }
 
-// sampledLayout returns the layout tex is read with. A texture without a
-// format (0, a Texture2D built by hand) reads as 8-bit unorm channels by
-// BytesPerPixel: R8, RG8, otherwise RGBA8.
-func sampledLayout(tex *Texture2D) (texelLayout, bool) {
+// stencilLayout returns the stencil plane of format: the whole texel of
+// Stencil8, the byte at StencilPlaneOffset of a combined format.
+func stencilLayout(format gputypes.TextureFormat) (sampledFormat, bool) {
+	stencil := texelLayout{1, 1, texelUint, false}
+	switch format {
+	case gputypes.TextureFormatStencil8:
+		return sampledFormat{texelLayout: stencil}, true
+	case gputypes.TextureFormatDepth24PlusStencil8, gputypes.TextureFormatDepth32FloatStencil8:
+		return sampledFormat{texelLayout: stencil, offset: StencilPlaneOffset, stride: DepthStencilTexelSize}, true
+	}
+	return sampledFormat{}, false
+}
+
+// sampledLayout returns the layout tex is read with: the plane its Aspect
+// selects (the stencil of a stencil-only view, the depth or colour
+// otherwise). A texture without a format (0, a Texture2D built by hand)
+// reads as 8-bit unorm channels by BytesPerPixel: R8, RG8, otherwise RGBA8.
+func sampledLayout(tex *Texture2D) (sampledFormat, bool) {
 	if tex.Format == 0 {
 		switch tex.BytesPerPixel {
 		case 1:
-			return texelLayouts[gputypes.TextureFormatR8Unorm], true
+			return sampledFormat{texelLayout: texelLayouts[gputypes.TextureFormatR8Unorm]}, true
 		case 2:
-			return texelLayouts[gputypes.TextureFormatRG8Unorm], true
+			return sampledFormat{texelLayout: texelLayouts[gputypes.TextureFormatRG8Unorm]}, true
 		}
-		return texelLayouts[gputypes.TextureFormatRGBA8Unorm], true
+		return sampledFormat{texelLayout: texelLayouts[gputypes.TextureFormatRGBA8Unorm]}, true
+	}
+	if gputypes.TextureAspect(tex.Aspect) == gputypes.TextureAspectStencilOnly {
+		return stencilLayout(gputypes.TextureFormat(tex.Format))
 	}
 	if uint64(tex.Format) >= uint64(len(sampledLayouts)) {
-		return texelLayout{}, false
+		return sampledFormat{}, false
 	}
 	l := sampledLayouts[tex.Format]
 	return l, l.channels != 0
 }
 
-// texelOffset returns the byte offset of texel (x, y) of tex stored with
-// layout, or false when the texel lies outside the texture or its data.
-func texelOffset(tex *Texture2D, x, y int, layout texelLayout) (int, bool) {
+// texelOffset returns the byte offset of the plane of layout in texel
+// (x, y) of tex, or false when the texel lies outside the texture or its
+// data. Texels are tex.texelSize() bytes apart.
+func texelOffset(tex *Texture2D, x, y int, layout sampledFormat) (int, bool) {
 	if x < 0 || y < 0 || x >= int(tex.Width) || y >= int(tex.Height) {
 		return 0, false
 	}
-	size := layout.channels * layout.bytes
-	off := (y*int(tex.Width) + x) * size
-	if off+size > len(tex.Data) {
+	off := (y*int(tex.Width)+x)*tex.texelSize() + layout.offset
+	if off+layout.size() > len(tex.Data) {
 		return 0, false
 	}
 	return off, true
@@ -161,23 +211,19 @@ func encodeTexel(tex *Texture2D, x, y int, v Vec4) bool {
 	if !ok {
 		return false
 	}
-	off, ok := texelOffset(tex, x, y, layout)
+	off, ok := texelOffset(tex, x, y, sampledFormat{texelLayout: layout})
 	if !ok {
 		return false
 	}
-	if layout.bgra {
-		v[0], v[2] = v[2], v[0]
-	}
-	for c := range layout.channels {
-		putChannel(tex.Data[off+c*layout.bytes:], layout, v[c])
-	}
+	encodeAt(tex.Data[off:], sampledFormat{texelLayout: layout}, v)
 	return true
 }
 
 // decodeTexel reads texel (x, y) of tex as a vec4 by its format, the missing
 // channels filled with (0, 0, 0, 1), and reports whether the format has a
 // layout and the texel lies in bounds. It is the one decoder of sampled
-// reads, textureLoad and storage reads.
+// reads, textureLoad and storage reads; an sRGB format decodes to linear
+// here, before any filtering, as the WebGPU spec requires.
 func decodeTexel(tex *Texture2D, x, y int) (Vec4, bool) {
 	layout, ok := sampledLayout(tex)
 	if !ok {
@@ -187,17 +233,47 @@ func decodeTexel(tex *Texture2D, x, y int) (Vec4, bool) {
 	if !ok {
 		return Vec4{}, false
 	}
+	return decodeAt(tex.Data[off:], layout), true
+}
+
+// decodeAt decodes the texel plane of layout that starts at b[0].
+func decodeAt(b []byte, layout sampledFormat) Vec4 {
 	if layout.kind >= texelRGB10A2Unorm {
-		return decodePacked(binary.LittleEndian.Uint32(tex.Data[off:]), layout.kind), true
+		return decodePacked(binary.LittleEndian.Uint32(b), layout.kind)
 	}
 	v := Vec4{0, 0, 0, 1}
 	for c := range layout.channels {
-		v[c] = getChannel(tex.Data[off+c*layout.bytes:], layout)
+		if layout.srgb && c < 3 {
+			v[c] = srgbToLinear8[b[c]]
+			continue
+		}
+		v[c] = getChannel(b[c*layout.bytes:], layout.texelLayout)
 	}
 	if layout.bgra {
 		v[0], v[2] = v[2], v[0]
 	}
-	return v, true
+	return v
+}
+
+// encodeAt encodes v into the texel plane of layout that starts at b[0],
+// with the WebGPU conversion rules: unorm and snorm values are clamped and
+// rounded, sRGB channels encoded from linear, integer values converted to
+// the channel width, and channels the format lacks dropped.
+func encodeAt(b []byte, layout sampledFormat, v Vec4) {
+	if layout.kind >= texelRGB10A2Unorm {
+		binary.LittleEndian.PutUint32(b, encodePacked(v, layout.kind))
+		return
+	}
+	if layout.bgra {
+		v[0], v[2] = v[2], v[0]
+	}
+	for c := range layout.channels {
+		if layout.srgb && c < 3 {
+			b[c] = linearToSrgb8(v[c])
+			continue
+		}
+		putChannel(b[c*layout.bytes:], layout.texelLayout, v[c])
+	}
 }
 
 func putChannel(b []byte, layout texelLayout, f float32) {

@@ -84,7 +84,14 @@ type Texture2D struct {
 	Width  uint32
 	Height uint32
 	Data   []byte // Pixel data, row-major, BytesPerPixel bytes per texel.
-	Format uint32 // Texture format identifier (0 = RGBA8).
+	// Format is the view's format, the gputypes.TextureFormat texels are
+	// read and written in (0 = RGBA8 by BytesPerPixel). It may differ from
+	// the stored texture's format by the sRGB suffix only.
+	Format uint32
+	// Aspect is the view's gputypes.TextureAspect: StencilOnly reads the
+	// stencil plane of a depth-stencil format; any other value reads the
+	// depth plane or the colour.
+	Aspect uint32
 	// BytesPerPixel is the storage size of a single texel (1 for R8, 2 for
 	// RG8/R16, 4 for RGBA8/BGRA8). When zero, sampling assumes 4 (RGBA8) for
 	// backward compatibility. Single-channel formats unpack as (r, 0, 0, 1).

@@ -65,10 +65,10 @@ func (b *Buffer) WriteData(offset uint64, data []byte) {
 // NativeHandle returns the buffer's unique ID for handle resolution.
 func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
-// formatBytesPerPixel returns the bytes per texel for texture allocation and
-// sampling. Delegates to gputypes.TextureFormat.BlockCopySize() — the canonical
-// source of truth for all 87 WebGPU formats. Returns 4 for unknown/ambiguous
-// formats (Depth24Plus, etc.) as a safe fallback.
+// formatBytesPerPixel returns the bytes per stored texel (per texel block of
+// a compressed format) for texture allocation and sampling: the format's
+// BlockCopySize where WebGPU defines one, otherwise 4 (Depth24Plus and the
+// combined depth-stencil formats store a float32 depth).
 func formatBytesPerPixel(f gputypes.TextureFormat) uint64 {
 	if s := f.BlockCopySize(); s > 0 {
 		return uint64(s)
@@ -157,8 +157,14 @@ func (t *Texture) Clear(color gputypes.Color) {
 // TextureView implements hal.TextureView: a range of a texture's mip levels
 // and array layers seen with one view dimension. CreateTextureView resolves
 // the descriptor's defaults, so the counts are explicit; a zero count (a view
-// built without it) means 1. The view's format is the texture's: the
-// backend reinterprets no texel data.
+// built without it) means 1.
+//
+// The view has its own format, which may differ from the texture's only by
+// the sRGB suffix (core validates the texture's ViewFormats): the same bytes
+// are then read and written through the view's format, so an RGBA8Unorm
+// texture seen through an RGBA8UnormSrgb view decodes sRGB on every fetch and
+// encodes it on every colour write. The aspect selects the depth or stencil
+// plane of a combined depth-stencil format.
 type TextureView struct {
 	Resource
 	id             uint64 // unique ID for handle resolution
@@ -170,6 +176,27 @@ type TextureView struct {
 	// view, whose depth slices are not layers.
 	arrayLayerCount uint32
 	dimension       gputypes.TextureViewDimension
+	// format is the view's format; Undefined (a view built without
+	// CreateTextureView) means the texture's.
+	format gputypes.TextureFormat
+	// aspect is the view's aspect; Undefined means All.
+	aspect gputypes.TextureAspect
+}
+
+// viewFormat returns the format the view reads and writes texels in.
+func (v *TextureView) viewFormat() gputypes.TextureFormat {
+	if v.format == gputypes.TextureFormatUndefined && v.texture != nil {
+		return v.texture.format
+	}
+	return v.format
+}
+
+// viewAspect returns the view's aspect, All when it is Undefined.
+func (v *TextureView) viewAspect() gputypes.TextureAspect {
+	if v.aspect == gputypes.TextureAspectUndefined {
+		return gputypes.TextureAspectAll
+	}
+	return v.aspect
 }
 
 // mipLevels returns the number of mip levels in the view, at least 1.
