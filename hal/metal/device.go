@@ -401,6 +401,12 @@ func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error)
 	_ = MsgSend(sampDesc, Sel("setTAddressMode:"), uintptr(addressModeToMTL(desc.AddressModeV)))
 	_ = MsgSend(sampDesc, Sel("setRAddressMode:"), uintptr(addressModeToMTL(desc.AddressModeW)))
 
+	// Literal clamps, as in Rust wgpu-hal (the root resolves a zero
+	// LodMaxClamp to 32). The properties are floats: they travel in FP
+	// registers, so they go through the typed call, not MsgSend's uintptr.
+	msgSendVoid(sampDesc, Sel("setLodMinClamp:"), argFloat32(desc.LodMinClamp))
+	msgSendVoid(sampDesc, Sel("setLodMaxClamp:"), argFloat32(desc.LodMaxClamp))
+
 	if desc.Anisotropy > 1 {
 		_ = MsgSend(sampDesc, Sel("setMaxAnisotropy:"), uintptr(desc.Anisotropy))
 	}
