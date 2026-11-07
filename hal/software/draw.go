@@ -1723,43 +1723,47 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	pipe.SetDepthTest(depthEnabled, depthCompare)
 	pipe.SetDepthWrite(ds.DepthWriteEnabled)
 
-	// Stencil state: use front-face state (software rasterizer does not
-	// distinguish front/back face stencil; use front as the common case).
-	sf := ds.StencilFront
-	stencilEnabled := isStencilEnabled(sf)
-	if stencilEnabled && r.passStencilBuffer != nil {
+	// Stencil: front-facing triangles use stencilFront, back-facing ones
+	// stencilBack (index.bs "stencil test"). The test runs when either face is
+	// not the default, as Vulkan's stencilTestEnable and Dawn's UsesStencil
+	// decide; a default face then gets compare "always", ops "keep", which
+	// leaves its fragments and the stencil values unchanged.
+	if (isStencilEnabled(ds.StencilFront) || isStencilEnabled(ds.StencilBack)) && r.passStencilBuffer != nil {
 		// Use the persistent stencil buffer created at BeginRenderPass.
 		// This is the same buffer for ALL draw calls in this pass, matching
 		// GPU behavior where the depth/stencil attachment texture persists.
 		pipe.SetStencilBuffer(r.passStencilBuffer)
-		pipe.SetStencilState(raster.StencilState{
-			Enabled:     true,
-			ReadMask:    uint8(ds.StencilReadMask),
-			WriteMask:   uint8(ds.StencilWriteMask),
-			Compare:     convertCompareFunction(sf.Compare),
-			FailOp:      convertStencilOp(sf.FailOp),
-			DepthFailOp: convertStencilOp(sf.DepthFailOp),
-			PassOp:      convertStencilOp(sf.PassOp),
-			Reference:   uint8(r.stencilRef),
-		})
+		pipe.SetStencilFaceStates(r.stencilFaceState(ds, ds.StencilFront), r.stencilFaceState(ds, ds.StencilBack))
 	}
 }
 
-// isStencilEnabled returns true if the stencil face state defines any
-// non-trivial operations (not all Keep + Always).
+// stencilFaceState is the raster stencil state of one face of ds, with the
+// pass's stencil reference. Undefined members convert to their spec defaults
+// (compare "always", op "keep"), as absent members do.
+func (r *RenderPassEncoder) stencilFaceState(ds *hal.DepthStencilState, sf hal.StencilFaceState) raster.StencilState {
+	return raster.StencilState{
+		Enabled:     true,
+		ReadMask:    uint8(ds.StencilReadMask),
+		WriteMask:   uint8(ds.StencilWriteMask),
+		Compare:     convertCompareFunction(sf.Compare),
+		FailOp:      convertStencilOp(sf.FailOp),
+		DepthFailOp: convertStencilOp(sf.DepthFailOp),
+		PassOp:      convertStencilOp(sf.PassOp),
+		Reference:   uint8(r.stencilRef),
+	}
+}
+
+// isStencilEnabled returns true if the stencil face state is not the WebGPU
+// default (compare "always", all ops "keep"), the rule core's
+// stencilFaceIgnored applies. An Undefined member counts as its default, as an
+// absent member does; a face with an Undefined compare and a real op still
+// writes the stencil.
 func isStencilEnabled(sf hal.StencilFaceState) bool {
-	// WebGPU default: Compare=Always, all ops=Keep. This is effectively disabled.
-	if sf.Compare == gputypes.CompareFunctionAlways &&
-		sf.FailOp == hal.StencilOperationKeep &&
-		sf.DepthFailOp == hal.StencilOperationKeep &&
-		sf.PassOp == hal.StencilOperationKeep {
-		return false
+	keep := func(op gputypes.StencilOperation) bool {
+		return op == hal.StencilOperationKeep || op == gputypes.StencilOperationUndefined
 	}
-	// Also treat Undefined compare as disabled.
-	if sf.Compare == gputypes.CompareFunctionUndefined {
-		return false
-	}
-	return true
+	return (sf.Compare != gputypes.CompareFunctionAlways && sf.Compare != gputypes.CompareFunctionUndefined) ||
+		!keep(sf.FailOp) || !keep(sf.DepthFailOp) || !keep(sf.PassOp)
 }
 
 // convertCullMode maps gputypes.CullMode to raster.CullMode. The values differ
