@@ -69,6 +69,11 @@ type Triangle struct {
 	// flat varyings, and every integer varying, whose lanes are the bit
 	// patterns of 32-bit words and must not go through arithmetic.
 	Flat uint64
+
+	// NoPerspective marks the attributes interpolated linearly in screen
+	// space, @interpolate(linear) varyings, instead of perspective-correct:
+	// bit i is Attributes[i]. A bit set in Flat takes precedence.
+	NoPerspective uint64
 }
 
 // Viewport defines the rectangular area of the framebuffer to render into.

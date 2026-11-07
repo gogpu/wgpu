@@ -116,3 +116,22 @@ func TestInterpolatesFlat(t *testing.T) {
 		}
 	}
 }
+
+// TestInterpolatesLinear checks that @interpolate(linear) inputs, and only
+// they, are reported as interpolated linearly in screen space.
+func TestInterpolatesLinear(t *testing.T) {
+	m := compileSoftwareSPIRV(t, `
+@fragment
+fn fs(@location(0) p: vec2<f32>,
+      @location(1) @interpolate(linear) l: vec2<f32>,
+      @location(2) @interpolate(linear, sample) ls: f32,
+      @location(3) @interpolate(perspective, centroid) pc: f32) -> @location(0) vec4<f32> {
+    return vec4<f32>(p + l, ls, pc);
+}
+`)
+	for loc, want := range []bool{false, true, true, false} {
+		if got := m.InterpolatesLinear(inputAtLocation(t, m, uint32(loc))); got != want {
+			t.Errorf("location %d: InterpolatesLinear = %v, want %v", loc, got, want)
+		}
+	}
+}

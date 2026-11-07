@@ -145,11 +145,12 @@ func rasterizeIncrementalCore(tri Triangle, startX, startY, endX, endY int, call
 func computeFragment(x, y int, tri *Triangle, incTri *IncrementalTriangle, attrCount int) Fragment {
 	b0, b1, b2 := incTri.Barycentric()
 
-	// Perspective-correct interpolation
+	// 1/w is linear in screen space: the perspective divisor of every
+	// perspective-correct attribute and the w of the position builtin.
 	oneOverW := b0*tri.V0.W + b1*tri.V1.W + b2*tri.V2.W
 
-	depth := interpolateDepth(b0, b1, b2, tri, oneOverW)
-	attrs := interpolateAttributes(b0, b1, b2, tri, oneOverW, attrCount)
+	depth := interpolateDepth(b0, b1, b2, tri)
+	attrs := interpolateAttributes(b1, b2, tri, oneOverW, attrCount)
 
 	return Fragment{
 		X:          x,
@@ -161,60 +162,82 @@ func computeFragment(x, y int, tri *Triangle, incTri *IncrementalTriangle, attrC
 	}
 }
 
-// interpolateDepth performs perspective-correct depth interpolation.
-func interpolateDepth(b0, b1, b2 float32, tri *Triangle, oneOverW float32) float32 {
-	if oneOverW != 0 {
-		return (b0*tri.V0.Z*tri.V0.W + b1*tri.V1.Z*tri.V1.W + b2*tri.V2.Z*tri.V2.W) / oneOverW
-	}
+// interpolateDepth returns the depth at screen-space barycentrics (b0, b1,
+// b2). The vertices' Z is already divided by w and mapped through the
+// viewport, so it is linear in screen space and interpolated without
+// perspective correction (WebGPU spec, "Rasterization": the fragment's depth
+// is interpolated from the framebuffer coordinates of the vertices).
+func interpolateDepth(b0, b1, b2 float32, tri *Triangle) float32 {
 	return b0*tri.V0.Z + b1*tri.V1.Z + b2*tri.V2.Z
 }
 
 // interpolateAttributes performs perspective-correct attribute interpolation.
-func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, attrCount int) []float32 {
+func interpolateAttributes(b1, b2 float32, tri *Triangle, oneOverW float32, attrCount int) []float32 {
 	if attrCount == 0 {
 		return nil
 	}
 
 	attrs := make([]float32, attrCount)
-	fillAttributes(attrs, b0, b1, b2, tri, oneOverW)
+	fillAttributes(attrs, b1, b2, tri, oneOverW)
 	return attrs
 }
 
 // fillAttributes fills attrs, one element per vertex attribute, with the
-// perspective-correct interpolation at barycentrics (b0, b1, b2).
-func fillAttributes(attrs []float32, b0, b1, b2 float32, tri *Triangle, oneOverW float32) {
-	attrCount := len(attrs)
-	if tri.Flat != 0 {
-		interpolateMixed(attrs, b0, b1, b2, tri, oneOverW)
+// interpolation at the point whose screen-space barycentrics of V1 and V2 are
+// b1 and b2 (V0's is 1-b1-b2) and whose 1/w is oneOverW. A perspective
+// attribute is linear in clip space (WebGPU spec,
+// "Interpolation"): its weights are bi*Wi/oneOverW, Wi being the vertices'
+// 1/w.
+func fillAttributes(attrs []float32, b1, b2 float32, tri *Triangle, oneOverW float32) {
+	if tri.Flat|tri.NoPerspective != 0 {
+		interpolateMixed(attrs, b1, b2, tri, oneOverW)
 		return
 	}
-	if oneOverW != 0 {
-		for i := 0; i < attrCount; i++ {
-			attrs[i] = (b0*tri.V0.Attributes[i]*tri.V0.W +
-				b1*tri.V1.Attributes[i]*tri.V1.W +
-				b2*tri.V2.Attributes[i]*tri.V2.W) / oneOverW
-		}
-	} else {
-		for i := 0; i < attrCount; i++ {
-			attrs[i] = b0*tri.V0.Attributes[i] + b1*tri.V1.Attributes[i] + b2*tri.V2.Attributes[i]
-		}
+	p1, p2 := perspectiveWeights(b1, b2, tri, oneOverW)
+	for i := range attrs {
+		attrs[i] = lerpAttribute(tri, i, p1, p2)
 	}
 }
 
-// interpolateMixed fills attrs for a triangle with flat attributes: a flat
-// attribute is the provoking vertex's lane, copied without arithmetic, and
-// every other one is interpolated as interpolateAttributes does.
-func interpolateMixed(attrs []float32, b0, b1, b2 float32, tri *Triangle, oneOverW float32) {
+// perspectiveWeights returns the weights of V1 and V2 in a
+// perspective-correct interpolation, V0's being 1 minus their sum. A
+// triangle built without 1/w (all W zero) is interpolated linearly in screen
+// space.
+func perspectiveWeights(b1, b2 float32, tri *Triangle, oneOverW float32) (p1, p2 float32) {
+	if oneOverW == 0 {
+		return b1, b2
+	}
+	inv := 1 / oneOverW
+	return b1 * tri.V1.W * inv, b2 * tri.V2.W * inv
+}
+
+// lerpAttribute interpolates attribute i with weights p1 and p2 of V1 and
+// V2. The form A0 + p1*(A1-A0) + p2*(A2-A0) gives an attribute equal at all
+// three vertices back exactly, whatever rounding the weights carry.
+func lerpAttribute(tri *Triangle, i int, p1, p2 float32) float32 {
+	a0 := tri.V0.Attributes[i]
+	return a0 + p1*(tri.V1.Attributes[i]-a0) + p2*(tri.V2.Attributes[i]-a0)
+}
+
+// interpolateMixed fills attrs for a triangle with flat or linear
+// attributes: a flat attribute is the provoking vertex's lane, copied
+// without arithmetic; a linear one (@interpolate(linear)) is interpolated
+// with the screen-space barycentrics b1 and b2 of V1 and V2; every other one
+// as fillAttributes does.
+func interpolateMixed(attrs []float32, b1, b2 float32, tri *Triangle, oneOverW float32) {
+	p1, p2 := perspectiveWeights(b1, b2, tri, oneOverW)
 	for i := range attrs {
+		bit := uint64(0)
+		if i < 64 {
+			bit = 1 << i
+		}
 		switch {
-		case i < 64 && tri.Flat&(1<<i) != 0:
+		case tri.Flat&bit != 0:
 			attrs[i] = tri.V0.Attributes[i]
-		case oneOverW != 0:
-			attrs[i] = (b0*tri.V0.Attributes[i]*tri.V0.W +
-				b1*tri.V1.Attributes[i]*tri.V1.W +
-				b2*tri.V2.Attributes[i]*tri.V2.W) / oneOverW
+		case tri.NoPerspective&bit != 0:
+			attrs[i] = lerpAttribute(tri, i, b1, b2)
 		default:
-			attrs[i] = b0*tri.V0.Attributes[i] + b1*tri.V1.Attributes[i] + b2*tri.V2.Attributes[i]
+			attrs[i] = lerpAttribute(tri, i, p1, p2)
 		}
 	}
 }

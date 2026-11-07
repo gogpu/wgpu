@@ -35,6 +35,7 @@ type rigScene struct {
 	depthTest gputypes.CompareFunction
 	primitive gputypes.PrimitiveState
 	buffers   []gputypes.VertexBufferLayout
+	layouts   []*wgpu.BindGroupLayout // the pipeline layout's bind groups
 	// draw records the scene's state (viewport, scissor, buffers) and draws
 	// into a pass that has the scene's pipeline set.
 	draw func(t *testing.T, device *wgpu.Device, pass *wgpu.RenderPassEncoder)
@@ -173,7 +174,7 @@ func (s rigScene) pipeline(t *testing.T, device *wgpu.Device) *wgpu.RenderPipeli
 		t.Fatalf("CreateShaderModule: %v", err)
 	}
 	t.Cleanup(shader.Release)
-	layout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{Label: "rig"})
+	layout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{Label: "rig", BindGroupLayouts: s.layouts})
 	if err != nil {
 		t.Fatalf("CreatePipelineLayout: %v", err)
 	}

@@ -518,7 +518,7 @@ func (r *RenderPassEncoder) fetchTriangles(
 		vertices = append(vertices, sv)
 	}
 
-	asm := r.newPrimitiveAssembler(targetW, targetH, 0)
+	asm := r.newPrimitiveAssembler(targetW, targetH, varyingMasks{})
 	return asm.assemble(nil, vertices)
 }
 
@@ -632,7 +632,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 
 	// Execute vertex shader for each (instance, vertex) pair.
 	var allTriangles []raster.Triangle
-	asm := r.newPrimitiveAssembler(targetW, targetH, r.flatVaryingMask())
+	asm := r.newPrimitiveAssembler(targetW, targetH, r.interpolationMasks())
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
@@ -728,20 +728,27 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 // assembles through it, so clipping and the transform exist once.
 type primitiveAssembler struct {
 	topology gputypes.PrimitiveTopology
-	flat     uint64 // raster.Triangle.Flat of every triangle (flatVaryingMask)
+	masks    varyingMasks
 	xf       raster.ViewportTransform
 	clip     raster.Clipper
 }
 
+// varyingMasks are raster.Triangle.Flat and NoPerspective of every triangle
+// of a draw (interpolationMasks).
+type varyingMasks struct {
+	flat, linear uint64
+}
+
 // newPrimitiveAssembler returns the assembler of the current pipeline and
-// viewport for a w x h render area; flat is the pipeline's flat varying mask.
-func (r *RenderPassEncoder) newPrimitiveAssembler(w, h int, flat uint64) primitiveAssembler {
+// viewport for a w x h render area, whose varyings interpolate as masks
+// says.
+func (r *RenderPassEncoder) newPrimitiveAssembler(w, h int, masks varyingMasks) primitiveAssembler {
 	a := primitiveAssembler{
 		topology: gputypes.PrimitiveTopologyTriangleList,
-		flat:     flat,
+		masks:    masks,
 		xf:       r.viewportTransform(w, h),
 	}
-	a.clip = raster.NewClipper(&a.xf, w, h, flat)
+	a.clip = raster.NewClipper(&a.xf, w, h, masks.flat, masks.linear)
 	if r.pipeline != nil && r.pipeline.desc != nil {
 		a.topology = r.pipeline.desc.Primitive.Topology
 	}
@@ -803,34 +810,43 @@ func (a *primitiveAssembler) emit(dst []raster.Triangle, v0, v1, v2 *raster.Clip
 	poly := a.clip.Clip(v0, v1, v2)
 	for i := 2; i < len(poly); i++ {
 		dst = append(dst, raster.Triangle{
-			V0:   a.xf.Project(&poly[0]),
-			V1:   a.xf.Project(&poly[i-1]),
-			V2:   a.xf.Project(&poly[i]),
-			Flat: a.flat,
+			V0:            a.xf.Project(&poly[0]),
+			V1:            a.xf.Project(&poly[i-1]),
+			V2:            a.xf.Project(&poly[i]),
+			Flat:          a.masks.flat,
+			NoPerspective: a.masks.linear,
 		})
 	}
 	return dst
 }
 
-// flatVaryingMask returns the attribute lanes the rasterizer must not
-// interpolate (raster.Triangle.Flat): the lanes of every fragment @location
-// input that InterpolatesFlat reports, in the order fragmentInterface.inputs
-// takes them from the interpolated attributes.
-func (r *RenderPassEncoder) flatVaryingMask() uint64 {
+// interpolationMasks returns the attribute lanes the rasterizer must not
+// interpolate (raster.Triangle.Flat) and those it interpolates linearly in
+// screen space (raster.Triangle.NoPerspective): the lanes of every fragment
+// @location input that InterpolatesFlat, or else InterpolatesLinear,
+// reports, in the order fragmentInterface.inputs takes them from the
+// interpolated attributes. Every other lane is perspective-correct.
+func (r *RenderPassEncoder) interpolationMasks() varyingMasks {
+	var m varyingMasks
 	fi, ok := r.fragmentInterfaceOf()
 	if !ok {
-		return 0
+		return m
 	}
-	var mask uint64
 	offset := 0
 	for _, li := range fi.locationInputs {
 		width := fi.inputWidth(li.varID)
-		if fi.parsed.InterpolatesFlat(li.varID) && offset < 64 {
-			mask |= (1<<width - 1) << offset
+		if offset < 64 {
+			lanes := uint64(1<<width-1) << offset
+			switch {
+			case fi.parsed.InterpolatesFlat(li.varID):
+				m.flat |= lanes
+			case fi.parsed.InterpolatesLinear(li.varID):
+				m.linear |= lanes
+			}
 		}
 		offset += width
 	}
-	return mask
+	return m
 }
 
 // buildExecutionContext creates a shader ExecutionContext populated with all
@@ -1288,7 +1304,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 
 	var allTriangles []raster.Triangle
 	hasLocOutputs := len(s.locationOutputs) > 0
-	asm := r.newPrimitiveAssembler(w, h, r.flatVaryingMask())
+	asm := r.newPrimitiveAssembler(w, h, r.interpolationMasks())
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst

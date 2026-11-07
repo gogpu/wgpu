@@ -132,11 +132,11 @@ func (it *IncrementalTriangle) laneFragment(frag *Fragment, tri *Triangle, qx, q
 	b2 := float32(float64(w2) * it.invArea)
 	oneOverW := b0*tri.V0.W + b1*tri.V1.W + b2*tri.V2.W
 	frag.X, frag.Y = qx+lane&1, qy+lane>>1
-	frag.Depth = interpolateDepth(b0, b1, b2, tri, oneOverW)
+	frag.Depth = interpolateDepth(b0, b1, b2, tri)
 	frag.InvW = oneOverW
 	frag.Bary = [3]float32{b0, b1, b2}
 	frag.Attributes = attrs
 	if attrs != nil {
-		fillAttributes(attrs, b0, b1, b2, tri, oneOverW)
+		fillAttributes(attrs, b1, b2, tri, oneOverW)
 	}
 }

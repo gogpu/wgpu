@@ -11,7 +11,7 @@ import (
 var clipperTestViewport = FullViewport(8, 8)
 
 func newTestClipper(flat uint64) Clipper {
-	return NewClipper(&clipperTestViewport, 8, 8, flat)
+	return NewClipper(&clipperTestViewport, 8, 8, flat, 0)
 }
 
 func clipVertex(x, y, z, w float32, attrs ...float32) ClipSpaceVertex {
@@ -58,7 +58,7 @@ func TestClipperReject(t *testing.T) {
 		t.Errorf("a triangle beyond the far plane clipped to %d vertices, want none", len(poly))
 	}
 	empty := ViewportTransform{X: 1, Y: 1, Width: 0, Height: 4, MaxDepth: 1}
-	c = NewClipper(&empty, 8, 8, 0)
+	c = NewClipper(&empty, 8, 8, 0, 0)
 	inside := [3]ClipSpaceVertex{clipVertex(0, 0, 0.5, 1), clipVertex(1, 0, 0.5, 1), clipVertex(0, 1, 0.5, 1)}
 	if poly := c.Clip(&inside[0], &inside[1], &inside[2]); len(poly) != 0 {
 		t.Errorf("a viewport without area kept %d vertices, want none", len(poly))
@@ -90,6 +90,130 @@ func TestClipperNearPlane(t *testing.T) {
 	}
 	if ndcArea(poly) <= 0 {
 		t.Errorf("the clipped polygon's winding flipped: area %g", ndcArea(poly))
+	}
+}
+
+// TestClipperLinearLane checks the attributes of the vertices the near
+// plane creates on edges whose w goes from 1 to 2: a perspective lane takes
+// the clip-space ratio t = 1/3, a linear one the ratio of the projected
+// edge, t*w_out/w = (1/3)*2/(4/3) = 1/2.
+func TestClipperLinearLane(t *testing.T) {
+	c := NewClipper(&clipperTestViewport, 8, 8, 0, 1<<1)
+	v0 := clipVertex(-0.5, -0.5, 0.5, 1, 0, 0)
+	v1 := clipVertex(0.5, -0.5, 0.5, 1, 0, 0)
+	v2 := clipVertex(0, 1, -1, 2, 1, 1) // z < 0
+	created := 0
+	for _, v := range c.Clip(&v0, &v1, &v2) {
+		if v.Position[2] != 0 {
+			continue
+		}
+		created++
+		if math.Abs(float64(v.Attributes[0])-1.0/3) > 1e-6 || math.Abs(float64(v.Attributes[1])-0.5) > 1e-6 {
+			t.Errorf("created vertex %v attributes %v, want [1/3 1/2]", v.Position, v.Attributes)
+		}
+	}
+	if created != 2 {
+		t.Errorf("the near plane created %d vertices, want 2", created)
+	}
+}
+
+// clipSpaceLanes returns the perspective and the linear value, at the
+// clip-space point p, of a lane whose values at tri's vertices are a: p is
+// Σ λi*Vi, found from its (x, y, w); the perspective value is Σ λi*ai, the
+// linear one Σ λi*wi*ai / Σ λi*wi (WebGPU spec, "Interpolation").
+func clipSpaceLanes(tri [3]*ClipSpaceVertex, a [3]float64, p [4]float32) (persp, linear float64) {
+	col := func(v [4]float32) [3]float64 { return [3]float64{float64(v[0]), float64(v[1]), float64(v[3])} }
+	det := func(a, b, c [3]float64) float64 {
+		return a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0])
+	}
+	c0, c1, c2, q := col(tri[0].Position), col(tri[1].Position), col(tri[2].Position), col(p)
+	m := det(c0, c1, c2)
+	l := [3]float64{det(q, c1, c2) / m, det(c0, q, c2) / m, det(c0, c1, q) / m}
+	var num, den float64
+	for i := range 3 {
+		w := float64(tri[i].Position[3])
+		persp += l[i] * a[i]
+		num += l[i] * w * a[i]
+		den += l[i] * w
+	}
+	return persp, num / den
+}
+
+// checkClippedLanes checks lane 0 (linear) and lane 1 (perspective) of every
+// vertex of poly against their exact values, and returns how many are off.
+func checkClippedLanes(t *testing.T, tri [3]*ClipSpaceVertex, a [3]float64, poly []ClipSpaceVertex, report bool) int {
+	t.Helper()
+	bad := 0
+	for i, v := range poly {
+		persp, linear := clipSpaceLanes(tri, a, v.Position)
+		gotL, gotP := float64(v.Attributes[0]), float64(v.Attributes[1])
+		if !(math.Abs(gotL-linear) <= 1e-4*math.Max(1, math.Abs(linear))) ||
+			!(math.Abs(gotP-persp) <= 1e-4*math.Max(1, math.Abs(persp))) {
+			bad++
+			if report {
+				t.Errorf("vertex %d at %v: lanes [linear perspective] = [%g %g], want [%g %g]",
+					i, v.Position, gotL, gotP, linear, persp)
+			}
+		}
+	}
+	return bad
+}
+
+// TestClipperLinearLaneBehindEye clips a triangle with a vertex behind the
+// eye and a linear lane. The w plane's vertex on an edge from w = 1 to w = -1
+// rounds to w = 0 in float32, minClipW being lost next to 1; the near plane
+// then cuts it. A linear lane computed from that vertex's screen position
+// (t*w_out/w) was infinite there and NaN at the near plane's vertex, the
+// fan's first: every fragment of the visible part was NaN.
+func TestClipperLinearLaneBehindEye(t *testing.T) {
+	c := NewClipper(&clipperTestViewport, 8, 8, 0, 1<<0)
+	v0 := clipVertex(0, 0, -1, -1, 0, 0) // behind the eye
+	v1 := clipVertex(-0.5, -0.5, 0.5, 1, 1, 1)
+	v2 := clipVertex(0.5, -0.5, 0.5, 1, 1, 1)
+	tri := [3]*ClipSpaceVertex{&v0, &v1, &v2}
+	poly := c.Clip(&v0, &v1, &v2)
+	if len(poly) < 3 {
+		t.Fatalf("the visible part is lost: %d vertices", len(poly))
+	}
+	checkClippedLanes(t, tri, [3]float64{0, 1, 1}, poly, true)
+
+	bad, total := 0, 0
+	for i := 2; i < len(poly); i++ {
+		ft := Triangle{
+			V0: clipperTestViewport.Project(&poly[0]), V1: clipperTestViewport.Project(&poly[i-1]),
+			V2: clipperTestViewport.Project(&poly[i]), NoPerspective: 1,
+		}
+		Rasterize(ft, Viewport{Width: 8, Height: 8}, func(f Fragment) {
+			total++
+			if a := float64(f.Attributes[0]); math.IsNaN(a) || math.IsInf(a, 0) {
+				bad++
+			}
+		})
+	}
+	if total == 0 || bad > 0 {
+		t.Errorf("%d of %d fragments have a non-finite linear lane", bad, total)
+	}
+}
+
+// TestClipperLinearLaneSweep checks the lanes of every vertex clipping
+// leaves, over triangles with one vertex behind the eye at w in [-4, -0.05)
+// and two in front at w in [0.5, 4].
+func TestClipperLinearLaneSweep(t *testing.T) {
+	c := NewClipper(&clipperTestViewport, 8, 8, 0, 1<<0)
+	bad, n := 0, 0
+	for wb := -4.0; wb < -0.05; wb += 0.05 {
+		for wf := 0.5; wf <= 4; wf += 0.25 {
+			b, f := float32(wb), float32(wf)
+			v0 := clipVertex(0, 0.3*b, b, b, 0, 0)
+			v1 := clipVertex(-0.5*f, -0.5*f, 0.5*f, f, 1, 1)
+			v2 := clipVertex(0.5*f, -0.5*f, 0.5*f, f, 1, 1)
+			poly := c.Clip(&v0, &v1, &v2)
+			n += len(poly)
+			bad += checkClippedLanes(t, [3]*ClipSpaceVertex{&v0, &v1, &v2}, [3]float64{0, 1, 1}, poly, false)
+		}
+	}
+	if n == 0 || bad > 0 {
+		t.Errorf("%d of %d clipped vertices have a lane off its exact value", bad, n)
 	}
 }
 

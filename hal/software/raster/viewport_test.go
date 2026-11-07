@@ -25,6 +25,9 @@ func TestViewportTransformProject(t *testing.T) {
 			if sv.X != tt.x || sv.Y != tt.y || sv.Z != tt.z {
 				t.Errorf("Project(%v) = (%g, %g, %g), want (%g, %g, %g)", tt.pos, sv.X, sv.Y, sv.Z, tt.x, tt.y, tt.z)
 			}
+			if want := 1 / tt.pos[3]; sv.W != want {
+				t.Errorf("Project(%v).W = %g, want 1/w = %g", tt.pos, sv.W, want)
+			}
 			if &sv.Attributes[0] != &attrs[0] {
 				t.Error("Project copied the attributes; it should share them")
 			}
