@@ -25,15 +25,10 @@ func FullViewport(width, height int) ViewportTransform {
 }
 
 // Project divides v's position by its w and maps it through the viewport.
-// The attributes are shared with v, not copied.
+// v must have w > 0, as every vertex a Clipper returns has. The attributes
+// are shared with v, not copied.
 func (vt *ViewportTransform) Project(v *ClipSpaceVertex) ScreenVertex {
-	w := v.Position[3]
-	if w == 0 {
-		// A vertex on the w = 0 plane has no window position. Until clipping
-		// removes such vertices it is treated as w = 1, as before.
-		w = 1
-	}
-	inv := 1 / w
+	inv := 1 / v.Position[3]
 	nx, ny, nz := v.Position[0]*inv, v.Position[1]*inv, v.Position[2]*inv
 	return ScreenVertex{
 		X:          vt.X + 0.5*(nx+1)*vt.Width,

@@ -48,12 +48,6 @@ var AllFrustumPlanes = []ClipPlane{
 	ClipPlaneTop,
 }
 
-// NearFarPlanes contains only near and far clipping planes.
-var NearFarPlanes = []ClipPlane{
-	ClipPlaneNear,
-	ClipPlaneFar,
-}
-
 // Distance returns the signed distance from a vertex to the plane.
 // Positive values indicate the vertex is inside (on the positive side).
 // Negative values indicate the vertex is outside.
@@ -67,188 +61,216 @@ func (p ClipPlane) IsInside(v ClipSpaceVertex) bool {
 	return p.Distance(v) >= 0
 }
 
-// Intersect computes the intersection point between an edge and the plane.
-// The edge goes from v0 to v1. Returns the interpolated vertex at the
-// intersection and the parameter t in [0, 1] where intersection occurs.
-// Assumes the edge actually crosses the plane (one vertex inside, one outside).
-func (p ClipPlane) Intersect(v0, v1 ClipSpaceVertex) (ClipSpaceVertex, float32) {
-	d0 := p.Distance(v0)
-	d1 := p.Distance(v1)
+const (
+	// clipGuardBand is how far past the render target's edges, in pixels,
+	// the x and y clip planes lie. Primitives are clipped in x and y only to
+	// keep their window coordinates in the range the rasterizer snaps to
+	// (±2^21 pixels, incremental.go) and precise in float32 (a coordinate
+	// under 2^15 keeps better than 1/256 of a pixel): the viewport and the
+	// scissor bound the pixels that are drawn, so a primitive that crosses
+	// the viewport's edge needs no new vertices there.
+	clipGuardBand = 8192
 
-	// Compute interpolation parameter
-	// t = d0 / (d0 - d1) gives the point where the edge crosses the plane
-	t := d0 / (d0 - d1)
+	// minClipW is the least w a clipped vertex keeps. The near and far
+	// planes (0 <= z <= w) already remove w < 0, but leave w = 0 on their
+	// boundary, which has no window position.
+	minClipW = 0x1p-40
 
-	// Clamp t to valid range to handle numerical issues
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
+	// clipPlaneCount is the number of planes a Clipper clips against: w,
+	// near, far, and the four guard band planes.
+	clipPlaneCount = 7
 
-	// Interpolate position
-	result := ClipSpaceVertex{
-		Position: [4]float32{
-			v0.Position[0] + t*(v1.Position[0]-v0.Position[0]),
-			v0.Position[1] + t*(v1.Position[1]-v0.Position[1]),
-			v0.Position[2] + t*(v1.Position[2]-v0.Position[2]),
-			v0.Position[3] + t*(v1.Position[3]-v0.Position[3]),
-		},
-	}
+	// maxClipVertices bounds a clipped polygon. A convex polygon gains at
+	// most one vertex per plane; the rest is room for rounding that makes a
+	// nearly degenerate polygon cross a plane twice more.
+	maxClipVertices = 3 + 2*clipPlaneCount
 
-	// Interpolate attributes if present
-	if len(v0.Attributes) > 0 && len(v1.Attributes) > 0 {
-		n := len(v0.Attributes)
-		if len(v1.Attributes) < n {
-			n = len(v1.Attributes)
-		}
-		result.Attributes = make([]float32, n)
-		for i := 0; i < n; i++ {
-			result.Attributes[i] = v0.Attributes[i] + t*(v1.Attributes[i]-v0.Attributes[i])
-		}
-	}
+	// clipArenaChunk is the number of float32s the attribute arena
+	// allocates at once for the vertices clipping creates.
+	clipArenaChunk = 4096
+)
 
-	return result, t
+// clipPlane is a plane of a Clipper: it keeps the points whose ClipPlane
+// distance is at least min.
+type clipPlane struct {
+	ClipPlane
+	min float32
 }
 
-// ClipTriangleAgainstPlane clips a triangle against a single plane.
-// Returns a slice of triangles (0, 1, or 2) after clipping.
+func (p *clipPlane) distance(v *ClipSpaceVertex) float32 {
+	return p.A*v.Position[0] + p.B*v.Position[1] + p.C*v.Position[2] + p.D*v.Position[3] - p.min
+}
+
+// Clipper clips triangles in clip space, before the perspective divide
+// (WebGPU spec, "Primitive Clipping"): against 0 <= z <= w, against w > 0,
+// and against x and y planes a guard band past the render target. Clipping
+// in clip space is what keeps a vertex behind the eye (w < 0), whose divided
+// position is mirrored, or one far outside the viewport, beyond the range
+// the rasterizer can snap to, from changing which pixels a triangle covers.
 //
-// Cases:
-//   - All 3 vertices inside: returns 1 triangle (original)
-//   - All 3 vertices outside: returns 0 triangles
-//   - 1 vertex inside: returns 1 triangle
-//   - 2 vertices inside: returns 2 triangles (quad split)
-func ClipTriangleAgainstPlane(tri [3]ClipSpaceVertex, plane ClipPlane) [][3]ClipSpaceVertex {
-	// Compute distances and count vertices inside
-	d := [3]float32{
-		plane.Distance(tri[0]),
-		plane.Distance(tri[1]),
-		plane.Distance(tri[2]),
-	}
+// The vertices clipping creates interpolate the position and every
+// attribute linearly in clip space, which is perspective-correct once they
+// are divided by w; flat attributes are copied from the provoking vertex.
+// Their attributes live in an arena owned by the Clipper and stay valid as
+// long as the triangles that use them; a triangle that needs no clipping
+// keeps its vertices' attribute slices and costs no allocation.
+//
+// A Clipper is not safe for concurrent use.
+type Clipper struct {
+	planes [clipPlaneCount]clipPlane
+	// reject is set for a viewport without area: it covers no pixel.
+	reject bool
+	// flat marks the attribute lanes copied from the provoking vertex, as
+	// Triangle.Flat.
+	flat uint64
+	// prov is the provoking vertex of the triangle being clipped.
+	prov  *ClipSpaceVertex
+	poly  [2][maxClipVertices]ClipSpaceVertex
+	dist  [maxClipVertices]float32
+	arena []float32
+}
 
-	inside := [3]bool{d[0] >= 0, d[1] >= 0, d[2] >= 0}
-	insideCount := 0
-	for _, in := range inside {
-		if in {
-			insideCount++
+// NewClipper returns a Clipper for primitives that vt maps onto a width x
+// height render target, with the attribute lanes in flat copied from the
+// provoking vertex.
+func NewClipper(vt *ViewportTransform, width, height int, flat uint64) Clipper {
+	c := Clipper{flat: flat}
+	hx, hy := vt.Width/2, vt.Height/2
+	if !(hx > 0 && hy > 0) {
+		c.reject = true
+		return c
+	}
+	// Window x = cx + hx*ndc.x and y = cy - hy*ndc.y; the guard band is the
+	// window rectangle [-g, width+g] x [-g, height+g] in NDC.
+	cx, cy := vt.X+hx, vt.Y+hy
+	g := float32(clipGuardBand)
+	xMin, xMax := (-g-cx)/hx, (float32(width)+g-cx)/hx
+	yMin, yMax := (cy-float32(height)-g)/hy, (cy+g)/hy
+	c.planes = [clipPlaneCount]clipPlane{
+		{ClipPlane{0, 0, 0, 1}, minClipW},
+		{ClipPlaneNear, 0},
+		{ClipPlaneFar, 0},
+		{ClipPlane{1, 0, 0, -xMin}, 0}, // x >= xMin*w
+		{ClipPlane{-1, 0, 0, xMax}, 0}, // x <= xMax*w
+		{ClipPlane{0, 1, 0, -yMin}, 0}, // y >= yMin*w
+		{ClipPlane{0, -1, 0, yMax}, 0}, // y <= yMax*w
+	}
+	return c
+}
+
+// outcode returns the planes v lies outside of, bit i for plane i.
+func (c *Clipper) outcode(v *ClipSpaceVertex) uint8 {
+	var code uint8
+	for i := range c.planes {
+		// !(d >= 0) puts a NaN position outside every plane.
+		if d := c.planes[i].distance(v); !(d >= 0) {
+			code |= 1 << i
 		}
 	}
+	return code
+}
 
-	switch insideCount {
-	case 0:
-		// All outside - triangle is completely clipped
+// Clip clips the triangle v0, v1, v2, whose provoking vertex is v0, and
+// returns the visible part as a convex polygon in the triangle's winding,
+// empty when nothing is visible. Its first vertex carries the provoking
+// vertex's flat attributes: it is v0, or a vertex clipping created. The
+// polygon is valid until the next call.
+func (c *Clipper) Clip(v0, v1, v2 *ClipSpaceVertex) []ClipSpaceVertex {
+	if c.reject {
 		return nil
-
-	case 3:
-		// All inside - return original triangle
-		return [][3]ClipSpaceVertex{tri}
-
-	case 1:
-		// One vertex inside - produces one smaller triangle
-		return clipOneInside(tri, inside, plane)
-
-	case 2:
-		// Two vertices inside - produces a quad (two triangles)
-		return clipTwoInside(tri, inside, plane)
 	}
-
-	return nil
-}
-
-// clipOneInside handles the case where exactly one vertex is inside the plane.
-// Returns one triangle formed by the inside vertex and two intersection points.
-func clipOneInside(tri [3]ClipSpaceVertex, inside [3]bool, plane ClipPlane) [][3]ClipSpaceVertex {
-	// Find the inside vertex index
-	var insideIdx int
-	for i, in := range inside {
-		if in {
-			insideIdx = i
-			break
+	o0, o1, o2 := c.outcode(v0), c.outcode(v1), c.outcode(v2)
+	if o0&o1&o2 != 0 {
+		return nil // all three outside one plane
+	}
+	poly := c.poly[0][:3]
+	poly[0], poly[1], poly[2] = *v0, *v1, *v2
+	cut := o0 | o1 | o2
+	if cut == 0 {
+		return poly
+	}
+	c.prov = v0
+	dst := 1 // the polygon alternates between the two buffers
+	for i := range c.planes {
+		if cut&(1<<i) == 0 {
+			continue // every vertex is inside: the plane cuts nothing
 		}
-	}
-
-	// Get vertex indices in order (inside vertex first)
-	i0 := insideIdx
-	i1 := (insideIdx + 1) % 3
-	i2 := (insideIdx + 2) % 3
-
-	// Compute intersection points
-	intersect1, _ := plane.Intersect(tri[i0], tri[i1])
-	intersect2, _ := plane.Intersect(tri[i0], tri[i2])
-
-	// New triangle: inside vertex + two intersection points
-	return [][3]ClipSpaceVertex{
-		{tri[i0], intersect1, intersect2},
-	}
-}
-
-// clipTwoInside handles the case where exactly two vertices are inside the plane.
-// Returns two triangles forming a quad.
-func clipTwoInside(tri [3]ClipSpaceVertex, inside [3]bool, plane ClipPlane) [][3]ClipSpaceVertex {
-	// Find the outside vertex index
-	var outsideIdx int
-	for i, in := range inside {
-		if !in {
-			outsideIdx = i
-			break
-		}
-	}
-
-	// Get vertex indices with outside vertex first
-	i0 := outsideIdx           // Outside
-	i1 := (outsideIdx + 1) % 3 // Inside
-	i2 := (outsideIdx + 2) % 3 // Inside
-
-	// Compute intersection points
-	// intersect1: on edge from i0 to i1
-	// intersect2: on edge from i0 to i2
-	intersect1, _ := plane.Intersect(tri[i1], tri[i0])
-	intersect2, _ := plane.Intersect(tri[i2], tri[i0])
-
-	// Form two triangles from the quad (i1, intersect1, intersect2, i2)
-	// Triangle 1: i1, intersect1, i2
-	// Triangle 2: intersect1, intersect2, i2
-	return [][3]ClipSpaceVertex{
-		{tri[i1], intersect1, tri[i2]},
-		{intersect1, intersect2, tri[i2]},
-	}
-}
-
-// ClipTriangle clips a triangle against all 6 frustum planes.
-// Returns a list of clipped triangles (may be 0 to many).
-func ClipTriangle(tri [3]ClipSpaceVertex) [][3]ClipSpaceVertex {
-	return ClipTriangleAgainstPlanes(tri, AllFrustumPlanes)
-}
-
-// ClipTriangleNearFar clips a triangle against only the near and far planes.
-// This is faster than full frustum clipping and is sufficient for many cases
-// where triangles are known to be within the X/Y bounds.
-func ClipTriangleNearFar(tri [3]ClipSpaceVertex) [][3]ClipSpaceVertex {
-	return ClipTriangleAgainstPlanes(tri, NearFarPlanes)
-}
-
-// ClipTriangleAgainstPlanes clips a triangle against the specified planes.
-func ClipTriangleAgainstPlanes(tri [3]ClipSpaceVertex, planes []ClipPlane) [][3]ClipSpaceVertex {
-	// Start with the input triangle
-	triangles := [][3]ClipSpaceVertex{tri}
-
-	// Clip against each plane
-	for _, plane := range planes {
-		if len(triangles) == 0 {
+		poly = c.clipPolygon(poly, &c.planes[i], c.poly[dst][:0])
+		if len(poly) < 3 {
 			return nil
 		}
-
-		var clipped [][3]ClipSpaceVertex
-		for _, t := range triangles {
-			result := ClipTriangleAgainstPlane(t, plane)
-			clipped = append(clipped, result...)
-		}
-		triangles = clipped
+		dst ^= 1
 	}
+	return poly
+}
 
-	return triangles
+// clipPolygon clips poly against p into dst (Sutherland-Hodgman). The first
+// vertex of the result is poly's first vertex when it is inside, otherwise
+// the vertex created where the polygon first enters the plane, so the
+// provoking vertex's flat attributes stay at index 0.
+func (c *Clipper) clipPolygon(poly []ClipSpaceVertex, p *clipPlane, dst []ClipSpaceVertex) []ClipSpaceVertex {
+	n := len(poly)
+	for i := range n {
+		c.dist[i] = p.distance(&poly[i])
+	}
+	for i := range n {
+		j := i + 1
+		if j == n {
+			j = 0
+		}
+		di, dj := c.dist[i], c.dist[j]
+		inI, inJ := di >= 0, dj >= 0
+		if inI && len(dst) < maxClipVertices {
+			dst = append(dst, poly[i])
+		}
+		if inI != inJ && len(dst) < maxClipVertices {
+			// The new vertex is computed from the inside vertex, so the
+			// shared edge of two triangles is cut at the same point whichever
+			// way they wind.
+			if inI {
+				dst = append(dst, c.intersect(&poly[i], &poly[j], di, dj))
+			} else {
+				dst = append(dst, c.intersect(&poly[j], &poly[i], dj, di))
+			}
+		}
+	}
+	return dst
+}
+
+// intersect returns the point where the edge from in (inside the plane, at
+// distance dIn) to out (outside, at dOut) crosses the plane.
+func (c *Clipper) intersect(in, out *ClipSpaceVertex, dIn, dOut float32) ClipSpaceVertex {
+	t := dIn / (dIn - dOut)
+	var v ClipSpaceVertex
+	for i := range v.Position {
+		v.Position[i] = in.Position[i] + t*(out.Position[i]-in.Position[i])
+	}
+	n := min(len(in.Attributes), len(out.Attributes), len(c.prov.Attributes))
+	if n == 0 {
+		return v
+	}
+	attrs := c.alloc(n)
+	for i := range attrs {
+		if i < 64 && c.flat&(1<<i) != 0 {
+			// A flat lane holds a bit pattern: copied, never interpolated.
+			attrs[i] = c.prov.Attributes[i]
+			continue
+		}
+		attrs[i] = in.Attributes[i] + t*(out.Attributes[i]-in.Attributes[i])
+	}
+	v.Attributes = attrs
+	return v
+}
+
+// alloc returns n float32s from the arena. A full chunk is left to the
+// triangles that use it, never reused.
+func (c *Clipper) alloc(n int) []float32 {
+	if len(c.arena) < n {
+		c.arena = make([]float32, max(clipArenaChunk, n))
+	}
+	s := c.arena[:n:n]
+	c.arena = c.arena[n:]
+	return s
 }
 
 // IsCompletelyOutside returns true if all vertices are outside any single plane.
@@ -350,21 +372,4 @@ func TriangleTrivialAccept(tri [3]ClipSpaceVertex) bool {
 
 	// If all vertices have zero outcode, they're all inside
 	return (o0 | o1 | o2) == 0
-}
-
-// ClipTriangleFast clips a triangle with optimized fast paths.
-// Uses trivial accept/reject tests before full clipping.
-func ClipTriangleFast(tri [3]ClipSpaceVertex) [][3]ClipSpaceVertex {
-	// Fast rejection test
-	if TriangleTrivialReject(tri) {
-		return nil
-	}
-
-	// Fast accept test
-	if TriangleTrivialAccept(tri) {
-		return [][3]ClipSpaceVertex{tri}
-	}
-
-	// Full clipping required
-	return ClipTriangle(tri)
 }
