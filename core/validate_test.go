@@ -33,6 +33,51 @@ func TestValidateTextureDescriptor_Valid(t *testing.T) {
 	}
 }
 
+// TestValidateTextureDescriptor_CompressedShape checks the compressed-format
+// rules of WebGPU "validating GPUTextureDescriptor" as Rust wgpu-core's
+// create_texture applies them: 2D only (3D needs the sliced-3D features,
+// which gputypes does not offer yet), width and height multiples of the block.
+func TestValidateTextureDescriptor_CompressedShape(t *testing.T) {
+	features := gputypes.Features(gputypes.FeatureTextureCompressionBC) |
+		gputypes.Features(gputypes.FeatureTextureCompressionETC2)
+	tests := []struct {
+		name   string
+		format gputypes.TextureFormat
+		dim    gputypes.TextureDimension
+		size   hal.Extent3D
+		want   CreateTextureErrorKind // -1: valid
+	}{
+		{"BC1 8x8 2D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1}, -1},
+		{"BC1 8x8 2D array", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 6}, -1},
+		{"BC1 5x5 2D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 5, Height: 5, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"BC7 4x6 2D", gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 4, Height: 6, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"ETC2 6x4 2D", gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 6, Height: 4, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"BC1 4x1 1D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension1D, hal.Extent3D{Width: 4, Height: 1, DepthOrArrayLayers: 1}, CreateTextureErrorInvalidCompressedDimension},
+		{"BC1 4x4x4 3D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension3D, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 4}, CreateTextureErrorInvalidCompressedDimension},
+		{"ETC2 4x4x4 3D", gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureDimension3D, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 4}, CreateTextureErrorInvalidCompressedDimension},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc := validTextureDesc()
+			desc.Format, desc.Dimension, desc.Size = tt.format, tt.dim, tt.size
+			err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), features)
+			if tt.want < 0 {
+				if err != nil {
+					t.Fatalf("want valid, got %v", err)
+				}
+				return
+			}
+			var cte *CreateTextureError
+			if !errors.As(err, &cte) || cte.Kind != tt.want {
+				t.Fatalf("got %v, want CreateTextureError kind %d", err, tt.want)
+			}
+			if cte.Format != tt.format || cte.Error() == "" {
+				t.Errorf("error %q does not carry format %v", cte.Error(), tt.format)
+			}
+		})
+	}
+}
+
 func TestValidateTextureDescriptor_InvalidDimension(t *testing.T) {
 	desc := validTextureDesc()
 	desc.Dimension = gputypes.TextureDimensionUndefined

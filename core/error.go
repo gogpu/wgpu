@@ -336,6 +336,13 @@ const (
 	// CreateTextureErrorMissingDownlevelFlags indicates a descriptor that needs
 	// a downlevel flag the device lacks (Rust CreateTextureError::MissingDownlevelFlags).
 	CreateTextureErrorMissingDownlevelFlags
+	// CreateTextureErrorInvalidCompressedDimension indicates a compressed format
+	// on a texture that is not 2D (Rust CreateTextureError::InvalidCompressedDimension).
+	CreateTextureErrorInvalidCompressedDimension
+	// CreateTextureErrorNotMultipleOfBlockSize indicates a compressed texture
+	// whose width or height is not a multiple of the format's block (Rust
+	// TextureDimensionError::NotMultipleOfBlockWidth/Height).
+	CreateTextureErrorNotMultipleOfBlockSize
 )
 
 // CreateTextureError represents an error during texture creation.
@@ -356,6 +363,8 @@ type CreateTextureError struct {
 	ViewFormat gputypes.TextureFormat
 	// Cause is the downlevel error (CreateTextureErrorMissingDownlevelFlags).
 	Cause error
+	// Dimension is the texture dimension (CreateTextureErrorInvalidCompressedDimension).
+	Dimension gputypes.TextureDimension
 }
 
 // Error implements the error interface.
@@ -414,6 +423,13 @@ func (e *CreateTextureError) viewFormatText(label string) string {
 			label, e.ViewFormat, e.Format)
 	case CreateTextureErrorMissingDownlevelFlags:
 		return fmt.Sprintf("texture %q: %v", label, e.Cause)
+	case CreateTextureErrorInvalidCompressedDimension:
+		return fmt.Sprintf("texture %q: compressed format %v needs a 2D texture, not %v",
+			label, e.Format, e.Dimension)
+	case CreateTextureErrorNotMultipleOfBlockSize:
+		bw, bh := e.Format.BlockDimensions()
+		return fmt.Sprintf("texture %q: size %dx%d is not a multiple of the %dx%d block of %v",
+			label, e.RequestedWidth, e.RequestedHeight, bw, bh, e.Format)
 	default:
 		return fmt.Sprintf("texture %q: unknown error", label)
 	}
