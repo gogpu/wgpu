@@ -35,19 +35,15 @@ func BitEntryPoint(bit int) string {
 //
 // Dawn's shader (BlitBufferToDepthStencil.cpp, kBlitStencilShaderCommon) reads
 // the bit from the instance index; see RecordLayer for why we bake it.
-//
-// The mip level is an i32: naga's GLSL writer passes a u32 level to
-// texelFetch, textureSize and textureQueryLevels as it is, and GLSL takes an
-// int there with no implicit conversion, so the GL driver rejects the shader.
 func ShaderSource(dim gputypes.TextureViewDimension) (string, error) {
 	var texType, load string
 	switch dim {
 	case gputypes.TextureViewDimension2D:
 		texType = "texture_2d<u32>"
-		load = "textureLoad(src_tex, coords, 0i)"
+		load = "textureLoad(src_tex, coords, 0u)"
 	case gputypes.TextureViewDimension2DArray:
 		texType = "texture_2d_array<u32>"
-		load = "textureLoad(src_tex, coords, params.layer, 0i)"
+		load = "textureLoad(src_tex, coords, params.layer, 0u)"
 	default:
 		return "", fmt.Errorf("stencilblit: source view dimension %v is neither 2d nor 2d-array", dim)
 	}

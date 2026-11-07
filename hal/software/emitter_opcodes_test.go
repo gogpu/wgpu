@@ -123,9 +123,7 @@ var<workgroup> flag: u32;
 }`},
 	{"loops_and_switch", `
 @group(0) @binding(0) var<storage, read_write> b: array<i32>;
-// The pointer store is spelled out: naga v0.21.3 rejects the valid compound
-// form *p += x ("Operation Add can't work with Pointer").
-fn helper(x: i32, p: ptr<function, i32>) -> i32 { *p = *p + x; return x * 2; }
+fn helper(x: i32, p: ptr<function, i32>) -> i32 { *p += x; return x * 2; }
 @compute @workgroup_size(1) fn main() {
 	var acc = 0;
 	for (var k = 0; k < b[0]; k++) {
