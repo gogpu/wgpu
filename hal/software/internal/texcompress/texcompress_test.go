@@ -23,6 +23,11 @@ var formats = []gputypes.TextureFormat{
 	gputypes.TextureFormatBC5RGUnorm, gputypes.TextureFormatBC5RGSnorm,
 	gputypes.TextureFormatBC6HRGBUfloat, gputypes.TextureFormatBC6HRGBFloat,
 	gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureFormatBC7RGBAUnormSrgb,
+	gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureFormatETC2RGB8UnormSrgb,
+	gputypes.TextureFormatETC2RGB8A1Unorm, gputypes.TextureFormatETC2RGB8A1UnormSrgb,
+	gputypes.TextureFormatETC2RGBA8Unorm, gputypes.TextureFormatETC2RGBA8UnormSrgb,
+	gputypes.TextureFormatEACR11Unorm, gputypes.TextureFormatEACR11Snorm,
+	gputypes.TextureFormatEACRG11Unorm, gputypes.TextureFormatEACRG11Snorm,
 }
 
 // goldenBlock is one line of testdata/gpu_readback.txt: a block and the
