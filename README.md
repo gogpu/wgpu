@@ -32,10 +32,10 @@
 |----------|--------------|
 | **Backends** | Vulkan, Metal, DirectX 12, OpenGL ES, Software, **Browser WebGPU**, **Rust FFI** |
 | **Platforms** | Windows, Linux, macOS, **Browser (WASM)**, **Android/arm64 (preview)**; iOS untested |
-| **API** | WebGPU-compliant (W3C specification) |
+| **API** | Follows the W3C WebGPU specification |
 | **Shaders** | WGSL via gogpu/naga compiler (SPIR-V, HLSL, MSL, GLSL, DXIL) |
-| **Compute** | Full compute shader support, GPU→CPU readback |
-| **Present** | Damage-aware presentation — compositor dirty rects (first WebGPU implementation) |
+| **Compute** | Compute shaders and GPU→CPU readback on every native backend (software: see its known gaps below) |
+| **Present** | Damage-aware presentation — compositor dirty rects |
 | **Ray Tracing** | Not usable yet: HAL code only, no public API, not run on a GPU. Public inline ray queries are planned, Vulkan first ([status](docs/RAY-TRACING.md), [#369](https://github.com/gogpu/wgpu/issues/369)) |
 | **Debug** | Leak detection, error scopes (native backends; not yet in the browser backend), validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
@@ -64,12 +64,13 @@ New surface integrations should use the explicit safe or unsafe target API
 described in [Surface targets](docs/SURFACE-TARGETS.md). The original
 two-`uintptr` method remains available as a compatibility adapter.
 
-**Rust FFI backend** (optional, battle-tested wgpu-native drivers):
+**Rust FFI backend** (optional, through wgpu-native):
 ```bash
 go build -tags rust
 ```
 
 > Requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) v29 binary. Set `WGPU_NATIVE_PATH` or place in system PATH. See [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) for details.
+> With go-webgpu/webgpu v0.5.5 this build is not usable for real rendering yet (vertex buffers and depth attachments fail; see the 0.34.6 known issues in [CHANGELOG.md](CHANGELOG.md)).
 
 **Browser (WASM):**
 ```bash
@@ -80,7 +81,7 @@ GOOS=js GOARCH=wasm go build -o app.wasm .
 > | Build Tag | Implementation | Use Case |
 > |-----------|---------------|----------|
 > | (default) | Pure Go → core → HAL → Vulkan/Metal/DX12/GLES/Software | Zero deps, cross-compile |
-> | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | Battle-tested GPU drivers |
+> | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | wgpu-native's backends |
 > | `GOOS=js` | syscall/js → Browser WebGPU | Web applications |
 >
 > **API consistency:** The public API compiles on all build targets. HAL wrapper functions (`NewDeviceFromHAL`, `NewSurfaceFromHAL`, etc.) return errors or nil on Rust/Browser builds where no Go HAL layer exists. Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
@@ -201,7 +202,7 @@ if ready, _ := pending.Status(); ready {
 ```
 
 Safety guarantees: UAF protection via generation counters on `MappedRange`,
-`ErrBufferDestroyed` on destroy-during-pending, `ErrMapCancelled` on unmap-during-pending,
+`ErrBufferDestroyed` on destroy-during-pending, `ErrMapCanceled` on unmap-during-pending,
 `ErrMapRangeOverlap` for overlapping `MappedRange` calls, `MAP_ALIGNMENT = 8`
 validation, thread-safe concurrent `Device.Poll`.
 
@@ -272,8 +273,8 @@ import _ "github.com/gogpu/wgpu/hal/allbackends"
 
 | Backend | Windows | Linux | macOS | iOS | Android/arm64 | Notes |
 |---------|:-------:|:-----:|:-----:|:---:|:-------------:|-------|
-| **Vulkan** | Yes | Yes | Yes | - | Preview | MoltenVK on macOS; [Android contract](docs/ANDROID.md) |
-| **Metal** | - | - | Yes | Untested | - | Native Apple GPU; never run on iOS |
+| **Vulkan** | Yes | Yes | Untested | - | Preview | macOS through MoltenVK, not run in CI; [Android contract](docs/ANDROID.md) |
+| **Metal** | - | - | Yes | Untested | - | Native Apple GPU; CI runs it on the macOS runner's virtual GPU; never run on iOS |
 | **DX12** | Yes | - | - | - | - | Windows 10+ |
 | **GLES** | Yes | Yes | - | - | - | OpenGL 3.3+ / OpenGL ES 3.0+ |
 | **Software** | Yes | Yes | Yes | Untested | - | CPU fallback |
@@ -315,15 +316,15 @@ Windows GPU access via:
 - Encoder pool with allocator recycling (Rust wgpu-core pattern)
 - In-memory shader cache (SHA-256 keyed, LRU eviction, works for both paths)
 - DRED diagnostics (auto-breadcrumbs + page fault tracking on TDR)
-- **Dual shader compilation:** HLSL→FXC (default, SM 5.1) or **DXIL direct** via naga (`GOGPU_DX12_DXIL=1`, SM 6.0+, zero external dependencies — first Pure Go DXIL generator)
-- StagingBelt ring-buffer allocator for zero-allocation GPU data transfer
+- **Dual shader compilation:** HLSL→FXC (default, SM 5.1) or **DXIL direct** via naga (`GOGPU_DX12_DXIL=1`, experimental, SM 6.0+, no external compiler)
+- StagingBelt ring-buffer allocator that reuses staging memory for uploads
 
 ### OpenGL ES Backend
 
 Cross-platform GPU access via OpenGL ES 3.0+:
 
 - Pure Go EGL/GL bindings (goffi)
-- Full rendering pipeline: VAO, FBO, MSAA, blend, stencil, depth
+- Rendering pipeline: VAO, FBO, MSAA, blend, stencil, depth
 - WGSL shader compilation (WGSL → GLSL via naga)
 - Combined texture-sampler binding via SamplerBindMap (Rust wgpu pattern)
 - Text rendering with proper texture completeness handling
@@ -333,7 +334,7 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 
 ### Software Backend
 
-Full-featured CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
+CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
 // Software backend auto-registers via init().
@@ -344,20 +345,20 @@ import _ "github.com/gogpu/wgpu/hal/software"
 // Use cases:
 // - CI/CD testing without GPU
 // - Server-side image generation
-// - Reference implementation
 // - Fallback when GPU unavailable
 // - Embedded systems without GPU
 ```
 
 **Rasterization Features:**
-- Edge function triangle rasterization (Pineda algorithm)
-- Perspective-correct interpolation
-- Depth buffer (8 compare functions)
-- Stencil buffer (8 operations)
-- Blending (13 factors, 5 operations)
-- 6-plane frustum clipping (Sutherland-Hodgman)
-- 8x8 tile-based parallel rendering
+- Edge function triangle rasterization (Pineda algorithm) with the top-left fill rule
+- Depth test (all 8 compare functions)
+- Stencil test (all 8 operations)
+- Blending (13 factors without dual-source, 5 operations)
 - **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
+
+**Known gaps** (being fixed): primitives are not clipped in clip space yet; shader derivatives return 0, so
+implicit-LOD sampling uses mip level 0; compute `var<workgroup>` memory is not shared between invocations; encoded
+commands run when they are recorded, not at `Queue.Submit`; compressed texture formats cannot be sampled.
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
@@ -451,6 +452,11 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
    <img alt="Star History Chart" src="https://api.starhistory.io/png?repos=gogpu/wgpu" width="800" />
  </picture>
 </a>
+
+## Acknowledgments
+
+The architecture follows [gfx-rs/wgpu](https://github.com/gfx-rs/wgpu), the Rust WebGPU implementation:
+wgpu-core, wgpu-hal and wgpu-types. Thanks to its authors and contributors for the design we build on.
 
 ## License
 
