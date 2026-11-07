@@ -412,6 +412,12 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, w, h int, vertexC
 		}
 	}
 
+	// A shader with derivatives or implicit-LOD samples runs in quads,
+	// whatever the vertices carry: it reads per-fragment input.
+	if r.drawQuads(pipe, triangles, targets) {
+		return
+	}
+
 	// MRT path: when multiple color attachments exist, use the MRT fragment
 	// shader to write outputs for all @location(N) targets simultaneously.
 	if r.hasMRT() && hasAttrs {
@@ -1006,25 +1012,6 @@ func wrapModeToShader(mode gputypes.AddressMode) uint32 {
 	}
 }
 
-// floatsToShaderValue converts a float32 slice into the appropriate shader Value type.
-func floatsToShaderValue(vals []float32) shader.Value {
-	switch len(vals) {
-	case 1:
-		return shader.ValFloat(vals[0])
-	case 2:
-		return shader.ValVec2(vals[0], vals[1])
-	case 3:
-		return shader.ValVec3(vals[0], vals[1], vals[2])
-	case 4:
-		return shader.ValVec4(vals[0], vals[1], vals[2], vals[3])
-	default:
-		if len(vals) == 0 {
-			return shader.ValFloat(0)
-		}
-		return shader.ValVec4(vals[0], vals[1], vals[2], vals[3])
-	}
-}
-
 // intVertexFormat is the layout of an integer vertex format.
 type intVertexFormat struct {
 	lanes, bytes int
@@ -1349,6 +1336,11 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 		allTriangles = append(allTriangles, r.verticesToTriangles(vertices, flat)...)
 	}
 
+	// A shader with derivatives or implicit-LOD samples runs in quads.
+	if r.drawQuads(pipe, allTriangles, targets) {
+		return true
+	}
+
 	// MRT path for SPIR-V draws with multiple color attachments.
 	if r.hasMRT() {
 		if mrtFunc, mayDiscard := r.buildMRTFragmentShaderFunc(); mrtFunc != nil {
@@ -1535,7 +1527,16 @@ func (fi *fragmentInterface) inputWidth(varID uint32) int {
 // each input's type (shader.Module.InterfaceValue). The position builtin is
 // the pixel center in framebuffer coordinates, the depth and 1/w.
 func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Value {
-	inputs := make(map[uint32]shader.Value, len(fi.locationInputs)+1)
+	return fi.fillInputs(frag, make(map[uint32]shader.Value, len(fi.locationInputs)+1))
+}
+
+// fillInputs stores the input values of frag (see inputs) in inputs, which
+// it creates when nil, and returns it. The quad path reuses one map per
+// lane, so it allocates no map per fragment.
+func (fi *fragmentInterface) fillInputs(frag *raster.Fragment, inputs map[uint32]shader.Value) map[uint32]shader.Value {
+	if inputs == nil {
+		inputs = make(map[uint32]shader.Value, len(fi.locationInputs)+1)
+	}
 	attrs := frag.Attributes
 	offset := 0
 	for _, li := range fi.locationInputs {
@@ -1547,11 +1548,80 @@ func (fi *fragmentInterface) inputs(frag *raster.Fragment) map[uint32]shader.Val
 		offset = end
 	}
 	if fi.fragCoordVar != 0 {
-		inputs[fi.fragCoordVar] = floatsToShaderValue([]float32{
-			float32(frag.X) + 0.5, float32(frag.Y) + 0.5, frag.Depth, frag.InvW,
-		})
+		inputs[fi.fragCoordVar] = shader.ValVec4(float32(frag.X)+0.5, float32(frag.Y)+0.5, frag.Depth, frag.InvW)
 	}
 	return inputs
+}
+
+// buildQuadShaderFunc creates a raster.QuadShaderFunc that runs the SPIR-V
+// fragment shader for a 2x2 quad at a time (shader.Module.ExecuteQuad) and
+// returns every lane's colors by @location, as buildMRTFragmentShaderFunc
+// does per fragment. It is built only for a shader that needs quads: one
+// whose entry point reaches a derivative or an implicit-LOD sample
+// (shader.Module.NeedsQuads), and that reads a per-fragment input. Every
+// other shader keeps the cheaper per-fragment path, whose results are the
+// same for it. The second result reports whether the shader may discard.
+func (r *RenderPassEncoder) buildQuadShaderFunc() (raster.QuadShaderFunc, bool) {
+	fi, ok := r.fragmentInterfaceOf()
+	if !ok || !fi.hasInputs || len(fi.outputs) == 0 || !fi.parsed.NeedsQuads(fi.entry) {
+		return nil, false
+	}
+	numOutputs := 0
+	for _, lo := range fi.outputs {
+		numOutputs = max(numOutputs, lo.location+1)
+	}
+
+	ctx := r.buildExecutionContext()
+	kinds := r.colorKinds()
+
+	// One set of input and output maps and color slices for the whole draw:
+	// the raster reads a quad's colors before it runs the next quad.
+	var sq shader.Quad
+	var colors [raster.QuadLanes][][4]float32
+	storage := make([][4]float32, raster.QuadLanes*numOutputs)
+	for lane := range colors {
+		colors[lane] = storage[lane*numOutputs : (lane+1)*numOutputs : (lane+1)*numOutputs]
+	}
+
+	return func(q *raster.Quad, helpers uint8) (*[raster.QuadLanes][][4]float32, uint8) {
+		for lane := range q.Frags {
+			sq.Inputs[lane] = fi.fillInputs(&q.Frags[lane], sq.Inputs[lane])
+		}
+		sq.Helpers = helpers
+		if err := fi.parsed.ExecuteQuad(fi.entry, ctx, &sq); err != nil {
+			// As the per-fragment paths do on an error: white for every target.
+			for _, c := range colors {
+				for i := range c {
+					c[i] = [4]float32{1, 1, 1, 1}
+				}
+			}
+			return &colors, 0
+		}
+		for lane, c := range colors {
+			clear(c)
+			for _, lo := range fi.outputs {
+				if v, ok := sq.Outputs[lane][lo.varID]; ok {
+					c[lo.location] = fragmentColor(v, kindAt(kinds, lo.location))
+				}
+			}
+		}
+		return &colors, sq.Discarded
+	}, r.pipeline.fragmentMayDiscard
+}
+
+// drawQuads draws triangles through buildQuadShaderFunc and reports true,
+// or reports false when the fragment shader does not need quads.
+func (r *RenderPassEncoder) drawQuads(pipe *raster.Pipeline, triangles []raster.Triangle, targets []*colorTarget) bool {
+	quadFunc, mayDiscard := r.buildQuadShaderFunc()
+	if quadFunc == nil {
+		return false
+	}
+	var mrtOut raster.MRTOutput
+	if r.hasMRT() {
+		mrtOut = writeMRTLocations(targets)
+	}
+	pipe.DrawTrianglesWithQuadShader(triangles, quadFunc, mrtOut, mayDiscard)
+	return true
 }
 
 // buildFragmentShaderFunc creates a raster.FragmentShaderFunc that executes

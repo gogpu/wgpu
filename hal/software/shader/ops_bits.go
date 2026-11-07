@@ -129,10 +129,11 @@ func bitCount(x uint32) uint32 { return uint32(bits.OnesCount32(x)) }
 func bitReverse(x uint32) uint32 { return bits.Reverse32(x) }
 
 // zeroDerivative returns the zero of the shape of v: what OpDPdx, OpDPdy and
-// OpFwidth (and their fine and coarse forms) return. A fragment invocation
-// runs alone here, not in a 2x2 quad, so there is no neighbor to take a
-// difference from; the derivative of every value is taken as 0, which is
-// exact for values uniform over the quad.
+// OpFwidth (and their fine and coarse forms) return in an invocation run
+// alone, outside ExecuteQuad (a fragment shader without per-fragment inputs,
+// or a direct Execute call). There is no neighbor to take a difference from;
+// the derivative of every value is taken as 0, which is exact for values
+// uniform over the quad.
 func zeroDerivative(v Value) Value {
 	switch v.Tag {
 	case TagVec2, TagVec3, TagVec4:

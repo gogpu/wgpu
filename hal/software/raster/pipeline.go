@@ -763,6 +763,106 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 	}
 }
 
+// QuadShaderFunc runs a fragment shader for the four lanes of q. The lanes
+// in helpers run only so the others can take derivatives (Quad.Frags holds a
+// fragment for each). It returns, for every lane that is not a helper and did
+// not discard, the colors per @location in colors[lane], and the lanes that
+// discarded. The colors are read before the next call, so the function may
+// reuse their storage.
+type QuadShaderFunc func(q *Quad, helpers uint8) (colors *[QuadLanes][][4]float32, discarded uint8)
+
+// DrawTrianglesWithQuadShader rasterizes triangles in 2x2 quads and runs
+// quadFunc once per quad that has a covered fragment, for shaders whose
+// derivatives or implicit-LOD samples need a fragment's neighbors.
+//
+// A lane is live when the triangle covers its pixel and the pixel passes the
+// bounds and scissor tests; the other lanes are helpers. Without mayDiscard
+// the depth and stencil tests run first, and a lane that fails them becomes
+// a helper too: it is not shaded for output, but its neighbors still take
+// differences from it. With mayDiscard the tests run after the shader, for
+// the lanes that did not discard. Location 0 is written as in
+// DrawTrianglesWithMRTShader, and mrtOut (if set) receives every location of
+// a fragment that has more than one.
+func (p *Pipeline) DrawTrianglesWithQuadShader(triangles []Triangle, quadFunc QuadShaderFunc, mrtOut MRTOutput, mayDiscard bool) {
+	p.mu.Lock()
+	viewport := p.viewport
+	depthTest := p.depthTest
+	depthWrite := p.depthWrite
+	depthCompare := p.depthCompare
+	cullMode := p.cullMode
+	frontFace := p.frontFace
+	blendState := p.blendState
+	out := p.colorOutput
+	stencilBuffer := p.stencilBuffer
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	var scissor *Rect
+	if p.scissorRect != nil {
+		scissor = &Rect{
+			X:      p.scissorRect.X,
+			Y:      p.scissorRect.Y,
+			Width:  p.scissorRect.Width,
+			Height: p.scissorRect.Height,
+		}
+	}
+	p.mu.Unlock()
+
+	// test runs the depth and stencil tests of frag and writes its depth;
+	// it reports whether the fragment passed.
+	var stencilState StencilState
+	test := func(frag *Fragment) bool {
+		result := p.performDepthStencilTest(
+			frag.X, frag.Y, frag.Depth,
+			depthTest, depthWrite, depthCompare,
+			stencilBuffer, stencilState,
+		)
+		if result.passed && result.writeDepth {
+			p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
+		}
+		return result.passed
+	}
+	shadeQuad := func(q *Quad) {
+		var live uint8
+		for lane := range QuadLanes {
+			frag := &q.Frags[lane]
+			if q.Covered&(1<<lane) == 0 ||
+				frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height ||
+				!p.passesScissorTest(frag.X, frag.Y, scissor) {
+				continue
+			}
+			if mayDiscard || test(frag) {
+				live |= 1 << lane
+			}
+		}
+		if live == 0 {
+			return
+		}
+		colors, discarded := quadFunc(q, ^live&(1<<QuadLanes-1))
+		for lane := range QuadLanes {
+			frag := &q.Frags[lane]
+			if live&(1<<lane) == 0 || discarded&(1<<lane) != 0 || (mayDiscard && !test(frag)) {
+				continue
+			}
+			c := colors[lane]
+			if len(c) > 0 {
+				p.writeColor(frag.X, frag.Y, c[0], blendState, out)
+			}
+			if mrtOut != nil && len(c) > 1 {
+				mrtOut(frag.X, frag.Y, c)
+			}
+		}
+	}
+
+	var rast QuadRasterizer
+	for i := range triangles {
+		tri := &triangles[i]
+		if ShouldCull(*tri, cullMode, frontFace) {
+			continue
+		}
+		stencilState = faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
+		rast.Rasterize(tri, viewport, shadeQuad)
+	}
+}
+
 // DrawTrianglesParallel uses tile-based parallel rasterization.
 // This can significantly speed up rendering for large numbers of triangles
 // by distributing work across multiple CPU cores.

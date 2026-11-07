@@ -100,21 +100,8 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 		return nil, err
 	}
 
-	// Collect output values.
 	outputs := make(map[uint32]Value)
-	for _, varID := range ep.InterfaceIDs {
-		vi, ok := m.Variables[varID]
-		if !ok {
-			continue
-		}
-		if vi.StorageClass != StorageClassOutput {
-			continue
-		}
-		v := interp.values[varID]
-		if v.Tag == TagPointer {
-			outputs[varID] = v.AsPointer().Val
-		}
-	}
+	interp.collectOutputs(outputs)
 
 	// Return interpreter to pool for reuse.
 	m.putInterpreter(interp)
@@ -167,6 +154,17 @@ type interpreter struct {
 	resumePC      int
 	pendingCall   *interpreter
 	pendingResult uint32
+
+	// Quad execution (P2-SW-020, see ExecuteQuad). With quad set, run
+	// returns at every derivative and implicit-LOD sample instruction with
+	// suspended set, quadPC at that instruction and resumePC after it: the
+	// result needs the other lanes of the quad, so the quad executor computes
+	// it from all of them, stores it and resumes the lane. A helper lane runs
+	// the shader only so its neighbors have values to take differences from:
+	// its buffer, atomic and storage texture writes are dropped.
+	quad   bool
+	helper bool
+	quadPC int
 
 	// debug holds the debug context for breakpoints, tracing, and watch variables.
 	// When nil, all debug logic is skipped (zero overhead on the hot path).
@@ -227,6 +225,9 @@ func (m *Module) putInterpreter(interp *interpreter) {
 	interp.resumePC = 0
 	interp.pendingCall = nil
 	interp.pendingResult = 0
+	interp.quad = false
+	interp.helper = false
+	interp.quadPC = 0
 	m.interpPool.Put(interp)
 }
 
@@ -469,7 +470,13 @@ func (interp *interpreter) readValueFromBuffer(data []byte, offset uint32, ti *T
 // members at their Offset. A store never touches the padding between them.
 // Without a type, or with a value that does not match it, it falls back to
 // the untyped writeValueToBuffer.
+//
+// A helper lane writes nothing: its stores and atomics have no effect on
+// memory (WGSL "Helper Invocations", Vulkan "Helper Invocations").
 func (interp *interpreter) writeValueToBufferTyped(data []byte, offset uint32, val Value, ti *TypeInfo, matStride uint32) {
+	if interp.helper {
+		return
+	}
 	m := interp.module
 	if ti == nil {
 		writeValueToBuffer(data, offset, val)
@@ -1229,19 +1236,16 @@ func (interp *interpreter) run() error {
 
 		case OpImageSampleImplicitLod:
 			// OpImageSampleImplicitLod: type resultID sampledImage coordinate [ImageOperands...]
+			// The implicit level of detail comes from the screen-space
+			// derivatives of the coordinate across the fragment's quad:
+			// in a quad the executor computes them (ExecuteQuad), so the
+			// lane stops here.
 			if len(inst.Operands) >= 2 {
-				sampledImg := interp.values[inst.Operands[0]]
-				coord := interp.values[inst.Operands[1]]
-				// The implicit level of detail comes from the screen-space
-				// derivatives of the coordinate across the 2x2 quad a
-				// fragment runs in on a GPU. The interpreter runs fragments
-				// one at a time and has no quad (P2-SW-020, see
-				// zeroDerivative), so it takes λ_base = 0: the view's base
-				// level, plus the Bias operand. Inventing derivatives would
-				// pick levels no GPU picks.
-				ops := interp.parseImageOperands(inst.Operands[2:])
-				ops.lod = 0
-				interp.values[inst.ResultID] = interp.sampleTexture(sampledImg, coord, ops)
+				if interp.quad {
+					interp.suspendInQuad(pc)
+					return nil
+				}
+				interp.values[inst.ResultID] = interp.sampleImplicitLod(inst, nil)
 			}
 
 		case OpImageSampleExplicitLod:
@@ -1254,13 +1258,18 @@ func (interp *interpreter) run() error {
 
 		case OpImageSampleDrefImplicitLod, OpImageSampleDrefExplicitLod:
 			// OpImageSampleDref*Lod: type resultID sampledImage coordinate Dref [ImageOperands...]
-			// The implicit form takes λ_base = 0 plus the Bias operand, as
+			// The implicit form takes its level of detail from the quad, as
 			// OpImageSampleImplicitLod does.
 			if len(inst.Operands) >= 3 {
-				ops := interp.parseImageOperands(inst.Operands[3:])
 				if inst.Opcode == OpImageSampleDrefImplicitLod {
-					ops.lod, ops.hasGrad = 0, false
+					if interp.quad {
+						interp.suspendInQuad(pc)
+						return nil
+					}
+					interp.values[inst.ResultID] = interp.sampleImplicitLod(inst, nil)
+					break
 				}
+				ops := interp.parseImageOperands(inst.Operands[3:])
 				ref := toFloat32(interp.values[inst.Operands[2]])
 				interp.values[inst.ResultID] = interp.sampleCompare(interp.values[inst.Operands[0]], interp.values[inst.Operands[1]], ref, ops)
 			}
@@ -1324,9 +1333,14 @@ func (interp *interpreter) run() error {
 
 		case OpDPdx, OpDPdy, OpFwidth, OpDPdxFine, OpDPdyFine, OpFwidthFine,
 			OpDPdxCoarse, OpDPdyCoarse, OpFwidthCoarse:
-			// Derivatives need the 2x2 quad a fragment runs in on a GPU;
-			// see zeroDerivative.
+			// Derivatives are differences between the lanes of the
+			// fragment's 2x2 quad: in a quad the executor computes them
+			// (ExecuteQuad); outside one see zeroDerivative.
 			if len(inst.Operands) >= 1 {
+				if interp.quad {
+					interp.suspendInQuad(pc)
+					return nil
+				}
 				interp.values[inst.ResultID] = zeroDerivative(interp.values[inst.Operands[0]])
 			}
 
@@ -1456,6 +1470,8 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (result 
 	child.iterationCount = 0
 	child.returnValue = Value{}
 	child.syncBarriers = interp.syncBarriers
+	child.quad = interp.quad
+	child.helper = interp.helper
 
 	child.seedConstants()
 
@@ -2026,8 +2042,12 @@ func (interp *interpreter) readImage(imgVal, coord Value) Value {
 
 // writeImage stores a texel into a storage texture (OpImageWrite), encoded
 // in the texture format. The texture's Data aliases its storage, so the write
-// is visible to later passes. Out-of-bounds writes are discarded.
+// is visible to later passes. Out-of-bounds writes and the writes of a
+// helper lane are discarded.
 func (interp *interpreter) writeImage(imgVal, coord, texel Value) {
+	if interp.helper {
+		return
+	}
 	img, x, y, ok := interp.storageImage(imgVal, coord)
 	if !ok {
 		return
