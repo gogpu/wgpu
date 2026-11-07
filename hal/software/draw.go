@@ -159,6 +159,12 @@ func (r *RenderPassEncoder) tryFullscreenBlit(triangles []raster.Triangle, targe
 	if target == nil || len(triangles) != 2 || !r.blitStateValid() || !isFullscreenQuad(triangles, w, h) {
 		return false
 	}
+	// The copy is texel for texel: a viewport other than the whole target
+	// moves or scales the quad, which isFullscreenQuad's tolerance can miss.
+	if vp := r.viewport; r.hasViewport &&
+		(vp.X != 0 || vp.Y != 0 || vp.Width != float32(w) || vp.Height != float32(h)) {
+		return false
+	}
 	srcView := r.findBoundTexture()
 	if srcView == nil || srcView.texture == nil {
 		return false
@@ -484,29 +490,17 @@ func (r *RenderPassEncoder) fetchTriangles(
 	}
 
 	// Read all vertices.
-	vertices := make([]raster.ScreenVertex, 0, vertexCount)
+	vertices := make([]raster.ClipSpaceVertex, 0, vertexCount)
 	for i := uint32(0); i < vertexCount; i++ {
 		vi := r.drawVertexIndex(firstVertex, i)
 		base := vb.offset + uint64(vi)*stride
 
-		// Read position.
+		// Read position. Without a vertex shader the position is taken as
+		// NDC: x, y in [-1, 1], z in [0, 1], that is clip space with w = 1.
 		pos := readVertexAttribute(bufData, base+posAttr.Offset, posAttr.Format)
-
-		// NDC to screen transform.
-		// Position is expected in NDC: x,y in [-1,1], z in [0,1].
-		// Screen: x = (ndcX+1)/2 * width, y = (1-ndcY)/2 * height (Y flipped).
-		sx := (pos[0] + 1.0) * 0.5 * float32(targetW)
-		sy := (1.0 - pos[1]) * 0.5 * float32(targetH)
-		sz := float32(0)
+		sv := raster.ClipSpaceVertex{Position: [4]float32{pos[0], pos[1], 0, 1}}
 		if len(pos) > 2 {
-			sz = pos[2]
-		}
-
-		sv := raster.ScreenVertex{
-			X: sx,
-			Y: sy,
-			Z: sz,
-			W: 1.0,
+			sv.Position[2] = pos[2]
 		}
 
 		// Read extra attributes (color, UV, etc.).
@@ -524,7 +518,8 @@ func (r *RenderPassEncoder) fetchTriangles(
 		vertices = append(vertices, sv)
 	}
 
-	return r.verticesToTriangles(vertices, 0)
+	asm := r.newPrimitiveAssembler(targetW, targetH, 0)
+	return asm.assemble(nil, vertices)
 }
 
 // fetchTrianglesSPIRV executes the SPIR-V vertex shader per-vertex with both
@@ -637,12 +632,12 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 
 	// Execute vertex shader for each (instance, vertex) pair.
 	var allTriangles []raster.Triangle
-	flat := r.flatVaryingMask()
+	asm := r.newPrimitiveAssembler(targetW, targetH, r.flatVaryingMask())
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
 
-		vertices := make([]raster.ScreenVertex, 0, vertexCount)
+		vertices := make([]raster.ClipSpaceVertex, 0, vertexCount)
 		for vert := uint32(0); vert < vertexCount; vert++ {
 			vertexID := r.drawVertexIndex(firstVertex, vert)
 
@@ -699,26 +694,7 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 			if !posOK {
 				return nil
 			}
-			pos := shader.Vec4ToFloat32(posVal)
-
-			// Clip-space to screen-space transform.
-			wClip := pos[3]
-			if wClip == 0 {
-				wClip = 1
-			}
-			ndcX := pos[0] / wClip
-			ndcY := pos[1] / wClip
-			ndcZ := pos[2] / wClip
-
-			sx := (ndcX + 1.0) * 0.5 * float32(targetW)
-			sy := (1.0 - ndcY) * 0.5 * float32(targetH)
-
-			sv := raster.ScreenVertex{
-				X: sx,
-				Y: sy,
-				Z: ndcZ,
-				W: 1.0,
-			}
+			sv := raster.ClipSpaceVertex{Position: shader.Vec4ToFloat32(posVal)}
 
 			// Collect @location outputs as interpolated attributes (sorted by location).
 			// These become per-vertex colors/UVs for the rasterizer.
@@ -739,69 +715,92 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 			vertices = append(vertices, sv)
 		}
 
-		// Convert this instance's vertices to triangles and append.
-		instanceTris := r.verticesToTriangles(vertices, flat)
-		allTriangles = append(allTriangles, instanceTris...)
+		allTriangles = asm.assemble(allTriangles, vertices)
 	}
 
 	return allTriangles
 }
 
-// verticesToTriangles converts a list of vertices into triangles based on the
-// pipeline's primitive topology (TriangleList or TriangleStrip). V0 of every
-// triangle is its provoking vertex, the first vertex of the primitive (WebGPU
-// "flat" interpolation), and flat (flatVaryingMask) marks the attributes the
-// rasterizer copies from it.
-func (r *RenderPassEncoder) verticesToTriangles(vertices []raster.ScreenVertex, flat uint64) []raster.Triangle {
-	if len(vertices) < 3 {
-		return nil
-	}
+// primitiveAssembler turns the clip-space vertices of a draw into the screen
+// triangles the rasterizer takes: it groups them by the pipeline's topology
+// and maps every primitive through the pass's viewport. Every draw path
+// (vertex buffers or not, any fragment path) assembles through it, so the
+// transform exists once.
+type primitiveAssembler struct {
+	topology gputypes.PrimitiveTopology
+	flat     uint64 // raster.Triangle.Flat of every triangle (flatVaryingMask)
+	xf       raster.ViewportTransform
+}
 
-	topology := gputypes.PrimitiveTopologyTriangleList
+// newPrimitiveAssembler returns the assembler of the current pipeline and
+// viewport for a w x h render area; flat is the pipeline's flat varying mask.
+func (r *RenderPassEncoder) newPrimitiveAssembler(w, h int, flat uint64) primitiveAssembler {
+	a := primitiveAssembler{
+		topology: gputypes.PrimitiveTopologyTriangleList,
+		flat:     flat,
+		xf:       r.viewportTransform(w, h),
+	}
 	if r.pipeline != nil && r.pipeline.desc != nil {
-		topology = r.pipeline.desc.Primitive.Topology
+		a.topology = r.pipeline.desc.Primitive.Topology
 	}
+	return a
+}
 
-	switch topology {
+// viewportTransform returns the pass's viewport: the last SetViewport, or
+// the whole w x h render area with depth 0..1 when none was set (WebGPU
+// beginRenderPass default).
+func (r *RenderPassEncoder) viewportTransform(w, h int) raster.ViewportTransform {
+	if !r.hasViewport {
+		return raster.FullViewport(w, h)
+	}
+	vp := r.viewport
+	return raster.ViewportTransform{
+		X: vp.X, Y: vp.Y, Width: vp.Width, Height: vp.Height,
+		MinDepth: vp.MinDepth, MaxDepth: vp.MaxDepth,
+	}
+}
+
+// assemble appends the triangles of vertices to dst. V0 of every triangle is
+// its provoking vertex, the first vertex of the primitive (WebGPU "flat"
+// interpolation), and a.flat marks the attributes the rasterizer copies from
+// it.
+func (a *primitiveAssembler) assemble(dst []raster.Triangle, vertices []raster.ClipSpaceVertex) []raster.Triangle {
+	if len(vertices) < 3 {
+		return dst
+	}
+	switch a.topology {
 	case gputypes.PrimitiveTopologyTriangleStrip:
 		// TriangleStrip: N vertices produce N-2 triangles. Triangle i is
 		// (i, i+1, i+2) for even i and (i+1, i, i+2) for odd i, to keep the
 		// winding; the odd one is stored rotated as (i, i+2, i+1), the same
 		// winding with vertex i, its provoking vertex, first.
 		triCount := len(vertices) - 2
-		triangles := make([]raster.Triangle, 0, triCount)
+		dst = slices.Grow(dst, triCount)
 		for i := 0; i < triCount; i++ {
 			if i%2 == 0 {
-				triangles = append(triangles, raster.Triangle{
-					V0:   vertices[i],
-					V1:   vertices[i+1],
-					V2:   vertices[i+2],
-					Flat: flat,
-				})
+				dst = a.emit(dst, &vertices[i], &vertices[i+1], &vertices[i+2])
 			} else {
-				triangles = append(triangles, raster.Triangle{
-					V0:   vertices[i],
-					V1:   vertices[i+2],
-					V2:   vertices[i+1],
-					Flat: flat,
-				})
+				dst = a.emit(dst, &vertices[i], &vertices[i+2], &vertices[i+1])
 			}
 		}
-		return triangles
-
 	default: // TriangleList
 		triCount := len(vertices) / 3
-		triangles := make([]raster.Triangle, 0, triCount)
+		dst = slices.Grow(dst, triCount)
 		for i := 0; i < triCount; i++ {
-			triangles = append(triangles, raster.Triangle{
-				V0:   vertices[i*3+0],
-				V1:   vertices[i*3+1],
-				V2:   vertices[i*3+2],
-				Flat: flat,
-			})
+			dst = a.emit(dst, &vertices[i*3], &vertices[i*3+1], &vertices[i*3+2])
 		}
-		return triangles
 	}
+	return dst
+}
+
+// emit appends the triangle (v0, v1, v2), v0 provoking, in screen space.
+func (a *primitiveAssembler) emit(dst []raster.Triangle, v0, v1, v2 *raster.ClipSpaceVertex) []raster.Triangle {
+	return append(dst, raster.Triangle{
+		V0:   a.xf.Project(v0),
+		V1:   a.xf.Project(v1),
+		V2:   a.xf.Project(v2),
+		Flat: a.flat,
+	})
 }
 
 // flatVaryingMask returns the attribute lanes the rasterizer must not
@@ -1280,12 +1279,12 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 
 	var allTriangles []raster.Triangle
 	hasLocOutputs := len(s.locationOutputs) > 0
-	flat := r.flatVaryingMask()
+	asm := r.newPrimitiveAssembler(w, h, r.flatVaryingMask())
 
 	for inst := uint32(0); inst < instanceCount; inst++ {
 		instanceID := firstInstance + inst
 
-		vertices := make([]raster.ScreenVertex, 0, vertexCount)
+		vertices := make([]raster.ClipSpaceVertex, 0, vertexCount)
 		for vert := uint32(0); vert < vertexCount; vert++ {
 			vertexID := r.drawVertexIndex(firstVertex, vert)
 
@@ -1306,18 +1305,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 			if !posOK {
 				return false
 			}
-			pos := shader.Vec4ToFloat32(posVal)
-
-			wClip := pos[3]
-			if wClip == 0 {
-				wClip = 1
-			}
-			sv := raster.ScreenVertex{
-				X: (pos[0]/wClip + 1.0) * 0.5 * float32(w),
-				Y: (1.0 - pos[1]/wClip) * 0.5 * float32(h),
-				Z: pos[2] / wClip,
-				W: 1.0,
-			}
+			sv := raster.ClipSpaceVertex{Position: shader.Vec4ToFloat32(posVal)}
 
 			if hasLocOutputs {
 				for _, lo := range s.locationOutputs {
@@ -1333,7 +1321,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 			vertices = append(vertices, sv)
 		}
 
-		allTriangles = append(allTriangles, r.verticesToTriangles(vertices, flat)...)
+		allTriangles = asm.assemble(allTriangles, vertices)
 	}
 
 	// A shader with derivatives or implicit-LOD samples runs in quads.
@@ -1751,6 +1739,11 @@ func clampBlitBounds(minX, minY, maxX, maxY int, scissor [4]uint32) (int, int, i
 // single point where WebGPU render pass state is translated to the raster
 // package's config.
 func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
+	// Viewport: primitives are rasterized only on the pixels whose centers
+	// lie in the viewport rectangle (the clip volume ends at its edges).
+	xf := r.viewportTransform(pipe.Width(), pipe.Height())
+	pipe.SetViewport(xf.PixelBounds(pipe.Width(), pipe.Height()))
+
 	// Scissor: clip fragments to the scissor rectangle set by SetScissorRect.
 	if r.hasScissor {
 		pipe.SetScissor(&raster.Rect{
