@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // Package texcompress decodes single texels of the block-compressed texture
-// formats the software backend samples: BC1-BC7 (texture-compression-bc).
+// formats the software backend samples: BC1-BC7 (texture-compression-bc) and
+// ETC2/EAC (texture-compression-etc2).
 //
 // A texel is decoded from its own 4x4 block only, reading just the fields
 // that texel needs, so a texture fetch costs one partial block decode and no
@@ -21,6 +22,7 @@
 //     16 bits of 65535 (unorm) or 15 bits of 32767 (snorm).
 //   - BC6H and BC7 follow the bit-exact integer decoding of the format
 //     specification (as Mesa's texcompress_bptc_tmp.h implements it).
+//   - ETC2 and EAC are integer-exact by specification.
 //
 // The values of an sRGB format are its encoded values: the caller applies
 // the sRGB transfer function after the block decode.
@@ -55,7 +57,7 @@ func Decode(f gputypes.TextureFormat, block []byte, x, y int) (rgba [4]float32, 
 	case gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureFormatBC7RGBAUnormSrgb:
 		return unorm8(decodeBC7(block, x, y)), true
 	}
-	return [4]float32{}, false
+	return decodeETC(f, block, x, y)
 }
 
 // Decodes reports whether Decode decodes format f.
@@ -67,7 +69,12 @@ func Decodes(f gputypes.TextureFormat) bool {
 		gputypes.TextureFormatBC4RUnorm, gputypes.TextureFormatBC4RSnorm,
 		gputypes.TextureFormatBC5RGUnorm, gputypes.TextureFormatBC5RGSnorm,
 		gputypes.TextureFormatBC6HRGBUfloat, gputypes.TextureFormatBC6HRGBFloat,
-		gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureFormatBC7RGBAUnormSrgb:
+		gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureFormatBC7RGBAUnormSrgb,
+		gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureFormatETC2RGB8UnormSrgb,
+		gputypes.TextureFormatETC2RGB8A1Unorm, gputypes.TextureFormatETC2RGB8A1UnormSrgb,
+		gputypes.TextureFormatETC2RGBA8Unorm, gputypes.TextureFormatETC2RGBA8UnormSrgb,
+		gputypes.TextureFormatEACR11Unorm, gputypes.TextureFormatEACR11Snorm,
+		gputypes.TextureFormatEACRG11Unorm, gputypes.TextureFormatEACRG11Snorm:
 		return true
 	}
 	return false
