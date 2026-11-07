@@ -41,6 +41,7 @@ var (
 	cifVoid4Buffer       types.CallInterface // void fn(uint32, uintptr, void*, uint32)
 	cifVoid4SubBuf       types.CallInterface // void fn(uint32, uintptr, uintptr, void*)
 	cifVoid6Attrib       types.CallInterface // void fn(uint32, int32, uint32, uint8, int32, uintptr)
+	cifVoid5IAttrib      types.CallInterface // void fn(uint32, int32, uint32, int32, uintptr) - VertexAttribIPointer
 	cifVoid5FBO          types.CallInterface // void fn(uint32, uint32, uint32, uint32, int32)
 	cifVoid9TexImg       types.CallInterface // void fn(uint32, int32, int32, int32, int32, int32, uint32, uint32, void*)
 	cifVoid4Draw         types.CallInterface // void fn(uint32, int32, int32, int32)
@@ -315,6 +316,20 @@ func initCommonCallInterfaces() error {
 			types.SInt32TypeDescriptor,  // size
 			types.UInt32TypeDescriptor,  // type
 			types.UInt8TypeDescriptor,   // normalized (bool as uint8)
+			types.SInt32TypeDescriptor,  // stride
+			types.PointerTypeDescriptor, // offset
+		})
+	if err != nil {
+		return err
+	}
+
+	// void fn(uint32, int32, uint32, int32, uintptr) - VertexAttribIPointer
+	err = ffi.PrepareCallInterface(&cifVoid5IAttrib, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor,  // index
+			types.SInt32TypeDescriptor,  // size
+			types.UInt32TypeDescriptor,  // type
 			types.SInt32TypeDescriptor,  // stride
 			types.PointerTypeDescriptor, // offset
 		})
@@ -676,6 +691,7 @@ type Context struct {
 	glEnableVertexAttribArray  unsafe.Pointer
 	glDisableVertexAttribArray unsafe.Pointer
 	glVertexAttribPointer      unsafe.Pointer
+	glVertexAttribIPointer     unsafe.Pointer
 
 	// Textures (GL 1.1+)
 	glGenTextures    unsafe.Pointer
@@ -908,6 +924,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glEnableVertexAttribArray = getProcAddr("glEnableVertexAttribArray")
 	c.glDisableVertexAttribArray = getProcAddr("glDisableVertexAttribArray")
 	c.glVertexAttribPointer = getProcAddr("glVertexAttribPointer")
+	c.glVertexAttribIPointer = getProcAddr("glVertexAttribIPointer")
 
 	// Textures
 	c.glGenTextures = getProcAddr("glGenTextures")
@@ -1071,6 +1088,7 @@ func (c *Context) requiredProcs() []requiredProc[unsafe.Pointer] {
 		{"glDrawArraysInstanced", c.glDrawArraysInstanced},
 		{"glDrawElementsInstanced", c.glDrawElementsInstanced},
 		{"glVertexAttribDivisor", c.glVertexAttribDivisor},
+		{"glVertexAttribIPointer", c.glVertexAttribIPointer},
 	}
 }
 
@@ -1527,6 +1545,20 @@ func (c *Context) VertexAttribPointer(index uint32, size int32, typ uint32, norm
 		unsafe.Pointer(&offset),
 	}
 	_, _ = ffi.CallFunction(&cifVoid6Attrib, c.glVertexAttribPointer, nil, args[:])
+}
+
+// VertexAttribIPointer configures an integer vertex attribute: the shader
+// reads the values as integers, unconverted. VertexAttribPointer converts
+// them to float, so an integer shader input reads the float's bits.
+func (c *Context) VertexAttribIPointer(index uint32, size int32, typ uint32, stride int32, offset uintptr) {
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&index),
+		unsafe.Pointer(&size),
+		unsafe.Pointer(&typ),
+		unsafe.Pointer(&stride),
+		unsafe.Pointer(&offset),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5IAttrib, c.glVertexAttribIPointer, nil, args[:])
 }
 
 // VertexAttribDivisor sets the instance divisor for a vertex attribute.
