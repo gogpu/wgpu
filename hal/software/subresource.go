@@ -215,8 +215,10 @@ func (t *Texture) rowOffset(r copyRegion, z, row uint32) uint64 {
 
 // bufferRowOffset returns the byte offset of block row row of image z of
 // region r in linear memory laid out by layout: rows BytesPerRow apart
-// (tight when 0) and images RowsPerImage texel rows apart (the region's
-// height when 0).
+// (tight when 0) and images RowsPerImage block rows apart (the region's
+// block rows when 0). RowsPerImage counts texel block rows, as WebGPU's
+// GPUTexelCopyBufferLayout and hal.ImageDataLayout define it: for a
+// block-compressed format a block row is four texel rows.
 func (t *Texture) bufferRowOffset(r copyRegion, layout hal.ImageDataLayout, z, row uint32) uint64 {
 	stride := uint64(layout.BytesPerRow)
 	if stride == 0 {
@@ -224,8 +226,7 @@ func (t *Texture) bufferRowOffset(r copyRegion, layout hal.ImageDataLayout, z, r
 	}
 	rowsPerImage := uint64(r.rows)
 	if layout.RowsPerImage != 0 {
-		_, bh, _ := t.blockSize()
-		rowsPerImage = uint64((layout.RowsPerImage + bh - 1) / bh)
+		rowsPerImage = uint64(layout.RowsPerImage)
 	}
 	return layout.Offset + (uint64(z)*rowsPerImage+uint64(row))*stride
 }
