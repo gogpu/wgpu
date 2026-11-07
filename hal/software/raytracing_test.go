@@ -601,6 +601,7 @@ func TestCommandEncoder_BuildAccelerationStructures_BLAS(t *testing.T) {
 			DestinationAccelerationStructure: as,
 		},
 	})
+	submit(t, enc)
 
 	swAS := as.(*AccelerationStructure)
 	if swAS.bvh == nil {
@@ -634,6 +635,7 @@ func TestCommandEncoder_CopyAccelerationStructure(t *testing.T) {
 	}
 
 	enc.CopyAccelerationStructure(srcAS, dstAS, gputypes.AccelerationStructureCopyModeClone)
+	submit(t, enc)
 
 	if dstAS.bvh == nil {
 		t.Fatal("destination BVH should not be nil after copy")
@@ -662,6 +664,7 @@ func TestCommandEncoder_ReadAccelerationStructureCompactSize(t *testing.T) {
 	}
 
 	enc.ReadAccelerationStructureCompactSize(as, buf, 0)
+	submit(t, enc)
 
 	gotSize := binary.LittleEndian.Uint64(buf.data[0:])
 	if gotSize != 4096 {
@@ -685,6 +688,7 @@ func TestCommandEncoder_ReadAccelerationStructureCompactSize_WithOffset(t *testi
 	}
 
 	enc.ReadAccelerationStructureCompactSize(as, buf, 16)
+	submit(t, enc)
 
 	gotSize := binary.LittleEndian.Uint64(buf.data[16:])
 	if gotSize != 2048 {

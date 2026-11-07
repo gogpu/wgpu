@@ -142,9 +142,6 @@ func TestStencilUploadQueueOrder(t *testing.T) {
 			check(t, tex, written[0])
 		})
 		t.Run("record-write-submit", func(t *testing.T) {
-			if strings.Contains(t.Name(), "/software/") {
-				t.Skip("software: commands run when recorded, not at Submit, P1-SW-031")
-			}
 			tex, _ := newReadbackTexture(t, device, "stencil-order-b", format, wgpu.TextureUsageCopySrc|wgpu.TextureUsageCopyDst)
 			src := newStencilSource(t, device, copied)
 			enc, err := device.CreateCommandEncoder(nil)

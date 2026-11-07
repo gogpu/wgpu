@@ -97,6 +97,7 @@ func readImage(t *testing.T, dev *Device, tex hal.Texture, level, z, w, h, bpp u
 		TextureBase:  hal.ImageCopyTexture{Texture: tex, MipLevel: level, Origin: hal.Origin3D{Z: z}},
 		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
+	submit(t, enc)
 	return bufHal.(*Buffer).GetData()
 }
 
@@ -226,4 +227,5 @@ func uploadSentinel(t *testing.T, dev *Device, tex hal.Texture, level, w, h, n u
 		TextureBase:  hal.ImageCopyTexture{Texture: tex, MipLevel: level},
 		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: n},
 	}})
+	submit(t, enc)
 }

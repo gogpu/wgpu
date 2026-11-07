@@ -837,6 +837,7 @@ func TestCommandEncoderClearBuffer(t *testing.T) {
 
 	// Clear the buffer
 	enc.ClearBuffer(buf, 0, 8)
+	submit(t, enc)
 
 	// Verify cleared
 	data := b.GetData()
@@ -865,6 +866,7 @@ func TestCommandEncoderCopyBufferToBuffer(t *testing.T) {
 	enc.CopyBufferToBuffer(srcBuf, dstBuf, []hal.BufferCopy{
 		{SrcOffset: 0, DstOffset: 0, Size: 4},
 	})
+	submit(t, enc)
 
 	dst := dstBuf.(*Buffer)
 	data := dst.GetData()
@@ -904,6 +906,7 @@ func TestCommandEncoderCopyBufferToTexture(t *testing.T) {
 			Size:         hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 		},
 	})
+	submit(t, enc)
 
 	// Verify texture has data
 	dstTex := tex.(*Texture)
@@ -936,6 +939,7 @@ func TestCommandEncoderCopyTextureToBuffer(t *testing.T) {
 			Size:         hal.Extent3D{Width: 2, Height: 1, DepthOrArrayLayers: 1},
 		},
 	})
+	submit(t, enc)
 
 	dstBuf := buf.(*Buffer)
 	data := dstBuf.GetData()
@@ -968,6 +972,7 @@ func TestCommandEncoderCopyTextureToTexture(t *testing.T) {
 	enc.CopyTextureToTexture(tex1, tex2, []hal.TextureCopy{
 		{Size: hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}},
 	})
+	submit(t, enc)
 
 	dstTex := tex2.(*Texture)
 	data := dstTex.GetData()
@@ -990,6 +995,7 @@ func TestCommandEncoderCopyWithNonSoftwareBuffers(t *testing.T) {
 	enc.CopyBufferToTexture(r, r, []hal.BufferTextureCopy{{}})
 	enc.CopyTextureToBuffer(r, r, []hal.BufferTextureCopy{{}})
 	enc.CopyTextureToTexture(r, r, []hal.TextureCopy{{}})
+	submit(t, enc)
 }
 
 func TestCommandEncoderResolveQuerySet(t *testing.T) {
@@ -1034,6 +1040,7 @@ func TestRenderPassEncoderEnd(t *testing.T) {
 	})
 
 	pass.End()
+	submit(t, enc)
 
 	// Verify that the clear color was applied
 	underlyingTex := tex.(*Texture)
@@ -1102,6 +1109,7 @@ func TestRenderPassEncoderAllNoOps(t *testing.T) {
 	pass.DrawIndexedIndirect(buf, 0, 1)
 	pass.ExecuteBundle(nil)
 	pass.End()
+	submit(t, enc)
 }
 
 // =============================================================================
@@ -1121,6 +1129,7 @@ func TestComputePassEncoderNoPipeline(t *testing.T) {
 	pass.Dispatch(1, 1, 1)        // warns but does not crash
 	pass.DispatchIndirect(nil, 0) // warns but does not crash
 	pass.End()
+	submit(t, enc)
 }
 
 // =============================================================================

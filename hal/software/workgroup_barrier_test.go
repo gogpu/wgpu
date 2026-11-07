@@ -115,5 +115,6 @@ func dispatchWGSL(t *testing.T, dev hal.Device, wgsl string, groups, words uint3
 	pass.SetBindGroup(0, bg, nil)
 	pass.Dispatch(groups, 1, 1)
 	pass.End()
+	submit(t, enc)
 	return buf.(*Buffer).GetData()
 }

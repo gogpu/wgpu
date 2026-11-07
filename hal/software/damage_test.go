@@ -1157,6 +1157,7 @@ func renderSolidColor(t *testing.T, dev *Device, surf *Surface, cr, cg, cb, ca f
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 }
 
 // absDiff returns the absolute difference between two byte values.

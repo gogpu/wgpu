@@ -83,6 +83,7 @@ func TestRenderIntoLayerAndMipViews(t *testing.T) {
 		pass.SetPipeline(pipeline)
 		pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 		pass.End()
+		submit(t, enc)
 	}
 
 	halfGreen := func(lw uint32) func(x, y uint32) [4]byte {

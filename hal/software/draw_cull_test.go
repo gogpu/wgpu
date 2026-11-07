@@ -79,6 +79,7 @@ func drawCullCase(t *testing.T, cull gputypes.CullMode, front gputypes.FrontFace
 	pass.SetVertexBuffer(0, vb, 0)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	data := dstTex.(*Texture).GetData()
 	drawn := func(x, y int) bool { return data[(y*8+x)*4] != 0 }

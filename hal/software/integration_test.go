@@ -54,6 +54,7 @@ func TestIntegration_TriangleBLAS_RayHit(t *testing.T) {
 		},
 		DestinationAccelerationStructure: blasAS,
 	}})
+	submit(t, enc)
 
 	blas := blasAS.(*AccelerationStructure)
 	if blas.bvh == nil {
@@ -118,6 +119,7 @@ func TestIntegration_TLAS_WithBLAS_RayHit(t *testing.T) {
 		},
 		DestinationAccelerationStructure: blasAS,
 	}})
+	submit(t, enc)
 
 	blas := blasAS.(*AccelerationStructure)
 	if blas.bvh == nil {
@@ -215,6 +217,7 @@ func TestIntegration_RayMiss(t *testing.T) {
 		},
 		DestinationAccelerationStructure: blasAS,
 	}})
+	submit(t, enc)
 
 	blas := blasAS.(*AccelerationStructure)
 
@@ -273,6 +276,7 @@ func TestIntegration_Compaction(t *testing.T) {
 		},
 		DestinationAccelerationStructure: srcAS,
 	}})
+	submit(t, enc)
 
 	src := srcAS.(*AccelerationStructure)
 	if src.bvh == nil {
@@ -286,6 +290,7 @@ func TestIntegration_Compaction(t *testing.T) {
 		size: 64,
 	}
 	enc.ReadAccelerationStructureCompactSize(srcAS, queryBuf, 0)
+	submit(t, enc)
 
 	compactSize := binary.LittleEndian.Uint64(queryBuf.data[0:])
 	if compactSize == 0 {
@@ -303,6 +308,7 @@ func TestIntegration_Compaction(t *testing.T) {
 	}
 
 	enc.CopyAccelerationStructure(srcAS, dstAS, gputypes.AccelerationStructureCopyModeCompact)
+	submit(t, enc)
 
 	dst := dstAS.(*AccelerationStructure)
 	if dst.bvh == nil {
@@ -424,6 +430,7 @@ func TestIntegration_MultiGeometryBLAS(t *testing.T) {
 		},
 		DestinationAccelerationStructure: blasAS,
 	}})
+	submit(t, enc)
 
 	blas := blasAS.(*AccelerationStructure)
 	if blas.bvh == nil {
