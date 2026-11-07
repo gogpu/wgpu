@@ -39,9 +39,11 @@ type Pipeline struct {
 	// Blending configuration
 	blendState BlendState
 
-	// Stencil configuration
+	// Stencil configuration: stencilState applies to front-facing triangles,
+	// stencilBack to back-facing ones (WebGPU stencilFront / stencilBack).
 	stencilBuffer *StencilBuffer
 	stencilState  StencilState
+	stencilBack   StencilState
 
 	// Scissor test (nil = disabled)
 	scissorRect *Rect
@@ -258,14 +260,34 @@ func (p *Pipeline) GetStencilBuffer() *StencilBuffer {
 	return p.stencilBuffer
 }
 
-// SetStencilState sets the stencil testing configuration.
+// SetStencilState sets the stencil testing configuration of both faces.
 func (p *Pipeline) SetStencilState(state StencilState) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stencilState = state
+	p.stencilBack = state
 }
 
-// GetStencilState returns the current stencil state.
+// SetStencilFaceStates sets the stencil testing configuration of
+// front-facing and back-facing triangles separately, facing as decided by
+// the front face (SetFrontFace) and IsBackFacing.
+func (p *Pipeline) SetStencilFaceStates(front, back StencilState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stencilState = front
+	p.stencilBack = back
+}
+
+// faceStencilState returns the stencil state of tri: back for a back-facing
+// triangle, front otherwise.
+func faceStencilState(tri *Triangle, frontFace FrontFace, front, back *StencilState) StencilState {
+	if *front != *back && IsBackFacing(*tri, frontFace) {
+		return *back
+	}
+	return *front
+}
+
+// GetStencilState returns the stencil state of front-facing triangles.
 func (p *Pipeline) GetStencilState() StencilState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -436,7 +458,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 	blendState := p.blendState
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
-	stencilState := p.stencilState
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -455,6 +477,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 		if ShouldCull(*tri, cullMode, frontFace) {
 			continue
 		}
+		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
 		Rasterize(*tri, viewport, func(frag Fragment) {
@@ -499,7 +522,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	blendState := p.blendState
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
-	stencilState := p.stencilState
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -518,6 +541,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 		if ShouldCull(*tri, cullMode, frontFace) {
 			continue
 		}
+		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
 		Rasterize(*tri, viewport, func(frag Fragment) {
@@ -580,7 +604,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 	blendState := p.blendState
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
-	stencilState := p.stencilState
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -599,6 +623,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 		if ShouldCull(*tri, cullMode, frontFace) {
 			continue
 		}
+		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
 		Rasterize(*tri, viewport, func(frag Fragment) {
@@ -672,7 +697,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 	blendState := p.blendState
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
-	stencilState := p.stencilState
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -690,6 +715,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 		if ShouldCull(*tri, cullMode, frontFace) {
 			continue
 		}
+		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		Rasterize(*tri, viewport, func(frag Fragment) {
 			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
@@ -756,7 +782,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 	blendState := p.blendState
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
-	stencilState := p.stencilState
+	stencilFront, stencilBack := p.stencilState, p.stencilBack
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -792,6 +818,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 		// Process all triangles in this tile
 		for i := range tileTriangles {
 			tri := &tileTriangles[i]
+			stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 			RasterizeTile(*tri, tile, func(frag Fragment) {
 				// Bounds check (should always pass for properly clipped tiles)
