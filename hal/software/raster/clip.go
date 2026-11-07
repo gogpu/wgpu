@@ -71,9 +71,12 @@ const (
 	// the viewport's edge needs no new vertices there.
 	clipGuardBand = 8192
 
-	// minClipW is the least w a clipped vertex keeps. The near and far
-	// planes (0 <= z <= w) already remove w < 0, but leave w = 0 on their
-	// boundary, which has no window position.
+	// minClipW is the least w the w plane keeps: the near and far planes
+	// (0 <= z <= w) already remove w < 0, but leave w = 0 on their boundary,
+	// which has no window position. In float32 it is lost next to an
+	// ordinary w, so a vertex the w plane creates may round to w = 0; the
+	// near and far planes, clipped after it, remove such a vertex unless it
+	// is the clip-space origin.
 	minClipW = 0x1p-40
 
 	// clipPlaneCount is the number of planes a Clipper clips against: w,
@@ -102,15 +105,18 @@ func (p *clipPlane) distance(v *ClipSpaceVertex) float32 {
 }
 
 // Clipper clips triangles in clip space, before the perspective divide
-// (WebGPU spec, "Primitive Clipping"): against 0 <= z <= w, against w > 0,
-// and against x and y planes a guard band past the render target. Clipping
+// (WebGPU spec, "Primitive Clipping"): against 0 <= z <= w, against
+// w >= minClipW, and against x and y planes a guard band past the render
+// target. Clipping
 // in clip space is what keeps a vertex behind the eye (w < 0), whose divided
 // position is mirrored, or one far outside the viewport, beyond the range
 // the rasterizer can snap to, from changing which pixels a triangle covers.
 //
 // The vertices clipping creates interpolate the position and every
 // attribute linearly in clip space, which is perspective-correct once they
-// are divided by w; flat attributes are copied from the provoking vertex.
+// are divided by w; linear attributes are computed from the triangle's
+// vertices at the new vertex's clip-space barycentrics, and flat attributes
+// are copied from the provoking vertex.
 // Their attributes live in an arena owned by the Clipper and stay valid as
 // long as the triangles that use them; a triangle that needs no clipping
 // keeps its vertices' attribute slices and costs no allocation.
@@ -123,18 +129,25 @@ type Clipper struct {
 	// flat marks the attribute lanes copied from the provoking vertex, as
 	// Triangle.Flat.
 	flat uint64
-	// prov is the provoking vertex of the triangle being clipped.
-	prov  *ClipSpaceVertex
+	// linear marks the attribute lanes interpolated linearly in screen
+	// space, as Triangle.NoPerspective.
+	linear uint64
+	// tri is the triangle being clipped, its provoking vertex first.
+	tri [3]*ClipSpaceVertex
+	// poly holds the polygon, alternating between the two buffers, and bary
+	// each polygon vertex's barycentrics of tri in clip space.
 	poly  [2][maxClipVertices]ClipSpaceVertex
+	bary  [2][maxClipVertices][3]float32
 	dist  [maxClipVertices]float32
 	arena []float32
 }
 
 // NewClipper returns a Clipper for primitives that vt maps onto a width x
 // height render target, with the attribute lanes in flat copied from the
-// provoking vertex.
-func NewClipper(vt *ViewportTransform, width, height int, flat uint64) Clipper {
-	c := Clipper{flat: flat}
+// provoking vertex and those in linear interpolated linearly in screen
+// space.
+func NewClipper(vt *ViewportTransform, width, height int, flat, linear uint64) Clipper {
+	c := Clipper{flat: flat, linear: linear}
 	hx, hy := vt.Width/2, vt.Height/2
 	if !(hx > 0 && hy > 0) {
 		c.reject = true
@@ -183,36 +196,40 @@ func (c *Clipper) Clip(v0, v1, v2 *ClipSpaceVertex) []ClipSpaceVertex {
 	if o0&o1&o2 != 0 {
 		return nil // all three outside one plane
 	}
-	poly := c.poly[0][:3]
+	poly := &c.poly[0]
 	poly[0], poly[1], poly[2] = *v0, *v1, *v2
 	cut := o0 | o1 | o2
 	if cut == 0 {
-		return poly
+		return poly[:3]
 	}
-	c.prov = v0
-	dst := 1 // the polygon alternates between the two buffers
+	c.tri = [3]*ClipSpaceVertex{v0, v1, v2}
+	c.bary[0][0], c.bary[0][1], c.bary[0][2] = [3]float32{1, 0, 0}, [3]float32{0, 1, 0}, [3]float32{0, 0, 1}
+	src, n := 0, 3 // the polygon alternates between the two buffers
 	for i := range c.planes {
 		if cut&(1<<i) == 0 {
 			continue // every vertex is inside: the plane cuts nothing
 		}
-		poly = c.clipPolygon(poly, &c.planes[i], c.poly[dst][:0])
-		if len(poly) < 3 {
+		n = c.clipPolygon(src, n, &c.planes[i])
+		src ^= 1
+		if n < 3 {
 			return nil
 		}
-		dst ^= 1
 	}
-	return poly
+	return c.poly[src][:n]
 }
 
-// clipPolygon clips poly against p into dst (Sutherland-Hodgman). The first
-// vertex of the result is poly's first vertex when it is inside, otherwise
-// the vertex created where the polygon first enters the plane, so the
-// provoking vertex's flat attributes stay at index 0.
-func (c *Clipper) clipPolygon(poly []ClipSpaceVertex, p *clipPlane, dst []ClipSpaceVertex) []ClipSpaceVertex {
-	n := len(poly)
+// clipPolygon clips the n-vertex polygon in buffer src against p into the
+// other buffer (Sutherland-Hodgman) and returns its vertex count. The first
+// vertex of the result is the polygon's first vertex when it is inside,
+// otherwise the vertex created where the polygon first enters the plane, so
+// the provoking vertex's flat attributes stay at index 0.
+func (c *Clipper) clipPolygon(src, n int, p *clipPlane) int {
+	poly, bary := &c.poly[src], &c.bary[src]
+	dst, dstBary := &c.poly[src^1], &c.bary[src^1]
 	for i := range n {
 		c.dist[i] = p.distance(&poly[i])
 	}
+	m := 0
 	for i := range n {
 		j := i + 1
 		if j == n {
@@ -220,46 +237,82 @@ func (c *Clipper) clipPolygon(poly []ClipSpaceVertex, p *clipPlane, dst []ClipSp
 		}
 		di, dj := c.dist[i], c.dist[j]
 		inI, inJ := di >= 0, dj >= 0
-		if inI && len(dst) < maxClipVertices {
-			dst = append(dst, poly[i])
+		if inI && m < maxClipVertices {
+			dst[m], dstBary[m] = poly[i], bary[i]
+			m++
 		}
-		if inI != inJ && len(dst) < maxClipVertices {
+		if inI != inJ && m < maxClipVertices {
 			// The new vertex is computed from the inside vertex, so the
 			// shared edge of two triangles is cut at the same point whichever
 			// way they wind.
 			if inI {
-				dst = append(dst, c.intersect(&poly[i], &poly[j], di, dj))
+				dst[m], dstBary[m] = c.intersect(&poly[i], &poly[j], &bary[i], &bary[j], di, dj)
 			} else {
-				dst = append(dst, c.intersect(&poly[j], &poly[i], dj, di))
+				dst[m], dstBary[m] = c.intersect(&poly[j], &poly[i], &bary[j], &bary[i], dj, di)
 			}
+			m++
 		}
 	}
-	return dst
+	return m
 }
 
 // intersect returns the point where the edge from in (inside the plane, at
-// distance dIn) to out (outside, at dOut) crosses the plane.
-func (c *Clipper) intersect(in, out *ClipSpaceVertex, dIn, dOut float32) ClipSpaceVertex {
+// distance dIn) to out (outside, at dOut) crosses the plane, and its
+// barycentrics of the triangle, in and out's being bIn and bOut.
+func (c *Clipper) intersect(in, out *ClipSpaceVertex, bIn, bOut *[3]float32, dIn, dOut float32) (ClipSpaceVertex, [3]float32) {
 	t := dIn / (dIn - dOut)
 	var v ClipSpaceVertex
 	for i := range v.Position {
 		v.Position[i] = in.Position[i] + t*(out.Position[i]-in.Position[i])
 	}
-	n := min(len(in.Attributes), len(out.Attributes), len(c.prov.Attributes))
+	var b [3]float32
+	for k := range b {
+		b[k] = bIn[k] + t*(bOut[k]-bIn[k])
+	}
+	t0, t1, t2 := c.tri[0], c.tri[1], c.tri[2]
+	n := min(len(in.Attributes), len(out.Attributes),
+		len(t0.Attributes), len(t1.Attributes), len(t2.Attributes))
 	if n == 0 {
-		return v
+		return v, b
+	}
+	// A linear lane is linear in screen space, not in clip space: at the
+	// clip-space point Σ bk*Vk it is Σ bk*wk*Ak / Σ bk*wk (WebGPU spec,
+	// "Interpolation"), taken from the triangle's vertices. Taking it from
+	// in and out instead, through the ratio of their projected edge (Mesa
+	// draw_pipe_clip.c), divides by the w of a vertex an earlier plane
+	// created, which can round to 0 when the w plane cuts an edge to a
+	// vertex behind the eye; the near plane then cuts that vertex and the
+	// lane came out NaN. A vertex with Σ bk*wk <= 0 lies behind the eye and
+	// is removed by a later plane: its linear lanes only need to be finite.
+	linear := false
+	var s1, s2 float32
+	if c.linear != 0 {
+		p0, p1, p2 := b[0]*t0.Position[3], b[1]*t1.Position[3], b[2]*t2.Position[3]
+		if den := p0 + p1 + p2; den > 0 {
+			linear, s1, s2 = true, p1/den, p2/den
+		}
 	}
 	attrs := c.alloc(n)
 	for i := range attrs {
-		if i < 64 && c.flat&(1<<i) != 0 {
-			// A flat lane holds a bit pattern: copied, never interpolated.
-			attrs[i] = c.prov.Attributes[i]
-			continue
+		bit := uint64(0)
+		if i < 64 {
+			bit = 1 << i
 		}
-		attrs[i] = in.Attributes[i] + t*(out.Attributes[i]-in.Attributes[i])
+		switch {
+		case c.flat&bit != 0:
+			// A flat lane holds a bit pattern: copied, never interpolated.
+			attrs[i] = t0.Attributes[i]
+		case linear && c.linear&bit != 0:
+			// The affine form gives a lane equal at all three vertices back
+			// exactly.
+			a0 := t0.Attributes[i]
+			attrs[i] = a0 + s1*(t1.Attributes[i]-a0) + s2*(t2.Attributes[i]-a0)
+		default:
+			attrs[i] = in.Attributes[i] + t*(out.Attributes[i]-in.Attributes[i])
+		}
 	}
 	v.Attributes = attrs
-	return v
+	return v, b
 }
 
 // alloc returns n float32s from the arena. A full chunk is left to the

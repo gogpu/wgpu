@@ -24,9 +24,10 @@ func FullViewport(width, height int) ViewportTransform {
 	return ViewportTransform{Width: float32(width), Height: float32(height), MaxDepth: 1}
 }
 
-// Project divides v's position by its w and maps it through the viewport.
-// v must have w > 0, as every vertex a Clipper returns has. The attributes
-// are shared with v, not copied.
+// Project divides v's position by its w and maps it through the viewport,
+// keeping 1/w for perspective-correct interpolation. v must have w > 0, as
+// every vertex a Clipper returns has. The attributes are shared with v, not
+// copied.
 func (vt *ViewportTransform) Project(v *ClipSpaceVertex) ScreenVertex {
 	inv := 1 / v.Position[3]
 	nx, ny, nz := v.Position[0]*inv, v.Position[1]*inv, v.Position[2]*inv
@@ -34,7 +35,7 @@ func (vt *ViewportTransform) Project(v *ClipSpaceVertex) ScreenVertex {
 		X:          vt.X + 0.5*(nx+1)*vt.Width,
 		Y:          vt.Y + 0.5*(1-ny)*vt.Height,
 		Z:          vt.MinDepth + nz*(vt.MaxDepth-vt.MinDepth),
-		W:          1,
+		W:          inv,
 		Attributes: v.Attributes,
 	}
 }

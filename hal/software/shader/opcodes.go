@@ -265,6 +265,7 @@ const (
 const (
 	DecorationArrayStride   = 6
 	DecorationBuiltIn       = 11
+	DecorationNoPerspective = 13
 	DecorationFlat          = 14
 	DecorationBinding       = 33
 	DecorationDescriptorSet = 34

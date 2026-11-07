@@ -58,6 +58,15 @@ func (m *Module) InterpolatesFlat(varID uint32) bool {
 	return k == kindUint || k == kindSint || k == kindBool
 }
 
+// InterpolatesLinear reports whether interface variable varID is
+// interpolated linearly in screen space instead of perspective-correct: it
+// is decorated NoPerspective, which WGSL @interpolate(linear) compiles to.
+// InterpolatesFlat takes precedence.
+func (m *Module) InterpolatesLinear(varID uint32) bool {
+	_, ok := m.Decorations[decorationKey{TargetID: varID, Decoration: DecorationNoPerspective}]
+	return ok
+}
+
 // varShape returns the shape of the type interface variable varID points to.
 func (m *Module) varShape(varID uint32) shape {
 	vi, ok := m.Variables[varID]
