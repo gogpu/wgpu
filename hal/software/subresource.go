@@ -29,8 +29,8 @@ import (
 // ceil(width / blockWidth) blocks of BlockCopySize bytes, an image
 // ceil(height / blockHeight) rows. That is the layout of the WebGPU copy
 // operations (bytesPerRow counts block rows), so uploads and readbacks round
-// trip byte for byte. The adapter exposes no texture-compression feature, so
-// core rejects such formats; the interpreter does not decode them.
+// trip byte for byte. The interpreter decodes BC and ETC2/EAC texels from
+// this layout (hal/software/internal/texcompress); ASTC is not offered.
 
 // mipLevels returns the number of stored mip levels, at least 1.
 func (t *Texture) mipLevels() uint32 { return max(t.mipLevelCount, 1) }

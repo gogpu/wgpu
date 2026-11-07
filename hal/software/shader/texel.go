@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal/software/internal/texcompress"
 	"github.com/gogpu/wgpu/hal/software/raster"
 )
 
@@ -117,8 +118,9 @@ const (
 // sampledLayouts, indexed by format, lists every uncompressed format the
 // interpreter reads (sampling, textureLoad and OpImageRead): the storage
 // formats of texelLayouts plus the formats only sampled. A zero entry has no
-// layout. The compressed formats have none: the software adapter does not
-// report a texture compression feature, so core refuses them. A combined
+// layout. The block-compressed formats have none: decodeTexel decodes them
+// per block through texcompress (BC and ETC2/EAC; ASTC is not offered, so
+// core refuses it). A combined
 // depth-stencil format reads its depth plane here; stencilLayout gives the
 // stencil plane.
 var sampledLayouts = buildSampledLayouts()
@@ -227,6 +229,11 @@ func encodeTexel(tex *Texture2D, x, y int, v Vec4) bool {
 func decodeTexel(tex *Texture2D, x, y int) (Vec4, bool) {
 	layout, ok := sampledLayout(tex)
 	if !ok {
+		// Compressed formats have no per-texel layout; checking them only
+		// here keeps the switch off the path of every uncompressed fetch.
+		if f := gputypes.TextureFormat(tex.Format); texcompress.Decodes(f) {
+			return decodeCompressedTexel(tex, f, x, y)
+		}
 		return Vec4{}, false
 	}
 	off, ok := texelOffset(tex, x, y, layout)
@@ -235,6 +242,33 @@ func decodeTexel(tex *Texture2D, x, y int) (Vec4, bool) {
 	}
 	return decodeAt(tex.Data[off:], layout), true
 }
+
+// decodeCompressedTexel decodes texel (x, y) of tex, whose format f is block
+// compressed: it decodes that texel from its own 4x4 block, which the
+// software backend stores as whole blocks, row-major, tex.texelSize() bytes
+// each (P1-SW-026). The red, green and blue of an sRGB format decode to
+// linear after the block decode; texcompress returns them as exact 8-bit
+// codes.
+func decodeCompressedTexel(tex *Texture2D, f gputypes.TextureFormat, x, y int) (Vec4, bool) {
+	if x < 0 || y < 0 || x >= int(tex.Width) || y >= int(tex.Height) {
+		return Vec4{}, false
+	}
+	size := tex.texelSize()
+	off := ((y/4)*blocksAcross(tex.Width) + x/4) * size
+	if off+size > len(tex.Data) {
+		return Vec4{}, false
+	}
+	v, ok := texcompress.Decode(f, tex.Data[off:off+size], x&3, y&3)
+	if ok && f.IsSrgb() {
+		for c := range 3 {
+			v[c] = srgbToLinear8[uint8(v[c]*255+0.5)]
+		}
+	}
+	return v, ok
+}
+
+// blocksAcross is the number of 4x4 blocks covering n texels.
+func blocksAcross(n uint32) int { return (int(n) + 3) / 4 }
 
 // decodeAt decodes the texel plane of layout that starts at b[0].
 func decodeAt(b []byte, layout sampledFormat) Vec4 {

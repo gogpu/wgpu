@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal/software/internal/texcompress"
 )
 
 // This file selects the mip level, array layer, cube face or depth slice a
@@ -142,10 +143,14 @@ func (tex *Texture2D) imageIndex(xyz [3]int) int {
 	return 0
 }
 
-// texelSize is the storage size of one texel.
+// texelSize is the storage size of one texel, or of one 4x4 block of a
+// block-compressed format.
 func (tex *Texture2D) texelSize() int {
 	if tex.BytesPerPixel != 0 {
 		return int(tex.BytesPerPixel)
+	}
+	if f := gputypes.TextureFormat(tex.Format); texcompress.Decodes(f) {
+		return int(f.BlockCopySize())
 	}
 	if layout, ok := sampledLayout(tex); ok {
 		return layout.texelStride()
@@ -161,6 +166,9 @@ func (tex *Texture2D) imageAt(lv TextureLevel, z int) (Texture2D, bool) {
 		return Texture2D{}, false
 	}
 	size := int(lv.Width) * int(lv.Height) * tex.texelSize()
+	if texcompress.Decodes(gputypes.TextureFormat(tex.Format)) {
+		size = blocksAcross(lv.Width) * blocksAcross(lv.Height) * tex.texelSize()
+	}
 	off := min(z*size, len(lv.Data))
 	end := min(off+size, len(lv.Data))
 	return Texture2D{
