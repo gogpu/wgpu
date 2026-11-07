@@ -80,6 +80,7 @@ type Context struct {
 	glEnableVertexAttribArray  uintptr
 	glDisableVertexAttribArray uintptr
 	glVertexAttribPointer      uintptr
+	glVertexAttribIPointer     uintptr
 
 	// Textures (GL 1.1+)
 	glGenTextures    uintptr
@@ -276,6 +277,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glEnableVertexAttribArray = getProcAddr("glEnableVertexAttribArray")
 	c.glDisableVertexAttribArray = getProcAddr("glDisableVertexAttribArray")
 	c.glVertexAttribPointer = getProcAddr("glVertexAttribPointer")
+	c.glVertexAttribIPointer = getProcAddr("glVertexAttribIPointer")
 
 	// Textures
 	c.glGenTextures = getProcAddr("glGenTextures")
@@ -433,6 +435,7 @@ func (c *Context) requiredProcs() []requiredProc[uintptr] {
 		{"glDrawArraysInstanced", c.glDrawArraysInstanced},
 		{"glDrawElementsInstanced", c.glDrawElementsInstanced},
 		{"glVertexAttribDivisor", c.glVertexAttribDivisor},
+		{"glVertexAttribIPointer", c.glVertexAttribIPointer},
 	}
 }
 
@@ -716,6 +719,14 @@ func (c *Context) VertexAttribPointer(index uint32, size int32, typ uint32, norm
 	}
 	syscall.SyscallN(c.glVertexAttribPointer, uintptr(index), uintptr(size),
 		uintptr(typ), norm, uintptr(stride), offset)
+}
+
+// VertexAttribIPointer configures an integer vertex attribute: the shader
+// reads the values as integers, unconverted. VertexAttribPointer converts
+// them to float, so an integer shader input reads the float's bits.
+func (c *Context) VertexAttribIPointer(index uint32, size int32, typ uint32, stride int32, offset uintptr) {
+	syscall.SyscallN(c.glVertexAttribIPointer, uintptr(index), uintptr(size),
+		uintptr(typ), uintptr(stride), offset)
 }
 
 // VertexAttribDivisor sets the instance divisor for a vertex attribute.
