@@ -47,8 +47,8 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 		}
 	}
 
-	// T4-T7: Dimension limits depend on texture type.
-	if err := validateTextureDimLimits(desc, label, limits); err != nil {
+	// T4-T7 dimension limits, then the compressed-format shape rules.
+	if err := validateTextureShape(desc, label, limits); err != nil {
 		return err
 	}
 
@@ -123,6 +123,15 @@ func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limi
 	}
 
 	return nil
+}
+
+// validateTextureShape checks the size of a texture: the T4-T7 dimension
+// limits, then the shape rules of a compressed format.
+func validateTextureShape(desc *hal.TextureDescriptor, label string, limits gputypes.Limits) error {
+	if err := validateTextureDimLimits(desc, label, limits); err != nil {
+		return err
+	}
+	return validateCompressedTextureShape(desc, label)
 }
 
 // validateTextureDimLimits checks T4-T7 dimension limit constraints.
@@ -1524,4 +1533,36 @@ func maxMips(dimension gputypes.TextureDimension, width, height, depth uint32) u
 		return 0
 	}
 	return uint32(bits.Len32(maxDim)) //nolint:gosec // bits.Len32 returns 0..32, always fits uint32
+}
+
+// validateCompressedTextureShape applies WebGPU "validating
+// GPUTextureDescriptor" to a block-compressed format, as Rust wgpu-core's
+// create_texture does (device/resource.rs): the texture must be 2D, and its
+// width and height multiples of the format's block. Rust also allows 3D for
+// BC and ASTC with the texture-compression-*-sliced-3d features; gputypes has
+// no such features yet, so every compressed 3D texture is refused, as Rust
+// refuses it without them.
+func validateCompressedTextureShape(desc *hal.TextureDescriptor, label string) error {
+	if !desc.Format.IsCompressed() {
+		return nil
+	}
+	if desc.Dimension != gputypes.TextureDimension2D {
+		return &CreateTextureError{
+			Kind:      CreateTextureErrorInvalidCompressedDimension,
+			Label:     label,
+			Format:    desc.Format,
+			Dimension: desc.Dimension,
+		}
+	}
+	bw, bh := desc.Format.BlockDimensions()
+	if desc.Size.Width%bw != 0 || desc.Size.Height%bh != 0 {
+		return &CreateTextureError{
+			Kind:            CreateTextureErrorNotMultipleOfBlockSize,
+			Label:           label,
+			Format:          desc.Format,
+			RequestedWidth:  desc.Size.Width,
+			RequestedHeight: desc.Size.Height,
+		}
+	}
+	return nil
 }
