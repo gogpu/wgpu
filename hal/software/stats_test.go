@@ -46,6 +46,7 @@ func TestRenderPassStats_ScissorAndDrawCount(t *testing.T) {
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	stats := pass.(*RenderPassEncoder).Stats()
 
@@ -93,6 +94,7 @@ func TestRenderPassStats_NoScissor(t *testing.T) {
 	})
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	stats := pass.(*RenderPassEncoder).Stats()
 

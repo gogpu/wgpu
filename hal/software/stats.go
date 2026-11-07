@@ -6,9 +6,10 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// RenderPassStats holds observable state from a completed software render pass.
-// Populated from fields already tracked by RenderPassEncoder — zero additional
-// overhead during rendering. Available via RenderPassEncoder.Stats() after End().
+// RenderPassStats holds observable state from a recorded software render pass.
+// Gathered as RenderPassEncoder records the pass's commands, so it is known
+// without submitting the command buffer. Available via
+// RenderPassEncoder.Stats() after End().
 //
 // Designed for CI e2e test assertions:
 //

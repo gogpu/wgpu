@@ -245,6 +245,7 @@ func TestSoftwareComputeDispatch(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Dispatch(1, 1, 1) // 1 workgroup of 64 invocations
 	pass.End()
+	submit(t, enc)
 
 	// 7. Verify output: each element should be (i+1) * 3.
 	outBuf := outputBuf.(*Buffer)
@@ -319,6 +320,7 @@ func TestSoftwareComputeMultipleWorkgroups(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Dispatch(1, 1, 1) // Only 1 workgroup to stay within bounds.
 	pass.End()
+	submit(t, enc)
 
 	outData := outputBuf.(*Buffer).GetData()
 	for i := uint32(0); i < numElements; i++ {

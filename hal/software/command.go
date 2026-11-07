@@ -9,6 +9,7 @@ import (
 	"image"
 	"log/slog"
 	"math"
+	"slices"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -16,31 +17,92 @@ import (
 	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
-// CommandEncoder implements hal.CommandEncoder for the software backend.
-// It holds a device reference so that compute passes can resolve bind group
-// resources during dispatch.
-type CommandEncoder struct {
-	device *Device
+// command is one recorded command. It runs when the command buffer holding
+// it is submitted (Queue.Submit), after the commands recorded before it and
+// after every queue operation made before that Submit, as on the GPU
+// backends. The GL backend of Rust wgpu works the same way: the encoder
+// appends commands to a list (wgpu-hal/src/gles/command.rs) and the queue
+// replays the list at submit (wgpu-hal/src/gles/queue.rs). A command holds
+// the resources it uses, so they stay alive until it has run.
+type command func()
+
+var (
+	_ hal.CommandBuffer      = (*CommandBuffer)(nil)
+	_ hal.CommandEncoder     = (*CommandEncoder)(nil)
+	_ hal.RenderPassEncoder  = (*RenderPassEncoder)(nil)
+	_ hal.ComputePassEncoder = (*ComputePassEncoder)(nil)
+)
+
+// CommandBuffer implements hal.CommandBuffer for the software backend: the
+// commands an encoder recorded between BeginEncoding and EndEncoding.
+type CommandBuffer struct {
+	commands []command
 }
 
-// BeginEncoding is a no-op.
+// Destroy drops the recorded commands and with them the resources they hold.
+func (cb *CommandBuffer) Destroy() {
+	cb.commands = nil
+}
+
+// execute runs the commands in recording order (Queue.Submit). The commands
+// are kept until ResetAll or Destroy, as the GL backend keeps them until
+// reset_all; core never submits a command buffer twice.
+func (cb *CommandBuffer) execute() {
+	for _, cmd := range cb.commands {
+		cmd()
+	}
+}
+
+// CommandEncoder implements hal.CommandEncoder for the software backend.
+// It records commands into the command buffer being encoded; nothing runs
+// until that command buffer is submitted. It holds a device reference so
+// that compute passes can resolve bind group resources during dispatch.
+type CommandEncoder struct {
+	device *Device
+
+	// commands is the command buffer being recorded. EndEncoding hands it
+	// over; DiscardEncoding drops it.
+	commands []command
+}
+
+// record appends cmd to the command buffer being recorded.
+func (c *CommandEncoder) record(cmd command) {
+	c.commands = append(c.commands, cmd)
+}
+
+// BeginEncoding starts a new, empty command buffer.
 func (c *CommandEncoder) BeginEncoding(_ string) error {
+	c.commands = nil
 	return nil
 }
 
-// EndEncoding returns a placeholder command buffer.
+// EndEncoding returns the recorded commands as a command buffer and starts
+// over with an empty one.
 func (c *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
-	return &Resource{}, nil
+	cb := &CommandBuffer{commands: c.commands}
+	c.commands = nil
+	return cb, nil
 }
 
-// DiscardEncoding is a no-op.
-func (c *CommandEncoder) DiscardEncoding() {}
+// DiscardEncoding drops the commands recorded since BeginEncoding.
+func (c *CommandEncoder) DiscardEncoding() {
+	c.commands = nil
+}
 
-// ResetAll is a no-op.
-func (c *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {}
+// ResetAll drops the commands of command buffers this encoder produced,
+// releasing the resources they hold.
+func (c *CommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
+	for _, cb := range commandBuffers {
+		if swcb, ok := cb.(*CommandBuffer); ok {
+			swcb.Destroy()
+		}
+	}
+}
 
-// Destroy is a no-op for the software backend.
-func (c *CommandEncoder) Destroy() {}
+// Destroy drops any commands still being recorded.
+func (c *CommandEncoder) Destroy() {
+	c.commands = nil
+}
 
 // TransitionBuffers is a no-op (software backend doesn't need explicit transitions).
 func (c *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
@@ -48,27 +110,36 @@ func (c *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
 // TransitionTextures is a no-op (software backend doesn't need explicit transitions).
 func (c *CommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {}
 
-// ClearBuffer clears a buffer region to zero.
+// ClearBuffer records clearing a buffer region to zero.
 func (c *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
 	if b, ok := buffer.(*Buffer); ok {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		// Clear to zero
-		for i := offset; i < offset+size && i < uint64(len(b.data)); i++ {
-			b.data[i] = 0
-		}
+		c.record(func() { clearBuffer(b, offset, size) })
 	}
 }
 
-// CopyBufferToBuffer copies data between buffers.
+// clearBuffer clears size bytes of b at offset to zero.
+func clearBuffer(b *Buffer, offset, size uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := offset; i < offset+size && i < uint64(len(b.data)); i++ {
+		b.data[i] = 0
+	}
+}
+
+// CopyBufferToBuffer records a copy between buffers.
 func (c *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
 	srcBuf, srcOK := src.(*Buffer)
 	dstBuf, dstOK := dst.(*Buffer)
-
 	if !srcOK || !dstOK {
 		return
 	}
+	// The caller may reuse its region slice once the call returns.
+	regions = slices.Clone(regions)
+	c.record(func() { copyBufferToBuffer(srcBuf, dstBuf, regions) })
+}
 
+// copyBufferToBuffer copies every region from src to dst.
+func copyBufferToBuffer(srcBuf, dstBuf *Buffer, regions []hal.BufferCopy) {
 	for _, region := range regions {
 		srcBuf.mu.RLock()
 		dstBuf.mu.Lock()
@@ -86,14 +157,19 @@ func (c *CommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.B
 	}
 }
 
-// CopyBufferToTexture copies data from a buffer to a texture.
+// CopyBufferToTexture records a copy from a buffer to a texture.
 func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
 	srcBuf, srcOK := src.(*Buffer)
 	dstTex := resolveTexture(dst)
 	if !srcOK || dstTex == nil {
 		return
 	}
+	regions = slices.Clone(regions)
+	c.record(func() { copyBufferToTexture(srcBuf, dstTex, regions) })
+}
 
+// copyBufferToTexture copies every region from srcBuf to dstTex.
+func copyBufferToTexture(srcBuf *Buffer, dstTex *Texture, regions []hal.BufferTextureCopy) {
 	for _, region := range regions {
 		r, ok := dstTex.regionOf(region.TextureBase.MipLevel, region.TextureBase.Origin, region.Size)
 		if !ok {
@@ -112,8 +188,8 @@ func (c *CommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, re
 	}
 }
 
-// CopyTextureToBuffer copies data from a texture to a buffer: layer by layer
-// and row by row from the origin of the region's mip level, into rows
+// CopyTextureToBuffer records a copy from a texture to a buffer: layer by
+// layer and row by row from the origin of the region's mip level, into rows
 // bytesPerRow apart and images rowsPerImage rows apart. Mirrors
 // CopyBufferToTexture above.
 func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
@@ -122,7 +198,12 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	if srcTex == nil || !dstOK {
 		return
 	}
+	regions = slices.Clone(regions)
+	c.record(func() { copyTextureToBuffer(srcTex, dstBuf, regions) })
+}
 
+// copyTextureToBuffer copies every region from srcTex to dstBuf.
+func copyTextureToBuffer(srcTex *Texture, dstBuf *Buffer, regions []hal.BufferTextureCopy) {
 	for _, region := range regions {
 		r, ok := srcTex.regionOf(region.TextureBase.MipLevel, region.TextureBase.Origin, region.Size)
 		if !ok {
@@ -137,16 +218,19 @@ func (c *CommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, re
 	}
 }
 
-// CopyTextureToTexture copies data between textures, including a surface's
-// acquired texture on either side.
+// CopyTextureToTexture records a copy between textures, including a
+// surface's acquired texture on either side.
 func (c *CommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
 	srcTex, dstTex := resolveTexture(src), resolveTexture(dst)
 	if srcTex == nil || dstTex == nil {
 		return
 	}
-	for _, region := range regions {
-		copyTextureRegion(srcTex, dstTex, region)
-	}
+	regions = slices.Clone(regions)
+	c.record(func() {
+		for _, region := range regions {
+			copyTextureRegion(srcTex, dstTex, region)
+		}
+	})
 }
 
 // copyTextureRegion copies one region as WebGPU copyTextureToTexture does:
@@ -191,11 +275,50 @@ func copyTextureRegion(src, dst *Texture, region hal.TextureCopy) {
 // ResolveQuerySet is a no-op (query sets not supported in software backend).
 func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
 
-// BuildAccelerationStructures builds BVH trees for BLAS entries by extracting
-// triangle data from vertex buffers, and stores TLAS instance references.
-// This is the CPU equivalent of vkCmdBuildAccelerationStructuresKHR / DXR
-// BuildRaytracingAccelerationStructure.
+// BuildAccelerationStructures records building BVH trees for BLAS entries
+// from the triangle data of vertex buffers, and storing TLAS instance
+// references. This is the CPU equivalent of
+// vkCmdBuildAccelerationStructuresKHR / DXR
+// BuildRaytracingAccelerationStructure: the vertex data is read when the
+// command runs, so it sees what earlier commands wrote.
 func (c *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAccelerationStructureDescriptor) {
+	descriptors = slices.Clone(descriptors)
+	for i := range descriptors {
+		descriptors[i].Entries = cloneEntries(descriptors[i].Entries)
+	}
+	c.record(func() { buildAccelerationStructures(descriptors) })
+}
+
+// cloneEntries copies the geometry lists of a build, so a caller that reuses
+// its descriptors after recording cannot change the build that runs at
+// Submit. The buffers inside stay shared: they are resources, read when the
+// command runs.
+func cloneEntries(e *hal.AccelerationStructureEntries) *hal.AccelerationStructureEntries {
+	if e == nil {
+		return nil
+	}
+	c := *e
+	if e.Instances != nil {
+		instances := *e.Instances
+		c.Instances = &instances
+	}
+	c.Triangles = slices.Clone(e.Triangles)
+	for i := range c.Triangles {
+		if idx := c.Triangles[i].Indices; idx != nil {
+			v := *idx
+			c.Triangles[i].Indices = &v
+		}
+		if tr := c.Triangles[i].Transform; tr != nil {
+			v := *tr
+			c.Triangles[i].Transform = &v
+		}
+	}
+	c.AABBs = slices.Clone(e.AABBs)
+	return &c
+}
+
+// buildAccelerationStructures builds the destination of every descriptor.
+func buildAccelerationStructures(descriptors []hal.BuildAccelerationStructureDescriptor) {
 	for i := range descriptors {
 		desc := &descriptors[i]
 		if desc.Entries == nil || desc.DestinationAccelerationStructure == nil {
@@ -288,8 +411,8 @@ func extractAABBsFromBuffer(buf *Buffer, offset, count uint32, stride uint64, ge
 // CPU execution is inherently ordered; no memory barriers are needed.
 func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
 
-// CopyAccelerationStructure performs a deep copy of the source BVH tree
-// into the destination acceleration structure.
+// CopyAccelerationStructure records a deep copy of the source BVH tree into
+// the destination acceleration structure.
 func (c *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
 	srcAS, ok := src.(*AccelerationStructure)
 	if !ok || srcAS == nil {
@@ -299,7 +422,11 @@ func (c *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStru
 	if !ok || dstAS == nil {
 		return
 	}
+	c.record(func() { copyAccelerationStructure(srcAS, dstAS) })
+}
 
+// copyAccelerationStructure deep-copies srcAS into dstAS.
+func copyAccelerationStructure(srcAS, dstAS *AccelerationStructure) {
 	dstAS.bvh = deepCopyBVH(srcAS.bvh)
 	dstAS.format = srcAS.format
 	dstAS.size = srcAS.size
@@ -310,9 +437,10 @@ func (c *CommandEncoder) CopyAccelerationStructure(src, dst hal.AccelerationStru
 	}
 }
 
-// ReadAccelerationStructureCompactSize writes the current BVH size estimate
-// into the destination buffer as a uint64. This is the CPU equivalent of
-// vkCmdWriteAccelerationStructuresPropertiesKHR COMPACTED_SIZE.
+// ReadAccelerationStructureCompactSize records writing the current BVH size
+// estimate into the destination buffer as a uint64. This is the CPU
+// equivalent of vkCmdWriteAccelerationStructuresPropertiesKHR
+// COMPACTED_SIZE.
 func (c *CommandEncoder) ReadAccelerationStructureCompactSize(as hal.AccelerationStructure, buffer hal.Buffer, offset uint64) {
 	swAS, ok := as.(*AccelerationStructure)
 	if !ok || swAS == nil {
@@ -322,7 +450,11 @@ func (c *CommandEncoder) ReadAccelerationStructureCompactSize(as hal.Acceleratio
 	if !ok || buf == nil {
 		return
 	}
+	c.record(func() { writeCompactSize(swAS, buf, offset) })
+}
 
+// writeCompactSize writes swAS's size into buf at offset.
+func writeCompactSize(swAS *AccelerationStructure, buf *Buffer, offset uint64) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 
@@ -332,43 +464,44 @@ func (c *CommandEncoder) ReadAccelerationStructureCompactSize(as hal.Acceleratio
 	}
 }
 
-// BeginRenderPass begins a render pass and returns an encoder.
-// If a depth/stencil attachment is present, a persistent stencil buffer is
-// created for the entire pass (matching GPU behavior where the stencil buffer
-// is the attachment texture, not recreated per draw call).
+// BeginRenderPass records the start of a render pass and returns the encoder
+// that records its commands into c. The pass runs when the command buffer is
+// submitted (begin, the recorded commands, end).
 func (c *CommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	r := &RenderPassEncoder{
-		desc: desc,
+		enc:  c,
+		desc: cloneRenderPassDescriptor(desc),
 	}
-	r.resolveColorTargets()
-
-	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
-		var w, h uint32
-		loadOp := gputypes.LoadOpClear
-		if len(desc.ColorAttachments) > 0 {
-			loadOp = desc.ColorAttachments[0].LoadOp
-			if target := r.colorTargets[0]; target != nil {
-				w, h = target.width, target.height
-			}
-		}
-		hal.Logger().Debug("software: BeginRenderPass",
-			"width", w, "height", h,
-			"colorLoadOp", loadOp,
-			"attachments", len(desc.ColorAttachments),
-		)
-	}
-
-	// Load the depth and stencil planes of the depth/stencil attachment's
-	// mip level and array layer for the pass.
-	if tex, level, layer, ok := depthAttachmentImage(desc.DepthStencilAttachment); ok {
-		w, h, _ := tex.levelExtent(level)
-		if w > 0 && h > 0 {
-			r.passStencilBuffer = loadStencilAttachment(desc.DepthStencilAttachment, tex, level, layer)
-			r.passDepthBuffer = loadDepthAttachment(desc.DepthStencilAttachment, tex, level, layer)
-		}
-	}
-
+	r.recorded = recordedPassStats(r.desc)
+	c.record(r.begin)
 	return r
+}
+
+// cloneRenderPassDescriptor copies desc and its attachment lists: the pass
+// runs after BeginRenderPass returns, when the caller may have reused them.
+func cloneRenderPassDescriptor(desc *hal.RenderPassDescriptor) *hal.RenderPassDescriptor {
+	d := *desc
+	d.ColorAttachments = slices.Clone(desc.ColorAttachments)
+	if desc.DepthStencilAttachment != nil {
+		ds := *desc.DepthStencilAttachment
+		d.DepthStencilAttachment = &ds
+	}
+	return &d
+}
+
+// recordedPassStats returns the Stats of a pass with desc before any of its
+// commands is recorded: the first color attachment's size and LoadOp.
+func recordedPassStats(desc *hal.RenderPassDescriptor) RenderPassStats {
+	var s RenderPassStats
+	if len(desc.ColorAttachments) == 0 {
+		return s
+	}
+	ca := desc.ColorAttachments[0]
+	s.ColorLoadOp = ca.LoadOp
+	if tex, level, _, ok := attachmentSubresource(ca.View, ca.DepthSlice); ok {
+		s.Width, s.Height, _ = tex.levelExtent(level)
+	}
+	return s
 }
 
 // stencilPlane returns where a texel of format stores its stencil: the
@@ -536,14 +669,22 @@ func writeDepthTexel(img textureImage, format gputypes.TextureFormat, x, y int, 
 	}
 }
 
-// BeginComputePass begins a compute pass and returns an encoder.
-// The device reference is passed through so Dispatch can resolve bind group
-// buffer data.
+// BeginComputePass records the start of a compute pass and returns the
+// encoder that records its commands into c. The device reference is passed
+// through so Dispatch can resolve bind group buffer data.
 func (c *CommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
-	return &ComputePassEncoder{
-		desc:   desc,
+	var d *hal.ComputePassDescriptor
+	if desc != nil {
+		cp := *desc
+		d = &cp
+	}
+	p := &ComputePassEncoder{
+		enc:    c,
+		desc:   d,
 		device: c.device,
 	}
+	c.record(p.begin)
+	return p
 }
 
 // vertexBufferBinding holds a vertex buffer and its byte offset.
@@ -553,12 +694,22 @@ type vertexBufferBinding struct {
 }
 
 // RenderPassEncoder implements hal.RenderPassEncoder for the software backend.
-// It tracks pipeline state set during encoding and executes draw calls
-// using the raster/ package for triangle rasterization.
+// Each method records a command into the command encoder; when the command
+// buffer is submitted the commands run in order on the pass state below,
+// and draw calls rasterize triangles with the raster/ package.
 type RenderPassEncoder struct {
+	// enc is the command encoder the pass records into.
+	enc  *CommandEncoder
 	desc *hal.RenderPassDescriptor
 
-	// Pipeline and resource state set during encoding.
+	// recorded holds what Stats reports, gathered as the commands are
+	// recorded, so it is known at End without submitting.
+	recorded RenderPassStats
+
+	// The fields below are the execution state: set while the pass's
+	// commands run (begin resets them).
+
+	// Pipeline and resource state set by the pass's commands.
 	pipeline    *RenderPipeline
 	bindGroups  [4]*BindGroup          // max 4 per WebGPU spec
 	vertexBufs  [8]vertexBufferBinding // max 8 vertex buffers
@@ -617,10 +768,54 @@ type RenderPassEncoder struct {
 	drawCount uint32
 }
 
-// End finishes the render pass.
+// begin starts the pass when it executes: it resets the execution state,
+// resolves the color targets and, with a depth/stencil attachment, loads
+// the depth and stencil buffers every draw of the pass shares (matching GPU
+// behavior where they are the attachment texture, not recreated per draw).
+func (r *RenderPassEncoder) begin() {
+	// Execution starts from the default pass state, whatever an earlier run
+	// of the same commands left behind (the GL backend resets its state
+	// before each command buffer for the same reason).
+	*r = RenderPassEncoder{enc: r.enc, desc: r.desc, recorded: r.recorded}
+	desc := r.desc
+	r.resolveColorTargets()
+
+	if hal.Logger().Enabled(context.Background(), slog.LevelDebug) {
+		var w, h uint32
+		loadOp := gputypes.LoadOpClear
+		if len(desc.ColorAttachments) > 0 {
+			loadOp = desc.ColorAttachments[0].LoadOp
+			if target := r.colorTargets[0]; target != nil {
+				w, h = target.width, target.height
+			}
+		}
+		hal.Logger().Debug("software: BeginRenderPass",
+			"width", w, "height", h,
+			"colorLoadOp", loadOp,
+			"attachments", len(desc.ColorAttachments),
+		)
+	}
+
+	// Load the depth and stencil planes of the depth/stencil attachment's
+	// mip level and array layer for the pass.
+	if tex, level, layer, ok := depthAttachmentImage(desc.DepthStencilAttachment); ok {
+		w, h, _ := tex.levelExtent(level)
+		if w > 0 && h > 0 {
+			r.passStencilBuffer = loadStencilAttachment(desc.DepthStencilAttachment, tex, level, layer)
+			r.passDepthBuffer = loadDepthAttachment(desc.DepthStencilAttachment, tex, level, layer)
+		}
+	}
+}
+
+// End records the end of the render pass.
+func (r *RenderPassEncoder) End() {
+	r.enc.record(r.end)
+}
+
+// end finishes the render pass when it executes.
 // If no draw calls were issued and LoadOp is Clear, the clear is applied now.
 // MSAA resolve: copies color attachment pixels to resolve target (WebGPU spec).
-func (r *RenderPassEncoder) End() {
+func (r *RenderPassEncoder) end() {
 	hal.Logger().Debug("software: End",
 		"draws", r.drawCount,
 		"hasScissor", r.hasScissor,
@@ -658,87 +853,116 @@ func (r *RenderPassEncoder) applyClear() {
 	}
 }
 
-// SetPipeline stores the render pipeline for subsequent draw calls.
+// SetPipeline records setting the render pipeline for subsequent draw calls.
 func (r *RenderPassEncoder) SetPipeline(p hal.RenderPipeline) {
 	if rp, ok := p.(*RenderPipeline); ok {
-		r.pipeline = rp
+		r.enc.record(func() { r.pipeline = rp })
 	}
 }
 
-// SetBindGroup stores a bind group at the given index.
+// SetBindGroup records binding a bind group at the given index.
 func (r *RenderPassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
-	if index < 4 {
-		if b, ok := bg.(*BindGroup); ok {
-			b.dynamicOffsets = dynamicOffsets
+	if index >= 4 {
+		return
+	}
+	if b, ok := bg.(*BindGroup); ok {
+		offsets := slices.Clone(dynamicOffsets)
+		r.enc.record(func() {
+			// The offsets live on the bind group, so they are set when the
+			// command runs: another pass may bind the same group with other
+			// offsets in between.
+			b.dynamicOffsets = offsets
 			r.bindGroups[index] = b
-		}
+		})
 	}
 }
 
-// SetVertexBuffer stores a vertex buffer binding at the given slot.
+// SetVertexBuffer records binding a vertex buffer at the given slot.
 func (r *RenderPassEncoder) SetVertexBuffer(slot uint32, buf hal.Buffer, offset uint64) {
-	if slot < 8 {
-		if b, ok := buf.(*Buffer); ok {
-			r.vertexBufs[slot] = vertexBufferBinding{buffer: b, offset: offset}
-		}
+	if slot >= 8 {
+		return
+	}
+	if b, ok := buf.(*Buffer); ok {
+		r.enc.record(func() { r.vertexBufs[slot] = vertexBufferBinding{buffer: b, offset: offset} })
 	}
 }
 
-// SetIndexBuffer stores the index buffer for indexed draw calls.
+// SetIndexBuffer records binding the index buffer for indexed draw calls.
 func (r *RenderPassEncoder) SetIndexBuffer(buf hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	if b, ok := buf.(*Buffer); ok {
-		r.indexBuffer = b
-		r.indexFormat = format
-		r.indexOffset = offset
+		r.enc.record(func() {
+			r.indexBuffer = b
+			r.indexFormat = format
+			r.indexOffset = offset
+		})
 	}
 }
 
-// SetViewport stores the viewport transformation.
+// SetViewport records setting the viewport transformation.
 func (r *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
-	r.viewport = [6]float32{vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth}
-	r.hasViewport = true
+	r.enc.record(func() {
+		r.viewport = [6]float32{vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth}
+		r.hasViewport = true
+	})
 }
 
-// SetScissorRect stores the scissor rectangle.
+// SetScissorRect records setting the scissor rectangle.
 func (r *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
-	r.scissorRect = [4]uint32{rect.X, rect.Y, rect.Width, rect.Height}
-	r.hasScissor = true
-	hal.Logger().Debug("software: SetScissorRect", "x", rect.X, "y", rect.Y, "w", rect.Width, "h", rect.Height)
+	r.recorded.HasScissor = true
+	r.recorded.ScissorRect = image.Rect(int(rect.X), int(rect.Y), int(rect.X+rect.Width), int(rect.Y+rect.Height))
+	r.enc.record(func() {
+		r.scissorRect = [4]uint32{rect.X, rect.Y, rect.Width, rect.Height}
+		r.hasScissor = true
+		hal.Logger().Debug("software: SetScissorRect", "x", rect.X, "y", rect.Y, "w", rect.Width, "h", rect.Height)
+	})
 }
 
-// SetBlendConstant sets the constant the "constant" and "one-minus-constant"
-// blend factors of later draws use.
+// SetBlendConstant records setting the constant the "constant" and
+// "one-minus-constant" blend factors of later draws use.
 func (r *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if color == nil {
 		return
 	}
-	r.blendConstant = [4]float32{float32(color.R), float32(color.G), float32(color.B), float32(color.A)}
+	c := [4]float32{float32(color.R), float32(color.G), float32(color.B), float32(color.A)}
+	r.enc.record(func() { r.blendConstant = c })
 }
 
-// SetStencilReference stores the stencil reference value for subsequent draw calls.
-// The reference value is used by stencil comparison and StencilOpReplace.
+// SetStencilReference records setting the stencil reference value for
+// subsequent draw calls. The reference value is used by stencil comparison
+// and StencilOpReplace.
 func (r *RenderPassEncoder) SetStencilReference(ref uint32) {
-	r.stencilRef = ref
+	r.enc.record(func() { r.stencilRef = ref })
 }
 
-// Draw executes a non-indexed draw call.
+// Draw records a non-indexed draw call.
+func (r *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
+	r.recorded.DrawCount++
+	r.enc.record(func() { r.draw(args) })
+}
+
+// draw executes a non-indexed draw call.
 // It performs vertex fetch, viewport transform, and triangle rasterization
 // using the raster/ package. If no vertex buffer is bound and a texture is
 // available in a bind group, it performs a fullscreen texture blit.
 // Supports instanced rendering: instanceCount > 1 draws the same vertices
 // multiple times, advancing instance-rate vertex buffers per instance.
-func (r *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
+func (r *RenderPassEncoder) draw(args gputypes.DrawArgs) {
 	r.drawCount++
 	hal.Logger().Debug("software: Draw", "vertices", args.VertexCount, "instances", args.InstanceCount, "drawIndex", r.drawCount)
 	r.executeDraw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
 }
 
-// DrawIndexed executes an indexed draw call. It resolves the index buffer into
-// a list of vertex indices (applying baseVertex) and runs the same vertex-fetch
-// and rasterization path as Draw, with vertex positions remapped through the
-// resolved indices. Previously this was a no-op, so every indexed draw (glyph
-// mask text, MSDF text) rendered nothing on the software backend.
+// DrawIndexed records an indexed draw call.
 func (r *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
+	r.recorded.DrawCount++
+	r.enc.record(func() { r.drawIndexed(args) })
+}
+
+// drawIndexed executes an indexed draw call. It resolves the index buffer
+// into a list of vertex indices (applying baseVertex) and runs the same
+// vertex-fetch and rasterization path as draw, with vertex positions
+// remapped through the resolved indices.
+func (r *RenderPassEncoder) drawIndexed(args gputypes.DrawIndexedArgs) {
 	r.drawCount++
 	if args.IndexCount == 0 || r.indexBuffer == nil {
 		return
@@ -833,33 +1057,46 @@ func readIndirectArgs(buf hal.Buffer, offset uint64, n int) (args [5]uint32, ok 
 	return args, true
 }
 
-// DrawIndirect draws drawCount consecutive DrawIndirectArgs records starting
-// at offset, each as a Draw with the arguments read from the buffer.
+// DrawIndirect records drawing drawCount consecutive DrawIndirectArgs
+// records starting at offset, each as a Draw with the arguments read from
+// the buffer when the command runs.
 func (r *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	r.recorded.DrawCount += drawCount
+	r.enc.record(func() { r.drawIndirect(buffer, offset, drawCount) })
+}
+
+// drawIndirect executes DrawIndirect.
+func (r *RenderPassEncoder) drawIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	for i := range uint64(drawCount) {
 		args, ok := readIndirectArgs(buffer, offset+i*drawIndirectRecordSize, 4)
 		if !ok {
 			slog.Warn("software: DrawIndirect record outside the buffer", "offset", offset+i*drawIndirectRecordSize)
 			return
 		}
-		r.Draw(gputypes.DrawArgs{
+		r.draw(gputypes.DrawArgs{
 			VertexCount: args[0], InstanceCount: args[1], FirstVertex: args[2], FirstInstance: args[3],
 		})
 	}
 }
 
-// DrawIndexedIndirect draws drawCount consecutive DrawIndexedIndirectArgs
-// records starting at offset, each as a DrawIndexed with the arguments read
-// from the buffer. The index buffer and its offset are those set by
-// SetIndexBuffer, as for DrawIndexed.
+// DrawIndexedIndirect records drawing drawCount consecutive
+// DrawIndexedIndirectArgs records starting at offset, each as a DrawIndexed
+// with the arguments read from the buffer when the command runs. The index
+// buffer and its offset are those set by SetIndexBuffer, as for DrawIndexed.
 func (r *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
+	r.recorded.DrawCount += drawCount
+	r.enc.record(func() { r.drawIndexedIndirect(buffer, offset, drawCount) })
+}
+
+// drawIndexedIndirect executes DrawIndexedIndirect.
+func (r *RenderPassEncoder) drawIndexedIndirect(buffer hal.Buffer, offset uint64, drawCount uint32) {
 	for i := range uint64(drawCount) {
 		args, ok := readIndirectArgs(buffer, offset+i*drawIndexedIndirectRecordSize, 5)
 		if !ok {
 			slog.Warn("software: DrawIndexedIndirect record outside the buffer", "offset", offset+i*drawIndexedIndirectRecordSize)
 			return
 		}
-		r.DrawIndexed(gputypes.DrawIndexedArgs{
+		r.drawIndexed(gputypes.DrawIndexedArgs{
 			IndexCount: args[0], InstanceCount: args[1], FirstIndex: args[2],
 			BaseVertex: int32(args[3]), FirstInstance: args[4],
 		})
@@ -877,63 +1114,70 @@ func (r *RenderPassEncoder) DrawIndexedIndirectCount(_ hal.Buffer, _ uint64, _ h
 // ExecuteBundle is a no-op.
 func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
 
-// Stats returns render pass statistics after End(). Designed for CI e2e
-// test assertions — zero overhead (fields already tracked during encoding).
+// Stats returns the render pass statistics: the draw calls and the last
+// scissor rectangle recorded so far and the first color attachment's size
+// and LoadOp. They describe the recorded commands, so they are complete
+// after End, before the command buffer is submitted. Designed for CI e2e
+// test assertions.
 func (r *RenderPassEncoder) Stats() RenderPassStats {
-	s := RenderPassStats{
-		DrawCount:  r.drawCount,
-		HasScissor: r.hasScissor,
-	}
-	if r.hasScissor {
-		s.ScissorRect = image.Rect(
-			int(r.scissorRect[0]), int(r.scissorRect[1]),
-			int(r.scissorRect[0]+r.scissorRect[2]), int(r.scissorRect[1]+r.scissorRect[3]),
-		)
-	}
-	if r.desc != nil && len(r.desc.ColorAttachments) > 0 {
-		s.ColorLoadOp = r.desc.ColorAttachments[0].LoadOp
-		if tex := r.getTargetTexture(); tex != nil {
-			s.Width = tex.width
-			s.Height = tex.height
-		}
-	}
-	return s
+	return r.recorded
 }
 
 // ComputePassEncoder implements hal.ComputePassEncoder for the software backend.
-// It collects pipeline and bind group state, then executes the SPIR-V interpreter
-// on Dispatch. Buffer writes from storage buffer bindings are reflected in-place.
+// Each method records a command into the command encoder; when the command
+// buffer is submitted the commands run in order, collecting pipeline and
+// bind group state and executing the SPIR-V interpreter on Dispatch. Buffer
+// writes from storage buffer bindings are reflected in-place.
 type ComputePassEncoder struct {
+	// enc is the command encoder the pass records into.
+	enc    *CommandEncoder
 	desc   *hal.ComputePassDescriptor
 	device *Device
 
-	// Pipeline and resource state set during encoding.
+	// Pipeline and resource state set while the pass's commands run.
 	pipeline   *ComputePipeline
 	bindGroups [4]*BindGroup // max 4 per WebGPU spec
 }
 
-// End finishes the compute pass. Currently a no-op since all work is done
-// synchronously in Dispatch.
+// begin starts the pass when it executes, from the default pass state.
+func (c *ComputePassEncoder) begin() {
+	c.pipeline = nil
+	c.bindGroups = [4]*BindGroup{}
+}
+
+// End finishes the compute pass. Nothing is left to do when it executes:
+// every Dispatch has completed by then.
 func (c *ComputePassEncoder) End() {}
 
-// SetPipeline stores the compute pipeline for subsequent Dispatch calls.
+// SetPipeline records setting the compute pipeline for subsequent Dispatch
+// calls.
 func (c *ComputePassEncoder) SetPipeline(p hal.ComputePipeline) {
 	if cp, ok := p.(*ComputePipeline); ok {
-		c.pipeline = cp
+		c.enc.record(func() { c.pipeline = cp })
 	}
 }
 
-// SetBindGroup stores a bind group at the given index for compute dispatch.
+// SetBindGroup records binding a bind group at the given index for compute
+// dispatch.
 func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynamicOffsets []uint32) {
-	if index < 4 {
-		if b, ok := bg.(*BindGroup); ok {
-			b.dynamicOffsets = dynamicOffsets
+	if index >= 4 {
+		return
+	}
+	if b, ok := bg.(*BindGroup); ok {
+		offsets := slices.Clone(dynamicOffsets)
+		c.enc.record(func() {
+			b.dynamicOffsets = offsets
 			c.bindGroups[index] = b
-		}
+		})
 	}
 }
 
-// Dispatch executes the compute shader for x*y*z workgroups.
+// Dispatch records running the compute shader for x*y*z workgroups.
+func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
+	c.enc.record(func() { c.dispatch(x, y, z) })
+}
+
+// dispatch executes the compute shader for x*y*z workgroups.
 //
 // The implementation:
 //  1. Gets the parsed SPIR-V module from the pipeline's shader module.
@@ -942,7 +1186,7 @@ func (c *ComputePassEncoder) SetBindGroup(index uint32, bg hal.BindGroup, dynami
 //  4. Delegates to Module.DispatchCompute which iterates over all workgroups
 //     and invocations, calling ExecuteCompute for each.
 //  5. Storage buffer writes are reflected in-place through shared []byte slices.
-func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
+func (c *ComputePassEncoder) dispatch(x, y, z uint32) {
 	if c.pipeline == nil {
 		slog.Warn("software: ComputePassEncoder.Dispatch called without a pipeline set")
 		return
@@ -969,15 +1213,17 @@ func (c *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	}
 }
 
-// DispatchIndirect reads the workgroup counts (x, y, z) from buffer at
-// offset when it executes and dispatches them. Core has already replaced
-// counts above maxComputeWorkgroupsPerDimension with zeros through its
-// indirect validation pass, as on the GPU backends.
+// DispatchIndirect records a dispatch that reads the workgroup counts
+// (x, y, z) from buffer at offset when it executes. Core has already
+// replaced counts above maxComputeWorkgroupsPerDimension with zeros through
+// its indirect validation pass, as on the GPU backends.
 func (c *ComputePassEncoder) DispatchIndirect(buffer hal.Buffer, offset uint64) {
-	args, ok := readIndirectArgs(buffer, offset, 3)
-	if !ok {
-		slog.Warn("software: DispatchIndirect arguments outside the buffer", "offset", offset)
-		return
-	}
-	c.Dispatch(args[0], args[1], args[2])
+	c.enc.record(func() {
+		args, ok := readIndirectArgs(buffer, offset, 3)
+		if !ok {
+			slog.Warn("software: DispatchIndirect arguments outside the buffer", "offset", offset)
+			return
+		}
+		c.dispatch(args[0], args[1], args[2])
+	})
 }

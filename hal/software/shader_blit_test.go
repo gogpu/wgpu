@@ -178,6 +178,7 @@ func (s *shaderDraw) draw(t testing.TB) {
 	}
 	pass.Draw(gputypes.DrawArgs{VertexCount: s.vertCount, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 }
 
 // TestDrawRunsFragmentShaderNotBlit draws a fullscreen triangle whose

@@ -47,7 +47,7 @@ func newCopyTexture(t *testing.T, dev *Device, w, h, layers uint32, sentinel boo
 	return tex
 }
 
-// copyTextures records one CopyTextureToTexture of region.
+// copyTextures records one CopyTextureToTexture of region and submits it.
 func copyTextures(t *testing.T, dev *Device, src, dst hal.Texture, region hal.TextureCopy) {
 	t.Helper()
 	enc, err := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
@@ -56,6 +56,7 @@ func copyTextures(t *testing.T, dev *Device, src, dst hal.Texture, region hal.Te
 	}
 	region.SrcBase.Texture, region.DstBase.Texture = src, dst
 	enc.CopyTextureToTexture(src, dst, []hal.TextureCopy{region})
+	submit(t, enc)
 }
 
 // checkCopiedTexel compares texel (x, y) of layer z of data, a w x h image
@@ -236,6 +237,7 @@ func TestCopyTextureToBufferLayerAndOrigin(t *testing.T) {
 		TextureBase:  hal.ImageCopyTexture{Texture: src, Origin: hal.Origin3D{X: 1, Y: 1, Z: 1}},
 		Size:         hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 	}})
+	submit(t, enc)
 
 	data := buf.GetData()
 	for row := range uint32(2) {
@@ -277,6 +279,7 @@ func TestCopyBufferToTextureOtherMipKeepsLevel0(t *testing.T) {
 		TextureBase:  hal.ImageCopyTexture{Texture: dst, MipLevel: 1},
 		Size:         hal.Extent3D{Width: 2, Height: 1, DepthOrArrayLayers: 1},
 	}})
+	submit(t, enc)
 
 	checkLevel0Sentinel(t, dev, dst, 4, 4)
 	level1 := readImage(t, dev, dst, 1, 0, 2, 2, 4)
@@ -355,6 +358,7 @@ func TestCopyFromOtherMipReadsThatLevel(t *testing.T) {
 		TextureBase:  hal.ImageCopyTexture{Texture: src, MipLevel: 1},
 		Size:         hal.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
 	}})
+	submit(t, enc)
 
 	data := readImage(t, dev, dst, 0, 0, 4, 4, 4)
 	for y := range uint32(4) {

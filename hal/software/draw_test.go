@@ -35,14 +35,17 @@ func TestRenderPassSetPipeline(t *testing.T) {
 	}
 
 	pass.SetPipeline(rp)
+	if encoder.pipeline != nil {
+		t.Error("pipeline should stay nil until the command buffer is submitted")
+	}
+	pass.End()
+	submit(t, enc)
 	if encoder.pipeline == nil {
-		t.Error("pipeline should be set after SetPipeline")
+		t.Fatal("pipeline should be set after SetPipeline ran")
 	}
 	if encoder.pipeline.desc.Label != "test-pipeline" {
 		t.Errorf("pipeline label = %q, want %q", encoder.pipeline.desc.Label, "test-pipeline")
 	}
-
-	pass.End()
 }
 
 func TestRenderPassSetBindGroup(t *testing.T) {
@@ -75,9 +78,11 @@ func TestRenderPassSetBindGroup(t *testing.T) {
 
 	encoder := pass.(*RenderPassEncoder)
 	pass.SetBindGroup(0, bg, nil)
+	pass.End()
+	submit(t, enc)
 
 	if encoder.bindGroups[0] == nil {
-		t.Error("bind group 0 should be set after SetBindGroup")
+		t.Fatal("bind group 0 should be set after SetBindGroup ran")
 	}
 
 	// Verify texture view was resolved
@@ -85,8 +90,6 @@ func TestRenderPassSetBindGroup(t *testing.T) {
 	if resolvedBG.textureViews[0] == nil {
 		t.Error("bind group should have resolved texture view at binding 0")
 	}
-
-	pass.End()
 }
 
 func TestRenderPassSetBindGroupOutOfRange(t *testing.T) {
@@ -103,6 +106,8 @@ func TestRenderPassSetBindGroupOutOfRange(t *testing.T) {
 
 	// Index 4 is out of range (max 4 bind groups: 0-3)
 	pass.SetBindGroup(4, bg, nil)
+	pass.End()
+	submit(t, enc)
 
 	encoder := pass.(*RenderPassEncoder)
 	for i := range encoder.bindGroups {
@@ -110,8 +115,6 @@ func TestRenderPassSetBindGroupOutOfRange(t *testing.T) {
 			t.Errorf("bind group %d should be nil (out of range set)", i)
 		}
 	}
-
-	pass.End()
 }
 
 // =============================================================================
@@ -245,6 +248,7 @@ func TestDrawTexturedQuad(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Verify the destination texture has the source's red pixels.
 	dst := dstTex.(*Texture)
@@ -315,6 +319,7 @@ func TestDrawClearsBeforeBlit(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// The result should be green (from blit), NOT blue (from clear) or white (pre-fill).
 	// Clear happens before Draw, then blit overwrites.
@@ -347,6 +352,7 @@ func TestDrawWithoutPipeline(t *testing.T) {
 	// Draw without SetPipeline — should be a no-op (not panic).
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Only clear should have happened.
 	data := dstTex.(*Texture).GetData()
@@ -391,6 +397,7 @@ func TestDrawWithoutTexture(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1}) // no source texture — should only clear
 	pass.End()
+	submit(t, enc)
 
 	// Only clear to blue should have happened.
 	data := dstTex.(*Texture).GetData()
@@ -452,6 +459,7 @@ func TestDrawBGRAToRGBAConversion(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// RGBA(255,0,128,200) -> BGRA should be (128,0,255,200).
 	data := dstTex.(*Texture).GetData()
@@ -512,6 +520,7 @@ func TestDrawScaling(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Verify corners with nearest-neighbor scaling.
 	data := dstTex.(*Texture).GetData()
@@ -591,6 +600,7 @@ func TestDrawWithSurfaceTexture(t *testing.T) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// The surface framebuffer should now have green pixels.
 	surf := surface.(*Surface)
@@ -659,6 +669,7 @@ func TestDrawMultipleBindGroups(t *testing.T) {
 	pass.SetBindGroup(1, bg1, nil) // texture is here
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Should find texture from bind group 1 and blit.
 	data := dstTex.(*Texture).GetData()
@@ -743,6 +754,7 @@ func TestDrawTriangleFromVertexBuffer(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, 0)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// The triangle covers the top-left area. Check pixel (1,1) is white (default color).
 	data := dstTex.(*Texture).GetData()
@@ -836,6 +848,7 @@ func TestDrawTriangleWithVertexColors(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, 0)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Center pixel should be a blend of R/G/B. Verify it is not black (was rendered).
 	data := dstTex.(*Texture).GetData()
@@ -923,6 +936,7 @@ func TestDrawMultipleTriangles(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, 0)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// All pixels should be white (two triangles cover full viewport, default white color).
 	data := dstTex.(*Texture).GetData()
@@ -997,6 +1011,7 @@ func TestDrawWithVertexBufferOffset(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, padding) // offset=64
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	// Center pixel should be white (triangle covers full viewport).
 	data := dstTex.(*Texture).GetData()
@@ -1040,6 +1055,7 @@ func TestDrawClearBeforeDraw(t *testing.T) {
 	pass.SetPipeline(pipeline)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1}) // No vertex buffer, no texture -> just clear
 	pass.End()
+	submit(t, enc)
 
 	// Should be blue (clear happened before draw, no texture to blit).
 	data := dstTex.(*Texture).GetData()
@@ -1110,6 +1126,7 @@ func TestDrawWithFirstVertex(t *testing.T) {
 	pass.SetVertexBuffer(0, vb, 0)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: 3}) // firstVertex=3
 	pass.End()
+	submit(t, enc)
 
 	// Center pixel should be white.
 	data := dstTex.(*Texture).GetData()
@@ -1136,6 +1153,10 @@ func TestSetVertexBufferSlot(t *testing.T) {
 
 	pass.SetVertexBuffer(0, buf, 0)
 	pass.SetVertexBuffer(3, buf, 32)
+	// Out of range slot: must not panic when it runs.
+	pass.SetVertexBuffer(8, buf, 0)
+	pass.End()
+	submit(t, enc)
 
 	if encoder.vertexBufs[0].buffer == nil {
 		t.Error("slot 0 should have buffer")
@@ -1146,12 +1167,6 @@ func TestSetVertexBufferSlot(t *testing.T) {
 	if encoder.vertexBufs[3].offset != 32 {
 		t.Errorf("slot 3 offset = %d, want 32", encoder.vertexBufs[3].offset)
 	}
-
-	// Out of range slot.
-	pass.SetVertexBuffer(8, buf, 0)
-	// Should not panic, slot 8 out of range.
-
-	pass.End()
 }
 
 func TestSetIndexBuffer(t *testing.T) {
@@ -1169,6 +1184,8 @@ func TestSetIndexBuffer(t *testing.T) {
 	encoder := pass.(*RenderPassEncoder)
 
 	pass.SetIndexBuffer(buf, gputypes.IndexFormatUint16, 10)
+	pass.End()
+	submit(t, enc)
 
 	if encoder.indexBuffer == nil {
 		t.Error("index buffer should be set")
@@ -1179,8 +1196,6 @@ func TestSetIndexBuffer(t *testing.T) {
 	if encoder.indexOffset != 10 {
 		t.Errorf("index offset = %d, want 10", encoder.indexOffset)
 	}
-
-	pass.End()
 }
 
 func TestSetViewport(t *testing.T) {
@@ -1198,6 +1213,8 @@ func TestSetViewport(t *testing.T) {
 	}
 
 	pass.SetViewport(gputypes.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
+	pass.End()
+	submit(t, enc)
 
 	if !encoder.hasViewport {
 		t.Error("hasViewport should be true after SetViewport")
@@ -1206,8 +1223,6 @@ func TestSetViewport(t *testing.T) {
 		encoder.viewport[2] != 800 || encoder.viewport[3] != 600 {
 		t.Errorf("viewport = %v, want [10 20 800 600 0 1]", encoder.viewport)
 	}
-
-	pass.End()
 }
 
 // =============================================================================
@@ -1406,6 +1421,7 @@ fn fs_main(@location(0) col: vec3<f32>) -> @location(0) vec4<f32> {
 	cpass.SetBindGroup(0, bg, nil)
 	cpass.Dispatch(1, 1, 1)
 	cpass.End()
+	submit(t, enc)
 
 	// Verify compute results: pos_new = pos_old + vel * dt.
 	outBuf := bufB.(*Buffer)
@@ -1486,6 +1502,7 @@ fn fs_main(@location(0) col: vec3<f32>) -> @location(0) vec4<f32> {
 	rpEnc.SetVertexBuffer(0, bufB, 0)
 	rpEnc.Draw(gputypes.DrawArgs{VertexCount: 4, InstanceCount: numParticles}) // 4 vertices per quad, numParticles instances
 	rpEnc.End()
+	submit(t, enc2)
 
 	// Verify render result: at least some pixels should be non-black.
 	texData := tex.(*Texture).GetData()
@@ -1553,6 +1570,7 @@ func TestScissorBlitClipsToRect(t *testing.T) {
 	pass.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: 2, Height: 2})
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	data := dstTex.(*Texture).GetData()
 	// Pixel (0,0) inside scissor -> red from blit.
@@ -1643,6 +1661,7 @@ func TestScissorTriangleDrawClipsToRect(t *testing.T) {
 	pass.SetScissorRect(gputypes.ScissorRect{X: 4, Y: 0, Width: 4, Height: 8})
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	data := dstTex.(*Texture).GetData()
 
@@ -1666,28 +1685,28 @@ func TestSetStencilReference(t *testing.T) {
 	defer cleanup()
 
 	enc, _ := dev.CreateCommandEncoder(&hal.CommandEncoderDescriptor{})
-	pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
-		ColorAttachments: []hal.RenderPassColorAttachment{},
-	})
-
-	encoder := pass.(*RenderPassEncoder)
-
-	// Initially zero.
-	if encoder.stencilRef != 0 {
-		t.Errorf("stencilRef = %d, want 0 initially", encoder.stencilRef)
+	runPass := func(refs ...uint32) *RenderPassEncoder {
+		pass := enc.BeginRenderPass(&hal.RenderPassDescriptor{
+			ColorAttachments: []hal.RenderPassColorAttachment{},
+		})
+		for _, ref := range refs {
+			pass.SetStencilReference(ref)
+		}
+		pass.End()
+		submit(t, enc)
+		return pass.(*RenderPassEncoder)
 	}
 
-	pass.SetStencilReference(42)
-	if encoder.stencilRef != 42 {
-		t.Errorf("stencilRef = %d, want 42", encoder.stencilRef)
+	// A pass starts with reference 0.
+	if got := runPass().stencilRef; got != 0 {
+		t.Errorf("stencilRef = %d, want 0 initially", got)
 	}
-
-	pass.SetStencilReference(255)
-	if encoder.stencilRef != 255 {
-		t.Errorf("stencilRef = %d, want 255", encoder.stencilRef)
+	if got := runPass(42).stencilRef; got != 42 {
+		t.Errorf("stencilRef = %d, want 42", got)
 	}
-
-	pass.End()
+	if got := runPass(42, 255).stencilRef; got != 255 {
+		t.Errorf("stencilRef = %d, want 255", got)
+	}
 }
 
 func TestScissorBlitScaledClipsToRect(t *testing.T) {
@@ -1739,6 +1758,7 @@ func TestScissorBlitScaledClipsToRect(t *testing.T) {
 	pass.SetScissorRect(gputypes.ScissorRect{X: 2, Y: 2, Width: 2, Height: 2})
 	pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 	pass.End()
+	submit(t, enc)
 
 	data := dstTex.(*Texture).GetData()
 
@@ -1862,6 +1882,7 @@ func TestDepthStencilStateWiring(t *testing.T) {
 	// Draw far triangle (vertices 3-5) — should be hidden by depth test.
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: 3})
 	pass.End()
+	submit(t, enc)
 
 	// All pixels should be white (near triangle wins over far triangle).
 	// This test verifies that DepthStencil from the pipeline descriptor
@@ -1938,6 +1959,7 @@ func TestDepthOnlyPass(t *testing.T) {
 					pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: first})
 				}
 				pass.End()
+				submit(t, enc)
 
 				data := tex.(*Texture).GetData()
 				for i := range size * size {
@@ -2009,8 +2031,8 @@ func stencilPipeline(t *testing.T, dev *Device, sm hal.ShaderModule, format gput
 
 // stencilPass runs one render pass over the depth/stencil view: stencil
 // cleared to 1 (and depth to 0.5) with clearFirst, loaded otherwise; it
-// draws vertices first..first+2 with the stencil reference ref.
-func stencilPass(dev *Device, view hal.TextureView, format gputypes.TextureFormat, clearFirst bool,
+// draws vertices first..first+2 with the stencil reference ref, and submits.
+func stencilPass(t *testing.T, dev *Device, view hal.TextureView, format gputypes.TextureFormat, clearFirst bool,
 	pipe hal.RenderPipeline, ref, first uint32,
 ) {
 	ds := &hal.RenderPassDepthStencilAttachment{
@@ -2028,6 +2050,7 @@ func stencilPass(dev *Device, view hal.TextureView, format gputypes.TextureForma
 	pass.SetStencilReference(ref)
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstVertex: first})
 	pass.End()
+	submit(t, enc)
 }
 
 // copyAspect reads aspect of tex back through CopyTextureToBuffer, packed
@@ -2047,6 +2070,7 @@ func copyAspect(t *testing.T, dev *Device, tex hal.Texture, aspect gputypes.Text
 		TextureBase:  hal.ImageCopyTexture{Texture: tex, Aspect: aspect},
 		Size:         hal.Extent3D{Width: stencilTestSize, Height: stencilTestSize, DepthOrArrayLayers: 1},
 	}})
+	submit(t, enc)
 	data := buf.(*Buffer).GetData()
 	out := make([]byte, 0, stencilTestSize*stencilTestSize*bytesPerTexel)
 	for y := range stencilTestSize {
@@ -2095,8 +2119,8 @@ func TestStencilAttachment(t *testing.T) {
 			defer dev.DestroyRenderPipeline(replace)
 			incr := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionEqual, hal.StencilOperationIncrementClamp)
 			defer dev.DestroyRenderPipeline(incr)
-			stencilPass(dev, view, format, true, replace, 5, 0)
-			stencilPass(dev, view, format, false, incr, 5, 3)
+			stencilPass(t, dev, view, format, true, replace, 5, 0)
+			stencilPass(t, dev, view, format, false, incr, 5, 3)
 
 			got := copyAspect(t, dev, tex, stencilAspect(format), 1)
 			for i, v := range got {
@@ -2151,7 +2175,7 @@ func TestStencilUpload(t *testing.T) {
 			if format.HasDepth() {
 				// Clear the depth to 0.5 and the stencil to 1 before the upload.
 				keep := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionNever, hal.StencilOperationKeep)
-				stencilPass(dev, view, format, true, keep, 0, 0)
+				stencilPass(t, dev, view, format, true, keep, 0, 0)
 				dev.DestroyRenderPipeline(keep)
 			}
 
@@ -2169,7 +2193,7 @@ func TestStencilUpload(t *testing.T) {
 			// where the stencil equals 22 changes only that texel, to ^22.
 			mark := stencilPipeline(t, dev, sm, format, gputypes.CompareFunctionEqual, hal.StencilOperationInvert)
 			defer dev.DestroyRenderPipeline(mark)
-			stencilPass(dev, view, format, false, mark, 22, 3)
+			stencilPass(t, dev, view, format, false, mark, 22, 3)
 			want := bytes.Clone(upload)
 			want[12] = ^byte(22)
 			if got := copyAspect(t, dev, tex, stencilAspect(format), 1); !bytes.Equal(got, want) {
@@ -2236,6 +2260,7 @@ func TestMRTPerAttachmentClear(t *testing.T) {
 	})
 	// No draws — just clear.
 	pass.End()
+	submit(t, enc)
 
 	// Verify target 0 is red.
 	data0 := tex0.(*Texture).GetData()
@@ -2275,11 +2300,14 @@ func TestMRTHelpers(t *testing.T) {
 			},
 		})
 
+		pass.End()
+		submit(t, enc)
+
+		// The helpers read the targets the pass resolved when it ran.
 		rpe := pass.(*RenderPassEncoder)
 		if rpe.hasMRT() {
 			t.Error("hasMRT() should be false for single attachment")
 		}
-		pass.End()
 	})
 
 	t.Run("hasMRT_multiple", func(t *testing.T) {
@@ -2307,6 +2335,9 @@ func TestMRTHelpers(t *testing.T) {
 			},
 		})
 
+		pass.End()
+		submit(t, enc)
+
 		rpe := pass.(*RenderPassEncoder)
 		if !rpe.hasMRT() {
 			t.Error("hasMRT() should be true for two attachments")
@@ -2314,13 +2345,11 @@ func TestMRTHelpers(t *testing.T) {
 
 		targets := rpe.getTargetTextures()
 		if len(targets) != 2 {
-			t.Errorf("getTargetTextures() returned %d targets, want 2", len(targets))
+			t.Fatalf("getTargetTextures() returned %d targets, want 2", len(targets))
 		}
 		if targets[0] == nil || targets[1] == nil {
 			t.Error("getTargetTextures() returned nil targets")
 		}
-
-		pass.End()
 	})
 
 	t.Run("drawColorTargets", func(t *testing.T) {
@@ -2389,6 +2418,8 @@ func TestMRTHelpers(t *testing.T) {
 
 		rpe := pass.(*RenderPassEncoder)
 		rpe.SetPipeline(pipeline)
+		pass.End()
+		submit(t, enc)
 
 		targets := rpe.drawColorTargets()
 		if len(targets) != 2 {
@@ -2405,7 +2436,6 @@ func TestMRTHelpers(t *testing.T) {
 		if targets[1].blend.SrcColor != raster.BlendFactorSrcAlpha {
 			t.Errorf("color target 1: src factor %v, want SrcAlpha", targets[1].blend.SrcColor)
 		}
-		pass.End()
 	})
 }
 

@@ -6,26 +6,50 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gogpu/wgpu/hal"
 )
 
+var _ hal.Queue = (*Queue)(nil)
+
 // Queue implements hal.Queue for the software backend.
 type Queue struct {
-	submissionIndex uint64
+	// mu serializes submissions, so each one runs its command buffers as a
+	// whole, in queue order.
+	mu              sync.Mutex
+	submissionIndex atomic.Uint64
 }
 
-// Submit simulates command buffer submission.
-// Software backend is synchronous — work is complete immediately.
-func (q *Queue) Submit(_ []hal.CommandBuffer) (uint64, error) {
-	q.submissionIndex++
-	return q.submissionIndex, nil
+// Submit runs the commands of the command buffers in order, one command
+// buffer after another; the commands were only recorded until now. The
+// software backend is synchronous, so the submission has completed when
+// Submit returns. Queue.WriteBuffer and WriteTexture run when called, so a
+// write made before Submit lands before the submitted commands run and a
+// write made after it lands after them, as on the queue timeline of the
+// GPU backends.
+func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	cbs := make([]*CommandBuffer, len(commandBuffers))
+	for i, cb := range commandBuffers {
+		swcb, ok := cb.(*CommandBuffer)
+		if !ok || swcb == nil {
+			return 0, fmt.Errorf("software: Submit: command buffer %d is %T, not a software command buffer", i, cb)
+		}
+		cbs[i] = swcb
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, cb := range cbs {
+		cb.execute()
+	}
+	return q.submissionIndex.Add(1), nil
 }
 
 // PollCompleted returns the highest submission index known to be completed.
 // Software backend is synchronous — all submissions are immediately complete.
 func (q *Queue) PollCompleted() uint64 {
-	return q.submissionIndex
+	return q.submissionIndex.Load()
 }
 
 // WriteBuffer performs immediate buffer writes with real data storage.

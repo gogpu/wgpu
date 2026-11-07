@@ -44,6 +44,7 @@ func runSubCompute(t *testing.T, dev *Device, wgsl string, outBinding uint32, n 
 	pass.SetBindGroup(0, bg, nil)
 	pass.Dispatch(1, 1, 1)
 	pass.End()
+	submit(t, enc)
 
 	data := out.(*Buffer).GetData()
 	f := make([]float32, n*4)

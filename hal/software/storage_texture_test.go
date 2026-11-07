@@ -73,6 +73,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 	pass.SetBindGroup(0, bg, nil)
 	pass.Dispatch(1, 1, 1)
 	pass.End()
+	submit(t, enc)
 
 	data := tex.(*Texture).GetData()
 	want := []byte{64, 255, 0, 255} // 0.25 * 255 rounds to 64
