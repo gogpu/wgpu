@@ -176,9 +176,17 @@ func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, 
 	}
 
 	attrs := make([]float32, attrCount)
+	fillAttributes(attrs, b0, b1, b2, tri, oneOverW)
+	return attrs
+}
+
+// fillAttributes fills attrs, one element per vertex attribute, with the
+// perspective-correct interpolation at barycentrics (b0, b1, b2).
+func fillAttributes(attrs []float32, b0, b1, b2 float32, tri *Triangle, oneOverW float32) {
+	attrCount := len(attrs)
 	if tri.Flat != 0 {
 		interpolateMixed(attrs, b0, b1, b2, tri, oneOverW)
-		return attrs
+		return
 	}
 	if oneOverW != 0 {
 		for i := 0; i < attrCount; i++ {
@@ -191,7 +199,6 @@ func interpolateAttributes(b0, b1, b2 float32, tri *Triangle, oneOverW float32, 
 			attrs[i] = b0*tri.V0.Attributes[i] + b1*tri.V1.Attributes[i] + b2*tri.V2.Attributes[i]
 		}
 	}
-	return attrs
 }
 
 // interpolateMixed fills attrs for a triangle with flat attributes: a flat

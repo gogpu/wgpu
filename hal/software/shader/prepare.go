@@ -18,6 +18,9 @@ type modulePrep struct {
 	private   []uint32 // Private variables
 	workgroup []uint32 // Workgroup variables
 	resources []uint32 // Uniform, StorageBuffer, PushConstant and UniformConstant variables
+	// quadEntries holds the entry points that reach a derivative or an
+	// implicit-LOD sample (see Module.NeedsQuads).
+	quadEntries map[string]bool
 }
 
 // modulePrepState is the lazily built modulePrep of a Module.
@@ -59,6 +62,12 @@ func (m *Module) buildPrep() *modulePrep {
 	slices.Sort(p.private)
 	slices.Sort(p.workgroup)
 	slices.Sort(p.resources)
+	p.quadEntries = make(map[string]bool)
+	for name, fn := range m.Functions {
+		if m.reachesQuadOp(fn, make(map[*Function]bool)) {
+			p.quadEntries[name] = true
+		}
+	}
 	return p
 }
 
