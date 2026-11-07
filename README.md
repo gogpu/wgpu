@@ -70,7 +70,7 @@ go build -tags rust
 ```
 
 > Requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) v29 binary. Set `WGPU_NATIVE_PATH` or place in system PATH. See [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) for details.
-> With go-webgpu/webgpu v0.5.5 this build is not usable for real rendering yet (vertex buffers and depth attachments fail; see the 0.34.6 known issues in [CHANGELOG.md](CHANGELOG.md)).
+> With go-webgpu/webgpu v0.5.5, `-tags rust` is not usable for real rendering: on Linux amd64 and Intel macOS it aborts at adapter request, and on Windows vertex buffers, depth attachments and explicit bind group layouts abort or crash (see the 0.34.6 known issues in [CHANGELOG.md](CHANGELOG.md)). These are fixed in go-webgpu/webgpu's next release.
 
 **Browser (WASM):**
 ```bash
@@ -357,8 +357,8 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
 
 **Known gaps** (being fixed): primitives are not clipped in clip space yet; shader derivatives return 0, so
-implicit-LOD sampling uses mip level 0; compute `var<workgroup>` memory is not shared between invocations; encoded
-commands run when they are recorded, not at `Queue.Submit`; compressed texture formats cannot be sampled.
+implicit-LOD sampling uses mip level 0; encoded commands run when they are recorded, not at `Queue.Submit`;
+compressed texture formats cannot be sampled.
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
