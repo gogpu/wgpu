@@ -1219,9 +1219,9 @@ func TestSetViewport(t *testing.T) {
 	if !encoder.hasViewport {
 		t.Error("hasViewport should be true after SetViewport")
 	}
-	if encoder.viewport[0] != 10 || encoder.viewport[1] != 20 ||
-		encoder.viewport[2] != 800 || encoder.viewport[3] != 600 {
-		t.Errorf("viewport = %v, want [10 20 800 600 0 1]", encoder.viewport)
+	want := gputypes.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0, MaxDepth: 1}
+	if encoder.viewport != want {
+		t.Errorf("viewport = %+v, want %+v", encoder.viewport, want)
 	}
 }
 

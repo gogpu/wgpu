@@ -724,8 +724,8 @@ type RenderPassEncoder struct {
 	activeIndices []uint32
 
 	// Viewport and scissor state.
-	viewport    [6]float32 // x, y, w, h, minDepth, maxDepth
-	scissorRect [4]uint32  // x, y, w, h
+	viewport    gputypes.Viewport
+	scissorRect [4]uint32 // x, y, w, h
 	hasViewport bool
 	hasScissor  bool
 
@@ -901,7 +901,7 @@ func (r *RenderPassEncoder) SetIndexBuffer(buf hal.Buffer, format gputypes.Index
 // SetViewport records setting the viewport transformation.
 func (r *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	r.enc.record(func() {
-		r.viewport = [6]float32{vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth}
+		r.viewport = vp
 		r.hasViewport = true
 	})
 }
