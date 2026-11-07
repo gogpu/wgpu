@@ -62,6 +62,7 @@ func (a *Adapter) open() (hal.OpenDevice, error) {
 	defer a.ctx.Unlock()
 
 	framebufferSRGB := enableFramebufferSRGB(glCtx, a.caps.IsES)
+	useFirstProvokingVertex(glCtx, a.caps.IsES, a.caps.Extensions)
 
 	// VAO is created lazily in CreateCommandEncoder — ensures it's allocated
 	// on the window surface (after Configure), not on the pbuffer (during Open).

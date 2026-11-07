@@ -50,6 +50,11 @@ const (
 	// no such capability.
 	FRAMEBUFFER_SRGB = 0x8DB9
 
+	// FIRST_VERTEX_CONVENTION makes flat varyings take the first vertex of a
+	// primitive (glProvokingVertex, desktop GL 3.2 core). GL's default is the
+	// last vertex.
+	FIRST_VERTEX_CONVENTION = 0x8E4D
+
 	// Buffer targets
 	ARRAY_BUFFER              = 0x8892
 	ELEMENT_ARRAY_BUFFER      = 0x8893

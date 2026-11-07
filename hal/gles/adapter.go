@@ -38,6 +38,7 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	defer a.ctx.Unlock()
 
 	framebufferSRGB := enableFramebufferSRGB(glCtx, a.caps.IsES)
+	useFirstProvokingVertex(glCtx, a.caps.IsES, a.caps.Extensions)
 
 	// Create and bind a persistent VAO. OpenGL Core Profile requires a VAO
 	// to be bound for any draw call. We keep one bound for the device lifetime.

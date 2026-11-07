@@ -81,6 +81,7 @@ type Context struct {
 	glDisableVertexAttribArray uintptr
 	glVertexAttribPointer      uintptr
 	glVertexAttribIPointer     uintptr
+	glProvokingVertex          uintptr // optional: desktop GL 3.2, or ES with GL_ANGLE_provoking_vertex
 
 	// Textures (GL 1.1+)
 	glGenTextures    uintptr
@@ -278,6 +279,10 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDisableVertexAttribArray = getProcAddr("glDisableVertexAttribArray")
 	c.glVertexAttribPointer = getProcAddr("glVertexAttribPointer")
 	c.glVertexAttribIPointer = getProcAddr("glVertexAttribIPointer")
+	c.glProvokingVertex = getProcAddr("glProvokingVertex")
+	if c.glProvokingVertex == 0 {
+		c.glProvokingVertex = getProcAddr("glProvokingVertexANGLE")
+	}
 
 	// Textures
 	c.glGenTextures = getProcAddr("glGenTextures")
@@ -727,6 +732,21 @@ func (c *Context) VertexAttribPointer(index uint32, size int32, typ uint32, norm
 func (c *Context) VertexAttribIPointer(index uint32, size int32, typ uint32, stride int32, offset uintptr) {
 	syscall.SyscallN(c.glVertexAttribIPointer, uintptr(index), uintptr(size),
 		uintptr(typ), uintptr(stride), offset)
+}
+
+// HasProvokingVertex reports whether glProvokingVertex was loaded. A loaded
+// pointer is not proof of support on OpenGL ES: check the extension too.
+func (c *Context) HasProvokingVertex() bool {
+	return c.glProvokingVertex != 0
+}
+
+// ProvokingVertex selects the vertex that flat varyings take their value from.
+// It does nothing when the entry point is missing.
+func (c *Context) ProvokingVertex(mode uint32) {
+	if c.glProvokingVertex == 0 {
+		return
+	}
+	syscall.SyscallN(c.glProvokingVertex, uintptr(mode))
 }
 
 // VertexAttribDivisor sets the instance divisor for a vertex attribute.

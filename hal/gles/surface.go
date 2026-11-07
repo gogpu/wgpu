@@ -97,6 +97,23 @@ func enableFramebufferSRGB(glCtx *gl.Context, isES bool) bool {
 	return true
 }
 
+// useFirstProvokingVertex makes flat varyings take the first vertex of each
+// primitive where the context can. WGSL's @interpolate(flat) means
+// @interpolate(flat, first), and integer varyings are always flat (WGSL
+// "Interpolation"); GL's default is the last vertex. glProvokingVertex is core
+// in desktop GL 3.2 (our minimum is 3.3); OpenGL ES has it only through
+// GL_ANGLE_provoking_vertex, and an ES context without it keeps the last
+// vertex, which only @interpolate(flat, either) allows. Rust wgpu-hal never
+// sets it, so its GLES backend gives the last vertex everywhere.
+func useFirstProvokingVertex(glCtx *gl.Context, isES bool, exts map[string]bool) {
+	if isES && !hasExtension(exts, "GL_ANGLE_provoking_vertex") {
+		return
+	}
+	if glCtx.HasProvokingVertex() {
+		glCtx.ProvokingVertex(gl.FIRST_VERTEX_CONVENTION)
+	}
+}
+
 // blitSwapchainToDefaultWith performs the present-time Y-flipping blit from
 // the Surface's swapchain FBO to the default framebuffer (FBO 0).
 // Must be called with GL context current on the user window DC.
