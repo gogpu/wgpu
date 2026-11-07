@@ -87,11 +87,15 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				DriverInfo: "CPU-based software rendering backend",
 				Backend:    gputypes.BackendEmpty,
 			},
-			// No features: the SPIR-V interpreter does not execute
-			// OpRayQuery* (ray_query), so FeatureRayQuery would promise
-			// shaders that cannot run here (ADR-078 rule 10). The CPU BVH
-			// build stays reachable through the HAL.
-			Features: 0,
+			// The BC and ETC2/EAC formats are sampled through
+			// internal/texcompress, which decodes them as GPUs do (tested
+			// against their readback). No FeatureRayQuery: the SPIR-V
+			// interpreter does not execute OpRayQuery* (ray_query), so it
+			// would promise shaders that cannot run here (ADR-078 rule 10).
+			// The CPU BVH build stays reachable through the HAL. No ASTC:
+			// there is no ASTC decoder.
+			Features: gputypes.Features(gputypes.FeatureTextureCompressionBC) |
+				gputypes.Features(gputypes.FeatureTextureCompressionETC2),
 			Capabilities: hal.Capabilities{
 				Limits: softwareLimits(),
 				AlignmentsMask: hal.Alignments{
