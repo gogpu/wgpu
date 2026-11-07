@@ -722,14 +722,15 @@ func (r *RenderPassEncoder) fetchTrianglesSPIRV(
 }
 
 // primitiveAssembler turns the clip-space vertices of a draw into the screen
-// triangles the rasterizer takes: it groups them by the pipeline's topology
-// and maps every primitive through the pass's viewport. Every draw path
-// (vertex buffers or not, any fragment path) assembles through it, so the
-// transform exists once.
+// triangles the rasterizer takes: it groups them by the pipeline's topology,
+// clips every primitive in clip space and maps it through the pass's
+// viewport. Every draw path (vertex buffers or not, any fragment path)
+// assembles through it, so clipping and the transform exist once.
 type primitiveAssembler struct {
 	topology gputypes.PrimitiveTopology
 	flat     uint64 // raster.Triangle.Flat of every triangle (flatVaryingMask)
 	xf       raster.ViewportTransform
+	clip     raster.Clipper
 }
 
 // newPrimitiveAssembler returns the assembler of the current pipeline and
@@ -740,6 +741,7 @@ func (r *RenderPassEncoder) newPrimitiveAssembler(w, h int, flat uint64) primiti
 		flat:     flat,
 		xf:       r.viewportTransform(w, h),
 	}
+	a.clip = raster.NewClipper(&a.xf, w, h, flat)
 	if r.pipeline != nil && r.pipeline.desc != nil {
 		a.topology = r.pipeline.desc.Primitive.Topology
 	}
@@ -793,14 +795,21 @@ func (a *primitiveAssembler) assemble(dst []raster.Triangle, vertices []raster.C
 	return dst
 }
 
-// emit appends the triangle (v0, v1, v2), v0 provoking, in screen space.
+// emit appends the visible part of the triangle (v0, v1, v2), v0 provoking,
+// in screen space: none, the triangle itself, or a fan over the clipped
+// polygon. The fan keeps the winding, and its center, the polygon's first
+// vertex, carries the provoking vertex's flat attributes (Clipper.Clip).
 func (a *primitiveAssembler) emit(dst []raster.Triangle, v0, v1, v2 *raster.ClipSpaceVertex) []raster.Triangle {
-	return append(dst, raster.Triangle{
-		V0:   a.xf.Project(v0),
-		V1:   a.xf.Project(v1),
-		V2:   a.xf.Project(v2),
-		Flat: a.flat,
-	})
+	poly := a.clip.Clip(v0, v1, v2)
+	for i := 2; i < len(poly); i++ {
+		dst = append(dst, raster.Triangle{
+			V0:   a.xf.Project(&poly[0]),
+			V1:   a.xf.Project(&poly[i-1]),
+			V2:   a.xf.Project(&poly[i]),
+			Flat: a.flat,
+		})
+	}
+	return dst
 }
 
 // flatVaryingMask returns the attribute lanes the rasterizer must not

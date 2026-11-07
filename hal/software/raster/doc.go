@@ -24,7 +24,15 @@
 // bits, rounding to nearest even, as D3D11+ hardware does (16.8). The edge
 // functions are then evaluated exactly in int64 and stepped from pixel to pixel
 // by addition, without drift. A triangle with a non-finite vertex or one beyond
-// ±2^21 pixels covers nothing.
+// ±2^21 pixels covers nothing: Clipper keeps every primitive the software
+// backend draws inside a guard band well within that range.
+//
+// # Clipping
+//
+// Primitives are clipped in clip space, before the perspective divide
+// (Clipper): against 0 <= z <= w, against w > 0, and against x and y planes a
+// guard band past the render target. The viewport and the scissor bound the
+// pixels a primitive covers, so it needs no clipping at the viewport's edges.
 //
 // # Fill Rule
 //
