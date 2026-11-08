@@ -905,7 +905,9 @@ func (e *RenderPassEncoder) SetStencilReference(ref uint32) {
 // the sizes before every dispatch, so the sizes always match the bind groups
 // set at the time of the draw. It reports false if the draw must be skipped.
 func (e *RenderPassEncoder) beginDraw() bool {
-	if !e.beginNative() {
+	// A draw takes its primitive type from the pipeline; core rejects a draw
+	// before SetPipeline, so this only guards the HAL against a nil pipeline.
+	if e == nil || e.pipeline == nil || !e.beginNative() {
 		return false
 	}
 	e.bindBufferSizes()
@@ -943,7 +945,7 @@ func (e *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 		return
 	}
 	_ = MsgSend(e.raw, Sel("drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(args.FirstVertex), uintptr(args.VertexCount), uintptr(args.InstanceCount), uintptr(args.FirstInstance))
+		uintptr(e.pipeline.primitiveType), uintptr(args.FirstVertex), uintptr(args.VertexCount), uintptr(args.InstanceCount), uintptr(args.FirstInstance))
 }
 
 // DrawIndexed draws indexed primitives.
@@ -958,7 +960,7 @@ func (e *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	}
 	offset := e.indexOffset + uint64(args.FirstIndex)*uint64(indexSize)
 	_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:"),
-		uintptr(MTLPrimitiveTypeTriangle), uintptr(args.IndexCount), uintptr(indexType),
+		uintptr(e.pipeline.primitiveType), uintptr(args.IndexCount), uintptr(indexType),
 		uintptr(e.indexBuffer.raw), uintptr(offset), uintptr(args.InstanceCount), uintptr(args.BaseVertex), uintptr(args.FirstInstance))
 }
 
@@ -980,7 +982,7 @@ func (e *RenderPassEncoder) DrawIndirect(buffer hal.Buffer, offset uint64, drawC
 	for i := uint32(0); i < drawCount; i++ {
 		recordOffset, _ := indirect.RecordOffset(offset, 16, i)
 		_ = MsgSend(e.raw, Sel("drawPrimitives:indirectBuffer:indirectBufferOffset:"),
-			uintptr(MTLPrimitiveTypeTriangle), uintptr(buf.raw), uintptr(recordOffset))
+			uintptr(e.pipeline.primitiveType), uintptr(buf.raw), uintptr(recordOffset))
 	}
 }
 
@@ -1011,7 +1013,7 @@ func (e *RenderPassEncoder) DrawIndexedIndirect(buffer hal.Buffer, offset uint64
 			return
 		}
 		_ = MsgSend(e.raw, Sel("drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"),
-			uintptr(MTLPrimitiveTypeTriangle), uintptr(indexType), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), uintptr(buf.raw), uintptr(recordOffset))
+			uintptr(e.pipeline.primitiveType), uintptr(indexType), uintptr(e.indexBuffer.raw), uintptr(e.indexOffset), uintptr(buf.raw), uintptr(recordOffset))
 	}
 }
 

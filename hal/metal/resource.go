@@ -266,6 +266,11 @@ type RenderPipeline struct {
 	frontFace     MTLWinding
 	icbCompatible bool
 
+	// primitiveType is the MTLPrimitiveType every draw with this pipeline
+	// passes: Metal takes the topology per draw call, not from the pipeline
+	// state (Rust wgpu-hal metal: RenderPipeline.raw_primitive_type).
+	primitiveType MTLPrimitiveType
+
 	// vertexSizes and fragmentSizes list, per stage, the bindings whose byte
 	// size naga's `_buffer_sizes` argument holds, in naga's field order. A
 	// stage without a runtime-sized array has none. vertexSizesSlot and

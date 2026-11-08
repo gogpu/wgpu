@@ -985,6 +985,7 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 		cullMode:        cullModeToMTL(desc.Primitive.CullMode),
 		frontFace:       frontFaceToMTL(desc.Primitive.FrontFace),
 		icbCompatible:   icbCompatible,
+		primitiveType:   primitiveTopologyToMTL(desc.Primitive.Topology),
 		vertexSizes:     vertexLib.sizesBindings,
 		vertexSizesSlot: vertexLib.sizesSlot,
 
