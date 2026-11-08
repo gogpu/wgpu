@@ -510,10 +510,12 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	// Queue writes are recorded lazily, so a surface acquisition can retire
 	// between WriteTexture and Submit. Revalidate every contributing wrapper
 	// before any command buffer reaches HAL. The raw texture comparison also
-	// protects against a wrapper being rebound to a different resource.
+	// protects against a wrapper being rebound to a different resource. A
+	// texture released after its write still receives it: the pending write
+	// holds its reference (P1-CORE-020), so recordedHAL, not resolveHAL.
 	for raw, owners := range pw.dstTextures {
 		for _, owner := range owners {
-			if owner.resolveHAL() != raw {
+			if owner.recordedHAL() != raw {
 				pw.discardRecording()
 				return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: destination texture retired before submit: %w", ErrReleased)
 			}
