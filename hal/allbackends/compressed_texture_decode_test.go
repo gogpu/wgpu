@@ -27,12 +27,17 @@ const texcompressGolden = "../software/internal/texcompress/testdata/gpu_readbac
 // TestCompressedTextureDecode reads every texel of the decodeCases blocks
 // with textureLoad on each backend that offers the format. The software
 // backend must offer texture-compression-bc and texture-compression-etc2 and
-// return the committed GPU readback; each GPU backend must return what the
-// software backend returns. Values compare bit for bit, except the red,
-// green and blue channels of the sRGB formats, which compare as 8-bit sRGB
-// codes: the GPUs decode the sRGB curve approximately (Intel Iris Xe is off
-// the IEC 61966-2-1 value by up to ~1e-3), the software backend exactly, and
-// the code is what the block stores.
+// return the committed GPU readback bit for bit. Each GPU backend must return
+// what the software backend returns: bit for bit for BC6H, BC7, ETC2 and EAC,
+// and within one 8-bit code of the format for the BC1-BC5 palette entries,
+// which GPUs round differently (WARP and Intel differ by one code; the
+// tolerances and their sources are in compressed_texture_ideal_test.go).
+// Decodes the Khronos Data Format Specification leaves to the
+// implementation accept each value it allows. The red, green and blue channels of the sRGB
+// formats compare as 8-bit sRGB codes: the GPUs decode the sRGB curve
+// approximately (Intel Iris Xe is off the IEC 61966-2-1 value by up to
+// ~1e-3), the software backend exactly, and the code is what the block
+// stores.
 //
 // WGPU_UPDATE_TEXCOMPRESS=1 rewrites the golden file from the Vulkan
 // readback (a Vulkan adapter with both features is required).
@@ -88,14 +93,85 @@ func TestCompressedTextureDecode(t *testing.T) {
 			if len(software) != len(decodeCases) {
 				t.Fatal("no software readback to compare with")
 			}
+			vm := adapters[b.name] == appleParavirtualDevice
 			for i, c := range decodeCases {
-				if texels, ok := got[i]; ok {
+				texels, ok := got[i]
+				if !ok {
+					continue
+				}
+				if !compareBC(t, c, b.name, texels, software[i], vm) {
 					compareDecode(t, c, b.name, texels, "software", software[i])
 				}
 			}
 			t.Logf("%s (%s) compared %d of %d formats", b.name, adapters[b.name], len(got), len(decodeCases))
 		})
 	}
+}
+
+// appleParavirtualDevice is the adapter name of the virtual GPU of a macOS
+// virtual machine (GitHub's macOS runners), not of Apple hardware. Measured
+// on it (CI run 42444020755): interpolated BC1-BC5 palette entries off the
+// ideal by up to 1.4/255 (BC1 color, ideal 0.6022, got 155/255), 0.0067
+// (BC4 unorm code 4 of endpoints 1 and 0: ideal 4/7, got 0.578125) and
+// 0.0157 (BC5 snorm), two codes away from the other decoders. Its
+// interpolated values are checked to lie between their two endpoints and
+// every deviation is logged; endpoints, constants and every other format
+// keep the full check, and the deviation is accepted from no other adapter.
+const appleParavirtualDevice = "Apple Paravirtual device"
+
+// compareBC checks got, the texels of BC1-BC5 case c, against sw, the
+// software decode, within the tolerance of each texel (idealBC), and reports
+// false for any other format. A value the specification leaves to the
+// implementation may also be its other decode. vm accepts the measured
+// deviation of appleParavirtualDevice: an interpolated value between its
+// endpoints.
+func compareBC(t *testing.T, c decodeCase, name string, got, sw []float32, vm bool) bool {
+	t.Helper()
+	width := 4 * len(c.blocks)
+	if _, ok := idealBC(c.format, c.blocks[0], 0, 0); !ok {
+		return false
+	}
+	if len(got) != 4*width*4 || len(sw) != len(got) {
+		t.Errorf("%v: %s has %d values, software %d, want %d", c.format, name, len(got), len(sw), 4*width*4)
+		return true
+	}
+	srgb := c.format.IsSrgb()
+	bad, deviations := 0, 0
+	for i := range got {
+		texel, ch := i/4, i%4
+		x, y := texel%width, texel/width
+		ideal, _ := idealBC(c.format, c.blocks[x/4], x%4, y)
+		want := ideal[ch]
+		g, s := float64(got[i]), float64(sw[i])
+		scale := 1.0
+		if srgb && ch < 3 {
+			// A GPU returns the sRGB code it decoded, linearized; compare the
+			// code, whose spacing is what the tolerance is written in.
+			g, s, scale = float64(srgbCode(got[i])), float64(srgbCode(sw[i])), 255
+		}
+		within := func(v float64) bool { return math.Abs(g-v) <= want.tol*scale+1e-9 }
+		if within(s) || want.hasAlt && within(want.alt*scale) {
+			continue
+		}
+		if vm && want.interp && g >= want.lo*scale-bcExactError*scale && g <= want.hi*scale+bcExactError*scale {
+			deviations++
+			t.Logf("%v block %d texel (%d,%d) channel %d: %s %v, ideal %v (bound %v): %s deviation",
+				c.format, x/4, x%4, y, ch, name, got[i], want.want, want.tol, appleParavirtualDevice)
+			continue
+		}
+		bad++
+		if bad <= 8 {
+			t.Errorf("%v block %d texel (%d,%d) channel %d: %s %v (%08x), software %v ± %v (ideal %v)",
+				c.format, x/4, x%4, y, ch, name, got[i], math.Float32bits(got[i]), sw[i], want.tol, want.want)
+		}
+	}
+	if bad > 8 {
+		t.Errorf("%v: %d values differ in all", c.format, bad)
+	}
+	if deviations > 0 {
+		t.Logf("%v: %d interpolated values of %s off the ideal, within their endpoints", c.format, deviations, name)
+	}
+	return true
 }
 
 // compareDecode reports the texels of case c where got differs from want.
@@ -115,6 +191,12 @@ func compareDecode(t *testing.T, c decodeCase, gotName string, got []float32, wa
 		if srgb && ch < 3 {
 			same = srgbCode(g) == srgbCode(w)
 		}
+		if !same && ch == 3 && bc7Reserved(c, i/4) && (g == 0 || g == 1) {
+			// KDFS "BC7": a decoder given the reserved mode "should return 0
+			// for all channels of all texels, but may return 1.0 in the A
+			// channel".
+			same = true
+		}
 		if same {
 			continue
 		}
@@ -129,6 +211,16 @@ func compareDecode(t *testing.T, c decodeCase, gotName string, got []float32, wa
 	if bad > 8 {
 		t.Errorf("%v: %d values differ in all", c.format, bad)
 	}
+}
+
+// bc7Reserved reports whether texel of case c lies in a BC7 block of the
+// reserved mode (a zero first byte).
+func bc7Reserved(c decodeCase, texel int) bool {
+	if c.format != gputypes.TextureFormatBC7RGBAUnorm && c.format != gputypes.TextureFormatBC7RGBAUnormSrgb {
+		return false
+	}
+	width := 4 * len(c.blocks)
+	return c.blocks[texel%width/4][0] == 0
 }
 
 // srgbCode returns the 8-bit sRGB code whose decode is nearest to linear l.
