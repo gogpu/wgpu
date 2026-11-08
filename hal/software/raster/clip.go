@@ -53,7 +53,19 @@ var AllFrustumPlanes = []ClipPlane{
 // Negative values indicate the vertex is outside.
 // Zero indicates the vertex is exactly on the plane.
 func (p ClipPlane) Distance(v ClipSpaceVertex) float32 {
-	return p.A*v.Position[0] + p.B*v.Position[1] + p.C*v.Position[2] + p.D*v.Position[3]
+	return planeDistance(p, &v, 0)
+}
+
+// planeDistance is p's distance of v minus bias. Each product is rounded on
+// its own (float32 conversions): the Go spec lets a compiler fuse x*y + z
+// into one fused multiply-add, which arm64 does and amd64 does not, so
+// without them a vertex exactly on a plane on one architecture is a hair
+// outside it on the other, and the software backend's geometry, the
+// vertices clipping creates and the pixels they cover, would differ between
+// architectures. Do not remove the conversions.
+func planeDistance(p ClipPlane, v *ClipSpaceVertex, bias float32) float32 {
+	return float32(p.A*v.Position[0]) + float32(p.B*v.Position[1]) +
+		float32(p.C*v.Position[2]) + float32(p.D*v.Position[3]) - bias
 }
 
 // IsInside returns true if the vertex is inside or on the plane.
@@ -101,7 +113,7 @@ type clipPlane struct {
 }
 
 func (p *clipPlane) distance(v *ClipSpaceVertex) float32 {
-	return p.A*v.Position[0] + p.B*v.Position[1] + p.C*v.Position[2] + p.D*v.Position[3] - p.min
+	return planeDistance(p.ClipPlane, v, p.min)
 }
 
 // Clipper clips triangles in clip space, before the perspective divide
@@ -260,14 +272,17 @@ func (c *Clipper) clipPolygon(src, n int, p *clipPlane) int {
 // distance dIn) to out (outside, at dOut) crosses the plane, and its
 // barycentrics of the triangle, in and out's being bIn and bOut.
 func (c *Clipper) intersect(in, out *ClipSpaceVertex, bIn, bOut *[3]float32, dIn, dOut float32) (ClipSpaceVertex, [3]float32) {
+	// Every product below is rounded on its own (float32 conversions) so
+	// that no multiply-add is fused: the result is then the same on every
+	// architecture (see planeDistance). Do not remove the conversions.
 	t := dIn / (dIn - dOut)
 	var v ClipSpaceVertex
 	for i := range v.Position {
-		v.Position[i] = in.Position[i] + t*(out.Position[i]-in.Position[i])
+		v.Position[i] = in.Position[i] + float32(t*(out.Position[i]-in.Position[i]))
 	}
 	var b [3]float32
 	for k := range b {
-		b[k] = bIn[k] + t*(bOut[k]-bIn[k])
+		b[k] = bIn[k] + float32(t*(bOut[k]-bIn[k]))
 	}
 	t0, t1, t2 := c.tri[0], c.tri[1], c.tri[2]
 	n := min(len(in.Attributes), len(out.Attributes),
@@ -287,7 +302,7 @@ func (c *Clipper) intersect(in, out *ClipSpaceVertex, bIn, bOut *[3]float32, dIn
 	linear := false
 	var s1, s2 float32
 	if c.linear != 0 {
-		p0, p1, p2 := b[0]*t0.Position[3], b[1]*t1.Position[3], b[2]*t2.Position[3]
+		p0, p1, p2 := float32(b[0]*t0.Position[3]), float32(b[1]*t1.Position[3]), float32(b[2]*t2.Position[3])
 		if den := p0 + p1 + p2; den > 0 {
 			linear, s1, s2 = true, p1/den, p2/den
 		}
@@ -306,9 +321,9 @@ func (c *Clipper) intersect(in, out *ClipSpaceVertex, bIn, bOut *[3]float32, dIn
 			// The affine form gives a lane equal at all three vertices back
 			// exactly.
 			a0 := t0.Attributes[i]
-			attrs[i] = a0 + s1*(t1.Attributes[i]-a0) + s2*(t2.Attributes[i]-a0)
+			attrs[i] = a0 + float32(s1*(t1.Attributes[i]-a0)) + float32(s2*(t2.Attributes[i]-a0))
 		default:
-			attrs[i] = in.Attributes[i] + t*(out.Attributes[i]-in.Attributes[i])
+			attrs[i] = in.Attributes[i] + float32(t*(out.Attributes[i]-in.Attributes[i]))
 		}
 	}
 	v.Attributes = attrs
