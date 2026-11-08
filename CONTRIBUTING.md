@@ -127,7 +127,7 @@ Components: `core`, `hal`, `vulkan`, `metal`, `dx12`, `gles`, `software`, `noop`
 - Reference the Rust wgpu equivalent for non-trivial HAL/core changes
 - Add tests for new functionality
 - Update documentation if needed (CHANGELOG, docs/, README)
-- Ensure all CI checks pass (build, cross-compile, tests with the race detector, GLES integration, lint, formatting, deps, Android preview)
+- Ensure all CI checks pass (build across three OSes and windows/386, cross-compile for browser and the Rust binding, tests with the race detector, GLES integration, lint on windows/amd64 and darwin/arm64 as well as linux, formatting, deps, Android preview)
 - Reference related issues
 
 ## Testing

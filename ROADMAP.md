@@ -19,8 +19,11 @@
 
 ---
 
-## Current State: v0.34.10
+## Current State: v0.34.11
 
+✅ **Resources released after recording stay alive through the work that uses them (v0.34.11)** — a `QuerySet` and a `PipelineLayout` are reference counted as samplers are; a released layout is refused at creation instead of reaching `vkAllocateDescriptorSets`; a pipeline keeps its layout until its own destruction
+✅ **Pass input is validated as the spec requires (v0.34.11)** — `SetViewport` per spec section and Rust, vertex formats gputypes does not define refused at pipeline creation
+✅ **GLES works on real OpenGL ES contexts (v0.34.11)** — MSAA as renderbuffers, `glMapBufferRange` for mapping, immutable storage textures for compute, BC from core GL versions and ARB names
 ✅ **Resources released after recording stay alive for the recorded work (v0.34.10)** — `Release()` is a drop, as in Rust wgpu: frame-batching consumers can free textures, views, samplers, bind groups and buffers before the frame's submit
 ✅ **Software backend renders like the GPU backends (v0.34.9)** — commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, 2x2 quads for derivatives and implicit LOD, two-sided stencil, exact integer values, BC/ETC2 sampling; checked by readback against Vulkan, DX12 and GLES
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
@@ -135,12 +138,20 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.11:**
-- [ ] `QuerySet` reference counted; pipelines keep their `PipelineLayout` alive (P1-CORE-021, P2-CORE-022)
-- [ ] GLES on OpenGL ES contexts: remaining gaps found by forced-ES runs (P1-GLES-025)
-- [ ] GLES: non-renderable copy sources, BC detection on core and ARB contexts (P2-GLES-023, P2-GLES-024)
+**Next patch release, v0.34.12:**
+- [ ] GLES: compute blit for non-renderable copy sources; snorm readback without EXT_render_snorm; vertex-storage flag tightened against Mesa d3d12 (P2-GLES-023, P1-GLES-025 items 2 and 4)
 - [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
+- [ ] Release only: `BindGroupLayout` reference counted as Rust and Dawn do; the Release-vs-create race contract (P2-CORE-027, P2-CORE-026)
+- [ ] A tracked WARP + GPU-based-validation test package (P2-INFRA-009, P1-CORE-028 for the selection API)
+
+**Patch release v0.34.11** (2026-11-08, naga v0.21.7):
+- [x] `QuerySet` reference counted; pipelines keep their `PipelineLayout` alive; released layouts refused at creation (P1-CORE-021, P2-CORE-022, P2-CORE-023)
+- [x] GLES on OpenGL ES contexts: MSAA, buffer mapping, storage textures (P1-GLES-025 items 1 and 3)
+- [x] GLES: BC detection on core and ARB contexts (P2-GLES-024)
+- [x] `SetViewport` and vertex formats validated (P2-CORE-019); `PushErrorScope` reports an unknown filter (P3-API-025)
+- [x] The module builds on GOARCH=386 (P1-INFRA-008); CI lints windows and darwin targets and builds 386 (P2-INFRA-007)
+- [x] naga v0.21.7: DX12 `position.w` is `1/w` (the dx12 exclusion in the readback is gone), DXIL bool locals merge as i32 with the `flow/short-circuit-or-rt` case; DXIL worker storage above the model's limit is refused
 
 **Patch release v0.34.10** (2026-11-08, naga v0.21.5):
 - [x] `Queue.Submit` accepts textures, views, bind groups and buffers released after recording (gogpu#461)
