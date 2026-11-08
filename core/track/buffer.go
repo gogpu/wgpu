@@ -176,7 +176,7 @@ func (t *BufferTracker) Merge(scope *BufferUsageScope) []PendingTransition {
 	var transitions []PendingTransition
 
 	for i := range scope.states {
-		if i < 0 || i > int(^TrackerIndex(0)-1) {
+		if i < 0 || uint64(i) >= uint64(InvalidTrackerIndex) {
 			continue // Skip if index would overflow TrackerIndex
 		}
 		index := TrackerIndex(i)

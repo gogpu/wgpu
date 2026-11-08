@@ -247,7 +247,7 @@ func (t *TextureTracker) Merge(scope *TextureUsageScope) []TexturePendingTransit
 	var transitions []TexturePendingTransition
 
 	for i := range scope.states {
-		if i < 0 || i > int(^TrackerIndex(0)-1) {
+		if i < 0 || uint64(i) >= uint64(InvalidTrackerIndex) {
 			continue
 		}
 		index := TrackerIndex(i)

@@ -265,7 +265,7 @@ func (t *EncoderBufferTracker) ensureSize(size int) {
 // Positions outside the TrackerIndex range (never produced by the allocator)
 // are reported invalid instead of being truncated.
 func trackerIndexAt(i int) (TrackerIndex, bool) {
-	if i < 0 || i > int(^TrackerIndex(0)-1) {
+	if i < 0 || uint64(i) >= uint64(InvalidTrackerIndex) {
 		return 0, false
 	}
 	return TrackerIndex(i), true
