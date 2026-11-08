@@ -639,10 +639,12 @@ const maxVertexAttributeOffset = 0x10000000
 
 // validateVertexAttributes checks the attributes of one vertex buffer in the
 // order of Rust wgpu-core create_render_pipeline
-// (wgpu-core/src/device/resource.rs): per attribute the offset alignment
-// (RP10f) and the location limit (RP10g), then per attribute the offset bound
-// (RP10f) and location clashes with every attribute seen so far (RP10h).
-// locations collects the shader locations across the pipeline's buffers.
+// (wgpu-core/src/device/resource.rs): first whether the format is one gputypes
+// defines (a check Rust needs neither, since its VertexFormat is an enum),
+// then per attribute the offset alignment (RP10f) and the location limit
+// (RP10g), then per attribute the offset bound (RP10f) and location clashes
+// with every attribute seen so far (RP10h). locations collects the shader
+// locations across the pipeline's buffers.
 //
 // Rust's later total-count check against maxVertexAttributes cannot fail
 // after these: unique locations below maxVertexAttributes bound the total.
@@ -657,20 +659,32 @@ func validateVertexAttributes(
 ) error {
 	attrError := func(kind CreateRenderPipelineErrorKind, j uint32, attr gputypes.VertexAttribute) error {
 		return &CreateRenderPipelineError{
-			Kind:            kind,
-			Label:           label,
-			BufferIndex:     bufferIndex,
-			ArrayStride:     vb.ArrayStride,
-			AttributeIndex:  j,
-			AttributeOffset: attr.Offset,
-			AttributeFormat: attr.Format.String(),
-			ShaderLocation:  attr.ShaderLocation,
-			Limit:           limits.MaxVertexAttributes,
+			Kind:                 kind,
+			Label:                label,
+			BufferIndex:          bufferIndex,
+			ArrayStride:          vb.ArrayStride,
+			AttributeIndex:       j,
+			AttributeOffset:      attr.Offset,
+			AttributeFormat:      attr.Format.String(),
+			AttributeFormatValue: attr.Format,
+			ShaderLocation:       attr.ShaderLocation,
+			Limit:                limits.MaxVertexAttributes,
 		}
 	}
 	for j, attr := range vb.Attributes {
-		// An undefined format has size 0; it then needs no alignment here.
-		if alignment := min(4, attr.Format.Size()); alignment > 0 && attr.Offset%alignment != 0 {
+		// The format must be one gputypes defines. This is not a spec
+		// validation rule: WebGPU's IDL rejects an unknown GPUVertexFormat
+		// before the algorithm runs. A Go caller can build one, and an
+		// unknown value has size 0, so every other check here treats it as a
+		// no-op and a backend receives a format it cannot map
+		// (hal/gles/command.go vertexFormatToGL falls back to Float32x4,
+		// reading 16 bytes per vertex).
+		if attr.Format.Size() == 0 {
+			return attrError(CreateRenderPipelineErrorInvalidVertexFormat, uint32(j), attr)
+		}
+		// Every defined format is at least 2 bytes, so the alignment is
+		// non-zero here.
+		if alignment := min(4, attr.Format.Size()); attr.Offset%alignment != 0 {
 			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
 		}
 		if attr.ShaderLocation >= limits.MaxVertexAttributes {

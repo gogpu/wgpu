@@ -701,6 +701,15 @@ const (
 	// constants of the stage named by Stage are invalid, or do not apply to
 	// the overrides of that stage's entry point. Cause holds the reason.
 	CreateRenderPipelineErrorPipelineConstants
+	// CreateRenderPipelineErrorInvalidVertexFormat indicates a vertex
+	// attribute format that gputypes does not define (VertexFormatUndefined
+	// included).
+	// WebGPU's IDL rejects an unknown GPUVertexFormat before the algorithm
+	// runs; Dawn validates it as a creation error
+	// (dawn/src/dawn/native/RenderPipeline.cpp:118, ValidateVertexFormat).
+	// Rust wgpu-types codes VertexFormat as an enum, so wgpu-core needs no
+	// equivalent check.
+	CreateRenderPipelineErrorInvalidVertexFormat
 )
 
 // CreateRenderPipelineError represents an error during render pipeline creation.
@@ -729,6 +738,10 @@ type CreateRenderPipelineError struct {
 	// AttributeFormat is the attribute vertex format for
 	// CreateRenderPipelineErrorVertexAttributeOutOfStride.
 	AttributeFormat string
+	// AttributeFormatValue is the attribute's vertex format, beside its name.
+	// An unknown value has no printable name, so
+	// CreateRenderPipelineErrorInvalidVertexFormat reports the number.
+	AttributeFormatValue gputypes.VertexFormat
 	// ShaderLocation is the attribute's shaderLocation for vertex attribute
 	// offset, location and clash errors.
 	ShaderLocation uint32
@@ -830,6 +843,9 @@ func (e *CreateRenderPipelineError) vertexAttributeMessage(label string) string 
 			label, e.Format)
 	case CreateRenderPipelineErrorPipelineConstants:
 		return fmt.Sprintf("render pipeline %q: %s stage: %v", label, e.Stage, e.Cause)
+	case CreateRenderPipelineErrorInvalidVertexFormat:
+		return fmt.Sprintf("render pipeline %q: vertex buffer [%d] attribute at shaderLocation %d: vertex format %d is not a valid GPUVertexFormat",
+			label, e.BufferIndex, e.ShaderLocation, e.AttributeFormatValue)
 	default:
 		return fmt.Sprintf("render pipeline %q: unknown error", label)
 	}
@@ -1321,9 +1337,34 @@ const (
 	// WebGPU spec: GPURenderPassColorAttachment Valid Usage.
 	// Rust wgpu-core: RenderPassErrorInner::UnsupportedResolveTargetFormat.
 	RenderPassErrorUnsupportedResolveFormat
+
+	// RenderPassErrorInvalidViewportRectSize indicates a SetViewport width or
+	// height that is negative, not finite, or above
+	// Limits.MaxTextureDimension2D.
+	// WebGPU spec: GPURenderPassEncoder.setViewport valid usage.
+	// Rust wgpu-core: RenderCommandError::InvalidViewportRectSize
+	// (command/draw.rs:126).
+	RenderPassErrorInvalidViewportRectSize
+
+	// RenderPassErrorInvalidViewportRectPosition indicates a SetViewport
+	// origin that is not finite, or an extent that leaves
+	// [-2 * maxTextureDimension2D, 2 * maxTextureDimension2D - 1].
+	// WebGPU spec: GPURenderPassEncoder.setViewport valid usage.
+	// Rust wgpu-core: RenderCommandError::InvalidViewportRectPosition
+	// (command/draw.rs:128).
+	RenderPassErrorInvalidViewportRectPosition
+
+	// RenderPassErrorInvalidViewportDepth indicates a SetViewport whose
+	// minDepth or maxDepth is outside [0, 1], not finite, or below the other.
+	// WebGPU spec: GPURenderPassEncoder.setViewport valid usage.
+	// Rust wgpu-core: RenderCommandError::InvalidViewportDepth
+	// (command/draw.rs:130).
+	RenderPassErrorInvalidViewportDepth
 )
 
-// RenderPassValidationError represents a validation error during render pass creation.
+// RenderPassValidationError represents a validation error of a render pass:
+// during its creation (attachments) or while commands are recorded on it
+// (viewport).
 type RenderPassValidationError struct {
 	Kind  RenderPassValidationErrorKind
 	Label string
@@ -1368,6 +1409,15 @@ type RenderPassValidationError struct {
 	// For InvalidResolveSampleCounts: ActualSamples is the resolve source's
 	// sample count, ResolveSamples the resolve target's.
 	ResolveSamples uint32
+
+	// For the viewport kinds: the rejected viewport, and the limit it was
+	// checked against. Limit is Limits.MaxTextureDimension2D for
+	// InvalidViewportRectSize; ViewportMin and ViewportMax are the allowed
+	// range of x and y for InvalidViewportRectPosition, zero when the device
+	// limit was unset and only finiteness was checked.
+	Viewport    gputypes.Viewport
+	ViewportMin float32
+	ViewportMax float32
 }
 
 // attachmentLocation names the attachment of e the way Rust wgpu-core's
@@ -1410,6 +1460,37 @@ func (e *RenderPassValidationError) notRenderableReason() string {
 		return fmt.Sprintf("the aspects of this texture view are a subset of the aspects in the original texture; aspect: %v", e.Aspect)
 	default:
 		return "unknown reason"
+	}
+}
+
+// viewportError words the viewport kinds of e the way Rust wgpu-core's
+// RenderCommandError does (command/draw.rs:126-130), naming the ranges the
+// WebGPU spec requires.
+func (e *RenderPassValidationError) viewportError(label string) string {
+	const spec = "(WebGPU spec: GPURenderPassEncoder.setViewport valid usage)"
+	vp := e.Viewport
+	switch e.Kind {
+	case RenderPassErrorInvalidViewportRectSize:
+		// The limit is zero when the device's was never populated; then only
+		// the sign and finiteness of the size were checked.
+		if e.Limit == 0 {
+			return fmt.Sprintf("render pass %q: viewport size { w: %v, h: %v } is negative or not finite %s",
+				label, vp.Width, vp.Height, spec)
+		}
+		return fmt.Sprintf("render pass %q: viewport size { w: %v, h: %v } is negative, not finite, or greater than maxTextureDimension2D %d %s",
+			label, vp.Width, vp.Height, e.Limit, spec)
+	case RenderPassErrorInvalidViewportRectPosition:
+		// With an unset device limit only the finiteness of the origin is
+		// checked, and ViewportMin and ViewportMax stay zero.
+		if e.ViewportMin == 0 && e.ViewportMax == 0 {
+			return fmt.Sprintf("render pass %q: viewport rect { x: %v, y: %v, w: %v, h: %v } has an origin that is not finite %s",
+				label, vp.X, vp.Y, vp.Width, vp.Height, spec)
+		}
+		return fmt.Sprintf("render pass %q: viewport rect { x: %v, y: %v, w: %v, h: %v } must keep x and y at or above %v, and x + width and y + height at or below %v %s",
+			label, vp.X, vp.Y, vp.Width, vp.Height, e.ViewportMin, e.ViewportMax, spec)
+	default:
+		return fmt.Sprintf("render pass %q: viewport minDepth %v and/or maxDepth %v are not in [0, 1], or minDepth exceeds maxDepth %s",
+			label, vp.MinDepth, vp.MaxDepth, spec)
 	}
 }
 
@@ -1488,6 +1569,9 @@ func (e *RenderPassValidationError) Error() string {
 		RenderPassErrorInvalidResolveSampleCounts, RenderPassErrorMismatchedResolveFormat,
 		RenderPassErrorUnsupportedResolveFormat:
 		return e.formatError(label)
+	case RenderPassErrorInvalidViewportRectSize, RenderPassErrorInvalidViewportRectPosition,
+		RenderPassErrorInvalidViewportDepth:
+		return e.viewportError(label)
 	default:
 		return fmt.Sprintf("render pass %q: unknown validation error", label)
 	}
