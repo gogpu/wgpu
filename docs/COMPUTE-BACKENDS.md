@@ -100,7 +100,7 @@ The software backend executes compute shaders on CPU through a built-in SPIR-V i
 - **Barriers:** a workgroup-scope barrier (`workgroupBarrier`, `storageBarrier`, `textureBarrier`) suspends each invocation until every invocation of its workgroup has reached it. The invocations of a workgroup run on one goroutine, round-robin from barrier to barrier, so memory is always coherent between them.
 - **Shader debugger:** DebugContext with breakpoints, JSON trace, watch variables. Zero overhead when disabled.
 - **Workgroup size:** Read from OpExecutionMode LocalSize in SPIR-V, and checked against the device limits at `CreateComputePipeline` for SPIR-V modules as for WGSL (since v0.34.9).
-- **Shader memory limits** (since v0.34.9): Private variables 64 KiB per module, Function variables 64 KiB per function, Workgroup variables 1 MiB per module (the per-entry-point `maxComputeWorkgroupStorageSize` applies as well), composite and null constants 1 MiB, any type at most `maxBufferSize`. A module over them fails pipeline creation; WebGPU sets no limit for these.
+- **Shader memory limits** (since v0.34.9): Private variables 64 KiB per module, Function variables 64 KiB per function, Workgroup variables 1 MiB per module (the per-entry-point `maxComputeWorkgroupStorageSize` applies as well), composite and null constants 1 MiB, any type at most `maxBufferSize`, 256 MiB live per invocation and 1 GiB per compute workgroup. A module over them fails pipeline creation; WebGPU sets no limit for these. The software backend is not a sandbox for hostile SPIR-V: for untrusted shaders, use WGSL, which naga validates.
 - `CreateQuerySet` returns an error (timestamps not supported).
 - `DispatchIndirect` reads its arguments from the buffer, after core's indirect validation.
 

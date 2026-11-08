@@ -29,6 +29,31 @@ func limitsSPIRV(length uint32, decls, body []uint32) []uint32 {
 	return append(w, spirvInst(1, OpReturn), spirvInst(1, OpFunctionEnd))
 }
 
+// undefs returns n OpUndef of type %6, result IDs from first on.
+func undefs(n int, first uint32) []uint32 {
+	w := make([]uint32, 0, 3*n)
+	for i := range n {
+		w = append(w, spirvInst(3, OpUndef), 6, first+uint32(i))
+	}
+	return w
+}
+
+// TestWorkgroupLiveBytes checks the bound compute pipeline creation applies:
+// one OpUndef of a 1 MiB array is about 12 MiB live per invocation, so a
+// 256-invocation workgroup exceeds MaxWorkgroupLiveBytes.
+func TestWorkgroupLiveBytes(t *testing.T) {
+	m, err := ParseModule(limitsSPIRV(262144, nil, undefs(1, 30)))
+	if err != nil {
+		t.Fatalf("ParseModule: %v", err)
+	}
+	if got := m.WorkgroupLiveBytes(1); got < 12<<20 || got > 13<<20 {
+		t.Fatalf("WorkgroupLiveBytes(1) = %d, want about 12 MiB", got)
+	}
+	if got := m.WorkgroupLiveBytes(256); got <= MaxWorkgroupLiveBytes {
+		t.Fatalf("WorkgroupLiveBytes(256) = %d, want above %d", got, MaxWorkgroupLiveBytes)
+	}
+}
+
 // TestParseModuleLimits checks that ParseModule rejects a module that would
 // make the interpreter allocate beyond Limits, before allocating it. Before
 // P1-SW-040 the first case asked for 206 GB inside ParseModule
@@ -63,10 +88,33 @@ func TestParseModuleLimits(t *testing.T) {
 		{"function variables above the limit", 16385,
 			ptr(10, StorageClassFunction, 6), variable(10, 11, StorageClassFunction), "Function variables of a function exceed"},
 		{"workgroup variables above the limit", 262145, // 1 MiB + 4 bytes
-			cat(ptr(10, StorageClassWorkgroup, 6), variable(10, 11, StorageClassWorkgroup)), nil, "Workgroup variables exceed"},
+			cat(ptr(10, StorageClassWorkgroup, 6), variable(10, 11, StorageClassWorkgroup)), nil, "Workgroup variables take"},
 		{"null constants above the limit", 131072, // 512 KiB each
 			[]uint32{spirvInst(3, OpConstantNull), 6, 10, spirvInst(3, OpConstantNull), 6, 11, spirvInst(3, OpConstantNull), 6, 12},
 			nil, "constants exceed"},
+		// The second deep review of P1-SW-040: each bypassed the first budget.
+		{"array of images, zero bytes per element", 1,
+			[]uint32{spirvInst(9, OpTypeImage), 10, 2, 1, 0, 0, 0, 1, 0, spirvInst(4, OpConstant), 3, 13, 0xFFFFFFFF,
+				spirvInst(4, OpTypeArray), 11, 10, 13, spirvInst(3, OpConstantNull), 11, 12}, nil, "type 11 is"},
+		{"type ID defined twice", 16, []uint32{spirvInst(4, OpTypeArray), 6, 2, 5}, nil, "defined more than once"},
+		{"workgroup array with a huge ArrayStride", 16,
+			cat([]uint32{spirvInst(4, OpDecorate), 6, DecorationArrayStride, 0xFFFFFFFF}, ptr(10, StorageClassWorkgroup, 6),
+				variable(10, 11, StorageClassWorkgroup)), nil, "Workgroup variables take"},
+		// The third: a decoration after the variable, and void elements.
+		{"ArrayStride declared after the workgroup variable", 16,
+			cat(ptr(10, StorageClassWorkgroup, 6), variable(10, 11, StorageClassWorkgroup),
+				[]uint32{spirvInst(4, OpDecorate), 6, DecorationArrayStride, 0xFFFFFFFF}), nil, "Workgroup variables take"},
+		{"workgroup array with an ArrayStride, as Rust naga emits", 16,
+			cat([]uint32{spirvInst(4, OpDecorate), 6, DecorationArrayStride, 4}, ptr(10, StorageClassWorkgroup, 6),
+				variable(10, 11, StorageClassWorkgroup)), nil, ""},
+		{"array of void", 1,
+			[]uint32{spirvInst(4, OpConstant), 3, 13, 0xFFFFFFFF, spirvInst(4, OpTypeArray), 11, 1, 13,
+				spirvInst(3, OpConstantNull), 11, 12}, nil, "type 11 is"},
+		{"two entry points of one name", 1,
+			[]uint32{spirvInst(4, OpEntryPoint), ExecutionModelGLCompute, 7, 0x6D, spirvInst(4, OpEntryPoint), ExecutionModelGLCompute, 7, 0x6D},
+			nil, "two entry points"},
+		{"recursion", 1, nil, []uint32{spirvInst(4, OpFunctionCall), 1, 20, 7}, "recursive"},
+		{"results of an invocation above the limit", 262144, nil, undefs(22, 30), "an invocation would hold"},
 		{"WGSL guarantees: 8192 private and 8192 function bytes", 2048,
 			cat(ptr(10, StorageClassPrivate, 6), variable(10, 11, StorageClassPrivate), ptr(12, StorageClassFunction, 6)),
 			variable(12, 13, StorageClassFunction), ""},

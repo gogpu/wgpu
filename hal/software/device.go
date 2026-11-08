@@ -434,6 +434,13 @@ func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal
 		// its own error from stageModule.
 		return nil, ErrComputeRequiresSPIRV
 	}
+	// Every invocation of a workgroup is live between barriers.
+	size := module.GetWorkgroupSize(desc.Compute.EntryPoint)
+	invocations := uint64(size[0]) * uint64(size[1]) * uint64(size[2])
+	if live := module.WorkgroupLiveBytes(invocations); live > shader.MaxWorkgroupLiveBytes {
+		return nil, fmt.Errorf("software: a workgroup of %d invocations would hold %d bytes, above the software backend's limit of %d",
+			invocations, live, shader.MaxWorkgroupLiveBytes)
+	}
 	return &ComputePipeline{
 		desc:       desc,
 		module:     module,

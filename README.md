@@ -367,7 +367,10 @@ helper, so a non-linear derivative taken after a non-uniform `discard` can diffe
 **Shader memory limits:** a shader's Private variables may total 64 KiB, the Function variables of one function
 64 KiB, its Workgroup variables 1 MiB, its composite and null constants 1 MiB, and any type at most `maxBufferSize`
 (the WebGPU limit on workgroup storage per entry point applies as well). WebGPU sets no limit for these; they are
-eight times the WGSL guarantees for Private and Function storage. A module over them fails pipeline creation.
+eight times the WGSL guarantees for Private and Function storage. What one invocation holds live may reach 256 MiB
+and a compute workgroup 1 GiB. A module over them fails pipeline creation. The software backend runs raw SPIR-V
+within these documented limits; it is not a sandbox for hostile SPIR-V. For untrusted shaders, use WGSL, which naga
+validates.
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
