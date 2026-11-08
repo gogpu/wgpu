@@ -364,6 +364,11 @@ import _ "github.com/gogpu/wgpu/hal/software"
 **Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`; a discarded fragment stops instead of staying a
 helper, so a non-linear derivative taken after a non-uniform `discard` can differ from the GPU backends.
 
+**Shader memory limits:** a shader's Private variables may total 64 KiB, the Function variables of one function
+64 KiB, its Workgroup variables 1 MiB, its composite and null constants 1 MiB, and any type at most `maxBufferSize`
+(the WebGPU limit on workgroup storage per entry point applies as well). WebGPU sets no limit for these; they are
+eight times the WGSL guarantees for Private and Function storage. A module over them fails pipeline creation.
+
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
 - Public `wgpu.HeadlessSurfaceTarget` + `Surface.ReadPixels()` lifecycle for deterministic headless render verification; snapshots are owned, tightly packed RGBA8
