@@ -195,7 +195,7 @@ func safeIntToUint32(v int) uint32 {
 		return 0
 	}
 
-	if v > math.MaxUint32 {
+	if uint64(v) > math.MaxUint32 {
 		return math.MaxUint32
 	}
 
