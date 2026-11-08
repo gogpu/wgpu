@@ -32,7 +32,14 @@ func TestAndroidSurfaceRequestIsWindowOnlyAndStateless(t *testing.T) {
 }
 
 func TestAndroidSurfaceCreateInfoPreservesIndependentRawWindows(t *testing.T) {
-	firstWindow := uintptr(0x87654321) | uintptr(0x10)<<32
+	if unsafe.Sizeof(uintptr(0)) != 8 {
+		t.Skip("a 64-bit ANativeWindow handle does not fit a 32-bit uintptr")
+	}
+	// The shift count is a variable so the constant does not overflow uintptr
+	// when the package is type-checked for a 32-bit target, where the test
+	// skips above.
+	highBits := uint(32)
+	firstWindow := uintptr(0x87654321) | uintptr(0x10)<<highBits
 	secondWindow := uintptr(0x23456789)
 
 	first := vk.AndroidSurfaceCreateInfoKHR{SType: vk.StructureTypeAndroidSurfaceCreateInfoKhr}

@@ -162,7 +162,7 @@ func TestMemoryTypeSelectorHelpers(t *testing.T) {
 
 	// Test GetHeapSize
 	if size := selector.GetHeapSize(0); size != 4<<30 {
-		t.Errorf("GetHeapSize(0) = %d, want %d", size, 4<<30)
+		t.Errorf("GetHeapSize(0) = %d, want %d", size, uint64(4)<<30)
 	}
 	if size := selector.GetHeapSize(99); size != 0 {
 		t.Errorf("GetHeapSize(99) = %d, want 0", size)
