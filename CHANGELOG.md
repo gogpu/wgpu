@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.11] - 2026-11-08
+
+A lifetime and validation patch: resources released after recording stay alive through the work that uses them,
+pass input is validated as the spec requires, and the module builds on 32-bit.
+
+### Fixed
+
+- **A query set released after recording stays alive until that work completes** (P1-CORE-021, closes the v0.34.10 known issue). `QuerySet.Release` destroyed the HAL query pool at the previous submission index, so a set released after timestamp writes or a `ResolveQuerySet` were recorded went away under the submitted command buffer: `VUID-vkDestroyQueryPool-queryPool-00793` on Vulkan, zero timestamps on DX12. Query sets are reference counted as samplers are; the command encoder holds the set's reference until the submission completes, and `Submit` refuses only a set whose HAL resource is gone (`ErrSubmitQuerySetDestroyed`).
+- **A render or compute pipeline keeps its pipeline layout alive** (P2-CORE-022, closes the second v0.34.10 known issue). A `PipelineLayout` released after the pipeline was created was destroyed while later `SetBindGroup` calls still named it — an invalid `VkPipelineLayout` at `vkCmdBindDescriptorSets`. Pipelines now hold their layout's reference and drop it when their own resource is destroyed.
+- **A released bind group layout cannot back a new bind group or pipeline layout** (P2-CORE-023). `CreateBindGroup` and `CreatePipelineLayout` now return `ErrReleased`, as `CreateBindGroup` already did for a released sampler. Before, the released layout's HAL handle reached `vkAllocateDescriptorSets` and crashed inside the driver.
+- **`SetViewport` is validated as the spec requires** (P2-CORE-019). Non-finite or negative sizes, an origin outside the viewport range, or a depth range outside `[0, 1]` is a `RenderPassValidationError` on the encoder instead of invalid values reaching the driver. Where the spec and Rust wgpu differ, the spec decides.
+- **A vertex format gputypes does not define is a pipeline-creation error** (P2-CORE-019, `CreateRenderPipelineErrorInvalidVertexFormat`). Each backend used to substitute a format of its own (float32x4 on Vulkan and GLES, an invalid Metal format, an unknown DXGI format).
+- **The module builds on GOARCH=386** (P1-INFRA-008). Four comparisons against `TrackerIndex` and `math.MaxUint32` were written as `int` constants and overflowed a 32-bit `int`, so every 386 build of wgpu failed to compile. Comparison is done in `uint64` now; behaviour on 64-bit targets is unchanged. Build only — there is no GPU on 386, and ecosystem CI needs goffi's own 386 support before the other repositories can run the leg.
+
+### Changed
+
+- **`Device.PushErrorScope` returns an error for a filter outside the three WebGPU filters** (P3-API-025). It used to map an unknown value to `Validation` silently, pushing a scope that could never capture what the caller asked for. The native build validates in core, `-tags rust` rejects the value before it reaches wgpu-native, which panics on an unknown filter and whose panic would abort the process across the FFI boundary. Calls written as statements are unaffected.
+
+### Infrastructure
+
+- CI lints windows/amd64 and darwin/arm64 in addition to the host, pins every action by SHA, installs the pinned golangci-lint from the ecosystem action, adds a dependabot configuration, and builds windows/386 (P2-INFRA-007, P1-INFRA-008). The ruleset still requires the `Test` gate; switching it to `Required checks` is a separate, coordinated step.
+
+### Known issues
+
+- Scissor rects are not validated yet; they go to the HAL unvalidated, as viewports did before this release (P2-CORE-024, next patch).
+
 ## [0.34.10] - 2026-11-08
 
 A patch for frame-batching consumers and a security update of naga.
