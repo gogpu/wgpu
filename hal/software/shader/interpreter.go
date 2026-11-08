@@ -129,7 +129,7 @@ type interpreter struct {
 	ep     *EntryPoint
 	fn     *Function
 	ctx    *ExecutionContext
-	values []Value // indexed by SSA ID, length == module.Bound
+	values []Value // indexed by SSA ID, length == module.valueSlots
 
 	// prevBlock tracks the predecessor block ID for OpPhi resolution.
 	prevBlock uint32
@@ -207,7 +207,7 @@ func (m *Module) getInterpreter() *interpreter {
 	}
 	return &interpreter{
 		module:  m,
-		values:  make([]Value, m.Bound),
+		values:  make([]Value, m.valueSlots),
 		ptrPool: make([]Pointer, ptrPoolSize),
 	}
 }

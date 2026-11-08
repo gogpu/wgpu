@@ -62,6 +62,12 @@ type Module struct {
 	// Bound is the upper bound of all IDs in the module.
 	Bound uint32
 
+	// valueSlots is the length of an interpreter's value slice: the largest
+	// ID the module defines plus one (validateIDs), at most Bound. A header
+	// Bound far above the IDs in use is legal; sizing by it would allocate
+	// for IDs nothing can name.
+	valueSlots uint32
+
 	// interpPool recycles interpreter structs across Execute calls to avoid
 	// allocating the values slice (sized to Bound) on every invocation.
 	interpPool sync.Pool
@@ -304,6 +310,12 @@ func ParseModule(words []uint32) (*Module, error) {
 			if len(operands) < 3 {
 				break
 			}
+			if err := m.requireType(operands[0], "component type", operands[1]); err != nil {
+				return nil, err
+			}
+			if operands[2] < 2 || operands[2] > 4 {
+				return nil, fmt.Errorf("spirv: vector type %d has %d components, want 2 to 4", operands[0], operands[2])
+			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:       TypeVector,
 				ElemType:   operands[1],
@@ -317,6 +329,12 @@ func ParseModule(words []uint32) (*Module, error) {
 			if len(operands) < 3 {
 				break
 			}
+			if err := m.requireType(operands[0], "column type", operands[1]); err != nil {
+				return nil, err
+			}
+			if operands[2] < 2 || operands[2] > 4 {
+				return nil, fmt.Errorf("spirv: matrix type %d has %d columns, want 2 to 4", operands[0], operands[2])
+			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:       TypeMatrix,
 				ElemType:   operands[1], // column vector type (e.g. vec4<f32>)
@@ -326,6 +344,9 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeArray:
 			if len(operands) < 3 {
 				break
+			}
+			if err := m.requireType(operands[0], "element type", operands[1]); err != nil {
+				return nil, err
 			}
 			// operands[2] is the ID of the constant holding the length.
 			length := uint32(0)
@@ -346,6 +367,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			if len(operands) < 2 {
 				break
 			}
+			if err := m.requireType(operands[0], "element type", operands[1]); err != nil {
+				return nil, err
+			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:     TypeArray,
 				ElemType: operands[1],
@@ -356,6 +380,11 @@ func ParseModule(words []uint32) (*Module, error) {
 			if len(operands) < 3 {
 				break
 			}
+			// OpTypeForwardPointer (physical storage buffer pointers) is
+			// not supported, so a pointee is always declared first.
+			if err := m.requireType(operands[0], "pointee type", operands[2]); err != nil {
+				return nil, err
+			}
 			m.Types[operands[0]] = &TypeInfo{
 				Kind:     TypePointer,
 				Storage:  operands[1],
@@ -365,6 +394,11 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeFunction:
 			if len(operands) < 2 {
 				break
+			}
+			for _, id := range operands[1:] {
+				if err := m.requireType(operands[0], "return or parameter type", id); err != nil {
+					return nil, err
+				}
 			}
 			ti := &TypeInfo{
 				Kind:       TypeFunction,
@@ -380,6 +414,11 @@ func ParseModule(words []uint32) (*Module, error) {
 			if len(operands) < 1 {
 				break
 			}
+			for _, id := range operands[1:] {
+				if err := m.requireType(operands[0], "member type", id); err != nil {
+					return nil, err
+				}
+			}
 			ti := &TypeInfo{Kind: TypeStruct}
 			if len(operands) > 1 {
 				ti.MemberIDs = make([]uint32, len(operands)-1)
@@ -390,6 +429,9 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeImage:
 			// OpTypeImage: result sampledType dim depth arrayed ms sampled format [access]
 			if len(operands) >= 2 {
+				if err := m.requireType(operands[0], "sampled type", operands[1]); err != nil {
+					return nil, err
+				}
 				m.Types[operands[0]] = &TypeInfo{Kind: TypeImage, ElemType: operands[1]}
 			}
 
@@ -402,6 +444,9 @@ func ParseModule(words []uint32) (*Module, error) {
 		case OpTypeSampledImage:
 			// OpTypeSampledImage: result imageType
 			if len(operands) >= 2 {
+				if err := m.requireType(operands[0], "image type", operands[1]); err != nil {
+					return nil, err
+				}
 				m.Types[operands[0]] = &TypeInfo{Kind: TypeSampledImage, ElemType: operands[1]}
 			}
 
@@ -627,17 +672,25 @@ func ParseModule(words []uint32) (*Module, error) {
 	}
 	m.layOutUndecoratedStructs()
 
+	// Record result types first: validateIDs reads an OpSwitch selector's type.
+	for _, fn := range funcsByID {
+		for _, inst := range fn.Instructions {
+			if inst.TypeID != 0 && inst.ResultID != 0 {
+				m.ResultTypes[inst.ResultID] = inst.TypeID
+			}
+		}
+	}
+	if err := m.validateIDs(); err != nil {
+		return nil, err
+	}
+
 	// Pre-build label indexes for all functions. This avoids rebuilding
 	// the label map on every Execute call (saves one map alloc per call).
-	// Record the result type of every typed instruction alongside.
 	for _, fn := range funcsByID {
 		fn.Labels = make(map[uint32]int, len(fn.Instructions)/4)
 		for i, inst := range fn.Instructions {
 			if inst.Opcode == OpLabel {
 				fn.Labels[inst.ResultID] = i
-			}
-			if inst.TypeID != 0 && inst.ResultID != 0 {
-				m.ResultTypes[inst.ResultID] = inst.TypeID
 			}
 		}
 	}
