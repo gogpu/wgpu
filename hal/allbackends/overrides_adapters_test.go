@@ -28,19 +28,38 @@ import (
 // Subtests are named backend/adapter/case, so one adapter can be selected
 // with -run (for example to give each Vulkan adapter its own validation log).
 func TestOverridesAllAdapters(t *testing.T) {
-	for _, cfg := range []struct {
-		name    string
-		variant gputypes.Backend
-		mask    gputypes.Backends
-		dxil    bool
-	}{
-		{name: "vulkan", variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
-		{name: "dx12-fxc", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
-		{name: "dx12-dxil", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
-		{name: "gles", variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
-		{name: "metal", variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
-		{name: "software", variant: gputypes.BackendEmpty, mask: gputypes.BackendsAll},
-	} {
+	forEachHALAdapter(t, func(t *testing.T, _ string, a *hal.ExposedAdapter, _ *vvlCapture) {
+		runOverrideCasesOnAdapter(t, a)
+	})
+}
+
+// halBackendConfig is one HAL backend variant that the all-adapter tests run.
+type halBackendConfig struct {
+	name    string // the corpus backend name: vulkan, dx12-fxc, dx12-dxil, gles, metal, software
+	variant gputypes.Backend
+	mask    gputypes.Backends
+	dxil    bool // DX12 with naga's DXIL backend instead of HLSL+FXC
+}
+
+var halBackendConfigs = []halBackendConfig{
+	{name: "vulkan", variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
+	{name: "dx12-fxc", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
+	{name: "dx12-dxil", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
+	{name: "gles", variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
+	{name: "metal", variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
+	{name: "software", variant: gputypes.BackendEmpty, mask: gputypes.BackendsAll},
+}
+
+// forEachHALAdapter runs fn in a subtest backend/adapter for every adapter of
+// every registered HAL backend variant. The instance lives for the backend's
+// subtest; a backend that is not registered, has no instance or no adapter
+// here is skipped. Vulkan instances run with the validation layer
+// (startVulkanValidation): fn gets the capture to drain per step, and any
+// message left at the end fails the backend's subtest. vvl is nil for the
+// other backends.
+func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend string, a *hal.ExposedAdapter, vvl *vvlCapture)) {
+	t.Helper()
+	for _, cfg := range halBackendConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
 			// DX12 reads the variable when a device is opened.
 			if cfg.dxil {
@@ -52,7 +71,12 @@ func TestOverridesAllAdapters(t *testing.T) {
 			if !ok {
 				t.Skipf("%s backend not registered on this platform", cfg.name)
 			}
-			instance, err := backend.CreateInstance(&hal.InstanceDescriptor{Backends: cfg.mask})
+			var flags gputypes.InstanceFlags
+			var vvl *vvlCapture
+			if cfg.variant == gputypes.BackendVulkan {
+				flags, vvl = startVulkanValidation(t)
+			}
+			instance, err := backend.CreateInstance(&hal.InstanceDescriptor{Backends: cfg.mask, Flags: flags})
 			if err != nil {
 				t.Skipf("CreateInstance: %v", err)
 			}
@@ -68,7 +92,7 @@ func TestOverridesAllAdapters(t *testing.T) {
 			for i := range adapters {
 				a := &adapters[i]
 				t.Run(subtestName(a.Info.Name), func(t *testing.T) {
-					runOverrideCasesOnAdapter(t, a)
+					fn(t, cfg.name, a, vvl)
 				})
 			}
 		})
@@ -115,9 +139,51 @@ type halRunner struct {
 	queue  hal.Queue
 }
 
-// run creates the pipeline (its error is returned), uploads inputs, runs one
-// workgroup and returns the contents of every binding.
+// halBinding is one buffer of a halDispatch, in @group(0).
+type halBinding struct {
+	binding uint32
+	// kind is BufferBindingTypeStorage, BufferBindingTypeReadOnlyStorage or
+	// BufferBindingTypeUniform.
+	kind  gputypes.BufferBindingType
+	words []uint32 // initial contents; the buffer is len(words)*4 bytes
+}
+
+// usage is the buffer usage the shader needs for the binding.
+func (b *halBinding) usage() gputypes.BufferUsage {
+	if b.kind == gputypes.BufferBindingTypeUniform {
+		return gputypes.BufferUsageUniform
+	}
+	return gputypes.BufferUsageStorage
+}
+
+// halDispatch is one compute dispatch for halRunner.dispatch.
+type halDispatch struct {
+	label      string
+	wgsl       string
+	entry      string
+	constants  map[string]float64
+	workgroups [3]uint32
+	bindings   []halBinding
+}
+
+// run creates the pipeline (its error is returned), uploads inputs into
+// read-write storage bindings 0..n-1, runs one workgroup of entry point main
+// and returns the contents of every binding.
 func (r *halRunner) run(wgsl string, constants map[string]float64, inputs [][]uint32) ([][]uint32, error) {
+	bindings := make([]halBinding, len(inputs))
+	for i, in := range inputs {
+		bindings[i] = halBinding{binding: uint32(i), kind: gputypes.BufferBindingTypeStorage, words: in}
+	}
+	return r.dispatch(&halDispatch{
+		label: "overrides", wgsl: wgsl, entry: "main", constants: constants,
+		workgroups: [3]uint32{1, 1, 1}, bindings: bindings,
+	})
+}
+
+// dispatch creates the pipeline (its error is returned), uploads every
+// binding's words, runs the dispatch and returns the contents of every
+// binding after it, in the order of disp.bindings.
+func (r *halRunner) dispatch(disp *halDispatch) ([][]uint32, error) {
 	d := r.device
 	var cleanup []func()
 	defer func() {
@@ -127,33 +193,39 @@ func (r *halRunner) run(wgsl string, constants map[string]float64, inputs [][]ui
 		}
 	}()
 
-	shader, err := d.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: "overrides", Source: hal.ShaderSource{WGSL: wgsl}})
+	shader, err := d.CreateShaderModule(&hal.ShaderModuleDescriptor{Label: disp.label, Source: hal.ShaderSource{WGSL: disp.wgsl}})
 	if err != nil {
 		return nil, fmt.Errorf("CreateShaderModule: %w", err)
 	}
 	cleanup = append(cleanup, func() { d.DestroyShaderModule(shader) })
 
-	entries := make([]gputypes.BindGroupLayoutEntry, len(inputs))
-	for i := range inputs {
+	entries := make([]gputypes.BindGroupLayoutEntry, len(disp.bindings))
+	for i := range disp.bindings {
+		b := &disp.bindings[i]
 		entries[i] = gputypes.BindGroupLayoutEntry{
-			Binding: uint32(i), Visibility: gputypes.ShaderStageCompute,
-			Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage},
+			Binding: b.binding, Visibility: gputypes.ShaderStageCompute,
+			Buffer: &gputypes.BufferBindingLayout{Type: b.kind},
 		}
 	}
-	bgl, err := d.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{Label: "overrides-bgl", Entries: entries})
+	bgl, err := d.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{Label: disp.label + "-bgl", Entries: entries})
 	if err != nil {
 		return nil, fmt.Errorf("CreateBindGroupLayout: %w", err)
 	}
 	cleanup = append(cleanup, func() { d.DestroyBindGroupLayout(bgl) })
-	pl, err := d.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{Label: "overrides-pl", BindGroupLayouts: []hal.BindGroupLayout{bgl}})
+	pl, err := d.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{Label: disp.label + "-pl", BindGroupLayouts: []hal.BindGroupLayout{bgl}})
 	if err != nil {
 		return nil, fmt.Errorf("CreatePipelineLayout: %w", err)
 	}
 	cleanup = append(cleanup, func() { d.DestroyPipelineLayout(pl) })
 	pipeline, err := d.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:   "overrides",
-		Layout:  pl,
-		Compute: hal.ComputeState{Module: shader, EntryPoint: "main", Constants: constants},
+		Label:  disp.label,
+		Layout: pl,
+		// Zeroing workgroup memory is WebGPU's default, which the public API
+		// passes (descriptor.go). The HAL's zero value turns it off, and a
+		// runner that left it false read stale workgroup memory on NVIDIA
+		// Vulkan (corpus vars/workgroup-zero-rt, 2026-11-08).
+		Compute: hal.ComputeState{Module: shader, EntryPoint: disp.entry, Constants: disp.constants,
+			ZeroInitializeWorkgroupMemory: true},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CreateComputePipeline: %w", err)
@@ -168,13 +240,15 @@ func (r *halRunner) run(wgsl string, constants map[string]float64, inputs [][]ui
 		cleanup = append(cleanup, func() { d.DestroyBuffer(b) })
 		return b, nil
 	}
-	storage := make([]hal.Buffer, len(inputs))
-	upload := make([]hal.Buffer, len(inputs))
-	readback := make([]hal.Buffer, len(inputs))
-	bgEntries := make([]gputypes.BindGroupEntry, len(inputs))
-	for i, in := range inputs {
-		size := uint64(len(in) * 4)
-		if storage[i], err = newBuffer("storage", size, gputypes.BufferUsageStorage|gputypes.BufferUsageCopySrc|gputypes.BufferUsageCopyDst); err != nil {
+	n := len(disp.bindings)
+	gpu := make([]hal.Buffer, n)
+	upload := make([]hal.Buffer, n)
+	readback := make([]hal.Buffer, n)
+	bgEntries := make([]gputypes.BindGroupEntry, n)
+	for i := range disp.bindings {
+		b := &disp.bindings[i]
+		size := uint64(len(b.words) * 4)
+		if gpu[i], err = newBuffer("binding", size, b.usage()|gputypes.BufferUsageCopySrc|gputypes.BufferUsageCopyDst); err != nil {
 			return nil, err
 		}
 		if upload[i], err = newBuffer("upload", size, gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopySrc); err != nil {
@@ -184,75 +258,81 @@ func (r *halRunner) run(wgsl string, constants map[string]float64, inputs [][]ui
 			return nil, err
 		}
 		data := make([]byte, size)
-		for j, w := range in {
+		for j, w := range b.words {
 			binary.LittleEndian.PutUint32(data[j*4:], w)
 		}
 		if err := r.queue.WriteBuffer(upload[i], 0, data); err != nil {
 			return nil, fmt.Errorf("WriteBuffer: %w", err)
 		}
 		bgEntries[i] = gputypes.BindGroupEntry{
-			Binding:  uint32(i),
-			Resource: gputypes.BufferBinding{Buffer: storage[i].NativeHandle(), Size: size},
+			Binding:  b.binding,
+			Resource: gputypes.BufferBinding{Buffer: gpu[i].NativeHandle(), Size: size},
 		}
 	}
-	bg, err := d.CreateBindGroup(&hal.BindGroupDescriptor{Label: "overrides-bg", Layout: bgl, Entries: bgEntries})
+	bg, err := d.CreateBindGroup(&hal.BindGroupDescriptor{Label: disp.label + "-bg", Layout: bgl, Entries: bgEntries})
 	if err != nil {
 		return nil, fmt.Errorf("CreateBindGroup: %w", err)
 	}
 	cleanup = append(cleanup, func() { d.DestroyBindGroup(bg) })
 
-	if err := r.encodeAndSubmit(pipeline, bg, inputs, storage, upload, readback); err != nil {
+	if err := r.encodeAndSubmit(disp, pipeline, bg, gpu, upload, readback); err != nil {
 		return nil, err
 	}
 
-	out := make([][]uint32, len(inputs))
-	for i, in := range inputs {
-		size := uint64(len(in) * 4)
+	out := make([][]uint32, n)
+	for i := range disp.bindings {
+		size := uint64(len(disp.bindings[i].words) * 4)
 		m, err := d.MapBuffer(readback[i], 0, size)
 		if err != nil {
 			return nil, fmt.Errorf("MapBuffer: %w", err)
 		}
 		data := unsafe.Slice((*byte)(m.Ptr), size)
-		out[i] = make([]uint32, len(in))
+		out[i] = make([]uint32, len(disp.bindings[i].words))
 		for j := range out[i] {
 			out[i][j] = binary.LittleEndian.Uint32(data[j*4:])
 		}
-		_ = d.UnmapBuffer(readback[i])
+		if err := d.UnmapBuffer(readback[i]); err != nil {
+			return nil, fmt.Errorf("UnmapBuffer: %w", err)
+		}
 	}
 	return out, nil
 }
 
-// encodeAndSubmit copies the uploads into the storage buffers, dispatches
-// one workgroup, copies the storage buffers to the readback buffers and
-// waits for the GPU. The HAL needs explicit barriers between the steps.
-func (r *halRunner) encodeAndSubmit(pipeline hal.ComputePipeline, bg hal.BindGroup, inputs [][]uint32, storage, upload, readback []hal.Buffer) error {
-	enc, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "overrides"})
+// encodeAndSubmit copies the uploads into the binding buffers, runs the
+// dispatch, copies the binding buffers to the readback buffers and waits for
+// the GPU. The HAL needs explicit barriers between the steps.
+func (r *halRunner) encodeAndSubmit(disp *halDispatch, pipeline hal.ComputePipeline, bg hal.BindGroup, gpu, upload, readback []hal.Buffer) error {
+	enc, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: disp.label})
 	if err != nil {
 		return fmt.Errorf("CreateCommandEncoder: %w", err)
 	}
-	if err := enc.BeginEncoding("overrides"); err != nil {
+	if err := enc.BeginEncoding(disp.label); err != nil {
 		return fmt.Errorf("BeginEncoding: %w", err)
 	}
-	barriers := func(from, to gputypes.BufferUsage) {
-		b := make([]hal.BufferBarrier, len(storage))
-		for i := range storage {
-			b[i] = hal.BufferBarrier{Buffer: storage[i], Usage: hal.BufferUsageTransition{OldUsage: from, NewUsage: to}}
+	fixed := func(u gputypes.BufferUsage) func(int) gputypes.BufferUsage {
+		return func(int) gputypes.BufferUsage { return u }
+	}
+	shaderUse := func(i int) gputypes.BufferUsage { return disp.bindings[i].usage() }
+	barriers := func(from, to func(int) gputypes.BufferUsage) {
+		b := make([]hal.BufferBarrier, len(gpu))
+		for i := range gpu {
+			b[i] = hal.BufferBarrier{Buffer: gpu[i], Usage: hal.BufferUsageTransition{OldUsage: from(i), NewUsage: to(i)}}
 		}
 		enc.TransitionBuffers(b)
 	}
-	barriers(0, gputypes.BufferUsageCopyDst)
-	for i, in := range inputs {
-		enc.CopyBufferToBuffer(upload[i], storage[i], []hal.BufferCopy{{Size: uint64(len(in) * 4)}})
+	barriers(fixed(0), fixed(gputypes.BufferUsageCopyDst))
+	for i := range gpu {
+		enc.CopyBufferToBuffer(upload[i], gpu[i], []hal.BufferCopy{{Size: uint64(len(disp.bindings[i].words) * 4)}})
 	}
-	barriers(gputypes.BufferUsageCopyDst, gputypes.BufferUsageStorage)
-	pass := enc.BeginComputePass(&hal.ComputePassDescriptor{Label: "overrides"})
+	barriers(fixed(gputypes.BufferUsageCopyDst), shaderUse)
+	pass := enc.BeginComputePass(&hal.ComputePassDescriptor{Label: disp.label})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.Dispatch(1, 1, 1)
+	pass.Dispatch(disp.workgroups[0], disp.workgroups[1], disp.workgroups[2])
 	pass.End()
-	barriers(gputypes.BufferUsageStorage, gputypes.BufferUsageCopySrc)
-	for i, in := range inputs {
-		enc.CopyBufferToBuffer(storage[i], readback[i], []hal.BufferCopy{{Size: uint64(len(in) * 4)}})
+	barriers(shaderUse, fixed(gputypes.BufferUsageCopySrc))
+	for i := range gpu {
+		enc.CopyBufferToBuffer(gpu[i], readback[i], []hal.BufferCopy{{Size: uint64(len(disp.bindings[i].words) * 4)}})
 	}
 	cmd, err := enc.EndEncoding()
 	if err != nil {

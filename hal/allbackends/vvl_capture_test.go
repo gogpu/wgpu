@@ -60,6 +60,20 @@ func (c *vvlCapture) Handle(_ context.Context, r slog.Record) error { //nolint:g
 func (c *vvlCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
 func (c *vvlCapture) WithGroup(string) slog.Handler      { return c }
 
+// drain returns the messages captured so far and forgets them, so a caller
+// that attributes them to one step (a corpus case) reports each message once.
+// A nil capture (a backend without the layer) has none.
+func (c *vvlCapture) drain() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	msgs := c.msgs
+	c.msgs = nil
+	return msgs
+}
+
 // enableVulkanValidation returns the instance flags that turn on the Khronos
 // validation layer for a Vulkan test device, with synchronization validation,
 // and fails the test for every validation error reported until the test's
@@ -71,6 +85,15 @@ func (c *vvlCapture) WithGroup(string) slog.Handler      { return c }
 // HAL skips it silently and the test runs without these checks. This is a
 // local check: CI has no Vulkan device.
 func enableVulkanValidation(t *testing.T) gputypes.InstanceFlags {
+	t.Helper()
+	flags, _ := startVulkanValidation(t)
+	return flags
+}
+
+// startVulkanValidation is enableVulkanValidation that also returns the
+// capture, for a caller that drains it per step; whatever is left when the
+// test's cleanups run still fails the test.
+func startVulkanValidation(t *testing.T) (gputypes.InstanceFlags, *vvlCapture) {
 	t.Helper()
 	// Read by the layer at instance creation (VkLayer_khronos_validation.json
 	// setting "validate_sync").
@@ -86,5 +109,5 @@ func enableVulkanValidation(t *testing.T) gputypes.InstanceFlags {
 			t.Errorf("Vulkan validation message: %s", m)
 		}
 	})
-	return gputypes.InstanceFlagsDebug
+	return gputypes.InstanceFlagsDebug, capture
 }
