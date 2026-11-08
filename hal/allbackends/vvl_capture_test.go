@@ -16,29 +16,41 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
-// vvlCapture is a slog.Handler that keeps the Vulkan validation errors the
-// HAL's debug messenger reports (hal/vulkan/debug.go logs them at
-// slog.LevelError with a "vulkan: " prefix).
+// vvlCapture is a slog.Handler that keeps the Vulkan validation errors and
+// warnings the HAL's debug messenger reports (hal/vulkan/debug.go logs them at
+// slog.LevelError and slog.LevelWarn with a "vulkan: " prefix). Warnings count:
+// the layer reports some spec violations as warnings, and drivers that are
+// strict about them fail where ours do not (P2-VK-016,
+// WARNING-CoreValidation-AllocateDescriptorSets-WrongType).
 type vvlCapture struct {
 	mu   sync.Mutex
 	msgs []string
 }
 
 func (c *vvlCapture) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= slog.LevelError
+	return level >= slog.LevelWarn
 }
 
 func (c *vvlCapture) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler takes the Record by value
 	if !strings.HasPrefix(r.Message, "vulkan: ") {
 		return nil
 	}
-	id := ""
+	// Only the debug messenger's records carry "type": the HAL's own warnings
+	// share the "vulkan: " prefix (a failed pipeline cache save when test
+	// processes write the shared cache file at once) and are not validation.
+	id, messenger := "", false
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "id" {
+		switch a.Key {
+		case "id":
 			id = a.Value.String()
+		case "type":
+			messenger = true
 		}
 		return true
 	})
+	if !messenger {
+		return nil
+	}
 	c.mu.Lock()
 	c.msgs = append(c.msgs, id+" "+r.Message)
 	c.mu.Unlock()
@@ -71,7 +83,7 @@ func enableVulkanValidation(t *testing.T) gputypes.InstanceFlags {
 		capture.mu.Lock()
 		defer capture.mu.Unlock()
 		for _, m := range capture.msgs {
-			t.Errorf("Vulkan validation error: %s", m)
+			t.Errorf("Vulkan validation message: %s", m)
 		}
 	})
 	return gputypes.InstanceFlagsDebug
