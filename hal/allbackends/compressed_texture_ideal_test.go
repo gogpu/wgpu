@@ -54,10 +54,9 @@ type idealChannel struct {
 	// (a decode the specification leaves to the implementation).
 	alt    float64
 	hasAlt bool
-	// interp marks a value interpolated between the endpoints lo and hi,
+	// interp marks a value interpolated between the two endpoints,
 	// as opposed to an endpoint or a constant.
 	interp bool
-	lo, hi float64
 }
 
 // idealTexel is the ideal RGBA of one texel.
@@ -130,7 +129,7 @@ func idealBC1Color(b []byte, t int, bc1 bool) idealTexel {
 		default:
 			v = (e0[i] + e1[i]) / 2
 		}
-		tx[i] = idealChannel{want: v, tol: bcUnorm8Error, interp: interp, lo: min(e0[i], e1[i]), hi: max(e0[i], e1[i])}
+		tx[i] = idealChannel{want: v, tol: bcUnorm8Error, interp: interp}
 		if v == 0 || v == 1 {
 			tx[i].tol = bcExactError
 		}
@@ -164,20 +163,29 @@ func idealBC4(b []byte, t int, snorm bool) idealChannel {
 // r1, in the eight-value mode when eight is set and in the six-value mode
 // (with rmin and rmax) otherwise.
 func bc4Palette(r0, r1 float64, eight bool, code int, rmin, rmax, tol float64) idealChannel {
+	// An endpoint gets one code too: WARP and Intel Iris Xe return a snorm
+	// endpoint up to 2e-5 off k/127, though D3D11.3 asks for it exactly; only
+	// -1, 0 and 1 compare exactly.
+	endpoint := func(r float64) idealChannel {
+		if r == -1 || r == 0 || r == 1 {
+			return exactChannel(r)
+		}
+		return idealChannel{want: r, tol: tol}
+	}
 	switch {
 	case code == 0:
-		return exactChannel(r0)
+		return endpoint(r0)
 	case code == 1:
-		return exactChannel(r1)
+		return endpoint(r1)
 	case eight:
 		v := (float64(8-code)*r0 + float64(code-1)*r1) / 7
-		return idealChannel{want: v, tol: tol, interp: true, lo: min(r0, r1), hi: max(r0, r1)}
+		return idealChannel{want: v, tol: tol, interp: true}
 	case code == 6:
 		return exactChannel(rmin)
 	case code == 7:
 		return exactChannel(rmax)
 	default:
 		v := (float64(6-code)*r0 + float64(code-1)*r1) / 5
-		return idealChannel{want: v, tol: tol, interp: true, lo: min(r0, r1), hi: max(r0, r1)}
+		return idealChannel{want: v, tol: tol, interp: true}
 	}
 }
