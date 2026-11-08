@@ -129,16 +129,47 @@ type PipelineLayout struct {
 	// bindGroupLayouts stores the layouts used to create this pipeline layout.
 	// Used by the binder for draw-time compatibility validation.
 	bindGroupLayouts []*BindGroupLayout
+	// ref counts the layout's owners: the application until Release, and
+	// every pipeline created with it until that pipeline is destroyed, as
+	// Rust wgpu-core's RenderPipeline and ComputePipeline hold an
+	// Arc<PipelineLayout> (pipeline.rs:496, :1155). The HAL layout is
+	// destroyed when the last one drops (ADR-056, P2-CORE-022).
+	ref *core.ResourceRef
 }
 
-// Release destroys the pipeline layout. Destruction is deferred until the
-// GPU completes any submission that may reference this layout.
+// newPipelineLayoutRef returns the reference count of a HAL pipeline layout:
+// when its last owner drops it, the layout is destroyed after the submissions
+// in flight, as a sampler or a bind group is. The owners are the application
+// until Release and every pipeline created with the layout, which passes it to
+// vkCmdBindDescriptorSets on every bind (P2-CORE-022).
+func newPipelineLayoutRef(d *Device, halDevice hal.Device, halLayout hal.PipelineLayout, label string) *core.ResourceRef {
+	return core.NewResourceRef("PipelineLayout:"+label, func() {
+		dq := d.destroyQueue()
+		if dq == nil {
+			halDevice.DestroyPipelineLayout(halLayout)
+			return
+		}
+		dq.Defer(d.lastSubmissionIndex(), "PipelineLayout", func() {
+			halDevice.DestroyPipelineLayout(halLayout)
+		})
+	})
+}
+
+// Release drops the application's reference to the pipeline layout. The HAL
+// layout is destroyed once no pipeline created with it exists any more and the
+// GPU has completed every submission that may use it: a layout released after
+// its pipeline was created stays valid for that pipeline's binds (P2-CORE-022).
 func (l *PipelineLayout) Release() {
 	if l.released {
 		return
 	}
 	l.released = true
+	if l.ref != nil {
+		l.ref.Drop()
+		return
+	}
 
+	// No reference count: destroy after the submissions in flight.
 	halDevice := l.device.halDevice()
 	if halDevice == nil {
 		return

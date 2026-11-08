@@ -417,6 +417,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		device:           d,
 		bindGroupCount:   uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
 		bindGroupLayouts: bgLayouts,
+		ref:              newPipelineLayoutRef(d, halDevice, halLayout, desc.Label),
 	}, nil
 }
 
@@ -654,6 +655,12 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
 	}
+	// A released layout may already be queued for destruction; the pipeline
+	// would be created from a dying HAL layout and would later revive its
+	// reference count (P2-CORE-022).
+	if desc.Layout != nil && desc.Layout.released {
+		return nil, ErrReleased
+	}
 
 	halDevice := d.halDevice()
 	if halDevice == nil {
@@ -678,7 +685,16 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 
 	var bgCount uint32
 	var bgLayouts []*BindGroupLayout
+	var layoutRef *core.ResourceRef
 	if desc.Layout != nil {
+		// The pipeline keeps its layout alive until its own HAL pipeline is
+		// destroyed: every later SetBindGroup passes the layout to
+		// vkCmdBindDescriptorSets. Rust wgpu-core holds an Arc<PipelineLayout>
+		// in the pipeline (pipeline.rs:496).
+		layoutRef = desc.Layout.ref
+		if layoutRef != nil {
+			layoutRef.Clone()
+		}
 		bgCount = desc.Layout.bindGroupCount
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
@@ -712,15 +728,20 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	// DestroyQueue. ADR-056: unified resource lifecycle.
 	halRP := halPipeline
 	rpOnZero := func() {
+		// Pipeline first, then the layout it was created from: the layout's
+		// own destruction waits for the submissions in flight.
+		destroy := func() {
+			halDevice.DestroyRenderPipeline(halRP)
+			if layoutRef != nil {
+				layoutRef.Drop()
+			}
+		}
 		dq := d.destroyQueue()
 		if dq != nil {
-			subIdx := d.lastSubmissionIndex()
-			dq.Defer(subIdx, "RenderPipeline", func() {
-				halDevice.DestroyRenderPipeline(halRP)
-			})
-		} else {
-			halDevice.DestroyRenderPipeline(halRP)
+			dq.Defer(d.lastSubmissionIndex(), "RenderPipeline", destroy)
+			return
 		}
+		destroy()
 	}
 
 	passContext, writesDepth, writesStencil := renderPipelineTargets(desc)
@@ -805,6 +826,12 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
 	}
+	// A released layout may already be queued for destruction; the pipeline
+	// would be created from a dying HAL layout and would later revive its
+	// reference count (P2-CORE-022).
+	if desc.Layout != nil && desc.Layout.released {
+		return nil, ErrReleased
+	}
 
 	// Validate that the device supports compute shaders (downlevel check).
 	// Matches Rust wgpu-core resource.rs:4367 — first validation in create_compute_pipeline_or_error.
@@ -834,7 +861,16 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 
 	var bgCount uint32
 	var bgLayouts []*BindGroupLayout
+	var layoutRef *core.ResourceRef
 	if desc.Layout != nil {
+		// The pipeline keeps its layout alive until its own HAL pipeline is
+		// destroyed: every later SetBindGroup passes the layout to
+		// vkCmdBindDescriptorSets. Rust wgpu-core holds an Arc<PipelineLayout>
+		// in the pipeline (pipeline.rs:1155).
+		layoutRef = desc.Layout.ref
+		if layoutRef != nil {
+			layoutRef.Clone()
+		}
 		bgCount = desc.Layout.bindGroupCount
 		bgLayouts = desc.Layout.bindGroupLayouts
 	}
@@ -848,15 +884,20 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	// ADR-056: unified resource lifecycle.
 	halCP := halPipeline
 	cpOnZero := func() {
+		// Pipeline first, then the layout it was created from: the layout's
+		// own destruction waits for the submissions in flight.
+		destroy := func() {
+			halDevice.DestroyComputePipeline(halCP)
+			if layoutRef != nil {
+				layoutRef.Drop()
+			}
+		}
 		dq := d.destroyQueue()
 		if dq != nil {
-			subIdx := d.lastSubmissionIndex()
-			dq.Defer(subIdx, "ComputePipeline", func() {
-				halDevice.DestroyComputePipeline(halCP)
-			})
-		} else {
-			halDevice.DestroyComputePipeline(halCP)
+			dq.Defer(d.lastSubmissionIndex(), "ComputePipeline", destroy)
+			return
 		}
+		destroy()
 	}
 
 	return &ComputePipeline{
