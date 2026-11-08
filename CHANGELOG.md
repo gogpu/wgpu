@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.10] - 2026-11-08
+
+A patch for frame-batching consumers and a security update of naga.
+
+### Fixed
+
+- **`Queue.Submit` accepts resources released after recording** (P1-CORE-020, gogpu#461). `Release()` on a texture, texture view, bind group or buffer is a drop, not WebGPU's `destroy()`: the command buffer that recorded the resource holds a reference and keeps it alive until its work completes, as Rust wgpu does. Submit rejected such a command buffer with `ErrSubmitTextureDestroyed`, `ErrSubmitBufferDestroyed` or `ErrSubmitBindGroupDestroyed`, so an application that records a frame into one encoder and releases resources before the frame's submit got an error and an empty frame. Submit now rejects only work that can no longer run (a lost device, an ended surface acquisition); a texture released after a `Queue.WriteTexture` still receives the write, and still gets its barriers.
+- **A sampler stays alive while a bind group that binds it can still be used.** `Sampler.Release` destroyed the sampler after the last submitted work, even while a recorded but not yet submitted bind group named it (a use-after-free on Vulkan, `VUID-vkDestroySampler-sampler-01082`). Samplers are now reference counted, and a bind group holds its samplers as it holds its texture views. `CreateBindGroup` rejects a released sampler with `ErrReleased`.
+- **A texture view keeps its texture alive**, as in Rust wgpu. A texture released while a view of it was still in use was destroyed under work recorded through the view afterwards (`VUID-vkDestroyImage-image-01000`).
+- **Device release destroys every deferred resource**, including the textures, views and samplers that a destroyed bind group or view was the last to hold.
+- **Vulkan: bind groups with dynamic-offset buffers allocate from valid descriptor pools** (P2-VK-016, found in gogpu#461). A layout with a dynamic uniform or storage buffer could get its descriptor set from a pool created without that descriptor type: the validation layer reported `WARNING-CoreValidation-AllocateDescriptorSets-WrongType`, and drivers that follow `VK_KHR_maintenance1` fail the allocation. Every pool now holds both dynamic buffer types.
+
+### Security
+
+- **naga v0.21.5**: fixes an out-of-memory denial of service where a ~200-byte WGSL swizzle chain made the shader parser allocate without bound (naga P1-WGSL-109; in every naga since v0.15.0).
+
+### Known issues
+
+- A `QuerySet` and a `PipelineLayout` released while submitted work still uses them can be destroyed before that work completes (the query set after `ResolveQuerySet` or timestamp writes; the layout under later `SetBindGroup` calls on a pipeline created from it). Until the next patch, keep both alive until the submissions that use them have completed.
+
 ## [0.34.9] - 2026-11-08
 
 A software backend correctness release: the CPU backend now renders and samples the way the GPU backends do, checked by readback against Vulkan, DX12 and GLES.

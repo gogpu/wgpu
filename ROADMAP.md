@@ -19,8 +19,9 @@
 
 ---
 
-## Current State: v0.34.9
+## Current State: v0.34.10
 
+✅ **Resources released after recording stay alive for the recorded work (v0.34.10)** — `Release()` is a drop, as in Rust wgpu: frame-batching consumers can free textures, views, samplers, bind groups and buffers before the frame's submit
 ✅ **Software backend renders like the GPU backends (v0.34.9)** — commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, 2x2 quads for derivatives and implicit LOD, two-sided stencil, exact integer values, BC/ETC2 sampling; checked by readback against Vulkan, DX12 and GLES
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
@@ -134,11 +135,18 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.10:**
+**Next patch release, v0.34.11:**
+- [ ] `QuerySet` reference counted; pipelines keep their `PipelineLayout` alive (P1-CORE-021, P2-CORE-022)
 - [ ] GLES on OpenGL ES contexts: remaining gaps found by forced-ES runs (P1-GLES-025)
 - [ ] GLES: non-renderable copy sources, BC detection on core and ARB contexts (P2-GLES-023, P2-GLES-024)
 - [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
+
+**Patch release v0.34.10** (2026-11-08, naga v0.21.5):
+- [x] `Queue.Submit` accepts textures, views, bind groups and buffers released after recording (gogpu#461)
+- [x] Samplers are reference counted; a bind group keeps its samplers alive; a texture view keeps its texture alive
+- [x] Vulkan: descriptor pools hold the dynamic buffer types
+- [x] naga v0.21.5: WGSL swizzle-chain out-of-memory fix
 
 **Patch release v0.34.9** (2026-11-08, naga v0.21.4):
 - [x] Software backend: commands at `Queue.Submit`; clip-space clipping; `SetViewport`; perspective-correct interpolation and `@interpolate(linear)`; 2x2 quads for derivatives and implicit LOD; two-sided stencil; exact integer values; BC1-BC7 and ETC2/EAC sampling
@@ -270,6 +278,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.10** | 2026-11 | `Queue.Submit` accepts resources released after recording (`Release()` is a drop); samplers reference counted and held by their bind groups; naga v0.21.5 (WGSL out-of-memory fix) |
 | **v0.34.9** | 2026-11 | Software backend renders like the GPU backends: commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, quad derivatives and implicit LOD, two-sided stencil, exact integers, BC/ETC2 sampling; GLES integer vertex attributes and first-vertex flat varyings; compressed texture shape validation; naga v0.21.4 |
 | **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`, `ErrContextReleased`; `RenderPassColorAttachment.DepthSlice` on every backend; render-stage pipeline constants; software: shared workgroup memory and barriers, every mip level, array layer, cube face and 3D slice, color formats and sRGB views; GLES format table from Rust, compressed textures, stencil uploads by draw blit, integer clears and sRGB targets; spec defaults for zero-value descriptor fields; WARP as a CPU adapter, adapters ranked hardware → CPU → software; `LodMaxClamp` zero = 32 everywhere; naga v0.21.3 (security and DXIL fixes) |
 | **v0.34.7** | 2026-11 | naga v0.21.2 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
