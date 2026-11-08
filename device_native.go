@@ -391,6 +391,11 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		if layout == nil {
 			return nil, fmt.Errorf("wgpu: bind group layout at index %d is nil", i)
 		}
+		// A released layout may already be queued for destruction; its HAL
+		// handle must not back a new pipeline layout (P2-CORE-023).
+		if layout.released {
+			return nil, ErrReleased
+		}
 		halLayouts[i] = layout.hal
 	}
 
@@ -440,6 +445,14 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 			Kind:  core.CreateBindGroupErrorMissingLayout,
 			Label: desc.Label,
 		}
+	}
+	// A released layout may already be queued for destruction; its HAL handle
+	// must not back a new descriptor set (P2-CORE-023). The HAL bind group does
+	// not keep the layout — Rust wgpu-hal's Vulkan BindGroup holds only the
+	// descriptor set — so a group created while the layout was alive is
+	// unaffected by a later Release.
+	if desc.Layout.released {
+		return nil, ErrReleased
 	}
 
 	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))
