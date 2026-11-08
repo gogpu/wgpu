@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.9] - 2026-11-08
+
+A software backend correctness release: the CPU backend now renders and samples the way the GPU backends do, checked by readback against Vulkan, DX12 and GLES.
+
+### Fixed
+
+- **Software backend: encoder commands run at `Queue.Submit`**, as on the GPU backends (P1-SW-031). They ran when recorded, so a command buffer that was never submitted still took effect, and a `Queue.WriteBuffer`/`WriteTexture` made between recording a copy and submitting it was overwritten in the wrong order.
+- **Software backend: derivatives and implicit-LOD sampling work** (P2-SW-020). Fragment shaders that take derivatives or sample with an implicit level of detail run in 2x2 quads with helper invocations. `dpdx`, `dpdy` and `fwidth` (fine, coarse and plain) return real differences instead of 0, and `textureSample`, `textureSampleBias` and `textureSampleCompare` pick the mip level from the coordinate's screen-space derivatives instead of always the base level. A discarded invocation stops instead of becoming a helper (see Known issues).
+- **Software backend: perspective-correct interpolation** (P1-SW-037). Varyings and texture coordinates were interpolated linearly in screen space; they now interpolate perspective-correctly, `@interpolate(linear)` is honoured, depth is linear in screen space, and the fragment position's w is 1/w as WGSL defines it.
+- **Software backend: primitives are clipped in clip space** before the perspective divide (P1-SW-027). A triangle with a vertex behind the eye no longer mirrors through the center of projection, and a triangle with a far-off vertex no longer vanishes.
+- **Software backend: `SetViewport` applies to every draw**, x, y, size and depth range (P1-SW-036). Every draw used the whole render target and depth 0..1.
+- **Software backend: back-facing triangles use the back stencil face state**, and the stencil test runs when either face differs from the default (P2-SW-030).
+- **Software backend: integer and bool vectors are exact 32-bit values** (P1-SW-019). The SPIR-V interpreter held integer vector lanes as float32, so values above 2^24 lost their low bits and bit operations, shuffles and composites on integer vectors gave wrong lanes. Integers in uniforms, storage buffers, integer vertex formats, flat varyings and textures now read, compute and store bit-exact.
+- **Software backend: missing shader operations execute.** `all()`, `any()`, vector-times-matrix, `isnan`/`isinf`, `quantizeToF16`, packed `dot4`, `textureGather`, `textureGatherCompare`, `textureSampleCompare(Level)` and the remaining atomics returned zeros before. Integer vertex formats (`uint32`/`sint32` x1-x4) read as zero before.
+- **Software backend: unsupported SPIR-V fails pipeline creation with an error naming it** (the opcode, f16 or ray query), where it was skipped silently. Shader compile and parse errors are returned from `CreateRenderPipeline` and `CreateComputePipeline`.
+- **Software backend: image loads are clamped in the shader**, as on Vulkan (naga Restrict). An out-of-bounds `textureLoad` reads an in-bounds texel; a negative coordinate reads the last texel, as on Vulkan.
+- **Software backend: BC1-BC7 and ETC2/EAC textures can be sampled and loaded** (P1-SW-029), decoded per texel as GPUs decode them (checked bit for bit against Vulkan, DX12 and GLES readback). The software adapter now offers `texture-compression-bc` and `texture-compression-etc2`. ASTC is not offered yet.
+- **Software backend: `RowsPerImage` of an upload or buffer copy counts texel block rows**, as WebGPU defines it. Copies of several layers of a block-compressed texture put every layer after the first at the wrong offset.
+- **Software backend no longer advertises `FeatureRayQuery`**: its interpreter does not execute ray queries (P1-SW-028). Executing them is planned (#369).
+- **GLES: integer vertex formats reach the shader as integers** (P1-GLES-026). Every attribute went through `glVertexAttribPointer`, which converts to float, so `uint`/`sint` vertex inputs read the float's bits. They now use `glVertexAttribIPointer`, as Rust wgpu-hal does. `float16x2`, `float16x4` and `unorm10-10-10-2` vertex formats were read as `float32x4` and are now mapped.
+- **GLES: flat varyings take the first vertex of a primitive**, as WGSL's `@interpolate(flat)` requires (`glProvokingVertex` on desktop GL; on OpenGL ES only with `GL_ANGLE_provoking_vertex`). GL's default is the last vertex.
+- **Compressed textures that are not 2D or not block-aligned are refused** at `CreateTexture`, as WebGPU and Rust wgpu-core require (P2-VAL-017): a width or height that is not a multiple of the block, a 1D compressed texture, a 3D compressed texture (the sliced-3D features are not offered yet). Before, such input reached the driver on Vulkan.
+
+### Changed
+
+- **deps: naga v0.21.3 → v0.21.4.** GLES no longer fails to compile a `textureLoad`, `textureDimensions` or `textureNumLevels` with a u32 level on desktop GL 4.3+; `primitive_index` compiles on OpenGL ES; compound assignment through a pointer parameter (`*p += x`) is accepted.
+- `CreateTextureErrorInvalidCompressedDimension` and `CreateTextureErrorNotMultipleOfBlockSize` (new `core.CreateTextureErrorKind` values) and `CreateTextureError.Dimension`.
+- `hal/software`: `Queue.Submit` returns an error for a nil command buffer or one not created by the software backend, before running any of the batch.
+- `hal/software/shader`: `Module.Execute` reads an integer input given as a float Value as its bits, no longer by value. Pass integer inputs as integer Values, as its documentation says.
+
+### Known issues
+
+- Software backend: after a non-uniform `discard`, the discarded invocation ends instead of becoming a helper (naga emits `OpKill`), so a non-linear derivative such as `dpdxFine(x*y)` in that quad differs from the GPU backends, and an alpha test followed by a perspective-warped `textureSample` can pick a slightly different mip level.
+- DX12: the fragment `@builtin(position).w` reads w instead of 1/w (a naga HLSL/DXIL issue, to be fixed in naga).
+- OpenGL ES contexts without `GL_ANGLE_provoking_vertex` (Mesa ES, most Android) still give flat varyings the last vertex.
+- `-tags rust` with go-webgpu/webgpu v0.5.5 remains unusable for real rendering (0.34.6 known issues); in addition, programs abort at adapter request on Linux amd64 and Intel macOS. These are fixed in go-webgpu/webgpu's next release.
+
 ## [0.34.8] - 2026-11-07
 
 ### Added

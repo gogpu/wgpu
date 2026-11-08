@@ -350,15 +350,19 @@ import _ "github.com/gogpu/wgpu/hal/software"
 ```
 
 **Rasterization Features:**
+- Clip-space clipping, then the viewport transform (`SetViewport`, depth range)
 - Edge function triangle rasterization (Pineda algorithm) with the top-left fill rule
+- Perspective-correct interpolation; `@interpolate(linear)` and `flat` (first vertex)
+- 2x2 quads with helper invocations for derivatives and implicit-LOD mip selection
 - Depth test (all 8 compare functions)
-- Stencil test (all 8 operations)
+- Stencil test (all 8 operations, front and back faces)
 - Blending (13 factors without dual-source, 5 operations)
+- BC1-BC7 and ETC2/EAC texture sampling (`texture-compression-bc`, `texture-compression-etc2`)
+- Encoded commands run at `Queue.Submit`
 - **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
 
-**Known gaps** (being fixed): primitives are not clipped in clip space yet; shader derivatives return 0, so
-implicit-LOD sampling uses mip level 0; encoded commands run when they are recorded, not at `Queue.Submit`;
-compressed texture formats cannot be sampled.
+**Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`; a discarded fragment stops instead of staying a
+helper, so a non-linear derivative taken after a non-uniform `discard` can differ from the GPU backends.
 
 **Debug & Testing:**
 - Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions

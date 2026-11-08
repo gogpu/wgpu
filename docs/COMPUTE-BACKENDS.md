@@ -93,6 +93,7 @@ Vulkan provides the most complete compute shader implementation:
 The software backend executes compute shaders on CPU through a built-in SPIR-V interpreter. **Designed for shader debugging, CI/CD testing, and GPU-less environments — not for production workloads** (interpreted, ~100× slower than JIT software renderers).
 
 - **Shader compilation:** WGSL → SPIR-V (via `gogpu/naga`), then interpreted instruction-by-instruction.
+- **Submission:** dispatches and copies are recorded into the command buffer and run in `Queue.Submit`, in submission order (since v0.34.9; before, they ran when recorded).
 - **Storage buffers:** Full read/write support. Buffer writes from compute shader are immediately visible.
 - **Atomics:** OpAtomicIAdd, OpAtomicISub, OpAtomicExchange, OpAtomicCompareExchange, OpAtomicSMin/SMax/UMin/UMax.
 - **Workgroup shared memory:** one zero-initialized buffer per workgroup, shared by all its invocations; the workgroups run one after another. Reductions, shared tiles and workgroup atomics compute what the WGSL spec says (since v0.34.8; v0.34.7 refused such shaders with `wgpu.ErrWorkgroupBarrierUnsupported`, which stays declared but is no longer returned).

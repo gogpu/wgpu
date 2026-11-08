@@ -19,8 +19,9 @@
 
 ---
 
-## Current State: v0.34.8
+## Current State: v0.34.9
 
+✅ **Software backend renders like the GPU backends (v0.34.9)** — commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, 2x2 quads for derivatives and implicit LOD, two-sided stencil, exact integer values, BC/ETC2 sampling; checked by readback against Vulkan, DX12 and GLES
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
 ✅ **Three-layer Native stack** — wgpu API → wgpu/core → wgpu/hal
@@ -133,10 +134,16 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.9:**
-- [ ] Software backend: workgroup memory shared across barriers, replacing v0.34.7's refusal (P1-SW-025)
-- [ ] `RenderPassColorAttachment.DepthSlice` with core validation on every backend (P1-API-019)
-- [ ] WARP listed as a CPU-type DX12 adapter, as in Rust (P2-DX12-060)
+**Next patch release, v0.34.10:**
+- [ ] GLES on OpenGL ES contexts: remaining gaps found by forced-ES runs (P1-GLES-025)
+- [ ] GLES: non-renderable copy sources, BC detection on core and ARB contexts (P2-GLES-023, P2-GLES-024)
+- [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
+- [ ] Software: ASTC sampling (P1-SW-029 step 2)
+
+**Patch release v0.34.9** (2026-11-08, naga v0.21.4):
+- [x] Software backend: commands at `Queue.Submit`; clip-space clipping; `SetViewport`; perspective-correct interpolation and `@interpolate(linear)`; 2x2 quads for derivatives and implicit LOD; two-sided stencil; exact integer values; BC1-BC7 and ETC2/EAC sampling
+- [x] GLES: integer vertex formats as integers; flat varyings from the first vertex
+- [x] Compressed textures must be 2D and block-aligned, as WebGPU requires
 
 **Patch release v0.34.8** (2026-11-06, naga v0.21.3):
 - [x] GLES on Linux: no segfault on exit on Wayland (#379); EGL displays counted and terminated with their last user
@@ -263,6 +270,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.34.9** | 2026-11 | Software backend renders like the GPU backends: commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, quad derivatives and implicit LOD, two-sided stencil, exact integers, BC/ETC2 sampling; GLES integer vertex attributes and first-vertex flat varyings; compressed texture shape validation; naga v0.21.4 |
 | **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`, `ErrContextReleased`; `RenderPassColorAttachment.DepthSlice` on every backend; render-stage pipeline constants; software: shared workgroup memory and barriers, every mip level, array layer, cube face and 3D slice, color formats and sRGB views; GLES format table from Rust, compressed textures, stencil uploads by draw blit, integer clears and sRGB targets; spec defaults for zero-value descriptor fields; WARP as a CPU adapter, adapters ranked hardware → CPU → software; `LodMaxClamp` zero = 32 everywhere; naga v0.21.3 (security and DXIL fixes) |
 | **v0.34.7** | 2026-11 | naga v0.21.2 (stricter WGSL), shader capability features, shaders validated once in core, bind groups in pass usage scopes and kept across pipelines, copy and clear validation, render bundles on every backend, texture refcounting, Vulkan robust access (#370), timestamps on Vulkan/DX12, `arrayStride: 0` (#364), DX12 special constants and dynamic offsets |
 | **v0.34.6** | 2026-11 | Tracker fixes (#365, #371), Vulkan/GLES MSAA resolve, GLES 3.3 / ES 3.0 minimum, software cull mode, DX12 `ShaderF16` only on DXIL, naga v0.20.5, goffi v0.6.8 |
