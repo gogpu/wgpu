@@ -399,7 +399,7 @@ func queryFeatures(exts map[string]bool, glMajor, glMinor int, isES bool, glCtx 
 	// Compressed textures are allocated with glTexStorage and written with
 	// glCompressedTexSubImage; without them no compression feature is offered.
 	if hasCompressedTexturePath(exts, glMajor, glMinor, isES, glCtx) {
-		insertCompressionFeatures(&features, exts, isES)
+		insertCompressionFeatures(&features, exts, glMajor, glMinor, isES)
 	}
 
 	// Float32 filterable (linear filtering for float textures)
@@ -458,20 +458,33 @@ func hasCompressedTexturePath(exts map[string]bool, glMajor, glMinor int, isES b
 
 // insertCompressionFeatures adds the texture compression features whose
 // formats the context has, as Rust wgpu-hal gles/adapter.rs detects them.
-func insertCompressionFeatures(features *gputypes.Features, exts map[string]bool, isES bool) {
-	// BC: S3TC + RGTC + BPTC. On GLES the sRGB S3TC formats come from their
-	// own extension; Rust asks only for that one, we also ask for the linear
-	// S3TC extension that defines the unorm formats.
+//
+// BC (BC1-7) needs three format families, from extensions on ES and from core
+// GL or an extension on desktop GL: S3TC (BC1-3), RGTC (BC4-5, core in desktop
+// GL 3.0) and BPTC (BC6-7, core in desktop GL 4.2). Rust wgpu-hal reads the
+// extension strings only, so it misses BC on a driver that offers RGTC as core
+// GL and lists GL_ARB_texture_compression_rgtc instead of the EXT name (Intel's
+// Windows GL 4.6 driver does). Offering the feature there is a deliberate
+// deviation from Rust: the formats are there, and the feature is what a
+// consumer checks before creating a BC texture.
+func insertCompressionFeatures(features *gputypes.Features, exts map[string]bool, glMajor, glMinor int, isES bool) {
+	// S3TC supplies BC1-3, RGTC BC4-5 and BPTC BC6-7. On ES each family is its
+	// own extension, and the sRGB S3TC formats come from their own extension
+	// too (Rust asks only for that one; we also ask for the linear S3TC
+	// extension that defines the unorm formats).
+	s3tc := hasExtension(exts, "GL_EXT_texture_compression_s3tc")
+	var rgtc, bptc bool
 	if isES {
-		if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
-			hasExtension(exts, "GL_EXT_texture_compression_s3tc_srgb") &&
-			hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
-			hasExtension(exts, "GL_EXT_texture_compression_bptc") {
-			features.Insert(gputypes.FeatureTextureCompressionBC)
-		}
-	} else if hasExtension(exts, "GL_EXT_texture_compression_s3tc") &&
-		hasExtension(exts, "GL_EXT_texture_compression_rgtc") &&
-		hasExtension(exts, "GL_ARB_texture_compression_bptc") {
+		s3tc = s3tc && hasExtension(exts, "GL_EXT_texture_compression_s3tc_srgb")
+		rgtc = hasExtension(exts, "GL_EXT_texture_compression_rgtc")
+		bptc = hasExtension(exts, "GL_EXT_texture_compression_bptc")
+	} else {
+		rgtc = glVersionAtLeast(glMajor, glMinor, false, [2]int{0, 0}, [2]int{3, 0}) ||
+			hasExtension(exts, "GL_EXT_texture_compression_rgtc", "GL_ARB_texture_compression_rgtc")
+		bptc = glVersionAtLeast(glMajor, glMinor, false, [2]int{0, 0}, [2]int{4, 2}) ||
+			hasExtension(exts, "GL_ARB_texture_compression_bptc", "GL_EXT_texture_compression_bptc")
+	}
+	if s3tc && rgtc && bptc {
 		features.Insert(gputypes.FeatureTextureCompressionBC)
 	}
 

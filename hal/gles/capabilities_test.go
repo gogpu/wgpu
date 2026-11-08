@@ -254,3 +254,84 @@ func TestGlVersionAtLeast(t *testing.T) {
 		}
 	}
 }
+
+// TestInsertCompressionFeaturesBC checks the BC detection table over the
+// three format families: S3TC (BC1-3) from an extension on both APIs, RGTC
+// (BC4-5) from core desktop GL 3.0 or an ARB/EXT name, BPTC (BC6-7) from core
+// desktop GL 4.2 or an ARB/EXT name. A driver that offers RGTC as core GL and
+// lists only GL_ARB_texture_compression_rgtc is the Intel Windows case the
+// Rust detection misses.
+func TestInsertCompressionFeaturesBC(t *testing.T) {
+	ext := func(names ...string) map[string]bool {
+		m := make(map[string]bool, len(names))
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	tests := []struct {
+		name         string
+		exts         map[string]bool
+		major, minor int
+		isES         bool
+		wantBC       bool
+	}{
+		{
+			name:  "desktop 4.6, S3TC and ARB RGTC and ARB BPTC",
+			exts:  ext("GL_EXT_texture_compression_s3tc", "GL_ARB_texture_compression_rgtc", "GL_ARB_texture_compression_bptc"),
+			major: 4, minor: 6, wantBC: true,
+		},
+		{
+			name:  "desktop 4.6, S3TC and EXT RGTC and EXT BPTC",
+			exts:  ext("GL_EXT_texture_compression_s3tc", "GL_EXT_texture_compression_rgtc", "GL_EXT_texture_compression_bptc"),
+			major: 4, minor: 6, wantBC: true,
+		},
+		{
+			name:  "desktop 4.2, S3TC only: RGTC and BPTC are core",
+			exts:  ext("GL_EXT_texture_compression_s3tc"),
+			major: 4, minor: 2, wantBC: true,
+		},
+		{
+			name:  "desktop 3.3, S3TC and ARB RGTC: BPTC not core yet",
+			exts:  ext("GL_EXT_texture_compression_s3tc", "GL_ARB_texture_compression_rgtc"),
+			major: 3, minor: 3, wantBC: false,
+		},
+		{
+			name:  "desktop 4.1, S3TC and core RGTC: BPTC needs 4.2",
+			exts:  ext("GL_EXT_texture_compression_s3tc"),
+			major: 4, minor: 1, wantBC: false,
+		},
+		{
+			name:  "desktop 4.6, no S3TC",
+			exts:  ext("GL_ARB_texture_compression_rgtc", "GL_ARB_texture_compression_bptc"),
+			major: 4, minor: 6, wantBC: false,
+		},
+		{
+			name: "ES 3.2, all four EXT names",
+			exts: ext("GL_EXT_texture_compression_s3tc", "GL_EXT_texture_compression_s3tc_srgb",
+				"GL_EXT_texture_compression_rgtc", "GL_EXT_texture_compression_bptc"),
+			major: 3, minor: 2, isES: true, wantBC: true,
+		},
+		{
+			name: "ES 3.2, no sRGB S3TC",
+			exts: ext("GL_EXT_texture_compression_s3tc",
+				"GL_EXT_texture_compression_rgtc", "GL_EXT_texture_compression_bptc"),
+			major: 3, minor: 2, isES: true, wantBC: false,
+		},
+		{
+			name: "ES 3.2, no BPTC",
+			exts: ext("GL_EXT_texture_compression_s3tc", "GL_EXT_texture_compression_s3tc_srgb",
+				"GL_EXT_texture_compression_rgtc"),
+			major: 3, minor: 2, isES: true, wantBC: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var features gputypes.Features
+			insertCompressionFeatures(&features, tt.exts, tt.major, tt.minor, tt.isES)
+			if got := features.Contains(gputypes.FeatureTextureCompressionBC); got != tt.wantBC {
+				t.Errorf("BC = %v, want %v", got, tt.wantBC)
+			}
+		})
+	}
+}
