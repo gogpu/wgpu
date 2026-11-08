@@ -219,11 +219,20 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	}
 
 	// The view is destroyed when its last reference drops: the application's,
-	// a bind group's or a command encoder's. Unlike Rust wgpu-core, whose
-	// TextureView holds an Arc of its parent, the view does not keep its
-	// texture alive by itself: Go has no drop, and a view the application
-	// never releases would pin the texture's memory. Every GPU use of a view
-	// (a bind group, a render pass) holds the texture's reference as well.
+	// a bind group's or a command encoder's. It holds its texture's reference
+	// until then, as Rust wgpu-core's TextureView holds an Arc of its parent
+	// (resource.rs TextureView::parent): a texture released while a view of it
+	// is alive stays valid for every later use of the view. Without it the
+	// texture was destroyed under a bind group created from the view afterwards
+	// (VUID-vkDestroyImage-image-01000, P1-CORE-020). Surface textures are
+	// borrowed and have no reference to hold.
+	var textureRef *core.ResourceRef
+	if texture.surface == nil {
+		textureRef = texture.ref()
+	}
+	if textureRef != nil {
+		textureRef.Clone()
+	}
 	return &TextureView{
 		hal:          halView,
 		device:       d,
@@ -232,6 +241,9 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		surfaceLease: texture.surfaceLease,
 		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
 			d.destroyTextureViewDeferred(halView)
+			if textureRef != nil {
+				textureRef.Drop()
+			}
 		}),
 		dimension:       halDesc.Dimension,
 		baseMipLevel:    halDesc.BaseMipLevel,
@@ -273,6 +285,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 	return &Sampler{
 		hal:          halSampler,
 		device:       d,
+		ref:          newSamplerRef(d, halDevice, halSampler, desc.Label),
 		magFilter:    halDesc.MagFilter,
 		minFilter:    halDesc.MinFilter,
 		mipmapFilter: halDesc.MipmapFilter,
@@ -433,6 +446,11 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		if entry.TextureView != nil && entry.TextureView.resolveHAL() == nil {
 			return nil, ErrReleased
 		}
+		// A released sampler may already be queued for destruction; binding
+		// it would revive its reference count and name a dying sampler.
+		if entry.Sampler != nil && entry.Sampler.released {
+			return nil, ErrReleased
+		}
 		halEntries[i] = entry.toHAL()
 	}
 
@@ -473,15 +491,15 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// Triage after GPU completion), onZero fires and defers HAL destruction via
 	// DestroyQueue. This matches Rust wgpu's Arc<BindGroup> Drop behavior. ADR-056.
 	//
-	// The bind group keeps its texture views and their textures alive until
-	// its HAL bind group is destroyed, as Rust wgpu-core's BindGroup holds an
-	// Arc of each view: a Vulkan descriptor set must not outlive the image
-	// views it names.
+	// The bind group keeps its texture views, their textures and its samplers
+	// alive until its HAL bind group is destroyed, as Rust wgpu-core's
+	// BindGroup holds an Arc of each: a Vulkan descriptor set must not outlive
+	// the image views and samplers it names (VUID-vkDestroySampler-sampler-01082).
 	halBG := halGroup
-	viewRefs := cloneBindGroupViewRefs(desc.Entries)
+	heldRefs := cloneBindGroupResourceRefs(desc.Entries)
 	destroy := func() {
 		halDevice.DestroyBindGroup(halBG)
-		for _, ref := range viewRefs {
+		for _, ref := range heldRefs {
 			ref.Drop()
 		}
 	}
@@ -582,21 +600,23 @@ func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, 
 // group entries for submit-time validation (VAL-A6). Matches Rust wgpu-core
 // where bind group creation stores resource references that are later checked
 // via trackers.buffers/textures.used_resources() in validate_command_buffer.
-// cloneBindGroupViewRefs clones the references of every texture view a bind
-// group binds and of its texture, and returns them, for the bind group to
-// drop when it is destroyed.
-func cloneBindGroupViewRefs(entries []BindGroupEntry) []*core.ResourceRef {
+// cloneBindGroupResourceRefs clones the references of every texture view and
+// sampler a bind group binds, and returns them, for the bind group to drop when
+// it is destroyed. A view holds its texture's reference itself.
+func cloneBindGroupResourceRefs(entries []BindGroupEntry) []*core.ResourceRef {
 	var refs []*core.ResourceRef
-	for i := range entries {
-		view := entries[i].TextureView
-		if view == nil {
-			continue
+	hold := func(ref *core.ResourceRef) {
+		if ref != nil {
+			ref.Clone()
+			refs = append(refs, ref)
 		}
-		for _, ref := range [2]*core.ResourceRef{view.ref, view.texture.ref()} {
-			if ref != nil {
-				ref.Clone()
-				refs = append(refs, ref)
-			}
+	}
+	for i := range entries {
+		if view := entries[i].TextureView; view != nil {
+			hold(view.ref)
+		}
+		if sampler := entries[i].Sampler; sampler != nil {
+			hold(sampler.ref)
 		}
 	}
 	return refs

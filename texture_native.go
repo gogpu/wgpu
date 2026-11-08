@@ -39,16 +39,39 @@ type Texture struct {
 	coreTexture *core.Texture
 }
 
-// resolveHAL is the single boundary from a public texture wrapper to HAL.
+// resolveHAL is the single boundary from a public texture wrapper to HAL for
+// new work: a released texture cannot be recorded into new commands.
 // Surface textures are borrowed and are usable only for their acquisition.
 // Encoder validation and HAL conversion may call this more than once during
 // one operation; acquisition and presentation are serialized by the render
 // loop, so the lease remains stable across those calls.
 func (t *Texture) resolveHAL() hal.Texture {
-	if t == nil || t.released || t.hal == nil || t.device == nil || t.device.released.Load() {
+	if t == nil || t.released {
 		return nil
 	}
-	if t.surface != nil && !t.surface.AcquisitionValid(t.surfaceLease) {
+	return t.recordedHAL()
+}
+
+// recordedHAL returns the HAL texture for work already recorded against t —
+// a command buffer or a pending queue write being submitted — or nil when
+// that work can no longer run. Release() is Rust's drop, not destroy()
+// (ADR-056): recorded work holds a reference, so a released texture with a
+// reference count stays alive until the work completes, as an Arc<Texture>
+// held by Rust wgpu-core's trackers does, and Submit must accept it
+// (P1-CORE-020). The work cannot run when the device is gone, when a surface
+// texture's acquisition has ended, or when a texture without a reference
+// count (wrapped from HAL) was released, since that queued its destruction.
+func (t *Texture) recordedHAL() hal.Texture {
+	if t == nil || t.hal == nil || t.device == nil || t.device.released.Load() {
+		return nil
+	}
+	if t.surface != nil {
+		if !t.surface.AcquisitionValid(t.surfaceLease) {
+			return nil
+		}
+		return t.hal
+	}
+	if t.released && t.ref() == nil {
 		return nil
 	}
 	return t.hal

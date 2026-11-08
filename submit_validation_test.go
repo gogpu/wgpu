@@ -15,10 +15,12 @@ import (
 // WebGPU spec §21.2, Rust wgpu-core device/queue.rs:1764-1828
 // =============================================================================
 
-// TestSubmitWithDestroyedBuffer verifies that submitting a command buffer that
-// references a released buffer returns ErrSubmitBufferDestroyed.
-// Matches Rust QueueSubmitError::DestroyedResource for buffers.
-func TestSubmitWithDestroyedBuffer(t *testing.T) {
+// TestSubmitAcceptsBufferReleasedAfterRecording verifies that Release() after
+// recording is a drop, not a destroy: the command buffer holds the buffer's
+// reference and Submit accepts it, as Rust wgpu-core does for a dropped
+// Arc<Buffer> (only a destroyed buffer fails, queue.rs check_destroyed).
+// P1-CORE-020; hal/allbackends TestReleaseBeforeSubmit* reads the results back.
+func TestSubmitAcceptsBufferReleasedAfterRecording(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
@@ -57,12 +59,8 @@ func TestSubmitWithDestroyedBuffer(t *testing.T) {
 	// Release the source buffer AFTER encoding but BEFORE submit.
 	srcBuf.Release()
 
-	_, err = device.Queue().Submit(cmdBuf)
-	if err == nil {
-		t.Fatal("Submit should fail: command buffer references destroyed buffer")
-	}
-	if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
-		t.Errorf("expected ErrSubmitBufferDestroyed, got: %v", err)
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
+		t.Fatalf("Submit with a buffer released after recording: %v", err)
 	}
 }
 
@@ -117,10 +115,9 @@ func TestSubmitWithMappedBuffer(t *testing.T) {
 	}
 }
 
-// TestSubmitWithDestroyedTexture verifies that submitting a command buffer that
-// references a released texture returns ErrSubmitTextureDestroyed.
-// Matches Rust QueueSubmitError::DestroyedResource for textures.
-func TestSubmitWithDestroyedTexture(t *testing.T) {
+// TestSubmitAcceptsTextureReleasedAfterRecording is the texture counterpart of
+// TestSubmitAcceptsBufferReleasedAfterRecording (P1-CORE-020).
+func TestSubmitAcceptsTextureReleasedAfterRecording(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
@@ -176,12 +173,8 @@ func TestSubmitWithDestroyedTexture(t *testing.T) {
 	// Release the texture AFTER encoding but BEFORE submit.
 	tex.Release()
 
-	_, err = device.Queue().Submit(cmdBuf)
-	if err == nil {
-		t.Fatal("Submit should fail: command buffer references destroyed texture")
-	}
-	if !errors.Is(err, wgpu.ErrSubmitTextureDestroyed) {
-		t.Errorf("expected ErrSubmitTextureDestroyed, got: %v", err)
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
+		t.Fatalf("Submit with a texture released after recording: %v", err)
 	}
 }
 
@@ -286,57 +279,6 @@ func TestSubmitDoubleSubmit(t *testing.T) {
 	}
 }
 
-// TestSubmitAfterBufferRelease verifies that releasing a buffer and then
-// submitting a command buffer that used it returns ErrSubmitBufferDestroyed.
-// This is the same as TestSubmitWithDestroyedBuffer but uses Release() which
-// is the public API for destruction.
-func TestSubmitAfterBufferRelease(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	srcBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "val-a6-release-src",
-		Size:  64,
-		Usage: wgpu.BufferUsageCopySrc,
-	})
-	if err != nil {
-		t.Fatalf("CreateBuffer src: %v", err)
-	}
-
-	dstBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "val-a6-release-dst",
-		Size:  64,
-		Usage: wgpu.BufferUsageCopyDst,
-	})
-	if err != nil {
-		t.Fatalf("CreateBuffer dst: %v", err)
-	}
-	defer dstBuf.Release()
-
-	enc, err := device.CreateCommandEncoder(nil)
-	if err != nil {
-		t.Fatalf("CreateCommandEncoder: %v", err)
-	}
-	enc.CopyBufferToBuffer(srcBuf, 0, dstBuf, 0, 64)
-
-	cmdBuf, err := enc.Finish()
-	if err != nil {
-		t.Fatalf("Finish: %v", err)
-	}
-
-	// Release (not Destroy) — should still be caught.
-	srcBuf.Release()
-
-	_, err = device.Queue().Submit(cmdBuf)
-	if err == nil {
-		t.Fatal("Submit should fail: command buffer references released buffer")
-	}
-	if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
-		t.Errorf("expected ErrSubmitBufferDestroyed, got: %v", err)
-	}
-}
-
 // TestSubmitEmptyCommandBuffer verifies that submitting an empty command buffer
 // (no resources referenced) succeeds.
 func TestSubmitEmptyCommandBuffer(t *testing.T) {
@@ -375,15 +317,14 @@ func TestSubmitNoCommandBuffers(t *testing.T) {
 }
 
 // =============================================================================
-// VAL-B5: BindGroup destruction tracking at Submit
-// Rust wgpu-core device/queue.rs:1815-1817
+// VAL-B5: bind groups at Submit
+// Rust wgpu-core device/queue.rs:2171-2180 (bind_group.try_raw)
 // =============================================================================
 
-// TestSubmitWithDestroyedBindGroup verifies that submitting a command buffer
-// that references a released bind group returns ErrSubmitBindGroupDestroyed.
-// Matches Rust wgpu-core validate_command_buffer bind_group.try_raw()
-// (device/queue.rs:1815-1817).
-func TestSubmitWithDestroyedBindGroup(t *testing.T) {
+// TestSubmitAcceptsBindGroupReleasedAfterRecording: a bind group released after
+// a pass bound it is still held by the command buffer, so Submit accepts it
+// (P1-CORE-020).
+func TestSubmitAcceptsBindGroupReleasedAfterRecording(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
@@ -425,12 +366,8 @@ func TestSubmitWithDestroyedBindGroup(t *testing.T) {
 	// Release the bind group AFTER encoding but BEFORE submit.
 	bg.Release()
 
-	_, err = device.Queue().Submit(cmdBuf)
-	if err == nil {
-		t.Fatal("Submit should fail: command buffer references destroyed bind group")
-	}
-	if !errors.Is(err, wgpu.ErrSubmitBindGroupDestroyed) {
-		t.Errorf("expected ErrSubmitBindGroupDestroyed, got: %v", err)
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
+		t.Fatalf("Submit with a bind group released after recording: %v", err)
 	}
 }
 
@@ -482,11 +419,10 @@ func TestSubmitWithValidBindGroup(t *testing.T) {
 	}
 }
 
-// TestSubmitWithReleasedBufferInBindGroup verifies that a buffer reachable only
-// through a bind group is still validated at Submit. Passes track the bind group
-// itself, not its contents — validateCommandBufferForSubmit walks
-// BindGroup.boundBuffers to reach this buffer.
-func TestSubmitWithReleasedBufferInBindGroup(t *testing.T) {
+// TestSubmitAcceptsReleasedBufferInBindGroup: a buffer reachable only through
+// a bind group, released after recording, is a drop; the walk over
+// BindGroup.boundBuffers still validates it and accepts it (P1-CORE-020).
+func TestSubmitAcceptsReleasedBufferInBindGroup(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
@@ -549,16 +485,14 @@ func TestSubmitWithReleasedBufferInBindGroup(t *testing.T) {
 	// Release the buffer — but not the bind group — after encoding.
 	buf.Release()
 
-	_, err = device.Queue().Submit(cmdBuf)
-	if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
-		t.Errorf("Submit with released bind group buffer = %v, want ErrSubmitBufferDestroyed", err)
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
+		t.Fatalf("Submit with a bind group buffer released after recording: %v", err)
 	}
 }
 
-// TestSubmitWithReleasedTextureInBindGroup is the texture counterpart of
-// TestSubmitWithReleasedBufferInBindGroup: a texture reachable only through a
-// bind group is still validated at Submit via BindGroup.boundTextures.
-func TestSubmitWithReleasedTextureInBindGroup(t *testing.T) {
+// TestSubmitAcceptsReleasedTextureInBindGroup is the texture counterpart of
+// TestSubmitAcceptsReleasedBufferInBindGroup, via BindGroup.boundTextures.
+func TestSubmitAcceptsReleasedTextureInBindGroup(t *testing.T) {
 	_, _, device := newDevice(t)
 	defer device.Release()
 	requireHAL(t, device)
@@ -631,193 +565,7 @@ func TestSubmitWithReleasedTextureInBindGroup(t *testing.T) {
 	// Release the texture — but not the bind group — after encoding.
 	tex.Release()
 
-	_, err = device.Queue().Submit(cmdBuf)
-	if !errors.Is(err, wgpu.ErrSubmitTextureDestroyed) {
-		t.Errorf("Submit with released bind group texture = %v, want ErrSubmitTextureDestroyed", err)
-	}
-}
-
-// TestSubmitReleasedBufferBeatsReleasedBindGroup pins the error precedence when
-// a bind group and a buffer it binds are both released. The buffer error is the
-// actionable one, and it is what the flat usedBuffers set reported before the
-// per-draw fan-out was removed, so the bind group check runs last.
-func TestSubmitReleasedBufferBeatsReleasedBindGroup(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "val-a6-precedence-buf",
-		Size:  128,
-		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
-	})
-	if err != nil {
-		t.Fatalf("CreateBuffer: %v", err)
-	}
-
-	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label: "val-a6-precedence-layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: wgpu.ShaderStageCompute,
-				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: 128,
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateBindGroupLayout: %v", err)
-	}
-	defer bgl.Release()
-
-	bg, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "val-a6-precedence-bg",
-		Layout: bgl,
-		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: buf, Offset: 0, Size: 128},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateBindGroup: %v", err)
-	}
-
-	enc, err := device.CreateCommandEncoder(nil)
-	if err != nil {
-		t.Fatalf("CreateCommandEncoder: %v", err)
-	}
-	pass, err := enc.BeginComputePass(nil)
-	if err != nil {
-		t.Fatalf("BeginComputePass: %v", err)
-	}
-	pass.SetBindGroup(0, bg, nil)
-	pass.End()
-
-	cmdBuf, err := enc.Finish()
-	if err != nil {
-		t.Fatalf("Finish: %v", err)
-	}
-
-	// Release both — the buffer error must win.
-	buf.Release()
-	bg.Release()
-
-	_, err = device.Queue().Submit(cmdBuf)
-	if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
-		t.Errorf("Submit with released buffer in released bind group = %v, want ErrSubmitBufferDestroyed", err)
-	}
-}
-
-// TestSubmitResourceErrorWinsAcrossBindGroups pins error precedence when
-// several bind groups are at fault at once: many released groups binding
-// nothing, and one live group binding a released buffer. The buffer error must
-// win no matter which group the map iteration reaches first.
-//
-// Folding the release check into the resource walk passes this only when the
-// live group happens to be visited first, so the odds of catching that are
-// roughly 1/(releasedGroups+1) per attempt. Binding many released groups makes
-// a single attempt decisive and the repeats then make a miss negligible.
-func TestSubmitResourceErrorWinsAcrossBindGroups(t *testing.T) {
-	_, _, device := newDevice(t)
-	defer device.Release()
-	requireHAL(t, device)
-
-	const releasedGroups = 8
-
-	bufLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label: "val-a6-cross-buf-layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: wgpu.ShaderStageCompute,
-				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: 128,
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateBindGroupLayout buffer: %v", err)
-	}
-	defer bufLayout.Release()
-
-	emptyLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label:   "val-a6-cross-empty-layout",
-		Entries: []gputypes.BindGroupLayoutEntry{},
-	})
-	if err != nil {
-		t.Fatalf("CreateBindGroupLayout empty: %v", err)
-	}
-	defer emptyLayout.Release()
-
-	for i := 0; i < 16; i++ {
-		buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: "val-a6-cross-buf",
-			Size:  128,
-			Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
-		})
-		if err != nil {
-			t.Fatalf("CreateBuffer: %v", err)
-		}
-
-		// Live group binding a buffer that is about to be released.
-		bgLive, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-			Label:  "val-a6-cross-live-bg",
-			Layout: bufLayout,
-			Entries: []wgpu.BindGroupEntry{
-				{Binding: 0, Buffer: buf, Offset: 0, Size: 128},
-			},
-		})
-		if err != nil {
-			t.Fatalf("CreateBindGroup live: %v", err)
-		}
-
-		enc, err := device.CreateCommandEncoder(nil)
-		if err != nil {
-			t.Fatalf("CreateCommandEncoder: %v", err)
-		}
-		pass, err := enc.BeginComputePass(nil)
-		if err != nil {
-			t.Fatalf("BeginComputePass: %v", err)
-		}
-		pass.SetBindGroup(0, bgLive, nil)
-
-		// Rebind slot 0 with each released group: every one lands in
-		// usedBindGroups, so this sidesteps the maxBindGroups limit.
-		for g := 0; g < releasedGroups; g++ {
-			bgReleased, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-				Label:   "val-a6-cross-released-bg",
-				Layout:  emptyLayout,
-				Entries: []wgpu.BindGroupEntry{},
-			})
-			if err != nil {
-				t.Fatalf("CreateBindGroup released: %v", err)
-			}
-			pass.SetBindGroup(0, bgReleased, nil)
-			bgReleased.Release()
-		}
-		pass.End()
-
-		cmdBuf, err := enc.Finish()
-		if err != nil {
-			t.Fatalf("Finish: %v", err)
-		}
-
-		buf.Release()
-
-		_, err = device.Queue().Submit(cmdBuf)
-		if !errors.Is(err, wgpu.ErrSubmitBufferDestroyed) {
-			t.Fatalf("iteration %d: Submit = %v, want ErrSubmitBufferDestroyed", i, err)
-		}
-
-		// Released here rather than deferred: over 16 iterations the deferred
-		// form would hold every encoder and bind group to the end of the test.
-		// The submit failed validation, so the command buffer must be released
-		// to return its HAL encoder to the pool.
-		cmdBuf.Release()
-		bgLive.Release()
+	if _, err := device.Queue().Submit(cmdBuf); err != nil {
+		t.Fatalf("Submit with a bind group texture released after recording: %v", err)
 	}
 }

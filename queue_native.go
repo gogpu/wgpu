@@ -522,9 +522,13 @@ func (q *Queue) destroyQueue() *core.DestroyQueue {
 // This is the Go equivalent of Rust wgpu-core's validate_command_buffer
 // (device/queue.rs:1764-1828). It checks:
 //   - Command buffer has not already been submitted (double-submit prevention)
-//   - All referenced buffers are not destroyed/released
+//   - All referenced buffers are not destroyed
 //   - All referenced buffers are not mapped (mapped buffer in GPU commands = data race)
-//   - All referenced textures are not destroyed/released
+//   - All referenced textures are not destroyed
+//
+// Destroyed is not released: Release() is a drop, and the command buffer's
+// references keep released resources alive until the work completes
+// (P1-CORE-020).
 //
 // The index parameter identifies which command buffer in the Submit() call
 // failed validation, for clearer error messages.
@@ -549,19 +553,16 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 		}
 	}
 
-	// 4. Check the resources bound by every bind group. A bind group already
-	// holds boundBuffers and boundTextures from CreateBindGroup, so passes
-	// track only the group itself and this walk reaches the rest — no per-draw
-	// fan-out needed. Release() never mutates those slices, so they stay
-	// walkable after the group itself is released.
+	// 4. Check the resources bound by every bind group, as Rust's
+	// bind_group.try_raw does (queue.rs:2171-2180). A bind group already holds
+	// boundBuffers and boundTextures from CreateBindGroup, so passes track only
+	// the group itself and this walk reaches the rest — no per-draw fan-out
+	// needed. Release() never mutates those slices, so they stay walkable after
+	// the group itself is released.
 	//
-	// This runs as its own pass, ahead of the bg.released pass below, so the
-	// specific error always wins: a released buffer reports the buffer rather
-	// than whichever bind group happens to reference it. Before the fan-out was
-	// removed these resources sat in the flat usedBuffers/usedTextures sets,
-	// checked in steps 2 and 3 ahead of any bind group, and folding the release
-	// check into this loop would make the winner depend on map iteration order
-	// whenever two bind groups are at fault.
+	// The bind group's own Release is not checked: it is a drop, and the
+	// command buffer holds the group's reference until its submission
+	// completes (P1-CORE-020).
 	for bg := range cb.usedBindGroups {
 		for _, buf := range bg.boundBuffers {
 			if err := validateSubmitBuffer(buf, index); err != nil {
@@ -575,24 +576,20 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 		}
 	}
 
-	// 5. Check the bind groups themselves (matches Rust queue.rs:1815-1817).
-	for bg := range cb.usedBindGroups {
-		if bg.released != nil && bg.released.Load() {
-			return fmt.Errorf("wgpu: Submit: command buffer at index %d references released bind group: %w",
-				index, ErrSubmitBindGroupDestroyed)
-		}
-	}
-
 	return nil
 }
 
-// validateSubmitBuffer checks that a buffer is neither released nor mapped.
-// Callers never pass nil: trackBuffer skips nil and collectBindGroupResources
-// only records non-nil entries.
+// validateSubmitBuffer checks that a buffer is neither destroyed nor mapped,
+// as Rust's buffer.check_destroyed and the BufferMapState::Idle check do
+// (queue.rs:2135-2142). Release() alone is a drop: the command buffer holds a
+// reference that keeps the HAL buffer alive (P1-CORE-020). The buffer is
+// destroyed only when its HAL buffer is gone: one without a reference count is
+// destroyed by Release itself. Callers never pass nil: trackBuffer skips nil
+// and collectBindGroupResources only records non-nil entries.
 func validateSubmitBuffer(buf *Buffer, index int) error {
-	// Check destroyed/released.
-	if buf.released != nil && buf.released.Load() {
-		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released buffer %q: %w",
+	if buf.released != nil && buf.released.Load() &&
+		(buf.core == nil || buf.core.Ref == nil || buf.core.IsDestroyed()) {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed buffer %q: %w",
 			index, buf.Label(), ErrSubmitBufferDestroyed)
 	}
 	// Check mapped state.
@@ -604,12 +601,15 @@ func validateSubmitBuffer(buf *Buffer, index int) error {
 	return nil
 }
 
-// validateSubmitTexture checks that a texture has not been released.
-// Callers never pass nil: trackTexture skips nil and collectBindGroupResources
-// only records non-nil entries.
+// validateSubmitTexture checks that the work recorded against a texture can
+// still run (Texture.recordedHAL), as Rust's texture.try_inner does
+// (queue.rs:2146-2147). A released texture passes while the command buffer's
+// reference keeps it alive (P1-CORE-020). Callers never pass nil:
+// trackTexture skips nil and collectBindGroupResources only records non-nil
+// entries.
 func validateSubmitTexture(tex *Texture, index int) error {
-	if tex.resolveHAL() == nil {
-		return fmt.Errorf("wgpu: Submit: command buffer at index %d references released texture: %w",
+	if tex.recordedHAL() == nil {
+		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed texture: %w",
 			index, ErrSubmitTextureDestroyed)
 	}
 	return nil
@@ -757,7 +757,9 @@ func addTrackedTexture(resolver map[track.TrackerIndex]hal.Texture, tex *Texture
 	if _, exists := resolver[td.Index()]; exists {
 		return
 	}
-	if halTex := tex.resolveHAL(); halTex != nil {
+	// recordedHAL, not resolveHAL: a texture released after recording still
+	// needs its submit-time barriers (P1-CORE-020).
+	if halTex := tex.recordedHAL(); halTex != nil {
 		resolver[td.Index()] = halTex
 	}
 }

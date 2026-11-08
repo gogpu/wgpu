@@ -84,6 +84,40 @@ func TestDestroyQueue_FlushAll(t *testing.T) {
 	}
 }
 
+// TestDestroyQueue_FlushAllDrainsChains: at device shutdown a submission's
+// tracked ref releases a bind group, whose destroy releases a view, whose
+// destroy releases its texture; each step defers the next. FlushAll must run
+// the whole chain before the device is destroyed, not only the first step.
+func TestDestroyQueue_FlushAllDrainsChains(t *testing.T) {
+	q := NewDestroyQueue()
+	var destroyed []string
+	deferringRef := func(name string, then func()) *ResourceRef {
+		return NewResourceRef(name, func() {
+			q.Defer(1, name, func() {
+				destroyed = append(destroyed, name)
+				if then != nil {
+					then()
+				}
+			})
+		})
+	}
+	texture := deferringRef("texture", nil)
+	view := deferringRef("view", texture.Drop)
+	bindGroup := deferringRef("bindgroup", view.Drop)
+	bindGroup.Clone()
+	q.TrackSubmission(5, []*ResourceRef{bindGroup})
+	bindGroup.Drop() // the application's Release
+
+	q.FlushAll()
+
+	if want := []string{"bindgroup", "view", "texture"}; len(destroyed) != len(want) {
+		t.Fatalf("FlushAll destroyed %v, want %v", destroyed, want)
+	}
+	if q.Len() != 0 {
+		t.Fatalf("want 0 pending after FlushAll, got %d", q.Len())
+	}
+}
+
 func TestDestroyQueue_EmptyTriage(t *testing.T) {
 	q := NewDestroyQueue()
 

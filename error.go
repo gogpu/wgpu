@@ -145,7 +145,9 @@ var (
 // (device/queue.rs:484-516).
 var (
 	// ErrSubmitBufferDestroyed is returned when a submitted command buffer
-	// references a buffer that has been released/destroyed.
+	// references a buffer whose GPU memory is gone. Release() after recording
+	// is not that: the command buffer keeps the buffer alive until its work
+	// completes, as a dropped Arc<Buffer> stays alive in Rust wgpu-core.
 	// Matches Rust QueueSubmitError::DestroyedResource for buffers.
 	ErrSubmitBufferDestroyed = errors.New("wgpu: Submit: command buffer references destroyed buffer")
 
@@ -156,14 +158,19 @@ var (
 	ErrSubmitBufferMapped = errors.New("wgpu: Submit: command buffer references mapped buffer")
 
 	// ErrSubmitTextureDestroyed is returned when a submitted command buffer
-	// references a texture that has been released/destroyed.
-	// Matches Rust QueueSubmitError::DestroyedResource for textures.
+	// references a texture whose work can no longer run: its device is gone,
+	// or a surface texture's acquisition has ended. Release() after recording
+	// is not that: the command buffer keeps the texture alive until its work
+	// completes. Matches Rust QueueSubmitError::DestroyedResource for textures.
 	ErrSubmitTextureDestroyed = errors.New("wgpu: Submit: command buffer references destroyed texture")
 
-	// ErrSubmitBindGroupDestroyed is returned when a submitted command buffer
-	// references a bind group that has been released/destroyed.
-	// Matches Rust wgpu-core validate_command_buffer bind_group.try_raw()
-	// (device/queue.rs:1815-1817).
+	// ErrSubmitBindGroupDestroyed reports a submitted command buffer that
+	// references a destroyed bind group. The native backends no longer return
+	// it: Release() after recording is a drop, the command buffer holds the
+	// bind group until its work completes, and Submit checks the resources the
+	// group binds instead, with the buffer and texture errors above (Rust
+	// bind_group.try_raw, device/queue.rs:2171-2180). It is kept so code that
+	// matches it still compiles.
 	ErrSubmitBindGroupDestroyed = errors.New("wgpu: Submit: command buffer references destroyed bind group")
 
 	// ErrSubmitCommandBufferInvalid is returned when a command buffer has
