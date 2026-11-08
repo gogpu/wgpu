@@ -166,7 +166,11 @@ Pure Go OpenGL 3.3+ / OpenGL ES 3.0+ implementation; adapters below that minimum
 - Texture updates via `glTexSubImage2D` (not `glTexImage2D`) — matches Rust wgpu-hal pattern
 - `GL_DYNAMIC_DRAW` for all writable buffers (Rust wgpu-hal parity — some vendors freeze STATIC_DRAW buffers)
 - Scissor Y-flip: WebGPU top-left → OpenGL bottom-left origin conversion
-- MSAA resolve via `glBlitFramebuffer`
+- MSAA resolve via `glBlitFramebuffer`; a multisampled render target is a renderbuffer (`glRenderbufferStorageMultisample` + `glFramebufferRenderbuffer`), as Rust wgpu-hal does — ES has no `glTexImage2DMultisample`
+- Textures allocate immutable storage (`glTexStorage2D`/`glTexStorage3D`) wherever the context has it: ES rejects `glBindImageTexture` on a texture with mutable storage
+- `glMapBufferRange` for buffer mapping (ES has no `glMapBuffer`)
+- Buffer-texture copy sources that GL cannot render to: uploaded through an internal compute pass when the context has compute
+- BC advertised from core desktop GL versions (RGTC 3.0, BPTC 4.2) and the `ARB` names as well as the `EXT` ones; S3TC stays an extension and needs sRGB support on ES
 - Texture unit validation: warns when binding exceeds GL_MAX_TEXTURE_IMAGE_UNITS
 - Texture formats from Rust wgpu-hal's `describe_texture_format` table; a format without a row is an error, never a silent RGBA8
 - Compressed textures (BC, ETC2, ASTC): immutable storage (`glTexStorage`) and `glCompressedTexSubImage` uploads in block rows
