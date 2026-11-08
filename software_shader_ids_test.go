@@ -3,9 +3,11 @@
 package wgpu_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/core"
 )
 
 // idsComputeSPIRV is a GLCompute module "main" that adds two u32 values,
@@ -27,6 +29,53 @@ func idsComputeSPIRV(bound, operand uint32) []uint32 {
 		5<<16 | 128, 6, 8, 7, operand, // %8 = OpIAdd %6 %7 operand
 		1<<16 | 253, // OpReturn
 		1<<16 | 56,  // OpFunctionEnd
+	}
+}
+
+// TestSPIRVWorkgroupSizeValidated checks that the LocalSize of a compute
+// module given as SPIR-V is checked against the device limits at pipeline
+// creation, as a WGSL module's workgroup size is. Before, nothing read it:
+// LocalSize 1024 1024 1024 made the software backend start 2^30
+// invocations at the dispatch, and 65536 65536 1 wrapped to 0 invocations.
+func TestSPIRVWorkgroupSizeValidated(t *testing.T) {
+	device := newSoftwareDevice(t)
+	layout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{Label: "empty"})
+	if err != nil {
+		t.Fatalf("CreatePipelineLayout: %v", err)
+	}
+	defer layout.Release()
+	tests := []struct {
+		name    string
+		size    [3]uint32
+		wantErr core.CreateComputePipelineErrorKind
+	}{
+		{"dimension above limit", [3]uint32{1024, 1024, 1024}, core.CreateComputePipelineErrorWorkgroupSizeExceeded},
+		{"product wraps 32 bits", [3]uint32{65536, 65536, 1}, core.CreateComputePipelineErrorWorkgroupSizeExceeded},
+		{"too many invocations", [3]uint32{64, 64, 1}, core.CreateComputePipelineErrorTooManyInvocations},
+		{"zero", [3]uint32{0, 1, 1}, core.CreateComputePipelineErrorWorkgroupSizeZero},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			words := idsComputeSPIRV(9, 7)
+			// OpExecutionMode %3 LocalSize x y z: words 18..20.
+			copy(words[18:21], tt.size[:])
+			module, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: tt.name, SPIRV: words})
+			if err != nil {
+				t.Fatalf("CreateShaderModule: %v", err)
+			}
+			defer module.Release()
+			pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+				Label: tt.name, Layout: layout, Module: module, EntryPoint: "main",
+			})
+			if err == nil {
+				pipeline.Release()
+				t.Fatalf("CreateComputePipeline accepted LocalSize %v", tt.size)
+			}
+			var cpe *core.CreateComputePipelineError
+			if !errors.As(err, &cpe) || cpe.Kind != tt.wantErr {
+				t.Fatalf("error %v (%T), want *core.CreateComputePipelineError of kind %v", err, err, tt.wantErr)
+			}
+		})
 	}
 }
 

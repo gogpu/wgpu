@@ -242,7 +242,10 @@ type workgroupRun struct {
 // newWorkgroupRun prepares to run workgroups of size invocations of the
 // entry point ep (function fn) in the dispatch context base.
 func (m *Module) newWorkgroupRun(ep *EntryPoint, fn *Function, base *ExecutionContext, size [3]uint32) *workgroupRun {
-	n := size[0] * size[1] * size[2]
+	// The product is taken in 64 bits: in 32 it wraps (65536 x 65536 x 1 is
+	// 0). The device validates the size against its limits at pipeline
+	// creation, WGSL and SPIR-V modules alike.
+	n := uint64(size[0]) * uint64(size[1]) * uint64(size[2])
 	return &workgroupRun{
 		module: m,
 		ep:     ep,

@@ -317,6 +317,8 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	if halDesc.IR != nil {
 		info := halDesc.Info
 		module.irInfo = &info
+	} else if len(desc.SPIRV) > 0 {
+		module.spirvWorkgroups = spirvComputeWorkgroups(desc.SPIRV)
 	}
 	return module, nil
 }
@@ -852,8 +854,15 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 // (VAL-010, Rust wgpu-core validation.rs check_stage) and workgroup storage
 // (WebGPU createComputePipeline, workgroupStorageUsed ≤
 // maxComputeWorkgroupStorageSize; Dawn ShaderModule.cpp, after the
-// workgroup-size checks). A module without IR (SPIR-V) is not checked.
+// workgroup-size checks). A module given as SPIR-V has no IR: its LocalSize
+// is checked; workgroup storage is not.
 func (d *Device) validateComputeShader(desc *ComputePipelineDescriptor) error {
+	if desc.Module.irModule == nil {
+		if size, ok := desc.Module.spirvWorkgroupSize(desc.EntryPoint); ok {
+			return d.validateComputeWorkgroupSize(desc.Label, size)
+		}
+		return nil
+	}
 	irMod, info, index, err := desc.Module.specializedEntryPoint(ir.StageCompute, desc.EntryPoint, desc.Constants)
 	if err != nil {
 		return &core.CreateComputePipelineError{
