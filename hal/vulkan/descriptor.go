@@ -220,11 +220,14 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 	}
 
 	// Build pool sizes with ALL descriptor types.
-	// Every pool includes all types to avoid allocation failures when
-	// different bind group layouts (e.g., uniform-only vs sampler+texture)
-	// share the same pool. Requested counts scale the primary types;
-	// all other types get a reasonable baseline allocation.
-	// Dynamic buffer types are included when any dynamic offsets are used.
+	// Every pool includes all types, because Allocate serves a layout from any
+	// existing pool first: bind group layouts of different kinds (uniform-only,
+	// sampler+texture, dynamic buffers) share pools. Requested counts scale the
+	// primary types; all other types get a baseline allocation. A pool without
+	// a type its set layout uses is invalid even where the driver allocates
+	// anyway (WARNING-CoreValidation-AllocateDescriptorSets-WrongType; strict
+	// drivers return VK_ERROR_OUT_OF_POOL_MEMORY, P2-VK-016). Rust wgpu-hal
+	// sizes pools from DescriptorCounts including the dynamic buffer types.
 	poolSizes := []vk.DescriptorPoolSize{
 		{Type: vk.DescriptorTypeSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
 		{Type: vk.DescriptorTypeSampledImage, DescriptorCount: max(counts.SampledImages, 1) * poolSize},
@@ -232,18 +235,8 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		{Type: vk.DescriptorTypeUniformBuffer, DescriptorCount: max(counts.UniformBuffers, 1) * poolSize},
 		{Type: vk.DescriptorTypeStorageBuffer, DescriptorCount: max(counts.StorageBuffers*poolSize, poolSize/2)},
 		{Type: vk.DescriptorTypeCombinedImageSampler, DescriptorCount: max(counts.Samplers, 1) * poolSize},
-	}
-	if counts.UniformBuffersDynamic > 0 {
-		poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-			Type:            vk.DescriptorTypeUniformBufferDynamic,
-			DescriptorCount: counts.UniformBuffersDynamic * poolSize,
-		})
-	}
-	if counts.StorageBuffersDynamic > 0 {
-		poolSizes = append(poolSizes, vk.DescriptorPoolSize{
-			Type:            vk.DescriptorTypeStorageBufferDynamic,
-			DescriptorCount: counts.StorageBuffersDynamic * poolSize,
-		})
+		{Type: vk.DescriptorTypeUniformBufferDynamic, DescriptorCount: max(counts.UniformBuffersDynamic*poolSize, poolSize/4)},
+		{Type: vk.DescriptorTypeStorageBufferDynamic, DescriptorCount: max(counts.StorageBuffersDynamic*poolSize, poolSize/4)},
 	}
 
 	createInfo := vk.DescriptorPoolCreateInfo{
