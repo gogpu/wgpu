@@ -576,6 +576,17 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 		}
 	}
 
+	// 5. Check the query sets the command buffer writes or resolves, as Rust's
+	// query_set.try_raw does (queue.rs:2167-2168). Release() is a drop: the
+	// command buffer holds the set's reference until its submission completes
+	// (P1-CORE-021). Only a query set whose HAL query set is gone fails.
+	for qs := range cb.usedQuerySets {
+		if qs.core == nil || qs.core.IsDestroyed() {
+			return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed query set: %w",
+				index, ErrSubmitQuerySetDestroyed)
+		}
+	}
+
 	return nil
 }
 
