@@ -1159,8 +1159,11 @@ func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
 }
 
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
-func (d *Device) PushErrorScope(filter ErrorFilter) {
-	d.core.PushErrorScope(filter)
+// It returns an error for a filter that is not one of the three WebGPU error
+// filters, and pushes nothing then: the spec throws a TypeError for that value
+// (pushErrorScope step 1), and a Go API reports it as an error.
+func (d *Device) PushErrorScope(filter ErrorFilter) error {
+	return d.core.PushErrorScope(filter)
 }
 
 // PopErrorScope pops the most recently pushed error scope.

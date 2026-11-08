@@ -444,26 +444,36 @@ func (d *Device) WaitForFence(f *Fence, _ uint64, _ time.Duration) (bool, error)
 }
 
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
-func (d *Device) PushErrorScope(filter ErrorFilter) {
-	if d.r != nil {
-		d.r.PushErrorScope(errorFilterToRust(filter))
+// It returns an error for a filter that is not one of the three WebGPU error
+// filters, and pushes nothing then. The return value is what makes the reason
+// reach the caller: wgpu-native panics on an unknown filter and a panic across
+// the FFI boundary aborts the process, so the value is rejected here instead.
+func (d *Device) PushErrorScope(filter ErrorFilter) error {
+	rFilter, err := errorFilterToRust(filter)
+	if err != nil {
+		return err
 	}
+	if d.r != nil {
+		d.r.PushErrorScope(rFilter)
+	}
+	return nil
 }
 
 // errorFilterToRust maps an ErrorFilter (core's numbering, Validation = 0, as
 // on the native build) to the webgpu.h member of the same name, which counts
 // from 1. wgpu-native panics on a filter it does not know, and a panic across
-// the FFI boundary aborts the process, so a value outside the three constants
-// is sent as Validation rather than as an invalid member.
-func errorFilterToRust(filter ErrorFilter) rwgpu.ErrorFilter {
+// the FFI boundary aborts the process, so an unmapped value is an error here
+// and never reaches the binding (P3-API-025).
+func errorFilterToRust(filter ErrorFilter) (rwgpu.ErrorFilter, error) {
 	switch filter {
+	case ErrorFilterValidation:
+		return rwgpu.ErrorFilterValidation, nil
 	case ErrorFilterOutOfMemory:
-		return rwgpu.ErrorFilterOutOfMemory
+		return rwgpu.ErrorFilterOutOfMemory, nil
 	case ErrorFilterInternal:
-		return rwgpu.ErrorFilterInternal
-	default:
-		return rwgpu.ErrorFilterValidation
+		return rwgpu.ErrorFilterInternal, nil
 	}
+	return 0, fmt.Errorf("wgpu: PushErrorScope: unknown error filter %d", int(filter))
 }
 
 // PopErrorScope pops the most recently pushed error scope.

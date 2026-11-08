@@ -463,3 +463,21 @@ func TestDeviceErrorScopeLazyInit(t *testing.T) {
 	// Clean up
 	_, _ = device.errorScopes().PopErrorScope()
 }
+
+// TestValidateErrorFilter checks that every WebGPU error filter passes and
+// that a value outside the three constants is an error, never a silent
+// Validation fallback (P3-API-025): a scope pushed with an unknown filter
+// would capture nothing.
+func TestValidateErrorFilter(t *testing.T) {
+	valid := []ErrorFilter{ErrorFilterValidation, ErrorFilterOutOfMemory, ErrorFilterInternal}
+	for _, f := range valid {
+		if err := ValidateErrorFilter(f); err != nil {
+			t.Errorf("ValidateErrorFilter(%s) = %v, want nil", f, err)
+		}
+	}
+	for _, f := range []ErrorFilter{-1, 3, 42} {
+		if err := ValidateErrorFilter(f); err == nil {
+			t.Errorf("ValidateErrorFilter(%d) = nil, want an error", int(f))
+		}
+	}
+}
