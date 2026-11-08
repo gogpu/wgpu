@@ -112,6 +112,12 @@ jobs:
         include:
           - { goos: js, goarch: wasm, tags: '', name: 'browser' }
           - { goos: linux, goarch: amd64, tags: 'rust', name: 'rust' }
+          # 32-bit int: a constant that fits int on 64-bit targets does not
+          # there (P1-INFRA-008: TrackerIndex bounds and math.MaxUint32). Build
+          # only — there is no GPU on 386 and no test runs. windows rather than
+          # linux: goffi's internal/syscall has no linux/386 files, so the
+          # linux/386 combination cannot build in the ecosystem.
+          - { goos: windows, goarch: "386", tags: '', name: '386' }
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
