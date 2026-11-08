@@ -332,7 +332,7 @@ func (d *Device) WaitForFence(_ *Fence, _ uint64, _ time.Duration) (bool, error)
 
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
 // Phase 2 — not yet implemented for browser.
-func (d *Device) PushErrorScope(filter ErrorFilter) {
+func (d *Device) PushErrorScope(filter ErrorFilter) error {
 	panic("wgpu: browser PushErrorScope not yet implemented (Phase 2)")
 }
 

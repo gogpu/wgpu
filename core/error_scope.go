@@ -177,6 +177,23 @@ func (m *ErrorScopeManager) ScopeDepth() int {
 
 // PushErrorScope pushes a new error scope onto this device's error scope stack.
 //
+// ValidateErrorFilter reports whether f is one of WebGPU's three error
+// filters. pushErrorScope throws a TypeError for any other value
+// (WebGPU spec, pushErrorScope step 1); in Go the caller gets this error. A
+// filter outside the three would never match a captured error, so a scope
+// pushed with it would silently capture nothing.
+func ValidateErrorFilter(f ErrorFilter) error {
+	switch f {
+	case ErrorFilterValidation, ErrorFilterOutOfMemory, ErrorFilterInternal:
+		return nil
+	}
+	return fmt.Errorf("wgpu: PushErrorScope: unknown error filter %d", int(f))
+}
+
+// PushErrorScope pushes a new error scope onto the device's error scope stack.
+// It returns an error for a filter that is not one of the three WebGPU error
+// filters, and pushes nothing then.
+//
 // The scope will capture the first error matching the specified filter type.
 // Error scopes are LIFO (stack-based) -- the last pushed scope is checked first.
 //
@@ -190,8 +207,12 @@ func (m *ErrorScopeManager) ScopeDepth() int {
 //	if gpuErr != nil {
 //	    log.Printf("Validation error: %s", gpuErr.Message)
 //	}
-func (d *Device) PushErrorScope(filter ErrorFilter) {
+func (d *Device) PushErrorScope(filter ErrorFilter) error {
+	if err := ValidateErrorFilter(filter); err != nil {
+		return err
+	}
 	d.errorScopes().PushErrorScope(filter)
+	return nil
 }
 
 // PopErrorScope pops the most recently pushed error scope and returns the
