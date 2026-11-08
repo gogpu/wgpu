@@ -251,8 +251,14 @@ func colorAttachmentLayer(view *TextureView, depthSlice *uint32) uint32 {
 // attachColorLayer attaches color attachment index of the bound framebuffer
 // to one mip level of tex and, for a layered texture or a cube map, to one
 // layer of it: the depth slice of a 3D texture, an array layer or a cube
-// face. Rust wgpu-hal gles/queue.rs set_attachment does the same.
+// face. A renderbuffer (a multisampled target on ES) attaches at the same
+// point with glFramebufferRenderbuffer; it has one level and layer.
+// Rust wgpu-hal gles/queue.rs set_attachment does the same.
 func attachColorLayer(ctx *gl.Context, attachment uint32, tex *Texture, mip, layer uint32) {
+	if tex.renderBuffer {
+		ctx.FramebufferRenderbuffer(gl.FRAMEBUFFER, attachment, gl.RENDERBUFFER, tex.id)
+		return
+	}
 	if isLayeredTarget(tex.target) {
 		ctx.FramebufferTextureLayer(gl.FRAMEBUFFER, attachment, tex.id, int32(mip), int32(layer))
 		return

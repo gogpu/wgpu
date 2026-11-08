@@ -53,6 +53,7 @@ var (
 	cifVoid5MultiElem    types.CallInterface // void fn(uint32, uint32, void*, int32, int32) - MultiDrawElementsIndirect
 	cifPtr1              types.CallInterface // void* fn(uint32)
 	cifPtr2UU            types.CallInterface // void* fn(uint32, uint32)
+	cifPtr4MapRange      types.CallInterface // void* fn(uint32, int64, int64, uint32) - MapBufferRange
 	cifVoid7ReadPx       types.CallInterface // void fn(int32, int32, int32, int32, uint32, uint32, void*)
 	cifVoid6TexMS        types.CallInterface // void fn(uint32, int32, uint32, int32, int32, uint8) - TexImage2DMultisample
 	cifVoid7BindImage    types.CallInterface // void fn(uint32, uint32, int32, uint8, int32, uint32, uint32) - BindImageTexture
@@ -68,6 +69,7 @@ var (
 
 	cifVoid5TexStorage2D  types.CallInterface // void fn(uint32, int32, uint32, int32, int32) - TexStorage2D
 	cifVoid6TexStorage3D  types.CallInterface // void fn(uint32, int32, uint32, int32, int32, int32) - TexStorage3D
+	cifVoid5RBStorageMS   types.CallInterface // void fn(uint32, int32, uint32, int32, int32) - RenderbufferStorageMultisample
 	cifVoid9CompSubImg2D  types.CallInterface // void fn(uint32, int32*5, uint32, int32, void*) - CompressedTexSubImage2D
 	cifVoid11CompSubImg3D types.CallInterface // void fn(uint32, int32*7, uint32, int32, void*) - CompressedTexSubImage3D
 
@@ -554,6 +556,27 @@ func initCommonCallInterfaces() error {
 	if err := initSyncCopyCallInterfaces(); err != nil {
 		return err
 	}
+	// void fn(uint32, int32, uint32, int32, int32) - RenderbufferStorageMultisample
+	if err := ffi.PrepareCallInterface(&cifVoid5RBStorageMS, types.DefaultCall, types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // target
+			types.SInt32TypeDescriptor, // samples
+			types.UInt32TypeDescriptor, // internalformat
+			types.SInt32TypeDescriptor, // width
+			types.SInt32TypeDescriptor, // height
+		}); err != nil {
+		return err
+	}
+	// void* fn(uint32, int64, int64, uint32) - MapBufferRange
+	if err := ffi.PrepareCallInterface(&cifPtr4MapRange, types.DefaultCall, types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.UInt32TypeDescriptor, // target
+			types.SInt64TypeDescriptor, // offset (GLintptr)
+			types.SInt64TypeDescriptor, // length (GLsizeiptr)
+			types.UInt32TypeDescriptor, // access
+		}); err != nil {
+		return err
+	}
 
 	cifInitialized = true
 	return nil
@@ -674,13 +697,14 @@ type Context struct {
 	glUniformMatrix4fv unsafe.Pointer
 
 	// Buffers (GL 1.5+)
-	glGenBuffers    unsafe.Pointer
-	glDeleteBuffers unsafe.Pointer
-	glBindBuffer    unsafe.Pointer
-	glBufferData    unsafe.Pointer
-	glBufferSubData unsafe.Pointer
-	glMapBuffer     unsafe.Pointer
-	glUnmapBuffer   unsafe.Pointer
+	glGenBuffers     unsafe.Pointer
+	glDeleteBuffers  unsafe.Pointer
+	glBindBuffer     unsafe.Pointer
+	glBufferData     unsafe.Pointer
+	glBufferSubData  unsafe.Pointer
+	glMapBuffer      unsafe.Pointer
+	glMapBufferRange unsafe.Pointer
+	glUnmapBuffer    unsafe.Pointer
 
 	// VAO (GL 3.0+)
 	glGenVertexArrays    unsafe.Pointer
@@ -720,11 +744,12 @@ type Context struct {
 	glPixelStorei unsafe.Pointer
 
 	// Renderbuffers (GL 3.0+)
-	glGenRenderbuffers        unsafe.Pointer
-	glDeleteRenderbuffers     unsafe.Pointer
-	glBindRenderbuffer        unsafe.Pointer
-	glRenderbufferStorage     unsafe.Pointer
-	glFramebufferRenderbuffer unsafe.Pointer
+	glGenRenderbuffers               unsafe.Pointer
+	glDeleteRenderbuffers            unsafe.Pointer
+	glBindRenderbuffer               unsafe.Pointer
+	glRenderbufferStorage            unsafe.Pointer
+	glRenderbufferStorageMultisample unsafe.Pointer
+	glFramebufferRenderbuffer        unsafe.Pointer
 
 	// Blending (GL 1.4+)
 	glBlendFunc             unsafe.Pointer
@@ -903,6 +928,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	if gles && c.glMapBuffer == nil {
 		c.glMapBuffer = getProcAddr("glMapBufferOES")
 	}
+	c.glMapBufferRange = getProcAddr("glMapBufferRange")
 	c.glUnmapBuffer = getProcAddr("glUnmapBuffer")
 
 	// VAO — GLES may need OES suffix on some Mesa dispatch paths.
@@ -961,6 +987,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDeleteRenderbuffers = getProcAddr("glDeleteRenderbuffers")
 	c.glBindRenderbuffer = getProcAddr("glBindRenderbuffer")
 	c.glRenderbufferStorage = getProcAddr("glRenderbufferStorage")
+	c.glRenderbufferStorageMultisample = getProcAddr("glRenderbufferStorageMultisample")
 	c.glFramebufferRenderbuffer = getProcAddr("glFramebufferRenderbuffer")
 
 	// Blending
@@ -1483,6 +1510,26 @@ func (c *Context) MapBuffer(target, access uint32) uintptr {
 	return ptr
 }
 
+// MapBufferRange maps a range of the buffer bound to target. GL 3.0+ / ES 3.0+
+// core, and the only mapping entry point OpenGL ES has: it has no glMapBuffer
+// (Mesa exposes no ES glMapBufferOES either, so the fallback in Load leaves the
+// pointer nil). GLintptr and GLsizeiptr are 64-bit on both platforms. Returns 0
+// when the entry point is missing or the driver refuses the mapping.
+func (c *Context) MapBufferRange(target uint32, offset, length int64, access uint32) uintptr {
+	if c.glMapBufferRange == nil {
+		return 0
+	}
+	var ptr uintptr
+	args := [4]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&offset),
+		unsafe.Pointer(&length),
+		unsafe.Pointer(&access),
+	}
+	_, _ = ffi.CallFunction(&cifPtr4MapRange, c.glMapBufferRange, unsafe.Pointer(&ptr), args[:])
+	return ptr
+}
+
 // UnmapBuffer releases the mapping of a buffer object's data store.
 // Returns true if the buffer was successfully unmapped, false if the buffer contents
 // became corrupt during the mapping (GL_FALSE from driver) or glUnmapBuffer is unavailable.
@@ -1771,6 +1818,14 @@ func initCompressedTextureCallInterfaces() error {
 func (c *Context) HasCompressedTextures() bool {
 	return c.glTexStorage2D != nil && c.glTexStorage3D != nil &&
 		c.glCompressedTexSubImage2D != nil && c.glCompressedTexSubImage3D != nil
+}
+
+// HasImmutableStorage reports whether the context has glTexStorage2D, the
+// immutable texture storage of GL 4.2 / ES 3.0 (GL_ARB_texture_storage). The
+// adapter's version or extension check decides whether it is offered
+// (hasTextureStorage); this only confirms the entry point resolved.
+func (c *Context) HasImmutableStorage() bool {
+	return c.glTexStorage2D != nil
 }
 
 // TexStorage2D allocates immutable storage for every level of a 2D texture
@@ -2150,6 +2205,22 @@ func (c *Context) RenderbufferStorage(target, internalFormat uint32, width, heig
 		unsafe.Pointer(&uh),
 	}
 	_, _ = ffi.CallFunction(&cifVoid4, c.glRenderbufferStorage, nil, args[:])
+}
+
+// RenderbufferStorageMultisample allocates multisampled storage for the
+// currently bound renderbuffer (GL 3.0+, ES 3.0+). No-op if not supported.
+func (c *Context) RenderbufferStorageMultisample(target uint32, samples int32, internalFormat uint32, width, height int32) {
+	if c.glRenderbufferStorageMultisample == nil {
+		return
+	}
+	args := [5]unsafe.Pointer{
+		unsafe.Pointer(&target),
+		unsafe.Pointer(&samples),
+		unsafe.Pointer(&internalFormat),
+		unsafe.Pointer(&width),
+		unsafe.Pointer(&height),
+	}
+	_, _ = ffi.CallFunction(&cifVoid5RBStorageMS, c.glRenderbufferStorageMultisample, nil, args[:])
 }
 
 // FramebufferRenderbuffer attaches a renderbuffer to the currently bound

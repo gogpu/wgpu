@@ -44,7 +44,7 @@ func (b *Buffer) NativeHandle() uintptr { return uintptr(b.id) }
 
 // Texture implements hal.Texture for OpenGL.
 type Texture struct {
-	id          uint32 // GL texture object ID
+	id          uint32 // GL texture object ID, or renderbuffer name when renderBuffer
 	target      uint32 // GL_TEXTURE_2D, GL_TEXTURE_2D_MULTISAMPLE, etc.
 	format      gputypes.TextureFormat
 	dimension   gputypes.TextureDimension
@@ -53,6 +53,20 @@ type Texture struct {
 	sampleCount uint32 // 1 for regular textures, >1 for MSAA
 	fbo         uint32 // GL framebuffer object ID (0 = no FBO created)
 	glCtx       *gl.Context
+
+	// renderBuffer is true when the texture is a GL renderbuffer rather than a
+	// texture object: a multisampled texture on an OpenGL ES context. ES has no
+	// glTexImage2DMultisample (desktop only) and ES 3.0 no multisample texture
+	// images at all, so a multisampled render target is a renderbuffer, which
+	// the framebuffer attaches with glFramebufferRenderbuffer. Rendering and
+	// the resolve blit read the attachment, not the texture object, so nothing
+	// else changes. WebGPU allows a multisampled texture only as a render
+	// attachment, so it is never sampled or copied.
+	//
+	// Rust wgpu-hal creates a renderbuffer for every render-usage texture on
+	// every GL version (gles/device.rs create_texture); we keep textures for
+	// single-sample targets and use renderbuffers where ES forces it.
+	renderBuffer bool
 }
 
 // CurrentUsage returns 0 — GLES has no explicit resource state tracking.
@@ -68,10 +82,32 @@ func (t *Texture) Destroy() {
 			t.fbo = 0
 		}
 		if t.id != 0 {
-			t.glCtx.DeleteTextures(t.id)
+			if t.renderBuffer {
+				t.glCtx.DeleteRenderbuffers(t.id)
+			} else {
+				t.glCtx.DeleteTextures(t.id)
+			}
 			t.id = 0
 		}
 	}
+}
+
+// createMultisampleRenderbuffer allocates a multisampled renderbuffer of the
+// given internal format: the storage of a multisampled render target on a
+// context without multisample texture images (OpenGL ES). The caller owns the
+// name and releases it with DeleteRenderbuffers.
+func createMultisampleRenderbuffer(glCtx *gl.Context, samples uint32, internalFormat uint32, size hal.Extent3D) (uint32, error) {
+	rb := glCtx.GenRenderbuffers(1)
+	glCtx.BindRenderbuffer(gl.RENDERBUFFER, rb)
+	glCtx.RenderbufferStorageMultisample(gl.RENDERBUFFER, int32(samples), internalFormat,
+		int32(size.Width), int32(size.Height))
+	glCtx.BindRenderbuffer(gl.RENDERBUFFER, 0)
+	if glErr := glCtx.GetError(); glErr != 0 {
+		glCtx.DeleteRenderbuffers(rb)
+		return 0, fmt.Errorf("gles: multisampled renderbuffer allocation failed: GL error 0x%x (format=0x%x, samples=%d, %dx%d)",
+			glErr, internalFormat, samples, size.Width, size.Height)
+	}
+	return rb, nil
 }
 
 // NativeHandle returns the GL texture object ID.

@@ -58,6 +58,16 @@ type Device struct {
 	// own (resetFramebufferAttachments).
 	maxColorAttachments uint32
 
+	// isES is true for an OpenGL ES context: a multisampled texture is then a
+	// renderbuffer, which ES has and multisample texture images it lacks
+	// (createMultisampleRenderbuffer).
+	isES bool
+
+	// immutableStorage is AdapterCapabilities.TextureStorage: 2D and cube
+	// textures are allocated with glTexStorage2D, which an ES image binding
+	// (glBindImageTexture) requires.
+	immutableStorage bool
+
 	// views maps TextureView.NativeHandle values back to the views, for
 	// CreateBindGroup (newBindGroup).
 	views handletable.Table[TextureView]
@@ -144,15 +154,9 @@ func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMa
 			case len(buf.data) == int(buf.size):
 				copy(buf.mapped, buf.data)
 			case buf.id != 0:
-				glCtx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
-				glPtr := glCtx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY)
-				if glPtr != 0 {
-					basePtr := *(**byte)(unsafe.Pointer(&glPtr))
-					src := unsafe.Slice(basePtr, buf.size)
-					copy(buf.mapped, src)
-					glCtx.UnmapBuffer(gl.COPY_READ_BUFFER)
-				}
-				glCtx.BindBuffer(gl.COPY_READ_BUFFER, 0)
+				// readGLBuffer maps with glMapBufferRange, the entry point
+				// OpenGL ES has in place of glMapBuffer.
+				copy(buf.mapped, readGLBuffer(glCtx, buf))
 			}
 			d.ctx.Unlock()
 		}
@@ -203,8 +207,6 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 	glCtx := d.ctx.Lock()
 	defer d.ctx.Unlock()
 
-	id := glCtx.GenTextures(1)
-
 	sampleCount := desc.SampleCount
 	if sampleCount == 0 {
 		sampleCount = 1
@@ -212,9 +214,34 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 
 	target := textureTarget(desc.Dimension, desc.Size, sampleCount, d.cubeArrays)
 
-	glCtx.BindTexture(target, id)
-
 	internalFormat, format, dataType := glFormat.internal, glFormat.external, glFormat.dataType
+
+	// A multisampled render target on an ES context is a renderbuffer: ES has
+	// no glTexImage2DMultisample (desktop only) and no multisample texture
+	// images before ES 3.1. See Texture.renderBuffer and
+	// createMultisampleRenderbuffer. No WGL context of this backend is an ES
+	// context today; the branch keeps both platform files one definition of
+	// what a multisampled texture is.
+	if d.isES && sampleCount > 1 {
+		rb, err := createMultisampleRenderbuffer(glCtx, sampleCount, internalFormat, desc.Size)
+		if err != nil {
+			return nil, err
+		}
+		return &Texture{
+			id:           rb,
+			target:       target,
+			format:       desc.Format,
+			dimension:    desc.Dimension,
+			size:         desc.Size,
+			mipLevels:    desc.MipLevelCount,
+			sampleCount:  sampleCount,
+			glCtx:        glCtx,
+			renderBuffer: true,
+		}, nil
+	}
+
+	id := glCtx.GenTextures(1)
+	glCtx.BindTexture(target, id)
 
 	// Allocate texture storage
 	switch {
@@ -230,6 +257,14 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 			int32(desc.Size.Width), int32(desc.Size.Height), true)
 
 	case target == gl.TEXTURE_2D:
+		if d.immutableStorage {
+			// Immutable storage, as Rust wgpu-hal allocates a texture with
+			// TEXTURE_STORAGE (gles/device.rs create_texture); every later
+			// write goes through TexSubImage2D.
+			glCtx.TexStorage2D(target, int32(max(desc.MipLevelCount, 1)), internalFormat,
+				int32(desc.Size.Width), int32(desc.Size.Height))
+			break
+		}
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			width := maxInt32(1, int32(desc.Size.Width>>level))
 			height := maxInt32(1, int32(desc.Size.Height>>level))
@@ -238,6 +273,13 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		}
 
 	case target == gl.TEXTURE_CUBE_MAP:
+		if d.immutableStorage {
+			// One glTexStorage2D allocates every face and level (Rust
+			// wgpu-hal gles/device.rs create_texture).
+			glCtx.TexStorage2D(target, int32(max(desc.MipLevelCount, 1)), internalFormat,
+				int32(desc.Size.Width), int32(desc.Size.Height))
+			break
+		}
 		for face := uint32(0); face < 6; face++ {
 			faceTarget := gl.TEXTURE_CUBE_MAP_POSITIVE_X + face
 			for level := uint32(0); level < desc.MipLevelCount; level++ {
@@ -249,13 +291,18 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (hal.Texture, error) {
 		}
 
 	case isLayeredTarget(target):
-		// Every level, as Rust wgpu-hal does with tex_image_3d on a context
-		// without immutable storage (gles/device.rs create_texture); the 2D
-		// path above uses mutable TexImage2D storage as well.
+		// One glTexStorage3D allocates every level when the context has
+		// immutable storage; without it every level is allocated with
+		// TexImage3D, as Rust wgpu-hal does (gles/device.rs create_texture).
 		if !glCtx.HasLayeredTextures() {
 			glCtx.BindTexture(target, 0)
 			glCtx.DeleteTextures(id)
 			return nil, errNoLayeredTextures
+		}
+		if d.immutableStorage {
+			w, h, depth := layeredLevelSize(target, desc.Size, 0)
+			glCtx.TexStorage3D(target, int32(max(desc.MipLevelCount, 1)), internalFormat, w, h, depth)
+			break
 		}
 		for level := uint32(0); level < desc.MipLevelCount; level++ {
 			w, h, depth := layeredLevelSize(target, desc.Size, level)

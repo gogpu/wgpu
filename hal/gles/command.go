@@ -2313,13 +2313,17 @@ func (c *CopyTextureToBufferCommand) bindSourceFBO(ctx *gl.Context, attachment, 
 
 // readGLBuffer returns a copy of buf's full GL contents (zeros if the buffer
 // cannot be mapped). Caller holds the context.
+//
+// The mapping goes through glMapBufferRange: it is the mapping entry point of
+// OpenGL ES 3.0, which has no glMapBuffer, and Rust wgpu-hal maps with it on
+// every GL context (gles/device.rs map_buffer).
 func readGLBuffer(ctx *gl.Context, buf *Buffer) []byte {
 	data := make([]byte, buf.size)
 	if buf.id == 0 || buf.size == 0 {
 		return data
 	}
 	ctx.BindBuffer(gl.COPY_READ_BUFFER, buf.id)
-	if ptr := ctx.MapBuffer(gl.COPY_READ_BUFFER, gl.READ_ONLY); ptr != 0 {
+	if ptr := ctx.MapBufferRange(gl.COPY_READ_BUFFER, 0, int64(buf.size), gl.MAP_READ_BIT); ptr != 0 {
 		src := unsafe.Slice(*(**byte)(unsafe.Pointer(&ptr)), buf.size)
 		copy(data, src)
 		ctx.UnmapBuffer(gl.COPY_READ_BUFFER)
