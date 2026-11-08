@@ -63,13 +63,14 @@ type Context struct {
 	glUniformMatrix4fv uintptr
 
 	// Buffers (GL 1.5+)
-	glGenBuffers    uintptr
-	glDeleteBuffers uintptr
-	glBindBuffer    uintptr
-	glBufferData    uintptr
-	glBufferSubData uintptr
-	glMapBuffer     uintptr
-	glUnmapBuffer   uintptr
+	glGenBuffers     uintptr
+	glDeleteBuffers  uintptr
+	glBindBuffer     uintptr
+	glBufferData     uintptr
+	glBufferSubData  uintptr
+	glMapBuffer      uintptr
+	glMapBufferRange uintptr
+	glUnmapBuffer    uintptr
 
 	// VAO (GL 3.0+)
 	glGenVertexArrays    uintptr
@@ -109,11 +110,12 @@ type Context struct {
 	glPixelStorei uintptr
 
 	// Renderbuffers (GL 3.0+)
-	glGenRenderbuffers        uintptr
-	glDeleteRenderbuffers     uintptr
-	glBindRenderbuffer        uintptr
-	glRenderbufferStorage     uintptr
-	glFramebufferRenderbuffer uintptr
+	glGenRenderbuffers               uintptr
+	glDeleteRenderbuffers            uintptr
+	glBindRenderbuffer               uintptr
+	glRenderbufferStorage            uintptr
+	glRenderbufferStorageMultisample uintptr
+	glFramebufferRenderbuffer        uintptr
 
 	// Blending (GL 1.4+)
 	glBlendFunc             uintptr
@@ -267,6 +269,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glBufferData = getProcAddr("glBufferData")
 	c.glBufferSubData = getProcAddr("glBufferSubData")
 	c.glMapBuffer = getProcAddr("glMapBuffer")
+	c.glMapBufferRange = getProcAddr("glMapBufferRange")
 	c.glUnmapBuffer = getProcAddr("glUnmapBuffer")
 
 	// VAO
@@ -314,6 +317,7 @@ func (c *Context) Load(getProcAddr ProcAddressFunc) error {
 	c.glDeleteRenderbuffers = getProcAddr("glDeleteRenderbuffers")
 	c.glBindRenderbuffer = getProcAddr("glBindRenderbuffer")
 	c.glRenderbufferStorage = getProcAddr("glRenderbufferStorage")
+	c.glRenderbufferStorageMultisample = getProcAddr("glRenderbufferStorageMultisample")
 	c.glFramebufferRenderbuffer = getProcAddr("glFramebufferRenderbuffer")
 
 	// Blending
@@ -679,6 +683,20 @@ func (c *Context) MapBuffer(target, access uint32) uintptr {
 	return r
 }
 
+// MapBufferRange maps a range of the buffer bound to target. GL 3.0+ / ES 3.0+
+// core, and the only mapping entry point OpenGL ES has: it has no glMapBuffer.
+// GLintptr and GLsizeiptr are pointer-sized, so offset and length are passed as
+// uintptr. Returns 0 when the entry point is missing or the driver refuses the
+// mapping.
+func (c *Context) MapBufferRange(target uint32, offset, length int64, access uint32) uintptr {
+	if c.glMapBufferRange == 0 {
+		return 0
+	}
+	r, _, _ := syscall.SyscallN(c.glMapBufferRange, uintptr(target),
+		uintptr(offset), uintptr(length), uintptr(access))
+	return r
+}
+
 // UnmapBuffer releases the mapping of a buffer object's data store.
 // Returns true if the buffer was successfully unmapped, false if the buffer contents
 // became corrupt during the mapping (GL_FALSE from driver) or glUnmapBuffer is unavailable.
@@ -848,6 +866,14 @@ func (c *Context) TexSubImage3D(target uint32, level, xoffset, yoffset, zoffset,
 func (c *Context) HasCompressedTextures() bool {
 	return c.glTexStorage2D != 0 && c.glTexStorage3D != 0 &&
 		c.glCompressedTexSubImage2D != 0 && c.glCompressedTexSubImage3D != 0
+}
+
+// HasImmutableStorage reports whether the context has glTexStorage2D, the
+// immutable texture storage of GL 4.2 / ES 3.0 (GL_ARB_texture_storage). The
+// adapter's version or extension check decides whether it is offered
+// (hasTextureStorage); this only confirms the entry point resolved.
+func (c *Context) HasImmutableStorage() bool {
+	return c.glTexStorage2D != 0
 }
 
 // TexStorage2D allocates immutable storage for every level of a 2D texture
@@ -1069,6 +1095,16 @@ func (c *Context) BindRenderbuffer(target, renderbuffer uint32) {
 func (c *Context) RenderbufferStorage(target, internalFormat uint32, width, height int32) {
 	syscall.SyscallN(c.glRenderbufferStorage, uintptr(target), uintptr(internalFormat),
 		uintptr(width), uintptr(height))
+}
+
+// RenderbufferStorageMultisample allocates multisampled storage for the
+// currently bound renderbuffer (GL 3.0+, ES 3.0+). No-op if not supported.
+func (c *Context) RenderbufferStorageMultisample(target uint32, samples int32, internalFormat uint32, width, height int32) {
+	if c.glRenderbufferStorageMultisample == 0 {
+		return
+	}
+	syscall.SyscallN(c.glRenderbufferStorageMultisample, uintptr(target), uintptr(samples),
+		uintptr(internalFormat), uintptr(width), uintptr(height))
 }
 
 // FramebufferRenderbuffer attaches a renderbuffer to the currently bound

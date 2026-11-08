@@ -81,6 +81,17 @@ const (
 	DYNAMIC_READ = 0x88E9
 	DYNAMIC_COPY = 0x88EA
 
+	// Buffer mapping access flags (GL 3.0+ / ES 3.0+), taken by
+	// glMapBufferRange. The old glMapBuffer takes the READ_ONLY/WRITE_ONLY
+	// access enums instead, which OpenGL ES does not have:
+	// glMapBufferRange is the only mapping entry point there.
+	MAP_READ_BIT              = 0x0001
+	MAP_WRITE_BIT             = 0x0002
+	MAP_INVALIDATE_RANGE_BIT  = 0x0004
+	MAP_INVALIDATE_BUFFER_BIT = 0x0008
+	MAP_FLUSH_EXPLICIT_BIT    = 0x0010
+	MAP_UNSYNCHRONIZED_BIT    = 0x0020
+
 	// Texture units
 	TEXTURE0 = 0x84C0
 

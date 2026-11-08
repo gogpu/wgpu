@@ -70,6 +70,14 @@ type AdapterCapabilities struct {
 	// emulated: the naga_vs_first_instance uniform and instance-stepped
 	// vertex buffer offsets.
 	FullyFeaturedInstancing bool
+
+	// TextureStorage is Rust wgpu-hal's TEXTURE_STORAGE: the context allocates
+	// immutable texture storage with glTexStorage2D (GL 4.2+, ES 3.0+, or
+	// GL_ARB_texture_storage). Textures are allocated with it when present
+	// (CreateTexture), as Rust does: an OpenGL ES image binding
+	// (glBindImageTexture, storage textures in compute) is rejected for a
+	// texture with mutable storage, so a storage texture needs it.
+	TextureStorage bool
 }
 
 // fullyFeaturedInstancing reports Rust wgpu-hal's FULLY_FEATURED_INSTANCING
@@ -78,6 +86,18 @@ type AdapterCapabilities struct {
 func fullyFeaturedInstancing(exts map[string]bool, glMajor, glMinor int, isES bool) bool {
 	return !isES && glVersionAtLeast(glMajor, glMinor, false, [2]int{0, 0}, [2]int{4, 2}) &&
 		hasExtension(exts, "GL_ARB_shader_draw_parameters")
+}
+
+// hasTextureStorage reports Rust wgpu-hal's TEXTURE_STORAGE private capability
+// (src/gles/adapter.rs): immutable texture storage, core in desktop GL 4.2 and
+// ES 3.0, and available through GL_ARB_texture_storage before that. The entry
+// point is the second check: an ES 3.0 context (or an ARB_texture_storage
+// context) has glTexStorage2D, and without a texture storage allocation the
+// driver may still refuse an image binding.
+func hasTextureStorage(glCtx *gl.Context, exts map[string]bool, glMajor, glMinor int, isES bool) bool {
+	storage := glVersionAtLeast(glMajor, glMinor, isES, [2]int{3, 0}, [2]int{4, 2}) ||
+		hasExtension(exts, "GL_ARB_texture_storage")
+	return storage && glCtx.HasImmutableStorage()
 }
 
 // queryAdapterCapabilities queries all adapter capabilities from the GL context.
@@ -116,6 +136,7 @@ func queryAdapterCapabilities(glCtx *gl.Context) (AdapterCapabilities, error) {
 	// --- 4. Detect features ---
 	caps.FullyFeaturedInstancing = fullyFeaturedInstancing(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES) &&
 		glCtx.HasBaseInstance()
+	caps.TextureStorage = hasTextureStorage(glCtx, caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES)
 	caps.Features = queryFeatures(caps.Extensions, caps.GLMajor, caps.GLMinor, caps.IsES, glCtx)
 
 	// --- 5. Query limits ---

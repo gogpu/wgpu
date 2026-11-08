@@ -100,6 +100,8 @@ func (a *Adapter) open() (hal.OpenDevice, error) {
 		depthStencilTextureMode: glVersionAtLeast(a.caps.GLMajor, a.caps.GLMinor, a.caps.IsES,
 			[2]int{3, 1}, [2]int{4, 3}),
 		maxColorAttachments: a.caps.Limits.MaxColorAttachments,
+		isES:                a.caps.IsES,
+		immutableStorage:    a.caps.TextureStorage,
 	}
 
 	queue := &Queue{
