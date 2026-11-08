@@ -628,7 +628,6 @@ func buildMatrixUniformVertexSPIRV() []uint32 {
 		inst(4, OpTypePointer), idPtrVec4Out, StorageClassOutput, idVec4,
 		inst(4, OpTypePointer), idPtrUintIn, StorageClassInput, idUint,
 		inst(4, OpTypePointer), idPtrStruct, StorageClassUniform, idStruct,
-		inst(4, OpTypePointer), idPtrArr, StorageClassFunction, idArr3Vec2,
 		inst(4, OpTypePointer), idPtrVec2, StorageClassFunction, idVec2,
 		inst(4, OpTypePointer), idPtrMat4Uni, StorageClassUniform, idMat4,
 		inst(3, OpTypeFunction), idFuncType, idVoid,
@@ -645,6 +644,8 @@ func buildMatrixUniformVertexSPIRV() []uint32 {
 
 		// Array type (after the constant for length).
 		inst(4, OpTypeArray), idArr3Vec2, idVec2, idConst3U,
+		// SPIR-V declares a pointee before its pointer.
+		inst(4, OpTypePointer), idPtrArr, StorageClassFunction, idArr3Vec2,
 
 		// Constant composites.
 		inst(5, OpConstantComposite), idVec2, idVec2_0, idConst0F, idConst05F, // vec2(0.0, 0.5)
