@@ -7,7 +7,6 @@ package allbackends_test
 
 import (
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -123,9 +122,7 @@ func TestPerspectiveInterpolation(t *testing.T) {
 				perspectiveVaryingTolerance)
 			checkDepth(t, x, y, img.depthAt(x, y), want.depth, viewportTolerance)
 			checkTexel(t, "position.z", x, y, [4]float64{pos[0]}, [4]float64{want.depth}, viewportTolerance)
-			if !positionWDeviates(t) {
-				checkTexel(t, "position.w", x, y, [4]float64{pos[1]}, [4]float64{want.invW}, viewportTolerance)
-			}
+			checkTexel(t, "position.w", x, y, [4]float64{pos[1]}, [4]float64{want.invW}, viewportTolerance)
 			checkTexel(t, "texture", x, y, [4]float64{pos[2], pos[3]}, [4]float64{want.texel[0], want.texel[1]},
 				perspectiveTextureTolerance)
 		})
@@ -376,17 +373,6 @@ func perspectiveScene(t *testing.T, device *wgpu.Device, depthTest gputypes.Comp
 			pass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: instances, FirstVertex: firstVertex})
 		},
 	}
-}
-
-// positionWDeviates reports whether the backend under test is known to give
-// the fragment position builtin a w other than WGSL's 1/w: naga's HLSL and
-// DXIL backends pass SV_Position through, whose w is the clip-space w (Rust
-// naga back/hlsl/conv.rs has the same gap; Tint inverts it in
-// src/tint/lang/hlsl/writer/raise/shader_io.cc). Tracked by naga card
-// P1-HLSL-037; remove this exclusion once wgpu takes the naga release that
-// fixes it.
-func positionWDeviates(t *testing.T) bool {
-	return strings.Contains(t.Name(), "/dx12-")
 }
 
 // forEachPerspectivePixel calls fn for every pixel of the target whose
