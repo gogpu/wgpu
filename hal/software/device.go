@@ -318,7 +318,7 @@ func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.Shade
 	}
 
 	if len(sm.spirv) > 0 {
-		parsed, err := shader.ParseModule(sm.spirv)
+		parsed, err := shader.ParseModuleLimits(sm.spirv, shaderLimits)
 		if err != nil {
 			sm.err = fmt.Errorf("software: parse SPIR-V: %w", err)
 			return sm, nil
@@ -353,7 +353,7 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 	if err != nil {
 		return nil, fmt.Errorf("software: SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
-	parsed, err := shader.ParseModule(words)
+	parsed, err := shader.ParseModuleLimits(words, shaderLimits)
 	if err != nil {
 		return nil, fmt.Errorf("software: parse SPIR-V for %s entry point %q: %w", shaderir.StageName(stage), entryPoint, err)
 	}
