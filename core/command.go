@@ -588,6 +588,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		raw:         halPass,
 		encoder:     e,
 		device:      e.device,
+		label:       desc.Label,
 		passContext: passCtx,
 		scope:       newPassUsageScopeWithTextures(attachments.scope),
 	}
@@ -1403,6 +1404,10 @@ type CoreRenderPassEncoder struct {
 	// device is the parent device.
 	device *Device
 
+	// label is the render pass's debug label, from the descriptor. Validation
+	// errors of pass commands carry it (Rust wgpu-core RenderPass::label).
+	label string
+
 	// pipeline is the currently bound render pipeline.
 	pipeline *RenderPipeline
 
@@ -1540,8 +1545,19 @@ func (p *CoreRenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.I
 }
 
 // SetViewport sets the viewport.
+//
+// The viewport is validated as the WebGPU spec requires
+// (GPURenderPassEncoder.setViewport valid usage, spec/index.bs:13695-13708).
+// An invalid viewport is not recorded: it puts the encoder into its deferred
+// error state, which End and Finish report.
+//
+// Reference: wgpu-core command/render.rs:2986-3026 (set_viewport).
 func (p *CoreRenderPassEncoder) SetViewport(vp gputypes.Viewport) {
 	if p.ended {
+		return
+	}
+	if err := validateViewport(vp, p.device.Limits, p.label); err != nil {
+		p.encoder.SetError(fmt.Errorf("SetViewport: %w", err))
 		return
 	}
 	if p.raw != nil {

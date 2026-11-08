@@ -3370,6 +3370,65 @@ func TestValidateRenderPipelineDescriptor_VertexBuffers(t *testing.T) {
 	}
 }
 
+// TestValidateRenderPipelineDescriptor_VertexFormat checks that a vertex
+// attribute format must be one gputypes defines. WebGPU's IDL rejects an
+// unknown GPUVertexFormat before the algorithm runs (a TypeError, not a
+// validation error); a Go caller can build one, and every other vertex check
+// treats it as a no-op because its size is 0, so the pipeline would reach the
+// backend with a format no backend maps (hal/gles/command.go vertexFormatToGL
+// falls back to Float32x4). Dawn validates it as a creation error
+// (dawn/src/dawn/native/RenderPipeline.cpp:118 ValidateVertexFormat).
+func TestValidateRenderPipelineDescriptor_VertexFormat(t *testing.T) {
+	layout := func(format gputypes.VertexFormat) gputypes.VertexBufferLayout {
+		return gputypes.VertexBufferLayout{
+			ArrayStride: 16,
+			StepMode:    gputypes.VertexStepModeVertex,
+			Attributes: []gputypes.VertexAttribute{{
+				Format:         format,
+				ShaderLocation: 1,
+			}},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		format  gputypes.VertexFormat
+		wantErr bool
+	}{
+		{name: "first defined format", format: gputypes.VertexFormatUint8x2},
+		{name: "last defined format", format: gputypes.VertexFormatUnorm1010102},
+		{name: "undefined", format: gputypes.VertexFormatUndefined, wantErr: true},
+		{name: "first value past the defined set", format: gputypes.VertexFormat(0x20), wantErr: true},
+		{name: "arbitrary unknown value", format: gputypes.VertexFormat(0xDEADBEEF), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc := vertexStrideDesc(layout(tt.format))
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("expected nil error, got: %v", err)
+				}
+				return
+			}
+			var crpe *CreateRenderPipelineError
+			if !errors.As(err, &crpe) {
+				t.Fatalf("expected CreateRenderPipelineError, got %T (%v)", err, err)
+			}
+			if crpe.Kind != CreateRenderPipelineErrorInvalidVertexFormat {
+				t.Fatalf("expected kind InvalidVertexFormat, got %v (%v)", crpe.Kind, err)
+			}
+			if crpe.AttributeIndex != 0 || crpe.ShaderLocation != 1 {
+				t.Errorf("AttributeIndex = %d, ShaderLocation = %d, want 0 and 1", crpe.AttributeIndex, crpe.ShaderLocation)
+			}
+			if !containsString(crpe.Error(), "not a valid GPUVertexFormat") {
+				t.Errorf("message %q does not say the format is invalid", crpe.Error())
+			}
+		})
+	}
+}
+
 func TestCreateRenderPipelineError_VertexBufferMessages(t *testing.T) {
 	tests := []struct {
 		name     string
