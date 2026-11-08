@@ -175,14 +175,19 @@ Pure Go OpenGL 3.3+ / OpenGL ES 3.0+ implementation; adapters below that minimum
 - `GL_FRAMEBUFFER_SRGB` on for every desktop context (off around the present blit), so sRGB targets encode and blend in linear space
 - Integer targets clear with `glClearBufferuiv` / `glClearBufferiv`; each pass detaches the earlier pass's attachments of a reused framebuffer
 - Stencil uploads into combined depth-stencil formats: the backend sets `hal.Capabilities.StencilCopyNeedsBlit`, and the frontend lowers them to a draw blit (`internal/stencilblit`, below)
+- Vertex attributes from Rust wgpu-hal's `describe_vertex_format`: integer formats go through `glVertexAttribIPointer`, float, unorm and snorm formats through `glVertexAttribPointer`
+- `glProvokingVertex(GL_FIRST_VERTEX_CONVENTION)` at device open, so flat varyings take the first vertex as WGSL requires (desktop GL 3.2+; OpenGL ES only with `GL_ANGLE_provoking_vertex`). Rust wgpu-hal does not set it
 
 ### `hal/software/` — Software Backend
 
 CPU-based rasterizer with SPIR-V interpreter. Always compiled (no build tags required). Pure Go, zero system dependencies.
 
-- `raster/` — Triangle rasterization, blending, depth/stencil, tiling, per-pixel fragment shader callback
-- `shader/` — Full SPIR-V interpreter (~10K LOC): vertex, fragment, compute shaders. GLSL.std.450 math intrinsics (30+), texture sampling, control flow, atomics, workgroup shared memory. Shader debugger with breakpoints and JSON trace. **Not for production rendering** — interpreted execution is ~100× slower than JIT (SwiftShader/llvmpipe). Designed for shader debugging, CI/CD testing, and GPU-less fallback.
-- Textures store every mip level, array layer, cube face and 3D slice. `WriteTexture`, copies, render attachments (colour, depth-stencil, resolve, a 3D view's `DepthSlice`) and storage textures address the subresource they name; sampling picks the mip level from the sampler and the layer, face or slice from the view. Implicit-LOD `textureSample` uses the view's base level: fragments are shaded one at a time, with no derivatives
+- Encoder commands are recorded into the command buffer and run in `Queue.Submit`, as on the GPU backends (a never-submitted command buffer has no effect)
+- Vertex path: clip-space clipping (`raster/clip.go`, near/far and guard-band planes), then the perspective divide and the `SetViewport` transform; varyings interpolate perspective-correctly, `@interpolate(linear)` in screen space, depth linearly in screen space
+- `raster/` — Triangle rasterization (top-left fill rule, fixed point), blending, depth/stencil (both faces), per-pixel fragment shader callback, and the 2x2 quad rasterizer (`raster/quad.go`) for shaders that take derivatives
+- `shader/` — Full SPIR-V interpreter: vertex, fragment, compute shaders with typed integer and bool vectors (exact 32-bit lanes). GLSL.std.450 math intrinsics, texture sampling, control flow, atomics, workgroup shared memory. A shader that takes derivatives or samples with an implicit level of detail runs in 2x2 quads with helper invocations (`shader/quad.go`); unsupported SPIR-V fails pipeline creation with an error naming it. Shader debugger with breakpoints and JSON trace. **Not for production rendering** — interpreted execution is ~100× slower than JIT (SwiftShader/llvmpipe). Designed for shader debugging, CI/CD testing, and GPU-less fallback.
+- `internal/texcompress/` — stateless per-texel decoders for BC1-BC7 and ETC2/EAC; the adapter offers `texture-compression-bc` and `texture-compression-etc2` (not ASTC)
+- Textures store every mip level, array layer, cube face and 3D slice. `WriteTexture`, copies, render attachments (colour, depth-stencil, resolve, a 3D view's `DepthSlice`) and storage textures address the subresource they name; sampling picks the mip level from the sampler, the coordinate's derivatives (implicit LOD) or the explicit level, and the layer, face or slice from the view
 - Colour attachments are written and textures sampled through the view's own format (`ColorCodec`): sRGB encodes on write and decodes before filtering, unorm/snorm clamp, integer formats never blend, the write mask keeps masked-out channels. Depth-stencil formats keep a stencil plane; depth-only passes rasterize
 - Compute workgroups share one workgroup-memory buffer; workgroup barriers suspend each invocation until the whole workgroup reaches them
 - `compute_test.go` — Naga WGSL→SPIR-V integration tests for compute shaders
