@@ -57,7 +57,11 @@ const (
 // absent; a malformed module returns what was read before the fault, the
 // HAL rejecting the module itself.
 func spirvComputeWorkgroups(words []uint32) *spirvWorkgroups {
-	names := map[uint32]string{}
+	type entry struct {
+		fn   uint32
+		name string
+	}
+	var entries []entry // in declaration order
 	sizes := map[uint32][3]uint32{}
 	for i := spirvHeaderWords; i < len(words); {
 		n := int(words[i] >> 16)
@@ -68,7 +72,7 @@ func spirvComputeWorkgroups(words []uint32) *spirvWorkgroups {
 		switch words[i] & 0xFFFF {
 		case spirvOpEntryPoint:
 			if len(ops) > spirvEntryPointName && ops[0] == spirvExecModelGLCompute {
-				names[ops[1]] = spirvString(ops[spirvEntryPointName:])
+				entries = append(entries, entry{fn: ops[1], name: spirvString(ops[spirvEntryPointName:])})
 			}
 		case spirvOpExecutionMode:
 			if len(ops) >= 5 && ops[1] == spirvExecModeLocalSize {
@@ -77,10 +81,18 @@ func spirvComputeWorkgroups(words []uint32) *spirvWorkgroups {
 		}
 		i += n
 	}
-	out := make(map[string][3]uint32, len(names))
-	for fn, name := range names {
-		if size, ok := sizes[fn]; ok {
-			out[name] = size
+	// Two compute entry points of one name (the software backend rejects
+	// such a module at parse): keep the larger workgroup, so the check is
+	// never the weaker one.
+	total := func(s [3]uint32) uint64 { return uint64(s[0]) * uint64(s[1]) * uint64(s[2]) }
+	out := make(map[string][3]uint32, len(entries))
+	for _, e := range entries {
+		size, ok := sizes[e.fn]
+		if !ok {
+			continue
+		}
+		if prev, dup := out[e.name]; !dup || total(size) > total(prev) {
+			out[e.name] = size
 		}
 	}
 	return &spirvWorkgroups{byName: out}

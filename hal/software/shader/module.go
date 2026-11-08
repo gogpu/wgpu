@@ -70,6 +70,9 @@ type Module struct {
 	// for IDs nothing can name.
 	valueSlots uint32
 
+	// invocationBytes is what one invocation may hold live (checkLive).
+	invocationBytes uint64
+
 	// interpPool recycles interpreter structs across Execute calls to avoid
 	// allocating the values slice (sized to Bound) on every invocation.
 	interpPool sync.Pool
@@ -221,7 +224,7 @@ func ParseModule(words []uint32) (*Module, error) {
 // followed by a stream of instructions. Each instruction's first word encodes
 // (wordCount << 16 | opcode).
 func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
-	budget := &parseBudget{limits: limits, sizes: map[uint32]uint64{}}
+	budget := &parseBudget{limits: limits, sizes: map[uint32]uint64{}, seen: map[uint32]bool{}}
 	if len(words) < 5 {
 		return nil, fmt.Errorf("spirv: module too short (%d words)", len(words))
 	}
@@ -264,6 +267,11 @@ func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
 		}
 
 		operands := words[pos+1 : pos+wordCount]
+		if id, ok := declaredResult(opcode, operands); ok {
+			if err := budget.define(id); err != nil {
+				return nil, err
+			}
+		}
 
 		switch opcode {
 		case OpTypeVoid:
@@ -535,6 +543,15 @@ func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
 				interfaceIDs = make([]uint32, len(operands)-int(interfaceStart))
 				copy(interfaceIDs, operands[interfaceStart:])
 			}
+			// Entry points are keyed by name, so a second one of the same name
+			// replaced the first, which pipeline creation may have checked
+			// instead. spirv-val rejects the same name and model twice; the
+			// same name with another model is valid SPIR-V, but one module
+			// cannot run both here, so it is rejected rather than replaced.
+			if prev, ok := m.EntryPoints[name]; ok {
+				return nil, fmt.Errorf("spirv: two entry points named %q (execution models %d and %d)",
+					name, prev.ExecutionModel, execModel)
+			}
 			m.EntryPoints[name] = &EntryPoint{
 				ExecutionModel: execModel,
 				FunctionID:     funcID,
@@ -701,6 +718,9 @@ func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
 		}
 	}
 	m.layOutUndecoratedStructs()
+	if err := budget.checkWorkgroup(m); err != nil {
+		return nil, err
+	}
 
 	// Record result types first: validateIDs reads an OpSwitch selector's type.
 	for _, fn := range funcsByID {
@@ -711,6 +731,9 @@ func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
 		}
 	}
 	if err := m.validateIDs(); err != nil {
+		return nil, err
+	}
+	if err := budget.checkLive(m); err != nil {
 		return nil, err
 	}
 
