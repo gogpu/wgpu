@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software/shader"
 )
 
 const (
@@ -126,6 +127,11 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 		},
 	}
 }
+
+// shaderLimits bound what a shader module may make the interpreter allocate:
+// the adapter's maxBufferSize and maxComputeWorkgroupStorageSize, and the
+// backend's own Private, Function and constant limits (shader.Limits).
+var shaderLimits = shader.LimitsFor(softwareLimits())
 
 func softwareLimits() gputypes.Limits {
 	l := gputypes.DefaultLimits()

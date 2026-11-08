@@ -14,6 +14,8 @@ import (
 	"math"
 	"slices"
 	"sync"
+
+	"github.com/gogpu/gputypes"
 )
 
 // Module is a parsed SPIR-V module ready for interpretation.
@@ -206,12 +208,20 @@ type decorationKey struct {
 	Decoration uint32
 }
 
-// ParseModule parses SPIR-V binary (as []uint32 words) into a Module.
+// ParseModule parses SPIR-V binary (as []uint32 words) into a Module, within
+// the Limits of a device with the WebGPU default limits.
+func ParseModule(words []uint32) (*Module, error) {
+	return ParseModuleLimits(words, LimitsFor(gputypes.DefaultLimits()))
+}
+
+// ParseModuleLimits parses SPIR-V binary (as []uint32 words) into a Module,
+// rejecting a module whose types, constants or variables exceed limits.
 //
 // The SPIR-V format is: 5-word header (magic, version, generator, bound, reserved)
 // followed by a stream of instructions. Each instruction's first word encodes
 // (wordCount << 16 | opcode).
-func ParseModule(words []uint32) (*Module, error) {
+func ParseModuleLimits(words []uint32, limits Limits) (*Module, error) {
+	budget := &parseBudget{limits: limits, sizes: map[uint32]uint64{}}
 	if len(words) < 5 {
 		return nil, fmt.Errorf("spirv: module too short (%d words)", len(words))
 	}
@@ -467,6 +477,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 			resultID := operands[1]
 			constituents := operands[2:]
+			if err := budget.chargeConstant(operands[0]); err != nil {
+				return nil, err
+			}
 			m.ResultTypes[resultID] = operands[0]
 			if s := m.typeShape(operands[0]); s.lanes() >= 2 {
 				// A vector constant is a vector of its type's kind, not an
@@ -502,6 +515,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			}
 			typeID := operands[0]
 			resultID := operands[1]
+			if err := budget.chargeConstant(typeID); err != nil {
+				return nil, err
+			}
 			m.Constants[resultID] = zeroValue(m.Types, typeID)
 			m.ResultTypes[resultID] = typeID
 
@@ -589,6 +605,9 @@ func ParseModule(words []uint32) (*Module, error) {
 			typeID := operands[0]
 			resultID := operands[1]
 			storageClass := operands[2]
+			if err := budget.chargeVariable(m, typeID, storageClass); err != nil {
+				return nil, err
+			}
 			m.Variables[resultID] = &VariableInfo{
 				TypeID:       typeID,
 				StorageClass: storageClass,
@@ -621,6 +640,7 @@ func ParseModule(words []uint32) (*Module, error) {
 				FunctionType: operands[3],
 			}
 			funcsByID[operands[1]] = currentFunc
+			budget.function = 0
 
 		case OpFunctionEnd:
 			currentFunc = nil
@@ -647,6 +667,16 @@ func ParseModule(words []uint32) (*Module, error) {
 				// type is known here.
 				inst.resShape = m.typeShape(inst.TypeID)
 				currentFunc.Instructions = append(currentFunc.Instructions, inst)
+			}
+		}
+
+		// A type just declared gets its byte size, from the types it is made
+		// of, before any constant or variable of it is materialized.
+		if isTypeDeclaration(opcode) && len(operands) > 0 {
+			if _, ok := m.Types[operands[0]]; ok {
+				if err := budget.sizeType(m, operands[0]); err != nil {
+					return nil, err
+				}
 			}
 		}
 
