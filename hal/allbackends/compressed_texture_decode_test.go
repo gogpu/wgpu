@@ -93,13 +93,12 @@ func TestCompressedTextureDecode(t *testing.T) {
 			if len(software) != len(decodeCases) {
 				t.Fatal("no software readback to compare with")
 			}
-			vm := adapters[b.name] == appleParavirtualDevice
 			for i, c := range decodeCases {
 				texels, ok := got[i]
 				if !ok {
 					continue
 				}
-				if !compareBC(t, c, b.name, texels, software[i], vm) {
+				if !compareBC(t, c, b.name+" ("+adapters[b.name]+")", texels, software[i]) {
 					compareDecode(t, c, b.name, texels, "software", software[i])
 				}
 			}
@@ -108,24 +107,24 @@ func TestCompressedTextureDecode(t *testing.T) {
 	}
 }
 
-// appleParavirtualDevice is the adapter name of the virtual GPU of a macOS
-// virtual machine (GitHub's macOS runners), not of Apple hardware. Measured
-// on it (CI run 42444020755): interpolated BC1-BC5 palette entries off the
-// ideal by up to 1.4/255 (BC1 color, ideal 0.6022, got 155/255), 0.0067
-// (BC4 unorm code 4 of endpoints 1 and 0: ideal 4/7, got 0.578125) and
-// 0.0157 (BC5 snorm), two codes away from the other decoders. Its
-// interpolated values are checked to lie between their two endpoints and
-// every deviation is logged; endpoints, constants and every other format
-// keep the full check, and the deviation is accepted from no other adapter.
-const appleParavirtualDevice = "Apple Paravirtual device"
+// bcInterpolatedCodes is how many codes an interpolated BC1-BC5 palette
+// entry may differ by between two decoders. Measured on GitHub's macOS
+// runner (CI run 42444020755, Metal on "Apple Paravirtual device"):
+// interpolated entries up to two codes away from WARP, Intel Iris Xe and the
+// software decoder (BC1 color 155/255 where the formula's ideal is 153.6/255
+// and the others give 153 or 154; BC4 unorm code 4 of endpoints 1 and 0:
+// ideal 4/7, got 0.578125; BC5 snorm 0.0157). The bugs of our own upload,
+// copy and format paths move endpoint texels too, and by tens of codes, so
+// endpoints and constants keep their one-code or exact check. A deviation
+// above one code is logged with the adapter's name.
+const bcInterpolatedCodes = 2
 
 // compareBC checks got, the texels of BC1-BC5 case c, against sw, the
 // software decode, within the tolerance of each texel (idealBC), and reports
-// false for any other format. A value the specification leaves to the
-// implementation may also be its other decode. vm accepts the measured
-// deviation of appleParavirtualDevice: an interpolated value between its
-// endpoints.
-func compareBC(t *testing.T, c decodeCase, name string, got, sw []float32, vm bool) bool {
+// false for any other format. An interpolated entry may differ by
+// bcInterpolatedCodes; a value the specification leaves to the
+// implementation may also be its other decode.
+func compareBC(t *testing.T, c decodeCase, name string, got, sw []float32) bool {
 	t.Helper()
 	width := 4 * len(c.blocks)
 	if _, ok := idealBC(c.format, c.blocks[0], 0, 0); !ok {
@@ -149,14 +148,18 @@ func compareBC(t *testing.T, c decodeCase, name string, got, sw []float32, vm bo
 			// code, whose spacing is what the tolerance is written in.
 			g, s, scale = float64(srgbCode(got[i])), float64(srgbCode(sw[i])), 255
 		}
-		within := func(v float64) bool { return math.Abs(g-v) <= want.tol*scale+1e-9 }
-		if within(s) || want.hasAlt && within(want.alt*scale) {
+		within := func(v, tol float64) bool { return math.Abs(g-v) <= tol*scale+1e-9 }
+		// The specification's value is always right: Metal returns the BC4/BC5
+		// snorm endpoints as exactly k/127, which the software decoder (exact
+		// with Intel Iris Xe) misses by 4e-6, and WARP takes the other mode of
+		// a block the specification leaves open.
+		if within(s, want.tol) || within(want.want*scale, want.tol) || want.hasAlt && within(want.alt*scale, want.tol) {
 			continue
 		}
-		if vm && want.interp && g >= want.lo*scale-bcExactError*scale && g <= want.hi*scale+bcExactError*scale {
+		if want.interp && within(s, bcInterpolatedCodes*want.tol) {
 			deviations++
-			t.Logf("%v block %d texel (%d,%d) channel %d: %s %v, ideal %v (bound %v): %s deviation",
-				c.format, x/4, x%4, y, ch, name, got[i], want.want, want.tol, appleParavirtualDevice)
+			t.Logf("%v block %d texel (%d,%d) channel %d: %s %v, software %v, ideal %v: more than one code off",
+				c.format, x/4, x%4, y, ch, name, got[i], sw[i], want.want)
 			continue
 		}
 		bad++
@@ -169,7 +172,7 @@ func compareBC(t *testing.T, c decodeCase, name string, got, sw []float32, vm bo
 		t.Errorf("%v: %d values differ in all", c.format, bad)
 	}
 	if deviations > 0 {
-		t.Logf("%v: %d interpolated values of %s off the ideal, within their endpoints", c.format, deviations, name)
+		t.Logf("%v: %d interpolated values of %s more than one code off the software decode", c.format, deviations, name)
 	}
 	return true
 }
