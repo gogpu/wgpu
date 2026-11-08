@@ -173,6 +173,13 @@ var (
 	// matches it still compiles.
 	ErrSubmitBindGroupDestroyed = errors.New("wgpu: Submit: command buffer references destroyed bind group")
 
+	// ErrSubmitQuerySetDestroyed reports a submitted command buffer that
+	// references a query set whose HAL query set is gone. Release() after
+	// recording is not that: the command buffer keeps the set alive until its
+	// work completes. Matches Rust QueueSubmitError::DestroyedResource for
+	// query sets (query_set.try_raw, device/queue.rs:2167-2168).
+	ErrSubmitQuerySetDestroyed = errors.New("wgpu: Submit: command buffer references destroyed query set")
+
 	// ErrSubmitCommandBufferInvalid is returned when a command buffer has
 	// already been submitted or was never properly finished.
 	// Matches Rust QueueSubmitError::CommandEncoder for invalid command buffers.

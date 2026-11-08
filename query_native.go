@@ -55,8 +55,27 @@ func (qs *QuerySet) liveCore() *core.QuerySet {
 	return qs.core
 }
 
-// Release destroys the query set. Destruction is deferred until the GPU
-// completes any submission that may reference this query set.
+// newQuerySetRef returns the reference count of a HAL query set: when its last
+// owner drops it, the set is destroyed after the submissions in flight, as a
+// sampler or a bind group is. The owners are the application until Release and
+// every command buffer that recorded the set's timestamp writes or a resolve
+// of it (P1-CORE-021, Rust wgpu-core's QuerySet is held by an Arc).
+func newQuerySetRef(d *Device, coreQS *core.QuerySet, label string) *core.ResourceRef {
+	return core.NewResourceRef("QuerySet:"+label, func() {
+		dq := d.destroyQueue()
+		if dq == nil {
+			coreQS.Destroy()
+			return
+		}
+		dq.Defer(d.lastSubmissionIndex(), "QuerySet", coreQS.Destroy)
+	})
+}
+
+// Release drops the application's reference to the query set. The HAL query
+// set is destroyed once no command buffer that recorded it references it any
+// more and the GPU has completed those submissions: a query set released after
+// its timestamp writes or a resolve were recorded stays valid for that work
+// (P1-CORE-021).
 func (qs *QuerySet) Release() {
 	if qs == nil || qs.released {
 		return
@@ -65,6 +84,12 @@ func (qs *QuerySet) Release() {
 	if qs.core == nil {
 		return
 	}
+	if qs.core.Ref != nil {
+		qs.core.Ref.Drop()
+		return
+	}
+
+	// No reference count: destroy after the submissions in flight.
 	halDevice := qs.device.halDevice()
 	if halDevice == nil {
 		qs.core.Destroy()
@@ -109,5 +134,6 @@ func (d *Device) CreateQuerySet(desc *QuerySetDescriptor) (*QuerySet, error) {
 	}
 
 	coreQS := core.NewQuerySet(halQS, d.core, halDesc.Type, halDesc.Count, desc.Label)
+	coreQS.Ref = newQuerySetRef(d, coreQS, desc.Label)
 	return &QuerySet{core: coreQS, device: d}, nil
 }

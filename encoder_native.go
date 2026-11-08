@@ -48,6 +48,12 @@ type CommandEncoder struct {
 	// (device/queue.rs:1815-1817).
 	usedBindGroups map[*BindGroup]struct{}
 
+	// usedQuerySets tracks query sets referenced during encoding for
+	// submit-time validation. At Submit, a set whose HAL query set is gone
+	// causes an error, as Rust wgpu-core's query_set.try_raw does
+	// (device/queue.rs:2167-2168).
+	usedQuerySets map[*QuerySet]struct{}
+
 	// internal holds the resources the frontend created for the encoder's own
 	// commands (the stencil upload blit's staging texture, views, uniform
 	// buffer and bind groups). They have no application owner, so the command
@@ -141,6 +147,25 @@ func (e *CommandEncoder) trackBindGroup(bg *BindGroup) {
 		e.usedBindGroups = make(map[*BindGroup]struct{})
 	}
 	e.usedBindGroups[bg] = struct{}{}
+}
+
+// trackQuerySet records a query set reference for submit-time validation and,
+// the first time, clones the set's reference so it stays alive until the
+// command buffer's submission completes, as Rust wgpu-core's command buffer
+// trackers hold an Arc<QuerySet>. The map is lazily initialized to avoid
+// allocation when no query sets are used (P1-CORE-021).
+func (e *CommandEncoder) trackQuerySet(qs *QuerySet) {
+	if qs == nil || qs.core == nil {
+		return
+	}
+	if e.usedQuerySets == nil {
+		e.usedQuerySets = make(map[*QuerySet]struct{})
+	}
+	if _, seen := e.usedQuerySets[qs]; seen {
+		return
+	}
+	e.usedQuerySets[qs] = struct{}{}
+	e.trackRef(qs.core.Ref)
 }
 
 // copyTextureUsage describes one texture endpoint of a copy command.
@@ -343,6 +368,9 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 		ds := desc.DepthStencilAttachment
 		pass.depthReadOnly, pass.stencilReadOnly = ds.DepthReadOnly, ds.StencilReadOnly
 	}
+	if desc != nil && desc.TimestampWrites != nil {
+		e.trackQuerySet(desc.TimestampWrites.QuerySet)
+	}
 	return pass, nil
 }
 
@@ -371,6 +399,9 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 		return nil, err
 	}
 
+	if desc != nil && desc.TimestampWrites != nil {
+		e.trackQuerySet(desc.TimestampWrites.QuerySet)
+	}
 	return &ComputePassEncoder{core: corePass, encoder: e}, nil
 }
 
@@ -814,7 +845,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 	}
 	e.trackRef(dst.core.Ref)
 	e.trackBuffer(dst)
-	e.trackRef(querySet.core.Ref)
+	e.trackQuerySet(querySet)
 
 	raw.ResolveQuerySet(halQuerySet, firstQuery, queryCount, halDestination, dstOffset)
 }
@@ -907,6 +938,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 		usedBuffers:    e.usedBuffers,
 		usedTextures:   e.usedTextures,
 		usedBindGroups: e.usedBindGroups,
+		usedQuerySets:  e.usedQuerySets,
 		internal:       e.internal,
 	}
 	e.trackedRefs = nil
@@ -915,6 +947,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	e.usedBuffers = nil    // ownership transferred
 	e.usedTextures = nil   // ownership transferred
 	e.usedBindGroups = nil // ownership transferred
+	e.usedQuerySets = nil  // ownership transferred
 	if e.device != nil {
 		e.device.recordings.addBuffer(cb)
 	}
@@ -1056,6 +1089,11 @@ type CommandBuffer struct {
 	// (device/queue.rs:1815-1817).
 	usedBindGroups map[*BindGroup]struct{}
 
+	// usedQuerySets tracks all query sets referenced during encoding.
+	// Validated at Submit time: a set whose HAL query set is gone causes an
+	// error, as Rust wgpu-core's query_set.try_raw does (device/queue.rs:2167-2168).
+	usedQuerySets map[*QuerySet]struct{}
+
 	// internal is CommandEncoder.internal, released once the command buffer
 	// is spent.
 	internal []internalResource
@@ -1123,7 +1161,7 @@ func releaseSubmittedInternal(commandBuffers []*CommandBuffer) {
 }
 
 // dropUsedSets releases the encode-time validation sets. usedBuffers,
-// usedTextures and usedBindGroups exist only for
+// usedTextures, usedBindGroups and usedQuerySets exist only for
 // validateCommandBufferForSubmit; once a command buffer is spent — submitted
 // or released — they are hard references pinning every resource the frame
 // touched for as long as the command buffer stays reachable.
@@ -1131,6 +1169,7 @@ func (cb *CommandBuffer) dropUsedSets() {
 	cb.usedBuffers = nil
 	cb.usedTextures = nil
 	cb.usedBindGroups = nil
+	cb.usedQuerySets = nil
 }
 
 // halBufferList returns all HAL command buffers in submission order.
