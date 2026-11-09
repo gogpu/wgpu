@@ -760,21 +760,22 @@ func (m *Module) GetBuiltIn(varID uint32) int {
 	return -1
 }
 
-// MayDiscard reports whether any function of the module contains OpKill or
-// OpTerminateInvocation, so a fragment entry point may discard. The answer is
+// MayDiscard reports whether any function of the module contains OpKill,
+// OpTerminateInvocation or OpDemoteToHelperInvocation, so a fragment entry
+// point may discard. The answer is
 // conservative: it does not check that the function is reachable from the
 // entry point.
 func (m *Module) MayDiscard() bool {
 	for _, fn := range m.FunctionsByID {
 		for i := range fn.Instructions {
-			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation || op == OpDemoteToHelperInvocation {
 				return true
 			}
 		}
 	}
 	for _, fn := range m.Functions {
 		for i := range fn.Instructions {
-			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation {
+			if op := fn.Instructions[i].Opcode; op == OpKill || op == OpTerminateInvocation || op == OpDemoteToHelperInvocation {
 				return true
 			}
 		}

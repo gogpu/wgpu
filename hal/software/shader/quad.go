@@ -61,12 +61,12 @@ func (m *Module) NeedsQuads(entryPoint string) bool {
 // the difference is then taken in the other row or column, and is 0 if
 // neither has both lanes.
 //
-// This differs from WGSL after a discard: discard does not make control flow
-// non-uniform, and a discarded invocation becomes a helper that keeps feeding
-// derivatives in its own row and column (WGSL "Discard Statement"). naga
-// emits OpKill for discard, which ends the lane here; matching GPUs needs
-// OpDemoteToHelperInvocation (P3-SW-035). Linear values give the same
-// difference in either row, so only non-linear ones differ.
+// A discard does not end the lane: the device compiles WGSL discard to
+// OpDemoteToHelperInvocation, and the discarded invocation runs on as a helper
+// that keeps feeding derivatives in its own row and column, as WGSL requires
+// ("Discard Statement"; P3-SW-035). OpKill, from SPIR-V input that uses it,
+// still ends the lane, and its row then takes the difference from the other
+// row, which matches only for values linear in the other coordinate.
 func (m *Module) ExecuteQuad(entryPoint string, ctx *ExecutionContext, q *Quad) error {
 	ep, ok := m.EntryPoints[entryPoint]
 	if !ok {
@@ -120,6 +120,11 @@ func (m *Module) ExecuteQuad(entryPoint string, ctx *ExecutionContext, q *Quad) 
 			running &^= bit
 			lanes[i] = nil
 			switch {
+			case err == nil && interp.demoted:
+				// Discarded with OpDemoteToHelperInvocation: the lane ran to
+				// its end as a helper for its neighbors' derivatives.
+				q.Discarded |= bit
+				m.putInterpreter(interp)
 			case err == nil:
 				if !interp.helper {
 					interp.collectOutputs(q.Outputs[i])
