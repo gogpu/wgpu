@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 package software
 
 import (
@@ -16,8 +18,6 @@ import (
 //	stats := pass.(*software.RenderPassEncoder).Stats()
 //	if stats.DrawCount != 2 { t.Error(...) }
 //	if !stats.HasScissor { t.Error(...) }
-//
-// See ADR: docs/dev/research/ADR-SOFTWARE-RENDER-PASS-INSTRUMENTATION.md
 type RenderPassStats struct {
 	DrawCount   uint32
 	HasScissor  bool

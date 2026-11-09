@@ -2,6 +2,9 @@
 
 // Package software provides a CPU-based software rendering backend.
 //
+// The package is not built for js/wasm: in a browser, wgpu uses the browser's
+// WebGPU implementation instead.
+//
 // The software backend implements all HAL interfaces using pure Go CPU rendering.
 // Unlike the noop backend, it actually performs rendering operations in memory,
 // including full SPIR-V shader execution for vertex, fragment, and compute stages.
