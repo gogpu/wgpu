@@ -147,11 +147,11 @@ releases.
 - [ ] Release only: `BindGroupLayout` reference counted as Rust and Dawn do; the Release-vs-create race contract (P2-CORE-027, P2-CORE-026)
 - [ ] A tracked WARP + GPU-based-validation test package (P2-INFRA-009, P1-CORE-028 for the selection API)
 
-**Patch release v0.34.12** (2026-11-09, naga v0.21.8):
+**Patch release v0.34.12** (2026-11-09, naga v0.21.9):
 - [x] Vulkan: the device's SPIR-V capability set for naga, integer dot products enabled where supported (P2-VK-014)
 - [x] Vulkan: `discard` as `OpDemoteToHelperInvocation` where supported (P2-VK-018); software: the same semantics in the interpreter (P3-SW-035)
 - [x] `TestReadbackCorpus`: naga's GPU readback corpus on every adapter of every backend (P1-INFRA-001)
-- [x] naga v0.21.8, gpucontext v0.32.0
+- [x] naga v0.21.9, gpucontext v0.32.0
 
 **Patch release v0.34.11** (2026-11-08, naga v0.21.7):
 - [x] `QuerySet` reference counted; pipelines keep their `PipelineLayout` alive; released layouts refused at creation (P1-CORE-021, P2-CORE-022, P2-CORE-023)
