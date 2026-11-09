@@ -52,37 +52,58 @@ func TestDXILShaderModel(t *testing.T) {
 // TestDXILShaderModelRefusal checks what a device whose highest shader model
 // is below the shader's need gets from the DXIL path: naga's
 // *backend.VersionError, which wraps backend.ErrUnsupported, and no raised
-// model. A storage buffer element of more than four components needs SM 6.2
-// in naga's DXIL writer (P1-DXIL-072); gg's tile and strip compute shaders
-// have such buffers.
+// model.
+//
+// A 64-bit storage buffer element is what needs a newer model: naga's DXIL
+// writer reads and writes it natively with dx.op.rawBufferLoad/Store, whose
+// i64/f64 overloads exist only from SM 6.3 (naga TestStorageBufferInt64RequiresSM63).
+// A 32-bit element of more than four components, as in gg's tile and strip
+// compute shaders, needed SM 6.2 until naga v0.21.8 (P1-DXIL-072); it now
+// compiles at SM 6.0 with one dx.op.bufferLoad per four components, as DXC
+// writes it.
 func TestDXILShaderModelRefusal(t *testing.T) {
-	const src = `struct S { a: vec4<f32>, b: f32 }
-@group(0) @binding(0) var<storage, read_write> data: array<S>;
-@compute @workgroup_size(1) fn main() { data[0].b = data[0].a.x; }`
-	module, err := shaderir.Lower(src)
-	if err != nil {
-		t.Fatalf("Lower: %v", err)
+	lower := func(src string) *ir.Module {
+		t.Helper()
+		module, err := shaderir.Lower(src)
+		if err != nil {
+			t.Fatalf("Lower: %v", err)
+		}
+		return module.IR
 	}
-	compile := func(sm d3d12.D3D_SHADER_MODEL) error {
+	compile := func(m *ir.Module, sm d3d12.D3D_SHADER_MODEL) error {
 		opts := (&Device{shaderModel: sm}).dxilOptions()
 		opts.EntryPoint = &backend.EntryPointSelector{Stage: ir.StageCompute, Name: "main"}
-		_, _, err := dxil.Compile(module.IR, opts)
+		_, _, err := dxil.Compile(m, opts)
 		return err
 	}
+	every := []d3d12.D3D_SHADER_MODEL{d3d12.D3D_SHADER_MODEL_6_0, d3d12.D3D_SHADER_MODEL_6_1,
+		d3d12.D3D_SHADER_MODEL_6_2, d3d12.D3D_SHADER_MODEL_6_3, d3d12.D3D_SHADER_MODEL_6_6}
 
-	for _, sm := range []d3d12.D3D_SHADER_MODEL{d3d12.D3D_SHADER_MODEL_6_0, d3d12.D3D_SHADER_MODEL_6_1} {
-		err := compile(sm)
-		var ve *backend.VersionError
-		if !errors.As(err, &ve) || !errors.Is(err, backend.ErrUnsupported) {
-			t.Fatalf("SM %#x: error %v (%T), want *backend.VersionError wrapping backend.ErrUnsupported", uint32(sm), err, err)
-		}
-		if want := dxilShaderModel(sm); ve.Requested.Major != want.Major || ve.Requested.Minor != want.Minor {
-			t.Errorf("SM %#x: VersionError.Requested = %v, want the device's %v", uint32(sm), ve.Requested, want)
+	wide32 := lower(`struct S { a: vec4<f32>, b: f32 }
+@group(0) @binding(0) var<storage, read_write> data: array<S>;
+@compute @workgroup_size(1) fn main() { data[0].b = data[0].a.x; }`)
+	for _, sm := range every {
+		if err := compile(wide32, sm); err != nil {
+			t.Errorf("32-bit element of five components, SM %#x: %v", uint32(sm), err)
 		}
 	}
-	for _, sm := range []d3d12.D3D_SHADER_MODEL{d3d12.D3D_SHADER_MODEL_6_2, d3d12.D3D_SHADER_MODEL_6_6} {
-		if err := compile(sm); err != nil {
-			t.Errorf("SM %#x: %v", uint32(sm), err)
+
+	wide64 := lower(`@group(0) @binding(0) var<storage, read_write> s: array<u64>;
+@compute @workgroup_size(1) fn main() { s[1] = s[0] + 1; }`)
+	for _, sm := range every {
+		err := compile(wide64, sm)
+		if sm >= d3d12.D3D_SHADER_MODEL_6_3 {
+			if err != nil {
+				t.Errorf("64-bit element, SM %#x: %v", uint32(sm), err)
+			}
+			continue
+		}
+		var ve *backend.VersionError
+		if !errors.As(err, &ve) || !errors.Is(err, backend.ErrUnsupported) {
+			t.Fatalf("64-bit element, SM %#x: error %v (%T), want *backend.VersionError wrapping backend.ErrUnsupported", uint32(sm), err, err)
+		}
+		if want := dxilShaderModel(sm); ve.Requested.Major != want.Major || ve.Requested.Minor != want.Minor {
+			t.Errorf("64-bit element, SM %#x: VersionError.Requested = %v, want the device's %v", uint32(sm), ve.Requested, want)
 		}
 	}
 }
