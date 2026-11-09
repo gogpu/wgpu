@@ -23,8 +23,8 @@ import (
 // top (see wgpu/buffer.go for the public layer).
 //
 // State transitions, concurrency model, and safety invariants are
-// documented in docs/dev/research/ADR-BUFFER-MAPPING-API.md §State machine
-// and §Safety guarantees.
+// documented in the buffer mapping API ADR (§State machine and §Safety
+// guarantees).
 
 // Extended BufferMapState values. The original 3-state enum
 // (Idle / Pending / Mapped) in resource.go is extended with Destroyed for
