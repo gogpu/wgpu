@@ -7,13 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.12] - 2026-11-09
+
+A Vulkan shader-feature patch: shaders use only what the device enabled, `discard` follows WGSL, and naga's GPU
+readback corpus runs on every adapter in the test suite.
+
 ### Fixed
 
 - **Vulkan: WGSL `dot4I8Packed` and `dot4U8Packed` no longer emit instructions the device never enabled** (P2-VK-014). naga got no capability set, treated every capability as available and wrote the native packed dot product, which needs `shaderIntegerDotProduct`; the validation layer reported `VUID-VkShaderModuleCreateInfo-pCode-08740` on Intel and NVIDIA. The device now gives naga its SPIR-V capabilities as Rust wgpu-hal does, so naga polyfills the dot product where the feature is missing, and `VK_KHR_shader_integer_dot_product` is enabled wherever it is supported.
+- **Software: a discarded fragment stays a helper for its quad, as on the GPU backends** (P3-SW-035). The interpreter ended the lane at `discard`, so a fine derivative taken afterwards in its row or column came from the other row instead — wrong for any value that is not linear in the other coordinate. WGSL `discard` now compiles to `OpDemoteToHelperInvocation` on the software backend, and the interpreter runs the lane on as a helper (no storage, atomic or color writes) to the end of the shader, including when the `discard` sits in a called function. The README's known gap is gone.
+- **`hal/software` and its `shader` and `raster` packages are consistently excluded from js/wasm builds.** Nineteen files had no build constraint, so a wasm build of these packages failed to compile instead of reporting them as not built for wasm, as `hal/allbackends` does; in a browser, wgpu uses the browser's WebGPU.
 
 ### Changed
 
-- **Vulkan: `discard` now demotes the fragment to a helper invocation instead of terminating it** (P2-VK-018). On Vulkan devices with `VK_EXT_shader_demote_to_helper_invocation` (promoted to Vulkan 1.3), `discard` follows WGSL's semantics: **a discarded fragment keeps running until the end of the shader**, writing nothing to storage or to its color targets, so derivatives in the rest of its quad stay defined. A shader that does heavy work after a `discard` now pays for it on the discarded fragments too. It used to be lowered to `OpKill`, which ends the invocation and leaves the quad's later derivatives undefined. Devices without the extension keep `OpKill`; the choice matches Dawn on Vulkan. New readback tests pin, on every backend, that a store before `discard` lands while one after it does not, and that the quad's fine derivatives stay exact after a lane discards.
+- **Vulkan: `discard` now demotes the fragment to a helper invocation instead of terminating it** (P2-VK-018). On Vulkan devices with `VK_EXT_shader_demote_to_helper_invocation` (promoted to Vulkan 1.3), `discard` follows WGSL's semantics: **a discarded fragment keeps running until the end of the shader**, writing nothing to storage or to its color targets, so derivatives in the rest of its quad stay defined. A shader that does heavy work after a `discard` now pays for it on the discarded fragments too. It used to be lowered to `OpKill`, which ends the invocation and leaves the quad's later derivatives undefined. Devices without the extension keep `OpKill`; the choice matches Dawn on Vulkan. New readback tests pin, on every backend, that a store before `discard` lands while one after it does not (also when the `discard` is in a called function), and that the quad's fine derivatives stay exact after a lane discards, including for a value that depends on both coordinates.
+- **naga v0.21.8.** WGSL now rejects what the spec never allowed: a function-scope `var` outside the function address space (`var<workgroup>` in a function body was silently lowered to a function variable), and an integer division, remainder or shift by a const-expression zero or past the bit width. No shader in this module was affected. DXIL reads a 32-bit storage element of more than four components with `dx.op.bufferLoad`, as DXC does, so it no longer needs shader model 6.2.
+- **gpucontext v0.32.0** (the new IME contract, ADR-045). wgpu uses none of the changed types; hosts that implement `IMEController` follow gpucontext's migration notes.
+
+### Added
+
+- **`TestReadbackCorpus` runs naga's GPU readback corpus on every adapter of every backend** (P1-INFRA-001). The corpus holds compute shaders and the exact words a GPU must write; static validators accept miscompiles that only a readback catches. The test finds the corpus through the naga version the module resolves (its `testdata/readback`), reads the corpus format strictly, opens each adapter with the features its cases require, and reports each case as PASS, FAIL, an expected failure with its card, an unexpected pass (which fails the test) or a skip. On Vulkan a validation-layer message during a case fails that case. The hand copy of `flow/short-circuit-or-rt` is gone: the corpus has the case.
 
 ## [0.34.11] - 2026-11-08
 
