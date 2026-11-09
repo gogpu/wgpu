@@ -61,17 +61,6 @@ func spirvOptions(deviceAPIVersion uint32, ext *extendedFeatureSupport) spirv.Op
 	}
 }
 
-// SPIR-V capabilities that naga's spirv package does not name (values from
-// the SPIR-V specification, Capability table; checked against the Vulkan
-// SDK's spirv-headers/spirv.h).
-const (
-	capabilityStorageImageWriteWithoutFormat spirv.Capability = 56
-	capabilityDrawParameters                 spirv.Capability = 4427
-	capabilityRayQueryKHR                    spirv.Capability = 4472
-	capabilityDotProductInputAll             spirv.Capability = 6016
-	capabilityDotProductInput4x8Bit          spirv.Capability = 6017
-)
-
 // spirvCapabilities returns the SPIR-V capabilities a module may use on a
 // device opened with requested, as Rust wgpu-hal lists them for naga
 // (vulkan/adapter.rs, Adapter::open): the capabilities every Vulkan device
@@ -106,8 +95,8 @@ func spirvCapabilities(requested gputypes.Features, downlevel gputypes.Downlevel
 		spirv.CapabilityGroupNonUniform, spirv.CapabilityGroupNonUniformVote, spirv.CapabilityGroupNonUniformArithmetic,
 		spirv.CapabilityGroupNonUniformBallot, spirv.CapabilityGroupNonUniformShuffle,
 		spirv.CapabilityGroupNonUniformShuffleRel, spirv.CapabilityGroupNonUniformQuad)
-	add(requested.Contains(gputypes.FeatureBGRA8UnormStorage), capabilityStorageImageWriteWithoutFormat)
-	add(requested.Contains(gputypes.FeatureRayQuery), capabilityRayQueryKHR)
+	add(requested.Contains(gputypes.FeatureBGRA8UnormStorage), spirv.CapabilityStorageImageWriteWithoutFormat)
+	add(requested.Contains(gputypes.FeatureRayQuery), spirv.CapabilityRayQueryKHR)
 	add(requested.Contains(gputypes.FeatureShaderInt64), spirv.CapabilityInt64)
 	add(requested.Contains(gputypes.FeatureShaderF16), spirv.CapabilityFloat16)
 	add(requested.Contains(gputypes.FeatureShaderI16), spirv.CapabilityInt16)
@@ -118,10 +107,10 @@ func spirvCapabilities(requested gputypes.Features, downlevel gputypes.Downlevel
 	// Vulkan bundles barycentrics and per-vertex inputs under one feature.
 	add(requested.Contains(gputypes.FeatureShaderBarycentrics) || requested.Contains(gputypes.FeatureShaderPerVertex),
 		spirv.CapabilityFragmentBarycentricKHR)
-	add(requested.Contains(gputypes.FeatureShaderDrawIndex), capabilityDrawParameters)
+	add(requested.Contains(gputypes.FeatureShaderDrawIndex), spirv.CapabilityDrawParameters)
 	// VK_KHR_shader_integer_dot_product's SPIR-V capabilities, enabled with
 	// the feature wherever supported (extendedFeatureSupport.enable).
-	add(ext.shaderIntegerDotProduct(), capabilityDotProductInputAll, capabilityDotProductInput4x8Bit,
+	add(ext.shaderIntegerDotProduct(), spirv.CapabilityDotProductInputAll, spirv.CapabilityDotProductInput4x8Bit,
 		spirv.CapabilityDotProductInput4x8BitPacked, spirv.CapabilityDotProduct)
 	add(ext.demoteToHelperInvocation(), spirv.CapabilityDemoteToHelperInvocation)
 	return set

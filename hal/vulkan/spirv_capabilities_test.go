@@ -24,7 +24,7 @@ var alwaysAvailableCapabilities = []spirv.Capability{
 }
 
 var dotProductCapabilities = []spirv.Capability{
-	capabilityDotProductInputAll, capabilityDotProductInput4x8Bit,
+	spirv.CapabilityDotProductInputAll, spirv.CapabilityDotProductInput4x8Bit,
 	spirv.CapabilityDotProductInput4x8BitPacked, spirv.CapabilityDotProduct,
 }
 
@@ -94,11 +94,11 @@ func TestSPIRVCapabilitiesPerDevice(t *testing.T) {
 		{name: "per-vertex", requested: feature(gputypes.FeatureShaderPerVertex),
 			want: []spirv.Capability{spirv.CapabilityFragmentBarycentricKHR}},
 		{name: "draw index", requested: feature(gputypes.FeatureShaderDrawIndex),
-			want: []spirv.Capability{capabilityDrawParameters}},
+			want: []spirv.Capability{spirv.CapabilityDrawParameters}},
 		{name: "bgra8unorm storage", requested: feature(gputypes.FeatureBGRA8UnormStorage),
-			want: []spirv.Capability{capabilityStorageImageWriteWithoutFormat}},
+			want: []spirv.Capability{spirv.CapabilityStorageImageWriteWithoutFormat}},
 		{name: "ray query", requested: feature(gputypes.FeatureRayQuery),
-			want: []spirv.Capability{capabilityRayQueryKHR}},
+			want: []spirv.Capability{spirv.CapabilityRayQueryKHR}},
 		{name: "integer dot product", ext: extendedFeatureSupport{integerDot: dot}, want: dotProductCapabilities},
 		{name: "integer dot product struct, feature off",
 			ext: extendedFeatureSupport{integerDot: &vk.PhysicalDeviceShaderIntegerDotProductFeatures{}}},
